@@ -437,7 +437,7 @@
           </div>
           <p class="lead">inkpodは、アニメーションの作画・彩色をセル、レイヤー、プレーンに分けて扱うWindowsアプリです。この説明書は、現在のWindows版で実際に利用できる操作を、制作の流れに沿って案内します。</p>
           <div class="meta-strip" aria-label="マニュアル情報">
-            <span>Windows 11</span><span>日本語UI</span><span>オフライン対応</span><span>2026年8月3日の実装に基づく</span>
+            <span>Windows 11</span><span>日本語UI</span><span>オフライン対応</span><span>2026年8月12日の実装に基づく</span>
           </div>
         </div>
 
@@ -505,7 +505,7 @@
           <div class="search-unit" data-search="new cell quick start Ctrl N">
             <h3 id="quick-new">新規セルを作って彩色する</h3>
             <ol class="steps">
-              <li><span class="menu-path">ファイル<span class="sep">›</span>新規セル</span>（<kbd>Ctrl</kbd>+<kbd>N</kbd>）を選びます。新しい無題セルが文書タブに開きます。</li>
+              <li><span class="menu-path">ファイル<span class="sep">›</span>新規<span class="sep">›</span>セル</span>（<kbd>Ctrl</kbd>+<kbd>N</kbd>）を選びます。新しい無題セルが文書タブに開きます。</li>
               <li><a href="#pane-layer">レイヤー／プレーン</a>で目的のレイヤーを選び、その中の「主線」または「彩色」プレーンを選びます。彩色する場合は「彩色」が編集可能であることを確認します。</li>
               <li>描画色は<a href="#pane-color">カラー</a>で指定します。主線色と彩色用描画色は別表示です。</li>
               <li>ツールパレットで「鉛筆」「ブラシ」「フィル」などを選び、Canvasで操作します。ストロークはペンを下ろしてから離すまでが一回のUndo単位です。</li>
@@ -542,6 +542,15 @@
             </div>
             <div class="card search-unit" id="term-selection" data-search="selection mask 選択範囲">
               <h3>選択範囲</h3><p>処理を適用する範囲を示すマスクです。描画、フィルター、変形などを選択の内側へ限定できます。</p>
+            </div>
+            <div class="card search-unit" id="term-annotation" data-search="annotation text instruction 注釈 テキスト 指示">
+              <h3>テキスト／指示注釈</h3><p>文字や手描き線で制作指示を残す、安定ID付きの非破壊オブジェクトです。通常の平坦画像には含めず、指示画像へ明示的に書き出せます。</p>
+            </div>
+            <div class="card search-unit" id="term-shooting-frame" data-search="shooting frame angled capture 撮影フレーム 角度">
+              <h3>撮影フレーム</h3><p>中心、幅、高さ、角度を持つ任意の撮影範囲です。プロパティ入力とCanvas上の5ハンドルで編集できます。</p>
+            </div>
+            <div class="card search-unit" id="term-vanishing-point" data-search="vanishing point radial snap 消失点 放射 スナップ">
+              <h3>消失点</h3><p>Canvas外も含む複数の位置へ置ける透視補助点です。放射ガイドの間隔、位相、色、不透明度、表示、スナップを点ごとに設定できます。</p>
             </div>
           </div>
           <div class="search-unit" data-search="main line color plane active visibility editability">
@@ -612,18 +621,27 @@
           <details class="reference search-unit" id="menu-file" open data-search="ファイル file new open save recovery import export recent">
             <summary>ファイル</summary>
             <div class="details-body"><ul class="command-list">
-              <li class="search-unit"><div class="command-name">ファイル › 新規セル <kbd>Ctrl</kbd>+<kbd>N</kbd></div><div class="command-desc">新しい無題セルを作り、現在のグループへタブとして開きます。文書を作れる状態なら実行でき、新しい文書は未保存です。</div></li>
+              <li class="search-unit"><div class="command-name">ファイル › 新規 › セル <kbd>Ctrl</kbd>+<kbd>N</kbd></div><div class="command-desc">新しい無題セルを作り、現在のグループへタブとして開きます。文書を作れる状態なら実行でき、新しい文書は未保存です。</div></li>
+              <li class="search-unit"><div class="command-name">ファイル › 新規 › カット...</div><div class="command-desc">カット名、制作情報、既定用紙／フレーム等を指定し、セル系列を管理するカットを作ります。カット記述子と各セル文書は別ファイルとして扱われます。</div></li>
               <li class="search-unit"><div class="command-name">ファイル › 開く... <kbd>Ctrl</kbd>+<kbd>O</kbd></div><div class="command-desc">`.inkpod` または対応ラスター画像を選びます。同じ実体のファイルが開いていれば既存文書を選択します。ダイアログのキャンセルでは変化しません。</div></li>
               <li class="search-unit" data-search="1 (なし) 2 3 4 5 6 7 8"><div class="command-name">ファイル › 最近使ったファイル › 1 (なし)〜8 (なし)</div><div class="command-desc">直近の最大8件を開く可変スロットです。履歴が空なら「(なし)」となり無効です。表示中のパスを開く点は「開く...」と同じです。</div></li>
               <li class="search-unit"><div class="command-name">ファイル › 保存 <kbd>Ctrl</kbd>+<kbd>S</kbd></div><div class="command-desc">現在の保存先へ安全に保存し、成功時だけ通常保存の基準を進めます。未保存なら保存先を選びます。変更なしは何も変えません。</div></li>
               <li class="search-unit"><div class="command-name">ファイル › 名前を付けて保存... <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></div><div class="command-desc">新しい `.inkpod` 保存先を選び、成功後に文書名、最近使ったファイル、Recovery情報を更新します。別の開いている文書と保存先が衝突する場合は確認なしに統合しません。</div></li>
+              <li class="search-unit"><div class="command-name">ファイル › カットを保存</div><div class="command-desc">カットのメタデータ、既定値、セル系列、カット履歴をカット記述子へ安全に保存します。構成セルの `.inkpod` は独立して保存します。</div></li>
+              <li class="search-unit"><div class="command-name">ファイル › カットのプロパティ...</div><div class="command-desc">現在カットの名称、制作情報、既定用紙／フレーム等を編集します。OKでカット履歴へ一回だけ確定し、キャンセルでは変更しません。</div></li>
+              <li class="search-unit"><div class="command-name">ファイル › カットを元に戻す／カットをやり直す</div><div class="command-desc">セル文書とは独立したカット履歴を移動します。セル系列やカット設定だけが対象で、各セル内の描画履歴は変更しません。</div></li>
+              <li class="search-unit"><div class="command-name">ファイル › カットのセル系列 › 既存セルを追加...／メンバーから除外</div><div class="command-desc">既存の `.inkpod` を安定ID付きメンバーとして追加し、または系列から外します。除外しても元のセルファイル自体は削除しません。</div></li>
+              <li class="search-unit"><div class="command-name">ファイル › カットのセル系列 › 上へ移動／下へ移動／表示番号を付け直す...</div><div class="command-desc">系列順や表示番号をカットの一回の履歴単位として変更します。対象はコマンド発行時のカットとセルで固定され、途中で別タブへ切り替えても付け替えません。</div></li>
+              <li class="search-unit"><div class="command-name">ファイル › 履歴を破棄してコピー... <span class="tag caution">注意</span></div><div class="command-desc">現在状態を新しいGenesisとする別ファイルへ書き出し、過去の手続き履歴を含めない小型のコピーを作ります。元文書とその履歴は変更しません。</div></li>
               <li class="search-unit"><div class="command-name">ファイル › 復帰 <span class="tag caution">注意</span></div><div class="command-desc">文書全体を最後の通常保存時点へ戻します。未保存変更とその後の履歴を失うため確認して使います。Recovery保存は復帰点ではありません。</div></li>
               <li class="search-unit"><div class="command-name">ファイル › レイヤーを部分的に復帰 <span class="tag undo">Undo可</span></div><div class="command-desc">最後の通常保存内容から、選択中レイヤー／プレーンの選択範囲だけを戻します。保存済み状態、編集対象、選択範囲が必要です。</div></li>
               <li class="search-unit"><div class="command-name">ファイル › ラスタ－を読み込み...</div><div class="command-desc">PNG、TIFF、TGA、BMPを文書として読み込みます。選択をキャンセルした場合や読み込み失敗時は既存文書を変更しません。</div></li>
               <li class="search-unit"><div class="command-name">ファイル › ラスタ－を書き出し...</div><div class="command-desc">現在の表示内容を対応ラスター形式へ書き出します。レイヤー／プレーン等の固有情報は画像形式では平坦化され得るため、編集用原本は `.inkpod` でも保存してください。</div></li>
+              <li class="search-unit"><div class="command-name">ファイル › 指示画像を書き出し...</div><div class="command-desc">テキスト／手描き指示と撮影フレームを含む確認用ラスターを書き出します。通常のラスター書き出しにはこれらの制作指示と消失点ガイドを含めません。</div></li>
               <li class="search-unit"><div class="command-name">ファイル › Recoveryを保存</div><div class="command-desc">障害復旧用の別保存を直ちに作ります。通常保存先、通常の保存基準、未保存表示は変えません。</div></li>
               <li class="search-unit"><div class="command-name">ファイル › Recoveryを開く...</div><div class="command-desc">列挙されたRecovery候補を選んで「復元セル」として開きます。元ファイルを無言で上書きしません。</div></li>
               <li class="search-unit"><div class="command-name">ファイル › 起動時に前回の文書を復元</div><div class="command-desc">通常終了時の文書一覧を次回起動時に戻す設定を切り替えます。既定はオフで、障害復旧用Recoveryとは別です。<span class="tag view">設定</span></div></li>
+              <li class="search-unit"><div class="command-name">ファイル › セル切替前に自動保存</div><div class="command-desc">シーケンスで別セルへ移る前に、現在セルを通常保存する設定を切り替えます。保存できない場合は切替を中止し、別セルへ変更を付け替えません。<span class="tag view">設定</span></div></li>
               <li class="search-unit"><div class="command-name">ファイル › 終了 <kbd>Alt</kbd>+<kbd>F4</kbd></div><div class="command-desc">inkpodを終了します。未保存文書ごとに一度だけ保存判断を求め、キャンセルまたは保存失敗なら終了しません。</div></li>
             </ul></div>
           </details>
@@ -670,6 +688,9 @@
               <li class="search-unit"><div class="command-name">表示 › ガイド › すべて削除 <span class="tag caution">注意</span></div><div class="command-desc">文書の全ガイドを削除します。画像ピクセルは変えません。</div></li>
               <li class="search-unit"><div class="command-name">表示 › グリッド設定...</div><div class="command-desc">グリッド間隔、分割、原点などを設定します。キャンセルでは現在設定を維持します。</div></li>
               <li class="search-unit"><div class="command-name">表示 › 透明部分</div><div class="command-desc">透明領域の表示を切り替えます。アルファ値や書き出し結果自体は変更しません。<span class="tag view">表示のみ</span></div></li>
+              <li class="search-unit"><div class="command-name">表示 › アンチエイリアス表示</div><div class="command-desc">ベクター輪郭のアンチエイリアス表示を切り替えます。ベクターデータ自体は変更しません。<span class="tag view">表示のみ</span></div></li>
+              <li class="search-unit"><div class="command-name">表示 › 中心線表示／中心線チェック</div><div class="command-desc">ベクター線の中心線を通常表示へ重ねるか、中心線だけの確認表示へ切り替えます。<span class="tag view">表示のみ</span></div></li>
+              <li class="search-unit"><div class="command-name">表示 › 端点表示</div><div class="command-desc">ベクターパスの端点を表示して、線つなぎや線消去前の確認に使います。<span class="tag view">表示のみ</span></div></li>
             </ul></div>
           </details>
 
@@ -678,6 +699,12 @@
             <div class="details-body"><ul class="command-list">
               <li class="search-unit"><div class="command-name">セル › 用紙設定...</div><div class="command-desc">用紙寸法、DPI、フレーム単位、元画像の配置基準を設定します。サイズ変更を確定すると文書編集として履歴へ記録されます。</div></li>
               <li class="search-unit"><div class="command-name">セル › 撮影フレームを考慮して用紙サイズ変更</div><div class="command-desc">撮影フレームを収めるよう用紙を切り詰め／拡張します。文書全体に作用するため、実行前にフレーム設定を確認してください。</div></li>
+              <li class="search-unit"><div class="command-name">セル › 撮影フレーム設定...</div><div class="command-desc">中心座標、幅、高さ、角度を数値で作成・編集します。プレビューは開始状態から再計算し、OKで一回のUndo単位、キャンセルで完全復元です。</div></li>
+              <li class="search-unit"><div class="command-name">セル › 撮影フレームをハンドル編集</div><div class="command-desc">Canvas上の中心、4辺中央の5ハンドルで移動、拡大縮小、角度調整を行います。確定まではプレビューです。</div></li>
+              <li class="search-unit"><div class="command-name">セル › 撮影フレームを削除 <span class="tag undo">Undo可</span></div><div class="command-desc">現在の撮影フレームを文書から削除します。撮影フレームがないときは無効です。</div></li>
+              <li class="search-unit"><div class="command-name">セル › 消失点設定...</div><div class="command-desc">複数の消失点について位置、放射線の角度間隔／位相、色、不透明度、表示、スナップを設定します。Canvas外の座標も指定できます。</div></li>
+              <li class="search-unit"><div class="command-name">セル › 消失点をハンドル編集</div><div class="command-desc">Canvas上の点をドラッグして位置を調整します。見えている放射ガイドへのスナップは直線・曲線・図形・折れ線等で利用できます。</div></li>
+              <li class="search-unit"><div class="command-name">セル › 消失点をすべて削除 <span class="tag undo">Undo可</span></div><div class="command-desc">文書内の全消失点を一回の履歴単位で削除します。通常／指示ラスターのピクセルには影響しません。</div></li>
               <li class="search-unit"><div class="command-name">セル › 画像サイズ...</div><div class="command-desc">Canvasの幅・高さと既存画像の配置基準を変更します。見えなくなる領域が生じ得るためプレビューを確認します。</div></li>
               <li class="search-unit"><div class="command-name">セル › 画像解像度...</div><div class="command-desc">物理寸法、DPI、ピクセル数、再サンプルの有無を設定します。再サンプルなしではピクセル数を変えません。</div></li>
               <li class="search-unit"><div class="command-name">セル › 鏡像 › 水平方向 <span class="tag undo">Undo可</span></div><div class="command-desc">全文書の実データと関連座標を左右反転します。「表示を左右反転」と異なり保存結果も変わります。</div></li>
@@ -702,6 +729,11 @@
               <li class="search-unit"><div class="command-name">セル › レイヤー › 変換...</div><div class="command-desc">選択レイヤーを別の対応種類へ変換します。表現できない情報がある場合は内容を確認してから確定します。</div></li>
               <li class="search-unit"><div class="command-name">セル › レイヤー › 同種を統合 <span class="tag caution">注意</span></div><div class="command-desc">互換性のある同種レイヤーを順序に従って統合します。異種または統合できない構成では無効です。</div></li>
               <li class="search-unit"><div class="command-name">セル › レイヤー › プロパティ...</div><div class="command-desc">選択レイヤーの名前、種類、状態など確認可能な属性を表示・編集します。</div></li>
+              <li class="search-unit"><div class="command-name">セル › レイヤー › テキスト／指示 › テキストを追加...／選択テキストを編集...</div><div class="command-desc">テキスト注釈の文字列、位置、書式等を作成・編集します。日本語を含むUTF-8文字列を保持し、フォントがない場合はWindows側で代替表示します。</div></li>
+              <li class="search-unit"><div class="command-name">セル › レイヤー › テキスト／指示 › 手描き指示モード</div><div class="command-desc">Canvas入力を通常描画ではなく指示ストロークとして記録するモードへ切り替えます。開始から終了までが一回のUndo単位です。</div></li>
+              <li class="search-unit"><div class="command-name">セル › レイヤー › テキスト／指示 › 前／次の注釈を選択</div><div class="command-desc">安定ID順に注釈の選択を移動します。選択ハンドルとステータスで対象を確認できます。</div></li>
+              <li class="search-unit"><div class="command-name">セル › レイヤー › テキスト／指示 › 選択注釈を左／右へ</div><div class="command-desc">注釈の重なり順を一段移動します。画像レイヤー／プレーンの順序は変更しません。</div></li>
+              <li class="search-unit"><div class="command-name">セル › レイヤー › テキスト／指示 › 選択注釈を削除 <span class="tag undo">Undo可</span></div><div class="command-desc">選択中の注釈だけを削除します。注釈が選択されていない場合は無効です。</div></li>
               <li class="search-unit"><div class="command-name">セル › プレーン › 主線</div><div class="command-desc">選択中レイヤーの主線プレーンを編集対象にします。存在しない／編集不可なら無効です。</div></li>
               <li class="search-unit"><div class="command-name">セル › プレーン › 彩色</div><div class="command-desc">選択中レイヤーの彩色プレーンを編集対象にします。</div></li>
               <li class="search-unit"><div class="command-name">セル › プレーン › 新規...</div><div class="command-desc">プレーン種類と形式（2値、グレースケール、RGBA等）を選んで追加します。レイヤーに使えない組み合わせは確定されず、画面を開いたままエラー表示します。</div></li>
@@ -1025,7 +1057,7 @@
             <div class="card search-unit" id="pane-layer" data-search="レイヤー プレーン layer plane thumbnail visibility editability opacity drag reorder">
               <h3>レイヤー／プレーン</h3>
               <p>上段にレイヤー、下段に選択レイヤー内のプレーンを縦順で表示します。タイルには選択、表示、編集可否、種類／不透明度情報、サムネイルが現れます。ドラッグで同じ階層内を並べ替え、下部ボタンで新規、複製、削除、上下移動、詳細を実行します。</p>
-              <p><span class="menu-path">ウィンドウ › レイヤー／プレーン</span>。現行版は複数対象を同時編集する専用表示を備えていません。</p>
+              <p>複数対象コマンドでは操作対象のレイヤー／プレーンをマーカーと状態表示で確認できます。<span class="menu-path">ウィンドウ › レイヤー／プレーン</span></p>
             </div>
             <div class="card search-unit" id="pane-locator" data-search="ロケーター locator neighborhood X Y selection H V L RGBA fixed edit auto scroll">
               <h3>ロケーター</h3>
@@ -1034,13 +1066,14 @@
             </div>
             <div class="card search-unit" id="pane-sequence" data-search="シーケンス sequence thumbnails previous next import files natural order">
               <h3>シーケンス</h3>
-              <p>自然順のセル一覧とサムネイルを表示し、選択、前へ、次へ、ファイル追加ができます。アクティブ追従／文書固定に対応します。セル切替前の自動保存は「ファイル」メニュー、端点の停止／循環は「制作 › 連番・サブパレット」メニューから設定します。</p>
+              <p>単独セルでは自然順、カットを開いているときはカットの安定ID付きメンバー順でセル一覧とサムネイルを表示します。選択、前へ、次へ、ファイル追加のほか、カットでは追加、除外、上下移動、表示番号の付け直しを行えます。アクティブ追従／文書固定に対応します。</p>
+              <p>セル切替前の自動保存は「ファイル」メニュー、端点の停止／循環は「制作 › 連番・サブパレット」メニューから設定します。</p>
               <p><span class="menu-path">ウィンドウ › シーケンス</span></p>
             </div>
             <div class="card search-unit" id="pane-light-table" data-search="ライトテーブル light table set reference image opacity transform reload swap canvas move">
               <h3>ライトテーブル</h3>
               <p>セット選択、新規／複製／削除、全体不透明度、参照一覧、追加、再読込、削除、上下移動、表示・変形、Canvas移動、編集画像との交換、前後セル移動を提供します。項目のダブルクリックでも編集画像と交換できます。</p>
-              <p>アクティブ追従／文書固定に対応します。現行版では前後N枚の一括登録と自動不透明度ステップの専用操作は未実装です。</p>
+              <p>前N枚、後N枚、前後N枚を一括登録でき、距離に応じた既定不透明度ステップを適用します。処理は上限付きで、失敗時に一部だけを登録しません。アクティブ追従／文書固定に対応します。</p>
             </div>
             <div class="card search-unit" id="pane-reference" data-search="サブパレット 参照ビュー subpalette reference viewer read only sample color previous next current fit one to one sync">
               <h3>サブパレット／参照ビュー</h3>
@@ -1149,7 +1182,12 @@
                 <tr><td>2値彩色レイヤー</td><td>主線、彩色、任意ラスター</td><td>硬い主線と彩色を分離。彩色時に主線を保護</td></tr>
                 <tr><td>階調彩色レイヤー</td><td>グレースケール主線、彩色</td><td>主線のカバレッジと基本線色を合成</td></tr>
                 <tr><td>ベクター彩色レイヤー</td><td>ベクター主線、色トレース、ベクター塗り</td><td>パスと閉領域を編集。鉛筆など一部ラスター用ツールは無効</td></tr>
+                <tr><td>ラスター汎用レイヤー</td><td>任意ラスター</td><td>一般画像や中間結果を、対応する8／16 bit形式で保持</td></tr>
+                <tr><td>フレームレイヤー</td><td>なし</td><td>制作フレーム情報を保持する非描画レイヤー</td></tr>
+                <tr><td>消失点レイヤー</td><td>なし</td><td>複数の消失点と放射ガイド設定を安定ID付きで所有</td></tr>
                 <tr><td>調整レイヤー</td><td>調整パラメーター</td><td>元ピクセルを変えず明るさ等を適用</td></tr>
+                <tr><td>テキストレイヤー</td><td>なし</td><td>テキスト注釈オブジェクトを所有</td></tr>
+                <tr><td>注釈レイヤー</td><td>なし</td><td>手描き線、引出線、値などの制作指示オブジェクトを所有</td></tr>
                 <tr><td>選択レイヤー</td><td>選択マスク</td><td>選択範囲の保存・編集・相互変換</td></tr>
               </tbody>
             </table>
@@ -1159,10 +1197,25 @@
             <p>表示切替は合成に含めるか、編集可否切替はコマンドが変更してよいかを決めます。非表示でも編集不可とは限らず、選択中でも編集不可なら描画できません。レイヤーとプレーンは別々の順序を持ち、プレーンを所属レイヤーの外へ移しません。新規プレーンでは種類と形式を文字列から選び、成立しない組み合わせは作成しません。</p>
             <p>削除、変換、同種統合は内容や編集特性を変えます。Undoできますが、保存前に結果を確認してください。</p>
           </div>
+          <div class="search-unit" data-search="annotation shooting frame vanishing point overlays output policy 注釈 撮影フレーム 消失点">
+            <h3 id="production-overlays">制作指示と透視補助</h3>
+            <p>テキスト／手描き指示はテキスト／注釈レイヤー、消失点は消失点レイヤーが、それぞれ安定ID付きオブジェクトとして所有します。これらのレイヤーにプレーンはありません。撮影フレームはレイヤー外の任意文書オブジェクトです。いずれもUndo／Redo、保存／再読込、Canvas上の選択またはハンドル編集に対応し、画像プレーンのピクセルを直接変更しません。</p>
+            <p>通常のラスター書き出しは制作指示、撮影フレーム、消失点ガイドを除外します。「指示画像を書き出し...」では指示出力対象の注釈と撮影フレームを含めます。消失点と放射ガイドは編集補助なので、どちらの平坦出力にも焼き込みません。</p>
+          </div>
         </section>
 
         <section class="chapter" id="animation" aria-labelledby="animation-heading">
-          <h2 id="animation-heading">11. ライトテーブル、連番、サブパレット、モーションチェック</h2>
+          <h2 id="animation-heading">11. カット、ライトテーブル、連番、サブパレット、モーションチェック</h2>
+          <div class="search-unit" data-search="cut workflow descriptor members sequence metadata save undo redo カット セル系列">
+            <h3 id="cut-workflow">カットとセル系列</h3>
+            <ol class="steps">
+              <li><span class="menu-path">ファイル<span class="sep">›</span>新規<span class="sep">›</span>カット...</span>でカット名、制作情報、既定値を設定します。</li>
+              <li>「カットのセル系列 › 既存セルを追加...」で既存の `.inkpod` を登録します。メンバーは安定IDで識別され、表示番号は後から付け直せます。</li>
+              <li>上へ／下へで順序を整えます。除外はカットの所属だけを変更し、元セルファイルを削除しません。</li>
+              <li>セル文書は通常の「保存」、カット構成は「カットを保存」で別々に保存します。</li>
+            </ol>
+            <p>カットのプロパティと系列編集はカット固有のUndo／Redoを使います。コマンド発行後に別タブへ切り替えたり対象が古くなった場合、現在の別カット／セルへ付け替えず安全に拒否します。</p>
+          </div>
           <div class="search-unit" data-search="light table workflow read only reference alignment swap">
             <h3 id="light-table-workflow">ライトテーブル</h3>
             <ol class="steps">
@@ -1250,9 +1303,11 @@
               <thead><tr><th>操作</th><th>目的</th><th>通常保存の基準／未保存状態</th><th>Undo</th></tr></thead>
               <tbody>
                 <tr><td>保存／名前を付けて保存</td><td>編集可能な原本を `.inkpod` として保存</td><td>成功時だけ基準を現在へ進める</td><td>保存自体はUndoしない。編集履歴は保持</td></tr>
+                <tr><td>カットを保存</td><td>カット設定、セル系列、カット履歴を別の `.inkpod` 記述子として保存</td><td>成功時だけカットの保存基準を進める。各セルの基準は変えない</td><td>保存自体はUndoしない。カット履歴は保持</td></tr>
                 <tr><td>Recoveryを保存</td><td>障害復旧用の別データ</td><td>進めない。未保存表示も消さない</td><td>対象外</td></tr>
                 <tr><td>Recoveryを開く</td><td>復旧候補を「復元セル」として開く</td><td>元ファイルを上書きしない</td><td>新しく開いた文書で編集可能</td></tr>
                 <tr><td>ラスタ－を書き出し</td><td>他アプリ向けの平坦な画像</td><td>進めない</td><td>外部出力はUndoしない</td></tr>
+                <tr><td>指示画像を書き出し</td><td>注釈と撮影フレームを含む確認用画像</td><td>進めない</td><td>外部出力はUndoしない</td></tr>
                 <tr><td>復帰</td><td>最後の通常保存へ戻す</td><td>保存基準そのものを使用</td><td>未保存編集と履歴を失う操作として確認</td></tr>
               </tbody>
             </table>
@@ -1265,12 +1320,13 @@
             <h3 id="savepoint-history">通常保存の基準とUndo／Redo</h3>
             <p>通常保存が成功した履歴位置が「保存済み」の基準です。そこから編集、Undo、Redoで別の状態へ移るとタブに未保存の「*」が付きます。履歴上で保存した状態へ正確に戻ると未保存表示も解消できます。Recovery保存や書き出しだけでは基準は動きません。</p>
           </div>
-          <div class="search-unit" data-search="supported formats inkpod v2 PNG TIFF TGA BMP 8 16 alpha DPI inkbatch">
+          <div class="search-unit" data-search="supported formats inkpod v26 PNG TIFF TGA BMP 8 16 alpha DPI inkbatch cut cell">
             <h3 id="file-formats">対応形式</h3>
             <ul>
-              <li><strong>編集用:</strong> `.inkpod`（現在の形式バージョン2）。レイヤー／プレーン、フレーム、保存基準に必要な情報、パレット、ライトテーブル、選択、色深度を保持します。</li>
+              <li><strong>セル編集用:</strong> `.inkpod`（現在の形式バージョン26、リプレイエポック23）。レイヤー／プレーン、注釈、撮影フレーム、消失点、保存基準、履歴、パレット、ライトテーブル、選択、色深度を保持します。</li>
+              <li><strong>カット記述子:</strong> 同じ `.inkpod` 拡張子ですが、セルとは異なる識別子を持つ別形式です。カットの制作情報、既定値、安定ID付きセル系列、カット履歴を保存し、各セルファイルは埋め込みません。現在は形式バージョン26、カットリプレイエポック23、ペイロードスキーマ2です。</li>
               <li><strong>一般ラスター:</strong> PNG、TIFF、TGA、BMP。各形式が表現できる8／16 bit、アルファ、寸法、DPIを扱います。形式で表せないレイヤー構造等は平坦化されます。</li>
-              <li><strong>バッチセット:</strong> `.inkbatch`。現行版だけを読み書きします。</li>
+              <li><strong>バッチセット:</strong> `.inkbatch`（現在の形式バージョン2）。現行版だけを読み書きします。</li>
             </ul>
             <p>JPEGなど、ここに記載のない拡張子は対応形式として扱わないでください。アプリ固有形式は正式な形式凍結前のため、古い形式バージョンは移行せず明示的に拒否します。</p>
           </div>
@@ -1339,6 +1395,18 @@
               <h3>複数セルを安全に一括処理する</h3>
               <ol><li>入力と処理列を設定。</li><li>出力を「複製保存（既定）」にする。</li><li>dry-runで衝突を検査。</li><li>プレビュー後に全実行。</li></ol>
             </div>
+            <div class="card search-unit" data-search="recipe cut sequence add reorder renumber save">
+              <h3>カットのセル系列を組む</h3>
+              <ol><li>新規カットを作成。</li><li>既存セルを系列へ追加。</li><li>上下移動で順序を整える。</li><li>表示番号を付け直し、カットを保存。</li></ol><p>セル文書は必要に応じて別途保存します。</p>
+            </div>
+            <div class="card search-unit" data-search="recipe annotation shooting frame instruction raster export">
+              <h3>撮影指示入りの確認画像を作る</h3>
+              <ol><li>テキストまたは手描き指示を追加。</li><li>撮影フレームを数値またはハンドルで調整。</li><li>「指示画像を書き出し...」を実行。</li></ol><p>通常のラスター書き出しには制作指示を含めません。</p>
+            </div>
+            <div class="card search-unit" data-search="recipe vanishing point radial guide snap perspective">
+              <h3>消失点へ線を吸着させる</h3>
+              <ol><li>消失点設定で点と放射間隔を追加。</li><li>必要ならハンドルで点をCanvas外へ移動。</li><li>表示とスナップをオン。</li><li>直線、曲線、図形、折れ線を描く。</li></ol><p>ガイドは平坦画像へ焼き込まれません。</p>
+            </div>
           </div>
         </section>
 
@@ -1374,18 +1442,24 @@
             <h3>ペインが見つからない</h3>
             <p>「ウィンドウ」メニューで該当ペインをオンにします。AutoHideなら画面端ボタンを確認します。配置が崩れた場合は「ウィンドウ › ワークスペース › 既定に戻す」を使います。</p>
           </div>
+          <div class="search-unit" data-search="cut command stale target active cell rejected カット コマンド 対象 古い">
+            <h3>カットの操作が実行されない</h3>
+            <p>カット操作は、メニューやボタンを押した時点のワークスペース、カット、セル、世代を対象にします。ダイアログ表示中などに別タブへ切り替えた場合、後からアクティブになった別セルへ操作を付け替えず拒否します。元のカット／セルを選び直して再実行してください。</p>
+          </div>
+          <div class="search-unit" data-search="shooting frame vanishing point handles hidden overlay edit mode">
+            <h3>撮影フレーム／消失点のハンドルが見えない</h3>
+            <p>対象が文書に存在するか、対応する「ハンドル編集」コマンドを選んでいるか、消失点の表示がオンかを確認します。点がCanvas外にある場合も放射ガイドは見えますが、中心ハンドルは表示領域外になることがあります。</p>
+          </div>
           <div class="search-unit" data-search="batch no output dry-run preview current inkpod overwrite">
             <h3>バッチが開始しない／期待した形式で出ない</h3>
             <p>入力、処理列、必要な対象レイヤー、出力設定をdry-runで確認します。dry-runとプレビューは出力しません。「現在セルを実行」または「全実行」が必要です。現行版のバッチ出力は `.inkpod` です。</p>
           </div>
-          <div class="callout warning search-unit" id="current-limitations" data-search="current limitations known differences 日本語 AutoHide ARM64 batch vector raster sequence light table">
+          <div class="callout warning search-unit" id="current-limitations" data-search="current limitations known differences 日本語 AutoHide ARM64 batch sequence">
             <strong>現行版での制限</strong>
             <ul>
               <li>UIリソースは日本語のみです。英語表示へ切り替える設定はありません。</li>
               <li>AutoHide端ボタンは支援技術から名前を取得できますが、<kbd>F6</kbd>／<kbd>Tab</kbd>だけでは到達できない場合があります。</li>
               <li>シーケンスペイン内にはセル切替時自動保存／端点循環の専用コントロールはありません。各設定はメニューから変更します。</li>
-              <li>レイヤー／プレーンの複数対象同時編集を示す専用表示はありません。</li>
-              <li>ベクター同士の順序は保たれますが、現行表示ではベクター内容が合成済みラスターの後に描かれ、ラスターとベクターを任意に交互配置した見え方にはなりません。</li>
               <li>バッチの実出力は `.inkpod` です。</li>
               <li>ARM64パッケージは構築されていますが、現行記録では一部のARM64実機操作は未確認です。</li>
             </ul>
@@ -1404,9 +1478,12 @@
                 <tr><td>dry-run</td><td>バッチの入力、対象、出力、衝突を検査するだけで、一切書き込まない実行。</td></tr>
                 <tr><td>Recovery</td><td>障害から作業を復元するための別保存。通常保存の代わりではありません。</td></tr>
                 <tr><td>savepoint／通常保存の基準</td><td>最後に通常保存が成功した履歴位置。未保存判定の基準になります。</td></tr>
-                <tr><td>カット</td><td>一つのショットに属するセル連番や制作設定をまとめる単位。</td></tr>
+                <tr><td>カット</td><td>一つのショットに属する安定ID付きセル系列、制作設定、独立した履歴をまとめる単位。各セル文書は別保存です。</td></tr>
                 <tr><td>セル</td><td>一枚の作画・彩色文書。</td></tr>
                 <tr><td>シーケンス／連番</td><td>自然順に並べた複数セル／画像の列。</td></tr>
+                <tr><td>注釈</td><td>テキスト、手描き線、引出線、値などの制作指示を保持する非破壊オブジェクト。</td></tr>
+                <tr><td>撮影フレーム</td><td>中心、幅、高さ、角度を持つ任意の撮影範囲。指示画像へ明示的に出力できます。</td></tr>
+                <tr><td>消失点</td><td>透視作画のための位置と放射ガイド設定。複数作成でき、Canvas外の点と放射スナップにも対応します。</td></tr>
                 <tr><td>主線保護</td><td>主線を見せたまま、彩色操作が主線プレーンを変更しない性質。</td></tr>
                 <tr><td>選択マスク</td><td>処理を許可する範囲をピクセルごとに表す情報。</td></tr>
                 <tr><td>調整レイヤー</td><td>元ピクセルを変えず、表示合成時に明るさ等を調整するレイヤー。</td></tr>

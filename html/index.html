@@ -597,8 +597,8 @@ footer{border-top:1px solid var(--border);padding:44px 0 56px;margin-top:40px}
         </div>
         <div class="card reveal" data-d="180">
           <div class="ico c-green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M10 9l5 3-5 3z" fill="currentColor" stroke="none"/></svg></div>
-          <h3 data-i18n="grid.4.t">連番 &amp; モーションチェック</h3>
-          <p data-i18n="grid.4.d">連番セルを前後に切り替え、30 / 24 / 12 fps などでループ再生。動きを塗りながら確認できます。</p>
+          <h3 data-i18n="grid.4.t">カット・連番 &amp; モーションチェック</h3>
+          <p data-i18n="grid.4.d">カット単位でセル系列を追加・並べ替え・採番し、30 / 24 / 12 fps などでループ再生。各セルは独立して安全に保存します。</p>
         </div>
         <div class="card reveal">
           <div class="ico c-cyan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="9" cy="6" r="2" fill="var(--bg-2)"/><circle cx="15" cy="12" r="2" fill="var(--bg-2)"/><circle cx="7" cy="18" r="2" fill="var(--bg-2)"/></svg></div>
@@ -619,6 +619,16 @@ footer{border-top:1px solid var(--border);padding:44px 0 56px;margin-top:40px}
           <div class="ico c-pink"><svg viewBox="0 0 24 24" fill="none" stroke="none"><rect x="3" y="3" width="8" height="8" rx="2" fill="#FF5FD5"/><rect x="13" y="3" width="8" height="8" rx="2" fill="#23C0FF"/><rect x="3" y="13" width="8" height="8" rx="2" fill="#22E0A6"/><rect x="13" y="13" width="8" height="8" rx="2" fill="#FFD23D"/></svg></div>
           <h3 data-i18n="grid.8.t">カラーチャート</h3>
           <p data-i18n="grid.8.d">色と名前を表で管理し、ページ・検索・ロックに対応。セルから一意色を抽出して自動生成も。</p>
+        </div>
+        <div class="card reveal">
+          <div class="ico c-amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v12H8l-4 4z"/><path d="M8 8h8M8 12h5"/></svg></div>
+          <h3 data-i18n="grid.9.t">テキスト &amp; 撮影指示</h3>
+          <p data-i18n="grid.9.d">テキストや手描き注釈、角度付き撮影フレームを非破壊で保持。通常画像と分け、確認用の指示画像へ明示的に出力します。</p>
+        </div>
+        <div class="card reveal" data-d="60">
+          <div class="ico c-blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="2"/><path d="M7 12h14M6.5 10.5l12-6M6.5 13.5l12 6"/></svg></div>
+          <h3 data-i18n="grid.10.t">消失点ガイド</h3>
+          <p data-i18n="grid.10.d">Canvas外も含む複数の消失点を設定し、間隔・位相・色・不透明度を調整。放射ガイドへ作図ツールを吸着できます。</p>
         </div>
       </div>
     </div>
@@ -776,7 +786,7 @@ footer{border-top:1px solid var(--border);padding:44px 0 56px;margin-top:40px}
           <div>
             <h3 data-i18n="tech.3.t">ジャーナル型フォーマット</h3>
             <p data-i18n="tech.3.d">.inkpod は画像のコピーではなく「原点 + アセット + 手続きの履歴」を保存。原子的な保存と復元に対応し、履歴も分岐も失われません。</p>
-            <span class="tech-chip">.inkpod v10 · atomic save · recovery</span>
+            <span class="tech-chip">.inkpod v26 · atomic save · recovery</span>
           </div>
         </div>
         <div class="card reveal" data-d="240">
@@ -792,7 +802,7 @@ footer{border-top:1px solid var(--border);padding:44px 0 56px;margin-top:40px}
       <div class="formats reveal">
         <div class="fl" data-i18n="formats.label">対応フォーマット</div>
         <div class="fmt-row">
-          <span class="fmt native">.inkpod v10</span>
+          <span class="fmt native">.inkpod v26</span>
           <span class="fmt">PNG</span>
           <span class="fmt">TIFF</span>
           <span class="fmt">TGA</span>
@@ -906,8 +916,8 @@ const I18N = {
     "grid.2.d": "矩形・楕円・投げ縄・折れ線・トレース・色指定。追加・削除・交差、拡張・縮小も自在に。",
     "grid.3.t": "ライトテーブル",
     "grid.3.d": "前後のセルを基準フレームで整列し、半透明で重ねて参照。距離に応じた不透明度ステップにも対応。",
-    "grid.4.t": "連番 &amp; モーションチェック",
-    "grid.4.d": "連番セルを前後に切り替え、30 / 24 / 12 fps などでループ再生。動きを塗りながら確認できます。",
+    "grid.4.t": "カット・連番 &amp; モーションチェック",
+    "grid.4.d": "カット単位でセル系列を追加・並べ替え・採番し、30 / 24 / 12 fps などでループ再生。各セルは独立して安全に保存します。",
     "grid.5.t": "フィルター &amp; 調整レイヤー",
     "grid.5.d": "色調カーブ、レベル補正、色相・彩度、カラーバランス。調整レイヤーで非破壊に適用。",
     "grid.6.t": "バッチ処理",
@@ -916,6 +926,10 @@ const I18N = {
     "grid.7.d": "元に戻す／やり直し、複数段階ジャンプ、自動保存とクラッシュ復元。分岐した履歴も失われません。",
     "grid.8.t": "カラーチャート",
     "grid.8.d": "色と名前を表で管理し、ページ・検索・ロックに対応。セルから一意色を抽出して自動生成も。",
+    "grid.9.t": "テキスト &amp; 撮影指示",
+    "grid.9.d": "テキストや手描き注釈、角度付き撮影フレームを非破壊で保持。通常画像と分け、確認用の指示画像へ明示的に出力します。",
+    "grid.10.t": "消失点ガイド",
+    "grid.10.d": "Canvas外も含む複数の消失点を設定し、間隔・位相・色・不透明度を調整。放射ガイドへ作図ツールを吸着できます。",
     "concept.eyebrow": "コンセプト",
     "concept.title": "レイヤーの中に、プレーンがある。",
     "concept.lead": "inkpod の文書は「セル → レイヤー → プレーン」の階層で構成されます。レイヤーはセル画を重ねる合成の単位。プレーンは主線・彩色・色トレース・塗りを分離して保持する、最小の編集単位です。",
@@ -1005,8 +1019,8 @@ const I18N = {
     "grid.2.d": "Rectangle, ellipse, lasso, polyline, trace brush and by-color. Add, subtract, intersect, expand and shrink freely.",
     "grid.3.t": "Light table",
     "grid.3.d": "Align neighboring cells on the registration frame and overlay them translucently — with distance-based opacity steps.",
-    "grid.4.t": "Sequences &amp; motion check",
-    "grid.4.d": "Flip through numbered cells and loop-play at 30 / 24 / 12 fps to check motion while you paint.",
+    "grid.4.t": "Cuts, sequences &amp; motion check",
+    "grid.4.d": "Add, reorder and renumber cells inside a cut, then loop-play at 30 / 24 / 12 fps. Every cell remains independently and safely saved.",
     "grid.5.t": "Filters &amp; adjustment layers",
     "grid.5.d": "Tone curves, levels, hue/saturation and color balance — applied non-destructively as adjustment layers.",
     "grid.6.t": "Batch processing",
@@ -1015,6 +1029,10 @@ const I18N = {
     "grid.7.d": "Undo/redo, multi-step jumps, autosave and crash recovery. Even divergent history branches are preserved.",
     "grid.8.t": "Color charts",
     "grid.8.d": "Manage colors and names in searchable, lockable pages — or auto-generate a chart from a painted cell.",
+    "grid.9.t": "Text &amp; shooting notes",
+    "grid.9.d": "Keep text, hand-drawn annotations and angled shooting frames non-destructively, then export them explicitly as an instruction image.",
+    "grid.10.t": "Vanishing-point guides",
+    "grid.10.d": "Place multiple vanishing points, even outside the canvas; tune spacing, phase, color and opacity, then snap drawing tools to their radial guides.",
     "concept.eyebrow": "Concept",
     "concept.title": "Planes live inside layers.",
     "concept.lead": "An inkpod document is structured as cell → layer → plane. Layers are the units you composite; planes are the smallest units you edit — line art, paint, color trace and fill are kept apart.",

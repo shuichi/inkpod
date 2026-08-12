@@ -35,9 +35,9 @@ native-format model.
 | Crate           | Responsibility                                                                                                                                                                     |
 | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `inkpod-image`  | Typed pixel formats, 64 x 64 sparse tiles, `Arc` copy-on-write storage, selection, fill/sampling/palette logic, vector geometry, and deterministic raster/filter/effect operations |
-| `inkpod-format` | Bounded procedure-authoritative `.inkpod` v16 DTO/container and `.inkbatch` v2 models, streaming encode/decode/validation, atomic file I/O, and PNG/TIFF/TGA/BMP codecs                              |
+| `inkpod-format` | Bounded procedure-authoritative `.inkpod` v26 Cell/Cut containers and `.inkbatch` v2 models, streaming encode/decode/validation, atomic file I/O, and PNG/TIFF/TGA/BMP codecs                     |
 | `inkpod-core`   | Stable-ID document/layer/plane state, immutable Genesis/base surfaces, a content-addressed canonical asset registry, StateId savepoints, views, clipboard, previews, animation, vector/effects/Batch commands, persistence mapping, immutable render snapshots, and canonical primitive execution plus append-only journal/cache-free replay and semantic document digests for the migrated Core slice |
-| `inkpod-ffi`    | ABI v10 fixed records and generation-tagged runtime IDs, persistence/compaction diagnostics, validation/conversion, panic containment, ownership functions, and feature-specific exports                |
+| `inkpod-ffi`    | ABI v12 fixed records and generation-tagged runtime IDs, persistence/compaction diagnostics, validation/conversion, panic containment, ownership functions, and feature-specific exports                |
 
 Binary, grayscale, RGBA8/16, straight-alpha, premultiplied display data, and
 selection masks remain distinct types. Core stores vector geometry in
@@ -157,7 +157,7 @@ and publish only after it produced exactly one valid document commit.
 `Core::replay_procedure` validates the retained procedure and invokes the same
 typed route rather than a second semantic implementation;
 `Core::document_state_digest` observes the memory-layout-independent BLAKE3-256
-semantic state digest. Schema 4 is a domain-separated commitment tree: one
+semantic state digest. Schema 9 is a domain-separated commitment tree: one
 metadata commitment plus stable-Plane-ID-keyed raster roots, whose leaves commit
 to logical tile pixels. A revision-matched raster-tile edit reuses every
 unchanged leaf and updates only the changed tile, its raster root, and the
@@ -185,13 +185,13 @@ cache release, and later history movement reconstructs the cache on demand.
 
 This is deliberately not a generic snapshot- or diff-procedure bridge. Every
 production history entry references its route-specific canonical procedure,
-and there is no supported incomplete-journal state. The v16 writer serializes
+and there is no supported incomplete-journal state. The v26 writer serializes
 Genesis, retained assets, the complete journal/control-event sequence, editor
 state, savepoints, cursor, branch graph, and ID authorities. Open validates and
 either fully replays that graph or uses a prefix/state/policy-verified optional
 checkpoint in a staged Core before one replacement of the live generation.
 Checkpoint mismatch selects full replay; malformed/hash/bound failure rejects.
-The journal remains authoritative and v2/every noncurrent version is rejected.
+The journal remains authoritative and every non-v26 version is rejected.
 
 ## Immutable Genesis and canonical assets
 
@@ -203,17 +203,22 @@ is not an editable layer or plane and never enters a layer-only export or the
 selection mask. `BaseSurface::Asset` instead names one immutable canonical raster
 asset whose dimensions and pixel semantics match the document paper. Replacing
 the earlier temporary Document-ID-as-Cell bridge and persisting the shooting and
-maximum-close frames change canonical document-state bytes, so the document-state
-commitment is schema 7/domain 6. The current replay contract is epoch 21 and native
-format version 24. Text/Annotation layers own bounded stable-ID annotation
+maximum-close frames change canonical document-state bytes. The current document-state
+commitment is schema 9/domain 8, the replay contract is epoch 23, and the native
+format is version 26. Text/Annotation layers own bounded stable-ID annotation
 objects, and `EditAnnotations/canonical-v2` commits create/update/move/delete or
 one completed stroke through the shared executor. Cut payload schema 2 separates immutable member assets from
 ordered membership and records membership before/after states in Cut history, while
 retaining Cell-document primitive semantics. Sequence edits stage bounded ordered
 insert/remove/move/renumber operations and publish one Cut revision only after final
 validation. Removed members are not physically deleted and remain addressable by
-stable `(CellId, document UUID)` while retained Cut history can restore them. Epoch
-19/version 22 added the independent current-only Cut descriptor and Cut metadata/
+stable `(CellId, document UUID)` while retained Cut history can restore them. The
+optional angled shooting frame and stable-ID vanishing points are independent document
+objects. Their canonical edits, previews, transform rules, snapshot overlays, output
+inclusion policies, and Core-owned radial snapping are persisted by v26; flat normal
+output excludes both overlay families, while explicit instruction export may include
+the shooting-frame outline and annotations. Epoch 19/version 22 added the independent
+current-only Cut descriptor and Cut metadata/
 default history. Epoch
 18/version 21 added the canonical floating-transform v3 procedure with
 half-open five-point absolute-anchor semantics. Epoch 17/version 20 added the
@@ -258,7 +263,7 @@ Cache-free verification first builds a detached asset archive from every semanti
 retention root, deep-copies each logical payload, and re-ingests it into an empty
 registry with the expected `AssetId`. Fresh Genesis/journal replay uses only that
 detached registry, so passing verification cannot be an artifact of shared
-`AssetRecord`, payload, or `TileRaster` ownership. Production v16 persists the
+`AssetRecord`, payload, or `TileRaster` ownership. Production v26 persists the
 same rooted graph in GENS/ASST.
 
 The present ABI is v12. `InkpodObjectId` separates Core, snapshot, task, color,
@@ -347,7 +352,7 @@ active layer/plane target, ordered multi-edit-target
 set, and selection/tool/brush options belong to `EditorState`. The active target owns
 keyboard focus and paint destination; the bounded target set independently owns
 grouped copy/tree-command intent. Core normalizes that set to document-tree
-order, reconciles it after topology changes, and persists it in EDIT schema 5.
+order, reconciles it after topology changes, and persists it in EDIT schema 6.
 Changing the marker set advances only EditorRevision/editor dirty. A grouped
 document command captures the set into one canonical invocation and publishes
 one transaction, document revision, history entry, and journal commit.
@@ -575,7 +580,7 @@ Inactive-session notifications validate their captured session/generation and
 update only tab dirty/processing presentation; they do not retarget the active
 view or request continuous snapshots.
 
-The fixed command-state catalog assigns all 334 production commands exactly one
+The fixed command-state catalog assigns all 380 production commands exactly one
 state owner. Pure providers compute enabled/checked state without calling Core or
 Win32 or mutating tools, previews, or documents. Menus, shortcuts, and palette
 entry points consume the same cached result. The main frame deliberately has no
@@ -718,7 +723,7 @@ maps to hide, preserving the pane's controller state. All HWND and Common
 Controls activity remains on the UI/Input thread; Core and renderer ownership is
 unchanged.
 
-The frontend persists a bounded version 4 workspace record in HKCU. It contains only main
+The frontend persists a bounded version 7 workspace record in HKCU. It contains only main
 window placement, editor split orientation/ratio, dock zones/order/ratios,
 primary and secondary pane visibility/size/floating placement, AutoHide edge,
 density, and selected or user-named preset; document paths and document/Core
@@ -726,7 +731,7 @@ identities are excluded. The decoder validates its exact size, counts, enums,
 stable pane IDs, duplicate IDs, placement bounds, and bounded terminated name.
 Unknown pane IDs are ignored, absent known panes retain current defaults, and an
 invalid or unsupported record restores the default without aborting startup.
-Version 2 fixed and version 3 dock records migrate once to version 4.
+Supported version 4, 5, and 6 records migrate once to version 7.
 
 The UI thread owns a fixed-capacity `WorkspaceWindowRegistry`. Each heap-stable
 `WorkspaceWindow` owns its top-level
@@ -1064,7 +1069,7 @@ stroke. Long-running tasks expose progress and cancellation; cancellation,
 failure, or stale revision does not partially commit. Format limits and recovery
 details are specified in [`file-format.md`](file-format.md).
 
-The current `.inkpod` v16 container requires `META`, `GENS`, `ASST`, `PROC`, and
+The current `.inkpod` v26 Cell container requires `META`, `GENS`, `ASST`, `PROC`, and
 `EDIT`. Save first verifies cache-free journal replay, encodes prospective
 document/editor savepoints, and streams the complete validated container to an
 exclusive same-directory temporary file. Header, records, asset chunks,
@@ -1077,7 +1082,7 @@ digests in a staged Core, then swaps once and rebases `DocumentRevision` to 1.
 Normal-save output therefore reopens clean with Undo/Redo and inactive branches
 intact. Autosave retains the existing normal path/savepoints; recovery open
 clears both savepoints and path authority and marks the restored session dirty.
-Partial selection revert reconstructs the saved document through this same v16
+Partial selection revert reconstructs the saved document through this same v26
 reader and commits the selected delta as one new canonical undo unit.
 
 Checkpoint policy is deterministic over procedure count, replay work, and dirty
