@@ -74,9 +74,12 @@ using inkpod::app::RecoveryMetadataPath;
 using inkpod::app::SequenceCellSwitchPolicy;
 using inkpod::app::SequenceEndpointPolicy;
 using inkpod::app::WriteFileAtomically;
+using inkpod::app::CommandContext;
+using inkpod::app::CommandResolveStatus;
 using inkpod::app::CommandTimerKind;
 using inkpod::app::DocumentSessionId;
 using inkpod::app::DocumentViewId;
+using inkpod::app::Generation;
 using inkpod::windows::ui::tools::kInteractionEffectAirbrush;
 
 bool CommandSurfacesMatchComputedState(const ApplicationHost& state) noexcept;
@@ -11621,17 +11624,34 @@ int RunCutWorkflowSmoke(ApplicationHost& state) noexcept {
     const auto finish = [&](int code) noexcept {
         return cleanup() ? code : 1049;
     };
+    InkpodStatus query_info_status = INKPOD_STATUS_INVALID_STATE;
+    DocumentSessionId query_info_session{};
+    Generation query_info_generation{};
     const auto query_info = [&](InkpodCutInfo& info) noexcept {
         info = {};
         info.struct_size = sizeof(info);
         InkpodCut* cut = state.Workspace().cut.handle;
-        return cut != nullptr && state.engine != nullptr
-            && state.engine->Invoke(
-                   [cut, &info](InkpodCore*) {
-                       return inkpod_cut_info(cut, &info);
-                   },
-                   false,
-                   false) == INKPOD_STATUS_OK;
+        const CommandContext context = state.routing.targets.Capture();
+        if (cut == nullptr || state.engine == nullptr
+            || !context.document_session.has_value()
+            || !context.generation.has_value()
+            || state.routing.targets.Resolve(
+                   context, inkpod::app::kDocumentSessionCommandScope)
+                != CommandResolveStatus::Ok) {
+            query_info_status = INKPOD_STATUS_INVALID_STATE;
+            query_info_session = {};
+            query_info_generation = {};
+            return false;
+        }
+        query_info_session = context.document_session.value();
+        query_info_generation = context.generation.value();
+        query_info_status = state.engine->Invoke(
+            query_info_session,
+            query_info_generation,
+            [cut, &info](InkpodCore*) { return inkpod_cut_info(cut, &info); },
+            false,
+            false);
+        return query_info_status == INKPOD_STATUS_OK;
     };
 
     const bool had_cut = state.Workspace().cut.handle != nullptr;
@@ -11816,7 +11836,8 @@ int RunCutWorkflowSmoke(ApplicationHost& state) noexcept {
         std::fprintf(
             stderr,
             "Cut reorder mismatch: revision=%llu expected=%llu members=%zu "
-            "active=%u first=%llu expected_first=%llu thumbnail=%llu/%llu\n",
+            "active=%u first=%llu expected_first=%llu thumbnail=%llu/%llu "
+            "query_status=%u session=%llu generation=%llu\n",
             static_cast<unsigned long long>(reordered.revision),
             static_cast<unsigned long long>(created_cut.revision + 1U),
             state.Workspace().cut.members.size(),
@@ -11831,7 +11852,10 @@ int RunCutWorkflowSmoke(ApplicationHost& state) noexcept {
                 : static_cast<unsigned long long>(
                     state.Workspace().sequence_dialog.view.cells[0]
                         .thumbnail_checksum),
-            static_cast<unsigned long long>(active_thumbnail_checksum));
+            static_cast<unsigned long long>(active_thumbnail_checksum),
+            static_cast<unsigned int>(query_info_status),
+            static_cast<unsigned long long>(query_info_session.Value()),
+            static_cast<unsigned long long>(query_info_generation.Value()));
         return finish(1047);
     }
     constexpr std::array<std::uint32_t, 5U> kRenumbered{1U, 2U, 3U, 4U, 5U};

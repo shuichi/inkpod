@@ -8869,17 +8869,52 @@ struct CutSnapshot final {
     std::array<InkpodCutMemberInfo, INKPOD_MAX_CELL_CREATION_COUNT> member_infos{};
 };
 
+struct CutCoreTarget final {
+    DocumentSessionId session{};
+    Generation generation{};
+    InkpodCut* cut{};
+};
+
+std::optional<CutCoreTarget> CaptureCutCoreTarget(
+    ApplicationHost& state, InkpodCut* requested_cut = nullptr) noexcept {
+    const CommandContext context = state.routing.targets.Capture();
+    InkpodCut* const cut = requested_cut != nullptr
+        ? requested_cut
+        : state.Workspace().cut.handle;
+    if (state.engine == nullptr || cut == nullptr
+        || !context.workspace.has_value()
+        || context.workspace.value() != state.Workspace().id
+        || !context.document_session.has_value()
+        || !context.generation.has_value()
+        || state.routing.targets.Resolve(
+               context, inkpod::app::kDocumentSessionCommandScope)
+            != CommandResolveStatus::Ok) {
+        return std::nullopt;
+    }
+    const DocumentSession* document = state.Documents().Find(
+        context.document_session.value());
+    if (document == nullptr
+        || document->generation != context.generation.value()) {
+        return std::nullopt;
+    }
+    return CutCoreTarget{document->id, document->generation, cut};
+}
+
 bool QueryCutCommandFlags(
     ApplicationHost& state, std::uint32_t& flags) noexcept {
     flags = 0U;
-    InkpodCut* const cut = state.Workspace().cut.handle;
-    if (state.engine == nullptr || cut == nullptr) {
+    const auto target = CaptureCutCoreTarget(state);
+    if (!target.has_value()) {
         return false;
     }
     InkpodCutInfo info{};
     info.struct_size = sizeof(info);
     const InkpodStatus status = state.engine->Invoke(
-        [cut, &info](InkpodCore*) { return inkpod_cut_info(cut, &info); },
+        target->session,
+        target->generation,
+        [cut = target->cut, &info](InkpodCore*) {
+            return inkpod_cut_info(cut, &info);
+        },
         false,
         false);
     if (status == INKPOD_STATUS_OK) {
@@ -8927,18 +8962,14 @@ bool Utf8ToWideText(
 
 bool QueryCutSnapshot(
     ApplicationHost& state,
-    CutSnapshot& snapshot,
-    InkpodCut* requested_cut = nullptr) noexcept {
-    InkpodCut* const cut = requested_cut != nullptr
-        ? requested_cut
-        : state.Workspace().cut.handle;
-    if (state.engine == nullptr || cut == nullptr) {
-        return false;
-    }
+    const CutCoreTarget& target,
+    CutSnapshot& snapshot) noexcept {
     snapshot.info = {};
     snapshot.info.struct_size = sizeof(snapshot.info);
     return state.engine->Invoke(
-               [cut, &snapshot](InkpodCore*) {
+               target.session,
+               target.generation,
+               [cut = target.cut, &snapshot](InkpodCore*) {
                    InkpodStatus status = inkpod_cut_info(cut, &snapshot.info);
                    if (status != INKPOD_STATUS_OK
                        || snapshot.info.member_count
@@ -8985,6 +9016,15 @@ bool QueryCutSnapshot(
                false,
                false)
         == INKPOD_STATUS_OK;
+}
+
+bool QueryCutSnapshot(
+    ApplicationHost& state,
+    CutSnapshot& snapshot,
+    InkpodCut* requested_cut = nullptr) noexcept {
+    const auto target = CaptureCutCoreTarget(state, requested_cut);
+    return target.has_value()
+        && QueryCutSnapshot(state, target.value(), snapshot);
 }
 
 bool BuildCutSessionCache(
@@ -9609,13 +9649,16 @@ std::optional<std::uint32_t> SelectedCutSequenceIndex(
 }
 
 InkpodStatus CancelCutSequenceEdit(ApplicationHost& state) noexcept {
-    if (state.engine == nullptr || state.Workspace().cut.handle == nullptr) {
+    const auto target = CaptureCutCoreTarget(state);
+    if (!target.has_value()) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     InkpodCutSequenceEditResult result{};
     result.struct_size = sizeof(result);
     return state.engine->Invoke(
-        [cut = state.Workspace().cut.handle, &result](InkpodCore*) {
+        target->session,
+        target->generation,
+        [cut = target->cut, &result](InkpodCore*) {
             return inkpod_cut_sequence_cancel(cut, &result);
         },
         false,
@@ -9625,9 +9668,10 @@ InkpodStatus CancelCutSequenceEdit(ApplicationHost& state) noexcept {
 InkpodStatus ApplyCutSequenceEdit(
     ApplicationHost& state,
     const std::vector<InkpodCutSequenceEditOperation>& operations) noexcept {
+    const auto target = CaptureCutCoreTarget(state);
     CutSnapshot snapshot{};
-    if (state.engine == nullptr || state.Workspace().cut.handle == nullptr
-        || !QueryCutSnapshot(state, snapshot)) {
+    if (!target.has_value()
+        || !QueryCutSnapshot(state, target.value(), snapshot)) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     const InkpodCutSequenceEditRequest request{
@@ -9641,13 +9685,22 @@ InkpodStatus ApplyCutSequenceEdit(
     InkpodCutSequenceEditResult result{};
     result.struct_size = sizeof(result);
     const InkpodStatus status = state.engine->Invoke(
-        [cut = state.Workspace().cut.handle, &request, &result](InkpodCore*) {
+        target->session,
+        target->generation,
+        [cut = target->cut, &request, &result](InkpodCore*) {
             return inkpod_cut_sequence_edit(cut, &request, &result);
         },
         false,
         false);
     if (status == INKPOD_STATUS_OK) {
-        (void)RefreshCutSessionCache(state);
+        CutSnapshot committed{};
+        if (!QueryCutSnapshot(state, target.value(), committed)
+            || committed.info.revision != result.revision
+            || committed.info.state_id != result.state_id
+            || committed.info.member_count != result.member_count
+            || !RefreshCutSessionCache(state, &committed)) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
         RefreshSequencePane(state);
         UpdateMenuState(state);
     }

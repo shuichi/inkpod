@@ -334,6 +334,8 @@ fn cut_abi_covers_contract_history_persistence_ownership_and_negative_cases() {
             INKPOD_STATUS_OK
         );
         assert_ne!(sequence_result.flags & INKPOD_CUT_SEQUENCE_EDIT_APPLIED, 0);
+        assert_eq!(sequence_result.revision, info.revision + 1);
+        assert_eq!(sequence_result.state_id, info.state_id + 1);
         assert_eq!(sequence_result.member_count, 2);
         assert_eq!(sequence_result.operation_count, 5);
         assert_eq!(
