@@ -393,7 +393,7 @@ pub fn decode_document_archive(bytes: &[u8]) -> Result<DocumentArchive, FormatEr
 
 fn decode_document_metadata(bytes: &[u8]) -> Result<FileDocumentMetadata, FormatError> {
     let mut reader = Reader::new(bytes);
-    if reader.take(4)? != DOCUMENT_METADATA_MAGIC || reader.u32()? != 4 {
+    if reader.take(4)? != DOCUMENT_METADATA_MAGIC || reader.u32()? != 5 {
         return Err(FormatError::Unsupported(
             "document metadata version is not supported",
         ));
@@ -413,10 +413,12 @@ fn decode_document_metadata(bytes: &[u8]) -> Result<FileDocumentMetadata, Format
             ));
         }
     };
+    let vanishing_point_count = reader.u32()? as usize;
     if layer_count == 0
         || layer_count > MAX_LAYERS
         || guide_count > MAX_GUIDES
         || annotation_count > MAX_ANNOTATION_OBJECTS
+        || vanishing_point_count > MAX_VANISHING_POINTS
     {
         return Err(FormatError::Invalid(
             "document layer or guide count is outside bounds",
@@ -538,6 +540,41 @@ fn decode_document_metadata(bytes: &[u8]) -> Result<FileDocumentMetadata, Format
     } else {
         None
     };
+    let mut vanishing_points = Vec::with_capacity(vanishing_point_count);
+    for _ in 0..vanishing_point_count {
+        let id = reader.u64()?;
+        let layer_id = reader.u64()?;
+        let x_milli = reader.i64()?;
+        let y_milli = reader.i64()?;
+        let interval_milli_degrees = reader.u32()?;
+        let angle_milli_degrees = reader.u32()?;
+        let opacity_milli = reader.u32()?;
+        let visible = match reader.u32()? {
+            0 => false,
+            1 => true,
+            _ => {
+                return Err(FormatError::Unsupported(
+                    "vanishing-point visibility is invalid",
+                ));
+            }
+        };
+        if reader.u32()? != 0 {
+            return Err(FormatError::Unsupported(
+                "vanishing-point reserved field is not zero",
+            ));
+        }
+        vanishing_points.push(FileVanishingPoint {
+            id,
+            layer_id,
+            x_milli,
+            y_milli,
+            interval_milli_degrees,
+            angle_milli_degrees,
+            color: reader.color_value()?,
+            opacity_milli,
+            visible,
+        });
+    }
     let mut annotations = Vec::with_capacity(annotation_count);
     for _ in 0..annotation_count {
         let id = reader.u64()?;
@@ -614,6 +651,7 @@ fn decode_document_metadata(bytes: &[u8]) -> Result<FileDocumentMetadata, Format
         color_chart_locked,
         annotations,
         shooting_frame,
+        vanishing_points,
     };
     validate_document_metadata(&metadata, None)?;
     Ok(metadata)

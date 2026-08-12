@@ -582,6 +582,131 @@ INT_PTR CALLBACK ShootingFrameDialogProcedure(
     return FALSE;
 }
 
+INT_PTR CALLBACK VanishingPointDialogProcedure(
+    HWND dialog, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
+    auto* state = reinterpret_cast<VanishingPointDialogState*>(
+        GetWindowLongPtrW(dialog, GWLP_USERDATA));
+    switch (message) {
+        case WM_INITDIALOG: {
+            state = reinterpret_cast<VanishingPointDialogState*>(lparam);
+            if (state == nullptr || state->value.struct_size < sizeof(state->value)) {
+                EndDialog(dialog, IDCANCEL);
+                return TRUE;
+            }
+            SetWindowLongPtrW(dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
+            const auto set_number = [dialog](int control, double value) {
+                std::array<wchar_t, 64U> text{};
+                _snwprintf_s(text.data(), text.size(), _TRUNCATE, L"%.3f", value);
+                SetDlgItemTextW(dialog, control, text.data());
+            };
+            set_number(IDC_VANISHING_POINT_X,
+                static_cast<double>(state->value.x_milli) / 1000.0);
+            set_number(IDC_VANISHING_POINT_Y,
+                static_cast<double>(state->value.y_milli) / 1000.0);
+            for (const wchar_t* interval : {L"1", L"5", L"10", L"15", L"30"}) {
+                SendDlgItemMessageW(
+                    dialog, IDC_VANISHING_POINT_INTERVAL, CB_ADDSTRING, 0,
+                    reinterpret_cast<LPARAM>(interval));
+            }
+            set_number(IDC_VANISHING_POINT_INTERVAL,
+                static_cast<double>(state->value.interval_milli_degrees) / 1000.0);
+            set_number(IDC_VANISHING_POINT_ANGLE,
+                static_cast<double>(state->value.angle_milli_degrees) / 1000.0);
+            set_number(IDC_VANISHING_POINT_OPACITY,
+                static_cast<double>(state->value.opacity_milli) / 10.0);
+            SetDlgItemInt(dialog, IDC_VANISHING_POINT_RED, state->value.color.red, FALSE);
+            SetDlgItemInt(dialog, IDC_VANISHING_POINT_GREEN, state->value.color.green, FALSE);
+            SetDlgItemInt(dialog, IDC_VANISHING_POINT_BLUE, state->value.color.blue, FALSE);
+            CheckDlgButton(
+                dialog, IDC_VANISHING_POINT_VISIBLE,
+                state->value.visible != 0U ? BST_CHECKED : BST_UNCHECKED);
+            state->centered_on_owner = CenterModalDialogOnOwner(dialog);
+            if (state->close_immediately) {
+                PostMessageW(dialog, WM_COMMAND, IDOK, 0);
+            }
+            return TRUE;
+        }
+        case WM_COMMAND:
+            if (state == nullptr) {
+                break;
+            }
+            if (LOWORD(wparam) == IDOK) {
+                double x{};
+                double y{};
+                double interval{};
+                double angle{};
+                double opacity{};
+                BOOL red_ok{};
+                BOOL green_ok{};
+                BOOL blue_ok{};
+                const UINT red = GetDlgItemInt(
+                    dialog, IDC_VANISHING_POINT_RED, &red_ok, FALSE);
+                const UINT green = GetDlgItemInt(
+                    dialog, IDC_VANISHING_POINT_GREEN, &green_ok, FALSE);
+                const UINT blue = GetDlgItemInt(
+                    dialog, IDC_VANISHING_POINT_BLUE, &blue_ok, FALSE);
+                if (!ReadFiniteDouble(dialog, IDC_VANISHING_POINT_X, x)
+                    || !ReadFiniteDouble(dialog, IDC_VANISHING_POINT_Y, y)
+                    || !ReadFiniteDouble(dialog, IDC_VANISHING_POINT_INTERVAL, interval)
+                    || !ReadFiniteDouble(dialog, IDC_VANISHING_POINT_ANGLE, angle)
+                    || !ReadFiniteDouble(dialog, IDC_VANISHING_POINT_OPACITY, opacity)
+                    || interval < 1.0 || interval > 180.0
+                    || opacity < 0.0 || opacity > 100.0
+                    || !red_ok || !green_ok || !blue_ok
+                    || red > 255U || green > 255U || blue > 255U) {
+                    if (!state->close_immediately) {
+                        MessageBoxW(
+                            dialog,
+                            L"有限の座標、1～180度の間隔、0～100%の不透明度、0～255のRGBを入力してください。",
+                            L"消失点設定", MB_OK | MB_ICONWARNING);
+                    }
+                    return TRUE;
+                }
+                InkpodVanishingPointInput candidate = state->value;
+                const double x_milli = std::nearbyint(x * 1000.0);
+                const double y_milli = std::nearbyint(y * 1000.0);
+                if (x_milli < static_cast<double>(INT64_MIN)
+                    || x_milli > static_cast<double>(INT64_MAX)
+                    || y_milli < static_cast<double>(INT64_MIN)
+                    || y_milli > static_cast<double>(INT64_MAX)) {
+                    return TRUE;
+                }
+                candidate.x_milli = static_cast<std::int64_t>(x_milli);
+                candidate.y_milli = static_cast<std::int64_t>(y_milli);
+                candidate.interval_milli_degrees = static_cast<std::uint32_t>(
+                    std::nearbyint(interval * 1000.0));
+                const double wrapped_angle = std::fmod(angle, 180.0);
+                candidate.angle_milli_degrees = static_cast<std::uint32_t>(std::nearbyint(
+                    (wrapped_angle < 0.0 ? wrapped_angle + 180.0 : wrapped_angle)
+                    * 1000.0)) % 180000U;
+                candidate.opacity_milli = static_cast<std::uint32_t>(
+                    std::nearbyint(opacity * 10.0));
+                candidate.visible = IsDlgButtonChecked(
+                    dialog, IDC_VANISHING_POINT_VISIBLE) == BST_CHECKED;
+                candidate.color.struct_size = sizeof(candidate.color);
+                candidate.color.depth = INKPOD_COLOR_DEPTH_8;
+                candidate.color.red = static_cast<std::uint16_t>(red);
+                candidate.color.green = static_cast<std::uint16_t>(green);
+                candidate.color.blue = static_cast<std::uint16_t>(blue);
+                candidate.color.alpha = 255U;
+                state->value = candidate;
+                EndDialog(dialog, IDOK);
+                return TRUE;
+            }
+            if (LOWORD(wparam) == IDCANCEL) {
+                EndDialog(dialog, IDCANCEL);
+                return TRUE;
+            }
+            break;
+        case WM_CLOSE:
+            EndDialog(dialog, IDCANCEL);
+            return TRUE;
+        default:
+            break;
+    }
+    return FALSE;
+}
+
 constexpr std::array<ViewOptionsDialogState::Choice, 5U> kCellAnchorChoices{{
     {L"左上", INKPOD_FRAME_ANCHOR_TOP_LEFT},
     {L"右上", INKPOD_FRAME_ANCHOR_TOP_RIGHT},
@@ -1419,6 +1544,23 @@ INT_PTR ShowShootingFrameOptions(
         MAKEINTRESOURCEW(IDD_SHOOTING_FRAME),
         owner,
         ShootingFrameDialogProcedure,
+        reinterpret_cast<LPARAM>(&candidate));
+    if (result == IDOK) {
+        state = candidate;
+    }
+    return result;
+}
+
+INT_PTR ShowVanishingPointOptions(
+    HINSTANCE instance,
+    HWND owner,
+    VanishingPointDialogState& state) noexcept {
+    VanishingPointDialogState candidate = state;
+    const INT_PTR result = DialogBoxParamW(
+        instance,
+        MAKEINTRESOURCEW(IDD_VANISHING_POINT),
+        owner,
+        VanishingPointDialogProcedure,
         reinterpret_cast<LPARAM>(&candidate));
     if (result == IDOK) {
         state = candidate;

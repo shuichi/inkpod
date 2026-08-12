@@ -5165,6 +5165,177 @@ int RunShootingFrameWorkflowSmoke(ApplicationHost& state) noexcept {
     return 0;
 }
 
+int RunVanishingPointWorkflowSmoke(ApplicationHost& state) noexcept {
+    const auto query_points = [&state](std::vector<InkpodVanishingPointInfo>& points) noexcept {
+        if (state.engine == nullptr) {
+            return false;
+        }
+        try {
+            points.assign(64U, InkpodVanishingPointInfo{});
+        } catch (const std::bad_alloc&) {
+            return false;
+        }
+        std::uint64_t count{};
+        const InkpodStatus status = state.engine->Invoke(
+            [&points, &count](InkpodCore* core) {
+                return inkpod_core_vanishing_points_copy(
+                    core,
+                    points.data(),
+                    static_cast<std::uint64_t>(points.size()),
+                    sizeof(InkpodVanishingPointInfo),
+                    &count);
+            },
+            false,
+            false);
+        if (status != INKPOD_STATUS_OK || count > points.size()) {
+            return false;
+        }
+        points.resize(static_cast<std::size_t>(count));
+        return true;
+    };
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_CELL_VANISHING_POINT_PROPERTIES,
+            0) != 1) {
+        return 1271;
+    }
+    std::vector<InkpodVanishingPointInfo> first;
+    if (!query_points(first) || first.size() != 1U
+        || first.front().point_id == 0U || first.front().x_milli >= 0
+        || first.front().interval_milli_degrees != 15000U
+        || first.front().opacity_milli != 750U) {
+        return 1272;
+    }
+    // Toggling handle mode off clears the selected object, so Properties adds
+    // another stable object instead of editing the first one.
+    SendMessageW(
+        state.Workspace().windows.window,
+        WM_COMMAND,
+        IDM_CELL_VANISHING_POINT_EDIT_HANDLES,
+        0);
+    UpdateMenuState(state);
+    if ((GetMenuState(
+             GetMenu(state.Workspace().windows.window),
+             IDM_CELL_VANISHING_POINT_EDIT_HANDLES,
+             MF_BYCOMMAND)
+         & MF_CHECKED) != 0U) {
+        return 1273;
+    }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_CELL_VANISHING_POINT_PROPERTIES,
+            0) != 1) {
+        return 1273;
+    }
+    std::vector<InkpodVanishingPointInfo> points;
+    UpdateMenuState(state);
+    if (!query_points(points) || points.size() != 2U
+        || (GetMenuState(
+                GetMenu(state.Workspace().windows.window),
+                IDM_CELL_VANISHING_POINT_EDIT_HANDLES,
+                MF_BYCOMMAND)
+            & MF_CHECKED) == 0U
+        || SendMessageW(
+               state.Workspace().windows.canvas,
+               inkpod::renderer::kCanvasRenderOnce,
+               0,
+               0) != 1) {
+        return 1274;
+    }
+    InkpodDocumentInfo document{};
+    inkpod::renderer::CanvasDocumentBounds bounds{};
+    if (!QueryDocument(state, document) || document.width == 0U
+        || !inkpod::renderer::GetCanvasDocumentBounds(
+            state.Workspace().windows.canvas, bounds)) {
+        return 1275;
+    }
+    const auto& selected = points.back();
+    const double zoom = (bounds.right - bounds.left)
+        / static_cast<double>(document.width);
+    const POINT start{
+        static_cast<LONG>(std::llround(
+            bounds.left + static_cast<double>(selected.x_milli) / 1000.0 * zoom)),
+        static_cast<LONG>(std::llround(
+            bounds.top + static_cast<double>(selected.y_milli) / 1000.0 * zoom))};
+    const POINT moved{start.x + 12, start.y + 8};
+    const POINT radial_sample{
+        static_cast<LONG>(std::llround((bounds.left + bounds.right) / 2.0)),
+        start.y};
+    const inkpod::app::EditorGroup* group = state.Workspace().editors.Active();
+    inkpod::renderer::CanvasPixelRgba8 radial_pixel{};
+    if (group == nullptr || state.renderer == nullptr
+        || !state.renderer->WaitQueueIdleForSmokeTest()
+        || FAILED(state.renderer->ReadPixelForSmokeTest(
+            group->canvas_id,
+            group->generation,
+            static_cast<UINT>(radial_sample.x),
+            static_cast<UINT>(radial_sample.y),
+            radial_pixel))
+        || radial_pixel.blue < 180U
+        || radial_pixel.blue <= radial_pixel.red + 60U
+        || radial_pixel.green <= radial_pixel.red) {
+        return 1276;
+    }
+    if (SendMessageW(
+            state.Workspace().windows.canvas,
+            WM_LBUTTONDOWN,
+            MK_LBUTTON,
+            MAKELPARAM(start.x, start.y)) != 1
+        || SendMessageW(
+               state.Workspace().windows.canvas,
+               WM_MOUSEMOVE,
+               MK_LBUTTON,
+               MAKELPARAM(moved.x, moved.y)) != 1
+        || SendMessageW(
+               state.Workspace().windows.canvas,
+               WM_LBUTTONUP,
+               0,
+               MAKELPARAM(moved.x, moved.y)) != 1) {
+        return 1277;
+    }
+    std::vector<InkpodVanishingPointInfo> after_move;
+    if (!query_points(after_move) || after_move.size() != 2U
+        || (after_move.back().x_milli == selected.x_milli
+            && after_move.back().y_milli == selected.y_milli)) {
+        return 1278;
+    }
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
+    std::vector<InkpodVanishingPointInfo> undone;
+    if (!query_points(undone) || undone.back().x_milli != selected.x_milli
+        || undone.back().y_milli != selected.y_milli) {
+        return 1279;
+    }
+    if (SendMessageW(
+            state.Workspace().windows.canvas,
+            inkpod::renderer::kCanvasSimulateDeviceLoss,
+            0,
+            0) != 1
+        || SendMessageW(
+               state.Workspace().windows.canvas,
+               inkpod::renderer::kCanvasRenderOnce,
+               0,
+               0) != 1
+        || !state.renderer->WaitQueueIdleForSmokeTest()) {
+        return 1280;
+    }
+    inkpod::renderer::CanvasPixelRgba8 restored_pixel{};
+    if (FAILED(state.renderer->ReadPixelForSmokeTest(
+            group->canvas_id,
+            group->generation,
+            static_cast<UINT>(radial_sample.x),
+            static_cast<UINT>(radial_sample.y),
+            restored_pixel))
+        || restored_pixel.red != radial_pixel.red
+        || restored_pixel.green != radial_pixel.green
+        || restored_pixel.blue != radial_pixel.blue
+        || restored_pixel.alpha != radial_pixel.alpha) {
+        return 1281;
+    }
+    return 0;
+}
+
 int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     if (state.engine == nullptr
         || CreateCell(state, 32U, 24U, 120000U) != INKPOD_STATUS_OK) {
@@ -12236,6 +12407,9 @@ int RunApplicationSmoke(app::ApplicationHost& state) noexcept {
     }
     if (exit_code == 0) {
         exit_code = runtime::RunShootingFrameWorkflowSmoke(state);
+    }
+    if (exit_code == 0) {
+        exit_code = runtime::RunVanishingPointWorkflowSmoke(state);
     }
     if (exit_code == 0) {
         exit_code = runtime::RunProductionWorkflowSmoke(state);

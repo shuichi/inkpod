@@ -16,7 +16,7 @@ pub(crate) use model::TEMP_SEQUENCE;
 pub use model::{
     DocumentArchive, FileAnnotationKind, FileAnnotationObject, FileAnnotationOutput,
     FileAnnotationPoint, FileDocumentMetadata, FileGrid, FileGuide, FileLayer, FilePlane,
-    FilePlaneProperties, FileShootingFrame, FileShootingFrameAnchor, FileTile, FormatError,
-    FrameMetadata, GuideAxis, LayerKind, Margins, PlaneKind, RectI32, checksum,
+    FilePlaneProperties, FileShootingFrame, FileShootingFrameAnchor, FileTile, FileVanishingPoint,
+    FormatError, FrameMetadata, GuideAxis, LayerKind, Margins, PlaneKind, RectI32, checksum,
 };
 pub(crate) use model::{MAX_MANIFEST_BYTES, MAX_NODE_NAME_BYTES, MAX_PLANES};

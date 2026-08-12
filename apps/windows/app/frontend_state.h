@@ -248,6 +248,11 @@ struct ToolUiState {
     std::vector<InkpodStrokeSample> shooting_frame_gesture_samples;
     std::uint32_t shooting_frame_drag_handle{};
     bool shooting_frame_preview_active{};
+    InkpodVanishingPointInput vanishing_point_drag_value{
+        sizeof(InkpodVanishingPointInput)};
+    std::vector<InkpodStrokeSample> vanishing_point_gesture_samples;
+    std::uint64_t vanishing_point_drag_id{};
+    bool vanishing_point_preview_active{};
 
     HWND palette{};
     windows::ui::ToolPaletteDialogState palette_dialog{};

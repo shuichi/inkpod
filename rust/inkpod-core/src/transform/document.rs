@@ -33,6 +33,11 @@ impl Core {
         if let Some(frame) = &mut after.shooting_frame {
             crate::shooting_frame::mirror_shooting_frame(frame, document_size, axis)?;
         }
+        crate::vanishing_point::mirror_vanishing_points(
+            &mut after.vanishing_points,
+            document_size,
+            axis,
+        )?;
         for guide in &mut after.guides {
             match (axis, guide.axis) {
                 (MirrorAxis::Horizontal, GuideAxis::Vertical) => {
@@ -102,6 +107,11 @@ impl Core {
         if let Some(frame) = &mut after.shooting_frame {
             crate::shooting_frame::rotate_shooting_frame(frame, before_size, direction)?;
         }
+        crate::vanishing_point::rotate_vanishing_points(
+            &mut after.vanishing_points,
+            before_size,
+            direction,
+        )?;
         rotate_guides(&mut after.guides, before_size, direction)?;
         let old_grid = after.grid;
         after.grid.origin_x = match direction {
@@ -199,6 +209,11 @@ impl Core {
             if let Some(frame) = &mut after.shooting_frame {
                 crate::shooting_frame::resample_shooting_frame(frame, before_size, after_size)?;
             }
+            crate::vanishing_point::resample_vanishing_points(
+                &mut after.vanishing_points,
+                before_size,
+                after_size,
+            )?;
             for plane in after
                 .layers
                 .iter_mut()
@@ -247,6 +262,10 @@ impl Core {
             if let Some(frame) = &mut after.shooting_frame {
                 crate::shooting_frame::translate_shooting_frame(frame, offset)?;
             }
+            crate::vanishing_point::translate_vanishing_points(
+                &mut after.vanishing_points,
+                offset,
+            )?;
             for plane in after
                 .layers
                 .iter_mut()

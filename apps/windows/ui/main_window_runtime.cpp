@@ -77,6 +77,7 @@ using inkpod::windows::ui::ShortcutDialogState;
 using inkpod::windows::ui::TextInputDialogState;
 using inkpod::windows::ui::ViewOptionsDialogState;
 using inkpod::windows::ui::ShootingFrameDialogState;
+using inkpod::windows::ui::VanishingPointDialogState;
 using inkpod::windows::ui::ShowAboutDialog;
 using inkpod::windows::ui::ShowCellCreationOptions;
 using inkpod::windows::ui::ShowCutProperties;
@@ -88,6 +89,7 @@ using inkpod::windows::ui::ShowShortcutEditor;
 using inkpod::windows::ui::ShowTextInput;
 using inkpod::windows::ui::ShowViewOptions;
 using inkpod::windows::ui::ShowShootingFrameOptions;
+using inkpod::windows::ui::ShowVanishingPointOptions;
 using inkpod::app::AnimationUiState;
 using inkpod::app::SequenceAutosaveBinding;
 using inkpod::app::SequenceCellSwitchPolicy;
@@ -210,6 +212,7 @@ using inkpod::windows::ui::tools::kInteractionEffectStamp;
 using inkpod::windows::ui::tools::kInteractionSelection;
 using inkpod::windows::ui::tools::kInteractionColorReplace;
 using inkpod::windows::ui::tools::kInteractionShootingFrame;
+using inkpod::windows::ui::tools::kInteractionVanishingPoint;
 using inkpod::windows::ui::tools::kInteractionVectorCurve;
 using inkpod::windows::ui::tools::kInteractionVectorEllipse;
 using inkpod::windows::ui::tools::kInteractionVectorEraser;
@@ -3983,6 +3986,202 @@ InkpodStatus UpdateFloatingHandleDrag(
     return SetFloatingTransform(state, transform);
 }
 
+bool QueryVanishingPoints(
+    ApplicationHost& state,
+    std::vector<InkpodVanishingPointInfo>& points) noexcept {
+    if (state.engine == nullptr) {
+        return false;
+    }
+    try {
+        points.assign(64U, InkpodVanishingPointInfo{});
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+    std::uint64_t count{};
+    const InkpodStatus status = state.engine->Invoke(
+        [&points, &count](InkpodCore* core) {
+            return inkpod_core_vanishing_points_copy(
+                core,
+                points.data(),
+                static_cast<std::uint64_t>(points.size()),
+                sizeof(InkpodVanishingPointInfo),
+                &count);
+        },
+        false,
+        false);
+    if (status != INKPOD_STATUS_OK || count > points.size()) {
+        points.clear();
+        return false;
+    }
+    points.resize(static_cast<std::size_t>(count));
+    return true;
+}
+
+InkpodVanishingPointInput VanishingPointInputFromInfo(
+    const InkpodVanishingPointInfo& point) noexcept {
+    return InkpodVanishingPointInput{
+        sizeof(InkpodVanishingPointInput),
+        point.visible,
+        0U,
+        point.layer_id,
+        point.x_milli,
+        point.y_milli,
+        point.interval_milli_degrees,
+        point.angle_milli_degrees,
+        point.opacity_milli,
+        0U,
+        point.color};
+}
+
+InkpodStatus HandleVanishingPointCanvasEvent(
+    ApplicationHost& state,
+    const inkpod::renderer::CanvasStrokeEvent& event) noexcept {
+    auto& tools = state.Workspace().tools;
+    if (state.engine == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    if (event.kind == inkpod::renderer::CanvasStrokeEventKind::Cancel) {
+        tools.vanishing_point_gesture_samples.clear();
+        tools.vanishing_point_drag_id = 0U;
+        if (!tools.vanishing_point_preview_active) {
+            return INKPOD_STATUS_OK;
+        }
+        tools.vanishing_point_preview_active = false;
+        return state.engine->Invoke(
+            [](InkpodCore* core) {
+                return inkpod_core_vanishing_point_preview_cancel(core);
+            },
+            true,
+            false);
+    }
+    if (event.sample_count == 0U || event.samples == nullptr) {
+        return INKPOD_STATUS_INVALID_ARGUMENT;
+    }
+    InkpodDocumentInfo document{};
+    inkpod::renderer::CanvasDocumentBounds canvas{};
+    std::vector<InkpodVanishingPointInfo> points;
+    if (!QueryDocument(state, document)
+        || !QueryVanishingPoints(state, points)
+        || !inkpod::renderer::GetCanvasDocumentBounds(
+            state.Workspace().windows.canvas, canvas)
+        || document.width == 0U) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const double zoom = (canvas.right - canvas.left)
+        / static_cast<double>(document.width);
+    if (!std::isfinite(zoom) || zoom <= 0.0) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const auto to_document = [&](const InkpodStrokeSample& sample) {
+        double x = (static_cast<double>(sample.x) - canvas.left) / zoom;
+        double y = (static_cast<double>(sample.y) - canvas.top) / zoom;
+        if (state.ActiveView().presentation.flip_horizontal) {
+            x = static_cast<double>(document.width) - x;
+        }
+        if (state.ActiveView().presentation.flip_vertical) {
+            y = static_cast<double>(document.height) - y;
+        }
+        return std::pair{x, y};
+    };
+    const auto to_device = [&](double x, double y) {
+        if (state.ActiveView().presentation.flip_horizontal) {
+            x = static_cast<double>(document.width) - x;
+        }
+        if (state.ActiveView().presentation.flip_vertical) {
+            y = static_cast<double>(document.height) - y;
+        }
+        return std::pair{canvas.left + x * zoom, canvas.top + y * zoom};
+    };
+    const InkpodStrokeSample current =
+        event.samples[static_cast<std::size_t>(event.sample_count - 1U)];
+    if (event.kind == inkpod::renderer::CanvasStrokeEventKind::Begin) {
+        tools.vanishing_point_preview_active = false;
+        tools.vanishing_point_drag_id = 0U;
+        tools.vanishing_point_gesture_samples.clear();
+        const InkpodVanishingPointInfo* selected{};
+        double best = 14.0;
+        for (const auto& point : points) {
+            const auto device = to_device(
+                static_cast<double>(point.x_milli) / 1000.0,
+                static_cast<double>(point.y_milli) / 1000.0);
+            const double distance = std::hypot(
+                device.first - static_cast<double>(current.x),
+                device.second - static_cast<double>(current.y));
+            if (distance <= best) {
+                best = distance;
+                selected = &point;
+            }
+        }
+        if (selected == nullptr) {
+            return INKPOD_STATUS_OK;
+        }
+        try {
+            tools.vanishing_point_gesture_samples.push_back(current);
+        } catch (const std::bad_alloc&) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        tools.vanishing_point_drag_id = selected->point_id;
+        tools.vanishing_point_drag_value = VanishingPointInputFromInfo(*selected);
+        const InkpodStatus status = state.engine->Invoke(
+            [base_revision = document.document_revision,
+             point_id = selected->point_id,
+             input = tools.vanishing_point_drag_value](InkpodCore* core) {
+                return inkpod_core_vanishing_point_preview_begin(
+                    core,
+                    base_revision,
+                    INKPOD_VANISHING_POINT_EDIT_UPDATE,
+                    point_id,
+                    &input);
+            },
+            true,
+            false);
+        tools.vanishing_point_preview_active = status == INKPOD_STATUS_OK;
+        return status;
+    }
+    if (!tools.vanishing_point_preview_active
+        || tools.vanishing_point_gesture_samples.empty()) {
+        return INKPOD_STATUS_OK;
+    }
+    const auto start = to_document(tools.vanishing_point_gesture_samples.front());
+    const auto position = to_document(current);
+    InkpodVanishingPointInput value = tools.vanishing_point_drag_value;
+    value.x_milli += static_cast<std::int64_t>(
+        std::nearbyint((position.first - start.first) * 1000.0));
+    value.y_milli += static_cast<std::int64_t>(
+        std::nearbyint((position.second - start.second) * 1000.0));
+    InkpodStatus status = state.engine->Invoke(
+        [value](InkpodCore* core) {
+            return inkpod_core_vanishing_point_preview_update(core, &value);
+        },
+        true,
+        false);
+    if (status != INKPOD_STATUS_OK) {
+        tools.vanishing_point_preview_active = false;
+        tools.vanishing_point_gesture_samples.clear();
+        (void)state.engine->Invoke(
+            [](InkpodCore* core) {
+                return inkpod_core_vanishing_point_preview_cancel(core);
+            },
+            true,
+            false);
+        return status;
+    }
+    if (event.kind == inkpod::renderer::CanvasStrokeEventKind::End) {
+        status = state.engine->Invoke(
+            [](InkpodCore* core) {
+                std::uint64_t revision{};
+                std::uint64_t point_id{};
+                return inkpod_core_vanishing_point_preview_apply(
+                    core, &revision, &point_id);
+            },
+            true,
+            true);
+        tools.vanishing_point_preview_active = false;
+        tools.vanishing_point_gesture_samples.clear();
+    }
+    return status;
+}
+
 InkpodStatus HandleShootingFrameCanvasEvent(
     ApplicationHost& state,
     const inkpod::renderer::CanvasStrokeEvent& event) noexcept {
@@ -4540,6 +4739,20 @@ InkpodStatus SetEditorActiveTool(
         tools.shooting_frame_preview_active = false;
         tools.shooting_frame_drag_handle = 0U;
         tools.shooting_frame_gesture_samples.clear();
+    }
+    if (previous != tool && previous == kInteractionVanishingPoint) {
+        auto& tools = state.Workspace().tools;
+        if (tools.vanishing_point_preview_active && state.engine != nullptr) {
+            (void)state.engine->Invoke(
+                [](InkpodCore* core) {
+                    return inkpod_core_vanishing_point_preview_cancel(core);
+                },
+                true,
+                false);
+        }
+        tools.vanishing_point_preview_active = false;
+        tools.vanishing_point_drag_id = 0U;
+        tools.vanishing_point_gesture_samples.clear();
     }
     update.tool = tool;
     return state.UpdateEditorState(update);
@@ -6229,6 +6442,12 @@ CommandStateInputs BuildCommandStateInputs(
         && shooting_frame_present;
     inputs.document.shooting_frame_handle_edit =
         state.Workspace().tools.active_tool == kInteractionShootingFrame;
+    std::vector<InkpodVanishingPointInfo> vanishing_points;
+    inputs.document.vanishing_point_present = has_document
+        && QueryVanishingPoints(state, vanishing_points)
+        && !vanishing_points.empty();
+    inputs.document.vanishing_point_handle_edit =
+        state.Workspace().tools.active_tool == kInteractionVanishingPoint;
     inputs.document.recent_document_count = state.RecentDocumentCount();
     inputs.application.restore_previous_documents =
         state.lifetime.restore_previous_documents;
@@ -6717,6 +6936,7 @@ void UpdateMainWindowStatus(
             case kInteractionFloatingTransform: return L"変形";
             case kInteractionLightTableMove: return L"ライトテーブル移動";
             case kInteractionShootingFrame: return L"撮影フレーム";
+            case kInteractionVanishingPoint: return L"消失点";
             case kInteractionVectorLine: return L"直線";
             case kInteractionVectorCurve: return L"曲線";
             case kInteractionVectorRectangle: return L"長方形";
@@ -15383,6 +15603,161 @@ InkpodStatus DeleteShootingFrame(ApplicationHost& state) noexcept {
     return status;
 }
 
+InkpodStatus EnsureVanishingPointLayer(
+    ApplicationHost& state, std::uint64_t& layer_id) noexcept {
+    TreePaneNode selected{};
+    if (QueryTreeNode(state, false, selected)
+        && selected.kind == INKPOD_LAYER_VANISHING_POINT) {
+        layer_id = selected.id;
+        return INKPOD_STATUS_OK;
+    }
+    InkpodTreeEdit edit{};
+    edit.struct_size = sizeof(edit);
+    edit.operation = INKPOD_TREE_CREATE_LAYER;
+    edit.flags = INKPOD_NODE_VISIBLE | INKPOD_NODE_EDITABLE;
+    edit.kind = INKPOD_LAYER_VANISHING_POINT;
+    edit.opacity_milli = 1000U;
+    const InkpodStatus status = ApplyTreeEditRecord(
+        state, edit, "Perspective", layer_id);
+    if (status == INKPOD_STATUS_OK) {
+        state.Document().shell.smoke_layer_id = layer_id;
+        RefreshTreePane(state);
+    }
+    return status;
+}
+
+InkpodStatus EditVanishingPointFromDialog(ApplicationHost& state) noexcept {
+    if (state.engine == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    std::vector<InkpodVanishingPointInfo> points;
+    if (!QueryVanishingPoints(state, points)) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    auto& tools = state.Workspace().tools;
+    const auto selected = std::find_if(
+        points.begin(), points.end(), [&tools](const InkpodVanishingPointInfo& point) {
+            return point.point_id == tools.vanishing_point_drag_id;
+        });
+    const bool updating = selected != points.end();
+    std::uint64_t layer_id = updating ? selected->layer_id : 0U;
+    InkpodStatus status = updating
+        ? INKPOD_STATUS_OK : EnsureVanishingPointLayer(state, layer_id);
+    if (status != INKPOD_STATUS_OK) {
+        return status;
+    }
+    InkpodDocumentInfo document{};
+    if (!QueryDocument(state, document)) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    VanishingPointDialogState dialog{};
+    dialog.value = updating
+        ? VanishingPointInputFromInfo(*selected)
+        : InkpodVanishingPointInput{
+              sizeof(InkpodVanishingPointInput),
+              1U,
+              0U,
+              layer_id,
+              static_cast<std::int64_t>(document.width) * 500,
+              static_cast<std::int64_t>(document.height) * 500,
+              15000U,
+              0U,
+              750U,
+              0U,
+              InkpodColorValue{
+                  sizeof(InkpodColorValue),
+                  INKPOD_COLOR_DEPTH_8,
+                  48U,
+                  128U,
+                  240U,
+                  255U}};
+    if (state.lifetime.smoke_test && !updating) {
+        dialog.value.x_milli = -20000;
+    }
+    dialog.close_immediately = state.lifetime.smoke_test;
+    const InkpodVanishingPointEditKind kind = updating
+        ? INKPOD_VANISHING_POINT_EDIT_UPDATE
+        : INKPOD_VANISHING_POINT_EDIT_CREATE;
+    const std::uint64_t point_id = updating ? selected->point_id : 0U;
+    status = state.engine->Invoke(
+        [base_revision = document.document_revision, kind, point_id,
+         input = dialog.value](InkpodCore* core) {
+            return inkpod_core_vanishing_point_preview_begin(
+                core, base_revision, kind, point_id, &input);
+        },
+        true,
+        false);
+    if (status != INKPOD_STATUS_OK) {
+        return status;
+    }
+    if (ShowVanishingPointOptions(
+            state.lifetime.instance, state.Workspace().windows.window, dialog)
+        != IDOK) {
+        (void)state.engine->Invoke(
+            [](InkpodCore* core) {
+                return inkpod_core_vanishing_point_preview_cancel(core);
+            },
+            true,
+            false);
+        return INKPOD_STATUS_CANCELLED;
+    }
+    status = state.engine->Invoke(
+        [input = dialog.value](InkpodCore* core) {
+            return inkpod_core_vanishing_point_preview_update(core, &input);
+        },
+        true,
+        false);
+    if (status != INKPOD_STATUS_OK) {
+        (void)state.engine->Invoke(
+            [](InkpodCore* core) {
+                return inkpod_core_vanishing_point_preview_cancel(core);
+            },
+            true,
+            false);
+        return status;
+    }
+    std::uint64_t committed_id{};
+    status = state.engine->Invoke(
+        [&committed_id](InkpodCore* core) {
+            std::uint64_t revision{};
+            return inkpod_core_vanishing_point_preview_apply(
+                core, &revision, &committed_id);
+        },
+        true,
+        true);
+    if (status == INKPOD_STATUS_OK) {
+        tools.vanishing_point_drag_id = committed_id;
+        status = SetEditorActiveTool(state, kInteractionVanishingPoint);
+    }
+    return status;
+}
+
+InkpodStatus DeleteAllVanishingPoints(ApplicationHost& state) noexcept {
+    InkpodDocumentInfo document{};
+    if (!QueryDocument(state, document) || state.engine == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const InkpodStatus status = state.engine->Invoke(
+        [expected_revision = document.document_revision](InkpodCore* core) {
+            std::uint64_t revision{};
+            std::uint64_t ignored{};
+            return inkpod_core_vanishing_point_edit(
+                core,
+                expected_revision,
+                INKPOD_VANISHING_POINT_EDIT_DELETE_ALL,
+                0U,
+                nullptr,
+                &revision,
+                &ignored);
+        },
+        true,
+        true);
+    if (status == INKPOD_STATUS_OK) {
+        state.Workspace().tools.vanishing_point_drag_id = 0U;
+    }
+    return status;
+}
+
 void PresentAnnotationSelection(ApplicationHost& state) noexcept {
     if (state.Workspace().windows.canvas != nullptr) {
         (void)inkpod::renderer::SetCanvasAnnotationSelection(
@@ -15593,6 +15968,39 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
             const InkpodStatus status = DeleteShootingFrame(*state);
             if (status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, L"撮影フレーム削除");
+            }
+            UpdateMenuState(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_CELL_VANISHING_POINT_PROPERTIES: {
+            const InkpodStatus status = EditVanishingPointFromDialog(*state);
+            if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
+                ShowCoreError(*state, window, L"消失点設定");
+            }
+            UpdateMenuState(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_CELL_VANISHING_POINT_EDIT_HANDLES: {
+            std::vector<InkpodVanishingPointInfo> points;
+            const InkpodStatus status = !QueryVanishingPoints(*state, points)
+                    || points.empty()
+                ? INKPOD_STATUS_INVALID_STATE
+                : SetEditorActiveTool(
+                      *state,
+                      state->Workspace().tools.active_tool
+                              == kInteractionVanishingPoint
+                          ? INKPOD_TOOL_PENCIL
+                          : kInteractionVanishingPoint);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"消失点のハンドル編集");
+            }
+            UpdateMenuState(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_CELL_VANISHING_POINT_DELETE_ALL: {
+            const InkpodStatus status = DeleteAllVanishingPoints(*state);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"消失点をすべて削除");
             }
             UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -19642,6 +20050,20 @@ std::optional<LRESULT> RouteCanvasMessage(
                         *state, *input);
                     if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
                         ShowCoreError(*state, window, L"撮影フレームのハンドル編集");
+                    }
+                    if (input->kind == inkpod::renderer::CanvasStrokeEventKind::End
+                        || input->kind
+                            == inkpod::renderer::CanvasStrokeEventKind::Cancel) {
+                        UpdateMenuState(*state);
+                    }
+                    return status == INKPOD_STATUS_OK ? 1 : 0;
+                }
+                if (state->Workspace().tools.active_tool
+                    == kInteractionVanishingPoint) {
+                    const InkpodStatus status = HandleVanishingPointCanvasEvent(
+                        *state, *input);
+                    if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
+                        ShowCoreError(*state, window, L"消失点のハンドル編集");
                     }
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::End
                         || input->kind

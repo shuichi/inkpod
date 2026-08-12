@@ -41,9 +41,9 @@ pub use light_table::{
 pub use native::{
     DocumentArchive, FileAnnotationKind, FileAnnotationObject, FileAnnotationOutput,
     FileAnnotationPoint, FileDocumentMetadata, FileGrid, FileGuide, FileLayer, FilePlane,
-    FilePlaneProperties, FileShootingFrame, FileShootingFrameAnchor, FileTile, FormatError,
-    FrameMetadata, GuideAxis, LayerKind, Margins, PlaneKind, RectI32, checksum, discard_recovery,
-    recovery_is_newer,
+    FilePlaneProperties, FileShootingFrame, FileShootingFrameAnchor, FileTile, FileVanishingPoint,
+    FormatError, FrameMetadata, GuideAxis, LayerKind, Margins, PlaneKind, RectI32, checksum,
+    discard_recovery, recovery_is_newer,
 };
 use native::{
     MAX_MANIFEST_BYTES, MAX_NODE_NAME_BYTES, MAX_PLANES, Reader, push_color_value, push_i32,

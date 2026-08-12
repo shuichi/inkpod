@@ -13,6 +13,7 @@ pub(super) fn validate_document_metadata(
         || metadata.layers.len() > MAX_LAYERS
         || metadata.guides.len() > MAX_GUIDES
         || metadata.annotations.len() > MAX_ANNOTATION_OBJECTS
+        || metadata.vanishing_points.len() > MAX_VANISHING_POINTS
         || metadata.grid.spacing_x == 0
         || metadata.grid.spacing_y == 0
         || metadata.grid.spacing_x > 1_048_576
@@ -133,6 +134,30 @@ pub(super) fn validate_document_metadata(
         {
             return Err(FormatError::Invalid(
                 "shooting-frame properties are invalid",
+            ));
+        }
+    }
+    for point in &metadata.vanishing_points {
+        let layer = metadata
+            .layers
+            .iter()
+            .find(|layer| layer.id == point.layer_id)
+            .ok_or(FormatError::Invalid(
+                "vanishing-point owner layer does not exist",
+            ))?;
+        const LIMIT: u64 = 67_108_864_000;
+        if point.id == 0
+            || !ids.insert(point.id)
+            || layer.kind != LayerKind::VanishingPoint
+            || point.x_milli.unsigned_abs() > LIMIT
+            || point.y_milli.unsigned_abs() > LIMIT
+            || !(1_000..=180_000).contains(&point.interval_milli_degrees)
+            || point.angle_milli_degrees >= 180_000
+            || point.opacity_milli > 1_000
+            || point.color.rgba16().is_none()
+        {
+            return Err(FormatError::Invalid(
+                "vanishing-point properties are invalid",
             ));
         }
     }

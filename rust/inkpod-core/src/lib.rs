@@ -1,12 +1,10 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 //! Platform-independent document, editing, history, and rendering state for inkpod.
-//!
 //! [`Core`] is a single-writer state machine. A successful document change creates
 //! one history entry, a semantic no-op leaves those values unchanged, and an error
 //! never publishes partial state. View-only operations advance the view revision
 //! without changing document history or dirty/savepoint state.
-//!
 //! Stable object identifiers are unique within a [`Core`] instance and remain
 //! valid for the lifetime of the referenced object. Public coordinates are in
 //! document pixels unless an item explicitly says that it uses device pixels.
@@ -51,6 +49,7 @@ mod shooting_frame;
 mod snapshot;
 mod stroke;
 mod transform;
+mod vanishing_point;
 mod vector;
 mod view;
 pub use animation::{
@@ -111,7 +110,7 @@ use inkpod_format::{
     CommonRaster, DocumentArchive, FileAdjustmentLayer, FileAdjustmentMetadata, FileAnnotationKind,
     FileAnnotationObject, FileAnnotationOutput, FileAnnotationPoint, FileDocumentMetadata,
     FileGrid, FileGuide, FileLayer, FilePlane, FilePlaneProperties, FileShootingFrame,
-    FileShootingFrameAnchor, FileTile, FormatError, PlaneKind as FilePlaneKind,
+    FileShootingFrameAnchor, FileTile, FileVanishingPoint, FormatError, PlaneKind as FilePlaneKind,
 };
 pub use inkpod_image::RasterRangeInterpretation as RangeInterpretation;
 use inkpod_image::{
@@ -140,6 +139,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use stroke::StrokeSession;
+pub use vanishing_point::*;
 pub use vector::{
     RenderVectorEndpoint, RenderVectorFill, RenderVectorSegment, VectorCubicSegment,
     VectorEndpoint, VectorEraseMode, VectorFillInfo, VectorPathInfo, VectorPathInput, VectorRaster,

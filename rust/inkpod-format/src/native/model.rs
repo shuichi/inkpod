@@ -6,7 +6,7 @@ use std::sync::atomic::AtomicU64;
 pub(super) const MAGIC: [u8; 8] = *b"INKPOD\0\0";
 /// Current development format. Increment for every serialized schema change
 /// until the user declares a format freeze; older versions are not migrated.
-pub const DOCUMENT_ARCHIVE_VERSION: u32 = 4;
+pub const DOCUMENT_ARCHIVE_VERSION: u32 = 5;
 pub(super) const DOCUMENT_METADATA_MAGIC: [u8; 4] = *b"DOCM";
 pub(super) const HEADER_BYTES: usize = 32;
 pub(super) const FIXED_MANIFEST_BYTES: usize = 200;
@@ -29,6 +29,7 @@ pub(crate) const MAX_NODE_NAME_BYTES: usize = 1_024;
 pub(crate) const MAX_ANNOTATION_OBJECTS: usize = 16_384;
 pub(crate) const MAX_ANNOTATION_TEXT_BYTES: usize = 65_536;
 pub(crate) const MAX_ANNOTATION_POINTS: usize = 65_536;
+pub(crate) const MAX_VANISHING_POINTS: usize = 64;
 #[cfg(test)]
 pub(crate) static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
@@ -178,6 +179,21 @@ pub struct FileDocumentMetadata {
     pub annotations: Vec<FileAnnotationObject>,
     /// Optional independent angled shooting-frame instruction overlay.
     pub shooting_frame: Option<FileShootingFrame>,
+    /// Ordered persistent vanishing-point objects keyed by stable ID.
+    pub vanishing_points: Vec<FileVanishingPoint>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FileVanishingPoint {
+    pub id: u64,
+    pub layer_id: u64,
+    pub x_milli: i64,
+    pub y_milli: i64,
+    pub interval_milli_degrees: u32,
+    pub angle_milli_degrees: u32,
+    pub color: PixelValue,
+    pub opacity_milli: u32,
+    pub visible: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -78,7 +78,8 @@ void ProvideDocumentCommandStates(
          IDM_FILE_AUTOSAVE_NOW,
          IDM_FILE_EXPORT_RASTER,
          IDM_FILE_EXPORT_INSTRUCTION_RASTER,
-         IDM_CELL_SHOOTING_FRAME_PROPERTIES},
+         IDM_CELL_SHOOTING_FRAME_PROPERTIES,
+         IDM_CELL_VANISHING_POINT_PROPERTIES},
         input.has_document);
     SetEnabled(
         states,
@@ -90,6 +91,16 @@ void ProvideDocumentCommandStates(
         IDM_CELL_SHOOTING_FRAME_EDIT_HANDLES,
         input.has_document && input.shooting_frame_present
             && input.shooting_frame_handle_edit);
+    SetEnabled(
+        states,
+        {IDM_CELL_VANISHING_POINT_EDIT_HANDLES,
+         IDM_CELL_VANISHING_POINT_DELETE_ALL},
+        input.has_document && input.vanishing_point_present);
+    SetChecked(
+        states,
+        IDM_CELL_VANISHING_POINT_EDIT_HANDLES,
+        input.has_document && input.vanishing_point_present
+            && input.vanishing_point_handle_edit);
     SetEnabled(
         states,
         {IDM_FILE_REVERT, IDM_FILE_REVERT_PARTIAL},

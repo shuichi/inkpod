@@ -260,7 +260,7 @@ fn encode_document_metadata(metadata: &FileDocumentMetadata) -> Result<Vec<u8>, 
     let color_chart = crate::encode_color_chart(&metadata.color_chart)?;
     let mut output = Vec::new();
     output.extend_from_slice(&DOCUMENT_METADATA_MAGIC);
-    push_u32(&mut output, 4);
+    push_u32(&mut output, 5);
     push_u64(&mut output, metadata.active_layer_id);
     push_u64(&mut output, metadata.active_plane_id);
     push_u64(&mut output, metadata.selection_plane_id);
@@ -268,6 +268,7 @@ fn encode_document_metadata(metadata: &FileDocumentMetadata) -> Result<Vec<u8>, 
     push_u32(&mut output, metadata.guides.len() as u32);
     push_u32(&mut output, metadata.annotations.len() as u32);
     push_u32(&mut output, u32::from(metadata.shooting_frame.is_some()));
+    push_u32(&mut output, metadata.vanishing_points.len() as u32);
     push_i32(&mut output, metadata.grid.origin_x);
     push_i32(&mut output, metadata.grid.origin_y);
     push_u32(&mut output, metadata.grid.spacing_x);
@@ -332,6 +333,18 @@ fn encode_document_metadata(metadata: &FileDocumentMetadata) -> Result<Vec<u8>, 
             u32::from(frame.visible) | (u32::from(frame.include_in_instruction_export) << 1),
         );
         push_u32(&mut output, 0);
+    }
+    for point in &metadata.vanishing_points {
+        push_u64(&mut output, point.id);
+        push_u64(&mut output, point.layer_id);
+        push_i64(&mut output, point.x_milli);
+        push_i64(&mut output, point.y_milli);
+        push_u32(&mut output, point.interval_milli_degrees);
+        push_u32(&mut output, point.angle_milli_degrees);
+        push_u32(&mut output, point.opacity_milli);
+        push_u32(&mut output, u32::from(point.visible));
+        push_u32(&mut output, 0);
+        push_color_value(&mut output, point.color)?;
     }
     for object in &metadata.annotations {
         push_u64(&mut output, object.id);

@@ -55,6 +55,10 @@ numeric_token!(
     ShootingFrameId,
     "An angled shooting-frame stable ID. Zero is invalid."
 );
+numeric_token!(
+    VanishingPointId,
+    "A vanishing-point stable ID. Zero is invalid."
+);
 numeric_token!(ViewId, "A secondary-view stable ID. Zero is invalid.");
 numeric_token!(
     DocumentRevision,
@@ -177,6 +181,10 @@ impl StableIdCursor {
 
     pub(crate) fn take_shooting_frame(&mut self) -> ShootingFrameId {
         ShootingFrameId::from_raw(self.take_raw())
+    }
+
+    pub(crate) fn take_vanishing_point(&mut self) -> VanishingPointId {
+        VanishingPointId::from_raw(self.take_raw())
     }
 }
 

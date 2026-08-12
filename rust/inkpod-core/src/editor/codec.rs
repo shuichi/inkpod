@@ -7,10 +7,10 @@ use crate::{
 };
 use std::collections::BTreeMap;
 
-const FRAME_SCHEMA: u32 = 5;
+const FRAME_SCHEMA: u32 = 6;
 const STATE_FIELD_COUNT: usize = 14;
 const EDIT_FIELD_COUNT: usize = 4;
-const DIGEST_CONTEXT: &str = "org.inkpod.digest.editor-state.v1";
+const DIGEST_CONTEXT: &str = "org.inkpod.digest.editor-state.v2";
 const MAX_DIAMETER_Q16: i64 = 256_i64 << 16;
 const MAX_SELECTION_DIAMETER_Q16: i64 = 4_096_i64 << 16;
 const MAX_INCLUSION_COLORS: usize = 6;
@@ -860,8 +860,8 @@ mod tests {
         assert_eq!(
             state_digest(&state).as_bytes(),
             &[
-                124, 2, 97, 238, 82, 226, 27, 110, 39, 57, 11, 13, 60, 51, 64, 108, 224, 10, 198,
-                49, 140, 238, 94, 38, 54, 128, 18, 57, 110, 235, 163, 69,
+                100, 249, 34, 24, 193, 224, 243, 184, 106, 138, 216, 65, 187, 216, 223, 228, 99,
+                219, 127, 169, 46, 154, 203, 121, 21, 107, 99, 93, 189, 74, 138, 241,
             ]
         );
     }

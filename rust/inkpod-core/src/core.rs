@@ -88,6 +88,7 @@ impl Core {
             active_stroke: None,
             annotation_stroke: None,
             shooting_frame_preview: None,
+            vanishing_point_preview: None,
             filter_preview: None,
             last_filter: None,
             render_cache: BTreeMap::new(),
@@ -291,6 +292,7 @@ impl Core {
         self.cancel_stroke();
         self.annotation_stroke = None;
         self.shooting_frame_preview = None;
+        self.vanishing_point_preview = None;
         self.filter_preview = None;
         self.last_filter = None;
         self.render_cache.clear();
@@ -349,6 +351,7 @@ pub struct Core {
     pub(super) active_stroke: Option<StrokeSession>,
     pub(super) annotation_stroke: Option<annotation::AnnotationStrokeSession>,
     pub(super) shooting_frame_preview: Option<shooting_frame::ShootingFramePreviewSession>,
+    pub(super) vanishing_point_preview: Option<vanishing_point::VanishingPointPreviewSession>,
     pub(super) filter_preview: Option<effects::FilterPreview>,
     pub(super) last_filter: Option<Filter>,
     pub(super) render_cache: BTreeMap<(u64, TileCoord), RenderTile>,
@@ -562,6 +565,7 @@ impl Core {
         if self.active_stroke.is_some()
             || self.annotation_stroke.is_some()
             || self.shooting_frame_preview.is_some()
+            || self.vanishing_point_preview.is_some()
             || self.filter_preview.is_some()
         {
             Err(CoreError::InvalidState(

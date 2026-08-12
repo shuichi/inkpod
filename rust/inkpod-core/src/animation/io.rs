@@ -89,6 +89,7 @@ impl Core {
         self.cancel_stroke();
         self.annotation_stroke = None;
         self.shooting_frame_preview = None;
+        self.vanishing_point_preview = None;
         self.filter_preview = None;
         self.last_filter = None;
         self.next_id = next_id;

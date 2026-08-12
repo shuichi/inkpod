@@ -16,6 +16,7 @@ fn editor_tool(code: u32) -> Result<EditorTool, u32> {
         1_007 => EditorTool::LightTableMove,
         1_008 => EditorTool::ColorReplace,
         1_009 => EditorTool::ShootingFrame,
+        1_010 => EditorTool::VanishingPoint,
         1_101 => EditorTool::EffectGradient,
         1_102 => EditorTool::EffectAirbrush,
         1_103 => EditorTool::EffectBlur,

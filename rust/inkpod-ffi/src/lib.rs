@@ -55,6 +55,7 @@ use inkpod_core::{
     ShootingFrameEdit, ShootingFrameInfo, ShootingFrameInput, ShootingFramePreviewTarget,
     ShortcutBinding, ShortcutSequenceBinding, ShortcutStroke, Stamp, StampGesture, StampShape,
     StartColorPredicate, Stroke, StrokeSample, TileRaster, TraceBrushOptions, TraceBrushShape,
+    VanishingPointEdit, VanishingPointInfo, VanishingPointInput, VanishingPointPreviewTarget,
     VectorCenterlineMode, VectorCubicSegment, VectorEndpoint, VectorEraseMode, VectorPathInput,
     VectorSelectionMode, VectorWidthMode, ViewCommand, plan_cell_creation, read_color_chart,
     read_palette, save_color_chart_atomic, save_palette_atomic,
@@ -80,6 +81,7 @@ mod paint_history;
 mod shooting_frame;
 mod support;
 mod v3;
+mod vanishing_point;
 mod vector_snapshot;
 
 pub use abi::*;
@@ -102,4 +104,5 @@ pub use paint_history::*;
 pub use shooting_frame::*;
 pub(crate) use support::*;
 pub use v3::*;
+pub use vanishing_point::*;
 pub use vector_snapshot::*;

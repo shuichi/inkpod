@@ -204,6 +204,29 @@ impl Core {
             object.input.layer_id = duplicate_id.get();
             after.annotations.push(object);
         }
+        let vanishing_point_count = before
+            .vanishing_points
+            .iter()
+            .filter(|object| object.input.layer_id == layer_id.get())
+            .count();
+        if after
+            .vanishing_points
+            .len()
+            .saturating_add(vanishing_point_count)
+            > MAX_VANISHING_POINTS
+        {
+            return Err(CoreError::InvalidState("vanishing-point limit reached"));
+        }
+        for object in before
+            .vanishing_points
+            .iter()
+            .filter(|object| object.input.layer_id == layer_id.get())
+        {
+            let mut object = *object;
+            object.id = next_id.take_vanishing_point();
+            object.input.layer_id = duplicate_id.get();
+            after.vanishing_points.push(object);
+        }
         after.vector.ensure_limits()?;
         after.layers.insert(index + 1, duplicate);
         if let Some(id) = active_plane_id {
@@ -256,6 +279,9 @@ impl Core {
         after.adjustments.remove(&layer_id);
         after
             .annotations
+            .retain(|object| object.input.layer_id != layer_id.get());
+        after
+            .vanishing_points
             .retain(|object| object.input.layer_id != layer_id.get());
         after.layers.remove(index);
         if active_target.is_some_and(|target| target.layer_id == layer_id.get()) {
@@ -324,6 +350,11 @@ impl Core {
             after.adjustments.remove(layer_id);
         }
         after.annotations.retain(|object| {
+            !hidden_ids
+                .iter()
+                .any(|layer_id| layer_id.get() == object.input.layer_id)
+        });
+        after.vanishing_points.retain(|object| {
             !hidden_ids
                 .iter()
                 .any(|layer_id| layer_id.get() == object.input.layer_id)
@@ -929,6 +960,13 @@ impl Core {
         }
         for (source_id, destination_id) in plane_reassignments {
             after.vector.reassign_plane(source_id, destination_id);
+        }
+        if before.layers[upper].kind == LayerKind::VanishingPoint {
+            for object in &mut after.vanishing_points {
+                if object.input.layer_id == layer_id.get() {
+                    object.input.layer_id = lower_id.get();
+                }
+            }
         }
         after.layers.remove(upper);
         edit.prefer_editor_target(EditorTarget {

@@ -65,7 +65,7 @@ scenario assertions are:
 | `light_table_composite` | every reference contributes to the expected tile grid and checksum |
 | `vector_snapshot` | ordered pass, segment/fill counts, zero legacy raster snapshot tiles, and rasterized pixels match |
 | `batch_preview` | one invalid graph is rejected, valid inputs dry-run successfully, and no output is generated |
-| `canonical_replay` | six boundaries replay bit-exactly; final digest and runtime epoch 22 / native v25 / numeric v1 contract match |
+| `canonical_replay` | six boundaries replay bit-exactly; final digest and runtime epoch 23 / native v26 / numeric v1 contract match |
 | `checkpoint_open` | policy emits CKPT; verified open restores the journal/document digest and exact Undo/Redo; full crosses one million replay-work units |
 | `output_color_guard` | exact scanned/selected/transparent counts, one canonical commit, revision 2/history 1, exact sparse selection bounds/tile bytes, zero CPU staging bytes, and result digest match |
 
@@ -82,8 +82,8 @@ wall-clock time, addresses, cache allocation order, and Batch output paths.
 | `vector_snapshot` | `2813c527f27311c8` | `b975f3cfdb7824fd` |
 | `batch_preview` | `f31d31fe1bb00fd7` | `6732b8b0a6565d03` |
 | `canonical_replay` | `264b98028ac92ac6` | `264b98028ac92ac6` |
-| `checkpoint_open` | `c66817dca5345832` | `c66817dca5345832` |
-| `output_color_guard` | `650300bdff9044cb` | `290f6150f7718c2d` |
+| `checkpoint_open` | `07da1b4e6bc5d289` | `07da1b4e6bc5d289` |
+| `output_color_guard` | `cfb6b288963c78ba` | `2b2196e06f7198b3` |
 
 The v19/schema-6 Color-chart commitment changed only the `checkpoint_open`
 document-digest checksum from `eca2df7e74020108` to `8847f8440d290c18`.
@@ -140,6 +140,26 @@ expression. Quick and full retain every scenario counter and the unchanged
 output-color-guard result digest to `650300bdff9044cb` quick and
 `290f6150f7718c2d` full; scanned/selected/transparent counts, revision 2,
 history 1, success 1, and failure 0 are unchanged.
+
+The v26/epoch-23 vanishing-point primitive adds persistent point fields to the
+canonical document commitment and bounded viewport-derived radial overlay
+records. It does not change any benchmark workload, harness logic, approved
+wall-clock envelope, payload-access route, or the `revision-max` expression.
+Two independent quick and two independent full runs retained all ten scenario
+counters, `canonical_replay` checksum `264b98028ac92ac6`, and every audited
+reuse/rebuild gate. The intentional schema-9 commitment changes
+`checkpoint_open` to `07da1b4e6bc5d289` in both profiles and changes the
+output-color-guard result digest to `cfb6b288963c78ba` quick and
+`2b2196e06f7198b3` full. Workload, harness logic, approved envelope,
+payload-access route, and `revision-max` remain unchanged.
+
+After one discarded warm-up per profile, the accepted M22
+`output_color_guard` samples were 74,551,800; 74,892,300; 75,355,400;
+73,662,700; 75,177,400 ns quick (median 74,892,300 ns) and 341,581,800;
+339,117,200; 340,747,300; 348,131,800; 338,601,500 ns full (median
+340,747,300 ns). Both medians remain inside the approved 55–92 ms and
+255–425 ms envelopes, and every measured process retained the exact counters
+and checksums above, so no independent regression-confirmation batch was needed.
 
 ## Approved output-color-guard envelope
 

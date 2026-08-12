@@ -520,6 +520,36 @@ pub struct InkpodSnapshotShootingFrameView {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
+pub struct InkpodSnapshotRadialGuide {
+    pub struct_size: u32,
+    pub angle_milli_degrees: u32,
+    pub feature_flags: u64,
+    pub point_id: u64,
+    pub start_x_milli: i64,
+    pub start_y_milli: i64,
+    pub end_x_milli: i64,
+    pub end_y_milli: i64,
+    pub opacity_milli: u32,
+    pub reserved: u32,
+    pub color: InkpodColorValue,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodSnapshotVanishingPointView {
+    pub struct_size: u32,
+    pub abi_version: u32,
+    pub feature_flags: u64,
+    pub points: *const InkpodVanishingPointInfo,
+    pub point_count: u64,
+    pub point_stride_bytes: u64,
+    pub radial_guides: *const InkpodSnapshotRadialGuide,
+    pub radial_guide_count: u64,
+    pub radial_guide_stride_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
 pub struct InkpodSnapshotVectorEndpoint {
     pub struct_size: u32,
     pub endpoint: u32,

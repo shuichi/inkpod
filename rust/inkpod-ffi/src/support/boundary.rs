@@ -187,6 +187,30 @@ pub(crate) fn snapshot_handle(snapshot: RenderSnapshot) -> Box<InkpodSnapshot> {
         .iter()
         .filter_map(|frame| shooting_frame_info_record(*frame).ok())
         .collect();
+    let vanishing_points = snapshot
+        .vanishing_points()
+        .iter()
+        .copied()
+        .map(vanishing_point_info_record)
+        .collect();
+    let radial_guides = snapshot
+        .radial_guides()
+        .iter()
+        .map(|guide| InkpodSnapshotRadialGuide {
+            struct_size: size_of::<InkpodSnapshotRadialGuide>() as u32,
+            angle_milli_degrees: guide.angle_milli_degrees,
+            feature_flags: INKPOD_FEATURE_NONE,
+            point_id: guide.point_id,
+            start_x_milli: guide.start_x_milli,
+            start_y_milli: guide.start_y_milli,
+            end_x_milli: guide.end_x_milli,
+            end_y_milli: guide.end_y_milli,
+            opacity_milli: guide.opacity_milli,
+            reserved: 0,
+            color: color_value_record(guide.color)
+                .expect("validated radial-guide color must be RGBA"),
+        })
+        .collect();
     Box::new(InkpodSnapshot {
         snapshot,
         tiles,
@@ -201,6 +225,8 @@ pub(crate) fn snapshot_handle(snapshot: RenderSnapshot) -> Box<InkpodSnapshot> {
         annotation_utf8: annotation_utf8.into_boxed_slice(),
         annotation_points: annotation_points.into_boxed_slice(),
         shooting_frames,
+        vanishing_points,
+        radial_guides,
     })
 }
 

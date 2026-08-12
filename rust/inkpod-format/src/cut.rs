@@ -18,7 +18,7 @@ const DIGEST_CONTEXT: &str = "org.inkpod.cut-descriptor.v2";
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 /// Runtime replay epoch for the current Cut canonical procedure semantics.
-pub const CUT_DESCRIPTOR_REPLAY_EPOCH: u32 = 22;
+pub const CUT_DESCRIPTOR_REPLAY_EPOCH: u32 = 23;
 
 /// Persisted Cut metadata.
 #[derive(Clone, Debug, Eq, PartialEq)]

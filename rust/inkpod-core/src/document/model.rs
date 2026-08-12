@@ -74,6 +74,7 @@ pub(crate) struct CellDocument {
     pub(crate) adjustments: BTreeMap<LayerId, Adjustment>,
     pub(crate) annotations: Vec<AnnotationObject>,
     pub(crate) shooting_frame: Option<ShootingFrameObject>,
+    pub(crate) vanishing_points: Vec<VanishingPointObject>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -195,6 +196,7 @@ impl CellDocument {
             adjustments: BTreeMap::new(),
             annotations: Vec::new(),
             shooting_frame: None,
+            vanishing_points: Vec::new(),
         })
     }
 
@@ -338,6 +340,21 @@ impl CellDocument {
                     visible: frame.input.visible,
                     include_in_instruction_export: frame.input.include_in_instruction_export,
                 }),
+                vanishing_points: self
+                    .vanishing_points
+                    .iter()
+                    .map(|point| FileVanishingPoint {
+                        id: point.id.get(),
+                        layer_id: point.input.layer_id,
+                        x_milli: point.input.x_milli,
+                        y_milli: point.input.y_milli,
+                        interval_milli_degrees: point.input.interval_milli_degrees,
+                        angle_milli_degrees: point.input.angle_milli_degrees,
+                        color: point.input.color,
+                        opacity_milli: point.input.opacity_milli,
+                        visible: point.input.visible,
+                    })
+                    .collect(),
             }),
             light_table_metadata: Some(self.light_table.to_file()),
             vector_metadata: self.vector.to_file(
@@ -602,6 +619,29 @@ impl CellDocument {
                 },
             })
         });
+        let vanishing_points = file
+            .document_metadata
+            .as_ref()
+            .map(|metadata| {
+                metadata
+                    .vanishing_points
+                    .iter()
+                    .map(|point| VanishingPointObject {
+                        id: VanishingPointId::from_raw(point.id),
+                        input: VanishingPointInput {
+                            layer_id: point.layer_id,
+                            x_milli: point.x_milli,
+                            y_milli: point.y_milli,
+                            interval_milli_degrees: point.interval_milli_degrees,
+                            angle_milli_degrees: point.angle_milli_degrees,
+                            color: point.color,
+                            opacity_milli: point.opacity_milli,
+                            visible: point.visible,
+                        },
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         let document = Self {
             uuid: u128::from_le_bytes(file.document_uuid),
             id: DocumentId::from_raw(file.document_id),
@@ -626,12 +666,16 @@ impl CellDocument {
             adjustments,
             annotations,
             shooting_frame,
+            vanishing_points,
         };
         for object in &document.annotations {
             crate::annotation::validate_annotation_input(&document, &object.input)?;
         }
         if let Some(frame) = document.shooting_frame {
             crate::shooting_frame::validate_shooting_frame_input(frame.input)?;
+        }
+        for point in &document.vanishing_points {
+            crate::vanishing_point::validate_vanishing_point_input(&document, point.input)?;
         }
         Ok(document)
     }
@@ -778,6 +822,7 @@ impl CellDocument {
             .chain([self.vector.maximum_id()])
             .chain(self.annotations.iter().map(|object| object.id.get()))
             .chain(self.shooting_frame.iter().map(|object| object.id.get()))
+            .chain(self.vanishing_points.iter().map(|object| object.id.get()))
             .chain([
                 self.id.get(),
                 self.cell_id.get(),

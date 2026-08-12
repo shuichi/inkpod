@@ -354,9 +354,10 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 
 #### 消失点
 
-- 一つ以上の消失点を Canvas 内外へ置ける。
-- 補助線の角度間隔は少なくとも 1/5/10/15/30度、色、不透明度を設定する。
-- dialog 表示中に追加・移動・削除・全削除でき、設定を native document または独立 native preset へ保存できる。
+- `VANISHING-POINT-001`: `LayerKind::VanishingPoint` は stable ID を持つ一つ以上の消失点 object を所有し、各 object は Canvas 内外の signed document milli-pixel 座標、1/5/10/15/30度 preset または 1〜180度の fixed-point custom 間隔、180度周期で正規化する開始角、exact sRGB RGBA8/16、0〜1000 の不透明度、表示状態を保持する。一文書64個、snapshot内の導出放射線16384本を上限とする。
+- 表示中の消失点だけから、現在 viewport と交差する有限な放射 segment を immutable snapshot へ導出する。通常 raster／thumbnail／instruction export には焼き込まず、Canvas overlay として描く。文書の回転・反転・Canvas移動・等方resampleでは幾何を追従させ、等角放射線を保存できない非等方resampleは全体を変更せず拒否する。
+- dialog と Canvas handle から追加・移動・更新・削除・全削除できる。preview は同じ immutable base から再計算し、Cancel は無変更、OK は一 transaction／一 Undo 単位とし、新規 ID は commit 時だけ消費する。独立 native preset はこの要件に含めず、設定は native document にだけ保存する。
+- snap master と guide snap が有効な場合、元入力から4 document pixel以内の最寄り放射線へ拘束する。explicit H/V guide は該当軸で radial guide より優先し、radial guide は grid より優先する。放射線候補は距離、`VanishingPointId`、正規化角の昇順で最後の候補を選び、snap master offまたはguide snap offでは放射線を入力へ適用しない。
 
 ### 10. 色、パレット、チャート、参照画像
 
@@ -628,6 +629,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - `RENDER-001`: raster/vector 混在時の layer/plane 木順序、visibility、opacity、alpha、adjustment を共有する Canvas/thumbnail/flatten 合成
 - `ANNOTATION-001`: stable ID、bounded UTF-8／geometry、通常／指示 output policy を持つ再編集可能 Text／Stroke／Leader／Value annotation と、その canonical edit／stroke、Canvas／thumbnail／flat export、save／reopen contract
 - `SHOOTING-FRAME-001`: stable ID、center／size／binary-turn rotation／五点 anchor／表示・指示 export policy を持つ独立した角度付き撮影 frame object、preview/transaction、document transform、Canvas／指示 export／save／reopen contract
+- `VANISHING-POINT-001`: Canvas内外の複数stable-ID消失点、bounded fixed-point放射線、exact color／opacity／visibility、preview／transaction、radial snap、document transform、Canvas overlay、save／reopen contract
 - `VIEW-001`: zoom、box zoom、fit、1:1、pan、horizontal/vertical flip
 - `VIEW-002`: ruler、guide/grid、snap、transparent view
 - `SNAP-001`: view-targeted device/document座標変換、guide/grid優先順位、Ctrl一時解除を共有するproduction図形入力snap

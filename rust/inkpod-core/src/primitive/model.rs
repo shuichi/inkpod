@@ -83,6 +83,8 @@ impl PrimitiveId {
     pub const EDIT_ANNOTATIONS: Self = Self(0x0002_0040);
     /// Primitive ID for one typed angled shooting-frame object edit.
     pub const EDIT_SHOOTING_FRAME: Self = Self(0x0002_0050);
+    /// Primitive ID for one atomic bounded vanishing-point edit batch.
+    pub const EDIT_VANISHING_POINTS: Self = Self(0x0002_0060);
     /// Primitive ID for main-line display color replacement.
     pub const SET_MAIN_LINE_COLOR: Self = Self(0x0003_0001);
     /// Primitive ID for ordered palette replacement.
@@ -252,14 +254,14 @@ impl StateId {
 
 impl ReplayEpoch {
     /// Replay epoch used by every built-in primitive in this Core version.
-    pub const CURRENT: Self = Self(22);
+    pub const CURRENT: Self = Self(23);
 }
 
 /// Exact current top-level procedure-authoritative native format version.
 ///
 /// The build, reader, writer, and replay contract all use this value. Earlier
 /// and later top-level versions are rejected without migration.
-pub const PROCEDURE_FORMAT_VERSION: u32 = 25;
+pub const PROCEDURE_FORMAT_VERSION: u32 = 26;
 
 /// Version of the canonical scalar, rounding, alpha, and geometry contract.
 pub const CANONICAL_NUMERIC_VERSION: u32 = 1;
@@ -314,7 +316,7 @@ impl ReplayContract {
 /// A BLAKE3-256 digest of canonical semantic document-state schema-6 bytes.
 ///
 /// The compact root and semantic metadata frames use schema version 4 in the
-/// `org.inkpod.digest.document-state.v5` derive-key domain. Raster payloads
+/// `org.inkpod.digest.document-state.v8` derive-key domain. Raster payloads
 /// enter that root through separately domain-separated, content-addressed tile
 /// and raster commitments, so the digest is independent of edit order and
 /// allocation history without requiring unchanged tile bytes to be rehashed

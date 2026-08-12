@@ -78,7 +78,7 @@ PDF は全 191 表示ページを確認した。PDF p2～p189 は原則として
 
 **inkpod は現時点では PaintMan の機能的上位互換とは判定できない。** 一方、既存の単一セルを対象にした「主線修正 → 色作成／参照 → フィル → 選択／変形 → 白抜け確認 → Undo／Redo → 保存」、および基本的な前後セル参照・モーション確認は、かなりの範囲で縦切り実装とテストがそろっている。
 
-個別Cell参照方式のカット作成、セル系列の構造編集、再編集可能な指示／text object、角度付き撮影frameは縦切り実装、自動検証、x64 Releaseの利用者確認まで完了した。端点loop policyも縦切り実装と自動検証を完了し、x64 Releaseの利用者確認待ちである。一方、消失点／放射補助線が残るため、「PaintMan の主要ワークフロー全体を損失なく完遂できる」とはまだ言えない。
+個別Cell参照方式のカット作成、セル系列の構造編集、再編集可能な指示／text object、角度付き撮影frame、端点loop policyは縦切り実装、自動検証、x64 Releaseの利用者確認まで完了した。消失点／放射補助線はM22の縦切り実装と自動検証を完了し、x64 Release利用者確認を待っているため、現時点では「PaintMan の主要ワークフロー全体を損失なく完遂できる」とはまだ言えない。
 
 ### 2.2 件数
 
@@ -117,13 +117,13 @@ PaintMan の塗りあふれ中断が途中結果を残すか、フィルター�
 | PM-CAP-003 | セル作成 | frame/image size、DPI、レイヤー型、8/16 bit、作成枚数を指定する | 第5章「新規セル」PDF表示 pp.63–65（印刷 pp.124–129） | `SPEC.md` §7、`DOC-001` | typed Cell creation plan、image/frame mode、DPI／frame、全initial layer、RGBA8/16、1..64枚、Core/ABI/Windows smokeとx64 Release利用者確認 | Implemented and verified | — |
 | PM-CAP-004 | 用紙／基準フレーム | 用紙、作画／安全／基準 frame、余白、DPI、異寸法整列を保持する | 第5章 PDF表示 pp.65–70（印刷 pp.128–139） | `SPEC.md` §7、`DOC-001` | `FrameMetadata`; test `acceptance_reference_frame_aligns_different_cell_sizes_and_reopens`; Windows document smoke | Implemented and verified | — |
 | PM-CAP-005 | 撮影フレーム | サイズ、角度、座標を持つ撮影 frame を文書内で編集する | 第12章 PDF表示 pp.163–164（印刷 pp.324–327） | `SHOOTING-FRAME-001` と「角度付き撮影 frame の確定 contract」 | stable-ID object、canonical edit/preview、ABI v12、Canvas handles、明示的な指示export、v25 save/reopen、x64 Release利用者確認 | Implemented and verified | — |
-| PM-CAP-006 | 連続作業 | thumbnail／番号／前後で切替え、dirty 時に確認または自動保存し、端点を循環できる | 第2・3・14章 PDF表示 pp.19–20,55,175–176（印刷 pp.36–39,108–109,348–351） | `SEQ-001`, `SEQ-ENDPOINT-001` | natural-order/thumbnail、exact autosave/staged-restore、Stop/Wrap issue-time plan、ABI v12、versioned HKCU setting、Windows checked-state/production smoke | Implemented but unverified | 自動保存はM11 ARM64確認済み。端点policyのx64 Release利用者確認待ち。PM-GAP-005 |
+| PM-CAP-006 | 連続作業 | thumbnail／番号／前後で切替え、dirty 時に確認または自動保存し、端点を循環できる | 第2・3・14章 PDF表示 pp.19–20,55,175–176（印刷 pp.36–39,108–109,348–351） | `SEQ-001`, `SEQ-ENDPOINT-001` | natural-order/thumbnail、exact autosave/staged-restore、Stop/Wrap issue-time plan、ABI v12、versioned HKCU setting、Windows checked-state/production smoke、x64 Release利用者確認 | Implemented and verified | — |
 | PM-CAP-007 | モーション確認 | FPS、範囲、loop、pause、step でセル系列を確認する | 第7章 PDF表示 pp.111–112（印刷 pp.220–223） | `SEQ-002` | animation contract、FFI、`RunProductionWorkflowSmoke` | Implemented and verified | タイムシート合成は対象外 |
 | PM-CAP-008 | 彩色構造 | 2値／階調／vector の主線、色トレース、彩色、汎用 plane を型付き分離する | 第6章 PDF表示 pp.71–84、第15章 pp.180–187 | `SPEC.md` §5、`DOC-002`, `VECTOR-001` | topology validation; test `acceptance_layer_tree_undo_redo_save_reopen_and_validation`, vector contracts | Implemented and verified | — |
 | PM-CAP-009 | レイヤー／プレーン操作 | create、duplicate、delete、reorder、visibility、editability、opacity、convert、merge を扱う | 第6章 PDF表示 pp.76–82（印刷 pp.150–163） | `DOC-002`, `DOC-003`, `SPEC.md:223–234` | grouped capability/canonical/Undo contracts; FFI spans; Layer pane marker/menu/status and smoke; x64 Release manual check | Implemented and verified | — |
 | PM-CAP-010 | 合成順 | raster／vector を含む論理 layer 順で合成する | 第6章 PDF表示 pp.76–82、第15章 pp.180–187 | `SPEC.md:221` | `docs/implementation-status.md:42–43` は vector を raster tile 後に合成すると明記 | Partial | 任意の raster/vector interleave が表示へ反映されない。PM-GAP-007 |
 | PM-CAP-011 | 指示／テキスト | 非出力の手書き指示、再編集可能 text、指示線／RGB 値を保持する | 第12章 PDF表示 pp.164–167（印刷 pp.326–333） | `ANNOTATION-001`、`SPEC.md`「テキスト／指示 annotation の確定 contract」 | stable annotation ID、canonical multi-edit/stroke、ABI v12、DirectWrite Canvas、thumbnail/flat policy、v24 save/reopen、Windows production smokeとx64 Release利用者確認 | Implemented and verified | — |
-| PM-CAP-012 | 消失点 | 複数消失点、補助線角度、色、不透明度を編集する | 第7章 PDF表示 p.95（印刷 pp.188–189） | `SPEC.md:313–317` | `LayerKind::VanishingPoint` は 0 plane／content なし。通常 H/V guide のみ | Specified only | PM-GAP-010 |
+| PM-CAP-012 | 消失点 | 複数消失点、補助線角度、色、不透明度を編集する | 第7章 PDF表示 p.95（印刷 pp.188–189） | `VANISHING-POINT-001` | stable-ID object、canonical CRUD/preview、bounded radial snapshot、radial snap、ABI v12、Windows dialog／Canvas handle／renderer route、current-v26 persistence | Experimental | 自動検証済み。x64 Release利用者確認待ち。PM-GAP-010 |
 | PM-CAP-013 | 自由描画／消去 | 鉛筆、brush、raster eraser、auto-erase、筆圧、vector 三種消去を扱う | 第7章 PDF表示 pp.88,107（印刷 pp.174–175,212–213） | `PAINT-001`, `VECTOR-002` | `paint_001_brush_eraser_auto_erase_and_pressure_are_transactional`; `RunVectorWorkflowSmoke` | Implemented and verified | 物理 pen 経路の直接検証は §7 参照 |
 | PM-CAP-013A | ストローク入力 | 実ペンタブレットの pressure を stroke 太さへ反映する | 第7章 PDF表示 pp.88,107（印刷 pp.174–175,212–213） | `PAINT-001` | `WM_POINTER` の PT_PEN／pressure route はあるが物理 device E2E なし | Implemented but unverified | 実機検証は §7 |
 | PM-CAP-014 | 図形描画 | 直線、二段階曲線、矩形、楕円、N角形、polyline、fill、入り抜き、制約、snap を扱う | 第7章 PDF表示 pp.89–91（印刷 pp.176–181） | `PAINT-002`, `SNAP-001`, `SPEC.md:281–287` | raster/vector 共通の typed geometry、resolved canonical procedure、preview state machine、全 primitive capability/golden、bounded ABI、Windows staged gesture/renderer/snap smoke、ARM64図形手動確認、M15 x64 snap手動確認 | Implemented and verified | — |
@@ -445,7 +445,7 @@ PaintMan の塗りあふれ中断が途中結果を残すか、フィルター�
 - **不足していた能力:** 先頭／末尾で停止するか循環するかを利用者が選べる。
 - **PaintMan で可能な作業:** 連続比較時に末尾から先頭へ戻り、keyboard 操作を途切れさせない。
 - **現状で困る状況:** 自動検証の範囲では解消した。`端点で循環`をoffにすると完全no-opで停止し、onにすると先頭／末尾を相互に切り替える。
-- **不足層／カバレッジ:** `SEQ-ENDPOINT-001`として、Coreのempty／one／Stop／Wrap／欠番／forward／backwardとissue-time stale原子性、96-byte caller-owned ABI v12 plan、versioned HKCU codec、application-wide menu／configurable shortcut／checked state／status、motion loop分離、Windows production smokeを実装した。x64 Release利用者確認だけが残る。
+- **不足層／カバレッジ:** `SEQ-ENDPOINT-001`として、Coreのempty／one／Stop／Wrap／欠番／forward／backwardとissue-time stale原子性、96-byte caller-owned ABI v12 plan、versioned HKCU codec、application-wide menu／configurable shortcut／checked state／status、motion loop分離、Windows production smokeを実装し、x64 Release利用者確認まで完了した。
 - **推奨優先度（仕上げ）:** **21/22（P3）**。互換性評価は **Could**。作業結果を変えず、先頭／末尾 command で代替できる。
 - **代替手段:** 実装経路は利用可能。手動確認までは先頭／末尾へ明示移動できる。
 - **関連要件:** `SEQ-001`, `SEQ-ENDPOINT-001`, `SPEC.md:191–193`。
@@ -458,10 +458,10 @@ PaintMan の塗りあふれ中断が途中結果を残すか、フィルター�
 - **不足している能力:** Canvas 内外の複数消失点と、1/5/10/15/30度等の補助線間隔、色、不透明度を編集する。
 - **PaintMan で可能な作業:** パース線に沿った修正線や背景要素を描く。
 - **現状で困る状況:** H/V guide はあるが、放射状 guide を同等に作る合理的な workflow がない。
-- **不足層／カバレッジ:** Core／FFI／frontend 実装不足、`Specified only`。VanishingPoint layer kind は空 content。
+- **不足層／カバレッジ:** `VANISHING-POINT-001`のstable-ID Core object、canonical CRUD／preview、bounded radial snapshot、guide／gridと競合するradial snap、current-only `.inkpod` v26／epoch-23、ABI v12、Windows dialog／Canvas handle／renderer／device-loss production routeを実装し、必須自動gateを完了した。x64 Release利用者確認だけが残る。
 - **推奨優先度（仕上げ）:** **22/22（P3）**。互換性評価は **Could**。主なセル彩色では頻度が低く、他の作図 app や手動 guide で代替できる。
 - **代替手段:** 外部作図、複数の手動線、参照画像。
-- **関連要件:** `SPEC.md:313–317`; 専用 requirement ID はない。
+- **関連要件:** `VANISHING-POINT-001`, `SNAP-001`, `VIEW-002`。
 - **責務:** Core は point／radial guide state と hit/edit。FFI は CRUD。Windows frontend／renderer は dialog と overlay。
 - **依存ギャップ:** PM-GAP-013 の snap と結合すれば入力拘束にも使える。
 - **PDF 根拠:** 第7章「消失点」、PDF表示 p.95（印刷 pp.188–189）。
@@ -478,12 +478,12 @@ PaintMan の塗りあふれ中断が途中結果を残すか、フィルター�
 | Cut内セル系列のadd／remove／reorder／renumber | `SEQ-STRUCT-001` | 実装・手動確認済み | stable pair identity、bounded ordered transaction、一回Cut Undo/Redo、Cut schema 2、ABI失敗index、Windows drag/keyboard/dialog smokeとx64 Release確認。PM-GAP-002解消済み |
 | frame/image size、8/16 bit、複数枚の新規セル | `DOC-001` | 実装・手動確認済み | typed plan、image/frame mode、DPI／frame、全initial layer、RGBA8/16、1..64枚、Core/ABI/Windows smokeとx64 Release確認。PM-GAP-003解消済み |
 | セル切替時自動保存 | `SEQ-001` | 実装・手動確認済み | exact native recovery association、staged restore、通常savepoint/path不変、Core／ABI／Windows production smokeとARM64確認。PM-GAP-004解消済み |
-| sequence 端点 loop preference | `SEQ-ENDPOINT-001` | 実装・手動確認待ち | Stop/Wrap、明示result、issue-time identity、ABI v12、versioned HKCU、menu／shortcut／checked state／status、Windows smoke。PM-GAP-005 |
+| sequence 端点 loop preference | `SEQ-ENDPOINT-001` | 実装・手動確認済み | Stop/Wrap、明示result、issue-time identity、ABI v12、versioned HKCU、menu／shortcut／checked state／status、Windows smoke／x64 Release確認。PM-GAP-005解消済み |
 | 複数 edit target の presentation | `DOC-002`, `DOC-003` | 実装・手動確認済み | tree-ordered Core/ABI、Layer pane marker、capability menu、status、smoke、x64 Release 確認。PM-GAP-006 |
 | 論理 layer 順の raster/vector 混在合成 | `DOC-002`, `VECTOR-001` | 一部実装 | `docs/implementation-status.md:42–43` の既知差分、PM-GAP-007 |
 | Text／Annotation の内容 | `ANNOTATION-001` と §5 | 実装・手動確認済み | stable-ID text/stroke/leader/value、canonical edit/stroke、ABI v12、Canvas/thumbnail/flat、v24 save/reopen、Windows smokeとx64 Release利用者確認。PM-GAP-009解消済み |
 | 角度付き撮影frameの内容 | `SHOOTING-FRAME-001` | 実装・手動確認済み | stable ID、center/size/rotation/anchor、canonical preview、ABI v12、Canvas handles、通常/指示export分離、v25 save/reopen、x64 Release確認。PM-GAP-008解消済み |
-| VanishingPoint の内容 | `DOC-002` と §5 | kind のみ | 消失点／放射補助線は空content。PM-GAP-010 |
+| VanishingPoint の内容 | `VANISHING-POINT-001` | 実装済み・手動確認待ち | stable ID、Canvas内外、間隔／開始角／exact color／opacity、canonical preview、radial snapshot／snap、ABI v12、Windows dialog／handle／renderer、v26 save/reopen。PM-GAP-010 |
 | 二段階 curve、N角形、filled shape、line／polyline options、raster 図形 | `PAINT-002` | 実装・手動確認済み | Core/canonical v2、ABI v9 additive exports、Windows staged gestures、現行v24/epoch-21、golden/smoke、ARM64 Release確認。snapはPM-GAP-013/M15 |
 | 通常 brush の shape／smoothing／開始色限定 | `PAINT-004` | 実装・手動確認済み | Core/image、canonical v3、ABI v8、Windows pane/Canvas、v13/epoch-10、golden/smoke、x64 Release確認。PM-GAP-012 解消済み |
 | guide／grid snap の実入力適用 | `SNAP-001`, `VIEW-002` | 実装・手動確認済み | view-targeted Core／ABI、全M09 Windows gesture共有route、checked state／geometry／digest／off／Ctrl bypass／Undo/Redo smoke、x64 Release利用者確認。PM-GAP-013解消済み |

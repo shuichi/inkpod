@@ -90,6 +90,8 @@ std::uint64_t EstimateSnapshotPayloadBytes(InkpodSnapshot* snapshot) noexcept {
     annotations.struct_size = sizeof(annotations);
     InkpodSnapshotShootingFrameView shooting_frames{};
     shooting_frames.struct_size = sizeof(shooting_frames);
+    InkpodSnapshotVanishingPointView vanishing_points{};
+    vanishing_points.struct_size = sizeof(vanishing_points);
     InkpodSnapshotVectorDiagnostics diagnostics{};
     diagnostics.struct_size = sizeof(diagnostics);
     InkpodSnapshotRenderPlan plan{};
@@ -99,6 +101,7 @@ std::uint64_t EstimateSnapshotPayloadBytes(InkpodSnapshot* snapshot) noexcept {
         || inkpod_snapshot_get_vectors(snapshot, &vectors) != INKPOD_STATUS_OK
         || inkpod_snapshot_get_annotations(snapshot, &annotations) != INKPOD_STATUS_OK
         || inkpod_snapshot_get_shooting_frames(snapshot, &shooting_frames) != INKPOD_STATUS_OK
+        || inkpod_snapshot_get_vanishing_points(snapshot, &vanishing_points) != INKPOD_STATUS_OK
         || inkpod_snapshot_get_vector_diagnostics(snapshot, &diagnostics)
             != INKPOD_STATUS_OK
         || inkpod_snapshot_get_render_plan(snapshot, &plan) != INKPOD_STATUS_OK) {
@@ -108,6 +111,7 @@ std::uint64_t EstimateSnapshotPayloadBytes(InkpodSnapshot* snapshot) noexcept {
         + sizeof(InkpodSnapshotOverlay) + sizeof(InkpodSnapshotVectorView)
         + sizeof(InkpodSnapshotAnnotationView)
         + sizeof(InkpodSnapshotShootingFrameView)
+        + sizeof(InkpodSnapshotVanishingPointView)
         + sizeof(InkpodSnapshotVectorDiagnostics)
         + sizeof(InkpodSnapshotRenderPlan);
     bytes = SaturatingAdd(bytes, SaturatingProduct(
@@ -129,6 +133,11 @@ std::uint64_t EstimateSnapshotPayloadBytes(InkpodSnapshot* snapshot) noexcept {
         overlay.guide_count, overlay.guide_stride_bytes));
     bytes = SaturatingAdd(bytes, SaturatingProduct(
         shooting_frames.frame_count, shooting_frames.frame_stride_bytes));
+    bytes = SaturatingAdd(bytes, SaturatingProduct(
+        vanishing_points.point_count, vanishing_points.point_stride_bytes));
+    bytes = SaturatingAdd(bytes, SaturatingProduct(
+        vanishing_points.radial_guide_count,
+        vanishing_points.radial_guide_stride_bytes));
     bytes = SaturatingAdd(bytes, SaturatingProduct(
         vectors.segment_count, vectors.segment_stride_bytes));
     bytes = SaturatingAdd(bytes, SaturatingProduct(
@@ -461,6 +470,12 @@ public:
                 d2d_context_->EndDraw();
                 return result;
             }
+            result = DrawVanishingPoints();
+            if (FAILED(result)) {
+                d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
+                d2d_context_->EndDraw();
+                return result;
+            }
             result = DrawFloatingPreview();
             if (FAILED(result)) {
                 d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
@@ -528,6 +543,8 @@ public:
         annotations.struct_size = sizeof(annotations);
         InkpodSnapshotShootingFrameView shooting_frames{};
         shooting_frames.struct_size = sizeof(shooting_frames);
+        InkpodSnapshotVanishingPointView vanishing_points{};
+        vanishing_points.struct_size = sizeof(vanishing_points);
         InkpodSnapshotVectorDiagnostics diagnostics{};
         diagnostics.struct_size = sizeof(diagnostics);
         InkpodSnapshotRenderPlan render_plan{};
@@ -548,9 +565,12 @@ public:
         const InkpodStatus shooting_frame_status = annotation_status == INKPOD_STATUS_OK
             ? inkpod_snapshot_get_shooting_frames(snapshot, &shooting_frames)
             : annotation_status;
-        const InkpodStatus diagnostics_status = shooting_frame_status == INKPOD_STATUS_OK
-            ? inkpod_snapshot_get_vector_diagnostics(snapshot, &diagnostics)
+        const InkpodStatus vanishing_point_status = shooting_frame_status == INKPOD_STATUS_OK
+            ? inkpod_snapshot_get_vanishing_points(snapshot, &vanishing_points)
             : shooting_frame_status;
+        const InkpodStatus diagnostics_status = vanishing_point_status == INKPOD_STATUS_OK
+            ? inkpod_snapshot_get_vector_diagnostics(snapshot, &diagnostics)
+            : vanishing_point_status;
         const InkpodStatus render_plan_status = diagnostics_status == INKPOD_STATUS_OK
             ? inkpod_snapshot_get_render_plan(snapshot, &render_plan)
             : diagnostics_status;
@@ -558,10 +578,12 @@ public:
             || overlay_status != INKPOD_STATUS_OK || vector_status != INKPOD_STATUS_OK
             || diagnostics_status != INKPOD_STATUS_OK || annotation_status != INKPOD_STATUS_OK
             || shooting_frame_status != INKPOD_STATUS_OK
+            || vanishing_point_status != INKPOD_STATUS_OK
             || render_plan_status != INKPOD_STATUS_OK
             || !ValidateOverlay(overlay) || !ValidateVectors(vectors)
             || !ValidateAnnotations(annotations)
             || !ValidateShootingFrames(shooting_frames)
+            || !ValidateVanishingPoints(vanishing_points)
             || !ValidateVectorDiagnostics(diagnostics)
             || !ValidateRenderPlan(render_plan, view, vectors, annotations)) {
             inkpod_snapshot_release(&snapshot);
@@ -577,6 +599,7 @@ public:
         vectors_ = vectors;
         annotations_ = annotations;
         shooting_frames_ = shooting_frames;
+        vanishing_points_ = vanishing_points;
         vector_diagnostics_ = diagnostics;
         render_plan_ = render_plan;
         retained_snapshot_bytes_ = EstimateSnapshotPayloadBytes(snapshot);
@@ -1179,6 +1202,49 @@ private:
             && frame.reserved == 0U
             && frame.anchor >= INKPOD_SHOOTING_FRAME_ANCHOR_TOP_LEFT
             && frame.anchor <= INKPOD_SHOOTING_FRAME_ANCHOR_BOTTOM_RIGHT;
+    }
+
+    static bool ValidateVanishingPoints(
+        const InkpodSnapshotVanishingPointView& view) noexcept {
+        if (view.abi_version != INKPOD_ABI_VERSION || view.feature_flags != 0U
+            || view.point_count > 64U || view.radial_guide_count > 16384U
+            || view.point_stride_bytes < sizeof(InkpodVanishingPointInfo)
+            || view.point_stride_bytes % alignof(InkpodVanishingPointInfo) != 0U
+            || view.radial_guide_stride_bytes < sizeof(InkpodSnapshotRadialGuide)
+            || view.radial_guide_stride_bytes % alignof(InkpodSnapshotRadialGuide) != 0U
+            || (view.point_count != 0U && view.points == nullptr)
+            || (view.radial_guide_count != 0U && view.radial_guides == nullptr)) {
+            return false;
+        }
+        const auto* point_bytes = reinterpret_cast<const std::byte*>(view.points);
+        for (std::uint64_t index = 0U; index < view.point_count; ++index) {
+            const auto* point = reinterpret_cast<const InkpodVanishingPointInfo*>(
+                point_bytes + static_cast<std::size_t>(index * view.point_stride_bytes));
+            if (point->struct_size < sizeof(InkpodVanishingPointInfo)
+                || point->struct_size > view.point_stride_bytes
+                || point->feature_flags != 0U || point->layer_id == 0U
+                || point->interval_milli_degrees < 1000U
+                || point->interval_milli_degrees > 180000U
+                || point->angle_milli_degrees >= 180000U
+                || point->opacity_milli > 1000U || point->visible > 1U
+                || point->reserved != 0U) {
+                return false;
+            }
+        }
+        const auto* guide_bytes = reinterpret_cast<const std::byte*>(view.radial_guides);
+        for (std::uint64_t index = 0U; index < view.radial_guide_count; ++index) {
+            const auto* guide = reinterpret_cast<const InkpodSnapshotRadialGuide*>(
+                guide_bytes + static_cast<std::size_t>(
+                    index * view.radial_guide_stride_bytes));
+            if (guide->struct_size < sizeof(InkpodSnapshotRadialGuide)
+                || guide->struct_size > view.radial_guide_stride_bytes
+                || guide->feature_flags != 0U
+                || guide->angle_milli_degrees >= 180000U
+                || guide->opacity_milli > 1000U || guide->reserved != 0U) {
+                return false;
+            }
+        }
+        return true;
     }
 
     static bool ValidateRenderPlan(
@@ -1931,6 +1997,62 @@ private:
                 D2D1::Ellipse(rotation_handle, radius, radius), shadow.Get());
             d2d_context_->DrawEllipse(
                 D2D1::Ellipse(rotation_handle, radius, radius), foreground.Get(), width);
+        }
+        return S_OK;
+    }
+
+    HRESULT DrawVanishingPoints() noexcept {
+        if (vanishing_points_.point_count == 0U
+            && vanishing_points_.radial_guide_count == 0U) {
+            return S_OK;
+        }
+        ComPtr<ID2D1SolidColorBrush> brush;
+        HRESULT result = d2d_context_->CreateSolidColorBrush(
+            D2D1::ColorF(1.0F, 1.0F, 1.0F, 1.0F), &brush);
+        if (FAILED(result)) {
+            return result;
+        }
+        const float width = static_cast<float>(std::max(1.0, 1.0 / transform_.zoom));
+        const auto* guide_bytes = reinterpret_cast<const std::byte*>(
+            vanishing_points_.radial_guides);
+        for (std::uint64_t index = 0U;
+             index < vanishing_points_.radial_guide_count; ++index) {
+            const auto* guide = reinterpret_cast<const InkpodSnapshotRadialGuide*>(
+                guide_bytes + static_cast<std::size_t>(
+                    index * vanishing_points_.radial_guide_stride_bytes));
+            D2D1_COLOR_F color = AnnotationColor(guide->color);
+            color.a *= static_cast<float>(guide->opacity_milli) / 1000.0F;
+            brush->SetColor(color);
+            d2d_context_->DrawLine(
+                D2D1::Point2F(
+                    static_cast<float>(guide->start_x_milli) / 1000.0F,
+                    static_cast<float>(guide->start_y_milli) / 1000.0F),
+                D2D1::Point2F(
+                    static_cast<float>(guide->end_x_milli) / 1000.0F,
+                    static_cast<float>(guide->end_y_milli) / 1000.0F),
+                brush.Get(), width);
+        }
+        const auto* point_bytes = reinterpret_cast<const std::byte*>(
+            vanishing_points_.points);
+        const float radius = static_cast<float>(std::max(3.0, 5.0 / transform_.zoom));
+        for (std::uint64_t index = 0U; index < vanishing_points_.point_count; ++index) {
+            const auto* point = reinterpret_cast<const InkpodVanishingPointInfo*>(
+                point_bytes + static_cast<std::size_t>(
+                    index * vanishing_points_.point_stride_bytes));
+            D2D1_COLOR_F color = AnnotationColor(point->color);
+            color.a *= static_cast<float>(point->opacity_milli) / 1000.0F;
+            brush->SetColor(color);
+            const D2D1_POINT_2F center = D2D1::Point2F(
+                static_cast<float>(point->x_milli) / 1000.0F,
+                static_cast<float>(point->y_milli) / 1000.0F);
+            d2d_context_->DrawLine(
+                D2D1::Point2F(center.x - radius, center.y),
+                D2D1::Point2F(center.x + radius, center.y), brush.Get(), width);
+            d2d_context_->DrawLine(
+                D2D1::Point2F(center.x, center.y - radius),
+                D2D1::Point2F(center.x, center.y + radius), brush.Get(), width);
+            d2d_context_->DrawEllipse(
+                D2D1::Ellipse(center, radius, radius), brush.Get(), width);
         }
         return S_OK;
     }
@@ -2969,6 +3091,7 @@ private:
     InkpodSnapshotVectorView vectors_{};
     InkpodSnapshotAnnotationView annotations_{};
     InkpodSnapshotShootingFrameView shooting_frames_{};
+    InkpodSnapshotVanishingPointView vanishing_points_{};
     InkpodSnapshotVectorDiagnostics vector_diagnostics_{};
     InkpodSnapshotRenderPlan render_plan_{};
     std::unordered_map<std::wstring, ComPtr<IDWriteTextFormat>> text_format_cache_;

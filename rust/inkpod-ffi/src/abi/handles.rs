@@ -20,6 +20,8 @@ pub struct InkpodSnapshot {
     pub(crate) annotation_utf8: Box<[u8]>,
     pub(crate) annotation_points: Box<[InkpodAnnotationPoint]>,
     pub(crate) shooting_frames: Box<[InkpodShootingFrameInfo]>,
+    pub(crate) vanishing_points: Box<[InkpodVanishingPointInfo]>,
+    pub(crate) radial_guides: Box<[InkpodSnapshotRadialGuide]>,
 }
 
 pub struct InkpodCut {

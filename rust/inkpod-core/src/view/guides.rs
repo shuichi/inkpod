@@ -271,6 +271,9 @@ fn snap_document_point(
         point
     };
     if view.guide_snap_enabled {
+        if let Some(radial) = snap_to_radial_guides(document, point) {
+            snapped = radial;
+        }
         for guide in &document.guides {
             match guide.axis {
                 GuideAxis::Vertical if (point.x - f64::from(guide.position)).abs() <= 4.0 => {

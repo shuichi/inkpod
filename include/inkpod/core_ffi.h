@@ -147,6 +147,7 @@ typedef uint32_t InkpodEditorTool;
 #define INKPOD_EDITOR_TOOL_GUIDE_MOVE UINT32_C(1004)
 #define INKPOD_EDITOR_TOOL_SELECTION UINT32_C(1005)
 #define INKPOD_EDITOR_TOOL_COLOR_REPLACE UINT32_C(1008)
+#define INKPOD_EDITOR_TOOL_VANISHING_POINT UINT32_C(1010)
 #define INKPOD_EDITOR_TOOL_FLOATING_TRANSFORM UINT32_C(1006)
 #define INKPOD_EDITOR_TOOL_LIGHT_TABLE_MOVE UINT32_C(1007)
 #define INKPOD_EDITOR_TOOL_EFFECT_GRADIENT UINT32_C(1101)
@@ -438,6 +439,12 @@ typedef uint32_t InkpodShootingFrameEditKind;
 #define INKPOD_SHOOTING_FRAME_EDIT_CREATE UINT32_C(1)
 #define INKPOD_SHOOTING_FRAME_EDIT_UPDATE UINT32_C(2)
 #define INKPOD_SHOOTING_FRAME_EDIT_DELETE UINT32_C(3)
+
+typedef uint32_t InkpodVanishingPointEditKind;
+#define INKPOD_VANISHING_POINT_EDIT_CREATE UINT32_C(1)
+#define INKPOD_VANISHING_POINT_EDIT_UPDATE UINT32_C(2)
+#define INKPOD_VANISHING_POINT_EDIT_DELETE UINT32_C(3)
+#define INKPOD_VANISHING_POINT_EDIT_DELETE_ALL UINT32_C(4)
 
 /** @brief filter catalog の処理識別子型。 */
 typedef uint32_t InkpodFilterKind;
@@ -1323,6 +1330,35 @@ typedef struct InkpodShootingFrameInfo {
     uint32_t reserved;
     InkpodShootingFramePoint corners[4];
 } InkpodShootingFrameInfo;
+
+typedef struct InkpodVanishingPointInput {
+    uint32_t struct_size;
+    uint32_t visible;
+    uint64_t feature_flags;
+    uint64_t layer_id;
+    int64_t x_milli;
+    int64_t y_milli;
+    uint32_t interval_milli_degrees;
+    uint32_t angle_milli_degrees;
+    uint32_t opacity_milli;
+    uint32_t reserved;
+    InkpodColorValue color;
+} InkpodVanishingPointInput;
+
+typedef struct InkpodVanishingPointInfo {
+    uint32_t struct_size;
+    uint32_t visible;
+    uint64_t feature_flags;
+    uint64_t point_id;
+    uint64_t layer_id;
+    int64_t x_milli;
+    int64_t y_milli;
+    uint32_t interval_milli_degrees;
+    uint32_t angle_milli_degrees;
+    uint32_t opacity_milli;
+    uint32_t reserved;
+    InkpodColorValue color;
+} InkpodVanishingPointInfo;
 
 /**
  * @brief 一つの Core generation に属する Rust-owned object の value identity。
@@ -2489,6 +2525,32 @@ typedef struct InkpodSnapshotShootingFrameView {
     uint64_t frame_count;
     uint64_t frame_stride_bytes;
 } InkpodSnapshotShootingFrameView;
+
+typedef struct InkpodSnapshotRadialGuide {
+    uint32_t struct_size;
+    uint32_t angle_milli_degrees;
+    uint64_t feature_flags;
+    uint64_t point_id;
+    int64_t start_x_milli;
+    int64_t start_y_milli;
+    int64_t end_x_milli;
+    int64_t end_y_milli;
+    uint32_t opacity_milli;
+    uint32_t reserved;
+    InkpodColorValue color;
+} InkpodSnapshotRadialGuide;
+
+typedef struct InkpodSnapshotVanishingPointView {
+    uint32_t struct_size;
+    uint32_t abi_version;
+    uint64_t feature_flags;
+    const InkpodVanishingPointInfo* points;
+    uint64_t point_count;
+    uint64_t point_stride_bytes;
+    const InkpodSnapshotRadialGuide* radial_guides;
+    uint64_t radial_guide_count;
+    uint64_t radial_guide_stride_bytes;
+} InkpodSnapshotVanishingPointView;
 
 /** @brief Explicitly disconnected vector endpoint in stable path/plane identity order. */
 typedef struct InkpodSnapshotVectorEndpoint {
@@ -5033,6 +5095,57 @@ InkpodStatus inkpod_core_shooting_frame_preview_apply(
     uint64_t* out_revision,
     uint64_t* out_frame_id);
 
+/**
+ * @brief Copy persistent vanishing points into a caller-owned strided buffer.
+ *
+ * A NULL output with zero capacity is a count query. Records and nested color
+ * values are copied during the call and are never retained. Core owner thread
+ * only; this query changes no document, history, dirty, revision, or ID state.
+ */
+InkpodStatus inkpod_core_vanishing_points_copy(
+    InkpodCore* core,
+    InkpodVanishingPointInfo* output,
+    uint64_t capacity,
+    uint64_t stride_bytes,
+    uint64_t* out_count);
+
+/**
+ * @brief Apply create/update/delete/delete-all as one canonical transaction.
+ *
+ * `input` is borrowed only for the call and is required only for create/update.
+ * Success is at most one Undo unit; no-op and all failures consume no ID.
+ */
+InkpodStatus inkpod_core_vanishing_point_edit(
+    InkpodCore* core,
+    uint64_t expected_revision,
+    InkpodVanishingPointEditKind kind,
+    uint64_t point_id,
+    const InkpodVanishingPointInput* input,
+    uint64_t* out_revision,
+    uint64_t* out_point_id);
+
+/** @brief Begin create/update preview at an exact document revision. */
+InkpodStatus inkpod_core_vanishing_point_preview_begin(
+    InkpodCore* core,
+    uint64_t expected_revision,
+    InkpodVanishingPointEditKind kind,
+    uint64_t point_id,
+    const InkpodVanishingPointInput* input);
+
+/** @brief Rebuild the active preview from its immutable base document. */
+InkpodStatus inkpod_core_vanishing_point_preview_update(
+    InkpodCore* core,
+    const InkpodVanishingPointInput* input);
+
+/** @brief Cancel preview without changing committed state or consuming an ID. */
+InkpodStatus inkpod_core_vanishing_point_preview_cancel(InkpodCore* core);
+
+/** @brief Commit preview as at most one Undo unit; create assigns its ID here. */
+InkpodStatus inkpod_core_vanishing_point_preview_apply(
+    InkpodCore* core,
+    uint64_t* out_revision,
+    uint64_t* out_point_id);
+
 /** @brief Begin an instruction/normal stroke without changing document history. */
 InkpodStatus inkpod_core_annotation_stroke_begin(
     InkpodCore* core,
@@ -5876,6 +5989,16 @@ InkpodStatus inkpod_snapshot_get_annotations(
 InkpodStatus inkpod_snapshot_get_shooting_frames(
     const InkpodSnapshot* snapshot,
     InkpodSnapshotShootingFrameView* out_frames);
+
+/**
+ * @brief Borrow snapshot-owned vanishing-point and clipped radial-guide spans.
+ *
+ * Both spans remain valid only until snapshot release. Access and release of
+ * the same snapshot require caller synchronization; no separate release exists.
+ */
+InkpodStatus inkpod_snapshot_get_vanishing_points(
+    const InkpodSnapshot* snapshot,
+    InkpodSnapshotVanishingPointView* out_view);
 
 /** @brief Two-stage copy of one annotation font-family hint, without a terminator. */
 InkpodStatus inkpod_snapshot_annotation_copy_font_family(

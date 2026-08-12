@@ -105,6 +105,8 @@ pub enum EditorTool {
     ColorReplace = 1_008,
     /// Angled shooting-frame handle editor.
     ShootingFrame = 1_009,
+    /// Persistent vanishing-point handle editor.
+    VanishingPoint = 1_010,
     /// Gradient effect command.
     EffectGradient = 1_101,
     /// Airbrush effect command.
@@ -134,7 +136,7 @@ pub enum EditorTool {
 }
 
 impl EditorTool {
-    pub(crate) const ALL: [Self; 25] = [
+    pub(crate) const ALL: [Self; 26] = [
         Self::Pencil,
         Self::Brush,
         Self::Eraser,
@@ -147,6 +149,7 @@ impl EditorTool {
         Self::LightTableMove,
         Self::ColorReplace,
         Self::ShootingFrame,
+        Self::VanishingPoint,
         Self::EffectGradient,
         Self::EffectAirbrush,
         Self::EffectBlur,

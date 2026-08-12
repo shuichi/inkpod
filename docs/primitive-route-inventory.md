@@ -56,6 +56,9 @@ route|rust|document-primitive|rust-core|Core::apply_shooting_frame_preview Core:
 route|rust|transient-preview-stroke|rust-core|Core::begin_shooting_frame_preview Core::cancel_shooting_frame_preview Core::update_shooting_frame_preview
 route|rust|query-snapshot|rust-core|Core::shooting_frame
 route|rust|asset-data-plane|rust-core|Core::export_instruction_common_raster
+route|rust|document-primitive|rust-core|Core::apply_vanishing_point_preview Core::delete_all_vanishing_points Core::edit_vanishing_points
+route|rust|transient-preview-stroke|rust-core|Core::begin_vanishing_point_preview Core::cancel_vanishing_point_preview Core::update_vanishing_point_preview
+route|rust|query-snapshot|rust-core|Core::vanishing_points
 
 ## C ABI surface
 
@@ -88,6 +91,9 @@ route|ffi|document-primitive|rust-core|inkpod_core_shooting_frame_edit inkpod_co
 route|ffi|transient-preview-stroke|rust-ffi-adapter|inkpod_core_shooting_frame_preview_begin inkpod_core_shooting_frame_preview_cancel inkpod_core_shooting_frame_preview_update
 route|ffi|query-snapshot|rust-ffi-adapter|inkpod_core_shooting_frame_get inkpod_snapshot_get_shooting_frames
 route|ffi|asset-data-plane|rust-ffi-adapter|inkpod_core_export_instruction_common_raster
+route|ffi|document-primitive|rust-core|inkpod_core_vanishing_point_edit inkpod_core_vanishing_point_preview_apply
+route|ffi|transient-preview-stroke|rust-ffi-adapter|inkpod_core_vanishing_point_preview_begin inkpod_core_vanishing_point_preview_cancel inkpod_core_vanishing_point_preview_update
+route|ffi|query-snapshot|rust-ffi-adapter|inkpod_core_vanishing_points_copy inkpod_snapshot_get_vanishing_points
 
 ## Windows production command surface
 
@@ -109,6 +115,8 @@ route|windows|view-only-command|windows-adapter|IDM_ANNOTATION_SELECT_NEXT IDM_A
 route|windows|document-primitive|rust-core|IDM_CELL_SHOOTING_FRAME_DELETE IDM_CELL_SHOOTING_FRAME_PROPERTIES
 route|windows|editor-state-command|rust-core|IDM_CELL_SHOOTING_FRAME_EDIT_HANDLES
 route|windows|asset-data-plane|windows-adapter|IDM_FILE_EXPORT_INSTRUCTION_RASTER
+route|windows|document-primitive|rust-core|IDM_CELL_VANISHING_POINT_DELETE_ALL IDM_CELL_VANISHING_POINT_PROPERTIES
+route|windows|editor-state-command|rust-core|IDM_CELL_VANISHING_POINT_EDIT_HANDLES
 
 route|rust|document-primitive|rust-core|Core::select_output_color_guard Core::select_output_color_guard_with_cancel
 route|ffi|document-primitive|rust-core|inkpod_core_select_output_color_guard
@@ -138,7 +146,7 @@ route|windows|document-primitive|rust-core|IDM_SELECTION_OUTPUT_COLOR_GUARD
   it exactly once; there is no queued arbitrary-callable work variant.
 - Palette and color-chart codecs are owned by `inkpod-format`; Windows supplies
   paths and presentation names but does not encode their native bytes.
-- Production `.inkpod` is exact-current v25. Its authoritative journal retains
+- Production `.inkpod` is exact-current v26. Its authoritative journal retains
   Genesis/assets/procedures/EditorState; optional CKPT is verified acceleration
   only, and explicit compaction writes a separate new-Genesis file.
 - Floating paste dialog, Canvas handles, renderer preview, ABI v12 record, Core
@@ -155,8 +163,13 @@ route|windows|document-primitive|rust-core|IDM_SELECTION_OUTPUT_COLOR_GUARD
   snapshot geometry feeds the renderer, while only the explicit instruction
   raster export includes the fixed red outline; normal export and thumbnails
   remain unchanged.
+- Vanishing-point layers own stable-ID document objects with exact RGBA8/16
+  color, opacity, visibility, bounded angular interval and normalized phase.
+  The Core derives only viewport-clipped radial snapshot segments; properties
+  and Canvas-handle edits share one canonical primitive and transient preview.
+  Radial snapping is resolved beside explicit guides and grid in the Core.
 
-The source-derived inventory currently contains 285 Rust routes, 289 C ABI
-exports, and 377 Windows commands. Its architecture test requires every symbol
+The source-derived inventory currently contains 292 Rust routes, 296 C ABI
+exports, and 380 Windows commands. Its architecture test requires every symbol
 to have exactly one class and owner; unclassified and direct C++ document
 mutation counts are both zero.

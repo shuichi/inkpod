@@ -100,6 +100,9 @@ pub(crate) enum CanonicalInvocation {
     EditShootingFrame {
         edit: ShootingFrameEdit,
     },
+    EditVanishingPoints {
+        edits: Vec<VanishingPointEdit>,
+    },
     AddGuide {
         axis: GuideAxis,
         position: i32,
@@ -642,6 +645,10 @@ fn decode_persistent_invocation(
         CanonicalInvocation::EditShootingFrame {
             edit: reader.shooting_frame_edit()?,
         }
+    } else if primitive_id == PrimitiveId::EDIT_VANISHING_POINTS {
+        CanonicalInvocation::EditVanishingPoints {
+            edits: reader.vanishing_point_edits()?,
+        }
     } else if primitive_id == PrimitiveId::ADD_GUIDE {
         CanonicalInvocation::AddGuide {
             axis: reader.guide_axis()?,
@@ -1148,6 +1155,7 @@ impl CanonicalInvocation {
             Self::EditTargets { .. } => PrimitiveId::EDIT_TARGETS,
             Self::EditAnnotations { .. } => PrimitiveId::EDIT_ANNOTATIONS,
             Self::EditShootingFrame { .. } => PrimitiveId::EDIT_SHOOTING_FRAME,
+            Self::EditVanishingPoints { .. } => PrimitiveId::EDIT_VANISHING_POINTS,
             Self::AddGuide { .. } => PrimitiveId::ADD_GUIDE,
             Self::MoveGuide { .. } => PrimitiveId::MOVE_GUIDE,
             Self::DeleteGuide { .. } => PrimitiveId::DELETE_GUIDE,
@@ -1247,6 +1255,17 @@ impl CanonicalInvocation {
                 ShootingFrameEdit::Update { frame_id, .. }
                 | ShootingFrameEdit::Delete { frame_id } => vec![*frame_id],
             },
+            Self::EditVanishingPoints { edits } => edits
+                .iter()
+                .flat_map(|edit| match edit {
+                    VanishingPointEdit::Create(input) => vec![input.layer_id],
+                    VanishingPointEdit::Update { point_id, input } => {
+                        vec![*point_id, input.layer_id]
+                    }
+                    VanishingPointEdit::Delete { point_id } => vec![*point_id],
+                    VanishingPointEdit::DeleteAll => Vec::new(),
+                })
+                .collect(),
             Self::CreatePlane { layer_id, .. } => vec![*layer_id],
             Self::DuplicatePlane { plane_id }
             | Self::DeletePlane { plane_id }
@@ -1473,6 +1492,17 @@ impl CanonicalInvocation {
                             accepted_commands: 1,
                         },
                         outcome.frame_id().into_iter().collect(),
+                    )
+                })
+            }
+            Self::EditVanishingPoints { edits } => {
+                core.apply_vanishing_point_edits(edits).map(|outcome| {
+                    InvocationResult::outputs(
+                        DispatchOutcome {
+                            revision: outcome.revision(),
+                            accepted_commands: 1,
+                        },
+                        outcome.point_ids().to_vec(),
                     )
                 })
             }
@@ -1841,6 +1871,7 @@ impl CanonicalInvocation {
             }
             Self::EditAnnotations { edits } => writer.annotation_edits(edits)?,
             Self::EditShootingFrame { edit } => writer.shooting_frame_edit(*edit),
+            Self::EditVanishingPoints { edits } => writer.vanishing_point_edits(edits)?,
             Self::ReorderLayer {
                 layer_id,
                 destination_index,
@@ -2408,6 +2439,7 @@ pub(super) const fn schema_version(primitive_id: PrimitiveId) -> Option<u16> {
         || value == PrimitiveId::EDIT_TARGETS.get()
         || value == PrimitiveId::EDIT_ANNOTATIONS.get()
         || value == PrimitiveId::EDIT_SHOOTING_FRAME.get()
+        || value == PrimitiveId::EDIT_VANISHING_POINTS.get()
         || value == PrimitiveId::ADD_GUIDE.get()
         || value == PrimitiveId::MOVE_GUIDE.get()
         || value == PrimitiveId::DELETE_GUIDE.get()
@@ -2697,6 +2729,42 @@ impl<'a> CanonicalReader<'a> {
             anchor,
             visible: self.boolean()?,
             include_in_instruction_export: self.boolean()?,
+        })
+    }
+
+    fn vanishing_point_edits(&mut self) -> Result<Vec<VanishingPointEdit>, CoreError> {
+        let count = self.count(1)?;
+        if count == 0 || count > MAX_VANISHING_POINT_EDITS {
+            return Err(self.invalid("canonical vanishing-point edit count is outside bounds"));
+        }
+        let mut edits = Vec::with_capacity(count);
+        for _ in 0..count {
+            edits.push(match self.u32()? {
+                1 => VanishingPointEdit::Create(self.vanishing_point_input()?),
+                2 => VanishingPointEdit::Update {
+                    point_id: self.u64()?,
+                    input: self.vanishing_point_input()?,
+                },
+                3 => VanishingPointEdit::Delete {
+                    point_id: self.u64()?,
+                },
+                4 => VanishingPointEdit::DeleteAll,
+                _ => return Err(self.invalid("canonical vanishing-point edit kind is unknown")),
+            });
+        }
+        Ok(edits)
+    }
+
+    fn vanishing_point_input(&mut self) -> Result<VanishingPointInput, CoreError> {
+        Ok(VanishingPointInput {
+            layer_id: self.u64()?,
+            x_milli: self.i64()?,
+            y_milli: self.i64()?,
+            interval_milli_degrees: self.u32()?,
+            angle_milli_degrees: self.u32()?,
+            color: self.annotation_color()?,
+            opacity_milli: self.u32()?,
+            visible: self.boolean()?,
         })
     }
 
@@ -3860,6 +3928,43 @@ impl CanonicalWriter {
         });
         self.boolean(input.visible);
         self.boolean(input.include_in_instruction_export);
+    }
+
+    fn vanishing_point_edits(&mut self, edits: &[VanishingPointEdit]) -> Result<(), CoreError> {
+        self.u32(u32::try_from(edits.len()).map_err(|_| {
+            CoreError::InvalidArgument("vanishing-point edit count is not representable")
+        })?);
+        for edit in edits {
+            match *edit {
+                VanishingPointEdit::Create(input) => {
+                    self.u32(1);
+                    self.vanishing_point_input(input)?;
+                }
+                VanishingPointEdit::Update { point_id, input } => {
+                    self.u32(2);
+                    self.u64(point_id);
+                    self.vanishing_point_input(input)?;
+                }
+                VanishingPointEdit::Delete { point_id } => {
+                    self.u32(3);
+                    self.u64(point_id);
+                }
+                VanishingPointEdit::DeleteAll => self.u32(4),
+            }
+        }
+        Ok(())
+    }
+
+    fn vanishing_point_input(&mut self, input: VanishingPointInput) -> Result<(), CoreError> {
+        self.u64(input.layer_id);
+        self.i64(input.x_milli);
+        self.i64(input.y_milli);
+        self.u32(input.interval_milli_degrees);
+        self.u32(input.angle_milli_degrees);
+        self.annotation_color(input.color)?;
+        self.u32(input.opacity_milli);
+        self.boolean(input.visible);
+        Ok(())
     }
 
     fn rect(&mut self, rect: RectI32) {

@@ -31,7 +31,7 @@ struct CommandState {
     bool checked{};
 };
 
-inline constexpr std::size_t kProductionCommandStateCount = 377U;
+inline constexpr std::size_t kProductionCommandStateCount = 380U;
 using CommandStateSet = std::array<CommandState, kProductionCommandStateCount>;
 
 struct DocumentCommandStateInput {
@@ -40,6 +40,8 @@ struct DocumentCommandStateInput {
     bool dirty{};
     bool shooting_frame_present{};
     bool shooting_frame_handle_edit{};
+    bool vanishing_point_present{};
+    bool vanishing_point_handle_edit{};
     std::size_t recent_document_count{};
 };
 

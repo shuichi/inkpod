@@ -1,7 +1,7 @@
 # Native file format
 
-`.inkpod` v25 is the bounded, procedure-authoritative, little-endian native
-container. Version 25 and runtime replay epoch 22 are the only accepted native contract.
+`.inkpod` v26 is the bounded, procedure-authoritative, little-endian native
+container. Version 26 and runtime replay epoch 23 are the only accepted native contract.
 
 Until the user explicitly declares a format freeze, Inkpod accepts only the
 current version of each application-owned file format. It provides no older-
@@ -25,14 +25,14 @@ The Cut header is exactly 64 bytes:
 | Offset | Size | Field |
 |---:|---:|---|
 | 0 | 8 | magic `INKCUT\0\0` |
-| 8 | 4 | top-level file-format version = 25 |
-| 12 | 4 | Cut replay epoch = 22 |
+| 8 | 4 | top-level file-format version = 26 |
+| 12 | 4 | Cut replay epoch = 23 |
 | 16 | 8 | total descriptor length |
 | 24 | 8 | payload length |
 | 32 | 32 | BLAKE3-256 derive-key digest of the payload, context `org.inkpod.cut-descriptor.v2` |
 
 The little-endian payload starts with schema `u32 = 2` and Cut replay epoch
-`u32 = 22`, followed in order by nonzero Cut ID, 16-byte Cut UUID, current and
+`u32 = 23`, followed in order by nonzero Cut ID, 16-byte Cut UUID, current and
 savepoint State IDs, next State and Procedure IDs, history cursor, member-asset/
 Genesis-membership/current-membership/active-history/inactive-history counts,
 Genesis metadata/defaults, current metadata/defaults, the member-asset table,
@@ -65,7 +65,7 @@ canonical procedure contains an external path. Active plus inactive history is b
 4096 records, each text field to 4096 UTF-8 bytes, and the complete descriptor to
 16 MiB. Counts, cursor, ID high-watermarks, canonical history chaining, current
 state, trailing bytes, UTF-8, enum values, lengths, and digest are validated before
-publication. Version 25, Cut replay epoch 22, and payload schema 2 are the only
+publication. Version 26, Cut replay epoch 23, and payload schema 2 are the only
 accepted values; there is no older-version reader or migration.
 
 Normal Cut save writes and flushes a same-directory temporary descriptor before
@@ -91,7 +91,7 @@ success.
 ## Current procedure-authoritative contract
 
 This section defines the implemented procedure-authoritative container at
-top-level format version 25 and runtime replay epoch 22. It uses a hierarchical document
+top-level format version 26 and runtime replay epoch 23. It uses a hierarchical document
 commitment, an exact-depth target-explicit `ApplyRasterStroke/v3` schema, a
 bounded resolved `ApplyGeometry/canonical-v2` schema,
 distinct stable Cell ID, and an explicit immutable Genesis base surface:
@@ -99,14 +99,14 @@ metadata, raster, and raster-tile commitments are domain-separated so a raster
 edit hashes only changed tile payloads instead of every allocated document
 pixel. This semantic digest is independent of the renderer's canonical
 revision-max cache identity. Asset and procedure-payload digest contracts are
-version 1. Every version other than 25 is rejected before Core state replacement;
+version 1. Every version other than 26 is rejected before Core state replacement;
 there is no migration or compatibility reader. Any schema or replay-semantics change
 after this contract increments the top-level version before that change is
 merged. A replay-result change also increments the replay epoch.
 
 The authoritative sections are `META`, `GENS`, `ASST`, `PROC`, and `EDIT`.
 `EXTM`, `CKPT`, and unknown opaque-preserve sections are optional. `CKPT` is a
-schema-1 acceleration record in v25. There is no `HIST` section: history moves and
+schema-1 acceleration record in v26. There is no `HIST` section: history moves and
 branch cuts are records in `PROC`, while cursor, active branch, savepoints, and
 ID high-watermarks are fields in `META`. A materialized document or checkpoint
 is never sufficient without Genesis, retained assets, and the procedure/control
@@ -379,7 +379,7 @@ the common 16-byte record header defined below, then these exact payload bytes:
 - An asset-reference record is `argument ordinal u32`, zero `u32`, then the
   32-byte `AssetId`. Input/output-ID records are `role ordinal u32`, reserved
   zero `u32`, and stable ID `u64`; the typed canonical invocation is the object-
-  kind authority in v25. Each sequence is strictly increasing
+  kind authority in v26. Each sequence is strictly increasing
   by ordinal with no duplicate role. The primitive schema fixes whether each
   input/output role is required; transient object IDs are forbidden.
 - When payload length is zero, `ProcedurePayloadDigest` is 32 zero bytes and no
@@ -570,7 +570,7 @@ RGBA8/16 color, milli-pixel points, and stroke width in snapshot order. View rev
 DPI are excluded. `RenderSnapshot::canonical_composite_digest` and
 `inkpod_snapshot_get_canonical_digest` expose this result without a test-only
 state accessor. This derived snapshot digest is not serialized in `.inkpod` and
-does not independently change native format v25 or runtime replay epoch 22.
+does not independently change native format v26 or runtime replay epoch 23.
 
 A sequence field is `element-count u64`, then for every element `element-length
 u64` and exact element bytes. A schema-declared ordered sequence retains its
@@ -588,10 +588,10 @@ The exact digest messages are:
 | Digest | Present fields in ordinal order |
 |---|---|
 | `DocumentStateDigest` | 1 32-byte document metadata commitment; 2 Plane-ID-sorted sequence of frames containing stable Plane ID then 32-byte raster commitment |
-| document metadata commitment | 1 document UUID; 2 stable Document ID; 3 paper; 4 frames/margins, including axis-aligned shooting and maximum-close; 5 base surface; 6 ordered layer/plane/annotation tree; 7 persistent selection record; 8 palette; 9 Color chart frame (lock plus ordered exact-depth color/name entries); 10 main-line color; 11 guides; 12 grid; 13 Light Table; 14 project/cut/cell/frame/sequence identities and animation metadata, including the distinct stable Cell ID; 15 optional independent angled shooting-frame object; 16 required-extension sequence, empty in schema 8 |
+| document metadata commitment | 1 document UUID; 2 stable Document ID; 3 paper; 4 frames/margins, including axis-aligned shooting and maximum-close; 5 base surface; 6 ordered layer/plane/annotation/vanishing-point tree; 7 persistent selection record; 8 palette; 9 Color chart frame (lock plus ordered exact-depth color/name entries); 10 main-line color; 11 guides; 12 grid; 13 Light Table; 14 project/cut/cell/frame/sequence identities and animation metadata, including the distinct stable Cell ID; 15 optional independent angled shooting-frame object; 16 required-extension sequence, empty in schema 9 |
 | document raster commitment | 1 width; 2 height; 3 canonical pixel format; 4 tile edge; 5 `(tile_x, tile_y)`-sorted sequence of tile coordinate, valid width/height, and 32-byte raster-tile commitment |
 | document raster-tile commitment | 1 canonical pixel format; 2 tile x; 3 tile y; 4 valid width; 5 valid height; 6 exact valid row-major pixel bytes without row padding |
-| `EditorStateDigest` | 1 editor-state schema `u32 = 5`; 2 active tool; 3 optional last color-consuming tool; 4 tool-keyed colors; 5 tool-keyed diameters; 6 brush options; 7 fill options; 8 selection options; 9 vector options; 10 optional active layer; 11 optional active plane; 12 optional palette cursor; 13 optional Color chart page/selected-index cursor; 14 ordered edit-target records |
+| `EditorStateDigest` | 1 editor-state schema `u32 = 6`; 2 active tool; 3 optional last color-consuming tool; 4 tool-keyed colors; 5 tool-keyed diameters; 6 brush options; 7 fill options; 8 selection options; 9 vector options; 10 optional active layer; 11 optional active plane; 12 optional palette cursor; 13 optional Color chart page/selected-index cursor; 14 ordered edit-target records |
 | `JournalPrefixDigest` | 1 last included event count `u64`; 2 ordered sequence of the exact common-header-plus-payload `PROC` record bytes from event 1 through that count |
 | `AssetDigest` | 1 asset schema `u32 = 1`; 2 asset kind `u32`; 3 optional pixel format; 4 optional color space; 5 optional alpha semantics; 6 optional width; 7 optional height; 8 optional canonical stride; 9 logical element count `u64`; 10 logical payload length `u64`; 11 exact canonical logical payload bytes |
 | asset chunk | 1 `AssetId`; 2 chunk index `u32`; 3 logical offset `u64`; 4 exact chunk bytes |
@@ -608,7 +608,7 @@ digest, 5 semantics revision `u32`, 6 work-formula ID `u32`, and 7 replay-policy
 argument-schema digest is BLAKE3 `derive_key` over the exact canonical ASCII
 label `<canonical-name>/canonical-v<schema-version>` using the primitive-
 argument-schema context above. This label identifies the closed typed schema;
-the v25 reader selects its decoder through the same catalog entry and accepts
+the v26 reader selects its decoder through the same catalog entry and accepts
 only a byte-exact canonical re-encoding.
 
 An argument descriptor is a schema-1 frame with fields 1 ordinal `u32`; 2
@@ -676,7 +676,7 @@ pixels elsewhere. NativeFile uses the normal atomic `.inkpod` batch output route
 and is invalid with ExplicitOverwrite.
 
 `DocumentStateDigest` excludes document/editor revisions, history, paths, views,
-transient sessions, allocation/tile-cache state, and caches. Its schema-8 root
+transient sessions, allocation/tile-cache state, and caches. Its schema-9 root
 commits to one metadata digest and every semantic raster digest by stable Plane
 ID. The runtime may cache that tree at a matching document revision, but the
 revision and cache layout never enter a digest. A changed raster tile replaces
@@ -758,8 +758,12 @@ follows:
   it in the required Cell slot, with absent Project/Cut IDs and empty frame/
   sequence lists for the current standalone-cell model. Document, Cell, layer,
   plane, selection, and other stable object IDs therefore obey cross-kind
-  numeric-ID uniqueness. This document-state frame is schema 8/domain 7. The
-  current build contract is runtime replay epoch 22 and top-level version 25; optional
+  numeric-ID uniqueness. Each VanishingPoint layer additionally orders its
+  stable-ID point objects by ID; a point frame contains owner layer ID, signed
+  milli-pixel X/Y, interval and normalized phase in milli-degrees, exact tagged
+  RGBA8/16 color, normalized opacity, and visibility. This document-state frame
+  is schema 9/domain 8. The current build contract is runtime replay epoch 23
+  and top-level version 26; optional
   checkpoint/streaming records do not change the state-digest schema.
   Collections whose UI order is not semantic are ID-sorted.
 - An adjustment frame orders kind, channel, interpolation, six signed `i32`
@@ -770,8 +774,8 @@ follows:
   occupy parameters 1/2; Levels orders input shadow, input gamma thousandths,
   input highlight, output shadow, and output highlight in parameters 1..5.
 
-The canonical EditorState frame has schema 5 and exactly fourteen fields in
-this order: 1 schema `u32 = 5`; 2 active `ToolId u32`; 3 optional last
+The canonical EditorState frame has schema 6 and exactly fourteen fields in
+this order: 1 schema `u32 = 6`; 2 active `ToolId u32`; 3 optional last
 color-consuming `ToolId`; 4 tool-color sequence; 5 tool-diameter sequence; 6
 brush-options frame; 7 fill-options frame; 8 selection-options frame; 9
 vector-options frame; 10 optional active Layer ID; 11 optional active Plane ID;
@@ -875,7 +879,7 @@ owners. The current materialized document and checkpoints are not sufficient
 roots by themselves. Assets referenced only by an inactive branch remain
 available for cache-free replay, and the owning Core session releases its
 registry only after transient work has drained. These runtime rules establish
-  the exact graph serialized by v25 `GENS` and `ASST`.
+  the exact graph serialized by v26 `GENS` and `ASST`.
 
 Cache-free save/reopen-equivalent verification is detached from that live
 registry: it walks the same roots, deep-copies every unique payload in
@@ -883,7 +887,7 @@ registry: it walks the same roots, deep-copies every unique payload in
 then rebinds Genesis and retained procedures before fresh replay. Descriptor,
 payload, identity, and duplicate-root reference counts must match, while the
 source and rebuilt `AssetRecord`, payload, and raster allocations must not share
-ownership. That detached archive remains test infrastructure; v25 provides
+ownership. That detached archive remains test infrastructure; v26 provides
 the production encoder and staged reader.
 
 Self-referential digest fields are present as thirty-two zero bytes during
@@ -898,22 +902,22 @@ The approved Rust implementation is the official `blake3` crate pinned as
 exact version `=1.8.5` with default features disabled and only `std` enabled, as
 recorded in `third-party-notices.md`; its portable/SIMD backend choice does not
 change digest output. The Core production dependency computes the
-hierarchical schema-8 `DocumentStateDigest` for canonical execution and
+hierarchical schema-9 `DocumentStateDigest` for canonical execution and
 fresh-Core replay. Its runtime commitment cache is separate from render
 caching: snapshot validation uses only the documented revision-max scalar and
-never these digests. The same pinned implementation computes the v25 section,
+never these digests. The same pinned implementation computes the v26 section,
 root, asset-chunk, journal, document, editor, and procedure-payload commitments.
 
 ### Header, directory, and record bytes
 
-The v25 header is exactly 128 bytes. Its outer container-layout epoch is 9;
+The v26 header is exactly 128 bytes. Its outer container-layout epoch is 9;
 the authoritative `META` and procedure records independently require runtime
-replay epoch 22 before staged Core publication:
+replay epoch 23 before staged Core publication:
 
 | Offset | Size | Field |
 |---:|---:|---|
 | 0 | 8 | magic bytes `49 4E 4B 50 4F 44 00 00` |
-| 8 | 4 | top-level format version = 25 |
+| 8 | 4 | top-level format version = 26 |
 | 12 | 4 | outer container-layout epoch = 9 |
 | 16 | 4 | header size = 128 |
 | 20 | 4 | required flags = 0 |
@@ -1009,10 +1013,10 @@ agree exactly.
 `StateId(1)`; 3 root `BranchId(1)`; 4 a Genesis archive; 5 its
 `DocumentStateDigest`. The archive starts with base-surface code `u8` (1
 SolidWhite, 2 Asset followed by its 32-byte `AssetId`), then nested payload
-length `u64` and the exact current schema-4 `DocumentArchive` payload. That nested
+length `u64` and the exact current schema-5 `DocumentArchive` payload. That nested
 payload is not a standalone `.inkpod` container and is not accepted through
 the native-file entrypoint; it is the bounded Genesis document DTO owned by the
-v25 GENS schema. Its fixed manifest is 200 bytes before palette, Color chart
+v26 GENS schema. Its fixed manifest is 204 bytes before palette, Color chart
 entries/lock, optional metadata, plane descriptors, shooting-frame descriptor,
 annotation descriptors, and blob descriptors:
 stable Document ID, distinct
@@ -1020,27 +1024,32 @@ stable Cell ID, primary layer/main/color plane IDs, document UUID, raster size,
 DPI, sRGB/reserved words, then 100%, reference, drawing, safe, shooting, and
 maximum-close rectangles in that order, followed by four margins and bounded
 counts. UUID, base asset, and digest are cross-checked after decode and
-before replay. Document metadata schema 4 stores annotation count and an exact
-0/1 shooting-frame presence value. When present, its descriptor stores the
+before replay. Document metadata schema 5 stores annotation and vanishing-point
+counts plus an exact 0/1 shooting-frame presence value. When present, the
+shooting-frame descriptor stores the
 stable ID, signed center, positive size, binary turns, anchor, visible/export
-flags, and a zero reserved word before annotation descriptors. Each annotation descriptor stores the fixed fields listed in the
+flags, and a zero reserved word. Each vanishing-point descriptor stores stable
+ID, owner layer ID, signed `i64` X/Y in document milli-pixels, `u32` interval
+and normalized phase in milli-degrees, `u32` opacity, exact 0/1 visibility, a
+zero reserved word, and tagged exact RGBA8/16 color. It precedes annotation
+descriptors. Each annotation descriptor stores the fixed fields listed in the
 canonical annotation frame, then exact UTF-8 font/text bytes and fixed `i32`
 milli-pixel point pairs. The decoder bounds object/text/font/point counts,
 validates UTF-8 and layer/type/geometry/ID relationships, and rejects trailing
 bytes before publication. No replay default comes from the build.
 
-`EDIT` kind-1 payload is a schema-1 frame: 1 editor-state schema `u32 = 5`; 2
+`EDIT` kind-1 payload is a schema-1 frame: 1 editor-state schema `u32 = 6`; 2
 persisted `EditorRevision u64`; 3 exact canonical EditorState frame; 4 its
 `EditorStateDigest`. Revision starts at 1, is excluded from the digest, and the
 stored digest must match both the frame and `META`.
 
-EditorState schema 5 contains 14 fields. It adds optional ordinal 13, a nested
-frame of Color chart page `u32` and absolute selected index `u32`; the ordered
-multi-edit-target sequence moves to ordinal 14. The cursor is absent for an
-empty chart and is validated/reconciled against document entries during staged
-open.
+EditorState schema 6 contains 14 fields and extends the closed active-tool code
+set with VanishingPoint tool 1010. Optional ordinal 13 remains the nested Color
+chart page `u32` and absolute selected index `u32`; ordinal 14 remains the
+ordered multi-edit-target sequence. The cursor is absent for an empty chart and
+is validated/reconciled against document entries during staged open.
 
-The v25 writer emits this bounded canonical EDIT payload and the staged reader
+The v26 writer emits this bounded canonical EDIT payload and the staged reader
 verifies its digest, target IDs, revision, and META savepoint before replacing
 the live Core. The decoder rejects an EDIT frame larger than 4 MiB.
 
@@ -1225,7 +1234,7 @@ is atomically installed. Dry-run creates no output or temporary file. Duplicate
 is the default and is forbidden from resolving to its input path; overwrite is
 available only through the explicit output policy. A current-document source
 retains a copy of its canonical asset store while operations run. Asset-backed
-Genesis and every retained journal asset are written through the same v25
+Genesis and every retained journal asset are written through the same v26
 GENS/ASST path as an interactive save.
 
 The decoder bounds the whole file (1 GiB), including a post-read check against
@@ -1287,7 +1296,7 @@ path as a normal document path. `open_recovery` loads the container into a
 dirty, recovered, pathless Core document, so a later ordinary Save must choose
 a destination and cannot silently overwrite the pre-recovery normal file.
 
-Sequence-cell autosave-before-switch uses this same exact-current v25 recovery
+Sequence-cell autosave-before-switch uses this same exact-current v26 recovery
 container and sidecar metadata. The live frontend associates the artifact with
 the source document UUID and sequence-source generation; revisiting that entry
 opens, validates, and replays the full native artifact in a staged Core rather
@@ -1320,6 +1329,14 @@ M20 advances the exact-current contract to v25/runtime replay epoch 22,
 `EditShootingFrame/canonical-v2`; exact v24/epoch-21 input is rejected without
 migration. Canonical snapshot-composite schema 3 is unchanged because the
 shooting-frame overlay is not flattened into normal output.
+M22 advances the exact-current contract to v26/runtime replay epoch 23,
+`DocumentArchive`/document-metadata schema 5, `DocumentStateDigest` schema
+9/domain 8, and EditorState schema 6/domain 2 for persistent stable-ID
+vanishing-point objects, `EditVanishingPoints/canonical-v2`, and the
+VanishingPoint active-tool code. Exact v25/epoch-22 input is rejected without
+migration. Canonical snapshot-composite schema 3 remains unchanged because
+vanishing points and derived radial guides are view overlays and are excluded
+from flattened normal, thumbnail, and instruction output.
 Autosave publication alone never advances the normal document/editor savepoint,
 adopts a normal path, clears dirty state, or overwrites the prior normal file.
 
@@ -1338,7 +1355,7 @@ itself retains the contract above.
 
 Explicit compaction is a separate export. Core first returns a confirmation
 token containing omitted event/procedure counts and document/editor/journal
-digests. Only the exact current token can write a new v25 file whose current
+digests. Only the exact current token can write a new v26 file whose current
 document is Genesis and whose PROC history is empty. The operation never changes
 or adopts the live path, journal, savepoints, dirty state, or IDs. There is no
 automatic squash.
@@ -1358,7 +1375,7 @@ deterministic mutation harness truncates and bit-flips valid native, batch, and
 all four common-raster seeds across every decoder. These regression tests do not
 replace coverage-guided fuzzing, but keep the accepted corruption corpus and
 allocation-bound paths executable on every normal `cargo test` run. The
-`rust/inkpod-format/fuzz` package provides `native_v25` for the current
-container, directory, CKPT removal/re-encode path, `native_core_v25` for staged Core
-journal/checkpoint/full-replay, retention, and compaction-plan parsing, and `cut_v25`
+`rust/inkpod-format/fuzz` package provides `native_v26` for the current
+container, directory, CKPT removal/re-encode path, `native_core_v26` for staged Core
+journal/checkpoint/full-replay, retention, and compaction-plan parsing, and `cut_v26`
 for the bounded Cut descriptor codec; all call public production entrypoints.

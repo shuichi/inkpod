@@ -28,5 +28,6 @@ mod primitive_kernel;
 mod procedure_journal;
 mod shooting_frame;
 mod state_machine;
+mod vanishing_point;
 mod vector;
 mod vector_diagnostics;

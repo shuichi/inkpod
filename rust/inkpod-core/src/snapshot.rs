@@ -206,6 +206,8 @@ pub struct RenderSnapshot {
     adjustment_luts: Vec<RenderAdjustmentLut>,
     annotations: Vec<AnnotationObjectInfo>,
     shooting_frames: Vec<ShootingFrameInfo>,
+    vanishing_points: Vec<VanishingPointInfo>,
+    radial_guides: Vec<RenderRadialGuide>,
 }
 
 impl RenderSnapshot {
@@ -337,6 +339,18 @@ impl RenderSnapshot {
     #[must_use]
     pub fn shooting_frames(&self) -> &[ShootingFrameInfo] {
         &self.shooting_frames
+    }
+
+    /// Borrows visible vanishing-point handles captured by this snapshot.
+    #[must_use]
+    pub fn vanishing_points(&self) -> &[VanishingPointInfo] {
+        &self.vanishing_points
+    }
+
+    /// Borrows viewport-clipped radial guide segments captured by this snapshot.
+    #[must_use]
+    pub fn radial_guides(&self) -> &[RenderRadialGuide] {
+        &self.radial_guides
     }
 
     /// Computes the canonical document-result digest for this immutable snapshot.
@@ -553,6 +567,11 @@ impl Core {
                     .map(|session| &session.preview_document)
             })
             .or_else(|| {
+                self.vanishing_point_preview
+                    .as_ref()
+                    .map(|session| &session.preview_document)
+            })
+            .or_else(|| {
                 self.filter_preview
                     .as_ref()
                     .map(|session| &session.preview_document)
@@ -575,6 +594,8 @@ impl Core {
                 adjustment_luts: Vec::new(),
                 annotations: Vec::new(),
                 shooting_frames: Vec::new(),
+                vanishing_points: Vec::new(),
+                radial_guides: Vec::new(),
             };
         };
         let snapshot_revision = self
@@ -583,6 +604,11 @@ impl Core {
             .map(|session| RenderRevision::from_raw(session.preview_revision.get()))
             .or_else(|| {
                 self.shooting_frame_preview
+                    .as_ref()
+                    .map(|session| RenderRevision::from_raw(session.preview_revision.get()))
+            })
+            .or_else(|| {
+                self.vanishing_point_preview
                     .as_ref()
                     .map(|session| RenderRevision::from_raw(session.preview_revision.get()))
             })
@@ -666,6 +692,8 @@ impl Core {
                     .filter(|frame| frame.input.visible)
                     .map(|frame| vec![frame.info()])
                     .unwrap_or_default(),
+                vanishing_points: visible_vanishing_point_infos(document),
+                radial_guides: build_radial_guides(document, self.view),
             };
         }
         let mut coords: Vec<_> = document
@@ -778,6 +806,8 @@ impl Core {
                 .filter(|frame| frame.input.visible)
                 .map(|frame| vec![frame.info()])
                 .unwrap_or_default(),
+            vanishing_points: visible_vanishing_point_infos(document),
+            radial_guides: build_radial_guides(document, self.view),
         }
     }
 
@@ -834,6 +864,8 @@ impl Core {
             adjustment_luts: Vec::new(),
             annotations: Vec::new(),
             shooting_frames: Vec::new(),
+            vanishing_points: Vec::new(),
+            radial_guides: Vec::new(),
         })
     }
 }
@@ -2157,7 +2189,7 @@ mod tests {
             blake3::hash(validation_call_graph.as_bytes())
                 .to_hex()
                 .to_string(),
-            "f6798fddf9f349d00c0538e12493564f10b4e4f48720a0b61d381897cc7b373d",
+            "eacb8e888e9ca03298923b797f3532950144b4a3f978aa0fcc630cb0a88d023b",
             "primary snapshot validation call graph changed; audit payload/hash access before updating this lock"
         );
     }

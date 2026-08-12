@@ -150,6 +150,7 @@ fn document_tree_fixture() -> DocumentArchive {
         color_chart_locked: false,
         annotations: Vec::new(),
         shooting_frame: None,
+        vanishing_points: Vec::new(),
     });
     document
 }
@@ -415,7 +416,7 @@ fn pm_gap_018_vector_connections_round_trip_and_reject_invalid_topology() {
 
 #[test]
 fn non_current_container_versions_are_rejected_before_format_freeze() {
-    for version in [1_u32, 2_u32, 3_u32, 24_u32] {
+    for version in [1_u32, 2_u32, 3_u32, FORMAT_VERSION - 1] {
         let mut encoded = encode(&base_fixture()).unwrap();
         encoded[8..12].copy_from_slice(&version.to_le_bytes());
         assert!(matches!(
@@ -466,7 +467,7 @@ fn procedure_file_fixture() -> NativeFile {
 }
 
 #[test]
-fn io_001_v25_directory_digest_and_opaque_sections_round_trip() {
+fn io_001_v26_directory_digest_and_opaque_sections_round_trip() {
     let file = procedure_file_fixture();
     let bytes = encode_procedure_file(&file).unwrap();
     assert_eq!(&bytes[0..8], b"INKPOD\0\0");
@@ -496,14 +497,14 @@ fn io_001_v25_directory_digest_and_opaque_sections_round_trip() {
 }
 
 #[test]
-fn io_001_v25_accepts_checkpoint_and_rejects_noncurrent_missing_duplicate_overlap_and_bad_digest() {
+fn io_001_v26_accepts_checkpoint_and_rejects_noncurrent_missing_duplicate_overlap_and_bad_digest() {
     let file = procedure_file_fixture();
     let encoded = encode_procedure_file(&file).unwrap();
 
-    let mut v22 = encoded.clone();
-    v22[8..12].copy_from_slice(&22_u32.to_le_bytes());
+    let mut v25 = encoded.clone();
+    v25[8..12].copy_from_slice(&FORMAT_VERSION.saturating_sub(1).to_le_bytes());
     assert!(matches!(
-        decode_procedure_file(&v22),
+        decode_procedure_file(&v25),
         Err(FormatError::Unsupported("format version is not supported"))
     ));
 
@@ -559,9 +560,9 @@ fn io_001_v25_accepts_checkpoint_and_rejects_noncurrent_missing_duplicate_overla
 }
 
 #[test]
-fn io_001_v25_streaming_cancel_keeps_existing_destination_and_removes_temp() {
+fn io_001_v26_streaming_cancel_keeps_existing_destination_and_removes_temp() {
     let directory = std::env::temp_dir().join(format!(
-        "inkpod-v25-cancel-test-{}-{}",
+        "inkpod-v26-cancel-test-{}-{}",
         std::process::id(),
         TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
     ));
@@ -588,9 +589,9 @@ fn io_001_v25_streaming_cancel_keeps_existing_destination_and_removes_temp() {
 }
 
 #[test]
-fn io_001_v25_atomic_save_replaces_an_existing_container() {
+fn io_001_v26_atomic_save_replaces_an_existing_container() {
     let directory = std::env::temp_dir().join(format!(
-        "inkpod-v25-replace-test-{}-{}",
+        "inkpod-v26-replace-test-{}-{}",
         std::process::id(),
         TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
     ));
@@ -710,6 +711,61 @@ fn shooting_frame_metadata_round_trips_and_rejects_invalid_geometry_and_ids() {
         encode(&duplicate_id),
         Err(FormatError::Invalid(
             "shooting-frame properties are invalid"
+        ))
+    ));
+}
+
+#[test]
+fn vanishing_point_metadata_round_trips_exact_depth_and_rejects_malformed_fields() {
+    let mut document = document_tree_fixture();
+    let metadata = document.document_metadata.as_mut().unwrap();
+    metadata.layers.push(FileLayer {
+        id: 7,
+        kind: LayerKind::VanishingPoint,
+        name: "Perspective".to_owned(),
+        visible: true,
+        editable: true,
+        opacity_milli: 1_000,
+        planes: Vec::new(),
+    });
+    metadata.vanishing_points.push(FileVanishingPoint {
+        id: 8,
+        layer_id: 7,
+        x_milli: -20_000,
+        y_milli: 96_000,
+        interval_milli_degrees: 1_000,
+        angle_milli_degrees: 179_999,
+        color: PixelValue::Rgba16([257, 2_000, 40_000, 65_535]),
+        opacity_milli: 1_000,
+        visible: true,
+    });
+    assert_eq!(decode(&encode(&document).unwrap()).unwrap(), document);
+
+    let mut invalid_angle = document.clone();
+    invalid_angle
+        .document_metadata
+        .as_mut()
+        .unwrap()
+        .vanishing_points[0]
+        .angle_milli_degrees = 180_000;
+    assert!(matches!(
+        encode(&invalid_angle),
+        Err(FormatError::Invalid(
+            "vanishing-point properties are invalid"
+        ))
+    ));
+
+    let mut wrong_layer = document;
+    wrong_layer
+        .document_metadata
+        .as_mut()
+        .unwrap()
+        .vanishing_points[0]
+        .layer_id = 2;
+    assert!(matches!(
+        encode(&wrong_layer),
+        Err(FormatError::Invalid(
+            "vanishing-point properties are invalid"
         ))
     ));
 }

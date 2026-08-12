@@ -41,6 +41,10 @@ _Static_assert(sizeof(InkpodShootingFrameInput) == 64U, "shooting frame input la
 _Static_assert(sizeof(InkpodShootingFramePoint) == 16U, "shooting frame point layout drift");
 _Static_assert(sizeof(InkpodShootingFrameInfo) == 136U, "shooting frame info layout drift");
 _Static_assert(sizeof(InkpodSnapshotShootingFrameView) == 40U, "shooting frame view layout drift");
+_Static_assert(sizeof(InkpodVanishingPointInput) == 72U, "vanishing point input layout drift");
+_Static_assert(sizeof(InkpodVanishingPointInfo) == 80U, "vanishing point info layout drift");
+_Static_assert(sizeof(InkpodSnapshotRadialGuide) == 80U, "radial guide layout drift");
+_Static_assert(sizeof(InkpodSnapshotVanishingPointView) == 64U, "vanishing point view layout drift");
 _Static_assert(sizeof(InkpodSnapshotVectorEndpoint) == 32U, "vector endpoint layout drift");
 _Static_assert(sizeof(InkpodSnapshotVectorDiagnostics) == 40U, "vector diagnostics layout drift");
 _Static_assert(sizeof(InkpodObjectId) == 32U, "object id layout drift");

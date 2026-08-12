@@ -94,6 +94,17 @@ INT_PTR ShowShootingFrameOptions(
     HWND owner,
     ShootingFrameDialogState& state) noexcept;
 
+struct VanishingPointDialogState {
+    InkpodVanishingPointInput value{sizeof(InkpodVanishingPointInput)};
+    bool close_immediately{};
+    bool centered_on_owner{};
+};
+
+INT_PTR ShowVanishingPointOptions(
+    HINSTANCE instance,
+    HWND owner,
+    VanishingPointDialogState& state) noexcept;
+
 struct CutPropertiesDialogState {
     std::wstring work_title;
     std::wstring episode;

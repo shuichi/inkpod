@@ -1189,7 +1189,7 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M21 — PM-GAP-005: 前後セル切替の端点loop policy
 
-状態: 手動確認待ち
+状態: 完了
 
 関連要件: SEQ-001、SEQ-ENDPOINT-001（今回新設）。
 
@@ -1234,7 +1234,7 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M22 — PM-GAP-010: 消失点と放射補助線
 
-状態: 未着手
+状態: 手動確認待ち
 
 関連要件: SPEC.mdの消失点節。専用要件IDを新設する。
 

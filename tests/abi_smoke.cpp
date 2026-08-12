@@ -44,6 +44,14 @@ static_assert(sizeof(InkpodShootingFrameInput) == 64U);
 static_assert(sizeof(InkpodShootingFramePoint) == 16U);
 static_assert(sizeof(InkpodShootingFrameInfo) == 136U);
 static_assert(sizeof(InkpodSnapshotShootingFrameView) == 40U);
+static_assert(std::is_standard_layout_v<InkpodVanishingPointInput>);
+static_assert(std::is_standard_layout_v<InkpodVanishingPointInfo>);
+static_assert(std::is_standard_layout_v<InkpodSnapshotRadialGuide>);
+static_assert(std::is_standard_layout_v<InkpodSnapshotVanishingPointView>);
+static_assert(sizeof(InkpodVanishingPointInput) == 72U);
+static_assert(sizeof(InkpodVanishingPointInfo) == 80U);
+static_assert(sizeof(InkpodSnapshotRadialGuide) == 80U);
+static_assert(sizeof(InkpodSnapshotVanishingPointView) == 64U);
 static_assert(sizeof(InkpodColorValue) == 16U);
 static_assert(std::is_standard_layout_v<InkpodObjectId>);
 static_assert(std::is_standard_layout_v<InkpodPrimitiveRequestV3>);
@@ -180,8 +188,8 @@ int InkpodRunAbiSmoke() {
     InkpodReplayContract replay_contract{};
     replay_contract.struct_size = sizeof(replay_contract);
     if (inkpod_core_get_replay_contract(core, &replay_contract) != INKPOD_STATUS_OK
-        || replay_contract.replay_epoch != 22U
-        || replay_contract.procedure_format_version != 25U
+        || replay_contract.replay_epoch != 23U
+        || replay_contract.procedure_format_version != 26U
         || replay_contract.canonical_numeric_version != 1U
         || replay_contract.primitive_count == 0U
         || replay_contract.feature_flags != INKPOD_FEATURE_NONE) {
@@ -335,7 +343,7 @@ int InkpodRunAbiSmoke() {
     InkpodCompactionPlan compaction{};
     compaction.struct_size = sizeof(compaction);
     if (inkpod_core_get_persistence_info(core, &persistence) != INKPOD_STATUS_OK
-        || persistence.format_version != 25U
+        || persistence.format_version != 26U
         || persistence.open_strategy != INKPOD_NATIVE_OPEN_NOT_OPENED
         || persistence.flags != 0U
         || persistence.feature_flags != INKPOD_FEATURE_NONE

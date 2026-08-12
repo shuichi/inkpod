@@ -110,6 +110,39 @@ pub struct InkpodShootingFrameInfo {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodVanishingPointInput {
+    pub struct_size: u32,
+    pub visible: u32,
+    pub feature_flags: u64,
+    pub layer_id: u64,
+    pub x_milli: i64,
+    pub y_milli: i64,
+    pub interval_milli_degrees: u32,
+    pub angle_milli_degrees: u32,
+    pub opacity_milli: u32,
+    pub reserved: u32,
+    pub color: InkpodColorValue,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodVanishingPointInfo {
+    pub struct_size: u32,
+    pub visible: u32,
+    pub feature_flags: u64,
+    pub point_id: u64,
+    pub layer_id: u64,
+    pub x_milli: i64,
+    pub y_milli: i64,
+    pub interval_milli_degrees: u32,
+    pub angle_milli_degrees: u32,
+    pub opacity_milli: u32,
+    pub reserved: u32,
+    pub color: InkpodColorValue,
+}
+
+#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct InkpodTreeEdit {
     pub struct_size: u32,

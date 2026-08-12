@@ -174,6 +174,170 @@ fn shooting_frame_abi_validates_numeric_input_and_borrows_snapshot_records() {
     }
 }
 
+#[test]
+fn vanishing_point_abi_owns_query_records_and_borrows_snapshot_spans() {
+    let (mut core, initial) = create_core(64, 48, 0x5f21);
+    unsafe {
+        let (_, layer_id) = (*core)
+            .core
+            .create_layer(LayerKind::VanishingPoint, "Perspective")
+            .unwrap();
+        (*core)
+            .core
+            .apply_view(ViewCommand::ViewportResized {
+                viewport_width: 64.0,
+                viewport_height: 48.0,
+            })
+            .unwrap();
+        let base = queried_document_info(core);
+        assert!(base.document_revision > initial.document_revision);
+        let color = InkpodColorValue {
+            struct_size: size_of::<InkpodColorValue>() as u32,
+            depth: INKPOD_COLOR_DEPTH_16,
+            red: 1_000,
+            green: 20_000,
+            blue: 50_000,
+            alpha: u16::MAX,
+        };
+        let mut input = InkpodVanishingPointInput {
+            struct_size: size_of::<InkpodVanishingPointInput>() as u32,
+            visible: 1,
+            feature_flags: INKPOD_FEATURE_NONE,
+            layer_id,
+            x_milli: -20_000,
+            y_milli: 24_000,
+            interval_milli_degrees: 15_000,
+            angle_milli_degrees: 195_000,
+            opacity_milli: 750,
+            reserved: 0,
+            color,
+        };
+        let mut revision = 0;
+        let mut point_id = 0;
+        assert_eq!(
+            inkpod_core_vanishing_point_edit(
+                core,
+                base.document_revision,
+                INKPOD_VANISHING_POINT_EDIT_CREATE,
+                0,
+                &input,
+                &mut revision,
+                &mut point_id,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_ne!(point_id, 0);
+
+        let mut count = 0;
+        assert_eq!(
+            inkpod_core_vanishing_points_copy(core, ptr::null_mut(), 0, 0, &mut count),
+            INKPOD_STATUS_BUFFER_TOO_SMALL
+        );
+        assert_eq!(count, 1);
+        let mut point = InkpodVanishingPointInfo::default();
+        assert_eq!(
+            inkpod_core_vanishing_points_copy(
+                core,
+                &mut point,
+                1,
+                size_of::<InkpodVanishingPointInfo>() as u64,
+                &mut count,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(point.point_id, point_id);
+        assert_eq!(point.color.depth, INKPOD_COLOR_DEPTH_16);
+        assert_eq!(point.angle_milli_degrees, 15_000);
+
+        let stable = queried_document_info(core);
+        input.struct_size -= 1;
+        assert_eq!(
+            inkpod_core_vanishing_point_edit(
+                core,
+                stable.document_revision,
+                INKPOD_VANISHING_POINT_EDIT_UPDATE,
+                point_id,
+                &input,
+                &mut revision,
+                &mut point_id,
+            ),
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+        input.struct_size = size_of::<InkpodVanishingPointInput>() as u32;
+        assert_eq!(
+            queried_document_info(core).document_revision,
+            stable.document_revision
+        );
+
+        input.x_milli = 96_000;
+        assert_eq!(
+            inkpod_core_vanishing_point_preview_begin(
+                core,
+                stable.document_revision,
+                INKPOD_VANISHING_POINT_EDIT_UPDATE,
+                point_id,
+                &input,
+            ),
+            INKPOD_STATUS_OK
+        );
+        input.y_milli = 30_000;
+        assert_eq!(
+            inkpod_core_vanishing_point_preview_update(core, &input),
+            INKPOD_STATUS_OK
+        );
+        let options = InkpodSnapshotOptions {
+            struct_size: size_of::<InkpodSnapshotOptions>() as u32,
+            reserved: 0,
+            feature_flags: INKPOD_FEATURE_NONE,
+        };
+        let mut snapshot = ptr::null_mut();
+        assert_eq!(
+            inkpod_core_build_snapshot(core, &options, &mut snapshot),
+            INKPOD_STATUS_OK
+        );
+        let mut view = InkpodSnapshotVanishingPointView {
+            struct_size: size_of::<InkpodSnapshotVanishingPointView>() as u32,
+            ..InkpodSnapshotVanishingPointView::default()
+        };
+        assert_eq!(
+            inkpod_snapshot_get_vanishing_points(snapshot, &mut view),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(view.point_count, 1);
+        assert!(view.radial_guide_count > 0);
+        assert!(!view.points.is_null());
+        assert!(!view.radial_guides.is_null());
+        assert_eq!(inkpod_snapshot_release(&mut snapshot), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_core_vanishing_point_preview_cancel(core),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            queried_document_info(core).document_revision,
+            stable.document_revision
+        );
+        assert_eq!(
+            inkpod_core_vanishing_point_preview_begin(
+                core,
+                stable.document_revision,
+                INKPOD_VANISHING_POINT_EDIT_UPDATE,
+                point_id,
+                &input,
+            ),
+            INKPOD_STATUS_OK
+        );
+        let mut applied_revision = 0;
+        let mut applied_id = 0;
+        assert_eq!(
+            inkpod_core_vanishing_point_preview_apply(core, &mut applied_revision, &mut applied_id,),
+            INKPOD_STATUS_OK
+        );
+        assert!(applied_revision > stable.document_revision);
+        assert_eq!(applied_id, point_id);
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+    }
+}
+
 fn config() -> InkpodCoreConfig {
     InkpodCoreConfig {
         struct_size: size_of::<InkpodCoreConfig>() as u32,
@@ -4699,8 +4863,8 @@ fn replay_contract_and_snapshot_digest_are_bounded_side_effect_free_queries() {
             inkpod_core_get_replay_contract(core, &mut contract),
             INKPOD_STATUS_OK
         );
-        assert_eq!(contract.replay_epoch, 22);
-        assert_eq!(contract.procedure_format_version, 25);
+        assert_eq!(contract.replay_epoch, 23);
+        assert_eq!(contract.procedure_format_version, 26);
         assert_eq!(contract.canonical_numeric_version, 1);
         assert!(contract.primitive_count > 0);
         assert_ne!(contract.primitive_catalog_digest, [0; 32]);
