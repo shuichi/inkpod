@@ -239,15 +239,19 @@ int main() {
         || IsCommandChecked(states, IDM_FILE_RESTORE_PREVIOUS)
         || !IsCommandEnabled(states, IDM_FILE_SEQUENCE_AUTOSAVE)
         || IsCommandChecked(states, IDM_FILE_SEQUENCE_AUTOSAVE)
+        || !IsCommandEnabled(states, IDM_SEQ_WRAP_ENDPOINTS)
+        || IsCommandChecked(states, IDM_SEQ_WRAP_ENDPOINTS)
         || !IsCommandEnabled(states, IDM_FILE_NEW)) {
         return 1;
     }
 
     inputs.application.restore_previous_documents = true;
     inputs.application.sequence_autosave_before_switch = true;
+    inputs.application.sequence_wrap_endpoints = true;
     states = ComputeCommandStates(inputs);
     if (!IsCommandChecked(states, IDM_FILE_RESTORE_PREVIOUS)
-        || !IsCommandChecked(states, IDM_FILE_SEQUENCE_AUTOSAVE)) {
+        || !IsCommandChecked(states, IDM_FILE_SEQUENCE_AUTOSAVE)
+        || !IsCommandChecked(states, IDM_SEQ_WRAP_ENDPOINTS)) {
         return 21;
     }
 

@@ -12,6 +12,7 @@ namespace {
 using inkpod::app::DecodePreviousDocumentPaths;
 using inkpod::app::DecodeRecoveryMetadata;
 using inkpod::app::DecodeSequenceCellSwitchPolicy;
+using inkpod::app::DecodeSequenceEndpointPolicy;
 using inkpod::app::DecodeOutputColorGuardProfileSetting;
 using inkpod::app::DiscardRecoveryArtifact;
 using inkpod::app::DocumentIdentity;
@@ -20,12 +21,14 @@ using inkpod::app::DocumentSessionId;
 using inkpod::app::EncodePreviousDocumentPaths;
 using inkpod::app::EncodeRecoveryMetadata;
 using inkpod::app::EncodeSequenceCellSwitchPolicy;
+using inkpod::app::EncodeSequenceEndpointPolicy;
 using inkpod::app::EncodeOutputColorGuardProfileSetting;
 using inkpod::app::EnumerateRecoveryCandidatesInDirectory;
 using inkpod::app::Generation;
 using inkpod::app::ReadRecoveryMetadata;
 using inkpod::app::RecoveryMetadata;
 using inkpod::app::SequenceCellSwitchPolicy;
+using inkpod::app::SequenceEndpointPolicy;
 using inkpod::app::OutputColorGuardProfileSetting;
 using inkpod::app::SequenceRecoveryPath;
 using inkpod::app::WriteRecoveryMetadata;
@@ -161,6 +164,30 @@ int TestSequenceSwitchPolicyCodec() {
     return 0;
 }
 
+int TestSequenceEndpointPolicyCodec() {
+    std::vector<std::uint8_t> bytes;
+    SequenceEndpointPolicy decoded{SequenceEndpointPolicy::Stop};
+    if (!EncodeSequenceEndpointPolicy(SequenceEndpointPolicy::Wrap, bytes)
+        || bytes.size() != 16U
+        || !DecodeSequenceEndpointPolicy(bytes.data(), bytes.size(), decoded)
+        || decoded != SequenceEndpointPolicy::Wrap) {
+        return 30;
+    }
+    std::vector<std::uint8_t> wrong_version = bytes;
+    wrong_version[4] = 2U;
+    if (DecodeSequenceEndpointPolicy(
+            wrong_version.data(), wrong_version.size(), decoded)) {
+        return 31;
+    }
+    bytes[12] = 3U;
+    if (DecodeSequenceEndpointPolicy(bytes.data(), bytes.size(), decoded)
+        || EncodeSequenceEndpointPolicy(
+            static_cast<SequenceEndpointPolicy>(3U), bytes)) {
+        return 32;
+    }
+    return 0;
+}
+
 int TestOutputColorGuardProfileCodec() {
     std::vector<std::uint8_t> bytes;
     OutputColorGuardProfileSetting decoded{
@@ -249,6 +276,10 @@ int main() {
     const int switch_policy = TestSequenceSwitchPolicyCodec();
     if (switch_policy != 0) {
         return switch_policy;
+    }
+    const int endpoint_policy = TestSequenceEndpointPolicyCodec();
+    if (endpoint_policy != 0) {
+        return endpoint_policy;
     }
     const int output_color_guard_profile = TestOutputColorGuardProfileCodec();
     return output_color_guard_profile == 0

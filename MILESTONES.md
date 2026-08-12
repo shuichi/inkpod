@@ -1136,7 +1136,7 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M20 — PM-GAP-008: 角度と位置を持つ撮影frame
 
-状態: 手動確認待ち
+状態: 完了
 
 関連要件: DOC-001、DOC-002。撮影frame object用の独立要件IDを新設する。
 
@@ -1189,9 +1189,19 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M21 — PM-GAP-005: 前後セル切替の端点loop policy
 
-状態: 未着手
+状態: 手動確認待ち
 
-関連要件: SEQ-001。
+関連要件: SEQ-001、SEQ-ENDPOINT-001（今回新設）。
+
+今回の契約影響:
+
+| Contract | Current | M21 impact |
+|---|---:|---|
+| native `.inkpod` top-level format | 25 | 文書／EditorState／canonical procedureは不変。version更新なし |
+| runtime replay epoch | 22 | document primitive semanticsは不変。epoch更新なし |
+| C ABI | 12 | 既存layoutを変えずsize-versioned step plan／commit exportを追加。version更新なし |
+| `.inkbatch` top-level format | 2 | Batch graph／operation semanticsは不変。version更新なし |
+| sequence endpoint application setting | — | application-wide HKCU current-only record v1を追加 |
 
 成果:
 

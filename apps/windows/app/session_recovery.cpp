@@ -23,6 +23,9 @@ constexpr std::uint16_t kSessionPathsVersion = 1U;
 constexpr std::uint32_t kSequenceSwitchPolicyMagic = UINT32_C(0x50534b49);
 constexpr std::uint16_t kSequenceSwitchPolicyVersion = 1U;
 constexpr std::size_t kSequenceSwitchPolicyBytes = 16U;
+constexpr std::uint32_t kSequenceEndpointPolicyMagic = UINT32_C(0x45534b49);
+constexpr std::uint16_t kSequenceEndpointPolicyVersion = 1U;
+constexpr std::size_t kSequenceEndpointPolicyBytes = 16U;
 constexpr std::uint32_t kOutputColorGuardProfileMagic = UINT32_C(0x47434b49);
 constexpr std::uint16_t kOutputColorGuardProfileVersion = 1U;
 constexpr std::size_t kOutputColorGuardProfileBytes = 16U;
@@ -31,6 +34,7 @@ constexpr wchar_t kSettingsKey[] = L"Software\\inkpod";
 constexpr wchar_t kRestoreSettingValue[] = L"RestorePreviousDocumentsV1";
 constexpr wchar_t kPreviousPathsValue[] = L"PreviousDocumentPathsV1";
 constexpr wchar_t kSequenceSwitchPolicyValue[] = L"SequenceCellSwitchPolicyV1";
+constexpr wchar_t kSequenceEndpointPolicyValue[] = L"SequenceEndpointPolicyV1";
 constexpr wchar_t kOutputColorGuardProfileValue[] = L"OutputColorGuardProfileV1";
 constexpr std::size_t kMaximumRestoredDocumentPaths = 64U;
 
@@ -815,6 +819,112 @@ bool SaveSequenceCellSwitchPolicy(
     const bool saved = RegSetValueExW(
         key,
         kSequenceSwitchPolicyValue,
+        0U,
+        REG_BINARY,
+        bytes.data(),
+        static_cast<DWORD>(bytes.size())) == ERROR_SUCCESS;
+    RegCloseKey(key);
+    return saved;
+}
+
+bool EncodeSequenceEndpointPolicy(
+    SequenceEndpointPolicy policy,
+    std::vector<std::uint8_t>& output) noexcept {
+    if (policy != SequenceEndpointPolicy::Stop
+        && policy != SequenceEndpointPolicy::Wrap) {
+        return false;
+    }
+    try {
+        output.clear();
+        output.reserve(kSequenceEndpointPolicyBytes);
+        AppendU32(output, kSequenceEndpointPolicyMagic);
+        AppendU16(output, kSequenceEndpointPolicyVersion);
+        AppendU16(output, 0U);
+        AppendU32(output, static_cast<std::uint32_t>(kSequenceEndpointPolicyBytes));
+        AppendU32(output, static_cast<std::uint32_t>(policy));
+        return output.size() == kSequenceEndpointPolicyBytes;
+    } catch (const std::bad_alloc&) {
+        output.clear();
+        return false;
+    }
+}
+
+bool DecodeSequenceEndpointPolicy(
+    const std::uint8_t* bytes,
+    std::size_t length,
+    SequenceEndpointPolicy& policy) noexcept {
+    if (bytes == nullptr || length != kSequenceEndpointPolicyBytes) {
+        return false;
+    }
+    std::size_t cursor{};
+    std::uint32_t magic{};
+    std::uint16_t version{};
+    std::uint16_t reserved{};
+    std::uint32_t total{};
+    std::uint32_t raw_policy{};
+    if (!ReadU32(bytes, length, cursor, magic)
+        || !ReadU16(bytes, length, cursor, version)
+        || !ReadU16(bytes, length, cursor, reserved)
+        || !ReadU32(bytes, length, cursor, total)
+        || !ReadU32(bytes, length, cursor, raw_policy)
+        || cursor != length || magic != kSequenceEndpointPolicyMagic
+        || version != kSequenceEndpointPolicyVersion || reserved != 0U
+        || total != length
+        || (raw_policy != static_cast<std::uint32_t>(SequenceEndpointPolicy::Stop)
+            && raw_policy
+                != static_cast<std::uint32_t>(SequenceEndpointPolicy::Wrap))) {
+        return false;
+    }
+    policy = static_cast<SequenceEndpointPolicy>(raw_policy);
+    return true;
+}
+
+bool LoadSequenceEndpointPolicy(
+    SequenceEndpointPolicy& policy) noexcept {
+    policy = SequenceEndpointPolicy::Stop;
+    HKEY key{};
+    if (!OpenSettingsKey(KEY_QUERY_VALUE, key)) {
+        return false;
+    }
+    DWORD type{};
+    DWORD byte_count{};
+    LSTATUS status = RegQueryValueExW(
+        key, kSequenceEndpointPolicyValue, nullptr, &type, nullptr, &byte_count);
+    if (status == ERROR_FILE_NOT_FOUND) {
+        RegCloseKey(key);
+        return true;
+    }
+    if (status != ERROR_SUCCESS || type != REG_BINARY
+        || byte_count != kSequenceEndpointPolicyBytes) {
+        RegCloseKey(key);
+        return false;
+    }
+    std::array<std::uint8_t, kSequenceEndpointPolicyBytes> bytes{};
+    status = RegQueryValueExW(
+        key,
+        kSequenceEndpointPolicyValue,
+        nullptr,
+        &type,
+        bytes.data(),
+        &byte_count);
+    RegCloseKey(key);
+    return status == ERROR_SUCCESS
+        && DecodeSequenceEndpointPolicy(bytes.data(), bytes.size(), policy);
+}
+
+bool SaveSequenceEndpointPolicy(
+    SequenceEndpointPolicy policy) noexcept {
+    std::vector<std::uint8_t> bytes;
+    if (!EncodeSequenceEndpointPolicy(policy, bytes)) {
+        return false;
+    }
+    HKEY key{};
+    if (!OpenSettingsKey(KEY_SET_VALUE, key)) {
+        return false;
+    }
+    const bool saved = RegSetValueExW(
+        key,
+        kSequenceEndpointPolicyValue,
         0U,
         REG_BINARY,
         bytes.data(),

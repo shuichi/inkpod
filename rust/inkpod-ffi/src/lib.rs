@@ -50,14 +50,14 @@ use inkpod_core::{
     ScopedColorReplaceMode, ScopedColorReplacePreview, ScopedColorReplaceRequest,
     SelectionConstructionOptions, SelectionLayerOperation, SelectionOperation, SelectionSample,
     SelectionShape, SequenceCellSource, SequenceDirection, SequenceEditOperation,
-    SequenceEditRequest, SequenceMemberId, SequenceSwitchPolicy, SequenceSwitchRequest,
-    ShootingFrameAnchor, ShootingFrameEdit, ShootingFrameInfo, ShootingFrameInput,
-    ShootingFramePreviewTarget, ShortcutBinding, ShortcutSequenceBinding, ShortcutStroke, Stamp,
-    StampGesture, StampShape, StartColorPredicate, Stroke, StrokeSample, TileRaster,
-    TraceBrushOptions, TraceBrushShape, VectorCenterlineMode, VectorCubicSegment, VectorEndpoint,
-    VectorEraseMode, VectorPathInput, VectorSelectionMode, VectorWidthMode, ViewCommand,
-    plan_cell_creation, read_color_chart, read_palette, save_color_chart_atomic,
-    save_palette_atomic,
+    SequenceEditRequest, SequenceEndpointPolicy, SequenceMemberId, SequenceStepPlan,
+    SequenceStepResult, SequenceSwitchPolicy, SequenceSwitchRequest, ShootingFrameAnchor,
+    ShootingFrameEdit, ShootingFrameInfo, ShootingFrameInput, ShootingFramePreviewTarget,
+    ShortcutBinding, ShortcutSequenceBinding, ShortcutStroke, Stamp, StampGesture, StampShape,
+    StartColorPredicate, Stroke, StrokeSample, TileRaster, TraceBrushOptions, TraceBrushShape,
+    VectorCenterlineMode, VectorCubicSegment, VectorEndpoint, VectorEraseMode, VectorPathInput,
+    VectorSelectionMode, VectorWidthMode, ViewCommand, plan_cell_creation, read_color_chart,
+    read_palette, save_color_chart_atomic, save_palette_atomic,
 };
 use std::cell::RefCell;
 use std::mem::{align_of, size_of};

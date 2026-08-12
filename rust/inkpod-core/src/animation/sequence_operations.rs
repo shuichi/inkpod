@@ -131,6 +131,120 @@ impl Core {
             .collect()
     }
 
+    /// Resolves an adjacent sequence target without changing document or editor state.
+    ///
+    /// No configured sequence returns an explicit `Empty` plan. An existing sequence
+    /// requires the active document to match one immutable sequence identity. Empty,
+    /// single-cell, stopped, adjacent, and wrapped results are distinct. Resolving a
+    /// request never changes document revision, history, journal, dirty state, or
+    /// savepoints.
+    pub fn resolve_sequence_step(
+        &self,
+        direction: SequenceDirection,
+        endpoint_policy: SequenceEndpointPolicy,
+    ) -> Result<SequenceStepPlan, CoreError> {
+        self.ensure_no_active_stroke()?;
+        let Some(sequence) = self.sequence.as_ref() else {
+            return Ok(SequenceStepPlan {
+                direction,
+                endpoint_policy,
+                result: SequenceStepResult::Empty,
+                sequence_revision: 0,
+                source_index: None,
+                target_index: None,
+                source_document_uuid: None,
+                source_generation: None,
+                target_document_uuid: None,
+                target_generation: None,
+                source_cell_number: None,
+                target_cell_number: None,
+            });
+        };
+        let source_index = sequence.active_index.ok_or(CoreError::InvalidState(
+            "active document is not bound to a sequence entry",
+        ))?;
+        let source = sequence
+            .cells
+            .get(source_index)
+            .ok_or(CoreError::InvalidState("sequence active index is invalid"))?;
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        if document.uuid != source.document_uuid {
+            return Err(CoreError::InvalidState(
+                "active document identity does not match the sequence source",
+            ));
+        }
+        let count = sequence.cells.len();
+        let (target_index, result) = if count == 1 {
+            (source_index, SequenceStepResult::SingleCell)
+        } else {
+            match direction {
+                SequenceDirection::Previous if source_index == 0 => match endpoint_policy {
+                    SequenceEndpointPolicy::Stop => (source_index, SequenceStepResult::Stopped),
+                    SequenceEndpointPolicy::Wrap => (count - 1, SequenceStepResult::Wrapped),
+                },
+                SequenceDirection::Previous => (source_index - 1, SequenceStepResult::Advanced),
+                SequenceDirection::Next if source_index + 1 == count => match endpoint_policy {
+                    SequenceEndpointPolicy::Stop => (source_index, SequenceStepResult::Stopped),
+                    SequenceEndpointPolicy::Wrap => (0, SequenceStepResult::Wrapped),
+                },
+                SequenceDirection::Next => (source_index + 1, SequenceStepResult::Advanced),
+            }
+        };
+        let target = sequence
+            .cells
+            .get(target_index)
+            .ok_or(CoreError::InvalidState(
+                "resolved sequence target is invalid",
+            ))?;
+        Ok(SequenceStepPlan {
+            direction,
+            endpoint_policy,
+            result,
+            sequence_revision: sequence.revision,
+            source_index: Some(
+                u32::try_from(source_index)
+                    .map_err(|_| CoreError::InvalidState("sequence source index overflows"))?,
+            ),
+            target_index: Some(
+                u32::try_from(target_index)
+                    .map_err(|_| CoreError::InvalidState("sequence target index overflows"))?,
+            ),
+            source_document_uuid: Some(source.document_uuid),
+            source_generation: Some(source.source_generation),
+            target_document_uuid: Some(target.document_uuid),
+            target_generation: Some(target.source_generation),
+            source_cell_number: Some(source.cell_number),
+            target_cell_number: Some(target.cell_number),
+        })
+    }
+
+    /// Commits one previously resolved normal sequence navigation request.
+    ///
+    /// Empty, single-cell, and stopped plans are semantic no-ops and return current
+    /// document information even if the document is dirty. A plan that changes the
+    /// active cell requires a clean document. Any stale identity/revision, unsaved
+    /// change, overflow, or activation failure leaves document, editor state, history,
+    /// journal, dirty state, savepoint, and sequence state unchanged.
+    pub fn commit_sequence_step(
+        &mut self,
+        plan: SequenceStepPlan,
+    ) -> Result<DocumentInfo, CoreError> {
+        let current = self.resolve_sequence_step(plan.direction, plan.endpoint_policy)?;
+        if current != plan {
+            return Err(CoreError::InvalidState("sequence step request is stale"));
+        }
+        if !plan.requires_switch() {
+            return self.document_info();
+        }
+        if self.savepoint != Some(self.current_state) {
+            return Err(CoreError::UnsavedChanges);
+        }
+        let target = plan
+            .target_index
+            .ok_or(CoreError::InvalidState("sequence step target is missing"))?;
+        self.sequence_activate_impl(target as usize)
+    }
+
     /// Activates the adjacent sequence cell, optionally wrapping at the ends.
     ///
     /// Unsaved document changes and active strokes are rejected. Editor-only dirty
@@ -149,34 +263,13 @@ impl Core {
         if self.savepoint != Some(self.current_state) {
             return Err(CoreError::UnsavedChanges);
         }
-        let sequence = self
-            .sequence
-            .as_ref()
-            .ok_or(CoreError::InvalidState("no sequence is configured"))?;
-        let count = sequence.cells.len();
-        let current = sequence.active_index.unwrap_or(match direction {
-            SequenceDirection::Previous => count,
-            SequenceDirection::Next => usize::MAX,
-        });
-        let target = match direction {
-            SequenceDirection::Previous => {
-                if current == 0 {
-                    if loop_sequence { count - 1 } else { 0 }
-                } else {
-                    current.min(count) - 1
-                }
-            }
-            SequenceDirection::Next => {
-                if current == usize::MAX {
-                    0
-                } else if current + 1 >= count {
-                    if loop_sequence { 0 } else { count - 1 }
-                } else {
-                    current + 1
-                }
-            }
+        let endpoint_policy = if loop_sequence {
+            SequenceEndpointPolicy::Wrap
+        } else {
+            SequenceEndpointPolicy::Stop
         };
-        self.sequence_activate(target)
+        let plan = self.resolve_sequence_step(direction, endpoint_policy)?;
+        self.commit_sequence_step(plan)
     }
 
     /// Activates a sequence cell by zero-based natural-order index.

@@ -611,8 +611,25 @@ the bytes are never persisted in the Cut descriptor. Reorder, renumber, Cut
 Undo/Redo, and save/reopen therefore preserve the thumbnail-to-member binding,
 while an invalid or mismatched source never substitutes pixels from another Cell.
 
-Sequence navigation has one application-level, versioned `Prompt` or
-`Autosave-before-switch` policy. The autosave route first asks Core for an
+Normal previous/next navigation has a separate application-level endpoint
+policy. `SequenceEndpointPolicyV1` is a versioned, bounded HKCU record shared by
+every workspace window in the process; missing, malformed, and noncurrent input
+falls back to `Stop`. `Stop` and `Wrap` are closed values and are independent of
+motion-check loop state. The menu checked state, configurable shortcut, status,
+and accessibility presentation all read the same `AppLifetimeState` value, so
+changing it never changes document/editor revision, history, dirty state,
+savepoint, replay, or native file schema.
+
+Core resolves every relative command into an immutable `SequenceStepPlan` with
+an explicit empty, single-cell, stopped, advanced, or wrapped result. Nonempty
+plans capture sequence revision and the source/target UUID, source generation,
+natural-order index, and parsed cell number. Commit re-resolves the captured
+direction and endpoint policy and rejects stale identity or revision atomically.
+The Windows adapter uses the Core-provided target for both prompt and autosave
+routes; it does not derive endpoint behavior from pane indices.
+
+Sequence navigation also has one application-level, versioned `Prompt` or
+`Autosave-before-switch` dirty-cell policy. The autosave route first asks Core for an
 immutable value request containing the exact source/target UUIDs, sequence-source
 generations, and source document/editor revisions. `DocumentSession` owns a
 bounded registry keyed by source UUID plus generation; each published entry owns
@@ -633,8 +650,8 @@ pre-reserved association, active cell, pathless recovery shell state, panes, and
 menu state only for the captured live session. Save, metadata, queue, or stale
 failure leaves the source cell active and never advances the normal path or
 savepoint; close or shutdown invalidates and discards that session without
-retargeting completion to another document. The HKCU policy record is versioned
-frontend state, not part of the `.inkpod` schema.
+retargeting completion to another document. Both HKCU policy records are
+versioned frontend state, not part of the `.inkpod` schema.
 
 The Light Table palette also uses the pane-target registry. Its set/item
 selection is valid only with the captured session/generation namespace, and

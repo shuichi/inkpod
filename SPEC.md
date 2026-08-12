@@ -188,7 +188,9 @@ Windows GUI は標準的な Windows 11 desktop application とし、古典的 MD
 - 開いたセルと同じ sequence/folder にある画像は file preview に自然順で表示する。thumbnail click、前/次 command、番号指定で切り替える。
 - active cell が dirty の状態で別セルへ移る場合は、versioned application setting で `Prompt` または `Autosave-before-switch` を選ぶ。Prompt の cancel、自動保存の失敗、発行後 stale、queue rejection では現在セルと未保存編集を保ち、durable な native recovery artifact と metadata の publication 成功後だけ対象セルへ切り替える。
 - 自動保存済みセルは sequence entry の document UUID と source generation に関連付け、戻る際は exact native state を staged Core で検証・replayしてから active Core を交換する。flattened preview source から history、layer/plane tree、selection、editor state を再構成しない。
-- `前のセル` と `次のセル` は欠番を飛ばし、設定で末尾から先頭へ循環できる。
+- `前のセル` と `次のセル` は、自然順に存在する entry だけを対象として欠番を飛ばす。closed な端点 policy は `Stop` と `Wrap` の二つとし、`Stop` は先頭から前／末尾から次を完全な no-op、`Wrap` は先頭と末尾を相互に切り替える。空 sequence と一件だけの sequence も別の明示 no-op result とする。
+- 端点 policy は application-wide の versioned、length-bounded な HKCU setting とし、既定は `Stop`、missing／malformed／noncurrent record も `Stop` へ戻す。同一 process の全 workspace window は同じ値を使い、`連番・サブパレット > 端点で循環` の menu checked state、設定 command、configurable shortcut、status／accessibility 表示を一つの setting へ接続する。この値は document／EditorState／canonical procedure ではなく、document revision、history、journal、dirty、savepoint、`.inkpod` format を変えない。
+- 通常の前後セル command は発行時の direction、端点 policy、sequence revision、source／target の document UUID、source generation、自然順 index、cell number を固定する。commit 前に Core が同じ target を再解決し、発行後の sequence／source／target 変更は stale として原子的に拒否する。通常 navigation の端点 policy と motion check 自身の loop setting は独立とする。
 - 通常保存、自動保存、recovery、export は別 status とし、自動保存成功だけで通常 savepoint、document path authority、dirty 表示を進めない。
 - 保存は temp file 完成後の置換とし、失敗しても元ファイルを残す。起動時は全 recovery 候補を列挙し、一件ずつ復元/破棄/保留を選べるようにして、silent に捨てない。通常の前回文書復元は layout と crash recovery から分離した既定 off の明示設定とする。
 - `名前を付けて保存` は成功時に file identity registry、title、recent files、recovery metadata を一つの transaction として更新する。保存先 identity が別の open session と競合する場合は上書きや silent merge をせず、明示的な解決を求める。
@@ -666,7 +668,8 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - `LT-002`: reference-frame alignment、boundary/color sampling、edit image swap
 - `LT-003`: 自然順の前／後／両方向Nセルを線形opacity stepと時系列z-orderでpreviewし、同一source UUIDの既存itemを保持したまま一つのUndo単位で一括登録する
 - `CUT-001`: stable CutId、metadata、Cell作成既定値、ordered Cell membershipを、同一directoryの個別Cell `.inkpod`へのbounded相対参照として保持し、独立history／savepoint／recovery、default明示copy、staged identity検証、Cut Properties／Undo／Redo／save／reopenを提供する
-- `SEQ-001`: cut/cell sequence、前後セル、欠番、thumbnail preview
+- `SEQ-001`: cut/cell sequence、自然順の前後セル、欠番、thumbnail preview
+- `SEQ-ENDPOINT-001`: application-wideの`Stop`／`Wrap`端点policy、empty／one／stopped／advanced／wrapped result、issue-time cell identity、motion loopとの分離、versioned HKCU persistence
 - `SEQ-STRUCT-001`: Cut membership の add／remove／move-before／move-after／range renumber を stable Cell identity の一 transaction として行い、表示順／番号を file 名から分離し、Cut 専用 Undo／Redo、save／reopen、orphan 状態を提供する
 - `SEQ-002`: motion check、FPS、loop、step、selection/light table option
 - `SHORT-001`: 全 menu command への single/multi-stroke shortcut、text-focus guard、prefix-free resolve、conflict replacement、永続化、reset

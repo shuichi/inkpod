@@ -872,6 +872,7 @@
               <li class="search-unit"><div class="command-name">制作 › 連番・サブパレット › 前のセル</div><div class="command-desc">自然順で前のセルへ移動します。未保存時は必要な保存確認を行い、キャンセルなら切り替えません。</div></li>
               <li class="search-unit"><div class="command-name">制作 › 連番・サブパレット › 次のセル</div><div class="command-desc">自然順で次のセルへ移動します。</div></li>
               <li class="search-unit"><div class="command-name">制作 › 連番・サブパレット › セル番号で移動...</div><div class="command-desc">番号を指定して連番内のセルへ移動します。存在しない番号は選択しません。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › 連番・サブパレット › 端点で循環</div><div class="command-desc">オンでは先頭の「前」と末尾の「次」を反対側の端点へ循環し、オフでは端点に停止します。アプリ全体の設定として次回起動にも保持されます。</div></li>
               <li class="search-unit"><div class="command-name">制作 › 連番・サブパレット › 選択セルをサブパレット登録</div><div class="command-desc">シーケンスで選択中のセルを参照ビューへ登録します。</div></li>
               <li class="search-unit"><div class="command-name">制作 › 連番・サブパレット › サブパレット色サンプル...</div><div class="command-desc">サブパレット／参照ビューの表示セルから色を採取します。参照セルへ描画しません。</div></li>
               <li class="search-unit"><div class="command-name">制作 › モーションチェック › 開始・設定...</div><div class="command-desc">再生範囲、倍率、背景／余白色、開始時停止、選択のみ、ライトテーブルを含めるか等を設定して再生を開始します。</div></li>
@@ -1033,7 +1034,7 @@
             </div>
             <div class="card search-unit" id="pane-sequence" data-search="シーケンス sequence thumbnails previous next import files natural order">
               <h3>シーケンス</h3>
-              <p>自然順のセル一覧とサムネイルを表示し、選択、前へ、次へ、ファイル追加ができます。アクティブ追従／文書固定に対応します。現行版ではセル切替時の自動保存と端点ループを指定する専用コントロールはありません。</p>
+              <p>自然順のセル一覧とサムネイルを表示し、選択、前へ、次へ、ファイル追加ができます。アクティブ追従／文書固定に対応します。セル切替前の自動保存は「ファイル」メニュー、端点の停止／循環は「制作 › 連番・サブパレット」メニューから設定します。</p>
               <p><span class="menu-path">ウィンドウ › シーケンス</span></p>
             </div>
             <div class="card search-unit" id="pane-light-table" data-search="ライトテーブル light table set reference image opacity transform reload swap canvas move">
@@ -1175,7 +1176,7 @@
           </div>
           <div class="search-unit" data-search="sequence natural order siblings thumbnails previous next goto export">
             <h3 id="sequence-workflow">連番</h3>
-            <p>「連番を読み込み...」またはシーケンスの「ファイルを追加」で画像列を読み込みます。同じフォルダーの対応画像は自然順で並びます。サムネイル、前／次、番号指定で切り替えます。未保存変更があるセルから移る際に確認が出た場合、キャンセルすると切り替わりません。</p>
+            <p>「連番を読み込み...」またはシーケンスの「ファイルを追加」で画像列を読み込みます。同じフォルダーの対応画像は自然順で並びます。サムネイル、前／次、番号指定で切り替えます。「端点で循環」をオンにすると先頭と末尾を前／次で循環し、オフでは端点に停止します。この設定はアプリ全体で共有・保存され、モーションチェックのループ設定とは独立しています。未保存変更があるセルから移る際に確認が出た場合、キャンセルすると切り替わりません。</p>
           </div>
           <div class="search-unit" data-search="subpalette reference viewer sample readonly current previous auto scroll sync">
             <h3 id="subpalette-workflow">サブパレット／参照ビュー</h3>
@@ -1382,7 +1383,7 @@
             <ul>
               <li>UIリソースは日本語のみです。英語表示へ切り替える設定はありません。</li>
               <li>AutoHide端ボタンは支援技術から名前を取得できますが、<kbd>F6</kbd>／<kbd>Tab</kbd>だけでは到達できない場合があります。</li>
-              <li>ライトテーブルの前後N枚一括登録／自動不透明度ステップ、シーケンスの切替時自動保存／端点ループの専用UIはありません。</li>
+              <li>シーケンスペイン内にはセル切替時自動保存／端点循環の専用コントロールはありません。各設定はメニューから変更します。</li>
               <li>レイヤー／プレーンの複数対象同時編集を示す専用表示はありません。</li>
               <li>ベクター同士の順序は保たれますが、現行表示ではベクター内容が合成済みラスターの後に描かれ、ラスターとベクターを任意に交互配置した見え方にはなりません。</li>
               <li>バッチの実出力は `.inkpod` です。</li>

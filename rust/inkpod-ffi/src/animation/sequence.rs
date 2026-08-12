@@ -931,6 +931,141 @@ fn write_sequence_switch_request(
     };
 }
 
+fn parse_sequence_endpoint_policy(value: u32) -> Result<SequenceEndpointPolicy, u32> {
+    match value {
+        INKPOD_SEQUENCE_ENDPOINT_STOP => Ok(SequenceEndpointPolicy::Stop),
+        INKPOD_SEQUENCE_ENDPOINT_WRAP => Ok(SequenceEndpointPolicy::Wrap),
+        _ => Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "sequence endpoint policy is not defined",
+        )),
+    }
+}
+
+fn parse_sequence_step_result(value: u32) -> Result<SequenceStepResult, u32> {
+    match value {
+        INKPOD_SEQUENCE_STEP_EMPTY => Ok(SequenceStepResult::Empty),
+        INKPOD_SEQUENCE_STEP_SINGLE_CELL => Ok(SequenceStepResult::SingleCell),
+        INKPOD_SEQUENCE_STEP_STOPPED => Ok(SequenceStepResult::Stopped),
+        INKPOD_SEQUENCE_STEP_ADVANCED => Ok(SequenceStepResult::Advanced),
+        INKPOD_SEQUENCE_STEP_WRAPPED => Ok(SequenceStepResult::Wrapped),
+        _ => Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "sequence step result is not defined",
+        )),
+    }
+}
+
+fn parse_sequence_step_plan(input: &InkpodSequenceStepPlan) -> Result<SequenceStepPlan, u32> {
+    if input.feature_flags != INKPOD_FEATURE_NONE {
+        return Err(fail(
+            INKPOD_STATUS_UNSUPPORTED,
+            "sequence step plan contains unsupported flags",
+        ));
+    }
+    let direction = parse_sequence_direction(input.direction)?;
+    let endpoint_policy = parse_sequence_endpoint_policy(input.endpoint_policy)?;
+    let result = parse_sequence_step_result(input.result_class)?;
+    if result == SequenceStepResult::Empty {
+        if input.sequence_revision != 0
+            || input.source_index != INKPOD_SEQUENCE_INDEX_NONE
+            || input.target_index != INKPOD_SEQUENCE_INDEX_NONE
+            || input.source_document_uuid_high != 0
+            || input.source_document_uuid_low != 0
+            || input.source_generation != 0
+            || input.target_document_uuid_high != 0
+            || input.target_document_uuid_low != 0
+            || input.target_generation != 0
+            || input.source_cell_number != 0
+            || input.target_cell_number != 0
+        {
+            return Err(fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "empty sequence step plan contains an identity",
+            ));
+        }
+        return Ok(SequenceStepPlan {
+            direction,
+            endpoint_policy,
+            result,
+            sequence_revision: 0,
+            source_index: None,
+            target_index: None,
+            source_document_uuid: None,
+            source_generation: None,
+            target_document_uuid: None,
+            target_generation: None,
+            source_cell_number: None,
+            target_cell_number: None,
+        });
+    }
+    let source_document_uuid = (u128::from(input.source_document_uuid_high) << 64)
+        | u128::from(input.source_document_uuid_low);
+    let target_document_uuid = (u128::from(input.target_document_uuid_high) << 64)
+        | u128::from(input.target_document_uuid_low);
+    if input.sequence_revision == 0
+        || input.source_index == INKPOD_SEQUENCE_INDEX_NONE
+        || input.target_index == INKPOD_SEQUENCE_INDEX_NONE
+        || source_document_uuid == 0
+        || target_document_uuid == 0
+        || input.source_generation == 0
+        || input.target_generation == 0
+        || input.source_cell_number == 0
+        || input.target_cell_number == 0
+    {
+        return Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "sequence step plan identity is incomplete",
+        ));
+    }
+    Ok(SequenceStepPlan {
+        direction,
+        endpoint_policy,
+        result,
+        sequence_revision: input.sequence_revision,
+        source_index: Some(input.source_index),
+        target_index: Some(input.target_index),
+        source_document_uuid: Some(source_document_uuid),
+        source_generation: Some(input.source_generation),
+        target_document_uuid: Some(target_document_uuid),
+        target_generation: Some(input.target_generation),
+        source_cell_number: Some(input.source_cell_number),
+        target_cell_number: Some(input.target_cell_number),
+    })
+}
+
+fn write_sequence_step_plan(output: &mut InkpodSequenceStepPlan, plan: SequenceStepPlan) {
+    output.direction = match plan.direction {
+        SequenceDirection::Previous => INKPOD_SEQUENCE_PREVIOUS,
+        SequenceDirection::Next => INKPOD_SEQUENCE_NEXT,
+    };
+    output.endpoint_policy = match plan.endpoint_policy {
+        SequenceEndpointPolicy::Stop => INKPOD_SEQUENCE_ENDPOINT_STOP,
+        SequenceEndpointPolicy::Wrap => INKPOD_SEQUENCE_ENDPOINT_WRAP,
+    };
+    output.result_class = match plan.result {
+        SequenceStepResult::Empty => INKPOD_SEQUENCE_STEP_EMPTY,
+        SequenceStepResult::SingleCell => INKPOD_SEQUENCE_STEP_SINGLE_CELL,
+        SequenceStepResult::Stopped => INKPOD_SEQUENCE_STEP_STOPPED,
+        SequenceStepResult::Advanced => INKPOD_SEQUENCE_STEP_ADVANCED,
+        SequenceStepResult::Wrapped => INKPOD_SEQUENCE_STEP_WRAPPED,
+    };
+    output.feature_flags = INKPOD_FEATURE_NONE;
+    output.sequence_revision = plan.sequence_revision;
+    let source_uuid = plan.source_document_uuid.unwrap_or(0);
+    output.source_document_uuid_high = (source_uuid >> 64) as u64;
+    output.source_document_uuid_low = source_uuid as u64;
+    output.source_generation = plan.source_generation.unwrap_or(0);
+    let target_uuid = plan.target_document_uuid.unwrap_or(0);
+    output.target_document_uuid_high = (target_uuid >> 64) as u64;
+    output.target_document_uuid_low = target_uuid as u64;
+    output.target_generation = plan.target_generation.unwrap_or(0);
+    output.source_index = plan.source_index.unwrap_or(INKPOD_SEQUENCE_INDEX_NONE);
+    output.target_index = plan.target_index.unwrap_or(INKPOD_SEQUENCE_INDEX_NONE);
+    output.source_cell_number = plan.source_cell_number.unwrap_or(0);
+    output.target_cell_number = plan.target_cell_number.unwrap_or(0);
+}
+
 /// Registers one sequence cell as the exact-depth subpalette source.
 ///
 /// # Safety
@@ -1160,6 +1295,101 @@ pub unsafe extern "C" fn inkpod_core_sequence_step(
             .core
             .sequence_step(direction, flags & INKPOD_SEQUENCE_FLAG_LOOP != 0)
         {
+            Ok(info) => {
+                write_document_info(output, info);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Resolves one previous/next command into an immutable identity and revision plan.
+///
+/// Empty, single-cell, stopped, adjacent, and wrapped outcomes are explicit and
+/// resolving never changes document or editor state.
+///
+/// # Safety
+/// Core and plan output must be complete live owner-thread records.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_sequence_step_resolve(
+    core: *mut InkpodCore,
+    direction: u32,
+    endpoint_policy: u32,
+    out_plan: *mut InkpodSequenceStepPlan,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) =
+            unsafe { validate_struct(out_plan.cast_const(), "InkpodSequenceStepPlan") }
+        {
+            return status;
+        }
+        let direction = match parse_sequence_direction(direction) {
+            Ok(direction) => direction,
+            Err(status) => return status,
+        };
+        let endpoint_policy = match parse_sequence_endpoint_policy(endpoint_policy) {
+            Ok(policy) => policy,
+            Err(status) => return status,
+        };
+        // SAFETY: Complete live records were validated above.
+        let core = unsafe { &mut *core };
+        let output = unsafe { &mut *out_plan };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core.core.resolve_sequence_step(direction, endpoint_policy) {
+            Ok(plan) => {
+                write_sequence_step_plan(output, plan);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Commits a previously resolved sequence-step plan if it is still current.
+///
+/// The borrowed plan is re-resolved by Core. A stale identity/revision, dirty
+/// switching source, invalid field, or failure leaves document and editor state unchanged.
+///
+/// # Safety
+/// Core, borrowed plan, and document-info output must be complete live owner-thread records.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_sequence_step_commit(
+    core: *mut InkpodCore,
+    plan: *const InkpodSequenceStepPlan,
+    out_info: *mut InkpodDocumentInfo,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(plan, "InkpodSequenceStepPlan") } {
+            return status;
+        }
+        if let Err(status) = unsafe { validate_struct(out_info.cast_const(), "InkpodDocumentInfo") }
+        {
+            return status;
+        }
+        // SAFETY: Complete records were validated and inputs are borrowed for this call.
+        let plan = match parse_sequence_step_plan(unsafe { &*plan }) {
+            Ok(plan) => plan,
+            Err(status) => return status,
+        };
+        let core = unsafe { &mut *core };
+        let output = unsafe { &mut *out_info };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core.core.commit_sequence_step(plan) {
             Ok(info) => {
                 write_document_info(output, info);
                 INKPOD_STATUS_OK

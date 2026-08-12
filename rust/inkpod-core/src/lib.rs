@@ -2,8 +2,7 @@
 #![warn(missing_docs)]
 //! Platform-independent document, editing, history, and rendering state for inkpod.
 //!
-//! [`Core`] is a single-writer state machine. Document-changing operations are
-//! transactional: a successful change advances the document revision and creates
+//! [`Core`] is a single-writer state machine. A successful document change creates
 //! one history entry, a semantic no-op leaves those values unchanged, and an error
 //! never publishes partial state. View-only operations advance the view revision
 //! without changing document history or dirty/savepoint state.
@@ -60,7 +59,8 @@ pub use animation::{
     LightTableBulkRegistrationSummary, LightTableDisplayMode, LightTableItemInfo,
     LightTableItemInput, LightTableItemProperties, LightTableSetInfo, LightTableSource,
     MotionCheckConfig, MotionFrame, RgbaRasterBytes, SequenceCellInfo, SequenceCellSource,
-    SequenceDirection, SequenceSwitchPolicy, SequenceSwitchRequest, Thumbnail,
+    SequenceDirection, SequenceEndpointPolicy, SequenceStepPlan, SequenceStepResult,
+    SequenceSwitchPolicy, SequenceSwitchRequest, Thumbnail,
 };
 use annotation::AnnotationObject;
 pub use annotation::*;

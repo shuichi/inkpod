@@ -38,6 +38,7 @@ pub(crate) use raster::base_raster_pixel;
 pub(crate) use raster::{flatten_document, visit_visible_document_composite_rgba16};
 pub use sequence::{
     MotionCheckConfig, MotionFrame, SequenceCellInfo, SequenceCellSource, SequenceDirection,
-    SequenceSwitchPolicy, SequenceSwitchRequest, Thumbnail,
+    SequenceEndpointPolicy, SequenceStepPlan, SequenceStepResult, SequenceSwitchPolicy,
+    SequenceSwitchRequest, Thumbnail,
 };
 pub(crate) use sequence::{MotionCheckState, SequenceState};

@@ -78,7 +78,7 @@ PDF は全 191 表示ページを確認した。PDF p2～p189 は原則として
 
 **inkpod は現時点では PaintMan の機能的上位互換とは判定できない。** 一方、既存の単一セルを対象にした「主線修正 → 色作成／参照 → フィル → 選択／変形 → 白抜け確認 → Undo／Redo → 保存」、および基本的な前後セル参照・モーション確認は、かなりの範囲で縦切り実装とテストがそろっている。
 
-個別Cell参照方式のカット作成、セル系列の構造編集、再編集可能な指示／text objectは縦切り実装、自動検証、x64 Releaseの利用者確認まで完了した。角度付き撮影frameも縦切り実装済みでx64 Releaseの利用者確認待ちである。一方、端点loop policy、消失点／放射補助線が残るため、「PaintMan の主要ワークフロー全体を損失なく完遂できる」とはまだ言えない。
+個別Cell参照方式のカット作成、セル系列の構造編集、再編集可能な指示／text object、角度付き撮影frameは縦切り実装、自動検証、x64 Releaseの利用者確認まで完了した。端点loop policyも縦切り実装と自動検証を完了し、x64 Releaseの利用者確認待ちである。一方、消失点／放射補助線が残るため、「PaintMan の主要ワークフロー全体を損失なく完遂できる」とはまだ言えない。
 
 ### 2.2 件数
 
@@ -116,8 +116,8 @@ PaintMan の塗りあふれ中断が途中結果を残すか、フィルター�
 | PM-CAP-002 | セル系列 | セルを追加・削除・並替え・採番し、系列を構造として編集する | 第3章「ファイルブラウザ」PDF表示 pp.46–55（印刷 pp.90–109） | `SEQ-STRUCT-001` | stable pair identity、bounded ordered insert/remove/move/renumber、一回Cut Undo/Redo、Cut schema 2、Windows drag/keyboard/dialog routeとx64 Release確認 | Implemented and verified | — |
 | PM-CAP-003 | セル作成 | frame/image size、DPI、レイヤー型、8/16 bit、作成枚数を指定する | 第5章「新規セル」PDF表示 pp.63–65（印刷 pp.124–129） | `SPEC.md` §7、`DOC-001` | typed Cell creation plan、image/frame mode、DPI／frame、全initial layer、RGBA8/16、1..64枚、Core/ABI/Windows smokeとx64 Release利用者確認 | Implemented and verified | — |
 | PM-CAP-004 | 用紙／基準フレーム | 用紙、作画／安全／基準 frame、余白、DPI、異寸法整列を保持する | 第5章 PDF表示 pp.65–70（印刷 pp.128–139） | `SPEC.md` §7、`DOC-001` | `FrameMetadata`; test `acceptance_reference_frame_aligns_different_cell_sizes_and_reopens`; Windows document smoke | Implemented and verified | — |
-| PM-CAP-005 | 撮影フレーム | サイズ、角度、座標を持つ撮影 frame を文書内で編集する | 第12章 PDF表示 pp.163–164（印刷 pp.324–327） | `SHOOTING-FRAME-001` と「角度付き撮影 frame の確定 contract」 | stable-ID object、canonical edit/preview、ABI v12、Canvas handles、明示的な指示export、v25 save/reopenを縦切り実装 | Implemented but unverified | x64 Release利用者確認待ち。PM-GAP-008 |
-| PM-CAP-006 | 連続作業 | thumbnail／番号／前後で切替え、dirty 時に確認または自動保存し、端点を循環できる | 第2・3・14章 PDF表示 pp.19–20,55,175–176（印刷 pp.36–39,108–109,348–351） | `SEQ-001`, `SPEC.md:174–177` | natural-order/thumbnail contracts; exact autosave/staged-restore Core・ABI contracts; Windows setting/owner/production sequence smoke | Partial | 確認切替と自動保存は実装済みでM11 ARM64手動確認待ち。端点 loop preference は未実装。PM-GAP-004, PM-GAP-005 |
+| PM-CAP-005 | 撮影フレーム | サイズ、角度、座標を持つ撮影 frame を文書内で編集する | 第12章 PDF表示 pp.163–164（印刷 pp.324–327） | `SHOOTING-FRAME-001` と「角度付き撮影 frame の確定 contract」 | stable-ID object、canonical edit/preview、ABI v12、Canvas handles、明示的な指示export、v25 save/reopen、x64 Release利用者確認 | Implemented and verified | — |
+| PM-CAP-006 | 連続作業 | thumbnail／番号／前後で切替え、dirty 時に確認または自動保存し、端点を循環できる | 第2・3・14章 PDF表示 pp.19–20,55,175–176（印刷 pp.36–39,108–109,348–351） | `SEQ-001`, `SEQ-ENDPOINT-001` | natural-order/thumbnail、exact autosave/staged-restore、Stop/Wrap issue-time plan、ABI v12、versioned HKCU setting、Windows checked-state/production smoke | Implemented but unverified | 自動保存はM11 ARM64確認済み。端点policyのx64 Release利用者確認待ち。PM-GAP-005 |
 | PM-CAP-007 | モーション確認 | FPS、範囲、loop、pause、step でセル系列を確認する | 第7章 PDF表示 pp.111–112（印刷 pp.220–223） | `SEQ-002` | animation contract、FFI、`RunProductionWorkflowSmoke` | Implemented and verified | タイムシート合成は対象外 |
 | PM-CAP-008 | 彩色構造 | 2値／階調／vector の主線、色トレース、彩色、汎用 plane を型付き分離する | 第6章 PDF表示 pp.71–84、第15章 pp.180–187 | `SPEC.md` §5、`DOC-002`, `VECTOR-001` | topology validation; test `acceptance_layer_tree_undo_redo_save_reopen_and_validation`, vector contracts | Implemented and verified | — |
 | PM-CAP-009 | レイヤー／プレーン操作 | create、duplicate、delete、reorder、visibility、editability、opacity、convert、merge を扱う | 第6章 PDF表示 pp.76–82（印刷 pp.150–163） | `DOC-002`, `DOC-003`, `SPEC.md:223–234` | grouped capability/canonical/Undo contracts; FFI spans; Layer pane marker/menu/status and smoke; x64 Release manual check | Implemented and verified | — |
@@ -429,12 +429,12 @@ PaintMan の塗りあふれ中断が途中結果を残すか、フィルター�
 
 ### PM-GAP-008 — 角度と位置を持つ撮影フレームを編集する
 
-- **不足している能力:** 撮影 frame の寸法、角度、座標を独立 object として保持・編集・表示する。
+- **不足していた能力:** 撮影 frame の寸法、角度、座標を独立 object として保持・編集・表示する。
 - **PaintMan で可能な作業:** camera framing の大きさと傾きをセル上で指示し、作画範囲と区別して後工程へ渡す。
-- **現状で困る状況:** 推奨案 A＋N1 の縦切りは実装済みだが、x64 Releaseでの利用者向けhandle、Cancel、save/reopen、出力分離の確認がまだである。
-- **不足層／カバレッジ:** `SHOOTING-FRAME-001`、Core／canonical-v2、current-only `.inkpod` v25／epoch-22、ABI v12、Windows properties／Canvas handle／renderer／明示的指示export production routeを実装した。独立overlay、既存axis-aligned frameのpaper-fit authority、通常export/thumbnail除外、非等方resampleの厳密表現不可時の原子的拒否を公開contractで固定した。必須自動gateは完了し、x64 Release利用者確認だけが残る。
+- **現状で困る状況:** 推奨案 A＋N1 の縦切りとx64 Releaseでの利用者向けhandle、Cancel、save/reopen、出力分離確認を完了した。
+- **不足層／カバレッジ:** `SHOOTING-FRAME-001`、Core／canonical-v2、current-only `.inkpod` v25／epoch-22、ABI v12、Windows properties／Canvas handle／renderer／明示的指示export production routeを実装した。独立overlay、既存axis-aligned frameのpaper-fit authority、通常export/thumbnail除外、非等方resampleの厳密表現不可時の原子的拒否を公開contractで固定し、必須自動gateとx64 Release利用者確認を完了した。
 - **推奨優先度（仕上げ）:** **20/22（P3）**。互換性評価は **Should**。カメラ指示の取り違えは作画／彩色のやり直しにつながる。
-- **代替手段:** 実装経路は利用可能。手動確認完了まではannotationへ同じ指示を併記できる。
+- **代替手段:** 不要。PM-GAP-008は解消済み。
 - **関連要件:** `SHOOTING-FRAME-001`, `DOC-001`, `DOC-002`, `SPEC.md` 「角度付き撮影 frame の確定 contract」。
 - **責務:** Core は frame object geometry。FFI は typed query/edit。Windows frontend／renderer は handle／dialog／overlay と preview。
 - **依存ギャップ:** PM-GAP-009 の annotation と表示上は連携できる。
@@ -442,13 +442,13 @@ PaintMan の塗りあふれ中断が途中結果を残すか、フィルター�
 
 ### PM-GAP-005 — 前後セル切替の端点 loop policy
 
-- **不足している能力:** 先頭／末尾で停止するか循環するかを利用者が選べる。
+- **不足していた能力:** 先頭／末尾で停止するか循環するかを利用者が選べる。
 - **PaintMan で可能な作業:** 連続比較時に末尾から先頭へ戻り、keyboard 操作を途切れさせない。
-- **現状で困る状況:** 現在の sequence UI は端点で停止する。
-- **不足層／カバレッジ:** 実装不足、`Specified only`。`SEQ-001` の既知残件。
+- **現状で困る状況:** 自動検証の範囲では解消した。`端点で循環`をoffにすると完全no-opで停止し、onにすると先頭／末尾を相互に切り替える。
+- **不足層／カバレッジ:** `SEQ-ENDPOINT-001`として、Coreのempty／one／Stop／Wrap／欠番／forward／backwardとissue-time stale原子性、96-byte caller-owned ABI v12 plan、versioned HKCU codec、application-wide menu／configurable shortcut／checked state／status、motion loop分離、Windows production smokeを実装した。x64 Release利用者確認だけが残る。
 - **推奨優先度（仕上げ）:** **21/22（P3）**。互換性評価は **Could**。作業結果を変えず、先頭／末尾 command で代替できる。
-- **代替手段:** 先頭／末尾へ明示移動する。
-- **関連要件:** `SEQ-001`, `SPEC.md:176`。
+- **代替手段:** 実装経路は利用可能。手動確認までは先頭／末尾へ明示移動できる。
+- **関連要件:** `SEQ-001`, `SEQ-ENDPOINT-001`, `SPEC.md:191–193`。
 - **責務:** Core または frontend policy に loop preference、FFI の step result、Windows setting／checked state。
 - **依存ギャップ:** なし。
 - **PDF 根拠:** 第7章モーション確認と第14章設定、PDF表示 pp.111–112,175–176（印刷 pp.220–223,348–351）。
@@ -478,11 +478,11 @@ PaintMan の塗りあふれ中断が途中結果を残すか、フィルター�
 | Cut内セル系列のadd／remove／reorder／renumber | `SEQ-STRUCT-001` | 実装・手動確認済み | stable pair identity、bounded ordered transaction、一回Cut Undo/Redo、Cut schema 2、ABI失敗index、Windows drag/keyboard/dialog smokeとx64 Release確認。PM-GAP-002解消済み |
 | frame/image size、8/16 bit、複数枚の新規セル | `DOC-001` | 実装・手動確認済み | typed plan、image/frame mode、DPI／frame、全initial layer、RGBA8/16、1..64枚、Core/ABI/Windows smokeとx64 Release確認。PM-GAP-003解消済み |
 | セル切替時自動保存 | `SEQ-001` | 実装・手動確認済み | exact native recovery association、staged restore、通常savepoint/path不変、Core／ABI／Windows production smokeとARM64確認。PM-GAP-004解消済み |
-| sequence 端点 loop preference | `SEQ-001` | 未実装 | 同上、PM-GAP-005 |
+| sequence 端点 loop preference | `SEQ-ENDPOINT-001` | 実装・手動確認待ち | Stop/Wrap、明示result、issue-time identity、ABI v12、versioned HKCU、menu／shortcut／checked state／status、Windows smoke。PM-GAP-005 |
 | 複数 edit target の presentation | `DOC-002`, `DOC-003` | 実装・手動確認済み | tree-ordered Core/ABI、Layer pane marker、capability menu、status、smoke、x64 Release 確認。PM-GAP-006 |
 | 論理 layer 順の raster/vector 混在合成 | `DOC-002`, `VECTOR-001` | 一部実装 | `docs/implementation-status.md:42–43` の既知差分、PM-GAP-007 |
 | Text／Annotation の内容 | `ANNOTATION-001` と §5 | 実装・手動確認済み | stable-ID text/stroke/leader/value、canonical edit/stroke、ABI v12、Canvas/thumbnail/flat、v24 save/reopen、Windows smokeとx64 Release利用者確認。PM-GAP-009解消済み |
-| 角度付き撮影frameの内容 | `SHOOTING-FRAME-001` | 実装・手動確認待ち | stable ID、center/size/rotation/anchor、canonical preview、ABI v12、Canvas handles、通常/指示export分離、v25 save/reopen。PM-GAP-008 |
+| 角度付き撮影frameの内容 | `SHOOTING-FRAME-001` | 実装・手動確認済み | stable ID、center/size/rotation/anchor、canonical preview、ABI v12、Canvas handles、通常/指示export分離、v25 save/reopen、x64 Release確認。PM-GAP-008解消済み |
 | VanishingPoint の内容 | `DOC-002` と §5 | kind のみ | 消失点／放射補助線は空content。PM-GAP-010 |
 | 二段階 curve、N角形、filled shape、line／polyline options、raster 図形 | `PAINT-002` | 実装・手動確認済み | Core/canonical v2、ABI v9 additive exports、Windows staged gestures、現行v24/epoch-21、golden/smoke、ARM64 Release確認。snapはPM-GAP-013/M15 |
 | 通常 brush の shape／smoothing／開始色限定 | `PAINT-004` | 実装・手動確認済み | Core/image、canonical v3、ABI v8、Windows pane/Canvas、v13/epoch-10、golden/smoke、x64 Release確認。PM-GAP-012 解消済み |

@@ -607,6 +607,27 @@ pub struct InkpodSequenceSwitchRequest {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodSequenceStepPlan {
+    pub struct_size: u32,
+    pub direction: u32,
+    pub endpoint_policy: u32,
+    pub result_class: u32,
+    pub feature_flags: u64,
+    pub sequence_revision: u64,
+    pub source_document_uuid_high: u64,
+    pub source_document_uuid_low: u64,
+    pub source_generation: u64,
+    pub target_document_uuid_high: u64,
+    pub target_document_uuid_low: u64,
+    pub target_generation: u64,
+    pub source_index: u32,
+    pub target_index: u32,
+    pub source_cell_number: u32,
+    pub target_cell_number: u32,
+}
+
+#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct InkpodMotionCheckInput {
     pub struct_size: u32,

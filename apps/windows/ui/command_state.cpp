@@ -783,6 +783,10 @@ void ProvideApplicationCommandStates(
         states,
         IDM_FILE_SEQUENCE_AUTOSAVE,
         input.sequence_autosave_before_switch);
+    SetChecked(
+        states,
+        IDM_SEQ_WRAP_ENDPOINTS,
+        input.sequence_wrap_endpoints);
 }
 
 } // namespace

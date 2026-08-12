@@ -1131,6 +1131,133 @@ fn acceptance_sequence_gaps_natural_order_thumbnails_subpalette_and_motion() {
 }
 
 #[test]
+fn seq_001_endpoint_policy_plans_empty_single_stop_wrap_and_gaps_without_document_mutation() {
+    let empty = Core::new();
+    let empty_plan = empty
+        .resolve_sequence_step(SequenceDirection::Next, SequenceEndpointPolicy::Stop)
+        .unwrap();
+    assert_eq!(empty_plan.result, SequenceStepResult::Empty);
+    assert!(!empty_plan.requires_switch());
+
+    let mut core = Core::new();
+    let first = core
+        .new_cell(2, 2, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    core.set_sequence(vec![source(
+        "cell1.png",
+        first.document_uuid,
+        2,
+        2,
+        [1, 2, 3, 255],
+    )])
+    .unwrap();
+    let single = core
+        .resolve_sequence_step(SequenceDirection::Previous, SequenceEndpointPolicy::Wrap)
+        .unwrap();
+    assert_eq!(single.result, SequenceStepResult::SingleCell);
+    assert_eq!(single.source_cell_number, Some(1));
+    assert_eq!(single.target_cell_number, Some(1));
+    assert!(!single.requires_switch());
+
+    core.set_sequence(vec![
+        source("cell1.png", first.document_uuid, 2, 2, [1, 2, 3, 255]),
+        source("cell3.png", 0x3030, 2, 2, [3, 4, 5, 255]),
+        source("cell10.png", 0x1010, 2, 2, [6, 7, 8, 255]),
+    ])
+    .unwrap();
+    let document_before = core.document_info().unwrap();
+    let editor_before = core.editor_state().unwrap();
+    let history_before = core.history_entries().to_vec();
+    let journal_before = core.journal_entries().to_vec();
+    let snapshot_before = core.build_snapshot();
+
+    let stopped = core
+        .resolve_sequence_step(SequenceDirection::Previous, SequenceEndpointPolicy::Stop)
+        .unwrap();
+    assert_eq!(stopped.result, SequenceStepResult::Stopped);
+    assert_eq!(stopped.source_index, Some(0));
+    assert_eq!(stopped.target_index, Some(0));
+    assert!(!stopped.requires_switch());
+    assert_eq!(core.document_info().unwrap(), document_before);
+    assert_eq!(core.editor_state().unwrap(), editor_before);
+    assert_eq!(core.history_entries(), history_before);
+    assert_eq!(core.journal_entries(), journal_before);
+    assert_eq!(core.build_snapshot(), snapshot_before);
+
+    let wrapped = core
+        .resolve_sequence_step(SequenceDirection::Previous, SequenceEndpointPolicy::Wrap)
+        .unwrap();
+    assert_eq!(wrapped.result, SequenceStepResult::Wrapped);
+    assert_eq!(wrapped.source_cell_number, Some(1));
+    assert_eq!(wrapped.target_cell_number, Some(10));
+    let wrapped_info = core.commit_sequence_step(wrapped).unwrap();
+    assert_eq!(wrapped_info.document_uuid, 0x1010);
+
+    let previous = core
+        .resolve_sequence_step(SequenceDirection::Previous, SequenceEndpointPolicy::Stop)
+        .unwrap();
+    assert_eq!(previous.result, SequenceStepResult::Advanced);
+    assert_eq!(previous.source_cell_number, Some(10));
+    assert_eq!(previous.target_cell_number, Some(3));
+    core.commit_sequence_step(previous).unwrap();
+    let gap = core
+        .resolve_sequence_step(SequenceDirection::Previous, SequenceEndpointPolicy::Stop)
+        .unwrap();
+    assert_eq!(gap.result, SequenceStepResult::Advanced);
+    assert_eq!(gap.source_cell_number, Some(3));
+    assert_eq!(gap.target_cell_number, Some(1));
+}
+
+#[test]
+fn seq_001_endpoint_step_rejects_stale_and_unsaved_requests_atomically() {
+    let mut core = Core::new();
+    let first = core
+        .new_cell(2, 2, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    core.set_sequence(vec![
+        source("cell1.png", first.document_uuid, 2, 2, [1, 2, 3, 255]),
+        source("cell2.png", 0x2020, 2, 2, [4, 5, 6, 255]),
+    ])
+    .unwrap();
+    let stale = core
+        .resolve_sequence_step(SequenceDirection::Next, SequenceEndpointPolicy::Wrap)
+        .unwrap();
+    core.set_sequence(vec![
+        source("cell1.png", first.document_uuid, 2, 2, [1, 2, 3, 255]),
+        source("cell2.png", 0x2020, 2, 2, [4, 5, 6, 255]),
+    ])
+    .unwrap();
+    let before_stale = core.document_info().unwrap();
+    assert_eq!(
+        core.commit_sequence_step(stale),
+        Err(CoreError::InvalidState("sequence step request is stale"))
+    );
+    assert_eq!(core.document_info().unwrap(), before_stale);
+
+    let request = core
+        .resolve_sequence_step(SequenceDirection::Next, SequenceEndpointPolicy::Stop)
+        .unwrap();
+    core.apply_stroke(&line_stroke(vec![StrokeSample {
+        x: 0.0,
+        y: 0.0,
+        pressure: 1.0,
+    }]))
+    .unwrap();
+    let document_before = core.document_info().unwrap();
+    let digest_before = core.document_state_digest().unwrap();
+    let history_before = core.history_entries().to_vec();
+    let journal_before = core.journal_entries().to_vec();
+    assert_eq!(
+        core.commit_sequence_step(request),
+        Err(CoreError::UnsavedChanges)
+    );
+    assert_eq!(core.document_info().unwrap(), document_before);
+    assert_eq!(core.document_state_digest().unwrap(), digest_before);
+    assert_eq!(core.history_entries(), history_before);
+    assert_eq!(core.journal_entries(), journal_before);
+}
+
+#[test]
 fn document_thumbnail_is_bounded_deterministic_and_query_only() {
     let mut core = Core::new();
     core.new_cell(128, 64, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)

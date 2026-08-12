@@ -462,6 +462,7 @@ BEGIN
             MENUITEM "前のセル", IDM_SEQ_PREVIOUS
             MENUITEM "次のセル", IDM_SEQ_NEXT
             MENUITEM "セル番号で移動...", IDM_SEQ_GOTO
+            MENUITEM "端点で循環(&L)", IDM_SEQ_WRAP_ENDPOINTS
             MENUITEM "選択セルをサブパレット登録", IDM_SUBPALETTE_SET
             MENUITEM "サブパレット色サンプル...", IDM_SUBPALETTE_SAMPLE
         END

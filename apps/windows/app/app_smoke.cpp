@@ -72,6 +72,7 @@ using inkpod::app::RecoveryCandidate;
 using inkpod::app::RecoveryMetadata;
 using inkpod::app::RecoveryMetadataPath;
 using inkpod::app::SequenceCellSwitchPolicy;
+using inkpod::app::SequenceEndpointPolicy;
 using inkpod::app::WriteFileAtomically;
 using inkpod::app::CommandTimerKind;
 using inkpod::app::DocumentSessionId;
@@ -6337,22 +6338,97 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     const std::uint32_t navigation_prompt_count =
         state.lifetime.smoke_dirty_prompt_count;
     state.lifetime.smoke_dirty_prompt_choice = IDOK;
-    const bool navigation_ok =
-        SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SEQ_GOTO, 0) == 1
-        && SendMessageW(
+    const SequenceEndpointPolicy previous_endpoint_policy =
+        state.lifetime.sequence_endpoint_policy;
+    const auto restore_endpoint_policy = [&state, previous_endpoint_policy]() {
+        state.lifetime.sequence_endpoint_policy = previous_endpoint_policy;
+        UpdateMenuState(state);
+    };
+    state.lifetime.sequence_endpoint_policy = SequenceEndpointPolicy::Stop;
+    UpdateMenuState(state);
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_SEQ_GOTO,
+            0) != 1
+        || SendMessageW(
                state.Workspace().windows.window,
                WM_COMMAND,
                IDM_SEQ_PREVIOUS,
-               0) == 1
+               0) != 1) {
+        restore_endpoint_policy();
+        return 412;
+    }
+    InkpodDocumentInfo endpoint_before = EmptyDocumentInfo();
+    InkpodDocumentInfo endpoint_after = EmptyDocumentInfo();
+    InkpodHistoryInfo endpoint_history_before{};
+    InkpodHistoryInfo endpoint_history_after{};
+    endpoint_history_before.struct_size = sizeof(endpoint_history_before);
+    endpoint_history_after.struct_size = sizeof(endpoint_history_after);
+    const std::uint32_t endpoint_prompt_count =
+        state.lifetime.smoke_dirty_prompt_count;
+    if (!QueryDocument(state, endpoint_before)
+        || state.engine->Invoke(
+               [&endpoint_history_before](InkpodCore* core) {
+                   return inkpod_core_history_info(core, &endpoint_history_before);
+               },
+               false,
+               false) != INKPOD_STATUS_OK
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_SEQ_PREVIOUS,
+               0) != 1
+        || !QueryDocument(state, endpoint_after)
+        || state.engine->Invoke(
+               [&endpoint_history_after](InkpodCore* core) {
+                   return inkpod_core_history_info(core, &endpoint_history_after);
+               },
+               false,
+               false) != INKPOD_STATUS_OK
+        || endpoint_after.document_revision != endpoint_before.document_revision
+        || endpoint_after.flags != endpoint_before.flags
+        || endpoint_after.main_plane_checksum != endpoint_before.main_plane_checksum
+        || endpoint_after.color_plane_checksum != endpoint_before.color_plane_checksum
+        || endpoint_history_after.cursor != endpoint_history_before.cursor
+        || endpoint_history_after.item_count != endpoint_history_before.item_count
+        || state.lifetime.smoke_dirty_prompt_count != endpoint_prompt_count) {
+        restore_endpoint_policy();
+        return 4110;
+    }
+    state.lifetime.sequence_endpoint_policy = SequenceEndpointPolicy::Wrap;
+    UpdateMenuState(state);
+    if (!IsCommandChecked(
+            state.Workspace().command_states, IDM_SEQ_WRAP_ENDPOINTS)
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_SEQ_PREVIOUS,
+               0) != 1
+        || state.Workspace().sequence_dialog.view.active_index != 2U
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_SEQ_NEXT,
+               0) != 1
+        || state.Workspace().sequence_dialog.view.active_index != 0U) {
+        restore_endpoint_policy();
+        return 4111;
+    }
+    state.lifetime.sequence_endpoint_policy = SequenceEndpointPolicy::Stop;
+    UpdateMenuState(state);
+    const bool navigation_ok =
+        !IsCommandChecked(state.Workspace().command_states, IDM_SEQ_WRAP_ENDPOINTS)
         && SendMessageW(
                state.Workspace().windows.window,
                WM_COMMAND,
                IDM_SEQ_NEXT,
                0) == 1;
+    restore_endpoint_policy();
     state.lifetime.smoke_dirty_prompt_choice = IDNO;
     if (!navigation_ok
         || state.lifetime.smoke_dirty_prompt_count
-            != navigation_prompt_count + 3U) {
+            != navigation_prompt_count + 5U) {
         return 412;
     }
     if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_MOTION_START, 0) != 1

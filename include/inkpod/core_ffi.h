@@ -599,6 +599,16 @@ typedef uint32_t InkpodSequenceDirection;
 #define INKPOD_SEQUENCE_PREVIOUS UINT32_C(1)
 #define INKPOD_SEQUENCE_NEXT UINT32_C(2)
 #define INKPOD_SEQUENCE_FLAG_LOOP (UINT32_C(1) << 0)
+typedef uint32_t InkpodSequenceEndpointPolicy;
+#define INKPOD_SEQUENCE_ENDPOINT_STOP UINT32_C(1)
+#define INKPOD_SEQUENCE_ENDPOINT_WRAP UINT32_C(2)
+typedef uint32_t InkpodSequenceStepResult;
+#define INKPOD_SEQUENCE_STEP_EMPTY UINT32_C(1)
+#define INKPOD_SEQUENCE_STEP_SINGLE_CELL UINT32_C(2)
+#define INKPOD_SEQUENCE_STEP_STOPPED UINT32_C(3)
+#define INKPOD_SEQUENCE_STEP_ADVANCED UINT32_C(4)
+#define INKPOD_SEQUENCE_STEP_WRAPPED UINT32_C(5)
+#define INKPOD_SEQUENCE_INDEX_NONE UINT32_MAX
 #define INKPOD_SEQUENCE_SWITCH_PROMPT UINT32_C(1)
 #define INKPOD_SEQUENCE_SWITCH_AUTOSAVE UINT32_C(2)
 #define INKPOD_SEQUENCE_SWITCH_REQUIRED (UINT32_C(1) << 0)
@@ -3081,6 +3091,26 @@ typedef struct InkpodSequenceSwitchRequest {
     uint32_t flags;
 } InkpodSequenceSwitchRequest;
 
+/** @brief Pointer-free issue-time resolution of one normal previous/next command. */
+typedef struct InkpodSequenceStepPlan {
+    uint32_t struct_size;
+    InkpodSequenceDirection direction;
+    InkpodSequenceEndpointPolicy endpoint_policy;
+    InkpodSequenceStepResult result_class;
+    uint64_t feature_flags;
+    uint64_t sequence_revision;
+    uint64_t source_document_uuid_high;
+    uint64_t source_document_uuid_low;
+    uint64_t source_generation;
+    uint64_t target_document_uuid_high;
+    uint64_t target_document_uuid_low;
+    uint64_t target_generation;
+    uint32_t source_index;
+    uint32_t target_index;
+    uint32_t source_cell_number;
+    uint32_t target_cell_number;
+} InkpodSequenceStepPlan;
+
 /** @brief motion-check の FPS と loop/selection/light-table flags を渡す入力。 */
 typedef struct InkpodMotionCheckInput {
     uint32_t struct_size;
@@ -4803,6 +4833,29 @@ InkpodStatus inkpod_core_sequence_step(
     InkpodCore* core,
     InkpodSequenceDirection direction,
     uint32_t flags,
+    InkpodDocumentInfo* out_info);
+/**
+ * @brief Resolves previous/next against one endpoint policy without mutation.
+ *
+ * Success reports EMPTY, SINGLE_CELL, STOPPED, ADVANCED, or WRAPPED and captures
+ * the sequence revision plus source/target UUID, generation, index, and cell number.
+ * The caller owns the fixed-size output and no pointer is retained.
+ */
+InkpodStatus inkpod_core_sequence_step_resolve(
+    InkpodCore* core,
+    InkpodSequenceDirection direction,
+    InkpodSequenceEndpointPolicy endpoint_policy,
+    InkpodSequenceStepPlan* out_plan);
+/**
+ * @brief Commits an issue-time sequence plan only while it is still current.
+ *
+ * Core re-resolves the direction and endpoint policy. Stale plans and dirty
+ * switching sources fail atomically. EMPTY, SINGLE_CELL, and STOPPED are no-ops.
+ * The plan is borrowed only for this call.
+ */
+InkpodStatus inkpod_core_sequence_step_commit(
+    InkpodCore* core,
+    const InkpodSequenceStepPlan* plan,
     InkpodDocumentInfo* out_info);
 /**
  * @brief 指定 FPS/flags で motion-check session を開始する。

@@ -91,6 +91,7 @@ using inkpod::windows::ui::ShowShootingFrameOptions;
 using inkpod::app::AnimationUiState;
 using inkpod::app::SequenceAutosaveBinding;
 using inkpod::app::SequenceCellSwitchPolicy;
+using inkpod::app::SequenceEndpointPolicy;
 using inkpod::app::SequenceSwitchAsyncResult;
 using inkpod::app::ApplicationHost;
 using inkpod::app::BatchOperationUi;
@@ -163,6 +164,7 @@ using inkpod::app::DiscardRecoveryArtifact;
 using inkpod::app::ClearPreviousDocumentPaths;
 using inkpod::app::SaveRestorePreviousDocumentsSetting;
 using inkpod::app::SaveSequenceCellSwitchPolicy;
+using inkpod::app::SaveSequenceEndpointPolicy;
 using inkpod::app::SaveOutputColorGuardProfileSetting;
 using inkpod::app::OutputColorGuardProfileSetting;
 using inkpod::app::SequenceRecoveryPath;
@@ -6233,6 +6235,9 @@ CommandStateInputs BuildCommandStateInputs(
     inputs.application.sequence_autosave_before_switch =
         state.lifetime.sequence_switch_policy
         == inkpod::app::SequenceCellSwitchPolicy::AutosaveBeforeSwitch;
+    inputs.application.sequence_wrap_endpoints =
+        state.lifetime.sequence_endpoint_policy
+        == inkpod::app::SequenceEndpointPolicy::Wrap;
 
     inputs.edit.can_undo =
         has_document && (info.flags & INKPOD_DOCUMENT_FLAG_CAN_UNDO) != 0U;
@@ -11020,6 +11025,26 @@ InkpodStatus WriteCompactedDocumentCopy(
     return status;
 }
 
+bool SameSequenceStepPlan(
+    const InkpodSequenceStepPlan& left,
+    const InkpodSequenceStepPlan& right) noexcept {
+    return left.direction == right.direction
+        && left.endpoint_policy == right.endpoint_policy
+        && left.result_class == right.result_class
+        && left.feature_flags == right.feature_flags
+        && left.sequence_revision == right.sequence_revision
+        && left.source_document_uuid_high == right.source_document_uuid_high
+        && left.source_document_uuid_low == right.source_document_uuid_low
+        && left.source_generation == right.source_generation
+        && left.target_document_uuid_high == right.target_document_uuid_high
+        && left.target_document_uuid_low == right.target_document_uuid_low
+        && left.target_generation == right.target_generation
+        && left.source_index == right.source_index
+        && left.target_index == right.target_index
+        && left.source_cell_number == right.source_cell_number
+        && left.target_cell_number == right.target_cell_number;
+}
+
 InkpodStatus SwitchSequenceTarget(
     ApplicationHost& state,
     const CommandContext& context,
@@ -11048,30 +11073,77 @@ InkpodStatus SwitchSequenceTarget(
             document->id, document->generation, before)) {
         return INKPOD_STATUS_INVALID_STATE;
     }
+    InkpodSequenceStepPlan step_plan{};
+    const bool has_step_plan = !index.has_value();
+    if (has_step_plan) {
+        if (direction != INKPOD_SEQUENCE_PREVIOUS
+            && direction != INKPOD_SEQUENCE_NEXT) {
+            return INKPOD_STATUS_INVALID_ARGUMENT;
+        }
+        step_plan.struct_size = sizeof(step_plan);
+        const InkpodSequenceEndpointPolicy endpoint_policy =
+            state.lifetime.sequence_endpoint_policy
+                == SequenceEndpointPolicy::Wrap
+            ? INKPOD_SEQUENCE_ENDPOINT_WRAP
+            : INKPOD_SEQUENCE_ENDPOINT_STOP;
+        const InkpodStatus resolve_status = state.engine->Invoke(
+            document->id,
+            document->generation,
+            [direction, endpoint_policy, &step_plan](InkpodCore* core) {
+                return inkpod_core_sequence_step_resolve(
+                    core, direction, endpoint_policy, &step_plan);
+            },
+            false,
+            false);
+        if (resolve_status != INKPOD_STATUS_OK) {
+            return resolve_status;
+        }
+        if (step_plan.result_class == INKPOD_SEQUENCE_STEP_EMPTY
+            || step_plan.result_class == INKPOD_SEQUENCE_STEP_SINGLE_CELL
+            || step_plan.result_class == INKPOD_SEQUENCE_STEP_STOPPED) {
+            const wchar_t* message = step_plan.result_class
+                    == INKPOD_SEQUENCE_STEP_EMPTY
+                ? L"連番セルがありません"
+                : step_plan.result_class == INKPOD_SEQUENCE_STEP_SINGLE_CELL
+                ? L"連番セルは1件です"
+                : L"連番セルの端点です";
+            PresentStatusBarPart(
+                state.Workspace().windows.status_bar, 5U, message);
+            RefreshSequencePane(state);
+            UpdateMenuState(state);
+            return INKPOD_STATUS_OK;
+        }
+        if (step_plan.result_class != INKPOD_SEQUENCE_STEP_ADVANCED
+            && step_plan.result_class != INKPOD_SEQUENCE_STEP_WRAPPED) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+    }
     if (state.lifetime.sequence_switch_policy
         == SequenceCellSwitchPolicy::AutosaveBeforeSwitch) {
-        std::uint32_t target{};
-        if (index.has_value()) {
-            target = index.value();
-        } else {
-            const std::uint32_t count = state.Workspace().panes.sequence_count;
-            if (count == 0U
-                || (direction != INKPOD_SEQUENCE_PREVIOUS
-                    && direction != INKPOD_SEQUENCE_NEXT)) {
-                return INKPOD_STATUS_INVALID_ARGUMENT;
-            }
-            const std::uint32_t active = std::min(
-                state.Workspace().animation.active_sequence_index, count - 1U);
-            target = direction == INKPOD_SEQUENCE_PREVIOUS
-                ? (active == 0U ? 0U : active - 1U)
-                : std::min(active + 1U, count - 1U);
-        }
+        const std::uint32_t target = index.has_value()
+            ? index.value()
+            : step_plan.target_index;
         InkpodSequenceSwitchRequest request{};
         request.struct_size = sizeof(request);
         const InkpodStatus request_status = state.engine->Invoke(
             document->id,
             document->generation,
-            [target, &request](InkpodCore* core) {
+            [target, has_step_plan, step_plan, &request](InkpodCore* core) {
+                if (has_step_plan) {
+                    InkpodSequenceStepPlan current{};
+                    current.struct_size = sizeof(current);
+                    const InkpodStatus status = inkpod_core_sequence_step_resolve(
+                        core,
+                        step_plan.direction,
+                        step_plan.endpoint_policy,
+                        &current);
+                    if (status != INKPOD_STATUS_OK) {
+                        return status;
+                    }
+                    if (!SameSequenceStepPlan(step_plan, current)) {
+                        return INKPOD_STATUS_INVALID_STATE;
+                    }
+                }
                 return inkpod_core_sequence_switch_request(
                     core,
                     target,
@@ -11266,10 +11338,10 @@ InkpodStatus SwitchSequenceTarget(
     const InkpodStatus status = state.engine->Invoke(
         document->id,
         document->generation,
-        [index, direction, &after](InkpodCore* core) {
+        [index, step_plan, &after](InkpodCore* core) {
             return index.has_value()
                 ? inkpod_core_sequence_activate(core, index.value(), &after)
-                : inkpod_core_sequence_step(core, direction, 0U, &after);
+                : inkpod_core_sequence_step_commit(core, &step_plan, &after);
         },
         true,
         true);
@@ -16484,6 +16556,30 @@ std::optional<LRESULT> RouteAnimationCommand(
                 ShowCoreError(*state, window, L"連番書き出し");
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_SEQ_WRAP_ENDPOINTS: {
+            const SequenceEndpointPolicy policy =
+                state->lifetime.sequence_endpoint_policy
+                    == SequenceEndpointPolicy::Wrap
+                ? SequenceEndpointPolicy::Stop
+                : SequenceEndpointPolicy::Wrap;
+            if (!SaveSequenceEndpointPolicy(policy)) {
+                MessageBoxW(
+                    window,
+                    L"連番セルの端点動作を保存できませんでした。",
+                    L"inkpod",
+                    MB_OK | MB_ICONERROR);
+                return 0;
+            }
+            state->lifetime.sequence_endpoint_policy = policy;
+            PresentStatusBarPart(
+                state->Workspace().windows.status_bar,
+                5U,
+                policy == SequenceEndpointPolicy::Wrap
+                    ? L"前後セル切替: 端点で循環"
+                    : L"前後セル切替: 端点で停止");
+            UpdateMenuState(*state);
+            return 1;
         }
         case IDM_SEQ_PREVIOUS:
         case IDM_SEQ_NEXT: {

@@ -3120,6 +3120,99 @@ fn ffi_contract_light_table_sequence_and_owned_buffers() {
         assert_eq!(active_editor.active_layer_id, active.layer_id);
         assert_eq!(active_editor.active_plane_id, active.main_plane_id);
 
+        let before_stopped_step = queried_document_info(sequence_core);
+        let mut step_plan = InkpodSequenceStepPlan {
+            struct_size: size_of::<u32>() as u32,
+            ..InkpodSequenceStepPlan::default()
+        };
+        assert_eq!(
+            inkpod_core_sequence_step_resolve(
+                sequence_core,
+                INKPOD_SEQUENCE_PREVIOUS,
+                INKPOD_SEQUENCE_ENDPOINT_STOP,
+                ptr::null_mut(),
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            inkpod_core_sequence_step_resolve(
+                sequence_core,
+                INKPOD_SEQUENCE_PREVIOUS,
+                INKPOD_SEQUENCE_ENDPOINT_STOP,
+                &mut step_plan,
+            ),
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+        step_plan.struct_size = size_of::<InkpodSequenceStepPlan>() as u32;
+        assert_eq!(
+            inkpod_core_sequence_step_resolve(
+                sequence_core,
+                INKPOD_SEQUENCE_PREVIOUS,
+                u32::MAX,
+                &mut step_plan,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            inkpod_core_sequence_step_resolve(
+                sequence_core,
+                INKPOD_SEQUENCE_PREVIOUS,
+                INKPOD_SEQUENCE_ENDPOINT_STOP,
+                &mut step_plan,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(step_plan.result_class, INKPOD_SEQUENCE_STEP_STOPPED);
+        assert_eq!(step_plan.source_index, 0);
+        assert_eq!(step_plan.target_index, 0);
+        assert_eq!(
+            inkpod_core_sequence_step_commit(sequence_core, ptr::null(), &mut active),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        let mut malformed_step = step_plan;
+        malformed_step.feature_flags = 1;
+        assert_eq!(
+            inkpod_core_sequence_step_commit(sequence_core, &malformed_step, &mut active),
+            INKPOD_STATUS_UNSUPPORTED
+        );
+        malformed_step = step_plan;
+        malformed_step.result_class = u32::MAX;
+        assert_eq!(
+            inkpod_core_sequence_step_commit(sequence_core, &malformed_step, &mut active),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        let mut stale_step = step_plan;
+        stale_step.sequence_revision += 1;
+        assert_eq!(
+            inkpod_core_sequence_step_commit(sequence_core, &stale_step, &mut active),
+            INKPOD_STATUS_INVALID_STATE
+        );
+        assert_eq!(
+            inkpod_core_sequence_step_commit(sequence_core, &step_plan, &mut active),
+            INKPOD_STATUS_OK
+        );
+        let after_stopped_step = queried_document_info(sequence_core);
+        assert_eq!(
+            after_stopped_step.document_revision,
+            before_stopped_step.document_revision
+        );
+        assert_eq!(
+            after_stopped_step.main_plane_checksum,
+            before_stopped_step.main_plane_checksum
+        );
+        assert_eq!(after_stopped_step.flags, before_stopped_step.flags);
+        assert_eq!(
+            inkpod_core_sequence_step_resolve(
+                sequence_core,
+                INKPOD_SEQUENCE_PREVIOUS,
+                INKPOD_SEQUENCE_ENDPOINT_WRAP,
+                &mut step_plan,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(step_plan.result_class, INKPOD_SEQUENCE_STEP_WRAPPED);
+        assert_eq!(step_plan.target_index, 1);
+
         let mut switch_request = InkpodSequenceSwitchRequest {
             struct_size: size_of::<u32>() as u32,
             ..InkpodSequenceSwitchRequest::default()

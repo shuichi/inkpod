@@ -172,6 +172,80 @@ pub enum SequenceDirection {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u32)]
+/// Application-selected behavior when normal sequence navigation reaches an endpoint.
+///
+/// This policy is supplied by the frontend for each request. It is not document or
+/// editor state and does not affect history, dirty state, savepoints, or replay.
+pub enum SequenceEndpointPolicy {
+    /// Keep the active cell unchanged at the first or last existing entry.
+    Stop = 1,
+    /// Move from the first entry to the last, or from the last entry to the first.
+    Wrap = 2,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+/// Semantic result of resolving one previous/next sequence command.
+pub enum SequenceStepResult {
+    /// No sequence is configured, so there is no target.
+    Empty = 1,
+    /// The sequence contains only the already-active cell.
+    SingleCell = 2,
+    /// Stop policy retained the active endpoint cell.
+    Stopped = 3,
+    /// Navigation selected the adjacent existing entry in natural order.
+    Advanced = 4,
+    /// Wrap policy selected the opposite endpoint.
+    Wrapped = 5,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Immutable issue-time resolution of one normal sequence navigation command.
+///
+/// The request records sequence revision and both immutable cell identities. Commit
+/// re-resolves the same direction and policy and rejects stale sequence, source, or
+/// target state without changing the document. Missing cell numbers are skipped by
+/// natural order and remain observable through the source/target cell numbers.
+pub struct SequenceStepPlan {
+    /// Requested relative direction.
+    pub direction: SequenceDirection,
+    /// Endpoint behavior captured when the command was issued.
+    pub endpoint_policy: SequenceEndpointPolicy,
+    /// Semantic resolution class.
+    pub result: SequenceStepResult,
+    /// Sequence-only revision, or zero when no sequence is configured.
+    pub sequence_revision: u64,
+    /// Zero-based natural-order source index when an active sequence exists.
+    pub source_index: Option<u32>,
+    /// Zero-based natural-order target index when a sequence target exists.
+    pub target_index: Option<u32>,
+    /// Persistent source document UUID.
+    pub source_document_uuid: Option<u128>,
+    /// Immutable source payload generation.
+    pub source_generation: Option<u64>,
+    /// Persistent target document UUID.
+    pub target_document_uuid: Option<u128>,
+    /// Immutable target payload generation.
+    pub target_generation: Option<u64>,
+    /// Parsed source cell number.
+    pub source_cell_number: Option<u32>,
+    /// Parsed target cell number.
+    pub target_cell_number: Option<u32>,
+}
+
+impl SequenceStepPlan {
+    /// Reports whether committing this plan replaces the active document.
+    #[must_use]
+    pub const fn requires_switch(self) -> bool {
+        matches!(
+            self.result,
+            SequenceStepResult::Advanced | SequenceStepResult::Wrapped
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
 /// User-selected dirty-cell policy captured in an immutable sequence switch request.
 pub enum SequenceSwitchPolicy {
     /// The frontend must obtain confirmation and complete a normal save before switching.

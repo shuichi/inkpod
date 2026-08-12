@@ -681,6 +681,21 @@ revision、history、dirty、savepoint を変更せず、Cut frontend は member
 長さを検証してから各画像をデコードする。全件成功時だけシーケンスを一括置換し、一件でも入力不正、
 デコード失敗、割り当て失敗があれば、以前のシーケンス、現在の文書、未保存状態、Undo を保つ。
 
+通常の前後セル切替は ABI v12 の additive な二段階 API を使う。
+`inkpod_core_sequence_step_resolve` は Core 所有スレッド専用で、caller-owned の固定長 96-byte
+`InkpodSequenceStepPlan` に direction、`STOP`／`WRAP`、`EMPTY`／`SINGLE_CELL`／`STOPPED`／
+`ADVANCED`／`WRAPPED`、sequence revision、source／target の UUID・generation・自然順 index・
+cell number をコピーする。空 sequence だけは revision 0、`INKPOD_SEQUENCE_INDEX_NONE`、zero identity
+を返す。pointer は含まず、Core は出力を保持しない。
+
+`inkpod_core_sequence_step_commit` は同じ plan を呼出中だけ借用し、direction と endpoint policy を
+Core で再解決して全 field が発行時と一致する場合だけ切り替える。empty／one-cell／stopped は dirty
+文書でも document revision、history、journal、dirty、savepointを変えない success である。advanced／
+wrapped は通常 savepoint が必要で、stale sequence/source/target、dirty source、未知 enum、nonzero
+feature flag、NULL／misaligned／短い record は出力と Core を変更せず失敗する。固定長 caller-owned
+record だけを使うため release API はなく、通常前後 navigation policy は motion-check の
+`INKPOD_MOTION_FLAG_LOOP` から独立する。
+
 セル切替前の自動保存は、同じCore所有スレッド上で次の三段階を使う。ABI versionはv9のままのadditive契約である。
 
 1. `inkpod_core_sequence_switch_request` はcaller-ownedの固定長

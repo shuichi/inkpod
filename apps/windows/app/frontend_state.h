@@ -144,6 +144,8 @@ struct AppLifetimeState {
     bool restore_previous_documents{};
     SequenceCellSwitchPolicy sequence_switch_policy{
         SequenceCellSwitchPolicy::Prompt};
+    SequenceEndpointPolicy sequence_endpoint_policy{
+        SequenceEndpointPolicy::Stop};
 };
 
 struct DocumentShellState {

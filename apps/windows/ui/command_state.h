@@ -31,7 +31,7 @@ struct CommandState {
     bool checked{};
 };
 
-inline constexpr std::size_t kProductionCommandStateCount = 376U;
+inline constexpr std::size_t kProductionCommandStateCount = 377U;
 using CommandStateSet = std::array<CommandState, kProductionCommandStateCount>;
 
 struct DocumentCommandStateInput {
@@ -161,6 +161,7 @@ struct WorkspaceCommandStateInput {
 struct ApplicationCommandStateInput {
     bool restore_previous_documents{};
     bool sequence_autosave_before_switch{};
+    bool sequence_wrap_endpoints{};
 };
 
 struct CommandStateInputs {

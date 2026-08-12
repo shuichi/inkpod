@@ -557,6 +557,10 @@ int Application::Run() {
         if (LoadSequenceCellSwitchPolicy(sequence_policy)) {
             state.lifetime.sequence_switch_policy = sequence_policy;
         }
+        SequenceEndpointPolicy endpoint_policy{};
+        if (LoadSequenceEndpointPolicy(endpoint_policy)) {
+            state.lifetime.sequence_endpoint_policy = endpoint_policy;
+        }
         OutputColorGuardProfileSetting output_color_guard_profile{};
         if (LoadOutputColorGuardProfileSetting(output_color_guard_profile)) {
             state.effects.output_color_guard_profile =

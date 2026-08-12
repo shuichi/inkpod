@@ -38,6 +38,11 @@ enum class SequenceCellSwitchPolicy : std::uint32_t {
     AutosaveBeforeSwitch = 2U,
 };
 
+enum class SequenceEndpointPolicy : std::uint32_t {
+    Stop = 1U,
+    Wrap = 2U,
+};
+
 enum class OutputColorGuardProfileSetting : std::uint32_t {
     Bt709ConservativeYcbcr = 1U,
 };
@@ -96,6 +101,17 @@ enum class OutputColorGuardProfileSetting : std::uint32_t {
     SequenceCellSwitchPolicy& policy) noexcept;
 [[nodiscard]] bool SaveSequenceCellSwitchPolicy(
     SequenceCellSwitchPolicy policy) noexcept;
+[[nodiscard]] bool EncodeSequenceEndpointPolicy(
+    SequenceEndpointPolicy policy,
+    std::vector<std::uint8_t>& output) noexcept;
+[[nodiscard]] bool DecodeSequenceEndpointPolicy(
+    const std::uint8_t* bytes,
+    std::size_t length,
+    SequenceEndpointPolicy& policy) noexcept;
+[[nodiscard]] bool LoadSequenceEndpointPolicy(
+    SequenceEndpointPolicy& policy) noexcept;
+[[nodiscard]] bool SaveSequenceEndpointPolicy(
+    SequenceEndpointPolicy policy) noexcept;
 [[nodiscard]] bool EncodeOutputColorGuardProfileSetting(
     OutputColorGuardProfileSetting profile,
     std::vector<std::uint8_t>& output) noexcept;
