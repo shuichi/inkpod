@@ -704,6 +704,14 @@ if(WIN32)
 
     add_test(NAME inkpod_abi_smoke COMMAND inkpod --abi-smoke-test)
     add_test(NAME inkpod_windows_smoke COMMAND inkpod --smoke-test)
+    add_test(
+        NAME inkpod_windows_release_automation_dry_run
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
+                -File "${CMAKE_SOURCE_DIR}/tests/verify_windows_release_automation.ps1"
+                -RepositoryRoot "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(
+        inkpod_windows_release_automation_dry_run
+        PROPERTIES TIMEOUT 30)
     if(INKPOD_WINDOWS_ARCHITECTURE STREQUAL "x64")
         add_test(
             NAME inkpod_windows_local_build_number_dry_run

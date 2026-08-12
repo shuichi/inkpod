@@ -113,10 +113,23 @@ the Rust ABI version and create/destroy a Core. The full `--abi-smoke-test`
 remains a separate CTest and is not repeated by the ZIP check. Hosted CI runs
 these checks for Debug and Release.
 
-`scripts/publish-windows-release.ps1` validates both Release executables and ZIPs,
-creates a three-part `v<version>` tag, and uploads the x64 and ARM assets rather
-than a raw executable. `-DryRun` performs validation and prints the proposed Git
-and GitHub CLI commands without changing external state.
+`scripts/publish-windows-release.ps1` is the complete local prerelease
+orchestrator. `-Version <major.minor.patch> -DryRun` validates the version and
+download-page replacement contracts and prints the proposed work without
+editing files, building, or contacting GitHub. `-Publish` requires a clean
+release branch synchronized with `origin`, updates and pushes the version,
+clean-builds both Release presets, validates the portable ZIP and MSIX payloads,
+creates the annotated three-part `v<version>` tag, and uploads the x64 and ARM
+portable ZIPs to a GitHub prerelease. It then reads the actual uploaded asset
+URLs, updates `html/index.html`, and commits/pushes that page separately. The tag
+therefore names the exact source used for the binaries rather than the later
+download-link commit.
+
+CTest runs automatically for the build matching the native host architecture.
+The other architecture is still clean-built and receives architecture,
+embedded-version, payload, checksum, and static-runtime validation, but its
+native CTest and interaction rows must be recorded on matching Windows hardware
+as described in `docs/windows-release-checklist.md`.
 
 `inkpod_windows_msix_install_uninstall_smoke` is not registered in the default
 CTest set. Configure with `-DINKPOD_ENABLE_ELEVATED_MSIX_TESTS=ON` to register it.

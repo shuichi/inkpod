@@ -176,11 +176,22 @@ cmake --build --preset windows-x64-release --target inkpod_portable_zip
 cmake --build --preset windows-arm-release --target inkpod_portable_zip
 ```
 
-両 architecture の ZIP を検証して GitHub Release の実行内容だけを確認するには
-次を使用します。このコマンドは tag、push、Release 作成を行いません。
+バージョン更新、両 architecture の clean Release build、パッケージ検証、
+GitHub prerelease、ダウンロードリンク更新までの実行内容だけを確認するには
+次を使用します。このコマンドは file 更新、build、commit、push、tag、Release
+作成を行いません。
 
 ```powershell
-.\scripts\publish-windows-release.ps1 -DryRun
+.\scripts\publish-windows-release.ps1 -Version 0.2.1 -DryRun
+```
+
+内容を確認してから `-Publish` で実行します。release branch は clean かつ
+`origin/main` と同期済みである必要があります。このコマンドは version bump と
+HTML link 更新をそれぞれ commit/push し、`v<version>` tag と GitHub prerelease
+を作成するため、通常のローカル build より強い外部変更を行います。
+
+```powershell
+.\scripts\publish-windows-release.ps1 -Version 0.2.1 -Publish
 ```
 
 新規セルは 1920 × 1080 の 2 値彩色セルとして作成されます。UI／入力、単一書き込みの Rust Core エンジン、D3D／D2D 描画は、それぞれ独立したスレッドで動作します。描画中のストロークはペンを離す前からプレビューされ、確定時には 1 回分の「元に戻す」単位として記録されます。
