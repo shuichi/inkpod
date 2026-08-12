@@ -26,7 +26,6 @@ Only the following requirements are not yet `Verified` in
 
 | Requirement | Available now | Remaining work |
 | --- | --- | --- |
-| `VANISHING-POINT-001` | Bounded stable-ID multiple points, exact color/opacity/visibility, canonical CRUD and preview, radial snapshot/snap, current-v26 save/reopen, ABI v12 records/spans, Windows dialog/handles/renderer, device-loss and production smoke | x64 Release user-visible two-point, radial snap, Cancel/Undo, and save/reopen confirmation |
 | `WIN-001` | Native Windows shell, offline Help/About, owner-centered work-area-clamped modal dialogs, DPI-aware layout, keyboard routes, MSAA/UIA names, theme and accessibility hooks | High contrast, 200% DPI, complete screen-reader, and Japanese IME validation/fixes; the current display resources are Japanese-only |
 | `WORKSPACE-001` | All eight modeless surfaces use DockHost; applicable panes support dock/tab/float/hide/AutoHide, one-direction split stacks with resource-titled singleton inspector headers, visible system-color 4-DIP splitters, an accessible keyboard-resizable Layer/Plane split, and an explicit Layer/Plane action target; default lower-inspector grouping, five presets, V7 persisted bounded layout with targeted V4/V5/V6 migration, monitor/DPI recovery, AutoHide pointer access, and accessible names. The transient Job Progress pane is intentionally excluded from persistence | Reference Check AutoHide edge buttons are not reachable by F6/Tab/Shift+Tab |
 
@@ -38,8 +37,9 @@ membership changes or none, and remove leaves the source file intact. M19 has
 completed its automatic gates and x64 user-visible confirmation. The user selected
 the recommended independent-overlay and exact-transform-rejection contract for M20.
 Its vertical slice has passed the required automatic gates and x64 user-visible
-confirmation. M21 has also completed its x64 user-visible confirmation. M22 has
-passed every required automatic gate and now awaits its x64 user-visible confirmation.
+confirmation. M21 and M22 have also completed their required automatic gates and
+x64 user-visible confirmations. The 22-item PaintMan gap-closure program is complete;
+its compact historical record is retained in [`legacy.md`](legacy.md).
 
 ## Known differences
 
@@ -68,14 +68,14 @@ owner, current-v26 persistence, ABI v12 records and snapshot spans, Windows
 properties/handle gestures, radial rendering and snapping. Success, no-op, invalid,
 Cancel, stale, overflow, failure, Undo/Redo, replay, save/reopen, flat-export
 exclusion, transform rejection, device loss, and production-route behavior are
-covered. M21 has completed its x64 user-visible confirmation; M22 awaits only that
-confirmation.
+covered. The same x64 Release binary has completed the user-visible two-point,
+radial-snap, Cancel/Undo, and save/reopen confirmation.
 
 | Boundary | Result |
 | --- | --- |
 | Rust workspace | 454 unit/integration tests including one doctest, zero ignored. Vanishing-point coverage includes multiple/exterior points, interval/phase/color/opacity bounds, create/update/delete/delete-all, preview/Cancel, no-op/invalid/stale/overflow/failure, Undo/Redo/replay/save/reopen, export exclusion, transforms, radial snap precedence, viewport caps, ABI ownership and negative cases. Public route inventory covers 292 Rust routes, 296 C ABI exports, and 380 Windows commands. `fmt`, all-target/all-feature Clippy with warnings denied, and strict rustdoc passed |
 | Native format | V26/runtime replay epoch 23, ABI v12, Cell document/archive metadata schema 5, document digest schema 9/domain 8, snapshot-composite schema 3, Cut descriptor schema 2, and `.inkbatch` v2 are current. Exact top-level v25, noncurrent archive/Cut versions, malformed vanishing-point/shooting-frame records, checksum failures, and corrupt corpus are rejected; Cell/Cut save/reopen is green |
-| Windows x64 | 2026-08-12 Release configure/build passed with warnings denied and static CRT; all 31 CTests passed in 74.86 s. Native smoke covers two points including a Canvas-exterior point, checked handle mode, exact-color radial output, handle move plus Undo, device-loss bit-exact rebuild, ABI v12, portable ZIP, and unsigned MSIX payload. The user-visible M22 confirmation remains pending |
+| Windows x64 | 2026-08-12 Release configure/build passed with warnings denied and static CRT; all 31 CTests passed in 74.86 s. Native smoke covers two points including a Canvas-exterior point, checked handle mode, exact-color radial output, handle move plus Undo, device-loss bit-exact rebuild, ABI v12, portable ZIP, and unsigned MSIX payload. User-visible two-point, radial snap, Cancel/Undo, and save/reopen confirmation also passed |
 | Windows ARM64 | Not run for M22 and not used as a substitute for the required x64 gate. The latest M13 ARM64 Release run passed all 31 CTests in 65.35 s |
 | Performance | The required M22 quick and supplemental full profiles passed every checksum/revision/history/reuse/rebuild/output/failure gate. Quick `canonical_replay` is `264b98028ac92ac6` at revision 6/history 5; `checkpoint_open` is `07da1b4e6bc5d289` with 175256 input, 256 output, and one reused item; output-color-guard is `cfb6b288963c78ba` with 1048576 input, 524288 output, and 65536 reused items. Full checkpoint is the same and full output-color-guard is `2b2196e06f7198b3` with 4194304 input, 2097152 output, and 262144 reused items. After discarded warm-ups, five-process medians were 74.8923 ms quick and 340.7473 ms full, inside the approved 55–92 ms and 255–425 ms envelopes. Workload, harness, approved envelope, payload-access route, and revision-max expression are unchanged |
 | Fuzzing | `native_v26`, `native_core_v26`, and `cut_v26` target declarations are current. Fuzz binary build and coverage-guided execution were not run because the optional `cargo fuzz` subcommand is outside the required gate |

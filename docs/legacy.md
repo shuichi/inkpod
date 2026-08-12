@@ -80,3 +80,21 @@ AutoHide edge button は keyboard focus 不能で Fail、高 contrast、200% dis
 リリース判断であり、現行候補には適用しない。現在の未完了項目は
 [`compatibility.md`](compatibility.md)、再現可能な検証手順は
 [`windows-release-checklist.md`](windows-release-checklist.md) を参照する。
+
+## PaintMan機能ギャップ解消計画（M01–M22）
+
+2026-08-09の機能ギャップ調査から起票した22件の段階的解消計画は、2026-08-12に
+すべて完了した。優先順はP0が`PM-GAP-007/003/006`、P1が
+`PM-GAP-016/012/015/022/018/011/021`、P2が
+`PM-GAP-004/019/014/020/013/017`、P3が
+`PM-GAP-001/002/009/008/005/010`だった。各項目は公開契約テスト、Core、
+canonical procedure、C ABI、Windows production route、必要な永続化と文書、
+必須自動gate、指定された利用者確認まで完了した。
+
+最終項目`PM-GAP-010`では、Canvas内外の複数消失点、放射補助線、radial snap、
+Cancel／Undo、current-v26 save／reopenをx64 Releaseで確認した。この計画の詳細な
+実装手順、途中version表、個別の手動確認手順、再実行用プロンプトは完了後の運用には
+不要なため削除した。現行の製品契約は[`../SPEC.md`](../SPEC.md)、要件状態と証拠は
+[`compatibility.md`](compatibility.md)、現在値と代表検証は
+[`implementation-status.md`](implementation-status.md)、22件の調査根拠と解消結果は
+[`paintman-functional-gap-analysis.md`](paintman-functional-gap-analysis.md)を正本とする。

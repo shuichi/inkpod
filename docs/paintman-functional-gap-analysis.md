@@ -76,9 +76,9 @@ PDF は全 191 表示ページを確認した。PDF p2～p189 は原則として
 
 ### 2.1 総合判定
 
-**inkpod は現時点では PaintMan の機能的上位互換とは判定できない。** 一方、既存の単一セルを対象にした「主線修正 → 色作成／参照 → フィル → 選択／変形 → 白抜け確認 → Undo／Redo → 保存」、および基本的な前後セル参照・モーション確認は、かなりの範囲で縦切り実装とテストがそろっている。
+2026-08-12時点で、本調査から起票した対象内22群の機能ギャップは、CoreからWindows production routeまでの縦切り、自動検証、指定された利用者確認をすべて完了した。したがって、この22群を対象とする段階的解消計画は完了している。ただし、§7に分離した物理ペン等の追加観測事項と、明示的な対象外項目まで完了したことは意味しない。
 
-個別Cell参照方式のカット作成、セル系列の構造編集、再編集可能な指示／text object、角度付き撮影frame、端点loop policyは縦切り実装、自動検証、x64 Releaseの利用者確認まで完了した。消失点／放射補助線はM22の縦切り実装と自動検証を完了し、x64 Release利用者確認を待っているため、現時点では「PaintMan の主要ワークフロー全体を損失なく完遂できる」とはまだ言えない。
+個別Cell参照方式のカット作成、セル系列の構造編集、再編集可能な指示／text object、角度付き撮影frame、端点loop policy、複数消失点／放射補助線は、いずれも縦切り実装、自動検証、x64 Releaseの利用者確認まで完了した。現行要件の状態と残る既知差分は`docs/compatibility.md`を正本とする。
 
 ### 2.2 件数
 
@@ -88,21 +88,21 @@ PDF は全 191 表示ページを確認した。PDF p2～p189 は原則として
   - `Could`: 3 群
 - 仕上げ工程での優先度: **P0 3 群、P1 7 群、P2 6 群、P3 6 群**。P0 が最優先である。
 - 仕様上の不足: **0 群**。セル系列の構造編集と撮影フレームの意味契約はそれぞれ `SEQ-STRUCT-001`、`SHOOTING-FRAME-001` として確定した。
-- 実装上の不足: **22 群**。上の 2 群を含むため、仕様不足との件数は排他的ではない。
-- `Specified only`: 9 群、`Missing`: 1 群、`Partial`: 11 群、`Implemented but unverified`: 1 群としてギャップを整理した。
+- 調査時点の実装上の不足: **22 群**。上の2群を含むため、仕様不足との件数は排他的ではなかった。
+- 調査時点では`Specified only`: 9群、`Missing`: 1群、`Partial`: 11群、`Implemented but unverified`: 1群として整理した。段階的解消後は22群すべて実装・確認済みである。
 - 対象外、`Equivalent by another workflow`、`Not required` は 22 群へ含めていない。
 
 `Must`／`Should`／`Could` は PaintMan の機能的上位互換に必要かという評価であり、P0〜P3 はアニメの仕上げ工程で先に解消すべき順序である。たとえばカット管理は上位互換には `Must` だが、既存セルを日々彩色する際の直接的な結果品質を基準にすると P3 となる。
 
-### 2.3 仕上げ工程で最も重大な不足
+### 2.3 調査時点で重大だった不足と解消結果
 
-1. raster と vector の任意のレイヤー順合成ができず、表示、確認、出力の結果が論理レイヤー順と異なる場合がある。
-2. frame/image size、DPI、8/16 bit、初期レイヤー、複数枚の新規セルと、それらを個別ファイル参照で束ねる新規カットを実装し、カット経路のx64利用者確認を待っている。
+1. rasterとvectorの任意レイヤー順合成は、ordered render planをCanvas、thumbnail、flattenへ共通適用し、x64利用者確認まで完了した。
+2. frame/image size、DPI、8/16 bit、初期レイヤー、複数枚の新規セルと、それらを個別ファイル参照で束ねる新規カットは、x64利用者確認まで完了した。
 3. 複数 edit target の production UI、Core／ABI、型付きコピー／編集は実装し、x64 Release の主線＋彩色手動確認まで完了した。
-4. raster 選択の閉領域内側、線沿い内側、筆跡形状、境界、作図 option は実装と自動検証を完了し、x64 Release の表示確認を待っている。
-5. 範囲限定の色置換は実装、自動検証、x64 Release の表示確認まで完了した。連番 batch authoring の詳細は実装と自動検証を完了し、x64 Release の手動確認を待っている。
+4. raster選択の閉領域内側、線沿い内側、筆跡形状、境界、作図optionは実装、自動検証、x64 Releaseの表示確認まで完了した。
+5. 範囲限定の色置換と連番batch authoringは、実装、自動検証、x64 Releaseの利用者確認まで完了した。
 
-`docs/compatibility.md` は `PAINT-*`、`COLOR-*`、`SEL-*`、`BATCH-*`、`VECTOR-*` 等を広い単位で追跡する。個別能力へ分解すると、M09〜M19は各production routeの自動検証と利用者確認まで完了した。M11〜M13はARM64、M14〜M19は必要なx64確認を含む。M17の個別Cell参照Cut、M18の構造化sequence、M19の再編集可能なtext／instruction annotationもx64 Releaseで確認済みである。本書は追跡文書の状態を否定材料ではなく出発点として使い、個別のコードとテストを優先した。
+`docs/compatibility.md`は`PAINT-*`、`COLOR-*`、`SEL-*`、`BATCH-*`、`VECTOR-*`等を広い単位で追跡する。個別能力へ分解した22件の解消作業はすべてproduction routeの自動検証と利用者確認を完了した。過去の優先順位と受入順は履歴であり、現在状態の判定には個別のコード、テスト、`docs/compatibility.md`を優先する。
 
 ### 2.4 結論保留領域
 
@@ -121,9 +121,9 @@ PaintMan の塗りあふれ中断が途中結果を残すか、フィルター�
 | PM-CAP-007 | モーション確認 | FPS、範囲、loop、pause、step でセル系列を確認する | 第7章 PDF表示 pp.111–112（印刷 pp.220–223） | `SEQ-002` | animation contract、FFI、`RunProductionWorkflowSmoke` | Implemented and verified | タイムシート合成は対象外 |
 | PM-CAP-008 | 彩色構造 | 2値／階調／vector の主線、色トレース、彩色、汎用 plane を型付き分離する | 第6章 PDF表示 pp.71–84、第15章 pp.180–187 | `SPEC.md` §5、`DOC-002`, `VECTOR-001` | topology validation; test `acceptance_layer_tree_undo_redo_save_reopen_and_validation`, vector contracts | Implemented and verified | — |
 | PM-CAP-009 | レイヤー／プレーン操作 | create、duplicate、delete、reorder、visibility、editability、opacity、convert、merge を扱う | 第6章 PDF表示 pp.76–82（印刷 pp.150–163） | `DOC-002`, `DOC-003`, `SPEC.md:223–234` | grouped capability/canonical/Undo contracts; FFI spans; Layer pane marker/menu/status and smoke; x64 Release manual check | Implemented and verified | — |
-| PM-CAP-010 | 合成順 | raster／vector を含む論理 layer 順で合成する | 第6章 PDF表示 pp.76–82、第15章 pp.180–187 | `SPEC.md:221` | `docs/implementation-status.md:42–43` は vector を raster tile 後に合成すると明記 | Partial | 任意の raster/vector interleave が表示へ反映されない。PM-GAP-007 |
+| PM-CAP-010 | 合成順 | raster／vector を含む論理 layer 順で合成する | 第6章 PDF表示 pp.76–82、第15章 pp.180–187 | `RENDER-001`, `DOC-002`, `VECTOR-001` | ordered render plan、R/V/R・V/R/V goldens、ABI records、renderer pixel smoke、thumbnail／flatten／save-reopen、x64 Release確認 | Implemented and verified | — |
 | PM-CAP-011 | 指示／テキスト | 非出力の手書き指示、再編集可能 text、指示線／RGB 値を保持する | 第12章 PDF表示 pp.164–167（印刷 pp.326–333） | `ANNOTATION-001`、`SPEC.md`「テキスト／指示 annotation の確定 contract」 | stable annotation ID、canonical multi-edit/stroke、ABI v12、DirectWrite Canvas、thumbnail/flat policy、v24 save/reopen、Windows production smokeとx64 Release利用者確認 | Implemented and verified | — |
-| PM-CAP-012 | 消失点 | 複数消失点、補助線角度、色、不透明度を編集する | 第7章 PDF表示 p.95（印刷 pp.188–189） | `VANISHING-POINT-001` | stable-ID object、canonical CRUD/preview、bounded radial snapshot、radial snap、ABI v12、Windows dialog／Canvas handle／renderer route、current-v26 persistence | Experimental | 自動検証済み。x64 Release利用者確認待ち。PM-GAP-010 |
+| PM-CAP-012 | 消失点 | 複数消失点、補助線角度、色、不透明度を編集する | 第7章 PDF表示 p.95（印刷 pp.188–189） | `VANISHING-POINT-001` | stable-ID object、canonical CRUD/preview、bounded radial snapshot、radial snap、ABI v12、Windows dialog／Canvas handle／renderer route、current-v26 persistence、x64 Release確認 | Implemented and verified | — |
 | PM-CAP-013 | 自由描画／消去 | 鉛筆、brush、raster eraser、auto-erase、筆圧、vector 三種消去を扱う | 第7章 PDF表示 pp.88,107（印刷 pp.174–175,212–213） | `PAINT-001`, `VECTOR-002` | `paint_001_brush_eraser_auto_erase_and_pressure_are_transactional`; `RunVectorWorkflowSmoke` | Implemented and verified | 物理 pen 経路の直接検証は §7 参照 |
 | PM-CAP-013A | ストローク入力 | 実ペンタブレットの pressure を stroke 太さへ反映する | 第7章 PDF表示 pp.88,107（印刷 pp.174–175,212–213） | `PAINT-001` | `WM_POINTER` の PT_PEN／pressure route はあるが物理 device E2E なし | Implemented but unverified | 実機検証は §7 |
 | PM-CAP-014 | 図形描画 | 直線、二段階曲線、矩形、楕円、N角形、polyline、fill、入り抜き、制約、snap を扱う | 第7章 PDF表示 pp.89–91（印刷 pp.176–181） | `PAINT-002`, `SNAP-001`, `SPEC.md:281–287` | raster/vector 共通の typed geometry、resolved canonical procedure、preview state machine、全 primitive capability/golden、bounded ABI、Windows staged gesture/renderer/snap smoke、ARM64図形手動確認、M15 x64 snap手動確認 | Implemented and verified | — |
@@ -182,10 +182,10 @@ PaintMan の塗りあふれ中断が途中結果を残すか、フィルター�
 
 ### PM-GAP-007 — raster／vector 混在時にも layer 順を守る
 
-- **不足している能力:** visibility、opacity、alpha、adjustment とともに、raster／vector を任意の論理 layer 順で決定的に合成する。
+- **不足していた能力:** visibility、opacity、alpha、adjustmentとともに、raster／vectorを任意の論理layer順で決定的に合成する。段階的解消作業で実装・確認済み。
 - **PaintMan で可能な作業:** vector 線を背景 raster の下、または raster 特効を vector の上へ置き、一覧の順序どおりの画を得る。
-- **現状で困る状況:** 現在は raster tiles を先に合成し vector content を後から描くため、並び順と見た目が食い違い得る。
-- **不足層／カバレッジ:** Core snapshot／renderer 実装不足、`Partial`。各形式の表示は実装済みだが混在順が既知差分。
+- **現状で困る状況:** 解消済み。Coreのordered render planをCanvas、thumbnail、flattenが共有し、raster／vector混在時も論理順を維持する。
+- **不足層／カバレッジ:** R/V/R・V/R/V、visibility、opacity、alpha、adjustment、reorder、Undo／Redo、save／reopen、ABI ownership／negative、renderer pixel、device loss、x64 Release利用者確認まで完了した。`RENDER-001`は`Verified`。
 - **推奨優先度（仕上げ）:** **1/22（P0）**。互換性評価は **Must**。見た目と論理データの不一致は判断、export、レビューの誤りにつながる。
 - **代替手段:** vector を rasterize して順序を固定するが、編集可能な geometry を失う。
 - **関連要件:** `DOC-002`, `VECTOR-001`, `SPEC.md:221`。
@@ -195,10 +195,10 @@ PaintMan の塗りあふれ中断が途中結果を残すか、フィルター�
 
 ### PM-GAP-003 — 新規セルを完全な制作条件で作成する
 
-- **不足している能力:** frame-size または image-size、DPI、initial layer type、8/16 bit、基準／最大寄り frame、anchor、作成枚数を指定する。
+- **不足していた能力:** frame-sizeまたはimage-size、DPI、initial layer type、8/16 bit、基準／最大寄りframe、anchor、作成枚数を指定する。段階的解消作業で実装・確認済み。
 - **PaintMan で可能な作業:** カット既定値から同条件の複数セルを一度に作り、階調深度と画角を開始時点で固定する。
-- **現状で困る状況:** UI は width／height pixel、DPI、レイヤー種別による一枚作成だけで、初期 raster は実質 RGBA8。後編集が必要になり、複数セル間で条件がずれ得る。
-- **不足層／カバレッジ:** 実装不足、`Partial`。単一セル生成は実装・検証済み、残りは未実装。
+- **現状で困る状況:** 解消済み。typed creation planから1～64枚をall-or-noneで生成し、dialog previewとcommitが同じCore計算を使う。
+- **不足層／カバレッジ:** image／frame mode、全initial layer、RGBA8/16、DPI／frame／anchor、invalid／overflow／allocation failure／Cancel、ABI ownership／negative、Windows production smoke、x64 Release利用者確認まで完了した。`DOC-001`は`Verified`。
 - **推奨優先度（仕上げ）:** **2/22（P0）**。互換性評価は **Must**。bit depth や frame 条件の誤りは後工程で情報損失または全セル修正を招く。
 - **代替手段:** 一枚ずつ作成し、用紙／frame／変換を後設定する。反復が多く、完全な同一条件を保証しにくい。
 - **関連要件:** `DOC-001`, `SPEC.md` §7。
@@ -403,7 +403,7 @@ PaintMan の塗りあふれ中断が途中結果を残すか、フィルター�
 
 ### PM-GAP-002 — セル系列を構造として編集する
 
-- **不足している能力:** 自動検証の範囲では解消した。セルを系列へ追加・削除・並替え・採番し、衝突なく一回の操作として確定できる。x64 Releaseの利用者確認だけが残る。
+- **不足していた能力:** セルを系列へ追加・削除・並替え・採番し、衝突なく一回の操作として確定する。自動検証とx64 Release利用者確認まで完了した。
 - **PaintMan で可能な作業:** サムネイル一覧を見ながら欠番や順序を直し、作業対象の並びを整える。
 - **現状で困る状況:** 自動検証の範囲では解消した。Sequence paneからadd／remove／dragまたはkeyboard reorder／range renumberでき、source fileをrename／deleteせずCut記述子だけを一回置換する。
 - **不足層／カバレッジ:** `SEQ-STRUCT-001`として仕様化し、stable `(CellId, document UUID)` identity、bounded ordered transaction、最終state検証、一回Cut Undo／Redo、current-only v24／epoch-21 Cut schema 2、strided ABIと失敗operation index、Windows production routeを実装・確認した。remove後の参照は別Cellへ付け替えずorphan／missingとして表示する。
@@ -455,10 +455,10 @@ PaintMan の塗りあふれ中断が途中結果を残すか、フィルター�
 
 ### PM-GAP-010 — 消失点と放射補助線
 
-- **不足している能力:** Canvas 内外の複数消失点と、1/5/10/15/30度等の補助線間隔、色、不透明度を編集する。
+- **不足していた能力:** Canvas内外の複数消失点と、1/5/10/15/30度等の補助線間隔、色、不透明度を編集する。自動検証とx64 Release利用者確認まで完了した。
 - **PaintMan で可能な作業:** パース線に沿った修正線や背景要素を描く。
-- **現状で困る状況:** H/V guide はあるが、放射状 guide を同等に作る合理的な workflow がない。
-- **不足層／カバレッジ:** `VANISHING-POINT-001`のstable-ID Core object、canonical CRUD／preview、bounded radial snapshot、guide／gridと競合するradial snap、current-only `.inkpod` v26／epoch-23、ABI v12、Windows dialog／Canvas handle／renderer／device-loss production routeを実装し、必須自動gateを完了した。x64 Release利用者確認だけが残る。
+- **現状で困る状況:** 解消済み。properties、Canvas handle、radial overlay／snapから同じpersistent objectを編集できる。
+- **不足層／カバレッジ:** `VANISHING-POINT-001`のstable-ID Core object、canonical CRUD／preview、bounded radial snapshot、guide／gridと競合するradial snap、current-only `.inkpod` v26／epoch-23、ABI v12、Windows dialog／Canvas handle／renderer／device-loss production route、自動gate、x64 Release利用者確認まで完了した。`Verified`。
 - **推奨優先度（仕上げ）:** **22/22（P3）**。互換性評価は **Could**。主なセル彩色では頻度が低く、他の作図 app や手動 guide で代替できる。
 - **代替手段:** 外部作図、複数の手動線、参照画像。
 - **関連要件:** `VANISHING-POINT-001`, `SNAP-001`, `VIEW-002`。
@@ -480,10 +480,10 @@ PaintMan の塗りあふれ中断が途中結果を残すか、フィルター�
 | セル切替時自動保存 | `SEQ-001` | 実装・手動確認済み | exact native recovery association、staged restore、通常savepoint/path不変、Core／ABI／Windows production smokeとARM64確認。PM-GAP-004解消済み |
 | sequence 端点 loop preference | `SEQ-ENDPOINT-001` | 実装・手動確認済み | Stop/Wrap、明示result、issue-time identity、ABI v12、versioned HKCU、menu／shortcut／checked state／status、Windows smoke／x64 Release確認。PM-GAP-005解消済み |
 | 複数 edit target の presentation | `DOC-002`, `DOC-003` | 実装・手動確認済み | tree-ordered Core/ABI、Layer pane marker、capability menu、status、smoke、x64 Release 確認。PM-GAP-006 |
-| 論理 layer 順の raster/vector 混在合成 | `DOC-002`, `VECTOR-001` | 一部実装 | `docs/implementation-status.md:42–43` の既知差分、PM-GAP-007 |
+| 論理 layer 順の raster/vector 混在合成 | `RENDER-001`, `DOC-002`, `VECTOR-001` | 実装・手動確認済み | ordered render plan、mixed-order goldens、ABI、renderer pixel smoke、thumbnail／flatten、x64 Release確認。PM-GAP-007解消済み |
 | Text／Annotation の内容 | `ANNOTATION-001` と §5 | 実装・手動確認済み | stable-ID text/stroke/leader/value、canonical edit/stroke、ABI v12、Canvas/thumbnail/flat、v24 save/reopen、Windows smokeとx64 Release利用者確認。PM-GAP-009解消済み |
 | 角度付き撮影frameの内容 | `SHOOTING-FRAME-001` | 実装・手動確認済み | stable ID、center/size/rotation/anchor、canonical preview、ABI v12、Canvas handles、通常/指示export分離、v25 save/reopen、x64 Release確認。PM-GAP-008解消済み |
-| VanishingPoint の内容 | `VANISHING-POINT-001` | 実装済み・手動確認待ち | stable ID、Canvas内外、間隔／開始角／exact color／opacity、canonical preview、radial snapshot／snap、ABI v12、Windows dialog／handle／renderer、v26 save/reopen。PM-GAP-010 |
+| VanishingPoint の内容 | `VANISHING-POINT-001` | 実装・手動確認済み | stable ID、Canvas内外、間隔／開始角／exact color／opacity、canonical preview、radial snapshot／snap、ABI v12、Windows dialog／handle／renderer、v26 save/reopen、x64 Release確認。PM-GAP-010解消済み |
 | 二段階 curve、N角形、filled shape、line／polyline options、raster 図形 | `PAINT-002` | 実装・手動確認済み | Core/canonical v2、ABI v9 additive exports、Windows staged gestures、現行v24/epoch-21、golden/smoke、ARM64 Release確認。snapはPM-GAP-013/M15 |
 | 通常 brush の shape／smoothing／開始色限定 | `PAINT-004` | 実装・手動確認済み | Core/image、canonical v3、ABI v8、Windows pane/Canvas、v13/epoch-10、golden/smoke、x64 Release確認。PM-GAP-012 解消済み |
 | guide／grid snap の実入力適用 | `SNAP-001`, `VIEW-002` | 実装・手動確認済み | view-targeted Core／ABI、全M09 Windows gesture共有route、checked state／geometry／digest／off／Ctrl bypass／Undo/Redo smoke、x64 Release利用者確認。PM-GAP-013解消済み |
