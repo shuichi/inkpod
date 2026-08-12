@@ -11598,6 +11598,36 @@ int RunCutWorkflowSmoke(ApplicationHost& state) noexcept {
         ? 0U
         : state.engine->SessionCount();
     const DocumentViewId previous_view = state.routing.targets.ActiveDocumentView();
+    const HWND main_window = state.Workspace().windows.window;
+    const bool main_window_was_visible = main_window != nullptr
+        && IsWindowVisible(main_window) != FALSE;
+    RECT main_window_bounds{};
+    const bool main_window_bounds_valid = main_window != nullptr
+        && GetWindowRect(main_window, &main_window_bounds) != FALSE;
+    const bool sequence_pane_was_visible =
+        state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Sequence);
+    DockPaneType previous_sequence_stack_active = DockPaneType::Count;
+    const DockPanePlacement* initial_sequence_placement =
+        state.Workspace().windows.workspace.dock.Pane(DockPaneType::Sequence);
+    if (initial_sequence_placement != nullptr) {
+        const DockZone sequence_zone =
+            IsDockedZone(initial_sequence_placement->zone)
+            ? initial_sequence_placement->zone
+            : initial_sequence_placement->restore_zone;
+        for (std::size_t index = 0U; index < kDockPaneCount; ++index) {
+            const auto type = static_cast<DockPaneType>(index);
+            const DockPanePlacement* candidate =
+                state.Workspace().windows.workspace.dock.Pane(type);
+            if (candidate != nullptr && candidate->present
+                && candidate->zone == sequence_zone
+                && candidate->stack == initial_sequence_placement->stack
+                && candidate->active_tab) {
+                previous_sequence_stack_active = type;
+                break;
+            }
+        }
+    }
     std::array<DocumentSessionId, inkpod::app::DocumentRegistry::kMaximumSessions>
         baseline{};
     for (std::size_t index = 0U; index < baseline_count; ++index) {
@@ -11608,8 +11638,56 @@ int RunCutWorkflowSmoke(ApplicationHost& state) noexcept {
         baseline[index] = document->id;
     }
     std::vector<DocumentSessionId> created;
+    bool main_window_was_resized{};
     const auto cleanup = [&]() noexcept {
-        bool clean = state.DestroyCutSession(state.Workspace());
+        bool clean = true;
+        const bool sequence_pane_is_visible =
+            state.Workspace().windows.workspace.dock.IsPaneVisible(
+                DockPaneType::Sequence);
+        if (sequence_pane_is_visible != sequence_pane_was_visible) {
+            clean = main_window != nullptr
+                    && SendMessageW(
+                           main_window,
+                           WM_COMMAND,
+                           IDM_WINDOW_SEQUENCE,
+                           0) == 1
+                    && state.Workspace().windows.workspace.dock.IsPaneVisible(
+                           DockPaneType::Sequence)
+                        == sequence_pane_was_visible
+                && clean;
+        }
+        if (previous_sequence_stack_active != DockPaneType::Count
+            && previous_sequence_stack_active != DockPaneType::Sequence) {
+            const DockResult activate_result =
+                state.Workspace().windows.dock_host.ActivatePane(
+                    previous_sequence_stack_active);
+            clean = (activate_result == DockResult::Ok
+                        || activate_result == DockResult::NoOp)
+                && clean;
+        }
+        if (main_window_was_resized && main_window_bounds_valid) {
+            clean = SetWindowPos(
+                        main_window,
+                        nullptr,
+                        main_window_bounds.left,
+                        main_window_bounds.top,
+                        main_window_bounds.right - main_window_bounds.left,
+                        main_window_bounds.bottom - main_window_bounds.top,
+                        SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER)
+                    != FALSE
+                && clean;
+        }
+        if (main_window != nullptr
+            && (IsWindowVisible(main_window) != FALSE)
+                != main_window_was_visible) {
+            ShowWindow(
+                main_window,
+                main_window_was_visible ? SW_SHOWNOACTIVATE : SW_HIDE);
+            clean = (IsWindowVisible(main_window) != FALSE)
+                    == main_window_was_visible
+                && clean;
+        }
+        clean = state.DestroyCutSession(state.Workspace()) && clean;
         for (std::size_t index = created.size(); index != 0U; --index) {
             clean = state.CloseDocumentSession(created[index - 1U]) && clean;
         }
@@ -11770,50 +11848,186 @@ int RunCutWorkflowSmoke(ApplicationHost& state) noexcept {
         return finish(1035);
     }
 
+    if (main_window == nullptr) {
+        return finish(1046);
+    }
+    if (!main_window_was_visible) {
+        ShowWindow(main_window, SW_SHOWNOACTIVATE);
+    }
+    if (!state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Sequence)
+        && SendMessageW(
+               main_window,
+               WM_COMMAND,
+               IDM_WINDOW_SEQUENCE,
+               0) != 1) {
+        return finish(1046);
+    }
+    const DockResult sequence_activate_result =
+        state.Workspace().windows.dock_host.ActivatePane(
+            DockPaneType::Sequence);
+    if (sequence_activate_result != DockResult::Ok
+        && sequence_activate_result != DockResult::NoOp) {
+        std::fprintf(
+            stderr,
+            "Cut drag pane activation mismatch: result=%u\n",
+            static_cast<unsigned int>(sequence_activate_result));
+        return finish(1046);
+    }
+    RECT main_client{};
+    if (GetClientRect(main_window, &main_client) == FALSE
+        || main_client.right <= main_client.left
+        || main_client.bottom <= main_client.top) {
+        return finish(1046);
+    }
+    const int minimum_smoke_client_height = MulDiv(
+        768, static_cast<int>(GetDpiForWindow(main_window)), 96);
+    const int current_client_height = main_client.bottom - main_client.top;
+    if (current_client_height < minimum_smoke_client_height) {
+        if (!main_window_bounds_valid
+            || SetWindowPos(
+                   main_window,
+                   nullptr,
+                   0,
+                   0,
+                   main_window_bounds.right - main_window_bounds.left,
+                   main_window_bounds.bottom - main_window_bounds.top
+                       + minimum_smoke_client_height - current_client_height,
+                   SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOOWNERZORDER
+                       | SWP_NOZORDER)
+                == FALSE) {
+            return finish(1046);
+        }
+        main_window_was_resized = true;
+        if (GetClientRect(main_window, &main_client) == FALSE) {
+            return finish(1046);
+        }
+    }
+    LayoutMainChrome(
+        state.Workspace().windows,
+        state.lifetime.smoke_test,
+        main_client.right - main_client.left,
+        main_client.bottom - main_client.top);
+    PumpPendingWindowMessages();
     const HWND sequence_list = GetDlgItem(
         state.Workspace().sequence_palette, IDC_SEQUENCE_CELLS);
     const auto* drag_document = state.Documents().Find(cell_sessions[1]);
     const auto* drag_view = drag_document == nullptr
         ? nullptr
         : drag_document->ViewAt(0U);
-    if (drag_view == nullptr || !state.ActivateDocumentView(drag_view->id)
+    const bool main_window_is_visible = IsWindowVisible(main_window) != FALSE;
+    const bool sequence_pane_is_visible =
+        state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Sequence);
+    const bool sequence_list_is_visible = sequence_list != nullptr
+        && IsWindowVisible(sequence_list) != FALSE;
+    if (!main_window_is_visible || !sequence_pane_is_visible
+        || !sequence_list_is_visible || drag_view == nullptr
+        || !state.ActivateDocumentView(drag_view->id)
         || !RefreshSequencePane(state)) {
+        std::fprintf(
+            stderr,
+            "Cut drag visibility mismatch: main=%d dock=%d list=%p/%d "
+            "drag_document=%p drag_view=%p\n",
+            main_window_is_visible ? 1 : 0,
+            sequence_pane_is_visible ? 1 : 0,
+            static_cast<void*>(sequence_list),
+            sequence_list_is_visible ? 1 : 0,
+            static_cast<const void*>(drag_document),
+            static_cast<const void*>(drag_view));
         return finish(1046);
     }
     const std::uint64_t active_thumbnail_checksum =
         state.Workspace().sequence_dialog.view.cells[1].thumbnail_checksum;
+    RECT list_client{};
     RECT destination_item{};
     RECT source_item{};
-    if (sequence_list == nullptr
-        || SendMessageW(
+    const LRESULT set_top_result = SendMessageW(
+        sequence_list, LB_SETTOPINDEX, 0, 0);
+    const BOOL client_result = GetClientRect(sequence_list, &list_client);
+    const LRESULT destination_rect_result = SendMessageW(
                sequence_list,
                LB_GETITEMRECT,
                0,
-               reinterpret_cast<LPARAM>(&destination_item))
-            == LB_ERR
-        || SendMessageW(
+               reinterpret_cast<LPARAM>(&destination_item));
+    const LRESULT source_rect_result = SendMessageW(
                sequence_list,
                LB_GETITEMRECT,
                1,
-               reinterpret_cast<LPARAM>(&source_item))
-            == LB_ERR) {
+               reinterpret_cast<LPARAM>(&source_item));
+    if (set_top_result == LB_ERR || client_result == FALSE
+        || destination_rect_result == LB_ERR || source_rect_result == LB_ERR) {
+        std::fprintf(
+            stderr,
+            "Cut drag geometry query failed: top=%lld client=%d "
+            "destination=%lld source=%lld\n",
+            static_cast<long long>(set_top_result),
+            client_result != FALSE ? 1 : 0,
+            static_cast<long long>(destination_rect_result),
+            static_cast<long long>(source_rect_result));
+        return finish(1046);
+    }
+    const POINT source_point{
+        (source_item.left + source_item.right) / 2,
+        (source_item.top + source_item.bottom) / 2};
+    const POINT destination_point{
+        (destination_item.left + destination_item.right) / 2,
+        (destination_item.top + destination_item.bottom) / 2};
+    const DWORD source_hit = static_cast<DWORD>(SendMessageW(
+        sequence_list,
+        LB_ITEMFROMPOINT,
+        0,
+        MAKELPARAM(source_point.x, source_point.y)));
+    const DWORD destination_hit = static_cast<DWORD>(SendMessageW(
+        sequence_list,
+        LB_ITEMFROMPOINT,
+        0,
+        MAKELPARAM(destination_point.x, destination_point.y)));
+    if (PtInRect(&list_client, source_point) == FALSE
+        || PtInRect(&list_client, destination_point) == FALSE
+        || HIWORD(source_hit) != 0U || LOWORD(source_hit) != 1U
+        || HIWORD(destination_hit) != 0U || LOWORD(destination_hit) != 0U) {
+        std::fprintf(
+            stderr,
+            "Cut drag layout mismatch: visible=%d client=%ld,%ld,%ld,%ld "
+            "source=%ld,%ld,%ld,%ld hit=%u/%u "
+            "destination=%ld,%ld,%ld,%ld hit=%u/%u\n",
+            IsWindowVisible(sequence_list) != FALSE ? 1 : 0,
+            list_client.left,
+            list_client.top,
+            list_client.right,
+            list_client.bottom,
+            source_item.left,
+            source_item.top,
+            source_item.right,
+            source_item.bottom,
+            static_cast<unsigned int>(LOWORD(source_hit)),
+            static_cast<unsigned int>(HIWORD(source_hit)),
+            destination_item.left,
+            destination_item.top,
+            destination_item.right,
+            destination_item.bottom,
+            static_cast<unsigned int>(LOWORD(destination_hit)),
+            static_cast<unsigned int>(HIWORD(destination_hit)));
         return finish(1046);
     }
     SendMessageW(
         sequence_list,
         WM_LBUTTONDOWN,
         MK_LBUTTON,
-        MAKELPARAM(
-            (source_item.left + source_item.right) / 2,
-            (source_item.top + source_item.bottom) / 2));
+        MAKELPARAM(source_point.x, source_point.y));
+    if (state.Workspace().sequence_dialog.drag_index != 1U) {
+        std::fprintf(
+            stderr,
+            "Cut drag did not arm: index=%u expected=1\n",
+            state.Workspace().sequence_dialog.drag_index);
+        return finish(1046);
+    }
     SendMessageW(
         sequence_list,
         WM_LBUTTONUP,
         0,
-        // A captured drag released above the list must target its first cell.
-        MAKELPARAM(
-            (destination_item.left + destination_item.right) / 2,
-            -1));
+        MAKELPARAM(destination_point.x, destination_point.y));
     InkpodCutInfo reordered{};
     if (!query_info(reordered) || reordered.revision != created_cut.revision + 1U
         || state.Workspace().cut.members.size() != 5U
