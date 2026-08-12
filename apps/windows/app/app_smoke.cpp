@@ -11810,9 +11810,10 @@ int RunCutWorkflowSmoke(ApplicationHost& state) noexcept {
         sequence_list,
         WM_LBUTTONUP,
         0,
+        // A captured drag released above the list must target its first cell.
         MAKELPARAM(
             (destination_item.left + destination_item.right) / 2,
-            (destination_item.top + destination_item.bottom) / 2));
+            -1));
     InkpodCutInfo reordered{};
     if (!query_info(reordered) || reordered.revision != created_cut.revision + 1U
         || state.Workspace().cut.members.size() != 5U

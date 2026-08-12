@@ -175,13 +175,13 @@ LRESULT CALLBACK SequenceListSubclass(
         state->drag_index = UINT32_MAX;
         const DWORD item = static_cast<DWORD>(SendMessageW(
             list, LB_ITEMFROMPOINT, 0, lparam));
-        if (HIWORD(item) == 0) {
-            const std::uint32_t destination = LOWORD(item);
-            if (source != destination && state->reorder_cell != nullptr) {
-                state->reorder_cell(
-                    state->context, source, destination);
-                return 0;
-            }
+        // LOWORD is the nearest item even when the captured pointer is outside.
+        const std::uint32_t destination = LOWORD(item);
+        if (destination < state->view.cells.size() && source != destination
+            && state->reorder_cell != nullptr) {
+            state->reorder_cell(
+                state->context, source, destination);
+            return 0;
         }
     }
     return DefSubclassProc(list, message, wparam, lparam);
