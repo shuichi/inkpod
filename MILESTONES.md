@@ -973,7 +973,7 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M17 — PM-GAP-001: Cutを意味上の制作単位として保持
 
-状態: 手動確認待ち
+状態: 完了
 
 関連要件: CUT-001、DOC-001、SESSION-001。
 
@@ -1038,7 +1038,7 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M18 — PM-GAP-002: セル系列の構造編集
 
-状態: 未着手
+状態: 手動確認待ち
 
 関連要件: SEQ-001、SESSION-001。構造編集用の独立要件IDを新設する。
 

@@ -28,6 +28,11 @@ fn defaults() -> FileCutDefaults {
 }
 
 fn descriptor() -> FileCutDescriptor {
+    let member = FileCutMembership {
+        cell_id: 7,
+        document_uuid: 0x9876_u128.to_le_bytes(),
+        display_number: 1,
+    };
     FileCutDescriptor {
         cut_id: 1,
         cut_uuid: 0x1234_u128.to_le_bytes(),
@@ -38,22 +43,25 @@ fn descriptor() -> FileCutDescriptor {
         history_cursor: 1,
         genesis_metadata: metadata("C000"),
         genesis_defaults: defaults(),
+        genesis_members: vec![member],
         metadata: metadata("C001"),
         defaults: defaults(),
-        members: vec![FileCutMember {
+        member_assets: vec![FileCutMemberAsset {
             cell_id: 7,
             document_uuid: 0x9876_u128.to_le_bytes(),
-            display_number: 1,
             relative_path: "C001-0001.inkpod".to_owned(),
         }],
+        members: vec![member],
         active_history: vec![FileCutHistoryEntry {
             procedure_id: 1,
             base_state_id: 1,
             committed_state_id: 2,
             before_metadata: metadata("C000"),
             before_defaults: defaults(),
+            before_members: vec![member],
             after_metadata: metadata("C001"),
             after_defaults: defaults(),
+            after_members: vec![member],
         }],
         inactive_history: Vec::new(),
     }
@@ -83,7 +91,7 @@ fn cut_descriptor_round_trips_current_version_and_rejects_noncurrent() {
 #[test]
 fn cut_descriptor_rejects_duplicates_corruption_and_oversized_text() {
     let mut duplicate = descriptor();
-    duplicate.members.push(duplicate.members[0].clone());
+    duplicate.members.push(duplicate.members[0]);
     assert!(matches!(
         encode_cut_descriptor(&duplicate),
         Err(FormatError::Invalid(_))

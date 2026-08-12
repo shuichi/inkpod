@@ -6,6 +6,8 @@
 #include <cwchar>
 #include <utility>
 
+#include <commctrl.h>
+
 #include "app/resource.h"
 #include "pane_dialog_layout.h"
 
@@ -48,9 +50,12 @@ void LayoutSequencePane(HWND dialog) noexcept {
         margin + ScalePaneDip(dialog, 4),
         std::max(0, width - margin * 3 - pin_width),
         line_height);
-    const int buttons_top = std::max(
+    const int edit_buttons_top = std::max(
         margin + header_height + gap,
         height - margin - button_height);
+    const int buttons_top = std::max(
+        margin + header_height + gap,
+        edit_buttons_top - gap - button_height);
     const int list_top = margin + header_height + gap;
     const int list_height = std::max(0, buttons_top - gap - list_top);
     PlacePaneDialogControl(
@@ -88,6 +93,98 @@ void LayoutSequencePane(HWND dialog) noexcept {
         buttons_top,
         import_width,
         button_height);
+    const int edit_width = std::max(1, (width - margin * 2 - gap * 3) / 4);
+    PlacePaneDialogControl(
+        dialog, IDC_SEQUENCE_REMOVE, margin, edit_buttons_top,
+        edit_width, button_height);
+    PlacePaneDialogControl(
+        dialog, IDC_SEQUENCE_MOVE_UP,
+        margin + edit_width + gap, edit_buttons_top,
+        edit_width, button_height);
+    PlacePaneDialogControl(
+        dialog, IDC_SEQUENCE_MOVE_DOWN,
+        margin + (edit_width + gap) * 2, edit_buttons_top,
+        edit_width, button_height);
+    PlacePaneDialogControl(
+        dialog, IDC_SEQUENCE_RENUMBER,
+        margin + (edit_width + gap) * 3, edit_buttons_top,
+        std::max(1, width - margin * 2 - (edit_width + gap) * 3),
+        button_height);
+}
+
+LRESULT CALLBACK SequenceListSubclass(
+    HWND list,
+    UINT message,
+    WPARAM wparam,
+    LPARAM lparam,
+    UINT_PTR,
+    DWORD_PTR reference) noexcept {
+    auto* state = reinterpret_cast<SequencePaneDialogState*>(reference);
+    if (state == nullptr) {
+        return DefSubclassProc(list, message, wparam, lparam);
+    }
+    if (message == WM_KEYDOWN && state->view.cut_editable) {
+        const bool control = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        const bool alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
+        if (wparam == VK_INSERT) {
+            Dispatch(*state, IDM_CUT_SEQUENCE_ADD);
+            return 0;
+        }
+        if (wparam == VK_DELETE) {
+            Dispatch(*state, IDM_CUT_SEQUENCE_REMOVE);
+            return 0;
+        }
+        if (alt && wparam == VK_UP) {
+            Dispatch(*state, IDM_CUT_SEQUENCE_MOVE_UP);
+            return 0;
+        }
+        if (alt && wparam == VK_DOWN) {
+            Dispatch(*state, IDM_CUT_SEQUENCE_MOVE_DOWN);
+            return 0;
+        }
+        if (control && wparam == 'R') {
+            Dispatch(*state, IDM_CUT_SEQUENCE_RENUMBER);
+            return 0;
+        }
+        if (control && wparam == 'Z') {
+            Dispatch(*state, IDM_CUT_UNDO);
+            return 0;
+        }
+        if (control && wparam == 'Y') {
+            Dispatch(*state, IDM_CUT_REDO);
+            return 0;
+        }
+    }
+    if (state->view.cut_editable && message == WM_LBUTTONDOWN) {
+        const DWORD item = static_cast<DWORD>(SendMessageW(
+            list, LB_ITEMFROMPOINT, 0, lparam));
+        state->drag_index = HIWORD(item) == 0
+            ? static_cast<std::uint32_t>(LOWORD(item))
+            : UINT32_MAX;
+    } else if (state->view.cut_editable && message == WM_MOUSEMOVE
+               && state->drag_index != UINT32_MAX
+               && (wparam & MK_LBUTTON) != 0U) {
+        const DWORD item = static_cast<DWORD>(SendMessageW(
+            list, LB_ITEMFROMPOINT, 0, lparam));
+        if (HIWORD(item) == 0) {
+            SendMessageW(list, LB_SETCURSEL, LOWORD(item), 0);
+        }
+    } else if (message == WM_LBUTTONUP
+               && state->drag_index != UINT32_MAX) {
+        const std::uint32_t source = state->drag_index;
+        state->drag_index = UINT32_MAX;
+        const DWORD item = static_cast<DWORD>(SendMessageW(
+            list, LB_ITEMFROMPOINT, 0, lparam));
+        if (HIWORD(item) == 0) {
+            const std::uint32_t destination = LOWORD(item);
+            if (source != destination && state->reorder_cell != nullptr) {
+                state->reorder_cell(
+                    state->context, source, destination);
+                return 0;
+            }
+        }
+    }
+    return DefSubclassProc(list, message, wparam, lparam);
 }
 
 void DrawThumbnail(
@@ -242,7 +339,23 @@ INT_PTR CALLBACK SequencePaneProcedure(
                     Dispatch(*state, IDM_SEQUENCE_PIN);
                     return TRUE;
                 case IDC_SEQUENCE_IMPORT:
-                    Dispatch(*state, IDM_SEQ_IMPORT);
+                    Dispatch(
+                        *state,
+                        state->view.cut_editable
+                            ? IDM_CUT_SEQUENCE_ADD
+                            : IDM_SEQ_IMPORT);
+                    return TRUE;
+                case IDC_SEQUENCE_REMOVE:
+                    Dispatch(*state, IDM_CUT_SEQUENCE_REMOVE);
+                    return TRUE;
+                case IDC_SEQUENCE_MOVE_UP:
+                    Dispatch(*state, IDM_CUT_SEQUENCE_MOVE_UP);
+                    return TRUE;
+                case IDC_SEQUENCE_MOVE_DOWN:
+                    Dispatch(*state, IDM_CUT_SEQUENCE_MOVE_DOWN);
+                    return TRUE;
+                case IDC_SEQUENCE_RENUMBER:
+                    Dispatch(*state, IDM_CUT_SEQUENCE_RENUMBER);
                     return TRUE;
                 case IDC_SEQUENCE_PREVIOUS:
                     Dispatch(*state, IDM_SEQ_PREVIOUS);
@@ -277,6 +390,10 @@ INT_PTR CALLBACK SequencePaneProcedure(
             }
             return TRUE;
         case WM_NCDESTROY:
+            RemoveWindowSubclass(
+                GetDlgItem(dialog, IDC_SEQUENCE_CELLS),
+                SequenceListSubclass,
+                1U);
             SetWindowLongPtrW(dialog, GWLP_USERDATA, 0);
             return TRUE;
         default:
@@ -303,6 +420,11 @@ HWND CreateSequencePaneDialog(
     }
     SetWindowLongPtrW(
         dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(&state));
+    SetWindowSubclass(
+        GetDlgItem(dialog, IDC_SEQUENCE_CELLS),
+        SequenceListSubclass,
+        1U,
+        reinterpret_cast<DWORD_PTR>(&state));
     LayoutSequencePane(dialog);
     SetWindowTextW(
         GetDlgItem(dialog, IDC_SEQUENCE_CELLS),
@@ -355,6 +477,21 @@ void UpdateSequencePaneDialog(HWND dialog, SequencePaneView view) noexcept {
     EnableWindow(
         GetDlgItem(dialog, IDC_SEQUENCE_IMPORT),
         state->view.target_available ? TRUE : FALSE);
+    SetDlgItemTextW(
+        dialog,
+        IDC_SEQUENCE_IMPORT,
+        state->view.cut_editable ? L"既存セルを追加" : L"ファイルを追加");
+    const int show_edit = state->view.cut_editable ? SW_SHOW : SW_HIDE;
+    for (const int control : {
+             IDC_SEQUENCE_REMOVE,
+             IDC_SEQUENCE_MOVE_UP,
+             IDC_SEQUENCE_MOVE_DOWN,
+             IDC_SEQUENCE_RENUMBER}) {
+        ShowWindow(GetDlgItem(dialog, control), show_edit);
+        EnableWindow(
+            GetDlgItem(dialog, control),
+            state->view.cut_editable && has_sequence ? TRUE : FALSE);
+    }
     SetDlgItemTextW(
         dialog,
         IDC_SEQUENCE_EMPTY,

@@ -28,8 +28,9 @@ pub use common_formats::{
 };
 pub use cut::{
     CUT_DESCRIPTOR_REPLAY_EPOCH, FileCutDefaults, FileCutDescriptor, FileCutHistoryEntry,
-    FileCutMember, FileCutMetadata, decode_cut_descriptor, encode_cut_descriptor,
-    read_cut_descriptor, save_cut_descriptor_atomic, save_cut_recovery_atomic,
+    FileCutMemberAsset, FileCutMembership, FileCutMetadata, decode_cut_descriptor,
+    encode_cut_descriptor, read_cut_descriptor, save_cut_descriptor_atomic,
+    save_cut_recovery_atomic,
 };
 use inkpod_image::PixelValue;
 #[cfg(test)]

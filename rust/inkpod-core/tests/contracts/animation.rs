@@ -1131,6 +1131,23 @@ fn acceptance_sequence_gaps_natural_order_thumbnails_subpalette_and_motion() {
 }
 
 #[test]
+fn document_thumbnail_is_bounded_deterministic_and_query_only() {
+    let mut core = Core::new();
+    core.new_cell(128, 64, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    let before = core.document_info().unwrap();
+    let history_before = core.history_entries();
+
+    let thumbnail = core.document_thumbnail().unwrap();
+    assert_eq!((thumbnail.width, thumbnail.height), (64, 32));
+    assert_eq!(thumbnail.rgba8.len(), 64 * 32 * 4);
+    assert_ne!(thumbnail.checksum, 0);
+    assert_eq!(core.document_thumbnail().unwrap(), thumbnail);
+    assert_eq!(core.document_info().unwrap(), before);
+    assert_eq!(core.history_entries(), history_before);
+}
+
+#[test]
 fn subpalette_reference_snapshot_has_independent_view_and_never_edits_document() {
     let mut core = Core::new();
     core.new_cell(8, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)

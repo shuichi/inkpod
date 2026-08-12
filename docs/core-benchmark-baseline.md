@@ -65,7 +65,7 @@ scenario assertions are:
 | `light_table_composite` | every reference contributes to the expected tile grid and checksum |
 | `vector_snapshot` | ordered pass, segment/fill counts, zero legacy raster snapshot tiles, and rasterized pixels match |
 | `batch_preview` | one invalid graph is rejected, valid inputs dry-run successfully, and no output is generated |
-| `canonical_replay` | six boundaries replay bit-exactly; final digest and runtime epoch 19 / native v22 / numeric v1 contract match |
+| `canonical_replay` | six boundaries replay bit-exactly; final digest and runtime epoch 20 / native v23 / numeric v1 contract match |
 | `checkpoint_open` | policy emits CKPT; verified open restores the journal/document digest and exact Undo/Redo; full crosses one million replay-work units |
 | `output_color_guard` | exact scanned/selected/transparent counts, one canonical commit, revision 2/history 1, exact sparse selection bounds/tile bytes, zero CPU staging bytes, and result digest match |
 
@@ -114,6 +114,12 @@ The v22/epoch-19 individual-Cell Cut descriptor adds a separate bounded persiste
 and history domain. It advances the closed current contract without changing the
 ten benchmark workloads, their semantic counters/checksums, the harness, any
 approved envelope, payload-access route, or the `revision-max` expression.
+
+The v23/epoch-20 ordered Cut-membership transaction separates immutable member
+assets from ordered membership and extends Cut history outside the document/render
+hot path. It changes no benchmark workload, semantic counter/checksum, harness,
+approved envelope, payload-access route, or `revision-max` expression. The required
+quick run must therefore retain all ten recorded checksums and reuse/rebuild gates.
 
 ## Approved output-color-guard envelope
 

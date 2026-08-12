@@ -127,6 +127,17 @@ impl Core {
         Ok(encode_common_raster(format, &raster, composite_white)?)
     }
 
+    /// Builds a bounded aspect-preserving thumbnail of the visible document.
+    ///
+    /// The returned straight-alpha RGBA8 pixels are owned by the caller. This is
+    /// a query and does not change revisions, history, dirty state, or savepoint.
+    pub fn document_thumbnail(&self) -> Result<Thumbnail, CoreError> {
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let flattened =
+            flatten_document(document, &self.assets, self.document_revision.get().max(1))?;
+        thumbnail_for_raster(&flattened)
+    }
+
     /// Quantizes visible composite colors into a replacement document palette.
     ///
     /// Success follows [`Core::replace_palette`] history/no-op semantics. Exceeding

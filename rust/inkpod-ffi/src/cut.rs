@@ -562,6 +562,261 @@ pub unsafe extern "C" fn inkpod_cut_member_get(
     })
 }
 
+fn sequence_identity(
+    cell_id: u64,
+    document_uuid_high: u64,
+    document_uuid_low: u64,
+) -> Result<SequenceMemberId, u32> {
+    SequenceMemberId::new(
+        cell_id,
+        (u128::from(document_uuid_high) << 64) | u128::from(document_uuid_low),
+    )
+    .map_err(map_core_error)
+}
+
+unsafe fn parse_sequence_operations(
+    request: &InkpodCutSequenceEditRequest,
+    result: &mut InkpodCutSequenceEditResult,
+) -> Result<Vec<SequenceEditOperation>, u32> {
+    if request.operation_count > inkpod_core::MAX_SEQUENCE_EDIT_OPERATIONS as u64 {
+        return Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "Cut sequence operation count exceeds the public bound",
+        ));
+    }
+    result.operation_count = request.operation_count as u32;
+    if request.operation_count == 0 {
+        return Ok(Vec::new());
+    }
+    if request.operations.is_null()
+        || request.operation_stride_bytes < size_of::<InkpodCutSequenceEditOperation>() as u64
+    {
+        return Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "Cut sequence operation span is null or has a short stride",
+        ));
+    }
+    let mut operations = Vec::with_capacity(request.operation_count as usize);
+    for index in 0..request.operation_count {
+        result.failed_operation_index = index as u32;
+        let offset = index
+            .checked_mul(request.operation_stride_bytes)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or_else(|| {
+                fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "Cut sequence operation span offset overflows",
+                )
+            })?;
+        // SAFETY: The caller contract exposes operation_count records at this stride.
+        let pointer = unsafe { request.operations.cast::<u8>().add(offset) }
+            .cast::<InkpodCutSequenceEditOperation>();
+        // SAFETY: The current record exposes its complete readable size-prefixed range.
+        unsafe { validate_struct(pointer, "InkpodCutSequenceEditOperation")? };
+        // SAFETY: The complete record was validated above.
+        let operation = unsafe { &*pointer };
+        if operation.feature_flags != INKPOD_FEATURE_NONE || operation.reserved != 0 {
+            return Err(fail(
+                INKPOD_STATUS_UNSUPPORTED,
+                "Cut sequence operation contains unsupported flags",
+            ));
+        }
+        let parsed = match operation.kind {
+            INKPOD_CUT_SEQUENCE_INSERT => {
+                let member = sequence_identity(
+                    operation.cell_id,
+                    operation.document_uuid_high,
+                    operation.document_uuid_low,
+                )?;
+                // SAFETY: The operation path span is readable for this call.
+                let relative_path =
+                    unsafe { utf8_text(operation.relative_path, "Cut sequence member path")? };
+                SequenceEditOperation::Insert {
+                    position: operation.position,
+                    member: CutMember {
+                        cell_id: member.cell_id(),
+                        document_uuid: member.document_uuid(),
+                        display_number: operation.display_number,
+                        relative_path,
+                    },
+                }
+            }
+            INKPOD_CUT_SEQUENCE_REMOVE => SequenceEditOperation::Remove {
+                member: sequence_identity(
+                    operation.cell_id,
+                    operation.document_uuid_high,
+                    operation.document_uuid_low,
+                )?,
+            },
+            INKPOD_CUT_SEQUENCE_MOVE_BEFORE | INKPOD_CUT_SEQUENCE_MOVE_AFTER => {
+                let member = sequence_identity(
+                    operation.cell_id,
+                    operation.document_uuid_high,
+                    operation.document_uuid_low,
+                )?;
+                let anchor = sequence_identity(
+                    operation.anchor_cell_id,
+                    operation.anchor_document_uuid_high,
+                    operation.anchor_document_uuid_low,
+                )?;
+                if operation.kind == INKPOD_CUT_SEQUENCE_MOVE_BEFORE {
+                    SequenceEditOperation::MoveBefore { member, anchor }
+                } else {
+                    SequenceEditOperation::MoveAfter { member, anchor }
+                }
+            }
+            INKPOD_CUT_SEQUENCE_RENUMBER_RANGE => SequenceEditOperation::RenumberRange {
+                start: operation.position,
+                count: operation.count,
+                first_number: operation.first_number,
+                step: operation.step,
+            },
+            _ => {
+                return Err(fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "Cut sequence operation kind is not defined",
+                ));
+            }
+        };
+        operations.push(parsed);
+    }
+    result.failed_operation_index = INKPOD_CUT_SEQUENCE_REQUEST_ERROR_INDEX;
+    Ok(operations)
+}
+
+fn write_sequence_result(
+    output: &mut InkpodCutSequenceEditResult,
+    info: inkpod_core::CutInfo,
+    operation_count: u32,
+    outcome: CutMutationOutcome,
+) {
+    output.flags =
+        u32::from(outcome == CutMutationOutcome::Applied) * INKPOD_CUT_SEQUENCE_EDIT_APPLIED;
+    output.revision = info.revision;
+    output.state_id = info.state_id;
+    output.member_count = info.member_count;
+    output.operation_count = operation_count;
+    output.failed_operation_index = INKPOD_CUT_SEQUENCE_REQUEST_ERROR_INDEX;
+    output.reserved = 0;
+}
+
+/// Commits one bounded ordered membership span as one Cut history transaction.
+///
+/// On an operation-local failure, `failed_operation_index` names the zero-based
+/// record that failed. Request-level and final-state failures report
+/// `INKPOD_CUT_SEQUENCE_REQUEST_ERROR_INDEX`. No operation pointer or path is
+/// retained after this call.
+///
+/// # Safety
+/// `cut` must be a live owner-thread handle. `request`, every advertised strided
+/// operation/path range, and the complete writable `result` must remain valid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_cut_sequence_edit(
+    cut: *mut InkpodCut,
+    request: *const InkpodCutSequenceEditRequest,
+    result: *mut InkpodCutSequenceEditResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if cut.is_null() || !is_aligned(cut) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "Cut handle is invalid");
+        }
+        // SAFETY: Public records expose complete readable size-prefixed ranges.
+        if let Err(status) = unsafe { validate_struct(request, "InkpodCutSequenceEditRequest") } {
+            return status;
+        }
+        // SAFETY: The result prefix is readable and the complete record writable.
+        if let Err(status) =
+            unsafe { validate_struct(result.cast_const(), "InkpodCutSequenceEditResult") }
+        {
+            return status;
+        }
+        // SAFETY: Complete validated records remain live for this call.
+        let cut = unsafe { &mut *cut };
+        let request = unsafe { &*request };
+        // SAFETY: The validated result is writable.
+        let result = unsafe { &mut *result };
+        result.flags = 0;
+        result.revision = cut.cut.info().revision;
+        result.state_id = cut.cut.info().state_id;
+        result.member_count = cut.cut.info().member_count;
+        result.operation_count = 0;
+        result.failed_operation_index = INKPOD_CUT_SEQUENCE_REQUEST_ERROR_INDEX;
+        result.reserved = 0;
+        let status = validate_cut_thread(cut);
+        if status != INKPOD_STATUS_OK {
+            return status;
+        }
+        if request.feature_flags != INKPOD_FEATURE_NONE || request.reserved != 0 {
+            return fail(
+                INKPOD_STATUS_UNSUPPORTED,
+                "Cut sequence edit request contains unsupported flags",
+            );
+        }
+        // SAFETY: The operation span and nested paths follow the exported contract.
+        let operations = match unsafe { parse_sequence_operations(request, result) } {
+            Ok(value) => value,
+            Err(status) => return status,
+        };
+        match cut.cut.edit_sequence(SequenceEditRequest {
+            base_revision: request.base_revision,
+            operations,
+        }) {
+            Ok(outcome) => {
+                write_sequence_result(
+                    result,
+                    cut.cut.info(),
+                    request.operation_count as u32,
+                    outcome,
+                );
+                INKPOD_STATUS_OK
+            }
+            Err(error) => {
+                result.failed_operation_index = error.operation_index();
+                map_core_error(error.into_error())
+            }
+        }
+    })
+}
+
+/// Reports a cancelled interactive sequence edit as an observable stable no-op.
+///
+/// # Safety
+/// `cut` must be a live owner-thread handle and `result` must expose a complete
+/// writable size-prefixed record.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_cut_sequence_cancel(
+    cut: *mut InkpodCut,
+    result: *mut InkpodCutSequenceEditResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if cut.is_null() || !is_aligned(cut) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "Cut handle is invalid");
+        }
+        // SAFETY: The result prefix is readable and complete record writable.
+        if let Err(status) =
+            unsafe { validate_struct(result.cast_const(), "InkpodCutSequenceEditResult") }
+        {
+            return status;
+        }
+        // SAFETY: Live handle and complete result are guaranteed by contract.
+        let cut = unsafe { &mut *cut };
+        let status = validate_cut_thread(cut);
+        if status != INKPOD_STATUS_OK {
+            return status;
+        }
+        // SAFETY: The complete validated result is writable.
+        write_sequence_result(
+            unsafe { &mut *result },
+            cut.cut.info(),
+            0,
+            cut.cut.cancel_sequence_edit(),
+        );
+        INKPOD_STATUS_OK
+    })
+}
+
 unsafe fn cut_file_operation(
     cut: *mut InkpodCut,
     path_utf8: *const u8,

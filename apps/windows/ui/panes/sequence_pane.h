@@ -12,6 +12,8 @@ namespace inkpod::windows::ui::panes {
 
 using SequencePaneCommandCallback = void (*)(void* context, UINT command) noexcept;
 using SequencePaneActivateCallback = void (*)(void* context, std::uint32_t index) noexcept;
+using SequencePaneReorderCallback = void (*)(
+    void* context, std::uint32_t from, std::uint32_t to) noexcept;
 
 struct SequencePaneCellView final {
     std::uint32_t sequence_index{};
@@ -33,6 +35,7 @@ struct SequencePaneView final {
     std::uint32_t active_index{UINT32_MAX};
     bool target_available{};
     bool pinned{};
+    bool cut_editable{};
 };
 
 struct SequencePaneDialogState final {
@@ -40,7 +43,9 @@ struct SequencePaneDialogState final {
     ThumbnailCache* thumbnail_cache{};
     SequencePaneCommandCallback dispatch_command{};
     SequencePaneActivateCallback activate_cell{};
+    SequencePaneReorderCallback reorder_cell{};
     SequencePaneView view;
+    std::uint32_t drag_index{UINT32_MAX};
 };
 
 HWND CreateSequencePaneDialog(

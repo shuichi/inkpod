@@ -62,6 +62,9 @@ inkpod は次の構成を維持する。
 - Cut Properties の metadata／defaults 変更は base revision を固定した一つの Cut procedure、一 revision、一 history item とする。no-op、invalid、Cancel、stale、overflow、failure は Cut state、history、ID、dirty、savepoint、descriptor を進めない。Cut Undo／Redo は Cut 専用 command だけが動かし、active Cell の Undo／Redo と混ぜない。
 - 通常 Cut save は全 member file の存在、同一 directory、stable Cell identity を staged 検証してから descriptor 一 file を同一 directory の temporary file 経由で atomic replace し、成功後だけ Cut savepoint を進める。Cell file の保存は別の明示境界であり、複数 file の見かけ上の atomic commit を約束しない。Cut autosave は通常 savepoint／path authority を進めず、recovery open は dirty とする。
 - Cut open は exact-current top-level version、replay epoch、checksum、bounds、UTF-8、ID／path 重複、history chainを検証し、さらに全 member Cell を current Cell reader で staged openして `CellId` と document UUID の一致を確認してから live Cut を置換する。missing、renamed、duplicate、identity mismatch、path traversal、非current version、corruption は現在の Cut／Cell session を変更せず拒否する。
+- Cut の Cell 系列編集は、発行時 Cut revision と順序付き operation 列を一つの request に固定する。operation は既存 Cell file の追加、membership からの除外、stable `(CellId, document UUID)` を使う before／after 移動、連続範囲の正の表示番号への採番を持つ。全 operation 適用後の identity、path、表示番号、上限を検証してから Cut state、State ID、revision、history、dirty を一回だけ公開し、no-op、invalid、Cancel、stale、overflow、failure では一つも進めない。
+- 表示番号と一覧順は別の値であり、どちらも Cell identity や file 名の代用にしない。表示番号 0 は予約値として拒否し、同じ Cut 内の表示番号は重複させない。除外は descriptor membership だけを変更し、Cell file を削除、rename、移動しない。開いている Cell、Light Table、Batch、subpalette、autosave 等が保持する stable identity は付け替えず、membership から外れた参照は明示的な missing／orphan 状態として扱う。
+- Cut 系列の Undo／Redo は Sequence pane に focus がある Cut command として一 transaction だけを移動し、active Cell の document Undo／Redo と混ぜない。相対 file 名は descriptor の immutable member asset table に保持し、永続 canonical history は stable member identity、表示番号、順序だけを参照する。reorder／renumber は member file を書き換えず、通常 Cut save は更新済み descriptor 一 file だけを atomic replace する。
 
 ### 2. Windows GUI の全体構成
 
@@ -647,6 +650,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - `LT-003`: 自然順の前／後／両方向Nセルを線形opacity stepと時系列z-orderでpreviewし、同一source UUIDの既存itemを保持したまま一つのUndo単位で一括登録する
 - `CUT-001`: stable CutId、metadata、Cell作成既定値、ordered Cell membershipを、同一directoryの個別Cell `.inkpod`へのbounded相対参照として保持し、独立history／savepoint／recovery、default明示copy、staged identity検証、Cut Properties／Undo／Redo／save／reopenを提供する
 - `SEQ-001`: cut/cell sequence、前後セル、欠番、thumbnail preview
+- `SEQ-STRUCT-001`: Cut membership の add／remove／move-before／move-after／range renumber を stable Cell identity の一 transaction として行い、表示順／番号を file 名から分離し、Cut 専用 Undo／Redo、save／reopen、orphan 状態を提供する
 - `SEQ-002`: motion check、FPS、loop、step、selection/light table option
 - `SHORT-001`: 全 menu command への single/multi-stroke shortcut、text-focus guard、prefix-free resolve、conflict replacement、永続化、reset
 

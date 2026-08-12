@@ -24,6 +24,10 @@ _Static_assert(sizeof(InkpodCutCreateRequest) == 72U, "Cut create request layout
 _Static_assert(sizeof(InkpodCutUpdateRequest) == 40U, "Cut update request layout drift");
 _Static_assert(sizeof(InkpodCutInfo) == 144U, "Cut info layout drift");
 _Static_assert(sizeof(InkpodCutMemberInfo) == 56U, "Cut member info layout drift");
+_Static_assert(sizeof(InkpodCutSequenceEditOperation) == 104U, "Cut sequence operation layout drift");
+_Static_assert(sizeof(InkpodCutSequenceEditRequest) == 48U, "Cut sequence request layout drift");
+_Static_assert(sizeof(InkpodCutSequenceEditResult) == 40U, "Cut sequence result layout drift");
+_Static_assert(sizeof(InkpodDocumentThumbnailBuffer) == 56U, "document thumbnail layout drift");
 _Static_assert(sizeof(InkpodResourceUsage) == 112U, "resource usage layout drift");
 _Static_assert(sizeof(InkpodStrokeSample) == 24U, "stroke sample layout drift");
 _Static_assert(sizeof(InkpodStrokeInput) == 72U, "stroke input layout drift");

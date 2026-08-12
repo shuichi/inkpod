@@ -200,6 +200,218 @@ fn cut_member_identity_combines_document_uuid_and_cell_id() {
     fs::remove_dir_all(directory).unwrap();
 }
 
+#[test]
+fn seq_struct_001_ordered_edit_is_one_cut_transaction_and_round_trips() {
+    let directory = unique_test_directory("cut-sequence-edit");
+    let mut members = Vec::new();
+    for index in 0..5_u32 {
+        let mut member = write_member(
+            &directory,
+            &format!("C005-{index:04}.inkpod"),
+            0x6000 + u128::from(index),
+        );
+        member.display_number = index * 2 + 1;
+        members.push(member);
+    }
+    let inserted = write_member(&directory, "C005-extra.inkpod", 0x7000);
+    let removed_identity = SequenceMemberId::of(&members[1]);
+    let moved_identity = SequenceMemberId::of(&members[4]);
+    let first_identity = SequenceMemberId::of(&members[0]);
+    let mut cut = CutCore::new(CutCreateRequest {
+        cut_uuid: 0x90abcd,
+        metadata: cut_metadata("C005"),
+        defaults: cut_defaults(),
+        members: members.clone(),
+    })
+    .unwrap();
+    let before = cut.info();
+
+    let outcome = cut
+        .edit_sequence(SequenceEditRequest {
+            base_revision: before.revision,
+            operations: vec![
+                SequenceEditOperation::Insert {
+                    position: 2,
+                    member: inserted.clone(),
+                },
+                SequenceEditOperation::MoveBefore {
+                    member: moved_identity,
+                    anchor: first_identity,
+                },
+                SequenceEditOperation::RenumberRange {
+                    start: 0,
+                    count: 6,
+                    first_number: 10,
+                    step: 10,
+                },
+                SequenceEditOperation::Remove {
+                    member: removed_identity,
+                },
+            ],
+        })
+        .unwrap();
+    assert_eq!(outcome, CutMutationOutcome::Applied);
+    assert_eq!(cut.info().revision, before.revision + 1);
+    assert_eq!(cut.info().state_id, before.state_id + 1);
+    assert_eq!(cut.info().member_count, 5);
+    assert_eq!(
+        cut.members()
+            .iter()
+            .map(|member| (member.document_uuid, member.display_number))
+            .collect::<Vec<_>>(),
+        vec![
+            (0x6004, 10),
+            (0x6000, 20),
+            (0x7000, 40),
+            (0x6002, 50),
+            (0x6003, 60)
+        ]
+    );
+    assert!(directory.join(&members[1].relative_path).is_file());
+
+    assert_eq!(cut.undo().unwrap(), CutMutationOutcome::Applied);
+    assert_eq!(cut.members(), members.as_slice());
+    assert_eq!(cut.redo().unwrap(), CutMutationOutcome::Applied);
+    let edited = cut.members().to_vec();
+    let path = directory.join("C005.inkpod");
+    cut.save(&path).unwrap();
+    let reopened = CutCore::open(&path).unwrap();
+    assert_eq!(reopened.members(), edited.as_slice());
+    assert!(reopened.info().can_undo);
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn seq_struct_001_noop_cancel_stale_invalid_and_overflow_are_atomic() {
+    let directory = unique_test_directory("cut-sequence-atomic");
+    let first = write_member(&directory, "C006-0001.inkpod", 0x8001);
+    let mut second = write_member(&directory, "C006-0002.inkpod", 0x8002);
+    second.display_number = 2;
+    let mut cut = CutCore::new(CutCreateRequest {
+        cut_uuid: 0x91abcd,
+        metadata: cut_metadata("C006"),
+        defaults: cut_defaults(),
+        members: vec![first.clone(), second.clone()],
+    })
+    .unwrap();
+    let before = cut.clone();
+    assert_eq!(
+        cut.edit_sequence(SequenceEditRequest {
+            base_revision: before.info().revision,
+            operations: vec![SequenceEditOperation::RenumberRange {
+                start: 0,
+                count: 0,
+                first_number: 1,
+                step: 1,
+            }],
+        })
+        .unwrap(),
+        CutMutationOutcome::NoOp
+    );
+    assert_eq!(cut.info(), before.info());
+    assert_eq!(cut.cancel_sequence_edit(), CutMutationOutcome::NoOp);
+
+    let invalid_cases = [
+        SequenceEditRequest {
+            base_revision: before.info().revision + 1,
+            operations: Vec::new(),
+        },
+        SequenceEditRequest {
+            base_revision: before.info().revision,
+            operations: vec![SequenceEditOperation::MoveAfter {
+                member: SequenceMemberId::of(&first),
+                anchor: SequenceMemberId::new(99, 99).unwrap(),
+            }],
+        },
+        SequenceEditRequest {
+            base_revision: before.info().revision,
+            operations: vec![SequenceEditOperation::RenumberRange {
+                start: 0,
+                count: 2,
+                first_number: u32::MAX,
+                step: 1,
+            }],
+        },
+        SequenceEditRequest {
+            base_revision: before.info().revision,
+            operations: vec![SequenceEditOperation::RenumberRange {
+                start: 0,
+                count: 2,
+                first_number: 1,
+                step: 0,
+            }],
+        },
+    ];
+    for request in invalid_cases {
+        assert!(cut.edit_sequence(request).is_err());
+        assert_eq!(cut.info(), before.info());
+        assert_eq!(cut.members(), before.members());
+    }
+
+    let duplicate_number = CutMember {
+        cell_id: 7,
+        document_uuid: 0x9000,
+        display_number: 2,
+        relative_path: "C006-extra.inkpod".to_owned(),
+    };
+    assert!(
+        cut.edit_sequence(SequenceEditRequest {
+            base_revision: before.info().revision,
+            operations: vec![SequenceEditOperation::Insert {
+                position: 2,
+                member: duplicate_number,
+            }],
+        })
+        .is_err()
+    );
+    assert_eq!(cut.info(), before.info());
+    assert_eq!(cut.members(), before.members());
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn seq_struct_001_retained_member_asset_overflow_is_atomic() {
+    let members = (0..MAX_CUT_MEMBERS)
+        .map(|index| CutMember {
+            cell_id: index as u64 + 1,
+            document_uuid: index as u128 + 1,
+            display_number: index as u32 + 1,
+            relative_path: format!("C007-{index:04}.inkpod"),
+        })
+        .collect::<Vec<_>>();
+    let removed = SequenceMemberId::of(&members[0]);
+    let mut cut = CutCore::new(CutCreateRequest {
+        cut_uuid: 0x92abcd,
+        metadata: cut_metadata("C007"),
+        defaults: cut_defaults(),
+        members,
+    })
+    .unwrap();
+    cut.edit_sequence(SequenceEditRequest {
+        base_revision: cut.info().revision,
+        operations: vec![SequenceEditOperation::Remove { member: removed }],
+    })
+    .unwrap();
+    let before = cut.clone();
+    let error = cut
+        .edit_sequence(SequenceEditRequest {
+            base_revision: cut.info().revision,
+            operations: vec![SequenceEditOperation::Insert {
+                position: 0,
+                member: CutMember {
+                    cell_id: 65,
+                    document_uuid: 65,
+                    display_number: 65,
+                    relative_path: "C007-0064.inkpod".to_owned(),
+                },
+            }],
+        })
+        .unwrap_err();
+    assert_eq!(error.operation_index(), SEQUENCE_EDIT_REQUEST_ERROR_INDEX);
+    assert_eq!(cut.info(), before.info());
+    assert_eq!(cut.members(), before.members());
+}
+
 fn unique_test_directory(label: &str) -> PathBuf {
     let sequence = TEST_PATH_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let path =

@@ -125,6 +125,77 @@ pub unsafe extern "C" fn inkpod_core_export_common_raster(
     })
 }
 
+/// Copies one bounded straight-alpha RGBA8 thumbnail of the visible document.
+///
+/// # Safety
+/// Core/output must be complete live owner-thread records and the optional pixel
+/// buffer must be writable for its advertised capacity.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_document_thumbnail_get(
+    core: *mut InkpodCore,
+    output: *mut InkpodDocumentThumbnailBuffer,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) =
+            unsafe { validate_struct(output.cast_const(), "InkpodDocumentThumbnailBuffer") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live records were validated above.
+        let core = unsafe { &mut *core };
+        let output = unsafe { &mut *output };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        if output.flags != 0 || output.reserved != 0 {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "document thumbnail flags are invalid",
+            );
+        }
+        let thumbnail = match core.core.document_thumbnail() {
+            Ok(thumbnail) => thumbnail,
+            Err(error) => return map_core_error(error),
+        };
+        let required = thumbnail.rgba8.len() as u64;
+        output.width = thumbnail.width;
+        output.height = thumbnail.height;
+        output.stride_bytes = thumbnail.width.saturating_mul(4);
+        output.checksum = thumbnail.checksum;
+        output.required_bytes = required;
+        if output.pixel_capacity == 0 {
+            return if output.pixels_rgba8.is_null() {
+                INKPOD_STATUS_OK
+            } else {
+                fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "zero-capacity document thumbnail buffer must be null",
+                )
+            };
+        }
+        if output.pixels_rgba8.is_null() || output.pixel_capacity < required {
+            return fail(
+                INKPOD_STATUS_BUFFER_TOO_SMALL,
+                "document thumbnail buffer is too small",
+            );
+        }
+        // SAFETY: Caller advertises sufficient writable pixel capacity.
+        unsafe {
+            ptr::copy_nonoverlapping(
+                thumbnail.rgba8.as_ptr(),
+                output.pixels_rgba8,
+                thumbnail.rgba8.len(),
+            )
+        };
+        INKPOD_STATUS_OK
+    })
+}
+
 /// Borrows the immutable byte span owned by a common-raster buffer.
 ///
 /// # Safety

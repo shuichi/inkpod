@@ -110,6 +110,39 @@ unsafe fn create_saved_cell(path: &Path, uuid: u128) -> InkpodDocumentInfo {
         unsafe { inkpod_core_save(core, bytes.as_ptr(), bytes.len() as u64, &mut info) },
         INKPOD_STATUS_OK
     );
+    let mut thumbnail = InkpodDocumentThumbnailBuffer {
+        struct_size: size_of::<InkpodDocumentThumbnailBuffer>() as u32,
+        ..InkpodDocumentThumbnailBuffer::default()
+    };
+    assert_eq!(
+        unsafe { inkpod_core_document_thumbnail_get(core, &mut thumbnail) },
+        INKPOD_STATUS_OK
+    );
+    assert_eq!(thumbnail.stride_bytes, thumbnail.width * 4);
+    assert_eq!(
+        thumbnail.required_bytes,
+        u64::from(thumbnail.stride_bytes) * u64::from(thumbnail.height)
+    );
+    assert_ne!(thumbnail.checksum, 0);
+    let mut short = vec![0_u8; thumbnail.required_bytes as usize - 1];
+    thumbnail.pixels_rgba8 = short.as_mut_ptr();
+    thumbnail.pixel_capacity = short.len() as u64;
+    assert_eq!(
+        unsafe { inkpod_core_document_thumbnail_get(core, &mut thumbnail) },
+        INKPOD_STATUS_BUFFER_TOO_SMALL
+    );
+    let mut pixels = vec![0_u8; thumbnail.required_bytes as usize];
+    thumbnail.pixels_rgba8 = pixels.as_mut_ptr();
+    thumbnail.pixel_capacity = pixels.len() as u64;
+    assert_eq!(
+        unsafe { inkpod_core_document_thumbnail_get(core, &mut thumbnail) },
+        INKPOD_STATUS_OK
+    );
+    thumbnail.reserved = 1;
+    assert_eq!(
+        unsafe { inkpod_core_document_thumbnail_get(core, &mut thumbnail) },
+        INKPOD_STATUS_INVALID_ARGUMENT
+    );
     // SAFETY: The owner storage contains the unique live Core handle.
     assert_eq!(unsafe { inkpod_core_destroy(&mut core) }, INKPOD_STATUS_OK);
     info
@@ -119,12 +152,16 @@ unsafe fn create_saved_cell(path: &Path, uuid: u128) -> InkpodDocumentInfo {
 fn cut_abi_covers_contract_history_persistence_ownership_and_negative_cases() {
     let directory = test_directory();
     let cell_path = directory.join("cell-0001.inkpod");
+    let second_cell_path = directory.join("cell-0002.inkpod");
+    let third_cell_path = directory.join("cell-0003.inkpod");
     let descriptor_path = directory.join("cut.inkpod");
     let recovery_path = directory.join("cut-recovery.inkpod");
     let cell_uuid = 0x2222_3333_4444_5555_6666_7777_8888_9999_u128;
     // SAFETY: This test owns every handle and keeps all advertised spans live.
     unsafe {
         let cell = create_saved_cell(&cell_path, cell_uuid);
+        let second_cell = create_saved_cell(&second_cell_path, cell_uuid + 1);
+        let third_cell = create_saved_cell(&third_cell_path, cell_uuid + 2);
         assert_ne!(cell.cell_id, 0);
         let member_name = "cell-0001.inkpod";
         let member = InkpodCutMemberInput {
@@ -227,12 +264,185 @@ fn cut_abi_covers_contract_history_persistence_ownership_and_negative_cases() {
             INKPOD_STATUS_INVALID_ARGUMENT
         );
 
+        let sequence_operations = [
+            InkpodCutSequenceEditOperation {
+                struct_size: size_of::<InkpodCutSequenceEditOperation>() as u32,
+                kind: INKPOD_CUT_SEQUENCE_INSERT,
+                cell_id: second_cell.cell_id,
+                document_uuid_high: second_cell.document_uuid_high,
+                document_uuid_low: second_cell.document_uuid_low,
+                position: 1,
+                display_number: 2,
+                relative_path: span("cell-0002.inkpod"),
+                ..InkpodCutSequenceEditOperation::default()
+            },
+            InkpodCutSequenceEditOperation {
+                struct_size: size_of::<InkpodCutSequenceEditOperation>() as u32,
+                kind: INKPOD_CUT_SEQUENCE_INSERT,
+                cell_id: third_cell.cell_id,
+                document_uuid_high: third_cell.document_uuid_high,
+                document_uuid_low: third_cell.document_uuid_low,
+                position: 2,
+                display_number: 3,
+                relative_path: span("cell-0003.inkpod"),
+                ..InkpodCutSequenceEditOperation::default()
+            },
+            InkpodCutSequenceEditOperation {
+                struct_size: size_of::<InkpodCutSequenceEditOperation>() as u32,
+                kind: INKPOD_CUT_SEQUENCE_MOVE_BEFORE,
+                cell_id: third_cell.cell_id,
+                document_uuid_high: third_cell.document_uuid_high,
+                document_uuid_low: third_cell.document_uuid_low,
+                anchor_cell_id: cell.cell_id,
+                anchor_document_uuid_high: cell.document_uuid_high,
+                anchor_document_uuid_low: cell.document_uuid_low,
+                ..InkpodCutSequenceEditOperation::default()
+            },
+            InkpodCutSequenceEditOperation {
+                struct_size: size_of::<InkpodCutSequenceEditOperation>() as u32,
+                kind: INKPOD_CUT_SEQUENCE_RENUMBER_RANGE,
+                position: 0,
+                count: 3,
+                first_number: 10,
+                step: 10,
+                ..InkpodCutSequenceEditOperation::default()
+            },
+            InkpodCutSequenceEditOperation {
+                struct_size: size_of::<InkpodCutSequenceEditOperation>() as u32,
+                kind: INKPOD_CUT_SEQUENCE_REMOVE,
+                cell_id: second_cell.cell_id,
+                document_uuid_high: second_cell.document_uuid_high,
+                document_uuid_low: second_cell.document_uuid_low,
+                ..InkpodCutSequenceEditOperation::default()
+            },
+        ];
+        let sequence_request = InkpodCutSequenceEditRequest {
+            struct_size: size_of::<InkpodCutSequenceEditRequest>() as u32,
+            reserved: 0,
+            feature_flags: INKPOD_FEATURE_NONE,
+            base_revision: info.revision,
+            operations: sequence_operations.as_ptr(),
+            operation_count: sequence_operations.len() as u64,
+            operation_stride_bytes: size_of::<InkpodCutSequenceEditOperation>() as u64,
+        };
+        let mut sequence_result = InkpodCutSequenceEditResult {
+            struct_size: size_of::<InkpodCutSequenceEditResult>() as u32,
+            ..InkpodCutSequenceEditResult::default()
+        };
+        assert_eq!(
+            inkpod_cut_sequence_edit(cut, &sequence_request, &mut sequence_result),
+            INKPOD_STATUS_OK
+        );
+        assert_ne!(sequence_result.flags & INKPOD_CUT_SEQUENCE_EDIT_APPLIED, 0);
+        assert_eq!(sequence_result.member_count, 2);
+        assert_eq!(sequence_result.operation_count, 5);
+        assert_eq!(
+            sequence_result.failed_operation_index,
+            INKPOD_CUT_SEQUENCE_REQUEST_ERROR_INDEX
+        );
+        assert!(second_cell_path.exists());
+
+        let invalid_operations = [
+            InkpodCutSequenceEditOperation {
+                struct_size: size_of::<InkpodCutSequenceEditOperation>() as u32,
+                kind: INKPOD_CUT_SEQUENCE_MOVE_AFTER,
+                cell_id: third_cell.cell_id,
+                document_uuid_high: third_cell.document_uuid_high,
+                document_uuid_low: third_cell.document_uuid_low,
+                anchor_cell_id: cell.cell_id,
+                anchor_document_uuid_high: cell.document_uuid_high,
+                anchor_document_uuid_low: cell.document_uuid_low,
+                ..InkpodCutSequenceEditOperation::default()
+            },
+            InkpodCutSequenceEditOperation {
+                struct_size: size_of::<InkpodCutSequenceEditOperation>() as u32,
+                kind: INKPOD_CUT_SEQUENCE_RENUMBER_RANGE,
+                position: 0,
+                count: 2,
+                first_number: 1,
+                step: 0,
+                ..InkpodCutSequenceEditOperation::default()
+            },
+        ];
+        let invalid_request = InkpodCutSequenceEditRequest {
+            base_revision: sequence_result.revision,
+            operations: invalid_operations.as_ptr(),
+            operation_count: invalid_operations.len() as u64,
+            ..sequence_request
+        };
+        let stable_revision = sequence_result.revision;
+        let stable_state_id = sequence_result.state_id;
+        assert_eq!(
+            inkpod_cut_sequence_edit(cut, &invalid_request, &mut sequence_result),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(sequence_result.failed_operation_index, 1);
+        assert_eq!(sequence_result.revision, stable_revision);
+        assert_eq!(sequence_result.state_id, stable_state_id);
+
+        let short_stride_request = InkpodCutSequenceEditRequest {
+            operation_stride_bytes: size_of::<InkpodCutSequenceEditOperation>() as u64 - 1,
+            ..invalid_request
+        };
+        assert_eq!(
+            inkpod_cut_sequence_edit(cut, &short_stride_request, &mut sequence_result),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            sequence_result.failed_operation_index,
+            INKPOD_CUT_SEQUENCE_REQUEST_ERROR_INDEX
+        );
+        assert_eq!(sequence_result.revision, stable_revision);
+        assert_eq!(sequence_result.state_id, stable_state_id);
+
+        let short_operation = InkpodCutSequenceEditOperation {
+            struct_size: size_of::<InkpodCutSequenceEditOperation>() as u32 - 1,
+            ..invalid_operations[0]
+        };
+        let short_operation_request = InkpodCutSequenceEditRequest {
+            operations: &short_operation,
+            operation_count: 1,
+            operation_stride_bytes: size_of::<InkpodCutSequenceEditOperation>() as u64,
+            ..invalid_request
+        };
+        assert_eq!(
+            inkpod_cut_sequence_edit(cut, &short_operation_request, &mut sequence_result),
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+        assert_eq!(sequence_result.failed_operation_index, 0);
+        assert_eq!(sequence_result.revision, stable_revision);
+        assert_eq!(sequence_result.state_id, stable_state_id);
+
+        let stale_request = InkpodCutSequenceEditRequest {
+            base_revision: stable_revision - 1,
+            operations: ptr::null(),
+            operation_count: 0,
+            operation_stride_bytes: 0,
+            ..invalid_request
+        };
+        assert_eq!(
+            inkpod_cut_sequence_edit(cut, &stale_request, &mut sequence_result),
+            INKPOD_STATUS_INVALID_STATE
+        );
+        assert_eq!(
+            sequence_result.failed_operation_index,
+            INKPOD_CUT_SEQUENCE_REQUEST_ERROR_INDEX
+        );
+        assert_eq!(sequence_result.revision, stable_revision);
+        assert_eq!(sequence_result.state_id, stable_state_id);
+
+        assert_eq!(
+            inkpod_cut_sequence_cancel(cut, &mut sequence_result),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(sequence_result.flags, 0);
+
         let changed_metadata = metadata("C002");
         let update = InkpodCutUpdateRequest {
             struct_size: size_of::<InkpodCutUpdateRequest>() as u32,
             reserved: 0,
             feature_flags: INKPOD_FEATURE_NONE,
-            base_revision: info.revision,
+            base_revision: sequence_result.revision,
             metadata: &changed_metadata,
             defaults: &initial_defaults,
         };
@@ -293,7 +503,7 @@ fn cut_abi_covers_contract_history_persistence_ownership_and_negative_cases() {
             INKPOD_STATUS_OK
         );
         assert_eq!(inkpod_cut_info(reopened, &mut info), INKPOD_STATUS_OK);
-        assert_eq!(info.member_count, 1);
+        assert_eq!(info.member_count, 2);
         assert_eq!(inkpod_cut_destroy(&mut reopened), INKPOD_STATUS_OK);
         let mut recovered = ptr::null_mut();
         assert_eq!(

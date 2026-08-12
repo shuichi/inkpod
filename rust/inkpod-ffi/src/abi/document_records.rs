@@ -465,6 +465,21 @@ pub struct InkpodSequenceThumbnailBuffer {
 }
 
 #[repr(C)]
+#[derive(Default)]
+pub struct InkpodDocumentThumbnailBuffer {
+    pub struct_size: u32,
+    pub flags: u32,
+    pub width: u32,
+    pub height: u32,
+    pub stride_bytes: u32,
+    pub reserved: u32,
+    pub checksum: u64,
+    pub pixels_rgba8: *mut u8,
+    pub pixel_capacity: u64,
+    pub required_bytes: u64,
+}
+
+#[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct InkpodSequenceSwitchRequest {
     pub struct_size: u32,

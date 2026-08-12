@@ -96,7 +96,7 @@ Rust 所有の正規化済みバイト列へコピーされ、4 MiB 以下なら
 コピーされる。NULL、短いレコード、パニックでは通常の ABI ステータス契約に従い、出力を部分更新しない。
 スレッド違反が成立するのは Core 所有スレッド専用のリプレイ契約照会だけであり、スナップショットの
 ダイジェスト照会は、外部同期された任意の読み取りスレッドから呼び出せる。これらは検証値を公開するだけで、
-製品の保存／オープン API は同じ v22 のリプレイ／カタログ契約を使い、現行でないネイティブ形式の
+製品の保存／オープン API は同じ v23 のリプレイ／カタログ契約を使い、現行でないネイティブ形式の
 バージョンをすべて拒否する。
 
 現行 ABI v11 は、Core 所有スレッド専用の永続化操作を三つ提供する。`inkpod_core_get_persistence_info` は、
@@ -108,7 +108,7 @@ Rust 所有の正規化済みバイト列へコピーされ、4 MiB 以下なら
 ジャーナルの正確なダイジェストを返す。UI は履歴件数を表示して確認を得た後、そのレコードを変更せずに
 `inkpod_core_write_compacted_copy` へ渡す。書き込み時に確認トークンが古ければ `INVALID_STATE`、
 トークンのフラグまたは予約領域が 0 でなければ `UNSUPPORTED` になる。成功時は、現在状態を新しい Genesis
-とする別の v22 ファイルを書き出すが、作業中のパス、リビジョン、未保存状態、保存点、ID、履歴は変更しない。
+とする別の v23 ファイルを書き出すが、作業中のパス、リビジョン、未保存状態、保存点、ID、履歴は変更しない。
 `CoreHost` は三つの操作すべてを Core エンジンキュー経由で実行する。自動的な履歴圧縮は行わず、`CKPT` は
 履歴やアセット保持の正本ではない。Windows では `ファイル > 履歴を破棄してコピー...` として公開し、
 最初に失われるイベント数とプロシージャ数を表示する。出力先には開いているセッションが所有しないパスだけを
@@ -165,8 +165,24 @@ Rust は復帰後に pointer を保持しない。
 overflow、failure は revision、state/procedure ID、履歴、dirty、savepoint を進めない。既定値の変更は
 既存 Cell を変更せず、後で作る Cell にだけコピーされる。
 
+`inkpod_cut_sequence_edit` は 104-byte の size-versioned
+`InkpodCutSequenceEditOperation` を stride 付きで最大 256 件受け取る。operation は insert、remove、
+move-before、move-after、range-renumber の closed kind で、Cell は常に `(cell_id,
+document_uuid)`、移動 anchor も同じ stable identity で指定する。position、count、first number、step、
+display number、insert 時だけの borrowed relative-path span は kind ごとに検証され、全レコードと path は
+呼び出し中に Rust 所有値へコピーされる。request は 48 bytes、result は 40 bytes で、成功時の実変更だけ
+`INKPOD_CUT_SEQUENCE_EDIT_APPLIED` を返し、一回だけ Cut revision/history を進める。同値の空 request と
+`inkpod_cut_sequence_cancel` は安定した no-op である。
+
+operation 内の失敗は `failed_operation_index` に 0-based index、request 全体または最終 membership 検証の
+失敗は `INKPOD_CUT_SEQUENCE_REQUEST_ERROR_INDEX` を返す。NULL、短い request/result/operation、短い
+stride、未知 kind/flag、stale base、欠落/重複 identity、番号衝突、zero step、上限超過、演算 overflow は、
+membership、revision、ID、history、dirty、savepoint、Cell file を部分変更しない。Sequence pane に focus が
+あるときだけ Cut-session generation を固定した command context から Cut Undo/Redo を呼び、active Cell の
+document history へ暗黙に混ぜない。
+
 通常保存と autosave は Cut 記述子と同じディレクトリの各 member `.inkpod` を staged validation し、
-相対ファイル名、Cell ID、document UUID が一致するときだけ current v22 / Cut replay epoch 19 の
+相対ファイル名、Cell ID、document UUID が一致するときだけ current v23 / Cut replay epoch 20 の
 記述子を原子的に置換する。通常保存だけが Cut savepoint を進め、autosave と recovery open は通常の
 path authority/savepoint を採用しない。非current version、欠落、重複、自己参照、directory escape、
 symlink escape、identity mismatch は拒否する。
@@ -586,6 +602,12 @@ status = inkpod_clipboard_render_rgba8(clipboard, &output);
 呼び出し側が担い、Core はポインターを保持しない。レイヤー自体が非表示でも内容を確認できる一方、
 プレーンの表示状態とレイヤー／プレーン不透明度はサムネイルに反映される。
 
+`inkpod_core_document_thumbnail_get` は visible document 全体を同じ上限付き 64×64 以下の
+straight-alpha RGBA8 として返す。`InkpodDocumentThumbnailBuffer` の capacity 0／NULL による
+size query と二回目の copy を同じ Core-owner-thread work item 内で行う。query は document
+revision、history、dirty、savepoint を変更せず、Cut frontend は member file を staged Core で
+開いて stable `(CellId, document UUID)` を再確認してからこの結果を presentation cache へ置く。
+
 `inkpod_core_sequence_thumbnail_get` も同じ呼び出し側所有の照会／コピー契約を使う。
 `pixels_rgba8 = NULL`、`pixel_capacity = 0` の照会で `required_bytes`、寸法、ストライド、チェックサムを
 取得し、確保後の二回目で上限付きの非乗算アルファ RGBA8 をコピーする。ポインターは呼び出し中だけ
@@ -843,10 +865,10 @@ Core はセッションを無効化するため、フロントエンドはスト
 | ストローク終了、プレビュー適用、浮動状態の確定                 | 実変更時に 1 回進む  | 未保存                            | 高々 1 単位                       |
 | 直接の文書編集                                                | 実変更時に 1 回進む  | 未保存                            | 原則 1 単位                       |
 | Undo／Redo／履歴位置の移動                                    | 結果状態へ進む       | 保存点との位置で再計算            | カーソルを移動し項目は増やさない  |
-| 現行 v22 の通常保存                                           | 不変                 | 置換成功時に文書／EditorState とも保存済み | 不変                    |
+| 現行 v23 の通常保存                                           | 不変                 | 置換成功時に文書／EditorState とも保存済み | 不変                    |
 | 自動保存                                                      | 不変                 | 不変                              | 不変                              |
 | 新規作成／インポート                                          | 新しい文書情報が正本 | 戻り情報が正本                    | 新しい Genesis／履歴              |
-| v22 のオープン／復旧                                          | 実行時リビジョンを付け直す | 戻り情報が正本               | ファイルの全ジャーナル／履歴を復元 |
+| v23 のオープン／復旧                                          | 実行時リビジョンを付け直す | 戻り情報が正本               | ファイルの全ジャーナル／履歴を復元 |
 
 意味上の変更がない場合の厳密な出力やリビジョンは、各関数の Doxygen 契約に従う。フロントエンドはファイル時刻ではなく、
 Core が返す文書フラグと保存点に基づいて未保存状態を表示する。
@@ -995,7 +1017,7 @@ document、EditorState、canonical procedure、`.inkpod` section のいずれに
 
 ## 保存、自動保存、復旧
 
-通常保存では、v22 の必須セクション `META` / `GENS` / `ASST` / `PROC` / `EDIT`、保持対象の不透明な任意
+通常保存では、v23 の必須セクション `META` / `GENS` / `ASST` / `PROC` / `EDIT`、保持対象の不透明な任意
 セクション、チェックポイントの作成条件を満たす場合だけ任意の `CKPT` を構築する。保存後に設定予定の
 文書／EditorState 保存点を含むコンテナは、同じディレクトリの一時ファイルへ複数回に分けて書き込む。
 フラッシュ、同期、クローズを終えてから置換する。成功後だけ通常保存パスと両保存点を Core へ公開するため、
@@ -1004,7 +1026,7 @@ EditorState だけが
 どちらの保存点も変更しない。
 
 自動保存とエクスポートは、出力を原子的に書いても通常保存パス、文書／EditorState 保存点、未保存状態を
-変えない。通常の v22 オープンでは、Genesis、アセット、プロシージャジャーナル、カーソル／分岐、すべての
+変えない。通常の v23 オープンでは、Genesis、アセット、プロシージャジャーナル、カーソル／分岐、すべての
 ID 発行状態、EditorState、両保存点を、段階的に構築した Core で検証・復元してから、現在の Core 状態を
 一回だけ置換する。`InkpodCore` の `_v3` 付きオブジェクトレジストリの世代自体は、オープンで更新されない。
 

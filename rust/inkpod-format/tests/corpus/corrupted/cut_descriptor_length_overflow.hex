@@ -1,5 +1,5 @@
-# INKCUT\0\0, top-level v22, replay epoch 19
-49 4e 4b 43 55 54 00 00  16 00 00 00  13 00 00 00
+# INKCUT\0\0, top-level v23, replay epoch 20
+49 4e 4b 43 55 54 00 00  17 00 00 00  14 00 00 00
 # impossible total length, zero payload length
 ff ff ff ff ff ff ff ff  00 00 00 00 00 00 00 00
 # checksum placeholder

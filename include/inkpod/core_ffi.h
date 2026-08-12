@@ -947,6 +947,13 @@ typedef struct InkpodCutUpdateRequest {
 #define INKPOD_CUT_FLAG_CAN_UNDO (UINT32_C(1) << 1)
 #define INKPOD_CUT_FLAG_CAN_REDO (UINT32_C(1) << 2)
 #define INKPOD_CUT_FLAG_RECOVERED (UINT32_C(1) << 3)
+#define INKPOD_CUT_SEQUENCE_INSERT UINT32_C(1)
+#define INKPOD_CUT_SEQUENCE_REMOVE UINT32_C(2)
+#define INKPOD_CUT_SEQUENCE_MOVE_BEFORE UINT32_C(3)
+#define INKPOD_CUT_SEQUENCE_MOVE_AFTER UINT32_C(4)
+#define INKPOD_CUT_SEQUENCE_RENUMBER_RANGE UINT32_C(5)
+#define INKPOD_CUT_SEQUENCE_EDIT_APPLIED (UINT32_C(1) << 0)
+#define INKPOD_CUT_SEQUENCE_REQUEST_ERROR_INDEX UINT32_MAX
 
 typedef struct InkpodCutInfo {
     uint32_t struct_size;
@@ -985,6 +992,46 @@ typedef struct InkpodCutMemberInfo {
     uint64_t document_uuid_low;
     InkpodUtf8Buffer relative_path;
 } InkpodCutMemberInfo;
+
+typedef struct InkpodCutSequenceEditOperation {
+    uint32_t struct_size;
+    uint32_t kind;
+    uint64_t feature_flags;
+    uint64_t cell_id;
+    uint64_t document_uuid_high;
+    uint64_t document_uuid_low;
+    uint64_t anchor_cell_id;
+    uint64_t anchor_document_uuid_high;
+    uint64_t anchor_document_uuid_low;
+    uint32_t position;
+    uint32_t count;
+    uint32_t first_number;
+    uint32_t step;
+    uint32_t display_number;
+    uint32_t reserved;
+    InkpodUtf8Span relative_path;
+} InkpodCutSequenceEditOperation;
+
+typedef struct InkpodCutSequenceEditRequest {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    uint64_t base_revision;
+    const InkpodCutSequenceEditOperation* operations;
+    uint64_t operation_count;
+    uint64_t operation_stride_bytes;
+} InkpodCutSequenceEditRequest;
+
+typedef struct InkpodCutSequenceEditResult {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t revision;
+    uint64_t state_id;
+    uint32_t member_count;
+    uint32_t operation_count;
+    uint32_t failed_operation_index;
+    uint32_t reserved;
+} InkpodCutSequenceEditResult;
 
 /**
  * @brief Core owner-thread session の deterministic な論理 resource 使用量。
@@ -2792,6 +2839,20 @@ typedef struct InkpodSequenceThumbnailBuffer {
     uint64_t required_bytes;
 } InkpodSequenceThumbnailBuffer;
 
+/** @brief visible document thumbnail を受け取る caller-owned size-query 対応 buffer。 */
+typedef struct InkpodDocumentThumbnailBuffer {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint32_t width;
+    uint32_t height;
+    uint32_t stride_bytes;
+    uint32_t reserved;
+    uint64_t checksum;
+    uint8_t* pixels_rgba8;
+    uint64_t pixel_capacity;
+    uint64_t required_bytes;
+} InkpodDocumentThumbnailBuffer;
+
 /** @brief Immutable source, target, and revision token for one sequence switch. */
 typedef struct InkpodSequenceSwitchRequest {
     uint32_t struct_size;
@@ -4146,6 +4207,18 @@ InkpodStatus inkpod_core_export_common_raster(
     InkpodCommonRasterFormat format,
     uint32_t composite_white,
     InkpodByteBuffer** out_buffer);
+/**
+ * @brief visible document の bounded straight-alpha RGBA8 thumbnail を caller buffer へコピーする。
+ * @par 契約
+ * Core owner thread。`core`／完全な `output` は非 NULL。flags/reserved は 0。
+ * capacity 0／NULL で必要量を照会し、十分な caller-owned buffer へコピーする。
+ * query のため revision、history、dirty、savepoint は不変。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`BUFFER_TOO_SMALL`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
+ */
+InkpodStatus inkpod_core_document_thumbnail_get(
+    InkpodCore* core,
+    InkpodDocumentThumbnailBuffer* output);
 /**
  * @brief immutable byte buffer の borrowed byte span を取得する。
  * @par 契約
@@ -5712,6 +5785,22 @@ InkpodStatus inkpod_cut_member_get(
     const InkpodCut* cut,
     uint32_t index,
     InkpodCutMemberInfo* output);
+
+/**
+ * Commits one bounded ordered membership span as one Cut history transaction.
+ * Borrowed operation records and paths are copied before return. An operation
+ * failure reports its zero-based index; request/final validation reports
+ * INKPOD_CUT_SEQUENCE_REQUEST_ERROR_INDEX. Failure publishes nothing.
+ */
+InkpodStatus inkpod_cut_sequence_edit(
+    InkpodCut* cut,
+    const InkpodCutSequenceEditRequest* request,
+    InkpodCutSequenceEditResult* result);
+
+/** Reports a cancelled interactive membership edit as a stable no-op. */
+InkpodStatus inkpod_cut_sequence_cancel(
+    InkpodCut* cut,
+    InkpodCutSequenceEditResult* result);
 
 /**
  * Commits one revision-bound metadata/default update. Success reports one

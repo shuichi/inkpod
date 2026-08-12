@@ -10966,10 +10966,13 @@ int RunCellCreationSmoke(ApplicationHost& state) noexcept {
 }
 
 int RunCutWorkflowSmoke(ApplicationHost& state) noexcept {
-    constexpr std::array<const wchar_t*, 3U> kFiles{
+    constexpr std::array<const wchar_t*, 6U> kFiles{
         L"inkpod-cut-smoke.inkpod",
         L"inkpod-cut-smoke-0001.inkpod",
-        L"inkpod-cut-smoke-0002.inkpod"};
+        L"inkpod-cut-smoke-0002.inkpod",
+        L"inkpod-cut-smoke-0003.inkpod",
+        L"inkpod-cut-smoke-0004.inkpod",
+        L"inkpod-cut-smoke-0005.inkpod"};
     for (const wchar_t* path : kFiles) {
         DeleteFileW(path);
     }
@@ -11052,20 +11055,20 @@ int RunCutWorkflowSmoke(ApplicationHost& state) noexcept {
         }
     }
     InkpodCutInfo created_cut{};
-    if (created.size() != 2U || !query_info(created_cut)
-        || created_cut.cut_id == 0U || created_cut.member_count != 2U
+    if (created.size() != 5U || !query_info(created_cut)
+        || created_cut.cut_id == 0U || created_cut.member_count != 5U
         || created_cut.revision != 0U
         || (created_cut.flags
             & (INKPOD_CUT_FLAG_DIRTY | INKPOD_CUT_FLAG_CAN_UNDO
                | INKPOD_CUT_FLAG_CAN_REDO)) != 0U
         || state.Workspace().cut.current_path != kFiles[0]
         || state.Workspace().cut.cut_name != L"SmokeCut"
-        || state.Workspace().cut.member_paths.size() != 2U) {
+        || state.Workspace().cut.members.size() != 5U) {
         return finish(1033);
     }
 
-    std::array<InkpodDocumentInfo, 2U> cell_infos{};
-    std::array<DocumentSessionId, 2U> cell_sessions{};
+    std::array<InkpodDocumentInfo, 5U> cell_infos{};
+    std::array<DocumentSessionId, 5U> cell_sessions{};
     for (std::size_t index = 0U; index < cell_infos.size(); ++index) {
         std::array<std::uint8_t, 64U> path{};
         InkpodCutMemberInfo member{};
@@ -11079,10 +11082,13 @@ int RunCutWorkflowSmoke(ApplicationHost& state) noexcept {
             },
             false,
             false);
-        const char* expected = index == 0U
-            ? "inkpod-cut-smoke-0001.inkpod"
-            : "inkpod-cut-smoke-0002.inkpod";
-        const std::size_t expected_bytes = std::strlen(expected);
+        std::array<char, 64U> expected{};
+        const int expected_count = std::snprintf(
+            expected.data(), expected.size(),
+            "inkpod-cut-smoke-%04zu.inkpod", index + 1U);
+        const std::size_t expected_bytes = expected_count <= 0
+            ? 0U
+            : static_cast<std::size_t>(expected_count);
         inkpod::app::DocumentSession* document{};
         for (const DocumentSessionId id : created) {
             auto* candidate = state.Documents().Find(id);
@@ -11095,7 +11101,8 @@ int RunCutWorkflowSmoke(ApplicationHost& state) noexcept {
         if (member_status != INKPOD_STATUS_OK
             || member.display_number != index + 1U || member.cell_id == 0U
             || member.relative_path.byte_count != expected_bytes
-            || std::memcmp(path.data(), expected, expected_bytes) != 0
+            || expected_bytes >= expected.size()
+            || std::memcmp(path.data(), expected.data(), expected_bytes) != 0
             || document == nullptr
             || !state.engine->GetDocumentInfo(
                 document->id, document->generation, cell_infos[index])
@@ -11116,8 +11123,191 @@ int RunCutWorkflowSmoke(ApplicationHost& state) noexcept {
                    state.Workspace().sequence_palette, IDC_SEQUENCE_CELLS),
                LB_GETCOUNT,
                0,
-               0) != 2) {
+               0) != 5
+        || state.Workspace().sequence_dialog.view.cells.size() != 5U
+        || std::any_of(
+            state.Workspace().sequence_dialog.view.cells.cbegin(),
+            state.Workspace().sequence_dialog.view.cells.cend(),
+            [](const auto& cell) {
+                return cell.thumbnail_width == 0U
+                    || cell.thumbnail_height == 0U
+                    || cell.thumbnail_stride_bytes != cell.thumbnail_width * 4U
+                    || cell.thumbnail_checksum == 0U || !cell.thumbnail_key;
+            })) {
         return finish(1035);
+    }
+
+    const HWND sequence_list = GetDlgItem(
+        state.Workspace().sequence_palette, IDC_SEQUENCE_CELLS);
+    const auto* drag_document = state.Documents().Find(cell_sessions[1]);
+    const auto* drag_view = drag_document == nullptr
+        ? nullptr
+        : drag_document->ViewAt(0U);
+    if (drag_view == nullptr || !state.ActivateDocumentView(drag_view->id)
+        || !RefreshSequencePane(state)) {
+        return finish(1046);
+    }
+    const std::uint64_t active_thumbnail_checksum =
+        state.Workspace().sequence_dialog.view.cells[1].thumbnail_checksum;
+    RECT destination_item{};
+    RECT source_item{};
+    if (sequence_list == nullptr
+        || SendMessageW(
+               sequence_list,
+               LB_GETITEMRECT,
+               0,
+               reinterpret_cast<LPARAM>(&destination_item))
+            == LB_ERR
+        || SendMessageW(
+               sequence_list,
+               LB_GETITEMRECT,
+               1,
+               reinterpret_cast<LPARAM>(&source_item))
+            == LB_ERR) {
+        return finish(1046);
+    }
+    SendMessageW(
+        sequence_list,
+        WM_LBUTTONDOWN,
+        MK_LBUTTON,
+        MAKELPARAM(
+            (source_item.left + source_item.right) / 2,
+            (source_item.top + source_item.bottom) / 2));
+    SendMessageW(
+        sequence_list,
+        WM_LBUTTONUP,
+        0,
+        MAKELPARAM(
+            (destination_item.left + destination_item.right) / 2,
+            (destination_item.top + destination_item.bottom) / 2));
+    InkpodCutInfo reordered{};
+    if (!query_info(reordered) || reordered.revision != created_cut.revision + 1U
+        || state.Workspace().cut.members.size() != 5U
+        || state.Workspace().cut.members[0].document_uuid_high
+            != cell_infos[1].document_uuid_high
+        || state.Workspace().cut.members[0].document_uuid_low
+            != cell_infos[1].document_uuid_low
+        || state.Workspace().cut.members[1].document_uuid_high
+            != cell_infos[0].document_uuid_high
+        || state.Workspace().cut.members[1].document_uuid_low
+            != cell_infos[0].document_uuid_low
+        || state.Workspace().cut.members[2].document_uuid_low
+            != cell_infos[2].document_uuid_low
+        || state.Workspace().cut.members[3].document_uuid_low
+            != cell_infos[3].document_uuid_low
+        || state.Workspace().cut.members[4].document_uuid_low
+            != cell_infos[4].document_uuid_low
+        || state.Workspace().sequence_dialog.view.active_index != 0U
+        || state.Workspace().sequence_dialog.view.cells[0].thumbnail_checksum
+            != active_thumbnail_checksum) {
+        std::fprintf(
+            stderr,
+            "Cut reorder mismatch: revision=%llu expected=%llu members=%zu "
+            "active=%u first=%llu expected_first=%llu thumbnail=%llu/%llu\n",
+            static_cast<unsigned long long>(reordered.revision),
+            static_cast<unsigned long long>(created_cut.revision + 1U),
+            state.Workspace().cut.members.size(),
+            state.Workspace().sequence_dialog.view.active_index,
+            state.Workspace().cut.members.empty()
+                ? 0ULL
+                : static_cast<unsigned long long>(
+                    state.Workspace().cut.members[0].cell_id),
+            static_cast<unsigned long long>(cell_infos[1].cell_id),
+            state.Workspace().sequence_dialog.view.cells.empty()
+                ? 0ULL
+                : static_cast<unsigned long long>(
+                    state.Workspace().sequence_dialog.view.cells[0]
+                        .thumbnail_checksum),
+            static_cast<unsigned long long>(active_thumbnail_checksum));
+        return finish(1047);
+    }
+    constexpr std::array<std::uint32_t, 5U> kRenumbered{1U, 2U, 3U, 4U, 5U};
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_CUT_SEQUENCE_RENUMBER,
+            0) != 1
+        || !std::equal(
+            state.Workspace().cut.members.cbegin(),
+            state.Workspace().cut.members.cend(),
+            kRenumbered.cbegin(),
+            [](const auto& member, std::uint32_t number) {
+                return member.display_number == number;
+            })) {
+        return finish(1048);
+    }
+    SendMessageW(sequence_list, LB_SETCURSEL, 0, 0);
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_CUT_SEQUENCE_REMOVE,
+            0) != 1
+        || state.Workspace().cut.members.size() != 4U
+        || GetFileAttributesW(kFiles[2]) == INVALID_FILE_ATTRIBUTES
+        || state.Workspace().sequence_dialog.view.active_index != UINT32_MAX
+        || state.Workspace().sequence_dialog.view.target_text.find(
+               L"現在のセルはメンバー外") == std::wstring::npos) {
+        return finish(1049);
+    }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_CUT_UNDO,
+            0) != 1
+        || state.Workspace().cut.members.size() != 5U
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_CUT_REDO,
+               0) != 1
+        || state.Workspace().cut.members.size() != 4U
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_CUT_SEQUENCE_ADD,
+               0) != 1
+        || state.Workspace().cut.members.size() != 5U
+        || state.Workspace().cut.members[4].document_uuid_high
+            != cell_infos[1].document_uuid_high
+        || state.Workspace().cut.members[4].document_uuid_low
+            != cell_infos[1].document_uuid_low) {
+        return finish(1050);
+    }
+    SendMessageW(sequence_list, LB_SETCURSEL, 4, 0);
+    for (std::uint32_t move = 0U; move < 4U; ++move) {
+        if (SendMessageW(
+                state.Workspace().windows.window,
+                WM_COMMAND,
+                IDM_CUT_SEQUENCE_MOVE_UP,
+                0) != 1) {
+            return finish(1052);
+        }
+    }
+    if (state.Workspace().cut.members.size() != 5U
+        || state.Workspace().cut.members[0].document_uuid_high
+            != cell_infos[1].document_uuid_high
+        || state.Workspace().cut.members[0].document_uuid_low
+            != cell_infos[1].document_uuid_low
+        || state.Workspace().cut.members[1].document_uuid_high
+            != cell_infos[0].document_uuid_high
+        || state.Workspace().cut.members[1].document_uuid_low
+            != cell_infos[0].document_uuid_low
+        || state.Workspace().cut.members[2].document_uuid_low
+            != cell_infos[2].document_uuid_low
+        || state.Workspace().cut.members[3].document_uuid_low
+            != cell_infos[3].document_uuid_low
+        || state.Workspace().cut.members[4].document_uuid_low
+            != cell_infos[4].document_uuid_low
+        || state.Workspace().sequence_dialog.view.active_index != 0U
+        || state.Workspace().sequence_dialog.view.cells[0].thumbnail_checksum
+            != active_thumbnail_checksum) {
+        return finish(1052);
+    }
+    InkpodCutInfo sequence_edited{};
+    if (!query_info(sequence_edited)
+        || sequence_edited.member_count != 5U
+        || (sequence_edited.flags & INKPOD_CUT_FLAG_CAN_UNDO) == 0U) {
+        return finish(1051);
     }
 
     if (SendMessageW(
@@ -11128,7 +11318,8 @@ int RunCutWorkflowSmoke(ApplicationHost& state) noexcept {
         return finish(1036);
     }
     InkpodCutInfo updated{};
-    if (!query_info(updated) || updated.revision != created_cut.revision + 1U
+    if (!query_info(updated)
+        || updated.revision != sequence_edited.revision + 1U
         || updated.duration_frames != created_cut.duration_frames + 1U
         || (updated.flags
             & (INKPOD_CUT_FLAG_DIRTY | INKPOD_CUT_FLAG_CAN_UNDO))
@@ -11189,15 +11380,39 @@ int RunCutWorkflowSmoke(ApplicationHost& state) noexcept {
         return finish(1043);
     }
     InkpodCutInfo reopened{};
-    if (!query_info(reopened) || reopened.member_count != 2U
+    if (!query_info(reopened) || reopened.member_count != 5U
         || reopened.duration_frames != updated.duration_frames
         || reopened.cut_id != created_cut.cut_id
         || state.Workspace().cut.cut_name != L"SmokeCut-updated"
-        || state.Workspace().cut.member_paths.size() != 2U) {
+        || state.Workspace().cut.members.size() != 5U
+        || state.Workspace().cut.members[0].document_uuid_high
+            != cell_infos[1].document_uuid_high
+        || state.Workspace().cut.members[0].document_uuid_low
+            != cell_infos[1].document_uuid_low
+        || state.Workspace().cut.members[1].document_uuid_high
+            != cell_infos[0].document_uuid_high
+        || state.Workspace().cut.members[1].document_uuid_low
+            != cell_infos[0].document_uuid_low
+        || state.Workspace().cut.members[2].document_uuid_low
+            != cell_infos[2].document_uuid_low
+        || state.Workspace().cut.members[3].document_uuid_low
+            != cell_infos[3].document_uuid_low
+        || state.Workspace().cut.members[4].document_uuid_low
+            != cell_infos[4].document_uuid_low
+        || state.Workspace().sequence_dialog.view.active_index != 0U
+        || state.Workspace().sequence_dialog.view.cells.size() != 5U
+        || std::any_of(
+            state.Workspace().sequence_dialog.view.cells.cbegin(),
+            state.Workspace().sequence_dialog.view.cells.cend(),
+            [](const auto& cell) {
+                return cell.thumbnail_width == 0U
+                    || cell.thumbnail_height == 0U
+                    || cell.thumbnail_checksum == 0U || !cell.thumbnail_key;
+            })) {
         return finish(1044);
     }
-    const bool counts_ok = state.Documents().Count() == baseline_count + 2U
-        && state.engine->SessionCount() == engine_baseline + 2U;
+    const bool counts_ok = state.Documents().Count() == baseline_count + 5U
+        && state.engine->SessionCount() == engine_baseline + 5U;
     return finish(counts_ok ? 0 : 1045);
 }
 

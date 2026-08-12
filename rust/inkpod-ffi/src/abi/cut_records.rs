@@ -134,3 +134,49 @@ pub struct InkpodCutMemberInfo {
     pub document_uuid_low: u64,
     pub relative_path: InkpodUtf8Buffer,
 }
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodCutSequenceEditOperation {
+    pub struct_size: u32,
+    pub kind: u32,
+    pub feature_flags: u64,
+    pub cell_id: u64,
+    pub document_uuid_high: u64,
+    pub document_uuid_low: u64,
+    pub anchor_cell_id: u64,
+    pub anchor_document_uuid_high: u64,
+    pub anchor_document_uuid_low: u64,
+    pub position: u32,
+    pub count: u32,
+    pub first_number: u32,
+    pub step: u32,
+    pub display_number: u32,
+    pub reserved: u32,
+    pub relative_path: InkpodUtf8Span,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodCutSequenceEditRequest {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub feature_flags: u64,
+    pub base_revision: u64,
+    pub operations: *const InkpodCutSequenceEditOperation,
+    pub operation_count: u64,
+    pub operation_stride_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodCutSequenceEditResult {
+    pub struct_size: u32,
+    pub flags: u32,
+    pub revision: u64,
+    pub state_id: u64,
+    pub member_count: u32,
+    pub operation_count: u32,
+    pub failed_operation_index: u32,
+    pub reserved: u32,
+}

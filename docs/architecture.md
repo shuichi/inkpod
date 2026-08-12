@@ -204,9 +204,15 @@ selection mask. `BaseSurface::Asset` instead names one immutable canonical raste
 asset whose dimensions and pixel semantics match the document paper. Replacing
 the earlier temporary Document-ID-as-Cell bridge and persisting the shooting and
 maximum-close frames change canonical document-state bytes, so the document-state
-commitment is schema 6/domain 5. The current replay contract is epoch 19 and native
-format version 22. It adds the independent current-only Cut descriptor and Cut
-metadata/default history while retaining Cell-document primitive semantics. Epoch
+commitment is schema 6/domain 5. The current replay contract is epoch 20 and native
+format version 23. Cut payload schema 2 separates immutable member assets from
+ordered membership and records membership before/after states in Cut history, while
+retaining Cell-document primitive semantics. Sequence edits stage bounded ordered
+insert/remove/move/renumber operations and publish one Cut revision only after final
+validation. Removed members are not physically deleted and remain addressable by
+stable `(CellId, document UUID)` while retained Cut history can restore them. Epoch
+19/version 22 added the independent current-only Cut descriptor and Cut metadata/
+default history. Epoch
 18/version 21 added the canonical floating-transform v3 procedure with
 half-open five-point absolute-anchor semantics. Epoch 17/version 20 added the
 canonical output-color guard selection procedure
@@ -594,6 +600,14 @@ raster discovers only sibling files whose prefix and suffix around the final
 numeric run match, then selects the opened cell in Core natural order. Dirty-cell
 cancel, stale target, decode failure, and endpoint no-op leave the current cell
 unchanged.
+
+For a Cut descriptor, the pane keeps a derived thumbnail cache keyed by the
+member's stable `(CellId, document UUID)` pair rather than its order or display
+number. A cache miss opens that same-directory Cell in a staged temporary Core,
+revalidates the identity, and requests one bounded visible-document thumbnail;
+the bytes are never persisted in the Cut descriptor. Reorder, renumber, Cut
+Undo/Redo, and save/reopen therefore preserve the thumbnail-to-member binding,
+while an invalid or mismatched source never substitutes pixels from another Cell.
 
 Sequence navigation has one application-level, versioned `Prompt` or
 `Autosave-before-switch` policy. The autosave route first asks Core for an

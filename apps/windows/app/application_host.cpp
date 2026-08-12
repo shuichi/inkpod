@@ -1148,7 +1148,7 @@ bool ApplicationHost::DestroyCutSession(WorkspaceWindow& workspace) noexcept {
     if (workspace.cut.handle == nullptr) {
         workspace.cut.current_path.clear();
         workspace.cut.cut_name.clear();
-        workspace.cut.member_paths.clear();
+        workspace.cut.members.clear();
         return true;
     }
     if (engine == nullptr) {
@@ -1165,7 +1165,7 @@ bool ApplicationHost::DestroyCutSession(WorkspaceWindow& workspace) noexcept {
     }
     workspace.cut.current_path.clear();
     workspace.cut.cut_name.clear();
-    workspace.cut.member_paths.clear();
+    workspace.cut.members.clear();
     return true;
 }
 
