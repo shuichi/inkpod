@@ -148,15 +148,15 @@ ctest --preset windows-arm-release
 ポータブル ZIP も生成します。Release 成果物は次の場所に作られます。
 
 ```text
-build/windows-x64-release/package/Inkpod-0.2.1-windows-x64.zip
-build/windows-arm-release/package/Inkpod-0.2.1-windows-arm.zip
+build/windows-x64-release/package/Inkpod-0.2.2-windows-x64.zip
+build/windows-arm-release/package/Inkpod-0.2.2-windows-arm.zip
 ```
 
 ZIP 名は三つ組の application version、EXE と MSIX は build number を加えた
 四つ組 version を使用します。ZIP 直下には次の4ファイルだけを収録します。
 
 ```text
-Inkpod-0.2.1-windows-x64.zip
+Inkpod-0.2.2-windows-x64.zip
 ├─ inkpod.exe
 ├─ README.txt
 ├─ LICENSE.txt
@@ -182,7 +182,7 @@ GitHub prerelease、ダウンロードリンク更新までの実行内容だけ
 作成を行いません。
 
 ```powershell
-.\scripts\publish-windows-release.ps1 -Version 0.2.1 -DryRun
+.\scripts\publish-windows-release.ps1 -Version 0.2.2 -DryRun
 ```
 
 内容を確認してから `-Publish` で実行します。release branch は clean かつ
@@ -191,7 +191,7 @@ HTML link 更新をそれぞれ commit/push し、`v<version>` tag と GitHub pr
 を作成するため、通常のローカル build より強い外部変更を行います。
 
 ```powershell
-.\scripts\publish-windows-release.ps1 -Version 0.2.1 -Publish
+.\scripts\publish-windows-release.ps1 -Version 0.2.2 -Publish
 ```
 
 新規セルは 1920 × 1080 の 2 値彩色セルとして作成されます。UI／入力、単一書き込みの Rust Core エンジン、D3D／D2D 描画は、それぞれ独立したスレッドで動作します。描画中のストロークはペンを離す前からプレビューされ、確定時には 1 回分の「元に戻す」単位として記録されます。
