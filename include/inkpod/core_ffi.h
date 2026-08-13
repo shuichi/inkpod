@@ -728,6 +728,8 @@ typedef struct InkpodSnapshot InkpodSnapshot;
 typedef struct InkpodClipboard InkpodClipboard;
 /** @brief encode 結果の immutable byte 列を保持する Rust-owned handle。 */
 typedef struct InkpodByteBuffer InkpodByteBuffer;
+/** @brief canonical procedure 履歴の immutable・Rust-owned 可視化 snapshot。 */
+typedef struct InkpodHistoryVisualization InkpodHistoryVisualization;
 /** @brief sequence の複数 encode 結果を保持する Rust-owned handle。 */
 typedef struct InkpodEncodedSequence InkpodEncodedSequence;
 /** @brief 任意スレッドから query/cancel できる Rust-owned atomic task handle。 */
@@ -3136,6 +3138,30 @@ typedef struct InkpodDocumentThumbnailBuffer {
     uint64_t required_bytes;
 } InkpodDocumentThumbnailBuffer;
 
+/** @brief 一つの procedure 履歴行を受け取る caller-owned size-query 対応 buffer。 */
+typedef struct InkpodHistoryVisualizationRowBuffer {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t journal_event_id;
+    uint64_t procedure_id;
+    uint64_t committed_state_id;
+    uint64_t branch_id;
+    uint32_t primitive_id;
+    uint32_t thumbnail_width;
+    uint32_t thumbnail_height;
+    uint32_t thumbnail_stride_bytes;
+    uint64_t thumbnail_checksum;
+    uint8_t* primitive_name_utf8;
+    uint64_t primitive_name_capacity;
+    uint64_t primitive_name_bytes;
+    uint8_t* arguments_utf8;
+    uint64_t arguments_capacity;
+    uint64_t arguments_bytes;
+    uint8_t* thumbnail_rgba8;
+    uint64_t thumbnail_capacity;
+    uint64_t thumbnail_bytes;
+} InkpodHistoryVisualizationRowBuffer;
+
 /** @brief Immutable source, target, and revision token for one sequence switch. */
 typedef struct InkpodSequenceSwitchRequest {
     uint32_t struct_size;
@@ -4528,6 +4554,42 @@ InkpodStatus inkpod_core_export_instruction_common_raster(
 InkpodStatus inkpod_core_document_thumbnail_get(
     InkpodCore* core,
     InkpodDocumentThumbnailBuffer* output);
+/**
+ * @brief current in-memory canonical journal の immutable 可視化 snapshot を作る。
+ * @par 契約
+ * Core owner thread。`core`/`out_visualization` は非 NULL・非重複で、
+ * `*out_visualization == NULL`。成功時は release が必要。query のため live Core の
+ * document/revision/history/dirty/savepoint/ID は変えない。
+ */
+InkpodStatus inkpod_core_history_visualization_create(
+    InkpodCore* core,
+    InkpodHistoryVisualization** out_visualization);
+/**
+ * @brief task progress/cancellation 付きで可視化 snapshot を作る。
+ * Core/output は通常 create と同じ。task は ready で、実行中は任意 thread から
+ * query/cancel できるが release してはならない。cancel は live Core を変えない。
+ */
+InkpodStatus inkpod_core_history_visualization_create_with_task(
+    InkpodCore* core,
+    InkpodTask* task,
+    InkpodHistoryVisualization** out_visualization);
+/** @brief immutable 可視化 snapshot の Commit 行数を取得する。任意 thread。 */
+InkpodStatus inkpod_history_visualization_row_count(
+    const InkpodHistoryVisualization* visualization,
+    uint64_t* out_row_count);
+/**
+ * @brief 一つの履歴行の metadata、UTF-8 文字列、straight-alpha RGBA8 thumbnail をコピーする。
+ * @par 契約
+ * 任意 thread。capacity 0/NULL は size query。十分な三つの caller-owned buffer を
+ * 与えると一回でコピーする。同じ handle の release とは外部同期する。
+ */
+InkpodStatus inkpod_history_visualization_row_get(
+    const InkpodHistoryVisualization* visualization,
+    uint64_t row_index,
+    InkpodHistoryVisualizationRowBuffer* output);
+/** @brief 可視化 snapshot を任意 thread で解放し、owner 変数を NULL にする。 */
+InkpodStatus inkpod_history_visualization_release(
+    InkpodHistoryVisualization** visualization);
 /**
  * @brief immutable byte buffer の borrowed byte span を取得する。
  * @par 契約

@@ -546,3 +546,12 @@ pub(super) fn thumbnail_for_raster(raster: &TileRaster) -> Result<Thumbnail, Cor
         checksum,
     })
 }
+
+pub(crate) fn thumbnail_for_document(
+    document: &CellDocument,
+    assets: &crate::asset::AssetStore,
+    revision: u64,
+) -> Result<Thumbnail, CoreError> {
+    let flattened = flatten_document(document, assets, revision.max(1))?;
+    thumbnail_for_raster(&flattened)
+}

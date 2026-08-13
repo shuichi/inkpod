@@ -38,6 +38,7 @@
 #include "ui/dialogs/basic_dialogs.h"
 #include "ui/dialogs/batch_dialog.h"
 #include "ui/dialogs/effects_dialogs.h"
+#include "ui/dialogs/history_visualization_dialog.h"
 #include "ui/dialogs/layer_palette.h"
 #include "ui/command_catalog.h"
 #include "ui/command_state.h"
@@ -933,6 +934,12 @@ bool MenuLeavesHaveAssignedShortcuts(
             continue;
         }
         if ((item.fType & MFT_SEPARATOR) != 0U) {
+            continue;
+        }
+        // Per-document history entries are ephemeral menu targets rather than
+        // configurable production commands, so they intentionally have no
+        // persistent shortcut binding.
+        if (IsHistoryVisualizationCommand(item.wID)) {
             continue;
         }
         ++leaf_count;
@@ -12574,6 +12581,112 @@ int RunRevisionMaxPerformanceSmoke(ApplicationHost& state) noexcept {
 }
 
 
+int RunHistoryVisualizationSmoke(ApplicationHost& state) noexcept {
+    if (state.engine == nullptr) {
+        return 820;
+    }
+    app::DocumentSession& document = state.Document();
+    InkpodHistoryInfo history{};
+    history.struct_size = sizeof(history);
+    if (state.engine->Invoke(
+            document.id,
+            document.generation,
+            [&history](InkpodCore* core) {
+                return inkpod_core_history_info(core, &history);
+            },
+            false,
+            false) != INKPOD_STATUS_OK) {
+        return 820;
+    }
+    if (history.item_count == 0U) {
+        InkpodColorValue color{};
+        color.struct_size = sizeof(color);
+        InkpodDispatchResult result{};
+        result.struct_size = sizeof(result);
+        const InkpodStatus edit_status = state.engine->Invoke(
+            document.id,
+            document.generation,
+            [&color, &result](InkpodCore* core) {
+                InkpodStatus status = inkpod_core_get_main_line_color(core, &color);
+                if (status != INKPOD_STATUS_OK) {
+                    return status;
+                }
+                color.red = color.red == 0U ? 1U : 0U;
+                return inkpod_core_set_main_line_color(core, &color, &result);
+            },
+            false,
+            true);
+        if (edit_status != INKPOD_STATUS_OK) {
+            return 820;
+        }
+    }
+    const std::wstring previous_path = document.shell.current_path;
+    document.shell.current_path = L"inkpod-history-visualization-smoke.inkpod";
+    const auto cleanup = [&]() noexcept {
+        CloseHistoryVisualizationDialog(document);
+        document.shell.current_path = previous_path;
+        UpdateMenuState(state);
+    };
+
+    UpdateMenuState(state);
+    std::optional<UINT> command;
+    for (std::size_t index = 0U;
+         index < state.Workspace().history_visualization_menu_target_count;
+         ++index) {
+        const auto target =
+            state.Workspace().history_visualization_menu_targets[index];
+        if (target.session == document.id
+            && target.generation == document.generation) {
+            command = IDM_TOOL_HISTORY_VISUALIZATION_FIRST
+                + static_cast<UINT>(index);
+            break;
+        }
+    }
+    if (!command.has_value() || !IsHistoryVisualizationCommand(*command)) {
+        cleanup();
+        return 821;
+    }
+    (void)IssueHistoryVisualizationCommand(
+        state, state.Workspace().windows.window, *command);
+    const HWND dialog = document.history_visualization_dialog;
+    const HWND list = dialog == nullptr
+        ? nullptr
+        : GetDlgItem(dialog, IDC_HISTORY_VISUALIZATION_LIST);
+    if (dialog == nullptr || list == nullptr
+        || GetWindow(dialog, GW_CHILD) != list
+        || GetWindow(list, GW_HWNDNEXT) != nullptr
+        || (GetWindowLongPtrW(list, GWL_STYLE) & LVS_OWNERDATA) == 0
+        || GetWindow(dialog, GW_OWNER) != state.Workspace().windows.window) {
+        cleanup();
+        return 822;
+    }
+    (void)IssueHistoryVisualizationCommand(
+        state, state.Workspace().windows.window, *command);
+    if (document.history_visualization_dialog != dialog
+        || state.engine->WaitIdle(document.id, document.generation)
+            != INKPOD_STATUS_OK) {
+        cleanup();
+        return 823;
+    }
+    PumpPendingWindowMessages();
+    const HWND header = ListView_GetHeader(list);
+    std::array<wchar_t, 128U> primitive{};
+    const int row_count = ListView_GetItemCount(list);
+    LVITEMW primitive_item{};
+    primitive_item.iSubItem = 0;
+    primitive_item.pszText = primitive.data();
+    primitive_item.cchTextMax = static_cast<int>(primitive.size());
+    const LRESULT primitive_length = SendMessageW(
+        list, LVM_GETITEMTEXTW, 0, reinterpret_cast<LPARAM>(&primitive_item));
+    if (header == nullptr || Header_GetItemCount(header) != 3
+        || row_count <= 0 || primitive_length <= 0) {
+        cleanup();
+        return 824;
+    }
+    cleanup();
+    return document.history_visualization_dialog == nullptr ? 0 : 825;
+}
+
 }  // namespace inkpod::windows::ui::runtime
 
 namespace inkpod::windows::ui {
@@ -12696,6 +12809,9 @@ int RunApplicationSmoke(app::ApplicationHost& state) noexcept {
     }
     if (exit_code == 0) {
         exit_code = runtime::RunCutWorkflowSmoke(state);
+    }
+    if (exit_code == 0) {
+        exit_code = runtime::RunHistoryVisualizationSmoke(state);
     }
     if (exit_code != 0) {
         std::fprintf(stderr, "inkpod application smoke failed: %d\n", exit_code);

@@ -23,6 +23,7 @@
 #include "session_recovery.h"
 #include "ui/main_window.h"
 #include "ui/main_window_runtime.h"
+#include "ui/dialogs/history_visualization_dialog.h"
 #include "ui/shortcut_controller.h"
 #include "ui/workspace_layout.h"
 
@@ -79,6 +80,7 @@ InkpodStatus StartCore(ApplicationHost& state) noexcept {
 }
 
 InkpodStatus StopCore(ApplicationHost& state) noexcept {
+    windows::ui::CloseAllHistoryVisualizationDialogs(state);
     const InkpodStatus clipboard_status = inkpod_clipboard_release(&state.clipboard);
     if (state.effects.task != nullptr) {
         inkpod_task_cancel(state.effects.task);
@@ -425,6 +427,11 @@ int RunMessageLoop(ApplicationHost& state) noexcept {
                     break;
                 }
             }
+        }
+        if (!dialog_message) {
+            dialog_message =
+                windows::ui::TranslateHistoryVisualizationDialogMessage(
+                    state, message);
         }
         if (dialog_message) {
             continue;

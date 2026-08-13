@@ -21,6 +21,7 @@ mod ffi_contract_tests;
 #[path = "../tests/unit/cut.rs"]
 mod cut_ffi_tests;
 
+use inkpod_core::history_visualization::HistoryVisualizationRow;
 use inkpod_core::{
     ActivePlane, Adjustment, AirbrushGesture, AirbrushStroke, AnnotationEdit, AnnotationKind,
     AnnotationObjectInput, AnnotationOutput, AnnotationPoint, ApplicationColor,
@@ -76,6 +77,7 @@ mod determinism;
 mod document_edit;
 mod editor_state;
 mod effects;
+mod history_visualization;
 mod lifecycle_document;
 mod paint_history;
 mod shooting_frame;
@@ -98,6 +100,7 @@ pub use determinism::*;
 pub use document_edit::*;
 pub use editor_state::*;
 pub use effects::*;
+pub use history_visualization::*;
 pub use lifecycle_document::*;
 pub(crate) use paint_history::parse_view_command;
 pub use paint_history::*;

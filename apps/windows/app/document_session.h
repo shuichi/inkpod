@@ -1,5 +1,7 @@
 #pragma once
 
+#include <windows.h>
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -42,6 +44,7 @@ public:
     DocumentShellState shell{};
     InkpodEditorStateInfo editor_presentation{sizeof(InkpodEditorStateInfo)};
     bool has_editor_presentation{};
+    HWND history_visualization_dialog{};
 
     void BindCore(CoreHost* host) noexcept;
     [[nodiscard]] CoreHost* Core() const noexcept;

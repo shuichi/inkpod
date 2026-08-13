@@ -633,7 +633,7 @@ fn encode_palette(colors: &[PixelValue]) -> Result<Vec<u8>, CoreError> {
     Ok(bytes)
 }
 
-fn decode_palette(bytes: &[u8]) -> Result<Vec<PixelValue>, CoreError> {
+pub(super) fn decode_palette(bytes: &[u8]) -> Result<Vec<PixelValue>, CoreError> {
     if bytes.len() < 8 {
         return Err(CoreError::InvalidArgument(
             "canonical palette is missing its count",
@@ -698,7 +698,7 @@ fn encode_color_chart(entries: &[ColorChartEntry], locked: bool) -> Result<Vec<u
     Ok(bytes)
 }
 
-fn decode_color_chart(bytes: &[u8]) -> Result<(Vec<ColorChartEntry>, bool), CoreError> {
+pub(super) fn decode_color_chart(bytes: &[u8]) -> Result<(Vec<ColorChartEntry>, bool), CoreError> {
     let (&locked, rest) = bytes.split_first().ok_or(CoreError::InvalidArgument(
         "canonical Color chart is truncated",
     ))?;

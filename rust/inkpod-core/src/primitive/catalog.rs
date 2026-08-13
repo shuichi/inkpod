@@ -333,6 +333,13 @@ const PRIMITIVE_CATALOG: &[PrimitiveCatalogEntry] = &[
     ),
 ];
 
+pub(crate) fn primitive_name(primitive_id: PrimitiveId) -> Option<&'static str> {
+    PRIMITIVE_CATALOG
+        .binary_search_by_key(&primitive_id, |entry| entry.id)
+        .ok()
+        .map(|index| PRIMITIVE_CATALOG[index].canonical_name)
+}
+
 static REPLAY_CONTRACT: LazyLock<ReplayContract> = LazyLock::new(|| {
     let mut hasher = blake3::Hasher::new_derive_key(CATALOG_CONTEXT);
     hasher.update(&(PRIMITIVE_CATALOG.len() as u32).to_le_bytes());

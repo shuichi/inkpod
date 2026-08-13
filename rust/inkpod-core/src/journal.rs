@@ -1,7 +1,10 @@
 //! Append-only canonical procedure journal and runtime history reconstruction.
 
 use super::*;
+use crate::animation::thumbnail_for_document;
+use crate::history_visualization::HistoryVisualizationRow;
 use crate::primitive::canonical_document_state;
+use crate::primitive::display_procedure;
 use std::sync::Arc;
 
 const MAX_JOURNAL_EVENTS: usize = 2_097_152;
@@ -383,6 +386,12 @@ struct ReplayNode {
     next_id: StableIdCursor,
 }
 
+struct ReplayedJournal {
+    runtime: RebuiltRuntime,
+    nodes: BTreeMap<StateId, ReplayNode>,
+    assets: crate::asset::AssetStore,
+}
+
 struct CheckpointNode {
     parent: Option<StateId>,
     procedure: Option<Arc<CanonicalProcedure>>,
@@ -425,6 +434,78 @@ impl Core {
             history_cursor: self.history_cursor,
             visible_history_count: self.history.len(),
         })
+    }
+
+    /// Builds an owned, point-in-time visualization row for every Commit record.
+    ///
+    /// Rows follow append-only journal event order and therefore also include
+    /// commits retained on inactive branches. Genesis, history moves, and branch
+    /// cuts are not rows. Each thumbnail is the visible document composite after
+    /// its procedure. This query performs deterministic replay but does not
+    /// change the live document, revisions, history, dirty state, savepoints,
+    /// caches, or persistent ID allocation.
+    pub fn history_visualization_rows(&self) -> Result<Vec<HistoryVisualizationRow>, CoreError> {
+        self.history_visualization_rows_with_progress(|_, _| true)
+    }
+
+    /// Builds visualization rows with cooperative replay/row progress.
+    ///
+    /// `continue_work` receives monotonically increasing completed work and the
+    /// total number of journal records plus Commit rows. Returning `false`
+    /// yields [`CoreError::Cancelled`]. Cancellation publishes no state and the
+    /// callback is not retained.
+    pub fn history_visualization_rows_with_progress(
+        &self,
+        mut continue_work: impl FnMut(u64, u64) -> bool,
+    ) -> Result<Vec<HistoryVisualizationRow>, CoreError> {
+        if self.document.is_none() {
+            return Err(CoreError::NoDocument);
+        }
+        let commit_count = self
+            .journal
+            .iter()
+            .filter(|entry| matches!(entry, JournalEntry::Commit(_)))
+            .count();
+        let total_work = self.journal.len().saturating_add(commit_count) as u64;
+        let replayed = self.replay_journal_graph(&mut continue_work, total_work)?;
+        let mut rows = Vec::new();
+        rows.try_reserve(commit_count)
+            .map_err(|_| CoreError::InvalidState("history visualization allocation failed"))?;
+        for entry in &self.journal {
+            let JournalEntry::Commit(commit) = entry else {
+                continue;
+            };
+            if !continue_work(self.journal.len() as u64 + rows.len() as u64, total_work) {
+                return Err(CoreError::Cancelled);
+            }
+            let node =
+                replayed
+                    .nodes
+                    .get(&commit.committed_state_id)
+                    .ok_or(CoreError::InvalidState(
+                        "history visualization state is missing",
+                    ))?;
+            let (primitive_name, arguments) = display_procedure(&commit.procedure)?;
+            let thumbnail = thumbnail_for_document(
+                &node.document,
+                &replayed.assets,
+                commit.committed_state_id.get(),
+            )?;
+            rows.push(HistoryVisualizationRow {
+                journal_event_id: commit.event_id,
+                procedure_id: commit.procedure.procedure_id(),
+                primitive_id: commit.procedure.primitive_id(),
+                committed_state_id: commit.committed_state_id,
+                branch_id: commit.branch_id,
+                primitive_name,
+                arguments,
+                thumbnail,
+            });
+        }
+        if !continue_work(total_work, total_work) {
+            return Err(CoreError::Cancelled);
+        }
+        Ok(rows)
     }
 
     /// Rebuilds the current semantic state from Genesis and the journal privately.
@@ -615,6 +696,17 @@ impl Core {
     }
 
     pub(super) fn rebuild_runtime_from_journal(&self) -> Result<RebuiltRuntime, CoreError> {
+        let total_work = self.journal.len() as u64;
+        Ok(self
+            .replay_journal_graph(&mut |_, _| true, total_work)?
+            .runtime)
+    }
+
+    fn replay_journal_graph(
+        &self,
+        continue_work: &mut dyn FnMut(u64, u64) -> bool,
+        total_work: u64,
+    ) -> Result<ReplayedJournal, CoreError> {
         if self.journal.len() > MAX_JOURNAL_EVENTS {
             return Err(CoreError::InvalidState("journal event limit exceeded"));
         }
@@ -654,7 +746,10 @@ impl Core {
         let mut next_branch = BranchId::first_unallocated();
         let mut pending_cut: Option<(BranchId, StateId)> = None;
 
-        for record in &self.journal {
+        for (index, record) in self.journal.iter().enumerate() {
+            if !continue_work(index as u64, total_work) {
+                return Err(CoreError::Cancelled);
+            }
             let event_id = match record {
                 JournalEntry::Commit(commit) => commit.event_id,
                 JournalEntry::HistoryMove(movement) => movement.event_id,
@@ -867,18 +962,22 @@ impl Core {
         let document = current_node.document.clone();
         let next_id = current_node.next_id;
         let (_, document_state_digest) = canonical_document_state(&document)?;
-        Ok(RebuiltRuntime {
-            document,
-            history,
-            history_cursor,
-            next_id,
-            info: JournalReplayInfo {
-                document_state_digest,
-                current_state_id: current_state,
-                active_branch_id: active_branch,
+        Ok(ReplayedJournal {
+            runtime: RebuiltRuntime {
+                document,
+                history,
                 history_cursor,
-                visible_history_count: state_path.len(),
+                next_id,
+                info: JournalReplayInfo {
+                    document_state_digest,
+                    current_state_id: current_state,
+                    active_branch_id: active_branch,
+                    history_cursor,
+                    visible_history_count: state_path.len(),
+                },
             },
+            nodes,
+            assets: detached_assets,
         })
     }
 

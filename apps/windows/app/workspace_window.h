@@ -57,6 +57,11 @@ struct CutSession final {
     std::vector<CutMemberCache> members;
 };
 
+struct HistoryVisualizationMenuTarget final {
+    DocumentSessionId session{};
+    Generation generation{};
+};
+
 struct WorkspaceWindow final {
     ApplicationHost* application{};
     WorkspaceWindowId id{};
@@ -103,6 +108,9 @@ struct WorkspaceWindow final {
     bool subpalette_auto_previous{true};
     bool subpalette_scroll_sync{};
     std::uint64_t subpalette_notice_sequence{};
+    std::array<HistoryVisualizationMenuTarget, 64U>
+        history_visualization_menu_targets{};
+    std::size_t history_visualization_menu_target_count{};
 };
 
 class WorkspaceWindowRegistry final {

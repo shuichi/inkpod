@@ -200,6 +200,23 @@ snapshotの照会と解放は外部同期し、rendererはcount、stride、recor
 最初に失われるイベント数とプロシージャ数を表示する。出力先には開いているセッションが所有しないパスだけを
 許可し、作成したコピーを現在の保存先として採用しない。
 
+## 履歴可視化 snapshot（現行 ABI v12）
+
+`inkpod_core_history_visualization_create` と
+`inkpod_core_history_visualization_create_with_task` は Core 所有スレッド専用の読み取り操作である。
+後者の `InkpodTask` は ready 状態で渡し、呼び出し中は任意スレッドから進捗照会と cooperative cancel が
+できるが、呼び出し完了前に解放してはならない。成功時は、作成時点の journal に含まれる全 `Commit` を
+`JournalEventId` 順に保持した Rust-owned immutable `InkpodHistoryVisualization` を返す。非 active branch の
+commit も含み、`HistoryMove`、`BranchCut`、Genesis は行にしない。cancel、失敗、query 成功のいずれでも、
+live document、revision、history、journal、dirty、savepoint、persistent ID は変更されない。
+
+`inkpod_history_visualization_row_count`、`inkpod_history_visualization_row_get`、
+`inkpod_history_visualization_release` は外部同期した任意スレッドから利用できる。`row_get` は primitive 名、
+決定的な引数文字列、最大 64×64 の straight-alpha RGBA8 thumbnail の三つを caller-owned buffer へコピーする。
+三 buffer をすべて NULL/capacity 0 とする最初の呼び出しで必要 byte 数を取得し、十分な容量を用意した二回目で
+一括コピーする。部分的に短い buffer は `INKPOD_STATUS_BUFFER_TOO_SMALL` となり、Rust-owned の内部 pointer は
+公開しない。同じ handle の照会と release を同時に行ってはならず、解放後に行 metadata を利用してはならない。
+
 ## 新規 Cell creation plan（現行 ABI v12）
 
 `InkpodCellCreationOptions` は sizing mode、入力寸法、軸別 DPI、各辺余白率、
@@ -600,6 +617,7 @@ make an older ABI version acceptable.
 | バイトバッファ       | 出力成功から解放まで              | バイト列は解放まで                                        | 外部同期した任意スレッド      |
 | エンコード済み列     | 出力成功から解放まで              | 要素名とバイト列は解放まで                                | 外部同期した任意スレッド      |
 | タスク／バッチタスク | 作成成功から解放まで              | 照会値は呼び出し側へのコピー                              | Core 呼び出し終了後の任意スレッド |
+| 履歴可視化 snapshot  | Core query 成功から解放まで        | 行の文字列と thumbnail は呼び出し側バッファへのコピー     | 外部同期した任意スレッド      |
 | バッチグラフ         | 作成／読込成功から解放まで        | 実行／プレビュー中はグラフが生存している必要がある       | 外部同期した任意スレッド      |
 | バッチプレビュー／レポート | Core 出力から解放まで       | 要素の UTF-8 列は親ハンドルの解放まで                    | 外部同期した任意スレッド      |
 | Cell creation plan   | plan 作成成功から解放まで          | copy/commit 呼出中は plan が生存し、解放と同時実行しない | 外部同期した任意スレッド      |

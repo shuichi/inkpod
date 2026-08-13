@@ -193,6 +193,18 @@ checkpoint in a staged Core before one replacement of the live generation.
 Checkpoint mismatch selects full replay; malformed/hash/bound failure rejects.
 The journal remains authoritative and every non-v26 version is rejected.
 
+History visualization is a read-only derived view of that journal. Core replays
+the complete retained graph through the canonical executor, visits only `Commit`
+records in `JournalEventId` order (including inactive branches), formats the
+typed invocation as a stable primitive name plus bounded argument text, and
+renders each committed document state to a maximum 64-by-64 straight-alpha
+RGBA8 thumbnail. `HistoryMove`, `BranchCut`, and Genesis do not produce rows.
+The derived rows are returned in one immutable Rust-owned ABI handle and are
+never persisted as another history authority. Windows creates that handle on
+the Core engine thread, owns it in the modeless-dialog controller, lazily copies
+rows into an owner-data list, and cancels an unfinished build when the dialog or
+document session closes.
+
 ## Immutable Genesis and canonical assets
 
 Each Core document has one immutable Genesis state. Genesis owns a stable

@@ -492,6 +492,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 ### 17. 履歴、復帰、preview
 
 - undo/redo は直前 command と複数段階移動を扱う。Undo または history jump 後の新規編集では旧 tail を通常 Redo の対象から外すが、procedure と asset は非 active journal branch として保持し、自動削除しない。
+- `ツール > Inkpodファイルの可視化` は、process 内で現在開かれており native `.inkpod` の保存先を持つ document session を重複なく列挙する。項目を選ぶと document ごとに一つのモードレス dialog を開き、dialog を開いた時点の in-memory journal の `Commit` record を `JournalEventId` 順に、primitive 名、決定的な `field=value` 引数表現、その commit 後の可視 composite の最大 64×64 straight-alpha RGBA8 thumbnail の三列で表示する。`HistoryMove`、`BranchCut`、Genesis は行にせず、通常 Redo から外れた branch の commit も表示する。巨大な可変長引数は件数、byte 長、digest へ要約し、表示 query は document、revision、history、dirty、savepoint、persistent ID を変更しない。dialog は一つの scrollbar 付き list control だけを content とし、session が閉じられた場合は対応する dialog も閉じる。
 - pointer down から up までの stroke、shape 確定、fill、filter apply、layer operation、paste commit をそれぞれ一 command とする。
 - dialog preview は base state から毎回再計算し、parameter slider を動かすたびに結果へ累積適用しない。
 - `実行`/`OK` は一回の commit、`キャンセル` は base state へ完全復元する。
@@ -637,6 +638,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - `VIEW-004`: 複数文書 tab、同一文書 view、二分割 group、group/window 間の移動と複製
 - `VIEW-005`: view-local vector antialias、中心線 overlay／中心線のみ、明示 topology に基づく未接続端点診断
 - `HIST-001`: transaction、Undo/Redo、savepoint、revert、preview cancel
+- `HIST-002`: open native document の canonical procedure journal、typed 引数、commit 後 thumbnail のモードレス可視化
 
 ### Paint and color
 

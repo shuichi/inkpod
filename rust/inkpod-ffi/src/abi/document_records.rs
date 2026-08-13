@@ -622,6 +622,31 @@ pub struct InkpodDocumentThumbnailBuffer {
 }
 
 #[repr(C)]
+#[derive(Default)]
+pub struct InkpodHistoryVisualizationRowBuffer {
+    pub struct_size: u32,
+    pub flags: u32,
+    pub journal_event_id: u64,
+    pub procedure_id: u64,
+    pub committed_state_id: u64,
+    pub branch_id: u64,
+    pub primitive_id: u32,
+    pub thumbnail_width: u32,
+    pub thumbnail_height: u32,
+    pub thumbnail_stride_bytes: u32,
+    pub thumbnail_checksum: u64,
+    pub primitive_name_utf8: *mut u8,
+    pub primitive_name_capacity: u64,
+    pub primitive_name_bytes: u64,
+    pub arguments_utf8: *mut u8,
+    pub arguments_capacity: u64,
+    pub arguments_bytes: u64,
+    pub thumbnail_rgba8: *mut u8,
+    pub thumbnail_capacity: u64,
+    pub thumbnail_bytes: u64,
+}
+
+#[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct InkpodSequenceSwitchRequest {
     pub struct_size: u32,

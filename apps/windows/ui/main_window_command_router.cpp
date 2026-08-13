@@ -3,6 +3,7 @@
 #include <array>
 
 #include "app/application_host.h"
+#include "dialogs/history_visualization_dialog.h"
 
 namespace inkpod::windows::ui::runtime {
 
@@ -108,6 +109,9 @@ std::optional<LRESULT> IssueCommand(
         return LRESULT{0};
     }
     const UINT command = LOWORD(wparam);
+    if (IsHistoryVisualizationCommand(command)) {
+        return IssueHistoryVisualizationCommand(*state, window, command);
+    }
     const auto* command_state = FindCommandState(
         state->Workspace().command_states, command);
     if (command_state == nullptr) {

@@ -20,6 +20,7 @@ mod floating_transform_anchor;
 mod foundation;
 mod geometry;
 mod history_stroke;
+mod history_visualization;
 mod mixed_order;
 mod multi_target;
 mod native_v23;

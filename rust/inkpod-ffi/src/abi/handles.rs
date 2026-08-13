@@ -42,6 +42,10 @@ pub struct InkpodByteBuffer {
     pub(crate) bytes: Box<[u8]>,
 }
 
+pub struct InkpodHistoryVisualization {
+    pub(crate) rows: Box<[HistoryVisualizationRow]>,
+}
+
 pub(crate) struct EncodedSequenceFile {
     pub(crate) name: Box<[u8]>,
     pub(crate) bytes: Box<[u8]>,

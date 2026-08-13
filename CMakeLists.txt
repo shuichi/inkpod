@@ -617,6 +617,8 @@ if(WIN32)
         apps/windows/ui/dialogs/basic_dialogs.cpp
         apps/windows/ui/dialogs/batch_dialog.cpp
         apps/windows/ui/dialogs/effects_dialogs.cpp
+        apps/windows/ui/dialogs/history_visualization_dialog.cpp
+        apps/windows/ui/dialogs/history_visualization_dialog.h
         apps/windows/ui/dialogs/layer_palette.cpp
         apps/windows/ui/dialogs/layer_palette.h
         apps/windows/ui/dialogs/modal_dialog_position.cpp

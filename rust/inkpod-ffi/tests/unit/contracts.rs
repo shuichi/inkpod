@@ -5270,6 +5270,122 @@ fn light_table_bulk_ffi_previews_commits_and_rejects_short_unknown_stale_inputs(
 }
 
 #[test]
+fn history_visualization_abi_owns_commit_rows_and_supports_bounded_size_queries() {
+    let (mut core, _) = create_core(32, 24, 0x4856_4953);
+    unsafe {
+        let mut result = dispatch();
+        let main_line = color(12, 34, 56, 255);
+        assert_eq!(
+            inkpod_core_set_main_line_color(core, &main_line, &mut result),
+            INKPOD_STATUS_OK
+        );
+        let document_before = queried_document_info(core);
+        let history_before = queried_history_info(core);
+
+        let mut visualization = ptr::null_mut();
+        let mut cancelled_task = ptr::null_mut();
+        assert_eq!(inkpod_task_create(&mut cancelled_task), INKPOD_STATUS_OK);
+        assert_eq!(inkpod_task_cancel(cancelled_task), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_core_history_visualization_create_with_task(
+                core,
+                cancelled_task,
+                &mut visualization,
+            ),
+            INKPOD_STATUS_CANCELLED
+        );
+        assert!(visualization.is_null());
+        assert_eq!(inkpod_task_release(&mut cancelled_task), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_core_history_visualization_create(core, &mut visualization),
+            INKPOD_STATUS_OK
+        );
+        assert!(!visualization.is_null());
+        assert_eq!(
+            document_observation(&queried_document_info(core)),
+            document_observation(&document_before)
+        );
+        assert_eq!(queried_history_info(core).cursor, history_before.cursor);
+
+        let mut row_count = 0;
+        assert_eq!(
+            inkpod_history_visualization_row_count(visualization, &mut row_count),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(row_count, 1);
+
+        let mut row = InkpodHistoryVisualizationRowBuffer {
+            struct_size: size_of::<InkpodHistoryVisualizationRowBuffer>() as u32,
+            ..InkpodHistoryVisualizationRowBuffer::default()
+        };
+        assert_eq!(
+            inkpod_history_visualization_row_get(visualization, 0, &mut row),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(row.journal_event_id, 1);
+        assert_eq!(row.procedure_id, 1);
+        assert_eq!(row.committed_state_id, 2);
+        assert_eq!(row.branch_id, 1);
+        assert_eq!(row.primitive_id, INKPOD_PRIMITIVE_SET_MAIN_LINE_COLOR);
+        assert_eq!((row.thumbnail_width, row.thumbnail_height), (32, 24));
+        assert_eq!(row.thumbnail_stride_bytes, 32 * 4);
+        assert_eq!(row.thumbnail_bytes, 32 * 24 * 4);
+        assert!(row.primitive_name_bytes > 0);
+        assert!(row.arguments_bytes > 0);
+
+        let mut name = vec![0_u8; row.primitive_name_bytes as usize];
+        let mut arguments = vec![0_u8; row.arguments_bytes as usize];
+        let mut thumbnail = vec![0_u8; row.thumbnail_bytes as usize - 1];
+        row.primitive_name_utf8 = name.as_mut_ptr();
+        row.primitive_name_capacity = name.len() as u64;
+        row.arguments_utf8 = arguments.as_mut_ptr();
+        row.arguments_capacity = arguments.len() as u64;
+        row.thumbnail_rgba8 = thumbnail.as_mut_ptr();
+        row.thumbnail_capacity = thumbnail.len() as u64;
+        assert_eq!(
+            inkpod_history_visualization_row_get(visualization, 0, &mut row),
+            INKPOD_STATUS_BUFFER_TOO_SMALL
+        );
+
+        thumbnail.resize(row.thumbnail_bytes as usize, 0);
+        row.thumbnail_rgba8 = thumbnail.as_mut_ptr();
+        row.thumbnail_capacity = thumbnail.len() as u64;
+        assert_eq!(
+            inkpod_history_visualization_row_get(visualization, 0, &mut row),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(std::str::from_utf8(&name).unwrap(), "SetMainLineColor");
+        assert_eq!(
+            std::str::from_utf8(&arguments).unwrap(),
+            "color=Rgba([12, 34, 56, 255])"
+        );
+
+        let full_size = row.struct_size;
+        row.struct_size -= 1;
+        assert_eq!(
+            inkpod_history_visualization_row_get(visualization, 0, &mut row),
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+        row.struct_size = full_size;
+        assert_eq!(
+            inkpod_history_visualization_row_get(visualization, 1, &mut row),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+
+        assert_eq!(
+            inkpod_history_visualization_release(&mut visualization),
+            INKPOD_STATUS_OK
+        );
+        assert!(visualization.is_null());
+        assert_eq!(
+            inkpod_history_visualization_release(&mut visualization),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+    }
+}
+
+#[test]
 fn ffi_contract_public_surface_matches_header_and_every_function_has_a_test_reference() {
     let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()

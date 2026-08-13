@@ -35,7 +35,9 @@ pub use light_table_bulk::{
 pub(crate) use ordering::{natural_cmp, parse_cell_number};
 #[cfg(test)]
 pub(crate) use raster::base_raster_pixel;
-pub(crate) use raster::{flatten_document, visit_visible_document_composite_rgba16};
+pub(crate) use raster::{
+    flatten_document, thumbnail_for_document, visit_visible_document_composite_rgba16,
+};
 pub use sequence::{
     MotionCheckConfig, MotionFrame, SequenceCellInfo, SequenceCellSource, SequenceDirection,
     SequenceEndpointPolicy, SequenceStepPlan, SequenceStepResult, SequenceSwitchPolicy,

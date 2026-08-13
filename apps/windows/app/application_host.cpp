@@ -10,6 +10,7 @@
 
 #include "application_owner_graph.h"
 #include "renderer/canvas.h"
+#include "ui/dialogs/history_visualization_dialog.h"
 
 namespace inkpod::app {
 
@@ -1020,6 +1021,7 @@ bool ApplicationHost::CloseDocumentSession(DocumentSessionId session) noexcept {
         return false;
     }
     const Generation generation = document->generation;
+    windows::ui::CloseHistoryVisualizationDialog(*document);
     for (std::size_t index = 0U; index < workspaces_.Count(); ++index) {
         WorkspaceWindow* workspace = workspaces_.At(index);
         if (workspace == nullptr) {

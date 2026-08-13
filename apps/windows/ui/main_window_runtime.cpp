@@ -37,6 +37,7 @@
 #include "ui/dialogs/basic_dialogs.h"
 #include "ui/dialogs/batch_dialog.h"
 #include "ui/dialogs/effects_dialogs.h"
+#include "ui/dialogs/history_visualization_dialog.h"
 #include "ui/dialogs/layer_palette.h"
 #include "ui/command_state.h"
 #include "ui/command_catalog.h"
@@ -7043,6 +7044,7 @@ void UpdateMenuState(ApplicationHost& state) noexcept {
     if (menu == nullptr) {
         return;
     }
+    UpdateHistoryVisualizationMenu(state, menu);
 
     InkpodDocumentInfo info{};
     const bool has_document = QueryDocument(state, info);
