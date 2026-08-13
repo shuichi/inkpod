@@ -19625,14 +19625,26 @@ std::optional<LRESULT> RouteApplicationCommand(
             return 1;
         }
         case IDM_HELP_MANUAL:
-        case IDM_HELP_FILE_FORMAT: {
-            const bool is_manual = LOWORD(wparam) == IDM_HELP_MANUAL;
-            const EmbeddedHelpDocument document = is_manual
-                ? EmbeddedHelpDocument::Manual
-                : EmbeddedHelpDocument::FileFormat;
-            const UINT error_message = is_manual
-                ? IDS_HELP_MANUAL_OPEN_FAILED
-                : IDS_HELP_FILE_FORMAT_OPEN_FAILED;
+        case IDM_HELP_FILE_FORMAT:
+        case IDM_HELP_ACKNOWLEDGEMENTS: {
+            EmbeddedHelpDocument document{};
+            UINT error_message{};
+            switch (LOWORD(wparam)) {
+                case IDM_HELP_MANUAL:
+                    document = EmbeddedHelpDocument::Manual;
+                    error_message = IDS_HELP_MANUAL_OPEN_FAILED;
+                    break;
+                case IDM_HELP_FILE_FORMAT:
+                    document = EmbeddedHelpDocument::FileFormat;
+                    error_message = IDS_HELP_FILE_FORMAT_OPEN_FAILED;
+                    break;
+                case IDM_HELP_ACKNOWLEDGEMENTS:
+                    document = EmbeddedHelpDocument::Acknowledgements;
+                    error_message = IDS_HELP_ACKNOWLEDGEMENTS_OPEN_FAILED;
+                    break;
+                default:
+                    return 0;
+            }
             std::wstring document_path;
             const EmbeddedHelpStatus status = state->lifetime.smoke_test
                 ? inkpod::app::PrepareEmbeddedHelpDocument(

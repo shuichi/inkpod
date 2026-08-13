@@ -99,9 +99,11 @@ bool OverwriteWithStaleContent(const std::wstring& path) noexcept {
 void CleanupTestDirectory(
     const std::wstring& root,
     const std::wstring& manual_path,
-    const std::wstring& file_format_path) noexcept {
+    const std::wstring& file_format_path,
+    const std::wstring& acknowledgements_path) noexcept {
     DeleteFileW(manual_path.c_str());
     DeleteFileW(file_format_path.c_str());
+    DeleteFileW(acknowledgements_path.c_str());
     const std::wstring version_directory =
         root + L"\\inkpod\\Help\\" INKPOD_FILE_VERSION_STRING_WIDE;
     RemoveDirectoryW(version_directory.c_str());
@@ -163,11 +165,14 @@ int main() {
         UINT resource_id;
         const wchar_t* file_name;
     };
-    constexpr std::array<TestDocument, 2U> documents{{
+    constexpr std::array<TestDocument, 3U> documents{{
         {EmbeddedHelpDocument::Manual, IDR_MANUAL_HTML, L"manual.html"},
         {EmbeddedHelpDocument::FileFormat,
          IDR_FILE_FORMAT_HTML,
          L"file_format.html"},
+        {EmbeddedHelpDocument::Acknowledgements,
+         IDR_ACKNOWLEDGEMENTS_HTML,
+         L"acknowledgements.html"},
     }};
     std::array<std::wstring, documents.size()> extracted_paths{};
     for (std::size_t index = 0U; index < documents.size(); ++index) {
@@ -179,7 +184,11 @@ int main() {
         extracted_paths[index] = output;
         if (first != EmbeddedHelpStatus::Ok || output != expected
             || !FileMatchesResource(instance, output, test.resource_id)) {
-            CleanupTestDirectory(root, extracted_paths[0], extracted_paths[1]);
+            CleanupTestDirectory(
+                root,
+                extracted_paths[0],
+                extracted_paths[1],
+                extracted_paths[2]);
             return 4;
         }
 
@@ -189,12 +198,20 @@ int main() {
                 != EmbeddedHelpStatus::Ok
             || reused_path != expected
             || !FileMatchesResource(instance, reused_path, test.resource_id)) {
-            CleanupTestDirectory(root, extracted_paths[0], extracted_paths[1]);
+            CleanupTestDirectory(
+                root,
+                extracted_paths[0],
+                extracted_paths[1],
+                extracted_paths[2]);
             return 5;
         }
 
         if (!OverwriteWithStaleContent(output)) {
-            CleanupTestDirectory(root, extracted_paths[0], extracted_paths[1]);
+            CleanupTestDirectory(
+                root,
+                extracted_paths[0],
+                extracted_paths[1],
+                extracted_paths[2]);
             return 6;
         }
         std::wstring replaced_path;
@@ -203,11 +220,19 @@ int main() {
                 != EmbeddedHelpStatus::Ok
             || replaced_path != expected
             || !FileMatchesResource(instance, replaced_path, test.resource_id)) {
-            CleanupTestDirectory(root, extracted_paths[0], extracted_paths[1]);
+            CleanupTestDirectory(
+                root,
+                extracted_paths[0],
+                extracted_paths[1],
+                extracted_paths[2]);
             return 7;
         }
     }
 
-    CleanupTestDirectory(root, extracted_paths[0], extracted_paths[1]);
+    CleanupTestDirectory(
+        root,
+        extracted_paths[0],
+        extracted_paths[1],
+        extracted_paths[2]);
     return 0;
 }

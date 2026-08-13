@@ -2,3 +2,4 @@
 
 IDR_MANUAL_HTML RCDATA "../html/manual.html"
 IDR_FILE_FORMAT_HTML RCDATA "../html/file_format.html"
+IDR_ACKNOWLEDGEMENTS_HTML RCDATA "../html/acknowledgements.html"

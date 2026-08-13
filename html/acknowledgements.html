@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="Inkpod が使用するサードパーティライブラリへの謝辞">
+  <title>謝辞 — Inkpod</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --accent: #0f6cbd;
+      --accent-strong: #084f8a;
+      --accent-soft: #e7f2fb;
+      --bg: #f4f6f8;
+      --surface: #ffffff;
+      --surface-2: #f0f3f6;
+      --text: #1b1b1b;
+      --muted: #5b6470;
+      --border: #d3d8de;
+      --shadow: 0 12px 34px rgba(0, 0, 0, .08);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --accent: #69b7ef;
+        --accent-strong: #96d0f7;
+        --accent-soft: #15364f;
+        --bg: #151719;
+        --surface: #202326;
+        --surface-2: #292d31;
+        --text: #f2f2f2;
+        --muted: #bcc4cc;
+        --border: #454b52;
+        --shadow: 0 12px 34px rgba(0, 0, 0, .28);
+      }
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "Yu Gothic UI", Meiryo, sans-serif;
+      font-size: 16px;
+      line-height: 1.75;
+    }
+    a { color: var(--accent-strong); text-underline-offset: .16em; }
+    a:hover { text-decoration-thickness: 2px; }
+    :focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+    code {
+      padding: .12em .4em;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      background: var(--surface-2);
+      font-family: "Cascadia Mono", Consolas, monospace;
+      font-size: .92em;
+    }
+    .skip-link {
+      position: fixed;
+      z-index: 10;
+      top: 8px;
+      left: 8px;
+      padding: 8px 12px;
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--text);
+      box-shadow: var(--shadow);
+      transform: translateY(-160%);
+    }
+    .skip-link:focus { transform: none; }
+    header {
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .hero,
+    main,
+    footer {
+      width: min(100% - 32px, 1040px);
+      margin-inline: auto;
+    }
+    .hero { padding: clamp(48px, 8vw, 88px) 0 48px; }
+    .eyebrow {
+      margin: 0 0 10px;
+      color: var(--accent-strong);
+      font-size: .82rem;
+      font-weight: 700;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 0;
+      font-size: clamp(2.6rem, 8vw, 5.6rem);
+      letter-spacing: -.055em;
+      line-height: 1;
+    }
+    .lead {
+      max-width: 760px;
+      margin: 24px 0 0;
+      color: var(--muted);
+      font-size: 1.12rem;
+    }
+    main { padding: 42px 0 72px; }
+    h2 {
+      margin: 54px 0 20px;
+      font-size: clamp(1.6rem, 4vw, 2.15rem);
+      letter-spacing: -.025em;
+    }
+    h2:first-child { margin-top: 0; }
+    h3 { margin: 0 0 8px; font-size: 1.32rem; }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+    .card,
+    .notice {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .card { padding: 24px; }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 14px 0;
+    }
+    .pill {
+      padding: 3px 9px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent-strong);
+      font-size: .88rem;
+      font-weight: 650;
+    }
+    .card p { margin: 12px 0 0; }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--surface);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: .94rem;
+    }
+    th,
+    td {
+      padding: 11px 14px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: var(--surface-2); }
+    tr:last-child td { border-bottom: 0; }
+    .version { white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .notice {
+      margin-top: 42px;
+      padding: 24px;
+      border-left: 5px solid var(--accent);
+    }
+    .notice h2 { margin: 0 0 8px; font-size: 1.38rem; }
+    .notice p { margin: 8px 0 0; }
+    footer {
+      padding: 26px 0 42px;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: .92rem;
+    }
+    @media (max-width: 720px) {
+      .cards { grid-template-columns: 1fr; }
+      th,
+      td { padding: 9px 10px; }
+    }
+    @media print {
+      body { background: #fff; color: #000; }
+      .card,
+      .notice { box-shadow: none; }
+      a { color: #000; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">本文へ移動</a>
+  <header>
+    <div class="hero">
+      <p class="eyebrow">Inkpod / Acknowledgements</p>
+      <h1>謝辞</h1>
+      <p class="lead">Inkpod は、次のオープンソースライブラリと、その開発者・貢献者の成果を利用しています。</p>
+    </div>
+  </header>
+
+  <main id="main">
+    <h2>主要ライブラリ</h2>
+    <div class="cards">
+      <article class="card" data-crate="blake3" data-version="1.8.5">
+        <h3><a href="https://github.com/BLAKE3-team/BLAKE3">blake3</a></h3>
+        <div class="meta">
+          <span class="pill">version 1.8.5</span>
+          <span class="pill">Apache-2.0を選択</span>
+        </div>
+        <p>Asset ID、document/editor state、procedure payload、journal、保存セクションの決定論的なBLAKE3-256ダイジェストに使用しています。</p>
+        <p>upstream license expression: <code>CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception</code></p>
+      </article>
+
+      <article class="card" data-crate="png" data-version="0.17.16">
+        <h3><a href="https://crates.io/crates/png">png</a></h3>
+        <div class="meta">
+          <span class="pill">version 0.17.16</span>
+          <span class="pill">MIT OR Apache-2.0</span>
+        </div>
+        <p>RGBA 8/16 bit画像、alpha、DPI metadataを含むPNGの読み込みと書き出しに使用しています。</p>
+        <p>TIFF、TGA、BMP codecはInkpodの<code>inkpod-format</code> crate内で実装しています。</p>
+      </article>
+    </div>
+
+    <h2>BLAKE3のproduction/build依存</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th scope="col">crate</th><th scope="col">version</th><th scope="col">役割</th><th scope="col">license</th></tr></thead>
+        <tbody>
+          <tr data-crate="arrayref" data-version="0.3.9"><td>arrayref</td><td class="version">0.3.9</td><td>runtime</td><td>BSD-2-Clause</td></tr>
+          <tr data-crate="arrayvec" data-version="0.7.8"><td>arrayvec</td><td class="version">0.7.8</td><td>runtime</td><td>MIT OR Apache-2.0</td></tr>
+          <tr data-crate="cfg-if" data-version="1.0.4"><td>cfg-if</td><td class="version">1.0.4</td><td>runtime</td><td>MIT OR Apache-2.0</td></tr>
+          <tr data-crate="constant_time_eq" data-version="0.4.2"><td>constant_time_eq</td><td class="version">0.4.2</td><td>runtime</td><td>CC0-1.0 OR MIT-0 OR Apache-2.0</td></tr>
+          <tr data-crate="cpufeatures" data-version="0.3.0"><td>cpufeatures</td><td class="version">0.3.0</td><td>Windows x64 runtime</td><td>MIT OR Apache-2.0</td></tr>
+          <tr data-crate="cc" data-version="1.4.0"><td>cc</td><td class="version">1.4.0</td><td>build</td><td>MIT OR Apache-2.0</td></tr>
+          <tr data-crate="find-msvc-tools" data-version="0.1.9"><td>find-msvc-tools</td><td class="version">0.1.9</td><td>build</td><td>MIT OR Apache-2.0</td></tr>
+          <tr data-crate="shlex" data-version="2.0.1"><td>shlex</td><td class="version">2.0.1</td><td>build</td><td>MIT OR Apache-2.0</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>PNG codecのproduction依存</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th scope="col">crate</th><th scope="col">version</th><th scope="col">license</th></tr></thead>
+        <tbody>
+          <tr data-crate="fdeflate" data-version="0.3.7"><td>fdeflate</td><td class="version">0.3.7</td><td>MIT OR Apache-2.0</td></tr>
+          <tr data-crate="flate2" data-version="1.1.9"><td>flate2</td><td class="version">1.1.9</td><td>MIT OR Apache-2.0</td></tr>
+          <tr data-crate="crc32fast" data-version="1.5.0"><td>crc32fast</td><td class="version">1.5.0</td><td>MIT OR Apache-2.0</td></tr>
+          <tr data-crate="miniz_oxide" data-version="0.8.9"><td>miniz_oxide</td><td class="version">0.8.9</td><td>MIT OR Zlib OR Apache-2.0</td></tr>
+          <tr data-crate="adler2" data-version="2.0.1"><td>adler2</td><td class="version">2.0.1</td><td>0BSD OR MIT OR Apache-2.0</td></tr>
+          <tr data-crate="simd-adler32" data-version="0.3.10"><td>simd-adler32</td><td class="version">0.3.10</td><td>MIT</td></tr>
+          <tr data-crate="cfg-if" data-version="1.0.4"><td>cfg-if</td><td class="version">1.0.4</td><td>MIT OR Apache-2.0</td></tr>
+          <tr data-crate="bitflags" data-version="1.3.2"><td>bitflags</td><td class="version">1.3.2</td><td>MIT OR Apache-2.0</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <aside class="notice" aria-labelledby="legal-heading">
+      <h2 id="legal-heading">完全なライセンス通知</h2>
+      <p>このページは利用者向けの謝辞です。適用される完全なlicense text、copyright、attributionの正本は、MSIXおよびportable ZIPに同梱される<code>ThirdPartyNotices.txt</code>です。</p>
+      <p>Inkpod本体のlicenseは<code>GPL-3.0-only</code>です。</p>
+    </aside>
+  </main>
+
+  <footer>
+    <p>Thank you to every maintainer and contributor whose work makes Inkpod possible.</p>
+  </footer>
+</body>
+</html>

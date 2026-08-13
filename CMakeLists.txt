@@ -226,6 +226,12 @@ add_test(
             -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_command_states.cmake")
 
 add_test(
+    NAME inkpod_acknowledgements_dependency_versions
+    COMMAND "${CMAKE_COMMAND}"
+            "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+            -P "${CMAKE_SOURCE_DIR}/tests/verify_acknowledgements.cmake")
+
+add_test(
     NAME inkpod_windows_frontend_boundaries
     COMMAND "${CMAKE_COMMAND}"
             "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
@@ -306,10 +312,14 @@ if(WIN32)
         OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/html/manual.html")
     set_property(SOURCE apps/windows/app/app.rc APPEND PROPERTY
         OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/html/file_format.html")
+    set_property(SOURCE apps/windows/app/app.rc APPEND PROPERTY
+        OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/html/acknowledgements.html")
     set_property(SOURCE tests/windows_embedded_manual.rc APPEND PROPERTY
         OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/html/manual.html")
     set_property(SOURCE tests/windows_embedded_manual.rc APPEND PROPERTY
         OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/html/file_format.html")
+    set_property(SOURCE tests/windows_embedded_manual.rc APPEND PROPERTY
+        OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/html/acknowledgements.html")
 
     add_executable(inkpod_windows_activation_tests
         apps/windows/app/activation.cpp

@@ -38,11 +38,17 @@ const EmbeddedHelpDocumentSpec* DocumentSpec(
         IDR_FILE_FORMAT_HTML,
         L"file_format.html",
     };
+    static constexpr EmbeddedHelpDocumentSpec kAcknowledgements{
+        IDR_ACKNOWLEDGEMENTS_HTML,
+        L"acknowledgements.html",
+    };
     switch (document) {
         case EmbeddedHelpDocument::Manual:
             return &kManual;
         case EmbeddedHelpDocument::FileFormat:
             return &kFileFormat;
+        case EmbeddedHelpDocument::Acknowledgements:
+            return &kAcknowledgements;
         default:
             return nullptr;
     }

@@ -10,6 +10,7 @@ namespace inkpod::app {
 enum class EmbeddedHelpDocument : std::uint8_t {
     Manual,
     FileFormat,
+    Acknowledgements,
 };
 
 enum class EmbeddedHelpStatus : std::uint8_t {

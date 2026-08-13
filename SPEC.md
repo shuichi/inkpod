@@ -177,7 +177,7 @@ Windows GUI は標準的な Windows 11 desktop application とし、古典的 MD
 
 #### ヘルプ
 
-- `inkpod ヘルプ`、`Inkpodファイルフォーマット`、`ショートカット一覧`、`診断情報`、`inkpod について`。旧製品名や旧 asset を自社製品表示として使わない。
+- `inkpod ヘルプ`、`Inkpodファイルフォーマット`、`ショートカット一覧`、`診断情報`、`謝辞`、`inkpod について`。謝辞は使用する production 外部 library、その用途と license、および完全な第三者通知の参照先をオフラインで表示する。旧製品名や旧 asset を自社製品表示として使わない。
 
 ### 4. 起動、終了、読み込み、セル切替、保存
 

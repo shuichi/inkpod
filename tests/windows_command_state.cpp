@@ -178,6 +178,7 @@ int main() {
         || !ShortcutCatalogIsCompleteAndPrefixFree()
         || FindCommandState(states, IDM_HELP_MANUAL) == nullptr
         || FindCommandState(states, IDM_HELP_FILE_FORMAT) == nullptr
+        || FindCommandState(states, IDM_HELP_ACKNOWLEDGEMENTS) == nullptr
         || FindCommandState(states, IDM_HELP_WEB_PAGE) == nullptr
         || FindCommandState(states, IDM_HELP_ABOUT) == nullptr
         || IsCommandEnabled(states, IDM_FILE_SAVE)
