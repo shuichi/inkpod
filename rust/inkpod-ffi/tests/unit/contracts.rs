@@ -5296,6 +5296,89 @@ fn history_visualization_abi_owns_commit_rows_and_supports_bounded_size_queries(
         );
         assert!(visualization.is_null());
         assert_eq!(inkpod_task_release(&mut cancelled_task), INKPOD_STATUS_OK);
+
+        let mut builder_task = ptr::null_mut();
+        let mut builder = ptr::null_mut();
+        assert_eq!(inkpod_task_create(&mut builder_task), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_core_history_visualization_builder_begin(core, builder_task, &mut builder),
+            INKPOD_STATUS_OK
+        );
+        assert!(!builder.is_null());
+        let mut task_info = InkpodTaskInfo {
+            struct_size: size_of::<InkpodTaskInfo>() as u32,
+            state: 0,
+            completed_work: 0,
+            total_work: 0,
+            reserved: 0,
+        };
+        assert_eq!(
+            inkpod_task_query(builder_task, &mut task_info),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(task_info.state, INKPOD_TASK_RUNNING);
+        assert_eq!((task_info.completed_work, task_info.total_work), (0, 1));
+
+        let mut progress = InkpodHistoryVisualizationProgress {
+            struct_size: size_of::<InkpodHistoryVisualizationProgress>() as u32,
+            ..InkpodHistoryVisualizationProgress::default()
+        };
+        let full_progress_size = progress.struct_size;
+        progress.struct_size -= 1;
+        assert_eq!(
+            inkpod_history_visualization_builder_step(
+                builder,
+                builder_task,
+                1,
+                &mut progress,
+                &mut visualization,
+            ),
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+        progress.struct_size = full_progress_size;
+        let mut wrong_task = ptr::null_mut();
+        assert_eq!(inkpod_task_create(&mut wrong_task), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_history_visualization_builder_step(
+                builder,
+                wrong_task,
+                1,
+                &mut progress,
+                &mut visualization,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(inkpod_task_release(&mut wrong_task), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_history_visualization_builder_step(
+                builder,
+                builder_task,
+                1,
+                &mut progress,
+                &mut visualization,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(progress.done, 1);
+        assert_eq!((progress.completed_events, progress.total_events), (1, 1));
+        assert_eq!((progress.completed_rows, progress.total_rows), (1, 1));
+        assert!(!visualization.is_null());
+        assert_eq!(
+            inkpod_history_visualization_builder_release(&mut builder, builder_task),
+            INKPOD_STATUS_OK
+        );
+        assert!(builder.is_null());
+        assert_eq!(
+            inkpod_task_query(builder_task, &mut task_info),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(task_info.state, INKPOD_TASK_COMPLETED);
+        assert_eq!(inkpod_task_release(&mut builder_task), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_history_visualization_release(&mut visualization),
+            INKPOD_STATUS_OK
+        );
+
         assert_eq!(
             inkpod_core_history_visualization_create(core, &mut visualization),
             INKPOD_STATUS_OK

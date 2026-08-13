@@ -52,6 +52,7 @@ struct CutMemberCache final {
 
 struct CutSession final {
     InkpodCut* handle{};
+    std::uint32_t flags{};
     std::wstring current_path;
     std::wstring cut_name;
     std::vector<CutMemberCache> members;

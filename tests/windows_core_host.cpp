@@ -1329,6 +1329,42 @@ int wmain() {
         return 25;
     }
     latency_operation_started.get_future().wait();
+    InkpodHistoryInfo cached_history{};
+    cached_history.struct_size = sizeof(cached_history);
+    std::string cached_undo;
+    std::string cached_redo;
+    std::uint64_t cached_target_count{};
+    InkpodEditTargetCapabilities cached_capabilities{};
+    cached_capabilities.struct_size = sizeof(cached_capabilities);
+    InkpodSnapshotTransform cached_transform{};
+    cached_transform.struct_size = sizeof(cached_transform);
+    const auto cache_query_started = std::chrono::steady_clock::now();
+    const bool cached_history_available = host.GetHistoryPresentation(
+        first, generation, cached_history, cached_undo, cached_redo);
+    const bool cached_targets_available = host.GetEditTargetPresentation(
+        first,
+        generation,
+        cached_target_count,
+        cached_capabilities);
+    const bool cached_transform_available = host.GetSnapshotTransform(
+        first, generation, 0U, cached_transform);
+    const bool stale_transform_rejected = !host.GetSnapshotTransform(
+        first, generation, UINT64_MAX, cached_transform);
+    const auto cache_query_elapsed = std::chrono::steady_clock::now()
+        - cache_query_started;
+    if (!cached_history_available || !cached_targets_available
+        || !cached_transform_available || !stale_transform_rejected
+        || cache_query_elapsed >= std::chrono::milliseconds(100)) {
+        release_latency_operation.set_value();
+        (void)latency_operation_completion.get_future().get();
+        host.Stop();
+        DestroyWindow(owner);
+        return !cached_history_available ? 35
+            : !cached_targets_available ? 36
+            : !cached_transform_available ? 37
+            : !stale_transform_rejected ? 38
+            : 39;
+    }
     if (!host.Enqueue(
             Context(first, generation),
             [](InkpodCore*) { return INKPOD_STATUS_OK; },

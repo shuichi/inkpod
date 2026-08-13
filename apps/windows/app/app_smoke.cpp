@@ -22,6 +22,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -2190,23 +2191,38 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     RecoveryMetadata initial_recovery_metadata{};
     InkpodDocumentInfo initial_recovery_info = EmptyDocumentInfo();
     std::vector<RecoveryCandidate> recovery_candidates;
-    if (initial_recovery_path.empty()
-        || !QueueAutosave(
-            state, state.routing.targets.Capture(), initial_recovery_path)
-        || state.engine->WaitIdle() != INKPOD_STATUS_OK
-        || GetFileAttributesW(initial_recovery_path.c_str())
-            == INVALID_FILE_ATTRIBUTES
-        || !ReadRecoveryMetadata(
-            initial_recovery_path, initial_recovery_metadata)
-        || !QueryDocument(state, initial_recovery_info)
-        || initial_recovery_metadata.session != state.Document().id
+    if (initial_recovery_path.empty()) {
+        return 730;
+    }
+    if (!QueueAutosave(
+            state, state.routing.targets.Capture(), initial_recovery_path)) {
+        return 731;
+    }
+    if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+        return 732;
+    }
+    if (GetFileAttributesW(initial_recovery_path.c_str())
+        == INVALID_FILE_ATTRIBUTES) {
+        return 733;
+    }
+    if (!ReadRecoveryMetadata(initial_recovery_path, initial_recovery_metadata)) {
+        return 734;
+    }
+    if (!QueryDocument(state, initial_recovery_info)) {
+        return 735;
+    }
+    if (initial_recovery_metadata.session != state.Document().id
         || initial_recovery_metadata.generation != state.Document().generation
         || initial_recovery_metadata.document_uuid_high
             != initial_recovery_info.document_uuid_high
         || initial_recovery_metadata.document_uuid_low
-            != initial_recovery_info.document_uuid_low
-        || !EnumerateRecoveryCandidates(recovery_candidates)
-        || std::none_of(
+            != initial_recovery_info.document_uuid_low) {
+        return 736;
+    }
+    if (!EnumerateRecoveryCandidates(recovery_candidates)) {
+        return 737;
+    }
+    if (std::none_of(
             recovery_candidates.begin(),
             recovery_candidates.end(),
             [&initial_recovery_path](const RecoveryCandidate& candidate) {
@@ -2214,7 +2230,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
                     candidate.recovery_path.c_str(),
                     initial_recovery_path.c_str()) == 0;
             })) {
-        return 215;
+        return 738;
     }
     std::wstring active_stroke_recovery_path;
     try {
@@ -11715,7 +11731,7 @@ int RunCutWorkflowSmoke(ApplicationHost& state) noexcept {
         return clean;
     };
     const auto finish = [&](int code) noexcept {
-        return cleanup() ? code : 1049;
+        return cleanup() ? code : 10490;
     };
     InkpodStatus query_info_status = INKPOD_STATUS_INVALID_STATE;
     DocumentSessionId query_info_session{};
@@ -12114,7 +12130,7 @@ int RunCutWorkflowSmoke(ApplicationHost& state) noexcept {
         || state.Workspace().sequence_dialog.view.active_index != UINT32_MAX
         || state.Workspace().sequence_dialog.view.target_text.find(
                L"現在のセルはメンバー外") == std::wstring::npos) {
-        return finish(1049);
+        return finish(10491);
     }
     if (SendMessageW(
             state.Workspace().windows.window,
@@ -12660,6 +12676,23 @@ int RunHistoryVisualizationSmoke(ApplicationHost& state) noexcept {
         cleanup();
         return 822;
     }
+    const auto& history_progress = state.Workspace().job_progress_state.entries[
+        static_cast<std::size_t>(JobProgressSlot::HistoryVisualization)];
+    std::array<wchar_t, 128U> loading_text{};
+    LVITEMW loading_item{};
+    loading_item.iSubItem = 0;
+    loading_item.pszText = loading_text.data();
+    loading_item.cchTextMax = static_cast<int>(loading_text.size());
+    if (ListView_GetItemCount(list) != 1
+        || SendMessageW(
+               list, LVM_GETITEMTEXTW, 0, reinterpret_cast<LPARAM>(&loading_item)) <= 0
+        || std::wstring_view{loading_text.data()}.find(L"履歴") == std::wstring_view::npos
+        || !history_progress.active || history_progress.progress.context == nullptr
+        || history_progress.progress.query == nullptr
+        || history_progress.progress.cancel == nullptr) {
+        cleanup();
+        return 826;
+    }
     (void)IssueHistoryVisualizationCommand(
         state, state.Workspace().windows.window, *command);
     if (document.history_visualization_dialog != dialog
@@ -12679,7 +12712,7 @@ int RunHistoryVisualizationSmoke(ApplicationHost& state) noexcept {
     const LRESULT primitive_length = SendMessageW(
         list, LVM_GETITEMTEXTW, 0, reinterpret_cast<LPARAM>(&primitive_item));
     if (header == nullptr || Header_GetItemCount(header) != 3
-        || row_count <= 0 || primitive_length <= 0) {
+        || row_count <= 0 || primitive_length <= 0 || history_progress.active) {
         cleanup();
         return 824;
     }

@@ -66,7 +66,7 @@
 extern "C" {
 #endif
 
-#define INKPOD_ABI_VERSION UINT32_C(12)
+#define INKPOD_ABI_VERSION UINT32_C(13)
 #define INKPOD_FEATURE_NONE UINT64_C(0)
 
 /** @brief すべての fallible API が返す固定幅ステータス型。 */
@@ -730,6 +730,8 @@ typedef struct InkpodClipboard InkpodClipboard;
 typedef struct InkpodByteBuffer InkpodByteBuffer;
 /** @brief canonical procedure 履歴の immutable・Rust-owned 可視化 snapshot。 */
 typedef struct InkpodHistoryVisualization InkpodHistoryVisualization;
+/** @brief Rust-owned point-in-time state for bounded history visualization replay. */
+typedef struct InkpodHistoryVisualizationBuilder InkpodHistoryVisualizationBuilder;
 /** @brief sequence の複数 encode 結果を保持する Rust-owned handle。 */
 typedef struct InkpodEncodedSequence InkpodEncodedSequence;
 /** @brief 任意スレッドから query/cancel できる Rust-owned atomic task handle。 */
@@ -3162,6 +3164,18 @@ typedef struct InkpodHistoryVisualizationRowBuffer {
     uint64_t thumbnail_bytes;
 } InkpodHistoryVisualizationRowBuffer;
 
+/** @brief Monotonic event and Commit-row progress for bounded history replay. */
+typedef struct InkpodHistoryVisualizationProgress {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t completed_events;
+    uint64_t total_events;
+    uint64_t completed_rows;
+    uint64_t total_rows;
+    uint32_t done;
+    uint32_t reserved;
+} InkpodHistoryVisualizationProgress;
+
 /** @brief Immutable source, target, and revision token for one sequence switch. */
 typedef struct InkpodSequenceSwitchRequest {
     uint32_t struct_size;
@@ -4573,6 +4587,31 @@ InkpodStatus inkpod_core_history_visualization_create_with_task(
     InkpodCore* core,
     InkpodTask* task,
     InkpodHistoryVisualization** out_visualization);
+/**
+ * @brief Captures a point-in-time journal source for bounded replay.
+ * Core owner thread only. The ready task remains live through builder release.
+ */
+InkpodStatus inkpod_core_history_visualization_builder_begin(
+    InkpodCore* core,
+    InkpodTask* task,
+    InkpodHistoryVisualizationBuilder** out_builder);
+/**
+ * @brief Replays at most `maximum_events` records and returns monotonic progress.
+ * Core owner thread only. Completion returns an immutable visualization handle.
+ */
+InkpodStatus inkpod_history_visualization_builder_step(
+    InkpodHistoryVisualizationBuilder* builder,
+    InkpodTask* task,
+    uint32_t maximum_events,
+    InkpodHistoryVisualizationProgress* out_progress,
+    InkpodHistoryVisualization** out_visualization);
+/**
+ * @brief Releases a bounded replay builder; incomplete work becomes cancelled.
+ * The task must be the same live task supplied at begin.
+ */
+InkpodStatus inkpod_history_visualization_builder_release(
+    InkpodHistoryVisualizationBuilder** builder,
+    InkpodTask* task);
 /** @brief immutable 可視化 snapshot の Commit 行数を取得する。任意 thread。 */
 InkpodStatus inkpod_history_visualization_row_count(
     const InkpodHistoryVisualization* visualization,

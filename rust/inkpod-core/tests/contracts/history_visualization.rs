@@ -108,3 +108,73 @@ fn hist_002_cancellation_is_an_observable_stable_noop() {
     assert_eq!(core.journal_state().unwrap(), state_before);
     assert_eq!(core.journal_entries(), journal_before);
 }
+
+#[test]
+fn hist_002_builder_processes_bounded_event_chunks_and_matches_the_snapshot_query() {
+    let mut core = visualization_core();
+    set_main_line(&mut core, 10);
+    replace_palette(&mut core, 20);
+    core.undo().unwrap();
+    set_main_line(&mut core, 30);
+    let expected = core.history_visualization_rows().unwrap();
+    let mut builder = core.begin_history_visualization().unwrap();
+    let mut previous = builder.progress();
+
+    while !previous.is_complete() {
+        let progress = builder.step(1).unwrap();
+        assert!(progress.completed_events() >= previous.completed_events());
+        assert!(progress.completed_events() <= previous.completed_events() + 1);
+        assert!(progress.completed_rows() >= previous.completed_rows());
+        assert!(progress.completed_rows() <= progress.total_rows());
+        previous = progress;
+    }
+
+    assert_eq!(builder.finish().unwrap(), expected);
+}
+
+#[test]
+fn hist_002_builder_owns_the_point_in_time_source_state() {
+    let mut core = visualization_core();
+    set_main_line(&mut core, 10);
+    let mut builder = core.begin_history_visualization().unwrap();
+
+    set_main_line(&mut core, 40);
+    while !builder.progress().is_complete() {
+        builder.step(1).unwrap();
+    }
+    let rows = builder.finish().unwrap();
+
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].arguments.contains("Rgba([10, 11, 12, 255])"));
+    assert_eq!(core.history_visualization_rows().unwrap().len(), 2);
+}
+
+#[test]
+fn hist_002_direct_bounded_thumbnail_matches_the_existing_visible_composite() {
+    let mut core = Core::new();
+    core.new_cell_with_uuid(
+        128,
+        96,
+        DEFAULT_DPI_MILLI,
+        DEFAULT_DPI_MILLI,
+        HISTORY_VISUALIZATION_UUID,
+    )
+    .unwrap();
+    core.set_active_plane(ActivePlane::Color).unwrap();
+    core.apply_stroke(&color_stroke(
+        PaintTool::Pencil,
+        3.0,
+        StrokeSample {
+            x: 63.0,
+            y: 47.0,
+            pressure: 1.0,
+        },
+    ))
+    .unwrap();
+
+    let expected = core.document_thumbnail().unwrap();
+    let rows = core.history_visualization_rows().unwrap();
+
+    assert_eq!(rows.last().unwrap().thumbnail, expected);
+    assert_eq!((expected.width, expected.height), (64, 48));
+}

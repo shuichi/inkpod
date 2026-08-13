@@ -182,6 +182,22 @@ public:
         DocumentSessionId session,
         Generation generation,
         InkpodDocumentInfo& info) const noexcept;
+    bool GetHistoryPresentation(
+        DocumentSessionId session,
+        Generation generation,
+        InkpodHistoryInfo& info,
+        std::string& undo_name,
+        std::string& redo_name) const noexcept;
+    bool GetEditTargetPresentation(
+        DocumentSessionId session,
+        Generation generation,
+        std::uint64_t& target_count,
+        InkpodEditTargetCapabilities& capabilities) const noexcept;
+    bool GetSnapshotTransform(
+        DocumentSessionId session,
+        Generation generation,
+        std::uint64_t view_id,
+        InkpodSnapshotTransform& transform) const noexcept;
     InkpodStatus GetReplayContract(
         DocumentSessionId session,
         Generation generation,

@@ -4,8 +4,7 @@
 //! [`Core`] is a single-writer state machine. A successful document change creates one
 //! history entry, a semantic no-op leaves those values unchanged, and an error never publishes
 //! partial state. View-only operations advance the view revision without changing document history or dirty/savepoint state.
-//! Stable object identifiers are unique within a [`Core`] instance and remain
-//! valid for the lifetime of the referenced object. Public coordinates are in
+//! Stable object identifiers are unique within a [`Core`] instance and remain valid for the lifetime of the referenced object. Public coordinates are in
 //! document pixels unless an item explicitly says that it uses device pixels.
 //!
 //! # Example
@@ -119,8 +118,9 @@ use inkpod_image::{
     color_check_category, extend_fill_with_cancel, eyedropper, seed_fill_with_cancel,
 };
 pub use journal::{
-    BranchId, HistoryMoveKind, JournalBranchCut, JournalCommit, JournalEntry, JournalEventId,
-    JournalHistoryMove, JournalReplayInfo, JournalState,
+    BranchId, HistoryMoveKind, HistoryVisualizationBuilder, HistoryVisualizationProgress,
+    JournalBranchCut, JournalCommit, JournalEntry, JournalEventId, JournalHistoryMove,
+    JournalReplayInfo, JournalState,
 };
 use persistence::{file_plane_to_raster, raster_to_file_plane};
 pub use primitive::{

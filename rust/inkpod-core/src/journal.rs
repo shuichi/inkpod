@@ -388,8 +388,80 @@ struct ReplayNode {
 
 struct ReplayedJournal {
     runtime: RebuiltRuntime,
-    nodes: BTreeMap<StateId, ReplayNode>,
+}
+
+/// Monotonic progress for a bounded history-visualization replay.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HistoryVisualizationProgress {
+    completed_events: u64,
+    total_events: u64,
+    completed_rows: u64,
+    total_rows: u64,
+}
+
+impl HistoryVisualizationProgress {
+    /// Returns the number of journal events replayed so far.
+    #[must_use]
+    pub const fn completed_events(self) -> u64 {
+        self.completed_events
+    }
+
+    /// Returns the point-in-time journal event count.
+    #[must_use]
+    pub const fn total_events(self) -> u64 {
+        self.total_events
+    }
+
+    /// Returns the number of Commit rows materialized so far.
+    #[must_use]
+    pub const fn completed_rows(self) -> u64 {
+        self.completed_rows
+    }
+
+    /// Returns the point-in-time Commit-row count.
+    #[must_use]
+    pub const fn total_rows(self) -> u64 {
+        self.total_rows
+    }
+
+    /// Returns whether every point-in-time journal event has been replayed.
+    #[must_use]
+    pub const fn is_complete(self) -> bool {
+        self.completed_events == self.total_events
+    }
+}
+
+/// Rust-owned point-in-time replay state for the history visualizer.
+///
+/// The builder owns cloned journal records, document nodes, and immutable asset
+/// references. Calling [`Self::step`] never observes later edits to the live
+/// [`Core`], and advances by at most the requested number of semantic journal
+/// events. It does not mutate revisions, history, dirty state, savepoints, or
+/// persistent identity allocation.
+pub struct HistoryVisualizationBuilder {
+    journal: Vec<JournalEntry>,
     assets: crate::asset::AssetStore,
+    nodes: BTreeMap<StateId, ReplayNode>,
+    branches: BTreeMap<BranchId, StateId>,
+    rows: Vec<HistoryVisualizationRow>,
+    index: usize,
+    current_state: StateId,
+    active_branch: BranchId,
+    expected_event: JournalEventId,
+    expected_procedure: ProcedureId,
+    expected_state: StateId,
+    next_branch: BranchId,
+    pending_cut: Option<(BranchId, StateId)>,
+    target_current_state: StateId,
+    target_active_branch: BranchId,
+    target_next_event: JournalEventId,
+    target_next_procedure: ProcedureId,
+    target_next_state: StateId,
+    target_next_branch: BranchId,
+    target_branch_tails: Vec<StateId>,
+    target_savepoint: Option<StateId>,
+    total_rows: u64,
+    validated: bool,
 }
 
 struct CheckpointNode {
@@ -405,6 +477,283 @@ pub(super) struct RebuiltRuntime {
     pub(super) history_cursor: usize,
     pub(super) next_id: StableIdCursor,
     pub(super) info: JournalReplayInfo,
+}
+
+impl HistoryVisualizationBuilder {
+    /// Returns current monotonic replay and row-materialization progress.
+    #[must_use]
+    pub fn progress(&self) -> HistoryVisualizationProgress {
+        HistoryVisualizationProgress {
+            completed_events: self.index as u64,
+            total_events: self.journal.len() as u64,
+            completed_rows: self.rows.len() as u64,
+            total_rows: self.total_rows,
+        }
+    }
+
+    /// Replays at most `maximum_events` journal records.
+    ///
+    /// Each Commit includes formatting its typed arguments and producing its
+    /// bounded thumbnail. A zero limit is invalid. Failure leaves no live Core
+    /// state changed; callers should discard a failed builder.
+    pub fn step(&mut self, maximum_events: u32) -> Result<HistoryVisualizationProgress, CoreError> {
+        if maximum_events == 0 {
+            return Err(CoreError::InvalidArgument(
+                "history visualization step limit must be nonzero",
+            ));
+        }
+        let stop = self
+            .index
+            .saturating_add(maximum_events as usize)
+            .min(self.journal.len());
+        while self.index < stop {
+            self.replay_next_event()?;
+            self.index += 1;
+        }
+        if self.index == self.journal.len() && !self.validated {
+            self.validate_completion()?;
+            self.validated = true;
+        }
+        Ok(self.progress())
+    }
+
+    /// Consumes a completed builder and returns its owned immutable rows.
+    pub fn finish(self) -> Result<Vec<HistoryVisualizationRow>, CoreError> {
+        if self.index != self.journal.len() {
+            return Err(CoreError::InvalidState(
+                "history visualization replay is incomplete",
+            ));
+        }
+        if !self.validated {
+            self.validate_completion()?;
+        }
+        Ok(self.rows)
+    }
+
+    fn replay_next_event(&mut self) -> Result<(), CoreError> {
+        let record = self
+            .journal
+            .get(self.index)
+            .cloned()
+            .ok_or(CoreError::InvalidState(
+                "history visualization event is missing",
+            ))?;
+        let event_id = match &record {
+            JournalEntry::Commit(commit) => commit.event_id,
+            JournalEntry::HistoryMove(movement) => movement.event_id,
+            JournalEntry::BranchCut(cut) => cut.event_id,
+        };
+        if event_id != self.expected_event {
+            return Err(CoreError::InvalidState(
+                "journal event IDs are not contiguous",
+            ));
+        }
+        self.expected_event = self
+            .expected_event
+            .checked_next()
+            .ok_or(CoreError::InvalidState("journal event ID overflow"))?;
+
+        match record {
+            JournalEntry::Commit(commit) => self.replay_commit(commit),
+            JournalEntry::HistoryMove(movement) => self.replay_history_move(movement),
+            JournalEntry::BranchCut(cut) => self.replay_branch_cut(cut),
+        }
+    }
+
+    fn replay_commit(&mut self, commit: JournalCommit) -> Result<(), CoreError> {
+        if commit.procedure.procedure_id().get() > MAX_JOURNAL_COMMITS {
+            return Err(CoreError::InvalidState("journal procedure limit exceeded"));
+        }
+        if commit.procedure.procedure_id() != self.expected_procedure
+            || commit.committed_state_id != self.expected_state
+            || commit.parent_state_id != self.current_state
+            || commit.procedure.base_state_id() != commit.parent_state_id
+            || commit.procedure.committed_state_id() != commit.committed_state_id
+            || commit.branch_id != self.active_branch
+            || self.branches.get(&self.active_branch).copied() != Some(self.current_state)
+        {
+            return Err(CoreError::InvalidState(
+                "journal Commit violates procedure, state, or branch ordering",
+            ));
+        }
+        if let Some((branch, fork)) = self.pending_cut.take()
+            && (branch != commit.branch_id || fork != commit.parent_state_id)
+        {
+            return Err(CoreError::InvalidState(
+                "BranchCut is not followed by its matching Commit",
+            ));
+        }
+        let (parent_document, parent_next_id) = self
+            .nodes
+            .get(&commit.parent_state_id)
+            .map(|parent| (parent.document.clone(), parent.next_id))
+            .ok_or(CoreError::InvalidState("journal parent state is missing"))?;
+        let mut replay = Core::new();
+        replay.assets = self.assets.clone();
+        replay.document = Some(parent_document.clone());
+        replay.document_revision = DocumentRevision::from_raw(1);
+        replay.current_state = commit.parent_state_id;
+        replay.next_state = commit.committed_state_id;
+        replay.next_procedure = commit.procedure.procedure_id();
+        replay.next_id = parent_next_id;
+        replay.genesis = Some(genesis::Genesis::new(parent_document));
+        replay.branch_tails.clear();
+        replay.branch_tails.push(commit.parent_state_id);
+        replay.replay_procedure(&commit.procedure)?;
+        let mut cached = replay.history.pop().ok_or(CoreError::InvalidState(
+            "procedure replay has no history cache",
+        ))?;
+        cached.before_state = commit.parent_state_id;
+        cached.after_state = commit.committed_state_id;
+        cached.procedure = Arc::clone(&commit.procedure);
+        cached.branch_id = commit.branch_id;
+        let next_id = replay.next_id;
+        let document = replay.document.ok_or(CoreError::NoDocument)?;
+        let (primitive_name, arguments) = display_procedure(&commit.procedure)?;
+        let thumbnail =
+            thumbnail_for_document(&document, &self.assets, commit.committed_state_id.get())?;
+        self.rows.push(HistoryVisualizationRow {
+            journal_event_id: commit.event_id,
+            procedure_id: commit.procedure.procedure_id(),
+            primitive_id: commit.procedure.primitive_id(),
+            committed_state_id: commit.committed_state_id,
+            branch_id: commit.branch_id,
+            primitive_name,
+            arguments,
+            thumbnail,
+        });
+        self.nodes.insert(
+            commit.committed_state_id,
+            ReplayNode {
+                parent: Some(commit.parent_state_id),
+                document,
+                history_entry: Some(cached),
+                next_id,
+            },
+        );
+        self.branches
+            .insert(self.active_branch, commit.committed_state_id);
+        self.current_state = commit.committed_state_id;
+        self.expected_procedure = self
+            .expected_procedure
+            .checked_next()
+            .ok_or(CoreError::InvalidState("procedure ID overflow"))?;
+        self.expected_state = self
+            .expected_state
+            .checked_next()
+            .ok_or(CoreError::InvalidState("history state overflow"))?;
+        Ok(())
+    }
+
+    fn replay_history_move(&mut self, movement: JournalHistoryMove) -> Result<(), CoreError> {
+        let branch_changes = movement.active_branch_id != self.active_branch;
+        if self.pending_cut.is_some()
+            || movement.source_state_id != self.current_state
+            || (movement.source_state_id == movement.destination_state_id && !branch_changes)
+            || (branch_changes && movement.kind != HistoryMoveKind::Jump)
+            || !self.branches.contains_key(&movement.active_branch_id)
+            || !is_ancestor(
+                movement.destination_state_id,
+                self.branches[&movement.active_branch_id],
+                &self.nodes,
+            )
+        {
+            return Err(CoreError::InvalidState(
+                "journal HistoryMove violates branch ancestry",
+            ));
+        }
+        match movement.kind {
+            HistoryMoveKind::Undo
+                if self
+                    .nodes
+                    .get(&movement.source_state_id)
+                    .and_then(|node| node.parent)
+                    != Some(movement.destination_state_id) =>
+            {
+                return Err(CoreError::InvalidState(
+                    "Undo does not move to the parent state",
+                ));
+            }
+            HistoryMoveKind::Redo
+                if self
+                    .nodes
+                    .get(&movement.destination_state_id)
+                    .and_then(|node| node.parent)
+                    != Some(movement.source_state_id) =>
+            {
+                return Err(CoreError::InvalidState(
+                    "Redo does not move to a child state",
+                ));
+            }
+            HistoryMoveKind::Undo | HistoryMoveKind::Redo | HistoryMoveKind::Jump => {}
+        }
+        self.current_state = movement.destination_state_id;
+        self.active_branch = movement.active_branch_id;
+        Ok(())
+    }
+
+    fn replay_branch_cut(&mut self, cut: JournalBranchCut) -> Result<(), CoreError> {
+        if self.pending_cut.is_some()
+            || cut.deactivated_branch_id != self.active_branch
+            || cut.fork_state_id != self.current_state
+            || self.branches.get(&self.active_branch).copied() != Some(cut.old_active_tail_state_id)
+            || cut.fork_state_id == cut.old_active_tail_state_id
+            || cut.new_branch_id != self.next_branch
+            || cut.new_branch_id.get() > MAX_JOURNAL_BRANCHES
+            || self.branches.contains_key(&cut.new_branch_id)
+            || !is_ancestor(cut.fork_state_id, cut.old_active_tail_state_id, &self.nodes)
+        {
+            return Err(CoreError::InvalidState(
+                "journal BranchCut violates branch ordering",
+            ));
+        }
+        self.branches.insert(cut.new_branch_id, cut.fork_state_id);
+        self.active_branch = cut.new_branch_id;
+        self.pending_cut = Some((cut.new_branch_id, cut.fork_state_id));
+        self.next_branch = self
+            .next_branch
+            .checked_next()
+            .ok_or(CoreError::InvalidState("branch ID overflow"))?;
+        Ok(())
+    }
+
+    fn validate_completion(&self) -> Result<(), CoreError> {
+        if self.pending_cut.is_some() {
+            return Err(CoreError::InvalidState(
+                "journal ends with an uncommitted BranchCut",
+            ));
+        }
+        if self
+            .target_savepoint
+            .is_some_and(|savepoint| !self.nodes.contains_key(&savepoint))
+        {
+            return Err(CoreError::InvalidState(
+                "journal savepoint state is missing",
+            ));
+        }
+        let branch_tails_match = self.branches.len() == self.target_branch_tails.len()
+            && self
+                .target_branch_tails
+                .iter()
+                .enumerate()
+                .all(|(index, tail)| {
+                    self.branches.get(&BranchId((index as u64) + 1)) == Some(tail)
+                });
+        if self.current_state != self.target_current_state
+            || self.active_branch != self.target_active_branch
+            || !branch_tails_match
+            || self.expected_event != self.target_next_event
+            || self.expected_procedure != self.target_next_procedure
+            || self.expected_state != self.target_next_state
+            || self.next_branch != self.target_next_branch
+            || self.rows.len() as u64 != self.total_rows
+        {
+            return Err(CoreError::InvalidState(
+                "journal replay high-watermarks do not match Core state",
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl Core {
@@ -448,64 +797,102 @@ impl Core {
         self.history_visualization_rows_with_progress(|_, _| true)
     }
 
+    /// Captures the journal source for bounded point-in-time visualization replay.
+    ///
+    /// The returned builder owns everything required by later [`HistoryVisualizationBuilder::step`]
+    /// calls. Beginning and stepping are read-only with respect to this Core.
+    pub fn begin_history_visualization(&self) -> Result<HistoryVisualizationBuilder, CoreError> {
+        if self.document.is_none() {
+            return Err(CoreError::NoDocument);
+        }
+        if self.journal.len() > MAX_JOURNAL_EVENTS {
+            return Err(CoreError::InvalidState("journal event limit exceeded"));
+        }
+        if self.next_procedure.get() > MAX_JOURNAL_COMMITS + 1 {
+            return Err(CoreError::InvalidState("journal procedure limit exceeded"));
+        }
+
+        let mut genesis = self
+            .genesis
+            .as_ref()
+            .map(|genesis| genesis.document.clone())
+            .ok_or(CoreError::InvalidState("journal Genesis is missing"))?;
+        let mut assets = self.assets.clone();
+        genesis.light_table.intern_into(&mut assets)?;
+        let mut genesis_next_id = StableIdCursor::first();
+        genesis_next_id.advance_past_raw(genesis.max_stable_id());
+        let mut nodes = BTreeMap::new();
+        nodes.insert(
+            StateId::GENESIS,
+            ReplayNode {
+                parent: None,
+                document: genesis,
+                history_entry: None,
+                next_id: genesis_next_id,
+            },
+        );
+        let mut branches = BTreeMap::new();
+        branches.insert(BranchId::ROOT, StateId::GENESIS);
+        let total_rows = self
+            .journal
+            .iter()
+            .filter(|entry| matches!(entry, JournalEntry::Commit(_)))
+            .count() as u64;
+        let mut rows = Vec::new();
+        rows.try_reserve(total_rows as usize)
+            .map_err(|_| CoreError::InvalidState("history visualization allocation failed"))?;
+
+        Ok(HistoryVisualizationBuilder {
+            journal: self.journal.clone(),
+            assets,
+            nodes,
+            branches,
+            rows,
+            index: 0,
+            current_state: StateId::GENESIS,
+            active_branch: BranchId::ROOT,
+            expected_event: JournalEventId::first(),
+            expected_procedure: ProcedureId::first(),
+            expected_state: StateId::GENESIS
+                .checked_next()
+                .ok_or(CoreError::InvalidState("Genesis state cannot advance"))?,
+            next_branch: BranchId::first_unallocated(),
+            pending_cut: None,
+            target_current_state: self.current_state,
+            target_active_branch: self.active_branch,
+            target_next_event: self.next_journal_event,
+            target_next_procedure: self.next_procedure,
+            target_next_state: self.next_state,
+            target_next_branch: self.next_branch,
+            target_branch_tails: self.branch_tails.clone(),
+            target_savepoint: self.savepoint,
+            total_rows,
+            validated: false,
+        })
+    }
+
     /// Builds visualization rows with cooperative replay/row progress.
     ///
-    /// `continue_work` receives monotonically increasing completed work and the
-    /// total number of journal records plus Commit rows. Returning `false`
+    /// `continue_work` receives monotonically increasing completed journal-event
+    /// work and the point-in-time event total. Returning `false`
     /// yields [`CoreError::Cancelled`]. Cancellation publishes no state and the
     /// callback is not retained.
     pub fn history_visualization_rows_with_progress(
         &self,
         mut continue_work: impl FnMut(u64, u64) -> bool,
     ) -> Result<Vec<HistoryVisualizationRow>, CoreError> {
-        if self.document.is_none() {
-            return Err(CoreError::NoDocument);
-        }
-        let commit_count = self
-            .journal
-            .iter()
-            .filter(|entry| matches!(entry, JournalEntry::Commit(_)))
-            .count();
-        let total_work = self.journal.len().saturating_add(commit_count) as u64;
-        let replayed = self.replay_journal_graph(&mut continue_work, total_work)?;
-        let mut rows = Vec::new();
-        rows.try_reserve(commit_count)
-            .map_err(|_| CoreError::InvalidState("history visualization allocation failed"))?;
-        for entry in &self.journal {
-            let JournalEntry::Commit(commit) = entry else {
-                continue;
-            };
-            if !continue_work(self.journal.len() as u64 + rows.len() as u64, total_work) {
-                return Err(CoreError::Cancelled);
-            }
-            let node =
-                replayed
-                    .nodes
-                    .get(&commit.committed_state_id)
-                    .ok_or(CoreError::InvalidState(
-                        "history visualization state is missing",
-                    ))?;
-            let (primitive_name, arguments) = display_procedure(&commit.procedure)?;
-            let thumbnail = thumbnail_for_document(
-                &node.document,
-                &replayed.assets,
-                commit.committed_state_id.get(),
-            )?;
-            rows.push(HistoryVisualizationRow {
-                journal_event_id: commit.event_id,
-                procedure_id: commit.procedure.procedure_id(),
-                primitive_id: commit.procedure.primitive_id(),
-                committed_state_id: commit.committed_state_id,
-                branch_id: commit.branch_id,
-                primitive_name,
-                arguments,
-                thumbnail,
-            });
-        }
-        if !continue_work(total_work, total_work) {
+        let mut builder = self.begin_history_visualization()?;
+        let total = builder.progress().total_events();
+        if !continue_work(0, total) {
             return Err(CoreError::Cancelled);
         }
-        Ok(rows)
+        while !builder.progress().is_complete() {
+            let progress = builder.step(1)?;
+            if !continue_work(progress.completed_events(), total) {
+                return Err(CoreError::Cancelled);
+            }
+        }
+        builder.finish()
     }
 
     /// Rebuilds the current semantic state from Genesis and the journal privately.
@@ -976,8 +1363,6 @@ impl Core {
                     visible_history_count: state_path.len(),
                 },
             },
-            nodes,
-            assets: detached_assets,
         })
     }
 

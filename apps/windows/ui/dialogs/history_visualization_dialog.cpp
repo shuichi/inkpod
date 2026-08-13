@@ -18,12 +18,17 @@
 #include "app/document_session.h"
 #include "app/resource.h"
 #include "inkpod/core_ffi.h"
+#include "ui/dialogs/effects_dialogs.h"
 
 namespace inkpod::windows::ui {
 namespace {
 
-constexpr UINT kHistoryVisualizationLoaded = WM_APP + 0x174U;
+constexpr UINT kHistoryVisualizationStepCompleted = WM_APP + 0x174U;
+constexpr UINT kHistoryVisualizationPrefetch = WM_APP + 0x175U;
 constexpr std::size_t kMaximumCachedRows = 256U;
+constexpr std::size_t kMaximumRowsPerPrefetch = 4U;
+constexpr std::size_t kMaximumQueuedRows = 64U;
+constexpr std::uint32_t kMaximumEventsPerStep = 1U;
 
 bool IsNativeInkpodPath(std::wstring_view path) noexcept {
     constexpr std::wstring_view extension = L".inkpod";
@@ -119,8 +124,9 @@ struct CachedRow final {
 
 struct VisualizationLoad final {
     ~VisualizationLoad() {
-        (void)inkpod_task_release(&task);
+        (void)inkpod_history_visualization_builder_release(&builder, task);
         (void)inkpod_history_visualization_release(&handle);
+        (void)inkpod_task_release(&task);
     }
 
     void Cancel() noexcept {
@@ -132,9 +138,35 @@ struct VisualizationLoad final {
     std::mutex mutex;
     HWND dialog{};
     InkpodTask* task{};
+    InkpodHistoryVisualizationBuilder* builder{};
     InkpodHistoryVisualization* handle{};
+    InkpodHistoryVisualizationProgress progress{};
     InkpodStatus status{INKPOD_STATUS_INVALID_STATE};
+    bool finished{};
+    bool progress_bound{};
 };
+
+bool QueryVisualizationProgress(
+    void* context, ProgressDialogInfo& output) noexcept {
+    const auto* load = static_cast<const VisualizationLoad*>(context);
+    if (load == nullptr || load->task == nullptr) {
+        return false;
+    }
+    InkpodTaskInfo info{};
+    info.struct_size = sizeof(info);
+    if (inkpod_task_query(load->task, &info) != INKPOD_STATUS_OK) {
+        return false;
+    }
+    output.completed_work = info.completed_work;
+    output.total_work = info.total_work;
+    return true;
+}
+
+void CancelVisualizationProgress(void* context) noexcept {
+    if (auto* load = static_cast<VisualizationLoad*>(context); load != nullptr) {
+        load->Cancel();
+    }
+}
 
 class HistoryVisualizationController final {
 public:
@@ -151,6 +183,7 @@ public:
     ~HistoryVisualizationController() {
         if (load_) {
             load_->Cancel();
+            ClearProgress();
         }
         if (image_list_ != nullptr) {
             ImageList_Destroy(image_list_);
@@ -187,51 +220,44 @@ public:
             SetLoadFailure(INKPOD_STATUS_INVALID_STATE);
             return;
         }
-        app::CommandContext context{};
-        context.document_session = session_;
-        context.generation = generation_;
-        const std::shared_ptr<VisualizationLoad> load = load_;
-        if (application_->engine == nullptr
-            || !application_->engine->Enqueue(
-                context,
-                [load](InkpodCore* core) {
-                    InkpodHistoryVisualization* visualization{};
-                    const InkpodStatus status =
-                        inkpod_core_history_visualization_create_with_task(
-                            core, load->task, &visualization);
-                    std::lock_guard lock(load->mutex);
-                    load->handle = visualization;
-                    return status;
-                },
-                false,
-                false,
-                false,
-                [load](InkpodStatus status) {
-                    {
-                        std::lock_guard lock(load->mutex);
-                        load->status = status;
-                    }
-                    (void)PostMessageW(
-                        load->dialog, kHistoryVisualizationLoaded, 0, 0);
-                })) {
+        BindProgress();
+        if (!QueueNextStep()) {
             load_->Cancel();
+            ClearProgress();
             load_.reset();
             SetLoadFailure(INKPOD_STATUS_INVALID_STATE);
         }
     }
 
-    void CompleteLoad() noexcept {
+    void StepCompleted() noexcept {
         if (!load_) {
             return;
         }
-        InkpodStatus status{};
+        InkpodStatus status{INKPOD_STATUS_INVALID_STATE};
+        bool finished{};
         {
             std::lock_guard lock(load_->mutex);
             status = load_->status;
+            finished = load_->finished;
+        }
+        UpdateLoadingText();
+        InvalidateRect(list_, nullptr, TRUE);
+        if (status == INKPOD_STATUS_OK && !finished) {
+            if (QueueNextStep()) {
+                return;
+            }
+            status = INKPOD_STATUS_INVALID_STATE;
+        }
+        if (!finished && status == INKPOD_STATUS_OK) {
+            return;
+        }
+        {
+            std::lock_guard lock(load_->mutex);
             if (status == INKPOD_STATUS_OK) {
                 visualization_ = std::exchange(load_->handle, nullptr);
             }
         }
+        ClearProgress();
         load_.reset();
         loading_ = false;
         if (status != INKPOD_STATUS_OK || visualization_ == nullptr) {
@@ -248,6 +274,7 @@ public:
         row_count_ = count;
         ListView_SetItemCountEx(
             list_, static_cast<int>(row_count_), LVSICF_NOINVALIDATEALL);
+        QueueVisibleRows();
         InvalidateRect(list_, nullptr, TRUE);
     }
 
@@ -273,7 +300,7 @@ public:
         }
         const wchar_t* text = L"";
         if (loading_) {
-            text = info.item.iSubItem == 0 ? L"読み込み中..." : L"";
+            text = info.item.iSubItem == 0 ? loading_text_.c_str() : L"";
         } else if (load_failed_) {
             text = info.item.iSubItem == 0 ? L"履歴を読み込めませんでした" : L"";
         } else if (const CachedRow* row = Row(
@@ -286,6 +313,38 @@ public:
         wcsncpy_s(
             info.item.pszText,
             static_cast<std::size_t>(info.item.cchTextMax), text, _TRUNCATE);
+    }
+
+    void CacheHint(const NMLVCACHEHINT& hint) noexcept {
+        if (loading_ || load_failed_ || hint.iFrom < 0 || hint.iTo < hint.iFrom) {
+            return;
+        }
+        const std::uint64_t first = static_cast<std::uint64_t>(hint.iFrom);
+        const std::uint64_t hinted_last =
+            static_cast<std::uint64_t>(hint.iTo) + 1U;
+        const std::uint64_t last = std::min({
+            row_count_, hinted_last, first + kMaximumQueuedRows});
+        for (std::uint64_t index = first;
+             index < last;
+             ++index) {
+            RequestPrefetch(index);
+        }
+    }
+
+    void ProcessPrefetch() noexcept {
+        prefetch_posted_ = false;
+        std::size_t completed{};
+        while (!prefetch_queue_.empty() && completed < kMaximumRowsPerPrefetch) {
+            const std::uint64_t index = prefetch_queue_.front();
+            prefetch_queue_.erase(prefetch_queue_.begin());
+            if (LoadRow(index)) {
+                ListView_RedrawItems(
+                    list_, static_cast<int>(index), static_cast<int>(index));
+            }
+            ++completed;
+        }
+        QueueVisibleRows();
+        PostPrefetchIfNeeded();
     }
 
     LRESULT CustomDraw(NMLVCUSTOMDRAW& draw) noexcept {
@@ -354,6 +413,7 @@ public:
     }
 
     void Detach() noexcept {
+        ClearProgress();
         if (app::DocumentSession* document = application_->Documents().Find(session_);
             document != nullptr && document->generation == generation_
             && document->history_visualization_dialog == dialog_) {
@@ -364,6 +424,167 @@ public:
     }
 
 private:
+    void BindProgress() noexcept {
+        if (!load_) {
+            return;
+        }
+        auto& workspace = application_->Workspace();
+        const ProgressDialogState progress{
+            load_.get(),
+            QueryVisualizationProgress,
+            CancelVisualizationProgress,
+            L"Inkpodファイルの可視化",
+            L"編集履歴を再構築中...",
+            L"キャンセル中..."};
+        if (!BindJobProgress(
+                workspace.job_progress,
+                workspace.job_progress_state,
+                JobProgressSlot::HistoryVisualization,
+                progress)) {
+            return;
+        }
+        load_->progress_bound = true;
+        static_cast<void>(workspace.windows.dock_host.RestorePane(
+            DockPaneType::JobProgress));
+        static_cast<void>(workspace.windows.dock_host.ActivatePane(
+            DockPaneType::JobProgress));
+    }
+
+    void ClearProgress() noexcept {
+        if (!load_ || !load_->progress_bound) {
+            return;
+        }
+        auto& workspace = application_->Workspace();
+        ClearJobProgressIfContext(
+            workspace.job_progress,
+            workspace.job_progress_state,
+            JobProgressSlot::HistoryVisualization,
+            load_.get());
+        load_->progress_bound = false;
+        if (!HasActiveJobProgress(workspace.job_progress_state)) {
+            static_cast<void>(workspace.windows.dock_host.HidePane(
+                DockPaneType::JobProgress));
+        }
+    }
+
+    bool QueueNextStep() noexcept {
+        if (!load_ || application_->engine == nullptr) {
+            return false;
+        }
+        app::CommandContext context{};
+        context.document_session = session_;
+        context.generation = generation_;
+        const std::shared_ptr<VisualizationLoad> load = load_;
+        return application_->engine->Enqueue(
+            context,
+            [load](InkpodCore* core) {
+                InkpodStatus status = INKPOD_STATUS_OK;
+                if (load->builder == nullptr) {
+                    status = inkpod_core_history_visualization_builder_begin(
+                        core, load->task, &load->builder);
+                }
+                InkpodHistoryVisualizationProgress progress{};
+                progress.struct_size = sizeof(progress);
+                InkpodHistoryVisualization* visualization{};
+                if (status == INKPOD_STATUS_OK) {
+                    status = inkpod_history_visualization_builder_step(
+                        load->builder,
+                        load->task,
+                        kMaximumEventsPerStep,
+                        &progress,
+                        &visualization);
+                }
+                {
+                    std::lock_guard lock(load->mutex);
+                    load->progress = progress;
+                    load->handle = visualization;
+                    load->status = status;
+                    load->finished = status != INKPOD_STATUS_OK
+                        || visualization != nullptr;
+                }
+                return status;
+            },
+            false,
+            false,
+            true,
+            [load](InkpodStatus status) {
+                if (status != INKPOD_STATUS_OK) {
+                    std::lock_guard lock(load->mutex);
+                    load->status = status;
+                    load->finished = true;
+                }
+                (void)PostMessageW(
+                    load->dialog, kHistoryVisualizationStepCompleted, 0, 0);
+            });
+    }
+
+    void UpdateLoadingText() noexcept {
+        if (!load_ || load_->task == nullptr) {
+            try {
+                loading_text_ = L"履歴を準備中...";
+            } catch (const std::bad_alloc&) {
+            }
+            return;
+        }
+        InkpodTaskInfo info{};
+        info.struct_size = sizeof(info);
+        if (inkpod_task_query(load_->task, &info) != INKPOD_STATUS_OK
+            || info.total_work == 0U) {
+            try {
+                loading_text_ = L"履歴を準備中...";
+            } catch (const std::bad_alloc&) {
+            }
+            return;
+        }
+        std::array<wchar_t, 128U> text{};
+        _snwprintf_s(
+            text.data(), text.size(), _TRUNCATE,
+            L"編集履歴を再構築中... %llu / %llu",
+            static_cast<unsigned long long>(info.completed_work),
+            static_cast<unsigned long long>(info.total_work));
+        try {
+            loading_text_ = text.data();
+        } catch (const std::bad_alloc&) {
+        }
+    }
+
+    void QueueVisibleRows() noexcept {
+        if (loading_ || load_failed_ || list_ == nullptr || row_count_ == 0U) {
+            return;
+        }
+        const int top = std::max(0, ListView_GetTopIndex(list_));
+        const int visible = std::max(1, ListView_GetCountPerPage(list_));
+        const std::uint64_t last = std::min<std::uint64_t>(
+            row_count_, static_cast<std::uint64_t>(top + visible + 2));
+        for (std::uint64_t index = static_cast<std::uint64_t>(top);
+             index < last;
+             ++index) {
+            RequestPrefetch(index);
+        }
+    }
+
+    void RequestPrefetch(std::uint64_t index) noexcept {
+        if (index >= row_count_ || prefetch_queue_.size() >= kMaximumQueuedRows
+            || cache_.contains(index)
+            || std::find(prefetch_queue_.begin(), prefetch_queue_.end(), index)
+                != prefetch_queue_.end()) {
+            return;
+        }
+        try {
+            prefetch_queue_.push_back(index);
+        } catch (const std::bad_alloc&) {
+            return;
+        }
+        PostPrefetchIfNeeded();
+    }
+
+    void PostPrefetchIfNeeded() noexcept {
+        if (!prefetch_posted_ && !prefetch_queue_.empty() && dialog_ != nullptr) {
+            prefetch_posted_ = PostMessageW(
+                dialog_, kHistoryVisualizationPrefetch, 0, 0) != FALSE;
+        }
+    }
+
     void InitializeList() noexcept {
         if (list_ == nullptr) {
             return;
@@ -416,6 +637,15 @@ private:
         if (const auto found = cache_.find(index); found != cache_.end()) {
             return &found->second;
         }
+        RequestPrefetch(index);
+        return nullptr;
+    }
+
+    bool LoadRow(std::uint64_t index) noexcept {
+        if (index >= row_count_ || visualization_ == nullptr
+            || cache_.contains(index)) {
+            return false;
+        }
         if (cache_.size() >= kMaximumCachedRows) {
             cache_.clear();
         }
@@ -423,7 +653,7 @@ private:
         output.struct_size = sizeof(output);
         if (inkpod_history_visualization_row_get(
                 visualization_, index, &output) != INKPOD_STATUS_OK) {
-            return nullptr;
+            return false;
         }
         try {
             std::vector<std::uint8_t> name(
@@ -440,7 +670,7 @@ private:
             output.thumbnail_capacity = rgba.size();
             if (inkpod_history_visualization_row_get(
                     visualization_, index, &output) != INKPOD_STATUS_OK) {
-                return nullptr;
+                return false;
             }
             for (std::size_t offset = 0U; offset + 3U < rgba.size(); offset += 4U) {
                 std::swap(rgba[offset], rgba[offset + 2U]);
@@ -451,9 +681,10 @@ private:
             row.width = output.thumbnail_width;
             row.height = output.thumbnail_height;
             row.bgra = std::move(rgba);
-            return &cache_.emplace(index, std::move(row)).first->second;
+            cache_.emplace(index, std::move(row));
+            return true;
         } catch (const std::bad_alloc&) {
-            return nullptr;
+            return false;
         }
     }
 
@@ -467,7 +698,10 @@ private:
     InkpodHistoryVisualization* visualization_{};
     std::shared_ptr<VisualizationLoad> load_;
     std::map<std::uint64_t, CachedRow> cache_;
+    std::vector<std::uint64_t> prefetch_queue_;
+    std::wstring loading_text_{L"履歴を準備中..."};
     std::uint64_t row_count_{};
+    bool prefetch_posted_{};
     bool loading_{true};
     bool load_failed_{};
 };
@@ -486,9 +720,14 @@ INT_PTR CALLBACK HistoryVisualizationDialogProcedure(
                 dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(controller));
             controller->Attach(dialog);
             return TRUE;
-        case kHistoryVisualizationLoaded:
+        case kHistoryVisualizationStepCompleted:
             if (controller != nullptr) {
-                controller->CompleteLoad();
+                controller->StepCompleted();
+            }
+            return TRUE;
+        case kHistoryVisualizationPrefetch:
+            if (controller != nullptr) {
+                controller->ProcessPrefetch();
             }
             return TRUE;
         case WM_SIZE:
@@ -504,6 +743,11 @@ INT_PTR CALLBACK HistoryVisualizationDialogProcedure(
                     if (header->code == LVN_GETDISPINFOW) {
                         controller->CopyDisplayText(
                             *reinterpret_cast<NMLVDISPINFOW*>(lparam));
+                        return TRUE;
+                    }
+                    if (header->code == LVN_ODCACHEHINT) {
+                        controller->CacheHint(
+                            *reinterpret_cast<NMLVCACHEHINT*>(lparam));
                         return TRUE;
                     }
                     if (header->code == NM_CUSTOMDRAW) {

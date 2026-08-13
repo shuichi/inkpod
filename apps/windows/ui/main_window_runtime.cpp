@@ -425,8 +425,6 @@ bool BuildCellCreationDialogPreview(
     InkpodCellCreationPlanItem& preview) noexcept;
 InkpodStatus SaveToPath(
     ApplicationHost& state, const std::wstring& path) noexcept;
-bool QueryCutCommandFlags(
-    ApplicationHost& state, std::uint32_t& flags) noexcept;
 std::wstring LocalizedHistoryLabel(const std::string& label);
 using inkpod::windows::ui::panes::DocumentPanesController;
 using inkpod::windows::ui::panes::ColorPanesController;
@@ -3336,38 +3334,15 @@ bool QueryHistoryMenuLabels(
     info.struct_size = sizeof(info);
     std::string undo_name;
     std::string redo_name;
-    const InkpodStatus status = app.engine->Invoke(
-        [&info, &undo_name, &redo_name](InkpodCore* core) {
-            InkpodStatus inner = inkpod_core_history_info(core, &info);
-            const auto read_name = [core](std::uint64_t index, std::string& output) {
-                InkpodHistoryItem item{};
-                item.struct_size = sizeof(item);
-                InkpodStatus item_status = inkpod_core_history_item(core, index, &item);
-                if (item_status != INKPOD_STATUS_OK || item.name_bytes > UINT64_C(4096)) {
-                    return item_status == INKPOD_STATUS_OK
-                        ? INKPOD_STATUS_INVALID_STATE
-                        : item_status;
-                }
-                try {
-                    output.assign(static_cast<std::size_t>(item.name_bytes), '\0');
-                } catch (const std::bad_alloc&) {
-                    return INKPOD_STATUS_INVALID_STATE;
-                }
-                item.name_utf8 = reinterpret_cast<std::uint8_t*>(output.data());
-                item.name_capacity = item.name_bytes;
-                return inkpod_core_history_item(core, index, &item);
-            };
-            if (inner == INKPOD_STATUS_OK && info.cursor != 0U) {
-                inner = read_name(info.cursor - 1U, undo_name);
-            }
-            if (inner == INKPOD_STATUS_OK && info.cursor < info.item_count) {
-                inner = read_name(info.cursor, redo_name);
-            }
-            return inner;
-        },
-        false,
-        false);
-    if (status != INKPOD_STATUS_OK) {
+    const DocumentSessionId session = app.routing.targets.DocumentSession();
+    const DocumentSession* document = app.Documents().Find(session);
+    if (document == nullptr
+        || !app.engine->GetHistoryPresentation(
+            document->id,
+            document->generation,
+            info,
+            undo_name,
+            redo_name)) {
         return false;
     }
     try {
@@ -7010,19 +6985,22 @@ void UpdateMainWindowStatus(
                 : ((info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U ? L"変更あり" : L"保存済み"));
     }
     if (!has_progress && has_document && state.engine != nullptr) {
-        std::vector<InkpodEditTarget> edit_targets;
-        if (state.engine->GetEditTargets(
+        std::uint64_t edit_target_count{};
+        InkpodEditTargetCapabilities capabilities{};
+        capabilities.struct_size = sizeof(capabilities);
+        if (state.engine->GetEditTargetPresentation(
                 state.Document().id,
                 state.Document().generation,
-                edit_targets) == INKPOD_STATUS_OK
-            && !edit_targets.empty()) {
+                edit_target_count,
+                capabilities)
+            && edit_target_count != 0U) {
             std::array<wchar_t, 48U> target_text{};
             _snwprintf_s(
                 target_text.data(),
                 target_text.size(),
                 _TRUNCATE,
                 L" | 編集対象 %zu",
-                edit_targets.size());
+                static_cast<std::size_t>(edit_target_count));
             wcsncat_s(
                 state_text.data(),
                 state_text.size(),
@@ -7059,8 +7037,8 @@ void UpdateMenuState(ApplicationHost& state) noexcept {
     // This is the only state computation. Every interactive surface below reads
     // the same immutable result; no tool or preview transition happens here.
     state.Workspace().command_states = ComputeCommandStates(inputs);
-    std::uint32_t cut_flags{};
-    const bool has_cut = QueryCutCommandFlags(state, cut_flags);
+    const bool has_cut = state.Workspace().cut.handle != nullptr;
+    const std::uint32_t cut_flags = state.Workspace().cut.flags;
     for (auto& command_state : state.Workspace().command_states) {
         switch (command_state.command) {
             case IDM_FILE_NEW_CUT:
@@ -7091,18 +7069,15 @@ void UpdateMenuState(ApplicationHost& state) noexcept {
         }
     }
     if (has_document && state.engine != nullptr) {
-        std::vector<InkpodEditTarget> edit_targets;
+        std::uint64_t edit_target_count{};
         InkpodEditTargetCapabilities capabilities{};
         capabilities.struct_size = sizeof(capabilities);
-        if (state.engine->GetEditTargets(
+        if (state.engine->GetEditTargetPresentation(
                 state.Document().id,
                 state.Document().generation,
-                edit_targets) == INKPOD_STATUS_OK
-            && !edit_targets.empty()
-            && state.engine->GetEditTargetCapabilities(
-                   state.Document().id,
-                   state.Document().generation,
-                   capabilities) == INKPOD_STATUS_OK) {
+                edit_target_count,
+                capabilities)
+            && edit_target_count != 0U) {
             for (auto& command_state : state.Workspace().command_states) {
                 bool capable = true;
                 switch (command_state.command) {
@@ -7271,28 +7246,16 @@ bool QuerySnapshotTransform(
     ApplicationHost& state, InkpodSnapshotTransform& transform) noexcept {
     transform = {};
     transform.struct_size = sizeof(transform);
-    if (state.engine == nullptr) {
+    const DocumentSessionId session = state.routing.targets.DocumentSession();
+    const DocumentSession* document = state.Documents().Find(session);
+    if (state.engine == nullptr || document == nullptr) {
         return false;
     }
-    const std::uint64_t view_id = state.ActiveView().presentation.active_view_id;
-    return state.engine->Invoke(
-               [&transform, view_id](InkpodCore* core) {
-                   const InkpodSnapshotOptions options{
-                       sizeof(InkpodSnapshotOptions), 0U, INKPOD_FEATURE_NONE};
-                   InkpodSnapshot* snapshot{};
-                   InkpodStatus status = view_id == 0U
-                       ? inkpod_core_build_snapshot(core, &options, &snapshot)
-                       : inkpod_core_build_snapshot_for_view(
-                             core, view_id, &options, &snapshot);
-                   if (status == INKPOD_STATUS_OK) {
-                       status = inkpod_snapshot_get_transform(snapshot, &transform);
-                   }
-                   const InkpodStatus release_status =
-                       inkpod_snapshot_release(&snapshot);
-                   return status == INKPOD_STATUS_OK ? release_status : status;
-               },
-               false,
-               false) == INKPOD_STATUS_OK;
+    return state.engine->GetSnapshotTransform(
+        document->id,
+        document->generation,
+        state.ActiveView().presentation.active_view_id,
+        transform);
 }
 
 InkpodStatus ApplyZoomPercent(ApplicationHost& state, std::uint32_t percent) noexcept {
@@ -8902,30 +8865,6 @@ std::optional<CutCoreTarget> CaptureCutCoreTarget(
     return CutCoreTarget{document->id, document->generation, cut};
 }
 
-bool QueryCutCommandFlags(
-    ApplicationHost& state, std::uint32_t& flags) noexcept {
-    flags = 0U;
-    const auto target = CaptureCutCoreTarget(state);
-    if (!target.has_value()) {
-        return false;
-    }
-    InkpodCutInfo info{};
-    info.struct_size = sizeof(info);
-    const InkpodStatus status = state.engine->Invoke(
-        target->session,
-        target->generation,
-        [cut = target->cut, &info](InkpodCore*) {
-            return inkpod_cut_info(cut, &info);
-        },
-        false,
-        false);
-    if (status == INKPOD_STATUS_OK) {
-        flags = info.flags;
-        return true;
-    }
-    return false;
-}
-
 bool Utf8ToWideText(
     const std::uint8_t* bytes,
     std::size_t byte_count,
@@ -9083,6 +9022,7 @@ bool BuildCutSessionCache(
         return false;
     }
     destination.cut_name = std::move(cut_name);
+    destination.flags = snapshot.info.flags;
     destination.members = std::move(members);
     return true;
 }

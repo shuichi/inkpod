@@ -327,12 +327,26 @@ INT_PTR CALLBACK EffectEditorDialogProcedure(
     return FALSE;
 }
 
-constexpr std::array<int, 2U> kProgressTextControls{
-    IDC_EFFECT_PROGRESS_TEXT, IDC_BATCH_PROGRESS_TEXT};
-constexpr std::array<int, 2U> kProgressBarControls{
-    IDC_EFFECT_PROGRESS_BAR, IDC_BATCH_PROGRESS_BAR};
-constexpr std::array<int, 2U> kProgressCancelControls{
-    IDC_EFFECT_PROGRESS_CANCEL, IDC_BATCH_PROGRESS_CANCEL};
+constexpr std::array<int, 4U> kProgressTextControls{
+    IDC_EFFECT_PROGRESS_TEXT,
+    IDC_BATCH_PROGRESS_TEXT,
+    IDC_COLOR_CHART_PROGRESS_TEXT,
+    IDC_HISTORY_PROGRESS_TEXT};
+constexpr std::array<int, 4U> kProgressBarControls{
+    IDC_EFFECT_PROGRESS_BAR,
+    IDC_BATCH_PROGRESS_BAR,
+    IDC_COLOR_CHART_PROGRESS_BAR,
+    IDC_HISTORY_PROGRESS_BAR};
+constexpr std::array<int, 4U> kProgressCancelControls{
+    IDC_EFFECT_PROGRESS_CANCEL,
+    IDC_BATCH_PROGRESS_CANCEL,
+    IDC_COLOR_CHART_PROGRESS_CANCEL,
+    IDC_HISTORY_PROGRESS_CANCEL};
+static_assert(
+    kProgressTextControls.size()
+    == static_cast<std::size_t>(JobProgressSlot::Count));
+static_assert(kProgressBarControls.size() == kProgressTextControls.size());
+static_assert(kProgressCancelControls.size() == kProgressTextControls.size());
 
 void LayoutJobProgressPane(
     HWND dialog, const JobProgressPaneState& state) noexcept {
@@ -572,6 +586,19 @@ void ClearJobProgress(
         LayoutJobProgressPane(pane, state);
         RefreshJobProgressPane(pane, state);
     }
+}
+
+void ClearJobProgressIfContext(
+    HWND pane,
+    JobProgressPaneState& state,
+    JobProgressSlot slot,
+    const void* context) noexcept {
+    const std::size_t index = static_cast<std::size_t>(slot);
+    if (index >= state.entries.size()
+        || state.entries[index].progress.context != context) {
+        return;
+    }
+    ClearJobProgress(pane, state, slot);
 }
 
 bool HasActiveJobProgress(const JobProgressPaneState& state) noexcept {

@@ -145,6 +145,17 @@ struct PublishedSession {
     bool has_document_info{};
     InkpodEditorStateInfo editor_state{};
     bool has_editor_state{};
+    InkpodHistoryInfo history_info{};
+    std::string undo_name;
+    std::string redo_name;
+    bool has_history_info{};
+    InkpodEditTargetCapabilities edit_target_capabilities{};
+    bool has_edit_target_presentation{};
+    bool has_edit_target_capabilities{};
+    std::uint64_t edit_target_count{};
+    InkpodSnapshotTransform snapshot_transform{};
+    std::uint64_t snapshot_view_id{};
+    bool has_snapshot_transform{};
     std::wstring last_error;
     EngineMetrics metrics{};
     CoreSessionState state{};
@@ -923,6 +934,73 @@ struct CoreHost::Impl final {
         }
     }
 
+    void RefreshPublishedPresentation(
+        SessionBinding binding, InkpodCore* core) noexcept {
+        InkpodHistoryInfo history{};
+        history.struct_size = sizeof(history);
+        std::string undo_name;
+        std::string redo_name;
+        bool has_history_info{};
+        try {
+            const auto read_history_name = [core](
+                std::uint64_t index, std::string& output) {
+                InkpodHistoryItem item{};
+                item.struct_size = sizeof(item);
+                InkpodStatus item_status = inkpod_core_history_item(
+                    core, index, &item);
+                if (item_status != INKPOD_STATUS_OK
+                    || item.name_bytes > UINT64_C(4096)) {
+                    return item_status == INKPOD_STATUS_OK
+                        ? INKPOD_STATUS_INVALID_STATE
+                        : item_status;
+                }
+                output.assign(static_cast<std::size_t>(item.name_bytes), '\0');
+                item.name_utf8 = reinterpret_cast<std::uint8_t*>(output.data());
+                item.name_capacity = item.name_bytes;
+                return inkpod_core_history_item(core, index, &item);
+            };
+            InkpodStatus history_status = inkpod_core_history_info(core, &history);
+            if (history_status == INKPOD_STATUS_OK && history.cursor != 0U) {
+                history_status = read_history_name(history.cursor - 1U, undo_name);
+            }
+            if (history_status == INKPOD_STATUS_OK
+                && history.cursor < history.item_count) {
+                history_status = read_history_name(history.cursor, redo_name);
+            }
+            has_history_info = history_status == INKPOD_STATUS_OK;
+        } catch (const std::bad_alloc&) {
+            has_history_info = false;
+        }
+
+        std::uint64_t edit_target_count{};
+        const InkpodStatus edit_target_status = inkpod_core_get_edit_targets(
+            core, nullptr, 0U, 0U, &edit_target_count);
+        const bool has_edit_target_presentation =
+            edit_target_count <= INKPOD_MAX_EDIT_TARGETS
+            && (edit_target_status == INKPOD_STATUS_OK
+                || edit_target_status == INKPOD_STATUS_BUFFER_TOO_SMALL);
+        const bool has_edit_targets = has_edit_target_presentation
+            && edit_target_count != 0U;
+        InkpodEditTargetCapabilities capabilities{};
+        capabilities.struct_size = sizeof(capabilities);
+        const bool has_capabilities = has_edit_targets
+            && inkpod_core_get_edit_target_capabilities(
+                   core, &capabilities) == INKPOD_STATUS_OK;
+        std::lock_guard lock(state_mutex);
+        const auto found = FindPublishedLocked(binding);
+        if (found != published.end()) {
+            found->history_info = history;
+            found->undo_name = std::move(undo_name);
+            found->redo_name = std::move(redo_name);
+            found->has_history_info = has_history_info;
+            found->edit_target_capabilities = capabilities;
+            found->has_edit_target_presentation = has_edit_target_presentation;
+            found->has_edit_target_capabilities = has_capabilities;
+            found->edit_target_count = has_edit_target_presentation
+                ? edit_target_count : 0U;
+        }
+    }
+
     InkpodStatus RefreshDocumentInfo(CoreEntry& entry, const CommandContext& context) noexcept {
         InkpodDocumentInfo info{};
         info.struct_size = sizeof(info);
@@ -943,6 +1021,7 @@ struct CoreHost::Impl final {
                     found->has_editor_state = true;
                 }
             }
+            RefreshPublishedPresentation(entry.binding, entry.core);
             PostNotification(CoreNotificationKind::StateChanged, context, status);
         }
         return status;
@@ -997,6 +1076,14 @@ struct CoreHost::Impl final {
                     != INKPOD_STATUS_OK) {
                 inkpod_snapshot_release(&snapshot);
                 return INKPOD_STATUS_INVALID_STATE;
+            }
+            if (core_view_id == entry.active_view_id) {
+                const auto published_session = FindPublishedLocked(entry.binding);
+                if (published_session != published.end()) {
+                    published_session->snapshot_transform = transform;
+                    published_session->snapshot_view_id = core_view_id;
+                    published_session->has_snapshot_transform = true;
+                }
             }
             renderer::SnapshotEnvelope envelope{
                 route,
@@ -1541,6 +1628,57 @@ struct CoreHost::Impl final {
         return true;
     }
 
+    bool CopyHistoryPresentation(
+        SessionBinding binding,
+        InkpodHistoryInfo& info,
+        std::string& undo_name,
+        std::string& redo_name) const noexcept {
+        std::lock_guard lock(state_mutex);
+        const auto found = FindPublishedLocked(binding);
+        if (found == published.end() || !found->has_history_info) {
+            return false;
+        }
+        try {
+            info = found->history_info;
+            undo_name = found->undo_name;
+            redo_name = found->redo_name;
+            return true;
+        } catch (const std::bad_alloc&) {
+            undo_name.clear();
+            redo_name.clear();
+            return false;
+        }
+    }
+
+    bool CopyEditTargetPresentation(
+        SessionBinding binding,
+        std::uint64_t& target_count,
+        InkpodEditTargetCapabilities& capabilities) const noexcept {
+        std::lock_guard lock(state_mutex);
+        const auto found = FindPublishedLocked(binding);
+        if (found == published.end()) {
+            return false;
+        }
+        target_count = found->edit_target_count;
+        capabilities = found->edit_target_capabilities;
+        return found->has_edit_target_presentation
+            && (target_count == 0U || found->has_edit_target_capabilities);
+    }
+
+    bool CopySnapshotTransform(
+        SessionBinding binding,
+        std::uint64_t view_id,
+        InkpodSnapshotTransform& transform) const noexcept {
+        std::lock_guard lock(state_mutex);
+        const auto found = FindPublishedLocked(binding);
+        if (found == published.end() || !found->has_snapshot_transform
+            || found->snapshot_view_id != view_id) {
+            return false;
+        }
+        transform = found->snapshot_transform;
+        return true;
+    }
+
     bool PushPrimitive(PrimitiveWork item) noexcept {
         std::lock_guard acceptance_lock(acceptance_mutex);
         const SessionBinding binding = item.binding;
@@ -1589,30 +1727,39 @@ struct CoreHost::Impl final {
     }
 
     bool StoreEditorState(
-        SessionBinding binding, const InkpodEditorStateInfo& state) noexcept {
-        std::lock_guard lock(state_mutex);
-        const auto found = FindPublishedLocked(binding);
-        if (found == published.end() || !found->state.accepting_work) {
-            return false;
+        SessionBinding binding,
+        InkpodCore* core,
+        const InkpodEditorStateInfo& state) noexcept {
+        {
+            std::lock_guard lock(state_mutex);
+            const auto found = FindPublishedLocked(binding);
+            if (found == published.end() || !found->state.accepting_work) {
+                return false;
+            }
+            found->editor_state = state;
+            found->has_editor_state = true;
         }
-        found->editor_state = state;
-        found->has_editor_state = true;
+        RefreshPublishedPresentation(binding, core);
         return true;
     }
 
     bool StoreDocumentAndEditorState(
         SessionBinding binding,
+        InkpodCore* core,
         const InkpodDocumentInfo& document,
         const InkpodEditorStateInfo& editor) noexcept {
-        std::lock_guard lock(state_mutex);
-        const auto found = FindPublishedLocked(binding);
-        if (found == published.end() || !found->state.accepting_work) {
-            return false;
+        {
+            std::lock_guard lock(state_mutex);
+            const auto found = FindPublishedLocked(binding);
+            if (found == published.end() || !found->state.accepting_work) {
+                return false;
+            }
+            found->document_info = document;
+            found->has_document_info = true;
+            found->editor_state = editor;
+            found->has_editor_state = true;
         }
-        found->document_info = document;
-        found->has_document_info = true;
-        found->editor_state = editor;
-        found->has_editor_state = true;
+        RefreshPublishedPresentation(binding, core);
         return true;
     }
 
@@ -2077,6 +2224,37 @@ bool CoreHost::GetDocumentInfo(
         && impl_->CopyDocumentInfo(SessionBinding{session, generation}, info);
 }
 
+bool CoreHost::GetHistoryPresentation(
+    DocumentSessionId session,
+    Generation generation,
+    InkpodHistoryInfo& info,
+    std::string& undo_name,
+    std::string& redo_name) const noexcept {
+    return impl_ != nullptr
+        && impl_->CopyHistoryPresentation(
+            SessionBinding{session, generation}, info, undo_name, redo_name);
+}
+
+bool CoreHost::GetEditTargetPresentation(
+    DocumentSessionId session,
+    Generation generation,
+    std::uint64_t& target_count,
+    InkpodEditTargetCapabilities& capabilities) const noexcept {
+    return impl_ != nullptr
+        && impl_->CopyEditTargetPresentation(
+            SessionBinding{session, generation}, target_count, capabilities);
+}
+
+bool CoreHost::GetSnapshotTransform(
+    DocumentSessionId session,
+    Generation generation,
+    std::uint64_t view_id,
+    InkpodSnapshotTransform& transform) const noexcept {
+    return impl_ != nullptr
+        && impl_->CopySnapshotTransform(
+            SessionBinding{session, generation}, view_id, transform);
+}
+
 InkpodStatus CoreHost::GetReplayContract(
     DocumentSessionId session,
     Generation generation,
@@ -2193,7 +2371,7 @@ InkpodStatus CoreHost::RefreshEditorState(
             if (status != INKPOD_STATUS_OK) {
                 return status;
             }
-            return impl->StoreEditorState(binding, state)
+            return impl->StoreEditorState(binding, core, state)
                 ? INKPOD_STATUS_OK
                 : INKPOD_STATUS_INVALID_STATE;
         },
@@ -2228,7 +2406,7 @@ InkpodStatus CoreHost::UpdateEditorState(
                 return query_status;
             }
             return impl->StoreDocumentAndEditorState(
-                       binding, document, updated)
+                       binding, core, document, updated)
                 ? INKPOD_STATUS_OK
                 : INKPOD_STATUS_INVALID_STATE;
         },
@@ -2331,7 +2509,8 @@ InkpodStatus CoreHost::SetEditTargets(
             const InkpodStatus query_status =
                 inkpod_core_get_document_info(core, &document);
             return query_status == INKPOD_STATUS_OK
-                && impl->StoreDocumentAndEditorState(binding, document, updated)
+                && impl->StoreDocumentAndEditorState(
+                    binding, core, document, updated)
                 ? INKPOD_STATUS_OK
                 : (query_status == INKPOD_STATUS_OK
                     ? INKPOD_STATUS_INVALID_STATE
@@ -2392,7 +2571,8 @@ InkpodStatus CoreHost::ApplyEditTargetCommand(
                 inkpod_core_get_editor_state(core, &editor);
             return document_status == INKPOD_STATUS_OK
                 && editor_status == INKPOD_STATUS_OK
-                && impl->StoreDocumentAndEditorState(binding, document, editor)
+                && impl->StoreDocumentAndEditorState(
+                    binding, core, document, editor)
                 ? INKPOD_STATUS_OK
                 : INKPOD_STATUS_INVALID_STATE;
         },

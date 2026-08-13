@@ -62,20 +62,23 @@ its compact historical record is retained in [`legacy.md`](legacy.md).
 
 ## Latest representative verification
 
-The latest automatic verification is for HIST-002 on 2026-08-13. The complete
-retained procedure graph now flows through one read-only Core replay/format/thumbnail
-query, an immutable ABI-v12 snapshot, and the dynamic Windows Tools submenu plus
-modeless owner-data list. Commit ordering including inactive branches, typed string
-formatting, post-commit thumbnails, empty/cancel/no-mutation behavior, bounded ABI
-copies, issue-time session targeting, dialog reuse/close, and the production route
-are covered. Native v26/runtime epoch 23 is unchanged because no serialized or
-replay semantics changed.
+The latest automatic verification is for the HIST-002 responsiveness remediation on
+2026-08-14. The retained procedure graph now flows through a point-in-time Core builder
+that replays one bounded semantic event per queue turn, produces thumbnails directly at
+maximum 64×64, reports progress and supports cooperative cancellation through ABI v13.
+Windows presents a loading row and the shared Job Progress pane, copies visible owner-data
+rows in small UI-message batches, and reads menu/status state from CoreHost's published
+cache without synchronously waiting for the Core lane. Commit ordering including inactive
+branches, typed string formatting, direct thumbnails, empty/cancel/no-mutation behavior,
+issue-time session targeting, dialog reuse/close, and the nonblocking production route are
+covered. Native v26/runtime epoch 23 is unchanged because no serialized or replay semantics
+changed.
 
 | Boundary | Result |
 | --- | --- |
-| Rust workspace | 458 unit/integration tests including one doctest, zero ignored. HIST-002 coverage includes retained-branch event order, primitive names and bounded typed arguments, deterministic thumbnails, empty/cancel/no-mutation behavior, ABI ownership, size queries and negative cases. Public route inventory covers 294 Rust routes, 301 C ABI exports, and 381 static Windows commands. `fmt`, all-target/all-feature Clippy with warnings denied, and strict rustdoc passed |
-| Native format | V26/runtime replay epoch 23, ABI v12, Cell document/archive metadata schema 5, document digest schema 9/domain 8, snapshot-composite schema 3, Cut descriptor schema 2, and `.inkbatch` v2 are current. Exact top-level v25, noncurrent archive/Cut versions, malformed vanishing-point/shooting-frame records, checksum failures, and corrupt corpus are rejected; Cell/Cut save/reopen is green |
-| Windows x64 | 2026-08-13 Debug configure/build passed with warnings denied and static CRT; all 33 CTests passed in 237.56 s. Native smoke covers the dynamic open-`.inkpod` submenu, fixed session/generation targeting, one modeless dialog per document, its sole three-column owner-data list, lazy row text, thumbnail path, reuse and close behavior. ABI v12, renderer/device-loss, portable ZIP, and unsigned MSIX payload tests also passed. The latest Release run remains the 2026-08-13 M22 run with all 33 CTests passed in 75.57 s |
+| Rust workspace | 461 unit/integration tests including one doctest, zero ignored. HIST-002 coverage includes retained-branch event order, point-in-time one-event stepping, progress monotonicity, live-edit isolation, direct-thumbnail equivalence, empty/cancel/no-mutation behavior, ABI builder ownership/lifecycle, task matching, size queries and negative cases. Public route inventory covers 296 Rust routes, 304 C ABI exports, and 381 static Windows commands. `fmt`, all-target/all-feature Clippy with warnings denied, and strict rustdoc passed |
+| Native format | V26/runtime replay epoch 23, ABI v13, Cell document/archive metadata schema 5, document digest schema 9/domain 8, snapshot-composite schema 3, Cut descriptor schema 2, and `.inkbatch` v2 are current. Exact top-level v25, noncurrent archive/Cut versions, malformed vanishing-point/shooting-frame records, checksum failures, and corrupt corpus are rejected; Cell/Cut save/reopen is green |
+| Windows x64 | 2026-08-14 Debug configure/build passed with warnings denied and static CRT; all 33 CTests passed in 248.06 s. Native smoke covers the dynamic open-`.inkpod` submenu, fixed session/generation targeting, one modeless dialog per document, its sole three-column owner-data list, loading row, active/cleared shared Job Progress binding, cooperative bounded lazy row text, thumbnail path, reuse and close behavior. CoreHost regression coverage verifies history/edit-target/view-matched transform presentation reads remain available while the single-writer Core lane is occupied. ABI v13, renderer/device-loss, portable ZIP, and unsigned MSIX payload tests also passed. The latest Release run remains the 2026-08-13 M22 run with all 33 CTests passed in 75.57 s |
 | Windows ARM64 | Not run for M22 and not used as a substitute for the required x64 gate. The latest M13 ARM64 Release run passed all 31 CTests in 65.35 s |
 | Performance | The HIST-002 quick profile preserved every checksum/revision/history/reuse/rebuild/output/failure gate. `canonical_replay` remains `264b98028ac92ac6` at revision 6/history 5; `checkpoint_open` remains `07da1b4e6bc5d289` with 175256 input, 256 output, and one reused item; output-color-guard remains `cfb6b288963c78ba` with 1048576 input, 524288 output, and 65536 reused items. The M22 supplemental full results and approved envelopes remain current; workload, harness, payload-access route, and revision-max expression are unchanged |
 | Fuzzing | `native_v26`, `native_core_v26`, and `cut_v26` target declarations are current. Fuzz binary build and coverage-guided execution were not run because the optional `cargo fuzz` subcommand is outside the required gate |

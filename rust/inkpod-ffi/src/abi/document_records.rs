@@ -648,6 +648,19 @@ pub struct InkpodHistoryVisualizationRowBuffer {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
+pub struct InkpodHistoryVisualizationProgress {
+    pub struct_size: u32,
+    pub flags: u32,
+    pub completed_events: u64,
+    pub total_events: u64,
+    pub completed_rows: u64,
+    pub total_rows: u64,
+    pub done: u32,
+    pub reserved: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
 pub struct InkpodSequenceSwitchRequest {
     pub struct_size: u32,
     pub policy: u32,

@@ -73,6 +73,7 @@ enum class JobProgressSlot : std::uint8_t {
     Effect,
     Batch,
     ColorChart,
+    HistoryVisualization,
     Count,
 };
 
@@ -96,6 +97,11 @@ HWND CreateJobProgressPane(
     const ProgressDialogState& progress) noexcept;
 void ClearJobProgress(
     HWND pane, JobProgressPaneState& state, JobProgressSlot slot) noexcept;
+void ClearJobProgressIfContext(
+    HWND pane,
+    JobProgressPaneState& state,
+    JobProgressSlot slot,
+    const void* context) noexcept;
 [[nodiscard]] bool HasActiveJobProgress(
     const JobProgressPaneState& state) noexcept;
 

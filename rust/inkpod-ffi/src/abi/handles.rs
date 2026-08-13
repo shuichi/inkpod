@@ -46,6 +46,12 @@ pub struct InkpodHistoryVisualization {
     pub(crate) rows: Box<[HistoryVisualizationRow]>,
 }
 
+pub struct InkpodHistoryVisualizationBuilder {
+    pub(crate) owner_thread: ThreadId,
+    pub(crate) task_address: usize,
+    pub(crate) builder: Option<CoreHistoryVisualizationBuilder>,
+}
+
 pub(crate) struct EncodedSequenceFile {
     pub(crate) name: Box<[u8]>,
     pub(crate) bytes: Box<[u8]>,
