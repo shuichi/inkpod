@@ -25,7 +25,13 @@ endforeach()
 
 # Generated artifacts are checked in, but the JSON catalog is their only
 # editable source. A stale artifact must fail even when it still compiles.
-file(SHA256 "${CATALOG}" CATALOG_SHA256)
+# Git checkout settings may materialize text files with LF or CRLF. Hash the
+# catalog's canonical LF form so generated artifacts are portable between
+# developer worktrees and CI runners.
+file(READ "${CATALOG}" CATALOG_CONTENT)
+string(REPLACE "\r\n" "\n" CATALOG_CONTENT "${CATALOG_CONTENT}")
+string(REPLACE "\r" "\n" CATALOG_CONTENT "${CATALOG_CONTENT}")
+string(SHA256 CATALOG_SHA256 "${CATALOG_CONTENT}")
 foreach(GENERATED_FILE IN ITEMS
         "${GENERATED_IDS}" "${GENERATED_TABLE}" "${RESOURCE_JA}" "${RESOURCE_EN}")
     file(READ "${GENERATED_FILE}" GENERATED_CONTENT)

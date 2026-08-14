@@ -178,9 +178,16 @@ def banner(catalog_hash: str, comment: str = "//") -> str:
     )
 
 
+def catalog_sha256() -> str:
+    # Git checkout settings may materialize the catalog with LF or CRLF.
+    # Hash its canonical UTF-8/LF representation so generated artifacts do
+    # not become stale solely because they were produced on another machine.
+    canonical = CATALOG_PATH.read_text(encoding="utf-8").encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
 def generated_artifacts(entries: list[dict[str, Any]]) -> dict[pathlib.Path, str]:
-    catalog_bytes = CATALOG_PATH.read_bytes()
-    catalog_hash = hashlib.sha256(catalog_bytes).hexdigest()
+    catalog_hash = catalog_sha256()
     ids = banner(catalog_hash) + "".join(
         f"INKPOD_UI_STRING_ID({entry['id']})\n" for entry in entries
     )
