@@ -1,3 +1,5 @@
+#include "ui/localization.h"
+
 #include "command_catalog.h"
 
 #include <algorithm>
@@ -65,25 +67,25 @@ wchar_t GroupKey(UINT group) noexcept {
 
 const wchar_t* GroupName(UINT command) noexcept {
     switch (command / 100U) {
-        case 400: return L"ファイル";
-        case 401: return L"編集";
-        case 402: return L"表示";
-        case 403: return L"ツール";
-        case 404: return L"プレーン";
-        case 405: return L"色";
-        case 406: return L"ヘルプ";
-        case 407: return L"レイヤー";
-        case 408: return L"選択範囲";
-        case 409: return L"設定";
-        case 410: return L"フィルタ";
-        case 411: return L"特効";
-        case 412: return L"調整レイヤー";
-        case 413: return L"セル";
-        case 414: return L"レイヤー";
-        case 415: return L"プレーン";
-        case 416: return L"ライトテーブル";
-        case 417: return L"連番・モーション";
-        case 418: return L"ベクター";
+        case 400: return UiText(UiStringId::Text0279);
+        case 401: return UiText(UiStringId::Editable);
+        case 402: return UiText(UiStringId::Visible);
+        case 403: return UiText(UiStringId::ToolGeneric);
+        case 404: return UiText(UiStringId::Plane);
+        case 405: return UiText(UiStringId::Text0865);
+        case 406: return UiText(UiStringId::Text0332);
+        case 407: return UiText(UiStringId::Layer);
+        case 408: return UiText(UiStringId::LayerSelection);
+        case 409: return UiText(UiStringId::Text0916);
+        case 410: return UiText(UiStringId::Text0285);
+        case 411: return UiText(UiStringId::Text0781);
+        case 412: return UiText(UiStringId::Text0926);
+        case 413: return UiText(UiStringId::Text0219);
+        case 414: return UiText(UiStringId::Layer);
+        case 415: return UiText(UiStringId::Plane);
+        case 416: return UiText(UiStringId::LightTable);
+        case 417: return UiText(UiStringId::Text0967);
+        case 418: return UiText(UiStringId::Text0334);
         case 419:
             return command == IDM_WINDOW_TOOL_PALETTE
                     || command == IDM_WINDOW_LAYER_PALETTE
@@ -110,10 +112,10 @@ const wchar_t* GroupName(UINT command) noexcept {
                     || command == IDM_BATCH_PIN
                     || command == IDM_WINDOW_BATCH
                     || command == IDM_WINDOW_JOB_PROGRESS
-                ? L"ウィンドウ"
-                : L"バッチ";
-        case 420: return L"バッチ項目";
-        default: return L"その他";
+                ? UiText(UiStringId::Text0133)
+                : UiText(UiStringId::Text0255);
+        case 420: return UiText(UiStringId::Text0269);
+        default: return UiText(UiStringId::Text0111);
     }
 }
 

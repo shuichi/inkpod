@@ -1,3 +1,5 @@
+#include "ui/localization.h"
+
 #include "document_shell.h"
 
 #include <commdlg.h>
@@ -18,6 +20,9 @@
 #include "session_recovery.h"
 
 namespace inkpod::app {
+using windows::ui::UiStringId;
+using windows::ui::UiText;
+
 namespace {
 
 InkpodDocumentInfo EmptyDocumentInfo() noexcept {
@@ -344,12 +349,10 @@ bool ChooseInkpodPath(
     if (!selected_path.empty()) {
         wcsncpy_s(path.data(), path.size(), selected_path.c_str(), _TRUNCATE);
     }
-    constexpr wchar_t filter[] =
-        L"inkpod セル (*.inkpod)\0*.inkpod\0すべてのファイル (*.*)\0*.*\0\0";
     OPENFILENAMEW dialog{};
     dialog.lStructSize = sizeof(dialog);
     dialog.hwndOwner = owner;
-    dialog.lpstrFilter = filter;
+    dialog.lpstrFilter = UiText(UiStringId::Text0091);
     dialog.lpstrFile = path.data();
     dialog.nMaxFile = static_cast<DWORD>(path.size());
     dialog.lpstrDefExt = L"inkpod";
@@ -375,14 +378,10 @@ bool ChooseCommonRasterPath(
     if (!selected_path.empty()) {
         wcsncpy_s(path.data(), path.size(), selected_path.c_str(), _TRUNCATE);
     }
-    constexpr wchar_t filter[] =
-        L"対応画像 (*.png;*.tif;*.tiff;*.tga;*.bmp)\0*.png;*.tif;*.tiff;*.tga;*.bmp\0"
-        L"PNG (*.png)\0*.png\0TIFF (*.tif;*.tiff)\0*.tif;*.tiff\0"
-        L"TGA (*.tga)\0*.tga\0BMP (*.bmp)\0*.bmp\0すべてのファイル (*.*)\0*.*\0\0";
     OPENFILENAMEW dialog{};
     dialog.lStructSize = sizeof(dialog);
     dialog.hwndOwner = owner;
-    dialog.lpstrFilter = filter;
+    dialog.lpstrFilter = UiText(UiStringId::RasterImageFileFilter);
     dialog.lpstrFile = path.data();
     dialog.nMaxFile = static_cast<DWORD>(path.size());
     dialog.lpstrDefExt = L"png";
@@ -410,13 +409,10 @@ bool ChooseCommonRasterPaths(
     } catch (const std::bad_alloc&) {
         return false;
     }
-    constexpr wchar_t filter[] =
-        L"対応画像 (*.png;*.tif;*.tiff;*.tga;*.bmp)\0*.png;*.tif;*.tiff;*.tga;*.bmp\0"
-        L"すべてのファイル (*.*)\0*.*\0\0";
     OPENFILENAMEW dialog{};
     dialog.lStructSize = sizeof(dialog);
     dialog.hwndOwner = owner;
-    dialog.lpstrFilter = filter;
+    dialog.lpstrFilter = UiText(UiStringId::CommonRasterFileFilter);
     dialog.lpstrFile = buffer.data();
     dialog.nMaxFile = static_cast<DWORD>(buffer.size());
     dialog.Flags = OFN_EXPLORER | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR
@@ -446,15 +442,10 @@ bool ChooseCommonRasterPaths(
 
 bool ChooseOpenDocumentPath(HWND owner, std::wstring& selected_path) noexcept {
     std::array<wchar_t, 32768> path{};
-    constexpr wchar_t filter[] =
-        L"inkpod/対応画像 (*.inkpod;*.png;*.tif;*.tiff;*.tga;*.bmp)\0"
-        L"*.inkpod;*.png;*.tif;*.tiff;*.tga;*.bmp\0"
-        L"inkpod セル (*.inkpod)\0*.inkpod\0対応画像\0*.png;*.tif;*.tiff;*.tga;*.bmp\0"
-        L"すべてのファイル (*.*)\0*.*\0\0";
     OPENFILENAMEW dialog{};
     dialog.lStructSize = sizeof(dialog);
     dialog.hwndOwner = owner;
-    dialog.lpstrFilter = filter;
+    dialog.lpstrFilter = UiText(UiStringId::OpenDocumentFileFilter);
     dialog.lpstrFile = path.data();
     dialog.nMaxFile = static_cast<DWORD>(path.size());
     dialog.Flags = OFN_EXPLORER | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR

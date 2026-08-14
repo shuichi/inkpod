@@ -4,7 +4,7 @@ endif()
 
 set(catalog_source
     "${INKPOD_SOURCE_DIR}/apps/windows/ui/command_state_catalog.inc")
-set(resource_source "${INKPOD_SOURCE_DIR}/apps/windows/app/app.rc")
+set(resource_source "${INKPOD_SOURCE_DIR}/apps/windows/app/app_ui_ja.generated.rc")
 file(READ "${catalog_source}" catalog_text)
 file(READ "${resource_source}" resource_text)
 
@@ -33,7 +33,7 @@ list(SORT resource_ids)
 list(SORT unique_catalog_ids)
 if(NOT resource_ids STREQUAL unique_catalog_ids)
     message(FATAL_ERROR
-        "command-state catalog differs from the production app.rc command set")
+        "command-state catalog differs from the production localized resource command set")
 endif()
 
 list(LENGTH resource_ids production_count)

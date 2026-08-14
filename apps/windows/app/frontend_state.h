@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ui/localization.h"
+
 #include <windows.h>
 
 #include <array>
@@ -399,8 +401,10 @@ struct EffectsUiState {
 };
 
 struct BatchUiState {
-    std::wstring target_text{L"アクティブに追従（対象なし）"};
-    std::wstring job_text{L"待機中"};
+    std::wstring target_text{
+        windows::ui::UiText(windows::ui::UiStringId::FollowingNoTarget)};
+    std::wstring job_text{
+        windows::ui::UiText(windows::ui::UiStringId::Text0655)};
     bool target_available{};
     bool target_pinned{};
     bool return_to_pinned{};

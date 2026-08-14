@@ -9,7 +9,7 @@ set(RUNTIME_SOURCE "${INKPOD_SOURCE_DIR}/apps/windows/ui/main_window_runtime.cpp
 set(CANVAS_HEADER "${INKPOD_SOURCE_DIR}/apps/windows/renderer/canvas.h")
 set(CANVAS_SOURCE "${INKPOD_SOURCE_DIR}/apps/windows/renderer/canvas.cpp")
 set(TEST_SOURCE "${INKPOD_SOURCE_DIR}/tests/windows_workspace_layout.cpp")
-set(RESOURCE_SOURCE "${INKPOD_SOURCE_DIR}/apps/windows/app/app.rc")
+set(RESOURCE_SOURCE "${INKPOD_SOURCE_DIR}/apps/windows/app/app_ui_ja.generated.rc")
 
 foreach(FILE IN ITEMS
         "${LAYOUT_HEADER}"

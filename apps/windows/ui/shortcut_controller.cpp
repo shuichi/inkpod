@@ -1,3 +1,5 @@
+#include "ui/localization.h"
+
 #include "shortcut_controller.h"
 
 #include <windows.h>
@@ -267,7 +269,7 @@ void UpdatePendingText(ShortcutUiState& state) noexcept {
     pending.stroke_count = static_cast<std::uint32_t>(state.pending_strokes.size());
     std::copy(state.pending_strokes.begin(), state.pending_strokes.end(), pending.strokes);
     try {
-        state.pending_text = L"ショートカット: " + FormatShortcutSequence(pending) + L", …";
+        state.pending_text = UiText(UiStringId::Text0198) + FormatShortcutSequence(pending) + L", …";
     } catch (const std::bad_alloc&) {
         state.pending_text.clear();
     }

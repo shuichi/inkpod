@@ -22,7 +22,7 @@ file(READ "${UI_DIR}/tab_drag.cpp" UI_SOURCE)
 file(READ "${UI_DIR}/main_window.cpp" MAIN_SOURCE)
 file(READ "${UI_DIR}/main_window_runtime.cpp" RUNTIME_SOURCE)
 file(READ "${INKPOD_SOURCE_DIR}/apps/windows/app/app_smoke.cpp" SMOKE_SOURCE)
-file(READ "${INKPOD_SOURCE_DIR}/apps/windows/app/app.rc" RESOURCE_SOURCE)
+file(READ "${INKPOD_SOURCE_DIR}/apps/windows/app/app_ui_ja.generated.rc" RESOURCE_SOURCE)
 
 foreach(required IN ITEMS
         "TabDragCoordinator tab_drag_"

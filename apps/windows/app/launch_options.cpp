@@ -31,6 +31,7 @@ LaunchParseStatus ParseLaunchArguments(
     bool options_ended{};
     bool has_mode{};
     bool has_new_workspace{};
+    bool has_smoke_ui_language{};
     std::size_t total_path_characters{};
     try {
         for (int index = 1; index < argument_count; ++index) {
@@ -84,6 +85,24 @@ LaunchParseStatus ParseLaunchArguments(
                 has_new_workspace = true;
                 continue;
             }
+            if (!options_ended
+                && IsOption(argument, L"--smoke-test-language=ja-JP")) {
+                if (has_smoke_ui_language) {
+                    return LaunchParseStatus::InvalidArguments;
+                }
+                parsed.smoke_ui_language = SmokeUiLanguage::Japanese;
+                has_smoke_ui_language = true;
+                continue;
+            }
+            if (!options_ended
+                && IsOption(argument, L"--smoke-test-language=en-US")) {
+                if (has_smoke_ui_language) {
+                    return LaunchParseStatus::InvalidArguments;
+                }
+                parsed.smoke_ui_language = SmokeUiLanguage::English;
+                has_smoke_ui_language = true;
+                continue;
+            }
             if (!options_ended && argument[0] == L'-') {
                 return LaunchParseStatus::InvalidArguments;
             }
@@ -103,6 +122,10 @@ LaunchParseStatus ParseLaunchArguments(
 
     if (has_mode
         && (!parsed.document_paths.empty() || parsed.open_in_new_workspace)) {
+        return LaunchParseStatus::InvalidArguments;
+    }
+    if (has_smoke_ui_language
+        && parsed.mode != LaunchMode::ApplicationSmoke) {
         return LaunchParseStatus::InvalidArguments;
     }
     output = std::move(parsed);

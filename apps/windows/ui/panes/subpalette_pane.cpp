@@ -1,3 +1,5 @@
+#include "ui/ui_resources.h"
+
 #include "subpalette_pane.h"
 
 #include <algorithm>
@@ -7,6 +9,7 @@
 #include "app/resource.h"
 #include "pane_dialog_layout.h"
 #include "renderer/renderer_host.h"
+#include "ui/localization.h"
 
 namespace inkpod::windows::ui::panes {
 namespace {
@@ -147,7 +150,7 @@ HWND CreateSubpalettePaneDialog(
     app::Generation surface_generation,
     SubpalettePaneDialogState& state) noexcept {
     state.surface_generation = surface_generation;
-    const HWND dialog = CreateDialogParamW(
+    const HWND dialog = CreateLocalizedDialogParamW(
         instance,
         MAKEINTRESOURCEW(IDD_SUBPALETTE_PALETTE),
         owner,
@@ -307,7 +310,8 @@ void UpdateSubpalettePaneDialog(HWND dialog, SubpalettePaneView view) noexcept {
     SetDlgItemTextW(
         dialog,
         IDC_SUBPALETTE_PIN,
-        state->view.pinned ? L"追従へ戻す" : L"文書に固定");
+        state->view.pinned ? UiText(UiStringId::ReturnToFollowing)
+                           : UiText(UiStringId::PinDocument));
     CheckDlgButton(
         dialog,
         IDC_SUBPALETTE_AUTO_PREVIOUS,

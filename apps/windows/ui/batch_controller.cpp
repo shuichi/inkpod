@@ -1,3 +1,5 @@
+#include "ui/localization.h"
+
 #include "batch_controller.h"
 
 #include <shlobj.h>
@@ -153,7 +155,7 @@ bool ReadOperation(
         operation.seeds.resize(static_cast<std::size_t>(info.seed_count));
         operation.filter.points.resize(
             static_cast<std::size_t>(info.curve_point_count));
-        operation.label = L"読み込み済み操作";
+        operation.label = UiText(UiStringId::Text0925);
     } catch (const std::bad_alloc&) {
         return false;
     }
@@ -347,8 +349,8 @@ InkpodStatus BatchController::Preview(
         }
         if (status == INKPOD_STATUS_OK) {
             try {
-                batch_.last_result = L"プレビュー: " + std::to_wstring(count)
-                    + L"件 / 警告 " + std::to_wstring(warnings);
+                batch_.last_result = UiText(UiStringId::Text0313) + std::to_wstring(count)
+                    + UiText(UiStringId::Text0455) + std::to_wstring(warnings);
             } catch (const std::bad_alloc&) {
                 status = INKPOD_STATUS_INVALID_STATE;
             }
@@ -380,8 +382,8 @@ InkpodStatus BatchController::Start(
         preview_confirmed = lifetime_.smoke_test
             || MessageBoxW(
                    windows_.window,
-                   L"表示した入力・出力・警告の内容で保存を続行しますか？",
-                   L"バッチ保存前プレビュー",
+                   UiText(UiStringId::Text0883),
+                   UiText(UiStringId::Text0260),
                    MB_OKCANCEL | MB_ICONQUESTION) == IDOK;
         if (!preview_confirmed) {
             return INKPOD_STATUS_CANCELLED;
@@ -435,9 +437,9 @@ InkpodStatus BatchController::Start(
         &batch_,
         QueryProgress,
         CancelProgress,
-        L"バッチ実行",
-        L"バッチ処理中...",
-        L"キャンセル中..."};
+        UiText(UiStringId::Text0267),
+        UiText(UiStringId::Text0263),
+        UiText(UiStringId::Cancelling)};
     if (!BindJobProgress(
             progress_,
             progress_state_,
@@ -587,20 +589,20 @@ void BatchController::RefreshPalette(
             }
         }
         if (batch.input_kind == INKPOD_BATCH_INPUT_CURRENT_SEQUENCE) {
-            view.input_label = L"現在セルを含む連番（自然順）";
+            view.input_label = UiText(UiStringId::Text0790);
         } else if (batch.input_kind == INKPOD_BATCH_INPUT_FOLDER) {
-            view.input_label = L"フォルダー: " + batch.input_path;
+            view.input_label = UiText(UiStringId::Text0303) + batch.input_path;
         } else {
-            view.input_label = L"ファイル: " + batch.input_path;
+            view.input_label = UiText(UiStringId::Text0281) + batch.input_path;
         }
         if (batch.first_cell != 0U || batch.last_cell != 0U) {
-            view.input_label += L" / 範囲 ";
+            view.input_label += UiText(UiStringId::Text0010);
             view.input_label += batch.first_cell == 0U
-                ? L"先頭"
+                ? UiText(UiStringId::Text0491)
                 : std::to_wstring(batch.first_cell);
-            view.input_label += L"～";
+            view.input_label += UiText(UiStringId::RangeSeparator);
             view.input_label += batch.last_cell == 0U
-                ? L"末尾"
+                ? UiText(UiStringId::Text0747)
                 : std::to_wstring(batch.last_cell);
         }
 
@@ -610,8 +612,8 @@ void BatchController::RefreshPalette(
             info.struct_size = sizeof(info);
             if (inkpod_batch_graph_get_info(batch.graph, &info) == INKPOD_STATUS_OK) {
                 view.operation_labels.push_back(
-                    L"読み込み済みセット: "
-                    + std::to_wstring(info.operation_count) + L" 項目");
+                    UiText(UiStringId::Text0924)
+                    + std::to_wstring(info.operation_count) + UiText(UiStringId::Text0014));
             }
         } else {
             view.operation_labels.reserve(batch.operations.size());
@@ -621,7 +623,7 @@ void BatchController::RefreshPalette(
                     : L"– ";
                 label += operation.label;
                 if (operation.flags & INKPOD_BATCH_OPERATION_CONFIGURE_EACH_RUN) {
-                    label += L"（実行ごとに設定）";
+                    label += UiText(UiStringId::Text1046);
                 }
                 view.operation_labels.push_back(std::move(label));
             }
@@ -633,17 +635,17 @@ void BatchController::RefreshPalette(
             }
         }
 
-        const wchar_t* policy = L"複製保存";
+        const wchar_t* policy = UiText(UiStringId::Text0904);
         if (batch.output_policy == INKPOD_BATCH_OUTPUT_NEW_SAVE) {
-            policy = L"新規保存";
+            policy = UiText(UiStringId::Text0716);
         } else if (batch.output_policy == INKPOD_BATCH_OUTPUT_EXPLICIT_OVERWRITE) {
-            policy = L"明示上書き";
+            policy = UiText(UiStringId::Text0727);
         }
-        view.output_text = L"出力: ";
+        view.output_text = UiText(UiStringId::Text0515);
         view.output_text += policy;
         view.output_text += L" / ";
         view.output_text += batch.output_folder.empty()
-            ? L"（入力と同じ場所）"
+            ? UiText(UiStringId::Text1045)
             : batch.output_folder;
         if (!batch.last_result.empty()) {
             view.output_text += L"\r\n";
@@ -672,18 +674,18 @@ std::wstring BatchController::ReportSummary(const InkpodBatchReport* report) {
     info.struct_size = sizeof(info);
     if (report == nullptr
         || inkpod_batch_report_get_info(report, &info) != INKPOD_STATUS_OK) {
-        return L"レポートを取得できません";
+        return UiText(UiStringId::Text0409);
     }
-    return L"結果: " + std::to_wstring(info.item_count) + L"件 / 失敗 "
+    return UiText(UiStringId::Text0844) + std::to_wstring(info.item_count) + UiText(UiStringId::Text0454)
         + std::to_wstring(info.failure_count)
-        + (info.cancelled != 0U ? L" / キャンセル" : L"");
+        + (info.cancelled != 0U ? UiText(UiStringId::Text0007) : L"");
 }
 
 bool BatchController::ChooseFolder(
     HWND owner, std::wstring& selected_path) noexcept {
     BROWSEINFOW browse{};
     browse.hwndOwner = owner;
-    browse.lpszTitle = L"バッチ入力フォルダーを選択";
+    browse.lpszTitle = UiText(UiStringId::Text0261);
     browse.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
     PIDLIST_ABSOLUTE item = SHBrowseForFolderW(&browse);
     if (item == nullptr) {

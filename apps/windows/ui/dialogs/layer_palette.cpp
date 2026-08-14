@@ -1,3 +1,5 @@
+#include "ui/ui_resources.h"
+
 #include "layer_palette.h"
 
 #include <commctrl.h>
@@ -13,6 +15,7 @@
 #include <utility>
 
 #include "app/resource.h"
+#include "ui/localization.h"
 
 namespace inkpod::windows::ui {
 namespace {
@@ -95,7 +98,7 @@ const wchar_t* LoadUiString(
         : reinterpret_cast<HINSTANCE>(
               GetWindowLongPtrW(dialog, GWLP_HINSTANCE));
     if (instance != nullptr
-        && LoadStringW(instance, resource, buffer, static_cast<int>(Size)) > 0) {
+        && LoadLocalizedStringW(instance, resource, buffer, static_cast<int>(Size)) > 0) {
         return buffer;
     }
     return fallback;
@@ -119,18 +122,9 @@ void ApplyActionCommandState(
 
 void UpdateActionTargetPresentation(
     HWND dialog, LayerPaletteDialogState& state) noexcept {
-    wchar_t target_buffer[64]{};
     const wchar_t* target = state.plane_active
-        ? LoadUiString(
-              dialog,
-              IDS_LAYER_ACTION_TARGET_PLANE,
-              L"操作対象: プレーン",
-              target_buffer)
-        : LoadUiString(
-              dialog,
-              IDS_LAYER_ACTION_TARGET_LAYER,
-              L"操作対象: レイヤー",
-              target_buffer);
+        ? UiText(UiStringId::OperationTargetPlane)
+        : UiText(UiStringId::OperationTargetLayer);
     SetDlgItemTextW(dialog, IDC_LAYER_ACTION_TARGET, target);
     for (const UINT control : kLayerActionCommands) {
         const HWND button = GetDlgItem(dialog, static_cast<int>(control));
@@ -184,38 +178,49 @@ void PaintLayerPlaneSplitter(HWND splitter, bool highlighted) noexcept {
     EndPaint(splitter, &paint);
 }
 
-const wchar_t* LayerKindLabel(std::uint32_t kind) noexcept {
+UiStringId LayerKindLabelId(std::uint32_t kind) noexcept {
     switch (kind) {
-        case INKPOD_LAYER_BINARY_COLORING: return L"2値彩色";
-        case INKPOD_LAYER_GRAYSCALE_COLORING: return L"階調彩色";
-        case INKPOD_LAYER_RASTER: return L"ラスター汎用";
-        case INKPOD_LAYER_SELECTION: return L"選択範囲";
-        case INKPOD_LAYER_FRAME: return L"フレーム";
-        case INKPOD_LAYER_VANISHING_POINT: return L"消失点";
-        case INKPOD_LAYER_ADJUSTMENT: return L"調整";
-        case INKPOD_LAYER_TEXT: return L"テキスト";
-        case INKPOD_LAYER_ANNOTATION: return L"指示";
-        case INKPOD_LAYER_VECTOR_COLORING: return L"ベクター彩色";
-        default: return L"不明";
+        case INKPOD_LAYER_BINARY_COLORING: return UiStringId::LayerBinaryColoring;
+        case INKPOD_LAYER_GRAYSCALE_COLORING: return UiStringId::LayerGrayscaleColoring;
+        case INKPOD_LAYER_RASTER: return UiStringId::LayerRasterGeneral;
+        case INKPOD_LAYER_SELECTION: return UiStringId::LayerSelection;
+        case INKPOD_LAYER_FRAME: return UiStringId::LayerFrame;
+        case INKPOD_LAYER_VANISHING_POINT: return UiStringId::LayerVanishingPoint;
+        case INKPOD_LAYER_ADJUSTMENT: return UiStringId::LayerAdjustment;
+        case INKPOD_LAYER_TEXT: return UiStringId::LayerText;
+        case INKPOD_LAYER_ANNOTATION: return UiStringId::LayerInstruction;
+        case INKPOD_LAYER_VECTOR_COLORING: return UiStringId::LayerVectorColoring;
+        default: return UiStringId::LayerUnknown;
     }
 }
 
-const wchar_t* PlaneKindLabel(std::uint32_t kind) noexcept {
+UiStringId PlaneKindLabelId(std::uint32_t kind) noexcept {
     switch (kind) {
-        case INKPOD_TYPED_PLANE_MAIN_LINE: return L"主線";
-        case INKPOD_TYPED_PLANE_COLOR: return L"彩色";
-        case INKPOD_TYPED_PLANE_COLOR_TRACE: return L"色トレース";
-        case INKPOD_TYPED_PLANE_RASTER: return L"ラスター";
-        case INKPOD_TYPED_PLANE_SELECTION: return L"選択";
-        case INKPOD_TYPED_PLANE_VECTOR_MAIN_LINE: return L"ベクター主線";
-        case INKPOD_TYPED_PLANE_VECTOR_FILL: return L"ベクター塗り";
-        default: return L"不明";
+        case INKPOD_TYPED_PLANE_MAIN_LINE: return UiStringId::MainLine;
+        case INKPOD_TYPED_PLANE_COLOR: return UiStringId::Coloring;
+        case INKPOD_TYPED_PLANE_COLOR_TRACE: return UiStringId::PlaneColorTrace;
+        case INKPOD_TYPED_PLANE_RASTER: return UiStringId::PlaneRaster;
+        case INKPOD_TYPED_PLANE_SELECTION: return UiStringId::PlaneSelection;
+        case INKPOD_TYPED_PLANE_VECTOR_MAIN_LINE: return UiStringId::PlaneVectorMainLine;
+        case INKPOD_TYPED_PLANE_VECTOR_FILL: return UiStringId::PlaneVectorFill;
+        default: return UiStringId::LayerUnknown;
+    }
+}
+
+UiStringId PixelFormatLabelId(std::uint32_t format) noexcept {
+    switch (format) {
+        case INKPOD_STORAGE_BINARY8: return UiStringId::Text0030;
+        case INKPOD_STORAGE_GRAYSCALE8: return UiStringId::Text0182;
+        case INKPOD_STORAGE_GRAYSCALE16: return UiStringId::Text0181;
+        case INKPOD_STORAGE_RGBA8: return UiStringId::Text0069;
+        case INKPOD_STORAGE_RGBA16: return UiStringId::Text0068;
+        default: return UiStringId::NameUnavailable;
     }
 }
 
 std::wstring Utf8ToWide(const std::string& text) {
     if (text.empty()) {
-        return L"(名称なし)";
+        return UiText(UiStringId::NameMissing);
     }
     const int required = MultiByteToWideChar(
         CP_UTF8,
@@ -225,7 +230,7 @@ std::wstring Utf8ToWide(const std::string& text) {
         nullptr,
         0);
     if (required <= 0) {
-        return L"(名称を表示できません)";
+        return UiText(UiStringId::NameUnavailable);
     }
     std::wstring output(static_cast<std::size_t>(required), L'\0');
     return MultiByteToWideChar(
@@ -237,7 +242,7 @@ std::wstring Utf8ToWide(const std::string& text) {
                required)
             == required
         ? output
-        : L"(名称を表示できません)";
+        : UiText(UiStringId::NameUnavailable);
 }
 
 const std::vector<LayerPaletteItem>& ItemsFor(
@@ -468,7 +473,7 @@ void DrawThumbnail(
         SetBkMode(dc, TRANSPARENT);
         DrawTextW(
             dc,
-            PlaneKindLabel(item.kind),
+            item.kind_text.c_str(),
             -1,
             &frame,
             DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
@@ -518,8 +523,7 @@ void DrawThumbnail(
 void DrawStatusButton(
     HDC dc,
     RECT bounds,
-    const wchar_t* active_label,
-    const wchar_t* inactive_label,
+    const wchar_t* label,
     bool active) noexcept {
     DrawFrameControl(
         dc,
@@ -531,7 +535,7 @@ void DrawStatusButton(
     SetTextColor(dc, GetSysColor(COLOR_BTNTEXT));
     DrawTextW(
         dc,
-        active ? active_label : inactive_label,
+        label,
         -1,
         &bounds,
         DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
@@ -585,33 +589,11 @@ void DrawItem(
         -1,
         &line,
         DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
-    std::array<wchar_t, 96U> detail{};
-    if (plane) {
-        _snwprintf_s(
-            detail.data(),
-            detail.size(),
-            _TRUNCATE,
-            L"%ls  |  形式 %u  |  %u.%u%%",
-            PlaneKindLabel(item.kind),
-            item.pixel_format,
-            item.opacity_milli / 10U,
-            item.opacity_milli % 10U);
-    } else {
-        _snwprintf_s(
-            detail.data(),
-            detail.size(),
-            _TRUNCATE,
-            L"%ls  |  %u プレーン  |  %u.%u%%",
-            LayerKindLabel(item.kind),
-            item.plane_count,
-            item.opacity_milli / 10U,
-            item.opacity_milli % 10U);
-    }
     line.top += ScaleForDpi(24, dpi);
     line.bottom = line.top + ScaleForDpi(20, dpi);
     DrawTextW(
         draw.hDC,
-        detail.data(),
+        item.detail_text.c_str(),
         -1,
         &line,
         DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
@@ -632,14 +614,12 @@ void DrawItem(
     DrawStatusButton(
         draw.hDC,
         visible,
-        L"表示",
-        L"非表示",
+        item.visibility_text.c_str(),
         (item.flags & INKPOD_NODE_VISIBLE) != 0U);
     DrawStatusButton(
         draw.hDC,
         editable,
-        L"編集",
-        L"保護",
+        item.editability_text.c_str(),
         (item.flags & INKPOD_NODE_EDITABLE) != 0U);
     FrameRect(
         draw.hDC,
@@ -994,13 +974,17 @@ INT_PTR CALLBACK LayerPaletteDialogProcedure(
                 || !UpdatePaletteFont(dialog, *state)) {
                 return FALSE;
             }
+            static_cast<void>(SetAccessibleName(
+                layer_list, UiText(UiStringId::Layer)));
+            static_cast<void>(SetAccessibleName(
+                plane_list, UiText(UiStringId::Plane)));
             wchar_t splitter_name[96]{};
             static_cast<void>(SetAccessibleName(
                 splitter,
                 LoadUiString(
                     dialog,
                     IDS_LAYER_PLANE_SPLITTER,
-                    L"レイヤーとプレーンの高さを変更",
+                    UiText(UiStringId::LayerPlaneSplitterAccessibleName),
                     splitter_name)));
             UpdateActionTargetPresentation(dialog, *state);
             LayoutControls(dialog);
@@ -1093,20 +1077,73 @@ std::vector<LayerPaletteItem> MakeItems(
                     : candidate.kind == INKPOD_EDIT_TARGET_LAYER
                         && candidate.layer_id == node.id;
             });
-        items.push_back(LayerPaletteItem{
-            node.id,
-            node.index,
-            node.kind,
-            node.pixel_format,
-            node.opacity_milli,
-            node.child_count,
-            node.flags,
-            target,
-            Utf8ToWide(node.name),
-            node.thumbnail_width,
-            node.thumbnail_height,
-            node.thumbnail_stride_bytes,
-            node.thumbnail_key});
+        LayerPaletteItem item{};
+        item.id = node.id;
+        item.index = node.index;
+        item.kind = node.kind;
+        item.pixel_format = node.pixel_format;
+        item.opacity_milli = node.opacity_milli;
+        item.plane_count = node.child_count;
+        item.flags = node.flags;
+        item.edit_target = target;
+        item.kind_label_id = plane
+            ? PlaneKindLabelId(node.kind)
+            : LayerKindLabelId(node.kind);
+        item.format_label_id = PixelFormatLabelId(node.pixel_format);
+        item.visibility_label_id = (node.flags & INKPOD_NODE_VISIBLE) != 0U
+            ? UiStringId::Visible
+            : UiStringId::Hidden;
+        item.editability_label_id = (node.flags & INKPOD_NODE_EDITABLE) != 0U
+            ? UiStringId::Editable
+            : UiStringId::Protected;
+        item.name = Utf8ToWide(node.name);
+        item.kind_text = UiText(item.kind_label_id);
+        item.format_text = UiText(item.format_label_id);
+        item.visibility_text = UiText(item.visibility_label_id);
+        item.editability_text = UiText(item.editability_label_id);
+        std::array<wchar_t, 160U> detail{};
+        if (plane) {
+            _snwprintf_s(
+                detail.data(),
+                detail.size(),
+                _TRUNCATE,
+                L"%ls  |  %ls: %ls  |  %u.%u%%",
+                item.kind_text.c_str(),
+                UiText(UiStringId::FormatLabel),
+                item.format_text.c_str(),
+                item.opacity_milli / 10U,
+                item.opacity_milli % 10U);
+        } else {
+            _snwprintf_s(
+                detail.data(),
+                detail.size(),
+                _TRUNCATE,
+                L"%ls  |  %u%ls  |  %u.%u%%",
+                item.kind_text.c_str(),
+                item.plane_count,
+                UiText(UiStringId::PlaneCountSuffix),
+                item.opacity_milli / 10U,
+                item.opacity_milli % 10U);
+        }
+        item.detail_text = detail.data();
+        item.accessible_text.reserve(
+            item.name.size() + item.detail_text.size()
+            + item.visibility_text.size() + item.editability_text.size() + 16U);
+        if (item.edit_target) {
+            item.accessible_text.append(UiText(UiStringId::EditTargetPrefix));
+        }
+        item.accessible_text.append(item.name);
+        item.accessible_text.append(L" | ");
+        item.accessible_text.append(item.detail_text);
+        item.accessible_text.append(L" | ");
+        item.accessible_text.append(item.visibility_text);
+        item.accessible_text.append(L" | ");
+        item.accessible_text.append(item.editability_text);
+        item.thumbnail_width = node.thumbnail_width;
+        item.thumbnail_height = node.thumbnail_height;
+        item.thumbnail_stride_bytes = node.thumbnail_stride_bytes;
+        item.thumbnail_key = node.thumbnail_key;
+        items.push_back(std::move(item));
     }
     return items;
 }
@@ -1123,9 +1160,7 @@ void PopulateList(
             list,
             LB_ADDSTRING,
             0,
-            reinterpret_cast<LPARAM>((items[index].edit_target
-                ? std::wstring{L"[編集対象] "} + items[index].name
-                : items[index].name).c_str()));
+            reinterpret_cast<LPARAM>(items[index].accessible_text.c_str()));
         if (added == LB_ERR || added == LB_ERRSPACE) {
             SendMessageW(list, LB_RESETCONTENT, 0, 0);
             break;
@@ -1147,7 +1182,7 @@ HWND CreateLayerPaletteDialog(
     HINSTANCE instance,
     HWND owner,
     LayerPaletteDialogState& state) noexcept {
-    return CreateDialogParamW(
+    return CreateLocalizedDialogParamW(
         instance,
         MAKEINTRESOURCEW(IDD_LAYER_PALETTE),
         owner,

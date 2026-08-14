@@ -1,3 +1,5 @@
+#include "ui/localization.h"
+
 #include "effects_controller.h"
 
 #include "app/frontend_state.h"
@@ -63,8 +65,8 @@ InkpodStatus EffectsController::StartTask(
         QueryProgress,
         CancelProgress,
         nullptr,
-        L"処理中...",
-        L"キャンセル中..."};
+        UiText(UiStringId::Text0512),
+        UiText(UiStringId::Cancelling)};
     if (!BindJobProgress(
             progress_,
             progress_state_,

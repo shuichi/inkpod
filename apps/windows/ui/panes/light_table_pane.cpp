@@ -1,3 +1,5 @@
+#include "ui/ui_resources.h"
+
 #include "light_table_pane.h"
 
 #include <algorithm>
@@ -8,6 +10,7 @@
 #include "app/resource.h"
 #include "inkpod/core_ffi.h"
 #include "pane_dialog_layout.h"
+#include "ui/localization.h"
 
 namespace inkpod::windows::ui::panes {
 namespace {
@@ -324,8 +327,10 @@ INT_PTR CALLBACK LightTablePaneProcedure(
 
 std::wstring ItemLabel(const LightTablePaneItemView& item) {
     const wchar_t* mode = item.display_mode == INKPOD_LIGHT_TABLE_MONOTONE
-        ? L"単色"
-        : (item.display_mode == INKPOD_LIGHT_TABLE_HALFTONE ? L"網点" : L"色");
+        ? UiText(UiStringId::Monochrome)
+        : (item.display_mode == INKPOD_LIGHT_TABLE_HALFTONE
+               ? UiText(UiStringId::Halftone)
+               : UiText(UiStringId::Color));
     std::array<wchar_t, 512U> label{};
     (void)_snwprintf_s(
         label.data(),
@@ -339,7 +344,7 @@ std::wstring ItemLabel(const LightTablePaneItemView& item) {
         static_cast<double>(item.translate_y_milli) / 1000.0,
         (item.flags & INKPOD_LIGHT_TABLE_ITEM_VISIBLE) != 0U
             ? L""
-            : L"  (非表示)");
+             : UiText(UiStringId::HiddenSuffix));
     return label.data();
 }
 
@@ -350,7 +355,7 @@ HWND CreateLightTablePaneDialog(
     if (state.dispatch_command == nullptr || state.select_entry == nullptr) {
         return nullptr;
     }
-    const HWND dialog = CreateDialogParamW(
+    const HWND dialog = CreateLocalizedDialogParamW(
         instance,
         MAKEINTRESOURCEW(IDD_LIGHT_TABLE_PALETTE),
         owner,
@@ -364,10 +369,10 @@ HWND CreateLightTablePaneDialog(
     LayoutLightTablePane(dialog);
     SetWindowTextW(
         GetDlgItem(dialog, IDC_LIGHT_TABLE_SETS),
-        L"ライトテーブルセット");
+        UiText(UiStringId::LightTableSetsAccessibleName));
     SetWindowTextW(
         GetDlgItem(dialog, IDC_LIGHT_TABLE_ITEMS),
-        L"ライトテーブル参照画像");
+        UiText(UiStringId::LightTableItemsAccessibleName));
     return dialog;
 }
 
@@ -385,7 +390,8 @@ void UpdateLightTablePaneDialog(HWND dialog, LightTablePaneView view) noexcept {
     SetDlgItemTextW(
         dialog,
         IDC_LIGHT_TABLE_PIN,
-        state->view.pinned ? L"追従へ戻す" : L"文書に固定");
+        state->view.pinned ? UiText(UiStringId::ReturnToFollowing)
+                           : UiText(UiStringId::PinDocument));
 
     const HWND sets = GetDlgItem(dialog, IDC_LIGHT_TABLE_SETS);
     SendMessageW(sets, WM_SETREDRAW, FALSE, 0);
@@ -396,10 +402,11 @@ void UpdateLightTablePaneDialog(HWND dialog, LightTablePaneView view) noexcept {
             label.data(),
             label.size(),
             _TRUNCATE,
-            L"%ls  (%u項目 / %u%%)",
-            set.name.c_str(),
-            set.item_count,
-            set.opacity_milli / 10U);
+             L"%ls  (%u %ls / %u%%)",
+             set.name.c_str(),
+             set.item_count,
+             UiText(UiStringId::ItemsLabel),
+             set.opacity_milli / 10U);
         (void)SendMessageW(
             sets, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.data()));
     }

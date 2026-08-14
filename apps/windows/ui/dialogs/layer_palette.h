@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "ui/command_state.h"
+#include "ui/localization.h"
 #include "ui/panes/document_panes.h"
 
 namespace inkpod::windows::ui {
@@ -20,7 +21,17 @@ struct LayerPaletteItem {
     std::uint32_t plane_count{};
     std::uint32_t flags{};
     bool edit_target{};
+    UiStringId kind_label_id{UiStringId::LayerUnknown};
+    UiStringId format_label_id{UiStringId::NameUnavailable};
+    UiStringId visibility_label_id{UiStringId::Hidden};
+    UiStringId editability_label_id{UiStringId::Protected};
     std::wstring name;
+    std::wstring kind_text;
+    std::wstring format_text;
+    std::wstring detail_text;
+    std::wstring visibility_text;
+    std::wstring editability_text;
+    std::wstring accessible_text;
     std::uint32_t thumbnail_width{};
     std::uint32_t thumbnail_height{};
     std::uint32_t thumbnail_stride_bytes{};

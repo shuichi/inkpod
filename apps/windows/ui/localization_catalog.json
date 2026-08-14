@@ -1,0 +1,8605 @@
+{
+  "schema": 1,
+  "languages": [
+    "ja-JP",
+    "en-US"
+  ],
+  "entries": [
+    {
+      "id": "ToolPencil",
+      "kind": "text",
+      "ja": "鉛筆",
+      "en": "Pencil",
+      "resource": false
+    },
+    {
+      "id": "ToolBrush",
+      "kind": "text",
+      "ja": "ブラシ",
+      "en": "Brush",
+      "resource": false
+    },
+    {
+      "id": "ToolEraser",
+      "kind": "text",
+      "ja": "消しゴム",
+      "en": "Eraser",
+      "resource": false
+    },
+    {
+      "id": "ToolFill",
+      "kind": "text",
+      "ja": "塗りつぶし",
+      "en": "Fill",
+      "resource": false
+    },
+    {
+      "id": "ToolClosedRegionFill",
+      "kind": "text",
+      "ja": "閉領域塗り",
+      "en": "Closed-region Fill",
+      "resource": false
+    },
+    {
+      "id": "ToolFillExtension",
+      "kind": "text",
+      "ja": "塗り延ばし",
+      "en": "Fill Extension",
+      "resource": false
+    },
+    {
+      "id": "ToolEyedropper",
+      "kind": "text",
+      "ja": "スポイト",
+      "en": "Eyedropper",
+      "resource": false
+    },
+    {
+      "id": "ToolVectorLine",
+      "kind": "text",
+      "ja": "直線",
+      "en": "Line",
+      "resource": true
+    },
+    {
+      "id": "ToolVectorCurve",
+      "kind": "text",
+      "ja": "曲線",
+      "en": "Curve",
+      "resource": true
+    },
+    {
+      "id": "ToolVectorRectangle",
+      "kind": "text",
+      "ja": "長方形",
+      "en": "Rectangle",
+      "resource": true
+    },
+    {
+      "id": "ToolVectorEllipse",
+      "kind": "text",
+      "ja": "楕円",
+      "en": "Ellipse",
+      "resource": true
+    },
+    {
+      "id": "ToolVectorPolyline",
+      "kind": "text",
+      "ja": "折れ線",
+      "en": "Polyline",
+      "resource": true
+    },
+    {
+      "id": "ToolVectorPolygon",
+      "kind": "text",
+      "ja": "正多角形",
+      "en": "Regular Polygon",
+      "resource": true
+    },
+    {
+      "id": "ToolVectorEraser",
+      "kind": "text",
+      "ja": "線消しゴム",
+      "en": "Vector Eraser",
+      "resource": false
+    },
+    {
+      "id": "ToolGradient",
+      "kind": "text",
+      "ja": "グラデーション",
+      "en": "Gradient",
+      "resource": false
+    },
+    {
+      "id": "ToolAirbrush",
+      "kind": "text",
+      "ja": "エアブラシ",
+      "en": "Airbrush",
+      "resource": false
+    },
+    {
+      "id": "ToolBoundaryAirbrush",
+      "kind": "text",
+      "ja": "境界ブラシ",
+      "en": "Boundary Brush",
+      "resource": false
+    },
+    {
+      "id": "ToolBlur",
+      "kind": "text",
+      "ja": "ぼかし",
+      "en": "Blur",
+      "resource": false
+    },
+    {
+      "id": "ToolStamp",
+      "kind": "text",
+      "ja": "スタンプ",
+      "en": "Stamp",
+      "resource": false
+    },
+    {
+      "id": "ToolDustRemoval",
+      "kind": "text",
+      "ja": "ゴミ取り",
+      "en": "Dust Removal",
+      "resource": true
+    },
+    {
+      "id": "ToolAlphaGradient",
+      "kind": "text",
+      "ja": "アルファ階調",
+      "en": "Alpha Gradient",
+      "resource": false
+    },
+    {
+      "id": "ToolClosedRegionFillCompact",
+      "kind": "text",
+      "ja": "閉領域塗り",
+      "en": "Closed Fill",
+      "resource": false
+    },
+    {
+      "id": "ToolFillExtensionCompact",
+      "kind": "text",
+      "ja": "塗り延ばし",
+      "en": "Fill Extend",
+      "resource": false
+    },
+    {
+      "id": "ToolVectorEraserCompact",
+      "kind": "text",
+      "ja": "線消しゴム",
+      "en": "Vector Erase",
+      "resource": false
+    },
+    {
+      "id": "ToolBoundaryAirbrushCompact",
+      "kind": "text",
+      "ja": "境界ブラシ",
+      "en": "Boundary",
+      "resource": false
+    },
+    {
+      "id": "ToolDustRemovalCompact",
+      "kind": "text",
+      "ja": "ゴミ取り",
+      "en": "Dust",
+      "resource": false
+    },
+    {
+      "id": "ToolAlphaGradientCompact",
+      "kind": "text",
+      "ja": "アルファ階調",
+      "en": "Alpha Grad.",
+      "resource": false
+    },
+    {
+      "id": "ToolGeneric",
+      "kind": "text",
+      "ja": "ツール",
+      "en": "Tool",
+      "resource": true
+    },
+    {
+      "id": "ToolBoxZoom",
+      "kind": "text",
+      "ja": "範囲拡大",
+      "en": "Zoom to Box",
+      "resource": false
+    },
+    {
+      "id": "ToolGuideMove",
+      "kind": "text",
+      "ja": "ガイド移動",
+      "en": "Move Guide",
+      "resource": false
+    },
+    {
+      "id": "ToolSelection",
+      "kind": "text",
+      "ja": "選択",
+      "en": "Selection",
+      "resource": true
+    },
+    {
+      "id": "ToolColorReplacement",
+      "kind": "text",
+      "ja": "色置換",
+      "en": "Color Replacement",
+      "resource": true
+    },
+    {
+      "id": "ToolFloatingTransform",
+      "kind": "text",
+      "ja": "変形",
+      "en": "Transform",
+      "resource": false
+    },
+    {
+      "id": "ToolLightTableMove",
+      "kind": "text",
+      "ja": "ライトテーブル移動",
+      "en": "Move Light Table Item",
+      "resource": false
+    },
+    {
+      "id": "ToolShootingFrame",
+      "kind": "text",
+      "ja": "撮影フレーム",
+      "en": "Shooting Frame",
+      "resource": false
+    },
+    {
+      "id": "ToolVanishingPoint",
+      "kind": "text",
+      "ja": "消失点",
+      "en": "Vanishing Point",
+      "resource": false
+    },
+    {
+      "id": "ToolDetails",
+      "kind": "text",
+      "ja": "詳細...",
+      "en": "Details...",
+      "resource": false
+    },
+    {
+      "id": "ToolDiameter",
+      "kind": "text",
+      "ja": "直径",
+      "en": "Diameter",
+      "resource": false
+    },
+    {
+      "id": "ToolEraseTarget",
+      "kind": "text",
+      "ja": "消去対象",
+      "en": "Erase Target",
+      "resource": false
+    },
+    {
+      "id": "ToolFillMatchingStartColor",
+      "kind": "text",
+      "ja": "開始色の部分だけ塗る",
+      "en": "Fill Only Areas Matching Start Color",
+      "resource": false
+    },
+    {
+      "id": "MainLine",
+      "kind": "text",
+      "ja": "主線",
+      "en": "Main Line",
+      "resource": true
+    },
+    {
+      "id": "Coloring",
+      "kind": "text",
+      "ja": "彩色",
+      "en": "Coloring",
+      "resource": true
+    },
+    {
+      "id": "Color",
+      "kind": "text",
+      "ja": "カラー",
+      "en": "Color",
+      "resource": true
+    },
+    {
+      "id": "Palette",
+      "kind": "text",
+      "ja": "パレット",
+      "en": "Palette",
+      "resource": false
+    },
+    {
+      "id": "Chart",
+      "kind": "text",
+      "ja": "チャート",
+      "en": "Chart",
+      "resource": false
+    },
+    {
+      "id": "Reference",
+      "kind": "text",
+      "ja": "参照",
+      "en": "Reference",
+      "resource": true
+    },
+    {
+      "id": "LightTable",
+      "kind": "text",
+      "ja": "ライトテーブル",
+      "en": "Light Table",
+      "resource": true
+    },
+    {
+      "id": "Layer",
+      "kind": "text",
+      "ja": "レイヤー",
+      "en": "Layer",
+      "resource": true
+    },
+    {
+      "id": "Plane",
+      "kind": "text",
+      "ja": "プレーン",
+      "en": "Plane",
+      "resource": true
+    },
+    {
+      "id": "LayerPlane",
+      "kind": "text",
+      "ja": "レイヤー／プレーン",
+      "en": "Layer / Plane",
+      "resource": true
+    },
+    {
+      "id": "LayerPlaneSplitterAccessibleName",
+      "kind": "text",
+      "ja": "レイヤーとプレーンの高さを変更",
+      "en": "Resize Layer and Plane Sections",
+      "resource": true
+    },
+    {
+      "id": "Opacity",
+      "kind": "text",
+      "ja": "不透明度",
+      "en": "Opacity",
+      "resource": false
+    },
+    {
+      "id": "Apply",
+      "kind": "text",
+      "ja": "適用",
+      "en": "Apply",
+      "resource": true
+    },
+    {
+      "id": "Register",
+      "kind": "text",
+      "ja": "登録",
+      "en": "Register",
+      "resource": false
+    },
+    {
+      "id": "Delete",
+      "kind": "text",
+      "ja": "削除",
+      "en": "Delete",
+      "resource": true
+    },
+    {
+      "id": "Clear",
+      "kind": "text",
+      "ja": "クリア",
+      "en": "Clear",
+      "resource": true
+    },
+    {
+      "id": "Load",
+      "kind": "text",
+      "ja": "読込",
+      "en": "Load",
+      "resource": false
+    },
+    {
+      "id": "Save",
+      "kind": "text",
+      "ja": "保存",
+      "en": "Save",
+      "resource": false
+    },
+    {
+      "id": "PinDocument",
+      "kind": "text",
+      "ja": "文書に固定",
+      "en": "Pin to Document",
+      "resource": true
+    },
+    {
+      "id": "ReturnToFollowing",
+      "kind": "text",
+      "ja": "追従へ戻す",
+      "en": "Return to Following",
+      "resource": false
+    },
+    {
+      "id": "FollowingActive",
+      "kind": "text",
+      "ja": "アクティブに追従",
+      "en": "Following Active Document",
+      "resource": true
+    },
+    {
+      "id": "FollowingNoTarget",
+      "kind": "text",
+      "ja": "アクティブに追従（対象なし）",
+      "en": "Following Active Document (No Target)",
+      "resource": false
+    },
+    {
+      "id": "PinnedClosedFollowingNoTarget",
+      "kind": "text",
+      "ja": "固定先を閉じたためアクティブに追従（対象なし）",
+      "en": "Pinned Document Closed; Following Active Document (No Target)",
+      "resource": false
+    },
+    {
+      "id": "FollowingPrefix",
+      "kind": "text",
+      "ja": "アクティブに追従: ",
+      "en": "Following: ",
+      "resource": false
+    },
+    {
+      "id": "PinnedPrefix",
+      "kind": "text",
+      "ja": "固定: ",
+      "en": "Pinned: ",
+      "resource": false
+    },
+    {
+      "id": "PinnedClosedFollowingPrefix",
+      "kind": "text",
+      "ja": "固定先を閉じたため追従: ",
+      "en": "Pinned Document Closed; Following: ",
+      "resource": false
+    },
+    {
+      "id": "JobPrefix",
+      "kind": "text",
+      "ja": "ジョブ ",
+      "en": "Job ",
+      "resource": false
+    },
+    {
+      "id": "JobClosedNoTarget",
+      "kind": "text",
+      "ja": "ジョブ終了（対象なし）",
+      "en": "Job Closed (No Target)",
+      "resource": false
+    },
+    {
+      "id": "OperationTargetLayer",
+      "kind": "text",
+      "ja": "操作対象: レイヤー",
+      "en": "Target: Layer",
+      "resource": true
+    },
+    {
+      "id": "OperationTargetPlane",
+      "kind": "text",
+      "ja": "操作対象: プレーン",
+      "en": "Target: Plane",
+      "resource": true
+    },
+    {
+      "id": "LayerBinaryColoring",
+      "kind": "text",
+      "ja": "2値彩色",
+      "en": "Binary Coloring",
+      "resource": false
+    },
+    {
+      "id": "LayerGrayscaleColoring",
+      "kind": "text",
+      "ja": "階調彩色",
+      "en": "Grayscale Coloring",
+      "resource": false
+    },
+    {
+      "id": "LayerRasterGeneral",
+      "kind": "text",
+      "ja": "ラスター汎用",
+      "en": "General Raster",
+      "resource": false
+    },
+    {
+      "id": "LayerSelection",
+      "kind": "text",
+      "ja": "選択範囲",
+      "en": "Selection",
+      "resource": false
+    },
+    {
+      "id": "LayerFrame",
+      "kind": "text",
+      "ja": "フレーム",
+      "en": "Frame",
+      "resource": false
+    },
+    {
+      "id": "LayerVanishingPoint",
+      "kind": "text",
+      "ja": "消失点",
+      "en": "Vanishing Point",
+      "resource": false
+    },
+    {
+      "id": "LayerAdjustment",
+      "kind": "text",
+      "ja": "調整",
+      "en": "Adjustment",
+      "resource": false
+    },
+    {
+      "id": "LayerText",
+      "kind": "text",
+      "ja": "テキスト",
+      "en": "Text",
+      "resource": false
+    },
+    {
+      "id": "LayerInstruction",
+      "kind": "text",
+      "ja": "指示",
+      "en": "Instruction",
+      "resource": true
+    },
+    {
+      "id": "LayerVectorColoring",
+      "kind": "text",
+      "ja": "ベクター彩色",
+      "en": "Vector Coloring",
+      "resource": false
+    },
+    {
+      "id": "LayerUnknown",
+      "kind": "text",
+      "ja": "不明",
+      "en": "Unknown",
+      "resource": false
+    },
+    {
+      "id": "PlaneColorTrace",
+      "kind": "text",
+      "ja": "色トレース",
+      "en": "Color Trace",
+      "resource": true
+    },
+    {
+      "id": "PlaneRaster",
+      "kind": "text",
+      "ja": "ラスター",
+      "en": "Raster",
+      "resource": true
+    },
+    {
+      "id": "PlaneSelection",
+      "kind": "text",
+      "ja": "選択",
+      "en": "Selection",
+      "resource": false
+    },
+    {
+      "id": "PlaneVectorMainLine",
+      "kind": "text",
+      "ja": "ベクター主線",
+      "en": "Vector Main Line",
+      "resource": true
+    },
+    {
+      "id": "PlaneVectorFill",
+      "kind": "text",
+      "ja": "ベクター塗り",
+      "en": "Vector Fill",
+      "resource": true
+    },
+    {
+      "id": "NameMissing",
+      "kind": "text",
+      "ja": "(名称なし)",
+      "en": "(Unnamed)",
+      "resource": false
+    },
+    {
+      "id": "NameUnavailable",
+      "kind": "text",
+      "ja": "(名称を表示できません)",
+      "en": "(Name Unavailable)",
+      "resource": false
+    },
+    {
+      "id": "FormatLabel",
+      "kind": "text",
+      "ja": "形式",
+      "en": "Format",
+      "resource": false
+    },
+    {
+      "id": "PlaneCountSuffix",
+      "kind": "text",
+      "ja": " プレーン",
+      "en": " planes",
+      "resource": false
+    },
+    {
+      "id": "Visible",
+      "kind": "text",
+      "ja": "表示",
+      "en": "Visible",
+      "resource": true
+    },
+    {
+      "id": "Hidden",
+      "kind": "text",
+      "ja": "非表示",
+      "en": "Hidden",
+      "resource": false
+    },
+    {
+      "id": "Editable",
+      "kind": "text",
+      "ja": "編集",
+      "en": "Editable",
+      "resource": true
+    },
+    {
+      "id": "Protected",
+      "kind": "text",
+      "ja": "保護",
+      "en": "Protected",
+      "resource": false
+    },
+    {
+      "id": "EditTargetPrefix",
+      "kind": "text",
+      "ja": "[編集対象] ",
+      "en": "[Edit Target] ",
+      "resource": false
+    },
+    {
+      "id": "MainLineColor",
+      "kind": "text",
+      "ja": "主線色",
+      "en": "Main Line Color",
+      "resource": false
+    },
+    {
+      "id": "DrawingColor",
+      "kind": "text",
+      "ja": "彩色用描画色",
+      "en": "Drawing Color",
+      "resource": false
+    },
+    {
+      "id": "SelectedMainLineColor",
+      "kind": "text",
+      "ja": "選択中: 主線色",
+      "en": "Selected: Main Line Color",
+      "resource": false
+    },
+    {
+      "id": "SelectedDrawingColor",
+      "kind": "text",
+      "ja": "選択中: 彩色用描画色",
+      "en": "Selected: Drawing Color",
+      "resource": false
+    },
+    {
+      "id": "ColorChannelsDescription",
+      "kind": "text",
+      "ja": "色相・彩度・明度・不透明度",
+      "en": "Hue, Saturation, Value, and Opacity",
+      "resource": false
+    },
+    {
+      "id": "FileAdd",
+      "kind": "text",
+      "ja": "ファイルを追加",
+      "en": "Add File",
+      "resource": true
+    },
+    {
+      "id": "ExistingCellAdd",
+      "kind": "text",
+      "ja": "既存セルを追加",
+      "en": "Add Existing Cell",
+      "resource": false
+    },
+    {
+      "id": "SequenceNoCells",
+      "kind": "text",
+      "ja": "シーケンスはありません",
+      "en": "No Sequence",
+      "resource": true
+    },
+    {
+      "id": "TargetDocumentUnavailable",
+      "kind": "text",
+      "ja": "対象文書がありません",
+      "en": "No Target Document",
+      "resource": false
+    },
+    {
+      "id": "SequenceLoadFailed",
+      "kind": "text",
+      "ja": "シーケンスを読み込めません",
+      "en": "Sequence Could Not Be Loaded",
+      "resource": false
+    },
+    {
+      "id": "SequenceThumbnailLoadFailed",
+      "kind": "text",
+      "ja": "カットのセル thumbnail を読み込めません",
+      "en": "Cut Cell Thumbnail Could Not Be Loaded",
+      "resource": false
+    },
+    {
+      "id": "SequenceThumbnailRegisterFailed",
+      "kind": "text",
+      "ja": "カットのセル thumbnail を登録できません",
+      "en": "Cut Cell Thumbnail Could Not Be Cached",
+      "resource": false
+    },
+    {
+      "id": "SequenceDisplayOutOfMemory",
+      "kind": "text",
+      "ja": "シーケンス表示用メモリが不足しました",
+      "en": "Not Enough Memory to Display the Sequence",
+      "resource": false
+    },
+    {
+      "id": "CutDisplayOutOfMemory",
+      "kind": "text",
+      "ja": "カット表示用メモリが不足しました",
+      "en": "Not Enough Memory to Display the Cut",
+      "resource": false
+    },
+    {
+      "id": "CellsSuffix",
+      "kind": "text",
+      "ja": " セル",
+      "en": " cells",
+      "resource": false
+    },
+    {
+      "id": "CutPrefix",
+      "kind": "text",
+      "ja": "カット: ",
+      "en": "Cut: ",
+      "resource": false
+    },
+    {
+      "id": "CurrentCellOutsideMembers",
+      "kind": "text",
+      "ja": "現在のセルはメンバー外",
+      "en": "Current Cell Is Not a Member",
+      "resource": false
+    },
+    {
+      "id": "LocatorMovePointer",
+      "kind": "text",
+      "ja": "Canvas 上へポインターを移動してください",
+      "en": "Move the Pointer over the Canvas",
+      "resource": false
+    },
+    {
+      "id": "LocatorAccessibleName",
+      "kind": "text",
+      "ja": "ロケーター拡大表示。固定モードではクリックした画素を編集します。",
+      "en": "Locator Magnification. In Fixed Edit Mode, click a pixel to edit it.",
+      "resource": false
+    },
+    {
+      "id": "LocatorSelectionPrefix",
+      "kind": "text",
+      "ja": "選択 ",
+      "en": "Selection ",
+      "resource": false
+    },
+    {
+      "id": "LocatorNoSelection",
+      "kind": "text",
+      "ja": "選択なし",
+      "en": "No Selection",
+      "resource": false
+    },
+    {
+      "id": "SequenceAccessibleName",
+      "kind": "text",
+      "ja": "シーケンスのサムネイル一覧",
+      "en": "Sequence Thumbnails",
+      "resource": false
+    },
+    {
+      "id": "LightTableSetsAccessibleName",
+      "kind": "text",
+      "ja": "ライトテーブルセット",
+      "en": "Light Table Sets",
+      "resource": true
+    },
+    {
+      "id": "LightTableItemsAccessibleName",
+      "kind": "text",
+      "ja": "ライトテーブル参照画像",
+      "en": "Light Table Reference Images",
+      "resource": false
+    },
+    {
+      "id": "Monochrome",
+      "kind": "text",
+      "ja": "単色",
+      "en": "Monochrome",
+      "resource": false
+    },
+    {
+      "id": "Halftone",
+      "kind": "text",
+      "ja": "網点",
+      "en": "Halftone",
+      "resource": false
+    },
+    {
+      "id": "HiddenSuffix",
+      "kind": "text",
+      "ja": "  (非表示)",
+      "en": "  (Hidden)",
+      "resource": false
+    },
+    {
+      "id": "ItemsLabel",
+      "kind": "text",
+      "ja": "項目",
+      "en": "items",
+      "resource": false
+    },
+    {
+      "id": "NoDocument",
+      "kind": "text",
+      "ja": "文書なし",
+      "en": "No Document",
+      "resource": false
+    },
+    {
+      "id": "ZoomPrefix",
+      "kind": "text",
+      "ja": "ズーム: ",
+      "en": "Zoom: ",
+      "resource": false
+    },
+    {
+      "id": "FlipHorizontal",
+      "kind": "text",
+      "ja": "左右",
+      "en": "Horizontal Flip",
+      "resource": false
+    },
+    {
+      "id": "FlipVertical",
+      "kind": "text",
+      "ja": "上下",
+      "en": "Vertical Flip",
+      "resource": false
+    },
+    {
+      "id": "Grid",
+      "kind": "text",
+      "ja": "グリッド",
+      "en": "Grid",
+      "resource": true
+    },
+    {
+      "id": "Modified",
+      "kind": "text",
+      "ja": "変更あり",
+      "en": "Modified",
+      "resource": false
+    },
+    {
+      "id": "Saved",
+      "kind": "text",
+      "ja": "保存済み",
+      "en": "Saved",
+      "resource": false
+    },
+    {
+      "id": "EditTargetsPrefix",
+      "kind": "text",
+      "ja": "編集対象 ",
+      "en": "Edit Targets ",
+      "resource": false
+    },
+    {
+      "id": "DockTop",
+      "kind": "text",
+      "ja": "上へドック",
+      "en": "Dock Top",
+      "resource": false
+    },
+    {
+      "id": "DockLeft",
+      "kind": "text",
+      "ja": "左へドック",
+      "en": "Dock Left",
+      "resource": false
+    },
+    {
+      "id": "DockRight",
+      "kind": "text",
+      "ja": "右へドック",
+      "en": "Dock Right",
+      "resource": false
+    },
+    {
+      "id": "DockBottom",
+      "kind": "text",
+      "ja": "下へドック",
+      "en": "Dock Bottom",
+      "resource": false
+    },
+    {
+      "id": "DockGeneric",
+      "kind": "text",
+      "ja": "ドック",
+      "en": "Dock",
+      "resource": false
+    },
+    {
+      "id": "DockTopSplitPosition",
+      "kind": "text",
+      "ja": "上ドック内の分割位置",
+      "en": "Split Position in Top Dock",
+      "resource": false
+    },
+    {
+      "id": "DockLeftSplitPosition",
+      "kind": "text",
+      "ja": "左ドック内の分割位置",
+      "en": "Split Position in Left Dock",
+      "resource": false
+    },
+    {
+      "id": "DockRightSplitPosition",
+      "kind": "text",
+      "ja": "右ドック内の分割位置",
+      "en": "Split Position in Right Dock",
+      "resource": false
+    },
+    {
+      "id": "DockBottomSplitPosition",
+      "kind": "text",
+      "ja": "下ドック内の分割位置",
+      "en": "Split Position in Bottom Dock",
+      "resource": false
+    },
+    {
+      "id": "DockPanelSplitPosition",
+      "kind": "text",
+      "ja": "パネルの分割位置",
+      "en": "Panel Split Position",
+      "resource": false
+    },
+    {
+      "id": "DockTopSize",
+      "kind": "text",
+      "ja": "上ドックの高さ",
+      "en": "Top Dock Height",
+      "resource": false
+    },
+    {
+      "id": "DockLeftSize",
+      "kind": "text",
+      "ja": "左ドックの幅",
+      "en": "Left Dock Width",
+      "resource": false
+    },
+    {
+      "id": "DockRightSize",
+      "kind": "text",
+      "ja": "右ドックの幅",
+      "en": "Right Dock Width",
+      "resource": false
+    },
+    {
+      "id": "DockBottomSize",
+      "kind": "text",
+      "ja": "下ドックの高さ",
+      "en": "Bottom Dock Height",
+      "resource": false
+    },
+    {
+      "id": "DockGenericSize",
+      "kind": "text",
+      "ja": "ドックの寸法",
+      "en": "Dock Size",
+      "resource": false
+    },
+    {
+      "id": "DockPreviewAccessibleName",
+      "kind": "text",
+      "ja": "ドック先のプレビュー",
+      "en": "Dock Destination Preview",
+      "resource": false
+    },
+    {
+      "id": "DockFloating",
+      "kind": "text",
+      "ja": "フローティング",
+      "en": "Floating",
+      "resource": false
+    },
+    {
+      "id": "DockSplitView",
+      "kind": "text",
+      "ja": "分割表示",
+      "en": "Split View",
+      "resource": false
+    },
+    {
+      "id": "DockTabView",
+      "kind": "text",
+      "ja": "タブ表示",
+      "en": "Tabbed View",
+      "resource": false
+    },
+    {
+      "id": "DockHide",
+      "kind": "text",
+      "ja": "非表示",
+      "en": "Hide",
+      "resource": false
+    },
+    {
+      "id": "DockResetPane",
+      "kind": "text",
+      "ja": "このパネルを初期位置へ戻す",
+      "en": "Reset This Panel to Its Default Position",
+      "resource": false
+    },
+    {
+      "id": "HistoryVisualizationTitle",
+      "kind": "text",
+      "ja": "Inkpodファイルの可視化",
+      "en": "Inkpod File Visualization",
+      "resource": true
+    },
+    {
+      "id": "HistoryVisualizationTitlePrefix",
+      "kind": "text",
+      "ja": "Inkpodファイルの可視化 — ",
+      "en": "Inkpod File Visualization — ",
+      "resource": false
+    },
+    {
+      "id": "HistoryRebuilding",
+      "kind": "text",
+      "ja": "編集履歴を再構築中...",
+      "en": "Rebuilding Edit History...",
+      "resource": false
+    },
+    {
+      "id": "Cancelling",
+      "kind": "text",
+      "ja": "キャンセル中...",
+      "en": "Cancelling...",
+      "resource": false
+    },
+    {
+      "id": "HistoryPreparing",
+      "kind": "text",
+      "ja": "履歴を準備中...",
+      "en": "Preparing History...",
+      "resource": false
+    },
+    {
+      "id": "HistoryRebuildingProgressFormat",
+      "kind": "format",
+      "ja": "編集履歴を再構築中... %llu / %llu",
+      "en": "Rebuilding Edit History... %llu / %llu",
+      "resource": false
+    },
+    {
+      "id": "Primitive",
+      "kind": "text",
+      "ja": "プリミティブ",
+      "en": "Primitive",
+      "resource": false
+    },
+    {
+      "id": "Arguments",
+      "kind": "text",
+      "ja": "引数",
+      "en": "Arguments",
+      "resource": false
+    },
+    {
+      "id": "Result",
+      "kind": "text",
+      "ja": "結果",
+      "en": "Result",
+      "resource": false
+    },
+    {
+      "id": "HistoryLoadFailed",
+      "kind": "text",
+      "ja": "履歴を読み込めませんでした",
+      "en": "History Could Not Be Loaded",
+      "resource": false
+    },
+    {
+      "id": "NoneParenthesized",
+      "kind": "text",
+      "ja": "(なし)",
+      "en": "(None)",
+      "resource": true
+    },
+    {
+      "id": "Text0001",
+      "kind": "text",
+      "ja": "\n\nこの結果を適用しますか？\n「いいえ」で設定を変更できます。",
+      "en": "\n\nApply this result?\nChoose No to change the settings.",
+      "resource": false
+    },
+    {
+      "id": "Text0002",
+      "kind": "text",
+      "ja": "\n\n上限を超えています。設定を変更してください。",
+      "en": "\n\nThe limit was exceeded. Change the settings.",
+      "resource": false
+    },
+    {
+      "id": "Text0003",
+      "kind": "text",
+      "ja": "\nこの内容を1回のUndo単位で登録しますか？",
+      "en": "\nRegister this content as one Undo step?",
+      "resource": false
+    },
+    {
+      "id": "Text0004",
+      "kind": "text",
+      "ja": "\n維持: ",
+      "en": "\nKept: ",
+      "resource": false
+    },
+    {
+      "id": "Text0005",
+      "kind": "text",
+      "ja": "  削除: ",
+      "en": "  Delete: ",
+      "resource": false
+    },
+    {
+      "id": "Text0006",
+      "kind": "text",
+      "ja": "  追加: ",
+      "en": "  Add: ",
+      "resource": false
+    },
+    {
+      "id": "Text0007",
+      "kind": "text",
+      "ja": " / キャンセル",
+      "en": " / Cancel",
+      "resource": false
+    },
+    {
+      "id": "Text0008",
+      "kind": "text",
+      "ja": " / 元の固有色: ",
+      "en": " / Original unique colors: ",
+      "resource": false
+    },
+    {
+      "id": "Text0009",
+      "kind": "text",
+      "ja": " / 検査 ",
+      "en": " / Check ",
+      "resource": false
+    },
+    {
+      "id": "Text0010",
+      "kind": "text",
+      "ja": " / 範囲 ",
+      "en": " / Range ",
+      "resource": false
+    },
+    {
+      "id": "Text0011",
+      "kind": "text",
+      "ja": " / 透明除外 ",
+      "en": " / Exclude transparent ",
+      "resource": false
+    },
+    {
+      "id": "Text0012",
+      "kind": "text",
+      "ja": " [ビュー ",
+      "en": " [View ",
+      "resource": false
+    },
+    {
+      "id": "Text0013",
+      "kind": "text",
+      "ja": " — 開始中",
+      "en": " — Starting",
+      "resource": false
+    },
+    {
+      "id": "Text0014",
+      "kind": "text",
+      "ja": " 項目",
+      "en": " items",
+      "resource": false
+    },
+    {
+      "id": "Text0015",
+      "kind": "format",
+      "ja": "%ls に失敗しました。\n\n%ls",
+      "en": "%ls failed.\n\n%ls",
+      "resource": false
+    },
+    {
+      "id": "Text0016",
+      "kind": "format",
+      "ja": "%zu. セル%u  距離%u  %u.%u%%  既存を保持 ",
+      "en": "%zu. Cell %u  Distance %u  %u.%u%%  Keep existing ",
+      "resource": false
+    },
+    {
+      "id": "Text0017",
+      "kind": "format",
+      "ja": "%zu. セル%u  距離%u  %u.%u%%  追加\n",
+      "en": "%zu. Cell %u  Distance %u  %u.%u%%  Add\n",
+      "resource": false
+    },
+    {
+      "id": "Text0018",
+      "kind": "text",
+      "ja": "(metadata なし)",
+      "en": "(metadata None)",
+      "resource": false
+    },
+    {
+      "id": "Text0019",
+      "kind": "format",
+      "ja": "(候補rev %llu / 既存rev %llu)\n",
+      "en": "(candidate rev %llu / existing rev %llu)\n",
+      "resource": false
+    },
+    {
+      "id": "Text0020",
+      "kind": "text",
+      "ja": "(未保存文書)",
+      "en": "(Unsaved Document)",
+      "resource": false
+    },
+    {
+      "id": "Text0021",
+      "kind": "format",
+      "ja": "...ほか %zu件（順序と件数はこのプレビューのまま適用）\n",
+      "en": "...and %zu more (the preview order and count will be applied)\n",
+      "resource": false
+    },
+    {
+      "id": "Text0022",
+      "kind": "text",
+      "ja": "0: 初期状態",
+      "en": "0: Initial state",
+      "resource": false
+    },
+    {
+      "id": "Text0023",
+      "kind": "text",
+      "ja": "1 (なし)",
+      "en": "1 (None)",
+      "resource": true
+    },
+    {
+      "id": "Text0024",
+      "kind": "format",
+      "ja": "100%%フレーム (%d, %d) %d x %d / 安全 %d x %d\r\n",
+      "en": "100%% frame (%d, %d) %d x %d / safe %d x %d\r\n",
+      "resource": false
+    },
+    {
+      "id": "Text0025",
+      "kind": "text",
+      "ja": "100%フレーム (μm)",
+      "en": "100%Frame (μm)",
+      "resource": true
+    },
+    {
+      "id": "Text0026",
+      "kind": "text",
+      "ja": "100フレーム",
+      "en": "100Frame",
+      "resource": false
+    },
+    {
+      "id": "Text0027",
+      "kind": "text",
+      "ja": "100フレーム...",
+      "en": "100% Frame...",
+      "resource": true
+    },
+    {
+      "id": "Text0028",
+      "kind": "text",
+      "ja": "2 (なし)",
+      "en": "2 (None)",
+      "resource": true
+    },
+    {
+      "id": "Text0029",
+      "kind": "text",
+      "ja": "2値",
+      "en": "Binary",
+      "resource": false
+    },
+    {
+      "id": "Text0030",
+      "kind": "text",
+      "ja": "2値（8 bit）",
+      "en": "Binary (8 bit)",
+      "resource": true
+    },
+    {
+      "id": "Text0031",
+      "kind": "text",
+      "ja": "3 (なし)",
+      "en": "3 (None)",
+      "resource": true
+    },
+    {
+      "id": "Text0032",
+      "kind": "text",
+      "ja": "4 (なし)",
+      "en": "4 (None)",
+      "resource": true
+    },
+    {
+      "id": "Text0033",
+      "kind": "text",
+      "ja": "45度制約",
+      "en": "45-degree constraint",
+      "resource": false
+    },
+    {
+      "id": "Text0034",
+      "kind": "text",
+      "ja": "45度制約 / 筆圧",
+      "en": "45-degree constraint / pressure",
+      "resource": true
+    },
+    {
+      "id": "Text0035",
+      "kind": "text",
+      "ja": "5 (なし)",
+      "en": "5 (None)",
+      "resource": true
+    },
+    {
+      "id": "Text0036",
+      "kind": "text",
+      "ja": "6 (なし)",
+      "en": "6 (None)",
+      "resource": true
+    },
+    {
+      "id": "Text0037",
+      "kind": "text",
+      "ja": "7 (なし)",
+      "en": "7 (None)",
+      "resource": true
+    },
+    {
+      "id": "Text0038",
+      "kind": "text",
+      "ja": "8 (なし)",
+      "en": "8 (None)",
+      "resource": true
+    },
+    {
+      "id": "Text0039",
+      "kind": "text",
+      "ja": "90度回転",
+      "en": "Rotate 90°",
+      "resource": true
+    },
+    {
+      "id": "Text0040",
+      "kind": "format",
+      "ja": "Alpha表示 (1:数値 2:%)",
+      "en": "Alpha display (1:value 2:%)",
+      "resource": false
+    },
+    {
+      "id": "Text0041",
+      "kind": "text",
+      "ja": "BT.709 保守ガード（規格適合判定ではありません）",
+      "en": "BT.709 conservative guard (not a standards-compliance test)",
+      "resource": false
+    },
+    {
+      "id": "Text0042",
+      "kind": "text",
+      "ja": "COM の初期化に失敗しました。",
+      "en": "COM initialization failed.",
+      "resource": false
+    },
+    {
+      "id": "Text0043",
+      "kind": "text",
+      "ja": "Canvas renderer の描画に失敗しました。",
+      "en": "The Canvas renderer failed to draw.",
+      "resource": false
+    },
+    {
+      "id": "Text0044",
+      "kind": "text",
+      "ja": "Canvas に表示",
+      "en": "Show on Canvas",
+      "resource": true
+    },
+    {
+      "id": "Text0045",
+      "kind": "text",
+      "ja": "Canvas に表示・snap 対象",
+      "en": "Show on Canvas / snap target",
+      "resource": true
+    },
+    {
+      "id": "Text0046",
+      "kind": "text",
+      "ja": "Canvas スクロール同期",
+      "en": "Synchronize Canvas scrolling",
+      "resource": true
+    },
+    {
+      "id": "Text0047",
+      "kind": "text",
+      "ja": "Canvasで移動",
+      "en": "Move on Canvas",
+      "resource": true
+    },
+    {
+      "id": "Text0048",
+      "kind": "text",
+      "ja": "Canvasで移動 (Shift:全項目)",
+      "en": "Move on Canvas (Shift: All Items)",
+      "resource": true
+    },
+    {
+      "id": "Text0049",
+      "kind": "text",
+      "ja": "Canvasのプレビューを更新しました。",
+      "en": "The Canvas preview was updated.",
+      "resource": false
+    },
+    {
+      "id": "Text0050",
+      "kind": "text",
+      "ja": "Canvasのプレビューを適用しますか？\nキャンセルすると元の状態へ完全に戻ります。",
+      "en": "Apply the Canvas preview?\nCancel restores the original state completely.",
+      "resource": false
+    },
+    {
+      "id": "Text0051",
+      "kind": "text",
+      "ja": "Canvas効果",
+      "en": "Canvas effect",
+      "resource": false
+    },
+    {
+      "id": "Text0052",
+      "kind": "text",
+      "ja": "Color chart の生成に失敗しました。文書状態と設定を確認してください。",
+      "en": "Color chart generation failed. Check the document state and settings.",
+      "resource": false
+    },
+    {
+      "id": "Text0053",
+      "kind": "text",
+      "ja": "Color chart 生成",
+      "en": "Generate Color Chart",
+      "resource": false
+    },
+    {
+      "id": "Text0054",
+      "kind": "text",
+      "ja": "Color chart 生成結果の比較",
+      "en": "Compare Color Chart Results",
+      "resource": false
+    },
+    {
+      "id": "Text0055",
+      "kind": "text",
+      "ja": "Color chart: 準備中...",
+      "en": "Color chart: Preparing...",
+      "resource": true
+    },
+    {
+      "id": "Text0056",
+      "kind": "text",
+      "ja": "Common Controls の初期化に失敗しました。",
+      "en": "Common Controls initialization failed.",
+      "resource": false
+    },
+    {
+      "id": "Text0057",
+      "kind": "text",
+      "ja": "Inkpod Color Chart (*.inkchart)\u0000*.inkchart\u0000すべてのファイル\u0000*.*\u0000\u0000",
+      "en": "Inkpod Color Chart (*.inkchart)\u0000*.inkchart\u0000All Files\u0000*.*\u0000\u0000",
+      "resource": false
+    },
+    {
+      "id": "Text0058",
+      "kind": "text",
+      "ja": "Inkpod Palette (*.inkpalette)\u0000*.inkpalette\u0000すべてのファイル\u0000*.*\u0000\u0000",
+      "en": "Inkpod Palette (*.inkpalette)\u0000*.inkpalette\u0000All Files\u0000*.*\u0000\u0000",
+      "resource": false
+    },
+    {
+      "id": "Text0059",
+      "kind": "text",
+      "ja": "Inkpodについて(&A)...",
+      "en": "&About Inkpod...",
+      "resource": true
+    },
+    {
+      "id": "Text0060",
+      "kind": "text",
+      "ja": "Inkpodウェブページ(&W)",
+      "en": "Inkpod &Website",
+      "resource": true
+    },
+    {
+      "id": "Text0061",
+      "kind": "text",
+      "ja": "Inkpodウェブページを表示できませんでした。既定ブラウザーの設定を確認してください。",
+      "en": "The Inkpod web page could not be opened. Check the default browser settings.",
+      "resource": true
+    },
+    {
+      "id": "Text0062",
+      "kind": "text",
+      "ja": "Inkpodファイルフォーマット(&F)",
+      "en": "Inkpod &File Format",
+      "resource": true
+    },
+    {
+      "id": "Text0063",
+      "kind": "text",
+      "ja": "Inkpodファイルフォーマットを表示できませんでした。保存先へのアクセスと既定ブラウザーの設定を確認してください。",
+      "en": "The Inkpod file format page could not be opened. Check access to the destination and the default browser settings.",
+      "resource": true
+    },
+    {
+      "id": "Text0064",
+      "kind": "text",
+      "ja": "LTから色",
+      "en": "Use LT colors",
+      "resource": true
+    },
+    {
+      "id": "Text0065",
+      "kind": "text",
+      "ja": "LTを境界",
+      "en": "Use LT as boundary",
+      "resource": true
+    },
+    {
+      "id": "Text0066",
+      "kind": "text",
+      "ja": "LT表示 (0/1)",
+      "en": "LTDisplay (0/1)",
+      "resource": false
+    },
+    {
+      "id": "Text0067",
+      "kind": "text",
+      "ja": "P0 / 明るさ / shadow",
+      "en": "P0 / Brightness / shadow",
+      "resource": false
+    },
+    {
+      "id": "Text0068",
+      "kind": "text",
+      "ja": "RGBA（16 bit/チャンネル）",
+      "en": "RGBA (16 bit/channel)",
+      "resource": true
+    },
+    {
+      "id": "Text0069",
+      "kind": "text",
+      "ja": "RGBA（8 bit/チャンネル）",
+      "en": "RGBA (8 bit/channel)",
+      "resource": true
+    },
+    {
+      "id": "Text0070",
+      "kind": "text",
+      "ja": "Recovery path の保持",
+      "en": "Retain Recovery path",
+      "resource": false
+    },
+    {
+      "id": "Text0071",
+      "kind": "text",
+      "ja": "Recovery の元文書は既に開いています。候補は破棄せず保持しました。",
+      "en": "The source document for this Recovery is already open. The candidate was retained.",
+      "resource": false
+    },
+    {
+      "id": "Text0072",
+      "kind": "text",
+      "ja": "Recoveryの破棄",
+      "en": "Discard Recovery",
+      "resource": false
+    },
+    {
+      "id": "Text0073",
+      "kind": "text",
+      "ja": "Recoveryを保存(&V)",
+      "en": "Sa&ve Recovery",
+      "resource": true
+    },
+    {
+      "id": "Text0074",
+      "kind": "text",
+      "ja": "Recoveryを開く",
+      "en": "Open Recovery",
+      "resource": false
+    },
+    {
+      "id": "Text0075",
+      "kind": "text",
+      "ja": "Recoveryを開く(&Y)...",
+      "en": "Open Recover&y...",
+      "resource": true
+    },
+    {
+      "id": "Text0076",
+      "kind": "text",
+      "ja": "Recovery保存の予約",
+      "en": "Schedule Recovery save",
+      "resource": false
+    },
+    {
+      "id": "Text0077",
+      "kind": "format",
+      "ja": "Recovery候補 %zu / %zu\n\n",
+      "en": "Recovery candidate %zu / %zu\n\n",
+      "resource": false
+    },
+    {
+      "id": "Text0078",
+      "kind": "text",
+      "ja": "Recovery候補が上限を超えたか、一覧を安全に読み取れませんでした。",
+      "en": "The Recovery candidate limit was exceeded, or the list could not be read safely.",
+      "resource": false
+    },
+    {
+      "id": "Text0079",
+      "kind": "text",
+      "ja": "Recovery候補を削除できませんでした。ファイルは保持されています。",
+      "en": "The Recovery candidate could not be deleted. The file was retained.",
+      "resource": false
+    },
+    {
+      "id": "Text0080",
+      "kind": "text",
+      "ja": "Recovery候補を開く",
+      "en": "Open Recovery Candidate",
+      "resource": false
+    },
+    {
+      "id": "Text0081",
+      "kind": "format",
+      "ja": "Recovery日時: %04u-%02u-%02u %02u:%02u:%02u\n",
+      "en": "Recovery date: %04u-%02u-%02u %02u:%02u:%02u\n",
+      "resource": false
+    },
+    {
+      "id": "Text0082",
+      "kind": "text",
+      "ja": "Recovery（比較不能または元ファイル以下）",
+      "en": "Recovery (not comparable with or no newer than source file)",
+      "resource": false
+    },
+    {
+      "id": "Text0083",
+      "kind": "text",
+      "ja": "Rust Core の初期化",
+      "en": "Initialize Rust Core",
+      "resource": false
+    },
+    {
+      "id": "Text0084",
+      "kind": "text",
+      "ja": "TGA (*.tga)\u0000*.tga\u0000BMP (*.bmp)\u0000*.bmp\u0000すべてのファイル (*.*)\u0000*.*\u0000\u0000",
+      "en": "TGA (*.tga)\u0000*.tga\u0000BMP (*.bmp)\u0000*.bmp\u0000All Files (*.*)\u0000*.*\u0000\u0000",
+      "resource": false
+    },
+    {
+      "id": "Text0085",
+      "kind": "text",
+      "ja": "Windows色選択...",
+      "en": "Windows Color Picker...",
+      "resource": true
+    },
+    {
+      "id": "Text0086",
+      "kind": "text",
+      "ja": "X 原点",
+      "en": "X origin",
+      "resource": false
+    },
+    {
+      "id": "Text0087",
+      "kind": "text",
+      "ja": "Y 原点",
+      "en": "Y origin",
+      "resource": false
+    },
+    {
+      "id": "Text0088",
+      "kind": "text",
+      "ja": "[ビュー 2]",
+      "en": "[View 2]",
+      "resource": false
+    },
+    {
+      "id": "Text0089",
+      "kind": "text",
+      "ja": "crop内容を確認 (1)",
+      "en": "Confirm crop content (1)",
+      "resource": false
+    },
+    {
+      "id": "Text0090",
+      "kind": "text",
+      "ja": "file間 wait (ms)",
+      "en": "Inter-file wait (ms)",
+      "resource": false
+    },
+    {
+      "id": "Text0091",
+      "kind": "text",
+      "ja": "inkpod セル (*.inkpod)\u0000*.inkpod\u0000すべてのファイル (*.*)\u0000*.*\u0000\u0000",
+      "en": "inkpod Cell (*.inkpod)\u0000*.inkpod\u0000All Files (*.*)\u0000*.*\u0000\u0000",
+      "resource": false
+    },
+    {
+      "id": "Text0092",
+      "kind": "text",
+      "ja": "inkpod セル (*.inkpod)\u0000*.inkpod\u0000対応画像\u0000*.png;*.tif;*.tiff;*.tga;*.bmp\u0000",
+      "en": "inkpod Cell (*.inkpod)\u0000*.inkpod\u0000Supported Images\u0000*.png;*.tif;*.tiff;*.tga;*.bmp\u0000",
+      "resource": false
+    },
+    {
+      "id": "Text0093",
+      "kind": "text",
+      "ja": "inkpod バッチセット (*.inkbatch)\u0000*.inkbatch\u0000すべてのファイル (*.*)\u0000*.*\u0000\u0000",
+      "en": "inkpod Batch Set (*.inkbatch)\u0000*.inkbatch\u0000All Files (*.*)\u0000*.*\u0000\u0000",
+      "resource": false
+    },
+    {
+      "id": "Text0094",
+      "kind": "text",
+      "ja": "inkpod ヘルプ(&H)\tF1",
+      "en": "inkpod &Help\tF1",
+      "resource": true
+    },
+    {
+      "id": "Text0095",
+      "kind": "text",
+      "ja": "inkpod ヘルプを表示できませんでした。保存先へのアクセスと既定ブラウザーの設定を確認してください。",
+      "en": "Inkpod Help could not be opened. Check access to the destination and the default browser settings.",
+      "resource": true
+    },
+    {
+      "id": "Text0096",
+      "kind": "text",
+      "ja": "inkpod/対応画像 (*.inkpod;*.png;*.tif;*.tiff;*.tga;*.bmp)\u0000",
+      "en": "inkpod / Supported Images (*.inkpod;*.png;*.tif;*.tiff;*.tga;*.bmp)\u0000",
+      "resource": false
+    },
+    {
+      "id": "Text0097",
+      "kind": "text",
+      "ja": "layer kind (0=IDのみ)",
+      "en": "layer kind (0=ID only)",
+      "resource": false
+    },
+    {
+      "id": "Text0098",
+      "kind": "text",
+      "ja": "metadataがないRecovery（内容は保持されています）",
+      "en": "Recovery without metadata (content is retained)",
+      "resource": false
+    },
+    {
+      "id": "Text0099",
+      "kind": "text",
+      "ja": "one-to-many 色対応の解決",
+      "en": "Resolve one-to-many color mapping",
+      "resource": false
+    },
+    {
+      "id": "Text0100",
+      "kind": "text",
+      "ja": "plane kind (0=layer対象)",
+      "en": "plane kind (0=layerTarget)",
+      "resource": false
+    },
+    {
+      "id": "Text0101",
+      "kind": "text",
+      "ja": "stopは position:RRGGBBAA;... 形式で3～16個、0から1000まで昇順に指定してください。",
+      "en": "Specify 3–16 stops in position:RRGGBBAA;... format, sorted from 0 to 1000.",
+      "resource": false
+    },
+    {
+      "id": "Text0102",
+      "kind": "text",
+      "ja": "「いいえ」で次候補、全候補を『いいえ』で旧色を除外します。",
+      "en": "Choose No for the next candidate; choosing No for all candidates excludes the old color.",
+      "resource": false
+    },
+    {
+      "id": "Text0103",
+      "kind": "text",
+      "ja": "いいえ: この候補を破棄\n",
+      "en": "No: discard this candidate\n",
+      "resource": false
+    },
+    {
+      "id": "Text0104",
+      "kind": "format",
+      "ja": "このコピーでは履歴イベント %llu 件（編集手順 %llu 件）を破棄し、\n",
+      "en": "This copy will discard %llu history events (%llu edit procedures),\n",
+      "resource": false
+    },
+    {
+      "id": "Text0105",
+      "kind": "text",
+      "ja": "このパラメーターではプレビューを更新できませんでした。",
+      "en": "The preview could not be updated with these parameters.",
+      "resource": false
+    },
+    {
+      "id": "Text0106",
+      "kind": "text",
+      "ja": "この図形ツールを使用できる描画プレーンを選択してください。",
+      "en": "Select a drawing plane that supports this shape tool.",
+      "resource": false
+    },
+    {
+      "id": "Text0107",
+      "kind": "text",
+      "ja": "すべてのファイル (*.*)\u0000*.*\u0000\u0000",
+      "en": "All Files (*.*)\u0000*.*\u0000\u0000",
+      "resource": false
+    },
+    {
+      "id": "Text0108",
+      "kind": "text",
+      "ja": "すべての値を整数で指定してください。",
+      "en": "Enter all values as integers.",
+      "resource": false
+    },
+    {
+      "id": "Text0109",
+      "kind": "text",
+      "ja": "すべて削除",
+      "en": "Delete All",
+      "resource": true
+    },
+    {
+      "id": "Text0110",
+      "kind": "text",
+      "ja": "すべて選択",
+      "en": "Select All",
+      "resource": true
+    },
+    {
+      "id": "Text0111",
+      "kind": "text",
+      "ja": "その他",
+      "en": "Other",
+      "resource": false
+    },
+    {
+      "id": "Text0112",
+      "kind": "text",
+      "ja": "その割り当ては別のショートカットと前方一致します。\n",
+      "en": "That assignment has a prefix conflict with another shortcut.\n",
+      "resource": false
+    },
+    {
+      "id": "Text0113",
+      "kind": "text",
+      "ja": "なし",
+      "en": "None",
+      "resource": false
+    },
+    {
+      "id": "Text0114",
+      "kind": "text",
+      "ja": "のばし距離",
+      "en": "Extension distance",
+      "resource": true
+    },
+    {
+      "id": "Text0115",
+      "kind": "text",
+      "ja": "はい: Recoveryを開く\nいいえ: Recoveryを破棄\n",
+      "en": "Yes: open Recovery\nNo: discard Recovery\n",
+      "resource": false
+    },
+    {
+      "id": "Text0116",
+      "kind": "text",
+      "ja": "はい: この候補を復元\n",
+      "en": "Yes: restore this candidate\n",
+      "resource": false
+    },
+    {
+      "id": "Text0117",
+      "kind": "text",
+      "ja": "ぼかしツール...",
+      "en": "Blur Tool...",
+      "resource": true
+    },
+    {
+      "id": "Text0118",
+      "kind": "text",
+      "ja": "ぼかしツール（領域をCanvasで指定）",
+      "en": "Blur Tool (specify region on Canvas)",
+      "resource": false
+    },
+    {
+      "id": "Text0119",
+      "kind": "text",
+      "ja": "ぼかし半径",
+      "en": "Blur radius",
+      "resource": false
+    },
+    {
+      "id": "Text0120",
+      "kind": "text",
+      "ja": "ぼかし（弱）",
+      "en": "Blur (Weak)",
+      "resource": true
+    },
+    {
+      "id": "Text0121",
+      "kind": "text",
+      "ja": "ぼかし（強）",
+      "en": "Blur (Strong)",
+      "resource": true
+    },
+    {
+      "id": "Text0122",
+      "kind": "text",
+      "ja": "やり直し(&R)\tCtrl+Y",
+      "en": "&Redo\tCtrl+Y",
+      "resource": true
+    },
+    {
+      "id": "Text0123",
+      "kind": "text",
+      "ja": "やり直し: ",
+      "en": "Redo: ",
+      "resource": false
+    },
+    {
+      "id": "Text0124",
+      "kind": "text",
+      "ja": "より新しいパラメーターを待機中...",
+      "en": "Waiting for newer parameters...",
+      "resource": false
+    },
+    {
+      "id": "Text0125",
+      "kind": "text",
+      "ja": "アスペクト比",
+      "en": "Aspect ratio",
+      "resource": false
+    },
+    {
+      "id": "Text0126",
+      "kind": "text",
+      "ja": "アプリ内コピーは完了しましたが、Windowsクリップボードへ公開できませんでした。",
+      "en": "The in-app copy completed, but it could not be published to the Windows clipboard.",
+      "resource": false
+    },
+    {
+      "id": "Text0127",
+      "kind": "text",
+      "ja": "アルファをグレースケール表示",
+      "en": "Show Alpha as Grayscale",
+      "resource": true
+    },
+    {
+      "id": "Text0128",
+      "kind": "text",
+      "ja": "アルファグラデーション...",
+      "en": "Alpha Gradient...",
+      "resource": true
+    },
+    {
+      "id": "Text0129",
+      "kind": "text",
+      "ja": "アルファグラデーション（RGBは保持、Canvasをドラッグ）",
+      "en": "Alpha Gradient (preserves RGB; drag on Canvas)",
+      "resource": false
+    },
+    {
+      "id": "Text0130",
+      "kind": "text",
+      "ja": "アルファ表示",
+      "en": "Alpha display",
+      "resource": false
+    },
+    {
+      "id": "Text0131",
+      "kind": "text",
+      "ja": "アンシャープマスク...",
+      "en": "Unsharp Mask...",
+      "resource": true
+    },
+    {
+      "id": "Text0132",
+      "kind": "text",
+      "ja": "アンチエイリアス表示",
+      "en": "Antialiasing",
+      "resource": true
+    },
+    {
+      "id": "Text0133",
+      "kind": "text",
+      "ja": "ウィンドウ",
+      "en": "Window",
+      "resource": false
+    },
+    {
+      "id": "Text0134",
+      "kind": "text",
+      "ja": "ウィンドウ(&N)",
+      "en": "Wi&ndow",
+      "resource": true
+    },
+    {
+      "id": "Text0135",
+      "kind": "text",
+      "ja": "エアブラシ...",
+      "en": "Airbrush...",
+      "resource": true
+    },
+    {
+      "id": "Text0136",
+      "kind": "text",
+      "ja": "エアブラシ（Canvasをドラッグ）",
+      "en": "Airbrush (drag on Canvas)",
+      "resource": false
+    },
+    {
+      "id": "Text0137",
+      "kind": "text",
+      "ja": "オフ",
+      "en": "Off",
+      "resource": false
+    },
+    {
+      "id": "Text0138",
+      "kind": "text",
+      "ja": "オン",
+      "en": "On",
+      "resource": false
+    },
+    {
+      "id": "Text0139",
+      "kind": "text",
+      "ja": "カット",
+      "en": "Cut",
+      "resource": true
+    },
+    {
+      "id": "Text0140",
+      "kind": "text",
+      "ja": "カット(&T)...",
+      "en": "Cu&t...",
+      "resource": true
+    },
+    {
+      "id": "Text0141",
+      "kind": "text",
+      "ja": "カット(&X)\tCtrl+X",
+      "en": "Cu&t\tCtrl+X",
+      "resource": true
+    },
+    {
+      "id": "Text0142",
+      "kind": "text",
+      "ja": "カットのセル保存先が既に存在します。別のカット名を選んでください。",
+      "en": "The destination for a cut cell already exists. Choose a different cut name.",
+      "resource": false
+    },
+    {
+      "id": "Text0143",
+      "kind": "text",
+      "ja": "カットのセル系列",
+      "en": "Cut Cell Sequence",
+      "resource": true
+    },
+    {
+      "id": "Text0144",
+      "kind": "text",
+      "ja": "カットのセル系列編集",
+      "en": "Edit Cut Cell Sequence",
+      "resource": false
+    },
+    {
+      "id": "Text0145",
+      "kind": "text",
+      "ja": "カットのセル順変更",
+      "en": "Reorder Cut Cells",
+      "resource": false
+    },
+    {
+      "id": "Text0146",
+      "kind": "text",
+      "ja": "カットのプロパティ",
+      "en": "Cut Properties",
+      "resource": true
+    },
+    {
+      "id": "Text0147",
+      "kind": "text",
+      "ja": "カットのプロパティ...",
+      "en": "Cut Properties...",
+      "resource": true
+    },
+    {
+      "id": "Text0148",
+      "kind": "text",
+      "ja": "カットをやり直す",
+      "en": "Redo Cut",
+      "resource": true
+    },
+    {
+      "id": "Text0149",
+      "kind": "text",
+      "ja": "カットを保存",
+      "en": "Save Cut",
+      "resource": true
+    },
+    {
+      "id": "Text0150",
+      "kind": "text",
+      "ja": "カットを元に戻す",
+      "en": "Undo Cut",
+      "resource": true
+    },
+    {
+      "id": "Text0151",
+      "kind": "text",
+      "ja": "カットを閉じる",
+      "en": "Close Cut",
+      "resource": false
+    },
+    {
+      "id": "Text0152",
+      "kind": "text",
+      "ja": "カット名",
+      "en": "Cut name",
+      "resource": true
+    },
+    {
+      "id": "Text0153",
+      "kind": "text",
+      "ja": "カット名と1以上の尺を入力してください。",
+      "en": "Enter a cut name and a duration of at least 1.",
+      "resource": false
+    },
+    {
+      "id": "Text0154",
+      "kind": "text",
+      "ja": "カット履歴",
+      "en": "Cut History",
+      "resource": false
+    },
+    {
+      "id": "Text0155",
+      "kind": "text",
+      "ja": "カラーを文書に固定／追従",
+      "en": "Pin Color to Document / Follow",
+      "resource": true
+    },
+    {
+      "id": "Text0156",
+      "kind": "text",
+      "ja": "カラーチャート",
+      "en": "Color Chart",
+      "resource": true
+    },
+    {
+      "id": "Text0157",
+      "kind": "text",
+      "ja": "カラーチャートのロック",
+      "en": "Lock Color Chart",
+      "resource": false
+    },
+    {
+      "id": "Text0158",
+      "kind": "text",
+      "ja": "カラーチャート名",
+      "en": "Color chart name",
+      "resource": false
+    },
+    {
+      "id": "Text0159",
+      "kind": "text",
+      "ja": "カラーチャート検索",
+      "en": "Search Color Chart",
+      "resource": false
+    },
+    {
+      "id": "Text0160",
+      "kind": "text",
+      "ja": "カラーチャート生成",
+      "en": "Generate Color Chart",
+      "resource": false
+    },
+    {
+      "id": "Text0161",
+      "kind": "text",
+      "ja": "カラーチャート生成結果の適用",
+      "en": "Apply Color Chart Result",
+      "resource": false
+    },
+    {
+      "id": "Text0162",
+      "kind": "text",
+      "ja": "カラーバランス...",
+      "en": "Color Balance...",
+      "resource": true
+    },
+    {
+      "id": "Text0163",
+      "kind": "text",
+      "ja": "カラーパレット",
+      "en": "Color Palette",
+      "resource": true
+    },
+    {
+      "id": "Text0164",
+      "kind": "text",
+      "ja": "カラーパレット編集",
+      "en": "Color PaletteEdit",
+      "resource": false
+    },
+    {
+      "id": "Text0165",
+      "kind": "text",
+      "ja": "ガイド",
+      "en": "Guides",
+      "resource": true
+    },
+    {
+      "id": "Text0166",
+      "kind": "text",
+      "ja": "ガイドの削除",
+      "en": "Delete Guide",
+      "resource": false
+    },
+    {
+      "id": "Text0167",
+      "kind": "text",
+      "ja": "ガイドの追加",
+      "en": "Add Guide",
+      "resource": false
+    },
+    {
+      "id": "Text0168",
+      "kind": "text",
+      "ja": "ガイドを移動",
+      "en": "Move Guide",
+      "resource": true
+    },
+    {
+      "id": "Text0169",
+      "kind": "text",
+      "ja": "ガイド線",
+      "en": "Guides",
+      "resource": true
+    },
+    {
+      "id": "Text0170",
+      "kind": "text",
+      "ja": "ガウスぼかし...",
+      "en": "Gaussian Blur...",
+      "resource": true
+    },
+    {
+      "id": "Text0171",
+      "kind": "text",
+      "ja": "キャンセル",
+      "en": "Cancel",
+      "resource": true
+    },
+    {
+      "id": "Text0172",
+      "kind": "text",
+      "ja": "キャンセル: この候補を後で判断",
+      "en": "Cancel: decide about this candidate later",
+      "resource": false
+    },
+    {
+      "id": "Text0173",
+      "kind": "text",
+      "ja": "キャンセル: 後で判断して通常保存を開く",
+      "en": "Cancel: decide later and open the normal save",
+      "resource": false
+    },
+    {
+      "id": "Text0174",
+      "kind": "text",
+      "ja": "キー列",
+      "en": "Key sequence",
+      "resource": true
+    },
+    {
+      "id": "Text0175",
+      "kind": "text",
+      "ja": "クリックで色を採取。描画入力は文書へ送信しません。",
+      "en": "Click to sample a color. Drawing input is not sent to the document.",
+      "resource": true
+    },
+    {
+      "id": "Text0176",
+      "kind": "text",
+      "ja": "グラデーション...",
+      "en": "Gradient...",
+      "resource": true
+    },
+    {
+      "id": "Text0177",
+      "kind": "text",
+      "ja": "グラデーション（3～16 stops、Canvasをドラッグ）",
+      "en": "Gradient (3–16 stops; drag on Canvas)",
+      "resource": false
+    },
+    {
+      "id": "Text0178",
+      "kind": "text",
+      "ja": "グリッド設定",
+      "en": "Grid Settings",
+      "resource": false
+    },
+    {
+      "id": "Text0179",
+      "kind": "text",
+      "ja": "グリッド設定...",
+      "en": "Grid Settings...",
+      "resource": true
+    },
+    {
+      "id": "Text0180",
+      "kind": "text",
+      "ja": "グループを閉じる",
+      "en": "Close Group",
+      "resource": true
+    },
+    {
+      "id": "Text0181",
+      "kind": "text",
+      "ja": "グレースケール（16 bit）",
+      "en": "Grayscale (16 bit)",
+      "resource": true
+    },
+    {
+      "id": "Text0182",
+      "kind": "text",
+      "ja": "グレースケール（8 bit）",
+      "en": "Grayscale (8 bit)",
+      "resource": true
+    },
+    {
+      "id": "Text0183",
+      "kind": "text",
+      "ja": "コピー",
+      "en": "Copy",
+      "resource": true
+    },
+    {
+      "id": "Text0184",
+      "kind": "text",
+      "ja": "コピー(&C)\tCtrl+C",
+      "en": "&Copy\tCtrl+C",
+      "resource": true
+    },
+    {
+      "id": "Text0185",
+      "kind": "text",
+      "ja": "コマンド",
+      "en": "Command",
+      "resource": true
+    },
+    {
+      "id": "Text0186",
+      "kind": "text",
+      "ja": "コマンドとキーを指定してください。",
+      "en": "Specify a command and key sequence.",
+      "resource": false
+    },
+    {
+      "id": "Text0187",
+      "kind": "text",
+      "ja": "ゴミ取り...",
+      "en": "Dust Removal...",
+      "resource": true
+    },
+    {
+      "id": "Text0188",
+      "kind": "text",
+      "ja": "ゴミ取り（全体または領域を指定、vector planeは拒否）",
+      "en": "Dust Removal (whole image or selected region; vector planes are rejected)",
+      "resource": false
+    },
+    {
+      "id": "Text0189",
+      "kind": "text",
+      "ja": "サイズの基準",
+      "en": "Size basis",
+      "resource": true
+    },
+    {
+      "id": "Text0190",
+      "kind": "text",
+      "ja": "サブパレット登録",
+      "en": "Register in Subpalette",
+      "resource": false
+    },
+    {
+      "id": "Text0191",
+      "kind": "text",
+      "ja": "サブパレット色サンプル",
+      "en": "Subpalette Color Sample",
+      "resource": false
+    },
+    {
+      "id": "Text0192",
+      "kind": "text",
+      "ja": "サブパレット色サンプル...",
+      "en": "Sample Subpalette Color...",
+      "resource": true
+    },
+    {
+      "id": "Text0193",
+      "kind": "text",
+      "ja": "サブパレット／参照",
+      "en": "Subpalette / Reference",
+      "resource": true
+    },
+    {
+      "id": "Text0194",
+      "kind": "text",
+      "ja": "サブパレット／参照ビュー",
+      "en": "Subpalette / Reference View",
+      "resource": true
+    },
+    {
+      "id": "Text0195",
+      "kind": "text",
+      "ja": "システム設定",
+      "en": "System Default",
+      "resource": true
+    },
+    {
+      "id": "Text0196",
+      "kind": "text",
+      "ja": "シャープ（弱）",
+      "en": "Sharpen (Weak)",
+      "resource": true
+    },
+    {
+      "id": "Text0197",
+      "kind": "text",
+      "ja": "シャープ（強）",
+      "en": "Sharpen (Strong)",
+      "resource": true
+    },
+    {
+      "id": "Text0198",
+      "kind": "text",
+      "ja": "ショートカット: ",
+      "en": "Shortcut: ",
+      "resource": false
+    },
+    {
+      "id": "Text0199",
+      "kind": "text",
+      "ja": "ショートカットの初期化",
+      "en": "Reset Shortcuts",
+      "resource": false
+    },
+    {
+      "id": "Text0200",
+      "kind": "text",
+      "ja": "ショートカットを初期化",
+      "en": "Reset Shortcuts",
+      "resource": true
+    },
+    {
+      "id": "Text0201",
+      "kind": "text",
+      "ja": "ショートカット一覧の作成",
+      "en": "Build Shortcut List",
+      "resource": false
+    },
+    {
+      "id": "Text0202",
+      "kind": "text",
+      "ja": "ショートカット編集",
+      "en": "Edit Shortcuts",
+      "resource": true
+    },
+    {
+      "id": "Text0203",
+      "kind": "text",
+      "ja": "ショートカット編集...",
+      "en": "Edit Shortcuts...",
+      "resource": true
+    },
+    {
+      "id": "Text0204",
+      "kind": "text",
+      "ja": "シーケンス",
+      "en": "Sequence",
+      "resource": true
+    },
+    {
+      "id": "Text0205",
+      "kind": "text",
+      "ja": "シーケンスがありません",
+      "en": "No sequence",
+      "resource": false
+    },
+    {
+      "id": "Text0206",
+      "kind": "text",
+      "ja": "シーケンスの切り替え",
+      "en": "Switch Sequence",
+      "resource": false
+    },
+    {
+      "id": "Text0207",
+      "kind": "text",
+      "ja": "シーケンス／プレビュー",
+      "en": "Sequence / Preview",
+      "resource": true
+    },
+    {
+      "id": "Text0208",
+      "kind": "text",
+      "ja": "シーン",
+      "en": "Scene",
+      "resource": true
+    },
+    {
+      "id": "Text0209",
+      "kind": "text",
+      "ja": "スタンプ...",
+      "en": "Stamp...",
+      "resource": true
+    },
+    {
+      "id": "Text0210",
+      "kind": "text",
+      "ja": "スタンプ（Alt+クリックでsource、次にCanvasをドラッグ）",
+      "en": "Stamp (Alt+click for source, then drag on Canvas)",
+      "resource": false
+    },
+    {
+      "id": "Text0211",
+      "kind": "text",
+      "ja": "スナップ",
+      "en": "Snap",
+      "resource": true
+    },
+    {
+      "id": "Text0212",
+      "kind": "text",
+      "ja": "スポイト(&I)",
+      "en": "Eyedropper (&I)",
+      "resource": true
+    },
+    {
+      "id": "Text0213",
+      "kind": "text",
+      "ja": "スポイト参照元",
+      "en": "Eyedropper Source",
+      "resource": true
+    },
+    {
+      "id": "Text0214",
+      "kind": "text",
+      "ja": "セット",
+      "en": "Set",
+      "resource": true
+    },
+    {
+      "id": "Text0215",
+      "kind": "text",
+      "ja": "セットを保存...",
+      "en": "Save Set...",
+      "resource": true
+    },
+    {
+      "id": "Text0216",
+      "kind": "text",
+      "ja": "セットを読み込み...",
+      "en": "Load Set...",
+      "resource": true
+    },
+    {
+      "id": "Text0217",
+      "kind": "text",
+      "ja": "セット保存",
+      "en": "Save Set",
+      "resource": true
+    },
+    {
+      "id": "Text0218",
+      "kind": "text",
+      "ja": "セット読込",
+      "en": "Load Set",
+      "resource": true
+    },
+    {
+      "id": "Text0219",
+      "kind": "text",
+      "ja": "セル",
+      "en": "Cell",
+      "resource": false
+    },
+    {
+      "id": "Text0220",
+      "kind": "text",
+      "ja": "セル(&C)\tCtrl+N",
+      "en": "&Cell\tCtrl+N",
+      "resource": true
+    },
+    {
+      "id": "Text0221",
+      "kind": "text",
+      "ja": "セル(&D)",
+      "en": "&Cell",
+      "resource": true
+    },
+    {
+      "id": "Text0222",
+      "kind": "text",
+      "ja": "セルからカラーチャートを作成",
+      "en": "Create Color Chart from Cell",
+      "resource": false
+    },
+    {
+      "id": "Text0223",
+      "kind": "text",
+      "ja": "セルから作成...",
+      "en": "Create from Cell...",
+      "resource": true
+    },
+    {
+      "id": "Text0224",
+      "kind": "text",
+      "ja": "セルは同じフォルダーの個別 .inkpod を参照します。",
+      "en": "Cells reference individual .inkpod files in the same folder.",
+      "resource": true
+    },
+    {
+      "id": "Text0225",
+      "kind": "text",
+      "ja": "セルまたはRecoveryの初期化",
+      "en": "Initialize Cell or Recovery",
+      "resource": false
+    },
+    {
+      "id": "Text0226",
+      "kind": "text",
+      "ja": "セルを復元しています...",
+      "en": "Restoring cell...",
+      "resource": false
+    },
+    {
+      "id": "Text0227",
+      "kind": "text",
+      "ja": "セルを自動保存しています...",
+      "en": "Autosaving cell...",
+      "resource": false
+    },
+    {
+      "id": "Text0228",
+      "kind": "text",
+      "ja": "セル切替前に自動保存(&W)",
+      "en": "Autosave Before Cell S&witch",
+      "resource": true
+    },
+    {
+      "id": "Text0229",
+      "kind": "text",
+      "ja": "セル切替時の保存方法を保存できませんでした。",
+      "en": "The save behavior for switching cells could not be saved.",
+      "resource": false
+    },
+    {
+      "id": "Text0230",
+      "kind": "text",
+      "ja": "セル番号",
+      "en": "Cell number",
+      "resource": false
+    },
+    {
+      "id": "Text0231",
+      "kind": "text",
+      "ja": "セル番号で移動",
+      "en": "Go to Cell Number",
+      "resource": false
+    },
+    {
+      "id": "Text0232",
+      "kind": "text",
+      "ja": "セル番号で移動...",
+      "en": "Go to Cell Number...",
+      "resource": true
+    },
+    {
+      "id": "Text0233",
+      "kind": "text",
+      "ja": "セル番号移動",
+      "en": "Move to Cell Number",
+      "resource": false
+    },
+    {
+      "id": "Text0234",
+      "kind": "text",
+      "ja": "セル番号範囲...",
+      "en": "Cell Number Range...",
+      "resource": true
+    },
+    {
+      "id": "Text0235",
+      "kind": "text",
+      "ja": "セル移動",
+      "en": "Move Cell",
+      "resource": true
+    },
+    {
+      "id": "Text0236",
+      "kind": "text",
+      "ja": "セル色を抽出中...",
+      "en": "Extracting cell colors...",
+      "resource": false
+    },
+    {
+      "id": "Text0237",
+      "kind": "text",
+      "ja": "セル表示番号の付け直し",
+      "en": "Renumber Cell Display Numbers",
+      "resource": false
+    },
+    {
+      "id": "Text0238",
+      "kind": "text",
+      "ja": "タブを右へ移動",
+      "en": "Move Tab Right",
+      "resource": true
+    },
+    {
+      "id": "Text0239",
+      "kind": "text",
+      "ja": "タブを左へ移動",
+      "en": "Move Tab Left",
+      "resource": true
+    },
+    {
+      "id": "Text0240",
+      "kind": "text",
+      "ja": "ツール(&T)",
+      "en": "&Tools",
+      "resource": true
+    },
+    {
+      "id": "Text0241",
+      "kind": "text",
+      "ja": "ツールオプション",
+      "en": "Tool Options",
+      "resource": true
+    },
+    {
+      "id": "Text0242",
+      "kind": "text",
+      "ja": "ツールパレット",
+      "en": "Tool Palette",
+      "resource": true
+    },
+    {
+      "id": "Text0243",
+      "kind": "text",
+      "ja": "テキストを追加...",
+      "en": "Add Text...",
+      "resource": true
+    },
+    {
+      "id": "Text0244",
+      "kind": "text",
+      "ja": "テキスト注釈",
+      "en": "Text Annotation",
+      "resource": false
+    },
+    {
+      "id": "Text0245",
+      "kind": "text",
+      "ja": "テキスト注釈の編集",
+      "en": "Edit Text Annotation",
+      "resource": false
+    },
+    {
+      "id": "Text0246",
+      "kind": "text",
+      "ja": "テキスト注釈の追加",
+      "en": "Add Text Annotation",
+      "resource": false
+    },
+    {
+      "id": "Text0247",
+      "kind": "text",
+      "ja": "テキスト注釈を再編集",
+      "en": "Re-edit Text Annotation",
+      "resource": false
+    },
+    {
+      "id": "Text0248",
+      "kind": "text",
+      "ja": "テキスト／指示",
+      "en": "Text / Instruction",
+      "resource": true
+    },
+    {
+      "id": "Text0249",
+      "kind": "text",
+      "ja": "ディザー",
+      "en": "Dither",
+      "resource": false
+    },
+    {
+      "id": "Text0250",
+      "kind": "text",
+      "ja": "トレース",
+      "en": "Trace",
+      "resource": true
+    },
+    {
+      "id": "Text0251",
+      "kind": "text",
+      "ja": "トーンカーブ",
+      "en": "Tone Curve",
+      "resource": false
+    },
+    {
+      "id": "Text0252",
+      "kind": "text",
+      "ja": "トーンカーブ...",
+      "en": "Tone Curve...",
+      "resource": true
+    },
+    {
+      "id": "Text0253",
+      "kind": "text",
+      "ja": "トーンカーブ点は input:output;... 形式で2点以上指定してください。",
+      "en": "Specify at least two tone-curve points in input:output;... format.",
+      "resource": false
+    },
+    {
+      "id": "Text0254",
+      "kind": "text",
+      "ja": "トーンカーブ点は input:output;...（各0～65535）で2点以上指定してください。",
+      "en": "Specify at least two tone-curve points in input:output;... format (each 0–65535).",
+      "resource": false
+    },
+    {
+      "id": "Text0255",
+      "kind": "text",
+      "ja": "バッチ",
+      "en": "Batch",
+      "resource": true
+    },
+    {
+      "id": "Text0256",
+      "kind": "text",
+      "ja": "バッチ: 準備中...",
+      "en": "Batch: preparing...",
+      "resource": true
+    },
+    {
+      "id": "Text0257",
+      "kind": "text",
+      "ja": "バッチセット保存",
+      "en": "Save Batch Set",
+      "resource": false
+    },
+    {
+      "id": "Text0258",
+      "kind": "text",
+      "ja": "バッチセット読込",
+      "en": "Load Batch Set",
+      "resource": false
+    },
+    {
+      "id": "Text0259",
+      "kind": "text",
+      "ja": "バッチプレビュー",
+      "en": "Batch Preview",
+      "resource": false
+    },
+    {
+      "id": "Text0260",
+      "kind": "text",
+      "ja": "バッチ保存前プレビュー",
+      "en": "Pre-save Batch Preview",
+      "resource": false
+    },
+    {
+      "id": "Text0261",
+      "kind": "text",
+      "ja": "バッチ入力フォルダーを選択",
+      "en": "Select Batch Input Folder",
+      "resource": false
+    },
+    {
+      "id": "Text0262",
+      "kind": "text",
+      "ja": "バッチ入力範囲",
+      "en": "Batch Input Range",
+      "resource": false
+    },
+    {
+      "id": "Text0263",
+      "kind": "text",
+      "ja": "バッチ処理中...",
+      "en": "Batch processing...",
+      "resource": false
+    },
+    {
+      "id": "Text0264",
+      "kind": "text",
+      "ja": "バッチ出力basename",
+      "en": "Batch output basename",
+      "resource": false
+    },
+    {
+      "id": "Text0265",
+      "kind": "text",
+      "ja": "バッチ出力フォルダー",
+      "en": "Batch Output Folder",
+      "resource": false
+    },
+    {
+      "id": "Text0266",
+      "kind": "text",
+      "ja": "バッチ出力設定",
+      "en": "Batch Output Settings",
+      "resource": false
+    },
+    {
+      "id": "Text0267",
+      "kind": "text",
+      "ja": "バッチ実行",
+      "en": "Run Batch",
+      "resource": false
+    },
+    {
+      "id": "Text0268",
+      "kind": "text",
+      "ja": "バッチ対象セレクター",
+      "en": "Batch Target Selector",
+      "resource": false
+    },
+    {
+      "id": "Text0269",
+      "kind": "text",
+      "ja": "バッチ項目",
+      "en": "Batch Item",
+      "resource": false
+    },
+    {
+      "id": "Text0270",
+      "kind": "text",
+      "ja": "バッチ項目の状態",
+      "en": "Batch Item State",
+      "resource": false
+    },
+    {
+      "id": "Text0271",
+      "kind": "text",
+      "ja": "バッチ項目の編集",
+      "en": "Edit Batch Item",
+      "resource": false
+    },
+    {
+      "id": "Text0272",
+      "kind": "text",
+      "ja": "パラメーターを変更するとCanvasを更新します。",
+      "en": "Update the Canvas when parameters change.",
+      "resource": false
+    },
+    {
+      "id": "Text0273",
+      "kind": "text",
+      "ja": "パレット編集",
+      "en": "Edit Palette",
+      "resource": false
+    },
+    {
+      "id": "Text0274",
+      "kind": "text",
+      "ja": "ビューの作成",
+      "en": "Create View",
+      "resource": false
+    },
+    {
+      "id": "Text0275",
+      "kind": "text",
+      "ja": "ビューを新しいウィンドウへ移動",
+      "en": "Move View to New Window",
+      "resource": true
+    },
+    {
+      "id": "Text0276",
+      "kind": "text",
+      "ja": "ビューを次のウィンドウへ移動",
+      "en": "Move View to Next Window",
+      "resource": true
+    },
+    {
+      "id": "Text0277",
+      "kind": "text",
+      "ja": "ビューを閉じる",
+      "en": "Close View",
+      "resource": true
+    },
+    {
+      "id": "Text0278",
+      "kind": "text",
+      "ja": "ピクセル等倍(&1)",
+      "en": "&Actual Pixels",
+      "resource": true
+    },
+    {
+      "id": "Text0279",
+      "kind": "text",
+      "ja": "ファイル",
+      "en": "File",
+      "resource": false
+    },
+    {
+      "id": "Text0280",
+      "kind": "text",
+      "ja": "ファイル(&F)",
+      "en": "&File",
+      "resource": true
+    },
+    {
+      "id": "Text0281",
+      "kind": "text",
+      "ja": "ファイル: ",
+      "en": "File: ",
+      "resource": false
+    },
+    {
+      "id": "Text0282",
+      "kind": "text",
+      "ja": "ファイルは削除していません。",
+      "en": "No files were deleted.",
+      "resource": false
+    },
+    {
+      "id": "Text0283",
+      "kind": "text",
+      "ja": "フィル",
+      "en": "Fill",
+      "resource": false
+    },
+    {
+      "id": "Text0284",
+      "kind": "text",
+      "ja": "フィル(&F)",
+      "en": "&Fill",
+      "resource": true
+    },
+    {
+      "id": "Text0285",
+      "kind": "text",
+      "ja": "フィルタ",
+      "en": "Filter",
+      "resource": true
+    },
+    {
+      "id": "Text0286",
+      "kind": "text",
+      "ja": "フィルタ(&I)",
+      "en": "F&ilter",
+      "resource": true
+    },
+    {
+      "id": "Text0287",
+      "kind": "text",
+      "ja": "フィルタ: HSV",
+      "en": "Filter: HSV",
+      "resource": false
+    },
+    {
+      "id": "Text0288",
+      "kind": "text",
+      "ja": "フィルタ: ぼかし（弱）",
+      "en": "Filter: Blur (Weak)",
+      "resource": false
+    },
+    {
+      "id": "Text0289",
+      "kind": "text",
+      "ja": "フィルタ: ぼかし（強）",
+      "en": "Filter: Blur (Strong)",
+      "resource": false
+    },
+    {
+      "id": "Text0290",
+      "kind": "text",
+      "ja": "フィルタ: アンシャープ",
+      "en": "Filter: Unsharp Mask",
+      "resource": false
+    },
+    {
+      "id": "Text0291",
+      "kind": "text",
+      "ja": "フィルタ: カラーバランス",
+      "en": "Filter: Color Balance",
+      "resource": false
+    },
+    {
+      "id": "Text0292",
+      "kind": "text",
+      "ja": "フィルタ: ガウスぼかし",
+      "en": "Filter: Gaussian Blur",
+      "resource": false
+    },
+    {
+      "id": "Text0293",
+      "kind": "text",
+      "ja": "フィルタ: シャープ（弱）",
+      "en": "Filter: Sharpen (Weak)",
+      "resource": false
+    },
+    {
+      "id": "Text0294",
+      "kind": "text",
+      "ja": "フィルタ: シャープ（強）",
+      "en": "Filter: Sharpen (Strong)",
+      "resource": false
+    },
+    {
+      "id": "Text0295",
+      "kind": "text",
+      "ja": "フィルタ: トーンカーブ",
+      "en": "Filter: Tone Curve",
+      "resource": false
+    },
+    {
+      "id": "Text0296",
+      "kind": "text",
+      "ja": "フィルタ: レベル補正",
+      "en": "Filter: Levels",
+      "resource": false
+    },
+    {
+      "id": "Text0297",
+      "kind": "text",
+      "ja": "フィルタ: 明るさ・コントラスト",
+      "en": "Filter: Brightness / Contrast",
+      "resource": false
+    },
+    {
+      "id": "Text0298",
+      "kind": "text",
+      "ja": "フィルタ: 自動コントラスト",
+      "en": "Filter: Auto Contrast",
+      "resource": false
+    },
+    {
+      "id": "Text0299",
+      "kind": "text",
+      "ja": "フィルタ: 階調反転",
+      "en": "Filter: Invert",
+      "resource": false
+    },
+    {
+      "id": "Text0300",
+      "kind": "text",
+      "ja": "フィルタ（選択範囲があればその内側だけに適用）",
+      "en": "Filter (apply only inside the selection, if any)",
+      "resource": false
+    },
+    {
+      "id": "Text0301",
+      "kind": "text",
+      "ja": "フィル設定",
+      "en": "Fill Settings",
+      "resource": true
+    },
+    {
+      "id": "Text0302",
+      "kind": "text",
+      "ja": "フィル設定...",
+      "en": "Fill Settings...",
+      "resource": true
+    },
+    {
+      "id": "Text0303",
+      "kind": "text",
+      "ja": "フォルダー: ",
+      "en": "Folder: ",
+      "resource": false
+    },
+    {
+      "id": "Text0304",
+      "kind": "text",
+      "ja": "フォルダー・命名・待機...",
+      "en": "Folder / Naming / Wait...",
+      "resource": true
+    },
+    {
+      "id": "Text0305",
+      "kind": "text",
+      "ja": "フレーム設定",
+      "en": "Frame Settings",
+      "resource": true
+    },
+    {
+      "id": "Text0306",
+      "kind": "text",
+      "ja": "フローティングハンドル変形",
+      "en": "Transform Floating Handles",
+      "resource": false
+    },
+    {
+      "id": "Text0307",
+      "kind": "text",
+      "ja": "フローティング変形",
+      "en": "Floating Transform",
+      "resource": false
+    },
+    {
+      "id": "Text0308",
+      "kind": "text",
+      "ja": "フローティング選択",
+      "en": "Floating Selection",
+      "resource": true
+    },
+    {
+      "id": "Text0309",
+      "kind": "text",
+      "ja": "フローティング選択の変形",
+      "en": "Transform Floating Selection",
+      "resource": false
+    },
+    {
+      "id": "Text0310",
+      "kind": "text",
+      "ja": "ブラシ(&B)",
+      "en": "&Brush",
+      "resource": true
+    },
+    {
+      "id": "Text0311",
+      "kind": "text",
+      "ja": "プリセット",
+      "en": "Preset",
+      "resource": true
+    },
+    {
+      "id": "Text0312",
+      "kind": "text",
+      "ja": "プレビュー",
+      "en": "Preview",
+      "resource": true
+    },
+    {
+      "id": "Text0313",
+      "kind": "text",
+      "ja": "プレビュー: ",
+      "en": "Preview: ",
+      "resource": false
+    },
+    {
+      "id": "Text0314",
+      "kind": "text",
+      "ja": "プレビューして確認",
+      "en": "Preview and Confirm",
+      "resource": true
+    },
+    {
+      "id": "Text0315",
+      "kind": "text",
+      "ja": "プレビュー要求を開始できませんでした。",
+      "en": "The preview request could not be started.",
+      "resource": false
+    },
+    {
+      "id": "Text0316",
+      "kind": "format",
+      "ja": "プレビュー計算中... %llu / %llu",
+      "en": "Calculating preview... %llu / %llu",
+      "resource": false
+    },
+    {
+      "id": "Text0317",
+      "kind": "text",
+      "ja": "プレーン(&P)",
+      "en": "&Plane",
+      "resource": true
+    },
+    {
+      "id": "Text0318",
+      "kind": "text",
+      "ja": "プレーンの不透明度",
+      "en": "Plane Opacity",
+      "resource": false
+    },
+    {
+      "id": "Text0319",
+      "kind": "text",
+      "ja": "プレーンの並べ替え",
+      "en": "Reorder Planes",
+      "resource": false
+    },
+    {
+      "id": "Text0320",
+      "kind": "text",
+      "ja": "プレーンの作成",
+      "en": "Create Plane",
+      "resource": false
+    },
+    {
+      "id": "Text0321",
+      "kind": "text",
+      "ja": "プレーンの選択",
+      "en": "Select Plane",
+      "resource": false
+    },
+    {
+      "id": "Text0322",
+      "kind": "text",
+      "ja": "プレーンの選択肢を読み込めませんでした。",
+      "en": "Plane choices could not be loaded.",
+      "resource": false
+    },
+    {
+      "id": "Text0323",
+      "kind": "text",
+      "ja": "プレーンプロパティ",
+      "en": "Plane Properties",
+      "resource": false
+    },
+    {
+      "id": "Text0324",
+      "kind": "text",
+      "ja": "プレーン作成条件を検証できません。",
+      "en": "The plane creation conditions could not be validated.",
+      "resource": false
+    },
+    {
+      "id": "Text0325",
+      "kind": "text",
+      "ja": "プレーン切替",
+      "en": "Switch Plane",
+      "resource": false
+    },
+    {
+      "id": "Text0326",
+      "kind": "text",
+      "ja": "プレーン変換",
+      "en": "PlaneTransform",
+      "resource": false
+    },
+    {
+      "id": "Text0327",
+      "kind": "text",
+      "ja": "プレーン変換（変換損失を確認）",
+      "en": "Convert Plane (confirm conversion loss)",
+      "resource": false
+    },
+    {
+      "id": "Text0328",
+      "kind": "text",
+      "ja": "プレーン操作",
+      "en": "Plane Operation",
+      "resource": false
+    },
+    {
+      "id": "Text0329",
+      "kind": "text",
+      "ja": "プレーン種類 (1-7)",
+      "en": "Plane kind (1–7)",
+      "resource": false
+    },
+    {
+      "id": "Text0330",
+      "kind": "text",
+      "ja": "プロパティ...",
+      "en": "Properties...",
+      "resource": true
+    },
+    {
+      "id": "Text0331",
+      "kind": "text",
+      "ja": "プロファイル",
+      "en": "Profile",
+      "resource": false
+    },
+    {
+      "id": "Text0332",
+      "kind": "text",
+      "ja": "ヘルプ",
+      "en": "Help",
+      "resource": false
+    },
+    {
+      "id": "Text0333",
+      "kind": "text",
+      "ja": "ヘルプ(&H)",
+      "en": "&Help",
+      "resource": true
+    },
+    {
+      "id": "Text0334",
+      "kind": "text",
+      "ja": "ベクター",
+      "en": "Vector",
+      "resource": false
+    },
+    {
+      "id": "Text0335",
+      "kind": "text",
+      "ja": "ベクターをラスタライズ",
+      "en": "Rasterize Vector",
+      "resource": false
+    },
+    {
+      "id": "Text0336",
+      "kind": "text",
+      "ja": "ベクターをラスタライズ...",
+      "en": "Rasterize Vector...",
+      "resource": true
+    },
+    {
+      "id": "Text0337",
+      "kind": "text",
+      "ja": "ベクター描画",
+      "en": "Vector Drawing",
+      "resource": true
+    },
+    {
+      "id": "Text0338",
+      "kind": "text",
+      "ja": "ベクター描画の入力点を文書座標へ変換できませんでした。",
+      "en": "The vector drawing input points could not be converted to document coordinates.",
+      "resource": false
+    },
+    {
+      "id": "Text0339",
+      "kind": "text",
+      "ja": "ベクター消しゴム",
+      "en": "Vector Eraser",
+      "resource": true
+    },
+    {
+      "id": "Text0340",
+      "kind": "text",
+      "ja": "ベクター消去モード",
+      "en": "Vector Erase Mode",
+      "resource": true
+    },
+    {
+      "id": "Text0341",
+      "kind": "text",
+      "ja": "ベクター線つなぎ",
+      "en": "Connect Vector Lines",
+      "resource": false
+    },
+    {
+      "id": "Text0342",
+      "kind": "text",
+      "ja": "ベクター線幅修正",
+      "en": "Adjust Vector Line Width",
+      "resource": false
+    },
+    {
+      "id": "Text0343",
+      "kind": "text",
+      "ja": "ベクター診断表示の切替",
+      "en": "Toggle Vector Diagnostics",
+      "resource": false
+    },
+    {
+      "id": "Text0344",
+      "kind": "text",
+      "ja": "ベクター選択",
+      "en": "Vector Selection",
+      "resource": true
+    },
+    {
+      "id": "Text0345",
+      "kind": "text",
+      "ja": "ペン",
+      "en": "Pen",
+      "resource": false
+    },
+    {
+      "id": "Text0346",
+      "kind": "text",
+      "ja": "ペン径 px",
+      "en": "Pen diameter (px)",
+      "resource": false
+    },
+    {
+      "id": "Text0347",
+      "kind": "text",
+      "ja": "ペン範囲",
+      "en": "Pen Range",
+      "resource": true
+    },
+    {
+      "id": "Text0348",
+      "kind": "text",
+      "ja": "ペン範囲を筆圧で細くする",
+      "en": "Reduce pen range with pressure",
+      "resource": false
+    },
+    {
+      "id": "Text0349",
+      "kind": "text",
+      "ja": "ペースト",
+      "en": "Paste",
+      "resource": true
+    },
+    {
+      "id": "Text0350",
+      "kind": "text",
+      "ja": "メンバーから除外",
+      "en": "Remove from Members",
+      "resource": true
+    },
+    {
+      "id": "Text0351",
+      "kind": "text",
+      "ja": "モーションFPS変更",
+      "en": "Change Motion FPS",
+      "resource": false
+    },
+    {
+      "id": "Text0352",
+      "kind": "text",
+      "ja": "モーションチェック",
+      "en": "Motion Check",
+      "resource": true
+    },
+    {
+      "id": "Text0353",
+      "kind": "text",
+      "ja": "モーションチェック設定",
+      "en": "Motion Check Settings",
+      "resource": false
+    },
+    {
+      "id": "Text0354",
+      "kind": "text",
+      "ja": "モーションチェック開始",
+      "en": "Start Motion Check",
+      "resource": false
+    },
+    {
+      "id": "Text0355",
+      "kind": "text",
+      "ja": "モーションフレーム移動",
+      "en": "Move Motion Frame",
+      "resource": false
+    },
+    {
+      "id": "Text0356",
+      "kind": "text",
+      "ja": "モーション一時停止",
+      "en": "Pause Motion",
+      "resource": false
+    },
+    {
+      "id": "Text0357",
+      "kind": "text",
+      "ja": "モーション停止",
+      "en": "Stop Motion",
+      "resource": false
+    },
+    {
+      "id": "Text0358",
+      "kind": "text",
+      "ja": "モーション先頭・末尾移動",
+      "en": "Move to First / Last Motion Frame",
+      "resource": false
+    },
+    {
+      "id": "Text0359",
+      "kind": "text",
+      "ja": "モーション再生",
+      "en": "Motion Playback",
+      "resource": false
+    },
+    {
+      "id": "Text0360",
+      "kind": "text",
+      "ja": "モード (1:太く 2:細く 3:倍率 4:一定)",
+      "en": "Mode (1:thicken 2:thin 3:scale 4:constant)",
+      "resource": false
+    },
+    {
+      "id": "Text0361",
+      "kind": "text",
+      "ja": "ユーザー",
+      "en": "User",
+      "resource": false
+    },
+    {
+      "id": "Text0362",
+      "kind": "text",
+      "ja": "ユーザーワークスペース",
+      "en": "User Workspace",
+      "resource": false
+    },
+    {
+      "id": "Text0363",
+      "kind": "text",
+      "ja": "ライトテーブルと編集画像の入れ替え",
+      "en": "Swap Light Table and Editing Image",
+      "resource": false
+    },
+    {
+      "id": "Text0364",
+      "kind": "text",
+      "ja": "ライトテーブルを読み込めません",
+      "en": "The light table could not be loaded",
+      "resource": false
+    },
+    {
+      "id": "Text0365",
+      "kind": "text",
+      "ja": "ライトテーブルセットの選択",
+      "en": "Select Light Table Set",
+      "resource": false
+    },
+    {
+      "id": "Text0366",
+      "kind": "text",
+      "ja": "ライトテーブルセットを作成",
+      "en": "Create Light Table Set",
+      "resource": false
+    },
+    {
+      "id": "Text0367",
+      "kind": "text",
+      "ja": "ライトテーブルセット名",
+      "en": "Light table set name",
+      "resource": false
+    },
+    {
+      "id": "Text0368",
+      "kind": "text",
+      "ja": "ライトテーブルセット操作",
+      "en": "Light Table Set Operation",
+      "resource": false
+    },
+    {
+      "id": "Text0369",
+      "kind": "text",
+      "ja": "ライトテーブル一括登録",
+      "en": "Batch-register Light Table",
+      "resource": false
+    },
+    {
+      "id": "Text0370",
+      "kind": "text",
+      "ja": "ライトテーブル一括登録プレビュー",
+      "en": "Light Table Batch-registration Preview",
+      "resource": false
+    },
+    {
+      "id": "Text0371",
+      "kind": "text",
+      "ja": "ライトテーブル入れ替え後の編集状態再取得",
+      "en": "Refresh edit state after light-table swap",
+      "resource": false
+    },
+    {
+      "id": "Text0372",
+      "kind": "text",
+      "ja": "ライトテーブル全体不透明度",
+      "en": "Light TableEntireOpacity",
+      "resource": false
+    },
+    {
+      "id": "Text0373",
+      "kind": "text",
+      "ja": "ライトテーブル変形",
+      "en": "Transform Light Table",
+      "resource": false
+    },
+    {
+      "id": "Text0374",
+      "kind": "text",
+      "ja": "ライトテーブル最上位色",
+      "en": "Topmost Light Table Color",
+      "resource": true
+    },
+    {
+      "id": "Text0375",
+      "kind": "text",
+      "ja": "ライトテーブル画像",
+      "en": "Light TableImage",
+      "resource": false
+    },
+    {
+      "id": "Text0376",
+      "kind": "text",
+      "ja": "ライトテーブル色サンプル",
+      "en": "Light Table Color Sample",
+      "resource": false
+    },
+    {
+      "id": "Text0377",
+      "kind": "text",
+      "ja": "ライトテーブル表示",
+      "en": "Light TableDisplay",
+      "resource": false
+    },
+    {
+      "id": "Text0378",
+      "kind": "text",
+      "ja": "ライトテーブル表示用メモリが不足しました",
+      "en": "Light Tablethere is not enough memory to display this content",
+      "resource": false
+    },
+    {
+      "id": "Text0379",
+      "kind": "text",
+      "ja": "ライトテーブル項目",
+      "en": "Light Table Item",
+      "resource": true
+    },
+    {
+      "id": "Text0380",
+      "kind": "text",
+      "ja": "ライトテーブル項目プロパティ",
+      "en": "Light Table Item Properties",
+      "resource": false
+    },
+    {
+      "id": "Text0381",
+      "kind": "text",
+      "ja": "ライトテーブル項目操作",
+      "en": "Light Table Item Operation",
+      "resource": false
+    },
+    {
+      "id": "Text0382",
+      "kind": "text",
+      "ja": "ライブプレビュー",
+      "en": "Live Preview",
+      "resource": false
+    },
+    {
+      "id": "Text0383",
+      "kind": "text",
+      "ja": "ラスターをベクター化",
+      "en": "Vectorize Raster",
+      "resource": false
+    },
+    {
+      "id": "Text0384",
+      "kind": "text",
+      "ja": "ラスターをベクター化...",
+      "en": "Vectorize Raster...",
+      "resource": true
+    },
+    {
+      "id": "Text0385",
+      "kind": "text",
+      "ja": "ラスター変換",
+      "en": "Raster Conversion",
+      "resource": true
+    },
+    {
+      "id": "Text0386",
+      "kind": "text",
+      "ja": "ラスター書き出し",
+      "en": "RasterExport",
+      "resource": false
+    },
+    {
+      "id": "Text0387",
+      "kind": "text",
+      "ja": "ラスタ－を書き出し...",
+      "en": "Export Raster...",
+      "resource": true
+    },
+    {
+      "id": "Text0388",
+      "kind": "text",
+      "ja": "ラスタ－を読み込み...",
+      "en": "Import Raster...",
+      "resource": true
+    },
+    {
+      "id": "Text0389",
+      "kind": "text",
+      "ja": "ループ (0/1)",
+      "en": "Loop (0/1)",
+      "resource": false
+    },
+    {
+      "id": "Text0390",
+      "kind": "text",
+      "ja": "ルーラー",
+      "en": "Ruler",
+      "resource": true
+    },
+    {
+      "id": "Text0391",
+      "kind": "text",
+      "ja": "レイヤー(&L)",
+      "en": "&Layer",
+      "resource": true
+    },
+    {
+      "id": "Text0392",
+      "kind": "text",
+      "ja": "レイヤーの不透明度",
+      "en": "Layer Opacity",
+      "resource": false
+    },
+    {
+      "id": "Text0393",
+      "kind": "text",
+      "ja": "レイヤーの並べ替え",
+      "en": "Reorder Layers",
+      "resource": false
+    },
+    {
+      "id": "Text0394",
+      "kind": "text",
+      "ja": "レイヤーの作成",
+      "en": "Create Layer",
+      "resource": false
+    },
+    {
+      "id": "Text0395",
+      "kind": "text",
+      "ja": "レイヤーの削除",
+      "en": "Delete Layer",
+      "resource": false
+    },
+    {
+      "id": "Text0396",
+      "kind": "text",
+      "ja": "レイヤーの移動",
+      "en": "Move Layer",
+      "resource": false
+    },
+    {
+      "id": "Text0397",
+      "kind": "text",
+      "ja": "レイヤーの複製",
+      "en": "Duplicate Layer",
+      "resource": false
+    },
+    {
+      "id": "Text0398",
+      "kind": "text",
+      "ja": "レイヤーの選択",
+      "en": "Select Layer",
+      "resource": false
+    },
+    {
+      "id": "Text0399",
+      "kind": "text",
+      "ja": "レイヤーの部分復帰",
+      "en": "Partially Revert Layer",
+      "resource": false
+    },
+    {
+      "id": "Text0400",
+      "kind": "text",
+      "ja": "レイヤーを削除",
+      "en": "Subtract Layer",
+      "resource": true
+    },
+    {
+      "id": "Text0401",
+      "kind": "text",
+      "ja": "レイヤーを追加",
+      "en": "Add Layer",
+      "resource": true
+    },
+    {
+      "id": "Text0402",
+      "kind": "text",
+      "ja": "レイヤーを選択範囲へ",
+      "en": "Layer to Selection",
+      "resource": true
+    },
+    {
+      "id": "Text0403",
+      "kind": "text",
+      "ja": "レイヤーを部分的に復帰",
+      "en": "Partially Revert Layer",
+      "resource": true
+    },
+    {
+      "id": "Text0404",
+      "kind": "text",
+      "ja": "レイヤープロパティ",
+      "en": "Layer Properties",
+      "resource": false
+    },
+    {
+      "id": "Text0405",
+      "kind": "text",
+      "ja": "レイヤー変換",
+      "en": "LayerTransform",
+      "resource": false
+    },
+    {
+      "id": "Text0406",
+      "kind": "text",
+      "ja": "レイヤー表示",
+      "en": "Layer Visibility",
+      "resource": true
+    },
+    {
+      "id": "Text0407",
+      "kind": "text",
+      "ja": "レベル補正",
+      "en": "Levels",
+      "resource": false
+    },
+    {
+      "id": "Text0408",
+      "kind": "text",
+      "ja": "レベル補正...",
+      "en": "Levels...",
+      "resource": true
+    },
+    {
+      "id": "Text0409",
+      "kind": "text",
+      "ja": "レポートを取得できません",
+      "en": "The report could not be retrieved",
+      "resource": false
+    },
+    {
+      "id": "Text0410",
+      "kind": "text",
+      "ja": "レポート表示用メモリが不足しました",
+      "en": "Insufficient memory to display the report",
+      "resource": false
+    },
+    {
+      "id": "Text0411",
+      "kind": "text",
+      "ja": "ロケーター",
+      "en": "Locator",
+      "resource": true
+    },
+    {
+      "id": "Text0412",
+      "kind": "text",
+      "ja": "ロケーターを更新できません",
+      "en": "The Locator could not be updated",
+      "resource": false
+    },
+    {
+      "id": "Text0413",
+      "kind": "text",
+      "ja": "ロケーター拡大表示",
+      "en": "Magnified Locator View",
+      "resource": true
+    },
+    {
+      "id": "Text0414",
+      "kind": "text",
+      "ja": "ロック",
+      "en": "Lock",
+      "resource": true
+    },
+    {
+      "id": "Text0415",
+      "kind": "text",
+      "ja": "ワークスペース",
+      "en": "Workspace",
+      "resource": true
+    },
+    {
+      "id": "Text0416",
+      "kind": "text",
+      "ja": "ワークスペースに名前を付けて保存",
+      "en": "Save Workspace As",
+      "resource": false
+    },
+    {
+      "id": "Text0417",
+      "kind": "text",
+      "ja": "ワークスペースを保存",
+      "en": "Save Workspace",
+      "resource": true
+    },
+    {
+      "id": "Text0418",
+      "kind": "text",
+      "ja": "ワークスペース名は1〜63文字で指定してください。",
+      "en": "Enter a workspace name between 1 and 63 characters.",
+      "resource": false
+    },
+    {
+      "id": "Text0419",
+      "kind": "text",
+      "ja": "一括登録",
+      "en": "Batch Register",
+      "resource": true
+    },
+    {
+      "id": "Text0420",
+      "kind": "text",
+      "ja": "一時停止/再開",
+      "en": "Pause / Resume",
+      "resource": true
+    },
+    {
+      "id": "Text0421",
+      "kind": "text",
+      "ja": "一般画像の書き出し",
+      "en": "Export General Image",
+      "resource": false
+    },
+    {
+      "id": "Text0422",
+      "kind": "text",
+      "ja": "一般画像の読み込み",
+      "en": "Import General Image",
+      "resource": false
+    },
+    {
+      "id": "Text0423",
+      "kind": "text",
+      "ja": "一部でも触れる線",
+      "en": "Lines Touching Selection",
+      "resource": true
+    },
+    {
+      "id": "Text0424",
+      "kind": "text",
+      "ja": "上",
+      "en": "Top",
+      "resource": false
+    },
+    {
+      "id": "Text0425",
+      "kind": "text",
+      "ja": "上から下へ、後のセルほど前面です。\n\n",
+      "en": "From top to bottom, later cells are in front.\n\n",
+      "resource": false
+    },
+    {
+      "id": "Text0426",
+      "kind": "text",
+      "ja": "上へ",
+      "en": "Move Up",
+      "resource": true
+    },
+    {
+      "id": "Text0427",
+      "kind": "text",
+      "ja": "上へ移動",
+      "en": "Move Up",
+      "resource": true
+    },
+    {
+      "id": "Text0428",
+      "kind": "text",
+      "ja": "上書き",
+      "en": "Overwrite",
+      "resource": false
+    },
+    {
+      "id": "Text0429",
+      "kind": "text",
+      "ja": "下",
+      "en": "Bottom",
+      "resource": false
+    },
+    {
+      "id": "Text0430",
+      "kind": "text",
+      "ja": "下へ",
+      "en": "Move Down",
+      "resource": true
+    },
+    {
+      "id": "Text0431",
+      "kind": "text",
+      "ja": "下へ分割",
+      "en": "Split Down",
+      "resource": true
+    },
+    {
+      "id": "Text0432",
+      "kind": "text",
+      "ja": "下へ移動",
+      "en": "Move Down",
+      "resource": true
+    },
+    {
+      "id": "Text0433",
+      "kind": "format",
+      "ja": "不透明度 (%)",
+      "en": "Opacity (%)",
+      "resource": true
+    },
+    {
+      "id": "Text0434",
+      "kind": "format",
+      "ja": "不透明度 (0-100%)",
+      "en": "Opacity (0-100%)",
+      "resource": false
+    },
+    {
+      "id": "Text0435",
+      "kind": "text",
+      "ja": "不透明度...",
+      "en": "Opacity...",
+      "resource": true
+    },
+    {
+      "id": "Text0436",
+      "kind": "text",
+      "ja": "両方を一意に識別できるキー列を指定してください。",
+      "en": "Specify a key sequence that identifies each shortcut uniquely.",
+      "resource": false
+    },
+    {
+      "id": "Text0437",
+      "kind": "text",
+      "ja": "中央",
+      "en": "Center",
+      "resource": false
+    },
+    {
+      "id": "Text0438",
+      "kind": "text",
+      "ja": "中心 + 45度",
+      "en": "Center + 45 degrees",
+      "resource": false
+    },
+    {
+      "id": "Text0439",
+      "kind": "text",
+      "ja": "中心 X (px)",
+      "en": "Center X (px)",
+      "resource": true
+    },
+    {
+      "id": "Text0440",
+      "kind": "text",
+      "ja": "中心 Y (px)",
+      "en": "Center Y (px)",
+      "resource": true
+    },
+    {
+      "id": "Text0441",
+      "kind": "text",
+      "ja": "中心から",
+      "en": "From center",
+      "resource": false
+    },
+    {
+      "id": "Text0442",
+      "kind": "text",
+      "ja": "中心線チェック",
+      "en": "Centerlines Only",
+      "resource": true
+    },
+    {
+      "id": "Text0443",
+      "kind": "text",
+      "ja": "中心線表示",
+      "en": "Show Centerlines",
+      "resource": true
+    },
+    {
+      "id": "Text0444",
+      "kind": "text",
+      "ja": "中止",
+      "en": "Cancel",
+      "resource": true
+    },
+    {
+      "id": "Text0445",
+      "kind": "text",
+      "ja": "丸",
+      "en": "Round",
+      "resource": false
+    },
+    {
+      "id": "Text0446",
+      "kind": "text",
+      "ja": "主線(&L)",
+      "en": "Main &Line",
+      "resource": true
+    },
+    {
+      "id": "Text0447",
+      "kind": "text",
+      "ja": "二セル比較: 候補 ",
+      "en": "Two-cell comparison: candidate ",
+      "resource": false
+    },
+    {
+      "id": "Text0448",
+      "kind": "text",
+      "ja": "二セル比較から色置換行を抽出...",
+      "en": "Extract Color Replacement Rows from Two Cells...",
+      "resource": true
+    },
+    {
+      "id": "Text0449",
+      "kind": "text",
+      "ja": "二セル比較を反映しました",
+      "en": "Two-cell comparison applied",
+      "resource": false
+    },
+    {
+      "id": "Text0450",
+      "kind": "text",
+      "ja": "二セル色比較",
+      "en": "Two-cell Color Comparison",
+      "resource": false
+    },
+    {
+      "id": "Text0451",
+      "kind": "text",
+      "ja": "五点基準 (1-5)",
+      "en": "Five-point reference (1–5)",
+      "resource": false
+    },
+    {
+      "id": "Text0452",
+      "kind": "text",
+      "ja": "交差",
+      "en": "Intersect",
+      "resource": true
+    },
+    {
+      "id": "Text0453",
+      "kind": "text",
+      "ja": "交点まで",
+      "en": "To Intersection",
+      "resource": true
+    },
+    {
+      "id": "Text0454",
+      "kind": "text",
+      "ja": "件 / 失敗 ",
+      "en": " items / failed ",
+      "resource": false
+    },
+    {
+      "id": "Text0455",
+      "kind": "text",
+      "ja": "件 / 警告 ",
+      "en": " items / warnings ",
+      "resource": false
+    },
+    {
+      "id": "Text0456",
+      "kind": "text",
+      "ja": "余白",
+      "en": "Margins",
+      "resource": false
+    },
+    {
+      "id": "Text0457",
+      "kind": "text",
+      "ja": "余白...",
+      "en": "Margins...",
+      "resource": true
+    },
+    {
+      "id": "Text0458",
+      "kind": "text",
+      "ja": "作品名",
+      "en": "Production title",
+      "resource": true
+    },
+    {
+      "id": "Text0459",
+      "kind": "text",
+      "ja": "作成",
+      "en": "Create",
+      "resource": true
+    },
+    {
+      "id": "Text0460",
+      "kind": "text",
+      "ja": "作成モード",
+      "en": "Selection Operation",
+      "resource": true
+    },
+    {
+      "id": "Text0461",
+      "kind": "text",
+      "ja": "作成方法",
+      "en": "Creation method",
+      "resource": false
+    },
+    {
+      "id": "Text0462",
+      "kind": "text",
+      "ja": "作成枚数",
+      "en": "Number to create",
+      "resource": true
+    },
+    {
+      "id": "Text0463",
+      "kind": "text",
+      "ja": "作画フレーム",
+      "en": "Drawing frame",
+      "resource": false
+    },
+    {
+      "id": "Text0464",
+      "kind": "text",
+      "ja": "作画フレーム...",
+      "en": "Drawing Frame...",
+      "resource": true
+    },
+    {
+      "id": "Text0465",
+      "kind": "text",
+      "ja": "保存(&S)\tCtrl+S",
+      "en": "&Save\tCtrl+S",
+      "resource": true
+    },
+    {
+      "id": "Text0466",
+      "kind": "text",
+      "ja": "保存...",
+      "en": "Save...",
+      "resource": true
+    },
+    {
+      "id": "Text0467",
+      "kind": "text",
+      "ja": "保存されたワークスペース配置がありません。",
+      "en": "No saved workspace layout exists.",
+      "resource": false
+    },
+    {
+      "id": "Text0468",
+      "kind": "text",
+      "ja": "保存したワークスペースを復元",
+      "en": "Restore Saved Workspace",
+      "resource": true
+    },
+    {
+      "id": "Text0469",
+      "kind": "text",
+      "ja": "保存先は別の開いている文書に使用されています。",
+      "en": "The destination is in use by another open document.",
+      "resource": false
+    },
+    {
+      "id": "Text0470",
+      "kind": "text",
+      "ja": "保存前に入力・出力と警告のプレビュー確認を必須にしますか？",
+      "en": "Require preview confirmation of input, output, and warnings before saving?",
+      "resource": false
+    },
+    {
+      "id": "Text0471",
+      "kind": "text",
+      "ja": "保存後の file identity を登録できませんでした。",
+      "en": "The post-save file identity could not be registered.",
+      "resource": false
+    },
+    {
+      "id": "Text0472",
+      "kind": "text",
+      "ja": "修正指示",
+      "en": "Revision instruction",
+      "resource": false
+    },
+    {
+      "id": "Text0473",
+      "kind": "text",
+      "ja": "個別セルの保存に失敗しました。成功済みセルは独立ファイルとして保持されています。",
+      "en": "Some cells could not be saved. Successfully saved cells are retained as independent files.",
+      "resource": false
+    },
+    {
+      "id": "Text0474",
+      "kind": "format",
+      "ja": "倍率 (%)",
+      "en": "Scale (%)",
+      "resource": false
+    },
+    {
+      "id": "Text0475",
+      "kind": "format",
+      "ja": "倍率X (%)",
+      "en": "X scale (%)",
+      "resource": false
+    },
+    {
+      "id": "Text0476",
+      "kind": "format",
+      "ja": "倍率Y (%)",
+      "en": "Y scale (%)",
+      "resource": false
+    },
+    {
+      "id": "Text0477",
+      "kind": "format",
+      "ja": "候補 %llu件 / 追加 %u件 / 既存を保持 %u件\n",
+      "en": "%llu candidates / %u added / %u existing kept\n",
+      "resource": false
+    },
+    {
+      "id": "Text0478",
+      "kind": "text",
+      "ja": "候補 1",
+      "en": "Candidate 1",
+      "resource": false
+    },
+    {
+      "id": "Text0479",
+      "kind": "text",
+      "ja": "候補: ",
+      "en": "Candidates: ",
+      "resource": false
+    },
+    {
+      "id": "Text0480",
+      "kind": "text",
+      "ja": "値",
+      "en": "Value",
+      "resource": true
+    },
+    {
+      "id": "Text0481",
+      "kind": "text",
+      "ja": "値 (1/1000 px または倍率)",
+      "en": "Value (1/1000 px or scale)",
+      "resource": false
+    },
+    {
+      "id": "Text0482",
+      "kind": "text",
+      "ja": "値2",
+      "en": "Value 2",
+      "resource": true
+    },
+    {
+      "id": "Text0483",
+      "kind": "text",
+      "ja": "値3",
+      "en": "Value 3",
+      "resource": true
+    },
+    {
+      "id": "Text0484",
+      "kind": "text",
+      "ja": "値4",
+      "en": "Value 4",
+      "resource": true
+    },
+    {
+      "id": "Text0485",
+      "kind": "text",
+      "ja": "停止",
+      "en": "Stop",
+      "resource": true
+    },
+    {
+      "id": "Text0486",
+      "kind": "text",
+      "ja": "元に戻す(&U)\tCtrl+Z",
+      "en": "&Undo\tCtrl+Z",
+      "resource": true
+    },
+    {
+      "id": "Text0487",
+      "kind": "text",
+      "ja": "元に戻す: ",
+      "en": "Undo: ",
+      "resource": false
+    },
+    {
+      "id": "Text0488",
+      "kind": "text",
+      "ja": "元の文書、保存先、履歴は変更しません。続行しますか？",
+      "en": "The original document, destination, and history will not change. Continue?",
+      "resource": false
+    },
+    {
+      "id": "Text0489",
+      "kind": "format",
+      "ja": "元ファイル: %ls\n",
+      "en": "Source file: %ls\n",
+      "resource": false
+    },
+    {
+      "id": "Text0490",
+      "kind": "text",
+      "ja": "元ファイルより新しいRecovery",
+      "en": "Recovery newer than source file",
+      "resource": false
+    },
+    {
+      "id": "Text0491",
+      "kind": "text",
+      "ja": "先頭",
+      "en": "First",
+      "resource": false
+    },
+    {
+      "id": "Text0492",
+      "kind": "text",
+      "ja": "先頭フレーム",
+      "en": "First Frame",
+      "resource": true
+    },
+    {
+      "id": "Text0493",
+      "kind": "text",
+      "ja": "先頭番号",
+      "en": "First number",
+      "resource": false
+    },
+    {
+      "id": "Text0494",
+      "kind": "text",
+      "ja": "入り",
+      "en": "Taper in",
+      "resource": false
+    },
+    {
+      "id": "Text0495",
+      "kind": "text",
+      "ja": "入り + 抜き",
+      "en": "Taper in + out",
+      "resource": false
+    },
+    {
+      "id": "Text0496",
+      "kind": "text",
+      "ja": "入力",
+      "en": "Input",
+      "resource": true
+    },
+    {
+      "id": "Text0497",
+      "kind": "text",
+      "ja": "入力ファイル...",
+      "en": "Input Files...",
+      "resource": true
+    },
+    {
+      "id": "Text0498",
+      "kind": "text",
+      "ja": "入力フォルダー...",
+      "en": "Input Folder...",
+      "resource": true
+    },
+    {
+      "id": "Text0499",
+      "kind": "text",
+      "ja": "入力中のパラメーターはまだ有効ではありません。",
+      "en": "The parameters being entered are not valid yet.",
+      "resource": false
+    },
+    {
+      "id": "Text0500",
+      "kind": "text",
+      "ja": "入力条件から有効な作成計画を計算できません。値と上限を確認してください。",
+      "en": "A valid creation plan could not be calculated from the input. Check the values and limits.",
+      "resource": false
+    },
+    {
+      "id": "Text0501",
+      "kind": "text",
+      "ja": "全体",
+      "en": "Entire Document",
+      "resource": true
+    },
+    {
+      "id": "Text0502",
+      "kind": "text",
+      "ja": "全体不透明度",
+      "en": "EntireOpacity",
+      "resource": true
+    },
+    {
+      "id": "Text0503",
+      "kind": "text",
+      "ja": "全体不透明度...",
+      "en": "Global Opacity...",
+      "resource": true
+    },
+    {
+      "id": "Text0504",
+      "kind": "text",
+      "ja": "全体表示(&F)",
+      "en": "&Fit",
+      "resource": true
+    },
+    {
+      "id": "Text0505",
+      "kind": "text",
+      "ja": "全実行",
+      "en": "Run All",
+      "resource": true
+    },
+    {
+      "id": "Text0506",
+      "kind": "text",
+      "ja": "共通ダイアログ smoke",
+      "en": "Common dialog smoke",
+      "resource": false
+    },
+    {
+      "id": "Text0507",
+      "kind": "text",
+      "ja": "内容解釈",
+      "en": "Content interpretation",
+      "resource": false
+    },
+    {
+      "id": "Text0508",
+      "kind": "text",
+      "ja": "円形",
+      "en": "Circular",
+      "resource": false
+    },
+    {
+      "id": "Text0509",
+      "kind": "text",
+      "ja": "再サンプル (0/1)",
+      "en": "Resample (0/1)",
+      "resource": false
+    },
+    {
+      "id": "Text0510",
+      "kind": "text",
+      "ja": "再読込",
+      "en": "Reload",
+      "resource": true
+    },
+    {
+      "id": "Text0511",
+      "kind": "text",
+      "ja": "処理",
+      "en": "Process",
+      "resource": false
+    },
+    {
+      "id": "Text0512",
+      "kind": "text",
+      "ja": "処理中...",
+      "en": "Processing...",
+      "resource": false
+    },
+    {
+      "id": "Text0513",
+      "kind": "text",
+      "ja": "処理進捗",
+      "en": "Job Progress",
+      "resource": true
+    },
+    {
+      "id": "Text0514",
+      "kind": "text",
+      "ja": "出力",
+      "en": "Output",
+      "resource": true
+    },
+    {
+      "id": "Text0515",
+      "kind": "text",
+      "ja": "出力: ",
+      "en": "Output: ",
+      "resource": false
+    },
+    {
+      "id": "Text0516",
+      "kind": "text",
+      "ja": "出力先 (1:元 2:選択 3:主線 4:彩色 5:別file)",
+      "en": "Output (1:original 2:selected 3:main line 4:coloring 5:other file)",
+      "resource": false
+    },
+    {
+      "id": "Text0517",
+      "kind": "text",
+      "ja": "出力色安全ガード",
+      "en": "Output Color Safety Guard",
+      "resource": false
+    },
+    {
+      "id": "Text0518",
+      "kind": "text",
+      "ja": "出力色安全ガード...",
+      "en": "Output Color Safety Guard...",
+      "resource": true
+    },
+    {
+      "id": "Text0519",
+      "kind": "text",
+      "ja": "出力色安全ガード: 選択 ",
+      "en": "Output color safety guard: selected ",
+      "resource": false
+    },
+    {
+      "id": "Text0520",
+      "kind": "text",
+      "ja": "出力色安全ガードの既定プロファイルを保存できませんでした。",
+      "en": "The default output color safety guard profile could not be saved.",
+      "resource": false
+    },
+    {
+      "id": "Text0521",
+      "kind": "text",
+      "ja": "分割数",
+      "en": "Divisions",
+      "resource": false
+    },
+    {
+      "id": "Text0522",
+      "kind": "text",
+      "ja": "初期レイヤー",
+      "en": "Initial layer",
+      "resource": true
+    },
+    {
+      "id": "Text0523",
+      "kind": "text",
+      "ja": "別グループに新しいビュー",
+      "en": "New View in Other Group",
+      "resource": true
+    },
+    {
+      "id": "Text0524",
+      "kind": "text",
+      "ja": "別グループへ移動",
+      "en": "Move to Other Group",
+      "resource": true
+    },
+    {
+      "id": "Text0525",
+      "kind": "text",
+      "ja": "制作(&W)",
+      "en": "&Production",
+      "resource": true
+    },
+    {
+      "id": "Text0526",
+      "kind": "text",
+      "ja": "前N...",
+      "en": "PreviousN...",
+      "resource": true
+    },
+    {
+      "id": "Text0527",
+      "kind": "text",
+      "ja": "前Nセル...",
+      "en": "Previous N Cells...",
+      "resource": true
+    },
+    {
+      "id": "Text0528",
+      "kind": "text",
+      "ja": "前のセル",
+      "en": "Previous Cell",
+      "resource": true
+    },
+    {
+      "id": "Text0529",
+      "kind": "text",
+      "ja": "前のタブ",
+      "en": "Previous Tab",
+      "resource": true
+    },
+    {
+      "id": "Text0530",
+      "kind": "text",
+      "ja": "前のフレーム",
+      "en": "Previous Frame",
+      "resource": true
+    },
+    {
+      "id": "Text0531",
+      "kind": "text",
+      "ja": "前の注釈を選択",
+      "en": "Select Previous Annotation",
+      "resource": true
+    },
+    {
+      "id": "Text0532",
+      "kind": "text",
+      "ja": "前の調整レイヤーを選択",
+      "en": "Select Previous Adjustment Layer",
+      "resource": true
+    },
+    {
+      "id": "Text0533",
+      "kind": "text",
+      "ja": "前へ",
+      "en": "Previous",
+      "resource": true
+    },
+    {
+      "id": "Text0534",
+      "kind": "text",
+      "ja": "前セルを自動参照",
+      "en": "Automatically reference previous cell",
+      "resource": true
+    },
+    {
+      "id": "Text0535",
+      "kind": "text",
+      "ja": "前回の文書を復元する設定を保存できませんでした。",
+      "en": "The setting to restore previous documents could not be saved.",
+      "resource": false
+    },
+    {
+      "id": "Text0536",
+      "kind": "text",
+      "ja": "前回の文書一覧が不正なため復元しません。文書ファイルは変更していません。",
+      "en": "The previous document list is invalid and will not be restored. Document files were not changed.",
+      "resource": false
+    },
+    {
+      "id": "Text0537",
+      "kind": "text",
+      "ja": "前後N...",
+      "en": "Previous / Next N...",
+      "resource": true
+    },
+    {
+      "id": "Text0538",
+      "kind": "text",
+      "ja": "前後Nセル...",
+      "en": "Previous and Next N Cells...",
+      "resource": true
+    },
+    {
+      "id": "Text0539",
+      "kind": "text",
+      "ja": "前後セル切替",
+      "en": "Switch Previous / Next Cell",
+      "resource": false
+    },
+    {
+      "id": "Text0540",
+      "kind": "text",
+      "ja": "前後セル切替: 端点で停止",
+      "en": "Previous / Next Cell: stop at endpoints",
+      "resource": false
+    },
+    {
+      "id": "Text0541",
+      "kind": "text",
+      "ja": "前後セル切替: 端点で循環",
+      "en": "Previous / Next Cell: wrap at endpoints",
+      "resource": false
+    },
+    {
+      "id": "Text0542",
+      "kind": "text",
+      "ja": "前景ゴミ除去",
+      "en": "Foreground Dust Removal",
+      "resource": false
+    },
+    {
+      "id": "Text0543",
+      "kind": "text",
+      "ja": "割り当ては反映されましたが、次回起動用の設定を保存できませんでした。",
+      "en": "The assignment was applied, but the setting for the next launch could not be saved.",
+      "resource": false
+    },
+    {
+      "id": "Text0544",
+      "kind": "text",
+      "ja": "半径 milli",
+      "en": "Radius (milli)",
+      "resource": false
+    },
+    {
+      "id": "Text0545",
+      "kind": "text",
+      "ja": "参照セル: ",
+      "en": "Reference cell: ",
+      "resource": false
+    },
+    {
+      "id": "Text0546",
+      "kind": "text",
+      "ja": "参照セル: —",
+      "en": "Reference cell: —",
+      "resource": true
+    },
+    {
+      "id": "Text0547",
+      "kind": "text",
+      "ja": "参照セルがありません",
+      "en": "No reference cell",
+      "resource": true
+    },
+    {
+      "id": "Text0548",
+      "kind": "text",
+      "ja": "参照ビューを初期化できません",
+      "en": "The reference view could not be initialized",
+      "resource": false
+    },
+    {
+      "id": "Text0549",
+      "kind": "text",
+      "ja": "参照・チェック",
+      "en": "Reference / Check",
+      "resource": true
+    },
+    {
+      "id": "Text0550",
+      "kind": "text",
+      "ja": "参照画像",
+      "en": "Reference Image",
+      "resource": true
+    },
+    {
+      "id": "Text0551",
+      "kind": "text",
+      "ja": "参照画像はありません",
+      "en": "No reference image",
+      "resource": true
+    },
+    {
+      "id": "Text0552",
+      "kind": "text",
+      "ja": "参照画像を描画できません",
+      "en": "The reference image could not be drawn",
+      "resource": false
+    },
+    {
+      "id": "Text0553",
+      "kind": "text",
+      "ja": "参照表示用メモリが不足しました",
+      "en": "Insufficient memory for reference display",
+      "resource": false
+    },
+    {
+      "id": "Text0554",
+      "kind": "text",
+      "ja": "反転 (0/1)",
+      "en": "Invert (0/1)",
+      "resource": false
+    },
+    {
+      "id": "Text0555",
+      "kind": "text",
+      "ja": "右",
+      "en": "Right",
+      "resource": false
+    },
+    {
+      "id": "Text0556",
+      "kind": "text",
+      "ja": "右90度",
+      "en": "Rotate Right 90°",
+      "resource": true
+    },
+    {
+      "id": "Text0557",
+      "kind": "text",
+      "ja": "右へ分割",
+      "en": "Split Right",
+      "resource": true
+    },
+    {
+      "id": "Text0558",
+      "kind": "text",
+      "ja": "右上",
+      "en": "RightTop",
+      "resource": false
+    },
+    {
+      "id": "Text0559",
+      "kind": "text",
+      "ja": "右下",
+      "en": "RightBottom",
+      "resource": false
+    },
+    {
+      "id": "Text0560",
+      "kind": "text",
+      "ja": "各辺余白 (‰)",
+      "en": "Per-edge margins (‰)",
+      "resource": true
+    },
+    {
+      "id": "Text0561",
+      "kind": "text",
+      "ja": "合成",
+      "en": "Composite",
+      "resource": false
+    },
+    {
+      "id": "Text0562",
+      "kind": "text",
+      "ja": "合成表示色",
+      "en": "Composite Display Color",
+      "resource": true
+    },
+    {
+      "id": "Text0563",
+      "kind": "text",
+      "ja": "同一ユーザーの application activation を初期化できませんでした。",
+      "en": "Application activation for the current user could not be initialized.",
+      "resource": false
+    },
+    {
+      "id": "Text0564",
+      "kind": "text",
+      "ja": "同種を統合",
+      "en": "Merge Same Kind",
+      "resource": true
+    },
+    {
+      "id": "Text0565",
+      "kind": "text",
+      "ja": "同種プレーンの統合",
+      "en": "Merge Same-kind Planes",
+      "resource": false
+    },
+    {
+      "id": "Text0566",
+      "kind": "text",
+      "ja": "同種レイヤーの統合",
+      "en": "Merge Same-kind Layers",
+      "resource": false
+    },
+    {
+      "id": "Text0567",
+      "kind": "text",
+      "ja": "名前",
+      "en": "Name",
+      "resource": false
+    },
+    {
+      "id": "Text0568",
+      "kind": "text",
+      "ja": "名前または番号",
+      "en": "Name or number",
+      "resource": false
+    },
+    {
+      "id": "Text0569",
+      "kind": "text",
+      "ja": "名前を付けて保存(&A)...",
+      "en": "Save &As...",
+      "resource": true
+    },
+    {
+      "id": "Text0570",
+      "kind": "text",
+      "ja": "名前を付けて保存...",
+      "en": "Save As...",
+      "resource": true
+    },
+    {
+      "id": "Text0571",
+      "kind": "text",
+      "ja": "名前を変更...",
+      "en": "Rename...",
+      "resource": true
+    },
+    {
+      "id": "Text0572",
+      "kind": "text",
+      "ja": "名前・番号を検索...",
+      "en": "Search Name / Number...",
+      "resource": true
+    },
+    {
+      "id": "Text0573",
+      "kind": "text",
+      "ja": "含み塗り",
+      "en": "Inclusive fill",
+      "resource": true
+    },
+    {
+      "id": "Text0574",
+      "kind": "text",
+      "ja": "含み塗りには対象色が必要です。",
+      "en": "Inclusive fill requires target colors.",
+      "resource": false
+    },
+    {
+      "id": "Text0575",
+      "kind": "text",
+      "ja": "四角",
+      "en": "Square",
+      "resource": false
+    },
+    {
+      "id": "Text0576",
+      "kind": "text",
+      "ja": "回転",
+      "en": "Rotate",
+      "resource": true
+    },
+    {
+      "id": "Text0577",
+      "kind": "text",
+      "ja": "回転 (度)",
+      "en": "Rotation (degrees)",
+      "resource": false
+    },
+    {
+      "id": "Text0578",
+      "kind": "text",
+      "ja": "回転・基準点",
+      "en": "Rotation / Reference Point",
+      "resource": false
+    },
+    {
+      "id": "Text0579",
+      "kind": "text",
+      "ja": "回転角 (度)",
+      "en": "Rotation angle (degrees)",
+      "resource": true
+    },
+    {
+      "id": "Text0580",
+      "kind": "text",
+      "ja": "回転角度",
+      "en": "Rotation angle",
+      "resource": false
+    },
+    {
+      "id": "Text0581",
+      "kind": "text",
+      "ja": "図形Canvas操作",
+      "en": "Shape Canvas Operation",
+      "resource": false
+    },
+    {
+      "id": "Text0582",
+      "kind": "text",
+      "ja": "図形オプション",
+      "en": "Shape Options",
+      "resource": false
+    },
+    {
+      "id": "Text0583",
+      "kind": "text",
+      "ja": "図形オプション...",
+      "en": "Shape Options...",
+      "resource": true
+    },
+    {
+      "id": "Text0584",
+      "kind": "text",
+      "ja": "図形プレビューが開始されていません。",
+      "en": "The shape preview has not started.",
+      "resource": false
+    },
+    {
+      "id": "Text0585",
+      "kind": "text",
+      "ja": "固定編集モード",
+      "en": "Fixed Edit Mode",
+      "resource": true
+    },
+    {
+      "id": "Text0586",
+      "kind": "text",
+      "ja": "垂直ガイド",
+      "en": "Vertical Guide",
+      "resource": false
+    },
+    {
+      "id": "Text0587",
+      "kind": "text",
+      "ja": "垂直ガイドを追加...",
+      "en": "Add Vertical Guide...",
+      "resource": true
+    },
+    {
+      "id": "Text0588",
+      "kind": "text",
+      "ja": "垂直方向",
+      "en": "Vertical",
+      "resource": true
+    },
+    {
+      "id": "Text0589",
+      "kind": "text",
+      "ja": "基準X (px)",
+      "en": "AnchorX (px)",
+      "resource": false
+    },
+    {
+      "id": "Text0590",
+      "kind": "text",
+      "ja": "基準Y (px)",
+      "en": "AnchorY (px)",
+      "resource": false
+    },
+    {
+      "id": "Text0591",
+      "kind": "text",
+      "ja": "基準フレーム",
+      "en": "AnchorFrame",
+      "resource": false
+    },
+    {
+      "id": "Text0592",
+      "kind": "text",
+      "ja": "基準フレーム...",
+      "en": "Reference Frame...",
+      "resource": true
+    },
+    {
+      "id": "Text0593",
+      "kind": "text",
+      "ja": "基準位置 (1:左上 2:右上 3:中央 4:左下 5:右下)",
+      "en": "Reference position (1:top left 2:top right 3:center 4:bottom left 5:bottom right)",
+      "resource": false
+    },
+    {
+      "id": "Text0594",
+      "kind": "text",
+      "ja": "基準点",
+      "en": "Reference point",
+      "resource": true
+    },
+    {
+      "id": "Text0595",
+      "kind": "text",
+      "ja": "塗り",
+      "en": "Fill",
+      "resource": true
+    },
+    {
+      "id": "Text0596",
+      "kind": "text",
+      "ja": "塗りあふれを中断",
+      "en": "Abort fill overflow",
+      "resource": true
+    },
+    {
+      "id": "Text0597",
+      "kind": "format",
+      "ja": "塗りあふれを中断しました。候補座標: (%u, %u)",
+      "en": "Fill overflow was aborted. Candidate coordinate: (%u, %u)",
+      "resource": false
+    },
+    {
+      "id": "Text0598",
+      "kind": "text",
+      "ja": "塗りのばし",
+      "en": "Fill Extension",
+      "resource": true
+    },
+    {
+      "id": "Text0599",
+      "kind": "text",
+      "ja": "塗りを囲む線",
+      "en": "Fill Boundary Lines",
+      "resource": true
+    },
+    {
+      "id": "Text0600",
+      "kind": "text",
+      "ja": "塗り色",
+      "en": "FillColor",
+      "resource": false
+    },
+    {
+      "id": "Text0601",
+      "kind": "text",
+      "ja": "境界",
+      "en": "Boundary",
+      "resource": false
+    },
+    {
+      "id": "Text0602",
+      "kind": "text",
+      "ja": "境界色は position:RRGGBBAA;... 形式で2～16個、0から1000まで昇順に指定してください。",
+      "en": "Specify 2–16 boundary colors in position:RRGGBBAA;... format, sorted from 0 to 1000.",
+      "resource": false
+    },
+    {
+      "id": "Text0603",
+      "kind": "text",
+      "ja": "境界色エアブラシ",
+      "en": "Boundary-color Airbrush",
+      "resource": true
+    },
+    {
+      "id": "Text0604",
+      "kind": "text",
+      "ja": "境界色エアブラシ...",
+      "en": "Boundary-color Airbrush...",
+      "resource": true
+    },
+    {
+      "id": "Text0605",
+      "kind": "text",
+      "ja": "境界色エアブラシ（現在の選択範囲へ適用）",
+      "en": "Boundary Color Airbrush (apply to current selection)",
+      "resource": false
+    },
+    {
+      "id": "Text0606",
+      "kind": "text",
+      "ja": "増分",
+      "en": "Increment",
+      "resource": false
+    },
+    {
+      "id": "Text0607",
+      "kind": "text",
+      "ja": "変換",
+      "en": "Convert",
+      "resource": true
+    },
+    {
+      "id": "Text0608",
+      "kind": "text",
+      "ja": "変換...",
+      "en": "Convert...",
+      "resource": true
+    },
+    {
+      "id": "Text0609",
+      "kind": "text",
+      "ja": "変換してペースト",
+      "en": "Convert and Paste",
+      "resource": false
+    },
+    {
+      "id": "Text0610",
+      "kind": "text",
+      "ja": "変換してペースト...",
+      "en": "Paste with Conversion...",
+      "resource": true
+    },
+    {
+      "id": "Text0611",
+      "kind": "text",
+      "ja": "変換先プレーン",
+      "en": "Destination plane",
+      "resource": false
+    },
+    {
+      "id": "Text0612",
+      "kind": "text",
+      "ja": "変換先形式 (1-5)",
+      "en": "Destination format (1–5)",
+      "resource": false
+    },
+    {
+      "id": "Text0613",
+      "kind": "text",
+      "ja": "変換先種類",
+      "en": "Destination kind",
+      "resource": false
+    },
+    {
+      "id": "Text0614",
+      "kind": "text",
+      "ja": "変換先種類 (1-7)",
+      "en": "Destination kind (1–7)",
+      "resource": false
+    },
+    {
+      "id": "Text0615",
+      "kind": "text",
+      "ja": "変更を保存しますか？",
+      "en": "Save changes?",
+      "resource": false
+    },
+    {
+      "id": "Text0616",
+      "kind": "text",
+      "ja": "失敗",
+      "en": "Failure",
+      "resource": false
+    },
+    {
+      "id": "Text0617",
+      "kind": "text",
+      "ja": "失敗時",
+      "en": "On Failure",
+      "resource": true
+    },
+    {
+      "id": "Text0618",
+      "kind": "text",
+      "ja": "安全フレーム",
+      "en": "Safe frame",
+      "resource": false
+    },
+    {
+      "id": "Text0619",
+      "kind": "text",
+      "ja": "安全フレーム (‰)",
+      "en": "Safe frame (‰)",
+      "resource": true
+    },
+    {
+      "id": "Text0620",
+      "kind": "text",
+      "ja": "安全フレーム...",
+      "en": "Safe Frame...",
+      "resource": true
+    },
+    {
+      "id": "Text0621",
+      "kind": "text",
+      "ja": "完了",
+      "en": "Completed",
+      "resource": false
+    },
+    {
+      "id": "Text0622",
+      "kind": "text",
+      "ja": "完全な白をチェック",
+      "en": "Check Pure White",
+      "resource": true
+    },
+    {
+      "id": "Text0623",
+      "kind": "text",
+      "ja": "完全に含まれる線",
+      "en": "Lines Fully Contained",
+      "resource": true
+    },
+    {
+      "id": "Text0624",
+      "kind": "text",
+      "ja": "実行ごとに設定 (0/1)",
+      "en": "Configure each run (0/1)",
+      "resource": false
+    },
+    {
+      "id": "Text0625",
+      "kind": "text",
+      "ja": "実行中の処理はありません。",
+      "en": "No operation is running.",
+      "resource": true
+    },
+    {
+      "id": "Text0626",
+      "kind": "text",
+      "ja": "対応画像 (*.png;*.tif;*.tiff;*.tga;*.bmp)\u0000*.png;*.tif;*.tiff;*.tga;*.bmp\u0000",
+      "en": "Supported Images (*.png;*.tif;*.tiff;*.tga;*.bmp)\u0000*.png;*.tif;*.tiff;*.tga;*.bmp\u0000",
+      "resource": false
+    },
+    {
+      "id": "Text0627",
+      "kind": "text",
+      "ja": "対象文書を確認できません",
+      "en": "The target document could not be verified",
+      "resource": false
+    },
+    {
+      "id": "Text0628",
+      "kind": "text",
+      "ja": "対象色 (RRGGBBAA; 最大6色)",
+      "en": "Target colors (RRGGBBAA; up to 6)",
+      "resource": true
+    },
+    {
+      "id": "Text0629",
+      "kind": "text",
+      "ja": "対象色を現在色に設定",
+      "en": "Set Target to Current Color",
+      "resource": true
+    },
+    {
+      "id": "Text0630",
+      "kind": "text",
+      "ja": "尺 (frame)",
+      "en": "Duration (frames)",
+      "resource": true
+    },
+    {
+      "id": "Text0631",
+      "kind": "text",
+      "ja": "履歴",
+      "en": "History",
+      "resource": true
+    },
+    {
+      "id": "Text0632",
+      "kind": "text",
+      "ja": "履歴: 準備中...",
+      "en": "History: Preparing...",
+      "resource": true
+    },
+    {
+      "id": "Text0633",
+      "kind": "text",
+      "ja": "履歴を破棄したコピーは、開いている文書とは別の保存先を選んでください。",
+      "en": "Choose a destination other than an open document for the copy without history.",
+      "resource": false
+    },
+    {
+      "id": "Text0634",
+      "kind": "text",
+      "ja": "履歴を破棄したコピーを保存しました。現在の文書は変更されていません。",
+      "en": "The copy without history was saved. The current document was not changed.",
+      "resource": false
+    },
+    {
+      "id": "Text0635",
+      "kind": "text",
+      "ja": "履歴を破棄してコピー",
+      "en": "Copy Without History",
+      "resource": false
+    },
+    {
+      "id": "Text0636",
+      "kind": "text",
+      "ja": "履歴を破棄してコピー...",
+      "en": "Copy Without History...",
+      "resource": true
+    },
+    {
+      "id": "Text0637",
+      "kind": "text",
+      "ja": "履歴操作",
+      "en": "History Operation",
+      "resource": false
+    },
+    {
+      "id": "Text0638",
+      "kind": "text",
+      "ja": "左",
+      "en": "Left",
+      "resource": false
+    },
+    {
+      "id": "Text0639",
+      "kind": "text",
+      "ja": "左90度",
+      "en": "Rotate Left 90°",
+      "resource": true
+    },
+    {
+      "id": "Text0640",
+      "kind": "text",
+      "ja": "左上",
+      "en": "LeftTop",
+      "resource": false
+    },
+    {
+      "id": "Text0641",
+      "kind": "text",
+      "ja": "左上から順に1～4ストロークを指定します。既存割当との完全一致は交換されます。",
+      "en": "Specify 1–4 strokes from the top left. An exact match with an existing assignment is swapped.",
+      "resource": true
+    },
+    {
+      "id": "Text0642",
+      "kind": "text",
+      "ja": "左下",
+      "en": "LeftBottom",
+      "resource": false
+    },
+    {
+      "id": "Text0643",
+      "kind": "text",
+      "ja": "左右を反転",
+      "en": "Mirror Horizontally",
+      "resource": true
+    },
+    {
+      "id": "Text0644",
+      "kind": "text",
+      "ja": "幅",
+      "en": "Width",
+      "resource": true
+    },
+    {
+      "id": "Text0645",
+      "kind": "format",
+      "ja": "幅 (%)",
+      "en": "Width (%)",
+      "resource": false
+    },
+    {
+      "id": "Text0646",
+      "kind": "text",
+      "ja": "幅 (px)",
+      "en": "Width (px)",
+      "resource": true
+    },
+    {
+      "id": "Text0647",
+      "kind": "text",
+      "ja": "幅 (μm)",
+      "en": "Width (μm)",
+      "resource": false
+    },
+    {
+      "id": "Text0648",
+      "kind": "text",
+      "ja": "幅 px",
+      "en": "Width px",
+      "resource": false
+    },
+    {
+      "id": "Text0649",
+      "kind": "text",
+      "ja": "強さ 0-1000",
+      "en": "Strength 0–1000",
+      "resource": false
+    },
+    {
+      "id": "Text0650",
+      "kind": "text",
+      "ja": "強さ x1000",
+      "en": "Strength x1000",
+      "resource": false
+    },
+    {
+      "id": "Text0651",
+      "kind": "text",
+      "ja": "形状",
+      "en": "Shape",
+      "resource": false
+    },
+    {
+      "id": "Text0652",
+      "kind": "text",
+      "ja": "彩色(&C)",
+      "en": "&Color",
+      "resource": true
+    },
+    {
+      "id": "Text0653",
+      "kind": "text",
+      "ja": "彩色チェックを解除",
+      "en": "Disable Color Check",
+      "resource": true
+    },
+    {
+      "id": "Text0654",
+      "kind": "text",
+      "ja": "彩色チェック表示",
+      "en": "Coloring Check View",
+      "resource": false
+    },
+    {
+      "id": "Text0655",
+      "kind": "text",
+      "ja": "待機中",
+      "en": "Waiting",
+      "resource": true
+    },
+    {
+      "id": "Text0656",
+      "kind": "text",
+      "ja": "後N...",
+      "en": "Next N...",
+      "resource": true
+    },
+    {
+      "id": "Text0657",
+      "kind": "text",
+      "ja": "後Nセル...",
+      "en": "Next N Cells...",
+      "resource": true
+    },
+    {
+      "id": "Text0658",
+      "kind": "text",
+      "ja": "復元セル",
+      "en": "Restored cell",
+      "resource": false
+    },
+    {
+      "id": "Text0659",
+      "kind": "text",
+      "ja": "復帰",
+      "en": "Revert",
+      "resource": false
+    },
+    {
+      "id": "Text0660",
+      "kind": "text",
+      "ja": "復帰(&R)",
+      "en": "&Revert",
+      "resource": true
+    },
+    {
+      "id": "Text0661",
+      "kind": "text",
+      "ja": "手描き指示モード",
+      "en": "Hand-drawn Instruction Mode",
+      "resource": true
+    },
+    {
+      "id": "Text0662",
+      "kind": "text",
+      "ja": "手描き指示モードを終了",
+      "en": "Exit Freehand Instruction Mode",
+      "resource": false
+    },
+    {
+      "id": "Text0663",
+      "kind": "text",
+      "ja": "手描き指示モード：Canvasをドラッグ（Escで取消）",
+      "en": "Freehand instruction mode: drag on Canvas (Esc to cancel)",
+      "resource": false
+    },
+    {
+      "id": "Text0664",
+      "kind": "text",
+      "ja": "投げ縄",
+      "en": "Lasso",
+      "resource": true
+    },
+    {
+      "id": "Text0665",
+      "kind": "text",
+      "ja": "投げ縄範囲",
+      "en": "Lasso Range",
+      "resource": true
+    },
+    {
+      "id": "Text0666",
+      "kind": "text",
+      "ja": "折れ線範囲",
+      "en": "Polyline Range",
+      "resource": true
+    },
+    {
+      "id": "Text0667",
+      "kind": "text",
+      "ja": "抜き",
+      "en": "Taper out",
+      "resource": false
+    },
+    {
+      "id": "Text0668",
+      "kind": "text",
+      "ja": "拡大(&I)",
+      "en": "Zoom &In",
+      "resource": true
+    },
+    {
+      "id": "Text0669",
+      "kind": "text",
+      "ja": "指定色",
+      "en": "Specified color",
+      "resource": false
+    },
+    {
+      "id": "Text0670",
+      "kind": "text",
+      "ja": "指定色以外",
+      "en": "Other than specified color",
+      "resource": false
+    },
+    {
+      "id": "Text0671",
+      "kind": "text",
+      "ja": "指示画像に含める",
+      "en": "Include in instruction image",
+      "resource": true
+    },
+    {
+      "id": "Text0672",
+      "kind": "text",
+      "ja": "指示画像を書き出し...",
+      "en": "Export Instruction Image...",
+      "resource": true
+    },
+    {
+      "id": "Text0673",
+      "kind": "text",
+      "ja": "描画",
+      "en": "Draw",
+      "resource": false
+    },
+    {
+      "id": "Text0674",
+      "kind": "text",
+      "ja": "描画色の選択",
+      "en": "Select Drawing Color",
+      "resource": false
+    },
+    {
+      "id": "Text0675",
+      "kind": "text",
+      "ja": "描画色を選択",
+      "en": "Select Drawing Color",
+      "resource": true
+    },
+    {
+      "id": "Text0676",
+      "kind": "text",
+      "ja": "描画色を選択範囲に追加",
+      "en": "Add Drawing Color to Selection",
+      "resource": true
+    },
+    {
+      "id": "Text0677",
+      "kind": "text",
+      "ja": "描画色以外を選択",
+      "en": "Select Colors Except Drawing Color",
+      "resource": true
+    },
+    {
+      "id": "Text0678",
+      "kind": "text",
+      "ja": "描画色形式",
+      "en": "Drawing Color Format",
+      "resource": false
+    },
+    {
+      "id": "Text0679",
+      "kind": "text",
+      "ja": "描画色編集",
+      "en": "Edit Drawing Color",
+      "resource": false
+    },
+    {
+      "id": "Text0680",
+      "kind": "text",
+      "ja": "描画色（RGB/HSV・RGBA8/16）...",
+      "en": "Drawing Color (RGB/HSV, RGBA8/16)...",
+      "resource": true
+    },
+    {
+      "id": "Text0681",
+      "kind": "text",
+      "ja": "描線",
+      "en": "Stroke",
+      "resource": false
+    },
+    {
+      "id": "Text0682",
+      "kind": "text",
+      "ja": "描線に寄せる",
+      "en": "Snap to strokes",
+      "resource": false
+    },
+    {
+      "id": "Text0683",
+      "kind": "text",
+      "ja": "損失を確認 (1)",
+      "en": "Confirm loss (1)",
+      "resource": false
+    },
+    {
+      "id": "Text0684",
+      "kind": "text",
+      "ja": "撮影フレームに用紙を合わせる",
+      "en": "Fit Paper to Shooting Frame",
+      "resource": false
+    },
+    {
+      "id": "Text0685",
+      "kind": "text",
+      "ja": "撮影フレームのハンドル編集",
+      "en": "Edit Shooting Frame Handles",
+      "resource": false
+    },
+    {
+      "id": "Text0686",
+      "kind": "text",
+      "ja": "撮影フレームをハンドル編集",
+      "en": "Edit Shooting Frame Handles",
+      "resource": true
+    },
+    {
+      "id": "Text0687",
+      "kind": "text",
+      "ja": "撮影フレームを削除",
+      "en": "Delete Shooting Frame",
+      "resource": true
+    },
+    {
+      "id": "Text0688",
+      "kind": "text",
+      "ja": "撮影フレームを考慮して用紙サイズ変更",
+      "en": "Resize Paper to Shooting Frame",
+      "resource": true
+    },
+    {
+      "id": "Text0689",
+      "kind": "text",
+      "ja": "撮影フレーム削除",
+      "en": "Shooting FrameDelete",
+      "resource": false
+    },
+    {
+      "id": "Text0690",
+      "kind": "text",
+      "ja": "撮影フレーム設定",
+      "en": "Shooting Frame Settings",
+      "resource": true
+    },
+    {
+      "id": "Text0691",
+      "kind": "text",
+      "ja": "撮影フレーム設定...",
+      "en": "Shooting Frame Settings...",
+      "resource": true
+    },
+    {
+      "id": "Text0692",
+      "kind": "text",
+      "ja": "操作",
+      "en": "Operation",
+      "resource": true
+    },
+    {
+      "id": "Text0693",
+      "kind": "text",
+      "ja": "放射",
+      "en": "Radial",
+      "resource": false
+    },
+    {
+      "id": "Text0694",
+      "kind": "text",
+      "ja": "数値パラメーターを10進整数で入力してください。",
+      "en": "Enter the numeric parameter as a decimal integer.",
+      "resource": false
+    },
+    {
+      "id": "Text0695",
+      "kind": "text",
+      "ja": "数値倍率の変更",
+      "en": "Change Numeric Zoom",
+      "resource": false
+    },
+    {
+      "id": "Text0696",
+      "kind": "text",
+      "ja": "文書に固定／追従",
+      "en": "Pin to Document / Follow",
+      "resource": true
+    },
+    {
+      "id": "Text0697",
+      "kind": "text",
+      "ja": "文書の選択範囲で制限",
+      "en": "Limit to document selection",
+      "resource": true
+    },
+    {
+      "id": "Text0698",
+      "kind": "text",
+      "ja": "文書を閉じる",
+      "en": "Close Document",
+      "resource": true
+    },
+    {
+      "id": "Text0699",
+      "kind": "text",
+      "ja": "文書編集",
+      "en": "DocumentEdit",
+      "resource": false
+    },
+    {
+      "id": "Text0700",
+      "kind": "text",
+      "ja": "断面",
+      "en": "Cross-section",
+      "resource": false
+    },
+    {
+      "id": "Text0701",
+      "kind": "text",
+      "ja": "新しいウィンドウ",
+      "en": "New Window",
+      "resource": true
+    },
+    {
+      "id": "Text0702",
+      "kind": "text",
+      "ja": "新しいウィンドウに複製ビュー",
+      "en": "Duplicate View in New Window",
+      "resource": true
+    },
+    {
+      "id": "Text0703",
+      "kind": "text",
+      "ja": "新しいビュー",
+      "en": "New View",
+      "resource": true
+    },
+    {
+      "id": "Text0704",
+      "kind": "text",
+      "ja": "新セル番号 (1以上)",
+      "en": "New cell number (1 or greater)",
+      "resource": false
+    },
+    {
+      "id": "Text0705",
+      "kind": "text",
+      "ja": "新色",
+      "en": "New color",
+      "resource": false
+    },
+    {
+      "id": "Text0706",
+      "kind": "text",
+      "ja": "新規",
+      "en": "New",
+      "resource": true
+    },
+    {
+      "id": "Text0707",
+      "kind": "text",
+      "ja": "新規 Cell",
+      "en": "New Cell",
+      "resource": true
+    },
+    {
+      "id": "Text0708",
+      "kind": "text",
+      "ja": "新規(&N)",
+      "en": "&New",
+      "resource": true
+    },
+    {
+      "id": "Text0709",
+      "kind": "text",
+      "ja": "新規...",
+      "en": "New...",
+      "resource": true
+    },
+    {
+      "id": "Text0710",
+      "kind": "text",
+      "ja": "新規カット",
+      "en": "New Cut",
+      "resource": false
+    },
+    {
+      "id": "Text0711",
+      "kind": "text",
+      "ja": "新規セルの作成",
+      "en": "Create New Cell",
+      "resource": false
+    },
+    {
+      "id": "Text0712",
+      "kind": "text",
+      "ja": "新規セル既定値",
+      "en": "New Cell Defaults",
+      "resource": false
+    },
+    {
+      "id": "Text0713",
+      "kind": "text",
+      "ja": "新規プレーン",
+      "en": "NewPlane",
+      "resource": false
+    },
+    {
+      "id": "Text0714",
+      "kind": "text",
+      "ja": "新規プレーン (1)",
+      "en": "NewPlane (1)",
+      "resource": false
+    },
+    {
+      "id": "Text0715",
+      "kind": "text",
+      "ja": "新規レイヤー",
+      "en": "NewLayer",
+      "resource": false
+    },
+    {
+      "id": "Text0716",
+      "kind": "text",
+      "ja": "新規保存",
+      "en": "Save New",
+      "resource": true
+    },
+    {
+      "id": "Text0717",
+      "kind": "text",
+      "ja": "方向 (1:左 2:右)",
+      "en": "Direction (1:left 2:right)",
+      "resource": false
+    },
+    {
+      "id": "Text0718",
+      "kind": "text",
+      "ja": "方向 (1:左右 2:上下)",
+      "en": "Direction (1:horizontal 2:vertical)",
+      "resource": false
+    },
+    {
+      "id": "Text0719",
+      "kind": "text",
+      "ja": "既存セルを追加...",
+      "en": "Add Existing Cell...",
+      "resource": true
+    },
+    {
+      "id": "Text0720",
+      "kind": "text",
+      "ja": "既定に戻す",
+      "en": "Reset to Default",
+      "resource": true
+    },
+    {
+      "id": "Text0721",
+      "kind": "text",
+      "ja": "日本語",
+      "en": "Japanese",
+      "resource": true
+    },
+    {
+      "id": "Text0722",
+      "kind": "text",
+      "ja": "旧セル番号 (1以上)",
+      "en": "Old cell number (1 or greater)",
+      "resource": false
+    },
+    {
+      "id": "Text0723",
+      "kind": "text",
+      "ja": "旧色",
+      "en": "Old color",
+      "resource": false
+    },
+    {
+      "id": "Text0724",
+      "kind": "format",
+      "ja": "旧色 (%u,%u,%u,%u) を新色 (%u,%u,%u,%u) に対応させますか？\n",
+      "en": "Map old color (%u,%u,%u,%u) to new color (%u,%u,%u,%u)?\n",
+      "resource": false
+    },
+    {
+      "id": "Text0725",
+      "kind": "text",
+      "ja": "明るさ・コントラスト",
+      "en": "Brightness / Contrast",
+      "resource": false
+    },
+    {
+      "id": "Text0726",
+      "kind": "text",
+      "ja": "明るさ・コントラスト...",
+      "en": "Brightness / Contrast...",
+      "resource": true
+    },
+    {
+      "id": "Text0727",
+      "kind": "text",
+      "ja": "明示上書き",
+      "en": "Explicit Overwrite",
+      "resource": true
+    },
+    {
+      "id": "Text0728",
+      "kind": "text",
+      "ja": "最上位の非透明プレーン",
+      "en": "Topmost Nontransparent Plane",
+      "resource": true
+    },
+    {
+      "id": "Text0729",
+      "kind": "text",
+      "ja": "最前面へ移動",
+      "en": "Move to Top",
+      "resource": true
+    },
+    {
+      "id": "Text0730",
+      "kind": "text",
+      "ja": "最大pixel",
+      "en": "Maximum pixels",
+      "resource": false
+    },
+    {
+      "id": "Text0731",
+      "kind": "text",
+      "ja": "最大pixel数",
+      "en": "Maximum pixel count",
+      "resource": false
+    },
+    {
+      "id": "Text0732",
+      "kind": "format",
+      "ja": "最大寄り (%d, %d) %d x %d / 余白 L%u T%u R%u B%u",
+      "en": "Maximum close-up (%d, %d) %d x %d / margins L%u T%u R%u B%u",
+      "resource": false
+    },
+    {
+      "id": "Text0733",
+      "kind": "text",
+      "ja": "最大寄り (‰)",
+      "en": "Maximum close-up (‰)",
+      "resource": true
+    },
+    {
+      "id": "Text0734",
+      "kind": "text",
+      "ja": "最大色数",
+      "en": "Maximum colors",
+      "resource": false
+    },
+    {
+      "id": "Text0735",
+      "kind": "text",
+      "ja": "最大隙間 (1/1000 px)",
+      "en": "Maximum gap (1/1000 px)",
+      "resource": false
+    },
+    {
+      "id": "Text0736",
+      "kind": "text",
+      "ja": "最新のパラメーターからプレビューを計算中...",
+      "en": "Calculating a preview from the latest parameters...",
+      "resource": false
+    },
+    {
+      "id": "Text0737",
+      "kind": "text",
+      "ja": "最近使ったファイル",
+      "en": "Recent Files",
+      "resource": true
+    },
+    {
+      "id": "Text0738",
+      "kind": "text",
+      "ja": "最近使ったファイルが見つからないため、履歴から削除しました。",
+      "en": "A recent file was not found and was removed from the history.",
+      "resource": false
+    },
+    {
+      "id": "Text0739",
+      "kind": "text",
+      "ja": "最近使ったファイルを開く",
+      "en": "Open Recent File",
+      "resource": false
+    },
+    {
+      "id": "Text0740",
+      "kind": "text",
+      "ja": "有効",
+      "en": "Enabled",
+      "resource": false
+    },
+    {
+      "id": "Text0741",
+      "kind": "text",
+      "ja": "有効 (0/1)",
+      "en": "Enabled (0/1)",
+      "resource": false
+    },
+    {
+      "id": "Text0742",
+      "kind": "format",
+      "ja": "有限の座標、1～180度の間隔、0～100%の不透明度、0～255のRGBを入力してください。",
+      "en": "Enter finite coordinates, an interval from 1–180 degrees, opacity from 0–100%, and RGB values from 0–255.",
+      "resource": false
+    },
+    {
+      "id": "Text0743",
+      "kind": "text",
+      "ja": "有限の数値を入力し、幅と高さを正にしてください。",
+      "en": "Enter finite values and use positive width and height.",
+      "resource": false
+    },
+    {
+      "id": "Text0744",
+      "kind": "text",
+      "ja": "期待する元色",
+      "en": "Expected source color",
+      "resource": false
+    },
+    {
+      "id": "Text0745",
+      "kind": "text",
+      "ja": "期待色を検査 (0/1)",
+      "en": "Check expected color (0/1)",
+      "resource": false
+    },
+    {
+      "id": "Text0746",
+      "kind": "text",
+      "ja": "未使用",
+      "en": "Unused",
+      "resource": false
+    },
+    {
+      "id": "Text0747",
+      "kind": "text",
+      "ja": "末尾",
+      "en": "Last",
+      "resource": false
+    },
+    {
+      "id": "Text0748",
+      "kind": "text",
+      "ja": "末尾フレーム",
+      "en": "Last Frame",
+      "resource": true
+    },
+    {
+      "id": "Text0749",
+      "kind": "text",
+      "ja": "本文",
+      "en": "Body",
+      "resource": false
+    },
+    {
+      "id": "Text0750",
+      "kind": "text",
+      "ja": "本文（UTF-8で保存）",
+      "en": "Body (saved as UTF-8)",
+      "resource": false
+    },
+    {
+      "id": "Text0751",
+      "kind": "text",
+      "ja": "欠落時 (1:skip 2:error)",
+      "en": "If missing (1:skip 2:error)",
+      "resource": false
+    },
+    {
+      "id": "Text0752",
+      "kind": "text",
+      "ja": "次の10色グループ\tTab",
+      "en": "Next 10-color Group\tTab",
+      "resource": true
+    },
+    {
+      "id": "Text0753",
+      "kind": "text",
+      "ja": "次のウィンドウに複製ビュー",
+      "en": "Duplicate View in Next Window",
+      "resource": true
+    },
+    {
+      "id": "Text0754",
+      "kind": "text",
+      "ja": "次のエディターグループ",
+      "en": "Next Editor Group",
+      "resource": true
+    },
+    {
+      "id": "Text0755",
+      "kind": "text",
+      "ja": "次のセル",
+      "en": "Next Cell",
+      "resource": true
+    },
+    {
+      "id": "Text0756",
+      "kind": "text",
+      "ja": "次のタブ",
+      "en": "Next Tab",
+      "resource": true
+    },
+    {
+      "id": "Text0757",
+      "kind": "text",
+      "ja": "次のフレーム",
+      "en": "Next Frame",
+      "resource": true
+    },
+    {
+      "id": "Text0758",
+      "kind": "text",
+      "ja": "次のプレビュー要求を開始できませんでした。",
+      "en": "The next preview request could not be started.",
+      "resource": false
+    },
+    {
+      "id": "Text0759",
+      "kind": "text",
+      "ja": "次のページ",
+      "en": "Next Page",
+      "resource": true
+    },
+    {
+      "id": "Text0760",
+      "kind": "text",
+      "ja": "次の注釈を選択",
+      "en": "Select Next Annotation",
+      "resource": true
+    },
+    {
+      "id": "Text0761",
+      "kind": "text",
+      "ja": "次の調整レイヤーを選択",
+      "en": "Select Next Adjustment Layer",
+      "resource": true
+    },
+    {
+      "id": "Text0762",
+      "kind": "text",
+      "ja": "次へ",
+      "en": "Next",
+      "resource": true
+    },
+    {
+      "id": "Text0763",
+      "kind": "text",
+      "ja": "次候補",
+      "en": "Next Match",
+      "resource": true
+    },
+    {
+      "id": "Text0764",
+      "kind": "text",
+      "ja": "水平ガイド",
+      "en": "Horizontal Guide",
+      "resource": false
+    },
+    {
+      "id": "Text0765",
+      "kind": "text",
+      "ja": "水平ガイドを追加...",
+      "en": "Add Horizontal Guide...",
+      "resource": true
+    },
+    {
+      "id": "Text0766",
+      "kind": "text",
+      "ja": "水平方向",
+      "en": "Horizontal",
+      "resource": true
+    },
+    {
+      "id": "Text0767",
+      "kind": "text",
+      "ja": "注釈オブジェクト操作",
+      "en": "Annotation Object Operation",
+      "resource": false
+    },
+    {
+      "id": "Text0768",
+      "kind": "text",
+      "ja": "消しゴム(&E)",
+      "en": "&Eraser",
+      "resource": true
+    },
+    {
+      "id": "Text0769",
+      "kind": "text",
+      "ja": "消失点のハンドル編集",
+      "en": "Edit Vanishing Point Handles",
+      "resource": false
+    },
+    {
+      "id": "Text0770",
+      "kind": "text",
+      "ja": "消失点をすべて削除",
+      "en": "Delete All Vanishing Points",
+      "resource": true
+    },
+    {
+      "id": "Text0771",
+      "kind": "text",
+      "ja": "消失点をハンドル編集",
+      "en": "Edit Vanishing Point Handles",
+      "resource": true
+    },
+    {
+      "id": "Text0772",
+      "kind": "text",
+      "ja": "消失点設定",
+      "en": "Vanishing Point Settings",
+      "resource": true
+    },
+    {
+      "id": "Text0773",
+      "kind": "text",
+      "ja": "消失点設定...",
+      "en": "Vanishing Point Settings...",
+      "resource": true
+    },
+    {
+      "id": "Text0774",
+      "kind": "text",
+      "ja": "深度 (8/16)",
+      "en": "Depth (8/16)",
+      "resource": false
+    },
+    {
+      "id": "Text0775",
+      "kind": "text",
+      "ja": "点/stop: input:output;... または position:RRGGBBAA;...",
+      "en": "points/stops: input:output;... or position:RRGGBBAA;...",
+      "resource": true
+    },
+    {
+      "id": "Text0776",
+      "kind": "text",
+      "ja": "無効",
+      "en": "Disabled",
+      "resource": false
+    },
+    {
+      "id": "Text0777",
+      "kind": "text",
+      "ja": "無題セル ",
+      "en": "Untitled Cell ",
+      "resource": false
+    },
+    {
+      "id": "Text0778",
+      "kind": "text",
+      "ja": "無題セル 1",
+      "en": "Untitled Cell 1",
+      "resource": false
+    },
+    {
+      "id": "Text0779",
+      "kind": "text",
+      "ja": "無題セル 1 *",
+      "en": "Untitled Cell 1 *",
+      "resource": false
+    },
+    {
+      "id": "Text0780",
+      "kind": "text",
+      "ja": "無題セル 1 - inkpod",
+      "en": "Untitled Cell 1 - inkpod",
+      "resource": false
+    },
+    {
+      "id": "Text0781",
+      "kind": "text",
+      "ja": "特効",
+      "en": "Special Effects",
+      "resource": false
+    },
+    {
+      "id": "Text0782",
+      "kind": "format",
+      "ja": "状態: %ls\n\n",
+      "en": "Status: %ls\n\n",
+      "resource": false
+    },
+    {
+      "id": "Text0783",
+      "kind": "text",
+      "ja": "現在のカットには未保存の変更があります。保存しますか？",
+      "en": "The current cut has unsaved changes. Save them?",
+      "resource": false
+    },
+    {
+      "id": "Text0784",
+      "kind": "text",
+      "ja": "現在のセルを保存してからシーケンスを切り替えますか？",
+      "en": "Save the current cell before switching sequences?",
+      "resource": false
+    },
+    {
+      "id": "Text0785",
+      "kind": "text",
+      "ja": "現在のワークスペース配置を保存できませんでした。",
+      "en": "The current workspace layout could not be saved.",
+      "resource": false
+    },
+    {
+      "id": "Text0786",
+      "kind": "text",
+      "ja": "現在の状態を新しい Genesis として保存します。\n\n",
+      "en": "The current state will be saved as a new Genesis.\n\n",
+      "resource": false
+    },
+    {
+      "id": "Text0787",
+      "kind": "text",
+      "ja": "現在の編集画像を保存してからライトテーブル項目と入れ替えますか？",
+      "en": "Save the current editing image before swapping it with the light-table item?",
+      "resource": false
+    },
+    {
+      "id": "Text0788",
+      "kind": "text",
+      "ja": "現在の連番",
+      "en": "Current Sequence",
+      "resource": true
+    },
+    {
+      "id": "Text0789",
+      "kind": "text",
+      "ja": "現在セル",
+      "en": "Current cell",
+      "resource": true
+    },
+    {
+      "id": "Text0790",
+      "kind": "text",
+      "ja": "現在セルを含む連番（自然順）",
+      "en": "Natural-order sequence containing current cell",
+      "resource": false
+    },
+    {
+      "id": "Text0791",
+      "kind": "text",
+      "ja": "現在セルを実行",
+      "en": "Run Current Cell",
+      "resource": true
+    },
+    {
+      "id": "Text0792",
+      "kind": "text",
+      "ja": "現在色を登録",
+      "en": "Register Current Color",
+      "resource": true
+    },
+    {
+      "id": "Text0793",
+      "kind": "text",
+      "ja": "用紙・画像サイズ変更",
+      "en": "Change Paper / Image Size",
+      "resource": false
+    },
+    {
+      "id": "Text0794",
+      "kind": "text",
+      "ja": "用紙設定",
+      "en": "Paper Settings",
+      "resource": false
+    },
+    {
+      "id": "Text0795",
+      "kind": "text",
+      "ja": "用紙設定...",
+      "en": "Paper Settings...",
+      "resource": true
+    },
+    {
+      "id": "Text0796",
+      "kind": "format",
+      "ja": "画像 %u x %u px / DPI %.3f / %u Cell\r\n",
+      "en": "Image %u x %u px / DPI %.3f / %u Cell\r\n",
+      "resource": false
+    },
+    {
+      "id": "Text0797",
+      "kind": "text",
+      "ja": "画像の左右反転",
+      "en": "Flip Image Horizontally",
+      "resource": false
+    },
+    {
+      "id": "Text0798",
+      "kind": "text",
+      "ja": "画像を再読み込み...",
+      "en": "Reload Image...",
+      "resource": true
+    },
+    {
+      "id": "Text0799",
+      "kind": "text",
+      "ja": "画像を追加",
+      "en": "Add Image",
+      "resource": true
+    },
+    {
+      "id": "Text0800",
+      "kind": "text",
+      "ja": "画像を追加...",
+      "en": "Add Image...",
+      "resource": true
+    },
+    {
+      "id": "Text0801",
+      "kind": "text",
+      "ja": "画像サイズ",
+      "en": "Image Size",
+      "resource": false
+    },
+    {
+      "id": "Text0802",
+      "kind": "text",
+      "ja": "画像サイズ (pixel)",
+      "en": "Image size (pixels)",
+      "resource": true
+    },
+    {
+      "id": "Text0803",
+      "kind": "text",
+      "ja": "画像サイズ...",
+      "en": "Image Size...",
+      "resource": true
+    },
+    {
+      "id": "Text0804",
+      "kind": "text",
+      "ja": "画像サイズ・解像度",
+      "en": "Image Size / Resolution",
+      "resource": true
+    },
+    {
+      "id": "Text0805",
+      "kind": "text",
+      "ja": "画像全体の変形",
+      "en": "Transform Entire Image",
+      "resource": false
+    },
+    {
+      "id": "Text0806",
+      "kind": "text",
+      "ja": "画像処理",
+      "en": "ImageProcess",
+      "resource": false
+    },
+    {
+      "id": "Text0807",
+      "kind": "text",
+      "ja": "画像処理: 準備中...",
+      "en": "ImageProcess: Preparing...",
+      "resource": true
+    },
+    {
+      "id": "Text0808",
+      "kind": "text",
+      "ja": "画像処理プレビュー",
+      "en": "Image Processing Preview",
+      "resource": false
+    },
+    {
+      "id": "Text0809",
+      "kind": "text",
+      "ja": "画像処理プレビューの取消",
+      "en": "Cancel Image Processing Preview",
+      "resource": false
+    },
+    {
+      "id": "Text0810",
+      "kind": "text",
+      "ja": "画像処理プレビューの確定",
+      "en": "Commit Image Processing Preview",
+      "resource": false
+    },
+    {
+      "id": "Text0811",
+      "kind": "text",
+      "ja": "画像編集",
+      "en": "ImageEdit",
+      "resource": true
+    },
+    {
+      "id": "Text0812",
+      "kind": "text",
+      "ja": "画像解像度",
+      "en": "Image Resolution",
+      "resource": false
+    },
+    {
+      "id": "Text0813",
+      "kind": "text",
+      "ja": "画像解像度...",
+      "en": "Image Resolution...",
+      "resource": true
+    },
+    {
+      "id": "Text0814",
+      "kind": "text",
+      "ja": "画面サイズ固定",
+      "en": "Fixed screen size",
+      "resource": false
+    },
+    {
+      "id": "Text0815",
+      "kind": "text",
+      "ja": "番号変更",
+      "en": "NumberChange",
+      "resource": true
+    },
+    {
+      "id": "Text0816",
+      "kind": "text",
+      "ja": "白と透明をチェック",
+      "en": "Check White and Transparency",
+      "resource": true
+    },
+    {
+      "id": "Text0817",
+      "kind": "text",
+      "ja": "白背景を合成 (0/1)",
+      "en": "Composite white background (0/1)",
+      "resource": false
+    },
+    {
+      "id": "Text0818",
+      "kind": "text",
+      "ja": "直前のフィルタ",
+      "en": "Previous Filter",
+      "resource": false
+    },
+    {
+      "id": "Text0819",
+      "kind": "text",
+      "ja": "直前のフィルタを再実行",
+      "en": "Repeat Last Filter",
+      "resource": true
+    },
+    {
+      "id": "Text0820",
+      "kind": "text",
+      "ja": "直径 (px)",
+      "en": "Diameter (px)",
+      "resource": false
+    },
+    {
+      "id": "Text0821",
+      "kind": "text",
+      "ja": "矩形",
+      "en": "Rectangle",
+      "resource": false
+    },
+    {
+      "id": "Text0822",
+      "kind": "text",
+      "ja": "硬さ 0-1000",
+      "en": "Hardness 0–1000",
+      "resource": false
+    },
+    {
+      "id": "Text0823",
+      "kind": "text",
+      "ja": "確定",
+      "en": "Apply",
+      "resource": true
+    },
+    {
+      "id": "Text0824",
+      "kind": "text",
+      "ja": "移動X (1/1000px)",
+      "en": "MoveX (1/1000px)",
+      "resource": false
+    },
+    {
+      "id": "Text0825",
+      "kind": "text",
+      "ja": "移動Y (1/1000px)",
+      "en": "MoveY (1/1000px)",
+      "resource": false
+    },
+    {
+      "id": "Text0826",
+      "kind": "text",
+      "ja": "移動・拡大縮小・回転...",
+      "en": "Move / Scale / Rotate...",
+      "resource": true
+    },
+    {
+      "id": "Text0827",
+      "kind": "text",
+      "ja": "移動先",
+      "en": "Destination",
+      "resource": true
+    },
+    {
+      "id": "Text0828",
+      "kind": "text",
+      "ja": "種類",
+      "en": "Kind",
+      "resource": false
+    },
+    {
+      "id": "Text0829",
+      "kind": "text",
+      "ja": "種類 (参照)",
+      "en": "Kind (reference)",
+      "resource": false
+    },
+    {
+      "id": "Text0830",
+      "kind": "text",
+      "ja": "空欄は入力と同じ場所",
+      "en": "Leave blank to use the input location",
+      "resource": false
+    },
+    {
+      "id": "Text0831",
+      "kind": "text",
+      "ja": "空欄は入力名を使用",
+      "en": "Leave blank to use the input name",
+      "resource": false
+    },
+    {
+      "id": "Text0832",
+      "kind": "text",
+      "ja": "端で自動スクロール",
+      "en": "Auto-scroll at Edge",
+      "resource": true
+    },
+    {
+      "id": "Text0833",
+      "kind": "text",
+      "ja": "端点で循環(&L)",
+      "en": "&Wrap at Endpoints",
+      "resource": true
+    },
+    {
+      "id": "Text0834",
+      "kind": "text",
+      "ja": "端点表示",
+      "en": "Show Endpoints",
+      "resource": true
+    },
+    {
+      "id": "Text0835",
+      "kind": "text",
+      "ja": "筆圧でサイズ",
+      "en": "Pressure controls size",
+      "resource": false
+    },
+    {
+      "id": "Text0836",
+      "kind": "text",
+      "ja": "筆圧で不透明度",
+      "en": "Pressure controls opacity",
+      "resource": false
+    },
+    {
+      "id": "Text0837",
+      "kind": "text",
+      "ja": "筆圧で大きさ",
+      "en": "Pressure controls size",
+      "resource": false
+    },
+    {
+      "id": "Text0838",
+      "kind": "text",
+      "ja": "等倍",
+      "en": "Actual size",
+      "resource": true
+    },
+    {
+      "id": "Text0839",
+      "kind": "text",
+      "ja": "範囲を拡大",
+      "en": "Zoom to Box",
+      "resource": true
+    },
+    {
+      "id": "Text0840",
+      "kind": "text",
+      "ja": "範囲フィル",
+      "en": "Area Fill",
+      "resource": false
+    },
+    {
+      "id": "Text0841",
+      "kind": "text",
+      "ja": "終了(&X)",
+      "en": "E&xit",
+      "resource": true
+    },
+    {
+      "id": "Text0842",
+      "kind": "text",
+      "ja": "終了セル番号 (0=末尾)",
+      "en": "End cell number (0=last)",
+      "resource": false
+    },
+    {
+      "id": "Text0843",
+      "kind": "text",
+      "ja": "経路",
+      "en": "Path",
+      "resource": false
+    },
+    {
+      "id": "Text0844",
+      "kind": "text",
+      "ja": "結果: ",
+      "en": "Result: ",
+      "resource": false
+    },
+    {
+      "id": "Text0845",
+      "kind": "text",
+      "ja": "線つなぎ...",
+      "en": "Connect Lines...",
+      "resource": true
+    },
+    {
+      "id": "Text0846",
+      "kind": "text",
+      "ja": "線を選択",
+      "en": "Select Line",
+      "resource": true
+    },
+    {
+      "id": "Text0847",
+      "kind": "text",
+      "ja": "線全体",
+      "en": "Whole Line",
+      "resource": true
+    },
+    {
+      "id": "Text0848",
+      "kind": "text",
+      "ja": "線幅",
+      "en": "Line Width",
+      "resource": true
+    },
+    {
+      "id": "Text0849",
+      "kind": "text",
+      "ja": "線幅修正...",
+      "en": "Correct Line Width...",
+      "resource": true
+    },
+    {
+      "id": "Text0850",
+      "kind": "text",
+      "ja": "線形",
+      "en": "Linear",
+      "resource": false
+    },
+    {
+      "id": "Text0851",
+      "kind": "text",
+      "ja": "線整理",
+      "en": "Line Cleanup",
+      "resource": true
+    },
+    {
+      "id": "Text0852",
+      "kind": "text",
+      "ja": "線端テーパー",
+      "en": "Line-end taper",
+      "resource": false
+    },
+    {
+      "id": "Text0853",
+      "kind": "text",
+      "ja": "編集(&E)",
+      "en": "&Edit",
+      "resource": true
+    },
+    {
+      "id": "Text0854",
+      "kind": "text",
+      "ja": "編集可 (0/1)",
+      "en": "Editable (0/1)",
+      "resource": false
+    },
+    {
+      "id": "Text0855",
+      "kind": "text",
+      "ja": "編集可否切替",
+      "en": "Toggle Editability",
+      "resource": true
+    },
+    {
+      "id": "Text0856",
+      "kind": "text",
+      "ja": "編集対象の変更",
+      "en": "Change Edit Target",
+      "resource": false
+    },
+    {
+      "id": "Text0857",
+      "kind": "text",
+      "ja": "編集方式 (1:RGB 2:HSV)",
+      "en": "Editing mode (1:RGB 2:HSV)",
+      "resource": false
+    },
+    {
+      "id": "Text0858",
+      "kind": "text",
+      "ja": "編集画像と交換",
+      "en": "Swap with Editing Image",
+      "resource": true
+    },
+    {
+      "id": "Text0859",
+      "kind": "text",
+      "ja": "編集画像と入れ替え",
+      "en": "Swap with Editing Image",
+      "resource": true
+    },
+    {
+      "id": "Text0860",
+      "kind": "text",
+      "ja": "縦横比",
+      "en": "Aspect ratio",
+      "resource": false
+    },
+    {
+      "id": "Text0861",
+      "kind": "text",
+      "ja": "縦横比固定 (0/1)",
+      "en": "Lock aspect ratio (0/1)",
+      "resource": false
+    },
+    {
+      "id": "Text0862",
+      "kind": "text",
+      "ja": "縮小(&O)",
+      "en": "Zoom &Out",
+      "resource": true
+    },
+    {
+      "id": "Text0863",
+      "kind": "text",
+      "ja": "自動コントラスト",
+      "en": "Auto Contrast",
+      "resource": true
+    },
+    {
+      "id": "Text0864",
+      "kind": "text",
+      "ja": "自由",
+      "en": "Free",
+      "resource": false
+    },
+    {
+      "id": "Text0865",
+      "kind": "text",
+      "ja": "色",
+      "en": "Color",
+      "resource": false
+    },
+    {
+      "id": "Text0866",
+      "kind": "text",
+      "ja": "色 (R / G / B)",
+      "en": "Color (R / G / B)",
+      "resource": true
+    },
+    {
+      "id": "Text0867",
+      "kind": "text",
+      "ja": "色(&C)",
+      "en": "&Color",
+      "resource": true
+    },
+    {
+      "id": "Text0868",
+      "kind": "text",
+      "ja": "色の杖",
+      "en": "Magic Wand",
+      "resource": true
+    },
+    {
+      "id": "Text0869",
+      "kind": "text",
+      "ja": "色をサンプル...",
+      "en": "Sample Color...",
+      "resource": true
+    },
+    {
+      "id": "Text0870",
+      "kind": "text",
+      "ja": "色分解",
+      "en": "Color Separation",
+      "resource": true
+    },
+    {
+      "id": "Text0871",
+      "kind": "text",
+      "ja": "色外れ置換",
+      "en": "Replace Color Outliers",
+      "resource": false
+    },
+    {
+      "id": "Text0872",
+      "kind": "text",
+      "ja": "色深度",
+      "en": "Color depth",
+      "resource": true
+    },
+    {
+      "id": "Text0873",
+      "kind": "text",
+      "ja": "色深度/形式 (1-5)",
+      "en": "Color depth / format (1–5)",
+      "resource": false
+    },
+    {
+      "id": "Text0874",
+      "kind": "text",
+      "ja": "色相",
+      "en": "Hue",
+      "resource": false
+    },
+    {
+      "id": "Text0875",
+      "kind": "text",
+      "ja": "色相・彩度・明度...",
+      "en": "Hue / Saturation / Value...",
+      "resource": true
+    },
+    {
+      "id": "Text0876",
+      "kind": "text",
+      "ja": "色置換 old/new を入替",
+      "en": "Swap Color Replacement Old / New",
+      "resource": true
+    },
+    {
+      "id": "Text0877",
+      "kind": "text",
+      "ja": "色置換は描画プレーンだけを対象にできます",
+      "en": "Color replacement can target only drawing planes",
+      "resource": false
+    },
+    {
+      "id": "Text0878",
+      "kind": "text",
+      "ja": "色置換行",
+      "en": "Color replacement row",
+      "resource": false
+    },
+    {
+      "id": "Text0879",
+      "kind": "text",
+      "ja": "行数 (1-4096)",
+      "en": "Rows (1–4096)",
+      "resource": false
+    },
+    {
+      "id": "Text0880",
+      "kind": "text",
+      "ja": "表示 (0/1)",
+      "en": "Display (0/1)",
+      "resource": false
+    },
+    {
+      "id": "Text0881",
+      "kind": "text",
+      "ja": "表示 (1:色 2:単色 3:網点)",
+      "en": "Display (1:color 2:monochrome 3:halftone)",
+      "resource": false
+    },
+    {
+      "id": "Text0882",
+      "kind": "text",
+      "ja": "表示(&V)",
+      "en": "&View",
+      "resource": true
+    },
+    {
+      "id": "Text0883",
+      "kind": "text",
+      "ja": "表示した入力・出力・警告の内容で保存を続行しますか？",
+      "en": "Continue saving with the displayed input, output, and warnings?",
+      "resource": false
+    },
+    {
+      "id": "Text0884",
+      "kind": "text",
+      "ja": "表示の変更",
+      "en": "Change View",
+      "resource": false
+    },
+    {
+      "id": "Text0885",
+      "kind": "text",
+      "ja": "表示を上下反転",
+      "en": "Flip View Vertically",
+      "resource": true
+    },
+    {
+      "id": "Text0886",
+      "kind": "text",
+      "ja": "表示を左右反転",
+      "en": "Flip View Horizontally",
+      "resource": true
+    },
+    {
+      "id": "Text0887",
+      "kind": "text",
+      "ja": "表示を更新できません",
+      "en": "The display could not be updated",
+      "resource": false
+    },
+    {
+      "id": "Text0888",
+      "kind": "text",
+      "ja": "表示・変形",
+      "en": "Display / Transform",
+      "resource": true
+    },
+    {
+      "id": "Text0889",
+      "kind": "text",
+      "ja": "表示・変形プロパティ...",
+      "en": "Display / Transform Properties...",
+      "resource": true
+    },
+    {
+      "id": "Text0890",
+      "kind": "text",
+      "ja": "表示倍率",
+      "en": "Zoom",
+      "resource": false
+    },
+    {
+      "id": "Text0891",
+      "kind": "text",
+      "ja": "表示倍率...",
+      "en": "Zoom Percentage...",
+      "resource": true
+    },
+    {
+      "id": "Text0892",
+      "kind": "text",
+      "ja": "表示倍率の変更",
+      "en": "Change Zoom",
+      "resource": false
+    },
+    {
+      "id": "Text0893",
+      "kind": "text",
+      "ja": "表示切替",
+      "en": "Toggle Visibility",
+      "resource": true
+    },
+    {
+      "id": "Text0894",
+      "kind": "text",
+      "ja": "表示反転",
+      "en": "Flip View",
+      "resource": false
+    },
+    {
+      "id": "Text0895",
+      "kind": "text",
+      "ja": "表示番号を付け直す...",
+      "en": "Renumber Display Numbers...",
+      "resource": true
+    },
+    {
+      "id": "Text0896",
+      "kind": "text",
+      "ja": "表示補助の切替",
+      "en": "Toggle View Aids",
+      "resource": false
+    },
+    {
+      "id": "Text0897",
+      "kind": "text",
+      "ja": "表示設定",
+      "en": "View Settings",
+      "resource": true
+    },
+    {
+      "id": "Text0898",
+      "kind": "text",
+      "ja": "補助ペインを自動格納",
+      "en": "Auto-hide Auxiliary Panes",
+      "resource": true
+    },
+    {
+      "id": "Text0899",
+      "kind": "text",
+      "ja": "複数作成は消失点レイヤーへ追加します。",
+      "en": "Multiple items are added to the vanishing-point layer.",
+      "resource": true
+    },
+    {
+      "id": "Text0900",
+      "kind": "text",
+      "ja": "複数段階の履歴移動",
+      "en": "Multi-step History Move",
+      "resource": false
+    },
+    {
+      "id": "Text0901",
+      "kind": "text",
+      "ja": "複数段階戻る...",
+      "en": "Undo Multiple Steps...",
+      "resource": true
+    },
+    {
+      "id": "Text0902",
+      "kind": "text",
+      "ja": "複数段階進む...",
+      "en": "Redo Multiple Steps...",
+      "resource": true
+    },
+    {
+      "id": "Text0903",
+      "kind": "text",
+      "ja": "複製",
+      "en": "Duplicate",
+      "resource": true
+    },
+    {
+      "id": "Text0904",
+      "kind": "text",
+      "ja": "複製保存",
+      "en": "DuplicateSave",
+      "resource": false
+    },
+    {
+      "id": "Text0905",
+      "kind": "text",
+      "ja": "複製保存（既定）",
+      "en": "Save Duplicate (Default)",
+      "resource": true
+    },
+    {
+      "id": "Text0906",
+      "kind": "text",
+      "ja": "角",
+      "en": "Corner",
+      "resource": false
+    },
+    {
+      "id": "Text0907",
+      "kind": "text",
+      "ja": "角度 (度)",
+      "en": "Angle (degrees)",
+      "resource": false
+    },
+    {
+      "id": "Text0908",
+      "kind": "text",
+      "ja": "角度間隔 (度)",
+      "en": "Angular interval (degrees)",
+      "resource": true
+    },
+    {
+      "id": "Text0909",
+      "kind": "text",
+      "ja": "触れた部分",
+      "en": "Touched Segment",
+      "resource": true
+    },
+    {
+      "id": "Text0910",
+      "kind": "text",
+      "ja": "言語",
+      "en": "Language",
+      "resource": true
+    },
+    {
+      "id": "Text0911",
+      "kind": "text",
+      "ja": "言語設定を保存しました。次回起動時に適用されます。",
+      "en": "The language setting was saved. It will apply at the next launch.",
+      "resource": false
+    },
+    {
+      "id": "Text0912",
+      "kind": "text",
+      "ja": "言語設定を保存できませんでした。設定は変更されていません。",
+      "en": "The language setting could not be saved. The setting was not changed.",
+      "resource": false
+    },
+    {
+      "id": "Text0913",
+      "kind": "text",
+      "ja": "計算結果",
+      "en": "Calculated result",
+      "resource": true
+    },
+    {
+      "id": "Text0914",
+      "kind": "text",
+      "ja": "記録して停止",
+      "en": "Record and Stop",
+      "resource": true
+    },
+    {
+      "id": "Text0915",
+      "kind": "text",
+      "ja": "記録して続行",
+      "en": "Record and Continue",
+      "resource": true
+    },
+    {
+      "id": "Text0916",
+      "kind": "text",
+      "ja": "設定",
+      "en": "Settings",
+      "resource": false
+    },
+    {
+      "id": "Text0917",
+      "kind": "text",
+      "ja": "設定(&G)",
+      "en": "Settin&gs",
+      "resource": true
+    },
+    {
+      "id": "Text0918",
+      "kind": "text",
+      "ja": "許容差",
+      "en": "Tolerance",
+      "resource": false
+    },
+    {
+      "id": "Text0919",
+      "kind": "text",
+      "ja": "許容差 (0-65535)",
+      "en": "Tolerance (0–65535)",
+      "resource": true
+    },
+    {
+      "id": "Text0920",
+      "kind": "text",
+      "ja": "許容差、隙間、距離、対象色を確認してください。",
+      "en": "Check the tolerance, gap, distance, and target colors.",
+      "resource": false
+    },
+    {
+      "id": "Text0921",
+      "kind": "text",
+      "ja": "話数",
+      "en": "Episode",
+      "resource": true
+    },
+    {
+      "id": "Text0922",
+      "kind": "text",
+      "ja": "詳細",
+      "en": "Details",
+      "resource": true
+    },
+    {
+      "id": "Text0923",
+      "kind": "text",
+      "ja": "読み込み...",
+      "en": "Load...",
+      "resource": true
+    },
+    {
+      "id": "Text0924",
+      "kind": "text",
+      "ja": "読み込み済みセット: ",
+      "en": "Loaded set: ",
+      "resource": false
+    },
+    {
+      "id": "Text0925",
+      "kind": "text",
+      "ja": "読み込み済み操作",
+      "en": "Loaded Operation",
+      "resource": false
+    },
+    {
+      "id": "Text0926",
+      "kind": "text",
+      "ja": "調整レイヤー",
+      "en": "Adjustment Layer",
+      "resource": false
+    },
+    {
+      "id": "Text0927",
+      "kind": "text",
+      "ja": "調整レイヤーの表示切替",
+      "en": "Toggle Adjustment Layer Visibility",
+      "resource": true
+    },
+    {
+      "id": "Text0928",
+      "kind": "text",
+      "ja": "調整レイヤーを作成...",
+      "en": "Create Adjustment Layer...",
+      "resource": true
+    },
+    {
+      "id": "Text0929",
+      "kind": "text",
+      "ja": "調整レイヤーを再編集...",
+      "en": "Edit Adjustment Layer...",
+      "resource": true
+    },
+    {
+      "id": "Text0930",
+      "kind": "text",
+      "ja": "調整レイヤーを最前面へ",
+      "en": "Move Adjustment Layer to Top",
+      "resource": true
+    },
+    {
+      "id": "Text0931",
+      "kind": "text",
+      "ja": "調整レイヤー移動",
+      "en": "Adjustment LayerMove",
+      "resource": false
+    },
+    {
+      "id": "Text0932",
+      "kind": "text",
+      "ja": "調整レイヤー表示",
+      "en": "Adjustment LayerDisplay",
+      "resource": false
+    },
+    {
+      "id": "Text0933",
+      "kind": "text",
+      "ja": "調整レイヤー（作成後も同じ項目から再編集可能）",
+      "en": "Adjustment Layer (can be re-edited from the same item after creation)",
+      "resource": false
+    },
+    {
+      "id": "Text0934",
+      "kind": "text",
+      "ja": "謝辞(&C)",
+      "en": "A&cknowledgements",
+      "resource": true
+    },
+    {
+      "id": "Text0935",
+      "kind": "text",
+      "ja": "謝辞を表示できませんでした。保存先へのアクセスと既定ブラウザーの設定を確認してください。",
+      "en": "Acknowledgements could not be opened. Check access to the destination and the default browser settings.",
+      "resource": true
+    },
+    {
+      "id": "Text0936",
+      "kind": "text",
+      "ja": "貼り付け(&P)\tCtrl+V",
+      "en": "&Paste\tCtrl+V",
+      "resource": true
+    },
+    {
+      "id": "Text0937",
+      "kind": "text",
+      "ja": "貼り付け取消",
+      "en": "Cancel Paste",
+      "resource": false
+    },
+    {
+      "id": "Text0938",
+      "kind": "text",
+      "ja": "貼り付け確定",
+      "en": "Commit Paste",
+      "resource": false
+    },
+    {
+      "id": "Text0939",
+      "kind": "text",
+      "ja": "貼り付け開始",
+      "en": "Start Paste",
+      "resource": false
+    },
+    {
+      "id": "Text0940",
+      "kind": "text",
+      "ja": "起動ファイルを開く",
+      "en": "Open Startup File",
+      "resource": false
+    },
+    {
+      "id": "Text0941",
+      "kind": "text",
+      "ja": "起動中の inkpod が応答しませんでした。同じ文書を別 process では開きません。",
+      "en": "The running inkpod instance did not respond. The same document will not be opened in another process.",
+      "resource": false
+    },
+    {
+      "id": "Text0942",
+      "kind": "text",
+      "ja": "起動中の inkpod へ安全に要求を渡せませんでした。同じ文書を別 process では開きません。",
+      "en": "The request could not be passed safely to the running inkpod instance. The same document will not be opened in another process.",
+      "resource": false
+    },
+    {
+      "id": "Text0943",
+      "kind": "text",
+      "ja": "起動引数が正しくありません。開くファイルは64件以内で指定してください。",
+      "en": "The launch arguments are invalid. Specify no more than 64 files to open.",
+      "resource": false
+    },
+    {
+      "id": "Text0944",
+      "kind": "text",
+      "ja": "起動引数を処理するメモリが不足しています。",
+      "en": "Insufficient memory to process the launch arguments.",
+      "resource": false
+    },
+    {
+      "id": "Text0945",
+      "kind": "text",
+      "ja": "起動時に前回の文書を復元(&P)",
+      "en": "Restore &Previous Documents at Startup",
+      "resource": true
+    },
+    {
+      "id": "Text0946",
+      "kind": "format",
+      "ja": "距離1の不透明度 (0-100%)",
+      "en": "Opacity at distance 1 (0–100%)",
+      "resource": false
+    },
+    {
+      "id": "Text0947",
+      "kind": "format",
+      "ja": "距離ごとの減衰 (0-100%)",
+      "en": "Falloff per distance (0–100%)",
+      "resource": false
+    },
+    {
+      "id": "Text0948",
+      "kind": "text",
+      "ja": "輪郭",
+      "en": "Outline",
+      "resource": false
+    },
+    {
+      "id": "Text0949",
+      "kind": "text",
+      "ja": "輪郭 + 塗り",
+      "en": "Outline + Fill",
+      "resource": false
+    },
+    {
+      "id": "Text0950",
+      "kind": "text",
+      "ja": "辺数",
+      "en": "Sides",
+      "resource": false
+    },
+    {
+      "id": "Text0951",
+      "kind": "text",
+      "ja": "追加",
+      "en": "Add",
+      "resource": true
+    },
+    {
+      "id": "Text0952",
+      "kind": "text",
+      "ja": "追加するセルはカット記述子と同じフォルダーに保存してください。",
+      "en": "Save added cells in the same folder as the cut descriptor.",
+      "resource": false
+    },
+    {
+      "id": "Text0953",
+      "kind": "text",
+      "ja": "透明だけ",
+      "en": "Transparent only",
+      "resource": true
+    },
+    {
+      "id": "Text0954",
+      "kind": "text",
+      "ja": "透明穴埋め",
+      "en": "Fill Transparent Holes",
+      "resource": false
+    },
+    {
+      "id": "Text0955",
+      "kind": "text",
+      "ja": "透明部分",
+      "en": "Transparency",
+      "resource": true
+    },
+    {
+      "id": "Text0956",
+      "kind": "text",
+      "ja": "通常",
+      "en": "Normal",
+      "resource": false
+    },
+    {
+      "id": "Text0957",
+      "kind": "text",
+      "ja": "通常フィル",
+      "en": "Normal Fill",
+      "resource": false
+    },
+    {
+      "id": "Text0958",
+      "kind": "text",
+      "ja": "通常保存より新しいRecoveryがあります。\n\n",
+      "en": "A Recovery newer than the normal save exists.\n\n",
+      "resource": false
+    },
+    {
+      "id": "Text0959",
+      "kind": "text",
+      "ja": "連番を書き出し...",
+      "en": "Export Sequence...",
+      "resource": true
+    },
+    {
+      "id": "Text0960",
+      "kind": "text",
+      "ja": "連番を読み込み...",
+      "en": "Import Sequence...",
+      "resource": true
+    },
+    {
+      "id": "Text0961",
+      "kind": "text",
+      "ja": "連番セルがありません",
+      "en": "No sequence cells",
+      "resource": false
+    },
+    {
+      "id": "Text0962",
+      "kind": "text",
+      "ja": "連番セルの端点です",
+      "en": "At sequence endpoint",
+      "resource": false
+    },
+    {
+      "id": "Text0963",
+      "kind": "text",
+      "ja": "連番セルの端点動作を保存できませんでした。",
+      "en": "The sequence endpoint behavior could not be saved.",
+      "resource": false
+    },
+    {
+      "id": "Text0964",
+      "kind": "text",
+      "ja": "連番セルは1件です",
+      "en": "The sequence contains one cell",
+      "resource": false
+    },
+    {
+      "id": "Text0965",
+      "kind": "text",
+      "ja": "連番セルを一括登録",
+      "en": "Bulk-register Sequence Cells",
+      "resource": true
+    },
+    {
+      "id": "Text0966",
+      "kind": "text",
+      "ja": "連番・サブパレット",
+      "en": "Sequence / Subpalette",
+      "resource": true
+    },
+    {
+      "id": "Text0967",
+      "kind": "text",
+      "ja": "連番・モーション",
+      "en": "Sequence / Motion",
+      "resource": false
+    },
+    {
+      "id": "Text0968",
+      "kind": "text",
+      "ja": "連番書き出し",
+      "en": "Export Sequence",
+      "resource": false
+    },
+    {
+      "id": "Text0969",
+      "kind": "text",
+      "ja": "連番読み込み",
+      "en": "Load Sequence",
+      "resource": false
+    },
+    {
+      "id": "Text0970",
+      "kind": "text",
+      "ja": "連続フィル",
+      "en": "Continuous Fill",
+      "resource": true
+    },
+    {
+      "id": "Text0971",
+      "kind": "text",
+      "ja": "連続フィル seed 行",
+      "en": "Continuous-fill seed row",
+      "resource": false
+    },
+    {
+      "id": "Text0972",
+      "kind": "text",
+      "ja": "選択 0",
+      "en": "Select 0",
+      "resource": false
+    },
+    {
+      "id": "Text0973",
+      "kind": "text",
+      "ja": "選択 H —  V —  L —",
+      "en": "Select H -  V -  L -",
+      "resource": true
+    },
+    {
+      "id": "Text0974",
+      "kind": "text",
+      "ja": "選択(&S)",
+      "en": "&Selection",
+      "resource": true
+    },
+    {
+      "id": "Text0975",
+      "kind": "text",
+      "ja": "選択した種類と形式の組み合わせは、選択中のレイヤーでは使用できません。",
+      "en": "The selected kind and format combination cannot be used in the selected layer.",
+      "resource": true
+    },
+    {
+      "id": "Text0976",
+      "kind": "text",
+      "ja": "選択オプション",
+      "en": "Selection Options",
+      "resource": false
+    },
+    {
+      "id": "Text0977",
+      "kind": "text",
+      "ja": "選択オプション...",
+      "en": "Selection Options...",
+      "resource": true
+    },
+    {
+      "id": "Text0978",
+      "kind": "text",
+      "ja": "選択セルをサブパレット登録",
+      "en": "Register Selected Cell in Subpalette",
+      "resource": true
+    },
+    {
+      "id": "Text0979",
+      "kind": "text",
+      "ja": "選択ツール",
+      "en": "Selection Tools",
+      "resource": true
+    },
+    {
+      "id": "Text0980",
+      "kind": "text",
+      "ja": "選択テキストを編集...",
+      "en": "Edit Selected Text...",
+      "resource": true
+    },
+    {
+      "id": "Text0981",
+      "kind": "text",
+      "ja": "選択トレース",
+      "en": "Selection Trace",
+      "resource": false
+    },
+    {
+      "id": "Text0982",
+      "kind": "text",
+      "ja": "選択プレーンにペースト",
+      "en": "Paste into Selected Plane",
+      "resource": true
+    },
+    {
+      "id": "Text0983",
+      "kind": "text",
+      "ja": "選択レイヤー変換",
+      "en": "SelectLayerTransform",
+      "resource": false
+    },
+    {
+      "id": "Text0984",
+      "kind": "text",
+      "ja": "選択中プレーン",
+      "en": "Selected Plane",
+      "resource": true
+    },
+    {
+      "id": "Text0985",
+      "kind": "text",
+      "ja": "選択注釈 ID ",
+      "en": "Selected annotation ID ",
+      "resource": false
+    },
+    {
+      "id": "Text0986",
+      "kind": "text",
+      "ja": "選択注釈を削除",
+      "en": "Delete Selected Annotation",
+      "resource": true
+    },
+    {
+      "id": "Text0987",
+      "kind": "text",
+      "ja": "選択注釈を右へ",
+      "en": "Move Selected Annotation Right",
+      "resource": true
+    },
+    {
+      "id": "Text0988",
+      "kind": "text",
+      "ja": "選択注釈を左へ",
+      "en": "Move Selected Annotation Left",
+      "resource": true
+    },
+    {
+      "id": "Text0989",
+      "kind": "text",
+      "ja": "選択演算",
+      "en": "Selection operation",
+      "resource": false
+    },
+    {
+      "id": "Text0990",
+      "kind": "text",
+      "ja": "選択範囲がありません。文書全体の対象色を置換しますか？",
+      "en": "There is no selection. Replace the target color throughout the document?",
+      "resource": false
+    },
+    {
+      "id": "Text0991",
+      "kind": "text",
+      "ja": "選択範囲で切断",
+      "en": "Cut at Selection Boundary",
+      "resource": true
+    },
+    {
+      "id": "Text0992",
+      "kind": "text",
+      "ja": "選択範囲の変更",
+      "en": "Modify Selection",
+      "resource": false
+    },
+    {
+      "id": "Text0993",
+      "kind": "text",
+      "ja": "選択範囲をレイヤーへ",
+      "en": "Selection to Layer",
+      "resource": true
+    },
+    {
+      "id": "Text0994",
+      "kind": "text",
+      "ja": "選択範囲をレイヤーへ変換",
+      "en": "Convert Selection to Layer",
+      "resource": false
+    },
+    {
+      "id": "Text0995",
+      "kind": "text",
+      "ja": "選択範囲を反転",
+      "en": "Invert Selection",
+      "resource": true
+    },
+    {
+      "id": "Text0996",
+      "kind": "text",
+      "ja": "選択範囲を拡張",
+      "en": "Expand Selection",
+      "resource": false
+    },
+    {
+      "id": "Text0997",
+      "kind": "text",
+      "ja": "選択範囲を拡張...",
+      "en": "Expand Selection...",
+      "resource": true
+    },
+    {
+      "id": "Text0998",
+      "kind": "text",
+      "ja": "選択範囲を縮小",
+      "en": "Shrink Selection",
+      "resource": false
+    },
+    {
+      "id": "Text0999",
+      "kind": "text",
+      "ja": "選択範囲を縮小...",
+      "en": "Shrink Selection...",
+      "resource": true
+    },
+    {
+      "id": "Text1000",
+      "kind": "text",
+      "ja": "選択範囲／文書全体",
+      "en": "Selection / Entire Document",
+      "resource": true
+    },
+    {
+      "id": "Text1001",
+      "kind": "text",
+      "ja": "選択色を削除",
+      "en": "Delete Selected Color",
+      "resource": true
+    },
+    {
+      "id": "Text1002",
+      "kind": "text",
+      "ja": "選択表示 (0/1)",
+      "en": "SelectDisplay (0/1)",
+      "resource": false
+    },
+    {
+      "id": "Text1003",
+      "kind": "text",
+      "ja": "選択解除",
+      "en": "Clear Selection",
+      "resource": true
+    },
+    {
+      "id": "Text1004",
+      "kind": "text",
+      "ja": "選択項目を削除",
+      "en": "Delete Selected Operation",
+      "resource": true
+    },
+    {
+      "id": "Text1005",
+      "kind": "text",
+      "ja": "選択項目を編集...",
+      "en": "Edit Selected Operation...",
+      "resource": true
+    },
+    {
+      "id": "Text1006",
+      "kind": "text",
+      "ja": "配置と再サンプル",
+      "en": "Placement and Resampling",
+      "resource": false
+    },
+    {
+      "id": "Text1007",
+      "kind": "text",
+      "ja": "量子化で捨てる下位bit (0-7)",
+      "en": "Low bits discarded by quantization (0–7)",
+      "resource": false
+    },
+    {
+      "id": "Text1008",
+      "kind": "text",
+      "ja": "鉛筆(&P)",
+      "en": "&Pencil",
+      "resource": true
+    },
+    {
+      "id": "Text1009",
+      "kind": "text",
+      "ja": "鏡像",
+      "en": "Mirror",
+      "resource": true
+    },
+    {
+      "id": "Text1010",
+      "kind": "text",
+      "ja": "長方形範囲",
+      "en": "Rectangle Range",
+      "resource": true
+    },
+    {
+      "id": "Text1011",
+      "kind": "text",
+      "ja": "閉じたベジェ",
+      "en": "Closed Bézier",
+      "resource": false
+    },
+    {
+      "id": "Text1012",
+      "kind": "text",
+      "ja": "閉じた直線",
+      "en": "Closed Line",
+      "resource": false
+    },
+    {
+      "id": "Text1013",
+      "kind": "text",
+      "ja": "閉じる",
+      "en": "Close",
+      "resource": true
+    },
+    {
+      "id": "Text1014",
+      "kind": "text",
+      "ja": "閉領域フィル",
+      "en": "Closed-region Fill",
+      "resource": true
+    },
+    {
+      "id": "Text1015",
+      "kind": "text",
+      "ja": "閉領域内部",
+      "en": "Inside closed region",
+      "resource": false
+    },
+    {
+      "id": "Text1016",
+      "kind": "text",
+      "ja": "開いたベジェ",
+      "en": "Open Bézier",
+      "resource": false
+    },
+    {
+      "id": "Text1017",
+      "kind": "text",
+      "ja": "開いた直線",
+      "en": "Open Line",
+      "resource": false
+    },
+    {
+      "id": "Text1018",
+      "kind": "text",
+      "ja": "開く",
+      "en": "Open",
+      "resource": false
+    },
+    {
+      "id": "Text1019",
+      "kind": "text",
+      "ja": "開く(&O)...\tCtrl+O",
+      "en": "&Open...\tCtrl+O",
+      "resource": true
+    },
+    {
+      "id": "Text1020",
+      "kind": "text",
+      "ja": "開始セル番号 (0=先頭)",
+      "en": "Start cell number (0=first)",
+      "resource": false
+    },
+    {
+      "id": "Text1021",
+      "kind": "text",
+      "ja": "開始・設定...",
+      "en": "Start / Settings...",
+      "resource": true
+    },
+    {
+      "id": "Text1022",
+      "kind": "text",
+      "ja": "開始失敗",
+      "en": "StartFailure",
+      "resource": false
+    },
+    {
+      "id": "Text1023",
+      "kind": "text",
+      "ja": "開始番号",
+      "en": "StartNumber",
+      "resource": false
+    },
+    {
+      "id": "Text1024",
+      "kind": "text",
+      "ja": "開始角 (度)",
+      "en": "Start angle (degrees)",
+      "resource": true
+    },
+    {
+      "id": "Text1025",
+      "kind": "text",
+      "ja": "間隔 (px)",
+      "en": "Spacing (px)",
+      "resource": false
+    },
+    {
+      "id": "Text1026",
+      "kind": "text",
+      "ja": "間隔 milli",
+      "en": "Spacing (milli)",
+      "resource": false
+    },
+    {
+      "id": "Text1027",
+      "kind": "text",
+      "ja": "降順 (0/1)",
+      "en": "Descending (0/1)",
+      "resource": false
+    },
+    {
+      "id": "Text1028",
+      "kind": "text",
+      "ja": "除外",
+      "en": "Exclude",
+      "resource": true
+    },
+    {
+      "id": "Text1029",
+      "kind": "text",
+      "ja": "階調反転",
+      "en": "Invert",
+      "resource": true
+    },
+    {
+      "id": "Text1030",
+      "kind": "text",
+      "ja": "隙間",
+      "en": "Gap",
+      "resource": true
+    },
+    {
+      "id": "Text1031",
+      "kind": "text",
+      "ja": "隣接セル数 N (0-10000)",
+      "en": "Adjacent cell count N (0–10000)",
+      "resource": false
+    },
+    {
+      "id": "Text1032",
+      "kind": "text",
+      "ja": "集中",
+      "en": "Focus",
+      "resource": true
+    },
+    {
+      "id": "Text1033",
+      "kind": "text",
+      "ja": "離れた同色領域",
+      "en": "Detached same-color regions",
+      "resource": true
+    },
+    {
+      "id": "Text1034",
+      "kind": "text",
+      "ja": "非同期処理",
+      "en": "Asynchronous Operation",
+      "resource": false
+    },
+    {
+      "id": "Text1035",
+      "kind": "text",
+      "ja": "非表示を削除",
+      "en": "Delete Hidden",
+      "resource": true
+    },
+    {
+      "id": "Text1036",
+      "kind": "text",
+      "ja": "非表示レイヤーの削除",
+      "en": "Delete Hidden Layers",
+      "resource": false
+    },
+    {
+      "id": "Text1037",
+      "kind": "text",
+      "ja": "項目をダブルクリックしても編集画像と交換できます。",
+      "en": "Double-click an item to swap it with the editing image.",
+      "resource": true
+    },
+    {
+      "id": "Text1038",
+      "kind": "text",
+      "ja": "項目を追加",
+      "en": "Add Operation",
+      "resource": true
+    },
+    {
+      "id": "Text1039",
+      "kind": "text",
+      "ja": "順序付きバッチ項目",
+      "en": "Ordered Batch Items",
+      "resource": true
+    },
+    {
+      "id": "Text1040",
+      "kind": "text",
+      "ja": "高さ",
+      "en": "Height",
+      "resource": true
+    },
+    {
+      "id": "Text1041",
+      "kind": "format",
+      "ja": "高さ (%)",
+      "en": "Height (%)",
+      "resource": false
+    },
+    {
+      "id": "Text1042",
+      "kind": "text",
+      "ja": "高さ (px)",
+      "en": "Height (px)",
+      "resource": true
+    },
+    {
+      "id": "Text1043",
+      "kind": "text",
+      "ja": "高さ (μm)",
+      "en": "Height (μm)",
+      "resource": false
+    },
+    {
+      "id": "Text1044",
+      "kind": "text",
+      "ja": "（←/→コマンドで移動）",
+      "en": "(move with Left / Right commands)",
+      "resource": false
+    },
+    {
+      "id": "Text1045",
+      "kind": "text",
+      "ja": "（入力と同じ場所）",
+      "en": "(same location as input)",
+      "resource": false
+    },
+    {
+      "id": "Text1046",
+      "kind": "text",
+      "ja": "（実行ごとに設定）",
+      "en": "(configure each run)",
+      "resource": false
+    },
+    {
+      "id": "Text1047",
+      "kind": "text",
+      "ja": "（対象を閉じたため結果を破棄）",
+      "en": "(result discarded because the target was closed)",
+      "resource": false
+    },
+    {
+      "id": "RecoveryCandidatePromptFormat",
+      "kind": "format",
+      "ja": "Recovery候補 %zu / %zu\n\n元ファイル: %ls\nRecovery日時: %04u-%02u-%02u %02u:%02u:%02u\nセッション: %llu / 世代: %llu\n状態: %ls\n\nはい: この候補を復元\nいいえ: この候補を破棄\nキャンセル: この候補を後で判断",
+      "en": "Recovery candidate %zu / %zu\n\nSource file: %ls\nRecovery date: %04u-%02u-%02u %02u:%02u:%02u\nSession: %llu / generation: %llu\nStatus: %ls\n\nYes: restore this candidate\nNo: discard this candidate\nCancel: decide about this candidate later",
+      "resource": false
+    },
+    {
+      "id": "RecoveryEnumerationFailure",
+      "kind": "text",
+      "ja": "Recovery候補が上限を超えたか、一覧を安全に読み取れませんでした。ファイルは削除していません。",
+      "en": "The Recovery candidate limit was exceeded, or the list could not be read safely. No files were deleted.",
+      "resource": false
+    },
+    {
+      "id": "ShortcutPrefixConflict",
+      "kind": "text",
+      "ja": "その割り当ては別のショートカットと前方一致します。\n両方を一意に識別できるキー列を指定してください。",
+      "en": "That assignment has a prefix conflict with another shortcut.\nSpecify a key sequence that identifies each shortcut uniquely.",
+      "resource": false
+    },
+    {
+      "id": "LightTableBulkPreviewHeaderFormat",
+      "kind": "format",
+      "ja": "候補 %llu件 / 追加 %u件 / 既存を保持 %u件\n上から下へ、後のセルほど前面です。\n\n",
+      "en": "%llu candidates / %u added / %u existing kept\nFrom top to bottom, later cells are in front.\n\n",
+      "resource": false
+    },
+    {
+      "id": "LightTableKeepExistingLineFormat",
+      "kind": "format",
+      "ja": "%zu. セル%u  距離%u  %u.%u%%  既存を保持 (候補rev %llu / 既存rev %llu)\n",
+      "en": "%zu. Cell %u  Distance %u  %u.%u%%  Keep existing (candidate rev %llu / existing rev %llu)\n",
+      "resource": false
+    },
+    {
+      "id": "HistoryCompactionWarningFormat",
+      "kind": "format",
+      "ja": "このコピーでは履歴イベント %llu 件（編集手順 %llu 件）を破棄し、\n現在の状態を新しい Genesis として保存します。\n\n元の文書、保存先、履歴は変更しません。続行しますか？",
+      "en": "This copy will discard %llu history events (%llu edit procedures),\nand save the current state as a new Genesis.\n\nThe original document, destination, and history will not change. Continue?",
+      "resource": false
+    },
+    {
+      "id": "NewerRecoveryPrompt",
+      "kind": "text",
+      "ja": "通常保存より新しいRecoveryがあります。\n\nはい: Recoveryを開く\nいいえ: Recoveryを破棄\nキャンセル: 後で判断して通常保存を開く",
+      "en": "A Recovery newer than the normal save exists.\n\nYes: open Recovery\nNo: discard Recovery\nCancel: decide later and open the normal save",
+      "resource": false
+    },
+    {
+      "id": "CellCreationSummaryFormat",
+      "kind": "format",
+      "ja": "画像 %u x %u px / DPI %.3f / %u Cell\r\n100%%フレーム (%d, %d) %d x %d / 安全 %d x %d\r\n最大寄り (%d, %d) %d x %d / 余白 L%u T%u R%u B%u",
+      "en": "Image %u x %u px / DPI %.3f / %u Cell\r\n100%% frame (%d, %d) %d x %d / safe %d x %d\r\nMaximum close-up (%d, %d) %d x %d / margins L%u T%u R%u B%u",
+      "resource": false
+    },
+    {
+      "id": "CommonRasterFileFilter",
+      "kind": "text",
+      "ja": "対応画像 (*.png;*.tif;*.tiff;*.tga;*.bmp)\u0000*.png;*.tif;*.tiff;*.tga;*.bmp\u0000すべてのファイル (*.*)\u0000*.*\u0000\u0000",
+      "en": "Supported Images (*.png;*.tif;*.tiff;*.tga;*.bmp)\u0000*.png;*.tif;*.tiff;*.tga;*.bmp\u0000All Files (*.*)\u0000*.*\u0000\u0000",
+      "resource": false
+    },
+    {
+      "id": "OpenDocumentFileFilter",
+      "kind": "text",
+      "ja": "inkpod/対応画像 (*.inkpod;*.png;*.tif;*.tiff;*.tga;*.bmp)\u0000*.inkpod;*.png;*.tif;*.tiff;*.tga;*.bmp\u0000inkpod セル (*.inkpod)\u0000*.inkpod\u0000対応画像\u0000*.png;*.tif;*.tiff;*.tga;*.bmp\u0000すべてのファイル (*.*)\u0000*.*\u0000\u0000",
+      "en": "inkpod / Supported Images (*.inkpod;*.png;*.tif;*.tiff;*.tga;*.bmp)\u0000*.inkpod;*.png;*.tif;*.tiff;*.tga;*.bmp\u0000inkpod Cell (*.inkpod)\u0000*.inkpod\u0000Supported Images\u0000*.png;*.tif;*.tiff;*.tga;*.bmp\u0000All Files (*.*)\u0000*.*\u0000\u0000",
+      "resource": false
+    },
+    {
+      "id": "RasterImageFileFilter",
+      "kind": "text",
+      "ja": "対応画像 (*.png;*.tif;*.tiff;*.tga;*.bmp)\u0000*.png;*.tif;*.tiff;*.tga;*.bmp\u0000PNG (*.png)\u0000*.png\u0000TIFF (*.tif;*.tiff)\u0000*.tif;*.tiff\u0000TGA (*.tga)\u0000*.tga\u0000BMP (*.bmp)\u0000*.bmp\u0000すべてのファイル (*.*)\u0000*.*\u0000\u0000",
+      "en": "Supported Images (*.png;*.tif;*.tiff;*.tga;*.bmp)\u0000*.png;*.tif;*.tiff;*.tga;*.bmp\u0000PNG (*.png)\u0000*.png\u0000TIFF (*.tif;*.tiff)\u0000*.tif;*.tiff\u0000TGA (*.tga)\u0000*.tga\u0000BMP (*.bmp)\u0000*.bmp\u0000All Files (*.*)\u0000*.*\u0000\u0000",
+      "resource": false
+    },
+    {
+      "id": "BatchPairCandidatePromptFormat",
+      "kind": "format",
+      "ja": "旧色 (%u,%u,%u,%u) を新色 (%u,%u,%u,%u) に対応させますか？\nピクセル数: %llu / 範囲: (%d,%d,%d,%d)\n「いいえ」で次候補、全候補を『いいえ』で旧色を除外します。",
+      "en": "Map old color (%u,%u,%u,%u) to new color (%u,%u,%u,%u)?\nPixels: %llu / bounds: (%d,%d,%d,%d)\nChoose No for the next candidate; choosing No for all candidates excludes the old color.",
+      "resource": false
+    },
+    {
+      "id": "RangeSeparator",
+      "kind": "text",
+      "ja": "～",
+      "en": "–",
+      "resource": false
+    },
+    {
+      "id": "LanguageEnglish",
+      "kind": "text",
+      "ja": "English",
+      "en": "English",
+      "resource": true
+    },
+    {
+      "id": "AboutInkpod",
+      "kind": "text",
+      "ja": "Inkpod について",
+      "en": "About Inkpod",
+      "resource": true
+    },
+    {
+      "id": "AboutDescription",
+      "kind": "text",
+      "ja": "Inkpod は、ベクターベースのストロークによる非破壊編集に対応した、GPU アクセラレーション型ペイントエンジンです。",
+      "en": "Inkpod is a GPU-accelerated painting engine with vector-based strokes for non-destructive editing.",
+      "resource": true
+    },
+    {
+      "id": "Ok",
+      "kind": "text",
+      "ja": "OK",
+      "en": "OK",
+      "resource": true
+    },
+    {
+      "id": "DryRun",
+      "kind": "text",
+      "ja": "試行のみ",
+      "en": "Dry run",
+      "resource": true
+    }
+  ]
+}

@@ -1,3 +1,7 @@
+#include "ui/ui_resources.h"
+
+#include "ui/localization.h"
+
 #include "basic_dialogs.h"
 
 #include <commctrl.h>
@@ -221,7 +225,7 @@ INT_PTR CALLBACK ShortcutDialogProcedure(
                     if (!state->close_immediately) {
                         MessageBoxW(
                             dialog,
-                            L"コマンドとキーを指定してください。",
+                            UiText(UiStringId::Text0186),
                             L"inkpod",
                             MB_OK | MB_ICONWARNING);
                     }
@@ -305,7 +309,7 @@ INT_PTR CALLBACK ViewOptionsDialogProcedure(
                 SetDlgItemTextW(
                     dialog,
                     label_ids[index],
-                    state->labels[index] == nullptr ? L"値" : state->labels[index]);
+                    state->labels[index] == nullptr ? UiText(UiStringId::Text0480) : state->labels[index]);
                 std::array<wchar_t, 32U> value{};
                 _snwprintf_s(
                     value.data(), value.size(), _TRUNCATE, L"%d", state->values[index]);
@@ -383,7 +387,7 @@ INT_PTR CALLBACK ViewOptionsDialogProcedure(
                         if (!state->close_immediately) {
                             MessageBoxW(
                                 dialog,
-                                L"すべての値を整数で指定してください。",
+                                UiText(UiStringId::Text0108),
                                 L"inkpod",
                                 MB_OK | MB_ICONWARNING);
                         }
@@ -425,13 +429,13 @@ INT_PTR CALLBACK ViewOptionsDialogProcedure(
     return FALSE;
 }
 
-constexpr std::array<std::pair<const wchar_t*, InkpodShootingFrameAnchor>, 5U>
+const std::array<std::pair<const wchar_t*, InkpodShootingFrameAnchor>, 5U>
     kShootingFrameAnchors{{
-        {L"左上", INKPOD_SHOOTING_FRAME_ANCHOR_TOP_LEFT},
-        {L"右上", INKPOD_SHOOTING_FRAME_ANCHOR_TOP_RIGHT},
-        {L"中央", INKPOD_SHOOTING_FRAME_ANCHOR_CENTER},
-        {L"左下", INKPOD_SHOOTING_FRAME_ANCHOR_BOTTOM_LEFT},
-        {L"右下", INKPOD_SHOOTING_FRAME_ANCHOR_BOTTOM_RIGHT},
+        {UiText(UiStringId::Text0640), INKPOD_SHOOTING_FRAME_ANCHOR_TOP_LEFT},
+        {UiText(UiStringId::Text0558), INKPOD_SHOOTING_FRAME_ANCHOR_TOP_RIGHT},
+        {UiText(UiStringId::Text0437), INKPOD_SHOOTING_FRAME_ANCHOR_CENTER},
+        {UiText(UiStringId::Text0642), INKPOD_SHOOTING_FRAME_ANCHOR_BOTTOM_LEFT},
+        {UiText(UiStringId::Text0559), INKPOD_SHOOTING_FRAME_ANCHOR_BOTTOM_RIGHT},
     }};
 
 bool ReadFiniteDouble(HWND dialog, int control, double& output) noexcept {
@@ -542,8 +546,8 @@ INT_PTR CALLBACK ShootingFrameDialogProcedure(
                     if (!state->close_immediately) {
                         MessageBoxW(
                             dialog,
-                            L"有限の数値を入力し、幅と高さを正にしてください。",
-                            L"撮影フレーム設定",
+                            UiText(UiStringId::Text0743),
+                            UiText(UiStringId::Text0690),
                             MB_OK | MB_ICONWARNING);
                     }
                     return TRUE;
@@ -657,8 +661,8 @@ INT_PTR CALLBACK VanishingPointDialogProcedure(
                     if (!state->close_immediately) {
                         MessageBoxW(
                             dialog,
-                            L"有限の座標、1～180度の間隔、0～100%の不透明度、0～255のRGBを入力してください。",
-                            L"消失点設定", MB_OK | MB_ICONWARNING);
+                            UiText(UiStringId::Text0742),
+                            UiText(UiStringId::Text0772), MB_OK | MB_ICONWARNING);
                     }
                     return TRUE;
                 }
@@ -707,12 +711,12 @@ INT_PTR CALLBACK VanishingPointDialogProcedure(
     return FALSE;
 }
 
-constexpr std::array<ViewOptionsDialogState::Choice, 5U> kCellAnchorChoices{{
-    {L"左上", INKPOD_FRAME_ANCHOR_TOP_LEFT},
-    {L"右上", INKPOD_FRAME_ANCHOR_TOP_RIGHT},
-    {L"中央", INKPOD_FRAME_ANCHOR_CENTER},
-    {L"左下", INKPOD_FRAME_ANCHOR_BOTTOM_LEFT},
-    {L"右下", INKPOD_FRAME_ANCHOR_BOTTOM_RIGHT},
+const std::array<ViewOptionsDialogState::Choice, 5U> kCellAnchorChoices{{
+    {UiText(UiStringId::Text0640), INKPOD_FRAME_ANCHOR_TOP_LEFT},
+    {UiText(UiStringId::Text0558), INKPOD_FRAME_ANCHOR_TOP_RIGHT},
+    {UiText(UiStringId::Text0437), INKPOD_FRAME_ANCHOR_CENTER},
+    {UiText(UiStringId::Text0642), INKPOD_FRAME_ANCHOR_BOTTOM_LEFT},
+    {UiText(UiStringId::Text0559), INKPOD_FRAME_ANCHOR_BOTTOM_RIGHT},
 }};
 
 constexpr std::array<ViewOptionsDialogState::Choice, 2U> kCellDepthChoices{{
@@ -830,9 +834,9 @@ bool RefreshCellCreationPreview(HWND dialog, CellCreationDialogState& state) noe
     const bool physical =
         IsDlgButtonChecked(dialog, IDC_CELL_SIZING_FRAME) == BST_CHECKED;
     SetDlgItemTextW(
-        dialog, IDC_CELL_WIDTH_LABEL, physical ? L"幅 (μm)" : L"幅 (px)");
+        dialog, IDC_CELL_WIDTH_LABEL, physical ? UiText(UiStringId::Text0647) : UiText(UiStringId::Text0646));
     SetDlgItemTextW(
-        dialog, IDC_CELL_HEIGHT_LABEL, physical ? L"高さ (μm)" : L"高さ (px)");
+        dialog, IDC_CELL_HEIGHT_LABEL, physical ? UiText(UiStringId::Text1043) : UiText(UiStringId::Text1042));
 
     InkpodCellCreationOptions options{};
     InkpodCellCreationPlanItem preview{};
@@ -840,7 +844,7 @@ bool RefreshCellCreationPreview(HWND dialog, CellCreationDialogState& state) noe
         SetDlgItemTextW(
             dialog,
             IDC_CELL_SUMMARY,
-            L"入力条件から有効な作成計画を計算できません。値と上限を確認してください。");
+            UiText(UiStringId::Text0500));
         EnableWindow(GetDlgItem(dialog, IDOK), FALSE);
         return false;
     }
@@ -849,9 +853,7 @@ bool RefreshCellCreationPreview(HWND dialog, CellCreationDialogState& state) noe
         summary.data(),
         summary.size(),
         _TRUNCATE,
-        L"画像 %u x %u px / DPI %.3f / %u Cell\r\n"
-        L"100%%フレーム (%d, %d) %d x %d / 安全 %d x %d\r\n"
-        L"最大寄り (%d, %d) %d x %d / 余白 L%u T%u R%u B%u",
+        UiText(UiStringId::CellCreationSummaryFormat),
         preview.width,
         preview.height,
         static_cast<double>(preview.dpi_x_milli) / 1000.0,
@@ -998,7 +1000,7 @@ INT_PTR CALLBACK TextInputDialogProcedure(
             }
             SetDlgItemTextW(
                 dialog, IDC_TEXT_INPUT_LABEL,
-                state->label == nullptr ? L"値" : state->label);
+                state->label == nullptr ? UiText(UiStringId::Text0480) : state->label);
             SetDlgItemTextW(dialog, IDC_TEXT_INPUT_VALUE, state->value.c_str());
             static_cast<void>(CenterModalDialogOnOwner(dialog));
             if (state->close_immediately) {
@@ -1115,7 +1117,7 @@ INT_PTR CALLBACK FillOptionsDialogProcedure(
             SetWindowLongPtrW(
                 dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
             const HWND operation = GetDlgItem(dialog, IDC_FILL_OPERATION);
-            for (const wchar_t* label : {L"通常フィル", L"閉領域フィル", L"塗りのばし"}) {
+            for (const wchar_t* label : {UiText(UiStringId::Text0957), UiText(UiStringId::Text1014), UiText(UiStringId::Text0598)}) {
                 SendMessageW(
                     operation,
                     CB_ADDSTRING,
@@ -1130,7 +1132,7 @@ INT_PTR CALLBACK FillOptionsDialogProcedure(
                     : (state->options.operation == INKPOD_FILL_EXTENSION ? 2 : 0),
                 0);
             const HWND inclusion = GetDlgItem(dialog, IDC_FILL_INCLUSION_MODE);
-            for (const wchar_t* label : {L"なし", L"指定色", L"指定色以外"}) {
+            for (const wchar_t* label : {UiText(UiStringId::Text0113), UiText(UiStringId::Text0669), UiText(UiStringId::Text0670)}) {
                 SendMessageW(
                     inclusion,
                     CB_ADDSTRING,
@@ -1228,7 +1230,7 @@ INT_PTR CALLBACK FillOptionsDialogProcedure(
                     if (!state->close_immediately) {
                         MessageBoxW(
                             dialog,
-                            L"許容差、隙間、距離、対象色を確認してください。",
+                            UiText(UiStringId::Text0920),
                             L"inkpod",
                             MB_OK | MB_ICONWARNING);
                     }
@@ -1253,7 +1255,7 @@ INT_PTR CALLBACK FillOptionsDialogProcedure(
                     if (!state->close_immediately) {
                         MessageBoxW(
                             dialog,
-                            L"含み塗りには対象色が必要です。",
+                            UiText(UiStringId::Text0574),
                             L"inkpod",
                             MB_OK | MB_ICONWARNING);
                     }
@@ -1391,7 +1393,7 @@ INT_PTR ShowShortcutEditor(
     ShortcutDialogState& state) noexcept {
     ShortcutDialogState candidate = state;
     candidate.close_immediately = close_immediately;
-    const INT_PTR result = DialogBoxParamW(
+    const INT_PTR result = DialogBoxLocalizedParamW(
         instance,
         MAKEINTRESOURCEW(IDD_SHORTCUT_EDITOR),
         owner,
@@ -1410,7 +1412,7 @@ INT_PTR ShowViewOptions(
     ViewOptionsDialogState& state) noexcept {
     ViewOptionsDialogState candidate = state;
     candidate.close_immediately = close_immediately;
-    const INT_PTR result = DialogBoxParamW(
+    const INT_PTR result = DialogBoxLocalizedParamW(
         instance,
         MAKEINTRESOURCEW(IDD_VIEW_OPTIONS),
         owner,
@@ -1487,8 +1489,8 @@ INT_PTR CALLBACK CutPropertiesDialogProcedure(
                     || !ReadCutText(dialog, IDC_CUT_INSTRUCTION, instruction)) {
                     MessageBoxW(
                         dialog,
-                        L"カット名と1以上の尺を入力してください。",
-                        L"カットのプロパティ",
+                        UiText(UiStringId::Text0153),
+                        UiText(UiStringId::Text0146),
                         MB_OK | MB_ICONWARNING);
                     return TRUE;
                 }
@@ -1522,7 +1524,7 @@ INT_PTR ShowCellCreationOptions(
     CellCreationDialogState& state) noexcept {
     CellCreationDialogState candidate = state;
     candidate.close_immediately = close_immediately;
-    const INT_PTR result = DialogBoxParamW(
+    const INT_PTR result = DialogBoxLocalizedParamW(
         instance,
         MAKEINTRESOURCEW(IDD_CELL_CREATION),
         owner,
@@ -1539,7 +1541,7 @@ INT_PTR ShowShootingFrameOptions(
     HWND owner,
     ShootingFrameDialogState& state) noexcept {
     ShootingFrameDialogState candidate = state;
-    const INT_PTR result = DialogBoxParamW(
+    const INT_PTR result = DialogBoxLocalizedParamW(
         instance,
         MAKEINTRESOURCEW(IDD_SHOOTING_FRAME),
         owner,
@@ -1556,7 +1558,7 @@ INT_PTR ShowVanishingPointOptions(
     HWND owner,
     VanishingPointDialogState& state) noexcept {
     VanishingPointDialogState candidate = state;
-    const INT_PTR result = DialogBoxParamW(
+    const INT_PTR result = DialogBoxLocalizedParamW(
         instance,
         MAKEINTRESOURCEW(IDD_VANISHING_POINT),
         owner,
@@ -1576,7 +1578,7 @@ INT_PTR ShowCutProperties(
     try {
         CutPropertiesDialogState candidate = state;
         candidate.close_immediately = close_immediately;
-        const INT_PTR result = DialogBoxParamW(
+        const INT_PTR result = DialogBoxLocalizedParamW(
             instance,
             MAKEINTRESOURCEW(IDD_CUT_PROPERTIES),
             owner,
@@ -1599,7 +1601,7 @@ INT_PTR ShowTextInput(
     try {
         TextInputDialogState candidate = state;
         candidate.close_immediately = close_immediately;
-        const INT_PTR result = DialogBoxParamW(
+        const INT_PTR result = DialogBoxLocalizedParamW(
             instance,
             MAKEINTRESOURCEW(IDD_TEXT_INPUT),
             owner,
@@ -1621,7 +1623,7 @@ bool ShowFillOptions(
     FillToolOptions& options) noexcept {
     try {
         FillOptionsDialogState state{options, close_immediately};
-        if (DialogBoxParamW(
+        if (DialogBoxLocalizedParamW(
                 instance,
                 MAKEINTRESOURCEW(IDD_FILL_OPTIONS),
                 owner,
@@ -1640,7 +1642,7 @@ INT_PTR ShowHistoryDialog(
     HINSTANCE instance, HWND owner, HistoryDialogState& state) noexcept {
     try {
         HistoryDialogState candidate = state;
-        const INT_PTR result = DialogBoxParamW(
+        const INT_PTR result = DialogBoxLocalizedParamW(
             instance,
             MAKEINTRESOURCEW(IDD_HISTORY),
             owner,

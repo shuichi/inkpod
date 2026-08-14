@@ -1,3 +1,5 @@
+#include "ui/ui_resources.h"
+
 #include "about_dialog.h"
 
 #include <commctrl.h>
@@ -392,17 +394,17 @@ bool ValidateAboutDialog(HWND dialog, HINSTANCE instance) noexcept {
                IDC_ABOUT_DESCRIPTION,
                description.data(),
                static_cast<int>(description.size())) == 0
-        || LoadStringW(
+        || LoadLocalizedStringW(
                instance,
                IDS_APP_VERSION,
                version.data(),
                static_cast<int>(version.size())) == 0
-        || LoadStringW(
+        || LoadLocalizedStringW(
                instance,
                IDS_APP_BUILD_NUMBER,
                build_number.data(),
                static_cast<int>(build_number.size())) == 0
-        || LoadStringW(
+        || LoadLocalizedStringW(
                instance,
                IDS_ABOUT_DESCRIPTION,
                expected_description.data(),
@@ -412,7 +414,7 @@ bool ValidateAboutDialog(HWND dialog, HINSTANCE instance) noexcept {
                IDC_ABOUT_COPYRIGHT,
                copyright.data(),
                static_cast<int>(copyright.size())) == 0
-        || LoadStringW(
+        || LoadLocalizedStringW(
                instance,
                IDS_ABOUT_COPYRIGHT,
                expected_copyright.data(),
@@ -452,22 +454,22 @@ INT_PTR CALLBACK AboutDialogProcedure(
             std::array<wchar_t, 128> version_label{};
             std::array<wchar_t, 512> description{};
             std::array<wchar_t, 64> copyright{};
-            if (LoadStringW(
+            if (LoadLocalizedStringW(
                     state->instance,
                     IDS_APP_VERSION,
                     version.data(),
                     static_cast<int>(version.size())) == 0
-                || LoadStringW(
+                || LoadLocalizedStringW(
                        state->instance,
                        IDS_APP_BUILD_NUMBER,
                        build_number.data(),
                        static_cast<int>(build_number.size())) == 0
-                || LoadStringW(
+                || LoadLocalizedStringW(
                        state->instance,
                        IDS_ABOUT_DESCRIPTION,
                        description.data(),
                        static_cast<int>(description.size())) == 0
-                || LoadStringW(
+                || LoadLocalizedStringW(
                        state->instance,
                        IDS_ABOUT_COPYRIGHT,
                        copyright.data(),
@@ -556,7 +558,7 @@ INT_PTR ShowAboutDialog(
     HINSTANCE instance, HWND owner, bool close_immediately) noexcept {
     AboutDialogState state{
         instance, nullptr, nullptr, nullptr, close_immediately, false};
-    const INT_PTR result = DialogBoxParamW(
+    const INT_PTR result = DialogBoxLocalizedParamW(
         instance,
         MAKEINTRESOURCEW(IDD_ABOUT),
         owner,

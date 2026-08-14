@@ -1,3 +1,5 @@
+#include "ui/ui_resources.h"
+
 #include "locator_pane.h"
 
 #include <windowsx.h>
@@ -8,6 +10,7 @@
 
 #include "app/resource.h"
 #include "pane_dialog_layout.h"
+#include "ui/localization.h"
 
 namespace inkpod::windows::ui::panes {
 namespace {
@@ -119,7 +122,7 @@ void DrawNeighborhood(
         SetTextColor(dc, GetSysColor(COLOR_GRAYTEXT));
         DrawTextW(
             dc,
-            L"Canvas 上へポインターを移動してください",
+            UiText(UiStringId::LocatorMovePointer),
             -1,
             &bounds,
             DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
@@ -280,7 +283,7 @@ HWND CreateLocatorPaneDialog(
     if (state.dispatch_command == nullptr || state.select_pixel == nullptr) {
         return nullptr;
     }
-    const HWND dialog = CreateDialogParamW(
+    const HWND dialog = CreateLocalizedDialogParamW(
         instance,
         MAKEINTRESOURCEW(IDD_LOCATOR_PALETTE),
         owner,
@@ -294,7 +297,7 @@ HWND CreateLocatorPaneDialog(
     LayoutLocatorPane(dialog);
     SetWindowTextW(
         GetDlgItem(dialog, IDC_LOCATOR_NEIGHBORHOOD),
-        L"ロケーター拡大表示。固定モードではクリックした画素を編集します。");
+        UiText(UiStringId::LocatorAccessibleName));
     return dialog;
 }
 
@@ -317,7 +320,11 @@ void UpdateLocatorPaneDialog(
     SetDlgItemTextW(dialog, IDC_LOCATOR_COORDINATE, view.coordinate_text.c_str());
     SetDlgItemTextW(dialog, IDC_LOCATOR_SELECTION, view.selection_text.c_str());
     SetDlgItemTextW(dialog, IDC_LOCATOR_COLOR, view.color_text.c_str());
-    SetDlgItemTextW(dialog, IDC_LOCATOR_PIN, view.pinned ? L"追従へ戻す" : L"文書に固定");
+    SetDlgItemTextW(
+        dialog,
+        IDC_LOCATOR_PIN,
+        view.pinned ? UiText(UiStringId::ReturnToFollowing)
+                    : UiText(UiStringId::PinDocument));
     CheckDlgButton(dialog, IDC_LOCATOR_FIXED, view.fixed_mode ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(
         dialog,

@@ -79,10 +79,13 @@ after each row.
    confirm, and cancel Japanese text. Repeat after switching documents and with
    a modeless pane open. Composition must remain in the edit control; workspace
    shortcuts must not consume it or retarget the result.
-6. **Language resources.** On Japanese Windows, inspect menus, common dialogs,
-   pane titles, command errors, accessibility names, and About. Repeat the route
-   on English Windows and record fallback behavior. Japanese-only display
-   resources remain a known difference until `WIN-001` records otherwise.
+6. **Language resources.** Select System, Japanese, and English under Edit >
+   Settings > Language, restarting after each change. Verify the checked state
+   persists; System resolves Japanese when the first preferred Windows UI
+   language is `ja` and English otherwise; menus, common dialogs, pane titles,
+   command errors, accessibility names, and About follow the selection. Confirm
+   user-entered names, document tabs, and paths are not translated. Record the
+   embedded Japanese-only Help body separately from UI-resource results.
 7. **Shutdown after faults.** With two windows open, trigger the documented
    device-loss hook, close a non-final window, then close the final window with
    a dirty document and with a cancelled dirty prompt. No background owner
@@ -105,8 +108,8 @@ High contrast: Pass | Fail | Blocked — evidence
 Keyboard only: Pass | Fail | Blocked — evidence
 Screen reader: Pass | Fail | Blocked — evidence
 Japanese IME: Pass | Fail | Blocked — evidence
-Japanese resources: Pass | Fail | Blocked — evidence
-English resources: Pass | Known difference | Fail | Blocked — evidence
+System/Japanese resources: Pass | Fail | Blocked — evidence
+System/English resources: Pass | Fail | Blocked — evidence
 Faulted shutdown: Pass | Fail | Blocked — evidence
 ```
 

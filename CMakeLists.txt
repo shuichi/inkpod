@@ -314,6 +314,12 @@ if(WIN32)
         OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/html/file_format.html")
     set_property(SOURCE apps/windows/app/app.rc APPEND PROPERTY
         OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/html/acknowledgements.html")
+    set_property(SOURCE apps/windows/app/app.rc APPEND PROPERTY OBJECT_DEPENDS
+        "${CMAKE_SOURCE_DIR}/apps/windows/app/app_common.rc")
+    set_property(SOURCE apps/windows/app/app.rc APPEND PROPERTY OBJECT_DEPENDS
+        "${CMAKE_SOURCE_DIR}/apps/windows/app/app_ui_ja.generated.rc")
+    set_property(SOURCE apps/windows/app/app.rc APPEND PROPERTY OBJECT_DEPENDS
+        "${CMAKE_SOURCE_DIR}/apps/windows/app/app_ui_en.generated.rc")
     set_property(SOURCE tests/windows_embedded_manual.rc APPEND PROPERTY
         OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/html/manual.html")
     set_property(SOURCE tests/windows_embedded_manual.rc APPEND PROPERTY
@@ -401,6 +407,8 @@ if(WIN32)
         COMMAND inkpod_windows_launch_options_tests)
 
     add_executable(inkpod_windows_command_state_tests
+        apps/windows/ui/localization.cpp
+        apps/windows/ui/localization.h
         apps/windows/ui/command_catalog.cpp
         apps/windows/ui/command_catalog.h
         apps/windows/ui/command_state.cpp
@@ -415,7 +423,9 @@ if(WIN32)
         "${CMAKE_SOURCE_DIR}/include")
     target_compile_definitions(inkpod_windows_command_state_tests PRIVATE
         UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
-    target_link_libraries(inkpod_windows_command_state_tests PRIVATE comctl32)
+    target_link_libraries(inkpod_windows_command_state_tests PRIVATE
+        advapi32
+        comctl32)
     if(MSVC)
         inkpod_enable_strict_warnings(inkpod_windows_command_state_tests)
         target_compile_options(inkpod_windows_command_state_tests PRIVATE /EHsc)
@@ -423,6 +433,36 @@ if(WIN32)
     add_test(
         NAME inkpod_windows_command_state
         COMMAND inkpod_windows_command_state_tests)
+
+    add_executable(inkpod_windows_localization_tests
+        apps/windows/ui/localization.cpp
+        apps/windows/ui/localization.h
+        apps/windows/ui/ui_resources.cpp
+        apps/windows/ui/ui_resources.h
+        tests/windows_localization.cpp
+        apps/windows/app/app.rc)
+    target_include_directories(inkpod_windows_localization_tests PRIVATE
+        "${CMAKE_SOURCE_DIR}/apps/windows"
+        "${CMAKE_BINARY_DIR}/generated")
+    target_compile_definitions(inkpod_windows_localization_tests PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(inkpod_windows_localization_tests PRIVATE
+        advapi32
+        comctl32
+        user32)
+    if(MSVC)
+        inkpod_enable_strict_warnings(inkpod_windows_localization_tests)
+        target_compile_options(inkpod_windows_localization_tests PRIVATE /EHsc)
+        target_link_options(inkpod_windows_localization_tests PRIVATE /MANIFEST:NO)
+    endif()
+    add_test(
+        NAME inkpod_windows_localization
+        COMMAND inkpod_windows_localization_tests)
+    add_test(
+        NAME inkpod_windows_localization_catalog
+        COMMAND ${CMAKE_COMMAND}
+            -DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -P ${CMAKE_SOURCE_DIR}/tests/verify_windows_localization_catalog.cmake)
 
     add_executable(inkpod_windows_command_context_tests
         apps/windows/app/command_context.cpp
@@ -446,6 +486,8 @@ if(WIN32)
         COMMAND inkpod_windows_command_context_tests)
 
     add_executable(inkpod_windows_workspace_layout_tests
+        apps/windows/ui/localization.cpp
+        apps/windows/ui/localization.h
         apps/windows/ui/dock_layout.cpp
         apps/windows/ui/dock_layout.h
         apps/windows/ui/workspace_layout.cpp
@@ -500,6 +542,10 @@ if(WIN32)
         apps/windows/ui/dock_layout.h
         apps/windows/ui/dock_host.cpp
         apps/windows/ui/dock_host.h
+        apps/windows/ui/localization.cpp
+        apps/windows/ui/localization.h
+        apps/windows/ui/ui_resources.cpp
+        apps/windows/ui/ui_resources.h
         apps/windows/ui/thumbnail_cache.cpp
         apps/windows/ui/thumbnail_cache.h
         tests/windows_owner_model.cpp)
@@ -510,6 +556,7 @@ if(WIN32)
         UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
     target_link_libraries(inkpod_windows_owner_model_tests PRIVATE
         comctl32
+        advapi32
         ole32
         oleacc)
     if(MSVC)
@@ -654,6 +701,10 @@ if(WIN32)
         apps/windows/ui/command_catalog.h
         apps/windows/ui/shortcut_controller.cpp
         apps/windows/ui/shortcut_controller.h
+        apps/windows/ui/localization.cpp
+        apps/windows/ui/localization.h
+        apps/windows/ui/ui_resources.cpp
+        apps/windows/ui/ui_resources.h
         apps/windows/ui/effects_controller.cpp
         apps/windows/ui/batch_controller.cpp
         apps/windows/ui/dock_layout.cpp
@@ -697,6 +748,7 @@ if(WIN32)
         ole32
         oleacc
         oleaut32
+        uiautomationcore
         advapi32
         shcore
         shell32)
@@ -715,7 +767,12 @@ if(WIN32)
     endif()
 
     add_test(NAME inkpod_abi_smoke COMMAND inkpod --abi-smoke-test)
-    add_test(NAME inkpod_windows_smoke COMMAND inkpod --smoke-test)
+    add_test(
+        NAME inkpod_windows_smoke
+        COMMAND inkpod --smoke-test --smoke-test-language=en-US)
+    add_test(
+        NAME inkpod_windows_smoke_japanese
+        COMMAND inkpod --smoke-test --smoke-test-language=ja-JP)
     add_test(
         NAME inkpod_windows_release_automation_dry_run
         COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass

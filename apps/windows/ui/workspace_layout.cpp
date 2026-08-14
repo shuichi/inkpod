@@ -1,3 +1,5 @@
+#include "ui/localization.h"
+
 #include "workspace_layout.h"
 
 #include <shellscalingapi.h>
@@ -1009,12 +1011,12 @@ bool ApplyWorkspacePreset(
 
 const wchar_t* WorkspacePresetDisplayName(WorkspacePreset preset) noexcept {
     switch (preset) {
-        case WorkspacePreset::Coloring: return L"彩色";
-        case WorkspacePreset::LineCleanup: return L"線整理";
-        case WorkspacePreset::ReferenceCheck: return L"参照・チェック";
-        case WorkspacePreset::Batch: return L"バッチ";
-        case WorkspacePreset::Focus: return L"集中";
-        case WorkspacePreset::Custom: return L"ユーザー";
+        case WorkspacePreset::Coloring: return UiText(UiStringId::Coloring);
+        case WorkspacePreset::LineCleanup: return UiText(UiStringId::Text0851);
+        case WorkspacePreset::ReferenceCheck: return UiText(UiStringId::Text0549);
+        case WorkspacePreset::Batch: return UiText(UiStringId::Text0255);
+        case WorkspacePreset::Focus: return UiText(UiStringId::Text1032);
+        case WorkspacePreset::Custom: return UiText(UiStringId::Text0361);
         case WorkspacePreset::Count: return L"";
     }
     return L"";

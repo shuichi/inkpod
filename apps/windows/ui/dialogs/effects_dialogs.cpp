@@ -1,3 +1,7 @@
+#include "ui/ui_resources.h"
+
+#include "ui/localization.h"
+
 #include "effects_dialogs.h"
 
 #include <commctrl.h>
@@ -88,7 +92,7 @@ bool ReadEffectEditorState(
             if (show_error && !state.close_immediately) {
                 MessageBoxW(
                     dialog,
-                    L"数値パラメーターを10進整数で入力してください。",
+                    UiText(UiStringId::Text0694),
                     L"inkpod",
                     MB_OK | MB_ICONWARNING);
             }
@@ -126,17 +130,17 @@ void SetEffectPreviewStatus(HWND dialog, const wchar_t* text) noexcept {
 bool SubmitEffectPreviewChange(
     HWND dialog, EffectEditorState& state, bool show_error) noexcept {
     if (!ReadEffectEditorState(dialog, state, show_error)) {
-        SetEffectPreviewStatus(dialog, L"入力中のパラメーターはまだ有効ではありません。");
+        SetEffectPreviewStatus(dialog, UiText(UiStringId::Text0499));
         return false;
     }
     if (state.preview_change == nullptr) {
         return true;
     }
     if (!state.preview_change(state.preview_context, state)) {
-        SetEffectPreviewStatus(dialog, L"プレビュー要求を開始できませんでした。");
+        SetEffectPreviewStatus(dialog, UiText(UiStringId::Text0315));
         return false;
     }
-    SetEffectPreviewStatus(dialog, L"最新のパラメーターからプレビューを計算中...");
+    SetEffectPreviewStatus(dialog, UiText(UiStringId::Text0736));
     return true;
 }
 
@@ -283,7 +287,7 @@ INT_PTR CALLBACK EffectEditorDialogProcedure(
                         status.data(),
                         status.size(),
                         _TRUNCATE,
-                        L"プレビュー計算中... %llu / %llu",
+                        UiText(UiStringId::Text0316),
                         static_cast<unsigned long long>(info.completed_work),
                         static_cast<unsigned long long>(info.total_work));
                     SetEffectPreviewStatus(dialog, status.data());
@@ -529,7 +533,7 @@ INT_PTR ShowEffectEditor(
     try {
         EffectEditorState candidate = state;
         candidate.close_immediately = close_immediately;
-        const INT_PTR result = DialogBoxParamW(
+        const INT_PTR result = DialogBoxLocalizedParamW(
             instance,
             MAKEINTRESOURCEW(IDD_EFFECT_EDITOR),
             owner,
@@ -550,7 +554,7 @@ void SetEffectEditorPreviewStatus(HWND dialog, const wchar_t* text) noexcept {
 
 HWND CreateJobProgressPane(
     HINSTANCE instance, HWND parent, JobProgressPaneState& state) noexcept {
-    return CreateDialogParamW(
+    return CreateLocalizedDialogParamW(
         instance,
         MAKEINTRESOURCEW(IDD_EFFECT_PROGRESS),
         parent,

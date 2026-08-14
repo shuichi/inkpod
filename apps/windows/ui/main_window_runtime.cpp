@@ -1,3 +1,5 @@
+#include "ui/ui_resources.h"
+
 #include <windows.h>
 #include <commctrl.h>
 #include <commdlg.h>
@@ -41,6 +43,7 @@
 #include "ui/dialogs/layer_palette.h"
 #include "ui/command_state.h"
 #include "ui/command_catalog.h"
+#include "ui/localization.h"
 #include "ui/shortcut_controller.h"
 #include "ui/panes/document_panes.h"
 #include "ui/panes/color_panes.h"
@@ -238,8 +241,6 @@ constexpr UINT kColorChartGenerationCompleted = WM_APP + 0x174U;
 constexpr UINT kShortcutSequenceTimerMilliseconds = 100U;
 constexpr UINT kStatusProgressTimerMilliseconds = 100U;
 constexpr UINT kContinuousSprayIntervalMilliseconds = 50U;
-constexpr wchar_t kVectorStrokePlaneRequired[] =
-    L"この図形ツールを使用できる描画プレーンを選択してください。";
 
 bool ArmCommandTimer(
     ApplicationHost& state,
@@ -295,18 +296,21 @@ std::optional<inkpod::app::CommandTimerToken> ResolveCommandTimer(
     (void)state.routing.timers.Disarm(token->kind);
     return std::nullopt;
 }
-constexpr std::array<ViewOptionsDialogState::Choice, 10U> kLayerKindChoices{{
-    {L"2値彩色", INKPOD_LAYER_BINARY_COLORING},
-    {L"階調彩色", INKPOD_LAYER_GRAYSCALE_COLORING},
-    {L"ラスター汎用", INKPOD_LAYER_RASTER},
-    {L"選択範囲", INKPOD_LAYER_SELECTION},
-    {L"フレーム", INKPOD_LAYER_FRAME},
-    {L"消失点", INKPOD_LAYER_VANISHING_POINT},
-    {L"調整", INKPOD_LAYER_ADJUSTMENT},
-    {L"テキスト", INKPOD_LAYER_TEXT},
-    {L"指示", INKPOD_LAYER_ANNOTATION},
-    {L"ベクター彩色", INKPOD_LAYER_VECTOR_COLORING},
-}};
+const std::array<ViewOptionsDialogState::Choice, 10U>& LayerKindChoices() {
+    static const std::array<ViewOptionsDialogState::Choice, 10U> choices{{
+        {UiText(UiStringId::LayerBinaryColoring), INKPOD_LAYER_BINARY_COLORING},
+        {UiText(UiStringId::LayerGrayscaleColoring), INKPOD_LAYER_GRAYSCALE_COLORING},
+        {UiText(UiStringId::LayerRasterGeneral), INKPOD_LAYER_RASTER},
+        {UiText(UiStringId::LayerSelection), INKPOD_LAYER_SELECTION},
+        {UiText(UiStringId::LayerFrame), INKPOD_LAYER_FRAME},
+        {UiText(UiStringId::ToolVanishingPoint), INKPOD_LAYER_VANISHING_POINT},
+        {UiText(UiStringId::LayerAdjustment), INKPOD_LAYER_ADJUSTMENT},
+        {UiText(UiStringId::LayerText), INKPOD_LAYER_TEXT},
+        {UiText(UiStringId::LayerInstruction), INKPOD_LAYER_ANNOTATION},
+        {UiText(UiStringId::LayerVectorColoring), INKPOD_LAYER_VECTOR_COLORING},
+    }};
+    return choices;
+}
 
 struct PlaneDialogChoiceStorage {
     std::array<std::wstring, 7U> kind_labels;
@@ -325,7 +329,7 @@ bool LoadViewOptionChoices(
     try {
         for (std::size_t index = 0U; index < Count; ++index) {
             std::array<wchar_t, 128U> buffer{};
-            const int length = LoadStringW(
+            const int length = LoadLocalizedStringW(
                 instance,
                 specifications[index].first,
                 buffer.data(),
@@ -362,7 +366,7 @@ bool LoadPlaneDialogChoices(
         {IDS_STORAGE_RGBA16, INKPOD_STORAGE_RGBA16},
     }};
     std::array<wchar_t, 160U> error{};
-    const int error_length = LoadStringW(
+    const int error_length = LoadLocalizedStringW(
         instance,
         IDS_PLANE_CREATION_INVALID,
         error.data(),
@@ -397,7 +401,7 @@ const wchar_t* ValidatePlaneCreationOptions(
     if (validation == nullptr || validation->engine == nullptr
         || validation->layer_id == 0U || validation->error_message == nullptr
         || value_count < 2U) {
-        return L"プレーン作成条件を検証できません。";
+        return UiText(UiStringId::Text0324);
     }
     const InkpodStatus status = validation->engine->Invoke(
         [layer_id = validation->layer_id,
@@ -833,7 +837,7 @@ void SelectLayerPaletteLayer(void* context, std::uint64_t layer_id) noexcept {
     const InkpodStatus status = SetEditorActiveTarget(
         *state, layer_id, planes.front().id);
     if (status != INKPOD_STATUS_OK) {
-        ShowCoreError(*state, state->Workspace().windows.window, L"レイヤーの選択");
+        ShowCoreError(*state, state->Workspace().windows.window, UiText(UiStringId::Text0398));
     } else {
         RefreshTreePane(*state);
     }
@@ -856,7 +860,7 @@ void SelectLayerPalettePlane(void* context, std::uint64_t plane_id) noexcept {
     const InkpodStatus status = SetEditorActiveTarget(
         *state, editor->active_layer_id, plane_id);
     if (status != INKPOD_STATUS_OK) {
-        ShowCoreError(*state, state->Workspace().windows.window, L"プレーンの選択");
+        ShowCoreError(*state, state->Workspace().windows.window, UiText(UiStringId::Text0321));
     } else {
         RefreshTreePane(*state);
     }
@@ -968,7 +972,7 @@ void ToggleLayerPaletteTarget(
         editor->editor_revision,
         targets);
     if (status != INKPOD_STATUS_OK) {
-        ShowCoreError(*state, state->Workspace().windows.window, L"編集対象の変更");
+        ShowCoreError(*state, state->Workspace().windows.window, UiText(UiStringId::Text0856));
     } else {
         RefreshTreePane(*state);
     }
@@ -1026,7 +1030,7 @@ void ReorderLayerPaletteLayer(
         destination_index,
         ignored);
     if (status != INKPOD_STATUS_OK) {
-        ShowCoreError(*state, state->Workspace().windows.window, L"レイヤーの並べ替え");
+        ShowCoreError(*state, state->Workspace().windows.window, UiText(UiStringId::Text0393));
     } else {
         RefreshTreePane(*state);
     }
@@ -1049,7 +1053,7 @@ void ReorderLayerPalettePlane(
         destination_index,
         ignored);
     if (status != INKPOD_STATUS_OK) {
-        ShowCoreError(*state, state->Workspace().windows.window, L"プレーンの並べ替え");
+        ShowCoreError(*state, state->Workspace().windows.window, UiText(UiStringId::Text0319));
     } else {
         RefreshTreePane(*state);
     }
@@ -1280,7 +1284,7 @@ bool CreateDocumentViewInGroup(
         if (previous.document_view.has_value()) {
             (void)state.ActivateDocumentView(previous.document_view.value());
         }
-        ShowCoreError(state, error_owner, L"ビューの作成");
+        ShowCoreError(state, error_owner, UiText(UiStringId::Text0274));
         return false;
     }
     const bool registered = document.AddView(
@@ -1688,7 +1692,7 @@ bool RefreshLightTablePane(ApplicationHost& state) noexcept {
     using inkpod::windows::ui::panes::UpdateLightTablePaneDialog;
 
     LightTablePaneView pane{};
-    pane.empty_text = L"参照画像はありません";
+    pane.empty_text = UiText(UiStringId::Text0551);
     const auto* binding = state.routing.pane_targets.Find(
         state.routing.light_table_pane);
     pane.pinned = binding != nullptr
@@ -1716,10 +1720,10 @@ bool RefreshLightTablePane(ApplicationHost& state) noexcept {
     }
     if (state.engine == nullptr || target.status != PaneTargetStatus::Ok
         || document == nullptr || !target.context.generation.has_value()) {
-        pane.target_text = notice == PaneTargetNotice::PinnedDocumentClosed
-            ? L"固定先を閉じたためアクティブに追従（対象なし）"
-            : L"アクティブに追従（対象なし）";
-        pane.empty_text = L"対象文書がありません";
+        pane.target_text = UiText(notice == PaneTargetNotice::PinnedDocumentClosed
+            ? UiStringId::PinnedClosedFollowingNoTarget
+            : UiStringId::FollowingNoTarget);
+        pane.empty_text = UiText(UiStringId::TargetDocumentUnavailable);
         state.Workspace().panes.light_table_set_count = 0U;
         state.Workspace().panes.light_table_item_count = 0U;
         state.Workspace().panes.active_light_table_set_index = 0U;
@@ -1748,10 +1752,10 @@ bool RefreshLightTablePane(ApplicationHost& state) noexcept {
         state.Workspace().panes.light_table_selection_session = {};
         state.Workspace().panes.light_table_selection_generation = {};
         pane.target_available = true;
-        pane.target_text = pane.pinned
-            ? L"固定: " + LocatorDocumentName(*document)
-            : L"アクティブに追従: " + LocatorDocumentName(*document);
-        pane.empty_text = L"ライトテーブルを読み込めません";
+        pane.target_text = UiTextWithUserText(
+            pane.pinned ? UiStringId::PinnedPrefix : UiStringId::FollowingPrefix,
+            LocatorDocumentName(*document));
+        pane.empty_text = UiText(UiStringId::Text0364);
         UpdateLightTablePaneDialog(
             state.Workspace().light_table_palette, std::move(pane));
         return false;
@@ -1825,11 +1829,12 @@ bool RefreshLightTablePane(ApplicationHost& state) noexcept {
     try {
         pane.target_available = true;
         const std::wstring name = LocatorDocumentName(*document);
-        pane.target_text = pane.pinned
-            ? L"固定: " + name
-            : L"アクティブに追従: " + name;
+        pane.target_text = UiTextWithUserText(
+            pane.pinned ? UiStringId::PinnedPrefix : UiStringId::FollowingPrefix,
+            name);
         if (notice == PaneTargetNotice::PinnedDocumentClosed) {
-            pane.target_text = L"固定先を閉じたため追従: " + name;
+            pane.target_text = UiTextWithUserText(
+                UiStringId::PinnedClosedFollowingPrefix, name);
         }
         pane.sets.reserve(sets.size());
         for (const auto& set : sets) {
@@ -1862,8 +1867,8 @@ bool RefreshLightTablePane(ApplicationHost& state) noexcept {
         pane.selected_item_index = items.empty() ? UINT32_MAX : selected_item;
     } catch (const std::bad_alloc&) {
         pane = {};
-        pane.target_text = L"ライトテーブル表示用メモリが不足しました";
-        pane.empty_text = L"表示を更新できません";
+        pane.target_text = UiText(UiStringId::Text0378);
+        pane.empty_text = UiText(UiStringId::Text0887);
         UpdateLightTablePaneDialog(
             state.Workspace().light_table_palette, std::move(pane));
         return false;
@@ -1965,7 +1970,7 @@ bool RefreshSequencePane(ApplicationHost& state) noexcept {
     using inkpod::windows::ui::panes::UpdateSequencePaneDialog;
     state.Thumbnails().RemovePane(state.Workspace().pane_ids.sequence);
     SequencePaneView pane{};
-    pane.empty_text = L"シーケンスはありません";
+    pane.empty_text = UiText(UiStringId::SequenceNoCells);
     const auto* binding = state.routing.pane_targets.Find(
         state.routing.sequence_pane);
     pane.pinned = binding != nullptr
@@ -1974,10 +1979,11 @@ bool RefreshSequencePane(ApplicationHost& state) noexcept {
         pane.target_available = true;
         pane.cut_editable = true;
         try {
-            pane.target_text = L"カット: " + state.Workspace().cut.cut_name
+            pane.target_text = UiTextWithUserText(
+                UiStringId::CutPrefix, state.Workspace().cut.cut_name)
                 + L" — "
                 + std::to_wstring(state.Workspace().cut.members.size())
-                + L" セル";
+                + UiText(UiStringId::CellsSuffix);
             const std::wstring& descriptor = state.Workspace().cut.current_path;
             const std::size_t slash = descriptor.find_last_of(L"\\/");
             const std::wstring directory = slash == std::wstring::npos
@@ -1991,7 +1997,7 @@ bool RefreshSequencePane(ApplicationHost& state) noexcept {
                 if (!LoadCutMemberThumbnail(
                         state, directory + member.relative_path, member)) {
                     pane.cells.clear();
-                    pane.empty_text = L"カットのセル thumbnail を読み込めません";
+                    pane.empty_text = UiText(UiStringId::SequenceThumbnailLoadFailed);
                     UpdateSequencePaneDialog(
                         state.Workspace().sequence_palette, std::move(pane));
                     return false;
@@ -2024,7 +2030,7 @@ bool RefreshSequencePane(ApplicationHost& state) noexcept {
                         ThumbnailPixelLayout::Rgba8,
                         std::move(thumbnail_pixels))) {
                     pane.cells.clear();
-                    pane.empty_text = L"カットのセル thumbnail を登録できません";
+                    pane.empty_text = UiText(UiStringId::SequenceThumbnailRegisterFailed);
                     UpdateSequencePaneDialog(
                         state.Workspace().sequence_palette, std::move(pane));
                     return false;
@@ -2067,11 +2073,12 @@ bool RefreshSequencePane(ApplicationHost& state) noexcept {
                        state.Document().shell.current_path.c_str(),
                        directory.c_str(),
                        directory.size()) == 0) {
-                pane.target_text += L" — 現在のセルはメンバー外";
+                pane.target_text += L" — ";
+                pane.target_text += UiText(UiStringId::CurrentCellOutsideMembers);
             }
         } catch (const std::bad_alloc&) {
             pane.cells.clear();
-            pane.empty_text = L"カット表示用メモリが不足しました";
+            pane.empty_text = UiText(UiStringId::CutDisplayOutOfMemory);
             UpdateSequencePaneDialog(
                 state.Workspace().sequence_palette, std::move(pane));
             return false;
@@ -2103,10 +2110,10 @@ bool RefreshSequencePane(ApplicationHost& state) noexcept {
     }
     if (state.engine == nullptr || target.status != PaneTargetStatus::Ok
         || document == nullptr || !target.context.generation.has_value()) {
-        pane.target_text = notice == PaneTargetNotice::PinnedDocumentClosed
-            ? L"固定先を閉じたためアクティブに追従（対象なし）"
-            : L"アクティブに追従（対象なし）";
-        pane.empty_text = L"対象文書がありません";
+        pane.target_text = UiText(notice == PaneTargetNotice::PinnedDocumentClosed
+            ? UiStringId::PinnedClosedFollowingNoTarget
+            : UiStringId::FollowingNoTarget);
+        pane.empty_text = UiText(UiStringId::TargetDocumentUnavailable);
         UpdateSequencePaneDialog(
             state.Workspace().sequence_palette, std::move(pane));
         return false;
@@ -2119,24 +2126,26 @@ bool RefreshSequencePane(ApplicationHost& state) noexcept {
     pane.target_available = true;
     try {
         const std::wstring name = LocatorDocumentName(*document);
-        pane.target_text = pane.pinned
-            ? L"固定: " + name
-            : L"アクティブに追従: " + name;
+        pane.target_text = UiTextWithUserText(
+            pane.pinned ? UiStringId::PinnedPrefix : UiStringId::FollowingPrefix,
+            name);
         if (notice == PaneTargetNotice::PinnedDocumentClosed) {
-            pane.target_text = L"固定先を閉じたため追従: " + name;
+            pane.target_text = UiTextWithUserText(
+                UiStringId::PinnedClosedFollowingPrefix, name);
         }
         if (status != INKPOD_STATUS_OK) {
-            pane.empty_text = L"シーケンスを読み込めません";
+            pane.empty_text = UiText(UiStringId::SequenceLoadFailed);
             UpdateSequencePaneDialog(
                 state.Workspace().sequence_palette, std::move(pane));
             return false;
         }
-        pane.target_text += L" — " + std::to_wstring(cells.size()) + L" セル";
+        pane.target_text += L" — " + std::to_wstring(cells.size())
+            + UiText(UiStringId::CellsSuffix);
         InkpodDocumentInfo info{};
         info.struct_size = sizeof(info);
         if (!state.engine->GetDocumentInfo(
                 document->id, document->generation, info)) {
-            pane.empty_text = L"対象文書を確認できません";
+            pane.empty_text = UiText(UiStringId::Text0627);
             UpdateSequencePaneDialog(
                 state.Workspace().sequence_palette, std::move(pane));
             return false;
@@ -2217,7 +2226,7 @@ bool RefreshSequencePane(ApplicationHost& state) noexcept {
         }
     } catch (const std::bad_alloc&) {
         pane.cells.clear();
-        pane.empty_text = L"シーケンス表示用メモリが不足しました";
+        pane.empty_text = UiText(UiStringId::SequenceDisplayOutOfMemory);
         UpdateSequencePaneDialog(
             state.Workspace().sequence_palette, std::move(pane));
         return false;
@@ -2309,7 +2318,7 @@ bool RefreshSubpalettePane(ApplicationHost& state) noexcept {
     SubpalettePaneView pane{};
     pane.auto_previous = workspace.subpalette_auto_previous;
     pane.scroll_sync = workspace.subpalette_scroll_sync;
-    pane.empty_text = L"参照セルがありません";
+    pane.empty_text = UiText(UiStringId::Text0547);
     const auto* binding = state.routing.pane_targets.Find(
         state.routing.subpalette_pane);
     pane.pinned = binding != nullptr
@@ -2339,11 +2348,11 @@ bool RefreshSubpalettePane(ApplicationHost& state) noexcept {
         || document == nullptr || !target.context.document_view.has_value()
         || !target.context.generation.has_value()) {
         ResetSubpaletteTarget(state);
-        pane.target_text = notice == PaneTargetNotice::PinnedDocumentClosed
-            ? L"固定先を閉じたためアクティブに追従（対象なし）"
-            : L"アクティブに追従（対象なし）";
-        pane.source_text = L"参照セル: —";
-        pane.empty_text = L"対象文書がありません";
+        pane.target_text = UiText(notice == PaneTargetNotice::PinnedDocumentClosed
+            ? UiStringId::PinnedClosedFollowingNoTarget
+            : UiStringId::FollowingNoTarget);
+        pane.source_text = UiText(UiStringId::Text0546);
+        pane.empty_text = UiText(UiStringId::TargetDocumentUnavailable);
         UpdateSubpalettePaneDialog(
             workspace.subpalette_palette, std::move(pane));
         return false;
@@ -2355,18 +2364,19 @@ bool RefreshSubpalettePane(ApplicationHost& state) noexcept {
         document->id, document->generation, cells);
     pane.target_available = true;
     const std::wstring document_name = LocatorDocumentName(*document);
-    pane.target_text = pane.pinned
-        ? L"固定: " + document_name
-        : L"アクティブに追従: " + document_name;
+    pane.target_text = UiTextWithUserText(
+        pane.pinned ? UiStringId::PinnedPrefix : UiStringId::FollowingPrefix,
+        document_name);
     if (notice == PaneTargetNotice::PinnedDocumentClosed) {
-        pane.target_text = L"固定先を閉じたため追従: " + document_name;
+        pane.target_text = UiTextWithUserText(
+            UiStringId::PinnedClosedFollowingPrefix, document_name);
     }
     if (sequence_status != INKPOD_STATUS_OK || cells.empty()) {
         ResetSubpaletteTarget(state);
-        pane.source_text = L"参照セル: —";
+        pane.source_text = UiText(UiStringId::Text0546);
         pane.empty_text = sequence_status == INKPOD_STATUS_OK
-            ? L"シーケンスがありません"
-            : L"シーケンスを読み込めません";
+            ? UiText(UiStringId::Text0205)
+            : UiText(UiStringId::SequenceLoadFailed);
         UpdateSubpalettePaneDialog(
             workspace.subpalette_palette, std::move(pane));
         return false;
@@ -2376,8 +2386,8 @@ bool RefreshSubpalettePane(ApplicationHost& state) noexcept {
     info.struct_size = sizeof(info);
     if (!state.engine->GetDocumentInfo(
             document->id, document->generation, info)) {
-        pane.source_text = L"参照セル: —";
-        pane.empty_text = L"対象文書を確認できません";
+        pane.source_text = UiText(UiStringId::Text0546);
+        pane.empty_text = UiText(UiStringId::Text0627);
         UpdateSubpalettePaneDialog(
             workspace.subpalette_palette, std::move(pane));
         return false;
@@ -2440,8 +2450,8 @@ bool RefreshSubpalettePane(ApplicationHost& state) noexcept {
                     false,
                     false);
             }
-            pane.source_text = L"参照セル: —";
-            pane.empty_text = L"参照ビューを初期化できません";
+            pane.source_text = UiText(UiStringId::Text0546);
+            pane.empty_text = UiText(UiStringId::Text0548);
             UpdateSubpalettePaneDialog(
                 workspace.subpalette_palette, std::move(pane));
             return false;
@@ -2512,16 +2522,16 @@ bool RefreshSubpalettePane(ApplicationHost& state) noexcept {
                     required);
             }
         }
-        pane.source_text = L"参照セル: "
+        pane.source_text = UiText(UiStringId::Text0545)
             + std::to_wstring(source.info.cell_number)
             + (source_name.empty() ? L"" : L" — " + source_name);
         pane.empty_text = pane.source_available
             ? L""
-            : L"参照画像を描画できません";
+            : UiText(UiStringId::Text0552);
     } catch (const std::bad_alloc&) {
         pane.source_available = false;
-        pane.source_text = L"参照セル: —";
-        pane.empty_text = L"参照表示用メモリが不足しました";
+        pane.source_text = UiText(UiStringId::Text0546);
+        pane.empty_text = UiText(UiStringId::Text0553);
     }
     UpdateSubpalettePaneDialog(
         workspace.subpalette_palette, std::move(pane));
@@ -2882,7 +2892,10 @@ std::wstring LocatorDocumentName(const DocumentSession& document) {
             return leaf;
         }
     }
-    return L"無題セル " + std::to_wstring(
+    const wchar_t* prefix = CurrentUiLanguage() == UiLanguage::English
+        ? L"Untitled Cell "
+        : UiText(UiStringId::Text0777);
+    return prefix + std::to_wstring(
         document.untitled_number == 0U ? 1U : document.untitled_number);
 }
 
@@ -2926,34 +2939,39 @@ void RefreshLocatorPane(ApplicationHost& state) noexcept {
     try {
         if (target.status != PaneTargetStatus::Ok || document == nullptr
             || view == nullptr) {
-            pane.target_text = notice == PaneTargetNotice::PinnedDocumentClosed
-                ? L"固定先を閉じたためアクティブに追従（対象なし）"
-                : L"アクティブに追従（対象なし）";
+            pane.target_text = UiText(notice == PaneTargetNotice::PinnedDocumentClosed
+                ? UiStringId::PinnedClosedFollowingNoTarget
+                : UiStringId::FollowingNoTarget);
             pane.coordinate_text = L"X —  Y —";
-            pane.selection_text = L"選択 H —  V —  L —";
+            pane.selection_text = std::wstring(UiText(UiStringId::LocatorSelectionPrefix))
+                + L"H —  V —  L —";
             pane.color_text = L"RGBA —";
             UpdateLocatorPaneDialog(state.Workspace().locator_palette, pane);
             return;
         }
         const std::wstring name = LocatorDocumentName(*document);
-        pane.target_text = pane.pinned
-            ? L"固定: " + name
-            : L"アクティブに追従: " + name;
+        pane.target_text = UiTextWithUserText(
+            pane.pinned ? UiStringId::PinnedPrefix : UiStringId::FollowingPrefix,
+            name);
         InkpodDocumentInfo target_info{};
         target_info.struct_size = sizeof(target_info);
         if (state.engine != nullptr && state.engine->GetDocumentInfo(
                 document->id, document->generation, target_info)) {
-            pane.target_text += target_info.active_plane == INKPOD_PLANE_COLOR
-                ? L" — 彩色"
-                : L" — 主線";
+            pane.target_text += L" — ";
+            pane.target_text += UiText(
+                target_info.active_plane == INKPOD_PLANE_COLOR
+                    ? UiStringId::Coloring
+                    : UiStringId::MainLine);
         }
         if (notice == PaneTargetNotice::PinnedDocumentClosed) {
-            pane.target_text = L"固定先を閉じたため追従: " + name;
+            pane.target_text = UiTextWithUserText(
+                UiStringId::PinnedClosedFollowingPrefix, name);
         }
         pane.valid = view->presentation.locator_valid;
         if (!pane.valid) {
             pane.coordinate_text = L"X —  Y —";
-            pane.selection_text = L"選択 H —  V —  L —";
+            pane.selection_text = std::wstring(UiText(UiStringId::LocatorSelectionPrefix))
+                + L"H —  V —  L —";
             pane.color_text = L"RGBA —";
         } else {
             const InkpodLocatorOutput& locator = view->presentation.locator;
@@ -2966,13 +2984,14 @@ void RefreshLocatorPane(ApplicationHost& state) noexcept {
                 std::array<wchar_t, 96U> text{};
                 _snwprintf_s(
                     text.data(), text.size(), _TRUNCATE,
-                    L"選択 H %d  V %d  L %.1f",
+                    L"%lsH %d  V %d  L %.1f",
+                    UiText(UiStringId::LocatorSelectionPrefix),
                     locator.selection.width,
                     locator.selection.height,
                     diagonal);
                 pane.selection_text = text.data();
             } else {
-                pane.selection_text = L"選択なし";
+                pane.selection_text = UiText(UiStringId::LocatorNoSelection);
             }
             if ((locator.flags & INKPOD_LOCATOR_COLOR_PRESENT) != 0U) {
                 pane.color_text = L"RGBA "
@@ -2998,7 +3017,7 @@ void RefreshLocatorPane(ApplicationHost& state) noexcept {
         }
     } catch (const std::bad_alloc&) {
         pane = {};
-        pane.target_text = L"ロケーターを更新できません";
+        pane.target_text = UiText(UiStringId::Text0412);
     }
     UpdateLocatorPaneDialog(state.Workspace().locator_palette, pane);
 }
@@ -3144,9 +3163,9 @@ bool RefreshColorPanes(ApplicationHost& state) noexcept {
         || !target.context.generation.has_value()) {
         inkpod::windows::ui::panes::UpdateColorDockPaneTarget(
             state.Workspace().windows.color_pane,
-            notice == PaneTargetNotice::PinnedDocumentClosed
-                ? L"固定先を閉じたため追従（対象なし）"
-                : L"アクティブに追従（対象なし）",
+            UiText(notice == PaneTargetNotice::PinnedDocumentClosed
+                ? UiStringId::PinnedClosedFollowingNoTarget
+                : UiStringId::FollowingNoTarget),
             false,
             false);
         return false;
@@ -3154,12 +3173,13 @@ bool RefreshColorPanes(ApplicationHost& state) noexcept {
     ColorPanesController controller(*state.engine);
     const InkpodStatus status = controller.RefreshModel(
         document->id, document->generation, state.Workspace().panes);
-    std::wstring target_text = pinned
-        ? L"固定: " + LocatorDocumentName(*document)
-        : L"追従: " + LocatorDocumentName(*document);
+    std::wstring target_text = UiTextWithUserText(
+        pinned ? UiStringId::PinnedPrefix : UiStringId::FollowingPrefix,
+        LocatorDocumentName(*document));
     if (notice == PaneTargetNotice::PinnedDocumentClosed) {
-        target_text = L"固定先を閉じたため追従: "
-            + LocatorDocumentName(*document);
+        target_text = UiTextWithUserText(
+            UiStringId::PinnedClosedFollowingPrefix,
+            LocatorDocumentName(*document));
     }
     inkpod::windows::ui::panes::UpdateColorDockPaneTarget(
         state.Workspace().windows.color_pane,
@@ -3210,16 +3230,16 @@ void UpdateMotionState(
 
 std::wstring LocalizedHistoryLabel(const std::string& label) {
     if (label == "Raster edit") {
-        return L"画像編集";
+        return UiText(UiStringId::Text0811);
     }
     if (label == "Palette edit") {
-        return L"パレット編集";
+        return UiText(UiStringId::Text0273);
     }
     if (label == "Main-line color") {
-        return L"主線色";
+        return UiText(UiStringId::MainLineColor);
     }
     if (label == "Document edit") {
-        return L"文書編集";
+        return UiText(UiStringId::Text0699);
     }
     const int count = MultiByteToWideChar(
         CP_UTF8,
@@ -3229,7 +3249,7 @@ std::wstring LocalizedHistoryLabel(const std::string& label) {
         nullptr,
         0);
     if (count <= 0) {
-        return L"編集";
+        return UiText(UiStringId::Editable);
     }
     std::wstring output(static_cast<std::size_t>(count), L'\0');
     if (MultiByteToWideChar(
@@ -3239,7 +3259,7 @@ std::wstring LocalizedHistoryLabel(const std::string& label) {
             static_cast<int>(label.size()),
             output.data(),
             count) != count) {
-        return L"編集";
+        return UiText(UiStringId::Editable);
     }
     return output;
 }
@@ -3299,7 +3319,7 @@ bool ConfigureHistoryDialog(
         for (std::uint64_t cursor = first; cursor <= last; ++cursor) {
             std::wstring label;
             if (cursor == 0U) {
-                label = L"0: 初期状態";
+                label = UiText(UiStringId::Text0022);
             } else {
                 std::array<wchar_t, 32U> prefix{};
                 _snwprintf_s(
@@ -3347,11 +3367,11 @@ bool QueryHistoryMenuLabels(
     }
     try {
         undo_label = undo_name.empty()
-            ? L"元に戻す(&U)\tCtrl+Z"
-            : L"元に戻す: " + LocalizedHistoryLabel(undo_name) + L"\tCtrl+Z";
+            ? UiText(UiStringId::Text0486)
+            : UiText(UiStringId::Text0487) + LocalizedHistoryLabel(undo_name) + L"\tCtrl+Z";
         redo_label = redo_name.empty()
-            ? L"やり直し(&R)\tCtrl+Y"
-            : L"やり直し: " + LocalizedHistoryLabel(redo_name) + L"\tCtrl+Y";
+            ? UiText(UiStringId::Text0122)
+            : UiText(UiStringId::Text0123) + LocalizedHistoryLabel(redo_name) + L"\tCtrl+Y";
     } catch (const std::bad_alloc&) {
         return false;
     }
@@ -3391,24 +3411,28 @@ void UpdateBatchTarget(ApplicationHost& state) noexcept {
     state.batch.target_available = target.status == PaneTargetStatus::Ok
         && document != nullptr;
     if (!state.batch.target_available) {
-        state.batch.target_text = notice == PaneTargetNotice::JobClosed
-            ? L"Job 終了（対象なし）"
-            : (notice == PaneTargetNotice::PinnedDocumentClosed
-                    ? L"固定先を閉じたため追従（対象なし）"
-                    : L"アクティブに追従（対象なし）");
+        state.batch.target_text = UiText(
+            notice == PaneTargetNotice::JobClosed
+                ? UiStringId::JobClosedNoTarget
+                : (notice == PaneTargetNotice::PinnedDocumentClosed
+                        ? UiStringId::PinnedClosedFollowingNoTarget
+                        : UiStringId::FollowingNoTarget));
         return;
     }
     const std::wstring name = LocatorDocumentName(*document);
     if (binding != nullptr && binding->policy == PaneTargetPolicy::Job
         && target.context.job.has_value()) {
-        state.batch.target_text = L"Job "
+        state.batch.target_text = std::wstring(UiText(UiStringId::JobPrefix))
             + std::to_wstring(target.context.job->Value()) + L": " + name;
     } else {
-        state.batch.target_text = state.batch.target_pinned
-            ? L"固定: " + name
-            : L"追従: " + name;
+        state.batch.target_text = UiTextWithUserText(
+            state.batch.target_pinned
+                ? UiStringId::PinnedPrefix
+                : UiStringId::FollowingPrefix,
+            name);
         if (notice == PaneTargetNotice::PinnedDocumentClosed) {
-            state.batch.target_text = L"固定先を閉じたため追従: " + name;
+            state.batch.target_text = UiTextWithUserText(
+                UiStringId::PinnedClosedFollowingPrefix, name);
         }
     }
 }
@@ -3601,7 +3625,7 @@ void ShowCoreError(const ApplicationHost& state, HWND owner, const wchar_t* oper
         message.data(),
         message.size(),
         _TRUNCATE,
-        L"%ls に失敗しました。\n\n%ls",
+        UiText(UiStringId::Text0015),
         operation,
         detail.c_str());
     MessageBoxW(owner, message.data(), L"inkpod", MB_OK | MB_ICONERROR);
@@ -3615,7 +3639,7 @@ void ShowEmbeddedHelpError(
         return;
     }
     std::array<wchar_t, 256U> message{};
-    if (LoadStringW(
+    if (LoadLocalizedStringW(
             state.lifetime.instance,
             message_id,
             message.data(),
@@ -3637,8 +3661,7 @@ void ShowShortcutError(
     if (status == INKPOD_STATUS_INVALID_ARGUMENT) {
         MessageBoxW(
             owner,
-            L"その割り当ては別のショートカットと前方一致します。\n"
-            L"両方を一意に識別できるキー列を指定してください。",
+            UiText(UiStringId::ShortcutPrefixConflict),
             L"inkpod",
             MB_OK | MB_ICONWARNING);
         return;
@@ -3646,7 +3669,7 @@ void ShowShortcutError(
     if (status == INKPOD_STATUS_IO_ERROR) {
         MessageBoxW(
             owner,
-            L"割り当ては反映されましたが、次回起動用の設定を保存できませんでした。",
+            UiText(UiStringId::Text0543),
             L"inkpod",
             MB_OK | MB_ICONWARNING);
         return;
@@ -3781,8 +3804,8 @@ InkpodStatus ShowFloatingTransformDialog(ApplicationHost& state) noexcept {
         return INKPOD_STATUS_INVALID_STATE;
     }
     ViewOptionsDialogState geometry{};
-    geometry.title = L"フローティング選択の変形";
-    geometry.labels = {L"基準X (px)", L"基準Y (px)", L"幅 (%)", L"高さ (%)"};
+    geometry.title = UiText(UiStringId::Text0309);
+    geometry.labels = {UiText(UiStringId::Text0589), UiText(UiStringId::Text0590), UiText(UiStringId::Text0645), UiText(UiStringId::Text1041)};
     geometry.values = {
         static_cast<std::int32_t>(std::lround(state.Workspace().tools.floating_transform.target_x)),
         static_cast<std::int32_t>(std::lround(state.Workspace().tools.floating_transform.target_y)),
@@ -3798,8 +3821,8 @@ InkpodStatus ShowFloatingTransformDialog(ApplicationHost& state) noexcept {
         return INKPOD_STATUS_CANCELLED;
     }
     ViewOptionsDialogState rotation{};
-    rotation.title = L"回転・基準点";
-    rotation.labels = {L"角度 (度)", L"縦横比固定 (0/1)", L"五点基準 (1-5)", nullptr};
+    rotation.title = UiText(UiStringId::Text0578);
+    rotation.labels = {UiText(UiStringId::Text0907), UiText(UiStringId::Text0861), UiText(UiStringId::Text0451), nullptr};
     rotation.values = {
         static_cast<std::int32_t>(std::lround(state.Workspace().tools.floating_transform.rotation_degrees)),
         0,
@@ -4385,7 +4408,7 @@ InkpodStatus ResizeDocumentFromDialog(
     }
     ViewOptionsDialogState dimensions{};
     dimensions.title = title;
-    dimensions.labels = {L"幅 (px)", L"高さ (px)", L"X DPI (1/1000)", L"Y DPI (1/1000)"};
+    dimensions.labels = {UiText(UiStringId::Text0646), UiText(UiStringId::Text1042), L"X DPI (1/1000)", L"Y DPI (1/1000)"};
     dimensions.values = {
         static_cast<std::int32_t>(info.width),
         static_cast<std::int32_t>(info.height),
@@ -4408,8 +4431,8 @@ InkpodStatus ResizeDocumentFromDialog(
         return INKPOD_STATUS_CANCELLED;
     }
     ViewOptionsDialogState placement{};
-    placement.title = L"配置と再サンプル";
-    placement.labels = {L"基準位置 (1:左上 2:右上 3:中央 4:左下 5:右下)", L"再サンプル (0/1)", L"crop内容を確認 (1)", nullptr};
+    placement.title = UiText(UiStringId::Text1006);
+    placement.labels = {UiText(UiStringId::Text0593), UiText(UiStringId::Text0509), UiText(UiStringId::Text0089), nullptr};
     placement.values = {
         INKPOD_RESIZE_ANCHOR_CENTER,
         resolution_mode ? 0 : 0,
@@ -4875,8 +4898,8 @@ void SetDrawingColor(ApplicationHost& state, InkpodColorValue color) noexcept {
 
 InkpodStatus ShowDrawingColorEditor(ApplicationHost& state) noexcept {
     ViewOptionsDialogState format{};
-    format.title = L"描画色形式";
-    format.labels = {L"深度 (8/16)", L"編集方式 (1:RGB 2:HSV)", L"Alpha表示 (1:数値 2:%)", nullptr};
+    format.title = UiText(UiStringId::Text0678);
+    format.labels = {UiText(UiStringId::Text0774), UiText(UiStringId::Text0857), UiText(UiStringId::Text0040), nullptr};
     format.values = {
         state.Workspace().tools.drawing_color.depth == INKPOD_COLOR_DEPTH_16 ? 16 : 8,
         1,
@@ -5042,10 +5065,10 @@ bool FormatCurvePoints(
 bool FormatOutputColorGuardSummary(
     const InkpodOutputColorGuardResult& result, std::wstring& text) noexcept {
     try {
-        text = L"出力色安全ガード: 選択 "
+        text = UiText(UiStringId::Text0519)
             + std::to_wstring(result.selected_pixel_count)
-            + L" / 検査 " + std::to_wstring(result.scanned_pixel_count)
-            + L" / 透明除外 " + std::to_wstring(result.transparent_pixel_count);
+            + UiText(UiStringId::Text0009) + std::to_wstring(result.scanned_pixel_count)
+            + UiText(UiStringId::Text0011) + std::to_wstring(result.transparent_pixel_count);
         return true;
     } catch (const std::bad_alloc&) {
         text.clear();
@@ -5127,7 +5150,7 @@ bool PrepareFilterEditor(
     if (job.kind == 0U) {
         return false;
     }
-    editor.title = L"フィルタ（選択範囲があればその内側だけに適用）";
+    editor.title = UiText(UiStringId::Text0300);
     editor.parameter_labels = {
         L"P0 / radius", L"P1 / amount", L"P2", L"P3", L"P4"};
     editor.channel_labels = {L"RGB", L"Red", L"Green", L"Blue"};
@@ -5239,9 +5262,9 @@ InkpodStatus StartColorChartGeneration(
         job.get(),
         QueryColorChartGenerationProgress,
         CancelColorChartGenerationProgress,
-        L"Color chart 生成",
-        L"セル色を抽出中...",
-        L"キャンセル中..."};
+        UiText(UiStringId::Text0053),
+        UiText(UiStringId::Text0236),
+        UiText(UiStringId::Cancelling)};
     if (!BindJobProgress(
             workspace.job_progress,
             workspace.job_progress_state,
@@ -5333,7 +5356,7 @@ bool ConfigureFilterEditor(
         if (!state.lifetime.smoke_test) {
             MessageBoxW(
                 state.Workspace().windows.window,
-                L"トーンカーブ点は input:output;...（各0～65535）で2点以上指定してください。",
+                UiText(UiStringId::Text0254),
                 L"inkpod",
                 MB_OK | MB_ICONWARNING);
         }
@@ -5587,7 +5610,7 @@ InkpodStatus RunInteractiveFilterEditor(
     preview.dialog_active = true;
     preview.smoke_cancel_next = false;
 
-    editor.option1_label = L"ライブプレビュー";
+    editor.option1_label = UiText(UiStringId::Text0382);
     editor.option1 = true;
     editor.option1_enabled = false;
     editor.preview_context = &state;
@@ -5631,13 +5654,13 @@ void CompleteInteractiveFilterWork(
         } else {
             ResetInteractiveFilterPreview(state.effects);
         }
-        ShowCoreError(state, state.Workspace().windows.window, L"画像処理プレビューの確定");
+        ShowCoreError(state, state.Workspace().windows.window, UiText(UiStringId::Text0810));
         return;
     }
     if (work == inkpod::app::FilterPreviewWork::Cancel) {
         if (status != INKPOD_STATUS_OK
             && status != INKPOD_STATUS_INVALID_STATE) {
-            ShowCoreError(state, state.Workspace().windows.window, L"画像処理プレビューの取消");
+            ShowCoreError(state, state.Workspace().windows.window, UiText(UiStringId::Text0809));
         }
         ResetInteractiveFilterPreview(state.effects);
         return;
@@ -5653,12 +5676,12 @@ void CompleteInteractiveFilterWork(
         SetEffectEditorPreviewStatus(
             preview.dialog,
             preview.pending.has_value()
-                ? L"より新しいパラメーターを待機中..."
-                : L"Canvasのプレビューを更新しました。");
+                ? UiText(UiStringId::Text0124)
+                : UiText(UiStringId::Text0049));
     } else if (status != INKPOD_STATUS_CANCELLED) {
         SetEffectEditorPreviewStatus(
             preview.dialog,
-            L"このパラメーターではプレビューを更新できませんでした。");
+            UiText(UiStringId::Text0105));
     }
 
     if (preview.cancel_requested) {
@@ -5675,7 +5698,7 @@ void CompleteInteractiveFilterWork(
         const InkpodStatus queued = QueueInteractiveFilterPreview(state);
         if (queued != INKPOD_STATUS_OK) {
             SetEffectEditorPreviewStatus(
-                preview.dialog, L"次のプレビュー要求を開始できませんでした。");
+                preview.dialog, UiText(UiStringId::Text0758));
         }
         return;
     }
@@ -5693,15 +5716,15 @@ void CompleteInteractiveFilterWork(
 bool ConfigureAdjustmentEditor(
     ApplicationHost& state, FilterJob& job, bool update) noexcept {
     EffectEditorState editor{};
-    editor.title = L"調整レイヤー（作成後も同じ項目から再編集可能）";
+    editor.title = UiText(UiStringId::Text0933);
     editor.parameter_labels = {
-        L"P0 / 明るさ / shadow",
+        UiText(UiStringId::Text0067),
         L"P1 / contrast / gamma",
         L"P2 / highlight",
         L"P3 / output shadow",
         L"P4 / output highlight"};
     editor.channel_labels = {
-        L"明るさ・コントラスト", L"トーンカーブ", L"レベル補正", nullptr, nullptr};
+        UiText(UiStringId::Text0725), UiText(UiStringId::Text0251), UiText(UiStringId::Text0407), nullptr, nullptr};
     editor.channel_values = {
         INKPOD_FILTER_BRIGHTNESS_CONTRAST,
         INKPOD_FILTER_TONE_CURVE,
@@ -5749,7 +5772,7 @@ bool ConfigureAdjustmentEditor(
         if (!state.lifetime.smoke_test) {
             MessageBoxW(
                 state.Workspace().windows.window,
-                L"トーンカーブ点は input:output;... 形式で2点以上指定してください。",
+                UiText(UiStringId::Text0253),
                 L"inkpod",
                 MB_OK | MB_ICONWARNING);
         }
@@ -5940,7 +5963,7 @@ bool ConfigureCanvasEffect(
     EffectEditorState editor{};
     editor.option1 = false;
     editor.option2 = false;
-    editor.channel_labels = {L"ペン", L"矩形", L"折れ線", L"投げ縄", nullptr};
+    editor.channel_labels = {UiText(UiStringId::Text0345), UiText(UiStringId::Text0821), UiText(UiStringId::ToolVectorPolyline), UiText(UiStringId::Text0664), nullptr};
     editor.channel_values = {
         INKPOD_SELECTION_TRACE,
         INKPOD_SELECTION_RECTANGLE,
@@ -5955,40 +5978,40 @@ bool ConfigureCanvasEffect(
         case IDM_EFFECT_GRADIENT:
         case IDM_EFFECT_ALPHA_GRADIENT:
             editor.title = command == IDM_EFFECT_GRADIENT
-                ? L"グラデーション（3～16 stops、Canvasをドラッグ）"
-                : L"アルファグラデーション（RGBは保持、Canvasをドラッグ）";
-            editor.parameter_labels = {L"未使用", L"未使用", L"未使用", L"未使用", L"未使用"};
-            editor.channel_labels = {L"合成", L"上書き", nullptr, nullptr, nullptr};
+                ? UiText(UiStringId::Text0177)
+                : UiText(UiStringId::Text0129);
+            editor.parameter_labels = {UiText(UiStringId::Text0746), UiText(UiStringId::Text0746), UiText(UiStringId::Text0746), UiText(UiStringId::Text0746), UiText(UiStringId::Text0746)};
+            editor.channel_labels = {UiText(UiStringId::Text0561), UiText(UiStringId::Text0428), nullptr, nullptr, nullptr};
             editor.channel_values = {
                 INKPOD_GRADIENT_COMPOSITE, INKPOD_GRADIENT_OVERWRITE, 0U, 0U, 0U};
             editor.channel_count = 2U;
             editor.channel = INKPOD_GRADIENT_OVERWRITE;
-            editor.mode_labels = {L"線形", L"放射", nullptr, nullptr};
+            editor.mode_labels = {UiText(UiStringId::Text0850), UiText(UiStringId::Text0693), nullptr, nullptr};
             editor.mode_values = {INKPOD_GRADIENT_LINEAR, INKPOD_GRADIENT_RADIAL, 0U, 0U};
             editor.mode_count = 2U;
             editor.mode = INKPOD_GRADIENT_LINEAR;
-            editor.option1_label = L"ディザー";
-            editor.option2_label = L"45度制約";
+            editor.option1_label = UiText(UiStringId::Text0249);
+            editor.option2_label = UiText(UiStringId::Text0033);
             interaction = command == IDM_EFFECT_GRADIENT ? kInteractionEffectGradient
                                                          : kInteractionEffectAlphaGradient;
             break;
         case IDM_EFFECT_AIRBRUSH:
-            editor.title = L"エアブラシ（Canvasをドラッグ）";
+            editor.title = UiText(UiStringId::Text0136);
             editor.parameter_labels = {
-                L"半径 milli", L"硬さ 0-1000", L"間隔 milli", L"不透明度", L"fade"};
+                UiText(UiStringId::Text0544), UiText(UiStringId::Text0822), UiText(UiStringId::Text1026), UiText(UiStringId::Opacity), L"fade"};
             editor.parameters = {8000, 500, 2000, 500, 0};
             editor.channel_count = 0U;
             editor.mode_count = 0U;
             editor.points.clear();
             editor.option1 = true;
             editor.option2 = true;
-            editor.option1_label = L"筆圧で不透明度";
-            editor.option2_label = L"筆圧でサイズ";
+            editor.option1_label = UiText(UiStringId::Text0836);
+            editor.option2_label = UiText(UiStringId::Text0835);
             interaction = kInteractionEffectAirbrush;
             break;
         case IDM_EFFECT_BOUNDARY_AIRBRUSH:
-            editor.title = L"境界色エアブラシ（現在の選択範囲へ適用）";
-            editor.parameter_labels = {L"幅 px", L"強さ 0-1000", L"未使用", L"未使用", L"未使用"};
+            editor.title = UiText(UiStringId::Text0605);
+            editor.parameter_labels = {UiText(UiStringId::Text0648), UiText(UiStringId::Text0649), UiText(UiStringId::Text0746), UiText(UiStringId::Text0746), UiText(UiStringId::Text0746)};
             editor.parameters = {3, 500, 0, 0, 0};
             editor.channel_count = 0U;
             editor.mode_count = 0U;
@@ -5997,40 +6020,40 @@ bool ConfigureCanvasEffect(
             editor.option2_enabled = false;
             break;
         case IDM_EFFECT_BLUR:
-            editor.title = L"ぼかしツール（領域をCanvasで指定）";
+            editor.title = UiText(UiStringId::Text0118);
             editor.parameter_labels = {
-                L"ぼかし半径", L"強さ 0-1000", L"ペン径 px", L"未使用", L"未使用"};
+                UiText(UiStringId::Text0119), UiText(UiStringId::Text0649), UiText(UiStringId::Text0346), UiText(UiStringId::Text0746), UiText(UiStringId::Text0746)};
             editor.parameters = {3, 750, 24, 0, 0};
             editor.mode_count = 0U;
             editor.points.clear();
             editor.option1 = true;
-            editor.option1_label = L"ペン範囲を筆圧で細くする";
+            editor.option1_label = UiText(UiStringId::Text0348);
             editor.option2_enabled = false;
             interaction = kInteractionEffectBlur;
             break;
         case IDM_EFFECT_STAMP:
-            editor.title = L"スタンプ（Alt+クリックでsource、次にCanvasをドラッグ）";
+            editor.title = UiText(UiStringId::Text0210);
             editor.parameter_labels = {
-                L"半径 milli", L"硬さ 0-1000", L"間隔 milli", L"不透明度", L"未使用"};
+                UiText(UiStringId::Text0544), UiText(UiStringId::Text0822), UiText(UiStringId::Text1026), UiText(UiStringId::Opacity), UiText(UiStringId::Text0746)};
             editor.parameters = {8000, 750, 2000, 1000, 0};
             editor.channel_count = 0U;
-            editor.mode_labels = {L"円形", L"矩形", nullptr, nullptr};
+            editor.mode_labels = {UiText(UiStringId::Text0508), UiText(UiStringId::Text0821), nullptr, nullptr};
             editor.mode_values = {INKPOD_STAMP_ROUND, INKPOD_STAMP_SQUARE, 0U, 0U};
             editor.mode_count = 2U;
             editor.mode = INKPOD_STAMP_ROUND;
             editor.points.clear();
             editor.option1 = true;
             editor.option2 = true;
-            editor.option1_label = L"筆圧で不透明度";
-            editor.option2_label = L"筆圧でサイズ";
+            editor.option1_label = UiText(UiStringId::Text0836);
+            editor.option2_label = UiText(UiStringId::Text0835);
             interaction = kInteractionEffectStamp;
             break;
         case IDM_EFFECT_DUST:
-            editor.title = L"ゴミ取り（全体または領域を指定、vector planeは拒否）";
+            editor.title = UiText(UiStringId::Text0188);
             editor.parameter_labels = {
-                L"最大pixel数", L"ペン径 px", L"未使用", L"未使用", L"未使用"};
+                UiText(UiStringId::Text0731), UiText(UiStringId::Text0346), UiText(UiStringId::Text0746), UiText(UiStringId::Text0746), UiText(UiStringId::Text0746)};
             editor.parameters = {8, 24, 0, 0, 0};
-            editor.channel_labels = {L"全体", L"ペン", L"矩形", L"折れ線", L"投げ縄"};
+            editor.channel_labels = {UiText(UiStringId::Text0501), UiText(UiStringId::Text0345), UiText(UiStringId::Text0821), UiText(UiStringId::ToolVectorPolyline), UiText(UiStringId::Text0664)};
             editor.channel_values = {
                 0U,
                 INKPOD_SELECTION_TRACE,
@@ -6039,7 +6062,7 @@ bool ConfigureCanvasEffect(
                 INKPOD_SELECTION_LASSO};
             editor.channel_count = 5U;
             editor.channel = 0U;
-            editor.mode_labels = {L"前景ゴミ除去", L"透明穴埋め", L"色外れ置換", nullptr};
+            editor.mode_labels = {UiText(UiStringId::Text0542), UiText(UiStringId::Text0954), UiText(UiStringId::Text0871), nullptr};
             editor.mode_values = {
                 INKPOD_DUST_REMOVE_FOREGROUND,
                 INKPOD_DUST_FILL_TRANSPARENT_HOLES,
@@ -6049,7 +6072,7 @@ bool ConfigureCanvasEffect(
             editor.mode = INKPOD_DUST_REMOVE_FOREGROUND;
             editor.points.clear();
             editor.option1 = true;
-            editor.option1_label = L"プレビューして確認";
+            editor.option1_label = UiText(UiStringId::Text0314);
             editor.option2_enabled = false;
             interaction = kInteractionEffectDust;
             break;
@@ -6073,8 +6096,8 @@ bool ConfigureCanvasEffect(
                 MessageBoxW(
                     state.Workspace().windows.window,
                     command == IDM_EFFECT_BOUNDARY_AIRBRUSH
-                        ? L"境界色は position:RRGGBBAA;... 形式で2～16個、0から1000まで昇順に指定してください。"
-                        : L"stopは position:RRGGBBAA;... 形式で3～16個、0から1000まで昇順に指定してください。",
+                        ? UiText(UiStringId::Text0602)
+                        : UiText(UiStringId::Text0101),
                     L"inkpod",
                     MB_OK | MB_ICONWARNING);
             }
@@ -6433,6 +6456,8 @@ CommandStateInputs BuildCommandStateInputs(
     inputs.application.sequence_wrap_endpoints =
         state.lifetime.sequence_endpoint_policy
         == inkpod::app::SequenceEndpointPolicy::Wrap;
+    inputs.application.ui_language_preference =
+        static_cast<std::uint32_t>(CurrentUiLanguagePreference());
 
     inputs.edit.can_undo =
         has_document && (info.flags & INKPOD_DOCUMENT_FLAG_CAN_UNDO) != 0U;
@@ -6722,18 +6747,18 @@ bool FormatTaskProgressStatus(
     std::array<wchar_t, 192U>& text) noexcept {
     InkpodTaskInfo task_info{};
     task_info.struct_size = sizeof(task_info);
-    const wchar_t* task_name = L"処理";
+    const wchar_t* task_name = UiText(UiStringId::Text0511);
     bool running{};
     if (state.effects.task != nullptr
         && inkpod_task_query(state.effects.task, &task_info) == INKPOD_STATUS_OK
         && task_info.state == INKPOD_TASK_RUNNING) {
         running = true;
-        task_name = L"画像処理";
+        task_name = UiText(UiStringId::Text0806);
     } else if (state.batch.task != nullptr
         && inkpod_batch_task_query(state.batch.task, &task_info) == INKPOD_STATUS_OK
         && task_info.state == INKPOD_TASK_RUNNING) {
         running = true;
-        task_name = L"バッチ";
+        task_name = UiText(UiStringId::Text0255);
     }
     if (!running) {
         return false;
@@ -6756,7 +6781,7 @@ std::wstring DocumentTabBaseName(
     const InkpodDocumentInfo& info,
     bool has_document) {
     if (!has_document) {
-        return L"文書なし";
+        return UiText(UiStringId::NoDocument);
     }
     if (&document == state.Documents().Current()
         && !state.Workspace().animation.active_sequence_name.empty()) {
@@ -6777,9 +6802,14 @@ std::wstring DocumentTabBaseName(
         }
     }
     if ((info.flags & INKPOD_DOCUMENT_FLAG_RECOVERED) != 0U) {
-        return L"復元セル";
+        return CurrentUiLanguage() == UiLanguage::English
+            ? L"Recovered Cell"
+            : UiText(UiStringId::Text0658);
     }
-    return L"無題セル "
+    const wchar_t* prefix = CurrentUiLanguage() == UiLanguage::English
+        ? L"Untitled Cell "
+        : UiText(UiStringId::Text0777);
+    return prefix
         + std::to_wstring(document.untitled_number == 0U
             ? 1U
             : document.untitled_number);
@@ -6832,7 +6862,9 @@ void UpdateDocumentTabLabels(
                 }
                 std::wstring label = base_name;
                 if (document_view_index != 0U) {
-                    label += L" [ビュー ";
+                    label += CurrentUiLanguage() == UiLanguage::English
+                        ? L" [View "
+                        : UiText(UiStringId::Text0012);
                     label += std::to_wstring(document_view_index + 1U);
                     label += L"]";
                 }
@@ -6884,7 +6916,7 @@ void UpdateMainWindowStatus(
         : nullptr;
     has_document = has_document && document != nullptr;
     const std::wstring active_name = document == nullptr
-        ? L"文書なし"
+        ? UiText(UiStringId::NoDocument)
         : DocumentTabBaseName(state, *document, info, true);
     _snwprintf_s(
         title.data(),
@@ -6903,31 +6935,31 @@ void UpdateMainWindowStatus(
     const bool has_transform = has_document && QuerySnapshotTransform(state, transform);
     const auto tool_name = [&state]() noexcept -> const wchar_t* {
         switch (state.Workspace().tools.active_tool) {
-            case kInteractionBoxZoom: return L"範囲拡大";
-            case kInteractionGuideMove: return L"ガイド移動";
-            case kInteractionSelection: return L"選択";
-            case kInteractionColorReplace: return L"色置換";
-            case kInteractionFill: return L"フィル";
-            case kInteractionEyedropper: return L"スポイト";
-            case kInteractionFloatingTransform: return L"変形";
-            case kInteractionLightTableMove: return L"ライトテーブル移動";
-            case kInteractionShootingFrame: return L"撮影フレーム";
-            case kInteractionVanishingPoint: return L"消失点";
-            case kInteractionVectorLine: return L"直線";
-            case kInteractionVectorCurve: return L"曲線";
-            case kInteractionVectorRectangle: return L"長方形";
-            case kInteractionVectorEllipse: return L"楕円";
-            case kInteractionVectorPolyline: return L"折れ線";
-            case kInteractionVectorEraser: return L"ベクター消しゴム";
-            case kInteractionEffectGradient: return L"グラデーション";
-            case kInteractionEffectAirbrush: return L"エアブラシ";
-            case kInteractionEffectBlur: return L"ぼかし";
-            case kInteractionEffectStamp: return L"スタンプ";
-            case kInteractionEffectDust: return L"ゴミ取り";
-            case kInteractionEffectAlphaGradient: return L"アルファ";
-            case INKPOD_TOOL_ERASER: return L"消しゴム";
-            case INKPOD_TOOL_BRUSH: return L"ブラシ";
-            default: return L"鉛筆";
+            case kInteractionBoxZoom: return UiText(UiStringId::ToolBoxZoom);
+            case kInteractionGuideMove: return UiText(UiStringId::ToolGuideMove);
+            case kInteractionSelection: return UiText(UiStringId::ToolSelection);
+            case kInteractionColorReplace: return UiText(UiStringId::ToolColorReplacement);
+            case kInteractionFill: return UiText(UiStringId::ToolFill);
+            case kInteractionEyedropper: return UiText(UiStringId::ToolEyedropper);
+            case kInteractionFloatingTransform: return UiText(UiStringId::ToolFloatingTransform);
+            case kInteractionLightTableMove: return UiText(UiStringId::ToolLightTableMove);
+            case kInteractionShootingFrame: return UiText(UiStringId::ToolShootingFrame);
+            case kInteractionVanishingPoint: return UiText(UiStringId::ToolVanishingPoint);
+            case kInteractionVectorLine: return UiText(UiStringId::ToolVectorLine);
+            case kInteractionVectorCurve: return UiText(UiStringId::ToolVectorCurve);
+            case kInteractionVectorRectangle: return UiText(UiStringId::ToolVectorRectangle);
+            case kInteractionVectorEllipse: return UiText(UiStringId::ToolVectorEllipse);
+            case kInteractionVectorPolyline: return UiText(UiStringId::ToolVectorPolyline);
+            case kInteractionVectorEraser: return UiText(UiStringId::ToolVectorEraser);
+            case kInteractionEffectGradient: return UiText(UiStringId::ToolGradient);
+            case kInteractionEffectAirbrush: return UiText(UiStringId::ToolAirbrush);
+            case kInteractionEffectBlur: return UiText(UiStringId::ToolBlur);
+            case kInteractionEffectStamp: return UiText(UiStringId::ToolStamp);
+            case kInteractionEffectDust: return UiText(UiStringId::ToolDustRemoval);
+            case kInteractionEffectAlphaGradient: return UiText(UiStringId::ToolAlphaGradient);
+            case INKPOD_TOOL_ERASER: return UiText(UiStringId::ToolEraser);
+            case INKPOD_TOOL_BRUSH: return UiText(UiStringId::ToolBrush);
+            default: return UiText(UiStringId::ToolPencil);
         }
     };
     std::array<wchar_t, 128U> tool_text{};
@@ -6937,27 +6969,44 @@ void UpdateMainWindowStatus(
         _TRUNCATE,
         L"%ls | %ls",
         tool_name(),
-        state.Workspace().tools.active_plane == INKPOD_PLANE_COLOR ? L"彩色" : L"主線");
+        UiText(state.Workspace().tools.active_plane == INKPOD_PLANE_COLOR
+            ? UiStringId::Coloring
+            : UiStringId::MainLine));
     std::array<wchar_t, 160U> zoom_text{};
     if (has_transform) {
         _snwprintf_s(
             zoom_text.data(),
             zoom_text.size(),
             _TRUNCATE,
-            L"ズーム: %.1f%%%ls%ls%ls",
-            transform.zoom * 100.0,
-            state.ActiveView().presentation.flip_horizontal ? L" | 左右" : L"",
-            state.ActiveView().presentation.flip_vertical ? L" | 上下" : L"",
-            state.ActiveView().presentation.grid_visible ? L" | グリッド" : L"");
+            L"%ls%.1f%%",
+            UiText(UiStringId::ZoomPrefix),
+            transform.zoom * 100.0);
+        const auto append_indicator = [&zoom_text](bool visible, UiStringId id) noexcept {
+            if (visible) {
+                wcsncat_s(zoom_text.data(), zoom_text.size(), L" | ", _TRUNCATE);
+                wcsncat_s(zoom_text.data(), zoom_text.size(), UiText(id), _TRUNCATE);
+            }
+        };
+        append_indicator(
+            state.ActiveView().presentation.flip_horizontal,
+            UiStringId::FlipHorizontal);
+        append_indicator(
+            state.ActiveView().presentation.flip_vertical,
+            UiStringId::FlipVertical);
+        append_indicator(
+            state.ActiveView().presentation.grid_visible,
+            UiStringId::Grid);
     } else {
-        wcscpy_s(zoom_text.data(), zoom_text.size(), L"ズーム: --");
+        _snwprintf_s(
+            zoom_text.data(), zoom_text.size(), _TRUNCATE,
+            L"%ls--", UiText(UiStringId::ZoomPrefix));
     }
     std::array<wchar_t, 160U> document_text{};
     _snwprintf_s(
         document_text.data(),
         document_text.size(),
         _TRUNCATE,
-        has_document ? L"%u×%u | %.1f dpi" : L"文書なし",
+        has_document ? L"%u×%u | %.1f dpi" : UiText(UiStringId::NoDocument),
         has_document ? info.width : 0U,
         has_document ? info.height : 0U,
         has_document ? static_cast<double>(info.dpi_x_milli) / 1000.0 : 0.0);
@@ -6981,8 +7030,10 @@ void UpdateMainWindowStatus(
             state_text.data(),
             state_text.size(),
             !has_document
-                ? L"文書なし"
-                : ((info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U ? L"変更あり" : L"保存済み"));
+                ? UiText(UiStringId::NoDocument)
+                : UiText((info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
+                      ? UiStringId::Modified
+                      : UiStringId::Saved));
     }
     if (!has_progress && has_document && state.engine != nullptr) {
         std::uint64_t edit_target_count{};
@@ -6999,7 +7050,8 @@ void UpdateMainWindowStatus(
                 target_text.data(),
                 target_text.size(),
                 _TRUNCATE,
-                L" | 編集対象 %zu",
+                L" | %ls%zu",
+                UiText(UiStringId::EditTargetsPrefix),
                 static_cast<std::size_t>(edit_target_count));
             wcsncat_s(
                 state_text.data(),
@@ -7139,7 +7191,7 @@ void UpdateMenuState(ApplicationHost& state) noexcept {
                     }
                 }
             } else {
-                label += L"(なし)";
+                label += UiText(UiStringId::NoneParenthesized);
             }
             ModifyMenuW(
                 menu,
@@ -7632,8 +7684,8 @@ InkpodStatus SetSelectedTreeNodeProperties(
         edit.flags ^= INKPOD_NODE_EDITABLE;
     } else {
         ViewOptionsDialogState dialog{};
-        dialog.title = plane ? L"プレーンの不透明度" : L"レイヤーの不透明度";
-        dialog.labels[0] = L"不透明度 (0-100%)";
+        dialog.title = plane ? UiText(UiStringId::Text0318) : UiText(UiStringId::Text0392);
+        dialog.labels[0] = UiText(UiStringId::Text0434);
         dialog.values[0] = state.lifetime.smoke_test
             ? 75
             : static_cast<std::int32_t>(node.opacity_milli / 10U);
@@ -7654,8 +7706,8 @@ InkpodStatus EditSelectedTreeNodeProperties(ApplicationHost& state, bool plane) 
         return INKPOD_STATUS_INVALID_STATE;
     }
     TextInputDialogState name_dialog{};
-    name_dialog.title = plane ? L"プレーンプロパティ" : L"レイヤープロパティ";
-    name_dialog.label = L"名前";
+    name_dialog.title = plane ? UiText(UiStringId::Text0323) : UiText(UiStringId::Text0404);
+    name_dialog.label = UiText(UiStringId::Text0567);
     try {
         name_dialog.value = LocalizedHistoryLabel(node.name);
     } catch (const std::bad_alloc&) {
@@ -7670,7 +7722,7 @@ InkpodStatus EditSelectedTreeNodeProperties(ApplicationHost& state, bool plane) 
     }
     ViewOptionsDialogState options{};
     options.title = name_dialog.title;
-    options.labels = {L"不透明度 (0-100%)", L"表示 (0/1)", L"編集可 (0/1)", L"種類 (参照)"};
+    options.labels = {UiText(UiStringId::Text0434), UiText(UiStringId::Text0880), UiText(UiStringId::Text0854), UiText(UiStringId::Text0829)};
     options.values = {
         static_cast<std::int32_t>(node.opacity_milli / 10U),
         (node.flags & INKPOD_NODE_VISIBLE) != 0U ? 1 : 0,
@@ -8009,29 +8061,29 @@ InkpodGeometryPrimitive GeometryPrimitiveForTool(std::uint32_t tool) noexcept {
 
 bool ShowGeometryToolOptions(ApplicationHost& state) noexcept {
     using Choice = inkpod::windows::ui::ViewOptionsDialogState::Choice;
-    static constexpr std::array<Choice, 3U> style_choices{{
-        {L"輪郭", 1}, {L"塗り", 2}, {L"輪郭 + 塗り", 3}}};
-    static constexpr std::array<Choice, 2U> off_on_choices{{
-        {L"オフ", 0}, {L"オン", 1}}};
-    static constexpr std::array<Choice, 4U> taper_choices{{
-        {L"なし", 0}, {L"入り", 1}, {L"抜き", 2}, {L"入り + 抜き", 3}}};
-    static constexpr std::array<Choice, 2U> cross_choices{{
-        {L"丸", 0}, {L"四角", 1}}};
-    static constexpr std::array<Choice, 4U> path_choices{{
-        {L"開いた直線", 0}, {L"閉じた直線", 1},
-        {L"開いたベジェ", 2}, {L"閉じたベジェ", 3}}};
+    static const std::array<Choice, 3U> style_choices{{
+        {UiText(UiStringId::Text0948), 1}, {UiText(UiStringId::Text0595), 2}, {UiText(UiStringId::Text0949), 3}}};
+    static const std::array<Choice, 2U> off_on_choices{{
+        {UiText(UiStringId::Text0137), 0}, {UiText(UiStringId::Text0138), 1}}};
+    static const std::array<Choice, 4U> taper_choices{{
+        {UiText(UiStringId::Text0113), 0}, {UiText(UiStringId::Text0494), 1}, {UiText(UiStringId::Text0667), 2}, {UiText(UiStringId::Text0495), 3}}};
+    static const std::array<Choice, 2U> cross_choices{{
+        {UiText(UiStringId::Text0445), 0}, {UiText(UiStringId::Text0575), 1}}};
+    static const std::array<Choice, 4U> path_choices{{
+        {UiText(UiStringId::Text1017), 0}, {UiText(UiStringId::Text1012), 1},
+        {UiText(UiStringId::Text1016), 2}, {UiText(UiStringId::Text1011), 3}}};
     static constexpr std::array<Choice, 6U> side_choices{{
         {L"3", 3}, {L"4", 4}, {L"5", 5}, {L"6", 6}, {L"8", 8}, {L"12", 12}}};
     static constexpr std::array<Choice, 4U> rotation_choices{{
         {L"0°", 0}, {L"45°", 45}, {L"90°", 90}, {L"135°", 135}}};
     auto& tools = state.Workspace().tools;
     inkpod::windows::ui::ViewOptionsDialogState dialog{};
-    dialog.title = L"図形オプション";
+    dialog.title = UiText(UiStringId::Text0582);
     dialog.centered_on_owner = true;
     const std::uint32_t tool = tools.active_tool;
     if (tool == kInteractionVectorLine || tool == kInteractionVectorCurve) {
         dialog.value_count = 3U;
-        dialog.labels = {L"45度制約", L"線端テーパー", L"断面", nullptr};
+        dialog.labels = {UiText(UiStringId::Text0033), UiText(UiStringId::Text0852), UiText(UiStringId::Text0700), nullptr};
         dialog.values = {
             (tools.vector_geometry_flags & INKPOD_GEOMETRY_CONSTRAIN_45_DEGREES) != 0U,
             static_cast<std::int32_t>(
@@ -8044,7 +8096,7 @@ bool ShowGeometryToolOptions(ApplicationHost& state) noexcept {
         dialog.choice_counts = {2U, 4U, 2U, 0U};
     } else if (tool == kInteractionVectorPolyline) {
         dialog.value_count = 4U;
-        dialog.labels = {L"描画", L"45度制約", L"経路", L"断面"};
+        dialog.labels = {UiText(UiStringId::Text0673), UiText(UiStringId::Text0033), UiText(UiStringId::Text0843), UiText(UiStringId::Text0700)};
         dialog.values = {
             static_cast<std::int32_t>(
                 ((tools.vector_geometry_flags & INKPOD_GEOMETRY_OUTLINE) != 0U ? 1U : 0U)
@@ -8059,7 +8111,7 @@ bool ShowGeometryToolOptions(ApplicationHost& state) noexcept {
         dialog.choice_counts = {3U, 2U, 4U, 2U};
     } else if (tool == kInteractionVectorPolygon) {
         dialog.value_count = 4U;
-        dialog.labels = {L"描画", L"辺数", L"回転", L"断面"};
+        dialog.labels = {UiText(UiStringId::Text0673), UiText(UiStringId::Text0950), UiText(UiStringId::Text0576), UiText(UiStringId::Text0700)};
         dialog.values = {
             static_cast<std::int32_t>(
                 ((tools.vector_geometry_flags & INKPOD_GEOMETRY_OUTLINE) != 0U ? 1U : 0U)
@@ -8074,7 +8126,7 @@ bool ShowGeometryToolOptions(ApplicationHost& state) noexcept {
         dialog.choice_counts = {3U, 6U, 4U, 2U};
     } else {
         dialog.value_count = 4U;
-        dialog.labels = {L"描画", L"縦横比", L"中心から", L"回転"};
+        dialog.labels = {UiText(UiStringId::Text0673), UiText(UiStringId::Text0860), UiText(UiStringId::Text0441), UiText(UiStringId::Text0576)};
         dialog.values = {
             static_cast<std::int32_t>(
                 ((tools.vector_geometry_flags & INKPOD_GEOMETRY_OUTLINE) != 0U ? 1U : 0U)
@@ -8235,7 +8287,7 @@ InkpodStatus FinishVectorCanvasGesture(ApplicationHost& state) noexcept {
         || (editor->flags & INKPOD_EDITOR_STATE_HAS_TARGET) == 0U
         || editor->active_plane_id == 0U) {
         if (state.engine != nullptr) {
-            state.engine->SetLocalFailure(kVectorStrokePlaneRequired);
+            state.engine->SetLocalFailure(UiText(UiStringId::Text0106));
         }
         CancelCoreVectorGeometryPreview(state);
         return INKPOD_STATUS_INVALID_STATE;
@@ -8248,7 +8300,7 @@ InkpodStatus FinishVectorCanvasGesture(ApplicationHost& state) noexcept {
                 state, state.Workspace().tools.vector_gesture_samples, points)) {
             if (state.engine != nullptr) {
                 state.engine->SetLocalFailure(
-                    L"ベクター描画の入力点を文書座標へ変換できませんでした。");
+                    UiText(UiStringId::Text0338));
             }
             CancelCoreVectorGeometryPreview(state);
             return INKPOD_STATUS_INVALID_STATE;
@@ -8268,7 +8320,7 @@ InkpodStatus FinishVectorCanvasGesture(ApplicationHost& state) noexcept {
     }
     if (!state.Workspace().tools.vector_geometry_preview_active || state.engine == nullptr) {
         if (state.engine != nullptr) {
-            state.engine->SetLocalFailure(L"図形プレビューが開始されていません。");
+            state.engine->SetLocalFailure(UiText(UiStringId::Text0584));
         }
         return INKPOD_STATUS_INVALID_ARGUMENT;
     }
@@ -8503,20 +8555,20 @@ InkpodStatus EditPaperFrames(ApplicationHost& state, UINT command) noexcept {
     dialog.value_count = 4U;
     InkpodFrameRect* frame{};
     if (command == IDM_CELL_FRAME_HUNDRED) {
-        dialog.title = L"100フレーム";
+        dialog.title = UiText(UiStringId::Text0026);
         frame = &input.hundred_frame;
     } else if (command == IDM_CELL_FRAME_REFERENCE) {
-        dialog.title = L"基準フレーム";
+        dialog.title = UiText(UiStringId::Text0591);
         frame = &input.reference_frame;
     } else if (command == IDM_CELL_FRAME_DRAWING) {
-        dialog.title = L"作画フレーム";
+        dialog.title = UiText(UiStringId::Text0463);
         frame = &input.drawing_frame;
     } else if (command == IDM_CELL_FRAME_SAFE) {
-        dialog.title = L"安全フレーム";
+        dialog.title = UiText(UiStringId::Text0618);
         frame = &input.safe_frame;
     }
     if (frame != nullptr) {
-        dialog.labels = {L"X", L"Y", L"幅", L"高さ"};
+        dialog.labels = {L"X", L"Y", UiText(UiStringId::Text0644), UiText(UiStringId::Text1040)};
         dialog.values = {frame->x, frame->y, frame->width, frame->height};
         if (state.lifetime.smoke_test && info.width > 8U && info.height > 8U
             && command != IDM_CELL_FRAME_HUNDRED) {
@@ -8530,8 +8582,8 @@ InkpodStatus EditPaperFrames(ApplicationHost& state, UINT command) noexcept {
                 static_cast<std::int32_t>(info.height) - inset * 2};
         }
     } else if (command == IDM_CELL_MARGINS) {
-        dialog.title = L"余白";
-        dialog.labels = {L"左", L"上", L"右", L"下"};
+        dialog.title = UiText(UiStringId::Text0456);
+        dialog.labels = {UiText(UiStringId::Text0638), UiText(UiStringId::Text0424), UiText(UiStringId::Text0555), UiText(UiStringId::Text0429)};
         dialog.values = {
             static_cast<std::int32_t>(input.margin_left),
             static_cast<std::int32_t>(input.margin_top),
@@ -9200,8 +9252,8 @@ bool PrepareWorkspaceCutReplacement(ApplicationHost& state) noexcept {
             ? IDNO
             : MessageBoxW(
                   state.Workspace().windows.window,
-                  L"現在のカットには未保存の変更があります。保存しますか？",
-                  L"カットを閉じる",
+                  UiText(UiStringId::Text0783),
+                  UiText(UiStringId::Text0151),
                   MB_YESNOCANCEL | MB_ICONQUESTION);
         if (choice == IDCANCEL
             || (choice == IDYES
@@ -9372,8 +9424,9 @@ InkpodStatus CreateNewCut(ApplicationHost& state, HWND owner) noexcept {
         INKPOD_STORAGE_RGBA8,
         state.lifetime.smoke_test ? 5U : 1U,
         0U};
-    cells.layer_choices = kLayerKindChoices.data();
-    cells.layer_choice_count = static_cast<std::uint32_t>(kLayerKindChoices.size());
+    cells.layer_choices = LayerKindChoices().data();
+    cells.layer_choice_count =
+        static_cast<std::uint32_t>(LayerKindChoices().size());
     cells.build_preview = BuildCellCreationDialogPreview;
     if (ShowCellCreationOptions(
             state.lifetime.instance, owner, state.lifetime.smoke_test, cells)
@@ -9400,7 +9453,7 @@ InkpodStatus CreateNewCut(ApplicationHost& state, HWND owner) noexcept {
         for (const auto& path : full_paths) {
             if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) {
                 state.engine->SetLocalFailure(
-                    L"カットのセル保存先が既に存在します。別のカット名を選んでください。");
+                    UiText(UiStringId::Text0142));
                 return INKPOD_STATUS_INVALID_STATE;
             }
         }
@@ -9425,7 +9478,7 @@ InkpodStatus CreateNewCut(ApplicationHost& state, HWND owner) noexcept {
                 created[index].generation,
                 document_infos[index])) {
             state.engine->SetLocalFailure(
-                L"個別セルの保存に失敗しました。成功済みセルは独立ファイルとして保持されています。");
+                UiText(UiStringId::Text0473));
             return status == INKPOD_STATUS_OK
                 ? INKPOD_STATUS_INVALID_STATE
                 : status;
@@ -9527,9 +9580,9 @@ InkpodStatus EditCutProperties(ApplicationHost& state, HWND owner) noexcept {
     }
     CellCreationDialogState cell_defaults{};
     cell_defaults.options = defaults;
-    cell_defaults.layer_choices = kLayerKindChoices.data();
+    cell_defaults.layer_choices = LayerKindChoices().data();
     cell_defaults.layer_choice_count =
-        static_cast<std::uint32_t>(kLayerKindChoices.size());
+        static_cast<std::uint32_t>(LayerKindChoices().size());
     cell_defaults.build_preview = BuildCellCreationDialogPreview;
     if (ShowCellCreationOptions(
             state.lifetime.instance,
@@ -9707,7 +9760,7 @@ InkpodStatus AddCutSequenceMember(
     if (_wcsicmp(
             descriptor_directory.c_str(), member_directory.c_str()) != 0) {
         state.engine->SetLocalFailure(
-            L"追加するセルはカット記述子と同じフォルダーに保存してください。");
+            UiText(UiStringId::Text0952));
         return INKPOD_STATUS_INVALID_ARGUMENT;
     }
     const std::wstring relative = member_slash == std::wstring::npos
@@ -9794,9 +9847,9 @@ InkpodStatus RenumberCutSequence(
         return CancelCutSequenceEdit(state);
     }
     ViewOptionsDialogState dialog{};
-    dialog.title = L"セル表示番号の付け直し";
-    dialog.labels[0] = L"先頭番号";
-    dialog.labels[1] = L"増分";
+    dialog.title = UiText(UiStringId::Text0237);
+    dialog.labels[0] = UiText(UiStringId::Text0493);
+    dialog.labels[1] = UiText(UiStringId::Text0606);
     dialog.values[0] = 1;
     dialog.values[1] = 1;
     if (ShowViewOptions(
@@ -9923,7 +9976,7 @@ bool ChoosePalettePath(HWND owner, bool save, std::wstring& path) noexcept {
     OPENFILENAMEW dialog{};
     dialog.lStructSize = sizeof(dialog);
     dialog.hwndOwner = owner;
-    dialog.lpstrFilter = L"Inkpod Palette (*.inkpalette)\0*.inkpalette\0すべてのファイル\0*.*\0\0";
+    dialog.lpstrFilter = UiText(UiStringId::Text0058);
     dialog.lpstrFile = buffer.data();
     dialog.nMaxFile = static_cast<DWORD>(buffer.size());
     dialog.lpstrDefExt = L"inkpalette";
@@ -9990,7 +10043,7 @@ bool ChooseChartPath(HWND owner, bool save, std::wstring& path) noexcept {
     OPENFILENAMEW dialog{};
     dialog.lStructSize = sizeof(dialog);
     dialog.hwndOwner = owner;
-    dialog.lpstrFilter = L"Inkpod Color Chart (*.inkchart)\0*.inkchart\0すべてのファイル\0*.*\0\0";
+    dialog.lpstrFilter = UiText(UiStringId::Text0057);
     dialog.lpstrFile = buffer.data();
     dialog.nMaxFile = static_cast<DWORD>(buffer.size());
     dialog.lpstrDefExt = L"inkchart";
@@ -10442,8 +10495,8 @@ InkpodStatus EditLightTableItemProperties(
         return INKPOD_STATUS_INVALID_STATE;
     }
     ViewOptionsDialogState display{};
-    display.title = L"ライトテーブル表示";
-    display.labels = {L"不透明度 (%)", L"表示 (1:色 2:単色 3:網点)", L"表示 (0/1)", L"回転 (度)"};
+    display.title = UiText(UiStringId::Text0377);
+    display.labels = {UiText(UiStringId::Text0433), UiText(UiStringId::Text0881), UiText(UiStringId::Text0880), UiText(UiStringId::Text0577)};
     display.values = {
         static_cast<std::int32_t>(info.opacity_milli / 10U),
         static_cast<std::int32_t>(info.display_mode),
@@ -10457,8 +10510,8 @@ InkpodStatus EditLightTableItemProperties(
         return INKPOD_STATUS_CANCELLED;
     }
     ViewOptionsDialogState transform{};
-    transform.title = L"ライトテーブル変形";
-    transform.labels = {L"移動X (1/1000px)", L"移動Y (1/1000px)", L"倍率X (%)", L"倍率Y (%)"};
+    transform.title = UiText(UiStringId::Text0373);
+    transform.labels = {UiText(UiStringId::Text0824), UiText(UiStringId::Text0825), UiText(UiStringId::Text0475), UiText(UiStringId::Text0476)};
     transform.values = {
         info.translate_x_milli,
         info.translate_y_milli,
@@ -10507,11 +10560,11 @@ InkpodStatus RegisterSequenceNeighborsInLightTable(
         return INKPOD_STATUS_INVALID_STATE;
     }
     ViewOptionsDialogState dialog{};
-    dialog.title = L"ライトテーブル一括登録";
+    dialog.title = UiText(UiStringId::Text0369);
     dialog.labels = {
-        L"隣接セル数 N (0-10000)",
-        L"距離1の不透明度 (0-100%)",
-        L"距離ごとの減衰 (0-100%)",
+        UiText(UiStringId::Text1031),
+        UiText(UiStringId::Text0946),
+        UiText(UiStringId::Text0947),
         nullptr};
     dialog.values = state.lifetime.smoke_test
         ? std::array<std::int32_t, 4U>{1, 80, 20, 0}
@@ -10602,8 +10655,7 @@ InkpodStatus RegisterSequenceNeighborsInLightTable(
             line.data(),
             line.size(),
             _TRUNCATE,
-            L"候補 %llu件 / 追加 %u件 / 既存を保持 %u件\n"
-            L"上から下へ、後のセルほど前面です。\n\n",
+            UiText(UiStringId::LightTableBulkPreviewHeaderFormat),
             static_cast<unsigned long long>(preview.entry_count),
             preview.add_count,
             preview.skip_count);
@@ -10617,8 +10669,7 @@ InkpodStatus RegisterSequenceNeighborsInLightTable(
                     line.data(),
                     line.size(),
                     _TRUNCATE,
-                    L"%zu. セル%u  距離%u  %u.%u%%  既存を保持 "
-                    L"(候補rev %llu / 既存rev %llu)\n",
+                    UiText(UiStringId::LightTableKeepExistingLineFormat),
                     index + 1U,
                     entry.cell_number,
                     entry.distance,
@@ -10631,7 +10682,7 @@ InkpodStatus RegisterSequenceNeighborsInLightTable(
                     line.data(),
                     line.size(),
                     _TRUNCATE,
-                    L"%zu. セル%u  距離%u  %u.%u%%  追加\n",
+                    UiText(UiStringId::Text0017),
                     index + 1U,
                     entry.cell_number,
                     entry.distance,
@@ -10645,11 +10696,11 @@ InkpodStatus RegisterSequenceNeighborsInLightTable(
                 line.data(),
                 line.size(),
                 _TRUNCATE,
-                L"...ほか %zu件（順序と件数はこのプレビューのまま適用）\n",
+                UiText(UiStringId::Text0021),
                 entries.size() - visible);
             message += line.data();
         }
-        message += L"\nこの内容を1回のUndo単位で登録しますか？";
+        message += UiText(UiStringId::Text0003);
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
     }
@@ -10661,7 +10712,7 @@ InkpodStatus RegisterSequenceNeighborsInLightTable(
                   ? state.Workspace().light_table_palette
                   : state.Workspace().windows.window,
               message.c_str(),
-              L"ライトテーブル一括登録プレビュー",
+              UiText(UiStringId::Text0370),
               MB_OKCANCEL | MB_ICONQUESTION);
     if (choice != IDOK) {
         return INKPOD_STATUS_CANCELLED;
@@ -11133,7 +11184,7 @@ InkpodStatus SaveToPath(ApplicationHost& state, const std::wstring& path) noexce
     const auto* conflict = state.Documents().FindByIdentity(requested_identity);
     if (conflict != nullptr && conflict != &state.Document()) {
         state.engine->SetLocalFailure(
-            L"保存先は別の開いている文書に使用されています。");
+            UiText(UiStringId::Text0469));
         return INKPOD_STATUS_INVALID_STATE;
     }
     DocumentShellController shell(
@@ -11150,7 +11201,7 @@ InkpodStatus SaveToPath(ApplicationHost& state, const std::wstring& path) noexce
             || !state.RecordRecentDocument(
                 std::move(recent_path), std::move(saved_identity))) {
             state.engine->SetLocalFailure(
-                L"保存後の file identity を登録できませんでした。");
+                UiText(UiStringId::Text0471));
             return INKPOD_STATUS_INVALID_STATE;
         }
         state.Document().untitled_number = 0U;
@@ -11192,15 +11243,13 @@ InkpodStatus WriteCompactedDocumentCopy(
         warning.data(),
         warning.size(),
         _TRUNCATE,
-        L"このコピーでは履歴イベント %llu 件（編集手順 %llu 件）を破棄し、\n"
-        L"現在の状態を新しい Genesis として保存します。\n\n"
-        L"元の文書、保存先、履歴は変更しません。続行しますか？",
+        UiText(UiStringId::HistoryCompactionWarningFormat),
         static_cast<unsigned long long>(plan.history_event_count),
         static_cast<unsigned long long>(plan.history_procedure_count));
     if (MessageBoxW(
             state.Workspace().windows.window,
             warning.data(),
-            L"履歴を破棄してコピー",
+            UiText(UiStringId::Text0635),
             MB_OKCANCEL | MB_ICONWARNING | MB_DEFBUTTON2)
         != IDOK) {
         return INKPOD_STATUS_CANCELLED;
@@ -11216,7 +11265,7 @@ InkpodStatus WriteCompactedDocumentCopy(
     }
     if (state.Documents().FindByIdentity(target_identity) != nullptr) {
         state.engine->SetLocalFailure(
-            L"履歴を破棄したコピーは、開いている文書とは別の保存先を選んでください。");
+            UiText(UiStringId::Text0633));
         return INKPOD_STATUS_INVALID_STATE;
     }
     std::vector<std::uint8_t> path_utf8;
@@ -11233,8 +11282,8 @@ InkpodStatus WriteCompactedDocumentCopy(
     if (status == INKPOD_STATUS_OK) {
         MessageBoxW(
             state.Workspace().windows.window,
-            L"履歴を破棄したコピーを保存しました。現在の文書は変更されていません。",
-            L"履歴を破棄してコピー",
+            UiText(UiStringId::Text0634),
+            UiText(UiStringId::Text0635),
             MB_OK | MB_ICONINFORMATION);
     }
     return status;
@@ -11318,10 +11367,10 @@ InkpodStatus SwitchSequenceTarget(
             || step_plan.result_class == INKPOD_SEQUENCE_STEP_STOPPED) {
             const wchar_t* message = step_plan.result_class
                     == INKPOD_SEQUENCE_STEP_EMPTY
-                ? L"連番セルがありません"
+                ? UiText(UiStringId::Text0961)
                 : step_plan.result_class == INKPOD_SEQUENCE_STEP_SINGLE_CELL
-                ? L"連番セルは1件です"
-                : L"連番セルの端点です";
+                ? UiText(UiStringId::Text0964)
+                : UiText(UiStringId::Text0962);
             PresentStatusBarPart(
                 state.Workspace().windows.status_bar, 5U, message);
             RefreshSequencePane(state);
@@ -11438,8 +11487,8 @@ InkpodStatus SwitchSequenceTarget(
                 state.Workspace().windows.status_bar,
                 5U,
                 source_dirty
-                    ? L"セルを自動保存しています..."
-                    : L"セルを復元しています...");
+                    ? UiText(UiStringId::Text0227)
+                    : UiText(UiStringId::Text0226));
             UpdateMenuState(state);
             const bool queued = state.engine->Enqueue(
                 context,
@@ -11529,8 +11578,8 @@ InkpodStatus SwitchSequenceTarget(
                 state.Workspace().sequence_palette != nullptr
                     ? state.Workspace().sequence_palette
                     : state.Workspace().windows.window,
-                L"現在のセルを保存してからシーケンスを切り替えますか？",
-                L"シーケンス",
+                UiText(UiStringId::Text0784),
+                UiText(UiStringId::Text0204),
                 MB_OKCANCEL | MB_ICONQUESTION);
         }
         if (choice != IDOK) {
@@ -11643,7 +11692,7 @@ void ActivateSequencePaneCell(void* context, std::uint32_t index) noexcept {
     if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED
         && !state->lifetime.smoke_test) {
         ShowCoreError(
-            *state, state->Workspace().sequence_palette, L"シーケンスの切り替え");
+            *state, state->Workspace().sequence_palette, UiText(UiStringId::Text0206));
     }
 }
 
@@ -11659,7 +11708,7 @@ void ReorderCutSequenceCell(
         ShowCoreError(
             *state,
             state->Workspace().sequence_palette,
-            L"カットのセル順変更");
+            UiText(UiStringId::Text0145));
     }
 }
 
@@ -11720,7 +11769,7 @@ void SelectLightTablePaneEntry(
                 ShowCoreError(
                     *state,
                     state->Workspace().light_table_palette,
-                    L"ライトテーブルセットの選択");
+                    UiText(UiStringId::Text0365));
             }
             RefreshLightTablePane(*state);
             return;
@@ -11894,7 +11943,7 @@ InkpodStatus OpenRecoveryCandidateImpl(
         && state.Documents().FindByIdentity(*identity) != nullptr) {
         if (state.engine != nullptr) {
             state.engine->SetLocalFailure(
-                L"Recovery の元文書は既に開いています。候補は破棄せず保持しました。");
+                UiText(UiStringId::Text0071));
         }
         return INKPOD_STATUS_INVALID_STATE;
     }
@@ -11946,9 +11995,7 @@ InkpodStatus OpenDocumentFromPathImpl(
 
     const int choice = MessageBoxW(
         state.Workspace().windows.window,
-        L"通常保存より新しいRecoveryがあります。\n\n"
-        L"はい: Recoveryを開く\nいいえ: Recoveryを破棄\n"
-        L"キャンセル: 後で判断して通常保存を開く",
+        UiText(UiStringId::NewerRecoveryPrompt),
         L"inkpod Recovery",
         MB_YESNOCANCEL | MB_ICONQUESTION);
     if (choice == IDYES) {
@@ -12138,7 +12185,7 @@ InkpodStatus ApplyFillAtDeviceRange(
             message.data(),
             message.size(),
             _TRUNCATE,
-            L"塗りあふれを中断しました。候補座標: (%u, %u)",
+            UiText(UiStringId::Text0597),
             fill_result.leak_x,
             fill_result.leak_y);
         MessageBoxW(state.Workspace().windows.window, message.data(), L"inkpod", MB_OK | MB_ICONWARNING);
@@ -12510,7 +12557,7 @@ bool ConfirmDiscard(ApplicationHost& state) noexcept {
     } else {
         choice = MessageBoxW(
             state.Workspace().windows.window,
-            L"変更を保存しますか？",
+            UiText(UiStringId::Text0615),
             L"inkpod",
             MB_YESNOCANCEL | MB_ICONQUESTION);
     }
@@ -12521,12 +12568,12 @@ bool ConfirmDiscard(ApplicationHost& state) noexcept {
         const InkpodStatus status = SaveDocument(state, false);
         if (status != INKPOD_STATUS_OK) {
             if (status != INKPOD_STATUS_CANCELLED) {
-                ShowCoreError(state, state.Workspace().windows.window, L"保存");
+                ShowCoreError(state, state.Workspace().windows.window, UiText(UiStringId::Save));
             }
             return false;
         }
     } else if (!DiscardCurrentRecovery(state)) {
-        ShowCoreError(state, state.Workspace().windows.window, L"Recoveryの破棄");
+        ShowCoreError(state, state.Workspace().windows.window, UiText(UiStringId::Text0072));
         return false;
     }
     return true;
@@ -12918,8 +12965,8 @@ bool EditBatchColorRows(
     ApplicationHost& state,
     BatchOperationUi& operation) noexcept {
     ViewOptionsDialogState count{};
-    count.title = L"色置換行";
-    count.labels = {L"行数 (1-4096)", nullptr, nullptr, nullptr};
+    count.title = UiText(UiStringId::Text0878);
+    count.labels = {UiText(UiStringId::Text0879), nullptr, nullptr, nullptr};
     count.values = {
         static_cast<std::int32_t>(operation.color_pairs.size()), 0, 0, 0};
     count.value_count = 1U;
@@ -12946,8 +12993,8 @@ bool EditBatchColorRows(
     }
     for (auto& pair : operation.color_pairs) {
         ViewOptionsDialogState enabled{};
-        enabled.title = L"色置換行";
-        enabled.labels = {L"有効 (0/1)", nullptr, nullptr, nullptr};
+        enabled.title = UiText(UiStringId::Text0878);
+        enabled.labels = {UiText(UiStringId::Text0741), nullptr, nullptr, nullptr};
         enabled.values = {static_cast<std::int32_t>(pair.enabled), 0, 0, 0};
         enabled.value_count = 1U;
         if (ShowViewOptions(
@@ -12956,8 +13003,8 @@ bool EditBatchColorRows(
                 state.lifetime.smoke_test,
                 enabled) != IDOK
             || enabled.values[0] < 0 || enabled.values[0] > 1
-            || !EditBatchColorValue(state, L"旧色", pair.old_color)
-            || !EditBatchColorValue(state, L"新色", pair.new_color)) {
+            || !EditBatchColorValue(state, UiText(UiStringId::Text0723), pair.old_color)
+            || !EditBatchColorValue(state, UiText(UiStringId::Text0705), pair.new_color)) {
             return false;
         }
         pair.struct_size = sizeof(pair);
@@ -12971,8 +13018,8 @@ bool EditBatchSeedRows(
     ApplicationHost& state,
     BatchOperationUi& operation) noexcept {
     ViewOptionsDialogState count{};
-    count.title = L"連続フィル seed 行";
-    count.labels = {L"行数 (1-4096)", nullptr, nullptr, nullptr};
+    count.title = UiText(UiStringId::Text0971);
+    count.labels = {UiText(UiStringId::Text0879), nullptr, nullptr, nullptr};
     count.values = {static_cast<std::int32_t>(operation.seeds.size()), 0, 0, 0};
     count.value_count = 1U;
     if (ShowViewOptions(
@@ -12998,8 +13045,8 @@ bool EditBatchSeedRows(
     }
     for (auto& seed : operation.seeds) {
         ViewOptionsDialogState geometry{};
-        geometry.title = L"連続フィル seed 行";
-        geometry.labels = {L"有効 (0/1)", L"X", L"Y", L"tolerance"};
+        geometry.title = UiText(UiStringId::Text0971);
+        geometry.labels = {UiText(UiStringId::Text0741), L"X", L"Y", L"tolerance"};
         geometry.values = {
             (seed.flags & INKPOD_BATCH_SEED_ENABLED) != 0U ? 1 : 0,
             static_cast<std::int32_t>(seed.x),
@@ -13007,8 +13054,8 @@ bool EditBatchSeedRows(
             static_cast<std::int32_t>(seed.tolerance)};
         geometry.value_count = 4U;
         ViewOptionsDialogState details{};
-        details.title = L"連続フィル seed 行";
-        details.labels = {L"gap close", L"期待色を検査 (0/1)", nullptr, nullptr};
+        details.title = UiText(UiStringId::Text0971);
+        details.labels = {L"gap close", UiText(UiStringId::Text0745), nullptr, nullptr};
         details.values = {
             static_cast<std::int32_t>(seed.gap_close),
             (seed.flags & INKPOD_BATCH_SEED_HAS_EXPECTED_COLOR) != 0U ? 1 : 0,
@@ -13030,9 +13077,9 @@ bool EditBatchSeedRows(
             || geometry.values[3] < 0 || geometry.values[3] > UINT16_MAX
             || details.values[0] < 0 || details.values[0] > UINT8_MAX
             || details.values[1] < 0 || details.values[1] > 1
-            || !EditBatchColorValue(state, L"塗り色", seed.fill_color)
+            || !EditBatchColorValue(state, UiText(UiStringId::Text0600), seed.fill_color)
             || (details.values[1] != 0
-                && !EditBatchColorValue(state, L"期待する元色", seed.expected_color))) {
+                && !EditBatchColorValue(state, UiText(UiStringId::Text0744), seed.expected_color))) {
             return false;
         }
         seed.struct_size = sizeof(seed);
@@ -13086,7 +13133,7 @@ const wchar_t* BatchOperationLabel(UINT command) noexcept {
             return entry.label;
         }
     }
-    return L"バッチ項目";
+    return UiText(UiStringId::Text0269);
 }
 
 bool AddBatchOperation(ApplicationHost& state, UINT command) noexcept {
@@ -13255,9 +13302,9 @@ bool EditSelectedBatchOperation(
         return false;
     }
     ViewOptionsDialogState metadata{};
-    metadata.title = L"バッチ項目の状態";
+    metadata.title = UiText(UiStringId::Text0270);
     metadata.labels = {
-        L"有効 (0/1)", L"実行ごとに設定 (0/1)", nullptr, nullptr};
+        UiText(UiStringId::Text0741), UiText(UiStringId::Text0624), nullptr, nullptr};
     metadata.values = {
         (operation.flags & INKPOD_BATCH_OPERATION_ENABLED) != 0U ? 1 : 0,
         (operation.flags & INKPOD_BATCH_OPERATION_CONFIGURE_EACH_RUN) != 0U ? 1 : 0,
@@ -13275,11 +13322,11 @@ bool EditSelectedBatchOperation(
                 : 0U);
     if (operation.missing_policy != 0U) {
         ViewOptionsDialogState target{};
-        target.title = L"バッチ対象セレクター";
+        target.title = UiText(UiStringId::Text0268);
         target.labels = {
-            L"layer kind (0=IDのみ)",
-            L"plane kind (0=layer対象)",
-            L"欠落時 (1:skip 2:error)",
+            UiText(UiStringId::Text0097),
+            UiText(UiStringId::Text0100),
+            UiText(UiStringId::Text0751),
             nullptr};
         target.values = {
             static_cast<std::int32_t>(operation.layer_kind),
@@ -13317,7 +13364,7 @@ bool EditSelectedBatchOperation(
         }
     } else {
         ViewOptionsDialogState dialog{};
-        dialog.title = L"バッチ項目の編集";
+        dialog.title = UiText(UiStringId::Text0271);
         dialog.labels = {L"P0", L"P1", L"P2", L"P3"};
         dialog.values = {
             static_cast<std::int32_t>(operation.parameters[0]),
@@ -13327,28 +13374,28 @@ bool EditSelectedBatchOperation(
         dialog.value_count = 2U;
         if (operation.kind == INKPOD_BATCH_OPERATION_SEPARATION) {
             dialog.labels = {
-                L"反転 (0/1)",
-                L"出力先 (1:元 2:選択 3:主線 4:彩色 5:別file)",
+                UiText(UiStringId::Text0554),
+                UiText(UiStringId::Text0516),
                 nullptr,
                 nullptr};
             dialog.value_count = 2U;
         } else if (operation.kind == INKPOD_BATCH_OPERATION_VISIBILITY) {
-            dialog.labels = {L"表示 (0/1)", nullptr, nullptr, nullptr};
+            dialog.labels = {UiText(UiStringId::Text0880), nullptr, nullptr, nullptr};
             dialog.value_count = 1U;
         } else if (operation.kind == INKPOD_BATCH_OPERATION_LINE_WIDTH) {
             dialog.labels = {L"mode (1-4)", L"value x1000", nullptr, nullptr};
         } else if (operation.kind == INKPOD_BATCH_OPERATION_BOUNDARY_AIRBRUSH) {
-            dialog.labels = {L"幅", L"強さ x1000", nullptr, nullptr};
+            dialog.labels = {UiText(UiStringId::Text0644), UiText(UiStringId::Text0650), nullptr, nullptr};
         } else if (operation.kind == INKPOD_BATCH_OPERATION_DUST_REMOVAL) {
-            dialog.labels = {L"mode (1-3)", L"最大pixel", nullptr, nullptr};
+            dialog.labels = {L"mode (1-3)", UiText(UiStringId::Text0730), nullptr, nullptr};
         } else if (operation.kind == INKPOD_BATCH_OPERATION_MIRROR) {
-            dialog.labels = {L"方向 (1:左右 2:上下)", nullptr, nullptr, nullptr};
+            dialog.labels = {UiText(UiStringId::Text0718), nullptr, nullptr, nullptr};
             dialog.value_count = 1U;
         } else if (operation.kind == INKPOD_BATCH_OPERATION_ROTATE_90) {
-            dialog.labels = {L"方向 (1:左 2:右)", nullptr, nullptr, nullptr};
+            dialog.labels = {UiText(UiStringId::Text0717), nullptr, nullptr, nullptr};
             dialog.value_count = 1U;
         } else if (operation.kind == INKPOD_BATCH_OPERATION_RESIZE) {
-            dialog.labels = {L"幅", L"高さ", L"X DPI x1000", L"Y DPI x1000"};
+            dialog.labels = {UiText(UiStringId::Text0644), UiText(UiStringId::Text1040), L"X DPI x1000", L"Y DPI x1000"};
             dialog.value_count = 4U;
         } else if (operation.kind == INKPOD_BATCH_OPERATION_CONVERT_PLANE) {
             dialog.labels = {L"plane kind", L"pixel format", nullptr, nullptr};
@@ -13448,9 +13495,9 @@ bool ExtractBatchColorPairs(
         return false;
     }
     ViewOptionsDialogState selector{};
-    selector.title = L"二セル色比較";
+    selector.title = UiText(UiStringId::Text0450);
     selector.labels = {
-        L"旧セル番号 (1以上)", L"新セル番号 (1以上)", nullptr, nullptr};
+        UiText(UiStringId::Text0722), UiText(UiStringId::Text0704), nullptr, nullptr};
     selector.values = {1, 2, 0, 0};
     selector.value_count = 2U;
     if (ShowViewOptions(
@@ -13541,9 +13588,7 @@ bool ExtractBatchColorPairs(
                 swprintf_s(
                     message.data(),
                     message.size(),
-                    L"旧色 (%u,%u,%u,%u) を新色 (%u,%u,%u,%u) に対応させますか？\n"
-                    L"pixel: %llu / bounds: (%d,%d,%d,%d)\n"
-                    L"「いいえ」で次候補、全候補を『いいえ』で旧色を除外します。",
+                    UiText(UiStringId::BatchPairCandidatePromptFormat),
                     candidate.old_color.red,
                     candidate.old_color.green,
                     candidate.old_color.blue,
@@ -13560,7 +13605,7 @@ bool ExtractBatchColorPairs(
                 const int decision = MessageBoxW(
                     state.Workspace().windows.window,
                     message.data(),
-                    L"one-to-many 色対応の解決",
+                    UiText(UiStringId::Text0099),
                     MB_YESNOCANCEL | MB_ICONQUESTION);
                 if (decision == IDCANCEL) {
                     return false;
@@ -13592,12 +13637,12 @@ bool ExtractBatchColorPairs(
         std::move(pairs);
     ResetBatchDerivedState(state.batch);
     try {
-        state.batch.last_result = L"二セル比較: 候補 "
+        state.batch.last_result = UiText(UiStringId::Text0447)
             + std::to_wstring(info.candidate_count) + L" / ambiguity "
             + std::to_wstring(info.ambiguity_count) + L" / unchanged "
             + std::to_wstring(info.unchanged_pixel_count);
     } catch (const std::bad_alloc&) {
-        state.batch.last_result = L"二セル比較を反映しました";
+        state.batch.last_result = UiText(UiStringId::Text0449);
     }
     RefreshBatchPalette(state.batch, state.Workspace().batch_palette);
     return true;
@@ -13674,7 +13719,7 @@ InkpodStatus StartBatch(
         return INKPOD_STATUS_INVALID_STATE;
     }
     state.batch.job_text = L"Job " + std::to_wstring(job->Value())
-        + L" — 開始中";
+        + UiText(UiStringId::Text0013);
     UpdateBatchTarget(state);
     RefreshBatchPalette(state.batch, state.Workspace().batch_palette);
     BatchController controller(
@@ -13702,8 +13747,8 @@ InkpodStatus StartBatch(
         state.batch.completion_context = {};
         state.batch.return_context = {};
         state.batch.job_text = status == INKPOD_STATUS_OK
-            ? L"完了"
-            : (status == INKPOD_STATUS_CANCELLED ? L"キャンセル" : L"開始失敗");
+            ? UiText(UiStringId::Text0621)
+            : (status == INKPOD_STATUS_CANCELLED ? UiText(UiStringId::Text0171) : UiText(UiStringId::Text1022));
         UpdateBatchTarget(state);
         RefreshBatchPalette(state.batch, state.Workspace().batch_palette);
     }
@@ -13716,12 +13761,10 @@ bool ChooseBatchSettingsPath(
     if (!selected_path.empty()) {
         wcsncpy_s(path.data(), path.size(), selected_path.c_str(), _TRUNCATE);
     }
-    constexpr wchar_t filter[] =
-        L"inkpod バッチセット (*.inkbatch)\0*.inkbatch\0すべてのファイル (*.*)\0*.*\0\0";
     OPENFILENAMEW dialog{};
     dialog.lStructSize = sizeof(dialog);
     dialog.hwndOwner = owner;
-    dialog.lpstrFilter = filter;
+    dialog.lpstrFilter = UiText(UiStringId::Text0093);
     dialog.lpstrFile = path.data();
     dialog.nMaxFile = static_cast<DWORD>(path.size());
     dialog.lpstrDefExt = L"inkbatch";
@@ -14190,6 +14233,13 @@ inkpod::app::WorkspaceWindow* CreateWorkspaceWindow(
         return nullptr;
     }
     const WorkspaceWindowId created = workspace->id;
+    HMENU menu = LoadLocalizedMenuW(
+        state.lifetime.instance, MAKEINTRESOURCEW(IDR_MAIN_MENU));
+    if (menu == nullptr) {
+        (void)state.RemoveWorkspaceWindow(created);
+        (void)state.ActivateWorkspaceWindow(previous, false);
+        return nullptr;
+    }
     const HWND window = CreateWindowExW(
         0,
         state.lifetime.window_class_name.c_str(),
@@ -14200,9 +14250,12 @@ inkpod::app::WorkspaceWindow* CreateWorkspaceWindow(
         1024,
         720,
         nullptr,
-        nullptr,
+        menu,
         state.lifetime.instance,
         workspace);
+    if (window == nullptr) {
+        DestroyMenu(menu);
+    }
     if (window == nullptr
         || !RegisterWorkspaceSnapshotSinks(state, *workspace)) {
         if (workspace->subpalette_canvas_id) {
@@ -14417,10 +14470,10 @@ std::optional<LRESULT> RouteBatchCommand(
                 return 0;
             }
             ViewOptionsDialogState dialog{};
-            dialog.title = L"バッチ入力範囲";
+            dialog.title = UiText(UiStringId::Text0262);
             dialog.labels = {
-                L"開始セル番号 (0=先頭)",
-                L"終了セル番号 (0=末尾)",
+                UiText(UiStringId::Text1020),
+                UiText(UiStringId::Text0842),
                 nullptr,
                 nullptr};
             dialog.values = {
@@ -14559,12 +14612,12 @@ std::optional<LRESULT> RouteBatchCommand(
                 return 0;
             }
             ViewOptionsDialogState dialog{};
-            dialog.title = L"バッチ出力設定";
+            dialog.title = UiText(UiStringId::Text0266);
             dialog.labels = {
                 L"cell folder (0/1)",
-                L"開始番号",
-                L"降順 (0/1)",
-                L"file間 wait (ms)"};
+                UiText(UiStringId::Text1023),
+                UiText(UiStringId::Text1027),
+                UiText(UiStringId::Text0090)};
             dialog.values = {
                 state->batch.cell_folder ? 1 : 0,
                 static_cast<std::int32_t>(state->batch.start_number),
@@ -14580,12 +14633,12 @@ std::optional<LRESULT> RouteBatchCommand(
                 return 0;
             }
             TextInputDialogState folder{};
-            folder.title = L"バッチ出力フォルダー";
-            folder.label = L"空欄は入力と同じ場所";
+            folder.title = UiText(UiStringId::Text0265);
+            folder.label = UiText(UiStringId::Text0830);
             folder.value = state->batch.output_folder;
             TextInputDialogState basename{};
-            basename.title = L"バッチ出力basename";
-            basename.label = L"空欄は入力名を使用";
+            basename.title = UiText(UiStringId::Text0264);
+            basename.label = UiText(UiStringId::Text0831);
             basename.value = state->batch.basename;
             if (ShowTextInput(
                     state->lifetime.instance, window, state->lifetime.smoke_test, folder) != IDOK
@@ -14597,8 +14650,8 @@ std::optional<LRESULT> RouteBatchCommand(
             if (!state->lifetime.smoke_test) {
                 const int preview_choice = MessageBoxW(
                     window,
-                    L"保存前に入力・出力と警告のプレビュー確認を必須にしますか？",
-                    L"バッチ出力設定",
+                    UiText(UiStringId::Text0470),
+                    UiText(UiStringId::Text0266),
                     MB_YESNOCANCEL | MB_ICONQUESTION);
                 if (preview_choice == IDCANCEL) {
                     return 0;
@@ -14642,7 +14695,7 @@ std::optional<LRESULT> RouteBatchCommand(
             const InkpodStatus status = PreviewBatch(
                 *state, context, INKPOD_BATCH_SCOPE_ALL);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"バッチプレビュー");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0259));
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
@@ -14658,7 +14711,7 @@ std::optional<LRESULT> RouteBatchCommand(
                     : INKPOD_BATCH_SCOPE_ALL,
                 command == IDM_BATCH_DRY_RUN);
             if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
-                ShowCoreError(*state, window, L"バッチ実行");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0267));
             }
             UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -14698,7 +14751,7 @@ std::optional<LRESULT> RouteBatchCommand(
                 status = controller.LoadGraph(utf8.data(), utf8.size());
             }
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, save ? L"バッチセット保存" : L"バッチセット読込");
+                ShowCoreError(*state, window, save ? UiText(UiStringId::Text0257) : UiText(UiStringId::Text0258));
             }
             RefreshBatchPalette(state->batch, state->Workspace().batch_palette);
             UpdateMenuState(*state);
@@ -14753,7 +14806,7 @@ std::optional<LRESULT> RouteDocumentCommand(
                 if (!state->lifetime.smoke_test) {
                     MessageBoxW(
                         window,
-                        L"最近使ったファイルが見つからないため、履歴から削除しました。",
+                        UiText(UiStringId::Text0738),
                         L"inkpod",
                         MB_OK | MB_ICONINFORMATION);
                 }
@@ -14761,7 +14814,7 @@ std::optional<LRESULT> RouteDocumentCommand(
             }
             const InkpodStatus status = OpenDocumentFromPath(*state, path);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"最近使ったファイルを開く");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0739));
             }
             UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -14775,7 +14828,7 @@ std::optional<LRESULT> RouteDocumentCommand(
                           state->Document().generation,
                           defaults);
                 if (defaults_status != INKPOD_STATUS_OK) {
-                    ShowCoreError(*state, window, L"新規セル既定値");
+                    ShowCoreError(*state, window, UiText(UiStringId::Text0712));
                     return 0;
                 }
                 CellCreationDialogState dialog{};
@@ -14795,9 +14848,9 @@ std::optional<LRESULT> RouteDocumentCommand(
                     INKPOD_STORAGE_RGBA8,
                     state->lifetime.smoke_test ? 3U : 1U,
                     0U};
-                dialog.layer_choices = kLayerKindChoices.data();
+                dialog.layer_choices = LayerKindChoices().data();
                 dialog.layer_choice_count =
-                    static_cast<std::uint32_t>(kLayerKindChoices.size());
+                    static_cast<std::uint32_t>(LayerKindChoices().size());
                 dialog.build_preview = BuildCellCreationDialogPreview;
                 if (ShowCellCreationOptions(
                         state->lifetime.instance,
@@ -14808,7 +14861,7 @@ std::optional<LRESULT> RouteDocumentCommand(
                 }
                 const InkpodStatus status = CreateCellsFromOptions(*state, dialog.options);
                 if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
-                    ShowCoreError(*state, window, L"新規セルの作成");
+                    ShowCoreError(*state, window, UiText(UiStringId::Text0711));
                 }
                 UpdateMenuState(*state);
             }
@@ -14820,11 +14873,11 @@ std::optional<LRESULT> RouteDocumentCommand(
             const InkpodStatus status = ResizeDocumentFromDialog(
                 *state,
                 command == IDM_CELL_PAPER_SETTINGS
-                    ? L"用紙設定"
-                    : (command == IDM_CELL_IMAGE_SIZE ? L"画像サイズ" : L"画像解像度"),
+                    ? UiText(UiStringId::Text0794)
+                    : (command == IDM_CELL_IMAGE_SIZE ? UiText(UiStringId::Text0801) : UiText(UiStringId::Text0812)),
                 command == IDM_CELL_RESOLUTION);
             if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
-                ShowCoreError(*state, window, L"用紙・画像サイズ変更");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0793));
             }
             UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -14832,7 +14885,7 @@ std::optional<LRESULT> RouteDocumentCommand(
         case IDM_CELL_FIT_CAPTURE_FRAME: {
             const InkpodStatus status = FitPaperToCaptureFrame(*state);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"撮影フレームに用紙を合わせる");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0684));
             }
             UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -14861,7 +14914,7 @@ std::optional<LRESULT> RouteDocumentCommand(
                       true,
                       true);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"画像全体の変形");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0805));
             }
             UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -14873,7 +14926,7 @@ std::optional<LRESULT> RouteDocumentCommand(
         case IDM_CELL_MARGINS: {
             const InkpodStatus status = EditPaperFrames(*state, LOWORD(wparam));
             if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
-                ShowCoreError(*state, window, L"フレーム設定");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0305));
             }
             UpdateMenuState(*state);
             return 0;
@@ -14883,7 +14936,7 @@ std::optional<LRESULT> RouteDocumentCommand(
                 if (ChooseOpenDocumentPath(window, path)) {
                     const InkpodStatus status = OpenDocumentFromPath(*state, path);
                     if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"開く");
+                        ShowCoreError(*state, window, UiText(UiStringId::Text1018));
                     }
                 }
             return 0;
@@ -14895,7 +14948,7 @@ std::optional<LRESULT> RouteDocumentCommand(
             }
             const InkpodStatus status = ImportCommonRasterFromPath(*state, path);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"一般画像の読み込み");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0422));
             }
             UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -14909,8 +14962,8 @@ std::optional<LRESULT> RouteDocumentCommand(
                 return 0;
             }
             ViewOptionsDialogState dialog{};
-            dialog.title = L"ラスター書き出し";
-            dialog.labels[0] = L"白背景を合成 (0/1)";
+            dialog.title = UiText(UiStringId::Text0386);
+            dialog.labels[0] = UiText(UiStringId::Text0817);
             dialog.values[0] = state->lifetime.smoke_test ? 1 : 0;
             if (ShowViewOptions(
                     state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
@@ -14922,7 +14975,7 @@ std::optional<LRESULT> RouteDocumentCommand(
                 : ExportCommonRasterToPath(
                       *state, path, dialog.values[0] != 0);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"一般画像の書き出し");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0421));
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
@@ -14932,7 +14985,7 @@ std::optional<LRESULT> RouteDocumentCommand(
                 *state, LOWORD(wparam) == IDM_FILE_SAVE_AS);
             if (status != INKPOD_STATUS_OK
                 && status != INKPOD_STATUS_CANCELLED) {
-                ShowCoreError(*state, window, L"保存");
+                ShowCoreError(*state, window, UiText(UiStringId::Save));
             }
             return 0;
         }
@@ -14941,7 +14994,7 @@ std::optional<LRESULT> RouteDocumentCommand(
                 WriteCompactedDocumentCopy(*state, context);
             if (status != INKPOD_STATUS_OK
                 && status != INKPOD_STATUS_CANCELLED) {
-                ShowCoreError(*state, window, L"履歴を破棄してコピー");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0635));
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
@@ -14957,7 +15010,7 @@ std::optional<LRESULT> RouteDocumentCommand(
                       false);
             if (revert_status != INKPOD_STATUS_OK
                 || FitCanvas(*state, INKPOD_VIEW_FIT) != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"復帰");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0659));
             }
             UpdateMenuState(*state);
             return 0;
@@ -14975,7 +15028,7 @@ std::optional<LRESULT> RouteDocumentCommand(
                       true,
                       true);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"レイヤーの部分復帰");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0399));
             }
             UpdateMenuState(*state);
             return 0;
@@ -14986,12 +15039,12 @@ std::optional<LRESULT> RouteDocumentCommand(
                 return 0;
             }
             if (!QueueAutosave(*state, context, path)) {
-                ShowCoreError(*state, window, L"Recovery保存の予約");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0076));
             } else {
                 try {
                     state->Document().shell.recovery_path = path;
                 } catch (const std::bad_alloc&) {
-                    ShowCoreError(*state, window, L"Recovery path の保持");
+                    ShowCoreError(*state, window, UiText(UiStringId::Text0070));
                 }
             }
             return 0;
@@ -15000,7 +15053,7 @@ std::optional<LRESULT> RouteDocumentCommand(
             std::wstring path = state->Document().shell.recovery_path;
             if (ChooseInkpodPath(window, false, path)
                 && OpenRecoveryFromPath(*state, path) != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"Recoveryを開く");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0074));
             }
             return 0;
         }
@@ -15036,7 +15089,7 @@ std::optional<LRESULT> RouteEditCommand(
                       true,
                       true);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"履歴操作");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0637));
             }
             UpdateMenuState(*state);
             return 0;
@@ -15061,7 +15114,7 @@ std::optional<LRESULT> RouteEditCommand(
                       true,
                       true);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"複数段階の履歴移動");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0900));
             }
             UpdateMenuState(*state);
             return 0;
@@ -15078,7 +15131,7 @@ std::optional<LRESULT> RouteEditCommand(
                       false,
                       false);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"コピー");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0183));
             } else {
                 inkpod_clipboard_release(&state->clipboard);
                 state->clipboard = replacement;
@@ -15086,7 +15139,7 @@ std::optional<LRESULT> RouteEditCommand(
                     && !state->lifetime.smoke_test) {
                     MessageBoxW(
                         window,
-                        L"アプリ内コピーは完了しましたが、Windowsクリップボードへ公開できませんでした。",
+                        UiText(UiStringId::Text0126),
                         L"inkpod",
                         MB_OK | MB_ICONWARNING);
                 }
@@ -15109,7 +15162,7 @@ std::optional<LRESULT> RouteEditCommand(
                       true,
                       true);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"カット");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0139));
             }
             UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -15122,15 +15175,15 @@ std::optional<LRESULT> RouteEditCommand(
                     ? INKPOD_PASTE_COMPATIBLE
                     : INKPOD_PASTE_ACTIVE_CONVERTED);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"貼り付け開始");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0939));
             }
             UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
         case IDM_EDIT_PASTE_CONVERTED: {
             ViewOptionsDialogState dialog{};
-            dialog.title = L"変換してペースト";
-            dialog.labels = {L"プレーン種類 (1-7)", L"色深度/形式 (1-5)", L"不透明度 (%)", L"新規プレーン (1)"};
+            dialog.title = UiText(UiStringId::Text0609);
+            dialog.labels = {UiText(UiStringId::Text0329), UiText(UiStringId::Text0873), UiText(UiStringId::Text0433), UiText(UiStringId::Text0714)};
             dialog.values = {INKPOD_TYPED_PLANE_RASTER, INKPOD_STORAGE_RGBA8, 100, 1};
             dialog.value_count = 4U;
             if (ShowViewOptions(
@@ -15138,8 +15191,8 @@ std::optional<LRESULT> RouteEditCommand(
                 return 0;
             }
             TextInputDialogState name{};
-            name.title = L"変換先プレーン";
-            name.label = L"名前";
+            name.title = UiText(UiStringId::Text0611);
+            name.label = UiText(UiStringId::Text0567);
             name.value = L"Pasted Plane";
             if (ShowTextInput(
                     state->lifetime.instance, window, state->lifetime.smoke_test, name) != IDOK) {
@@ -15168,14 +15221,14 @@ std::optional<LRESULT> RouteEditCommand(
                 status = INKPOD_STATUS_INVALID_STATE;
             }
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"変換してペースト");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0609));
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
         case IDM_EDIT_FLOATING_TRANSFORM: {
             const InkpodStatus status = ShowFloatingTransformDialog(*state);
             if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
-                ShowCoreError(*state, window, L"フローティング変形");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0307));
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
@@ -15184,7 +15237,7 @@ std::optional<LRESULT> RouteEditCommand(
             const bool commit = LOWORD(wparam) == IDM_EDIT_FLOATING_COMMIT;
             const InkpodStatus status = EndFloatingPaste(*state, commit);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, commit ? L"貼り付け確定" : L"貼り付け取消");
+                ShowCoreError(*state, window, commit ? UiText(UiStringId::Text0938) : UiText(UiStringId::Text0937));
             }
             UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -15204,7 +15257,7 @@ std::optional<LRESULT> RouteEditCommand(
                       true,
                       true);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"画像の左右反転");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0797));
             }
             UpdateMenuState(*state);
             return 0;
@@ -15245,7 +15298,7 @@ std::optional<LRESULT> RouteEffectsCommand(
                               core, plane_id, task, &result);
                       });
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"直前のフィルタ");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0818));
             }
             UpdateMenuState(*state);
             return 0;
@@ -15274,7 +15327,7 @@ std::optional<LRESULT> RouteEffectsCommand(
             const InkpodStatus status = RunInteractiveFilterEditor(
                 *state, context, command, editor->active_plane_id);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"フィルタ");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0285));
             }
             UpdateMenuState(*state);
             return 0;
@@ -15289,7 +15342,7 @@ std::optional<LRESULT> RouteEffectsCommand(
             const InkpodStatus status = CreateOrUpdateAdjustment(
                 *state, std::move(job), update);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"調整レイヤー");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0926));
             }
             UpdateMenuState(*state);
             return 0;
@@ -15306,7 +15359,7 @@ std::optional<LRESULT> RouteEffectsCommand(
             if (status == INKPOD_STATUS_OK) {
                 state->effects.adjustment_visible = visible;
             } else {
-                ShowCoreError(*state, window, L"調整レイヤー表示");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0932));
             }
             UpdateMenuState(*state);
             return 0;
@@ -15320,7 +15373,7 @@ std::optional<LRESULT> RouteEffectsCommand(
                 0U,
                 ignored);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"調整レイヤー移動");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0931));
             }
             UpdateMenuState(*state);
             return 0;
@@ -15838,12 +15891,12 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
             return 0;
         case IDM_LAYER_NEW: {
             ViewOptionsDialogState dialog{};
-            dialog.title = L"新規レイヤー";
-            dialog.labels = {L"種類", L"不透明度 (%)", nullptr, nullptr};
+            dialog.title = UiText(UiStringId::Text0715);
+            dialog.labels = {UiText(UiStringId::Text0828), UiText(UiStringId::Text0433), nullptr, nullptr};
             dialog.values = {INKPOD_LAYER_RASTER, 100, 0, 0};
-            dialog.choices[0] = kLayerKindChoices.data();
+            dialog.choices[0] = LayerKindChoices().data();
             dialog.choice_counts[0] =
-                static_cast<std::uint32_t>(kLayerKindChoices.size());
+                static_cast<std::uint32_t>(LayerKindChoices().size());
             dialog.value_count = 2U;
             if (ShowViewOptions(
                     state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
@@ -15870,7 +15923,7 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                 }
             }
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"レイヤーの作成");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0394));
             }
             RefreshTreePane(*state);
             UpdateMenuState(*state);
@@ -15880,9 +15933,9 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
             std::uint64_t layer_id{};
             InkpodStatus status = EnsureAnnotationLayer(*state, INKPOD_LAYER_TEXT, layer_id);
             TextInputDialogState dialog{};
-            dialog.title = L"テキスト注釈";
-            dialog.label = L"本文（UTF-8で保存）";
-            dialog.value = L"修正指示";
+            dialog.title = UiText(UiStringId::Text0244);
+            dialog.label = UiText(UiStringId::Text0750);
+            dialog.value = UiText(UiStringId::Text0472);
             if (status == INKPOD_STATUS_OK
                 && ShowTextInput(
                     state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
@@ -15928,7 +15981,7 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                 PresentAnnotationSelection(*state);
             }
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"テキスト注釈の追加");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0246));
             }
             UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -15936,7 +15989,7 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
         case IDM_CELL_SHOOTING_FRAME_PROPERTIES: {
             const InkpodStatus status = EditShootingFrameFromDialog(*state);
             if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
-                ShowCoreError(*state, window, L"撮影フレーム設定");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0690));
             }
             UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -15954,7 +16007,7 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                           ? INKPOD_TOOL_PENCIL
                           : kInteractionShootingFrame);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"撮影フレームのハンドル編集");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0685));
             }
             UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -15962,7 +16015,7 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
         case IDM_CELL_SHOOTING_FRAME_DELETE: {
             const InkpodStatus status = DeleteShootingFrame(*state);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"撮影フレーム削除");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0689));
             }
             UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -15970,7 +16023,7 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
         case IDM_CELL_VANISHING_POINT_PROPERTIES: {
             const InkpodStatus status = EditVanishingPointFromDialog(*state);
             if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
-                ShowCoreError(*state, window, L"消失点設定");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0772));
             }
             UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -15987,7 +16040,7 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                           ? INKPOD_TOOL_PENCIL
                           : kInteractionVanishingPoint);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"消失点のハンドル編集");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0769));
             }
             UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -15995,7 +16048,7 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
         case IDM_CELL_VANISHING_POINT_DELETE_ALL: {
             const InkpodStatus status = DeleteAllVanishingPoints(*state);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"消失点をすべて削除");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0770));
             }
             UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -16024,8 +16077,8 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                 });
             }
             TextInputDialogState dialog{};
-            dialog.title = L"テキスト注釈を再編集";
-            dialog.label = L"本文";
+            dialog.title = UiText(UiStringId::Text0247);
+            dialog.label = UiText(UiStringId::Text0749);
             if (status == INKPOD_STATUS_OK && (found == objects.end()
                     || !Utf8AnnotationTextToWide(found->text, dialog.value))) {
                 status = INKPOD_STATUS_INVALID_STATE;
@@ -16056,7 +16109,7 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                 PresentAnnotationSelection(*state);
             }
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"テキスト注釈の編集");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0245));
             }
             UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -16075,11 +16128,11 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                         0,
                         reinterpret_cast<LPARAM>(
                             state->Document().shell.annotation_draw_active
-                                ? L"手描き指示モード：Canvasをドラッグ（Escで取消）"
-                                : L"手描き指示モードを終了"));
+                                ? UiText(UiStringId::Text0663)
+                                : UiText(UiStringId::Text0662)));
                 }
             } else {
-                ShowCoreError(*state, window, L"手描き指示モード");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0661));
             }
             UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -16115,9 +16168,9 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
             state->Document().shell.active_annotation_id = objects[index].id;
             PresentAnnotationSelection(*state);
             if (state->Workspace().windows.status_bar != nullptr) {
-                const std::wstring label = L"選択注釈 ID "
+                const std::wstring label = UiText(UiStringId::Text0985)
                     + std::to_wstring(objects[index].id)
-                    + L"（←/→コマンドで移動）";
+                    + UiText(UiStringId::Text1044);
                 SendMessageW(
                     state->Workspace().windows.status_bar, SB_SETTEXTW, 0,
                     reinterpret_cast<LPARAM>(label.c_str()));
@@ -16150,7 +16203,7 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                 PresentAnnotationSelection(*state);
             }
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"注釈オブジェクト操作");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0767));
             }
             UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -16183,7 +16236,7 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                 }
             }
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"レイヤーの複製");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0397));
             }
             RefreshTreePane(*state);
             UpdateMenuState(*state);
@@ -16218,7 +16271,7 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                 }
             }
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"レイヤーの削除");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0395));
             }
             RefreshTreePane(*state);
             UpdateMenuState(*state);
@@ -16241,7 +16294,7 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                       0U,
                       ignored);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"レイヤーの移動");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0396));
             }
             UpdateMenuState(*state);
             return 0;
@@ -16261,7 +16314,7 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                 static_cast<std::uint32_t>(destination),
                 ignored);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"レイヤーの並べ替え");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0393));
             }
             RefreshTreePane(*state);
             return 0;
@@ -16295,7 +16348,7 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                     *state, false, LOWORD(wparam));
             }
             if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
-                ShowCoreError(*state, window, L"レイヤープロパティ");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0404));
             }
             RefreshTreePane(*state);
             return 0;
@@ -16303,19 +16356,19 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
         case IDM_LAYER_PROPERTIES: {
             const InkpodStatus status = EditSelectedTreeNodeProperties(*state, false);
             if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
-                ShowCoreError(*state, window, L"レイヤープロパティ");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0404));
             }
             RefreshTreePane(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
         case IDM_LAYER_CONVERT: {
             ViewOptionsDialogState dialog{};
-            dialog.title = L"レイヤー変換";
-            dialog.labels[0] = L"変換先種類";
+            dialog.title = UiText(UiStringId::Text0405);
+            dialog.labels[0] = UiText(UiStringId::Text0613);
             dialog.values[0] = INKPOD_LAYER_RASTER;
-            dialog.choices[0] = kLayerKindChoices.data();
+            dialog.choices[0] = LayerKindChoices().data();
             dialog.choice_counts[0] =
-                static_cast<std::uint32_t>(kLayerKindChoices.size());
+                static_cast<std::uint32_t>(LayerKindChoices().size());
             if (ShowViewOptions(
                     state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
                 return 0;
@@ -16343,7 +16396,7 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                 status = INKPOD_STATUS_INVALID_STATE;
             }
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"レイヤー変換");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0405));
             }
             RefreshTreePane(*state);
             return 0;
@@ -16366,7 +16419,7 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                 status = INKPOD_STATUS_INVALID_STATE;
             }
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"同種レイヤーの統合");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0566));
             }
             RefreshTreePane(*state);
             return 0;
@@ -16392,7 +16445,7 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                 status = INKPOD_STATUS_INVALID_STATE;
             }
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"非表示レイヤーの削除");
+                ShowCoreError(*state, window, UiText(UiStringId::Text1036));
             }
             RefreshTreePane(*state);
             return 0;
@@ -16403,8 +16456,8 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                 if (!state->lifetime.smoke_test) {
                     MessageBoxW(
                         window,
-                        L"プレーンの選択肢を読み込めませんでした。",
-                        L"新規プレーン",
+                        UiText(UiStringId::Text0322),
+                        UiText(UiStringId::Text0713),
                         MB_OK | MB_ICONERROR);
                 }
                 return 0;
@@ -16414,8 +16467,8 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                 state->Workspace().panes.active_tree_layer_id,
                 choice_storage.validation_error.c_str()};
             ViewOptionsDialogState dialog{};
-            dialog.title = L"新規プレーン";
-            dialog.labels = {L"種類", L"形式", L"不透明度 (%)", nullptr};
+            dialog.title = UiText(UiStringId::Text0713);
+            dialog.labels = {UiText(UiStringId::Text0828), UiText(UiStringId::FormatLabel), UiText(UiStringId::Text0433), nullptr};
             dialog.values = {INKPOD_TYPED_PLANE_RASTER, INKPOD_STORAGE_RGBA8, 100, 0};
             dialog.choices[0] = choice_storage.kind_choices.data();
             dialog.choice_counts[0] =
@@ -16448,7 +16501,7 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                 status = INKPOD_STATUS_INVALID_STATE;
             }
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"プレーンの作成");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0320));
             }
             RefreshTreePane(*state);
             return 0;
@@ -16498,7 +16551,7 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                 status = INKPOD_STATUS_INVALID_STATE;
             }
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"プレーン操作");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0328));
             }
             RefreshTreePane(*state);
             return 0;
@@ -16532,7 +16585,7 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                     *state, true, LOWORD(wparam));
             }
             if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
-                ShowCoreError(*state, window, L"プレーンプロパティ");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0323));
             }
             RefreshTreePane(*state);
             return 0;
@@ -16540,7 +16593,7 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
         case IDM_PLANE_PROPERTIES: {
             const InkpodStatus status = EditSelectedTreeNodeProperties(*state, true);
             if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
-                ShowCoreError(*state, window, L"プレーンプロパティ");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0323));
             }
             RefreshTreePane(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -16551,8 +16604,8 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                 return 0;
             }
             ViewOptionsDialogState dialog{};
-            dialog.title = L"プレーン変換（変換損失を確認）";
-            dialog.labels = {L"変換先種類 (1-7)", L"変換先形式 (1-5)", L"損失を確認 (1)", nullptr};
+            dialog.title = UiText(UiStringId::Text0327);
+            dialog.labels = {UiText(UiStringId::Text0614), UiText(UiStringId::Text0612), UiText(UiStringId::Text0683), nullptr};
             dialog.values = {
                 static_cast<std::int32_t>(node.kind),
                 static_cast<std::int32_t>(node.pixel_format),
@@ -16587,7 +16640,7 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                 status = ApplyTreeEditRecord(*state, edit, {}, ignored);
             }
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"プレーン変換");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0326));
             }
             RefreshTreePane(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -16610,7 +16663,7 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                 status = INKPOD_STATUS_INVALID_STATE;
             }
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"同種プレーンの統合");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0565));
             }
             RefreshTreePane(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -16636,9 +16689,9 @@ std::optional<LRESULT> RouteAnimationCommand(
         case IDM_LT_SET_RENAME: {
             TextInputDialogState dialog{};
             dialog.title = LOWORD(wparam) == IDM_LT_SET_NEW
-                ? L"ライトテーブルセットを作成"
-                : L"ライトテーブルセット名";
-            dialog.label = L"名前";
+                ? UiText(UiStringId::Text0366)
+                : UiText(UiStringId::Text0367);
+            dialog.label = UiText(UiStringId::Text0567);
             dialog.value = state->lifetime.smoke_test ? L"Smoke Set" : L"Light Table";
             if (ShowTextInput(
                     state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
@@ -16653,7 +16706,7 @@ std::optional<LRESULT> RouteAnimationCommand(
             const InkpodStatus status = ApplyLightTableEdit(
                 *state, context, edit, dialog.value, object_id);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"ライトテーブルセット");
+                ShowCoreError(*state, window, UiText(UiStringId::LightTableSetsAccessibleName));
             } else if (object_id != 0U) {
                 state->Workspace().panes.active_light_table_set_id = object_id;
             }
@@ -16682,7 +16735,7 @@ std::optional<LRESULT> RouteAnimationCommand(
             const InkpodStatus status = ApplyLightTableEdit(
                 *state, context, edit, {}, object_id);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"ライトテーブルセット操作");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0368));
             } else if (object_id != 0U) {
                 state->Workspace().panes.active_light_table_set_id = object_id;
             } else {
@@ -16693,8 +16746,8 @@ std::optional<LRESULT> RouteAnimationCommand(
         }
         case IDM_LT_GLOBAL_OPACITY: {
             ViewOptionsDialogState dialog{};
-            dialog.title = L"ライトテーブル全体不透明度";
-            dialog.labels[0] = L"不透明度 (0-100%)";
+            dialog.title = UiText(UiStringId::Text0372);
+            dialog.labels[0] = UiText(UiStringId::Text0434);
             dialog.values[0] = state->lifetime.smoke_test ? 50 : 100;
             if (ShowViewOptions(
                     state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
@@ -16715,7 +16768,7 @@ std::optional<LRESULT> RouteAnimationCommand(
                 true,
                 true);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"ライトテーブル全体不透明度");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0372));
             }
             RefreshLightTablePane(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -16732,7 +16785,7 @@ std::optional<LRESULT> RouteAnimationCommand(
                 path,
                 LOWORD(wparam) == IDM_LT_ITEM_RELOAD);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"ライトテーブル画像");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0375));
             }
             RefreshLightTablePane(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -16750,7 +16803,7 @@ std::optional<LRESULT> RouteAnimationCommand(
                 *state, context, direction);
             if (status != INKPOD_STATUS_OK
                 && status != INKPOD_STATUS_CANCELLED) {
-                ShowCoreError(*state, window, L"ライトテーブル一括登録");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0369));
             }
             RefreshLightTablePane(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -16773,7 +16826,7 @@ std::optional<LRESULT> RouteAnimationCommand(
             const InkpodStatus status = ApplyLightTableEdit(
                 *state, context, edit, {}, ignored);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"ライトテーブル項目操作");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0381));
             }
             state->Workspace().panes.active_light_table_item_id = 0U;
             RefreshLightTablePane(*state);
@@ -16783,7 +16836,7 @@ std::optional<LRESULT> RouteAnimationCommand(
             const InkpodStatus status = EditLightTableItemProperties(
                 *state, context);
             if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
-                ShowCoreError(*state, window, L"ライトテーブル項目プロパティ");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0380));
             }
             RefreshLightTablePane(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -16811,7 +16864,7 @@ std::optional<LRESULT> RouteAnimationCommand(
             InkpodDocumentInfo document{};
             QueryDocument(*state, document);
             ViewOptionsDialogState dialog{};
-            dialog.title = L"ライトテーブル色サンプル";
+            dialog.title = UiText(UiStringId::Text0376);
             dialog.labels = {L"X", L"Y", nullptr, nullptr};
             dialog.values = {
                 state->lifetime.smoke_test ? document.reference_frame.x : 0,
@@ -16841,7 +16894,7 @@ std::optional<LRESULT> RouteAnimationCommand(
             if (status == INKPOD_STATUS_OK) {
                 SetDrawingColor(*state, color);
             } else if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"ライトテーブル色サンプル");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0376));
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
@@ -16871,8 +16924,8 @@ std::optional<LRESULT> RouteAnimationCommand(
                         state->Workspace().light_table_palette != nullptr
                             ? state->Workspace().light_table_palette
                             : window,
-                        L"現在の編集画像を保存してからライトテーブル項目と入れ替えますか？",
-                        L"ライトテーブル",
+                        UiText(UiStringId::Text0787),
+                        UiText(UiStringId::LightTable),
                         MB_OKCANCEL | MB_ICONQUESTION);
                 }
                 if (choice != IDOK || !context.document_view.has_value()
@@ -16896,7 +16949,7 @@ std::optional<LRESULT> RouteAnimationCommand(
                 false,
                 false);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"ライトテーブルと編集画像の入れ替え");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0363));
             } else {
                 ResetUiForNewActiveDocument(*state);
                 if (!state->RefreshEditorPresentation(
@@ -16906,7 +16959,7 @@ std::optional<LRESULT> RouteAnimationCommand(
                     ShowCoreError(
                         *state,
                         window,
-                        L"ライトテーブル入れ替え後の編集状態再取得");
+                        UiText(UiStringId::Text0371));
                 } else {
                     FitCanvas(*state, INKPOD_VIEW_FIT);
                 }
@@ -16934,7 +16987,7 @@ std::optional<LRESULT> RouteAnimationCommand(
                       context.generation.value())
                 : INKPOD_STATUS_INVALID_STATE;
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"連番読み込み");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0969));
             }
             RefreshSequencePane(*state);
             UpdateMenuState(*state);
@@ -16946,8 +16999,8 @@ std::optional<LRESULT> RouteAnimationCommand(
                 return 0;
             }
             ViewOptionsDialogState dialog{};
-            dialog.title = L"連番書き出し";
-            dialog.labels[0] = L"白背景を合成 (0/1)";
+            dialog.title = UiText(UiStringId::Text0968);
+            dialog.labels[0] = UiText(UiStringId::Text0817);
             dialog.values[0] = state->lifetime.smoke_test ? 1 : 0;
             if (ShowViewOptions(
                     state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
@@ -16956,7 +17009,7 @@ std::optional<LRESULT> RouteAnimationCommand(
             const InkpodStatus status = ExportSequenceToPath(
                 *state, path, dialog.values[0] != 0);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"連番書き出し");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0968));
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
@@ -16969,7 +17022,7 @@ std::optional<LRESULT> RouteAnimationCommand(
             if (!SaveSequenceEndpointPolicy(policy)) {
                 MessageBoxW(
                     window,
-                    L"連番セルの端点動作を保存できませんでした。",
+                    UiText(UiStringId::Text0963),
                     L"inkpod",
                     MB_OK | MB_ICONERROR);
                 return 0;
@@ -16979,8 +17032,8 @@ std::optional<LRESULT> RouteAnimationCommand(
                 state->Workspace().windows.status_bar,
                 5U,
                 policy == SequenceEndpointPolicy::Wrap
-                    ? L"前後セル切替: 端点で循環"
-                    : L"前後セル切替: 端点で停止");
+                    ? UiText(UiStringId::Text0541)
+                    : UiText(UiStringId::Text0540));
             UpdateMenuState(*state);
             return 1;
         }
@@ -16994,14 +17047,14 @@ std::optional<LRESULT> RouteAnimationCommand(
                 next ? INKPOD_SEQUENCE_NEXT : INKPOD_SEQUENCE_PREVIOUS);
             if (status != INKPOD_STATUS_OK
                 && status != INKPOD_STATUS_CANCELLED) {
-                ShowCoreError(*state, window, L"前後セル切替");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0539));
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
         case IDM_SEQ_GOTO: {
             ViewOptionsDialogState dialog{};
-            dialog.title = L"セル番号で移動";
-            dialog.labels[0] = L"セル番号";
+            dialog.title = UiText(UiStringId::Text0231);
+            dialog.labels[0] = UiText(UiStringId::Text0230);
             dialog.values[0] = state->lifetime.smoke_test ? 3 : 1;
             if (ShowViewOptions(
                     state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
@@ -17041,7 +17094,7 @@ std::optional<LRESULT> RouteAnimationCommand(
                 : query_status;
             if (status != INKPOD_STATUS_OK
                 && status != INKPOD_STATUS_CANCELLED) {
-                ShowCoreError(*state, window, L"セル番号移動");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0233));
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
@@ -17059,7 +17112,7 @@ std::optional<LRESULT> RouteAnimationCommand(
                 false,
                 false);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"サブパレット登録");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0190));
             } else {
                 (void)RefreshSubpalettePane(*state);
             }
@@ -17067,7 +17120,7 @@ std::optional<LRESULT> RouteAnimationCommand(
         }
         case IDM_SUBPALETTE_SAMPLE: {
             ViewOptionsDialogState dialog{};
-            dialog.title = L"サブパレット色サンプル";
+            dialog.title = UiText(UiStringId::Text0191);
             dialog.labels = {L"X", L"Y", nullptr, nullptr};
             dialog.values = {0, 0, 0, 0};
             dialog.value_count = 2U;
@@ -17098,14 +17151,14 @@ std::optional<LRESULT> RouteAnimationCommand(
                 (void)RefreshColorPanes(*state);
                 RefreshDockPaneViews(*state);
             } else if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"サブパレット色サンプル");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0191));
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
         case IDM_MOTION_START: {
             ViewOptionsDialogState dialog{};
-            dialog.title = L"モーションチェック設定";
-            dialog.labels = {L"FPS (8/10/12/24/25/30)", L"ループ (0/1)", L"選択表示 (0/1)", L"LT表示 (0/1)"};
+            dialog.title = UiText(UiStringId::Text0353);
+            dialog.labels = {L"FPS (8/10/12/24/25/30)", UiText(UiStringId::Text0389), UiText(UiStringId::Text1002), UiText(UiStringId::Text0066)};
             dialog.values = {
                 static_cast<std::int32_t>(state->Workspace().animation.motion_fps),
                 (state->Workspace().animation.motion_flags & INKPOD_MOTION_FLAG_LOOP) != 0U ? 1 : 0,
@@ -17145,7 +17198,7 @@ std::optional<LRESULT> RouteAnimationCommand(
                     CommandTimerKind::MotionPlayback,
                     std::max<UINT>(1U, 1000U / state->Workspace().animation.motion_fps));
             } else {
-                ShowCoreError(*state, window, L"モーションチェック開始");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0354));
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
@@ -17171,7 +17224,7 @@ std::optional<LRESULT> RouteAnimationCommand(
                         std::max<UINT>(1U, 1000U / state->Workspace().animation.motion_fps));
                 }
             } else {
-                ShowCoreError(*state, window, L"モーション一時停止");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0356));
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
@@ -17192,7 +17245,7 @@ std::optional<LRESULT> RouteAnimationCommand(
             if (status == INKPOD_STATUS_OK) {
                 UpdateMotionState(state->Workspace().animation, frame);
             } else {
-                ShowCoreError(*state, window, L"モーションフレーム移動");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0355));
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
@@ -17233,7 +17286,7 @@ std::optional<LRESULT> RouteAnimationCommand(
             if (status == INKPOD_STATUS_OK) {
                 UpdateMotionState(state->Workspace().animation, frame);
             } else {
-                ShowCoreError(*state, window, L"モーション先頭・末尾移動");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0358));
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
@@ -17281,7 +17334,7 @@ std::optional<LRESULT> RouteAnimationCommand(
                     CommandTimerKind::MotionPlayback,
                     std::max<UINT>(1U, 1000U / state->Workspace().animation.motion_fps));
             } else {
-                ShowCoreError(*state, window, L"モーションFPS変更");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0351));
             }
             UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -17298,7 +17351,7 @@ std::optional<LRESULT> RouteAnimationCommand(
             state->Workspace().animation.motion_active = false;
             state->Workspace().animation.motion_paused = false;
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"モーション停止");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0357));
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
@@ -17349,23 +17402,23 @@ std::optional<LRESULT> RouteSelectionViewCommand(
             if (command == IDM_SELECTION_WAND || command == IDM_SELECTION_TRACE) {
                 ViewOptionsDialogState dialog{};
                 dialog.title = command == IDM_SELECTION_WAND
-                    ? L"色の杖"
-                    : L"選択トレース";
+                    ? UiText(UiStringId::Text0868)
+                    : UiText(UiStringId::Text0981);
                 dialog.labels = command == IDM_SELECTION_WAND
                     ? std::array<const wchar_t*, 4U>{
-                          L"許容差", L"隙間", nullptr, nullptr}
+                          UiText(UiStringId::Text0918), UiText(UiStringId::Text1030), nullptr, nullptr}
                     : std::array<const wchar_t*, 4U>{
-                          L"直径 (px)", L"形状", L"筆圧で大きさ", L"画面サイズ固定"};
+                          UiText(UiStringId::Text0820), UiText(UiStringId::Text0651), UiText(UiStringId::Text0837), UiText(UiStringId::Text0814)};
                 dialog.values[0] = command == IDM_SELECTION_WAND
                     ? state->Workspace().tools.selection_tolerance
                     : static_cast<std::int32_t>(state->Workspace().tools.selection_diameter);
                 dialog.values[1] = state->Workspace().tools.selection_gap_close;
-                static constexpr std::array<ViewOptionsDialogState::Choice, 2U> kTraceShapes{
-                    ViewOptionsDialogState::Choice{L"丸", INKPOD_TRACE_ROUND},
-                    ViewOptionsDialogState::Choice{L"角", INKPOD_TRACE_SQUARE}};
-                static constexpr std::array<ViewOptionsDialogState::Choice, 2U> kBooleanChoices{
-                    ViewOptionsDialogState::Choice{L"無効", 0},
-                    ViewOptionsDialogState::Choice{L"有効", 1}};
+                static const std::array<ViewOptionsDialogState::Choice, 2U> kTraceShapes{
+                    ViewOptionsDialogState::Choice{UiText(UiStringId::Text0445), INKPOD_TRACE_ROUND},
+                    ViewOptionsDialogState::Choice{UiText(UiStringId::Text0906), INKPOD_TRACE_SQUARE}};
+                static const std::array<ViewOptionsDialogState::Choice, 2U> kBooleanChoices{
+                    ViewOptionsDialogState::Choice{UiText(UiStringId::Text0776), 0},
+                    ViewOptionsDialogState::Choice{UiText(UiStringId::Text0740), 1}};
                 if (command == IDM_SELECTION_TRACE) {
                     dialog.values[1] = static_cast<std::int32_t>(trace_shape);
                     dialog.values[2] = (construction_flags
@@ -17432,26 +17485,26 @@ std::optional<LRESULT> RouteSelectionViewCommand(
             return 0;
         }
         case IDM_SELECTION_OPTIONS: {
-            static constexpr std::array<ViewOptionsDialogState::Choice, 5U> kRanges{
-                ViewOptionsDialogState::Choice{L"通常", INKPOD_RANGE_NORMAL},
-                ViewOptionsDialogState::Choice{L"描線に寄せる", INKPOD_RANGE_TIGHT},
-                ViewOptionsDialogState::Choice{L"閉領域内部", INKPOD_RANGE_ENCLOSED_INTERIOR},
-                ViewOptionsDialogState::Choice{L"描線", INKPOD_RANGE_DRAWING},
-                ViewOptionsDialogState::Choice{L"境界", INKPOD_RANGE_BOUNDARY}};
-            static constexpr std::array<ViewOptionsDialogState::Choice, 4U> kAspects{
-                ViewOptionsDialogState::Choice{L"自由", 0},
+            static const std::array<ViewOptionsDialogState::Choice, 5U> kRanges{
+                ViewOptionsDialogState::Choice{UiText(UiStringId::Text0956), INKPOD_RANGE_NORMAL},
+                ViewOptionsDialogState::Choice{UiText(UiStringId::Text0682), INKPOD_RANGE_TIGHT},
+                ViewOptionsDialogState::Choice{UiText(UiStringId::Text1015), INKPOD_RANGE_ENCLOSED_INTERIOR},
+                ViewOptionsDialogState::Choice{UiText(UiStringId::Text0681), INKPOD_RANGE_DRAWING},
+                ViewOptionsDialogState::Choice{UiText(UiStringId::Text0601), INKPOD_RANGE_BOUNDARY}};
+            static const std::array<ViewOptionsDialogState::Choice, 4U> kAspects{
+                ViewOptionsDialogState::Choice{UiText(UiStringId::Text0864), 0},
                 ViewOptionsDialogState::Choice{L"1:1", 1 << 16},
                 ViewOptionsDialogState::Choice{L"4:3", (4 << 16) / 3},
                 ViewOptionsDialogState::Choice{L"16:9", (16 << 16) / 9}};
-            static constexpr std::array<ViewOptionsDialogState::Choice, 4U> kConstruction{
-                ViewOptionsDialogState::Choice{L"通常", 0},
-                ViewOptionsDialogState::Choice{L"中心から", 1},
-                ViewOptionsDialogState::Choice{L"45度制約", 2},
-                ViewOptionsDialogState::Choice{L"中心 + 45度", 3}};
+            static const std::array<ViewOptionsDialogState::Choice, 4U> kConstruction{
+                ViewOptionsDialogState::Choice{UiText(UiStringId::Text0956), 0},
+                ViewOptionsDialogState::Choice{UiText(UiStringId::Text0441), 1},
+                ViewOptionsDialogState::Choice{UiText(UiStringId::Text0033), 2},
+                ViewOptionsDialogState::Choice{UiText(UiStringId::Text0438), 3}};
             auto& tools = state->Workspace().tools;
             ViewOptionsDialogState dialog{};
-            dialog.title = L"選択オプション";
-            dialog.labels = {L"内容解釈", L"アスペクト比", L"作成方法", L"回転角度"};
+            dialog.title = UiText(UiStringId::Text0976);
+            dialog.labels = {UiText(UiStringId::Text0507), UiText(UiStringId::Text0125), UiText(UiStringId::Text0461), UiText(UiStringId::Text0580)};
             dialog.values = {
                 static_cast<std::int32_t>(tools.selection_interpretation),
                 static_cast<std::int32_t>(tools.selection_aspect_ratio_q16),
@@ -17523,7 +17576,7 @@ std::optional<LRESULT> RouteSelectionViewCommand(
                       true,
                       true);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"選択解除");
+                ShowCoreError(*state, window, UiText(UiStringId::Text1003));
             }
             UpdateMenuState(*state);
             return 0;
@@ -17538,23 +17591,23 @@ std::optional<LRESULT> RouteSelectionViewCommand(
                 command == IDM_SELECTION_COLOR_ADD ? INKPOD_SELECTION_ADD
                                                    : INKPOD_SELECTION_NEW);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"描画色の選択");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0674));
             }
             UpdateMenuState(*state);
             return 0;
         }
         case IDM_SELECTION_OUTPUT_COLOR_GUARD: {
-            static constexpr std::array<ViewOptionsDialogState::Choice, 1U> kProfiles{{
-                {L"BT.709 保守ガード（規格適合判定ではありません）",
+            static const std::array<ViewOptionsDialogState::Choice, 1U> kProfiles{{
+                {UiText(UiStringId::Text0041),
                  INKPOD_OUTPUT_COLOR_GUARD_BT709_CONSERVATIVE_YCBCR}}};
-            static constexpr std::array<ViewOptionsDialogState::Choice, 4U> kOperations{{
-                {L"新規", INKPOD_SELECTION_NEW},
-                {L"追加", INKPOD_SELECTION_ADD},
-                {L"削除", INKPOD_SELECTION_SUBTRACT},
-                {L"交差", INKPOD_SELECTION_INTERSECT}}};
+            static const std::array<ViewOptionsDialogState::Choice, 4U> kOperations{{
+                {UiText(UiStringId::Text0706), INKPOD_SELECTION_NEW},
+                {UiText(UiStringId::Text0951), INKPOD_SELECTION_ADD},
+                {UiText(UiStringId::Delete), INKPOD_SELECTION_SUBTRACT},
+                {UiText(UiStringId::Text0452), INKPOD_SELECTION_INTERSECT}}};
             ViewOptionsDialogState dialog{};
-            dialog.title = L"出力色安全ガード";
-            dialog.labels = {L"プロファイル", L"選択演算", nullptr, nullptr};
+            dialog.title = UiText(UiStringId::Text0517);
+            dialog.labels = {UiText(UiStringId::Text0331), UiText(UiStringId::Text0989), nullptr, nullptr};
             dialog.values = {
                 static_cast<std::int32_t>(state->effects.output_color_guard_profile),
                 static_cast<std::int32_t>(state->Workspace().tools.selection_operation),
@@ -17581,21 +17634,21 @@ std::optional<LRESULT> RouteSelectionViewCommand(
                 && !SaveOutputColorGuardProfileSetting(profile_setting)) {
                 MessageBoxW(
                     window,
-                    L"出力色安全ガードの既定プロファイルを保存できませんでした。",
+                    UiText(UiStringId::Text0520),
                     L"inkpod",
                     MB_OK | MB_ICONERROR);
                 return 0;
             }
             InkpodDocumentInfo document{};
             if (!QueryDocument(*state, document)) {
-                ShowCoreError(*state, window, L"出力色安全ガード");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0517));
                 return 0;
             }
             std::shared_ptr<OutputColorGuardJob> job;
             try {
                 job = std::make_shared<OutputColorGuardJob>();
             } catch (const std::bad_alloc&) {
-                ShowCoreError(*state, window, L"出力色安全ガード");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0517));
                 return 0;
             }
             state->effects.output_color_guard_profile =
@@ -17615,7 +17668,7 @@ std::optional<LRESULT> RouteSelectionViewCommand(
                 });
             if (status != INKPOD_STATUS_OK) {
                 state->effects.output_color_guard.reset();
-                ShowCoreError(*state, window, L"出力色安全ガード");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0517));
             } else if (state->lifetime.smoke_test) {
                 (void)FormatOutputColorGuardSummary(
                     job->result, state->effects.last_output_color_guard_summary);
@@ -17632,9 +17685,10 @@ std::optional<LRESULT> RouteSelectionViewCommand(
             return 0;
         }
         case IDM_SELECTION_TO_LAYER: {
-            static constexpr std::array<std::uint8_t, 13U> name{
-                0xe9, 0x81, 0xb8, 0xe6, 0x8a, 0x9e, 0xe7, 0xaf, 0x84,
-                0xe5, 0x9b, 0xb2, '1'};
+            // This becomes document data, so keep it language-neutral rather
+            // than deriving it from the process UI language.
+            static constexpr std::array<std::uint8_t, 11U> name{
+                'S', 'e', 'l', 'e', 'c', 't', 'i', 'o', 'n', ' ', '1'};
             std::uint64_t layer_id{};
             const InkpodStatus status = state->engine == nullptr
                 ? INKPOD_STATUS_INVALID_STATE
@@ -17652,7 +17706,7 @@ std::optional<LRESULT> RouteSelectionViewCommand(
                       true,
                       true);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"選択範囲をレイヤーへ変換");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0994));
             } else {
                 state->Document().shell.selection_layer_id = layer_id;
                 state->Document().shell.smoke_layer_id = layer_id;
@@ -17682,7 +17736,7 @@ std::optional<LRESULT> RouteSelectionViewCommand(
                       true,
                       true);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"選択レイヤー変換");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0983));
             }
             UpdateMenuState(*state);
             return 0;
@@ -17723,7 +17777,7 @@ std::optional<LRESULT> RouteSelectionViewCommand(
                       true,
                       true);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"すべて選択");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0110));
             }
             UpdateMenuState(*state);
             return 0;
@@ -17741,9 +17795,9 @@ std::optional<LRESULT> RouteSelectionViewCommand(
             if (operation != INKPOD_SELECTION_ADJUST_INVERT) {
                 ViewOptionsDialogState dialog{};
                 dialog.title = operation == INKPOD_SELECTION_ADJUST_EXPAND
-                    ? L"選択範囲を拡張"
-                    : L"選択範囲を縮小";
-                dialog.labels[0] = L"幅 (px)";
+                    ? UiText(UiStringId::Text0996)
+                    : UiText(UiStringId::Text0998);
+                dialog.labels[0] = UiText(UiStringId::Text0646);
                 dialog.values[0] = state->lifetime.smoke_test ? 2 : 1;
                 if (ShowViewOptions(
                         state->lifetime.instance,
@@ -17760,7 +17814,7 @@ std::optional<LRESULT> RouteSelectionViewCommand(
                 operation,
                 pixels);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"選択範囲の変更");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0992));
             }
             UpdateMenuState(*state);
             return 0;
@@ -17777,7 +17831,7 @@ std::optional<LRESULT> RouteSelectionViewCommand(
                     static_cast<double>(client.right) / 2.0,
                     static_cast<double>(client.bottom) / 2.0)
                 != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"表示倍率の変更");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0892));
             }
             UpdateMenuState(*state);
             return 0;
@@ -17789,15 +17843,15 @@ std::optional<LRESULT> RouteSelectionViewCommand(
                     LOWORD(wparam) == IDM_VIEW_FIT ? INKPOD_VIEW_FIT
                                                   : INKPOD_VIEW_ONE_TO_ONE)
                 != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"表示の変更");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0884));
             }
             UpdateMenuState(*state);
             return 0;
         case IDM_VIEW_ZOOM_PERCENT: {
             InkpodSnapshotTransform transform{};
             ViewOptionsDialogState dialog{};
-            dialog.title = L"表示倍率";
-            dialog.labels[0] = L"倍率 (%)";
+            dialog.title = UiText(UiStringId::Text0890);
+            dialog.labels[0] = UiText(UiStringId::Text0474);
             dialog.values[0] = state->lifetime.smoke_test
                 ? 125
                 : (QuerySnapshotTransform(*state, transform)
@@ -17812,7 +17866,7 @@ std::optional<LRESULT> RouteSelectionViewCommand(
                 const InkpodStatus status = ApplyZoomPercent(
                     *state, static_cast<std::uint32_t>(dialog.values[0]));
                 if (status != INKPOD_STATUS_OK) {
-                    ShowCoreError(*state, window, L"数値倍率の変更");
+                    ShowCoreError(*state, window, UiText(UiStringId::Text0695));
                 }
                 UpdateMenuState(*state);
             }
@@ -17838,7 +17892,7 @@ std::optional<LRESULT> RouteSelectionViewCommand(
                 0.0,
                 0.0);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"表示反転");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0894));
             } else if (horizontal) {
                 state->ActiveView().presentation.flip_horizontal =
                     !state->ActiveView().presentation.flip_horizontal;
@@ -17884,7 +17938,7 @@ std::optional<LRESULT> RouteSelectionViewCommand(
                 visible ? 1.0 : 0.0,
                 0.0);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"表示補助の切替");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0896));
             } else {
                 *current = visible;
             }
@@ -17922,7 +17976,7 @@ std::optional<LRESULT> RouteSelectionViewCommand(
             const InkpodStatus status = ApplyView(
                 *state, context, kind, value, 0.0);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"ベクター診断表示の切替");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0343));
             } else if (command == IDM_VIEW_VECTOR_ANTIALIAS) {
                 presentation.vector_antialias = value != 0.0;
             } else if (command == IDM_VIEW_VECTOR_ENDPOINTS) {
@@ -17942,7 +17996,7 @@ std::optional<LRESULT> RouteSelectionViewCommand(
             }
             const bool vertical = LOWORD(wparam) == IDM_VIEW_GUIDE_VERTICAL;
             ViewOptionsDialogState dialog{};
-            dialog.title = vertical ? L"垂直ガイド" : L"水平ガイド";
+            dialog.title = vertical ? UiText(UiStringId::Text0586) : UiText(UiStringId::Text0764);
             dialog.labels[0] = vertical ? L"X (px)" : L"Y (px)";
             dialog.values[0] = static_cast<std::int32_t>(
                 vertical ? info.width / 2U : info.height / 2U);
@@ -17958,7 +18012,7 @@ std::optional<LRESULT> RouteSelectionViewCommand(
                 vertical ? INKPOD_GUIDE_VERTICAL : INKPOD_GUIDE_HORIZONTAL,
                 dialog.values[0]);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"ガイドの追加");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0167));
             }
             UpdateMenuState(*state);
             return 0;
@@ -17973,15 +18027,15 @@ std::optional<LRESULT> RouteSelectionViewCommand(
         case IDM_VIEW_GUIDE_DELETE_ALL: {
             const InkpodStatus status = DeleteAllGuides(*state);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"ガイドの削除");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0166));
             }
             UpdateMenuState(*state);
             return 0;
         }
         case IDM_VIEW_GRID_SETTINGS: {
             ViewOptionsDialogState dialog{};
-            dialog.title = L"グリッド設定";
-            dialog.labels = {L"X 原点", L"Y 原点", L"間隔 (px)", L"分割数"};
+            dialog.title = UiText(UiStringId::Text0178);
+            dialog.labels = {UiText(UiStringId::Text0086), UiText(UiStringId::Text0087), UiText(UiStringId::Text1025), UiText(UiStringId::Text0521)};
             dialog.values = {0, 0, 8, 2};
             dialog.value_count = 4U;
             if (ShowViewOptions(
@@ -18003,7 +18057,7 @@ std::optional<LRESULT> RouteSelectionViewCommand(
                 ? INKPOD_STATUS_INVALID_ARGUMENT
                 : SetGrid(*state, input);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"グリッド設定");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0178));
             }
             UpdateMenuState(*state);
             return 0;
@@ -18216,7 +18270,7 @@ std::optional<LRESULT> RouteToolCommand(
             if (!mode.has_value()) {
                 if (state->engine != nullptr) {
                     state->engine->SetLocalFailure(
-                        L"色置換は描画プレーンだけを対象にできます");
+                        UiText(UiStringId::Text0877));
                 }
                 return 0;
             }
@@ -18270,8 +18324,8 @@ std::optional<LRESULT> RouteToolCommand(
                 && !state->lifetime.smoke_test
                 && MessageBoxW(
                        window,
-                       L"選択範囲がありません。文書全体の対象色を置換しますか？",
-                       L"色置換",
+                       UiText(UiStringId::Text0990),
+                       UiText(UiStringId::ToolColorReplacement),
                        MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2)
                     != IDYES) {
                 return 0;
@@ -18279,7 +18333,7 @@ std::optional<LRESULT> RouteToolCommand(
             const InkpodStatus status = ApplyColorReplace(
                 *state, editor, false, {});
             if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
-                ShowCoreError(*state, window, L"色置換");
+                ShowCoreError(*state, window, UiText(UiStringId::ToolColorReplacement));
             }
             UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -18308,7 +18362,7 @@ std::optional<LRESULT> RouteToolCommand(
                 : IsGeometryCanvasPlane(plane.kind);
             if (!supported) {
                 if (state->engine != nullptr) {
-                    state->engine->SetLocalFailure(kVectorStrokePlaneRequired);
+                    state->engine->SetLocalFailure(UiText(UiStringId::Text0106));
                 }
                 UpdateMenuState(*state);
                 return 0;
@@ -18352,8 +18406,8 @@ std::optional<LRESULT> RouteToolCommand(
             return 1;
         case IDM_VECTOR_CONNECT: {
             ViewOptionsDialogState dialog{};
-            dialog.title = L"ベクター線つなぎ";
-            dialog.labels[0] = L"最大隙間 (1/1000 px)";
+            dialog.title = UiText(UiStringId::Text0341);
+            dialog.labels[0] = UiText(UiStringId::Text0735);
             dialog.values[0] = state->lifetime.smoke_test ? 4000 : 2000;
             if (ShowViewOptions(
                     state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
@@ -18363,15 +18417,15 @@ std::optional<LRESULT> RouteToolCommand(
             const InkpodStatus status = ConnectSelectedVectorPlane(
                 *state, static_cast<float>(dialog.values[0]) / 1000.0F);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"ベクター線つなぎ");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0341));
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
         case IDM_VECTOR_WIDTH: {
             ViewOptionsDialogState dialog{};
-            dialog.title = L"ベクター線幅修正";
-            dialog.labels = {L"モード (1:太く 2:細く 3:倍率 4:一定)",
-                L"値 (1/1000 px または倍率)", nullptr, nullptr};
+            dialog.title = UiText(UiStringId::Text0342);
+            dialog.labels = {UiText(UiStringId::Text0360),
+                UiText(UiStringId::Text0481), nullptr, nullptr};
             dialog.values = {1, state->lifetime.smoke_test ? 500 : 1000, 0, 0};
             dialog.value_count = 2U;
             if (ShowViewOptions(
@@ -18385,7 +18439,7 @@ std::optional<LRESULT> RouteToolCommand(
                 static_cast<InkpodVectorWidthMode>(dialog.values[0]),
                 static_cast<float>(dialog.values[1]) / 1000.0F);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"ベクター線幅修正");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0342));
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
@@ -18427,7 +18481,7 @@ std::optional<LRESULT> RouteToolCommand(
                 ? SelectVectorObjects(*state)
                 : option_status;
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"ベクター選択");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0344));
             }
             UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -18436,7 +18490,7 @@ std::optional<LRESULT> RouteToolCommand(
             TreePaneNode source{};
             if (!QueryTreeNode(*state, false, source)
                 || source.kind != INKPOD_LAYER_VECTOR_COLORING) {
-                ShowCoreError(*state, window, L"ベクターをラスタライズ");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0335));
                 return 0;
             }
             static constexpr std::array<std::uint8_t, 10U> name{
@@ -18472,7 +18526,7 @@ std::optional<LRESULT> RouteToolCommand(
                     RefreshTreePane(*state);
                 }
             } else {
-                ShowCoreError(*state, window, L"ベクターをラスタライズ");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0335));
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
@@ -18504,7 +18558,7 @@ std::optional<LRESULT> RouteToolCommand(
                     RefreshTreePane(*state);
                 }
             } else {
-                ShowCoreError(*state, window, L"ラスターをベクター化");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0383));
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
@@ -18530,7 +18584,7 @@ std::optional<LRESULT> RouteToolCommand(
             if (status == INKPOD_STATUS_OK) {
                 state->effects.alpha_view = enabled;
             } else {
-                ShowCoreError(*state, window, L"アルファ表示");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0130));
             }
             UpdateMenuState(*state);
             return 0;
@@ -18550,7 +18604,7 @@ std::optional<LRESULT> RouteToolCommand(
                           : info.color_plane_id)
                 : INKPOD_STATUS_INVALID_STATE;
             if (plane_status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"プレーン切替");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0325));
             } else {
                 RefreshTreePane(*state);
             }
@@ -18608,7 +18662,7 @@ std::optional<LRESULT> RouteColorCommand(
         case IDM_COLOR_EDITOR: {
             const InkpodStatus status = ShowDrawingColorEditor(*state);
             if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
-                ShowCoreError(*state, window, L"描画色編集");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0679));
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
@@ -18655,7 +18709,7 @@ std::optional<LRESULT> RouteColorCommand(
             }
             const InkpodStatus status = ReplacePalette(*state, context, colors);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"カラーパレット編集");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0164));
             }
             RefreshColorPanes(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -18691,8 +18745,8 @@ std::optional<LRESULT> RouteColorCommand(
         }
         case IDM_CHART_GENERATE: {
             ViewOptionsDialogState dialog{};
-            dialog.title = L"セルからカラーチャートを作成";
-            dialog.labels = {L"最大色数", L"量子化で捨てる下位bit (0-7)", nullptr, nullptr};
+            dialog.title = UiText(UiStringId::Text0222);
+            dialog.labels = {UiText(UiStringId::Text0734), UiText(UiStringId::Text1007), nullptr, nullptr};
             dialog.values = {256, 2, 0, 0};
             dialog.value_count = 2U;
             if (state->lifetime.smoke_test) {
@@ -18713,14 +18767,14 @@ std::optional<LRESULT> RouteColorCommand(
                 static_cast<std::uint32_t>(dialog.values[0]),
                 static_cast<std::uint32_t>(dialog.values[1]));
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"カラーチャート生成");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0160));
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
         case IDM_CHART_SEARCH: {
             TextInputDialogState dialog{};
-            dialog.title = L"カラーチャート検索";
-            dialog.label = L"名前または番号";
+            dialog.title = UiText(UiStringId::Text0159);
+            dialog.label = UiText(UiStringId::Text0568);
             dialog.value = state->lifetime.smoke_test ? L"Smoke" : L"";
             if (ShowTextInput(
                     state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
@@ -18779,7 +18833,7 @@ std::optional<LRESULT> RouteColorCommand(
             if (status == INKPOD_STATUS_OK) {
                 RefreshColorPanes(*state);
             } else {
-                ShowCoreError(*state, window, L"カラーチャートのロック");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0157));
             }
             UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -18802,8 +18856,8 @@ std::optional<LRESULT> RouteColorCommand(
                 return 0;
             }
             TextInputDialogState dialog{};
-            dialog.title = L"カラーチャート名";
-            dialog.label = L"名前";
+            dialog.title = UiText(UiStringId::Text0158);
+            dialog.label = UiText(UiStringId::Text0567);
             dialog.value = state->lifetime.smoke_test ? L"Smoke Color" : state->Workspace().panes.color_chart_names[index];
             if (ShowTextInput(
                     state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
@@ -19040,7 +19094,7 @@ std::optional<LRESULT> RouteColorCommand(
                       true,
                       true);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"彩色チェック表示");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0654));
             } else {
                 state->ActiveView().presentation.color_check_mode = mode;
             }
@@ -19068,7 +19122,7 @@ std::optional<LRESULT> RouteApplicationCommand(
             const InkpodStatus status = CreateNewCut(*state, window);
             if (status != INKPOD_STATUS_OK
                 && status != INKPOD_STATUS_CANCELLED) {
-                ShowCoreError(*state, window, L"新規カット");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0710));
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
@@ -19076,14 +19130,14 @@ std::optional<LRESULT> RouteApplicationCommand(
             const InkpodStatus status = EditCutProperties(*state, window);
             if (status != INKPOD_STATUS_OK
                 && status != INKPOD_STATUS_CANCELLED) {
-                ShowCoreError(*state, window, L"カットのプロパティ");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0146));
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
         case IDM_CUT_SAVE: {
             const InkpodStatus status = SaveWorkspaceCut(*state);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"カットを保存");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0149));
             }
             UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -19093,7 +19147,7 @@ std::optional<LRESULT> RouteApplicationCommand(
             const InkpodStatus status = MoveCutHistory(
                 *state, LOWORD(wparam) == IDM_CUT_REDO);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"カット履歴");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0154));
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
@@ -19124,7 +19178,7 @@ std::optional<LRESULT> RouteApplicationCommand(
             }
             if (status != INKPOD_STATUS_OK
                 && status != INKPOD_STATUS_CANCELLED) {
-                ShowCoreError(*state, window, L"カットのセル系列編集");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0144));
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
@@ -19149,7 +19203,7 @@ std::optional<LRESULT> RouteApplicationCommand(
                 || (!enabled && !ClearPreviousDocumentPaths())) {
                 MessageBoxW(
                     window,
-                    L"前回の文書を復元する設定を保存できませんでした。",
+                    UiText(UiStringId::Text0535),
                     L"inkpod",
                     MB_OK | MB_ICONERROR);
                 return 0;
@@ -19167,7 +19221,7 @@ std::optional<LRESULT> RouteApplicationCommand(
             if (!SaveSequenceCellSwitchPolicy(policy)) {
                 MessageBoxW(
                     window,
-                    L"セル切替時の保存方法を保存できませんでした。",
+                    UiText(UiStringId::Text0229),
                     L"inkpod",
                     MB_OK | MB_ICONERROR);
                 return 0;
@@ -19383,7 +19437,7 @@ std::optional<LRESULT> RouteApplicationCommand(
             if (!saved && !state->lifetime.smoke_test) {
                 MessageBoxW(
                     window,
-                    L"現在のワークスペース配置を保存できませんでした。",
+                    UiText(UiStringId::Text0785),
                     L"inkpod",
                     MB_OK | MB_ICONWARNING);
             }
@@ -19391,12 +19445,12 @@ std::optional<LRESULT> RouteApplicationCommand(
         }
         case IDM_WORKSPACE_SAVE_AS: {
             TextInputDialogState dialog{};
-            dialog.title = L"ワークスペースに名前を付けて保存";
-            dialog.label = L"名前";
+            dialog.title = UiText(UiStringId::Text0416);
+            dialog.label = UiText(UiStringId::Text0567);
             const WorkspaceLayoutState& current =
                 state->Workspace().windows.workspace;
             dialog.value = current.custom_name[0] == L'\0'
-                ? L"ユーザーワークスペース"
+                ? UiText(UiStringId::Text0362)
                 : current.custom_name.data();
             dialog.close_immediately = state->lifetime.smoke_test;
             if (ShowTextInput(
@@ -19413,7 +19467,7 @@ std::optional<LRESULT> RouteApplicationCommand(
                 if (!state->lifetime.smoke_test) {
                     MessageBoxW(
                         window,
-                        L"ワークスペース名は1〜63文字で指定してください。",
+                        UiText(UiStringId::Text0418),
                         L"inkpod",
                         MB_OK | MB_ICONWARNING);
                 }
@@ -19450,7 +19504,7 @@ std::optional<LRESULT> RouteApplicationCommand(
             } else if (!state->lifetime.smoke_test) {
                 MessageBoxW(
                     window,
-                    L"保存されたワークスペース配置がありません。",
+                    UiText(UiStringId::Text0467),
                     L"inkpod",
                     MB_OK | MB_ICONINFORMATION);
             }
@@ -19521,7 +19575,7 @@ std::optional<LRESULT> RouteApplicationCommand(
                       *state->engine, state->shortcuts, !state->lifetime.smoke_test);
             if (status != INKPOD_STATUS_OK) {
                 ShowShortcutError(
-                    *state, window, L"ショートカットの初期化", status);
+                    *state, window, UiText(UiStringId::Text0199), status);
             }
             UpdateMenuState(*state);
             return 0;
@@ -19538,7 +19592,7 @@ std::optional<LRESULT> RouteApplicationCommand(
                         binding});
                 }
             } catch (const std::bad_alloc&) {
-                ShowCoreError(*state, window, L"ショートカット一覧の作成");
+                ShowCoreError(*state, window, UiText(UiStringId::Text0201));
                 return 0;
             }
             if (ShowShortcutEditor(
@@ -19556,7 +19610,7 @@ std::optional<LRESULT> RouteApplicationCommand(
                       dialog_state.sequence,
                       !state->lifetime.smoke_test);
             if (status != INKPOD_STATUS_OK) {
-                ShowShortcutError(*state, window, L"ショートカット編集", status);
+                ShowShortcutError(*state, window, UiText(UiStringId::Text0202), status);
                 if (status == INKPOD_STATUS_IO_ERROR) {
                     UpdateMenuState(*state);
                     return 1;
@@ -19564,6 +19618,38 @@ std::optional<LRESULT> RouteApplicationCommand(
                 return 0;
             }
             UpdateMenuState(*state);
+            return 1;
+        }
+        case IDM_LANGUAGE_SYSTEM:
+        case IDM_LANGUAGE_JAPANESE:
+        case IDM_LANGUAGE_ENGLISH: {
+            UiLanguagePreference preference = UiLanguagePreference::System;
+            if (LOWORD(wparam) == IDM_LANGUAGE_JAPANESE) {
+                preference = UiLanguagePreference::Japanese;
+            } else if (LOWORD(wparam) == IDM_LANGUAGE_ENGLISH) {
+                preference = UiLanguagePreference::English;
+            }
+            if (preference == CurrentUiLanguagePreference()) {
+                return 0;
+            }
+            if (!SaveUiLanguagePreference(preference)) {
+                if (!state->lifetime.smoke_test) {
+                    MessageBoxW(
+                        window,
+                        UiText(UiStringId::Text0912),
+                        L"inkpod",
+                        MB_OK | MB_ICONERROR);
+                }
+                return 0;
+            }
+            UpdateMenuState(*state);
+            if (!state->lifetime.smoke_test) {
+                MessageBoxW(
+                    window,
+                    UiText(UiStringId::Text0911),
+                    L"inkpod",
+                    MB_OK | MB_ICONINFORMATION);
+            }
             return 1;
         }
         case IDM_HELP_MANUAL:
@@ -20056,7 +20142,7 @@ std::optional<LRESULT> RouteCanvasMessage(
                     const InkpodStatus status = HandleShootingFrameCanvasEvent(
                         *state, *input);
                     if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
-                        ShowCoreError(*state, window, L"撮影フレームのハンドル編集");
+                        ShowCoreError(*state, window, UiText(UiStringId::Text0685));
                     }
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::End
                         || input->kind
@@ -20070,7 +20156,7 @@ std::optional<LRESULT> RouteCanvasMessage(
                     const InkpodStatus status = HandleVanishingPointCanvasEvent(
                         *state, *input);
                     if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
-                        ShowCoreError(*state, window, L"消失点のハンドル編集");
+                        ShowCoreError(*state, window, UiText(UiStringId::Text0769));
                     }
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::End
                         || input->kind
@@ -20091,7 +20177,7 @@ std::optional<LRESULT> RouteCanvasMessage(
                             input->samples[static_cast<std::size_t>(
                                 input->sample_count - 1U)]);
                         if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
-                            ShowCoreError(*state, window, L"ガイド移動");
+                            ShowCoreError(*state, window, UiText(UiStringId::ToolGuideMove));
                         }
                         UpdateMenuState(*state);
                     }
@@ -20135,7 +20221,7 @@ std::optional<LRESULT> RouteCanvasMessage(
                                   state->ActiveView().presentation.gesture_samples.back());
                         state->ActiveView().presentation.gesture_samples.clear();
                         if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
-                            ShowCoreError(*state, window, L"範囲拡大");
+                            ShowCoreError(*state, window, UiText(UiStringId::ToolBoxZoom));
                         }
                         UpdateMenuState(*state);
                     }
@@ -20147,7 +20233,7 @@ std::optional<LRESULT> RouteCanvasMessage(
                     const InkpodStatus status = EyedropAtDevicePoint(
                         *state, input->samples[0].x, input->samples[0].y);
                     if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
-                        ShowCoreError(*state, window, L"スポイト");
+                        ShowCoreError(*state, window, UiText(UiStringId::ToolEyedropper));
                     }
                     UpdateMenuState(*state);
                     return 1;
@@ -20183,7 +20269,7 @@ std::optional<LRESULT> RouteCanvasMessage(
                             state->Workspace().tools.floating_gesture_samples.back(),
                             input->kind == inkpod::renderer::CanvasStrokeEventKind::Begin);
                         if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
-                            ShowCoreError(*state, window, L"フローティングハンドル変形");
+                            ShowCoreError(*state, window, UiText(UiStringId::Text0306));
                         }
                     }
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::End) {
@@ -20228,7 +20314,7 @@ std::optional<LRESULT> RouteCanvasMessage(
                         state->Workspace().panes.light_table_move_samples.clear();
                         state->Workspace().panes.light_table_move_context.reset();
                         if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
-                            ShowCoreError(*state, window, L"ライトテーブル移動");
+                            ShowCoreError(*state, window, UiText(UiStringId::ToolLightTableMove));
                         }
                         RefreshLightTablePane(*state);
                     }
@@ -20242,7 +20328,7 @@ std::optional<LRESULT> RouteCanvasMessage(
                 if (IsVectorCanvasTool(procedure_tool)) {
                     const InkpodStatus status = HandleVectorCanvasEvent(*state, *input);
                     if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
-                        ShowCoreError(*state, window, L"図形Canvas操作");
+                        ShowCoreError(*state, window, UiText(UiStringId::Text0581));
                     }
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::End
                         || input->kind == inkpod::renderer::CanvasStrokeEventKind::Cancel) {
@@ -20339,7 +20425,7 @@ std::optional<LRESULT> RouteCanvasMessage(
                             state->Workspace().windows.canvas);
                         if (status != INKPOD_STATUS_OK
                             && !state->lifetime.smoke_test) {
-                            ShowCoreError(*state, window, L"色置換");
+                            ShowCoreError(*state, window, UiText(UiStringId::ToolColorReplacement));
                         }
                         UpdateMenuState(*state);
                     }
@@ -20402,7 +20488,7 @@ std::optional<LRESULT> RouteCanvasMessage(
                                 0,
                                 0);
                             if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
-                                ShowCoreError(*state, window, L"色の杖");
+                                ShowCoreError(*state, window, UiText(UiStringId::Text0868));
                             }
                             UpdateMenuState(*state);
                         } else if (input->kind
@@ -20422,7 +20508,7 @@ std::optional<LRESULT> RouteCanvasMessage(
                         CancelSelectionGeometryPreview(
                             state->Workspace().tools, state->Workspace().windows.canvas);
                         if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
-                            ShowCoreError(*state, window, L"選択範囲");
+                            ShowCoreError(*state, window, UiText(UiStringId::LayerSelection));
                         }
                         UpdateMenuState(*state);
                     }
@@ -20459,7 +20545,7 @@ std::optional<LRESULT> RouteCanvasMessage(
                             if (status != INKPOD_STATUS_OK
                                 && status != INKPOD_STATUS_FILL_OVERFLOW
                                 && !state->lifetime.smoke_test) {
-                                ShowCoreError(*state, window, L"フィル");
+                                ShowCoreError(*state, window, UiText(UiStringId::Text0283));
                             }
                             UpdateMenuState(*state);
                         }
@@ -20504,7 +20590,7 @@ std::optional<LRESULT> RouteCanvasMessage(
                         if (status != INKPOD_STATUS_OK
                             && status != INKPOD_STATUS_FILL_OVERFLOW
                             && !state->lifetime.smoke_test) {
-                            ShowCoreError(*state, window, L"範囲フィル");
+                            ShowCoreError(*state, window, UiText(UiStringId::Text0840));
                         }
                         UpdateMenuState(*state);
                     }
@@ -20626,7 +20712,7 @@ std::optional<LRESULT> RouteCanvasMessage(
                         state->effects.gesture_options_valid = false;
                         ClearEditorProcedureCapture(*state);
                         if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
-                            ShowCoreError(*state, window, L"Canvas効果");
+                            ShowCoreError(*state, window, UiText(UiStringId::Text0051));
                         }
                         UpdateMenuState(*state);
                     }
@@ -21129,8 +21215,8 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                 if (!state->lifetime.smoke_test) {
                     MessageBoxW(
                         completion_workspace->windows.window,
-                        L"Color chart の生成に失敗しました。文書状態と設定を確認してください。",
-                        L"Color chart 生成",
+                        UiText(UiStringId::Text0052),
+                        UiText(UiStringId::Text0053),
                         MB_OK | MB_ICONERROR);
                 }
                 return 0;
@@ -21138,12 +21224,12 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
 
             const auto& summary = job->summary;
             std::wstring comparison =
-                L"候補: " + std::to_wstring(summary.entry_count)
-                + L" / 元の固有色: "
+                UiText(UiStringId::Text0479) + std::to_wstring(summary.entry_count)
+                + UiText(UiStringId::Text0008)
                 + std::to_wstring(summary.source_unique_color_count)
-                + L"\n維持: " + std::to_wstring(summary.retained_color_count)
-                + L"  追加: " + std::to_wstring(summary.added_color_count)
-                + L"  削除: " + std::to_wstring(summary.removed_color_count);
+                + UiText(UiStringId::Text0004) + std::to_wstring(summary.retained_color_count)
+                + UiText(UiStringId::Text0006) + std::to_wstring(summary.added_color_count)
+                + UiText(UiStringId::Text0005) + std::to_wstring(summary.removed_color_count);
             const std::uint64_t representatives = std::min<std::uint64_t>(
                 5U, summary.entry_count);
             for (std::uint64_t index = 0; index < representatives; ++index) {
@@ -21172,10 +21258,10 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                       completion_workspace->windows.window,
                       (comparison
                        + (overflow
-                              ? L"\n\n上限を超えています。設定を変更してください。"
-                              : L"\n\nこの結果を適用しますか？\n「いいえ」で設定を変更できます。"))
+                              ? UiText(UiStringId::Text0002)
+                              : UiText(UiStringId::Text0001)))
                           .c_str(),
-                      L"Color chart 生成結果の比較",
+                      UiText(UiStringId::Text0054),
                       overflow ? MB_RETRYCANCEL | MB_ICONWARNING
                                : MB_YESNOCANCEL | MB_ICONQUESTION);
             if (!overflow && decision == IDYES) {
@@ -21194,7 +21280,7 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                     ShowCoreError(
                         *state,
                         completion_workspace->windows.window,
-                        L"カラーチャート生成結果の適用");
+                        UiText(UiStringId::Text0161));
                     return 0;
                 }
                 (void)state->ActivateWorkspaceWindow(
@@ -21280,7 +21366,7 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                             ShowCoreError(
                                 *state,
                                 completion_workspace->windows.window,
-                                L"出力色安全ガード");
+                                UiText(UiStringId::Text0517));
                         }
                     }
                     UpdateMenuState(*state);
@@ -21304,8 +21390,8 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                     const int choice = target_current
                         ? MessageBoxW(
                               window,
-                              L"Canvasのプレビューを適用しますか？\nキャンセルすると元の状態へ完全に戻ります。",
-                              L"画像処理プレビュー",
+                              UiText(UiStringId::Text0050),
+                              UiText(UiStringId::Text0808),
                               MB_OKCANCEL | MB_ICONQUESTION)
                         : IDCANCEL;
                     const InkpodStatus preview_status = state->engine->Invoke(
@@ -21324,7 +21410,7 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                         true,
                         true);
                     if (preview_status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"画像処理プレビューの確定");
+                        ShowCoreError(*state, window, UiText(UiStringId::Text0810));
                     }
                 }
                 UpdateMenuState(*state);
@@ -21375,7 +21461,7 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                     try {
                         state->batch.last_result = BatchReportSummary(state->batch.report);
                     } catch (const std::bad_alloc&) {
-                        state->batch.last_result = L"レポート表示用メモリが不足しました";
+                        state->batch.last_result = UiText(UiStringId::Text0410);
                     }
                 } else if (!target_valid) {
                     inkpod_batch_report_release(&state->batch.report);
@@ -21400,15 +21486,15 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                 state->batch.completion_context = {};
                 state->batch.return_context = {};
                 state->batch.job_text = status == INKPOD_STATUS_OK
-                    ? L"完了"
+                    ? UiText(UiStringId::Text0621)
                     : (status == INKPOD_STATUS_CANCELLED
-                              ? L"キャンセル"
-                              : L"失敗");
+                              ? UiText(UiStringId::Text0171)
+                              : UiText(UiStringId::Text0616));
                 if (!completed_target.empty()) {
                     state->batch.job_text += L": " + completed_target;
                 }
                 if (!target_valid) {
-                    state->batch.job_text += L"（対象を閉じたため結果を破棄）";
+                    state->batch.job_text += UiText(UiStringId::Text1047);
                 }
                 UpdateBatchTarget(*state);
                 RefreshBatchPalette(state->batch, state->Workspace().batch_palette);
@@ -21416,7 +21502,7 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                 if (target_valid && status != INKPOD_STATUS_OK
                     && status != INKPOD_STATUS_CANCELLED
                     && !state->lifetime.smoke_test) {
-                    ShowCoreError(*state, window, L"バッチ実行");
+                    ShowCoreError(*state, window, UiText(UiStringId::Text0267));
                 }
             }
             return 0;
@@ -21435,7 +21521,7 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                     && notification.context.document_session.value()
                         == state->routing.targets.DocumentSession();
                 if (target_current && !state->lifetime.smoke_test) {
-                    ShowCoreError(*state, window, L"非同期処理");
+                    ShowCoreError(*state, window, UiText(UiStringId::Text1034));
                 }
             return 0;
         }
@@ -21503,7 +21589,7 @@ std::optional<LRESULT> RouteTimerAndCloseMessage(
                         DisarmCommandTimer(
                             *state, window, CommandTimerKind::MotionPlayback);
                         if (!state->lifetime.smoke_test) {
-                            ShowCoreError(*state, window, L"モーション再生");
+                            ShowCoreError(*state, window, UiText(UiStringId::Text0359));
                         }
                     }
                 }
@@ -21576,7 +21662,7 @@ std::optional<LRESULT> RouteTimerAndCloseMessage(
             if (state == nullptr || !state->lifetime.smoke_test) {
                 MessageBoxW(
                     window,
-                    L"Canvas renderer の描画に失敗しました。",
+                    UiText(UiStringId::Text0043),
                     L"inkpod",
                     MB_OK | MB_ICONERROR);
             }

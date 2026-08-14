@@ -1,3 +1,7 @@
+#include "ui/ui_resources.h"
+
+#include "ui/localization.h"
+
 #include "batch_dialog.h"
 
 #include <algorithm>
@@ -12,31 +16,31 @@ namespace {
 
 constexpr UINT_PTR kBatchRefreshTimer = 1U;
 
-constexpr std::array<BatchPaletteEntry, 24U> kBatchPaletteEntries{{
-    {IDM_BATCH_ADD_COLOR_REPLACE, L"色置換"},
-    {IDM_BATCH_ADD_CONTINUOUS_FILL, L"連続フィル"},
-    {IDM_BATCH_ADD_SEPARATION, L"色分解"},
-    {IDM_BATCH_ADD_VISIBILITY, L"レイヤー表示"},
-    {IDM_BATCH_ADD_LINE_WIDTH, L"線幅"},
-    {IDM_BATCH_ADD_BOUNDARY_AIRBRUSH, L"境界色エアブラシ"},
-    {IDM_BATCH_ADD_DUST, L"ゴミ取り"},
-    {IDM_BATCH_ADD_MIRROR, L"鏡像"},
-    {IDM_BATCH_ADD_ROTATE, L"90度回転"},
-    {IDM_BATCH_ADD_RESIZE, L"画像サイズ・解像度"},
-    {IDM_BATCH_ADD_CONVERT, L"ラスター変換"},
-    {IDM_BATCH_ADD_FILTER_SHARPEN_WEAK, L"フィルタ: シャープ（弱）"},
-    {IDM_BATCH_ADD_FILTER_SHARPEN_STRONG, L"フィルタ: シャープ（強）"},
-    {IDM_BATCH_ADD_FILTER_BLUR_WEAK, L"フィルタ: ぼかし（弱）"},
-    {IDM_BATCH_ADD_FILTER_BLUR_STRONG, L"フィルタ: ぼかし（強）"},
-    {IDM_BATCH_ADD_FILTER_GAUSSIAN, L"フィルタ: ガウスぼかし"},
-    {IDM_BATCH_ADD_FILTER_INVERT, L"フィルタ: 階調反転"},
-    {IDM_BATCH_ADD_FILTER_AUTO_CONTRAST, L"フィルタ: 自動コントラスト"},
-    {IDM_BATCH_ADD_FILTER_BRIGHTNESS, L"フィルタ: 明るさ・コントラスト"},
-    {IDM_BATCH_ADD_FILTER_TONE_CURVE, L"フィルタ: トーンカーブ"},
-    {IDM_BATCH_ADD_FILTER_LEVELS, L"フィルタ: レベル補正"},
-    {IDM_BATCH_ADD_FILTER_HSV, L"フィルタ: HSV"},
-    {IDM_BATCH_ADD_FILTER_COLOR_BALANCE, L"フィルタ: カラーバランス"},
-    {IDM_BATCH_ADD_FILTER_UNSHARP, L"フィルタ: アンシャープ"},
+const std::array<BatchPaletteEntry, 24U> kBatchPaletteEntries{{
+    {IDM_BATCH_ADD_COLOR_REPLACE, UiText(UiStringId::ToolColorReplacement)},
+    {IDM_BATCH_ADD_CONTINUOUS_FILL, UiText(UiStringId::Text0970)},
+    {IDM_BATCH_ADD_SEPARATION, UiText(UiStringId::Text0870)},
+    {IDM_BATCH_ADD_VISIBILITY, UiText(UiStringId::Text0406)},
+    {IDM_BATCH_ADD_LINE_WIDTH, UiText(UiStringId::Text0848)},
+    {IDM_BATCH_ADD_BOUNDARY_AIRBRUSH, UiText(UiStringId::Text0603)},
+    {IDM_BATCH_ADD_DUST, UiText(UiStringId::ToolDustRemoval)},
+    {IDM_BATCH_ADD_MIRROR, UiText(UiStringId::Text1009)},
+    {IDM_BATCH_ADD_ROTATE, UiText(UiStringId::Text0039)},
+    {IDM_BATCH_ADD_RESIZE, UiText(UiStringId::Text0804)},
+    {IDM_BATCH_ADD_CONVERT, UiText(UiStringId::Text0385)},
+    {IDM_BATCH_ADD_FILTER_SHARPEN_WEAK, UiText(UiStringId::Text0293)},
+    {IDM_BATCH_ADD_FILTER_SHARPEN_STRONG, UiText(UiStringId::Text0294)},
+    {IDM_BATCH_ADD_FILTER_BLUR_WEAK, UiText(UiStringId::Text0288)},
+    {IDM_BATCH_ADD_FILTER_BLUR_STRONG, UiText(UiStringId::Text0289)},
+    {IDM_BATCH_ADD_FILTER_GAUSSIAN, UiText(UiStringId::Text0292)},
+    {IDM_BATCH_ADD_FILTER_INVERT, UiText(UiStringId::Text0299)},
+    {IDM_BATCH_ADD_FILTER_AUTO_CONTRAST, UiText(UiStringId::Text0298)},
+    {IDM_BATCH_ADD_FILTER_BRIGHTNESS, UiText(UiStringId::Text0297)},
+    {IDM_BATCH_ADD_FILTER_TONE_CURVE, UiText(UiStringId::Text0295)},
+    {IDM_BATCH_ADD_FILTER_LEVELS, UiText(UiStringId::Text0296)},
+    {IDM_BATCH_ADD_FILTER_HSV, UiText(UiStringId::Text0287)},
+    {IDM_BATCH_ADD_FILTER_COLOR_BALANCE, UiText(UiStringId::Text0291)},
+    {IDM_BATCH_ADD_FILTER_UNSHARP, UiText(UiStringId::Text0290)},
 }};
 
 void DispatchCommand(BatchPaletteDialogState& state, UINT command) noexcept {
@@ -340,7 +344,7 @@ const std::array<BatchPaletteEntry, 24U>& BatchPaletteEntries() noexcept {
 
 HWND CreateBatchPaletteDialog(
     HINSTANCE instance, HWND owner, BatchPaletteDialogState& state) noexcept {
-    return CreateDialogParamW(
+    return CreateLocalizedDialogParamW(
         instance,
         MAKEINTRESOURCEW(IDD_BATCH_PALETTE),
         owner,
@@ -369,7 +373,7 @@ void UpdateBatchPaletteDialog(
     SetDlgItemTextW(
         dialog,
         IDC_BATCH_PIN,
-        view.pinned ? L"追従へ戻す" : L"文書に固定");
+        view.pinned ? UiText(UiStringId::ReturnToFollowing) : UiText(UiStringId::PinDocument));
     EnableWindow(
         GetDlgItem(dialog, IDC_BATCH_PIN),
         view.target_available && view.idle ? TRUE : FALSE);

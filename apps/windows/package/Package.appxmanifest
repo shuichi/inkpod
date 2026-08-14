@@ -47,7 +47,7 @@
       <Extensions>
         <uap:Extension Category="windows.fileTypeAssociation">
           <uap:FileTypeAssociation Name="inkpod">
-            <uap:DisplayName>inkpod セル</uap:DisplayName>
+            <uap:DisplayName>inkpod (.inkpod)</uap:DisplayName>
             <uap:SupportedFileTypes>
               <uap:FileType>.inkpod</uap:FileType>
             </uap:SupportedFileTypes>

@@ -3,6 +3,7 @@
 #include <commdlg.h>
 #include <oleacc.h>
 #include <shlobj.h>
+#include <uiautomation.h>
 #include <windowsx.h>
 
 #include <algorithm>
@@ -56,6 +57,7 @@
 #include "ui/batch_controller.h"
 #include "ui/main_window.h"
 #include "ui/main_window_runtime.h"
+#include "ui/localization.h"
 
 #include "app/app_smoke.h"
 
@@ -184,6 +186,163 @@ bool WindowHasVisibleStyle(HWND window) noexcept {
         && (static_cast<DWORD>(GetWindowLongPtrW(window, GWL_STYLE))
             & WS_VISIBLE)
             != 0U;
+}
+
+bool AutomationWindowNameContains(
+    HWND window, std::wstring_view expected) noexcept {
+    if (window == nullptr || expected.empty()) {
+        return false;
+    }
+    IUIAutomation* automation = nullptr;
+    IUIAutomationElement* element = nullptr;
+    BSTR name = nullptr;
+    const HRESULT create_result = CoCreateInstance(
+        CLSID_CUIAutomation,
+        nullptr,
+        CLSCTX_INPROC_SERVER,
+        IID_PPV_ARGS(&automation));
+    const HRESULT element_result = SUCCEEDED(create_result) && automation != nullptr
+        ? automation->ElementFromHandle(window, &element)
+        : E_FAIL;
+    const HRESULT name_result = SUCCEEDED(element_result) && element != nullptr
+        ? element->get_CurrentName(&name)
+        : E_FAIL;
+    const bool contains = SUCCEEDED(name_result) && name != nullptr
+        && std::wstring_view(name, SysStringLen(name)).find(expected)
+            != std::wstring_view::npos;
+    SysFreeString(name);
+    if (element != nullptr) {
+        element->Release();
+    }
+    if (automation != nullptr) {
+        automation->Release();
+    }
+    return contains;
+}
+
+bool IsJapaneseCodePoint(std::uint32_t value) noexcept {
+    return (value >= 0x3000U && value <= 0x303fU)
+        || (value >= 0x3040U && value <= 0x30ffU)
+        || (value >= 0x3190U && value <= 0x319fU)
+        || (value >= 0x31c0U && value <= 0x31efU)
+        || (value >= 0x31f0U && value <= 0x31ffU)
+        || (value >= 0x3400U && value <= 0x4dbfU)
+        || (value >= 0x4e00U && value <= 0x9fffU)
+        || (value >= 0xf900U && value <= 0xfaffU)
+        || (value >= 0xff65U && value <= 0xff9fU)
+        || (value >= 0x20000U && value <= 0x2fa1fU);
+}
+
+bool HasJapaneseCharacters(std::wstring_view text) noexcept {
+    if (CurrentUiLanguage() != UiLanguage::English) {
+        return false;
+    }
+    for (std::size_t index = 0U; index < text.size(); ++index) {
+        std::uint32_t value = static_cast<std::uint16_t>(text[index]);
+        if (value >= 0xd800U && value <= 0xdbffU && index + 1U < text.size()) {
+            const std::uint32_t low = static_cast<std::uint16_t>(text[index + 1U]);
+            if (low >= 0xdc00U && low <= 0xdfffU) {
+                value = 0x10000U + ((value - 0xd800U) << 10U) + (low - 0xdc00U);
+                ++index;
+            }
+        }
+        if (IsJapaneseCodePoint(value)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool ExerciseOwnerDraw(
+    HWND parent, HWND item, UINT control_id, UINT item_id) noexcept {
+    if (parent == nullptr || item == nullptr) {
+        return false;
+    }
+    const HWND item_parent = GetParent(item);
+    if (item_parent != nullptr) {
+        parent = item_parent;
+    }
+    HDC window_dc = GetDC(parent);
+    HDC memory_dc = window_dc == nullptr ? nullptr : CreateCompatibleDC(window_dc);
+    HBITMAP bitmap = memory_dc == nullptr
+        ? nullptr
+        : CreateCompatibleBitmap(window_dc, 512, 128);
+    HGDIOBJ previous = bitmap == nullptr
+        ? nullptr
+        : SelectObject(memory_dc, bitmap);
+    const COLORREF sentinel = RGB(1, 2, 3);
+    HBRUSH brush = CreateSolidBrush(sentinel);
+    RECT bounds{0, 0, 512, 128};
+    if (memory_dc != nullptr && brush != nullptr) {
+        FillRect(memory_dc, &bounds, brush);
+    }
+    DRAWITEMSTRUCT draw{};
+    draw.CtlType = ODT_LISTBOX;
+    draw.CtlID = control_id;
+    draw.itemID = item_id;
+    draw.itemAction = ODA_DRAWENTIRE;
+    draw.hwndItem = item;
+    draw.hDC = memory_dc;
+    draw.rcItem = bounds;
+    const bool handled = memory_dc != nullptr && bitmap != nullptr
+        && SendMessageW(
+               parent,
+               WM_DRAWITEM,
+               static_cast<WPARAM>(control_id),
+               reinterpret_cast<LPARAM>(&draw)) != FALSE;
+    const COLORREF rendered_pixel = memory_dc == nullptr
+        ? CLR_INVALID
+        : GetPixel(memory_dc, 1, 1);
+    const bool changed = rendered_pixel != CLR_INVALID && rendered_pixel != sentinel;
+    if (brush != nullptr) {
+        DeleteObject(brush);
+    }
+    if (previous != nullptr) {
+        SelectObject(memory_dc, previous);
+    }
+    if (bitmap != nullptr) {
+        DeleteObject(bitmap);
+    }
+    if (memory_dc != nullptr) {
+        DeleteDC(memory_dc);
+    }
+    if (window_dc != nullptr) {
+        ReleaseDC(parent, window_dc);
+    }
+    return handled || changed;
+}
+
+bool ReadListItemText(HWND list, int index, std::wstring& text) {
+    const LRESULT length = SendMessageW(list, LB_GETTEXTLEN, index, 0);
+    if (length == LB_ERR || length < 0 || length > 1024) {
+        return false;
+    }
+    text.assign(static_cast<std::size_t>(length) + 1U, L'\0');
+    if (SendMessageW(
+            list,
+            LB_GETTEXT,
+            index,
+            reinterpret_cast<LPARAM>(text.data())) == LB_ERR) {
+        return false;
+    }
+    text.resize(static_cast<std::size_t>(length));
+    return !text.empty();
+}
+
+bool StatusBarPartStartsWith(
+    HWND status_bar, int part, std::wstring_view prefix) noexcept {
+    if (status_bar == nullptr || prefix.empty()) {
+        return false;
+    }
+    std::array<wchar_t, 512U> text{};
+    const LRESULT length = SendMessageW(
+        status_bar,
+        SB_GETTEXTW,
+        static_cast<WPARAM>(part),
+        reinterpret_cast<LPARAM>(text.data()));
+    const std::wstring_view actual(text.data());
+    return length > 0 && actual.starts_with(prefix)
+        && !HasJapaneseCharacters(actual);
 }
 
 bool AccessibleChildNameContains(
@@ -539,10 +698,12 @@ int RunLocatorPaneSmoke(ApplicationHost& state) noexcept {
     if (TabCtrl_GetItem(locator_header, 0, &locator_tab) == FALSE) {
         return 990;
     }
-    if (std::wcscmp(locator_title.data(), L"ロケーター") != 0) {
+    if (std::wcscmp(
+            locator_title.data(), std::wstring(UiText(UiStringId::Text0411)).c_str()) != 0) {
         return 991;
     }
-    if (!AccessibleChildNameContains(locator_header, L"ロケーター")) {
+    if (!AccessibleChildNameContains(
+            locator_header, std::wstring(UiText(UiStringId::Text0411)))) {
         return 992;
     }
     if (GetWindowRect(locator_header, &locator_header_bounds) == FALSE
@@ -559,7 +720,9 @@ int RunLocatorPaneSmoke(ApplicationHost& state) noexcept {
             IDC_LOCATOR_TARGET,
             target_text.data(),
             static_cast<int>(target_text.size())) <= 0
-        || std::wcsstr(target_text.data(), L"追従") == nullptr) {
+        || std::wcsstr(
+               target_text.data(), UiText(UiStringId::FollowingPrefix))
+            != target_text.data()) {
         return 852;
     }
     if (SendMessageW(
@@ -580,7 +743,10 @@ int RunLocatorPaneSmoke(ApplicationHost& state) noexcept {
                IDC_LOCATOR_TARGET,
                target_text.data(),
                static_cast<int>(target_text.size())) <= 0
-        || std::wcsstr(target_text.data(), L"固定") == nullptr) {
+        || std::wcsstr(
+               target_text.data(), UiText(UiStringId::PinnedPrefix))
+            != target_text.data()
+        || HasJapaneseCharacters(target_text.data())) {
         return 854;
     }
     if (SendMessageW(
@@ -615,7 +781,16 @@ int RunLocatorPaneSmoke(ApplicationHost& state) noexcept {
         || state.Workspace().locator_fixed_mode
         || !state.Workspace().locator_auto_scroll
         || state.routing.pane_targets.Find(state.routing.locator_pane)->policy
-            != inkpod::app::PaneTargetPolicy::FollowActiveView) {
+            != inkpod::app::PaneTargetPolicy::FollowActiveView
+        || GetDlgItemTextW(
+               pane,
+               IDC_LOCATOR_TARGET,
+               target_text.data(),
+               static_cast<int>(target_text.size())) <= 0
+        || std::wcsstr(
+               target_text.data(), UiText(UiStringId::FollowingPrefix))
+            != target_text.data()
+        || HasJapaneseCharacters(target_text.data())) {
         return 856;
     }
     if (SendMessageW(
@@ -667,7 +842,10 @@ int RunSequencePaneSmoke(ApplicationHost& state) noexcept {
             IDC_SEQUENCE_TARGET,
             target_text.data(),
             static_cast<int>(target_text.size())) <= 0
-        || std::wcsstr(target_text.data(), L"追従") == nullptr
+        || std::wcsstr(
+               target_text.data(), UiText(UiStringId::FollowingPrefix))
+            != target_text.data()
+        || HasJapaneseCharacters(target_text.data())
         || IsWindowEnabled(cells) != FALSE
         || SendMessageW(cells, LB_GETCOUNT, 0, 0) != 0) {
         return 869;
@@ -690,7 +868,10 @@ int RunSequencePaneSmoke(ApplicationHost& state) noexcept {
                IDC_SEQUENCE_TARGET,
                target_text.data(),
                static_cast<int>(target_text.size())) <= 0
-        || std::wcsstr(target_text.data(), L"固定") == nullptr) {
+        || std::wcsstr(
+               target_text.data(), UiText(UiStringId::PinnedPrefix))
+            != target_text.data()
+        || HasJapaneseCharacters(target_text.data())) {
         return 871;
     }
     if (SendMessageW(
@@ -699,7 +880,16 @@ int RunSequencePaneSmoke(ApplicationHost& state) noexcept {
             IDM_SEQUENCE_PIN,
             0) != 1
         || state.routing.pane_targets.Find(state.routing.sequence_pane)->policy
-            != inkpod::app::PaneTargetPolicy::FollowActiveView) {
+            != inkpod::app::PaneTargetPolicy::FollowActiveView
+        || GetDlgItemTextW(
+               pane,
+               IDC_SEQUENCE_TARGET,
+               target_text.data(),
+               static_cast<int>(target_text.size())) <= 0
+        || std::wcsstr(
+               target_text.data(), UiText(UiStringId::FollowingPrefix))
+            != target_text.data()
+        || HasJapaneseCharacters(target_text.data())) {
         return 872;
     }
     if (SendMessageW(
@@ -757,7 +947,10 @@ int RunLightTablePaneSmoke(ApplicationHost& state) noexcept {
             IDC_LIGHT_TABLE_TARGET,
             target_text.data(),
             static_cast<int>(target_text.size())) <= 0
-        || std::wcsstr(target_text.data(), L"追従") == nullptr
+        || std::wcsstr(
+               target_text.data(), UiText(UiStringId::FollowingPrefix))
+            != target_text.data()
+        || HasJapaneseCharacters(target_text.data())
         || SendMessageW(sets, CB_GETCOUNT, 0, 0) < 1
         || SendMessageW(items, LB_GETCOUNT, 0, 0) != 0
         || IsWindowEnabled(items) != FALSE) {
@@ -781,7 +974,10 @@ int RunLightTablePaneSmoke(ApplicationHost& state) noexcept {
                IDC_LIGHT_TABLE_TARGET,
                target_text.data(),
                static_cast<int>(target_text.size())) <= 0
-        || std::wcsstr(target_text.data(), L"固定") == nullptr) {
+        || std::wcsstr(
+               target_text.data(), UiText(UiStringId::PinnedPrefix))
+            != target_text.data()
+        || HasJapaneseCharacters(target_text.data())) {
         return 878;
     }
     if (SendMessageW(
@@ -791,6 +987,15 @@ int RunLightTablePaneSmoke(ApplicationHost& state) noexcept {
             0) != 1
         || state.routing.pane_targets.Find(state.routing.light_table_pane)->policy
             != inkpod::app::PaneTargetPolicy::FollowActiveView
+        || GetDlgItemTextW(
+               pane,
+               IDC_LIGHT_TABLE_TARGET,
+               target_text.data(),
+               static_cast<int>(target_text.size())) <= 0
+        || std::wcsstr(
+               target_text.data(), UiText(UiStringId::FollowingPrefix))
+            != target_text.data()
+        || HasJapaneseCharacters(target_text.data())
         || SendMessageW(
                state.Workspace().windows.window,
                WM_COMMAND,
@@ -846,7 +1051,10 @@ int RunSubpalettePaneSmoke(ApplicationHost& state) noexcept {
             IDC_SUBPALETTE_TARGET,
             target_text.data(),
             static_cast<int>(target_text.size())) <= 0
-        || std::wcsstr(target_text.data(), L"追従") == nullptr
+        || std::wcsstr(
+               target_text.data(), UiText(UiStringId::FollowingPrefix))
+            != target_text.data()
+        || HasJapaneseCharacters(target_text.data())
         || SendMessageW(
                state.Workspace().windows.window,
                WM_COMMAND,
@@ -1098,17 +1306,17 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_HELP_ABOUT, 0) != 1) {
         return 29;
     }
-    constexpr std::array<ViewOptionsDialogState::Choice, 2U> plane_kind_choices{{
-        {L"主線", INKPOD_TYPED_PLANE_MAIN_LINE},
-        {L"ラスター", INKPOD_TYPED_PLANE_RASTER},
+    const std::array<ViewOptionsDialogState::Choice, 2U> plane_kind_choices{{
+        {UiText(UiStringId::MainLine), INKPOD_TYPED_PLANE_MAIN_LINE},
+        {UiText(UiStringId::PlaneRaster), INKPOD_TYPED_PLANE_RASTER},
     }};
-    constexpr std::array<ViewOptionsDialogState::Choice, 2U> plane_format_choices{{
-        {L"2値", INKPOD_STORAGE_BINARY8},
+    const std::array<ViewOptionsDialogState::Choice, 2U> plane_format_choices{{
+        {UiText(UiStringId::Text0029), INKPOD_STORAGE_BINARY8},
         {L"RGBA", INKPOD_STORAGE_RGBA8},
     }};
     ViewOptionsDialogState dropdown_dialog{};
-    dropdown_dialog.title = L"共通ダイアログ smoke";
-    dropdown_dialog.labels = {L"種類", L"形式", L"不透明度", nullptr};
+    dropdown_dialog.title = UiText(UiStringId::Text0506);
+    dropdown_dialog.labels = {UiText(UiStringId::Text0828), UiText(UiStringId::FormatLabel), UiText(UiStringId::Opacity), nullptr};
     dropdown_dialog.values = {
         INKPOD_TYPED_PLANE_RASTER, INKPOD_STORAGE_RGBA8, 75, 0};
     dropdown_dialog.choices[0] = plane_kind_choices.data();
@@ -1177,16 +1385,49 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
             ToolPaletteEntries().end(),
             [&](const ToolPaletteEntry& entry) {
                 const HWND button = GetDlgItem(state.Workspace().tools.palette, entry.command);
-                const auto glyph_length =
-                    entry.glyph == nullptr ? 0U : std::wcslen(entry.glyph);
-                return glyph_length >= 2U && glyph_length <= 8U
-                    && std::wcschr(entry.glyph, L' ') == nullptr
-                    && std::wcschr(entry.glyph, L'　') == nullptr
+                const wchar_t* glyph = UiText(entry.glyph);
+                std::array<wchar_t, 64U> caption{};
+                const int caption_length = button == nullptr
+                    ? 0
+                    : GetWindowTextW(
+                        button,
+                        caption.data(),
+                        static_cast<int>(caption.size()));
+                const auto glyph_length = std::wcslen(glyph);
+                const bool msaa_name =
+                    AccessibleWindowNameContains(button, UiText(entry.label));
+                const bool automation_name =
+                    AutomationWindowNameContains(button, UiText(entry.label));
+                const bool owner_draw = ExerciseOwnerDraw(
+                    state.Workspace().tools.palette,
+                    button,
+                    entry.command,
+                    0U);
+                const bool valid = glyph_length >= 2U && glyph_length <= 16U
                     && button != nullptr
+                    && caption_length > 0
+                    && std::wstring_view(caption.data()) == UiText(entry.label)
+                    && msaa_name
+                    && automation_name
+                    && owner_draw
+                    && (CurrentUiLanguage() != UiLanguage::English
+                        || (!HasJapaneseCharacters(glyph)
+                            && !HasJapaneseCharacters(caption.data())))
                     && (static_cast<DWORD>(
                             GetWindowLongPtrW(button, GWL_STYLE))
                             & BS_TYPEMASK)
                         == BS_OWNERDRAW;
+                if (!valid) {
+                    std::fprintf(
+                        stderr,
+                        "tool localization smoke command=%u caption=%d msaa=%d uia=%d draw=%d\n",
+                        entry.command,
+                        caption_length,
+                        msaa_name ? 1 : 0,
+                        automation_name ? 1 : 0,
+                        owner_draw ? 1 : 0);
+                }
+                return valid;
             })) {
         return 746;
     }
@@ -1213,7 +1454,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         || brush_start_color == nullptr) {
         return 747;
     }
-    std::array<wchar_t, 32U> brush_start_color_text{};
+    std::array<wchar_t, 64U> brush_start_color_text{};
     if (GetWindowTextW(
             brush_start_color,
             brush_start_color_text.data(),
@@ -1221,7 +1462,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
             <= 0
         || std::wcscmp(
                brush_start_color_text.data(),
-               L"開始色の部分だけ塗る")
+               std::wstring(UiText(UiStringId::ToolFillMatchingStartColor)).c_str())
             != 0) {
         return 747;
     }
@@ -1336,7 +1577,8 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         || state.Workspace().panes.color_pane.change_main_line_color == nullptr
         || (GetWindowLongPtrW(color_eyedropper, GWL_STYLE) & BS_TYPEMASK)
             == BS_OWNERDRAW
-        || std::wcscmp(eyedropper_text.data(), L"スポイト") != 0) {
+        || std::wcscmp(
+               eyedropper_text.data(), std::wstring(UiText(UiStringId::ToolEyedropper)).c_str()) != 0) {
         return 783;
     }
     const auto is_opaque_black = [](const InkpodColorValue& color) noexcept {
@@ -1369,12 +1611,16 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         || state.Workspace().tools.color_rgba != UINT32_C(0x000000ff)
         || !is_opaque_black(state.Workspace().panes.main_line_color)
         || !is_opaque_black(state.Workspace().panes.color_pane.main_line_color)
-        || std::wcsstr(main_line_text.data(), L"主線色") == nullptr
+        || std::wcsstr(
+               main_line_text.data(), std::wstring(UiText(UiStringId::MainLineColor)).c_str()) == nullptr
         || std::wcsstr(main_line_text.data(), L"#000000FF") == nullptr
-        || std::wcsstr(drawing_text.data(), L"彩色用描画色") == nullptr
+        || std::wcsstr(
+               drawing_text.data(), std::wstring(UiText(UiStringId::DrawingColor)).c_str()) == nullptr
         || std::wcsstr(drawing_text.data(), L"#000000FF") == nullptr
-        || std::wcsstr(picker_text.data(), L"色相") == nullptr
-        || std::wcsstr(picker_text.data(), L"不透明度") == nullptr) {
+        || std::wcsstr(
+               picker_text.data(), std::wstring(UiText(UiStringId::Text0874)).c_str()) == nullptr
+        || std::wcsstr(
+               picker_text.data(), std::wstring(UiText(UiStringId::Opacity)).c_str()) == nullptr) {
         return 762;
     }
     RECT swatch_client{};
@@ -1473,15 +1719,55 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     const HWND new_action =
         GetDlgItem(state.Workspace().panes.layer_palette, IDM_LAYER_NEW);
     std::array<wchar_t, 64U> action_target_text{};
+    std::wstring first_layer_name;
+    std::wstring first_plane_name;
+    const bool layer_action_name =
+        AccessibleWindowNameContains(new_action, UiText(UiStringId::Layer))
+        && AutomationWindowNameContains(new_action, UiText(UiStringId::Layer));
+    const bool layer_text = ReadListItemText(layer_list, 0, first_layer_name);
+    const bool plane_text = ReadListItemText(plane_list, 0, first_plane_name);
+    const bool layer_draw = ExerciseOwnerDraw(
+        state.Workspace().panes.layer_palette,
+        layer_list,
+        IDC_LAYER_LIST,
+        0U);
+    const bool plane_draw = ExerciseOwnerDraw(
+        state.Workspace().panes.layer_palette,
+        plane_list,
+        IDC_PLANE_LIST,
+        0U);
+    const bool layer_msaa = layer_text
+        && AccessibleChildNameContains(layer_list, first_layer_name);
+    const bool plane_msaa = plane_text
+        && AccessibleChildNameContains(plane_list, first_plane_name);
+    const bool layer_uia = AutomationWindowNameContains(
+        layer_list, UiText(UiStringId::Layer));
+    const bool plane_uia = AutomationWindowNameContains(
+        plane_list, UiText(UiStringId::Plane));
     if (layer_list == nullptr || plane_list == nullptr
         || !IsCaptionlessAccessibleSplitter(layer_splitter)
         || action_target == nullptr || new_action == nullptr
+        || !layer_text || !plane_text || !layer_draw || !plane_draw
+        || !layer_msaa || !plane_msaa || !layer_uia || !plane_uia
         || GetWindowTextW(
                action_target,
                action_target_text.data(),
                static_cast<int>(action_target_text.size())) <= 0
-        || std::wcsstr(action_target_text.data(), L"レイヤー") == nullptr
-        || !AccessibleWindowNameContains(new_action, L"レイヤー")) {
+        || std::wcsstr(
+               action_target_text.data(), UiText(UiStringId::Layer)) == nullptr
+        || !layer_action_name) {
+        std::fprintf(
+            stderr,
+            "layer localization smoke text=%d/%d draw=%d/%d msaa=%d/%d uia=%d/%d action=%d\n",
+            layer_text ? 1 : 0,
+            plane_text ? 1 : 0,
+            layer_draw ? 1 : 0,
+            plane_draw ? 1 : 0,
+            layer_msaa ? 1 : 0,
+            plane_msaa ? 1 : 0,
+            layer_uia ? 1 : 0,
+            plane_uia ? 1 : 0,
+            layer_action_name ? 1 : 0);
         return 749;
     }
     SetFocus(plane_list);
@@ -1490,8 +1776,11 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
             action_target,
             action_target_text.data(),
             static_cast<int>(action_target_text.size())) <= 0
-        || std::wcsstr(action_target_text.data(), L"プレーン") == nullptr
-        || !AccessibleWindowNameContains(new_action, L"プレーン")) {
+        || std::wcsstr(
+               action_target_text.data(), UiText(UiStringId::Plane)) == nullptr
+        || !AccessibleWindowNameContains(
+            new_action, UiText(UiStringId::Plane))
+        || !AutomationWindowNameContains(new_action, UiText(UiStringId::Plane))) {
         return 985;
     }
     SetFocus(layer_list);
@@ -2130,7 +2419,9 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     UpdateMenuState(state);
     std::wstring tab_label;
     if (!ReadDocumentTabLabel(state.Workspace().windows.document_tabs, 0, tab_label)
-        || tab_label != L"無題セル 1") {
+        || tab_label != (CurrentUiLanguage() == UiLanguage::English
+                ? L"Untitled Cell 1"
+                : UiText(UiStringId::Text0778))) {
         return 716;
     }
     std::size_t shortcut_leaf_count{};
@@ -2280,12 +2571,24 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
 
     InkpodDocumentInfo before_line{};
     std::array<wchar_t, 128> initial_title{};
+    UpdateMenuState(state);
     if (!QueryDocument(state, before_line)
         || (before_line.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
         || GetWindowTextW(
                state.Workspace().windows.window, initial_title.data(), static_cast<int>(initial_title.size())) == 0
-        || std::wcscmp(initial_title.data(), L"無題セル 1 - inkpod") != 0) {
+        || std::wcscmp(
+               initial_title.data(),
+               CurrentUiLanguage() == UiLanguage::English
+                   ? L"Untitled Cell 1 - inkpod"
+                   : UiText(UiStringId::Text0780)) != 0) {
         return 32;
+    }
+    if (CurrentUiLanguage() == UiLanguage::English
+        && !StatusBarPartStartsWith(
+            state.Workspace().windows.status_bar,
+            5,
+            UiText(UiStringId::Saved))) {
+        return 1060;
     }
     const auto frames_before = static_cast<std::uint64_t>(SendMessageW(
         state.Workspace().windows.canvas, inkpod::renderer::kCanvasGetPresentedFrameCount, 0, 0));
@@ -2368,8 +2671,18 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         || (after_line.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U
         || (after_line.flags & INKPOD_DOCUMENT_FLAG_CAN_UNDO) == 0U
         || !ReadDocumentTabLabel(state.Workspace().windows.document_tabs, 0, tab_label)
-        || tab_label != L"無題セル 1 *") {
+        || tab_label != (CurrentUiLanguage() == UiLanguage::English
+                ? L"Untitled Cell 1 *"
+                : UiText(UiStringId::Text0779))) {
         return 38;
+    }
+    UpdateMenuState(state);
+    if (CurrentUiLanguage() == UiLanguage::English
+        && !StatusBarPartStartsWith(
+            state.Workspace().windows.status_bar,
+            5,
+            UiText(UiStringId::Modified))) {
+        return 1061;
     }
     const std::uint64_t line_checksum = after_line.main_plane_checksum;
 
@@ -3527,7 +3840,7 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
         || state.effects.output_color_guard != nullptr
         || state.effects.output_color_guard_profile
             != INKPOD_OUTPUT_COLOR_GUARD_BT709_CONSERVATIVE_YCBCR
-        || state.effects.last_output_color_guard_summary.find(L"選択 0")
+        || state.effects.last_output_color_guard_summary.find(UiText(UiStringId::Text0519))
             == std::wstring::npos) {
         return 341;
     }
@@ -4419,7 +4732,10 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
             state.Workspace().windows.document_tabs,
             TabCtrl_GetCurSel(state.Workspace().windows.document_tabs),
             secondary_tab_label)
-        || secondary_tab_label.find(L"[ビュー 2]") == std::wstring::npos) {
+        || secondary_tab_label.find(
+               CurrentUiLanguage() == UiLanguage::English
+                   ? L"[View 2]"
+                   : UiText(UiStringId::Text0088)) == std::wstring::npos) {
         return 324;
     }
     const InkpodViewInput secondary_pan{
@@ -4545,7 +4861,9 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
         SB_GETTEXTW,
         1,
         reinterpret_cast<LPARAM>(zoom_status.data()));
-    if (wcsstr(zoom_status.data(), L"ズーム:") == nullptr) {
+    if (!std::wstring_view(zoom_status.data()).starts_with(
+            UiText(UiStringId::ZoomPrefix))
+        || HasJapaneseCharacters(zoom_status.data())) {
         return 758;
     }
     const InkpodShortcutSequence* multi_stroke =
@@ -8069,7 +8387,7 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
                IDM_BATCH_EXTRACT_PAIRS,
                0) != 1
         || state.batch.operations[0].color_pairs.size() != 1U
-        || state.batch.last_result.find(L"候補 1") == std::wstring::npos) {
+        || state.batch.last_result.find(UiText(UiStringId::Text0447)) == std::wstring::npos) {
         cleanup();
         return 702;
     }
@@ -8112,7 +8430,7 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
         || state.batch.job_id.has_value()
         || state.routing.pane_targets.Find(state.routing.batch_pane)->policy
             != inkpod::app::PaneTargetPolicy::FollowActiveView
-        || state.batch.job_text.find(L"完了") == std::wstring::npos
+        || state.batch.job_text.find(UiText(UiStringId::Text0621)) == std::wstring::npos
         || !WindowHasAccessibleName(
             GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_TARGET))
         || !WindowHasAccessibleName(
@@ -12129,7 +12447,8 @@ int RunCutWorkflowSmoke(ApplicationHost& state) noexcept {
         || GetFileAttributesW(kFiles[2]) == INVALID_FILE_ATTRIBUTES
         || state.Workspace().sequence_dialog.view.active_index != UINT32_MAX
         || state.Workspace().sequence_dialog.view.target_text.find(
-               L"現在のセルはメンバー外") == std::wstring::npos) {
+               UiText(UiStringId::CurrentCellOutsideMembers))
+            == std::wstring::npos) {
         return finish(10491);
     }
     if (SendMessageW(
@@ -12686,7 +13005,8 @@ int RunHistoryVisualizationSmoke(ApplicationHost& state) noexcept {
     if (ListView_GetItemCount(list) != 1
         || SendMessageW(
                list, LVM_GETITEMTEXTW, 0, reinterpret_cast<LPARAM>(&loading_item)) <= 0
-        || std::wstring_view{loading_text.data()}.find(L"履歴") == std::wstring_view::npos
+        || std::wstring_view{loading_text.data()}.find(
+               UiText(UiStringId::HistoryPreparing)) == std::wstring_view::npos
         || !history_progress.active || history_progress.progress.context == nullptr
         || history_progress.progress.query == nullptr
         || history_progress.progress.cancel == nullptr) {

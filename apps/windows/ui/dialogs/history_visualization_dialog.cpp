@@ -1,3 +1,5 @@
+#include "ui/ui_resources.h"
+
 #include "history_visualization_dialog.h"
 
 #include <commctrl.h>
@@ -19,6 +21,7 @@
 #include "app/resource.h"
 #include "inkpod/core_ffi.h"
 #include "ui/dialogs/effects_dialogs.h"
+#include "ui/localization.h"
 
 namespace inkpod::windows::ui {
 namespace {
@@ -60,23 +63,35 @@ std::wstring EscapeMenuText(std::wstring_view text) {
     return escaped;
 }
 
+bool MenuContainsDirectVisualizationCommand(HMENU menu) noexcept {
+    const int count = GetMenuItemCount(menu);
+    for (int position = 0; position < count; ++position) {
+        MENUITEMINFOW item{};
+        item.cbSize = sizeof(item);
+        item.fMask = MIIM_ID;
+        if (GetMenuItemInfoW(menu, position, TRUE, &item) != FALSE
+            && item.wID >= IDM_TOOL_HISTORY_VISUALIZATION_FIRST
+            && item.wID <= IDM_TOOL_HISTORY_VISUALIZATION_LAST) {
+            return true;
+        }
+    }
+    return false;
+}
+
 HMENU FindVisualizationSubmenu(HMENU menu) noexcept {
     if (menu == nullptr) {
         return nullptr;
     }
     const int count = GetMenuItemCount(menu);
     for (int position = 0; position < count; ++position) {
-        std::array<wchar_t, 128U> text{};
         MENUITEMINFOW item{};
         item.cbSize = sizeof(item);
-        item.fMask = MIIM_SUBMENU | MIIM_STRING;
-        item.dwTypeData = text.data();
-        item.cch = static_cast<UINT>(text.size() - 1U);
+        item.fMask = MIIM_SUBMENU;
         if (GetMenuItemInfoW(menu, position, TRUE, &item) == FALSE
             || item.hSubMenu == nullptr) {
             continue;
         }
-        if (std::wstring_view(text.data()) == L"Inkpodファイルの可視化") {
+        if (MenuContainsDirectVisualizationCommand(item.hSubMenu)) {
             return item.hSubMenu;
         }
         if (HMENU nested = FindVisualizationSubmenu(item.hSubMenu);
@@ -199,10 +214,11 @@ public:
             document->history_visualization_dialog = dialog;
         }
         try {
-            const std::wstring title = L"Inkpodファイルの可視化 — " + display_name_;
+            const std::wstring title = UiTextWithUserText(
+                UiStringId::HistoryVisualizationTitlePrefix, display_name_);
             SetWindowTextW(dialog, title.c_str());
         } catch (const std::bad_alloc&) {
-            SetWindowTextW(dialog, L"Inkpodファイルの可視化");
+            SetWindowTextW(dialog, UiText(UiStringId::HistoryVisualizationTitle));
         }
         InitializeList();
     }
@@ -302,7 +318,7 @@ public:
         if (loading_) {
             text = info.item.iSubItem == 0 ? loading_text_.c_str() : L"";
         } else if (load_failed_) {
-            text = info.item.iSubItem == 0 ? L"履歴を読み込めませんでした" : L"";
+            text = info.item.iSubItem == 0 ? load_failed_text_.c_str() : L"";
         } else if (const CachedRow* row = Row(
                        static_cast<std::uint64_t>(info.item.iItem));
                    row != nullptr) {
@@ -433,9 +449,9 @@ private:
             load_.get(),
             QueryVisualizationProgress,
             CancelVisualizationProgress,
-            L"Inkpodファイルの可視化",
-            L"編集履歴を再構築中...",
-            L"キャンセル中..."};
+            UiText(UiStringId::HistoryVisualizationTitle),
+            UiText(UiStringId::HistoryRebuilding),
+            UiText(UiStringId::Cancelling)};
         if (!BindJobProgress(
                 workspace.job_progress,
                 workspace.job_progress_state,
@@ -521,7 +537,7 @@ private:
     void UpdateLoadingText() noexcept {
         if (!load_ || load_->task == nullptr) {
             try {
-                loading_text_ = L"履歴を準備中...";
+                loading_text_ = UiText(UiStringId::HistoryPreparing);
             } catch (const std::bad_alloc&) {
             }
             return;
@@ -531,7 +547,7 @@ private:
         if (inkpod_task_query(load_->task, &info) != INKPOD_STATUS_OK
             || info.total_work == 0U) {
             try {
-                loading_text_ = L"履歴を準備中...";
+                loading_text_ = UiText(UiStringId::HistoryPreparing);
             } catch (const std::bad_alloc&) {
             }
             return;
@@ -539,7 +555,7 @@ private:
         std::array<wchar_t, 128U> text{};
         _snwprintf_s(
             text.data(), text.size(), _TRUNCATE,
-            L"編集履歴を再構築中... %llu / %llu",
+            UiText(UiStringId::HistoryRebuildingProgressFormat),
             static_cast<unsigned long long>(info.completed_work),
             static_cast<unsigned long long>(info.total_work));
         try {
@@ -592,7 +608,9 @@ private:
         ListView_SetExtendedListViewStyle(
             list_, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_DOUBLEBUFFER);
         const std::array<const wchar_t*, 3U> labels{
-            L"プリミティブ", L"引数", L"結果"};
+            UiText(UiStringId::Primitive),
+            UiText(UiStringId::Arguments),
+            UiText(UiStringId::Result)};
         for (int index = 0; index < static_cast<int>(labels.size()); ++index) {
             LVCOLUMNW column{};
             column.mask = LVCF_TEXT | LVCF_SUBITEM | LVCF_WIDTH;
@@ -699,7 +717,8 @@ private:
     std::shared_ptr<VisualizationLoad> load_;
     std::map<std::uint64_t, CachedRow> cache_;
     std::vector<std::uint64_t> prefetch_queue_;
-    std::wstring loading_text_{L"履歴を準備中..."};
+    std::wstring loading_text_{UiText(UiStringId::HistoryPreparing)};
+    std::wstring load_failed_text_{UiText(UiStringId::HistoryLoadFailed)};
     std::uint64_t row_count_{};
     bool prefetch_posted_{};
     bool loading_{true};
@@ -818,7 +837,7 @@ void UpdateHistoryVisualizationMenu(
                                other.leaf.c_str(), -1, TRUE) == CSTR_EQUAL;
                 }) > 1;
             std::wstring label = duplicate_leaf
-                ? candidate.leaf + L" — " + candidate.document->shell.current_path
+                ? candidate.leaf + L" - " + candidate.document->shell.current_path
                 : candidate.leaf;
             label = EscapeMenuText(label);
             MENUITEMINFOW item{};
@@ -845,8 +864,8 @@ void UpdateHistoryVisualizationMenu(
         item.fMask = MIIM_ID | MIIM_STATE | MIIM_STRING;
         item.wID = IDM_TOOL_HISTORY_VISUALIZATION_FIRST;
         item.fState = MFS_DISABLED;
-        wchar_t label[] = L"(なし)";
-        item.dwTypeData = label;
+        std::wstring label = UiText(UiStringId::NoneParenthesized);
+        item.dwTypeData = label.data();
         (void)InsertMenuItemW(submenu, 0U, TRUE, &item);
     }
 }
@@ -883,7 +902,7 @@ LRESULT IssueHistoryVisualizationCommand(
     } catch (const std::bad_alloc&) {
         return 0;
     }
-    const HWND dialog = CreateDialogParamW(
+    const HWND dialog = CreateLocalizedDialogParamW(
         GetModuleHandleW(nullptr),
         MAKEINTRESOURCEW(IDD_HISTORY_VISUALIZATION),
         owner,

@@ -5,13 +5,14 @@
 #include <array>
 
 #include "ui/command_state.h"
+#include "ui/localization.h"
 
 namespace inkpod::windows::ui {
 
 struct ToolPaletteEntry {
     UINT command;
-    const wchar_t* label;
-    const wchar_t* glyph;
+    UiStringId label;
+    UiStringId glyph;
 };
 
 inline constexpr std::size_t kToolPaletteEntryCount = 20U;

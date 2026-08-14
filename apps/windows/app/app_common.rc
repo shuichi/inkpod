@@ -1,0 +1,44 @@
+#include <windows.h>
+#include <commctrl.h>
+#include "app_version.h"
+#include "resource.h"
+
+#pragma code_page(65001)
+
+1 RT_MANIFEST "app.manifest"
+IDI_APP_ICON ICON "../package/Assets/app.ico"
+IDR_MANUAL_HTML RCDATA "../../../html/manual.html"
+IDR_FILE_FORMAT_HTML RCDATA "../../../html/file_format.html"
+IDR_ACKNOWLEDGEMENTS_HTML RCDATA "../../../html/acknowledgements.html"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION INKPOD_VERSION_RESOURCE
+ PRODUCTVERSION INKPOD_VERSION_RESOURCE
+ FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+ FILEFLAGS VS_FF_DEBUG
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+ FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "041104b0"
+        BEGIN
+            VALUE "CompanyName", "inkpod contributors\0"
+            VALUE "FileDescription", "Inkpod\0"
+            VALUE "FileVersion", INKPOD_FILE_VERSION_STRING "\0"
+            VALUE "InternalName", "inkpod\0"
+            VALUE "OriginalFilename", "inkpod.exe\0"
+            VALUE "ProductName", "inkpod\0"
+            VALUE "ProductVersion", INKPOD_FILE_VERSION_STRING "\0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0411, 1200
+    END
+END

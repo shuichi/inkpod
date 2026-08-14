@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ui/localization.h"
+
 #include <windows.h>
 
 #include <array>
@@ -21,7 +23,7 @@ using EffectEditorProgressCallback = bool (*)(
     void* context, ProgressDialogInfo& output) noexcept;
 
 struct EffectEditorState {
-    const wchar_t* title{L"画像編集"};
+    const wchar_t* title{UiText(UiStringId::Text0811)};
     std::array<const wchar_t*, 5U> parameter_labels{L"P0", L"P1", L"P2", L"P3", L"P4"};
     std::array<std::int32_t, 5U> parameters{};
     std::array<const wchar_t*, 5U> channel_labels{};
@@ -33,8 +35,8 @@ struct EffectEditorState {
     std::size_t mode_count{};
     std::uint32_t mode{};
     std::wstring points;
-    const wchar_t* option1_label{L"プレビューして確認"};
-    const wchar_t* option2_label{L"45度制約 / 筆圧"};
+    const wchar_t* option1_label{UiText(UiStringId::Text0314)};
+    const wchar_t* option2_label{UiText(UiStringId::Text0034)};
     bool option1{true};
     bool option2{};
     bool option1_enabled{true};
@@ -43,7 +45,7 @@ struct EffectEditorState {
     void* preview_context{};
     EffectEditorChangeCallback preview_change{};
     EffectEditorProgressCallback preview_progress{};
-    const wchar_t* preview_idle_text{L"パラメーターを変更するとCanvasを更新します。"};
+    const wchar_t* preview_idle_text{UiText(UiStringId::Text0272)};
     HWND dialog{};
     std::uint32_t smoke_change_step{};
     bool smoke_cancel{};
@@ -65,8 +67,8 @@ struct ProgressDialogState {
     ProgressQueryCallback query{};
     ProgressCancelCallback cancel{};
     const wchar_t* title{};
-    const wchar_t* progress_prefix{L"処理中..."};
-    const wchar_t* cancelling_text{L"キャンセル中..."};
+    const wchar_t* progress_prefix{UiText(UiStringId::Text0512)};
+    const wchar_t* cancelling_text{UiText(UiStringId::Cancelling)};
 };
 
 enum class JobProgressSlot : std::uint8_t {

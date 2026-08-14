@@ -4,7 +4,7 @@ endif()
 
 set(main_source
     "${INKPOD_SOURCE_DIR}/apps/windows/ui/main_window_runtime.cpp")
-set(resource_source "${INKPOD_SOURCE_DIR}/apps/windows/app/app.rc")
+set(resource_source "${INKPOD_SOURCE_DIR}/apps/windows/app/app_ui_ja.generated.rc")
 file(READ "${main_source}" main_text)
 file(READ "${resource_source}" resource_text)
 
@@ -42,7 +42,7 @@ list(SORT resource_ids)
 list(SORT unique_route_ids)
 if(NOT resource_ids STREQUAL unique_route_ids)
     message(FATAL_ERROR
-        "command routes differ from the production app.rc command set")
+        "command routes differ from the production localized resource command set")
 endif()
 
 set(vector_select_begin "        case IDM_VECTOR_SELECT_CUT:")

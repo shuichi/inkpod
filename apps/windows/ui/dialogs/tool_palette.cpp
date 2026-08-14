@@ -1,3 +1,5 @@
+#include "ui/ui_resources.h"
+
 #include "tool_palette.h"
 
 #include <commctrl.h>
@@ -14,26 +16,26 @@ namespace {
 
 constexpr std::array<ToolPaletteEntry, kToolPaletteEntryCount>
     kToolPaletteEntries{{
-        {IDM_TOOL_PENCIL, L"鉛筆", L"鉛筆"},
-        {IDM_TOOL_BRUSH, L"ブラシ", L"ブラシ"},
-        {IDM_TOOL_ERASER, L"消しゴム", L"消しゴム"},
-        {IDM_TOOL_FILL, L"フィル", L"塗りつぶし"},
-        {IDM_TOOL_CLOSED_FILL, L"閉領域フィル", L"閉領域塗り"},
-        {IDM_TOOL_FILL_EXTENSION, L"塗りのばし", L"塗り延ばし"},
-        {IDM_TOOL_EYEDROPPER, L"スポイト", L"スポイト"},
-        {IDM_VECTOR_LINE, L"直線", L"直線"},
-        {IDM_VECTOR_CURVE, L"曲線", L"曲線"},
-        {IDM_VECTOR_RECTANGLE, L"長方形", L"長方形"},
-        {IDM_VECTOR_ELLIPSE, L"楕円", L"楕円"},
-        {IDM_VECTOR_POLYLINE, L"折れ線", L"折れ線"},
-        {IDM_VECTOR_ERASER, L"ベクター消しゴム", L"線消しゴム"},
-        {IDM_EFFECT_GRADIENT, L"グラデーション", L"グラデーション"},
-        {IDM_EFFECT_AIRBRUSH, L"エアブラシ", L"エアブラシ"},
-        {IDM_EFFECT_BOUNDARY_AIRBRUSH, L"境界色エアブラシ", L"境界ブラシ"},
-        {IDM_EFFECT_BLUR, L"ぼかし", L"ぼかし"},
-        {IDM_EFFECT_STAMP, L"スタンプ", L"スタンプ"},
-        {IDM_EFFECT_DUST, L"ゴミ取り", L"ゴミ取り"},
-        {IDM_EFFECT_ALPHA_GRADIENT, L"アルファグラデーション", L"アルファ階調"},
+        {IDM_TOOL_PENCIL, UiStringId::ToolPencil, UiStringId::ToolPencil},
+        {IDM_TOOL_BRUSH, UiStringId::ToolBrush, UiStringId::ToolBrush},
+        {IDM_TOOL_ERASER, UiStringId::ToolEraser, UiStringId::ToolEraser},
+        {IDM_TOOL_FILL, UiStringId::ToolFill, UiStringId::ToolFill},
+        {IDM_TOOL_CLOSED_FILL, UiStringId::ToolClosedRegionFill, UiStringId::ToolClosedRegionFillCompact},
+        {IDM_TOOL_FILL_EXTENSION, UiStringId::ToolFillExtension, UiStringId::ToolFillExtensionCompact},
+        {IDM_TOOL_EYEDROPPER, UiStringId::ToolEyedropper, UiStringId::ToolEyedropper},
+        {IDM_VECTOR_LINE, UiStringId::ToolVectorLine, UiStringId::ToolVectorLine},
+        {IDM_VECTOR_CURVE, UiStringId::ToolVectorCurve, UiStringId::ToolVectorCurve},
+        {IDM_VECTOR_RECTANGLE, UiStringId::ToolVectorRectangle, UiStringId::ToolVectorRectangle},
+        {IDM_VECTOR_ELLIPSE, UiStringId::ToolVectorEllipse, UiStringId::ToolVectorEllipse},
+        {IDM_VECTOR_POLYLINE, UiStringId::ToolVectorPolyline, UiStringId::ToolVectorPolyline},
+        {IDM_VECTOR_ERASER, UiStringId::ToolVectorEraser, UiStringId::ToolVectorEraserCompact},
+        {IDM_EFFECT_GRADIENT, UiStringId::ToolGradient, UiStringId::ToolGradient},
+        {IDM_EFFECT_AIRBRUSH, UiStringId::ToolAirbrush, UiStringId::ToolAirbrush},
+        {IDM_EFFECT_BOUNDARY_AIRBRUSH, UiStringId::ToolBoundaryAirbrush, UiStringId::ToolBoundaryAirbrushCompact},
+        {IDM_EFFECT_BLUR, UiStringId::ToolBlur, UiStringId::ToolBlur},
+        {IDM_EFFECT_STAMP, UiStringId::ToolStamp, UiStringId::ToolStamp},
+        {IDM_EFFECT_DUST, UiStringId::ToolDustRemoval, UiStringId::ToolDustRemovalCompact},
+        {IDM_EFFECT_ALPHA_GRADIENT, UiStringId::ToolAlphaGradient, UiStringId::ToolAlphaGradientCompact},
     }};
 
 constexpr int kReferenceDpi = 96;
@@ -177,10 +179,11 @@ bool CreateButtons(HWND dialog, ToolPaletteDialogState& state) noexcept {
         return false;
     }
     for (const auto& entry : kToolPaletteEntries) {
+        const wchar_t* label = UiText(entry.label);
         const HWND button = CreateWindowExW(
             0,
             L"BUTTON",
-            entry.label,
+            label,
             WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
             0,
             0,
@@ -198,7 +201,7 @@ bool CreateButtons(HWND dialog, ToolPaletteDialogState& state) noexcept {
         tool.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
         tool.hwnd = dialog;
         tool.uId = reinterpret_cast<UINT_PTR>(button);
-        tool.lpszText = const_cast<wchar_t*>(entry.label);
+        tool.lpszText = const_cast<wchar_t*>(label);
         SendMessageW(
             state.tooltip,
             TTM_ADDTOOLW,
@@ -236,7 +239,7 @@ void DrawToolButton(const DRAWITEMSTRUCT& draw) noexcept {
     RECT text = draw.rcItem;
     DrawTextW(
         draw.hDC,
-        entry->glyph,
+        UiText(entry->glyph),
         -1,
         &text,
         DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
@@ -354,7 +357,7 @@ HWND CreateToolPaletteDialog(
     HINSTANCE instance,
     HWND owner,
     ToolPaletteDialogState& state) noexcept {
-    return CreateDialogParamW(
+    return CreateLocalizedDialogParamW(
         instance,
         MAKEINTRESOURCEW(IDD_TOOL_PALETTE),
         owner,

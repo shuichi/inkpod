@@ -44,6 +44,31 @@ int main() {
         return 3;
     }
 
+    const wchar_t* english_smoke[]{
+        L"inkpod.exe", L"--smoke-test", L"--smoke-test-language=en-US"};
+    if (Parse(english_smoke, 3, options) != LaunchParseStatus::Ok
+        || options.mode != LaunchMode::ApplicationSmoke
+        || options.smoke_ui_language
+            != inkpod::app::SmokeUiLanguage::English) {
+        return 18;
+    }
+
+    const wchar_t* japanese_smoke[]{
+        L"inkpod.exe", L"--smoke-test-language=ja-JP", L"--smoke-test"};
+    if (Parse(japanese_smoke, 3, options) != LaunchParseStatus::Ok
+        || options.mode != LaunchMode::ApplicationSmoke
+        || options.smoke_ui_language
+            != inkpod::app::SmokeUiLanguage::Japanese) {
+        return 19;
+    }
+
+    const wchar_t* language_without_smoke[]{
+        L"inkpod.exe", L"--smoke-test-language=en-US"};
+    if (Parse(language_without_smoke, 2, options)
+        != LaunchParseStatus::InvalidArguments) {
+        return 20;
+    }
+
     const wchar_t* abi[]{L"inkpod.exe", L"--abi-smoke-test"};
     if (Parse(abi, 2, options) != LaunchParseStatus::Ok
         || options.mode != LaunchMode::AbiSmoke

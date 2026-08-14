@@ -16,6 +16,7 @@
 #include <windowsx.h>
 
 #include "app/resource.h"
+#include "ui/localization.h"
 
 namespace inkpod::windows::ui::panes {
 
@@ -1373,7 +1374,7 @@ void DrawPicker(
             color_bottom + ScaleForDpi(1, dpi),
             width - margin,
             geometry.alpha_track.top};
-        DrawTextW(target, L"不透明度", -1, &opacity_label,
+        DrawTextW(target, UiText(UiStringId::Opacity), -1, &opacity_label,
                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
         const unsigned opacity_percent = static_cast<unsigned>(std::lround(
             ChannelUnit(selected_color, selected_color.alpha) * 100.0));
@@ -1550,10 +1551,10 @@ void CommitPickerColor(
     const HWND pane = GetParent(picker);
     if (state.picker_targets_main_line) {
         state.main_line_color = color;
-        SetColorLabel(pane, IDC_COLOR_MAIN_LINE_LABEL, L"主線色", color);
+        SetColorLabel(pane, IDC_COLOR_MAIN_LINE_LABEL, UiText(UiStringId::MainLineColor), color);
     } else {
         state.drawing_color = color;
-        SetColorLabel(pane, IDC_COLOR_DRAWING_LABEL, L"彩色用描画色", color);
+        SetColorLabel(pane, IDC_COLOR_DRAWING_LABEL, UiText(UiStringId::DrawingColor), color);
     }
     SetColorFields(pane, color);
     InvalidateRect(GetDlgItem(pane, IDC_COLOR_MAIN_LINE_SWATCH), nullptr, FALSE);
@@ -1720,8 +1721,8 @@ void SelectSwatchTarget(
     SetWindowTextW(
         swatch,
         state.picker_targets_main_line
-            ? L"選択中: 主線色"
-            : L"選択中: 彩色用描画色");
+            ? UiText(UiStringId::SelectedMainLineColor)
+            : UiText(UiStringId::SelectedDrawingColor));
     InvalidateRect(swatch, nullptr, FALSE);
     InvalidateRect(GetDlgItem(pane, IDC_COLOR_PICKER), nullptr, FALSE);
 }
@@ -1882,7 +1883,7 @@ LRESULT CALLBACK PickerSubclassProcedure(
                     SetColorLabel(
                         pane,
                         IDC_COLOR_MAIN_LINE_LABEL,
-                        L"主線色",
+                        UiText(UiStringId::MainLineColor),
                         state->main_line_color);
                     SetColorFields(pane, state->main_line_color);
                     InvalidateRect(
@@ -2095,7 +2096,7 @@ HWND CreateControl(
     return CreateWindowExW(
         0,
         class_name,
-        text,
+        text == nullptr ? L"" : text,
         WS_CHILD | WS_VISIBLE | style,
         0,
         0,
@@ -2175,7 +2176,7 @@ HWND CreateColorDockPane(
                instance,
                pane,
                L"STATIC",
-               L"アクティブに追従",
+               UiText(UiStringId::FollowingActive),
                SS_LEFT | SS_CENTERIMAGE | SS_ENDELLIPSIS,
                IDC_COLOR_TARGET)
             != nullptr
@@ -2183,7 +2184,7 @@ HWND CreateColorDockPane(
                instance,
                pane,
                L"BUTTON",
-               L"文書に固定",
+               UiText(UiStringId::PinDocument),
                WS_TABSTOP | BS_PUSHBUTTON,
                IDC_COLOR_PIN)
             != nullptr
@@ -2191,7 +2192,7 @@ HWND CreateColorDockPane(
                instance,
                pane,
                L"STATIC",
-               L"主線色",
+               UiText(UiStringId::MainLineColor),
                SS_OWNERDRAW,
                IDC_COLOR_MAIN_LINE_LABEL)
             != nullptr
@@ -2199,7 +2200,7 @@ HWND CreateColorDockPane(
                instance,
                pane,
                L"STATIC",
-               L"選択中: 彩色用描画色",
+               UiText(UiStringId::SelectedDrawingColor),
                WS_TABSTOP | SS_OWNERDRAW | SS_NOTIFY,
                IDC_COLOR_MAIN_LINE_SWATCH)
             != nullptr
@@ -2207,18 +2208,18 @@ HWND CreateColorDockPane(
                instance,
                pane,
                L"STATIC",
-               L"彩色用描画色",
+               UiText(UiStringId::DrawingColor),
                SS_OWNERDRAW,
                IDC_COLOR_DRAWING_LABEL)
             != nullptr
         && CreateControl(
-               instance, pane, L"STATIC", L"彩色用描画色", SS_OWNERDRAW, IDC_COLOR_SWATCH)
+               instance, pane, L"STATIC", UiText(UiStringId::DrawingColor), SS_OWNERDRAW, IDC_COLOR_SWATCH)
             != nullptr
         && CreateControl(
                instance,
                pane,
                L"STATIC",
-               L"色相・彩度・明度・不透明度",
+               UiText(UiStringId::ColorChannelsDescription),
                WS_TABSTOP | SS_OWNERDRAW | SS_NOTIFY,
                IDC_COLOR_PICKER)
             != nullptr
@@ -2226,7 +2227,7 @@ HWND CreateColorDockPane(
                instance,
                pane,
                L"BUTTON",
-               L"スポイト",
+               UiText(UiStringId::ToolEyedropper),
                WS_TABSTOP | BS_PUSHBUTTON,
                IDC_COLOR_EYEDROPPER)
             != nullptr
@@ -2247,7 +2248,7 @@ HWND CreateColorDockPane(
                IDC_COLOR_ALPHA)
             != nullptr
         && CreateControl(
-               instance, pane, L"BUTTON", L"適用", WS_TABSTOP | BS_PUSHBUTTON,
+               instance, pane, L"BUTTON", UiText(UiStringId::Apply), WS_TABSTOP | BS_PUSHBUTTON,
                IDC_COLOR_APPLY)
             != nullptr
         && CreateControl(
@@ -2268,23 +2269,23 @@ HWND CreateColorDockPane(
                IDC_PALETTE_NEXT)
             != nullptr
         && CreateControl(
-               instance, pane, L"BUTTON", L"登録", WS_TABSTOP | BS_PUSHBUTTON,
+               instance, pane, L"BUTTON", UiText(UiStringId::Register), WS_TABSTOP | BS_PUSHBUTTON,
                IDC_PALETTE_REGISTER_BUTTON)
             != nullptr
         && CreateControl(
-               instance, pane, L"BUTTON", L"削除", WS_TABSTOP | BS_PUSHBUTTON,
+               instance, pane, L"BUTTON", UiText(UiStringId::Delete), WS_TABSTOP | BS_PUSHBUTTON,
                IDC_PALETTE_DELETE_BUTTON)
             != nullptr
         && CreateControl(
-               instance, pane, L"BUTTON", L"クリア", WS_TABSTOP | BS_PUSHBUTTON,
+               instance, pane, L"BUTTON", UiText(UiStringId::Clear), WS_TABSTOP | BS_PUSHBUTTON,
                IDC_PALETTE_CLEAR_BUTTON)
             != nullptr
         && CreateControl(
-               instance, pane, L"BUTTON", L"読込", WS_TABSTOP | BS_PUSHBUTTON,
+               instance, pane, L"BUTTON", UiText(UiStringId::Load), WS_TABSTOP | BS_PUSHBUTTON,
                IDC_PALETTE_LOAD_BUTTON)
             != nullptr
         && CreateControl(
-               instance, pane, L"BUTTON", L"保存", WS_TABSTOP | BS_PUSHBUTTON,
+               instance, pane, L"BUTTON", UiText(UiStringId::Save), WS_TABSTOP | BS_PUSHBUTTON,
                IDC_PALETTE_SAVE_BUTTON)
             != nullptr
         && CreateControl(
@@ -2340,7 +2341,10 @@ HWND CreateColorDockPane(
             TRUE,
             reinterpret_cast<LPARAM>(cue));
     }
-    for (const wchar_t* label : {L"カラー", L"パレット", L"チャート"}) {
+    for (const wchar_t* label : {
+             UiText(UiStringId::Color),
+             UiText(UiStringId::Palette),
+             UiText(UiStringId::Chart)}) {
         TCITEMW item{};
         item.mask = TCIF_TEXT;
         item.pszText = const_cast<wchar_t*>(label);
@@ -2409,7 +2413,7 @@ void UpdateColorDockPaneTarget(
     SetDlgItemTextW(
         pane,
         IDC_COLOR_PIN,
-        pinned ? L"追従へ戻す" : L"文書に固定");
+        pinned ? UiText(UiStringId::ReturnToFollowing) : UiText(UiStringId::PinDocument));
     EnableWindow(GetDlgItem(pane, IDC_COLOR_PIN), target_available ? TRUE : FALSE);
     for (const int control : {
              IDC_PALETTE_LIST,
@@ -2438,7 +2442,7 @@ void UpdateColorDockPaneDrawingColor(
         state->drawing_hue_degrees = hsv.hue_degrees;
     }
     SetColorLabel(
-        pane, IDC_COLOR_DRAWING_LABEL, L"彩色用描画色", drawing_color);
+        pane, IDC_COLOR_DRAWING_LABEL, UiText(UiStringId::DrawingColor), drawing_color);
     if (!state->picker_targets_main_line) {
         SetColorFields(pane, drawing_color);
         InvalidateRect(GetDlgItem(pane, IDC_COLOR_PICKER), nullptr, FALSE);
@@ -2461,7 +2465,7 @@ void UpdateColorDockPaneMainLineColor(
         state->main_line_hue_degrees = hsv.hue_degrees;
     }
     SetColorLabel(
-        pane, IDC_COLOR_MAIN_LINE_LABEL, L"主線色", main_line_color);
+        pane, IDC_COLOR_MAIN_LINE_LABEL, UiText(UiStringId::MainLineColor), main_line_color);
     if (state->picker_targets_main_line) {
         SetColorFields(pane, main_line_color);
         InvalidateRect(GetDlgItem(pane, IDC_COLOR_PICKER), nullptr, FALSE);

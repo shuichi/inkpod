@@ -1,3 +1,7 @@
+#include "ui/ui_resources.h"
+
+#include "ui/localization.h"
+
 #include "main_window.h"
 
 #include <commctrl.h>
@@ -8,6 +12,7 @@
 #include <cstdint>
 
 #include "app/resource.h"
+#include "localization.h"
 #include "tab_drag.h"
 
 namespace inkpod::windows::ui {
@@ -304,7 +309,7 @@ bool CreateMainChrome(
     }
     for (std::size_t index = 0U; index < windows.auto_hide_buttons.size(); ++index) {
         std::array<wchar_t, 64U> label{};
-        if (LoadStringW(
+        if (LoadLocalizedStringW(
                 instance,
                 kAutoHideButtonLabelResources[index],
                 label.data(),
@@ -337,7 +342,10 @@ bool CreateMainChrome(
 
     TCITEMW primary{};
     primary.mask = TCIF_TEXT | TCIF_PARAM;
-    primary.pszText = const_cast<wchar_t*>(L"無題セル 1");
+    std::wstring primary_label = CurrentUiLanguage() == UiLanguage::English
+        ? L"Untitled Cell 1"
+        : UiText(UiStringId::Text0778);
+    primary.pszText = primary_label.data();
     primary.lParam = 0;
     return TabCtrl_InsertItem(windows.document_tabs, 0, &primary) >= 0;
 }
@@ -452,7 +460,8 @@ bool RegisterMainWindowClass(
     window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     window_class.hIcon = app_icon;
     window_class.hbrBackground = nullptr;
-    window_class.lpszMenuName = MAKEINTRESOURCEW(IDR_MAIN_MENU);
+    // Each workspace window receives the explicitly selected language menu.
+    window_class.lpszMenuName = nullptr;
     window_class.lpszClassName = class_name;
     window_class.hIconSm = small_icon != nullptr ? small_icon : app_icon;
     return RegisterClassExW(&window_class) != 0;

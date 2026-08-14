@@ -96,7 +96,7 @@ Windows GUI は標準的な Windows 11 desktop application とし、古典的 MD
 
 ### 3. メニュー構成
 
-表示名は日本語 resource を基本とし、英語 resource を追加できる構造にしてください。以下は機能上必要な top-level menu と command です。Windows の標準慣習に合わせた mnemonic、ellipsis、並びの小調整は許可します。
+UI 表示文字列は、日本語と英語を言語非依存の型付き ID で参照する一つの catalog で管理する。単語単位の部分置換で表示文を組み立てず、各言語の完成した文または format string を catalog に置く。文書名、path、Light Table set 名等のユーザー所有文字列は翻訳せず、catalog 由来の prefix/suffix と明示的に合成する。`編集 > 設定 > 言語` で `システム設定`、`日本語`、`English` を選択でき、次回起動から process 内の全 workspace に適用する。`システム設定` は Windows の第1優先 UI 言語が `ja` の場合だけ日本語を選び、それ以外または判定不能時は英語を選ぶ。選択値は versioned、bounded な HKCU application setting として保存し、不正 record は `システム設定` へ戻す。言語は文書、履歴、native file、ユーザー入力の名前や path に混ぜない。以下は機能上必要な top-level menu と command です。Windows の標準慣習に合わせた mnemonic、ellipsis、並びの小調整は許可します。
 
 #### ファイル
 
@@ -123,6 +123,7 @@ Windows GUI は標準的な Windows 11 desktop application とし、古典的 MD
 - `スナップ > ガイド/グリッド`: checked state を表示する。
 - `アルファ使用モード`: alpha 対応の描画、読み込み、保存を有効にする。
 - `設定 > ショートカット`: menu/tool/other command を分類し、衝突する新割当は既存 command から解除する。`すべて戻す` で既定値へ戻す。
+- `設定 > 言語`: `システム設定`、`日本語`、`English` の checked state を表示し、選択を次回起動用に保存する。
 - `設定 > グリッド`: 間隔、分割数、原点を指定する。
 - `設定 > 環境設定`: 色、透明表示、保存、cursor、performance、language 等を分類する。
 

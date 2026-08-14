@@ -1,3 +1,5 @@
+#include "ui/localization.h"
+
 #include "dock_layout.h"
 
 #include <algorithm>
@@ -39,11 +41,11 @@ constexpr std::uint32_t DockedAndTransientZones(
     return value;
 }
 
-constexpr std::array<PaneDescriptor, kDockPaneCount> kPaneDescriptors{{
+const std::array<PaneDescriptor, kDockPaneCount> kPaneDescriptors{{
     {DockPaneType::Tool,
      UINT32_C(0x4c4f4f54),
      IDS_DOCK_PANE_TOOL,
-     L"ツールパレット",
+     UiText(UiStringId::Text0242),
      DockZone::Left,
      DockedAndTransientZones({DockZone::Left, DockZone::Right}),
       PaneTargetScope::Application,
@@ -61,7 +63,7 @@ constexpr std::array<PaneDescriptor, kDockPaneCount> kPaneDescriptors{{
     {DockPaneType::ToolOptions,
      UINT32_C(0x54504f54),
      IDS_DOCK_PANE_TOOL_OPTIONS,
-     L"ツールオプション",
+     UiText(UiStringId::Text0241),
      DockZone::TopContext,
      DockedAndTransientZones({DockZone::TopContext, DockZone::Bottom}),
       PaneTargetScope::FollowActiveView,
@@ -79,7 +81,7 @@ constexpr std::array<PaneDescriptor, kDockPaneCount> kPaneDescriptors{{
     {DockPaneType::Color,
      UINT32_C(0x524c4f43),
      IDS_DOCK_PANE_COLOR,
-     L"カラー",
+     UiText(UiStringId::Color),
      DockZone::Right,
      DockedAndTransientZones(
          {DockZone::Left, DockZone::Right, DockZone::Bottom}),
@@ -98,7 +100,7 @@ constexpr std::array<PaneDescriptor, kDockPaneCount> kPaneDescriptors{{
     {DockPaneType::Layer,
      UINT32_C(0x5259414c),
      IDS_DOCK_PANE_LAYER,
-     L"レイヤー／プレーン",
+     UiText(UiStringId::LayerPlane),
      DockZone::Right,
      DockedAndTransientZones(
          {DockZone::Left, DockZone::Right, DockZone::Bottom}),
@@ -117,7 +119,7 @@ constexpr std::array<PaneDescriptor, kDockPaneCount> kPaneDescriptors{{
     {DockPaneType::Locator,
      UINT32_C(0x41434f4c),
      IDS_PANE_LOCATOR,
-     L"ロケーター",
+     UiText(UiStringId::Text0411),
      DockZone::Right,
      DockedAndTransientZones(
          {DockZone::Left, DockZone::Right, DockZone::Bottom}, true),
@@ -136,7 +138,7 @@ constexpr std::array<PaneDescriptor, kDockPaneCount> kPaneDescriptors{{
     {DockPaneType::Sequence,
      UINT32_C(0x55514553),
      IDS_PANE_SEQUENCE,
-     L"シーケンス",
+     UiText(UiStringId::Text0204),
      DockZone::Bottom,
      DockedAndTransientZones(
          {DockZone::Left, DockZone::Right, DockZone::Bottom}, true),
@@ -155,7 +157,7 @@ constexpr std::array<PaneDescriptor, kDockPaneCount> kPaneDescriptors{{
     {DockPaneType::LightTable,
      UINT32_C(0x544c474c),
      IDS_PANE_LIGHT_TABLE,
-     L"ライトテーブル",
+     UiText(UiStringId::LightTable),
      DockZone::Right,
      DockedAndTransientZones(
          {DockZone::Left, DockZone::Right, DockZone::Bottom}, true),
@@ -174,7 +176,7 @@ constexpr std::array<PaneDescriptor, kDockPaneCount> kPaneDescriptors{{
     {DockPaneType::Reference,
      UINT32_C(0x45464552),
      IDS_PANE_REFERENCE,
-     L"サブパレット／参照ビュー",
+     UiText(UiStringId::Text0194),
      DockZone::Right,
      DockedAndTransientZones(
          {DockZone::Left, DockZone::Right, DockZone::Bottom}, true),
@@ -193,7 +195,7 @@ constexpr std::array<PaneDescriptor, kDockPaneCount> kPaneDescriptors{{
     {DockPaneType::Batch,
      UINT32_C(0x48435442),
      IDS_PANE_BATCH,
-     L"バッチ",
+     UiText(UiStringId::Text0255),
      DockZone::Right,
      DockedAndTransientZones(
          {DockZone::Left, DockZone::Right, DockZone::Bottom}, true),
@@ -212,7 +214,7 @@ constexpr std::array<PaneDescriptor, kDockPaneCount> kPaneDescriptors{{
     {DockPaneType::JobProgress,
      UINT32_C(0x424f4a50),
      IDS_PANE_JOB_PROGRESS,
-     L"処理進捗",
+     UiText(UiStringId::Text0513),
      DockZone::Bottom,
      DockedAndTransientZones({DockZone::Bottom}),
      PaneTargetScope::Job,

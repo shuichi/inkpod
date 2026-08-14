@@ -1,3 +1,5 @@
+#include "ui/ui_resources.h"
+
 #include "sequence_pane.h"
 
 #include <algorithm>
@@ -10,6 +12,7 @@
 
 #include "app/resource.h"
 #include "pane_dialog_layout.h"
+#include "ui/localization.h"
 
 namespace inkpod::windows::ui::panes {
 namespace {
@@ -289,7 +292,7 @@ void DrawCell(
     (void)swprintf_s(
         label.data(),
         label.size(),
-        L"%u  %ls\n%u × %u",
+        L"%u  %ls\n%u x %u",
         cell.cell_number,
         cell.name.c_str(),
         cell.width,
@@ -409,7 +412,7 @@ HWND CreateSequencePaneDialog(
     if (state.dispatch_command == nullptr || state.activate_cell == nullptr) {
         return nullptr;
     }
-    const HWND dialog = CreateDialogParamW(
+    const HWND dialog = CreateLocalizedDialogParamW(
         instance,
         MAKEINTRESOURCEW(IDD_SEQUENCE_PALETTE),
         owner,
@@ -428,7 +431,7 @@ HWND CreateSequencePaneDialog(
     LayoutSequencePane(dialog);
     SetWindowTextW(
         GetDlgItem(dialog, IDC_SEQUENCE_CELLS),
-        L"シーケンスのサムネイル一覧");
+        UiText(UiStringId::SequenceAccessibleName));
     return dialog;
 }
 
@@ -446,7 +449,8 @@ void UpdateSequencePaneDialog(HWND dialog, SequencePaneView view) noexcept {
     SetDlgItemTextW(
         dialog,
         IDC_SEQUENCE_PIN,
-        state->view.pinned ? L"追従へ戻す" : L"文書に固定");
+        state->view.pinned ? UiText(UiStringId::ReturnToFollowing)
+                           : UiText(UiStringId::PinDocument));
     const HWND list = GetDlgItem(dialog, IDC_SEQUENCE_CELLS);
     SendMessageW(list, WM_SETREDRAW, FALSE, 0);
     SendMessageW(list, LB_RESETCONTENT, 0, 0);
@@ -480,7 +484,8 @@ void UpdateSequencePaneDialog(HWND dialog, SequencePaneView view) noexcept {
     SetDlgItemTextW(
         dialog,
         IDC_SEQUENCE_IMPORT,
-        state->view.cut_editable ? L"既存セルを追加" : L"ファイルを追加");
+        state->view.cut_editable ? UiText(UiStringId::ExistingCellAdd)
+                                 : UiText(UiStringId::FileAdd));
     const int show_edit = state->view.cut_editable ? SW_SHOW : SW_HIDE;
     for (const int control : {
              IDC_SEQUENCE_REMOVE,

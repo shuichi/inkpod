@@ -19,9 +19,16 @@ enum class LaunchParseStatus {
     OutOfMemory,
 };
 
+enum class SmokeUiLanguage {
+    System,
+    Japanese,
+    English,
+};
+
 struct LaunchOptions {
     LaunchMode mode{LaunchMode::Application};
     bool open_in_new_workspace{};
+    SmokeUiLanguage smoke_ui_language{SmokeUiLanguage::System};
     std::vector<std::wstring> document_paths;
 };
 

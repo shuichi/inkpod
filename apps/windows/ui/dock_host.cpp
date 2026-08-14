@@ -1,3 +1,5 @@
+#include "ui/ui_resources.h"
+
 #include "dock_host.h"
 
 #include <commctrl.h>
@@ -10,6 +12,7 @@
 #include <cstdint>
 
 #include "app/resource.h"
+#include "ui/localization.h"
 
 namespace inkpod::windows::ui {
 namespace {
@@ -89,11 +92,11 @@ void PlaceWindow(HWND window, const DockRect& bounds, bool visible) noexcept {
 
 const wchar_t* ZoneLabel(DockZone zone) noexcept {
     switch (zone) {
-        case DockZone::TopContext: return L"上へドック";
-        case DockZone::Left: return L"左へドック";
-        case DockZone::Right: return L"右へドック";
-        case DockZone::Bottom: return L"下へドック";
-        default: return L"ドック";
+        case DockZone::TopContext: return UiText(UiStringId::DockTop);
+        case DockZone::Left: return UiText(UiStringId::DockLeft);
+        case DockZone::Right: return UiText(UiStringId::DockRight);
+        case DockZone::Bottom: return UiText(UiStringId::DockBottom);
+        default: return UiText(UiStringId::DockGeneric);
     }
 }
 
@@ -102,7 +105,7 @@ const wchar_t* LoadPaneTitle(
     const PaneDescriptor& descriptor,
     wchar_t (&buffer)[128]) noexcept {
     if (instance != nullptr
-        && LoadStringW(
+        && LoadLocalizedStringW(
                instance,
                static_cast<UINT>(descriptor.title_resource_id),
                buffer,
@@ -136,19 +139,19 @@ DockZone CommandZone(UINT command) noexcept {
 const wchar_t* SplitterName(const DockSplitterGeometry& splitter) noexcept {
     if (splitter.kind == DockSplitterKind::StackBoundary) {
         switch (splitter.zone) {
-            case DockZone::TopContext: return L"上ドック内の分割位置";
-            case DockZone::Left: return L"左ドック内の分割位置";
-            case DockZone::Right: return L"右ドック内の分割位置";
-            case DockZone::Bottom: return L"下ドック内の分割位置";
-            default: return L"パネルの分割位置";
+            case DockZone::TopContext: return UiText(UiStringId::DockTopSplitPosition);
+            case DockZone::Left: return UiText(UiStringId::DockLeftSplitPosition);
+            case DockZone::Right: return UiText(UiStringId::DockRightSplitPosition);
+            case DockZone::Bottom: return UiText(UiStringId::DockBottomSplitPosition);
+            default: return UiText(UiStringId::DockPanelSplitPosition);
         }
     }
     switch (splitter.zone) {
-        case DockZone::TopContext: return L"上ドックの高さ";
-        case DockZone::Left: return L"左ドックの幅";
-        case DockZone::Right: return L"右ドックの幅";
-        case DockZone::Bottom: return L"下ドックの高さ";
-        default: return L"ドックの寸法";
+        case DockZone::TopContext: return UiText(UiStringId::DockTopSize);
+        case DockZone::Left: return UiText(UiStringId::DockLeftSize);
+        case DockZone::Right: return UiText(UiStringId::DockRightSize);
+        case DockZone::Bottom: return UiText(UiStringId::DockBottomSize);
+        default: return UiText(UiStringId::DockGenericSize);
     }
 }
 
@@ -267,7 +270,7 @@ bool DockHost::Initialize(
     if (preview_ == nullptr) {
         return false;
     }
-    SetAccessibleName(preview_, L"ドック先のプレビュー");
+    SetAccessibleName(preview_, UiText(UiStringId::DockPreviewAccessibleName));
     for (std::size_t index = 0U; index < splitters_.size(); ++index) {
         splitters_[index] = CreateWindowExW(
             0,
@@ -931,7 +934,7 @@ void DockHost::ShowContextMenu(
         MF_STRING
             | (pane != nullptr && pane->zone == DockZone::Floating ? MF_CHECKED : 0U),
         kContextFloat,
-        L"フローティング");
+        UiText(UiStringId::DockFloating));
     const PaneDescriptor* descriptor = FindPaneDescriptor(type);
     if (descriptor == nullptr || !descriptor->can_float) {
         EnableMenuItem(menu, kContextFloat, MF_BYCOMMAND | MF_GRAYED);
@@ -947,7 +950,7 @@ void DockHost::ShowContextMenu(
                        ? MF_CHECKED
                        : 0U),
             kContextSplit,
-            L"分割表示");
+            UiText(UiStringId::DockSplitView));
         AppendMenuW(
             menu,
             MF_STRING
@@ -955,11 +958,11 @@ void DockHost::ShowContextMenu(
                        ? MF_CHECKED
                        : 0U),
             kContextTabs,
-            L"タブ表示");
+            UiText(UiStringId::DockTabView));
     }
     AppendMenuW(menu, MF_SEPARATOR, 0U, nullptr);
-    AppendMenuW(menu, MF_STRING, kContextHide, L"非表示");
-    AppendMenuW(menu, MF_STRING, kContextReset, L"このパネルを初期位置へ戻す");
+    AppendMenuW(menu, MF_STRING, kContextHide, UiText(UiStringId::DockHide));
+    AppendMenuW(menu, MF_STRING, kContextReset, UiText(UiStringId::DockResetPane));
     const UINT command = TrackPopupMenu(
         menu,
         TPM_RETURNCMD | TPM_RIGHTBUTTON,

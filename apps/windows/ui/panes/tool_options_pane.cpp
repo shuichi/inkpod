@@ -9,6 +9,7 @@
 
 #include "app/resource.h"
 #include "inkpod/core_ffi.h"
+#include "ui/localization.h"
 #include "ui/tools/tool_state.h"
 
 namespace inkpod::windows::ui::panes {
@@ -67,25 +68,25 @@ int EditControlHeight(HWND pane, HFONT font, UINT dpi) noexcept {
 }
 
 const wchar_t* ToolLabel(std::uint32_t tool) noexcept {
-    if (tool == INKPOD_TOOL_PENCIL) return L"鉛筆";
-    if (tool == INKPOD_TOOL_BRUSH) return L"ブラシ";
-    if (tool == INKPOD_TOOL_ERASER) return L"消しゴム";
-    if (tool == tools::kInteractionFill) return L"フィル";
-    if (tool == tools::kInteractionEyedropper) return L"スポイト";
-    if (tool == tools::kInteractionVectorLine) return L"直線";
-    if (tool == tools::kInteractionVectorCurve) return L"曲線";
-    if (tool == tools::kInteractionVectorRectangle) return L"長方形";
-    if (tool == tools::kInteractionVectorEllipse) return L"楕円";
-    if (tool == tools::kInteractionVectorPolyline) return L"折れ線";
-    if (tool == tools::kInteractionVectorPolygon) return L"正多角形";
-    if (tool == tools::kInteractionVectorEraser) return L"ベクター消しゴム";
-    if (tool == tools::kInteractionEffectGradient) return L"グラデーション";
-    if (tool == tools::kInteractionEffectAirbrush) return L"エアブラシ";
-    if (tool == tools::kInteractionEffectBlur) return L"ぼかし";
-    if (tool == tools::kInteractionEffectStamp) return L"スタンプ";
-    if (tool == tools::kInteractionEffectDust) return L"ゴミ取り";
-    if (tool == tools::kInteractionEffectAlphaGradient) return L"アルファグラデーション";
-    return L"ツール";
+    if (tool == INKPOD_TOOL_PENCIL) return UiText(UiStringId::ToolPencil);
+    if (tool == INKPOD_TOOL_BRUSH) return UiText(UiStringId::ToolBrush);
+    if (tool == INKPOD_TOOL_ERASER) return UiText(UiStringId::ToolEraser);
+    if (tool == tools::kInteractionFill) return UiText(UiStringId::ToolFill);
+    if (tool == tools::kInteractionEyedropper) return UiText(UiStringId::ToolEyedropper);
+    if (tool == tools::kInteractionVectorLine) return UiText(UiStringId::ToolVectorLine);
+    if (tool == tools::kInteractionVectorCurve) return UiText(UiStringId::ToolVectorCurve);
+    if (tool == tools::kInteractionVectorRectangle) return UiText(UiStringId::ToolVectorRectangle);
+    if (tool == tools::kInteractionVectorEllipse) return UiText(UiStringId::ToolVectorEllipse);
+    if (tool == tools::kInteractionVectorPolyline) return UiText(UiStringId::ToolVectorPolyline);
+    if (tool == tools::kInteractionVectorPolygon) return UiText(UiStringId::ToolVectorPolygon);
+    if (tool == tools::kInteractionVectorEraser) return UiText(UiStringId::ToolVectorEraser);
+    if (tool == tools::kInteractionEffectGradient) return UiText(UiStringId::ToolGradient);
+    if (tool == tools::kInteractionEffectAirbrush) return UiText(UiStringId::ToolAirbrush);
+    if (tool == tools::kInteractionEffectBlur) return UiText(UiStringId::ToolBlur);
+    if (tool == tools::kInteractionEffectStamp) return UiText(UiStringId::ToolStamp);
+    if (tool == tools::kInteractionEffectDust) return UiText(UiStringId::ToolDustRemoval);
+    if (tool == tools::kInteractionEffectAlphaGradient) return UiText(UiStringId::ToolAlphaGradient);
+    return UiText(UiStringId::ToolGeneric);
 }
 
 UINT DetailsCommand(std::uint32_t tool) noexcept {
@@ -460,7 +461,7 @@ HWND CreateControl(
     return CreateWindowExW(
         0,
         class_name,
-        text,
+        text == nullptr ? L"" : text,
         WS_CHILD | WS_VISIBLE | style,
         0,
         0,
@@ -496,7 +497,7 @@ HWND CreateToolOptionsPane(
                instance,
                pane,
                L"STATIC",
-               L"ツール",
+               UiText(UiStringId::ToolGeneric),
                SS_LEFT | SS_CENTERIMAGE,
                IDC_TOOL_OPTIONS_LABEL)
             == nullptr
@@ -504,7 +505,7 @@ HWND CreateToolOptionsPane(
                instance,
                pane,
                L"STATIC",
-               L"直径",
+               UiText(UiStringId::ToolDiameter),
                SS_LEFT | SS_CENTERIMAGE,
                IDC_TOOL_OPTIONS_DIAMETER_LABEL)
             == nullptr
@@ -520,7 +521,7 @@ HWND CreateToolOptionsPane(
                instance,
                pane,
                L"BUTTON",
-               L"詳細...",
+               UiText(UiStringId::ToolDetails),
                WS_TABSTOP | BS_PUSHBUTTON,
                IDC_TOOL_OPTIONS_DETAILS)
             == nullptr
@@ -528,7 +529,7 @@ HWND CreateToolOptionsPane(
                instance,
                pane,
                L"STATIC",
-               L"消去対象",
+               UiText(UiStringId::ToolEraseTarget),
                SS_LEFT | SS_CENTERIMAGE,
                IDC_TOOL_OPTIONS_TARGET_LABEL)
             == nullptr
@@ -536,7 +537,7 @@ HWND CreateToolOptionsPane(
                instance,
                pane,
                L"BUTTON",
-               L"主線",
+               UiText(UiStringId::MainLine),
                WS_TABSTOP | WS_GROUP | BS_AUTORADIOBUTTON | BS_PUSHLIKE,
                IDC_TOOL_OPTIONS_TARGET_MAIN_LINE)
             == nullptr
@@ -544,7 +545,7 @@ HWND CreateToolOptionsPane(
                instance,
                pane,
                L"BUTTON",
-               L"彩色",
+               UiText(UiStringId::Coloring),
                WS_TABSTOP | BS_AUTORADIOBUTTON | BS_PUSHLIKE,
                IDC_TOOL_OPTIONS_TARGET_COLOR)
             == nullptr
@@ -568,7 +569,7 @@ HWND CreateToolOptionsPane(
                instance,
                pane,
                L"BUTTON",
-               L"開始色の部分だけ塗る",
+               UiText(UiStringId::ToolFillMatchingStartColor),
                WS_TABSTOP | BS_AUTOCHECKBOX,
                IDC_TOOL_OPTIONS_BRUSH_START_COLOR)
             == nullptr) {

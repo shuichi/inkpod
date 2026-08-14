@@ -1,3 +1,7 @@
+#include "ui/ui_resources.h"
+
+#include "ui/localization.h"
+
 #include "application.h"
 
 #include <commctrl.h>
@@ -28,6 +32,10 @@
 #include "ui/workspace_layout.h"
 
 namespace inkpod::app {
+using windows::ui::LoadLocalizedStringW;
+using windows::ui::UiStringId;
+using windows::ui::UiText;
+
 namespace {
 
 std::array<wchar_t, 96U> WorkspaceRegistryValueName(
@@ -215,7 +223,7 @@ InkpodStatus StopCore(ApplicationHost& state) noexcept {
 
 std::wstring RecoveryDisplayPath(const RecoveryCandidate& candidate) {
     if (!candidate.has_metadata) {
-        return L"(metadata なし)";
+        return UiText(UiStringId::Text0018);
     }
     if (!candidate.metadata.original_path.empty()) {
         return candidate.metadata.original_path;
@@ -226,7 +234,7 @@ std::wstring RecoveryDisplayPath(const RecoveryCandidate& candidate) {
     if (!candidate.metadata.original_identity.normalized_path.empty()) {
         return candidate.metadata.original_identity.normalized_path;
     }
-    return L"(未保存文書)";
+    return UiText(UiStringId::Text0020);
 }
 
 std::wstring RecoveryPromptText(
@@ -247,14 +255,7 @@ std::wstring RecoveryPromptText(
         text.data(),
         text.size(),
         _TRUNCATE,
-        L"Recovery候補 %zu / %zu\n\n"
-        L"元ファイル: %ls\n"
-        L"Recovery日時: %04u-%02u-%02u %02u:%02u:%02u\n"
-        L"session: %llu / generation: %llu\n"
-        L"状態: %ls\n\n"
-        L"はい: この候補を復元\n"
-        L"いいえ: この候補を破棄\n"
-        L"キャンセル: この候補を後で判断",
+        UiText(UiStringId::RecoveryCandidatePromptFormat),
         index + 1U,
         count,
         original.c_str(),
@@ -269,8 +270,8 @@ std::wstring RecoveryPromptText(
         static_cast<unsigned long long>(
             candidate.has_metadata ? candidate.metadata.generation.Value() : 0U),
         candidate.has_metadata
-            ? (newer ? L"元ファイルより新しいRecovery" : L"Recovery（比較不能または元ファイル以下）")
-            : L"metadataがないRecovery（内容は保持されています）");
+            ? (newer ? UiText(UiStringId::Text0490) : UiText(UiStringId::Text0082))
+            : UiText(UiStringId::Text0098));
     return text.data();
 }
 
@@ -282,8 +283,7 @@ bool ReviewRecoveryCandidates(
     if (!EnumerateRecoveryCandidates(candidates)) {
         MessageBoxW(
             owner,
-            L"Recovery候補が上限を超えたか、一覧を安全に読み取れませんでした。"
-            L"ファイルは削除していません。",
+            UiText(UiStringId::RecoveryEnumerationFailure),
             L"inkpod Recovery",
             MB_OK | MB_ICONWARNING);
         return false;
@@ -307,13 +307,13 @@ bool ReviewRecoveryCandidates(
                 document_initialized = true;
             } else {
                 windows::ui::runtime::ShowCoreError(
-                    state, owner, L"Recovery候補を開く");
+                    state, owner, UiText(UiStringId::Text0080));
             }
         } else if (choice == IDNO
             && !DiscardRecoveryArtifact(candidates[index].recovery_path)) {
             MessageBoxW(
                 owner,
-                L"Recovery候補を削除できませんでした。ファイルは保持されています。",
+                UiText(UiStringId::Text0079),
                 L"inkpod Recovery",
                 MB_OK | MB_ICONWARNING);
         }
@@ -334,7 +334,7 @@ bool OpenDocumentPaths(
             document_initialized = true;
         } else {
             windows::ui::runtime::ShowCoreError(
-                state, owner, L"起動ファイルを開く");
+                state, owner, UiText(UiStringId::Text0940));
             all_opened = false;
         }
     }
@@ -352,7 +352,7 @@ void RestorePreviousDocuments(
     if (!LoadPreviousDocumentPaths(paths)) {
         MessageBoxW(
             owner,
-            L"前回の文書一覧が不正なため復元しません。文書ファイルは変更していません。",
+            UiText(UiStringId::Text0536),
             L"inkpod",
             MB_OK | MB_ICONWARNING);
         return;
@@ -468,7 +468,7 @@ int Application::Run() {
         if (role == ActivationRole::Failed) {
             MessageBoxW(
                 nullptr,
-                L"同一ユーザーの application activation を初期化できませんでした。",
+                UiText(UiStringId::Text0563),
                 L"inkpod",
                 MB_OK | MB_ICONERROR);
             host_.reset();
@@ -493,8 +493,8 @@ int Application::Run() {
                 MessageBoxW(
                     nullptr,
                     sent == ActivationSendStatus::Timeout
-                        ? L"起動中の inkpod が応答しませんでした。同じ文書を別 process では開きません。"
-                        : L"起動中の inkpod へ安全に要求を渡せませんでした。同じ文書を別 process では開きません。",
+                        ? UiText(UiStringId::Text0941)
+                        : UiText(UiStringId::Text0942),
                     L"inkpod",
                     MB_OK | MB_ICONERROR);
                 host_.reset();
@@ -511,7 +511,7 @@ int Application::Run() {
     if (!InitCommonControlsEx(&controls)) {
         MessageBoxW(
             nullptr,
-            L"Common Controls の初期化に失敗しました。",
+            UiText(UiStringId::Text0056),
             L"inkpod",
             MB_OK | MB_ICONERROR);
         return 10;
@@ -521,7 +521,7 @@ int Application::Run() {
     if (FAILED(com.Initialize())) {
         MessageBoxW(
             nullptr,
-            L"COM の初期化に失敗しました。",
+            UiText(UiStringId::Text0042),
             L"inkpod",
             MB_OK | MB_ICONERROR);
         return 11;
@@ -529,12 +529,12 @@ int Application::Run() {
 
     std::array<wchar_t, 128> title{};
     std::array<wchar_t, 128> class_name{};
-    if (LoadStringW(
+    if (LoadLocalizedStringW(
             launch_.instance,
             IDS_APP_TITLE,
             title.data(),
             static_cast<int>(title.size())) == 0
-        || LoadStringW(
+        || LoadLocalizedStringW(
                launch_.instance,
                IDS_MAIN_WINDOW_CLASS,
                class_name.data(),
@@ -583,6 +583,14 @@ int Application::Run() {
         host_.reset();
         return 15;
     }
+    HMENU menu = windows::ui::LoadLocalizedMenuW(
+        launch_.instance, MAKEINTRESOURCEW(IDR_MAIN_MENU));
+    if (menu == nullptr) {
+        state.renderer->Stop();
+        state.ClearOwners();
+        host_.reset();
+        return 14;
+    }
     HWND window = CreateWindowExW(
         0,
         class_name.data(),
@@ -593,10 +601,11 @@ int Application::Run() {
         1024,
         720,
         nullptr,
-        nullptr,
+        menu,
         launch_.instance,
         &state.Workspace());
     if (window == nullptr) {
+        DestroyMenu(menu);
         state.renderer->Stop();
         state.ClearOwners();
         host_.reset();
@@ -607,7 +616,7 @@ int Application::Run() {
     if (core_status != INKPOD_STATUS_OK) {
         if (!launch_.smoke_test) {
             windows::ui::runtime::ShowCoreError(
-                state, window, L"Rust Core の初期化");
+                state, window, UiText(UiStringId::Text0083));
         }
         StopCore(state);
         DestroyWindow(window);
@@ -634,7 +643,7 @@ int Application::Run() {
             windows::ui::runtime::ShowCoreError(
                 state,
                 window,
-                L"セルまたはRecoveryの初期化");
+                UiText(UiStringId::Text0225));
         }
         StopCore(state);
         DestroyWindow(window);

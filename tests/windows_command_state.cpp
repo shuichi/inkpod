@@ -238,6 +238,10 @@ int main() {
         || IsCommandEnabled(states, IDM_TOOL_COLOR_REPLACE_RECTANGLE)
         || !IsCommandEnabled(states, IDM_FILE_RESTORE_PREVIOUS)
         || IsCommandChecked(states, IDM_FILE_RESTORE_PREVIOUS)
+        || !IsCommandEnabled(states, IDM_LANGUAGE_SYSTEM)
+        || !IsCommandChecked(states, IDM_LANGUAGE_SYSTEM)
+        || IsCommandChecked(states, IDM_LANGUAGE_JAPANESE)
+        || IsCommandChecked(states, IDM_LANGUAGE_ENGLISH)
         || !IsCommandEnabled(states, IDM_FILE_SEQUENCE_AUTOSAVE)
         || IsCommandChecked(states, IDM_FILE_SEQUENCE_AUTOSAVE)
         || !IsCommandEnabled(states, IDM_SEQ_WRAP_ENDPOINTS)
@@ -249,10 +253,14 @@ int main() {
     inputs.application.restore_previous_documents = true;
     inputs.application.sequence_autosave_before_switch = true;
     inputs.application.sequence_wrap_endpoints = true;
+    inputs.application.ui_language_preference = 3U;
     states = ComputeCommandStates(inputs);
     if (!IsCommandChecked(states, IDM_FILE_RESTORE_PREVIOUS)
         || !IsCommandChecked(states, IDM_FILE_SEQUENCE_AUTOSAVE)
-        || !IsCommandChecked(states, IDM_SEQ_WRAP_ENDPOINTS)) {
+        || !IsCommandChecked(states, IDM_SEQ_WRAP_ENDPOINTS)
+        || IsCommandChecked(states, IDM_LANGUAGE_SYSTEM)
+        || IsCommandChecked(states, IDM_LANGUAGE_JAPANESE)
+        || !IsCommandChecked(states, IDM_LANGUAGE_ENGLISH)) {
         return 21;
     }
 
