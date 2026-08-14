@@ -678,6 +678,48 @@
       "resource": false
     },
     {
+      "id": "HistoryRasterEdit",
+      "kind": "text",
+      "ja": "ラスター編集",
+      "en": "Raster Edit",
+      "resource": false
+    },
+    {
+      "id": "HistoryPaletteEdit",
+      "kind": "text",
+      "ja": "パレット編集",
+      "en": "Palette Edit",
+      "resource": false
+    },
+    {
+      "id": "HistoryColorChartEdit",
+      "kind": "text",
+      "ja": "カラーチャート編集",
+      "en": "Color Chart Edit",
+      "resource": false
+    },
+    {
+      "id": "HistoryMainLineColorEdit",
+      "kind": "text",
+      "ja": "主線色編集",
+      "en": "Main Line Color Edit",
+      "resource": false
+    },
+    {
+      "id": "HistoryDocumentEdit",
+      "kind": "text",
+      "ja": "文書編集",
+      "en": "Document Edit",
+      "resource": false
+    },
+    {
+      "id": "RecoveredCell",
+      "kind": "text",
+      "ja": "復元セル",
+      "en": "Recovered Cell",
+      "resource": false
+    },
+    {
       "id": "DrawingColor",
       "kind": "text",
       "ja": "彩色用描画色",

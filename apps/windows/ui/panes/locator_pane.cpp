@@ -29,7 +29,6 @@ void LayoutLocatorPane(HWND dialog) noexcept {
     const int margin = ScalePaneDip(dialog, 8);
     const int gap = ScalePaneDip(dialog, 6);
     const int header_height = ScalePaneDip(dialog, 24);
-    const int pin_width = ScalePaneDip(dialog, 88);
     const int line_height = ScalePaneDip(dialog, 18);
     const int option_height = ScalePaneDip(dialog, 20);
     const int width = std::max(
@@ -37,20 +36,17 @@ void LayoutLocatorPane(HWND dialog) noexcept {
     const int height = std::max(
         0, static_cast<int>(client.bottom - client.top));
 
-    PlacePaneDialogControl(
-        dialog,
-        IDC_LOCATOR_PIN,
-        std::max(margin, width - margin - pin_width),
-        margin,
-        pin_width,
-        header_height);
-    PlacePaneDialogControl(
+    PlacePaneTargetRow(
         dialog,
         IDC_LOCATOR_TARGET,
+        IDC_LOCATOR_PIN,
         margin,
-        margin + ScalePaneDip(dialog, 4),
-        std::max(0, width - margin * 3 - pin_width),
-        line_height);
+        margin,
+        std::max(0, width - margin * 2),
+        ScalePaneDip(dialog, 4),
+        line_height,
+        header_height,
+        gap);
 
     const int options_top = std::max(
         margin + header_height + gap,

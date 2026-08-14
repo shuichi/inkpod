@@ -202,24 +202,20 @@ void LayoutSubpalettePaneDialog(HWND dialog) noexcept {
     const int gap = ScalePaneDip(dialog, 6);
     const int line_height = ScalePaneDip(dialog, 18);
     const int row_height = ScalePaneDip(dialog, 26);
-    const int pin_width = ScalePaneDip(dialog, 92);
     const int width = static_cast<int>(client.right - client.left);
     const int height = static_cast<int>(client.bottom - client.top);
     const int content_width = std::max(0, width - margin * 2);
-    PlacePaneDialogControl(
-        dialog,
-        IDC_SUBPALETTE_PIN,
-        std::max(margin, width - margin - pin_width),
-        margin,
-        pin_width,
-        row_height);
-    PlacePaneDialogControl(
+    PlacePaneTargetRow(
         dialog,
         IDC_SUBPALETTE_TARGET,
+        IDC_SUBPALETTE_PIN,
         margin,
-        margin + ScalePaneDip(dialog, 4),
-        std::max(0, width - margin * 3 - pin_width),
-        line_height);
+        margin,
+        content_width,
+        ScalePaneDip(dialog, 4),
+        line_height,
+        row_height,
+        gap);
     const int source_top = margin + row_height + gap;
     PlacePaneDialogControl(
         dialog,
@@ -239,27 +235,25 @@ void LayoutSubpalettePaneDialog(HWND dialog) noexcept {
         hint_top,
         content_width,
         line_height);
+    const int check_height = ScalePaneDip(dialog, 22);
+    const std::array<int, 2U> checks{
+        IDC_SUBPALETTE_AUTO_PREVIOUS,
+        IDC_SUBPALETTE_SCROLL_SYNC};
+    const std::size_t check_rows = PaneButtonRowCount(
+        dialog, checks, content_width, gap);
+    const int checks_height = static_cast<int>(check_rows) * check_height
+        + std::max(0, static_cast<int>(check_rows) - 1) * gap;
     const int checks_top = std::max(
         source_top + line_height + gap,
-        hint_top - gap - ScalePaneDip(dialog, 22));
-    const int check_width = std::max(0, (content_width - gap) / 2);
-    PlacePaneDialogControl(
+        hint_top - gap - checks_height);
+    PlacePaneButtonRows(
         dialog,
-        IDC_SUBPALETTE_AUTO_PREVIOUS,
+        checks,
         margin,
         checks_top,
-        check_width,
-        ScalePaneDip(dialog, 22));
-    PlacePaneDialogControl(
-        dialog,
-        IDC_SUBPALETTE_SCROLL_SYNC,
-        margin + check_width + gap,
-        checks_top,
-        std::max(0, content_width - check_width - gap),
-        ScalePaneDip(dialog, 22));
-    const int actions_top = std::max(
-        source_top + line_height + gap,
-        checks_top - gap - row_height);
+        content_width,
+        check_height,
+        gap);
     const std::array<int, 6U> actions{
         IDC_SUBPALETTE_PREVIOUS,
         IDC_SUBPALETTE_NEXT,
@@ -267,14 +261,21 @@ void LayoutSubpalettePaneDialog(HWND dialog) noexcept {
         IDC_SUBPALETTE_FIT,
         IDC_SUBPALETTE_ONE_TO_ONE,
         IDC_SUBPALETTE_REGISTER};
-    const int action_width = std::max(
-        0, (content_width - gap * 5) / static_cast<int>(actions.size()));
-    int cursor = margin;
-    for (const int control : actions) {
-        PlacePaneDialogControl(
-            dialog, control, cursor, actions_top, action_width, row_height);
-        cursor += action_width + gap;
-    }
+    const std::size_t action_rows = PaneButtonRowCount(
+        dialog, actions, content_width, gap);
+    const int actions_height = static_cast<int>(action_rows) * row_height
+        + std::max(0, static_cast<int>(action_rows) - 1) * gap;
+    const int actions_top = std::max(
+        source_top + line_height + gap,
+        checks_top - gap - actions_height);
+    PlacePaneButtonRows(
+        dialog,
+        actions,
+        margin,
+        actions_top,
+        content_width,
+        row_height,
+        gap);
     const int canvas_top = source_top + line_height + gap;
     const int canvas_height = std::max(0, actions_top - gap - canvas_top);
     SetWindowPos(

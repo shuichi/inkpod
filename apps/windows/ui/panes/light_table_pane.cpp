@@ -30,25 +30,21 @@ void LayoutLightTablePane(HWND dialog) noexcept {
     const int gap = ScalePaneDip(dialog, 6);
     const int line_height = ScalePaneDip(dialog, 18);
     const int row_height = ScalePaneDip(dialog, 26);
-    const int pin_width = ScalePaneDip(dialog, 92);
     const int width = static_cast<int>(client.right - client.left);
     const int height = static_cast<int>(client.bottom - client.top);
     const int content_width = std::max(0, width - margin * 2);
 
-    PlacePaneDialogControl(
-        dialog,
-        IDC_LIGHT_TABLE_PIN,
-        std::max(margin, width - margin - pin_width),
-        margin,
-        pin_width,
-        row_height);
-    PlacePaneDialogControl(
+    PlacePaneTargetRow(
         dialog,
         IDC_LIGHT_TABLE_TARGET,
+        IDC_LIGHT_TABLE_PIN,
         margin,
-        margin + ScalePaneDip(dialog, 4),
-        std::max(0, width - margin * 3 - pin_width),
-        line_height);
+        margin,
+        content_width,
+        ScalePaneDip(dialog, 4),
+        line_height,
+        row_height,
+        gap);
 
     const int set_top = margin + row_height + gap;
     const int set_label_width = ScalePaneDip(dialog, 48);
@@ -68,26 +64,25 @@ void LayoutLightTablePane(HWND dialog) noexcept {
         row_height);
 
     const int set_actions_top = set_top + row_height + gap;
-    const int small_button = ScalePaneDip(dialog, 54);
-    const int opacity_width = ScalePaneDip(dialog, 112);
-    int cursor = margin;
-    for (const int control : {
-             IDC_LIGHT_TABLE_SET_NEW,
-             IDC_LIGHT_TABLE_SET_DUPLICATE,
-             IDC_LIGHT_TABLE_SET_DELETE}) {
-        PlacePaneDialogControl(
-            dialog, control, cursor, set_actions_top, small_button, row_height);
-        cursor += small_button + gap;
-    }
-    PlacePaneDialogControl(
+    const std::array<int, 4U> set_action_controls{
+        IDC_LIGHT_TABLE_SET_NEW,
+        IDC_LIGHT_TABLE_SET_DUPLICATE,
+        IDC_LIGHT_TABLE_SET_DELETE,
+        IDC_LIGHT_TABLE_GLOBAL_OPACITY};
+    const std::size_t set_action_rows = PaneButtonRowCount(
+        dialog, set_action_controls, content_width, gap);
+    const int set_actions_height = static_cast<int>(set_action_rows) * row_height
+        + std::max(0, static_cast<int>(set_action_rows) - 1) * gap;
+    PlacePaneButtonRows(
         dialog,
-        IDC_LIGHT_TABLE_GLOBAL_OPACITY,
-        std::max(margin, width - margin - opacity_width),
+        set_action_controls,
+        margin,
         set_actions_top,
-        opacity_width,
-        row_height);
+        content_width,
+        row_height,
+        gap);
 
-    const int items_label_top = set_actions_top + row_height + gap;
+    const int items_label_top = set_actions_top + set_actions_height + gap;
     PlacePaneDialogControl(
         dialog,
         IDC_LIGHT_TABLE_ITEMS_LABEL,
@@ -105,8 +100,17 @@ void LayoutLightTablePane(HWND dialog) noexcept {
         hint_top,
         content_width,
         line_height);
-    const int cell_top = std::max(list_top, hint_top - gap - row_height);
     const int cell_label_width = ScalePaneDip(dialog, 58);
+    const int labelled_button_width = std::max(
+        0, content_width - cell_label_width - gap);
+    const std::array<int, 2U> cell_controls{
+        IDC_LIGHT_TABLE_PREVIOUS,
+        IDC_LIGHT_TABLE_NEXT};
+    const std::size_t cell_rows = PaneButtonRowCount(
+        dialog, cell_controls, labelled_button_width, gap);
+    const int cell_height = static_cast<int>(cell_rows) * row_height
+        + std::max(0, static_cast<int>(cell_rows) - 1) * gap;
+    const int cell_top = std::max(list_top, hint_top - gap - cell_height);
     PlacePaneDialogControl(
         dialog,
         IDC_LIGHT_TABLE_CELL_LABEL,
@@ -114,22 +118,24 @@ void LayoutLightTablePane(HWND dialog) noexcept {
         cell_top + ScalePaneDip(dialog, 4),
         cell_label_width,
         line_height);
-    PlacePaneDialogControl(
+    PlacePaneButtonRows(
         dialog,
-        IDC_LIGHT_TABLE_PREVIOUS,
+        cell_controls,
         margin + cell_label_width + gap,
         cell_top,
-        ScalePaneDip(dialog, 72),
-        row_height);
-    PlacePaneDialogControl(
-        dialog,
-        IDC_LIGHT_TABLE_NEXT,
-        margin + cell_label_width + gap + ScalePaneDip(dialog, 78),
-        cell_top,
-        ScalePaneDip(dialog, 72),
-        row_height);
+        labelled_button_width,
+        row_height,
+        gap);
 
-    const int bulk_top = std::max(list_top, cell_top - gap - row_height);
+    const std::array<int, 3U> bulk_controls{
+        IDC_LIGHT_TABLE_BULK_PREVIOUS,
+        IDC_LIGHT_TABLE_BULK_NEXT,
+        IDC_LIGHT_TABLE_BULK_BOTH};
+    const std::size_t bulk_rows = PaneButtonRowCount(
+        dialog, bulk_controls, labelled_button_width, gap);
+    const int bulk_height = static_cast<int>(bulk_rows) * row_height
+        + std::max(0, static_cast<int>(bulk_rows) - 1) * gap;
+    const int bulk_top = std::max(list_top, cell_top - gap - bulk_height);
     PlacePaneDialogControl(
         dialog,
         IDC_LIGHT_TABLE_BULK_LABEL,
@@ -137,48 +143,53 @@ void LayoutLightTablePane(HWND dialog) noexcept {
         bulk_top + ScalePaneDip(dialog, 4),
         cell_label_width,
         line_height);
-    const int bulk_button_width = std::max(
-        0, (content_width - cell_label_width - gap * 3) / 3);
-    cursor = margin + cell_label_width + gap;
-    for (const int control : {
-             IDC_LIGHT_TABLE_BULK_PREVIOUS,
-             IDC_LIGHT_TABLE_BULK_NEXT,
-             IDC_LIGHT_TABLE_BULK_BOTH}) {
-        PlacePaneDialogControl(
-            dialog, control, cursor, bulk_top, bulk_button_width, row_height);
-        cursor += bulk_button_width + gap;
-    }
+    PlacePaneButtonRows(
+        dialog,
+        bulk_controls,
+        margin + cell_label_width + gap,
+        bulk_top,
+        labelled_button_width,
+        row_height,
+        gap);
 
-    const int property_top = std::max(list_top, bulk_top - gap - row_height);
     const std::array<int, 3U> property_controls{
         IDC_LIGHT_TABLE_ITEM_PROPERTIES,
         IDC_LIGHT_TABLE_ITEM_MOVE,
         IDC_LIGHT_TABLE_ITEM_SWAP};
-    const int property_width = std::max(
-        0, (content_width - gap * 2) / static_cast<int>(property_controls.size()));
-    cursor = margin;
-    for (const int control : property_controls) {
-        PlacePaneDialogControl(
-            dialog, control, cursor, property_top, property_width, row_height);
-        cursor += property_width + gap;
-    }
+    const std::size_t property_rows = PaneButtonRowCount(
+        dialog, property_controls, content_width, gap);
+    const int property_height = static_cast<int>(property_rows) * row_height
+        + std::max(0, static_cast<int>(property_rows) - 1) * gap;
+    const int property_top = std::max(list_top, bulk_top - gap - property_height);
+    PlacePaneButtonRows(
+        dialog,
+        property_controls,
+        margin,
+        property_top,
+        content_width,
+        row_height,
+        gap);
 
-    const int item_actions_top = std::max(
-        list_top, property_top - gap - row_height);
     const std::array<int, 5U> item_controls{
         IDC_LIGHT_TABLE_ITEM_ADD,
         IDC_LIGHT_TABLE_ITEM_RELOAD,
         IDC_LIGHT_TABLE_ITEM_DELETE,
         IDC_LIGHT_TABLE_ITEM_UP,
         IDC_LIGHT_TABLE_ITEM_DOWN};
-    const int item_width = std::max(
-        0, (content_width - gap * 4) / static_cast<int>(item_controls.size()));
-    cursor = margin;
-    for (const int control : item_controls) {
-        PlacePaneDialogControl(
-            dialog, control, cursor, item_actions_top, item_width, row_height);
-        cursor += item_width + gap;
-    }
+    const std::size_t item_rows = PaneButtonRowCount(
+        dialog, item_controls, content_width, gap);
+    const int item_height = static_cast<int>(item_rows) * row_height
+        + std::max(0, static_cast<int>(item_rows) - 1) * gap;
+    const int item_actions_top = std::max(
+        list_top, property_top - gap - item_height);
+    PlacePaneButtonRows(
+        dialog,
+        item_controls,
+        margin,
+        item_actions_top,
+        content_width,
+        row_height,
+        gap);
     const int list_height = std::max(0, item_actions_top - gap - list_top);
     PlacePaneDialogControl(
         dialog,

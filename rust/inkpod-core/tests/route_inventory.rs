@@ -365,10 +365,26 @@ fn route_inventory_covers_public_core_ffi_and_windows_surfaces() {
     let mut expected_rust = public_core_methods(&repository.join("rust/inkpod-core/src"));
     expected_rust.extend(public_non_core_mutations(repository));
     let expected_ffi = public_ffi_exports(&repository.join("rust/inkpod-ffi/src"));
-    let resource_path = repository.join("apps/windows/app/app.rc");
-    let resource = fs::read_to_string(&resource_path)
-        .unwrap_or_else(|error| panic!("failed to read {}: {error}", resource_path.display()));
-    let expected_windows = windows_production_commands(&resource);
+    let japanese_resource_path = repository.join("apps/windows/app/app_ui_ja.generated.rc");
+    let english_resource_path = repository.join("apps/windows/app/app_ui_en.generated.rc");
+    let japanese_resource = fs::read_to_string(&japanese_resource_path).unwrap_or_else(|error| {
+        panic!(
+            "failed to read {}: {error}",
+            japanese_resource_path.display()
+        )
+    });
+    let english_resource = fs::read_to_string(&english_resource_path).unwrap_or_else(|error| {
+        panic!(
+            "failed to read {}: {error}",
+            english_resource_path.display()
+        )
+    });
+    let japanese_windows = windows_production_commands(&japanese_resource);
+    let expected_windows = windows_production_commands(&english_resource);
+    assert_eq!(
+        japanese_windows, expected_windows,
+        "Japanese and English resources must expose the same production command IDs"
+    );
 
     let actual_rust = inventoried
         .get("rust")

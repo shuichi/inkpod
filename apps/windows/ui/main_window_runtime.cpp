@@ -44,6 +44,7 @@
 #include "ui/command_state.h"
 #include "ui/command_catalog.h"
 #include "ui/localization.h"
+#include "ui/history_presentation.h"
 #include "ui/shortcut_controller.h"
 #include "ui/panes/document_panes.h"
 #include "ui/panes/color_panes.h"
@@ -429,7 +430,7 @@ bool BuildCellCreationDialogPreview(
     InkpodCellCreationPlanItem& preview) noexcept;
 InkpodStatus SaveToPath(
     ApplicationHost& state, const std::wstring& path) noexcept;
-std::wstring LocalizedHistoryLabel(const std::string& label);
+std::wstring Utf8UserText(const std::string& text);
 using inkpod::windows::ui::panes::DocumentPanesController;
 using inkpod::windows::ui::panes::ColorPanesController;
 using inkpod::windows::ui::panes::LightTablePaneItem;
@@ -2892,9 +2893,7 @@ std::wstring LocatorDocumentName(const DocumentSession& document) {
             return leaf;
         }
     }
-    const wchar_t* prefix = CurrentUiLanguage() == UiLanguage::English
-        ? L"Untitled Cell "
-        : UiText(UiStringId::Text0777);
+    const wchar_t* prefix = UiText(UiStringId::Text0777);
     return prefix + std::to_wstring(
         document.untitled_number == 0U ? 1U : document.untitled_number);
 }
@@ -3228,38 +3227,29 @@ void UpdateMotionState(
     animation.motion_paused = (frame.flags & INKPOD_MOTION_FRAME_PAUSED) != 0U;
 }
 
-std::wstring LocalizedHistoryLabel(const std::string& label) {
-    if (label == "Raster edit") {
-        return UiText(UiStringId::Text0811);
-    }
-    if (label == "Palette edit") {
-        return UiText(UiStringId::Text0273);
-    }
-    if (label == "Main-line color") {
-        return UiText(UiStringId::MainLineColor);
-    }
-    if (label == "Document edit") {
-        return UiText(UiStringId::Text0699);
+std::wstring Utf8UserText(const std::string& text) {
+    if (text.size() > static_cast<std::size_t>(INT_MAX)) {
+        return {};
     }
     const int count = MultiByteToWideChar(
         CP_UTF8,
         MB_ERR_INVALID_CHARS,
-        label.data(),
-        static_cast<int>(label.size()),
+        text.data(),
+        static_cast<int>(text.size()),
         nullptr,
         0);
     if (count <= 0) {
-        return UiText(UiStringId::Editable);
+        return {};
     }
     std::wstring output(static_cast<std::size_t>(count), L'\0');
     if (MultiByteToWideChar(
             CP_UTF8,
             MB_ERR_INVALID_CHARS,
-            label.data(),
-            static_cast<int>(label.size()),
+            text.data(),
+            static_cast<int>(text.size()),
             output.data(),
             count) != count) {
-        return UiText(UiStringId::Editable);
+        return {};
     }
     return output;
 }
@@ -3271,33 +3261,25 @@ bool ConfigureHistoryDialog(
     }
     InkpodHistoryInfo info{};
     info.struct_size = sizeof(info);
-    std::vector<std::string> names;
+    std::vector<InkpodHistoryEntryKind> kinds;
     const InkpodStatus status = app.engine->Invoke(
-        [&info, &names](InkpodCore* core) {
+        [&info, &kinds](InkpodCore* core) {
             InkpodStatus inner = inkpod_core_history_info(core, &info);
             if (inner != INKPOD_STATUS_OK || info.item_count > UINT64_C(1048576)) {
                 return inner == INKPOD_STATUS_OK ? INKPOD_STATUS_INVALID_STATE : inner;
             }
             try {
-                names.reserve(static_cast<std::size_t>(info.item_count));
+                kinds.reserve(static_cast<std::size_t>(info.item_count));
                 for (std::uint64_t index = 0; index < info.item_count; ++index) {
                     InkpodHistoryItem item{};
                     item.struct_size = sizeof(item);
                     inner = inkpod_core_history_item(core, index, &item);
                     if (inner != INKPOD_STATUS_OK
-                        || item.name_bytes > UINT64_C(4096)) {
-                        return inner == INKPOD_STATUS_OK
-                            ? INKPOD_STATUS_INVALID_STATE
-                            : inner;
+                        || item.entry_kind < INKPOD_HISTORY_ENTRY_RASTER
+                        || item.entry_kind > INKPOD_HISTORY_ENTRY_DOCUMENT) {
+                        return inner == INKPOD_STATUS_OK ? INKPOD_STATUS_INVALID_STATE : inner;
                     }
-                    std::string name(static_cast<std::size_t>(item.name_bytes), '\0');
-                    item.name_utf8 = reinterpret_cast<std::uint8_t*>(name.data());
-                    item.name_capacity = item.name_bytes;
-                    inner = inkpod_core_history_item(core, index, &item);
-                    if (inner != INKPOD_STATUS_OK) {
-                        return inner;
-                    }
-                    names.push_back(std::move(name));
+                    kinds.push_back(item.entry_kind);
                 }
             } catch (const std::bad_alloc&) {
                 return INKPOD_STATUS_INVALID_STATE;
@@ -3326,8 +3308,12 @@ bool ConfigureHistoryDialog(
                     prefix.data(), prefix.size(), _TRUNCATE, L"%llu: ",
                     static_cast<unsigned long long>(cursor));
                 label = prefix.data();
-                label += LocalizedHistoryLabel(
-                    names[static_cast<std::size_t>(cursor - 1U)]);
+                const auto string_id = HistoryUiStringId(
+                    kinds[static_cast<std::size_t>(cursor - 1U)]);
+                if (!string_id.has_value()) {
+                    return false;
+                }
+                label += UiText(string_id.value());
             }
             dialog.labels.push_back(std::move(label));
             dialog.cursors.push_back(cursor);
@@ -3352,8 +3338,8 @@ bool QueryHistoryMenuLabels(
     }
     info = {};
     info.struct_size = sizeof(info);
-    std::string undo_name;
-    std::string redo_name;
+    InkpodHistoryEntryKind undo_kind{};
+    InkpodHistoryEntryKind redo_kind{};
     const DocumentSessionId session = app.routing.targets.DocumentSession();
     const DocumentSession* document = app.Documents().Find(session);
     if (document == nullptr
@@ -3361,17 +3347,25 @@ bool QueryHistoryMenuLabels(
             document->id,
             document->generation,
             info,
-            undo_name,
-            redo_name)) {
+            undo_kind,
+            redo_kind)) {
         return false;
     }
     try {
-        undo_label = undo_name.empty()
+        const auto undo_string_id = HistoryUiStringId(undo_kind);
+        const auto redo_string_id = HistoryUiStringId(redo_kind);
+        if ((undo_kind != 0U && !undo_string_id.has_value())
+            || (redo_kind != 0U && !redo_string_id.has_value())) {
+            return false;
+        }
+        undo_label = undo_kind == 0U
             ? UiText(UiStringId::Text0486)
-            : UiText(UiStringId::Text0487) + LocalizedHistoryLabel(undo_name) + L"\tCtrl+Z";
-        redo_label = redo_name.empty()
+            : UiText(UiStringId::Text0487)
+                + std::wstring(UiText(undo_string_id.value())) + L"\tCtrl+Z";
+        redo_label = redo_kind == 0U
             ? UiText(UiStringId::Text0122)
-            : UiText(UiStringId::Text0123) + LocalizedHistoryLabel(redo_name) + L"\tCtrl+Y";
+            : UiText(UiStringId::Text0123)
+                + std::wstring(UiText(redo_string_id.value())) + L"\tCtrl+Y";
     } catch (const std::bad_alloc&) {
         return false;
     }
@@ -6802,13 +6796,9 @@ std::wstring DocumentTabBaseName(
         }
     }
     if ((info.flags & INKPOD_DOCUMENT_FLAG_RECOVERED) != 0U) {
-        return CurrentUiLanguage() == UiLanguage::English
-            ? L"Recovered Cell"
-            : UiText(UiStringId::Text0658);
+        return UiText(UiStringId::RecoveredCell);
     }
-    const wchar_t* prefix = CurrentUiLanguage() == UiLanguage::English
-        ? L"Untitled Cell "
-        : UiText(UiStringId::Text0777);
+    const wchar_t* prefix = UiText(UiStringId::Text0777);
     return prefix
         + std::to_wstring(document.untitled_number == 0U
             ? 1U
@@ -6862,9 +6852,7 @@ void UpdateDocumentTabLabels(
                 }
                 std::wstring label = base_name;
                 if (document_view_index != 0U) {
-                    label += CurrentUiLanguage() == UiLanguage::English
-                        ? L" [View "
-                        : UiText(UiStringId::Text0012);
+                    label += UiText(UiStringId::Text0012);
                     label += std::to_wstring(document_view_index + 1U);
                     label += L"]";
                 }
@@ -7709,7 +7697,7 @@ InkpodStatus EditSelectedTreeNodeProperties(ApplicationHost& state, bool plane) 
     name_dialog.title = plane ? UiText(UiStringId::Text0323) : UiText(UiStringId::Text0404);
     name_dialog.label = UiText(UiStringId::Text0567);
     try {
-        name_dialog.value = LocalizedHistoryLabel(node.name);
+        name_dialog.value = Utf8UserText(node.name);
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
     }

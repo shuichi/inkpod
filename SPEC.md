@@ -96,7 +96,7 @@ Windows GUI は標準的な Windows 11 desktop application とし、古典的 MD
 
 ### 3. メニュー構成
 
-UI 表示文字列は、日本語と英語を言語非依存の型付き ID で参照する一つの catalog で管理する。単語単位の部分置換で表示文を組み立てず、各言語の完成した文または format string を catalog に置く。文書名、path、Light Table set 名等のユーザー所有文字列は翻訳せず、catalog 由来の prefix/suffix と明示的に合成する。`編集 > 設定 > 言語` で `システム設定`、`日本語`、`English` を選択でき、次回起動から process 内の全 workspace に適用する。`システム設定` は Windows の第1優先 UI 言語が `ja` の場合だけ日本語を選び、それ以外または判定不能時は英語を選ぶ。選択値は versioned、bounded な HKCU application setting として保存し、不正 record は `システム設定` へ戻す。言語は文書、履歴、native file、ユーザー入力の名前や path に混ぜない。以下は機能上必要な top-level menu と command です。Windows の標準慣習に合わせた mnemonic、ellipsis、並びの小調整は許可します。
+UI 表示文字列は、日本語と英語を言語非依存の型付き ID で参照する一つの catalog で管理する。単語単位の部分置換で表示文を組み立てず、各言語の完成した文または format string を catalog に置く。文書名、path、Light Table set 名等のユーザー所有文字列は翻訳せず、catalog 由来の prefix/suffix と明示的に合成する。`編集 > 設定 > 言語` で `システム設定`、`日本語`、`English` を選択でき、次回起動から process 内の全 workspace に適用する。`システム設定` は Windows の第1優先 UI 言語が `ja` の場合だけ日本語を選び、それ以外または判定不能時は英語を選ぶ。選択値は versioned、bounded な HKCU application setting として保存し、不正 record は `システム設定` へ戻す。言語は文書、履歴、native file、ユーザー入力の名前や path に混ぜない。実行可能な button、checkbox 等の catalog 由来 caption は、各 pane の最小幅と 96/120/144/192 DPI 相当の標準 UI font で全文を表示し、必要なら操作行を折り返す。省略表示を許すのは文書名や path 等の可変長ユーザー所有文字列であり、操作 caption の切り詰め、略称化、font 縮小で代用しない。以下は機能上必要な top-level menu と command です。Windows の標準慣習に合わせた mnemonic、ellipsis、並びの小調整は許可します。
 
 #### ファイル
 

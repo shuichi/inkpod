@@ -186,8 +186,8 @@ public:
         DocumentSessionId session,
         Generation generation,
         InkpodHistoryInfo& info,
-        std::string& undo_name,
-        std::string& redo_name) const noexcept;
+        InkpodHistoryEntryKind& undo_kind,
+        InkpodHistoryEntryKind& redo_kind) const noexcept;
     bool GetEditTargetPresentation(
         DocumentSessionId session,
         Generation generation,

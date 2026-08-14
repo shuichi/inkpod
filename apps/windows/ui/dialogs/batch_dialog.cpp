@@ -62,25 +62,21 @@ void LayoutBatchPane(HWND dialog) noexcept {
     const int gap = scale(6);
     const int line_height = scale(18);
     const int row_height = scale(26);
-    const int pin_width = scale(90);
     const int width = static_cast<int>(client.right - client.left);
     const int height = static_cast<int>(client.bottom - client.top);
     const int content_width = std::max(0, width - margin * 2);
 
-    PlacePaneDialogControl(
-        dialog,
-        IDC_BATCH_PIN,
-        std::max(margin, width - margin - pin_width),
-        margin,
-        pin_width,
-        row_height);
-    PlacePaneDialogControl(
+    panes::PlacePaneTargetRow(
         dialog,
         IDC_BATCH_TARGET,
+        IDC_BATCH_PIN,
         margin,
-        margin + scale(4),
-        std::max(0, width - margin * 3 - pin_width),
-        line_height);
+        margin,
+        content_width,
+        scale(4),
+        line_height,
+        row_height,
+        gap);
     const int job_top = margin + row_height + gap;
     PlacePaneDialogControl(
         dialog, IDC_BATCH_JOB, margin, job_top, content_width, line_height);
@@ -111,45 +107,45 @@ void LayoutBatchPane(HWND dialog) noexcept {
         line_height);
     const int operations_top = operations_label_top + line_height;
 
-    const int bottom_top = std::max(operations_top, height - margin - row_height);
-    const int save_width = scale(82);
-    PlacePaneDialogControl(
-        dialog,
+    const std::array<int, 3U> bottom_controls{
         IDC_BATCH_SAVE_SET,
+        IDC_BATCH_LOAD_SET,
+        IDCANCEL};
+    const std::size_t bottom_rows = panes::PaneButtonRowCount(
+        dialog, bottom_controls, content_width, gap);
+    const int bottom_height = static_cast<int>(bottom_rows) * row_height
+        + std::max(0, static_cast<int>(bottom_rows) - 1) * gap;
+    const int bottom_top = std::max(
+        operations_top, height - margin - bottom_height);
+    panes::PlacePaneButtonRows(
+        dialog,
+        bottom_controls,
         margin,
         bottom_top,
-        save_width,
-        row_height);
-    PlacePaneDialogControl(
-        dialog,
-        IDC_BATCH_LOAD_SET,
-        margin + save_width + gap,
-        bottom_top,
-        save_width,
-        row_height);
-    PlacePaneDialogControl(
-        dialog,
-        IDCANCEL,
-        std::max(margin, width - margin - save_width),
-        bottom_top,
-        save_width,
-        row_height);
+        content_width,
+        row_height,
+        gap);
 
-    const int run_top = std::max(operations_top, bottom_top - gap - row_height);
     const std::array<int, 5U> run_controls{
         IDC_BATCH_PREVIEW,
         IDC_BATCH_DRY_RUN,
         IDC_BATCH_RUN_CURRENT,
         IDC_BATCH_RUN_ALL,
         IDC_BATCH_CANCEL};
-    const int run_width = std::max(
-        0, (content_width - gap * 4) / static_cast<int>(run_controls.size()));
-    int cursor = margin;
-    for (const int control : run_controls) {
-        PlacePaneDialogControl(
-            dialog, control, cursor, run_top, run_width, row_height);
-        cursor += run_width + gap;
-    }
+    const std::size_t run_rows = panes::PaneButtonRowCount(
+        dialog, run_controls, content_width, gap);
+    const int run_height = static_cast<int>(run_rows) * row_height
+        + std::max(0, static_cast<int>(run_rows) - 1) * gap;
+    const int run_top = std::max(
+        operations_top, bottom_top - gap - run_height);
+    panes::PlacePaneButtonRows(
+        dialog,
+        run_controls,
+        margin,
+        run_top,
+        content_width,
+        row_height,
+        gap);
 
     const int output_height = scale(34);
     const int output_top = std::max(operations_top, run_top - gap - output_height);
@@ -170,39 +166,48 @@ void LayoutBatchPane(HWND dialog) noexcept {
         content_width,
         line_height);
 
+    const std::array<int, 3U> reorder_controls{
+        IDC_BATCH_UP,
+        IDC_BATCH_DOWN,
+        IDC_BATCH_EDIT};
+    const std::size_t reorder_rows = panes::PaneButtonRowCount(
+        dialog, reorder_controls, content_width, gap);
+    const int reorder_height = static_cast<int>(reorder_rows) * row_height
+        + std::max(0, static_cast<int>(reorder_rows) - 1) * gap;
     const int reorder_top = std::max(
-        operations_top, output_label_top - gap - row_height);
-    const int small_button = scale(56);
-    cursor = margin;
-    for (const int control : {
-             IDC_BATCH_UP, IDC_BATCH_DOWN, IDC_BATCH_EDIT}) {
-        PlacePaneDialogControl(
-            dialog, control, cursor, reorder_top, small_button, row_height);
-        cursor += small_button + gap;
-    }
+        operations_top, output_label_top - gap - reorder_height);
+    panes::PlacePaneButtonRows(
+        dialog,
+        reorder_controls,
+        margin,
+        reorder_top,
+        content_width,
+        row_height,
+        gap);
     const int add_top = std::max(
         operations_top, reorder_top - gap - row_height);
-    const int action_width = scale(56);
+    const int add_width = panes::PaneButtonIdealWidth(dialog, IDC_BATCH_ADD);
+    const int remove_width = panes::PaneButtonIdealWidth(dialog, IDC_BATCH_REMOVE);
     PlacePaneDialogControl(
         dialog,
         IDC_BATCH_OPERATION_KIND,
         margin,
         add_top,
-        std::max(0, content_width - action_width * 2 - gap * 2),
+        std::max(0, content_width - add_width - remove_width - gap * 2),
         row_height);
     PlacePaneDialogControl(
         dialog,
         IDC_BATCH_ADD,
-        std::max(margin, width - margin - action_width * 2 - gap),
+        std::max(margin, width - margin - add_width - remove_width - gap),
         add_top,
-        action_width,
+        add_width,
         row_height);
     PlacePaneDialogControl(
         dialog,
         IDC_BATCH_REMOVE,
-        std::max(margin, width - margin - action_width),
+        std::max(margin, width - margin - remove_width),
         add_top,
-        action_width,
+        remove_width,
         row_height);
     PlacePaneDialogControl(
         dialog,

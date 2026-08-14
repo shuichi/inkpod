@@ -16,6 +16,7 @@
 #include <windowsx.h>
 
 #include "app/resource.h"
+#include "pane_dialog_layout.h"
 #include "ui/localization.h"
 
 namespace inkpod::windows::ui::panes {
@@ -431,29 +432,25 @@ void LayoutPane(HWND pane) noexcept {
             0,
             static_cast<int>(client.bottom) - margin * 2 - target_height),
         SWP_NOACTIVATE | SWP_NOZORDER);
-    const int pin_width = ScaleForDpi(76, dpi);
-    SetWindowPos(
-        GetDlgItem(pane, IDC_COLOR_TARGET),
-        nullptr,
+    PlacePaneTargetRow(
+        pane,
+        IDC_COLOR_TARGET,
+        IDC_COLOR_PIN,
         margin,
         margin,
-        std::max(0, static_cast<int>(client.right) - margin * 3 - pin_width),
+        std::max(0, static_cast<int>(client.right) - margin * 2),
+        0,
         target_height,
-        SWP_NOACTIVATE | SWP_NOZORDER);
-    SetWindowPos(
-        GetDlgItem(pane, IDC_COLOR_PIN),
-        nullptr,
-        std::max(margin, static_cast<int>(client.right) - margin - pin_width),
-        margin,
-        pin_width,
         target_height,
-        SWP_NOACTIVATE | SWP_NOZORDER);
+        gap);
     RECT content{margin * 2, margin + target_height + tabs_height,
                  client.right - margin * 2,
                  client.bottom - margin * 2};
     const int top_row = ScaleForDpi(44, dpi);
     const int swatch_width = ScaleForDpi(60, dpi);
-    const int eyedropper_width = ScaleForDpi(52, dpi);
+    const int eyedropper_width = std::min(
+        std::max(0, static_cast<int>(content.right - content.left)),
+        PaneButtonIdealWidth(pane, IDC_COLOR_EYEDROPPER));
     const int eyedropper_height = ScaleForDpi(24, dpi);
     const int swatch_left = content.left + ScaleForDpi(3, dpi);
     const int label_left = content.left + ScaleForDpi(67, dpi);
@@ -512,7 +509,9 @@ void LayoutPane(HWND pane) noexcept {
         std::max(0, static_cast<int>(content.right - content.left)),
         std::max(0, fields_top - gap - picker_top),
         SWP_NOACTIVATE | SWP_NOZORDER);
-    const int apply_width = ScaleForDpi(58, dpi);
+    const int apply_width = std::min(
+        std::max(0, static_cast<int>(content.right - content.left)),
+        PaneButtonIdealWidth(pane, IDC_COLOR_APPLY));
     const int field_area_width = std::max(
         0,
         static_cast<int>(content.right - content.left) - apply_width - gap);
@@ -556,28 +555,27 @@ void LayoutPane(HWND pane) noexcept {
         button_width,
         row,
         SWP_NOACTIVATE | SWP_NOZORDER);
-    const int palette_action_height = row;
+    const std::array<int, 5U> palette_action_controls{
+        IDC_PALETTE_REGISTER_BUTTON,
+        IDC_PALETTE_DELETE_BUTTON,
+        IDC_PALETTE_CLEAR_BUTTON,
+        IDC_PALETTE_LOAD_BUTTON,
+        IDC_PALETTE_SAVE_BUTTON};
+    const int palette_content_width = std::max(
+        0, static_cast<int>(content.right - content.left));
+    const std::size_t palette_action_rows = PaneButtonRowCount(
+        pane, palette_action_controls, palette_content_width, gap);
+    const int palette_action_height = static_cast<int>(palette_action_rows) * row
+        + std::max(0, static_cast<int>(palette_action_rows) - 1) * gap;
     const int palette_action_top = content.top + row + gap;
-    const int palette_action_width = std::max(
-        ScaleForDpi(36, dpi),
-        (static_cast<int>(content.right - content.left) - gap * 4) / 5);
-    int palette_action_x = content.left;
-    for (const int control : {
-             IDC_PALETTE_REGISTER_BUTTON,
-             IDC_PALETTE_DELETE_BUTTON,
-             IDC_PALETTE_CLEAR_BUTTON,
-             IDC_PALETTE_LOAD_BUTTON,
-             IDC_PALETTE_SAVE_BUTTON}) {
-        SetWindowPos(
-            GetDlgItem(pane, control),
-            nullptr,
-            palette_action_x,
-            palette_action_top,
-            palette_action_width,
-            palette_action_height,
-            SWP_NOACTIVATE | SWP_NOZORDER);
-        palette_action_x += palette_action_width + gap;
-    }
+    PlacePaneButtonRows(
+        pane,
+        palette_action_controls,
+        content.left,
+        palette_action_top,
+        palette_content_width,
+        row,
+        gap);
     SetWindowPos(
         GetDlgItem(pane, IDC_PALETTE_LIST),
         nullptr,

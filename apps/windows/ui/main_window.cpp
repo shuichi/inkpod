@@ -342,9 +342,7 @@ bool CreateMainChrome(
 
     TCITEMW primary{};
     primary.mask = TCIF_TEXT | TCIF_PARAM;
-    std::wstring primary_label = CurrentUiLanguage() == UiLanguage::English
-        ? L"Untitled Cell 1"
-        : UiText(UiStringId::Text0778);
+    std::wstring primary_label = UiText(UiStringId::Text0778);
     primary.pszText = primary_label.data();
     primary.lParam = 0;
     return TabCtrl_InsertItem(windows.document_tabs, 0, &primary) >= 0;

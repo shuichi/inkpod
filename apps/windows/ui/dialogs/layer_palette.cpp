@@ -16,6 +16,7 @@
 
 #include "app/resource.h"
 #include "ui/localization.h"
+#include "ui/panes/pane_dialog_layout.h"
 
 namespace inkpod::windows::ui {
 namespace {
@@ -272,9 +273,17 @@ void LayoutControls(HWND dialog) noexcept {
     const int button_height = ScaleForDpi(kButtonHeight, dpi);
     const int width = std::max(
         0, static_cast<int>(client.right) - margin * 2);
+    std::array<int, kLayerActionCommands.size()> action_controls{};
+    for (std::size_t index = 0; index < kLayerActionCommands.size(); ++index) {
+        action_controls[index] = static_cast<int>(kLayerActionCommands[index]);
+    }
+    const std::size_t action_rows = panes::PaneButtonRowCount(
+        dialog, action_controls, width, gap);
+    const int action_buttons_height = static_cast<int>(action_rows) * button_height
+        + std::max(0, static_cast<int>(action_rows) - 1) * gap;
     const int button_y = std::max(
         margin,
-        static_cast<int>(client.bottom) - margin - button_height);
+        static_cast<int>(client.bottom) - margin - action_buttons_height);
     const int action_target_y = std::max(
         margin,
         button_y - gap - action_target_height);
@@ -359,20 +368,14 @@ void LayoutControls(HWND dialog) noexcept {
         action_target_height,
         SWP_NOACTIVATE | SWP_NOZORDER);
 
-    const int button_width = std::max(
-        1,
-        (width - gap * (static_cast<int>(kLayerActionCommands.size()) - 1))
-            / static_cast<int>(kLayerActionCommands.size()));
-    for (std::size_t index = 0; index < kLayerActionCommands.size(); ++index) {
-        SetWindowPos(
-            GetDlgItem(dialog, static_cast<int>(kLayerActionCommands[index])),
-            nullptr,
-            margin + static_cast<int>(index) * (button_width + gap),
-            button_y,
-            button_width,
-            button_height,
-            SWP_NOACTIVATE | SWP_NOZORDER);
-    }
+    panes::PlacePaneButtonRows(
+        dialog,
+        action_controls,
+        margin,
+        button_y,
+        width,
+        button_height,
+        gap);
 }
 
 bool UpdatePaletteFont(HWND dialog, LayerPaletteDialogState& state) noexcept {

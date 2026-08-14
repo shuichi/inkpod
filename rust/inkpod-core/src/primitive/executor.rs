@@ -476,7 +476,7 @@ impl Core {
 
         self.history.truncate(self.history_cursor);
         let history_entry = HistoryEntry {
-            label: applied.history.label(),
+            kind: applied.history.kind(),
             change: Some(applied.history),
             before_state: self.current_state,
             after_state: next_state,

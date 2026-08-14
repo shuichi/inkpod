@@ -100,8 +100,8 @@ pub use geometry::{
     GeometryCommit, GeometryCrossSection, GeometryOptions, GeometryPointResolution,
     GeometryPreviewInfo, GeometryPrimitive, GeometryRequest, GeometrySnapMode, MAX_GEOMETRY_POINTS,
 };
-pub use history::HistoryEntryInfo;
 use history::{HistoryChange, HistoryEntry, PixelChange, StagedHistoryEntry};
+pub use history::{HistoryEntryInfo, HistoryEntryKind};
 pub(crate) use identity::*;
 pub use inkpod_format::CommonRasterFormat;
 use inkpod_format::NativeSection;

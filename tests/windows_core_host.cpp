@@ -1331,8 +1331,8 @@ int wmain() {
     latency_operation_started.get_future().wait();
     InkpodHistoryInfo cached_history{};
     cached_history.struct_size = sizeof(cached_history);
-    std::string cached_undo;
-    std::string cached_redo;
+    InkpodHistoryEntryKind cached_undo{};
+    InkpodHistoryEntryKind cached_redo{};
     std::uint64_t cached_target_count{};
     InkpodEditTargetCapabilities cached_capabilities{};
     cached_capabilities.struct_size = sizeof(cached_capabilities);

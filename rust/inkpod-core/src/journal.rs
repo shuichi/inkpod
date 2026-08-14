@@ -1580,7 +1580,7 @@ impl Core {
                     .ok_or(CoreError::InvalidState("history procedure is missing"))?;
                 Ok(HistoryEntry {
                     change: None,
-                    label: checkpoint_history_label(procedure.primitive_id()),
+                    kind: checkpoint_history_kind(procedure.primitive_id()),
                     before_state: node
                         .parent
                         .ok_or(CoreError::InvalidState("history parent state is missing"))?,
@@ -1672,7 +1672,7 @@ impl Core {
 }
 
 fn same_history_skeleton(left: &HistoryEntry, right: &HistoryEntry) -> bool {
-    left.label == right.label
+    left.kind == right.kind
         && left.before_state == right.before_state
         && left.after_state == right.after_state
         && left.procedure == right.procedure
@@ -1709,15 +1709,15 @@ fn is_checkpoint_ancestor(
     false
 }
 
-const fn checkpoint_history_label(primitive: PrimitiveId) -> &'static str {
+const fn checkpoint_history_kind(primitive: PrimitiveId) -> HistoryEntryKind {
     if primitive.get() == PrimitiveId::SET_MAIN_LINE_COLOR.get() {
-        "Main-line color"
+        HistoryEntryKind::MainLineColor
     } else if primitive.get() == PrimitiveId::REPLACE_PALETTE.get() {
-        "Palette edit"
+        HistoryEntryKind::Palette
     } else if primitive.get() == PrimitiveId::APPLY_RASTER_STROKE.get() {
-        "Raster edit"
+        HistoryEntryKind::Raster
     } else {
-        "Document edit"
+        HistoryEntryKind::Document
     }
 }
 
@@ -1992,7 +1992,7 @@ mod tests {
     fn cache_release_rejects_live_history_skeleton_drift() {
         let mut core = initialized_core();
         set_main_line(&mut core, 8).unwrap();
-        core.history[0].label = "forged history label";
+        core.history[0].kind = HistoryEntryKind::ColorChart;
 
         assert!(matches!(
             core.verify_journal_replay(),

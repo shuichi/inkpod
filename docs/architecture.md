@@ -37,7 +37,7 @@ native-format model.
 | `inkpod-image`  | Typed pixel formats, 64 x 64 sparse tiles, `Arc` copy-on-write storage, selection, fill/sampling/palette logic, vector geometry, and deterministic raster/filter/effect operations |
 | `inkpod-format` | Bounded procedure-authoritative `.inkpod` v26 Cell/Cut containers and `.inkbatch` v2 models, streaming encode/decode/validation, atomic file I/O, and PNG/TIFF/TGA/BMP codecs                     |
 | `inkpod-core`   | Stable-ID document/layer/plane state, immutable Genesis/base surfaces, a content-addressed canonical asset registry, StateId savepoints, views, clipboard, previews, animation, vector/effects/Batch commands, persistence mapping, immutable render snapshots, and canonical primitive execution plus append-only journal/cache-free replay and semantic document digests for the migrated Core slice |
-| `inkpod-ffi`    | ABI v13 fixed records and generation-tagged runtime IDs, persistence/compaction diagnostics, validation/conversion, panic containment, ownership functions, and feature-specific exports                |
+| `inkpod-ffi`    | ABI v14 fixed records and generation-tagged runtime IDs, persistence/compaction diagnostics, validation/conversion, panic containment, ownership functions, and feature-specific exports                |
 
 Binary, grayscale, RGBA8/16, straight-alpha, premultiplied display data, and
 selection masks remain distinct types. Core stores vector geometry in
@@ -1032,7 +1032,7 @@ document, revision, one history entry, and render-cache invalidation together.
 All public document-mutation wrappers construct a typed primitive request or
 canonical invocation and delegate validation, canonicalization, working-state
 mutation, no-op detection, and commit to the one canonical boundary. Their
-canonical procedures retain the existing history labels and cache policy, and
+canonical procedures retain language-neutral history entry kinds and the existing cache policy, and
 replay uses the same route rather than a second pixel, geometry, topology, or
 metadata implementation. For every committed edit, document, StateId,
 visible history, journal events, document revision, cache invalidation, and all

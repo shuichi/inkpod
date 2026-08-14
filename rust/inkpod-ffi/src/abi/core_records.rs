@@ -179,9 +179,8 @@ pub struct InkpodHistoryItem {
     pub struct_size: u32,
     pub flags: u32,
     pub index: u64,
-    pub name_utf8: *mut u8,
-    pub name_capacity: u64,
-    pub name_bytes: u64,
+    pub entry_kind: u32,
+    pub reserved: u32,
 }
 
 #[repr(C)]

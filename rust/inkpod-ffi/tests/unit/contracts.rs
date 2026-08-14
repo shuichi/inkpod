@@ -2112,23 +2112,22 @@ fn ffi_contract_document_history_selection_clipboard_and_raster_round_trip() {
             struct_size: size_of::<InkpodHistoryItem>() as u32,
             flags: 0,
             index: 0,
-            name_utf8: ptr::null_mut(),
-            name_capacity: 0,
-            name_bytes: 0,
+            entry_kind: 0,
+            reserved: 0,
         };
         assert_eq!(
             inkpod_core_history_item(core, 0, &mut history_item),
             INKPOD_STATUS_OK
         );
-        assert!(history_item.name_bytes > 0);
-        let mut history_name = vec![0_u8; history_item.name_bytes as usize];
-        history_item.name_utf8 = history_name.as_mut_ptr();
-        history_item.name_capacity = history_name.len() as u64;
-        assert_eq!(
-            inkpod_core_history_item(core, 0, &mut history_item),
-            INKPOD_STATUS_OK
-        );
-        assert!(std::str::from_utf8(&history_name).is_ok());
+        assert!(matches!(
+            history_item.entry_kind,
+            INKPOD_HISTORY_ENTRY_RASTER
+                | INKPOD_HISTORY_ENTRY_PALETTE
+                | INKPOD_HISTORY_ENTRY_COLOR_CHART
+                | INKPOD_HISTORY_ENTRY_MAIN_LINE_COLOR
+                | INKPOD_HISTORY_ENTRY_DOCUMENT
+        ));
+        assert_eq!(history_item.reserved, 0);
 
         assert_eq!(
             inkpod_core_history_jump(core, 0, &mut result),

@@ -96,7 +96,7 @@ pub unsafe extern "C" fn inkpod_core_history_info(
     })
 }
 
-/// Queries one history label into caller-owned UTF-8 storage.
+/// Queries one language-neutral history entry category.
 ///
 /// # Safety
 /// Core/output and any advertised name buffer must remain live and non-overlapping.
@@ -145,24 +145,14 @@ pub unsafe extern "C" fn inkpod_core_history_item(
             0
         };
         out.index = entry.index as u64;
-        out.name_bytes = entry.label.len() as u64;
-        if out.name_capacity == 0 {
-            if !out.name_utf8.is_null() {
-                return fail(
-                    INKPOD_STATUS_INVALID_ARGUMENT,
-                    "zero-capacity history label buffer must be null",
-                );
-            }
-            return INKPOD_STATUS_OK;
-        }
-        if out.name_utf8.is_null() || out.name_capacity < out.name_bytes {
-            return fail(
-                INKPOD_STATUS_BUFFER_TOO_SMALL,
-                "history label buffer is too small",
-            );
-        }
-        // SAFETY: Caller advertises complete writable storage for the copied label.
-        unsafe { ptr::copy_nonoverlapping(entry.label.as_ptr(), out.name_utf8, entry.label.len()) };
+        out.entry_kind = match entry.kind {
+            inkpod_core::HistoryEntryKind::Raster => INKPOD_HISTORY_ENTRY_RASTER,
+            inkpod_core::HistoryEntryKind::Palette => INKPOD_HISTORY_ENTRY_PALETTE,
+            inkpod_core::HistoryEntryKind::ColorChart => INKPOD_HISTORY_ENTRY_COLOR_CHART,
+            inkpod_core::HistoryEntryKind::MainLineColor => INKPOD_HISTORY_ENTRY_MAIN_LINE_COLOR,
+            inkpod_core::HistoryEntryKind::Document => INKPOD_HISTORY_ENTRY_DOCUMENT,
+        };
+        out.reserved = 0;
         INKPOD_STATUS_OK
     })
 }

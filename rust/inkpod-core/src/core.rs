@@ -638,10 +638,10 @@ impl Core {
             "a canonical invocation may stage only one history entry"
         );
         let before_state = self.current_state;
-        let label = change.label();
+        let kind = change.kind();
         self.staged_history = Some(StagedHistoryEntry {
             change,
-            label,
+            kind,
             before_state,
             after_state,
         });
@@ -793,20 +793,23 @@ mod tests {
     }
 
     #[test]
-    fn primitive_metadata_commits_preserve_history_labels_and_cache_policy() {
+    fn primitive_metadata_commits_preserve_history_kinds_and_cache_policy() {
         let mut core = initialized_core();
         let _ = core.build_snapshot();
         let cache = core.render_cache.clone();
         core.replace_palette(&[PixelValue::Rgba([1, 2, 3, 255])])
             .unwrap();
 
-        assert_eq!(core.history_entries()[0].label, "Palette edit");
+        assert_eq!(core.history_entries()[0].kind, HistoryEntryKind::Palette);
         assert_eq!(core.render_cache, cache);
 
         core.set_main_line_color(PixelValue::Rgba([4, 5, 6, 255]))
             .unwrap();
 
-        assert_eq!(core.history_entries()[1].label, "Main-line color");
+        assert_eq!(
+            core.history_entries()[1].kind,
+            HistoryEntryKind::MainLineColor
+        );
         assert!(core.render_cache.is_empty());
     }
 

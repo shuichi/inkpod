@@ -66,7 +66,7 @@
 extern "C" {
 #endif
 
-#define INKPOD_ABI_VERSION UINT32_C(13)
+#define INKPOD_ABI_VERSION UINT32_C(14)
 #define INKPOD_FEATURE_NONE UINT64_C(0)
 
 /** @brief すべての fallible API が返す固定幅ステータス型。 */
@@ -215,6 +215,14 @@ typedef uint32_t InkpodCoordinateSpace;
 #define INKPOD_DOCUMENT_FLAG_CAN_REDO (UINT32_C(1) << 2)
 #define INKPOD_DOCUMENT_FLAG_RECOVERED (UINT32_C(1) << 3)
 #define INKPOD_HISTORY_ITEM_APPLIED (UINT32_C(1) << 0)
+
+/** @brief history entry の言語非依存な意味種別。 */
+typedef uint32_t InkpodHistoryEntryKind;
+#define INKPOD_HISTORY_ENTRY_RASTER UINT32_C(1)
+#define INKPOD_HISTORY_ENTRY_PALETTE UINT32_C(2)
+#define INKPOD_HISTORY_ENTRY_COLOR_CHART UINT32_C(3)
+#define INKPOD_HISTORY_ENTRY_MAIN_LINE_COLOR UINT32_C(4)
+#define INKPOD_HISTORY_ENTRY_DOCUMENT UINT32_C(5)
 
 /** @brief pan/zoom/flip/overlay など view-only command の識別子型。 */
 typedef uint32_t InkpodViewCommandKind;
@@ -1142,14 +1150,13 @@ typedef struct InkpodHistoryInfo {
     uint64_t item_count;
 } InkpodHistoryInfo;
 
-/** @brief history item と UTF-8 名を caller-owned buffer へ受け取る size-query 対応出力。 */
+/** @brief history item の適用状態と言語非依存種別を受け取る caller-owned 出力。 */
 typedef struct InkpodHistoryItem {
     uint32_t struct_size;
     uint32_t flags;
     uint64_t index;
-    uint8_t* name_utf8;
-    uint64_t name_capacity;
-    uint64_t name_bytes;
+    InkpodHistoryEntryKind entry_kind;
+    uint32_t reserved;
 } InkpodHistoryItem;
 
 /** @brief 位置・筆圧を持つ stroke sample record。span の stride ごとに borrowed で読む。 */
@@ -3810,12 +3817,12 @@ InkpodStatus inkpod_core_history_info(
     InkpodCore* core,
     InkpodHistoryInfo* out_info);
 /**
- * @brief 指定 history item の適用状態と UTF-8 名を caller buffer へコピーする。
+ * @brief 指定 history item の適用状態と言語非依存種別を取得する。
  * @par 契約
- * Core owner thread。`core`/`out_item` は非 NULL・非重複、完全サイズ。name capacity 0/NULL は size query。
- * 成功時 complete record、`BUFFER_TOO_SMALL` 時も必要 `name_bytes` を返す。revision、dirty、Undo、排他状態は不変。
+ * Core owner thread。`core`/`out_item` は非 NULL・非重複、完全サイズ。成功時 complete record。
+ * `entry_kind` は固定幅の意味値であり、表示言語や UI catalog ID を含まない。revision、dirty、Undo、排他状態は不変。
  * @par 主なステータス
- * `OK`、`BUFFER_TOO_SMALL`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_history_item(
     InkpodCore* core,

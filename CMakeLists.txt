@@ -437,12 +437,14 @@ if(WIN32)
     add_executable(inkpod_windows_localization_tests
         apps/windows/ui/localization.cpp
         apps/windows/ui/localization.h
+        apps/windows/ui/history_presentation.h
         apps/windows/ui/ui_resources.cpp
         apps/windows/ui/ui_resources.h
         tests/windows_localization.cpp
         apps/windows/app/app.rc)
     target_include_directories(inkpod_windows_localization_tests PRIVATE
         "${CMAKE_SOURCE_DIR}/apps/windows"
+        "${CMAKE_SOURCE_DIR}/include"
         "${CMAKE_BINARY_DIR}/generated")
     target_compile_definitions(inkpod_windows_localization_tests PRIVATE
         UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
@@ -544,6 +546,7 @@ if(WIN32)
         apps/windows/ui/dock_host.h
         apps/windows/ui/localization.cpp
         apps/windows/ui/localization.h
+        apps/windows/ui/history_presentation.h
         apps/windows/ui/ui_resources.cpp
         apps/windows/ui/ui_resources.h
         apps/windows/ui/thumbnail_cache.cpp

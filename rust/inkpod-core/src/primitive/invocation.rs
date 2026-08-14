@@ -2393,7 +2393,7 @@ impl Core {
             .map_err(|_| CoreError::InvalidState("history allocation failed"))?;
         staged.history.push(HistoryEntry {
             change: Some(pending.change),
-            label: pending.label,
+            kind: pending.kind,
             before_state: pending.before_state,
             after_state: pending.after_state,
             procedure: Arc::clone(&procedure),

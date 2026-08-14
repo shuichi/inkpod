@@ -47,6 +47,7 @@
 #include "ui/shortcut_controller.h"
 #include "ui/panes/document_panes.h"
 #include "ui/panes/color_panes.h"
+#include "ui/panes/pane_dialog_layout.h"
 #include "ui/tools/fill_controller.h"
 #include "ui/tools/floating_paste_controller.h"
 #include "ui/tools/selection_controller.h"
@@ -251,6 +252,68 @@ bool HasJapaneseCharacters(std::wstring_view text) noexcept {
         }
     }
     return false;
+}
+
+struct ButtonFitContext {
+    bool passed{true};
+};
+
+BOOL CALLBACK VerifyButtonFit(HWND button, LPARAM parameter) noexcept {
+    auto* context = reinterpret_cast<ButtonFitContext*>(parameter);
+    if (context == nullptr || IsWindowVisible(button) == FALSE) {
+        return TRUE;
+    }
+    std::array<wchar_t, 32U> class_name{};
+    if (GetClassNameW(
+            button, class_name.data(), static_cast<int>(class_name.size())) <= 0
+        || _wcsicmp(class_name.data(), L"Button") != 0) {
+        return TRUE;
+    }
+    const DWORD style = static_cast<DWORD>(GetWindowLongPtrW(button, GWL_STYLE));
+    const DWORD type = style & BS_TYPEMASK;
+    if (type == BS_OWNERDRAW || type == BS_GROUPBOX
+        || GetWindowTextLengthW(button) == 0) {
+        return TRUE;
+    }
+    const HWND parent = GetParent(button);
+    const int control = GetDlgCtrlID(button);
+    RECT button_bounds{};
+    RECT parent_bounds{};
+    if (parent == nullptr || control <= 0
+        || GetWindowRect(button, &button_bounds) == FALSE
+        || GetClientRect(parent, &parent_bounds) == FALSE) {
+        return TRUE;
+    }
+    MapWindowPoints(HWND_DESKTOP, parent, reinterpret_cast<POINT*>(&button_bounds), 2U);
+    const int actual_width = button_bounds.right - button_bounds.left;
+    const int required_width = panes::PaneButtonIdealWidth(parent, control);
+    if (button_bounds.left < parent_bounds.left
+        || button_bounds.top < parent_bounds.top
+        || button_bounds.right > parent_bounds.right
+        || button_bounds.bottom > parent_bounds.bottom
+        || actual_width < required_width) {
+        std::array<wchar_t, 256U> text{};
+        GetWindowTextW(button, text.data(), static_cast<int>(text.size()));
+        std::fwprintf(
+            stderr,
+            L"button fit failure control=%d actual=%d required=%d text=%ls\n",
+            control,
+            actual_width,
+            required_width,
+            text.data());
+        context->passed = false;
+    }
+    return TRUE;
+}
+
+bool PaneButtonsFit(HWND pane) noexcept {
+    ButtonFitContext context{};
+    return pane != nullptr
+        && EnumChildWindows(
+               pane,
+               VerifyButtonFit,
+               reinterpret_cast<LPARAM>(&context)) != FALSE
+        && context.passed;
 }
 
 bool ExerciseOwnerDraw(
@@ -671,7 +734,10 @@ int RunLocatorPaneSmoke(ApplicationHost& state) noexcept {
         || GetDlgItem(pane, IDC_LOCATOR_PIN) == nullptr
         || GetDlgItem(pane, IDC_LOCATOR_NEIGHBORHOOD) == nullptr
         || GetDlgItem(pane, IDC_LOCATOR_FIXED) == nullptr
-        || GetDlgItem(pane, IDC_LOCATOR_AUTOSCROLL) == nullptr) {
+        || GetDlgItem(pane, IDC_LOCATOR_AUTOSCROLL) == nullptr
+        || !PaneButtonsFit(pane)
+        || !PaneButtonsFit(state.Workspace().windows.color_pane)
+        || !PaneButtonsFit(state.Workspace().panes.layer_palette)) {
         return 851;
     }
     const HWND locator_header =
@@ -746,7 +812,8 @@ int RunLocatorPaneSmoke(ApplicationHost& state) noexcept {
         || std::wcsstr(
                target_text.data(), UiText(UiStringId::PinnedPrefix))
             != target_text.data()
-        || HasJapaneseCharacters(target_text.data())) {
+        || HasJapaneseCharacters(target_text.data())
+        || !PaneButtonsFit(pane)) {
         return 854;
     }
     if (SendMessageW(
@@ -832,7 +899,8 @@ int RunSequencePaneSmoke(ApplicationHost& state) noexcept {
         || GetDlgItem(pane, IDC_SEQUENCE_CELLS) == nullptr
         || GetDlgItem(pane, IDC_SEQUENCE_PREVIOUS) == nullptr
         || GetDlgItem(pane, IDC_SEQUENCE_NEXT) == nullptr
-        || GetDlgItem(pane, IDC_SEQUENCE_IMPORT) == nullptr) {
+        || GetDlgItem(pane, IDC_SEQUENCE_IMPORT) == nullptr
+        || !PaneButtonsFit(pane)) {
         return 868;
     }
     std::array<wchar_t, 256U> target_text{};
@@ -871,7 +939,8 @@ int RunSequencePaneSmoke(ApplicationHost& state) noexcept {
         || std::wcsstr(
                target_text.data(), UiText(UiStringId::PinnedPrefix))
             != target_text.data()
-        || HasJapaneseCharacters(target_text.data())) {
+        || HasJapaneseCharacters(target_text.data())
+        || !PaneButtonsFit(pane)) {
         return 871;
     }
     if (SendMessageW(
@@ -936,7 +1005,8 @@ int RunLightTablePaneSmoke(ApplicationHost& state) noexcept {
         || GetDlgItem(pane, IDC_LIGHT_TABLE_ITEM_SWAP) == nullptr
         || GetDlgItem(pane, IDC_LIGHT_TABLE_PREVIOUS) == nullptr
         || GetDlgItem(pane, IDC_LIGHT_TABLE_NEXT) == nullptr
-        || GetDlgItem(pane, IDCANCEL) != nullptr) {
+        || GetDlgItem(pane, IDCANCEL) != nullptr
+        || !PaneButtonsFit(pane)) {
         return 875;
     }
     std::array<wchar_t, 256U> target_text{};
@@ -977,7 +1047,8 @@ int RunLightTablePaneSmoke(ApplicationHost& state) noexcept {
         || std::wcsstr(
                target_text.data(), UiText(UiStringId::PinnedPrefix))
             != target_text.data()
-        || HasJapaneseCharacters(target_text.data())) {
+        || HasJapaneseCharacters(target_text.data())
+        || !PaneButtonsFit(pane)) {
         return 878;
     }
     if (SendMessageW(
@@ -1042,7 +1113,8 @@ int RunSubpalettePaneSmoke(ApplicationHost& state) noexcept {
         || GetDlgItem(pane, IDC_SUBPALETTE_AUTO_PREVIOUS) == nullptr
         || GetDlgItem(pane, IDC_SUBPALETTE_SCROLL_SYNC) == nullptr
         || (GetMenuState(menu, IDM_WINDOW_SUBPALETTE, MF_BYCOMMAND)
-            & MF_CHECKED) == 0U) {
+            & MF_CHECKED) == 0U
+        || !PaneButtonsFit(pane)) {
         return 921;
     }
     std::array<wchar_t, 256U> target_text{};
@@ -1061,6 +1133,9 @@ int RunSubpalettePaneSmoke(ApplicationHost& state) noexcept {
                IDM_SUBPALETTE_PIN,
                0) != 1) {
         return 922;
+    }
+    if (!PaneButtonsFit(pane)) {
+        return 924;
     }
     const auto* binding = state.routing.pane_targets.Find(
         state.routing.subpalette_pane);
@@ -2419,9 +2494,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     UpdateMenuState(state);
     std::wstring tab_label;
     if (!ReadDocumentTabLabel(state.Workspace().windows.document_tabs, 0, tab_label)
-        || tab_label != (CurrentUiLanguage() == UiLanguage::English
-                ? L"Untitled Cell 1"
-                : UiText(UiStringId::Text0778))) {
+        || tab_label != UiText(UiStringId::Text0778)) {
         return 716;
     }
     std::size_t shortcut_leaf_count{};
@@ -2578,9 +2651,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
                state.Workspace().windows.window, initial_title.data(), static_cast<int>(initial_title.size())) == 0
         || std::wcscmp(
                initial_title.data(),
-               CurrentUiLanguage() == UiLanguage::English
-                   ? L"Untitled Cell 1 - inkpod"
-                   : UiText(UiStringId::Text0780)) != 0) {
+               UiText(UiStringId::Text0780)) != 0) {
         return 32;
     }
     if (CurrentUiLanguage() == UiLanguage::English
@@ -2671,9 +2742,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         || (after_line.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U
         || (after_line.flags & INKPOD_DOCUMENT_FLAG_CAN_UNDO) == 0U
         || !ReadDocumentTabLabel(state.Workspace().windows.document_tabs, 0, tab_label)
-        || tab_label != (CurrentUiLanguage() == UiLanguage::English
-                ? L"Untitled Cell 1 *"
-                : UiText(UiStringId::Text0779))) {
+        || tab_label != UiText(UiStringId::Text0779)) {
         return 38;
     }
     UpdateMenuState(state);
@@ -4733,9 +4802,7 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
             TabCtrl_GetCurSel(state.Workspace().windows.document_tabs),
             secondary_tab_label)
         || secondary_tab_label.find(
-               CurrentUiLanguage() == UiLanguage::English
-                   ? L"[View 2]"
-                   : UiText(UiStringId::Text0088)) == std::wstring::npos) {
+               UiText(UiStringId::Text0088)) == std::wstring::npos) {
         return 324;
     }
     const InkpodViewInput secondary_pan{
@@ -8356,6 +8423,7 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
             GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_TARGET))
         || !WindowHasAccessibleName(
             GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_JOB))
+        || !PaneButtonsFit(state.Workspace().batch_palette)
         || SendMessageW(
                state.Workspace().windows.window,
                WM_COMMAND,
@@ -11990,11 +12058,22 @@ int RunCutWorkflowSmoke(ApplicationHost& state) noexcept {
     bool main_window_was_resized{};
     const auto cleanup = [&]() noexcept {
         bool clean = true;
+        const auto record_cleanup = [&clean](
+            bool passed, const wchar_t* operation) noexcept {
+            if (!passed) {
+                std::fwprintf(
+                    stderr,
+                    L"cut smoke cleanup failure: %ls\n",
+                    operation);
+            }
+            clean = passed && clean;
+        };
         const bool sequence_pane_is_visible =
             state.Workspace().windows.workspace.dock.IsPaneVisible(
                 DockPaneType::Sequence);
         if (sequence_pane_is_visible != sequence_pane_was_visible) {
-            clean = main_window != nullptr
+            record_cleanup(
+                main_window != nullptr
                     && SendMessageW(
                            main_window,
                            WM_COMMAND,
@@ -12002,29 +12081,31 @@ int RunCutWorkflowSmoke(ApplicationHost& state) noexcept {
                            0) == 1
                     && state.Workspace().windows.workspace.dock.IsPaneVisible(
                            DockPaneType::Sequence)
-                        == sequence_pane_was_visible
-                && clean;
+                        == sequence_pane_was_visible,
+                L"restore sequence visibility");
         }
         if (previous_sequence_stack_active != DockPaneType::Count
             && previous_sequence_stack_active != DockPaneType::Sequence) {
             const DockResult activate_result =
                 state.Workspace().windows.dock_host.ActivatePane(
                     previous_sequence_stack_active);
-            clean = (activate_result == DockResult::Ok
-                        || activate_result == DockResult::NoOp)
-                && clean;
+            record_cleanup(
+                activate_result == DockResult::Ok
+                    || activate_result == DockResult::NoOp,
+                L"restore active sequence stack pane");
         }
         if (main_window_was_resized && main_window_bounds_valid) {
-            clean = SetWindowPos(
-                        main_window,
-                        nullptr,
-                        main_window_bounds.left,
-                        main_window_bounds.top,
-                        main_window_bounds.right - main_window_bounds.left,
-                        main_window_bounds.bottom - main_window_bounds.top,
-                        SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER)
-                    != FALSE
-                && clean;
+            record_cleanup(
+                SetWindowPos(
+                    main_window,
+                    nullptr,
+                    main_window_bounds.left,
+                    main_window_bounds.top,
+                    main_window_bounds.right - main_window_bounds.left,
+                    main_window_bounds.bottom - main_window_bounds.top,
+                    SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER)
+                    != FALSE,
+                L"restore main window bounds");
         }
         if (main_window != nullptr
             && (IsWindowVisible(main_window) != FALSE)
@@ -12032,16 +12113,23 @@ int RunCutWorkflowSmoke(ApplicationHost& state) noexcept {
             ShowWindow(
                 main_window,
                 main_window_was_visible ? SW_SHOWNOACTIVATE : SW_HIDE);
-            clean = (IsWindowVisible(main_window) != FALSE)
-                    == main_window_was_visible
-                && clean;
+            record_cleanup(
+                (IsWindowVisible(main_window) != FALSE)
+                    == main_window_was_visible,
+                L"restore main window visibility");
         }
-        clean = state.DestroyCutSession(state.Workspace()) && clean;
+        record_cleanup(
+            state.DestroyCutSession(state.Workspace()),
+            L"destroy Cut session");
         for (std::size_t index = created.size(); index != 0U; --index) {
-            clean = state.CloseDocumentSession(created[index - 1U]) && clean;
+            record_cleanup(
+                state.CloseDocumentSession(created[index - 1U]),
+                L"close created Cell session");
         }
         if (previous_view) {
-            clean = state.ActivateDocumentView(previous_view) && clean;
+            record_cleanup(
+                state.ActivateDocumentView(previous_view),
+                L"restore previous document view");
         }
         for (const wchar_t* path : kFiles) {
             DeleteFileW(path);

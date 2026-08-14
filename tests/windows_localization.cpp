@@ -1,5 +1,7 @@
 #include "app/resource.h"
+#include "ui/history_presentation.h"
 #include "ui/localization.h"
+#include "ui/panes/pane_dialog_layout.h"
 #include "ui/ui_resources.h"
 
 #include <windows.h>
@@ -206,15 +208,52 @@ bool TypedCatalogContract() {
         && filter[filter.size() - 2U] == L'\0';
 }
 
-bool OpaqueUserTextContract() {
+bool OpaqueUserTextContract(UiLanguagePreference preference) {
+    const HINSTANCE instance = GetModuleHandleW(nullptr);
+    if (!InitializeUiLocalization(instance, preference)) {
+        return false;
+    }
     using inkpod::windows::ui::UiTextWithUserText;
     const std::wstring user_path =
         L"C:\\shots\\\u5f69\u8272\\\u30d5\u30a1\u30a4\u30eb.inkpod";
     const std::wstring result =
         UiTextWithUserText(UiStringId::FollowingPrefix, user_path);
-    return result == L"Following: " + user_path
+    const std::wstring expected =
+        std::wstring(UiText(UiStringId::FollowingPrefix)) + user_path;
+    const bool passed = result == expected
         && result.ends_with(user_path)
         && result.find(L"Coloring") == std::wstring::npos;
+    ShutdownUiLocalization();
+    return passed;
+}
+
+bool HistoryPresentationContract() {
+    using inkpod::windows::ui::HistoryUiStringId;
+    const std::array<InkpodHistoryEntryKind, 5U> kinds{
+        INKPOD_HISTORY_ENTRY_RASTER,
+        INKPOD_HISTORY_ENTRY_PALETTE,
+        INKPOD_HISTORY_ENTRY_COLOR_CHART,
+        INKPOD_HISTORY_ENTRY_MAIN_LINE_COLOR,
+        INKPOD_HISTORY_ENTRY_DOCUMENT};
+    std::array<UiStringId, kinds.size()> ids{};
+    for (std::size_t index = 0U; index < kinds.size(); ++index) {
+        const auto id = HistoryUiStringId(kinds[index]);
+        if (!id.has_value()) {
+            return false;
+        }
+        ids[index] = id.value();
+        if (UiTextView(ids[index], UiLanguage::Japanese).empty()
+            || UiTextView(ids[index], UiLanguage::English).empty()) {
+            return false;
+        }
+        for (std::size_t prior = 0U; prior < index; ++prior) {
+            if (ids[prior] == ids[index]) {
+                return false;
+            }
+        }
+    }
+    return !HistoryUiStringId(0U).has_value()
+        && !HistoryUiStringId(UINT32_MAX).has_value();
 }
 
 INT_PTR CALLBACK PassiveDialogProcedure(
@@ -290,6 +329,150 @@ bool ResourceLanguageContract(UiLanguagePreference preference) {
     return passed;
 }
 
+bool LocalizedButtonLayoutContract(UiLanguagePreference preference) {
+    using inkpod::windows::ui::panes::PaneButtonIdealWidthAtDpi;
+    using inkpod::windows::ui::panes::PaneButtonRowCount;
+    using inkpod::windows::ui::panes::PlacePaneButtonRows;
+    const HINSTANCE instance = GetModuleHandleW(nullptr);
+    if (!InitializeUiLocalization(instance, preference)) {
+        return false;
+    }
+    HWND parent = CreateWindowExW(
+        0,
+        L"STATIC",
+        nullptr,
+        WS_POPUP,
+        0,
+        0,
+        1600,
+        1200,
+        nullptr,
+        nullptr,
+        instance,
+        nullptr);
+    const std::array<UiStringId, 13U> labels{
+        UiStringId::Text0706,
+        UiStringId::Text0903,
+        UiStringId::Delete,
+        UiStringId::Text0426,
+        UiStringId::Text0430,
+        UiStringId::Text0922,
+        UiStringId::Register,
+        UiStringId::Clear,
+        UiStringId::Load,
+        UiStringId::Save,
+        UiStringId::ToolEyedropper,
+        UiStringId::PinDocument,
+        UiStringId::ReturnToFollowing};
+    std::array<int, labels.size()> controls{};
+    bool passed = parent != nullptr;
+    for (std::size_t index = 0U; passed && index < labels.size(); ++index) {
+        controls[index] = 1000 + static_cast<int>(index);
+        passed = CreateWindowExW(
+                     0,
+                     L"BUTTON",
+                     UiText(labels[index]),
+                     WS_CHILD | BS_PUSHBUTTON,
+                     0,
+                     0,
+                     1,
+                     1,
+                     parent,
+                     reinterpret_cast<HMENU>(
+                         static_cast<INT_PTR>(controls[index])),
+                     instance,
+                     nullptr)
+            != nullptr;
+    }
+    const std::array<UINT, 4U> dpis{96U, 120U, 144U, 192U};
+    for (const UINT dpi : dpis) {
+        if (!passed) {
+            break;
+        }
+        const HFONT font = CreateFontW(
+            -MulDiv(9, static_cast<int>(dpi), 72),
+            0,
+            0,
+            0,
+            FW_NORMAL,
+            FALSE,
+            FALSE,
+            FALSE,
+            DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS,
+            CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY,
+            DEFAULT_PITCH | FF_DONTCARE,
+            L"Segoe UI");
+        if (font == nullptr) {
+            passed = false;
+            break;
+        }
+        for (const int control : controls) {
+            SendDlgItemMessageW(
+                parent,
+                control,
+                WM_SETFONT,
+                reinterpret_cast<WPARAM>(font),
+                FALSE);
+        }
+        const int available = MulDiv(240 - 12, static_cast<int>(dpi), 96);
+        const int gap = MulDiv(4, static_cast<int>(dpi), 96);
+        const int row_height = MulDiv(26, static_cast<int>(dpi), 96);
+        const std::span<const int> action_controls{controls.data(), 10U};
+        const std::size_t rows = PaneButtonRowCount(
+            parent, action_controls, available, gap, dpi);
+        passed = rows >= 2U && rows <= action_controls.size()
+            && PlacePaneButtonRows(
+                   parent,
+                   action_controls,
+                   0,
+                   0,
+                   available,
+                   row_height,
+                   gap,
+                   dpi) == rows;
+        std::array<RECT, 10U> bounds{};
+        for (std::size_t index = 0U; passed && index < bounds.size(); ++index) {
+            const HWND button = GetDlgItem(parent, controls[index]);
+            passed = button != nullptr
+                && GetWindowRect(button, &bounds[index]) != FALSE;
+            if (!passed) {
+                break;
+            }
+            MapWindowPoints(
+                HWND_DESKTOP,
+                parent,
+                reinterpret_cast<POINT*>(&bounds[index]),
+                2U);
+            passed = bounds[index].left >= 0
+                && bounds[index].right <= available
+                && bounds[index].bottom
+                    <= static_cast<int>(rows) * row_height
+                        + std::max(0, static_cast<int>(rows) - 1) * gap
+                && bounds[index].right - bounds[index].left
+                    >= PaneButtonIdealWidthAtDpi(
+                        parent, controls[index], dpi);
+            for (std::size_t prior = 0U; passed && prior < index; ++prior) {
+                RECT intersection{};
+                passed = IntersectRect(
+                    &intersection, &bounds[prior], &bounds[index]) == FALSE;
+            }
+        }
+        for (std::size_t index = 10U; passed && index < controls.size(); ++index) {
+            passed = PaneButtonIdealWidthAtDpi(
+                         parent, controls[index], dpi)
+                <= available;
+        }
+        DeleteObject(font);
+    }
+    if (parent != nullptr) {
+        DestroyWindow(parent);
+    }
+    ShutdownUiLocalization();
+    return passed;
+}
+
 }  // namespace
 
 int wmain() {
@@ -297,7 +480,11 @@ int wmain() {
     if (!ResolverContract()) return 2;
     if (!TypedCatalogContract()) return 3;
     if (!ResourceLanguageContract(UiLanguagePreference::English)) return 4;
-    if (!OpaqueUserTextContract()) return 5;
+    if (!OpaqueUserTextContract(UiLanguagePreference::English)) return 5;
     if (!ResourceLanguageContract(UiLanguagePreference::Japanese)) return 6;
+    if (!HistoryPresentationContract()) return 7;
+    if (!LocalizedButtonLayoutContract(UiLanguagePreference::English)) return 8;
+    if (!LocalizedButtonLayoutContract(UiLanguagePreference::Japanese)) return 9;
+    if (!OpaqueUserTextContract(UiLanguagePreference::Japanese)) return 10;
     return 0;
 }

@@ -99,7 +99,7 @@ impl Core {
             .map(|(index, entry)| HistoryEntryInfo {
                 index,
                 applied: index < self.history_cursor,
-                label: entry.label,
+                kind: entry.kind,
             })
             .collect()
     }
@@ -343,21 +343,39 @@ pub(super) enum HistoryChange {
 }
 
 impl HistoryChange {
-    pub(super) const fn label(&self) -> &'static str {
+    pub(super) const fn kind(&self) -> HistoryEntryKind {
         match self {
-            Self::Pixels { .. } => "Raster edit",
-            Self::Palette { .. } => "Palette edit",
-            Self::ColorChart { .. } => "Color chart edit",
-            Self::MainLineColor { .. } => "Main-line color",
-            Self::Document { .. } => "Document edit",
+            Self::Pixels { .. } => HistoryEntryKind::Raster,
+            Self::Palette { .. } => HistoryEntryKind::Palette,
+            Self::ColorChart { .. } => HistoryEntryKind::ColorChart,
+            Self::MainLineColor { .. } => HistoryEntryKind::MainLineColor,
+            Self::Document { .. } => HistoryEntryKind::Document,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Language-neutral semantic category for a document history entry.
+///
+/// Frontends map this value to their own presentation catalog. It is not a
+/// localized label and is not serialized into the native document format.
+pub enum HistoryEntryKind {
+    /// Raster pixel content changed.
+    Raster,
+    /// The document palette changed.
+    Palette,
+    /// The document color chart changed.
+    ColorChart,
+    /// The main-line color changed.
+    MainLineColor,
+    /// Another document-level operation changed state.
+    Document,
 }
 
 #[derive(Clone, Debug)]
 pub(super) struct HistoryEntry {
     pub(super) change: Option<HistoryChange>,
-    pub(super) label: &'static str,
+    pub(super) kind: HistoryEntryKind,
     pub(super) before_state: StateId,
     pub(super) after_state: StateId,
     pub(super) procedure: Arc<CanonicalProcedure>,
@@ -367,7 +385,7 @@ pub(super) struct HistoryEntry {
 #[derive(Clone, Debug)]
 pub(super) struct StagedHistoryEntry {
     pub(super) change: HistoryChange,
-    pub(super) label: &'static str,
+    pub(super) kind: HistoryEntryKind,
     pub(super) before_state: StateId,
     pub(super) after_state: StateId,
 }
@@ -443,6 +461,6 @@ pub struct HistoryEntryInfo {
     pub index: usize,
     /// Whether this entry is before the current history cursor.
     pub applied: bool,
-    /// Stable user-facing category label for the change.
-    pub label: &'static str,
+    /// Stable language-neutral semantic category for the change.
+    pub kind: HistoryEntryKind,
 }

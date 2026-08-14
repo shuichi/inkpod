@@ -33,29 +33,35 @@ void LayoutSequencePane(HWND dialog) noexcept {
     const int header_height = ScalePaneDip(dialog, 24);
     const int line_height = ScalePaneDip(dialog, 18);
     const int button_height = ScalePaneDip(dialog, 26);
-    const int pin_width = ScalePaneDip(dialog, 88);
     const int nav_width = ScalePaneDip(dialog, 58);
     const int import_width = ScalePaneDip(dialog, 112);
     const int width = static_cast<int>(client.right - client.left);
     const int height = static_cast<int>(client.bottom - client.top);
 
-    PlacePaneDialogControl(
-        dialog,
-        IDC_SEQUENCE_PIN,
-        std::max(margin, width - margin - pin_width),
-        margin,
-        pin_width,
-        header_height);
-    PlacePaneDialogControl(
+    PlacePaneTargetRow(
         dialog,
         IDC_SEQUENCE_TARGET,
+        IDC_SEQUENCE_PIN,
         margin,
-        margin + ScalePaneDip(dialog, 4),
-        std::max(0, width - margin * 3 - pin_width),
-        line_height);
+        margin,
+        std::max(0, width - margin * 2),
+        ScalePaneDip(dialog, 4),
+        line_height,
+        header_height,
+        gap);
+    const std::array<int, 4U> edit_controls{
+        IDC_SEQUENCE_REMOVE,
+        IDC_SEQUENCE_MOVE_UP,
+        IDC_SEQUENCE_MOVE_DOWN,
+        IDC_SEQUENCE_RENUMBER};
+    const int content_width = std::max(0, width - margin * 2);
+    const std::size_t edit_rows = PaneButtonRowCount(
+        dialog, edit_controls, content_width, gap);
+    const int edit_buttons_height = static_cast<int>(edit_rows) * button_height
+        + std::max(0, static_cast<int>(edit_rows) - 1) * gap;
     const int edit_buttons_top = std::max(
         margin + header_height + gap,
-        height - margin - button_height);
+        height - margin - edit_buttons_height);
     const int buttons_top = std::max(
         margin + header_height + gap,
         edit_buttons_top - gap - button_height);
@@ -96,23 +102,14 @@ void LayoutSequencePane(HWND dialog) noexcept {
         buttons_top,
         import_width,
         button_height);
-    const int edit_width = std::max(1, (width - margin * 2 - gap * 3) / 4);
-    PlacePaneDialogControl(
-        dialog, IDC_SEQUENCE_REMOVE, margin, edit_buttons_top,
-        edit_width, button_height);
-    PlacePaneDialogControl(
-        dialog, IDC_SEQUENCE_MOVE_UP,
-        margin + edit_width + gap, edit_buttons_top,
-        edit_width, button_height);
-    PlacePaneDialogControl(
-        dialog, IDC_SEQUENCE_MOVE_DOWN,
-        margin + (edit_width + gap) * 2, edit_buttons_top,
-        edit_width, button_height);
-    PlacePaneDialogControl(
-        dialog, IDC_SEQUENCE_RENUMBER,
-        margin + (edit_width + gap) * 3, edit_buttons_top,
-        std::max(1, width - margin * 2 - (edit_width + gap) * 3),
-        button_height);
+    PlacePaneButtonRows(
+        dialog,
+        edit_controls,
+        margin,
+        edit_buttons_top,
+        content_width,
+        button_height,
+        gap);
 }
 
 LRESULT CALLBACK SequenceListSubclass(

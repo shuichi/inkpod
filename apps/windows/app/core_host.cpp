@@ -146,8 +146,8 @@ struct PublishedSession {
     InkpodEditorStateInfo editor_state{};
     bool has_editor_state{};
     InkpodHistoryInfo history_info{};
-    std::string undo_name;
-    std::string redo_name;
+    InkpodHistoryEntryKind undo_kind{};
+    InkpodHistoryEntryKind redo_kind{};
     bool has_history_info{};
     InkpodEditTargetCapabilities edit_target_capabilities{};
     bool has_edit_target_presentation{};
@@ -938,38 +938,34 @@ struct CoreHost::Impl final {
         SessionBinding binding, InkpodCore* core) noexcept {
         InkpodHistoryInfo history{};
         history.struct_size = sizeof(history);
-        std::string undo_name;
-        std::string redo_name;
+        InkpodHistoryEntryKind undo_kind{};
+        InkpodHistoryEntryKind redo_kind{};
         bool has_history_info{};
-        try {
-            const auto read_history_name = [core](
-                std::uint64_t index, std::string& output) {
+        {
+            const auto read_history_kind = [core](
+                std::uint64_t index, InkpodHistoryEntryKind& output) {
                 InkpodHistoryItem item{};
                 item.struct_size = sizeof(item);
-                InkpodStatus item_status = inkpod_core_history_item(
+                const InkpodStatus item_status = inkpod_core_history_item(
                     core, index, &item);
-                if (item_status != INKPOD_STATUS_OK
-                    || item.name_bytes > UINT64_C(4096)) {
-                    return item_status == INKPOD_STATUS_OK
-                        ? INKPOD_STATUS_INVALID_STATE
-                        : item_status;
+                if (item_status != INKPOD_STATUS_OK) {
+                    return item_status;
                 }
-                output.assign(static_cast<std::size_t>(item.name_bytes), '\0');
-                item.name_utf8 = reinterpret_cast<std::uint8_t*>(output.data());
-                item.name_capacity = item.name_bytes;
-                return inkpod_core_history_item(core, index, &item);
+                output = item.entry_kind;
+                return item.entry_kind >= INKPOD_HISTORY_ENTRY_RASTER
+                        && item.entry_kind <= INKPOD_HISTORY_ENTRY_DOCUMENT
+                    ? INKPOD_STATUS_OK
+                    : INKPOD_STATUS_INVALID_STATE;
             };
             InkpodStatus history_status = inkpod_core_history_info(core, &history);
             if (history_status == INKPOD_STATUS_OK && history.cursor != 0U) {
-                history_status = read_history_name(history.cursor - 1U, undo_name);
+                history_status = read_history_kind(history.cursor - 1U, undo_kind);
             }
             if (history_status == INKPOD_STATUS_OK
                 && history.cursor < history.item_count) {
-                history_status = read_history_name(history.cursor, redo_name);
+                history_status = read_history_kind(history.cursor, redo_kind);
             }
             has_history_info = history_status == INKPOD_STATUS_OK;
-        } catch (const std::bad_alloc&) {
-            has_history_info = false;
         }
 
         std::uint64_t edit_target_count{};
@@ -990,8 +986,8 @@ struct CoreHost::Impl final {
         const auto found = FindPublishedLocked(binding);
         if (found != published.end()) {
             found->history_info = history;
-            found->undo_name = std::move(undo_name);
-            found->redo_name = std::move(redo_name);
+            found->undo_kind = undo_kind;
+            found->redo_kind = redo_kind;
             found->has_history_info = has_history_info;
             found->edit_target_capabilities = capabilities;
             found->has_edit_target_presentation = has_edit_target_presentation;
@@ -1631,23 +1627,17 @@ struct CoreHost::Impl final {
     bool CopyHistoryPresentation(
         SessionBinding binding,
         InkpodHistoryInfo& info,
-        std::string& undo_name,
-        std::string& redo_name) const noexcept {
+        InkpodHistoryEntryKind& undo_kind,
+        InkpodHistoryEntryKind& redo_kind) const noexcept {
         std::lock_guard lock(state_mutex);
         const auto found = FindPublishedLocked(binding);
         if (found == published.end() || !found->has_history_info) {
             return false;
         }
-        try {
-            info = found->history_info;
-            undo_name = found->undo_name;
-            redo_name = found->redo_name;
-            return true;
-        } catch (const std::bad_alloc&) {
-            undo_name.clear();
-            redo_name.clear();
-            return false;
-        }
+        info = found->history_info;
+        undo_kind = found->undo_kind;
+        redo_kind = found->redo_kind;
+        return true;
     }
 
     bool CopyEditTargetPresentation(
@@ -2228,11 +2218,11 @@ bool CoreHost::GetHistoryPresentation(
     DocumentSessionId session,
     Generation generation,
     InkpodHistoryInfo& info,
-    std::string& undo_name,
-    std::string& redo_name) const noexcept {
+    InkpodHistoryEntryKind& undo_kind,
+    InkpodHistoryEntryKind& redo_kind) const noexcept {
     return impl_ != nullptr
         && impl_->CopyHistoryPresentation(
-            SessionBinding{session, generation}, info, undo_name, redo_name);
+            SessionBinding{session, generation}, info, undo_kind, redo_kind);
 }
 
 bool CoreHost::GetEditTargetPresentation(

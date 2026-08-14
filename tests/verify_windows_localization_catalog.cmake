@@ -139,6 +139,97 @@ foreach(FORBIDDEN_LEGACY_TOKEN IN ITEMS
     endif()
 endforeach()
 
+# Product presentation must not branch on the active language or compare
+# language-specific history labels. Selection is exclusively UiStringId-based.
+foreach(RELATIVE_PATH IN LISTS PRODUCT_SOURCE_FILES)
+    if(NOT RELATIVE_PATH MATCHES "\\.(cpp|h)$"
+        OR RELATIVE_PATH STREQUAL "apps/windows/ui/localization.cpp"
+        OR RELATIVE_PATH STREQUAL "apps/windows/ui/localization.h"
+        OR RELATIVE_PATH STREQUAL "apps/windows/app/app_smoke.cpp")
+        continue()
+    endif()
+    file(READ "${INKPOD_SOURCE_DIR}/${RELATIVE_PATH}" CONTENT)
+    foreach(FORBIDDEN_LANGUAGE_BRANCH IN ITEMS
+            "CurrentUiLanguage()" "LocalizedHistoryLabel"
+            "L\"Untitled Cell" "L\"Recovered Cell" "L\" [View ")
+        string(FIND
+            "${CONTENT}"
+            "${FORBIDDEN_LANGUAGE_BRANCH}"
+            LANGUAGE_BRANCH_POSITION)
+        if(NOT LANGUAGE_BRANCH_POSITION LESS 0)
+            message(FATAL_ERROR
+                "language-specific product presentation remains in ${RELATIVE_PATH}: ${FORBIDDEN_LANGUAGE_BRANCH}")
+        endif()
+    endforeach()
+endforeach()
+file(READ
+    "${INKPOD_SOURCE_DIR}/apps/windows/ui/main_window.cpp"
+    MAIN_WINDOW_SOURCE)
+file(READ
+    "${INKPOD_SOURCE_DIR}/apps/windows/ui/main_window_runtime.cpp"
+    MAIN_WINDOW_RUNTIME_SOURCE)
+foreach(FORBIDDEN_PRESENTATION_TOKEN IN ITEMS
+        "CurrentUiLanguage()" "LocalizedHistoryLabel"
+        "L\"Untitled Cell" "L\"Recovered Cell" "L\" [View ")
+    string(FIND
+        "${MAIN_WINDOW_SOURCE}${MAIN_WINDOW_RUNTIME_SOURCE}"
+        "${FORBIDDEN_PRESENTATION_TOKEN}"
+        PRESENTATION_POSITION)
+    if(NOT PRESENTATION_POSITION LESS 0)
+        message(FATAL_ERROR
+            "language-specific product presentation remains: ${FORBIDDEN_PRESENTATION_TOKEN}")
+    endif()
+endforeach()
+foreach(REQUIRED_PRESENTATION_TOKEN IN ITEMS
+        "UiStringId::Text0777" "UiStringId::Text0778"
+        "UiStringId::Text0012" "UiStringId::RecoveredCell"
+        "HistoryUiStringId" "Utf8UserText(node.name)")
+    string(FIND
+        "${MAIN_WINDOW_SOURCE}${MAIN_WINDOW_RUNTIME_SOURCE}"
+        "${REQUIRED_PRESENTATION_TOKEN}"
+        PRESENTATION_POSITION)
+    if(PRESENTATION_POSITION LESS 0)
+        message(FATAL_ERROR
+            "typed presentation route is incomplete: ${REQUIRED_PRESENTATION_TOKEN}")
+    endif()
+endforeach()
+
+set(HISTORY_KIND_SOURCES)
+foreach(HISTORY_KIND_PATH IN ITEMS
+        "rust/inkpod-core/src/history.rs"
+        "rust/inkpod-core/src/journal.rs"
+        "rust/inkpod-ffi/src/paint_history/history.rs"
+        "include/inkpod/core_ffi.h")
+    file(READ
+        "${INKPOD_SOURCE_DIR}/${HISTORY_KIND_PATH}"
+        HISTORY_KIND_CONTENT)
+    string(APPEND HISTORY_KIND_SOURCES "${HISTORY_KIND_CONTENT}")
+endforeach()
+foreach(FORBIDDEN_HISTORY_TOKEN IN ITEMS
+        "Raster edit" "Palette edit" "Color chart edit"
+        "Main-line color" "Document edit")
+    string(FIND
+        "${HISTORY_KIND_SOURCES}"
+        "${FORBIDDEN_HISTORY_TOKEN}"
+        HISTORY_TOKEN_POSITION)
+    if(NOT HISTORY_TOKEN_POSITION LESS 0)
+        message(FATAL_ERROR
+            "history string-key route remains: ${FORBIDDEN_HISTORY_TOKEN}")
+    endif()
+endforeach()
+foreach(REQUIRED_HISTORY_TOKEN IN ITEMS
+        "HistoryEntryKind" "InkpodHistoryEntryKind" "entry_kind"
+        "HistoryEntryKind::ColorChart" "INKPOD_HISTORY_ENTRY_COLOR_CHART")
+    string(FIND
+        "${HISTORY_KIND_SOURCES}"
+        "${REQUIRED_HISTORY_TOKEN}"
+        HISTORY_TOKEN_POSITION)
+    if(HISTORY_TOKEN_POSITION LESS 0)
+        message(FATAL_ERROR
+            "typed history route is incomplete: ${REQUIRED_HISTORY_TOKEN}")
+    endif()
+endforeach()
+
 # Lock in the three owner-draw migrations that otherwise regress silently.
 file(READ
     "${INKPOD_SOURCE_DIR}/apps/windows/ui/dialogs/tool_palette.cpp"
@@ -149,6 +240,42 @@ foreach(REQUIRED_TOKEN IN ITEMS
     string(FIND "${TOOL_PALETTE_SOURCE}" "${REQUIRED_TOKEN}" TOKEN_POSITION)
     if(TOKEN_POSITION LESS 0)
         message(FATAL_ERROR "tool palette typed localization is incomplete: ${REQUIRED_TOKEN}")
+    endif()
+endforeach()
+
+file(READ
+    "${INKPOD_SOURCE_DIR}/apps/windows/ui/panes/pane_dialog_layout.h"
+    PANE_LAYOUT_SOURCE)
+foreach(REQUIRED_TOKEN IN ITEMS
+        "BCM_GETIDEALSIZE" "MeasurePaneButtonTextWidth"
+        "PaneButtonIdealWidthAtDpi" "PaneButtonTextFits"
+        "PaneButtonRowCount" "PlacePaneButtonRows" "PlacePaneTargetRow")
+    string(FIND "${PANE_LAYOUT_SOURCE}" "${REQUIRED_TOKEN}" TOKEN_POSITION)
+    if(TOKEN_POSITION LESS 0)
+        message(FATAL_ERROR "localized button-fit gate is incomplete: ${REQUIRED_TOKEN}")
+    endif()
+endforeach()
+file(READ
+    "${INKPOD_SOURCE_DIR}/tests/windows_localization.cpp"
+    LOCALIZATION_TEST_SOURCE)
+foreach(REQUIRED_TOKEN IN ITEMS
+        "LocalizedButtonLayoutContract" "96U, 120U, 144U, 192U"
+        "PaneButtonIdealWidthAtDpi" "IntersectRect"
+        "UiStringId::PinDocument" "UiStringId::ReturnToFollowing"
+        "OpaqueUserTextContract(UiLanguagePreference::Japanese)")
+    string(FIND "${LOCALIZATION_TEST_SOURCE}" "${REQUIRED_TOKEN}" TOKEN_POSITION)
+    if(TOKEN_POSITION LESS 0)
+        message(FATAL_ERROR "multi-DPI button-fit test is incomplete: ${REQUIRED_TOKEN}")
+    endif()
+endforeach()
+file(READ
+    "${INKPOD_SOURCE_DIR}/apps/windows/app/app_smoke.cpp"
+    APP_SMOKE_SOURCE)
+foreach(REQUIRED_TOKEN IN ITEMS
+        "PaneButtonsFit" "button fit failure" "PaneButtonIdealWidth")
+    string(FIND "${APP_SMOKE_SOURCE}" "${REQUIRED_TOKEN}" TOKEN_POSITION)
+    if(TOKEN_POSITION LESS 0)
+        message(FATAL_ERROR "product button-fit smoke gate is incomplete: ${REQUIRED_TOKEN}")
     endif()
 endforeach()
 
