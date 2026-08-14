@@ -23,7 +23,14 @@ struct LocatorPaneDialogState final {
     std::int32_t neighborhood_origin_x{};
     std::int32_t neighborhood_origin_y{};
     std::array<std::uint8_t, 9U * 9U * 4U> neighborhood{};
+    std::wstring presented_target_text;
+    std::wstring presented_coordinate_text;
+    std::wstring presented_selection_text;
+    std::wstring presented_color_text;
+    std::wstring presented_pin_text;
     bool fixed_mode{};
+    bool presented_auto_scroll{};
+    bool presentation_initialized{};
 };
 
 struct LocatorPaneView final {

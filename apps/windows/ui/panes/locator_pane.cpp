@@ -7,6 +7,9 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <new>
+#include <string_view>
+#include <utility>
 
 #include "app/resource.h"
 #include "pane_dialog_layout.h"
@@ -18,6 +21,40 @@ namespace {
 void Dispatch(LocatorPaneDialogState& state, UINT command) noexcept {
     if (state.dispatch_command != nullptr) {
         state.dispatch_command(state.context, command);
+    }
+}
+
+void SetControlTextIfChanged(
+    HWND dialog,
+    int control,
+    std::wstring& presented,
+    std::wstring_view next,
+    bool force) noexcept {
+    if (!force && std::wstring_view(presented) == next) {
+        return;
+    }
+    try {
+        std::wstring replacement(next);
+        const HWND control_window = GetDlgItem(dialog, control);
+        if (control_window == nullptr) {
+            return;
+        }
+        const bool text_shrank = replacement.size() < presented.size();
+        if (SetWindowTextW(control_window, replacement.c_str()) == FALSE) {
+            return;
+        }
+        presented = std::move(replacement);
+        if (text_shrank) {
+            // A STATIC control may repaint only the new, shorter glyph run after
+            // WM_SETTEXT. Complete the erase and paint now so pixels belonging
+            // to the previous text cannot survive until another pane refresh.
+            RedrawWindow(
+                control_window,
+                nullptr,
+                nullptr,
+                RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW);
+        }
+    } catch (const std::bad_alloc&) {
     }
 }
 
@@ -304,29 +341,84 @@ void UpdateLocatorPaneDialog(
     }
     auto* state = reinterpret_cast<LocatorPaneDialogState*>(
         GetWindowLongPtrW(dialog, GWLP_USERDATA));
-    if (state != nullptr) {
-        state->neighborhood_width = view.valid ? view.neighborhood_width : 0U;
-        state->neighborhood_height = view.valid ? view.neighborhood_height : 0U;
+    if (state == nullptr) {
+        return;
+    }
+    const bool first_presentation = !state->presentation_initialized;
+    const std::uint32_t neighborhood_width =
+        view.valid ? view.neighborhood_width : 0U;
+    const std::uint32_t neighborhood_height =
+        view.valid ? view.neighborhood_height : 0U;
+    const bool neighborhood_visible =
+        neighborhood_width != 0U && neighborhood_height != 0U;
+    const bool neighborhood_changed = first_presentation
+        || state->neighborhood_width != neighborhood_width
+        || state->neighborhood_height != neighborhood_height
+        || (neighborhood_visible
+            && (state->neighborhood_origin_x != view.neighborhood_origin_x
+                || state->neighborhood_origin_y != view.neighborhood_origin_y
+                || state->neighborhood != view.neighborhood));
+    if (neighborhood_changed) {
+        state->neighborhood_width = neighborhood_width;
+        state->neighborhood_height = neighborhood_height;
         state->neighborhood_origin_x = view.neighborhood_origin_x;
         state->neighborhood_origin_y = view.neighborhood_origin_y;
         state->neighborhood = view.neighborhood;
-        state->fixed_mode = view.fixed_mode;
     }
-    SetDlgItemTextW(dialog, IDC_LOCATOR_TARGET, view.target_text.c_str());
-    SetDlgItemTextW(dialog, IDC_LOCATOR_COORDINATE, view.coordinate_text.c_str());
-    SetDlgItemTextW(dialog, IDC_LOCATOR_SELECTION, view.selection_text.c_str());
-    SetDlgItemTextW(dialog, IDC_LOCATOR_COLOR, view.color_text.c_str());
-    SetDlgItemTextW(
+    const bool fixed_mode_changed =
+        first_presentation || state->fixed_mode != view.fixed_mode;
+    const bool auto_scroll_changed = first_presentation
+        || state->presented_auto_scroll != view.auto_scroll;
+    state->fixed_mode = view.fixed_mode;
+    SetControlTextIfChanged(
+        dialog,
+        IDC_LOCATOR_TARGET,
+        state->presented_target_text,
+        view.target_text,
+        first_presentation);
+    SetControlTextIfChanged(
+        dialog,
+        IDC_LOCATOR_COORDINATE,
+        state->presented_coordinate_text,
+        view.coordinate_text,
+        first_presentation);
+    SetControlTextIfChanged(
+        dialog,
+        IDC_LOCATOR_SELECTION,
+        state->presented_selection_text,
+        view.selection_text,
+        first_presentation);
+    SetControlTextIfChanged(
+        dialog,
+        IDC_LOCATOR_COLOR,
+        state->presented_color_text,
+        view.color_text,
+        first_presentation);
+    SetControlTextIfChanged(
         dialog,
         IDC_LOCATOR_PIN,
+        state->presented_pin_text,
         view.pinned ? UiText(UiStringId::ReturnToFollowing)
-                    : UiText(UiStringId::PinDocument));
-    CheckDlgButton(dialog, IDC_LOCATOR_FIXED, view.fixed_mode ? BST_CHECKED : BST_UNCHECKED);
-    CheckDlgButton(
-        dialog,
-        IDC_LOCATOR_AUTOSCROLL,
-        view.auto_scroll ? BST_CHECKED : BST_UNCHECKED);
-    InvalidateRect(GetDlgItem(dialog, IDC_LOCATOR_NEIGHBORHOOD), nullptr, FALSE);
+                    : UiText(UiStringId::PinDocument),
+        first_presentation);
+    if (fixed_mode_changed) {
+        CheckDlgButton(
+            dialog,
+            IDC_LOCATOR_FIXED,
+            view.fixed_mode ? BST_CHECKED : BST_UNCHECKED);
+    }
+    if (auto_scroll_changed) {
+        CheckDlgButton(
+            dialog,
+            IDC_LOCATOR_AUTOSCROLL,
+            view.auto_scroll ? BST_CHECKED : BST_UNCHECKED);
+    }
+    state->presented_auto_scroll = view.auto_scroll;
+    state->presentation_initialized = true;
+    if (neighborhood_changed) {
+        InvalidateRect(
+            GetDlgItem(dialog, IDC_LOCATOR_NEIGHBORHOOD), nullptr, FALSE);
+    }
 }
 
 }  // namespace inkpod::windows::ui::panes

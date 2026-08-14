@@ -189,6 +189,55 @@ bool WindowHasVisibleStyle(HWND window) noexcept {
             != 0U;
 }
 
+struct WindowMessageCounter final {
+    UINT message{};
+    std::uint32_t count{};
+};
+
+LRESULT CALLBACK WindowMessageCounterProcedure(
+    HWND window,
+    UINT message,
+    WPARAM wparam,
+    LPARAM lparam,
+    UINT_PTR subclass_id,
+    DWORD_PTR reference) noexcept {
+    auto* counter = reinterpret_cast<WindowMessageCounter*>(reference);
+    if (counter != nullptr && message == counter->message) {
+        ++counter->count;
+    }
+    if (message == WM_NCDESTROY) {
+        RemoveWindowSubclass(
+            window, WindowMessageCounterProcedure, subclass_id);
+    }
+    return DefSubclassProc(window, message, wparam, lparam);
+}
+
+bool WindowFontsAreEquivalent(HWND left, HWND right) noexcept {
+    const HFONT left_font = left == nullptr
+        ? nullptr
+        : reinterpret_cast<HFONT>(SendMessageW(left, WM_GETFONT, 0, 0));
+    const HFONT right_font = right == nullptr
+        ? nullptr
+        : reinterpret_cast<HFONT>(SendMessageW(right, WM_GETFONT, 0, 0));
+    LOGFONTW left_info{};
+    LOGFONTW right_info{};
+    return left_font != nullptr && right_font != nullptr
+        && GetObjectW(
+               left_font, static_cast<int>(sizeof(left_info)), &left_info)
+            == static_cast<int>(sizeof(left_info))
+        && GetObjectW(
+               right_font, static_cast<int>(sizeof(right_info)), &right_info)
+            == static_cast<int>(sizeof(right_info))
+        && left_info.lfHeight == right_info.lfHeight
+        && left_info.lfWeight == right_info.lfWeight
+        && left_info.lfItalic == right_info.lfItalic
+        && left_info.lfUnderline == right_info.lfUnderline
+        && left_info.lfStrikeOut == right_info.lfStrikeOut
+        && left_info.lfCharSet == right_info.lfCharSet
+        && left_info.lfQuality == right_info.lfQuality
+        && std::wcscmp(left_info.lfFaceName, right_info.lfFaceName) == 0;
+}
+
 bool AutomationWindowNameContains(
     HWND window, std::wstring_view expected) noexcept {
     if (window == nullptr || expected.empty()) {
@@ -790,6 +839,82 @@ int RunLocatorPaneSmoke(ApplicationHost& state) noexcept {
                target_text.data(), UiText(UiStringId::FollowingPrefix))
             != target_text.data()) {
         return 852;
+    }
+    std::array<wchar_t, 256U> coordinate_text{};
+    std::array<wchar_t, 256U> selection_text{};
+    std::array<wchar_t, 256U> color_text{};
+    GetDlgItemTextW(
+        pane,
+        IDC_LOCATOR_COORDINATE,
+        coordinate_text.data(),
+        static_cast<int>(coordinate_text.size()));
+    GetDlgItemTextW(
+        pane,
+        IDC_LOCATOR_SELECTION,
+        selection_text.data(),
+        static_cast<int>(selection_text.size()));
+    GetDlgItemTextW(
+        pane,
+        IDC_LOCATOR_COLOR,
+        color_text.data(),
+        static_cast<int>(color_text.size()));
+    const auto* initial_binding = state.routing.pane_targets.Find(
+        state.routing.locator_pane);
+    const auto& locator_state = state.Workspace().locator_dialog;
+    inkpod::windows::ui::panes::LocatorPaneView repeated_view{};
+    repeated_view.target_text = target_text.data();
+    repeated_view.coordinate_text = coordinate_text.data();
+    repeated_view.selection_text = selection_text.data();
+    repeated_view.color_text = color_text.data();
+    repeated_view.neighborhood_width = locator_state.neighborhood_width;
+    repeated_view.neighborhood_height = locator_state.neighborhood_height;
+    repeated_view.neighborhood_origin_x = locator_state.neighborhood_origin_x;
+    repeated_view.neighborhood_origin_y = locator_state.neighborhood_origin_y;
+    repeated_view.neighborhood = locator_state.neighborhood;
+    repeated_view.valid = locator_state.neighborhood_width != 0U
+        && locator_state.neighborhood_height != 0U;
+    repeated_view.pinned = initial_binding != nullptr
+        && initial_binding->policy == inkpod::app::PaneTargetPolicy::PinnedDocument;
+    repeated_view.fixed_mode = state.Workspace().locator_fixed_mode;
+    repeated_view.auto_scroll = state.Workspace().locator_auto_scroll;
+    constexpr UINT_PTR kTargetMessageCounterSubclass = 1U;
+    WindowMessageCounter target_message_counter{WM_SETTEXT};
+    const HWND target_control = GetDlgItem(pane, IDC_LOCATOR_TARGET);
+    if (target_control == nullptr
+        || SetWindowSubclass(
+               target_control,
+               WindowMessageCounterProcedure,
+               kTargetMessageCounterSubclass,
+               reinterpret_cast<DWORD_PTR>(&target_message_counter)) == FALSE) {
+        return 11004;
+    }
+    inkpod::windows::ui::panes::UpdateLocatorPaneDialog(
+        pane, repeated_view);
+    RemoveWindowSubclass(
+        target_control,
+        WindowMessageCounterProcedure,
+        kTargetMessageCounterSubclass);
+    if (target_message_counter.count != 0U) {
+        return 11004;
+    }
+    inkpod::windows::ui::panes::LocatorPaneView expanded_selection_view =
+        repeated_view;
+    std::array<wchar_t, 33U> expanded_selection_text{};
+    expanded_selection_text.fill(L'W');
+    expanded_selection_text.back() = L'\0';
+    expanded_selection_view.selection_text = expanded_selection_text.data();
+    inkpod::windows::ui::panes::UpdateLocatorPaneDialog(
+        pane, expanded_selection_view);
+    inkpod::windows::ui::panes::UpdateLocatorPaneDialog(
+        pane, repeated_view);
+    std::array<wchar_t, 256U> restored_selection_text{};
+    GetDlgItemTextW(
+        pane,
+        IDC_LOCATOR_SELECTION,
+        restored_selection_text.data(),
+        static_cast<int>(restored_selection_text.size()));
+    if (std::wcscmp(restored_selection_text.data(), selection_text.data()) != 0) {
+        return 11005;
     }
     if (SendMessageW(
             state.Workspace().windows.window,
@@ -2378,6 +2503,8 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     }
     HWND dock_tabs =
         state.Workspace().windows.dock_host.TabWindow(DockZone::Left);
+    const HWND color_tabs = GetDlgItem(
+        state.Workspace().windows.color_pane, IDC_COLOR_TABS);
     const DockZoneState* left_zone =
         state.Workspace().windows.workspace.dock.Zone(DockZone::Left);
     if (dock_tabs == nullptr || left_zone == nullptr
@@ -2385,6 +2512,9 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         || (GetWindowLongPtrW(dock_tabs, GWL_STYLE) & WS_TABSTOP) == 0
         || left_zone->active_tab != DockPaneType::Tool) {
         return 836;
+    }
+    if (!WindowFontsAreEquivalent(dock_tabs, color_tabs)) {
+        return 11003;
     }
     SetFocus(dock_tabs);
     SendMessageW(dock_tabs, WM_KEYDOWN, VK_RIGHT, 0);

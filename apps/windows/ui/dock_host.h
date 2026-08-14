@@ -14,6 +14,7 @@ using DockHostChangedCallback = void (*)(void* context) noexcept;
 class DockHost final {
 public:
     DockHost() noexcept;
+    ~DockHost() noexcept;
     DockHost(const DockHost&) = delete;
     DockHost& operator=(const DockHost&) = delete;
 
@@ -106,6 +107,7 @@ private:
     void LayoutAutoHiddenContent(PaneHostState& pane) noexcept;
     [[nodiscard]] bool ShouldShowStackHeader(
         DockZone zone, std::uint8_t stack) const noexcept;
+    [[nodiscard]] bool UpdateTabFont(UINT dpi) noexcept;
     void ApplyPaneLayout(PaneHostState& pane) noexcept;
     void ApplyTabLayout(TabHostState& tabs) noexcept;
     void NotifyChanged() noexcept;
@@ -133,6 +135,8 @@ private:
     std::array<SplitterHostState, kMaximumDockSplitters> splitter_states_{};
     std::array<HWND, kMaximumDockSplitters> splitters_{};
     std::array<TabHostState, kMaximumDockTabStacks> tab_states_{};
+    HFONT tab_font_{};
+    UINT tab_font_dpi_{};
     HWND preview_{};
     DockZone preview_zone_{DockZone::Count};
     bool initialized_{};

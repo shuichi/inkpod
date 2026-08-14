@@ -73,6 +73,18 @@ foreach(REQUIRED IN ITEMS
     endif()
 endforeach()
 
+file(READ "${LOCATOR_SOURCE}" LOCATOR_IMPLEMENTATION)
+foreach(REQUIRED IN ITEMS
+        "std::wstring_view(presented) == next"
+        "replacement.size() < presented.size()"
+        "RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW")
+    string(FIND "${LOCATOR_IMPLEMENTATION}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR
+            "Locator idempotent/shorter-text repaint contract is missing: ${REQUIRED}")
+    endif()
+endforeach()
+
 file(READ "${MODEL_HEADER}" MODEL)
 foreach(REQUIRED IN ITEMS
         "class DockLayoutModel final"
@@ -165,7 +177,12 @@ foreach(REQUIRED IN ITEMS
         "ShowDockPreview"
         "PreviewZoneAt"
         "DockSplitterKind::StackBoundary"
-        "DockStackMode::Tabs")
+        "DockStackMode::Tabs"
+        "UpdateTabFont(GetDpiForWindow(owner_))"
+        "UpdateTabFont(dpi_)"
+        "WM_SETFONT"
+        "CLEARTYPE_QUALITY"
+        "Segoe UI")
     string(FIND "${HOST}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
         message(FATAL_ERROR "DockHost implementation is missing: ${REQUIRED}")

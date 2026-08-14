@@ -235,6 +235,18 @@ DockHost::DockHost() noexcept {
     }
 }
 
+DockHost::~DockHost() noexcept {
+    if (tab_font_ == nullptr) {
+        return;
+    }
+    for (const TabHostState& tabs : tab_states_) {
+        if (tabs.control != nullptr) {
+            SendMessageW(tabs.control, WM_SETFONT, 0, FALSE);
+        }
+    }
+    DeleteObject(tab_font_);
+}
+
 bool DockHost::Initialize(
     HWND owner, HINSTANCE instance, DockLayoutModel& model) noexcept {
     if (initialized_ || owner == nullptr || instance == nullptr) {
@@ -319,6 +331,9 @@ bool DockHost::Initialize(
             return false;
         }
     }
+    if (!UpdateTabFont(GetDpiForWindow(owner_))) {
+        return false;
+    }
     initialized_ = true;
     return true;
 }
@@ -356,6 +371,7 @@ void DockHost::ApplyLayout(
     applying_ = true;
     geometry_ = geometry;
     dpi_ = dpi == 0U ? 96U : dpi;
+    static_cast<void>(UpdateTabFont(dpi_));
     for (TabHostState& tabs : tab_states_) {
         ApplyTabLayout(tabs);
     }
@@ -749,6 +765,46 @@ bool DockHost::ShouldShowStackHeader(
             && descriptor->show_header_when_singleton;
     }
     return false;
+}
+
+bool DockHost::UpdateTabFont(UINT dpi) noexcept {
+    const UINT normalized_dpi = dpi == 0U ? 96U : dpi;
+    if (tab_font_ != nullptr && tab_font_dpi_ == normalized_dpi) {
+        return true;
+    }
+    const HFONT replacement = CreateFontW(
+        -MulDiv(9, static_cast<int>(normalized_dpi), 72),
+        0,
+        0,
+        0,
+        FW_NORMAL,
+        FALSE,
+        FALSE,
+        FALSE,
+        DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS,
+        CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY,
+        DEFAULT_PITCH | FF_DONTCARE,
+        L"Segoe UI");
+    if (replacement == nullptr) {
+        return false;
+    }
+    for (const TabHostState& tabs : tab_states_) {
+        if (tabs.control != nullptr) {
+            SendMessageW(
+                tabs.control,
+                WM_SETFONT,
+                reinterpret_cast<WPARAM>(replacement),
+                TRUE);
+        }
+    }
+    if (tab_font_ != nullptr) {
+        DeleteObject(tab_font_);
+    }
+    tab_font_ = replacement;
+    tab_font_dpi_ = normalized_dpi;
+    return true;
 }
 
 void DockHost::ApplyPaneLayout(PaneHostState& pane) noexcept {
