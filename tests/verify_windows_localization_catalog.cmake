@@ -284,10 +284,106 @@ file(READ
     LAYER_PALETTE_SOURCE)
 foreach(REQUIRED_TOKEN IN ITEMS
         "kind_label_id" "format_label_id" "visibility_label_id"
-        "editability_label_id" "accessible_text" "item.kind_text")
+        "editability_label_id" "badge_label_id" "accessible_text"
+        "item.kind_text" "item.badge_text"
+        "state.status_cell_width"
+        "MeasureLayerPaletteStatusCellWidth"
+        "LayoutLayerPaletteStatusCells"
+        "PtInRect(&status_layout.editability"
+        "PtInRect(&status_layout.visibility")
     string(FIND "${LAYER_PALETTE_SOURCE}" "${REQUIRED_TOKEN}" TOKEN_POSITION)
     if(TOKEN_POSITION LESS 0)
         message(FATAL_ERROR "layer/plane presentation is not pre-resolved: ${REQUIRED_TOKEN}")
+    endif()
+endforeach()
+string(FIND "${LAYER_PALETTE_SOURCE}" "kActionWidth" FIXED_WIDTH_POSITION)
+if(NOT FIXED_WIDTH_POSITION LESS 0)
+    message(FATAL_ERROR
+        "layer/plane owner-draw status cells reverted to a fixed action width")
+endif()
+foreach(REQUIRED_TOKEN IN ITEMS
+        "PlaneKindBadgeLabelId"
+        "UiStringId::PlaneBadgeMainLine"
+        "UiStringId::PlaneBadgeColoring"
+        "UiStringId::PlaneBadgeColorTrace"
+        "UiStringId::PlaneBadgeRaster"
+        "UiStringId::PlaneBadgeSelection"
+        "UiStringId::PlaneBadgeVectorMainLine"
+        "UiStringId::PlaneBadgeVectorFill"
+        "UiStringId::PlaneBadgeUnknown"
+        "kLayerPalettePlaneBadgeTextFlags")
+    string(FIND "${LAYER_PALETTE_SOURCE}" "${REQUIRED_TOKEN}" TOKEN_POSITION)
+    if(TOKEN_POSITION LESS 0)
+        message(FATAL_ERROR
+            "layer/plane compact badge route is incomplete: ${REQUIRED_TOKEN}")
+    endif()
+endforeach()
+string(FIND
+    "${LAYER_PALETTE_SOURCE}"
+    "DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS"
+    LEGACY_BADGE_POSITION)
+if(NOT LEGACY_BADGE_POSITION LESS 0)
+    message(FATAL_ERROR
+        "layer/plane badge reverted to single-line ellipsis")
+endif()
+file(READ
+    "${INKPOD_SOURCE_DIR}/apps/windows/ui/dialogs/layer_palette_badge_layout.h"
+    LAYER_PALETTE_BADGE_LAYOUT_SOURCE)
+foreach(REQUIRED_TOKEN IN ITEMS
+        "kLayerPalettePlaneBadgeWidthDip"
+        "kLayerPalettePlaneBadgeHeightDip"
+        "kLayerPalettePlaneBadgeTextFlags"
+        "MeasureLayerPalettePlaneBadgeText"
+        "LayerPalettePlaneBadgeTextFits"
+        "LayoutLayerPalettePlaneBadgeText")
+    string(FIND
+        "${LAYER_PALETTE_BADGE_LAYOUT_SOURCE}"
+        "${REQUIRED_TOKEN}"
+        TOKEN_POSITION)
+    if(TOKEN_POSITION LESS 0)
+        message(FATAL_ERROR
+            "layer/plane compact badge layout gate is incomplete: ${REQUIRED_TOKEN}")
+    endif()
+endforeach()
+file(READ
+    "${INKPOD_SOURCE_DIR}/apps/windows/ui/dialogs/layer_palette_status_layout.h"
+    LAYER_PALETTE_STATUS_LAYOUT_SOURCE)
+foreach(REQUIRED_TOKEN IN ITEMS
+        "kLayerPaletteStatusMinimumWidthDip"
+        "kLayerPaletteStatusHorizontalPaddingDip"
+        "MeasureLayerPaletteStatusCellWidth"
+        "LayerPaletteStatusCellLayout"
+        "LayoutLayerPaletteStatusCells")
+    string(FIND
+        "${LAYER_PALETTE_STATUS_LAYOUT_SOURCE}"
+        "${REQUIRED_TOKEN}"
+        TOKEN_POSITION)
+    if(TOKEN_POSITION LESS 0)
+        message(FATAL_ERROR
+            "layer/plane owner-draw width gate is incomplete: ${REQUIRED_TOKEN}")
+    endif()
+endforeach()
+foreach(REQUIRED_TOKEN IN ITEMS
+        "LayerPaletteOwnerDrawCellWidthContract"
+        "UiStringId::Visible" "UiStringId::Hidden"
+        "UiStringId::Editable" "UiStringId::Protected")
+    string(FIND "${LOCALIZATION_TEST_SOURCE}" "${REQUIRED_TOKEN}" TOKEN_POSITION)
+    if(TOKEN_POSITION LESS 0)
+        message(FATAL_ERROR
+            "layer/plane owner-draw width test is incomplete: ${REQUIRED_TOKEN}")
+    endif()
+endforeach()
+foreach(REQUIRED_TOKEN IN ITEMS
+        "LayerPalettePlaneBadgeLayoutContract"
+        "LayerPalettePlaneBadgeTextFits"
+        "UiStringId::PlaneBadgeMainLine"
+        "UiStringId::PlaneBadgeColoring"
+        "UiStringId::PlaneBadgeColorTrace"
+        "UiStringId::PlaneBadgeVectorMainLine")
+    string(FIND "${LOCALIZATION_TEST_SOURCE}" "${REQUIRED_TOKEN}" TOKEN_POSITION)
+    if(TOKEN_POSITION LESS 0)
+        message(FATAL_ERROR
+            "layer/plane compact badge test is incomplete: ${REQUIRED_TOKEN}")
     endif()
 endforeach()
 

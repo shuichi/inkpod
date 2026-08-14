@@ -438,6 +438,8 @@ if(WIN32)
         apps/windows/ui/localization.cpp
         apps/windows/ui/localization.h
         apps/windows/ui/history_presentation.h
+        apps/windows/ui/dialogs/layer_palette_badge_layout.h
+        apps/windows/ui/dialogs/layer_palette_status_layout.h
         apps/windows/ui/ui_resources.cpp
         apps/windows/ui/ui_resources.h
         tests/windows_localization.cpp
@@ -671,6 +673,8 @@ if(WIN32)
         apps/windows/ui/dialogs/history_visualization_dialog.h
         apps/windows/ui/dialogs/layer_palette.cpp
         apps/windows/ui/dialogs/layer_palette.h
+        apps/windows/ui/dialogs/layer_palette_badge_layout.h
+        apps/windows/ui/dialogs/layer_palette_status_layout.h
         apps/windows/ui/dialogs/modal_dialog_position.cpp
         apps/windows/ui/dialogs/modal_dialog_position.h
         apps/windows/ui/dialogs/tool_palette.cpp

@@ -608,6 +608,62 @@
       "resource": true
     },
     {
+      "id": "PlaneBadgeMainLine",
+      "kind": "text",
+      "ja": "主線",
+      "en": "Main\nLine",
+      "resource": false
+    },
+    {
+      "id": "PlaneBadgeColoring",
+      "kind": "text",
+      "ja": "彩色",
+      "en": "Color\nPlane",
+      "resource": false
+    },
+    {
+      "id": "PlaneBadgeColorTrace",
+      "kind": "text",
+      "ja": "色トレ",
+      "en": "Color\nTrace",
+      "resource": false
+    },
+    {
+      "id": "PlaneBadgeRaster",
+      "kind": "text",
+      "ja": "ラス\nター",
+      "en": "Raster",
+      "resource": false
+    },
+    {
+      "id": "PlaneBadgeSelection",
+      "kind": "text",
+      "ja": "選択",
+      "en": "Select",
+      "resource": false
+    },
+    {
+      "id": "PlaneBadgeVectorMainLine",
+      "kind": "text",
+      "ja": "ベク\n主線",
+      "en": "Vector\nLine",
+      "resource": false
+    },
+    {
+      "id": "PlaneBadgeVectorFill",
+      "kind": "text",
+      "ja": "ベク\n塗り",
+      "en": "Vector\nFill",
+      "resource": false
+    },
+    {
+      "id": "PlaneBadgeUnknown",
+      "kind": "text",
+      "ja": "不明",
+      "en": "?",
+      "resource": false
+    },
+    {
       "id": "NameMissing",
       "kind": "text",
       "ja": "(名称なし)",

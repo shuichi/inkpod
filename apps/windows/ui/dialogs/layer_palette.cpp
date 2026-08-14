@@ -1,6 +1,8 @@
 #include "ui/ui_resources.h"
 
 #include "layer_palette.h"
+#include "layer_palette_badge_layout.h"
+#include "layer_palette_status_layout.h"
 
 #include <commctrl.h>
 #include <oleacc.h>
@@ -27,7 +29,6 @@ constexpr int kLayerTileHeight = 84;
 constexpr int kPlaneTileHeight = 62;
 constexpr int kThumbnailWidth = 72;
 constexpr int kThumbnailHeight = 54;
-constexpr int kActionWidth = 42;
 constexpr int kButtonHeight = 24;
 constexpr int kButtonGap = 4;
 constexpr UINT_PTR kListSubclass = 1U;
@@ -195,6 +196,14 @@ UiStringId LayerKindLabelId(std::uint32_t kind) noexcept {
     }
 }
 
+std::array<std::wstring_view, 4U> StatusCellLabels() noexcept {
+    return {
+        UiTextView(UiStringId::Visible),
+        UiTextView(UiStringId::Hidden),
+        UiTextView(UiStringId::Editable),
+        UiTextView(UiStringId::Protected)};
+}
+
 UiStringId PlaneKindLabelId(std::uint32_t kind) noexcept {
     switch (kind) {
         case INKPOD_TYPED_PLANE_MAIN_LINE: return UiStringId::MainLine;
@@ -205,6 +214,22 @@ UiStringId PlaneKindLabelId(std::uint32_t kind) noexcept {
         case INKPOD_TYPED_PLANE_VECTOR_MAIN_LINE: return UiStringId::PlaneVectorMainLine;
         case INKPOD_TYPED_PLANE_VECTOR_FILL: return UiStringId::PlaneVectorFill;
         default: return UiStringId::LayerUnknown;
+    }
+}
+
+UiStringId PlaneKindBadgeLabelId(std::uint32_t kind) noexcept {
+    switch (kind) {
+        case INKPOD_TYPED_PLANE_MAIN_LINE: return UiStringId::PlaneBadgeMainLine;
+        case INKPOD_TYPED_PLANE_COLOR: return UiStringId::PlaneBadgeColoring;
+        case INKPOD_TYPED_PLANE_COLOR_TRACE:
+            return UiStringId::PlaneBadgeColorTrace;
+        case INKPOD_TYPED_PLANE_RASTER: return UiStringId::PlaneBadgeRaster;
+        case INKPOD_TYPED_PLANE_SELECTION: return UiStringId::PlaneBadgeSelection;
+        case INKPOD_TYPED_PLANE_VECTOR_MAIN_LINE:
+            return UiStringId::PlaneBadgeVectorMainLine;
+        case INKPOD_TYPED_PLANE_VECTOR_FILL:
+            return UiStringId::PlaneBadgeVectorFill;
+        default: return UiStringId::PlaneBadgeUnknown;
     }
 }
 
@@ -379,8 +404,9 @@ void LayoutControls(HWND dialog) noexcept {
 }
 
 bool UpdatePaletteFont(HWND dialog, LayerPaletteDialogState& state) noexcept {
+    const UINT dpi = GetDpiForWindow(dialog);
     const HFONT replacement = CreateFontW(
-        -MulDiv(9, static_cast<int>(GetDpiForWindow(dialog)), 72),
+        -MulDiv(9, static_cast<int>(dpi), 72),
         0,
         0,
         0,
@@ -414,6 +440,13 @@ bool UpdatePaletteFont(HWND dialog, LayerPaletteDialogState& state) noexcept {
         DeleteObject(state.font);
     }
     state.font = replacement;
+    HDC device = GetDC(dialog);
+    const auto status_labels = StatusCellLabels();
+    state.status_cell_width = MeasureLayerPaletteStatusCellWidth(
+        device, replacement, dpi, status_labels);
+    if (device != nullptr) {
+        ReleaseDC(dialog, device);
+    }
     return true;
 }
 
@@ -458,10 +491,15 @@ void DrawThumbnail(
     const RECT& bounds,
     const LayerPaletteItem& item,
     ThumbnailCache* cache,
+    HFONT font,
     UINT dpi,
     bool plane) noexcept {
-    const int requested_width = ScaleForDpi(plane ? 42 : kThumbnailWidth, dpi);
-    const int requested_height = ScaleForDpi(plane ? 42 : kThumbnailHeight, dpi);
+    const int requested_width = plane
+        ? ScaleLayerPaletteBadgeDip(kLayerPalettePlaneBadgeWidthDip, dpi)
+        : ScaleForDpi(kThumbnailWidth, dpi);
+    const int requested_height = plane
+        ? ScaleLayerPaletteBadgeDip(kLayerPalettePlaneBadgeHeightDip, dpi)
+        : ScaleForDpi(kThumbnailHeight, dpi);
     RECT frame{
         bounds.left,
         bounds.top + std::max(
@@ -474,12 +512,19 @@ void DrawThumbnail(
     FrameRect(dc, &frame, GetSysColorBrush(COLOR_3DSHADOW));
     if (plane) {
         SetBkMode(dc, TRANSPARENT);
+        SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
+        RECT text_bounds = LayoutLayerPalettePlaneBadgeText(
+            dc, font, dpi, item.badge_text, frame);
+        const HGDIOBJ previous = font == nullptr ? nullptr : SelectObject(dc, font);
         DrawTextW(
             dc,
-            item.kind_text.c_str(),
-            -1,
-            &frame,
-            DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+            item.badge_text.c_str(),
+            static_cast<int>(item.badge_text.size()),
+            &text_bounds,
+            kLayerPalettePlaneBadgeTextFlags);
+        if (previous != nullptr) {
+            SelectObject(dc, previous);
+        }
         return;
     }
     ThumbnailImageView image{};
@@ -568,14 +613,27 @@ void DrawItem(
     const UINT dpi = GetDpiForWindow(draw.hwndItem);
     const int margin = ScaleForDpi(kMargin, dpi);
     InflateRect(&inner, -margin, -ScaleForDpi(4, dpi));
-    DrawThumbnail(draw.hDC, inner, item, state.thumbnail_cache, dpi, plane);
+    DrawThumbnail(
+        draw.hDC,
+        inner,
+        item,
+        state.thumbnail_cache,
+        state.font,
+        dpi,
+        plane);
 
-    const int action_width = ScaleForDpi(kActionWidth, dpi);
-    const int thumbnail_width = ScaleForDpi(plane ? 42 : kThumbnailWidth, dpi);
+    const int action_width = std::max(
+        state.status_cell_width,
+        ScaleLayerPaletteStatusDip(kLayerPaletteStatusMinimumWidthDip, dpi));
+    const LayerPaletteStatusCellLayout status_layout =
+        LayoutLayerPaletteStatusCells(inner, action_width, dpi);
+    const int thumbnail_width = plane
+        ? ScaleLayerPaletteBadgeDip(kLayerPalettePlaneBadgeWidthDip, dpi)
+        : ScaleForDpi(kThumbnailWidth, dpi);
     RECT text_bounds{
         inner.left + thumbnail_width + margin,
         inner.top,
-        inner.right - action_width * 2 - margin,
+        status_layout.text_right - margin,
         inner.bottom};
     SetBkMode(draw.hDC, TRANSPARENT);
     SetTextColor(
@@ -600,30 +658,19 @@ void DrawItem(
         -1,
         &line,
         DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
-    if (previous != nullptr) {
-        SelectObject(draw.hDC, previous);
-    }
-
-    RECT visible{
-        inner.right - action_width * 2,
-        inner.top,
-        inner.right - action_width - ScaleForDpi(2, dpi),
-        inner.bottom};
-    RECT editable{
-        inner.right - action_width,
-        inner.top,
-        inner.right,
-        inner.bottom};
     DrawStatusButton(
         draw.hDC,
-        visible,
+        status_layout.visibility,
         item.visibility_text.c_str(),
         (item.flags & INKPOD_NODE_VISIBLE) != 0U);
     DrawStatusButton(
         draw.hDC,
-        editable,
+        status_layout.editability,
         item.editability_text.c_str(),
         (item.flags & INKPOD_NODE_EDITABLE) != 0U);
+    if (previous != nullptr) {
+        SelectObject(draw.hDC, previous);
+    }
     FrameRect(
         draw.hDC,
         &draw.rcItem,
@@ -668,17 +715,31 @@ LRESULT CALLBACK ListSubclassProcedure(
                 return 0;
             }
             SelectItem(list, *state, index);
-            RECT client{};
-            GetClientRect(list, &client);
-            const int action_width = ScaleForDpi(kActionWidth, GetDpiForWindow(list));
-            if (point.x >= client.right - action_width) {
+            RECT item_bounds{};
+            if (SendMessageW(
+                    list,
+                    LB_GETITEMRECT,
+                    static_cast<WPARAM>(index),
+                    reinterpret_cast<LPARAM>(&item_bounds)) == LB_ERR) {
+                break;
+            }
+            const UINT dpi = GetDpiForWindow(list);
+            const int margin = ScaleForDpi(kMargin, dpi);
+            InflateRect(&item_bounds, -margin, -ScaleForDpi(4, dpi));
+            const int action_width = std::max(
+                state->status_cell_width,
+                ScaleLayerPaletteStatusDip(
+                    kLayerPaletteStatusMinimumWidthDip, dpi));
+            const LayerPaletteStatusCellLayout status_layout =
+                LayoutLayerPaletteStatusCells(item_bounds, action_width, dpi);
+            if (PtInRect(&status_layout.editability, point) != FALSE) {
                 state->dispatch_command(
                     state->context,
                     plane ? IDM_PLANE_TOGGLE_EDITABLE
                           : IDM_LAYER_TOGGLE_EDITABLE);
                 return 0;
             }
-            if (point.x >= client.right - action_width * 2) {
+            if (PtInRect(&status_layout.visibility, point) != FALSE) {
                 state->dispatch_command(
                     state->context,
                     plane ? IDM_PLANE_TOGGLE_VISIBLE
@@ -1050,6 +1111,7 @@ INT_PTR CALLBACK LayerPaletteDialogProcedure(
             if (state != nullptr && state->font != nullptr) {
                 DeleteObject(state->font);
                 state->font = nullptr;
+                state->status_cell_width = 0;
             }
             SetWindowLongPtrW(dialog, GWLP_USERDATA, 0);
             return TRUE;
@@ -1092,6 +1154,9 @@ std::vector<LayerPaletteItem> MakeItems(
         item.kind_label_id = plane
             ? PlaneKindLabelId(node.kind)
             : LayerKindLabelId(node.kind);
+        item.badge_label_id = plane
+            ? PlaneKindBadgeLabelId(node.kind)
+            : UiStringId::PlaneBadgeUnknown;
         item.format_label_id = PixelFormatLabelId(node.pixel_format);
         item.visibility_label_id = (node.flags & INKPOD_NODE_VISIBLE) != 0U
             ? UiStringId::Visible
@@ -1101,6 +1166,7 @@ std::vector<LayerPaletteItem> MakeItems(
             : UiStringId::Protected;
         item.name = Utf8ToWide(node.name);
         item.kind_text = UiText(item.kind_label_id);
+        item.badge_text = UiText(item.badge_label_id);
         item.format_text = UiText(item.format_label_id);
         item.visibility_text = UiText(item.visibility_label_id);
         item.editability_text = UiText(item.editability_label_id);

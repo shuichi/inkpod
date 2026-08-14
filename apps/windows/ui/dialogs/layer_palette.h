@@ -22,11 +22,13 @@ struct LayerPaletteItem {
     std::uint32_t flags{};
     bool edit_target{};
     UiStringId kind_label_id{UiStringId::LayerUnknown};
+    UiStringId badge_label_id{UiStringId::PlaneBadgeUnknown};
     UiStringId format_label_id{UiStringId::NameUnavailable};
     UiStringId visibility_label_id{UiStringId::Hidden};
     UiStringId editability_label_id{UiStringId::Protected};
     std::wstring name;
     std::wstring kind_text;
+    std::wstring badge_text;
     std::wstring format_text;
     std::wstring detail_text;
     std::wstring visibility_text;
@@ -77,6 +79,7 @@ struct LayerPaletteDialogState {
     bool has_command_states{};
     bool updating{};
     HFONT font{};
+    int status_cell_width{};
 };
 
 HWND CreateLayerPaletteDialog(

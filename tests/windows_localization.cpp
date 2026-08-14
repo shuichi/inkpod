@@ -1,4 +1,6 @@
 #include "app/resource.h"
+#include "ui/dialogs/layer_palette_badge_layout.h"
+#include "ui/dialogs/layer_palette_status_layout.h"
 #include "ui/history_presentation.h"
 #include "ui/localization.h"
 #include "ui/panes/pane_dialog_layout.h"
@@ -473,6 +475,191 @@ bool LocalizedButtonLayoutContract(UiLanguagePreference preference) {
     return passed;
 }
 
+bool LayerPaletteOwnerDrawCellWidthContract(
+    UiLanguagePreference preference) {
+    using inkpod::windows::ui::kLayerPaletteStatusGapDip;
+    using inkpod::windows::ui::kLayerPaletteStatusHorizontalPaddingDip;
+    using inkpod::windows::ui::kLayerPaletteStatusMinimumWidthDip;
+    using inkpod::windows::ui::LayoutLayerPaletteStatusCells;
+    using inkpod::windows::ui::MeasureLayerPaletteStatusCellWidth;
+    const HINSTANCE instance = GetModuleHandleW(nullptr);
+    if (!InitializeUiLocalization(instance, preference)) {
+        return false;
+    }
+    HDC device = GetDC(nullptr);
+    bool passed = device != nullptr;
+    const std::array<std::wstring_view, 4U> labels{
+        UiTextView(UiStringId::Visible),
+        UiTextView(UiStringId::Hidden),
+        UiTextView(UiStringId::Editable),
+        UiTextView(UiStringId::Protected)};
+    const std::array<UINT, 4U> dpis{96U, 120U, 144U, 192U};
+    for (const UINT dpi : dpis) {
+        if (!passed) {
+            break;
+        }
+        const HFONT font = CreateFontW(
+            -MulDiv(9, static_cast<int>(dpi), 72),
+            0,
+            0,
+            0,
+            FW_NORMAL,
+            FALSE,
+            FALSE,
+            FALSE,
+            DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS,
+            CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY,
+            DEFAULT_PITCH | FF_DONTCARE,
+            L"Segoe UI");
+        if (font == nullptr) {
+            passed = false;
+            break;
+        }
+        const int cell_width = MeasureLayerPaletteStatusCellWidth(
+            device, font, dpi, labels);
+        const int minimum_width = MulDiv(
+            kLayerPaletteStatusMinimumWidthDip, static_cast<int>(dpi), 96);
+        const int padding = MulDiv(
+            kLayerPaletteStatusHorizontalPaddingDip, static_cast<int>(dpi), 96);
+        const int gap = MulDiv(
+            kLayerPaletteStatusGapDip, static_cast<int>(dpi), 96);
+        passed = cell_width > minimum_width;
+
+        const HGDIOBJ previous = SelectObject(device, font);
+        for (const std::wstring_view label : labels) {
+            SIZE extent{};
+            passed = passed
+                && GetTextExtentPoint32W(
+                       device,
+                       label.data(),
+                       static_cast<int>(label.size()),
+                       &extent) != FALSE
+                && extent.cx + padding <= cell_width;
+        }
+        if (previous != nullptr) {
+            SelectObject(device, previous);
+        }
+
+        const RECT content{
+            0,
+            0,
+            cell_width * 2 + gap + MulDiv(80, static_cast<int>(dpi), 96),
+            MulDiv(52, static_cast<int>(dpi), 96)};
+        const auto layout = LayoutLayerPaletteStatusCells(
+            content, cell_width, dpi);
+        RECT intersection{};
+        passed = passed
+            && layout.visibility.right - layout.visibility.left == cell_width
+            && layout.editability.right - layout.editability.left == cell_width
+            && layout.editability.left - layout.visibility.right == gap
+            && layout.text_right == layout.visibility.left
+            && IntersectRect(
+                   &intersection,
+                   &layout.visibility,
+                   &layout.editability) == FALSE;
+        DeleteObject(font);
+    }
+    if (device != nullptr) {
+        ReleaseDC(nullptr, device);
+    }
+    ShutdownUiLocalization();
+    return passed;
+}
+
+bool LayerPalettePlaneBadgeLayoutContract(
+    UiLanguagePreference preference) {
+    using inkpod::windows::ui::kLayerPalettePlaneBadgeHeightDip;
+    using inkpod::windows::ui::kLayerPalettePlaneBadgePaddingDip;
+    using inkpod::windows::ui::kLayerPalettePlaneBadgeWidthDip;
+    using inkpod::windows::ui::LayerPalettePlaneBadgeLineCount;
+    using inkpod::windows::ui::LayerPalettePlaneBadgeTextFits;
+    using inkpod::windows::ui::LayoutLayerPalettePlaneBadgeText;
+    using inkpod::windows::ui::MeasureLayerPalettePlaneBadgeText;
+    const HINSTANCE instance = GetModuleHandleW(nullptr);
+    if (!InitializeUiLocalization(instance, preference)) {
+        return false;
+    }
+    HDC device = GetDC(nullptr);
+    bool passed = device != nullptr;
+    const std::array<UiStringId, 8U> labels{
+        UiStringId::PlaneBadgeMainLine,
+        UiStringId::PlaneBadgeColoring,
+        UiStringId::PlaneBadgeColorTrace,
+        UiStringId::PlaneBadgeRaster,
+        UiStringId::PlaneBadgeSelection,
+        UiStringId::PlaneBadgeVectorMainLine,
+        UiStringId::PlaneBadgeVectorFill,
+        UiStringId::PlaneBadgeUnknown};
+    const std::array<UINT, 4U> dpis{96U, 120U, 144U, 192U};
+    for (const UINT dpi : dpis) {
+        if (!passed) {
+            break;
+        }
+        const HFONT font = CreateFontW(
+            -MulDiv(9, static_cast<int>(dpi), 72),
+            0,
+            0,
+            0,
+            FW_NORMAL,
+            FALSE,
+            FALSE,
+            FALSE,
+            DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS,
+            CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY,
+            DEFAULT_PITCH | FF_DONTCARE,
+            L"Segoe UI");
+        if (font == nullptr) {
+            passed = false;
+            break;
+        }
+        const int width = MulDiv(
+            kLayerPalettePlaneBadgeWidthDip, static_cast<int>(dpi), 96);
+        const int height = MulDiv(
+            kLayerPalettePlaneBadgeHeightDip, static_cast<int>(dpi), 96);
+        const int padding = MulDiv(
+            kLayerPalettePlaneBadgePaddingDip, static_cast<int>(dpi), 96);
+        const RECT frame{0, 0, width, height};
+        for (const UiStringId id : labels) {
+            const std::wstring_view label = UiTextView(id);
+            const SIZE measured = MeasureLayerPalettePlaneBadgeText(
+                device, font, dpi, label);
+            const RECT bounds = LayoutLayerPalettePlaneBadgeText(
+                device, font, dpi, label, frame);
+            passed = passed
+                && label.find(L'\u2026') == std::wstring_view::npos
+                && LayerPalettePlaneBadgeLineCount(label) <= 2U
+                && LayerPalettePlaneBadgeTextFits(device, font, dpi, label)
+                && measured.cx <= width - padding * 2
+                && measured.cy <= height - padding * 2
+                && bounds.left >= frame.left + padding
+                && bounds.right <= frame.right - padding
+                && bounds.top >= frame.top + padding
+                && bounds.bottom <= frame.bottom - padding;
+        }
+        DeleteObject(font);
+    }
+    if (preference == UiLanguagePreference::English) {
+        passed = passed
+            && UiTextView(UiStringId::PlaneBadgeMainLine).find(L'\n')
+                != std::wstring_view::npos
+            && UiTextView(UiStringId::PlaneBadgeColoring).find(L'\n')
+                != std::wstring_view::npos
+            && UiTextView(UiStringId::PlaneBadgeColorTrace).find(L'\n')
+                != std::wstring_view::npos
+            && UiTextView(UiStringId::PlaneBadgeVectorMainLine).find(L'\n')
+                != std::wstring_view::npos;
+    }
+    if (device != nullptr) {
+        ReleaseDC(nullptr, device);
+    }
+    ShutdownUiLocalization();
+    return passed;
+}
+
 }  // namespace
 
 int wmain() {
@@ -486,5 +673,13 @@ int wmain() {
     if (!LocalizedButtonLayoutContract(UiLanguagePreference::English)) return 8;
     if (!LocalizedButtonLayoutContract(UiLanguagePreference::Japanese)) return 9;
     if (!OpaqueUserTextContract(UiLanguagePreference::Japanese)) return 10;
+    if (!LayerPaletteOwnerDrawCellWidthContract(
+            UiLanguagePreference::English)) return 11;
+    if (!LayerPaletteOwnerDrawCellWidthContract(
+            UiLanguagePreference::Japanese)) return 12;
+    if (!LayerPalettePlaneBadgeLayoutContract(
+            UiLanguagePreference::English)) return 13;
+    if (!LayerPalettePlaneBadgeLayoutContract(
+            UiLanguagePreference::Japanese)) return 14;
     return 0;
 }
