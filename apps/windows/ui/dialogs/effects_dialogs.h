@@ -24,7 +24,12 @@ using EffectEditorProgressCallback = bool (*)(
 
 struct EffectEditorState {
     const wchar_t* title{UiText(UiStringId::Text0811)};
-    std::array<const wchar_t*, 5U> parameter_labels{L"P0", L"P1", L"P2", L"P3", L"P4"};
+    std::array<const wchar_t*, 5U> parameter_labels{
+        UiText(UiStringId::ParameterP0),
+        UiText(UiStringId::ParameterP1),
+        UiText(UiStringId::ParameterP2),
+        UiText(UiStringId::ParameterP3),
+        UiText(UiStringId::ParameterP4)};
     std::array<std::int32_t, 5U> parameters{};
     std::array<const wchar_t*, 5U> channel_labels{};
     std::array<std::uint32_t, 5U> channel_values{};

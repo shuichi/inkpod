@@ -8693,6 +8693,300 @@
       "resource": true
     },
     {
+      "id": "ParameterP0",
+      "kind": "text",
+      "ja": "P0",
+      "en": "P0",
+      "resource": false
+    },
+    {
+      "id": "ParameterP1",
+      "kind": "text",
+      "ja": "P1",
+      "en": "P1",
+      "resource": false
+    },
+    {
+      "id": "ParameterP2",
+      "kind": "text",
+      "ja": "P2",
+      "en": "P2",
+      "resource": false
+    },
+    {
+      "id": "ParameterP3",
+      "kind": "text",
+      "ja": "P3",
+      "en": "P3",
+      "resource": false
+    },
+    {
+      "id": "ParameterP4",
+      "kind": "text",
+      "ja": "P4",
+      "en": "P4",
+      "resource": false
+    },
+    {
+      "id": "XDpiThousandthLabel",
+      "kind": "text",
+      "ja": "X DPI (1/1000)",
+      "en": "X DPI (1/1000)",
+      "resource": false
+    },
+    {
+      "id": "YDpiThousandthLabel",
+      "kind": "text",
+      "ja": "Y DPI (1/1000)",
+      "en": "Y DPI (1/1000)",
+      "resource": false
+    },
+    {
+      "id": "RgbAlphaTitle",
+      "kind": "text",
+      "ja": "RGB / アルファ",
+      "en": "RGB / Alpha",
+      "resource": false
+    },
+    {
+      "id": "HsvAlphaTitle",
+      "kind": "text",
+      "ja": "HSV / アルファ",
+      "en": "HSV / Alpha",
+      "resource": false
+    },
+    {
+      "id": "ChannelR",
+      "kind": "text",
+      "ja": "R",
+      "en": "R",
+      "resource": false
+    },
+    {
+      "id": "ChannelG",
+      "kind": "text",
+      "ja": "G",
+      "en": "G",
+      "resource": false
+    },
+    {
+      "id": "ChannelB",
+      "kind": "text",
+      "ja": "B",
+      "en": "B",
+      "resource": false
+    },
+    {
+      "id": "AlphaLabel",
+      "kind": "text",
+      "ja": "アルファ",
+      "en": "Alpha",
+      "resource": false
+    },
+    {
+      "id": "AlphaPercentLabel",
+      "kind": "text",
+      "ja": "アルファ (%)",
+      "en": "Alpha (%)",
+      "resource": false
+    },
+    {
+      "id": "HueRangeLabel",
+      "kind": "text",
+      "ja": "H (0-359)",
+      "en": "H (0-359)",
+      "resource": false
+    },
+    {
+      "id": "SaturationRangeLabel",
+      "kind": "text",
+      "ja": "S (0-1000)",
+      "en": "S (0-1000)",
+      "resource": false
+    },
+    {
+      "id": "ValueRangeLabel",
+      "kind": "text",
+      "ja": "V (0-1000)",
+      "en": "V (0-1000)",
+      "resource": false
+    },
+    {
+      "id": "FilterParameterRadius",
+      "kind": "text",
+      "ja": "P0 / 半径",
+      "en": "P0 / radius",
+      "resource": false
+    },
+    {
+      "id": "FilterParameterAmount",
+      "kind": "text",
+      "ja": "P1 / 適用量",
+      "en": "P1 / amount",
+      "resource": false
+    },
+    {
+      "id": "ColorChannelRgb",
+      "kind": "text",
+      "ja": "RGB",
+      "en": "RGB",
+      "resource": false
+    },
+    {
+      "id": "ColorChannelRed",
+      "kind": "text",
+      "ja": "赤",
+      "en": "Red",
+      "resource": false
+    },
+    {
+      "id": "ColorChannelGreen",
+      "kind": "text",
+      "ja": "緑",
+      "en": "Green",
+      "resource": false
+    },
+    {
+      "id": "ColorChannelBlue",
+      "kind": "text",
+      "ja": "青",
+      "en": "Blue",
+      "resource": false
+    },
+    {
+      "id": "CurveBezier",
+      "kind": "text",
+      "ja": "ベジェ",
+      "en": "Bezier",
+      "resource": false
+    },
+    {
+      "id": "CurveBSpline",
+      "kind": "text",
+      "ja": "Bスプライン",
+      "en": "B-spline",
+      "resource": false
+    },
+    {
+      "id": "AdjustmentContrastGamma",
+      "kind": "text",
+      "ja": "P1 / コントラスト / ガンマ",
+      "en": "P1 / contrast / gamma",
+      "resource": false
+    },
+    {
+      "id": "AdjustmentHighlight",
+      "kind": "text",
+      "ja": "P2 / ハイライト",
+      "en": "P2 / highlight",
+      "resource": false
+    },
+    {
+      "id": "AdjustmentOutputShadow",
+      "kind": "text",
+      "ja": "P3 / 出力シャドウ",
+      "en": "P3 / output shadow",
+      "resource": false
+    },
+    {
+      "id": "AdjustmentOutputHighlight",
+      "kind": "text",
+      "ja": "P4 / 出力ハイライト",
+      "en": "P4 / output highlight",
+      "resource": false
+    },
+    {
+      "id": "FadeLabel",
+      "kind": "text",
+      "ja": "フェード",
+      "en": "fade",
+      "resource": false
+    },
+    {
+      "id": "AxisX",
+      "kind": "text",
+      "ja": "X",
+      "en": "X",
+      "resource": false
+    },
+    {
+      "id": "AxisY",
+      "kind": "text",
+      "ja": "Y",
+      "en": "Y",
+      "resource": false
+    },
+    {
+      "id": "GapCloseLabel",
+      "kind": "text",
+      "ja": "隙間閉じ",
+      "en": "gap close",
+      "resource": false
+    },
+    {
+      "id": "ModeRangeOneToFour",
+      "kind": "text",
+      "ja": "モード (1-4)",
+      "en": "mode (1-4)",
+      "resource": false
+    },
+    {
+      "id": "ModeRangeOneToThree",
+      "kind": "text",
+      "ja": "モード (1-3)",
+      "en": "mode (1-3)",
+      "resource": false
+    },
+    {
+      "id": "ValueTimesThousand",
+      "kind": "text",
+      "ja": "値 ×1000",
+      "en": "value x1000",
+      "resource": false
+    },
+    {
+      "id": "XDpiTimesThousand",
+      "kind": "text",
+      "ja": "X DPI ×1000",
+      "en": "X DPI x1000",
+      "resource": false
+    },
+    {
+      "id": "YDpiTimesThousand",
+      "kind": "text",
+      "ja": "Y DPI ×1000",
+      "en": "Y DPI x1000",
+      "resource": false
+    },
+    {
+      "id": "PlaneKindLabel",
+      "kind": "text",
+      "ja": "プレーン種別",
+      "en": "plane kind",
+      "resource": false
+    },
+    {
+      "id": "PixelFormatFieldLabel",
+      "kind": "text",
+      "ja": "ピクセル形式",
+      "en": "pixel format",
+      "resource": false
+    },
+    {
+      "id": "CellFolderToggleLabel",
+      "kind": "text",
+      "ja": "セルフォルダー (0/1)",
+      "en": "cell folder (0/1)",
+      "resource": false
+    },
+    {
+      "id": "MotionFpsValuesLabel",
+      "kind": "text",
+      "ja": "FPS (8/10/12/24/25/30)",
+      "en": "FPS (8/10/12/24/25/30)",
+      "resource": false
+    },
+    {
       "id": "DryRun",
       "kind": "text",
       "ja": "試行のみ",

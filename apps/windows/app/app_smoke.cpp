@@ -1462,12 +1462,30 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
                 const HWND button = GetDlgItem(state.Workspace().tools.palette, entry.command);
                 const wchar_t* glyph = UiText(entry.glyph);
                 std::array<wchar_t, 64U> caption{};
+                std::array<wchar_t, 64U> tooltip_text{};
                 const int caption_length = button == nullptr
                     ? 0
                     : GetWindowTextW(
                         button,
                         caption.data(),
                         static_cast<int>(caption.size()));
+                bool tooltip_name = false;
+                if (button != nullptr
+                    && state.Workspace().tools.palette_dialog.tooltip != nullptr) {
+                    TOOLINFOW tool{};
+                    tool.cbSize = sizeof(tool);
+                    tool.uFlags = TTF_IDISHWND;
+                    tool.hwnd = state.Workspace().tools.palette;
+                    tool.uId = reinterpret_cast<UINT_PTR>(button);
+                    tool.lpszText = tooltip_text.data();
+                    SendMessageW(
+                        state.Workspace().tools.palette_dialog.tooltip,
+                        TTM_GETTEXTW,
+                        0,
+                        reinterpret_cast<LPARAM>(&tool));
+                    tooltip_name = std::wstring_view(tooltip_text.data())
+                        == UiText(entry.label);
+                }
                 const auto glyph_length = std::wcslen(glyph);
                 const bool msaa_name =
                     AccessibleWindowNameContains(button, UiText(entry.label));
@@ -1482,6 +1500,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
                     && button != nullptr
                     && caption_length > 0
                     && std::wstring_view(caption.data()) == UiText(entry.label)
+                    && tooltip_name
                     && msaa_name
                     && automation_name
                     && owner_draw
@@ -1495,9 +1514,10 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
                 if (!valid) {
                     std::fprintf(
                         stderr,
-                        "tool localization smoke command=%u caption=%d msaa=%d uia=%d draw=%d\n",
+                        "tool localization smoke command=%u caption=%d tooltip=%d msaa=%d uia=%d draw=%d\n",
                         entry.command,
                         caption_length,
+                        tooltip_name ? 1 : 0,
                         msaa_name ? 1 : 0,
                         automation_name ? 1 : 0,
                         owner_draw ? 1 : 0);

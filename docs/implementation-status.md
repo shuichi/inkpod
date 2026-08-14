@@ -62,10 +62,10 @@ its compact historical record is retained in [`legacy.md`](legacy.md).
 
 ## Latest representative verification
 
-The latest automatic verification is for the completed WIN-001 Japanese/English
+The latest automatic verification is for the strengthened WIN-001 Japanese/English
 localization slice on 2026-08-14. A versioned HKCU preference records System, Japanese,
 or English; System selects Japanese only for a first-preferred `ja` Windows UI language
-and otherwise selects English on the next launch. The canonical catalog contains 1,242
+and otherwise selects English on the next launch. The canonical catalog contains 1,284
 typed entries and generates the C++ IDs/table plus same-ID ja-JP/en-US STRINGTABLE, menu,
 and dialog resources. Product resource lookup names the selected LANGID explicitly.
 Complete format strings are selected before arguments are inserted; no hook, Japanese-key,
@@ -73,23 +73,26 @@ partial, hybrid, English-history-key, or direct-language branch remains. History
 cross ABI v14 as one of five fixed-width semantic kinds and are mapped exhaustively to
 catalog IDs only at the Windows presentation boundary. User names and paths cross an explicit opaque-text
 boundary and are never treated as translation input. Tool labels share IDs across owner
-draw, tooltip and accessibility; Layer/Plane presentation is pre-resolved before drawing,
-Plane badges use typed compact two-line labels without ellipsis while the adjacent detail
-and accessibility text retains the full kind, and owner-draw state cells are sized from all four localized state captions at the
+draw, tooltip and accessibility; both full product smoke modes retrieve each real ToolTip
+control value and compare it with the same typed label used by the button, MSAA, and UIA.
+Layer/Plane presentation is pre-resolved before drawing, Plane badges use typed compact
+two-line labels without ellipsis while the adjacent detail and accessibility text retains
+the full kind, and owner-draw state cells are sized from all four localized state captions at the
 active 9-point font with DPI-scaled padding and shared draw/hit-test geometry;
 Color tabs are ID-generated. The static gate rejects raw, escaped, or UTF-8-byte-array
-Japanese literals in all other Windows product sources, rejects fallback resource APIs,
-and checks generated artifact hashes. Dedicated tests exercise both resource languages and embedded-NUL file
+Japanese literals in all other Windows product sources, rejects direct wide-string bypasses
+in product dialog/effect presentation fields and fallback resource APIs, compares all 642
+Japanese/English resource identifiers including all 384 command IDs, and checks generated
+artifact hashes. Dedicated tests exercise both resource languages and embedded-NUL file
 filters. Full English and Japanese product smoke runs cover the same UI/Core/renderer,
-owner-draw, MSAA/UIA, state, device-loss and workspace-lifecycle paths. The native format
-and replay epoch are unchanged. The C ABI advances to v14 because history query records
-now expose the language-neutral kind instead of a caller-buffer English label.
+owner-draw, tooltip, MSAA/UIA, state, device-loss and workspace-lifecycle paths. The native
+format, replay epoch, and C ABI remain unchanged.
 
 | Boundary | Result |
 | --- | --- |
-| Rust workspace | `HistoryEntryKind` replaces product-facing history labels in Core and maps exhaustively to the fixed-width ABI v14 kind. All 461 tests, including one doctest and zero ignored, passed; `fmt`, all-target/all-feature Clippy with warnings denied, strict rustdoc, and the resource-split route inventory passed. The inventory now also proves that Japanese and English generated resources expose the same 384 static command IDs |
+| Rust workspace | `HistoryEntryKind` replaces product-facing history labels in Core and maps exhaustively to the fixed-width ABI v14 kind. All 461 tests, including one doctest and zero ignored, passed; `fmt`, all-target/all-feature Clippy with warnings denied, strict rustdoc, and the resource-split route inventory passed. The inventory now also proves that Japanese and English generated resources expose the same 642 resource identifiers, including the same 384 static command IDs |
 | Native format | V26/runtime replay epoch 23, ABI v14, Cell document/archive metadata schema 5, document digest schema 9/domain 8, snapshot-composite schema 3, Cut descriptor schema 2, and `.inkbatch` v2 are current. Exact top-level v25, noncurrent archive/Cut versions, malformed vanishing-point/shooting-frame records, checksum failures, and corrupt corpus are rejected; Cell/Cut save/reopen is green |
-| Windows x64 | The 2026-08-14 Debug configure/build passed under MSVC `/W4 /WX` with static CRT. All 36 CTests passed in 438.87 s; the full-path English and Japanese product smoke runs took 182.73 s and 180.78 s. Both smoke modes measure every visible standard button against its active-font ideal width and parent bounds while exercising the same UI/Core/renderer, owner-draw, MSAA/UIA, state, device-loss and workspace-lifecycle paths. Dedicated localization tests cover both languages, exact format signatures, embedded-NUL filters, opaque user data, exhaustive history-kind mapping, and 96/120/144/192-DPI button measurement, wrapping, bounds and non-overlap, including Eyedropper and the long pin/follow captions. Separate Layer/Plane owner-draw contracts verify at all four DPIs in both languages that every compact Plane badge fits the unchanged 42-by-42-DIP frame in at most two lines without ellipsis, the widest of Visible/Hidden/Editable/Protected plus 16 DIP padding fits, the fixed 42-DIP status fallback is insufficient, and the two status-cell rectangles remain full-width, separated, and non-overlapping. The strict catalog test scans all Windows product `.cpp`, `.h`, `.inc`, and `.rc` sources, validates generated hashes and equal Japanese/English command IDs, rejects Japanese bypasses, product language branches, history string keys, partial localization and fallback resource APIs, rejects restoration of the single-line ellipsized badge or fixed action width, and locks shared owner-draw measurement/layout plus hit testing. ABI v14, command ownership, renderer host, portable ZIP, neutral MSIX file-association label, and unsigned MSIX payload tests also passed. The latest Release run remains the 2026-08-13 M22 run with all 33 then-current CTests passed in 75.57 s |
+| Windows x64 | The current 2026-08-14 Debug `inkpod` and localization-test targets build under MSVC `/W4 /WX` with static CRT. The strengthened localization and catalog CTests passed in 0.15 s and 2.95 s; full-path English and Japanese product smoke runs passed in 175.23 s and 175.15 s. Both smoke modes now retrieve and compare all 20 real ToolTip values with the same typed labels used by button captions, MSAA, and UIA while retaining the existing UI/Core/renderer, owner-draw, state, device-loss and workspace-lifecycle coverage. The catalog gate compares all 642 ja-JP/en-US resource identifiers, rejects direct product dialog/effect presentation literals in addition to Japanese bypasses, and retains the generated-hash, fallback-resource, language-branch, history-kind, button-layout, Layer/Plane and Color-tab contracts. The immediately preceding full Debug run passed all 36 CTests in 438.87 s; the latest Release run remains the 2026-08-13 M22 run with all 33 then-current CTests passed in 75.57 s |
 | Windows ARM64 | Not run for M22 and not used as a substitute for the required x64 gate. The latest M13 ARM64 Release run passed all 31 CTests in 65.35 s |
 | Performance | The quick profile was rerun and preserved every checksum/revision/history/reuse/rebuild/output/failure gate. `canonical_replay` remains `264b98028ac92ac6` at revision 6/history 5; `checkpoint_open` remains `07da1b4e6bc5d289` with 175256 input, 256 output, and one reused item; output-color-guard remains `cfb6b288963c78ba` with 1048576 input, 524288 output, and 65536 reused items. Workload, harness, payload-access route, and revision-max expression are unchanged |
 | Fuzzing | `native_v26`, `native_core_v26`, and `cut_v26` target declarations are current. Fuzz binary build and coverage-guided execution were not run because the optional `cargo fuzz` subcommand is outside the required gate |

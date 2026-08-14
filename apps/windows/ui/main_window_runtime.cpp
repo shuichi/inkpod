@@ -4402,7 +4402,11 @@ InkpodStatus ResizeDocumentFromDialog(
     }
     ViewOptionsDialogState dimensions{};
     dimensions.title = title;
-    dimensions.labels = {UiText(UiStringId::Text0646), UiText(UiStringId::Text1042), L"X DPI (1/1000)", L"Y DPI (1/1000)"};
+    dimensions.labels = {
+        UiText(UiStringId::Text0646),
+        UiText(UiStringId::Text1042),
+        UiText(UiStringId::XDpiThousandthLabel),
+        UiText(UiStringId::YDpiThousandthLabel)};
     dimensions.values = {
         static_cast<std::int32_t>(info.width),
         static_cast<std::int32_t>(info.height),
@@ -4911,10 +4915,17 @@ InkpodStatus ShowDrawingColorEditor(ApplicationHost& state) noexcept {
     }
     const std::uint32_t maximum = format.values[0] == 16 ? UINT16_MAX : UINT8_MAX;
     ViewOptionsDialogState values{};
-    values.title = format.values[1] == 1 ? L"RGB / Alpha" : L"HSV / Alpha";
+    values.title = format.values[1] == 1
+        ? UiText(UiStringId::RgbAlphaTitle)
+        : UiText(UiStringId::HsvAlphaTitle);
     values.value_count = 4U;
     if (format.values[1] == 1) {
-        values.labels = {L"R", L"G", L"B", format.values[2] == 2 ? L"Alpha (%)" : L"Alpha"};
+        values.labels = {
+            UiText(UiStringId::ChannelR),
+            UiText(UiStringId::ChannelG),
+            UiText(UiStringId::ChannelB),
+            format.values[2] == 2 ? UiText(UiStringId::AlphaPercentLabel)
+                                  : UiText(UiStringId::AlphaLabel)};
         values.values = {
             state.Workspace().tools.drawing_color.depth == INKPOD_COLOR_DEPTH_16
                 ? state.Workspace().tools.drawing_color.red
@@ -4931,7 +4942,12 @@ InkpodStatus ShowDrawingColorEditor(ApplicationHost& state) noexcept {
             values.values = {65535, 32768, 0, 50};
         }
     } else {
-        values.labels = {L"H (0-359)", L"S (0-1000)", L"V (0-1000)", format.values[2] == 2 ? L"Alpha (%)" : L"Alpha"};
+        values.labels = {
+            UiText(UiStringId::HueRangeLabel),
+            UiText(UiStringId::SaturationRangeLabel),
+            UiText(UiStringId::ValueRangeLabel),
+            format.values[2] == 2 ? UiText(UiStringId::AlphaPercentLabel)
+                                  : UiText(UiStringId::AlphaLabel)};
         values.values = {30, 1000, 1000, format.values[2] == 2 ? 100 : static_cast<std::int32_t>(maximum)};
         if (state.lifetime.smoke_test) {
             values.values = {210, 750, 800, 50};
@@ -5146,8 +5162,16 @@ bool PrepareFilterEditor(
     }
     editor.title = UiText(UiStringId::Text0300);
     editor.parameter_labels = {
-        L"P0 / radius", L"P1 / amount", L"P2", L"P3", L"P4"};
-    editor.channel_labels = {L"RGB", L"Red", L"Green", L"Blue"};
+        UiText(UiStringId::FilterParameterRadius),
+        UiText(UiStringId::FilterParameterAmount),
+        UiText(UiStringId::ParameterP2),
+        UiText(UiStringId::ParameterP3),
+        UiText(UiStringId::ParameterP4)};
+    editor.channel_labels = {
+        UiText(UiStringId::ColorChannelRgb),
+        UiText(UiStringId::ColorChannelRed),
+        UiText(UiStringId::ColorChannelGreen),
+        UiText(UiStringId::ColorChannelBlue)};
     editor.channel_values = {
         INKPOD_FILTER_CHANNEL_RGB,
         INKPOD_FILTER_CHANNEL_RED,
@@ -5155,7 +5179,11 @@ bool PrepareFilterEditor(
         INKPOD_FILTER_CHANNEL_BLUE};
     editor.channel_count = editor.channel_labels.size();
     editor.channel = INKPOD_FILTER_CHANNEL_RGB;
-    editor.mode_labels = {L"Bezier", L"B-spline", nullptr, nullptr};
+    editor.mode_labels = {
+        UiText(UiStringId::CurveBezier),
+        UiText(UiStringId::CurveBSpline),
+        nullptr,
+        nullptr};
     editor.mode_values = {INKPOD_CURVE_BEZIER, INKPOD_CURVE_BSPLINE, 0U, 0U};
     editor.mode_count = 2U;
     editor.mode = INKPOD_CURVE_BEZIER;
@@ -5713,10 +5741,10 @@ bool ConfigureAdjustmentEditor(
     editor.title = UiText(UiStringId::Text0933);
     editor.parameter_labels = {
         UiText(UiStringId::Text0067),
-        L"P1 / contrast / gamma",
-        L"P2 / highlight",
-        L"P3 / output shadow",
-        L"P4 / output highlight"};
+        UiText(UiStringId::AdjustmentContrastGamma),
+        UiText(UiStringId::AdjustmentHighlight),
+        UiText(UiStringId::AdjustmentOutputShadow),
+        UiText(UiStringId::AdjustmentOutputHighlight)};
     editor.channel_labels = {
         UiText(UiStringId::Text0725), UiText(UiStringId::Text0251), UiText(UiStringId::Text0407), nullptr, nullptr};
     editor.channel_values = {
@@ -5727,7 +5755,11 @@ bool ConfigureAdjustmentEditor(
         0U};
     editor.channel_count = 3U;
     editor.channel = INKPOD_FILTER_BRIGHTNESS_CONTRAST;
-    editor.mode_labels = {L"Bezier", L"B-spline", nullptr, nullptr};
+    editor.mode_labels = {
+        UiText(UiStringId::CurveBezier),
+        UiText(UiStringId::CurveBSpline),
+        nullptr,
+        nullptr};
     editor.mode_values = {INKPOD_CURVE_BEZIER, INKPOD_CURVE_BSPLINE, 0U, 0U};
     editor.mode_count = 2U;
     editor.mode = INKPOD_CURVE_BEZIER;
@@ -5992,7 +6024,11 @@ bool ConfigureCanvasEffect(
         case IDM_EFFECT_AIRBRUSH:
             editor.title = UiText(UiStringId::Text0136);
             editor.parameter_labels = {
-                UiText(UiStringId::Text0544), UiText(UiStringId::Text0822), UiText(UiStringId::Text1026), UiText(UiStringId::Opacity), L"fade"};
+                UiText(UiStringId::Text0544),
+                UiText(UiStringId::Text0822),
+                UiText(UiStringId::Text1026),
+                UiText(UiStringId::Opacity),
+                UiText(UiStringId::FadeLabel)};
             editor.parameters = {8000, 500, 2000, 500, 0};
             editor.channel_count = 0U;
             editor.mode_count = 0U;
@@ -8556,7 +8592,11 @@ InkpodStatus EditPaperFrames(ApplicationHost& state, UINT command) noexcept {
         frame = &input.safe_frame;
     }
     if (frame != nullptr) {
-        dialog.labels = {L"X", L"Y", UiText(UiStringId::Text0644), UiText(UiStringId::Text1040)};
+        dialog.labels = {
+            UiText(UiStringId::AxisX),
+            UiText(UiStringId::AxisY),
+            UiText(UiStringId::Text0644),
+            UiText(UiStringId::Text1040)};
         dialog.values = {frame->x, frame->y, frame->width, frame->height};
         if (state.lifetime.smoke_test && info.width > 8U && info.height > 8U
             && command != IDM_CELL_FRAME_HUNDRED) {
@@ -12906,7 +12946,11 @@ bool EditBatchColorValue(
     InkpodColorValue& color) noexcept {
     ViewOptionsDialogState channels{};
     channels.title = title;
-    channels.labels = {L"depth (8/16)", L"R", L"G", L"B"};
+    channels.labels = {
+        UiText(UiStringId::Text0774),
+        UiText(UiStringId::ChannelR),
+        UiText(UiStringId::ChannelG),
+        UiText(UiStringId::ChannelB)};
     channels.values = {
         static_cast<std::int32_t>(color.depth),
         static_cast<std::int32_t>(color.red),
@@ -12929,7 +12973,7 @@ bool EditBatchColorValue(
     }
     ViewOptionsDialogState alpha{};
     alpha.title = title;
-    alpha.labels = {L"alpha", nullptr, nullptr, nullptr};
+    alpha.labels = {UiText(UiStringId::AlphaLabel), nullptr, nullptr, nullptr};
     alpha.values = {static_cast<std::int32_t>(color.alpha), 0, 0, 0};
     alpha.value_count = 1U;
     if (ShowViewOptions(
@@ -13034,7 +13078,11 @@ bool EditBatchSeedRows(
     for (auto& seed : operation.seeds) {
         ViewOptionsDialogState geometry{};
         geometry.title = UiText(UiStringId::Text0971);
-        geometry.labels = {UiText(UiStringId::Text0741), L"X", L"Y", L"tolerance"};
+        geometry.labels = {
+            UiText(UiStringId::Text0741),
+            UiText(UiStringId::AxisX),
+            UiText(UiStringId::AxisY),
+            UiText(UiStringId::Text0918)};
         geometry.values = {
             (seed.flags & INKPOD_BATCH_SEED_ENABLED) != 0U ? 1 : 0,
             static_cast<std::int32_t>(seed.x),
@@ -13043,7 +13091,11 @@ bool EditBatchSeedRows(
         geometry.value_count = 4U;
         ViewOptionsDialogState details{};
         details.title = UiText(UiStringId::Text0971);
-        details.labels = {L"gap close", UiText(UiStringId::Text0745), nullptr, nullptr};
+        details.labels = {
+            UiText(UiStringId::GapCloseLabel),
+            UiText(UiStringId::Text0745),
+            nullptr,
+            nullptr};
         details.values = {
             static_cast<std::int32_t>(seed.gap_close),
             (seed.flags & INKPOD_BATCH_SEED_HAS_EXPECTED_COLOR) != 0U ? 1 : 0,
@@ -13353,7 +13405,11 @@ bool EditSelectedBatchOperation(
     } else {
         ViewOptionsDialogState dialog{};
         dialog.title = UiText(UiStringId::Text0271);
-        dialog.labels = {L"P0", L"P1", L"P2", L"P3"};
+        dialog.labels = {
+            UiText(UiStringId::ParameterP0),
+            UiText(UiStringId::ParameterP1),
+            UiText(UiStringId::ParameterP2),
+            UiText(UiStringId::ParameterP3)};
         dialog.values = {
             static_cast<std::int32_t>(operation.parameters[0]),
             static_cast<std::int32_t>(operation.parameters[1]),
@@ -13371,11 +13427,19 @@ bool EditSelectedBatchOperation(
             dialog.labels = {UiText(UiStringId::Text0880), nullptr, nullptr, nullptr};
             dialog.value_count = 1U;
         } else if (operation.kind == INKPOD_BATCH_OPERATION_LINE_WIDTH) {
-            dialog.labels = {L"mode (1-4)", L"value x1000", nullptr, nullptr};
+            dialog.labels = {
+                UiText(UiStringId::ModeRangeOneToFour),
+                UiText(UiStringId::ValueTimesThousand),
+                nullptr,
+                nullptr};
         } else if (operation.kind == INKPOD_BATCH_OPERATION_BOUNDARY_AIRBRUSH) {
             dialog.labels = {UiText(UiStringId::Text0644), UiText(UiStringId::Text0650), nullptr, nullptr};
         } else if (operation.kind == INKPOD_BATCH_OPERATION_DUST_REMOVAL) {
-            dialog.labels = {L"mode (1-3)", UiText(UiStringId::Text0730), nullptr, nullptr};
+            dialog.labels = {
+                UiText(UiStringId::ModeRangeOneToThree),
+                UiText(UiStringId::Text0730),
+                nullptr,
+                nullptr};
         } else if (operation.kind == INKPOD_BATCH_OPERATION_MIRROR) {
             dialog.labels = {UiText(UiStringId::Text0718), nullptr, nullptr, nullptr};
             dialog.value_count = 1U;
@@ -13383,10 +13447,18 @@ bool EditSelectedBatchOperation(
             dialog.labels = {UiText(UiStringId::Text0717), nullptr, nullptr, nullptr};
             dialog.value_count = 1U;
         } else if (operation.kind == INKPOD_BATCH_OPERATION_RESIZE) {
-            dialog.labels = {UiText(UiStringId::Text0644), UiText(UiStringId::Text1040), L"X DPI x1000", L"Y DPI x1000"};
+            dialog.labels = {
+                UiText(UiStringId::Text0644),
+                UiText(UiStringId::Text1040),
+                UiText(UiStringId::XDpiTimesThousand),
+                UiText(UiStringId::YDpiTimesThousand)};
             dialog.value_count = 4U;
         } else if (operation.kind == INKPOD_BATCH_OPERATION_CONVERT_PLANE) {
-            dialog.labels = {L"plane kind", L"pixel format", nullptr, nullptr};
+            dialog.labels = {
+                UiText(UiStringId::PlaneKindLabel),
+                UiText(UiStringId::PixelFormatFieldLabel),
+                nullptr,
+                nullptr};
         }
         if (ShowViewOptions(state.lifetime.instance, state.Workspace().windows.window, state.lifetime.smoke_test, dialog) != IDOK) {
             return false;
@@ -14602,7 +14674,7 @@ std::optional<LRESULT> RouteBatchCommand(
             ViewOptionsDialogState dialog{};
             dialog.title = UiText(UiStringId::Text0266);
             dialog.labels = {
-                L"cell folder (0/1)",
+                UiText(UiStringId::CellFolderToggleLabel),
                 UiText(UiStringId::Text1023),
                 UiText(UiStringId::Text1027),
                 UiText(UiStringId::Text0090)};
@@ -16853,7 +16925,11 @@ std::optional<LRESULT> RouteAnimationCommand(
             QueryDocument(*state, document);
             ViewOptionsDialogState dialog{};
             dialog.title = UiText(UiStringId::Text0376);
-            dialog.labels = {L"X", L"Y", nullptr, nullptr};
+            dialog.labels = {
+                UiText(UiStringId::AxisX),
+                UiText(UiStringId::AxisY),
+                nullptr,
+                nullptr};
             dialog.values = {
                 state->lifetime.smoke_test ? document.reference_frame.x : 0,
                 state->lifetime.smoke_test ? document.reference_frame.y : 0,
@@ -17109,7 +17185,11 @@ std::optional<LRESULT> RouteAnimationCommand(
         case IDM_SUBPALETTE_SAMPLE: {
             ViewOptionsDialogState dialog{};
             dialog.title = UiText(UiStringId::Text0191);
-            dialog.labels = {L"X", L"Y", nullptr, nullptr};
+            dialog.labels = {
+                UiText(UiStringId::AxisX),
+                UiText(UiStringId::AxisY),
+                nullptr,
+                nullptr};
             dialog.values = {0, 0, 0, 0};
             dialog.value_count = 2U;
             if (ShowViewOptions(
@@ -17146,7 +17226,11 @@ std::optional<LRESULT> RouteAnimationCommand(
         case IDM_MOTION_START: {
             ViewOptionsDialogState dialog{};
             dialog.title = UiText(UiStringId::Text0353);
-            dialog.labels = {L"FPS (8/10/12/24/25/30)", UiText(UiStringId::Text0389), UiText(UiStringId::Text1002), UiText(UiStringId::Text0066)};
+            dialog.labels = {
+                UiText(UiStringId::MotionFpsValuesLabel),
+                UiText(UiStringId::Text0389),
+                UiText(UiStringId::Text1002),
+                UiText(UiStringId::Text0066)};
             dialog.values = {
                 static_cast<std::int32_t>(state->Workspace().animation.motion_fps),
                 (state->Workspace().animation.motion_flags & INKPOD_MOTION_FLAG_LOOP) != 0U ? 1 : 0,

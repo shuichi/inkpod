@@ -57,6 +57,31 @@ if(NOT RESOURCE_EN_CONTENT MATCHES
     message(FATAL_ERROR "English resources do not declare en-US explicitly")
 endif()
 
+# Both languages are generated from one resource topology and must expose the
+# exact same command/control/resource identifiers.  Comparing every symbolic
+# ID prevents one language from silently losing or renaming a menu, dialog,
+# control, string, or other product resource while still compiling.
+string(REGEX MATCHALL
+    "(IDM|IDC|IDD|IDR|IDS)_[A-Z0-9_]+"
+    RESOURCE_JA_IDS
+    "${RESOURCE_JA_CONTENT}")
+string(REGEX MATCHALL
+    "(IDM|IDC|IDD|IDR|IDS)_[A-Z0-9_]+"
+    RESOURCE_EN_IDS
+    "${RESOURCE_EN_CONTENT}")
+list(REMOVE_DUPLICATES RESOURCE_JA_IDS)
+list(REMOVE_DUPLICATES RESOURCE_EN_IDS)
+list(SORT RESOURCE_JA_IDS)
+list(SORT RESOURCE_EN_IDS)
+list(LENGTH RESOURCE_JA_IDS RESOURCE_JA_ID_COUNT)
+list(LENGTH RESOURCE_EN_IDS RESOURCE_EN_ID_COUNT)
+if(RESOURCE_JA_ID_COUNT EQUAL 0
+    OR NOT RESOURCE_JA_IDS STREQUAL RESOURCE_EN_IDS)
+    message(FATAL_ERROR
+        "Japanese/English resource identifier sets differ: "
+        "ja=${RESOURCE_JA_ID_COUNT}, en=${RESOURCE_EN_ID_COUNT}")
+endif()
+
 file(READ "${INKPOD_SOURCE_DIR}/apps/windows/app/app.rc" AGGREGATE_RESOURCE)
 foreach(REQUIRED_INCLUDE IN ITEMS
         "app_common.rc" "app_ui_ja.generated.rc" "app_ui_en.generated.rc")
@@ -102,6 +127,23 @@ foreach(RELATIVE_PATH IN LISTS PRODUCT_SOURCE_FILES)
     if(RAW_JAPANESE OR ESCAPED_NON_ASCII OR ENCODED_UTF8_LEAD_BYTE)
         message(FATAL_ERROR
             "Japanese literal bypasses UiStringId: ${RELATIVE_PATH}")
+    endif()
+
+    # Product-owned dialog/editor presentation must come from UiStringId.
+    # User-owned values are stored in separate `value`/document fields and are
+    # intentionally outside this gate.  Match both assignment sites and
+    # in-struct default initializers, including multi-line arrays.
+    string(REGEX MATCH
+        "\\.(title|label|labels|parameter_labels|channel_labels|mode_labels|option1_label|option2_label|preview_idle_text)[ \t\r\n]*=[^;]*L\""
+        RAW_PRESENTATION_ASSIGNMENT
+        "${CONTENT}")
+    string(REGEX MATCH
+        "(^|[^A-Za-z0-9_])(title|label|labels|parameter_labels|channel_labels|mode_labels|option1_label|option2_label|preview_idle_text)[ \t\r\n]*\\{[^;]*L\""
+        RAW_PRESENTATION_DEFAULT
+        "${CONTENT}")
+    if(RAW_PRESENTATION_ASSIGNMENT OR RAW_PRESENTATION_DEFAULT)
+        message(FATAL_ERROR
+            "product presentation literal bypasses UiStringId: ${RELATIVE_PATH}")
     endif()
 endforeach()
 
@@ -240,6 +282,18 @@ foreach(REQUIRED_TOKEN IN ITEMS
     string(FIND "${TOOL_PALETTE_SOURCE}" "${REQUIRED_TOKEN}" TOKEN_POSITION)
     if(TOKEN_POSITION LESS 0)
         message(FATAL_ERROR "tool palette typed localization is incomplete: ${REQUIRED_TOKEN}")
+    endif()
+endforeach()
+file(READ
+    "${INKPOD_SOURCE_DIR}/apps/windows/app/app_smoke.cpp"
+    APP_SMOKE_SOURCE)
+foreach(REQUIRED_TOKEN IN ITEMS
+        "TOOLINFOW tool" "TTM_GETTEXTW" "tooltip_name"
+        "state.Workspace().tools.palette_dialog.tooltip")
+    string(FIND "${APP_SMOKE_SOURCE}" "${REQUIRED_TOKEN}" TOKEN_POSITION)
+    if(TOKEN_POSITION LESS 0)
+        message(FATAL_ERROR
+            "tool palette tooltip runtime contract is incomplete: ${REQUIRED_TOKEN}")
     endif()
 endforeach()
 
