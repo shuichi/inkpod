@@ -76,8 +76,8 @@ names use the three-part CMake project version while the EXE and MSIX retain the
 four-part version containing `INKPOD_BUILD_NUMBER`:
 
 ```text
-build/windows-x64-release/package/Inkpod-0.2.2-windows-x64.zip
-build/windows-arm-release/package/Inkpod-0.2.2-windows-arm.zip
+build/windows-x64-release/package/Inkpod-0.2.3-windows-x64.zip
+build/windows-arm-release/package/Inkpod-0.2.3-windows-arm.zip
 ```
 
 `arm` in the archive name denotes the ARM64 target. Each ZIP has no enclosing
