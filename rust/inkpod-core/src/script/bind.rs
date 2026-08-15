@@ -4,8 +4,8 @@ use super::catalog::{
     CatalogError, CatalogWorkEstimate, InkScriptCatalogView, InkScriptPortability,
     InkScriptPortabilityClass,
 };
-use super::schema::{InkScriptAssertComparison, InkScriptSchemaView, InkScriptSelectorOwner};
-use super::types::{
+use inkpod_format::{InkScriptAssertComparison, InkScriptSchemaView, InkScriptSelectorOwner};
+use inkpod_format::{
     InkScriptDeclarationModel, InkScriptDependencyNodeKind, InkScriptSelectorCardinality,
     InkScriptSelectorMissingPolicy, InkScriptTypedAssert, InkScriptTypedBinding,
     InkScriptTypedProgramNode, InkScriptTypedValue, InkScriptTypedValueKind,
@@ -107,25 +107,56 @@ impl From<CatalogError> for InkScriptBindingError {
     }
 }
 
-pub(crate) fn prepare_inkscript_initial_state(
+#[cfg(test)]
+fn prepare_inkscript_initial_state(
     model: &InkScriptDeclarationModel,
     schema: &InkScriptSchemaView<'_>,
     catalog: &InkScriptCatalogView,
     snapshot: &InkScriptInitialDocumentSnapshot,
 ) -> Result<InkScriptInitialPreparation, InkScriptBindingError> {
-    validate_snapshot(schema, snapshot)?;
-    let parameter_values = model
+    let values = model
         .parameters()
         .iter()
-        .map(|parameter| (parameter.name().to_owned(), parameter.default_value()))
-        .collect::<BTreeMap<_, _>>();
+        .map(|parameter| {
+            (
+                parameter.name().to_owned(),
+                parameter.default_value().clone(),
+            )
+        })
+        .collect();
+    let arguments = model
+        .steps()
+        .iter()
+        .map(|step| step.arguments().clone())
+        .collect::<Vec<_>>();
+    prepare_inkscript_initial_state_with_parameters(
+        model, schema, catalog, snapshot, &values, &arguments,
+    )
+}
+
+pub(crate) fn prepare_inkscript_initial_state_with_parameters(
+    model: &InkScriptDeclarationModel,
+    schema: &InkScriptSchemaView<'_>,
+    catalog: &InkScriptCatalogView,
+    snapshot: &InkScriptInitialDocumentSnapshot,
+    parameter_values: &BTreeMap<String, InkScriptTypedValue>,
+    frozen_arguments: &[InkScriptTypedValue],
+) -> Result<InkScriptInitialPreparation, InkScriptBindingError> {
+    if frozen_arguments.len() != model.steps().len() {
+        return Err(InkScriptBindingError::TypeMismatch);
+    }
+    validate_snapshot(schema, snapshot)?;
     let mut bindings = BTreeMap::new();
     for binding in model.bindings() {
         if selector_references_skipped_binding(binding.selector(), &bindings) {
             bindings.insert(binding.name().to_owned(), InkScriptBoundValue::Skipped);
             continue;
         }
-        let value = resolve_binding(binding, snapshot, &parameter_values, &bindings)?;
+        let parameter_refs = parameter_values
+            .iter()
+            .map(|(name, value)| (name.clone(), value))
+            .collect::<BTreeMap<_, _>>();
+        let value = resolve_binding(binding, snapshot, &parameter_refs, &bindings)?;
         bindings.insert(binding.name().to_owned(), value);
     }
 
@@ -209,13 +240,11 @@ pub(crate) fn prepare_inkscript_initial_state(
                 }
                 let entry = catalog.entry(step.command())?;
                 let _editor_contract = entry.editor;
-                let portability = catalog.evaluate_portability(step.command(), step.arguments())?;
+                let arguments = &frozen_arguments[index];
+                let portability = catalog.evaluate_portability(step.command(), arguments)?;
                 portability_class = portability_class.max(portability.class);
                 preconditions.extend(portability.required_preconditions);
-                add_work(
-                    &mut work,
-                    catalog.evaluate_work(step.command(), step.arguments())?,
-                )?;
+                add_work(&mut work, catalog.evaluate_work(step.command(), arguments)?)?;
                 statements.push(InkScriptPreparedStatement::StepReady);
             }
         }
@@ -249,10 +278,10 @@ fn validate_snapshot(
         if entity.reference.persistent_id == 0 || !references.insert(entity.reference.clone()) {
             return Err(InkScriptBindingError::InvalidSnapshot);
         }
-        let selector = schema
-            .selector_schema(&entity.reference.entity)
+        let owner_relation = schema
+            .selector_owner(&entity.reference.entity)
             .ok_or(InkScriptBindingError::InvalidSnapshot)?;
-        let valid_owner = match selector.owner {
+        let valid_owner = match owner_relation {
             InkScriptSelectorOwner::Document => entity.owner.is_none(),
             InkScriptSelectorOwner::Layer => entity
                 .owner
@@ -609,11 +638,11 @@ fn id_allocation_digest(
         return Err(InkScriptBindingError::InvalidSnapshot);
     }
     let mut expected = schema.id_namespaces().iter().collect::<Vec<_>>();
-    expected.sort_by_key(|namespace| namespace.order);
+    expected.sort_by_key(|namespace| namespace.order());
     if expected
         .iter()
         .zip(allocations)
-        .any(|(namespace, (tag, _))| namespace.tag != tag)
+        .any(|(namespace, (tag, _))| namespace.tag() != tag)
     {
         return Err(InkScriptBindingError::InvalidSnapshot);
     }
@@ -638,17 +667,14 @@ fn id_allocation_digest(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::inkscript::catalog::{
+    use crate::script::catalog::{
         CatalogBooleanExpression, CatalogCommandDomain, CatalogEditorMetadata, CatalogEntry,
         CatalogNumericExpression, CatalogPortabilityEvaluator, CatalogWorkFormula,
     };
-    use crate::inkscript::diagnostic::InkScriptSourceId;
-    use crate::inkscript::parser::parse_inkscript;
-    use crate::inkscript::schema::{
-        InkScriptCommandSchema, InkScriptFieldSchema, InkScriptSchemaView,
+    use inkpod_format::{
+        InkScriptCommandSchema, InkScriptFieldSchema, InkScriptSchemaView, InkScriptSource,
+        InkScriptSourceId, build_inkscript_declaration_model, parse_inkscript,
     };
-    use crate::inkscript::source::InkScriptSource;
-    use crate::inkscript::types::build_inkscript_declaration_model;
 
     const USE_LAYER_FIELDS: &[InkScriptFieldSchema] =
         &[InkScriptFieldSchema::required("layer", "layer_ref", 0)];
@@ -679,7 +705,7 @@ mod tests {
                 assets: Vec::new(),
                 portability: CatalogPortabilityEvaluator {
                     rules: vec![(
-                        CatalogBooleanExpression::Literal(schema.name == "use_layer"),
+                        CatalogBooleanExpression::Literal(schema.name() == "use_layer"),
                         InkScriptPortability {
                             class: InkScriptPortabilityClass::RequiresBinding,
                             required_preconditions: vec!["semantic_target"],

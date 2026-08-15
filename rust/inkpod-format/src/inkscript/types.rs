@@ -14,6 +14,7 @@ use super::syntax::{
 
 /// Exact language-v1 maximum for reference edges in one dependency graph.
 pub const MAX_INKSCRIPT_DEPENDENCY_EDGES: usize = 4_194_304;
+const MAX_RUN_VALUE_FREEZE_DEPTH: usize = 64;
 
 /// Caller-lowerable limits for type and dependency analysis.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -295,42 +296,50 @@ impl InkScriptTypedBinding {
         self.source_range
     }
 
-    pub(crate) fn entity(&self) -> &str {
+    /// Returns the exact selector entity name.
+    pub fn entity(&self) -> &str {
         &self.entity
     }
 
-    pub(crate) const fn owner(&self) -> InkScriptSelectorOwner {
+    /// Returns the selector owner relation.
+    pub const fn owner(&self) -> InkScriptSelectorOwner {
         self.owner
     }
 
-    pub(crate) const fn initial_order(&self) -> InkScriptSelectorOrder {
+    /// Returns the canonical initial-snapshot ordering.
+    pub const fn initial_order(&self) -> InkScriptSelectorOrder {
         self.initial_order
     }
 
-    pub(crate) const fn cardinality(&self) -> InkScriptSelectorCardinality {
+    /// Returns the selector cardinality policy.
+    pub const fn cardinality(&self) -> InkScriptSelectorCardinality {
         self.cardinality
     }
 
-    pub(crate) const fn missing(&self) -> InkScriptSelectorMissingPolicy {
+    /// Returns the missing-selector policy.
+    pub const fn missing(&self) -> InkScriptSelectorMissingPolicy {
         self.missing
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum InkScriptSelectorCardinality {
+/// Closed selector cardinality policy.
+pub enum InkScriptSelectorCardinality {
     One,
     First,
     All,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum InkScriptSelectorMissingPolicy {
+/// Closed missing-selector policy.
+pub enum InkScriptSelectorMissingPolicy {
     Error,
     SkipDependents,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct InkScriptTypedAssert {
+/// One typed assertion evaluated against the immutable initial snapshot.
+pub struct InkScriptTypedAssert {
     kind: String,
     comparison: InkScriptAssertComparison,
     arguments: InkScriptTypedValue,
@@ -339,25 +348,30 @@ pub(crate) struct InkScriptTypedAssert {
 }
 
 impl InkScriptTypedAssert {
-    pub(crate) fn kind(&self) -> &str {
+    /// Returns the exact assertion kind.
+    pub fn kind(&self) -> &str {
         &self.kind
     }
 
-    pub(crate) const fn comparison(&self) -> InkScriptAssertComparison {
+    /// Returns the closed comparison contract.
+    pub const fn comparison(&self) -> InkScriptAssertComparison {
         self.comparison
     }
 
-    pub(crate) const fn arguments(&self) -> &InkScriptTypedValue {
+    /// Returns the immutable typed arguments.
+    pub const fn arguments(&self) -> &InkScriptTypedValue {
         &self.arguments
     }
 
-    pub(crate) const fn program_index(&self) -> u32 {
+    /// Returns the source-order program index.
+    pub const fn program_index(&self) -> u32 {
         self.program_index
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum InkScriptTypedProgramNode {
+/// Source-order node in a typed InkScript program.
+pub enum InkScriptTypedProgramNode {
     Assert(usize),
     Step(usize),
 }
@@ -583,11 +597,13 @@ impl InkScriptDeclarationModel {
         &self.dependency_edges
     }
 
-    pub(crate) fn assertions(&self) -> &[InkScriptTypedAssert] {
+    /// Returns typed assertions in declaration order.
+    pub fn assertions(&self) -> &[InkScriptTypedAssert] {
         &self.assertions
     }
 
-    pub(crate) fn program(&self) -> &[InkScriptTypedProgramNode] {
+    /// Returns assertions and steps in exact source order.
+    pub fn program(&self) -> &[InkScriptTypedProgramNode] {
         &self.program
     }
 }
@@ -641,6 +657,64 @@ impl InkScriptRunParameters {
     pub fn values(&self) -> &[InkScriptRunParameterValue] {
         &self.values
     }
+
+    /// Replaces parameter-root references recursively with this immutable run's values.
+    /// Binding and step-result references remain unresolved for the Core binding stage.
+    pub fn freeze_value(
+        &self,
+        value: &InkScriptTypedValue,
+    ) -> Result<InkScriptTypedValue, InkScriptTypeDiagnosticCode> {
+        freeze_run_value(value, &self.values, 0)
+    }
+}
+
+fn freeze_run_value(
+    value: &InkScriptTypedValue,
+    parameters: &[InkScriptRunParameterValue],
+    depth: usize,
+) -> Result<InkScriptTypedValue, InkScriptTypeDiagnosticCode> {
+    if depth >= MAX_RUN_VALUE_FREEZE_DEPTH {
+        return Err(InkScriptTypeDiagnosticCode::ResourceLimit);
+    }
+    let kind = match value.kind() {
+        InkScriptTypedValueKind::Reference { root, segments } => {
+            let Some(parameter) = parameters.iter().find(|value| value.name == *root) else {
+                return Ok(value.clone());
+            };
+            if !segments.is_empty() {
+                return Err(InkScriptTypeDiagnosticCode::UndefinedValueSymbol);
+            }
+            return Ok(parameter.value.clone());
+        }
+        InkScriptTypedValueKind::Constructor { name, arguments } => {
+            InkScriptTypedValueKind::Constructor {
+                name: name.clone(),
+                arguments: arguments
+                    .iter()
+                    .map(|value| freeze_run_value(value, parameters, depth + 1))
+                    .collect::<Result<_, _>>()?,
+            }
+        }
+        InkScriptTypedValueKind::List(values) => InkScriptTypedValueKind::List(
+            values
+                .iter()
+                .map(|value| freeze_run_value(value, parameters, depth + 1))
+                .collect::<Result<_, _>>()?,
+        ),
+        InkScriptTypedValueKind::Record(fields) => InkScriptTypedValueKind::Record(
+            fields
+                .iter()
+                .map(|(name, value)| {
+                    Ok((
+                        name.clone(),
+                        freeze_run_value(value, parameters, depth + 1)?,
+                    ))
+                })
+                .collect::<Result<_, InkScriptTypeDiagnosticCode>>()?,
+        ),
+        other => other.clone(),
+    };
+    Ok(InkScriptTypedValue::new(value.type_name(), kind))
 }
 
 struct DeclarationRanges {
@@ -2207,6 +2281,33 @@ fn validate_record_constraints(
     };
     for field in fields {
         for constraint in field.constraints {
+            if let Some(names) = constraint.strip_prefix("exactly-one-of:") {
+                let mut choices = names.split(',');
+                let first = choices.next();
+                let second = choices.next();
+                let extra = choices.next();
+                let (Some(first), Some(second), None) = (first, second, extra) else {
+                    return Err(InkScriptTypeDiagnostic::new(
+                        InkScriptTypeDiagnosticCode::InvalidStrictPrecondition,
+                        source_id,
+                        range,
+                        format!("{path}.{}", field.name),
+                    ));
+                };
+                if [first, second]
+                    .into_iter()
+                    .filter(|name| present(name))
+                    .count()
+                    != 1
+                {
+                    return Err(InkScriptTypeDiagnostic::new(
+                        InkScriptTypeDiagnosticCode::InvalidStrictPrecondition,
+                        source_id,
+                        range,
+                        format!("{path}.{}", field.name),
+                    ));
+                }
+            }
             let strict_missing = constraint
                 .strip_prefix("required-with:")
                 .is_some_and(|other| present(other) && !present(field.name))

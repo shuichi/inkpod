@@ -1,12 +1,9 @@
 use std::collections::BTreeMap;
-#[cfg(test)]
 use std::collections::BTreeSet;
 
-use super::schema::InkScriptCommandSchema;
-use super::types::{InkScriptTypedValue, InkScriptTypedValueKind};
+use inkpod_format::{InkScriptCommandSchema, InkScriptTypedValue, InkScriptTypedValueKind};
 
 const MAX_CATALOG_EXPRESSION_DEPTH: usize = 64;
-#[cfg(test)]
 const MAX_PORTABILITY_RULES: usize = 256;
 
 #[allow(
@@ -182,19 +179,23 @@ pub(crate) struct InkScriptCatalogView {
 }
 
 impl InkScriptCatalogView {
-    #[cfg(test)]
-    pub(crate) fn test_only(entries: Vec<CatalogEntry>) -> Result<Self, CatalogError> {
+    pub(crate) fn new(entries: Vec<CatalogEntry>) -> Result<Self, CatalogError> {
         let mut by_name = BTreeMap::new();
         for entry in entries {
             validate_entry(&entry)?;
             if entry.domain != CatalogCommandDomain::DocumentMutation {
                 return Err(CatalogError::NonMutationCommand);
             }
-            if by_name.insert(entry.schema.name, entry).is_some() {
+            if by_name.insert(entry.schema.name(), entry).is_some() {
                 return Err(CatalogError::DuplicateCommand);
             }
         }
         Ok(Self { entries: by_name })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_only(entries: Vec<CatalogEntry>) -> Result<Self, CatalogError> {
+        Self::new(entries)
     }
 
     pub(crate) fn entry(&self, name: &str) -> Result<&CatalogEntry, CatalogError> {
@@ -231,18 +232,17 @@ impl InkScriptCatalogView {
     }
 }
 
-#[cfg(test)]
 fn validate_entry(entry: &CatalogEntry) -> Result<(), CatalogError> {
     if entry.portability.rules.len() > MAX_PORTABILITY_RULES
-        || entry.results.len() != entry.schema.results.len()
+        || entry.results.len() != entry.schema.results().len()
     {
         return Err(CatalogError::InvalidEntry);
     }
     let schema_results = entry
         .schema
-        .results
+        .results()
         .iter()
-        .map(|result| result.name)
+        .map(|result| result.name())
         .collect::<BTreeSet<_>>();
     if entry
         .results
@@ -449,8 +449,10 @@ fn numeric_value(value: &InkScriptTypedValue) -> Result<i128, CatalogError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::inkscript::schema::{
+    use inkpod_format::{
         InkScriptCommandResultSchema, InkScriptFieldSchema, InkScriptResultAvailability,
+        InkScriptSchemaView, InkScriptSource, InkScriptSourceId, build_inkscript_declaration_model,
+        parse_inkscript,
     };
 
     const FIELDS: &[InkScriptFieldSchema] = &[
@@ -465,25 +467,22 @@ mod tests {
     )];
 
     fn arguments(count: u32) -> InkScriptTypedValue {
-        InkScriptTypedValue::new(
-            "catalog_test_invocation",
-            InkScriptTypedValueKind::Record(BTreeMap::from([
-                (
-                    "count".to_owned(),
-                    InkScriptTypedValue::new("u32", InkScriptTypedValueKind::U32(count)),
-                ),
-                (
-                    "values".to_owned(),
-                    InkScriptTypedValue::new(
-                        "list<u32>",
-                        InkScriptTypedValueKind::List(vec![
-                            InkScriptTypedValue::new("u32", InkScriptTypedValueKind::U32(2)),
-                            InkScriptTypedValue::new("u32", InkScriptTypedValueKind::U32(3)),
-                        ]),
-                    ),
-                ),
-            ])),
-        )
+        let source = format!(
+            "inkscript_fragment 1; requires {{ procedure_catalog = 1; replay_epoch = 23; }} program {{ step \"test\" {{ enabled = true; invoke catalog_test {{ count = {count}; values = [2, 3]; }}; }} }}"
+        );
+        let source = InkScriptSource::new(InkScriptSourceId::new(208), source.as_bytes()).unwrap();
+        let parsed = parse_inkscript(&source);
+        let commands = [InkScriptCommandSchema::with_results(
+            "catalog_test",
+            FIELDS,
+            RESULTS,
+        )];
+        let schema = InkScriptSchemaView::exact_current(&[], &commands).unwrap();
+        build_inkscript_declaration_model(&parsed, &schema)
+            .unwrap()
+            .steps()[0]
+            .arguments()
+            .clone()
     }
 
     fn entry(domain: CatalogCommandDomain) -> CatalogEntry {
@@ -550,7 +549,7 @@ mod tests {
         assert_eq!(catalog_entry.results[0].output_id_ordinal, Some(0));
         assert_eq!(catalog_entry.assets[0].kind, "canonical_raster");
         assert!(catalog_entry.editor.allow_skip_dependents);
-        assert_eq!(catalog_entry.schema.results[0].name, "layers");
+        assert_eq!(catalog_entry.schema.results()[0].name(), "layers");
 
         assert_eq!(
             view.evaluate_portability("catalog_test", &arguments(2))

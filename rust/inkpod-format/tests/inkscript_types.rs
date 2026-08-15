@@ -151,6 +151,33 @@ fn type_constructor_record_and_numeric_failures_have_stable_source_ranges() {
 }
 
 #[test]
+fn asset_payload_source_is_an_exactly_one_closed_choice() {
+    for payload_fields in [
+        "",
+        r#"data = base64"""AAAAAA=="""; data_file = "payload.bin";"#,
+    ] {
+        let input = format!(
+            r#"inkscript_fragment 1;
+requires {{ procedure_catalog = 1; replay_epoch = 23; }}
+program {{}}
+assets {{
+    asset payload {{
+        asset_id = blake3"0000000000000000000000000000000000000000000000000000000000000000";
+        kind = "canonical_raster";
+        descriptor = {{ pixel_format = rgba8; color_space = srgb; alpha = straight; width = 1; height = 1; stride = 4; element_count = 1; }};
+        {payload_fields}
+    }};
+}}
+"#
+        );
+        assert_eq!(
+            analyze(input.as_bytes()).unwrap_err().code(),
+            InkScriptTypeDiagnosticCode::InvalidStrictPrecondition
+        );
+    }
+}
+
+#[test]
 fn value_and_asset_namespaces_reject_duplicates_undefined_forward_and_cycles() {
     let cases = [
         (

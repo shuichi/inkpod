@@ -7,8 +7,8 @@ use crate::primitive::canonical_document_state;
 use crate::primitive::display_procedure;
 use std::sync::Arc;
 
-const MAX_JOURNAL_EVENTS: usize = 2_097_152;
-const MAX_JOURNAL_BRANCHES: u64 = 65_536;
+pub(crate) const MAX_JOURNAL_EVENTS: usize = 2_097_152;
+pub(crate) const MAX_JOURNAL_BRANCHES: u64 = 65_536;
 pub(crate) const MAX_JOURNAL_COMMITS: u64 = 1_048_576;
 
 macro_rules! journal_id {

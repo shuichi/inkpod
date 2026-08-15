@@ -329,6 +329,17 @@ fn registry_type_names(language: &Json) -> BTreeSet<&str> {
     names
 }
 
+fn composed_catalog_type_names<'a>(language: &'a Json, catalog: &'a Json) -> BTreeSet<&'a str> {
+    let mut names = registry_type_names(language);
+    for collection in ["enums", "records"] {
+        for value in array(member(catalog, collection)) {
+            let name = string(member(value, "name"));
+            assert!(names.insert(name), "duplicate composed catalog type {name}");
+        }
+    }
+    names
+}
+
 fn base_type(reference: &str) -> &str {
     reference
         .strip_prefix("list<")
@@ -375,7 +386,7 @@ fn validate_fields(fields: &Json, type_names: &BTreeSet<&str>, owner: &str) {
 
 #[test]
 fn inkscript_registry_meta_schema_is_closed_and_draft_is_private() {
-    let meta = load_json("schemas/inkscript/registry-schema-v1.json");
+    let meta = load_json("schemas/inkscript/registry-schema-v2.json");
     assert_exact_keys(
         &meta,
         &[
@@ -391,7 +402,7 @@ fn inkscript_registry_meta_schema_is_closed_and_draft_is_private() {
         string(member(&meta, "$schema")),
         "https://json-schema.org/draft/2020-12/schema"
     );
-    assert_all_object_schemas_are_closed(&meta, "registry-schema-v1");
+    assert_all_object_schemas_are_closed(&meta, "registry-schema-v2");
     let definitions = object(member(&meta, "$defs"));
     for required in [
         "language_registry",
@@ -410,16 +421,34 @@ fn inkscript_registry_meta_schema_is_closed_and_draft_is_private() {
             "missing schema {required}"
         );
     }
+    for registry in ["language_registry", "catalog_registry", "owner_manifest"] {
+        let schema = definitions
+            .get(registry)
+            .unwrap_or_else(|| panic!("missing schema {registry}"));
+        let version = member(
+            member(member(schema, "properties"), "registry_schema_version"),
+            "const",
+        );
+        assert_eq!(
+            number(version),
+            2,
+            "{registry} must accept exact-current v2"
+        );
+        assert_ne!(number(version), 1, "{registry} must reject superseded v1");
+    }
 
     let draft = load_json("schemas/inkscript/catalog-v1.draft.json");
     assert_exact_keys(
         &draft,
         &[
             "catalog_version",
+            "constructors",
+            "enums",
             "entries",
             "file_version",
             "kind",
             "production",
+            "records",
             "registry_schema_version",
             "required_replay_epoch",
         ],
@@ -429,7 +458,16 @@ fn inkscript_registry_meta_schema_is_closed_and_draft_is_private() {
         "inkpod.inkscript.catalog-draft"
     );
     assert_eq!(member(&draft, "production"), &Json::Bool(false));
-    assert!(array(member(&draft, "entries")).is_empty());
+    assert_eq!(array(member(&draft, "entries")).len(), 13);
+    assert_eq!(array(member(&draft, "enums")).len(), 11);
+    assert_eq!(array(member(&draft, "records")).len(), 13);
+    assert!(array(member(&draft, "constructors")).is_empty());
+    assert!(
+        !repository()
+            .join("schemas/inkscript/registry-schema-v1.json")
+            .exists(),
+        "exact-current registry schema must reject the superseded v1 identity"
+    );
     assert!(
         !repository()
             .join("schemas/inkscript/catalog-v1.json")
@@ -441,6 +479,240 @@ fn inkscript_registry_meta_schema_is_closed_and_draft_is_private() {
             .join("docs/inkscript-command-reference.md")
             .exists(),
         "the generated command reference must not exist before catalog freeze"
+    );
+}
+
+#[test]
+fn inkscript_legacy_simple_catalog_entries_are_closed_typed_and_owner_exact() {
+    let language = load_json("schemas/inkscript/language-v1.json");
+    let draft = load_json("schemas/inkscript/catalog-v1.draft.json");
+    let manifest = load_json("schemas/inkscript/owner-manifest-v1.json");
+    let type_names = composed_catalog_type_names(&language, &draft);
+
+    let expected = BTreeMap::from([
+        ("set_layer_properties", ("0x00020005", 2, 2, "INKS-EQ-0006")),
+        ("set_plane_properties", ("0x00020015", 2, 2, "INKS-EQ-0011")),
+        ("convert_plane", ("0x00020016", 2, 2, "INKS-EQ-0012")),
+        ("convert_layer", ("0x00020021", 2, 2, "INKS-EQ-0014")),
+        ("mirror_document", ("0x00070001", 2, 2, "INKS-EQ-0060")),
+        ("rotate_document", ("0x00070002", 2, 2, "INKS-EQ-0061")),
+        ("resize_document", ("0x00070003", 2, 2, "INKS-EQ-0062")),
+    ]);
+    const OWNER_MILESTONE: &str = concat!("M", "07");
+    let manifest_owners = array(member(&manifest, "owners"))
+        .iter()
+        .filter(|owner| string(member(owner, "owner_milestone")) == OWNER_MILESTONE)
+        .map(|owner| (string(member(owner, "command_name")), owner))
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(manifest_owners.len(), expected.len());
+
+    let mut actual_names = BTreeSet::new();
+    for entry in array(member(&draft, "entries"))
+        .iter()
+        .filter(|entry| string(member(entry, "owner_milestone")) == OWNER_MILESTONE)
+    {
+        assert_exact_keys(
+            entry,
+            &[
+                "arguments",
+                "cancellation_boundary",
+                "editor",
+                "equivalence_test",
+                "name",
+                "owner_milestone",
+                "portability",
+                "primitive_id",
+                "primitive_schema_version",
+                "replay_epoch",
+                "results",
+                "semantics_revision",
+                "work",
+            ],
+        );
+        let name = string(member(entry, "name"));
+        assert!(
+            actual_names.insert(name),
+            "duplicate catalog command {name}"
+        );
+        let (primitive_id, schema, semantics, equivalence) = expected[name];
+        assert_eq!(string(member(entry, "primitive_id")), primitive_id);
+        assert_eq!(number(member(entry, "primitive_schema_version")), schema);
+        assert_eq!(number(member(entry, "replay_epoch")), 23);
+        assert_eq!(number(member(entry, "semantics_revision")), semantics);
+        assert_eq!(string(member(entry, "owner_milestone")), OWNER_MILESTONE);
+        assert_eq!(string(member(entry, "equivalence_test")), equivalence);
+        assert!(array(member(entry, "results")).is_empty());
+
+        let owner = manifest_owners[name];
+        assert_eq!(string(member(owner, "primitive_id")), primitive_id);
+        assert_eq!(number(member(owner, "primitive_schema_version")), schema);
+        assert_eq!(number(member(owner, "semantics_revision")), semantics);
+        assert_eq!(
+            string(member(owner, "planned_equivalence_test")),
+            equivalence
+        );
+
+        let mut argument_names = BTreeSet::new();
+        let mut argument_orders = BTreeSet::new();
+        for argument in array(member(entry, "arguments")) {
+            assert_exact_keys(
+                argument,
+                &[
+                    "asset_role",
+                    "bound",
+                    "canonical_order",
+                    "default",
+                    "name",
+                    "nullable",
+                    "required",
+                    "stable_id_role",
+                    "type",
+                ],
+            );
+            let argument_name = string(member(argument, "name"));
+            assert!(argument_names.insert(argument_name));
+            assert!(argument_orders.insert(number(member(argument, "canonical_order"))));
+            assert!(type_names.contains(base_type(string(member(argument, "type")))));
+            assert_eq!(member(argument, "required"), &Json::Bool(true));
+            assert_eq!(member(argument, "nullable"), &Json::Bool(false));
+            assert_eq!(member(argument, "default"), &Json::Null);
+            assert!(matches!(member(argument, "bound"), Json::Array(_)));
+            assert!(matches!(member(argument, "asset_role"), Json::Null));
+        }
+        assert!(
+            argument_orders
+                .iter()
+                .copied()
+                .eq(0..argument_orders.len() as u64)
+        );
+
+        let portability = member(entry, "portability");
+        assert_exact_keys(portability, &["default", "rules"]);
+        assert!(array(member(portability, "rules")).is_empty());
+        let default = member(portability, "default");
+        assert_exact_keys(default, &["class", "required_preconditions"]);
+        let expected_class = if name.contains("document") {
+            "portable"
+        } else {
+            "requires_binding"
+        };
+        assert_eq!(string(member(default, "class")), expected_class);
+
+        assert_exact_keys(
+            member(entry, "work"),
+            &[
+                "max_asset_bytes",
+                "max_invocations",
+                "max_output_growth",
+                "max_output_ids",
+                "max_work_units",
+            ],
+        );
+        let editor = member(entry, "editor");
+        assert_exact_keys(
+            editor,
+            &["allow_skip_dependents", "family", "legacy_projection"],
+        );
+        assert_eq!(string(member(editor, "family")), "legacy_simple");
+    }
+    assert_eq!(actual_names, expected.keys().copied().collect());
+
+    for value in array(member(&draft, "enums")) {
+        assert_exact_keys(value, &["members", "name"]);
+        assert!(!array(member(value, "members")).is_empty());
+    }
+    let resize = named(member(&draft, "records"), "document_resize");
+    assert_exact_keys(resize, &["fields", "name"]);
+    validate_fields(member(resize, "fields"), &type_names, "document_resize");
+}
+
+#[test]
+fn inkscript_legacy_image_catalog_entries_are_closed_typed_and_owner_exact() {
+    let language = load_json("schemas/inkscript/language-v1.json");
+    let draft = load_json("schemas/inkscript/catalog-v1.draft.json");
+    let manifest = load_json("schemas/inkscript/owner-manifest-v1.json");
+    let type_names = composed_catalog_type_names(&language, &draft);
+    let expected = BTreeMap::from([
+        ("apply_fill", ("0x00050002", 2, 2, "INKS-EQ-0030")),
+        (
+            "apply_boundary_airbrush",
+            ("0x00050011", 2, 2, "INKS-EQ-0033"),
+        ),
+        ("apply_dust_removal", ("0x00050018", 2, 2, "INKS-EQ-0040")),
+        ("apply_filter", ("0x00050020", 2, 2, "INKS-EQ-0043")),
+        (
+            "replace_raster_colors",
+            ("0x00050040", 2, 2, "INKS-EQ-0046"),
+        ),
+        (
+            "separate_raster_colors",
+            ("0x00050041", 2, 3, "INKS-EQ-0047"),
+        ),
+    ]);
+    const OWNER_MILESTONE: &str = concat!("M", "08");
+    let manifest_owners = array(member(&manifest, "owners"))
+        .iter()
+        .filter(|owner| string(member(owner, "owner_milestone")) == OWNER_MILESTONE)
+        .map(|owner| (string(member(owner, "command_name")), owner))
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(manifest_owners.len(), expected.len());
+
+    let entries = array(member(&draft, "entries"))
+        .iter()
+        .filter(|entry| string(member(entry, "owner_milestone")) == OWNER_MILESTONE)
+        .collect::<Vec<_>>();
+    assert_eq!(entries.len(), expected.len());
+    let mut actual = BTreeSet::new();
+    for entry in entries {
+        let name = string(member(entry, "name"));
+        assert!(actual.insert(name));
+        let (primitive_id, schema, semantics, equivalence) = expected[name];
+        assert_eq!(string(member(entry, "primitive_id")), primitive_id);
+        assert_eq!(number(member(entry, "primitive_schema_version")), schema);
+        assert_eq!(number(member(entry, "replay_epoch")), 23);
+        assert_eq!(number(member(entry, "semantics_revision")), semantics);
+        assert_eq!(string(member(entry, "equivalence_test")), equivalence);
+        assert!(array(member(entry, "results")).is_empty());
+        assert_eq!(
+            string(member(member(entry, "editor"), "family")),
+            "legacy_image"
+        );
+        assert_eq!(
+            string(member(
+                member(member(entry, "portability"), "default"),
+                "class"
+            )),
+            "requires_binding"
+        );
+        assert!(matches!(
+            string(member(entry, "cancellation_boundary")),
+            "before_primitive" | "bounded_work_chunk"
+        ));
+        let owner = manifest_owners[name];
+        assert_eq!(string(member(owner, "primitive_id")), primitive_id);
+        assert_eq!(
+            string(member(owner, "planned_equivalence_test")),
+            equivalence
+        );
+
+        let mut orders = BTreeSet::new();
+        for argument in array(member(entry, "arguments")) {
+            assert!(type_names.contains(base_type(string(member(argument, "type")))));
+            assert!(orders.insert(number(member(argument, "canonical_order"))));
+        }
+        assert!(orders.iter().copied().eq(0..orders.len() as u64));
+    }
+    assert_eq!(actual, expected.keys().copied().collect());
+
+    for record in array(member(&draft, "records")) {
+        let name = string(member(record, "name"));
+        validate_fields(member(record, "fields"), &type_names, name);
+    }
+    assert!(
+        array(member(&draft, "entries"))
+            .iter()
+            .all(|entry| string(member(entry, "name")) != "vector_correct_width"),
+        "the line-width catalog entry remains owned by the later vector catalog"
     );
 }
 
@@ -694,6 +966,37 @@ fn inkscript_language_core_is_closed_and_references_resolve() {
         assert!(limit_names.insert(string(member(limit, "name"))));
     }
     assert_eq!(limits.len(), 32);
+    assert_eq!(
+        number(member(
+            named(member(&language, "resource_limits"), "inline_asset_bytes"),
+            "maximum"
+        )),
+        inkpod_format::MAX_INKSCRIPT_INLINE_ASSET_BYTES as u64
+    );
+    assert_eq!(
+        number(member(
+            named(
+                member(&language, "resource_limits"),
+                "inline_asset_total_bytes"
+            ),
+            "maximum"
+        )),
+        inkpod_format::MAX_INKSCRIPT_INLINE_ASSET_TOTAL_BYTES
+    );
+    assert_eq!(
+        number(member(
+            named(member(&language, "resource_limits"), "external_asset_bytes"),
+            "maximum"
+        )),
+        inkpod_format::MAX_INKSCRIPT_EXTERNAL_ASSET_BYTES
+    );
+    assert_eq!(
+        number(member(
+            named(member(&language, "resource_limits"), "asset_total_bytes"),
+            "maximum"
+        )),
+        inkpod_format::MAX_INKSCRIPT_ASSET_TOTAL_BYTES
+    );
 
     let _ = named(member(&language, "records"), "requires_record");
     let _ = named(member(&language, "records"), "canonical_raster_descriptor");
@@ -882,10 +1185,11 @@ fn inkscript_versions_and_traceability_match_repository_contracts() {
     let draft = load_json("schemas/inkscript/catalog-v1.draft.json");
     let manifest = load_json("schemas/inkscript/owner-manifest-v1.json");
     for value in [&language, &draft] {
-        assert_eq!(number(member(value, "registry_schema_version")), 1);
+        assert_eq!(number(member(value, "registry_schema_version")), 2);
         assert_eq!(number(member(value, "file_version")), 1);
         assert_eq!(number(member(value, "required_replay_epoch")), 23);
     }
+    assert_eq!(number(member(&manifest, "registry_schema_version")), 2);
     assert_eq!(number(member(&language, "procedure_catalog_version")), 1);
     assert_eq!(number(member(&draft, "catalog_version")), 1);
 
@@ -995,14 +1299,44 @@ fn inkscript_private_draft_is_unreachable_from_production() {
 fn inkscript_typed_frontend_models_are_unreachable_from_core_ffi_and_windows() {
     let repository = repository();
     let mut sources = Vec::new();
-    for root in [
-        "rust/inkpod-core/src",
-        "rust/inkpod-ffi/src",
-        "apps/windows",
-        "include",
-    ] {
+    for root in ["rust/inkpod-ffi/src", "apps/windows", "include"] {
         collect_production_sources(&repository.join(root), &mut sources);
     }
+
+    let core_source = repository.join("rust/inkpod-core/src");
+    let private_adapters = [
+        core_source.join("primitive/inkscript.rs"),
+        core_source.join("primitive/inkscript_batch.rs"),
+    ];
+    let private_compiler = core_source.join("script");
+    let mut core_sources = Vec::new();
+    collect_production_sources(&core_source, &mut core_sources);
+    for source in core_sources {
+        if private_adapters.contains(&source) || source.starts_with(&private_compiler) {
+            continue;
+        }
+        let text = fs::read_to_string(&source)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", source.display()));
+        assert!(
+            !text.contains("InkScriptTypedStep")
+                && !text.contains("build_inkscript_declaration_model"),
+            "Core source {} bypasses the private catalog adapter owners",
+            source.display()
+        );
+    }
+    let primitive_root = fs::read_to_string(core_source.join("primitive/mod.rs"))
+        .expect("primitive module root must be readable");
+    assert!(primitive_root.contains("mod inkscript;"));
+    assert!(!primitive_root.contains("pub mod inkscript"));
+    assert!(primitive_root.contains("mod inkscript_batch;"));
+    assert!(!primitive_root.contains("pub mod inkscript_batch"));
+    let core_public_root =
+        fs::read_to_string(core_source.join("lib.rs")).expect("Core public root must be readable");
+    assert!(!core_public_root.contains("LegacySimpleScriptStep"));
+    assert!(!core_public_root.contains("LegacyImageScriptStep"));
+    assert!(!core_public_root.contains("FrozenScriptAssets"));
+    assert!(!core_public_root.contains("AuthorizedAssetStream"));
+    assert!(!core_public_root.contains("freeze_inkscript_assets"));
     for source in sources {
         let contents = fs::read(&source)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", source.display()));
@@ -1020,7 +1354,10 @@ fn inkscript_typed_frontend_models_are_unreachable_from_core_ffi_and_windows() {
                 && !text.contains("InkScriptDependencyEdge")
                 && !text.contains("prepare_inkscript_initial_state")
                 && !text.contains("InkScriptCatalogView")
-                && !text.contains("InkScriptInitialDocumentSnapshot"),
+                && !text.contains("InkScriptInitialDocumentSnapshot")
+                && !text.contains("FrozenScriptAssets")
+                && !text.contains("AuthorizedAssetStream")
+                && !text.contains("freeze_inkscript_assets"),
             "production source {} reaches a private typed InkScript model",
             source.display()
         );

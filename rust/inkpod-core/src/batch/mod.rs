@@ -60,6 +60,11 @@ const OP_CONFIGURE_EACH_RUN: u64 = 1 << 1;
 
 mod codec;
 mod execute;
+#[allow(
+    dead_code,
+    reason = "the private grouped InkScript projection stays disconnected until the compiler owner"
+)]
+mod inkscript;
 mod model;
 mod operations;
 mod pairs;

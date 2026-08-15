@@ -11,6 +11,9 @@ pub const MAX_INKSCRIPT_TOKENS: usize = 4_194_304;
 pub const MAX_INKSCRIPT_DIAGNOSTICS: usize = 256;
 pub const MAX_INKSCRIPT_STRING_BYTES: usize = 32 * 1024;
 pub const MAX_INKSCRIPT_INLINE_ASSET_BYTES: usize = 32 * 1024 * 1024;
+pub const MAX_INKSCRIPT_INLINE_ASSET_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
+pub const MAX_INKSCRIPT_EXTERNAL_ASSET_BYTES: u64 = 512 * 1024 * 1024;
+pub const MAX_INKSCRIPT_ASSET_TOTAL_BYTES: u64 = 768 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct InkScriptLexerLimits {

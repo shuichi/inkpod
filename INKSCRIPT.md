@@ -14,8 +14,10 @@ journal-replayable な canonical procedure と等価な文書変更を、別文�
 ならない。この文書と `SPEC.md` が競合する場合は、ユーザーの最新指示、`AGENTS.md`、
 `SPEC.md`、この文書の順で解決する。
 
-machine-readable schemaは段階を分ける。M00で
-`schemas/inkscript/registry-schema-v1.json`と`schemas/inkscript/language-v1.json`を規範化し、
+machine-readable schemaは段階を分ける。M00でregistry schema v1と
+`schemas/inkscript/language-v1.json`を規範化し、M07で承認されたexact-current
+`schemas/inkscript/registry-schema-v2.json`がcatalog-owned typeを追加してv1を置き換えた。
+旧registry schemaは受理しない。language v1は引き続き
 registry自体のclosed JSON形式と、command非依存の全language-core type、section、selector、assert、assetの
 exact field、型、default、上限を固定する。command entryはowner manifestに従ってM07～M22で
 `schemas/inkscript/catalog-v1.draft.json`へ追加する。このdraftはproduct file、clipboard、公開Rust API、
@@ -784,7 +786,9 @@ overflow、zero/overflow済みnext IDをdigest計算前に拒否する。
 
 ### 7.7 InkScript schema registry
 
-M00で`registry-schema-v1.json`と`language-v1.json`を確定し、command以外の言語coreを固定する。
+M00でregistry schema v1と`language-v1.json`を確定し、command以外の言語coreを固定した。M07で
+明示承認されたexact-current `registry-schema-v2.json`は、language v1を変更せずcatalog-ownedな
+closed enum／record／constructorを追加し、旧registry schemaを置き換える。
 全journal-replayable `PrimitiveId`はowner manifestでM07～M22のちょうど一つへ割り当てる。各ownerは
 実装するfamilyのexact command entryと、そのentry専用type/constructorを`catalog-v1.draft.json`へ追加する。
 合成`SchemaView`はlanguage-core定義と全catalog entry定義を結合し、type/constructor名の重複を拒否する。
@@ -809,7 +813,7 @@ registryは最低限、次を定義する。
 - Batch editor/history rebind UI用の非意味的editor metadata
 - entryを実装する唯一のmilestone IDとequivalence test ID
 
-registry内のportability ruleとwork formulaは`registry-schema-v1.json`が定めるclosed JSON ASTで表し、
+registry内のportability ruleとwork formulaはexact-current `registry-schema-v2.json`が定めるclosed JSON ASTで表し、
 任意expression string、Rust function/type名、source codeを格納しない。numeric expressionはbounded typed
 argument/input/asset summary fieldの読取り、`u64` literal、list length、checked add/subtract/multiply、
 nonzero ceil-divide、min/max、signed値のchecked absolute、compile-time上限付きlistのbounded sumだけを
@@ -1620,6 +1624,9 @@ Undo/Redo、next ID、report、semantic work counter、save/reopen、cache-free 
   参照できないtestがある。
 - 利用者の仕様確認待ちとして`[~]`で停止する。
 
+M00のregistry schema v1はM07の明示承認によりexact-current v2へ置換された。M00が批准したlanguage v1、
+formula/evaluator semantics、resource boundは変更していない。
+
 **自動検証結果（2026-08-15）**
 
 - closed meta-schema、command非依存language v1、空のprivate catalog draft、84 replayable primitiveの
@@ -1920,7 +1927,7 @@ Version impact:
 - C ABI: 14（symbol／record変更なし）
 ```
 
-### [~] M06 — selector、assert、catalog interface
+### [x] M06 — selector、assert、catalog interface
 
 **範囲**
 
@@ -1960,7 +1967,8 @@ Version impact:
 - Windows x64 Debug configure／build、static CRT、portable ZIP、unsigned MSIX、最終binaryの全36 CTestが
   407.53秒で成功した。ABI smokeは58.03秒、English smokeは167.84秒、Japanese smokeは168.35秒だった。
 - command entry、Core-backed compiler/executor、authority／plan、C ABI、Windows UI、`.inkscript` product route、
-  `.inkbatch` production routeは変更していない。新規手動UI項目はなく、既存binaryの利用者回帰確認待ちとして停止する。
+  `.inkbatch` production routeは変更していない。新規手動UI項目はなく、次sessionの不具合報告を伴わない
+  汎用promptにより既存binaryの利用者回帰確認済みとして`[x]`へ移行した。
 
 ```text
 Version impact:
@@ -1971,7 +1979,20 @@ Version impact:
 - C ABI: 14（symbol／record変更なし）
 ```
 
-### [ ] M07 — legacy simple catalog adapter
+### [x] M07 — legacy simple catalog adapter
+
+**承認gate（2026-08-15、registry schema v2案を承認済み）**
+
+- M07着手時、M00で批准した`registry-schema-v1.json`の`catalog_registry`が`entries`だけを所有し、
+  7.7でcatalog ownerへ割り当てたcommand専用`enum`／`record`／`constructor`を表現できないことを確認した。
+  `mirror_document`、`rotate_document`、`resize_document`のaxis／direction／anchorをclosed typed argumentとして
+  登録できず、`u32`、`bool`、別用途の`guide_axis`で代用するとexact entryとunknown-enum拒否契約を満たさない。
+- 承認案はexact-current registry schemaをv2へ上げ、catalog registryへclosedな`enums`／`records`／
+  `constructors`を追加すること。`language-v1.json`のlanguage coreと`.inkscript` grammarは変更せず、M23前の
+  private draft entry追加としてInkScript file／procedure catalog／replay epoch／`.inkpod`／C ABI versionは
+  据え置く。旧registry schemaを暗黙受理する互換routeは作らない。
+- M00の`registry-schema-v1.json`を同名でin-place変更する代替案と、typed contractを弱める数値／boolean代用は
+  不採用とした。旧schemaの互換reader／shimは作らない。
 
 **範囲**
 
@@ -1986,7 +2007,43 @@ Version impact:
 - unknown field/type/enum、format/target mismatchを原子的に拒否する。
 - 実行engineとUIはまだ切り替えない。
 
-### [ ] M08 — legacy image catalogとgrouped Batch adapter
+**自動検証結果（2026-08-15）**
+
+- 承認済みregistry schema v2へcatalog-owned closed enum／record／constructorを追加し、language v1 grammarを
+  変更せずlanguage、owner manifest、private catalog draftをexact-current v2へ更新した。旧v1 schema fileは
+  廃止し、旧version不在／拒否をregistry testで固定した。
+- owner manifestのM07割当どおり、property 2件、plane/layer conversion 2件、mirror／rotate／resize 3件の
+  ちょうど7 entryをprivate catalog v1 draftへ追加した。stable name、`PrimitiveId`、schema／semantics revision、
+  argument/result、portability、checked work formula、cancellation boundary、editor metadata、equivalence IDの
+  全単射とtype closureを検証する。
+- Core-private adapterはtyped stepとissue-time stable bindingをcanonical invocationへ双方向変換するだけとし、
+  実行は既存の単一canonical executorへ委譲する。第二canonical model／第二executor、private catalog entryの
+  public re-export、FFI／Windows／`.inkscript` product routeは追加していない。
+- 7 primitiveすべてでdirect実行とtyped step経由のdocument digest、state、revision、history、next ID、savepointを
+  比較した。no-op、invalid、stale target、resource bound、unknown field/type/enum、format/target mismatch、
+  failure atomicity、`Send + Sync`、product非到達性を固定した。M09以前のためrunner cancellationとnative outputは
+  対象外である。
+- `cargo fmt --check`、workspace全target／feature Clippy（warning deny）、workspace 527 tests（doctest 1、
+  ignored 0）、workspace strict rustdoc、全format fuzz target checkが成功した。
+- 承認済みquick benchmarkはworkload、harness、semantic counter、envelopeを変更せず成功し、
+  `canonical_replay=264b98028ac92ac6`、`checkpoint_open=07da1b4e6bc5d289`、
+  `output_color_guard=cfb6b288963c78ba`を維持した。
+- Windows x64 Debug configure／build、static CRT、portable ZIP、unsigned MSIX、最終binaryの全36 CTestが
+  407.99秒で成功した。ABI smokeは57.70秒、English smokeは168.09秒、Japanese smokeは168.80秒だった。
+- 自動検証完了後、次sessionの不具合報告を伴わない汎用promptにより既存binaryの利用者回帰確認済みとして
+  `[x]`へ移行した。
+
+```text
+Version impact:
+- Registry schema: 2（catalog-owned enum／record／constructor追加、旧v1拒否）
+- InkScript file: 1（language v1 grammar／serialized program変更なし）
+- InkScript procedure catalog: 1（M23前のprivate draftにowner exact entry 7件、version変更なし）
+- replay epoch: 23（canonical replay semantics変更なし）
+- .inkpod top-level: 26（schema／state／replay変更なし）
+- C ABI: 14（symbol／record変更なし）
+```
+
+### [x] M08 — legacy image catalogとgrouped Batch adapter
 
 **範囲**
 
@@ -2002,7 +2059,34 @@ Version impact:
 - enabled/disabled seed/pair、0..N Commit、exact-depth、ambiguity、native separation fixtureが一致する。
 - advanced groupをlegacy operationへlossy変換せず、明示的にprojection不能と診断する。
 
-### [ ] M09 — Core compiler、binding、単一入力staged実行
+**自動検証結果（2026-08-15）**
+
+- owner manifestがM08へ割り当てた6 primitiveのexact entryをprivate catalog v1 draftへ追加し、draftを
+  13/84 entryへ拡張した。line widthは既存`VectorCorrectWidth` canonical invocationへ投影するが、catalog
+  entryのownerはM20のままとし、M08で重複登録しない。
+- Core-private adapterは全M08 image payloadをclosed typed recordへ双方向変換し、M07 stepを再利用する。
+  Continuous Fillは一seed一step、pair/seed enable、exact-depth color、native separation destination、targetの
+  missing policyとper-run flagを保持し、同一`editor_group`でないadvanced groupの逆投影を拒否する。
+- grouped adapter／image codecの10 testと9 registry contractでsuccess、semantic no-op、invalid、cancel、
+  stale、resource overflow、missing、ambiguity、atomicity、ownership/thread、direct canonical routeとのdigest／
+  state／revision／history／next-ID／savepoint一致、private product非到達性を検証した。
+- Rust workspace 538 test、format、Clippy、strict rustdoc、format fuzz target check、承認済みquick benchmark、
+  Windows x64 Debug configure／build／static CRT／MSIX／portable ZIP、および全36 CTestが成功した。
+  CTestは428.74秒、ABI smokeは71.62秒、English smokeは171.25秒、Japanese smokeは172.21秒だった。
+- M08はproduct UI／ABI／`.inkscript` file routeを追加しない。次sessionの不具合報告を伴わない汎用promptにより、
+  既存binaryのBatch回帰とInkScript UI非公開の利用者確認済みとして`[x]`へ移行した。
+
+```text
+Version impact:
+- Registry schema: 2（M07で批准済みのexact-current schemaを使用、変更なし）
+- InkScript file: 1（language v1 grammar／serialized program変更なし）
+- InkScript procedure catalog: 1（M23前のprivate draftにowner exact entry 6件、version変更なし）
+- replay epoch: 23（canonical replay semantics変更なし）
+- .inkpod top-level: 26（schema／state／replay変更なし）
+- C ABI: 14（symbol／record変更なし）
+```
+
+### [x] M09 — Core compiler、binding、単一入力staged実行
 
 **範囲**
 
@@ -2020,7 +2104,41 @@ Version impact:
 - stepごとのCommit/Undo/revision、result ordinal、ID high-watermark、最終state digestがdirect canonical routeと一致する。
 - failure時にsource Coreとstaged resultが公開されない。
 
-### [ ] M10 — canonical asset decodeとimmutable freeze
+**自動検証結果（2026-08-15）**
+
+- semantic AST、typed declaration、run parameterを一つのimmutable static programへcompileし、parameter参照を
+  recursiveにfreezeした。command ownerのclosed schemaを合成し、checked invocation／work／output ID／asset／
+  output-growth budgetと、実行直前のprocedure／state／journal-event／branch／stable-ID high-watermarkを検査する。
+- initial document snapshotからlayer／plane selectorをdocument-tree順でbindし、`one`／`first`／`all`、
+  `missing = error`／`skip_dependents`、document／object／selection assertを既存M06 evaluatorで解決する。
+  result availabilityとoutput ordinalはtyped result contractから決定し、failure時はpartial binding/reportを返さない。
+- M07／M08 typed stepをowner adapterで既存`CanonicalInvocation`へlowerし、staged `Core`上の単一canonical executorへ
+  一stepずつ委譲する。in-memory captureはissue-time fingerprintを再検査し、native inputはexact-current `.inkpod`
+  bytesをstaged Coreへdecodeする。source Core、通常savepoint、path authority、filesystem outputは変更しない。
+- end-to-end contractでassert、success、semantic no-op、missing、ambiguity、skip、invalid native bytes、実行前／
+  step間Cancel、stale capture、counter overflow、ID非消費、Undo／Redo、native save-image decode、direct canonical routeとの
+  per-step Commit／revision／history／journal／next-ID／document/editor savepoint／最終state digest一致を検証した。
+- compile／bind／runとreport型はcrate-privateのままで、`inkpod-core` public re-export、C ABI、Windows、product command、
+  `.inkscript` file-open routeへ公開していない。private catalog draftは13/84 entryのままである。
+- `cargo fmt --check`、workspace全target／feature Clippy（warning deny）、workspace 542 tests（doctest 1、
+  ignored 0）、workspace strict rustdoc、全format fuzz target checkが成功した。承認済みquick benchmarkはworkload、
+  harness、semantic counter、envelopeを変更せず、全10 checksumと意味counterを維持した。
+- Windows x64 Debug configure／build、static CRT、portable ZIP、unsigned MSIX、および最終binaryの全36 CTestが
+  407.05秒で成功した。ABI smokeは57.34秒、English smokeは168.45秒、Japanese smokeは168.09秒だった。
+- 自動検証完了後はproduct binaryから到達できない内部milestoneとして`[~]`で停止し、次sessionの不具合報告を
+  伴わない汎用promptにより既存binaryのBatch回帰とInkScript UI非公開の利用者確認済みとして`[x]`へ移行した。
+
+```text
+Version impact:
+- Registry schema: 2（exact-current schemaとowner metadataを使用、変更なし）
+- InkScript file: 1（language v1 grammar／serialized program変更なし）
+- InkScript procedure catalog: 1（private draft 13/84、entry追加なし、version変更なし）
+- replay epoch: 23（canonical replay semantics変更なし）
+- .inkpod top-level: 26（decode／staged replayのみ、schema／state／replay変更なし）
+- C ABI: 14（symbol／record変更なし）
+```
+
+### [~] M10 — canonical asset decodeとimmutable freeze
 
 **範囲**
 
@@ -2035,6 +2153,39 @@ Version impact:
 - inline/authorized streamの同一assetが同じidentityとlogical bytesを返す。
 - digest mismatch、truncation、oversize、duplicate descriptor mismatch、cancelでasset/commit/outputを公開しない。
 - payload read/copy counterと既存resource envelopeに回帰がなく、production commandのstubを作らない。
+
+**自動検証結果（2026-08-15）**
+
+- `data`／`data_file`のexactly-one制約をapproved language-v1 descriptorからtyped modelへ実装した。inline Base64と、
+  opaqueな検証済みidentityを持つbounded `AuthorizedAssetStream`を同じdescriptor検査と既存Core `AssetStore`へ通し、
+  path、OS authority token、handleをCoreで解釈または保持しない。
+- declared `AssetId`、canonical descriptor、stride／logical length、個別／inline総量／全asset総量、duplicate descriptorを
+  read前に検査する。64 KiB以下のchunkでcancelを検査しながら読み、前後identity一致、truncation、余剰byte、reader error、
+  不正read countを拒否する。全assetを局所storeへfreezeした後だけimmutable `FrozenScriptAssets`を返すため、失敗時はasset、
+  commit、outputを一切公開しない。
+- asset symbolはRust-owned immutable recordへaliasし、catalogのasset role／inline-external policyを検査するtyped role planと
+  portability summaryを作る。payload read／copy、inline decode、logical byte、declaration／unique assetのexact counterを返す。
+  external path open／identity解決と`ScriptExecutionPlan`への接続はM11へ残した。
+- Core-private 4 testとformat public-model 1 testでinline／authorized identity・logical-byte一致、empty no-op、invalid descriptor、
+  digest mismatch、truncation、余剰byte、oversize、combined limit、duplicate mismatch、cancel、stale identity、read failure、
+  malformed count、counter、role policy、Rust ownership／`Send + Sync`、product非到達性を検証した。
+- `cargo fmt --check`、workspace全target／feature Clippy（warning deny）、workspace 547 tests（doctest 1、ignored 0）、workspace
+  strict rustdoc、全format fuzz target checkが成功した。承認済みquick benchmarkはworkload、harness、semantic counter、
+  envelopeを変更せず、全10 checksumと意味counterを維持した。
+- Windows x64 Debug configure／build、static CRT、portable ZIP、unsigned MSIX、および最終binaryの全36 CTestが
+  405.02秒で成功した。ABI smokeは57.50秒、English smokeは167.21秒、Japanese smokeは167.48秒だった。
+- asset ingestion／freeze／role planはcrate-privateのままで、M09 compiler、Core public re-export、C ABI、Windows、product command、
+  `.inkscript` file-open routeへ接続していない。既存Batch回帰とInkScript UI非公開の利用者確認を待つため`[~]`で停止する。
+
+```text
+Version impact:
+- Registry schema: 2（exact-current resource値とdescriptor制約を使用、schema変更なし）
+- InkScript file: 1（批准済みasset descriptor／exactly-one／resource semanticsの初回実装、grammar変更なし）
+- InkScript procedure catalog: 1（private draft 13/84、asset role entry追加なし、version変更なし）
+- replay epoch: 23（canonical replay semantics変更なし、既存AssetId規則を使用）
+- .inkpod top-level: 26（schema／state／replay変更なし）
+- C ABI: 14（symbol／record変更なし）
+```
 
 ### [ ] M11 — PathIntent、authority DTO、immutable input/output PlanTask
 

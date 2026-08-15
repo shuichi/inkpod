@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://inkpod.invalid/schemas/inkscript/registry-schema-v1.json",
-  "title": "InkScript registry schema v1",
+  "$id": "https://inkpod.invalid/schemas/inkscript/registry-schema-v2.json",
+  "title": "InkScript registry schema v2",
   "unevaluatedProperties": false,
   "oneOf": [
     { "$ref": "#/$defs/language_registry" },
@@ -414,7 +414,7 @@
       "required": ["kind", "registry_schema_version", "file_version", "procedure_catalog_version", "required_replay_epoch", "canonicalization", "grammar", "types", "enums", "constructors", "records", "sections", "input_kinds", "selector_entities", "assert_kinds", "asset_kinds", "persistent_id_namespaces", "resource_limits"],
       "properties": {
         "kind": { "const": "inkpod.inkscript.language" },
-        "registry_schema_version": { "const": 1 },
+        "registry_schema_version": { "const": 2 },
         "file_version": { "type": "integer", "minimum": 1 },
         "procedure_catalog_version": { "type": "integer", "minimum": 1 },
         "required_replay_epoch": { "type": "integer", "minimum": 1 },
@@ -528,14 +528,17 @@
     "catalog_registry": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "registry_schema_version", "file_version", "catalog_version", "required_replay_epoch", "production", "entries"],
+      "required": ["kind", "registry_schema_version", "file_version", "catalog_version", "required_replay_epoch", "production", "enums", "constructors", "records", "entries"],
       "properties": {
         "kind": { "enum": ["inkpod.inkscript.catalog-draft", "inkpod.inkscript.catalog"] },
-        "registry_schema_version": { "const": 1 },
+        "registry_schema_version": { "const": 2 },
         "file_version": { "type": "integer", "minimum": 1 },
         "catalog_version": { "type": "integer", "minimum": 1 },
         "required_replay_epoch": { "type": "integer", "minimum": 1 },
         "production": { "type": "boolean" },
+        "enums": { "type": "array", "items": { "$ref": "#/$defs/enum_type" } },
+        "constructors": { "type": "array", "items": { "$ref": "#/$defs/constructor" } },
+        "records": { "type": "array", "items": { "$ref": "#/$defs/record_type" } },
         "entries": { "type": "array", "items": { "$ref": "#/$defs/command_entry" } }
       }
     },
@@ -594,7 +597,7 @@
       "required": ["kind", "registry_schema_version", "replay_contract", "owners", "excluded_primitives", "batch_traceability"],
       "properties": {
         "kind": { "const": "inkpod.inkscript.owner-manifest" },
-        "registry_schema_version": { "const": 1 },
+        "registry_schema_version": { "const": 2 },
         "replay_contract": { "$ref": "#/$defs/replay_contract" },
         "owners": { "type": "array", "items": { "$ref": "#/$defs/owner_assignment" } },
         "excluded_primitives": { "type": "array", "items": { "$ref": "#/$defs/excluded_primitive" } },

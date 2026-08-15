@@ -4,6 +4,16 @@ mod catalog;
 mod digest;
 mod display;
 mod executor;
+#[allow(
+    dead_code,
+    reason = "the private legacy-simple adapter stays disconnected until the compiler owner"
+)]
+pub(crate) mod inkscript;
+#[allow(
+    dead_code,
+    reason = "the private legacy-image adapter stays disconnected until the compiler owner"
+)]
+pub(crate) mod inkscript_batch;
 mod invocation;
 mod model;
 mod raster;
@@ -20,6 +30,8 @@ use digest::canonical_payload_digest;
 pub(crate) use digest::{CanonicalDocumentStateCache, canonical_document_state};
 pub(crate) use display::display_procedure;
 pub(crate) use executor::validate_persisted_procedure;
+pub(crate) use inkscript::{LegacySimpleAdapterError, LegacySimpleScriptStep};
+pub(crate) use inkscript_batch::{LegacyImageAdapterError, LegacyImageScriptStep};
 pub(crate) use invocation::{CanonicalInvocation, InvocationResult, RuntimeInvocation};
 use model::CanonicalPrimitive;
 pub(crate) use model::CanonicalStrokeArguments;

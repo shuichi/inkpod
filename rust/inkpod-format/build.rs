@@ -225,10 +225,12 @@ fn generate() -> Result<(), String> {
     println!("cargo:rerun-if-changed={}", language.display());
     println!("cargo:rerun-if-changed=build.rs");
     let root = Parser::parse(&fs::read(&language).map_err(|error| error.to_string())?)?;
+    let registry_schema_version = number(member(&root, "registry_schema_version")?)?;
     let file_version = number(member(&root, "file_version")?)?;
     let procedure_catalog_version = number(member(&root, "procedure_catalog_version")?)?;
     let required_replay_epoch = number(member(&root, "required_replay_epoch")?)?;
     if string(member(&root, "kind")?)? != "inkpod.inkscript.language"
+        || registry_schema_version != 2
         || file_version != 1
         || procedure_catalog_version != 1
         || required_replay_epoch != 23
@@ -346,7 +348,7 @@ fn emit_enums(output: &mut String, root: &Json) -> Result<(), String> {
 fn emit_constructors(output: &mut String, root: &Json) -> Result<(), String> {
     writeln!(
         output,
-        "const GENERATED_CONSTRUCTORS: &[GeneratedConstructor] = &["
+        "const GENERATED_CONSTRUCTORS: &[InkScriptConstructorSchema] = &["
     )
     .unwrap();
     for entry in array(member(root, "constructors")?)? {
@@ -354,7 +356,7 @@ fn emit_constructors(output: &mut String, root: &Json) -> Result<(), String> {
         let result = string(member(entry, "result")?)?;
         writeln!(
             output,
-            "    GeneratedConstructor {{ name: {name:?}, result: {result:?}, arguments: &["
+            "    InkScriptConstructorSchema {{ name: {name:?}, result: {result:?}, arguments: &["
         )
         .unwrap();
         for argument in array(member(entry, "arguments")?)? {
@@ -363,7 +365,7 @@ fn emit_constructors(output: &mut String, root: &Json) -> Result<(), String> {
             let constraints = string_slice_expression(array(member(argument, "constraints")?)?)?;
             writeln!(
                 output,
-                "        GeneratedConstructorArgument {{ name: {argument_name:?}, type_name: {type_name:?}, constraints: {constraints} }},"
+                "        InkScriptConstructorArgumentSchema {{ name: {argument_name:?}, type_name: {type_name:?}, constraints: {constraints} }},"
             )
             .unwrap();
         }

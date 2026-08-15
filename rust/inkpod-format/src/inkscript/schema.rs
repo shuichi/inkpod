@@ -112,6 +112,66 @@ impl InkScriptFieldSchema {
     }
 }
 
+/// A named closed enum contributed by a private command catalog.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct InkScriptEnumSchema {
+    pub(crate) name: &'static str,
+    pub(crate) members: &'static [&'static str],
+}
+
+impl InkScriptEnumSchema {
+    /// Declares one catalog-owned enum and its complete member set.
+    pub const fn new(name: &'static str, members: &'static [&'static str]) -> Self {
+        Self { name, members }
+    }
+}
+
+/// One ordered argument of a catalog-owned constructor.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct InkScriptConstructorArgumentSchema {
+    pub(crate) name: &'static str,
+    pub(crate) type_name: &'static str,
+    pub(crate) constraints: &'static [&'static str],
+}
+
+impl InkScriptConstructorArgumentSchema {
+    /// Declares one typed constructor argument.
+    pub const fn new(
+        name: &'static str,
+        type_name: &'static str,
+        constraints: &'static [&'static str],
+    ) -> Self {
+        Self {
+            name,
+            type_name,
+            constraints,
+        }
+    }
+}
+
+/// A named constructor contributed by a private command catalog.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct InkScriptConstructorSchema {
+    pub(crate) name: &'static str,
+    pub(crate) result: &'static str,
+    pub(crate) arguments: &'static [InkScriptConstructorArgumentSchema],
+}
+
+impl InkScriptConstructorSchema {
+    /// Declares a constructor with an exact result type and ordered arguments.
+    pub const fn new(
+        name: &'static str,
+        result: &'static str,
+        arguments: &'static [InkScriptConstructorArgumentSchema],
+    ) -> Self {
+        Self {
+            name,
+            result,
+            arguments,
+        }
+    }
+}
+
 /// A named closed record contributed by a bounded test or command schema.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct InkScriptRecordSchema {
@@ -188,6 +248,21 @@ impl InkScriptCommandResultSchema {
             InkScriptResultCardinality::OrderedList => format!("list<{}>", self.element_type),
         }
     }
+
+    /// Returns the exact result field name.
+    pub const fn name(self) -> &'static str {
+        self.name
+    }
+
+    /// Returns the exact result availability contract.
+    pub const fn availability(self) -> InkScriptResultAvailability {
+        self.availability
+    }
+
+    /// Returns the result cardinality.
+    pub const fn cardinality(self) -> InkScriptResultCardinality {
+        self.cardinality
+    }
 }
 
 /// The argument record for one exact command name.
@@ -198,28 +273,44 @@ pub struct InkScriptCommandSchema {
     pub(crate) results: &'static [InkScriptCommandResultSchema],
 }
 
+/// Owner relation used to validate one initial-document selector entity.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum InkScriptSelectorOwner {
+pub enum InkScriptSelectorOwner {
+    /// The selected entity is owned directly by the document.
     Document,
+    /// The selected entity is owned by a layer.
     Layer,
+    /// The selected entity is owned by a plane.
     Plane,
+    /// The selected entity is owned by a Light Table set.
     LightTableSet,
 }
 
+/// Stable initial ordering used by selector cardinality resolution.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum InkScriptSelectorOrder {
+pub enum InkScriptSelectorOrder {
+    /// Document tree order.
     DocumentTree,
+    /// Guide declaration order.
     Guide,
+    /// Vector object order.
     Vector,
+    /// Annotation order.
     Annotation,
+    /// A singleton entity.
     Singleton,
+    /// Light Table set or item order.
     LightTable,
 }
 
+/// Closed comparison contract for an InkScript assertion kind.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum InkScriptAssertComparison {
+pub enum InkScriptAssertComparison {
+    /// Exact comparison against initial document fields.
     DocumentFields,
+    /// Exact comparison against a bound object's initial properties.
     ObjectProperties,
+    /// Exact comparison against the initial selection state.
     SelectionState,
 }
 
@@ -244,6 +335,16 @@ impl InkScriptCommandSchema {
             results,
         }
     }
+
+    /// Returns the exact stable command name.
+    pub const fn name(self) -> &'static str {
+        self.name
+    }
+
+    /// Returns the exact ordered result schema.
+    pub const fn results(self) -> &'static [InkScriptCommandResultSchema] {
+        self.results
+    }
 }
 
 /// Exact-current language-core schemas composed with a bounded private command schema set.
@@ -252,6 +353,8 @@ impl InkScriptCommandSchema {
 /// slice accepts no `invoke` command.
 #[derive(Clone, Debug)]
 pub struct InkScriptSchemaView<'schema> {
+    enums: &'schema [InkScriptEnumSchema],
+    constructors: &'schema [InkScriptConstructorSchema],
     records: &'schema [InkScriptRecordSchema],
     commands: &'schema [InkScriptCommandSchema],
 }
@@ -263,12 +366,43 @@ impl<'schema> InkScriptSchemaView<'schema> {
         records: &'schema [InkScriptRecordSchema],
         commands: &'schema [InkScriptCommandSchema],
     ) -> Result<Self, InkScriptSemanticError> {
-        if records.len() > MAX_INKSCRIPT_CONTAINER_ELEMENTS
+        Self::exact_current_with_catalog(&[], &[], records, commands)
+    }
+
+    /// Composes language v1 with the exact closed types and commands supplied by one private
+    /// catalog owner. This does not read or expose the pre-ratification catalog draft.
+    pub fn exact_current_with_catalog(
+        enums: &'schema [InkScriptEnumSchema],
+        constructors: &'schema [InkScriptConstructorSchema],
+        records: &'schema [InkScriptRecordSchema],
+        commands: &'schema [InkScriptCommandSchema],
+    ) -> Result<Self, InkScriptSemanticError> {
+        if enums.len() > MAX_INKSCRIPT_CONTAINER_ELEMENTS
+            || constructors.len() > MAX_INKSCRIPT_CONTAINER_ELEMENTS
+            || records.len() > MAX_INKSCRIPT_CONTAINER_ELEMENTS
             || commands.len() > MAX_INKSCRIPT_CONTAINER_ELEMENTS
         {
             return Err(invalid_schema("schema_view"));
         }
         let mut names = BTreeSet::new();
+        for value_enum in enums {
+            if !is_schema_name(value_enum.name)
+                || GENERATED_TYPE_NAMES.contains(&value_enum.name)
+                || !names.insert(value_enum.name)
+                || value_enum.members.is_empty()
+                || value_enum.members.len() > MAX_INKSCRIPT_CONTAINER_ELEMENTS
+            {
+                return Err(invalid_schema(value_enum.name));
+            }
+            let mut members = BTreeSet::new();
+            if value_enum
+                .members
+                .iter()
+                .any(|member| !is_word(member) || !members.insert(*member))
+            {
+                return Err(invalid_schema(value_enum.name));
+            }
+        }
         for record in records {
             if !is_schema_name(record.name)
                 || GENERATED_TYPE_NAMES.contains(&record.name)
@@ -276,17 +410,45 @@ impl<'schema> InkScriptSchemaView<'schema> {
             {
                 return Err(invalid_schema(record.name));
             }
-            validate_fields(record.name, record.fields, records)?;
+        }
+        for record in records {
+            validate_fields(record.name, record.fields, enums, records)?;
+        }
+        names.clear();
+        for constructor in constructors {
+            if !is_identifier(constructor.name)
+                || GENERATED_CONSTRUCTORS
+                    .iter()
+                    .any(|generated| generated.name == constructor.name)
+                || !names.insert(constructor.name)
+                || constructor.arguments.len() > 16
+                || !type_is_known(constructor.result, enums, records)
+            {
+                return Err(invalid_schema(constructor.name));
+            }
+            let mut arguments = BTreeSet::new();
+            if constructor.arguments.iter().any(|argument| {
+                !is_word(argument.name)
+                    || !arguments.insert(argument.name)
+                    || !type_is_known(argument.type_name, enums, records)
+            }) {
+                return Err(invalid_schema(constructor.name));
+            }
         }
         names.clear();
         for command in commands {
             if !is_identifier(command.name) || !names.insert(command.name) {
                 return Err(invalid_schema(command.name));
             }
-            validate_fields(command.name, command.fields, records)?;
-            validate_results(command.name, command.results, records)?;
+            validate_fields(command.name, command.fields, enums, records)?;
+            validate_results(command.name, command.results, enums, records)?;
         }
-        Ok(Self { records, commands })
+        Ok(Self {
+            enums,
+            constructors,
+            records,
+            commands,
+        })
     }
 
     pub(crate) fn record(&self, name: &str) -> Option<&[InkScriptFieldSchema]> {
@@ -326,11 +488,22 @@ impl<'schema> InkScriptSchemaView<'schema> {
             .find(|selector| selector.name == name)
     }
 
+    /// Returns the owner relation for an exact language-v1 selector entity.
+    pub fn selector_owner(&self, name: &str) -> Option<InkScriptSelectorOwner> {
+        self.selector_schema(name).map(|selector| selector.owner)
+    }
+
     pub(crate) fn type_kind(&self, name: &str) -> Option<&'static str> {
         GENERATED_TYPES
             .iter()
             .find(|value_type| value_type.name == name)
             .map(|value_type| value_type.kind)
+            .or_else(|| {
+                self.enums
+                    .iter()
+                    .any(|value_enum| value_enum.name == name)
+                    .then_some("enum")
+            })
             .or_else(|| {
                 self.records
                     .iter()
@@ -339,17 +512,28 @@ impl<'schema> InkScriptSchemaView<'schema> {
             })
     }
 
-    pub(crate) fn enum_members(&self, name: &str) -> Option<&'static [&'static str]> {
+    pub(crate) fn enum_members(&self, name: &str) -> Option<&[&'static str]> {
         GENERATED_ENUMS
             .iter()
             .find(|value_enum| value_enum.name == name)
             .map(|value_enum| value_enum.members)
+            .or_else(|| {
+                self.enums
+                    .iter()
+                    .find(|value_enum| value_enum.name == name)
+                    .map(|value_enum| value_enum.members)
+            })
     }
 
-    pub(crate) fn constructor(&self, name: &str) -> Option<&'static GeneratedConstructor> {
+    pub(crate) fn constructor(&self, name: &str) -> Option<&InkScriptConstructorSchema> {
         GENERATED_CONSTRUCTORS
             .iter()
             .find(|constructor| constructor.name == name)
+            .or_else(|| {
+                self.constructors
+                    .iter()
+                    .find(|constructor| constructor.name == name)
+            })
     }
 
     pub(crate) fn assertion(&self, name: &str) -> Option<&'static [InkScriptFieldSchema]> {
@@ -363,7 +547,8 @@ impl<'schema> InkScriptSchemaView<'schema> {
             .find(|assertion| assertion.name == name)
     }
 
-    pub(crate) fn id_namespaces(&self) -> &'static [GeneratedIdNamespace] {
+    /// Returns persistent-ID namespaces in canonical schema order.
+    pub fn id_namespaces(&self) -> &'static [GeneratedIdNamespace] {
         GENERATED_ID_NAMESPACES
     }
 
@@ -393,20 +578,6 @@ struct GeneratedEnum {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct GeneratedConstructorArgument {
-    pub(crate) name: &'static str,
-    pub(crate) type_name: &'static str,
-    pub(crate) constraints: &'static [&'static str],
-}
-
-#[derive(Clone, Copy)]
-pub(crate) struct GeneratedConstructor {
-    pub(crate) name: &'static str,
-    pub(crate) result: &'static str,
-    pub(crate) arguments: &'static [GeneratedConstructorArgument],
-}
-
-#[derive(Clone, Copy)]
 pub(crate) struct GeneratedSelector {
     pub(crate) name: &'static str,
     pub(crate) reference_type: &'static str,
@@ -422,10 +593,23 @@ pub(crate) struct GeneratedAssertion {
     pub(crate) fields: &'static [InkScriptFieldSchema],
 }
 
-#[derive(Clone, Copy)]
-pub(crate) struct GeneratedIdNamespace {
-    pub(crate) tag: &'static str,
-    pub(crate) order: u32,
+/// One generated persistent-ID namespace used by strict allocation preconditions.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GeneratedIdNamespace {
+    tag: &'static str,
+    order: u32,
+}
+
+impl GeneratedIdNamespace {
+    /// Returns the stable ASCII namespace tag.
+    pub const fn tag(self) -> &'static str {
+        self.tag
+    }
+
+    /// Returns canonical schema order.
+    pub const fn order(self) -> u32 {
+        self.order
+    }
 }
 
 include!(concat!(env!("OUT_DIR"), "/inkscript_language_schema.rs"));
@@ -449,6 +633,7 @@ fn generated_record(
 fn validate_fields(
     owner: &str,
     fields: &[InkScriptFieldSchema],
+    additional_enums: &[InkScriptEnumSchema],
     additional_records: &[InkScriptRecordSchema],
 ) -> Result<(), InkScriptSemanticError> {
     if fields.len() > MAX_INKSCRIPT_CONTAINER_ELEMENTS {
@@ -459,7 +644,7 @@ fn validate_fields(
     for field in fields {
         if !is_word(field.name)
             || !is_schema_name(field.type_name)
-            || !type_is_known(field.type_name, additional_records)
+            || !type_is_known(field.type_name, additional_enums, additional_records)
             || !names.insert(field.name)
             || !orders.insert(field.canonical_order)
         {
@@ -475,6 +660,7 @@ fn validate_fields(
 fn validate_results(
     owner: &str,
     results: &[InkScriptCommandResultSchema],
+    additional_enums: &[InkScriptEnumSchema],
     additional_records: &[InkScriptRecordSchema],
 ) -> Result<(), InkScriptSemanticError> {
     if results.len() > MAX_INKSCRIPT_CONTAINER_ELEMENTS {
@@ -485,7 +671,7 @@ fn validate_results(
     for result in results {
         if !is_word(result.name)
             || !is_schema_name(result.element_type)
-            || !type_is_known(result.element_type, additional_records)
+            || !type_is_known(result.element_type, additional_enums, additional_records)
             || !names.insert(result.name)
             || !orders.insert(result.canonical_order)
         {
@@ -498,9 +684,16 @@ fn validate_results(
     Ok(())
 }
 
-fn type_is_known(type_name: &str, additional_records: &[InkScriptRecordSchema]) -> bool {
+fn type_is_known(
+    type_name: &str,
+    additional_enums: &[InkScriptEnumSchema],
+    additional_records: &[InkScriptRecordSchema],
+) -> bool {
     let base = base_type(type_name);
     GENERATED_TYPE_NAMES.contains(&base)
+        || additional_enums
+            .iter()
+            .any(|value_enum| value_enum.name == base)
         || additional_records.iter().any(|record| record.name == base)
 }
 
@@ -570,3 +763,79 @@ const RESERVED: &[&str] = &[
     "list",
     "nullable",
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ENUMS: &[InkScriptEnumSchema] = &[InkScriptEnumSchema::new(
+        "catalog_mode",
+        &["first", "second"],
+    )];
+    const RECORD_FIELDS: &[InkScriptFieldSchema] = &[
+        InkScriptFieldSchema::required("mode", "catalog_mode", 0),
+        InkScriptFieldSchema::required("count", "u32", 1),
+    ];
+    const RECORDS: &[InkScriptRecordSchema] =
+        &[InkScriptRecordSchema::new("catalog_record", RECORD_FIELDS)];
+    const CONSTRUCTOR_ARGUMENTS: &[InkScriptConstructorArgumentSchema] = &[
+        InkScriptConstructorArgumentSchema::new("mode", "catalog_mode", &[]),
+        InkScriptConstructorArgumentSchema::new("count", "u32", &["nonzero"]),
+    ];
+    const CONSTRUCTORS: &[InkScriptConstructorSchema] = &[InkScriptConstructorSchema::new(
+        "catalog_value",
+        "catalog_record",
+        CONSTRUCTOR_ARGUMENTS,
+    )];
+    const COMMAND_FIELDS: &[InkScriptFieldSchema] =
+        &[InkScriptFieldSchema::required("value", "catalog_record", 0)];
+    const COMMANDS: &[InkScriptCommandSchema] =
+        &[InkScriptCommandSchema::new("catalog_test", COMMAND_FIELDS)];
+
+    #[test]
+    fn exact_current_catalog_types_are_closed_and_resolvable() {
+        let schema =
+            InkScriptSchemaView::exact_current_with_catalog(ENUMS, CONSTRUCTORS, RECORDS, COMMANDS)
+                .unwrap();
+        assert_eq!(schema.type_kind("catalog_mode"), Some("enum"));
+        assert_eq!(
+            schema.enum_members("catalog_mode"),
+            Some(&["first", "second"][..])
+        );
+        assert_eq!(schema.type_kind("catalog_record"), Some("record"));
+        assert_eq!(schema.record("catalog_record"), Some(RECORD_FIELDS));
+        assert_eq!(schema.constructor("catalog_value"), Some(&CONSTRUCTORS[0]));
+        assert_eq!(schema.command("catalog_test"), Some(COMMAND_FIELDS));
+    }
+
+    #[test]
+    fn catalog_types_reject_duplicates_unknowns_and_open_enums_atomically() {
+        const EMPTY_ENUM: &[InkScriptEnumSchema] = &[InkScriptEnumSchema::new("empty", &[])];
+        assert!(
+            InkScriptSchemaView::exact_current_with_catalog(EMPTY_ENUM, &[], &[], &[]).is_err()
+        );
+        const DUPLICATE_ENUM: &[InkScriptEnumSchema] = &[
+            InkScriptEnumSchema::new("duplicate", &["value"]),
+            InkScriptEnumSchema::new("duplicate", &["other"]),
+        ];
+        assert!(
+            InkScriptSchemaView::exact_current_with_catalog(DUPLICATE_ENUM, &[], &[], &[]).is_err()
+        );
+        const UNKNOWN_ARGUMENT: &[InkScriptConstructorArgumentSchema] =
+            &[InkScriptConstructorArgumentSchema::new(
+                "value",
+                "unknown",
+                &[],
+            )];
+        const UNKNOWN_CONSTRUCTOR: &[InkScriptConstructorSchema] =
+            &[InkScriptConstructorSchema::new(
+                "unknown_value",
+                "u32",
+                UNKNOWN_ARGUMENT,
+            )];
+        assert!(
+            InkScriptSchemaView::exact_current_with_catalog(&[], UNKNOWN_CONSTRUCTOR, &[], &[],)
+                .is_err()
+        );
+    }
+}

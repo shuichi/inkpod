@@ -13,6 +13,9 @@ M00's exact-current contract was explicitly accepted before M01 implementation:
 
 - InkScript file version 1, procedure catalog version 1, replay epoch 23, `.inkpod`
   top-level version 26, and C ABI version 14 are the starting registry values.
+- M07's approved exact-current registry schema v2 supersedes registry schema v1 solely to add
+  closed catalog-owned enum, record, and constructor definitions. It does not change language v1,
+  catalog v1, replay epoch 23, `.inkpod` v26, or C ABI v14; schema v1 is not accepted.
 - `schemas/inkscript/language-v1.json` freezes the command-independent language core.
   Later discovery of a missing grammar, section, type, selector, assert, asset, or
   resource rule requires an explicit InkScript file-version decision; it is not a silent

@@ -1,5 +1,3 @@
-mod bind;
-mod catalog;
 mod diagnostic;
 mod emit;
 mod envelope;
@@ -11,19 +9,6 @@ mod schema;
 mod source;
 mod syntax;
 mod types;
-
-// Catalog ratification is the first point allowed to re-export this route. Keeping a typed private
-// reference here includes it in normal builds without exposing a production catalog.
-#[allow(dead_code)]
-const PRIVATE_INKSCRIPT_PREPARATION_ROUTE: fn(
-    &types::InkScriptDeclarationModel,
-    &schema::InkScriptSchemaView<'_>,
-    &catalog::InkScriptCatalogView,
-    &bind::InkScriptInitialDocumentSnapshot,
-) -> Result<
-    bind::InkScriptInitialPreparation,
-    bind::InkScriptBindingError,
-> = bind::prepare_inkscript_initial_state;
 
 pub use diagnostic::{
     InkScriptDiagnostic, InkScriptDiagnosticCode, InkScriptDiagnosticSeverity, InkScriptSourceId,
@@ -58,16 +43,19 @@ pub use parser::{
 };
 pub use schema::{
     INKSCRIPT_PROCEDURE_CATALOG_VERSION, INKSCRIPT_REQUIRED_REPLAY_EPOCH,
-    InkScriptCommandResultSchema, InkScriptCommandSchema, InkScriptFieldSchema,
-    InkScriptRecordSchema, InkScriptResultAvailability, InkScriptResultCardinality,
-    InkScriptSchemaDefault, InkScriptSchemaView, InkScriptSemanticError,
+    InkScriptAssertComparison, InkScriptCommandResultSchema, InkScriptCommandSchema,
+    InkScriptConstructorArgumentSchema, InkScriptConstructorSchema, InkScriptEnumSchema,
+    InkScriptFieldSchema, InkScriptRecordSchema, InkScriptResultAvailability,
+    InkScriptResultCardinality, InkScriptSchemaDefault, InkScriptSchemaView,
+    InkScriptSelectorOrder, InkScriptSelectorOwner, InkScriptSemanticError,
     InkScriptSemanticErrorCode,
 };
 pub use source::{
     INKSCRIPT_FILE_VERSION, InkScriptLexerLimits, InkScriptLineMap, InkScriptSource,
-    MAX_INKSCRIPT_DIAGNOSTICS, MAX_INKSCRIPT_IDENTIFIER_BYTES, MAX_INKSCRIPT_INLINE_ASSET_BYTES,
-    MAX_INKSCRIPT_NUMERIC_BYTES, MAX_INKSCRIPT_SOURCE_BYTES, MAX_INKSCRIPT_STRING_BYTES,
-    MAX_INKSCRIPT_TOKENS,
+    MAX_INKSCRIPT_ASSET_TOTAL_BYTES, MAX_INKSCRIPT_DIAGNOSTICS, MAX_INKSCRIPT_EXTERNAL_ASSET_BYTES,
+    MAX_INKSCRIPT_IDENTIFIER_BYTES, MAX_INKSCRIPT_INLINE_ASSET_BYTES,
+    MAX_INKSCRIPT_INLINE_ASSET_TOTAL_BYTES, MAX_INKSCRIPT_NUMERIC_BYTES,
+    MAX_INKSCRIPT_SOURCE_BYTES, MAX_INKSCRIPT_STRING_BYTES, MAX_INKSCRIPT_TOKENS,
 };
 pub use syntax::{
     InkScriptAsset, InkScriptBinding, InkScriptInput, InkScriptInputKind, InkScriptParameter,
@@ -79,9 +67,10 @@ pub use types::{
     InkScriptAnalysisLimits, InkScriptDeclarationModel, InkScriptDependencyEdge,
     InkScriptDependencyNode, InkScriptDependencyNodeKind, InkScriptResolvedType,
     InkScriptRunParameterChoice, InkScriptRunParameterDecision, InkScriptRunParameterValue,
-    InkScriptRunParameters, InkScriptStepGroup, InkScriptTypeDiagnostic,
-    InkScriptTypeDiagnosticCode, InkScriptTypedAsset, InkScriptTypedBinding,
-    InkScriptTypedParameter, InkScriptTypedStep, InkScriptTypedStepResult, InkScriptTypedValue,
-    InkScriptTypedValueKind, MAX_INKSCRIPT_DEPENDENCY_EDGES, build_inkscript_declaration_model,
+    InkScriptRunParameters, InkScriptSelectorCardinality, InkScriptSelectorMissingPolicy,
+    InkScriptStepGroup, InkScriptTypeDiagnostic, InkScriptTypeDiagnosticCode, InkScriptTypedAssert,
+    InkScriptTypedAsset, InkScriptTypedBinding, InkScriptTypedParameter, InkScriptTypedProgramNode,
+    InkScriptTypedStep, InkScriptTypedStepResult, InkScriptTypedValue, InkScriptTypedValueKind,
+    MAX_INKSCRIPT_DEPENDENCY_EDGES, build_inkscript_declaration_model,
     build_inkscript_declaration_model_with_limits, resolve_inkscript_run_parameters,
 };
