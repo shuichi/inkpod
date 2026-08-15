@@ -225,10 +225,13 @@ fn generate() -> Result<(), String> {
     println!("cargo:rerun-if-changed={}", language.display());
     println!("cargo:rerun-if-changed=build.rs");
     let root = Parser::parse(&fs::read(&language).map_err(|error| error.to_string())?)?;
+    let file_version = number(member(&root, "file_version")?)?;
+    let procedure_catalog_version = number(member(&root, "procedure_catalog_version")?)?;
+    let required_replay_epoch = number(member(&root, "required_replay_epoch")?)?;
     if string(member(&root, "kind")?)? != "inkpod.inkscript.language"
-        || number(member(&root, "file_version")?)? != 1
-        || number(member(&root, "procedure_catalog_version")?)? != 1
-        || number(member(&root, "required_replay_epoch")?)? != 23
+        || file_version != 1
+        || procedure_catalog_version != 1
+        || required_replay_epoch != 23
     {
         return Err("language registry identity/version mismatch".to_owned());
     }
@@ -236,7 +239,20 @@ fn generate() -> Result<(), String> {
     let mut generated = String::from(
         "// @generated from the exact-current InkScript language registry; do not edit.\n",
     );
+    writeln!(
+        generated,
+        "const GENERATED_PROCEDURE_CATALOG_VERSION: u32 = {procedure_catalog_version};"
+    )
+    .unwrap();
+    writeln!(
+        generated,
+        "const GENERATED_REQUIRED_REPLAY_EPOCH: u32 = {required_replay_epoch};\n"
+    )
+    .unwrap();
     emit_type_names(&mut generated, &root)?;
+    emit_types(&mut generated, &root)?;
+    emit_enums(&mut generated, &root)?;
+    emit_constructors(&mut generated, &root)?;
     emit_section_order(&mut generated, &root)?;
     emit_collection(
         &mut generated,
@@ -250,6 +266,7 @@ fn generate() -> Result<(), String> {
         array(member(&root, "selector_entities")?)?,
         "filters",
     )?;
+    emit_selector_results(&mut generated, &root)?;
     emit_collection(
         &mut generated,
         "GENERATED_ASSERTIONS",
@@ -290,6 +307,101 @@ fn emit_type_names(output: &mut String, root: &Json) -> Result<(), String> {
     Ok(())
 }
 
+fn emit_types(output: &mut String, root: &Json) -> Result<(), String> {
+    writeln!(output, "const GENERATED_TYPES: &[GeneratedType] = &[").unwrap();
+    for entry in array(member(root, "types")?)? {
+        let name = string(member(entry, "name")?)?;
+        let kind = string(member(entry, "kind")?)?;
+        writeln!(
+            output,
+            "    GeneratedType {{ name: {name:?}, kind: {kind:?} }},"
+        )
+        .unwrap();
+    }
+    for entry in array(member(root, "enums")?)? {
+        let name = string(member(entry, "name")?)?;
+        writeln!(
+            output,
+            "    GeneratedType {{ name: {name:?}, kind: \"enum\" }},"
+        )
+        .unwrap();
+    }
+    for entry in array(member(root, "records")?)? {
+        let name = string(member(entry, "name")?)?;
+        writeln!(
+            output,
+            "    GeneratedType {{ name: {name:?}, kind: \"record\" }},"
+        )
+        .unwrap();
+    }
+    writeln!(output, "];\n").unwrap();
+    Ok(())
+}
+
+fn emit_enums(output: &mut String, root: &Json) -> Result<(), String> {
+    writeln!(output, "const GENERATED_ENUMS: &[GeneratedEnum] = &[").unwrap();
+    for entry in array(member(root, "enums")?)? {
+        let name = string(member(entry, "name")?)?;
+        let members = string_slice_expression(array(member(entry, "members")?)?)?;
+        writeln!(
+            output,
+            "    GeneratedEnum {{ name: {name:?}, members: {members} }},"
+        )
+        .unwrap();
+    }
+    writeln!(output, "];\n").unwrap();
+    Ok(())
+}
+
+fn emit_constructors(output: &mut String, root: &Json) -> Result<(), String> {
+    writeln!(
+        output,
+        "const GENERATED_CONSTRUCTORS: &[GeneratedConstructor] = &["
+    )
+    .unwrap();
+    for entry in array(member(root, "constructors")?)? {
+        let name = string(member(entry, "name")?)?;
+        let result = string(member(entry, "result")?)?;
+        writeln!(
+            output,
+            "    GeneratedConstructor {{ name: {name:?}, result: {result:?}, arguments: &["
+        )
+        .unwrap();
+        for argument in array(member(entry, "arguments")?)? {
+            let argument_name = string(member(argument, "name")?)?;
+            let type_name = string(member(argument, "type")?)?;
+            let constraints = string_slice_expression(array(member(argument, "constraints")?)?)?;
+            writeln!(
+                output,
+                "        GeneratedConstructorArgument {{ name: {argument_name:?}, type_name: {type_name:?}, constraints: {constraints} }},"
+            )
+            .unwrap();
+        }
+        writeln!(output, "    ] }},").unwrap();
+    }
+    writeln!(output, "];\n").unwrap();
+    Ok(())
+}
+
+fn emit_selector_results(output: &mut String, root: &Json) -> Result<(), String> {
+    writeln!(
+        output,
+        "const GENERATED_SELECTOR_RESULTS: &[GeneratedSelectorResult] = &["
+    )
+    .unwrap();
+    for entry in array(member(root, "selector_entities")?)? {
+        let name = string(member(entry, "name")?)?;
+        let reference_type = string(member(entry, "reference_type")?)?;
+        writeln!(
+            output,
+            "    GeneratedSelectorResult {{ name: {name:?}, reference_type: {reference_type:?} }},"
+        )
+        .unwrap();
+    }
+    writeln!(output, "];\n").unwrap();
+    Ok(())
+}
+
 fn emit_collection(
     output: &mut String,
     const_name: &str,
@@ -307,9 +419,10 @@ fn emit_collection(
             let required = boolean(member(field, "required")?)?;
             let order = number(member(field, "canonical_order")?)?;
             let default = default_expression(member(field, "default")?, required)?;
+            let constraints = string_slice_expression(array(member(field, "constraints")?)?)?;
             writeln!(
                 output,
-                "        InkScriptFieldSchema {{ name: {field_name:?}, type_name: {type_name:?}, required: {required}, default: {default}, canonical_order: {order} }},"
+                "        InkScriptFieldSchema {{ name: {field_name:?}, type_name: {type_name:?}, required: {required}, default: {default}, canonical_order: {order}, constraints: {constraints} }},"
             )
             .unwrap();
         }
@@ -317,6 +430,15 @@ fn emit_collection(
     }
     writeln!(output, "];\n").unwrap();
     Ok(())
+}
+
+fn string_slice_expression(values: &[Json]) -> Result<String, String> {
+    let mut result = String::from("&[");
+    for value in values {
+        write!(result, "{:?},", string(value)?).unwrap();
+    }
+    result.push(']');
+    Ok(result)
 }
 
 fn default_expression(value: &Json, required: bool) -> Result<String, String> {

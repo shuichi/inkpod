@@ -1,17 +1,33 @@
 mod diagnostic;
 mod emit;
+mod envelope;
+mod fragment;
 mod lexer;
 mod names;
 mod parser;
 mod schema;
 mod source;
 mod syntax;
+mod types;
 
 pub use diagnostic::{
     InkScriptDiagnostic, InkScriptDiagnosticCode, InkScriptDiagnosticSeverity, InkScriptSourceId,
     InkScriptSourcePosition, InkScriptSourceRange, InkScriptSourceSpan,
 };
 pub use emit::emit_inkscript_canonical;
+pub use envelope::{
+    InkScriptCellSelection, InkScriptEnvelopeError, InkScriptEnvelopeErrorCode,
+    InkScriptExecutionFailure, InkScriptExecutionPolicy, InkScriptInputDeclaration,
+    InkScriptInputDeclarationKind, InkScriptMetadata, InkScriptMetadataExtension,
+    InkScriptNumberDirection, InkScriptNumberedOutput, InkScriptOrchestrationEnvelope,
+    InkScriptOutput, InkScriptOutputFormat, InkScriptPathIntent, InkScriptPathIntentAccess,
+    InkScriptPathIntentPreview, InkScriptRequirements, MAX_INKSCRIPT_WAIT_MS,
+    build_inkscript_orchestration_envelope,
+};
+pub use fragment::{
+    InkScriptClosedFragment, InkScriptExternalResultBinding, InkScriptFragmentRequest,
+    InkScriptFragmentSelection, close_inkscript_fragment,
+};
 pub use lexer::{
     InkScriptKeyword, InkScriptLexed, InkScriptPunctuation, InkScriptToken, InkScriptTokenKind,
     lex_inkscript, lex_inkscript_with_limits,
@@ -26,8 +42,11 @@ pub use parser::{
     parse_inkscript_with_limits,
 };
 pub use schema::{
-    InkScriptCommandSchema, InkScriptFieldSchema, InkScriptRecordSchema, InkScriptSchemaDefault,
-    InkScriptSchemaView, InkScriptSemanticError, InkScriptSemanticErrorCode,
+    INKSCRIPT_PROCEDURE_CATALOG_VERSION, INKSCRIPT_REQUIRED_REPLAY_EPOCH,
+    InkScriptCommandResultSchema, InkScriptCommandSchema, InkScriptFieldSchema,
+    InkScriptRecordSchema, InkScriptResultAvailability, InkScriptResultCardinality,
+    InkScriptSchemaDefault, InkScriptSchemaView, InkScriptSemanticError,
+    InkScriptSemanticErrorCode,
 };
 pub use source::{
     INKSCRIPT_FILE_VERSION, InkScriptLexerLimits, InkScriptLineMap, InkScriptSource,
@@ -40,4 +59,14 @@ pub use syntax::{
     InkScriptProgramStatement, InkScriptRecord, InkScriptReferenceSegment,
     InkScriptSemanticDocument, InkScriptSemanticSection, InkScriptTypeReference, InkScriptValue,
     build_inkscript_semantic,
+};
+pub use types::{
+    InkScriptAnalysisLimits, InkScriptDeclarationModel, InkScriptDependencyEdge,
+    InkScriptDependencyNode, InkScriptDependencyNodeKind, InkScriptResolvedType,
+    InkScriptRunParameterChoice, InkScriptRunParameterDecision, InkScriptRunParameterValue,
+    InkScriptRunParameters, InkScriptStepGroup, InkScriptTypeDiagnostic,
+    InkScriptTypeDiagnosticCode, InkScriptTypedAsset, InkScriptTypedBinding,
+    InkScriptTypedParameter, InkScriptTypedStep, InkScriptTypedStepResult, InkScriptTypedValue,
+    InkScriptTypedValueKind, MAX_INKSCRIPT_DEPENDENCY_EDGES, build_inkscript_declaration_model,
+    build_inkscript_declaration_model_with_limits, resolve_inkscript_run_parameters,
 };

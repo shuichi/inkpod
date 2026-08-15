@@ -1721,7 +1721,7 @@ Version impact:
 - C ABI: 14（変更なし）
 ```
 
-### [~] M03 — semantic ASTとcanonical emitter
+### [x] M03 — semantic ASTとcanonical emitter
 
 **範囲**
 
@@ -1758,7 +1758,7 @@ Version impact:
 - Windows x64 Debug configure/build、static CRT、portable ZIP、unsigned MSIX、全36 CTestが成功した。最終増分build後のABI smokeは57.78秒、
   English smokeは174.13秒、Japanese smokeは182.49秒、CTest全体は428.32秒だった。
 - typed orchestration、Core compiler/executor、C ABI、Windows UI、`.inkbatch` production routeは変更していない。
-  既存binaryの利用者回帰確認待ちとして停止する。
+  次sessionの不具合報告を伴わない汎用promptにより既存binaryの回帰確認済みとして`[x]`へ移行した。
 
 ```text
 Version impact:
@@ -1769,7 +1769,7 @@ Version impact:
 - C ABI: 14（変更なし）
 ```
 
-### [ ] M04 — typed orchestration envelope
+### [x] M04 — typed orchestration envelope
 
 **範囲**
 
@@ -1786,7 +1786,41 @@ Version impact:
 - `.inkpod` versionをscript sourceへ固定しない契約がtest/docで一致する。
 - 既存`.inkbatch` binaryとUI smokeに回帰がない。
 
-### [ ] M05A — type、namespace、parameter
+**自動検証結果（2026-08-15）**
+
+- `inkpod-format`へcomplete file専用のimmutable `InkScriptOrchestrationEnvelope`を追加し、`requires`、
+  非意味的`meta` extension、全input kindとinclusive cell range、closed native output variant、bounded execution
+  policyを固定幅のtyped modelへ変換する。fragment、noncurrent catalog/replay、型不一致、numeric overflow、
+  invalid/recursive range、metadata key重複、不正output/executionをsource AST無変更で拒否する。
+- file/folder inputとduplicate/new-save/explicit-overwriteから、宣言順の`read`／`enumerate`／`create`／`replace`
+  path-intent textをowned previewとして返す。変換とpreviewはfilesystemをopen/列挙せず、authority、Core、task、
+  outputを作らない。current document/sequenceと`explicit_overwrite`の静的に不可能な組合せも拒否する。
+- procedure catalog versionとrequired replay epochの公開値は`language-v1.json`からbuild生成し、別の手書き正本を
+  作らない。`.inkpod` top-level versionはsource/modelへ追加せず、output formatはexact-current native
+  `inkpod`だけをtypedに受理する。
+- 公開契約test 4件でcanonical round-trip、全input/output variant、metadata extension、path intent、pure no-op、
+  noncurrent file/catalog/replay、unknown/forbidden field、invalid type/range/policy/bounds、overflow、failure atomicity、
+  `Send + Sync`を検証した。Core/FFI/Windows productからtyped envelopeへ到達しないarchitecture gateを追加した。
+- `cargo fmt --check`、workspace全target／feature Clippy、workspace 503 tests（doctest 1、ignored 0）、workspace
+  strict rustdoc、lexer/parser fuzz target check、既存approved quick benchmarkが成功した。benchmark workload、
+  harness、counter、envelopeは変更せず、M03記録の三checksumを維持した。
+- Windows x64 Debug configure/build、static CRT、portable ZIP、unsigned MSIXが成功した。sandbox内でGUI起動を
+  要する4 CTestだけが失敗したが、通常desktop権限で対象を再実行して全件成功し、全36 testの成功を確認した。
+  ABI smokeは57.78秒、English smokeは168.79秒、Japanese smokeは170.27秒だった。
+- typed parameter/program/compiler/executor、path解決／authority、C ABI、Windows UI、`.inkbatch` production routeは
+  変更していない。新規の手動UI項目はなく、次sessionの不具合報告を伴わない汎用promptにより既存binaryの
+  回帰確認済みとして`[x]`へ移行した。
+
+```text
+Version impact:
+- InkScript file: 1（批准済みorchestration contractの初回typed実装、grammar変更なし、bumpなし）
+- InkScript procedure catalog: 1（private draft、entry 0、変更なし）
+- replay epoch: 23（canonical replay semantics変更なし）
+- .inkpod top-level: 26（sourceへ固定せず、変更なし）
+- C ABI: 14（symbol/record変更なし）
+```
+
+### [x] M05A — type、namespace、parameter
 
 **範囲**
 
@@ -1801,7 +1835,43 @@ Version impact:
 - each-run値を確定したrun copyがsource/defaultを変更せず、Cancel/invalidでjob modelを作らない。
 - value/asset namespaceと可視性が6.5に一致する。
 
-### [ ] M05B — step result、dependency、fragment closure
+**自動検証結果（2026-08-15）**
+
+- `language-v1.json`からtype kind、closed enum member、constructor signature／argument constraint、closed-record
+  field constraint、selector result typeをbuild時に一方向生成し、既存`SchemaView`だけを型の正本として使う
+  immutable `InkScriptDeclarationModel`を`inkpod-format`へ追加した。private catalog draftは読み込まない。
+- parameterのdeclared type、literal/default、Q16 exact-decimal ties-to-even、closed sum、list／nullable、constructor
+  arity／channel range、closed recordを固定幅のowned typed valueへ変換する。value namespaceはparameter、binding、
+  step result aliasで共有し、assetは同名を許す別namespaceとして、duplicate、undefined、forward、shadowing、
+  binding dependency cycleをsource declaration range付きのstable diagnosticで拒否する。
+- selector bindingはinitial declaration orderだけを使ってparameterと先行bindingを解決し、`cardinality = all`だけを
+  `list<entity_ref>`相当へ固定する。selectorのdocument解決／assert／step result availabilityは後続ownerへ残した。
+- `ask = each_run`は対象parameterごとの`accepted_default`またはoverrideを必須とするimmutable run copyとして実装した。
+  Cancel、欠落、重複、unknown／`ask = never`指定、型不一致はcopyを公開せず、source AST、stored default、declaration
+  modelを変更しない。job、Core、path authority、outputは作らない。
+- 公開契約test 4件でempty no-op、全主要type／constructor／record、value／asset namespace分離、duplicate／undefined／
+  forward／cycle、numeric／Q16／constructor overflow、source range、each-run success／Cancel／invalid atomicity、owned
+  `Send + Sync`を検証した。Core／FFI／Windows productからdeclaration/run modelへ到達しないarchitecture gateも追加した。
+- `cargo fmt --check`、workspace全target／feature Clippy、workspace 507 tests（doctest 1、ignored 0）、workspace strict
+  rustdoc、lexer/parser fuzz target check、既存approved quick benchmarkが成功した。benchmark workload、harness、counter、
+  envelopeは変更せず、`canonical_replay=264b98028ac92ac6`、`checkpoint_open=07da1b4e6bc5d289`、
+  `output_color_guard=cfb6b288963c78ba`を維持した。
+- Windows x64 Debug configure／build、static CRT、portable ZIP、unsigned MSIX、最終binaryで全36 CTestが
+  410.99秒で成功した。ABI smokeは58.15秒、English smokeは169.19秒、Japanese smokeは169.96秒だった。
+- step result typing／dependency closure、selector／assert実行、Core compiler/executor、C ABI、Windows UI、
+  `.inkbatch` production routeは変更していない。新規の手動UI項目はなく、次sessionの不具合報告を伴わない
+  汎用promptにより既存binaryの回帰確認済みとして`[x]`へ移行した。
+
+```text
+Version impact:
+- InkScript file: 1（批准済みlanguage v1 type/namespace/parameter contractの初回実装、grammar変更なし）
+- InkScript procedure catalog: 1（private draft、entry 0、変更なし）
+- replay epoch: 23（canonical replay semantics変更なし）
+- .inkpod top-level: 26（schema／state／replay変更なし）
+- C ABI: 14（symbol／record変更なし）
+```
+
+### [~] M05B — step result、dependency、fragment closure
 
 **範囲**
 
@@ -1815,6 +1885,39 @@ Version impact:
 - source range付きresult field/index/availability/dependency diagnostic testがある。
 - fragment closureが範囲外mutationを暗黙追加せず、parse/emit/name rewriteがdeterministicである。
 - parser/compilerがRust `Debug`名や未知commandを暗黙受理しない。
+
+**自動検証結果（2026-08-15）**
+
+- M03のbounded test command `SchemaView`へclosed scalar／ordered-list result field、availability、canonical orderを
+  追加し、immutable step result／typed invocation／contiguous editor groupをM05Aの単一declaration modelへ統合した。
+  private catalog draftはentry 0のまま読み込まず、fixed tupleとproduct catalog entryは後続ownerへ残した。
+- parameter、binding、先行step result、assetの全reference occurrenceを決定的なsemantic traversal順のbounded dependency graphへ
+  正規化した。result field、constant list index、scalar/list exact match、disabled／forward producer、self-cycle、
+  `always_on_success`／`only_on_change` availabilityをsource declaration range付きstable diagnosticで検証する。
+- step range／`editor_group`のfragment closureは必要なparameter／binding／assetと範囲内producerだけを含め、範囲外
+  mutationを暗黙追加しない。範囲外stable resultはsource UUID＋nonzero persistent IDのstrict selector bindingへ
+  明示変換するか拒否し、同一asset ID＋descriptorをdeduplicateする。destination collisionはvalue／asset namespaceと
+  group keyを分離し、最小decimal suffixで宣言と全referenceを一括alpha-renameする。
+- 公開契約test 5件でempty no-op、step/group/result所有、全edge kind、field／index／cardinality／availability、unknown
+  schema／command、overflow、caller-lowered resource stop、failure atomicity、外部producer拒否／strict binding化、asset
+  dedup、canonical emit→parse→type、反復決定性、`Send + Sync`を検証した。Core／FFI／Windows product非到達gateも拡張した。
+- `cargo fmt --check`、workspace全target／feature Clippy、workspace 512 tests（doctest 1、ignored 0）、workspace strict
+  rustdoc、lexer/parser fuzz target check、既存approved quick benchmarkが成功した。workload、harness、counter、envelopeは
+  変更せず、`canonical_replay=264b98028ac92ac6`、`checkpoint_open=07da1b4e6bc5d289`、
+  `output_color_guard=cfb6b288963c78ba`を維持した。
+- Windows x64 Debug configure／build、static CRT、portable ZIP、unsigned MSIX、最終binaryの全36 CTestが
+  419.29秒で成功した。ABI smokeは58.38秒、English smokeは170.71秒、Japanese smokeは177.70秒だった。
+- selector／assert実行、catalog interface、Core compiler/executor、authority／plan、C ABI、Windows UI、`.inkbatch`
+  production routeは変更していない。新規手動UI項目はなく、既存binaryの利用者回帰確認待ちとして停止する。
+
+```text
+Version impact:
+- InkScript file: 1（批准済みresult/reference/fragment closure contractの初回typed実装、grammar変更なし）
+- InkScript procedure catalog: 1（bounded test schemaのみ、private draft entry 0、変更なし）
+- replay epoch: 23（canonical replay semantics変更なし）
+- .inkpod top-level: 26（schema／state／replay変更なし）
+- C ABI: 14（symbol／record変更なし）
+```
 
 ### [ ] M06 — selector、assert、catalog interface
 

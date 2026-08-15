@@ -990,3 +990,36 @@ fn inkscript_private_draft_is_unreachable_from_production() {
         );
     }
 }
+
+#[test]
+fn inkscript_typed_frontend_models_are_unreachable_from_core_ffi_and_windows() {
+    let repository = repository();
+    let mut sources = Vec::new();
+    for root in [
+        "rust/inkpod-core/src",
+        "rust/inkpod-ffi/src",
+        "apps/windows",
+        "include",
+    ] {
+        collect_production_sources(&repository.join(root), &mut sources);
+    }
+    for source in sources {
+        let contents = fs::read(&source)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", source.display()));
+        let text = String::from_utf8_lossy(&contents);
+        assert!(
+            !text.contains("build_inkscript_orchestration_envelope")
+                && !text.contains("InkScriptOrchestrationEnvelope")
+                && !text.contains("InkScriptPathIntentPreview")
+                && !text.contains("build_inkscript_declaration_model")
+                && !text.contains("InkScriptDeclarationModel")
+                && !text.contains("resolve_inkscript_run_parameters")
+                && !text.contains("close_inkscript_fragment")
+                && !text.contains("InkScriptClosedFragment")
+                && !text.contains("InkScriptTypedStep")
+                && !text.contains("InkScriptDependencyEdge"),
+            "production source {} reaches a private typed InkScript model",
+            source.display()
+        );
+    }
+}
