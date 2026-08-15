@@ -14,6 +14,12 @@ pub(crate) mod inkscript;
     reason = "the private legacy-image adapter stays disconnected until the compiler owner"
 )]
 pub(crate) mod inkscript_batch;
+#[allow(
+    dead_code,
+    reason = "the private document-tree adapter is connected only through the script runner"
+)]
+pub(crate) mod inkscript_document_tree;
+mod inkscript_reference;
 mod invocation;
 mod model;
 mod raster;
@@ -32,6 +38,8 @@ pub(crate) use display::display_procedure;
 pub(crate) use executor::validate_persisted_procedure;
 pub(crate) use inkscript::{LegacySimpleAdapterError, LegacySimpleScriptStep};
 pub(crate) use inkscript_batch::{LegacyImageAdapterError, LegacyImageScriptStep};
+pub(crate) use inkscript_document_tree::{DocumentTreeAdapterError, DocumentTreeScriptStep};
+pub(crate) use inkscript_reference::{InkScriptEntityKind, InkScriptRuntimeReferences};
 pub(crate) use invocation::{CanonicalInvocation, InvocationResult, RuntimeInvocation};
 use model::CanonicalPrimitive;
 pub(crate) use model::CanonicalStrokeArguments;

@@ -458,10 +458,10 @@ fn inkscript_registry_meta_schema_is_closed_and_draft_is_private() {
         "inkpod.inkscript.catalog-draft"
     );
     assert_eq!(member(&draft, "production"), &Json::Bool(false));
-    assert_eq!(array(member(&draft, "entries")).len(), 13);
+    assert_eq!(array(member(&draft, "entries")).len(), 26);
     assert_eq!(array(member(&draft, "enums")).len(), 11);
-    assert_eq!(array(member(&draft, "records")).len(), 13);
-    assert!(array(member(&draft, "constructors")).is_empty());
+    assert_eq!(array(member(&draft, "records")).len(), 18);
+    assert_eq!(array(member(&draft, "constructors")).len(), 9);
     assert!(
         !repository()
             .join("schemas/inkscript/registry-schema-v1.json")
@@ -479,6 +479,123 @@ fn inkscript_registry_meta_schema_is_closed_and_draft_is_private() {
             .join("docs/inkscript-command-reference.md")
             .exists(),
         "the generated command reference must not exist before catalog freeze"
+    );
+}
+
+#[test]
+fn inkscript_document_tree_catalog_entries_are_closed_typed_and_owner_exact() {
+    let language = load_json("schemas/inkscript/language-v1.json");
+    let draft = load_json("schemas/inkscript/catalog-v1.draft.json");
+    let manifest = load_json("schemas/inkscript/owner-manifest-v1.json");
+    let type_names = composed_catalog_type_names(&language, &draft);
+    let expected = BTreeMap::from([
+        ("update_paper_frames", ("0x00010001", 2, 2, "INKS-EQ-0001")),
+        ("create_layer", ("0x00020001", 2, 2, "INKS-EQ-0002")),
+        ("duplicate_layer", ("0x00020002", 2, 2, "INKS-EQ-0003")),
+        ("delete_layer", ("0x00020003", 2, 2, "INKS-EQ-0004")),
+        ("reorder_layer", ("0x00020004", 2, 2, "INKS-EQ-0005")),
+        ("create_plane", ("0x00020011", 2, 2, "INKS-EQ-0007")),
+        ("duplicate_plane", ("0x00020012", 2, 2, "INKS-EQ-0008")),
+        ("delete_plane", ("0x00020013", 2, 2, "INKS-EQ-0009")),
+        ("reorder_plane", ("0x00020014", 2, 2, "INKS-EQ-0010")),
+        ("merge_plane", ("0x00020017", 2, 2, "INKS-EQ-0013")),
+        ("merge_layer", ("0x00020022", 2, 2, "INKS-EQ-0015")),
+        ("delete_hidden_layers", ("0x00020023", 2, 2, "INKS-EQ-0016")),
+        ("edit_targets", ("0x00020030", 2, 1, "INKS-EQ-0017")),
+    ]);
+    const OWNER_MILESTONE: &str = concat!("M", "15");
+    let manifest_owners = array(member(&manifest, "owners"))
+        .iter()
+        .filter(|owner| string(member(owner, "owner_milestone")) == OWNER_MILESTONE)
+        .map(|owner| (string(member(owner, "command_name")), owner))
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(manifest_owners.len(), expected.len());
+
+    let entries = array(member(&draft, "entries"))
+        .iter()
+        .filter(|entry| string(member(entry, "owner_milestone")) == OWNER_MILESTONE)
+        .collect::<Vec<_>>();
+    assert_eq!(entries.len(), expected.len());
+    let mut actual = BTreeSet::new();
+    for entry in entries {
+        let name = string(member(entry, "name"));
+        assert!(actual.insert(name));
+        let (primitive_id, schema, semantics, equivalence) = expected[name];
+        assert_eq!(string(member(entry, "primitive_id")), primitive_id);
+        assert_eq!(number(member(entry, "primitive_schema_version")), schema);
+        assert_eq!(number(member(entry, "replay_epoch")), 23);
+        assert_eq!(number(member(entry, "semantics_revision")), semantics);
+        assert_eq!(string(member(entry, "equivalence_test")), equivalence);
+        assert_eq!(
+            string(member(member(entry, "editor"), "family")),
+            "document_tree"
+        );
+        let owner = manifest_owners[name];
+        assert_eq!(string(member(owner, "primitive_id")), primitive_id);
+        assert_eq!(
+            string(member(owner, "planned_equivalence_test")),
+            equivalence
+        );
+
+        let mut argument_orders = BTreeSet::new();
+        for argument in array(member(entry, "arguments")) {
+            assert!(type_names.contains(base_type(string(member(argument, "type")))));
+            assert!(argument_orders.insert(number(member(argument, "canonical_order"))));
+        }
+        assert!(
+            argument_orders
+                .iter()
+                .copied()
+                .eq(0..argument_orders.len() as u64)
+        );
+        for result in array(member(entry, "results")) {
+            assert_exact_keys(
+                result,
+                &[
+                    "availability",
+                    "canonical_order",
+                    "cardinality",
+                    "name",
+                    "namespace",
+                    "output_id_ordinal",
+                    "owner_role",
+                    "type",
+                ],
+            );
+            assert!(type_names.contains(base_type(string(member(result, "type")))));
+            assert_eq!(string(member(result, "availability")), "always_on_success");
+            assert_eq!(string(member(result, "namespace")), "document_stable");
+        }
+    }
+    assert_eq!(actual, expected.keys().copied().collect());
+
+    for record_name in [
+        "frame_rect_i32",
+        "paper_margins",
+        "paper_frames",
+        "edit_target",
+        "edit_target_command",
+    ] {
+        let record = named(member(&draft, "records"), record_name);
+        validate_fields(member(record, "fields"), &type_names, record_name);
+    }
+    let constructor_names = array(member(&draft, "constructors"))
+        .iter()
+        .map(|value| string(member(value, "name")))
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        constructor_names,
+        BTreeSet::from([
+            "duplicate_targets",
+            "delete_targets",
+            "set_target_visibility",
+            "set_target_editability",
+            "convert_target_planes",
+            "convert_target_layers",
+            "merge_targets",
+            "layer_target",
+            "plane_target",
+        ])
     );
 }
 
@@ -1307,6 +1424,8 @@ fn inkscript_typed_frontend_models_are_unreachable_from_core_ffi_and_windows() {
     let private_adapters = [
         core_source.join("primitive/inkscript.rs"),
         core_source.join("primitive/inkscript_batch.rs"),
+        core_source.join("primitive/inkscript_document_tree.rs"),
+        core_source.join("primitive/inkscript_reference.rs"),
     ];
     let private_compiler = core_source.join("script");
     let mut core_sources = Vec::new();

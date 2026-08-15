@@ -219,6 +219,9 @@ pub(crate) trait ScriptRunAdapter: Send {
     ) -> Result<ScriptAtomicInstallResult, ScriptRunAdapterError>;
     /// Cleanup must be identity-guarded and leave a different object untouched.
     fn cleanup_closed_temporary(&mut self, temporary: ScriptTemporaryIdentity);
+
+    #[cfg(test)]
+    fn observe_staged_execution(&mut self, _report: &ScriptDryRunReport) {}
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -521,6 +524,8 @@ fn run_one_item(
         Err(ScriptRunError::Cancelled) => return ItemRunResult::cancelled(),
         Err(error) => return ItemRunResult::failed(execution_failure(error)),
     };
+    #[cfg(test)]
+    adapter.observe_staged_execution(&executed.report);
     if mode == ScriptRunMode::DryRun {
         return ItemRunResult {
             outcome: ScriptItemOutcome::DryRun,

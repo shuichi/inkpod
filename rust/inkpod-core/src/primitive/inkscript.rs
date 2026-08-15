@@ -1,6 +1,9 @@
 //! Private pre-ratification adapters for the LegacySimple legacy-simple InkScript catalog family.
 
 use super::CanonicalInvocation;
+use super::inkscript_reference::{
+    InkScriptEntityKind, InkScriptReferenceError, InkScriptRuntimeReferences,
+};
 use crate::{
     DocumentResize, LayerKind, MAX_FILL_PIXELS, MirrorAxis, PixelFormat, PlaneType, PrimitiveId,
     ResizeAnchor, RotateDirection,
@@ -192,19 +195,7 @@ const LEGACY_SIMPLE_CATALOG: &[LegacySimpleCatalogEntry] = &[
     ),
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum LegacySimpleEntityKind {
-    Layer,
-    Plane,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct LegacySimpleResolvedBinding {
-    entity: LegacySimpleEntityKind,
-    persistent_id: u64,
-}
-
-type LegacySimpleLiftedArguments = (&'static str, Option<(LegacySimpleEntityKind, u64)>, String);
+type LegacySimpleLiftedArguments = (&'static str, Option<(InkScriptEntityKind, u64)>, String);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct LegacySimpleWorkEstimate {
@@ -232,7 +223,7 @@ pub(crate) enum LegacySimpleAdapterError {
 pub(crate) struct LegacySimpleScriptStep {
     typed: InkScriptTypedStep,
     arguments: InkScriptTypedValue,
-    bindings: BTreeMap<String, LegacySimpleResolvedBinding>,
+    bindings: InkScriptRuntimeReferences,
 }
 
 impl LegacySimpleScriptStep {
@@ -243,25 +234,21 @@ impl LegacySimpleScriptStep {
         let mut source = String::from(
             "inkscript_fragment 1;\nrequires { procedure_catalog = 1; replay_epoch = 23; }\n",
         );
-        let mut bindings = BTreeMap::new();
+        let mut bindings = InkScriptRuntimeReferences::default();
         if let Some((entity, persistent_id)) = binding {
             if persistent_id == 0 {
                 return Err(LegacySimpleAdapterError::InvalidValue);
             }
             let entity_name = match entity {
-                LegacySimpleEntityKind::Layer => "layer",
-                LegacySimpleEntityKind::Plane => "plane",
+                InkScriptEntityKind::Layer => "layer",
+                InkScriptEntityKind::Plane => "plane",
             };
             source.push_str(&format!(
                 "bindings {{ let target = select {entity_name} {{ source_document_uuid = uuid\"{ADAPTER_SOURCE_UUID}\"; persistent_id = {persistent_id}; }}; }}\n"
             ));
-            bindings.insert(
-                "target".to_owned(),
-                LegacySimpleResolvedBinding {
-                    entity,
-                    persistent_id,
-                },
-            );
+            bindings
+                .insert("target", entity, persistent_id)
+                .map_err(reference_error)?;
         }
         source.push_str(&format!(
             "program {{ step \"Canonical LegacySimple adapter\" {{ enabled = true; invoke {command} {{ {arguments} }}; }} }}\n"
@@ -271,7 +258,7 @@ impl LegacySimpleScriptStep {
 
     fn from_source(
         source: &str,
-        bindings: BTreeMap<String, LegacySimpleResolvedBinding>,
+        bindings: InkScriptRuntimeReferences,
     ) -> Result<Self, LegacySimpleAdapterError> {
         let source = InkScriptSource::new(InkScriptSourceId::new(7), source.as_bytes())
             .map_err(|_| LegacySimpleAdapterError::InvalidSource)?;
@@ -295,29 +282,12 @@ impl LegacySimpleScriptStep {
     pub(crate) fn from_compiled(
         typed: &InkScriptTypedStep,
         arguments: InkScriptTypedValue,
-        bindings: &BTreeMap<String, crate::script::bind::InkScriptBoundValue>,
+        bindings: &InkScriptRuntimeReferences,
     ) -> Result<Self, LegacySimpleAdapterError> {
-        let bindings = bindings
-            .iter()
-            .filter_map(|(name, value)| match value {
-                crate::script::bind::InkScriptBoundValue::One(reference) => Some((
-                    name.clone(),
-                    LegacySimpleResolvedBinding {
-                        entity: match reference.entity.as_str() {
-                            "layer" => LegacySimpleEntityKind::Layer,
-                            "plane" => LegacySimpleEntityKind::Plane,
-                            _ => return None,
-                        },
-                        persistent_id: reference.persistent_id,
-                    },
-                )),
-                _ => None,
-            })
-            .collect();
         Ok(Self {
             typed: typed.clone(),
             arguments,
-            bindings,
+            bindings: bindings.clone(),
         })
     }
 
@@ -328,7 +298,7 @@ impl LegacySimpleScriptStep {
                 layer_id: binding_id(
                     field(arguments, "layer_id")?,
                     &self.bindings,
-                    LegacySimpleEntityKind::Layer,
+                    InkScriptEntityKind::Layer,
                 )?,
                 visible: boolean(field(arguments, "visible")?)?,
                 editable: boolean(field(arguments, "editable")?)?,
@@ -339,7 +309,7 @@ impl LegacySimpleScriptStep {
                 plane_id: binding_id(
                     field(arguments, "plane_id")?,
                     &self.bindings,
-                    LegacySimpleEntityKind::Plane,
+                    InkScriptEntityKind::Plane,
                 )?,
                 visible: boolean(field(arguments, "visible")?)?,
                 editable: boolean(field(arguments, "editable")?)?,
@@ -350,7 +320,7 @@ impl LegacySimpleScriptStep {
                 plane_id: binding_id(
                     field(arguments, "plane_id")?,
                     &self.bindings,
-                    LegacySimpleEntityKind::Plane,
+                    InkScriptEntityKind::Plane,
                 )?,
                 destination_kind: plane_kind(field(arguments, "destination_kind")?)?,
                 destination_format: pixel_format(field(arguments, "destination_format")?)?,
@@ -359,7 +329,7 @@ impl LegacySimpleScriptStep {
                 layer_id: binding_id(
                     field(arguments, "layer_id")?,
                     &self.bindings,
-                    LegacySimpleEntityKind::Layer,
+                    InkScriptEntityKind::Layer,
                 )?,
                 destination: layer_kind(field(arguments, "destination")?)?,
             }),
@@ -433,7 +403,7 @@ fn lift_arguments(
             validate_properties(*opacity_milli, name)?;
             (
                 "set_layer_properties",
-                Some((LegacySimpleEntityKind::Layer, *layer_id)),
+                Some((InkScriptEntityKind::Layer, *layer_id)),
                 format!(
                     "layer_id = $target; visible = {visible}; editable = {editable}; opacity_milli = {opacity_milli}; name = {};",
                     string_literal(name)
@@ -450,7 +420,7 @@ fn lift_arguments(
             validate_properties(*opacity_milli, name)?;
             (
                 "set_plane_properties",
-                Some((LegacySimpleEntityKind::Plane, *plane_id)),
+                Some((InkScriptEntityKind::Plane, *plane_id)),
                 format!(
                     "plane_id = $target; visible = {visible}; editable = {editable}; opacity_milli = {opacity_milli}; name = {};",
                     string_literal(name)
@@ -463,7 +433,7 @@ fn lift_arguments(
             destination_format,
         } => (
             "convert_plane",
-            Some((LegacySimpleEntityKind::Plane, *plane_id)),
+            Some((InkScriptEntityKind::Plane, *plane_id)),
             format!(
                 "plane_id = $target; destination_kind = {}; destination_format = {};",
                 plane_kind_name(*destination_kind),
@@ -475,7 +445,7 @@ fn lift_arguments(
             destination,
         } => (
             "convert_layer",
-            Some((LegacySimpleEntityKind::Layer, *layer_id)),
+            Some((InkScriptEntityKind::Layer, *layer_id)),
             format!(
                 "layer_id = $target; destination = {};",
                 layer_kind_name(*destination)
@@ -531,25 +501,18 @@ fn field<'a>(
 
 fn binding_id(
     value: &InkScriptTypedValue,
-    bindings: &BTreeMap<String, LegacySimpleResolvedBinding>,
-    expected: LegacySimpleEntityKind,
+    bindings: &InkScriptRuntimeReferences,
+    expected: InkScriptEntityKind,
 ) -> Result<u64, LegacySimpleAdapterError> {
-    let InkScriptTypedValueKind::Reference { root, segments } = value.kind() else {
-        return Err(LegacySimpleAdapterError::InvalidTypedStep);
-    };
-    if !segments.is_empty() {
-        return Err(LegacySimpleAdapterError::InvalidTypedStep);
+    bindings.resolve(value, expected).map_err(reference_error)
+}
+
+fn reference_error(error: InkScriptReferenceError) -> LegacySimpleAdapterError {
+    match error {
+        InkScriptReferenceError::InvalidReference => LegacySimpleAdapterError::InvalidTypedStep,
+        InkScriptReferenceError::MissingReference => LegacySimpleAdapterError::MissingBinding,
+        InkScriptReferenceError::KindMismatch => LegacySimpleAdapterError::TargetMismatch,
     }
-    let binding = bindings
-        .get(root)
-        .ok_or(LegacySimpleAdapterError::MissingBinding)?;
-    if binding.entity != expected {
-        return Err(LegacySimpleAdapterError::TargetMismatch);
-    }
-    if binding.persistent_id == 0 {
-        return Err(LegacySimpleAdapterError::InvalidValue);
-    }
-    Ok(binding.persistent_id)
 }
 
 fn boolean(value: &InkScriptTypedValue) -> Result<bool, LegacySimpleAdapterError> {
@@ -964,7 +927,7 @@ mod tests {
             Err(LegacySimpleAdapterError::MissingBinding)
         );
         let mut wrong_kind = LegacySimpleScriptStep::from_canonical(&valid).unwrap();
-        wrong_kind.bindings.get_mut("target").unwrap().entity = LegacySimpleEntityKind::Plane;
+        wrong_kind.bindings.entry_mut("target").unwrap().kind = InkScriptEntityKind::Plane;
         assert_eq!(
             wrong_kind.to_canonical(),
             Err(LegacySimpleAdapterError::TargetMismatch)
@@ -972,7 +935,7 @@ mod tests {
 
         let mut stale_core = core();
         let mut stale = LegacySimpleScriptStep::from_canonical(&valid).unwrap();
-        stale.bindings.get_mut("target").unwrap().persistent_id = u64::MAX;
+        stale.bindings.entry_mut("target").unwrap().persistent_id = u64::MAX;
         let stale_invocation = stale.to_canonical().unwrap();
         let stale_digest = digest(&stale_core);
         let stale_revision = stale_core.document_revision;
@@ -991,14 +954,22 @@ mod tests {
             "{prefix} program {{ step \"Bad\" {{ enabled = true; invoke mirror_document {{ axis = horizontal; extra = true; }}; }} }}"
         );
         assert_eq!(
-            LegacySimpleScriptStep::from_source(&unknown_field, BTreeMap::new()).unwrap_err(),
+            LegacySimpleScriptStep::from_source(
+                &unknown_field,
+                InkScriptRuntimeReferences::default(),
+            )
+            .unwrap_err(),
             LegacySimpleAdapterError::Type(InkScriptTypeDiagnosticCode::InvalidSemanticModel)
         );
         let unknown_enum = format!(
             "{prefix} program {{ step \"Bad\" {{ enabled = true; invoke mirror_document {{ axis = diagonal; }}; }} }}"
         );
         assert_eq!(
-            LegacySimpleScriptStep::from_source(&unknown_enum, BTreeMap::new()).unwrap_err(),
+            LegacySimpleScriptStep::from_source(
+                &unknown_enum,
+                InkScriptRuntimeReferences::default(),
+            )
+            .unwrap_err(),
             LegacySimpleAdapterError::Type(InkScriptTypeDiagnosticCode::ValueOutOfRange)
         );
         const UNKNOWN_FIELDS: &[InkScriptFieldSchema] =

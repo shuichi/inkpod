@@ -1,10 +1,11 @@
 # Rust Core workflow benchmark baseline
 
 This document defines the current reproducible performance and semantic
-comparison contract for `rust/inkpod-core/benches/core_workflows.rs` and the
-native Windows performance smoke. Cross-host wall-clock values are not a CI
-gate. Semantic counters and checksums are hard gates on every host; elapsed time
-is gated only when the environment matches an explicitly approved envelope.
+comparison contract for `rust/inkpod-core/benches/core_workflows.rs`, the
+crate-private InkScript quick runner, and the native Windows performance smoke.
+Cross-host wall-clock values are not a CI gate. Semantic counters and checksums
+are hard gates on every host; elapsed time is gated only when the environment
+matches an explicitly approved envelope.
 
 Workload, harness, environment envelope, or the canonical cache formula may be
 changed only with recorded reasoning, complete samples and semantic counters,
@@ -17,6 +18,7 @@ acceptance logs. Historical calibration and milestone results are summarized in
 ```text
 cargo bench --package inkpod-core --bench core_workflows -- --quick
 cargo bench --package inkpod-core --bench core_workflows
+cargo test --release --package inkpod-core --lib script::tests::approved_quick_performance_contract -- --ignored --exact --nocapture --test-threads=1
 ```
 
 Both commands use the release benchmark profile and the same ten scenarios.
@@ -24,6 +26,12 @@ Quick is the bounded CI profile; full increases inputs for local before/after
 comparison. The checkpoint fixture is written outside its timed open interval
 and removed afterward. Batch uses in-memory sequence cells and asserts that its
 absent output directory remains absent.
+
+The ignored InkScript command is a separate Release process-level quick gate.
+It does not add an eleventh `core_workflows` scenario or change either existing
+profile. Fixture construction is untimed; the interval begins immediately
+before static compile and ends after plan, success/failure/cancel runs,
+cache-free reopen, checksum construction, and exact counter assertions.
 
 | Parameter | Quick | Full |
 |---|---:|---:|
@@ -160,6 +168,60 @@ After one discarded warm-up per profile, the accepted M22
 340,747,300 ns). Both medians remain inside the approved 55–92 ms and
 255–425 ms envelopes, and every measured process retained the exact counters
 and checksums above, so no independent regression-confirmation batch was needed.
+
+## Approved InkScript quick envelope
+
+The active range ID is
+`windows-x64-ryzen-9-9950x3d-release-2026-08-15-inkscript-v1`. It applies only
+to Windows build 26200.9168 on the MSI MS-7E26 host with an AMD Ryzen 9
+9950X3D, 127.6 GiB memory, x86_64-pc-windows-msvc, Rust/Cargo 1.97.1, LLVM
+22.1.6, MSVC 19.51.36252.0, Release profile, and the Windows Balanced power
+scheme. A materially different host, target, toolchain, or power mode needs a
+separately approved range.
+
+The fixed quick fixture uses InkScript source ID 913, file/catalog v1 and replay
+epoch 23, 128 `set_plane_properties` steps, four successful 4-by-4 current-v26
+inputs, one 256 KiB inline straight-sRGB RGBA8 asset, one Save failure and one
+pre-linearization cancellation. Every successful output is reopened through
+full Genesis/asset/procedure replay without a checkpoint cache. The runner is
+`#[cfg(test)]`, crate-private, and ignored by routine debug tests; it adds no
+public Rust API, feature, C ABI symbol, Windows route, or product file handling.
+
+| Protected score | Accepted range | Reference median | Interpretation |
+|---|---:|---:|---|
+| quick InkScript pipeline | 64–107 ms total | 85.3722 ms | compile + bind + asset freeze + six staged items + four cache-free reopens |
+
+The semantic hard gates are source 371,176 bytes, 7,965 lexer tokens, 2,000 CST
+nodes, zero parameters, one binding/assert/asset, 128 steps/dependency edges/
+catalog invocations/work units, 262,144 logical/unique/inline-decoded/copied
+asset bytes, zero authorized reads, 24,768 planned input bytes, 37,152 runner
+native-read bytes, six attempted items/binding resolutions, 774 statements, 768
+invocations, 384 Commit and 384 no-op outcomes, installed/failed/cancelled
+4/1/1, 91,584 installed bytes, four cache-free reopens, 256 replayed Commits,
+and checksum `0f84d2c54cfe1e2c`. The failure reason must be exactly Save; neither
+negative probe may publish an output.
+
+The approved M13 reference batch discarded one warm-up process and retained the
+following nine independent Release processes. These samples define the range;
+the bounds are the rounded 75–125% band. The lower edge is diagnostic when all
+semantic gates remain exact. An upper-edge breach requires another independent
+batch of at least five processes, and the envelope is never widened
+automatically.
+
+| Complete accepted samples (ns) | Median |
+|---|---:|
+| 85,230,900; 87,304,700; 84,489,500; 86,339,300; 85,838,200; 85,097,100; 85,237,900; 85,372,200; 86,873,700 | 85,372,200 |
+
+The M14 implementation batch on the same environment discarded one warm-up and
+then retained 83,469,900; 84,492,700; 84,018,300; 89,425,600; 83,562,700;
+83,808,200; 84,431,400; 83,860,300; 83,694,900 ns (median 83,860,300 ns).
+Every process reproduced the exact checksum and all counters above, so no
+independent regression-confirmation batch was needed.
+
+The approved full fixture remains unimplemented until M36. Its workload,
+checksum, samples, and 15.3–25.6 s proposed envelope remain recorded only in
+[`inkscript-performance-proposal.md`](inkscript-performance-proposal.md); they
+are not an active executable gate.
 
 ## Approved output-color-guard envelope
 

@@ -5,7 +5,7 @@ use super::catalog::{
     CatalogWorkEstimate, CatalogWorkFormula, InkScriptCatalogView, InkScriptPortability,
     InkScriptPortabilityClass,
 };
-use crate::primitive::{inkscript, inkscript_batch};
+use crate::primitive::{inkscript, inkscript_batch, inkscript_document_tree};
 use inkpod_format::{
     InkScriptDeclarationModel, InkScriptEnvelopeErrorCode, InkScriptInputDeclarationKind,
     InkScriptOrchestrationEnvelope, InkScriptOutput, InkScriptPathIntentAccess,
@@ -193,6 +193,7 @@ pub(crate) fn compile_inkscript_with_limits(
 
 pub(super) struct ScriptSchemas {
     enums: Vec<inkpod_format::InkScriptEnumSchema>,
+    constructors: Vec<inkpod_format::InkScriptConstructorSchema>,
     records: Vec<inkpod_format::InkScriptRecordSchema>,
     pub(super) commands: Vec<inkpod_format::InkScriptCommandSchema>,
 }
@@ -205,14 +206,17 @@ impl ScriptSchemas {
                 .chain(inkscript_batch::LEGACY_IMAGE_ENUMS)
                 .copied()
                 .collect(),
+            constructors: inkscript_document_tree::DOCUMENT_TREE_CONSTRUCTORS.to_vec(),
             records: inkscript::LEGACY_SIMPLE_RECORDS
                 .iter()
                 .chain(inkscript_batch::LEGACY_IMAGE_RECORDS)
+                .chain(inkscript_document_tree::DOCUMENT_TREE_RECORDS)
                 .copied()
                 .collect(),
             commands: inkscript::LEGACY_SIMPLE_COMMANDS
                 .iter()
                 .chain(inkscript_batch::LEGACY_IMAGE_COMMANDS)
+                .chain(inkscript_document_tree::DOCUMENT_TREE_COMMANDS)
                 .copied()
                 .collect(),
         }
@@ -221,7 +225,7 @@ impl ScriptSchemas {
     pub(super) fn view(&self) -> Result<InkScriptSchemaView<'_>, ScriptCompileError> {
         InkScriptSchemaView::exact_current_with_catalog(
             &self.enums,
-            &[],
+            &self.constructors,
             &self.records,
             &self.commands,
         )
@@ -234,7 +238,7 @@ pub(super) fn catalog(
 ) -> Result<InkScriptCatalogView, ScriptCompileError> {
     let mut entries = Vec::with_capacity(schemas.len());
     for schema in schemas {
-        let (class, preconditions, work, projection, skip) = match schema.name() {
+        let (class, preconditions, work, projection, skip, results, family) = match schema.name() {
             "set_layer_properties" => tuple(1, true, Some("layer_property")),
             "set_plane_properties" => tuple(1, true, Some("plane_property")),
             "convert_plane" => tuple(16_777_216, true, Some("plane_conversion")),
@@ -259,6 +263,8 @@ pub(super) fn catalog(
                 },
                 Some("resize"),
                 false,
+                Vec::new(),
+                "legacy_simple",
             ),
             "apply_fill" => restricted(
                 16_777_216,
@@ -278,12 +284,77 @@ pub(super) fn catalog(
                 &["semantic_target", "typed_destination"],
                 "separation",
             ),
+            "update_paper_frames" => document_tree_portable(1, vec![]),
+            "create_layer" => document_tree_portable(1, entity_result("layer")),
+            "duplicate_layer" => document_tree_bound(1, entity_result("layer")),
+            "delete_layer" => document_tree_bound(67_108_864, vec![]),
+            "merge_layer" => document_tree_bound_with(
+                67_108_864,
+                &["semantic_target", "adjacent_merge_target"],
+                vec![],
+            ),
+            "reorder_layer" => document_tree_bound_with(
+                1,
+                &["semantic_target", "initial_document_tree_order"],
+                vec![],
+            ),
+            "create_plane" => document_tree_bound(1, entity_result("plane")),
+            "duplicate_plane" => document_tree_bound(67_108_864, entity_result("plane")),
+            "delete_plane" => document_tree_bound(67_108_864, vec![]),
+            "merge_plane" => document_tree_bound_with(
+                67_108_864,
+                &["semantic_target", "adjacent_merge_target"],
+                vec![],
+            ),
+            "reorder_plane" => document_tree_bound_with(
+                1,
+                &["semantic_target", "initial_document_tree_order"],
+                vec![],
+            ),
+            "delete_hidden_layers" => document_tree_portable(67_108_864, vec![]),
+            "edit_targets" => (
+                InkScriptPortabilityClass::RequiresBinding,
+                vec!["semantic_target"],
+                CatalogWorkFormula {
+                    max_invocations: CatalogNumericExpression::Literal(1),
+                    max_output_ids: CatalogNumericExpression::ListLength {
+                        path: vec!["targets"],
+                        maximum: 4_096,
+                    },
+                    max_asset_bytes: CatalogNumericExpression::Literal(0),
+                    max_work_units: CatalogNumericExpression::CheckedMultiply(
+                        Box::new(CatalogNumericExpression::ListLength {
+                            path: vec!["targets"],
+                            maximum: 4_096,
+                        }),
+                        Box::new(CatalogNumericExpression::Literal(67_108_864)),
+                    ),
+                    max_output_growth: CatalogNumericExpression::Literal(67_108_864),
+                },
+                None,
+                false,
+                vec![
+                    CatalogResultMetadata {
+                        name: "layers",
+                        namespace: Some("document_stable"),
+                        owner_role: Some("layer"),
+                        output_id_ordinal: None,
+                    },
+                    CatalogResultMetadata {
+                        name: "planes",
+                        namespace: Some("document_stable"),
+                        owner_role: Some("plane"),
+                        output_id_ordinal: None,
+                    },
+                ],
+                "document_tree",
+            ),
             _ => return Err(ScriptCompileError::Catalog(CatalogError::InvalidEntry)),
         };
         entries.push(CatalogEntry {
             schema: *schema,
             domain: CatalogCommandDomain::DocumentMutation,
-            results: Vec::<CatalogResultMetadata>::new(),
+            results,
             assets: Vec::<CatalogAssetMetadata>::new(),
             portability: CatalogPortabilityEvaluator {
                 rules: Vec::new(),
@@ -294,11 +365,7 @@ pub(super) fn catalog(
             },
             work,
             editor: CatalogEditorMetadata {
-                family: if schema.name().starts_with("apply_") || schema.name().contains("raster") {
-                    "legacy_image"
-                } else {
-                    "legacy_simple"
-                },
+                family,
                 legacy_projection: projection,
                 allow_skip_dependents: skip,
             },
@@ -313,6 +380,8 @@ type EntryTuple = (
     CatalogWorkFormula,
     Option<&'static str>,
     bool,
+    Vec<CatalogResultMetadata>,
+    &'static str,
 );
 
 fn literal_work(work: u64) -> CatalogWorkFormula {
@@ -332,6 +401,8 @@ fn tuple(work: u64, skip: bool, projection: Option<&'static str>) -> EntryTuple 
         literal_work(work),
         projection,
         skip,
+        Vec::new(),
+        "legacy_simple",
     )
 }
 
@@ -342,6 +413,8 @@ fn portable(work: u64, projection: Option<&'static str>) -> EntryTuple {
         literal_work(work),
         projection,
         false,
+        Vec::new(),
+        "legacy_simple",
     )
 }
 
@@ -352,7 +425,60 @@ fn restricted(work: u64, preconditions: &[&'static str], projection: &'static st
         literal_work(work),
         Some(projection),
         true,
+        Vec::new(),
+        "legacy_image",
     )
+}
+
+fn entity_result(name: &'static str) -> Vec<CatalogResultMetadata> {
+    vec![CatalogResultMetadata {
+        name,
+        namespace: Some("document_stable"),
+        owner_role: Some(name),
+        output_id_ordinal: Some(0),
+    }]
+}
+
+fn document_tree_portable(work: u64, results: Vec<CatalogResultMetadata>) -> EntryTuple {
+    (
+        InkScriptPortabilityClass::Portable,
+        Vec::new(),
+        literal_work_with_outputs(work, u64::from(!results.is_empty())),
+        None,
+        false,
+        results,
+        "document_tree",
+    )
+}
+
+fn document_tree_bound(work: u64, results: Vec<CatalogResultMetadata>) -> EntryTuple {
+    document_tree_bound_with(work, &["semantic_target"], results)
+}
+
+fn document_tree_bound_with(
+    work: u64,
+    preconditions: &[&'static str],
+    results: Vec<CatalogResultMetadata>,
+) -> EntryTuple {
+    (
+        InkScriptPortabilityClass::RequiresBinding,
+        preconditions.to_vec(),
+        literal_work_with_outputs(work, u64::from(!results.is_empty())),
+        None,
+        false,
+        results,
+        "document_tree",
+    )
+}
+
+fn literal_work_with_outputs(work: u64, output_ids: u64) -> CatalogWorkFormula {
+    CatalogWorkFormula {
+        max_invocations: CatalogNumericExpression::Literal(1),
+        max_output_ids: CatalogNumericExpression::Literal(output_ids),
+        max_asset_bytes: CatalogNumericExpression::Literal(0),
+        max_work_units: CatalogNumericExpression::Literal(work),
+        max_output_growth: CatalogNumericExpression::Literal(0),
+    }
 }
 
 fn add_budget(

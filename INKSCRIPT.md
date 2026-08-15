@@ -2317,7 +2317,7 @@ Version impact:
 - C ABI: 14（symbol／record変更なし）
 ```
 
-### [~] M13 — InkScript performance contract proposal
+### [x] M13 — InkScript performance contract proposal
 
 **範囲**
 
@@ -2330,7 +2330,7 @@ Version impact:
 - workloadがparser/compile/bind/runner/assetの意味counterを測り、private fieldやwall-clockだけに依存しない。
 - proposalと全探索測定を記録して`[~]`で停止する。次の汎用promptはproposalの明示承認を兼ねる。
 
-**提案・自動測定結果（2026-08-15、明示承認待ち）**
+**提案・自動測定結果（2026-08-15、明示承認済み）**
 
 - [`docs/inkscript-performance-proposal.md`](docs/inkscript-performance-proposal.md)へquick／fullのsource、固定seed、
   step／item／asset入力、catalog work formula、parser／compile／bind／runner／asset counter、FNV-1a checksum、
@@ -2350,8 +2350,9 @@ Version impact:
 - 一時probe除去後の`cargo fmt --check`、workspace全target／feature Clippy（warning deny）、workspace 556 tests
   （doctest 1、ignored 0）、workspace strict rustdocが成功した。既存approved quick benchmarkも10 scenarioの
   checksum／semantic counterをすべて維持し、workload、harness、payload-access route、envelopeを変更していない。
-- M14は承認後にtest-only crate-private quick runnerだけを追加し、既存`core_workflows` 10 scenarioを変更しない。
-  full runnerはM36まで実装しない。公開API／C ABI／Windows／product routeは追加していないため、M13は`[~]`で停止する。
+- 次sessionの不具合報告を伴わない汎用promptによりM13のquick workload／counter／checksum／sample policy／
+  reference environment／64–107 ms envelopeが明示承認され、`[x]`へ移行した。M14はtest-only crate-private
+  quick runnerだけを追加し、既存`core_workflows` 10 scenarioを変更しない。full runnerはM36まで実装しない。
 
 ```text
 Version impact:
@@ -2363,7 +2364,7 @@ Version impact:
 - C ABI: 14（symbol／record変更なし）
 ```
 
-### [ ] M14 — approved quick benchmark導入
+### [x] M14 — approved quick benchmark導入
 
 **範囲**
 
@@ -2375,7 +2376,40 @@ Version impact:
 - warm-up後の全sampleと中央値、semantic counter、environmentを記録する。
 - 承認内容を変更・緩和せず、既存core_workflows benchmarkに回帰がない。
 
-### [ ] M15 — catalog implementation A: document tree
+**自動検証結果（2026-08-15）**
+
+- `inkpod-core`へ`#[cfg(test)]` crate-private performance moduleとignored Release testを追加した。fixture構築を
+  timed interval外に置き、static compile直前からplan、success／Save failure／install線形化直前Cancel、4件の
+  cache-free reopen、checksum／counter検査までを測定する。失敗／Cancel itemもstaged execution observerで実workを
+  数え、negative runはoutputを公開しない。
+- quick contractはsource 371,176 bytes、token 7,965、CST node 2,000、128 step／dependency edge／catalog work、
+  256 KiB inline asset、6 attempted item、774 statement、768 invocation、Commit／no-op各384、installed／failed／
+  cancelled = 4／1／1、installed 91,584 bytes、cache-free reopen 4、replayed Commit 256、checksum
+  `0f84d2c54cfe1e2c`をhard gateにした。既存invalid／cancel／stale／overflow／atomic save／Undo／Redo／savepoint契約を
+  performance checksumの代用にせず、workspace testで引き続き検証する。
+- M13と同じWindows x64 Ryzen 9 9950X3D Release環境でwarm-up 1 processを破棄後、9 processは83,469,900;
+  84,492,700; 84,018,300; 89,425,600; 83,562,700; 83,808,200; 84,431,400; 83,860,300;
+  83,694,900 ns、中央値83,860,300 nsだった。全sampleがexact counter／checksumを維持し、承認済み64–107 ms内である。
+- `rust/inkpod-core/benches/core_workflows.rs`、既存10 scenario、checksum配列、workload、harness、semantic counter、
+  payload-access route、既存envelopeは変更していない。full runnerはM36まで未実装である。
+- `cargo fmt --check`、workspace全target／feature Clippy（warning deny）、workspace 556 passed／M14 Release gate
+  1 ignored（doctest 1）、strict rustdocが成功した。M14 Release gateを明示実行し、既存approved
+  `core_workflows --quick`も10 checksumと意味counterをすべて維持した。
+- Rust public re-export、Cargo feature、C ABI、Windows route、product command／file association、catalog entryは追加して
+  いない。production InkScriptは引き続き到達不能である。前回`[~]`で停止した後、今回promptにより既存binary回帰と
+  InkScript UI非公開に問題がなかったことを利用者確認済みとして`[x]`へ移行した。
+
+```text
+Version impact:
+- Registry schema: 2（approved quick harnessのみ、schema変更なし）
+- InkScript file: 1（grammar／serialized field／selector意味変更なし）
+- InkScript procedure catalog: 1（private draft 13/84、entry／signature変更なし）
+- replay epoch: 23（canonical invocation／state／pixel semantics変更なし）
+- .inkpod top-level: 26（exact-current encode／cache-free replayを再利用、schema変更なし）
+- C ABI: 14（symbol／record変更なし）
+```
+
+### [~] M15 — catalog implementation A: document tree
 
 **範囲**
 
@@ -2390,6 +2424,38 @@ Version impact:
   equivalence testがある。journal fragment exportはM24より前に実装しない。
 - create後参照、no-op result、ID high-watermark、Undo/Redo round-tripを検証する。
 - 対象外familyへ先行実装しない。
+
+**自動検証結果（2026-08-15）**
+
+- owner manifestのM15所有13 primitiveをprivate catalog v1 draftへ追加し、draftを13/84から26/84へ拡張した。
+  paper/frame、layer/plane create/duplicate/delete/reorder/merge、delete-hidden、edit-targetを閉じたrecord／constructor／
+  argument／result／portability／work metadataとして登録し、M07のproperty/conversion entryを重複登録していない。
+- Core-private `DocumentTreeScriptStep`が全13 commandを`CanonicalInvocation`へ双方向変換する。initial selectorと実行時resultは
+  共通の型付き参照表を使い、source UUID／semantic selectorで束縛したnonzero stable IDだけを解決する。create resultは
+  scalar `layer_ref`／`plane_ref`、mixed edit-target resultは順序を保った`layers: list<layer_ref>`と
+  `planes: list<plane_ref>`へ分離し、後続stepが型を失わず参照できる。欠落resultをactive documentへ再解決しない。
+- 文書変更は既存の単一canonical executorだけを通り、別model／executorを追加していない。全13 primitiveのcodecと
+  direct-vs-script state／revision／history／ID／savepoint同値性、success／no-op／invalid／Cancel／stale／overflow／
+  resource／atomicity、mixed result順序、missing-result、Undo／Redo、ID high-watermarkを7契約で検証した。
+- 作成resultを後続create/propertyへ渡す3-step runをcurrent-v26 native bytesへencodeし、checkpointなしのfull replayでreopenした。
+  document digest、history、next stable/procedure/state ID、document/editor savepoint、3回のUndo／Redoが一致した。
+- `cargo fmt --check`、workspace全target／feature Clippy（warning deny）、workspace 563 passed／Release gate 1 ignored
+  （doctest 1）、workspace strict rustdocが成功した。承認済みInkScript quickは全counterとchecksum
+  `0f84d2c54cfe1e2c`を維持して89,478,300 ns、既存`core_workflows --quick`も10 checksumを維持した。
+- Windows x64 Debug configure／build、static CRT、portable ZIP、unsigned MSIX、および最終binaryの全36 CTestが
+  424.47秒で成功した。ABI smokeは60.89秒、English smokeは174.81秒、Japanese smokeは175.88秒だった。
+  production catalog、Rust public API、C ABI、Windows route、UI、`.inkscript` file acceptanceは追加しておらず、
+  既存binary回帰とInkScript UI非公開の利用者確認待ちとして`[~]`で停止する。
+
+```text
+Version impact:
+- Registry schema: 2（owner draft instanceのtype／entry追加のみ、meta-schema変更なし）
+- InkScript file: 1（批准済みgrammar／language core／serialized field変更なし）
+- InkScript procedure catalog: 1（M23前のprivate draftを26/84へ拡張、production catalog未批准）
+- replay epoch: 23（既存canonical invocation／executor／replay semantics変更なし）
+- .inkpod top-level: 26（exact-current encoder／decoder／cache-free replay再利用、schema変更なし）
+- C ABI: 14（symbol／record／ownership／thread規則変更なし）
+```
 
 ### [ ] M16 — catalog implementation B: metadata、color、guide
 

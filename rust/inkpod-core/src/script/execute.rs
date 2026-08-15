@@ -1,18 +1,22 @@
 use super::bind::{
-    InkScriptBindingError, InkScriptComparableValue, InkScriptEntityReference,
+    InkScriptBindingError, InkScriptBoundValue, InkScriptComparableValue, InkScriptEntityReference,
     InkScriptEntitySnapshot, InkScriptInitialDocumentSnapshot, InkScriptPreparedStatement,
     InkScriptSelectionSnapshot, prepare_inkscript_initial_state_with_parameters,
 };
 use super::compile::{ScriptCompileError, ScriptSchemas, StaticScriptProgram, catalog};
 use super::report::{ScriptDryRunReport, ScriptResultValue, ScriptStatementOutcome};
-use crate::primitive::{InvocationResult, LegacyImageScriptStep, LegacySimpleScriptStep};
+use crate::primitive::{
+    DocumentTreeAdapterError, DocumentTreeScriptStep, InkScriptEntityKind,
+    InkScriptRuntimeReferences, InvocationResult, LegacyImageAdapterError, LegacyImageScriptStep,
+    LegacySimpleAdapterError, LegacySimpleScriptStep,
+};
 use crate::{
     Core, CoreError, DocumentStateDigest, LayerKind, MAX_PERSISTENT_NUMERIC_ID, PixelFormat,
     PlaneType,
 };
 use inkpod_format::{
-    InkScriptInputDeclarationKind, InkScriptResultAvailability, InkScriptTypedProgramNode,
-    decode_procedure_file,
+    InkScriptInputDeclarationKind, InkScriptResultAvailability, InkScriptResultCardinality,
+    InkScriptTypedProgramNode, decode_procedure_file,
 };
 use std::collections::BTreeMap;
 
@@ -50,6 +54,7 @@ pub(crate) enum ScriptRunError {
     ResourceLimit,
     InvalidInput,
     InvalidStep,
+    MissingResult,
     Core(CoreError),
 }
 
@@ -157,6 +162,7 @@ pub(super) fn run_inkscript_on_staged_core(
 
     let mut statements = Vec::with_capacity(prepared.statements.len());
     let mut results = Vec::new();
+    let mut runtime_references = initial_runtime_references(&prepared.bindings)?;
     let mut commits = 0_u64;
     let mut step_index = 0usize;
     if program.model.program().len() != prepared.statements.len() {
@@ -186,22 +192,34 @@ pub(super) fn run_inkscript_on_staged_core(
                     return Err(ScriptRunError::InvalidStep);
                 }
                 let step = &program.model.steps()[index];
-                let invocation = if is_simple(step.command()) {
-                    LegacySimpleScriptStep::from_compiled(
+                let (invocation, output_kinds) = if is_simple(step.command()) {
+                    let invocation = LegacySimpleScriptStep::from_compiled(
                         step,
                         program.frozen_arguments[index].clone(),
-                        &prepared.bindings,
+                        &runtime_references,
                     )
                     .and_then(|step| step.to_canonical())
-                    .map_err(|_| ScriptRunError::InvalidStep)?
+                    .map_err(simple_adapter_error)?;
+                    (invocation, Vec::new())
+                } else if is_document_tree(step.command()) {
+                    let invocation = DocumentTreeScriptStep::from_compiled(
+                        step,
+                        program.frozen_arguments[index].clone(),
+                        &runtime_references,
+                    )
+                    .and_then(|step| step.to_canonical())
+                    .map_err(document_tree_adapter_error)?;
+                    let output_kinds = DocumentTreeScriptStep::output_entity_kinds(&invocation);
+                    (invocation, output_kinds)
                 } else {
-                    LegacyImageScriptStep::from_compiled(
+                    let invocation = LegacyImageScriptStep::from_compiled(
                         step,
                         program.frozen_arguments[index].clone(),
-                        &prepared.bindings,
+                        &runtime_references,
                     )
                     .and_then(|step| step.to_canonical())
-                    .map_err(|_| ScriptRunError::InvalidStep)?
+                    .map_err(image_adapter_error)?;
+                    (invocation, Vec::new())
                 };
                 let before_revision = working.document_info()?.document_revision;
                 let result = working.execute_canonical_invocation(invocation)?;
@@ -214,7 +232,14 @@ pub(super) fn run_inkscript_on_staged_core(
                 } else {
                     statements.push(ScriptStatementOutcome::NoOp);
                 }
-                materialize_results(step, &result, changed, &mut results)?;
+                materialize_results(
+                    step,
+                    &result,
+                    changed,
+                    &output_kinds,
+                    &mut runtime_references,
+                    &mut results,
+                )?;
                 step_index += 1;
             }
             _ => return Err(ScriptRunError::InvalidStep),
@@ -252,6 +277,69 @@ fn is_simple(command: &str) -> bool {
             | "rotate_document"
             | "resize_document"
     )
+}
+
+fn is_document_tree(command: &str) -> bool {
+    crate::primitive::inkscript_document_tree::DOCUMENT_TREE_COMMANDS
+        .iter()
+        .any(|schema| schema.name() == command)
+}
+
+fn initial_runtime_references(
+    bindings: &BTreeMap<String, InkScriptBoundValue>,
+) -> Result<InkScriptRuntimeReferences, ScriptRunError> {
+    let mut references = InkScriptRuntimeReferences::default();
+    for (name, value) in bindings {
+        match value {
+            InkScriptBoundValue::One(reference) => {
+                insert_runtime_reference(&mut references, name.clone(), reference)?
+            }
+            InkScriptBoundValue::All(values) => {
+                for (index, reference) in values.iter().enumerate() {
+                    insert_runtime_reference(
+                        &mut references,
+                        format!("{name}[{index}]"),
+                        reference,
+                    )?;
+                }
+            }
+            InkScriptBoundValue::Skipped => {}
+        }
+    }
+    Ok(references)
+}
+
+fn insert_runtime_reference(
+    references: &mut InkScriptRuntimeReferences,
+    key: String,
+    reference: &InkScriptEntityReference,
+) -> Result<(), ScriptRunError> {
+    let kind =
+        InkScriptEntityKind::from_name(&reference.entity).ok_or(ScriptRunError::InvalidInput)?;
+    references
+        .insert(key, kind, reference.persistent_id)
+        .map_err(|_| ScriptRunError::InvalidInput)
+}
+
+fn simple_adapter_error(error: LegacySimpleAdapterError) -> ScriptRunError {
+    match error {
+        LegacySimpleAdapterError::MissingBinding => ScriptRunError::MissingResult,
+        _ => ScriptRunError::InvalidStep,
+    }
+}
+
+fn image_adapter_error(error: LegacyImageAdapterError) -> ScriptRunError {
+    match error {
+        LegacyImageAdapterError::MissingBinding => ScriptRunError::MissingResult,
+        _ => ScriptRunError::InvalidStep,
+    }
+}
+
+fn document_tree_adapter_error(error: DocumentTreeAdapterError) -> ScriptRunError {
+    match error {
+        DocumentTreeAdapterError::MissingReference => ScriptRunError::MissingResult,
+        _ => ScriptRunError::InvalidStep,
+    }
 }
 
 fn preflight_resources(core: &Core, program: &StaticScriptProgram) -> Result<(), ScriptRunError> {
@@ -459,24 +547,67 @@ fn materialize_results(
     step: &inkpod_format::InkScriptTypedStep,
     invocation: &InvocationResult,
     changed: bool,
+    entity_kinds: &[InkScriptEntityKind],
+    references: &mut InkScriptRuntimeReferences,
     output: &mut Vec<ScriptResultValue>,
 ) -> Result<(), ScriptRunError> {
     let Some(alias) = step.result_alias() else {
         return Ok(());
     };
-    for (index, result) in step.results().iter().enumerate() {
+    let mut consumed = vec![false; invocation.output_ids.len()];
+    for result in step.results() {
         if result.availability() == InkScriptResultAvailability::OnlyOnChange && !changed {
             continue;
         }
-        let Some(id) = invocation.output_ids.get(index) else {
-            return Err(ScriptRunError::InvalidStep);
+        let matching = match result.cardinality() {
+            InkScriptResultCardinality::Scalar => consumed
+                .iter()
+                .position(|value| !*value)
+                .into_iter()
+                .collect::<Vec<_>>(),
+            InkScriptResultCardinality::OrderedList => {
+                let expected = match result.name() {
+                    "layers" => InkScriptEntityKind::Layer,
+                    "planes" => InkScriptEntityKind::Plane,
+                    _ => return Err(ScriptRunError::InvalidStep),
+                };
+                entity_kinds
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(output_index, kind)| {
+                        (!consumed[output_index] && *kind == expected).then_some(output_index)
+                    })
+                    .collect()
+            }
         };
-        output.push(ScriptResultValue {
-            alias: alias.to_owned(),
-            field: result.name().to_owned(),
-            output_id_ordinal: u16::try_from(index).map_err(|_| ScriptRunError::ResourceLimit)?,
-            persistent_id: *id,
-        });
+        for (element_index, output_index) in matching.into_iter().enumerate() {
+            let Some(id) = invocation.output_ids.get(output_index) else {
+                return Err(ScriptRunError::InvalidStep);
+            };
+            let Some(kind) = entity_kinds.get(output_index) else {
+                return Err(ScriptRunError::InvalidStep);
+            };
+            let key = match result.cardinality() {
+                InkScriptResultCardinality::Scalar => format!("{alias}.{}", result.name()),
+                InkScriptResultCardinality::OrderedList => {
+                    format!("{alias}.{}[{element_index}]", result.name())
+                }
+            };
+            references
+                .insert(key, *kind, *id)
+                .map_err(|_| ScriptRunError::InvalidStep)?;
+            output.push(ScriptResultValue {
+                alias: alias.to_owned(),
+                field: result.name().to_owned(),
+                output_id_ordinal: u16::try_from(output_index)
+                    .map_err(|_| ScriptRunError::ResourceLimit)?,
+                persistent_id: *id,
+            });
+            consumed[output_index] = true;
+        }
+    }
+    if invocation.output_ids.len() != entity_kinds.len() || consumed.iter().any(|value| !*value) {
+        return Err(ScriptRunError::InvalidStep);
     }
     Ok(())
 }

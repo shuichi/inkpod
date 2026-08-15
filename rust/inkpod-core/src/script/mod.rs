@@ -10,6 +10,8 @@ pub(crate) mod bind;
 mod catalog;
 mod compile;
 mod execute;
+#[cfg(test)]
+mod performance;
 mod plan;
 mod report;
 mod run;

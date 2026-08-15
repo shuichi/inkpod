@@ -1,6 +1,9 @@
 //! Private typed adapter for the legacy-image InkScript catalog family.
 
 use super::CanonicalInvocation;
+use super::inkscript_reference::{
+    InkScriptEntityKind, InkScriptReferenceError, InkScriptRuntimeReferences,
+};
 use crate::{
     BatchColorPair, BatchSeparation, BatchSeparationDestination, BoundaryAirbrush, Channel,
     ColorBalance, CurveInterpolation, CurvePoint, DustMode, DustRemoval, EditorTarget,
@@ -293,7 +296,7 @@ pub(crate) enum LegacyImageAdapterError {
 pub(crate) struct LegacyImageScriptStep {
     typed: InkScriptTypedStep,
     arguments: InkScriptTypedValue,
-    bindings: BTreeMap<String, u64>,
+    bindings: InkScriptRuntimeReferences,
 }
 
 impl LegacyImageScriptStep {
@@ -309,7 +312,7 @@ impl LegacyImageScriptStep {
         let mut source = String::from(
             "inkscript_fragment 1;\nrequires { procedure_catalog = 1; replay_epoch = 23; }\n",
         );
-        let mut bindings = BTreeMap::new();
+        let mut bindings = InkScriptRuntimeReferences::default();
         source.push_str("bindings { ");
         if let Some(layer_id) = layer_id {
             if layer_id == 0 {
@@ -318,7 +321,9 @@ impl LegacyImageScriptStep {
             source.push_str(&format!(
                 "let target_layer = select layer {{ source_document_uuid = uuid\"{ADAPTER_SOURCE_UUID}\"; persistent_id = {layer_id}; }}; "
             ));
-            bindings.insert("target_layer".to_owned(), layer_id);
+            bindings
+                .insert("target_layer", InkScriptEntityKind::Layer, layer_id)
+                .map_err(reference_error)?;
         }
         if plane_id == 0 {
             return Err(LegacyImageAdapterError::InvalidValue);
@@ -326,7 +331,9 @@ impl LegacyImageScriptStep {
         source.push_str(&format!(
             "let target_plane = select plane {{ source_document_uuid = uuid\"{ADAPTER_SOURCE_UUID}\"; persistent_id = {plane_id}; }}; }}\n"
         ));
-        bindings.insert("target_plane".to_owned(), plane_id);
+        bindings
+            .insert("target_plane", InkScriptEntityKind::Plane, plane_id)
+            .map_err(reference_error)?;
         source.push_str(&format!(
             "program {{ step \"Canonical LegacyImage adapter\" {{ enabled = {}; editor_group = {}; invoke {command} {{ {arguments} }}; }} }}\n",
             if enabled { "true" } else { "false" },
@@ -337,7 +344,7 @@ impl LegacyImageScriptStep {
 
     fn from_source(
         source: &str,
-        bindings: BTreeMap<String, u64>,
+        bindings: InkScriptRuntimeReferences,
     ) -> Result<Self, LegacyImageAdapterError> {
         let source = InkScriptSource::new(InkScriptSourceId::new(8), source.as_bytes())
             .map_err(|_| LegacyImageAdapterError::InvalidSource)?;
@@ -368,21 +375,12 @@ impl LegacyImageScriptStep {
     pub(crate) fn from_compiled(
         typed: &InkScriptTypedStep,
         arguments: InkScriptTypedValue,
-        bindings: &BTreeMap<String, crate::script::bind::InkScriptBoundValue>,
+        bindings: &InkScriptRuntimeReferences,
     ) -> Result<Self, LegacyImageAdapterError> {
-        let bindings = bindings
-            .iter()
-            .filter_map(|(name, value)| match value {
-                crate::script::bind::InkScriptBoundValue::One(reference) => {
-                    Some((name.clone(), reference.persistent_id))
-                }
-                _ => None,
-            })
-            .collect();
         Ok(Self {
             typed: typed.clone(),
             arguments,
-            bindings,
+            bindings: bindings.clone(),
         })
     }
 
@@ -405,12 +403,20 @@ impl LegacyImageScriptStep {
 
     pub(crate) fn to_canonical(&self) -> Result<CanonicalInvocation, LegacyImageAdapterError> {
         let arguments = record(&self.arguments)?;
-        let plane_id = binding_id(field(arguments, "plane_id")?, &self.bindings)?;
+        let plane_id = binding_id(
+            field(arguments, "plane_id")?,
+            &self.bindings,
+            InkScriptEntityKind::Plane,
+        )?;
         match self.typed.command() {
             "apply_fill" => Ok(CanonicalInvocation::ApplyFill {
                 request: fill_request(field(arguments, "request")?)?,
                 target: EditorTarget {
-                    layer_id: binding_id(field(arguments, "layer_id")?, &self.bindings)?,
+                    layer_id: binding_id(
+                        field(arguments, "layer_id")?,
+                        &self.bindings,
+                        InkScriptEntityKind::Layer,
+                    )?,
                     plane_id,
                 },
                 use_light_table_boundary: boolean(field(arguments, "use_light_table_boundary")?)?,
@@ -925,19 +931,18 @@ fn list(value: &InkScriptTypedValue) -> Result<&[InkScriptTypedValue], LegacyIma
 
 fn binding_id(
     value: &InkScriptTypedValue,
-    bindings: &BTreeMap<String, u64>,
+    bindings: &InkScriptRuntimeReferences,
+    expected: InkScriptEntityKind,
 ) -> Result<u64, LegacyImageAdapterError> {
-    let InkScriptTypedValueKind::Reference { root, segments } = value.kind() else {
-        return Err(LegacyImageAdapterError::InvalidTypedStep);
-    };
-    if !segments.is_empty() {
-        return Err(LegacyImageAdapterError::TargetMismatch);
+    bindings.resolve(value, expected).map_err(reference_error)
+}
+
+fn reference_error(error: InkScriptReferenceError) -> LegacyImageAdapterError {
+    match error {
+        InkScriptReferenceError::InvalidReference => LegacyImageAdapterError::InvalidTypedStep,
+        InkScriptReferenceError::MissingReference => LegacyImageAdapterError::MissingBinding,
+        InkScriptReferenceError::KindMismatch => LegacyImageAdapterError::TargetMismatch,
     }
-    bindings
-        .get(root)
-        .copied()
-        .filter(|id| *id != 0)
-        .ok_or(LegacyImageAdapterError::MissingBinding)
 }
 
 fn boolean(value: &InkScriptTypedValue) -> Result<bool, LegacyImageAdapterError> {
@@ -1747,10 +1752,7 @@ mod tests {
             "{prefix} program {{ step \"Bad\" {{ enabled = true; editor_group = \"bad\"; invoke apply_filter {{ plane_id = $target_plane; filter = {{ kind = diagonal; {fields} }}; }}; }} }}"
         );
         assert!(matches!(
-            LegacyImageScriptStep::from_source(
-                &unknown_enum,
-                BTreeMap::from([("target_plane".to_owned(), 12)]),
-            ),
+            LegacyImageScriptStep::from_source(&unknown_enum, plane_references(12),),
             Err(LegacyImageAdapterError::Type(
                 InkScriptTypeDiagnosticCode::ValueOutOfRange,
                 _
@@ -1761,10 +1763,7 @@ mod tests {
             "{prefix} program {{ step \"Bad\" {{ enabled = true; editor_group = \"bad\"; invoke apply_filter {{ plane_id = $target_plane; filter = {{ kind = sharpen_weak; {fields} extra = true; }}; }}; }} }}"
         );
         assert!(matches!(
-            LegacyImageScriptStep::from_source(
-                &unknown_field,
-                BTreeMap::from([("target_plane".to_owned(), 12)]),
-            ),
+            LegacyImageScriptStep::from_source(&unknown_field, plane_references(12),),
             Err(LegacyImageAdapterError::Type(
                 InkScriptTypeDiagnosticCode::InvalidSemanticModel,
                 _
@@ -1774,11 +1773,7 @@ mod tests {
         let nonexact = format!(
             "{prefix} program {{ step \"Bad\" {{ enabled = true; editor_group = \"bad\"; invoke apply_filter {{ plane_id = $target_plane; filter = {{ kind = sharpen_weak; radius = 2; strength_milli = none; amount_milli = none; threshold = none; channel = none; brightness_milli = none; contrast_milli = none; interpolation = none; points = []; levels = none; hsv = none; color_balance = none; }}; }}; }} }}"
         );
-        let step = LegacyImageScriptStep::from_source(
-            &nonexact,
-            BTreeMap::from([("target_plane".to_owned(), 12)]),
-        )
-        .unwrap();
+        let step = LegacyImageScriptStep::from_source(&nonexact, plane_references(12)).unwrap();
         assert_eq!(
             step.to_canonical(),
             Err(LegacyImageAdapterError::InvalidValue)
@@ -1791,5 +1786,13 @@ mod tests {
         assert_send_sync::<LegacyImageScriptStep>();
         assert_send_sync::<LegacyImageCatalogEntry>();
         assert_send_sync::<LegacyImageAdapterError>();
+    }
+
+    fn plane_references(id: u64) -> InkScriptRuntimeReferences {
+        let mut references = InkScriptRuntimeReferences::default();
+        references
+            .insert("target_plane", InkScriptEntityKind::Plane, id)
+            .unwrap();
+        references
     }
 }

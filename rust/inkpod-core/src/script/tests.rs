@@ -1,12 +1,12 @@
 use super::*;
 use crate::primitive::CanonicalInvocation;
 use crate::{
-    BatchColorPair, Core, DEFAULT_DPI_MILLI, LayerKind, PixelValue, PrimitiveId, ProcedureId,
-    StateId,
+    BatchColorPair, Core, DEFAULT_DPI_MILLI, LayerKind, NativeOpenStrategy, PixelValue,
+    PrimitiveId, ProcedureId, StateId,
 };
 use inkpod_format::{
     InkScriptRunParameterChoice, InkScriptRunParameterDecision, InkScriptSource, InkScriptSourceId,
-    InkScriptValue, encode_procedure_file,
+    InkScriptValue, decode_procedure_file, encode_procedure_file,
 };
 
 fn document_uuid(value: u128) -> String {
@@ -282,6 +282,294 @@ fn staged_memory_and_native_dry_runs_match_the_direct_canonical_route() {
 }
 
 #[test]
+fn document_tree_create_results_feed_later_steps_and_round_trip_history() {
+    let source_core = core();
+    let before = source_core.document_state_digest().unwrap();
+    let program = complete_source(
+        "",
+        "",
+        r#"
+step "Create layer" as created_layer {
+    enabled = true;
+    invoke create_layer { kind = raster; name = "Script layer"; };
+}
+step "Create plane" as created_plane {
+    enabled = true;
+    invoke create_plane {
+        layer_id = $created_layer.layer;
+        kind = raster;
+        format = rgba8;
+        name = "Script plane";
+    };
+}
+step "Rename created plane" {
+    enabled = true;
+    invoke set_plane_properties {
+        plane_id = $created_plane.plane;
+        visible = true;
+        editable = true;
+        opacity_milli = 1000;
+        name = "Result-linked plane";
+    };
+}
+"#,
+    );
+    let program =
+        compile_inkscript(&program, InkScriptRunParameterDecision::Resolve(Vec::new())).unwrap();
+    assert_eq!(program.budget.max_invocations, 3);
+    assert_eq!(program.budget.max_output_ids, 2);
+
+    let mut never_cancel = || false;
+    let mut result = run_inkscript_dry(
+        &program,
+        capture_in_memory_input(&source_core).unwrap(),
+        &mut never_cancel,
+    )
+    .unwrap();
+    assert_eq!(result.report.commit_count, 3);
+    assert_eq!(result.report.results.len(), 2);
+    assert_eq!(result.report.results[0].alias, "created_layer");
+    assert_eq!(result.report.results[0].field, "layer");
+    assert_eq!(result.report.results[1].alias, "created_plane");
+    assert_eq!(result.report.results[1].field, "plane");
+    let created_layer = result.report.results[0].persistent_id;
+    let created_plane = result.report.results[1].persistent_id;
+    let layer = result
+        .staged
+        .layers()
+        .unwrap()
+        .into_iter()
+        .find(|layer| layer.id == created_layer)
+        .unwrap();
+    assert!(
+        layer
+            .planes
+            .iter()
+            .any(|plane| { plane.id == created_plane && plane.name == "Result-linked plane" })
+    );
+    let after = result.staged.document_state_digest().unwrap();
+    for _ in 0..3 {
+        result.staged.undo().unwrap();
+    }
+    assert_eq!(result.staged.document_state_digest().unwrap(), before);
+    for _ in 0..3 {
+        result.staged.redo().unwrap();
+    }
+    assert_eq!(result.staged.document_state_digest().unwrap(), after);
+
+    let editor_digest = result.staged.editor_state().unwrap().digest;
+    let native = result
+        .staged
+        .build_procedure_file(Some(result.staged.current_state), Some(editor_digest))
+        .unwrap();
+    let bytes = encode_procedure_file(&native).unwrap();
+    let mut reopened = Core::from_procedure_file(decode_procedure_file(&bytes).unwrap()).unwrap();
+    assert_eq!(reopened.document_state_digest().unwrap(), after);
+    assert_eq!(reopened.history_entries(), result.staged.history_entries());
+    assert_eq!(reopened.next_id, result.staged.next_id);
+    assert_eq!(reopened.next_procedure, result.staged.next_procedure);
+    assert_eq!(reopened.next_state, result.staged.next_state);
+    assert!(created_layer < reopened.next_id.next_raw());
+    assert!(created_plane < reopened.next_id.next_raw());
+    assert_eq!(
+        reopened.persistence_info().unwrap().open_strategy,
+        NativeOpenStrategy::FullReplay
+    );
+    assert!(!reopened.document_info().unwrap().dirty);
+    assert!(!reopened.editor_state().unwrap().dirty);
+    for _ in 0..3 {
+        reopened.undo().unwrap();
+    }
+    assert_eq!(reopened.document_state_digest().unwrap(), before);
+    for _ in 0..3 {
+        reopened.redo().unwrap();
+    }
+    assert_eq!(reopened.document_state_digest().unwrap(), after);
+}
+
+#[test]
+fn document_tree_no_op_result_cancel_and_missing_result_are_atomic() {
+    let base = core();
+    let info = base.document_info().unwrap();
+    let uuid = document_uuid(info.document_uuid);
+    let binding = format!(
+        r#"let target = select layer {{ source_document_uuid = uuid"{uuid}"; persistent_id = {}; }};"#,
+        info.layer_id
+    );
+    let no_op = complete_source(
+        "",
+        &binding,
+        r#"
+step "No-op targets" as unchanged {
+    enabled = true;
+    invoke edit_targets {
+        targets = [layer_target($target)];
+        command = set_target_visibility(true);
+    };
+}
+"#,
+    );
+    let no_op =
+        compile_inkscript(&no_op, InkScriptRunParameterDecision::Resolve(Vec::new())).unwrap();
+    assert_eq!(no_op.budget.max_output_ids, 1);
+    let before = (
+        base.document_state_digest().unwrap(),
+        base.document_info().unwrap(),
+        base.history_entries(),
+        base.next_id,
+    );
+    let mut never_cancel = || false;
+    let no_op_result = run_inkscript_dry(
+        &no_op,
+        capture_in_memory_input(&base).unwrap(),
+        &mut never_cancel,
+    )
+    .unwrap();
+    assert_eq!(
+        no_op_result.report.statements,
+        vec![crate::script::report::ScriptStatementOutcome::NoOp]
+    );
+    assert!(no_op_result.report.results.is_empty());
+    assert_eq!(no_op_result.report.commit_count, 0);
+    assert_eq!(no_op_result.staged.next_id, before.3);
+
+    let missing_result = complete_source(
+        "",
+        &binding,
+        r#"
+step "No-op targets" as unchanged {
+    enabled = true;
+    invoke edit_targets {
+        targets = [layer_target($target)];
+        command = set_target_visibility(true);
+    };
+}
+step "Use absent list item" {
+    enabled = true;
+    invoke delete_layer { layer_id = $unchanged.layers[0]; };
+}
+"#,
+    );
+    let missing_result = compile_inkscript(
+        &missing_result,
+        InkScriptRunParameterDecision::Resolve(Vec::new()),
+    )
+    .unwrap();
+    let mut never_cancel = || false;
+    assert!(matches!(
+        run_inkscript_dry(
+            &missing_result,
+            capture_in_memory_input(&base).unwrap(),
+            &mut never_cancel,
+        ),
+        Err(ScriptRunError::MissingResult)
+    ));
+
+    let mut cancel = || true;
+    assert!(matches!(
+        run_inkscript_dry(&no_op, capture_in_memory_input(&base).unwrap(), &mut cancel,),
+        Err(ScriptRunError::Cancelled)
+    ));
+    assert_eq!(
+        (
+            base.document_state_digest().unwrap(),
+            base.document_info().unwrap(),
+            base.history_entries(),
+            base.next_id,
+        ),
+        before
+    );
+}
+
+#[test]
+fn document_tree_mixed_edit_target_results_remain_typed_and_ordered() {
+    let mut base = core();
+    let (_, raster_layer_id) = base
+        .create_layer(LayerKind::Raster, "Raster owner")
+        .unwrap();
+    let (_, target_layer_id) = base
+        .create_layer(LayerKind::Raster, "Layer target")
+        .unwrap();
+    let info = base.document_info().unwrap();
+    let raster_plane_id = base
+        .layers()
+        .unwrap()
+        .into_iter()
+        .find(|layer| layer.id == raster_layer_id)
+        .unwrap()
+        .planes[0]
+        .id;
+    let uuid = document_uuid(info.document_uuid);
+    let bindings = format!(
+        r#"
+let source_layer = select layer {{ source_document_uuid = uuid"{uuid}"; persistent_id = {}; }};
+let plane_owner = select layer {{ source_document_uuid = uuid"{uuid}"; persistent_id = {raster_layer_id}; }};
+let source_plane = select plane {{ source_document_uuid = uuid"{uuid}"; persistent_id = {raster_plane_id}; }};
+"#,
+        target_layer_id
+    );
+    let program = complete_source(
+        "",
+        &bindings,
+        r#"
+step "Duplicate mixed targets" as copies {
+    enabled = true;
+    invoke edit_targets {
+        targets = [plane_target($plane_owner, $source_plane), layer_target($source_layer)];
+        command = duplicate_targets();
+    };
+}
+step "Delete copied plane" {
+    enabled = true;
+    invoke delete_plane { plane_id = $copies.planes[0]; };
+}
+step "Delete copied layer" {
+    enabled = true;
+    invoke delete_layer { layer_id = $copies.layers[0]; };
+}
+"#,
+    );
+    let program =
+        compile_inkscript(&program, InkScriptRunParameterDecision::Resolve(Vec::new())).unwrap();
+    assert_eq!(program.budget.max_invocations, 3);
+    assert_eq!(program.budget.max_output_ids, 2);
+    let before_digest = base.document_state_digest().unwrap();
+    let before_next_id = base.next_id.next_raw();
+    let mut never_cancel = || false;
+    let mut result = run_inkscript_dry(
+        &program,
+        capture_in_memory_input(&base).unwrap(),
+        &mut never_cancel,
+    )
+    .unwrap();
+    assert_eq!(result.report.commit_count, 3);
+    assert_eq!(result.report.results.len(), 2);
+    assert_eq!(result.report.results[0].field, "layers");
+    assert_eq!(result.report.results[1].field, "planes");
+    assert_eq!(result.report.results[0].output_id_ordinal, 1);
+    assert_eq!(result.report.results[1].output_id_ordinal, 0);
+    assert!(result.report.results[0].persistent_id >= before_next_id);
+    assert!(result.report.results[0].persistent_id > result.report.results[1].persistent_id);
+    assert_eq!(
+        result.staged.document_state_digest().unwrap(),
+        before_digest
+    );
+    let final_next_id = result.staged.next_id.next_raw();
+    assert!(final_next_id > result.report.results[1].persistent_id);
+    for _ in 0..3 {
+        result.staged.undo().unwrap();
+    }
+    for _ in 0..3 {
+        result.staged.redo().unwrap();
+    }
+    assert_eq!(
+        result.staged.document_state_digest().unwrap(),
+        before_digest
+    );
+    assert_eq!(result.staged.next_id.next_raw(), final_next_id);
+}
+
+#[test]
 fn binding_skip_cancel_stale_and_overflow_fail_atomically_without_id_consumption() {
     let base = core();
     let info = base.document_info().unwrap();
@@ -466,6 +754,12 @@ fn run_authority_overwrite_and_temporary_identity_contracts() {
 #[test]
 fn dirty_pathless_dry_run_and_saved_snapshot_contracts() {
     crate::script::run::test_dirty_pathless_dry_run_and_saved_snapshot_contracts();
+}
+
+#[test]
+#[ignore = "release-only InkScript quick performance contract"]
+fn approved_quick_performance_contract() {
+    super::performance::run_approved_quick();
 }
 
 fn value_contains_reference(value: &inkpod_format::InkScriptTypedValue, root: &str) -> bool {

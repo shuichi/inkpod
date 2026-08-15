@@ -869,6 +869,17 @@ pub(crate) struct ScriptPlanUsage {
     asset: ScriptAssetUsage,
 }
 
+#[cfg(test)]
+impl ScriptPlanUsage {
+    pub(super) const fn native_input_bytes(self) -> u64 {
+        self.native_input_bytes
+    }
+
+    pub(super) const fn asset(self) -> ScriptAssetUsage {
+        self.asset
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) enum PlannedInputSource {
     Session(ScriptSessionSnapshot),
@@ -959,6 +970,11 @@ impl ScriptExecutionPlan {
 
     pub(super) const fn open_session_set_generation(&self) -> u64 {
         self.open_session_set_generation
+    }
+
+    #[cfg(test)]
+    pub(super) const fn performance_usage(&self) -> ScriptPlanUsage {
+        self.usage
     }
 }
 

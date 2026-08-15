@@ -1,11 +1,11 @@
 # InkScript performance contract proposal
 
-Status: **proposed, not approved**. This is the M13 decision record. It does not
-change the existing benchmark harness, any approved envelope, the InkScript
-language/catalog, replay, native format, or ABI. The next generic InkScript
-milestone prompt without a reported defect explicitly approves this proposal;
-M14 may then implement only the quick contract below. The full contract remains
-reserved for M36.
+Status: **quick contract approved and implemented in M14**. The generic
+InkScript milestone prompt following M13 approved the recorded quick workload,
+counter, checksum, sample policy, reference environment, and 64–107 ms envelope
+without modification. The active executable contract and current samples are
+maintained in [`core-benchmark-baseline.md`](core-benchmark-baseline.md). The
+full contract remains reserved and unimplemented until M36.
 
 ## Contract intent
 
@@ -177,11 +177,12 @@ output-color-guard contract. The lower edge is diagnostic only when every
 semantic gate is exact. An upper-edge breach requires a second independent batch
 of at least five processes. Approval never permits automatic widening.
 
-## Planned M14/M36 harness changes
+## M14 implementation and reserved M36 changes
 
-M13 leaves no probe or harness code in the tree. After explicit approval:
+M13 left no probe or harness code in the tree. M14 implemented the approved
+quick slice as follows:
 
-- M14 adds a `#[cfg(test)]` crate-private InkScript benchmark module and one
+- M14 added a `#[cfg(test)]` crate-private InkScript benchmark module and one
   ignored Release quick runner. It uses the existing private compiler/planner/
   runner directly, emits the same stable key-value style as `core_workflows`, and
   adds explicit stage reports so failure/cancel work is counted even though a
@@ -191,8 +192,9 @@ M13 leaves no probe or harness code in the tree. After explicit approval:
 - `rust/inkpod-core/benches/core_workflows.rs`, its ten scenarios, both checksum
   arrays, and all approved envelopes receive no code or data change. M14 runs the
   existing quick benchmark separately to prove that invariant.
-- M14 records the approved quick range and all independent samples in
-  `core-benchmark-baseline.md`. It does not implement the full runner.
+- M14 records the approved quick range and both the approval and implementation
+  sample batches in `core-benchmark-baseline.md`. It does not implement the full
+  runner.
 - M36 later implements and runs only the approved full fixture above, without
   changing its seed, counters, checksum algorithm, timed interval, or envelope.
 
