@@ -519,11 +519,13 @@ fn run_one_item(
         Err(ItemStageError::Cancelled) => return ItemRunResult::cancelled(),
         Err(ItemStageError::Failed(failure)) => return ItemRunResult::failed(failure),
     };
-    let executed = match run_inkscript_on_staged_core(program, working, cancelled) {
-        Ok(value) => value,
-        Err(ScriptRunError::Cancelled) => return ItemRunResult::cancelled(),
-        Err(error) => return ItemRunResult::failed(execution_failure(error)),
-    };
+    let executed =
+        match run_inkscript_on_staged_core(program, working, Some(plan.frozen_assets()), cancelled)
+        {
+            Ok(value) => value,
+            Err(ScriptRunError::Cancelled) => return ItemRunResult::cancelled(),
+            Err(error) => return ItemRunResult::failed(execution_failure(error)),
+        };
     #[cfg(test)]
     adapter.observe_staged_execution(&executed.report);
     if mode == ScriptRunMode::DryRun {

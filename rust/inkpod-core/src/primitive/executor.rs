@@ -116,6 +116,15 @@ impl Core {
         self.execute_canonical(canonical, None)
     }
 
+    pub(crate) fn execute_canonical_stroke_arguments(
+        &mut self,
+        arguments: CanonicalStrokeArguments,
+    ) -> Result<PrimitiveOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        let canonical = self.canonicalized_stroke_request(arguments)?;
+        self.execute_canonical(canonical, None)
+    }
+
     /// Replays one canonical procedure through the same working-state executor.
     ///
     /// Replay requires the exact next Procedure/State IDs, current replay epoch,

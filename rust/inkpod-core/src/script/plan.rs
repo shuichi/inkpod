@@ -964,6 +964,10 @@ impl ScriptExecutionPlan {
         &self.destinations
     }
 
+    pub(super) const fn frozen_assets(&self) -> &FrozenScriptAssets {
+        &self.frozen_assets
+    }
+
     pub(super) const fn authority_generation(&self) -> u64 {
         self.authority_generation
     }

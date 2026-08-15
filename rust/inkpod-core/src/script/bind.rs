@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::catalog::{
-    CatalogError, CatalogWorkEstimate, InkScriptCatalogView, InkScriptPortability,
-    InkScriptPortabilityClass,
+    CatalogAssetSummary, CatalogError, CatalogWorkEstimate, InkScriptCatalogView,
+    InkScriptPortability, InkScriptPortabilityClass,
 };
 use inkpod_format::{InkScriptAssertComparison, InkScriptSchemaView, InkScriptSelectorOwner};
 use inkpod_format::{
@@ -130,7 +130,13 @@ fn prepare_inkscript_initial_state(
         .map(|step| step.arguments().clone())
         .collect::<Vec<_>>();
     prepare_inkscript_initial_state_with_parameters(
-        model, schema, catalog, snapshot, &values, &arguments,
+        model,
+        schema,
+        catalog,
+        snapshot,
+        &values,
+        &arguments,
+        &BTreeMap::new(),
     )
 }
 
@@ -141,6 +147,7 @@ pub(crate) fn prepare_inkscript_initial_state_with_parameters(
     snapshot: &InkScriptInitialDocumentSnapshot,
     parameter_values: &BTreeMap<String, InkScriptTypedValue>,
     frozen_arguments: &[InkScriptTypedValue],
+    asset_summaries: &BTreeMap<String, CatalogAssetSummary>,
 ) -> Result<InkScriptInitialPreparation, InkScriptBindingError> {
     if frozen_arguments.len() != model.steps().len() {
         return Err(InkScriptBindingError::TypeMismatch);
@@ -244,7 +251,14 @@ pub(crate) fn prepare_inkscript_initial_state_with_parameters(
                 let portability = catalog.evaluate_portability(step.command(), arguments)?;
                 portability_class = portability_class.max(portability.class);
                 preconditions.extend(portability.required_preconditions);
-                add_work(&mut work, catalog.evaluate_work(step.command(), arguments)?)?;
+                add_work(
+                    &mut work,
+                    catalog.evaluate_work_with_assets(
+                        step.command(),
+                        arguments,
+                        asset_summaries,
+                    )?,
+                )?;
                 statements.push(InkScriptPreparedStatement::StepReady);
             }
         }

@@ -238,6 +238,23 @@ bool WindowFontsAreEquivalent(HWND left, HWND right) noexcept {
         && std::wcscmp(left_info.lfFaceName, right_info.lfFaceName) == 0;
 }
 
+bool WindowUsesStandardUiFont(HWND window) noexcept {
+    const HFONT font = window == nullptr
+        ? nullptr
+        : reinterpret_cast<HFONT>(SendMessageW(window, WM_GETFONT, 0, 0));
+    LOGFONTW info{};
+    return font != nullptr
+        && GetObjectW(font, static_cast<int>(sizeof(info)), &info)
+            == static_cast<int>(sizeof(info))
+        && info.lfHeight
+            == -MulDiv(9, static_cast<int>(GetDpiForWindow(window)), 72)
+        && info.lfWeight == FW_NORMAL && info.lfItalic == FALSE
+        && info.lfUnderline == FALSE && info.lfStrikeOut == FALSE
+        && info.lfCharSet == DEFAULT_CHARSET
+        && info.lfQuality == CLEARTYPE_QUALITY
+        && std::wcscmp(info.lfFaceName, L"Segoe UI") == 0;
+}
+
 bool AutomationWindowNameContains(
     HWND window, std::wstring_view expected) noexcept {
     if (window == nullptr || expected.empty()) {
@@ -9829,6 +9846,9 @@ int RunSplitEditorGroupSmoke(ApplicationHost& state) noexcept {
         || state.renderer->SurfaceCount() != 2U) {
         return 750;
     }
+    if (!WindowUsesStandardUiFont(first_group->document_tabs)) {
+        return 11006;
+    }
     const auto first_group_id = first_group->id;
     const auto first_canvas_id = first_group->canvas_id;
     const HWND first_canvas = first_group->canvas;
@@ -9859,6 +9879,19 @@ int RunSplitEditorGroupSmoke(ApplicationHost& state) noexcept {
         || state.Workspace().windows.document_tabs
             != second_group->document_tabs) {
         return 752;
+    }
+    if (!WindowUsesStandardUiFont(second_group->document_tabs)) {
+        return 11007;
+    }
+    const auto second_tab_font = reinterpret_cast<HFONT>(SendMessageW(
+        second_group->document_tabs, WM_GETFONT, 0, 0));
+    SendMessageW(
+        second_group->document_tabs, WM_DPICHANGED_AFTERPARENT, 0, 0);
+    if (reinterpret_cast<HFONT>(SendMessageW(
+            second_group->document_tabs, WM_GETFONT, 0, 0))
+            == second_tab_font
+        || !WindowUsesStandardUiFont(second_group->document_tabs)) {
+        return 11008;
     }
     const auto second_group_id = second_group->id;
     const HWND second_canvas = second_group->canvas;

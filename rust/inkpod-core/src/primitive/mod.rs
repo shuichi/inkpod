@@ -19,7 +19,17 @@ pub(crate) mod inkscript_batch;
     reason = "the private document-tree adapter is connected only through the script runner"
 )]
 pub(crate) mod inkscript_document_tree;
+#[allow(
+    dead_code,
+    reason = "the private metadata/color/guide adapter is connected only through the script runner"
+)]
+pub(crate) mod inkscript_metadata;
 mod inkscript_reference;
+#[allow(
+    dead_code,
+    reason = "the private stroke/geometry/import adapter is connected only through the script runner"
+)]
+pub(crate) mod inkscript_stroke_geometry;
 mod invocation;
 mod model;
 mod raster;
@@ -39,7 +49,11 @@ pub(crate) use executor::validate_persisted_procedure;
 pub(crate) use inkscript::{LegacySimpleAdapterError, LegacySimpleScriptStep};
 pub(crate) use inkscript_batch::{LegacyImageAdapterError, LegacyImageScriptStep};
 pub(crate) use inkscript_document_tree::{DocumentTreeAdapterError, DocumentTreeScriptStep};
+pub(crate) use inkscript_metadata::{MetadataColorGuideAdapterError, MetadataColorGuideScriptStep};
 pub(crate) use inkscript_reference::{InkScriptEntityKind, InkScriptRuntimeReferences};
+pub(crate) use inkscript_stroke_geometry::{
+    StrokeGeometryImportAction, StrokeGeometryImportAdapterError,
+};
 pub(crate) use invocation::{CanonicalInvocation, InvocationResult, RuntimeInvocation};
 use model::CanonicalPrimitive;
 pub(crate) use model::CanonicalStrokeArguments;

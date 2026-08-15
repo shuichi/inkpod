@@ -19,6 +19,7 @@ namespace inkpod::windows::ui {
 namespace {
 
 constexpr UINT_PTR kSplitterSubclass = 1U;
+constexpr UINT_PTR kDocumentTabFontSubclass = 2U;
 
 constexpr std::array<UINT, kWorkspaceAuxiliaryPaneCount>
     kAutoHideButtonCommands{
@@ -37,6 +38,82 @@ constexpr std::array<UINT, kWorkspaceAuxiliaryPaneCount>
         IDS_PANE_REFERENCE,
         IDS_PANE_BATCH,
     };
+
+HFONT CreateDocumentTabFont(HWND tabs) noexcept {
+    const UINT window_dpi = tabs == nullptr ? 96U : GetDpiForWindow(tabs);
+    const UINT dpi = window_dpi == 0U ? 96U : window_dpi;
+    return CreateFontW(
+        -MulDiv(9, static_cast<int>(dpi), 72),
+        0,
+        0,
+        0,
+        FW_NORMAL,
+        FALSE,
+        FALSE,
+        FALSE,
+        DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS,
+        CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY,
+        DEFAULT_PITCH | FF_DONTCARE,
+        L"Segoe UI");
+}
+
+LRESULT CALLBACK DocumentTabFontSubclassProcedure(
+    HWND tabs,
+    UINT message,
+    WPARAM wparam,
+    LPARAM lparam,
+    UINT_PTR,
+    DWORD_PTR reference) noexcept {
+    const auto font = reinterpret_cast<HFONT>(reference);
+    if (message == WM_DPICHANGED_AFTERPARENT) {
+        const HFONT replacement = CreateDocumentTabFont(tabs);
+        if (replacement != nullptr
+            && SetWindowSubclass(
+                   tabs,
+                   DocumentTabFontSubclassProcedure,
+                   kDocumentTabFontSubclass,
+                   reinterpret_cast<DWORD_PTR>(replacement))
+                != FALSE) {
+            SendMessageW(
+                tabs,
+                WM_SETFONT,
+                reinterpret_cast<WPARAM>(replacement),
+                TRUE);
+            DeleteObject(font);
+        } else if (replacement != nullptr) {
+            DeleteObject(replacement);
+        }
+    } else if (message == WM_NCDESTROY) {
+        RemoveWindowSubclass(
+            tabs,
+            DocumentTabFontSubclassProcedure,
+            kDocumentTabFontSubclass);
+        const LRESULT result = DefSubclassProc(tabs, message, wparam, lparam);
+        DeleteObject(font);
+        return result;
+    }
+    return DefSubclassProc(tabs, message, wparam, lparam);
+}
+
+bool AttachDocumentTabFont(HWND tabs) noexcept {
+    const HFONT font = CreateDocumentTabFont(tabs);
+    if (font == nullptr) {
+        return false;
+    }
+    if (SetWindowSubclass(
+            tabs,
+            DocumentTabFontSubclassProcedure,
+            kDocumentTabFontSubclass,
+            reinterpret_cast<DWORD_PTR>(font))
+        == FALSE) {
+        DeleteObject(font);
+        return false;
+    }
+    SendMessageW(tabs, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+    return true;
+}
 
 void PlaceChild(HWND child, const RECT& bounds, bool requested_visible) noexcept {
     if (child == nullptr) {
@@ -374,6 +451,7 @@ bool CreateEditorGroupTabs(
         instance,
         nullptr);
     return group.document_tabs != nullptr
+        && AttachDocumentTabFont(group.document_tabs)
         && AttachDocumentTabDrag(group.document_tabs, group.id);
 }
 

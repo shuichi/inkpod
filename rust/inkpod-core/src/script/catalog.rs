@@ -126,6 +126,12 @@ pub(crate) struct CatalogAssetMetadata {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct CatalogAssetSummary {
+    pub(crate) logical_element_count: u64,
+    pub(crate) logical_payload_bytes: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct CatalogEditorMetadata {
     pub(crate) family: &'static str,
     pub(crate) legacy_projection: Option<&'static str>,
@@ -209,7 +215,7 @@ impl InkScriptCatalogView {
     ) -> Result<InkScriptPortability, CatalogError> {
         let entry = self.entry(name)?;
         for (condition, result) in &entry.portability.rules {
-            if evaluate_boolean(condition, arguments, 0)? {
+            if evaluate_boolean(condition, arguments, &BTreeMap::new(), 0)? {
                 return Ok(result.clone());
             }
         }
@@ -221,13 +227,22 @@ impl InkScriptCatalogView {
         name: &str,
         arguments: &InkScriptTypedValue,
     ) -> Result<CatalogWorkEstimate, CatalogError> {
+        self.evaluate_work_with_assets(name, arguments, &BTreeMap::new())
+    }
+
+    pub(crate) fn evaluate_work_with_assets(
+        &self,
+        name: &str,
+        arguments: &InkScriptTypedValue,
+        assets: &BTreeMap<String, CatalogAssetSummary>,
+    ) -> Result<CatalogWorkEstimate, CatalogError> {
         let entry = self.entry(name)?;
         Ok(CatalogWorkEstimate {
-            max_invocations: evaluate_output(&entry.work.max_invocations, arguments)?,
-            max_output_ids: evaluate_output(&entry.work.max_output_ids, arguments)?,
-            max_asset_bytes: evaluate_output(&entry.work.max_asset_bytes, arguments)?,
-            max_work_units: evaluate_output(&entry.work.max_work_units, arguments)?,
-            max_output_growth: evaluate_output(&entry.work.max_output_growth, arguments)?,
+            max_invocations: evaluate_output(&entry.work.max_invocations, arguments, assets)?,
+            max_output_ids: evaluate_output(&entry.work.max_output_ids, arguments, assets)?,
+            max_asset_bytes: evaluate_output(&entry.work.max_asset_bytes, arguments, assets)?,
+            max_work_units: evaluate_output(&entry.work.max_work_units, arguments, assets)?,
+            max_output_growth: evaluate_output(&entry.work.max_output_growth, arguments, assets)?,
         })
     }
 }
@@ -275,6 +290,7 @@ fn validate_entry(entry: &CatalogEntry) -> Result<(), CatalogError> {
 fn evaluate_boolean(
     expression: &CatalogBooleanExpression,
     arguments: &InkScriptTypedValue,
+    assets: &BTreeMap<String, CatalogAssetSummary>,
     depth: usize,
 ) -> Result<bool, CatalogError> {
     if depth >= MAX_CATALOG_EXPRESSION_DEPTH {
@@ -287,8 +303,8 @@ fn evaluate_boolean(
             left,
             right,
         } => {
-            let left = evaluate_numeric(left, arguments, depth + 1)?;
-            let right = evaluate_numeric(right, arguments, depth + 1)?;
+            let left = evaluate_numeric(left, arguments, assets, depth + 1)?;
+            let right = evaluate_numeric(right, arguments, assets, depth + 1)?;
             Ok(match comparison {
                 CatalogComparison::Equal => left == right,
                 CatalogComparison::NotEqual => left != right,
@@ -299,27 +315,32 @@ fn evaluate_boolean(
             })
         }
         CatalogBooleanExpression::And(left, right) => {
-            Ok(evaluate_boolean(left, arguments, depth + 1)?
-                && evaluate_boolean(right, arguments, depth + 1)?)
+            Ok(evaluate_boolean(left, arguments, assets, depth + 1)?
+                && evaluate_boolean(right, arguments, assets, depth + 1)?)
         }
         CatalogBooleanExpression::Or(left, right) => {
-            Ok(evaluate_boolean(left, arguments, depth + 1)?
-                || evaluate_boolean(right, arguments, depth + 1)?)
+            Ok(evaluate_boolean(left, arguments, assets, depth + 1)?
+                || evaluate_boolean(right, arguments, assets, depth + 1)?)
         }
-        CatalogBooleanExpression::Not(value) => Ok(!evaluate_boolean(value, arguments, depth + 1)?),
+        CatalogBooleanExpression::Not(value) => {
+            Ok(!evaluate_boolean(value, arguments, assets, depth + 1)?)
+        }
     }
 }
 
 fn evaluate_output(
     expression: &CatalogNumericExpression,
     arguments: &InkScriptTypedValue,
+    assets: &BTreeMap<String, CatalogAssetSummary>,
 ) -> Result<u64, CatalogError> {
-    u64::try_from(evaluate_numeric(expression, arguments, 0)?).map_err(|_| CatalogError::Overflow)
+    u64::try_from(evaluate_numeric(expression, arguments, assets, 0)?)
+        .map_err(|_| CatalogError::Overflow)
 }
 
 fn evaluate_numeric(
     expression: &CatalogNumericExpression,
     arguments: &InkScriptTypedValue,
+    assets: &BTreeMap<String, CatalogAssetSummary>,
     depth: usize,
 ) -> Result<i128, CatalogError> {
     if depth >= MAX_CATALOG_EXPRESSION_DEPTH {
@@ -329,13 +350,21 @@ fn evaluate_numeric(
                   right: &CatalogNumericExpression|
      -> Result<(i128, i128), CatalogError> {
         Ok((
-            evaluate_numeric(left, arguments, depth + 1)?,
-            evaluate_numeric(right, arguments, depth + 1)?,
+            evaluate_numeric(left, arguments, assets, depth + 1)?,
+            evaluate_numeric(right, arguments, assets, depth + 1)?,
         ))
     };
     match expression {
         CatalogNumericExpression::Literal(value) => Ok(i128::from(*value)),
-        CatalogNumericExpression::Field(path) => numeric_value(value_at_path(arguments, path)?),
+        CatalogNumericExpression::Field(path) => {
+            asset_numeric(arguments, path, assets).or_else(|error| {
+                if error == CatalogError::UnknownField {
+                    numeric_value(value_at_path(arguments, path)?)
+                } else {
+                    Err(error)
+                }
+            })
+        }
         CatalogNumericExpression::ListLength { path, maximum } => {
             let InkScriptTypedValueKind::List(values) = value_at_path(arguments, path)?.kind()
             else {
@@ -381,7 +410,7 @@ fn evaluate_numeric(
             Ok(left.max(right))
         }
         CatalogNumericExpression::CheckedAbs(value) => {
-            evaluate_numeric(value, arguments, depth + 1)?
+            evaluate_numeric(value, arguments, assets, depth + 1)?
                 .checked_abs()
                 .ok_or(CatalogError::Overflow)
         }
@@ -401,7 +430,7 @@ fn evaluate_numeric(
             let mut total = 0i128;
             for value in values {
                 total = total
-                    .checked_add(evaluate_numeric(body, value, depth + 1)?)
+                    .checked_add(evaluate_numeric(body, value, assets, depth + 1)?)
                     .ok_or(CatalogError::Overflow)?;
             }
             Ok(total)
@@ -411,12 +440,33 @@ fn evaluate_numeric(
             when_true,
             when_false,
         } => {
-            if evaluate_boolean(condition, arguments, depth + 1)? {
-                evaluate_numeric(when_true, arguments, depth + 1)
+            if evaluate_boolean(condition, arguments, assets, depth + 1)? {
+                evaluate_numeric(when_true, arguments, assets, depth + 1)
             } else {
-                evaluate_numeric(when_false, arguments, depth + 1)
+                evaluate_numeric(when_false, arguments, assets, depth + 1)
             }
         }
+    }
+}
+
+fn asset_numeric(
+    arguments: &InkScriptTypedValue,
+    path: &[&str],
+    assets: &BTreeMap<String, CatalogAssetSummary>,
+) -> Result<i128, CatalogError> {
+    if path.len() != 2 {
+        return Err(CatalogError::UnknownField);
+    }
+    let InkScriptTypedValueKind::AssetReference(symbol) =
+        value_at_path(arguments, &path[..1])?.kind()
+    else {
+        return Err(CatalogError::UnknownField);
+    };
+    let summary = assets.get(symbol).ok_or(CatalogError::UnknownField)?;
+    match path[1] {
+        "logical_element_count" => Ok(i128::from(summary.logical_element_count)),
+        "logical_payload_bytes" => Ok(i128::from(summary.logical_payload_bytes)),
+        _ => Err(CatalogError::UnknownField),
     }
 }
 
@@ -596,13 +646,14 @@ mod tests {
             Box::new(CatalogNumericExpression::Literal(1)),
         );
         assert_eq!(
-            evaluate_output(&invalid, &arguments(1)).unwrap_err(),
+            evaluate_output(&invalid, &arguments(1), &BTreeMap::new()).unwrap_err(),
             CatalogError::Overflow
         );
         assert_eq!(
             evaluate_output(
                 &CatalogNumericExpression::Field(vec!["missing"]),
-                &arguments(1)
+                &arguments(1),
+                &BTreeMap::new()
             )
             .unwrap_err(),
             CatalogError::UnknownField
@@ -613,7 +664,8 @@ mod tests {
                     path: vec!["values"],
                     maximum: 1,
                 },
-                &arguments(1)
+                &arguments(1),
+                &BTreeMap::new()
             )
             .unwrap_err(),
             CatalogError::ResourceLimit
@@ -624,7 +676,8 @@ mod tests {
                     Box::new(CatalogNumericExpression::Literal(1)),
                     Box::new(CatalogNumericExpression::Literal(0)),
                 ),
-                &arguments(1)
+                &arguments(1),
+                &BTreeMap::new()
             )
             .unwrap_err(),
             CatalogError::ZeroDivisor
@@ -638,7 +691,7 @@ mod tests {
                 right: CatalogNumericExpression::Literal(0),
             }),
         );
-        assert!(evaluate_boolean(&short_circuit, &arguments(1), 0).unwrap());
+        assert!(evaluate_boolean(&short_circuit, &arguments(1), &BTreeMap::new(), 0).unwrap());
         assert_eq!(
             view.entry("missing").unwrap_err(),
             CatalogError::InvalidEntry

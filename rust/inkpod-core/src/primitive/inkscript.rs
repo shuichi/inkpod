@@ -242,6 +242,12 @@ impl LegacySimpleScriptStep {
             let entity_name = match entity {
                 InkScriptEntityKind::Layer => "layer",
                 InkScriptEntityKind::Plane => "plane",
+                InkScriptEntityKind::Guide => {
+                    return Err(LegacySimpleAdapterError::UnsupportedPrimitive);
+                }
+                InkScriptEntityKind::VectorPath | InkScriptEntityKind::VectorFill => {
+                    return Err(LegacySimpleAdapterError::UnsupportedPrimitive);
+                }
             };
             source.push_str(&format!(
                 "bindings {{ let target = select {entity_name} {{ source_document_uuid = uuid\"{ADAPTER_SOURCE_UUID}\"; persistent_id = {persistent_id}; }}; }}\n"

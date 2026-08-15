@@ -1,8 +1,14 @@
+use super::assets::{FrozenScriptAssets, ScriptAssetLimits, freeze_inkscript_assets};
+use super::execute::run_inkscript_on_staged_core;
 use super::*;
+use crate::asset::{AssetStore, RasterAssetInput};
 use crate::primitive::CanonicalInvocation;
 use crate::{
-    BatchColorPair, Core, DEFAULT_DPI_MILLI, LayerKind, NativeOpenStrategy, PixelValue,
-    PrimitiveId, ProcedureId, StateId,
+    ActivePlane, AssetAlphaSemantics, AssetColorSpace, BatchColorPair, BrushShape, CoordinateSpace,
+    Core, DEFAULT_DPI_MILLI, GeometryCrossSection, GeometryOptions, GeometryPrimitive,
+    GeometryRequest, GridConfig, GuideAxis, LayerKind, MAX_PERSISTENT_NUMERIC_ID,
+    NativeOpenStrategy, PaintTool, PixelFormat, PixelValue, PointF32, PrimitiveId,
+    PrimitiveRequest, ProcedureId, StartColorPredicate, StateId, Stroke, StrokeSample,
 };
 use inkpod_format::{
     InkScriptRunParameterChoice, InkScriptRunParameterDecision, InkScriptSource, InkScriptSourceId,
@@ -38,6 +44,47 @@ output {{ policy = duplicate; format = inkpod; folder = "out"; cell_folder = fal
 execution {{ failure = stop; wait_ms = 0; preview_before_save = false; }}
 "#
     ))
+}
+
+fn complete_source_with_assets(bindings: &str, program: &str, assets: &str) -> InkScriptSource {
+    source(format!(
+        r#"inkscript 1;
+requires {{ procedure_catalog = 1; replay_epoch = 23; }}
+inputs {{ current_document; }}
+parameters {{}}
+bindings {{ {bindings} }}
+program {{ {program} }}
+output {{ policy = duplicate; format = inkpod; folder = "out"; cell_folder = false; basename = "stroke-geometry"; start_number = 1; direction = ascending; }}
+execution {{ failure = stop; wait_ms = 0; preview_before_save = false; }}
+assets {{ {assets} }}
+"#
+    ))
+}
+
+fn asset_digest_text(id: crate::AssetId) -> String {
+    let mut text = String::with_capacity(64);
+    for byte in id.as_bytes() {
+        use std::fmt::Write as _;
+        write!(text, "{byte:02x}").unwrap();
+    }
+    text
+}
+
+fn rgba8_asset_id(pixels: Vec<u8>, width: u32, height: u32) -> crate::AssetId {
+    let mut store = AssetStore::default();
+    store
+        .ingest_raster(RasterAssetInput {
+            width,
+            height,
+            pixel_format: PixelFormat::StraightRgba8,
+            color_space: Some(AssetColorSpace::Srgb),
+            alpha_semantics: AssetAlphaSemantics::Straight,
+            canonical_stride: u64::from(width) * 4,
+            pixels,
+            expected_id: None,
+        })
+        .unwrap()
+        .id()
 }
 
 fn core() -> Core {
@@ -387,16 +434,14 @@ step "Rename created plane" {
     assert_eq!(reopened.document_state_digest().unwrap(), after);
 }
 
-#[test]
-fn document_tree_no_op_result_cancel_and_missing_result_are_atomic() {
-    let base = core();
+fn document_tree_no_op_fixture(base: &Core) -> InkScriptSource {
     let info = base.document_info().unwrap();
     let uuid = document_uuid(info.document_uuid);
     let binding = format!(
         r#"let target = select layer {{ source_document_uuid = uuid"{uuid}"; persistent_id = {}; }};"#,
         info.layer_id
     );
-    let no_op = complete_source(
+    complete_source(
         "",
         &binding,
         r#"
@@ -408,7 +453,685 @@ step "No-op targets" as unchanged {
     };
 }
 "#,
+    )
+}
+
+#[test]
+fn metadata_color_guide_results_round_trip_native_history_ids_and_savepoints() {
+    let source_core = core();
+    let before = source_core.document_state_digest().unwrap();
+    let source_next_id = source_core.next_id.next_raw();
+    let program = complete_source(
+        "",
+        "",
+        r#"
+step "Main-line color" {
+    enabled = true;
+    invoke set_main_line_color { color = rgba16(257, 514, 771, 65535); };
+}
+step "Palette" {
+    enabled = true;
+    invoke replace_palette { colors = [rgba8(1, 2, 3, 4), rgba16(5, 6, 7, 8),]; };
+}
+step "Color chart" {
+    enabled = true;
+    invoke replace_color_chart {
+        entries = [
+            { color = rgba8(10, 20, 30, 40); name = chart_name_text("Eight"); },
+            { color = rgba16(11, 22, 33, 44); name = chart_name_scalars([78, 0, 85, 76,]); },
+        ];
+        locked = true;
+    };
+}
+step "Add guide" as created {
+    enabled = true;
+    invoke add_guide { axis = vertical; position = 2; };
+}
+step "Move created guide" {
+    enabled = true;
+    invoke move_guide { guide_id = $created.guide; position = 3; };
+}
+step "Grid" {
+    enabled = true;
+    invoke set_grid {
+        grid = { origin_x = -1; origin_y = 2; spacing_x = 7; spacing_y = 9; subdivisions = 3; };
+    };
+}
+step "Grid no-op" {
+    enabled = true;
+    invoke set_grid {
+        grid = { origin_x = -1; origin_y = 2; spacing_x = 7; spacing_y = 9; subdivisions = 3; };
+    };
+}
+"#,
     );
+    let program =
+        compile_inkscript(&program, InkScriptRunParameterDecision::Resolve(Vec::new())).unwrap();
+    assert_eq!(program.budget.max_invocations, 7);
+    assert_eq!(program.budget.max_output_ids, 1);
+
+    let mut never_cancel = || false;
+    let mut result = run_inkscript_dry(
+        &program,
+        capture_in_memory_input(&source_core).unwrap(),
+        &mut never_cancel,
+    )
+    .unwrap();
+    assert_eq!(result.report.commit_count, 6);
+    assert_eq!(result.report.results.len(), 1);
+    assert_eq!(result.report.results[0].alias, "created");
+    assert_eq!(result.report.results[0].field, "guide");
+    let guide_id = result.report.results[0].persistent_id;
+    assert_eq!(guide_id, source_next_id);
+    assert!(guide_id < result.staged.next_id.next_raw());
+    assert_eq!(
+        result.staged.main_line_color().unwrap(),
+        PixelValue::Rgba16([257, 514, 771, u16::MAX])
+    );
+    assert_eq!(
+        result.staged.palette().unwrap(),
+        [
+            PixelValue::Rgba([1, 2, 3, 4]),
+            PixelValue::Rgba16([5, 6, 7, 8]),
+        ]
+    );
+    assert_eq!(
+        result.staged.color_chart().unwrap().entries()[1].name,
+        "N\0UL"
+    );
+    assert!(result.staged.color_chart().unwrap().locked());
+    assert_eq!(
+        result.staged.guides().unwrap(),
+        [crate::Guide {
+            id: guide_id,
+            axis: GuideAxis::Vertical,
+            position: 3,
+        }]
+    );
+    assert_eq!(
+        result.staged.grid().unwrap(),
+        GridConfig {
+            origin_x: -1,
+            origin_y: 2,
+            spacing_x: 7,
+            spacing_y: 9,
+            subdivisions: 3,
+        }
+    );
+
+    let after = result.staged.document_state_digest().unwrap();
+    for _ in 0..6 {
+        result.staged.undo().unwrap();
+    }
+    assert_eq!(result.staged.document_state_digest().unwrap(), before);
+    assert_eq!(result.staged.next_id.next_raw(), source_next_id + 1);
+    for _ in 0..6 {
+        result.staged.redo().unwrap();
+    }
+    assert_eq!(result.staged.document_state_digest().unwrap(), after);
+
+    let editor_digest = result.staged.editor_state().unwrap().digest;
+    let native = result
+        .staged
+        .build_procedure_file(Some(result.staged.current_state), Some(editor_digest))
+        .unwrap();
+    let bytes = encode_procedure_file(&native).unwrap();
+    let mut reopened = Core::from_procedure_file(decode_procedure_file(&bytes).unwrap()).unwrap();
+    assert_eq!(reopened.document_state_digest().unwrap(), after);
+    assert_eq!(reopened.history_entries(), result.staged.history_entries());
+    assert_eq!(reopened.next_id, result.staged.next_id);
+    assert_eq!(reopened.next_procedure, result.staged.next_procedure);
+    assert_eq!(reopened.next_state, result.staged.next_state);
+    assert_eq!(
+        reopened.next_journal_event,
+        result.staged.next_journal_event
+    );
+    assert_eq!(reopened.next_branch, result.staged.next_branch);
+    assert_eq!(
+        reopened.persistence_info().unwrap().open_strategy,
+        NativeOpenStrategy::FullReplay
+    );
+    assert!(!reopened.document_info().unwrap().dirty);
+    assert!(!reopened.editor_state().unwrap().dirty);
+    assert_eq!(reopened.color_chart().unwrap().entries()[1].name, "N\0UL");
+    for _ in 0..6 {
+        reopened.undo().unwrap();
+    }
+    assert_eq!(reopened.document_state_digest().unwrap(), before);
+    for _ in 0..6 {
+        reopened.redo().unwrap();
+    }
+    assert_eq!(reopened.document_state_digest().unwrap(), after);
+}
+
+fn stroke_geometry_import_fixture() -> (
+    Core,
+    StaticScriptProgram,
+    FrozenScriptAssets,
+    crate::AssetId,
+    Vec<u8>,
+) {
+    let mut base = Core::new();
+    base.new_cell(2, 2, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    let (_, vector_layer_id) = base
+        .create_layer(LayerKind::VectorColoring, "Vector geometry")
+        .unwrap();
+    let (vector_plane_id, _, _) = base.vector_layer_planes(vector_layer_id).unwrap();
+    let info = base.document_info().unwrap();
+    let pixels = vec![
+        12, 34, 56, 255, 12, 34, 56, 255, 12, 34, 56, 255, 12, 34, 56, 255,
+    ];
+    let asset_id = rgba8_asset_id(pixels.clone(), 2, 2);
+    let bindings = format!(
+        r#"
+let paint = select plane {{ source_document_uuid = uuid"{}"; persistent_id = {}; }};
+let vector_paint = select plane {{ source_document_uuid = uuid"{}"; persistent_id = {vector_plane_id}; }};
+"#,
+        document_uuid(info.document_uuid),
+        info.color_plane_id,
+        document_uuid(info.document_uuid),
+    );
+    let program = complete_source_with_assets(
+        &bindings,
+        r#"
+step "Stroke" {
+    enabled = true;
+    invoke apply_raster_stroke {
+        plane_id = $paint;
+        stroke = {
+            tool = brush;
+            color = rgba8(90, 80, 70, 255);
+            diameter = q16(65536);
+            shape = round;
+            smoothing = 0;
+            start_color = any;
+            auto_erase = false;
+            pressure_size = true;
+            samples = [
+                { x = q16(32768); y = q16(32768); pressure = 65535; },
+                { x = q16(98304); y = q16(32768); pressure = 32768; },
+            ];
+        };
+    };
+}
+step "Import" {
+    enabled = true;
+    invoke import_raster_asset { plane_id = $paint; raster = asset(paint_asset); };
+}
+step "Import no-op" {
+    enabled = true;
+    invoke import_raster_asset { plane_id = $paint; raster = asset(paint_asset); };
+}
+step "Geometry" as created {
+    enabled = true;
+    invoke apply_geometry {
+        plane_id = $vector_paint;
+        primitive = line;
+        segments = [{
+            p0 = point(q16(0), q16(65536));
+            p1 = point(q16(21845), q16(65536));
+            p2 = point(q16(43691), q16(65536));
+            p3 = point(q16(65536), q16(65536));
+            width_start = q16(65536);
+            width_end = q16(65536);
+        }];
+        fill_boundary = [];
+        outline_color = rgba8(200, 100, 50, 255);
+        fill_color = rgba8(0, 0, 0, 0);
+        outline_width = q16(65536);
+        cross_section = round;
+        outline = true;
+        fill = false;
+        closed = false;
+    };
+}
+"#,
+        &format!(
+            r#"asset paint_asset {{
+                asset_id = blake3"{}";
+                kind = "canonical_raster";
+                descriptor = {{ pixel_format = rgba8; color_space = srgb; alpha = straight; width = 2; height = 2; stride = 8; element_count = 4; }};
+                data = base64"""DCI4/wwiOP8MIjj/DCI4/w==""";
+            }};"#,
+            asset_digest_text(asset_id)
+        ),
+    );
+    let program =
+        compile_inkscript(&program, InkScriptRunParameterDecision::Resolve(Vec::new())).unwrap();
+    let mut never_cancel = || false;
+    let assets = freeze_inkscript_assets(
+        program.model.assets(),
+        &mut [],
+        ScriptAssetLimits::exact_current(),
+        &mut never_cancel,
+    )
+    .unwrap();
+    (base, program, assets, asset_id, pixels)
+}
+
+fn imported_raster_input(pixels: Vec<u8>, expected_id: crate::AssetId) -> RasterAssetInput {
+    RasterAssetInput {
+        width: 2,
+        height: 2,
+        pixel_format: PixelFormat::StraightRgba8,
+        color_space: Some(AssetColorSpace::Srgb),
+        alpha_semantics: AssetAlphaSemantics::Straight,
+        canonical_stride: 8,
+        pixels,
+        expected_id: Some(expected_id),
+    }
+}
+
+#[test]
+fn stroke_geometry_import_execute_typed_assets_and_round_trip_native_history() {
+    let (base, program, assets, asset_id, pixels) = stroke_geometry_import_fixture();
+    assert_eq!(program.budget.max_invocations, 4);
+    assert_eq!(program.budget.max_output_ids, 2);
+    assert_eq!(program.budget.max_asset_bytes, 88);
+    assert_eq!(assets.asset_id("paint_asset"), Some(asset_id));
+    assert_eq!(assets.usage().logical_payload_bytes, 16);
+
+    let base_digest = base.document_state_digest().unwrap();
+    let mut never_cancel = || false;
+    let mut scripted =
+        run_inkscript_on_staged_core(&program, base.clone(), Some(&assets), &mut never_cancel)
+            .unwrap();
+    assert_eq!(scripted.report.commit_count, 3);
+    assert_eq!(
+        scripted.report.statements,
+        [
+            crate::script::report::ScriptStatementOutcome::Committed,
+            crate::script::report::ScriptStatementOutcome::Committed,
+            crate::script::report::ScriptStatementOutcome::NoOp,
+            crate::script::report::ScriptStatementOutcome::Committed,
+        ]
+    );
+    assert_eq!(scripted.report.results.len(), 1);
+    assert_eq!(scripted.report.results[0].alias, "created");
+    assert_eq!(scripted.report.results[0].field, "paths");
+    let path_id = scripted.report.results[0].persistent_id;
+    assert!(path_id < scripted.staged.next_id.next_raw());
+
+    let mut direct = base.clone();
+    let expected_revision = direct.document_info().unwrap().document_revision;
+    direct
+        .execute_primitive(PrimitiveRequest::ApplyRasterStroke {
+            expected_revision,
+            target_plane_id: direct.document_info().unwrap().color_plane_id,
+            stroke: Stroke {
+                tool: PaintTool::Brush,
+                plane: ActivePlane::Color,
+                color: [90, 80, 70, 255],
+                diameter: 1.0,
+                shape: BrushShape::Round,
+                smoothing: 0,
+                start_color: StartColorPredicate::Any,
+                auto_erase: false,
+                pressure_size: true,
+                coordinate_space: CoordinateSpace::Document,
+                samples: vec![
+                    StrokeSample {
+                        x: 0.5,
+                        y: 0.5,
+                        pressure: 1.0,
+                    },
+                    StrokeSample {
+                        x: 1.5,
+                        y: 0.5,
+                        pressure: 32768.0 / 65535.0,
+                    },
+                ],
+            },
+        })
+        .unwrap();
+    let expected_revision = direct.document_info().unwrap().document_revision;
+    let color_plane_id = direct.document_info().unwrap().color_plane_id;
+    direct
+        .execute_primitive(PrimitiveRequest::ImportRasterAsset {
+            expected_revision,
+            target_plane_id: color_plane_id,
+            raster: imported_raster_input(pixels.clone(), asset_id),
+        })
+        .unwrap();
+    let expected_revision = direct.document_info().unwrap().document_revision;
+    let no_op = direct
+        .execute_primitive(PrimitiveRequest::ImportRasterAsset {
+            expected_revision,
+            target_plane_id: color_plane_id,
+            raster: imported_raster_input(pixels, asset_id),
+        })
+        .unwrap();
+    assert!(no_op.procedure().is_none());
+    let vector_plane_id = base
+        .layers()
+        .unwrap()
+        .into_iter()
+        .find(|layer| layer.kind == LayerKind::VectorColoring)
+        .unwrap()
+        .planes[0]
+        .id;
+    let geometry = GeometryRequest {
+        plane_id: vector_plane_id,
+        primitive: GeometryPrimitive::Line,
+        points: vec![PointF32 { x: 0.0, y: 1.0 }, PointF32 { x: 1.0, y: 1.0 }],
+        outline_color: PixelValue::Rgba([200, 100, 50, 255]),
+        fill_color: PixelValue::Rgba([0, 0, 0, 0]),
+        outline_width: 1.0,
+        options: GeometryOptions {
+            outline: true,
+            fill: false,
+            close_path: false,
+            bezier_segments: false,
+            constrain_45_degrees: false,
+            from_center: false,
+            taper_start: false,
+            taper_end: false,
+            cross_section: GeometryCrossSection::Round,
+            aspect_ratio_q16: 0,
+            polygon_sides: 3,
+            rotation_turns: 0,
+        },
+    };
+    let direct_path = direct.apply_geometry(&geometry).unwrap().path_id;
+    assert_eq!(path_id, direct_path);
+    assert_same_document(&scripted.staged, &direct);
+
+    let after = scripted.staged.document_state_digest().unwrap();
+    for _ in 0..3 {
+        scripted.staged.undo().unwrap();
+    }
+    assert_eq!(
+        scripted.staged.document_state_digest().unwrap(),
+        base_digest
+    );
+    for _ in 0..3 {
+        scripted.staged.redo().unwrap();
+    }
+    assert_eq!(scripted.staged.document_state_digest().unwrap(), after);
+    scripted.staged.release_history_cache().unwrap();
+    assert_eq!(
+        scripted
+            .staged
+            .verify_journal_replay()
+            .unwrap()
+            .document_state_digest(),
+        after
+    );
+
+    let editor_digest = scripted.staged.editor_state().unwrap().digest;
+    let native = scripted
+        .staged
+        .build_procedure_file(Some(scripted.staged.current_state), Some(editor_digest))
+        .unwrap();
+    let bytes = encode_procedure_file(&native).unwrap();
+    let mut reopened = Core::from_procedure_file(decode_procedure_file(&bytes).unwrap()).unwrap();
+    assert_eq!(reopened.document_state_digest().unwrap(), after);
+    assert_eq!(
+        reopened.history_entries(),
+        scripted.staged.history_entries()
+    );
+    assert_eq!(reopened.next_id, scripted.staged.next_id);
+    assert_eq!(reopened.next_procedure, scripted.staged.next_procedure);
+    assert_eq!(reopened.next_state, scripted.staged.next_state);
+    assert_eq!(
+        reopened.persistence_info().unwrap().open_strategy,
+        NativeOpenStrategy::FullReplay
+    );
+    assert!(!reopened.document_info().unwrap().dirty);
+    assert!(!reopened.editor_state().unwrap().dirty);
+    for _ in 0..3 {
+        reopened.undo().unwrap();
+    }
+    assert_eq!(reopened.document_state_digest().unwrap(), base_digest);
+    for _ in 0..3 {
+        reopened.redo().unwrap();
+    }
+    assert_eq!(reopened.document_state_digest().unwrap(), after);
+}
+
+#[test]
+fn stroke_geometry_import_cancel_stale_and_overflow_are_atomic() {
+    let (base, program, assets, _, _) = stroke_geometry_import_fixture();
+    let before = (
+        base.document_state_digest().unwrap(),
+        base.document_info().unwrap(),
+        base.history_entries(),
+        base.next_id,
+        base.next_procedure,
+        base.next_state,
+    );
+
+    let mut cancel = || true;
+    assert_eq!(
+        run_inkscript_on_staged_core(&program, base.clone(), Some(&assets), &mut cancel)
+            .unwrap_err(),
+        ScriptRunError::Cancelled
+    );
+    let mut never_cancel = || false;
+    assert_eq!(
+        run_inkscript_on_staged_core(&program, base.clone(), None, &mut never_cancel).unwrap_err(),
+        ScriptRunError::InvalidStep
+    );
+
+    let mut stale = base.clone();
+    let fingerprint = capture_in_memory_fingerprint(&stale).unwrap();
+    stale.add_guide(GuideAxis::Vertical, 1).unwrap();
+    let stale_before = stale.document_state_digest().unwrap();
+    let mut never_cancel = || false;
+    assert_eq!(
+        run_inkscript_dry(
+            &program,
+            capture_in_memory_input_at(&stale, fingerprint),
+            &mut never_cancel,
+        )
+        .unwrap_err(),
+        ScriptRunError::StaleInput
+    );
+    assert_eq!(stale.document_state_digest().unwrap(), stale_before);
+
+    let mut overflow = base.clone();
+    overflow.next_id = crate::identity::StableIdCursor::from_next_raw(MAX_PERSISTENT_NUMERIC_ID);
+    let overflow_before = (
+        overflow.document_state_digest().unwrap(),
+        overflow.document_info().unwrap(),
+        overflow.history_entries(),
+        overflow.next_id,
+    );
+    let mut never_cancel = || false;
+    assert_eq!(
+        run_inkscript_on_staged_core(&program, overflow.clone(), Some(&assets), &mut never_cancel)
+            .unwrap_err(),
+        ScriptRunError::ResourceLimit
+    );
+    assert_eq!(
+        (
+            overflow.document_state_digest().unwrap(),
+            overflow.document_info().unwrap(),
+            overflow.history_entries(),
+            overflow.next_id,
+        ),
+        overflow_before
+    );
+    assert_eq!(
+        (
+            base.document_state_digest().unwrap(),
+            base.document_info().unwrap(),
+            base.history_entries(),
+            base.next_id,
+            base.next_procedure,
+            base.next_state,
+        ),
+        before
+    );
+}
+
+#[test]
+fn guide_strict_binding_and_semantic_rebind_are_initial_state_exact() {
+    let mut source_core = core();
+    let source_guide = source_core.add_guide(GuideAxis::Horizontal, 1).unwrap().1;
+    let info = source_core.document_info().unwrap();
+    let strict = complete_source(
+        "",
+        &format!(
+            r#"let target = select guide {{ source_document_uuid = uuid"{}"; persistent_id = {source_guide}; }};"#,
+            document_uuid(info.document_uuid)
+        ),
+        r#"step "Strict" { enabled = true; invoke move_guide { guide_id = $target; position = 2; }; }"#,
+    );
+    let strict =
+        compile_inkscript(&strict, InkScriptRunParameterDecision::Resolve(Vec::new())).unwrap();
+    let mut never_cancel = || false;
+    let strict_result = run_inkscript_dry(
+        &strict,
+        capture_in_memory_input(&source_core).unwrap(),
+        &mut never_cancel,
+    )
+    .unwrap();
+    assert_eq!(strict_result.staged.guides().unwrap()[0].position, 2);
+
+    let mut rebound_core = Core::new();
+    rebound_core
+        .new_cell_with_uuid(
+            4,
+            4,
+            DEFAULT_DPI_MILLI,
+            DEFAULT_DPI_MILLI,
+            info.document_uuid + 1,
+        )
+        .unwrap();
+    assert_ne!(
+        rebound_core.document_info().unwrap().document_uuid,
+        info.document_uuid
+    );
+    rebound_core.add_guide(GuideAxis::Horizontal, 1).unwrap();
+    let rebound_before = rebound_core.document_state_digest().unwrap();
+    let mut never_cancel = || false;
+    assert_eq!(
+        run_inkscript_dry(
+            &strict,
+            capture_in_memory_input(&rebound_core).unwrap(),
+            &mut never_cancel,
+        )
+        .unwrap_err(),
+        ScriptRunError::Binding(crate::script::bind::InkScriptBindingError::StalePrecondition)
+    );
+    assert_eq!(
+        rebound_core.document_state_digest().unwrap(),
+        rebound_before
+    );
+
+    let semantic = complete_source(
+        "",
+        "let target = select guide { axis = horizontal; position = 1; cardinality = one; missing = error; };",
+        r#"step "Rebound" { enabled = true; invoke move_guide { guide_id = $target; position = 2; }; }"#,
+    );
+    let semantic = compile_inkscript(
+        &semantic,
+        InkScriptRunParameterDecision::Resolve(Vec::new()),
+    )
+    .unwrap();
+    let mut never_cancel = || false;
+    let rebound = run_inkscript_dry(
+        &semantic,
+        capture_in_memory_input(&rebound_core).unwrap(),
+        &mut never_cancel,
+    )
+    .unwrap();
+    assert_eq!(rebound.report.commit_count, 1);
+    assert_eq!(rebound.staged.guides().unwrap()[0].position, 2);
+    assert_eq!(
+        rebound_core.document_state_digest().unwrap(),
+        rebound_before
+    );
+}
+
+#[test]
+fn metadata_color_guide_cancel_stale_and_id_overflow_are_atomic() {
+    let add = complete_source(
+        "",
+        "",
+        r#"step "Add" as created { enabled = true; invoke add_guide { axis = horizontal; position = 1; }; }"#,
+    );
+    let add = compile_inkscript(&add, InkScriptRunParameterDecision::Resolve(Vec::new())).unwrap();
+
+    let base = core();
+    let before = (
+        base.document_state_digest().unwrap(),
+        base.document_info().unwrap(),
+        base.history_entries(),
+        base.next_id,
+    );
+    let mut cancel = || true;
+    assert_eq!(
+        run_inkscript_dry(&add, capture_in_memory_input(&base).unwrap(), &mut cancel,).unwrap_err(),
+        ScriptRunError::Cancelled
+    );
+    assert_eq!(
+        (
+            base.document_state_digest().unwrap(),
+            base.document_info().unwrap(),
+            base.history_entries(),
+            base.next_id,
+        ),
+        before
+    );
+
+    let mut stale = core();
+    let fingerprint = capture_in_memory_fingerprint(&stale).unwrap();
+    stale.add_guide(GuideAxis::Vertical, 2).unwrap();
+    let stale_before = stale.document_state_digest().unwrap();
+    let mut never_cancel = || false;
+    assert_eq!(
+        run_inkscript_dry(
+            &add,
+            capture_in_memory_input_at(&stale, fingerprint),
+            &mut never_cancel,
+        )
+        .unwrap_err(),
+        ScriptRunError::StaleInput
+    );
+    assert_eq!(stale.document_state_digest().unwrap(), stale_before);
+
+    let mut overflow = core();
+    overflow.next_id = crate::identity::StableIdCursor::from_next_raw(MAX_PERSISTENT_NUMERIC_ID);
+    let overflow_before = (
+        overflow.document_state_digest().unwrap(),
+        overflow.document_info().unwrap(),
+        overflow.history_entries(),
+        overflow.next_id,
+    );
+    let mut never_cancel = || false;
+    assert_eq!(
+        run_inkscript_dry(
+            &add,
+            capture_in_memory_input(&overflow).unwrap(),
+            &mut never_cancel,
+        )
+        .unwrap_err(),
+        ScriptRunError::ResourceLimit
+    );
+    assert_eq!(
+        (
+            overflow.document_state_digest().unwrap(),
+            overflow.document_info().unwrap(),
+            overflow.history_entries(),
+            overflow.next_id,
+        ),
+        overflow_before
+    );
+}
+
+#[test]
+fn document_tree_no_op_result_cancel_and_missing_result_are_atomic() {
+    let base = core();
+    let info = base.document_info().unwrap();
+    let uuid = document_uuid(info.document_uuid);
+    let binding = format!(
+        r#"let target = select layer {{ source_document_uuid = uuid"{uuid}"; persistent_id = {}; }};"#,
+        info.layer_id
+    );
+    let no_op = document_tree_no_op_fixture(&base);
     let no_op =
         compile_inkscript(&no_op, InkScriptRunParameterDecision::Resolve(Vec::new())).unwrap();
     assert_eq!(no_op.budget.max_output_ids, 1);
@@ -731,6 +1454,7 @@ fn runtime_result_ordinals_and_thread_ownership_are_explicit() {
     fn assert_send_sync<T: Send + Sync>() {}
     fn assert_send<T: Send>() {}
     assert_send_sync::<StaticScriptProgram>();
+    assert_send_sync::<FrozenScriptAssets>();
     assert_send_sync::<crate::script::report::ScriptDryRunReport>();
     assert_send::<ScriptDryRunResult>();
     assert_eq!(PrimitiveId::REPLACE_RASTER_COLORS.get(), 0x0005_0040);

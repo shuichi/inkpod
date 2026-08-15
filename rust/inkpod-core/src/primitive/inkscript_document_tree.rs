@@ -655,6 +655,11 @@ fn bind_declaration(
     let entity = match kind {
         InkScriptEntityKind::Layer => "layer",
         InkScriptEntityKind::Plane => "plane",
+        InkScriptEntityKind::Guide
+        | InkScriptEntityKind::VectorPath
+        | InkScriptEntityKind::VectorFill => {
+            return Err(DocumentTreeAdapterError::TargetMismatch);
+        }
     };
     references
         .insert(name, kind, persistent_id)

@@ -197,6 +197,47 @@ impl FrozenScriptAssets {
             .map(|asset| asset.record.payload())
     }
 
+    pub(crate) fn raster_input(&self, symbol: &str) -> Result<RasterAssetInput, ScriptAssetError> {
+        let asset = self
+            .by_symbol
+            .get(symbol)
+            .ok_or(ScriptAssetError::UnknownAsset)?;
+        let descriptor = asset.record.descriptor();
+        if descriptor.kind != AssetKind::CanonicalRaster {
+            return Err(ScriptAssetError::RoleMismatch);
+        }
+        let width = descriptor
+            .width
+            .ok_or(ScriptAssetError::InvalidDescriptor)?;
+        let height = descriptor
+            .height
+            .ok_or(ScriptAssetError::InvalidDescriptor)?;
+        let pixel_format = descriptor
+            .pixel_format
+            .ok_or(ScriptAssetError::InvalidDescriptor)?;
+        let canonical_stride = descriptor
+            .canonical_stride
+            .ok_or(ScriptAssetError::InvalidDescriptor)?;
+        let alpha_semantics = descriptor
+            .alpha_semantics
+            .ok_or(ScriptAssetError::InvalidDescriptor)?;
+        let mut pixels = Vec::new();
+        pixels
+            .try_reserve_exact(asset.record.payload().len())
+            .map_err(|_| ScriptAssetError::ResourceLimit)?;
+        pixels.extend_from_slice(asset.record.payload());
+        Ok(RasterAssetInput {
+            width,
+            height,
+            pixel_format,
+            color_space: descriptor.color_space,
+            alpha_semantics,
+            canonical_stride,
+            pixels,
+            expected_id: Some(asset.record.id()),
+        })
+    }
+
     pub(crate) const fn usage(&self) -> ScriptAssetUsage {
         self.usage
     }

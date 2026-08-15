@@ -222,6 +222,19 @@ if(MAIN MATCHES "IDC_WORKSPACE_TOOL_SPLITTER"
         OR MAIN MATCHES "IDC_WORKSPACE_COLOR_SPLITTER")
     message(FATAL_ERROR "Retired fixed-layout splitter geometry remains")
 endif()
+foreach(REQUIRED IN ITEMS
+        "AttachDocumentTabFont"
+        "DocumentTabFontSubclassProcedure"
+        "WM_DPICHANGED_AFTERPARENT"
+        "WM_SETFONT"
+        "CLEARTYPE_QUALITY"
+        "Segoe UI")
+    string(FIND "${MAIN}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR
+            "Document tab standard UI font integration is missing: ${REQUIRED}")
+    endif()
+endforeach()
 
 file(READ "${RUNTIME_SOURCE}" RUNTIME)
 foreach(REQUIRED IN ITEMS

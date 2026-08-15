@@ -2409,7 +2409,7 @@ Version impact:
 - C ABI: 14（symbol／record変更なし）
 ```
 
-### [~] M15 — catalog implementation A: document tree
+### [x] M15 — catalog implementation A: document tree
 
 **範囲**
 
@@ -2446,6 +2446,8 @@ Version impact:
   424.47秒で成功した。ABI smokeは60.89秒、English smokeは174.81秒、Japanese smokeは175.88秒だった。
   production catalog、Rust public API、C ABI、Windows route、UI、`.inkscript` file acceptanceは追加しておらず、
   既存binary回帰とInkScript UI非公開の利用者確認待ちとして`[~]`で停止する。
+- 2026-08-16の次回promptをもって、上記binary回帰とInkScript UI非公開に問題がなかったことを利用者確認済みとして
+  `[x]`へ移行した。
 
 ```text
 Version impact:
@@ -2457,7 +2459,7 @@ Version impact:
 - C ABI: 14（symbol／record／ownership／thread規則変更なし）
 ```
 
-### [ ] M16 — catalog implementation B: metadata、color、guide
+### [x] M16 — catalog implementation B: metadata、color、guide
 
 **範囲**
 
@@ -2471,7 +2473,42 @@ Version impact:
 - `SetMainLineColor`、`ReplacePalette`、`ReplaceColorChart`をowner manifestどおり漏れなく扱う。
 - M07/M08/M15 entryを再登録しない。
 
-### [ ] M17 — catalog implementation C: stroke、import、geometry
+**自動検証結果（2026-08-16）**
+
+- owner manifestのM16所有8 primitiveをprivate catalog v1 draftへ追加し、draftを26/84から34/84へ拡張した。
+  main-line color、palette、color chart、guide add/move/delete、grid設定、全guide削除を閉じたargument／result／
+  portability／work metadataとして登録し、M07/M08/M15 entryを再登録していない。
+- Core-private `MetadataColorGuideScriptStep`が全8 commandを既存primitiveへ双方向変換する。color metadataは既存の
+  typed `PrimitiveRequest`、guide/gridは既存の`CanonicalInvocation`を使い、いずれも単一canonical executorだけを通る。
+  guide selectorはinitial snapshotのdocument orderを保ち、source UUID＋stable IDのstrict bindingとaxis＋positionの
+  semantic reboundを区別する。
+- RGBA8/RGBA16を量子化せず保持する。批准済みlanguage v1のNUL禁止を変更せず、既存Color chartが許すembedded NULは
+  catalog-owned `chart_name_scalars(list<u32>)` constructorでUnicode scalar列としてlosslessに表現する。
+- 全8 primitiveのcodec／direct-vs-script state・revision・history・ID同値性、exact-depth color、metadata no-op、
+  guide order、strict/rebound、success／invalid／Cancel／stale／overflow／resource／atomicity、ownership／thread suitabilityを
+  検証した。guide resultの後続参照、Undo／Redo、ID high-watermark、document/editor savepoint、current-v26 encodeと
+  checkpointなしfull replay reopenも一致した。
+- `cargo fmt --check`、workspace全target／feature Clippy（warning deny）、workspace 570 non-doc tests／Release gate 1 ignored
+  とdoctest 1、workspace strict rustdocが成功した。`inkscript_registry`は11/11。承認済みInkScript quickは全counterと
+  checksum `0f84d2c54cfe1e2c`を維持して84,753,800 ns、既存`core_workflows --quick`も10 checksumを維持した。
+- Windows x64 Debug build 108、static CRT、portable ZIP、unsigned MSIX、および最終binaryの全36 CTestが402.79秒で
+  成功した。ABI smokeは57.56秒、English smokeは165.87秒、Japanese smokeは166.06秒だった。production catalog、
+  Rust public API、C ABI、Windows route、UI、`.inkscript` file acceptanceは追加しておらず、既存binary回帰と
+  InkScript UI非公開の利用者確認待ちとして`[~]`で停止する。
+- 2026-08-16の次回promptをもって、上記binary回帰とInkScript UI非公開に問題がなかったことを利用者確認済みとして
+  `[x]`へ移行した。
+
+```text
+Version impact:
+- Registry schema: 2（catalog-owned type／constructor／entry追加のみ、meta-schema変更なし）
+- InkScript file: 1（批准済みgrammar／language core／serialized field変更なし）
+- InkScript procedure catalog: 1（M23前のprivate draftを34/84へ拡張、production catalog未批准）
+- replay epoch: 23（既存canonical invocation／executor／replay semantics変更なし）
+- .inkpod top-level: 26（exact-current encoder／decoder／cache-free replay再利用、schema変更なし）
+- C ABI: 14（symbol／record／ownership／thread規則変更なし）
+```
+
+### [~] M17 — catalog implementation C: stroke、import、geometry
 
 **範囲**
 
@@ -2484,6 +2521,38 @@ Version impact:
 - native depth、Q16、sample order、asset roleのgolden testがある。
 - direct operationとscript operationのcanonical arguments/payload/state digestが一致する。
 - cancel/overflow/allocation failureがall-or-nothingである。
+
+**自動検証結果（2026-08-16）**
+
+- owner manifestでM17が所有する`apply_raster_stroke`、`apply_geometry`、`import_raster_asset`の3 primitiveを
+  private catalog v1 draftへ追加し、draftを34/84から37/84へ拡張した。M18A所有の`apply_gradient`は先行登録せず、
+  gesture geometryから後続gradientへ必要なexact `fill_boundary`だけをgeometryのcanonical argumentとして保持する。
+- Core-private `StrokeGeometryImportAction`がtyped stepを既存の`CanonicalStrokeArguments`、
+  `CanonicalInvocation::ApplyGeometry`、`PrimitiveRequest::ImportRasterAsset`へ変換する。stroke sampleはsource orderの
+  Q16/u16 recordとして受け、既存executorの4 MiB境界でinline payloadまたはRust-owned canonical sample assetへ確定する。
+  raster importは凍結済みassetのkind/source role、descriptor、digest、native depthを検証してから同じexecutorへ渡す。
+- compileとinitial bindingは同じ凍結asset summaryを使って`logical_payload_bytes`／`logical_element_count` work fieldを
+  評価する。geometryのpath/fill resultはstable vector IDのtyped ordered-listとして後続参照可能である。
+- native depth、Q16、sample order、inline raster asset role、direct-vs-script canonical arguments／payload／state、
+  success／no-op／invalid／Cancel／stale／overflow／allocation/resource／atomicity、ownership／thread suitabilityを検証した。
+  Undo／Redo、cache-free replay、ID high-watermark、document/editor savepoint、current-v26 encodeとfull replay reopenも一致した。
+- `cargo fmt --check`、workspace全target／feature Clippy（warning deny）、workspace 577 non-doc tests／Release gate 1 ignoredと
+  doctest 1、workspace strict rustdocが成功した。`inkscript_registry`は12/12。承認済みInkScript quickは全counterと
+  checksum `0f84d2c54cfe1e2c`を維持して85,434,600 ns、既存`core_workflows --quick`も10 checksumを維持した。
+- Windows x64 Debug build 108、static CRT、portable ZIP、unsigned MSIX、および最終binaryの全36 CTestが403.67秒で
+  成功した。ABI smokeは57.89秒、English smokeは166.55秒、Japanese smokeは167.26秒だった。production catalog、
+  Rust public API、C ABI、Windows route、UI、`.inkscript` file acceptanceは追加しておらず、既存binary回帰と
+  InkScript UI非公開の利用者確認待ちとして`[~]`で停止する。
+
+```text
+Version impact:
+- Registry schema: 2（catalog-owned enum／record／entry追加のみ、meta-schema変更なし）
+- InkScript file: 1（批准済みgrammar／language core／serialized field変更なし）
+- InkScript procedure catalog: 1（M23前のprivate draftを37/84へ拡張、production catalog未批准）
+- replay epoch: 23（既存stroke／geometry／import canonical executorとreplay semantics変更なし）
+- .inkpod top-level: 26（exact-current encoder／decoder／cache-free replay再利用、schema変更なし）
+- C ABI: 14（symbol／record／ownership／thread規則変更なし）
+```
 
 ### [ ] M18A — catalog implementation D1: fill、gradient
 

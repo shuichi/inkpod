@@ -7,6 +7,9 @@ use std::collections::BTreeMap;
 pub(crate) enum InkScriptEntityKind {
     Layer,
     Plane,
+    Guide,
+    VectorPath,
+    VectorFill,
 }
 
 impl InkScriptEntityKind {
@@ -14,6 +17,9 @@ impl InkScriptEntityKind {
         match name {
             "layer" | "layer_ref" => Some(Self::Layer),
             "plane" | "plane_ref" => Some(Self::Plane),
+            "guide" | "guide_ref" => Some(Self::Guide),
+            "vector_path" | "vector_path_ref" => Some(Self::VectorPath),
+            "vector_fill" | "vector_fill_ref" => Some(Self::VectorFill),
             _ => None,
         }
     }

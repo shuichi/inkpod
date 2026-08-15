@@ -1,3 +1,4 @@
+use super::assets::{FrozenScriptAssets, ScriptAssetError};
 use super::bind::{
     InkScriptBindingError, InkScriptBoundValue, InkScriptComparableValue, InkScriptEntityReference,
     InkScriptEntitySnapshot, InkScriptInitialDocumentSnapshot, InkScriptPreparedStatement,
@@ -8,11 +9,12 @@ use super::report::{ScriptDryRunReport, ScriptResultValue, ScriptStatementOutcom
 use crate::primitive::{
     DocumentTreeAdapterError, DocumentTreeScriptStep, InkScriptEntityKind,
     InkScriptRuntimeReferences, InvocationResult, LegacyImageAdapterError, LegacyImageScriptStep,
-    LegacySimpleAdapterError, LegacySimpleScriptStep,
+    LegacySimpleAdapterError, LegacySimpleScriptStep, MetadataColorGuideAdapterError,
+    MetadataColorGuideScriptStep, StrokeGeometryImportAction, StrokeGeometryImportAdapterError,
 };
 use crate::{
     Core, CoreError, DocumentStateDigest, LayerKind, MAX_PERSISTENT_NUMERIC_ID, PixelFormat,
-    PlaneType,
+    PlaneType, PrimitiveRequest,
 };
 use inkpod_format::{
     InkScriptInputDeclarationKind, InkScriptResultAvailability, InkScriptResultCardinality,
@@ -134,12 +136,13 @@ pub(crate) fn run_inkscript_dry(
             Core::from_procedure_file(file)?
         }
     };
-    run_inkscript_on_staged_core(program, working, cancelled)
+    run_inkscript_on_staged_core(program, working, None, cancelled)
 }
 
 pub(super) fn run_inkscript_on_staged_core(
     program: &StaticScriptProgram,
     mut working: Core,
+    assets: Option<&FrozenScriptAssets>,
     cancelled: &mut dyn FnMut() -> bool,
 ) -> Result<ScriptDryRunResult, ScriptRunError> {
     if cancelled() {
@@ -158,6 +161,7 @@ pub(super) fn run_inkscript_on_staged_core(
         &snapshot,
         &program.parameters,
         &program.frozen_arguments,
+        &program.asset_summaries,
     )?;
 
     let mut statements = Vec::with_capacity(prepared.statements.len());
@@ -192,7 +196,8 @@ pub(super) fn run_inkscript_on_staged_core(
                     return Err(ScriptRunError::InvalidStep);
                 }
                 let step = &program.model.steps()[index];
-                let (invocation, output_kinds) = if is_simple(step.command()) {
+                let before_revision = working.document_info()?.document_revision;
+                let (result, output_kinds) = if is_simple(step.command()) {
                     let invocation = LegacySimpleScriptStep::from_compiled(
                         step,
                         program.frozen_arguments[index].clone(),
@@ -200,7 +205,7 @@ pub(super) fn run_inkscript_on_staged_core(
                     )
                     .and_then(|step| step.to_canonical())
                     .map_err(simple_adapter_error)?;
-                    (invocation, Vec::new())
+                    (working.execute_canonical_invocation(invocation), Vec::new())
                 } else if is_document_tree(step.command()) {
                     let invocation = DocumentTreeScriptStep::from_compiled(
                         step,
@@ -210,7 +215,68 @@ pub(super) fn run_inkscript_on_staged_core(
                     .and_then(|step| step.to_canonical())
                     .map_err(document_tree_adapter_error)?;
                     let output_kinds = DocumentTreeScriptStep::output_entity_kinds(&invocation);
-                    (invocation, output_kinds)
+                    (
+                        working.execute_canonical_invocation(invocation),
+                        output_kinds,
+                    )
+                } else if is_metadata_color_guide(step.command()) {
+                    let invocation = MetadataColorGuideScriptStep::from_compiled(
+                        step,
+                        program.frozen_arguments[index].clone(),
+                        &runtime_references,
+                    )
+                    .to_canonical()
+                    .map_err(metadata_color_guide_adapter_error)?;
+                    let output_kinds =
+                        MetadataColorGuideScriptStep::output_entity_kinds(&invocation);
+                    (invocation.execute(&mut working), output_kinds)
+                } else if is_stroke_geometry_import(step.command()) {
+                    let action = StrokeGeometryImportAction::from_compiled(
+                        step,
+                        &program.frozen_arguments[index],
+                        &runtime_references,
+                    )
+                    .map_err(stroke_geometry_import_adapter_error)?;
+                    let result = match &action {
+                        StrokeGeometryImportAction::RasterStroke(arguments) => working
+                            .execute_canonical_stroke_arguments(arguments.clone())
+                            .map(|outcome| InvocationResult::dispatch(outcome.dispatch())),
+                        StrokeGeometryImportAction::Geometry(invocation) => {
+                            working.execute_canonical_invocation(invocation.clone())
+                        }
+                        StrokeGeometryImportAction::ImportRaster {
+                            plane_id,
+                            asset_symbol,
+                        } => {
+                            let assets = assets.ok_or(ScriptRunError::InvalidStep)?;
+                            let role = catalog
+                                .entry(step.command())
+                                .map_err(ScriptCompileError::Catalog)
+                                .map_err(ScriptRunError::Compile)?
+                                .assets
+                                .first()
+                                .ok_or(ScriptRunError::InvalidStep)?;
+                            let _role_plan = assets
+                                .bind_role(role, asset_symbol)
+                                .map_err(script_asset_error)?;
+                            let raster = assets
+                                .raster_input(asset_symbol)
+                                .map_err(script_asset_error)?;
+                            let expected_revision = working.document_info()?.document_revision;
+                            working
+                                .execute_primitive(PrimitiveRequest::ImportRasterAsset {
+                                    expected_revision,
+                                    target_plane_id: *plane_id,
+                                    raster,
+                                })
+                                .map(|outcome| InvocationResult::dispatch(outcome.dispatch()))
+                        }
+                    };
+                    let result = result?;
+                    let output_kinds = action
+                        .output_entity_kinds(result.output_ids.len())
+                        .map_err(stroke_geometry_import_adapter_error)?;
+                    (Ok(result), output_kinds)
                 } else {
                     let invocation = LegacyImageScriptStep::from_compiled(
                         step,
@@ -219,10 +285,9 @@ pub(super) fn run_inkscript_on_staged_core(
                     )
                     .and_then(|step| step.to_canonical())
                     .map_err(image_adapter_error)?;
-                    (invocation, Vec::new())
+                    (working.execute_canonical_invocation(invocation), Vec::new())
                 };
-                let before_revision = working.document_info()?.document_revision;
-                let result = working.execute_canonical_invocation(invocation)?;
+                let result = result?;
                 let changed = result.dispatch.revision() != before_revision;
                 if changed {
                     commits = commits
@@ -285,6 +350,18 @@ fn is_document_tree(command: &str) -> bool {
         .any(|schema| schema.name() == command)
 }
 
+fn is_metadata_color_guide(command: &str) -> bool {
+    crate::primitive::inkscript_metadata::METADATA_COLOR_GUIDE_COMMANDS
+        .iter()
+        .any(|schema| schema.name() == command)
+}
+
+fn is_stroke_geometry_import(command: &str) -> bool {
+    crate::primitive::inkscript_stroke_geometry::STROKE_GEOMETRY_COMMANDS
+        .iter()
+        .any(|schema| schema.name() == command)
+}
+
 fn initial_runtime_references(
     bindings: &BTreeMap<String, InkScriptBoundValue>,
 ) -> Result<InkScriptRuntimeReferences, ScriptRunError> {
@@ -338,6 +415,29 @@ fn image_adapter_error(error: LegacyImageAdapterError) -> ScriptRunError {
 fn document_tree_adapter_error(error: DocumentTreeAdapterError) -> ScriptRunError {
     match error {
         DocumentTreeAdapterError::MissingReference => ScriptRunError::MissingResult,
+        _ => ScriptRunError::InvalidStep,
+    }
+}
+
+fn metadata_color_guide_adapter_error(error: MetadataColorGuideAdapterError) -> ScriptRunError {
+    match error {
+        MetadataColorGuideAdapterError::MissingReference => ScriptRunError::MissingResult,
+        MetadataColorGuideAdapterError::ResourceLimit => ScriptRunError::ResourceLimit,
+        _ => ScriptRunError::InvalidStep,
+    }
+}
+
+fn stroke_geometry_import_adapter_error(error: StrokeGeometryImportAdapterError) -> ScriptRunError {
+    match error {
+        StrokeGeometryImportAdapterError::MissingReference => ScriptRunError::MissingResult,
+        StrokeGeometryImportAdapterError::ResourceLimit => ScriptRunError::ResourceLimit,
+        _ => ScriptRunError::InvalidStep,
+    }
+}
+
+fn script_asset_error(error: ScriptAssetError) -> ScriptRunError {
+    match error {
+        ScriptAssetError::ResourceLimit => ScriptRunError::ResourceLimit,
         _ => ScriptRunError::InvalidStep,
     }
 }
@@ -443,6 +543,31 @@ fn initial_snapshot(core: &Core) -> Result<InkScriptInitialDocumentSnapshot, Cor
                 properties,
             });
         }
+    }
+    for guide in core.guides()? {
+        let mut properties = BTreeMap::new();
+        properties.insert(
+            "axis".to_owned(),
+            InkScriptComparableValue::Enum(
+                match guide.axis {
+                    crate::GuideAxis::Horizontal => "horizontal",
+                    crate::GuideAxis::Vertical => "vertical",
+                }
+                .to_owned(),
+            ),
+        );
+        properties.insert(
+            "position".to_owned(),
+            InkScriptComparableValue::I64(i64::from(guide.position)),
+        );
+        entities.push(InkScriptEntitySnapshot {
+            reference: InkScriptEntityReference {
+                entity: "guide".to_owned(),
+                persistent_id: guide.id,
+            },
+            owner: None,
+            properties,
+        });
     }
     let selection = core.selection_bounds()?;
     Ok(InkScriptInitialDocumentSnapshot {
@@ -569,6 +694,9 @@ fn materialize_results(
                 let expected = match result.name() {
                     "layers" => InkScriptEntityKind::Layer,
                     "planes" => InkScriptEntityKind::Plane,
+                    "guides" => InkScriptEntityKind::Guide,
+                    "paths" => InkScriptEntityKind::VectorPath,
+                    "fills" => InkScriptEntityKind::VectorFill,
                     _ => return Err(ScriptRunError::InvalidStep),
                 };
                 entity_kinds

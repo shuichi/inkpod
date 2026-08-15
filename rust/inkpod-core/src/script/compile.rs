@@ -1,11 +1,14 @@
 use super::assets::{ScriptAssetError, external_asset_path};
 use super::catalog::{
-    CatalogAssetMetadata, CatalogCommandDomain, CatalogEditorMetadata, CatalogEntry, CatalogError,
-    CatalogNumericExpression, CatalogPortabilityEvaluator, CatalogResultMetadata,
-    CatalogWorkEstimate, CatalogWorkFormula, InkScriptCatalogView, InkScriptPortability,
-    InkScriptPortabilityClass,
+    CatalogAssetMetadata, CatalogAssetSummary, CatalogCommandDomain, CatalogEditorMetadata,
+    CatalogEntry, CatalogError, CatalogNumericExpression, CatalogPortabilityEvaluator,
+    CatalogResultMetadata, CatalogWorkEstimate, CatalogWorkFormula, InkScriptCatalogView,
+    InkScriptPortability, InkScriptPortabilityClass,
 };
-use crate::primitive::{inkscript, inkscript_batch, inkscript_document_tree};
+use crate::primitive::{
+    inkscript, inkscript_batch, inkscript_document_tree, inkscript_metadata,
+    inkscript_stroke_geometry,
+};
 use inkpod_format::{
     InkScriptDeclarationModel, InkScriptEnvelopeErrorCode, InkScriptInputDeclarationKind,
     InkScriptOrchestrationEnvelope, InkScriptOutput, InkScriptPathIntentAccess,
@@ -77,6 +80,7 @@ pub(crate) struct StaticScriptProgram {
     pub(crate) budget: ScriptBudget,
     pub(crate) parameters: BTreeMap<String, InkScriptTypedValue>,
     pub(crate) frozen_arguments: Vec<InkScriptTypedValue>,
+    pub(crate) asset_summaries: BTreeMap<String, CatalogAssetSummary>,
     pub(crate) model: InkScriptDeclarationModel,
     pub(crate) envelope: InkScriptOrchestrationEnvelope,
     pub(crate) path_intents: Vec<ScriptStaticPathIntent>,
@@ -156,13 +160,14 @@ pub(crate) fn compile_inkscript_with_limits(
         .collect::<Result<Vec<_>, _>>()
         .map_err(ScriptCompileError::Freeze)?;
     let catalog = catalog(&schemas.commands)?;
+    let asset_summaries = catalog_asset_summaries(&model)?;
     let mut budget = ScriptBudget::default();
     for (step, arguments) in model.steps().iter().zip(&frozen_arguments) {
         if step.enabled() {
             add_budget(
                 &mut budget,
                 catalog
-                    .evaluate_work(step.command(), arguments)
+                    .evaluate_work_with_assets(step.command(), arguments, &asset_summaries)
                     .map_err(ScriptCompileError::Catalog)?,
             )?;
         }
@@ -185,10 +190,75 @@ pub(crate) fn compile_inkscript_with_limits(
         budget,
         parameters,
         frozen_arguments,
+        asset_summaries,
         model,
         envelope,
         path_intents,
     })
+}
+
+fn catalog_asset_summaries(
+    model: &InkScriptDeclarationModel,
+) -> Result<BTreeMap<String, CatalogAssetSummary>, ScriptCompileError> {
+    let mut summaries = BTreeMap::new();
+    for asset in model.assets() {
+        let InkScriptTypedValueKind::Record(body) = asset.body().kind() else {
+            return Err(ScriptCompileError::Asset(
+                ScriptAssetError::InvalidTypedModel,
+            ));
+        };
+        let descriptor = body.get("descriptor").ok_or(ScriptCompileError::Asset(
+            ScriptAssetError::InvalidTypedModel,
+        ))?;
+        let InkScriptTypedValueKind::Record(descriptor) = descriptor.kind() else {
+            return Err(ScriptCompileError::Asset(
+                ScriptAssetError::InvalidTypedModel,
+            ));
+        };
+        let logical_element_count = match descriptor.get("element_count").map(|value| value.kind())
+        {
+            Some(InkScriptTypedValueKind::U64(value)) => *value,
+            _ => {
+                return Err(ScriptCompileError::Asset(
+                    ScriptAssetError::InvalidTypedModel,
+                ));
+            }
+        };
+        let stride = match descriptor.get("stride").map(|value| value.kind()) {
+            Some(InkScriptTypedValueKind::U32(value)) => u64::from(*value),
+            _ => {
+                return Err(ScriptCompileError::Asset(
+                    ScriptAssetError::InvalidTypedModel,
+                ));
+            }
+        };
+        let height = match descriptor.get("height").map(|value| value.kind()) {
+            Some(InkScriptTypedValueKind::U32(value)) => u64::from(*value),
+            _ => {
+                return Err(ScriptCompileError::Asset(
+                    ScriptAssetError::InvalidTypedModel,
+                ));
+            }
+        };
+        let logical_payload_bytes = stride
+            .checked_mul(height)
+            .ok_or(ScriptCompileError::ResourceLimit)?;
+        if summaries
+            .insert(
+                asset.name().to_owned(),
+                CatalogAssetSummary {
+                    logical_element_count,
+                    logical_payload_bytes,
+                },
+            )
+            .is_some()
+        {
+            return Err(ScriptCompileError::Asset(
+                ScriptAssetError::InvalidTypedModel,
+            ));
+        }
+    }
+    Ok(summaries)
 }
 
 pub(super) struct ScriptSchemas {
@@ -204,19 +274,28 @@ impl ScriptSchemas {
             enums: inkscript::LEGACY_SIMPLE_ENUMS
                 .iter()
                 .chain(inkscript_batch::LEGACY_IMAGE_ENUMS)
+                .chain(inkscript_stroke_geometry::STROKE_GEOMETRY_ENUMS)
                 .copied()
                 .collect(),
-            constructors: inkscript_document_tree::DOCUMENT_TREE_CONSTRUCTORS.to_vec(),
+            constructors: inkscript_document_tree::DOCUMENT_TREE_CONSTRUCTORS
+                .iter()
+                .chain(inkscript_metadata::METADATA_COLOR_GUIDE_CONSTRUCTORS)
+                .copied()
+                .collect(),
             records: inkscript::LEGACY_SIMPLE_RECORDS
                 .iter()
                 .chain(inkscript_batch::LEGACY_IMAGE_RECORDS)
                 .chain(inkscript_document_tree::DOCUMENT_TREE_RECORDS)
+                .chain(inkscript_metadata::METADATA_COLOR_GUIDE_RECORDS)
+                .chain(inkscript_stroke_geometry::STROKE_GEOMETRY_RECORDS)
                 .copied()
                 .collect(),
             commands: inkscript::LEGACY_SIMPLE_COMMANDS
                 .iter()
                 .chain(inkscript_batch::LEGACY_IMAGE_COMMANDS)
                 .chain(inkscript_document_tree::DOCUMENT_TREE_COMMANDS)
+                .chain(inkscript_metadata::METADATA_COLOR_GUIDE_COMMANDS)
+                .chain(inkscript_stroke_geometry::STROKE_GEOMETRY_COMMANDS)
                 .copied()
                 .collect(),
         }
@@ -349,13 +428,93 @@ pub(super) fn catalog(
                 ],
                 "document_tree",
             ),
+            "set_main_line_color" => metadata_portable(literal_work(1), Vec::new()),
+            "replace_palette" => metadata_portable(list_work("colors", 4_096), Vec::new()),
+            "replace_color_chart" => metadata_portable(list_work("entries", 4_096), Vec::new()),
+            "add_guide" => {
+                metadata_portable(literal_work_with_outputs(1, 1), entity_result("guide"))
+            }
+            "move_guide" | "delete_guide" => metadata_bound(literal_work(1), Vec::new()),
+            "set_grid" => metadata_portable(literal_work(1), Vec::new()),
+            "delete_all_guides" => metadata_portable(literal_work(4_096), Vec::new()),
+            "apply_raster_stroke" => stroke_geometry_bound(
+                CatalogWorkFormula {
+                    max_invocations: CatalogNumericExpression::Literal(1),
+                    max_output_ids: CatalogNumericExpression::Literal(0),
+                    max_asset_bytes: CatalogNumericExpression::CheckedAdd(
+                        Box::new(CatalogNumericExpression::CheckedMultiply(
+                            Box::new(CatalogNumericExpression::ListLength {
+                                path: vec!["stroke", "samples"],
+                                maximum: 1_048_576,
+                            }),
+                            Box::new(CatalogNumericExpression::Literal(24)),
+                        )),
+                        Box::new(CatalogNumericExpression::Literal(8)),
+                    ),
+                    max_work_units: CatalogNumericExpression::Literal(16_777_216),
+                    max_output_growth: CatalogNumericExpression::Literal(16_777_216),
+                },
+                Vec::new(),
+            ),
+            "apply_geometry" => stroke_geometry_bound(
+                CatalogWorkFormula {
+                    max_invocations: CatalogNumericExpression::Literal(1),
+                    max_output_ids: CatalogNumericExpression::Literal(2),
+                    max_asset_bytes: CatalogNumericExpression::Literal(0),
+                    max_work_units: CatalogNumericExpression::Literal(16_777_216),
+                    max_output_growth: CatalogNumericExpression::Literal(16_777_216),
+                },
+                vec![
+                    CatalogResultMetadata {
+                        name: "paths",
+                        namespace: Some("document_stable"),
+                        owner_role: Some("vector_path"),
+                        output_id_ordinal: None,
+                    },
+                    CatalogResultMetadata {
+                        name: "fills",
+                        namespace: Some("document_stable"),
+                        owner_role: Some("vector_fill"),
+                        output_id_ordinal: None,
+                    },
+                ],
+            ),
+            "import_raster_asset" => stroke_geometry_bound(
+                CatalogWorkFormula {
+                    max_invocations: CatalogNumericExpression::Literal(1),
+                    max_output_ids: CatalogNumericExpression::Literal(0),
+                    max_asset_bytes: CatalogNumericExpression::Field(vec![
+                        "raster",
+                        "logical_payload_bytes",
+                    ]),
+                    max_work_units: CatalogNumericExpression::Field(vec![
+                        "raster",
+                        "logical_element_count",
+                    ]),
+                    max_output_growth: CatalogNumericExpression::Field(vec![
+                        "raster",
+                        "logical_payload_bytes",
+                    ]),
+                },
+                Vec::new(),
+            ),
             _ => return Err(ScriptCompileError::Catalog(CatalogError::InvalidEntry)),
+        };
+        let assets = if schema.name() == "import_raster_asset" {
+            vec![CatalogAssetMetadata {
+                name: "source_raster",
+                kind: "canonical_raster",
+                inline: true,
+                external: true,
+            }]
+        } else {
+            Vec::new()
         };
         entries.push(CatalogEntry {
             schema: *schema,
             domain: CatalogCommandDomain::DocumentMutation,
             results,
-            assets: Vec::<CatalogAssetMetadata>::new(),
+            assets,
             portability: CatalogPortabilityEvaluator {
                 rules: Vec::new(),
                 default: InkScriptPortability {
@@ -479,6 +638,58 @@ fn literal_work_with_outputs(work: u64, output_ids: u64) -> CatalogWorkFormula {
         max_work_units: CatalogNumericExpression::Literal(work),
         max_output_growth: CatalogNumericExpression::Literal(0),
     }
+}
+
+fn list_work(path: &'static str, maximum: u64) -> CatalogWorkFormula {
+    CatalogWorkFormula {
+        max_invocations: CatalogNumericExpression::Literal(1),
+        max_output_ids: CatalogNumericExpression::Literal(0),
+        max_asset_bytes: CatalogNumericExpression::Literal(0),
+        max_work_units: CatalogNumericExpression::ListLength {
+            path: vec![path],
+            maximum,
+        },
+        max_output_growth: CatalogNumericExpression::Literal(0),
+    }
+}
+
+fn metadata_portable(work: CatalogWorkFormula, results: Vec<CatalogResultMetadata>) -> EntryTuple {
+    (
+        InkScriptPortabilityClass::Portable,
+        Vec::new(),
+        work,
+        None,
+        false,
+        results,
+        "metadata_color_guide",
+    )
+}
+
+fn metadata_bound(work: CatalogWorkFormula, results: Vec<CatalogResultMetadata>) -> EntryTuple {
+    (
+        InkScriptPortabilityClass::RequiresBinding,
+        vec!["semantic_target"],
+        work,
+        None,
+        false,
+        results,
+        "metadata_color_guide",
+    )
+}
+
+fn stroke_geometry_bound(
+    work: CatalogWorkFormula,
+    results: Vec<CatalogResultMetadata>,
+) -> EntryTuple {
+    (
+        InkScriptPortabilityClass::RequiresBinding,
+        vec!["semantic_target"],
+        work,
+        None,
+        false,
+        results,
+        "stroke_geometry_import",
+    )
 }
 
 fn add_budget(
