@@ -6,10 +6,10 @@ SCRIPT_DIR="${0:A:h}"
 ROOT_DIR="${SCRIPT_DIR:h}"
 
 APP_NAME="Inkpod"
-BUILD_PRESET="${INKPOD_BUILD_PRESET:-macos-universal-release}"
+BUILD_PRESET="${INKPOD_BUILD_PRESET:-macos-arm64-release}"
 BUILD_TARGET="${INKPOD_BUILD_TARGET:-inkpod_macos_archive}"
-BUILD_DIR="${INKPOD_BUILD_DIR:-${ROOT_DIR}/build/macos-universal-release}"
-SOURCE_APP="${INKPOD_SOURCE_APP:-${BUILD_DIR}/xcode-universal-derived/Build/Products/Release/${APP_NAME}.app}"
+BUILD_DIR="${INKPOD_BUILD_DIR:-${ROOT_DIR}/build/macos-arm64-release}"
+SOURCE_APP="${INKPOD_SOURCE_APP:-${BUILD_DIR}/xcode-arm64-release-derived/Build/Products/Release/${APP_NAME}.app}"
 OUTPUT_DIR="${INKPOD_OUTPUT_DIR:-${ROOT_DIR}/build/release/macos}"
 PACKAGED_APP="${OUTPUT_DIR}/${APP_NAME}.app"
 ENTITLEMENTS_FILE="${INKPOD_ENTITLEMENTS_FILE:-${ROOT_DIR}/apps/macos/App/Inkpod.entitlements}"
@@ -31,7 +31,7 @@ default_build_number() {
 
 VERSION="${INKPOD_VERSION:-$(project_version)}"
 BUILD_NUMBER="${INKPOD_BUILD_NUMBER:-$(default_build_number)}"
-DMG_FILE="${INKPOD_DMG_PATH:-${OUTPUT_DIR}/${APP_NAME}-${VERSION}-macOS-universal.dmg}"
+DMG_FILE="${INKPOD_DMG_PATH:-${OUTPUT_DIR}/${APP_NAME}-${VERSION}-macOS-arm64.dmg}"
 VOLUME_NAME="${INKPOD_VOLUME_NAME:-${APP_NAME}}"
 CODESIGN_IDENTITY="${INKPOD_CODESIGN_IDENTITY:-${CODESIGN_IDENTITY:-Developer ID Application: Shuichi Kurabayashi (ETD7LJJGQZ)}}"
 NOTARY_PROFILE="${INKPOD_NOTARY_PROFILE:-${NOTARY_PROFILE:-developer-id-notary}}"
@@ -68,7 +68,7 @@ usage() {
 Usage: ./scripts/macOS.sh <command>
 
 Commands:
-  build       Build the Universal 2 Release Inkpod.app through CMake.
+  build       Build the arm64 Release Inkpod.app through CMake.
   package     Run build, stage the app bundle, set its version, and sign it.
   dmg         Run package and create a signed release DMG.
   notarize    Run dmg, submit it to Apple, staple the ticket, and assess it.

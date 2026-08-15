@@ -33,6 +33,8 @@ execute_process(
             -parallel-testing-enabled NO
             -skip-testing:InkpodUITests
             ${INKPOD_XCODE_SANITIZER_ARGUMENTS}
+            ARCHS=arm64
+            ONLY_ACTIVE_ARCH=YES
             CODE_SIGNING_ALLOWED=NO
     RESULT_VARIABLE INKPOD_XCODE_RESULT
     OUTPUT_VARIABLE INKPOD_XCODE_OUTPUT

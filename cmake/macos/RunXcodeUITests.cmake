@@ -43,6 +43,8 @@ execute_process(
             -disableAutomaticPackageResolution
             -parallel-testing-enabled NO
             ${INKPOD_ONLY_TESTING_ARGUMENTS}
+            ARCHS=arm64
+            ONLY_ACTIVE_ARCH=YES
             CODE_SIGNING_ALLOWED=YES
             CODE_SIGNING_REQUIRED=YES
             CODE_SIGN_IDENTITY=-

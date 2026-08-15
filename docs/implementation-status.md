@@ -17,7 +17,7 @@ past acceptance records are summarized in [`legacy.md`](legacy.md).
 | macOS frontend | M0–M10 are complete through Sandbox file lifecycle, document/layer/plane multi-view workspace, paint/selection/history, filter/effect/vector/annotation, Cut/Sequence/Light Table/Subpalette/Reference/motion, and Batch/job workflows. A value-only `CoreHost` keeps all live Core, Cut, view, snapshot, plan, clipboard, preview, stroke, history-builder, Batch graph/run-copy/pair-preview/task/report, and export-buffer pointers in private registries on one fixed `Foundation.Thread`; the MainActor coordinator and dedicated Metal renderer remain separate. M10's value-keyed Batch `WindowGroup` captures issue-time workspace/session/generation/revision, freezes a value-only graph before enqueue, retains balanced security-scoped input/output leases for the exact job lifetime, and cancels/awaits the job on window/workspace close or shutdown. Loaded `.inkbatch` operations are copied to values, explicitly resolved per run, and cloned to an immutable Rust-owned run graph; Swift never implements graph, image, history, selection, or format semantics. SwiftUI receives only value projections; stale work never falls back to another document. ABI v15, native v26, `.inkbatch` v2, and replay epoch 23 are unchanged. All 384 ledger rows are implemented: M10 contributes 50 `macEquivalent` rows and one native-surface `notApplicable` row. |
 | Rendering and performance | Immutable snapshots carry mixed raster/vector/annotation/shooting-frame/vanishing-point spans plus bounded viewport-clipped radial guides, snapshot-owned pools, Core-ordered passes, adjustment LUTs, Light Table overlays, view-local diagnostics, selections and floating previews. The Windows renderer retains its device-loss coverage. The macOS product Canvas uses a custom SDR sRGB `CAMetalLayer`, premultiplied blending, alternate-rule stencil vector fill, offscreen group-opacity and adjustment ping-pong passes, CoreText font resolution, a process-wide session/tile/revision texture cache, retained latest snapshots, hidden-surface rejection, and GPU-only rebuild/purge on display/device change or memory pressure. Product-scene tests prove pan/zoom reuse without full tile re-upload, document-raster redraw after simulated device/display and memory events, and M9 Light Table snapshot presentation with exactly-once release; M8/M9 pass the same Metal API Validation profile. Raster revision-max validation remains scalar-only and the audited source-call-graph lock plus payload counters remain green. |
 | Product surface | New Cut, structural sequence editing and endpoint Stop/Wrap selection, drawing/fill/vector/effects, Text/Instruction annotations, angled shooting-frame properties/handles/export, multiple vanishing-point properties/handles/radial snap, selection, layer/plane, transform, Light Table, clipboard, common-raster import/export, Batch, history visualization, recovery, and compaction-copy commands are connected from the Windows UI to their owning Core or OS adapter. macOS exposes the M2 Canvas, M3 commands/settings/localization, M4 file/Sandbox/clipboard workflow, M5 configurable New Cell/Cell Properties and multi-view workspace, M6 Tool/Options and raster paint/fill/color, M7 Selection/Transform/History, M8 Filter/Effect/Adjustment/Vector/Annotation/Shooting Frame/Vanishing Point/diagnostics, M9 Cut/Sequence/Light Table/Subpalette/Reference/motion, and M10 dedicated Batch graph/progress/report surfaces. |
-| Build and distribution | CMake drives both the Rust static library/MSVC C++20 build and the macOS Cargo→Xcode sub-build. Rust domain crates remain OS-independent; Windows x64/ARM64 use static CRT. macOS builds arm64 XCTest/64-session headless CoreHost/product UI/Metal runtime artifacts and an `arm64`+`x86_64` Universal `Inkpod.app`. The release CLI composes that existing target with versioned app staging, bottom-up Hardened Runtime signing, compressed DMG creation, notary submission, ticket stapling, and Gatekeeper assessment; real Developer ID/notary execution and Intel runtime remain unverified. Unsigned MSIX and four-file portable ZIP packaging paths are maintained for Windows. |
+| Build and distribution | CMake drives both the Rust static library/MSVC C++20 build and the macOS Cargo→Xcode sub-build. Rust domain crates remain OS-independent; Windows x64/ARM64 use static CRT. macOS Debug and Release fix Cargo, CMake, and Xcode to arm64; the Release gate requires the Rust archive, XCTest executable, 64-session headless CoreHost, and `Inkpod.app` to contain exactly the arm64 architecture. The release CLI composes that arm64-only target with versioned app staging, bottom-up Hardened Runtime signing, compressed DMG creation, notary submission, ticket stapling, and Gatekeeper assessment; real Developer ID/notary execution remains unverified. Unsigned MSIX and four-file portable ZIP packaging paths are maintained for Windows. |
 | Locator responsiveness | Selection-bound queries scan sparse allocated mask tiles and reuse a document-identity/revision cache. Windows keeps one locator query in flight plus one latest request, presents processed intermediate generations during continuous input, and rejects reset or target-stale results before requeuing the newest pointer behind accepted stroke work. |
 
 ## Active gaps
@@ -60,14 +60,21 @@ its compact historical record is retained in [`legacy.md`](legacy.md).
   install/installed-ABI/uninstall remains optional validation.
 - The macOS frontend currently stops at M10. M11 parity-freeze hardening,
   full accessibility, and distribution remain later work.
-  Physical-tablet, multiple-display, sleep/wake, Instruments, complete screen-reader/
-  IME interaction, and Intel Tahoe runtime are
-  unverified; the x86_64 app slice is cross-build/link checked only.
+  Physical-tablet, multiple-display, sleep/wake, Instruments, and complete screen-reader/
+  IME interaction remain unverified. Intel Mac is intentionally unsupported.
 
 ## Latest representative verification
 
-The latest automatic verification is the macOS M10 Batch/job slice on
-2026-08-16. The arm64 CMake profile built the Rust archive and
+The latest automatic verification is the macOS arm64-only build and distribution
+change on 2026-08-16. Fresh Debug and Release presets fixed CMake, Cargo, and
+Xcode to arm64; clean builds used `aarch64-apple-darwin` with deployment target
+26.0. The Release architecture gate reported exactly `arm64` for the Rust
+archive, XCTest bundle, CoreHost executable, and `Inkpod.app`; a deliberate
+`CMAKE_OSX_ARCHITECTURES=x86_64` configure was rejected. The Debug Core/Xcode
+check and CTest 20/20 passed, as did all four release-CLI contract tests, Rust
+formatting, all-target/all-feature Clippy with warnings denied, and all 462 Rust
+tests. The preceding product-feature verification remains the macOS
+M10 Batch/job slice on 2026-08-16. Its arm64 CMake profile built the Rust archive and
 `Inkpod.app`, compiled the canonical wrapper as C11 and C++20 with warnings
 denied, passed all 88 strict Swift 6 unit/integration tests and the separate 64-session headless
 executable, and validated the value-only CoreHost boundary. M10 did not change the
@@ -82,15 +89,16 @@ passed 20/20. V-Rust passed fmt, all-target/all-feature Clippy, all 462 tests,
 the full ten-scenario benchmark semantic gates, and strict rustdoc. Native format
 v26, replay epoch 23, canonical procedure format 26, and public ABI v15 are
 unchanged.
-The prior M2 Thread Sanitizer and Universal cross-build evidence remains current
-for those unchanged paths. The isolated macOS release-CLI regression passed all
-three cases for dependency ordering, packaged version metadata, temporary-file
-cleanup, the `notarize` subcommand, and early ad-hoc-identity rejection; it used
+The prior M2 Thread Sanitizer evidence remains current for that unchanged path.
+The isolated macOS release-CLI regression passed all
+four cases for the arm64-only repository/default-preset contract, dependency
+ordering, packaged version metadata, temporary-file cleanup, the `notarize`
+subcommand, and early ad-hoc-identity rejection; it used
 fake signing/notary tools and
-therefore is not Developer ID or Apple notary evidence. A real local ad-hoc run
-also rebuilt the Universal app, applied version 0.2.3/build 173, verified the app
-signature and both executable slices, created the compressed DMG, and passed
-`hdiutil verify`; Developer ID signing and Apple notarization were not attempted.
+therefore is not Developer ID or Apple notary evidence. A prior real local ad-hoc
+run covered signing, compressed-DMG creation, and `hdiutil verify`; the current
+arm64-only distribution still requires equivalent real signing and DMG evidence.
+Developer ID signing and Apple notarization were not attempted.
 Native Windows builds and
 the hardware/manual macOS checks listed above were not available in this
 environment; their last recorded evidence remains below.
@@ -101,7 +109,7 @@ environment; their last recorded evidence remains below.
 | Native format | V26/runtime replay epoch 23, ABI v15, Cell document/archive metadata schema 5, document digest schema 9/domain 8, snapshot-composite schema 3, Cut descriptor schema 2, and `.inkbatch` v2 are current. Exact top-level v25, noncurrent archive/Cut versions, malformed vanishing-point/shooting-frame records, checksum failures, and corrupt corpus are rejected; Cell/Cut save/reopen is green |
 | macOS arm64 | CMake→Cargo→Xcode M10 check passed on macOS 26.6.1 with Xcode 26.6/Tahoe SDK. All 88 strict Swift tests, the 64-session headless executable, six product Canvas lifecycle tests, eight launched-product XCUITests, 384-command parity with all rows implemented, 612-key en/ja localization, CoreHost source boundary, M10 all-operation/natural-order/dry-run/cancel/collision/bookmark/close/shutdown success and negative coverage, Batch graph/task/report/pair/run-copy exactly-once ownership, prior Sandbox/file/clipboard/Cut/animation regressions, and CTest 20/20 passed. The required M10 V-MacUI target passed all 14 selected tests with Metal validation error count zero |
 | macOS Thread Sanitizer | The prior M2 19-XCTest and headless-executable run passed under Xcode Thread Sanitizer with zero failures or skips; M3–M8 did not require or rerun this extended profile |
-| macOS Universal | The Release validation build contains `arm64` and `x86_64` slices in the Rust static archive, linked XCTest executable, CoreHost headless executable, and `Inkpod.app`. x86_64 runtime remains unverified because no Intel Tahoe runner was available |
+| macOS arm64 Release | CMake, Cargo, Xcode, the release CLI, and the repository contract test select arm64 only. The clean Release validation reported exact `arm64` output from `lipo -archs` for the Rust static archive, linked XCTest executable, CoreHost headless executable, and `Inkpod.app`; Intel Mac is not supported |
 | Windows x64 | M10 made no Rust ABI/native-format or Windows production-code change. Canonical-header C11/C++20, Windows route/source-boundary static regressions, and the existing shared Rust tests passed in the macOS profile, but native Debug/Release configure presets are disabled on this non-Windows host. The current 2026-08-14 Debug `inkpod` and localization-test targets otherwise remain the latest MSVC `/W4 /WX` static-CRT evidence. Their full-path English and Japanese product smoke runs passed in 186.20 s and 185.05 s; the immediately preceding full Debug run passed all 36 CTests in 438.87 s, and the latest Release run remains the 2026-08-13 M22 run with all 33 then-current CTests passed in 75.57 s |
 | Windows ARM64 | Not run for M22 and not used as a substitute for the required x64 gate. The latest M13 ARM64 Release run passed all 31 CTests in 65.35 s |
 | Performance | The required full profile passed every checksum/revision/history/reuse/rebuild/output/failure gate. M10 `batch_preview` completed 16 successes plus one intentional failure with checksum `6732b8b0a6565d03`; `canonical_replay` remains `264b98028ac92ac6` at revision 6/history 5; full `checkpoint_open` remains `07da1b4e6bc5d289` with 1000256 input, 256 output, and one reused item; full output-color-guard is `2b2196e06f7198b3` with 4194304 input, 2097152 output, and 262144 reused items. Workload, harness, payload-access route, and revision-max expression are unchanged |

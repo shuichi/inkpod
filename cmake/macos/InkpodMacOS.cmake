@@ -157,64 +157,22 @@ set_tests_properties(
     inkpod_macos_missing_rust_library_rejected
     PROPERTIES WILL_FAIL TRUE)
 
-set(INKPOD_MACOS_ARM64_CARGO_TARGET_DIR
-    "${CMAKE_BINARY_DIR}/cargo-universal-arm64")
-set(INKPOD_MACOS_X86_64_CARGO_TARGET_DIR
-    "${CMAKE_BINARY_DIR}/cargo-universal-x86_64")
-set(INKPOD_MACOS_ARM64_RUST_STATICLIB
-    "${INKPOD_MACOS_ARM64_CARGO_TARGET_DIR}/aarch64-apple-darwin/release/libinkpod_ffi.a")
-set(INKPOD_MACOS_X86_64_RUST_STATICLIB
-    "${INKPOD_MACOS_X86_64_CARGO_TARGET_DIR}/x86_64-apple-darwin/release/libinkpod_ffi.a")
-set(INKPOD_MACOS_UNIVERSAL_RUST_STATICLIB
-    "${CMAKE_BINARY_DIR}/cargo-universal/libinkpod_ffi.a")
-
-add_custom_command(
-    OUTPUT "${INKPOD_MACOS_UNIVERSAL_RUST_STATICLIB}"
-    COMMAND "${CMAKE_COMMAND}" -E make_directory
-            "${CMAKE_BINARY_DIR}/cargo-universal"
-    COMMAND "${CMAKE_COMMAND}" -E env
-            "CARGO_TARGET_DIR=${INKPOD_MACOS_ARM64_CARGO_TARGET_DIR}"
-            "${CARGO_EXECUTABLE}" build --locked --package inkpod-ffi
-            --target aarch64-apple-darwin --release
-    COMMAND "${CMAKE_COMMAND}" -E env
-            "CARGO_TARGET_DIR=${INKPOD_MACOS_X86_64_CARGO_TARGET_DIR}"
-            "${CARGO_EXECUTABLE}" build --locked --package inkpod-ffi
-            --target x86_64-apple-darwin --release
-    COMMAND "${INKPOD_XCRUN_EXECUTABLE}" lipo -create
-            "${INKPOD_MACOS_ARM64_RUST_STATICLIB}"
-            "${INKPOD_MACOS_X86_64_RUST_STATICLIB}"
-            -output "${INKPOD_MACOS_UNIVERSAL_RUST_STATICLIB}"
-    DEPENDS ${INKPOD_RUST_INPUTS}
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    COMMENT "Building Universal 2 inkpod-ffi static library"
-    VERBATIM)
-
-add_custom_target(inkpod_macos_rust_universal
-    DEPENDS "${INKPOD_MACOS_UNIVERSAL_RUST_STATICLIB}")
-
-set(INKPOD_MACOS_UNIVERSAL_XCCONFIG
-    "${CMAKE_BINARY_DIR}/generated/InkpodUniversal.xcconfig")
-set(INKPOD_XCODE_RUST_STATICLIB
-    "${INKPOD_MACOS_UNIVERSAL_RUST_STATICLIB}")
-configure_file(
-    "${CMAKE_SOURCE_DIR}/cmake/macos/InkpodGenerated.xcconfig.in"
-    "${INKPOD_MACOS_UNIVERSAL_XCCONFIG}"
-    @ONLY)
-
-add_custom_target(inkpod_macos_archive
-    COMMAND "${CMAKE_COMMAND}"
-            "-DINKPOD_XCODEBUILD=${INKPOD_XCODEBUILD_EXECUTABLE}"
-            "-DINKPOD_XCRUN=${INKPOD_XCRUN_EXECUTABLE}"
-            "-DINKPOD_FILE=${INKPOD_FILE_EXECUTABLE}"
-            "-DINKPOD_XCODE_PROJECT=${INKPOD_MACOS_PROJECT}"
-            "-DINKPOD_XCODE_SCHEME=${INKPOD_MACOS_SCHEME}"
-            "-DINKPOD_XCCONFIG=${INKPOD_MACOS_UNIVERSAL_XCCONFIG}"
-            "-DINKPOD_DERIVED_DATA=${CMAKE_BINARY_DIR}/xcode-universal-derived"
-            "-DINKPOD_RUST_STATICLIB=${INKPOD_MACOS_UNIVERSAL_RUST_STATICLIB}"
-            -P "${CMAKE_SOURCE_DIR}/cmake/macos/RunUniversalBuild.cmake"
-    DEPENDS
-        inkpod_macos_rust_universal
-        inkpod_macos_header_c11
-        inkpod_macos_header_cxx20
-    COMMENT "Building and inspecting Universal 2 macOS ABI smoke artifacts"
-    VERBATIM)
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    add_custom_target(inkpod_macos_archive
+        COMMAND "${CMAKE_COMMAND}"
+                "-DINKPOD_XCODEBUILD=${INKPOD_XCODEBUILD_EXECUTABLE}"
+                "-DINKPOD_XCRUN=${INKPOD_XCRUN_EXECUTABLE}"
+                "-DINKPOD_FILE=${INKPOD_FILE_EXECUTABLE}"
+                "-DINKPOD_XCODE_PROJECT=${INKPOD_MACOS_PROJECT}"
+                "-DINKPOD_XCODE_SCHEME=${INKPOD_MACOS_SCHEME}"
+                "-DINKPOD_XCCONFIG=${INKPOD_MACOS_GENERATED_XCCONFIG}"
+                "-DINKPOD_DERIVED_DATA=${CMAKE_BINARY_DIR}/xcode-arm64-release-derived"
+                "-DINKPOD_RUST_STATICLIB=${INKPOD_RUST_STATICLIB}"
+                -P "${CMAKE_SOURCE_DIR}/cmake/macos/RunArm64Build.cmake"
+        DEPENDS
+            inkpod_rust
+            inkpod_macos_header_c11
+            inkpod_macos_header_cxx20
+        COMMENT "Building and inspecting arm64 macOS ABI smoke artifacts"
+        VERBATIM)
+endif()

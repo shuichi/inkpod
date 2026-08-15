@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import plistlib
 import subprocess
@@ -161,6 +162,45 @@ class MacOSReleaseCliTests(unittest.TestCase):
         self.assertLess(submit_index, log_index)
         self.assertLess(log_index, staple_index)
         self.assertLess(staple_index, assess_index)
+        self.assertIn(
+            "cmake --preset macos-arm64-release -DINKPOD_BUILD_NUMBER=42",
+            calls,
+        )
+        self.assertIn(
+            "cmake --build --preset macos-arm64-release --target inkpod_macos_archive",
+            calls,
+        )
+
+    def test_repository_declares_arm64_only_macos_builds(self) -> None:
+        with (REPOSITORY_ROOT / "CMakePresets.json").open(
+            encoding="utf-8"
+        ) as source:
+            presets = json.load(source)
+
+        configure_names = {
+            preset["name"] for preset in presets["configurePresets"]
+        }
+        self.assertIn("macos-arm64-debug", configure_names)
+        self.assertIn("macos-arm64-release", configure_names)
+        self.assertNotIn("macos-universal-release", configure_names)
+
+        build_sources = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in (
+                REPOSITORY_ROOT / "CMakeLists.txt",
+                REPOSITORY_ROOT / "apps" / "macos" / "Config" / "Base.xcconfig",
+                REPOSITORY_ROOT / "cmake" / "macos" / "InkpodMacOS.cmake",
+                REPOSITORY_ROOT / "cmake" / "macos" / "RunArm64Build.cmake",
+                REPOSITORY_ROOT / "cmake" / "macos" / "RunXcodeTests.cmake",
+                REPOSITORY_ROOT / "cmake" / "macos" / "RunXcodeUITests.cmake",
+            )
+        )
+        self.assertNotIn("x86_64-apple-darwin", build_sources)
+        self.assertIn("aarch64-apple-darwin", build_sources)
+        self.assertIn("MACOSX_DEPLOYMENT_TARGET=26.0", build_sources)
+        self.assertIn("ARCHS = arm64", build_sources)
+        self.assertEqual(build_sources.count("ARCHS=arm64"), 3)
+        self.assertIn('STREQUAL "arm64"', build_sources)
 
     def test_help_documents_notarize_subcommand(self) -> None:
         result = self.run_cli("--help")

@@ -620,7 +620,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - `SAFE-001`: malformed/corrupted input の bounded rejection と非破壊性
 - `PERF-001`: 「横断的な性能契約」に定める sparse/COW、変更 tile だけの再合成、canonical `revision-max` cache、payload 非走査、意味 counter、固定 workload、承認済み環境別 envelope を維持する
 - `PKG-001`: Rust/Win32 の静的 CRT、x64/ARM64 self-contained MSIX、ならびに ZIP 直下へ `inkpod.exe`、`README.txt`、`LICENSE.txt`、`ThirdPartyNotices.txt` だけを収録する x64/ARM64 portable payload と package/dependency 検証
-- `PORT-001`: Rust workspace の OS 非依存性と次 frontend の adapter gap
+- `PORT-001`: Rust workspace の OS 非依存性、macOS frontend／Debug／Release／配布物のarm64-only契約とIntel Mac非対応、次 frontend の adapter gap
 
 ### Document and view
 

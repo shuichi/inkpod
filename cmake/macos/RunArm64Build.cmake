@@ -25,7 +25,7 @@ execute_process(
             -derivedDataPath "${INKPOD_DERIVED_DATA}"
             -xcconfig "${INKPOD_XCCONFIG}"
             -disableAutomaticPackageResolution
-            "ARCHS=arm64 x86_64"
+            ARCHS=arm64
             ONLY_ACTIVE_ARCH=NO
             ENABLE_TESTABILITY=YES
             CODE_SIGNING_ALLOWED=NO
@@ -35,7 +35,7 @@ execute_process(
 
 if(NOT INKPOD_XCODE_RESULT EQUAL 0)
     message(FATAL_ERROR
-        "Universal xcodebuild failed (${INKPOD_XCODE_RESULT})\n"
+        "arm64 xcodebuild failed (${INKPOD_XCODE_RESULT})\n"
         "${INKPOD_XCODE_OUTPUT}\n${INKPOD_XCODE_ERROR}")
 endif()
 
@@ -43,14 +43,14 @@ set(INKPOD_TEST_EXECUTABLE
     "${INKPOD_DERIVED_DATA}/Build/Products/Release/InkpodCoreBridgeTests.xctest/Contents/MacOS/InkpodCoreBridgeTests")
 if(NOT EXISTS "${INKPOD_TEST_EXECUTABLE}")
     message(FATAL_ERROR
-        "Universal ABI smoke executable was not produced: ${INKPOD_TEST_EXECUTABLE}")
+        "arm64 ABI smoke executable was not produced: ${INKPOD_TEST_EXECUTABLE}")
 endif()
 
 set(INKPOD_CORE_HOST_INTEGRATION
     "${INKPOD_DERIVED_DATA}/Build/Products/Release/InkpodCoreHostIntegration")
 if(NOT EXISTS "${INKPOD_CORE_HOST_INTEGRATION}")
     message(FATAL_ERROR
-        "Universal CoreHost integration executable was not produced: "
+        "arm64 CoreHost integration executable was not produced: "
         "${INKPOD_CORE_HOST_INTEGRATION}")
 endif()
 
@@ -58,7 +58,7 @@ set(INKPOD_APP_EXECUTABLE
     "${INKPOD_DERIVED_DATA}/Build/Products/Release/Inkpod.app/Contents/MacOS/Inkpod")
 if(NOT EXISTS "${INKPOD_APP_EXECUTABLE}")
     message(FATAL_ERROR
-        "Universal macOS product executable was not produced: ${INKPOD_APP_EXECUTABLE}")
+        "arm64 macOS product executable was not produced: ${INKPOD_APP_EXECUTABLE}")
 endif()
 
 foreach(INKPOD_BINARY
@@ -76,23 +76,26 @@ foreach(INKPOD_BINARY
         message(FATAL_ERROR
             "lipo could not inspect ${INKPOD_BINARY}: ${INKPOD_LIPO_ERROR}")
     endif()
-    if(NOT INKPOD_LIPO_ARCHS MATCHES "(^| )arm64($| )"
-            OR NOT INKPOD_LIPO_ARCHS MATCHES "(^| )x86_64($| )")
+    if(NOT INKPOD_LIPO_ARCHS STREQUAL "arm64")
         message(FATAL_ERROR
-            "${INKPOD_BINARY} is not Universal 2: ${INKPOD_LIPO_ARCHS}")
+            "${INKPOD_BINARY} must contain only arm64, not: ${INKPOD_LIPO_ARCHS}")
     endif()
+
     execute_process(
         COMMAND "${INKPOD_FILE}" "${INKPOD_BINARY}"
         RESULT_VARIABLE INKPOD_FILE_RESULT
         OUTPUT_VARIABLE INKPOD_FILE_OUTPUT
         ERROR_VARIABLE INKPOD_FILE_ERROR
         OUTPUT_STRIP_TRAILING_WHITESPACE)
-    if(NOT INKPOD_FILE_RESULT EQUAL 0
-            OR NOT INKPOD_FILE_OUTPUT MATCHES
-                "Mach-O universal binary with 2 architectures")
+    if(NOT INKPOD_FILE_RESULT EQUAL 0)
         message(FATAL_ERROR
-            "file did not recognize ${INKPOD_BINARY} as Universal 2: "
+            "file could not inspect ${INKPOD_BINARY}: "
             "${INKPOD_FILE_OUTPUT}${INKPOD_FILE_ERROR}")
     endif()
-    message(STATUS "Universal 2 ${INKPOD_BINARY}: ${INKPOD_LIPO_ARCHS}")
+    if(INKPOD_FILE_OUTPUT MATCHES "universal binary"
+            OR INKPOD_FILE_OUTPUT MATCHES "x86_64")
+        message(FATAL_ERROR
+            "${INKPOD_BINARY} is not arm64-only: ${INKPOD_FILE_OUTPUT}")
+    endif()
+    message(STATUS "arm64-only ${INKPOD_BINARY}: ${INKPOD_FILE_OUTPUT}")
 endforeach()

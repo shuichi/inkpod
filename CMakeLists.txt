@@ -2,6 +2,16 @@ cmake_minimum_required(VERSION 3.25)
 
 cmake_policy(SET CMP0091 NEW)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
+    set(CMAKE_OSX_ARCHITECTURES arm64 CACHE STRING
+        "Supported macOS target architecture (arm64 only)")
+    if(NOT CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
+        message(FATAL_ERROR
+            "Inkpod supports only arm64 macOS targets, not "
+            "'${CMAKE_OSX_ARCHITECTURES}'. Use a checked-in macos-arm64 preset "
+            "with '--fresh'.")
+    endif()
+endif()
 project(inkpod VERSION 0.2.3 LANGUAGES C CXX)
 
 set(INKPOD_BUILD_NUMBER "0" CACHE STRING
@@ -137,6 +147,12 @@ if(WIN32)
     set(INKPOD_CARGO_TARGET_ARGUMENT --target "${INKPOD_RUST_TARGET_TRIPLE}")
     set(INKPOD_CARGO_ENVIRONMENT
         "CARGO_ENCODED_RUSTFLAGS=-Ctarget-feature=+crt-static")
+elseif(APPLE)
+    set(INKPOD_RUST_TARGET_TRIPLE aarch64-apple-darwin)
+    set(INKPOD_RUST_OUTPUT_DIR
+        "${INKPOD_CARGO_TARGET_DIR}/${INKPOD_RUST_TARGET_TRIPLE}")
+    set(INKPOD_CARGO_TARGET_ARGUMENT --target "${INKPOD_RUST_TARGET_TRIPLE}")
+    set(INKPOD_CARGO_ENVIRONMENT "MACOSX_DEPLOYMENT_TARGET=26.0")
 endif()
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     set(INKPOD_RUST_PROFILE release)

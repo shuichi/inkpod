@@ -566,10 +566,11 @@ clipboard release. The product-scene test runs both normally and with Metal API
 Validation; the same Swift suite and headless executable run under Thread
 Sanitizer where that extended profile is selected.
 
-CMake builds arm64 and x86_64 Rust archives in separate Cargo target
-directories and combines them with `lipo`. The Universal Xcode build verifies
-both architectures in the Rust archive, XCTest executable, headless CoreHost,
-and `Inkpod.app`. The checked-in parity ledger still classifies all 384 Windows
+CMake fixes the macOS Rust target to `aarch64-apple-darwin` for both Debug and
+Release. The Xcode sub-build sets `ARCHS=arm64`, and the Release architecture
+gate requires the Rust archive, XCTest executable, headless CoreHost, and
+`Inkpod.app` to report exactly `arm64` through `lipo -archs`. Intel Mac is not a
+supported product target. The checked-in parity ledger still classifies all 384 Windows
 production command IDs. M3 marks the 19 deferred M2 View rows and 11 M3
 application/help/shortcut/language rows implemented; M4 marks exactly 26 file,
 clipboard, and close rows; M5 marks exactly 67 document/tree/view/workspace

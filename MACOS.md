@@ -14,7 +14,7 @@
 - Rust Core、`.inkpod` v26、replay epoch 23、canonical procedure semantics は変更しない。
 - 既存 ABI v14 で移植を開始する。ただし `SHORT-001` 完了には Windows VK/Ctrl 固有の shortcut record を置換する ABI v15 が必要で、M3 の独立変更として扱う。
 - CMake を公式 umbrella entry として維持し、checked-in Xcode project を CMake から呼ぶ macOS sub-build とする。
-- Release は arm64／x86_64 Universal 2 を既定とする。Intel Tahoe 実機 runner がなければ x86_64 runtime は未検証と明記する。
+- Debug／Release／配布物はarm64専用とし、Intel Macはサポート対象に含めない。
 - App Sandbox を既定とし、Developer ID 署名、Hardened Runtime、notarization を最初の配布経路とする。
 
 SwiftUI の `DocumentGroup` はファイルの open/save lifecycle を SwiftUI が所有するため、同一 Cell session の複数 view、Cut と Cell の別 owner、Core savepoint、atomic save、独自 close/shutdown を表現しにくい。[DocumentGroup](https://developer.apple.com/documentation/SwiftUI/DocumentGroup) に対し、`WindowGroup` は window ごとの state と標準 Window command を提供するので、独自 coordinator と組み合わせる。[WindowGroup](https://developer.apple.com/documentation/SwiftUI/WindowGroup)
@@ -120,8 +120,8 @@ macOS parityの分母は384とし、391を再現対象のUI数にしない。
 - Swift 6.3.3、target `arm64-apple-macosx26.0`
 - rustc 1.95.0
 - CMake 4.4.2
-- installed Rust targetは `aarch64-apple-darwin` と `x86_64-apple-darwin`
-- M0–M10のarm64 runtime、64-session headless integration、product Core/Metal、Sandbox file/clipboard、document/layer/plane/multi-view workspace、paint/fill/color、selection/transform/history、filter/effect/adjustment/vector/annotation/frame/vanishing-point、Cut/Sequence/Light Table/Subpalette/Reference/motion、Batch/job縦切りは通過。今回のV-MacUIはproduct lifecycle 6件とlaunched-product 8件を全通過し、Universal 2 app cross-build／link検査は既存証跡がある。Intel Tahoe実機runtimeは未検証
+- macOS buildに使用するinstalled Rust targetは `aarch64-apple-darwin`
+- M0–M10のarm64 runtime、64-session headless integration、product Core/Metal、Sandbox file/clipboard、document/layer/plane/multi-view workspace、paint/fill/color、selection/transform/history、filter/effect/adjustment/vector/annotation/frame/vanishing-point、Cut/Sequence/Light Table/Subpalette/Reference/motion、Batch/job縦切りは通過。今回のV-MacUIはproduct lifecycle 6件とlaunched-product 8件を全通過した
 
 ### 再利用する部分
 
@@ -324,8 +324,7 @@ Windowsの自由dockを再現せず、sidebar／inspector／bottom timeline／ut
 
 ```text
 CMake/Ninja
-  → Cargo arm64 / x86_64 staticlib
-  → lipo Universal libinkpod_ffi.a
+  → Cargo aarch64-apple-darwin staticlib
   → generated xcconfig
   → xcodebuild project/scheme/test/archive
 ```
@@ -435,7 +434,7 @@ Raw Core pointerはCORE内だけ、raw snapshot pointerは`OwnedSnapshot`内だ�
 
 | ID  | 名称                                       | 主な完了物                                                            |
 | --- | ------------------------------------------ | --------------------------------------------------------------------- |
-| M0  | Contract・build・ABI import基盤            | CMake→Cargo→Swift ABI smoke、Universal方針、384 parity ledger         |
+| M0  | Contract・build・ABI import基盤            | CMake→Cargo→Swift ABI smoke、arm64-only方針、384 parity ledger        |
 | M1  | 固定Core threadとsession lifecycle         | Core registry、bounded queue、create/close/shutdown headless vertical |
 | M2  | SwiftUI product shellとMetal Canvas        | WindowGroup、実Canvas、default stroke、pan/zoom、snapshot renderer    |
 | M3  | Command・menu・shortcut・localization      | Commands、FocusedValue、ABI v15 shortcut、Settings、ja/en             |
@@ -446,7 +445,7 @@ Raw Core pointerはCORE内だけ、raw snapshot pointerは`OwnedSnapshot`内だ�
 | M8  | Filter・Effect・Vector・Annotation         | preview sheets、adjustment、vector、frame/VP/annotation               |
 | M9  | Cut・Sequence・Light Table                 | animation workflow、subpalette/reference、motion                      |
 | M10 | Batchとlong-running jobs                   | Batch window、folder authority、dry-run/cancel/report                 |
-| M11 | Parity freeze・hardening・distribution     | 384 zero-pending、a11y/perf/soak、Universal signed/notarized artifact |
+| M11 | Parity freeze・hardening・distribution     | 384 zero-pending、a11y/perf/soak、arm64 signed/notarized artifact     |
 
 ```mermaid
 flowchart LR
@@ -473,14 +472,14 @@ flowchart LR
 
 ### M0 — Contract・build・ABI import基盤
 
-- **実装状態:** 完了。CMake経由のarm64 ABI smoke、384 parity gate、Universal 2 cross-build／link検査を実装済み。Intel Tahoe実機runtimeは未検証。
+- **実装状態:** 完了。CMake経由のarm64 ABI smoke、384 parity gate、arm64-only archive／link検査を実装済み。
 - **完了状態:** CMake入口からarm64 Rust staticlib、Clang module、Swift ABI smokeをbuild/runできる。smokeは専用test thread上でCore create→query→snapshot build/release→destroyを行う。384 command parity manifestがsourceと一致する。
 - **要件:** `ARCH-001/002`,`ABI-001/002`,`PORT-001`,`SAFE-001`。先行なし。
 - **scope/file:** `apps/macos/Inkpod.xcodeproj`、`Config/*.xcconfig`、`CoreBridge/C/include/{InkpodCoreC.h,module.modulemap}`、最小Swift bridge、`cmake/macos/*`、macOS CMake preset、`tests/macos/macos-command-parity.json`と検証script。
-- **data flow:** Swift smoke→Clang module→ABI v14→Rust staticlib。Universal releaseはarm64/x86_64 thin `.a`を別target-dirで構築して`lipo`する。
+- **data flow:** Swift smoke→Clang module→ABI v14→`aarch64-apple-darwin` Rust staticlib。Debug／Releaseとも同じarm64-only境界を使う。
 - **状態:** success、ABI mismatch、short struct、NULL、wrong-thread、unknown status、double release、link failure。
 - **test:** C11/C++20 include/layout、Swift import/link、opaque pointer NULL化、TLS diagnostic同thread copy、snapshot cross-thread release、raw387の完全partition。
-- **検証:** V-Rust、V-MacUnit、V-Universal-build。Xcode 26/Tahoe SDK。x86 target/runnerがなければruntime未検証。
+- **検証:** V-Rust、V-MacUnit、V-Arm64-release。Xcode 26/Tahoe SDK。
 - **完了判定:** CMake以外をrootにせず全smokeが通り、manifestの分母が384、unclassified raw symbolがゼロ。
 - **risk/mitigation:** anonymous C unionのSwift importはcompile testで判定し、必要時だけprivate inline helperを置く。header複製はしない。
 - **後続:** product UI、Core registry、renderer、file accessは作らない。
@@ -635,15 +634,15 @@ flowchart LR
 
 ### M11 — Parity freeze・hardening・distribution
 
-- **完了状態:** parity manifestのpending/unmappedがゼロ。Tahoe appがaccessibility、appearance、fault injection、performance、Universal build、署名/notarizationを通過する。
+- **完了状態:** parity manifestのpending/unmappedがゼロ。arm64 Tahoe appがaccessibility、appearance、fault injection、performance、arm64-only build、署名/notarizationを通過する。
 - **要件:** 全共有要件、`SAFE-001`,`PERF-001`,`PORT-001`、新規Mac shell/render/io/a11y/pkg要件案。依存M8–M10。
 - **scope/file:** smoke/fault/soak/UI test、sign/archive scripts、release checklist、documentation/status/compatibility更新。
 - **data flow:** 新機能は追加しない。各ownerのmetricsとparity evidenceを集約する。
 - **状態:** 全milestoneのsuccess/no-op/invalid/cancel/stale/failureに加え、sleep/wake、memory pressure、GPU/display switch、sign/notary failure。
 - **test:** queue saturation、close中input、active stroke、stale snapshot、save failure、shutdown race、repeated window/tab/layout、VoiceOver、keyboard、IME、appearance、Retina/multidisplay、clean-machine launch。
-- **検証:** 全verification profile、Universal archive、codesign/spctl/notary/stapler。Windows/Linux/Rust regressionを含む。
+- **検証:** 全verification profile、arm64-only archive、codesign/spctl/notary/stapler。Windows/Linux/Rust regressionを含む。
 - **完了判定:** 384 command全行が許可されたdispositionに分類され、active semantic commandのroute/state/surface/testが完全。未接続UI、常時成功stub、未検証をVerified扱いする項目がゼロ。
-- **risk/mitigation:** Tahoe runnerやIntel hardware不足は隠さず、該当項目をExperimental/未検証のままrelease gateで判断する。
+- **risk/mitigation:** Tahoe arm64 runner不足は隠さず、該当項目をExperimental/未検証のままrelease gateで判断する。
 - **後続:** なし。欠落機能はM11で雑に実装せず、所有milestoneを再度開く。
 
 ## 8. テスト、CI、性能、アクセシビリティ、配布戦略
@@ -651,7 +650,7 @@ flowchart LR
 ### Verification profile
 
 各milestoneで必要になったprofileだけを追加する。M0ではV-Rust、V-MacUnit、
-V-Universal、M1ではextended Thread Sanitizer、M2ではV-MacUIと自動化可能な
+V-Arm64-release、M1ではextended Thread Sanitizer、M2ではV-MacUIと自動化可能な
 V-Metal API Validation targetを追加・実行済み。
 
 ```text
@@ -697,11 +696,11 @@ cmake --build --preset macos-arm64-debug --target inkpod_macos_metal_check
 - memory-pressure injection
 - Instruments Metal/System Trace
 
-**V-Universal**
+**V-Arm64-release**
 
 ```text
-cmake --preset macos-universal-release
-cmake --build --preset macos-universal-release --target inkpod_macos_archive
+cmake --preset macos-arm64-release
+cmake --build --preset macos-arm64-release --target inkpod_macos_archive
 lipo -archs <app-executable>
 lipo -archs <libinkpod_ffi.a>
 file <app-executable>
@@ -728,8 +727,7 @@ Windows ARM presetsもCIで維持する。
 | Rust portable           | Linux/macOS、全crate、fmt/clippy/test/doc/quick benchmark            |
 | Windows                 | 既存x64/ARM configure/build/test/smoke/package                       |
 | macOS arm64             | Tahoe＋Xcode 26、Swift 6 strict concurrency、unit/integration/UI     |
-| macOS x86_64            | Tahoe Intel runnerがあればruntime。なければcross-build/linkのみ      |
-| macOS Universal release | 両slice、archive、resource/entitlement/UTType検査                    |
+| macOS arm64 release     | arm64-only archive、resource/entitlement/UTTypeとarchitecture検査   |
 | Signed release          | protected runner、Developer ID、notary credential、clean Tahoe smoke |
 
 Tahoe runnerがない場合、次は明示的に未検証とする。
@@ -813,7 +811,7 @@ AppleはDeveloper ID配布のnotarizationにHardened Runtime等を要求する�
 - CMakeはumbrella entry、Xcode projectはmacOS sub-buildの正本
 - `apps/macos` directory責務
 - Mac resource、sandbox、signing、notarization
-- Universal 2とminimum deployment
+- arm64-onlyとminimum deployment
 - Windows static CRT規則がWindows限定であること
 - frontend共通のno-global-active-pointer／snapshot ownership
 
@@ -828,7 +826,7 @@ AppleはDeveloper ID配布のnotarizationにHardened Runtime等を要求する�
 - `MAC-RENDER-001`: Metal、Retina、pointer/tablet、occlusion/device recovery
 - `MAC-IO-001`: App Sandbox、security scope、UTType、file panel、pasteboard/drop
 - `MAC-A11Y-001`: VoiceOver、Full Keyboard Access、IME、appearance/accessibility settings
-- `MAC-PKG-001`: Universal 2、Developer ID、Hardened Runtime、notarization
+- `MAC-PKG-001`: arm64-only、Developer ID、Hardened Runtime、notarization
 
 Windows固有IDとは別にMac IDを追加する必要がある。追加しない場合、Mac shellを`WIN-001`でVerifiedにする不自然な状態になる。
 
@@ -885,7 +883,7 @@ M0 build/ABI
 | close/shutdown中のinput/task race                  | High   | accept停止→transient cancel→Core drain→renderer drain→Core destroy            |
 | SwiftUIのlarge tree/timeline性能不足               | Medium | Instruments evidence後だけAppKit list/collectionへ置換                        |
 | multiple GPU/display切替                           | Medium | device registry ID別cache、surface generation、GPU resourceだけ再構築         |
-| Intel Tahoe runner不在                             | Medium | Universal cross-buildは実施、runtimeを未検証表示。必要ならarm64-only decision |
+| Intel sliceが誤って再導入される                    | Medium | preset、Cargo target、Xcode ARCHS、`lipo -archs`のarm64-only gate             |
 | VoiceOverでcustom Canvasが未知viewになる           | High   | semantic role/value/actions、menu/keyboard代替、audit＋manual test            |
 | CMake↔Xcodeの再帰build                             | Medium | 一方向CMake→xcodebuild。Xcode canonical Cargo script禁止                      |
 | localization drift                                 | Medium | String Catalog key parity、user string separation、ja/en UI smoke             |
@@ -895,7 +893,7 @@ M0 build/ABI
 
 | 論点                         | 推奨default                                     | 代替                                  | 影響                                                  | 期限                      |
 | ---------------------------- | ----------------------------------------------- | ------------------------------------- | ----------------------------------------------------- | ------------------------- |
-| CPU配布                      | Universal 2 arm64+x86_64                        | arm64-only                            | size/CI対coverage。Intel runtime runner不足時は未検証 | M0、最終M11               |
+| CPU配布                      | arm64-only（決定済み）                          | Intel Macは非対応                     | 配布sizeとCIをarm64へ集中                            | 2026-08-16決定             |
 | Native fileとSandbox         | 現行path ABI＋security scope＋NSFileCoordinator | ABI v16 staged bytes/file authority   | ABI追加量、Cut/Batch access、atomicity                | M4前半                    |
 | App Sandbox                  | Developer ID版でも有効                          | Hardened Runtimeのみ                  | batch/folder usability対security/将来App Store        | M4                        |
 | Document scene               | WindowGroup＋独自coordinator                    | DocumentGroup spike                   | save/session ownershipが大きく変わる                  | M1。defaultを覆すならM2前 |
@@ -903,7 +901,6 @@ M0 build/ABI
 | Shortcut ABI                 | ABI v15 neutral V2                              | Macだけ独自resolver                   | Core input interpretationの重複、Windows VK混入       | M3                        |
 | Pane detachment              | sidebar/inspector＋Batch専用window              | 多数のUtilityWindow                   | target/focus/keyboard複雑性                           | M5                        |
 | Workspace persistence        | versioned Codable property-list record          | Application Support DB                | lightweight state対拡張性                             | M5                        |
-| x86_64 Verified条件          | Intel Tahoe実行を要求                           | Rosetta/cross-buildのみでExperimental | 配布表示とsupport範囲                                 | M11                       |
 | 配布channel                  | notarized Developer ID DMG/ZIP                  | Mac App Store                         | Sandbox/bookmark審査と配布運用                        | M11                       |
 | HDR/wide color               | 初期はSDR sRGB                                  | extended-range drawable               | color QAとrenderer complexity                         | M2。必要性は別SPEC変更    |
 | Xcode direct developer build | CMake configure/build後にprojectを開く          | XcodeがCargoを直接呼ぶ                | build正本の二重化                                     | M0                        |
@@ -940,7 +937,6 @@ M0 build/ABI
 - [NSPasteboard](https://developer.apple.com/documentation/AppKit/NSPasteboard)
 - [Accessing files from the macOS App Sandbox](https://developer.apple.com/documentation/security/accessing-files-from-the-macos-app-sandbox)
 - [NSFileCoordinator](https://developer.apple.com/documentation/Foundation/NSFileCoordinator)
-- [Building a universal macOS binary](https://developer.apple.com/documentation/Apple-Silicon/building-a-universal-macos-binary)
 - [Recording performance data](https://developer.apple.com/documentation/os/recording-performance-data)
 - [Notarizing macOS software](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)
 - [Developer ID](https://developer.apple.com/developer-id/)
