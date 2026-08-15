@@ -47,6 +47,12 @@ Windows frontend の所有権は process 単位の `ApplicationHost`、top-level
 - `staticlib` は `inkpod-ffi` だけに設定し、MSVC runtime は全構成の C/C++ を `/MT`（`CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded`）、Rust MSVC target を `-C target-feature=+crt-static` として静的 CRT に統一する。Rust と CRT 種別を合わせるため Debug でも `/MTd` を使わない。
 - manifest で Common Controls v6 と Per-Monitor DPI Awareness v2 を有効にする。
 - build にローカル絶対 path、手動 file copy、開発者個人だけの前提を埋め込まない。
+- Windows の非対話 build、test、format、document 生成 command は、原則としてユーザーの PowerShell
+  profile を読み込まずに実行する。Codex の command 実行では `login: false`、直接 PowerShell を起動する場合は
+  `-NoProfile` または同等の方法を使う。profile が明示的に必要な診断だけを例外とし、その理由を記録する。
+- build と検証を、開発者個人の PowerShell profile が設定する PATH、環境変数、alias、module に依存させない。
+- command 本体の完了後に shell wrapper だけが残った場合は成功と推測しない。child process の有無を読み取り専用で
+  確認し、wrapper を終了して同じ command を no-profile で再実行し、exit code 0 を取得する。
 - 非 Windows でも Rust の build/test を可能にし、Win32 target は明示的に skip する。
 - 依存は必要最小限とし、配布ライセンスを確認して third-party notice を更新する。
 - `lib.rs` と `mod.rs` は module declaration と意図した re-export を中心にし、production logic を置かない。責務で module を分け、便宜的な `helpers`、`common`、`utils` や循環依存を作らず、visibility を必要最小限に保つ。

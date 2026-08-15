@@ -10,7 +10,9 @@ pub(crate) mod bind;
 mod catalog;
 mod compile;
 mod execute;
+mod plan;
 mod report;
+mod run;
 
 #[allow(
     unused_imports,

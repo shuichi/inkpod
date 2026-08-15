@@ -1,3 +1,4 @@
+use super::assets::{ScriptAssetError, external_asset_path};
 use super::catalog::{
     CatalogAssetMetadata, CatalogCommandDomain, CatalogEditorMetadata, CatalogEntry, CatalogError,
     CatalogNumericExpression, CatalogPortabilityEvaluator, CatalogResultMetadata,
@@ -7,12 +8,12 @@ use super::catalog::{
 use crate::primitive::{inkscript, inkscript_batch};
 use inkpod_format::{
     InkScriptDeclarationModel, InkScriptEnvelopeErrorCode, InkScriptInputDeclarationKind,
-    InkScriptOrchestrationEnvelope, InkScriptPathIntentAccess, InkScriptRunParameterDecision,
-    InkScriptSchemaView, InkScriptSemanticErrorCode, InkScriptSource, InkScriptTypeDiagnostic,
-    InkScriptTypeDiagnosticCode, InkScriptTypedValue, InkScriptTypedValueKind,
-    build_inkscript_declaration_model, build_inkscript_orchestration_envelope,
-    build_inkscript_semantic, emit_inkscript_canonical, parse_inkscript,
-    resolve_inkscript_run_parameters,
+    InkScriptOrchestrationEnvelope, InkScriptOutput, InkScriptPathIntentAccess,
+    InkScriptRunParameterDecision, InkScriptSchemaView, InkScriptSemanticErrorCode,
+    InkScriptSource, InkScriptTypeDiagnostic, InkScriptTypeDiagnosticCode, InkScriptTypedValue,
+    InkScriptTypedValueKind, build_inkscript_declaration_model,
+    build_inkscript_orchestration_envelope, build_inkscript_semantic, emit_inkscript_canonical,
+    parse_inkscript, resolve_inkscript_run_parameters,
 };
 use std::collections::BTreeMap;
 
@@ -54,8 +55,8 @@ pub(crate) enum ScriptCompileError {
     Type(InkScriptTypeDiagnostic),
     Freeze(InkScriptTypeDiagnosticCode),
     ParameterCancelled,
-    UnsupportedInput,
-    AssetsNotYetSupported,
+    InvalidPathIntent,
+    Asset(ScriptAssetError),
     Catalog(CatalogError),
     ResourceLimit,
 }
@@ -78,6 +79,40 @@ pub(crate) struct StaticScriptProgram {
     pub(crate) frozen_arguments: Vec<InkScriptTypedValue>,
     pub(crate) model: InkScriptDeclarationModel,
     pub(crate) envelope: InkScriptOrchestrationEnvelope,
+    pub(crate) path_intents: Vec<ScriptStaticPathIntent>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum ScriptPathIntentSubject {
+    Input(usize),
+    Asset(String),
+    OutputRoot,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ScriptStaticPathIntent {
+    id: u64,
+    access: InkScriptPathIntentAccess,
+    text: String,
+    subject: ScriptPathIntentSubject,
+}
+
+impl ScriptStaticPathIntent {
+    pub(crate) const fn id(&self) -> u64 {
+        self.id
+    }
+
+    pub(crate) const fn access(&self) -> InkScriptPathIntentAccess {
+        self.access
+    }
+
+    pub(crate) fn text(&self) -> &str {
+        &self.text
+    }
+
+    pub(crate) const fn subject(&self) -> &ScriptPathIntentSubject {
+        &self.subject
+    }
 }
 
 pub(crate) fn compile_inkscript(
@@ -102,19 +137,8 @@ pub(crate) fn compile_inkscript_with_limits(
         .map_err(|error| ScriptCompileError::Semantic(error.code()))?;
     let envelope = build_inkscript_orchestration_envelope(&semantic)
         .map_err(|error| ScriptCompileError::Envelope(error.code()))?;
-    if envelope.inputs().len() != 1
-        || !matches!(
-            envelope.inputs()[0].kind(),
-            InkScriptInputDeclarationKind::CurrentDocument | InkScriptInputDeclarationKind::File
-        )
-    {
-        return Err(ScriptCompileError::UnsupportedInput);
-    }
     let model =
         build_inkscript_declaration_model(&parsed, &schema).map_err(ScriptCompileError::Type)?;
-    if !model.assets().is_empty() {
-        return Err(ScriptCompileError::AssetsNotYetSupported);
-    }
     let Some(run_parameters) = resolve_inkscript_run_parameters(&model, &schema, parameters)
         .map_err(ScriptCompileError::Type)?
     else {
@@ -153,7 +177,8 @@ pub(crate) fn compile_inkscript_with_limits(
     let canonical = emit_inkscript_canonical(&semantic, &schema)
         .map_err(|error| ScriptCompileError::Semantic(error.code()))?;
     let static_compile_digest = compile_digest(&canonical, &parameters, &frozen_arguments);
-    let path_intent_digest = path_digest(&envelope);
+    let path_intents = build_path_intents(&envelope, &model)?;
+    let path_intent_digest = path_digest(&path_intents);
     Ok(StaticScriptProgram {
         static_compile_digest,
         path_intent_digest,
@@ -162,6 +187,7 @@ pub(crate) fn compile_inkscript_with_limits(
         frozen_arguments,
         model,
         envelope,
+        path_intents,
     })
 }
 
@@ -373,21 +399,125 @@ fn compile_digest(
     *hasher.finalize().as_bytes()
 }
 
-fn path_digest(envelope: &InkScriptOrchestrationEnvelope) -> [u8; 32] {
+fn build_path_intents(
+    envelope: &InkScriptOrchestrationEnvelope,
+    model: &InkScriptDeclarationModel,
+) -> Result<Vec<ScriptStaticPathIntent>, ScriptCompileError> {
+    let mut intents = Vec::new();
+    for (index, input) in envelope.inputs().iter().enumerate() {
+        let access = match input.kind() {
+            InkScriptInputDeclarationKind::File => Some(InkScriptPathIntentAccess::Read),
+            InkScriptInputDeclarationKind::Folder => Some(InkScriptPathIntentAccess::Enumerate),
+            InkScriptInputDeclarationKind::CurrentDocument
+            | InkScriptInputDeclarationKind::CurrentSequence => None,
+        };
+        if let (Some(access), Some(text)) = (access, input.path_text()) {
+            push_path_intent(
+                &mut intents,
+                access,
+                text,
+                ScriptPathIntentSubject::Input(index),
+            )?;
+        }
+    }
+    for asset in model.assets() {
+        if let Some(path) = external_asset_path(asset).map_err(ScriptCompileError::Asset)? {
+            push_path_intent(
+                &mut intents,
+                InkScriptPathIntentAccess::Read,
+                path,
+                ScriptPathIntentSubject::Asset(asset.name().to_owned()),
+            )?;
+        }
+    }
+    match envelope.output() {
+        InkScriptOutput::Duplicate(output) | InkScriptOutput::NewSave(output) => {
+            push_path_intent(
+                &mut intents,
+                InkScriptPathIntentAccess::Create,
+                output.folder(),
+                ScriptPathIntentSubject::OutputRoot,
+            )?;
+        }
+        InkScriptOutput::ExplicitOverwrite => {
+            for (index, input) in envelope.inputs().iter().enumerate() {
+                let Some(text) = input.path_text() else {
+                    continue;
+                };
+                push_path_intent(
+                    &mut intents,
+                    InkScriptPathIntentAccess::Replace,
+                    text,
+                    ScriptPathIntentSubject::Input(index),
+                )?;
+            }
+        }
+    }
+    Ok(intents)
+}
+
+fn push_path_intent(
+    intents: &mut Vec<ScriptStaticPathIntent>,
+    access: InkScriptPathIntentAccess,
+    text: &str,
+    subject: ScriptPathIntentSubject,
+) -> Result<(), ScriptCompileError> {
+    if text.is_empty() && !matches!(subject, ScriptPathIntentSubject::OutputRoot) {
+        return Err(ScriptCompileError::InvalidPathIntent);
+    }
+    validate_path_intent_text(text)?;
+    let id = u64::try_from(intents.len())
+        .ok()
+        .and_then(|value| value.checked_add(1))
+        .ok_or(ScriptCompileError::ResourceLimit)?;
+    intents.push(ScriptStaticPathIntent {
+        id,
+        access,
+        text: text.to_owned(),
+        subject,
+    });
+    Ok(())
+}
+
+fn validate_path_intent_text(text: &str) -> Result<(), ScriptCompileError> {
+    if text.starts_with("//")
+        || text.starts_with("\\\\")
+        || text.contains("://")
+        || text == "~"
+        || text.starts_with("~/")
+        || text.starts_with("~\\")
+        || text.contains('*')
+        || text.contains('?')
+        || text.split(['/', '\\']).any(|component| component == "..")
+    {
+        return Err(ScriptCompileError::InvalidPathIntent);
+    }
+    Ok(())
+}
+
+fn path_digest(intents: &[ScriptStaticPathIntent]) -> [u8; 32] {
     let mut hasher = blake3::Hasher::new_derive_key(PATH_INTENT_DIGEST_CONTEXT);
-    for intent in envelope.path_intent_preview().intents() {
+    for intent in intents {
         hasher.update(&[match intent.access() {
             InkScriptPathIntentAccess::Read => 1,
             InkScriptPathIntentAccess::Enumerate => 2,
             InkScriptPathIntentAccess::Create => 3,
             InkScriptPathIntentAccess::Replace => 4,
         }]);
-        hasher.update(
-            &intent
-                .input_index()
-                .map_or(u64::MAX, |value| value as u64)
-                .to_le_bytes(),
-        );
+        hasher.update(&intent.id().to_le_bytes());
+        match intent.subject() {
+            ScriptPathIntentSubject::Input(index) => {
+                hasher.update(&[0]);
+                hasher.update(&(*index as u64).to_le_bytes());
+            }
+            ScriptPathIntentSubject::Asset(name) => {
+                hasher.update(&[1]);
+                hash_bytes(&mut hasher, name.as_bytes());
+            }
+            ScriptPathIntentSubject::OutputRoot => {
+                hasher.update(&[2]);
+            }
+        };
         hash_bytes(&mut hasher, intent.text().as_bytes());
     }
     *hasher.finalize().as_bytes()

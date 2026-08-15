@@ -30,6 +30,18 @@ impl AuthorizedAssetIdentity {
             logical_length,
         }
     }
+
+    pub(super) const fn object(self) -> [u8; 32] {
+        self.object
+    }
+
+    pub(super) const fn generation(self) -> u64 {
+        self.generation
+    }
+
+    pub(super) const fn logical_length(self) -> u64 {
+        self.logical_length
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -64,6 +76,14 @@ impl<'reader> AuthorizedAssetStream<'reader> {
             authorized_identity,
             reader,
         }
+    }
+
+    pub(super) const fn asset_symbol(&self) -> &str {
+        self.asset_symbol
+    }
+
+    pub(super) const fn authorized_identity(&self) -> AuthorizedAssetIdentity {
+        self.authorized_identity
     }
 }
 
@@ -181,6 +201,19 @@ impl FrozenScriptAssets {
         self.usage
     }
 
+    pub(super) fn plan_records(&self) -> Vec<FrozenAssetPlanRecord> {
+        self.by_symbol
+            .iter()
+            .map(|(symbol, asset)| FrozenAssetPlanRecord {
+                symbol: symbol.clone(),
+                asset_id: asset.record.id(),
+                descriptor: asset.record.descriptor(),
+                source: asset.source,
+                authorized_identity: asset.authorized_identity,
+            })
+            .collect()
+    }
+
     pub(crate) fn bind_role(
         &self,
         role: &CatalogAssetMetadata,
@@ -213,6 +246,15 @@ impl FrozenScriptAssets {
             },
         })
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct FrozenAssetPlanRecord {
+    pub(super) symbol: String,
+    pub(super) asset_id: AssetId,
+    pub(super) descriptor: AssetDescriptor,
+    pub(super) source: ScriptAssetSource,
+    pub(super) authorized_identity: Option<AuthorizedAssetIdentity>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -446,6 +488,13 @@ fn prepare_asset(asset: &InkScriptTypedAsset) -> Result<PreparedAsset<'_>, Scrip
         descriptor,
         payload,
     })
+}
+
+pub(super) fn external_asset_path(
+    asset: &InkScriptTypedAsset,
+) -> Result<Option<&str>, ScriptAssetError> {
+    let body = typed_record(asset.body(), "canonical_raster_asset")?;
+    optional_string(body.get("data_file"))
 }
 
 fn canonical_raster_descriptor(

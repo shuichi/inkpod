@@ -2138,7 +2138,7 @@ Version impact:
 - C ABI: 14（symbol／record変更なし）
 ```
 
-### [~] M10 — canonical asset decodeとimmutable freeze
+### [x] M10 — canonical asset decodeとimmutable freeze
 
 **範囲**
 
@@ -2175,7 +2175,8 @@ Version impact:
 - Windows x64 Debug configure／build、static CRT、portable ZIP、unsigned MSIX、および最終binaryの全36 CTestが
   405.02秒で成功した。ABI smokeは57.50秒、English smokeは167.21秒、Japanese smokeは167.48秒だった。
 - asset ingestion／freeze／role planはcrate-privateのままで、M09 compiler、Core public re-export、C ABI、Windows、product command、
-  `.inkscript` file-open routeへ接続していない。既存Batch回帰とInkScript UI非公開の利用者確認を待つため`[~]`で停止する。
+  `.inkscript` file-open routeへ接続していない。前回`[~]`で停止した後、今回promptにより既存Batch回帰と
+  InkScript UI非公開に問題がなかったことを利用者確認済みとして`[x]`へ移行した。
 
 ```text
 Version impact:
@@ -2187,7 +2188,7 @@ Version impact:
 - C ABI: 14（symbol／record変更なし）
 ```
 
-### [ ] M11 — PathIntent、authority DTO、immutable input/output PlanTask
+### [x] M11 — PathIntent、authority DTO、immutable input/output PlanTask
 
 **範囲**
 
@@ -2209,7 +2210,50 @@ Version impact:
 - PlanTaskのcancel/failureがCore、directory、temporary、destinationを変更しない。
 - preview順とoutput namingが既存Batch fixtureに一致し、authorityとplan digestに循環依存がない。
 
-### [ ] M12 — sequential multi-item runnerとnative persistence
+**自動検証結果（2026-08-15）**
+
+- static compileはfile／folder input、external asset、output create／replaceのintentへstable IDを付け、
+  `static_compile_digest`と独立した`path_intent_digest`を作る。empty non-output path、UNC／URL、home shorthand、
+  wildcard、parent traversalをauthority取得前に拒否し、source textをauthorityとして扱わない。
+- OS非依存の`ValidatedPathIdentity`、`AuthoritySnapshot`、session／sequence expectation、native fingerprint、
+  open-session set snapshot、folder scan DTOと注入可能なadapterを追加した。Coreはpath canonical keyと固定幅の
+  volume／object／alias／generationだけを検査し、OS token、handle、reparse固有型を解釈または保持しない。
+- cancellable PlanTaskはfile／folder／dirtyまたはpathless current document／current sequenceをimmutable snapshotへ
+  固定する。open session所有fileはCore snapshotへ切り替え、closed fileだけをfingerprintとして保持する。
+  folderのmatch/nonmatch entry、name bytes、work、depth、native read、expanded item、invocation、wait、logical output＋
+  temporaryをchecked集計し、超過時にtruncateせずplan全体を公開しない。
+- 全input展開後にapproved natural order、range、document UUID／path alias dedupを適用し、既存Batch互換の
+  duplicate／new-save／explicit-overwrite namingをchecked `u32`で導出する。input／asset／script／open session／
+  item間collision、open-session overwrite、guard不能overwrite、identity replacementを出力作成前に拒否する。
+- M10 external asset streamをauthorityのexact object identityへ束縛してimmutable storeへfreezeし、plan digestは
+  static/path digestの後にauthority ID/generation、session/input fingerprint、asset、destinationを取り込む。
+  confirmation tokenはplan digestとall/current scopeへ束縛し、一回だけ消費できる。authorityはplan digestを参照しないため
+  循環依存しない。
+- Core-private 4 contractでsuccess／empty program no-op、invalid path、range、natural order、output naming、dirty/pathless
+  snapshot、sequence stale、file replacement、alias duplicate、open-session overwrite、asset stale、output collision、
+  number overflow/underflow、entry/name/work/depth resource、cancel、adapter failure、atomic nonpublication、Send owner、
+  one-shot/scope confirmation、digest orderingを検証した。filesystem mutation API、temporary、destination writeは存在しない。
+- `cargo fmt --check`、workspace全target／feature Clippy（warning deny）、workspace 551 tests（doctest 1、ignored 0）、
+  workspace strict rustdocが成功した。承認済みquick benchmarkはworkload、harness、semantic counter、envelopeを変更せず、
+  全10 checksumと意味counterを維持した。
+- Windows x64 Debug configure／build、static CRT、portable ZIP、unsigned MSIX、および最終binaryの全36 CTestが
+  415.54秒で成功した。ABI smokeは57.96秒、English smokeは171.86秒、Japanese smokeは172.41秒だった。
+- plan／authority DTO／adapter／confirmationはcrate-privateで、Core public re-export、C ABI、Windows、production Batch、
+  `.inkscript` file-open routeへ接続していない。M12のRunTask、native encode、temporary／install、reportは未実装である。
+  前回`[~]`で停止した後、今回promptにより既存Batch回帰とInkScript UI非公開に問題がなかったことを
+  利用者確認済みとして`[x]`へ移行した。
+
+```text
+Version impact:
+- Registry schema: 2（approved language-v1 resource／path contractの実装、schema変更なし）
+- InkScript file: 1（grammar／serialized field／selector意味変更なし）
+- InkScript procedure catalog: 1（private draft 13/84、entry／signature変更なし）
+- replay epoch: 23（canonical invocation／state／pixel semantics変更なし）
+- .inkpod top-level: 26（encode／install／schema／replay変更なし）
+- C ABI: 14（symbol／record変更なし）
+```
+
+### [x] M12 — sequential multi-item runnerとnative persistence
 
 **範囲**
 
@@ -2231,7 +2275,49 @@ Version impact:
   next IDを保持したままscript Commitをappendし、save/reopenできるtestがある。
 - source/live document、dirty、savepoint、path authorityをsuccess/failure/cancelで変更しない。
 
-### [ ] M13 — InkScript performance contract proposal
+**自動検証結果（2026-08-15）**
+
+- one-shot confirmationを消費してimmutable planのscopeを固定し、preview ordinalごとに一件ずつ進む
+  Core-private `ScriptRunTask`を追加した。item completionと`wait_ms` timer要求を別advanceとして返すため、
+  Core engine threadをsleepさせず、item execution／encode／install順は常にpreview順になる。
+- file inputはread前後の完全fingerprint、raw byte length／BLAKE3、native document UUIDを照合してcurrent v26を
+  staged openする。session inputはM11の完全snapshotからCoreを復元し、既存Genesis、asset、journal／branch、
+  history cursor、persistent-ID high-watermark、document/editor savepointへ既存canonical executorのCommitをappendする。
+- install modeは最終document/editor stateをprospective savepointとしてcurrent `.inkpod`へencodeする。runtime-only
+  adapter境界はauthority／open-session generation、source／destination identity、same-volume temporary、write／flush／close後
+  identity、atomic create／replace、overwrite no-lost-update guardを再検査し、OS handleやpath tokenをCoreへ入れない。
+- atomic installだけをlinearization pointとし、直前Cancelはactive itemを`cancelled`、直後Cancelは当該itemを
+  `installed`のまま後続を`not_started`にする。`failure = continue | stop`、installed／failed／cancelled／not-started、
+  作成directory、item execution reportをpreview順で決定的に保持し、先行installed itemをrollbackしない。
+- dry-runは同じstaged open／binding／canonical executorを通るが、encode、directory、temporary、destinationを作らない。
+  output byte上限、adapter save failure、stale authority／session／source／destination、atomic capability消失はitem単位で
+  fail closedになり、temporary identity swap時は別objectをcleanupしない。
+- Core-private 4 integration contractと1 ownership contractでnatural-order 3-item run、shared missing directory再利用、
+  nonblocking wait、continue／stop、encode resource／save failure、atomic install前後Cancel、guard不能overwrite、同一identityの
+  content更新、temp swap、authority失効、temp作成前Cancel、dry-run無書込み、`Send` ownershipを検証した。
+- native outputをcache-free reopenし、canonical direct routeとstate／Commit／journal／Undo／Redo／next IDを照合した。
+  dirty／pathless snapshot fixtureはasset-backed Genesisとinactive branchを持ち、sourceのdirty／path／両savepointを変えず、
+  outputだけが最終document/editor savepointを持つことを検証した。
+- `cargo fmt --check`、workspace全target／feature Clippy（warning deny）、workspace 556 tests（doctest 1、ignored 0）、
+  strict rustdocが成功した。承認済みquick benchmarkはworkload、harness、semantic counter、envelopeを変更せず、
+  全10 checksumと意味counterを維持した。
+- Windows x64 Debug configure／build、static CRT、portable ZIP、unsigned MSIX、および最終binaryの全36 CTestが
+  410.11秒で成功した。ABI smokeは57.27秒、English smokeは168.42秒、Japanese smokeは169.34秒だった。
+- RunTask／report／OS adapter契約はcrate-privateで、実Windows authority adapter、Core public re-export、C ABI、UI、
+  production Batch、`.inkscript` file-open routeへ接続していない。前回`[~]`で停止した後、今回promptにより既存Batch回帰と
+  InkScript UI非公開に問題がなかったことを利用者確認済みとして`[x]`へ移行した。
+
+```text
+Version impact:
+- Registry schema: 2（approved language-v1 execution／atomic-install contractの実装、schema変更なし）
+- InkScript file: 1（grammar／serialized field／selector意味変更なし）
+- InkScript procedure catalog: 1（private draft 13/84、entry／signature変更なし）
+- replay epoch: 23（既存canonical executor／invocation／state／pixel semantics変更なし）
+- .inkpod top-level: 26（exact-current encoder／decoder再利用、schema／replay変更なし）
+- C ABI: 14（symbol／record変更なし）
+```
+
+### [~] M13 — InkScript performance contract proposal
 
 **範囲**
 
@@ -2243,6 +2329,39 @@ Version impact:
 
 - workloadがparser/compile/bind/runner/assetの意味counterを測り、private fieldやwall-clockだけに依存しない。
 - proposalと全探索測定を記録して`[~]`で停止する。次の汎用promptはproposalの明示承認を兼ねる。
+
+**提案・自動測定結果（2026-08-15、明示承認待ち）**
+
+- [`docs/inkscript-performance-proposal.md`](docs/inkscript-performance-proposal.md)へquick／fullのsource、固定seed、
+  step／item／asset入力、catalog work formula、parser／compile／bind／runner／asset counter、FNV-1a checksum、
+  timed interval、独立process sample規則、測定環境、提案envelopeを記録した。
+- quickは128 step、4 success item、256 KiB inline assetとし、failure／cancel probeを含む6 attempted itemで
+  token 7,965、CST node 2,000、dependency edge 128、statement 774、invocation 768、Commit／no-op各384、
+  installed／failed／cancelled = 4／1／1、cache-free reopen 4を固定する。checksumは`0f84d2c54cfe1e2c`である。
+- fullは1,024 step、8 success item、16 MiB inline assetとし、10 attempted itemでtoken 61,725、CST node 15,440、
+  dependency edge 1,024、statement 10,250、invocation 10,240、Commit／no-op各5,120、installed／failed／cancelled =
+  8／1／1、cache-free reopen 8を固定する。checksumは`17c636b92b1aebf1`である。
+- step 32／64／128／256／512／1,024／2,048、item 1／2／4／8／16、asset 16 KiB／64 KiB／256 KiB／1 MiB／
+  4 MiB／16 MiBの全候補軸を一時的なcrate-private Release probeで測定し、選択full複合も測定した。probeは測定後に
+  完全削除し、production code、test、Cargo target、既存benchmark harness／checksum／envelopeへ差分を残していない。
+- Windows x64 Ryzen 9 9950X3D Releaseで各profileのwarm-up 1 processを破棄後、quick 9 process中央値は
+  85,372,200 ns、full 5 process中央値は20,455,099,800 nsだった。全sampleが同じcounter／checksumを維持し、
+  既存x64契約と同じ丸めた75–125%幅からquick 64–107 ms、full 15.3–25.6 sを提案する。
+- 一時probe除去後の`cargo fmt --check`、workspace全target／feature Clippy（warning deny）、workspace 556 tests
+  （doctest 1、ignored 0）、workspace strict rustdocが成功した。既存approved quick benchmarkも10 scenarioの
+  checksum／semantic counterをすべて維持し、workload、harness、payload-access route、envelopeを変更していない。
+- M14は承認後にtest-only crate-private quick runnerだけを追加し、既存`core_workflows` 10 scenarioを変更しない。
+  full runnerはM36まで実装しない。公開API／C ABI／Windows／product routeは追加していないため、M13は`[~]`で停止する。
+
+```text
+Version impact:
+- Registry schema: 2（proposal／測定記録のみ、schema変更なし）
+- InkScript file: 1（grammar／serialized field／selector意味変更なし）
+- InkScript procedure catalog: 1（private draft 13/84、entry／signature変更なし）
+- replay epoch: 23（canonical invocation／state／pixel semantics変更なし）
+- .inkpod top-level: 26（schema／encoder／decoder／replay変更なし）
+- C ABI: 14（symbol／record変更なし）
+```
 
 ### [ ] M14 — approved quick benchmark導入
 

@@ -109,7 +109,7 @@ pub(crate) fn run_inkscript_dry(
     if cancelled() {
         return Err(ScriptRunError::Cancelled);
     }
-    let mut working = match input {
+    let working = match input {
         CapturedScriptInput::InMemory { core, fingerprint } => {
             if program.envelope.inputs()[0].kind() != InkScriptInputDeclarationKind::CurrentDocument
             {
@@ -129,6 +129,14 @@ pub(crate) fn run_inkscript_dry(
             Core::from_procedure_file(file)?
         }
     };
+    run_inkscript_on_staged_core(program, working, cancelled)
+}
+
+pub(super) fn run_inkscript_on_staged_core(
+    program: &StaticScriptProgram,
+    mut working: Core,
+    cancelled: &mut dyn FnMut() -> bool,
+) -> Result<ScriptDryRunResult, ScriptRunError> {
     if cancelled() {
         return Err(ScriptRunError::Cancelled);
     }

@@ -448,6 +448,26 @@ fn runtime_result_ordinals_and_thread_ownership_are_explicit() {
     assert_eq!(PrimitiveId::REPLACE_RASTER_COLORS.get(), 0x0005_0040);
 }
 
+#[test]
+fn sequential_multi_item_native_run_contracts() {
+    crate::script::run::test_sequential_multi_item_native_run_contracts();
+}
+
+#[test]
+fn run_failure_cancel_and_install_race_contracts() {
+    crate::script::run::test_failure_cancel_and_install_race_contracts();
+}
+
+#[test]
+fn run_authority_overwrite_and_temporary_identity_contracts() {
+    crate::script::run::test_authority_overwrite_and_temporary_identity_contracts();
+}
+
+#[test]
+fn dirty_pathless_dry_run_and_saved_snapshot_contracts() {
+    crate::script::run::test_dirty_pathless_dry_run_and_saved_snapshot_contracts();
+}
+
 fn value_contains_reference(value: &inkpod_format::InkScriptTypedValue, root: &str) -> bool {
     match value.kind() {
         inkpod_format::InkScriptTypedValueKind::Reference { root: actual, .. } => actual == root,
