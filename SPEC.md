@@ -544,6 +544,11 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - airbrush effect batch は境界を構成する複数色と幅を設定する。
 - 一件ごとにtemp outputからatomic commitし、cancel/失敗したfileに部分出力を残さない。dry-runは一切書かない。
 
+将来のBatch authoring／execution形式であるInkScriptのlanguage core、schema registry、exact-source／rebound
+等価性、実装gateは[`INKSCRIPT.md`](INKSCRIPT.md)を規範とする。InkScriptがM29Cのshadow parityとM34の
+production cutoverを完了するまでは、exact-current `.inkbatch` v2と既存Batch UI／ABIを現行production
+contractとして維持し、`.inkscript` parser、catalog、executor、ABI、UIをproductionから到達可能にしない。
+
 ### 20. 形式、白透過、一般画像入出力
 
 - native `.inkpod` は、保存時点の可変 raster snapshot を意味上の正本にしない。正本は immutable な `Genesis`、content-addressed な `Assets`、Core が検証・正規化して実変更を確定した `Procedures` と history control event、history の現在位置と high-watermark を持つ `META`、文書単位の `EditorState` とする。materialized document、inverse delta、COW snapshot、render/checkpoint cache は派生物であり、これらだけで文書を成立させない。
@@ -690,5 +695,10 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - `BATCH-002`: line width、continuous fill、replace、visibility、separate、filter/effect
 - `BATCH-003`: dry-run、preview、progress、cancel、per-output atomicity、failure report
 - `BATCH-004`: bounded multi-row seed／pair authoring、exact native-depth二セルpair抽出とambiguity解決、typed separation destination、実行前immutable per-run configuration
+- `SCRIPT-001`: exact-current UTF-8 `.inkscript`／fragmentのclosed grammar、lossless CST、typed semantic AST、canonical emitter、schema registry、bounded diagnostic／resource contract
+- `SCRIPT-002`: 全journal-replayable primitiveのclosed typed catalog、同一canonical executor、exact-source／rebound等価性、selector／assert／result／asset／portability／work formula、Continuous Fillの一seed一stepと1:N `editor_group`
+- `SCRIPT-003`: authority-bound immutable plan、dry-run／progress／cancel／failure report、inputごとのstaged executionとexact-current `.inkpod` atomic install、save/reopen／Undo/Redo／cache-free replay／ID／savepoint保持
+- `SCRIPT-004`: journalからのexact fragment export、dependency closure、strict bindingの明示rebind、Batch／History間のtransactional clipboard、source-preserving structured edit
+- `SCRIPT-005`: `.inkbatch`現行productionを維持したprivate実装、M29C shadow parity、M34明示cutover、M35旧形式削除、承認済みperformance gateと最終hardening
 - `VECTOR-001`: path/variable width/fill/color-trace model と rendering
 - `VECTOR-002`: vector draw/erase/connect/width/select/convert

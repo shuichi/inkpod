@@ -28,12 +28,12 @@ ABI、UIから参照せず、M23で全単射と実装を検証した後に初め
 
 初期値は次のとおりとする。
 
-| 項目 | 初期値 |
-|---|---:|
-| InkScript file format version | 1 |
+| 項目                                |                                       初期値 |
+| ----------------------------------- | -------------------------------------------: |
+| InkScript file format version       |                                            1 |
 | InkScript procedure catalog version | 1（M23で批准予定。批准前はproduction非公開） |
-| required replay epoch | 23 |
-| native output | exact-current `.inkpod` |
+| required replay epoch               |                                           23 |
+| native output                       |                      exact-current `.inkpod` |
 
 フォーマットフリーズ前のため、reader、writer、clipboard fragment は常に
 exact-current version だけを受理する。grammar、serialized field、selector の
@@ -41,11 +41,11 @@ exact-current version だけを受理する。grammar、serialized field、selec
 同じ変更で更新し、旧 version の migration reader、互換 writer、互換 shim を
 残さない。
 
-| 変更 | 必須version更新 |
-|---|---|
-| lexer、grammar、section、literal、asset表現 | file format version |
-| command/assert/selectorの追加・削除・名前・field・型・result・binding意味 | procedure catalog version。serialized syntaxも変わる場合はfile versionも更新 |
-| 同じtyped invocationから得るcanonical state/pixel結果 | replay epochと`.inkpod` top-level version。必要に応じてcatalog/file versionも更新 |
+| 変更                                                                      | 必須version更新                                                                   |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| lexer、grammar、section、literal、asset表現                               | file format version                                                               |
+| command/assert/selectorの追加・削除・名前・field・型・result・binding意味 | procedure catalog version。serialized syntaxも変わる場合はfile versionも更新      |
+| 同じtyped invocationから得るcanonical state/pixel結果                     | replay epochと`.inkpod` top-level version。必要に応じてcatalog/file versionも更新 |
 
 catalog versionは「そのbuildで実装済みのcommand集合」ではなく、批准済みの完全なclosed command
 contractを識別する。実装coverageは非永続の内部状態であり、file、clipboard、公開ABIへserializeしない。
@@ -402,24 +402,24 @@ parserはrecovery付きで複数診断を返してよいが、
 
 ### 6.1 primitive value
 
-| 型 | syntax / 範囲 |
-|---|---|
-| `bool` | `true` / `false` |
-| `u32` | `0..4294967295` |
-| `i32` | `-2147483648..2147483647` |
-| `u64` | `0..18446744073709551615`。stable ID は別途 nonzero 制約を持つ |
-| `i64` | `-9223372036854775808..9223372036854775807` |
-| `q16` | decimal または `q16(raw_i64)` |
-| `string` | InkScript quoted UTF-8 string |
-| `mask8` / `gray8` / `gray16` / `rgba8` / `rgba16` | native depthを保持するexact pixel value |
-| `pixel_value` | 上記exact pixel valueのclosed sum。variantを消去しない |
-| `point` | `point(q16, q16)`。連続document pixel座標 |
-| `pixel_rect` | `rect(i32, i32, u32, u32)`。half-open document pixel rect |
-| `uuid` | canonical lowercase hyphenated `uuid"..."` |
-| `digest` | lowercase 64-hex `blake3"..."` |
-| `list<T>` | `[value, ...]` |
-| closed record | `{ field = value; ... }` |
-| `nullable<T>` | `T`または`none`。schemaが許可したfieldだけ使用可能 |
+| 型                                                | syntax / 範囲                                                  |
+| ------------------------------------------------- | -------------------------------------------------------------- |
+| `bool`                                            | `true` / `false`                                               |
+| `u32`                                             | `0..4294967295`                                                |
+| `i32`                                             | `-2147483648..2147483647`                                      |
+| `u64`                                             | `0..18446744073709551615`。stable ID は別途 nonzero 制約を持つ |
+| `i64`                                             | `-9223372036854775808..9223372036854775807`                    |
+| `q16`                                             | decimal または `q16(raw_i64)`                                  |
+| `string`                                          | InkScript quoted UTF-8 string                                  |
+| `mask8` / `gray8` / `gray16` / `rgba8` / `rgba16` | native depthを保持するexact pixel value                        |
+| `pixel_value`                                     | 上記exact pixel valueのclosed sum。variantを消去しない         |
+| `point`                                           | `point(q16, q16)`。連続document pixel座標                      |
+| `pixel_rect`                                      | `rect(i32, i32, u32, u32)`。half-open document pixel rect      |
+| `uuid`                                            | canonical lowercase hyphenated `uuid"..."`                     |
+| `digest`                                          | lowercase 64-hex `blake3"..."`                                 |
+| `list<T>`                                         | `[value, ...]`                                                 |
+| closed record                                     | `{ field = value; ... }`                                       |
+| `nullable<T>`                                     | `T`または`none`。schemaが許可したfieldだけ使用可能             |
 
 色 literal は次を使用する。
 
@@ -573,12 +573,12 @@ input kind は次の閉じた集合とする。
 `.inkpod` extensionを持つ一path componentである。`source_stem`はその最終extensionを除いた非空文字列とし、
 output path componentとしての妥当性も検査する。
 
-| item origin | `display_label` | `path_order_key` | `source_stem` |
-|---|---|---|---|
-| `file` / `folder` | authorized final filename | `ValidatedPathIdentity`のcanonical key | validated filenameのstem |
-| `current_sequence` member | validated member filename | file-backed memberのcanonical key | member filenameのstem |
-| file-backed `current_document` | backing filename | backing fileのcanonical key | backing filenameのstem |
-| pathless `current_document` | `current-cell.inkpod` | empty bytes | なし |
+| item origin                    | `display_label`           | `path_order_key`                       | `source_stem`            |
+| ------------------------------ | ------------------------- | -------------------------------------- | ------------------------ |
+| `file` / `folder`              | authorized final filename | `ValidatedPathIdentity`のcanonical key | validated filenameのstem |
+| `current_sequence` member      | validated member filename | file-backed memberのcanonical key      | member filenameのstem    |
+| file-backed `current_document` | backing filename          | backing fileのcanonical key            | backing filenameのstem   |
+| pathless `current_document`    | `current-cell.inkpod`     | empty bytes                            | なし                     |
 
 canonical path keyはOS adapterが返すlossless UTF-8、`/`区切り、absolute/root-tag付きの比較専用値である。
 Unicode normalization、locale、display用短縮、sourceに書かれた未解決pathを使わない。lossless UTF-8 keyを
@@ -664,16 +664,16 @@ state に対して上から順に解決し、以後固定する。program 実行
 version 1 の selector entity は次の閉じた集合とする。次表は概要であり、exact field、型、
 required/default、owner relation、initial-order規則はschema registryと生成referenceを規範とする。
 
-| entity | 主な filter |
-|---|---|
-| `layer` | kind、name、initial document order、persistent ID |
-| `plane` | owning layer binding/filter、kind、format、name、initial order、persistent ID |
-| `guide` | axis、position、persistent ID |
-| `vector_path` / `vector_fill` | owning plane、persistent ID |
-| `annotation` | owning layer、kind、persistent ID |
-| `shooting_frame` | owning layer、persistent ID |
-| `vanishing_point` | owning layer、persistent ID |
-| `light_table_set` / `light_table_item` | owner、name/order、persistent ID |
+| entity                                 | 主な filter                                                                   |
+| -------------------------------------- | ----------------------------------------------------------------------------- |
+| `layer`                                | kind、name、initial document order、persistent ID                             |
+| `plane`                                | owning layer binding/filter、kind、format、name、initial order、persistent ID |
+| `guide`                                | axis、position、persistent ID                                                 |
+| `vector_path` / `vector_fill`          | owning plane、persistent ID                                                   |
+| `annotation`                           | owning layer、kind、persistent ID                                             |
+| `shooting_frame`                       | owning layer、persistent ID                                                   |
+| `vanishing_point`                      | owning layer、persistent ID                                                   |
+| `light_table_set` / `light_table_item` | owner、name/order、persistent ID                                              |
 
 共通 field は次のとおりとする。
 
@@ -919,15 +919,15 @@ output {
 `output`はpolicyごとのclosed variantである。`format = inkpod`だけを許可し、一般画像形式を
 version 1のBatch outputへ追加しない。
 
-| field | `duplicate` / `new_save` | `explicit_overwrite` |
-|---|---|---|
-| `policy` | 必須 | 必須 |
-| `format` | 必須、`inkpod` | 必須、`inkpod` |
-| `folder` | 必須。空stringを許可 | 指定禁止 |
-| `cell_folder` | 必須bool | 指定禁止 |
-| `basename` | 必須。空stringを許可 | 指定禁止 |
-| `start_number` | 必須`u32` | 指定禁止 |
-| `direction` | 必須、`ascending`または`descending` | 指定禁止 |
+| field          | `duplicate` / `new_save`            | `explicit_overwrite` |
+| -------------- | ----------------------------------- | -------------------- |
+| `policy`       | 必須                                | 必須                 |
+| `format`       | 必須、`inkpod`                      | 必須、`inkpod`       |
+| `folder`       | 必須。空stringを許可                | 指定禁止             |
+| `cell_folder`  | 必須bool                            | 指定禁止             |
+| `basename`     | 必須。空stringを許可                | 指定禁止             |
+| `start_number` | 必須`u32`                           | 指定禁止             |
+| `direction`    | 必須、`ascending`または`descending` | 指定禁止             |
 
 既存Batch互換のdestination derivationは次のとおりとする。
 
@@ -1283,40 +1283,40 @@ clipboard fragmentのassetはすべてinline `data`とし、`data_file`を生成
 version 1 は少なくとも次を上限とし、検査付き加算でtotalを計算する。既存Core側のより小さい
 上限がある場合は小さい方を適用する。
 
-| 対象 | 上限 |
-|---|---:|
-| source text | 128 MiB |
-| identifier / keyword token | 128 bytes |
-| numeric literal | 128 bytes |
-| tokens合計 | 4,194,304 |
-| AST/CST nodes合計 | 2,097,152 |
-| sections | 9 |
-| inputs（展開前） | 16,384 |
-| 展開後input items | 16,384 |
-| folder列挙で検査するdirectory entry合計（match/nonmatchを含む） | 1,048,576 |
-| folder列挙で検査する正規化entry名のUTF-8 bytes合計 | 256 MiB |
-| folder列挙work units（検査entry数 + openしたdirectory数） | 1,048,576 |
-| folder traversal depth | 64、またはOS adapter上限の小さい方 |
-| 一native input file | exact-current native decoderのfile/section/payload上限 |
-| fingerprint/readするnative input bytes合計 | 64 GiB、またはapplication設定の小さい方 |
-| parameters | 4,096 |
-| bindings | 65,536 |
-| program statements | 65,536 |
-| nesting depth | 64 |
-| 一containerのfield/list element | 65,536 |
-| list elements合計 | 4,194,304 |
-| reference path segments | 64 |
-| dependency edges | 4,194,304 |
-| 展開後item × enabled primitive step | 1,048,576 |
-| 一つのUTF-8 string | 32 KiB |
-| 一つのinline decoded asset | 32 MiB |
-| inline decoded asset合計 | 64 MiB |
-| 一つのexternal canonical asset | 512 MiB |
-| asset logical payload合計 | 768 MiB |
-| planned logical output + temporary合計 | 64 GiB、またはapplication設定の小さい方 |
-| diagnostics | 256 |
-| `wait_ms` | 3,600,000 |
-| aggregate wait | `wait_ms * max(planned_item_count - 1, 0) <= 3,600,000 ms` |
+| 対象                                                            |                                                       上限 |
+| --------------------------------------------------------------- | ---------------------------------------------------------: |
+| source text                                                     |                                                    128 MiB |
+| identifier / keyword token                                      |                                                  128 bytes |
+| numeric literal                                                 |                                                  128 bytes |
+| tokens合計                                                      |                                                  4,194,304 |
+| AST/CST nodes合計                                               |                                                  2,097,152 |
+| sections                                                        |                                                          9 |
+| inputs（展開前）                                                |                                                     16,384 |
+| 展開後input items                                               |                                                     16,384 |
+| folder列挙で検査するdirectory entry合計（match/nonmatchを含む） |                                                  1,048,576 |
+| folder列挙で検査する正規化entry名のUTF-8 bytes合計              |                                                    256 MiB |
+| folder列挙work units（検査entry数 + openしたdirectory数）       |                                                  1,048,576 |
+| folder traversal depth                                          |                         64、またはOS adapter上限の小さい方 |
+| 一native input file                                             |     exact-current native decoderのfile/section/payload上限 |
+| fingerprint/readするnative input bytes合計                      |                    64 GiB、またはapplication設定の小さい方 |
+| parameters                                                      |                                                      4,096 |
+| bindings                                                        |                                                     65,536 |
+| program statements                                              |                                                     65,536 |
+| nesting depth                                                   |                                                         64 |
+| 一containerのfield/list element                                 |                                                     65,536 |
+| list elements合計                                               |                                                  4,194,304 |
+| reference path segments                                         |                                                         64 |
+| dependency edges                                                |                                                  4,194,304 |
+| 展開後item × enabled primitive step                             |                                                  1,048,576 |
+| 一つのUTF-8 string                                              |                                                     32 KiB |
+| 一つのinline decoded asset                                      |                                                     32 MiB |
+| inline decoded asset合計                                        |                                                     64 MiB |
+| 一つのexternal canonical asset                                  |                                                    512 MiB |
+| asset logical payload合計                                       |                                                    768 MiB |
+| planned logical output + temporary合計                          |                    64 GiB、またはapplication設定の小さい方 |
+| diagnostics                                                     |                                                        256 |
+| `wait_ms`                                                       |                                                  3,600,000 |
+| aggregate wait                                                  | `wait_ms * max(planned_item_count - 1, 0) <= 3,600,000 ms` |
 
 Base64はdecode前後の長さを先に検査する。external assetはmetadataとbounded streamで読み、
 全fileを無制限allocationしない。path alias、input/output同一性、symlink/reparse point、case-fold、
@@ -1570,25 +1570,25 @@ product file/APIからdraftを受理できない状態を維持する。
 
 M00はrepositoryのexact-current値と次表を照合し、差があればコードを変えず本書を現状へ更新する。
 
-| contract | M00開始時の値 |
-|---|---:|
-| InkScript file | 1 |
-| InkScript procedure catalog | 1 |
-| replay epoch | 23 |
-| `.inkpod` top-level | 26 |
-| C ABI | 14 |
+| contract                    | M00開始時の値 |
+| --------------------------- | ------------: |
+| InkScript file              |             1 |
+| InkScript procedure catalog |             1 |
+| replay epoch                |            23 |
+| `.inkpod` top-level         |            26 |
+| C ABI                       |            14 |
 
 ### 16.4 Batch parity traceability
 
 M00で次表を`SPEC.md`要件、compatibility evidence、schema owner manifestへ接続し、M29Cをcutover前の
 shadow parity gateとする。
 
-| requirement | 主なowner | 必須evidence |
-|---|---|---|
-| `BATCH-001` persisted Input→Operations→Output | M04–M05B、M11、M28A–M29C | parse/emit/save/reopen、group/order/enable/set管理 |
-| `BATCH-002` legacy operation全種 | M07–M09 | legacy fixture→grouped steps→canonical invocation、direct result一致 |
-| `BATCH-003` dry-run/progress/cancel/atomic output/report | M11–M12、M26–M29C | outcome、temp/output、cancel/failure、report parity |
-| `BATCH-004` pair/seed/ambiguity/per-run config | M05A–M05B、M08–M09、M28B–M29C | 1:N fill Commit、exact-depth pair、ambiguity、transient parameters |
+| requirement                                              | 主なowner                     | 必須evidence                                                         |
+| -------------------------------------------------------- | ----------------------------- | -------------------------------------------------------------------- |
+| `BATCH-001` persisted Input→Operations→Output            | M04–M05B、M11、M28A–M29C      | parse/emit/save/reopen、group/order/enable/set管理                   |
+| `BATCH-002` legacy operation全種                         | M07–M09                       | legacy fixture→grouped steps→canonical invocation、direct result一致 |
+| `BATCH-003` dry-run/progress/cancel/atomic output/report | M11–M12、M26–M29C             | outcome、temp/output、cancel/failure、report parity                  |
+| `BATCH-004` pair/seed/ambiguity/per-run config           | M05A–M05B、M08–M09、M28B–M29C | 1:N fill Commit、exact-depth pair、ambiguity、transient parameters   |
 
 M29Cはinput順、output plan、each-run解決、canonical procedure列、state/composite digest、history、
 Undo/Redo、next ID、report、semantic work counter、save/reopen、cache-free replay、failure atomicityを比較する。
@@ -1596,7 +1596,7 @@ Undo/Redo、next ID、report、semantic work counter、save/reopen、cache-free 
 
 ## 17. 実装マイルストーン
 
-### [ ] M00 — 仕様批准、schema registry、追跡表
+### [x] M00 — 仕様批准、schema registry、追跡表
 
 **範囲**
 
@@ -1620,7 +1620,28 @@ Undo/Redo、next ID、report、semantic work counter、save/reopen、cache-free 
   参照できないtestがある。
 - 利用者の仕様確認待ちとして`[~]`で停止する。
 
-### [ ] M01 — UTF-8 source、lexer、line map、diagnostic
+**自動検証結果（2026-08-15）**
+
+- closed meta-schema、command非依存language v1、空のprivate catalog draft、84 replayable primitiveの
+  owner manifest、Batch parity追跡表を追加した。session-onlyの`LightTableSwapWithActive`だけを明示除外した。
+- JSON Schema validationでlanguage／draft／ownerの3 registryをmeta-schemaへ照合し、test-only
+  `inkscript_registry` 6件でJSONのduplicate/malformed/overflow拒否、schema/reference閉性、owner全単射、
+  version／SPEC／compatibility drift、production非到達性を検証した。
+- `cargo fmt --check`、全target／feature Clippy、workspace 467 tests、strict rustdoc、既存approved quick
+  benchmarkが成功した。benchmark workload、harness、semantic counter、envelopeは変更していない。
+- production parser、executor、Rust public API、C ABI、Windows UIは追加していない。次sessionの不具合報告を
+  伴わない汎用promptによりlanguage coreとownership splitが批准され、`[x]`へ移行した。
+
+```text
+Version impact:
+- InkScript file: 1（初期language contractを登録、bumpなし、批准済み）
+- InkScript procedure catalog: 1（private draft、entry 0、bumpなし）
+- replay epoch: 23（変更なし）
+- .inkpod top-level: 26（変更なし）
+- C ABI: 14（変更なし）
+```
+
+### [x] M01 — UTF-8 source、lexer、line map、diagnostic
 
 **範囲**
 
@@ -1634,7 +1655,32 @@ Undo/Redo、next ID、report、semantic work counter、save/reopen、cache-free 
 - malformed/property/fuzz入口があり、巨大tokenとdiagnostic recoveryをboundedに拒否する。
 - parser、Core、FFI、Windows、`.inkbatch`の挙動を変更しない。
 
-### [ ] M02 — lossless CSTとbounded parser
+**自動検証結果（2026-08-15）**
+
+- `inkpod-format`にcaller byte列を所有copyするimmutable source、BOMをdisplay columnへ数えない
+  CRLF-aware line map、UTF-8 byte／1-based Unicode scalar range、21個のstable `INKS-LEX-*` diagnostic、
+  exact-current以下へだけ縮小できるresource limits、trivia保持型のbounded maximal-munch lexerを追加した。
+- public API test 12件でvalid/no-op、全予約keyword、BOM／CRLF、comment、compound UUID／digest／Base64、
+  escape、NUL、invalid UTF-8、standalone CR、leading zero、source／identifier／numeric／string／asset／token／
+  diagnostic overflow、recovery、truncation、所有copy、`Send + Sync`を検証した。
+- deterministic truncation/malformed corpusを追加し、`inkscript_lexer_v1` libFuzzer targetを宣言して実compileした。
+  coverage-guided fuzz実行は行っていない。
+- `cargo fmt --check`、workspace全target／feature Clippy、workspace 479 tests（ignored 0）、workspace strict
+  rustdoc、既存approved quick benchmarkが成功した。benchmark workload、harness、semantic counter、envelopeは
+  変更せず、規範checksumとcounterを維持した。
+- parser、CST、semantic AST、canonical emitter、Core、FFI、Windows、`.inkbatch` routeは変更していない。
+  Windows configure/build/CTest/smokeは変更範囲外のため再実行せず、既存binaryの回帰確認待ちとして停止する。
+
+```text
+Version impact:
+- InkScript file: 1（批准済みv1 lexical contractの初回実装、grammar変更なし、bumpなし）
+- InkScript procedure catalog: 1（private draft、entry 0、変更なし）
+- replay epoch: 23（canonical replay semantics変更なし）
+- .inkpod top-level: 26（変更なし）
+- C ABI: 14（変更なし）
+```
+
+### [x] M02 — lossless CSTとbounded parser
 
 **範囲**
 
@@ -1648,7 +1694,34 @@ Undo/Redo、next ID、report、semantic work counter、save/reopen、cache-free 
 - invalid sourceからsemantic ASTや実行handleを公開しない。
 - duplicate section/member/field、missing member、fragment必須sectionのnegative testがある。
 
-### [ ] M03 — semantic ASTとcanonical emitter
+**自動検証結果（2026-08-15）**
+
+- `inkpod-format`へsource借用型の公開lossless CSTとbounded parserを追加し、完全file／fragment、全section、
+  input／parameter／binding／assert／step／asset declaration、record／list／reference／constructor／typeをparseする。
+  CSTは全token、trivia、元spelling、byte span、error nodeを保持し、未編集writerは元byte列を直接再出力する。
+- exact-current versionだけを受理し、file／fragment必須section、fragment禁止section、duplicate section／field／step member、
+  missing step member、reserved identifier、空／非連続`editor_group`をstable diagnosticで拒否する。
+- CST node、section、nesting、container、aggregate list、reference segment、input／parameter／binding／program statement、
+  diagnostic上限をcaller-lowered envelopeで検査し、上限到達時はtruncateせずterminal errorにする。
+- public API test 13件でvalid／invalid、BOM／CRLF／comment／escape spellingのbyte-perfect round-trip、全value形、
+  exact-current version拒否、recovery、error node、duplicate／missing、全parser resource上限、deterministic truncationを検証した。
+  `inkscript_parser_v1` fuzz targetを追加してstandalone manifestの`cargo check`を通した。coverage-guided fuzz実行は行っていない。
+- `cargo fmt --check`、workspace全target／feature Clippy、workspace 492 tests（ignored 0）、workspace strict rustdoc、
+  既存approved quick benchmark、Windows x64 Debug configure／build／ABI smokeが成功した。benchmark workload、harness、
+  semantic counter、envelopeは変更せず、規範checksumとcounterを維持した。
+- semantic AST、canonical emitter、Core、C ABI、Windows UI、`.inkbatch` production routeは変更していない。
+  通常／日本語UI smokeは変更範囲外として再実行せず、既存binaryの利用者回帰確認待ちで停止する。
+
+```text
+Version impact:
+- InkScript file: 1（M00批准済みgrammarの初回parser実装、serialized grammar変更なし、bumpなし）
+- InkScript procedure catalog: 1（private draft、entry 0、変更なし）
+- replay epoch: 23（canonical replay semantics変更なし）
+- .inkpod top-level: 26（変更なし）
+- C ABI: 14（変更なし）
+```
+
+### [~] M03 — semantic ASTとcanonical emitter
 
 **範囲**
 
@@ -1664,6 +1737,37 @@ Undo/Redo、next ID、report、semantic work counter、save/reopen、cache-free 
 - `parse -> semantic AST -> canonical emit -> parse`でsemantic ASTが一致する。
 - canonical golden bytesがOS、locale、hash iteration順に依存しない。
 - commentを保持する通常保存と、commentを含めない明示canonical emitを混同しないtestがある。
+
+**自動検証結果（2026-08-15）**
+
+- validなlossless CSTだけをCore非依存semantic ASTへ変換し、sectionをschema順、recordをfield-order非依存、
+  declarationを意味上のsource順で保持する公開APIを`inkpod-format`へ追加した。invalid/recovery CSTはASTを返さない。
+- `language-v1.json`のclosed record／selector／assert field、型、required/default、`canonical_order`をbuild時に
+  一方向生成し、bounded private record/command schemaと合成する`SchemaView`を追加した。private catalog draftは
+  読み込まず、未知commandは`unknown_command_schema`、未知field／record、欠落required field、重複名／order／typeを拒否する。
+- BOMなしUTF-8、LF、末尾改行一つ、section/schema field順、default/`none`省略、数値、string、UUID、digest、
+  Base64、constructor、reference、list／recordを4.4の正規形で出力するfile/fragment canonical emitterを追加した。
+  lossless writerは元BOM／CRLF／comment／literal spellingを引き続きbyte-perfectに保持し、canonical emitと分離した。
+- occurrence順と最小decimal suffixだけに依存するdeterministic generated-name allocatorを追加した。invalid identifierと
+  suffix長／counter overflowは名前を予約せず拒否する。
+- 公開契約test 6件でfile/fragment round-trip、golden bytes、全literal class、default省略、declaration順、反復決定性、
+  invalid CST、schema closure/resource、未知command非fallback、lossless no-op、generated-name collisionを検証した。
+- `cargo fmt --check`、workspace全target／feature Clippy、workspace 498 tests（doctest 1、ignored 0）、workspace strict rustdoc、
+  M00 architecture/registry gate、既存approved quick benchmarkが成功した。benchmark workload、harness、counter、envelopeは変更せず、
+  `canonical_replay=264b98028ac92ac6`、`checkpoint_open=07da1b4e6bc5d289`、`output_color_guard=cfb6b288963c78ba`を維持した。
+- Windows x64 Debug configure/build、static CRT、portable ZIP、unsigned MSIX、全36 CTestが成功した。最終増分build後のABI smokeは57.78秒、
+  English smokeは174.13秒、Japanese smokeは182.49秒、CTest全体は428.32秒だった。
+- typed orchestration、Core compiler/executor、C ABI、Windows UI、`.inkbatch` production routeは変更していない。
+  既存binaryの利用者回帰確認待ちとして停止する。
+
+```text
+Version impact:
+- InkScript file: 1（M00批准済みsemantic/canonical contractの初回実装、grammar変更なし、bumpなし）
+- InkScript procedure catalog: 1（private draft、entry 0、test schemaのみ、変更なし）
+- replay epoch: 23（canonical replay semantics変更なし）
+- .inkpod top-level: 26（変更なし）
+- C ABI: 14（変更なし）
+```
 
 ### [ ] M04 — typed orchestration envelope
 
@@ -2307,7 +2411,7 @@ Undo/Redo、next ID、report、semantic work counter、save/reopen、cache-free 
 
 ```text
 AGENTS.md、SPEC.md、INKSCRIPT.md、git status、既存差分、対象コードとテスト、関連する
-implementation-status / compatibilityを確認してください。
+implementation-status / compatibilityを確認してください。MACOS.mdとその内容は無視してください。
 
 最初にINKSCRIPT.mdのマイルストーン状態を確認してください。`[!]`があれば最初の一件だけを修正し、
 次へ進まないでください。直前が`[~]`で、私が不具合や確認失敗を併記していない場合、このpromptの送信は

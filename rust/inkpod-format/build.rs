@@ -1,0 +1,383 @@
+use std::collections::BTreeMap;
+use std::env;
+use std::fmt::Write as _;
+use std::fs;
+use std::path::PathBuf;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum Json {
+    Null,
+    Bool(bool),
+    Number(u64),
+    String(String),
+    Array(Vec<Self>),
+    Object(BTreeMap<String, Self>),
+}
+
+struct Parser<'a> {
+    bytes: &'a [u8],
+    cursor: usize,
+}
+
+impl<'a> Parser<'a> {
+    fn parse(bytes: &'a [u8]) -> Result<Json, String> {
+        let mut parser = Self { bytes, cursor: 0 };
+        let value = parser.value()?;
+        parser.whitespace();
+        if parser.cursor != bytes.len() {
+            return Err(format!("trailing JSON bytes at {}", parser.cursor));
+        }
+        Ok(value)
+    }
+
+    fn value(&mut self) -> Result<Json, String> {
+        self.whitespace();
+        match self.peek() {
+            Some(b'{') => self.object(),
+            Some(b'[') => self.array(),
+            Some(b'"') => self.string().map(Json::String),
+            Some(b't') => self.keyword(b"true", Json::Bool(true)),
+            Some(b'f') => self.keyword(b"false", Json::Bool(false)),
+            Some(b'n') => self.keyword(b"null", Json::Null),
+            Some(b'0'..=b'9') => self.number(),
+            _ => Err(format!("invalid JSON value at {}", self.cursor)),
+        }
+    }
+
+    fn object(&mut self) -> Result<Json, String> {
+        self.expect(b'{')?;
+        let mut values = BTreeMap::new();
+        self.whitespace();
+        if self.take(b'}') {
+            return Ok(Json::Object(values));
+        }
+        loop {
+            self.whitespace();
+            let key = self.string()?;
+            self.whitespace();
+            self.expect(b':')?;
+            let value = self.value()?;
+            if values.insert(key.clone(), value).is_some() {
+                return Err(format!("duplicate JSON key {key:?}"));
+            }
+            self.whitespace();
+            if self.take(b'}') {
+                break;
+            }
+            self.expect(b',')?;
+        }
+        Ok(Json::Object(values))
+    }
+
+    fn array(&mut self) -> Result<Json, String> {
+        self.expect(b'[')?;
+        let mut values = Vec::new();
+        self.whitespace();
+        if self.take(b']') {
+            return Ok(Json::Array(values));
+        }
+        loop {
+            values.push(self.value()?);
+            self.whitespace();
+            if self.take(b']') {
+                break;
+            }
+            self.expect(b',')?;
+        }
+        Ok(Json::Array(values))
+    }
+
+    fn string(&mut self) -> Result<String, String> {
+        self.expect(b'"')?;
+        let mut result = String::new();
+        loop {
+            let byte = self.peek().ok_or_else(|| "short JSON string".to_owned())?;
+            if byte == b'"' {
+                self.cursor += 1;
+                return Ok(result);
+            }
+            if byte == b'\\' {
+                self.cursor += 1;
+                let escaped = self.peek().ok_or_else(|| "short JSON escape".to_owned())?;
+                self.cursor += 1;
+                match escaped {
+                    b'"' => result.push('"'),
+                    b'\\' => result.push('\\'),
+                    b'/' => result.push('/'),
+                    b'b' => result.push('\u{8}'),
+                    b'f' => result.push('\u{c}'),
+                    b'n' => result.push('\n'),
+                    b'r' => result.push('\r'),
+                    b't' => result.push('\t'),
+                    b'u' => result.push(self.unicode_escape()?),
+                    _ => return Err(format!("invalid JSON escape at {}", self.cursor - 1)),
+                }
+                continue;
+            }
+            if byte < 0x20 {
+                return Err(format!("control byte in JSON string at {}", self.cursor));
+            }
+            let tail = std::str::from_utf8(&self.bytes[self.cursor..])
+                .map_err(|error| format!("invalid JSON UTF-8: {error}"))?;
+            let character = tail
+                .chars()
+                .next()
+                .ok_or_else(|| "short JSON string".to_owned())?;
+            result.push(character);
+            self.cursor += character.len_utf8();
+        }
+    }
+
+    fn unicode_escape(&mut self) -> Result<char, String> {
+        let high = self.hex_quad()?;
+        let scalar = if (0xd800..=0xdbff).contains(&high) {
+            self.expect(b'\\')?;
+            self.expect(b'u')?;
+            let low = self.hex_quad()?;
+            if !(0xdc00..=0xdfff).contains(&low) {
+                return Err("invalid JSON surrogate pair".to_owned());
+            }
+            0x1_0000 + ((u32::from(high) - 0xd800) << 10) + (u32::from(low) - 0xdc00)
+        } else if (0xdc00..=0xdfff).contains(&high) {
+            return Err("unpaired JSON low surrogate".to_owned());
+        } else {
+            u32::from(high)
+        };
+        char::from_u32(scalar).ok_or_else(|| "invalid JSON scalar".to_owned())
+    }
+
+    fn hex_quad(&mut self) -> Result<u16, String> {
+        let end = self
+            .cursor
+            .checked_add(4)
+            .filter(|end| *end <= self.bytes.len())
+            .ok_or_else(|| "short JSON unicode escape".to_owned())?;
+        let text = std::str::from_utf8(&self.bytes[self.cursor..end])
+            .map_err(|error| format!("invalid JSON unicode escape: {error}"))?;
+        self.cursor = end;
+        u16::from_str_radix(text, 16).map_err(|_| "invalid JSON unicode escape".to_owned())
+    }
+
+    fn number(&mut self) -> Result<Json, String> {
+        let start = self.cursor;
+        if self.take(b'0') {
+            if matches!(self.peek(), Some(b'0'..=b'9')) {
+                return Err(format!("leading zero in JSON number at {start}"));
+            }
+        } else {
+            while matches!(self.peek(), Some(b'0'..=b'9')) {
+                self.cursor += 1;
+            }
+        }
+        let text = std::str::from_utf8(&self.bytes[start..self.cursor])
+            .map_err(|error| format!("invalid JSON number: {error}"))?;
+        text.parse::<u64>()
+            .map(Json::Number)
+            .map_err(|error| format!("invalid JSON number: {error}"))
+    }
+
+    fn keyword(&mut self, keyword: &[u8], value: Json) -> Result<Json, String> {
+        let end = self.cursor.saturating_add(keyword.len());
+        if self.bytes.get(self.cursor..end) != Some(keyword) {
+            return Err(format!("invalid JSON keyword at {}", self.cursor));
+        }
+        self.cursor = end;
+        Ok(value)
+    }
+
+    fn whitespace(&mut self) {
+        while matches!(self.peek(), Some(b' ' | b'\n' | b'\r' | b'\t')) {
+            self.cursor += 1;
+        }
+    }
+
+    fn expect(&mut self, expected: u8) -> Result<(), String> {
+        if self.take(expected) {
+            Ok(())
+        } else {
+            Err(format!("expected JSON byte at {}", self.cursor))
+        }
+    }
+
+    fn take(&mut self, expected: u8) -> bool {
+        if self.peek() == Some(expected) {
+            self.cursor += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn peek(&self) -> Option<u8> {
+        self.bytes.get(self.cursor).copied()
+    }
+}
+
+fn main() {
+    if let Err(error) = generate() {
+        panic!("failed to generate InkScript language schema projection: {error}");
+    }
+}
+
+fn generate() -> Result<(), String> {
+    let crate_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").ok_or("missing manifest dir")?);
+    let language = crate_dir.join("../../schemas/inkscript/language-v1.json");
+    println!("cargo:rerun-if-changed={}", language.display());
+    println!("cargo:rerun-if-changed=build.rs");
+    let root = Parser::parse(&fs::read(&language).map_err(|error| error.to_string())?)?;
+    if string(member(&root, "kind")?)? != "inkpod.inkscript.language"
+        || number(member(&root, "file_version")?)? != 1
+        || number(member(&root, "procedure_catalog_version")?)? != 1
+        || number(member(&root, "required_replay_epoch")?)? != 23
+    {
+        return Err("language registry identity/version mismatch".to_owned());
+    }
+
+    let mut generated = String::from(
+        "// @generated from the exact-current InkScript language registry; do not edit.\n",
+    );
+    emit_type_names(&mut generated, &root)?;
+    emit_section_order(&mut generated, &root)?;
+    emit_collection(
+        &mut generated,
+        "GENERATED_RECORDS",
+        array(member(&root, "records")?)?,
+        "fields",
+    )?;
+    emit_collection(
+        &mut generated,
+        "GENERATED_SELECTORS",
+        array(member(&root, "selector_entities")?)?,
+        "filters",
+    )?;
+    emit_collection(
+        &mut generated,
+        "GENERATED_ASSERTIONS",
+        array(member(&root, "assert_kinds")?)?,
+        "fields",
+    )?;
+    let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("missing OUT_DIR")?)
+        .join("inkscript_language_schema.rs");
+    fs::write(output, generated).map_err(|error| error.to_string())
+}
+
+fn emit_section_order(output: &mut String, root: &Json) -> Result<(), String> {
+    let canonicalization = member(root, "canonicalization")?;
+    let section_order = array(member(canonicalization, "section_order")?)?;
+    writeln!(output, "const GENERATED_SECTION_ORDER: &[&str] = &[").unwrap();
+    for section in section_order {
+        writeln!(output, "    {:?},", string(section)?).unwrap();
+    }
+    writeln!(output, "];\n").unwrap();
+    Ok(())
+}
+
+fn emit_type_names(output: &mut String, root: &Json) -> Result<(), String> {
+    let mut names = std::collections::BTreeSet::new();
+    for collection in ["types", "enums", "records"] {
+        for entry in array(member(root, collection)?)? {
+            let name = string(member(entry, "name")?)?;
+            if !names.insert(name) {
+                return Err(format!("duplicate language type {name:?}"));
+            }
+        }
+    }
+    writeln!(output, "const GENERATED_TYPE_NAMES: &[&str] = &[").unwrap();
+    for name in names {
+        writeln!(output, "    {name:?},").unwrap();
+    }
+    writeln!(output, "];\n").unwrap();
+    Ok(())
+}
+
+fn emit_collection(
+    output: &mut String,
+    const_name: &str,
+    entries: &[Json],
+    fields_member: &str,
+) -> Result<(), String> {
+    writeln!(output, "const {const_name}: &[GeneratedRecord] = &[").unwrap();
+    for entry in entries {
+        let name = string(member(entry, "name")?)?;
+        writeln!(output, "    GeneratedRecord {{ name: {name:?}, fields: &[").unwrap();
+        let fields = array(member(entry, fields_member)?)?;
+        for field in fields {
+            let field_name = string(member(field, "name")?)?;
+            let type_name = string(member(field, "type")?)?;
+            let required = boolean(member(field, "required")?)?;
+            let order = number(member(field, "canonical_order")?)?;
+            let default = default_expression(member(field, "default")?, required)?;
+            writeln!(
+                output,
+                "        InkScriptFieldSchema {{ name: {field_name:?}, type_name: {type_name:?}, required: {required}, default: {default}, canonical_order: {order} }},"
+            )
+            .unwrap();
+        }
+        writeln!(output, "    ] }},").unwrap();
+    }
+    writeln!(output, "];\n").unwrap();
+    Ok(())
+}
+
+fn default_expression(value: &Json, required: bool) -> Result<String, String> {
+    if required {
+        return Ok("None".to_owned());
+    }
+    Ok(match value {
+        Json::Null => "Some(InkScriptSchemaDefault::None)".to_owned(),
+        Json::Bool(value) => {
+            format!("Some(InkScriptSchemaDefault::Boolean({value}))")
+        }
+        Json::String(value) => {
+            format!("Some(InkScriptSchemaDefault::Enum({value:?}))")
+        }
+        Json::Array(values) if values.is_empty() => {
+            "Some(InkScriptSchemaDefault::EmptyList)".to_owned()
+        }
+        Json::Object(values) if values.is_empty() => {
+            "Some(InkScriptSchemaDefault::EmptyRecord)".to_owned()
+        }
+        _ => return Err("unsupported non-empty language registry default".to_owned()),
+    })
+}
+
+fn object(value: &Json) -> Result<&BTreeMap<String, Json>, String> {
+    match value {
+        Json::Object(value) => Ok(value),
+        _ => Err("expected JSON object".to_owned()),
+    }
+}
+
+fn array(value: &Json) -> Result<&[Json], String> {
+    match value {
+        Json::Array(value) => Ok(value),
+        _ => Err("expected JSON array".to_owned()),
+    }
+}
+
+fn string(value: &Json) -> Result<&str, String> {
+    match value {
+        Json::String(value) => Ok(value),
+        _ => Err("expected JSON string".to_owned()),
+    }
+}
+
+fn number(value: &Json) -> Result<u64, String> {
+    match value {
+        Json::Number(value) => Ok(*value),
+        _ => Err("expected JSON number".to_owned()),
+    }
+}
+
+fn boolean(value: &Json) -> Result<bool, String> {
+    match value {
+        Json::Bool(value) => Ok(*value),
+        _ => Err("expected JSON boolean".to_owned()),
+    }
+}
+
+fn member<'a>(value: &'a Json, name: &str) -> Result<&'a Json, String> {
+    object(value)?
+        .get(name)
+        .ok_or_else(|| format!("missing JSON member {name:?}"))
+}

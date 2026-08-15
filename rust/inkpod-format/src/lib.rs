@@ -5,6 +5,7 @@ mod application_data;
 mod batch;
 mod common_formats;
 mod cut;
+mod inkscript;
 mod light_table;
 mod native;
 mod procedure;
@@ -35,6 +36,26 @@ pub use cut::{
 use inkpod_image::PixelValue;
 #[cfg(test)]
 use inkpod_image::{PixelFormat, TileCoord};
+pub use inkscript::{
+    INKSCRIPT_FILE_VERSION, InkScriptAsset, InkScriptBinding, InkScriptCommandSchema, InkScriptCst,
+    InkScriptCstNode, InkScriptCstNodeKind, InkScriptDiagnostic, InkScriptDiagnosticCode,
+    InkScriptDiagnosticSeverity, InkScriptDocumentKind, InkScriptFieldSchema,
+    InkScriptGeneratedNames, InkScriptInput, InkScriptInputKind, InkScriptKeyword, InkScriptLexed,
+    InkScriptLexerLimits, InkScriptLineMap, InkScriptParameter, InkScriptParsed,
+    InkScriptParserLimits, InkScriptProgramStatement, InkScriptPunctuation, InkScriptRecord,
+    InkScriptRecordSchema, InkScriptReferenceSegment, InkScriptSchemaDefault, InkScriptSchemaView,
+    InkScriptSemanticDocument, InkScriptSemanticError, InkScriptSemanticErrorCode,
+    InkScriptSemanticSection, InkScriptSource, InkScriptSourceId, InkScriptSourcePosition,
+    InkScriptSourceRange, InkScriptSourceSpan, InkScriptToken, InkScriptTokenKind,
+    InkScriptTypeReference, InkScriptValue, MAX_INKSCRIPT_BINDINGS,
+    MAX_INKSCRIPT_CONTAINER_ELEMENTS, MAX_INKSCRIPT_CST_NODES, MAX_INKSCRIPT_DIAGNOSTICS,
+    MAX_INKSCRIPT_IDENTIFIER_BYTES, MAX_INKSCRIPT_INLINE_ASSET_BYTES, MAX_INKSCRIPT_INPUTS,
+    MAX_INKSCRIPT_LIST_ELEMENTS, MAX_INKSCRIPT_NESTING_DEPTH, MAX_INKSCRIPT_NUMERIC_BYTES,
+    MAX_INKSCRIPT_PARAMETERS, MAX_INKSCRIPT_PROGRAM_STATEMENTS, MAX_INKSCRIPT_REFERENCE_SEGMENTS,
+    MAX_INKSCRIPT_SECTIONS, MAX_INKSCRIPT_SOURCE_BYTES, MAX_INKSCRIPT_STRING_BYTES,
+    MAX_INKSCRIPT_TOKENS, build_inkscript_semantic, emit_inkscript_canonical, lex_inkscript,
+    lex_inkscript_with_limits, parse_inkscript, parse_inkscript_with_limits,
+};
 pub use light_table::{
     FileLightTableItem, FileLightTableMetadata, FileLightTableSet, LightTableDisplayMode,
 };

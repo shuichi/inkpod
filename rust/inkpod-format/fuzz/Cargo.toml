@@ -34,3 +34,17 @@ path = "fuzz_targets/cut_v26.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "inkscript_lexer_v1"
+path = "fuzz_targets/inkscript_lexer_v1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "inkscript_parser_v1"
+path = "fuzz_targets/inkscript_parser_v1.rs"
+test = false
+doc = false
+bench = false

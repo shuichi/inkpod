@@ -1,0 +1,9 @@
+{
+  "kind": "inkpod.inkscript.catalog-draft",
+  "registry_schema_version": 1,
+  "file_version": 1,
+  "catalog_version": 1,
+  "required_replay_epoch": 23,
+  "production": false,
+  "entries": []
+}
