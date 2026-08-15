@@ -933,3 +933,7 @@ if(WIN32)
             TIMEOUT 180)
     endif()
 endif()
+
+if(APPLE)
+    include("${CMAKE_SOURCE_DIR}/cmake/macos/InkpodMacOS.cmake")
+endif()

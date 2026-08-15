@@ -582,21 +582,63 @@ pub struct LocatorNeighborhood {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-/// Legacy single-stroke shortcut binding.
+/// Platform-neutral named key used by shortcut input.
+pub enum ShortcutNamedKey {
+    /// Tab.
+    Tab,
+    /// Return or Enter.
+    Return,
+    /// Escape.
+    Escape,
+    /// Space.
+    Space,
+    /// Backspace.
+    Backspace,
+    /// Forward delete.
+    Delete,
+    /// Left arrow.
+    Left,
+    /// Right arrow.
+    Right,
+    /// Up arrow.
+    Up,
+    /// Down arrow.
+    Down,
+    /// Home.
+    Home,
+    /// End.
+    End,
+    /// Page Up.
+    PageUp,
+    /// Page Down.
+    PageDown,
+    /// Function key F1 through F24.
+    Function(u8),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Platform-neutral shortcut key.
+pub enum ShortcutKey {
+    /// A Unicode scalar after frontend keyboard-layout normalization.
+    UnicodeScalar(char),
+    /// A non-text named key.
+    Named(ShortcutNamedKey),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Single-stroke shortcut binding.
 pub struct ShortcutBinding {
     /// Application command identifier.
     pub command_id: u32,
-    /// Platform-normalized virtual-key code.
-    pub virtual_key: u32,
-    /// Bitwise combination of `SHORTCUT_MODIFIER_*` values.
-    pub modifiers: u32,
+    /// Platform-neutral key and modifiers.
+    pub stroke: ShortcutStroke,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// One normalized key stroke in a shortcut sequence.
 pub struct ShortcutStroke {
-    /// Platform-normalized virtual-key code.
-    pub virtual_key: u32,
+    /// Unicode scalar or named key.
+    pub key: ShortcutKey,
     /// Bitwise combination of `SHORTCUT_MODIFIER_*` values.
     pub modifiers: u32,
 }

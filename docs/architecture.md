@@ -37,7 +37,7 @@ native-format model.
 | `inkpod-image`  | Typed pixel formats, 64 x 64 sparse tiles, `Arc` copy-on-write storage, selection, fill/sampling/palette logic, vector geometry, and deterministic raster/filter/effect operations |
 | `inkpod-format` | Bounded procedure-authoritative `.inkpod` v26 Cell/Cut containers and `.inkbatch` v2 models, streaming encode/decode/validation, atomic file I/O, and PNG/TIFF/TGA/BMP codecs                     |
 | `inkpod-core`   | Stable-ID document/layer/plane state, immutable Genesis/base surfaces, a content-addressed canonical asset registry, StateId savepoints, views, clipboard, previews, animation, vector/effects/Batch commands, persistence mapping, immutable render snapshots, and canonical primitive execution plus append-only journal/cache-free replay and semantic document digests for the migrated Core slice |
-| `inkpod-ffi`    | ABI v14 fixed records and generation-tagged runtime IDs, persistence/compaction diagnostics, validation/conversion, panic containment, ownership functions, and feature-specific exports                |
+| `inkpod-ffi`    | ABI v15 fixed records and generation-tagged runtime IDs, persistence/compaction diagnostics, validation/conversion, panic containment, ownership functions, and feature-specific exports                |
 
 Binary, grayscale, RGBA8/16, straight-alpha, premultiplied display data, and
 selection masks remain distinct types. Core stores vector geometry in
@@ -278,7 +278,7 @@ detached registry, so passing verification cannot be an artifact of shared
 `AssetRecord`, payload, or `TileRaster` ownership. Production v26 persists the
 same rooted graph in GENS/ASST.
 
-The present ABI is v12. `InkpodObjectId` separates Core, snapshot, task, color,
+The present ABI is v15. `InkpodObjectId` separates Core, snapshot, task, color,
 sample, raster, thumbnail, and export runtime objects by type and Core generation;
 IDs are monotonic within one Core and are never accepted across generation or
 after release. Variable input is synchronously copied into bounded Rust-owned
@@ -301,6 +301,287 @@ work variant contains a callable, pointer, path, or STL container. V14 normal
 save, autosave/recovery, and Batch output all serialize asset-backed Genesis and
 every retained asset through the same Core-owned GENS/ASST mapping. Flat common-
 raster export remains a separate operation.
+
+## macOS ABI import, Core ownership, and Metal Canvas
+
+The current macOS slice includes the M0 contract/build/ABI-import foundation,
+the M1 Core session host, the M2 SwiftUI/AppKit/Metal product vertical, the
+M3 command/menu/shortcut/localization vertical, the M4 Sandbox file, recovery,
+clipboard, and Finder-drop vertical, the M5 document/tree/multi-view workspace
+vertical, the M6 raster paint/fill/color vertical, the M7 selection/
+floating-transform/history vertical, and the M8 filter/effect/adjustment/
+vector/annotation/frame/vanishing-point vertical, the M9 Cut/Sequence/
+Light Table/Subpalette/Reference/motion vertical, and the M10 Batch/job vertical.
+CMake remains the only root build and invokes Cargo before the checked-in Xcode
+project:
+
+```text
+CMake -> Cargo -> libinkpod_ffi.a -> Clang module -> Swift bridge
+                                              -> WindowGroup product app
+                                              -> XCTest / headless integration
+```
+
+`apps/macos/CoreBridge/C/include/InkpodCoreC.h` includes the canonical
+`include/inkpod/core_ffi.h`; it does not copy ABI declarations. Its private
+inline accessors expose only C macro constants that Swift's Clang importer
+cannot import directly. C ABI types and `OpaquePointer` stay inside the bridge
+implementation. SwiftUI receives only value projections containing typed IDs,
+generations, revisions, document dimensions, and capability flags.
+
+The M0 ABI smoke creates, queries, snapshots, and destroys one Core on a dedicated
+`Foundation.Thread`. Its snapshot is wrapped immediately in an exactly-once
+owner and released from a distinct synchronized thread, which is permitted by
+the immutable snapshot contract. Core cleanup remains on the creating thread,
+including failure paths, and thread-local diagnostics are copied before a
+result crosses that boundary.
+
+M1 adds a value-only `CoreHost` facade and a long-lived `Foundation.Thread`.
+The thread closure creates a private `CoreOwnerLoop`; its local registry is the
+only owner of live Core pointers, and create/view/stroke/history/snapshot/
+destroy calls never leave that OS thread. Requests use separate bounded lanes:
+4096 normal entries, 4096 pointer-sample entries plus 64 reserved ordered input
+boundaries, and 64 control entries for close/request-cancel/shutdown. Normal
+stroke cancel shares the ordered input-boundary lane so a rapid begin/cancel
+cannot reorder; only emergency cleanup after failed sample admission uses the
+control lane.
+
+Session creation first creates the Core, copies Rust-owned editor defaults,
+creates one real default Cell through `inkpod_core_new_cell`, and queries the
+replay contract. Only after all steps succeed does it consume and publish the
+next session ID/generation. Duplicate document UUID creation is a no-op,
+invalid and stale generations never retarget another session, and close cancels
+a live Core stroke before owner-thread destroy. Shutdown stops admission,
+cancels queued completion exactly once, cancels active transients, and destroys
+live sessions in stable ID order before the owner thread exits.
+
+M2 adds a `WindowGroup` product app and a MainActor `ApplicationCoordinator`.
+The coordinator owns a workspace registry, one `CoreHost`, and one process-wide
+`MetalRendererHost`; it has no process-global active-document pointer. Each
+`WorkspaceModel` captures its session/view/surface ID and generation at issue
+time. Stale completions and snapshots are rejected against that immutable route
+instead of resolving to whichever window later becomes active.
+
+```text
+MainActor SwiftUI / CanvasHostView
+  -> top-left client backing-pixel input
+  -> ordered CoreHost request lanes
+  -> fixed Core owner Thread / private registry / C ABI
+  -> immutable snapshot + captured session/view/surface generations
+  -> latest-wins SnapshotOwnershipQueue
+  -> dedicated Metal renderer Thread
+  -> CAMetalLayer drawable
+```
+
+`CanvasHostView` is an `NSViewRepresentable` backed by a custom `CAMetalLayer`.
+AppKit points are converted to backing coordinates once, then normalized from
+the possibly negative flipped-view backing rectangle to the Core's top-left,
+half-open device-pixel space. Mouse and tablet events share the same bounded
+pencil sample type; middle-button/scroll pan and magnification update only Core
+view state. Escape/responder cancellation ends the transient without changing
+document history. Swift never reimplements raster, selection, history, or file
+semantics.
+
+The renderer thread owns the Metal device, command queue, pipeline, surfaces,
+drawables, and a process-wide tile cache keyed by session, tile ID, and tile
+revision. Snapshots transfer to the renderer queue exactly once: rejection,
+pending replacement, retained-frame replacement, surface close, and shutdown
+each have one release owner. A nil drawable retains the latest immutable
+snapshot for a later redraw. Hidden surfaces reject new snapshots and perform
+no draw. Pan and zoom rebuild only view transforms and reuse unchanged tile
+textures. Display/device change clears GPU-only state and redraws the retained
+snapshot; memory pressure purges the tile cache without changing the Core
+document raster. The Canvas is SDR sRGB with premultiplied-alpha blending; HDR
+is not inferred from the host display.
+
+M3 adds a typed semantic command catalog shared by SwiftUI `Commands`, toolbar,
+Canvas context menu, and Settings. Focused menu actions and normalized key
+events capture workspace/session/view generations plus document/view revisions
+at issue time. The fixed Core thread checks those revisions before mutation;
+stale input is rejected instead of retargeting the key window or another
+document. A window-number registry contains only typed workspace identity and
+generation, never a process-global active Core pointer.
+The standard Settings scene supplies Command-comma, while the application
+command router invokes the environment's real `OpenSettingsAction` for the
+semantic shortcut-edit route; it never reports a presentation without opening
+that scene.
+
+Shortcut input maps macOS Command to ABI-v15 `PRIMARY`, Option to `ALTERNATE`,
+and physical Control to the separate `CONTROL` bit. Unicode-scalar and named-key
+strokes cross `InkpodShortcutStrokeV2`; the thread-independent Rust resolver
+classifies 1–4 strokes as none, prefix, or exact. Settings persists the full
+versioned table only after prefix-free validation; exact conflicts exchange
+bindings, prefix conflicts and persistence failure keep the prior table, and a
+1.5-second pending sequence or Escape cancels without routing. A local AppKit
+monitor stops custom character and multi-stroke routing for `NSTextInputClient`
+focus or marked text. `Localizable.xcstrings` is the single en/ja catalog;
+language choice is versioned and applies on the next process launch.
+
+M4 keeps file authority in `FileAccessBroker`. A balanced security-scoped lease
+and `NSFileCoordinator` reading or `.forReplacing` accessor enclose each ABI-v15
+path call; only a borrowed UTF-8 path survives long enough for that call, and no
+bookmark or `URL` enters Core or the journal. Recent files use bounded
+app-scoped bookmarks with stale regeneration. A volume/inode/canonical-path
+identity registry reserves Open and Save As targets at issue time, rejects a
+second owning session, and atomically rebinds the reservation to the inode
+published by successful replacement. Open, recovery, and common-raster import
+decode into a staged Core on the fixed owner thread, then replace the live slot
+only after validation succeeds. Normal save publishes the new Core savepoint
+only after same-directory temporary-file flush/close/replace succeeds; autosave,
+recovery, export, and compacted copy do not advance normal path authority.
+
+Recovery artifacts live in the app-support `Inkpod/Recovery` directory with a
+bounded versioned sidecar containing session generation, document UUID,
+original path, and write time. Startup offers every candidate in its own
+workspace; malformed metadata is disclosed and retained until explicit
+discard. Previous-document restoration is versioned, bounded by the recent
+bookmark store, and off by default. The app declares only `.inkpod` plus the
+four Core-supported common raster types, and the same classifier gates panels
+and Finder drops.
+
+`ClipboardBroker` writes one pasteboard item containing a process-private typed
+ticket and standard PNG and TIFF representations. The ticket resolves to a
+generation-tagged Rust-owned clipboard object held only in the Core owner
+registry; replacement, rejected paste, Cancel, close, and shutdown release it
+exactly once. External PNG/TIFF bytes are decoded by ImageIO into copied
+straight-RGBA data before Core ingestion. Compatible-plane,
+active-plane-converted, and new-raster-plane paste all use Core transactions;
+Swift does not reproduce selection, plane, or history semantics.
+
+M5 keeps one Rust Core session per logical Cell while `WorkspaceEditorGraph`
+owns value-only frontend views, tabs, and at most two nonrecursive editor
+groups. Creating or duplicating a view asks the fixed Core owner thread for a
+distinct Core view target; every view retains its own view revision and surface
+while sharing the session's document revision, history, dirty state, and
+savepoint. Cross-window move accepts the destination before removing the source;
+copy creates a Core view first, and reject/failure closes it exactly once. The
+application coordinator reference-counts workspace claims on a session and
+destroys the Core session only after its final window releases it.
+
+New Cell uses an immutable bounded draft and a Rust-owned plan. The owner thread
+prepares one or three Cells, validates every option before publication, and
+commits all sessions or none; invalid, Cancel, stale, overflow, allocation, and
+frontend-publication failure consume neither persistent nor frontend identity.
+Cell properties and Layer/Plane edits are typed requests that execute only in
+Core. Swift renders value projections and never implements topology, main/color
+plane, image, history, or format rules.
+
+The Layer/Plane inspector follows the active view or pins an exact session/view
+identity. A stale pinned view may resolve only to another live view of that same
+session; after the session disappears it invalidates with an accessibility
+notice and never falls back to a different active document. Workspace layout is
+a bounded versioned property-list record containing group orientation/ratio,
+tab order, inspector state, and named presets. Restore selects the display with
+the largest intersection (then nearest center) and clamps to its visible frame;
+malformed records restore defaults. This app-scoped layout is not document,
+history, journal, or native-format state. The M5 slice did not add paint panes;
+M6, M8, and M9 added their inspectors without changing the Core ownership
+boundary. M10 adds a value-keyed Batch `WindowGroup` without adding an active-
+document global. Its MainActor model captures the issue-time workspace/session/
+generation/revision, freezes one value-only graph before enqueue, and hands that
+graph plus balanced security-scoped input/output leases to the fixed Core owner
+thread. `BatchJobRegistry` retains the task and leases through completion; window
+close, workspace close, and application shutdown cancel and then await that exact
+job rather than retargeting another document. The renderer remains uninvolved
+except for the existing immutable document snapshots.
+
+All raw Batch graph, run-copy, pair-preview, task, and report pointers remain in
+the bridge/owner-thread implementation. Loaded `.inkbatch` operations are copied
+to Swift values for explicit per-run configuration, then cloned into a distinct
+immutable Rust-owned run graph; the stored graph is never modified. Every accept,
+reject, replacement, cancellation, close, and shutdown path has one release owner.
+SwiftUI receives only bounded operation, progress, preview, and report projections
+and never reproduces document, image, selection, history, or format semantics.
+
+M6 keeps tool/color state as immutable Swift value projections while the fixed
+Core owner thread remains the only owner of editor state, live strokes, fill
+transactions, palette/chart codecs, color-replacement previews, locator reads,
+and output-color guard tasks. AppKit normalizes mouse/tablet locations to
+top-left backing pixels and enqueues begin/sample/end/cancel on the existing
+bounded lanes; pressure and tilt are inputs only and no raster algorithm is
+implemented in Swift. Each request captures session/view generation plus
+document/view/editor revision at issue time. A stale target is rejected and is
+never re-resolved to the current tab or another document.
+
+Color controls convert `NSColor` through the device-independent sRGB space and
+retain exact RGBA8 or RGBA16 channel values in the bridge projection; display
+colors never replace the Core-owned native-depth value. Palette and chart bytes
+are bounded caller-owned inputs copied by Core. Rust-owned chart preview and
+task objects live only in private owner-thread registries and are released once
+on apply, cancel, replacement, session close, or shutdown. Locator follow/pin
+uses the same exact pane target policy as M5, and its mouse tracking converts
+window/view coordinates through AppKit before the device-to-document Core
+query. SwiftUI receives only sampled values and bounded neighborhoods. M6 does
+not change public ABI v15, native `.inkpod` v26, replay epoch 23, or procedure
+format v26.
+
+M7 routes every selection shape/mode, color operation, adjustment, and
+selection-layer conversion through typed requests on the fixed Core owner
+thread. Paste retains the Core-owned floating transient while a value-only
+Swift draft issues absolute five-anchor transforms; each preview replaces the
+same base, Apply performs one Core commit, and Cancel restores the base without
+advancing revision or history. Canvas handles use the snapshot transform and
+have menu, arrow-key, and `NSAccessibilityCustomAction` alternatives.
+
+Command-Z and Shift-Command-Z replace SwiftUI's standard undo group but invoke
+only Core Undo/Redo; no `UndoManager` document history is created. The dynamic
+menu uses a bounded value history projection. The History inspector owns a
+generation-tagged Core visualization builder/snapshot in the owner-thread
+registry, advances it in bounded steps, and copies only 64 visible rows per
+request. Replacement, session close, workspace stop, and shutdown each remove
+and release that Rust owner exactly once. Branch rows retain Core branch/state/
+journal IDs and stale issue-time targets never fall back to another document.
+M7 changes neither ABI v15 nor native/replay/procedure versions.
+
+M8 closes every existing filter, effect, adjustment, vector, annotation,
+shooting-frame, vanishing-point, and deferred vector-diagnostic route through
+value-only requests. A MainActor preview coordinator debounces filter edits for
+120 ms, admits at most one running request plus the latest pending request, and
+cancels or replaces the Rust-owned task only on the fixed Core owner thread.
+Geometry, frame, vanishing-point, and annotation Canvas gestures carry the
+issue-time session/view generation and document/view revision; the owner thread
+uses Core device-to-document point resolution and rejects stale input instead
+of recomputing coordinates or retargeting in Swift.
+
+The immutable snapshot is copied while locked into bounded vector, annotation,
+shooting-frame, vanishing-point, radial-guide, diagnostic, and ordered-render
+value spans. Raster tile bytes keep their existing borrowed lifetime. The Metal
+renderer executes the Core-owned pass order with offscreen ping-pong textures,
+premultiplied group opacity, alternate-rule stencil vector fill, vector stroke,
+and adjustment LUT passes.
+CoreText resolves frontend fonts and fallback only; annotation geometry,
+procedure semantics, and normal-versus-instruction export stay in Core. Snapshot
+accept, reject, replace, surface close, and renderer shutdown transfer and
+release exactly one owner. Renderer allocation, texture, pipeline, or command
+encoding failure rejects the frame without publishing partial document state.
+M8 changes neither public ABI v15 nor native `.inkpod` v26, replay epoch 23, or
+procedure format v26.
+
+The checked-in headless executable proves 64 real Cell sessions use one owner
+thread and destroy in order. XCTest fixes success/no-op/invalid/stale/cancel,
+ordered input, queue saturation, latest-wins ownership, close/shutdown release,
+flipped Retina coordinates, live stroke/Undo, hidden rendering, cache reuse,
+device/display/memory recovery, file failure atomicity, duplicate identity,
+bookmark regeneration, recovery retention, pasteboard representations, and
+clipboard release. The product-scene test runs both normally and with Metal API
+Validation; the same Swift suite and headless executable run under Thread
+Sanitizer where that extended profile is selected.
+
+CMake builds arm64 and x86_64 Rust archives in separate Cargo target
+directories and combines them with `lipo`. The Universal Xcode build verifies
+both architectures in the Rust archive, XCTest executable, headless CoreHost,
+and `Inkpod.app`. The checked-in parity ledger still classifies all 384 Windows
+production command IDs. M3 marks the 19 deferred M2 View rows and 11 M3
+application/help/shortcut/language rows implemented; M4 marks exactly 26 file,
+clipboard, and close rows; M5 marks exactly 67 document/tree/view/workspace
+rows; M6 marks 49 paint/fill/color rows plus one native-surface
+`notApplicable` Locator AutoHide row; M7 marks exactly 31 selection/transform/
+history rows; M8 marks exactly 70 filter/effect/adjustment/vector/annotation/
+frame/guide/diagnostic rows; M9 marks 56 Cut/Sequence/Light Table/Subpalette/
+Reference/Motion rows plus three native-surface `notApplicable` AutoHide rows.
+M10 marks 50 Batch/job rows as `macEquivalent` and the Windows-only Batch AutoHide
+row as native-surface `notApplicable`. All 384 implemented rows have a complete
+route/state/surface/test chain; there are no planned rows or placeholder menu,
+button, pane, or shortcut surfaces.
 
 ## Windows frontend ownership
 
@@ -411,6 +692,25 @@ revision, canonical metadata/defaults history, dirty state, and savepoint.
 so a Cut edit cannot enter Cell history and a Cell edit cannot enter Cut history.
 Workspace close and CoreHost shutdown destroy every Cut handle before the Core
 engine thread stops; no process-global active Cut pointer exists.
+
+The macOS M9 adapter keeps the same split with a MainActor `WorkspaceModel`, a
+value-only `CoreCutProjection`, and private Cut/Core registries on the fixed
+`Foundation.Thread`. New Cut creates and saves each planned Cell as its own
+same-directory `.inkpod`, then saves the relative Cut descriptor. Open and
+recovery stage every missing member, validate its exact `CellId` and document
+UUID, reserve file identity, and publish the Cut and tabs only after the whole
+set succeeds. Failure closes every staged handle and leaves the live workspace
+unchanged. MainActor never receives an ABI pointer or mutable Core state.
+
+For Cut playback and thumbnails, the owner thread exports bounded encoded
+rasters from the member Cores and imports them through the identified mixed
+sequence ABI. Source UUID and generation therefore remain the live Cell's
+document identity and document revision without Swift pixel decoding. Direct
+selection and endpoint navigation activate the already-open matching member
+session; a stale Cut/session/member/sequence revision is rejected instead of
+opening a duplicate document or falling back to the active tab. Motion timers
+remain MainActor presentation state and issue the same exact-target sequence
+commands; they do not mutate Core motion or document state themselves.
 
 The selected persistence topology is an individually referenced descriptor.
 The Cut `.inkpod` stores ordered `(CellId, document UUID, display number,
@@ -592,7 +892,7 @@ Inactive-session notifications validate their captured session/generation and
 update only tab dirty/processing presentation; they do not retarget the active
 view or request continuous snapshots.
 
-The fixed command-state catalog assigns all 381 production commands exactly one
+The fixed command-state catalog assigns all 384 production commands exactly one
 state owner. Pure providers compute enabled/checked state without calling Core or
 Win32 or mutating tools, previews, or documents. Menus, shortcuts, and palette
 entry points consume the same cached result. The main frame deliberately has no

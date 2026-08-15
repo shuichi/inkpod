@@ -76,13 +76,14 @@ bool SameColor(
 }
 
 bool StartsWith(
-    const InkpodShortcutSequence& sequence,
-    const InkpodShortcutSequence& prefix) noexcept {
+    const InkpodShortcutSequenceV2& sequence,
+    const InkpodShortcutSequenceV2& prefix) noexcept {
     if (prefix.stroke_count > sequence.stroke_count) {
         return false;
     }
     for (std::uint32_t index = 0; index < prefix.stroke_count; ++index) {
-        if (sequence.strokes[index].virtual_key != prefix.strokes[index].virtual_key
+        if (sequence.strokes[index].key_kind != prefix.strokes[index].key_kind
+            || sequence.strokes[index].key_value != prefix.strokes[index].key_value
             || sequence.strokes[index].modifiers != prefix.strokes[index].modifiers) {
             return false;
         }
@@ -99,13 +100,14 @@ bool ShortcutCatalogIsCompleteAndPrefixFree() {
     for (const UINT command : commands) {
         const auto* sequence = FindShortcutSequence(shortcuts, command);
         if (sequence == nullptr || sequence->command_id != command
-            || sequence->struct_size != sizeof(InkpodShortcutSequence)
+            || sequence->struct_size != sizeof(InkpodShortcutSequenceV2)
             || sequence->stroke_count == 0U
             || sequence->stroke_count > INKPOD_SHORTCUT_MAX_STROKES) {
             return false;
         }
         for (std::uint32_t index = 0; index < sequence->stroke_count; ++index) {
-            if (sequence->strokes[index].virtual_key == 0U) {
+            if (sequence->strokes[index].struct_size != sizeof(InkpodShortcutStrokeV2)
+                || sequence->strokes[index].key_value == 0U) {
                 return false;
             }
         }
@@ -138,34 +140,36 @@ bool ShortcutCatalogIsCompleteAndPrefixFree() {
         FindShortcutSequence(shortcuts, IDM_TAB_PREVIOUS);
     const auto* manual = FindShortcutSequence(shortcuts, IDM_HELP_MANUAL);
     return save != nullptr && save->stroke_count == 1U
-        && save->strokes[0].virtual_key == static_cast<std::uint32_t>('S')
-        && save->strokes[0].modifiers == INKPOD_SHORTCUT_MODIFIER_CONTROL
+        && save->strokes[0].key_kind == INKPOD_SHORTCUT_KEY_UNICODE_SCALAR
+        && save->strokes[0].key_value == static_cast<std::uint32_t>('S')
+        && save->strokes[0].modifiers == INKPOD_SHORTCUT_MODIFIER_PRIMARY
         && pencil != nullptr && pencil->stroke_count == 1U
-        && pencil->strokes[0].virtual_key == static_cast<std::uint32_t>('P')
+        && pencil->strokes[0].key_value == static_cast<std::uint32_t>('P')
         && pencil->strokes[0].modifiers == 0U
         && batch != nullptr && batch->stroke_count > 1U
         && tool_palette != nullptr && tool_palette->stroke_count == 3U
         && layer_palette != nullptr && layer_palette->stroke_count == 3U
         && locator != nullptr && locator->stroke_count == 3U
         && sequence != nullptr && sequence->stroke_count == 3U
-        && sequence->strokes[2].virtual_key == static_cast<std::uint32_t>('F')
+        && sequence->strokes[2].key_value == static_cast<std::uint32_t>('F')
         && light_table != nullptr && light_table->stroke_count == 3U
-        && light_table->strokes[2].virtual_key == static_cast<std::uint32_t>('H')
+        && light_table->strokes[2].key_value == static_cast<std::uint32_t>('H')
         && close_view != nullptr && close_view->stroke_count == 1U
-        && close_view->strokes[0].virtual_key == VK_F4
+        && close_view->strokes[0].key_kind == INKPOD_SHORTCUT_KEY_NAMED
+        && close_view->strokes[0].key_value == INKPOD_SHORTCUT_NAMED_F1 + 3U
         && close_view->strokes[0].modifiers
-            == INKPOD_SHORTCUT_MODIFIER_CONTROL
+            == INKPOD_SHORTCUT_MODIFIER_PRIMARY
         && next_tab != nullptr && next_tab->stroke_count == 1U
-        && next_tab->strokes[0].virtual_key == VK_TAB
+        && next_tab->strokes[0].key_value == INKPOD_SHORTCUT_NAMED_TAB
         && next_tab->strokes[0].modifiers
-            == INKPOD_SHORTCUT_MODIFIER_CONTROL
+            == INKPOD_SHORTCUT_MODIFIER_PRIMARY
         && previous_tab != nullptr && previous_tab->stroke_count == 1U
-        && previous_tab->strokes[0].virtual_key == VK_TAB
+        && previous_tab->strokes[0].key_value == INKPOD_SHORTCUT_NAMED_TAB
         && previous_tab->strokes[0].modifiers
-            == (INKPOD_SHORTCUT_MODIFIER_CONTROL
+            == (INKPOD_SHORTCUT_MODIFIER_PRIMARY
                 | INKPOD_SHORTCUT_MODIFIER_SHIFT)
         && manual != nullptr && manual->stroke_count == 1U
-        && manual->strokes[0].virtual_key == VK_F1
+        && manual->strokes[0].key_value == INKPOD_SHORTCUT_NAMED_F1
         && manual->strokes[0].modifiers == 0U;
 }
 

@@ -1,0 +1,864 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		100000000000000000000001 /* CoreStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000001 /* CoreStatus.swift */; };
+		100000000000000000000002 /* CoreABISmoke.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000002 /* CoreABISmoke.swift */; };
+		100000000000000000000003 /* CoreABISmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000003 /* CoreABISmokeTests.swift */; };
+		100000000000000000000004 /* libInkpodCoreBridge.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 200000000000000000000004 /* libInkpodCoreBridge.a */; };
+		100000000000000000000005 /* CoreRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000009 /* CoreRequest.swift */; };
+		100000000000000000000006 /* CoreResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000A /* CoreResult.swift */; };
+		100000000000000000000007 /* CoreOwnerThread.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000B /* CoreOwnerThread.swift */; };
+		100000000000000000000008 /* CoreHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000C /* CoreHost.swift */; };
+		100000000000000000000009 /* CoreHostIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000D /* CoreHostIntegrationTests.swift */; };
+		10000000000000000000000A /* CoreHostIntegrationMain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000E /* CoreHostIntegrationMain.swift */; };
+		10000000000000000000000B /* libInkpodCoreBridge.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 200000000000000000000004 /* libInkpodCoreBridge.a */; };
+		10000000000000000000000C /* CoreSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000010 /* CoreSnapshot.swift */; };
+		10000000000000000000000D /* SnapshotOwnershipQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000011 /* SnapshotOwnershipQueue.swift */; };
+		10000000000000000000000E /* CanvasInputNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000012 /* CanvasInputNormalizer.swift */; };
+		10000000000000000000000F /* CanvasCoreIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000013 /* CanvasCoreIntegrationTests.swift */; };
+		100000000000000000000010 /* MetalRendererHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000014 /* MetalRendererHost.swift */; };
+		100000000000000000000011 /* ApplicationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000016 /* ApplicationCoordinator.swift */; };
+		100000000000000000000012 /* WorkspaceModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000017 /* WorkspaceModel.swift */; };
+		100000000000000000000013 /* CanvasHostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000018 /* CanvasHostView.swift */; };
+		100000000000000000000014 /* WorkspaceScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000019 /* WorkspaceScene.swift */; };
+		100000000000000000000015 /* InkpodApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001A /* InkpodApp.swift */; };
+		100000000000000000000016 /* CanvasShaders.metal in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000015 /* CanvasShaders.metal */; };
+		100000000000000000000017 /* libInkpodCoreBridge.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 200000000000000000000004 /* libInkpodCoreBridge.a */; };
+		100000000000000000000018 /* InkpodUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001C /* InkpodUITests.swift */; };
+		100000000000000000000019 /* CanvasShaders.metal in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000015 /* CanvasShaders.metal */; };
+		10000000000000000000001A /* ProductCanvasLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001E /* ProductCanvasLifecycleTests.swift */; };
+		10000000000000000000001B /* CommandModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001F /* CommandModel.swift */; };
+		10000000000000000000001C /* ShortcutModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000020 /* ShortcutModel.swift */; };
+		10000000000000000000001D /* CommandInfrastructureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000021 /* CommandInfrastructureTests.swift */; };
+		10000000000000000000001E /* ApplicationInfrastructure.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000022 /* ApplicationInfrastructure.swift */; };
+		10000000000000000000001F /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000023 /* Localizable.xcstrings */; };
+		100000000000000000000020 /* CommandViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000024 /* CommandViews.swift */; };
+		100000000000000000000021 /* CoreFileClipboardIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000025 /* CoreFileClipboardIntegrationTests.swift */; };
+		100000000000000000000022 /* FileAccessBrokerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000026 /* FileAccessBrokerTests.swift */; };
+		100000000000000000000023 /* FileAccessBroker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000027 /* FileAccessBroker.swift */; };
+		100000000000000000000024 /* ClipboardBroker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000028 /* ClipboardBroker.swift */; };
+		100000000000000000000025 /* ClipboardBrokerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002B /* ClipboardBrokerTests.swift */; };
+		100000000000000000000026 /* CoreWorkspaceTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002C /* CoreWorkspaceTypes.swift */; };
+		100000000000000000000027 /* WorkspaceDomain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002D /* WorkspaceDomain.swift */; };
+		100000000000000000000028 /* CoreWorkspaceIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002E /* CoreWorkspaceIntegrationTests.swift */; };
+		100000000000000000000029 /* WorkspaceDomainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002F /* WorkspaceDomainTests.swift */; };
+		10000000000000000000002A /* WorkspaceM5Views.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000030 /* WorkspaceM5Views.swift */; };
+		10000000000000000000002B /* CorePaintTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000031 /* CorePaintTypes.swift */; };
+		10000000000000000000002C /* CorePaintIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000032 /* CorePaintIntegrationTests.swift */; };
+		10000000000000000000002D /* WorkspaceM6Views.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000033 /* WorkspaceM6Views.swift */; };
+		10000000000000000000002E /* CoreM8Types.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000034 /* CoreM8Types.swift */; };
+		10000000000000000000002F /* CoreM8IntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000035 /* CoreM8IntegrationTests.swift */; };
+		100000000000000000000030 /* CoreM9Types.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000036 /* CoreM9Types.swift */; };
+		100000000000000000000031 /* CoreM9IntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000037 /* CoreM9IntegrationTests.swift */; };
+		100000000000000000000032 /* WorkspaceM9Views.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000038 /* WorkspaceM9Views.swift */; };
+		100000000000000000000033 /* CoreM10IntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000039 /* CoreM10IntegrationTests.swift */; };
+		100000000000000000000034 /* BatchDomainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000003A /* BatchDomainTests.swift */; };
+		100000000000000000000035 /* CoreM10Types.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000003B /* CoreM10Types.swift */; };
+		100000000000000000000036 /* CoreM10Bridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000003C /* CoreM10Bridge.swift */; };
+		100000000000000000000037 /* BatchDomain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000003D /* BatchDomain.swift */; };
+		100000000000000000000038 /* BatchWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000003E /* BatchWindow.swift */; };
+		100000000000000000000039 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000003F /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		300000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 400000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 500000000000000000000001;
+			remoteInfo = InkpodCoreBridge;
+		};
+		300000000000000000000002 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 400000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 500000000000000000000001;
+			remoteInfo = InkpodCoreBridge;
+		};
+		300000000000000000000003 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 400000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 500000000000000000000001;
+			remoteInfo = InkpodCoreBridge;
+		};
+		300000000000000000000004 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 400000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 500000000000000000000004;
+			remoteInfo = Inkpod;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		200000000000000000000001 /* CoreStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreStatus.swift; sourceTree = "<group>"; };
+		200000000000000000000002 /* CoreABISmoke.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreABISmoke.swift; sourceTree = "<group>"; };
+		200000000000000000000003 /* CoreABISmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreABISmokeTests.swift; sourceTree = "<group>"; };
+		200000000000000000000004 /* libInkpodCoreBridge.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libInkpodCoreBridge.a; sourceTree = BUILT_PRODUCTS_DIR; };
+		200000000000000000000005 /* InkpodCoreBridgeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InkpodCoreBridgeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		200000000000000000000006 /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
+		200000000000000000000007 /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
+		200000000000000000000008 /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Base.xcconfig; sourceTree = "<group>"; };
+		200000000000000000000009 /* CoreRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreRequest.swift; sourceTree = "<group>"; };
+		20000000000000000000000A /* CoreResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreResult.swift; sourceTree = "<group>"; };
+		20000000000000000000000B /* CoreOwnerThread.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreOwnerThread.swift; sourceTree = "<group>"; };
+		20000000000000000000000C /* CoreHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreHost.swift; sourceTree = "<group>"; };
+		20000000000000000000000D /* CoreHostIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreHostIntegrationTests.swift; sourceTree = "<group>"; };
+		20000000000000000000000E /* CoreHostIntegrationMain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreHostIntegrationMain.swift; sourceTree = "<group>"; };
+		20000000000000000000000F /* InkpodCoreHostIntegration */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = InkpodCoreHostIntegration; sourceTree = BUILT_PRODUCTS_DIR; };
+		200000000000000000000010 /* CoreSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreSnapshot.swift; sourceTree = "<group>"; };
+		200000000000000000000011 /* SnapshotOwnershipQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapshotOwnershipQueue.swift; sourceTree = "<group>"; };
+		200000000000000000000012 /* CanvasInputNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasInputNormalizer.swift; sourceTree = "<group>"; };
+		200000000000000000000013 /* CanvasCoreIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasCoreIntegrationTests.swift; sourceTree = "<group>"; };
+		200000000000000000000014 /* MetalRendererHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalRendererHost.swift; sourceTree = "<group>"; };
+		200000000000000000000015 /* CanvasShaders.metal */ = {isa = PBXFileReference; explicitFileType = text; path = CanvasShaders.metal; sourceTree = "<group>"; };
+		200000000000000000000016 /* ApplicationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationCoordinator.swift; sourceTree = "<group>"; };
+		200000000000000000000017 /* WorkspaceModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceModel.swift; sourceTree = "<group>"; };
+		200000000000000000000018 /* CanvasHostView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasHostView.swift; sourceTree = "<group>"; };
+		200000000000000000000019 /* WorkspaceScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceScene.swift; sourceTree = "<group>"; };
+		20000000000000000000001A /* InkpodApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InkpodApp.swift; sourceTree = "<group>"; };
+		20000000000000000000001B /* Inkpod.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Inkpod.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		20000000000000000000001C /* InkpodUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InkpodUITests.swift; sourceTree = "<group>"; };
+		20000000000000000000001D /* InkpodUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InkpodUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		20000000000000000000001E /* ProductCanvasLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductCanvasLifecycleTests.swift; sourceTree = "<group>"; };
+		20000000000000000000001F /* CommandModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandModel.swift; sourceTree = "<group>"; };
+		200000000000000000000020 /* ShortcutModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutModel.swift; sourceTree = "<group>"; };
+		200000000000000000000021 /* CommandInfrastructureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandInfrastructureTests.swift; sourceTree = "<group>"; };
+		200000000000000000000022 /* ApplicationInfrastructure.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationInfrastructure.swift; sourceTree = "<group>"; };
+		200000000000000000000023 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		200000000000000000000024 /* CommandViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandViews.swift; sourceTree = "<group>"; };
+		200000000000000000000025 /* CoreFileClipboardIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreFileClipboardIntegrationTests.swift; sourceTree = "<group>"; };
+		200000000000000000000026 /* FileAccessBrokerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileAccessBrokerTests.swift; sourceTree = "<group>"; };
+		200000000000000000000027 /* FileAccessBroker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileAccessBroker.swift; sourceTree = "<group>"; };
+		200000000000000000000028 /* ClipboardBroker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardBroker.swift; sourceTree = "<group>"; };
+		200000000000000000000029 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		20000000000000000000002A /* Inkpod.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Inkpod.entitlements; sourceTree = "<group>"; };
+		20000000000000000000002B /* ClipboardBrokerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardBrokerTests.swift; sourceTree = "<group>"; };
+		20000000000000000000002C /* CoreWorkspaceTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreWorkspaceTypes.swift; sourceTree = "<group>"; };
+		20000000000000000000002D /* WorkspaceDomain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceDomain.swift; sourceTree = "<group>"; };
+		20000000000000000000002E /* CoreWorkspaceIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreWorkspaceIntegrationTests.swift; sourceTree = "<group>"; };
+		20000000000000000000002F /* WorkspaceDomainTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceDomainTests.swift; sourceTree = "<group>"; };
+		200000000000000000000030 /* WorkspaceM5Views.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceM5Views.swift; sourceTree = "<group>"; };
+		200000000000000000000031 /* CorePaintTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CorePaintTypes.swift; sourceTree = "<group>"; };
+		200000000000000000000032 /* CorePaintIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CorePaintIntegrationTests.swift; sourceTree = "<group>"; };
+		200000000000000000000033 /* WorkspaceM6Views.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceM6Views.swift; sourceTree = "<group>"; };
+		200000000000000000000034 /* CoreM8Types.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreM8Types.swift; sourceTree = "<group>"; };
+		200000000000000000000035 /* CoreM8IntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreM8IntegrationTests.swift; sourceTree = "<group>"; };
+		200000000000000000000036 /* CoreM9Types.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreM9Types.swift; sourceTree = "<group>"; };
+		200000000000000000000037 /* CoreM9IntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreM9IntegrationTests.swift; sourceTree = "<group>"; };
+		200000000000000000000038 /* WorkspaceM9Views.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceM9Views.swift; sourceTree = "<group>"; };
+		200000000000000000000039 /* CoreM10IntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreM10IntegrationTests.swift; sourceTree = "<group>"; };
+		20000000000000000000003A /* BatchDomainTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchDomainTests.swift; sourceTree = "<group>"; };
+		20000000000000000000003B /* CoreM10Types.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreM10Types.swift; sourceTree = "<group>"; };
+		20000000000000000000003C /* CoreM10Bridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreM10Bridge.swift; sourceTree = "<group>"; };
+		20000000000000000000003D /* BatchDomain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchDomain.swift; sourceTree = "<group>"; };
+		20000000000000000000003E /* BatchWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchWindow.swift; sourceTree = "<group>"; };
+		20000000000000000000003F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		600000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		600000000000000000000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000004 /* libInkpodCoreBridge.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		600000000000000000000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				10000000000000000000000B /* libInkpodCoreBridge.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		600000000000000000000004 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000017 /* libInkpodCoreBridge.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		600000000000000000000005 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		700000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				700000000000000000000002 /* CoreBridge */,
+				700000000000000000000007 /* Renderer */,
+				700000000000000000000008 /* Application */,
+				700000000000000000000009 /* Workspace */,
+				70000000000000000000000A /* UI */,
+				70000000000000000000000B /* App */,
+				70000000000000000000000D /* Resources */,
+				70000000000000000000000E /* Platform */,
+				700000000000000000000003 /* Tests */,
+				700000000000000000000006 /* Integration Tests */,
+				70000000000000000000000C /* UI Tests */,
+				700000000000000000000004 /* Config */,
+				700000000000000000000005 /* Products */,
+			);
+		sourceTree = "<group>";
+		};
+		700000000000000000000002 /* CoreBridge */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000001 /* CoreStatus.swift */,
+				200000000000000000000002 /* CoreABISmoke.swift */,
+				200000000000000000000009 /* CoreRequest.swift */,
+				20000000000000000000000A /* CoreResult.swift */,
+				20000000000000000000000B /* CoreOwnerThread.swift */,
+				20000000000000000000000C /* CoreHost.swift */,
+				200000000000000000000010 /* CoreSnapshot.swift */,
+				20000000000000000000002C /* CoreWorkspaceTypes.swift */,
+				200000000000000000000031 /* CorePaintTypes.swift */,
+				200000000000000000000034 /* CoreM8Types.swift */,
+				200000000000000000000036 /* CoreM9Types.swift */,
+				20000000000000000000003B /* CoreM10Types.swift */,
+				20000000000000000000003C /* CoreM10Bridge.swift */,
+			);
+			path = CoreBridge/Swift;
+			sourceTree = "<group>";
+		};
+		700000000000000000000003 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000003 /* CoreABISmokeTests.swift */,
+				200000000000000000000021 /* CommandInfrastructureTests.swift */,
+				200000000000000000000026 /* FileAccessBrokerTests.swift */,
+				20000000000000000000002B /* ClipboardBrokerTests.swift */,
+				20000000000000000000002F /* WorkspaceDomainTests.swift */,
+				20000000000000000000003A /* BatchDomainTests.swift */,
+			);
+			path = Tests/Unit;
+			sourceTree = "<group>";
+		};
+		700000000000000000000004 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000008 /* Base.xcconfig */,
+				200000000000000000000006 /* Debug.xcconfig */,
+				200000000000000000000007 /* Release.xcconfig */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
+		700000000000000000000006 /* Integration Tests */ = {
+			isa = PBXGroup;
+			children = (
+				20000000000000000000000D /* CoreHostIntegrationTests.swift */,
+				20000000000000000000000E /* CoreHostIntegrationMain.swift */,
+				200000000000000000000013 /* CanvasCoreIntegrationTests.swift */,
+				20000000000000000000001E /* ProductCanvasLifecycleTests.swift */,
+				200000000000000000000025 /* CoreFileClipboardIntegrationTests.swift */,
+				20000000000000000000002E /* CoreWorkspaceIntegrationTests.swift */,
+				200000000000000000000032 /* CorePaintIntegrationTests.swift */,
+				200000000000000000000035 /* CoreM8IntegrationTests.swift */,
+				200000000000000000000037 /* CoreM9IntegrationTests.swift */,
+				200000000000000000000039 /* CoreM10IntegrationTests.swift */,
+			);
+			path = Tests/Integration;
+			sourceTree = "<group>";
+		};
+		700000000000000000000007 /* Renderer */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000011 /* SnapshotOwnershipQueue.swift */,
+				200000000000000000000012 /* CanvasInputNormalizer.swift */,
+				200000000000000000000014 /* MetalRendererHost.swift */,
+				200000000000000000000018 /* CanvasHostView.swift */,
+				200000000000000000000015 /* CanvasShaders.metal */,
+			);
+			path = Renderer;
+			sourceTree = "<group>";
+		};
+		700000000000000000000008 /* Application */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000016 /* ApplicationCoordinator.swift */,
+				20000000000000000000001F /* CommandModel.swift */,
+				20000000000000000000003D /* BatchDomain.swift */,
+				200000000000000000000020 /* ShortcutModel.swift */,
+				200000000000000000000022 /* ApplicationInfrastructure.swift */,
+			);
+			path = Application;
+			sourceTree = "<group>";
+		};
+		700000000000000000000009 /* Workspace */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000017 /* WorkspaceModel.swift */,
+				20000000000000000000002D /* WorkspaceDomain.swift */,
+			);
+			path = Workspace;
+			sourceTree = "<group>";
+		};
+		70000000000000000000000A /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000019 /* WorkspaceScene.swift */,
+				200000000000000000000024 /* CommandViews.swift */,
+				200000000000000000000030 /* WorkspaceM5Views.swift */,
+				200000000000000000000033 /* WorkspaceM6Views.swift */,
+				200000000000000000000038 /* WorkspaceM9Views.swift */,
+				20000000000000000000003E /* BatchWindow.swift */,
+			);
+			path = UI;
+			sourceTree = "<group>";
+		};
+		70000000000000000000000B /* App */ = {
+			isa = PBXGroup;
+			children = (
+				20000000000000000000001A /* InkpodApp.swift */,
+				200000000000000000000029 /* Info.plist */,
+				20000000000000000000002A /* Inkpod.entitlements */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		70000000000000000000000C /* UI Tests */ = {
+			isa = PBXGroup;
+			children = (
+				20000000000000000000001C /* InkpodUITests.swift */,
+			);
+			path = Tests/UI;
+			sourceTree = "<group>";
+		};
+		70000000000000000000000D /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				20000000000000000000003F /* Assets.xcassets */,
+				200000000000000000000023 /* Localizable.xcstrings */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		70000000000000000000000E /* Platform */ = {
+			isa = PBXGroup;
+			children = (
+				70000000000000000000000F /* FileAccess */,
+				700000000000000000000010 /* Clipboard */,
+			);
+			path = Platform;
+			sourceTree = "<group>";
+		};
+		70000000000000000000000F /* FileAccess */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000027 /* FileAccessBroker.swift */,
+			);
+			path = FileAccess;
+			sourceTree = "<group>";
+		};
+		700000000000000000000010 /* Clipboard */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000028 /* ClipboardBroker.swift */,
+			);
+			path = Clipboard;
+			sourceTree = "<group>";
+		};
+		700000000000000000000005 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000004 /* libInkpodCoreBridge.a */,
+				200000000000000000000005 /* InkpodCoreBridgeTests.xctest */,
+				20000000000000000000000F /* InkpodCoreHostIntegration */,
+				20000000000000000000001B /* Inkpod.app */,
+				20000000000000000000001D /* InkpodUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		500000000000000000000001 /* InkpodCoreBridge */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 800000000000000000000002 /* Build configuration list for PBXNativeTarget "InkpodCoreBridge" */;
+			buildPhases = (
+				900000000000000000000001 /* Sources */,
+				600000000000000000000001 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = InkpodCoreBridge;
+			productName = InkpodCoreBridge;
+			productReference = 200000000000000000000004 /* libInkpodCoreBridge.a */;
+			productType = "com.apple.product-type.library.static";
+		};
+		500000000000000000000002 /* InkpodCoreBridgeTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 800000000000000000000003 /* Build configuration list for PBXNativeTarget "InkpodCoreBridgeTests" */;
+			buildPhases = (
+				900000000000000000000002 /* Sources */,
+				D00000000000000000000002 /* Resources */,
+				600000000000000000000002 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A00000000000000000000001 /* PBXTargetDependency */,
+			);
+			name = InkpodCoreBridgeTests;
+			productName = InkpodCoreBridgeTests;
+			productReference = 200000000000000000000005 /* InkpodCoreBridgeTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		500000000000000000000003 /* InkpodCoreHostIntegration */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 800000000000000000000004 /* Build configuration list for PBXNativeTarget "InkpodCoreHostIntegration" */;
+			buildPhases = (
+				900000000000000000000003 /* Sources */,
+				600000000000000000000003 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A00000000000000000000002 /* PBXTargetDependency */,
+			);
+			name = InkpodCoreHostIntegration;
+			productName = InkpodCoreHostIntegration;
+			productReference = 20000000000000000000000F /* InkpodCoreHostIntegration */;
+			productType = "com.apple.product-type.tool";
+		};
+		500000000000000000000004 /* Inkpod */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 800000000000000000000005 /* Build configuration list for PBXNativeTarget "Inkpod" */;
+			buildPhases = (
+				900000000000000000000004 /* Sources */,
+				D00000000000000000000001 /* Resources */,
+				600000000000000000000004 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A00000000000000000000003 /* PBXTargetDependency */,
+			);
+			name = Inkpod;
+			productName = Inkpod;
+			productReference = 20000000000000000000001B /* Inkpod.app */;
+			productType = "com.apple.product-type.application";
+		};
+		500000000000000000000005 /* InkpodUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 800000000000000000000006 /* Build configuration list for PBXNativeTarget "InkpodUITests" */;
+			buildPhases = (
+				900000000000000000000005 /* Sources */,
+				600000000000000000000005 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A00000000000000000000004 /* PBXTargetDependency */,
+			);
+			name = InkpodUITests;
+			productName = InkpodUITests;
+			productReference = 20000000000000000000001D /* InkpodUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXResourcesBuildPhase section */
+		D00000000000000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000039 /* Assets.xcassets in Resources */,
+				100000000000000000000016 /* CanvasShaders.metal in Resources */,
+				10000000000000000000001F /* Localizable.xcstrings in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D00000000000000000000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000019 /* CanvasShaders.metal in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXProject section */
+		400000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2660;
+				LastUpgradeCheck = 2660;
+				TargetAttributes = {
+					500000000000000000000001 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+					500000000000000000000002 = {
+						CreatedOnToolsVersion = 26.0;
+						TestTargetID = 500000000000000000000001;
+					};
+					500000000000000000000003 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+					500000000000000000000004 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+					500000000000000000000005 = {
+						CreatedOnToolsVersion = 26.0;
+						TestTargetID = 500000000000000000000004;
+					};
+				};
+			};
+			buildConfigurationList = 800000000000000000000001 /* Build configuration list for PBXProject "Inkpod" */;
+			compatibilityVersion = "Xcode 16.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 700000000000000000000001;
+			productRefGroup = 700000000000000000000005 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				500000000000000000000001 /* InkpodCoreBridge */,
+				500000000000000000000002 /* InkpodCoreBridgeTests */,
+				500000000000000000000003 /* InkpodCoreHostIntegration */,
+				500000000000000000000004 /* Inkpod */,
+				500000000000000000000005 /* InkpodUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		900000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000001 /* CoreStatus.swift in Sources */,
+				100000000000000000000002 /* CoreABISmoke.swift in Sources */,
+				100000000000000000000005 /* CoreRequest.swift in Sources */,
+				100000000000000000000006 /* CoreResult.swift in Sources */,
+				100000000000000000000007 /* CoreOwnerThread.swift in Sources */,
+				100000000000000000000008 /* CoreHost.swift in Sources */,
+				10000000000000000000000C /* CoreSnapshot.swift in Sources */,
+				10000000000000000000000D /* SnapshotOwnershipQueue.swift in Sources */,
+				10000000000000000000000E /* CanvasInputNormalizer.swift in Sources */,
+				100000000000000000000010 /* MetalRendererHost.swift in Sources */,
+				100000000000000000000011 /* ApplicationCoordinator.swift in Sources */,
+				100000000000000000000012 /* WorkspaceModel.swift in Sources */,
+				100000000000000000000013 /* CanvasHostView.swift in Sources */,
+				100000000000000000000014 /* WorkspaceScene.swift in Sources */,
+				10000000000000000000001B /* CommandModel.swift in Sources */,
+				100000000000000000000037 /* BatchDomain.swift in Sources */,
+				10000000000000000000001C /* ShortcutModel.swift in Sources */,
+				10000000000000000000001E /* ApplicationInfrastructure.swift in Sources */,
+				100000000000000000000020 /* CommandViews.swift in Sources */,
+				100000000000000000000023 /* FileAccessBroker.swift in Sources */,
+				100000000000000000000024 /* ClipboardBroker.swift in Sources */,
+				100000000000000000000026 /* CoreWorkspaceTypes.swift in Sources */,
+				100000000000000000000027 /* WorkspaceDomain.swift in Sources */,
+				10000000000000000000002A /* WorkspaceM5Views.swift in Sources */,
+				10000000000000000000002B /* CorePaintTypes.swift in Sources */,
+				10000000000000000000002D /* WorkspaceM6Views.swift in Sources */,
+				10000000000000000000002E /* CoreM8Types.swift in Sources */,
+				100000000000000000000030 /* CoreM9Types.swift in Sources */,
+				100000000000000000000035 /* CoreM10Types.swift in Sources */,
+				100000000000000000000036 /* CoreM10Bridge.swift in Sources */,
+				100000000000000000000032 /* WorkspaceM9Views.swift in Sources */,
+				100000000000000000000038 /* BatchWindow.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		900000000000000000000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000003 /* CoreABISmokeTests.swift in Sources */,
+				100000000000000000000009 /* CoreHostIntegrationTests.swift in Sources */,
+				10000000000000000000000F /* CanvasCoreIntegrationTests.swift in Sources */,
+				10000000000000000000001A /* ProductCanvasLifecycleTests.swift in Sources */,
+				10000000000000000000001D /* CommandInfrastructureTests.swift in Sources */,
+				100000000000000000000021 /* CoreFileClipboardIntegrationTests.swift in Sources */,
+				100000000000000000000022 /* FileAccessBrokerTests.swift in Sources */,
+				100000000000000000000025 /* ClipboardBrokerTests.swift in Sources */,
+				100000000000000000000028 /* CoreWorkspaceIntegrationTests.swift in Sources */,
+				100000000000000000000029 /* WorkspaceDomainTests.swift in Sources */,
+				10000000000000000000002C /* CorePaintIntegrationTests.swift in Sources */,
+				10000000000000000000002F /* CoreM8IntegrationTests.swift in Sources */,
+				100000000000000000000031 /* CoreM9IntegrationTests.swift in Sources */,
+				100000000000000000000033 /* CoreM10IntegrationTests.swift in Sources */,
+				100000000000000000000034 /* BatchDomainTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		900000000000000000000003 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				10000000000000000000000A /* CoreHostIntegrationMain.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		900000000000000000000004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000015 /* InkpodApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		900000000000000000000005 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000018 /* InkpodUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A00000000000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 500000000000000000000001 /* InkpodCoreBridge */;
+			targetProxy = 300000000000000000000001 /* PBXContainerItemProxy */;
+		};
+		A00000000000000000000002 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 500000000000000000000001 /* InkpodCoreBridge */;
+			targetProxy = 300000000000000000000002 /* PBXContainerItemProxy */;
+		};
+		A00000000000000000000003 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 500000000000000000000001 /* InkpodCoreBridge */;
+			targetProxy = 300000000000000000000003 /* PBXContainerItemProxy */;
+		};
+		A00000000000000000000004 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 500000000000000000000004 /* Inkpod */;
+			targetProxy = 300000000000000000000004 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		B00000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 200000000000000000000006 /* Debug.xcconfig */;
+			buildSettings = {
+			};
+			name = Debug;
+		};
+		B00000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 200000000000000000000007 /* Release.xcconfig */;
+			buildSettings = {
+			};
+			name = Release;
+		};
+		B00000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 200000000000000000000006 /* Debug.xcconfig */;
+			buildSettings = {
+				DEFINES_MODULE = YES;
+				MACH_O_TYPE = staticlib;
+				PRODUCT_MODULE_NAME = InkpodCoreBridge;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
+		B00000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 200000000000000000000007 /* Release.xcconfig */;
+			buildSettings = {
+				DEFINES_MODULE = YES;
+				MACH_O_TYPE = staticlib;
+				PRODUCT_MODULE_NAME = InkpodCoreBridge;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+			};
+			name = Release;
+		};
+		B00000000000000000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 200000000000000000000006 /* Debug.xcconfig */;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.inkpod.CoreBridgeTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
+		B00000000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 200000000000000000000007 /* Release.xcconfig */;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.inkpod.CoreBridgeTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+			};
+			name = Release;
+		};
+		B00000000000000000000007 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 200000000000000000000006 /* Debug.xcconfig */;
+			buildSettings = {
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
+		B00000000000000000000008 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 200000000000000000000007 /* Release.xcconfig */;
+			buildSettings = {
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+			};
+			name = Release;
+		};
+		B00000000000000000000009 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 200000000000000000000006 /* Debug.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/Inkpod.entitlements;
+				ENABLE_APP_SANDBOX = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = App/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = com.inkpod.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Debug;
+		};
+		B0000000000000000000000A /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 200000000000000000000007 /* Release.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/Inkpod.entitlements;
+				ENABLE_APP_SANDBOX = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = App/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = com.inkpod.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Release;
+		};
+		B0000000000000000000000B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 200000000000000000000006 /* Debug.xcconfig */;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.inkpod.UITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				TEST_TARGET_NAME = Inkpod;
+			};
+			name = Debug;
+		};
+		B0000000000000000000000C /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 200000000000000000000007 /* Release.xcconfig */;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.inkpod.UITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				TEST_TARGET_NAME = Inkpod;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		800000000000000000000001 /* Build configuration list for PBXProject "Inkpod" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B00000000000000000000001 /* Debug */,
+				B00000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		800000000000000000000002 /* Build configuration list for PBXNativeTarget "InkpodCoreBridge" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B00000000000000000000003 /* Debug */,
+				B00000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		800000000000000000000003 /* Build configuration list for PBXNativeTarget "InkpodCoreBridgeTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B00000000000000000000005 /* Debug */,
+				B00000000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		800000000000000000000004 /* Build configuration list for PBXNativeTarget "InkpodCoreHostIntegration" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B00000000000000000000007 /* Debug */,
+				B00000000000000000000008 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		800000000000000000000005 /* Build configuration list for PBXNativeTarget "Inkpod" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B00000000000000000000009 /* Debug */,
+				B0000000000000000000000A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		800000000000000000000006 /* Build configuration list for PBXNativeTarget "InkpodUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B0000000000000000000000B /* Debug */,
+				B0000000000000000000000C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 400000000000000000000001 /* Project object */;
+}

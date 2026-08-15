@@ -1,0 +1,4 @@
+module InkpodCoreC [system] {
+    header "InkpodCoreC.h"
+    export *
+}

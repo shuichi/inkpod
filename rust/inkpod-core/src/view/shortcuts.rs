@@ -8,8 +8,7 @@ impl Core {
             .filter_map(|(command_id, strokes)| {
                 (strokes.len() == 1).then_some(ShortcutBinding {
                     command_id: *command_id,
-                    virtual_key: strokes[0].virtual_key,
-                    modifiers: strokes[0].modifiers,
+                    stroke: strokes[0],
                 })
             })
             .collect()
@@ -22,23 +21,13 @@ impl Core {
     pub fn rebind_shortcut(&mut self, binding: ShortcutBinding) -> Result<(), CoreError> {
         self.rebind_shortcut_sequence(ShortcutSequenceBinding {
             command_id: binding.command_id,
-            strokes: vec![ShortcutStroke {
-                virtual_key: binding.virtual_key,
-                modifiers: binding.modifiers,
-            }],
+            strokes: vec![binding.stroke],
         })
     }
 
     /// Resolves one validated stroke to an exact command, if present.
-    pub fn resolve_shortcut(
-        &self,
-        virtual_key: u32,
-        modifiers: u32,
-    ) -> Result<Option<u32>, CoreError> {
-        match self.resolve_shortcut_sequence(&[ShortcutStroke {
-            virtual_key,
-            modifiers,
-        }])? {
+    pub fn resolve_shortcut(&self, stroke: ShortcutStroke) -> Result<Option<u32>, CoreError> {
+        match self.resolve_shortcut_sequence(&[stroke])? {
             ShortcutSequenceMatch::Exact(command_id) => Ok(Some(command_id)),
             ShortcutSequenceMatch::None | ShortcutSequenceMatch::Prefix => Ok(None),
         }
@@ -169,7 +158,10 @@ fn validate_shortcut_strokes(strokes: &[ShortcutStroke]) -> Result<(), CoreError
     }
     if strokes
         .iter()
-        .any(|stroke| stroke.virtual_key == 0 || stroke.modifiers & !SHORTCUT_MODIFIER_MASK != 0)
+        .any(|stroke| {
+            matches!(stroke.key, ShortcutKey::Named(ShortcutNamedKey::Function(value)) if !(1..=24).contains(&value))
+                || stroke.modifiers & !SHORTCUT_MODIFIER_MASK != 0
+        })
     {
         return Err(CoreError::InvalidArgument("shortcut stroke is invalid"));
     }
@@ -183,34 +175,34 @@ pub(crate) fn default_shortcuts() -> BTreeMap<u32, Vec<ShortcutStroke>> {
     [
         ShortcutBinding {
             command_id: 1,
-            virtual_key: u32::from(b'Z'),
-            modifiers: 1,
+            stroke: ShortcutStroke {
+                key: ShortcutKey::UnicodeScalar('Z'),
+                modifiers: SHORTCUT_MODIFIER_PRIMARY,
+            },
         },
         ShortcutBinding {
             command_id: 2,
-            virtual_key: u32::from(b'Y'),
-            modifiers: 1,
+            stroke: ShortcutStroke {
+                key: ShortcutKey::UnicodeScalar('Y'),
+                modifiers: SHORTCUT_MODIFIER_PRIMARY,
+            },
         },
         ShortcutBinding {
             command_id: 3,
-            virtual_key: u32::from(b'C'),
-            modifiers: 1,
+            stroke: ShortcutStroke {
+                key: ShortcutKey::UnicodeScalar('C'),
+                modifiers: SHORTCUT_MODIFIER_PRIMARY,
+            },
         },
         ShortcutBinding {
             command_id: 4,
-            virtual_key: u32::from(b'V'),
-            modifiers: 1,
+            stroke: ShortcutStroke {
+                key: ShortcutKey::UnicodeScalar('V'),
+                modifiers: SHORTCUT_MODIFIER_PRIMARY,
+            },
         },
     ]
     .into_iter()
-    .map(|binding| {
-        (
-            binding.command_id,
-            vec![ShortcutStroke {
-                virtual_key: binding.virtual_key,
-                modifiers: binding.modifiers,
-            }],
-        )
-    })
+    .map(|binding| (binding.command_id, vec![binding.stroke]))
     .collect()
 }

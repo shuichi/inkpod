@@ -1322,22 +1322,17 @@ int InkpodRunAbiSmoke() {
         return 89;
     }
     std::uint32_t shortcut_command{};
-    if (inkpod_core_shortcut_rebind(
-            core,
-            99U,
-            static_cast<std::uint32_t>('Z'),
-            INKPOD_SHORTCUT_MODIFIER_CONTROL) != INKPOD_STATUS_OK
-        || inkpod_core_shortcut_resolve(
-               core,
-               static_cast<std::uint32_t>('Z'),
-               INKPOD_SHORTCUT_MODIFIER_CONTROL,
-               &shortcut_command) != INKPOD_STATUS_OK
+    const InkpodShortcutStrokeV2 shortcut{
+        sizeof(InkpodShortcutStrokeV2),
+        INKPOD_SHORTCUT_KEY_UNICODE_SCALAR,
+        static_cast<std::uint32_t>('Z'),
+        INKPOD_SHORTCUT_MODIFIER_PRIMARY};
+    if (inkpod_core_shortcut_rebind_v2(core, 99U, &shortcut) != INKPOD_STATUS_OK
+        || inkpod_core_shortcut_resolve_v2(core, &shortcut, &shortcut_command)
+            != INKPOD_STATUS_OK
         || shortcut_command != 99U || inkpod_core_shortcut_reset(core) != INKPOD_STATUS_OK
-        || inkpod_core_shortcut_resolve(
-               core,
-               static_cast<std::uint32_t>('Z'),
-               INKPOD_SHORTCUT_MODIFIER_CONTROL,
-               &shortcut_command) != INKPOD_STATUS_OK
+        || inkpod_core_shortcut_resolve_v2(core, &shortcut, &shortcut_command)
+            != INKPOD_STATUS_OK
         || shortcut_command != 1U) {
         return 44;
     }

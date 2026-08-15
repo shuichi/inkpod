@@ -98,6 +98,34 @@ impl Core {
         self.set_sequence(cells)
     }
 
+    /// Decodes named common-raster files with caller-owned persistent source identities.
+    ///
+    /// This is the encoded-data equivalent of [`Self::set_sequence`]: UUID and
+    /// generation remain attached to each immutable raster while decode, identity,
+    /// and sequence validation stay atomic. It does not mutate document history,
+    /// dirty state, savepoint, or the current document.
+    pub fn import_identified_mixed_sequence(
+        &mut self,
+        files: Vec<(String, CommonRasterFormat, Vec<u8>, u128, u64)>,
+    ) -> Result<(), CoreError> {
+        if files.is_empty() || files.len() > MAX_SEQUENCE_CELLS {
+            return Err(CoreError::InvalidArgument(
+                "identified sequence import count is outside bounds",
+            ));
+        }
+        let mut cells = Vec::with_capacity(files.len());
+        for (name, format, bytes, document_uuid, source_generation) in files {
+            let raster = decode_common_raster(format, &bytes)?;
+            cells.push(SequenceCellSource::from_common_raster_with_generation(
+                name,
+                document_uuid,
+                source_generation,
+                &raster,
+            )?);
+        }
+        self.set_sequence(cells)
+    }
+
     /// Returns owned metadata and a thumbnail for one natural-order cell.
     pub fn sequence_cell(&self, index: usize) -> Result<SequenceCellInfo, CoreError> {
         let cell = self

@@ -12,18 +12,18 @@ namespace inkpod::windows::ui {
 
 std::span<const UINT> MenuCommandCatalog() noexcept;
 
-std::vector<InkpodShortcutSequence> BuildDefaultShortcutSequences();
+std::vector<InkpodShortcutSequenceV2> BuildDefaultShortcutSequences();
 
-const InkpodShortcutSequence* FindShortcutSequence(
-    std::span<const InkpodShortcutSequence> bindings,
+const InkpodShortcutSequenceV2* FindShortcutSequence(
+    std::span<const InkpodShortcutSequenceV2> bindings,
     UINT command) noexcept;
 
-std::wstring FormatShortcutSequence(const InkpodShortcutSequence& sequence);
+std::wstring FormatShortcutSequence(const InkpodShortcutSequenceV2& sequence);
 
 std::wstring MenuCommandDisplayName(HMENU menu, UINT command);
 
 void ApplyShortcutLabelsToMenu(
     HMENU menu,
-    std::span<const InkpodShortcutSequence> bindings) noexcept;
+    std::span<const InkpodShortcutSequenceV2> bindings) noexcept;
 
 }  // namespace inkpod::windows::ui

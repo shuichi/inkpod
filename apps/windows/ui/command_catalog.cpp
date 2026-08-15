@@ -25,14 +25,24 @@ constexpr UINT kCommandIds[] = {
 #undef INKPOD_COMMAND_STATE
 };
 
-constexpr InkpodShortcutStroke Stroke(UINT key, std::uint32_t modifiers = 0U) noexcept {
-    return {key, modifiers};
+constexpr InkpodShortcutStrokeV2 Stroke(UINT key, std::uint32_t modifiers = 0U) noexcept {
+    return {
+        sizeof(InkpodShortcutStrokeV2),
+        INKPOD_SHORTCUT_KEY_UNICODE_SCALAR,
+        key,
+        modifiers};
 }
 
-InkpodShortcutSequence Sequence(
+constexpr InkpodShortcutStrokeV2 NamedStroke(
+    InkpodShortcutNamedKey key,
+    std::uint32_t modifiers = 0U) noexcept {
+    return {sizeof(InkpodShortcutStrokeV2), INKPOD_SHORTCUT_KEY_NAMED, key, modifiers};
+}
+
+InkpodShortcutSequenceV2 Sequence(
     UINT command,
-    std::initializer_list<InkpodShortcutStroke> strokes) noexcept {
-    InkpodShortcutSequence sequence{};
+    std::initializer_list<InkpodShortcutStrokeV2> strokes) noexcept {
+    InkpodShortcutSequenceV2 sequence{};
     sequence.struct_size = sizeof(sequence);
     sequence.command_id = command;
     sequence.stroke_count = static_cast<std::uint32_t>(strokes.size());
@@ -119,10 +129,10 @@ const wchar_t* GroupName(UINT command) noexcept {
     }
 }
 
-bool DirectSequence(UINT command, InkpodShortcutSequence& sequence) noexcept {
-    constexpr auto control = INKPOD_SHORTCUT_MODIFIER_CONTROL;
+bool DirectSequence(UINT command, InkpodShortcutSequenceV2& sequence) noexcept {
+    constexpr auto control = INKPOD_SHORTCUT_MODIFIER_PRIMARY;
     constexpr auto shift = INKPOD_SHORTCUT_MODIFIER_SHIFT;
-    constexpr auto alt = INKPOD_SHORTCUT_MODIFIER_ALT;
+    constexpr auto alt = INKPOD_SHORTCUT_MODIFIER_ALTERNATE;
     switch (command) {
         case IDM_FILE_NEW: sequence = Sequence(command, {Stroke(L'N', control)}); return true;
         case IDM_FILE_OPEN: sequence = Sequence(command, {Stroke(L'O', control)}); return true;
@@ -130,28 +140,38 @@ bool DirectSequence(UINT command, InkpodShortcutSequence& sequence) noexcept {
         case IDM_FILE_SAVE_AS:
             sequence = Sequence(command, {Stroke(L'S', control | shift)});
             return true;
-        case IDM_APP_EXIT: sequence = Sequence(command, {Stroke(VK_F4, alt)}); return true;
-        case IDM_HELP_MANUAL: sequence = Sequence(command, {Stroke(VK_F1)}); return true;
+        case IDM_APP_EXIT:
+            sequence = Sequence(command, {NamedStroke(INKPOD_SHORTCUT_NAMED_F1 + 3U, alt)});
+            return true;
+        case IDM_HELP_MANUAL:
+            sequence = Sequence(command, {NamedStroke(INKPOD_SHORTCUT_NAMED_F1)});
+            return true;
         case IDM_VIEW_CLOSE:
-            sequence = Sequence(command, {Stroke(VK_F4, control)});
+            sequence = Sequence(
+                command, {NamedStroke(INKPOD_SHORTCUT_NAMED_F1 + 3U, control)});
             return true;
         case IDM_TAB_NEXT:
-            sequence = Sequence(command, {Stroke(VK_TAB, control)});
+            sequence = Sequence(command, {NamedStroke(INKPOD_SHORTCUT_NAMED_TAB, control)});
             return true;
         case IDM_TAB_PREVIOUS:
-            sequence = Sequence(command, {Stroke(VK_TAB, control | shift)});
+            sequence = Sequence(
+                command, {NamedStroke(INKPOD_SHORTCUT_NAMED_TAB, control | shift)});
             return true;
         case IDM_TAB_MOVE_LEFT:
-            sequence = Sequence(command, {Stroke(VK_PRIOR, control | shift)});
+            sequence = Sequence(
+                command, {NamedStroke(INKPOD_SHORTCUT_NAMED_PAGE_UP, control | shift)});
             return true;
         case IDM_TAB_MOVE_RIGHT:
-            sequence = Sequence(command, {Stroke(VK_NEXT, control | shift)});
+            sequence = Sequence(
+                command, {NamedStroke(INKPOD_SHORTCUT_NAMED_PAGE_DOWN, control | shift)});
             return true;
         case IDM_EDITOR_SPLIT_RIGHT:
-            sequence = Sequence(command, {Stroke(VK_RIGHT, control | alt)});
+            sequence = Sequence(
+                command, {NamedStroke(INKPOD_SHORTCUT_NAMED_RIGHT, control | alt)});
             return true;
         case IDM_EDITOR_SPLIT_DOWN:
-            sequence = Sequence(command, {Stroke(VK_DOWN, control | alt)});
+            sequence = Sequence(
+                command, {NamedStroke(INKPOD_SHORTCUT_NAMED_DOWN, control | alt)});
             return true;
         case IDM_EDITOR_MOVE_OTHER_GROUP:
             sequence = Sequence(command, {Stroke(L'M', control | alt)});
@@ -163,7 +183,8 @@ bool DirectSequence(UINT command, InkpodShortcutSequence& sequence) noexcept {
             sequence = Sequence(command, {Stroke(L'W', control | alt)});
             return true;
         case IDM_EDITOR_GROUP_NEXT:
-            sequence = Sequence(command, {Stroke(VK_F6, control)});
+            sequence = Sequence(
+                command, {NamedStroke(INKPOD_SHORTCUT_NAMED_F1 + 5U, control)});
             return true;
         case IDM_WORKSPACE_NEW_WINDOW:
             sequence = Sequence(command, {Stroke(L'N', control | shift)});
@@ -205,7 +226,9 @@ bool DirectSequence(UINT command, InkpodShortcutSequence& sequence) noexcept {
         case IDM_SELECTION_WAND: sequence = Sequence(command, {Stroke(L'W')}); return true;
         case IDM_EFFECT_GRADIENT: sequence = Sequence(command, {Stroke(L'G')}); return true;
         case IDM_EFFECT_AIRBRUSH: sequence = Sequence(command, {Stroke(L'A')}); return true;
-        case IDM_PALETTE_NEXT_GROUP: sequence = Sequence(command, {Stroke(VK_TAB)}); return true;
+        case IDM_PALETTE_NEXT_GROUP:
+            sequence = Sequence(command, {NamedStroke(INKPOD_SHORTCUT_NAMED_TAB)});
+            return true;
         case IDM_MOTION_FPS_30:
             sequence = Sequence(command, {Stroke(L'3', control | alt)});
             return true;
@@ -358,7 +381,7 @@ bool FindMenuText(HMENU menu, UINT command, std::wstring& output) {
 
 void ApplyShortcutLabels(
     HMENU menu,
-    std::span<const InkpodShortcutSequence> bindings) noexcept {
+    std::span<const InkpodShortcutSequenceV2> bindings) noexcept {
     const int count = GetMenuItemCount(menu);
     for (int position = 0; position < count; ++position) {
         MENUITEMINFOW item{};
@@ -374,7 +397,7 @@ void ApplyShortcutLabels(
             || item.wID == std::numeric_limits<UINT>::max()) {
             continue;
         }
-        const InkpodShortcutSequence* sequence = FindShortcutSequence(bindings, item.wID);
+        const InkpodShortcutSequenceV2* sequence = FindShortcutSequence(bindings, item.wID);
         if (sequence == nullptr) {
             continue;
         }
@@ -406,31 +429,37 @@ void ApplyShortcutLabels(
     }
 }
 
-std::wstring KeyName(const InkpodShortcutStroke& stroke) {
-    switch (stroke.virtual_key) {
-        case VK_TAB: return L"Tab";
-        case VK_SPACE: return L"Space";
-        case VK_RETURN: return L"Enter";
-        case VK_ESCAPE: return L"Esc";
-        case VK_LEFT: return L"Left";
-        case VK_RIGHT: return L"Right";
-        case VK_HOME: return L"Home";
-        case VK_END: return L"End";
-        case VK_F4: return L"F4";
-        default: break;
+std::wstring KeyName(const InkpodShortcutStrokeV2& stroke) {
+    if (stroke.key_kind == INKPOD_SHORTCUT_KEY_NAMED) {
+        switch (stroke.key_value) {
+            case INKPOD_SHORTCUT_NAMED_TAB: return L"Tab";
+            case INKPOD_SHORTCUT_NAMED_SPACE: return L"Space";
+            case INKPOD_SHORTCUT_NAMED_RETURN: return L"Enter";
+            case INKPOD_SHORTCUT_NAMED_ESCAPE: return L"Esc";
+            case INKPOD_SHORTCUT_NAMED_BACKSPACE: return L"Backspace";
+            case INKPOD_SHORTCUT_NAMED_DELETE: return L"Delete";
+            case INKPOD_SHORTCUT_NAMED_LEFT: return L"Left";
+            case INKPOD_SHORTCUT_NAMED_RIGHT: return L"Right";
+            case INKPOD_SHORTCUT_NAMED_UP: return L"Up";
+            case INKPOD_SHORTCUT_NAMED_DOWN: return L"Down";
+            case INKPOD_SHORTCUT_NAMED_HOME: return L"Home";
+            case INKPOD_SHORTCUT_NAMED_END: return L"End";
+            case INKPOD_SHORTCUT_NAMED_PAGE_UP: return L"Page Up";
+            case INKPOD_SHORTCUT_NAMED_PAGE_DOWN: return L"Page Down";
+            default:
+                if (stroke.key_value >= INKPOD_SHORTCUT_NAMED_F1
+                    && stroke.key_value <= INKPOD_SHORTCUT_NAMED_F24) {
+                    return L"F" + std::to_wstring(
+                        stroke.key_value - INKPOD_SHORTCUT_NAMED_F1 + 1U);
+                }
+                return L"?";
+        }
     }
-    if ((stroke.virtual_key >= L'A' && stroke.virtual_key <= L'Z')
-        || (stroke.virtual_key >= L'0' && stroke.virtual_key <= L'9')) {
-        return std::wstring(1U, static_cast<wchar_t>(stroke.virtual_key));
+    if (stroke.key_kind != INKPOD_SHORTCUT_KEY_UNICODE_SCALAR
+        || stroke.key_value > static_cast<std::uint32_t>(std::numeric_limits<wchar_t>::max())) {
+        return L"?";
     }
-    const UINT scan = MapVirtualKeyW(stroke.virtual_key, MAPVK_VK_TO_VSC);
-    wchar_t buffer[64]{};
-    const LONG key_data = static_cast<LONG>(scan << 16)
-        | ((stroke.modifiers & INKPOD_SHORTCUT_MODIFIER_EXTENDED) != 0U ? (1L << 24) : 0L);
-    if (GetKeyNameTextW(key_data, buffer, static_cast<int>(std::size(buffer))) > 0) {
-        return buffer;
-    }
-    return L"?";
+    return std::wstring(1U, static_cast<wchar_t>(stroke.key_value));
 }
 
 }  // namespace
@@ -439,12 +468,12 @@ std::span<const UINT> MenuCommandCatalog() noexcept {
     return kCommandIds;
 }
 
-std::vector<InkpodShortcutSequence> BuildDefaultShortcutSequences() {
-    std::vector<InkpodShortcutSequence> result;
+std::vector<InkpodShortcutSequenceV2> BuildDefaultShortcutSequences() {
+    std::vector<InkpodShortcutSequenceV2> result;
     result.reserve(std::size(kCommandIds));
     std::map<UINT, UINT> group_ordinals;
     for (const UINT command : kCommandIds) {
-        InkpodShortcutSequence direct{};
+        InkpodShortcutSequenceV2 direct{};
         if (DirectSequence(command, direct)) {
             result.push_back(direct);
             continue;
@@ -468,8 +497,8 @@ std::vector<InkpodShortcutSequence> BuildDefaultShortcutSequences() {
     return result;
 }
 
-const InkpodShortcutSequence* FindShortcutSequence(
-    std::span<const InkpodShortcutSequence> bindings,
+const InkpodShortcutSequenceV2* FindShortcutSequence(
+    std::span<const InkpodShortcutSequenceV2> bindings,
     UINT command) noexcept {
     const auto found = std::find_if(bindings.begin(), bindings.end(), [command](const auto& binding) {
         return binding.command_id == command;
@@ -477,7 +506,7 @@ const InkpodShortcutSequence* FindShortcutSequence(
     return found == bindings.end() ? nullptr : &*found;
 }
 
-std::wstring FormatShortcutSequence(const InkpodShortcutSequence& sequence) {
+std::wstring FormatShortcutSequence(const InkpodShortcutSequenceV2& sequence) {
     std::wstring output;
     const std::uint32_t count = std::min(
         sequence.stroke_count,
@@ -487,14 +516,17 @@ std::wstring FormatShortcutSequence(const InkpodShortcutSequence& sequence) {
             output += L", ";
         }
         const auto& stroke = sequence.strokes[index];
-        if ((stroke.modifiers & INKPOD_SHORTCUT_MODIFIER_CONTROL) != 0U) {
+        if ((stroke.modifiers & INKPOD_SHORTCUT_MODIFIER_PRIMARY) != 0U) {
             output += L"Ctrl+";
         }
         if ((stroke.modifiers & INKPOD_SHORTCUT_MODIFIER_SHIFT) != 0U) {
             output += L"Shift+";
         }
-        if ((stroke.modifiers & INKPOD_SHORTCUT_MODIFIER_ALT) != 0U) {
+        if ((stroke.modifiers & INKPOD_SHORTCUT_MODIFIER_ALTERNATE) != 0U) {
             output += L"Alt+";
+        }
+        if ((stroke.modifiers & INKPOD_SHORTCUT_MODIFIER_CONTROL) != 0U) {
+            output += L"Physical Ctrl+";
         }
         output += KeyName(stroke);
     }
@@ -511,7 +543,7 @@ std::wstring MenuCommandDisplayName(HMENU menu, UINT command) {
 
 void ApplyShortcutLabelsToMenu(
     HMENU menu,
-    std::span<const InkpodShortcutSequence> bindings) noexcept {
+    std::span<const InkpodShortcutSequenceV2> bindings) noexcept {
     if (menu != nullptr) {
         ApplyShortcutLabels(menu, bindings);
     }

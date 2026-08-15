@@ -82,14 +82,14 @@ tests/macos/
 | 現在のfrontendは C++/Win32、CanvasはD3D11/D2D/DXGI                                              | [SPEC.md:9–16](/Users/shuichi/GitHub/inkpod/SPEC.md:9)                                                                                                                                                                                                  | C++ frontendを再利用せず、意味上のownerとrouteだけ写像する |
 | CMakeが唯一のbuild入口                                                                          | [AGENTS.md:19](/Users/shuichi/GitHub/inkpod/AGENTS.md:19)、[SPEC.md:14](/Users/shuichi/GitHub/inkpod/SPEC.md:14)                                                                                                                                        | Xcodeを並列のroot builderにしない                          |
 | Rust CoreはOS非依存、`inkpod-ffi`だけがstaticlib                                                | [Cargo.toml:1](/Users/shuichi/GitHub/inkpod/Cargo.toml:1)、[rust/inkpod-ffi/Cargo.toml:8](/Users/shuichi/GitHub/inkpod/rust/inkpod-ffi/Cargo.toml:8)                                                                                                    | 4 crateと意味処理をそのまま再利用できる                    |
-| ABIは純C・current version 14                                                                    | [core_ffi.h:4–69](/Users/shuichi/GitHub/inkpod/include/inkpod/core_ffi.h:4)、[docs/ffi.md:54](/Users/shuichi/GitHub/inkpod/docs/ffi.md:54)                                                                                                              | Clang moduleからSwiftへimport可能                          |
+| ABIは純C・current version 15                                                                    | [core_ffi.h:4–69](/Users/shuichi/GitHub/inkpod/include/inkpod/core_ffi.h:4)、[docs/ffi.md:54](/Users/shuichi/GitHub/inkpod/docs/ffi.md:54)                                                                                                              | Clang moduleからSwiftへimport可能                          |
 | Coreはcreate threadと同じOS threadで全操作/destroyが必要                                        | [core_ffi.h:3242](/Users/shuichi/GitHub/inkpod/include/inkpod/core_ffi.h:3242)                                                                                                                                                                          | dedicated `Thread` が必須                                  |
 | snapshotはimmutableでCoreから独立し、renderer threadでrelease可能                               | [core_ffi.h:6007](/Users/shuichi/GitHub/inkpod/include/inkpod/core_ffi.h:6007)、[core_ffi.h:6176](/Users/shuichi/GitHub/inkpod/include/inkpod/core_ffi.h:6176)                                                                                          | Metal queueへownership transferできる                      |
 | native形式はv26／epoch 23のみ                                                                   | [docs/file-format.md:1–11](/Users/shuichi/GitHub/inkpod/docs/file-format.md:1)、[docs/determinism.md:3](/Users/shuichi/GitHub/inkpod/docs/determinism.md:3)                                                                                             | GUI移植ではversionを上げない                               |
 | 保存はsame-directory temporary→flush→replace、成功後だけsavepoint更新                           | [docs/file-format.md:1270](/Users/shuichi/GitHub/inkpod/docs/file-format.md:1270)                                                                                                                                                                       | Sandbox下でもこのatomicityを維持する必要がある             |
 | Windows owner/thread/snapshot設計は既に分離済み                                                 | [docs/architecture.md:334](/Users/shuichi/GitHub/inkpod/docs/architecture.md:334)、[docs/architecture.md:479](/Users/shuichi/GitHub/inkpod/docs/architecture.md:479)、[docs/architecture.md:505](/Users/shuichi/GitHub/inkpod/docs/architecture.md:505) | Mac側の設計雛形として利用できる                            |
-| `apps/macos`、Xcode project、Swift/module mapは存在しない                                       | 読み取り専用tree確認                                                                                                                                                                                                                                    | macOS frontend基盤は未着手                                 |
-| `PORT-001` はCore portabilityをVerifiedとしているが、Sandbox frontendのfile-authority gapが残る | [docs/compatibility.md:31](/Users/shuichi/GitHub/inkpod/docs/compatibility.md:31)                                                                                                                                                                       | M4に明示的なfile access decision gateが必要                |
+| `apps/macos`にchecked-in Xcode project、値型CoreHost、SwiftUI product app、AppKit/Metal Canvas、Sandbox file/clipboard adapter、multi-view workspace、paint/color/selection/history/filter/vector/annotation/Cut/animation/Batch UI、XCTestが存在する | [apps/macos](/Users/shuichi/GitHub/inkpod/apps/macos)、[InkpodMacOS.cmake](/Users/shuichi/GitHub/inkpod/cmake/macos/InkpodMacOS.cmake)                                                                                                                  | M0–M10のbuild／owner thread／product Canvas／file lifecycle／workspace／paint・color／selection・history／filter・vector・annotation／Cut・animation／Batchが完了 |
+| `PORT-001` のSandbox frontend file-authority gapはM4、複数folderのjob-lifetime authorityはM10で解消した | [docs/compatibility.md:31](/Users/shuichi/GitHub/inkpod/docs/compatibility.md:31)                                                                                                                                                                       | M11の配布hardeningは別scope                                |
 
 ### Command inventory の正確な基準
 
@@ -106,7 +106,7 @@ production外は、履歴可視化rangeのfirst/last marker 2個と、予約aggr
 
 391 occurrence は、384 unique command、Filter/Toolに重複する Dust 1件、Layer paneの代替control 6件で構成される。[app_ui_ja.generated.rc:51](/Users/shuichi/GitHub/inkpod/apps/windows/app/app_ui_ja.generated.rc:51)、[app_ui_ja.generated.rc:296](/Users/shuichi/GitHub/inkpod/apps/windows/app/app_ui_ja.generated.rc:296)、[app_ui_ja.generated.rc:877](/Users/shuichi/GitHub/inkpod/apps/windows/app/app_ui_ja.generated.rc:877)
 
-[docs/windows-command-inventory.md:9](/Users/shuichi/GitHub/inkpod/docs/windows-command-inventory.md:9) はこの区別を概ね記録している。一方、[docs/primitive-route-inventory.md:174](/Users/shuichi/GitHub/inkpod/docs/primitive-route-inventory.md:174) の「381 Windows commands」は古いproseで、同文書のmachine-readable節とsource-derived testは384を扱っている。[route_inventory.rs:368](/Users/shuichi/GitHub/inkpod/rust/inkpod-core/tests/route_inventory.rs:368)
+[docs/windows-command-inventory.md:9](/Users/shuichi/GitHub/inkpod/docs/windows-command-inventory.md:9) はこの区別を概ね記録し、[docs/primitive-route-inventory.md:174](/Users/shuichi/GitHub/inkpod/docs/primitive-route-inventory.md:174) のmachine-readable節とsource-derived testも384を扱っている。[route_inventory.rs:368](/Users/shuichi/GitHub/inkpod/rust/inkpod-core/tests/route_inventory.rs:368)
 
 macOS parityの分母は384とし、391を再現対象のUI数にしない。
 
@@ -120,8 +120,8 @@ macOS parityの分母は384とし、391を再現対象のUI数にしない。
 - Swift 6.3.3、target `arm64-apple-macosx26.0`
 - rustc 1.95.0
 - CMake 4.4.2
-- installed Rust targetは `aarch64-apple-darwin` のみ。`x86_64-apple-darwin` は未導入
-- build/testは今回実行していない
+- installed Rust targetは `aarch64-apple-darwin` と `x86_64-apple-darwin`
+- M0–M10のarm64 runtime、64-session headless integration、product Core/Metal、Sandbox file/clipboard、document/layer/plane/multi-view workspace、paint/fill/color、selection/transform/history、filter/effect/adjustment/vector/annotation/frame/vanishing-point、Cut/Sequence/Light Table/Subpalette/Reference/motion、Batch/job縦切りは通過。今回のV-MacUIはproduct lifecycle 6件とlaunched-product 8件を全通過し、Universal 2 app cross-build／link検査は既存証跡がある。Intel Tahoe実機runtimeは未検証
 
 ### 再利用する部分
 
@@ -142,16 +142,10 @@ macOS parityの分母は384とし、391を再現対象のUI数にしない。
 - MSIX/portable ZIP packaging
 - Windows DPI、UI Automation、shell integration
 
-### 現在不足している基盤
+### M11へ残る基盤
 
-- macOS product target、XCTest/XCUITest target
-- C headerのClang moduleとSwift安全wrapper
-- dedicated Core owner threadのSwift実装
-- Metal rendererとCanvas input adapter
-- macOS command/parity manifest
-- String Catalog、asset catalog、UTType、entitlements
-- App Sandbox file-authority broker
-- macOS smoke、accessibility、performance、sign/notarize pipeline
+- 配布用asset catalog／entitlements最終監査
+- complete XCUITest accessibility、manual tablet/multiple-display/sleep-wake、Instruments、sign/notarize pipeline
 
 ## 3. macOS向け設計原則
 
@@ -479,9 +473,10 @@ flowchart LR
 
 ### M0 — Contract・build・ABI import基盤
 
+- **実装状態:** 完了。CMake経由のarm64 ABI smoke、384 parity gate、Universal 2 cross-build／link検査を実装済み。Intel Tahoe実機runtimeは未検証。
 - **完了状態:** CMake入口からarm64 Rust staticlib、Clang module、Swift ABI smokeをbuild/runできる。smokeは専用test thread上でCore create→query→snapshot build/release→destroyを行う。384 command parity manifestがsourceと一致する。
 - **要件:** `ARCH-001/002`,`ABI-001/002`,`PORT-001`,`SAFE-001`。先行なし。
-- **scope/file:** `apps/macos/Inkpod.xcodeproj`、`Config/*.xcconfig`、`CoreBridge/C/include/{InkpodCoreC.h,module.modulemap}`、最小Swift bridge、`cmake/macos/*`、macOS CMake preset、`tests/macos/command-parity.json`と検証script。
+- **scope/file:** `apps/macos/Inkpod.xcodeproj`、`Config/*.xcconfig`、`CoreBridge/C/include/{InkpodCoreC.h,module.modulemap}`、最小Swift bridge、`cmake/macos/*`、macOS CMake preset、`tests/macos/macos-command-parity.json`と検証script。
 - **data flow:** Swift smoke→Clang module→ABI v14→Rust staticlib。Universal releaseはarm64/x86_64 thin `.a`を別target-dirで構築して`lipo`する。
 - **状態:** success、ABI mismatch、short struct、NULL、wrong-thread、unknown status、double release、link failure。
 - **test:** C11/C++20 include/layout、Swift import/link、opaque pointer NULL化、TLS diagnostic同thread copy、snapshot cross-thread release、raw387の完全partition。
@@ -492,6 +487,7 @@ flowchart LR
 
 ### M1 — 固定Core threadとsession lifecycle
 
+- **実装状態:** 完了。値型 facade、4096+64 bounded mailbox、固定 `Foundation.Thread` 内 registry、64-session headless executable、13 XCTest と Thread Sanitizer 検証を実装済み。
 - **完了状態:** headless integration executableが複数Core sessionを一つの固定OS thread上で作成・操作・破棄し、queue saturationやshutdown raceを再現可能に検証する。
 - **要件:** `SESSION-001`,`WORKSPACE-002`,`CELL-001`,`ABI-001`,`SAFE-001`。依存M0。
 - **scope/file:** `CoreBridge/Swift/CoreOwnerThread.swift`、`CoreHost.swift`、`CoreRequest/Result.swift`、session/cut/view stable ID型、bounded mailbox、task wrapper、integration tests。
@@ -505,6 +501,8 @@ flowchart LR
 
 ### M2 — SwiftUI product shellとMetal Canvas
 
+- **実装状態:** 完了。`WindowGroup` product app、MainActor workspace、固定Core owner thread、専用Metal renderer threadを接続し、実Cellのdefault pencil／cancel／pan／zoom／Undoとsnapshot描画を実装済み。Retina 2×での自動縦切りとMetal API Validationは通過。tablet実機、複数display、sleep/wake、Instruments、XCUITest accessibility auditは利用可能環境でのmanual/extended evidence待ち。
+- **command parity:** `milestone: 2`の19行はM3でroute/state/menu・toolbar・context-menu surfaceとfeature testを接続し、`implemented`へ進めた。M2の直接gestureだけを根拠にした状態変更ではない。
 - **完了状態:** product appが`WindowGroup`で起動し、実Core CellをMetal Canvasへ表示する。mouse/tabletでdefault pencil stroke、pan/zoom、cancel、Undoが動く。
 - **要件:** `RENDER-001`,`VIEW-001..005`,`SNAP-001`,`PAINT-001`,`HIST-001`,`PERF-001`,`WIN-002`のplatform-neutral意味。依存M1。
 - **scope/file:** `App/InkpodApp.swift`、Application/Workspace owner、`Renderer/{CanvasHostView,MetalRendererHost,SurfaceRegistry,TileCache}.swift`、`.metal` shader、AppKit event adapter。
@@ -518,6 +516,7 @@ flowchart LR
 
 ### M3 — Command・menu・shortcut・localization
 
+- **実装状態:** 完了。M2から保留した19 View行とM3の11行だけを同一command catalog/router/stateへ接続した。M4完了後のparity manifestはM4の26行を加えた計56行を`implemented`とし、後続328行は`planned`のままでUIへ出していない。
 - **完了状態:** 実装済みsemantic commandが標準menu、toolbar、context menuから同じrouter/stateへ到達し、ja/en、Settings、shortcut編集、IME guardが動く。
 - **要件:** `SHORT-001`,`WORKSPACE-002`,`HIST-001`、新規`MAC-SHELL-001`案。依存M2。
 - **scope/file:** Commands descriptor/router/state provider、`Localizable.xcstrings`、Settings scene、Help/About/Acknowledgements、shortcut editor。
@@ -528,10 +527,11 @@ flowchart LR
 - **検証:** V-Rust＋V-MacUnit＋V-MacUI＋Windows CIの既存debug/release presets。
 - **完了判定:** ABI v15 driftなし、Windows regressionなし、UI未実装commandのplaceholder surfaceなし。
 - **risk/mitigation:** ABI riskをshortcut変更だけに限定し、M3内でもCore/FFI test→Windows adapter→Mac UIの順で縦切りする。
-- **後続:** parity manifestの未実装行は残せるが、UIには出さない。
+- **後続:** M6完了後もM7以降のparity 211行は`planned`のまま残し、対応milestoneまでUIには出さない。selection/history可視化は先取りしない。
 
 ### M4 — File lifecycle・Sandbox・clipboard/drop
 
+- **実装状態:** 完了。ABI v15 path APIをsecurity-scope leaseと`NSFileCoordinator`の内側で使用し、native/open/save/recovery、PNG/TIFF/TGA/BMP、Finder drop、private typed＋PNG＋TIFF pasteboardをproduct UIへ接続した。`milestone: 4`の26行だけを`implemented`へ進め、累計56行、後続328行は`planned`のままとした。
 - **完了状態:** New/Open/Open Recent/Save/Save As/Revert/autosave/recovery、common image import/export、Finder drop、typed clipboardが実ファイルで動く。
 - **要件:** `IO-001/002`,`SESSION-001`,`CLIP-001`,`CUT-001`,`SAFE-001`,`PORT-001`。依存M1、product UIはM2。
 - **scope/file:** `FileAccessBroker`、security-scope lease/bookmark store、NSOpen/SavePanel adapter、NSFileCoordinator adapter、UTType/Info.plist、NSPasteboard/drag destination。
@@ -546,6 +546,8 @@ flowchart LR
 
 ### M5 — Document/Layer/Plane・multi-view workspace
 
+- **実装状態:** 完了。New Cell plan／Properties／Layer・Plane inspector、同一sessionの複数view、最大2 EditorGroup、window間move/copy、follow/pin pane target、named workspace／5 presets／versioned layout restoreをproduct UIへ接続した。`milestone: 5`の67行だけを`implemented`へ進め、累計123行、後続261行は`planned`のままUIへ出していない。複数displayの選択/clampは自動検証済みで、物理複数display操作は未検証。
+- **command parity:** 67行すべてがtyped descriptor、単一route/state owner、File／View／Cell／Window menuまたはLayer/Plane inspector surface、`MAC-CELL-WORKFLOW-001`／`MAC-WORKSPACE-001` testへ接続済み。`VIEW-005`のvector diagnostic 4行はMetal/vector surfaceを必要とするためM8の`planned`を維持する。
 - **完了状態:** New Cellの全条件、Cell properties、Layer/Plane tree、同じsessionの複数view、最大2 EditorGroup、window間view移動、named workspaceが動く。
 - **要件:** `DOC-001/002/003`,`CELL-001`,`VIEW-004/005`,`WORKSPACE-001/002`,`SESSION-001`。依存M2–M4。
 - **scope/file:** New Cell/Properties sheet、LayerPlane inspector、EditorGroup split/tab、pane target model、workspace record/presets。
@@ -559,6 +561,8 @@ flowchart LR
 
 ### M6 — Paint・Fill・Color
 
+- **実装状態:** 完了。Tool／Tool Options、pencil・brush・eraser、fill options、eyedropper、raster color replacement、Color／Palette／Chart／Locatorをproduct Canvasから既存ABI v15のCore primitiveへ接続した。`milestone: 6`の50行だけを`implemented`へ進め、累計173行、後続211行は`planned`のままUIへ出していない。native `.inkpod` v26、replay epoch 23、procedure format v26は変更していない。
+- **command parity:** 49 `macEquivalent`行はtyped descriptor、単一route/state owner、Tools／Color／Selection／Window menu、toolbar、sidebar／inspector surface、`MAC-PAINT-SURFACE-001` testへ接続済み。`IDM_WORKSPACE_AUTOHIDE_LOCATOR` 1行はWindows固有edge AutoHideを複製せず、native inspector visibility routeを保つ`notApplicable`として完全実装扱いにした。Subpalette 4行はM9の`planned`を維持する。
 - **完了状態:** Tool/Tool Options、全raster paint/fill/color replacement、Color/Palette/Chart、LocatorがCanvasからCoreまで接続される。
 - **要件:** `PAINT-001..004`,`FILL-001..003`,`COLOR-REPLACE-001`,`COLOR-001/002`,`COLOR-CHART-PREVIEW-001`,`COLOR-OUTPUT-QA-001`。依存M5。
 - **scope/file:** Tool sidebar、contextual options、Color inspector、Palette/Chart/Locator panes、original tool symbol assets。
@@ -572,6 +576,8 @@ flowchart LR
 
 ### M7 — Selection・Transform・History
 
+- **実装状態:** 完了。全selection形状／演算、selection layer変換、floating pasteの5-anchor placement・scale・rotate、Canvas handle／keyboard／accessibility action、Core-authorityのUndo/Redo、dynamic history menu、branch History inspectorを既存ABI v15へ接続した。`milestone: 7`の31行だけを`implemented`へ進め、累計204行、後続180行は`planned`のままUIへ出していない。native `.inkpod` v26、replay epoch 23、procedure format v26は変更していない。
+- **command parity:** Undo/Redoを標準Edit command roleとCommand-Z／Shift-Command-Zへ統合し、残るM7行も単一`EditCommandRouter`／`EditStateProvider`、Edit／Selection menu、Canvas／inspector surface、`MAC-SELECTION-HISTORY-001`へ接続した。
 - **完了状態:** selection作成/演算、floating selection、clipboard paste positioning、mirror/rotate/scale/placement、Undo/Redo、branch history visualizationが動く。
 - **要件:** `SEL-001..004`,`CLIP-001`,`XFORM-001..003`,`HIST-001/002`。依存M6。
 - **scope/file:** Selection menu、Canvas handles、Transform sheet、History inspector、dynamic history menu adapter。
@@ -585,8 +591,10 @@ flowchart LR
 
 ### M8 — Filter・Effect・Vector・Annotation
 
+- **実装状態:** 完了。Filter／Effect／Adjustment、vector geometry・edit・selection・rasterize/vectorize、Text／Instruction annotation、shooting frame、vanishing point、instruction raster export、4つのvector diagnostic view commandを既存ABI v15へ接続した。`milestone: 8`の70行だけを`implemented`へ進め、累計274行、後続110行は`planned`のままUIへ出していない。native `.inkpod` v26、replay epoch 23、procedure format v26は変更していない。
+- **command parity:** 70行すべてがtyped descriptor、単一route/state owner、Image／Tools／Cell／View menuまたはFilter／Vector／Annotation inspector・Canvas surface、`MAC-FILTER-EFFECT-001`／`MAC-VECTOR-WORKFLOW-001`／`MAC-ANNOTATION-WORKFLOW-001`／`MAC-FRAME-GUIDE-001`／`MAC-RENDER-DIAGNOSTICS-001` testへ接続済み。M5で保留した`VIEW-005`の4行もこの縦切りで`implemented`へ進めた。
 - **完了状態:** Filter、tone adjustment、effects、adjustment layer、vector edit、annotation、shooting frame、vanishing pointがnative sheet/inspector/Canvasで動く。
-- **要件:** `FILTER-001/002`,`FILTER-PREVIEW-001`,`EFFECT-001`,`ADJUST-001`,`VECTOR-001/002`,`ANNOTATION-001`,`SHOOTING-FRAME-001`,`VANISHING-POINT-001`,`PAINT-002/003`。依存M7。
+- **要件:** `FILTER-001/002`,`FILTER-PREVIEW-001`,`EFFECT-001`,`ADJUST-001`,`VECTOR-001/002`,`ANNOTATION-001`,`SHOOTING-FRAME-001`,`VANISHING-POINT-001`,`PAINT-002/003`,`VIEW-005`。依存M7。
 - **scope/file:** Image/Tools commands、parameter sheets、preview coordinator、Vector/Annotation inspector、CoreText/font resource adapter、Metal overlay pipeline。
 - **data flow:** typed initial values→bounded preview request→latest-wins result→snapshot overlay／OK commit。
 - **状態:** success、parameter no-op、invalid/nonfinite、Cancel、stale revision/target、task failure、renderer resource failure。
@@ -598,6 +606,8 @@ flowchart LR
 
 ### M9 — Cut・Sequence・Light Table
 
+- **実装状態:** 完了。New Cut／Cut Properties／Cut Save／Cut Undo・Redo、Sequence構造編集・直接選択・Stop/Wrap navigation、Light Table、Subpalette、Reference、motion playbackを既存ABI v15とadditiveなidentified sequence importへ接続した。`milestone: 9`の59行だけを`implemented`へ進め、累計333行、M10の51行は`planned`のままUIへ出していない。native `.inkpod` v26、replay epoch 23、procedure format v26は変更していない。unit/integration、product lifecycle、Metal profileは通過したが、今回のlaunched-product XCUITestはrunnerがappをforegroundへ昇格できず、M9製品assertion前で環境上停止した。
+- **command parity:** 56 `macEquivalent`行はtyped descriptor、単一route/state owner、Animation／File／Edit／Window menu、Sequence timeline、Light Table／Subpalette／Reference inspector、Cut sheet、および`MAC-CUT-WORKFLOW-001`／`MAC-SEQUENCE-STRUCTURE-001`／`MAC-SEQUENCE-WORKFLOW-001`／`MAC-SEQUENCE-ENDPOINT-001`／`MAC-LIGHT-TABLE-001`／`MAC-MOTION-SUBPALETTE-001`／`MAC-ANIMATION-SURFACE-001` testへ接続済み。`IDM_WORKSPACE_AUTOHIDE_SEQUENCE`、`IDM_WORKSPACE_AUTOHIDE_LIGHT_TABLE`、`IDM_WORKSPACE_AUTOHIDE_REFERENCE`のWindows固有edge AutoHide 3行は、native inspector visibility routeを保つ`notApplicable`として完全実装扱いにした。
 - **完了状態:** Cut作成/編集/保存、Sequence、Light Table、Subpalette、Reference、motion playback、endpoint policyが一連のproduction workflowとして動く。
 - **要件:** `CUT-001`,`SEQ-001`,`SEQ-ENDPOINT-001`,`SEQ-STRUCT-001`,`SEQ-002`,`LT-001..003`,`COLOR-002`。依存M4–M6。
 - **scope/file:** Animation menu、Sequence bottom timeline、LightTable/Subpalette/Reference inspector、Cut sheets、motion controller。
@@ -611,6 +621,7 @@ flowchart LR
 
 ### M10 — Batchとlong-running jobs
 
+- **実装状態:** 完了。専用の値付き`WindowGroup`、全12 operation kind／24 concrete add command、順序付きgraph editor、`.inkbatch` v2 save/loadとper-run immutable clone、二セルexact-depth pair解決、security-scoped input/output lease、進捗・Cancel・永続reportを既存ABI v15へ接続した。window/workspace closeとapp shutdownはjobをcancelしてcompletionを待ち、leaseとRust-owned graph/task/report/pair ownerを全pathでexactly once解放する。`milestone: 10`の51行は50 `macEquivalent`＋1 native-surface `notApplicable`として`implemented`へ進み、累計384行、`planned`は0。native `.inkpod` v26、`.inkbatch` v2、replay epoch 23は変更していない。V-Rust、V-MacUnit（88/88）、V-MacUI（14/14）、CTest 20/20、full benchmarkの全semantic gateが通過した。
 - **完了状態:** 全concrete Batch operationを専用windowで構成、preview、dry-run、実行、cancelでき、job reportとoutputが残る。
 - **要件:** `BATCH-001..004`,`SAFE-001`,`PERF-001`,`IO-001/002`。依存M4、M6、M9。
 - **scope/file:** Batch `WindowGroup`、graph editor、input/output folder broker、job registry、progress/report UI、file promiseが必要な場合のadapter。
@@ -639,7 +650,13 @@ flowchart LR
 
 ### Verification profile
 
-計画上追加するpreset名であり、今回は作成・実行していない。
+各milestoneで必要になったprofileだけを追加する。M0ではV-Rust、V-MacUnit、
+V-Universal、M1ではextended Thread Sanitizer、M2ではV-MacUIと自動化可能な
+V-Metal API Validation targetを追加・実行済み。
+
+```text
+cmake --build --preset macos-arm64-debug --target inkpod_macos_tsan
+```
 
 **V-Rust**
 
@@ -668,6 +685,10 @@ cmake --build --preset macos-arm64-debug --target inkpod_macos_ui_test
 ```
 
 **V-Metal**
+
+```text
+cmake --build --preset macos-arm64-debug --target inkpod_macos_metal_check
+```
 
 - Metal API validation/capture
 - Retina/multiple display

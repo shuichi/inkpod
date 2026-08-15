@@ -12,8 +12,8 @@
 namespace inkpod::windows::ui {
 
 struct ShortcutUiState {
-    std::vector<InkpodShortcutSequence> bindings;
-    std::vector<InkpodShortcutStroke> pending_strokes;
+    std::vector<InkpodShortcutSequenceV2> bindings;
+    std::vector<InkpodShortcutStrokeV2> pending_strokes;
     ULONGLONG pending_deadline{};
     std::wstring pending_text;
 };
@@ -31,13 +31,18 @@ InkpodStatus ResetShortcuts(
 InkpodStatus RebindShortcut(
     app::CoreHost& engine,
     ShortcutUiState& state,
-    const InkpodShortcutSequence& replacement,
+    const InkpodShortcutSequenceV2& replacement,
     bool persist) noexcept;
 
 InkpodShortcutMatch ResolveShortcutStroke(
     ShortcutUiState& state,
-    InkpodShortcutStroke stroke,
+    InkpodShortcutStrokeV2 stroke,
     UINT& command) noexcept;
+
+bool NormalizeWindowsShortcutStroke(
+    std::uint32_t virtual_key,
+    std::uint32_t modifiers,
+    InkpodShortcutStrokeV2& output) noexcept;
 
 void ClearPendingShortcut(ShortcutUiState& state) noexcept;
 

@@ -375,6 +375,175 @@ pub unsafe extern "C" fn inkpod_core_sequence_import_mixed_encoded(
     })
 }
 
+/// Decodes a bounded sequence while preserving each persistent source identity.
+///
+/// # Safety
+/// Core and both equal-length strided input spans, including every nested byte
+/// span, must remain live and readable for this owner-thread call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_sequence_import_mixed_encoded_identified(
+    core: *mut InkpodCore,
+    files: *const InkpodNamedRasterInput,
+    file_count: u64,
+    file_stride_bytes: u64,
+    identities: *const InkpodSequenceSourceIdentity,
+    identity_stride_bytes: u64,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null()
+            || !is_aligned(core)
+            || files.is_null()
+            || !is_aligned(files)
+            || identities.is_null()
+            || !is_aligned(identities)
+            || file_count == 0
+            || file_count > 10_000
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "identified mixed sequence header is invalid",
+            );
+        }
+        let count = match usize::try_from(file_count) {
+            Ok(count) => count,
+            Err(_) => return fail(INKPOD_STATUS_INVALID_ARGUMENT, "sequence count overflows"),
+        };
+        let file_stride = match usize::try_from(file_stride_bytes) {
+            Ok(stride)
+                if stride >= size_of::<InkpodNamedRasterInput>()
+                    && stride % align_of::<InkpodNamedRasterInput>() == 0 =>
+            {
+                stride
+            }
+            _ => return fail(INKPOD_STATUS_INVALID_ARGUMENT, "sequence stride is invalid"),
+        };
+        let identity_stride = match usize::try_from(identity_stride_bytes) {
+            Ok(stride)
+                if stride >= size_of::<InkpodSequenceSourceIdentity>()
+                    && stride % align_of::<InkpodSequenceSourceIdentity>() == 0 =>
+            {
+                stride
+            }
+            _ => {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "sequence identity stride is invalid",
+                );
+            }
+        };
+        let file_storage = count
+            .saturating_sub(1)
+            .checked_mul(file_stride)
+            .and_then(|offset| offset.checked_add(size_of::<InkpodNamedRasterInput>()));
+        let identity_storage = count
+            .saturating_sub(1)
+            .checked_mul(identity_stride)
+            .and_then(|offset| offset.checked_add(size_of::<InkpodSequenceSourceIdentity>()));
+        if file_storage.is_none_or(|bytes| bytes > isize::MAX as usize)
+            || identity_storage.is_none_or(|bytes| bytes > isize::MAX as usize)
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "identified sequence record span overflows",
+            );
+        }
+        let mut decoded = Vec::with_capacity(count);
+        let mut total_bytes = 0_usize;
+        for index in 0..count {
+            // SAFETY: Both strided spans were bounded above and remain borrowed.
+            let file_pointer = unsafe {
+                files
+                    .cast::<u8>()
+                    .add(index * file_stride)
+                    .cast::<InkpodNamedRasterInput>()
+            };
+            let identity_pointer = unsafe {
+                identities
+                    .cast::<u8>()
+                    .add(index * identity_stride)
+                    .cast::<InkpodSequenceSourceIdentity>()
+            };
+            let file_size = match unsafe { validate_struct(file_pointer, "InkpodNamedRasterInput") }
+            {
+                Ok(size) => size,
+                Err(status) => return status,
+            };
+            let identity_size = match unsafe {
+                validate_struct(identity_pointer, "InkpodSequenceSourceIdentity")
+            } {
+                Ok(size) => size,
+                Err(status) => return status,
+            };
+            if file_size as usize > file_stride || identity_size as usize > identity_stride {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "identified sequence record exceeds stride",
+                );
+            }
+            // SAFETY: Complete records were validated above.
+            let file = unsafe { &*file_pointer };
+            let identity = unsafe { &*identity_pointer };
+            let document_uuid = (u128::from(identity.document_uuid_high) << 64)
+                | u128::from(identity.document_uuid_low);
+            if file.reserved != 0
+                || file.reserved2 != 0
+                || file.bytes.is_null()
+                || file.byte_count == 0
+                || file.byte_count > MAX_COMMON_RASTER_BYTES as u64
+                || identity.reserved != 0
+                || document_uuid == 0
+                || identity.source_generation == 0
+            {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "identified mixed sequence record is invalid",
+                );
+            }
+            let format = match parse_common_raster_format(file.format) {
+                Ok(format) => format,
+                Err(status) => return status,
+            };
+            let name = match unsafe { name_from_utf8(file.name_utf8, file.name_bytes) } {
+                Ok(name) => name.to_owned(),
+                Err(status) => return status,
+            };
+            let length = match usize::try_from(file.byte_count) {
+                Ok(length) => length,
+                Err(_) => return fail(INKPOD_STATUS_INVALID_ARGUMENT, "file length overflows"),
+            };
+            total_bytes = match total_bytes.checked_add(length) {
+                Some(total) if total <= MAX_COMMON_RASTER_BYTES => total,
+                _ => {
+                    return fail(
+                        INKPOD_STATUS_INVALID_ARGUMENT,
+                        "sequence bytes exceed bound",
+                    );
+                }
+            };
+            // SAFETY: Caller advertises this complete bounded byte span.
+            let bytes = unsafe { slice::from_raw_parts(file.bytes, length) }.to_vec();
+            decoded.push((
+                name,
+                format,
+                bytes,
+                document_uuid,
+                identity.source_generation,
+            ));
+        }
+        // SAFETY: Live owner-thread Core is required by contract.
+        let core = unsafe { &mut *core };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core.core.import_identified_mixed_sequence(decoded) {
+            Ok(()) => INKPOD_STATUS_OK,
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
 /// Encodes the configured sequence into a Rust-owned immutable file collection.
 ///
 /// # Safety

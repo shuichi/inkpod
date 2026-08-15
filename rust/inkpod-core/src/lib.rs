@@ -166,19 +166,19 @@ pub const MAX_GUIDES: usize = 4_096;
 pub const MAX_SHORTCUTS: usize = 1_024;
 /// Maximum number of key strokes in one shortcut sequence.
 pub const MAX_SHORTCUT_STROKES: usize = 4;
-/// Shortcut modifier bit for the Control key.
-pub const SHORTCUT_MODIFIER_CONTROL: u32 = 1 << 0;
+/// Shortcut modifier bit for the platform's primary command key.
+pub const SHORTCUT_MODIFIER_PRIMARY: u32 = 1 << 0;
 /// Shortcut modifier bit for the Shift key.
 pub const SHORTCUT_MODIFIER_SHIFT: u32 = 1 << 1;
-/// Shortcut modifier bit for the Alt key.
-pub const SHORTCUT_MODIFIER_ALT: u32 = 1 << 2;
-/// Shortcut modifier bit distinguishing extended virtual keys.
-pub const SHORTCUT_MODIFIER_EXTENDED: u32 = 1 << 3;
+/// Shortcut modifier bit for the platform's alternate/option key.
+pub const SHORTCUT_MODIFIER_ALTERNATE: u32 = 1 << 2;
+/// Shortcut modifier bit for the physical Control key.
+pub const SHORTCUT_MODIFIER_CONTROL: u32 = 1 << 3;
 /// Mask containing every supported shortcut modifier bit.
-pub const SHORTCUT_MODIFIER_MASK: u32 = SHORTCUT_MODIFIER_CONTROL
+pub const SHORTCUT_MODIFIER_MASK: u32 = SHORTCUT_MODIFIER_PRIMARY
     | SHORTCUT_MODIFIER_SHIFT
-    | SHORTCUT_MODIFIER_ALT
-    | SHORTCUT_MODIFIER_EXTENDED;
+    | SHORTCUT_MODIFIER_ALTERNATE
+    | SHORTCUT_MODIFIER_CONTROL;
 const MAX_STROKE_SAMPLES: usize = 1_048_576;
 const MAX_BRUSH_DIAMETER: f32 = 256.0;
 const MAX_STROKE_COORDINATE: f32 = 16_777_216.0;

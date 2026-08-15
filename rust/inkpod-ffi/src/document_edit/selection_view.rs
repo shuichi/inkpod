@@ -567,16 +567,126 @@ pub unsafe extern "C" fn inkpod_core_locator_neighborhood(
     })
 }
 
+fn shortcut_named_key(value: u32) -> Option<ShortcutNamedKey> {
+    match value {
+        INKPOD_SHORTCUT_NAMED_TAB => Some(ShortcutNamedKey::Tab),
+        INKPOD_SHORTCUT_NAMED_RETURN => Some(ShortcutNamedKey::Return),
+        INKPOD_SHORTCUT_NAMED_ESCAPE => Some(ShortcutNamedKey::Escape),
+        INKPOD_SHORTCUT_NAMED_SPACE => Some(ShortcutNamedKey::Space),
+        INKPOD_SHORTCUT_NAMED_BACKSPACE => Some(ShortcutNamedKey::Backspace),
+        INKPOD_SHORTCUT_NAMED_DELETE => Some(ShortcutNamedKey::Delete),
+        INKPOD_SHORTCUT_NAMED_LEFT => Some(ShortcutNamedKey::Left),
+        INKPOD_SHORTCUT_NAMED_RIGHT => Some(ShortcutNamedKey::Right),
+        INKPOD_SHORTCUT_NAMED_UP => Some(ShortcutNamedKey::Up),
+        INKPOD_SHORTCUT_NAMED_DOWN => Some(ShortcutNamedKey::Down),
+        INKPOD_SHORTCUT_NAMED_HOME => Some(ShortcutNamedKey::Home),
+        INKPOD_SHORTCUT_NAMED_END => Some(ShortcutNamedKey::End),
+        INKPOD_SHORTCUT_NAMED_PAGE_UP => Some(ShortcutNamedKey::PageUp),
+        INKPOD_SHORTCUT_NAMED_PAGE_DOWN => Some(ShortcutNamedKey::PageDown),
+        INKPOD_SHORTCUT_NAMED_F1..=INKPOD_SHORTCUT_NAMED_F24 => Some(ShortcutNamedKey::Function(
+            (value - INKPOD_SHORTCUT_NAMED_F1 + 1) as u8,
+        )),
+        _ => None,
+    }
+}
+
+fn shortcut_named_key_value(value: ShortcutNamedKey) -> u32 {
+    match value {
+        ShortcutNamedKey::Tab => INKPOD_SHORTCUT_NAMED_TAB,
+        ShortcutNamedKey::Return => INKPOD_SHORTCUT_NAMED_RETURN,
+        ShortcutNamedKey::Escape => INKPOD_SHORTCUT_NAMED_ESCAPE,
+        ShortcutNamedKey::Space => INKPOD_SHORTCUT_NAMED_SPACE,
+        ShortcutNamedKey::Backspace => INKPOD_SHORTCUT_NAMED_BACKSPACE,
+        ShortcutNamedKey::Delete => INKPOD_SHORTCUT_NAMED_DELETE,
+        ShortcutNamedKey::Left => INKPOD_SHORTCUT_NAMED_LEFT,
+        ShortcutNamedKey::Right => INKPOD_SHORTCUT_NAMED_RIGHT,
+        ShortcutNamedKey::Up => INKPOD_SHORTCUT_NAMED_UP,
+        ShortcutNamedKey::Down => INKPOD_SHORTCUT_NAMED_DOWN,
+        ShortcutNamedKey::Home => INKPOD_SHORTCUT_NAMED_HOME,
+        ShortcutNamedKey::End => INKPOD_SHORTCUT_NAMED_END,
+        ShortcutNamedKey::PageUp => INKPOD_SHORTCUT_NAMED_PAGE_UP,
+        ShortcutNamedKey::PageDown => INKPOD_SHORTCUT_NAMED_PAGE_DOWN,
+        ShortcutNamedKey::Function(value) => INKPOD_SHORTCUT_NAMED_F1 + u32::from(value) - 1,
+    }
+}
+
+unsafe fn parse_shortcut_stroke(
+    stroke: *const InkpodShortcutStrokeV2,
+) -> Result<ShortcutStroke, u32> {
+    if stroke.is_null() || !is_aligned(stroke) {
+        return Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "shortcut stroke is null or misaligned",
+        ));
+    }
+    // SAFETY: The public contract requires a readable size prefix.
+    unsafe { validate_struct(stroke, "InkpodShortcutStrokeV2")? };
+    // SAFETY: Full size and alignment were validated above.
+    let record = unsafe { stroke.read() };
+    let key = match record.key_kind {
+        INKPOD_SHORTCUT_KEY_UNICODE_SCALAR => char::from_u32(record.key_value)
+            .map(ShortcutKey::UnicodeScalar)
+            .ok_or_else(|| {
+                fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "shortcut Unicode key is not a scalar",
+                )
+            })?,
+        INKPOD_SHORTCUT_KEY_NAMED => shortcut_named_key(record.key_value)
+            .map(ShortcutKey::Named)
+            .ok_or_else(|| {
+                fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "shortcut named key is not defined",
+                )
+            })?,
+        _ => {
+            return Err(fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "shortcut key kind is not defined",
+            ));
+        }
+    };
+    if record.modifiers
+        & !(INKPOD_SHORTCUT_MODIFIER_PRIMARY
+            | INKPOD_SHORTCUT_MODIFIER_SHIFT
+            | INKPOD_SHORTCUT_MODIFIER_ALTERNATE
+            | INKPOD_SHORTCUT_MODIFIER_CONTROL)
+        != 0
+    {
+        return Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "shortcut modifiers contain unsupported bits",
+        ));
+    }
+    Ok(ShortcutStroke {
+        key,
+        modifiers: record.modifiers,
+    })
+}
+
+fn write_shortcut_stroke(stroke: ShortcutStroke) -> InkpodShortcutStrokeV2 {
+    let (key_kind, key_value) = match stroke.key {
+        ShortcutKey::UnicodeScalar(value) => (INKPOD_SHORTCUT_KEY_UNICODE_SCALAR, u32::from(value)),
+        ShortcutKey::Named(value) => (INKPOD_SHORTCUT_KEY_NAMED, shortcut_named_key_value(value)),
+    };
+    InkpodShortcutStrokeV2 {
+        struct_size: size_of::<InkpodShortcutStrokeV2>() as u32,
+        key_kind,
+        key_value,
+        modifiers: stroke.modifiers,
+    }
+}
+
 /// Rebinds one shortcut, replacing any conflicting binding deterministically.
 ///
 /// # Safety
 /// `core` must be a live handle used on its owner thread.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inkpod_core_shortcut_rebind(
+pub unsafe extern "C" fn inkpod_core_shortcut_rebind_v2(
     core: *mut InkpodCore,
     command_id: u32,
-    virtual_key: u32,
-    modifiers: u32,
+    stroke: *const InkpodShortcutStrokeV2,
 ) -> u32 {
     ffi_boundary(|| {
         clear_last_error();
@@ -589,11 +699,15 @@ pub unsafe extern "C" fn inkpod_core_shortcut_rebind(
         if thread_status != INKPOD_STATUS_OK {
             return thread_status;
         }
-        match core.core.rebind_shortcut(ShortcutBinding {
-            command_id,
-            virtual_key,
-            modifiers,
-        }) {
+        // SAFETY: The caller provides one readable size-versioned stroke record.
+        let stroke = match unsafe { parse_shortcut_stroke(stroke) } {
+            Ok(stroke) => stroke,
+            Err(status) => return status,
+        };
+        match core
+            .core
+            .rebind_shortcut(ShortcutBinding { command_id, stroke })
+        {
             Ok(()) => INKPOD_STATUS_OK,
             Err(error) => map_core_error(error),
         }
@@ -607,10 +721,9 @@ pub unsafe extern "C" fn inkpod_core_shortcut_rebind(
 /// `core` must be a live handle used on its owner thread and `out_command_id`
 /// must point to writable `u32` storage that does not overlap the core.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inkpod_core_shortcut_resolve(
+pub unsafe extern "C" fn inkpod_core_shortcut_resolve_v2(
     core: *mut InkpodCore,
-    virtual_key: u32,
-    modifiers: u32,
+    stroke: *const InkpodShortcutStrokeV2,
     out_command_id: *mut u32,
 ) -> u32 {
     ffi_boundary(|| {
@@ -632,7 +745,12 @@ pub unsafe extern "C" fn inkpod_core_shortcut_resolve(
         if thread_status != INKPOD_STATUS_OK {
             return thread_status;
         }
-        match core.core.resolve_shortcut(virtual_key, modifiers) {
+        // SAFETY: The caller provides one readable size-versioned stroke record.
+        let stroke = match unsafe { parse_shortcut_stroke(stroke) } {
+            Ok(stroke) => stroke,
+            Err(status) => return status,
+        };
+        match core.core.resolve_shortcut(stroke) {
             Ok(command_id) => {
                 // SAFETY: Output storage was validated above.
                 unsafe { out_command_id.write(command_id.unwrap_or(0)) };
@@ -666,7 +784,7 @@ pub unsafe extern "C" fn inkpod_core_shortcut_reset(core: *mut InkpodCore) -> u3
 }
 
 unsafe fn parse_shortcut_sequences(
-    sequences: *const InkpodShortcutSequence,
+    sequences: *const InkpodShortcutSequenceV2,
     sequence_count: u64,
     sequence_stride_bytes: u64,
 ) -> Result<Vec<ShortcutSequenceBinding>, u32> {
@@ -699,8 +817,8 @@ unsafe fn parse_shortcut_sequences(
     })?;
     if sequences.is_null()
         || !is_aligned(sequences)
-        || stride < size_of::<InkpodShortcutSequence>()
-        || stride % align_of::<InkpodShortcutSequence>() != 0
+        || stride < size_of::<InkpodShortcutSequenceV2>()
+        || stride % align_of::<InkpodShortcutSequenceV2>() != 0
     {
         return Err(fail(
             INKPOD_STATUS_INVALID_ARGUMENT,
@@ -709,7 +827,7 @@ unsafe fn parse_shortcut_sequences(
     }
     if (count - 1)
         .checked_mul(stride)
-        .and_then(|offset| offset.checked_add(size_of::<InkpodShortcutSequence>()))
+        .and_then(|offset| offset.checked_add(size_of::<InkpodShortcutSequenceV2>()))
         .filter(|span| *span <= isize::MAX as usize)
         .is_none()
     {
@@ -730,10 +848,10 @@ unsafe fn parse_shortcut_sequences(
                         "shortcut sequence offset overflow",
                     )
                 })?)
-                .cast::<InkpodShortcutSequence>()
+                .cast::<InkpodShortcutSequenceV2>()
         };
         // SAFETY: The pointer exposes a readable size prefix by the public contract.
-        let struct_size = unsafe { validate_struct(pointer, "InkpodShortcutSequence")? };
+        let struct_size = unsafe { validate_struct(pointer, "InkpodShortcutSequenceV2")? };
         if u64::from(struct_size) > sequence_stride_bytes {
             return Err(fail(
                 INKPOD_STATUS_INVALID_ARGUMENT,
@@ -754,31 +872,29 @@ unsafe fn parse_shortcut_sequences(
                 "shortcut stroke_count is invalid",
             ));
         }
+        let mut strokes = Vec::with_capacity(stroke_count);
+        for stroke in &record.strokes[..stroke_count] {
+            // SAFETY: The nested record is part of the validated readable sequence.
+            strokes.push(unsafe { parse_shortcut_stroke(stroke) }?);
+        }
         parsed.push(ShortcutSequenceBinding {
             command_id: record.command_id,
-            strokes: record.strokes[..stroke_count]
-                .iter()
-                .map(|stroke| ShortcutStroke {
-                    virtual_key: stroke.virtual_key,
-                    modifiers: stroke.modifiers,
-                })
-                .collect(),
+            strokes,
         });
     }
     Ok(parsed)
 }
 
-fn write_shortcut_sequence(binding: &ShortcutSequenceBinding) -> InkpodShortcutSequence {
-    let mut output = InkpodShortcutSequence {
-        struct_size: size_of::<InkpodShortcutSequence>() as u32,
+fn write_shortcut_sequence(binding: &ShortcutSequenceBinding) -> InkpodShortcutSequenceV2 {
+    let mut output = InkpodShortcutSequenceV2 {
+        struct_size: size_of::<InkpodShortcutSequenceV2>() as u32,
         command_id: binding.command_id,
         stroke_count: binding.strokes.len() as u32,
         reserved: 0,
-        strokes: [InkpodShortcutStroke::default(); 4],
+        strokes: [InkpodShortcutStrokeV2::default(); 4],
     };
     for (destination, source) in output.strokes.iter_mut().zip(&binding.strokes) {
-        destination.virtual_key = source.virtual_key;
-        destination.modifiers = source.modifiers;
+        *destination = write_shortcut_stroke(*source);
     }
     output
 }
@@ -788,9 +904,9 @@ fn write_shortcut_sequence(binding: &ShortcutSequenceBinding) -> InkpodShortcutS
 /// # Safety
 /// `core` and the borrowed strided sequence span must satisfy the public header contract.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inkpod_core_shortcut_defaults_set(
+pub unsafe extern "C" fn inkpod_core_shortcut_defaults_set_v2(
     core: *mut InkpodCore,
-    sequences: *const InkpodShortcutSequence,
+    sequences: *const InkpodShortcutSequenceV2,
     sequence_count: u64,
     sequence_stride_bytes: u64,
 ) -> u32 {
@@ -824,9 +940,9 @@ pub unsafe extern "C" fn inkpod_core_shortcut_defaults_set(
 /// # Safety
 /// `core` and the borrowed strided sequence span must satisfy the public header contract.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inkpod_core_shortcut_sequences_set(
+pub unsafe extern "C" fn inkpod_core_shortcut_sequences_set_v2(
     core: *mut InkpodCore,
-    sequences: *const InkpodShortcutSequence,
+    sequences: *const InkpodShortcutSequenceV2,
     sequence_count: u64,
     sequence_stride_bytes: u64,
 ) -> u32 {
@@ -860,9 +976,9 @@ pub unsafe extern "C" fn inkpod_core_shortcut_sequences_set(
 /// # Safety
 /// Outputs must satisfy the query/buffer contract in the public header.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inkpod_core_shortcut_sequences_copy(
+pub unsafe extern "C" fn inkpod_core_shortcut_sequences_copy_v2(
     core: *mut InkpodCore,
-    out_sequences: *mut InkpodShortcutSequence,
+    out_sequences: *mut InkpodShortcutSequenceV2,
     sequence_capacity: u64,
     sequence_stride_bytes: u64,
     out_sequence_count: *mut u64,
@@ -902,8 +1018,8 @@ pub unsafe extern "C" fn inkpod_core_shortcut_sequences_copy(
         }
         let stride = match usize::try_from(sequence_stride_bytes) {
             Ok(stride)
-                if stride >= size_of::<InkpodShortcutSequence>()
-                    && stride % align_of::<InkpodShortcutSequence>() == 0 =>
+                if stride >= size_of::<InkpodShortcutSequenceV2>()
+                    && stride % align_of::<InkpodShortcutSequenceV2>() == 0 =>
             {
                 stride
             }
@@ -927,7 +1043,7 @@ pub unsafe extern "C" fn inkpod_core_shortcut_sequences_copy(
         if !bindings.is_empty()
             && (bindings.len() - 1)
                 .checked_mul(stride)
-                .and_then(|offset| offset.checked_add(size_of::<InkpodShortcutSequence>()))
+                .and_then(|offset| offset.checked_add(size_of::<InkpodShortcutSequenceV2>()))
                 .filter(|span| *span <= isize::MAX as usize)
                 .is_none()
         {
@@ -942,7 +1058,7 @@ pub unsafe extern "C" fn inkpod_core_shortcut_sequences_copy(
                 out_sequences
                     .cast::<u8>()
                     .add(index * stride)
-                    .cast::<InkpodShortcutSequence>()
+                    .cast::<InkpodShortcutSequenceV2>()
             };
             // SAFETY: The destination record is writable and non-overlapping.
             unsafe { pointer.write(write_shortcut_sequence(binding)) };
@@ -956,11 +1072,11 @@ pub unsafe extern "C" fn inkpod_core_shortcut_sequences_copy(
 /// # Safety
 /// All input/output pointers must satisfy the public header contract.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inkpod_shortcut_sequence_resolve(
-    sequences: *const InkpodShortcutSequence,
+pub unsafe extern "C" fn inkpod_shortcut_sequence_resolve_v2(
+    sequences: *const InkpodShortcutSequenceV2,
     sequence_count: u64,
     sequence_stride_bytes: u64,
-    strokes: *const InkpodShortcutStroke,
+    strokes: *const InkpodShortcutStrokeV2,
     stroke_count: u32,
     out_match: *mut u32,
     out_command_id: *mut u32,
@@ -990,124 +1106,38 @@ pub unsafe extern "C" fn inkpod_shortcut_sequence_resolve(
             );
         }
         // SAFETY: The caller provides exactly stroke_count readable fixed-size records.
-        let input = unsafe { slice::from_raw_parts(strokes, count) };
-        if input.iter().any(|stroke| {
-            stroke.virtual_key == 0
-                || stroke.modifiers
-                    & !(INKPOD_SHORTCUT_MODIFIER_CONTROL
-                        | INKPOD_SHORTCUT_MODIFIER_SHIFT
-                        | INKPOD_SHORTCUT_MODIFIER_ALT
-                        | INKPOD_SHORTCUT_MODIFIER_EXTENDED)
-                    != 0
-        }) {
-            return fail(
-                INKPOD_STATUS_INVALID_ARGUMENT,
-                "shortcut input stroke is invalid",
-            );
+        let input_records = unsafe { slice::from_raw_parts(strokes, count) };
+        let mut input = Vec::with_capacity(count);
+        for record in input_records {
+            // SAFETY: Each record is inside the caller-advertised readable span.
+            match unsafe { parse_shortcut_stroke(record) } {
+                Ok(stroke) => input.push(stroke),
+                Err(status) => return status,
+            }
         }
-        let binding_count = match usize::try_from(sequence_count) {
-            Ok(value) if value <= MAX_SHORTCUTS => value,
-            _ => {
-                return fail(
-                    INKPOD_STATUS_INVALID_ARGUMENT,
-                    "shortcut sequence_count is invalid",
-                );
-            }
+        // SAFETY: The public contract supplies the readable strided table.
+        let bindings = match unsafe {
+            parse_shortcut_sequences(sequences, sequence_count, sequence_stride_bytes)
+        } {
+            Ok(bindings) => bindings,
+            Err(status) => return status,
         };
-        let stride = match usize::try_from(sequence_stride_bytes) {
-            Ok(value)
-                if value >= size_of::<InkpodShortcutSequence>()
-                    && value % align_of::<InkpodShortcutSequence>() == 0 =>
-            {
-                value
-            }
-            _ => {
-                return fail(
-                    INKPOD_STATUS_INVALID_ARGUMENT,
-                    "shortcut sequence stride is invalid",
-                );
-            }
-        };
-        if binding_count == 0 || sequences.is_null() || !is_aligned(sequences) {
+        if bindings.is_empty() {
             return fail(
                 INKPOD_STATUS_INVALID_ARGUMENT,
-                "shortcut sequence table is empty, null, or misaligned",
-            );
-        }
-        if (binding_count - 1)
-            .checked_mul(stride)
-            .and_then(|offset| offset.checked_add(size_of::<InkpodShortcutSequence>()))
-            .filter(|span| *span <= isize::MAX as usize)
-            .is_none()
-        {
-            return fail(
-                INKPOD_STATUS_INVALID_ARGUMENT,
-                "shortcut sequence span overflows",
+                "shortcut sequence table is empty",
             );
         }
         let mut prefix = false;
-        for index in 0..binding_count {
-            let offset = match index.checked_mul(stride) {
-                Some(value) => value,
-                None => {
-                    return fail(
-                        INKPOD_STATUS_INVALID_ARGUMENT,
-                        "shortcut sequence offset overflow",
-                    );
-                }
-            };
-            // SAFETY: Validated base, count and stride identify each readable record.
-            let pointer = unsafe {
-                sequences
-                    .cast::<u8>()
-                    .add(offset)
-                    .cast::<InkpodShortcutSequence>()
-            };
-            // SAFETY: Each public record exposes a readable size prefix.
-            let struct_size = match unsafe { validate_struct(pointer, "InkpodShortcutSequence") } {
-                Ok(value) => value,
-                Err(status) => return status,
-            };
-            if u64::from(struct_size) > sequence_stride_bytes {
+        for binding in &bindings {
+            if binding.command_id == 0 {
                 return fail(
                     INKPOD_STATUS_INVALID_ARGUMENT,
-                    "shortcut sequence struct_size exceeds stride",
+                    "shortcut sequence command is invalid",
                 );
             }
-            // SAFETY: Full record size and alignment were validated.
-            let binding = unsafe { pointer.read() };
-            let binding_stroke_count = binding.stroke_count as usize;
-            if binding.command_id == 0
-                || binding_stroke_count == 0
-                || binding_stroke_count > MAX_SHORTCUT_STROKES
-                || binding.strokes[..binding_stroke_count]
-                    .iter()
-                    .any(|stroke| {
-                        stroke.virtual_key == 0
-                            || stroke.modifiers
-                                & !(INKPOD_SHORTCUT_MODIFIER_CONTROL
-                                    | INKPOD_SHORTCUT_MODIFIER_SHIFT
-                                    | INKPOD_SHORTCUT_MODIFIER_ALT
-                                    | INKPOD_SHORTCUT_MODIFIER_EXTENDED)
-                                != 0
-                    })
-            {
-                return fail(
-                    INKPOD_STATUS_INVALID_ARGUMENT,
-                    "shortcut sequence record is invalid",
-                );
-            }
-            const fn same_stroke(
-                left: &InkpodShortcutStroke,
-                right: &InkpodShortcutStroke,
-            ) -> bool {
-                left.virtual_key == right.virtual_key && left.modifiers == right.modifiers
-            }
-            let shared = binding_stroke_count.min(count);
-            let starts_with = (0..shared).all(|stroke_index| {
-                same_stroke(&binding.strokes[stroke_index], &input[stroke_index])
-            });
-            if starts_with && binding_stroke_count == count {
+            let starts_with = binding.strokes.starts_with(&input);
+            if starts_with && binding.strokes.len() == count {
                 // SAFETY: Both outputs are writable by contract.
                 unsafe {
                     out_match.write(INKPOD_SHORTCUT_MATCH_EXACT);
@@ -1115,7 +1145,7 @@ pub unsafe extern "C" fn inkpod_shortcut_sequence_resolve(
                 }
                 return INKPOD_STATUS_OK;
             }
-            prefix |= starts_with && binding_stroke_count > count;
+            prefix |= starts_with && binding.strokes.len() > count;
         }
         if prefix {
             // SAFETY: out_match is writable by contract.

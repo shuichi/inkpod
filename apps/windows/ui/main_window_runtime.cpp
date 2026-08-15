@@ -3439,19 +3439,16 @@ void RefreshBatchPaletteTimer(void* context) noexcept {
             state->batch, state->Workspace().batch_palette);
     }
 }
-std::uint32_t CurrentShortcutModifiers(LPARAM key_data) noexcept {
+std::uint32_t CurrentShortcutModifiers(LPARAM) noexcept {
     std::uint32_t modifiers{};
     if ((GetKeyState(VK_CONTROL) & 0x8000) != 0) {
-        modifiers |= INKPOD_SHORTCUT_MODIFIER_CONTROL;
+        modifiers |= INKPOD_SHORTCUT_MODIFIER_PRIMARY;
     }
     if ((GetKeyState(VK_SHIFT) & 0x8000) != 0) {
         modifiers |= INKPOD_SHORTCUT_MODIFIER_SHIFT;
     }
     if ((GetKeyState(VK_MENU) & 0x8000) != 0) {
-        modifiers |= INKPOD_SHORTCUT_MODIFIER_ALT;
-    }
-    if ((static_cast<std::uint64_t>(key_data) & (UINT64_C(1) << 24)) != 0U) {
-        modifiers |= INKPOD_SHORTCUT_MODIFIER_EXTENDED;
+        modifiers |= INKPOD_SHORTCUT_MODIFIER_ALTERNATE;
     }
     return modifiers;
 }
@@ -3567,9 +3564,9 @@ bool HandleWorkspaceNavigation(
     std::uint32_t virtual_key,
     std::uint32_t modifiers) noexcept {
     const std::uint32_t navigation_modifiers = modifiers
-        & (INKPOD_SHORTCUT_MODIFIER_CONTROL
+        & (INKPOD_SHORTCUT_MODIFIER_PRIMARY
             | INKPOD_SHORTCUT_MODIFIER_SHIFT
-            | INKPOD_SHORTCUT_MODIFIER_ALT);
+            | INKPOD_SHORTCUT_MODIFIER_ALTERNATE);
     if (virtual_key == VK_F6
         && (navigation_modifiers == 0U
             || navigation_modifiers == INKPOD_SHORTCUT_MODIFIER_SHIFT)) {
@@ -3579,9 +3576,9 @@ bool HandleWorkspaceNavigation(
         return true;
     }
     if (virtual_key == VK_F6
-        && (navigation_modifiers == INKPOD_SHORTCUT_MODIFIER_CONTROL
+        && (navigation_modifiers == INKPOD_SHORTCUT_MODIFIER_PRIMARY
             || navigation_modifiers
-                == (INKPOD_SHORTCUT_MODIFIER_CONTROL
+                == (INKPOD_SHORTCUT_MODIFIER_PRIMARY
                     | INKPOD_SHORTCUT_MODIFIER_SHIFT))) {
         UpdateMenuState(state);
         DispatchEnabledCommand(state, window, IDM_EDITOR_GROUP_NEXT);
@@ -3601,8 +3598,12 @@ bool ResolveConfiguredShortcut(
     UINT& menu_command) noexcept {
     ClearPendingShortcut(state.shortcuts);
     UINT command{};
+    InkpodShortcutStrokeV2 stroke{};
+    if (!NormalizeWindowsShortcutStroke(virtual_key, modifiers, stroke)) {
+        return false;
+    }
     const InkpodShortcutMatch match = ResolveShortcutStroke(
-        state.shortcuts, InkpodShortcutStroke{virtual_key, modifiers}, command);
+        state.shortcuts, stroke, command);
     menu_command = ShortcutMenuCommand(command);
     return match == INKPOD_SHORTCUT_MATCH_EXACT && menu_command != 0U;
 }
@@ -19968,9 +19969,14 @@ std::optional<LRESULT> RouteKeyboardMessage(
                     return 0;
                 }
                 UINT menu_command{};
+                InkpodShortcutStrokeV2 stroke{};
+                if (!NormalizeWindowsShortcutStroke(
+                        static_cast<std::uint32_t>(wparam), modifiers, stroke)) {
+                    return DefWindowProcW(window, message, wparam, lparam);
+                }
                 const InkpodShortcutMatch shortcut_match = ResolveShortcutStroke(
                     state->shortcuts,
-                    InkpodShortcutStroke{static_cast<std::uint32_t>(wparam), modifiers},
+                    stroke,
                     menu_command);
                 if (shortcut_match == INKPOD_SHORTCUT_MATCH_PREFIX) {
                     ArmCommandTimer(

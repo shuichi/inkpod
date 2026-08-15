@@ -272,7 +272,11 @@ impl Core {
         if let Some(viewport) = command_viewport {
             candidate.viewport = viewport;
         }
-        if next_zoom != self.view.zoom || next_pan != self.view.pan || next_mode != self.view.mode {
+        if candidate.viewport != self.view.viewport
+            || next_zoom != self.view.zoom
+            || next_pan != self.view.pan
+            || next_mode != self.view.mode
+        {
             candidate.revision = candidate
                 .revision
                 .checked_next()
@@ -329,6 +333,33 @@ mod tests {
         assert!(DevicePointF64::new(f64::NAN, 0.0).is_err());
         assert!(DeviceSizeF64::new(0.0, 10.0).is_err());
         assert!(DeviceSizeF64::new(10.0, f64::INFINITY).is_err());
+    }
+
+    #[test]
+    fn manual_viewport_resize_advances_only_for_a_real_size_change() {
+        let mut core = Core::new();
+        core.new_cell(16, 8, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+            .unwrap();
+        let before = core.view_state();
+
+        let resized = core
+            .apply_view(ViewCommand::ViewportResized {
+                viewport_width: 800.0,
+                viewport_height: 600.0,
+            })
+            .unwrap();
+        assert!(resized.revision() > before.revision());
+        assert_eq!(resized.zoom(), before.zoom());
+        assert_eq!(resized.pan_x(), before.pan_x());
+        assert_eq!(resized.pan_y(), before.pan_y());
+
+        let repeated = core
+            .apply_view(ViewCommand::ViewportResized {
+                viewport_width: 800.0,
+                viewport_height: 600.0,
+            })
+            .unwrap();
+        assert_eq!(repeated.revision(), resized.revision());
     }
 
     #[test]

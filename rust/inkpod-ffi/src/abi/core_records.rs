@@ -7,19 +7,21 @@ pub struct InkpodCoreConfig {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-pub struct InkpodShortcutStroke {
-    pub virtual_key: u32,
+pub struct InkpodShortcutStrokeV2 {
+    pub struct_size: u32,
+    pub key_kind: u32,
+    pub key_value: u32,
     pub modifiers: u32,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-pub struct InkpodShortcutSequence {
+pub struct InkpodShortcutSequenceV2 {
     pub struct_size: u32,
     pub command_id: u32,
     pub stroke_count: u32,
     pub reserved: u32,
-    pub strokes: [InkpodShortcutStroke; 4],
+    pub strokes: [InkpodShortcutStrokeV2; 4],
 }
 
 #[repr(C)]

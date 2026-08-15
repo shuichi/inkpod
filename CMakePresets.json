@@ -69,6 +69,36 @@
         "lhs": "${hostSystemName}",
         "rhs": "Windows"
       }
+    },
+    {
+      "name": "macos-arm64-debug",
+      "displayName": "macOS arm64 Debug (CMake + Cargo + Xcode)",
+      "description": "Builds the Rust static library and invokes the checked-in Xcode project only through CMake.",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/macos-arm64-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      }
+    },
+    {
+      "name": "macos-universal-release",
+      "displayName": "macOS Universal 2 Release (CMake + Cargo + Xcode)",
+      "description": "Builds separate arm64/x86_64 Rust archives, merges them with lipo, and links the Universal Swift ABI smoke.",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/macos-universal-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      }
     }
   ],
   "buildPresets": [
@@ -87,6 +117,14 @@
     {
       "name": "windows-arm-release",
       "configurePreset": "windows-arm-release"
+    },
+    {
+      "name": "macos-arm64-debug",
+      "configurePreset": "macos-arm64-debug"
+    },
+    {
+      "name": "macos-universal-release",
+      "configurePreset": "macos-universal-release"
     }
   ],
   "testPresets": [
@@ -114,6 +152,13 @@
     {
       "name": "windows-arm-release",
       "configurePreset": "windows-arm-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "macos-arm64-debug",
+      "configurePreset": "macos-arm64-debug",
       "output": {
         "outputOnFailure": true
       }

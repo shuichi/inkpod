@@ -55,12 +55,13 @@ use inkpod_core::{
     SequenceEditRequest, SequenceEndpointPolicy, SequenceMemberId, SequenceStepPlan,
     SequenceStepResult, SequenceSwitchPolicy, SequenceSwitchRequest, ShootingFrameAnchor,
     ShootingFrameEdit, ShootingFrameInfo, ShootingFrameInput, ShootingFramePreviewTarget,
-    ShortcutBinding, ShortcutSequenceBinding, ShortcutStroke, Stamp, StampGesture, StampShape,
-    StartColorPredicate, Stroke, StrokeSample, TileRaster, TraceBrushOptions, TraceBrushShape,
-    VanishingPointEdit, VanishingPointInfo, VanishingPointInput, VanishingPointPreviewTarget,
-    VectorCenterlineMode, VectorCubicSegment, VectorEndpoint, VectorEraseMode, VectorPathInput,
-    VectorSelectionMode, VectorWidthMode, ViewCommand, plan_cell_creation, read_color_chart,
-    read_palette, save_color_chart_atomic, save_palette_atomic,
+    ShortcutBinding, ShortcutKey, ShortcutNamedKey, ShortcutSequenceBinding, ShortcutStroke, Stamp,
+    StampGesture, StampShape, StartColorPredicate, Stroke, StrokeSample, TileRaster,
+    TraceBrushOptions, TraceBrushShape, VanishingPointEdit, VanishingPointInfo,
+    VanishingPointInput, VanishingPointPreviewTarget, VectorCenterlineMode, VectorCubicSegment,
+    VectorEndpoint, VectorEraseMode, VectorPathInput, VectorSelectionMode, VectorWidthMode,
+    ViewCommand, plan_cell_creation, read_color_chart, read_palette, save_color_chart_atomic,
+    save_palette_atomic,
 };
 use std::cell::RefCell;
 use std::mem::{align_of, size_of};

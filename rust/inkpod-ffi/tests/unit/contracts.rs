@@ -3150,6 +3150,46 @@ fn ffi_contract_light_table_sequence_and_owned_buffers() {
             INKPOD_STATUS_OK
         );
 
+        let mut source_identities = [
+            InkpodSequenceSourceIdentity {
+                struct_size: size_of::<InkpodSequenceSourceIdentity>() as u32,
+                reserved: 0,
+                document_uuid_high: 0x1010,
+                document_uuid_low: 0x1111,
+                source_generation: 17,
+            },
+            InkpodSequenceSourceIdentity {
+                struct_size: size_of::<InkpodSequenceSourceIdentity>() as u32,
+                reserved: 0,
+                document_uuid_high: 0x2020,
+                document_uuid_low: 0x2222,
+                source_generation: 0,
+            },
+        ];
+        assert_eq!(
+            inkpod_core_sequence_import_mixed_encoded_identified(
+                sequence_core,
+                mixed_files.as_ptr(),
+                mixed_files.len() as u64,
+                size_of::<InkpodNamedRasterInput>() as u64,
+                source_identities.as_ptr(),
+                size_of::<InkpodSequenceSourceIdentity>() as u64,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        source_identities[1].source_generation = 29;
+        assert_eq!(
+            inkpod_core_sequence_import_mixed_encoded_identified(
+                sequence_core,
+                mixed_files.as_ptr(),
+                mixed_files.len() as u64,
+                size_of::<InkpodNamedRasterInput>() as u64,
+                source_identities.as_ptr(),
+                size_of::<InkpodSequenceSourceIdentity>() as u64,
+            ),
+            INKPOD_STATUS_OK
+        );
+
         let mut cell = InkpodSequenceCellInfo {
             struct_size: size_of::<InkpodSequenceCellInfo>() as u32,
             ..InkpodSequenceCellInfo::default()
@@ -3159,6 +3199,35 @@ fn ffi_contract_light_table_sequence_and_owned_buffers() {
             INKPOD_STATUS_OK
         );
         assert_eq!(cell.cell_number, 2);
+        assert_eq!(
+            cell.document_uuid_high,
+            source_identities[1].document_uuid_high
+        );
+        assert_eq!(
+            cell.document_uuid_low,
+            source_identities[1].document_uuid_low
+        );
+        let mut installed_identity = InkpodSequenceSourceIdentity {
+            struct_size: size_of::<InkpodSequenceSourceIdentity>() as u32,
+            ..InkpodSequenceSourceIdentity::default()
+        };
+        assert_eq!(
+            crate::batch::inkpod_core_sequence_source_identity(
+                sequence_core,
+                0,
+                &mut installed_identity,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            installed_identity.document_uuid_high,
+            source_identities[1].document_uuid_high
+        );
+        assert_eq!(
+            installed_identity.document_uuid_low,
+            source_identities[1].document_uuid_low
+        );
+        assert_eq!(installed_identity.source_generation, 29);
         let mut cell_name = vec![0_u8; cell.name_bytes as usize];
         cell.name_utf8 = cell_name.as_mut_ptr();
         cell.name_capacity = cell_name.len() as u64;

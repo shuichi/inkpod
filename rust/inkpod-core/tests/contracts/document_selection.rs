@@ -688,6 +688,13 @@ fn acceptance_selection_authoring_tools() {
     core.resize_selection(-1).unwrap();
     let saved_bounds = core.selection_bounds().unwrap();
     let (_, selection_layer) = core.selection_to_layer("Saved Selection").unwrap();
+    let before_noop = core.document_info().unwrap().document_revision;
+    let history_before_noop = core.history_entries().len();
+    let unchanged = core
+        .selection_from_layer(selection_layer, SelectionLayerOperation::Add)
+        .unwrap();
+    assert_eq!(unchanged.revision(), before_noop);
+    assert_eq!(core.history_entries().len(), history_before_noop);
     core.invert_selection().unwrap();
     core.selection_from_layer(selection_layer, SelectionLayerOperation::Replace)
         .unwrap();
@@ -1379,13 +1386,18 @@ fn acceptance_multi_view_locator_guides_grid_and_shortcuts() {
     assert_eq!((locator.document_x, locator.document_y), (3, 3));
     core.rebind_shortcut(ShortcutBinding {
         command_id: 99,
-        virtual_key: u32::from(b'Z'),
-        modifiers: 1,
+        stroke: ShortcutStroke {
+            key: ShortcutKey::UnicodeScalar('Z'),
+            modifiers: SHORTCUT_MODIFIER_PRIMARY,
+        },
     })
     .unwrap();
     assert_eq!(
-        core.resolve_shortcut(u32::from(b'Z'), SHORTCUT_MODIFIER_CONTROL)
-            .unwrap(),
+        core.resolve_shortcut(ShortcutStroke {
+            key: ShortcutKey::UnicodeScalar('Z'),
+            modifiers: SHORTCUT_MODIFIER_PRIMARY,
+        })
+        .unwrap(),
         Some(99)
     );
     assert!(
@@ -1401,8 +1413,11 @@ fn acceptance_multi_view_locator_guides_grid_and_shortcuts() {
     );
     core.reset_shortcuts();
     assert_eq!(
-        core.resolve_shortcut(u32::from(b'Z'), SHORTCUT_MODIFIER_CONTROL)
-            .unwrap(),
+        core.resolve_shortcut(ShortcutStroke {
+            key: ShortcutKey::UnicodeScalar('Z'),
+            modifiers: SHORTCUT_MODIFIER_PRIMARY,
+        })
+        .unwrap(),
         Some(1)
     );
     assert!(
@@ -1416,7 +1431,7 @@ fn acceptance_multi_view_locator_guides_grid_and_shortcuts() {
 fn shortcut_sequences_are_prefix_free_transactional_and_resettable() {
     let mut core = Core::new();
     let stroke = |key| ShortcutStroke {
-        virtual_key: u32::from(key),
+        key: ShortcutKey::UnicodeScalar(char::from(key)),
         modifiers: 0,
     };
     let defaults = vec![
@@ -1431,8 +1446,8 @@ fn shortcut_sequences_are_prefix_free_transactional_and_resettable() {
         ShortcutSequenceBinding {
             command_id: 12,
             strokes: vec![ShortcutStroke {
-                virtual_key: u32::from(b'S'),
-                modifiers: SHORTCUT_MODIFIER_CONTROL,
+                key: ShortcutKey::UnicodeScalar('S'),
+                modifiers: SHORTCUT_MODIFIER_PRIMARY,
             }],
         },
     ];
@@ -1484,6 +1499,36 @@ fn shortcut_sequences_are_prefix_free_transactional_and_resettable() {
 
     core.reset_shortcuts();
     assert_eq!(core.shortcut_sequences(), defaults);
+
+    let before = core.shortcut_sequences();
+    assert!(
+        core.replace_shortcut_sequences(&[ShortcutSequenceBinding {
+            command_id: 30,
+            strokes: vec![ShortcutStroke {
+                key: ShortcutKey::Named(ShortcutNamedKey::Function(1)),
+                modifiers: SHORTCUT_MODIFIER_PRIMARY | (1 << 8),
+            }],
+        }])
+        .is_err()
+    );
+    assert_eq!(core.shortcut_sequences(), before);
+
+    core.replace_shortcut_sequences(&[ShortcutSequenceBinding {
+        command_id: 31,
+        strokes: vec![ShortcutStroke {
+            key: ShortcutKey::Named(ShortcutNamedKey::PageDown),
+            modifiers: SHORTCUT_MODIFIER_PRIMARY | SHORTCUT_MODIFIER_CONTROL,
+        }],
+    }])
+    .unwrap();
+    assert_eq!(
+        core.resolve_shortcut_sequence(&[ShortcutStroke {
+            key: ShortcutKey::Named(ShortcutNamedKey::PageDown),
+            modifiers: SHORTCUT_MODIFIER_PRIMARY | SHORTCUT_MODIFIER_CONTROL,
+        }])
+        .unwrap(),
+        ShortcutSequenceMatch::Exact(31)
+    );
 }
 
 #[test]

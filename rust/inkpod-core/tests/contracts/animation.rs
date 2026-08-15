@@ -1128,6 +1128,53 @@ fn acceptance_sequence_gaps_natural_order_thumbnails_subpalette_and_motion() {
         imported.sequence_cell(2),
         Err(CoreError::InvalidArgument(_))
     ));
+
+    let identified = vec![
+        (
+            "identified10.png".to_owned(),
+            CommonRasterFormat::Png,
+            encode_common_raster(
+                CommonRasterFormat::Png,
+                &rgba8(1, 1, vec![10, 20, 30, 255]),
+                false,
+            )
+            .unwrap(),
+            0xaaaa,
+            41,
+        ),
+        (
+            "identified2.png".to_owned(),
+            CommonRasterFormat::Png,
+            encode_common_raster(
+                CommonRasterFormat::Png,
+                &rgba8(1, 1, vec![40, 50, 60, 255]),
+                false,
+            )
+            .unwrap(),
+            0xbbbb,
+            73,
+        ),
+    ];
+    imported
+        .import_identified_mixed_sequence(identified)
+        .unwrap();
+    let first = imported.sequence_cell(0).unwrap();
+    assert_eq!(first.cell_number, 2);
+    assert_eq!(first.document_uuid, 0xbbbb);
+    assert_eq!(first.source_generation, 73);
+    let before = imported.sequence_cells().unwrap();
+    assert!(
+        imported
+            .import_identified_mixed_sequence(vec![(
+                "invalid3.png".to_owned(),
+                CommonRasterFormat::Png,
+                vec![0, 1, 2],
+                0xcccc,
+                1,
+            )])
+            .is_err()
+    );
+    assert_eq!(imported.sequence_cells().unwrap(), before);
 }
 
 #[test]

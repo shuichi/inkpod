@@ -1326,7 +1326,7 @@ int RunJobProgressPaneSmoke(ApplicationHost& state) noexcept {
 
 bool MenuLeavesHaveAssignedShortcuts(
     HMENU menu,
-    std::span<const InkpodShortcutSequence> bindings,
+    std::span<const InkpodShortcutSequenceV2> bindings,
     std::size_t& leaf_count) noexcept {
     const int count = GetMenuItemCount(menu);
     for (int position = 0; position < count; ++position) {
@@ -5083,7 +5083,7 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
         || HasJapaneseCharacters(zoom_status.data())) {
         return 758;
     }
-    const InkpodShortcutSequence* multi_stroke =
+    const InkpodShortcutSequenceV2* multi_stroke =
         windows::ui::FindShortcutSequence(state.shortcuts.bindings, IDM_FILE_REVERT);
     if (multi_stroke == nullptr || multi_stroke->stroke_count <= 1U) {
         return 359;
@@ -5100,12 +5100,15 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
         }
     }
 
-    InkpodShortcutSequence undo_shortcut{};
+    InkpodShortcutSequenceV2 undo_shortcut{};
     undo_shortcut.struct_size = sizeof(undo_shortcut);
     undo_shortcut.command_id = IDM_EDIT_UNDO;
     undo_shortcut.stroke_count = 1U;
     undo_shortcut.strokes[0] = {
-        static_cast<std::uint32_t>('U'), INKPOD_SHORTCUT_MODIFIER_CONTROL};
+        sizeof(InkpodShortcutStrokeV2),
+        INKPOD_SHORTCUT_KEY_UNICODE_SCALAR,
+        static_cast<std::uint32_t>('U'),
+        INKPOD_SHORTCUT_MODIFIER_PRIMARY};
     const InkpodStatus navigation_status = windows::ui::RebindShortcut(
         *state.engine, state.shortcuts, undo_shortcut, false);
     if (navigation_status != INKPOD_STATUS_OK) {
@@ -5115,13 +5118,13 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
     if (!ResolveConfiguredShortcut(
             state,
             static_cast<std::uint32_t>('U'),
-            INKPOD_SHORTCUT_MODIFIER_CONTROL,
+            INKPOD_SHORTCUT_MODIFIER_PRIMARY,
             shortcut_menu_command)
         || shortcut_menu_command != IDM_EDIT_UNDO
         || ResolveConfiguredShortcut(
             state,
             static_cast<std::uint32_t>('Z'),
-            INKPOD_SHORTCUT_MODIFIER_CONTROL,
+            INKPOD_SHORTCUT_MODIFIER_PRIMARY,
             shortcut_menu_command)) {
         return 328;
     }
@@ -5259,13 +5262,13 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
     if (!ResolveConfiguredShortcut(
             state,
             static_cast<std::uint32_t>('U'),
-            INKPOD_SHORTCUT_MODIFIER_CONTROL,
+            INKPOD_SHORTCUT_MODIFIER_PRIMARY,
             shortcut_menu_command)
         || shortcut_menu_command != IDM_EDIT_UNDO
         || ResolveConfiguredShortcut(
             state,
             static_cast<std::uint32_t>('Z'),
-            INKPOD_SHORTCUT_MODIFIER_CONTROL,
+            INKPOD_SHORTCUT_MODIFIER_PRIMARY,
             shortcut_menu_command)) {
         return 330;
     }
@@ -5273,7 +5276,7 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
     if (!ResolveConfiguredShortcut(
             state,
             static_cast<std::uint32_t>('Z'),
-            INKPOD_SHORTCUT_MODIFIER_CONTROL,
+            INKPOD_SHORTCUT_MODIFIER_PRIMARY,
             shortcut_menu_command)
         || shortcut_menu_command != IDM_EDIT_UNDO) {
         return 361;
@@ -10390,7 +10393,7 @@ int RunSplitEditorGroupSmoke(ApplicationHost& state) noexcept {
             state,
             state.Workspace().windows.window,
             VK_F6,
-            INKPOD_SHORTCUT_MODIFIER_CONTROL | INKPOD_SHORTCUT_MODIFIER_SHIFT)) {
+            INKPOD_SHORTCUT_MODIFIER_PRIMARY | INKPOD_SHORTCUT_MODIFIER_SHIFT)) {
         return 1001;
     }
     if (editors.Active() == nullptr || editors.Active()->id != first_group_id) {
@@ -10400,7 +10403,7 @@ int RunSplitEditorGroupSmoke(ApplicationHost& state) noexcept {
             state,
             state.Workspace().windows.window,
             VK_F6,
-            INKPOD_SHORTCUT_MODIFIER_CONTROL)) {
+            INKPOD_SHORTCUT_MODIFIER_PRIMARY)) {
         return 1007;
     }
     if (editors.Active() == nullptr || editors.Active()->id != second_group_id) {
@@ -13295,19 +13298,21 @@ int RunApplicationSmoke(app::ApplicationHost& state) noexcept {
         ? 731
         : 0;
     if (exit_code == 0) {
-        const InkpodShortcutSequence* original = FindShortcutSequence(
+        const InkpodShortcutSequenceV2* original = FindShortcutSequence(
             state.shortcuts.bindings, IDM_VIEW_VECTOR_ENDPOINTS);
         if (original == nullptr) {
             exit_code = 732;
         } else {
-            const InkpodShortcutSequence saved = *original;
-            InkpodShortcutSequence replacement{};
+            const InkpodShortcutSequenceV2 saved = *original;
+            InkpodShortcutSequenceV2 replacement{};
             replacement.struct_size = sizeof(replacement);
             replacement.command_id = IDM_VIEW_VECTOR_ENDPOINTS;
             replacement.stroke_count = 1U;
             replacement.strokes[0] = {
+                sizeof(InkpodShortcutStrokeV2),
+                INKPOD_SHORTCUT_KEY_UNICODE_SCALAR,
                 static_cast<std::uint32_t>('9'),
-                INKPOD_SHORTCUT_MODIFIER_CONTROL | INKPOD_SHORTCUT_MODIFIER_ALT};
+                INKPOD_SHORTCUT_MODIFIER_PRIMARY | INKPOD_SHORTCUT_MODIFIER_ALTERNATE};
             UINT resolved{};
             const InkpodStatus rebind = RebindShortcut(
                 *state.engine, state.shortcuts, replacement, false);
@@ -13315,7 +13320,7 @@ int RunApplicationSmoke(app::ApplicationHost& state) noexcept {
                 && runtime::ResolveConfiguredShortcut(
                     state,
                     static_cast<std::uint32_t>('9'),
-                    INKPOD_SHORTCUT_MODIFIER_CONTROL | INKPOD_SHORTCUT_MODIFIER_ALT,
+                    INKPOD_SHORTCUT_MODIFIER_PRIMARY | INKPOD_SHORTCUT_MODIFIER_ALTERNATE,
                     resolved)
                 && resolved == IDM_VIEW_VECTOR_ENDPOINTS;
             const InkpodStatus restore = rebind == INKPOD_STATUS_OK

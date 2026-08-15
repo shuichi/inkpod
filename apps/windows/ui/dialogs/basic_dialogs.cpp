@@ -20,6 +20,7 @@
 
 #include "app/resource.h"
 #include "modal_dialog_position.h"
+#include "ui/shortcut_controller.h"
 
 namespace inkpod::windows::ui {
 namespace {
@@ -30,24 +31,55 @@ constexpr std::array<int, 4U> kShortcutHotkeyControls{
     IDC_SHORTCUT_HOTKEY3,
     IDC_SHORTCUT_HOTKEY4};
 
-WORD ShortcutHotkey(const InkpodShortcutStroke& stroke) noexcept {
+BYTE ShortcutVirtualKey(const InkpodShortcutStrokeV2& stroke) noexcept {
+    if (stroke.key_kind == INKPOD_SHORTCUT_KEY_UNICODE_SCALAR) {
+        const SHORT value = VkKeyScanW(static_cast<wchar_t>(stroke.key_value));
+        return value == -1 ? 0U : LOBYTE(value);
+    }
+    switch (stroke.key_value) {
+        case INKPOD_SHORTCUT_NAMED_TAB: return VK_TAB;
+        case INKPOD_SHORTCUT_NAMED_RETURN: return VK_RETURN;
+        case INKPOD_SHORTCUT_NAMED_ESCAPE: return VK_ESCAPE;
+        case INKPOD_SHORTCUT_NAMED_SPACE: return VK_SPACE;
+        case INKPOD_SHORTCUT_NAMED_BACKSPACE: return VK_BACK;
+        case INKPOD_SHORTCUT_NAMED_DELETE: return VK_DELETE;
+        case INKPOD_SHORTCUT_NAMED_LEFT: return VK_LEFT;
+        case INKPOD_SHORTCUT_NAMED_RIGHT: return VK_RIGHT;
+        case INKPOD_SHORTCUT_NAMED_UP: return VK_UP;
+        case INKPOD_SHORTCUT_NAMED_DOWN: return VK_DOWN;
+        case INKPOD_SHORTCUT_NAMED_HOME: return VK_HOME;
+        case INKPOD_SHORTCUT_NAMED_END: return VK_END;
+        case INKPOD_SHORTCUT_NAMED_PAGE_UP: return VK_PRIOR;
+        case INKPOD_SHORTCUT_NAMED_PAGE_DOWN: return VK_NEXT;
+        default:
+            return stroke.key_value >= INKPOD_SHORTCUT_NAMED_F1
+                    && stroke.key_value <= INKPOD_SHORTCUT_NAMED_F24
+                ? static_cast<BYTE>(VK_F1 + stroke.key_value - INKPOD_SHORTCUT_NAMED_F1)
+                : 0U;
+    }
+}
+
+WORD ShortcutHotkey(const InkpodShortcutStrokeV2& stroke) noexcept {
     BYTE flags{};
-    if ((stroke.modifiers & INKPOD_SHORTCUT_MODIFIER_CONTROL) != 0U) {
+    if ((stroke.modifiers
+            & (INKPOD_SHORTCUT_MODIFIER_PRIMARY | INKPOD_SHORTCUT_MODIFIER_CONTROL)) != 0U) {
         flags |= HOTKEYF_CONTROL;
     }
     if ((stroke.modifiers & INKPOD_SHORTCUT_MODIFIER_SHIFT) != 0U) {
         flags |= HOTKEYF_SHIFT;
     }
-    if ((stroke.modifiers & INKPOD_SHORTCUT_MODIFIER_ALT) != 0U) {
+    if ((stroke.modifiers & INKPOD_SHORTCUT_MODIFIER_ALTERNATE) != 0U) {
         flags |= HOTKEYF_ALT;
     }
-    if ((stroke.modifiers & INKPOD_SHORTCUT_MODIFIER_EXTENDED) != 0U) {
+    if (stroke.key_kind == INKPOD_SHORTCUT_KEY_NAMED
+        && stroke.key_value >= INKPOD_SHORTCUT_NAMED_DELETE
+        && stroke.key_value <= INKPOD_SHORTCUT_NAMED_PAGE_DOWN) {
         flags |= HOTKEYF_EXT;
     }
-    return MAKEWORD(static_cast<BYTE>(stroke.virtual_key), flags);
+    return MAKEWORD(ShortcutVirtualKey(stroke), flags);
 }
 
-void ShowShortcutSequence(HWND dialog, const InkpodShortcutSequence& sequence) noexcept {
+void ShowShortcutSequence(HWND dialog, const InkpodShortcutSequenceV2& sequence) noexcept {
     for (std::size_t index = 0; index < kShortcutHotkeyControls.size(); ++index) {
         const WORD hotkey = index < sequence.stroke_count
             ? ShortcutHotkey(sequence.strokes[index])
@@ -96,16 +128,13 @@ void SelectShortcutFromTypedPrefix(HWND dialog, const ShortcutDialogState& state
 std::uint32_t ShortcutModifiers(BYTE hotkey_flags) noexcept {
     std::uint32_t modifiers{};
     if ((hotkey_flags & HOTKEYF_CONTROL) != 0U) {
-        modifiers |= INKPOD_SHORTCUT_MODIFIER_CONTROL;
+        modifiers |= INKPOD_SHORTCUT_MODIFIER_PRIMARY;
     }
     if ((hotkey_flags & HOTKEYF_SHIFT) != 0U) {
         modifiers |= INKPOD_SHORTCUT_MODIFIER_SHIFT;
     }
     if ((hotkey_flags & HOTKEYF_ALT) != 0U) {
-        modifiers |= INKPOD_SHORTCUT_MODIFIER_ALT;
-    }
-    if ((hotkey_flags & HOTKEYF_EXT) != 0U) {
-        modifiers |= INKPOD_SHORTCUT_MODIFIER_EXTENDED;
+        modifiers |= INKPOD_SHORTCUT_MODIFIER_ALTERNATE;
     }
     return modifiers;
 }
@@ -206,7 +235,7 @@ INT_PTR CALLBACK ShortcutDialogProcedure(
                           CB_GETITEMDATA,
                           static_cast<WPARAM>(selected),
                           0);
-                InkpodShortcutSequence sequence{};
+                InkpodShortcutSequenceV2 sequence{};
                 sequence.struct_size = sizeof(sequence);
                 sequence.command_id = command_id == CB_ERR
                     ? 0U
@@ -218,8 +247,11 @@ INT_PTR CALLBACK ShortcutDialogProcedure(
                         break;
                     }
                     auto& stroke = sequence.strokes[sequence.stroke_count++];
-                    stroke.virtual_key = LOBYTE(hotkey);
-                    stroke.modifiers = ShortcutModifiers(HIBYTE(hotkey));
+                    if (!NormalizeWindowsShortcutStroke(
+                            LOBYTE(hotkey), ShortcutModifiers(HIBYTE(hotkey)), stroke)) {
+                        --sequence.stroke_count;
+                        break;
+                    }
                 }
                 if (command_id == CB_ERR || sequence.stroke_count == 0U) {
                     if (!state->close_immediately) {
@@ -232,7 +264,7 @@ INT_PTR CALLBACK ShortcutDialogProcedure(
                     return TRUE;
                 }
                 state->command_id = static_cast<std::uint32_t>(command_id);
-                state->virtual_key = sequence.strokes[0].virtual_key;
+                state->virtual_key = LOBYTE(ShortcutHotkey(sequence.strokes[0]));
                 state->modifiers = sequence.strokes[0].modifiers;
                 state->sequence = sequence;
                 EndDialog(dialog, IDOK);

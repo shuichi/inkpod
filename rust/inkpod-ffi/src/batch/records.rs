@@ -162,16 +162,6 @@ pub struct InkpodBatchReportItem {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-pub struct InkpodSequenceSourceIdentity {
-    pub struct_size: u32,
-    pub reserved: u32,
-    pub document_uuid_high: u64,
-    pub document_uuid_low: u64,
-    pub source_generation: u64,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
 pub struct InkpodBatchPairPreviewInfo {
     pub struct_size: u32,
     pub pixel_format: u32,

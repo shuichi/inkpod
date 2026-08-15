@@ -66,7 +66,7 @@
 extern "C" {
 #endif
 
-#define INKPOD_ABI_VERSION UINT32_C(14)
+#define INKPOD_ABI_VERSION UINT32_C(15)
 #define INKPOD_FEATURE_NONE UINT64_C(0)
 
 /** @brief すべての fallible API が返す固定幅ステータス型。 */
@@ -269,11 +269,31 @@ typedef uint32_t InkpodVectorEndpointKind;
 #define INKPOD_SNAPSHOT_OVERLAY_TRANSPARENT_VIEW (UINT32_C(1) << 4)
 #define INKPOD_SNAPSHOT_OVERLAY_ALPHA_VIEW (UINT32_C(1) << 5)
 
-#define INKPOD_SHORTCUT_MODIFIER_CONTROL (UINT32_C(1) << 0)
+#define INKPOD_SHORTCUT_MODIFIER_PRIMARY (UINT32_C(1) << 0)
 #define INKPOD_SHORTCUT_MODIFIER_SHIFT (UINT32_C(1) << 1)
-#define INKPOD_SHORTCUT_MODIFIER_ALT (UINT32_C(1) << 2)
-#define INKPOD_SHORTCUT_MODIFIER_EXTENDED (UINT32_C(1) << 3)
+#define INKPOD_SHORTCUT_MODIFIER_ALTERNATE (UINT32_C(1) << 2)
+#define INKPOD_SHORTCUT_MODIFIER_CONTROL (UINT32_C(1) << 3)
 #define INKPOD_SHORTCUT_MAX_STROKES UINT32_C(4)
+typedef uint32_t InkpodShortcutKeyKind;
+#define INKPOD_SHORTCUT_KEY_UNICODE_SCALAR UINT32_C(1)
+#define INKPOD_SHORTCUT_KEY_NAMED UINT32_C(2)
+typedef uint32_t InkpodShortcutNamedKey;
+#define INKPOD_SHORTCUT_NAMED_TAB UINT32_C(1)
+#define INKPOD_SHORTCUT_NAMED_RETURN UINT32_C(2)
+#define INKPOD_SHORTCUT_NAMED_ESCAPE UINT32_C(3)
+#define INKPOD_SHORTCUT_NAMED_SPACE UINT32_C(4)
+#define INKPOD_SHORTCUT_NAMED_BACKSPACE UINT32_C(5)
+#define INKPOD_SHORTCUT_NAMED_DELETE UINT32_C(6)
+#define INKPOD_SHORTCUT_NAMED_LEFT UINT32_C(7)
+#define INKPOD_SHORTCUT_NAMED_RIGHT UINT32_C(8)
+#define INKPOD_SHORTCUT_NAMED_UP UINT32_C(9)
+#define INKPOD_SHORTCUT_NAMED_DOWN UINT32_C(10)
+#define INKPOD_SHORTCUT_NAMED_HOME UINT32_C(11)
+#define INKPOD_SHORTCUT_NAMED_END UINT32_C(12)
+#define INKPOD_SHORTCUT_NAMED_PAGE_UP UINT32_C(13)
+#define INKPOD_SHORTCUT_NAMED_PAGE_DOWN UINT32_C(14)
+#define INKPOD_SHORTCUT_NAMED_F1 UINT32_C(101)
+#define INKPOD_SHORTCUT_NAMED_F24 UINT32_C(124)
 typedef uint32_t InkpodShortcutMatch;
 #define INKPOD_SHORTCUT_MATCH_NONE UINT32_C(0)
 #define INKPOD_SHORTCUT_MATCH_PREFIX UINT32_C(1)
@@ -2895,20 +2915,22 @@ typedef struct InkpodLocatorNeighborhoodBuffer {
     uint64_t required_bytes;
 } InkpodLocatorNeighborhoodBuffer;
 
-/** @brief 一つの正規化済みshortcut stroke。 */
-typedef struct InkpodShortcutStroke {
-    uint32_t virtual_key;
+/** @brief 一つのplatform-neutralな正規化済みshortcut stroke。 */
+typedef struct InkpodShortcutStrokeV2 {
+    uint32_t struct_size;
+    InkpodShortcutKeyKind key_kind;
+    uint32_t key_value;
     uint32_t modifiers;
-} InkpodShortcutStroke;
+} InkpodShortcutStrokeV2;
 
 /** @brief 最大4 strokeのprefix-free shortcut列。 */
-typedef struct InkpodShortcutSequence {
+typedef struct InkpodShortcutSequenceV2 {
     uint32_t struct_size;
     uint32_t command_id;
     uint32_t stroke_count;
     uint32_t reserved;
-    InkpodShortcutStroke strokes[4];
-} InkpodShortcutSequence;
+    InkpodShortcutStrokeV2 strokes[4];
+} InkpodShortcutSequenceV2;
 
 /**
  * @brief light-table/sequence 用 straight RGBA8/16 raster の borrowed 入力。
@@ -4426,11 +4448,10 @@ InkpodStatus inkpod_core_locator_neighborhood(
  * @par 主なステータス
  * `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`PANIC`。
  */
-InkpodStatus inkpod_core_shortcut_rebind(
+InkpodStatus inkpod_core_shortcut_rebind_v2(
     InkpodCore* core,
     uint32_t command_id,
-    uint32_t virtual_key,
-    uint32_t modifiers);
+    const InkpodShortcutStrokeV2* stroke);
 /**
  * @brief normalized key chord を command ID へ解決する。
  * @par 契約
@@ -4439,10 +4460,9 @@ InkpodStatus inkpod_core_shortcut_rebind(
  * @par 主なステータス
  * `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`PANIC`。
  */
-InkpodStatus inkpod_core_shortcut_resolve(
+InkpodStatus inkpod_core_shortcut_resolve_v2(
     InkpodCore* core,
-    uint32_t virtual_key,
-    uint32_t modifiers,
+    const InkpodShortcutStrokeV2* stroke,
     uint32_t* out_command_id);
 /**
  * @brief shortcut map を deterministic default へ戻す。
@@ -4459,21 +4479,21 @@ InkpodStatus inkpod_core_shortcut_reset(InkpodCore* core);
  * Core owner thread。各列は1～4 stroke、commandは一意、全列はprefix-free。入力は呼出中だけ借用する。
  * 成功時だけ既定値と現在値を同時置換し、document revision、dirty、Undoは不変。
  */
-InkpodStatus inkpod_core_shortcut_defaults_set(
+InkpodStatus inkpod_core_shortcut_defaults_set_v2(
     InkpodCore* core,
-    const InkpodShortcutSequence* sequences,
+    const InkpodShortcutSequenceV2* sequences,
     uint64_t sequence_count,
     uint64_t sequence_stride_bytes);
 /** @brief 現在の完全なshortcut集合をtransactionalに置換する。 */
-InkpodStatus inkpod_core_shortcut_sequences_set(
+InkpodStatus inkpod_core_shortcut_sequences_set_v2(
     InkpodCore* core,
-    const InkpodShortcutSequence* sequences,
+    const InkpodShortcutSequenceV2* sequences,
     uint64_t sequence_count,
     uint64_t sequence_stride_bytes);
 /** @brief 現在のshortcut集合をcaller bufferへコピーする。buffer無しは必要件数queryになる。 */
-InkpodStatus inkpod_core_shortcut_sequences_copy(
+InkpodStatus inkpod_core_shortcut_sequences_copy_v2(
     InkpodCore* core,
-    InkpodShortcutSequence* out_sequences,
+    InkpodShortcutSequenceV2* out_sequences,
     uint64_t sequence_capacity,
     uint64_t sequence_stride_bytes,
     uint64_t* out_sequence_count);
@@ -4484,11 +4504,11 @@ InkpodStatus inkpod_core_shortcut_sequences_copy(
  * 各recordの形式不正は拒否する。成功時matchとcommandを書き、
  * prefix/noneではcommandを0にする。
  */
-InkpodStatus inkpod_shortcut_sequence_resolve(
-    const InkpodShortcutSequence* sequences,
+InkpodStatus inkpod_shortcut_sequence_resolve_v2(
+    const InkpodShortcutSequenceV2* sequences,
     uint64_t sequence_count,
     uint64_t sequence_stride_bytes,
-    const InkpodShortcutStroke* strokes,
+    const InkpodShortcutStrokeV2* strokes,
     uint32_t stroke_count,
     InkpodShortcutMatch* out_match,
     uint32_t* out_command_id);
@@ -4870,6 +4890,23 @@ InkpodStatus inkpod_core_sequence_import_mixed_encoded(
     const InkpodNamedRasterInput* files,
     uint64_t file_count,
     uint64_t file_stride_bytes);
+/**
+ * @brief file ごとの encoded raster と persistent source identity で sequence を置換する。
+ * @par 契約
+ * Core owner thread。`files` と `identities` は同じ非 0 count の caller-owned strided span。
+ * 全 record/span/format/UUID/generation を検証して decode し、成功時だけ自然順の sequence を
+ * 一括 install する。入力 identity は call 中だけ borrowed で Core が値コピーする。
+ * current document revision、dirty、Undo、savepoint は不変で、失敗時は旧 sequence を保つ。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`UNSUPPORTED`、`IO_ERROR`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ */
+InkpodStatus inkpod_core_sequence_import_mixed_encoded_identified(
+    InkpodCore* core,
+    const InkpodNamedRasterInput* files,
+    uint64_t file_count,
+    uint64_t file_stride_bytes,
+    const InkpodSequenceSourceIdentity* identities,
+    uint64_t identity_stride_bytes);
 /**
  * @brief sequence 全 cell を common raster へ encode する。
  * @par 契約
