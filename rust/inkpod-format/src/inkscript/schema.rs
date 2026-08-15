@@ -198,6 +198,31 @@ pub struct InkScriptCommandSchema {
     pub(crate) results: &'static [InkScriptCommandResultSchema],
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum InkScriptSelectorOwner {
+    Document,
+    Layer,
+    Plane,
+    LightTableSet,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum InkScriptSelectorOrder {
+    DocumentTree,
+    Guide,
+    Vector,
+    Annotation,
+    Singleton,
+    LightTable,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum InkScriptAssertComparison {
+    DocumentFields,
+    ObjectProperties,
+    SelectionState,
+}
+
 impl InkScriptCommandSchema {
     pub const fn new(name: &'static str, fields: &'static [InkScriptFieldSchema]) -> Self {
         Self {
@@ -285,14 +310,20 @@ impl<'schema> InkScriptSchemaView<'schema> {
     }
 
     pub(crate) fn selector(&self, name: &str) -> Option<&'static [InkScriptFieldSchema]> {
-        generated_record(GENERATED_SELECTORS, name)
+        self.selector_schema(name).map(|selector| selector.fields)
     }
 
     pub(crate) fn selector_result_type(&self, name: &str) -> Option<&'static str> {
-        GENERATED_SELECTOR_RESULTS
+        GENERATED_SELECTORS
             .iter()
             .find(|selector| selector.name == name)
             .map(|selector| selector.reference_type)
+    }
+
+    pub(crate) fn selector_schema(&self, name: &str) -> Option<&'static GeneratedSelector> {
+        GENERATED_SELECTORS
+            .iter()
+            .find(|selector| selector.name == name)
     }
 
     pub(crate) fn type_kind(&self, name: &str) -> Option<&'static str> {
@@ -322,7 +353,18 @@ impl<'schema> InkScriptSchemaView<'schema> {
     }
 
     pub(crate) fn assertion(&self, name: &str) -> Option<&'static [InkScriptFieldSchema]> {
-        generated_record(GENERATED_ASSERTIONS, name)
+        self.assertion_schema(name)
+            .map(|assertion| assertion.fields)
+    }
+
+    pub(crate) fn assertion_schema(&self, name: &str) -> Option<&'static GeneratedAssertion> {
+        GENERATED_ASSERTIONS
+            .iter()
+            .find(|assertion| assertion.name == name)
+    }
+
+    pub(crate) fn id_namespaces(&self) -> &'static [GeneratedIdNamespace] {
+        GENERATED_ID_NAMESPACES
     }
 
     pub(crate) fn section_order(&self, name: &str) -> Option<usize> {
@@ -365,9 +407,25 @@ pub(crate) struct GeneratedConstructor {
 }
 
 #[derive(Clone, Copy)]
-struct GeneratedSelectorResult {
-    name: &'static str,
-    reference_type: &'static str,
+pub(crate) struct GeneratedSelector {
+    pub(crate) name: &'static str,
+    pub(crate) reference_type: &'static str,
+    pub(crate) owner: InkScriptSelectorOwner,
+    pub(crate) initial_order: InkScriptSelectorOrder,
+    pub(crate) fields: &'static [InkScriptFieldSchema],
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct GeneratedAssertion {
+    pub(crate) name: &'static str,
+    pub(crate) comparison: InkScriptAssertComparison,
+    pub(crate) fields: &'static [InkScriptFieldSchema],
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct GeneratedIdNamespace {
+    pub(crate) tag: &'static str,
+    pub(crate) order: u32,
 }
 
 include!(concat!(env!("OUT_DIR"), "/inkscript_language_schema.rs"));

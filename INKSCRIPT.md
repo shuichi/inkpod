@@ -1871,7 +1871,7 @@ Version impact:
 - C ABI: 14（symbol／record変更なし）
 ```
 
-### [~] M05B — step result、dependency、fragment closure
+### [x] M05B — step result、dependency、fragment closure
 
 **範囲**
 
@@ -1908,7 +1908,8 @@ Version impact:
 - Windows x64 Debug configure／build、static CRT、portable ZIP、unsigned MSIX、最終binaryの全36 CTestが
   419.29秒で成功した。ABI smokeは58.38秒、English smokeは170.71秒、Japanese smokeは177.70秒だった。
 - selector／assert実行、catalog interface、Core compiler/executor、authority／plan、C ABI、Windows UI、`.inkbatch`
-  production routeは変更していない。新規手動UI項目はなく、既存binaryの利用者回帰確認待ちとして停止する。
+  production routeは変更していない。新規手動UI項目はなく、次sessionの不具合報告を伴わない汎用promptにより
+  既存binaryの回帰確認済みとして`[x]`へ移行した。
 
 ```text
 Version impact:
@@ -1919,7 +1920,7 @@ Version impact:
 - C ABI: 14（symbol／record変更なし）
 ```
 
-### [ ] M06 — selector、assert、catalog interface
+### [~] M06 — selector、assert、catalog interface
 
 **範囲**
 
@@ -1936,6 +1937,39 @@ Version impact:
 - `skip_dependents`が同じdependency graph上でassert/stepへ推移し、静的disabled依存と混同されない。
 - query/view/session commandをcatalog interfaceが受理しない。
 - M23までpublic re-export、FFI、Windows product routeから到達不能であるvisibility testがある。
+
+**自動検証結果（2026-08-15）**
+
+- M00 language registryからselector entity/filter/owner/order/cardinality/missing policy、assert field/comparison、
+  persistent-ID namespace順を生成typed metadataへ変換した。JSON grammarとprivate catalog draftは変更していない。
+- crate-internal initial-document snapshot APIで、initial orderに基づく`one`／`first`／`all`、semantic filter、
+  owner relation、strict source UUID＋persistent ID、document state／ID-allocation digest、object／selection assertを
+  mutationなしで検証する。ID-allocation digestは批准済みBLAKE3 derive-key規則とregistry namespace順を使用する。
+- `skip_dependents`をbinding、assert、step、result consumerが共有するdependency graphで推移させ、静的disabled stepは
+  `Disabled`のまま区別した。missing、ambiguous、owner mismatch、stale precondition、invalid snapshot、overflow、
+  resource bound、atomic failureをcrate-private testで固定した。
+- test-only constructorだけを持つcrate-internal `CatalogView`へclosed portability/work formula、result、asset、editor
+  metadataを実装した。document mutationだけを受理し、query/view/session command、未知path、除算0、overflow、
+  nesting/rule上限を拒否する。production empty catalogとstub executorは作っていない。
+- 新規2 catalog test、4 binding/assert test、1 crate-internal integration contractを含むworkspace全519 test、
+  `cargo fmt --check`、all-target/all-feature Clippy（warning deny）、strict rustdoc、lexer/parser fuzz target buildが成功した。
+  Core/FFI/Windowsと`inkpod-format` public re-exportからprivate preparation/catalog APIへ到達できないgateも成功した。
+- 承認済みquick benchmarkはworkload、harness、semantic counter、envelopeを変更せず成功し、
+  `canonical_replay=264b98028ac92ac6`、`checkpoint_open=07da1b4e6bc5d289`、
+  `output_color_guard=cfb6b288963c78ba`を維持した。
+- Windows x64 Debug configure／build、static CRT、portable ZIP、unsigned MSIX、最終binaryの全36 CTestが
+  407.53秒で成功した。ABI smokeは58.03秒、English smokeは167.84秒、Japanese smokeは168.35秒だった。
+- command entry、Core-backed compiler/executor、authority／plan、C ABI、Windows UI、`.inkscript` product route、
+  `.inkbatch` production routeは変更していない。新規手動UI項目はなく、既存binaryの利用者回帰確認待ちとして停止する。
+
+```text
+Version impact:
+- InkScript file: 1（批准済みselector/assert language v1 contractの初回typed実装、grammar変更なし）
+- InkScript procedure catalog: 1（crate-internal test catalogのみ、private draft entry 0、変更なし）
+- replay epoch: 23（canonical replay semantics変更なし）
+- .inkpod top-level: 26（schema／state／replay変更なし）
+- C ABI: 14（symbol／record変更なし）
+```
 
 ### [ ] M07 — legacy simple catalog adapter
 

@@ -260,19 +260,9 @@ fn generate() -> Result<(), String> {
         array(member(&root, "records")?)?,
         "fields",
     )?;
-    emit_collection(
-        &mut generated,
-        "GENERATED_SELECTORS",
-        array(member(&root, "selector_entities")?)?,
-        "filters",
-    )?;
-    emit_selector_results(&mut generated, &root)?;
-    emit_collection(
-        &mut generated,
-        "GENERATED_ASSERTIONS",
-        array(member(&root, "assert_kinds")?)?,
-        "fields",
-    )?;
+    emit_selectors(&mut generated, &root)?;
+    emit_assertions(&mut generated, &root)?;
+    emit_id_namespaces(&mut generated, &root)?;
     let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("missing OUT_DIR")?)
         .join("inkscript_language_schema.rs");
     fs::write(output, generated).map_err(|error| error.to_string())
@@ -383,18 +373,67 @@ fn emit_constructors(output: &mut String, root: &Json) -> Result<(), String> {
     Ok(())
 }
 
-fn emit_selector_results(output: &mut String, root: &Json) -> Result<(), String> {
+fn emit_selectors(output: &mut String, root: &Json) -> Result<(), String> {
     writeln!(
         output,
-        "const GENERATED_SELECTOR_RESULTS: &[GeneratedSelectorResult] = &["
+        "const GENERATED_SELECTORS: &[GeneratedSelector] = &["
     )
     .unwrap();
     for entry in array(member(root, "selector_entities")?)? {
         let name = string(member(entry, "name")?)?;
         let reference_type = string(member(entry, "reference_type")?)?;
+        let owner = selector_owner_expression(string(member(entry, "owner")?)?)?;
+        let initial_order = selector_order_expression(string(member(entry, "initial_order")?)?)?;
         writeln!(
             output,
-            "    GeneratedSelectorResult {{ name: {name:?}, reference_type: {reference_type:?} }},"
+            "    GeneratedSelector {{ name: {name:?}, reference_type: {reference_type:?}, owner: {owner}, initial_order: {initial_order}, fields: &["
+        )
+        .unwrap();
+        emit_fields(output, array(member(entry, "filters")?)?)?;
+        writeln!(output, "    ] }},").unwrap();
+    }
+    writeln!(output, "];\n").unwrap();
+    Ok(())
+}
+
+fn emit_assertions(output: &mut String, root: &Json) -> Result<(), String> {
+    writeln!(
+        output,
+        "const GENERATED_ASSERTIONS: &[GeneratedAssertion] = &["
+    )
+    .unwrap();
+    for entry in array(member(root, "assert_kinds")?)? {
+        let name = string(member(entry, "name")?)?;
+        let comparison = assert_comparison_expression(string(member(entry, "comparison")?)?)?;
+        if string(member(entry, "failure")?)? != "item_failure_without_mutation" {
+            return Err(format!(
+                "unsupported assertion failure contract for {name:?}"
+            ));
+        }
+        writeln!(
+            output,
+            "    GeneratedAssertion {{ name: {name:?}, comparison: {comparison}, fields: &["
+        )
+        .unwrap();
+        emit_fields(output, array(member(entry, "fields")?)?)?;
+        writeln!(output, "    ] }},").unwrap();
+    }
+    writeln!(output, "];\n").unwrap();
+    Ok(())
+}
+
+fn emit_id_namespaces(output: &mut String, root: &Json) -> Result<(), String> {
+    writeln!(
+        output,
+        "const GENERATED_ID_NAMESPACES: &[GeneratedIdNamespace] = &["
+    )
+    .unwrap();
+    for entry in array(member(root, "persistent_id_namespaces")?)? {
+        let tag = string(member(entry, "tag")?)?;
+        let order = number(member(entry, "order")?)?;
+        writeln!(
+            output,
+            "    GeneratedIdNamespace {{ tag: {tag:?}, order: {order} }},"
         )
         .unwrap();
     }
@@ -412,24 +451,59 @@ fn emit_collection(
     for entry in entries {
         let name = string(member(entry, "name")?)?;
         writeln!(output, "    GeneratedRecord {{ name: {name:?}, fields: &[").unwrap();
-        let fields = array(member(entry, fields_member)?)?;
-        for field in fields {
-            let field_name = string(member(field, "name")?)?;
-            let type_name = string(member(field, "type")?)?;
-            let required = boolean(member(field, "required")?)?;
-            let order = number(member(field, "canonical_order")?)?;
-            let default = default_expression(member(field, "default")?, required)?;
-            let constraints = string_slice_expression(array(member(field, "constraints")?)?)?;
-            writeln!(
-                output,
-                "        InkScriptFieldSchema {{ name: {field_name:?}, type_name: {type_name:?}, required: {required}, default: {default}, canonical_order: {order}, constraints: {constraints} }},"
-            )
-            .unwrap();
-        }
+        emit_fields(output, array(member(entry, fields_member)?)?)?;
         writeln!(output, "    ] }},").unwrap();
     }
     writeln!(output, "];\n").unwrap();
     Ok(())
+}
+
+fn emit_fields(output: &mut String, fields: &[Json]) -> Result<(), String> {
+    for field in fields {
+        let field_name = string(member(field, "name")?)?;
+        let type_name = string(member(field, "type")?)?;
+        let required = boolean(member(field, "required")?)?;
+        let order = number(member(field, "canonical_order")?)?;
+        let default = default_expression(member(field, "default")?, required)?;
+        let constraints = string_slice_expression(array(member(field, "constraints")?)?)?;
+        writeln!(
+            output,
+            "        InkScriptFieldSchema {{ name: {field_name:?}, type_name: {type_name:?}, required: {required}, default: {default}, canonical_order: {order}, constraints: {constraints} }},"
+        )
+        .unwrap();
+    }
+    Ok(())
+}
+
+fn selector_owner_expression(value: &str) -> Result<&'static str, String> {
+    match value {
+        "document" => Ok("InkScriptSelectorOwner::Document"),
+        "layer" => Ok("InkScriptSelectorOwner::Layer"),
+        "plane" => Ok("InkScriptSelectorOwner::Plane"),
+        "light_table_set" => Ok("InkScriptSelectorOwner::LightTableSet"),
+        _ => Err(format!("unknown selector owner {value:?}")),
+    }
+}
+
+fn selector_order_expression(value: &str) -> Result<&'static str, String> {
+    match value {
+        "document_tree" => Ok("InkScriptSelectorOrder::DocumentTree"),
+        "guide_order" => Ok("InkScriptSelectorOrder::Guide"),
+        "vector_order" => Ok("InkScriptSelectorOrder::Vector"),
+        "annotation_order" => Ok("InkScriptSelectorOrder::Annotation"),
+        "singleton" => Ok("InkScriptSelectorOrder::Singleton"),
+        "light_table_order" => Ok("InkScriptSelectorOrder::LightTable"),
+        _ => Err(format!("unknown selector initial order {value:?}")),
+    }
+}
+
+fn assert_comparison_expression(value: &str) -> Result<&'static str, String> {
+    match value {
+        "exact_typed_field_equality" => Ok("InkScriptAssertComparison::DocumentFields"),
+        "exact_object_property_equality" => Ok("InkScriptAssertComparison::ObjectProperties"),
+        "exact_selection_state_equality" => Ok("InkScriptAssertComparison::SelectionState"),
+        _ => Err(format!("unknown assert comparison {value:?}")),
+    }
 }
 
 fn string_slice_expression(values: &[Json]) -> Result<String, String> {

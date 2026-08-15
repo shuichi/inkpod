@@ -1,3 +1,5 @@
+mod bind;
+mod catalog;
 mod diagnostic;
 mod emit;
 mod envelope;
@@ -9,6 +11,19 @@ mod schema;
 mod source;
 mod syntax;
 mod types;
+
+// Catalog ratification is the first point allowed to re-export this route. Keeping a typed private
+// reference here includes it in normal builds without exposing a production catalog.
+#[allow(dead_code)]
+const PRIVATE_INKSCRIPT_PREPARATION_ROUTE: fn(
+    &types::InkScriptDeclarationModel,
+    &schema::InkScriptSchemaView<'_>,
+    &catalog::InkScriptCatalogView,
+    &bind::InkScriptInitialDocumentSnapshot,
+) -> Result<
+    bind::InkScriptInitialPreparation,
+    bind::InkScriptBindingError,
+> = bind::prepare_inkscript_initial_state;
 
 pub use diagnostic::{
     InkScriptDiagnostic, InkScriptDiagnosticCode, InkScriptDiagnosticSeverity, InkScriptSourceId,

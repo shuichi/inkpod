@@ -1017,9 +1017,26 @@ fn inkscript_typed_frontend_models_are_unreachable_from_core_ffi_and_windows() {
                 && !text.contains("close_inkscript_fragment")
                 && !text.contains("InkScriptClosedFragment")
                 && !text.contains("InkScriptTypedStep")
-                && !text.contains("InkScriptDependencyEdge"),
+                && !text.contains("InkScriptDependencyEdge")
+                && !text.contains("prepare_inkscript_initial_state")
+                && !text.contains("InkScriptCatalogView")
+                && !text.contains("InkScriptInitialDocumentSnapshot"),
             "production source {} reaches a private typed InkScript model",
             source.display()
+        );
+    }
+
+    let format_public_root = fs::read_to_string(repository.join("rust/inkpod-format/src/lib.rs"))
+        .expect("format public root must be readable");
+    for private_name in [
+        "prepare_inkscript_initial_state",
+        "InkScriptCatalogView",
+        "InkScriptInitialDocumentSnapshot",
+        "InkScriptInitialPreparation",
+    ] {
+        assert!(
+            !format_public_root.contains(private_name),
+            "crate-internal InkScript API {private_name} was publicly re-exported"
         );
     }
 }

@@ -3,8 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::diagnostic::{InkScriptSourceId, InkScriptSourceRange};
 use super::parser::{InkScriptCstNode, InkScriptCstNodeKind, InkScriptParsed};
 use super::schema::{
-    InkScriptFieldSchema, InkScriptResultAvailability, InkScriptResultCardinality,
-    InkScriptSchemaView,
+    InkScriptAssertComparison, InkScriptFieldSchema, InkScriptResultAvailability,
+    InkScriptResultCardinality, InkScriptSchemaView, InkScriptSelectorOrder,
+    InkScriptSelectorOwner,
 };
 use super::syntax::{
     InkScriptBinding, InkScriptProgramStatement, InkScriptRecord, InkScriptReferenceSegment,
@@ -67,6 +68,7 @@ pub enum InkScriptTypeDiagnosticCode {
     ExternalMutationDependency,
     InvalidFragmentSelection,
     InvalidStrictBinding,
+    InvalidStrictPrecondition,
     ResourceLimit,
     InvalidRunParameter,
     MissingRunParameter,
@@ -98,6 +100,7 @@ impl InkScriptTypeDiagnosticCode {
             Self::ExternalMutationDependency => "external_mutation_dependency",
             Self::InvalidFragmentSelection => "invalid_fragment_selection",
             Self::InvalidStrictBinding => "invalid_strict_binding",
+            Self::InvalidStrictPrecondition => "invalid_strict_precondition",
             Self::ResourceLimit => "resource_limit",
             Self::InvalidRunParameter => "invalid_run_parameter",
             Self::MissingRunParameter => "missing_run_parameter",
@@ -201,7 +204,7 @@ pub struct InkScriptTypedValue {
 }
 
 impl InkScriptTypedValue {
-    fn new(value_type: impl Into<String>, kind: InkScriptTypedValueKind) -> Self {
+    pub(crate) fn new(value_type: impl Into<String>, kind: InkScriptTypedValueKind) -> Self {
         Self {
             value_type: InkScriptResolvedType::new(value_type),
             kind,
@@ -265,6 +268,11 @@ impl InkScriptTypedParameter {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct InkScriptTypedBinding {
     name: String,
+    entity: String,
+    owner: InkScriptSelectorOwner,
+    initial_order: InkScriptSelectorOrder,
+    cardinality: InkScriptSelectorCardinality,
+    missing: InkScriptSelectorMissingPolicy,
     result_type: InkScriptResolvedType,
     selector: InkScriptTypedValue,
     source_range: InkScriptSourceRange,
@@ -286,6 +294,72 @@ impl InkScriptTypedBinding {
     pub const fn source_range(&self) -> InkScriptSourceRange {
         self.source_range
     }
+
+    pub(crate) fn entity(&self) -> &str {
+        &self.entity
+    }
+
+    pub(crate) const fn owner(&self) -> InkScriptSelectorOwner {
+        self.owner
+    }
+
+    pub(crate) const fn initial_order(&self) -> InkScriptSelectorOrder {
+        self.initial_order
+    }
+
+    pub(crate) const fn cardinality(&self) -> InkScriptSelectorCardinality {
+        self.cardinality
+    }
+
+    pub(crate) const fn missing(&self) -> InkScriptSelectorMissingPolicy {
+        self.missing
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum InkScriptSelectorCardinality {
+    One,
+    First,
+    All,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum InkScriptSelectorMissingPolicy {
+    Error,
+    SkipDependents,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct InkScriptTypedAssert {
+    kind: String,
+    comparison: InkScriptAssertComparison,
+    arguments: InkScriptTypedValue,
+    source_range: InkScriptSourceRange,
+    program_index: u32,
+}
+
+impl InkScriptTypedAssert {
+    pub(crate) fn kind(&self) -> &str {
+        &self.kind
+    }
+
+    pub(crate) const fn comparison(&self) -> InkScriptAssertComparison {
+        self.comparison
+    }
+
+    pub(crate) const fn arguments(&self) -> &InkScriptTypedValue {
+        &self.arguments
+    }
+
+    pub(crate) const fn program_index(&self) -> u32 {
+        self.program_index
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum InkScriptTypedProgramNode {
+    Assert(usize),
+    Step(usize),
 }
 
 /// One closed, typed asset declaration. Payload ingestion belongs to its later owner milestone.
@@ -411,6 +485,7 @@ impl InkScriptStepGroup {
 pub enum InkScriptDependencyNodeKind {
     Parameter,
     Binding,
+    Assert,
     Step,
     StepResult,
     Asset,
@@ -422,6 +497,7 @@ pub struct InkScriptDependencyNode {
     kind: InkScriptDependencyNodeKind,
     name: String,
     step_index: Option<u32>,
+    program_index: Option<u32>,
 }
 
 impl InkScriptDependencyNode {
@@ -435,6 +511,10 @@ impl InkScriptDependencyNode {
 
     pub const fn step_index(&self) -> Option<u32> {
         self.step_index
+    }
+
+    pub const fn program_index(&self) -> Option<u32> {
+        self.program_index
     }
 }
 
@@ -463,7 +543,9 @@ pub struct InkScriptDeclarationModel {
     parameters: Vec<InkScriptTypedParameter>,
     bindings: Vec<InkScriptTypedBinding>,
     assets: Vec<InkScriptTypedAsset>,
+    assertions: Vec<InkScriptTypedAssert>,
     steps: Vec<InkScriptTypedStep>,
+    program: Vec<InkScriptTypedProgramNode>,
     groups: Vec<InkScriptStepGroup>,
     dependency_edges: Vec<InkScriptDependencyEdge>,
 }
@@ -499,6 +581,14 @@ impl InkScriptDeclarationModel {
 
     pub fn dependency_edges(&self) -> &[InkScriptDependencyEdge] {
         &self.dependency_edges
+    }
+
+    pub(crate) fn assertions(&self) -> &[InkScriptTypedAssert] {
+        &self.assertions
+    }
+
+    pub(crate) fn program(&self) -> &[InkScriptTypedProgramNode] {
+        &self.program
     }
 }
 
@@ -559,6 +649,7 @@ struct DeclarationRanges {
     bindings: Vec<InkScriptSourceRange>,
     assets: Vec<InkScriptSourceRange>,
     steps: Vec<InkScriptSourceRange>,
+    program: Vec<InkScriptSourceRange>,
 }
 
 /// Resolves approved language-v1 declaration types and namespaces without filesystem, Core, or
@@ -602,6 +693,7 @@ pub fn build_inkscript_declaration_model_with_limits(
     let mut parameter_syntax = Vec::new();
     let mut binding_syntax = Vec::new();
     let mut asset_syntax = Vec::new();
+    let mut program_syntax = Vec::new();
     let mut step_syntax = Vec::new();
     let mut result_aliases = Vec::new();
     let mut step_index = 0usize;
@@ -612,6 +704,7 @@ pub fn build_inkscript_declaration_model_with_limits(
             InkScriptSemanticSection::Assets(values) => asset_syntax.extend(values),
             InkScriptSemanticSection::Program(statements) => {
                 for statement in statements {
+                    program_syntax.push(statement);
                     if let super::syntax::InkScriptProgramStatement::Step { result_alias, .. } =
                         statement
                     {
@@ -631,6 +724,7 @@ pub fn build_inkscript_declaration_model_with_limits(
         align_ranges(&ranges.parameters, parameter_syntax.len(), ranges.document);
     let binding_ranges = align_ranges(&ranges.bindings, binding_syntax.len(), ranges.document);
     let asset_ranges = align_ranges(&ranges.assets, asset_syntax.len(), ranges.document);
+    let program_ranges = align_ranges(&ranges.program, program_syntax.len(), ranges.document);
 
     let mut value_names = BTreeMap::<String, SymbolKind>::new();
     for (index, parameter) in parameter_syntax.iter().enumerate() {
@@ -786,8 +880,18 @@ pub fn build_inkscript_declaration_model_with_limits(
             range,
             &format!("bindings.{}.selector", binding.name),
         )?;
+        let selector_schema = schema
+            .selector_schema(&binding.entity)
+            .expect("semantic analysis accepted this exact selector entity");
+        let cardinality = selector_cardinality(&selector, source.id(), range, &binding.name)?;
+        let missing = selector_missing_policy(&selector, source.id(), range, &binding.name)?;
         bindings.push(InkScriptTypedBinding {
             name: binding.name.clone(),
+            entity: binding.entity.clone(),
+            owner: selector_schema.owner,
+            initial_order: selector_schema.initial_order,
+            cardinality,
+            missing,
             result_type: binding_result_types[index].clone(),
             selector,
             source_range: range,
@@ -823,11 +927,14 @@ pub fn build_inkscript_declaration_model_with_limits(
 
     let step_ranges = align_ranges(&ranges.steps, step_syntax.len(), ranges.document);
     let AnalyzedProgram {
+        assertions,
         steps,
+        program,
         groups,
         dependency_edges,
     } = analyze_program(
         &binding_syntax,
+        &program_syntax,
         &step_syntax,
         &value_names,
         &parameter_types,
@@ -836,6 +943,7 @@ pub fn build_inkscript_declaration_model_with_limits(
         schema,
         source.id(),
         &binding_ranges,
+        &program_ranges,
         &step_ranges,
         limits,
     )?;
@@ -846,7 +954,9 @@ pub fn build_inkscript_declaration_model_with_limits(
         parameters,
         bindings,
         assets,
+        assertions,
         steps,
+        program,
         groups,
         dependency_edges,
     })
@@ -958,7 +1068,9 @@ enum DependencyUse {
 }
 
 struct AnalyzedProgram {
+    assertions: Vec<InkScriptTypedAssert>,
     steps: Vec<InkScriptTypedStep>,
+    program: Vec<InkScriptTypedProgramNode>,
     groups: Vec<InkScriptStepGroup>,
     dependency_edges: Vec<InkScriptDependencyEdge>,
 }
@@ -966,6 +1078,7 @@ struct AnalyzedProgram {
 #[allow(clippy::too_many_arguments)]
 fn analyze_program(
     binding_syntax: &[&InkScriptBinding],
+    program_syntax: &[&InkScriptProgramStatement],
     step_syntax: &[&InkScriptProgramStatement],
     value_names: &BTreeMap<String, SymbolKind>,
     parameter_types: &[InkScriptResolvedType],
@@ -974,6 +1087,7 @@ fn analyze_program(
     schema: &InkScriptSchemaView<'_>,
     source_id: InkScriptSourceId,
     binding_ranges: &[InkScriptSourceRange],
+    program_ranges: &[InkScriptSourceRange],
     step_ranges: &[InkScriptSourceRange],
     limits: InkScriptAnalysisLimits,
 ) -> Result<AnalyzedProgram, InkScriptTypeDiagnostic> {
@@ -1027,6 +1141,7 @@ fn analyze_program(
             kind: InkScriptDependencyNodeKind::Binding,
             name: binding.name.clone(),
             step_index: None,
+            program_index: None,
         };
         let mut uses = Vec::new();
         collect_dependency_uses_record(&binding.selector, &mut uses);
@@ -1052,6 +1167,13 @@ fn analyze_program(
     }
 
     let mut steps = Vec::with_capacity(step_syntax.len());
+    let step_program_indices = program_syntax
+        .iter()
+        .enumerate()
+        .filter_map(|(index, statement)| {
+            matches!(statement, InkScriptProgramStatement::Step { .. }).then_some(index)
+        })
+        .collect::<Vec<_>>();
     for (index, statement) in step_syntax.iter().enumerate() {
         let InkScriptProgramStatement::Step {
             label,
@@ -1115,6 +1237,14 @@ fn analyze_program(
                     format!("program.steps[{index}]"),
                 )
             })?),
+            program_index: Some(u32::try_from(step_program_indices[index]).map_err(|_| {
+                InkScriptTypeDiagnostic::new(
+                    InkScriptTypeDiagnosticCode::NumericOverflow,
+                    source_id,
+                    range,
+                    format!("program.steps[{index}]"),
+                )
+            })?),
         };
         let mut uses = Vec::new();
         collect_dependency_uses_record(
@@ -1155,9 +1285,119 @@ fn analyze_program(
         });
     }
 
+    let mut assertions = Vec::new();
+    let mut program = Vec::with_capacity(program_syntax.len());
+    let mut preceding_steps = 0usize;
+    for (program_index, statement) in program_syntax.iter().enumerate() {
+        let range = program_ranges[program_index];
+        match statement {
+            InkScriptProgramStatement::Step { .. } => {
+                program.push(InkScriptTypedProgramNode::Step(preceding_steps));
+                preceding_steps += 1;
+            }
+            InkScriptProgramStatement::Assert { kind, arguments } => {
+                let assertion_schema = schema.assertion_schema(kind).ok_or_else(|| {
+                    InkScriptTypeDiagnostic::new(
+                        InkScriptTypeDiagnosticCode::InvalidSemanticModel,
+                        source_id,
+                        range,
+                        format!("program.assertions[{program_index}].{kind}"),
+                    )
+                })?;
+                let mut resolve_reference = |root: &str, segments: &[InkScriptReferenceSegment]| {
+                    let root_type = match value_names.get(root) {
+                        Some(SymbolKind::Parameter(parameter)) => {
+                            parameter_types[*parameter].clone()
+                        }
+                        Some(SymbolKind::Binding(binding)) => {
+                            binding_result_types[*binding].clone()
+                        }
+                        Some(SymbolKind::StepResult(producer)) if *producer >= preceding_steps => {
+                            return Err(InkScriptTypeDiagnosticCode::ForwardReference);
+                        }
+                        Some(SymbolKind::StepResult(producer)) => {
+                            if !step_enabled[*producer] {
+                                return Err(InkScriptTypeDiagnosticCode::UnavailableResult);
+                            }
+                            resolve_step_result_segments(
+                                &step_results[*producer],
+                                segments,
+                                schema,
+                            )?
+                        }
+                        None => {
+                            return Err(InkScriptTypeDiagnosticCode::UndefinedValueSymbol);
+                        }
+                    };
+                    if matches!(value_names.get(root), Some(SymbolKind::StepResult(_))) {
+                        Ok(root_type)
+                    } else {
+                        resolve_reference_segments(root_type, segments, schema)
+                    }
+                };
+                let typed_arguments = type_record(
+                    arguments,
+                    &format!("{kind}_assert"),
+                    assertion_schema.fields,
+                    schema,
+                    asset_names,
+                    &mut resolve_reference,
+                    source_id,
+                    range,
+                    &format!("program.assertions[{program_index}].{kind}"),
+                )?;
+                let converted_index = u32::try_from(program_index).map_err(|_| {
+                    InkScriptTypeDiagnostic::new(
+                        InkScriptTypeDiagnosticCode::NumericOverflow,
+                        source_id,
+                        range,
+                        format!("program.assertions[{program_index}]"),
+                    )
+                })?;
+                let consumer = InkScriptDependencyNode {
+                    kind: InkScriptDependencyNodeKind::Assert,
+                    name: kind.clone(),
+                    step_index: None,
+                    program_index: Some(converted_index),
+                };
+                let mut uses = Vec::new();
+                collect_dependency_uses_record(arguments, &mut uses);
+                for dependency in uses {
+                    let dependency = dependency_node(
+                        dependency,
+                        value_names,
+                        step_syntax,
+                        asset_names,
+                        source_id,
+                        range,
+                        &format!("program.assertions[{program_index}].{kind}"),
+                    )?;
+                    push_dependency_edge(
+                        &mut dependency_edges,
+                        consumer.clone(),
+                        dependency,
+                        limits,
+                        source_id,
+                        range,
+                    )?;
+                }
+                program.push(InkScriptTypedProgramNode::Assert(assertions.len()));
+                assertions.push(InkScriptTypedAssert {
+                    kind: kind.clone(),
+                    comparison: assertion_schema.comparison,
+                    arguments: typed_arguments,
+                    source_range: range,
+                    program_index: converted_index,
+                });
+            }
+        }
+    }
+
     let groups = build_step_groups(&steps, source_id)?;
     Ok(AnalyzedProgram {
+        assertions,
         steps,
+        program,
         groups,
         dependency_edges,
     })
@@ -1230,6 +1470,7 @@ fn dependency_node(
                 kind: InkScriptDependencyNodeKind::Asset,
                 name,
                 step_index: None,
+                program_index: None,
             })
         }
         DependencyUse::Value { root, segments } => match symbols.get(&root) {
@@ -1237,11 +1478,13 @@ fn dependency_node(
                 kind: InkScriptDependencyNodeKind::Parameter,
                 name: root,
                 step_index: None,
+                program_index: None,
             }),
             Some(SymbolKind::Binding(_)) => Ok(InkScriptDependencyNode {
                 kind: InkScriptDependencyNodeKind::Binding,
                 name: root,
                 step_index: None,
+                program_index: None,
             }),
             Some(SymbolKind::StepResult(index)) => {
                 let alias = match steps[*index] {
@@ -1263,6 +1506,7 @@ fn dependency_node(
                             path,
                         )
                     })?),
+                    program_index: None,
                 })
             }
             None => Err(InkScriptTypeDiagnostic::new(
@@ -1375,6 +1619,43 @@ fn selector_result_type(
         )))
     } else {
         Ok(InkScriptResolvedType::new(reference_type))
+    }
+}
+
+fn selector_cardinality(
+    selector: &InkScriptTypedValue,
+    source_id: InkScriptSourceId,
+    range: InkScriptSourceRange,
+    name: &str,
+) -> Result<InkScriptSelectorCardinality, InkScriptTypeDiagnostic> {
+    match typed_enum_field(selector, "cardinality").unwrap_or("one") {
+        "one" => Ok(InkScriptSelectorCardinality::One),
+        "first" => Ok(InkScriptSelectorCardinality::First),
+        "all" => Ok(InkScriptSelectorCardinality::All),
+        _ => Err(InkScriptTypeDiagnostic::new(
+            InkScriptTypeDiagnosticCode::ValueOutOfRange,
+            source_id,
+            range,
+            format!("bindings.{name}.cardinality"),
+        )),
+    }
+}
+
+fn selector_missing_policy(
+    selector: &InkScriptTypedValue,
+    source_id: InkScriptSourceId,
+    range: InkScriptSourceRange,
+    name: &str,
+) -> Result<InkScriptSelectorMissingPolicy, InkScriptTypeDiagnostic> {
+    match typed_enum_field(selector, "missing").unwrap_or("error") {
+        "error" => Ok(InkScriptSelectorMissingPolicy::Error),
+        "skip_dependents" => Ok(InkScriptSelectorMissingPolicy::SkipDependents),
+        _ => Err(InkScriptTypeDiagnostic::new(
+            InkScriptTypeDiagnosticCode::ValueOutOfRange,
+            source_id,
+            range,
+            format!("bindings.{name}.missing"),
+        )),
     }
 }
 
@@ -1827,6 +2108,7 @@ fn type_record(
         )?;
         typed.insert(name.clone(), value);
     }
+    validate_record_constraints(&typed, fields, source_id, range, path)?;
     Ok(InkScriptTypedValue::new(
         type_name,
         InkScriptTypedValueKind::Record(typed),
@@ -1876,6 +2158,9 @@ fn validate_constraints(
     range: InkScriptSourceRange,
     path: &str,
 ) -> Result<(), InkScriptTypeDiagnostic> {
+    if matches!(value.kind(), InkScriptTypedValueKind::None) {
+        return Ok(());
+    }
     for constraint in constraints {
         let valid = if *constraint == "nonzero" || *constraint == "positive" {
             integer_magnitude(value).is_some_and(|value| value > 0)
@@ -1903,6 +2188,78 @@ fn validate_constraints(
                 range,
                 path,
             ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_record_constraints(
+    values: &BTreeMap<String, InkScriptTypedValue>,
+    fields: &[InkScriptFieldSchema],
+    source_id: InkScriptSourceId,
+    range: InkScriptSourceRange,
+    path: &str,
+) -> Result<(), InkScriptTypeDiagnostic> {
+    let present = |name: &str| {
+        values
+            .get(name)
+            .is_some_and(|value| !matches!(value.kind(), InkScriptTypedValueKind::None))
+    };
+    for field in fields {
+        for constraint in field.constraints {
+            let strict_missing = constraint
+                .strip_prefix("required-with:")
+                .is_some_and(|other| present(other) && !present(field.name))
+                || constraint
+                    .strip_prefix("requires:")
+                    .is_some_and(|other| present(field.name) && !present(other));
+            if strict_missing {
+                return Err(InkScriptTypeDiagnostic::new(
+                    InkScriptTypeDiagnosticCode::InvalidStrictPrecondition,
+                    source_id,
+                    range,
+                    format!("{path}.{}", field.name),
+                ));
+            }
+            if *constraint == "all-forbidden"
+                && matches!(
+                    values.get(field.name).map(InkScriptTypedValue::kind),
+                    Some(InkScriptTypedValueKind::Enum(value)) if value == "all"
+                )
+            {
+                return Err(InkScriptTypeDiagnostic::new(
+                    InkScriptTypeDiagnosticCode::ValueOutOfRange,
+                    source_id,
+                    range,
+                    format!("{path}.{}", field.name),
+                ));
+            }
+            let target_type = values.get("target").map(InkScriptTypedValue::type_name);
+            if present(field.name)
+                && ((*constraint == "layer-only" && target_type != Some("layer_ref"))
+                    || (*constraint == "plane-only" && target_type != Some("plane_ref")))
+            {
+                return Err(InkScriptTypeDiagnostic::new(
+                    InkScriptTypeDiagnosticCode::TypeMismatch,
+                    source_id,
+                    range,
+                    format!("{path}.{}", field.name),
+                ));
+            }
+            if *constraint == "none-when-empty"
+                && matches!(
+                    values.get("empty").map(InkScriptTypedValue::kind),
+                    Some(InkScriptTypedValueKind::Boolean(true))
+                )
+                && present(field.name)
+            {
+                return Err(InkScriptTypeDiagnostic::new(
+                    InkScriptTypeDiagnosticCode::ValueOutOfRange,
+                    source_id,
+                    range,
+                    format!("{path}.{}", field.name),
+                ));
+            }
         }
     }
     Ok(())
@@ -1998,6 +2355,7 @@ fn declaration_ranges(parsed: &InkScriptParsed<'_>) -> DeclarationRanges {
     let mut bindings = Vec::new();
     let mut assets = Vec::new();
     let mut steps = Vec::new();
+    let mut program = Vec::new();
     collect_declaration_ranges(
         parsed.cst().root(),
         &line_map,
@@ -2005,6 +2363,7 @@ fn declaration_ranges(parsed: &InkScriptParsed<'_>) -> DeclarationRanges {
         &mut bindings,
         &mut assets,
         &mut steps,
+        &mut program,
     );
     DeclarationRanges {
         document,
@@ -2012,6 +2371,7 @@ fn declaration_ranges(parsed: &InkScriptParsed<'_>) -> DeclarationRanges {
         bindings,
         assets,
         steps,
+        program,
     }
 }
 
@@ -2022,6 +2382,7 @@ fn collect_declaration_ranges(
     bindings: &mut Vec<InkScriptSourceRange>,
     assets: &mut Vec<InkScriptSourceRange>,
     steps: &mut Vec<InkScriptSourceRange>,
+    program: &mut Vec<InkScriptSourceRange>,
 ) {
     let range = || {
         line_map
@@ -2032,11 +2393,19 @@ fn collect_declaration_ranges(
         InkScriptCstNodeKind::ParameterDeclaration => parameters.push(range()),
         InkScriptCstNodeKind::BindingDeclaration => bindings.push(range()),
         InkScriptCstNodeKind::AssetDeclaration => assets.push(range()),
-        InkScriptCstNodeKind::StepStatement => steps.push(range()),
+        InkScriptCstNodeKind::AssertStatement => {
+            program.push(range());
+        }
+        InkScriptCstNodeKind::StepStatement => {
+            steps.push(range());
+            program.push(range());
+        }
         _ => {}
     }
     for child in node.children() {
-        collect_declaration_ranges(child, line_map, parameters, bindings, assets, steps);
+        collect_declaration_ranges(
+            child, line_map, parameters, bindings, assets, steps, program,
+        );
     }
 }
 
@@ -2060,6 +2429,16 @@ fn string_field<'a>(record: &'a InkScriptRecord, name: &str) -> Option<&'a str> 
 fn enum_field<'a>(record: &'a InkScriptRecord, name: &str) -> Option<&'a str> {
     match record.0.get(name) {
         Some(InkScriptValue::Enum(value)) => Some(value),
+        _ => None,
+    }
+}
+
+fn typed_enum_field<'a>(record: &'a InkScriptTypedValue, name: &str) -> Option<&'a str> {
+    let InkScriptTypedValueKind::Record(fields) = record.kind() else {
+        return None;
+    };
+    match fields.get(name).map(InkScriptTypedValue::kind) {
+        Some(InkScriptTypedValueKind::Enum(value)) => Some(value),
         _ => None,
     }
 }

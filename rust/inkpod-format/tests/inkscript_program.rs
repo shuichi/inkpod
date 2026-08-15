@@ -258,6 +258,54 @@ fn dependency_resource_limit_rejects_without_partial_model() {
 }
 
 #[test]
+fn selectors_and_asserts_fail_closed_and_share_the_dependency_graph() {
+    let strict_without_uuid = analyze(
+        b"inkscript_fragment 1; requires { procedure_catalog = 1; replay_epoch = 23; } bindings { let target = select layer { persistent_id = 7; }; } program {}",
+    )
+    .unwrap_err();
+    assert_eq!(
+        strict_without_uuid.code(),
+        InkScriptTypeDiagnosticCode::InvalidStrictPrecondition
+    );
+
+    let forbidden_all = analyze(
+        b"inkscript_fragment 1; requires { procedure_catalog = 1; replay_epoch = 23; } bindings { let frame = select shooting_frame { cardinality = all; }; } program {}",
+    )
+    .unwrap_err();
+    assert_eq!(
+        forbidden_all.code(),
+        InkScriptTypeDiagnosticCode::ValueOutOfRange
+    );
+
+    let zero_width = analyze(
+        b"inkscript_fragment 1; requires { procedure_catalog = 1; replay_epoch = 23; } program { assert document { width = 0; }; }",
+    )
+    .unwrap_err();
+    assert_eq!(
+        zero_width.code(),
+        InkScriptTypeDiagnosticCode::ValueOutOfRange
+    );
+
+    let list_target = analyze(
+        b"inkscript_fragment 1; requires { procedure_catalog = 1; replay_epoch = 23; } bindings { let targets = select layer { cardinality = all; }; } program { assert object { target = $targets; }; }",
+    )
+    .unwrap_err();
+    assert_eq!(
+        list_target.code(),
+        InkScriptTypeDiagnosticCode::ResultCardinalityMismatch
+    );
+
+    let model = analyze(
+        b"inkscript_fragment 1; requires { procedure_catalog = 1; replay_epoch = 23; } bindings { let target = select layer {}; } program { assert object { target = $target; visible = true; }; step \"Use\" { enabled = true; invoke use_layer_test { layer = $target; value = 1; payload = asset(image); }; } } assets { asset image { asset_id = blake3\"0000000000000000000000000000000000000000000000000000000000000000\"; kind = \"canonical_raster\"; descriptor = { pixel_format = rgba8; color_space = srgb; alpha = straight; width = 1; height = 1; stride = 4; element_count = 1; }; data = base64\"\"\"AAAAAA==\"\"\"; }; }",
+    )
+    .unwrap();
+    assert!(model.dependency_edges().iter().any(|edge| {
+        edge.consumer().kind() == InkScriptDependencyNodeKind::Assert
+            && edge.dependency().kind() == InkScriptDependencyNodeKind::Binding
+    }));
+}
+
+#[test]
 fn fragment_closure_rebinds_external_results_without_adding_mutations_and_renames_atomically() {
     let text = format!(
         r#"inkscript_fragment 1;
