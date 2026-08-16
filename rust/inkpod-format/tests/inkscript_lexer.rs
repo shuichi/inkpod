@@ -30,9 +30,9 @@ fn diagnostic_codes(bytes: &[u8]) -> Vec<InkScriptDiagnosticCode> {
 }
 
 #[test]
-fn public_lexer_accepts_v1_tokens_and_uses_maximal_munch() {
+fn public_lexer_accepts_v2_tokens_and_uses_maximal_munch() {
     let source = fixture_source(
-        br#"inkscript 1; uuid"550e8400-e29b-41d4-a716-446655440000" blake3"0000000000000000000000000000000000000000000000000000000000000000" base64"""QUJD""" uuid "plain" 1.25 -0 // tail
+        br#"inkscript 2; uuid"550e8400-e29b-41d4-a716-446655440000" blake3"0000000000000000000000000000000000000000000000000000000000000000" base64"""QUJD""" uuid "plain" 1.25 -0 // tail
 "#,
     );
     let lexed = lex_inkscript(&source);
@@ -61,8 +61,8 @@ fn public_lexer_accepts_v1_tokens_and_uses_maximal_munch() {
 }
 
 #[test]
-fn public_lexer_exposes_the_exact_current_v1_keywords_limits_and_codes() {
-    assert_eq!(INKSCRIPT_FILE_VERSION, 1);
+fn public_lexer_exposes_the_exact_current_v2_keywords_limits_and_codes() {
+    assert_eq!(INKSCRIPT_FILE_VERSION, 2);
     assert_eq!(MAX_INKSCRIPT_SOURCE_BYTES, 128 * 1024 * 1024);
     assert_eq!(MAX_INKSCRIPT_IDENTIFIER_BYTES, 128);
     assert_eq!(MAX_INKSCRIPT_NUMERIC_BYTES, 128);
@@ -239,7 +239,7 @@ fn public_lexer_reports_nul_cr_escape_and_number_errors_then_recovers() {
 }
 
 #[test]
-fn public_lexer_accepts_v1_escapes_and_treats_nonleading_bom_as_source_text() {
+fn public_lexer_accepts_v2_escapes_and_treats_nonleading_bom_as_source_text() {
     let source = fixture_source(br#""\"\\\n\r\t\u{e9}\u{1F600}" base64"""//8=""""#);
     let lexed = lex_inkscript(&source);
     assert!(lexed.is_complete());
@@ -397,7 +397,7 @@ fn public_lexer_empty_input_is_a_stable_no_op_and_source_is_owned() {
 
 #[test]
 fn public_lexer_malformed_and_truncation_corpus_never_panics() {
-    let valid = "inkscript 1;\nprogram { step \"é\" { enabled = true; invoke x {}; }; }\n";
+    let valid = "inkscript 2;\nprogram { step \"é\" { enabled = true; invoke x {}; }; }\n";
     for length in 0..=valid.len() {
         match InkScriptSource::new(InkScriptSourceId::new(31), &valid.as_bytes()[..length]) {
             Ok(source) => {

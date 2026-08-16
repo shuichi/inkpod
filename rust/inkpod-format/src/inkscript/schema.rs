@@ -360,7 +360,7 @@ pub struct InkScriptSchemaView<'schema> {
 }
 
 impl<'schema> InkScriptSchemaView<'schema> {
-    /// Composes the generated exact-current language v1 projection with caller-provided private
+    /// Composes the generated exact-current language v2 projection with caller-provided private
     /// schemas. The private catalog draft is never read by this API.
     pub fn exact_current(
         records: &'schema [InkScriptRecordSchema],
@@ -369,7 +369,7 @@ impl<'schema> InkScriptSchemaView<'schema> {
         Self::exact_current_with_catalog(&[], &[], records, commands)
     }
 
-    /// Composes language v1 with the exact closed types and commands supplied by one private
+    /// Composes language v2 with the exact closed types and commands supplied by one private
     /// catalog owner. This does not read or expose the pre-ratification catalog draft.
     pub fn exact_current_with_catalog(
         enums: &'schema [InkScriptEnumSchema],
@@ -488,7 +488,7 @@ impl<'schema> InkScriptSchemaView<'schema> {
             .find(|selector| selector.name == name)
     }
 
-    /// Returns the owner relation for an exact language-v1 selector entity.
+    /// Returns the owner relation for an exact language-v2 selector entity.
     pub fn selector_owner(&self, name: &str) -> Option<InkScriptSelectorOwner> {
         self.selector_schema(name).map(|selector| selector.owner)
     }

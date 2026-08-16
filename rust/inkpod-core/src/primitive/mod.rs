@@ -11,6 +11,11 @@ mod executor;
 pub(crate) mod inkscript;
 #[allow(
     dead_code,
+    reason = "the private annotation/frame adapter is connected only through the script runner"
+)]
+pub(crate) mod inkscript_annotation_frame;
+#[allow(
+    dead_code,
     reason = "the private legacy-image adapter stays disconnected until the compiler owner"
 )]
 pub(crate) mod inkscript_batch;
@@ -45,6 +50,11 @@ pub(crate) mod inkscript_selection_floating;
     reason = "the private stroke/geometry/import adapter is connected only through the script runner"
 )]
 pub(crate) mod inkscript_stroke_geometry;
+#[allow(
+    dead_code,
+    reason = "the private vector adapter is connected only through the script runner"
+)]
+pub(crate) mod inkscript_vector;
 mod invocation;
 mod model;
 mod raster;
@@ -62,6 +72,9 @@ pub(crate) use digest::{CanonicalDocumentStateCache, canonical_document_state};
 pub(crate) use display::display_procedure;
 pub(crate) use executor::validate_persisted_procedure;
 pub(crate) use inkscript::{LegacySimpleAdapterError, LegacySimpleScriptStep};
+pub(crate) use inkscript_annotation_frame::{
+    AnnotationFrameAdapterError, AnnotationFrameScriptStep,
+};
 pub(crate) use inkscript_batch::{LegacyImageAdapterError, LegacyImageScriptStep};
 pub(crate) use inkscript_document_tree::{DocumentTreeAdapterError, DocumentTreeScriptStep};
 pub(crate) use inkscript_fill_gradient::{FillGradientAdapterError, FillGradientScriptStep};
@@ -76,6 +89,7 @@ pub(crate) use inkscript_selection_floating::{
 pub(crate) use inkscript_stroke_geometry::{
     StrokeGeometryImportAction, StrokeGeometryImportAdapterError,
 };
+pub(crate) use inkscript_vector::{VectorAdapterError, VectorScriptStep};
 pub(crate) use invocation::{CanonicalInvocation, InvocationResult, RuntimeInvocation};
 use model::CanonicalPrimitive;
 pub(crate) use model::CanonicalStrokeArguments;

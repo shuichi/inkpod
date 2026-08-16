@@ -42,7 +42,7 @@ pub enum InkScriptKeyword {
 }
 
 impl InkScriptKeyword {
-    /// Returns the exact lowercase v1 spelling.
+    /// Returns the exact lowercase v2 spelling.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::InkScript => "inkscript",
@@ -222,7 +222,7 @@ impl InkScriptLexed {
     }
 }
 
-/// Tokenizes an immutable source with the exact-current InkScript v1 limits.
+/// Tokenizes an immutable source with the exact-current InkScript v2 limits.
 ///
 /// This function has no Core, filesystem, or global state and does not mutate the
 /// source. It returns a lossless token stream even when recoverable diagnostics exist.
@@ -230,7 +230,7 @@ pub fn lex_inkscript(source: &InkScriptSource) -> InkScriptLexed {
     lex_inkscript_with_limits(source, InkScriptLexerLimits::exact_current())
 }
 
-/// Tokenizes with a caller-lowered v1 resource envelope.
+/// Tokenizes with a caller-lowered v2 resource envelope.
 pub fn lex_inkscript_with_limits(
     source: &InkScriptSource,
     limits: InkScriptLexerLimits,

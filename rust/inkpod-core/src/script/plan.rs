@@ -1890,8 +1890,8 @@ mod tests {
         InkScriptSource::new(
             InkScriptSourceId::new(211),
             format!(
-                r#"inkscript 1;
-requires {{ procedure_catalog = 1; replay_epoch = 23; }}
+                r#"inkscript 2;
+requires {{ procedure_catalog = 2; replay_epoch = 23; }}
 inputs {{ {inputs} }}
 program {{}}
 output {{ {output} }}

@@ -232,7 +232,7 @@ impl LegacySimpleScriptStep {
     ) -> Result<Self, LegacySimpleAdapterError> {
         let (command, binding, arguments) = lift_arguments(invocation)?;
         let mut source = String::from(
-            "inkscript_fragment 1;\nrequires { procedure_catalog = 1; replay_epoch = 23; }\n",
+            "inkscript_fragment 2;\nrequires { procedure_catalog = 2; replay_epoch = 23; }\n",
         );
         let mut bindings = InkScriptRuntimeReferences::default();
         if let Some((entity, persistent_id)) = binding {
@@ -245,7 +245,11 @@ impl LegacySimpleScriptStep {
                 InkScriptEntityKind::Guide => {
                     return Err(LegacySimpleAdapterError::UnsupportedPrimitive);
                 }
-                InkScriptEntityKind::VectorPath | InkScriptEntityKind::VectorFill => {
+                InkScriptEntityKind::VectorPath
+                | InkScriptEntityKind::VectorFill
+                | InkScriptEntityKind::Annotation
+                | InkScriptEntityKind::ShootingFrame
+                | InkScriptEntityKind::VanishingPoint => {
                     return Err(LegacySimpleAdapterError::UnsupportedPrimitive);
                 }
             };
@@ -955,7 +959,7 @@ mod tests {
 
     #[test]
     fn unknown_field_type_enum_and_format_mismatch_are_rejected() {
-        let prefix = "inkscript_fragment 1; requires { procedure_catalog = 1; replay_epoch = 23; }";
+        let prefix = "inkscript_fragment 2; requires { procedure_catalog = 2; replay_epoch = 23; }";
         let unknown_field = format!(
             "{prefix} program {{ step \"Bad\" {{ enabled = true; invoke mirror_document {{ axis = horizontal; extra = true; }}; }} }}"
         );

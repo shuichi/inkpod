@@ -10,6 +10,9 @@ pub(crate) enum InkScriptEntityKind {
     Guide,
     VectorPath,
     VectorFill,
+    Annotation,
+    ShootingFrame,
+    VanishingPoint,
 }
 
 impl InkScriptEntityKind {
@@ -20,6 +23,9 @@ impl InkScriptEntityKind {
             "guide" | "guide_ref" => Some(Self::Guide),
             "vector_path" | "vector_path_ref" => Some(Self::VectorPath),
             "vector_fill" | "vector_fill_ref" => Some(Self::VectorFill),
+            "annotation" | "annotation_ref" => Some(Self::Annotation),
+            "shooting_frame" | "shooting_frame_ref" => Some(Self::ShootingFrame),
+            "vanishing_point" | "vanishing_point_ref" => Some(Self::VanishingPoint),
             _ => None,
         }
     }

@@ -883,8 +883,8 @@ mod tests {
         assets: &str,
     ) -> Result<InkScriptDeclarationModel, InkScriptTypeDiagnosticCode> {
         let text = format!(
-            r#"inkscript 1;
-requires {{ procedure_catalog = 1; replay_epoch = 23; }}
+            r#"inkscript 2;
+requires {{ procedure_catalog = 2; replay_epoch = 23; }}
 inputs {{ current_document; }}
 program {{}}
 output {{ policy = duplicate; format = inkpod; folder = "out"; cell_folder = false; basename = "asset"; start_number = 1; direction = ascending; }}

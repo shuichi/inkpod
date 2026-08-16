@@ -815,8 +815,8 @@ mod tests {
     #[test]
     fn one_first_all_and_ambiguity_use_initial_snapshot_order() {
         let declaration = model(
-            r#"inkscript_fragment 1;
-requires { procedure_catalog = 1; replay_epoch = 23; }
+            r#"inkscript_fragment 2;
+requires { procedure_catalog = 2; replay_epoch = 23; }
 bindings {
     let one_value = select layer { name = "A"; cardinality = one; };
     let first_value = select layer { name = "Duplicate"; cardinality = first; };
@@ -849,7 +849,7 @@ program { step "Independent" { enabled = true; invoke independent {}; } }
         ));
 
         let ambiguous = model(
-            r#"inkscript_fragment 1; requires { procedure_catalog = 1; replay_epoch = 23; }
+            r#"inkscript_fragment 2; requires { procedure_catalog = 2; replay_epoch = 23; }
 bindings { let target = select layer { name = "Duplicate"; cardinality = one; }; }
 program {}"#,
         );
@@ -863,7 +863,7 @@ program {}"#,
     #[test]
     fn skip_dependents_propagates_to_asserts_and_steps_but_not_static_disabled_state() {
         let declaration = model(
-            r#"inkscript_fragment 1; requires { procedure_catalog = 1; replay_epoch = 23; }
+            r#"inkscript_fragment 2; requires { procedure_catalog = 2; replay_epoch = 23; }
 bindings { let absent = select layer { name = "Absent"; missing = skip_dependents; }; }
 program {
     assert object { target = $absent; visible = true; };
@@ -894,7 +894,7 @@ program {
         let current = snapshot();
         let digest = id_allocation_digest(&schema(), &current.id_allocations).unwrap();
         let declaration = model(&format!(
-            r#"inkscript_fragment 1; requires {{ procedure_catalog = 1; replay_epoch = 23; }}
+            r#"inkscript_fragment 2; requires {{ procedure_catalog = 2; replay_epoch = 23; }}
 bindings {{ let target = select layer {{ source_document_uuid = uuid"00112233-4455-6677-8899-aabbccddeeff"; persistent_id = 1; }}; }}
 program {{
     assert document {{ source_document_uuid = uuid"00112233-4455-6677-8899-aabbccddeeff"; state_digest = blake3"1111111111111111111111111111111111111111111111111111111111111111"; id_allocation_digest = blake3"{digest}"; width = 1920; }};
@@ -965,7 +965,7 @@ program {{
     #[test]
     fn missing_and_owner_mismatch_fail_without_publishing_partial_bindings() {
         let missing = model(
-            r#"inkscript_fragment 1; requires { procedure_catalog = 1; replay_epoch = 23; }
+            r#"inkscript_fragment 2; requires { procedure_catalog = 2; replay_epoch = 23; }
 bindings { let target = select layer { name = "Absent"; missing = error; }; }
 program {}"#,
         );
@@ -988,7 +988,7 @@ program {}"#,
             properties: BTreeMap::new(),
         });
         let empty = model(
-            "inkscript_fragment 1; requires { procedure_catalog = 1; replay_epoch = 23; } program {}",
+            "inkscript_fragment 2; requires { procedure_catalog = 2; replay_epoch = 23; } program {}",
         );
         assert_eq!(
             prepare_inkscript_initial_state(&empty, &schema(), &catalog(), &invalid_owner)

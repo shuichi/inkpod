@@ -14,26 +14,27 @@ journal-replayable な canonical procedure と等価な文書変更を、別文�
 ならない。この文書と `SPEC.md` が競合する場合は、ユーザーの最新指示、`AGENTS.md`、
 `SPEC.md`、この文書の順で解決する。
 
-machine-readable schemaは段階を分ける。M00でregistry schema v1と
-`schemas/inkscript/language-v1.json`を規範化し、M07で承認されたexact-current
-`schemas/inkscript/registry-schema-v2.json`がcatalog-owned typeを追加してv1を置き換えた。
-旧registry schemaは受理しない。language v1は引き続き
+machine-readable schemaは段階を分ける。M00でregistry schema v1とlanguage v1を規範化し、M07で承認された
+exact-current `schemas/inkscript/registry-schema-v2.json`がcatalog-owned typeを追加してregistry schema v1を
+置き換えた。M21では明示承認に基づきshooting-frame selectorをdocument-owned singletonへ正し、
+`schemas/inkscript/language-v2.json`へexact-current更新した。旧registry schemaと旧language resourceは受理しない。
+language v2は
 registry自体のclosed JSON形式と、command非依存の全language-core type、section、selector、assert、assetの
 exact field、型、default、上限を固定する。command entryはowner manifestに従ってM07～M22で
-`schemas/inkscript/catalog-v1.draft.json`へ追加する。このdraftはproduct file、clipboard、公開Rust API、
-ABI、UIから参照せず、M23で全単射と実装を検証した後に初めて`catalog-v1.json`として批准する。
+`schemas/inkscript/catalog-v2.draft.json`へ追加する。このdraftはproduct file、clipboard、公開Rust API、
+ABI、UIから参照せず、M23で全単射と実装を検証した後に初めて`catalog-v2.json`として批准する。
 `docs/inkscript-command-reference.md`はM23以後にlanguage/catalog registryから生成する派生物であり、
 手編集しない。
 
 本文中の「必須」「禁止」「拒否」は規範要件である。「推奨」は、同等の安全性、
 決定性、保守性を示せる場合に限って置換できる設計判断である。
 
-初期値は次のとおりとする。
+現在のexact-current値は次のとおりとする。
 
 | 項目                                |                                       初期値 |
 | ----------------------------------- | -------------------------------------------: |
-| InkScript file format version       |                                            1 |
-| InkScript procedure catalog version | 1（M23で批准予定。批准前はproduction非公開） |
+| InkScript file format version       |                                            2 |
+| InkScript procedure catalog version | 2（M23で批准予定。批准前はproduction非公開） |
 | required replay epoch               |                                           23 |
 | native output                       |                      exact-current `.inkpod` |
 
@@ -51,7 +52,7 @@ exact-current version だけを受理する。grammar、serialized field、selec
 
 catalog versionは「そのbuildで実装済みのcommand集合」ではなく、批准済みの完全なclosed command
 contractを識別する。実装coverageは非永続の内部状態であり、file、clipboard、公開ABIへserializeしない。
-catalog v1 draftはM23までversioned contractではなく、owner milestone内で変更できるがproductから受理
+catalog v2 draftはM23までproduction catalog contractではなく、owner milestone内で変更できるがproductから受理
 してはならない。M23で批准した後は意味を変更せず、新entryやsignature変更ではcatalog versionを更新し、
 旧version拒否test、example、registry、生成referenceを同時更新する。
 
@@ -90,7 +91,7 @@ catalog v1 draftはM23までversioned contractではなく、owner milestone内�
   view、session、OS、UI 固有操作を script command にしない。
 - shell、任意 process、network、clock、locale、environment variable、registry、
   無制限 loop、recursion、動的 code loading を提供しない。
-- version 1では`include`、module、別script importを提供しない。完全file一件だけでprogram構造を
+- version 2では`include`、module、別script importを提供しない。完全file一件だけでprogram構造を
   決定し、assetの`data_file`だけを明示的な外部byte依存として許可する。
 - Rust enum の `Debug` 表示や可視化画面の要約文字列を executable syntax として
   再利用しない。
@@ -136,7 +137,7 @@ command catalog を利用する UI preset に縮退させる。
 
 sourceは編集用のlossless CSTと実行用のsemantic ASTを分離する。外部pathを読む前までの
 static compile、authority取得後の`PlanTask`、確認後の`RunTask`は別lifecycleとする。
-version 1のitem実行とinstallはimmutable preview順の逐次実行に固定し、Core single-writer、
+version 2のitem実行とinstallはimmutable preview順の逐次実行に固定し、Core single-writer、
 `failure = stop`、`wait_ms`、report順を一意にする。
 
 ## 4. ソースファイル
@@ -161,7 +162,7 @@ version 1のitem実行とinstallはimmutable preview順の逐次実行に固定�
 完全な file は必ず次の header から始める。
 
 ```inkscript
-inkscript 1;
+inkscript 2;
 ```
 
 header 後の section 順序は parser が許容するが、同名 section の重複を拒否する。
@@ -183,7 +184,7 @@ canonical formatter は次の順序で出力する。
 ### 4.3 comment
 
 `//` から行末までを comment とする。string と Base64 literal の内部では comment を
-開始しない。block comment と nested comment は version 1 では提供しない。
+開始しない。block comment と nested comment は version 2 では提供しない。
 comment は実行意味を持たない。
 
 parser はsource textを二種類の表現へ分ける。
@@ -212,7 +213,7 @@ canonical emitterは検証済みsemantic ASTまたはtyped modelだけを入力�
 - ユーザーが明示した「文書を整形」
 - semantic/golden test用の正規形生成
 
-version 1の出力規則は次のとおりとする。
+version 2の出力規則は次のとおりとする。
 
 - BOMなしUTF-8、LF、末尾改行一つ、trailing whitespaceなし
 - indentationはASCII space 4個
@@ -456,9 +457,9 @@ escape、NUL、invalid scalar を拒否する。path、name、label は byte lim
 
 ### 6.4 型の形成とliteral解決
 
-version 1にuser-defined type、alias、generic function、implicit castはない。`type_ref`の
+version 2にuser-defined type、alias、generic function、implicit castはない。`type_ref`の
 identifierは合成済み`SchemaView`に登録されたbuiltinまたはnamed closed typeへexact-current catalogで
-解決する。`language-v1.json`はcommand非依存のbuiltin、stable ID reference、共有enum/record、asset
+解決する。`language-v2.json`はcommand非依存のbuiltin、stable ID reference、共有enum/record、asset
 reference、selector referenceだけを所有する。commandの引数/result専用enum、record、constructorは
 そのcatalog entryが所有し、language registryへ逆流させない。
 
@@ -516,7 +517,7 @@ assetの全reference edgeを含む。fragment closure、`skip_dependents`、diag
 
 ```inkscript
 requires {
-    procedure_catalog = 1;
+    procedure_catalog = 2;
     replay_epoch = 23;
 }
 ```
@@ -589,7 +590,7 @@ Unicode normalization、locale、display用短縮、sourceに書かれた未解�
 
 `cells` は `all` または inclusive display-number range `range(first, last)` とする。
 display number 0、逆 range、重複 input、同一 file の path alias、非 Cell native file を
-拒否する。folder は version 1 では再帰しない。既存Batch互換性のため、全input declarationを
+拒否する。folder は version 2 では再帰しない。既存Batch互換性のため、全input declarationを
 展開してから、全itemをdisplay labelのglobal natural orderで並べる。input declaration順やOS列挙順を
 最終順序に使用しない。
 
@@ -663,7 +664,7 @@ binding は入力一件を staged Core へ読み込んだ後、最初の mutatio
 state に対して上から順に解決し、以後固定する。program 実行後の状態を selector で再検索しては
 ならない。step が作成した object は step result 変数を使用する。
 
-version 1 の selector entity は次の閉じた集合とする。次表は概要であり、exact field、型、
+version 2 の selector entity は次の閉じた集合とする。次表は概要であり、exact field、型、
 required/default、owner relation、initial-order規則はschema registryと生成referenceを規範とする。
 
 | entity                                 | 主な filter                                                                   |
@@ -765,36 +766,37 @@ disabled producerへの参照はcompile error、`skip_dependents`によるskippe
 skip、`only_on_change` resultをno-op/failure後に参照した場合だけ、そのinput itemを
 `missing_result`として失敗させる。
 
-`assert` は mutation と Commit を生成しない。version 1 は次を持つ。
+`assert` は mutation と Commit を生成しない。version 2 は次を持つ。
 
 - `assert document`: UUID、state digest、ID allocation digest、寸法、DPI、色空間等の既知field
 - `assert object`: binding reference と既知 property
 - `assert selection`: empty/nonempty と half-open bounds
 
 assert failure はその入力 item を変更せず失敗させる。汎用 boolean expression、条件分岐、
-loop は version 1 では提供しない。入力一件ごとの反復だけが暗黙の bounded loop である。
+loop は version 2 では提供しない。入力一件ごとの反復だけが暗黙の bounded loop である。
 
 `id_allocation_digest`は全persistent-ID namespaceをregistryのnamespace tag順に並べ、各
 `(namespace_tag, next_nonzero_id)`をdomain-separated BLAKE3へ入れた値とする。削除済みIDを含む
 high-watermarkを表し、document state digestで代用しない。exact-source fragmentはprogram先頭の
 `assert document`でsource UUID、base state digest、ID allocation digestを必須検査する。
 
-version 1のdomain contextはASCII `inkpod.inkscript.id-allocation-digest.v1`とし、BLAKE3 derive-key modeを
+ID allocation digest algorithm v1のdomain contextはASCII `inkpod.inkscript.id-allocation-digest.v1`とし、BLAKE3 derive-key modeを
 使う。hash inputは`namespace_count: u32_le`に続き、registry順で
 `tag_length: u16_le`、ASCII tag bytes、`next_nonzero_id: u64_le`を連結する。tagは重複不可で、count/length
 overflow、zero/overflow済みnext IDをdigest計算前に拒否する。
 
 ### 7.7 InkScript schema registry
 
-M00でregistry schema v1と`language-v1.json`を確定し、command以外の言語coreを固定した。M07で
-明示承認されたexact-current `registry-schema-v2.json`は、language v1を変更せずcatalog-ownedな
-closed enum／record／constructorを追加し、旧registry schemaを置き換える。
+M00でregistry schema v1とlanguage v1を確定し、command以外の言語coreを固定した。M07で
+明示承認されたexact-current `registry-schema-v2.json`はcatalog-ownedなclosed enum／record／constructorを追加し、
+旧registry schemaを置き換えた。M21の明示承認でshooting-frame selectorのowner意味だけを修正し、
+file/catalog versionと`language-v2.json`をexact-currentへ更新した。
 全journal-replayable `PrimitiveId`はowner manifestでM07～M22のちょうど一つへ割り当てる。各ownerは
-実装するfamilyのexact command entryと、そのentry専用type/constructorを`catalog-v1.draft.json`へ追加する。
+実装するfamilyのexact command entryと、そのentry専用type/constructorを`catalog-v2.draft.json`へ追加する。
 合成`SchemaView`はlanguage-core定義と全catalog entry定義を結合し、type/constructor名の重複を拒否する。
 draftはM23まで内部testだけに
 使用し、file、clipboard、public Rust re-export、FFI、Windows product commandから受理しない。M23で
-全entry、実装、equivalence testの全単射を検証してから`catalog-v1.json`へfreezeし、catalog v1を
+全entry、実装、equivalence testの全単射を検証してから`catalog-v2.json`へfreezeし、catalog v2を
 production contractとして初めて公開する。
 
 registryは最低限、次を定義する。
@@ -904,7 +906,7 @@ external assetはPlanTaskがauthority検証済みhandleからidentityとlength�
 descriptorと`AssetId`をplan/confirmation digestへ含め、RunTaskはfreeze済みbytesだけを使用する。
 
 外部の一般画像を読み込む authoring convenience は、将来 `ingest` 宣言として追加できるが、
-version 1 の canonical `asset` と混同しない。Coreへ渡る procedure は外部 pathを保持しない。
+version 2 の canonical `asset` と混同しない。Coreへ渡る procedure は外部 pathを保持しない。
 
 ### 7.9 `output`
 
@@ -921,7 +923,7 @@ output {
 ```
 
 `output`はpolicyごとのclosed variantである。`format = inkpod`だけを許可し、一般画像形式を
-version 1のBatch outputへ追加しない。
+version 2のBatch outputへ追加しない。
 
 | field          | `duplicate` / `new_save`            | `explicit_overwrite` |
 | -------------- | ----------------------------------- | -------------------- |
@@ -1032,7 +1034,7 @@ tokenはauthorized rootまたはexact object、`read | enumerate | create | repl
 generationを含めてplan digestを生成し、confirmation tokenだけがplan digestへ束縛される。OS adapterは
 authority後にhandle-basedでfinal targetを解決し、symlink/reparse
 targetがauthorized root内であることを検査する。alias判定はfile identityを優先する。`..`、implicit
-cwd、`~`、environment/wildcard/shell expansion、network URL、UNC pathはversion 1で拒否する。Rust Coreは
+cwd、`~`、environment/wildcard/shell expansion、network URL、UNC pathはversion 2で拒否する。Rust Coreは
 opaque OS tokenを解釈せず、adapterが検証したbounded path/identity DTOだけを受け取る。
 
 temporary fileもoutputの`create` authority外へ書いてはならない。RunTaskは作成直前にcancel、authority
@@ -1109,7 +1111,7 @@ encode用temporary fileを作らず、outputをinstallしない。単純なsynta
 
 結果はOS path列挙順、hash iteration順、locale、clock、thread数、GPU、UI stateに依存しない。
 folder展開、selectorの`first/all`、asset、parameter、stepは明示的な決定順を持つ。
-version 1のitem execution、encode、installはimmutable preview順の逐次実行に固定する。item並列化、
+version 2のitem execution、encode、installはimmutable preview順の逐次実行に固定する。item並列化、
 out-of-order completion/installを禁止する。`wait_ms`は一item終了後から次item開始前だけに適用し、
 Core engine threadをsleep/blockせずtimer continuationでyieldする。immutable bytesのhash/encode等を
 workerへ委譲しても、Core操作とinstall順を変えてはならない。将来のitem並列化はfile/catalog versionを
@@ -1194,10 +1196,10 @@ preconditionを出力/reportする。`strict_source_only`をportableに見せず
 fragmentは完全fileとは別のheaderを持つ。
 
 ```inkscript
-inkscript_fragment 1;
+inkscript_fragment 2;
 
 requires {
-    procedure_catalog = 1;
+    procedure_catalog = 2;
     replay_epoch = 23;
 }
 
@@ -1255,7 +1257,7 @@ Cancelまたはstale destinationで一部だけ書き換えない。
 
 ### 10.4 clipboard encoding
 
-Windows clipboardはregistered format `Inkpod.InkScript.v1`へBOMなしUTF-8 byte列とbyte lengthを置き、
+Windows clipboardはregistered format `Inkpod.InkScript.v2`へBOMなしUTF-8 byte列とbyte lengthを置き、
 同時に`CF_UNICODETEXT`へ同じUnicode textを提供する。pasteはregistered formatを優先し、plain textは
 `inkscript_fragment`または`inkscript` headerを持つ場合だけInkScript候補として扱い、10.3の操作別規則を
 適用する。画像clipboardと誤認しない。
@@ -1284,7 +1286,7 @@ clipboard fragmentのassetはすべてinline `data`とし、`data_file`を生成
 
 ## 12. resource limit と安全性
 
-version 1 は少なくとも次を上限とし、検査付き加算でtotalを計算する。既存Core側のより小さい
+version 2 は少なくとも次を上限とし、検査付き加算でtotalを計算する。既存Core側のより小さい
 上限がある場合は小さい方を適用する。
 
 | 対象                                                            |                                                       上限 |
@@ -1349,14 +1351,14 @@ queue saturation、shutdown raceをfault injectionで検証する。
 
 ## 13. 完全な例
 
-次はversion 1のsyntaxと、`replace_raster_colors`、`resize_document`の規範的なfieldを示す。
+次はversion 2のsyntaxと、`replace_raster_colors`、`resize_document`の規範的なfieldを示す。
 他commandのfieldをこの例から類推して追加してはならず、procedure catalogのexact signatureに従う。
 
 ```inkscript
-inkscript 1;
+inkscript 2;
 
 requires {
-    procedure_catalog = 1;
+    procedure_catalog = 2;
     replay_epoch = 23;
 }
 
@@ -1624,8 +1626,8 @@ Undo/Redo、next ID、report、semantic work counter、save/reopen、cache-free 
   参照できないtestがある。
 - 利用者の仕様確認待ちとして`[~]`で停止する。
 
-M00のregistry schema v1はM07の明示承認によりexact-current v2へ置換された。M00が批准したlanguage v1、
-formula/evaluator semantics、resource boundは変更していない。
+M00のregistry schema v1はM07の明示承認によりexact-current v2へ置換された。M21では別の明示承認により
+shooting-frame selectorのowner意味だけをlanguage v2へ更新した。formula/evaluator semanticsとresource boundは変更していない。
 
 **自動検証結果（2026-08-15）**
 
@@ -2648,7 +2650,7 @@ Version impact:
 - C ABI: 14（symbol／record／ownership／thread規則変更なし）
 ```
 
-### [~] M19 — catalog implementation E: selection、floating、transform
+### [x] M19 — catalog implementation E: selection、floating、transform
 
 **範囲**
 
@@ -2683,6 +2685,8 @@ Version impact:
   成功した。ABI smokeは68.93秒、English smokeは217.85秒、Japanese smokeは173.23秒だった。production catalog、
   Rust public API、C ABI、Windows route、UI、`.inkscript` file acceptanceは追加しておらず、既存binary回帰と
   InkScript UI非公開の利用者確認待ちとして`[~]`で停止する。
+- 2026-08-16の今回promptをもって、上記binary回帰とInkScript UI非公開に問題がなかったことを利用者確認済みとして
+  M19を`[x]`へ移行した。
 
 ```text
 Version impact:
@@ -2694,7 +2698,7 @@ Version impact:
 - C ABI: 14（symbol／record／ownership／thread規則変更なし）
 ```
 
-### [ ] M20 — catalog implementation F: vector
+### [x] M20 — catalog implementation F: vector
 
 **範囲**
 
@@ -2708,11 +2712,43 @@ Version impact:
 - result ordinalが全`output_ids`を重複なく覆い、後続index参照が動作する。
 - direct/scriptのcache-free replayとstate digestが一致する。
 
-### [ ] M21 — catalog implementation G: annotation、frame、vanishing point
+**自動検証結果（2026-08-16）**
+
+- owner manifestでM20が所有するvector path／fill／erase／connect／width、rasterize、vectorize、new-layerの
+  8 primitiveをexact ID／schema／semantics revision／equivalence IDでprivate catalog v1 draftへ追加し、draftを
+  60/84から68/84へ拡張した。M08のlegacy line-width projectionは再登録していない。
+- Core-private `VectorScriptStep`はQ16 cubic path、RGBA8/16 color、erase/connect/width、rasterize/vectorizeをtyped valueから
+  既存`CanonicalInvocation`へ変換し、単一executorへ渡す。vector path/fillをinitial snapshotのtyped entityとしてbindし、
+  path/fill list、layer scalar、new-layerのlayer+fill listをrole／ordinalへ分配する。外部assetを消費しないprimitiveに
+  架空のasset roleは追加していない。M21以降のcatalog familyは先行実装していない。
+- 8 commandのsuccess／semantic no-op、list index後続参照、全`output_ids`の重複なしordinal coverage、RGBA16 native depth、
+  strict UUID+stable-ID binding、semantic rebound、direct canonical state parityを検証した。invalid／Cancel（即時および
+  先行step staged後）／stale／stable/procedure ID overflow／resource超過／atomicity、ownership／thread suitability、
+  Undo／Redo、cache-free replay、ID high-watermark、document/editor savepoint、current-v26 full-replay reopenも一致した。
+- `cargo fmt --check`、workspace全target／feature Clippy（warning deny）、workspace 598 non-doc tests（597 pass、Release-only gate
+  1 ignored）とdoctest 1、workspace strict rustdocが成功した。`inkscript_registry`は16/16。承認済みInkScript quickは
+  全counterとchecksum `0f84d2c54cfe1e2c`を維持して87,233,900 ns、既存`core_workflows --quick`も10 checksumを維持した。
+- Windows x64 Debug build 113、static CRT、portable ZIP、unsigned MSIX、および最終binaryの全36 CTestが417.35秒で
+  成功した。ABI smokeは58.58秒、English smokeは172.42秒、Japanese smokeは174.11秒だった。production catalog、
+  Rust public API、C ABI、Windows route、UI、`.inkscript` file acceptanceは追加していない。
+- 2026-08-16の今回promptをもって、上記binary回帰とInkScript UI非公開に問題がなかったことを利用者確認済みとして
+  M20を`[x]`へ移行した。
+
+```text
+Version impact:
+- Registry schema: 2（catalog-owned enum／record／entry追加のみ、meta-schema変更なし）
+- InkScript file: 1（批准済みgrammar／language core／serialized field変更なし）
+- InkScript procedure catalog: 1（M23前のprivate draftを68/84へ拡張、production catalog未批准）
+- replay epoch: 23（既存vector canonical executorとreplay semantics変更なし）
+- .inkpod top-level: 26（exact-current encoder／decoder／cache-free replay再利用、schema変更なし）
+- C ABI: 14（symbol／record／ownership／thread規則変更なし）
+```
+
+### [~] M21 — catalog implementation G: annotation、frame、vanishing point
 
 **範囲**
 
-- owner manifestのannotation、shooting frame、vanishing point exact entryをcatalog v1 draftへ追加して実装する。
+- owner manifestのannotation、shooting frame、vanishing point exact entryをcatalog v2 draftへ追加して実装する。
 - 可変長create/update/delete resultとinvocation依存portabilityを接続する。
 
 **完了条件**
@@ -2721,11 +2757,42 @@ Version impact:
 - exact-source/rebound export準備とcache-free replayがdirect routeに一致する。
 - ID allocation digestとhigh-watermarkを検証する。
 
+**実装・自動検証結果（2026-08-16、利用者確認待ち）**
+
+- 利用者承認済みの選択肢Aを採用し、shooting-frame selectorをlayer filterのないdocument ownerへ修正した。
+  InkScript file/catalogをexact-current v2へ更新し、v1 file/catalogと旧v1 registry resourceを拒否する契約を追加した。
+- private catalog-v2 draftへ3 exact entryと専用closed enum/recordを追加して71/84とした。annotation、document-owned
+  shooting frame、layer-owned vanishing pointのinitial selectorと0/1/N ordered-list resultを、Core-private adapterから既存の
+  `CanonicalInvocation`／単一executorへ接続した。外部asset、別model、別executorは追加していない。
+- create/update/move/delete/delete-all、no-op result availability、list index、owner role、invocation依存portability、
+  exact-source/rebound binding、invalid／Cancel／stale document・ID allocation／stable・procedure ID overflow／resource／
+  atomicity、ownership／thread suitabilityを契約化した。direct route同値、Undo／Redo、cache-free replay、ID high-watermark、
+  current-v26 save/reopenとdocument/editor savepointも検証した。
+- `cargo fmt --check`、workspace全target／feature Clippy（warning deny）、workspace 603 non-doc tests（602 pass、Release-only gate
+  1 ignored）とdoctest 1、strict rustdoc、renamed v2 fuzz targetのstandalone checkが成功した。`inkscript_registry`は17/17。
+  承認済みInkScript quickはfile/catalog v2によるstatic compile digest変更だけをchecksum `4401131d804c8eb7`へ再固定し、
+  workload／harness／全counter／sample policy／64–107 ms envelopeを変えず87,927,100 nsで成功した。既存
+  `core_workflows --quick`も10 checksumと意味counterを維持した。
+- Windows x64 Debug build 114、static CRT、portable ZIP、unsigned MSIXと全36 CTestが553.94秒で成功した。
+  ABI smokeは76.16秒、English smokeは230.65秒、Japanese smokeは234.74秒だった。
+- production catalog、Rust public API、C ABI、Windows route、UI、`.inkscript` product acceptanceは追加していない。
+  自動検証完了後もbinaryで既存InkScript非公開・Windows回帰を利用者が確認するまで`[~]`を維持し、M22へ進まない。
+
+```text
+Version impact:
+- Registry schema: 2（shooting-frame selectorのapproved resource内容だけを更新、meta-schema変更なし）
+- InkScript file: 2（1から更新。selector owner／field意味変更、file v1を拒否）
+- InkScript procedure catalog: 2（1から更新。private draftを71/84へ拡張、production catalog未批准）
+- replay epoch: 23（既存annotation/frame/vanishing canonical semantics変更なし）
+- .inkpod top-level: 26（native schema／encoder／decoder変更なし）
+- C ABI: 14（symbol／record／ownership／thread規則変更なし）
+```
+
 ### [ ] M22 — catalog implementation H: Light Table
 
 **範囲**
 
-- owner manifestのjournal-replayable Light Table set/item exact entryをcatalog v1 draftへ追加して実装する。
+- owner manifestのjournal-replayable Light Table set/item exact entryをcatalog v2 draftへ追加して実装する。
 - session-only swap、query、preview entryを明示除外する。
 
 **完了条件**
@@ -2734,15 +2801,15 @@ Version impact:
 - non-replayable commandを誤登録せず、owner manifestと一致する。
 - direct/script/cache-free replayが一致する。
 
-### [ ] M23 — catalog v1 completenessとgenerated reference gate
+### [ ] M23 — catalog v2 completenessとgenerated reference gate
 
 **範囲**
 
 - current journal-replayable primitiveとdraft entry、実装、owner、equivalence testの全単射を検査する。
 - portability evaluator、result、asset、work、editor metadata未指定をbuild/test failureにする。
-- validated draftを初めて`catalog-v1.json`としてfreezeし、language/catalog registryから
+- validated draftを初めて`catalog-v2.json`としてfreezeし、language/catalog registryから
   `docs/inkscript-command-reference.md`を生成するtoolとdrift testを追加する。
-- completeness gate成功後にだけInkScript compile/bind/runをRust public APIへre-exportし、catalog v1を
+- completeness gate成功後にだけInkScript compile/bind/runをRust public APIへre-exportし、catalog v2を
   production contractとして有効化する。FFI/Windows公開は後続milestoneで行う。
 
 **完了条件**
@@ -2907,7 +2974,7 @@ Version impact:
 **範囲**
 
 - Batch step/rangeはfragment挿入paste、full scriptは明示的な全体置換pasteとしてcopy/pasteを実装する。
-- `Inkpod.InkScript.v1`と`CF_UNICODETEXT`、dependency closure、asset dedup、name collisionを実装する。
+- `Inkpod.InkScript.v2`と`CF_UNICODETEXT`、dependency closure、asset dedup、name collisionを実装する。
 - group copy、canonical text、one UI transaction、oversize asset拒否を実装する。
 
 **完了条件**
@@ -3071,7 +3138,7 @@ Undo/Redo、cache-free replay、ID high-watermark、document/editor savepointも
 各変更でInkScript file version、procedure catalog version、replay epoch、.inkpod top-level version、
 C ABI versionへの影響を明示的に判定してください。serialized grammar/catalog/ABIを変更する場合は
 exact-current versionを同じ変更で更新し、旧version拒否testを追加してください。canonical replay
-semantics、M00で批准したlanguage core、またはM23で批准したcatalog v1を変更する必要が生じた場合は
+semantics、M00/M21で批准したlanguage core、またはM23で批准したcatalog v2を変更する必要が生じた場合は
 推測で進めず、作業を止めて影響、選択肢、必要なversion bumpを説明してください。M23以前にowner
 milestoneがprivate catalog draftへexact entryを追加すること自体はversion bumpにせず、draftをproductへ
 公開しないgateを維持してください。

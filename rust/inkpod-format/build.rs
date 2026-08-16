@@ -221,7 +221,7 @@ fn main() {
 
 fn generate() -> Result<(), String> {
     let crate_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").ok_or("missing manifest dir")?);
-    let language = crate_dir.join("../../schemas/inkscript/language-v1.json");
+    let language = crate_dir.join("../../schemas/inkscript/language-v2.json");
     println!("cargo:rerun-if-changed={}", language.display());
     println!("cargo:rerun-if-changed=build.rs");
     let root = Parser::parse(&fs::read(&language).map_err(|error| error.to_string())?)?;
@@ -231,8 +231,8 @@ fn generate() -> Result<(), String> {
     let required_replay_epoch = number(member(&root, "required_replay_epoch")?)?;
     if string(member(&root, "kind")?)? != "inkpod.inkscript.language"
         || registry_schema_version != 2
-        || file_version != 1
-        || procedure_catalog_version != 1
+        || file_version != 2
+        || procedure_catalog_version != 2
         || required_replay_epoch != 23
     {
         return Err("language registry identity/version mismatch".to_owned());

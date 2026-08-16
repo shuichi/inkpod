@@ -42,7 +42,7 @@ const EXPECTED_COMMITS: u64 = 384;
 const EXPECTED_NO_OPS: u64 = 384;
 const EXPECTED_INSTALLED_OUTPUT_BYTES: u64 = 91_584;
 const EXPECTED_REPLAYED_COMMITS: u64 = 256;
-const EXPECTED_CHECKSUM: u64 = 0x0f84_d2c5_4cfe_1e2c;
+const EXPECTED_CHECKSUM: u64 = 0x4401_131d_804c_8eb7;
 
 struct SourceFixture {
     source: InkScriptSource,
@@ -523,7 +523,7 @@ fn build_source_fixture() -> SourceFixture {
     let asset_id = raster_asset_id(payload.clone());
     let encoded = base64(&payload);
     let mut text = String::from(
-        "inkscript 1;\nrequires { procedure_catalog = 1; replay_epoch = 23; }\ninputs { folder \"in\"; }\nparameters {}\nbindings { let paint = select plane { plane_kind = color; cardinality = one; missing = error; }; }\nprogram {\nassert selection { empty = true; };\n",
+        "inkscript 2;\nrequires { procedure_catalog = 2; replay_epoch = 23; }\ninputs { folder \"in\"; }\nparameters {}\nbindings { let paint = select plane { plane_kind = color; cardinality = one; missing = error; }; }\nprogram {\nassert selection { empty = true; };\n",
     );
     for index in 0..STEP_COUNT {
         let name = probe_name(index / 2);

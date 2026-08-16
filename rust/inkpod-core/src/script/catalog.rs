@@ -56,7 +56,7 @@ pub(crate) enum CatalogNumericExpression {
 
 #[allow(
     dead_code,
-    reason = "catalog v1 comparison nodes are populated by owner entries"
+    reason = "catalog v2 comparison nodes are populated by owner entries"
 )]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CatalogComparison {
@@ -70,7 +70,7 @@ pub(crate) enum CatalogComparison {
 
 #[allow(
     dead_code,
-    reason = "catalog v1 predicate nodes are populated by owner entries"
+    reason = "catalog v2 predicate nodes are populated by owner entries"
 )]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum CatalogBooleanExpression {
@@ -518,7 +518,7 @@ mod tests {
 
     fn arguments(count: u32) -> InkScriptTypedValue {
         let source = format!(
-            "inkscript_fragment 1; requires {{ procedure_catalog = 1; replay_epoch = 23; }} program {{ step \"test\" {{ enabled = true; invoke catalog_test {{ count = {count}; values = [2, 3]; }}; }} }}"
+            "inkscript_fragment 2; requires {{ procedure_catalog = 2; replay_epoch = 23; }} program {{ step \"test\" {{ enabled = true; invoke catalog_test {{ count = {count}; values = [2, 3]; }}; }} }}"
         );
         let source = InkScriptSource::new(InkScriptSourceId::new(208), source.as_bytes()).unwrap();
         let parsed = parse_inkscript(&source);

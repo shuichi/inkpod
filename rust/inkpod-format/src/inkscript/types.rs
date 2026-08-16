@@ -12,7 +12,7 @@ use super::syntax::{
     InkScriptSemanticSection, InkScriptTypeReference, InkScriptValue, build_inkscript_semantic,
 };
 
-/// Exact language-v1 maximum for reference edges in one dependency graph.
+/// Exact language-v2 maximum for reference edges in one dependency graph.
 pub const MAX_INKSCRIPT_DEPENDENCY_EDGES: usize = 4_194_304;
 const MAX_RUN_VALUE_FREEZE_DEPTH: usize = 64;
 
@@ -23,7 +23,7 @@ pub struct InkScriptAnalysisLimits {
 }
 
 impl InkScriptAnalysisLimits {
-    /// Returns the exact-current language-v1 envelope.
+    /// Returns the exact-current language-v2 envelope.
     pub const fn exact_current() -> Self {
         Self {
             dependency_edges: MAX_INKSCRIPT_DEPENDENCY_EDGES,
@@ -726,7 +726,7 @@ struct DeclarationRanges {
     program: Vec<InkScriptSourceRange>,
 }
 
-/// Resolves approved language-v1 declaration types and namespaces without filesystem, Core, or
+/// Resolves approved language-v2 declaration types and namespaces without filesystem, Core, or
 /// job access. Failure publishes no partial declaration model.
 pub fn build_inkscript_declaration_model(
     parsed: &InkScriptParsed<'_>,
@@ -2250,7 +2250,7 @@ fn validate_constraints(
                 }
                 _ => false,
             }
-        } else if *constraint == "must-be-false-in-v1" {
+        } else if *constraint == "must-be-false-in-v2" {
             matches!(value.kind(), InkScriptTypedValueKind::Boolean(false))
         } else {
             true

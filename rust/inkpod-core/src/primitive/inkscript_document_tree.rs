@@ -271,7 +271,7 @@ impl DocumentTreeScriptStep {
         invocation: &CanonicalInvocation,
     ) -> Result<Self, DocumentTreeAdapterError> {
         let mut source = String::from(
-            "inkscript_fragment 1;\nrequires { procedure_catalog = 1; replay_epoch = 23; }\n",
+            "inkscript_fragment 2;\nrequires { procedure_catalog = 2; replay_epoch = 23; }\n",
         );
         let mut references = InkScriptRuntimeReferences::default();
         let (command, arguments, has_result) =
@@ -657,7 +657,10 @@ fn bind_declaration(
         InkScriptEntityKind::Plane => "plane",
         InkScriptEntityKind::Guide
         | InkScriptEntityKind::VectorPath
-        | InkScriptEntityKind::VectorFill => {
+        | InkScriptEntityKind::VectorFill
+        | InkScriptEntityKind::Annotation
+        | InkScriptEntityKind::ShootingFrame
+        | InkScriptEntityKind::VanishingPoint => {
             return Err(DocumentTreeAdapterError::TargetMismatch);
         }
     };

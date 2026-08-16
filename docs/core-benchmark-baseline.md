@@ -179,7 +179,7 @@ to Windows build 26200.9168 on the MSI MS-7E26 host with an AMD Ryzen 9
 scheme. A materially different host, target, toolchain, or power mode needs a
 separately approved range.
 
-The fixed quick fixture uses InkScript source ID 913, file/catalog v1 and replay
+The fixed quick fixture uses InkScript source ID 913, exact-current file/catalog v2 and replay
 epoch 23, 128 `set_plane_properties` steps, four successful 4-by-4 current-v26
 inputs, one 256 KiB inline straight-sRGB RGBA8 asset, one Save failure and one
 pre-linearization cancellation. Every successful output is reopened through
@@ -198,8 +198,13 @@ asset bytes, zero authorized reads, 24,768 planned input bytes, 37,152 runner
 native-read bytes, six attempted items/binding resolutions, 774 statements, 768
 invocations, 384 Commit and 384 no-op outcomes, installed/failed/cancelled
 4/1/1, 91,584 installed bytes, four cache-free reopens, 256 replayed Commits,
-and checksum `0f84d2c54cfe1e2c`. The failure reason must be exactly Save; neither
+and checksum `4401131d804c8eb7`. The failure reason must be exactly Save; neither
 negative probe may publish an output.
+
+M21's explicitly approved file/catalog v1-to-v2 update changes the static compile
+digest included in this checksum. The checksum was therefore re-locked from
+`0f84d2c54cfe1e2c` to `4401131d804c8eb7`; source length, workload, harness,
+semantic counters, sample policy, and the 64–107 ms envelope are unchanged.
 
 The approved M13 reference batch discarded one warm-up process and retained the
 following nine independent Release processes. These samples define the range;
@@ -215,7 +220,7 @@ automatically.
 The M14 implementation batch on the same environment discarded one warm-up and
 then retained 83,469,900; 84,492,700; 84,018,300; 89,425,600; 83,562,700;
 83,808,200; 84,431,400; 83,860,300; 83,694,900 ns (median 83,860,300 ns).
-Every process reproduced the exact checksum and all counters above, so no
+Every process reproduced the then-current v1 checksum and all counters above, so no
 independent regression-confirmation batch was needed.
 
 The approved full fixture remains unimplemented until M36. Its workload,

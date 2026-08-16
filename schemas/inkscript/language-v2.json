@@ -1,8 +1,8 @@
 {
   "kind": "inkpod.inkscript.language",
   "registry_schema_version": 2,
-  "file_version": 1,
-  "procedure_catalog_version": 1,
+  "file_version": 2,
+  "procedure_catalog_version": 2,
   "required_replay_epoch": 23,
   "canonicalization": {
     "encoding": "utf-8",
@@ -234,7 +234,7 @@
       "name": "folder_input_options",
       "fields": [
         { "name": "cells", "type": "cells_spec", "required": false, "default": "all", "canonical_order": 0, "constraints": ["inclusive-display-number-range"] },
-        { "name": "recursive", "type": "bool", "required": false, "default": false, "canonical_order": 1, "constraints": ["must-be-false-in-v1"] }
+        { "name": "recursive", "type": "bool", "required": false, "default": false, "canonical_order": 1, "constraints": ["must-be-false-in-v2"] }
       ]
     },
     {
@@ -464,13 +464,12 @@
       ]
     },
     {
-      "name": "shooting_frame", "reference_type": "shooting_frame_ref", "owner": "layer", "initial_order": "singleton",
+      "name": "shooting_frame", "reference_type": "shooting_frame_ref", "owner": "document", "initial_order": "singleton",
       "filters": [
-        { "name": "layer", "type": "nullable<layer_ref>", "required": false, "default": null, "canonical_order": 0, "constraints": ["owner-filter"] },
-        { "name": "source_document_uuid", "type": "nullable<uuid>", "required": false, "default": null, "canonical_order": 1, "constraints": ["required-with:persistent_id"] },
-        { "name": "persistent_id", "type": "nullable<u64>", "required": false, "default": null, "canonical_order": 2, "constraints": ["nonzero", "requires:source_document_uuid"] },
-        { "name": "cardinality", "type": "cardinality", "required": false, "default": "one", "canonical_order": 3, "constraints": ["all-forbidden"] },
-        { "name": "missing", "type": "missing_policy", "required": false, "default": "error", "canonical_order": 4, "constraints": [] }
+        { "name": "source_document_uuid", "type": "nullable<uuid>", "required": false, "default": null, "canonical_order": 0, "constraints": ["required-with:persistent_id"] },
+        { "name": "persistent_id", "type": "nullable<u64>", "required": false, "default": null, "canonical_order": 1, "constraints": ["nonzero", "requires:source_document_uuid"] },
+        { "name": "cardinality", "type": "cardinality", "required": false, "default": "one", "canonical_order": 2, "constraints": ["all-forbidden"] },
+        { "name": "missing", "type": "missing_policy", "required": false, "default": "error", "canonical_order": 3, "constraints": [] }
       ]
     },
     {

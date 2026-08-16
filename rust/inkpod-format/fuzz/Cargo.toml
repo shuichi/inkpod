@@ -36,15 +36,15 @@ doc = false
 bench = false
 
 [[bin]]
-name = "inkscript_lexer_v1"
-path = "fuzz_targets/inkscript_lexer_v1.rs"
+name = "inkscript_lexer_v2"
+path = "fuzz_targets/inkscript_lexer_v2.rs"
 test = false
 doc = false
 bench = false
 
 [[bin]]
-name = "inkscript_parser_v1"
-path = "fuzz_targets/inkscript_parser_v1.rs"
+name = "inkscript_parser_v2"
+path = "fuzz_targets/inkscript_parser_v2.rs"
 test = false
 doc = false
 bench = false

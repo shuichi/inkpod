@@ -9,18 +9,21 @@ not exist before M23.
 
 ## Ratified contract
 
-M00's exact-current contract was explicitly accepted before M01 implementation:
+M00's starting contract was explicitly accepted before M01 implementation, and M21's
+selector correction was separately approved before implementation:
 
-- InkScript file version 1, procedure catalog version 1, replay epoch 23, `.inkpod`
-  top-level version 26, and C ABI version 14 are the starting registry values.
+- InkScript file version 2, procedure catalog version 2, replay epoch 23, `.inkpod`
+  top-level version 26, and C ABI version 14 are the exact-current registry values.
 - M07's approved exact-current registry schema v2 supersedes registry schema v1 solely to add
-  closed catalog-owned enum, record, and constructor definitions. It does not change language v1,
-  catalog v1, replay epoch 23, `.inkpod` v26, or C ABI v14; schema v1 is not accepted.
-- `schemas/inkscript/language-v1.json` freezes the command-independent language core.
+  closed catalog-owned enum, record, and constructor definitions; schema v1 is not accepted.
+- M21's approved option A changes only the shooting-frame selector from a layer owner to the
+  document-owned singleton required by SPEC/Core. It supersedes file/catalog v1 with exact-current
+  v2 while leaving registry schema v2, replay epoch 23, `.inkpod` v26, and C ABI v14 unchanged.
+- `schemas/inkscript/language-v2.json` freezes the command-independent language core.
   Later discovery of a missing grammar, section, type, selector, assert, asset, or
   resource rule requires an explicit InkScript file-version decision; it is not a silent
   M01+ fix.
-- Catalog v1 remains a non-production draft through M22. M23 alone may freeze it after
+- Catalog v2 remains a non-production draft through M22. M23 alone may freeze it after
   proving a bijection among all replayable primitives, exact command entries,
   implementations, and equivalence tests. Owner additions to the private draft before
   M23 do not bump catalog version.
@@ -58,7 +61,7 @@ counters, save/reopen, cache-free replay, and failure atomicity before cutover.
 
 ## M00 machine-readable ownership
 
-[`owner-manifest-v1.json`](../schemas/inkscript/owner-manifest-v1.json) assigns all 84
+[`owner-manifest-v2.json`](../schemas/inkscript/owner-manifest-v2.json) assigns all 84
 current replayable `PrimitiveId` values exactly once. The allocation is deliberately
 reviewable before signatures are added:
 

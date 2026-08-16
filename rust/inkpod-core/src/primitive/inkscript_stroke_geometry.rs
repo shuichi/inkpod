@@ -511,7 +511,7 @@ mod tests {
 
     fn fragment(command: &str) -> String {
         format!(
-            "inkscript_fragment 1;\nrequires {{ procedure_catalog = 1; replay_epoch = 23; }}\nbindings {{ let paint = select plane {{ source_document_uuid = uuid\"00000000-0000-0000-0000-000000000017\"; persistent_id = 1; }}; }}\nprogram {{ step \"Stroke geometry command\" {{ enabled = true; {command} }} }}\n"
+            "inkscript_fragment 2;\nrequires {{ procedure_catalog = 2; replay_epoch = 23; }}\nbindings {{ let paint = select plane {{ source_document_uuid = uuid\"00000000-0000-0000-0000-000000000017\"; persistent_id = 1; }}; }}\nprogram {{ step \"Stroke geometry command\" {{ enabled = true; {command} }} }}\n"
         )
     }
 

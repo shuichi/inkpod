@@ -3,7 +3,7 @@ use super::diagnostic::{
     InkScriptSourceRange, InkScriptSourceSpan,
 };
 
-pub const INKSCRIPT_FILE_VERSION: u32 = 1;
+pub const INKSCRIPT_FILE_VERSION: u32 = 2;
 pub const MAX_INKSCRIPT_SOURCE_BYTES: usize = 128 * 1024 * 1024;
 pub const MAX_INKSCRIPT_IDENTIFIER_BYTES: usize = 128;
 pub const MAX_INKSCRIPT_NUMERIC_BYTES: usize = 128;
@@ -27,7 +27,7 @@ pub struct InkScriptLexerLimits {
 }
 
 impl InkScriptLexerLimits {
-    /// Returns the exact-current InkScript v1 resource limits.
+    /// Returns the exact-current InkScript v2 resource limits.
     pub const fn exact_current() -> Self {
         Self {
             source_bytes: MAX_INKSCRIPT_SOURCE_BYTES,
@@ -40,19 +40,19 @@ impl InkScriptLexerLimits {
         }
     }
 
-    /// Applies a smaller source-byte cap. Values above v1 are clamped to v1.
+    /// Applies a smaller source-byte cap. Values above v2 are clamped to v2.
     pub const fn with_source_byte_limit(mut self, maximum: usize) -> Self {
         self.source_bytes = minimum_nonzero(maximum, MAX_INKSCRIPT_SOURCE_BYTES);
         self
     }
 
-    /// Applies a smaller identifier/keyword cap. Values above v1 are clamped to v1.
+    /// Applies a smaller identifier/keyword cap. Values above v2 are clamped to v2.
     pub const fn with_identifier_byte_limit(mut self, maximum: usize) -> Self {
         self.identifier_bytes = minimum_nonzero(maximum, MAX_INKSCRIPT_IDENTIFIER_BYTES);
         self
     }
 
-    /// Applies a smaller numeric-literal cap. Values above v1 are clamped to v1.
+    /// Applies a smaller numeric-literal cap. Values above v2 are clamped to v2.
     pub const fn with_numeric_byte_limit(mut self, maximum: usize) -> Self {
         self.numeric_bytes = minimum_nonzero(maximum, MAX_INKSCRIPT_NUMERIC_BYTES);
         self
@@ -76,13 +76,13 @@ impl InkScriptLexerLimits {
         self
     }
 
-    /// Applies a smaller decoded-string byte cap. Values above v1 are clamped to v1.
+    /// Applies a smaller decoded-string byte cap. Values above v2 are clamped to v2.
     pub const fn with_string_byte_limit(mut self, maximum: usize) -> Self {
         self.string_bytes = minimum_nonzero(maximum, MAX_INKSCRIPT_STRING_BYTES);
         self
     }
 
-    /// Applies a smaller decoded inline-asset cap. Values above v1 are clamped to v1.
+    /// Applies a smaller decoded inline-asset cap. Values above v2 are clamped to v2.
     pub const fn with_inline_asset_byte_limit(mut self, maximum: usize) -> Self {
         self.inline_asset_bytes = minimum_nonzero(maximum, MAX_INKSCRIPT_INLINE_ASSET_BYTES);
         self
@@ -149,7 +149,7 @@ impl InkScriptSource {
         Self::with_limits(id, bytes, InkScriptLexerLimits::exact_current())
     }
 
-    /// Validates and copies a source under a caller-lowered v1 resource envelope.
+    /// Validates and copies a source under a caller-lowered v2 resource envelope.
     pub fn with_limits(
         id: InkScriptSourceId,
         bytes: &[u8],

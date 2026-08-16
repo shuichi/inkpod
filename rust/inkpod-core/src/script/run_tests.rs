@@ -869,8 +869,8 @@ fn plan_fixture(
 
 fn compile_program(orchestration: &str) -> StaticScriptProgram {
     let text = format!(
-        r#"inkscript 1;
-requires {{ procedure_catalog = 1; replay_epoch = 23; }}
+        r#"inkscript 2;
+requires {{ procedure_catalog = 2; replay_epoch = 23; }}
 {orchestration}
 bindings {{ let paint = select plane {{ plane_kind = color; cardinality = one; missing = error; }}; }}
 program {{

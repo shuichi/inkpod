@@ -1,19 +1,25 @@
 use super::assets::{FrozenScriptAssets, ScriptAssetLimits, freeze_inkscript_assets};
+use super::bind::InkScriptBindingError;
+use super::catalog::InkScriptPortabilityClass;
+use super::compile::{ScriptSchemas, catalog as runtime_catalog};
 use super::execute::run_inkscript_on_staged_core;
 use super::*;
 use crate::asset::{AssetStore, RasterAssetInput};
 use crate::primitive::CanonicalInvocation;
 use crate::{
-    ActivePlane, Adjustment, AirbrushGesture, AirbrushStroke, AssetAlphaSemantics, AssetColorSpace,
-    BatchColorPair, BrushShape, CellCreationOptions, CellSizing, CoordinateSpace, Core,
-    DEFAULT_DPI_MILLI, EditorTarget, EffectSample, FillOperation, FillRequest, FrameAnchor,
-    GeometryCrossSection, GeometryOptions, GeometryPrimitive, GeometryRequest, Gradient,
-    GradientKind, GradientMode, GradientStop, GridConfig, GuideAxis, InclusionMode, LayerKind,
-    MAX_PERSISTENT_NUMERIC_ID, NativeOpenStrategy, OutputColorGuardProfile, PaintTool, PixelFormat,
-    PixelValue, PointF32, PrimitiveId, PrimitiveRequest, ProcedureId, RangeInterpretation, RectI32,
+    ActivePlane, Adjustment, AirbrushGesture, AirbrushStroke, AnnotationEdit, AnnotationKind,
+    AnnotationObjectInput, AnnotationOutput, AssetAlphaSemantics, AssetColorSpace, BatchColorPair,
+    BrushShape, CellCreationOptions, CellSizing, CoordinateSpace, Core, DEFAULT_DPI_MILLI,
+    EditorTarget, EffectSample, FillOperation, FillRequest, FrameAnchor, GeometryCrossSection,
+    GeometryOptions, GeometryPrimitive, GeometryRequest, Gradient, GradientKind, GradientMode,
+    GradientStop, GridConfig, GuideAxis, InclusionMode, LayerKind, MAX_PERSISTENT_NUMERIC_ID,
+    NativeOpenStrategy, OutputColorGuardProfile, PaintTool, PixelFormat, PixelValue, PointF32,
+    PrimitiveId, PrimitiveRequest, ProcedureId, RangeInterpretation, RectI32,
     ScopedColorReplaceMode, SelectionConstructionOptions, SelectionLayerOperation,
-    SelectionOperation, SelectionShape, Stamp, StampGesture, StampShape, StartColorPredicate,
-    StateId, Stroke, StrokeSample, plan_cell_creation,
+    SelectionOperation, SelectionShape, ShootingFrameAnchor, ShootingFrameEdit, ShootingFrameInput,
+    Stamp, StampGesture, StampShape, StartColorPredicate, StateId, Stroke, StrokeSample,
+    VanishingPointEdit, VanishingPointInput, VectorCubicSegment, VectorEraseMode, VectorPathInput,
+    VectorWidthMode, plan_cell_creation,
 };
 use inkpod_format::{
     InkScriptRunParameterChoice, InkScriptRunParameterDecision, InkScriptSource, InkScriptSourceId,
@@ -39,8 +45,8 @@ fn source(text: String) -> InkScriptSource {
 
 fn complete_source(parameters: &str, bindings: &str, program: &str) -> InkScriptSource {
     source(format!(
-        r#"inkscript 1;
-requires {{ procedure_catalog = 1; replay_epoch = 23; }}
+        r#"inkscript 2;
+requires {{ procedure_catalog = 2; replay_epoch = 23; }}
 inputs {{ current_document; }}
 parameters {{ {parameters} }}
 bindings {{ {bindings} }}
@@ -53,8 +59,8 @@ execution {{ failure = stop; wait_ms = 0; preview_before_save = false; }}
 
 fn complete_source_with_assets(bindings: &str, program: &str, assets: &str) -> InkScriptSource {
     source(format!(
-        r#"inkscript 1;
-requires {{ procedure_catalog = 1; replay_epoch = 23; }}
+        r#"inkscript 2;
+requires {{ procedure_catalog = 2; replay_epoch = 23; }}
 inputs {{ current_document; }}
 parameters {{}}
 bindings {{ {bindings} }}
@@ -250,7 +256,7 @@ fn compiler_freezes_parameters_and_checks_cancel_invalid_and_aggregate_resources
     assert_eq!(limited, Err(ScriptCompileError::ResourceLimit));
 
     let invalid =
-        source("inkscript 1; requires { procedure_catalog = 1; replay_epoch = 23; }".to_owned());
+        source("inkscript 2; requires { procedure_catalog = 2; replay_epoch = 23; }".to_owned());
     assert!(matches!(
         compile_inkscript(&invalid, InkScriptRunParameterDecision::Resolve(Vec::new())),
         Err(ScriptCompileError::Syntax) | Err(ScriptCompileError::Semantic(_))
@@ -2785,6 +2791,1054 @@ fn selection_floating_cancel_invalid_stale_overflow_resource_and_asset_failures_
         ScriptRunError::InvalidStep
     );
 
+    assert_eq!(
+        (
+            base.document_state_digest().unwrap(),
+            base.document_info().unwrap(),
+            base.history_entries(),
+            base.next_id,
+            base.next_procedure,
+            base.next_state,
+        ),
+        before
+    );
+}
+
+fn vector_script_base_with_uuid(uuid: u128) -> (Core, u64, u64, u64, u64) {
+    let mut base = Core::new();
+    base.new_cell_with_uuid(8, 8, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI, uuid)
+        .unwrap();
+    let info = base.document_info().unwrap();
+    base.execute_canonical_invocation(CanonicalInvocation::ReplaceRasterColors {
+        plane_id: info.color_plane_id,
+        pairs: vec![BatchColorPair {
+            enabled: true,
+            old: PixelValue::Rgba([0, 0, 0, 0]),
+            new: PixelValue::Rgba([255, 0, 0, 255]),
+        }],
+    })
+    .unwrap();
+    let (_, vector_layer_id) = base
+        .create_layer(LayerKind::VectorColoring, "Vector Script")
+        .unwrap();
+    let (main_plane_id, _trace_plane_id, fill_plane_id) =
+        base.vector_layer_planes(vector_layer_id).unwrap();
+    (
+        base,
+        info.color_plane_id,
+        vector_layer_id,
+        main_plane_id,
+        fill_plane_id,
+    )
+}
+
+fn vector_script_base() -> (Core, u64, u64, u64, u64) {
+    vector_script_base_with_uuid(0x4d32_3056_4543_544f)
+}
+
+fn vector_segment(x0: f32, y0: f32, x1: f32, y1: f32) -> VectorCubicSegment {
+    VectorCubicSegment {
+        p0: PointF32 { x: x0, y: y0 },
+        p1: PointF32 { x: x0, y: y0 },
+        p2: PointF32 { x: x1, y: y1 },
+        p3: PointF32 { x: x1, y: y1 },
+        width_start: 1.0,
+        width_end: 1.0,
+    }
+}
+
+#[test]
+fn vector_catalog_results_index_roles_direct_equivalence_and_native_reopen() {
+    let (base, raster_plane_id, vector_layer_id, main_plane_id, fill_plane_id) =
+        vector_script_base();
+    let info = base.document_info().unwrap();
+    let uuid = document_uuid(info.document_uuid);
+    let bindings = format!(
+        r#"
+let raster = select plane {{ source_document_uuid = uuid"{uuid}"; persistent_id = {raster_plane_id}; }};
+let vector_layer = select layer {{ source_document_uuid = uuid"{uuid}"; persistent_id = {vector_layer_id}; }};
+let vector_main = select plane {{ source_document_uuid = uuid"{uuid}"; persistent_id = {main_plane_id}; }};
+let vector_fill = select plane {{ source_document_uuid = uuid"{uuid}"; persistent_id = {fill_plane_id}; }};
+"#
+    );
+    let segment = |x0: i64, y0: i64, x1: i64, y1: i64| {
+        format!(
+            "{{ p0 = point(q16({x0}), q16({y0})); p1 = point(q16({x0}), q16({y0})); p2 = point(q16({x1}), q16({y1})); p3 = point(q16({x1}), q16({y1})); width_start = q16(65536); width_end = q16(65536); }}"
+        )
+    };
+    let square = [
+        segment(65_536, 65_536, 196_608, 65_536),
+        segment(196_608, 65_536, 196_608, 196_608),
+        segment(196_608, 196_608, 65_536, 196_608),
+        segment(65_536, 196_608, 65_536, 65_536),
+    ]
+    .join(", ");
+    let program_text = format!(
+        r#"
+step "Closed path" as outline {{ enabled = true; invoke vector_add_path {{ plane_id = $vector_main; input = {{ segments = [{square}]; color = rgba16(1000, 2000, 3000, 65535); closed = true; }}; }}; }}
+step "Fill" as colored {{ enabled = true; invoke vector_add_fill {{ plane_id = $vector_fill; boundary_path_ids = [$outline.paths[0]]; color = rgba16(4000, 5000, 6000, 65535); }}; }}
+step "Open left" as left {{ enabled = true; invoke vector_add_path {{ plane_id = $vector_main; input = {{ segments = [{}]; color = rgba8(10, 20, 30, 255); closed = false; }}; }}; }}
+step "Open right" as right {{ enabled = true; invoke vector_add_path {{ plane_id = $vector_main; input = {{ segments = [{}]; color = rgba8(10, 20, 30, 255); closed = false; }}; }}; }}
+step "Connect" as connector {{ enabled = true; invoke vector_connect {{ plane_id = $vector_main; maximum_gap = q16(65536); }}; }}
+step "Width" {{ enabled = true; invoke vector_correct_width {{ path_ids = [$left.paths[0], $connector.paths[0]]; width = {{ operation = add; value = q16(32768); }}; }}; }}
+step "Erase no hit" {{ enabled = true; invoke vector_erase {{ plane_id = $vector_main; point = point(q16(458752), q16(458752)); radius = q16(32768); mode = whole_path; }}; }}
+step "Rasterize" as rasterized {{ enabled = true; invoke rasterize_vector_layer {{ layer_id = $vector_layer; antialias = true; name = "Rasterized Vector"; }}; }}
+step "Vectorize existing" as extracted {{ enabled = true; invoke vectorize_raster_plane {{ source_plane_id = $raster; target_vector_layer_id = $vector_layer; alpha_threshold = 1; }}; }}
+step "Vectorize new" as traced {{ enabled = true; invoke vectorize_raster_plane_into_new_layer {{ source_plane_id = $raster; alpha_threshold = 1; name = "Traced Vector"; }}; }}
+"#,
+        segment(65_536, 262_144, 131_072, 262_144),
+        segment(163_840, 262_144, 229_376, 262_144),
+    );
+    let source = complete_source("", &bindings, &program_text);
+    let schemas = super::compile::ScriptSchemas::new();
+    let runtime_catalog = super::compile::catalog(&schemas.commands).unwrap();
+    assert_eq!(
+        runtime_catalog
+            .entry("vector_correct_width")
+            .unwrap()
+            .editor
+            .legacy_projection,
+        Some("line_width")
+    );
+    let program =
+        compile_inkscript(&source, InkScriptRunParameterDecision::Resolve(Vec::new())).unwrap();
+    let mut never_cancel = || false;
+    let mut scripted =
+        run_inkscript_on_staged_core(&program, base.clone(), None, &mut never_cancel).unwrap();
+
+    assert_eq!(scripted.report.statements.len(), 10);
+    assert_eq!(scripted.report.commit_count, 9);
+    assert_eq!(
+        scripted.report.statements[6],
+        crate::script::report::ScriptStatementOutcome::NoOp
+    );
+    assert!(
+        scripted
+            .report
+            .results
+            .iter()
+            .any(|result| result.alias == "traced"
+                && result.field == "layer"
+                && result.output_id_ordinal == 0)
+    );
+    let traced_fill_ordinals = scripted
+        .report
+        .results
+        .iter()
+        .filter(|result| result.alias == "traced" && result.field == "fills")
+        .map(|result| result.output_id_ordinal)
+        .collect::<Vec<_>>();
+    assert!(!traced_fill_ordinals.is_empty());
+    assert_eq!(traced_fill_ordinals[0], 1);
+    assert!(
+        traced_fill_ordinals
+            .windows(2)
+            .all(|pair| pair[1] == pair[0] + 1)
+    );
+    assert!(
+        scripted
+            .staged
+            .vector_paths()
+            .unwrap()
+            .iter()
+            .any(|path| path.color == PixelValue::Rgba16([1000, 2000, 3000, 65535]))
+    );
+    assert!(
+        scripted
+            .staged
+            .vector_fills()
+            .unwrap()
+            .iter()
+            .any(|fill| fill.color == PixelValue::Rgba16([4000, 5000, 6000, 65535]))
+    );
+
+    let mut direct = base.clone();
+    let closed_id = direct
+        .execute_canonical_invocation(CanonicalInvocation::VectorAddPath {
+            plane_id: main_plane_id,
+            input: VectorPathInput {
+                segments: vec![
+                    vector_segment(1.0, 1.0, 3.0, 1.0),
+                    vector_segment(3.0, 1.0, 3.0, 3.0),
+                    vector_segment(3.0, 3.0, 1.0, 3.0),
+                    vector_segment(1.0, 3.0, 1.0, 1.0),
+                ],
+                color: PixelValue::Rgba16([1000, 2000, 3000, 65535]),
+                closed: true,
+            },
+        })
+        .unwrap()
+        .output_ids[0];
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::VectorAddFill {
+            plane_id: fill_plane_id,
+            boundary_path_ids: vec![closed_id],
+            color: PixelValue::Rgba16([4000, 5000, 6000, 65535]),
+        })
+        .unwrap();
+    let left_id = direct
+        .execute_canonical_invocation(CanonicalInvocation::VectorAddPath {
+            plane_id: main_plane_id,
+            input: VectorPathInput {
+                segments: vec![vector_segment(1.0, 4.0, 2.0, 4.0)],
+                color: PixelValue::Rgba([10, 20, 30, 255]),
+                closed: false,
+            },
+        })
+        .unwrap()
+        .output_ids[0];
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::VectorAddPath {
+            plane_id: main_plane_id,
+            input: VectorPathInput {
+                segments: vec![vector_segment(2.5, 4.0, 3.5, 4.0)],
+                color: PixelValue::Rgba([10, 20, 30, 255]),
+                closed: false,
+            },
+        })
+        .unwrap();
+    let connector_id = direct
+        .execute_canonical_invocation(CanonicalInvocation::VectorConnect {
+            plane_id: main_plane_id,
+            maximum_gap: 1.0,
+        })
+        .unwrap()
+        .output_ids[0];
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::VectorCorrectWidth {
+            path_ids: vec![left_id, connector_id],
+            mode: VectorWidthMode::Add(0.5),
+        })
+        .unwrap();
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::VectorErase {
+            plane_id: main_plane_id,
+            point: PointF32 { x: 7.0, y: 7.0 },
+            radius: 0.5,
+            mode: VectorEraseMode::WholePath,
+        })
+        .unwrap();
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::RasterizeVectorLayer {
+            layer_id: vector_layer_id,
+            antialias: true,
+            name: "Rasterized Vector".to_owned(),
+        })
+        .unwrap();
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::VectorizeRasterPlane {
+            source_plane_id: raster_plane_id,
+            target_vector_layer_id: vector_layer_id,
+            alpha_threshold: 1,
+        })
+        .unwrap();
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::VectorizeRasterPlaneIntoNewLayer {
+            source_plane_id: raster_plane_id,
+            alpha_threshold: 1,
+            name: "Traced Vector".to_owned(),
+        })
+        .unwrap();
+    assert_same_document(&scripted.staged, &direct);
+
+    let base_digest = base.document_state_digest().unwrap();
+    let final_digest = scripted.staged.document_state_digest().unwrap();
+    for _ in 0..scripted.report.commit_count {
+        scripted.staged.undo().unwrap();
+    }
+    assert_eq!(
+        scripted.staged.document_state_digest().unwrap(),
+        base_digest
+    );
+    for _ in 0..scripted.report.commit_count {
+        scripted.staged.redo().unwrap();
+    }
+    assert_eq!(
+        scripted.staged.document_state_digest().unwrap(),
+        final_digest
+    );
+    scripted.staged.release_history_cache().unwrap();
+    assert_eq!(
+        scripted
+            .staged
+            .verify_journal_replay()
+            .unwrap()
+            .document_state_digest(),
+        final_digest
+    );
+    let editor_digest = scripted.staged.editor_state().unwrap().digest;
+    let native = scripted
+        .staged
+        .build_procedure_file(Some(scripted.staged.current_state), Some(editor_digest))
+        .unwrap();
+    let reopened = Core::from_procedure_file(
+        decode_procedure_file(&encode_procedure_file(&native).unwrap()).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(reopened.document_state_digest().unwrap(), final_digest);
+    assert_eq!(reopened.next_id, scripted.staged.next_id);
+    assert_eq!(reopened.next_procedure, scripted.staged.next_procedure);
+    assert_eq!(reopened.next_state, scripted.staged.next_state);
+    assert_eq!(reopened.savepoint, Some(reopened.current_state));
+    assert_eq!(
+        reopened.persistence_info().unwrap().open_strategy,
+        NativeOpenStrategy::FullReplay
+    );
+    assert!(!reopened.document_info().unwrap().dirty);
+    assert!(!reopened.editor_state().unwrap().dirty);
+}
+
+#[test]
+fn vector_strict_binding_and_semantic_rebound_are_initial_state_exact() {
+    fn add_initial_path(base: &mut Core, plane_id: u64) -> u64 {
+        base.execute_canonical_invocation(CanonicalInvocation::VectorAddPath {
+            plane_id,
+            input: VectorPathInput {
+                segments: vec![vector_segment(1.0, 1.0, 3.0, 1.0)],
+                color: PixelValue::Rgba([1, 2, 3, 255]),
+                closed: false,
+            },
+        })
+        .unwrap()
+        .output_ids[0]
+    }
+
+    let (mut source_core, _raster, _layer, source_plane, _fill) = vector_script_base();
+    let source_path = add_initial_path(&mut source_core, source_plane);
+    let source_info = source_core.document_info().unwrap();
+    let strict_source = complete_source(
+        "",
+        &format!(
+            r#"let target = select vector_path {{ source_document_uuid = uuid"{}"; persistent_id = {source_path}; }};"#,
+            document_uuid(source_info.document_uuid)
+        ),
+        r#"step "Strict width" { enabled = true; invoke vector_correct_width { path_ids = [$target]; width = { operation = constant; value = q16(131072); }; }; }"#,
+    );
+    let strict = compile_inkscript(
+        &strict_source,
+        InkScriptRunParameterDecision::Resolve(Vec::new()),
+    )
+    .unwrap();
+    let mut never_cancel = || false;
+    let strict_result = run_inkscript_dry(
+        &strict,
+        capture_in_memory_input(&source_core).unwrap(),
+        &mut never_cancel,
+    )
+    .unwrap();
+    assert_eq!(
+        strict_result.staged.vector_paths().unwrap()[0].segments[0].width_start,
+        2.0
+    );
+
+    let (mut rebound_core, _raster, _layer, rebound_plane, _fill) =
+        vector_script_base_with_uuid(source_info.document_uuid + 1);
+    add_initial_path(&mut rebound_core, rebound_plane);
+    let rebound_before = rebound_core.document_state_digest().unwrap();
+    let mut never_cancel = || false;
+    assert_eq!(
+        run_inkscript_dry(
+            &strict,
+            capture_in_memory_input(&rebound_core).unwrap(),
+            &mut never_cancel,
+        )
+        .unwrap_err(),
+        ScriptRunError::Binding(InkScriptBindingError::StalePrecondition)
+    );
+    assert_eq!(
+        rebound_core.document_state_digest().unwrap(),
+        rebound_before
+    );
+
+    let rebound_source = complete_source(
+        "",
+        r#"
+let vector_layer = select layer { name = "Vector Script"; };
+let vector_main = select plane { layer = $vector_layer; plane_kind = vector_main_line; };
+let target = select vector_path { plane = $vector_main; };
+"#,
+        r#"step "Rebound width" { enabled = true; invoke vector_correct_width { path_ids = [$target]; width = { operation = constant; value = q16(131072); }; }; }"#,
+    );
+    let rebound = compile_inkscript(
+        &rebound_source,
+        InkScriptRunParameterDecision::Resolve(Vec::new()),
+    )
+    .unwrap();
+    let mut never_cancel = || false;
+    let rebound_result = run_inkscript_dry(
+        &rebound,
+        capture_in_memory_input(&rebound_core).unwrap(),
+        &mut never_cancel,
+    )
+    .unwrap();
+    assert_eq!(
+        rebound_result.staged.vector_paths().unwrap()[0].segments[0].width_start,
+        2.0
+    );
+}
+
+#[test]
+fn vector_cancel_invalid_stale_overflow_and_resource_failures_are_atomic() {
+    let (base, _raster, _layer, main_plane_id, _fill) = vector_script_base();
+    let info = base.document_info().unwrap();
+    let uuid = document_uuid(info.document_uuid);
+    let bindings = format!(
+        r#"let vector_main = select plane {{ source_document_uuid = uuid"{uuid}"; persistent_id = {main_plane_id}; }};"#
+    );
+    let path_step = |name: &str| {
+        format!(
+            r#"step "{name}" {{ enabled = true; invoke vector_add_path {{ plane_id = $vector_main; input = {{ segments = [{{ p0 = point(q16(65536), q16(65536)); p1 = point(q16(65536), q16(65536)); p2 = point(q16(131072), q16(65536)); p3 = point(q16(131072), q16(65536)); width_start = q16(65536); width_end = q16(65536); }}]; color = rgba8(1, 2, 3, 255); closed = false; }}; }}; }}"#
+        )
+    };
+    let source = complete_source(
+        "",
+        &bindings,
+        &format!("{} {}", path_step("One"), path_step("Two")),
+    );
+    let program =
+        compile_inkscript(&source, InkScriptRunParameterDecision::Resolve(Vec::new())).unwrap();
+    let before = (
+        base.document_state_digest().unwrap(),
+        base.document_info().unwrap(),
+        base.history_entries(),
+        base.next_id,
+        base.next_procedure,
+        base.next_state,
+    );
+    let mut cancel = || true;
+    assert_eq!(
+        run_inkscript_on_staged_core(&program, base.clone(), None, &mut cancel).unwrap_err(),
+        ScriptRunError::Cancelled
+    );
+    let mut polls = 0_u32;
+    let mut cancel_after_staging = || {
+        polls += 1;
+        polls == 3
+    };
+    assert_eq!(
+        run_inkscript_on_staged_core(&program, base.clone(), None, &mut cancel_after_staging,)
+            .unwrap_err(),
+        ScriptRunError::Cancelled
+    );
+
+    let invalid_source = complete_source(
+        "",
+        &bindings,
+        &path_step("Invalid").replace("rgba8(1, 2, 3, 255)", "gray8(1)"),
+    );
+    let invalid = compile_inkscript(
+        &invalid_source,
+        InkScriptRunParameterDecision::Resolve(Vec::new()),
+    )
+    .unwrap();
+    let mut never_cancel = || false;
+    assert_eq!(
+        run_inkscript_on_staged_core(&invalid, base.clone(), None, &mut never_cancel).unwrap_err(),
+        ScriptRunError::InvalidStep
+    );
+
+    let mut stale = base.clone();
+    let fingerprint = capture_in_memory_fingerprint(&stale).unwrap();
+    stale.add_guide(GuideAxis::Vertical, 2).unwrap();
+    let stale_digest = stale.document_state_digest().unwrap();
+    let mut never_cancel = || false;
+    assert_eq!(
+        run_inkscript_dry(
+            &program,
+            capture_in_memory_input_at(&stale, fingerprint),
+            &mut never_cancel,
+        )
+        .unwrap_err(),
+        ScriptRunError::StaleInput
+    );
+    assert_eq!(stale.document_state_digest().unwrap(), stale_digest);
+
+    let one_source = complete_source("", &bindings, &path_step("One"));
+    let one = compile_inkscript(
+        &one_source,
+        InkScriptRunParameterDecision::Resolve(Vec::new()),
+    )
+    .unwrap();
+    let mut id_overflow = base.clone();
+    id_overflow.next_id = crate::identity::StableIdCursor::from_next_raw(MAX_PERSISTENT_NUMERIC_ID);
+    let overflow_digest = id_overflow.document_state_digest().unwrap();
+    let mut never_cancel = || false;
+    assert_eq!(
+        run_inkscript_on_staged_core(&one, id_overflow.clone(), None, &mut never_cancel)
+            .unwrap_err(),
+        ScriptRunError::ResourceLimit
+    );
+    assert_eq!(
+        id_overflow.document_state_digest().unwrap(),
+        overflow_digest
+    );
+
+    let mut procedure_overflow = base.clone();
+    procedure_overflow.next_procedure = ProcedureId::from_raw(MAX_PERSISTENT_NUMERIC_ID);
+    let procedure_digest = procedure_overflow.document_state_digest().unwrap();
+    let mut never_cancel = || false;
+    assert_eq!(
+        run_inkscript_on_staged_core(&one, procedure_overflow.clone(), None, &mut never_cancel,)
+            .unwrap_err(),
+        ScriptRunError::ResourceLimit
+    );
+    assert_eq!(
+        procedure_overflow.document_state_digest().unwrap(),
+        procedure_digest
+    );
+
+    assert_eq!(
+        compile_inkscript_with_limits(
+            &source,
+            InkScriptRunParameterDecision::Resolve(Vec::new()),
+            ScriptCompileLimits::exact_current().with_invocations(1),
+        ),
+        Err(ScriptCompileError::ResourceLimit)
+    );
+    assert_eq!(
+        (
+            base.document_state_digest().unwrap(),
+            base.document_info().unwrap(),
+            base.history_entries(),
+            base.next_id,
+            base.next_procedure,
+            base.next_state,
+        ),
+        before
+    );
+}
+
+fn annotation_frame_script_base_with_uuid(uuid: u128) -> (Core, u64, u64, u64) {
+    let mut base = Core::new();
+    base.new_cell_with_uuid(16, 16, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI, uuid)
+        .unwrap();
+    let (_, text_layer) = base.create_layer(LayerKind::Text, "Script Text").unwrap();
+    let (_, annotation_layer) = base
+        .create_layer(LayerKind::Annotation, "Script Annotation")
+        .unwrap();
+    let (_, vanishing_layer) = base
+        .create_layer(LayerKind::VanishingPoint, "Script Vanishing")
+        .unwrap();
+    (base, text_layer, annotation_layer, vanishing_layer)
+}
+
+fn annotation_frame_script_base() -> (Core, u64, u64, u64) {
+    annotation_frame_script_base_with_uuid(0x4d32_3141_4e4e_4f54)
+}
+
+fn annotation_input(layer_id: u64) -> AnnotationObjectInput {
+    AnnotationObjectInput {
+        layer_id,
+        kind: AnnotationKind::Text,
+        output: AnnotationOutput::Instruction,
+        bounds: RectI32 {
+            x: 1,
+            y: 2,
+            width: 6,
+            height: 4,
+        },
+        font_family_hint: "Inkpod Sans".to_owned(),
+        font_size_milli: 12_000,
+        style_flags: 1,
+        color: PixelValue::Rgba16([1_000, 2_000, 3_000, 65_535]),
+        text: "Frame note".to_owned(),
+        points: Vec::new(),
+        stroke_width_milli: 0,
+    }
+}
+
+fn shooting_input() -> ShootingFrameInput {
+    ShootingFrameInput {
+        center_x_milli: 8_000,
+        center_y_milli: 8_000,
+        width_milli: 10_000,
+        height_milli: 6_000,
+        rotation_turns: 0x1000_0000,
+        anchor: ShootingFrameAnchor::Center,
+        visible: true,
+        include_in_instruction_export: true,
+    }
+}
+
+fn vanishing_input(layer_id: u64, x_milli: i64) -> VanishingPointInput {
+    VanishingPointInput {
+        layer_id,
+        x_milli,
+        y_milli: 7_000,
+        interval_milli_degrees: 30_000,
+        angle_milli_degrees: 15_000,
+        color: PixelValue::Rgba16([4_000, 5_000, 6_000, 65_535]),
+        opacity_milli: 750,
+        visible: true,
+    }
+}
+
+#[test]
+fn annotation_frame_catalog_results_direct_equivalence_and_native_reopen() {
+    let (base, text_layer, _annotation_layer, vanishing_layer) = annotation_frame_script_base();
+    let base_next_id = base.next_id.next_raw();
+    let info = base.document_info().unwrap();
+    let uuid = document_uuid(info.document_uuid);
+    let bindings = format!(
+        r#"
+let text_layer = select layer {{ source_document_uuid = uuid"{uuid}"; persistent_id = {text_layer}; }};
+let vanishing_layer = select layer {{ source_document_uuid = uuid"{uuid}"; persistent_id = {vanishing_layer}; }};
+"#
+    );
+    let program_text = r#"
+step "Annotation" as annotation_created { enabled = true; invoke edit_annotations { edits = [{ operation = 1; object_id = none; input = { layer_id = $text_layer; kind = text; output = instruction; bounds = rect(1, 2, 6, 4); font_family_hint = "Inkpod Sans"; font_size_milli = 12000; style_flags = 1; color = rgba16(1000, 2000, 3000, 65535); text = "Frame note"; points = []; stroke_width_milli = 0; }; delta_x = 0; delta_y = 0; }]; }; }
+step "Frame" as frame_created { enabled = true; invoke edit_shooting_frame { edit = { operation = 1; frame_id = none; input = { center_x_milli = 8000; center_y_milli = 8000; width_milli = 10000; height_milli = 6000; rotation_turns = 268435456; anchor = center; visible = true; include_in_instruction_export = true; }; }; }; }
+step "Vanishing" as vanishing_created { enabled = true; invoke edit_vanishing_points { edits = [{ operation = 1; point_id = none; input = { layer_id = $vanishing_layer; x_milli = 3000; y_milli = 7000; interval_milli_degrees = 30000; angle_milli_degrees = 15000; color = rgba16(4000, 5000, 6000, 65535); opacity_milli = 750; visible = true; }; }, { operation = 1; point_id = none; input = { layer_id = $vanishing_layer; x_milli = 12000; y_milli = 7000; interval_milli_degrees = 30000; angle_milli_degrees = 15000; color = rgba16(4000, 5000, 6000, 65535); opacity_milli = 750; visible = true; }; }]; }; }
+step "Annotation no-op" as annotation_same { enabled = true; invoke edit_annotations { edits = [{ operation = 2; object_id = $annotation_created.annotations[0]; input = { layer_id = $text_layer; kind = text; output = instruction; bounds = rect(1, 2, 6, 4); font_family_hint = "Inkpod Sans"; font_size_milli = 12000; style_flags = 1; color = rgba16(1000, 2000, 3000, 65535); text = "Frame note"; points = []; stroke_width_milli = 0; }; delta_x = 0; delta_y = 0; }]; }; }
+step "Frame no-op" as frame_same { enabled = true; invoke edit_shooting_frame { edit = { operation = 2; frame_id = $frame_created.shooting_frames[0]; input = { center_x_milli = 8000; center_y_milli = 8000; width_milli = 10000; height_milli = 6000; rotation_turns = 268435456; anchor = center; visible = true; include_in_instruction_export = true; }; }; }; }
+step "Vanishing no-op" as vanishing_same { enabled = true; invoke edit_vanishing_points { edits = [{ operation = 2; point_id = $vanishing_created.vanishing_points[1]; input = { layer_id = $vanishing_layer; x_milli = 12000; y_milli = 7000; interval_milli_degrees = 30000; angle_milli_degrees = 15000; color = rgba16(4000, 5000, 6000, 65535); opacity_milli = 750; visible = true; }; }]; }; }
+step "Annotation move no-op" { enabled = true; invoke edit_annotations { edits = [{ operation = 3; object_id = $annotation_created.annotations[0]; input = none; delta_x = 0; delta_y = 0; }]; }; }
+step "Delete annotation" { enabled = true; invoke edit_annotations { edits = [{ operation = 4; object_id = $annotation_created.annotations[0]; input = none; delta_x = 0; delta_y = 0; }]; }; }
+step "Delete frame" { enabled = true; invoke edit_shooting_frame { edit = { operation = 3; frame_id = $frame_created.shooting_frames[0]; input = none; }; }; }
+step "Delete vanishing points" { enabled = true; invoke edit_vanishing_points { edits = [{ operation = 4; point_id = none; input = none; }]; }; }
+"#;
+    let source = complete_source("", &bindings, program_text);
+    let program =
+        compile_inkscript(&source, InkScriptRunParameterDecision::Resolve(Vec::new())).unwrap();
+    let schemas = ScriptSchemas::new();
+    let catalog = runtime_catalog(&schemas.commands).unwrap();
+    let portability = |command: &str, index: usize| {
+        catalog
+            .evaluate_portability(command, &program.frozen_arguments[index])
+            .unwrap()
+    };
+    assert_eq!(
+        portability("edit_annotations", 0).class,
+        InkScriptPortabilityClass::RequiresBinding
+    );
+    assert_eq!(
+        portability("edit_shooting_frame", 1).class,
+        InkScriptPortabilityClass::Portable
+    );
+    assert_eq!(
+        portability("edit_shooting_frame", 4).class,
+        InkScriptPortabilityClass::RequiresBinding
+    );
+    assert_eq!(
+        portability("edit_annotations", 6).class,
+        InkScriptPortabilityClass::StrictSourceOnly
+    );
+    assert_eq!(
+        portability("edit_vanishing_points", 9).class,
+        InkScriptPortabilityClass::StrictSourceOnly
+    );
+    let mut never_cancel = || false;
+    let mut scripted =
+        run_inkscript_on_staged_core(&program, base.clone(), None, &mut never_cancel).unwrap();
+    assert_eq!(scripted.report.commit_count, 6);
+    assert_eq!(scripted.report.statements.len(), 10);
+    assert!(
+        scripted.report.statements[3..7]
+            .iter()
+            .all(|outcome| { *outcome == crate::script::report::ScriptStatementOutcome::NoOp })
+    );
+    assert!(
+        scripted.report.statements[7..].iter().all(|outcome| {
+            *outcome == crate::script::report::ScriptStatementOutcome::Committed
+        })
+    );
+    assert_eq!(scripted.report.results.len(), 6);
+    assert!(
+        scripted
+            .report
+            .results
+            .iter()
+            .all(|result| result.alias != "annotation_same")
+    );
+    assert_eq!(
+        scripted
+            .report
+            .results
+            .iter()
+            .filter(|result| matches!(result.alias.as_str(), "frame_same" | "vanishing_same"))
+            .count(),
+        2
+    );
+    let created_ids = scripted
+        .report
+        .results
+        .iter()
+        .filter(|result| result.alias.ends_with("_created"))
+        .map(|result| result.persistent_id)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        created_ids,
+        (base_next_id..base_next_id + 4).collect::<Vec<_>>()
+    );
+    assert_eq!(scripted.staged.next_id.next_raw(), base_next_id + 4);
+    assert_eq!(scripted.report.next_stable_id, base_next_id + 4);
+    assert_eq!(
+        scripted
+            .report
+            .results
+            .iter()
+            .filter(|result| result.alias == "vanishing_created")
+            .count(),
+        2
+    );
+
+    let mut direct = base.clone();
+    let annotation_id = direct
+        .execute_canonical_invocation(CanonicalInvocation::EditAnnotations {
+            edits: vec![AnnotationEdit::Create(annotation_input(text_layer))],
+        })
+        .unwrap()
+        .output_ids[0];
+    let frame_id = direct
+        .execute_canonical_invocation(CanonicalInvocation::EditShootingFrame {
+            edit: ShootingFrameEdit::Create(shooting_input()),
+        })
+        .unwrap()
+        .output_ids[0];
+    let vanishing_ids = direct
+        .execute_canonical_invocation(CanonicalInvocation::EditVanishingPoints {
+            edits: vec![
+                VanishingPointEdit::Create(vanishing_input(vanishing_layer, 3_000)),
+                VanishingPointEdit::Create(vanishing_input(vanishing_layer, 12_000)),
+            ],
+        })
+        .unwrap()
+        .output_ids;
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::EditAnnotations {
+            edits: vec![AnnotationEdit::Update {
+                object_id: annotation_id,
+                input: annotation_input(text_layer),
+            }],
+        })
+        .unwrap();
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::EditShootingFrame {
+            edit: ShootingFrameEdit::Update {
+                frame_id,
+                input: shooting_input(),
+            },
+        })
+        .unwrap();
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::EditVanishingPoints {
+            edits: vec![VanishingPointEdit::Update {
+                point_id: vanishing_ids[1],
+                input: vanishing_input(vanishing_layer, 12_000),
+            }],
+        })
+        .unwrap();
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::EditAnnotations {
+            edits: vec![AnnotationEdit::Move {
+                object_id: annotation_id,
+                delta_x: 0,
+                delta_y: 0,
+            }],
+        })
+        .unwrap();
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::EditAnnotations {
+            edits: vec![AnnotationEdit::Delete {
+                object_id: annotation_id,
+            }],
+        })
+        .unwrap();
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::EditShootingFrame {
+            edit: ShootingFrameEdit::Delete { frame_id },
+        })
+        .unwrap();
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::EditVanishingPoints {
+            edits: vec![VanishingPointEdit::DeleteAll],
+        })
+        .unwrap();
+    assert_same_document(&scripted.staged, &direct);
+
+    let base_digest = base.document_state_digest().unwrap();
+    let final_digest = scripted.staged.document_state_digest().unwrap();
+    for _ in 0..scripted.report.commit_count {
+        scripted.staged.undo().unwrap();
+    }
+    assert_eq!(
+        scripted.staged.document_state_digest().unwrap(),
+        base_digest
+    );
+    for _ in 0..scripted.report.commit_count {
+        scripted.staged.redo().unwrap();
+    }
+    assert_eq!(
+        scripted.staged.document_state_digest().unwrap(),
+        final_digest
+    );
+    scripted.staged.release_history_cache().unwrap();
+    assert_eq!(
+        scripted
+            .staged
+            .verify_journal_replay()
+            .unwrap()
+            .document_state_digest(),
+        final_digest
+    );
+    let editor_digest = scripted.staged.editor_state().unwrap().digest;
+    let native = scripted
+        .staged
+        .build_procedure_file(Some(scripted.staged.current_state), Some(editor_digest))
+        .unwrap();
+    let reopened = Core::from_procedure_file(
+        decode_procedure_file(&encode_procedure_file(&native).unwrap()).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(reopened.document_state_digest().unwrap(), final_digest);
+    assert_eq!(reopened.next_id, scripted.staged.next_id);
+    assert_eq!(reopened.next_procedure, scripted.staged.next_procedure);
+    assert_eq!(reopened.next_state, scripted.staged.next_state);
+    assert_eq!(reopened.savepoint, Some(reopened.current_state));
+    assert_eq!(
+        reopened.persistence_info().unwrap().open_strategy,
+        NativeOpenStrategy::FullReplay
+    );
+    assert!(!reopened.document_info().unwrap().dirty);
+    assert!(!reopened.editor_state().unwrap().dirty);
+}
+
+#[test]
+fn shooting_frame_document_owner_supports_exact_source_and_semantic_rebound() {
+    fn add_frame(core: &mut Core) -> u64 {
+        core.execute_canonical_invocation(CanonicalInvocation::EditShootingFrame {
+            edit: ShootingFrameEdit::Create(shooting_input()),
+        })
+        .unwrap()
+        .output_ids[0]
+    }
+
+    let (mut source_core, _, _, _) = annotation_frame_script_base();
+    let frame_id = add_frame(&mut source_core);
+    let info = source_core.document_info().unwrap();
+    let update = r#"step "Update frame" { enabled = true; invoke edit_shooting_frame { edit = { operation = 2; frame_id = $frame; input = { center_x_milli = 9000; center_y_milli = 8000; width_milli = 10000; height_milli = 6000; rotation_turns = 268435456; anchor = center; visible = true; include_in_instruction_export = true; }; }; }; }"#;
+    let strict_source = complete_source(
+        "",
+        &format!(
+            r#"let frame = select shooting_frame {{ source_document_uuid = uuid"{}"; persistent_id = {frame_id}; }};"#,
+            document_uuid(info.document_uuid)
+        ),
+        update,
+    );
+    let strict = compile_inkscript(
+        &strict_source,
+        InkScriptRunParameterDecision::Resolve(Vec::new()),
+    )
+    .unwrap();
+    let mut never_cancel = || false;
+    let strict_result = run_inkscript_dry(
+        &strict,
+        capture_in_memory_input(&source_core).unwrap(),
+        &mut never_cancel,
+    )
+    .unwrap();
+    assert_eq!(
+        strict_result
+            .staged
+            .shooting_frame()
+            .unwrap()
+            .unwrap()
+            .center_x_milli,
+        9_000
+    );
+
+    let (mut rebound_core, _, _, _) =
+        annotation_frame_script_base_with_uuid(info.document_uuid + 1);
+    add_frame(&mut rebound_core);
+    let before = rebound_core.document_state_digest().unwrap();
+    let mut never_cancel = || false;
+    assert_eq!(
+        run_inkscript_dry(
+            &strict,
+            capture_in_memory_input(&rebound_core).unwrap(),
+            &mut never_cancel,
+        )
+        .unwrap_err(),
+        ScriptRunError::Binding(InkScriptBindingError::StalePrecondition)
+    );
+    assert_eq!(rebound_core.document_state_digest().unwrap(), before);
+
+    let rebound_source = complete_source("", r#"let frame = select shooting_frame {};"#, update);
+    let rebound = compile_inkscript(
+        &rebound_source,
+        InkScriptRunParameterDecision::Resolve(Vec::new()),
+    )
+    .unwrap();
+    let mut never_cancel = || false;
+    let rebound_result = run_inkscript_dry(
+        &rebound,
+        capture_in_memory_input(&rebound_core).unwrap(),
+        &mut never_cancel,
+    )
+    .unwrap();
+    assert_eq!(
+        rebound_result
+            .staged
+            .shooting_frame()
+            .unwrap()
+            .unwrap()
+            .center_x_milli,
+        9_000
+    );
+
+    let invalid_owner_source = complete_source(
+        "",
+        r#"let layer = select layer { name = "Script Text"; }; let frame = select shooting_frame { layer = $layer; };"#,
+        update,
+    );
+    assert!(
+        compile_inkscript(
+            &invalid_owner_source,
+            InkScriptRunParameterDecision::Resolve(Vec::new())
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn annotation_frame_invalid_cancel_stale_overflow_and_resource_failures_are_atomic() {
+    let (base, text_layer, _, _) = annotation_frame_script_base();
+    let info = base.document_info().unwrap();
+    let bindings = format!(
+        r#"let text_layer = select layer {{ source_document_uuid = uuid"{}"; persistent_id = {text_layer}; }};"#,
+        document_uuid(info.document_uuid)
+    );
+    let annotation_step = |name: &str| {
+        format!(
+            r#"step "{name}" {{ enabled = true; invoke edit_annotations {{ edits = [{{ operation = 1; object_id = none; input = {{ layer_id = $text_layer; kind = text; output = instruction; bounds = rect(1, 2, 6, 4); font_family_hint = "Inkpod Sans"; font_size_milli = 12000; style_flags = 1; color = rgba8(1, 2, 3, 255); text = "Frame note"; points = []; stroke_width_milli = 0; }}; delta_x = 0; delta_y = 0; }}]; }}; }}"#
+        )
+    };
+    let source = complete_source(
+        "",
+        &bindings,
+        &format!("{} {}", annotation_step("One"), annotation_step("Two")),
+    );
+    let program =
+        compile_inkscript(&source, InkScriptRunParameterDecision::Resolve(Vec::new())).unwrap();
+    let before = (
+        base.document_state_digest().unwrap(),
+        base.document_info().unwrap(),
+        base.history_entries(),
+        base.next_id,
+        base.next_procedure,
+        base.next_state,
+    );
+
+    let mut cancel = || true;
+    assert_eq!(
+        run_inkscript_on_staged_core(&program, base.clone(), None, &mut cancel).unwrap_err(),
+        ScriptRunError::Cancelled
+    );
+    let mut polls = 0_u32;
+    let mut cancel_after_staging = || {
+        polls += 1;
+        polls == 3
+    };
+    assert_eq!(
+        run_inkscript_on_staged_core(&program, base.clone(), None, &mut cancel_after_staging)
+            .unwrap_err(),
+        ScriptRunError::Cancelled
+    );
+
+    let invalid_source = complete_source(
+        "",
+        &bindings,
+        &annotation_step("Invalid").replace("rgba8(1, 2, 3, 255)", "gray8(1)"),
+    );
+    let invalid = compile_inkscript(
+        &invalid_source,
+        InkScriptRunParameterDecision::Resolve(Vec::new()),
+    )
+    .unwrap();
+    let mut never_cancel = || false;
+    assert_eq!(
+        run_inkscript_on_staged_core(&invalid, base.clone(), None, &mut never_cancel).unwrap_err(),
+        ScriptRunError::InvalidStep
+    );
+
+    let mut stale = base.clone();
+    let fingerprint = capture_in_memory_fingerprint(&stale).unwrap();
+    stale.add_guide(GuideAxis::Horizontal, 2).unwrap();
+    let stale_digest = stale.document_state_digest().unwrap();
+    let mut never_cancel = || false;
+    assert_eq!(
+        run_inkscript_dry(
+            &program,
+            capture_in_memory_input_at(&stale, fingerprint),
+            &mut never_cancel,
+        )
+        .unwrap_err(),
+        ScriptRunError::StaleInput
+    );
+    assert_eq!(stale.document_state_digest().unwrap(), stale_digest);
+
+    let allocation_fingerprint = capture_in_memory_fingerprint(&base).unwrap();
+    let mut allocation_stale = base.clone();
+    allocation_stale.next_id =
+        crate::identity::StableIdCursor::from_next_raw(allocation_stale.next_id.next_raw() + 1);
+    let allocation_before = allocation_stale.document_state_digest().unwrap();
+    let mut never_cancel = || false;
+    assert_eq!(
+        run_inkscript_dry(
+            &program,
+            capture_in_memory_input_at(&allocation_stale, allocation_fingerprint),
+            &mut never_cancel,
+        )
+        .unwrap_err(),
+        ScriptRunError::StaleInput
+    );
+    assert_eq!(
+        allocation_stale.document_state_digest().unwrap(),
+        allocation_before
+    );
+
+    let one_source = complete_source("", &bindings, &annotation_step("One"));
+    let one = compile_inkscript(
+        &one_source,
+        InkScriptRunParameterDecision::Resolve(Vec::new()),
+    )
+    .unwrap();
+    let mut id_overflow = base.clone();
+    id_overflow.next_id = crate::identity::StableIdCursor::from_next_raw(MAX_PERSISTENT_NUMERIC_ID);
+    let overflow_digest = id_overflow.document_state_digest().unwrap();
+    let mut never_cancel = || false;
+    assert_eq!(
+        run_inkscript_on_staged_core(&one, id_overflow.clone(), None, &mut never_cancel)
+            .unwrap_err(),
+        ScriptRunError::ResourceLimit
+    );
+    assert_eq!(
+        id_overflow.document_state_digest().unwrap(),
+        overflow_digest
+    );
+
+    let mut procedure_overflow = base.clone();
+    procedure_overflow.next_procedure = ProcedureId::from_raw(MAX_PERSISTENT_NUMERIC_ID);
+    let procedure_digest = procedure_overflow.document_state_digest().unwrap();
+    let mut never_cancel = || false;
+    assert_eq!(
+        run_inkscript_on_staged_core(&one, procedure_overflow.clone(), None, &mut never_cancel)
+            .unwrap_err(),
+        ScriptRunError::ResourceLimit
+    );
+    assert_eq!(
+        procedure_overflow.document_state_digest().unwrap(),
+        procedure_digest
+    );
+
+    assert_eq!(
+        compile_inkscript_with_limits(
+            &source,
+            InkScriptRunParameterDecision::Resolve(Vec::new()),
+            ScriptCompileLimits::exact_current().with_invocations(1),
+        ),
+        Err(ScriptCompileError::ResourceLimit)
+    );
     assert_eq!(
         (
             base.document_state_digest().unwrap(),

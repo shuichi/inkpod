@@ -2,8 +2,8 @@
   "kind": "inkpod.inkscript.owner-manifest",
   "registry_schema_version": 2,
   "replay_contract": {
-    "inkscript_file_version": 1,
-    "procedure_catalog_version": 1,
+    "inkscript_file_version": 2,
+    "procedure_catalog_version": 2,
     "replay_epoch": 23,
     "inkpod_top_level_version": 26,
     "c_abi_version": 14

@@ -338,8 +338,8 @@ fn production_and_test_identifiers_are_semantic() {
             source.display()
         );
 
-        if source.ends_with(Path::new("schemas/inkscript/owner-manifest-v1.json"))
-            || source.ends_with(Path::new("schemas/inkscript/catalog-v1.draft.json"))
+        if source.ends_with(Path::new("schemas/inkscript/owner-manifest-v2.json"))
+            || source.ends_with(Path::new("schemas/inkscript/catalog-v2.draft.json"))
         {
             // The private InkScript ownership and catalog registries intentionally record
             // the ratification plan's stable milestone IDs. Separate integration tests

@@ -38,7 +38,7 @@ pub struct InkScriptParserLimits {
 }
 
 impl InkScriptParserLimits {
-    /// Returns the exact-current InkScript v1 lexer and CST resource limits.
+    /// Returns the exact-current InkScript v2 lexer and CST resource limits.
     pub const fn exact_current() -> Self {
         Self {
             lexer: InkScriptLexerLimits::exact_current(),
@@ -55,7 +55,7 @@ impl InkScriptParserLimits {
         }
     }
 
-    /// Uses a caller-lowered lexer envelope. Values in that envelope remain clamped to v1.
+    /// Uses a caller-lowered lexer envelope. Values in that envelope remain clamped to v2.
     pub const fn with_lexer_limits(mut self, lexer: InkScriptLexerLimits) -> Self {
         self.lexer = lexer;
         self
@@ -267,7 +267,7 @@ impl<'source> InkScriptParsed<'source> {
     }
 }
 
-/// Parses a complete InkScript file or fragment with exact-current v1 limits.
+/// Parses a complete InkScript file or fragment with exact-current v2 limits.
 ///
 /// The returned CST borrows the immutable source, retains all trivia and spelling, and
 /// remains available after recoverable errors. Parsing performs no filesystem, Core, or

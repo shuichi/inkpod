@@ -1,8 +1,8 @@
 {
   "kind": "inkpod.inkscript.catalog-draft",
   "registry_schema_version": 2,
-  "file_version": 1,
-  "catalog_version": 1,
+  "file_version": 2,
+  "catalog_version": 2,
   "required_replay_epoch": 23,
   "production": false,
   "enums": [
@@ -33,7 +33,11 @@
     { "name": "selection_layer_operation", "members": ["replace", "add", "subtract"] },
     { "name": "output_color_guard_profile", "members": ["bt709_conservative_ycbcr"] },
     { "name": "floating_destination_kind", "members": ["existing_planes", "new_plane"] },
-    { "name": "floating_anchor", "members": ["top_left", "top_right", "center", "bottom_left", "bottom_right"] }
+    { "name": "floating_anchor", "members": ["top_left", "top_right", "center", "bottom_left", "bottom_right"] },
+    { "name": "vector_erase_mode", "members": ["partial", "to_intersection", "whole_path"] },
+    { "name": "vector_width_operation", "members": ["add", "subtract", "scale", "constant"] },
+    { "name": "annotation_output", "members": ["normal", "instruction"] },
+    { "name": "shooting_frame_anchor", "members": ["top_left", "top_right", "center", "bottom_left", "bottom_right"] }
   ],
   "constructors": [
     { "name": "layer_target", "result": "edit_target", "arguments": [{ "name": "layer", "type": "layer_ref", "constraints": ["nonzero"] }], "conversion": "exact" },
@@ -425,6 +429,107 @@
         { "name": "source_document_uuid", "type": "uuid", "required": true, "default": null, "canonical_order": 0, "constraints": [] },
         { "name": "bounds", "type": "pixel_rect", "required": true, "default": null, "canonical_order": 1, "constraints": ["nonempty", "half-open"] },
         { "name": "planes", "type": "list<floating_plane>", "required": true, "default": null, "canonical_order": 2, "constraints": ["bounded:1..4096", "source-order", "raster-only-before-vector-owner"] }
+      ]
+    },
+    {
+      "name": "vector_cubic_segment",
+      "fields": [
+        { "name": "p0", "type": "point", "required": true, "default": null, "canonical_order": 0, "constraints": ["document-q16"] },
+        { "name": "p1", "type": "point", "required": true, "default": null, "canonical_order": 1, "constraints": ["document-q16"] },
+        { "name": "p2", "type": "point", "required": true, "default": null, "canonical_order": 2, "constraints": ["document-q16"] },
+        { "name": "p3", "type": "point", "required": true, "default": null, "canonical_order": 3, "constraints": ["document-q16"] },
+        { "name": "width_start", "type": "q16", "required": true, "default": null, "canonical_order": 4, "constraints": ["positive", "maximum:4096"] },
+        { "name": "width_end", "type": "q16", "required": true, "default": null, "canonical_order": 5, "constraints": ["positive", "maximum:4096"] }
+      ]
+    },
+    {
+      "name": "vector_path_input",
+      "fields": [
+        { "name": "segments", "type": "list<vector_cubic_segment>", "required": true, "default": null, "canonical_order": 0, "constraints": ["bounded:1..262144", "source-order", "contiguous"] },
+        { "name": "color", "type": "pixel_value", "required": true, "default": null, "canonical_order": 1, "constraints": ["rgba-only", "exact-native-depth"] },
+        { "name": "closed", "type": "bool", "required": true, "default": null, "canonical_order": 2, "constraints": [] }
+      ]
+    },
+    {
+      "name": "vector_width",
+      "fields": [
+        { "name": "operation", "type": "vector_width_operation", "required": true, "default": null, "canonical_order": 0, "constraints": [] },
+        { "name": "value", "type": "q16", "required": true, "default": null, "canonical_order": 1, "constraints": ["positive", "maximum:4096"] }
+      ]
+    },
+    {
+      "name": "annotation_point_milli",
+      "fields": [
+        { "name": "x_milli", "type": "i32", "required": true, "default": null, "canonical_order": 0, "constraints": ["document-milli-pixel"] },
+        { "name": "y_milli", "type": "i32", "required": true, "default": null, "canonical_order": 1, "constraints": ["document-milli-pixel"] }
+      ]
+    },
+    {
+      "name": "annotation_object_input",
+      "fields": [
+        { "name": "layer_id", "type": "layer_ref", "required": true, "default": null, "canonical_order": 0, "constraints": ["nonzero", "text-or-annotation-layer"] },
+        { "name": "kind", "type": "annotation_kind", "required": true, "default": null, "canonical_order": 1, "constraints": [] },
+        { "name": "output", "type": "annotation_output", "required": true, "default": null, "canonical_order": 2, "constraints": [] },
+        { "name": "bounds", "type": "pixel_rect", "required": true, "default": null, "canonical_order": 3, "constraints": ["positive", "document-bounded"] },
+        { "name": "font_family_hint", "type": "string", "required": true, "default": null, "canonical_order": 4, "constraints": ["utf8-bytes:0..1024"] },
+        { "name": "font_size_milli", "type": "u32", "required": true, "default": null, "canonical_order": 5, "constraints": ["variant-exact", "0..1000000"] },
+        { "name": "style_flags", "type": "u32", "required": true, "default": null, "canonical_order": 6, "constraints": ["mask:0x00000007"] },
+        { "name": "color", "type": "pixel_value", "required": true, "default": null, "canonical_order": 7, "constraints": ["rgba-only", "exact-depth"] },
+        { "name": "text", "type": "string", "required": true, "default": null, "canonical_order": 8, "constraints": ["utf8-bytes:0..65536", "variant-exact"] },
+        { "name": "points", "type": "list<annotation_point_milli>", "required": true, "default": null, "canonical_order": 9, "constraints": ["bounded:0..65536", "source-order", "variant-exact"] },
+        { "name": "stroke_width_milli", "type": "u32", "required": true, "default": null, "canonical_order": 10, "constraints": ["variant-exact", "0..1000000"] }
+      ]
+    },
+    {
+      "name": "annotation_edit",
+      "fields": [
+        { "name": "operation", "type": "u32", "required": true, "default": null, "canonical_order": 0, "constraints": ["closed:1=create,2=update,3=move,4=delete"] },
+        { "name": "object_id", "type": "nullable<annotation_ref>", "required": true, "default": null, "canonical_order": 1, "constraints": ["variant-exact"] },
+        { "name": "input", "type": "nullable<annotation_object_input>", "required": true, "default": null, "canonical_order": 2, "constraints": ["variant-exact"] },
+        { "name": "delta_x", "type": "i32", "required": true, "default": null, "canonical_order": 3, "constraints": ["variant-exact", "document-pixel"] },
+        { "name": "delta_y", "type": "i32", "required": true, "default": null, "canonical_order": 4, "constraints": ["variant-exact", "document-pixel"] }
+      ]
+    },
+    {
+      "name": "shooting_frame_input",
+      "fields": [
+        { "name": "center_x_milli", "type": "i64", "required": true, "default": null, "canonical_order": 0, "constraints": ["document-milli-pixel", "bounded"] },
+        { "name": "center_y_milli", "type": "i64", "required": true, "default": null, "canonical_order": 1, "constraints": ["document-milli-pixel", "bounded"] },
+        { "name": "width_milli", "type": "u64", "required": true, "default": null, "canonical_order": 2, "constraints": ["positive", "bounded"] },
+        { "name": "height_milli", "type": "u64", "required": true, "default": null, "canonical_order": 3, "constraints": ["positive", "bounded"] },
+        { "name": "rotation_turns", "type": "u32", "required": true, "default": null, "canonical_order": 4, "constraints": ["binary-turns"] },
+        { "name": "anchor", "type": "shooting_frame_anchor", "required": true, "default": null, "canonical_order": 5, "constraints": [] },
+        { "name": "visible", "type": "bool", "required": true, "default": null, "canonical_order": 6, "constraints": [] },
+        { "name": "include_in_instruction_export", "type": "bool", "required": true, "default": null, "canonical_order": 7, "constraints": [] }
+      ]
+    },
+    {
+      "name": "shooting_frame_edit",
+      "fields": [
+        { "name": "operation", "type": "u32", "required": true, "default": null, "canonical_order": 0, "constraints": ["closed:1=create,2=update,3=delete"] },
+        { "name": "frame_id", "type": "nullable<shooting_frame_ref>", "required": true, "default": null, "canonical_order": 1, "constraints": ["variant-exact"] },
+        { "name": "input", "type": "nullable<shooting_frame_input>", "required": true, "default": null, "canonical_order": 2, "constraints": ["variant-exact"] }
+      ]
+    },
+    {
+      "name": "vanishing_point_input",
+      "fields": [
+        { "name": "layer_id", "type": "layer_ref", "required": true, "default": null, "canonical_order": 0, "constraints": ["nonzero", "vanishing-point-layer"] },
+        { "name": "x_milli", "type": "i64", "required": true, "default": null, "canonical_order": 1, "constraints": ["document-milli-pixel", "bounded"] },
+        { "name": "y_milli", "type": "i64", "required": true, "default": null, "canonical_order": 2, "constraints": ["document-milli-pixel", "bounded"] },
+        { "name": "interval_milli_degrees", "type": "u32", "required": true, "default": null, "canonical_order": 3, "constraints": ["1000..180000"] },
+        { "name": "angle_milli_degrees", "type": "u32", "required": true, "default": null, "canonical_order": 4, "constraints": ["normalize-modulo:180000"] },
+        { "name": "color", "type": "pixel_value", "required": true, "default": null, "canonical_order": 5, "constraints": ["rgba-only", "exact-depth"] },
+        { "name": "opacity_milli", "type": "u32", "required": true, "default": null, "canonical_order": 6, "constraints": ["0..1000"] },
+        { "name": "visible", "type": "bool", "required": true, "default": null, "canonical_order": 7, "constraints": [] }
+      ]
+    },
+    {
+      "name": "vanishing_point_edit",
+      "fields": [
+        { "name": "operation", "type": "u32", "required": true, "default": null, "canonical_order": 0, "constraints": ["closed:1=create,2=update,3=delete,4=delete_all"] },
+        { "name": "point_id", "type": "nullable<vanishing_point_ref>", "required": true, "default": null, "canonical_order": 1, "constraints": ["variant-exact"] },
+        { "name": "input", "type": "nullable<vanishing_point_input>", "required": true, "default": null, "canonical_order": 2, "constraints": ["variant-exact"] }
       ]
     }
   ],
@@ -907,7 +1012,7 @@
       ],
       "results": [],
       "portability": { "rules": [], "default": { "class": "requires_binding", "required_preconditions": ["semantic_target", "state_coupled_raster", "state_coupled_selection"] } },
-      "work": { "max_invocations": { "op": "u64", "value": 1 }, "max_output_ids": { "op": "u64", "value": 0 }, "max_asset_bytes": { "op": "asset_field", "asset_argument": "alpha", "field": "logical_payload_bytes" }, "max_work_units": { "op": "asset_field", "asset_argument": "alpha", "field": "logical_element_count" }, "max_output_growth": { "op": "u64", "value": 0 } },
+      "work": { "max_invocations": { "op": "u64", "value": 1 }, "max_output_ids": { "op": "u64", "value": 0 }, "max_asset_bytes": { "op": "field", "path": ["alpha", "logical_payload_bytes"], "type": "u64" }, "max_work_units": { "op": "field", "path": ["alpha", "logical_element_count"], "type": "u64" }, "max_output_growth": { "op": "u64", "value": 0 } },
       "cancellation_boundary": "before_primitive",
       "editor": { "family": "gesture_alpha_adjustment", "legacy_projection": null, "allow_skip_dependents": false },
       "owner_milestone": "M18B",
@@ -1189,6 +1294,125 @@
       "portability": { "rules": [], "default": { "class": "requires_binding", "required_preconditions": ["semantic_target", "state_coupled_raster_or_vector", "floating_asset_payload"] } },
       "work": { "max_invocations": { "op": "u64", "value": 1 }, "max_output_ids": { "op": "u64", "value": 1 }, "max_asset_bytes": { "op": "u64", "value": 536870912 }, "max_work_units": { "op": "u64", "value": 1100000000 }, "max_output_growth": { "op": "u64", "value": 67108864 } },
       "cancellation_boundary": "before_primitive", "editor": { "family": "selection_floating", "legacy_projection": null, "allow_skip_dependents": false }, "owner_milestone": "M19", "equivalence_test": "INKS-EQ-0059"
+    },
+    {
+      "name": "vector_add_path", "primitive_id": "0x00080001", "primitive_schema_version": 2, "replay_epoch": 23, "semantics_revision": 2,
+      "arguments": [
+        { "name": "plane_id", "type": "plane_ref", "required": true, "default": null, "nullable": false, "bound": ["nonzero", "vector-stroke-plane"], "canonical_order": 0, "stable_id_role": { "name": "target_plane", "namespace": "document_stable", "cardinality": "scalar" }, "asset_role": null },
+        { "name": "input", "type": "vector_path_input", "required": true, "default": null, "nullable": false, "bound": ["canonical-q16", "exact-native-depth", "source-order"], "canonical_order": 1, "stable_id_role": null, "asset_role": null }
+      ],
+      "results": [{ "name": "paths", "type": "list<vector_path_ref>", "availability": "always_on_success", "cardinality": "ordered_list", "namespace": "document_stable", "owner_role": "vector_path", "output_id_ordinal": 0, "canonical_order": 0 }],
+      "portability": { "rules": [], "default": { "class": "requires_binding", "required_preconditions": ["semantic_target"] } },
+      "work": { "max_invocations": { "op": "u64", "value": 1 }, "max_output_ids": { "op": "u64", "value": 1 }, "max_asset_bytes": { "op": "checked_add", "left": { "op": "checked_multiply", "left": { "op": "list_length", "path": ["input", "segments"], "maximum": 262144 }, "right": { "op": "u64", "value": 48 } }, "right": { "op": "u64", "value": 9 } }, "max_work_units": { "op": "list_length", "path": ["input", "segments"], "maximum": 262144 }, "max_output_growth": { "op": "u64", "value": 1 } },
+      "cancellation_boundary": "before_primitive", "editor": { "family": "vector", "legacy_projection": null, "allow_skip_dependents": false }, "owner_milestone": "M20", "equivalence_test": "INKS-EQ-0063"
+    },
+    {
+      "name": "vector_add_fill", "primitive_id": "0x00080002", "primitive_schema_version": 2, "replay_epoch": 23, "semantics_revision": 2,
+      "arguments": [
+        { "name": "plane_id", "type": "plane_ref", "required": true, "default": null, "nullable": false, "bound": ["nonzero", "vector-fill-plane"], "canonical_order": 0, "stable_id_role": { "name": "target_plane", "namespace": "document_stable", "cardinality": "scalar" }, "asset_role": null },
+        { "name": "boundary_path_ids", "type": "list<vector_path_ref>", "required": true, "default": null, "nullable": false, "bound": ["bounded:1..262144", "unique", "closed", "same-vector-layer", "source-order"], "canonical_order": 1, "stable_id_role": { "name": "boundary_paths", "namespace": "document_stable", "cardinality": "ordered_list" }, "asset_role": null },
+        { "name": "color", "type": "pixel_value", "required": true, "default": null, "nullable": false, "bound": ["rgba-only", "exact-native-depth"], "canonical_order": 2, "stable_id_role": null, "asset_role": null }
+      ],
+      "results": [{ "name": "fills", "type": "list<vector_fill_ref>", "availability": "always_on_success", "cardinality": "ordered_list", "namespace": "document_stable", "owner_role": "vector_fill", "output_id_ordinal": 0, "canonical_order": 0 }],
+      "portability": { "rules": [], "default": { "class": "requires_binding", "required_preconditions": ["semantic_target", "state_coupled_vector_topology"] } },
+      "work": { "max_invocations": { "op": "u64", "value": 1 }, "max_output_ids": { "op": "u64", "value": 1 }, "max_asset_bytes": { "op": "checked_add", "left": { "op": "checked_multiply", "left": { "op": "list_length", "path": ["boundary_path_ids"], "maximum": 262144 }, "right": { "op": "u64", "value": 8 } }, "right": { "op": "u64", "value": 8 } }, "max_work_units": { "op": "list_length", "path": ["boundary_path_ids"], "maximum": 262144 }, "max_output_growth": { "op": "u64", "value": 1 } },
+      "cancellation_boundary": "before_primitive", "editor": { "family": "vector", "legacy_projection": null, "allow_skip_dependents": false }, "owner_milestone": "M20", "equivalence_test": "INKS-EQ-0064"
+    },
+    {
+      "name": "vector_erase", "primitive_id": "0x00080003", "primitive_schema_version": 2, "replay_epoch": 23, "semantics_revision": 2,
+      "arguments": [
+        { "name": "plane_id", "type": "plane_ref", "required": true, "default": null, "nullable": false, "bound": ["nonzero", "vector-stroke-plane"], "canonical_order": 0, "stable_id_role": { "name": "target_plane", "namespace": "document_stable", "cardinality": "scalar" }, "asset_role": null },
+        { "name": "point", "type": "point", "required": true, "default": null, "nullable": false, "bound": ["document-q16"], "canonical_order": 1, "stable_id_role": null, "asset_role": null },
+        { "name": "radius", "type": "q16", "required": true, "default": null, "nullable": false, "bound": ["positive", "maximum:4096"], "canonical_order": 2, "stable_id_role": null, "asset_role": null },
+        { "name": "mode", "type": "vector_erase_mode", "required": true, "default": null, "nullable": false, "bound": [], "canonical_order": 3, "stable_id_role": null, "asset_role": null }
+      ], "results": [],
+      "portability": { "rules": [], "default": { "class": "strict_source_only", "required_preconditions": ["semantic_target", "state_coupled_vector_geometry"] } },
+      "work": { "max_invocations": { "op": "u64", "value": 1 }, "max_output_ids": { "op": "u64", "value": 131072 }, "max_asset_bytes": { "op": "u64", "value": 0 }, "max_work_units": { "op": "u64", "value": 67108864 }, "max_output_growth": { "op": "u64", "value": 65536 } },
+      "cancellation_boundary": "before_primitive", "editor": { "family": "vector", "legacy_projection": null, "allow_skip_dependents": false }, "owner_milestone": "M20", "equivalence_test": "INKS-EQ-0065"
+    },
+    {
+      "name": "vector_connect", "primitive_id": "0x00080004", "primitive_schema_version": 2, "replay_epoch": 23, "semantics_revision": 2,
+      "arguments": [
+        { "name": "plane_id", "type": "plane_ref", "required": true, "default": null, "nullable": false, "bound": ["nonzero", "vector-stroke-plane"], "canonical_order": 0, "stable_id_role": { "name": "target_plane", "namespace": "document_stable", "cardinality": "scalar" }, "asset_role": null },
+        { "name": "maximum_gap", "type": "q16", "required": true, "default": null, "nullable": false, "bound": ["positive", "maximum:4096"], "canonical_order": 1, "stable_id_role": null, "asset_role": null }
+      ],
+      "results": [{ "name": "paths", "type": "list<vector_path_ref>", "availability": "only_on_change", "cardinality": "ordered_list", "namespace": "document_stable", "owner_role": "vector_path", "output_id_ordinal": 0, "canonical_order": 0 }],
+      "portability": { "rules": [], "default": { "class": "strict_source_only", "required_preconditions": ["semantic_target", "state_coupled_vector_geometry"] } },
+      "work": { "max_invocations": { "op": "u64", "value": 1 }, "max_output_ids": { "op": "u64", "value": 1 }, "max_asset_bytes": { "op": "u64", "value": 0 }, "max_work_units": { "op": "u64", "value": 65536 }, "max_output_growth": { "op": "u64", "value": 1 } },
+      "cancellation_boundary": "before_primitive", "editor": { "family": "vector", "legacy_projection": null, "allow_skip_dependents": false }, "owner_milestone": "M20", "equivalence_test": "INKS-EQ-0066"
+    },
+    {
+      "name": "vector_correct_width", "primitive_id": "0x00080005", "primitive_schema_version": 2, "replay_epoch": 23, "semantics_revision": 2,
+      "arguments": [
+        { "name": "path_ids", "type": "list<vector_path_ref>", "required": true, "default": null, "nullable": false, "bound": ["bounded:1..65536", "unique", "source-order"], "canonical_order": 0, "stable_id_role": { "name": "target_paths", "namespace": "document_stable", "cardinality": "ordered_list" }, "asset_role": null },
+        { "name": "width", "type": "vector_width", "required": true, "default": null, "nullable": false, "bound": ["canonical-q16", "variant-exact"], "canonical_order": 1, "stable_id_role": null, "asset_role": null }
+      ], "results": [],
+      "portability": { "rules": [], "default": { "class": "requires_binding", "required_preconditions": ["semantic_target", "state_coupled_vector_geometry"] } },
+      "work": { "max_invocations": { "op": "u64", "value": 1 }, "max_output_ids": { "op": "u64", "value": 0 }, "max_asset_bytes": { "op": "u64", "value": 0 }, "max_work_units": { "op": "list_length", "path": ["path_ids"], "maximum": 65536 }, "max_output_growth": { "op": "u64", "value": 0 } },
+      "cancellation_boundary": "before_primitive", "editor": { "family": "vector", "legacy_projection": "line_width", "allow_skip_dependents": false }, "owner_milestone": "M20", "equivalence_test": "INKS-EQ-0067"
+    },
+    {
+      "name": "rasterize_vector_layer", "primitive_id": "0x00080010", "primitive_schema_version": 2, "replay_epoch": 23, "semantics_revision": 2,
+      "arguments": [
+        { "name": "layer_id", "type": "layer_ref", "required": true, "default": null, "nullable": false, "bound": ["nonzero", "vector-coloring-layer"], "canonical_order": 0, "stable_id_role": { "name": "source_layer", "namespace": "document_stable", "cardinality": "scalar" }, "asset_role": null },
+        { "name": "antialias", "type": "bool", "required": true, "default": null, "nullable": false, "bound": [], "canonical_order": 1, "stable_id_role": null, "asset_role": null },
+        { "name": "name", "type": "string", "required": true, "default": null, "nullable": false, "bound": ["utf8-bytes:1..1024"], "canonical_order": 2, "stable_id_role": null, "asset_role": null }
+      ],
+      "results": [{ "name": "layer", "type": "layer_ref", "availability": "always_on_success", "cardinality": "scalar", "namespace": "document_stable", "owner_role": "layer", "output_id_ordinal": 0, "canonical_order": 0 }],
+      "portability": { "rules": [], "default": { "class": "strict_source_only", "required_preconditions": ["semantic_target", "state_coupled_vector_geometry"] } },
+      "work": { "max_invocations": { "op": "u64", "value": 1 }, "max_output_ids": { "op": "u64", "value": 2 }, "max_asset_bytes": { "op": "u64", "value": 0 }, "max_work_units": { "op": "u64", "value": 16777216 }, "max_output_growth": { "op": "u64", "value": 16777216 } },
+      "cancellation_boundary": "before_primitive", "editor": { "family": "vector", "legacy_projection": null, "allow_skip_dependents": false }, "owner_milestone": "M20", "equivalence_test": "INKS-EQ-0068"
+    },
+    {
+      "name": "vectorize_raster_plane", "primitive_id": "0x00080011", "primitive_schema_version": 2, "replay_epoch": 23, "semantics_revision": 2,
+      "arguments": [
+        { "name": "source_plane_id", "type": "plane_ref", "required": true, "default": null, "nullable": false, "bound": ["nonzero", "rgba8-raster-plane"], "canonical_order": 0, "stable_id_role": { "name": "source_plane", "namespace": "document_stable", "cardinality": "scalar" }, "asset_role": null },
+        { "name": "target_vector_layer_id", "type": "layer_ref", "required": true, "default": null, "nullable": false, "bound": ["nonzero", "vector-coloring-layer"], "canonical_order": 1, "stable_id_role": { "name": "target_layer", "namespace": "document_stable", "cardinality": "scalar" }, "asset_role": null },
+        { "name": "alpha_threshold", "type": "u32", "required": true, "default": null, "nullable": false, "bound": ["0..255", "exact-native-alpha8"], "canonical_order": 2, "stable_id_role": null, "asset_role": null }
+      ],
+      "results": [{ "name": "fills", "type": "list<vector_fill_ref>", "availability": "always_on_success", "cardinality": "ordered_list", "namespace": "document_stable", "owner_role": "vector_fill", "output_id_ordinal": 0, "canonical_order": 0 }],
+      "portability": { "rules": [], "default": { "class": "requires_binding", "required_preconditions": ["semantic_target", "state_coupled_raster", "state_coupled_vector_topology"] } },
+      "work": { "max_invocations": { "op": "u64", "value": 1 }, "max_output_ids": { "op": "u64", "value": 131072 }, "max_asset_bytes": { "op": "u64", "value": 0 }, "max_work_units": { "op": "u64", "value": 67108864 }, "max_output_growth": { "op": "u64", "value": 131072 } },
+      "cancellation_boundary": "before_primitive", "editor": { "family": "vector", "legacy_projection": null, "allow_skip_dependents": false }, "owner_milestone": "M20", "equivalence_test": "INKS-EQ-0069"
+    },
+    {
+      "name": "vectorize_raster_plane_into_new_layer", "primitive_id": "0x00080012", "primitive_schema_version": 2, "replay_epoch": 23, "semantics_revision": 2,
+      "arguments": [
+        { "name": "source_plane_id", "type": "plane_ref", "required": true, "default": null, "nullable": false, "bound": ["nonzero", "rgba8-raster-plane"], "canonical_order": 0, "stable_id_role": { "name": "source_plane", "namespace": "document_stable", "cardinality": "scalar" }, "asset_role": null },
+        { "name": "alpha_threshold", "type": "u32", "required": true, "default": null, "nullable": false, "bound": ["0..255", "exact-native-alpha8"], "canonical_order": 1, "stable_id_role": null, "asset_role": null },
+        { "name": "name", "type": "string", "required": true, "default": null, "nullable": false, "bound": ["utf8-bytes:1..1024"], "canonical_order": 2, "stable_id_role": null, "asset_role": null }
+      ],
+      "results": [
+        { "name": "layer", "type": "layer_ref", "availability": "only_on_change", "cardinality": "scalar", "namespace": "document_stable", "owner_role": "layer", "output_id_ordinal": 0, "canonical_order": 0 },
+        { "name": "fills", "type": "list<vector_fill_ref>", "availability": "only_on_change", "cardinality": "ordered_list", "namespace": "document_stable", "owner_role": "vector_fill", "output_id_ordinal": 1, "canonical_order": 1 }
+      ],
+      "portability": { "rules": [], "default": { "class": "requires_binding", "required_preconditions": ["semantic_target", "state_coupled_raster"] } },
+      "work": { "max_invocations": { "op": "u64", "value": 1 }, "max_output_ids": { "op": "u64", "value": 131076 }, "max_asset_bytes": { "op": "u64", "value": 0 }, "max_work_units": { "op": "u64", "value": 67108864 }, "max_output_growth": { "op": "u64", "value": 131076 } },
+      "cancellation_boundary": "before_primitive", "editor": { "family": "vector", "legacy_projection": null, "allow_skip_dependents": false }, "owner_milestone": "M20", "equivalence_test": "INKS-EQ-0070"
+    },
+    {
+      "name": "edit_annotations", "primitive_id": "0x00020040", "primitive_schema_version": 2, "replay_epoch": 23, "semantics_revision": 1,
+      "arguments": [{ "name": "edits", "type": "list<annotation_edit>", "required": true, "default": null, "nullable": false, "bound": ["bounded:1..4096", "source-order", "variant-exact"], "canonical_order": 0, "stable_id_role": { "name": "annotation_edits", "namespace": "document_stable", "cardinality": "ordered_list" }, "asset_role": null }],
+      "results": [{ "name": "annotations", "type": "list<annotation_ref>", "availability": "always_on_success", "cardinality": "ordered_list", "namespace": "document_stable", "owner_role": "annotation", "output_id_ordinal": 0, "canonical_order": 0 }],
+      "portability": { "rules": [{ "when": { "op": "greater", "left": { "op": "bounded_sum", "path": ["edits"], "maximum_items": 4096, "body": { "op": "conditional", "condition": { "op": "equal", "left": { "op": "field", "path": ["operation"], "type": "u64" }, "right": { "op": "u64", "value": 3 } }, "when_true": { "op": "u64", "value": 1 }, "when_false": { "op": "u64", "value": 0 } } }, "right": { "op": "u64", "value": 0 } }, "result": { "class": "strict_source_only", "required_preconditions": ["exact_document_revision", "state_coupled_annotation_geometry"] } }], "default": { "class": "requires_binding", "required_preconditions": ["semantic_target"] } },
+      "work": { "max_invocations": { "op": "u64", "value": 1 }, "max_output_ids": { "op": "bounded_sum", "path": ["edits"], "maximum_items": 4096, "body": { "op": "conditional", "condition": { "op": "equal", "left": { "op": "field", "path": ["operation"], "type": "u64" }, "right": { "op": "u64", "value": 1 } }, "when_true": { "op": "u64", "value": 1 }, "when_false": { "op": "u64", "value": 0 } } }, "max_asset_bytes": { "op": "bounded_sum", "path": ["edits"], "maximum_items": 4096, "body": { "op": "conditional", "condition": { "op": "or", "left": { "op": "equal", "left": { "op": "field", "path": ["operation"], "type": "u64" }, "right": { "op": "u64", "value": 1 } }, "right": { "op": "equal", "left": { "op": "field", "path": ["operation"], "type": "u64" }, "right": { "op": "u64", "value": 2 } } }, "when_true": { "op": "checked_add", "left": { "op": "u64", "value": 66560 }, "right": { "op": "checked_multiply", "left": { "op": "list_length", "path": ["input", "points"], "maximum": 65536 }, "right": { "op": "u64", "value": 8 } } }, "when_false": { "op": "u64", "value": 0 } } }, "max_work_units": { "op": "bounded_sum", "path": ["edits"], "maximum_items": 4096, "body": { "op": "conditional", "condition": { "op": "or", "left": { "op": "equal", "left": { "op": "field", "path": ["operation"], "type": "u64" }, "right": { "op": "u64", "value": 1 } }, "right": { "op": "equal", "left": { "op": "field", "path": ["operation"], "type": "u64" }, "right": { "op": "u64", "value": 2 } } }, "when_true": { "op": "max", "left": { "op": "u64", "value": 1 }, "right": { "op": "list_length", "path": ["input", "points"], "maximum": 65536 } }, "when_false": { "op": "u64", "value": 1 } } }, "max_output_growth": { "op": "bounded_sum", "path": ["edits"], "maximum_items": 4096, "body": { "op": "conditional", "condition": { "op": "equal", "left": { "op": "field", "path": ["operation"], "type": "u64" }, "right": { "op": "u64", "value": 1 } }, "when_true": { "op": "u64", "value": 1 }, "when_false": { "op": "u64", "value": 0 } } } },
+      "cancellation_boundary": "before_primitive", "editor": { "family": "annotation_frame_vanishing", "legacy_projection": null, "allow_skip_dependents": false }, "owner_milestone": "M21", "equivalence_test": "INKS-EQ-0018"
+    },
+    {
+      "name": "edit_shooting_frame", "primitive_id": "0x00020050", "primitive_schema_version": 2, "replay_epoch": 23, "semantics_revision": 1,
+      "arguments": [{ "name": "edit", "type": "shooting_frame_edit", "required": true, "default": null, "nullable": false, "bound": ["variant-exact", "singleton"], "canonical_order": 0, "stable_id_role": { "name": "shooting_frame_edit", "namespace": "document_stable", "cardinality": "scalar" }, "asset_role": null }],
+      "results": [{ "name": "shooting_frames", "type": "list<shooting_frame_ref>", "availability": "always_on_success", "cardinality": "ordered_list", "namespace": "document_stable", "owner_role": "shooting_frame", "output_id_ordinal": 0, "canonical_order": 0 }],
+      "portability": { "rules": [{ "when": { "op": "equal", "left": { "op": "field", "path": ["edit", "operation"], "type": "u64" }, "right": { "op": "u64", "value": 1 } }, "result": { "class": "portable", "required_preconditions": ["shooting_frame_absent"] } }], "default": { "class": "requires_binding", "required_preconditions": ["semantic_target"] } },
+      "work": { "max_invocations": { "op": "u64", "value": 1 }, "max_output_ids": { "op": "conditional", "condition": { "op": "equal", "left": { "op": "field", "path": ["edit", "operation"], "type": "u64" }, "right": { "op": "u64", "value": 3 } }, "when_true": { "op": "u64", "value": 0 }, "when_false": { "op": "u64", "value": 1 } }, "max_asset_bytes": { "op": "u64", "value": 56 }, "max_work_units": { "op": "u64", "value": 1 }, "max_output_growth": { "op": "conditional", "condition": { "op": "equal", "left": { "op": "field", "path": ["edit", "operation"], "type": "u64" }, "right": { "op": "u64", "value": 1 } }, "when_true": { "op": "u64", "value": 1 }, "when_false": { "op": "u64", "value": 0 } } },
+      "cancellation_boundary": "before_primitive", "editor": { "family": "annotation_frame_vanishing", "legacy_projection": null, "allow_skip_dependents": false }, "owner_milestone": "M21", "equivalence_test": "INKS-EQ-0019"
+    },
+    {
+      "name": "edit_vanishing_points", "primitive_id": "0x00020060", "primitive_schema_version": 2, "replay_epoch": 23, "semantics_revision": 1,
+      "arguments": [{ "name": "edits", "type": "list<vanishing_point_edit>", "required": true, "default": null, "nullable": false, "bound": ["bounded:1..1024", "source-order", "delete-all-exclusive", "variant-exact"], "canonical_order": 0, "stable_id_role": { "name": "vanishing_point_edits", "namespace": "document_stable", "cardinality": "ordered_list" }, "asset_role": null }],
+      "results": [{ "name": "vanishing_points", "type": "list<vanishing_point_ref>", "availability": "always_on_success", "cardinality": "ordered_list", "namespace": "document_stable", "owner_role": "vanishing_point", "output_id_ordinal": 0, "canonical_order": 0 }],
+      "portability": { "rules": [{ "when": { "op": "greater", "left": { "op": "bounded_sum", "path": ["edits"], "maximum_items": 1024, "body": { "op": "conditional", "condition": { "op": "equal", "left": { "op": "field", "path": ["operation"], "type": "u64" }, "right": { "op": "u64", "value": 4 } }, "when_true": { "op": "u64", "value": 1 }, "when_false": { "op": "u64", "value": 0 } } }, "right": { "op": "u64", "value": 0 } }, "result": { "class": "strict_source_only", "required_preconditions": ["exact_document_revision", "state_coupled_vanishing_points"] } }], "default": { "class": "requires_binding", "required_preconditions": ["semantic_target"] } },
+      "work": { "max_invocations": { "op": "u64", "value": 1 }, "max_output_ids": { "op": "bounded_sum", "path": ["edits"], "maximum_items": 1024, "body": { "op": "conditional", "condition": { "op": "or", "left": { "op": "equal", "left": { "op": "field", "path": ["operation"], "type": "u64" }, "right": { "op": "u64", "value": 1 } }, "right": { "op": "equal", "left": { "op": "field", "path": ["operation"], "type": "u64" }, "right": { "op": "u64", "value": 2 } } }, "when_true": { "op": "u64", "value": 1 }, "when_false": { "op": "u64", "value": 0 } } }, "max_asset_bytes": { "op": "checked_multiply", "left": { "op": "list_length", "path": ["edits"], "maximum": 1024 }, "right": { "op": "u64", "value": 48 } }, "max_work_units": { "op": "list_length", "path": ["edits"], "maximum": 1024 }, "max_output_growth": { "op": "bounded_sum", "path": ["edits"], "maximum_items": 1024, "body": { "op": "conditional", "condition": { "op": "equal", "left": { "op": "field", "path": ["operation"], "type": "u64" }, "right": { "op": "u64", "value": 1 } }, "when_true": { "op": "u64", "value": 1 }, "when_false": { "op": "u64", "value": 0 } } } },
+      "cancellation_boundary": "before_primitive", "editor": { "family": "annotation_frame_vanishing", "legacy_projection": null, "allow_skip_dependents": false }, "owner_milestone": "M21", "equivalence_test": "INKS-EQ-0020"
     }
   ]
 }

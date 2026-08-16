@@ -1,14 +1,14 @@
 use super::assets::{ScriptAssetError, external_asset_path};
 use super::catalog::{
-    CatalogAssetMetadata, CatalogAssetSummary, CatalogCommandDomain, CatalogEditorMetadata,
-    CatalogEntry, CatalogError, CatalogNumericExpression, CatalogPortabilityEvaluator,
-    CatalogResultMetadata, CatalogWorkEstimate, CatalogWorkFormula, InkScriptCatalogView,
-    InkScriptPortability, InkScriptPortabilityClass,
+    CatalogAssetMetadata, CatalogAssetSummary, CatalogBooleanExpression, CatalogCommandDomain,
+    CatalogComparison, CatalogEditorMetadata, CatalogEntry, CatalogError, CatalogNumericExpression,
+    CatalogPortabilityEvaluator, CatalogResultMetadata, CatalogWorkEstimate, CatalogWorkFormula,
+    InkScriptCatalogView, InkScriptPortability, InkScriptPortabilityClass,
 };
 use crate::primitive::{
-    inkscript, inkscript_batch, inkscript_document_tree, inkscript_fill_gradient,
-    inkscript_gesture_adjustment, inkscript_metadata, inkscript_selection_floating,
-    inkscript_stroke_geometry,
+    inkscript, inkscript_annotation_frame, inkscript_batch, inkscript_document_tree,
+    inkscript_fill_gradient, inkscript_gesture_adjustment, inkscript_metadata,
+    inkscript_selection_floating, inkscript_stroke_geometry, inkscript_vector,
 };
 use inkpod_format::{
     InkScriptDeclarationModel, InkScriptEnvelopeErrorCode, InkScriptInputDeclarationKind,
@@ -279,6 +279,8 @@ impl ScriptSchemas {
                 .chain(inkscript_gesture_adjustment::GESTURE_ADJUSTMENT_ENUMS)
                 .chain(inkscript_selection_floating::SELECTION_FLOATING_ENUMS)
                 .chain(inkscript_stroke_geometry::STROKE_GEOMETRY_ENUMS)
+                .chain(inkscript_vector::VECTOR_ENUMS)
+                .chain(inkscript_annotation_frame::ANNOTATION_FRAME_ENUMS)
                 .copied()
                 .collect(),
             constructors: inkscript_document_tree::DOCUMENT_TREE_CONSTRUCTORS
@@ -295,6 +297,8 @@ impl ScriptSchemas {
                 .chain(inkscript_gesture_adjustment::GESTURE_ADJUSTMENT_RECORDS)
                 .chain(inkscript_selection_floating::SELECTION_FLOATING_RECORDS)
                 .chain(inkscript_stroke_geometry::STROKE_GEOMETRY_RECORDS)
+                .chain(inkscript_vector::VECTOR_RECORDS)
+                .chain(inkscript_annotation_frame::ANNOTATION_FRAME_RECORDS)
                 .copied()
                 .collect(),
             commands: inkscript::LEGACY_SIMPLE_COMMANDS
@@ -306,6 +310,8 @@ impl ScriptSchemas {
                 .chain(inkscript_gesture_adjustment::GESTURE_ADJUSTMENT_COMMANDS)
                 .chain(inkscript_selection_floating::SELECTION_FLOATING_COMMANDS)
                 .chain(inkscript_stroke_geometry::STROKE_GEOMETRY_COMMANDS)
+                .chain(inkscript_vector::VECTOR_COMMANDS)
+                .chain(inkscript_annotation_frame::ANNOTATION_FRAME_COMMANDS)
                 .copied()
                 .collect(),
         }
@@ -539,6 +545,124 @@ pub(super) fn catalog(
                 ],
                 Vec::new(),
             ),
+            "vector_add_path" => vector_bound(
+                CatalogWorkFormula {
+                    max_invocations: CatalogNumericExpression::Literal(1),
+                    max_output_ids: CatalogNumericExpression::Literal(1),
+                    max_asset_bytes: CatalogNumericExpression::CheckedAdd(
+                        Box::new(CatalogNumericExpression::CheckedMultiply(
+                            Box::new(CatalogNumericExpression::ListLength {
+                                path: vec!["input", "segments"],
+                                maximum: 262_144,
+                            }),
+                            Box::new(CatalogNumericExpression::Literal(48)),
+                        )),
+                        Box::new(CatalogNumericExpression::Literal(9)),
+                    ),
+                    max_work_units: CatalogNumericExpression::ListLength {
+                        path: vec!["input", "segments"],
+                        maximum: 262_144,
+                    },
+                    max_output_growth: CatalogNumericExpression::Literal(1),
+                },
+                &["semantic_target"],
+                ordered_entity_result("paths", "vector_path", 0),
+            ),
+            "vector_add_fill" => vector_bound(
+                CatalogWorkFormula {
+                    max_invocations: CatalogNumericExpression::Literal(1),
+                    max_output_ids: CatalogNumericExpression::Literal(1),
+                    max_asset_bytes: CatalogNumericExpression::CheckedAdd(
+                        Box::new(CatalogNumericExpression::CheckedMultiply(
+                            Box::new(CatalogNumericExpression::ListLength {
+                                path: vec!["boundary_path_ids"],
+                                maximum: 262_144,
+                            }),
+                            Box::new(CatalogNumericExpression::Literal(8)),
+                        )),
+                        Box::new(CatalogNumericExpression::Literal(8)),
+                    ),
+                    max_work_units: CatalogNumericExpression::ListLength {
+                        path: vec!["boundary_path_ids"],
+                        maximum: 262_144,
+                    },
+                    max_output_growth: CatalogNumericExpression::Literal(1),
+                },
+                &["semantic_target", "state_coupled_vector_topology"],
+                ordered_entity_result("fills", "vector_fill", 0),
+            ),
+            "vector_erase" => vector_strict(
+                literal_work_with_outputs_and_growth(67_108_864, 131_072, 65_536),
+                &["semantic_target", "state_coupled_vector_geometry"],
+                Vec::new(),
+            ),
+            "vector_connect" => vector_strict(
+                literal_work_with_outputs_and_growth(65_536, 1, 1),
+                &["semantic_target", "state_coupled_vector_geometry"],
+                ordered_entity_result("paths", "vector_path", 0),
+            ),
+            "vector_correct_width" => vector_bound_with_projection(
+                CatalogWorkFormula {
+                    max_invocations: CatalogNumericExpression::Literal(1),
+                    max_output_ids: CatalogNumericExpression::Literal(0),
+                    max_asset_bytes: CatalogNumericExpression::Literal(0),
+                    max_work_units: CatalogNumericExpression::ListLength {
+                        path: vec!["path_ids"],
+                        maximum: 65_536,
+                    },
+                    max_output_growth: CatalogNumericExpression::Literal(0),
+                },
+                &["semantic_target", "state_coupled_vector_geometry"],
+                Vec::new(),
+                Some("line_width"),
+            ),
+            "rasterize_vector_layer" => vector_strict(
+                literal_work_with_outputs_and_growth(16_777_216, 2, 16_777_216),
+                &["semantic_target", "state_coupled_vector_geometry"],
+                entity_result("layer"),
+            ),
+            "vectorize_raster_plane" => vector_bound(
+                literal_work_with_outputs_and_growth(67_108_864, 131_072, 131_072),
+                &[
+                    "semantic_target",
+                    "state_coupled_raster",
+                    "state_coupled_vector_topology",
+                ],
+                ordered_entity_result("fills", "vector_fill", 0),
+            ),
+            "vectorize_raster_plane_into_new_layer" => vector_bound(
+                literal_work_with_outputs_and_growth(67_108_864, 131_076, 131_076),
+                &["semantic_target", "state_coupled_raster"],
+                vec![
+                    CatalogResultMetadata {
+                        name: "layer",
+                        namespace: Some("document_stable"),
+                        owner_role: Some("layer"),
+                        output_id_ordinal: Some(0),
+                    },
+                    CatalogResultMetadata {
+                        name: "fills",
+                        namespace: Some("document_stable"),
+                        owner_role: Some("vector_fill"),
+                        output_id_ordinal: Some(1),
+                    },
+                ],
+            ),
+            "edit_annotations" => annotation_frame_bound(
+                annotation_work(),
+                &["semantic_target"],
+                ordered_entity_result("annotations", "annotation", 0),
+            ),
+            "edit_shooting_frame" => annotation_frame_bound(
+                shooting_frame_work(),
+                &["semantic_target"],
+                ordered_entity_result("shooting_frames", "shooting_frame", 0),
+            ),
+            "edit_vanishing_points" => annotation_frame_bound(
+                vanishing_point_work(),
+                &["semantic_target"],
+                ordered_entity_result("vanishing_points", "vanishing_point", 0),
+            ),
             "apply_boundary_airbrush" => {
                 restricted(67_108_864, &["semantic_target"], "boundary_airbrush")
             }
@@ -716,7 +840,7 @@ pub(super) fn catalog(
             results,
             assets,
             portability: CatalogPortabilityEvaluator {
-                rules: Vec::new(),
+                rules: annotation_frame_portability_rules(schema.name()),
                 default: InkScriptPortability {
                     class,
                     required_preconditions: preconditions,
@@ -795,6 +919,19 @@ fn entity_result(name: &'static str) -> Vec<CatalogResultMetadata> {
         namespace: Some("document_stable"),
         owner_role: Some(name),
         output_id_ordinal: Some(0),
+    }]
+}
+
+fn ordered_entity_result(
+    name: &'static str,
+    owner_role: &'static str,
+    output_id_ordinal: u16,
+) -> Vec<CatalogResultMetadata> {
+    vec![CatalogResultMetadata {
+        name,
+        namespace: Some("document_stable"),
+        owner_role: Some(owner_role),
+        output_id_ordinal: Some(output_id_ordinal),
     }]
 }
 
@@ -963,10 +1100,246 @@ fn selection_strict(
     )
 }
 
+fn vector_bound(
+    work: CatalogWorkFormula,
+    preconditions: &[&'static str],
+    results: Vec<CatalogResultMetadata>,
+) -> EntryTuple {
+    vector_bound_with_projection(work, preconditions, results, None)
+}
+
+fn vector_bound_with_projection(
+    work: CatalogWorkFormula,
+    preconditions: &[&'static str],
+    results: Vec<CatalogResultMetadata>,
+    projection: Option<&'static str>,
+) -> EntryTuple {
+    (
+        InkScriptPortabilityClass::RequiresBinding,
+        preconditions.to_vec(),
+        work,
+        projection,
+        false,
+        results,
+        "vector",
+    )
+}
+
+fn vector_strict(
+    work: CatalogWorkFormula,
+    preconditions: &[&'static str],
+    results: Vec<CatalogResultMetadata>,
+) -> EntryTuple {
+    (
+        InkScriptPortabilityClass::StrictSourceOnly,
+        preconditions.to_vec(),
+        work,
+        None,
+        false,
+        results,
+        "vector",
+    )
+}
+
+fn annotation_frame_bound(
+    work: CatalogWorkFormula,
+    preconditions: &[&'static str],
+    results: Vec<CatalogResultMetadata>,
+) -> EntryTuple {
+    (
+        InkScriptPortabilityClass::RequiresBinding,
+        preconditions.to_vec(),
+        work,
+        None,
+        false,
+        results,
+        "annotation_frame_vanishing",
+    )
+}
+
+fn annotation_work() -> CatalogWorkFormula {
+    let output_ids = operation_count(&["edits"], 4_096, &[1]);
+    let has_input = or_conditions(
+        operation_condition(&["operation"], 1),
+        operation_condition(&["operation"], 2),
+    );
+    let point_count = CatalogNumericExpression::ListLength {
+        path: vec!["input", "points"],
+        maximum: 65_536,
+    };
+    let payload = CatalogNumericExpression::Conditional {
+        condition: Box::new(has_input.clone()),
+        when_true: Box::new(CatalogNumericExpression::CheckedAdd(
+            Box::new(CatalogNumericExpression::Literal(66_560)),
+            Box::new(CatalogNumericExpression::CheckedMultiply(
+                Box::new(point_count.clone()),
+                Box::new(CatalogNumericExpression::Literal(8)),
+            )),
+        )),
+        when_false: Box::new(CatalogNumericExpression::Literal(0)),
+    };
+    let work = CatalogNumericExpression::Conditional {
+        condition: Box::new(has_input),
+        when_true: Box::new(CatalogNumericExpression::Max(
+            Box::new(CatalogNumericExpression::Literal(1)),
+            Box::new(point_count),
+        )),
+        when_false: Box::new(CatalogNumericExpression::Literal(1)),
+    };
+    CatalogWorkFormula {
+        max_invocations: CatalogNumericExpression::Literal(1),
+        max_output_ids: output_ids.clone(),
+        max_asset_bytes: CatalogNumericExpression::BoundedSum {
+            path: vec!["edits"],
+            maximum_items: 4_096,
+            body: Box::new(payload),
+        },
+        max_work_units: CatalogNumericExpression::BoundedSum {
+            path: vec!["edits"],
+            maximum_items: 4_096,
+            body: Box::new(work),
+        },
+        max_output_growth: output_ids,
+    }
+}
+
+fn shooting_frame_work() -> CatalogWorkFormula {
+    let output_ids = CatalogNumericExpression::Conditional {
+        condition: Box::new(operation_condition(&["edit", "operation"], 3)),
+        when_true: Box::new(CatalogNumericExpression::Literal(0)),
+        when_false: Box::new(CatalogNumericExpression::Literal(1)),
+    };
+    let growth = CatalogNumericExpression::Conditional {
+        condition: Box::new(operation_condition(&["edit", "operation"], 1)),
+        when_true: Box::new(CatalogNumericExpression::Literal(1)),
+        when_false: Box::new(CatalogNumericExpression::Literal(0)),
+    };
+    CatalogWorkFormula {
+        max_invocations: CatalogNumericExpression::Literal(1),
+        max_output_ids: output_ids,
+        max_asset_bytes: CatalogNumericExpression::Literal(56),
+        max_work_units: CatalogNumericExpression::Literal(1),
+        max_output_growth: growth,
+    }
+}
+
+fn vanishing_point_work() -> CatalogWorkFormula {
+    CatalogWorkFormula {
+        max_invocations: CatalogNumericExpression::Literal(1),
+        max_output_ids: operation_count(&["edits"], 1_024, &[1, 2]),
+        max_asset_bytes: CatalogNumericExpression::CheckedMultiply(
+            Box::new(CatalogNumericExpression::ListLength {
+                path: vec!["edits"],
+                maximum: 1_024,
+            }),
+            Box::new(CatalogNumericExpression::Literal(48)),
+        ),
+        max_work_units: CatalogNumericExpression::ListLength {
+            path: vec!["edits"],
+            maximum: 1_024,
+        },
+        max_output_growth: operation_count(&["edits"], 1_024, &[1]),
+    }
+}
+
+fn annotation_frame_portability_rules(
+    command: &str,
+) -> Vec<(CatalogBooleanExpression, InkScriptPortability)> {
+    match command {
+        "edit_annotations" => vec![(
+            greater_than_zero(operation_count(&["edits"], 4_096, &[3])),
+            InkScriptPortability {
+                class: InkScriptPortabilityClass::StrictSourceOnly,
+                required_preconditions: vec![
+                    "exact_document_revision",
+                    "state_coupled_annotation_geometry",
+                ],
+            },
+        )],
+        "edit_shooting_frame" => vec![(
+            operation_condition(&["edit", "operation"], 1),
+            InkScriptPortability {
+                class: InkScriptPortabilityClass::Portable,
+                required_preconditions: vec!["shooting_frame_absent"],
+            },
+        )],
+        "edit_vanishing_points" => vec![(
+            greater_than_zero(operation_count(&["edits"], 1_024, &[4])),
+            InkScriptPortability {
+                class: InkScriptPortabilityClass::StrictSourceOnly,
+                required_preconditions: vec![
+                    "exact_document_revision",
+                    "state_coupled_vanishing_points",
+                ],
+            },
+        )],
+        _ => Vec::new(),
+    }
+}
+
+fn operation_count(
+    list_path: &[&'static str],
+    maximum_items: u64,
+    operations: &[u64],
+) -> CatalogNumericExpression {
+    let mut operations = operations.iter().copied();
+    let first = operations.next().expect("operation set must be non-empty");
+    let mut condition = operation_condition(&["operation"], first);
+    for operation in operations {
+        condition = or_conditions(condition, operation_condition(&["operation"], operation));
+    }
+    CatalogNumericExpression::BoundedSum {
+        path: list_path.to_vec(),
+        maximum_items,
+        body: Box::new(CatalogNumericExpression::Conditional {
+            condition: Box::new(condition),
+            when_true: Box::new(CatalogNumericExpression::Literal(1)),
+            when_false: Box::new(CatalogNumericExpression::Literal(0)),
+        }),
+    }
+}
+
+fn operation_condition(path: &[&'static str], operation: u64) -> CatalogBooleanExpression {
+    CatalogBooleanExpression::Compare {
+        comparison: CatalogComparison::Equal,
+        left: CatalogNumericExpression::Field(path.to_vec()),
+        right: CatalogNumericExpression::Literal(operation),
+    }
+}
+
+fn or_conditions(
+    left: CatalogBooleanExpression,
+    right: CatalogBooleanExpression,
+) -> CatalogBooleanExpression {
+    CatalogBooleanExpression::Or(Box::new(left), Box::new(right))
+}
+
+fn greater_than_zero(value: CatalogNumericExpression) -> CatalogBooleanExpression {
+    CatalogBooleanExpression::Compare {
+        comparison: CatalogComparison::Greater,
+        left: value,
+        right: CatalogNumericExpression::Literal(0),
+    }
+}
+
 fn literal_work_with_growth(work: u64, growth: u64) -> CatalogWorkFormula {
     CatalogWorkFormula {
         max_invocations: CatalogNumericExpression::Literal(1),
         max_output_ids: CatalogNumericExpression::Literal(0),
+        max_asset_bytes: CatalogNumericExpression::Literal(0),
+        max_work_units: CatalogNumericExpression::Literal(work),
+        max_output_growth: CatalogNumericExpression::Literal(growth),
+    }
+}
+
+fn literal_work_with_outputs_and_growth(
+    work: u64,
+    output_ids: u64,
+    growth: u64,
+) -> CatalogWorkFormula {
+    CatalogWorkFormula {
+        max_invocations: CatalogNumericExpression::Literal(1),
+        max_output_ids: CatalogNumericExpression::Literal(output_ids),
         max_asset_bytes: CatalogNumericExpression::Literal(0),
         max_work_units: CatalogNumericExpression::Literal(work),
         max_output_growth: CatalogNumericExpression::Literal(growth),

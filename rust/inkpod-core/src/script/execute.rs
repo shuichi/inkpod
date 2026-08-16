@@ -7,12 +7,14 @@ use super::bind::{
 use super::compile::{ScriptCompileError, ScriptSchemas, StaticScriptProgram, catalog};
 use super::report::{ScriptDryRunReport, ScriptResultValue, ScriptStatementOutcome};
 use crate::primitive::{
-    DocumentTreeAdapterError, DocumentTreeScriptStep, FillGradientAdapterError,
-    FillGradientScriptStep, GestureAdjustmentAdapterError, GestureAdjustmentScriptAction,
-    InkScriptEntityKind, InkScriptRuntimeReferences, InvocationResult, LegacyImageAdapterError,
-    LegacyImageScriptStep, LegacySimpleAdapterError, LegacySimpleScriptStep,
-    MetadataColorGuideAdapterError, MetadataColorGuideScriptStep, SelectionFloatingAdapterError,
-    SelectionFloatingScriptAction, StrokeGeometryImportAction, StrokeGeometryImportAdapterError,
+    AnnotationFrameAdapterError, AnnotationFrameScriptStep, DocumentTreeAdapterError,
+    DocumentTreeScriptStep, FillGradientAdapterError, FillGradientScriptStep,
+    GestureAdjustmentAdapterError, GestureAdjustmentScriptAction, InkScriptEntityKind,
+    InkScriptRuntimeReferences, InvocationResult, LegacyImageAdapterError, LegacyImageScriptStep,
+    LegacySimpleAdapterError, LegacySimpleScriptStep, MetadataColorGuideAdapterError,
+    MetadataColorGuideScriptStep, SelectionFloatingAdapterError, SelectionFloatingScriptAction,
+    StrokeGeometryImportAction, StrokeGeometryImportAdapterError, VectorAdapterError,
+    VectorScriptStep,
 };
 use crate::{
     Core, CoreError, DocumentStateDigest, LayerKind, MAX_PERSISTENT_NUMERIC_ID, PixelFormat,
@@ -363,6 +365,30 @@ pub(super) fn run_inkscript_on_staged_core(
                         .output_entity_kinds(result.output_ids.len())
                         .map_err(selection_floating_adapter_error)?;
                     (Ok(result), output_kinds)
+                } else if is_vector(step.command()) {
+                    let invocation = VectorScriptStep::from_compiled(
+                        step,
+                        &program.frozen_arguments[index],
+                        &runtime_references,
+                    )
+                    .map_err(vector_adapter_error)?;
+                    let result = working.execute_canonical_invocation(invocation.to_canonical())?;
+                    let output_kinds = invocation
+                        .output_entity_kinds(result.output_ids.len())
+                        .map_err(vector_adapter_error)?;
+                    (Ok(result), output_kinds)
+                } else if is_annotation_frame(step.command()) {
+                    let invocation = AnnotationFrameScriptStep::from_compiled(
+                        step,
+                        &program.frozen_arguments[index],
+                        &runtime_references,
+                    )
+                    .map_err(annotation_frame_adapter_error)?;
+                    let result = working.execute_canonical_invocation(invocation.to_canonical())?;
+                    let output_kinds = invocation
+                        .output_entity_kinds(result.output_ids.len())
+                        .map_err(annotation_frame_adapter_error)?;
+                    (Ok(result), output_kinds)
                 } else {
                     let invocation = LegacyImageScriptStep::from_compiled(
                         step,
@@ -466,6 +492,18 @@ fn is_selection_floating(command: &str) -> bool {
         .any(|schema| schema.name() == command)
 }
 
+fn is_vector(command: &str) -> bool {
+    crate::primitive::inkscript_vector::VECTOR_COMMANDS
+        .iter()
+        .any(|schema| schema.name() == command)
+}
+
+fn is_annotation_frame(command: &str) -> bool {
+    crate::primitive::inkscript_annotation_frame::ANNOTATION_FRAME_COMMANDS
+        .iter()
+        .any(|schema| schema.name() == command)
+}
+
 fn initial_runtime_references(
     bindings: &BTreeMap<String, InkScriptBoundValue>,
 ) -> Result<InkScriptRuntimeReferences, ScriptRunError> {
@@ -559,6 +597,22 @@ fn selection_floating_adapter_error(error: SelectionFloatingAdapterError) -> Scr
     match error {
         SelectionFloatingAdapterError::MissingReference => ScriptRunError::MissingResult,
         SelectionFloatingAdapterError::ResourceLimit => ScriptRunError::ResourceLimit,
+        _ => ScriptRunError::InvalidStep,
+    }
+}
+
+fn vector_adapter_error(error: VectorAdapterError) -> ScriptRunError {
+    match error {
+        VectorAdapterError::MissingReference => ScriptRunError::MissingResult,
+        VectorAdapterError::ResourceLimit => ScriptRunError::ResourceLimit,
+        _ => ScriptRunError::InvalidStep,
+    }
+}
+
+fn annotation_frame_adapter_error(error: AnnotationFrameAdapterError) -> ScriptRunError {
+    match error {
+        AnnotationFrameAdapterError::MissingReference => ScriptRunError::MissingResult,
+        AnnotationFrameAdapterError::ResourceLimit => ScriptRunError::ResourceLimit,
         _ => ScriptRunError::InvalidStep,
     }
 }
@@ -697,6 +751,81 @@ fn initial_snapshot(core: &Core) -> Result<InkScriptInitialDocumentSnapshot, Cor
             properties,
         });
     }
+    for path in core.vector_paths()? {
+        entities.push(InkScriptEntitySnapshot {
+            reference: InkScriptEntityReference {
+                entity: "vector_path".to_owned(),
+                persistent_id: path.id,
+            },
+            owner: Some(InkScriptEntityReference {
+                entity: "plane".to_owned(),
+                persistent_id: path.plane_id,
+            }),
+            properties: BTreeMap::new(),
+        });
+    }
+    for fill in core.vector_fills()? {
+        entities.push(InkScriptEntitySnapshot {
+            reference: InkScriptEntityReference {
+                entity: "vector_fill".to_owned(),
+                persistent_id: fill.id,
+            },
+            owner: Some(InkScriptEntityReference {
+                entity: "plane".to_owned(),
+                persistent_id: fill.plane_id,
+            }),
+            properties: BTreeMap::new(),
+        });
+    }
+    for annotation in core.annotation_objects()? {
+        let mut properties = BTreeMap::new();
+        properties.insert(
+            "kind".to_owned(),
+            InkScriptComparableValue::Enum(
+                match annotation.kind {
+                    crate::AnnotationKind::Text => "text",
+                    crate::AnnotationKind::Stroke => "stroke",
+                    crate::AnnotationKind::Leader => "leader",
+                    crate::AnnotationKind::Value => "value",
+                }
+                .to_owned(),
+            ),
+        );
+        entities.push(InkScriptEntitySnapshot {
+            reference: InkScriptEntityReference {
+                entity: "annotation".to_owned(),
+                persistent_id: annotation.id,
+            },
+            owner: Some(InkScriptEntityReference {
+                entity: "layer".to_owned(),
+                persistent_id: annotation.layer_id,
+            }),
+            properties,
+        });
+    }
+    if let Some(frame) = core.shooting_frame()? {
+        entities.push(InkScriptEntitySnapshot {
+            reference: InkScriptEntityReference {
+                entity: "shooting_frame".to_owned(),
+                persistent_id: frame.id,
+            },
+            owner: None,
+            properties: BTreeMap::new(),
+        });
+    }
+    for point in core.vanishing_points()? {
+        entities.push(InkScriptEntitySnapshot {
+            reference: InkScriptEntityReference {
+                entity: "vanishing_point".to_owned(),
+                persistent_id: point.id,
+            },
+            owner: Some(InkScriptEntityReference {
+                entity: "layer".to_owned(),
+                persistent_id: point.layer_id,
+            }),
+            properties: BTreeMap::new(),
+        });
+    }
     let selection = core.selection_bounds()?;
     Ok(InkScriptInitialDocumentSnapshot {
         source_document_uuid: uuid_text(info.document_uuid),
@@ -825,6 +954,9 @@ fn materialize_results(
                     "guides" => InkScriptEntityKind::Guide,
                     "paths" => InkScriptEntityKind::VectorPath,
                     "fills" => InkScriptEntityKind::VectorFill,
+                    "annotations" => InkScriptEntityKind::Annotation,
+                    "shooting_frames" => InkScriptEntityKind::ShootingFrame,
+                    "vanishing_points" => InkScriptEntityKind::VanishingPoint,
                     _ => return Err(ScriptRunError::InvalidStep),
                 };
                 entity_kinds
