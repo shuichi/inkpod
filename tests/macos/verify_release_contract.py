@@ -118,8 +118,11 @@ def verify(repository: Path) -> None:
         "stapler validate",
         "spctl --assess",
         "publish_release_dmg",
+        "publish --force",
         "the working tree must be clean before publishing",
         "already contains ${DMG_FILE:t} with different bytes",
+        "publish --force is limited to an existing prerelease",
+        "--force-with-lease=refs/tags/${RELEASE_TAG}:${REMOTE_TAG_OBJECT}",
         "Concurrent publisher fixed ${RELEASE_TAG} to the same commit",
         "Concurrent publisher uploaded the identical ${DMG_FILE:t}",
         'release create "${RELEASE_TAG}"',
@@ -127,8 +130,8 @@ def verify(repository: Path) -> None:
         'gh release download "${RELEASE_TAG}"',
     ):
         require(release_cli, token, "scripts/macOS.sh")
-    if "--clobber" in release_cli:
-        fail("scripts/macOS.sh must never delete an existing GitHub release asset")
+    if release_cli.count("--clobber") != 1:
+        fail("scripts/macOS.sh must keep --clobber isolated to publish --force")
 
     with parity_path.open(encoding="utf-8") as source:
         parity = json.load(source)
@@ -202,6 +205,14 @@ def verify(repository: Path) -> None:
         "test_publish_adds_dmg_to_an_existing_release_without_rebuilding",
         "test_publish_is_noop_when_the_existing_asset_is_byte_identical",
         "test_publish_rejects_a_different_existing_asset_without_clobbering",
+        "test_publish_force_retargets_tag_and_clobbers_prerelease_dmg",
+        "test_publish_force_refuses_to_mutate_a_stable_release",
+        "test_publish_force_refuses_to_clobber_a_stable_release_asset",
+        "test_publish_force_tag_race_restores_the_previous_local_tag",
+        "test_publish_force_does_not_assume_an_unreadable_release_is_missing",
+        "test_publish_force_reports_a_failed_asset_replacement",
+        "test_publish_without_force_still_rejects_a_tag_on_another_commit",
+        "test_force_is_accepted_only_by_publish",
         "test_publish_creates_and_pushes_a_tag_then_creates_a_prerelease",
         "test_publish_converges_when_tag_release_and_upload_race",
         "test_publish_rejects_a_racing_tag_that_targets_another_commit",
@@ -224,6 +235,7 @@ def verify(repository: Path) -> None:
         "notary log",
         "clean Tahoe",
         "./scripts/macOS.sh publish",
+        "./scripts/macOS.sh publish --force",
         "different bytes",
     ):
         require(checklist, token, "macOS release checklist")

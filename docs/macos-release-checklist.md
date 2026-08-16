@@ -83,11 +83,36 @@ DMG is uploaded.
 Tag creation, Release creation, and asset upload are each followed by a remote
 read. A concurrent publisher is accepted only when it fixed the same tag to the
 same commit or uploaded byte-identical content. An existing identical asset is
-a no-op. An asset with the same name and different bytes is rejected; the
-command never uses `--clobber`, because deleting the old asset before a failed
-upload would lose the published artifact. Set `INKPOD_GITHUB_PRERELEASE=0` only
+a no-op. In normal mode, an asset with the same name and different bytes is
+rejected and `--clobber` is never used. Set `INKPOD_GITHUB_PRERELEASE=0` only
 when intentionally creating a new stable Release; it never changes an existing
 Release between prerelease and stable.
+
+### Destructive development prerelease update
+
+During development, an already notarized candidate may intentionally replace
+the macOS artifact of the same version:
+
+```text
+INKPOD_VERSION=<major.minor.patch> ./scripts/macOS.sh publish --force
+```
+
+This mode retains every normal preflight requirement: the worktree must be
+clean, the checked-out release branch must equal its remote, and the candidate
+must pass signature, notarization, Gatekeeper, architecture, version/build, and
+entitlement validation. If the version tag points elsewhere, the command reads
+the current remote tag object and uses `--force-with-lease` to retarget it to
+exact `HEAD`; a racing tag change aborts the operation and restores the previous
+local tag. If a same-name macOS DMG has different bytes, the command uses one
+explicit `gh release upload --clobber`, then downloads and hashes the resulting
+asset and rechecks the remote tag.
+
+The destructive replacement behavior of `publish --force` is limited to an
+existing prerelease. It rejects an existing stable Release before moving its
+tag or replacing its asset. Other platform assets are left untouched and can
+therefore represent a different development commit. GitHub asset replacement
+is not atomic: an upload failure can leave the old DMG missing, so use this mode
+only for disposable development prereleases.
 
 ## Native interaction matrix
 

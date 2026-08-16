@@ -635,7 +635,12 @@ public Release whose tag resolves to that commit. Tag, Release, and upload races
 are resolved by re-reading remote state; only the same commit or byte-identical
 asset is accepted. Before remote mutation it mounts the DMG read-only and checks
 the enclosed app signature, identity, version/build, arm64 executable, and exact
-entitlements. A same-name different asset is never deleted or overwritten.
+entitlements. Normal publication never deletes or overwrites a same-name
+different asset. The explicit development-only `publish --force` route keeps
+those preflights but may retarget an existing prerelease tag to exact HEAD with
+a remote-object `force-with-lease` and replace only its same-name macOS DMG with
+`--clobber`; stable Releases are rejected, a tag race restores the prior local
+tag, and the resulting asset bytes and tag are re-read after mutation.
 
 The checked-in parity ledger still classifies all 384 Windows
 production command IDs. M3 marks the 19 deferred M2 View rows and 11 M3

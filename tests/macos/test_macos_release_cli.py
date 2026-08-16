@@ -54,7 +54,10 @@ def remote_release_json():
         {
             "assets": assets,
             "isDraft": False,
-            "isPrerelease": True,
+            "isPrerelease": os.environ.get(
+                "INKPOD_TEST_RELEASE_PRERELEASE", "1"
+            )
+            == "1",
             "tagName": "v" + os.environ["INKPOD_VERSION"],
             "url": "https://github.com/owner/inkpod/releases/tag/v"
             + os.environ["INKPOD_VERSION"],
@@ -66,6 +69,7 @@ if tool == "git":
     arguments = git_arguments()
     local_tag = remote_state / "local-tag"
     remote_tag = remote_state / "remote-tag"
+    remote_tag_object = remote_state / "remote-tag-object"
     if arguments == ["status", "--porcelain"]:
         print(os.environ.get("INKPOD_TEST_GIT_STATUS", ""))
     elif arguments == ["branch", "--show-current"]:
@@ -86,15 +90,30 @@ if tool == "git":
         print("git@github.com:owner/inkpod.git")
     elif arguments[:1] == ["ls-remote"]:
         if remote_tag.is_file():
+            commit = remote_tag.read_text(encoding="utf-8")
+            object_id = (
+                remote_tag_object.read_text(encoding="utf-8")
+                if remote_tag_object.is_file()
+                else commit
+            )
             print(
-                remote_tag.read_text(encoding="utf-8")
+                object_id
                 + "\trefs/tags/v"
                 + os.environ["INKPOD_VERSION"]
             )
-    elif arguments[:2] == ["tag", "-a"]:
+            if object_id != commit:
+                print(
+                    commit
+                    + "\trefs/tags/v"
+                    + os.environ["INKPOD_VERSION"]
+                    + "^{}"
+                )
+    elif arguments[:2] in (["tag", "-a"], ["tag", "-f"]):
         local_tag.write_text(head_commit, encoding="utf-8")
     elif arguments[:2] == ["tag", "-d"]:
         local_tag.unlink(missing_ok=True)
+    elif arguments[:1] == ["update-ref"]:
+        local_tag.write_text(arguments[2], encoding="utf-8")
     elif arguments[:1] == ["push"]:
         marker = remote_state / "tag-race-fired"
         if "tag" in publish_races and not marker.exists():
@@ -103,10 +122,32 @@ if tool == "git":
                 os.environ.get("INKPOD_TEST_RACING_TAG_COMMIT", head_commit),
                 encoding="utf-8",
             )
+            remote_tag_object.write_text(
+                os.environ.get("INKPOD_TEST_RACING_TAG_OBJECT", head_commit),
+                encoding="utf-8",
+            )
             sys.exit(1)
-        if remote_tag.is_file() and remote_tag.read_text(encoding="utf-8") != head_commit:
+        force_lease = next(
+            (
+                argument
+                for argument in arguments
+                if argument.startswith("--force-with-lease=refs/tags/")
+            ),
+            None,
+        )
+        if force_lease is not None:
+            expected = force_lease.rsplit(":", 1)[1]
+            current_object = (
+                remote_tag_object.read_text(encoding="utf-8")
+                if remote_tag_object.is_file()
+                else remote_tag.read_text(encoding="utf-8")
+            )
+            if not remote_tag.is_file() or current_object != expected:
+                sys.exit(1)
+        elif remote_tag.is_file() and remote_tag.read_text(encoding="utf-8") != head_commit:
             sys.exit(1)
         remote_tag.write_text(head_commit, encoding="utf-8")
+        remote_tag_object.write_text(head_commit, encoding="utf-8")
     else:
         raise RuntimeError("unexpected fake git invocation: " + " ".join(arguments))
 elif tool == "gh":
@@ -117,8 +158,16 @@ elif tool == "gh":
         pass
     elif arguments[:2] == ["api", "repos/owner/inkpod"]:
         pass
+    elif arguments[:2] == [
+        "api",
+        "repos/owner/inkpod/releases/tags/v" + os.environ["INKPOD_VERSION"],
+    ]:
+        if not release.exists():
+            sys.exit(1)
     elif arguments[:2] == ["release", "view"]:
         if not release.exists():
+            sys.exit(1)
+        if os.environ.get("INKPOD_TEST_RELEASE_VIEW_FAILURE") == "1":
             sys.exit(1)
         print(remote_release_json())
     elif arguments[:2] == ["release", "create"]:
@@ -140,7 +189,7 @@ elif tool == "gh":
             marker.touch()
             shutil.copyfile(source, remote_asset)
             sys.exit(1)
-        if remote_asset.exists():
+        if remote_asset.exists() and "--clobber" not in arguments:
             sys.exit(1)
         shutil.copyfile(source, remote_asset)
     elif arguments[:2] == ["release", "download"]:
@@ -263,9 +312,9 @@ class MacOSReleaseCliTests(unittest.TestCase):
             }
         )
 
-    def run_cli(self, command: str) -> subprocess.CompletedProcess[str]:
+    def run_cli(self, *arguments: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            [str(RELEASE_CLI), command],
+            [str(RELEASE_CLI), *arguments],
             cwd=REPOSITORY_ROOT,
             env=self.environment,
             check=False,
@@ -279,12 +328,17 @@ class MacOSReleaseCliTests(unittest.TestCase):
         release_exists: bool = True,
         remote_asset: bytes | None = None,
         remote_tag_commit: str | None = None,
+        remote_tag_object: str | None = None,
     ) -> None:
         self.output_directory.mkdir(parents=True, exist_ok=True)
         self.dmg.write_bytes(b"signed and notarized dmg\n")
         head_commit = self.environment.get("INKPOD_TEST_HEAD_COMMIT", "1" * 40)
         (self.remote_state / "remote-tag").write_text(
             remote_tag_commit or head_commit,
+            encoding="utf-8",
+        )
+        (self.remote_state / "remote-tag-object").write_text(
+            remote_tag_object or remote_tag_commit or head_commit,
             encoding="utf-8",
         )
         if release_exists:
@@ -491,9 +545,184 @@ class MacOSReleaseCliTests(unittest.TestCase):
         self.assertFalse(any(call.startswith("gh release upload ") for call in calls))
         self.assertFalse(any("--clobber" in call for call in calls))
 
+    def test_publish_force_retargets_tag_and_clobbers_prerelease_dmg(self) -> None:
+        previous_commit = "2" * 40
+        previous_object = "5" * 40
+        previous_asset = b"previous development artifact\n"
+        self.prepare_publish_candidate(
+            remote_asset=previous_asset,
+            remote_tag_commit=previous_commit,
+            remote_tag_object=previous_object,
+        )
+
+        result = self.run_cli("publish", "--force")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("DESTRUCTIVE", result.stdout)
+        self.assertEqual(
+            (self.remote_state / "remote-tag").read_text(encoding="utf-8"),
+            "1" * 40,
+        )
+        self.assertEqual(
+            (self.remote_state / "remote-asset").read_bytes(),
+            self.dmg.read_bytes(),
+        )
+        calls = self.tool_log.read_text(encoding="utf-8").splitlines()
+        self.assertTrue(
+            any(" tag -f -a v0.2.3 " in call for call in calls),
+            calls,
+        )
+        self.assertTrue(
+            any(
+                "--force-with-lease=refs/tags/v0.2.3:" + previous_object in call
+                for call in calls
+            ),
+            calls,
+        )
+        upload = next(call for call in calls if call.startswith("gh release upload "))
+        self.assertIn("--clobber", upload)
+
+    def test_publish_force_refuses_to_mutate_a_stable_release(self) -> None:
+        previous_commit = "2" * 40
+        previous_asset = b"stable artifact\n"
+        self.prepare_publish_candidate(
+            remote_asset=previous_asset,
+            remote_tag_commit=previous_commit,
+        )
+        self.environment["INKPOD_TEST_RELEASE_PRERELEASE"] = "0"
+
+        result = self.run_cli("publish", "--force")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("limited to an existing prerelease", result.stderr)
+        self.assertEqual(
+            (self.remote_state / "remote-tag").read_text(encoding="utf-8"),
+            previous_commit,
+        )
+        self.assertEqual(
+            (self.remote_state / "remote-asset").read_bytes(),
+            previous_asset,
+        )
+        calls = self.tool_log.read_text(encoding="utf-8").splitlines()
+        self.assertFalse(any(" tag -f " in call for call in calls))
+        self.assertFalse(any(call.startswith("gh release upload ") for call in calls))
+
+    def test_publish_force_refuses_to_clobber_a_stable_release_asset(self) -> None:
+        previous_asset = b"stable artifact\n"
+        self.prepare_publish_candidate(remote_asset=previous_asset)
+        self.environment["INKPOD_TEST_RELEASE_PRERELEASE"] = "0"
+
+        result = self.run_cli("publish", "--force")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("limited to an existing prerelease", result.stderr)
+        self.assertEqual(
+            (self.remote_state / "remote-asset").read_bytes(),
+            previous_asset,
+        )
+        calls = self.tool_log.read_text(encoding="utf-8").splitlines()
+        self.assertFalse(any("--clobber" in call for call in calls))
+
+    def test_publish_force_tag_race_restores_the_previous_local_tag(self) -> None:
+        previous_remote_commit = "2" * 40
+        previous_local_object = "3" * 40
+        racing_commit = "4" * 40
+        self.prepare_publish_candidate(remote_tag_commit=previous_remote_commit)
+        (self.remote_state / "local-tag").write_text(
+            previous_local_object,
+            encoding="utf-8",
+        )
+        self.environment["INKPOD_TEST_PUBLISH_RACES"] = "tag"
+        self.environment["INKPOD_TEST_RACING_TAG_COMMIT"] = racing_commit
+
+        result = self.run_cli("publish", "--force")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("local tag was restored", result.stderr)
+        self.assertEqual(
+            (self.remote_state / "remote-tag").read_text(encoding="utf-8"),
+            racing_commit,
+        )
+        self.assertEqual(
+            (self.remote_state / "local-tag").read_text(encoding="utf-8"),
+            previous_local_object,
+        )
+        calls = self.tool_log.read_text(encoding="utf-8").splitlines()
+        self.assertTrue(any(" update-ref refs/tags/v0.2.3 " in call for call in calls))
+        self.assertFalse(any(call.startswith("gh release upload ") for call in calls))
+
+    def test_publish_force_does_not_assume_an_unreadable_release_is_missing(self) -> None:
+        previous_commit = "2" * 40
+        previous_asset = b"existing artifact\n"
+        self.prepare_publish_candidate(
+            remote_asset=previous_asset,
+            remote_tag_commit=previous_commit,
+        )
+        self.environment["INKPOD_TEST_RELEASE_VIEW_FAILURE"] = "1"
+
+        result = self.run_cli("publish", "--force")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("exists but its state could not be read", result.stderr)
+        self.assertEqual(
+            (self.remote_state / "remote-tag").read_text(encoding="utf-8"),
+            previous_commit,
+        )
+        self.assertEqual(
+            (self.remote_state / "remote-asset").read_bytes(),
+            previous_asset,
+        )
+        calls = self.tool_log.read_text(encoding="utf-8").splitlines()
+        self.assertFalse(any(" tag -f " in call for call in calls))
+        self.assertFalse(any("--clobber" in call for call in calls))
+
+    def test_publish_force_reports_a_failed_asset_replacement(self) -> None:
+        previous_asset = b"previous development artifact\n"
+        self.prepare_publish_candidate(remote_asset=previous_asset)
+        self.environment["INKPOD_TEST_PUBLISH_FAILURES"] = "upload"
+
+        result = self.run_cli("publish", "--force")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "forced GitHub asset replacement failed and the remote asset is not the candidate",
+            result.stderr,
+        )
+        self.assertEqual(
+            (self.remote_state / "remote-asset").read_bytes(),
+            previous_asset,
+        )
+        calls = self.tool_log.read_text(encoding="utf-8").splitlines()
+        upload = next(call for call in calls if call.startswith("gh release upload "))
+        self.assertIn("--clobber", upload)
+
+    def test_publish_without_force_still_rejects_a_tag_on_another_commit(self) -> None:
+        previous_commit = "2" * 40
+        self.prepare_publish_candidate(remote_tag_commit=previous_commit)
+
+        result = self.run_cli("publish")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not HEAD", result.stderr)
+        self.assertEqual(
+            (self.remote_state / "remote-tag").read_text(encoding="utf-8"),
+            previous_commit,
+        )
+        calls = self.tool_log.read_text(encoding="utf-8").splitlines()
+        self.assertFalse(any("--force-with-lease" in call for call in calls))
+        self.assertFalse(any("--clobber" in call for call in calls))
+
+    def test_force_is_accepted_only_by_publish(self) -> None:
+        result = self.run_cli("release", "--force")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--force is accepted only by publish", result.stderr)
+        self.assertFalse(self.tool_log.exists())
+
     def test_publish_creates_and_pushes_a_tag_then_creates_a_prerelease(self) -> None:
         self.prepare_publish_candidate(release_exists=False)
         (self.remote_state / "remote-tag").unlink()
+        (self.remote_state / "remote-tag-object").unlink()
 
         result = self.run_cli("publish")
 
@@ -510,6 +739,7 @@ class MacOSReleaseCliTests(unittest.TestCase):
     def test_publish_converges_when_tag_release_and_upload_race(self) -> None:
         self.prepare_publish_candidate(release_exists=False)
         (self.remote_state / "remote-tag").unlink()
+        (self.remote_state / "remote-tag-object").unlink()
         self.environment["INKPOD_TEST_PUBLISH_RACES"] = "tag,release,upload"
 
         result = self.run_cli("publish")
@@ -524,6 +754,7 @@ class MacOSReleaseCliTests(unittest.TestCase):
     def test_publish_rejects_a_racing_tag_that_targets_another_commit(self) -> None:
         self.prepare_publish_candidate(release_exists=False)
         (self.remote_state / "remote-tag").unlink()
+        (self.remote_state / "remote-tag-object").unlink()
         self.environment["INKPOD_TEST_PUBLISH_RACES"] = "tag"
         self.environment["INKPOD_TEST_RACING_TAG_COMMIT"] = "2" * 40
 

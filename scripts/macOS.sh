@@ -42,6 +42,7 @@ RELEASE_BRANCH="${INKPOD_RELEASE_BRANCH:-main}"
 RELEASE_TAG="v${VERSION}"
 GITHUB_REPOSITORY="${INKPOD_GITHUB_REPOSITORY:-}"
 GITHUB_PRERELEASE="${INKPOD_GITHUB_PRERELEASE:-1}"
+PUBLISH_FORCE=0
 export CODESIGN_IDENTITY NOTARY_PROFILE
 
 HEAD_COMMIT=""
@@ -50,9 +51,11 @@ LOCAL_DMG_SIZE=""
 PUBLISH_STATE_DIR=""
 RELEASE_EXISTS=0
 RELEASE_IS_DRAFT=""
+RELEASE_IS_PRERELEASE=""
 RELEASE_URL=""
 RELEASE_ASSET_COUNT=0
 RELEASE_ASSET_SIZE=""
+REMOTE_TAG_OBJECT=""
 REMOTE_TAG_COMMIT=""
 
 typeset -a TEMP_DIRS
@@ -90,7 +93,7 @@ die() {
 
 usage() {
     cat <<'USAGE'
-Usage: ./scripts/macOS.sh <command>
+Usage: ./scripts/macOS.sh <command> [--force]
 
 Commands:
   verify      Run every automated Rust/macOS M12 release profile.
@@ -100,6 +103,9 @@ Commands:
   notarize    Run dmg, submit it to Apple, staple the ticket, and assess it.
   release     Verify, sign, notarize, staple, and assess the release DMG.
   publish     Publish an existing notarized DMG to the matching GitHub Release.
+  publish --force
+              Destructively retarget an existing prerelease tag to HEAD and
+              replace a different same-name macOS DMG during development.
 
 Configuration environment variables:
   INKPOD_VERSION              Marketing version (default: CMake project version)
@@ -120,11 +126,13 @@ Configuration environment variables:
 Set INKPOD_CODESIGN_IDENTITY=- to create an ad-hoc signed app for local
 package/dmg checks. Ad-hoc artifacts cannot be notarized.
 
-publish never rebuilds or replaces a GitHub asset. It requires a clean branch
-synchronized with its remote, verifies the existing notarized DMG, and uses tag
-v<INKPOD_VERSION>. An identical existing asset is a no-op; different bytes are
-rejected. A missing Release is created only after the remote tag is fixed to
-the exact HEAD commit.
+publish never rebuilds. It requires a clean branch synchronized with its remote,
+verifies the existing notarized DMG, and uses tag v<INKPOD_VERSION>. Normally an
+identical existing asset is a no-op and different bytes are rejected. The
+explicit publish --force development mode uses a force-with-lease tag update and
+may clobber only the same-name macOS DMG of an existing prerelease. It refuses to
+mutate an existing stable Release. A missing Release is created only after the
+remote tag is fixed to the exact HEAD commit.
 USAGE
 }
 
@@ -571,6 +579,8 @@ read_remote_tag() {
     local direct_commit=""
     local peeled_commit=""
 
+    REMOTE_TAG_OBJECT=""
+    REMOTE_TAG_COMMIT=""
     lines="$(git -C "${ROOT_DIR}" ls-remote --tags "${GIT_REMOTE}" \
         "refs/tags/${RELEASE_TAG}" "refs/tags/${RELEASE_TAG}^{}")" || \
         die "could not query remote tag ${RELEASE_TAG}"
@@ -581,33 +591,87 @@ read_remote_tag() {
             peeled_commit="${object_id}"
         fi
     done <<< "${lines}"
+    REMOTE_TAG_OBJECT="${direct_commit}"
     REMOTE_TAG_COMMIT="${peeled_commit:-${direct_commit}}"
 }
 
 ensure_remote_tag() {
     local local_tag_commit=""
+    local local_tag_object=""
     local local_tag_exists=0
     local created_local_tag=0
+    local force_lease
 
     if local_tag_commit="$(git -C "${ROOT_DIR}" rev-parse \
             "refs/tags/${RELEASE_TAG}^{commit}" 2>/dev/null)"; then
         local_tag_exists=1
+        local_tag_object="$(git -C "${ROOT_DIR}" rev-parse \
+            "refs/tags/${RELEASE_TAG}")" || \
+            die "could not resolve local tag object ${RELEASE_TAG}"
     fi
 
     read_remote_tag
     if [[ -n "${REMOTE_TAG_COMMIT}" ]]; then
-        [[ "${REMOTE_TAG_COMMIT}" == "${HEAD_COMMIT}" ]] || \
-            die "remote tag ${RELEASE_TAG} points to ${REMOTE_TAG_COMMIT}, not HEAD ${HEAD_COMMIT}"
+        if [[ "${REMOTE_TAG_COMMIT}" != "${HEAD_COMMIT}" ]]; then
+            (( PUBLISH_FORCE )) || \
+                die "remote tag ${RELEASE_TAG} points to ${REMOTE_TAG_COMMIT}, not HEAD ${HEAD_COMMIT}"
+            read_release_state
+            if (( RELEASE_EXISTS )) && [[ "${RELEASE_IS_PRERELEASE}" != "true" ]]; then
+                die "publish --force is limited to an existing prerelease; ${RELEASE_TAG} is stable"
+            fi
+            [[ -n "${REMOTE_TAG_OBJECT}" ]] || \
+                die "remote tag ${RELEASE_TAG} has no object for a guarded force update"
+
+            log "DESTRUCTIVE: retargeting ${RELEASE_TAG} from ${REMOTE_TAG_COMMIT} to HEAD ${HEAD_COMMIT}"
+            git -C "${ROOT_DIR}" tag -f -a "${RELEASE_TAG}" "${HEAD_COMMIT}" \
+                -m "inkpod ${RELEASE_TAG}" || \
+                die "could not replace local tag ${RELEASE_TAG}"
+            force_lease="--force-with-lease=refs/tags/${RELEASE_TAG}:${REMOTE_TAG_OBJECT}"
+            if git -C "${ROOT_DIR}" push "${force_lease}" "${GIT_REMOTE}" \
+                    "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"; then
+                read_remote_tag
+                [[ "${REMOTE_TAG_COMMIT}" == "${HEAD_COMMIT}" ]] || \
+                    die "forced tag ${RELEASE_TAG} did not resolve to HEAD ${HEAD_COMMIT}"
+                return
+            fi
+
+            log "Guarded tag replacement conflicted; checking remote state"
+            read_remote_tag
+            if [[ "${REMOTE_TAG_COMMIT}" == "${HEAD_COMMIT}" ]]; then
+                log "Concurrent publisher fixed ${RELEASE_TAG} to the same commit"
+                return
+            fi
+            if (( local_tag_exists )); then
+                git -C "${ROOT_DIR}" update-ref "refs/tags/${RELEASE_TAG}" \
+                    "${local_tag_object}" || \
+                    die "tag replacement failed and local tag ${RELEASE_TAG} could not be restored"
+            else
+                git -C "${ROOT_DIR}" tag -d "${RELEASE_TAG}" >/dev/null || true
+            fi
+            die "remote tag ${RELEASE_TAG} changed during guarded force update; local tag was restored"
+        fi
         if (( local_tag_exists )); then
-            [[ "${local_tag_commit}" == "${HEAD_COMMIT}" ]] || \
-                die "local tag ${RELEASE_TAG} points to ${local_tag_commit}, not HEAD ${HEAD_COMMIT}"
+            if [[ "${local_tag_commit}" != "${HEAD_COMMIT}" ]]; then
+                (( PUBLISH_FORCE )) || \
+                    die "local tag ${RELEASE_TAG} points to ${local_tag_commit}, not HEAD ${HEAD_COMMIT}"
+                log "DESTRUCTIVE: retargeting local ${RELEASE_TAG} to HEAD ${HEAD_COMMIT}"
+                git -C "${ROOT_DIR}" tag -f -a "${RELEASE_TAG}" "${HEAD_COMMIT}" \
+                    -m "inkpod ${RELEASE_TAG}" || \
+                    die "could not replace local tag ${RELEASE_TAG}"
+            fi
         fi
         return
     fi
 
     if (( local_tag_exists )); then
-        [[ "${local_tag_commit}" == "${HEAD_COMMIT}" ]] || \
-            die "local tag ${RELEASE_TAG} points to ${local_tag_commit}, not HEAD ${HEAD_COMMIT}"
+        if [[ "${local_tag_commit}" != "${HEAD_COMMIT}" ]]; then
+            (( PUBLISH_FORCE )) || \
+                die "local tag ${RELEASE_TAG} points to ${local_tag_commit}, not HEAD ${HEAD_COMMIT}"
+            log "DESTRUCTIVE: retargeting local ${RELEASE_TAG} to HEAD ${HEAD_COMMIT}"
+            git -C "${ROOT_DIR}" tag -f -a "${RELEASE_TAG}" "${HEAD_COMMIT}" \
+                -m "inkpod ${RELEASE_TAG}" || \
+                die "could not replace local tag ${RELEASE_TAG}"
+        fi
     else
         git -C "${ROOT_DIR}" tag -a "${RELEASE_TAG}" "${HEAD_COMMIT}" \
             -m "inkpod ${RELEASE_TAG}" || \
@@ -648,6 +712,7 @@ read_release_state() {
 
     RELEASE_EXISTS=0
     RELEASE_IS_DRAFT=""
+    RELEASE_IS_PRERELEASE=""
     RELEASE_URL=""
     RELEASE_ASSET_COUNT=0
     RELEASE_ASSET_SIZE=""
@@ -655,6 +720,11 @@ read_release_state() {
     if ! gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" \
             --json tagName,isDraft,isPrerelease,url,assets \
             >"${release_file}" 2>"${error_file}"; then
+        if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" \
+                --silent >/dev/null 2>&1; then
+            [[ ! -s "${error_file}" ]] || cat "${error_file}" >&2
+            die "GitHub release ${RELEASE_TAG} exists but its state could not be read"
+        fi
         gh api "repos/${GITHUB_REPOSITORY}" --silent >/dev/null || {
             [[ ! -s "${error_file}" ]] || cat "${error_file}" >&2
             die "could not access GitHub repository ${GITHUB_REPOSITORY}"
@@ -668,10 +738,16 @@ read_release_state() {
         die "GitHub release returned tag ${actual_tag}, expected ${RELEASE_TAG}"
     RELEASE_IS_DRAFT="$(/usr/bin/plutil -extract isDraft raw -o - "${release_file}")" || \
         die "GitHub release response has no draft state"
+    RELEASE_IS_PRERELEASE="$(/usr/bin/plutil -extract isPrerelease raw -o - \
+        "${release_file}")" || \
+        die "GitHub release response has no prerelease state"
     RELEASE_URL="$(/usr/bin/plutil -extract url raw -o - "${release_file}")" || \
         die "GitHub release response has no URL"
     [[ "${RELEASE_IS_DRAFT}" == "false" ]] || \
         die "GitHub release ${RELEASE_TAG} is a draft and is not a public release"
+    [[ "${RELEASE_IS_PRERELEASE}" == "true" || \
+        "${RELEASE_IS_PRERELEASE}" == "false" ]] || \
+        die "GitHub release ${RELEASE_TAG} returned an invalid prerelease state"
 
     asset_total="$(/usr/bin/plutil -extract assets raw -o - "${release_file}")" || \
         die "GitHub release response has no asset list"
@@ -691,16 +767,14 @@ read_release_state() {
     RELEASE_EXISTS=1
 }
 
-verify_remote_asset_bytes() {
+remote_asset_matches() {
     local download_dir
     local downloaded_asset
     local checksum_line
     local remote_sha256
 
-    [[ "${RELEASE_ASSET_COUNT}" == "1" ]] || \
-        die "GitHub release ${RELEASE_TAG} has no ${DMG_FILE:t} asset"
-    [[ "${RELEASE_ASSET_SIZE}" == "${LOCAL_DMG_SIZE}" ]] || \
-        die "GitHub release ${RELEASE_TAG} already contains ${DMG_FILE:t} with different bytes"
+    [[ "${RELEASE_ASSET_COUNT}" == "1" ]] || return 1
+    [[ "${RELEASE_ASSET_SIZE}" == "${LOCAL_DMG_SIZE}" ]] || return 1
 
     download_dir="$(mktemp -d "${PUBLISH_STATE_DIR}/download.XXXXXX")"
     downloaded_asset="${download_dir}/${DMG_FILE:t}"
@@ -712,7 +786,13 @@ verify_remote_asset_bytes() {
     checksum_line="$(shasum -a 256 "${downloaded_asset}")" || \
         die "could not hash downloaded GitHub release asset"
     remote_sha256="${checksum_line%%[[:space:]]*}"
-    [[ "${remote_sha256}" == "${LOCAL_DMG_SHA256}" ]] || \
+    [[ "${remote_sha256}" == "${LOCAL_DMG_SHA256}" ]]
+}
+
+verify_remote_asset_bytes() {
+    [[ "${RELEASE_ASSET_COUNT}" == "1" ]] || \
+        die "GitHub release ${RELEASE_TAG} has no ${DMG_FILE:t} asset"
+    remote_asset_matches || \
         die "GitHub release ${RELEASE_TAG} already contains ${DMG_FILE:t} with different bytes"
 }
 
@@ -725,6 +805,11 @@ publish_release_dmg() {
     TEMP_DIRS+=("${PUBLISH_STATE_DIR}")
     verify_publish_candidate
 
+    read_release_state
+    if (( PUBLISH_FORCE && RELEASE_EXISTS )) && \
+            [[ "${RELEASE_IS_PRERELEASE}" != "true" ]]; then
+        die "publish --force is limited to an existing prerelease; ${RELEASE_TAG} is stable"
+    fi
     ensure_remote_tag
     read_release_state
     if (( ! RELEASE_EXISTS )); then
@@ -758,12 +843,45 @@ publish_release_dmg() {
         die "remote tag ${RELEASE_TAG} changed to ${REMOTE_TAG_COMMIT:-missing} before asset publication"
 
     if (( RELEASE_ASSET_COUNT == 1 )); then
-        verify_remote_asset_bytes
+        if remote_asset_matches; then
+            read_remote_tag
+            [[ "${REMOTE_TAG_COMMIT}" == "${HEAD_COMMIT}" ]] || \
+                die "remote tag ${RELEASE_TAG} changed to ${REMOTE_TAG_COMMIT:-missing} during asset verification"
+            log "GitHub release ${RELEASE_TAG} already contains the identical ${DMG_FILE:t}; no upload needed"
+            log "Published release: ${RELEASE_URL}"
+            return
+        fi
+
+        (( PUBLISH_FORCE )) || \
+            die "GitHub release ${RELEASE_TAG} already contains ${DMG_FILE:t} with different bytes"
+        read_release_state
+        (( RELEASE_EXISTS )) || \
+            die "GitHub release ${RELEASE_TAG} disappeared before forced asset replacement"
+        [[ "${RELEASE_IS_PRERELEASE}" == "true" ]] || \
+            die "publish --force is limited to an existing prerelease; ${RELEASE_TAG} is stable"
         read_remote_tag
         [[ "${REMOTE_TAG_COMMIT}" == "${HEAD_COMMIT}" ]] || \
-            die "remote tag ${RELEASE_TAG} changed to ${REMOTE_TAG_COMMIT:-missing} during asset verification"
-        log "GitHub release ${RELEASE_TAG} already contains the identical ${DMG_FILE:t}; no upload needed"
+            die "remote tag ${RELEASE_TAG} changed to ${REMOTE_TAG_COMMIT:-missing} before forced asset replacement"
+        log "DESTRUCTIVE: replacing ${DMG_FILE:t} in prerelease ${RELEASE_TAG}"
+        if ! gh release upload "${RELEASE_TAG}" "${DMG_FILE}" \
+                --repo "${GITHUB_REPOSITORY}" --clobber; then
+            log "Forced asset upload failed; checking whether the candidate reached GitHub"
+            read_release_state
+            if (( RELEASE_EXISTS && RELEASE_ASSET_COUNT == 1 )) && \
+                    remote_asset_matches; then
+                log "Concurrent publisher uploaded the identical ${DMG_FILE:t}"
+            else
+                die "forced GitHub asset replacement failed and the remote asset is not the candidate"
+            fi
+        else
+            read_release_state
+            verify_remote_asset_bytes
+        fi
+        read_remote_tag
+        [[ "${REMOTE_TAG_COMMIT}" == "${HEAD_COMMIT}" ]] || \
+            die "remote tag ${RELEASE_TAG} changed to ${REMOTE_TAG_COMMIT:-missing} during forced asset replacement"
         log "Published release: ${RELEASE_URL}"
+        log "Published SHA-256: ${LOCAL_DMG_SHA256}"
         return
     fi
 
@@ -799,6 +917,7 @@ run_through_dmg() {
 
 main() {
     local command="${1:-}"
+    local option="${2:-}"
 
     if [[ "${command}" == "help" || "${command}" == "-h" || "${command}" == "--help" ]]; then
         usage
@@ -808,7 +927,15 @@ main() {
         usage >&2
         return 2
     }
-    [[ $# -eq 1 ]] || die "only one subcommand is accepted"
+    if [[ "${command}" == "publish" ]]; then
+        if [[ $# -eq 2 && "${option}" == "--force" ]]; then
+            PUBLISH_FORCE=1
+        elif [[ $# -ne 1 ]]; then
+            die "publish accepts only the optional --force argument"
+        fi
+    else
+        [[ $# -eq 1 ]] || die "--force is accepted only by publish"
+    fi
 
     validate_configuration
 
