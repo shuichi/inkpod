@@ -594,16 +594,166 @@ public enum WorkspacePreset: String, CaseIterable, Codable, Sendable {
     case focus
 }
 
+public enum WorkspaceToolPresentation: String, CaseIterable, Codable, Sendable {
+    case hidden
+    case compact
+    case expanded
+
+    public var width: Double {
+        switch self {
+        case .hidden: 0
+        case .compact: 54
+        case .expanded: 178
+        }
+    }
+}
+
+public enum WorkspaceInspectorSection: String, CaseIterable, Codable, Sendable {
+    case layerPlane
+    case color
+    case history
+    case vectorAnnotationGuides
+    case animation
+}
+
+public enum WorkspaceInspectorEdge: String, CaseIterable, Codable, Sendable {
+    case leading
+    case trailing
+}
+
+public enum WorkspaceChromeAction: Equatable, Sendable {
+    case toggleToolSurface
+    case toggleToolOptions
+    case setToolPresentation(WorkspaceToolPresentation)
+    case toggleInspector
+    case setInspectorPresented(Bool)
+    case selectInspectorSection(WorkspaceInspectorSection)
+    case showInspectorSection(WorkspaceInspectorSection)
+    case toggleInspectorSection(WorkspaceInspectorSection)
+    case mirrorEdges
+    case setInspectorWidth(Double)
+    case restore(WorkspaceChromePreference)
+}
+
+public struct WorkspaceChromePreference: Equatable, Codable, Sendable {
+    public var toolPresentation: WorkspaceToolPresentation
+    public var inspectorRequestedVisible: Bool
+    public var selectedInspectorSection: WorkspaceInspectorSection
+    public var inspectorEdge: WorkspaceInspectorEdge
+    public var inspectorWidth: Double
+
+    public init(
+        toolPresentation: WorkspaceToolPresentation,
+        inspectorRequestedVisible: Bool,
+        selectedInspectorSection: WorkspaceInspectorSection,
+        inspectorEdge: WorkspaceInspectorEdge,
+        inspectorWidth: Double
+    ) {
+        self.toolPresentation = toolPresentation
+        self.inspectorRequestedVisible = inspectorRequestedVisible
+        self.selectedInspectorSection = selectedInspectorSection
+        self.inspectorEdge = inspectorEdge
+        self.inspectorWidth = inspectorWidth
+    }
+
+    public static let defaultColoring = WorkspaceChromePreference(
+        toolPresentation: .expanded,
+        inspectorRequestedVisible: true,
+        selectedInspectorSection: .layerPlane,
+        inspectorEdge: .trailing,
+        inspectorWidth: 320
+    )
+
+    @discardableResult
+    public mutating func reduce(_ action: WorkspaceChromeAction) -> Bool {
+        let previous = self
+        switch action {
+        case .toggleToolSurface:
+            toolPresentation = toolPresentation == .hidden ? .compact : .hidden
+        case .toggleToolOptions:
+            toolPresentation = switch toolPresentation {
+            case .hidden, .compact: .expanded
+            case .expanded: .compact
+            }
+        case let .setToolPresentation(presentation):
+            toolPresentation = presentation
+        case .toggleInspector:
+            inspectorRequestedVisible.toggle()
+        case let .setInspectorPresented(isPresented):
+            inspectorRequestedVisible = isPresented
+        case let .selectInspectorSection(section):
+            selectedInspectorSection = section
+        case let .showInspectorSection(section):
+            selectedInspectorSection = section
+            inspectorRequestedVisible = true
+        case let .toggleInspectorSection(section):
+            if inspectorRequestedVisible, selectedInspectorSection == section {
+                inspectorRequestedVisible = false
+            } else {
+                selectedInspectorSection = section
+                inspectorRequestedVisible = true
+            }
+        case .mirrorEdges:
+            inspectorEdge = inspectorEdge == .leading ? .trailing : .leading
+        case let .setInspectorWidth(width):
+            guard width.isFinite, (240 ... 640).contains(width) else { return false }
+            inspectorWidth = width
+        case let .restore(preference):
+            guard preference.isValid else { return false }
+            self = preference
+        }
+        return self != previous
+    }
+
+    fileprivate var isValid: Bool {
+        inspectorWidth.isFinite && (240 ... 640).contains(inspectorWidth)
+    }
+}
+
+public struct AdaptiveChromeState: Equatable, Sendable {
+    public static let minimumCanvasWidth = 480.0
+
+    public let toolPresentation: WorkspaceToolPresentation
+    public let inspectorVisible: Bool
+    public let canvasWidth: Double
+
+    public static func project(
+        _ preference: WorkspaceChromePreference,
+        availableWidth: Double
+    ) -> AdaptiveChromeState {
+        let width = availableWidth.isFinite && availableWidth > 0 ? availableWidth : 1_200
+        var tool = preference.toolPresentation
+        var inspectorVisible = preference.inspectorRequestedVisible
+
+        func projectedCanvasWidth() -> Double {
+            max(0, width - tool.width - (inspectorVisible ? preference.inspectorWidth : 0))
+        }
+
+        if projectedCanvasWidth() < minimumCanvasWidth, tool == .expanded {
+            tool = .compact
+        }
+        if projectedCanvasWidth() < minimumCanvasWidth, inspectorVisible {
+            inspectorVisible = false
+        }
+        if projectedCanvasWidth() < minimumCanvasWidth, tool != .hidden {
+            tool = .hidden
+        }
+        return AdaptiveChromeState(
+            toolPresentation: tool,
+            inspectorVisible: inspectorVisible,
+            canvasWidth: projectedCanvasWidth()
+        )
+    }
+}
+
 public struct WorkspaceLayoutRecord: Equatable, Codable, Sendable {
-    private static let currentVersion: UInt32 = 1
+    private static let currentVersion: UInt32 = 2
 
     public let version: UInt32
     public var preset: WorkspacePreset
     public var split: WorkspaceSplitOrientation?
     public var splitRatio: Double
-    public var layerInspectorVisible: Bool
-    public var inspectorOnLeadingEdge: Bool
-    public var inspectorWidth: Double
+    public var chrome: WorkspaceChromePreference
     public var layerPlaneRatio: Double
     public var windowFrame: CGRect
     public var customName: String?
@@ -623,12 +773,50 @@ public struct WorkspaceLayoutRecord: Equatable, Codable, Sendable {
         self.preset = preset
         self.split = split
         self.splitRatio = splitRatio
-        self.layerInspectorVisible = layerInspectorVisible
-        self.inspectorOnLeadingEdge = inspectorOnLeadingEdge
-        self.inspectorWidth = inspectorWidth
+        chrome = WorkspaceChromePreference(
+            toolPresentation: .expanded,
+            inspectorRequestedVisible: layerInspectorVisible,
+            selectedInspectorSection: .layerPlane,
+            inspectorEdge: inspectorOnLeadingEdge ? .leading : .trailing,
+            inspectorWidth: inspectorWidth
+        )
         self.layerPlaneRatio = layerPlaneRatio
         self.windowFrame = windowFrame
         self.customName = customName
+    }
+
+    public init(
+        preset: WorkspacePreset,
+        split: WorkspaceSplitOrientation?,
+        splitRatio: Double,
+        chrome: WorkspaceChromePreference,
+        layerPlaneRatio: Double,
+        windowFrame: CGRect,
+        customName: String?
+    ) {
+        version = Self.currentVersion
+        self.preset = preset
+        self.split = split
+        self.splitRatio = splitRatio
+        self.chrome = chrome
+        self.layerPlaneRatio = layerPlaneRatio
+        self.windowFrame = windowFrame
+        self.customName = customName
+    }
+
+    public var layerInspectorVisible: Bool {
+        get { chrome.inspectorRequestedVisible }
+        set { chrome.inspectorRequestedVisible = newValue }
+    }
+
+    public var inspectorOnLeadingEdge: Bool {
+        get { chrome.inspectorEdge == .leading }
+        set { chrome.inspectorEdge = newValue ? .leading : .trailing }
+    }
+
+    public var inspectorWidth: Double {
+        get { chrome.inspectorWidth }
+        set { chrome.inspectorWidth = newValue }
     }
 
     public static let defaultColoring = WorkspaceLayoutRecord(
@@ -646,7 +834,7 @@ public struct WorkspaceLayoutRecord: Equatable, Codable, Sendable {
     func validated(visibleWorkAreas: [CGRect]) -> WorkspaceLayoutRecord? {
         guard version == Self.currentVersion,
               splitRatio.isFinite, (0.2 ... 0.8).contains(splitRatio),
-              inspectorWidth.isFinite, (240 ... 640).contains(inspectorWidth),
+              chrome.isValid,
               layerPlaneRatio.isFinite, (0.2 ... 0.8).contains(layerPlaneRatio),
               windowFrame.width.isFinite, windowFrame.height.isFinite,
               (640 ... 16_384).contains(windowFrame.width),
@@ -690,6 +878,37 @@ public struct WorkspaceLayoutRecord: Equatable, Codable, Sendable {
     }
 }
 
+private struct WorkspaceLayoutRecordV1: Codable {
+    let version: UInt32
+    var preset: WorkspacePreset
+    var split: WorkspaceSplitOrientation?
+    var splitRatio: Double
+    var layerInspectorVisible: Bool
+    var inspectorOnLeadingEdge: Bool
+    var inspectorWidth: Double
+    var layerPlaneRatio: Double
+    var windowFrame: CGRect
+    var customName: String?
+
+    var migrated: WorkspaceLayoutRecord {
+        WorkspaceLayoutRecord(
+            preset: preset,
+            split: split,
+            splitRatio: splitRatio,
+            chrome: WorkspaceChromePreference(
+                toolPresentation: .expanded,
+                inspectorRequestedVisible: layerInspectorVisible,
+                selectedInspectorSection: .layerPlane,
+                inspectorEdge: inspectorOnLeadingEdge ? .leading : .trailing,
+                inspectorWidth: inspectorWidth
+            ),
+            layerPlaneRatio: layerPlaneRatio,
+            windowFrame: windowFrame,
+            customName: customName
+        )
+    }
+}
+
 private extension CGRect {
     var center: CGPoint { CGPoint(x: midX, y: midY) }
 }
@@ -713,14 +932,34 @@ public final class WorkspaceLayoutStore: @unchecked Sendable {
     }
 
     public func load(visibleWorkAreas: [CGRect]) -> WorkspaceLayoutRecord? {
-        guard let data = defaults.data(forKey: key), data.count <= 64 * 1_024,
-              let decoded = try? PropertyListDecoder().decode(
-                  WorkspaceLayoutRecord.self,
-                  from: data
-              )
+        guard let data = defaults.data(forKey: key) else { return nil }
+        guard data.count <= 64 * 1_024,
+              let propertyList = try? PropertyListSerialization.propertyList(
+                  from: data,
+                  options: [],
+                  format: nil
+              ),
+              let dictionary = propertyList as? [String: Any],
+              let number = dictionary["version"] as? NSNumber
         else {
-            return nil
+            return fallback(visibleWorkAreas: visibleWorkAreas)
         }
-        return decoded.validated(visibleWorkAreas: visibleWorkAreas)
+        let decoder = PropertyListDecoder()
+        let decoded: WorkspaceLayoutRecord?
+        switch number.uint32Value {
+        case 1:
+            decoded = try? decoder.decode(WorkspaceLayoutRecordV1.self, from: data).migrated
+        case 2:
+            decoded = try? decoder.decode(WorkspaceLayoutRecord.self, from: data)
+        default:
+            decoded = nil
+        }
+        return decoded?.validated(visibleWorkAreas: visibleWorkAreas)
+            ?? fallback(visibleWorkAreas: visibleWorkAreas)
+    }
+
+    private func fallback(visibleWorkAreas: [CGRect]) -> WorkspaceLayoutRecord {
+        WorkspaceLayoutRecord.defaultColoring.validated(visibleWorkAreas: visibleWorkAreas)
+            ?? .defaultColoring
     }
 }

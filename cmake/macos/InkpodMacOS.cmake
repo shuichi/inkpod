@@ -18,6 +18,10 @@ set(INKPOD_MACOS_CORE_HOST_VERIFIER
     "${CMAKE_SOURCE_DIR}/tests/macos/verify_core_host_contract.py")
 set(INKPOD_MACOS_LOCALIZATION_VERIFIER
     "${CMAKE_SOURCE_DIR}/tests/macos/verify_localization_catalog.py")
+set(INKPOD_MACOS_RELEASE_VERIFIER
+    "${CMAKE_SOURCE_DIR}/tests/macos/verify_release_contract.py")
+set(INKPOD_MACOS_RELEASE_CLI_TEST
+    "${CMAKE_SOURCE_DIR}/tests/macos/test_macos_release_cli.py")
 
 set(INKPOD_XCODE_RUST_STATICLIB "${INKPOD_RUST_STATICLIB}")
 configure_file(
@@ -60,6 +64,11 @@ add_custom_target(inkpod_macos_check
     COMMAND "${Python3_EXECUTABLE}"
             "${INKPOD_MACOS_LOCALIZATION_VERIFIER}"
             --repository "${CMAKE_SOURCE_DIR}"
+    COMMAND "${Python3_EXECUTABLE}"
+            "${INKPOD_MACOS_RELEASE_VERIFIER}"
+            --repository "${CMAKE_SOURCE_DIR}"
+    COMMAND "${Python3_EXECUTABLE}"
+            "${INKPOD_MACOS_RELEASE_CLI_TEST}"
     DEPENDS
         inkpod_rust
         inkpod_macos_header_c11
@@ -68,7 +77,9 @@ add_custom_target(inkpod_macos_check
         "${INKPOD_MACOS_PARITY_VERIFIER}"
         "${INKPOD_MACOS_CORE_HOST_VERIFIER}"
         "${INKPOD_MACOS_LOCALIZATION_VERIFIER}"
-    COMMENT "Running macOS ABI/import and 384-command parity checks"
+        "${INKPOD_MACOS_RELEASE_VERIFIER}"
+        "${INKPOD_MACOS_RELEASE_CLI_TEST}"
+    COMMENT "Running macOS ABI, parity, hardening, and release contract checks"
     VERBATIM)
 
 add_custom_target(inkpod_macos_tsan
@@ -136,6 +147,17 @@ add_test(
     COMMAND "${Python3_EXECUTABLE}"
             "${INKPOD_MACOS_LOCALIZATION_VERIFIER}"
             --repository "${CMAKE_SOURCE_DIR}")
+
+add_test(
+    NAME inkpod_macos_release_contract
+    COMMAND "${Python3_EXECUTABLE}"
+            "${INKPOD_MACOS_RELEASE_VERIFIER}"
+            --repository "${CMAKE_SOURCE_DIR}")
+
+add_test(
+    NAME inkpod_macos_release_cli
+    COMMAND "${Python3_EXECUTABLE}"
+            "${INKPOD_MACOS_RELEASE_CLI_TEST}")
 
 add_test(
     NAME inkpod_macos_xcode_abi_smoke

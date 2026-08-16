@@ -88,8 +88,8 @@ tests/macos/
 | native形式はv26／epoch 23のみ                                                                   | [docs/file-format.md:1–11](/Users/shuichi/GitHub/inkpod/docs/file-format.md:1)、[docs/determinism.md:3](/Users/shuichi/GitHub/inkpod/docs/determinism.md:3)                                                                                             | GUI移植ではversionを上げない                               |
 | 保存はsame-directory temporary→flush→replace、成功後だけsavepoint更新                           | [docs/file-format.md:1270](/Users/shuichi/GitHub/inkpod/docs/file-format.md:1270)                                                                                                                                                                       | Sandbox下でもこのatomicityを維持する必要がある             |
 | Windows owner/thread/snapshot設計は既に分離済み                                                 | [docs/architecture.md:334](/Users/shuichi/GitHub/inkpod/docs/architecture.md:334)、[docs/architecture.md:479](/Users/shuichi/GitHub/inkpod/docs/architecture.md:479)、[docs/architecture.md:505](/Users/shuichi/GitHub/inkpod/docs/architecture.md:505) | Mac側の設計雛形として利用できる                            |
-| `apps/macos`にchecked-in Xcode project、値型CoreHost、SwiftUI product app、AppKit/Metal Canvas、Sandbox file/clipboard adapter、multi-view workspace、paint/color/selection/history/filter/vector/annotation/Cut/animation/Batch UI、XCTestが存在する | [apps/macos](/Users/shuichi/GitHub/inkpod/apps/macos)、[InkpodMacOS.cmake](/Users/shuichi/GitHub/inkpod/cmake/macos/InkpodMacOS.cmake)                                                                                                                  | M0–M10のbuild／owner thread／product Canvas／file lifecycle／workspace／paint・color／selection・history／filter・vector・annotation／Cut・animation／Batchが完了 |
-| `PORT-001` のSandbox frontend file-authority gapはM4、複数folderのjob-lifetime authorityはM10で解消した | [docs/compatibility.md:31](/Users/shuichi/GitHub/inkpod/docs/compatibility.md:31)                                                                                                                                                                       | M11の配布hardeningは別scope                                |
+| `apps/macos`にchecked-in Xcode project、値型CoreHost、SwiftUI product app、AppKit/Metal Canvas、Sandbox file/clipboard adapter、multi-view workspace、paint/color/selection/history/filter/vector/annotation/Cut/animation/Batch UI、XCTestが存在する | [apps/macos](/Users/shuichi/GitHub/inkpod/apps/macos)、[InkpodMacOS.cmake](/Users/shuichi/GitHub/inkpod/cmake/macos/InkpodMacOS.cmake)                                                                                                                  | M0–M11のbuild／owner thread／product Canvas／file lifecycle／workspace／paint・color／selection・history／filter・vector・annotation／Cut・animation／Batch／workspace chromeが完了 |
+| `PORT-001` のSandbox frontend file-authority gapはM4、複数folderのjob-lifetime authorityはM10で解消した | [docs/compatibility.md:31](/Users/shuichi/GitHub/inkpod/docs/compatibility.md:31)                                                                                                                                                                       | M12の配布hardeningは別scope                                |
 
 ### Command inventory の正確な基準
 
@@ -121,7 +121,7 @@ macOS parityの分母は384とし、391を再現対象のUI数にしない。
 - rustc 1.95.0
 - CMake 4.4.2
 - macOS buildに使用するinstalled Rust targetは `aarch64-apple-darwin`
-- M0–M10のarm64 runtime、64-session headless integration、product Core/Metal、Sandbox file/clipboard、document/layer/plane/multi-view workspace、paint/fill/color、selection/transform/history、filter/effect/adjustment/vector/annotation/frame/vanishing-point、Cut/Sequence/Light Table/Subpalette/Reference/motion、Batch/job縦切りは通過。今回のV-MacUIはproduct lifecycle 6件とlaunched-product 8件を全通過した
+- M0–M11のarm64 runtime、64-session headless integration、product Core/Metal、Sandbox file/clipboard、document/layer/plane/multi-view workspace、paint/fill/color、selection/transform/history、filter/effect/adjustment/vector/annotation/frame/vanishing-point、Cut/Sequence/Light Table/Subpalette/Reference/motion、Batch/job、Liquid Glass workspace chrome縦切りは通過。今回のV-MacUIはproduct lifecycle 8件とlaunched-product 9件を全通過した
 
 ### 再利用する部分
 
@@ -142,10 +142,10 @@ macOS parityの分母は384とし、391を再現対象のUI数にしない。
 - MSIX/portable ZIP packaging
 - Windows DPI、UI Automation、shell integration
 
-### M11へ残る基盤
+### M12へ残る基盤
 
-- 配布用asset catalog／entitlements最終監査
-- complete XCUITest accessibility、manual tablet/multiple-display/sleep-wake、Instruments、sign/notarize pipeline
+- M12: 配布用asset catalog／entitlements最終監査
+- M12: complete XCUITest accessibility、manual tablet/multiple-display/sleep-wake、Instruments、sign/notarize pipeline
 
 ## 3. macOS向け設計原則
 
@@ -276,13 +276,14 @@ macOSではmenu barが全commandの到達可能性を担い、toolbarは頻用ac
 
 Paneの写像:
 
-- Tool: leading sidebar
-- Tool Options: contextual inspector／toolbar group
-- Color／Palette／Chart: trailing inspector tabs
-- Layer／Plane: trailing inspector
+- Tool: leadingの折りたたみ可能なglass tool surface。navigation hierarchyではないため、見た目だけを目的に`NavigationSplitView`へ入れない
+- Tool Options: expanded tool surface内のcontextual controls。toolbarは頻用actionだけを重複表示する
+- Color／Palette／Chart: 一つのtrailing inspector内のColor tab。swatchと色判定content wellはnon-glass
+- Layer／Plane: 同じtrailing inspector内のLayer tab
+- History／Vector／Annotation: 同じtrailing inspector内の各tab
 - Locator: inspector tabまたはtoolbar popover
 - Sequence: collapsible bottom timeline
-- Light Table／Subpalette／Reference: inspector tabs
+- Light Table／Subpalette／Reference: 同じtrailing inspector内のAnimation tab
 - Batch: workspaceに紐づく専用 `WindowGroup`
 - Job Progress: toolbar `ProgressView`＋詳細sheet/window
 - status: Canvas下の非glass status region
@@ -292,6 +293,8 @@ Windowsの自由dockを再現せず、sidebar／inspector／bottom timeline／ut
 ### 3.8 Liquid Glass
 
 標準toolbar、sidebar、inspector、sheet、popover、menuを使い、Tahoeのsystem appearanceに任せる。標準componentはLiquid Glassを自動採用し、custom effectは最上位の操作surfaceへ限定する。[HIG: Materials](https://developer.apple.com/design/human-interface-guidelines/materials)、[Build a SwiftUI app with the new design](https://developer.apple.com/videos/play/wwdc2025/323/)
+
+Tool surfaceはcommand群でありnavigation sidebarではないため、`GlassEffectContainer`／`glassEffect`を使うcustom top-level control surfaceとする。trailing側はSwiftUIの`.inspector(isPresented:)`と`InspectorCommands`を優先し、systemの表示復元、keyboard route、edge-to-edge glassを利用する。[HIG: Sidebars](https://developer.apple.com/design/human-interface-guidelines/sidebars)、[SwiftUI inspector](https://developer.apple.com/documentation/swiftui/view/inspector%28ispresented%3Acontent%3A%29/)
 
 追加してよい場所:
 
@@ -335,10 +338,10 @@ SPMは将来のpure Swift moduleまたは外部依存だけに限定し、初期
 
 | Windows側の機能領域・概念                      | `SPEC.md`契約                                                   | macOS surface                                     | API                                                                       | macOS向け変更理由                                           | owner／data flow                                    |    M | 検証                                                          |
 | ---------------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------- | --------------------------------------------------- | ---: | ------------------------------------------------------------- |
-| Application、Help/About、language              | `SHORT-001`、新規`MAC-SHELL-001`案                              | App menu、Settings、Help                          | SwiftUI `Commands`、`Settings`、AppKit About panel、String Catalog        | WIN-001を流用せずMac固有契約を分離                          | ApplicationCoordinator→CommandRouter／ResourceStore | 3,11 | ja/en、長文、user string非翻訳、Help route、a11y              |
+| Application、Help/About、language              | `SHORT-001`、新規`MAC-SHELL-001`案                              | App menu、Settings、Help                          | SwiftUI `Commands`、`Settings`、AppKit About panel、String Catalog        | WIN-001を流用せずMac固有契約を分離                          | ApplicationCoordinator→CommandRouter／ResourceStore | 3,12 | ja/en、長文、user string非翻訳、Help route、a11y              |
 | New/Open/Save/Recent/Revert/Recovery           | `IO-001/002`,`SESSION-001`,`CELL-001`,`CUT-001`                 | 標準File menu、panel、sheet                       | `NSOpenPanel`,`NSSavePanel`,`NSDocumentController`,`NSFileCoordinator`    | `DocumentGroup`へownershipを渡さない                        | FileAccessBroker→Core thread→save/open result       |    4 | success/cancel/failure、savepoint、reopen、duplicate identity |
 | Window/session/view lifecycle                  | `SESSION-001`,`VIEW-004/005`,`WORKSPACE-002`                    | WindowGroup、document tabs、Close View/Window     | SwiftUI scenes、FocusedValue、AppKit window delegate                      | Cmd-Wの対象を明示し、view/document/window closeを混同しない | issue-time CommandContext→session registry          |  1–5 | same-session multi-view、dirty prompt一回、stale close        |
-| Workspace／EditorGroup／pane                   | `WORKSPACE-001/002`,`WIN-002`の意味部分                         | sidebar、inspector、bottom timeline、Batch window | `NavigationSplitView`, `.inspector`, `HSplitView/VSplitView`, WindowGroup | Win32 dockを模写せず最大2 groupとscopeを維持                | WorkspaceModel→EditorGroup/PaneModel                |    5 | layout round-trip、monitor recovery、focus、follow/pin        |
+| Workspace／EditorGroup／pane                   | `WORKSPACE-001/002`,`WIN-002`の意味部分                         | glass tool surface、統合inspector、bottom timeline、Batch window | `GlassEffectContainer`, `.inspector`, `HSplitView/VSplitView`, WindowGroup | Win32 dockを模写せず最大2 groupとscopeを維持                | WorkspaceModel→EditorGroup/PaneModel                | 5,11 | layout v1→v2、collapse、monitor recovery、focus、follow/pin   |
 | Canvas/view/input                              | `RENDER-001`,`VIEW-001..005`,`SNAP-001`,`PERF-001`              | Metal Canvas                                      | NSViewRepresentable、NSView、CAMetalLayer、Metal、NSEvent                 | Retina/input/cache/thread性能のため                         | MainActor input→Core queue→snapshot→Renderer        |    2 | coordinates、pressure/tilt、hidden draw=0、device recovery    |
 | Command/state/shortcut                         | `SHORT-001`,`WORKSPACE-002`                                     | menu、toolbar、context menu、chord router         | SwiftUI Commands、FocusedValue、NSEvent monitor                           | Command中心、text/IME guard、標準shortcut優先               | descriptor→pure state owner→issue-time router       |    3 | 384 disposition、one owner/state/surface、prefix-free         |
 | Cell／Layer／Plane                             | `DOC-001/002/003`,`CELL-001`                                    | New Cell sheet、Layer/Plane inspector             | SwiftUI Form/List/OutlineGroup、sheet                                     | Common Controls配置を捨てnative inspectorへ                 | typed dialog result→Core primitive→projection       |    5 | all layer kinds、no-op/invalid/cancel、save/reopen            |
@@ -432,20 +435,21 @@ Raw Core pointerはCORE内だけ、raw snapshot pointerは`OwnedSnapshot`内だ�
 
 ## 6. マイルストーン一覧と依存関係
 
-| ID  | 名称                                       | 主な完了物                                                            |
-| --- | ------------------------------------------ | --------------------------------------------------------------------- |
-| M0  | Contract・build・ABI import基盤            | CMake→Cargo→Swift ABI smoke、arm64-only方針、384 parity ledger        |
-| M1  | 固定Core threadとsession lifecycle         | Core registry、bounded queue、create/close/shutdown headless vertical |
-| M2  | SwiftUI product shellとMetal Canvas        | WindowGroup、実Canvas、default stroke、pan/zoom、snapshot renderer    |
-| M3  | Command・menu・shortcut・localization      | Commands、FocusedValue、ABI v15 shortcut、Settings、ja/en             |
-| M4  | File lifecycle・Sandbox・clipboard/drop    | Open/Save/Recent/Revert/Recovery、UTType、security scope              |
-| M5  | Document/Layer/Plane・multi-view workspace | Cell workflow、Layer/Plane、最大2 group、named workspace              |
-| M6  | Paint・Fill・Color                         | Tool/Options、raster tools、fill、Color/Palette/Chart/Locator         |
-| M7  | Selection・Transform・History              | selection、floating、transform、Undo/Redo、history visualization      |
-| M8  | Filter・Effect・Vector・Annotation         | preview sheets、adjustment、vector、frame/VP/annotation               |
-| M9  | Cut・Sequence・Light Table                 | animation workflow、subpalette/reference、motion                      |
-| M10 | Batchとlong-running jobs                   | Batch window、folder authority、dry-run/cancel/report                 |
-| M11 | Parity freeze・hardening・distribution     | 384 zero-pending、a11y/perf/soak、arm64 signed/notarized artifact     |
+| ID  | 名称                                         | 主な完了物                                                            |
+| --- | -------------------------------------------- | --------------------------------------------------------------------- |
+| M0  | Contract・build・ABI import基盤              | CMake→Cargo→Swift ABI smoke、arm64-only方針、384 parity ledger        |
+| M1  | 固定Core threadとsession lifecycle           | Core registry、bounded queue、create/close/shutdown headless vertical |
+| M2  | SwiftUI product shellとMetal Canvas          | WindowGroup、実Canvas、default stroke、pan/zoom、snapshot renderer    |
+| M3  | Command・menu・shortcut・localization        | Commands、FocusedValue、ABI v15 shortcut、Settings、ja/en             |
+| M4  | File lifecycle・Sandbox・clipboard/drop      | Open/Save/Recent/Revert/Recovery、UTType、security scope              |
+| M5  | Document/Layer/Plane・multi-view workspace   | Cell workflow、Layer/Plane、最大2 group、named workspace              |
+| M6  | Paint・Fill・Color                           | Tool/Options、raster tools、fill、Color/Palette/Chart/Locator         |
+| M7  | Selection・Transform・History                | selection、floating、transform、Undo/Redo、history visualization      |
+| M8  | Filter・Effect・Vector・Annotation           | preview sheets、adjustment、vector、frame/VP/annotation               |
+| M9  | Cut・Sequence・Light Table                   | animation workflow、subpalette/reference、motion                      |
+| M10 | Batchとlong-running jobs                     | Batch window、folder authority、dry-run/cancel/report                 |
+| M11 | Liquid Glass・折りたたみworkspace chrome     | leading tool surface、統合inspector、layout v2、Canvas safe region    |
+| M12 | Parity freeze・hardening・distribution       | 384 zero-pending、a11y/perf/soak、arm64 signed/notarized artifact     |
 
 ```mermaid
 flowchart LR
@@ -464,8 +468,8 @@ flowchart LR
     M4 --> M10
     M9 --> M10
     M8 --> M11
-    M9 --> M11
     M10 --> M11
+    M11 --> M12
 ```
 
 ## 7. 各マイルストーンの詳細
@@ -630,20 +634,78 @@ flowchart LR
 - **検証:** V-Rust＋V-MacUnit＋V-MacUI＋full benchmark scenario。
 - **完了判定:** 予約aggregateをproduction commandとして数えず、具体operationへ型付きdispatchする。部分結果をlive documentへcommitしない。
 - **risk/mitigation:** folder accessはユーザーに明示選択させ、job lifetime中leaseを保持する。
-- **後続:** 機能追加のcatch-allをM11へ送らない。
+- **後続:** M11はworkspace chrome再編だけを扱い、未完了のdomain機能を混ぜない。
 
-### M11 — Parity freeze・hardening・distribution
+### M11 — Liquid Glass・折りたたみworkspace chrome
 
+- **実装状態:** 完了。M0–M10のCore／command／pane機能を変更せず、leading tool surface、単一inspector、明示状態と一時適応、workspace layout v2、Canvas safe regionをproduct UIへ接続した。Rust／C ABI v15／native `.inkpod` v26／replay epoch 23／Metal shaderは変更していない。
+- **command parity:** 新規行は0。既存384行はすべて`implemented`のまま、toolbar／Window menu／shortcut／pane command／`InspectorCommands` bindingが同じreducerとissue-time target routeへ到達することを再検証した。
+- **完了状態:** 既定では左側に折りたたみ可能なglass tool surface、中央に最大化されたMetal Canvas、右側に一つだけの折りたたみ可能なnative inspectorを持ち、mirror時は両edgeを交換する。明示的な表示状態、狭幅時の一時自動適応、workspace復元、Canvas resize、色判定、keyboard／VoiceOverが一つの契約として動く。
+- **要件:** `WORKSPACE-001/002`,`VIEW-001/002/004`,`RENDER-001`,`COLOR-001/002`,`SAFE-001`,`PERF-001`、新規`MAC-SHELL-001`／`MAC-A11Y-001`案。依存M5–M10。
+
+#### M11.1 利用者向けレイアウト
+
+- `WorkspaceEditorView`の横方向へpaneを個別追加する`HStack`を廃止し、`WorkspaceChromeView`がleading tool surface、中央EditorGroup、trailing inspector、bottom timelineを所有する。
+- 既定のleading tool surfaceはnavigationではなくcommand surfaceとする。`NavigationSplitView`を見た目のために使わず、`GlassEffectContainer`／`glassEffect`でsystem glass上に既存Tool buttonを置く。
+- leadingは`hidden`、`compact`、`expanded`の三状態とする。`compact`は現行54 ptのicon rail、`expanded`は現行178 ptのTool Options込み、`hidden`はCanvasへ全幅を返す。
+- toolbarのleading toggle、既存`windowToolPalette` command、設定済みshortcut、accessibility actionは同じroute/stateを使う。`windowToolOptions`は`compact`と`expanded`だけを切り替え、hidden時に実行した場合は`expanded`で再表示する。
+- 既定のtrailing側はSwiftUI `.inspector(isPresented:)`＋`InspectorCommands`を第一選択とし、同時に一列だけ表示する。幅は現行contractの240...640 pt、既定320 ptを維持する。
+- inspector内は`Layer/Plane`、`Color/Palette/Chart/Locator`、`History`、`Vector/Annotation/Guides`、`Animation`の五つのicon tabとし、各tabは既存pane viewと同じissue-time target／follow／pin ownerを使う。
+- 既存pane表示commandは別の横列を増やさない。inspectorが閉じているか別tabを表示中なら開いて対応tabを選択し、対応tabが選択中ならinspectorを閉じる。checked stateは「inspectorが表示中かつ対応tabが選択中」で統一する。Locator／Light Table／Subpalette／Reference等のsection commandは既存section visibilityを維持し、有効化時に対応tabも選択する。
+- master inspector toggleは選択tabを保持したまま一時的に列だけを閉じ、再表示時に同じtabへ戻す。Sequence timelineとBatch専用windowの形は変更しない。
+- `workspaceMirror`は文字のlayout directionを反転せず、tool surfaceと統合inspectorのedgeだけを交換する。SwiftUI `.inspector`がleading配置を表現できない場合は、同じSwiftUI content／modelを薄いAppKit split host＋`NSGlassEffectView`へ載せ、別のpane実装や状態ownerを作らない。
+
+#### M11.2 明示状態、自動適応、workspace persistence
+
+- `WorkspaceChromePreference`を値型として導入し、`toolPresentation`、`inspectorRequestedVisible`、`selectedInspectorSection`、`inspectorEdge`、`inspectorWidth`をwindow単位で保持する。document、Core、`.inkpod`へ保存しない。
+- `WorkspaceLayoutRecord`をv2へ上げ、built-in／named workspaceに明示状態だけを保存する。decoderは最初にboundedなversionだけを読み、v1 DTOとv2 DTOを分けてdecodeする。v1は保存済み`layerInspectorVisible`／`inspectorOnLeadingEdge`／幅を維持し、v1に存在しないtool modeとselected tabは現行product defaultから決定的に補ってv2へ移行する。malformed／unknown versionは既存のdefault layoutへ戻す。
+- `AdaptiveChromeState`は保存しない一時projectionとする。中心のinteractive Canvasが480 pt未満になる場合、まず`expanded→compact`、次にtrailing inspectorを一時的に閉じ、それでも不足する場合だけtool surfaceを一時的に隠す。
+- window幅が戻ったときは一時適応だけを逆順に解除し、利用者が明示的に隠したsurfaceを勝手に再表示しない。自動適応中のworkspace saveは明示状態を保存し、適応結果で上書きしない。
+- toolbar/menu/shortcut操作、preset適用、mirror、window restore、display clampの全routeは同じ`WorkspaceChromePreference` reducerを通し、SwiftUI View内で個別Boolを直接変更しない。
+- `.inspector`のscene restorationや`InspectorCommands`からbindingへ届く変更も同じreducerへ入力する。起動時は検証済みworkspace recordをauthorityとし、framework restoration用の別保存先を作らない。
+
+#### M11.3 Glassと色精度
+
+- system toolbarとnative inspectorのLiquid GlassはTahoeに任せ、custom blur radius、固定dark tint、固定opacity、glassのpixel値を契約にしない。
+- tool surfaceの外形だけをcustom glassとし、近接するglass controlは一つの`GlassEffectContainer`でsamplingを共有する。装飾目的のglass button増加や独自morph animationは行わない。
+- outer paneにある現行`controlBackgroundColor`の全面塗りは除去するが、palette swatch、ColorPicker数値、chart、layer／sequence thumbnail、checker、color checkはneutralで不透明なcontent wellに置く。document色の背後samplingやaccent tintを色値へ混入させない。
+- `Reduce Transparency`、`Increase Contrast`、`Reduce Motion`、Light／Dark、accent colorでsystem fallback、境界、selection、focus ring、label contrastを検査する。glassが無効でもpane階層と操作可能性を失わない。
+
+#### M11.4 Canvas／Metal／Core境界
+
+- interactive `CAMetalLayer`をglassの下へ隠さない。`backgroundExtensionEffect()`を使う場合もworkspace backgroundだけを延長し、document pixelは複製、blur、sampleしない。
+- tool／inspectorが占有するsafe regionを除いた実可視矩形を`CanvasHostView`へ渡し、Fit、box zoom、pan clamp、pointer hit test、AppKit point→backing pixel変換を同じ矩形で行う。
+- collapse／expand／window resizeは既存surface resize経路を通し、`CAMetalLayer.drawableSize`とCore view viewportを更新する。document revision、history、dirty、savepoint、stable IDは変更しない。
+- hidden inspectorは高頻度のLocator／History／thumbnail projection更新を停止し、再表示時にcaptured session/view generationを検証してから一回refreshする。stale targetをactive documentへ再解決しない。
+- Rust Core、C ABI v15、native `.inkpod` v26、replay epoch 23、Metal shader／snapshot formatは変更しない。新しいcommand parity行も追加せず、既存384 commandとMac標準`InspectorCommands`のpresentation routeを分離して検査する。
+
+#### M11.5 実装範囲と検証
+
+- **scope/file:** `UI/WorkspaceScene.swift`、`UI/WorkspaceM5Views.swift`、`UI/WorkspaceM6Views.swift`、`UI/WorkspaceM9Views.swift`、新規`UI/WorkspaceChromeViews.swift`、`Workspace/WorkspaceDomain.swift`、`Workspace/WorkspaceModel.swift`、`UI/CommandViews.swift`、String Catalog、Unit／Integration／UI／product Canvas lifecycle test。Rust／FFI／shaderは対象外。
+- **状態:** explicit show/hide/compact/expand、adaptive no-op、invalid persisted enum/width/selected tab/edge、resize中連続toggle、stale pinned target、hidden中session close、Reduce Transparency、renderer drawable nil／surface generation change。
+- **unit test:** chrome reducerの全遷移、利用者状態と一時適応の分離、v1→v2 migration／v2 round-trip／malformed fallback、pane command→tab selection／close、preset／edge mirror、保存中に自動適応を混入しないこと。
+- **integration test:** collapse前後でworkspace/session/view IDとdocument revision/history/dirty/savepointが不変、visible Canvas rectとbacking drawable sizeが一致、Fitとpointer座標のlast-pixel／half-open境界、hidden pane query停止、再表示時stale rejection。
+- **XCUITest:** toolbar、Window/View menu、shortcut、Full Keyboard Access、VoiceOver actionから同じsurfaceを開閉し、五tabを選択できる。640／800／1200 pt幅のresizeで自動適応と復元を確認し、Light／Dark、Reduce Transparency、Increase Contrastでaccessibility auditを通す。
+- **Metal／performance test:** 200回のcollapse/expandとwindow resizeでsnapshotをexactly once releaseし、surface generation mismatch、全tile再upload、hidden Present、queue増加、MainActor長時間blockを発生させない。glass compositingをMetal rendererへ実装しない。
+- **検証:** V-MacUnit＋V-MacUI＋V-Metal＋quick benchmark。物理複数display、VoiceOver、Reduce Transparency、sleep/wakeはM12のmanual/extended evidenceにも引き継ぐ。
+- **完了判定:** 同時表示される統合inspectorはedgeにかかわらず最大一列、明示状態と自動適応は可逆、色判定contentはnon-glass、Canvas座標とMetal ownershipは既存契約を維持し、未接続button／空tab／新規Core semanticsがゼロ。
+- **risk/mitigation:** custom glassによる色判断の汚染はopaque content well、狭幅適応によるlayout破壊は二層state、overlayによるCanvas座標ずれは単一visible-rect owner、SwiftUI inspectorの不足はprofile evidence後だけAppKit `NSSplitViewController`／`NSGlassEffectView` bridgeへ限定して補う。
+- **後続:** M12でM11を含む全appearance／accessibility／soak／distribution gateを固定する。M11へ無関係な機能追加を混ぜない。
+
+### M12 — Parity freeze・hardening・distribution
+
+- **実装状態:** 自動化と配布経路は実装済み。384行freeze、fault／a11y／soak source gate、全自動profileを順序付きで実行するrelease CLI、実`Inkpod.xcarchive`、arm64-only検査、Developer ID署名→DMG→notary log→staple／Gatekeeperの非迂回経路、競合安全なGitHub Release `publish`、Tahoe arm64／Windows x64・ARM64 CI、保護された署名workflow、release checklistを接続した。`publish`はcleanかつremote同期済みの同一commitだけをtagへ固定し、既存Releaseへ不足DMGを追加する。tag／Release／upload競合はremote再読込で同一commit／同一bytesだけを受理し、異なる既存assetを削除・上書きしない。2026-08-16に実機TahoeでV-Rust、V-MacUnit、V-MacUI、V-Metal、Thread Sanitizer、arm64 archiveを通過し、version 0.2.3／build 175のarm64 appとDMGをDeveloper IDで署名した。Apple notarization submission `fd8ccacc-c1a2-4d30-9c5b-064ea38fc901`はissuesなしでAcceptedとなり、ticketのstaple／validateとGatekeeperの`Notarized Developer ID`判定も通過した。GitHub公開、clean-machine launchと物理VoiceOver／複数display／sleep-wake等は未検証であり、マイルストーン全体の完了はまだ宣言しない。
+- **command parity:** 新規行は0。既存384行はすべて`implemented`のまま、M12 release contract verifierがpending、placeholder evidence、route/state/surface/testの退行を拒否する。
 - **完了状態:** parity manifestのpending/unmappedがゼロ。arm64 Tahoe appがaccessibility、appearance、fault injection、performance、arm64-only build、署名/notarizationを通過する。
-- **要件:** 全共有要件、`SAFE-001`,`PERF-001`,`PORT-001`、新規Mac shell/render/io/a11y/pkg要件案。依存M8–M10。
-- **scope/file:** smoke/fault/soak/UI test、sign/archive scripts、release checklist、documentation/status/compatibility更新。
+- **要件:** 全共有要件、`SAFE-001`,`PERF-001`,`PORT-001`、新規Mac shell/render/io/a11y/pkg要件案。依存M11。
+- **scope/file:** smoke/fault/soak/UI test、`tests/macos/verify_release_contract.py`、`scripts/macOS.sh`のrelease／publish、実archive CMake script、macOS／Windows ARM64 CI、protected sign/notary workflow、`docs/macos-release-checklist.md`、documentation/status/compatibility更新。
 - **data flow:** 新機能は追加しない。各ownerのmetricsとparity evidenceを集約する。
 - **状態:** 全milestoneのsuccess/no-op/invalid/cancel/stale/failureに加え、sleep/wake、memory pressure、GPU/display switch、sign/notary failure。
-- **test:** queue saturation、close中input、active stroke、stale snapshot、save failure、shutdown race、repeated window/tab/layout、VoiceOver、keyboard、IME、appearance、Retina/multidisplay、clean-machine launch。
+- **test:** queue saturation、close中input、active stroke、stale snapshot、save failure、shutdown race、repeated window/tab/layout/chrome collapse、VoiceOver、keyboard、IME、appearance、Retina/multidisplay、clean-machine launch。
 - **検証:** 全verification profile、arm64-only archive、codesign/spctl/notary/stapler。Windows/Linux/Rust regressionを含む。
 - **完了判定:** 384 command全行が許可されたdispositionに分類され、active semantic commandのroute/state/surface/testが完全。未接続UI、常時成功stub、未検証をVerified扱いする項目がゼロ。
 - **risk/mitigation:** Tahoe arm64 runner不足は隠さず、該当項目をExperimental/未検証のままrelease gateで判断する。
-- **後続:** なし。欠落機能はM11で雑に実装せず、所有milestoneを再度開く。
+- **後続:** なし。欠落機能はM12で雑に実装せず、所有milestoneを再度開く。
 
 ## 8. テスト、CI、性能、アクセシビリティ、配布戦略
 
@@ -855,7 +917,8 @@ M0 build/ABI
 → M7 selection/history
 → M8/M9
 → M10
-→ M11 release
+→ M11 workspace chrome
+→ M12 release
 ```
 
 並列化可能:
@@ -863,7 +926,7 @@ M0 build/ABI
 - M1後、M4のSandbox/file-authority spikeはM2/M3と並行可能
 - M2後、Metal hardeningとM3 command workは別担当で並行可能
 - M5後、M8のfilter/vector系とM9のanimation系は並行可能
-- accessibility label/testは各機能milestone内で同時実装し、M11へ一括先送りしない
+- accessibility label/testは各機能milestone内で同時実装し、M12へ一括先送りしない
 - signing/notary automationはM4のentitlement確定後、feature workと並行可能
 - Windows regressionとRust portable CIは全milestoneで常時実行する
 
@@ -901,7 +964,7 @@ M0 build/ABI
 | Shortcut ABI                 | ABI v15 neutral V2                              | Macだけ独自resolver                   | Core input interpretationの重複、Windows VK混入       | M3                        |
 | Pane detachment              | sidebar/inspector＋Batch専用window              | 多数のUtilityWindow                   | target/focus/keyboard複雑性                           | M5                        |
 | Workspace persistence        | versioned Codable property-list record          | Application Support DB                | lightweight state対拡張性                             | M5                        |
-| 配布channel                  | notarized Developer ID DMG/ZIP                  | Mac App Store                         | Sandbox/bookmark審査と配布運用                        | M11                       |
+| 配布channel                  | notarized Developer ID DMG/ZIP                  | Mac App Store                         | Sandbox/bookmark審査と配布運用                        | M12                       |
 | HDR/wide color               | 初期はSDR sRGB                                  | extended-range drawable               | color QAとrenderer complexity                         | M2。必要性は別SPEC変更    |
 | Xcode direct developer build | CMake configure/build後にprojectを開く          | XcodeがCargoを直接呼ぶ                | build正本の二重化                                     | M0                        |
 
@@ -913,6 +976,10 @@ M0 build/ABI
 - [Meet Liquid Glass — WWDC25](https://developer.apple.com/videos/play/wwdc2025/219/)
 - [Build a SwiftUI app with the new design — WWDC25](https://developer.apple.com/videos/play/wwdc2025/323/)
 - [Build an AppKit app with the new design — WWDC25](https://developer.apple.com/videos/play/wwdc2025/310/)
+- [HIG: Sidebars](https://developer.apple.com/design/human-interface-guidelines/sidebars)
+- [SwiftUI Inspector](https://developer.apple.com/documentation/swiftui/view/inspector%28ispresented%3Acontent%3A%29/)
+- [GlassEffectContainer](https://developer.apple.com/documentation/swiftui/glasseffectcontainer)
+- [NSGlassEffectView](https://developer.apple.com/documentation/appkit/nsglasseffectview)
 - [WindowGroup](https://developer.apple.com/documentation/SwiftUI/WindowGroup)
 - [DocumentGroup](https://developer.apple.com/documentation/SwiftUI/DocumentGroup)
 - [Building and customizing the menu bar with SwiftUI](https://developer.apple.com/documentation/SwiftUI/Building-and-customizing-the-menu-bar-with-SwiftUI)

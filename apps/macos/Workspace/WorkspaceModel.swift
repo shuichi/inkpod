@@ -405,11 +405,27 @@ extension WorkspaceModel {
         case .sequencePin:
             toggleM9Pane(.sequence, context: context)
         case .windowLightTable:
-            lightTableVisible.toggle()
+            if inspectorSectionIsActive(.animation) {
+                lightTableVisible.toggle()
+            } else {
+                let wasVisible = lightTableVisible
+                let chromeResult = reduceChrome(.showInspectorSection(.animation))
+                if chromeResult == .stale { return .stale }
+                lightTableVisible = true
+                if wasVisible, chromeResult == .noOp { return .noOp }
+            }
         case .lightTablePin:
             toggleM9Pane(.lightTable, context: context)
         case .windowSubpalette:
-            subpaletteVisible.toggle()
+            if inspectorSectionIsActive(.animation) {
+                subpaletteVisible.toggle()
+            } else {
+                let wasVisible = subpaletteVisible
+                let chromeResult = reduceChrome(.showInspectorSection(.animation))
+                if chromeResult == .stale { return .stale }
+                subpaletteVisible = true
+                if wasVisible, chromeResult == .noOp { return .noOp }
+            }
         case .subpalettePin:
             toggleM9Pane(.subpalette, context: context)
         default:
@@ -737,6 +753,35 @@ private struct CanvasPaintGesture {
     var samples: [CorePointerSample]
 }
 
+private struct WorkspaceInspectorTarget: Equatable {
+    let workspaceID: WorkspaceID
+    let lifecycleGeneration: UInt64
+    let session: CoreSessionTarget
+    let view: CoreViewTarget
+
+    init?(_ context: CommandTargetContext?) {
+        guard let context else { return nil }
+        workspaceID = context.workspaceID
+        lifecycleGeneration = context.lifecycleGeneration
+        session = context.session
+        view = context.view
+    }
+
+    func matches(_ context: CommandTargetContext?) -> Bool {
+        guard let context else { return false }
+        return workspaceID == context.workspaceID
+            && lifecycleGeneration == context.lifecycleGeneration
+            && session == context.session
+            && view == context.view
+    }
+}
+
+enum WorkspaceChromeReductionResult: Equatable {
+    case changed
+    case noOp
+    case stale
+}
+
 @MainActor
 final class WorkspaceModel: ObservableObject {
     enum Phase: Equatable {
@@ -765,8 +810,6 @@ final class WorkspaceModel: ObservableObject {
     @Published private(set) var locator: CoreLocatorProjection?
     @Published private(set) var colorChartPreview: CoreColorChartPreviewProjection?
     @Published private(set) var colorReplacePreview: CoreColorReplacePreviewProjection?
-    @Published var toolSidebarVisible = true
-    @Published var toolOptionsVisible = true
     @Published var colorInspectorVisible = true
     @Published var locatorVisible = true
     @Published var eyedropperSource = CoreEyedropperSource.composite
@@ -782,8 +825,11 @@ final class WorkspaceModel: ObservableObject {
     @Published private(set) var chartPage: UInt32 = 0
     @Published private(set) var layerPaneTarget = PaneTargetRecord.following
     @Published private(set) var layerPaneAccessibilityNotice: PaneTargetNotice?
-    @Published var layerInspectorVisible = true
-    @Published var inspectorOnLeadingEdge = false
+    @Published private(set) var chromePreference = WorkspaceChromePreference.defaultColoring
+    @Published private(set) var adaptiveChrome = AdaptiveChromeState.project(
+        .defaultColoring,
+        availableWidth: 1_200
+    )
     @Published var pendingNewCellDraft: NewCellDraft?
     @Published var pendingNewCellPlan: CoreCellCreationPlanProjection?
     @Published var pendingCellEditor: CellEditorDraft?
@@ -799,7 +845,6 @@ final class WorkspaceModel: ObservableObject {
     @Published private(set) var history: CoreHistoryProjection?
     @Published private(set) var historyRows: [CoreHistoryVisualizationRow] = []
     @Published private(set) var historyProgress: CoreHistoryVisualizationProgressProjection?
-    @Published var historyInspectorVisible = true
     @Published var pendingRecoveryDecision: RecoveryCandidate?
     @Published private(set) var m8State: CoreM8Projection?
     @Published var pendingM8Editor: M8EditorDraft?
@@ -837,6 +882,9 @@ final class WorkspaceModel: ObservableObject {
     private var lifecycleGeneration: UInt64 = 1
     private var stopping = false
     private var drawableSize = CGSize.zero
+    private var chromeAvailableWidth = 1_200.0
+    private var suspendedInspectorTarget: WorkspaceInspectorTarget?
+    private var inspectorRestorationBlocked = false
     private var guidePositions: [UInt64: Int32] = [:]
     private var lastAffectedGuideID: UInt64?
     private weak var window: NSWindow?
@@ -870,6 +918,241 @@ final class WorkspaceModel: ObservableObject {
     init(id: WorkspaceID, application: ApplicationCoordinator) {
         self.id = id
         self.application = application
+    }
+
+    var toolSidebarVisible: Bool {
+        adaptiveChrome.toolPresentation != .hidden
+    }
+
+    var toolOptionsVisible: Bool {
+        adaptiveChrome.toolPresentation == .expanded
+    }
+
+    var layerInspectorVisible: Bool {
+        adaptiveChrome.inspectorVisible
+            && chromePreference.selectedInspectorSection == .layerPlane
+    }
+
+    var inspectorOnLeadingEdge: Bool {
+        chromePreference.inspectorEdge == .leading
+    }
+
+    var inspectorEffectivelyVisible: Bool {
+        adaptiveChrome.inspectorVisible
+    }
+
+    var visibleCanvasWidth: Double {
+        adaptiveChrome.canvasWidth
+    }
+
+    func inspectorSectionIsActive(_ section: WorkspaceInspectorSection) -> Bool {
+        adaptiveChrome.inspectorVisible && chromePreference.selectedInspectorSection == section
+    }
+
+    @discardableResult
+    func reduceChrome(_ action: WorkspaceChromeAction) -> WorkspaceChromeReductionResult {
+        let wasVisible = adaptiveChrome.inspectorVisible
+        let previousSection = chromePreference.selectedInspectorSection
+        var replacementPreference = chromePreference
+        guard replacementPreference.reduce(action) else { return .noOp }
+        let explicitlyDismissesInspector = actionDismissesInspector(
+            action,
+            replacementPreference: replacementPreference
+        )
+        if explicitlyDismissesInspector {
+            inspectorRestorationBlocked = false
+        }
+        let projectedAdaptive = AdaptiveChromeState.project(
+            replacementPreference,
+            availableWidth: chromeAvailableWidth
+        )
+        var replacementAdaptive = projectedAdaptive
+        if !wasVisible, projectedAdaptive.inspectorVisible,
+           let suspendedInspectorTarget,
+           !suspendedInspectorTarget.matches(commandContext)
+        {
+            inspectorRestorationBlocked = true
+            if actionPresentsInspector(action, replacementPreference: replacementPreference) {
+                lastCommandResult = .stale
+                return .stale
+            }
+            replacementAdaptive = suppressInspector(
+                in: projectedAdaptive,
+                availableWidth: chromeAvailableWidth
+            )
+        } else if inspectorRestorationBlocked, projectedAdaptive.inspectorVisible {
+            if let suspendedInspectorTarget,
+               suspendedInspectorTarget.matches(commandContext)
+            {
+                inspectorRestorationBlocked = false
+            } else {
+                replacementAdaptive = suppressInspector(
+                    in: projectedAdaptive,
+                    availableWidth: chromeAvailableWidth
+                )
+            }
+        } else if projectedAdaptive.inspectorVisible {
+            inspectorRestorationBlocked = false
+        }
+        chromePreference = replacementPreference
+        workspaceLayout.chrome = chromePreference
+        adaptiveChrome = replacementAdaptive
+        handleInspectorProjectionTransition(wasVisible: wasVisible)
+        if explicitlyDismissesInspector, !wasVisible, !adaptiveChrome.inspectorVisible {
+            suspendedInspectorTarget = WorkspaceInspectorTarget(commandContext)
+        }
+        if wasVisible, adaptiveChrome.inspectorVisible,
+           previousSection == .history,
+           chromePreference.selectedInspectorSection != .history
+        {
+            cancelHistoryVisualization()
+        }
+        if case .selectInspectorSection = action, wasVisible, adaptiveChrome.inspectorVisible {
+            refreshSelectedInspectorOnce()
+        } else if case .showInspectorSection = action, wasVisible,
+                  adaptiveChrome.inspectorVisible
+        {
+            refreshSelectedInspectorOnce()
+        } else if case .toggleInspectorSection = action, wasVisible,
+                  adaptiveChrome.inspectorVisible
+        {
+            refreshSelectedInspectorOnce()
+        }
+        return .changed
+    }
+
+    private func reduceChromeCommand(_ action: WorkspaceChromeAction) -> CommandRouteResult {
+        switch reduceChrome(action) {
+        case .changed: .started
+        case .noOp: .noOp
+        case .stale: .stale
+        }
+    }
+
+    func updateAdaptiveChrome(availableWidth: Double) {
+        guard availableWidth.isFinite, availableWidth > 0 else { return }
+        let wasVisible = adaptiveChrome.inspectorVisible
+        chromeAvailableWidth = availableWidth
+        let projected = AdaptiveChromeState.project(
+            chromePreference,
+            availableWidth: availableWidth
+        )
+        var replacement = projected
+        if !wasVisible, projected.inspectorVisible,
+           let suspendedInspectorTarget,
+           !suspendedInspectorTarget.matches(commandContext)
+        {
+            inspectorRestorationBlocked = true
+            lastCommandResult = .stale
+            replacement = suppressInspector(in: projected, availableWidth: availableWidth)
+        } else if inspectorRestorationBlocked, projected.inspectorVisible {
+            if let suspendedInspectorTarget,
+               suspendedInspectorTarget.matches(commandContext)
+            {
+                inspectorRestorationBlocked = false
+            } else {
+                replacement = suppressInspector(in: projected, availableWidth: availableWidth)
+            }
+        } else if projected.inspectorVisible {
+            inspectorRestorationBlocked = false
+        }
+        guard replacement != adaptiveChrome else { return }
+        adaptiveChrome = replacement
+        handleInspectorProjectionTransition(wasVisible: wasVisible)
+    }
+
+    private func actionPresentsInspector(
+        _ action: WorkspaceChromeAction,
+        replacementPreference: WorkspaceChromePreference
+    ) -> Bool {
+        switch action {
+        case .toggleInspector, .toggleInspectorSection:
+            replacementPreference.inspectorRequestedVisible
+        case let .setInspectorPresented(isPresented):
+            isPresented
+        case .showInspectorSection:
+            true
+        case let .restore(preference):
+            preference.inspectorRequestedVisible
+        case .toggleToolSurface, .toggleToolOptions, .setToolPresentation,
+             .selectInspectorSection, .mirrorEdges, .setInspectorWidth:
+            false
+        }
+    }
+
+    private func actionDismissesInspector(
+        _ action: WorkspaceChromeAction,
+        replacementPreference: WorkspaceChromePreference
+    ) -> Bool {
+        switch action {
+        case .toggleInspector, .toggleInspectorSection:
+            !replacementPreference.inspectorRequestedVisible
+        case let .setInspectorPresented(isPresented):
+            !isPresented
+        case let .restore(preference):
+            !preference.inspectorRequestedVisible
+        case .toggleToolSurface, .toggleToolOptions, .setToolPresentation,
+             .selectInspectorSection, .showInspectorSection, .mirrorEdges,
+             .setInspectorWidth:
+            false
+        }
+    }
+
+    private func suppressInspector(
+        in projection: AdaptiveChromeState,
+        availableWidth: Double
+    ) -> AdaptiveChromeState {
+        AdaptiveChromeState(
+            toolPresentation: projection.toolPresentation,
+            inspectorVisible: false,
+            canvasWidth: max(0, availableWidth - projection.toolPresentation.width)
+        )
+    }
+
+    func setInspectorPresentedFromFramework(_ isPresented: Bool) {
+        guard isPresented != adaptiveChrome.inspectorVisible else { return }
+        _ = reduceChrome(.setInspectorPresented(isPresented))
+    }
+
+    func selectInspectorSection(_ section: WorkspaceInspectorSection) {
+        _ = reduceChrome(.selectInspectorSection(section))
+    }
+
+    private func handleInspectorProjectionTransition(wasVisible: Bool) {
+        let isVisible = adaptiveChrome.inspectorVisible
+        guard wasVisible != isVisible else { return }
+        if isVisible {
+            guard let suspendedInspectorTarget else {
+                refreshSelectedInspectorOnce()
+                return
+            }
+            self.suspendedInspectorTarget = nil
+            guard suspendedInspectorTarget.matches(commandContext) else {
+                lastCommandResult = .stale
+                return
+            }
+            refreshSelectedInspectorOnce()
+        } else {
+            suspendedInspectorTarget = WorkspaceInspectorTarget(commandContext)
+            if chromePreference.selectedInspectorSection == .history {
+                cancelHistoryVisualization()
+            }
+        }
+    }
+
+    private func refreshSelectedInspectorOnce() {
+        switch chromePreference.selectedInspectorSection {
+        case .layerPlane:
+            refreshTree()
+        case .color:
+            refreshPaint()
+        case .history:
+            refreshHistory(rebuildVisualization: true)
+        case .vectorAnnotationGuides:
+            refreshM8()
+        case .animation:
+            refreshAnimation()
+        }
     }
 
     func start(opening startupItem: StartupWorkspaceItem? = nil) {
@@ -1245,7 +1528,7 @@ final class WorkspaceModel: ObservableObject {
     }
 
     func updateLocator(_ sample: CorePointerSample, viewID: WorkspaceViewID) {
-        guard locatorVisible, !locatorFixed,
+        guard inspectorSectionIsActive(.color), locatorVisible, !locatorFixed,
               let context = locatorPaneContext(preferredViewID: viewID)
         else {
             return
@@ -2532,18 +2815,22 @@ final class WorkspaceModel: ObservableObject {
         record.preset = preset
         switch preset {
         case .coloring:
-            record.layerInspectorVisible = true
+            record.chrome = .defaultColoring
         case .lineCleanup:
-            record.layerInspectorVisible = true
-            record.inspectorOnLeadingEdge = true
+            record.chrome = .defaultColoring
+            record.chrome.inspectorEdge = .leading
+            record.chrome.selectedInspectorSection = .vectorAnnotationGuides
         case .referenceCheck:
-            record.layerInspectorVisible = true
+            record.chrome = .defaultColoring
+            record.chrome.selectedInspectorSection = .animation
             record.split = .horizontal
         case .batch:
-            record.layerInspectorVisible = true
+            record.chrome = .defaultColoring
+            record.chrome.selectedInspectorSection = .animation
             record.split = .vertical
         case .focus:
-            record.layerInspectorVisible = false
+            record.chrome.toolPresentation = .hidden
+            record.chrome.inspectorRequestedVisible = false
         }
         restoreWorkspace(record)
     }
@@ -2553,9 +2840,7 @@ final class WorkspaceModel: ObservableObject {
             preset: workspaceLayout.preset,
             split: editorGraph?.splitOrientation,
             splitRatio: workspaceLayout.splitRatio,
-            layerInspectorVisible: layerInspectorVisible,
-            inspectorOnLeadingEdge: inspectorOnLeadingEdge,
-            inspectorWidth: workspaceLayout.inspectorWidth,
+            chrome: chromePreference,
             layerPlaneRatio: workspaceLayout.layerPlaneRatio,
             windowFrame: window?.frame ?? workspaceLayout.windowFrame,
             customName: name
@@ -2607,8 +2892,7 @@ final class WorkspaceModel: ObservableObject {
 
     private func restoreWorkspace(_ record: WorkspaceLayoutRecord) {
         workspaceLayout = record
-        layerInspectorVisible = record.layerInspectorVisible
-        inspectorOnLeadingEdge = record.inspectorOnLeadingEdge
+        _ = reduceChrome(.restore(record.chrome))
         if let window { applyWorkspaceLayout(record, to: window) }
         if let split = record.split, editorGraph?.groups.count == 1 {
             createLogicalView(split: split)
@@ -2621,8 +2905,8 @@ final class WorkspaceModel: ObservableObject {
 
     private func applyWorkspaceLayout(_ record: WorkspaceLayoutRecord, to window: NSWindow) {
         workspaceLayout = record
-        layerInspectorVisible = record.layerInspectorVisible
-        inspectorOnLeadingEdge = record.inspectorOnLeadingEdge
+        chromeAvailableWidth = Double(record.windowFrame.width)
+        _ = reduceChrome(.restore(record.chrome))
         window.setFrame(record.windowFrame, display: true)
     }
 
@@ -3068,11 +3352,17 @@ final class WorkspaceModel: ObservableObject {
         case .sequencePin:
             return CommandState(enabled: true, checked: sequencePaneTarget.isPinned)
         case .windowLightTable:
-            return CommandState(enabled: true, checked: lightTableVisible)
+            return CommandState(
+                enabled: true,
+                checked: inspectorSectionIsActive(.animation) && lightTableVisible
+            )
         case .lightTablePin:
             return CommandState(enabled: true, checked: lightTablePaneTarget.isPinned)
         case .windowSubpalette:
-            return CommandState(enabled: true, checked: subpaletteVisible)
+            return CommandState(
+                enabled: true,
+                checked: inspectorSectionIsActive(.animation) && subpaletteVisible
+            )
         case .subpalettePin:
             return CommandState(enabled: true, checked: subpalettePaneTarget.isPinned)
         case .fileNew, .fileOpen, .fileOpenRecovery, .fileImportRaster,
@@ -3149,7 +3439,7 @@ final class WorkspaceModel: ObservableObject {
              .workspacePresetBatch, .workspacePresetFocus, .workspaceSaveAs,
              .windowLayerPalette:
             return CommandState(enabled: true, checked: command == .windowLayerPalette
-                && layerInspectorVisible)
+                && inspectorSectionIsActive(.layerPlane))
         case .viewClose:
             return CommandState(enabled: (editorGraph?.allViews.count ?? 0) > 1)
         case .tabNext, .tabPrevious, .tabMoveLeft, .tabMoveRight:
@@ -3201,7 +3491,7 @@ final class WorkspaceModel: ObservableObject {
         case .toolFillOptions:
             return CommandState(
                 enabled: paintProjections[context.session] != nil,
-                checked: toolOptionsVisible
+                checked: adaptiveChrome.toolPresentation == .expanded
             )
         case .toolClosedFill, .toolFillExtension:
             let operation = paintProjections[context.session]?.editor.fillOptions.operation
@@ -3334,22 +3624,37 @@ final class WorkspaceModel: ObservableObject {
         case .selectionOptions:
             return CommandState(
                 enabled: paintProjections[context.session] != nil,
-                checked: toolOptionsVisible
+                checked: adaptiveChrome.toolPresentation == .expanded
             )
         case .windowToolPalette:
-            return CommandState(enabled: true, checked: toolSidebarVisible)
+            return CommandState(
+                enabled: true,
+                checked: adaptiveChrome.toolPresentation != .hidden
+            )
         case .windowToolOptions:
-            return CommandState(enabled: true, checked: toolOptionsVisible)
+            return CommandState(
+                enabled: true,
+                checked: adaptiveChrome.toolPresentation == .expanded
+            )
         case .windowColorPane:
-            return CommandState(enabled: true, checked: colorInspectorVisible)
+            return CommandState(enabled: true, checked: inspectorSectionIsActive(.color))
         case .windowLocator:
-            return CommandState(enabled: true, checked: locatorVisible)
+            return CommandState(
+                enabled: true,
+                checked: inspectorSectionIsActive(.color) && locatorVisible
+            )
         case .locatorPin:
             return CommandState(enabled: true, checked: locatorPaneIsPinned)
         case .locatorFixed:
-            return CommandState(enabled: locatorVisible, checked: locatorFixed)
+            return CommandState(
+                enabled: inspectorSectionIsActive(.color) && locatorVisible,
+                checked: locatorFixed
+            )
         case .locatorAutoscroll:
-            return CommandState(enabled: locatorVisible, checked: locatorAutoscroll)
+            return CommandState(
+                enabled: inspectorSectionIsActive(.color) && locatorVisible,
+                checked: locatorAutoscroll
+            )
         case .colorPin:
             return CommandState(enabled: true, checked: colorPaneIsPinned)
         case .fileExportInstructionRaster:
@@ -3679,7 +3984,7 @@ final class WorkspaceModel: ObservableObject {
                 viewID: viewID(for: context)
             )
         case .selectionOptions:
-            toolOptionsVisible = true
+            _ = reduceChrome(.setToolPresentation(.expanded))
         case .zoomIn:
             routeView(
                 .zoomAt(
@@ -3848,15 +4153,23 @@ final class WorkspaceModel: ObservableObject {
         case .workspaceNewWindow:
             application.openNewWorkspaceWindow()
         case .windowLayerPalette:
-            layerInspectorVisible.toggle()
+            return reduceChromeCommand(.toggleInspectorSection(.layerPlane))
         case .windowToolPalette:
-            toolSidebarVisible.toggle()
+            return reduceChromeCommand(.toggleToolSurface)
         case .windowToolOptions:
-            toolOptionsVisible.toggle()
+            return reduceChromeCommand(.toggleToolOptions)
         case .windowColorPane:
-            colorInspectorVisible.toggle()
+            return reduceChromeCommand(.toggleInspectorSection(.color))
         case .windowLocator:
-            locatorVisible.toggle()
+            if inspectorSectionIsActive(.color) {
+                locatorVisible.toggle()
+            } else {
+                let wasVisible = locatorVisible
+                let chromeResult = reduceChrome(.showInspectorSection(.color))
+                if chromeResult == .stale { return .stale }
+                locatorVisible = true
+                if wasVisible, chromeResult == .noOp { return .noOp }
+            }
         case .locatorPin:
             toggleLocatorPanePin()
         case .locatorFixed:
@@ -3866,8 +4179,7 @@ final class WorkspaceModel: ObservableObject {
         case .colorPin:
             toggleColorPanePin()
         case .workspaceMirror:
-            inspectorOnLeadingEdge.toggle()
-            workspaceLayout.inspectorOnLeadingEdge = inspectorOnLeadingEdge
+            return reduceChromeCommand(.mirrorEdges)
         case .workspaceReset:
             restoreWorkspace(.defaultColoring)
         case .workspaceSave:
@@ -3937,7 +4249,7 @@ final class WorkspaceModel: ObservableObject {
         case .toolEyedropper:
             updateEditor(.activeTool(.eyedropper), viewID: viewID(for: context))
         case .toolFillOptions:
-            toolOptionsVisible = true
+            _ = reduceChrome(.setToolPresentation(.expanded))
         case .toolClosedFill, .toolFillExtension:
             updateFillOperationAndSelectTool(
                 command == .toolClosedFill ? .closedRegion : .extensionRegion,
@@ -3945,6 +4257,7 @@ final class WorkspaceModel: ObservableObject {
             )
         case .toolColorReplaceTarget:
             colorInspectorVisible = true
+            _ = reduceChrome(.showInspectorSection(.color))
             updateEditor(.activeTool(.colorReplace), viewID: viewID(for: context))
         case .toolColorReplacePen, .toolColorReplaceRectangle,
              .toolColorReplacePolyline, .toolColorReplaceLasso, .toolColorReplaceAll:
@@ -3958,6 +4271,7 @@ final class WorkspaceModel: ObservableObject {
             updateEditor(.activeTool(.colorReplace), viewID: viewID(for: context))
         case .colorChoose, .colorEditor:
             colorInspectorVisible = true
+            _ = reduceChrome(.showInspectorSection(.color))
         case .colorCheckOff, .colorCheckLegacy, .colorCheckNative:
             let mode: CoreColorCheckMode = switch command {
             case .colorCheckLegacy: .legacyWhite
@@ -4010,6 +4324,7 @@ final class WorkspaceModel: ObservableObject {
             return .presentedInput
         case .chartSearch:
             colorInspectorVisible = true
+            _ = reduceChrome(.showInspectorSection(.color))
         case .chartNext:
             advanceChartCursor(session: context.session, matchingSearch: true)
         case .chartLock:
@@ -5258,7 +5573,9 @@ final class WorkspaceModel: ObservableObject {
             switch outcome {
             case let .history(projection):
                 history = projection
-                if rebuildVisualization { rebuildHistoryVisualization(context: context) }
+                if rebuildVisualization, inspectorSectionIsActive(.history) {
+                    rebuildHistoryVisualization(context: context)
+                }
             case .failed(.staleTarget):
                 lastCommandResult = .stale
             case let .failed(failure):
@@ -5285,7 +5602,8 @@ final class WorkspaceModel: ObservableObject {
     }
 
     func loadMoreHistoryRowsIfNeeded(after row: CoreHistoryVisualizationRow) {
-        guard row.id == historyRows.last?.id,
+        guard inspectorSectionIsActive(.history),
+              row.id == historyRows.last?.id,
               let progress = historyProgress,
               UInt64(historyRows.count) < progress.rowCount
         else { return }
@@ -6231,20 +6549,23 @@ private extension WorkspaceModel {
         } else {
             kind = .sequence
         }
-        var target: PaneTargetRecord = switch kind {
+        let originalTarget: PaneTargetRecord = switch kind {
         case .sequence: sequencePaneTarget
         case .lightTable: lightTablePaneTarget
         case .subpalette: subpalettePaneTarget
         }
+        var target = originalTarget
         guard let view = target.resolve(
             active: active,
             liveViews: editorGraph?.allViews ?? []
         ), let session = sessionProjections[view.session]
         else {
-            switch kind {
-            case .sequence: sequencePaneTarget = target
-            case .lightTable: lightTablePaneTarget = target
-            case .subpalette: subpalettePaneTarget = target
+            if target != originalTarget {
+                switch kind {
+                case .sequence: sequencePaneTarget = target
+                case .lightTable: lightTablePaneTarget = target
+                case .subpalette: subpalettePaneTarget = target
+                }
             }
             return nil
         }

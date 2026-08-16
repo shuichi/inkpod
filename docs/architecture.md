@@ -311,7 +311,11 @@ clipboard, and Finder-drop vertical, the M5 document/tree/multi-view workspace
 vertical, the M6 raster paint/fill/color vertical, the M7 selection/
 floating-transform/history vertical, and the M8 filter/effect/adjustment/
 vector/annotation/frame/vanishing-point vertical, the M9 Cut/Sequence/
-Light Table/Subpalette/Reference/motion vertical, and the M10 Batch/job vertical.
+Light Table/Subpalette/Reference/motion vertical, the M10 Batch/job vertical,
+and the M11 collapsible workspace-chrome vertical.
+CMake/source/CI release gates, archive/sign/notary orchestration, and the
+native-evidence checklist form the M12 hardening/distribution vertical; they add
+no document, renderer, format, or command semantics.
 CMake remains the only root build and invokes Cargo before the checked-in Xcode
 project:
 
@@ -492,6 +496,37 @@ reject, replacement, cancellation, close, and shutdown path has one release owne
 SwiftUI receives only bounded operation, progress, preview, and report projections
 and never reproduces document, image, selection, history, or format semantics.
 
+M11 replaces the accumulated horizontal pane columns with one
+`WorkspaceChromeView`. The MainActor `WorkspaceModel` owns a value-type
+`WorkspaceChromePreference`; toolbar, menu, shortcut, preset, mirror, native
+`InspectorCommands`, and scene-restoration binding changes all enter its one pure
+reducer. A separate derived `AdaptiveChromeState` temporarily compacts the tool
+surface, hides the inspector, and finally hides the tool surface when the Canvas
+would fall below 480 points. Only the explicit preference is persisted. The
+app-scoped layout record is version 2; a bounded version probe selects a distinct
+v1 migration DTO or v2 decoder, while malformed and unknown versions restore the
+default. This changes neither document persistence nor replay.
+
+The default trailing edge uses SwiftUI's native single `.inspector`; the mirrored
+leading edge hosts the same inspector content and model in a thin
+`NSGlassEffectView` fallback. The leading command surface alone uses one
+`GlassEffectContainer`. Color, chart, thumbnail, checker, and related judging
+content remains in opaque system content wells, and Reduce Transparency replaces
+the custom glass background without changing the hierarchy. Hidden inspector
+queries retain an issue-time workspace/session/view/generation target, suspend
+high-frequency refresh, and reject a stale target on reopening rather than
+falling back to the then-active document. Automatic width restoration performs
+the same check before publishing visibility; on mismatch it retains the explicit
+preference but keeps the runtime inspector hidden until an explicit dismissal or
+the captured target becomes current again.
+
+Chrome geometry reduces the actual SwiftUI content region before
+`CanvasHostView` lays out, so AppKit bounds, backing-pixel normalization, the Core
+viewport, and `CAMetalLayer.drawableSize` continue to describe the same half-open
+rectangle. Resize uses the existing surface route. A 200-resize product test
+proves bounded tile upload and exactly-once snapshot release without adding Metal
+glass composition, snapshot fields, C ABI, or Rust Core semantics.
+
 M6 keeps tool/color state as immutable Swift value projections while the fixed
 Core owner thread remains the only owner of editor state, live strokes, fill
 transactions, palette/chart codecs, color-replacement previews, locator reads,
@@ -569,8 +604,26 @@ Sanitizer where that extended profile is selected.
 CMake fixes the macOS Rust target to `aarch64-apple-darwin` for both Debug and
 Release. The Xcode sub-build sets `ARCHS=arm64`, and the Release architecture
 gate requires the Rust archive, XCTest executable, headless CoreHost, and
-`Inkpod.app` to report exactly `arm64` through `lipo -archs`. Intel Mac is not a
-supported product target. The checked-in parity ledger still classifies all 384 Windows
+product executable inside a real `Inkpod.xcarchive` to report exactly `arm64`
+through `lipo -archs`. Intel Mac is not a supported product target. The
+`release` command first runs portable Rust, Swift/ABI/parity, launched-product
+accessibility, Metal Validation/ownership soak, Thread Sanitizer, and archive
+profiles; it then signs bottom-up with Hardened Runtime and a secure timestamp,
+creates and verifies a DMG, waits for an accepted Apple notary result, retrieves
+the log, staples and validates the ticket, and runs Gatekeeper assessment. The
+release path rejects ad-hoc identity and cannot skip notarization; local ad-hoc
+packaging remains a separate `dmg` diagnostic. A source gate keeps the checked-in
+entitlement allowlist, evidence tests, CI profiles, and checklist connected.
+The separate `publish` command accepts only the already notarized versioned DMG
+from a clean release branch synchronized to its remote. It fixes `v<version>` to
+the exact HEAD before creating a prerelease, or adds the DMG to an existing
+public Release whose tag resolves to that commit. Tag, Release, and upload races
+are resolved by re-reading remote state; only the same commit or byte-identical
+asset is accepted. Before remote mutation it mounts the DMG read-only and checks
+the enclosed app signature, identity, version/build, arm64 executable, and exact
+entitlements. A same-name different asset is never deleted or overwritten.
+
+The checked-in parity ledger still classifies all 384 Windows
 production command IDs. M3 marks the 19 deferred M2 View rows and 11 M3
 application/help/shortcut/language rows implemented; M4 marks exactly 26 file,
 clipboard, and close rows; M5 marks exactly 67 document/tree/view/workspace

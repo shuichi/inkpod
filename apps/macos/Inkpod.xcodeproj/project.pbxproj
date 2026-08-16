@@ -64,6 +64,7 @@
 		100000000000000000000037 /* BatchDomain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000003D /* BatchDomain.swift */; };
 		100000000000000000000038 /* BatchWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000003E /* BatchWindow.swift */; };
 		100000000000000000000039 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000003F /* Assets.xcassets */; };
+		10000000000000000000003A /* WorkspaceChromeViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000040 /* WorkspaceChromeViews.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -161,6 +162,7 @@
 		20000000000000000000003D /* BatchDomain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchDomain.swift; sourceTree = "<group>"; };
 		20000000000000000000003E /* BatchWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchWindow.swift; sourceTree = "<group>"; };
 		20000000000000000000003F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		200000000000000000000040 /* WorkspaceChromeViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceChromeViews.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -321,6 +323,7 @@
 			isa = PBXGroup;
 			children = (
 				200000000000000000000019 /* WorkspaceScene.swift */,
+				200000000000000000000040 /* WorkspaceChromeViews.swift */,
 				200000000000000000000024 /* CommandViews.swift */,
 				200000000000000000000030 /* WorkspaceM5Views.swift */,
 				200000000000000000000033 /* WorkspaceM6Views.swift */,
@@ -574,6 +577,7 @@
 				100000000000000000000012 /* WorkspaceModel.swift in Sources */,
 				100000000000000000000013 /* CanvasHostView.swift in Sources */,
 				100000000000000000000014 /* WorkspaceScene.swift in Sources */,
+				10000000000000000000003A /* WorkspaceChromeViews.swift in Sources */,
 				10000000000000000000001B /* CommandModel.swift in Sources */,
 				100000000000000000000037 /* BatchDomain.swift in Sources */,
 				10000000000000000000001C /* ShortcutModel.swift in Sources */,

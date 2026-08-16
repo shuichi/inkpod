@@ -50,6 +50,7 @@ final class InkpodUITests: XCTestCase {
         let application = XCUIApplication()
         application.launch()
 
+        selectInspectorTab("animation", in: application)
         XCTAssertTrue(
             application.descendants(matching: .any)["inkpod.m9.sequence-timeline"]
                 .waitForExistence(timeout: 10)
@@ -86,6 +87,7 @@ final class InkpodUITests: XCTestCase {
         let application = XCUIApplication()
         application.launch()
 
+        selectInspectorTab("vectorAnnotationGuides", in: application)
         XCTAssertTrue(
             application.descendants(matching: .any)["inkpod.m8.inspector"]
                 .waitForExistence(timeout: 10)
@@ -124,6 +126,7 @@ final class InkpodUITests: XCTestCase {
 
         let canvas = application.descendants(matching: .any)["inkpod.canvas"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 10))
+        selectInspectorTab("history", in: application)
         XCTAssertTrue(
             application.descendants(matching: .any)["inkpod.m7.history-inspector"]
                 .waitForExistence(timeout: 5)
@@ -199,9 +202,10 @@ final class InkpodUITests: XCTestCase {
         let canvas = application.descendants(matching: .any)["inkpod.canvas"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 10))
         XCTAssertTrue(
-            application.descendants(matching: .any)["inkpod.m6.tool-sidebar"]
+            application.descendants(matching: .any)["inkpod.m11.tool-surface"]
                 .waitForExistence(timeout: 5)
         )
+        selectInspectorTab("color", in: application)
         XCTAssertTrue(
             application.descendants(matching: .any)["inkpod.m6.color-inspector"]
                 .waitForExistence(timeout: 5)
@@ -242,6 +246,63 @@ final class InkpodUITests: XCTestCase {
             object: canvas
         )
         XCTAssertEqual(XCTWaiter.wait(for: [revisionChanged], timeout: 10), .completed)
+    }
+
+    @MainActor
+    func testM11WorkspaceChromeUsesOneInspectorAndSharedToggleRoutes() throws {
+        let application = XCUIApplication()
+        application.launch()
+
+        let canvas = application.descendants(matching: .any)["inkpod.canvas"]
+        let inspector = application.descendants(matching: .any)["inkpod.m11.inspector"]
+        let toolSurface = application.descendants(matching: .any)["inkpod.m11.tool-surface"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 10))
+        XCTAssertTrue(inspector.waitForExistence(timeout: 5))
+        XCTAssertTrue(toolSurface.waitForExistence(timeout: 5))
+        XCTAssertEqual(
+            application.descendants(matching: .any).matching(
+                identifier: "inkpod.m11.inspector"
+            ).count,
+            1
+        )
+
+        for section in [
+            "layerPlane", "color", "history", "vectorAnnotationGuides", "animation",
+        ] {
+            selectInspectorTab(section, in: application)
+        }
+
+        application.typeKey("i", modifierFlags: [.command, .control])
+        XCTAssertFalse(inspector.waitForExistence(timeout: 2))
+        application.typeKey("i", modifierFlags: [.command, .control])
+        XCTAssertTrue(inspector.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            application.buttons["inkpod.m11.inspector-tab.animation"].isSelected
+        )
+
+        let toolToggle = application.buttons["inkpod.command.41900"].firstMatch
+        XCTAssertTrue(toolToggle.waitForExistence(timeout: 5))
+        toolToggle.click()
+        XCTAssertFalse(toolSurface.waitForExistence(timeout: 2))
+
+        let windowMenu = application.menuBars.menuBarItems["Window"].firstMatch.exists
+            ? application.menuBars.menuBarItems["Window"].firstMatch
+            : application.menuBars.menuBarItems["ウインドウ"].firstMatch
+        XCTAssertTrue(windowMenu.waitForExistence(timeout: 5))
+        windowMenu.click()
+        let identifiedMenuToolToggle = application.menuItems["inkpod.command.41900"].firstMatch
+        let englishMenuToolToggle = application.menuItems["Tool Palette"].firstMatch
+        let japaneseMenuToolToggle = application.menuItems["ツールパレット"].firstMatch
+        let menuToolToggle = identifiedMenuToolToggle.exists
+            ? identifiedMenuToolToggle
+            : (englishMenuToolToggle.exists ? englishMenuToolToggle : japaneseMenuToolToggle)
+        XCTAssertTrue(menuToolToggle.waitForExistence(timeout: 5))
+        menuToolToggle.click()
+        XCTAssertTrue(toolSurface.waitForExistence(timeout: 5))
+
+        try application.performAccessibilityAudit { issue in
+            self.isKnownMacOSFrameworkAuditFalsePositive(issue)
+        }
     }
 
     @MainActor
@@ -372,6 +433,43 @@ final class InkpodUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [panelBegan], timeout: 5), .completed)
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         application.terminate()
+    }
+
+    @MainActor
+    private func selectInspectorTab(_ section: String, in application: XCUIApplication) {
+        let tab = application.buttons["inkpod.m11.inspector-tab.\(section)"].firstMatch
+        XCTAssertTrue(tab.waitForExistence(timeout: 5), "missing inspector tab \(section)")
+        tab.click()
+        XCTAssertTrue(tab.isSelected, "inspector tab \(section) did not become selected")
+    }
+
+    @MainActor
+    private func isKnownMacOSFrameworkAuditFalsePositive(
+        _ issue: XCUIAccessibilityAuditIssue
+    ) -> Bool {
+        guard let element = issue.element else { return false }
+        if issue.auditType == .sufficientElementDescription {
+            // SwiftUI and AppKit add identifier-less container groups (and the
+            // system Touch Bar proxy) around labeled, independently audited controls.
+            return element.elementType == .touchBar
+                || (element.elementType == .group && element.identifier.isEmpty)
+        }
+        if issue.auditType == .parentChild {
+            // AppKit contributes a tiny identifier-less full-screen control group.
+            // Keep the exception bounded so product-owned groups remain audited.
+            let frame = element.frame
+            return element.elementType == .group
+                && element.identifier.isEmpty
+                && frame.width <= 16
+                && frame.height <= 16
+        }
+        if issue.auditType == .action {
+            // The Picker exposes an adjustable accessibility action, but XCTest
+            // still reports its exact pop-up proxy as having no default action.
+            return element.elementType == .popUpButton
+                && element.identifier == "inkpod.m9.light-table-set"
+        }
+        return false
     }
 
 }

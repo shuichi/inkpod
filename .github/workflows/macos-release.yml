@@ -1,0 +1,88 @@
+name: Signed macOS Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Three-component marketing version
+        required: true
+        type: string
+      build_number:
+        description: Decimal build number from 0 through 65535
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Verify, sign, notarize, and staple arm64 DMG
+    runs-on: macos-26
+    timeout-minutes: 180
+    environment: macos-release
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: aarch64-apple-darwin
+
+      - name: Import protected Developer ID and notary credentials
+        shell: zsh {0}
+        env:
+          MACOS_DEVELOPER_ID_P12_BASE64: ${{ secrets.MACOS_DEVELOPER_ID_P12_BASE64 }}
+          MACOS_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_P12_PASSWORD }}
+          MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+          MACOS_NOTARY_KEY_P8_BASE64: ${{ secrets.MACOS_NOTARY_KEY_P8_BASE64 }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          certificate_path="$RUNNER_TEMP/inkpod-developer-id.p12"
+          notary_key_path="$RUNNER_TEMP/AuthKey_${MACOS_NOTARY_KEY_ID}.p8"
+          keychain_path="$RUNNER_TEMP/inkpod-signing.keychain-db"
+          print -rn -- "$MACOS_DEVELOPER_ID_P12_BASE64" | base64 -D > "$certificate_path"
+          print -rn -- "$MACOS_NOTARY_KEY_P8_BASE64" | base64 -D > "$notary_key_path"
+          security create-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$keychain_path"
+          security import "$certificate_path" -k "$keychain_path" \
+            -P "$MACOS_DEVELOPER_ID_P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: -s \
+            -k "$MACOS_KEYCHAIN_PASSWORD" "$keychain_path"
+          security list-keychains -d user -s "$keychain_path"
+          xcrun notarytool store-credentials inkpod-ci-notary \
+            --key "$notary_key_path" \
+            --key-id "$MACOS_NOTARY_KEY_ID" \
+            --issuer "$MACOS_NOTARY_ISSUER_ID" \
+            --keychain "$keychain_path"
+          print -r -- "INKPOD_RELEASE_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
+          print -r -- "INKPOD_RELEASE_CERTIFICATE=$certificate_path" >> "$GITHUB_ENV"
+          print -r -- "INKPOD_RELEASE_NOTARY_KEY=$notary_key_path" >> "$GITHUB_ENV"
+
+      - name: Run non-bypassable release pipeline
+        env:
+          INKPOD_BUILD_NUMBER: ${{ inputs.build_number }}
+          INKPOD_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+          INKPOD_NOTARY_PROFILE: inkpod-ci-notary
+          INKPOD_VERSION: ${{ inputs.version }}
+        run: ./scripts/macOS.sh release
+
+      - name: Upload notarized DMG
+        uses: actions/upload-artifact@v6
+        with:
+          name: Inkpod-${{ inputs.version }}-macOS-arm64
+          path: build/release/macos/Inkpod-${{ inputs.version }}-macOS-arm64.dmg
+          if-no-files-found: error
+
+      - name: Remove temporary signing material
+        if: always()
+        shell: zsh {0}
+        run: |
+          set -euo pipefail
+          if [[ -n "${INKPOD_RELEASE_KEYCHAIN:-}" && -e "$INKPOD_RELEASE_KEYCHAIN" ]]; then
+            security delete-keychain "$INKPOD_RELEASE_KEYCHAIN" || true
+          fi
+          [[ -z "${INKPOD_RELEASE_CERTIFICATE:-}" ]] || rm -f -- "$INKPOD_RELEASE_CERTIFICATE"
+          [[ -z "${INKPOD_RELEASE_NOTARY_KEY:-}" ]] || rm -f -- "$INKPOD_RELEASE_NOTARY_KEY"

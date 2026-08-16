@@ -131,8 +131,188 @@ final class WorkspaceDomainTests: XCTestCase {
         XCTAssertLessThanOrEqual(secondaryLoaded.windowFrame.maxX, secondary.maxX)
 
         defaults.set(Data([0xFF, 0x00]), forKey: "layout")
-        XCTAssertNil(store.load(visibleWorkAreas: [workArea]))
+        let fallback = try XCTUnwrap(
+            WorkspaceLayoutRecord.defaultColoring.validated(visibleWorkAreas: [workArea])
+        )
+        XCTAssertEqual(
+            store.load(visibleWorkAreas: [workArea]),
+            fallback
+        )
     }
+
+    func testChromeReducerOwnsToolInspectorSectionAndMirrorTransitions() {
+        var preference = WorkspaceChromePreference.defaultColoring
+
+        XCTAssertTrue(preference.reduce(.toggleToolSurface))
+        XCTAssertEqual(preference.toolPresentation, .hidden)
+        XCTAssertTrue(preference.reduce(.toggleToolOptions))
+        XCTAssertEqual(preference.toolPresentation, .expanded)
+        XCTAssertTrue(preference.reduce(.toggleToolOptions))
+        XCTAssertEqual(preference.toolPresentation, .compact)
+
+        XCTAssertTrue(preference.reduce(.toggleInspectorSection(.color)))
+        XCTAssertTrue(preference.inspectorRequestedVisible)
+        XCTAssertEqual(preference.selectedInspectorSection, .color)
+        XCTAssertTrue(preference.reduce(.toggleInspectorSection(.color)))
+        XCTAssertFalse(preference.inspectorRequestedVisible)
+        XCTAssertEqual(preference.selectedInspectorSection, .color)
+        XCTAssertFalse(preference.reduce(.setInspectorPresented(false)))
+
+        XCTAssertTrue(preference.reduce(.showInspectorSection(.animation)))
+        XCTAssertTrue(preference.inspectorRequestedVisible)
+        XCTAssertEqual(preference.selectedInspectorSection, .animation)
+        XCTAssertTrue(preference.reduce(.mirrorEdges))
+        XCTAssertEqual(preference.inspectorEdge, .leading)
+    }
+
+    func testAdaptiveChromeProjectionIsOrderedReversibleAndNeverPersisted() {
+        var preference = WorkspaceChromePreference.defaultColoring
+        preference.toolPresentation = .expanded
+        preference.inspectorWidth = 320
+
+        let wide = AdaptiveChromeState.project(preference, availableWidth: 1_200)
+        XCTAssertEqual(wide.toolPresentation, .expanded)
+        XCTAssertTrue(wide.inspectorVisible)
+        XCTAssertEqual(wide.canvasWidth, 702)
+
+        let medium = AdaptiveChromeState.project(preference, availableWidth: 800)
+        XCTAssertEqual(medium.toolPresentation, .compact)
+        XCTAssertFalse(medium.inspectorVisible)
+        XCTAssertEqual(medium.canvasWidth, 746)
+
+        let narrow = AdaptiveChromeState.project(preference, availableWidth: 500)
+        XCTAssertEqual(narrow.toolPresentation, .hidden)
+        XCTAssertFalse(narrow.inspectorVisible)
+        XCTAssertEqual(narrow.canvasWidth, 500)
+
+        XCTAssertEqual(preference.toolPresentation, .expanded)
+        XCTAssertTrue(preference.inspectorRequestedVisible)
+        XCTAssertEqual(
+            AdaptiveChromeState.project(preference, availableWidth: 1_200),
+            wide
+        )
+        XCTAssertEqual(
+            AdaptiveChromeState.project(preference, availableWidth: .nan),
+            .project(preference, availableWidth: 1_200)
+        )
+    }
+
+    func testWorkspaceLayoutMigratesV1AndRoundTripsExplicitV2Chrome() throws {
+        let suite = "inkpod.workspace-m11.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = WorkspaceLayoutStore(defaults: defaults, key: "layout")
+        let workArea = CGRect(x: 0, y: 0, width: 1_440, height: 900)
+        let legacy = TestWorkspaceLayoutRecordV1(
+            version: 1,
+            preset: .lineCleanup,
+            split: .horizontal,
+            splitRatio: 0.72,
+            layerInspectorVisible: true,
+            inspectorOnLeadingEdge: true,
+            inspectorWidth: 420,
+            layerPlaneRatio: 0.61,
+            windowFrame: CGRect(x: 120, y: 120, width: 1_200, height: 800),
+            customName: "Legacy"
+        )
+        let legacyData = try PropertyListEncoder().encode(legacy)
+        defaults.set(legacyData, forKey: "layout")
+
+        let migrated = try XCTUnwrap(store.load(visibleWorkAreas: [workArea]))
+        XCTAssertEqual(migrated.version, 2)
+        XCTAssertEqual(migrated.chrome.toolPresentation, .expanded)
+        XCTAssertTrue(migrated.chrome.inspectorRequestedVisible)
+        XCTAssertEqual(migrated.chrome.selectedInspectorSection, .layerPlane)
+        XCTAssertEqual(migrated.chrome.inspectorEdge, .leading)
+        XCTAssertEqual(migrated.chrome.inspectorWidth, 420)
+
+        var explicit = migrated
+        explicit.chrome.toolPresentation = .compact
+        explicit.chrome.selectedInspectorSection = .history
+        explicit.chrome.inspectorRequestedVisible = false
+        XCTAssertTrue(store.save(explicit))
+        XCTAssertEqual(store.load(visibleWorkAreas: [workArea]), explicit)
+
+        var malformed = legacy
+        malformed.version = 99
+        defaults.set(try PropertyListEncoder().encode(malformed), forKey: "layout")
+        let fallback = try XCTUnwrap(
+            WorkspaceLayoutRecord.defaultColoring.validated(visibleWorkAreas: [workArea])
+        )
+        XCTAssertEqual(store.load(visibleWorkAreas: [workArea]), fallback)
+    }
+
+    func testWorkspaceLayoutRejectsEveryInvalidV2ChromeField() throws {
+        let suite = "inkpod.workspace-m11-invalid.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = WorkspaceLayoutStore(defaults: defaults, key: "layout")
+        let workArea = CGRect(x: 0, y: 0, width: 1_440, height: 900)
+        let fallback = try XCTUnwrap(
+            WorkspaceLayoutRecord.defaultColoring.validated(visibleWorkAreas: [workArea])
+        )
+        let validData = try PropertyListEncoder().encode(WorkspaceLayoutRecord.defaultColoring)
+        let validObject = try XCTUnwrap(
+            try PropertyListSerialization.propertyList(
+                from: validData,
+                options: .mutableContainersAndLeaves,
+                format: nil
+            ) as? NSMutableDictionary
+        )
+
+        for (field, invalidValue) in [
+            ("toolPresentation", "wide" as Any),
+            ("selectedInspectorSection", "metadata" as Any),
+            ("inspectorEdge", "center" as Any),
+            ("inspectorWidth", 239 as Any),
+        ] {
+            let candidate = validObject.mutableCopy() as! NSMutableDictionary
+            let chrome = try XCTUnwrap(
+                (validObject["chrome"] as? NSDictionary)?.mutableCopy()
+                    as? NSMutableDictionary
+            )
+            chrome[field] = invalidValue
+            candidate["chrome"] = chrome
+            defaults.set(
+                try PropertyListSerialization.data(
+                    fromPropertyList: candidate,
+                    format: .binary,
+                    options: 0
+                ),
+                forKey: "layout"
+            )
+            XCTAssertEqual(
+                store.load(visibleWorkAreas: [workArea]),
+                fallback,
+                "invalid \(field) must fall back atomically"
+            )
+        }
+    }
+
+    func testAdaptiveProjectionIsNotWrittenIntoWorkspaceRecord() {
+        var record = WorkspaceLayoutRecord.defaultColoring
+        record.chrome.toolPresentation = .expanded
+        record.chrome.inspectorRequestedVisible = true
+        let projected = AdaptiveChromeState.project(record.chrome, availableWidth: 640)
+
+        XCTAssertEqual(projected.toolPresentation, .compact)
+        XCTAssertFalse(projected.inspectorVisible)
+        XCTAssertEqual(record.chrome.toolPresentation, .expanded)
+        XCTAssertTrue(record.chrome.inspectorRequestedVisible)
+    }
+}
+
+private struct TestWorkspaceLayoutRecordV1: Codable {
+    var version: UInt32
+    var preset: WorkspacePreset
+    var split: WorkspaceSplitOrientation?
+    var splitRatio: Double
+    var layerInspectorVisible: Bool
+    var inspectorOnLeadingEdge: Bool
+    var inspectorWidth: Double
+    var layerPlaneRatio: Double
+    var windowFrame: CGRect
+    var customName: String?
 }
 
 private func workspaceView(_ value: UInt64, session: UInt64) -> WorkspaceViewRecord {

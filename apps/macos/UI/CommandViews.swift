@@ -216,6 +216,7 @@ public struct InkpodCommands: Commands {
 
     @CommandsBuilder
     private var applicationChrome: some Commands {
+        InspectorCommands()
         CommandGroup(replacing: .appInfo) {
             item(.helpAbout)
         }

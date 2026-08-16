@@ -6,6 +6,262 @@ import XCTest
 
 final class ProductCanvasLifecycleTests: XCTestCase {
     @MainActor
+    func testM11ChromeCommandsPreserveDocumentHistoryAndDirtyState() async throws {
+        _ = NSApplication.shared
+        let application = ApplicationCoordinator()
+        let workspaceID = WorkspaceID(
+            rawValue: UUID(uuidString: "A1110000-0000-0000-0000-000000000011")!
+        )
+        let workspace = application.workspace(for: workspaceID)
+        workspace.start()
+        let hostingView = NSHostingView(
+            rootView: InkpodWorkspaceScene(id: workspaceID, application: application)
+        )
+        hostingView.frame = NSRect(x: 0, y: 0, width: 1_200, height: 800)
+        let window = NSWindow(
+            contentRect: hostingView.frame,
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hostingView
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            dismantleProductCanvas(in: window)
+        }
+
+        guard await waitUntil(timeout: 10, condition: {
+            workspace.phase == .ready
+                && workspace.commandContext != nil
+                && workspace.history != nil
+        }), let before = workspace.projection, let context = workspace.commandContext
+        else {
+            XCTFail("M11 product workspace did not become ready")
+            await application.shutdown(confirmingDirty: false)
+            return
+        }
+        let beforeHistory = workspace.history
+        let foundCanvas = await waitForCanvas(in: hostingView, timeout: 10)
+        let canvas = try XCTUnwrap(foundCanvas)
+        for command in [
+            InkpodCommandID.windowToolPalette,
+            .windowToolOptions,
+            .windowLayerPalette,
+            .windowColorPane,
+            .workspaceMirror,
+        ] {
+            XCTAssertEqual(workspace.execute(command, context: context), .started)
+        }
+        await Task.yield()
+        let after = try XCTUnwrap(workspace.projection)
+        XCTAssertEqual(after.target, before.target)
+        XCTAssertEqual(after.documentRevision, before.documentRevision)
+        XCTAssertEqual(after.canUndo, before.canUndo)
+        XCTAssertEqual(after.canRedo, before.canRedo)
+        XCTAssertEqual(after.isDirty, before.isDirty)
+        XCTAssertEqual(workspace.history?.cursor, beforeHistory?.cursor)
+        XCTAssertEqual(workspace.history?.items, beforeHistory?.items)
+
+        let explicitChrome = workspace.chromePreference
+        for width in [640.0, 800.0, 1_200.0] {
+            window.setContentSize(NSSize(width: width, height: 800))
+            hostingView.layoutSubtreeIfNeeded()
+            let drawableMatched = await waitUntil(timeout: 5) {
+                guard let layer = canvas.layer as? CAMetalLayer else { return false }
+                return layer.drawableSize == canvas.convertToBacking(canvas.bounds).size
+            }
+            XCTAssertTrue(drawableMatched)
+            let backingBounds = canvas.convertToBacking(canvas.bounds)
+            XCTAssertGreaterThan(backingBounds.width, 0)
+            XCTAssertGreaterThan(backingBounds.height, 0)
+            XCTAssertNotNil(CanvasInputNormalizer.sample(
+                deviceX: backingBounds.width.nextDown,
+                deviceY: backingBounds.height.nextDown,
+                drawableWidth: backingBounds.width,
+                drawableHeight: backingBounds.height,
+                pressure: nil,
+                tilt: nil
+            ))
+            XCTAssertNil(CanvasInputNormalizer.sample(
+                deviceX: backingBounds.width,
+                deviceY: backingBounds.height,
+                drawableWidth: backingBounds.width,
+                drawableHeight: backingBounds.height,
+                pressure: nil,
+                tilt: nil
+            ))
+        }
+        XCTAssertEqual(workspace.chromePreference, explicitChrome)
+        let chromeRestored = await waitUntil(timeout: 5) {
+            workspace.adaptiveChrome.toolPresentation == .expanded
+                && workspace.adaptiveChrome.inspectorVisible
+        }
+        XCTAssertTrue(chromeRestored)
+        XCTAssertEqual(workspace.adaptiveChrome.toolPresentation, .expanded)
+        XCTAssertTrue(workspace.adaptiveChrome.inspectorVisible)
+
+        let automaticSuspensionContext = try XCTUnwrap(workspace.commandContext)
+        let automaticSuspensionView = automaticSuspensionContext.view
+        workspace.updateAdaptiveChrome(availableWidth: 640)
+        XCTAssertTrue(workspace.chromePreference.inspectorRequestedVisible)
+        XCTAssertFalse(workspace.adaptiveChrome.inspectorVisible)
+        XCTAssertEqual(
+            workspace.execute(.viewNew, context: automaticSuspensionContext),
+            .started
+        )
+        let automaticReplacementActivated = await waitUntil(timeout: 5) {
+            workspace.commandContext?.view != automaticSuspensionView
+        }
+        XCTAssertTrue(automaticReplacementActivated)
+        workspace.updateAdaptiveChrome(availableWidth: 1_200)
+        XCTAssertEqual(workspace.lastCommandResult, .stale)
+        XCTAssertTrue(workspace.chromePreference.inspectorRequestedVisible)
+        XCTAssertFalse(workspace.adaptiveChrome.inspectorVisible)
+        let automaticReplacementContext = try XCTUnwrap(workspace.commandContext)
+        XCTAssertEqual(
+            workspace.execute(.windowColorPane, context: automaticReplacementContext),
+            .started
+        )
+        XCTAssertFalse(workspace.chromePreference.inspectorRequestedVisible)
+        XCTAssertFalse(workspace.adaptiveChrome.inspectorVisible)
+        XCTAssertEqual(
+            workspace.execute(.windowColorPane, context: automaticReplacementContext),
+            .started
+        )
+        XCTAssertTrue(workspace.adaptiveChrome.inspectorVisible)
+
+        let colorContext = try XCTUnwrap(workspace.commandContext)
+        XCTAssertEqual(workspace.execute(.windowColorPane, context: colorContext), .started)
+        XCTAssertFalse(workspace.adaptiveChrome.inspectorVisible)
+        let suspendedView = colorContext.view
+        XCTAssertEqual(workspace.execute(.viewNew, context: colorContext), .started)
+        let replacementActivated = await waitUntil(timeout: 5) {
+            workspace.commandContext?.view != suspendedView
+        }
+        XCTAssertTrue(replacementActivated)
+        let replacementContext = try XCTUnwrap(workspace.commandContext)
+        let closedChrome = workspace.chromePreference
+        XCTAssertEqual(
+            workspace.execute(.windowColorPane, context: replacementContext),
+            .stale
+        )
+        XCTAssertEqual(workspace.lastCommandResult, .stale)
+        XCTAssertEqual(workspace.chromePreference, closedChrome)
+        XCTAssertFalse(workspace.adaptiveChrome.inspectorVisible)
+        workspace.locatorVisible = false
+        XCTAssertEqual(workspace.execute(.windowLocator, context: replacementContext), .stale)
+        XCTAssertFalse(workspace.locatorVisible)
+        workspace.lightTableVisible = false
+        XCTAssertEqual(workspace.execute(.windowLightTable, context: replacementContext), .stale)
+        XCTAssertFalse(workspace.lightTableVisible)
+        await application.shutdown(confirmingDirty: false)
+    }
+
+    @MainActor
+    func testM11TwoHundredChromeResizesReuseTilesAndReleaseSnapshotsExactlyOnce() async throws {
+        _ = NSApplication.shared
+        let host = CoreHost()
+        let renderer = MetalRendererHost()
+        let surface = CoreSurfaceTarget(
+            id: .init(rawValue: 1_111),
+            generation: .init(rawValue: 1)
+        )
+        let metalLayer = CAMetalLayer()
+        metalLayer.frame = CGRect(x: 0, y: 0, width: 128, height: 128)
+        metalLayer.drawableSize = CGSize(width: 128, height: 128)
+        let container = NSView(frame: metalLayer.frame)
+        container.wantsLayer = true
+        container.layer = metalLayer
+        let window = NSWindow(
+            contentRect: container.frame,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = container
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.orderOut(nil)
+            window.contentView = nil
+            _ = renderer.shutdown()
+            _ = host.shutdown().wait(timeout: 20)
+        }
+
+        let createdOutcome = await host.createSession(
+            documentUUID: .init(high: 0xA111, low: 2)
+        ).value()
+        guard case let .created(created) = createdOutcome else {
+            XCTFail("M11 Core session creation failed: \(createdOutcome)")
+            return
+        }
+        guard case let .viewUpdated(viewport) = await host.applyView(
+            target: created.primaryView,
+            command: .viewportResized(width: 128, height: 128)
+        ).value(),
+            case let .paint(paint) = await host.inspectPaint(
+                target: created.target,
+                expectedDocumentRevision: viewport.documentRevision
+            ).value(),
+            case let .paintUpdated(brush) = await host.updateEditor(
+                target: viewport.primaryView,
+                expectation: paint.editor.expectation,
+                update: .activeTool(.brush)
+            ).value(),
+            case .acknowledged = await host.beginRasterStroke(
+                target: viewport.primaryView,
+                expectation: brush.editor.expectation,
+                samples: [.init(deviceX: 32, deviceY: 32, pressure: 1)]
+            ).value(),
+            case .acknowledged = await host.appendRasterStroke(
+                target: viewport.primaryView,
+                samples: [.init(deviceX: 96, deviceY: 96, pressure: 1)]
+            ).value(),
+            case .documentUpdated = await host.endStroke(
+                target: viewport.primaryView
+            ).value()
+        else {
+            XCTFail("M11 tile-reuse fixture could not commit its seed stroke")
+            return
+        }
+        let route = CoreSnapshotRoute(
+            session: created.target,
+            view: viewport.primaryView,
+            surface: surface
+        )
+        XCTAssertTrue(renderer.registerSurface(
+            route: route,
+            layer: metalLayer,
+            drawableSize: metalLayer.drawableSize
+        ))
+        var snapshots: [CoreSnapshotEnvelope] = []
+        snapshots.reserveCapacity(200)
+        for index in 0 ..< 200 {
+            let width = index.isMultiple(of: 2) ? 128.0 : 96.0
+            renderer.resizeSurface(surface, drawableSize: CGSize(width: width, height: 128))
+            let outcome = await host.buildSnapshot(route: route).value()
+            guard case let .snapshot(snapshot) = outcome else {
+                XCTFail("M11 snapshot build failed at \(index): \(outcome)")
+                break
+            }
+            snapshots.append(snapshot)
+            let submission = renderer.submit(snapshot)
+            XCTAssertTrue(submission == .accepted || submission == .replacedPending)
+            if index.isMultiple(of: 20) {
+                XCTAssertTrue(renderer.waitUntilIdle(timeout: 10))
+            }
+        }
+        XCTAssertEqual(snapshots.count, 200)
+        XCTAssertTrue(renderer.waitUntilIdle(timeout: 20))
+        let metrics = renderer.metrics()
+        XCTAssertEqual(metrics.hiddenDrawCount, 0)
+        XCTAssertGreaterThan(metrics.reusedTileCount, 0)
+        XCTAssertLessThanOrEqual(metrics.uploadedTileCount, 4)
+        XCTAssertGreaterThan(metrics.reusedTileCount, metrics.uploadedTileCount)
+        XCTAssertTrue(renderer.unregisterSurface(surface))
+        XCTAssertTrue(snapshots.allSatisfy { $0.owner.ffiReleaseCount == 1 })
+    }
+
+    @MainActor
     func testM9LightTableSnapshotPresentsThroughMetalAndReleasesExactlyOnce() async throws {
         _ = NSApplication.shared
         let host = CoreHost()

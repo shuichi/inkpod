@@ -3,42 +3,23 @@ import SwiftUI
 struct WorkspaceEditorView: View {
     @ObservedObject var model: WorkspaceModel
     @ObservedObject var language: AppLanguageController
+
+    var body: some View {
+        WorkspaceChromeView(model: model, language: language)
+    }
+}
+
+struct WorkspaceEditorContent: View {
+    @ObservedObject var model: WorkspaceModel
+    @ObservedObject var language: AppLanguageController
     @State private var splitDragStartRatio: Double?
 
     var body: some View {
-        HStack(spacing: 0) {
-            if model.toolSidebarVisible {
-                M6ToolSidebar(model: model, language: language)
+        VStack(spacing: 0) {
+            editorGroups
+            if model.sequenceVisible {
                 Divider()
-            }
-            if model.layerInspectorVisible, model.inspectorOnLeadingEdge {
-                LayerPlaneInspector(model: model, language: language)
-                Divider()
-            }
-            VStack(spacing: 0) {
-                editorGroups
-                if model.sequenceVisible {
-                    Divider()
-                    M9SequenceTimeline(model: model, language: language)
-                }
-            }
-            if model.layerInspectorVisible, !model.inspectorOnLeadingEdge {
-                Divider()
-                LayerPlaneInspector(model: model, language: language)
-            }
-            if model.colorInspectorVisible || model.locatorVisible {
-                Divider()
-                M6ColorInspector(model: model, language: language)
-            }
-            if model.historyInspectorVisible {
-                Divider()
-                M7HistoryInspector(model: model, language: language)
-            }
-            Divider()
-            M8VectorAnnotationInspector(model: model, language: language)
-            if model.lightTableVisible || model.subpaletteVisible || model.referenceVisible {
-                Divider()
-                M9AnimationInspector(model: model, language: language)
+                M9SequenceTimeline(model: model, language: language)
             }
         }
     }
@@ -211,7 +192,6 @@ struct M8VectorAnnotationInspector: View {
         }
         .padding(8)
         .frame(minWidth: 210, idealWidth: 230, maxWidth: 280)
-        .background(Color(nsColor: .controlBackgroundColor))
         .accessibilityIdentifier("inkpod.m8.inspector")
     }
 
@@ -295,7 +275,6 @@ struct M7HistoryInspector: View {
             }
         }
         .frame(minWidth: 240, idealWidth: 280, maxWidth: 380)
-        .background(Color(nsColor: .controlBackgroundColor))
         .accessibilityIdentifier("inkpod.m7.history-inspector")
     }
 }
@@ -393,7 +372,6 @@ struct LayerPlaneInspector: View {
             .accessibilityIdentifier("inkpod.inspector.planes")
         }
         .frame(minWidth: 240, idealWidth: model.workspaceLayout.inspectorWidth, maxWidth: 640)
-        .background(.regularMaterial)
     }
 
     private var activePlanes: [CoreNodeProjection] {

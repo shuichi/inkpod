@@ -101,11 +101,21 @@ struct M9AnimationInspector: View {
                 if model.lightTableVisible { lightTableSection }
                 if model.subpaletteVisible { subpaletteSection }
                 if model.referenceVisible { referenceSection }
+                if !model.lightTableVisible, !model.subpaletteVisible, !model.referenceVisible {
+                    ContentUnavailableView(
+                        language.text("m11.inspector.animation.empty"),
+                        systemImage: "film.stack"
+                    )
+                }
             }
+            .padding(8)
+            .background(
+                Color(nsColor: .controlBackgroundColor),
+                in: RoundedRectangle(cornerRadius: 8)
+            )
             .padding(8)
         }
         .frame(minWidth: 230, idealWidth: 270, maxWidth: 360)
-        .background(Color(nsColor: .controlBackgroundColor))
         .accessibilityIdentifier("inkpod.m9.animation-inspector")
     }
 
@@ -130,6 +140,11 @@ struct M9AnimationInspector: View {
                     ForEach(model.lightTableAnimation?.lightTableSets ?? [], id: \.id) { set in
                         Text(set.name).tag(set.id)
                     }
+                }
+                .accessibilityLabel(language.text("m9.lightTable.set"))
+                .accessibilityIdentifier("inkpod.m9.light-table-set")
+                .accessibilityAdjustableAction { direction in
+                    adjustSelectedLightTableSet(direction)
                 }
                 ForEach(model.selectedLightTableSet?.items ?? [], id: \.id) { item in
                     Button {
@@ -164,6 +179,22 @@ struct M9AnimationInspector: View {
                 }
             }
         }
+    }
+
+    private func adjustSelectedLightTableSet(_ direction: AccessibilityAdjustmentDirection) {
+        let sets = model.lightTableAnimation?.lightTableSets ?? []
+        guard !sets.isEmpty else { return }
+        let currentIndex = sets.firstIndex { $0.id == model.selectedLightTableSetID } ?? 0
+        let nextIndex: Int
+        switch direction {
+        case .increment:
+            nextIndex = min(currentIndex + 1, sets.index(before: sets.endIndex))
+        case .decrement:
+            nextIndex = max(currentIndex - 1, sets.startIndex)
+        @unknown default:
+            return
+        }
+        model.selectLightTableSet(sets[nextIndex].id)
     }
 
     @ViewBuilder

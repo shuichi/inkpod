@@ -39,6 +39,32 @@ if(NOT INKPOD_XCODE_RESULT EQUAL 0)
         "${INKPOD_XCODE_OUTPUT}\n${INKPOD_XCODE_ERROR}")
 endif()
 
+set(INKPOD_ARCHIVE_PATH "${INKPOD_DERIVED_DATA}/Inkpod.xcarchive")
+file(REMOVE_RECURSE "${INKPOD_ARCHIVE_PATH}")
+execute_process(
+    COMMAND "${INKPOD_XCODEBUILD}"
+            archive
+            -project "${INKPOD_XCODE_PROJECT}"
+            -scheme "${INKPOD_XCODE_SCHEME}"
+            -configuration Release
+            -destination "generic/platform=macOS"
+            -archivePath "${INKPOD_ARCHIVE_PATH}"
+            -derivedDataPath "${INKPOD_DERIVED_DATA}"
+            -xcconfig "${INKPOD_XCCONFIG}"
+            -disableAutomaticPackageResolution
+            ARCHS=arm64
+            ONLY_ACTIVE_ARCH=NO
+            CODE_SIGNING_ALLOWED=NO
+    RESULT_VARIABLE INKPOD_ARCHIVE_RESULT
+    OUTPUT_VARIABLE INKPOD_ARCHIVE_OUTPUT
+    ERROR_VARIABLE INKPOD_ARCHIVE_ERROR)
+
+if(NOT INKPOD_ARCHIVE_RESULT EQUAL 0)
+    message(FATAL_ERROR
+        "arm64 xcodebuild archive failed (${INKPOD_ARCHIVE_RESULT})\n"
+        "${INKPOD_ARCHIVE_OUTPUT}\n${INKPOD_ARCHIVE_ERROR}")
+endif()
+
 set(INKPOD_TEST_EXECUTABLE
     "${INKPOD_DERIVED_DATA}/Build/Products/Release/InkpodCoreBridgeTests.xctest/Contents/MacOS/InkpodCoreBridgeTests")
 if(NOT EXISTS "${INKPOD_TEST_EXECUTABLE}")
@@ -55,7 +81,7 @@ if(NOT EXISTS "${INKPOD_CORE_HOST_INTEGRATION}")
 endif()
 
 set(INKPOD_APP_EXECUTABLE
-    "${INKPOD_DERIVED_DATA}/Build/Products/Release/Inkpod.app/Contents/MacOS/Inkpod")
+    "${INKPOD_ARCHIVE_PATH}/Products/Applications/Inkpod.app/Contents/MacOS/Inkpod")
 if(NOT EXISTS "${INKPOD_APP_EXECUTABLE}")
     message(FATAL_ERROR
         "arm64 macOS product executable was not produced: ${INKPOD_APP_EXECUTABLE}")

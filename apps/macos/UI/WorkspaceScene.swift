@@ -44,6 +44,9 @@ public struct InkpodWorkspaceScene: View {
         .frame(minWidth: 640, minHeight: 480)
         .focusedSceneValue(\.inkpodCommandTarget, model.commandContext)
         .toolbar {
+            ToolbarItem(placement: .navigation) {
+                commandButton(.windowToolPalette, icon: "sidebar.left")
+            }
             ToolbarItemGroup(placement: .primaryAction) {
                 commandButton(.toolPencil, icon: "pencil")
                 commandButton(.toolBrush, icon: "paintbrush")

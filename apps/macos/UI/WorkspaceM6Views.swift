@@ -64,7 +64,6 @@ struct M6ToolSidebar: View {
         }
         .padding(7)
         .frame(width: model.toolOptionsVisible ? 178 : 54)
-        .background(Color(nsColor: .controlBackgroundColor))
         .accessibilityIdentifier("inkpod.m6.tool-sidebar")
     }
 
@@ -263,9 +262,13 @@ struct M6ColorInspector: View {
                 }
             }
             .padding(10)
+            .background(
+                Color(nsColor: .controlBackgroundColor),
+                in: RoundedRectangle(cornerRadius: 8)
+            )
+            .padding(8)
         }
         .frame(minWidth: 230, idealWidth: 270, maxWidth: 360)
-        .background(Color(nsColor: .controlBackgroundColor))
         .accessibilityIdentifier("inkpod.m6.color-inspector")
     }
 

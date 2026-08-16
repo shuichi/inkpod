@@ -640,7 +640,15 @@
     "m9.bulk.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Confirm Bulk Registration" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "一括登録の確認" } } } },
     "m9.bulk.summary" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Add %1$@, skip %2$@ existing items." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "%1$@件を追加し、既存%2$@件をスキップします。" } } } },
     "m9.bulk.add" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "add" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "追加" } } } },
-    "m9.bulk.skip" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "skip" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "スキップ" } } } }
+    "m9.bulk.skip" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "skip" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "スキップ" } } } },
+    "m11.inspector.animation.empty" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "No Animation Sections Are Shown" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "表示中のアニメーション項目はありません" } } } },
+    "m11.inspector.tab.layerPlane" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Layers and Planes" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "レイヤーとプレーン" } } } },
+    "m11.inspector.tab.color" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Color, Palette, Chart, and Locator" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "色・パレット・チャート・ロケーター" } } } },
+    "m11.inspector.tab.history" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "History" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "履歴" } } } },
+    "m11.inspector.tab.vectorAnnotationGuides" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Vector, Annotation, and Guides" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "ベクター・注釈・ガイド" } } } },
+    "m11.inspector.tab.animation" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Animation" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "アニメーション" } } } },
+    "m11.tool.surface" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Tool Surface" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "ツールサーフェス" } } } },
+    "m11.tool.toggle.accessibility" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Hide Tool Surface" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "ツールサーフェスを隠す" } } } }
   },
   "version" : "1.0"
 }
