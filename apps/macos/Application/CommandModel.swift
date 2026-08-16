@@ -505,6 +505,13 @@ public struct CommandTargetContext: Equatable, Sendable {
         self.documentRevision = documentRevision
         self.viewRevision = viewRevision
     }
+
+    func hasSameDocumentState(as other: CommandTargetContext) -> Bool {
+        workspaceID == other.workspaceID
+            && lifecycleGeneration == other.lifecycleGeneration
+            && session == other.session
+            && documentRevision == other.documentRevision
+    }
 }
 
 public enum CommandRouteResult: Equatable, Sendable {

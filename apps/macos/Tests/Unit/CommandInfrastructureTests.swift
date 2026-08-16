@@ -1,6 +1,6 @@
 import Foundation
-import InkpodCoreBridge
 import Testing
+@testable import InkpodCoreBridge
 
 private final class ShortcutMemoryPersistence: ShortcutPersistence {
     var data: Data?
@@ -24,6 +24,52 @@ private struct ShortcutTestRecord: Codable {
 @Suite("M10 command and shortcut contracts", .serialized)
 @MainActor
 struct CommandInfrastructureTests {
+    @Test("document-state targets ignore view-only revision changes")
+    func documentStateTargetMatching() {
+        let workspaceID = WorkspaceID(
+            rawValue: UUID(uuidString: "A1110000-0000-0000-0000-000000000099")!
+        )
+        let session = CoreSessionTarget(
+            id: CoreSessionID(rawValue: 11),
+            generation: CoreSessionGeneration(rawValue: 2)
+        )
+        let initial = CommandTargetContext(
+            workspaceID: workspaceID,
+            lifecycleGeneration: 3,
+            session: session,
+            view: CoreViewTarget(
+                session: session,
+                id: CoreViewID(rawValue: 21),
+                generation: CoreViewGeneration(rawValue: 4)
+            ),
+            documentRevision: 5,
+            viewRevision: 6
+        )
+        let resizedView = CommandTargetContext(
+            workspaceID: workspaceID,
+            lifecycleGeneration: 3,
+            session: session,
+            view: CoreViewTarget(
+                session: session,
+                id: CoreViewID(rawValue: 22),
+                generation: CoreViewGeneration(rawValue: 7)
+            ),
+            documentRevision: 5,
+            viewRevision: 8
+        )
+        let editedDocument = CommandTargetContext(
+            workspaceID: workspaceID,
+            lifecycleGeneration: 3,
+            session: session,
+            view: resizedView.view,
+            documentRevision: 6,
+            viewRevision: 8
+        )
+
+        #expect(resizedView.hasSameDocumentState(as: initial))
+        #expect(!editedDocument.hasSameDocumentState(as: initial))
+    }
+
     @Test("implemented M2 through M10 commands have one owner, state owner, and real surface")
     func commandCatalogCompleteness() {
         #expect(CommandCatalog.parityCommandIDs.count == 372)

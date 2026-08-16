@@ -5659,7 +5659,10 @@ final class WorkspaceModel: ObservableObject {
                 target: context.session,
                 expectedDocumentRevision: context.documentRevision
             ).value()
-            guard lifecycleGeneration == generation, matches(context) else { return }
+            guard lifecycleGeneration == generation,
+                  let currentContext = commandContext,
+                  currentContext.hasSameDocumentState(as: context)
+            else { return }
             switch outcome {
             case let .history(projection):
                 history = projection
@@ -5744,7 +5747,10 @@ final class WorkspaceModel: ObservableObject {
                 if case let .failed(failure) = outcome { lastCommandResult = .failed(failure) }
                 return
             }
-            guard lifecycleGeneration == generation, matches(context) else {
+            guard lifecycleGeneration == generation,
+                  let currentContext = commandContext,
+                  currentContext.hasSameDocumentState(as: context)
+            else {
                 _ = await application.coreHost.releaseHistoryVisualization(progress.id).value()
                 return
             }
@@ -5767,7 +5773,8 @@ final class WorkspaceModel: ObservableObject {
             ).value()
             guard lifecycleGeneration == generation,
                   historyVisualization == id,
-                  matches(context)
+                  let currentContext = commandContext,
+                  currentContext.hasSameDocumentState(as: context)
             else { return }
             guard case let .historyVisualizationProgress(progress) = outcome else {
                 if case let .failed(failure) = outcome { lastCommandResult = .failed(failure) }
