@@ -741,11 +741,18 @@ private final class CoreOwnerLoop {
             )
         case let .buildSnapshot(route):
             return buildSnapshot(route: route)
-        case let .save(target, expectedRevision, pathUTF8, allowCleanSave):
+        case let .save(
+            target,
+            expectedRevision,
+            pathUTF8,
+            stagingPathUTF8,
+            allowCleanSave
+        ):
             return save(
                 target: target,
                 expectedDocumentRevision: expectedRevision,
                 pathUTF8: pathUTF8,
+                stagingPathUTF8: stagingPathUTF8,
                 allowCleanSave: allowCleanSave
             )
         case let .open(target, expectedRevision, pathUTF8):
@@ -3331,9 +3338,13 @@ private final class CoreOwnerLoop {
         target: CoreSessionTarget,
         expectedDocumentRevision: UInt64,
         pathUTF8: [UInt8],
+        stagingPathUTF8: [UInt8]?,
         allowCleanSave: Bool
     ) -> CoreRequestOutcome {
         guard validPath(pathUTF8) else { return .failed(.invalidRequest) }
+        if let stagingPathUTF8, !validPath(stagingPathUTF8) {
+            return .failed(.invalidRequest)
+        }
         switch resolve(target) {
         case .retired, .stale:
             return .failed(.staleTarget)
@@ -3348,8 +3359,45 @@ private final class CoreOwnerLoop {
             }
             guard allowCleanSave || before.isDirty else { return .noOp(before) }
             var info = documentInfo()
-            let status = withPath(pathUTF8) { pointer, count in
-                CoreStatus(cValue: inkpod_core_save(entry.core, pointer, count, &info))
+            let status: CoreStatus
+            if let stagingPathUTF8 {
+                var prepared: OpaquePointer?
+                let prepareStatus = withPath(stagingPathUTF8) { pointer, count in
+                    CoreStatus(cValue: inkpod_core_prepare_save(
+                        entry.core,
+                        pointer,
+                        count,
+                        &prepared
+                    ))
+                }
+                guard prepareStatus == .ok, prepared != nil else {
+                    if prepared != nil { _ = inkpod_prepared_save_release(&prepared) }
+                    return .failed(.coreOperation(prepareStatus))
+                }
+                defer { _ = inkpod_prepared_save_release(&prepared) }
+                do {
+                    try AtomicFilePublisher.publish(CoordinatedFileReplacement(
+                        destination: URL(filePath: String(decoding: pathUTF8, as: UTF8.self)),
+                        staging: URL(
+                            filePath: String(decoding: stagingPathUTF8, as: UTF8.self)
+                        )
+                    ))
+                } catch {
+                    return .failed(.coreOperation(.ioError))
+                }
+                status = withPath(pathUTF8) { pointer, count in
+                    CoreStatus(cValue: inkpod_core_commit_prepared_save(
+                        entry.core,
+                        pointer,
+                        count,
+                        prepared,
+                        &info
+                    ))
+                }
+            } else {
+                status = withPath(pathUTF8) { pointer, count in
+                    CoreStatus(cValue: inkpod_core_save(entry.core, pointer, count, &info))
+                }
             }
             guard status == .ok else { return .failed(.coreOperation(status)) }
             guard let updated = projection(for: entry) else {

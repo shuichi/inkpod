@@ -589,9 +589,34 @@ enum FileTypeCatalog {
     }
 }
 
-enum FileAccessBrokerError: Error {
+enum FileAccessBrokerError: Error, Equatable {
     case coordinationFailed
     case accessorNotInvoked
+    case preparedFileMissing
+}
+
+struct CoordinatedFileReplacement: Sendable {
+    let destination: URL
+    let staging: URL
+}
+
+struct AtomicFilePublisher {
+    static func publish(_ replacement: CoordinatedFileReplacement) throws {
+        let manager = FileManager.default
+        guard manager.fileExists(atPath: replacement.staging.path) else {
+            throw FileAccessBrokerError.preparedFileMissing
+        }
+        if manager.fileExists(atPath: replacement.destination.path) {
+            _ = try manager.replaceItemAt(
+                replacement.destination,
+                withItemAt: replacement.staging,
+                backupItemName: nil,
+                options: [.usingNewMetadataOnly]
+            )
+        } else {
+            try manager.moveItem(at: replacement.staging, to: replacement.destination)
+        }
+    }
 }
 
 final class FileAccessBroker: @unchecked Sendable {
@@ -607,6 +632,44 @@ final class FileAccessBroker: @unchecked Sendable {
         operation: (URL) throws -> T
     ) throws -> T {
         try coordinate(url, writing: true, operation: operation)
+    }
+
+    func coordinatePreparedReplacement<T>(
+        _ url: URL,
+        operation: (CoordinatedFileReplacement) throws -> T
+    ) throws -> T {
+        let lease = SecurityScopedResourceLease(url: url)
+        defer { lease.close() }
+        let coordinator = NSFileCoordinator(filePresenter: nil)
+        var coordinationError: NSError?
+        var result: Result<T, Error>?
+        coordinator.coordinate(
+            writingItemAt: url,
+            options: .forReplacing,
+            error: &coordinationError
+        ) { coordinatedURL in
+            result = Result {
+                let manager = FileManager.default
+                let replacementDirectory = try manager.url(
+                    for: .itemReplacementDirectory,
+                    in: .userDomainMask,
+                    appropriateFor: coordinatedURL,
+                    create: true
+                )
+                defer { try? manager.removeItem(at: replacementDirectory) }
+                let staging = replacementDirectory.appending(
+                    path: coordinatedURL.lastPathComponent,
+                    directoryHint: .notDirectory
+                )
+                return try operation(CoordinatedFileReplacement(
+                    destination: coordinatedURL,
+                    staging: staging
+                ))
+            }
+        }
+        if let coordinationError { throw coordinationError }
+        guard let result else { throw FileAccessBrokerError.accessorNotInvoked }
+        return try result.get()
     }
 
     private func coordinate<T>(

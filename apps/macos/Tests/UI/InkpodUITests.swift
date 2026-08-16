@@ -2,15 +2,52 @@ import XCTest
 
 final class InkpodUITests: XCTestCase {
     @MainActor
+    func testWorkspaceMenuIsDistinctFromSystemWindowMenuAndAboutHasProductCopy() throws {
+        let application = XCUIApplication()
+        application.launch()
+
+        let menuBarItems = application.menuBars.menuBarItems
+        let workspaceCount = menuBarItems.matching(identifier: "Workspace").count
+            + menuBarItems.matching(identifier: "ワークスペース").count
+        let systemWindowCount = menuBarItems.matching(identifier: "Window").count
+            + menuBarItems.matching(identifier: "ウインドウ").count
+        XCTAssertEqual(workspaceCount, 1)
+        XCTAssertEqual(systemWindowCount, 1)
+
+        let japaneseWorkspace = menuBarItems["ワークスペース"].firstMatch.exists
+        let appMenu = menuBarItems["Inkpod"].firstMatch
+        XCTAssertTrue(appMenu.waitForExistence(timeout: 10))
+        appMenu.click()
+        let englishAbout = application.menuItems["About Inkpod"].firstMatch
+        let japaneseAbout = application.menuItems["Inkpodについて"].firstMatch
+        let about = englishAbout.exists ? englishAbout : japaneseAbout
+        XCTAssertTrue(about.waitForExistence(timeout: 5))
+        about.click()
+
+        let description = japaneseWorkspace
+            ? "Inkpod は、ベクターベースのストロークによる非破壊編集に対応した、GPU アクセラレーション型ペイントエンジンです。"
+            : "Inkpod is a GPU-accelerated painting engine with vector-based strokes for non-destructive editing."
+        XCTAssertTrue(
+            application.descendants(matching: .any)[description]
+                .waitForExistence(timeout: 5)
+        )
+        XCTAssertTrue(
+            application.descendants(matching: .any)["© Shuichi Kurabayashi"]
+                .waitForExistence(timeout: 5)
+        )
+    }
+
+    @MainActor
     func testM10BatchWindowRunsDryRunAndKeepsReportVisible() throws {
         let application = XCUIApplication()
         application.launch()
 
-        let englishWindowMenu = application.menuBars.menuBarItems["Window"].firstMatch
-        let japaneseWindowMenu = application.menuBars.menuBarItems["ウインドウ"].firstMatch
-        let windowMenu = englishWindowMenu.exists ? englishWindowMenu : japaneseWindowMenu
-        XCTAssertTrue(windowMenu.waitForExistence(timeout: 10))
-        windowMenu.click()
+        let englishWorkspaceMenu = application.menuBars.menuBarItems["Workspace"].firstMatch
+        let japaneseWorkspaceMenu = application.menuBars.menuBarItems["ワークスペース"].firstMatch
+        let workspaceMenu = englishWorkspaceMenu.exists
+            ? englishWorkspaceMenu : japaneseWorkspaceMenu
+        XCTAssertTrue(workspaceMenu.waitForExistence(timeout: 10))
+        workspaceMenu.click()
         let identifiedBatch = application.menuItems["inkpod.command.41901"].firstMatch
         let englishBatch = application.menuItems["Batch"].firstMatch
         let japaneseBatch = application.menuItems["バッチ"].firstMatch
@@ -285,11 +322,11 @@ final class InkpodUITests: XCTestCase {
         toolToggle.click()
         XCTAssertFalse(toolSurface.waitForExistence(timeout: 2))
 
-        let windowMenu = application.menuBars.menuBarItems["Window"].firstMatch.exists
-            ? application.menuBars.menuBarItems["Window"].firstMatch
-            : application.menuBars.menuBarItems["ウインドウ"].firstMatch
-        XCTAssertTrue(windowMenu.waitForExistence(timeout: 5))
-        windowMenu.click()
+        let workspaceMenu = application.menuBars.menuBarItems["Workspace"].firstMatch.exists
+            ? application.menuBars.menuBarItems["Workspace"].firstMatch
+            : application.menuBars.menuBarItems["ワークスペース"].firstMatch
+        XCTAssertTrue(workspaceMenu.waitForExistence(timeout: 5))
+        workspaceMenu.click()
         let identifiedMenuToolToggle = application.menuItems["inkpod.command.41900"].firstMatch
         let englishMenuToolToggle = application.menuItems["Tool Palette"].firstMatch
         let japaneseMenuToolToggle = application.menuItems["ツールパレット"].firstMatch
@@ -385,6 +422,8 @@ final class InkpodUITests: XCTestCase {
 
         let canvas = application.descendants(matching: .any)["inkpod.canvas"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 10))
+        XCTAssertFalse(application.buttons["inkpod.command.40101"].exists)
+        XCTAssertFalse(application.buttons["inkpod.command.40201"].exists)
         application.typeKey(",", modifierFlags: .command)
 
         let search = application.textFields["inkpod.settings.search"]
@@ -409,9 +448,6 @@ final class InkpodUITests: XCTestCase {
 
         application.typeKey("w", modifierFlags: .command)
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        let zoomButton = application.buttons["inkpod.command.40201"]
-        XCTAssertTrue(zoomButton.waitForExistence(timeout: 5))
-        zoomButton.click()
         let before = try XCTUnwrap(canvas.value as? String)
         application.typeKey("2", modifierFlags: .command)
         let viewChanged = XCTNSPredicateExpectation(
@@ -431,6 +467,41 @@ final class InkpodUITests: XCTestCase {
         let reset = application.buttons["inkpod.shortcut.reset"]
         XCTAssertTrue(reset.waitForExistence(timeout: 5))
         reset.click()
+    }
+
+    @MainActor
+    func testM4FileMenuExposesSaveCommands() throws {
+        let application = XCUIApplication()
+        application.launch()
+
+        let canvas = application.descendants(matching: .any)["inkpod.canvas"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 10))
+
+        let fileMenu = application.menuBars.menuBarItems["File"].exists
+            ? application.menuBars.menuBarItems["File"]
+            : application.menuBars.menuBarItems["ファイル"]
+        XCTAssertTrue(fileMenu.waitForExistence(timeout: 5))
+        fileMenu.click()
+
+        let englishSave = application.menuItems["Save"].firstMatch
+        let japaneseSave = application.menuItems["保存"].firstMatch
+        let save = englishSave.exists ? englishSave : japaneseSave
+        let englishSaveAs = application.menuItems["Save As…"].firstMatch
+        let japaneseSaveAs = application.menuItems["名前を付けて保存…"].firstMatch
+        let saveAs = englishSaveAs.exists ? englishSaveAs : japaneseSaveAs
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
+        XCTAssertTrue(saveAs.waitForExistence(timeout: 5))
+        XCTAssertTrue(save.isEnabled)
+        XCTAssertTrue(saveAs.isEnabled)
+
+        save.click()
+        // A sandboxed NSSavePanel is hosted outside the app's AX hierarchy.
+        let panelBegan = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "enabled == false"),
+            object: application
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [panelBegan], timeout: 5), .completed)
+        application.terminate()
     }
 
     @MainActor
@@ -474,6 +545,20 @@ final class InkpodUITests: XCTestCase {
         _ issue: XCUIAccessibilityAuditIssue
     ) -> Bool {
         guard let element = issue.element else { return false }
+        if issue.auditType == .contrast {
+            // The system-owned window title is white on the dark titlebar, but
+            // macOS 26 reports it as having no measurable background after the
+            // primary-action toolbar is absent. The audit exposes the native
+            // title as an empty, full-width static-text container rather than
+            // the visible "Inkpod" glyph element.
+            let frame = element.frame
+            return element.elementType == .staticText
+                && element.label.isEmpty
+                && element.identifier.isEmpty
+                && frame.width > 600
+                && frame.height <= 64
+                && frame.minY < 100
+        }
         if issue.auditType == .sufficientElementDescription {
             // SwiftUI and AppKit add identifier-less container groups (and the
             // system Touch Bar proxy) around labeled, independently audited controls.

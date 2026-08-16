@@ -729,7 +729,7 @@ enum CoreRequest: Sendable {
     case inspectHistory(CoreSessionTarget, UInt64?)
     case jumpHistory(CoreSessionTarget, UInt64, UInt64)
     case buildSnapshot(CoreSnapshotRoute)
-    case save(CoreSessionTarget, UInt64, [UInt8], Bool)
+    case save(CoreSessionTarget, UInt64, [UInt8], [UInt8]?, Bool)
     case open(CoreSessionTarget, UInt64, [UInt8])
     case autosave(CoreSessionTarget, UInt64, [UInt8])
     case openRecovery(CoreSessionTarget, UInt64, [UInt8])

@@ -11,21 +11,72 @@ impl Core {
     /// after durable same-directory replacement succeeds. Failure leaves the
     /// previous file, path, and both Core savepoints unchanged.
     pub fn save(&mut self, path: &Path) -> Result<DocumentInfo, CoreError> {
+        let token = self.prepare_save(path)?;
+        self.commit_prepared_save(path, token)
+    }
+
+    /// Durably writes a prospective normal-save container without changing Core.
+    ///
+    /// The output container records the exact current document and editor states
+    /// as its savepoints, but the live normal path, savepoints, recovered flag,
+    /// revision, history, and dirty state are unchanged. This split is intended
+    /// for sandboxed frontends that must publish the prepared file through an OS
+    /// file-coordination API. Failure leaves both Core and any previous file at
+    /// `path` unchanged.
+    pub fn prepare_save(&self, path: &Path) -> Result<PreparedSaveToken, CoreError> {
         self.ensure_no_active_stroke()?;
-        self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
         let editor = self.editor_session.as_ref().ok_or(CoreError::NoDocument)?;
-        let document_savepoint = self.current_state;
-        let editor_savepoint = editor.digest;
-        let file = self.build_procedure_file(Some(document_savepoint), Some(editor_savepoint))?;
+        let token = PreparedSaveToken {
+            document_state: self.current_state,
+            editor_revision: editor.revision,
+            document_uuid: document.uuid,
+            document_digest: self.document_state_digest()?,
+            editor_digest: editor.digest,
+            journal_digest: journal_prefix_digest(&encode_journal_records(&self.journal)?),
+        };
+        let file =
+            self.build_procedure_file(Some(token.document_state), Some(token.editor_digest))?;
         inkpod_format::save_procedure_file_atomic(path, &file)?;
-        self.savepoint = Some(document_savepoint);
+        Ok(token)
+    }
+
+    /// Commits a prepared normal save after the frontend publishes it.
+    ///
+    /// This call performs no file I/O. `token` must still describe the exact
+    /// current document, editor, and journal state. Success changes only the
+    /// normal path, both savepoints, recovered status, and derived dirty state;
+    /// revision and history are unchanged. A stale token fails atomically.
+    pub fn commit_prepared_save(
+        &mut self,
+        path: &Path,
+        token: PreparedSaveToken,
+    ) -> Result<DocumentInfo, CoreError> {
+        self.ensure_no_active_stroke()?;
+        if self.prepared_save_token()? != token {
+            return Err(CoreError::InvalidState("prepared save token is stale"));
+        }
+        self.savepoint = Some(token.document_state);
         self.editor_session
             .as_mut()
             .ok_or(CoreError::NoDocument)?
-            .savepoint = Some(editor_savepoint);
+            .savepoint = Some(token.editor_digest);
         self.current_path = Some(path.to_path_buf());
         self.recovered = false;
         self.document_info()
+    }
+
+    fn prepared_save_token(&self) -> Result<PreparedSaveToken, CoreError> {
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let editor = self.editor_session.as_ref().ok_or(CoreError::NoDocument)?;
+        Ok(PreparedSaveToken {
+            document_state: self.current_state,
+            editor_revision: editor.revision,
+            document_uuid: document.uuid,
+            document_digest: self.document_state_digest()?,
+            editor_digest: editor.digest,
+            journal_digest: journal_prefix_digest(&encode_journal_records(&self.journal)?),
+        })
     }
 
     /// Atomically writes recovery data without advancing the normal-save savepoint.

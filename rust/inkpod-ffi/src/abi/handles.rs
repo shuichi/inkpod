@@ -42,6 +42,10 @@ pub struct InkpodByteBuffer {
     pub(crate) bytes: Box<[u8]>,
 }
 
+pub struct InkpodPreparedSave {
+    pub(crate) token: PreparedSaveToken,
+}
+
 pub struct InkpodHistoryVisualization {
     pub(crate) rows: Box<[HistoryVisualizationRow]>,
 }

@@ -543,10 +543,17 @@ public final class CoreHost: @unchecked Sendable {
         target: CoreSessionTarget,
         expectedDocumentRevision: UInt64,
         pathUTF8: [UInt8],
+        stagingPathUTF8: [UInt8]? = nil,
         allowCleanSave: Bool
     ) -> CoreTask {
         submit(
-            .save(target, expectedDocumentRevision, pathUTF8, allowCleanSave),
+            .save(
+                target,
+                expectedDocumentRevision,
+                pathUTF8,
+                stagingPathUTF8,
+                allowCleanSave
+            ),
             lane: .normal
         )
     }

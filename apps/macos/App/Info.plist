@@ -41,6 +41,8 @@
     <string>$(MACOSX_DEPLOYMENT_TARGET)</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSHumanReadableCopyright</key>
+    <string>© Shuichi Kurabayashi</string>
     <key>UTExportedTypeDeclarations</key>
     <array>
         <dict>

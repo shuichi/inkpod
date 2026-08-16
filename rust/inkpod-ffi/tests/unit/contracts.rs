@@ -786,6 +786,85 @@ fn save_document(core: *mut InkpodCore, path: &Path) -> InkpodDocumentInfo {
 }
 
 #[test]
+fn prepared_save_ffi_defers_path_and_savepoint_until_publication_commit() {
+    let (mut core, before) = create_core(8, 8, 0x5052_4550_4152_4544);
+    let staged = temporary_inkpod_path("prepared-stage");
+    let published = temporary_inkpod_path("prepared-published");
+    let staged_bytes = staged.to_string_lossy().into_owned().into_bytes();
+    let published_bytes = published.to_string_lossy().into_owned().into_bytes();
+    let mut prepared = ptr::null_mut();
+    let mut output = document_info();
+
+    // SAFETY: All handles, owner slots, UTF-8 spans, and outputs are live and
+    // non-overlapping for each call on the Core owner thread.
+    unsafe {
+        assert_eq!(
+            inkpod_core_prepare_save(
+                core,
+                staged_bytes.as_ptr(),
+                staged_bytes.len() as u64,
+                ptr::null_mut(),
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            inkpod_core_prepare_save(
+                core,
+                staged_bytes.as_ptr(),
+                staged_bytes.len() as u64,
+                &mut prepared,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert!(!prepared.is_null());
+        assert!(staged.is_file());
+        let after_prepare = queried_document_info(core);
+        assert_eq!(after_prepare.flags, before.flags);
+        assert_eq!(after_prepare.document_revision, before.document_revision);
+        assert_eq!(after_prepare.document_uuid_high, before.document_uuid_high);
+        assert_eq!(after_prepare.document_uuid_low, before.document_uuid_low);
+        assert_eq!(
+            after_prepare.main_plane_checksum,
+            before.main_plane_checksum
+        );
+        assert_eq!(
+            after_prepare.color_plane_checksum,
+            before.color_plane_checksum
+        );
+        assert_eq!(
+            inkpod_core_revert(core, &mut output),
+            INKPOD_STATUS_INVALID_STATE,
+            "prepare must not adopt the staging path"
+        );
+
+        std::fs::rename(&staged, &published).unwrap();
+        assert_eq!(
+            inkpod_core_commit_prepared_save(
+                core,
+                published_bytes.as_ptr(),
+                published_bytes.len() as u64,
+                prepared,
+                &mut output,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(output.flags & INKPOD_DOCUMENT_FLAG_DIRTY, 0);
+        assert_eq!(inkpod_core_revert(core, &mut output), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_prepared_save_release(&mut prepared),
+            INKPOD_STATUS_OK
+        );
+        assert!(prepared.is_null());
+        assert_eq!(
+            inkpod_prepared_save_release(&mut prepared),
+            INKPOD_STATUS_INVALID_STATE
+        );
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+    }
+    std::fs::remove_file(published).unwrap();
+}
+
+#[test]
 fn editor_defaults_and_state_ffi_are_caller_owned_exact_depth_and_side_effect_free() {
     let mut core = ptr::null_mut();
     // SAFETY: Every live pointer below is aligned, complete, and uniquely writable for its call.

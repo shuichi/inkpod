@@ -181,6 +181,139 @@ pub unsafe extern "C" fn inkpod_core_save(
     unsafe { file_operation(core, path_utf8, path_bytes, out_info, false) }
 }
 
+/// Writes a prospective normal-save file without advancing live savepoints.
+///
+/// # Safety
+/// Core/path must remain live for this call. `out_prepared` must be a writable,
+/// aligned owner slot; success transfers one Rust-owned token to that slot.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_prepare_save(
+    core: *mut InkpodCore,
+    path_utf8: *const u8,
+    path_bytes: u64,
+    out_prepared: *mut *mut InkpodPreparedSave,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if out_prepared.is_null() || !is_aligned(out_prepared) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "prepared save owner pointer is null or misaligned",
+            );
+        }
+        // SAFETY: The caller provides one writable owner slot.
+        unsafe { out_prepared.write(ptr::null_mut()) };
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        // SAFETY: The path range is readable for this call by contract.
+        let path = match unsafe { path_from_utf8(path_utf8, path_bytes) } {
+            Ok(path) => path,
+            Err(status) => return status,
+        };
+        // SAFETY: The caller contract requires a live Core owner-thread handle.
+        let core = unsafe { &*core };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core.core.prepare_save(path) {
+            Ok(token) => {
+                let prepared = Box::new(InkpodPreparedSave { token });
+                // SAFETY: The output owner slot was validated above.
+                unsafe { out_prepared.write(Box::into_raw(prepared)) };
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Commits a prepared normal save after platform publication succeeds.
+///
+/// # Safety
+/// Core/path/token/output must remain live, aligned, and non-overlapping for
+/// this call. Core must be called on its owner thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_commit_prepared_save(
+    core: *mut InkpodCore,
+    path_utf8: *const u8,
+    path_bytes: u64,
+    prepared: *const InkpodPreparedSave,
+    out_info: *mut InkpodDocumentInfo,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if prepared.is_null() || !is_aligned(prepared) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "prepared save token is null or misaligned",
+            );
+        }
+        // SAFETY: The output prefix is readable before the validated write.
+        if let Err(status) = unsafe { validate_struct(out_info.cast_const(), "InkpodDocumentInfo") }
+        {
+            return status;
+        }
+        // SAFETY: The path range is readable for this call by contract.
+        let path = match unsafe { path_from_utf8(path_utf8, path_bytes) } {
+            Ok(path) => path,
+            Err(status) => return status,
+        };
+        // SAFETY: All complete live objects are required by the caller contract.
+        let core = unsafe { &mut *core };
+        let prepared = unsafe { &*prepared };
+        let output = unsafe { &mut *out_info };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core.core.commit_prepared_save(path, prepared.token) {
+            Ok(info) => {
+                write_document_info(output, info);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Releases one Rust-owned prepared-save token and clears its owner slot.
+///
+/// # Safety
+/// `prepared` must be a writable aligned owner slot containing one live token.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_prepared_save_release(
+    prepared: *mut *mut InkpodPreparedSave,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if prepared.is_null() || !is_aligned(prepared) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "prepared save owner pointer is null or misaligned",
+            );
+        }
+        // SAFETY: The caller provides one readable/writable owner slot.
+        let handle = unsafe { prepared.read() };
+        if handle.is_null() || !is_aligned(handle) {
+            return fail(
+                INKPOD_STATUS_INVALID_STATE,
+                "prepared save handle is null or misaligned",
+            );
+        }
+        // SAFETY: Ownership is unique and transferred back for this release.
+        unsafe {
+            drop(Box::from_raw(handle));
+            prepared.write(ptr::null_mut());
+        }
+        INKPOD_STATUS_OK
+    })
+}
+
 /// Opens a versioned `.inkpod` file from a UTF-8 path.
 ///
 /// # Safety

@@ -47,19 +47,6 @@ public struct InkpodWorkspaceScene: View {
             ToolbarItem(placement: .navigation) {
                 commandButton(.windowToolPalette, icon: "sidebar.left")
             }
-            ToolbarItemGroup(placement: .primaryAction) {
-                commandButton(.toolPencil, icon: "pencil")
-                commandButton(.toolBrush, icon: "paintbrush")
-                commandButton(.toolFill, icon: "paintbrush.pointed.fill")
-                commandButton(.toolEyedropper, icon: "eyedropper")
-                Divider()
-                commandButton(.undo, icon: "arrow.uturn.backward")
-                commandButton(.zoomOut, icon: "minus.magnifyingglass")
-                commandButton(.zoomIn, icon: "plus.magnifyingglass")
-                commandButton(.fit, icon: "arrow.down.right.and.arrow.up.left")
-                commandButton(.oneToOne, icon: "1.magnifyingglass")
-                commandButton(.grid, icon: "grid")
-            }
         }
         .sheet(item: commandInputBinding) { input in
             WorkspaceCommandInputSheet(model: model, input: input, language: language)
@@ -108,6 +95,15 @@ public struct InkpodWorkspaceScene: View {
             .padding()
             .frame(width: 440)
             .interactiveDismissDisabled()
+        }
+        .alert(item: fileOperationAlertBinding) { alert in
+            Alert(
+                title: Text(language.text(alert.titleKey)),
+                message: Text(language.text(alert.messageKey)),
+                dismissButton: .default(Text(language.text("action.ok"))) {
+                    model.dismissFileOperationAlert()
+                }
+            )
         }
         .onAppear {
             let action = openSettings
@@ -176,6 +172,13 @@ public struct InkpodWorkspaceScene: View {
         Binding(
             get: { model.pendingRecoveryDecision },
             set: { if $0 == nil { model.deferPendingRecoveryCandidate() } }
+        )
+    }
+
+    private var fileOperationAlertBinding: Binding<WorkspaceFileOperationAlert?> {
+        Binding(
+            get: { model.fileOperationAlert },
+            set: { if $0 == nil { model.dismissFileOperationAlert() } }
         )
     }
 

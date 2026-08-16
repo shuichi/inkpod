@@ -121,7 +121,7 @@ macOS parityの分母は384とし、391を再現対象のUI数にしない。
 - rustc 1.95.0
 - CMake 4.4.2
 - macOS buildに使用するinstalled Rust targetは `aarch64-apple-darwin`
-- M0–M11のarm64 runtime、64-session headless integration、product Core/Metal、Sandbox file/clipboard、document/layer/plane/multi-view workspace、paint/fill/color、selection/transform/history、filter/effect/adjustment/vector/annotation/frame/vanishing-point、Cut/Sequence/Light Table/Subpalette/Reference/motion、Batch/job、Liquid Glass workspace chrome縦切りは通過。今回のV-MacUIはproduct lifecycle 8件とlaunched-product 9件を全通過した
+- M0–M11のarm64 runtime、64-session headless integration、product Core/Metal、Sandbox file/clipboard、document/layer/plane/multi-view workspace、paint/fill/color、selection/transform/history、filter/effect/adjustment/vector/annotation/frame/vanishing-point、Cut/Sequence/Light Table/Subpalette/Reference/motion、Batch/job、Liquid Glass workspace chrome縦切りは通過。今回のV-MacUIはproduct lifecycle 8件とlaunched-product 11件を全通過した
 
 ### 再利用する部分
 

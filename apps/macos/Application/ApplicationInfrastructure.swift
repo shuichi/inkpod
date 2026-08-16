@@ -124,10 +124,23 @@ public final class AppLanguageController: ObservableObject {
 
 @MainActor
 final class HelpPresenter {
+    struct AboutPanelContent: Equatable {
+        let description: String
+    }
+
+    static func aboutPanelContent(localizer: AppLanguageController) -> AboutPanelContent {
+        AboutPanelContent(
+            description: localizer.text("about.description")
+        )
+    }
+
     func present(_ command: InkpodCommandID, localizer: AppLanguageController) -> Bool {
         switch command {
         case .helpAbout:
-            NSApp.orderFrontStandardAboutPanel(nil)
+            let content = Self.aboutPanelContent(localizer: localizer)
+            NSApp.orderFrontStandardAboutPanel(options: [
+                .credits: NSAttributedString(string: content.description),
+            ])
             return true
         case .helpManual:
             show(

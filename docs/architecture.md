@@ -423,14 +423,18 @@ language choice is versioned and applies on the next process launch.
 M4 keeps file authority in `FileAccessBroker`. A balanced security-scoped lease
 and `NSFileCoordinator` reading or `.forReplacing` accessor enclose each ABI-v15
 path call; only a borrowed UTF-8 path survives long enough for that call, and no
-bookmark or `URL` enters Core or the journal. Recent files use bounded
+bookmark or `URL` enters Core or the journal. For normal save, Core prepares a
+current-v26 candidate in Foundation's same-volume item-replacement directory,
+the platform publishes it with replace/move while the selected-URL authority is
+live, and Core commits path plus both savepoints only after publication succeeds.
+Recent files use bounded
 app-scoped bookmarks with stale regeneration. A volume/inode/canonical-path
 identity registry reserves Open and Save As targets at issue time, rejects a
 second owning session, and atomically rebinds the reservation to the inode
 published by successful replacement. Open, recovery, and common-raster import
 decode into a staged Core on the fixed owner thread, then replace the live slot
 only after validation succeeds. Normal save publishes the new Core savepoint
-only after same-directory temporary-file flush/close/replace succeeds; autosave,
+only after same-volume temporary-file flush/close/replace succeeds; autosave,
 recovery, export, and compacted copy do not advance normal path authority.
 
 Recovery artifacts live in the app-support `Inkpod/Recovery` directory with a

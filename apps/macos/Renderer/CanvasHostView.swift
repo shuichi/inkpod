@@ -304,10 +304,15 @@ final class CanvasHostView: NSView {
     }
 
     override func scrollWheel(with event: NSEvent) {
-        let delta = convertToBacking(
-            NSSize(width: event.scrollingDeltaX, height: event.scrollingDeltaY)
+        let backingPixelsPerPoint = convertToBacking(NSSize(width: 1, height: 1))
+        guard let delta = CanvasInputNormalizer.backingScrollDelta(
+            pointDelta: CGVector(dx: event.scrollingDeltaX, dy: event.scrollingDeltaY),
+            backingPixelsPerPoint: backingPixelsPerPoint
         )
-        model.pan(deviceDX: delta.width, deviceDY: delta.height, viewID: viewID)
+        else {
+            return
+        }
+        model.pan(deviceDX: delta.dx, deviceDY: delta.dy, viewID: viewID)
     }
 
     override func magnify(with event: NSEvent) {

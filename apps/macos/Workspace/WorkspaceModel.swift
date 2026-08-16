@@ -11,6 +11,24 @@ private enum CoordinatedFileAction: Sendable {
     case compact(CoreSessionTarget, UInt64, CoreCompactionToken)
 }
 
+enum WorkspaceFileOperationAlert: String, Identifiable, Equatable {
+    case saveFailed
+
+    var id: String { rawValue }
+
+    var titleKey: String {
+        switch self {
+        case .saveFailed: "file.save.error.title"
+        }
+    }
+
+    var messageKey: String {
+        switch self {
+        case .saveFailed: "file.save.error.body"
+        }
+    }
+}
+
 private extension PaneTargetRecord {
     var isPinned: Bool {
         if case .pinnedDocument = mode { return true }
@@ -838,6 +856,7 @@ final class WorkspaceModel: ObservableObject {
     @Published private(set) var workspaceLayout = WorkspaceLayoutRecord.defaultColoring
     @Published var pendingCommandInput: WorkspaceCommandInput?
     @Published private(set) var lastCommandResult: CommandRouteResult = .noOp
+    @Published private(set) var fileOperationAlert: WorkspaceFileOperationAlert?
     @Published private(set) var documentURL: URL?
     @Published private(set) var isFileOperationActive = false
     @Published var pendingPasteConfirmation: PasteConfirmation?
@@ -2064,12 +2083,19 @@ final class WorkspaceModel: ObservableObject {
             identity: identity,
             reservation: reservation
         )
+        if case .failed = result {
+            fileOperationAlert = .saveFailed
+        }
         if case .fileCompleted = result { return true }
         if case .noOp = result {
             application.fileIdentityRegistry.cancel(reservation)
             return true
         }
         return false
+    }
+
+    func dismissFileOperationAlert() {
+        fileOperationAlert = nil
     }
 
     private func autosaveNow() async {
@@ -5198,49 +5224,50 @@ final class WorkspaceModel: ObservableObject {
         let coreHost = application.coreHost
         return await Task.detached {
             do {
-                let operation: (URL) throws -> CoreRequestOutcome = { coordinatedURL in
-                    let path = Array(coordinatedURL.path.utf8)
-                    let task: CoreTask = switch action {
-                    case let .save(target, revision, allowClean):
+                switch action {
+                case let .save(target, revision, allowClean):
+                    return try broker.coordinatePreparedReplacement(url) { replacement in
                         coreHost.save(
                             target: target,
                             expectedDocumentRevision: revision,
-                            pathUTF8: path,
+                            pathUTF8: Array(replacement.destination.path.utf8),
+                            stagingPathUTF8: Array(replacement.staging.path.utf8),
                             allowCleanSave: allowClean
-                        )
-                    case let .open(target, revision):
+                        ).wait(timeout: 120) ?? .failed(.cancelled)
+                    }
+                case let .open(target, revision):
+                    return try broker.coordinateReading(url) { coordinatedURL in
                         coreHost.open(
                             target: target,
                             expectedDocumentRevision: revision,
-                            pathUTF8: path
-                        )
-                    case let .autosave(target, revision):
+                            pathUTF8: Array(coordinatedURL.path.utf8)
+                        ).wait(timeout: 120) ?? .failed(.cancelled)
+                    }
+                case let .autosave(target, revision):
+                    return try broker.coordinateReplacing(url) { coordinatedURL in
                         coreHost.autosave(
                             target: target,
                             expectedDocumentRevision: revision,
-                            pathUTF8: path
-                        )
-                    case let .recovery(target, revision):
+                            pathUTF8: Array(coordinatedURL.path.utf8)
+                        ).wait(timeout: 120) ?? .failed(.cancelled)
+                    }
+                case let .recovery(target, revision):
+                    return try broker.coordinateReading(url) { coordinatedURL in
                         coreHost.openRecovery(
                             target: target,
                             expectedDocumentRevision: revision,
-                            pathUTF8: path
-                        )
-                    case let .compact(target, revision, token):
+                            pathUTF8: Array(coordinatedURL.path.utf8)
+                        ).wait(timeout: 120) ?? .failed(.cancelled)
+                    }
+                case let .compact(target, revision, token):
+                    return try broker.coordinateReplacing(url) { coordinatedURL in
                         coreHost.writeCompactedCopy(
                             target: target,
                             expectedDocumentRevision: revision,
-                            pathUTF8: path,
+                            pathUTF8: Array(coordinatedURL.path.utf8),
                             token: token
-                        )
+                        ).wait(timeout: 120) ?? .failed(.cancelled)
                     }
-                    return task.wait(timeout: 120) ?? .failed(.cancelled)
-                }
-                switch action {
-                case .open, .recovery:
-                    return try broker.coordinateReading(url, operation: operation)
-                case .save, .autosave, .compact:
-                    return try broker.coordinateReplacing(url, operation: operation)
                 }
             } catch {
                 return .failed(.coreOperation(.ioError))

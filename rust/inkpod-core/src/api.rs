@@ -1220,6 +1220,61 @@ pub struct CompactionPlan {
     pub journal_digest: [u8; 32],
 }
 
+/// Exact token for committing a previously prepared normal save.
+///
+/// The token is created only after a prospective normal-save container has
+/// been durably written. It does not change the live path or either savepoint.
+/// A frontend may publish that prepared file with its platform-native atomic
+/// replacement API and then present the token to [`Core::commit_prepared_save`].
+/// Any intervening document, editor, or journal change makes the token stale.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PreparedSaveToken {
+    pub(crate) document_state: StateId,
+    pub(crate) editor_revision: EditorRevision,
+    pub(crate) document_uuid: u128,
+    pub(crate) document_digest: DocumentStateDigest,
+    pub(crate) editor_digest: EditorStateDigest,
+    pub(crate) journal_digest: [u8; 32],
+}
+
+impl PreparedSaveToken {
+    /// Returns the document history state persisted as the prospective savepoint.
+    #[must_use]
+    pub const fn document_state(self) -> StateId {
+        self.document_state
+    }
+
+    /// Returns the EditorState revision persisted by the prepared file.
+    #[must_use]
+    pub const fn editor_revision(self) -> EditorRevision {
+        self.editor_revision
+    }
+
+    /// Returns the persistent document UUID guarded by this token.
+    #[must_use]
+    pub const fn document_uuid(self) -> u128 {
+        self.document_uuid
+    }
+
+    /// Returns the semantic document digest guarded by this token.
+    #[must_use]
+    pub const fn document_digest(self) -> DocumentStateDigest {
+        self.document_digest
+    }
+
+    /// Returns the semantic EditorState digest guarded by this token.
+    #[must_use]
+    pub const fn editor_digest(self) -> EditorStateDigest {
+        self.editor_digest
+    }
+
+    /// Returns the authoritative journal-prefix digest guarded by this token.
+    #[must_use]
+    pub const fn journal_digest(self) -> [u8; 32] {
+        self.journal_digest
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 /// Read-only logical resource usage for one Core document session.
 ///

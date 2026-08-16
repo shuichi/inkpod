@@ -163,6 +163,45 @@ struct FileAccessBrokerTests {
         #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).count == 1)
     }
 
+    @Test("prepared replacement publishes on the destination volume and preserves old bytes on failure")
+    func preparedReplacementPublication() throws {
+        let manager = FileManager.default
+        let directory = manager.temporaryDirectory.appending(
+            path: "inkpod-m4-publisher-\(UUID().uuidString)",
+            directoryHint: .isDirectory
+        )
+        try manager.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? manager.removeItem(at: directory) }
+        let destination = directory.appending(path: "document.inkpod")
+        let broker = FileAccessBroker()
+        var replacementDirectory: URL?
+
+        try broker.coordinatePreparedReplacement(destination) { replacement in
+            replacementDirectory = replacement.staging.deletingLastPathComponent()
+            try Data("first".utf8).write(to: replacement.staging)
+            try AtomicFilePublisher.publish(replacement)
+        }
+        #expect(try Data(contentsOf: destination) == Data("first".utf8))
+        if let replacementDirectory {
+            #expect(!manager.fileExists(atPath: replacementDirectory.path))
+        }
+
+        try broker.coordinatePreparedReplacement(destination) { replacement in
+            try Data("second".utf8).write(to: replacement.staging)
+            try AtomicFilePublisher.publish(replacement)
+        }
+        #expect(try Data(contentsOf: destination) == Data("second".utf8))
+
+        let missing = CoordinatedFileReplacement(
+            destination: destination,
+            staging: directory.appending(path: "missing.inkpod")
+        )
+        #expect(throws: FileAccessBrokerError.preparedFileMissing) {
+            try AtomicFilePublisher.publish(missing)
+        }
+        #expect(try Data(contentsOf: destination) == Data("second".utf8))
+    }
+
     @Test("drop and panel type classification accepts only the declared M4 formats")
     func supportedTypes() {
         #expect(FileTypeCatalog.classify(URL(filePath: "/tmp/a.inkpod")) == .native)

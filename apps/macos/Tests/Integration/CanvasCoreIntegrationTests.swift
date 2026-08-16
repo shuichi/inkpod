@@ -270,6 +270,43 @@ final class CanvasCoreIntegrationTests: XCTestCase {
         )
     }
 
+    func testBackingScrollDeltaPreservesBothDirectionsAtRetinaScale() {
+        let scale = CGSize(width: 2, height: 2)
+        XCTAssertEqual(
+            CanvasInputNormalizer.backingScrollDelta(
+                pointDelta: CGVector(dx: -3, dy: 5),
+                backingPixelsPerPoint: scale
+            ),
+            CGVector(dx: -6, dy: 10)
+        )
+        XCTAssertEqual(
+            CanvasInputNormalizer.backingScrollDelta(
+                pointDelta: CGVector(dx: 3, dy: -5),
+                backingPixelsPerPoint: scale
+            ),
+            CGVector(dx: 6, dy: -10)
+        )
+        XCTAssertEqual(
+            CanvasInputNormalizer.backingScrollDelta(
+                pointDelta: .zero,
+                backingPixelsPerPoint: scale
+            ),
+            .zero
+        )
+        XCTAssertNil(
+            CanvasInputNormalizer.backingScrollDelta(
+                pointDelta: CGVector(dx: CGFloat.nan, dy: 1),
+                backingPixelsPerPoint: scale
+            )
+        )
+        XCTAssertNil(
+            CanvasInputNormalizer.backingScrollDelta(
+                pointDelta: CGVector(dx: 1, dy: 1),
+                backingPixelsPerPoint: .zero
+            )
+        )
+    }
+
     func testRetinaCanvasPaperPlanSeparatesDocumentFromLargerBackingViewport() throws {
         let drawableSize = CGSize(width: 2_706, height: 1_516)
         let transform = CoreSnapshotTransform(

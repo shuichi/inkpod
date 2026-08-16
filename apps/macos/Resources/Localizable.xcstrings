@@ -1,8 +1,10 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "about.description" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Inkpod is a GPU-accelerated painting engine with vector-based strokes for non-destructive editing." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "Inkpod は、ベクターベースのストロークによる非破壊編集に対応した、GPU アクセラレーション型ペイントエンジンです。" } } } },
     "action.apply" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Apply" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "適用" } } } },
     "action.cancel" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Cancel" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "キャンセル" } } } },
+    "action.ok" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "OK" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "OK" } } } },
     "command.adjustment.create" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "New Adjustment Layer…" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "調整レイヤーを作成…" } } } },
     "command.adjustment.edit" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Edit Adjustment…" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "調整を編集…" } } } },
     "command.adjustment.move.top" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Move Adjustment to Top" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "調整を最上部へ" } } } },
@@ -265,6 +267,8 @@
     "command.file.revert.partial" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Revert Selected Part" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "レイヤーを部分的に復帰" } } } },
     "command.file.save" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Save" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "保存" } } } },
     "command.file.save.as" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Save As…" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "名前を付けて保存…" } } } },
+    "file.save.error.body" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "The selected location could not be written. Choose another location or check its permissions." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "選択した場所に書き込めませんでした。別の場所を選ぶか、アクセス権を確認してください。" } } } },
+    "file.save.error.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "The document couldn’t be saved." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "書類を保存できませんでした。" } } } },
     "command.file.sequence.autosave" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Autosave Current Sequence Cell" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "現在の連番セルを自動保存" } } } },
     "command.help.about" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "About Inkpod" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "Inkpodについて" } } } },
     "command.help.acknowledgements" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Acknowledgements" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "謝辞" } } } },
@@ -315,7 +319,7 @@
     "menu.cell.frames" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Frames" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "フレーム" } } } },
     "menu.layer" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Layer" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "レイヤー" } } } },
     "menu.plane" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Plane" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "プレーン" } } } },
-    "menu.window" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Window" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "ウインドウ" } } } },
+    "menu.workspace" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Workspace" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "ワークスペース" } } } },
     "menu.workspace.presets" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Workspace Presets" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "ワークスペースプリセット" } } } },
     "m5.inspector.follow" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Follow Active View" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "アクティブビューに追従" } } } },
     "m5.inspector.layers" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Layers" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "レイヤー" } } } },

@@ -76,9 +76,12 @@ fallbackしない。shortcut解決は上記のthread-independent `_v2` helperを
 C ABI recordやCore pointerを渡さない。ABI v15はshortcut key/modifier表現だけを置換し、native
 `.inkpod` v26、replay epoch 23、procedure format v26を変更しない。
 
-M4のnative open/save/autosave/recovery/revert/compacted-copyは既存ABI v15のpath APIを使う。
+M4のnative open/save/autosave/recovery/revert/compacted-copyはABI v15のpath APIを使う。
 Swiftの`FileAccessBroker`がsecurity-scoped resource leaseを開始し、`NSFileCoordinator`のreadまたは
-`.forReplacing` accessor内でUTF-8 pathを一時配列へcopyして`CoreHost`へenqueueする。owner thread上の
+`.forReplacing` accessor内でUTF-8 pathを一時配列へcopyして`CoreHost`へenqueueする。通常保存は
+`inkpod_core_prepare_save`で同一volumeの`itemReplacementDirectory`へ候補を完成させ、Foundationの
+replace/moveが選択先への公開に成功した後だけ`inkpod_core_commit_prepared_save`でnormal pathと
+document/editor savepointを進める。prepare tokenは成功・失敗の全経路でowner thread上からreleaseする。
 ABI callが終了するまでleaseとcoordinated URLを保持し、call終了後に借用配列を保持しない。bookmark、
 `URL`、file descriptor、file identityはCore、asset、procedure、journalへ渡さない。open/recovery/importは
 別Coreへstagingし、decode・検証成功後だけ同じsession slotを一度で置換するため、invalid、stale、cancel、
@@ -316,6 +319,13 @@ snapshotの照会と解放は外部同期し、rendererはcount、stride、recor
 履歴やアセット保持の正本ではない。Windows では `ファイル > 履歴を破棄してコピー...` として公開し、
 最初に失われるイベント数とプロシージャ数を表示する。出力先には開いているセッションが所有しないパスだけを
 許可し、作成したコピーを現在の保存先として採用しない。
+
+通常保存の追加APIは、`inkpod_core_prepare_save`、`inkpod_core_commit_prepared_save`、
+`inkpod_prepared_save_release`である。prepareはprospective savepointを含むcurrent-v26候補をatomicに
+書くがlive Coreを変更しない。frontendが候補を選択先へ公開した後、同じCore owner requestの中でcommitを
+呼ぶ。commitはfile I/Oを行わず、tokenと現在のdocument/editor/journalが完全一致するときだけpath、両
+savepoint、recovered/dirtyを更新する。stale token、公開失敗、releaseを含む失敗経路ではrevision、history、
+path、savepointを進めない。この追加境界はserialized schema、replay semantics、ABI versionを変更しない。
 
 ## 履歴可視化 snapshot（現行 ABI v15）
 

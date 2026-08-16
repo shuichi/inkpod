@@ -79,7 +79,9 @@ struct CommandInfrastructureTests {
         #expect(CommandCatalog.descriptor(for: .sequencePin).targetScope == .pane)
         #expect(CommandCatalog.descriptor(for: .batchPreview).routeOwner == .batch)
         #expect(CommandCatalog.descriptor(for: .batchCancel).targetScope == .job)
-        #expect(CommandCatalog.descriptor(for: .windowBatch).surfaces == [.windowMenu])
+        #expect(CommandCatalog.descriptor(for: .windowBatch).surfaces == [.workspaceMenu])
+        #expect(!CommandCatalog.descriptor(for: .zoomIn).surfaces.contains(.toolbar))
+        #expect(CommandCatalog.descriptor(for: .zoomIn).surfaces.contains(.contextMenu))
     }
 
     @Test("pure ABI resolver distinguishes prefix, exact, none, and invalid")

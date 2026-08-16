@@ -6,6 +6,25 @@ struct CanvasTilt: Equatable, Sendable {
 }
 
 enum CanvasInputNormalizer {
+    static func backingScrollDelta(
+        pointDelta: CGVector,
+        backingPixelsPerPoint: CGSize
+    ) -> CGVector? {
+        guard pointDelta.dx.isFinite,
+              pointDelta.dy.isFinite,
+              backingPixelsPerPoint.width.isFinite,
+              backingPixelsPerPoint.height.isFinite,
+              backingPixelsPerPoint.width > 0,
+              backingPixelsPerPoint.height > 0
+        else {
+            return nil
+        }
+        return CGVector(
+            dx: pointDelta.dx * backingPixelsPerPoint.width,
+            dy: pointDelta.dy * backingPixelsPerPoint.height
+        )
+    }
+
     static func localDevicePoint(
         backingPoint: CGPoint,
         backingBounds: CGRect,

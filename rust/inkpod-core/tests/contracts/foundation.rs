@@ -312,6 +312,85 @@ fn autosave_recovery_never_inherits_or_overwrites_normal_path() {
 }
 
 #[test]
+fn prepared_save_is_side_effect_free_until_published_and_committed() {
+    let suffix = TEST_PATH_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let directory = std::env::temp_dir();
+    let staged = directory.join(format!(
+        "inkpod-prepared-stage-{}-{suffix}.inkpod",
+        std::process::id()
+    ));
+    let published = directory.join(format!(
+        "inkpod-prepared-published-{}-{suffix}.inkpod",
+        std::process::id()
+    ));
+    let mut core = Core::new();
+    core.new_cell(8, 8, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    core.invert_selection().unwrap();
+    let before = core.document_info().unwrap();
+    assert!(before.dirty);
+
+    let token = core.prepare_save(&staged).unwrap();
+    assert_eq!(core.document_info().unwrap(), before);
+    assert!(staged.is_file());
+    assert!(
+        core.revert().is_err(),
+        "prepare must not adopt its staging path"
+    );
+
+    let mut staged_core = Core::new();
+    let staged_info = staged_core.open(&staged).unwrap();
+    assert!(
+        !staged_info.dirty,
+        "the published candidate must reopen clean"
+    );
+
+    std::fs::rename(&staged, &published).unwrap();
+    let committed = core.commit_prepared_save(&published, token).unwrap();
+    assert!(!committed.dirty);
+    assert_eq!(
+        core.revert().unwrap().document_uuid,
+        committed.document_uuid
+    );
+
+    std::fs::remove_file(published).unwrap();
+}
+
+#[test]
+fn stale_prepared_save_token_cannot_advance_savepoints_or_path() {
+    let suffix = TEST_PATH_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let directory = std::env::temp_dir();
+    let staged = directory.join(format!(
+        "inkpod-prepared-stale-stage-{}-{suffix}.inkpod",
+        std::process::id()
+    ));
+    let published = directory.join(format!(
+        "inkpod-prepared-stale-published-{}-{suffix}.inkpod",
+        std::process::id()
+    ));
+    let mut core = Core::new();
+    core.new_cell(8, 8, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    core.invert_selection().unwrap();
+    let token = core.prepare_save(&staged).unwrap();
+    core.invert_selection().unwrap();
+    let changed = core.document_info().unwrap();
+    std::fs::rename(&staged, &published).unwrap();
+
+    assert!(matches!(
+        core.commit_prepared_save(&published, token),
+        Err(CoreError::InvalidState("prepared save token is stale"))
+    ));
+    assert_eq!(core.document_info().unwrap(), changed);
+    assert!(
+        core.revert().is_err(),
+        "failed commit must not adopt a path"
+    );
+
+    std::fs::remove_file(published).unwrap();
+}
+
+#[test]
 fn fill_rejects_oversized_documents_before_materializing_selection() {
     let mut core = Core::new();
     core.new_cell(

@@ -3,7 +3,7 @@ import XCTest
 @testable import InkpodCoreBridge
 
 final class CoreFileClipboardIntegrationTests: XCTestCase {
-    func testCoordinatedNativeSaveAndStagedOpenUseTheV15PathAPI() throws {
+    func testCoordinatedNativeSavePublishesPreparedFileBeforeCommittingSavepoint() throws {
         let host = CoreHost()
         let original = try created(
             host.createSession(documentUUID: documentUUID(0x400)).wait(timeout: 10)
@@ -16,11 +16,12 @@ final class CoreFileClipboardIntegrationTests: XCTestCase {
         let destination = directory.appending(path: "coordinated.inkpod")
         let broker = FileAccessBroker()
 
-        let savedOutcome = try broker.coordinateReplacing(destination) { coordinatedURL in
+        let savedOutcome = try broker.coordinatePreparedReplacement(destination) { replacement in
             try outcome(host.save(
                 target: dirty.target,
                 expectedDocumentRevision: dirty.documentRevision,
-                pathUTF8: Array(coordinatedURL.path.utf8),
+                pathUTF8: Array(replacement.destination.path.utf8),
+                stagingPathUTF8: Array(replacement.staging.path.utf8),
                 allowCleanSave: true
             ).wait(timeout: 20))
         }
@@ -120,16 +121,19 @@ final class CoreFileClipboardIntegrationTests: XCTestCase {
         XCTAssertTrue(recovered.session.isRecovered)
 
         let beforeFailure = try inspected(host, recovered.session.target)
+        let staged = directory.appending(path: "staged-failure.inkpod")
         let missingParent = directory.appending(path: "missing/failure.inkpod")
         XCTAssertEqual(
             try outcome(host.save(
                 target: beforeFailure.target,
                 expectedDocumentRevision: beforeFailure.documentRevision,
                 pathUTF8: Array(missingParent.path.utf8),
+                stagingPathUTF8: Array(staged.path.utf8),
                 allowCleanSave: true
             ).wait(timeout: 20)),
             .failed(.coreOperation(.ioError))
         )
+        XCTAssertTrue(FileManager.default.fileExists(atPath: staged.path))
         XCTAssertEqual(try inspected(host, beforeFailure.target), beforeFailure)
 
         XCTAssertEqual(

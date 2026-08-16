@@ -420,7 +420,7 @@ public enum CommandSurface: String, Hashable, Sendable {
     case toolbar
     case contextMenu
     case cellMenu
-    case windowMenu
+    case workspaceMenu
     case inspector
     case tabStrip
     case settings
@@ -668,7 +668,7 @@ public enum CommandCatalog {
                 routeOwner: .workspace,
                 stateOwner: .workspace,
                 targetScope: .workspace,
-                surfaces: [.windowMenu],
+                surfaces: [.workspaceMenu],
                 parityTestID: "MAC-ANIMATION-SURFACE-001"
             )
         }
@@ -682,7 +682,7 @@ public enum CommandCatalog {
                 routeOwner: .paneTarget,
                 stateOwner: .paneTarget,
                 targetScope: .pane,
-                surfaces: [.windowMenu, .inspector],
+                surfaces: [.workspaceMenu, .inspector],
                 parityTestID: "MAC-ANIMATION-SURFACE-001"
             )
         }
@@ -693,7 +693,7 @@ public enum CommandCatalog {
                 routeOwner: .workspace,
                 stateOwner: .workspace,
                 targetScope: .workspace,
-                surfaces: [.windowMenu],
+                surfaces: [.workspaceMenu],
                 parityTestID: "MAC-BATCH-WORKFLOW-001"
             )
         }
@@ -704,7 +704,7 @@ public enum CommandCatalog {
                 routeOwner: .batch,
                 stateOwner: .batch,
                 targetScope: .job,
-                surfaces: command == .batchPin ? [.windowMenu, .batchWindow] : [.batchWindow],
+                surfaces: command == .batchPin ? [.workspaceMenu, .batchWindow] : [.batchWindow],
                 parityTestID: "MAC-BATCH-WORKFLOW-001"
             )
         }
@@ -907,7 +907,7 @@ public enum CommandCatalog {
                 routeOwner: .view,
                 stateOwner: .view,
                 targetScope: .documentView,
-                surfaces: [.windowMenu, .inspector],
+                surfaces: [.workspaceMenu, .inspector],
                 parityTestID: "MAC-LOCATOR-001"
             )
         }
@@ -933,7 +933,7 @@ public enum CommandCatalog {
                 routeOwner: .workspace,
                 stateOwner: .workspace,
                 targetScope: .workspace,
-                surfaces: tabSurface ? [.viewMenu, .tabStrip] : [.windowMenu],
+                surfaces: tabSurface ? [.viewMenu, .tabStrip] : [.workspaceMenu],
                 parityTestID: [
                     .windowToolPalette, .windowToolOptions, .windowColorPane,
                     .windowLocator,
@@ -975,7 +975,6 @@ public enum CommandCatalog {
         }
         var surfaces: Set<CommandSurface> = [.viewMenu]
         if [.zoomIn, .zoomOut, .fit, .oneToOne, .grid].contains(command) {
-            surfaces.insert(.toolbar)
             surfaces.insert(.contextMenu)
         }
         return CommandDescriptor(

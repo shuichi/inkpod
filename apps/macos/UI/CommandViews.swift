@@ -32,19 +32,16 @@ public struct InkpodCommands: Commands {
                 }
             }
         }
-        CommandGroup(replacing: .saveItem) {
+        // WindowGroup does not materialize document-management commands at
+        // saveItem. Anchor Inkpod's file lifecycle after the new-item group,
+        // which exists for both WindowGroup and DocumentGroup scenes.
+        CommandGroup(after: .newItem) {
             item(.fileSave)
             item(.fileSaveAs)
             Divider()
             item(.fileRevert)
             item(.fileRevertPartial)
-        }
-        CommandGroup(replacing: .importExport) {
-            item(.fileImportRaster)
-            item(.fileExportRaster)
-            item(.fileExportInstructionRaster)
-        }
-        CommandGroup(after: .saveItem) {
+            Divider()
             Menu(language.text("menu.cut")) {
                 item(.cutProperties)
                 item(.cutSave)
@@ -63,8 +60,11 @@ public struct InkpodCommands: Commands {
             item(.fileRestorePrevious)
             item(.fileCompactCopy)
             item(.fileSequenceAutosave)
-            Divider()
-            item(.documentClose)
+        }
+        CommandGroup(replacing: .importExport) {
+            item(.fileImportRaster)
+            item(.fileExportRaster)
+            item(.fileExportInstructionRaster)
         }
         CommandGroup(replacing: .undoRedo) {
             item(.undo)
@@ -364,7 +364,7 @@ public struct InkpodCommands: Commands {
         m6Menus
         m8ImageMenu
         m9AnimationMenu
-        workspaceWindowMenu
+        workspaceMenu
     }
 
     @CommandsBuilder
@@ -467,8 +467,8 @@ public struct InkpodCommands: Commands {
     }
 
     @CommandsBuilder
-    private var workspaceWindowMenu: some Commands {
-        CommandMenu(language.text("menu.window")) {
+    private var workspaceMenu: some Commands {
+        CommandMenu(language.text("menu.workspace")) {
             item(.workspaceNewWindow)
             item(.windowToolPalette)
             item(.windowToolOptions)

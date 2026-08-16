@@ -756,6 +756,8 @@ typedef struct InkpodSnapshot InkpodSnapshot;
 typedef struct InkpodClipboard InkpodClipboard;
 /** @brief encode 結果の immutable byte 列を保持する Rust-owned handle。 */
 typedef struct InkpodByteBuffer InkpodByteBuffer;
+/** @brief 公開前の通常保存を正確なCore状態へ結び付けるRust-owned token。 */
+typedef struct InkpodPreparedSave InkpodPreparedSave;
 /** @brief canonical procedure 履歴の immutable・Rust-owned 可視化 snapshot。 */
 typedef struct InkpodHistoryVisualization InkpodHistoryVisualization;
 /** @brief Rust-owned point-in-time state for bounded history visualization replay. */
@@ -3925,6 +3927,38 @@ InkpodStatus inkpod_core_save(
     const uint8_t* path_utf8,
     uint64_t path_bytes,
     InkpodDocumentInfo* out_info);
+
+/**
+ * @brief 通常保存候補をatomicに書くが、live Coreのpath/savepointは進めない。
+ * @par 契約
+ * Core owner thread。`staging_path_utf8` はfrontendが所有する同一volumeの公開前pathで、
+ * `out_prepared` はNULL初期化されるcaller-owned owner slot。成功時、候補fileには現在の
+ * document/editor stateをprospective savepointとして記録し、Rust-owned tokenを返す。
+ * live Coreのrevision/history/dirty/path/savepoint/recoveredは不変。失敗時は以前のstaging
+ * fileとCoreを保ち、owner slotはNULLのまま。tokenはcommit後も明示releaseが必要。
+ */
+InkpodStatus inkpod_core_prepare_save(
+    InkpodCore* core,
+    const uint8_t* staging_path_utf8,
+    uint64_t staging_path_bytes,
+    InkpodPreparedSave** out_prepared);
+
+/**
+ * @brief frontendによる候補file公開成功後に通常path/savepointだけを確定する。
+ * @par 契約
+ * Core owner thread。file I/Oは行わない。`prepared`が現在のdocument/editor/journalと完全一致
+ * するときだけ両savepoint、normal path、recovered/dirtyを更新し、revision/historyは不変。
+ * stale/invalid/failureではCoreと出力を変更しない。tokenはborrowedで、呼出し後にreleaseする。
+ */
+InkpodStatus inkpod_core_commit_prepared_save(
+    InkpodCore* core,
+    const uint8_t* published_path_utf8,
+    uint64_t published_path_bytes,
+    const InkpodPreparedSave* prepared,
+    InkpodDocumentInfo* out_info);
+
+/** @brief prepared-save tokenを解放し、owner slotをNULLにする。 */
+InkpodStatus inkpod_prepared_save_release(InkpodPreparedSave** prepared);
 /**
  * @brief `.inkpod` を検証・decode して current document を置換する。
  * @par 契約
