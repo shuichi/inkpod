@@ -543,7 +543,11 @@ verify_publish_candidate() {
             "${mounted_entitlements}")" == "true" ]] || \
             die "mounted app is missing required entitlement ${entitlement_key}"
     done
-    entitlement_count="$(grep -c '<key>' "${mounted_entitlements}")"
+    entitlement_count="$(
+        grep -oF '<key>' "${mounted_entitlements}" |
+            wc -l |
+            tr -d '[:space:]'
+    )"
     [[ "${entitlement_count}" == "3" ]] || \
         die "mounted app must contain exactly the three approved entitlements"
 

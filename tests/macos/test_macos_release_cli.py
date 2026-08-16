@@ -191,15 +191,17 @@ elif tool == "hdiutil":
                 output,
             )
 elif tool == "codesign" and "-d" in sys.argv and "--entitlements" in sys.argv:
-    sys.stdout.buffer.write(
-        plistlib.dumps(
-            {
-                "com.apple.security.app-sandbox": True,
-                "com.apple.security.files.bookmarks.app-scope": True,
-                "com.apple.security.files.user-selected.read-write": True,
-            }
-        )
-    )
+    entitlements = {
+        "com.apple.security.app-sandbox": True,
+        "com.apple.security.files.bookmarks.app-scope": True,
+        "com.apple.security.files.user-selected.read-write": True,
+    }
+    if os.environ.get("INKPOD_TEST_EXTRA_ENTITLEMENT") == "1":
+        entitlements["com.apple.security.network.client"] = True
+    payload = plistlib.dumps(entitlements)
+    if os.environ.get("INKPOD_TEST_MINIFIED_ENTITLEMENTS") == "1":
+        payload = b"".join(line.strip() for line in payload.splitlines())
+    sys.stdout.buffer.write(payload)
 elif tool == "lipo":
     print(os.environ.get("INKPOD_TEST_MOUNTED_ARCHITECTURE", "arm64"))
 elif tool == "xcrun" and sys.argv[1:3] == ["notarytool", "submit"]:
@@ -552,6 +554,30 @@ class MacOSReleaseCliTests(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("mounted app version 0.2.2 does not match 0.2.3", result.stderr)
+        calls = self.tool_log.read_text(encoding="utf-8").splitlines()
+        self.assertFalse(any(call.startswith("gh release create ") for call in calls))
+        self.assertFalse(any(call.startswith("gh release upload ") for call in calls))
+
+    def test_publish_accepts_minified_codesign_entitlements(self) -> None:
+        self.prepare_publish_candidate(remote_asset=b"signed and notarized dmg\n")
+        self.environment["INKPOD_TEST_MINIFIED_ENTITLEMENTS"] = "1"
+
+        result = self.run_cli("publish")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("already contains the identical", result.stdout)
+
+    def test_publish_rejects_an_unapproved_mounted_entitlement(self) -> None:
+        self.prepare_publish_candidate()
+        self.environment["INKPOD_TEST_EXTRA_ENTITLEMENT"] = "1"
+
+        result = self.run_cli("publish")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "mounted app must contain exactly the three approved entitlements",
+            result.stderr,
+        )
         calls = self.tool_log.read_text(encoding="utf-8").splitlines()
         self.assertFalse(any(call.startswith("gh release create ") for call in calls))
         self.assertFalse(any(call.startswith("gh release upload ") for call in calls))

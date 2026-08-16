@@ -207,6 +207,8 @@ def verify(repository: Path) -> None:
         "test_publish_rejects_a_racing_tag_that_targets_another_commit",
         "test_publish_rejects_a_dirty_worktree_before_contacting_github",
         "test_publish_rejects_a_renamed_dmg_with_the_wrong_app_version",
+        "test_publish_accepts_minified_codesign_entitlements",
+        "test_publish_rejects_an_unapproved_mounted_entitlement",
         "test_publish_upload_failure_leaves_the_release_without_deleting_assets",
     ):
         require(release_cli_tests, token, "test_macos_release_cli.py")

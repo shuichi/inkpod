@@ -87,7 +87,10 @@ checks pan, zoom, flip, half-open limits, and bounded transparent checker work.
 
 The 384-row parity ledger remains fully implemented; M12 adds or changes no row.
 All 616 required String Catalog keys have complete English and Japanese values,
-and CTest passed 22/22, including the release-contract and 15-case release-CLI tests. V-Rust passed formatting, all-target/all-feature Clippy
+and CTest passed 22/22, including the release-contract and 17-case release-CLI
+tests. The publication regression accepts compact one-line `codesign`
+entitlement output while continuing to reject any entitlement outside the exact
+three-key allowlist. V-Rust passed formatting, all-target/all-feature Clippy
 with warnings denied, all 462 tests, the quick ten-scenario semantic gates, and
 strict rustdoc. The complete 95-test/headless suite also passed under Thread
 Sanitizer. V-MacUI passed 17/17 and V-Metal reported zero validation errors.
