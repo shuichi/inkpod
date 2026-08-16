@@ -138,3 +138,16 @@ misalignment, short records, unknown flags and enums, oversize spans, Cancel, re
 stale controller/session tokens, stale Core generation, wrong-thread access, and idempotent NULL
 release. No CST/AST/catalog node, per-token/per-node call, second model/executor, execution/report,
 or Windows product route is exposed.
+
+## M26 execution/report C ABI evidence
+
+Three `inkpod-ffi` execution contracts plus the C header/export drift, C11 include, C++20 ABI
+layout smoke, route inventory, and exact-old-version rejection cover ABI v16 PathIntent, copied
+authority grants, fixed DTO host callbacks, immutable plan/preview, one-shot confirmation,
+PlanTask/RunTask event flow, cancellation, atomic native install, and detached batched reports.
+Success evidence reopens the current-v26 output, verifies cache-free full replay, Undo/Redo,
+document/editor savepoints, history, state digest, and ID high-watermark while proving the input
+Core is unchanged. Negative evidence covers v15 rejection, NULL, short/unknown records, queue
+saturation, cancellation, stale authority/confirmation and save failure. The ABI delegates to the
+existing M11/M12 planner/runner, invokes callbacks without a Core lock, and adds no Windows
+authority adapter, command, UI, product route, parser/catalog node, or second executor.

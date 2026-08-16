@@ -14,32 +14,34 @@ use inkpod_format::{
 const MAX_RUN_OUTPUT_BYTES: u64 = 64 * 1024 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ScriptRunMode {
+#[doc(hidden)]
+pub enum ScriptRunMode {
     DryRun,
     Install,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct ScriptRunLimits {
+#[doc(hidden)]
+pub struct ScriptRunLimits {
     output_bytes: u64,
 }
 
 impl ScriptRunLimits {
-    pub(crate) const fn exact_current() -> Self {
+    pub const fn exact_current() -> Self {
         Self {
             output_bytes: MAX_RUN_OUTPUT_BYTES,
         }
     }
 
-    #[cfg(test)]
-    const fn with_output_bytes(mut self, maximum: u64) -> Self {
+    pub const fn with_output_bytes(mut self, maximum: u64) -> Self {
         self.output_bytes = if maximum == 0 { 1 } else { maximum };
         self
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ScriptRunAdapterError {
+#[doc(hidden)]
+pub enum ScriptRunAdapterError {
     Cancelled,
     Unavailable,
     InvalidData,
@@ -49,14 +51,15 @@ pub(crate) enum ScriptRunAdapterError {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct ScriptNativeRead {
+#[doc(hidden)]
+pub struct ScriptNativeRead {
     bytes: Vec<u8>,
     before: NativeInputFingerprint,
     after: NativeInputFingerprint,
 }
 
 impl ScriptNativeRead {
-    pub(crate) fn new(
+    pub fn new(
         bytes: Vec<u8>,
         before: NativeInputFingerprint,
         after: NativeInputFingerprint,
@@ -70,13 +73,14 @@ impl ScriptNativeRead {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct ScriptPreparedDestination {
+#[doc(hidden)]
+pub struct ScriptPreparedDestination {
     observed: ValidatedPathIdentity,
     created_directories: Vec<ValidatedPathIdentity>,
 }
 
 impl ScriptPreparedDestination {
-    pub(crate) fn new(
+    pub fn new(
         observed: ValidatedPathIdentity,
         created_directories: Vec<ValidatedPathIdentity>,
     ) -> Self {
@@ -88,13 +92,15 @@ impl ScriptPreparedDestination {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct ScriptAtomicCapabilities {
-    pub(crate) install: bool,
-    pub(crate) overwrite: bool,
+#[doc(hidden)]
+pub struct ScriptAtomicCapabilities {
+    pub install: bool,
+    pub overwrite: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct ScriptTemporaryIdentity {
+#[doc(hidden)]
+pub struct ScriptTemporaryIdentity {
     volume_id: [u8; 16],
     parent_object_id: [u8; 32],
     parent_generation: u64,
@@ -103,7 +109,7 @@ pub(crate) struct ScriptTemporaryIdentity {
 }
 
 impl ScriptTemporaryIdentity {
-    pub(crate) fn new(
+    pub fn new(
         volume_id: [u8; 16],
         parent_object_id: [u8; 32],
         parent_generation: u64,
@@ -126,24 +132,50 @@ impl ScriptTemporaryIdentity {
             object_generation,
         })
     }
+
+    pub const fn volume_id(self) -> [u8; 16] {
+        self.volume_id
+    }
+
+    pub const fn parent_object_id(self) -> [u8; 32] {
+        self.parent_object_id
+    }
+
+    pub const fn parent_generation(self) -> u64 {
+        self.parent_generation
+    }
+
+    pub const fn object_id(self) -> [u8; 32] {
+        self.object_id
+    }
+
+    pub const fn object_generation(self) -> u64 {
+        self.object_generation
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct ScriptOverwriteGuard {
+#[doc(hidden)]
+pub struct ScriptOverwriteGuard {
     id: [u8; 32],
 }
 
 impl ScriptOverwriteGuard {
-    pub(crate) fn new(id: [u8; 32]) -> Result<Self, ScriptRunAdapterError> {
+    pub fn new(id: [u8; 32]) -> Result<Self, ScriptRunAdapterError> {
         if id == [0; 32] {
             return Err(ScriptRunAdapterError::InvalidData);
         }
         Ok(Self { id })
     }
+
+    pub const fn id(self) -> [u8; 32] {
+        self.id
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ScriptAtomicInstallResult {
+#[doc(hidden)]
+pub enum ScriptAtomicInstallResult {
     Installed,
     InstalledAfterCancellation,
     CancelledBeforeLinearization,
@@ -152,7 +184,8 @@ pub(crate) enum ScriptAtomicInstallResult {
 /// Runtime-only filesystem/session bridge. Implementations own all OS handles and guards.
 /// A successful `atomic_install` is the per-item linearization point; it must never report
 /// an error after the destination change has become visible.
-pub(crate) trait ScriptRunAdapter: Send {
+#[doc(hidden)]
+pub trait ScriptRunAdapter: Send {
     fn authority_generation(&mut self) -> Result<u64, ScriptRunAdapterError>;
     fn open_session_set_generation(&mut self) -> Result<u64, ScriptRunAdapterError>;
     fn session_is_current(
@@ -225,7 +258,8 @@ pub(crate) trait ScriptRunAdapter: Send {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ScriptItemFailure {
+#[doc(hidden)]
+pub enum ScriptItemFailure {
     StaleAuthority,
     StaleSession,
     StaleInput,
@@ -241,7 +275,8 @@ pub(crate) enum ScriptItemFailure {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum ScriptItemOutcome {
+#[doc(hidden)]
+pub enum ScriptItemOutcome {
     Installed,
     DryRun,
     Failed(ScriptItemFailure),
@@ -250,24 +285,27 @@ pub(crate) enum ScriptItemOutcome {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct ScriptRunItemReport {
-    pub(crate) ordinal: usize,
-    pub(crate) input_label: String,
-    pub(crate) destination_key: String,
-    pub(crate) outcome: ScriptItemOutcome,
-    pub(crate) execution: Option<ScriptDryRunReport>,
+#[doc(hidden)]
+pub struct ScriptRunItemReport {
+    pub ordinal: usize,
+    pub input_label: String,
+    pub destination_key: String,
+    pub outcome: ScriptItemOutcome,
+    pub execution: Option<ScriptDryRunReport>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct ScriptRunReport {
-    pub(crate) dry_run: bool,
-    pub(crate) cancelled: bool,
-    pub(crate) items: Vec<ScriptRunItemReport>,
-    pub(crate) created_directories: Vec<String>,
+#[doc(hidden)]
+pub struct ScriptRunReport {
+    pub dry_run: bool,
+    pub cancelled: bool,
+    pub items: Vec<ScriptRunItemReport>,
+    pub created_directories: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum ScriptRunAdvance {
+#[doc(hidden)]
+pub enum ScriptRunAdvance {
     ItemCompleted {
         ordinal: usize,
         completed: usize,
@@ -281,7 +319,8 @@ pub(crate) enum ScriptRunAdvance {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum ScriptRunStartError {
+#[doc(hidden)]
+pub enum ScriptRunStartError {
     Plan(ScriptPlanError),
     ProgramMismatch,
     NotComplete,
@@ -295,7 +334,8 @@ enum TaskPhase {
 }
 
 #[derive(Debug)]
-pub(crate) struct ScriptRunTask {
+#[doc(hidden)]
+pub struct ScriptRunTask {
     program: StaticScriptProgram,
     plan: ScriptExecutionPlan,
     confirmation: ScriptConsumedConfirmation,
@@ -310,7 +350,9 @@ pub(crate) struct ScriptRunTask {
     report: ScriptRunReport,
 }
 
-pub(crate) fn start_inkscript_run(
+/// Consumes an immutable plan and one-shot confirmation into a sequential run task.
+#[doc(hidden)]
+pub fn start_inkscript_run(
     program: &StaticScriptProgram,
     plan: ScriptExecutionPlan,
     confirmation: &mut ScriptConfirmationToken,
@@ -370,7 +412,11 @@ pub(crate) fn start_inkscript_run(
 }
 
 impl ScriptRunTask {
-    pub(crate) fn advance(
+    pub const fn total_items(&self) -> usize {
+        self.total
+    }
+
+    pub fn advance(
         &mut self,
         adapter: &mut dyn ScriptRunAdapter,
         cancelled: &mut dyn FnMut() -> bool,
@@ -454,7 +500,7 @@ impl ScriptRunTask {
         }
     }
 
-    pub(crate) fn finish(&self) -> Result<ScriptRunReport, ScriptRunStartError> {
+    pub fn finish(&self) -> Result<ScriptRunReport, ScriptRunStartError> {
         if self.phase != TaskPhase::Complete {
             return Err(ScriptRunStartError::NotComplete);
         }

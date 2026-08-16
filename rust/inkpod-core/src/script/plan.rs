@@ -23,7 +23,8 @@ const MAX_PLANNED_OUTPUT_BYTES: u64 = 64 * 1024 * 1024 * 1024;
 const MAX_PLANNED_INVOCATIONS: u64 = 1_048_576;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct ValidatedPathIdentity {
+#[doc(hidden)]
+pub struct ValidatedPathIdentity {
     canonical_key: String,
     volume_id: [u8; 16],
     object_id: Option<[u8; 32]>,
@@ -36,7 +37,7 @@ pub(crate) struct ValidatedPathIdentity {
 }
 
 impl ValidatedPathIdentity {
-    pub(crate) fn existing(
+    pub fn existing(
         canonical_key: String,
         volume_id: [u8; 16],
         object_id: [u8; 32],
@@ -59,7 +60,7 @@ impl ValidatedPathIdentity {
         Ok(value)
     }
 
-    pub(crate) fn expected_absent(
+    pub fn expected_absent(
         canonical_key: String,
         volume_id: [u8; 16],
         parent_object_id: [u8; 32],
@@ -81,43 +82,47 @@ impl ValidatedPathIdentity {
         Ok(value)
     }
 
-    pub(crate) fn canonical_key(&self) -> &str {
+    pub fn canonical_key(&self) -> &str {
         &self.canonical_key
     }
 
-    pub(crate) const fn object_id(&self) -> Option<[u8; 32]> {
+    pub const fn object_id(&self) -> Option<[u8; 32]> {
         self.object_id
     }
 
-    pub(super) const fn object_generation(&self) -> Option<u64> {
+    pub const fn object_generation(&self) -> Option<u64> {
         self.object_generation
     }
 
-    pub(super) const fn volume_id(&self) -> [u8; 16] {
+    pub const fn volume_id(&self) -> [u8; 16] {
         self.volume_id
     }
 
-    pub(super) const fn parent_object_id(&self) -> [u8; 32] {
+    pub const fn parent_object_id(&self) -> [u8; 32] {
         self.parent_object_id
     }
 
-    pub(super) const fn parent_generation(&self) -> u64 {
+    pub const fn parent_generation(&self) -> u64 {
         self.parent_generation
     }
 
-    pub(super) const fn alias_key(&self) -> [u8; 32] {
+    pub const fn parent_alias_key(&self) -> [u8; 32] {
+        self.parent_alias_key
+    }
+
+    pub const fn alias_key(&self) -> [u8; 32] {
         self.alias_key
     }
 
-    pub(super) const fn is_expected_absent(&self) -> bool {
+    pub const fn is_expected_absent(&self) -> bool {
         self.expected_absent
     }
 
-    pub(super) fn matches_exact(&self, other: &Self) -> bool {
+    pub fn matches_exact(&self, other: &Self) -> bool {
         self == other
     }
 
-    pub(crate) fn with_generations(
+    pub fn with_generations(
         mut self,
         object_generation: Option<u64>,
         parent_generation: u64,
@@ -177,7 +182,8 @@ impl ValidatedPathIdentity {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct NativeInputFingerprint {
+#[doc(hidden)]
+pub struct NativeInputFingerprint {
     path: ValidatedPathIdentity,
     display_label: String,
     display_number: u32,
@@ -190,7 +196,7 @@ pub(crate) struct NativeInputFingerprint {
 
 impl NativeInputFingerprint {
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(
+    pub fn new(
         path: ValidatedPathIdentity,
         display_label: String,
         display_number: u32,
@@ -223,33 +229,46 @@ impl NativeInputFingerprint {
         })
     }
 
-    pub(super) const fn path(&self) -> &ValidatedPathIdentity {
+    pub const fn path(&self) -> &ValidatedPathIdentity {
         &self.path
     }
 
-    pub(super) const fn document_uuid(&self) -> u128 {
+    pub const fn document_uuid(&self) -> u128 {
         self.document_uuid
     }
 
-    pub(super) const fn logical_length(&self) -> u64 {
+    pub const fn logical_length(&self) -> u64 {
         self.logical_length
     }
 
-    pub(super) const fn content_digest(&self) -> [u8; 32] {
+    pub const fn content_digest(&self) -> [u8; 32] {
         self.content_digest
     }
 
-    pub(super) const fn supports_atomic_overwrite(&self) -> bool {
+    pub const fn supports_atomic_overwrite(&self) -> bool {
         self.supports_atomic_overwrite
     }
 
-    pub(super) fn matches_exact(&self, other: &Self) -> bool {
+    pub fn matches_exact(&self, other: &Self) -> bool {
         self == other
+    }
+
+    pub fn display_label(&self) -> &str {
+        &self.display_label
+    }
+
+    pub const fn display_number(&self) -> u32 {
+        self.display_number
+    }
+
+    pub const fn change_token(&self) -> Option<[u8; 32]> {
+        self.change_token
     }
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ScriptSessionSnapshot {
+#[doc(hidden)]
+pub struct ScriptSessionSnapshot {
     session_id: u64,
     session_generation: u64,
     source_generation: u64,
@@ -267,7 +286,7 @@ pub(crate) struct ScriptSessionSnapshot {
 
 impl ScriptSessionSnapshot {
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn capture(
+    pub fn capture(
         session_id: u64,
         session_generation: u64,
         source_generation: u64,
@@ -367,7 +386,8 @@ impl ScriptSessionSnapshot {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct ScriptSessionExpectation {
+#[doc(hidden)]
+pub struct ScriptSessionExpectation {
     session_id: u64,
     session_generation: u64,
     source_generation: u64,
@@ -380,7 +400,7 @@ pub(crate) struct ScriptSessionExpectation {
 }
 
 impl ScriptSessionExpectation {
-    pub(crate) fn from_snapshot(snapshot: &ScriptSessionSnapshot) -> Result<Self, ScriptPlanError> {
+    pub fn from_snapshot(snapshot: &ScriptSessionSnapshot) -> Result<Self, ScriptPlanError> {
         snapshot.validate_self()?;
         Ok(Self {
             session_id: snapshot.session_id,
@@ -409,7 +429,8 @@ impl ScriptSessionExpectation {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) enum ScriptSequenceMemberSnapshot {
+#[doc(hidden)]
+pub enum ScriptSequenceMemberSnapshot {
     Session(ScriptSessionSnapshot),
     File {
         source_generation: u64,
@@ -436,14 +457,15 @@ impl ScriptSequenceMemberSnapshot {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ScriptSequenceSnapshot {
+#[doc(hidden)]
+pub struct ScriptSequenceSnapshot {
     sequence_id: u64,
     generation: u64,
     members: Vec<ScriptSequenceMemberSnapshot>,
 }
 
 impl ScriptSequenceSnapshot {
-    pub(crate) fn new(
+    pub fn new(
         sequence_id: u64,
         generation: u64,
         members: Vec<ScriptSequenceMemberSnapshot>,
@@ -484,16 +506,15 @@ enum ScriptSequenceMemberExpectation {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct ScriptSequenceExpectation {
+#[doc(hidden)]
+pub struct ScriptSequenceExpectation {
     sequence_id: u64,
     generation: u64,
     members: Vec<ScriptSequenceMemberExpectation>,
 }
 
 impl ScriptSequenceExpectation {
-    pub(crate) fn from_snapshot(
-        snapshot: &ScriptSequenceSnapshot,
-    ) -> Result<Self, ScriptPlanError> {
+    pub fn from_snapshot(snapshot: &ScriptSequenceSnapshot) -> Result<Self, ScriptPlanError> {
         if snapshot.sequence_id == 0 || snapshot.generation == 0 {
             return Err(ScriptPlanError::InvalidInput);
         }
@@ -569,13 +590,14 @@ impl ScriptSequenceExpectation {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub(crate) struct ScriptCommandContext {
+#[doc(hidden)]
+pub struct ScriptCommandContext {
     current_document: Option<ScriptSessionExpectation>,
     current_sequence: Option<ScriptSequenceExpectation>,
 }
 
 impl ScriptCommandContext {
-    pub(crate) const fn new(
+    pub const fn new(
         current_document: Option<ScriptSessionExpectation>,
         current_sequence: Option<ScriptSequenceExpectation>,
     ) -> Self {
@@ -587,7 +609,8 @@ impl ScriptCommandContext {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct AuthorityGrant {
+#[doc(hidden)]
+pub struct AuthorityGrant {
     intent_id: u64,
     access: InkScriptPathIntentAccess,
     authority_id: [u8; 32],
@@ -596,7 +619,7 @@ pub(crate) struct AuthorityGrant {
 }
 
 impl AuthorityGrant {
-    pub(crate) fn new(
+    pub fn new(
         intent_id: u64,
         access: InkScriptPathIntentAccess,
         authority_id: [u8; 32],
@@ -618,7 +641,8 @@ impl AuthorityGrant {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct AuthoritySnapshot {
+#[doc(hidden)]
+pub struct AuthoritySnapshot {
     static_compile_digest: [u8; 32],
     path_intent_digest: [u8; 32],
     generation: u64,
@@ -630,7 +654,7 @@ pub(crate) struct AuthoritySnapshot {
 
 impl AuthoritySnapshot {
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(
+    pub fn new(
         static_compile_digest: [u8; 32],
         path_intent_digest: [u8; 32],
         generation: u64,
@@ -663,7 +687,8 @@ impl AuthoritySnapshot {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct OpenSessionRecord {
+#[doc(hidden)]
+pub struct OpenSessionRecord {
     session_id: u64,
     session_generation: u64,
     document_uuid: u128,
@@ -671,7 +696,7 @@ pub(crate) struct OpenSessionRecord {
 }
 
 impl OpenSessionRecord {
-    pub(crate) fn new(
+    pub fn new(
         session_id: u64,
         session_generation: u64,
         document_uuid: u128,
@@ -691,19 +716,33 @@ impl OpenSessionRecord {
             backing_path,
         })
     }
+
+    pub const fn session_id(&self) -> u64 {
+        self.session_id
+    }
+
+    pub const fn session_generation(&self) -> u64 {
+        self.session_generation
+    }
+
+    pub const fn document_uuid(&self) -> u128 {
+        self.document_uuid
+    }
+
+    pub const fn backing_path(&self) -> &ValidatedPathIdentity {
+        &self.backing_path
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub(crate) struct OpenSessionSetSnapshot {
+#[doc(hidden)]
+pub struct OpenSessionSetSnapshot {
     generation: u64,
     sessions: Vec<OpenSessionRecord>,
 }
 
 impl OpenSessionSetSnapshot {
-    pub(crate) fn new(
-        generation: u64,
-        sessions: Vec<OpenSessionRecord>,
-    ) -> Result<Self, ScriptPlanError> {
+    pub fn new(generation: u64, sessions: Vec<OpenSessionRecord>) -> Result<Self, ScriptPlanError> {
         if generation == 0 {
             return Err(ScriptPlanError::StaleAuthority);
         }
@@ -725,7 +764,8 @@ impl OpenSessionSetSnapshot {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct FolderScan {
+#[doc(hidden)]
+pub struct FolderScan {
     observed_entries: u64,
     normalized_name_bytes: u64,
     work_units: u64,
@@ -734,7 +774,7 @@ pub(crate) struct FolderScan {
 }
 
 impl FolderScan {
-    pub(crate) fn new(
+    pub fn new(
         observed_entries: u64,
         normalized_name_bytes: u64,
         work_units: u64,
@@ -758,13 +798,15 @@ impl FolderScan {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ScriptPlanAdapterError {
+#[doc(hidden)]
+pub enum ScriptPlanAdapterError {
     Unavailable,
     InvalidData,
     Failure,
 }
 
-pub(crate) trait ScriptPlanAdapter {
+#[doc(hidden)]
+pub trait ScriptPlanAdapter {
     fn authority_generation(&mut self) -> Result<u64, ScriptPlanAdapterError>;
     fn open_session_set(&mut self) -> Result<OpenSessionSetSnapshot, ScriptPlanAdapterError>;
     fn resolve_file(
@@ -800,7 +842,8 @@ pub(crate) trait ScriptPlanAdapter {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum ScriptDestinationBase {
+#[doc(hidden)]
+pub enum ScriptDestinationBase {
     AuthorizedRoot {
         intent_id: u64,
         root: ValidatedPathIdentity,
@@ -811,13 +854,25 @@ pub(crate) enum ScriptDestinationBase {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct ScriptDestinationRequest {
+#[doc(hidden)]
+pub struct ScriptDestinationRequest {
     base: ScriptDestinationBase,
     relative_components: Vec<String>,
 }
 
+impl ScriptDestinationRequest {
+    pub const fn base(&self) -> &ScriptDestinationBase {
+        &self.base
+    }
+
+    pub fn relative_components(&self) -> &[String] {
+        &self.relative_components
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct ScriptPlanLimits {
+#[doc(hidden)]
+pub struct ScriptPlanLimits {
     expanded_inputs: u64,
     folder_entries: u64,
     folder_name_bytes: u64,
@@ -829,7 +884,7 @@ pub(crate) struct ScriptPlanLimits {
 }
 
 impl ScriptPlanLimits {
-    pub(crate) const fn exact_current() -> Self {
+    pub const fn exact_current() -> Self {
         Self {
             expanded_inputs: MAX_INKSCRIPT_INPUTS as u64,
             folder_entries: MAX_FOLDER_ENTRIES,
@@ -842,7 +897,7 @@ impl ScriptPlanLimits {
         }
     }
 
-    pub(crate) const fn with_folder_entries(mut self, maximum: u64) -> Self {
+    pub const fn with_folder_entries(mut self, maximum: u64) -> Self {
         self.folder_entries = lowered(maximum, MAX_FOLDER_ENTRIES);
         self
     }
@@ -925,7 +980,8 @@ impl ScriptPlannedInput {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct ScriptExecutionPreviewItem {
+#[doc(hidden)]
+pub struct ScriptExecutionPreviewItem {
     display_label: String,
     output_name: String,
     destination_key: String,
@@ -937,7 +993,8 @@ pub(crate) struct ScriptExecutionPreview {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ScriptExecutionPlan {
+#[doc(hidden)]
+pub struct ScriptExecutionPlan {
     items: Vec<ScriptPlannedInput>,
     destinations: Vec<ValidatedPathIdentity>,
     frozen_assets: FrozenScriptAssets,
@@ -976,21 +1033,49 @@ impl ScriptExecutionPlan {
         self.open_session_set_generation
     }
 
+    pub fn preview_items(&self) -> &[ScriptExecutionPreviewItem] {
+        &self.preview.items
+    }
+
+    pub const fn plan_digest(&self) -> [u8; 32] {
+        self.plan_digest
+    }
+
+    pub fn input_count(&self) -> usize {
+        self.items.len()
+    }
+
     #[cfg(test)]
     pub(super) const fn performance_usage(&self) -> ScriptPlanUsage {
         self.usage
     }
 }
 
+impl ScriptExecutionPreviewItem {
+    pub fn display_label(&self) -> &str {
+        &self.display_label
+    }
+
+    pub fn output_name(&self) -> &str {
+        &self.output_name
+    }
+
+    pub fn destination_key(&self) -> &str {
+        &self.destination_key
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum ScriptRunScope {
+#[doc(hidden)]
+pub enum ScriptRunScope {
     All,
     CurrentDocument(u128),
     CurrentFile([u8; 32]),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct ScriptConfirmationToken {
+#[doc(hidden)]
+pub struct ScriptConfirmationToken {
     plan_digest: [u8; 32],
     scope: ScriptRunScope,
     token_digest: [u8; 32],
@@ -1043,7 +1128,8 @@ impl ScriptConfirmationToken {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum ScriptPlanError {
+#[doc(hidden)]
+pub enum ScriptPlanError {
     Cancelled,
     AuthorityMismatch,
     MissingAuthority,
@@ -1080,7 +1166,9 @@ impl From<ScriptAssetError> for ScriptPlanError {
     }
 }
 
-pub(crate) fn plan_inkscript(
+/// Builds one immutable execution plan through the caller's OS/session adapter.
+#[doc(hidden)]
+pub fn plan_inkscript(
     program: &StaticScriptProgram,
     authority: &AuthoritySnapshot,
     adapter: &mut dyn ScriptPlanAdapter,
@@ -1281,7 +1369,9 @@ pub(crate) fn plan_inkscript(
     })
 }
 
-pub(crate) fn issue_confirmation_token(
+/// Issues one plan- and scope-bound confirmation token.
+#[doc(hidden)]
+pub fn issue_confirmation_token(
     plan: &ScriptExecutionPlan,
     scope: ScriptRunScope,
 ) -> Result<ScriptConfirmationToken, ScriptPlanError> {

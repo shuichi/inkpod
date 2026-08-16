@@ -16,6 +16,29 @@ pub use crate::script::{
     export_inkscript_fragment, export_inkscript_fragment_with_limits, native_script_input,
     run_inkscript_dry,
 };
+
+/// Internal safe-Rust bridge used by the versioned C ABI implementation.
+///
+/// These values keep OS handles and callbacks outside Core. They are intentionally hidden from
+/// the normal Rust documentation; the stable ownership and thread contract is the C header.
+#[doc(hidden)]
+pub mod abi_bridge {
+    pub use crate::script::{
+        AuthorityGrant, AuthoritySnapshot, AuthorizedAssetIdentity, AuthorizedAssetReadError,
+        AuthorizedAssetReader, AuthorizedAssetStream, FolderScan, NativeInputFingerprint,
+        OpenSessionRecord, OpenSessionSetSnapshot, ScriptAtomicCapabilities,
+        ScriptAtomicInstallResult, ScriptCommandContext, ScriptConfirmationToken,
+        ScriptDestinationBase, ScriptDestinationRequest, ScriptExecutionPlan,
+        ScriptExecutionPreviewItem, ScriptItemFailure, ScriptItemOutcome, ScriptNativeRead,
+        ScriptOverwriteGuard, ScriptPlanAdapter, ScriptPlanAdapterError, ScriptPlanError,
+        ScriptPlanLimits, ScriptPreparedDestination, ScriptRunAdapter, ScriptRunAdapterError,
+        ScriptRunAdvance, ScriptRunItemReport, ScriptRunLimits, ScriptRunMode, ScriptRunReport,
+        ScriptRunScope, ScriptRunStartError, ScriptRunTask, ScriptSequenceExpectation,
+        ScriptSequenceMemberSnapshot, ScriptSequenceSnapshot, ScriptSessionExpectation,
+        ScriptSessionSnapshot, ScriptTemporaryIdentity, ValidatedPathIdentity,
+        issue_confirmation_token, plan_inkscript, start_inkscript_run,
+    };
+}
 pub use inkpod_format::{
     InkScriptRunParameterChoice, InkScriptRunParameterDecision, InkScriptSource, InkScriptSourceId,
     InkScriptValue,

@@ -35,5 +35,28 @@ pub use export::{
 };
 pub use report::{ScriptDryRunReport, ScriptResultValue, ScriptStatementOutcome};
 
+#[doc(hidden)]
+pub use assets::{
+    AuthorizedAssetIdentity, AuthorizedAssetReadError, AuthorizedAssetReader, AuthorizedAssetStream,
+};
+#[doc(hidden)]
+pub use plan::{
+    AuthorityGrant, AuthoritySnapshot, FolderScan, NativeInputFingerprint, OpenSessionRecord,
+    OpenSessionSetSnapshot, ScriptCommandContext, ScriptConfirmationToken, ScriptDestinationBase,
+    ScriptDestinationRequest, ScriptExecutionPlan, ScriptExecutionPreviewItem, ScriptPlanAdapter,
+    ScriptPlanAdapterError, ScriptPlanError, ScriptPlanLimits, ScriptRunScope,
+    ScriptSequenceExpectation, ScriptSequenceMemberSnapshot, ScriptSequenceSnapshot,
+    ScriptSessionExpectation, ScriptSessionSnapshot, ValidatedPathIdentity,
+    issue_confirmation_token, plan_inkscript,
+};
+#[doc(hidden)]
+pub use run::{
+    ScriptAtomicCapabilities, ScriptAtomicInstallResult, ScriptItemFailure, ScriptItemOutcome,
+    ScriptNativeRead, ScriptOverwriteGuard, ScriptPreparedDestination, ScriptRunAdapter,
+    ScriptRunAdapterError, ScriptRunAdvance, ScriptRunItemReport, ScriptRunLimits, ScriptRunMode,
+    ScriptRunReport, ScriptRunStartError, ScriptRunTask, ScriptTemporaryIdentity,
+    start_inkscript_run,
+};
+
 #[cfg(test)]
 mod tests;

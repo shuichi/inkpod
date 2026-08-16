@@ -10,7 +10,7 @@
  *
  * @par 共通の構造体規則
  * 拡張可能な入出力構造体は先頭が `uint32_t struct_size` である。呼び出し側は
- * `struct_size = sizeof(その構造体)` を設定する。Core は ABI v15 で既知の末尾まで
+ * `struct_size = sizeof(その構造体)` を設定する。Core は ABI v16 で既知の末尾まで
  * 読み書きできるサイズ、アラインメント、stride、count と全バイト範囲を検証してから
  * ポインターを参照する。構造体ポインターは個別に NULL 可と明記したものを除き非 NULL。
  * count が 0 の任意 span だけはデータポインターを NULL にできる。入力構造体、出力構造体、
@@ -66,7 +66,7 @@
 extern "C" {
 #endif
 
-#define INKPOD_ABI_VERSION UINT32_C(15)
+#define INKPOD_ABI_VERSION UINT32_C(16)
 #define INKPOD_FEATURE_NONE UINT64_C(0)
 
 /** @brief InkScript ABI record の exact-current version。 */
@@ -85,6 +85,76 @@ extern "C" {
 #define INKPOD_INKSCRIPT_PORTABLE UINT32_C(1)
 #define INKPOD_INKSCRIPT_REQUIRES_BINDING UINT32_C(2)
 #define INKPOD_INKSCRIPT_STRICT_SOURCE_ONLY UINT32_C(3)
+#define INKPOD_INKSCRIPT_PATH_EXPECTED_ABSENT (UINT64_C(1) << 0)
+#define INKPOD_INKSCRIPT_PATH_READ UINT32_C(1)
+#define INKPOD_INKSCRIPT_PATH_ENUMERATE UINT32_C(2)
+#define INKPOD_INKSCRIPT_PATH_CREATE UINT32_C(3)
+#define INKPOD_INKSCRIPT_PATH_REPLACE UINT32_C(4)
+#define INKPOD_INKSCRIPT_INTENT_INPUT UINT32_C(1)
+#define INKPOD_INKSCRIPT_INTENT_ASSET UINT32_C(2)
+#define INKPOD_INKSCRIPT_INTENT_OUTPUT_ROOT UINT32_C(3)
+#define INKPOD_INKSCRIPT_FINGERPRINT_HAS_CHANGE_TOKEN (UINT32_C(1) << 0)
+#define INKPOD_INKSCRIPT_FINGERPRINT_ATOMIC_OVERWRITE (UINT32_C(1) << 1)
+#define INKPOD_INKSCRIPT_SESSION_MEMBER UINT32_C(1)
+#define INKPOD_INKSCRIPT_FILE_MEMBER UINT32_C(2)
+#define INKPOD_INKSCRIPT_HOST_RESPONSE_PRESENT (UINT32_C(1) << 0)
+#define INKPOD_INKSCRIPT_HOST_CAPABILITY_INSTALL (UINT32_C(1) << 1)
+#define INKPOD_INKSCRIPT_HOST_CAPABILITY_OVERWRITE (UINT32_C(1) << 2)
+#define INKPOD_INKSCRIPT_HOST_HAS_OVERWRITE_GUARD (UINT32_C(1) << 3)
+#define INKPOD_INKSCRIPT_HOST_AUTHORITY_GENERATION UINT32_C(1)
+#define INKPOD_INKSCRIPT_HOST_OPEN_SESSIONS UINT32_C(2)
+#define INKPOD_INKSCRIPT_HOST_RESOLVE_FILE UINT32_C(3)
+#define INKPOD_INKSCRIPT_HOST_ENUMERATE_FOLDER UINT32_C(4)
+#define INKPOD_INKSCRIPT_HOST_CURRENT_DOCUMENT UINT32_C(5)
+#define INKPOD_INKSCRIPT_HOST_CURRENT_SEQUENCE UINT32_C(6)
+#define INKPOD_INKSCRIPT_HOST_CAPTURE_OPEN_SESSION UINT32_C(7)
+#define INKPOD_INKSCRIPT_HOST_RESOLVE_DESTINATION UINT32_C(8)
+#define INKPOD_INKSCRIPT_HOST_ASSET_IDENTITY UINT32_C(9)
+#define INKPOD_INKSCRIPT_HOST_ASSET_READ UINT32_C(10)
+#define INKPOD_INKSCRIPT_HOST_OPEN_SESSION_GENERATION UINT32_C(11)
+#define INKPOD_INKSCRIPT_HOST_SESSION_IS_CURRENT UINT32_C(12)
+#define INKPOD_INKSCRIPT_HOST_READ_NATIVE UINT32_C(13)
+#define INKPOD_INKSCRIPT_HOST_FINGERPRINT_NATIVE UINT32_C(14)
+#define INKPOD_INKSCRIPT_HOST_ATOMIC_CAPABILITIES UINT32_C(15)
+#define INKPOD_INKSCRIPT_HOST_PREPARE_DESTINATION UINT32_C(16)
+#define INKPOD_INKSCRIPT_HOST_REVALIDATE_DESTINATION UINT32_C(17)
+#define INKPOD_INKSCRIPT_HOST_CREATE_TEMPORARY UINT32_C(18)
+#define INKPOD_INKSCRIPT_HOST_WRITE_CLOSE_TEMPORARY UINT32_C(19)
+#define INKPOD_INKSCRIPT_HOST_REVALIDATE_TEMPORARY UINT32_C(20)
+#define INKPOD_INKSCRIPT_HOST_ACQUIRE_OVERWRITE_GUARD UINT32_C(21)
+#define INKPOD_INKSCRIPT_HOST_FINGERPRINT_UNDER_GUARD UINT32_C(22)
+#define INKPOD_INKSCRIPT_HOST_RELEASE_OVERWRITE_GUARD UINT32_C(23)
+#define INKPOD_INKSCRIPT_HOST_ATOMIC_INSTALL UINT32_C(24)
+#define INKPOD_INKSCRIPT_HOST_CLEANUP_TEMPORARY UINT32_C(25)
+#define INKPOD_INKSCRIPT_SCOPE_ALL UINT32_C(1)
+#define INKPOD_INKSCRIPT_SCOPE_CURRENT_DOCUMENT UINT32_C(2)
+#define INKPOD_INKSCRIPT_SCOPE_CURRENT_FILE UINT32_C(3)
+#define INKPOD_INKSCRIPT_RUN_DRY UINT32_C(1)
+#define INKPOD_INKSCRIPT_RUN_INSTALL UINT32_C(2)
+#define INKPOD_INKSCRIPT_EVENT_PLAN_COMPLETE UINT32_C(1)
+#define INKPOD_INKSCRIPT_EVENT_ITEM_COMPLETE UINT32_C(2)
+#define INKPOD_INKSCRIPT_EVENT_WAIT_REQUESTED UINT32_C(3)
+#define INKPOD_INKSCRIPT_EVENT_RUN_COMPLETE UINT32_C(4)
+#define INKPOD_INKSCRIPT_OUTCOME_NOT_STARTED UINT32_C(1)
+#define INKPOD_INKSCRIPT_OUTCOME_INSTALLED UINT32_C(2)
+#define INKPOD_INKSCRIPT_OUTCOME_DRY_RUN UINT32_C(3)
+#define INKPOD_INKSCRIPT_OUTCOME_FAILED UINT32_C(4)
+#define INKPOD_INKSCRIPT_OUTCOME_CANCELLED UINT32_C(5)
+#define INKPOD_INKSCRIPT_FAILURE_NONE UINT32_C(0)
+#define INKPOD_INKSCRIPT_FAILURE_STALE_AUTHORITY UINT32_C(1)
+#define INKPOD_INKSCRIPT_FAILURE_STALE_SESSION UINT32_C(2)
+#define INKPOD_INKSCRIPT_FAILURE_STALE_INPUT UINT32_C(3)
+#define INKPOD_INKSCRIPT_FAILURE_STALE_DESTINATION UINT32_C(4)
+#define INKPOD_INKSCRIPT_FAILURE_UNSUPPORTED_INSTALL UINT32_C(5)
+#define INKPOD_INKSCRIPT_FAILURE_UNSUPPORTED_OVERWRITE UINT32_C(6)
+#define INKPOD_INKSCRIPT_FAILURE_DECODE UINT32_C(7)
+#define INKPOD_INKSCRIPT_FAILURE_EXECUTE UINT32_C(8)
+#define INKPOD_INKSCRIPT_FAILURE_ENCODE UINT32_C(9)
+#define INKPOD_INKSCRIPT_FAILURE_SAVE UINT32_C(10)
+#define INKPOD_INKSCRIPT_FAILURE_RESOURCE UINT32_C(11)
+#define INKPOD_INKSCRIPT_FAILURE_ADAPTER UINT32_C(12)
+#define INKPOD_INKSCRIPT_REPORT_DRY_RUN (UINT64_C(1) << 0)
+#define INKPOD_INKSCRIPT_REPORT_CANCELLED (UINT64_C(1) << 1)
 
 /** @brief すべての fallible API が返す固定幅ステータス型。 */
 typedef uint32_t InkpodStatus;
@@ -101,6 +171,7 @@ typedef uint32_t InkpodStatus;
 #define INKPOD_STATUS_CANCELLED UINT32_C(10)
 #define INKPOD_STATUS_FILL_OVERFLOW UINT32_C(11)
 #define INKPOD_STATUS_UNSAVED_CHANGES UINT32_C(12)
+#define INKPOD_STATUS_QUEUE_FULL UINT32_C(13)
 
 /** @brief ABI-v3 Rust-owned object の閉じた type namespace。 */
 typedef uint32_t InkpodObjectType;
@@ -781,6 +852,11 @@ typedef struct InkpodInkScriptSource InkpodInkScriptSource;
 typedef struct InkpodInkScriptProgram InkpodInkScriptProgram;
 /** @brief Canonical journal fragment text と linkage を所有する immutable handle。 */
 typedef struct InkpodInkScriptFragment InkpodInkScriptFragment;
+typedef struct InkpodInkScriptPlanTask InkpodInkScriptPlanTask;
+typedef struct InkpodInkScriptPlan InkpodInkScriptPlan;
+typedef struct InkpodInkScriptConfirmation InkpodInkScriptConfirmation;
+typedef struct InkpodInkScriptRunTask InkpodInkScriptRunTask;
+typedef struct InkpodInkScriptReport InkpodInkScriptReport;
 
 /** @brief One borrowed exact-current source parse request. */
 typedef struct InkpodInkScriptSourceInput {
@@ -960,6 +1036,327 @@ typedef struct InkpodInkScriptFragmentSummary {
     uint64_t required_precondition_count;
     uint64_t text_bytes;
 } InkpodInkScriptFragmentSummary;
+
+typedef struct InkpodInkScriptUtf8Span {
+    const uint8_t* bytes;
+    uint64_t byte_count;
+} InkpodInkScriptUtf8Span;
+
+typedef struct InkpodInkScriptPathIdentity {
+    uint32_t struct_size;
+    uint32_t version;
+    uint64_t feature_flags;
+    InkpodInkScriptUtf8Span canonical_key;
+    uint8_t volume_id[16];
+    uint8_t object_id[32];
+    uint64_t object_generation;
+    uint8_t alias_key[32];
+    uint8_t parent_object_id[32];
+    uint64_t parent_generation;
+    uint8_t parent_alias_key[32];
+    uint64_t flags;
+} InkpodInkScriptPathIdentity;
+
+typedef struct InkpodInkScriptNativeFingerprint {
+    uint32_t struct_size;
+    uint32_t version;
+    uint64_t feature_flags;
+    const InkpodInkScriptPathIdentity* path;
+    InkpodInkScriptUtf8Span display_label;
+    uint32_t display_number;
+    uint32_t flags;
+    uint64_t document_uuid_low;
+    uint64_t document_uuid_high;
+    uint64_t logical_length;
+    uint8_t content_digest[32];
+    uint8_t change_token[32];
+} InkpodInkScriptNativeFingerprint;
+
+typedef struct InkpodInkScriptSessionInput {
+    uint32_t struct_size;
+    uint32_t version;
+    uint64_t feature_flags;
+    InkpodCore* core;
+    uint64_t session_id;
+    uint64_t session_generation;
+    uint64_t source_generation;
+    InkpodInkScriptUtf8Span display_label;
+    uint32_t display_number;
+    uint32_t reserved;
+    const InkpodInkScriptPathIdentity* backing_path;
+} InkpodInkScriptSessionInput;
+
+typedef struct InkpodInkScriptSequenceMember {
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t kind;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    uint64_t source_generation;
+    const InkpodInkScriptSessionInput* session;
+    const InkpodInkScriptNativeFingerprint* fingerprint;
+} InkpodInkScriptSequenceMember;
+
+typedef struct InkpodInkScriptOpenSession {
+    uint32_t struct_size;
+    uint32_t version;
+    uint64_t feature_flags;
+    uint64_t session_id;
+    uint64_t session_generation;
+    uint64_t document_uuid_low;
+    uint64_t document_uuid_high;
+    const InkpodInkScriptPathIdentity* backing_path;
+} InkpodInkScriptOpenSession;
+
+typedef struct InkpodInkScriptAuthorityGrant {
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t access;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    uint64_t intent_id;
+    uint8_t authority_id[32];
+    uint64_t authority_generation;
+    const InkpodInkScriptPathIdentity* resolved;
+} InkpodInkScriptAuthorityGrant;
+
+typedef struct InkpodInkScriptTemporaryIdentity {
+    uint8_t volume_id[16];
+    uint8_t parent_object_id[32];
+    uint64_t parent_generation;
+    uint8_t object_id[32];
+    uint64_t object_generation;
+} InkpodInkScriptTemporaryIdentity;
+
+typedef struct InkpodInkScriptHostRequest {
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t operation;
+    uint32_t flags;
+    uint64_t feature_flags;
+    uint64_t intent_id;
+    uint64_t session_id;
+    uint64_t session_generation;
+    uint64_t source_generation;
+    uint64_t byte_offset;
+    uint64_t byte_capacity;
+    InkpodInkScriptUtf8Span asset_symbol;
+    const InkpodInkScriptPathIdentity* identity;
+    const InkpodInkScriptNativeFingerprint* fingerprint;
+    const InkpodInkScriptUtf8Span* relative_components;
+    uint64_t relative_component_count;
+    const InkpodInkScriptPathIdentity* known_directories;
+    uint64_t known_directory_count;
+    InkpodInkScriptTemporaryIdentity temporary;
+    uint8_t overwrite_guard[32];
+    const uint8_t* bytes;
+    uint64_t byte_count;
+} InkpodInkScriptHostRequest;
+
+typedef struct InkpodInkScriptHostResponse {
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t flags;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    uint64_t generation;
+    uint64_t secondary_generation;
+    uint64_t sequence_id;
+    const void* records;
+    uint64_t record_count;
+    uint64_t record_stride_bytes;
+    uint64_t observed_entries;
+    uint64_t normalized_name_bytes;
+    uint64_t work_units;
+    uint32_t maximum_depth;
+    uint32_t result_kind;
+    const InkpodInkScriptPathIdentity* identity;
+    const InkpodInkScriptNativeFingerprint* fingerprint;
+    const InkpodInkScriptNativeFingerprint* fingerprint_after;
+    const InkpodInkScriptSessionInput* session;
+    const uint8_t* bytes;
+    uint64_t byte_count;
+    InkpodInkScriptTemporaryIdentity temporary;
+    uint8_t overwrite_guard[32];
+} InkpodInkScriptHostResponse;
+
+typedef InkpodStatus (*InkpodInkScriptHostCall)(
+    void* context,
+    const InkpodInkScriptHostRequest* request,
+    InkpodInkScriptHostResponse* response);
+
+typedef struct InkpodInkScriptHostAdapter {
+    uint32_t struct_size;
+    uint32_t version;
+    uint64_t feature_flags;
+    void* context;
+    InkpodInkScriptHostCall call;
+} InkpodInkScriptHostAdapter;
+
+typedef struct InkpodInkScriptPlanTaskRequest {
+    uint32_t struct_size;
+    uint32_t version;
+    uint64_t feature_flags;
+    uint64_t controller_id;
+    uint64_t session_generation;
+    uint64_t authority_generation;
+    uint64_t open_session_set_generation;
+    const InkpodInkScriptAuthorityGrant* grants;
+    uint64_t grant_count;
+    uint64_t grant_stride_bytes;
+    const InkpodInkScriptPathIdentity* script_path;
+    uint64_t maximum_folder_entries;
+    InkpodInkScriptHostAdapter host;
+} InkpodInkScriptPlanTaskRequest;
+
+typedef struct InkpodInkScriptPathIntent {
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t access;
+    uint32_t subject_kind;
+    uint64_t feature_flags;
+    uint64_t intent_id;
+    uint64_t subject_index;
+    uint64_t text_offset;
+    uint64_t text_bytes;
+    uint64_t subject_offset;
+    uint64_t subject_bytes;
+} InkpodInkScriptPathIntent;
+
+typedef struct InkpodInkScriptPathIntentBuffer {
+    uint32_t struct_size;
+    uint32_t version;
+    uint64_t feature_flags;
+    InkpodInkScriptPathIntent* records;
+    uint64_t record_capacity;
+    uint64_t record_stride_bytes;
+    uint8_t* utf8;
+    uint64_t utf8_capacity_bytes;
+    uint64_t records_written;
+    uint64_t required_records;
+    uint64_t utf8_written_bytes;
+    uint64_t required_utf8_bytes;
+} InkpodInkScriptPathIntentBuffer;
+
+typedef struct InkpodInkScriptPlanSummary {
+    uint32_t struct_size;
+    uint32_t version;
+    uint64_t feature_flags;
+    uint64_t controller_id;
+    uint64_t session_generation;
+    uint64_t core_generation;
+    uint8_t plan_digest[32];
+    uint64_t item_count;
+} InkpodInkScriptPlanSummary;
+
+typedef struct InkpodInkScriptPreviewItem {
+    uint32_t struct_size;
+    uint32_t version;
+    uint64_t feature_flags;
+    uint64_t ordinal;
+    uint64_t input_offset;
+    uint64_t input_bytes;
+    uint64_t output_offset;
+    uint64_t output_bytes;
+    uint64_t destination_offset;
+    uint64_t destination_bytes;
+} InkpodInkScriptPreviewItem;
+
+typedef struct InkpodInkScriptPreviewBuffer {
+    uint32_t struct_size;
+    uint32_t version;
+    uint64_t feature_flags;
+    uint64_t first_item;
+    InkpodInkScriptPreviewItem* records;
+    uint64_t record_capacity;
+    uint64_t record_stride_bytes;
+    uint8_t* utf8;
+    uint64_t utf8_capacity_bytes;
+    uint64_t records_written;
+    uint64_t required_records;
+    uint64_t utf8_written_bytes;
+    uint64_t required_utf8_bytes;
+} InkpodInkScriptPreviewBuffer;
+
+typedef struct InkpodInkScriptConfirmationRequest {
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t scope;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    uint64_t document_uuid_low;
+    uint64_t document_uuid_high;
+    uint8_t file_alias[32];
+} InkpodInkScriptConfirmationRequest;
+
+typedef struct InkpodInkScriptRunRequest {
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t mode;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    uint64_t controller_id;
+    uint64_t session_generation;
+    uint64_t maximum_output_bytes;
+    InkpodInkScriptHostAdapter host;
+} InkpodInkScriptRunRequest;
+
+typedef struct InkpodInkScriptTaskEvent {
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t kind;
+    uint32_t task_state;
+    uint64_t feature_flags;
+    uint64_t ordinal;
+    uint64_t completed_items;
+    uint64_t total_items;
+    uint32_t wait_milliseconds;
+    uint32_t outcome;
+    uint32_t failure;
+    uint32_t reserved;
+} InkpodInkScriptTaskEvent;
+
+typedef struct InkpodInkScriptReportSummary {
+    uint32_t struct_size;
+    uint32_t version;
+    uint64_t feature_flags;
+    uint64_t flags;
+    uint64_t item_count;
+    uint64_t created_directory_count;
+} InkpodInkScriptReportSummary;
+
+typedef struct InkpodInkScriptReportItem {
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t outcome;
+    uint32_t failure;
+    uint64_t feature_flags;
+    uint64_t ordinal;
+    uint64_t input_offset;
+    uint64_t input_bytes;
+    uint64_t destination_offset;
+    uint64_t destination_bytes;
+    uint64_t commit_count;
+    uint64_t final_revision;
+    uint64_t next_stable_id;
+    uint8_t final_state_digest[32];
+} InkpodInkScriptReportItem;
+
+typedef struct InkpodInkScriptReportBuffer {
+    uint32_t struct_size;
+    uint32_t version;
+    uint64_t feature_flags;
+    uint64_t first_item;
+    InkpodInkScriptReportItem* records;
+    uint64_t record_capacity;
+    uint64_t record_stride_bytes;
+    uint8_t* utf8;
+    uint64_t utf8_capacity_bytes;
+    uint64_t records_written;
+    uint64_t required_records;
+    uint64_t utf8_written_bytes;
+    uint64_t required_utf8_bytes;
+} InkpodInkScriptReportBuffer;
 
 /** @brief Core 作成時の ABI version と feature を渡す入力。全体を borrowed で読み取る。 */
 typedef struct InkpodCoreConfig {
@@ -6737,6 +7134,125 @@ InkpodStatus inkpod_core_inkscript_fragment_text_copy(
 InkpodStatus inkpod_core_inkscript_fragment_release(
     InkpodCore* core,
     InkpodInkScriptFragment** fragment);
+
+/** Copies every authority-free path intent as fixed records plus packed UTF-8 in one batch. */
+InkpodStatus inkpod_core_inkscript_program_path_intents_copy(
+    InkpodCore* core,
+    const InkpodInkScriptProgram* program,
+    InkpodInkScriptPathIntentBuffer* output);
+
+/**
+ * Creates a Core-owner-thread PlanTask from copied grants and a borrowed host callback context.
+ * The host context, callback, returned Core/session pointers, and response spans remain caller-owned.
+ * Response pointers remain readable until the next callback on that context. The callback must not
+ * reenter the same Core. No Core lock is held while it executes. The task must be cancelled/drained
+ * and released before the callback context, program generation, or parent Core is destroyed.
+ */
+InkpodStatus inkpod_core_inkscript_plan_task_create(
+    InkpodCore* core,
+    const InkpodInkScriptProgram* program,
+    const InkpodInkScriptPlanTaskRequest* request,
+    InkpodInkScriptPlanTask** out_task);
+
+/** Atomically queries PlanTask state/progress from any thread; synchronize against release. */
+InkpodStatus inkpod_inkscript_plan_task_query(
+    const InkpodInkScriptPlanTask* task,
+    InkpodTaskInfo* output);
+/** Atomically requests cooperative PlanTask cancellation from any thread. */
+InkpodStatus inkpod_inkscript_plan_task_cancel(const InkpodInkScriptPlanTask* task);
+/** Runs the bounded planning stage on the Core owner thread and enqueues one terminal event. */
+InkpodStatus inkpod_core_inkscript_plan_task_advance(
+    InkpodCore* core,
+    InkpodInkScriptPlanTask* task);
+/** Takes the oldest lossless task event; advance returns QUEUE_FULL until it is drained. */
+InkpodStatus inkpod_core_inkscript_plan_task_event_take(
+    InkpodCore* core,
+    InkpodInkScriptPlanTask* task,
+    InkpodInkScriptTaskEvent* output);
+/** Transfers the immutable plan out of a successfully completed PlanTask exactly once. */
+InkpodStatus inkpod_core_inkscript_plan_task_take_plan(
+    InkpodCore* core,
+    InkpodInkScriptPlanTask* task,
+    InkpodInkScriptPlan** out_plan);
+/** Releases a PlanTask on its Core owner thread; NULL owner is a no-op. */
+InkpodStatus inkpod_core_inkscript_plan_task_release(
+    InkpodCore* core,
+    InkpodInkScriptPlanTask** task);
+
+/** Copies immutable plan identity and item count on the Core owner thread. */
+InkpodStatus inkpod_core_inkscript_plan_summary(
+    InkpodCore* core,
+    const InkpodInkScriptPlan* plan,
+    InkpodInkScriptPlanSummary* output);
+/** Copies preview-ordered input/output/destination rows plus packed UTF-8 in one batch. */
+InkpodStatus inkpod_core_inkscript_plan_preview_copy(
+    InkpodCore* core,
+    const InkpodInkScriptPlan* plan,
+    InkpodInkScriptPreviewBuffer* output);
+/** Releases an immutable plan on its Core owner thread; NULL owner is a no-op. */
+InkpodStatus inkpod_core_inkscript_plan_release(
+    InkpodCore* core,
+    InkpodInkScriptPlan** plan);
+
+/** Creates one plan/scope-bound, one-shot confirmation token without changing the plan. */
+InkpodStatus inkpod_core_inkscript_confirmation_create(
+    InkpodCore* core,
+    const InkpodInkScriptPlan* plan,
+    const InkpodInkScriptConfirmationRequest* request,
+    InkpodInkScriptConfirmation** out_confirmation);
+/** Releases an unused confirmation on its Core owner thread; NULL owner is a no-op. */
+InkpodStatus inkpod_core_inkscript_confirmation_release(
+    InkpodCore* core,
+    InkpodInkScriptConfirmation** confirmation);
+
+/**
+ * Consumes plan and confirmation owners only on success and creates one sequential RunTask.
+ * The callback context remains borrowed through task release. Item execution, current-v26 encode,
+ * and atomic install use the existing canonical runner. Shutdown must cancel, drain, and release
+ * the task before releasing the program, host context, session Cores, or parent Core.
+ */
+InkpodStatus inkpod_core_inkscript_run_task_create(
+    InkpodCore* core,
+    const InkpodInkScriptProgram* program,
+    InkpodInkScriptPlan** plan,
+    InkpodInkScriptConfirmation** confirmation,
+    const InkpodInkScriptRunRequest* request,
+    InkpodInkScriptRunTask** out_task);
+/** Atomically queries RunTask state/progress from any thread; synchronize against release. */
+InkpodStatus inkpod_inkscript_run_task_query(
+    const InkpodInkScriptRunTask* task,
+    InkpodTaskInfo* output);
+/** Atomically requests cooperative RunTask cancellation from any thread. */
+InkpodStatus inkpod_inkscript_run_task_cancel(const InkpodInkScriptRunTask* task);
+/** Advances at most one item or one wait/terminal transition on the Core owner thread. */
+InkpodStatus inkpod_core_inkscript_run_task_advance(
+    InkpodCore* core,
+    InkpodInkScriptRunTask* task);
+/** Takes the oldest lossless run event; advance returns QUEUE_FULL until it is drained. */
+InkpodStatus inkpod_core_inkscript_run_task_event_take(
+    InkpodCore* core,
+    InkpodInkScriptRunTask* task,
+    InkpodInkScriptTaskEvent* output);
+/** Transfers one immutable terminal report out of a completed RunTask exactly once. */
+InkpodStatus inkpod_core_inkscript_run_task_take_report(
+    InkpodCore* core,
+    InkpodInkScriptRunTask* task,
+    InkpodInkScriptReport** out_report);
+/** Releases a RunTask on its Core owner thread; NULL owner is a no-op. */
+InkpodStatus inkpod_core_inkscript_run_task_release(
+    InkpodCore* core,
+    InkpodInkScriptRunTask** task);
+
+/** Copies immutable report flags and aggregate counts on any externally synchronized thread. */
+InkpodStatus inkpod_inkscript_report_summary(
+    const InkpodInkScriptReport* report,
+    InkpodInkScriptReportSummary* output);
+/** Copies preview-ordinal item reports plus packed UTF-8 in one bounded batch. */
+InkpodStatus inkpod_inkscript_report_items_copy(
+    const InkpodInkScriptReport* report,
+    InkpodInkScriptReportBuffer* output);
+/** Releases a detached immutable report on any externally synchronized thread. */
+InkpodStatus inkpod_inkscript_report_release(InkpodInkScriptReport** report);
 
 /**
  * @brief current thread の直近 FFI diagnostic に必要な UTF-8 buffer size を得る。

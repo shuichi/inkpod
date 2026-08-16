@@ -16,14 +16,15 @@ use std::sync::Arc;
 const ASSET_READ_CHUNK_BYTES: usize = 64 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct AuthorizedAssetIdentity {
+#[doc(hidden)]
+pub struct AuthorizedAssetIdentity {
     object: [u8; 32],
     generation: u64,
     logical_length: u64,
 }
 
 impl AuthorizedAssetIdentity {
-    pub(crate) const fn new(object: [u8; 32], generation: u64, logical_length: u64) -> Self {
+    pub const fn new(object: [u8; 32], generation: u64, logical_length: u64) -> Self {
         Self {
             object,
             generation,
@@ -31,21 +32,22 @@ impl AuthorizedAssetIdentity {
         }
     }
 
-    pub(super) const fn object(self) -> [u8; 32] {
+    pub const fn object(self) -> [u8; 32] {
         self.object
     }
 
-    pub(super) const fn generation(self) -> u64 {
+    pub const fn generation(self) -> u64 {
         self.generation
     }
 
-    pub(super) const fn logical_length(self) -> u64 {
+    pub const fn logical_length(self) -> u64 {
         self.logical_length
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum AuthorizedAssetReadError {
+#[doc(hidden)]
+pub enum AuthorizedAssetReadError {
     IdentityUnavailable,
     ReadFailed,
 }
@@ -54,19 +56,21 @@ pub(crate) enum AuthorizedAssetReadError {
 ///
 /// Identity observations must describe the same already-authorized object before and after the
 /// bounded read. Core never interprets an OS handle, authority token, or filesystem path.
-pub(crate) trait AuthorizedAssetReader: Send {
+#[doc(hidden)]
+pub trait AuthorizedAssetReader: Send {
     fn observe_identity(&mut self) -> Result<AuthorizedAssetIdentity, AuthorizedAssetReadError>;
     fn read_chunk(&mut self, target: &mut [u8]) -> Result<usize, AuthorizedAssetReadError>;
 }
 
-pub(crate) struct AuthorizedAssetStream<'reader> {
+#[doc(hidden)]
+pub struct AuthorizedAssetStream<'reader> {
     asset_symbol: &'reader str,
     authorized_identity: AuthorizedAssetIdentity,
     reader: &'reader mut dyn AuthorizedAssetReader,
 }
 
 impl<'reader> AuthorizedAssetStream<'reader> {
-    pub(crate) fn new(
+    pub fn new(
         asset_symbol: &'reader str,
         authorized_identity: AuthorizedAssetIdentity,
         reader: &'reader mut dyn AuthorizedAssetReader,

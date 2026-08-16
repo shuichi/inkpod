@@ -2545,7 +2545,7 @@ fn inkscript_versions_and_traceability_match_repository_contracts() {
     assert_eq!(number(member(contract, "procedure_catalog_version")), 2);
     assert_eq!(number(member(contract, "replay_epoch")), 23);
     assert_eq!(number(member(contract, "inkpod_top_level_version")), 26);
-    assert_eq!(number(member(contract, "c_abi_version")), 15);
+    assert_eq!(number(member(contract, "c_abi_version")), 16);
 
     let repository = repository();
     let model = fs::read_to_string(repository.join("rust/inkpod-core/src/primitive/model.rs"))
@@ -2557,7 +2557,7 @@ fn inkscript_versions_and_traceability_match_repository_contracts() {
     assert!(model.contains("pub const CURRENT: Self = Self(23);"));
     assert!(model.contains("pub const PROCEDURE_FORMAT_VERSION: u32 = 26;"));
     assert!(format.contains("pub const FORMAT_VERSION: u32 = 26;"));
-    assert!(header.contains("#define INKPOD_ABI_VERSION UINT32_C(15)"));
+    assert!(header.contains("#define INKPOD_ABI_VERSION UINT32_C(16)"));
 
     let spec = fs::read_to_string(repository.join("SPEC.md")).expect("SPEC must be readable");
     let compatibility = fs::read_to_string(repository.join("docs/compatibility.md"))
@@ -2706,10 +2706,16 @@ fn inkscript_private_typed_models_remain_unreachable_from_core_ffi_and_windows()
     assert!(!core_public_root.contains("FrozenScriptAssets"));
     assert!(!core_public_root.contains("AuthorizedAssetStream"));
     assert!(!core_public_root.contains("freeze_inkscript_assets"));
+    let execution_bridge = repository.join("rust/inkpod-ffi/src/inkscript_execution.rs");
     for source in sources {
         let contents = fs::read(&source)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", source.display()));
         let text = String::from_utf8_lossy(&contents);
+        let is_execution_bridge = source == execution_bridge;
+        if is_execution_bridge {
+            assert!(text.contains("inkpod_core::inkscript::abi_bridge::*"));
+            assert!(!text.contains("inkpod_core::script"));
+        }
         assert!(
             !text.contains("build_inkscript_orchestration_envelope")
                 && !text.contains("InkScriptOrchestrationEnvelope")
@@ -2725,7 +2731,7 @@ fn inkscript_private_typed_models_remain_unreachable_from_core_ffi_and_windows()
                 && !text.contains("InkScriptCatalogView")
                 && !text.contains("InkScriptInitialDocumentSnapshot")
                 && !text.contains("FrozenScriptAssets")
-                && !text.contains("AuthorizedAssetStream")
+                && (!text.contains("AuthorizedAssetStream") || is_execution_bridge)
                 && !text.contains("freeze_inkscript_assets"),
             "production source {} reaches a private typed InkScript model",
             source.display()

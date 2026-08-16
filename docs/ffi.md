@@ -13,9 +13,11 @@ Windows フロントエンドは、UI/Input、Core エンジン、レンダラ�
 - Core エンジンスレッドは `InkpodCore` を作成し、すべての Core 操作とスナップショット構築を行う。
 - レンダラースレッドは D3D11/DXGI/Direct2D リソースと `Present` を所有し、不変スナップショットだけを読む。
 
-Core は C++ コールバックを呼ばない。UI スレッドは Core やレンダラーの完了を同期的に待たず、
-レンダラーは古い未描画スナップショットだけを置き換えてよい。ストロークの開始・終了・キャンセルと
-入力サンプル自体は捨てない。
+通常の文書 command／render 経路で Core は C++ コールバックを呼ばない。InkScript execution ABI だけは、
+Core engine thread 上の明示的な `PlanTask`／`RunTask` advance 中に、OS authority／session／file install を
+`InkpodInkScriptHostAdapter` callbackへ問い合わせる。この callback 中に Core lockを保持せず、同じ Coreへ
+reenterしてはならない。UI スレッドは Core やレンダラーの完了を同期的に待たず、レンダラーは古い未描画
+スナップショットだけを置き換えてよい。ストロークの開始・終了・キャンセルと入力サンプル自体は捨てない。
 
 ```text
 UI/Input スレッド
@@ -44,7 +46,7 @@ options.feature_flags = INKPOD_FEATURE_NONE;
 ```
 
 - `struct_size` は必ず呼び出し側が設定する。出力構造体でも同じである。
-- ABI v15 で既知の構造体末尾まで読み書きできるサイズが必要である。
+- ABI v16 で既知の構造体末尾まで読み書きできるサイズが必要である。
 - `reserved` は 0 とし、未知の必須機能フラグは指定しない。
 - レコード列では、各レコードの `struct_size` と `*_stride_bytes` の両方を設定する。
 - 要素数、ストライド、アラインメント、列全体のバイト範囲が有効でなければならない。
@@ -54,23 +56,24 @@ options.feature_flags = INKPOD_FEATURE_NONE;
 ABI バージョンは Core 作成前に比較できる。`INKPOD_ABI_VERSION` とライブラリの戻り値が異なる場合は、
 Core を作らず互換性エラーとして扱う。
 
-現行ライブラリは ABI v15 だけを受理し、`InkpodCoreConfig::abi_version` が完全一致しなければ
+現行ライブラリは ABI v16 だけを受理し、`InkpodCoreConfig::abi_version` が完全一致しなければ
 `INKPOD_STATUS_INCOMPATIBLE_ABI` を返す。関数名や型名の `_v3` は、値／ID API 群が導入された世代を
-示す接尾辞であり、ABI v3 の呼び出し側との実行時互換性を意味しない。ABI v1-v14 の呼び出し側は、
-現行の v15 ヘッダーへ更新して再ビルドする。
+示す接尾辞であり、ABI v3 の呼び出し側との実行時互換性を意味しない。ABI v1-v15 の呼び出し側は、
+現行の v16 ヘッダーへ更新して再ビルドする。
 
-ABI v15 は ABI v14 の `_v3` 値／ID 専用プリミティブ制御 API と永続化 API を保持し、
+ABI v16 は ABI v15 までの `_v3` 値／ID 専用プリミティブ制御 API、永続化 API、InkScript
+source/compiler/fragment APIを保持し、
 sequence source identity、Rust-owned二セルpair preview、その bounded candidate照会、
 読込済みBatch graphのoperation照会とimmutable run-copy作成、annotation
 edit／stroke／snapshot API、角度付き撮影frameのedit／preview／snapshot、明示的な
 指示raster export API、消失点のCRUD／preview／snapshot APIを保持する。ABI v14 で
 `InkpodHistoryItem` から表示用UTF-8名を除き、固定幅の `InkpodHistoryEntryKind` を返す。
 Coreは言語や `UiStringId` を保持せず、frontendだけがこの意味種別を表示catalogへ写像する。
-ABI v2 で公開名から実装時のマイルストーン番号を除いたタスク API は、現行 v15 でも引き続き
+ABI v2 で公開名から実装時のマイルストーン番号を除いたタスク API は、現行 v16 でも引き続き
 `InkpodTask` / `InkpodTaskInfo` / `INKPOD_TASK_*` / `inkpod_task_*`、共有ラスタ入力は
 `InkpodRasterSourceInput` を使用する。v1 のマイルストーン名は公開別名として残していない。
 
-既存のラスタ文書オープン／インポート、クリップボード、ライトテーブル入力は、現行 v15 の操作別 API の
+既存のラスタ文書オープン／インポート、クリップボード、ライトテーブル入力は、現行 v16 の操作別 API の
 一回の上限付き呼び出し中に、同期的に検証、コピー、正規化、登録される。ストロークサンプルも同期的に
 Rust 所有の正規化済みバイト列へコピーされ、4 MiB 以下ならプロシージャ内のペイロード、4 MiB 超なら
 正規化済みサンプルアセットになる。シーケンスの入力元は従来どおり上限付きの Rust 所有ラスタコピーであり、
@@ -79,11 +82,11 @@ Rust 所有の正規化済みバイト列へコピーされ、4 MiB 以下なら
 正規アセットの保持は Core 内部で行われ、`_v3` 付き実行時オブジェクト ID と、永続的で内容アドレス方式の
 `AssetId` は別の名前空間に属する。
 
-## InkScript source／compiler／fragment（現行 ABI v15）
+## InkScript source／compiler／fragment（現行 ABI v16）
 
-ABI v15 は exact-current InkScript file v2／procedure catalog v2／replay epoch 23 を変えず、source parse、
-diagnostic copy、static compile、journal fragment export の C ABI を追加する。`.inkscript` file filter、Windows
-command／UI、path authority、plan execution、report はまだ接続しない。
+ABI v15 で追加されたsource parse、diagnostic copy、static compile、journal fragment exportは、exact-current
+InkScript file v2／procedure catalog v2／replay epoch 23を変えずABI v16にも保持される。`.inkscript` file filter、
+Windows command／UI、実Windows path authorityはまだ接続しない。
 
 `inkpod_inkscript_source_parse` は `InkpodInkScriptSourceInput` の UTF-8 span を呼出中だけ借用し、128 MiB
 以下を Rust 所有へ一回コピーする。lex／parse error は API failure ではなく、`OK` と invalid source handle、
@@ -111,12 +114,48 @@ Core destroyより先にreleaseする。NULL、short record、unknown flag/kind�
 non-Commit、oversize、Cancel、stale generation、panicはowned handleを公開せず、document/editor revision、history、
 dirty、savepoint、cache、asset、ID high-watermarkを変更しない。
 
-全InkScript recordは`struct_size`と`version == INKPOD_INKSCRIPT_RECORD_VERSION`を持つ。ABI v15のRust unit contract、
+全InkScript recordは`struct_size`と`version == INKPOD_INKSCRIPT_RECORD_VERSION`を持つ。ABI v16のRust unit contract、
 C11/C++20 layout/include、header/export drift、ABI smokeは、NULL、alignment、short record、unknown flag/kind、
-oversize、wrong thread、stale Core/controller generation、二段階copy、Cancel、double release、v14拒否を検証する。
+oversize、wrong thread、stale Core/controller generation、二段階copy、Cancel、double release、v15拒否を検証する。
 error textは既存thread-local二段階APIを使い、共有global mutable bufferを設けない。
 
-## Text／instruction annotation（現行 ABI v15）
+## InkScript execution／report（現行 ABI v16）
+
+ABI v16は、M11／M12から維持している単一のRust planner／runnerへ、authority-free `PathIntent`、検証済み
+authority grant、immutable plan、preview、one-shot confirmation、PlanTask／RunTask、task event、detached reportを
+接続する。C++側へparser／catalog node、canonical procedure、別planner、別executorを公開しない。
+
+`inkpod_core_inkscript_program_path_intents_copy`は、compile済みprogramのintentを固定幅recordとpacked UTF-8で
+一括copyする。callerは各出力recordのsize／version／flagsを初期化する。容量不足では必要量だけを返し、全recordを
+検証してからrecord／textをcopyするため、短いrecordや未知flagで部分出力しない。frontendはintentへauthorityを
+付与し、`InkpodInkScriptPlanTaskRequest`へgrant列、controller／session／authority／open-session-set generation、
+borrowed host adapterを渡す。grantとnested DTOはcreate中にRust所有へcopyされるが、callback contextはtask releaseまで
+caller所有である。
+
+host callbackのrequest／responseはsize-versioned fixed-width DTOだけである。callbackが返すpath、fingerprint、session、
+record span、byte spanは同じcontextへの次のcallbackまで読み取り可能でなければならず、taskはcallbackをowner Core engine
+threadからだけ呼ぶ。callback中にRust側Core lockを保持せず、callbackは同じCoreへreenterしてはならない。callback status、
+NULL、短いresponse、未知flag、invalid UTF-8／stride／identityはfail closedである。
+
+PlanTaskのadvanceはbounded planning stageを実行し、成功時だけimmutable planをtake可能にする。plan summaryはplan digestと
+item数、preview copyは順序付きinput／output／destinationをpacked UTF-8とともに返す。confirmationはplan digest、authority、
+open-session set、scopeへ束縛されたone-shot tokenである。RunTask createは成功時だけplan／confirmation ownerを消費し、
+同じ既存runnerを一itemまたは一wait／terminal transitionずつ進める。各taskはlossless一event slotを持ち、未取得eventが
+ある間のadvanceは`INKPOD_STATUS_QUEUE_FULL`を返す。query／cancelはreleaseと外部同期すれば任意threadからatomically呼べるが、
+advance／event take／owner transfer／releaseは作成Coreのowner threadとgenerationへ固定される。
+
+run itemはstaged Coreでdecode／cache-free replay／canonical execution／current-v26 encodeを完了し、temporary fileをwrite／
+flush／closeしてidentityを再検証した後だけatomic installする。cancel、stale plan／confirmation／authority／session／input／
+destination、resource、encode、save、install failureは進行中itemをinstallせず、入力Coreのdocument/editor revision、history、
+dirty／savepoint、asset、ID high-watermarkを変更しない。既に完了した別itemはrun policyに従ってreportへ残る。
+
+terminal reportはCoreから切り離されたimmutable handleで、外部同期下の任意threadでsummary、bounded item span copy、releaseが
+できる。item reportはpreview ordinal、outcome／failure、commit数、final revision、next stable ID、state digest、input／destination
+UTF-8を一括copyし、短いrecordやcapacity不足で部分copyしない。shutdownでは新規advanceを止め、taskをcancelし、event／reportを
+drainしてtaskをreleaseした後、program、host context、session Core、owner Coreの順に破棄する。M26ではWindows authority／install
+adapter、Core engine command route、UI、file filter、clipboard、product `.inkscript` acceptanceを追加していない。
+
+## Text／instruction annotation（現行 ABI v16）
 
 `inkpod_core_annotation_edit` は Core 所有スレッドで、expected document
 revision と caller-owned `InkpodAnnotationEdit` span を一回だけ借用する。
@@ -147,7 +186,7 @@ count、stride、offset/count、enum、style、bounds を検証してから保�
 未知 enum、長さ／count／stride overflow、stale revision、wrong thread は通常の
 negative contract で拒否される。
 
-## 角度付き撮影 frame（現行 ABI v15）
+## 角度付き撮影 frame（現行 ABI v16）
 
 `inkpod_core_shooting_frame_get` はCore所有スレッドのread-only queryで、
 完全サイズのcaller-owned `InkpodShootingFrameInfo`（136 bytes）と0/1 presenceを
@@ -176,7 +215,7 @@ queryで、Instruction annotationとinclude flag付き撮影frameを合成した
 失敗時はownerをNULLのままにする。通常export、thumbnail、axis-aligned paper fitは
 このobjectを含まず、ABI callerが両frame authorityを暗黙変換しない。
 
-## 消失点と放射補助線（現行 ABI v15）
+## 消失点と放射補助線（現行 ABI v16）
 
 `inkpod_core_vanishing_points_copy` はCore所有スレッドのread-only queryである。
 capacity 0／NULLで必要件数を取得し、十分なcaller-owned strided
@@ -224,7 +263,7 @@ snapshotの照会と解放は外部同期し、rendererはcount、stride、recor
 製品の保存／オープン API は同じ v26 のリプレイ／カタログ契約を使い、現行でないネイティブ形式の
 バージョンをすべて拒否する。
 
-現行 ABI v15 は、Core 所有スレッド専用の永続化操作を三つ提供する。`inkpod_core_get_persistence_info` は、
+現行 ABI v16 は、Core 所有スレッド専用の永続化操作を三つ提供する。`inkpod_core_get_persistence_info` は、
 形式バージョン、最後に成功したオープン方式、正本であるジャーナルの件数、決定的なリプレイ作業量と
 未保存変更量（`dirty_bytes`）、アセット使用量、`INKPOD_PERSISTENCE_CHECKPOINT_DUE` フラグを、
 リプレイや状態変更を行わずに返す。`open_strategy` は `INKPOD_NATIVE_OPEN_NOT_OPENED`、
@@ -239,14 +278,14 @@ snapshotの照会と解放は外部同期し、rendererはcount、stride、recor
 最初に失われるイベント数とプロシージャ数を表示する。出力先には開いているセッションが所有しないパスだけを
 許可し、作成したコピーを現在の保存先として採用しない。
 
-## 履歴可視化 snapshot（現行 ABI v15）
+## 履歴可視化 snapshot（現行 ABI v16）
 
 `inkpod_core_history_visualization_create` と
 `inkpod_core_history_visualization_create_with_task` は Core 所有スレッド専用の一括読み取り操作である。
 後者の `InkpodTask` は ready 状態で渡し、呼び出し中は任意スレッドから進捗照会と cooperative cancel が
 できるが、呼び出し完了前に解放してはならない。
 
-対話 UI は ABI v15 の分割 API を使う。`inkpod_core_history_visualization_builder_begin` は ready task と
+対話 UI は ABI v16 の分割 API を使う。`inkpod_core_history_visualization_builder_begin` は ready task と
 Core を受け取り、呼び出し時点の journal、Genesis、asset、高水位を Rust-owned
 `InkpodHistoryVisualizationBuilder` に固定する。`inkpod_history_visualization_builder_step` は同じ task と
 1 以上の `maximum_events` を受け取り、Core 所有スレッドで最大その件数だけ replay する。`out_progress` は
@@ -268,7 +307,7 @@ dirty、savepoint、persistent ID は変更されない。
 一括コピーする。部分的に短い buffer は `INKPOD_STATUS_BUFFER_TOO_SMALL` となり、Rust-owned の内部 pointer は
 公開しない。同じ handle の照会と release を同時に行ってはならず、解放後に行 metadata を利用してはならない。
 
-## 新規 Cell creation plan（現行 ABI v15）
+## 新規 Cell creation plan（現行 ABI v16）
 
 `InkpodCellCreationOptions` は sizing mode、入力寸法、軸別 DPI、各辺余白率、
 安全／最大寄り比率、五点 anchor、初期 layer kind、RGBA8/16 storage format、
@@ -298,7 +337,7 @@ ID cursor、出力 `InkpodDocumentInfo` を変更しない。ABI v11 の
 `InkpodDocumentInfo` と `InkpodPaperFramesInput` は撮影／最大寄り frame を含み、
 前世代 layout を暗黙に受理しない。
 
-## Cut handle（現行 ABI v15）
+## Cut handle（現行 ABI v16）
 
 `InkpodCut` は Cut メタデータ、Cell 作成既定値、同一ディレクトリにある個別 Cell
 ファイルへの順序付き参照、独立した履歴／保存点を所有する Rust-owned opaque handle である。
@@ -346,10 +385,10 @@ symlink escape、identity mismatch は拒否する。
 wrong-thread 呼び出しは無効であり、所有権移譲にはならない。shutdown では全 `CutSession` を CoreHost
 停止前に owner thread 上で破棄する。
 
-## ABI v15 の `_v3` 付き値／ID 制御 API
+## ABI v16 の `_v3` 付き値／ID 制御 API
 
 この節の `V3` / `_v3` は API 群とレコード名の一部である。すべての呼び出しは、全体として
-ABI v15 に一致するヘッダーとライブラリの組み合わせで使用する。
+ABI v16 に一致するヘッダーとライブラリの組み合わせで使用する。
 
 `InkpodObjectId` は、オブジェクト種別、Core 世代、単調増加値からなる固定幅レコードである。Core、
 スナップショット、タスク、色配列、サンプル列、ラスタアセット、サムネイル、エクスポートは異なる種別を持つ。
@@ -473,7 +512,7 @@ Core エンジンスレッドで登録する。各列は 1–4 個の `InkpodSho
 これらは文書リビジョン、未保存状態、Undo を変更しない。永続化形式、テキスト入力フォーカスの保護、
 入力タイムアウト、衝突時に UI 上で割り当てを交換する方針は、フロントエンドの責務である。
 
-## Batch行と二セルpair preview（ABI v15）
+## Batch行と二セルpair preview（ABI v16）
 
 `InkpodBatchColorPairInput` と `InkpodBatchSeedInput` は graph 作成呼び出し中だけ
 borrowed である。各行は完全な `struct_size`、整列済みstride、上限付き件数を必要とし、
@@ -567,7 +606,7 @@ records index one LUT. The adapter rejects NULL, short/misaligned records,
 unknown pass kinds, invalid group structure, out-of-range item spans, nonzero
 reserved fields, and opacity above 1000 before the renderer retains a snapshot.
 The records transfer no ownership. The render-plan export was additive in ABI
-v5; the current library nevertheless requires ABI v15 because the selection
+v5; the current library nevertheless requires ABI v16 because the selection
 records now carry range, construction, pressure, and view-zoom values.
 
 ### View-local vector diagnostics
@@ -590,14 +629,14 @@ the record contains no DPI-scaled geometry. The span remains valid until
 externally synchronized renderer thread. NULL/misaligned/short output records,
 unknown view-command flags or centerline values, invalid endpoint kinds,
 excess counts/strides, and inconsistent flag combinations are rejected before
-retention. The additive export and view commands are retained in ABI v15.
+retention. The additive export and view commands are retained in ABI v16.
 
 ### Filter preview session
 
 `inkpod_core_filter_preview_begin[_task]`,
 `inkpod_core_filter_preview_update[_task]`,
 `inkpod_core_filter_preview_apply`, and `inkpod_core_filter_preview_cancel`
-operate on the Core owner thread and reuse the existing ABI v15 records. The
+operate on the Core owner thread and reuse the existing ABI v16 records. The
 `InkpodFilterInput` and any curve-point span are borrowed only for the call;
 `InkpodFilterPreviewInfo` and `InkpodDispatchResult` are caller-owned value
 records and require no release. `InkpodTask*` remains caller-owned: the caller
@@ -652,7 +691,7 @@ cross-target update, and point/work overflow are rejected without partial
 preview or committed publication. Preview snapshots follow the normal
 Rust-owned snapshot lifetime. Geometry-created vector segments use flag bit 2,
 `INKPOD_SNAPSHOT_VECTOR_SQUARE_CROSS_SECTION`, for square caps; other unknown
-segment flag bits remain invalid. These additive exports are retained in ABI v15 and do not
+segment flag bits remain invalid. These additive exports are retained in ABI v16 and do not
 make an older ABI version acceptable.
 
 解放後は、ハンドルから得たタイル、ピクセル、ガイド、ベクター、文字列、バイト列と、コピーしておいた
@@ -775,7 +814,7 @@ revision、history、dirty、savepoint を変更せず、Cut frontend は member
 長さを検証してから各画像をデコードする。全件成功時だけシーケンスを一括置換し、一件でも入力不正、
 デコード失敗、割り当て失敗があれば、以前のシーケンス、現在の文書、未保存状態、Undo を保つ。
 
-通常の前後セル切替は ABI v15 の additive な二段階 API を使う。
+通常の前後セル切替は ABI v16 の additive な二段階 API を使う。
 `inkpod_core_sequence_step_resolve` は Core 所有スレッド専用で、caller-owned の固定長 96-byte
 `InkpodSequenceStepPlan` に direction、`STOP`／`WRAP`、`EMPTY`／`SINGLE_CELL`／`STOPPED`／
 `ADVANCED`／`WRAPPED`、sequence revision、source／target の UUID・generation・自然順 index・
@@ -809,7 +848,7 @@ record だけを使うため release API はなく、通常前後 navigation pol
 これらはRust所有objectを新規に返さず、release関数も追加しない。Windows `DocumentSession`がartifact pathと
 metadataをUUID+source generationへ関連付け、CoreHost queueの完了前に別cellへ再解決しない。
 
-## Light Table 前後 N セル一括登録（現行 ABI v15）
+## Light Table 前後 N セル一括登録（現行 ABI v16）
 
 三つの additive API は Core 所有スレッド専用で、すべて caller-owned の固定幅レコードだけを使う。
 `inkpod_core_light_table_bulk_request` は対象 set ID、direction、N、base/step opacity を検証し、文書
@@ -854,7 +893,7 @@ property を canonical procedure へ解決して所有するため、sequence �
 Core へ送らない。対象の再割り当て、クローズ、終了処理では、先に Canvas の受け取り先を解除し、
 捕捉済みセッション／世代の Core 上でビューを閉じてから Canvas 所有者を破棄する。
 
-## Floating transform（現行 ABI v15）
+## Floating transform（現行 ABI v16）
 
 ABI v10 の `InkpodFloatingTransform` は 48-byte の caller-owned borrowed
 入力で、`struct_size`、closed anchor `u32`、absolute document target X/Y、
@@ -876,7 +915,7 @@ unknown anchor、非有限 target/scale/angle、範囲外・非正 scale は
 48-byte layout自体を変えず、旧 reserved/translate field の意味を closed
 anchor/absolute target へ置き換えるため、ABI v9 caller は再コンパイルが必要である。
 
-## EditorDefaults / EditorState（現行 ABI v15）
+## EditorDefaults / EditorState（現行 ABI v16）
 
 ### 複数 edit target
 
@@ -908,7 +947,7 @@ anchor/absolute target へ置き換えるため、ABI v9 caller は再コンパ�
   8/16-bit 値、vector path/fill topology を Rust 側で所有し、paste/cancel/release まで
   C++ が内部 pointer を参照しない。
 
-次の八つの Core 所有スレッド用 API と固定幅レコードは ABI v2 以降に追加され、現行 ABI v15 に保持されている。
+次の八つの Core 所有スレッド用 API と固定幅レコードは ABI v2 以降に追加され、現行 ABI v16 に保持されている。
 ABI v2 のライブラリや呼び出し側を受理するという意味ではない。
 
 - `inkpod_core_get_editor_defaults` は文書作成前にも有効な Rust 所有の不変 `InkpodEditorDefaults` を、
@@ -939,7 +978,7 @@ ABI v2 のライブラリや呼び出し側を受理するという意味では�
   切り替えない。既存の `inkpod_core_select_color` は、同期コマンド開始時に現在の対象を Core 内で捕捉して
   委譲する。
 
-ABI v15 の `InkpodSelectionInput` と `InkpodEditorSelectionOptions` は、range interpretation、
+ABI v16 の `InkpodSelectionInput` と `InkpodEditorSelectionOptions` は、range interpretation、
 Q16.16 aspect、from-center／45度制約、`u32` turns、round／square trace、pressure-size、
 screen-size を固定幅値として保持する。gesture の rectangle／ellipse はちょうど二つの
 `InkpodSelectionPoint` を渡し、trace point は座標に加えて 0..1 の pressure を持つ。
@@ -956,7 +995,7 @@ footprint 内の一致 pixel だけを変更する。平滑化は仕様の固定
 公開レコードは `InkpodEditorFillOptions`、`InkpodEditorSelectionOptions`、
 `InkpodEditorVectorOptions`、`InkpodEditorBrushOptions`、`InkpodEditorStateInfo`、`InkpodEditorDefaults`、
 `InkpodEditorStateUpdate`、`InkpodEditorStrokeInput` である。呼び出し側は、最上位の入力レコードと、
-その入力が使用する各入れ子レコードの `struct_size` を、現行 ABI v15 ヘッダーにある完全な
+その入力が使用する各入れ子レコードの `struct_size` を、現行 ABI v16 ヘッダーにある完全な
 `sizeof(record)` 以上に設定し、予約領域と未知フラグを 0 にする。照会／更新の出力では、呼び出し側は
 最上位出力の `struct_size` だけを提示する。Core は成功時に、呼び出し側所有の完全なコピーと、各入れ子出力の
 `struct_size` を書き込む。短い最上位レコード、使用対象の短い入れ子入力、NULL、未知の列挙値／更新種別、
@@ -977,7 +1016,7 @@ Windows の `CoreHost` は、発行時の `DocumentSessionId + Generation` を�
 再照会する。同一文書の複数ビューは一つの EditorState を共有し、別セッションは分離される。ワークスペースに
 残った以前の表示値を Core へ書き戻してはならない。
 
-## 正規 Genesis とアセット取り込み（現行 ABI v15）
+## 正規 Genesis とアセット取り込み（現行 ABI v16）
 
 Core は、Genesis の安定した文書 ID、別個の Cell ID、不変の基底面を所有する。空の文書では
 割り当て不要の `SolidWhite`、ラスタを文書として開く場合は正規ラスタアセットが基底面となる。基底面は、

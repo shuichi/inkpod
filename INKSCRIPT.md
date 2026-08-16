@@ -2940,7 +2940,7 @@ Version impact:
 - C ABI: 14（symbol／record／ownership／thread規則変更なし）
 ```
 
-### [~] M25 — source/compiler/export C ABI
+### [x] M25 — source/compiler/export C ABI
 
 **範囲**
 
@@ -2980,8 +2980,8 @@ Version impact:
   86,467,800 nsで成功した。既存`core_workflows --quick`も10 checksumと意味counterを維持した。
 - Windows x64 Debug build 117はMSVC `/W4 /WX`、static CRT、C11/C++20 header、portable ZIP、unsigned MSIXを含め成功し、
   最終binaryの全36 CTestが431.51秒で成功した。ABI smoke 61.15秒、English smoke 178.18秒、Japanese smoke 180.04秒だった。
-  Windows command／file filter／clipboard／product UIとexecution/report ABIは追加していない。利用者確認が必要なため`[~]`で
-  停止し、M26には進まない。
+  Windows command／file filter／clipboard／product UIとexecution/report ABIは追加していない。2026-08-16の次session promptに
+  不具合報告がなかったため、利用者確認済みとして`[x]`へ移行した。
 
 ```text
 Version impact:
@@ -2993,7 +2993,7 @@ Version impact:
 - C ABI: 15（source/compiler/export symbol・record・ownership/thread契約を追加、v14を拒否）
 ```
 
-### [ ] M26 — execution/report C ABI
+### [~] M26 — execution/report C ABI
 
 **範囲**
 
@@ -3006,6 +3006,48 @@ Version impact:
 - NULL、short record、unknown flag、queue saturation、cancel、stale plan/token、save failureのnegative testがある。
 - task/report ownership、thread、release、shutdown中lifetimeがheaderとRustで一致する。
 - per-item reportをspan単位でcopyし、callback中にCore lockを保持しない。
+
+**実装・自動検証結果（2026-08-16、利用者確認待ち）**
+
+- `inkpod-ffi`へauthority-free `PathIntent`のfixed record／packed UTF-8 copy、copied authority grant、固定幅host
+  request／response callback、generation-bound PlanTask／immutable plan／preview／one-shot confirmation／RunTaskと、Coreから
+  切り離したimmutable reportを追加した。CST／AST／catalog node／canonical procedureをABIへ公開せず、`inkpod-core`の
+  doc-hidden `abi_bridge` facadeからM11／M12の既存planner／runnerだけを呼ぶため、二重model／executorはない。
+- plan／run taskはCore owner threadとgenerationへ固定し、query／cancelだけをreleaseとの外部同期下で任意threadからatomicに
+  呼べる。advanceはplan一段階またはrun一item／wait／terminal遷移だけを進め、lossless一event slotが未取得なら
+  `INKPOD_STATUS_QUEUE_FULL`を返す。plan／confirmation ownerはRunTask作成成功時だけ消費し、reportはtake後に外部同期下の
+  任意threadでsummary／batched item copy／releaseできる。NULL ownerの再releaseはsuccess no-opである。
+- host callbackはsize-versioned fixed DTOだけを受け、response pointer／nested spanは同じcontextへの次callbackまでborrowする。
+  callback中にRustのCore lockを保持せず、同じCoreへのreentryを禁止した。shutdownは新規advance停止、cancel、event／report
+  drain、task release、program／host context／session Core／owner Core破棄の順とし、headerと`docs/ffi.md`へ記録した。
+- per-item reportはpreview ordinal、outcome／failure、commit数、final revision、next stable ID、state digest、input／destination
+  UTF-8をspan単位で一括copyする。全caller-owned recordを先にsize／version／flag検証し、capacity不足、short record、unknown
+  flagでrecord／textを部分copyしない。
+- 3件の新規FFI contractでsuccess、PathIntent／preview／report batch、NULL、short record、unknown flag、queue saturation、
+  cross-thread plan query／plan・run cancel、stale authority／confirmation、save failure、double release、入力Core非変更を固定した。成功outputはcurrent-v26
+  decode／save-reopen／cache-free full replay、Undo／Redo、history、ID high-watermark、document/editor savepointを検証し、失敗／
+  cancelではtemporary／install／入力revision・history・savepoint・IDを変更しない。
+- C ABIをexact-current v16へ更新し、v15 Core config拒否、C header／Rust export drift、C11 include、C++20全新規record static layoutを
+  固定した。registry owner manifestのreplay contractもABI 16へ同期し、private catalog model gateは`abi_bridge` facadeだけを
+  許可してCore内部ownerへの直接到達を引き続き拒否する。
+- `cargo fmt --all -- --check`、workspace全target／feature Clippy（warning deny）、workspace 624 non-doc tests（623 pass、
+  Release-only quick gate 1 ignored）とdoctest 1、workspace strict rustdoc、20-test InkScript registry、55-test FFI、generated command
+  reference `--check`、310 Rust／339 C ABI／384 Windows route inventoryが成功した。
+- 承認済みInkScript quickはworkload／harness／全counter／checksum `4401131d804c8eb7`／64–107 ms envelopeを変えず
+  88,956,900 nsで成功した。既存`core_workflows --quick`も10 checksumと意味counterを維持した。
+- Windows x64 Debug build 119はMSVC `/W4 /WX`、static CRT、C11/C++20 header、portable ZIP、unsigned MSIXを含め成功し、
+  最終binaryの全36 CTestが454.56秒で成功した。ABI smoke 62.73秒、English smoke 191.22秒、Japanese smoke 187.45秒だった。
+  M27A／M27BのWindows authority adapter／Core engine route、command／file filter／clipboard／product UIは追加していない。
+
+```text
+Version impact:
+- Registry schema: 2（meta-schema／language core変更なし）
+- InkScript file: 2（grammar／serialized program変更なし、v1拒否を維持）
+- InkScript procedure catalog: 2（批准済み84-entry signature／semantics変更なし、v1拒否を維持）
+- replay epoch: 23（canonical replay semantics変更なし）
+- .inkpod top-level: 26（native schema／encoder／decoder変更なし）
+- C ABI: 16（authority／plan／task／run／report symbol・record・callback・ownership/thread契約を追加、v15を拒否）
+```
 
 ### [ ] M27A — Windows authority/file-identity adapter
 

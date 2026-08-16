@@ -62,11 +62,11 @@ pub struct InkpodInkScriptSource {
 }
 
 pub struct InkpodInkScriptProgram {
-    program: StaticScriptProgram,
-    owner_thread: ThreadId,
-    core_generation: u64,
-    controller_id: u64,
-    session_generation: u64,
+    pub(crate) program: StaticScriptProgram,
+    pub(crate) owner_thread: ThreadId,
+    pub(crate) core_generation: u64,
+    pub(crate) controller_id: u64,
+    pub(crate) session_generation: u64,
 }
 
 pub struct InkpodInkScriptFragment {

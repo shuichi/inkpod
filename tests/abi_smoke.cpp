@@ -171,6 +171,29 @@ static_assert(sizeof(InkpodInkScriptProgramSummary) == 152U);
 static_assert(sizeof(InkpodInkScriptJournalEvent) == 24U);
 static_assert(sizeof(InkpodInkScriptExportRequest) == 96U);
 static_assert(sizeof(InkpodInkScriptFragmentSummary) == 88U);
+static_assert(sizeof(InkpodInkScriptUtf8Span) == 16U);
+static_assert(sizeof(InkpodInkScriptPathIdentity) == 200U);
+static_assert(sizeof(InkpodInkScriptNativeFingerprint) == 136U);
+static_assert(sizeof(InkpodInkScriptSessionInput) == 80U);
+static_assert(sizeof(InkpodInkScriptSequenceMember) == 48U);
+static_assert(sizeof(InkpodInkScriptOpenSession) == 56U);
+static_assert(sizeof(InkpodInkScriptAuthorityGrant) == 80U);
+static_assert(sizeof(InkpodInkScriptTemporaryIdentity) == 96U);
+static_assert(sizeof(InkpodInkScriptHostRequest) == 280U);
+static_assert(sizeof(InkpodInkScriptHostResponse) == 280U);
+static_assert(sizeof(InkpodInkScriptHostAdapter) == 32U);
+static_assert(sizeof(InkpodInkScriptPlanTaskRequest) == 120U);
+static_assert(sizeof(InkpodInkScriptPathIntent) == 72U);
+static_assert(sizeof(InkpodInkScriptPathIntentBuffer) == 88U);
+static_assert(sizeof(InkpodInkScriptPlanSummary) == 80U);
+static_assert(sizeof(InkpodInkScriptPreviewItem) == 72U);
+static_assert(sizeof(InkpodInkScriptPreviewBuffer) == 96U);
+static_assert(sizeof(InkpodInkScriptConfirmationRequest) == 72U);
+static_assert(sizeof(InkpodInkScriptRunRequest) == 80U);
+static_assert(sizeof(InkpodInkScriptTaskEvent) == 64U);
+static_assert(sizeof(InkpodInkScriptReportSummary) == 40U);
+static_assert(sizeof(InkpodInkScriptReportItem) == 120U);
+static_assert(sizeof(InkpodInkScriptReportBuffer) == 96U);
 
 extern "C" int inkpod_header_c11_smoke(void);
 
@@ -182,7 +205,7 @@ int InkpodRunAbiSmoke() {
         return 1;
     }
     InkpodCoreConfig old_config{
-        sizeof(InkpodCoreConfig), 14U, INKPOD_FEATURE_NONE};
+        sizeof(InkpodCoreConfig), 15U, INKPOD_FEATURE_NONE};
     InkpodCore* old_core = nullptr;
     if (inkpod_core_create(&old_config, &old_core)
             != INKPOD_STATUS_INCOMPATIBLE_ABI

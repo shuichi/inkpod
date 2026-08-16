@@ -85,7 +85,7 @@ fn assert_send_sync<T: Send + Sync>() {}
 
 #[test]
 fn inkscript_source_parse_copies_diagnostics_and_text_in_batches() {
-    assert_eq!(INKPOD_ABI_VERSION, 15);
+    assert_eq!(INKPOD_ABI_VERSION, 16);
     assert_send_sync::<InkpodInkScriptSource>();
     assert_send_sync::<InkpodInkScriptProgram>();
     assert_send_sync::<InkpodInkScriptFragment>();
@@ -555,7 +555,7 @@ fn inkscript_compile_and_export_are_generation_bound_and_failure_atomic() {
 fn inkscript_abi_rejects_old_versions_invalid_records_and_stale_routes() {
     let old_config = InkpodCoreConfig {
         struct_size: size_of::<InkpodCoreConfig>() as u32,
-        abi_version: 14,
+        abi_version: 15,
         feature_flags: INKPOD_FEATURE_NONE,
     };
     let mut old_core = ptr::null_mut();
@@ -675,4 +675,1053 @@ fn inkscript_abi_rejects_old_versions_invalid_records_and_stale_routes() {
         INKPOD_STATUS_OK
     );
     assert_eq!(unsafe { inkpod_core_destroy(&mut core) }, INKPOD_STATUS_OK);
+}
+
+struct ExecutionHostPath {
+    _key: Box<[u8]>,
+    record: Box<InkpodInkScriptPathIdentity>,
+}
+
+impl ExecutionHostPath {
+    fn existing(key: &str, object: u8, parent: u8) -> Self {
+        Self::new(key, object, parent, false)
+    }
+
+    fn absent(key: &str, parent: u8) -> Self {
+        Self::new(key, 0, parent, true)
+    }
+
+    fn new(key: &str, object: u8, parent: u8, absent: bool) -> Self {
+        let key = key.as_bytes().to_vec().into_boxed_slice();
+        let record = Box::new(InkpodInkScriptPathIdentity {
+            struct_size: size_of::<InkpodInkScriptPathIdentity>() as u32,
+            version: INKPOD_INKSCRIPT_RECORD_VERSION,
+            feature_flags: 0,
+            canonical_key: InkpodInkScriptUtf8Span {
+                bytes: key.as_ptr(),
+                byte_count: key.len() as u64,
+            },
+            volume_id: [1; 16],
+            object_id: if absent { [0; 32] } else { [object; 32] },
+            object_generation: if absent { 0 } else { 1 },
+            alias_key: [if absent { 10 } else { object }; 32],
+            parent_object_id: [parent; 32],
+            parent_generation: 1,
+            parent_alias_key: [parent.saturating_add(1); 32],
+            flags: if absent {
+                INKPOD_INKSCRIPT_PATH_EXPECTED_ABSENT
+            } else {
+                0
+            },
+        });
+        Self { _key: key, record }
+    }
+}
+
+struct ExecutionHost {
+    _label: Box<[u8]>,
+    session: Box<InkpodInkScriptSessionInput>,
+    root: ExecutionHostPath,
+    destination: ExecutionHostPath,
+    authority_generation: u64,
+    open_generation: u64,
+    temporary: InkpodInkScriptTemporaryIdentity,
+    temporary_bytes: Vec<u8>,
+    installed_bytes: Vec<u8>,
+    fail_write: bool,
+}
+
+impl ExecutionHost {
+    fn new(input_core: *mut InkpodCore) -> Self {
+        let label = b"current.inkpod".to_vec().into_boxed_slice();
+        let session = Box::new(InkpodInkScriptSessionInput {
+            struct_size: size_of::<InkpodInkScriptSessionInput>() as u32,
+            version: INKPOD_INKSCRIPT_RECORD_VERSION,
+            feature_flags: 0,
+            core: input_core,
+            session_id: 71,
+            session_generation: 3,
+            source_generation: 5,
+            display_label: InkpodInkScriptUtf8Span {
+                bytes: label.as_ptr(),
+                byte_count: label.len() as u64,
+            },
+            display_number: 1,
+            reserved: 0,
+            backing_path: ptr::null(),
+        });
+        Self {
+            _label: label,
+            session,
+            root: ExecutionHostPath::existing("root:/out", 60, 70),
+            destination: ExecutionHostPath::absent("root:/out/ffi_0001.inkpod", 60),
+            authority_generation: 9,
+            open_generation: 4,
+            temporary: InkpodInkScriptTemporaryIdentity {
+                volume_id: [1; 16],
+                parent_object_id: [60; 32],
+                parent_generation: 1,
+                object_id: [88; 32],
+                object_generation: 1,
+            },
+            temporary_bytes: Vec::new(),
+            installed_bytes: Vec::new(),
+            fail_write: false,
+        }
+    }
+}
+
+unsafe extern "C" fn execution_host_call(
+    context: *mut core::ffi::c_void,
+    request: *const InkpodInkScriptHostRequest,
+    response: *mut InkpodInkScriptHostResponse,
+) -> u32 {
+    if context.is_null() || request.is_null() || response.is_null() {
+        return INKPOD_STATUS_INVALID_ARGUMENT;
+    }
+    // SAFETY: The test owns the context and callback records for the task lifetime.
+    let host = unsafe { &mut *context.cast::<ExecutionHost>() };
+    // SAFETY: The ABI passes a complete request record.
+    let request = unsafe { &*request };
+    // SAFETY: The ABI passes unique writable response storage.
+    let response = unsafe { &mut *response };
+    response.struct_size = size_of::<InkpodInkScriptHostResponse>() as u32;
+    response.version = INKPOD_INKSCRIPT_RECORD_VERSION;
+    response.feature_flags = 0;
+    match request.operation {
+        INKPOD_INKSCRIPT_HOST_AUTHORITY_GENERATION => {
+            response.generation = host.authority_generation;
+        }
+        INKPOD_INKSCRIPT_HOST_OPEN_SESSIONS => {
+            response.generation = host.open_generation;
+            response.records = ptr::null();
+            response.record_count = 0;
+            response.record_stride_bytes = 0;
+        }
+        INKPOD_INKSCRIPT_HOST_CURRENT_DOCUMENT => {
+            response.flags = INKPOD_INKSCRIPT_HOST_RESPONSE_PRESENT;
+            response.session = host.session.as_ref();
+        }
+        INKPOD_INKSCRIPT_HOST_CURRENT_SEQUENCE => return INKPOD_STATUS_NO_DOCUMENT,
+        INKPOD_INKSCRIPT_HOST_RESOLVE_DESTINATION => {
+            response.identity = host.destination.record.as_ref();
+        }
+        INKPOD_INKSCRIPT_HOST_OPEN_SESSION_GENERATION => {
+            response.generation = host.open_generation;
+        }
+        INKPOD_INKSCRIPT_HOST_SESSION_IS_CURRENT => {
+            response.flags = if request.session_id == 71
+                && request.session_generation == 3
+                && request.source_generation == 5
+            {
+                INKPOD_INKSCRIPT_HOST_RESPONSE_PRESENT
+            } else {
+                0
+            };
+        }
+        INKPOD_INKSCRIPT_HOST_ATOMIC_CAPABILITIES => {
+            response.flags = INKPOD_INKSCRIPT_HOST_CAPABILITY_INSTALL
+                | INKPOD_INKSCRIPT_HOST_CAPABILITY_OVERWRITE;
+        }
+        INKPOD_INKSCRIPT_HOST_PREPARE_DESTINATION
+        | INKPOD_INKSCRIPT_HOST_REVALIDATE_DESTINATION => {
+            response.identity = host.destination.record.as_ref();
+            response.records = ptr::null();
+            response.record_count = 0;
+            response.record_stride_bytes = 0;
+        }
+        INKPOD_INKSCRIPT_HOST_CREATE_TEMPORARY | INKPOD_INKSCRIPT_HOST_REVALIDATE_TEMPORARY => {
+            response.temporary = host.temporary;
+        }
+        INKPOD_INKSCRIPT_HOST_WRITE_CLOSE_TEMPORARY => {
+            if host.fail_write {
+                return INKPOD_STATUS_IO_ERROR;
+            }
+            if request.byte_count != 0 && request.bytes.is_null() {
+                return INKPOD_STATUS_INVALID_ARGUMENT;
+            }
+            // SAFETY: The run adapter lends the encoded native bytes for this callback.
+            host.temporary_bytes =
+                unsafe { slice::from_raw_parts(request.bytes, request.byte_count as usize) }
+                    .to_vec();
+            response.temporary = host.temporary;
+        }
+        INKPOD_INKSCRIPT_HOST_ATOMIC_INSTALL => {
+            host.installed_bytes = std::mem::take(&mut host.temporary_bytes);
+            response.result_kind = 1;
+        }
+        INKPOD_INKSCRIPT_HOST_CLEANUP_TEMPORARY => host.temporary_bytes.clear(),
+        _ => return INKPOD_STATUS_UNSUPPORTED,
+    }
+    INKPOD_STATUS_OK
+}
+
+fn execution_host_record(host: &mut ExecutionHost) -> InkpodInkScriptHostAdapter {
+    InkpodInkScriptHostAdapter {
+        struct_size: size_of::<InkpodInkScriptHostAdapter>() as u32,
+        version: INKPOD_INKSCRIPT_RECORD_VERSION,
+        feature_flags: 0,
+        context: (host as *mut ExecutionHost).cast(),
+        call: Some(execution_host_call),
+    }
+}
+
+unsafe fn compiled_execution_fixture() -> (
+    *mut InkpodCore,
+    *mut InkpodCore,
+    *mut InkpodInkScriptSource,
+    *mut InkpodInkScriptProgram,
+) {
+    let owner = new_core();
+    let input_core = new_core();
+    // SAFETY: Test owns the input Core on the current thread.
+    unsafe {
+        (*input_core)
+            .core
+            .new_cell_with_uuid(8, 8, 72_000, 72_000, 0x2600)
+            .unwrap();
+    }
+    let input = source_input(source_text());
+    let mut source = ptr::null_mut();
+    // SAFETY: Source bytes and owner storage are live.
+    assert_eq!(
+        unsafe { inkpod_inkscript_source_parse(&input, &mut source) },
+        INKPOD_STATUS_OK
+    );
+    let mut program = ptr::null_mut();
+    let request = compile_request();
+    // SAFETY: Core/source/request and unique owner storage are live.
+    assert_eq!(
+        unsafe { inkpod_core_inkscript_compile(owner, source, &request, &mut program) },
+        INKPOD_STATUS_OK
+    );
+    (owner, input_core, source, program)
+}
+
+unsafe fn make_plan(
+    owner: *mut InkpodCore,
+    program: *mut InkpodInkScriptProgram,
+    host: &mut ExecutionHost,
+) -> (*mut InkpodInkScriptPlanTask, *mut InkpodInkScriptPlan) {
+    let grant = InkpodInkScriptAuthorityGrant {
+        struct_size: size_of::<InkpodInkScriptAuthorityGrant>() as u32,
+        version: INKPOD_INKSCRIPT_RECORD_VERSION,
+        access: INKPOD_INKSCRIPT_PATH_CREATE,
+        reserved: 0,
+        feature_flags: 0,
+        intent_id: 1,
+        authority_id: [1; 32],
+        authority_generation: 9,
+        resolved: host.root.record.as_ref(),
+    };
+    let request = InkpodInkScriptPlanTaskRequest {
+        struct_size: size_of::<InkpodInkScriptPlanTaskRequest>() as u32,
+        version: INKPOD_INKSCRIPT_RECORD_VERSION,
+        feature_flags: 0,
+        controller_id: 41,
+        session_generation: 7,
+        authority_generation: 9,
+        open_session_set_generation: 4,
+        grants: &grant,
+        grant_count: 1,
+        grant_stride_bytes: size_of::<InkpodInkScriptAuthorityGrant>() as u64,
+        script_path: ptr::null(),
+        maximum_folder_entries: 0,
+        host: execution_host_record(host),
+    };
+    let mut task = ptr::null_mut();
+    // SAFETY: Every request and owner pointer remains live for handle creation.
+    assert_eq!(
+        unsafe { inkpod_core_inkscript_plan_task_create(owner, program, &request, &mut task) },
+        INKPOD_STATUS_OK
+    );
+    let task_address = task as usize;
+    let (query_status, mut task_info) = std::thread::spawn(move || {
+        let mut task_info = InkpodTaskInfo {
+            struct_size: size_of::<InkpodTaskInfo>() as u32,
+            state: 0,
+            completed_work: 0,
+            total_work: 0,
+            reserved: 0,
+        };
+        // SAFETY: Query is read-only, the task remains live until join, and release is excluded.
+        let status = unsafe {
+            inkpod_inkscript_plan_task_query(
+                task_address as *const InkpodInkScriptPlanTask,
+                &mut task_info,
+            )
+        };
+        (status, task_info)
+    })
+    .join()
+    .expect("plan-task query thread must not panic");
+    assert_eq!(query_status, INKPOD_STATUS_OK);
+    assert_eq!(task_info.state, INKPOD_TASK_READY);
+    // SAFETY: The task and parent Core are live on the owner thread.
+    assert_eq!(
+        unsafe { inkpod_core_inkscript_plan_task_advance(owner, task) },
+        INKPOD_STATUS_OK
+    );
+    // The bounded one-event queue must be drained before another advance.
+    assert_eq!(
+        unsafe { inkpod_core_inkscript_plan_task_advance(owner, task) },
+        INKPOD_STATUS_QUEUE_FULL
+    );
+    let mut event = InkpodInkScriptTaskEvent {
+        struct_size: size_of::<InkpodInkScriptTaskEvent>() as u32,
+        version: INKPOD_INKSCRIPT_RECORD_VERSION,
+        ..Default::default()
+    };
+    // SAFETY: Event output and task are live.
+    assert_eq!(
+        unsafe { inkpod_core_inkscript_plan_task_event_take(owner, task, &mut event) },
+        INKPOD_STATUS_OK
+    );
+    assert_eq!(event.kind, INKPOD_INKSCRIPT_EVENT_PLAN_COMPLETE);
+    assert_eq!(
+        unsafe { inkpod_inkscript_plan_task_query(task, &mut task_info) },
+        INKPOD_STATUS_OK
+    );
+    assert_eq!(task_info.state, INKPOD_TASK_COMPLETED);
+    let mut plan = ptr::null_mut();
+    // SAFETY: Successful task transfers one plan into unique owner storage.
+    assert_eq!(
+        unsafe { inkpod_core_inkscript_plan_task_take_plan(owner, task, &mut plan) },
+        INKPOD_STATUS_OK
+    );
+    (task, plan)
+}
+
+#[test]
+fn inkscript_execution_abi_plans_runs_installs_and_batches_reports() {
+    // SAFETY: The fixture owns every handle and callback context on this thread.
+    unsafe {
+        let (mut owner, mut input_core, mut source, mut program) = compiled_execution_fixture();
+        let input_before = (*input_core).core.document_state_digest().unwrap();
+        let input_info = (*input_core).core.document_info().unwrap();
+        let input_editor = (*input_core).core.editor_state().unwrap();
+        let input_history = (*input_core).core.history_entries();
+        let mut host = ExecutionHost::new(input_core);
+
+        let mut intent_query = InkpodInkScriptPathIntentBuffer {
+            struct_size: size_of::<InkpodInkScriptPathIntentBuffer>() as u32,
+            version: INKPOD_INKSCRIPT_RECORD_VERSION,
+            ..Default::default()
+        };
+        assert_eq!(
+            inkpod_core_inkscript_program_path_intents_copy(owner, program, &mut intent_query),
+            INKPOD_STATUS_BUFFER_TOO_SMALL
+        );
+        assert_eq!(intent_query.required_records, 1);
+        let mut intent_records = vec![InkpodInkScriptPathIntent {
+            struct_size: size_of::<InkpodInkScriptPathIntent>() as u32,
+            version: INKPOD_INKSCRIPT_RECORD_VERSION,
+            ..Default::default()
+        }];
+        let mut intent_utf8 = vec![0; intent_query.required_utf8_bytes as usize];
+        intent_query.records = intent_records.as_mut_ptr();
+        intent_query.record_capacity = intent_records.len() as u64;
+        intent_query.record_stride_bytes = size_of::<InkpodInkScriptPathIntent>() as u64;
+        intent_query.utf8 = intent_utf8.as_mut_ptr();
+        intent_query.utf8_capacity_bytes = intent_utf8.len() as u64;
+        assert_eq!(
+            inkpod_core_inkscript_program_path_intents_copy(owner, program, &mut intent_query),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(intent_records[0].access, INKPOD_INKSCRIPT_PATH_CREATE);
+        assert_eq!(
+            intent_records[0].subject_kind,
+            INKPOD_INKSCRIPT_INTENT_OUTPUT_ROOT
+        );
+        assert_eq!(
+            &intent_utf8[intent_records[0].text_offset as usize
+                ..(intent_records[0].text_offset + intent_records[0].text_bytes) as usize],
+            b"out"
+        );
+
+        let (mut plan_task, mut plan) = make_plan(owner, program, &mut host);
+        let mut plan_summary = InkpodInkScriptPlanSummary {
+            struct_size: size_of::<InkpodInkScriptPlanSummary>() as u32,
+            ..Default::default()
+        };
+        assert_eq!(
+            inkpod_core_inkscript_plan_summary(owner, plan, &mut plan_summary),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(plan_summary.item_count, 1);
+        assert_ne!(plan_summary.plan_digest, [0; 32]);
+
+        let mut preview = InkpodInkScriptPreviewBuffer {
+            struct_size: size_of::<InkpodInkScriptPreviewBuffer>() as u32,
+            version: INKPOD_INKSCRIPT_RECORD_VERSION,
+            ..Default::default()
+        };
+        assert_eq!(
+            inkpod_core_inkscript_plan_preview_copy(owner, plan, &mut preview),
+            INKPOD_STATUS_BUFFER_TOO_SMALL
+        );
+        let mut preview_records = vec![InkpodInkScriptPreviewItem {
+            struct_size: size_of::<InkpodInkScriptPreviewItem>() as u32,
+            version: INKPOD_INKSCRIPT_RECORD_VERSION,
+            ..Default::default()
+        }];
+        let mut preview_utf8 = vec![0; preview.required_utf8_bytes as usize];
+        preview.records = preview_records.as_mut_ptr();
+        preview.record_capacity = 1;
+        preview.record_stride_bytes = size_of::<InkpodInkScriptPreviewItem>() as u64;
+        preview.utf8 = preview_utf8.as_mut_ptr();
+        preview.utf8_capacity_bytes = preview_utf8.len() as u64;
+        assert_eq!(
+            inkpod_core_inkscript_plan_preview_copy(owner, plan, &mut preview),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(preview_records[0].ordinal, 0);
+        assert_eq!(
+            &preview_utf8[preview_records[0].output_offset as usize
+                ..(preview_records[0].output_offset + preview_records[0].output_bytes) as usize],
+            b"ffi_0001.inkpod"
+        );
+
+        let confirmation_request = InkpodInkScriptConfirmationRequest {
+            struct_size: size_of::<InkpodInkScriptConfirmationRequest>() as u32,
+            version: INKPOD_INKSCRIPT_RECORD_VERSION,
+            scope: INKPOD_INKSCRIPT_SCOPE_ALL,
+            reserved: 0,
+            feature_flags: 0,
+            document_uuid_low: 0,
+            document_uuid_high: 0,
+            file_alias: [0; 32],
+        };
+        let mut confirmation = ptr::null_mut();
+        assert_eq!(
+            inkpod_core_inkscript_confirmation_create(
+                owner,
+                plan,
+                &confirmation_request,
+                &mut confirmation,
+            ),
+            INKPOD_STATUS_OK
+        );
+        let run_request = InkpodInkScriptRunRequest {
+            struct_size: size_of::<InkpodInkScriptRunRequest>() as u32,
+            version: INKPOD_INKSCRIPT_RECORD_VERSION,
+            mode: INKPOD_INKSCRIPT_RUN_INSTALL,
+            reserved: 0,
+            feature_flags: 0,
+            controller_id: 41,
+            session_generation: 7,
+            maximum_output_bytes: 0,
+            host: execution_host_record(&mut host),
+        };
+        let mut run_task = ptr::null_mut();
+        assert_eq!(
+            inkpod_core_inkscript_run_task_create(
+                owner,
+                program,
+                &mut plan,
+                &mut confirmation,
+                &run_request,
+                &mut run_task,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert!(plan.is_null());
+        assert!(confirmation.is_null());
+        let mut run_info = InkpodTaskInfo {
+            struct_size: size_of::<InkpodTaskInfo>() as u32,
+            state: 0,
+            completed_work: 0,
+            total_work: 0,
+            reserved: 0,
+        };
+        assert_eq!(
+            inkpod_inkscript_run_task_query(run_task, &mut run_info),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(run_info.state, INKPOD_TASK_READY);
+        assert_eq!(
+            inkpod_core_inkscript_run_task_advance(owner, run_task),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_inkscript_run_task_advance(owner, run_task),
+            INKPOD_STATUS_QUEUE_FULL
+        );
+        let mut event = InkpodInkScriptTaskEvent {
+            struct_size: size_of::<InkpodInkScriptTaskEvent>() as u32,
+            version: INKPOD_INKSCRIPT_RECORD_VERSION,
+            ..Default::default()
+        };
+        assert_eq!(
+            inkpod_core_inkscript_run_task_event_take(owner, run_task, &mut event),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(event.kind, INKPOD_INKSCRIPT_EVENT_ITEM_COMPLETE);
+        assert_eq!(event.outcome, INKPOD_INKSCRIPT_OUTCOME_INSTALLED);
+        assert_eq!(
+            inkpod_core_inkscript_run_task_advance(owner, run_task),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_inkscript_run_task_event_take(owner, run_task, &mut event),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(event.kind, INKPOD_INKSCRIPT_EVENT_RUN_COMPLETE);
+        assert_eq!(
+            inkpod_inkscript_run_task_query(run_task, &mut run_info),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(run_info.state, INKPOD_TASK_COMPLETED);
+
+        let mut report = ptr::null_mut();
+        assert_eq!(
+            inkpod_core_inkscript_run_task_take_report(owner, run_task, &mut report),
+            INKPOD_STATUS_OK
+        );
+        let mut report_summary = InkpodInkScriptReportSummary {
+            struct_size: size_of::<InkpodInkScriptReportSummary>() as u32,
+            ..Default::default()
+        };
+        assert_eq!(
+            inkpod_inkscript_report_summary(report, &mut report_summary),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(report_summary.item_count, 1);
+        assert_eq!(report_summary.flags, 0);
+        let mut report_buffer = InkpodInkScriptReportBuffer {
+            struct_size: size_of::<InkpodInkScriptReportBuffer>() as u32,
+            version: INKPOD_INKSCRIPT_RECORD_VERSION,
+            ..Default::default()
+        };
+        assert_eq!(
+            inkpod_inkscript_report_items_copy(report, &mut report_buffer),
+            INKPOD_STATUS_BUFFER_TOO_SMALL
+        );
+        let mut report_records = vec![InkpodInkScriptReportItem {
+            struct_size: size_of::<InkpodInkScriptReportItem>() as u32,
+            version: INKPOD_INKSCRIPT_RECORD_VERSION,
+            ..Default::default()
+        }];
+        let mut report_utf8 = vec![0; report_buffer.required_utf8_bytes as usize];
+        report_buffer.records = report_records.as_mut_ptr();
+        report_buffer.record_capacity = 1;
+        report_buffer.record_stride_bytes = size_of::<InkpodInkScriptReportItem>() as u64;
+        report_buffer.utf8 = report_utf8.as_mut_ptr();
+        report_buffer.utf8_capacity_bytes = report_utf8.len() as u64;
+        assert_eq!(
+            inkpod_inkscript_report_items_copy(report, &mut report_buffer),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            report_records[0].outcome,
+            INKPOD_INKSCRIPT_OUTCOME_INSTALLED
+        );
+        assert_eq!(report_records[0].commit_count, 1);
+        assert!(!host.installed_bytes.is_empty());
+
+        inkpod_format::decode_procedure_file(&host.installed_bytes).unwrap();
+        let reopen_path =
+            std::env::temp_dir().join(format!("inkpod-m26-{}-reopen.inkpod", std::process::id()));
+        std::fs::write(&reopen_path, &host.installed_bytes).unwrap();
+        let mut reopened = inkpod_core::Core::new();
+        reopened.open(&reopen_path).unwrap();
+        std::fs::remove_file(&reopen_path).unwrap();
+        assert_eq!(
+            reopened.persistence_info().unwrap().open_strategy,
+            inkpod_core::NativeOpenStrategy::FullReplay
+        );
+        assert!(!reopened.document_info().unwrap().dirty);
+        assert!(!reopened.editor_state().unwrap().dirty);
+        assert_eq!(reopened.history_entries().len(), input_history.len() + 1);
+        assert!(report_records[0].next_stable_id > input_info.color_plane_id);
+        let mut moved = reopened.clone();
+        moved.undo().unwrap();
+        assert_eq!(moved.document_state_digest().unwrap(), input_before);
+        moved.redo().unwrap();
+        assert_eq!(
+            moved.document_state_digest().unwrap(),
+            reopened.document_state_digest().unwrap()
+        );
+
+        assert_eq!(
+            (*input_core).core.document_state_digest().unwrap(),
+            input_before
+        );
+        assert_eq!(
+            (*input_core)
+                .core
+                .document_info()
+                .unwrap()
+                .document_revision,
+            input_info.document_revision
+        );
+        assert_eq!((*input_core).core.editor_state().unwrap(), input_editor);
+        assert!(!(*input_core).core.document_info().unwrap().dirty);
+
+        assert_eq!(
+            inkpod_inkscript_report_release(&mut report),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_inkscript_report_release(&mut report),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_inkscript_run_task_release(owner, &mut run_task),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_inkscript_plan_task_release(owner, &mut plan_task),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_inkscript_program_release(owner, &mut program),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_inkscript_source_release(&mut source),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(inkpod_core_destroy(&mut input_core), INKPOD_STATUS_OK);
+        assert_eq!(inkpod_core_destroy(&mut owner), INKPOD_STATUS_OK);
+    }
+}
+
+#[test]
+fn inkscript_execution_abi_cancel_stale_and_save_failure_are_atomic() {
+    // SAFETY: Each subcase owns every handle and callback context on this thread.
+    unsafe {
+        let (mut owner, mut input_core, mut source, mut program) = compiled_execution_fixture();
+        let input_digest = (*input_core).core.document_state_digest().unwrap();
+        let input_history = (*input_core).core.history_entries();
+        let mut host = ExecutionHost::new(input_core);
+
+        let mut null_task = ptr::null_mut();
+        assert_eq!(
+            inkpod_core_inkscript_plan_task_create(owner, program, ptr::null(), &mut null_task),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert!(null_task.is_null());
+
+        let mut intent_buffer = InkpodInkScriptPathIntentBuffer {
+            struct_size: size_of::<InkpodInkScriptPathIntentBuffer>() as u32,
+            version: INKPOD_INKSCRIPT_RECORD_VERSION,
+            ..Default::default()
+        };
+        assert_eq!(
+            inkpod_core_inkscript_program_path_intents_copy(owner, program, &mut intent_buffer),
+            INKPOD_STATUS_BUFFER_TOO_SMALL
+        );
+        let mut short_intent = [InkpodInkScriptPathIntent {
+            struct_size: size_of::<InkpodInkScriptPathIntent>() as u32 - 1,
+            version: INKPOD_INKSCRIPT_RECORD_VERSION,
+            ..Default::default()
+        }];
+        let mut intent_utf8 = vec![0_u8; intent_buffer.required_utf8_bytes as usize];
+        intent_buffer.records = short_intent.as_mut_ptr();
+        intent_buffer.record_capacity = 1;
+        intent_buffer.record_stride_bytes = size_of::<InkpodInkScriptPathIntent>() as u64;
+        intent_buffer.utf8 = intent_utf8.as_mut_ptr();
+        intent_buffer.utf8_capacity_bytes = intent_utf8.len() as u64;
+        assert_eq!(
+            inkpod_core_inkscript_program_path_intents_copy(owner, program, &mut intent_buffer),
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+        assert_eq!(intent_buffer.records_written, 0);
+        assert_eq!(intent_buffer.utf8_written_bytes, 0);
+
+        let grant = InkpodInkScriptAuthorityGrant {
+            struct_size: size_of::<InkpodInkScriptAuthorityGrant>() as u32,
+            version: INKPOD_INKSCRIPT_RECORD_VERSION,
+            access: INKPOD_INKSCRIPT_PATH_CREATE,
+            reserved: 0,
+            feature_flags: 0,
+            intent_id: 1,
+            authority_id: [1; 32],
+            authority_generation: 9,
+            resolved: host.root.record.as_ref(),
+        };
+        let mut plan_request = InkpodInkScriptPlanTaskRequest {
+            struct_size: size_of::<InkpodInkScriptPlanTaskRequest>() as u32,
+            version: INKPOD_INKSCRIPT_RECORD_VERSION,
+            feature_flags: 0,
+            controller_id: 41,
+            session_generation: 7,
+            authority_generation: 9,
+            open_session_set_generation: 4,
+            grants: &grant,
+            grant_count: 1,
+            grant_stride_bytes: size_of::<InkpodInkScriptAuthorityGrant>() as u64,
+            script_path: ptr::null(),
+            maximum_folder_entries: 0,
+            host: execution_host_record(&mut host),
+        };
+        let mut cancelled_task = ptr::null_mut();
+        assert_eq!(
+            inkpod_core_inkscript_plan_task_create(
+                owner,
+                program,
+                &plan_request,
+                &mut cancelled_task,
+            ),
+            INKPOD_STATUS_OK
+        );
+        let cancelled_task_address = cancelled_task as usize;
+        assert_eq!(
+            std::thread::spawn(move || {
+                inkpod_inkscript_plan_task_cancel(
+                    cancelled_task_address as *const InkpodInkScriptPlanTask,
+                )
+            })
+            .join()
+            .expect("plan-task cancellation thread must not panic"),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_inkscript_plan_task_advance(owner, cancelled_task),
+            INKPOD_STATUS_CANCELLED
+        );
+        let mut no_plan = ptr::null_mut();
+        assert_eq!(
+            inkpod_core_inkscript_plan_task_take_plan(owner, cancelled_task, &mut no_plan),
+            INKPOD_STATUS_INVALID_STATE
+        );
+        assert!(no_plan.is_null());
+        assert_eq!(
+            inkpod_core_inkscript_plan_task_release(owner, &mut cancelled_task),
+            INKPOD_STATUS_OK
+        );
+
+        plan_request.feature_flags = 1;
+        let mut invalid_task = ptr::null_mut();
+        assert_eq!(
+            inkpod_core_inkscript_plan_task_create(
+                owner,
+                program,
+                &plan_request,
+                &mut invalid_task,
+            ),
+            INKPOD_STATUS_UNSUPPORTED
+        );
+        assert!(invalid_task.is_null());
+        plan_request.feature_flags = 0;
+        plan_request.struct_size -= 1;
+        assert_eq!(
+            inkpod_core_inkscript_plan_task_create(
+                owner,
+                program,
+                &plan_request,
+                &mut invalid_task,
+            ),
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+
+        let confirmation_request = InkpodInkScriptConfirmationRequest {
+            struct_size: size_of::<InkpodInkScriptConfirmationRequest>() as u32,
+            version: INKPOD_INKSCRIPT_RECORD_VERSION,
+            scope: INKPOD_INKSCRIPT_SCOPE_ALL,
+            reserved: 0,
+            feature_flags: 0,
+            document_uuid_low: 0,
+            document_uuid_high: 0,
+            file_alias: [0; 32],
+        };
+
+        let (mut released_plan_task, mut released_plan) = make_plan(owner, program, &mut host);
+        let mut released_confirmation = ptr::null_mut();
+        assert_eq!(
+            inkpod_core_inkscript_confirmation_create(
+                owner,
+                released_plan,
+                &confirmation_request,
+                &mut released_confirmation,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_inkscript_confirmation_release(owner, &mut released_confirmation),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_inkscript_confirmation_release(owner, &mut released_confirmation),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_inkscript_plan_release(owner, &mut released_plan),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_inkscript_plan_release(owner, &mut released_plan),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_inkscript_plan_task_release(owner, &mut released_plan_task),
+            INKPOD_STATUS_OK
+        );
+
+        let (mut cancelled_plan_task, mut cancelled_plan) = make_plan(owner, program, &mut host);
+        let mut cancelled_confirmation = ptr::null_mut();
+        assert_eq!(
+            inkpod_core_inkscript_confirmation_create(
+                owner,
+                cancelled_plan,
+                &confirmation_request,
+                &mut cancelled_confirmation,
+            ),
+            INKPOD_STATUS_OK
+        );
+        let cancelled_run_request = InkpodInkScriptRunRequest {
+            struct_size: size_of::<InkpodInkScriptRunRequest>() as u32,
+            version: INKPOD_INKSCRIPT_RECORD_VERSION,
+            mode: INKPOD_INKSCRIPT_RUN_INSTALL,
+            reserved: 0,
+            feature_flags: 0,
+            controller_id: 41,
+            session_generation: 7,
+            maximum_output_bytes: 0,
+            host: execution_host_record(&mut host),
+        };
+        let mut cancelled_run_task = ptr::null_mut();
+        assert_eq!(
+            inkpod_core_inkscript_run_task_create(
+                owner,
+                program,
+                &mut cancelled_plan,
+                &mut cancelled_confirmation,
+                &cancelled_run_request,
+                &mut cancelled_run_task,
+            ),
+            INKPOD_STATUS_OK
+        );
+        let cancelled_run_task_address = cancelled_run_task as usize;
+        assert_eq!(
+            std::thread::spawn(move || {
+                inkpod_inkscript_run_task_cancel(
+                    cancelled_run_task_address as *const InkpodInkScriptRunTask,
+                )
+            })
+            .join()
+            .expect("run-task cancellation thread must not panic"),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_inkscript_run_task_advance(owner, cancelled_run_task),
+            INKPOD_STATUS_OK
+        );
+        let mut cancelled_event = InkpodInkScriptTaskEvent {
+            struct_size: size_of::<InkpodInkScriptTaskEvent>() as u32,
+            version: INKPOD_INKSCRIPT_RECORD_VERSION,
+            ..Default::default()
+        };
+        assert_eq!(
+            inkpod_core_inkscript_run_task_event_take(
+                owner,
+                cancelled_run_task,
+                &mut cancelled_event,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(cancelled_event.kind, INKPOD_INKSCRIPT_EVENT_ITEM_COMPLETE);
+        assert_eq!(cancelled_event.outcome, INKPOD_INKSCRIPT_OUTCOME_CANCELLED);
+        assert_eq!(
+            inkpod_core_inkscript_run_task_advance(owner, cancelled_run_task),
+            INKPOD_STATUS_CANCELLED
+        );
+        let mut cancelled_run_info = InkpodTaskInfo {
+            struct_size: size_of::<InkpodTaskInfo>() as u32,
+            state: 0,
+            completed_work: 0,
+            total_work: 0,
+            reserved: 0,
+        };
+        assert_eq!(
+            inkpod_inkscript_run_task_query(cancelled_run_task, &mut cancelled_run_info),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(cancelled_run_info.state, INKPOD_TASK_CANCELLED);
+        assert_eq!(
+            inkpod_core_inkscript_run_task_event_take(
+                owner,
+                cancelled_run_task,
+                &mut cancelled_event,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(cancelled_event.kind, INKPOD_INKSCRIPT_EVENT_RUN_COMPLETE);
+        assert_eq!(cancelled_event.task_state, INKPOD_TASK_CANCELLED);
+        assert_eq!(
+            inkpod_core_inkscript_run_task_release(owner, &mut cancelled_run_task),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_inkscript_plan_task_release(owner, &mut cancelled_plan_task),
+            INKPOD_STATUS_OK
+        );
+
+        let (mut plan_task, mut plan) = make_plan(owner, program, &mut host);
+        let mut confirmation = ptr::null_mut();
+        assert_eq!(
+            inkpod_core_inkscript_confirmation_create(
+                owner,
+                plan,
+                &confirmation_request,
+                &mut confirmation,
+            ),
+            INKPOD_STATUS_OK
+        );
+        host.fail_write = true;
+        let run_request = InkpodInkScriptRunRequest {
+            struct_size: size_of::<InkpodInkScriptRunRequest>() as u32,
+            version: INKPOD_INKSCRIPT_RECORD_VERSION,
+            mode: INKPOD_INKSCRIPT_RUN_INSTALL,
+            reserved: 0,
+            feature_flags: 0,
+            controller_id: 41,
+            session_generation: 7,
+            maximum_output_bytes: 0,
+            host: execution_host_record(&mut host),
+        };
+        let mut run_task = ptr::null_mut();
+        assert_eq!(
+            inkpod_core_inkscript_run_task_create(
+                owner,
+                program,
+                &mut plan,
+                &mut confirmation,
+                &run_request,
+                &mut run_task,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_inkscript_run_task_advance(owner, run_task),
+            INKPOD_STATUS_OK
+        );
+        let mut event = InkpodInkScriptTaskEvent {
+            struct_size: size_of::<InkpodInkScriptTaskEvent>() as u32,
+            version: INKPOD_INKSCRIPT_RECORD_VERSION,
+            ..Default::default()
+        };
+        assert_eq!(
+            inkpod_core_inkscript_run_task_event_take(owner, run_task, &mut event),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(event.outcome, INKPOD_INKSCRIPT_OUTCOME_FAILED);
+        assert_eq!(event.failure, INKPOD_INKSCRIPT_FAILURE_SAVE);
+        assert!(host.installed_bytes.is_empty());
+        assert!(host.temporary_bytes.is_empty());
+        assert_eq!(
+            (*input_core).core.document_state_digest().unwrap(),
+            input_digest
+        );
+        assert_eq!((*input_core).core.history_entries(), input_history);
+
+        assert_eq!(
+            inkpod_core_inkscript_run_task_release(owner, &mut run_task),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_inkscript_plan_task_release(owner, &mut plan_task),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_inkscript_program_release(owner, &mut program),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_inkscript_source_release(&mut source),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(inkpod_core_destroy(&mut input_core), INKPOD_STATUS_OK);
+        assert_eq!(inkpod_core_destroy(&mut owner), INKPOD_STATUS_OK);
+    }
+}
+
+#[test]
+fn inkscript_execution_abi_rejects_stale_confirmation_authority() {
+    // SAFETY: The fixture owns all opaque handles and the callback context on this thread.
+    unsafe {
+        let (mut owner, mut input_core, mut source, mut program) = compiled_execution_fixture();
+        let input_digest = (*input_core).core.document_state_digest().unwrap();
+        let mut host = ExecutionHost::new(input_core);
+        let (mut plan_task, mut plan) = make_plan(owner, program, &mut host);
+        let request = InkpodInkScriptConfirmationRequest {
+            struct_size: size_of::<InkpodInkScriptConfirmationRequest>() as u32,
+            version: INKPOD_INKSCRIPT_RECORD_VERSION,
+            scope: INKPOD_INKSCRIPT_SCOPE_ALL,
+            reserved: 0,
+            feature_flags: 0,
+            document_uuid_low: 0,
+            document_uuid_high: 0,
+            file_alias: [0; 32],
+        };
+        let mut confirmation = ptr::null_mut();
+        assert_eq!(
+            inkpod_core_inkscript_confirmation_create(owner, plan, &request, &mut confirmation),
+            INKPOD_STATUS_OK
+        );
+        let run_request = InkpodInkScriptRunRequest {
+            struct_size: size_of::<InkpodInkScriptRunRequest>() as u32,
+            version: INKPOD_INKSCRIPT_RECORD_VERSION,
+            mode: INKPOD_INKSCRIPT_RUN_INSTALL,
+            reserved: 0,
+            feature_flags: 0,
+            controller_id: 41,
+            session_generation: 7,
+            maximum_output_bytes: 0,
+            host: execution_host_record(&mut host),
+        };
+        let mut run_task = ptr::null_mut();
+        assert_eq!(
+            inkpod_core_inkscript_run_task_create(
+                owner,
+                program,
+                &mut plan,
+                &mut confirmation,
+                &run_request,
+                &mut run_task,
+            ),
+            INKPOD_STATUS_OK
+        );
+        host.authority_generation += 1;
+        assert_eq!(
+            inkpod_core_inkscript_run_task_advance(owner, run_task),
+            INKPOD_STATUS_OK
+        );
+        let mut event = InkpodInkScriptTaskEvent {
+            struct_size: size_of::<InkpodInkScriptTaskEvent>() as u32,
+            version: INKPOD_INKSCRIPT_RECORD_VERSION,
+            ..Default::default()
+        };
+        assert_eq!(
+            inkpod_core_inkscript_run_task_event_take(owner, run_task, &mut event),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(event.outcome, INKPOD_INKSCRIPT_OUTCOME_FAILED);
+        assert_eq!(event.failure, INKPOD_INKSCRIPT_FAILURE_STALE_AUTHORITY);
+        assert!(host.installed_bytes.is_empty());
+        assert_eq!(
+            (*input_core).core.document_state_digest().unwrap(),
+            input_digest
+        );
+
+        assert_eq!(
+            inkpod_core_inkscript_run_task_release(owner, &mut run_task),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_inkscript_plan_task_release(owner, &mut plan_task),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_inkscript_program_release(owner, &mut program),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_inkscript_source_release(&mut source),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(inkpod_core_destroy(&mut input_core), INKPOD_STATUS_OK);
+        assert_eq!(inkpod_core_destroy(&mut owner), INKPOD_STATUS_OK);
+    }
 }
