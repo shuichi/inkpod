@@ -364,12 +364,17 @@ impl Core {
             SelectionLayerOperation::Add => SelectionOperation::Add,
             SelectionLayerOperation::Subtract => SelectionOperation::Subtract,
         };
-        after.selection = combine_selection_masks(
+        let combined = combine_selection_masks(
             &before.selection,
             &mask.raster,
             selection_operation,
             revision.get(),
         )?;
+        if selection_masks_have_same_coverage(&before.selection, &combined)? {
+            drop(edit);
+            return Ok(self.noop_outcome());
+        }
+        after.selection = combined;
         edit.commit(self)
     }
 

@@ -4,11 +4,16 @@ use super::*;
 use crate::asset::{AssetStore, RasterAssetInput};
 use crate::primitive::CanonicalInvocation;
 use crate::{
-    ActivePlane, AssetAlphaSemantics, AssetColorSpace, BatchColorPair, BrushShape, CoordinateSpace,
-    Core, DEFAULT_DPI_MILLI, GeometryCrossSection, GeometryOptions, GeometryPrimitive,
-    GeometryRequest, GridConfig, GuideAxis, LayerKind, MAX_PERSISTENT_NUMERIC_ID,
-    NativeOpenStrategy, PaintTool, PixelFormat, PixelValue, PointF32, PrimitiveId,
-    PrimitiveRequest, ProcedureId, StartColorPredicate, StateId, Stroke, StrokeSample,
+    ActivePlane, Adjustment, AirbrushGesture, AirbrushStroke, AssetAlphaSemantics, AssetColorSpace,
+    BatchColorPair, BrushShape, CellCreationOptions, CellSizing, CoordinateSpace, Core,
+    DEFAULT_DPI_MILLI, EditorTarget, EffectSample, FillOperation, FillRequest, FrameAnchor,
+    GeometryCrossSection, GeometryOptions, GeometryPrimitive, GeometryRequest, Gradient,
+    GradientKind, GradientMode, GradientStop, GridConfig, GuideAxis, InclusionMode, LayerKind,
+    MAX_PERSISTENT_NUMERIC_ID, NativeOpenStrategy, OutputColorGuardProfile, PaintTool, PixelFormat,
+    PixelValue, PointF32, PrimitiveId, PrimitiveRequest, ProcedureId, RangeInterpretation, RectI32,
+    ScopedColorReplaceMode, SelectionConstructionOptions, SelectionLayerOperation,
+    SelectionOperation, SelectionShape, Stamp, StampGesture, StampShape, StartColorPredicate,
+    StateId, Stroke, StrokeSample, plan_cell_creation,
 };
 use inkpod_format::{
     InkScriptRunParameterChoice, InkScriptRunParameterDecision, InkScriptSource, InkScriptSourceId,
@@ -80,6 +85,23 @@ fn rgba8_asset_id(pixels: Vec<u8>, width: u32, height: u32) -> crate::AssetId {
             color_space: Some(AssetColorSpace::Srgb),
             alpha_semantics: AssetAlphaSemantics::Straight,
             canonical_stride: u64::from(width) * 4,
+            pixels,
+            expected_id: None,
+        })
+        .unwrap()
+        .id()
+}
+
+fn gray8_asset_id(pixels: Vec<u8>, width: u32, height: u32) -> crate::AssetId {
+    let mut store = AssetStore::default();
+    store
+        .ingest_raster(RasterAssetInput {
+            width,
+            height,
+            pixel_format: PixelFormat::Grayscale8,
+            color_space: None,
+            alpha_semantics: AssetAlphaSemantics::Opaque,
+            canonical_stride: u64::from(width),
             pixels,
             expected_id: None,
         })
@@ -953,6 +975,1816 @@ fn stroke_geometry_import_cancel_stale_and_overflow_are_atomic() {
         ),
         overflow_before
     );
+    assert_eq!(
+        (
+            base.document_state_digest().unwrap(),
+            base.document_info().unwrap(),
+            base.history_entries(),
+            base.next_id,
+            base.next_procedure,
+            base.next_state,
+        ),
+        before
+    );
+}
+
+fn fill_gradient_fixture() -> (Core, StaticScriptProgram, u64) {
+    let mut base = Core::new();
+    let plan = plan_cell_creation(&CellCreationOptions {
+        sizing: CellSizing::ImagePixels {
+            width: 70,
+            height: 3,
+        },
+        dpi_x_milli: DEFAULT_DPI_MILLI,
+        dpi_y_milli: DEFAULT_DPI_MILLI,
+        margin_milli: 0,
+        safe_frame_ratio_milli: 900,
+        maximum_close_ratio_milli: 500,
+        anchor: FrameAnchor::Center,
+        initial_layer_kind: LayerKind::BinaryColoring,
+        pixel_format: PixelFormat::StraightRgba16,
+        count: 1,
+    })
+    .unwrap();
+    base.new_cell_from_creation_plan(plan.item(0).unwrap(), 0x4d31_3841_4649_4c4c)
+        .unwrap();
+    base.apply_selection(
+        &SelectionShape::Rectangle(RectI32 {
+            x: 63,
+            y: 1,
+            width: 3,
+            height: 1,
+        }),
+        SelectionOperation::New,
+    )
+    .unwrap();
+    let layers = base.layers().unwrap();
+    let layer = layers
+        .iter()
+        .find(|layer| {
+            layer
+                .planes
+                .iter()
+                .any(|plane| plane.kind == crate::PlaneType::Color)
+        })
+        .unwrap();
+    let plane_id = layer
+        .planes
+        .iter()
+        .find(|plane| plane.kind == crate::PlaneType::Color)
+        .unwrap()
+        .id;
+    let info = base.document_info().unwrap();
+    let bindings = format!(
+        r#"
+let paint_layer = select layer {{ source_document_uuid = uuid"{}"; persistent_id = {}; }};
+let paint = select plane {{ source_document_uuid = uuid"{}"; persistent_id = {plane_id}; }};
+"#,
+        document_uuid(info.document_uuid),
+        layer.id,
+        document_uuid(info.document_uuid),
+    );
+    let fill = r#"
+invoke apply_fill {
+    layer_id = $paint_layer;
+    plane_id = $paint;
+    request = {
+        operation = seed;
+        seed_x = 63;
+        seed_y = 1;
+        color = rgba16(1000, 2000, 3000, 65535);
+        selection = none;
+        use_document_selection = true;
+        tolerance = 0;
+        detached_regions = false;
+        overflow_abort = true;
+        gap_close = 0;
+        transparent_only = false;
+        inclusion_mode = no_inclusion;
+        inclusion_colors = [];
+        extension_distance = 0;
+    };
+    use_light_table_boundary = false;
+    use_light_table_color = false;
+};
+"#;
+    let gradient = r#"
+invoke apply_gradient {
+    plane_id = $paint;
+    gradient = {
+        kind = linear;
+        mode = overwrite;
+        start = point(q16(4161536), q16(98304));
+        end = point(q16(4292608), q16(98304));
+        dither = false;
+        stops = [
+            { position_milli = 0; color = rgba16(65535, 0, 0, 65535); },
+            { position_milli = 500; color = rgba16(0, 65535, 0, 32768); },
+            { position_milli = 1000; color = rgba16(0, 0, 65535, 65535); },
+        ];
+    };
+};
+"#;
+    let program = complete_source(
+        "",
+        &bindings,
+        &format!(
+            "step \"Fill\" {{ enabled = true; {fill} }}\nstep \"Fill no-op\" {{ enabled = true; {fill} }}\nstep \"Gradient\" {{ enabled = true; {gradient} }}\nstep \"Gradient no-op\" {{ enabled = true; {gradient} }}"
+        ),
+    );
+    let program =
+        compile_inkscript(&program, InkScriptRunParameterDecision::Resolve(Vec::new())).unwrap();
+    (base, program, plane_id)
+}
+
+fn fill_gradient_request() -> FillRequest {
+    FillRequest {
+        operation: FillOperation::Seed,
+        seed_x: 63,
+        seed_y: 1,
+        color: PixelValue::Rgba16([1000, 2000, 3000, 65535]),
+        selection: None,
+        use_document_selection: true,
+        tolerance: 0,
+        detached_regions: false,
+        overflow_abort: true,
+        gap_close: 0,
+        transparent_only: false,
+        inclusion_mode: InclusionMode::None,
+        inclusion_colors: Vec::new(),
+        extension_distance: 0,
+    }
+}
+
+fn fill_gradient_spec() -> Gradient {
+    Gradient {
+        kind: GradientKind::Linear,
+        mode: GradientMode::Overwrite,
+        start_x_milli: 63_500,
+        start_y_milli: 1_500,
+        end_x_milli: 65_500,
+        end_y_milli: 1_500,
+        dither: false,
+        stops: vec![
+            GradientStop {
+                position_milli: 0,
+                color: [65535, 0, 0, 65535],
+            },
+            GradientStop {
+                position_milli: 500,
+                color: [0, 65535, 0, 32768],
+            },
+            GradientStop {
+                position_milli: 1000,
+                color: [0, 0, 65535, 65535],
+            },
+        ],
+    }
+}
+
+#[test]
+fn fill_gradient_execute_native_depth_q16_selection_tile_boundary_and_reopen() {
+    let (base, program, plane_id) = fill_gradient_fixture();
+    assert_eq!(program.budget.max_invocations, 4);
+    assert_eq!(program.budget.max_output_ids, 0);
+    assert_eq!(program.budget.max_asset_bytes, 160);
+    assert_eq!(program.budget.max_work_units, 167_772_160);
+    assert_eq!(program.budget.max_output_growth, 0);
+
+    let mut references = crate::primitive::InkScriptRuntimeReferences::default();
+    references
+        .insert(
+            "paint",
+            crate::primitive::InkScriptEntityKind::Plane,
+            plane_id,
+        )
+        .unwrap();
+    let lowered = crate::primitive::FillGradientScriptStep::from_compiled(
+        &program.model.steps()[2],
+        &program.frozen_arguments[2],
+        &references,
+    )
+    .unwrap()
+    .to_canonical();
+    assert_eq!(
+        lowered,
+        CanonicalInvocation::ApplyGradient {
+            plane_id,
+            gradient: fill_gradient_spec(),
+        }
+    );
+
+    let base_digest = base.document_state_digest().unwrap();
+    let base_next_id = base.next_id;
+    let mut never_cancel = || false;
+    let mut scripted =
+        run_inkscript_on_staged_core(&program, base.clone(), None, &mut never_cancel).unwrap();
+    assert_eq!(scripted.report.commit_count, 2);
+    assert_eq!(
+        scripted.report.statements,
+        [
+            crate::script::report::ScriptStatementOutcome::Committed,
+            crate::script::report::ScriptStatementOutcome::NoOp,
+            crate::script::report::ScriptStatementOutcome::Committed,
+            crate::script::report::ScriptStatementOutcome::NoOp,
+        ]
+    );
+    assert_eq!(scripted.staged.next_id, base_next_id);
+    assert_eq!(
+        scripted
+            .staged
+            .plane_pixel(ActivePlane::Color, 62, 1)
+            .unwrap(),
+        PixelValue::Rgba16([0; 4])
+    );
+    assert_eq!(
+        scripted
+            .staged
+            .plane_pixel(ActivePlane::Color, 63, 1)
+            .unwrap(),
+        PixelValue::Rgba16([65535, 0, 0, 65535])
+    );
+    assert_eq!(
+        scripted
+            .staged
+            .plane_pixel(ActivePlane::Color, 64, 1)
+            .unwrap(),
+        PixelValue::Rgba16([0, 65535, 0, 32768])
+    );
+    assert_eq!(
+        scripted
+            .staged
+            .plane_pixel(ActivePlane::Color, 65, 1)
+            .unwrap(),
+        PixelValue::Rgba16([0, 0, 65535, 65535])
+    );
+    assert_eq!(
+        scripted
+            .staged
+            .plane_pixel(ActivePlane::Color, 66, 1)
+            .unwrap(),
+        PixelValue::Rgba16([0; 4])
+    );
+
+    let mut direct = base.clone();
+    assert!(
+        direct
+            .apply_fill(&fill_gradient_request())
+            .unwrap()
+            .changed_pixels
+            > 0
+    );
+    assert_eq!(
+        direct
+            .apply_fill(&fill_gradient_request())
+            .unwrap()
+            .changed_pixels,
+        0
+    );
+    let gradient = fill_gradient_spec();
+    let before_gradient = direct.document_info().unwrap().document_revision;
+    let changed = direct.apply_gradient_to_plane(plane_id, &gradient).unwrap();
+    let no_op = direct.apply_gradient_to_plane(plane_id, &gradient).unwrap();
+    assert_eq!(changed.revision(), before_gradient + 1);
+    assert_eq!(changed.revision(), no_op.revision());
+    assert_same_document(&scripted.staged, &direct);
+
+    let after = scripted.staged.document_state_digest().unwrap();
+    scripted.staged.undo().unwrap();
+    scripted.staged.undo().unwrap();
+    assert_eq!(
+        scripted.staged.document_state_digest().unwrap(),
+        base_digest
+    );
+    scripted.staged.redo().unwrap();
+    scripted.staged.redo().unwrap();
+    assert_eq!(scripted.staged.document_state_digest().unwrap(), after);
+    scripted.staged.release_history_cache().unwrap();
+    assert_eq!(
+        scripted
+            .staged
+            .verify_journal_replay()
+            .unwrap()
+            .document_state_digest(),
+        after
+    );
+
+    let editor_digest = scripted.staged.editor_state().unwrap().digest;
+    let native = scripted
+        .staged
+        .build_procedure_file(Some(scripted.staged.current_state), Some(editor_digest))
+        .unwrap();
+    let bytes = encode_procedure_file(&native).unwrap();
+    let reopened = Core::from_procedure_file(decode_procedure_file(&bytes).unwrap()).unwrap();
+    assert_eq!(reopened.document_state_digest().unwrap(), after);
+    assert_eq!(reopened.next_id, scripted.staged.next_id);
+    assert_eq!(reopened.next_procedure, scripted.staged.next_procedure);
+    assert_eq!(reopened.next_state, scripted.staged.next_state);
+    assert_eq!(
+        reopened.persistence_info().unwrap().open_strategy,
+        NativeOpenStrategy::FullReplay
+    );
+    assert!(!reopened.document_info().unwrap().dirty);
+    assert!(!reopened.editor_state().unwrap().dirty);
+}
+
+#[test]
+fn fill_gradient_cancel_invalid_stale_and_resource_failures_are_atomic() {
+    let (base, program, plane_id) = fill_gradient_fixture();
+    let before = (
+        base.document_state_digest().unwrap(),
+        base.document_info().unwrap(),
+        base.history_entries(),
+        base.next_id,
+        base.next_procedure,
+        base.next_state,
+    );
+    let mut cancel = || true;
+    assert_eq!(
+        run_inkscript_on_staged_core(&program, base.clone(), None, &mut cancel).unwrap_err(),
+        ScriptRunError::Cancelled
+    );
+    let mut checks = 0_u8;
+    let mut cancel_after_first_step = || {
+        checks += 1;
+        checks == 3
+    };
+    assert_eq!(
+        run_inkscript_on_staged_core(&program, base.clone(), None, &mut cancel_after_first_step,)
+            .unwrap_err(),
+        ScriptRunError::Cancelled
+    );
+
+    let mut stale = base.clone();
+    let fingerprint = capture_in_memory_fingerprint(&stale).unwrap();
+    stale.add_guide(GuideAxis::Vertical, 1).unwrap();
+    let stale_before = stale.document_state_digest().unwrap();
+    let mut never_cancel = || false;
+    assert_eq!(
+        run_inkscript_dry(
+            &program,
+            capture_in_memory_input_at(&stale, fingerprint),
+            &mut never_cancel,
+        )
+        .unwrap_err(),
+        ScriptRunError::StaleInput
+    );
+    assert_eq!(stale.document_state_digest().unwrap(), stale_before);
+
+    let info = base.document_info().unwrap();
+    let invalid = complete_source(
+        "",
+        &format!(
+            "let paint = select plane {{ source_document_uuid = uuid\"{}\"; persistent_id = {plane_id}; }};",
+            document_uuid(info.document_uuid)
+        ),
+        r#"step "Invalid stops" { enabled = true; invoke apply_gradient {
+            plane_id = $paint;
+            gradient = {
+                kind = linear; mode = overwrite;
+                start = point(q16(0), q16(0)); end = point(q16(65536), q16(0));
+                dither = false;
+                stops = [
+                    { position_milli = 0; color = rgba16(0, 0, 0, 65535); },
+                    { position_milli = 0; color = rgba16(65535, 65535, 65535, 65535); },
+                ];
+            };
+        }; }"#,
+    );
+    let invalid =
+        compile_inkscript(&invalid, InkScriptRunParameterDecision::Resolve(Vec::new())).unwrap();
+    let mut never_cancel = || false;
+    assert!(matches!(
+        run_inkscript_on_staged_core(&invalid, base.clone(), None, &mut never_cancel),
+        Err(ScriptRunError::Core(_))
+    ));
+
+    let stops = (0..65)
+        .map(|index| format!("{{ position_milli = {index}; color = rgba16(0, 0, 0, 65535); }}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let resource = complete_source(
+        "",
+        &format!(
+            "let paint = select plane {{ source_document_uuid = uuid\"{}\"; persistent_id = {plane_id}; }};",
+            document_uuid(info.document_uuid)
+        ),
+        &format!(
+            r#"step "Too many stops" {{ enabled = true; invoke apply_gradient {{
+                plane_id = $paint;
+                gradient = {{ kind = linear; mode = overwrite;
+                    start = point(q16(0), q16(0)); end = point(q16(65536), q16(0));
+                    dither = false; stops = [{stops}];
+                }};
+            }}; }}"#
+        ),
+    );
+    assert_eq!(
+        compile_inkscript(
+            &resource,
+            InkScriptRunParameterDecision::Resolve(Vec::new()),
+        ),
+        Err(ScriptCompileError::Catalog(
+            crate::script::catalog::CatalogError::ResourceLimit
+        ))
+    );
+    let mut overflow = base.clone();
+    overflow.next_procedure = ProcedureId::from_raw(MAX_PERSISTENT_NUMERIC_ID);
+    let overflow_before = (
+        overflow.document_state_digest().unwrap(),
+        overflow.document_info().unwrap(),
+        overflow.history_entries(),
+        overflow.next_id,
+        overflow.next_procedure,
+        overflow.next_state,
+    );
+    let mut never_cancel = || false;
+    assert_eq!(
+        run_inkscript_on_staged_core(&program, overflow.clone(), None, &mut never_cancel)
+            .unwrap_err(),
+        ScriptRunError::ResourceLimit
+    );
+    assert_eq!(
+        (
+            overflow.document_state_digest().unwrap(),
+            overflow.document_info().unwrap(),
+            overflow.history_entries(),
+            overflow.next_id,
+            overflow.next_procedure,
+            overflow.next_state,
+        ),
+        overflow_before
+    );
+    assert_eq!(
+        (
+            base.document_state_digest().unwrap(),
+            base.document_info().unwrap(),
+            base.history_entries(),
+            base.next_id,
+            base.next_procedure,
+            base.next_state,
+        ),
+        before
+    );
+}
+
+fn gesture_alpha_adjustment_fixture() -> (Core, StaticScriptProgram, FrozenScriptAssets, u64) {
+    let mut base = Core::new();
+    let plan = plan_cell_creation(&CellCreationOptions {
+        sizing: CellSizing::ImagePixels {
+            width: 8,
+            height: 4,
+        },
+        dpi_x_milli: DEFAULT_DPI_MILLI,
+        dpi_y_milli: DEFAULT_DPI_MILLI,
+        margin_milli: 0,
+        safe_frame_ratio_milli: 900,
+        maximum_close_ratio_milli: 500,
+        anchor: FrameAnchor::Center,
+        initial_layer_kind: LayerKind::BinaryColoring,
+        pixel_format: PixelFormat::StraightRgba16,
+        count: 1,
+    })
+    .unwrap();
+    base.new_cell_from_creation_plan(plan.item(0).unwrap(), 0x4d31_3842_4745_5354)
+        .unwrap();
+    let info = base.document_info().unwrap();
+    base.apply_airbrush_to_plane(
+        info.color_plane_id,
+        AirbrushStroke {
+            center_x_milli: 1_500,
+            center_y_milli: 1_500,
+            radius_milli: 1_400,
+            hardness_milli: 700,
+            opacity_milli: 1_000,
+            color: [40_000, 2_000, 1_000, 65_535],
+        },
+    )
+    .unwrap();
+    base.apply_selection(
+        &SelectionShape::Rectangle(RectI32 {
+            x: 1,
+            y: 0,
+            width: 6,
+            height: 4,
+        }),
+        SelectionOperation::New,
+    )
+    .unwrap();
+
+    let alpha_pixels = vec![
+        0, 32, 64, 96, 128, 160, 192, 255, 255, 192, 160, 128, 96, 64, 32, 0, 0, 64, 128, 192, 255,
+        192, 128, 64, 64, 128, 192, 255, 192, 128, 64, 0,
+    ];
+    let alpha_id = gray8_asset_id(alpha_pixels, 8, 4);
+    let bindings = format!(
+        r#"let paint = select plane {{ source_document_uuid = uuid"{}"; persistent_id = {}; }};"#,
+        document_uuid(info.document_uuid),
+        info.color_plane_id,
+    );
+    let program = complete_source_with_assets(
+        &bindings,
+        r#"
+step "Scoped color" { enabled = true; invoke scoped_color_replace {
+    plane_id = $paint; mode = raster_color;
+    target = rgba16(0, 0, 0, 0); replacement = rgba16(0, 50000, 1000, 65535);
+    region = { kind = rectangle; rect = rect(6, 0, 1, 1); anchor = none; current = none; points = []; samples = []; diameter = none; x = none; y = none; tolerance = none; gap_close = none; };
+}; }
+step "Airbrush" { enabled = true; invoke apply_airbrush {
+    plane_id = $paint; stroke = { center = point(q16(294912), q16(98304)); radius_milli = 1200; hardness_milli = 650; opacity_milli = 800; color = rgba16(1000, 2000, 60000, 50000); };
+}; }
+step "Airbrush gesture" { enabled = true; invoke apply_airbrush_gesture {
+    plane_id = $paint; gesture = {
+        samples = [
+            { position = point(q16(163840), q16(32768)); pressure_milli = 1000; },
+            { position = point(q16(360448), q16(163840)); pressure_milli = 500; },
+        ];
+        radius_milli = 900; hardness_milli = 500; spacing_milli = 500; opacity_milli = 700;
+        fade_milli = 100; pressure_size = true; pressure_opacity = true; continuous_dabs = 1;
+        color = rgba16(60000, 3000, 2000, 60000);
+    };
+}; }
+step "Stamp" { enabled = true; invoke apply_stamp {
+    plane_id = $paint; stamp = { source_x = 1; source_y = 1; destination_x = 5; destination_y = 0; width = 1; height = 1; opacity_milli = 750; };
+}; }
+step "Stamp gesture" { enabled = true; invoke apply_stamp_gesture {
+    plane_id = $paint; gesture = {
+        source = point(q16(98304), q16(98304));
+        samples = [
+            { position = point(q16(229376), q16(98304)); pressure_milli = 1000; },
+            { position = point(q16(294912), q16(163840)); pressure_milli = 750; },
+        ];
+        radius_milli = 700; hardness_milli = 700; spacing_milli = 600; opacity_milli = 800;
+        shape = square; pressure_size = true; pressure_opacity = true;
+    };
+}; }
+step "Blur" { enabled = true; invoke apply_blur { plane_id = $paint; radius = 1; strength_milli = 600; }; }
+step "Blur tool" { enabled = true; invoke apply_blur_tool {
+    plane_id = $paint;
+    shape = { kind = rectangle; rect = rect(1, 0, 6, 4); anchor = none; current = none; points = []; samples = []; diameter = none; x = none; y = none; tolerance = none; gap_close = none; };
+    radius = 1; strength_milli = 500;
+}; }
+step "Alpha asset" { enabled = true; invoke edit_plane_alpha { plane_id = $paint; alpha = asset(alpha_asset); }; }
+step "Alpha gradient" { enabled = true; invoke apply_alpha_gradient {
+    plane_id = $paint; gradient = {
+        kind = linear; mode = overwrite; start = point(q16(98304), q16(98304)); end = point(q16(425984), q16(98304)); dither = false;
+        stops = [
+            { position_milli = 0; color = rgba16(0, 0, 0, 10000); },
+            { position_milli = 500; color = rgba16(0, 0, 0, 35000); },
+            { position_milli = 1000; color = rgba16(0, 0, 0, 60000); },
+        ];
+    };
+}; }
+step "Create adjustment" as created { enabled = true; invoke create_adjustment_layer {
+    name = "InkScript adjustment";
+    adjustment = { kind = brightness_contrast; brightness_milli = 100; contrast_milli = -200; channel = none; interpolation = none; points = []; levels = none; };
+}; }
+step "Update adjustment" { enabled = true; invoke update_adjustment_layer {
+    layer_id = $created.layer;
+    adjustment = { kind = levels; brightness_milli = none; contrast_milli = none; channel = none; interpolation = none; points = []; levels = { channel = rgb; input_shadow = 1000; input_gamma_milli = 1000; input_highlight = 64000; output_shadow = 500; output_highlight = 65000; }; };
+}; }
+step "Update adjustment no-op" { enabled = true; invoke update_adjustment_layer {
+    layer_id = $created.layer;
+    adjustment = { kind = levels; brightness_milli = none; contrast_milli = none; channel = none; interpolation = none; points = []; levels = { channel = rgb; input_shadow = 1000; input_gamma_milli = 1000; input_highlight = 64000; output_shadow = 500; output_highlight = 65000; }; };
+}; }
+"#,
+        &format!(
+            r#"asset alpha_asset {{
+                asset_id = blake3"{}";
+                kind = "canonical_raster";
+                descriptor = {{ pixel_format = gray8; color_space = srgb; alpha = straight; width = 8; height = 4; stride = 8; element_count = 32; }};
+                data = base64"""ACBAYICgwP//wKCAYEAgAABAgMD/wIBAQIDA/8CAQAA=""";
+            }};"#,
+            asset_digest_text(alpha_id)
+        ),
+    );
+    let program =
+        compile_inkscript(&program, InkScriptRunParameterDecision::Resolve(Vec::new())).unwrap();
+    let mut never_cancel = || false;
+    let assets = freeze_inkscript_assets(
+        program.model.assets(),
+        &mut [],
+        ScriptAssetLimits::exact_current(),
+        &mut never_cancel,
+    )
+    .unwrap();
+    (base, program, assets, info.color_plane_id)
+}
+
+fn gesture_alpha_gradient() -> Gradient {
+    Gradient {
+        kind: GradientKind::Linear,
+        mode: GradientMode::Overwrite,
+        start_x_milli: 1_500,
+        start_y_milli: 1_500,
+        end_x_milli: 6_500,
+        end_y_milli: 1_500,
+        dither: false,
+        stops: vec![
+            GradientStop {
+                position_milli: 0,
+                color: [0, 0, 0, 10_000],
+            },
+            GradientStop {
+                position_milli: 500,
+                color: [0, 0, 0, 35_000],
+            },
+            GradientStop {
+                position_milli: 1_000,
+                color: [0, 0, 0, 60_000],
+            },
+        ],
+    }
+}
+
+fn created_adjustment() -> Adjustment {
+    Adjustment::BrightnessContrast {
+        brightness_milli: 100,
+        contrast_milli: -200,
+    }
+}
+
+fn updated_adjustment() -> Adjustment {
+    Adjustment::Levels(crate::Levels {
+        channel: crate::Channel::Rgb,
+        input_shadow: 1_000,
+        input_gamma_milli: 1_000,
+        input_highlight: 64_000,
+        output_shadow: 500,
+        output_highlight: 65_000,
+    })
+}
+
+#[test]
+fn gesture_alpha_adjustment_lowering_preserves_order_shape_depth_and_result_reference() {
+    let (_, program, _, plane_id) = gesture_alpha_adjustment_fixture();
+    assert_eq!(program.model.steps().len(), 12);
+    assert_eq!(program.budget.max_invocations, 12);
+    assert_eq!(program.budget.max_output_ids, 1);
+    assert_eq!(program.budget.max_output_growth, 1);
+    assert_eq!(program.budget.max_asset_bytes, 37_749_360);
+    assert_eq!(program.budget.max_work_units, 2_472_629_795);
+
+    let samples = vec![
+        EffectSample {
+            x_milli: 2_500,
+            y_milli: 500,
+            pressure_milli: 1_000,
+        },
+        EffectSample {
+            x_milli: 5_500,
+            y_milli: 2_500,
+            pressure_milli: 500,
+        },
+    ];
+    let stamp_samples = vec![
+        EffectSample {
+            x_milli: 3_500,
+            y_milli: 1_500,
+            pressure_milli: 1_000,
+        },
+        EffectSample {
+            x_milli: 4_500,
+            y_milli: 2_500,
+            pressure_milli: 750,
+        },
+    ];
+    let shape = SelectionShape::Rectangle(RectI32 {
+        x: 1,
+        y: 0,
+        width: 6,
+        height: 4,
+    });
+    let mut references = crate::primitive::InkScriptRuntimeReferences::default();
+    references
+        .insert(
+            "paint",
+            crate::primitive::InkScriptEntityKind::Plane,
+            plane_id,
+        )
+        .unwrap();
+    references
+        .insert(
+            "created.layer",
+            crate::primitive::InkScriptEntityKind::Layer,
+            999,
+        )
+        .unwrap();
+    let expected = vec![
+        crate::primitive::GestureAdjustmentScriptAction::Canonical(
+            CanonicalInvocation::ScopedColorReplace {
+                plane_id,
+                mode: ScopedColorReplaceMode::RasterColor,
+                target: PixelValue::Rgba16([0, 0, 0, 0]),
+                replacement: PixelValue::Rgba16([0, 50_000, 1_000, 65_535]),
+                region: Some(SelectionShape::Rectangle(RectI32 {
+                    x: 6,
+                    y: 0,
+                    width: 1,
+                    height: 1,
+                })),
+            },
+        ),
+        crate::primitive::GestureAdjustmentScriptAction::Canonical(
+            CanonicalInvocation::ApplyAirbrush {
+                plane_id,
+                stroke: AirbrushStroke {
+                    center_x_milli: 4_500,
+                    center_y_milli: 1_500,
+                    radius_milli: 1_200,
+                    hardness_milli: 650,
+                    opacity_milli: 800,
+                    color: [1_000, 2_000, 60_000, 50_000],
+                },
+            },
+        ),
+        crate::primitive::GestureAdjustmentScriptAction::Canonical(
+            CanonicalInvocation::ApplyAirbrushGesture {
+                plane_id,
+                gesture: AirbrushGesture {
+                    samples,
+                    radius_milli: 900,
+                    hardness_milli: 500,
+                    spacing_milli: 500,
+                    opacity_milli: 700,
+                    fade_milli: 100,
+                    pressure_size: true,
+                    pressure_opacity: true,
+                    continuous_dabs: 1,
+                    color: [60_000, 3_000, 2_000, 60_000],
+                },
+            },
+        ),
+        crate::primitive::GestureAdjustmentScriptAction::Canonical(
+            CanonicalInvocation::ApplyStamp {
+                plane_id,
+                stamp: Stamp {
+                    source_x: 1,
+                    source_y: 1,
+                    destination_x: 5,
+                    destination_y: 0,
+                    width: 1,
+                    height: 1,
+                    opacity_milli: 750,
+                },
+            },
+        ),
+        crate::primitive::GestureAdjustmentScriptAction::Canonical(
+            CanonicalInvocation::ApplyStampGesture {
+                plane_id,
+                gesture: StampGesture {
+                    source_x_milli: 1_500,
+                    source_y_milli: 1_500,
+                    samples: stamp_samples,
+                    radius_milli: 700,
+                    hardness_milli: 700,
+                    spacing_milli: 600,
+                    opacity_milli: 800,
+                    shape: StampShape::Square,
+                    pressure_size: true,
+                    pressure_opacity: true,
+                },
+            },
+        ),
+        crate::primitive::GestureAdjustmentScriptAction::Canonical(
+            CanonicalInvocation::ApplyBlur {
+                plane_id,
+                radius: 1,
+                strength_milli: 600,
+            },
+        ),
+        crate::primitive::GestureAdjustmentScriptAction::Canonical(
+            CanonicalInvocation::ApplyBlurTool {
+                plane_id,
+                shape,
+                radius: 1,
+                strength_milli: 500,
+            },
+        ),
+        crate::primitive::GestureAdjustmentScriptAction::EditAlpha {
+            plane_id,
+            asset_symbol: "alpha_asset".to_owned(),
+        },
+        crate::primitive::GestureAdjustmentScriptAction::Canonical(
+            CanonicalInvocation::ApplyAlphaGradient {
+                plane_id,
+                gradient: gesture_alpha_gradient(),
+            },
+        ),
+        crate::primitive::GestureAdjustmentScriptAction::Canonical(
+            CanonicalInvocation::CreateAdjustmentLayer {
+                name: "InkScript adjustment".to_owned(),
+                adjustment: created_adjustment(),
+            },
+        ),
+        crate::primitive::GestureAdjustmentScriptAction::Canonical(
+            CanonicalInvocation::UpdateAdjustmentLayer {
+                layer_id: 999,
+                adjustment: updated_adjustment(),
+            },
+        ),
+        crate::primitive::GestureAdjustmentScriptAction::Canonical(
+            CanonicalInvocation::UpdateAdjustmentLayer {
+                layer_id: 999,
+                adjustment: updated_adjustment(),
+            },
+        ),
+    ];
+    let actual = program
+        .model
+        .steps()
+        .iter()
+        .zip(&program.frozen_arguments)
+        .map(|(step, arguments)| {
+            crate::primitive::GestureAdjustmentScriptAction::from_compiled(
+                step,
+                arguments,
+                &references,
+            )
+            .unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn gesture_alpha_adjustment_execute_matches_direct_and_round_trips_native_history() {
+    let (base, program, assets, plane_id) = gesture_alpha_adjustment_fixture();
+    assert_eq!(assets.usage().logical_payload_bytes, 32);
+    assert_eq!(
+        assets.raster("alpha_asset").unwrap().format(),
+        PixelFormat::Grayscale8
+    );
+    assert_eq!(assets.raster("alpha_asset").unwrap().width(), 8);
+    assert_eq!(assets.raster("alpha_asset").unwrap().height(), 4);
+    let base_digest = base.document_state_digest().unwrap();
+    let base_next_id = base.next_id;
+    let outside_left = base.plane_pixel(ActivePlane::Color, 0, 1).unwrap();
+    let outside_right = base.plane_pixel(ActivePlane::Color, 7, 1).unwrap();
+    let mut never_cancel = || false;
+    let mut scripted =
+        run_inkscript_on_staged_core(&program, base.clone(), Some(&assets), &mut never_cancel)
+            .unwrap();
+    assert_eq!(scripted.report.statements.len(), 12);
+    assert_eq!(
+        scripted.report.statements.last(),
+        Some(&crate::script::report::ScriptStatementOutcome::NoOp)
+    );
+    assert_eq!(scripted.report.results.len(), 1);
+    assert_eq!(scripted.report.results[0].alias, "created");
+    assert_eq!(scripted.report.results[0].field, "layer");
+    let adjustment_layer_id = scripted.report.results[0].persistent_id;
+    assert!(adjustment_layer_id >= base_next_id.next_raw());
+    assert!(adjustment_layer_id < scripted.staged.next_id.next_raw());
+    assert_eq!(
+        scripted
+            .staged
+            .plane_pixel(ActivePlane::Color, 0, 1)
+            .unwrap(),
+        outside_left
+    );
+    assert_eq!(
+        scripted
+            .staged
+            .plane_pixel(ActivePlane::Color, 7, 1)
+            .unwrap(),
+        outside_right
+    );
+
+    let mut direct = base.clone();
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::ScopedColorReplace {
+            plane_id,
+            mode: ScopedColorReplaceMode::RasterColor,
+            target: PixelValue::Rgba16([0, 0, 0, 0]),
+            replacement: PixelValue::Rgba16([0, 50_000, 1_000, 65_535]),
+            region: Some(SelectionShape::Rectangle(RectI32 {
+                x: 6,
+                y: 0,
+                width: 1,
+                height: 1,
+            })),
+        })
+        .unwrap();
+    direct
+        .apply_airbrush_to_plane(
+            plane_id,
+            AirbrushStroke {
+                center_x_milli: 4_500,
+                center_y_milli: 1_500,
+                radius_milli: 1_200,
+                hardness_milli: 650,
+                opacity_milli: 800,
+                color: [1_000, 2_000, 60_000, 50_000],
+            },
+        )
+        .unwrap();
+    direct
+        .apply_airbrush_gesture_to_plane(
+            plane_id,
+            &AirbrushGesture {
+                samples: vec![
+                    EffectSample {
+                        x_milli: 2_500,
+                        y_milli: 500,
+                        pressure_milli: 1_000,
+                    },
+                    EffectSample {
+                        x_milli: 5_500,
+                        y_milli: 2_500,
+                        pressure_milli: 500,
+                    },
+                ],
+                radius_milli: 900,
+                hardness_milli: 500,
+                spacing_milli: 500,
+                opacity_milli: 700,
+                fade_milli: 100,
+                pressure_size: true,
+                pressure_opacity: true,
+                continuous_dabs: 1,
+                color: [60_000, 3_000, 2_000, 60_000],
+            },
+        )
+        .unwrap();
+    direct
+        .apply_stamp_to_plane(
+            plane_id,
+            Stamp {
+                source_x: 1,
+                source_y: 1,
+                destination_x: 5,
+                destination_y: 0,
+                width: 1,
+                height: 1,
+                opacity_milli: 750,
+            },
+        )
+        .unwrap();
+    direct
+        .apply_stamp_gesture_to_plane(
+            plane_id,
+            &StampGesture {
+                source_x_milli: 1_500,
+                source_y_milli: 1_500,
+                samples: vec![
+                    EffectSample {
+                        x_milli: 3_500,
+                        y_milli: 1_500,
+                        pressure_milli: 1_000,
+                    },
+                    EffectSample {
+                        x_milli: 4_500,
+                        y_milli: 2_500,
+                        pressure_milli: 750,
+                    },
+                ],
+                radius_milli: 700,
+                hardness_milli: 700,
+                spacing_milli: 600,
+                opacity_milli: 800,
+                shape: StampShape::Square,
+                pressure_size: true,
+                pressure_opacity: true,
+            },
+        )
+        .unwrap();
+    direct.apply_blur_to_plane(plane_id, 1, 600).unwrap();
+    direct
+        .apply_blur_tool_to_plane(
+            plane_id,
+            &SelectionShape::Rectangle(RectI32 {
+                x: 1,
+                y: 0,
+                width: 6,
+                height: 4,
+            }),
+            1,
+            500,
+        )
+        .unwrap();
+    let PixelValue::Rgba16(before_alpha) = direct.plane_pixel(ActivePlane::Color, 1, 1).unwrap()
+    else {
+        panic!("native RGBA16 plane changed format before alpha edits");
+    };
+    direct
+        .edit_plane_alpha(plane_id, assets.raster("alpha_asset").unwrap())
+        .unwrap();
+    direct
+        .apply_alpha_gradient_to_plane(plane_id, &gesture_alpha_gradient())
+        .unwrap();
+    let (_, direct_adjustment_layer) = direct
+        .create_adjustment_layer("InkScript adjustment", created_adjustment())
+        .unwrap();
+    direct
+        .update_adjustment_layer(direct_adjustment_layer, updated_adjustment())
+        .unwrap();
+    let before_no_op = direct.document_info().unwrap().document_revision;
+    let no_op = direct
+        .update_adjustment_layer(direct_adjustment_layer, updated_adjustment())
+        .unwrap();
+    assert_eq!(no_op.revision(), before_no_op);
+    let PixelValue::Rgba16(after_alpha) = direct.plane_pixel(ActivePlane::Color, 1, 1).unwrap()
+    else {
+        panic!("native RGBA16 plane changed format after alpha edits");
+    };
+    assert_eq!(after_alpha[..3], before_alpha[..3]);
+    assert_eq!(after_alpha[3], 10_000);
+    assert!(after_alpha[..3].iter().any(|channel| *channel > 255));
+    assert_same_document(&scripted.staged, &direct);
+
+    let after = scripted.staged.document_state_digest().unwrap();
+    let commit_count = scripted.report.commit_count;
+    assert_eq!(commit_count, 11);
+    for _ in 0..commit_count {
+        scripted.staged.undo().unwrap();
+    }
+    assert_eq!(
+        scripted.staged.document_state_digest().unwrap(),
+        base_digest
+    );
+    for _ in 0..commit_count {
+        scripted.staged.redo().unwrap();
+    }
+    assert_eq!(scripted.staged.document_state_digest().unwrap(), after);
+    scripted.staged.release_history_cache().unwrap();
+    assert_eq!(
+        scripted
+            .staged
+            .verify_journal_replay()
+            .unwrap()
+            .document_state_digest(),
+        after
+    );
+
+    let editor_digest = scripted.staged.editor_state().unwrap().digest;
+    let native = scripted
+        .staged
+        .build_procedure_file(Some(scripted.staged.current_state), Some(editor_digest))
+        .unwrap();
+    let bytes = encode_procedure_file(&native).unwrap();
+    let reopened = Core::from_procedure_file(decode_procedure_file(&bytes).unwrap()).unwrap();
+    assert_eq!(reopened.document_state_digest().unwrap(), after);
+    assert_eq!(reopened.next_id, scripted.staged.next_id);
+    assert_eq!(reopened.next_procedure, scripted.staged.next_procedure);
+    assert_eq!(reopened.next_state, scripted.staged.next_state);
+    assert_eq!(
+        reopened.persistence_info().unwrap().open_strategy,
+        NativeOpenStrategy::FullReplay
+    );
+    assert!(!reopened.document_info().unwrap().dirty);
+    assert!(!reopened.editor_state().unwrap().dirty);
+}
+
+#[test]
+fn gesture_alpha_adjustment_cancel_invalid_stale_resource_and_overflow_are_atomic() {
+    let (base, program, assets, plane_id) = gesture_alpha_adjustment_fixture();
+    let before = (
+        base.document_state_digest().unwrap(),
+        base.document_info().unwrap(),
+        base.history_entries(),
+        base.next_id,
+        base.next_procedure,
+        base.next_state,
+    );
+    let mut cancel = || true;
+    assert_eq!(
+        run_inkscript_on_staged_core(&program, base.clone(), Some(&assets), &mut cancel)
+            .unwrap_err(),
+        ScriptRunError::Cancelled
+    );
+    let mut checks = 0_u8;
+    let mut cancel_after_first_step = || {
+        checks += 1;
+        checks == 3
+    };
+    assert_eq!(
+        run_inkscript_on_staged_core(
+            &program,
+            base.clone(),
+            Some(&assets),
+            &mut cancel_after_first_step,
+        )
+        .unwrap_err(),
+        ScriptRunError::Cancelled
+    );
+
+    let mut stale = base.clone();
+    let fingerprint = capture_in_memory_fingerprint(&stale).unwrap();
+    stale.add_guide(GuideAxis::Vertical, 1).unwrap();
+    let stale_before = stale.document_state_digest().unwrap();
+    let mut never_cancel = || false;
+    assert_eq!(
+        run_inkscript_dry(
+            &program,
+            capture_in_memory_input_at(&stale, fingerprint),
+            &mut never_cancel,
+        )
+        .unwrap_err(),
+        ScriptRunError::StaleInput
+    );
+    assert_eq!(stale.document_state_digest().unwrap(), stale_before);
+
+    let info = base.document_info().unwrap();
+    let invalid = complete_source(
+        "",
+        &format!(
+            "let paint = select plane {{ source_document_uuid = uuid\"{}\"; persistent_id = {plane_id}; }};",
+            document_uuid(info.document_uuid)
+        ),
+        r#"step "Invalid airbrush" { enabled = true; invoke apply_airbrush {
+            plane_id = $paint;
+            stroke = { center = point(q16(65536), q16(65536)); radius_milli = 0; hardness_milli = 500; opacity_milli = 500; color = rgba16(1, 2, 3, 4); };
+        }; }"#,
+    );
+    let invalid =
+        compile_inkscript(&invalid, InkScriptRunParameterDecision::Resolve(Vec::new())).unwrap();
+    let mut never_cancel = || false;
+    assert!(matches!(
+        run_inkscript_on_staged_core(&invalid, base.clone(), None, &mut never_cancel),
+        Err(ScriptRunError::Core(_))
+    ));
+
+    let points = (0..65)
+        .map(|index| format!("{{ input = {index}; output = {index}; }}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let resource = complete_source(
+        "",
+        "",
+        &format!(
+            r#"step "Too many curve points" {{ enabled = true; invoke create_adjustment_layer {{
+                name = "oversized";
+                adjustment = {{ kind = tone_curve; brightness_milli = none; contrast_milli = none; channel = rgb; interpolation = bezier; points = [{points}]; levels = none; }};
+            }}; }}"#
+        ),
+    );
+    assert_eq!(
+        compile_inkscript(
+            &resource,
+            InkScriptRunParameterDecision::Resolve(Vec::new()),
+        ),
+        Err(ScriptCompileError::Catalog(
+            crate::script::catalog::CatalogError::ResourceLimit
+        ))
+    );
+
+    let mut id_overflow = base.clone();
+    id_overflow.next_id = crate::identity::StableIdCursor::from_next_raw(MAX_PERSISTENT_NUMERIC_ID);
+    let id_before = (
+        id_overflow.document_state_digest().unwrap(),
+        id_overflow.document_info().unwrap(),
+        id_overflow.history_entries(),
+        id_overflow.next_id,
+        id_overflow.next_procedure,
+        id_overflow.next_state,
+    );
+    let mut never_cancel = || false;
+    assert!(matches!(
+        run_inkscript_on_staged_core(
+            &program,
+            id_overflow.clone(),
+            Some(&assets),
+            &mut never_cancel,
+        ),
+        Err(ScriptRunError::Core(_)) | Err(ScriptRunError::ResourceLimit)
+    ));
+    assert_eq!(
+        (
+            id_overflow.document_state_digest().unwrap(),
+            id_overflow.document_info().unwrap(),
+            id_overflow.history_entries(),
+            id_overflow.next_id,
+            id_overflow.next_procedure,
+            id_overflow.next_state,
+        ),
+        id_before
+    );
+
+    let mut procedure_overflow = base.clone();
+    procedure_overflow.next_procedure = ProcedureId::from_raw(MAX_PERSISTENT_NUMERIC_ID);
+    let procedure_before = (
+        procedure_overflow.document_state_digest().unwrap(),
+        procedure_overflow.document_info().unwrap(),
+        procedure_overflow.history_entries(),
+        procedure_overflow.next_id,
+        procedure_overflow.next_procedure,
+        procedure_overflow.next_state,
+    );
+    let mut never_cancel = || false;
+    assert_eq!(
+        run_inkscript_on_staged_core(
+            &program,
+            procedure_overflow.clone(),
+            Some(&assets),
+            &mut never_cancel,
+        )
+        .unwrap_err(),
+        ScriptRunError::ResourceLimit
+    );
+    assert_eq!(
+        (
+            procedure_overflow.document_state_digest().unwrap(),
+            procedure_overflow.document_info().unwrap(),
+            procedure_overflow.history_entries(),
+            procedure_overflow.next_id,
+            procedure_overflow.next_procedure,
+            procedure_overflow.next_state,
+        ),
+        procedure_before
+    );
+    assert_eq!(
+        (
+            base.document_state_digest().unwrap(),
+            base.document_info().unwrap(),
+            base.history_entries(),
+            base.next_id,
+            base.next_procedure,
+            base.next_state,
+        ),
+        before
+    );
+}
+
+fn selection_floating_base() -> (Core, u64, u64) {
+    let mut base = Core::new();
+    base.new_cell_with_uuid(
+        8,
+        8,
+        DEFAULT_DPI_MILLI,
+        DEFAULT_DPI_MILLI,
+        0x4d31_3953_454c_4543,
+    )
+    .unwrap();
+    let info = base.document_info().unwrap();
+    base.execute_canonical_invocation(CanonicalInvocation::ReplaceRasterColors {
+        plane_id: info.color_plane_id,
+        pairs: vec![BatchColorPair {
+            enabled: true,
+            old: PixelValue::Rgba([0, 0, 0, 0]),
+            new: PixelValue::Rgba([255, 0, 0, 255]),
+        }],
+    })
+    .unwrap();
+    let info = base.document_info().unwrap();
+    (base, info.layer_id, info.color_plane_id)
+}
+
+fn selection_program(base: &Core, layer_id: u64, plane_id: u64) -> StaticScriptProgram {
+    let info = base.document_info().unwrap();
+    let bindings = format!(
+        r#"
+let paint_layer = select layer {{ source_document_uuid = uuid"{}"; persistent_id = {layer_id}; }};
+let paint = select plane {{ source_document_uuid = uuid"{}"; persistent_id = {plane_id}; }};
+"#,
+        document_uuid(info.document_uuid),
+        document_uuid(info.document_uuid),
+    );
+    let shape = r#"{ kind = rectangle; rect = rect(0, 0, 2, 2); anchor = none; current = none; points = []; samples = []; diameter = none; x = none; y = none; tolerance = none; gap_close = none; }"#;
+    let options = r#"{ aspect_ratio_q16 = 0; from_center = false; constrain_rotation_45 = false; rotation_turns = 0; trace = { shape = round; pressure_size = false; screen_size = false; view_zoom = q16(65536); }; }"#;
+    let program = format!(
+        r#"
+step "Restore pixel" {{ enabled = true; invoke restore_selected_pixels {{
+    plane_id = $paint;
+    changes = [{{ x = 0; y = 0; before = rgba8(255, 0, 0, 255); after = rgba8(0, 255, 0, 255); }}];
+}}; }}
+step "Select rectangle" {{ enabled = true; invoke apply_selection {{
+    shape = {shape}; operation = new; interpretation = normal; options = {options};
+    target_layer_id = $paint_layer; target_plane_id = $paint;
+}}; }}
+step "Select rectangle no-op" {{ enabled = true; invoke apply_selection {{
+    shape = {shape}; operation = new; interpretation = normal; options = {options};
+    target_layer_id = $paint_layer; target_plane_id = $paint;
+}}; }}
+step "Expand" {{ enabled = true; invoke resize_selection {{ pixels = 1; }}; }}
+step "Invert" {{ enabled = true; invoke invert_selection {{}}; }}
+step "Clear" {{ enabled = true; invoke clear_selection {{}}; }}
+step "Select green" {{ enabled = true; invoke select_color {{
+    color = rgba8(0, 255, 0, 255); tolerance = 0; different = false; operation = new;
+    target_layer_id = $paint_layer; target_plane_id = $paint;
+}}; }}
+step "Selection layer" as stored {{ enabled = true; invoke selection_to_layer {{ name = "Stored selection"; }}; }}
+step "Clear before restore" {{ enabled = true; invoke clear_selection {{}}; }}
+step "Selection from layer" {{ enabled = true; invoke selection_from_layer {{ layer_id = $stored.layer; operation = replace; }}; }}
+step "Selection from layer no-op" {{ enabled = true; invoke selection_from_layer {{ layer_id = $stored.layer; operation = replace; }}; }}
+step "Clear selected content" {{ enabled = true; invoke clear_selected_content {{ target_layer_id = $paint_layer; target_plane_id = $paint; }}; }}
+step "Clear restored selection" {{ enabled = true; invoke clear_selection {{}}; }}
+"#
+    );
+    let source = complete_source("", &bindings, &program);
+    compile_inkscript(&source, InkScriptRunParameterDecision::Resolve(Vec::new())).unwrap()
+}
+
+#[test]
+fn selection_family_bounds_results_direct_equivalence_and_native_reopen() {
+    let (base, layer_id, plane_id) = selection_floating_base();
+    let info = base.document_info().unwrap();
+    let uuid = document_uuid(info.document_uuid);
+    let shape = r#"{ kind = rectangle; rect = rect(0, 0, 2, 2); anchor = none; current = none; points = []; samples = []; diameter = none; x = none; y = none; tolerance = none; gap_close = none; }"#;
+    let bounds_source = complete_source(
+        "",
+        &format!(
+            r#"let paint_layer = select layer {{ source_document_uuid = uuid"{uuid}"; persistent_id = {layer_id}; }}; let paint = select plane {{ source_document_uuid = uuid"{uuid}"; persistent_id = {plane_id}; }};"#
+        ),
+        &format!(
+            r#"step "Bounds" {{ enabled = true; invoke apply_selection {{ shape = {shape}; operation = new; interpretation = normal; options = {{ aspect_ratio_q16 = 0; from_center = false; constrain_rotation_45 = false; rotation_turns = 0; trace = {{ shape = round; pressure_size = false; screen_size = false; view_zoom = q16(65536); }}; }}; target_layer_id = $paint_layer; target_plane_id = $paint; }}; }}"#
+        ),
+    );
+    let bounds_program = compile_inkscript(
+        &bounds_source,
+        InkScriptRunParameterDecision::Resolve(Vec::new()),
+    )
+    .unwrap();
+    let mut never_cancel = || false;
+    let bounds =
+        run_inkscript_on_staged_core(&bounds_program, base.clone(), None, &mut never_cancel)
+            .unwrap();
+    assert_eq!(
+        bounds.staged.selection_bounds().unwrap(),
+        Some(RectI32 {
+            x: 0,
+            y: 0,
+            width: 2,
+            height: 2,
+        })
+    );
+
+    let program = selection_program(&base, layer_id, plane_id);
+    assert_eq!(program.budget.max_invocations, 13);
+    assert_eq!(program.budget.max_output_ids, 2);
+    let base_digest = base.document_state_digest().unwrap();
+    let base_next_id = base.next_id.next_raw();
+    let mut never_cancel = || false;
+    let mut scripted =
+        run_inkscript_on_staged_core(&program, base.clone(), None, &mut never_cancel).unwrap();
+    assert_eq!(scripted.report.commit_count, 11);
+    assert_eq!(scripted.report.results.len(), 1);
+    assert_eq!(scripted.report.results[0].field, "layer");
+    assert_eq!(scripted.report.results[0].output_id_ordinal, 0);
+    assert!(scripted.report.results[0].persistent_id >= base_next_id);
+    assert_eq!(
+        scripted.report.statements[2],
+        crate::script::report::ScriptStatementOutcome::NoOp
+    );
+    assert_eq!(
+        scripted.report.statements[10],
+        crate::script::report::ScriptStatementOutcome::NoOp
+    );
+    assert_eq!(scripted.staged.selection_bounds().unwrap(), None);
+
+    let target = EditorTarget { layer_id, plane_id };
+    let shape_value = SelectionShape::Rectangle(RectI32 {
+        x: 0,
+        y: 0,
+        width: 2,
+        height: 2,
+    });
+    let mut direct = base.clone();
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::RestoreSelectedPixels {
+            plane_id,
+            changes: vec![crate::history::PixelChange {
+                x: 0,
+                y: 0,
+                before: PixelValue::Rgba([255, 0, 0, 255]),
+                after: PixelValue::Rgba([0, 255, 0, 255]),
+            }],
+        })
+        .unwrap();
+    for _ in 0..2 {
+        direct
+            .execute_canonical_invocation(CanonicalInvocation::ApplySelection {
+                shape: shape_value.clone(),
+                operation: SelectionOperation::New,
+                interpretation: RangeInterpretation::Normal,
+                options: SelectionConstructionOptions::default(),
+                target,
+            })
+            .unwrap();
+    }
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::ResizeSelection { pixels: 1 })
+        .unwrap();
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::InvertSelection)
+        .unwrap();
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::ClearSelection)
+        .unwrap();
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::SelectColor {
+            color: PixelValue::Rgba([0, 255, 0, 255]),
+            tolerance: 0,
+            different: false,
+            operation: SelectionOperation::New,
+            target,
+        })
+        .unwrap();
+    let stored = direct
+        .execute_canonical_invocation(CanonicalInvocation::SelectionToLayer {
+            name: "Stored selection".to_owned(),
+        })
+        .unwrap()
+        .output_ids[0];
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::ClearSelection)
+        .unwrap();
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::SelectionFromLayer {
+            layer_id: stored,
+            operation: SelectionLayerOperation::Replace,
+        })
+        .unwrap();
+    let before_noop_revision = direct.document_info().unwrap().document_revision;
+    let no_op = direct
+        .execute_canonical_invocation(CanonicalInvocation::SelectionFromLayer {
+            layer_id: stored,
+            operation: SelectionLayerOperation::Replace,
+        })
+        .unwrap();
+    assert_eq!(no_op.dispatch.revision, before_noop_revision);
+    assert_eq!(
+        direct.document_info().unwrap().document_revision,
+        before_noop_revision
+    );
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::ClearSelectedContent { target })
+        .unwrap();
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::ClearSelection)
+        .unwrap();
+    assert_same_document(&scripted.staged, &direct);
+
+    let final_digest = scripted.staged.document_state_digest().unwrap();
+    for _ in 0..scripted.report.commit_count {
+        scripted.staged.undo().unwrap();
+    }
+    assert_eq!(
+        scripted.staged.document_state_digest().unwrap(),
+        base_digest
+    );
+    for _ in 0..scripted.report.commit_count {
+        scripted.staged.redo().unwrap();
+    }
+    assert_eq!(
+        scripted.staged.document_state_digest().unwrap(),
+        final_digest
+    );
+    scripted.staged.release_history_cache().unwrap();
+    assert_eq!(
+        scripted
+            .staged
+            .verify_journal_replay()
+            .unwrap()
+            .document_state_digest(),
+        final_digest
+    );
+
+    let editor_digest = scripted.staged.editor_state().unwrap().digest;
+    let native = scripted
+        .staged
+        .build_procedure_file(Some(scripted.staged.current_state), Some(editor_digest))
+        .unwrap();
+    let reopened = Core::from_procedure_file(
+        decode_procedure_file(&encode_procedure_file(&native).unwrap()).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(reopened.document_state_digest().unwrap(), final_digest);
+    assert_eq!(reopened.next_id, scripted.staged.next_id);
+    assert_eq!(reopened.next_procedure, scripted.staged.next_procedure);
+    assert_eq!(reopened.next_state, scripted.staged.next_state);
+    assert_eq!(
+        reopened.persistence_info().unwrap().open_strategy,
+        NativeOpenStrategy::FullReplay
+    );
+    assert!(!reopened.document_info().unwrap().dirty);
+    assert!(!reopened.editor_state().unwrap().dirty);
+}
+
+#[test]
+fn output_color_guard_script_precondition_is_exact_and_atomic() {
+    let (base, _layer_id, _plane_id) = selection_floating_base();
+    let revision = base.document_info().unwrap().document_revision;
+    let source = complete_source(
+        "",
+        "",
+        &format!(
+            r#"step "Guard" {{ enabled = true; invoke select_output_color_guard {{ profile = bt709_conservative_ycbcr; operation = new; base_revision = {revision}; }}; }}"#
+        ),
+    );
+    let program =
+        compile_inkscript(&source, InkScriptRunParameterDecision::Resolve(Vec::new())).unwrap();
+    let mut direct = base.clone();
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::SelectOutputColorGuard {
+            profile: OutputColorGuardProfile::Bt709ConservativeYCbCr,
+            operation: SelectionOperation::New,
+            base_revision: revision,
+        })
+        .unwrap();
+    let mut never_cancel = || false;
+    let scripted =
+        run_inkscript_on_staged_core(&program, base.clone(), None, &mut never_cancel).unwrap();
+    assert_same_document(&scripted.staged, &direct);
+
+    let stale_source = complete_source(
+        "",
+        "",
+        &format!(
+            r#"step "Stale guard" {{ enabled = true; invoke select_output_color_guard {{ profile = bt709_conservative_ycbcr; operation = new; base_revision = {}; }}; }}"#,
+            revision - 1
+        ),
+    );
+    let stale = compile_inkscript(
+        &stale_source,
+        InkScriptRunParameterDecision::Resolve(Vec::new()),
+    )
+    .unwrap();
+    let before = (
+        base.document_state_digest().unwrap(),
+        base.document_info().unwrap(),
+        base.history_entries(),
+        base.next_id,
+        base.next_procedure,
+        base.next_state,
+    );
+    let mut never_cancel = || false;
+    assert!(matches!(
+        run_inkscript_on_staged_core(&stale, base.clone(), None, &mut never_cancel),
+        Err(ScriptRunError::Core(crate::CoreError::InvalidState(_)))
+    ));
+    assert_eq!(
+        (
+            base.document_state_digest().unwrap(),
+            base.document_info().unwrap(),
+            base.history_entries(),
+            base.next_id,
+            base.next_procedure,
+            base.next_state,
+        ),
+        before
+    );
+}
+
+fn floating_program() -> (Core, StaticScriptProgram, FrozenScriptAssets, u64) {
+    let (base, _layer_id, plane_id) = selection_floating_base();
+    let info = base.document_info().unwrap();
+    let pixels = vec![10, 20, 30, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let asset_id = rgba8_asset_id(pixels, 2, 2);
+    let uuid = document_uuid(info.document_uuid);
+    let program = complete_source_with_assets(
+        &format!(
+            r#"let paint = select plane {{ source_document_uuid = uuid"{uuid}"; persistent_id = {plane_id}; }};"#
+        ),
+        &format!(
+            r#"step "Floating asset" {{ enabled = true; invoke commit_floating {{
+                payload = {{
+                    source_document_uuid = uuid"{uuid}";
+                    bounds = rect(2, 2, 2, 2);
+                    planes = [{{ kind = color; pixel_format = rgba8; origin_x = 2; origin_y = 2; raster = asset(float_asset); }}];
+                }};
+                destination = {{ kind = existing_planes; existing_plane_ids = [$paint]; new_layer_id = none; new_plane_kind = none; new_pixel_format = none; new_name = none; new_opacity_milli = none; }};
+                transform = {{ anchor = center; target_x = q16(196608); target_y = q16(196608); scale_x = q16(65536); scale_y = q16(65536); rotation_turns = 0; }};
+            }}; }}"#
+        ),
+        &format!(
+            r#"asset float_asset {{
+                asset_id = blake3"{}";
+                kind = "canonical_raster";
+                descriptor = {{ pixel_format = rgba8; color_space = srgb; alpha = straight; width = 2; height = 2; stride = 8; element_count = 4; }};
+                data = base64"""ChQe/wAAAAAAAAAAAAAAAA==""";
+            }};"#,
+            asset_digest_text(asset_id)
+        ),
+    );
+    let program =
+        compile_inkscript(&program, InkScriptRunParameterDecision::Resolve(Vec::new())).unwrap();
+    let mut never_cancel = || false;
+    let assets = freeze_inkscript_assets(
+        program.model.assets(),
+        &mut [],
+        ScriptAssetLimits::exact_current(),
+        &mut never_cancel,
+    )
+    .unwrap();
+    (base, program, assets, plane_id)
+}
+
+#[test]
+fn floating_asset_commit_is_owned_atomic_replayable_and_direct_exact() {
+    let (base, program, assets, plane_id) = floating_program();
+    assert_eq!(program.budget.max_invocations, 1);
+    assert_eq!(program.budget.max_output_ids, 1);
+    assert_eq!(program.budget.max_asset_bytes, 536_870_912);
+    assert_eq!(program.budget.max_work_units, 1_100_000_000);
+    assert_eq!(program.budget.max_output_growth, 67_108_864);
+    let asset_id = assets.asset_id("float_asset").unwrap();
+
+    let mut references = crate::primitive::InkScriptRuntimeReferences::default();
+    references
+        .insert(
+            "paint",
+            crate::primitive::InkScriptEntityKind::Plane,
+            plane_id,
+        )
+        .unwrap();
+    let action = crate::primitive::SelectionFloatingScriptAction::from_compiled(
+        &program.model.steps()[0],
+        &program.frozen_arguments[0],
+        &references,
+    )
+    .unwrap();
+    assert_eq!(action.asset_symbols(), vec!["float_asset"]);
+    let lowered = action
+        .to_canonical_with_rasters(&[assets.raster("float_asset").unwrap()])
+        .unwrap();
+
+    let mut direct = base.clone();
+    direct.execute_canonical_invocation(lowered).unwrap();
+    let mut never_cancel = || false;
+    let mut scripted =
+        run_inkscript_on_staged_core(&program, base.clone(), Some(&assets), &mut never_cancel)
+            .unwrap();
+    assert_eq!(assets.asset_id("float_asset"), Some(asset_id));
+    assert_eq!(scripted.report.commit_count, 1);
+    assert_eq!(scripted.report.results.len(), 0);
+    assert_eq!(
+        scripted
+            .staged
+            .plane_pixel(ActivePlane::Color, 2, 2)
+            .unwrap(),
+        PixelValue::Rgba([10, 20, 30, 255])
+    );
+    assert_same_document(&scripted.staged, &direct);
+
+    let base_digest = base.document_state_digest().unwrap();
+    let final_digest = scripted.staged.document_state_digest().unwrap();
+    scripted.staged.undo().unwrap();
+    assert_eq!(
+        scripted.staged.document_state_digest().unwrap(),
+        base_digest
+    );
+    scripted.staged.redo().unwrap();
+    assert_eq!(
+        scripted.staged.document_state_digest().unwrap(),
+        final_digest
+    );
+    scripted.staged.release_history_cache().unwrap();
+    assert_eq!(
+        scripted
+            .staged
+            .verify_journal_replay()
+            .unwrap()
+            .document_state_digest(),
+        final_digest
+    );
+    let editor_digest = scripted.staged.editor_state().unwrap().digest;
+    let native = scripted
+        .staged
+        .build_procedure_file(Some(scripted.staged.current_state), Some(editor_digest))
+        .unwrap();
+    let reopened = Core::from_procedure_file(
+        decode_procedure_file(&encode_procedure_file(&native).unwrap()).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(reopened.document_state_digest().unwrap(), final_digest);
+    assert_eq!(reopened.next_id, scripted.staged.next_id);
+    assert!(!reopened.document_info().unwrap().dirty);
+    assert!(!reopened.editor_state().unwrap().dirty);
+}
+
+#[test]
+fn selection_floating_cancel_invalid_stale_overflow_resource_and_asset_failures_are_atomic() {
+    let (base, layer_id, plane_id) = selection_floating_base();
+    let program = selection_program(&base, layer_id, plane_id);
+    let before = (
+        base.document_state_digest().unwrap(),
+        base.document_info().unwrap(),
+        base.history_entries(),
+        base.next_id,
+        base.next_procedure,
+        base.next_state,
+    );
+    let mut cancel = || true;
+    assert_eq!(
+        run_inkscript_on_staged_core(&program, base.clone(), None, &mut cancel).unwrap_err(),
+        ScriptRunError::Cancelled
+    );
+    let mut polls = 0_u32;
+    let mut cancel_after_staging = || {
+        polls += 1;
+        polls == 5
+    };
+    assert_eq!(
+        run_inkscript_on_staged_core(&program, base.clone(), None, &mut cancel_after_staging,)
+            .unwrap_err(),
+        ScriptRunError::Cancelled
+    );
+
+    let invalid = complete_source(
+        "",
+        "",
+        r#"step "Invalid resize" { enabled = true; invoke resize_selection { pixels = 4097; }; }"#,
+    );
+    let invalid =
+        compile_inkscript(&invalid, InkScriptRunParameterDecision::Resolve(Vec::new())).unwrap();
+    let mut never_cancel = || false;
+    assert!(matches!(
+        run_inkscript_on_staged_core(&invalid, base.clone(), None, &mut never_cancel),
+        Err(ScriptRunError::Core(_))
+    ));
+
+    let mut stale = base.clone();
+    let fingerprint = capture_in_memory_fingerprint(&stale).unwrap();
+    stale.add_guide(GuideAxis::Vertical, 3).unwrap();
+    let stale_digest = stale.document_state_digest().unwrap();
+    let mut never_cancel = || false;
+    assert_eq!(
+        run_inkscript_dry(
+            &program,
+            capture_in_memory_input_at(&stale, fingerprint),
+            &mut never_cancel,
+        )
+        .unwrap_err(),
+        ScriptRunError::StaleInput
+    );
+    assert_eq!(stale.document_state_digest().unwrap(), stale_digest);
+
+    let mut id_overflow = base.clone();
+    id_overflow.next_id = crate::identity::StableIdCursor::from_next_raw(MAX_PERSISTENT_NUMERIC_ID);
+    let id_before = id_overflow.document_state_digest().unwrap();
+    let mut never_cancel = || false;
+    assert_eq!(
+        run_inkscript_on_staged_core(&program, id_overflow.clone(), None, &mut never_cancel)
+            .unwrap_err(),
+        ScriptRunError::ResourceLimit
+    );
+    assert_eq!(id_overflow.document_state_digest().unwrap(), id_before);
+
+    let mut procedure_overflow = base.clone();
+    procedure_overflow.next_procedure = ProcedureId::from_raw(MAX_PERSISTENT_NUMERIC_ID);
+    let procedure_before = procedure_overflow.document_state_digest().unwrap();
+    let mut never_cancel = || false;
+    assert_eq!(
+        run_inkscript_on_staged_core(
+            &program,
+            procedure_overflow.clone(),
+            None,
+            &mut never_cancel,
+        )
+        .unwrap_err(),
+        ScriptRunError::ResourceLimit
+    );
+    assert_eq!(
+        procedure_overflow.document_state_digest().unwrap(),
+        procedure_before
+    );
+
+    assert_eq!(
+        compile_inkscript_with_limits(
+            &complete_source(
+                "",
+                "",
+                r#"step "One" { enabled = true; invoke clear_selection {}; } step "Two" { enabled = true; invoke clear_selection {}; }"#,
+            ),
+            InkScriptRunParameterDecision::Resolve(Vec::new()),
+            ScriptCompileLimits::exact_current().with_invocations(1),
+        ),
+        Err(ScriptCompileError::ResourceLimit)
+    );
+
+    let (floating_base, _floating, assets, floating_plane_id) = floating_program();
+    let floating_info = floating_base.document_info().unwrap();
+    let floating_uuid = document_uuid(floating_info.document_uuid);
+    let bad_source = complete_source_with_assets(
+        &format!(
+            r#"let paint = select plane {{ source_document_uuid = uuid"{floating_uuid}"; persistent_id = {floating_plane_id}; }};"#
+        ),
+        &format!(
+            r#"step "Bad asset format" {{ enabled = true; invoke commit_floating {{ payload = {{ source_document_uuid = uuid"{floating_uuid}"; bounds = rect(2, 2, 2, 2); planes = [{{ kind = color; pixel_format = gray8; origin_x = 2; origin_y = 2; raster = asset(float_asset); }}]; }}; destination = {{ kind = existing_planes; existing_plane_ids = [$paint]; new_layer_id = none; new_plane_kind = none; new_pixel_format = none; new_name = none; new_opacity_milli = none; }}; transform = {{ anchor = center; target_x = q16(196608); target_y = q16(196608); scale_x = q16(65536); scale_y = q16(65536); rotation_turns = 0; }}; }}; }}"#
+        ),
+        &format!(
+            r#"asset float_asset {{ asset_id = blake3"{}"; kind = "canonical_raster"; descriptor = {{ pixel_format = rgba8; color_space = srgb; alpha = straight; width = 2; height = 2; stride = 8; element_count = 4; }}; data = base64"""ChQe/wAAAAAAAAAAAAAAAA=="""; }};"#,
+            asset_digest_text(assets.asset_id("float_asset").unwrap())
+        ),
+    );
+    let bad = compile_inkscript(
+        &bad_source,
+        InkScriptRunParameterDecision::Resolve(Vec::new()),
+    )
+    .unwrap();
+    let mut never_cancel = || false;
+    assert_eq!(
+        run_inkscript_on_staged_core(
+            &bad,
+            floating_base.clone(),
+            Some(&assets),
+            &mut never_cancel,
+        )
+        .unwrap_err(),
+        ScriptRunError::InvalidStep
+    );
+
     assert_eq!(
         (
             base.document_state_digest().unwrap(),

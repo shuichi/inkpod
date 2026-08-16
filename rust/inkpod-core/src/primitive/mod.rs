@@ -21,10 +21,25 @@ pub(crate) mod inkscript_batch;
 pub(crate) mod inkscript_document_tree;
 #[allow(
     dead_code,
+    reason = "the private fill/gradient adapter is connected only through the script runner"
+)]
+pub(crate) mod inkscript_fill_gradient;
+#[allow(
+    dead_code,
+    reason = "the private gesture/alpha/adjustment adapter is connected only through the script runner"
+)]
+pub(crate) mod inkscript_gesture_adjustment;
+#[allow(
+    dead_code,
     reason = "the private metadata/color/guide adapter is connected only through the script runner"
 )]
 pub(crate) mod inkscript_metadata;
 mod inkscript_reference;
+#[allow(
+    dead_code,
+    reason = "the private selection/floating adapter is connected only through the script runner"
+)]
+pub(crate) mod inkscript_selection_floating;
 #[allow(
     dead_code,
     reason = "the private stroke/geometry/import adapter is connected only through the script runner"
@@ -49,8 +64,15 @@ pub(crate) use executor::validate_persisted_procedure;
 pub(crate) use inkscript::{LegacySimpleAdapterError, LegacySimpleScriptStep};
 pub(crate) use inkscript_batch::{LegacyImageAdapterError, LegacyImageScriptStep};
 pub(crate) use inkscript_document_tree::{DocumentTreeAdapterError, DocumentTreeScriptStep};
+pub(crate) use inkscript_fill_gradient::{FillGradientAdapterError, FillGradientScriptStep};
+pub(crate) use inkscript_gesture_adjustment::{
+    GestureAdjustmentAdapterError, GestureAdjustmentScriptAction,
+};
 pub(crate) use inkscript_metadata::{MetadataColorGuideAdapterError, MetadataColorGuideScriptStep};
 pub(crate) use inkscript_reference::{InkScriptEntityKind, InkScriptRuntimeReferences};
+pub(crate) use inkscript_selection_floating::{
+    SelectionFloatingAdapterError, SelectionFloatingScriptAction,
+};
 pub(crate) use inkscript_stroke_geometry::{
     StrokeGeometryImportAction, StrokeGeometryImportAdapterError,
 };

@@ -2508,7 +2508,7 @@ Version impact:
 - C ABI: 14（symbol／record／ownership／thread規則変更なし）
 ```
 
-### [~] M17 — catalog implementation C: stroke、import、geometry
+### [x] M17 — catalog implementation C: stroke、import、geometry
 
 **範囲**
 
@@ -2554,7 +2554,7 @@ Version impact:
 - C ABI: 14（symbol／record／ownership／thread規則変更なし）
 ```
 
-### [ ] M18A — catalog implementation D1: fill、gradient
+### [x] M18A — catalog implementation D1: fill、gradient
 
 **範囲**
 
@@ -2569,7 +2569,39 @@ Version impact:
 - direct operationとscript operationのcanonical invocation/state digestが一致する。
 - M08 entryに重複ownerがない。
 
-### [ ] M18B — catalog implementation D2: gesture effect、alpha、adjustment
+**自動検証結果（2026-08-16）**
+
+- 今回のpromptをM17の利用者確認完了として受け、M17を`[x]`へ更新した。owner manifestでM08が所有する
+  `apply_fill`と既存adapterを重複登録せず再利用し、M18A所有の`apply_gradient`だけをprivate catalog v1 draftへ
+  追加して、draftを37/84から38/84へ拡張した。
+- Core-private `FillGradientScriptStep`がtyped gradientをsource orderのRGBA16 stop、Q16 point、linear/radial、
+  composite/overwriteを保った既存`CanonicalInvocation::ApplyGradient`へ決定的に変換し、同じcanonical executorへ渡す。
+  Q16から既存milli座標への変換はties-to-evenで一か所に集約した。
+- compile metadataはstate-coupled raster/selection precondition、64 stop上限、checked payload式、最大work、
+  before-primitive cancellation boundaryを固定する。選択範囲とtile境界をまたぐRGBA16 fill/gradientでnative depth、
+  clipping、direct canonical arguments/state digest一致を検証した。
+- success／no-op／invalid／Cancel（即時および先行step staged後）／stale／procedure ID overflow／resource超過／
+  atomicity、ownership／thread suitabilityを検証した。Undo／Redo、cache-free replay、ID high-watermark、
+  document/editor savepoint、current-v26 encodeとfull replay reopenも一致した。
+- `cargo fmt --check`、workspace全target／feature Clippy（warning deny）、workspace 581 non-doc tests／Release gate 1 ignoredと
+  doctest 1、workspace strict rustdocが成功した。`inkscript_registry`は13/13。承認済みInkScript quickは全counterと
+  checksum `0f84d2c54cfe1e2c`を維持して88,304,800 ns、既存`core_workflows --quick`も10 checksumを維持した。
+- Windows x64 Debug build 110、static CRT、portable ZIP、unsigned MSIX、および最終binaryの全36 CTestが422.44秒で
+  成功した。ABI smokeは59.28秒、English smokeは174.33秒、Japanese smokeは176.23秒だった。production catalog、
+  Rust public API、C ABI、Windows route、UI、`.inkscript` file acceptanceは追加しておらず、既存binary回帰と
+  InkScript UI非公開の利用者確認待ちとして`[~]`で停止する。
+
+```text
+Version impact:
+- Registry schema: 2（catalog-owned enum／record／entry追加のみ、meta-schema変更なし）
+- InkScript file: 1（批准済みgrammar／language core／serialized field変更なし）
+- InkScript procedure catalog: 1（M23前のprivate draftを38/84へ拡張、production catalog未批准）
+- replay epoch: 23（既存fill／gradient canonical executorとreplay semantics変更なし）
+- .inkpod top-level: 26（exact-current encoder／decoder／cache-free replay再利用、schema変更なし）
+- C ABI: 14（symbol／record／ownership／thread規則変更なし）
+```
+
+### [x] M18B — catalog implementation D2: gesture effect、alpha、adjustment
 
 **範囲**
 
@@ -2583,7 +2615,40 @@ Version impact:
 - direct operationとscript operationのcanonical invocation/state digestが一致する。
 - M08/M18A entryに重複ownerがない。
 
-### [ ] M19 — catalog implementation E: selection、floating、transform
+**自動検証結果（2026-08-16）**
+
+- 今回のpromptをM18Aの利用者確認完了として受け、M18Aを`[x]`へ更新した。owner manifestのM18B所有11 primitiveを
+  exact ID／schema／semantics revision／equivalence IDでprivate catalog v1 draftへ追加し、draftを38/84から49/84へ
+  拡張した。M08所有の`apply_boundary_airbrush`／`apply_filter`とM18A所有の`apply_gradient`は重複登録していない。
+- Core-private `GestureAdjustmentScriptAction`はairbrush／stamp gestureのsource order、Q16、RGBA16、selection shape、
+  scoped color、alpha gradient、adjustment variantとtyped layer resultを既存canonical invocationへ変換し、単一executorへ渡す。
+  `edit_plane_alpha`だけはimmutable frozen grayscale8/16 asset roleを同サイズ`TileRaster`へ解決してから既存alpha primitiveへ渡す。
+- catalogはgesture／selection／gradient／adjustment／asset payloadのchecked work式、state-coupled raster／selection／adjustment
+  portability、before-primitive cancellationを固定した。in-place編集はoutput growth 0、新規adjustment layerだけ1とし、
+  update entryがoutput IDを誤計上しないことを12-step aggregate budgetで固定した。
+- RGBA16 documentとgrayscale8 alpha assetでgesture order、selection外不変、alpha-only/native depth、payload ownership、
+  adjustment resultの後続参照、direct／script canonical argumentsとstate digestを検証した。success／no-op／invalid／Cancel
+  （即時および先行step staged後）／stale／stable/procedure ID overflow／resource超過／atomicity、ownership／thread suitability、
+  Undo／Redo、cache-free replay、ID high-watermark、document/editor savepoint、current-v26 full-replay reopenも一致した。
+- `cargo fmt --check`、workspace全target／feature Clippy（warning deny）、workspace 586 non-doc tests／Release gate 1 ignoredと
+  doctest 1、workspace strict rustdocが成功した。`inkscript_registry`は14/14。承認済みInkScript quickは全counterとchecksum
+  `0f84d2c54cfe1e2c`を維持して86,469,200 ns、既存`core_workflows --quick`も10 checksumを維持した。
+- Windows x64 Debug build 111、static CRT、portable ZIP、unsigned MSIX、および最終binaryの全36 CTestが419.59秒で
+  成功した。ABI smokeは58.82秒、English smokeは172.96秒、Japanese smokeは175.48秒だった。production catalog、
+  Rust public API、C ABI、Windows route、UI、`.inkscript` file acceptanceは追加しておらず、既存binary回帰と
+  InkScript UI非公開の利用者確認待ちとして`[~]`で停止する。
+
+```text
+Version impact:
+- Registry schema: 2（catalog-owned enum／record／entry追加のみ、meta-schema変更なし）
+- InkScript file: 1（批准済みgrammar／language core／serialized field変更なし）
+- InkScript procedure catalog: 1（M23前のprivate draftを49/84へ拡張、production catalog未批准）
+- replay epoch: 23（既存gesture／alpha／adjustment canonical executorとreplay semantics変更なし）
+- .inkpod top-level: 26（exact-current encoder／decoder／cache-free replay再利用、schema変更なし）
+- C ABI: 14（symbol／record／ownership／thread規則変更なし）
+```
+
+### [~] M19 — catalog implementation E: selection、floating、transform
 
 **範囲**
 
@@ -2596,6 +2661,38 @@ Version impact:
 - selection bounds、floating asset、no-op result、cancel/overflowのtestがある。
 - mirror/rotate/resize等のM07 entryを再登録せずowner manifestと一致する。
 - direct/scriptのCommit、Undo/Redo、state digest、ID high-watermarkが一致する。
+
+**自動検証結果（2026-08-16）**
+
+- 今回のpromptをM18Bの利用者確認完了として受け、M18Bを`[x]`へ更新した。owner manifestでM19が所有する
+  selection／floatingの11 primitiveをexact ID／schema／semantics revision／equivalence IDでprivate catalog v1 draftへ追加し、
+  draftを49/84から60/84へ拡張した。M07所有の`mirror_document`／`rotate_document`／`resize_document`は既存entryを再利用し、
+  重複登録していない。
+- Core-private `SelectionFloatingScriptAction`はselection shape／operation／bounds、list pixel restore、scalar layer result、
+  exact-revision output-color guard、frozen canonical-raster asset list、既存plane／新規plane destination、Q16 floating transformを
+  typed valueから既存canonical invocationへ変換し、単一executorへ渡す。M20のvector command familyは先行実装していない。
+- selection bounds、typed resultと後続参照、semantic no-op、strict precondition、floating asset ownership、direct／scriptの
+  canonical state parityを検証した。success／invalid／Cancel（即時および先行step staged後）／stale／stable/procedure ID overflow／
+  resource超過／asset不一致／atomicity、ownership／thread suitability、Undo／Redo、cache-free replay、ID high-watermark、
+  document/editor savepoint、current-v26 full-replay reopenも一致した。既存`selection_from_layer`の同一mask経路が文書化済み
+  no-op契約に反してCommitを作る不具合もtest-firstで修正し、revision／history／ID非進行を固定した。
+- `cargo fmt --check`、workspace全target／feature Clippy（warning deny）、workspace 591 non-doc tests／Release gate 1 ignoredと
+  doctest 1、workspace strict rustdocが成功した。`inkscript_registry`は15/15。承認済みInkScript quickは全counterとchecksum
+  `0f84d2c54cfe1e2c`を維持して88,425,500 ns、既存`core_workflows --quick`も10 checksumを維持した。
+- Windows x64 Debug build 113、static CRT、portable ZIP、unsigned MSIX、および最終binaryの全36 CTestが472.40秒で
+  成功した。ABI smokeは68.93秒、English smokeは217.85秒、Japanese smokeは173.23秒だった。production catalog、
+  Rust public API、C ABI、Windows route、UI、`.inkscript` file acceptanceは追加しておらず、既存binary回帰と
+  InkScript UI非公開の利用者確認待ちとして`[~]`で停止する。
+
+```text
+Version impact:
+- Registry schema: 2（catalog-owned enum／record／entry追加のみ、meta-schema変更なし）
+- InkScript file: 1（批准済みgrammar／language core／serialized field変更なし）
+- InkScript procedure catalog: 1（M23前のprivate draftを60/84へ拡張、production catalog未批准）
+- replay epoch: 23（既存selection／floating／transform canonical executorとreplay semantics変更なし）
+- .inkpod top-level: 26（exact-current encoder／decoder／cache-free replay再利用、schema変更なし）
+- C ABI: 14（symbol／record／ownership／thread規則変更なし）
+```
 
 ### [ ] M20 — catalog implementation F: vector
 

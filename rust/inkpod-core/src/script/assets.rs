@@ -2,7 +2,7 @@ use super::catalog::CatalogAssetMetadata;
 use crate::asset::{AssetRecord, AssetStore, RasterAssetInput};
 use crate::{
     AssetAlphaSemantics, AssetColorSpace, AssetDescriptor, AssetId, AssetKind, CoreError,
-    MAX_RASTER_DIMENSION, PixelFormat,
+    MAX_RASTER_DIMENSION, PixelFormat, TileRaster,
 };
 use inkpod_format::{
     InkScriptTypedAsset, InkScriptTypedValue, InkScriptTypedValueKind,
@@ -236,6 +236,16 @@ impl FrozenScriptAssets {
             pixels,
             expected_id: Some(asset.record.id()),
         })
+    }
+
+    pub(crate) fn raster(&self, symbol: &str) -> Result<&TileRaster, ScriptAssetError> {
+        self.by_symbol
+            .get(symbol)
+            .ok_or(ScriptAssetError::UnknownAsset)?
+            .record
+            .raster()
+            .map(AsRef::as_ref)
+            .ok_or(ScriptAssetError::RoleMismatch)
     }
 
     pub(crate) const fn usage(&self) -> ScriptAssetUsage {

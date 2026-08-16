@@ -6,7 +6,8 @@ use super::catalog::{
     InkScriptPortability, InkScriptPortabilityClass,
 };
 use crate::primitive::{
-    inkscript, inkscript_batch, inkscript_document_tree, inkscript_metadata,
+    inkscript, inkscript_batch, inkscript_document_tree, inkscript_fill_gradient,
+    inkscript_gesture_adjustment, inkscript_metadata, inkscript_selection_floating,
     inkscript_stroke_geometry,
 };
 use inkpod_format::{
@@ -274,6 +275,9 @@ impl ScriptSchemas {
             enums: inkscript::LEGACY_SIMPLE_ENUMS
                 .iter()
                 .chain(inkscript_batch::LEGACY_IMAGE_ENUMS)
+                .chain(inkscript_fill_gradient::FILL_GRADIENT_ENUMS)
+                .chain(inkscript_gesture_adjustment::GESTURE_ADJUSTMENT_ENUMS)
+                .chain(inkscript_selection_floating::SELECTION_FLOATING_ENUMS)
                 .chain(inkscript_stroke_geometry::STROKE_GEOMETRY_ENUMS)
                 .copied()
                 .collect(),
@@ -287,6 +291,9 @@ impl ScriptSchemas {
                 .chain(inkscript_batch::LEGACY_IMAGE_RECORDS)
                 .chain(inkscript_document_tree::DOCUMENT_TREE_RECORDS)
                 .chain(inkscript_metadata::METADATA_COLOR_GUIDE_RECORDS)
+                .chain(inkscript_fill_gradient::FILL_GRADIENT_RECORDS)
+                .chain(inkscript_gesture_adjustment::GESTURE_ADJUSTMENT_RECORDS)
+                .chain(inkscript_selection_floating::SELECTION_FLOATING_RECORDS)
                 .chain(inkscript_stroke_geometry::STROKE_GEOMETRY_RECORDS)
                 .copied()
                 .collect(),
@@ -295,6 +302,9 @@ impl ScriptSchemas {
                 .chain(inkscript_batch::LEGACY_IMAGE_COMMANDS)
                 .chain(inkscript_document_tree::DOCUMENT_TREE_COMMANDS)
                 .chain(inkscript_metadata::METADATA_COLOR_GUIDE_COMMANDS)
+                .chain(inkscript_fill_gradient::FILL_GRADIENT_COMMANDS)
+                .chain(inkscript_gesture_adjustment::GESTURE_ADJUSTMENT_COMMANDS)
+                .chain(inkscript_selection_floating::SELECTION_FLOATING_COMMANDS)
                 .chain(inkscript_stroke_geometry::STROKE_GEOMETRY_COMMANDS)
                 .copied()
                 .collect(),
@@ -349,6 +359,185 @@ pub(super) fn catalog(
                 16_777_216,
                 &["semantic_target", "state_coupled_fill_boundary"],
                 "continuous_fill_seed",
+            ),
+            "apply_gradient" => (
+                InkScriptPortabilityClass::RequiresBinding,
+                vec![
+                    "semantic_target",
+                    "state_coupled_raster",
+                    "state_coupled_selection",
+                ],
+                CatalogWorkFormula {
+                    max_invocations: CatalogNumericExpression::Literal(1),
+                    max_output_ids: CatalogNumericExpression::Literal(0),
+                    max_asset_bytes: CatalogNumericExpression::CheckedAdd(
+                        Box::new(CatalogNumericExpression::Literal(44)),
+                        Box::new(CatalogNumericExpression::CheckedMultiply(
+                            Box::new(CatalogNumericExpression::ListLength {
+                                path: vec!["gradient", "stops"],
+                                maximum: 64,
+                            }),
+                            Box::new(CatalogNumericExpression::Literal(12)),
+                        )),
+                    ),
+                    max_work_units: CatalogNumericExpression::Literal(67_108_864),
+                    max_output_growth: CatalogNumericExpression::Literal(0),
+                },
+                None,
+                false,
+                Vec::new(),
+                "fill_gradient",
+            ),
+            "apply_blur" => gesture_adjustment_bound(
+                literal_work_with_growth(1_100_000_000, 0),
+                &raster_effect_preconditions(),
+                Vec::new(),
+            ),
+            "apply_airbrush" => gesture_adjustment_bound(
+                fixed_payload_work(52, 67_108_864, 0),
+                &raster_effect_preconditions(),
+                Vec::new(),
+            ),
+            "apply_airbrush_gesture" => gesture_adjustment_bound(
+                list_payload_work(vec!["gesture", "samples"], 52, 20, 1_048_576, 1_048_576, 0),
+                &raster_effect_preconditions(),
+                Vec::new(),
+            ),
+            "apply_stamp" => gesture_adjustment_bound(
+                fixed_payload_work(32, 67_108_864, 0),
+                &raster_effect_preconditions(),
+                Vec::new(),
+            ),
+            "apply_stamp_gesture" => gesture_adjustment_bound(
+                list_payload_work(vec!["gesture", "samples"], 48, 20, 1_048_576, 1_048_576, 0),
+                &raster_effect_preconditions(),
+                Vec::new(),
+            ),
+            "apply_blur_tool" => gesture_adjustment_bound(
+                selection_payload_work(vec!["shape"], 1_100_000_000, 0),
+                &raster_effect_preconditions(),
+                Vec::new(),
+            ),
+            "edit_plane_alpha" => gesture_adjustment_bound(
+                CatalogWorkFormula {
+                    max_invocations: CatalogNumericExpression::Literal(1),
+                    max_output_ids: CatalogNumericExpression::Literal(0),
+                    max_asset_bytes: CatalogNumericExpression::Field(vec![
+                        "alpha",
+                        "logical_payload_bytes",
+                    ]),
+                    max_work_units: CatalogNumericExpression::Field(vec![
+                        "alpha",
+                        "logical_element_count",
+                    ]),
+                    max_output_growth: CatalogNumericExpression::Literal(0),
+                },
+                &raster_effect_preconditions(),
+                Vec::new(),
+            ),
+            "apply_alpha_gradient" => gesture_adjustment_bound(
+                gradient_payload_work("gradient", 0),
+                &raster_effect_preconditions(),
+                Vec::new(),
+            ),
+            "create_adjustment_layer" => gesture_adjustment_portable(
+                adjustment_payload_work("adjustment", 1, 1),
+                entity_result("layer"),
+            ),
+            "update_adjustment_layer" => gesture_adjustment_bound(
+                adjustment_payload_work("adjustment", 0, 0),
+                &["semantic_target", "state_coupled_adjustment"],
+                Vec::new(),
+            ),
+            "scoped_color_replace" => gesture_adjustment_bound(
+                fixed_payload_work(37_748_800, 67_108_864, 0),
+                &[
+                    "semantic_target",
+                    "state_coupled_raster_or_vector",
+                    "state_coupled_selection",
+                ],
+                Vec::new(),
+            ),
+            "restore_selected_pixels" => selection_bound(
+                list_payload_work(vec!["changes"], 0, 24, 1_048_576, 1, 0),
+                &[
+                    "semantic_target",
+                    "exact_pixel_precondition",
+                    "state_coupled_selection",
+                ],
+                Vec::new(),
+            ),
+            "apply_selection" => selection_bound(
+                selection_payload_work(vec!["shape"], 67_108_864, 0),
+                &[
+                    "semantic_target",
+                    "state_coupled_raster",
+                    "state_coupled_selection",
+                ],
+                Vec::new(),
+            ),
+            "invert_selection" | "clear_selection" | "resize_selection" => selection_bound(
+                literal_work(67_108_864),
+                &["state_coupled_selection"],
+                Vec::new(),
+            ),
+            "select_color" => selection_bound(
+                literal_work(67_108_864),
+                &[
+                    "semantic_target",
+                    "state_coupled_raster",
+                    "state_coupled_selection",
+                ],
+                Vec::new(),
+            ),
+            "select_output_color_guard" => selection_strict(
+                literal_work(67_108_864),
+                &[
+                    "exact_document_revision",
+                    "state_coupled_composite",
+                    "state_coupled_selection",
+                ],
+                Vec::new(),
+            ),
+            "selection_to_layer" => selection_bound(
+                CatalogWorkFormula {
+                    max_invocations: CatalogNumericExpression::Literal(1),
+                    max_output_ids: CatalogNumericExpression::Literal(2),
+                    max_asset_bytes: CatalogNumericExpression::Literal(0),
+                    max_work_units: CatalogNumericExpression::Literal(67_108_864),
+                    max_output_growth: CatalogNumericExpression::Literal(1),
+                },
+                &["state_coupled_selection"],
+                entity_result("layer"),
+            ),
+            "selection_from_layer" => selection_bound(
+                literal_work(67_108_864),
+                &["semantic_target", "state_coupled_selection"],
+                Vec::new(),
+            ),
+            "clear_selected_content" => selection_bound(
+                literal_work(67_108_864),
+                &[
+                    "semantic_target",
+                    "state_coupled_raster_or_vector",
+                    "state_coupled_selection",
+                ],
+                Vec::new(),
+            ),
+            "commit_floating" => selection_bound(
+                CatalogWorkFormula {
+                    max_invocations: CatalogNumericExpression::Literal(1),
+                    max_output_ids: CatalogNumericExpression::Literal(1),
+                    max_asset_bytes: CatalogNumericExpression::Literal(536_870_912),
+                    max_work_units: CatalogNumericExpression::Literal(1_100_000_000),
+                    max_output_growth: CatalogNumericExpression::Literal(67_108_864),
+                },
+                &[
+                    "semantic_target",
+                    "state_coupled_raster_or_vector",
+                    "floating_asset_payload",
+                ],
+                Vec::new(),
             ),
             "apply_boundary_airbrush" => {
                 restricted(67_108_864, &["semantic_target"], "boundary_airbrush")
@@ -500,15 +689,26 @@ pub(super) fn catalog(
             ),
             _ => return Err(ScriptCompileError::Catalog(CatalogError::InvalidEntry)),
         };
-        let assets = if schema.name() == "import_raster_asset" {
-            vec![CatalogAssetMetadata {
+        let assets = match schema.name() {
+            "import_raster_asset" => vec![CatalogAssetMetadata {
                 name: "source_raster",
                 kind: "canonical_raster",
                 inline: true,
                 external: true,
-            }]
-        } else {
-            Vec::new()
+            }],
+            "edit_plane_alpha" => vec![CatalogAssetMetadata {
+                name: "alpha_raster",
+                kind: "canonical_raster",
+                inline: true,
+                external: true,
+            }],
+            "commit_floating" => vec![CatalogAssetMetadata {
+                name: "floating_rasters",
+                kind: "canonical_raster",
+                inline: true,
+                external: true,
+            }],
+            _ => Vec::new(),
         };
         entries.push(CatalogEntry {
             schema: *schema,
@@ -690,6 +890,196 @@ fn stroke_geometry_bound(
         results,
         "stroke_geometry_import",
     )
+}
+
+fn raster_effect_preconditions() -> [&'static str; 3] {
+    [
+        "semantic_target",
+        "state_coupled_raster",
+        "state_coupled_selection",
+    ]
+}
+
+fn gesture_adjustment_bound(
+    work: CatalogWorkFormula,
+    preconditions: &[&'static str],
+    results: Vec<CatalogResultMetadata>,
+) -> EntryTuple {
+    (
+        InkScriptPortabilityClass::RequiresBinding,
+        preconditions.to_vec(),
+        work,
+        None,
+        false,
+        results,
+        "gesture_alpha_adjustment",
+    )
+}
+
+fn gesture_adjustment_portable(
+    work: CatalogWorkFormula,
+    results: Vec<CatalogResultMetadata>,
+) -> EntryTuple {
+    (
+        InkScriptPortabilityClass::Portable,
+        Vec::new(),
+        work,
+        None,
+        false,
+        results,
+        "gesture_alpha_adjustment",
+    )
+}
+
+fn selection_bound(
+    work: CatalogWorkFormula,
+    preconditions: &[&'static str],
+    results: Vec<CatalogResultMetadata>,
+) -> EntryTuple {
+    (
+        InkScriptPortabilityClass::RequiresBinding,
+        preconditions.to_vec(),
+        work,
+        None,
+        false,
+        results,
+        "selection_floating",
+    )
+}
+
+fn selection_strict(
+    work: CatalogWorkFormula,
+    preconditions: &[&'static str],
+    results: Vec<CatalogResultMetadata>,
+) -> EntryTuple {
+    (
+        InkScriptPortabilityClass::StrictSourceOnly,
+        preconditions.to_vec(),
+        work,
+        None,
+        false,
+        results,
+        "selection_floating",
+    )
+}
+
+fn literal_work_with_growth(work: u64, growth: u64) -> CatalogWorkFormula {
+    CatalogWorkFormula {
+        max_invocations: CatalogNumericExpression::Literal(1),
+        max_output_ids: CatalogNumericExpression::Literal(0),
+        max_asset_bytes: CatalogNumericExpression::Literal(0),
+        max_work_units: CatalogNumericExpression::Literal(work),
+        max_output_growth: CatalogNumericExpression::Literal(growth),
+    }
+}
+
+fn fixed_payload_work(payload: u64, work: u64, growth: u64) -> CatalogWorkFormula {
+    CatalogWorkFormula {
+        max_invocations: CatalogNumericExpression::Literal(1),
+        max_output_ids: CatalogNumericExpression::Literal(0),
+        max_asset_bytes: CatalogNumericExpression::Literal(payload),
+        max_work_units: CatalogNumericExpression::Literal(work),
+        max_output_growth: CatalogNumericExpression::Literal(growth),
+    }
+}
+
+fn list_payload_work(
+    path: Vec<&'static str>,
+    base_bytes: u64,
+    element_bytes: u64,
+    maximum: u64,
+    work_per_element: u64,
+    growth: u64,
+) -> CatalogWorkFormula {
+    let length = CatalogNumericExpression::ListLength { path, maximum };
+    CatalogWorkFormula {
+        max_invocations: CatalogNumericExpression::Literal(1),
+        max_output_ids: CatalogNumericExpression::Literal(0),
+        max_asset_bytes: CatalogNumericExpression::CheckedAdd(
+            Box::new(CatalogNumericExpression::Literal(base_bytes)),
+            Box::new(CatalogNumericExpression::CheckedMultiply(
+                Box::new(length.clone()),
+                Box::new(CatalogNumericExpression::Literal(element_bytes)),
+            )),
+        ),
+        max_work_units: CatalogNumericExpression::CheckedMultiply(
+            Box::new(length),
+            Box::new(CatalogNumericExpression::Literal(work_per_element)),
+        ),
+        max_output_growth: CatalogNumericExpression::Literal(growth),
+    }
+}
+
+fn selection_payload_work(path: Vec<&'static str>, work: u64, growth: u64) -> CatalogWorkFormula {
+    let mut points_path = path.clone();
+    points_path.push("points");
+    let mut samples_path = path;
+    samples_path.push("samples");
+    let points = CatalogNumericExpression::ListLength {
+        path: points_path,
+        maximum: 1_048_576,
+    };
+    let samples = CatalogNumericExpression::ListLength {
+        path: samples_path,
+        maximum: 1_048_576,
+    };
+    CatalogWorkFormula {
+        max_invocations: CatalogNumericExpression::Literal(1),
+        max_output_ids: CatalogNumericExpression::Literal(0),
+        max_asset_bytes: CatalogNumericExpression::CheckedAdd(
+            Box::new(CatalogNumericExpression::Literal(64)),
+            Box::new(CatalogNumericExpression::CheckedAdd(
+                Box::new(CatalogNumericExpression::CheckedMultiply(
+                    Box::new(points),
+                    Box::new(CatalogNumericExpression::Literal(16)),
+                )),
+                Box::new(CatalogNumericExpression::CheckedMultiply(
+                    Box::new(samples),
+                    Box::new(CatalogNumericExpression::Literal(20)),
+                )),
+            )),
+        ),
+        max_work_units: CatalogNumericExpression::Literal(work),
+        max_output_growth: CatalogNumericExpression::Literal(growth),
+    }
+}
+
+fn gradient_payload_work(path: &'static str, growth: u64) -> CatalogWorkFormula {
+    CatalogWorkFormula {
+        max_invocations: CatalogNumericExpression::Literal(1),
+        max_output_ids: CatalogNumericExpression::Literal(0),
+        max_asset_bytes: CatalogNumericExpression::CheckedAdd(
+            Box::new(CatalogNumericExpression::Literal(44)),
+            Box::new(CatalogNumericExpression::CheckedMultiply(
+                Box::new(CatalogNumericExpression::ListLength {
+                    path: vec![path, "stops"],
+                    maximum: 64,
+                }),
+                Box::new(CatalogNumericExpression::Literal(12)),
+            )),
+        ),
+        max_work_units: CatalogNumericExpression::Literal(67_108_864),
+        max_output_growth: CatalogNumericExpression::Literal(growth),
+    }
+}
+
+fn adjustment_payload_work(path: &'static str, output_ids: u64, growth: u64) -> CatalogWorkFormula {
+    CatalogWorkFormula {
+        max_invocations: CatalogNumericExpression::Literal(1),
+        max_output_ids: CatalogNumericExpression::Literal(output_ids),
+        max_asset_bytes: CatalogNumericExpression::CheckedAdd(
+            Box::new(CatalogNumericExpression::Literal(40)),
+            Box::new(CatalogNumericExpression::CheckedMultiply(
+                Box::new(CatalogNumericExpression::ListLength {
+                    path: vec![path, "points"],
+                    maximum: 64,
+                }),
+                Box::new(CatalogNumericExpression::Literal(8)),
+            )),
+        ),
+        max_work_units: CatalogNumericExpression::Literal(1),
+        max_output_growth: CatalogNumericExpression::Literal(growth),
+    }
 }
 
 fn add_budget(

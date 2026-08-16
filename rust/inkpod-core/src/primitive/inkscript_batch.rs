@@ -1003,7 +1003,7 @@ fn constructor<'a>(
     }
 }
 
-fn pixel(value: &InkScriptTypedValue) -> Result<PixelValue, LegacyImageAdapterError> {
+pub(crate) fn pixel(value: &InkScriptTypedValue) -> Result<PixelValue, LegacyImageAdapterError> {
     match value.type_name() {
         "mask8" => Ok(PixelValue::Binary(narrow_u8(
             &constructor(value, "mask8")?[0],
@@ -1344,7 +1344,9 @@ fn filter(value: &InkScriptTypedValue) -> Result<Filter, LegacyImageAdapterError
     })
 }
 
-fn filter_channel(value: &InkScriptTypedValue) -> Result<Channel, LegacyImageAdapterError> {
+pub(crate) fn filter_channel(
+    value: &InkScriptTypedValue,
+) -> Result<Channel, LegacyImageAdapterError> {
     match enum_value(value)? {
         "rgb" => Ok(Channel::Rgb),
         "red" => Ok(Channel::Red),
@@ -1354,7 +1356,7 @@ fn filter_channel(value: &InkScriptTypedValue) -> Result<Channel, LegacyImageAda
     }
 }
 
-fn curve_interpolation(
+pub(crate) fn curve_interpolation(
     value: &InkScriptTypedValue,
 ) -> Result<CurveInterpolation, LegacyImageAdapterError> {
     match enum_value(value)? {
@@ -1364,7 +1366,9 @@ fn curve_interpolation(
     }
 }
 
-fn curve_point(value: &InkScriptTypedValue) -> Result<CurvePoint, LegacyImageAdapterError> {
+pub(crate) fn curve_point(
+    value: &InkScriptTypedValue,
+) -> Result<CurvePoint, LegacyImageAdapterError> {
     let fields = record(value)?;
     Ok(CurvePoint {
         input: narrow_u16(field(fields, "input")?)?,
@@ -1372,7 +1376,9 @@ fn curve_point(value: &InkScriptTypedValue) -> Result<CurvePoint, LegacyImageAda
     })
 }
 
-fn filter_levels(value: &InkScriptTypedValue) -> Result<Levels, LegacyImageAdapterError> {
+pub(crate) fn filter_levels(
+    value: &InkScriptTypedValue,
+) -> Result<Levels, LegacyImageAdapterError> {
     let fields = record(value)?;
     Ok(Levels {
         channel: filter_channel(field(fields, "channel")?)?,
@@ -1404,7 +1410,9 @@ fn filter_color_balance(
     })
 }
 
-fn selection_shape(value: &InkScriptTypedValue) -> Result<SelectionShape, LegacyImageAdapterError> {
+pub(crate) fn selection_shape(
+    value: &InkScriptTypedValue,
+) -> Result<SelectionShape, LegacyImageAdapterError> {
     let fields = record(value)?;
     let rect_value = nullable(field(fields, "rect")?, rect)?;
     let anchor = nullable(field(fields, "anchor")?, point)?;

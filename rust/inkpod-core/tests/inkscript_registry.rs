@@ -458,9 +458,9 @@ fn inkscript_registry_meta_schema_is_closed_and_draft_is_private() {
         "inkpod.inkscript.catalog-draft"
     );
     assert_eq!(member(&draft, "production"), &Json::Bool(false));
-    assert_eq!(array(member(&draft, "entries")).len(), 37);
-    assert_eq!(array(member(&draft, "enums")).len(), 16);
-    assert_eq!(array(member(&draft, "records")).len(), 24);
+    assert_eq!(array(member(&draft, "entries")).len(), 60);
+    assert_eq!(array(member(&draft, "enums")).len(), 28);
+    assert_eq!(array(member(&draft, "records")).len(), 39);
     assert_eq!(array(member(&draft, "constructors")).len(), 11);
     assert!(
         !repository()
@@ -804,12 +804,421 @@ fn inkscript_stroke_geometry_and_import_entries_are_closed_typed_and_owner_exact
     assert_eq!(string(member(role, "kind")), "canonical_raster");
     assert_eq!(member(role, "inline"), &Json::Bool(true));
     assert_eq!(member(role, "external"), &Json::Bool(true));
-    const NEXT_OWNER_MILESTONE: &str = concat!("M", "18A");
-    assert!(
-        array(member(&draft, "entries"))
-            .iter()
-            .all(|entry| string(member(entry, "owner_milestone")) != NEXT_OWNER_MILESTONE)
+}
+
+#[test]
+fn inkscript_fill_and_gradient_entries_are_closed_typed_and_owner_exact() {
+    let language = load_json("schemas/inkscript/language-v1.json");
+    let draft = load_json("schemas/inkscript/catalog-v1.draft.json");
+    let manifest = load_json("schemas/inkscript/owner-manifest-v1.json");
+    let type_names = composed_catalog_type_names(&language, &draft);
+    const OWNER_MILESTONE: &str = concat!("M", "18A");
+
+    let owner = array(member(&manifest, "owners"))
+        .iter()
+        .find(|owner| string(member(owner, "owner_milestone")) == OWNER_MILESTONE)
+        .expect("fill/gradient owner");
+    assert_eq!(string(member(owner, "command_name")), "apply_gradient");
+    assert_eq!(string(member(owner, "primitive_id")), "0x00050010");
+    assert_eq!(number(member(owner, "primitive_schema_version")), 2);
+    assert_eq!(number(member(owner, "semantics_revision")), 2);
+    assert_eq!(
+        string(member(owner, "planned_equivalence_test")),
+        "INKS-EQ-0032"
     );
+    assert_eq!(
+        array(member(&manifest, "owners"))
+            .iter()
+            .filter(|owner| string(member(owner, "owner_milestone")) == OWNER_MILESTONE)
+            .count(),
+        1
+    );
+
+    let entries = array(member(&draft, "entries"));
+    let gradient = named(member(&draft, "entries"), "apply_gradient");
+    assert_exact_keys(
+        gradient,
+        &[
+            "arguments",
+            "cancellation_boundary",
+            "editor",
+            "equivalence_test",
+            "name",
+            "owner_milestone",
+            "portability",
+            "primitive_id",
+            "primitive_schema_version",
+            "replay_epoch",
+            "results",
+            "semantics_revision",
+            "work",
+        ],
+    );
+    assert_eq!(string(member(gradient, "primitive_id")), "0x00050010");
+    assert_eq!(number(member(gradient, "primitive_schema_version")), 2);
+    assert_eq!(number(member(gradient, "replay_epoch")), 23);
+    assert_eq!(number(member(gradient, "semantics_revision")), 2);
+    assert_eq!(string(member(gradient, "owner_milestone")), OWNER_MILESTONE);
+    assert_eq!(string(member(gradient, "equivalence_test")), "INKS-EQ-0032");
+    assert_eq!(
+        string(member(gradient, "cancellation_boundary")),
+        "before_primitive"
+    );
+    assert_eq!(
+        string(member(member(gradient, "editor"), "family")),
+        "fill_gradient"
+    );
+    assert_eq!(array(member(gradient, "results")).len(), 0);
+    let arguments = array(member(gradient, "arguments"));
+    assert_eq!(arguments.len(), 2);
+    assert_eq!(string(member(&arguments[0], "name")), "plane_id");
+    assert_eq!(string(member(&arguments[0], "type")), "plane_ref");
+    assert_eq!(string(member(&arguments[1], "name")), "gradient");
+    assert_eq!(string(member(&arguments[1], "type")), "gradient_spec");
+    for argument in arguments {
+        assert!(type_names.contains(base_type(string(member(argument, "type")))));
+    }
+    let preconditions = array(member(
+        member(member(gradient, "portability"), "default"),
+        "required_preconditions",
+    ));
+    assert_eq!(
+        preconditions.iter().map(string).collect::<BTreeSet<_>>(),
+        BTreeSet::from([
+            "semantic_target",
+            "state_coupled_raster",
+            "state_coupled_selection",
+        ])
+    );
+
+    for record_name in ["gradient_stop", "gradient_spec"] {
+        let record = named(member(&draft, "records"), record_name);
+        validate_fields(member(record, "fields"), &type_names, record_name);
+    }
+    let enums = array(member(&draft, "enums"))
+        .iter()
+        .map(|value| string(member(value, "name")))
+        .collect::<BTreeSet<_>>();
+    assert!(BTreeSet::from(["gradient_kind", "gradient_mode"]).is_subset(&enums));
+
+    assert_eq!(
+        entries
+            .iter()
+            .filter(|entry| string(member(entry, "name")) == "apply_fill")
+            .count(),
+        1,
+        "legacy-image apply_fill must be reused without a second owner entry"
+    );
+    assert_eq!(
+        string(member(
+            named(member(&draft, "entries"), "apply_fill"),
+            "owner_milestone"
+        )),
+        concat!("M", "08")
+    );
+    assert_eq!(
+        entries
+            .iter()
+            .filter(|entry| string(member(entry, "owner_milestone")) == OWNER_MILESTONE)
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn inkscript_gesture_alpha_adjustment_entries_are_closed_typed_and_owner_exact() {
+    let language = load_json("schemas/inkscript/language-v1.json");
+    let draft = load_json("schemas/inkscript/catalog-v1.draft.json");
+    let manifest = load_json("schemas/inkscript/owner-manifest-v1.json");
+    let type_names = composed_catalog_type_names(&language, &draft);
+    const OWNER_MILESTONE: &str = concat!("M", "18B");
+    let expected = BTreeMap::from([
+        ("apply_blur", ("0x00050012", 2, 2, "INKS-EQ-0034")),
+        ("apply_airbrush", ("0x00050013", 2, 2, "INKS-EQ-0035")),
+        (
+            "apply_airbrush_gesture",
+            ("0x00050014", 2, 2, "INKS-EQ-0036"),
+        ),
+        ("apply_stamp", ("0x00050015", 2, 2, "INKS-EQ-0037")),
+        ("apply_stamp_gesture", ("0x00050016", 2, 2, "INKS-EQ-0038")),
+        ("apply_blur_tool", ("0x00050017", 2, 2, "INKS-EQ-0039")),
+        ("edit_plane_alpha", ("0x00050019", 2, 2, "INKS-EQ-0041")),
+        ("apply_alpha_gradient", ("0x0005001a", 2, 2, "INKS-EQ-0042")),
+        (
+            "create_adjustment_layer",
+            ("0x00050030", 2, 2, "INKS-EQ-0044"),
+        ),
+        (
+            "update_adjustment_layer",
+            ("0x00050031", 2, 2, "INKS-EQ-0045"),
+        ),
+        ("scoped_color_replace", ("0x00050043", 2, 1, "INKS-EQ-0049")),
+    ]);
+    let manifest_owners = array(member(&manifest, "owners"))
+        .iter()
+        .filter(|owner| string(member(owner, "owner_milestone")) == OWNER_MILESTONE)
+        .map(|owner| (string(member(owner, "command_name")), owner))
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(manifest_owners.len(), expected.len());
+
+    let mut actual = BTreeSet::new();
+    for entry in array(member(&draft, "entries"))
+        .iter()
+        .filter(|entry| string(member(entry, "owner_milestone")) == OWNER_MILESTONE)
+    {
+        assert_exact_keys(
+            entry,
+            &[
+                "arguments",
+                "cancellation_boundary",
+                "editor",
+                "equivalence_test",
+                "name",
+                "owner_milestone",
+                "portability",
+                "primitive_id",
+                "primitive_schema_version",
+                "replay_epoch",
+                "results",
+                "semantics_revision",
+                "work",
+            ],
+        );
+        let name = string(member(entry, "name"));
+        assert!(actual.insert(name), "duplicate gesture command {name}");
+        let (primitive_id, schema, semantics, equivalence) = expected[name];
+        assert_eq!(string(member(entry, "primitive_id")), primitive_id);
+        assert_eq!(number(member(entry, "primitive_schema_version")), schema);
+        assert_eq!(number(member(entry, "replay_epoch")), 23);
+        assert_eq!(number(member(entry, "semantics_revision")), semantics);
+        assert_eq!(string(member(entry, "equivalence_test")), equivalence);
+        assert_eq!(
+            string(member(entry, "cancellation_boundary")),
+            "before_primitive"
+        );
+        assert_eq!(string(member(entry, "owner_milestone")), OWNER_MILESTONE);
+        for argument in array(member(entry, "arguments")) {
+            assert!(type_names.contains(base_type(string(member(argument, "type")))));
+        }
+        let owner = manifest_owners[name];
+        assert_eq!(string(member(owner, "primitive_id")), primitive_id);
+        assert_eq!(number(member(owner, "primitive_schema_version")), schema);
+        assert_eq!(number(member(owner, "semantics_revision")), semantics);
+        assert_eq!(
+            string(member(owner, "planned_equivalence_test")),
+            equivalence
+        );
+    }
+    assert_eq!(actual, expected.keys().copied().collect());
+
+    for record_name in [
+        "effect_sample",
+        "airbrush_stroke",
+        "airbrush_gesture",
+        "stamp_spec",
+        "stamp_gesture",
+        "adjustment_spec",
+    ] {
+        let record = named(member(&draft, "records"), record_name);
+        validate_fields(member(record, "fields"), &type_names, record_name);
+    }
+    let enum_names = array(member(&draft, "enums"))
+        .iter()
+        .map(|value| string(member(value, "name")))
+        .collect::<BTreeSet<_>>();
+    assert!(
+        BTreeSet::from(["stamp_shape", "adjustment_kind", "scoped_color_mode"])
+            .is_subset(&enum_names)
+    );
+
+    let alpha = named(member(&draft, "entries"), "edit_plane_alpha");
+    let alpha_asset = array(member(alpha, "arguments"))
+        .iter()
+        .find(|argument| string(member(argument, "name")) == "alpha")
+        .expect("alpha asset argument");
+    assert_eq!(string(member(alpha_asset, "type")), "asset_ref");
+    let role = member(alpha_asset, "asset_role");
+    assert_eq!(string(member(role, "name")), "alpha_raster");
+    assert_eq!(string(member(role, "kind")), "canonical_raster");
+    assert_eq!(member(role, "inline"), &Json::Bool(true));
+    assert_eq!(member(role, "external"), &Json::Bool(true));
+
+    let create = named(member(&draft, "entries"), "create_adjustment_layer");
+    let results = array(member(create, "results"));
+    assert_eq!(results.len(), 1);
+    assert_eq!(string(member(&results[0], "name")), "layer");
+    assert_eq!(string(member(&results[0], "type")), "layer_ref");
+    assert_eq!(number(member(&results[0], "output_id_ordinal")), 0);
+
+    for reused in ["apply_boundary_airbrush", "apply_filter", "apply_gradient"] {
+        assert_eq!(
+            array(member(&draft, "entries"))
+                .iter()
+                .filter(|entry| string(member(entry, "name")) == reused)
+                .count(),
+            1,
+            "prior owner entry {reused} must not be duplicated"
+        );
+        assert_ne!(
+            string(member(
+                named(member(&draft, "entries"), reused),
+                "owner_milestone"
+            )),
+            OWNER_MILESTONE
+        );
+    }
+}
+
+#[test]
+fn inkscript_selection_floating_entries_are_closed_typed_and_owner_exact() {
+    let language = load_json("schemas/inkscript/language-v1.json");
+    let draft = load_json("schemas/inkscript/catalog-v1.draft.json");
+    let manifest = load_json("schemas/inkscript/owner-manifest-v1.json");
+    let type_names = composed_catalog_type_names(&language, &draft);
+    const OWNER_MILESTONE: &str = concat!("M", "19");
+    let expected = BTreeMap::from([
+        (
+            "restore_selected_pixels",
+            ("0x00050042", 2, 2, "INKS-EQ-0048"),
+        ),
+        ("apply_selection", ("0x00060001", 2, 3, "INKS-EQ-0050")),
+        ("invert_selection", ("0x00060002", 2, 2, "INKS-EQ-0051")),
+        ("clear_selection", ("0x00060003", 2, 2, "INKS-EQ-0052")),
+        ("resize_selection", ("0x00060004", 2, 2, "INKS-EQ-0053")),
+        ("select_color", ("0x00060005", 2, 2, "INKS-EQ-0054")),
+        (
+            "select_output_color_guard",
+            ("0x00060006", 2, 1, "INKS-EQ-0055"),
+        ),
+        ("selection_to_layer", ("0x00060010", 2, 2, "INKS-EQ-0056")),
+        ("selection_from_layer", ("0x00060011", 2, 2, "INKS-EQ-0057")),
+        (
+            "clear_selected_content",
+            ("0x00060020", 2, 2, "INKS-EQ-0058"),
+        ),
+        ("commit_floating", ("0x00060021", 3, 3, "INKS-EQ-0059")),
+    ]);
+    let manifest_owners = array(member(&manifest, "owners"))
+        .iter()
+        .filter(|owner| string(member(owner, "owner_milestone")) == OWNER_MILESTONE)
+        .map(|owner| (string(member(owner, "command_name")), owner))
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(manifest_owners.len(), expected.len());
+
+    let mut actual = BTreeSet::new();
+    for entry in array(member(&draft, "entries"))
+        .iter()
+        .filter(|entry| string(member(entry, "owner_milestone")) == OWNER_MILESTONE)
+    {
+        assert_exact_keys(
+            entry,
+            &[
+                "arguments",
+                "cancellation_boundary",
+                "editor",
+                "equivalence_test",
+                "name",
+                "owner_milestone",
+                "portability",
+                "primitive_id",
+                "primitive_schema_version",
+                "replay_epoch",
+                "results",
+                "semantics_revision",
+                "work",
+            ],
+        );
+        let name = string(member(entry, "name"));
+        assert!(actual.insert(name), "duplicate selection command {name}");
+        let (primitive_id, schema, semantics, equivalence) = expected[name];
+        assert_eq!(string(member(entry, "primitive_id")), primitive_id);
+        assert_eq!(number(member(entry, "primitive_schema_version")), schema);
+        assert_eq!(number(member(entry, "replay_epoch")), 23);
+        assert_eq!(number(member(entry, "semantics_revision")), semantics);
+        assert_eq!(string(member(entry, "equivalence_test")), equivalence);
+        assert_eq!(string(member(entry, "owner_milestone")), OWNER_MILESTONE);
+        for argument in array(member(entry, "arguments")) {
+            assert!(type_names.contains(base_type(string(member(argument, "type")))));
+        }
+        let owner = manifest_owners[name];
+        assert_eq!(string(member(owner, "primitive_id")), primitive_id);
+        assert_eq!(number(member(owner, "primitive_schema_version")), schema);
+        assert_eq!(number(member(owner, "semantics_revision")), semantics);
+        assert_eq!(
+            string(member(owner, "planned_equivalence_test")),
+            equivalence
+        );
+    }
+    assert_eq!(actual, expected.keys().copied().collect());
+
+    for record_name in [
+        "selection_pixel_change",
+        "selection_trace_options",
+        "selection_construction_options",
+        "floating_plane",
+        "floating_transform",
+        "floating_destination",
+        "floating_payload",
+    ] {
+        let record = named(member(&draft, "records"), record_name);
+        validate_fields(member(record, "fields"), &type_names, record_name);
+    }
+    let enum_names = array(member(&draft, "enums"))
+        .iter()
+        .map(|value| string(member(value, "name")))
+        .collect::<BTreeSet<_>>();
+    assert!(
+        BTreeSet::from([
+            "selection_operation",
+            "range_interpretation",
+            "trace_brush_shape",
+            "selection_layer_operation",
+            "output_color_guard_profile",
+            "floating_destination_kind",
+            "floating_anchor",
+        ])
+        .is_subset(&enum_names)
+    );
+
+    let floating = named(member(&draft, "entries"), "commit_floating");
+    let payload = array(member(floating, "arguments"))
+        .iter()
+        .find(|argument| string(member(argument, "name")) == "payload")
+        .expect("floating payload argument");
+    let role = member(payload, "asset_role");
+    assert_eq!(string(member(role, "name")), "floating_rasters");
+    assert_eq!(string(member(role, "kind")), "canonical_raster");
+    assert_eq!(member(role, "inline"), &Json::Bool(true));
+    assert_eq!(member(role, "external"), &Json::Bool(true));
+
+    let selection_layer = named(member(&draft, "entries"), "selection_to_layer");
+    let results = array(member(selection_layer, "results"));
+    assert_eq!(results.len(), 1);
+    assert_eq!(string(member(&results[0], "name")), "layer");
+    assert_eq!(string(member(&results[0], "type")), "layer_ref");
+    assert_eq!(
+        string(member(&results[0], "availability")),
+        "always_on_success"
+    );
+    assert_eq!(number(member(&results[0], "output_id_ordinal")), 0);
+
+    for transform in ["mirror_document", "rotate_document", "resize_document"] {
+        assert_eq!(
+            array(member(&draft, "entries"))
+                .iter()
+                .filter(|entry| string(member(entry, "name")) == transform)
+                .count(),
+            1,
+            "preexisting document transform {transform} must not be re-registered"
+        );
+        assert_eq!(
+            string(member(
+                named(member(&draft, "entries"), transform),
+                "owner_milestone"
+            )),
+            concat!("M", "07")
+        );
+    }
 }
 
 #[test]
@@ -1641,6 +2050,9 @@ fn inkscript_typed_frontend_models_are_unreachable_from_core_ffi_and_windows() {
         core_source.join("primitive/inkscript_metadata.rs"),
         core_source.join("primitive/inkscript_reference.rs"),
         core_source.join("primitive/inkscript_stroke_geometry.rs"),
+        core_source.join("primitive/inkscript_fill_gradient.rs"),
+        core_source.join("primitive/inkscript_gesture_adjustment.rs"),
+        core_source.join("primitive/inkscript_selection_floating.rs"),
     ];
     let private_compiler = core_source.join("script");
     let mut core_sources = Vec::new();
@@ -1668,11 +2080,20 @@ fn inkscript_typed_frontend_models_are_unreachable_from_core_ffi_and_windows() {
     assert!(!primitive_root.contains("pub mod inkscript_metadata"));
     assert!(primitive_root.contains("mod inkscript_stroke_geometry;"));
     assert!(!primitive_root.contains("pub mod inkscript_stroke_geometry"));
+    assert!(primitive_root.contains("mod inkscript_fill_gradient;"));
+    assert!(!primitive_root.contains("pub mod inkscript_fill_gradient"));
+    assert!(primitive_root.contains("mod inkscript_gesture_adjustment;"));
+    assert!(!primitive_root.contains("pub mod inkscript_gesture_adjustment"));
+    assert!(primitive_root.contains("mod inkscript_selection_floating;"));
+    assert!(!primitive_root.contains("pub mod inkscript_selection_floating"));
     let core_public_root =
         fs::read_to_string(core_source.join("lib.rs")).expect("Core public root must be readable");
     assert!(!core_public_root.contains("LegacySimpleScriptStep"));
     assert!(!core_public_root.contains("LegacyImageScriptStep"));
     assert!(!core_public_root.contains("StrokeGeometryImportAction"));
+    assert!(!core_public_root.contains("FillGradientScriptStep"));
+    assert!(!core_public_root.contains("GestureAdjustmentScriptAction"));
+    assert!(!core_public_root.contains("SelectionFloatingScriptAction"));
     assert!(!core_public_root.contains("FrozenScriptAssets"));
     assert!(!core_public_root.contains("AuthorizedAssetStream"));
     assert!(!core_public_root.contains("freeze_inkscript_assets"));

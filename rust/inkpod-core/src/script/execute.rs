@@ -7,10 +7,12 @@ use super::bind::{
 use super::compile::{ScriptCompileError, ScriptSchemas, StaticScriptProgram, catalog};
 use super::report::{ScriptDryRunReport, ScriptResultValue, ScriptStatementOutcome};
 use crate::primitive::{
-    DocumentTreeAdapterError, DocumentTreeScriptStep, InkScriptEntityKind,
-    InkScriptRuntimeReferences, InvocationResult, LegacyImageAdapterError, LegacyImageScriptStep,
-    LegacySimpleAdapterError, LegacySimpleScriptStep, MetadataColorGuideAdapterError,
-    MetadataColorGuideScriptStep, StrokeGeometryImportAction, StrokeGeometryImportAdapterError,
+    DocumentTreeAdapterError, DocumentTreeScriptStep, FillGradientAdapterError,
+    FillGradientScriptStep, GestureAdjustmentAdapterError, GestureAdjustmentScriptAction,
+    InkScriptEntityKind, InkScriptRuntimeReferences, InvocationResult, LegacyImageAdapterError,
+    LegacyImageScriptStep, LegacySimpleAdapterError, LegacySimpleScriptStep,
+    MetadataColorGuideAdapterError, MetadataColorGuideScriptStep, SelectionFloatingAdapterError,
+    SelectionFloatingScriptAction, StrokeGeometryImportAction, StrokeGeometryImportAdapterError,
 };
 use crate::{
     Core, CoreError, DocumentStateDigest, LayerKind, MAX_PERSISTENT_NUMERIC_ID, PixelFormat,
@@ -277,6 +279,90 @@ pub(super) fn run_inkscript_on_staged_core(
                         .output_entity_kinds(result.output_ids.len())
                         .map_err(stroke_geometry_import_adapter_error)?;
                     (Ok(result), output_kinds)
+                } else if is_fill_gradient(step.command()) {
+                    let invocation = FillGradientScriptStep::from_compiled(
+                        step,
+                        &program.frozen_arguments[index],
+                        &runtime_references,
+                    )
+                    .map(|step| step.to_canonical())
+                    .map_err(fill_gradient_adapter_error)?;
+                    (working.execute_canonical_invocation(invocation), Vec::new())
+                } else if is_gesture_adjustment(step.command()) {
+                    let action = GestureAdjustmentScriptAction::from_compiled(
+                        step,
+                        &program.frozen_arguments[index],
+                        &runtime_references,
+                    )
+                    .map_err(gesture_adjustment_adapter_error)?;
+                    let result = match &action {
+                        GestureAdjustmentScriptAction::Canonical(invocation) => {
+                            working.execute_canonical_invocation(invocation.clone())
+                        }
+                        GestureAdjustmentScriptAction::EditAlpha {
+                            plane_id,
+                            asset_symbol,
+                        } => {
+                            let assets = assets.ok_or(ScriptRunError::InvalidStep)?;
+                            let role = catalog
+                                .entry(step.command())
+                                .map_err(ScriptCompileError::Catalog)
+                                .map_err(ScriptRunError::Compile)?
+                                .assets
+                                .first()
+                                .ok_or(ScriptRunError::InvalidStep)?;
+                            let _role_plan = assets
+                                .bind_role(role, asset_symbol)
+                                .map_err(script_asset_error)?;
+                            let alpha = assets.raster(asset_symbol).map_err(script_asset_error)?;
+                            working.execute_canonical_invocation(
+                                crate::primitive::CanonicalInvocation::EditPlaneAlpha {
+                                    plane_id: *plane_id,
+                                    alpha: alpha.clone(),
+                                },
+                            )
+                        }
+                    };
+                    let result = result?;
+                    let output_kinds = action
+                        .output_entity_kinds(result.output_ids.len())
+                        .map_err(gesture_adjustment_adapter_error)?;
+                    (Ok(result), output_kinds)
+                } else if is_selection_floating(step.command()) {
+                    let action = SelectionFloatingScriptAction::from_compiled(
+                        step,
+                        &program.frozen_arguments[index],
+                        &runtime_references,
+                    )
+                    .map_err(selection_floating_adapter_error)?;
+                    let symbols = action.asset_symbols();
+                    let mut rasters = Vec::new();
+                    if !symbols.is_empty() {
+                        let assets = assets.ok_or(ScriptRunError::InvalidStep)?;
+                        let role = catalog
+                            .entry(step.command())
+                            .map_err(ScriptCompileError::Catalog)
+                            .map_err(ScriptRunError::Compile)?
+                            .assets
+                            .first()
+                            .ok_or(ScriptRunError::InvalidStep)?;
+                        rasters
+                            .try_reserve_exact(symbols.len())
+                            .map_err(|_| ScriptRunError::ResourceLimit)?;
+                        for symbol in symbols {
+                            let _role_plan =
+                                assets.bind_role(role, symbol).map_err(script_asset_error)?;
+                            rasters.push(assets.raster(symbol).map_err(script_asset_error)?);
+                        }
+                    }
+                    let invocation = action
+                        .to_canonical_with_rasters(&rasters)
+                        .map_err(selection_floating_adapter_error)?;
+                    let result = working.execute_canonical_invocation(invocation)?;
+                    let output_kinds = action
+                        .output_entity_kinds(result.output_ids.len())
+                        .map_err(selection_floating_adapter_error)?;
+                    (Ok(result), output_kinds)
                 } else {
                     let invocation = LegacyImageScriptStep::from_compiled(
                         step,
@@ -362,6 +448,24 @@ fn is_stroke_geometry_import(command: &str) -> bool {
         .any(|schema| schema.name() == command)
 }
 
+fn is_fill_gradient(command: &str) -> bool {
+    crate::primitive::inkscript_fill_gradient::FILL_GRADIENT_COMMANDS
+        .iter()
+        .any(|schema| schema.name() == command)
+}
+
+fn is_gesture_adjustment(command: &str) -> bool {
+    crate::primitive::inkscript_gesture_adjustment::GESTURE_ADJUSTMENT_COMMANDS
+        .iter()
+        .any(|schema| schema.name() == command)
+}
+
+fn is_selection_floating(command: &str) -> bool {
+    crate::primitive::inkscript_selection_floating::SELECTION_FLOATING_COMMANDS
+        .iter()
+        .any(|schema| schema.name() == command)
+}
+
 fn initial_runtime_references(
     bindings: &BTreeMap<String, InkScriptBoundValue>,
 ) -> Result<InkScriptRuntimeReferences, ScriptRunError> {
@@ -431,6 +535,30 @@ fn stroke_geometry_import_adapter_error(error: StrokeGeometryImportAdapterError)
     match error {
         StrokeGeometryImportAdapterError::MissingReference => ScriptRunError::MissingResult,
         StrokeGeometryImportAdapterError::ResourceLimit => ScriptRunError::ResourceLimit,
+        _ => ScriptRunError::InvalidStep,
+    }
+}
+
+fn fill_gradient_adapter_error(error: FillGradientAdapterError) -> ScriptRunError {
+    match error {
+        FillGradientAdapterError::MissingReference => ScriptRunError::MissingResult,
+        FillGradientAdapterError::ResourceLimit => ScriptRunError::ResourceLimit,
+        _ => ScriptRunError::InvalidStep,
+    }
+}
+
+fn gesture_adjustment_adapter_error(error: GestureAdjustmentAdapterError) -> ScriptRunError {
+    match error {
+        GestureAdjustmentAdapterError::MissingReference => ScriptRunError::MissingResult,
+        GestureAdjustmentAdapterError::ResourceLimit => ScriptRunError::ResourceLimit,
+        _ => ScriptRunError::InvalidStep,
+    }
+}
+
+fn selection_floating_adapter_error(error: SelectionFloatingAdapterError) -> ScriptRunError {
+    match error {
+        SelectionFloatingAdapterError::MissingReference => ScriptRunError::MissingResult,
+        SelectionFloatingAdapterError::ResourceLimit => ScriptRunError::ResourceLimit,
         _ => ScriptRunError::InvalidStep,
     }
 }
