@@ -11,10 +11,10 @@ use crate::primitive::{
     DocumentTreeScriptStep, FillGradientAdapterError, FillGradientScriptStep,
     GestureAdjustmentAdapterError, GestureAdjustmentScriptAction, InkScriptEntityKind,
     InkScriptRuntimeReferences, InvocationResult, LegacyImageAdapterError, LegacyImageScriptStep,
-    LegacySimpleAdapterError, LegacySimpleScriptStep, MetadataColorGuideAdapterError,
-    MetadataColorGuideScriptStep, SelectionFloatingAdapterError, SelectionFloatingScriptAction,
-    StrokeGeometryImportAction, StrokeGeometryImportAdapterError, VectorAdapterError,
-    VectorScriptStep,
+    LegacySimpleAdapterError, LegacySimpleScriptStep, LightTableAdapterError,
+    LightTableScriptAction, MetadataColorGuideAdapterError, MetadataColorGuideScriptStep,
+    SelectionFloatingAdapterError, SelectionFloatingScriptAction, StrokeGeometryImportAction,
+    StrokeGeometryImportAdapterError, VectorAdapterError, VectorScriptStep,
 };
 use crate::{
     Core, CoreError, DocumentStateDigest, LayerKind, MAX_PERSISTENT_NUMERIC_ID, PixelFormat,
@@ -389,6 +389,41 @@ pub(super) fn run_inkscript_on_staged_core(
                         .output_entity_kinds(result.output_ids.len())
                         .map_err(annotation_frame_adapter_error)?;
                     (Ok(result), output_kinds)
+                } else if is_light_table(step.command()) {
+                    let action = LightTableScriptAction::from_compiled(
+                        step,
+                        &program.frozen_arguments[index],
+                        &runtime_references,
+                    )
+                    .map_err(light_table_adapter_error)?;
+                    let symbols = action.asset_symbols();
+                    let mut records = Vec::new();
+                    if !symbols.is_empty() {
+                        let assets = assets.ok_or(ScriptRunError::InvalidStep)?;
+                        let role = catalog
+                            .entry(step.command())
+                            .map_err(ScriptCompileError::Catalog)
+                            .map_err(ScriptRunError::Compile)?
+                            .assets
+                            .first()
+                            .ok_or(ScriptRunError::InvalidStep)?;
+                        records
+                            .try_reserve_exact(symbols.len())
+                            .map_err(|_| ScriptRunError::ResourceLimit)?;
+                        for symbol in symbols {
+                            let _role_plan =
+                                assets.bind_role(role, symbol).map_err(script_asset_error)?;
+                            records.push(assets.raster_record(symbol).map_err(script_asset_error)?);
+                        }
+                    }
+                    let invocation = action
+                        .to_canonical_with_assets(&records)
+                        .map_err(light_table_adapter_error)?;
+                    let result = working.execute_canonical_invocation(invocation)?;
+                    let output_kinds = action
+                        .output_entity_kinds(result.output_ids.len())
+                        .map_err(light_table_adapter_error)?;
+                    (Ok(result), output_kinds)
                 } else {
                     let invocation = LegacyImageScriptStep::from_compiled(
                         step,
@@ -504,6 +539,12 @@ fn is_annotation_frame(command: &str) -> bool {
         .any(|schema| schema.name() == command)
 }
 
+fn is_light_table(command: &str) -> bool {
+    crate::primitive::inkscript_light_table::LIGHT_TABLE_COMMANDS
+        .iter()
+        .any(|schema| schema.name() == command)
+}
+
 fn initial_runtime_references(
     bindings: &BTreeMap<String, InkScriptBoundValue>,
 ) -> Result<InkScriptRuntimeReferences, ScriptRunError> {
@@ -614,6 +655,16 @@ fn annotation_frame_adapter_error(error: AnnotationFrameAdapterError) -> ScriptR
         AnnotationFrameAdapterError::MissingReference => ScriptRunError::MissingResult,
         AnnotationFrameAdapterError::ResourceLimit => ScriptRunError::ResourceLimit,
         _ => ScriptRunError::InvalidStep,
+    }
+}
+
+fn light_table_adapter_error(error: LightTableAdapterError) -> ScriptRunError {
+    match error {
+        LightTableAdapterError::MissingReference => ScriptRunError::MissingResult,
+        LightTableAdapterError::ResourceLimit => ScriptRunError::ResourceLimit,
+        LightTableAdapterError::InvalidTypedStep
+        | LightTableAdapterError::InvalidValue
+        | LightTableAdapterError::UnsupportedPrimitive => ScriptRunError::InvalidStep,
     }
 }
 
@@ -826,6 +877,34 @@ fn initial_snapshot(core: &Core) -> Result<InkScriptInitialDocumentSnapshot, Cor
             properties: BTreeMap::new(),
         });
     }
+    for set in core.light_table_sets()? {
+        let mut properties = BTreeMap::new();
+        properties.insert(
+            "name".to_owned(),
+            InkScriptComparableValue::String(set.name),
+        );
+        entities.push(InkScriptEntitySnapshot {
+            reference: InkScriptEntityReference {
+                entity: "light_table_set".to_owned(),
+                persistent_id: set.id,
+            },
+            owner: None,
+            properties,
+        });
+    }
+    for (set_id, item_id) in core.light_table_item_owners()? {
+        entities.push(InkScriptEntitySnapshot {
+            reference: InkScriptEntityReference {
+                entity: "light_table_item".to_owned(),
+                persistent_id: item_id,
+            },
+            owner: Some(InkScriptEntityReference {
+                entity: "light_table_set".to_owned(),
+                persistent_id: set_id,
+            }),
+            properties: BTreeMap::new(),
+        });
+    }
     let selection = core.selection_bounds()?;
     Ok(InkScriptInitialDocumentSnapshot {
         source_document_uuid: uuid_text(info.document_uuid),
@@ -957,6 +1036,8 @@ fn materialize_results(
                     "annotations" => InkScriptEntityKind::Annotation,
                     "shooting_frames" => InkScriptEntityKind::ShootingFrame,
                     "vanishing_points" => InkScriptEntityKind::VanishingPoint,
+                    "set" => InkScriptEntityKind::LightTableSet,
+                    "item" | "items" => InkScriptEntityKind::LightTableItem,
                     _ => return Err(ScriptRunError::InvalidStep),
                 };
                 entity_kinds

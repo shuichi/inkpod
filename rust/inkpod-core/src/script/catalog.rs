@@ -454,16 +454,16 @@ fn asset_numeric(
     path: &[&str],
     assets: &BTreeMap<String, CatalogAssetSummary>,
 ) -> Result<i128, CatalogError> {
-    if path.len() != 2 {
+    if path.len() < 2 {
         return Err(CatalogError::UnknownField);
     }
     let InkScriptTypedValueKind::AssetReference(symbol) =
-        value_at_path(arguments, &path[..1])?.kind()
+        value_at_path(arguments, &path[..path.len() - 1])?.kind()
     else {
         return Err(CatalogError::UnknownField);
     };
     let summary = assets.get(symbol).ok_or(CatalogError::UnknownField)?;
-    match path[1] {
+    match path[path.len() - 1] {
         "logical_element_count" => Ok(i128::from(summary.logical_element_count)),
         "logical_payload_bytes" => Ok(i128::from(summary.logical_payload_bytes)),
         _ => Err(CatalogError::UnknownField),

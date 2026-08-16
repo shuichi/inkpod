@@ -539,6 +539,24 @@ impl Core {
             .collect())
     }
 
+    pub(crate) fn light_table_item_owners(&self) -> Result<Vec<(u64, u64)>, CoreError> {
+        let state = &self
+            .document
+            .as_ref()
+            .ok_or(CoreError::NoDocument)?
+            .light_table;
+        let mut result = Vec::new();
+        result
+            .try_reserve_exact(state.item_count())
+            .map_err(|_| CoreError::InvalidState("light-table item snapshot allocation failed"))?;
+        for set in &state.sets {
+            for item in &set.items {
+                result.push((set.id.get(), item.id.get()));
+            }
+        }
+        Ok(result)
+    }
+
     /// Replaces an item's name, source, and display properties while retaining IDs.
     ///
     /// Success is one undoable edit; validation failure retains the existing item.

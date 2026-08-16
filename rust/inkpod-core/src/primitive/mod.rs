@@ -36,6 +36,11 @@ pub(crate) mod inkscript_fill_gradient;
 pub(crate) mod inkscript_gesture_adjustment;
 #[allow(
     dead_code,
+    reason = "the private Light Table adapter is connected only through the script runner"
+)]
+pub(crate) mod inkscript_light_table;
+#[allow(
+    dead_code,
     reason = "the private metadata/color/guide adapter is connected only through the script runner"
 )]
 pub(crate) mod inkscript_metadata;
@@ -81,6 +86,7 @@ pub(crate) use inkscript_fill_gradient::{FillGradientAdapterError, FillGradientS
 pub(crate) use inkscript_gesture_adjustment::{
     GestureAdjustmentAdapterError, GestureAdjustmentScriptAction,
 };
+pub(crate) use inkscript_light_table::{LightTableAdapterError, LightTableScriptAction};
 pub(crate) use inkscript_metadata::{MetadataColorGuideAdapterError, MetadataColorGuideScriptStep};
 pub(crate) use inkscript_reference::{InkScriptEntityKind, InkScriptRuntimeReferences};
 pub(crate) use inkscript_selection_floating::{

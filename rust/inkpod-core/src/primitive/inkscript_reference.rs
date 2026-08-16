@@ -13,6 +13,8 @@ pub(crate) enum InkScriptEntityKind {
     Annotation,
     ShootingFrame,
     VanishingPoint,
+    LightTableSet,
+    LightTableItem,
 }
 
 impl InkScriptEntityKind {
@@ -26,6 +28,8 @@ impl InkScriptEntityKind {
             "annotation" | "annotation_ref" => Some(Self::Annotation),
             "shooting_frame" | "shooting_frame_ref" => Some(Self::ShootingFrame),
             "vanishing_point" | "vanishing_point_ref" => Some(Self::VanishingPoint),
+            "light_table_set" | "light_table_set_ref" => Some(Self::LightTableSet),
+            "light_table_item" | "light_table_item_ref" => Some(Self::LightTableItem),
             _ => None,
         }
     }

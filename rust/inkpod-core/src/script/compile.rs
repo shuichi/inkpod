@@ -7,8 +7,8 @@ use super::catalog::{
 };
 use crate::primitive::{
     inkscript, inkscript_annotation_frame, inkscript_batch, inkscript_document_tree,
-    inkscript_fill_gradient, inkscript_gesture_adjustment, inkscript_metadata,
-    inkscript_selection_floating, inkscript_stroke_geometry, inkscript_vector,
+    inkscript_fill_gradient, inkscript_gesture_adjustment, inkscript_light_table,
+    inkscript_metadata, inkscript_selection_floating, inkscript_stroke_geometry, inkscript_vector,
 };
 use inkpod_format::{
     InkScriptDeclarationModel, InkScriptEnvelopeErrorCode, InkScriptInputDeclarationKind,
@@ -281,6 +281,7 @@ impl ScriptSchemas {
                 .chain(inkscript_stroke_geometry::STROKE_GEOMETRY_ENUMS)
                 .chain(inkscript_vector::VECTOR_ENUMS)
                 .chain(inkscript_annotation_frame::ANNOTATION_FRAME_ENUMS)
+                .chain(inkscript_light_table::LIGHT_TABLE_ENUMS)
                 .copied()
                 .collect(),
             constructors: inkscript_document_tree::DOCUMENT_TREE_CONSTRUCTORS
@@ -299,6 +300,7 @@ impl ScriptSchemas {
                 .chain(inkscript_stroke_geometry::STROKE_GEOMETRY_RECORDS)
                 .chain(inkscript_vector::VECTOR_RECORDS)
                 .chain(inkscript_annotation_frame::ANNOTATION_FRAME_RECORDS)
+                .chain(inkscript_light_table::LIGHT_TABLE_RECORDS)
                 .copied()
                 .collect(),
             commands: inkscript::LEGACY_SIMPLE_COMMANDS
@@ -312,6 +314,7 @@ impl ScriptSchemas {
                 .chain(inkscript_stroke_geometry::STROKE_GEOMETRY_COMMANDS)
                 .chain(inkscript_vector::VECTOR_COMMANDS)
                 .chain(inkscript_annotation_frame::ANNOTATION_FRAME_COMMANDS)
+                .chain(inkscript_light_table::LIGHT_TABLE_COMMANDS)
                 .copied()
                 .collect(),
         }
@@ -663,6 +666,77 @@ pub(super) fn catalog(
                 &["semantic_target"],
                 ordered_entity_result("vanishing_points", "vanishing_point", 0),
             ),
+            "light_table_set_global_opacity" => {
+                light_table_strict(literal_work(1), &["active_light_table_set"], Vec::new())
+            }
+            "light_table_create_set" => light_table_bound(
+                literal_work_with_outputs_and_growth(256, 1, 1),
+                &["initial_light_table_set_names"],
+                entity_result_with_role("set", "light_table_set"),
+            ),
+            "light_table_duplicate_set" => light_table_bound(
+                literal_work_with_outputs_and_growth(4_097, 1, 4_097),
+                &[
+                    "semantic_target",
+                    "state_coupled_light_table_items",
+                    "initial_light_table_set_names",
+                ],
+                entity_result_with_role("set", "light_table_set"),
+            ),
+            "light_table_delete_set" => light_table_bound(
+                literal_work(4_097),
+                &["semantic_target", "initial_light_table_set_order"],
+                Vec::new(),
+            ),
+            "light_table_rename_set" => {
+                light_table_bound(literal_work(1), &["semantic_target"], Vec::new())
+            }
+            "light_table_reorder_set" => light_table_bound(
+                literal_work(256),
+                &["semantic_target", "initial_light_table_set_order"],
+                Vec::new(),
+            ),
+            "light_table_set_active" => {
+                light_table_bound(literal_work(1), &["semantic_target"], Vec::new())
+            }
+            "light_table_add_item" => light_table_strict(
+                light_table_item_asset_work(&["input"], 1),
+                &["active_light_table_set", "source_raster_asset"],
+                entity_result_with_role("item", "light_table_item"),
+            ),
+            "light_table_update_item_properties" => light_table_bound(
+                literal_work(1),
+                &["semantic_target", "active_light_table_set"],
+                Vec::new(),
+            ),
+            "light_table_update_item" => light_table_bound(
+                light_table_item_asset_work(&["input"], 0),
+                &[
+                    "semantic_target",
+                    "active_light_table_set",
+                    "source_raster_asset",
+                ],
+                Vec::new(),
+            ),
+            "light_table_remove_item" => light_table_bound(
+                literal_work(4_096),
+                &["semantic_target", "active_light_table_set"],
+                Vec::new(),
+            ),
+            "light_table_reorder_item" => light_table_bound(
+                literal_work(4_096),
+                &[
+                    "semantic_target",
+                    "active_light_table_set",
+                    "initial_light_table_item_order",
+                ],
+                Vec::new(),
+            ),
+            "light_table_bulk_register" => light_table_bound(
+                light_table_bulk_asset_work(),
+                &["semantic_target", "source_raster_assets"],
+                ordered_entity_result("items", "light_table_item", 0),
+            ),
             "apply_boundary_airbrush" => {
                 restricted(67_108_864, &["semantic_target"], "boundary_airbrush")
             }
@@ -832,6 +906,14 @@ pub(super) fn catalog(
                 inline: true,
                 external: true,
             }],
+            "light_table_add_item" | "light_table_update_item" | "light_table_bulk_register" => {
+                vec![CatalogAssetMetadata {
+                    name: "source_rasters",
+                    kind: "canonical_raster",
+                    inline: true,
+                    external: true,
+                }]
+            }
             _ => Vec::new(),
         };
         entries.push(CatalogEntry {
@@ -918,6 +1000,18 @@ fn entity_result(name: &'static str) -> Vec<CatalogResultMetadata> {
         name,
         namespace: Some("document_stable"),
         owner_role: Some(name),
+        output_id_ordinal: Some(0),
+    }]
+}
+
+fn entity_result_with_role(
+    name: &'static str,
+    owner_role: &'static str,
+) -> Vec<CatalogResultMetadata> {
+    vec![CatalogResultMetadata {
+        name,
+        namespace: Some("document_stable"),
+        owner_role: Some(owner_role),
         output_id_ordinal: Some(0),
     }]
 }
@@ -1155,6 +1249,83 @@ fn annotation_frame_bound(
         results,
         "annotation_frame_vanishing",
     )
+}
+
+fn light_table_bound(
+    work: CatalogWorkFormula,
+    preconditions: &[&'static str],
+    results: Vec<CatalogResultMetadata>,
+) -> EntryTuple {
+    (
+        InkScriptPortabilityClass::RequiresBinding,
+        preconditions.to_vec(),
+        work,
+        None,
+        false,
+        results,
+        "light_table",
+    )
+}
+
+fn light_table_strict(
+    work: CatalogWorkFormula,
+    preconditions: &[&'static str],
+    results: Vec<CatalogResultMetadata>,
+) -> EntryTuple {
+    (
+        InkScriptPortabilityClass::StrictSourceOnly,
+        preconditions.to_vec(),
+        work,
+        None,
+        false,
+        results,
+        "light_table",
+    )
+}
+
+fn light_table_item_asset_work(root: &[&'static str], output_ids: u64) -> CatalogWorkFormula {
+    let mut payload_path = root.to_vec();
+    payload_path.extend(["source", "raster", "logical_payload_bytes"]);
+    let mut element_path = root.to_vec();
+    element_path.extend(["source", "raster", "logical_element_count"]);
+    let payload = CatalogNumericExpression::Field(payload_path);
+    CatalogWorkFormula {
+        max_invocations: CatalogNumericExpression::Literal(1),
+        max_output_ids: CatalogNumericExpression::Literal(output_ids),
+        max_asset_bytes: payload.clone(),
+        max_work_units: CatalogNumericExpression::Field(element_path),
+        max_output_growth: payload,
+    }
+}
+
+fn light_table_bulk_asset_work() -> CatalogWorkFormula {
+    let payload = CatalogNumericExpression::BoundedSum {
+        path: vec!["inputs"],
+        maximum_items: 4_096,
+        body: Box::new(CatalogNumericExpression::Field(vec![
+            "source",
+            "raster",
+            "logical_payload_bytes",
+        ])),
+    };
+    CatalogWorkFormula {
+        max_invocations: CatalogNumericExpression::Literal(1),
+        max_output_ids: CatalogNumericExpression::ListLength {
+            path: vec!["inputs"],
+            maximum: 4_096,
+        },
+        max_asset_bytes: payload.clone(),
+        max_work_units: CatalogNumericExpression::BoundedSum {
+            path: vec!["inputs"],
+            maximum_items: 4_096,
+            body: Box::new(CatalogNumericExpression::Field(vec![
+                "source",
+                "raster",
+                "logical_element_count",
+            ])),
+        },
+        max_output_growth: payload,
+    }
 }
 
 fn annotation_work() -> CatalogWorkFormula {

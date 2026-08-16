@@ -458,9 +458,9 @@ fn inkscript_registry_meta_schema_is_closed_and_draft_is_private() {
         "inkpod.inkscript.catalog-draft"
     );
     assert_eq!(member(&draft, "production"), &Json::Bool(false));
-    assert_eq!(array(member(&draft, "entries")).len(), 71);
-    assert_eq!(array(member(&draft, "enums")).len(), 32);
-    assert_eq!(array(member(&draft, "records")).len(), 49);
+    assert_eq!(array(member(&draft, "entries")).len(), 84);
+    assert_eq!(array(member(&draft, "enums")).len(), 33);
+    assert_eq!(array(member(&draft, "records")).len(), 52);
     assert_eq!(array(member(&draft, "constructors")).len(), 11);
     assert!(
         !repository()
@@ -1437,6 +1437,166 @@ fn inkscript_v2_annotation_frame_vanishing_contract_is_exact() {
 }
 
 #[test]
+fn inkscript_light_table_entries_are_replayable_asset_owned_and_session_commands_are_excluded() {
+    let language = load_json("schemas/inkscript/language-v2.json");
+    let draft = load_json("schemas/inkscript/catalog-v2.draft.json");
+    let manifest = load_json("schemas/inkscript/owner-manifest-v2.json");
+    let type_names = composed_catalog_type_names(&language, &draft);
+    const OWNER_MILESTONE: &str = concat!("M", "22");
+    let expected = BTreeMap::from([
+        (
+            "light_table_set_global_opacity",
+            ("0x000a0001", 2, 2, "INKS-EQ-0072"),
+        ),
+        (
+            "light_table_create_set",
+            ("0x000a0002", 2, 2, "INKS-EQ-0073"),
+        ),
+        (
+            "light_table_duplicate_set",
+            ("0x000a0003", 2, 2, "INKS-EQ-0074"),
+        ),
+        (
+            "light_table_delete_set",
+            ("0x000a0004", 2, 2, "INKS-EQ-0075"),
+        ),
+        (
+            "light_table_rename_set",
+            ("0x000a0005", 2, 2, "INKS-EQ-0076"),
+        ),
+        (
+            "light_table_reorder_set",
+            ("0x000a0006", 2, 2, "INKS-EQ-0077"),
+        ),
+        (
+            "light_table_set_active",
+            ("0x000a0007", 2, 2, "INKS-EQ-0078"),
+        ),
+        ("light_table_add_item", ("0x000a0010", 2, 2, "INKS-EQ-0079")),
+        (
+            "light_table_update_item_properties",
+            ("0x000a0011", 2, 2, "INKS-EQ-0080"),
+        ),
+        (
+            "light_table_update_item",
+            ("0x000a0012", 2, 2, "INKS-EQ-0081"),
+        ),
+        (
+            "light_table_remove_item",
+            ("0x000a0013", 2, 2, "INKS-EQ-0082"),
+        ),
+        (
+            "light_table_reorder_item",
+            ("0x000a0014", 2, 2, "INKS-EQ-0083"),
+        ),
+        (
+            "light_table_bulk_register",
+            ("0x000a0016", 2, 1, "INKS-EQ-0084"),
+        ),
+    ]);
+    let manifest_owners = array(member(&manifest, "owners"))
+        .iter()
+        .filter(|owner| string(member(owner, "owner_milestone")) == OWNER_MILESTONE)
+        .map(|owner| (string(member(owner, "command_name")), owner))
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(manifest_owners.len(), expected.len());
+    let entries = array(member(&draft, "entries"))
+        .iter()
+        .filter(|entry| string(member(entry, "owner_milestone")) == OWNER_MILESTONE)
+        .collect::<Vec<_>>();
+    assert_eq!(entries.len(), expected.len());
+
+    for entry in entries {
+        let name = string(member(entry, "name"));
+        let (primitive_id, schema, semantics, equivalence) = expected[name];
+        assert_eq!(string(member(entry, "primitive_id")), primitive_id);
+        assert_eq!(number(member(entry, "primitive_schema_version")), schema);
+        assert_eq!(number(member(entry, "replay_epoch")), 23);
+        assert_eq!(number(member(entry, "semantics_revision")), semantics);
+        assert_eq!(string(member(entry, "equivalence_test")), equivalence);
+        assert_eq!(string(member(entry, "owner_milestone")), OWNER_MILESTONE);
+        assert_eq!(
+            string(member(member(entry, "editor"), "family")),
+            "light_table"
+        );
+        for argument in array(member(entry, "arguments")) {
+            assert!(type_names.contains(base_type(string(member(argument, "type")))));
+        }
+        let owner = manifest_owners[name];
+        assert_eq!(string(member(owner, "primitive_id")), primitive_id);
+        assert_eq!(
+            string(member(owner, "planned_equivalence_test")),
+            equivalence
+        );
+    }
+
+    for record_name in [
+        "light_table_source",
+        "light_table_item_properties",
+        "light_table_item_input",
+    ] {
+        validate_fields(
+            member(named(member(&draft, "records"), record_name), "fields"),
+            &type_names,
+            record_name,
+        );
+    }
+    for (command, argument) in [
+        ("light_table_add_item", "input"),
+        ("light_table_update_item", "input"),
+        ("light_table_bulk_register", "inputs"),
+    ] {
+        let argument = named(
+            member(named(member(&draft, "entries"), command), "arguments"),
+            argument,
+        );
+        let role = member(argument, "asset_role");
+        assert_eq!(string(member(role, "name")), "source_rasters");
+        assert_eq!(string(member(role, "kind")), "canonical_raster");
+        assert_eq!(member(role, "inline"), &Json::Bool(true));
+        assert_eq!(member(role, "external"), &Json::Bool(true));
+    }
+
+    let expected_results = BTreeMap::from([
+        (
+            "light_table_create_set",
+            ("set", "light_table_set_ref", "scalar"),
+        ),
+        (
+            "light_table_duplicate_set",
+            ("set", "light_table_set_ref", "scalar"),
+        ),
+        (
+            "light_table_add_item",
+            ("item", "light_table_item_ref", "scalar"),
+        ),
+        (
+            "light_table_bulk_register",
+            ("items", "list<light_table_item_ref>", "ordered_list"),
+        ),
+    ]);
+    for (name, (result_name, result_type, cardinality)) in expected_results {
+        let results = array(member(named(member(&draft, "entries"), name), "results"));
+        assert_eq!(results.len(), 1);
+        assert_eq!(string(member(&results[0], "name")), result_name);
+        assert_eq!(string(member(&results[0], "type")), result_type);
+        assert_eq!(string(member(&results[0], "cardinality")), cardinality);
+        assert_eq!(number(member(&results[0], "output_id_ordinal")), 0);
+    }
+
+    assert!(
+        array(member(&draft, "entries"))
+            .iter()
+            .all(|entry| string(member(entry, "name")) != "light_table_swap_with_active")
+    );
+    let excluded = array(member(&manifest, "excluded_primitives"))
+        .iter()
+        .find(|entry| string(member(entry, "canonical_name")) == "LightTableSwapWithActive")
+        .expect("session-only Light Table swap exclusion must exist");
+    assert_eq!(string(member(excluded, "reason")), "session_only");
+}
+
+#[test]
 fn inkscript_legacy_simple_catalog_entries_are_closed_typed_and_owner_exact() {
     let language = load_json("schemas/inkscript/language-v2.json");
     let draft = load_json("schemas/inkscript/catalog-v2.draft.json");
@@ -2273,6 +2433,7 @@ fn inkscript_typed_frontend_models_are_unreachable_from_core_ffi_and_windows() {
         core_source.join("primitive/inkscript_selection_floating.rs"),
         core_source.join("primitive/inkscript_vector.rs"),
         core_source.join("primitive/inkscript_annotation_frame.rs"),
+        core_source.join("primitive/inkscript_light_table.rs"),
     ];
     let private_compiler = core_source.join("script");
     let mut core_sources = Vec::new();
@@ -2310,6 +2471,8 @@ fn inkscript_typed_frontend_models_are_unreachable_from_core_ffi_and_windows() {
     assert!(!primitive_root.contains("pub mod inkscript_vector"));
     assert!(primitive_root.contains("mod inkscript_annotation_frame;"));
     assert!(!primitive_root.contains("pub mod inkscript_annotation_frame"));
+    assert!(primitive_root.contains("mod inkscript_light_table;"));
+    assert!(!primitive_root.contains("pub mod inkscript_light_table"));
     let core_public_root =
         fs::read_to_string(core_source.join("lib.rs")).expect("Core public root must be readable");
     assert!(!core_public_root.contains("LegacySimpleScriptStep"));
@@ -2320,6 +2483,7 @@ fn inkscript_typed_frontend_models_are_unreachable_from_core_ffi_and_windows() {
     assert!(!core_public_root.contains("SelectionFloatingScriptAction"));
     assert!(!core_public_root.contains("VectorScriptStep"));
     assert!(!core_public_root.contains("AnnotationFrameScriptStep"));
+    assert!(!core_public_root.contains("LightTableScriptAction"));
     assert!(!core_public_root.contains("FrozenScriptAssets"));
     assert!(!core_public_root.contains("AuthorizedAssetStream"));
     assert!(!core_public_root.contains("freeze_inkscript_assets"));

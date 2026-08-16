@@ -660,7 +660,9 @@ fn bind_declaration(
         | InkScriptEntityKind::VectorFill
         | InkScriptEntityKind::Annotation
         | InkScriptEntityKind::ShootingFrame
-        | InkScriptEntityKind::VanishingPoint => {
+        | InkScriptEntityKind::VanishingPoint
+        | InkScriptEntityKind::LightTableSet
+        | InkScriptEntityKind::LightTableItem => {
             return Err(DocumentTreeAdapterError::TargetMismatch);
         }
     };

@@ -12,9 +12,10 @@ use crate::{
     BrushShape, CellCreationOptions, CellSizing, CoordinateSpace, Core, DEFAULT_DPI_MILLI,
     EditorTarget, EffectSample, FillOperation, FillRequest, FrameAnchor, GeometryCrossSection,
     GeometryOptions, GeometryPrimitive, GeometryRequest, Gradient, GradientKind, GradientMode,
-    GradientStop, GridConfig, GuideAxis, InclusionMode, LayerKind, MAX_PERSISTENT_NUMERIC_ID,
+    GradientStop, GridConfig, GuideAxis, InclusionMode, LayerKind, LightTableDisplayMode,
+    LightTableItemInput, LightTableItemProperties, LightTableSource, MAX_PERSISTENT_NUMERIC_ID,
     NativeOpenStrategy, OutputColorGuardProfile, PaintTool, PixelFormat, PixelValue, PointF32,
-    PrimitiveId, PrimitiveRequest, ProcedureId, RangeInterpretation, RectI32,
+    PrimitiveId, PrimitiveRequest, ProcedureId, RangeInterpretation, RectI32, RgbaRasterBytes,
     ScopedColorReplaceMode, SelectionConstructionOptions, SelectionLayerOperation,
     SelectionOperation, SelectionShape, ShootingFrameAnchor, ShootingFrameEdit, ShootingFrameInput,
     Stamp, StampGesture, StampShape, StartColorPredicate, StateId, Stroke, StrokeSample,
@@ -4370,6 +4371,610 @@ fn dirty_pathless_dry_run_and_saved_snapshot_contracts() {
 #[ignore = "release-only InkScript quick performance contract"]
 fn approved_quick_performance_contract() {
     super::performance::run_approved_quick();
+}
+
+fn light_table_properties(
+    opacity_milli: u32,
+    display_mode: LightTableDisplayMode,
+    display_color: [u8; 4],
+    transform: (i32, i32, u32, u32, i32),
+) -> LightTableItemProperties {
+    let (
+        translate_x_milli,
+        translate_y_milli,
+        scale_x_milli,
+        scale_y_milli,
+        rotation_milli_degrees,
+    ) = transform;
+    LightTableItemProperties {
+        visible: true,
+        opacity_milli,
+        display_mode,
+        display_color: PixelValue::Rgba(display_color),
+        translate_x_milli,
+        translate_y_milli,
+        scale_x_milli,
+        scale_y_milli,
+        rotation_milli_degrees,
+    }
+}
+
+fn light_table_item(
+    name: &str,
+    source_uuid: u128,
+    source_revision: u64,
+    pixels: [u8; 4],
+    properties: LightTableItemProperties,
+) -> LightTableItemInput {
+    let source = LightTableSource::from_rgba_bytes(
+        source_uuid,
+        source_revision,
+        RectI32 {
+            x: 0,
+            y: 0,
+            width: 1,
+            height: 1,
+        },
+        RgbaRasterBytes {
+            width: 1,
+            height: 1,
+            pixel_format: PixelFormat::StraightRgba8,
+            dpi_x_milli: Some(DEFAULT_DPI_MILLI),
+            dpi_y_milli: Some(DEFAULT_DPI_MILLI),
+            pixels: pixels.to_vec(),
+        },
+    )
+    .unwrap();
+    LightTableItemInput {
+        name: name.to_owned(),
+        source,
+        visible: properties.visible,
+        opacity_milli: properties.opacity_milli,
+        display_mode: properties.display_mode,
+        display_color: properties.display_color,
+        translate_x_milli: properties.translate_x_milli,
+        translate_y_milli: properties.translate_y_milli,
+        scale_x_milli: properties.scale_x_milli,
+        scale_y_milli: properties.scale_y_milli,
+        rotation_milli_degrees: properties.rotation_milli_degrees,
+    }
+}
+
+fn light_table_script_item(
+    name: &str,
+    source_uuid: u128,
+    source_revision: u64,
+    asset_symbol: &str,
+    properties: LightTableItemProperties,
+) -> String {
+    let mode = match properties.display_mode {
+        LightTableDisplayMode::Color => "color",
+        LightTableDisplayMode::Monotone => "monotone",
+        LightTableDisplayMode::Halftone => "halftone",
+    };
+    let PixelValue::Rgba(color) = properties.display_color else {
+        panic!("fixture light-table color must be rgba8");
+    };
+    format!(
+        r#"{{ name = "{name}"; source = {{ document_uuid = uuid"{}"; source_revision = {source_revision}; reference_frame = rect(0, 0, 1, 1); dpi_x_milli = {DEFAULT_DPI_MILLI}; dpi_y_milli = {DEFAULT_DPI_MILLI}; raster = asset({asset_symbol}); }}; properties = {{ visible = {}; opacity_milli = {}; display_mode = {mode}; display_color = rgba8({}, {}, {}, {}); translate_x_milli = {}; translate_y_milli = {}; scale_x_milli = {}; scale_y_milli = {}; rotation_milli_degrees = {}; }}; }}"#,
+        document_uuid(source_uuid),
+        properties.visible,
+        properties.opacity_milli,
+        color[0],
+        color[1],
+        color[2],
+        color[3],
+        properties.translate_x_milli,
+        properties.translate_y_milli,
+        properties.scale_x_milli,
+        properties.scale_y_milli,
+        properties.rotation_milli_degrees,
+    )
+}
+
+fn light_table_asset(symbol: &str, pixels: [u8; 4], base64: &str) -> String {
+    let id = rgba8_asset_id(pixels.to_vec(), 1, 1);
+    format!(
+        r#"asset {symbol} {{ asset_id = blake3"{}"; kind = "canonical_raster"; descriptor = {{ pixel_format = rgba8; color_space = srgb; alpha = straight; width = 1; height = 1; stride = 4; element_count = 1; }}; data = base64"""{base64}"""; }};"#,
+        asset_digest_text(id)
+    )
+}
+
+fn light_table_script_fixture() -> (
+    Core,
+    StaticScriptProgram,
+    FrozenScriptAssets,
+    Vec<LightTableItemInput>,
+    u64,
+    u64,
+) {
+    let mut base = Core::new();
+    base.new_cell_with_uuid(
+        8,
+        8,
+        DEFAULT_DPI_MILLI,
+        DEFAULT_DPI_MILLI,
+        0x4d32_324c_4947_4854,
+    )
+    .unwrap();
+    let info = base.document_info().unwrap();
+    let default_set_id = base.light_table_sets().unwrap()[0].id;
+    let first = light_table_properties(
+        900,
+        LightTableDisplayMode::Color,
+        [1, 2, 3, 255],
+        (10, -20, 1_000, 1_100, 500),
+    );
+    let second = light_table_properties(
+        800,
+        LightTableDisplayMode::Monotone,
+        [4, 5, 6, 255],
+        (-30, 40, 900, 1_200, -1_000),
+    );
+    let third = light_table_properties(
+        700,
+        LightTableDisplayMode::Halftone,
+        [7, 8, 9, 255],
+        (50, 60, 1_300, 800, 2_000),
+    );
+    let (_, initial_item_id) = base
+        .light_table_add_item(light_table_item("Initial", 0x91, 1, [5, 6, 7, 255], first))
+        .unwrap();
+    let input_a = light_table_script_item("Added A", 0xa1, 1, "lt_a", first);
+    let input_b = light_table_script_item("Updated B", 0xb2, 2, "lt_b", third);
+    let input_c = light_table_script_item("Bulk C", 0xc3, 3, "lt_c", first);
+    let input_d = light_table_script_item("Bulk D", 0xd4, 4, "lt_d", second);
+    let properties_second = r#"{ visible = true; opacity_milli = 800; display_mode = monotone; display_color = rgba8(4, 5, 6, 255); translate_x_milli = -30; translate_y_milli = 40; scale_x_milli = 900; scale_y_milli = 1200; rotation_milli_degrees = -1000; }"#;
+    let program = format!(
+        r#"
+step "Initial item no-op" {{ enabled = true; invoke light_table_update_item_properties {{ item_id = $initial_item; properties = {{ visible = true; opacity_milli = 900; display_mode = color; display_color = rgba8(1, 2, 3, 255); translate_x_milli = 10; translate_y_milli = -20; scale_x_milli = 1000; scale_y_milli = 1100; rotation_milli_degrees = 500; }}; }}; }}
+step "Initial active no-op" {{ enabled = true; invoke light_table_set_active {{ set_id = $default_set; }}; }}
+step "Opacity" {{ enabled = true; invoke light_table_set_global_opacity {{ opacity_milli = 850; }}; }}
+step "Opacity no-op" {{ enabled = true; invoke light_table_set_global_opacity {{ opacity_milli = 850; }}; }}
+step "Create set" as created {{ enabled = true; invoke light_table_create_set {{ name = "Script Set"; }}; }}
+step "Add item" as added {{ enabled = true; invoke light_table_add_item {{ input = {input_a}; }}; }}
+step "Properties" {{ enabled = true; invoke light_table_update_item_properties {{ item_id = $added.item; properties = {properties_second}; }}; }}
+step "Properties no-op" {{ enabled = true; invoke light_table_update_item_properties {{ item_id = $added.item; properties = {properties_second}; }}; }}
+step "Update item" {{ enabled = true; invoke light_table_update_item {{ item_id = $added.item; input = {input_b}; }}; }}
+step "Bulk" as bulk {{ enabled = true; invoke light_table_bulk_register {{ target_set_id = $created.set; inputs = [{input_c}, {input_d}]; }}; }}
+step "Reorder item" {{ enabled = true; invoke light_table_reorder_item {{ item_id = $added.item; destination_index = 0; }}; }}
+step "Duplicate set" as duplicate {{ enabled = true; invoke light_table_duplicate_set {{ set_id = $created.set; }}; }}
+step "Rename duplicate" {{ enabled = true; invoke light_table_rename_set {{ set_id = $duplicate.set; name = "Script Copy"; }}; }}
+step "Reorder duplicate" {{ enabled = true; invoke light_table_reorder_set {{ set_id = $duplicate.set; destination_index = 0; }}; }}
+step "Activate created" {{ enabled = true; invoke light_table_set_active {{ set_id = $created.set; }}; }}
+step "Remove added" {{ enabled = true; invoke light_table_remove_item {{ item_id = $added.item; }}; }}
+step "Delete duplicate" {{ enabled = true; invoke light_table_delete_set {{ set_id = $duplicate.set; }}; }}
+"#
+    );
+    let assets_source = [
+        light_table_asset("lt_a", [10, 20, 30, 255], "ChQe/w=="),
+        light_table_asset("lt_b", [40, 50, 60, 255], "KDI8/w=="),
+        light_table_asset("lt_c", [70, 80, 90, 255], "RlBa/w=="),
+        light_table_asset("lt_d", [100, 110, 120, 255], "ZG54/w=="),
+    ]
+    .join("\n");
+    let source = complete_source_with_assets(
+        &format!(
+            r#"let default_set = select light_table_set {{ source_document_uuid = uuid"{}"; persistent_id = {default_set_id}; }}; let initial_item = select light_table_item {{ set = $default_set; source_document_uuid = uuid"{}"; persistent_id = {initial_item_id}; }};"#,
+            document_uuid(info.document_uuid),
+            document_uuid(info.document_uuid)
+        ),
+        &program,
+        &assets_source,
+    );
+    let program =
+        compile_inkscript(&source, InkScriptRunParameterDecision::Resolve(Vec::new())).unwrap();
+    let mut never_cancel = || false;
+    let assets = freeze_inkscript_assets(
+        program.model.assets(),
+        &mut [],
+        ScriptAssetLimits::exact_current(),
+        &mut never_cancel,
+    )
+    .unwrap();
+    let direct_inputs = vec![
+        light_table_item("Added A", 0xa1, 1, [10, 20, 30, 255], first),
+        light_table_item("Updated B", 0xb2, 2, [40, 50, 60, 255], third),
+        light_table_item("Bulk C", 0xc3, 3, [70, 80, 90, 255], first),
+        light_table_item("Bulk D", 0xd4, 4, [100, 110, 120, 255], second),
+    ];
+    (
+        base,
+        program,
+        assets,
+        direct_inputs,
+        default_set_id,
+        initial_item_id,
+    )
+}
+
+#[test]
+fn light_table_catalog_results_assets_direct_replay_and_native_reopen_are_exact() {
+    let (base, program, assets, inputs, default_set_id, initial_item_id) =
+        light_table_script_fixture();
+    let base_digest = base.document_state_digest().unwrap();
+    let base_next_id = base.next_id.next_raw();
+    assert_eq!(program.budget.max_invocations, 17);
+    assert_eq!(program.budget.max_output_ids, 5);
+    assert_eq!(program.budget.max_asset_bytes, 16);
+    assert_eq!(assets.usage().logical_payload_bytes, 16);
+
+    let mut never_cancel = || false;
+    let mut scripted =
+        run_inkscript_on_staged_core(&program, base.clone(), Some(&assets), &mut never_cancel)
+            .unwrap();
+    assert_eq!(scripted.report.commit_count, 13);
+    assert_eq!(scripted.report.statements.len(), 17);
+    assert_eq!(
+        scripted
+            .report
+            .statements
+            .iter()
+            .filter(|outcome| { **outcome == crate::script::report::ScriptStatementOutcome::NoOp })
+            .count(),
+        4
+    );
+    assert_eq!(scripted.report.results.len(), 5);
+    assert_eq!(
+        scripted
+            .report
+            .results
+            .iter()
+            .map(|result| (result.alias.as_str(), result.field.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("created", "set"),
+            ("added", "item"),
+            ("bulk", "items"),
+            ("bulk", "items"),
+            ("duplicate", "set"),
+        ]
+    );
+
+    let mut direct = base.clone();
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::LightTableUpdateItemProperties {
+            item_id: initial_item_id,
+            properties: light_table_properties(
+                900,
+                LightTableDisplayMode::Color,
+                [1, 2, 3, 255],
+                (10, -20, 1_000, 1_100, 500),
+            ),
+        })
+        .unwrap();
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::LightTableSetActive {
+            set_id: default_set_id,
+        })
+        .unwrap();
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::LightTableSetGlobalOpacity {
+            opacity_milli: 850,
+        })
+        .unwrap();
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::LightTableSetGlobalOpacity {
+            opacity_milli: 850,
+        })
+        .unwrap();
+    let created_set = direct
+        .execute_canonical_invocation(CanonicalInvocation::LightTableCreateSet {
+            name: "Script Set".to_owned(),
+        })
+        .unwrap()
+        .output_ids[0];
+    let added_item = direct
+        .execute_canonical_invocation(CanonicalInvocation::LightTableAddItem {
+            input: inputs[0].clone(),
+        })
+        .unwrap()
+        .output_ids[0];
+    let second = light_table_properties(
+        800,
+        LightTableDisplayMode::Monotone,
+        [4, 5, 6, 255],
+        (-30, 40, 900, 1_200, -1_000),
+    );
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::LightTableUpdateItemProperties {
+            item_id: added_item,
+            properties: second,
+        })
+        .unwrap();
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::LightTableUpdateItemProperties {
+            item_id: added_item,
+            properties: second,
+        })
+        .unwrap();
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::LightTableUpdateItem {
+            item_id: added_item,
+            input: inputs[1].clone(),
+        })
+        .unwrap();
+    let bulk_items = direct
+        .execute_canonical_invocation(CanonicalInvocation::LightTableBulkRegister {
+            target_set_id: created_set,
+            inputs: inputs[2..].to_vec(),
+        })
+        .unwrap()
+        .output_ids;
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::LightTableReorderItem {
+            item_id: added_item,
+            destination_index: 0,
+        })
+        .unwrap();
+    let duplicate_set = direct
+        .execute_canonical_invocation(CanonicalInvocation::LightTableDuplicateSet {
+            set_id: created_set,
+        })
+        .unwrap()
+        .output_ids[0];
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::LightTableRenameSet {
+            set_id: duplicate_set,
+            name: "Script Copy".to_owned(),
+        })
+        .unwrap();
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::LightTableReorderSet {
+            set_id: duplicate_set,
+            destination_index: 0,
+        })
+        .unwrap();
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::LightTableSetActive {
+            set_id: created_set,
+        })
+        .unwrap();
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::LightTableRemoveItem {
+            item_id: added_item,
+        })
+        .unwrap();
+    direct
+        .execute_canonical_invocation(CanonicalInvocation::LightTableDeleteSet {
+            set_id: duplicate_set,
+        })
+        .unwrap();
+    assert_eq!(
+        scripted
+            .report
+            .results
+            .iter()
+            .map(|result| result.persistent_id)
+            .collect::<Vec<_>>(),
+        [
+            created_set,
+            added_item,
+            bulk_items[0],
+            bulk_items[1],
+            duplicate_set,
+        ]
+    );
+    assert_eq!(scripted.staged.next_id.next_raw(), base_next_id + 14);
+    assert_eq!(scripted.report.next_stable_id, base_next_id + 14);
+    assert_same_document(&scripted.staged, &direct);
+    assert_eq!(scripted.staged.light_table_items().unwrap().len(), 2);
+
+    let final_digest = scripted.staged.document_state_digest().unwrap();
+    for _ in 0..scripted.report.commit_count {
+        scripted.staged.undo().unwrap();
+    }
+    assert_eq!(
+        scripted.staged.document_state_digest().unwrap(),
+        base_digest
+    );
+    for _ in 0..scripted.report.commit_count {
+        scripted.staged.redo().unwrap();
+    }
+    assert_eq!(
+        scripted.staged.document_state_digest().unwrap(),
+        final_digest
+    );
+    scripted.staged.release_history_cache().unwrap();
+    assert_eq!(
+        scripted
+            .staged
+            .verify_journal_replay()
+            .unwrap()
+            .document_state_digest(),
+        final_digest
+    );
+
+    let editor_digest = scripted.staged.editor_state().unwrap().digest;
+    let native = scripted
+        .staged
+        .build_procedure_file(Some(scripted.staged.current_state), Some(editor_digest))
+        .unwrap();
+    let mut reopened = Core::from_procedure_file(
+        decode_procedure_file(&encode_procedure_file(&native).unwrap()).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(reopened.document_state_digest().unwrap(), final_digest);
+    assert_eq!(reopened.next_id, scripted.staged.next_id);
+    assert_eq!(reopened.next_procedure, scripted.staged.next_procedure);
+    assert_eq!(reopened.next_state, scripted.staged.next_state);
+    assert_eq!(reopened.savepoint, Some(reopened.current_state));
+    assert_eq!(
+        reopened.persistence_info().unwrap().open_strategy,
+        NativeOpenStrategy::FullReplay
+    );
+    assert!(!reopened.document_info().unwrap().dirty);
+    assert!(!reopened.editor_state().unwrap().dirty);
+    for _ in 0..scripted.report.commit_count {
+        reopened.undo().unwrap();
+    }
+    assert_eq!(reopened.document_state_digest().unwrap(), base_digest);
+    for _ in 0..scripted.report.commit_count {
+        reopened.redo().unwrap();
+    }
+    assert_eq!(reopened.document_state_digest().unwrap(), final_digest);
+}
+
+#[test]
+fn light_table_invalid_cancel_stale_overflow_resource_and_asset_failures_are_atomic() {
+    let (base, program, assets, _, _, _) = light_table_script_fixture();
+    let before = (
+        base.document_state_digest().unwrap(),
+        base.document_info().unwrap(),
+        base.history_entries(),
+        base.next_id,
+        base.next_procedure,
+        base.next_state,
+    );
+    let mut cancel = || true;
+    assert_eq!(
+        run_inkscript_on_staged_core(&program, base.clone(), Some(&assets), &mut cancel)
+            .unwrap_err(),
+        ScriptRunError::Cancelled
+    );
+    let mut polls = 0_u32;
+    let mut cancel_after_staging = || {
+        polls += 1;
+        polls == 5
+    };
+    assert_eq!(
+        run_inkscript_on_staged_core(
+            &program,
+            base.clone(),
+            Some(&assets),
+            &mut cancel_after_staging,
+        )
+        .unwrap_err(),
+        ScriptRunError::Cancelled
+    );
+    let invalid = compile_inkscript(
+        &complete_source(
+            "",
+            "",
+            r#"step "Invalid opacity" { enabled = true; invoke light_table_set_global_opacity { opacity_milli = 1001; }; }"#,
+        ),
+        InkScriptRunParameterDecision::Resolve(Vec::new()),
+    )
+    .unwrap();
+    let mut never_cancel = || false;
+    assert_eq!(
+        run_inkscript_on_staged_core(&invalid, base.clone(), None, &mut never_cancel).unwrap_err(),
+        ScriptRunError::InvalidStep
+    );
+    let mut never_cancel = || false;
+    assert_eq!(
+        run_inkscript_on_staged_core(&program, base.clone(), None, &mut never_cancel).unwrap_err(),
+        ScriptRunError::InvalidStep
+    );
+
+    let mut stale = base.clone();
+    let fingerprint = capture_in_memory_fingerprint(&stale).unwrap();
+    stale.add_guide(GuideAxis::Vertical, 3).unwrap();
+    let stale_digest = stale.document_state_digest().unwrap();
+    let mut never_cancel = || false;
+    assert_eq!(
+        run_inkscript_dry(
+            &program,
+            capture_in_memory_input_at(&stale, fingerprint),
+            &mut never_cancel,
+        )
+        .unwrap_err(),
+        ScriptRunError::StaleInput
+    );
+    assert_eq!(stale.document_state_digest().unwrap(), stale_digest);
+
+    let create = compile_inkscript(
+        &complete_source(
+            "",
+            "",
+            r#"step "Create" { enabled = true; invoke light_table_create_set { name = "Overflow"; }; }"#,
+        ),
+        InkScriptRunParameterDecision::Resolve(Vec::new()),
+    )
+    .unwrap();
+    let mut id_overflow = base.clone();
+    id_overflow.next_id = crate::identity::StableIdCursor::from_next_raw(MAX_PERSISTENT_NUMERIC_ID);
+    let id_digest = id_overflow.document_state_digest().unwrap();
+    let mut never_cancel = || false;
+    assert_eq!(
+        run_inkscript_on_staged_core(&create, id_overflow.clone(), None, &mut never_cancel)
+            .unwrap_err(),
+        ScriptRunError::ResourceLimit
+    );
+    assert_eq!(id_overflow.document_state_digest().unwrap(), id_digest);
+    let mut procedure_overflow = base.clone();
+    procedure_overflow.next_procedure = ProcedureId::from_raw(MAX_PERSISTENT_NUMERIC_ID);
+    let procedure_digest = procedure_overflow.document_state_digest().unwrap();
+    let mut never_cancel = || false;
+    assert_eq!(
+        run_inkscript_on_staged_core(&create, procedure_overflow.clone(), None, &mut never_cancel)
+            .unwrap_err(),
+        ScriptRunError::ResourceLimit
+    );
+    assert_eq!(
+        procedure_overflow.document_state_digest().unwrap(),
+        procedure_digest
+    );
+    assert_eq!(
+        compile_inkscript_with_limits(
+            &complete_source(
+                "",
+                "",
+                r#"step "One" { enabled = true; invoke light_table_set_global_opacity { opacity_milli = 900; }; } step "Two" { enabled = true; invoke light_table_set_global_opacity { opacity_milli = 800; }; }"#,
+            ),
+            InkScriptRunParameterDecision::Resolve(Vec::new()),
+            ScriptCompileLimits::exact_current().with_invocations(1),
+        ),
+        Err(ScriptCompileError::ResourceLimit)
+    );
+
+    let gray_id = gray8_asset_id(vec![1], 1, 1);
+    let gray_source = complete_source_with_assets(
+        "",
+        &format!(
+            r#"step "Gray" {{ enabled = true; invoke light_table_add_item {{ input = {{ name = "Gray"; source = {{ document_uuid = uuid"{}"; source_revision = 1; reference_frame = rect(0, 0, 1, 1); dpi_x_milli = {DEFAULT_DPI_MILLI}; dpi_y_milli = {DEFAULT_DPI_MILLI}; raster = asset(gray); }}; properties = {{ visible = true; opacity_milli = 1000; display_mode = color; display_color = rgba8(0, 0, 0, 255); translate_x_milli = 0; translate_y_milli = 0; scale_x_milli = 1000; scale_y_milli = 1000; rotation_milli_degrees = 0; }}; }}; }}; }}"#,
+            document_uuid(0xee)
+        ),
+        &format!(
+            r#"asset gray {{ asset_id = blake3"{}"; kind = "canonical_raster"; descriptor = {{ pixel_format = gray8; color_space = srgb; alpha = straight; width = 1; height = 1; stride = 1; element_count = 1; }}; data = base64"""AQ=="""; }};"#,
+            asset_digest_text(gray_id)
+        ),
+    );
+    let gray_program = compile_inkscript(
+        &gray_source,
+        InkScriptRunParameterDecision::Resolve(Vec::new()),
+    )
+    .unwrap();
+    let mut never_cancel = || false;
+    let gray_assets = freeze_inkscript_assets(
+        gray_program.model.assets(),
+        &mut [],
+        ScriptAssetLimits::exact_current(),
+        &mut never_cancel,
+    )
+    .unwrap();
+    let mut never_cancel = || false;
+    assert_eq!(
+        run_inkscript_on_staged_core(
+            &gray_program,
+            base.clone(),
+            Some(&gray_assets),
+            &mut never_cancel,
+        )
+        .unwrap_err(),
+        ScriptRunError::InvalidStep
+    );
+    assert_eq!(
+        (
+            base.document_state_digest().unwrap(),
+            base.document_info().unwrap(),
+            base.history_entries(),
+            base.next_id,
+            base.next_procedure,
+            base.next_state,
+        ),
+        before
+    );
 }
 
 fn value_contains_reference(value: &inkpod_format::InkScriptTypedValue, root: &str) -> bool {

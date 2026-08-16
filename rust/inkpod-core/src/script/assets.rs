@@ -248,6 +248,17 @@ impl FrozenScriptAssets {
             .ok_or(ScriptAssetError::RoleMismatch)
     }
 
+    pub(crate) fn raster_record(&self, symbol: &str) -> Result<Arc<AssetRecord>, ScriptAssetError> {
+        let asset = self
+            .by_symbol
+            .get(symbol)
+            .ok_or(ScriptAssetError::UnknownAsset)?;
+        if asset.record.raster().is_none() {
+            return Err(ScriptAssetError::RoleMismatch);
+        }
+        Ok(Arc::clone(&asset.record))
+    }
+
     pub(crate) const fn usage(&self) -> ScriptAssetUsage {
         self.usage
     }

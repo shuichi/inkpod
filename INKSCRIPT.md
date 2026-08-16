@@ -2744,7 +2744,7 @@ Version impact:
 - C ABI: 14（symbol／record／ownership／thread規則変更なし）
 ```
 
-### [~] M21 — catalog implementation G: annotation、frame、vanishing point
+### [x] M21 — catalog implementation G: annotation、frame、vanishing point
 
 **範囲**
 
@@ -2757,7 +2757,7 @@ Version impact:
 - exact-source/rebound export準備とcache-free replayがdirect routeに一致する。
 - ID allocation digestとhigh-watermarkを検証する。
 
-**実装・自動検証結果（2026-08-16、利用者確認待ち）**
+**実装・自動検証結果（2026-08-16、利用者確認済み）**
 
 - 利用者承認済みの選択肢Aを採用し、shooting-frame selectorをlayer filterのないdocument ownerへ修正した。
   InkScript file/catalogをexact-current v2へ更新し、v1 file/catalogと旧v1 registry resourceを拒否する契約を追加した。
@@ -2776,7 +2776,8 @@ Version impact:
 - Windows x64 Debug build 114、static CRT、portable ZIP、unsigned MSIXと全36 CTestが553.94秒で成功した。
   ABI smokeは76.16秒、English smokeは230.65秒、Japanese smokeは234.74秒だった。
 - production catalog、Rust public API、C ABI、Windows route、UI、`.inkscript` product acceptanceは追加していない。
-  自動検証完了後もbinaryで既存InkScript非公開・Windows回帰を利用者が確認するまで`[~]`を維持し、M22へ進まない。
+  自動検証完了後は`[~]`で停止し、2026-08-16の今回promptをもって既存InkScript非公開・Windows回帰に
+  問題がなかったことを利用者確認済みとして`[x]`へ移行した。
 
 ```text
 Version impact:
@@ -2788,7 +2789,7 @@ Version impact:
 - C ABI: 14（symbol／record／ownership／thread規則変更なし）
 ```
 
-### [ ] M22 — catalog implementation H: Light Table
+### [~] M22 — catalog implementation H: Light Table
 
 **範囲**
 
@@ -2800,6 +2801,38 @@ Version impact:
 - add/remove/reorder/propertyの複数result、asset retention、Undo/Redo testがある。
 - non-replayable commandを誤登録せず、owner manifestと一致する。
 - direct/script/cache-free replayが一致する。
+
+**実装・自動検証結果（2026-08-16、利用者確認待ち）**
+
+- private catalog-v2 draftへowner manifestのjournal-replayable Light Table 13 exact entryと専用closed enum／recordを
+  追加し、84/84とした。set/item selector、scalar／ordered-list result、canonical asset role、checked nested asset
+  work、portabilityをCore-private adapterから既存`CanonicalInvocation`／単一executorへ接続した。
+- global opacity、set create／duplicate／delete／rename／reorder／active、item add／property update／full update／
+  remove／reorder／bulk registerを一つのsequential programで検証した。direct routeとdocument／history／journal／
+  ID high-watermarkが一致し、3 no-op、5 ordered result、4 frozen RGBA asset、Undo／Redo、cache-free replay、
+  current-v26 save/reopenとdocument/editor savepointが一致した。
+- invalid、即時／途中Cancel、stale input、stable／procedure ID overflow、resource limit、missing asset、非RGBA assetを
+  失敗前後のdigest／history／counter不変で検証した。adapter値のCore-engine thread間`Send + Sync`も固定した。
+- session-only `LIGHT_TABLE_SWAP_WITH_ACTIVE`はowner manifestの除外理由`session_only`と照合し、query／previewを含め
+  draftへ登録していない。production catalog、Rust public API、C ABI、Windows route、UI、`.inkscript` product
+  acceptanceは追加していない。
+- `cargo fmt --check`、workspace全target／feature Clippy（warning deny）、workspace 607 non-doc tests（606 pass、
+  Release-only quick gate 1 ignored）とdoctest 1、strict rustdocが成功した。`inkscript_registry`は18/18。
+  承認済みInkScript quickはworkload／harness／全counter／checksum `4401131d804c8eb7`／64–107 ms envelopeを変えず
+  91,652,200 nsで成功し、既存`core_workflows --quick`も10 checksumと意味counterを維持した。
+- Windows x64 Debug build 114、static CRT、portable ZIP、unsigned MSIXと全36 CTestが427.01秒で成功した。
+  ABI smokeは62.17秒、English smokeは175.17秒、Japanese smokeは176.93秒だった。
+- 自動検証完了後もbinaryで既存InkScript非公開・Windows回帰を利用者が確認するまで`[~]`を維持し、M23へ進まない。
+
+```text
+Version impact:
+- Registry schema: 2（既存meta-schema／language core変更なし）
+- InkScript file: 2（批准済みgrammar／serialized program変更なし）
+- InkScript procedure catalog: 2（M23前のprivate draftを84/84へ拡張、production catalog未批准）
+- replay epoch: 23（既存Light Table canonical semantics変更なし）
+- .inkpod top-level: 26（native schema／encoder／decoder変更なし）
+- C ABI: 14（symbol／record／ownership／thread規則変更なし）
+```
 
 ### [ ] M23 — catalog v2 completenessとgenerated reference gate
 
