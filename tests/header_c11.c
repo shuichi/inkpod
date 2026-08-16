@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-_Static_assert(INKPOD_ABI_VERSION == 14U, "unexpected ABI version");
+_Static_assert(INKPOD_ABI_VERSION == 15U, "unexpected ABI version");
 _Static_assert(sizeof(InkpodCoreConfig) == 16U, "core config layout drift");
 _Static_assert(sizeof(InkpodSnapshotOptions) == 16U, "snapshot options layout drift");
 _Static_assert(sizeof(InkpodPersistenceInfo) == 72U, "persistence info layout drift");
@@ -70,9 +70,23 @@ _Static_assert(sizeof(InkpodScopedColorReplacePreview) == 48U, "scoped replace p
 _Static_assert(sizeof(InkpodSequenceSourceIdentity) == 32U, "sequence identity layout drift");
 _Static_assert(sizeof(InkpodBatchPairPreviewInfo) == 40U, "pair preview info layout drift");
 _Static_assert(sizeof(InkpodBatchPairCandidate) == 64U, "pair candidate layout drift");
+_Static_assert(sizeof(InkpodInkScriptSourceInput) == 56U, "InkScript source input layout drift");
+_Static_assert(sizeof(InkpodInkScriptSourceSummary) == 72U, "InkScript source summary layout drift");
+_Static_assert(sizeof(InkpodInkScriptUtf8Buffer) == 48U, "InkScript UTF-8 buffer layout drift");
+_Static_assert(sizeof(InkpodInkScriptDiagnostic) == 128U, "InkScript diagnostic layout drift");
+_Static_assert(sizeof(InkpodInkScriptDiagnosticBuffer) == 96U, "InkScript diagnostic buffer layout drift");
+_Static_assert(sizeof(InkpodInkScriptParameterChoice) == 56U, "InkScript parameter choice layout drift");
+_Static_assert(sizeof(InkpodInkScriptCompileRequest) == 80U, "InkScript compile request layout drift");
+_Static_assert(sizeof(InkpodInkScriptProgramSummary) == 152U, "InkScript program summary layout drift");
+_Static_assert(sizeof(InkpodInkScriptJournalEvent) == 24U, "InkScript event layout drift");
+_Static_assert(sizeof(InkpodInkScriptExportRequest) == 96U, "InkScript export request layout drift");
+_Static_assert(sizeof(InkpodInkScriptFragmentSummary) == 88U, "InkScript fragment summary layout drift");
 
 int inkpod_header_c11_smoke(void) {
     InkpodSnapshotView view = {0};
+    InkpodInkScriptSourceInput source = {0};
     view.struct_size = (uint32_t)sizeof(view);
-    return view.struct_size == 0U;
+    source.struct_size = (uint32_t)sizeof(source);
+    source.version = INKPOD_INKSCRIPT_RECORD_VERSION;
+    return view.struct_size == 0U || source.struct_size == 0U;
 }

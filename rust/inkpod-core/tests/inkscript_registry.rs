@@ -385,7 +385,7 @@ fn validate_fields(fields: &Json, type_names: &BTreeSet<&str>, owner: &str) {
 }
 
 #[test]
-fn inkscript_registry_meta_schema_is_closed_and_draft_is_private() {
+fn inkscript_registry_meta_schema_and_production_catalog_are_closed() {
     let meta = load_json("schemas/inkscript/registry-schema-v2.json");
     assert_exact_keys(
         &meta,
@@ -437,7 +437,7 @@ fn inkscript_registry_meta_schema_is_closed_and_draft_is_private() {
         assert_ne!(number(version), 1, "{registry} must reject superseded v1");
     }
 
-    let draft = load_json("schemas/inkscript/catalog-v2.draft.json");
+    let draft = load_json("schemas/inkscript/catalog-v2.json");
     assert_exact_keys(
         &draft,
         &[
@@ -453,11 +453,8 @@ fn inkscript_registry_meta_schema_is_closed_and_draft_is_private() {
             "required_replay_epoch",
         ],
     );
-    assert_eq!(
-        string(member(&draft, "kind")),
-        "inkpod.inkscript.catalog-draft"
-    );
-    assert_eq!(member(&draft, "production"), &Json::Bool(false));
+    assert_eq!(string(member(&draft, "kind")), "inkpod.inkscript.catalog");
+    assert_eq!(member(&draft, "production"), &Json::Bool(true));
     assert_eq!(array(member(&draft, "entries")).len(), 84);
     assert_eq!(array(member(&draft, "enums")).len(), 33);
     assert_eq!(array(member(&draft, "records")).len(), 52);
@@ -470,22 +467,22 @@ fn inkscript_registry_meta_schema_is_closed_and_draft_is_private() {
     );
     assert!(
         !repository()
-            .join("schemas/inkscript/catalog-v2.json")
+            .join("schemas/inkscript/catalog-v2.draft.json")
             .exists(),
-        "catalog v2 must not be frozen before the completeness gate"
+        "the pre-ratification draft must not remain beside the production catalog"
     );
     assert!(
-        !repository()
+        repository()
             .join("docs/inkscript-command-reference.md")
             .exists(),
-        "the generated command reference must not exist before catalog freeze"
+        "the generated command reference must exist after catalog freeze"
     );
 }
 
 #[test]
 fn inkscript_document_tree_catalog_entries_are_closed_typed_and_owner_exact() {
     let language = load_json("schemas/inkscript/language-v2.json");
-    let draft = load_json("schemas/inkscript/catalog-v2.draft.json");
+    let draft = load_json("schemas/inkscript/catalog-v2.json");
     let manifest = load_json("schemas/inkscript/owner-manifest-v2.json");
     let type_names = composed_catalog_type_names(&language, &draft);
     let expected = BTreeMap::from([
@@ -602,7 +599,7 @@ fn inkscript_document_tree_catalog_entries_are_closed_typed_and_owner_exact() {
 #[test]
 fn inkscript_metadata_color_and_guide_entries_are_closed_typed_and_owner_exact() {
     let language = load_json("schemas/inkscript/language-v2.json");
-    let draft = load_json("schemas/inkscript/catalog-v2.draft.json");
+    let draft = load_json("schemas/inkscript/catalog-v2.json");
     let manifest = load_json("schemas/inkscript/owner-manifest-v2.json");
     let type_names = composed_catalog_type_names(&language, &draft);
     let expected = BTreeMap::from([
@@ -706,7 +703,7 @@ fn inkscript_metadata_color_and_guide_entries_are_closed_typed_and_owner_exact()
 #[test]
 fn inkscript_stroke_geometry_and_import_entries_are_closed_typed_and_owner_exact() {
     let language = load_json("schemas/inkscript/language-v2.json");
-    let draft = load_json("schemas/inkscript/catalog-v2.draft.json");
+    let draft = load_json("schemas/inkscript/catalog-v2.json");
     let manifest = load_json("schemas/inkscript/owner-manifest-v2.json");
     let type_names = composed_catalog_type_names(&language, &draft);
     let expected = BTreeMap::from([
@@ -809,7 +806,7 @@ fn inkscript_stroke_geometry_and_import_entries_are_closed_typed_and_owner_exact
 #[test]
 fn inkscript_fill_and_gradient_entries_are_closed_typed_and_owner_exact() {
     let language = load_json("schemas/inkscript/language-v2.json");
-    let draft = load_json("schemas/inkscript/catalog-v2.draft.json");
+    let draft = load_json("schemas/inkscript/catalog-v2.json");
     let manifest = load_json("schemas/inkscript/owner-manifest-v2.json");
     let type_names = composed_catalog_type_names(&language, &draft);
     const OWNER_MILESTONE: &str = concat!("M", "18A");
@@ -928,7 +925,7 @@ fn inkscript_fill_and_gradient_entries_are_closed_typed_and_owner_exact() {
 #[test]
 fn inkscript_gesture_alpha_adjustment_entries_are_closed_typed_and_owner_exact() {
     let language = load_json("schemas/inkscript/language-v2.json");
-    let draft = load_json("schemas/inkscript/catalog-v2.draft.json");
+    let draft = load_json("schemas/inkscript/catalog-v2.json");
     let manifest = load_json("schemas/inkscript/owner-manifest-v2.json");
     let type_names = composed_catalog_type_names(&language, &draft);
     const OWNER_MILESTONE: &str = concat!("M", "18B");
@@ -1072,7 +1069,7 @@ fn inkscript_gesture_alpha_adjustment_entries_are_closed_typed_and_owner_exact()
 #[test]
 fn inkscript_selection_floating_entries_are_closed_typed_and_owner_exact() {
     let language = load_json("schemas/inkscript/language-v2.json");
-    let draft = load_json("schemas/inkscript/catalog-v2.draft.json");
+    let draft = load_json("schemas/inkscript/catalog-v2.json");
     let manifest = load_json("schemas/inkscript/owner-manifest-v2.json");
     let type_names = composed_catalog_type_names(&language, &draft);
     const OWNER_MILESTONE: &str = concat!("M", "19");
@@ -1224,7 +1221,7 @@ fn inkscript_selection_floating_entries_are_closed_typed_and_owner_exact() {
 #[test]
 fn inkscript_vector_entries_are_closed_typed_and_owner_exact() {
     let language = load_json("schemas/inkscript/language-v2.json");
-    let draft = load_json("schemas/inkscript/catalog-v2.draft.json");
+    let draft = load_json("schemas/inkscript/catalog-v2.json");
     let manifest = load_json("schemas/inkscript/owner-manifest-v2.json");
     let type_names = composed_catalog_type_names(&language, &draft);
     const OWNER_MILESTONE: &str = concat!("M", "20");
@@ -1343,7 +1340,7 @@ fn inkscript_vector_entries_are_closed_typed_and_owner_exact() {
 #[test]
 fn inkscript_v2_annotation_frame_vanishing_contract_is_exact() {
     let language = load_json("schemas/inkscript/language-v2.json");
-    let draft = load_json("schemas/inkscript/catalog-v2.draft.json");
+    let draft = load_json("schemas/inkscript/catalog-v2.json");
     let manifest = load_json("schemas/inkscript/owner-manifest-v2.json");
     assert_eq!(number(member(&language, "file_version")), 2);
     assert_eq!(number(member(&language, "procedure_catalog_version")), 2);
@@ -1439,7 +1436,7 @@ fn inkscript_v2_annotation_frame_vanishing_contract_is_exact() {
 #[test]
 fn inkscript_light_table_entries_are_replayable_asset_owned_and_session_commands_are_excluded() {
     let language = load_json("schemas/inkscript/language-v2.json");
-    let draft = load_json("schemas/inkscript/catalog-v2.draft.json");
+    let draft = load_json("schemas/inkscript/catalog-v2.json");
     let manifest = load_json("schemas/inkscript/owner-manifest-v2.json");
     let type_names = composed_catalog_type_names(&language, &draft);
     const OWNER_MILESTONE: &str = concat!("M", "22");
@@ -1599,7 +1596,7 @@ fn inkscript_light_table_entries_are_replayable_asset_owned_and_session_commands
 #[test]
 fn inkscript_legacy_simple_catalog_entries_are_closed_typed_and_owner_exact() {
     let language = load_json("schemas/inkscript/language-v2.json");
-    let draft = load_json("schemas/inkscript/catalog-v2.draft.json");
+    let draft = load_json("schemas/inkscript/catalog-v2.json");
     let manifest = load_json("schemas/inkscript/owner-manifest-v2.json");
     let type_names = composed_catalog_type_names(&language, &draft);
 
@@ -1743,7 +1740,7 @@ fn inkscript_legacy_simple_catalog_entries_are_closed_typed_and_owner_exact() {
 #[test]
 fn inkscript_legacy_image_catalog_entries_are_closed_typed_and_owner_exact() {
     let language = load_json("schemas/inkscript/language-v2.json");
-    let draft = load_json("schemas/inkscript/catalog-v2.draft.json");
+    let draft = load_json("schemas/inkscript/catalog-v2.json");
     let manifest = load_json("schemas/inkscript/owner-manifest-v2.json");
     let type_names = composed_catalog_type_names(&language, &draft);
     let expected = BTreeMap::from([
@@ -2297,9 +2294,232 @@ fn inkscript_owner_manifest_is_a_bijection_with_replayable_primitives() {
 }
 
 #[test]
+fn inkscript_production_catalog_is_bijective_with_runtime_and_equivalence_evidence() {
+    let catalog = load_json("schemas/inkscript/catalog-v2.json");
+    let manifest = load_json("schemas/inkscript/owner-manifest-v2.json");
+    let entries = array(member(&catalog, "entries"));
+    let owners = array(member(&manifest, "owners"));
+    assert_eq!(entries.len(), 84);
+    assert_eq!(owners.len(), entries.len());
+    assert_eq!(
+        entries.len(),
+        inkpod_format::INKSCRIPT_PRODUCTION_CATALOG_COMMAND_COUNT
+    );
+    assert_eq!(
+        inkpod_format::INKSCRIPT_PRODUCTION_CATALOG_FINGERPRINT,
+        0x988b_9725_dbdc_a0a2
+    );
+
+    let owners_by_command = owners
+        .iter()
+        .map(|owner| (string(member(owner, "command_name")), owner))
+        .collect::<BTreeMap<_, _>>();
+    let primitive_entries = parse_catalog_entries(&repository());
+    let replayable_by_id = primitive_entries
+        .iter()
+        .filter(|entry| entry.replayable)
+        .map(|entry| (entry.id.as_str(), entry))
+        .collect::<BTreeMap<_, _>>();
+    let compile_source =
+        fs::read_to_string(repository().join("rust/inkpod-core/src/script/compile.rs"))
+            .expect("production compiler must be readable");
+    let mut adapter_source = String::new();
+    for entry in fs::read_dir(repository().join("rust/inkpod-core/src/primitive"))
+        .expect("primitive source directory must be readable")
+    {
+        let path = entry
+            .expect("primitive source entry must be readable")
+            .path();
+        if path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("inkscript") && name.ends_with(".rs"))
+        {
+            adapter_source.push_str(
+                &fs::read_to_string(&path)
+                    .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display())),
+            );
+        }
+    }
+
+    let mut commands = BTreeSet::new();
+    let mut evidence = BTreeSet::new();
+    for entry in entries {
+        assert_exact_keys(
+            entry,
+            &[
+                "arguments",
+                "cancellation_boundary",
+                "editor",
+                "equivalence_test",
+                "name",
+                "owner_milestone",
+                "portability",
+                "primitive_id",
+                "primitive_schema_version",
+                "replay_epoch",
+                "results",
+                "semantics_revision",
+                "work",
+            ],
+        );
+        let command = string(member(entry, "name"));
+        let test_id = string(member(entry, "equivalence_test"));
+        assert!(commands.insert(command), "duplicate command {command}");
+        assert!(
+            evidence.insert(test_id.to_owned()),
+            "duplicate equivalence ID {test_id}"
+        );
+
+        let owner = owners_by_command
+            .get(command)
+            .unwrap_or_else(|| panic!("catalog command {command} has no owner"));
+        for field in [
+            "primitive_id",
+            "primitive_schema_version",
+            "semantics_revision",
+            "owner_milestone",
+        ] {
+            assert_eq!(
+                member(entry, field),
+                member(owner, field),
+                "{command}.{field}"
+            );
+        }
+        assert_eq!(
+            member(entry, "equivalence_test"),
+            member(owner, "planned_equivalence_test"),
+            "{command}.equivalence_test"
+        );
+        let primitive_id = string(member(entry, "primitive_id"));
+        let primitive = replayable_by_id
+            .get(primitive_id)
+            .unwrap_or_else(|| panic!("catalog command {command} has no replayable primitive"));
+        assert_eq!(
+            number(member(entry, "primitive_schema_version")),
+            primitive.schema_version
+        );
+        assert_eq!(
+            number(member(entry, "semantics_revision")),
+            primitive.semantics_revision
+        );
+
+        let literal = format!("\"{command}\"");
+        assert!(
+            compile_source.contains(&literal),
+            "catalog command {command} has no runtime catalog declaration"
+        );
+        assert!(
+            adapter_source.contains(&literal),
+            "catalog command {command} has no typed adapter declaration"
+        );
+        assert!(
+            command
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_'),
+            "catalog command names cannot be derived Debug spellings"
+        );
+        assert_exact_keys(member(entry, "portability"), &["default", "rules"]);
+        assert_exact_keys(
+            member(entry, "work"),
+            &[
+                "max_asset_bytes",
+                "max_invocations",
+                "max_output_growth",
+                "max_output_ids",
+                "max_work_units",
+            ],
+        );
+        assert_exact_keys(
+            member(entry, "editor"),
+            &["allow_skip_dependents", "family", "legacy_projection"],
+        );
+    }
+    assert_eq!(commands.len(), replayable_by_id.len());
+    assert_eq!(
+        evidence,
+        (1..=84)
+            .map(|index| format!("INKS-EQ-{index:04}"))
+            .collect::<BTreeSet<_>>()
+    );
+
+    let execution_tests =
+        fs::read_to_string(repository().join("rust/inkpod-core/src/script/tests.rs"))
+            .expect("script execution evidence must be readable");
+    for evidence_name in [
+        "staged_memory_and_native_dry_runs_match_the_direct_canonical_route",
+        "document_tree_create_results_feed_later_steps_and_round_trip_history",
+        "metadata_color_guide_results_round_trip_native_history_ids_and_savepoints",
+        "stroke_geometry_import_execute_typed_assets_and_round_trip_native_history",
+        "fill_gradient_execute_native_depth_q16_selection_tile_boundary_and_reopen",
+        "gesture_alpha_adjustment_execute_matches_direct_and_round_trips_native_history",
+        "selection_family_bounds_results_direct_equivalence_and_native_reopen",
+        "vector_catalog_results_index_roles_direct_equivalence_and_native_reopen",
+        "annotation_frame_catalog_results_direct_equivalence_and_native_reopen",
+        "light_table_catalog_results_assets_direct_replay_and_native_reopen_are_exact",
+    ] {
+        assert!(
+            execution_tests.contains(evidence_name),
+            "missing family execution/replay evidence {evidence_name}"
+        );
+    }
+}
+
+fn fnv1a64_normalized(bytes: &[u8]) -> u64 {
+    bytes
+        .iter()
+        .filter(|byte| **byte != b'\r')
+        .fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+        })
+}
+
+#[test]
+fn inkscript_generated_command_reference_has_no_drift() {
+    let catalog = load_json("schemas/inkscript/catalog-v2.json");
+    let reference_path = repository().join("docs/inkscript-command-reference.md");
+    let bytes = fs::read(&reference_path).expect("generated command reference must be readable");
+    assert_eq!(fnv1a64_normalized(&bytes), 0x47bf_3307_0c4c_c90d);
+    let reference = std::str::from_utf8(&bytes).expect("reference must be UTF-8");
+    assert!(reference.starts_with(
+        "<!-- @generated by scripts/generate_inkscript_reference.py; do not edit. -->\n"
+    ));
+    assert!(reference.contains("| Catalog FNV-1a drift fingerprint | `988b9725dbdca0a2` |"));
+    let headings = reference
+        .lines()
+        .filter_map(|line| line.strip_prefix("### `")?.strip_suffix('`'))
+        .collect::<Vec<_>>();
+    let expected = array(member(&catalog, "entries"))
+        .iter()
+        .map(|entry| string(member(entry, "name")))
+        .collect::<Vec<_>>();
+    assert_eq!(headings, expected);
+    for entry in array(member(&catalog, "entries")) {
+        let command = string(member(entry, "name"));
+        let primitive = string(member(entry, "primitive_id"));
+        let evidence = string(member(entry, "equivalence_test"));
+        let heading = format!("### `{command}`\n");
+        let section = reference
+            .split_once(&heading)
+            .unwrap_or_else(|| panic!("missing command reference section {command}"))
+            .1
+            .split("\n### `")
+            .next()
+            .expect("command reference section must terminate");
+        assert!(section.contains(&format!("Primitive: `{primitive}`")));
+        assert!(section.contains(&format!("equivalence `{evidence}`")));
+        assert!(section.contains("- Arguments:"));
+        assert!(section.contains("- Results:"));
+        assert!(section.contains("- Portability:"));
+        assert!(section.contains("- Work:"));
+        assert!(section.contains("- Editor:"));
+    }
+}
+
+#[test]
 fn inkscript_versions_and_traceability_match_repository_contracts() {
     let language = load_json("schemas/inkscript/language-v2.json");
-    let draft = load_json("schemas/inkscript/catalog-v2.draft.json");
+    let draft = load_json("schemas/inkscript/catalog-v2.json");
     let manifest = load_json("schemas/inkscript/owner-manifest-v2.json");
     for value in [&language, &draft] {
         assert_eq!(number(member(value, "registry_schema_version")), 2);
@@ -2325,7 +2545,7 @@ fn inkscript_versions_and_traceability_match_repository_contracts() {
     assert_eq!(number(member(contract, "procedure_catalog_version")), 2);
     assert_eq!(number(member(contract, "replay_epoch")), 23);
     assert_eq!(number(member(contract, "inkpod_top_level_version")), 26);
-    assert_eq!(number(member(contract, "c_abi_version")), 14);
+    assert_eq!(number(member(contract, "c_abi_version")), 15);
 
     let repository = repository();
     let model = fs::read_to_string(repository.join("rust/inkpod-core/src/primitive/model.rs"))
@@ -2337,7 +2557,7 @@ fn inkscript_versions_and_traceability_match_repository_contracts() {
     assert!(model.contains("pub const CURRENT: Self = Self(23);"));
     assert!(model.contains("pub const PROCEDURE_FORMAT_VERSION: u32 = 26;"));
     assert!(format.contains("pub const FORMAT_VERSION: u32 = 26;"));
-    assert!(header.contains("#define INKPOD_ABI_VERSION UINT32_C(14)"));
+    assert!(header.contains("#define INKPOD_ABI_VERSION UINT32_C(15)"));
 
     let spec = fs::read_to_string(repository.join("SPEC.md")).expect("SPEC must be readable");
     let compatibility = fs::read_to_string(repository.join("docs/compatibility.md"))
@@ -2385,7 +2605,7 @@ fn collect_production_sources(root: &Path, output: &mut Vec<PathBuf>) {
 }
 
 #[test]
-fn inkscript_private_draft_is_unreachable_from_production() {
+fn inkscript_removed_draft_is_unreachable_from_production() {
     let repository = repository();
     let mut sources = Vec::new();
     for root in [
@@ -2404,16 +2624,15 @@ fn inkscript_private_draft_is_unreachable_from_production() {
         let text = String::from_utf8_lossy(&contents);
         assert!(
             !text.contains("catalog-v2.draft.json")
-                && !text.contains("inkpod.inkscript.catalog-draft")
-                && !text.contains("schemas/inkscript"),
-            "production source {} reaches the private InkScript draft",
+                && !text.contains("inkpod.inkscript.catalog-draft"),
+            "production source {} reaches the removed InkScript draft",
             source.display()
         );
     }
 }
 
 #[test]
-fn inkscript_typed_frontend_models_are_unreachable_from_core_ffi_and_windows() {
+fn inkscript_private_typed_models_remain_unreachable_from_core_ffi_and_windows() {
     let repository = repository();
     let mut sources = Vec::new();
     for root in ["rust/inkpod-ffi/src", "apps/windows", "include"] {

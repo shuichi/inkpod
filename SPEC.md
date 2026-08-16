@@ -547,7 +547,9 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 将来のBatch authoring／execution形式であるInkScriptのlanguage core、schema registry、exact-source／rebound
 等価性、実装gateは[`INKSCRIPT.md`](INKSCRIPT.md)を規範とする。InkScriptがM29Cのshadow parityとM34の
 production cutoverを完了するまでは、exact-current `.inkbatch` v2と既存Batch UI／ABIを現行production
-contractとして維持し、`.inkscript` parser、catalog、executor、ABI、UIをproductionから到達可能にしない。
+contractとして維持する。M23で批准済みcatalogを使うRust compile／bind／staged-run APIはproductから独立して
+公開してよいが、`.inkscript` file filter、clipboard、C ABI、Windows command／UI、Batch production executorからは
+各owner milestoneとM34 cutoverまで到達可能にしない。
 
 ### 20. 形式、白透過、一般画像入出力
 

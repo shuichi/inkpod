@@ -642,7 +642,7 @@ fn encode_palette(colors: &[PixelValue]) -> Result<Vec<u8>, CoreError> {
     Ok(bytes)
 }
 
-pub(super) fn decode_palette(bytes: &[u8]) -> Result<Vec<PixelValue>, CoreError> {
+pub(crate) fn decode_palette(bytes: &[u8]) -> Result<Vec<PixelValue>, CoreError> {
     if bytes.len() < 8 {
         return Err(CoreError::InvalidArgument(
             "canonical palette is missing its count",
@@ -707,7 +707,7 @@ fn encode_color_chart(entries: &[ColorChartEntry], locked: bool) -> Result<Vec<u
     Ok(bytes)
 }
 
-pub(super) fn decode_color_chart(bytes: &[u8]) -> Result<(Vec<ColorChartEntry>, bool), CoreError> {
+pub(crate) fn decode_color_chart(bytes: &[u8]) -> Result<(Vec<ColorChartEntry>, bool), CoreError> {
     let (&locked, rest) = bytes.split_first().ok_or(CoreError::InvalidArgument(
         "canonical Color chart is truncated",
     ))?;
@@ -1011,6 +1011,19 @@ fn decode_stroke_procedure(
         arguments: encoded,
         staged_assets: None,
     })
+}
+
+pub(crate) fn decode_stroke_arguments_for_export(
+    procedure: &CanonicalProcedure,
+    assets: &asset::AssetStore,
+) -> Result<CanonicalStrokeArguments, CoreError> {
+    let decoded = decode_stroke_procedure(procedure, assets)?;
+    match decoded.primitive {
+        CanonicalPrimitive::ApplyRasterStroke(arguments) => Ok(arguments),
+        _ => Err(CoreError::InvalidState(
+            "stroke decoder returned a different primitive",
+        )),
+    }
 }
 
 fn decode_import_raster_procedure(

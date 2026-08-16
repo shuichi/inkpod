@@ -620,6 +620,17 @@ pub const INKSCRIPT_PROCEDURE_CATALOG_VERSION: u32 = GENERATED_PROCEDURE_CATALOG
 /// Exact-current canonical replay epoch required by InkScript files and fragments.
 pub const INKSCRIPT_REQUIRED_REPLAY_EPOCH: u32 = GENERATED_REQUIRED_REPLAY_EPOCH;
 
+/// Number of commands in the immutable exact-current production catalog.
+pub const INKSCRIPT_PRODUCTION_CATALOG_COMMAND_COUNT: usize =
+    GENERATED_PRODUCTION_CATALOG_COMMAND_COUNT;
+
+/// FNV-1a drift fingerprint of the immutable `catalog-v2.json` bytes after CRLF normalization.
+///
+/// This is a build/review sentinel rather than a security digest. A catalog change requires a new
+/// exact-current catalog version and a new versioned resource instead of editing the frozen v2
+/// bytes in place.
+pub const INKSCRIPT_PRODUCTION_CATALOG_FINGERPRINT: u64 = GENERATED_PRODUCTION_CATALOG_FINGERPRINT;
+
 fn generated_record(
     records: &'static [GeneratedRecord],
     name: &str,

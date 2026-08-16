@@ -145,6 +145,7 @@ name = "inkpod-ffi"
 version = "0.2.3"
 dependencies = [
  "inkpod-core",
+ "inkpod-format",
 ]
 
 [[package]]

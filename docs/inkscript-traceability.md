@@ -3,9 +3,9 @@
 This document is the M00 traceability authority connecting the product requirements in
 [`SPEC.md`](../SPEC.md), the normative language contract in
 [`INKSCRIPT.md`](../INKSCRIPT.md), the machine-readable registries, milestones, and
-planned evidence. It is not a command reference. Command signatures remain absent from
-the private draft until their owner milestone, and the generated command reference does
-not exist before M23.
+planned evidence. It is not a command reference. M23 froze the completed command signatures in
+[`catalog-v2.json`](../schemas/inkscript/catalog-v2.json); the derived presentation is
+[`inkscript-command-reference.md`](inkscript-command-reference.md).
 
 ## Ratified contract
 
@@ -13,7 +13,7 @@ M00's starting contract was explicitly accepted before M01 implementation, and M
 selector correction was separately approved before implementation:
 
 - InkScript file version 2, procedure catalog version 2, replay epoch 23, `.inkpod`
-  top-level version 26, and C ABI version 14 are the exact-current registry values.
+  top-level version 26, and C ABI version 15 are the exact-current registry values.
 - M07's approved exact-current registry schema v2 supersedes registry schema v1 solely to add
   closed catalog-owned enum, record, and constructor definitions; schema v1 is not accepted.
 - M21's approved option A changes only the shooting-frame selector from a layer owner to the
@@ -23,15 +23,25 @@ selector correction was separately approved before implementation:
   Later discovery of a missing grammar, section, type, selector, assert, asset, or
   resource rule requires an explicit InkScript file-version decision; it is not a silent
   M01+ fix.
-- Catalog v2 remains a non-production draft through M22. M23 alone may freeze it after
-  proving a bijection among all replayable primitives, exact command entries,
-  implementations, and equivalence tests. Owner additions to the private draft before
-  M23 do not bump catalog version.
+- Catalog v2 remained a non-production draft through M22. M23 proved the bijection among all 84
+  replayable primitives, exact command entries, owners, implementations, and equivalence IDs,
+  removed the draft, and froze `catalog-v2.json` as the production Rust contract. Owner additions
+  made before M23 did not bump catalog version; any post-freeze change requires a new versioned
+  resource, old-version rejection, and regenerated reference.
 - Exact-source equivalence compares canonical state/pixel digests, ID high-watermarks,
   typed result roles and output ordinals, pre/post state digests, stable input/output/asset
   roles, and canonical invocations. Rebound execution guarantees deterministic execution
   only after every external strict selector is explicitly replaced; it does not claim
   source UUID, raw ID, or source-state equality.
+- M24's journal exporter is a read-only orchestration query, not a catalog procedure. It maps
+  the already frozen typed runtime invocation and retained asset authority back to an
+  exact-current semantic fragment, emits exact parent state/ID-allocation assertions and
+  strict selectors, and reuses the same canonical executor for equivalence. It changes no
+  file grammar, command signature, primitive semantics, replay epoch, native schema, or ABI.
+- M25 exposes source parse/diagnostic copy/static compile/journal fragment export through C ABI
+  v15. The FFI only translates versioned fixed-width records, bounded spans, and opaque ownership
+  into the public Rust APIs; private catalog models and executors remain unreachable, and no
+  Windows command, file filter, clipboard, plan execution, report, or product UI route is added.
 - Continuous Fill lowers one source seed to one step and therefore produces zero through
   N ordinary Commits. A contiguous, non-semantic `editor_group` is the only lossless 1:N
   link back to one legacy Batch operation; it cannot alter execution or Commit boundaries.
@@ -81,22 +91,50 @@ reviewable before signatures are added:
 
 `LIGHT_TABLE_SWAP_WITH_ACTIVE` is the sole current catalog exclusion because it is
 session-only. Query, view, preview, export, save/open, history-control, and frontend
-command IDs remain outside the manifest.
+command IDs remain outside the manifest. M24's journal-fragment query therefore remains
+outside the 84-entry procedure catalog while exhaustively consuming its typed runtime variants.
 
-## M00 evidence
+## Registry and completeness evidence
 
-The test-only `inkscript_registry` integration target provides these current checks:
+The `inkscript_registry` integration target provides these current checks:
 
-- `inkscript_registry_meta_schema_is_closed_and_draft_is_private`
+- `inkscript_registry_meta_schema_and_production_catalog_are_closed`
 - `inkscript_registry_json_rejects_duplicate_malformed_and_overflowing_input`
 - `inkscript_language_core_is_closed_and_references_resolve`
 - `inkscript_owner_manifest_is_a_bijection_with_replayable_primitives`
+- `inkscript_production_catalog_is_bijective_with_runtime_and_equivalence_evidence`
+- `inkscript_generated_command_reference_has_no_drift`
 - `inkscript_versions_and_traceability_match_repository_contracts`
-- `inkscript_private_draft_is_unreachable_from_production`
+- `inkscript_removed_draft_is_unreachable_from_production`
+- `inkscript_private_typed_models_remain_unreachable_from_core_ffi_and_windows`
 
-PowerShell `Test-Json -SchemaFile` additionally validates the language, draft, and owner
+PowerShell `Test-Json -SchemaFile` additionally validates the language, production catalog, and owner
 documents against the formal Draft 2020-12 meta-schema. The Rust tests validate the closed
 meta-schema and JSON syntax, duplicate/malformed/overflow rejection, language type/nonterminal
 references, unique field/order/type names, current version constants, the 84-entry
 primitive-owner bijection, the one explicit session-only exclusion, requirement/document
-drift, and absence of private catalog paths from production Rust/C++/header sources.
+drift, immutable catalog fingerprint, generated-reference drift, public Rust ownership, absence of
+the removed draft, and absence of private typed catalog models or Windows InkScript routes.
+
+## M24 journal-fragment evidence
+
+Six public exporter contracts plus one inline-asset unit contract cover active and inactive
+one/linear Commit selection, Genesis, non-Commit/nonlinear rejection, exact parent assertions,
+strict and strict-source-only binding, typed scalar/list result references, retained asset
+deduplication, caller-lowered resource bounds, cancellation, source atomicity, and owned
+`Send + Sync` output. Seven M17–M22 family fixtures additionally apply the emitted fragment to a
+cache-free parent and compare final state/pixel digest, ID high-watermark, pre/post digest,
+schema-ordered input/output/asset IDs, and the full canonical procedure sequence. The export
+replay path does not materialize history visualization summaries or thumbnails.
+
+## M25 C ABI evidence
+
+Three `inkpod-ffi` contracts plus the C header/export drift, C11 include, C++20 ABI smoke, and
+route-inventory gates cover the exact-current ABI v15 source/compiler/export boundary. They prove
+bounded source ownership, two-stage original-text and canonical-fragment copy, atomic strided
+diagnostic records with packed UTF-8, stored-default/typed-override static compilation through the public Rust compiler, and
+journal export through the M24 public exporter. Negative evidence covers v14 rejection, NULL,
+misalignment, short records, unknown flags and enums, oversize spans, Cancel, resource limits,
+stale controller/session tokens, stale Core generation, wrong-thread access, and idempotent NULL
+release. No CST/AST/catalog node, per-token/per-node call, second model/executor, execution/report,
+or Windows product route is exposed.

@@ -284,6 +284,13 @@ pub fn parse_inkscript_with_limits(
     Parser::new(source, limits).run()
 }
 
+pub(crate) fn parse_inkscript_value_tokens(
+    source: &InkScriptSource,
+    limits: InkScriptParserLimits,
+) -> Option<Vec<InkScriptToken>> {
+    Parser::new(source, limits).run_value()
+}
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum SectionTag {
     Requires,
@@ -401,6 +408,16 @@ impl<'source> Parser<'source> {
             diagnostics: self.diagnostics,
             complete: self.complete && !self.stopped,
         }
+    }
+
+    fn run_value(mut self) -> Option<Vec<InkScriptToken>> {
+        let parsed = !self.stopped && self.parse_value().is_some();
+        if parsed && self.peek_kind() != InkScriptTokenKind::EndOfSource {
+            let range = self.current_range();
+            self.report(InkScriptDiagnosticCode::UnexpectedToken, range);
+        }
+        (parsed && self.complete && !self.stopped && self.diagnostics.is_empty())
+            .then_some(self.tokens)
     }
 
     fn parse_header(&mut self) -> (InkScriptDocumentKind, Option<InkScriptCstNode>) {

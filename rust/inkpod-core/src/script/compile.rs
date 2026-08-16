@@ -11,13 +11,14 @@ use crate::primitive::{
     inkscript_metadata, inkscript_selection_floating, inkscript_stroke_geometry, inkscript_vector,
 };
 use inkpod_format::{
-    InkScriptDeclarationModel, InkScriptEnvelopeErrorCode, InkScriptInputDeclarationKind,
-    InkScriptOrchestrationEnvelope, InkScriptOutput, InkScriptPathIntentAccess,
-    InkScriptRunParameterDecision, InkScriptSchemaView, InkScriptSemanticErrorCode,
-    InkScriptSource, InkScriptTypeDiagnostic, InkScriptTypeDiagnosticCode, InkScriptTypedValue,
-    InkScriptTypedValueKind, build_inkscript_declaration_model,
-    build_inkscript_orchestration_envelope, build_inkscript_semantic, emit_inkscript_canonical,
-    parse_inkscript, resolve_inkscript_run_parameters,
+    INKSCRIPT_PRODUCTION_CATALOG_COMMAND_COUNT, InkScriptDeclarationModel,
+    InkScriptEnvelopeErrorCode, InkScriptInputDeclarationKind, InkScriptOrchestrationEnvelope,
+    InkScriptOutput, InkScriptPathIntentAccess, InkScriptRunParameterDecision, InkScriptSchemaView,
+    InkScriptSemanticErrorCode, InkScriptSource, InkScriptTypeDiagnostic,
+    InkScriptTypeDiagnosticCode, InkScriptTypedValue, InkScriptTypedValueKind,
+    build_inkscript_declaration_model, build_inkscript_orchestration_envelope,
+    build_inkscript_semantic, emit_inkscript_canonical, parse_inkscript,
+    resolve_inkscript_run_parameters,
 };
 use std::collections::BTreeMap;
 
@@ -28,18 +29,23 @@ const MAX_SCRIPT_WORK_UNITS: u64 = 1_100_000_000_000;
 const MAX_SCRIPT_OUTPUT_GROWTH: u64 = 67_108_864;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct ScriptCompileLimits {
+/// Caller-lowerable compile limits bounded by the exact-current InkScript contract.
+pub struct ScriptCompileLimits {
     invocations: u64,
 }
 
 impl ScriptCompileLimits {
-    pub(crate) const fn exact_current() -> Self {
+    /// Returns the exact-current maximum compile envelope.
+    pub const fn exact_current() -> Self {
         Self {
             invocations: MAX_SCRIPT_INVOCATIONS,
         }
     }
 
-    pub(crate) const fn with_invocations(mut self, maximum: u64) -> Self {
+    /// Lowers the maximum invocation count; zero is normalized to one and the contract maximum
+    /// cannot be raised.
+    #[must_use]
+    pub const fn with_invocations(mut self, maximum: u64) -> Self {
         self.invocations = if maximum == 0 {
             1
         } else if maximum < MAX_SCRIPT_INVOCATIONS {
@@ -52,21 +58,33 @@ impl ScriptCompileLimits {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum ScriptCompileError {
+/// Stable failures produced before an InkScript execution plan can be created.
+pub enum ScriptCompileError {
+    /// Bounded parsing did not produce a valid exact-current file.
     Syntax,
+    /// Semantic construction rejected the source.
     Semantic(InkScriptSemanticErrorCode),
+    /// The orchestration envelope is invalid.
     Envelope(InkScriptEnvelopeErrorCode),
+    /// Typed declaration or reference analysis failed.
     Type(InkScriptTypeDiagnostic),
+    /// Resolving run parameters did not yield a closed typed value.
     Freeze(InkScriptTypeDiagnosticCode),
+    /// The caller cancelled per-run parameter resolution.
     ParameterCancelled,
+    /// A source path intent is invalid or exceeds its bound.
     InvalidPathIntent,
+    /// Asset declaration validation failed.
     Asset(ScriptAssetError),
+    /// The exact-current catalog rejected a command or formula.
     Catalog(CatalogError),
+    /// A checked aggregate compile bound was exceeded.
     ResourceLimit,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(crate) struct ScriptBudget {
+/// Checked upper bounds computed from enabled invocations and exact catalog formulas.
+pub struct ScriptBudget {
     pub(crate) max_invocations: u64,
     pub(crate) max_output_ids: u64,
     pub(crate) max_asset_bytes: u64,
@@ -74,8 +92,39 @@ pub(crate) struct ScriptBudget {
     pub(crate) max_output_growth: u64,
 }
 
+impl ScriptBudget {
+    /// Returns the maximum number of canonical invocations.
+    pub const fn max_invocations(self) -> u64 {
+        self.max_invocations
+    }
+
+    /// Returns the maximum number of persistent output identifiers.
+    pub const fn max_output_ids(self) -> u64 {
+        self.max_output_ids
+    }
+
+    /// Returns the maximum number of logical asset bytes.
+    pub const fn max_asset_bytes(self) -> u64 {
+        self.max_asset_bytes
+    }
+
+    /// Returns the maximum catalog work-unit count.
+    pub const fn max_work_units(self) -> u64 {
+        self.max_work_units
+    }
+
+    /// Returns the maximum native output growth in bytes.
+    pub const fn max_output_growth(self) -> u64 {
+        self.max_output_growth
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct StaticScriptProgram {
+/// Immutable exact-current program produced by [`compile_inkscript`].
+///
+/// The program owns all resolved parameters and frozen invocation values. It is safe to move
+/// between threads, but execution remains subject to the caller's single-writer `Core` route.
+pub struct StaticScriptProgram {
     pub(crate) static_compile_digest: [u8; 32],
     pub(crate) path_intent_digest: [u8; 32],
     pub(crate) budget: ScriptBudget,
@@ -87,15 +136,42 @@ pub(crate) struct StaticScriptProgram {
     pub(crate) path_intents: Vec<ScriptStaticPathIntent>,
 }
 
+impl StaticScriptProgram {
+    /// Returns the digest of canonical source semantics, resolved parameters, and frozen values.
+    pub const fn static_compile_digest(&self) -> &[u8; 32] {
+        &self.static_compile_digest
+    }
+
+    /// Returns the digest of every authority-free path intent in source order.
+    pub const fn path_intent_digest(&self) -> &[u8; 32] {
+        &self.path_intent_digest
+    }
+
+    /// Returns the checked aggregate catalog budget.
+    pub const fn budget(&self) -> ScriptBudget {
+        self.budget
+    }
+
+    /// Returns immutable authority-free path intents in source order.
+    pub fn path_intents(&self) -> &[ScriptStaticPathIntent] {
+        &self.path_intents
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum ScriptPathIntentSubject {
+/// Source declaration that owns one authority-free path intent.
+pub enum ScriptPathIntentSubject {
+    /// An input declaration at the given zero-based source index.
     Input(usize),
+    /// A named external asset declaration.
     Asset(String),
+    /// The output-root declaration.
     OutputRoot,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct ScriptStaticPathIntent {
+/// Immutable path text and requested access captured during static compilation.
+pub struct ScriptStaticPathIntent {
     id: u64,
     access: InkScriptPathIntentAccess,
     text: String,
@@ -103,31 +179,43 @@ pub(crate) struct ScriptStaticPathIntent {
 }
 
 impl ScriptStaticPathIntent {
-    pub(crate) const fn id(&self) -> u64 {
+    /// Returns the nonzero program-local intent identifier.
+    pub const fn id(&self) -> u64 {
         self.id
     }
 
-    pub(crate) const fn access(&self) -> InkScriptPathIntentAccess {
+    /// Returns the requested path access without granting OS authority.
+    pub const fn access(&self) -> InkScriptPathIntentAccess {
         self.access
     }
 
-    pub(crate) fn text(&self) -> &str {
+    /// Returns the exact source-owned path text.
+    pub fn text(&self) -> &str {
         &self.text
     }
 
-    pub(crate) const fn subject(&self) -> &ScriptPathIntentSubject {
+    /// Returns the declaration that owns this intent.
+    pub const fn subject(&self) -> &ScriptPathIntentSubject {
         &self.subject
     }
 }
 
-pub(crate) fn compile_inkscript(
+/// Compiles one exact-current source with an explicit per-run parameter decision.
+///
+/// Parsing, semantic analysis, parameter freezing, catalog lookup, and resource calculation are
+/// all-or-nothing and do not read paths or mutate a document.
+pub fn compile_inkscript(
     source: &InkScriptSource,
     parameters: InkScriptRunParameterDecision,
 ) -> Result<StaticScriptProgram, ScriptCompileError> {
     compile_inkscript_with_limits(source, parameters, ScriptCompileLimits::exact_current())
 }
 
-pub(crate) fn compile_inkscript_with_limits(
+/// Compiles with caller-lowered resource limits.
+///
+/// This has the same atomic ownership contract as [`compile_inkscript`]. Limits cannot raise the
+/// exact-current contract envelope.
+pub fn compile_inkscript_with_limits(
     source: &InkScriptSource,
     parameters: InkScriptRunParameterDecision,
     limits: ScriptCompileLimits,
@@ -271,7 +359,7 @@ pub(super) struct ScriptSchemas {
 
 impl ScriptSchemas {
     pub(super) fn new() -> Self {
-        Self {
+        let schemas = Self {
             enums: inkscript::LEGACY_SIMPLE_ENUMS
                 .iter()
                 .chain(inkscript_batch::LEGACY_IMAGE_ENUMS)
@@ -317,7 +405,13 @@ impl ScriptSchemas {
                 .chain(inkscript_light_table::LIGHT_TABLE_COMMANDS)
                 .copied()
                 .collect(),
-        }
+        };
+        assert_eq!(
+            schemas.commands.len(),
+            INKSCRIPT_PRODUCTION_CATALOG_COMMAND_COUNT,
+            "Rust command declarations must stay bijective with the frozen production catalog"
+        );
+        schemas
     }
 
     pub(super) fn view(&self) -> Result<InkScriptSchemaView<'_>, ScriptCompileError> {

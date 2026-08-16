@@ -370,9 +370,9 @@ impl MetadataColorGuideScriptStep {
     }
 }
 
-type LiftedArguments = (&'static str, String, bool);
+pub(crate) type LiftedArguments = (&'static str, String, bool);
 
-fn lift_arguments(
+pub(crate) fn lift_arguments(
     invocation: &MetadataColorGuideInvocation,
     source: &mut String,
     references: &mut InkScriptRuntimeReferences,

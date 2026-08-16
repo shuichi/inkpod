@@ -10,7 +10,7 @@
  *
  * @par 共通の構造体規則
  * 拡張可能な入出力構造体は先頭が `uint32_t struct_size` である。呼び出し側は
- * `struct_size = sizeof(その構造体)` を設定する。Core は ABI v10 で既知の末尾まで
+ * `struct_size = sizeof(その構造体)` を設定する。Core は ABI v15 で既知の末尾まで
  * 読み書きできるサイズ、アラインメント、stride、count と全バイト範囲を検証してから
  * ポインターを参照する。構造体ポインターは個別に NULL 可と明記したものを除き非 NULL。
  * count が 0 の任意 span だけはデータポインターを NULL にできる。入力構造体、出力構造体、
@@ -66,8 +66,25 @@
 extern "C" {
 #endif
 
-#define INKPOD_ABI_VERSION UINT32_C(14)
+#define INKPOD_ABI_VERSION UINT32_C(15)
 #define INKPOD_FEATURE_NONE UINT64_C(0)
+
+/** @brief InkScript ABI record の exact-current version。 */
+#define INKPOD_INKSCRIPT_RECORD_VERSION UINT32_C(1)
+#define INKPOD_INKSCRIPT_DOCUMENT_UNKNOWN UINT32_C(0)
+#define INKPOD_INKSCRIPT_DOCUMENT_FILE UINT32_C(1)
+#define INKPOD_INKSCRIPT_DOCUMENT_FRAGMENT UINT32_C(2)
+#define INKPOD_INKSCRIPT_SOURCE_COMPLETE (UINT64_C(1) << 0)
+#define INKPOD_INKSCRIPT_SOURCE_VALID (UINT64_C(1) << 1)
+#define INKPOD_INKSCRIPT_SOURCE_UTF8_BOM (UINT64_C(1) << 2)
+#define INKPOD_INKSCRIPT_DIAGNOSTIC_ERROR UINT32_C(1)
+#define INKPOD_INKSCRIPT_PARAMETER_ACCEPT_DEFAULT UINT32_C(1)
+#define INKPOD_INKSCRIPT_PARAMETER_OVERRIDE UINT32_C(2)
+#define INKPOD_INKSCRIPT_COMPILE_CANCEL (UINT64_C(1) << 0)
+#define INKPOD_INKSCRIPT_EXPORT_CANCEL (UINT64_C(1) << 0)
+#define INKPOD_INKSCRIPT_PORTABLE UINT32_C(1)
+#define INKPOD_INKSCRIPT_REQUIRES_BINDING UINT32_C(2)
+#define INKPOD_INKSCRIPT_STRICT_SOURCE_ONLY UINT32_C(3)
 
 /** @brief すべての fallible API が返す固定幅ステータス型。 */
 typedef uint32_t InkpodStatus;
@@ -758,6 +775,191 @@ typedef struct InkpodBatchPreview InkpodBatchPreview;
 typedef struct InkpodBatchPairPreview InkpodBatchPairPreview;
 /** @brief batch report item を所有する immutable・Rust-owned handle。 */
 typedef struct InkpodBatchReport InkpodBatchReport;
+/** @brief Source bytes と parse diagnostics を所有する immutable Rust handle。 */
+typedef struct InkpodInkScriptSource InkpodInkScriptSource;
+/** @brief Core generation に束縛された immutable compiled program。 */
+typedef struct InkpodInkScriptProgram InkpodInkScriptProgram;
+/** @brief Canonical journal fragment text と linkage を所有する immutable handle。 */
+typedef struct InkpodInkScriptFragment InkpodInkScriptFragment;
+
+/** @brief One borrowed exact-current source parse request. */
+typedef struct InkpodInkScriptSourceInput {
+    uint32_t struct_size;
+    uint32_t version;
+    uint64_t feature_flags;
+    uint64_t controller_id;
+    uint64_t session_generation;
+    uint64_t source_id;
+    const uint8_t* source_utf8;
+    uint64_t source_bytes;
+} InkpodInkScriptSourceInput;
+
+/** @brief Fixed-width source parse summary; no CST/AST pointer is exposed. */
+typedef struct InkpodInkScriptSourceSummary {
+    uint32_t struct_size;
+    uint32_t version;
+    uint64_t feature_flags;
+    uint64_t controller_id;
+    uint64_t session_generation;
+    uint64_t source_id;
+    uint64_t source_bytes;
+    uint64_t diagnostic_count;
+    uint32_t document_kind;
+    uint32_t reserved;
+    uint64_t flags;
+} InkpodInkScriptSourceSummary;
+
+/** @brief Versioned two-stage UTF-8 byte buffer; output is not NUL-terminated. */
+typedef struct InkpodInkScriptUtf8Buffer {
+    uint32_t struct_size;
+    uint32_t version;
+    uint64_t feature_flags;
+    uint8_t* bytes;
+    uint64_t capacity_bytes;
+    uint64_t written_bytes;
+    uint64_t required_bytes;
+} InkpodInkScriptUtf8Buffer;
+
+/** @brief One diagnostic whose variable strings are offsets into a packed UTF-8 span. */
+typedef struct InkpodInkScriptDiagnostic {
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t severity;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    uint64_t source_id;
+    uint64_t byte_start;
+    uint64_t byte_end;
+    uint32_t start_line;
+    uint32_t start_column;
+    uint32_t end_line;
+    uint32_t end_column;
+    uint64_t code_offset;
+    uint64_t code_bytes;
+    uint64_t message_offset;
+    uint64_t message_bytes;
+    uint64_t path_offset;
+    uint64_t path_bytes;
+    uint64_t hint_offset;
+    uint64_t hint_bytes;
+} InkpodInkScriptDiagnostic;
+
+/**
+ * @brief Two-stage batch copy for all diagnostics at or after `first_diagnostic`.
+ *
+ * A size query uses NULL/zero record and UTF-8 spans. BUFFER_TOO_SMALL writes only the four
+ * written/required counters. A copy call initializes every destination diagnostic with exact
+ * struct size/version/zero feature flags before entry; all records and packed text are written
+ * atomically after full validation.
+ */
+typedef struct InkpodInkScriptDiagnosticBuffer {
+    uint32_t struct_size;
+    uint32_t version;
+    uint64_t feature_flags;
+    uint64_t first_diagnostic;
+    InkpodInkScriptDiagnostic* records;
+    uint64_t record_capacity;
+    uint64_t record_stride_bytes;
+    uint8_t* utf8;
+    uint64_t utf8_capacity_bytes;
+    uint64_t records_written;
+    uint64_t required_records;
+    uint64_t utf8_written_bytes;
+    uint64_t required_utf8_bytes;
+} InkpodInkScriptDiagnosticBuffer;
+
+/**
+ * @brief One explicit `ask = each_run` decision.
+ *
+ * ACCEPT_DEFAULT requires a NULL/zero value span. OVERRIDE borrows one complete exact-current
+ * value spelling during compile; the Rust compiler owns and type-checks the parsed closed value.
+ */
+typedef struct InkpodInkScriptParameterChoice {
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t kind;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    const uint8_t* name_utf8;
+    uint64_t name_bytes;
+    const uint8_t* value_utf8;
+    uint64_t value_bytes;
+} InkpodInkScriptParameterChoice;
+
+/** @brief Bounded static compile request; zero max_invocations selects the exact-current limit. */
+typedef struct InkpodInkScriptCompileRequest {
+    uint32_t struct_size;
+    uint32_t version;
+    uint64_t feature_flags;
+    uint64_t controller_id;
+    uint64_t session_generation;
+    uint64_t flags;
+    uint64_t reserved;
+    const InkpodInkScriptParameterChoice* parameter_choices;
+    uint64_t parameter_choice_count;
+    uint64_t parameter_choice_stride_bytes;
+    uint64_t max_invocations;
+} InkpodInkScriptCompileRequest;
+
+/** @brief Immutable compile digests, checked budget, and generation identity. */
+typedef struct InkpodInkScriptProgramSummary {
+    uint32_t struct_size;
+    uint32_t version;
+    uint64_t feature_flags;
+    uint64_t controller_id;
+    uint64_t session_generation;
+    uint64_t core_generation;
+    uint8_t static_compile_digest[32];
+    uint8_t path_intent_digest[32];
+    uint64_t max_invocations;
+    uint64_t max_output_ids;
+    uint64_t max_asset_bytes;
+    uint64_t max_work_units;
+    uint64_t max_output_growth;
+    uint64_t path_intent_count;
+} InkpodInkScriptProgramSummary;
+
+/** @brief One size/version-checked journal event in a borrowed export span. */
+typedef struct InkpodInkScriptJournalEvent {
+    uint32_t struct_size;
+    uint32_t version;
+    uint64_t event_id;
+    uint64_t reserved;
+} InkpodInkScriptJournalEvent;
+
+/** @brief Bounded journal-to-fragment query; zero maxima select exact-current limits. */
+typedef struct InkpodInkScriptExportRequest {
+    uint32_t struct_size;
+    uint32_t version;
+    uint64_t feature_flags;
+    uint64_t controller_id;
+    uint64_t session_generation;
+    uint64_t flags;
+    uint64_t reserved;
+    const InkpodInkScriptJournalEvent* events;
+    uint64_t event_count;
+    uint64_t event_stride_bytes;
+    uint64_t max_commits;
+    uint64_t max_source_bytes;
+    uint64_t max_inline_asset_bytes;
+} InkpodInkScriptExportRequest;
+
+/** @brief Immutable canonical fragment linkage, portability, and text requirements. */
+typedef struct InkpodInkScriptFragmentSummary {
+    uint32_t struct_size;
+    uint32_t version;
+    uint64_t feature_flags;
+    uint64_t controller_id;
+    uint64_t session_generation;
+    uint64_t core_generation;
+    uint64_t base_state_id;
+    uint64_t final_state_id;
+    uint64_t commit_count;
+    uint32_t portability;
+    uint32_t reserved;
+    uint64_t required_precondition_count;
+    uint64_t text_bytes;
+} InkpodInkScriptFragmentSummary;
 
 /** @brief Core 作成時の ABI version と feature を渡す入力。全体を borrowed で読み取る。 */
 typedef struct InkpodCoreConfig {
@@ -6436,6 +6638,105 @@ InkpodStatus inkpod_cut_autosave(
     const uint8_t* path_utf8,
     uint64_t path_bytes,
     InkpodCutInfo* out_info);
+
+/**
+ * @brief Copies and parses one UTF-8 source into an immutable Rust-owned handle.
+ * @par Thread and ownership
+ * May run on a bounded worker thread. Input bytes are borrowed only for the call and copied.
+ * The source has no parent handle, may move between threads, and must be externally synchronized
+ * against `inkpod_inkscript_source_release`. The controller/session generation is immutable route
+ * metadata; compile rejects a request carrying a different pair.
+ * @par Failure and diagnostics
+ * Lexical/parser errors still return OK with a non-valid source and batched diagnostics. NULL,
+ * alignment, short record, noncurrent record version, unknown flags, or source overflow publishes
+ * no handle. Rust panic is contained.
+ */
+InkpodStatus inkpod_inkscript_source_parse(
+    const InkpodInkScriptSourceInput* input,
+    InkpodInkScriptSource** out_source);
+
+/** @brief Copies fixed-width source validity and diagnostic counts; no parser node is exposed. */
+InkpodStatus inkpod_inkscript_source_summary(
+    const InkpodInkScriptSource* source,
+    InkpodInkScriptSourceSummary* out_summary);
+
+/** @brief Two-stage copy of the exact caller source bytes without NUL termination. */
+InkpodStatus inkpod_inkscript_source_text_copy(
+    const InkpodInkScriptSource* source,
+    InkpodInkScriptUtf8Buffer* output);
+
+/** @brief Batched diagnostic-record and packed-UTF-8 copy; never returns Rust-owned pointers. */
+InkpodStatus inkpod_inkscript_source_diagnostics_copy(
+    const InkpodInkScriptSource* source,
+    InkpodInkScriptDiagnosticBuffer* output);
+
+/** @brief Releases a source on any externally synchronized thread; NULL owner is a success no-op. */
+InkpodStatus inkpod_inkscript_source_release(InkpodInkScriptSource** source);
+
+/**
+ * @brief Statically compiles one valid source through the exact Core compiler.
+ * @par Thread, parent, and generation
+ * Core owner thread only. Source remains caller-owned and may be released after return. The
+ * program owns all compiled values but is bound to the creating Core generation and owner thread;
+ * all access/release requires that same live Core before `inkpod_core_destroy`. The request
+ * controller/session generation must equal the source token, so stale source state is not rebound
+ * to another controller. Every named `ask = each_run` parameter has one strided ACCEPT_DEFAULT or
+ * OVERRIDE choice. Override text is borrowed only for the call, parsed as one bounded exact-current
+ * value, copied into Rust ownership, and checked against the source declaration without changing
+ * the stored default.
+ * @par Atomicity
+ * Invalid source/choice/limit, Cancel, stale token, panic, or allocation failure leaves
+ * `*out_program == NULL` and changes no Core/document/history/savepoint/ID state.
+ */
+InkpodStatus inkpod_core_inkscript_compile(
+    InkpodCore* core,
+    const InkpodInkScriptSource* source,
+    const InkpodInkScriptCompileRequest* request,
+    InkpodInkScriptProgram** out_program);
+
+/** @brief Copies immutable compile digests and budget on the program/Core owner thread. */
+InkpodStatus inkpod_core_inkscript_program_summary(
+    InkpodCore* core,
+    const InkpodInkScriptProgram* program,
+    InkpodInkScriptProgramSummary* out_summary);
+
+/** @brief Releases a program on its owner thread before its parent Core; NULL is a no-op. */
+InkpodStatus inkpod_core_inkscript_program_release(
+    InkpodCore* core,
+    InkpodInkScriptProgram** program);
+
+/**
+ * @brief Exports one bounded linear Commit selection through the canonical journal exporter.
+ * @par Thread, parent, and generation
+ * Core owner thread only. The event span is borrowed for the call and copied as stable IDs. The
+ * immutable fragment is bound to this Core generation and owner thread; summary/text/release need
+ * the same live Core before destroy. Controller/session generation is retained unchanged for the
+ * later frontend route and must never be substituted with the current active session.
+ * @par Atomicity
+ * Empty/non-Commit/nonlinear/stale/resource/Cancel/panic failure publishes no fragment and changes
+ * no document/editor revision, history, dirty/savepoint, cache, asset, or ID high-watermark.
+ */
+InkpodStatus inkpod_core_inkscript_fragment_export(
+    InkpodCore* core,
+    const InkpodInkScriptExportRequest* request,
+    InkpodInkScriptFragment** out_fragment);
+
+/** @brief Copies immutable fragment state linkage, portability, counts, and text byte length. */
+InkpodStatus inkpod_core_inkscript_fragment_summary(
+    InkpodCore* core,
+    const InkpodInkScriptFragment* fragment,
+    InkpodInkScriptFragmentSummary* out_summary);
+
+/** @brief Two-stage copy of canonical BOM-free LF fragment text without NUL termination. */
+InkpodStatus inkpod_core_inkscript_fragment_text_copy(
+    InkpodCore* core,
+    const InkpodInkScriptFragment* fragment,
+    InkpodInkScriptUtf8Buffer* output);
+
+/** @brief Releases a fragment on its export thread before its parent Core; NULL is a no-op. */
+InkpodStatus inkpod_core_inkscript_fragment_release(
+    InkpodCore* core,
+    InkpodInkScriptFragment** fragment);
 
 /**
  * @brief current thread の直近 FFI diagnostic に必要な UTF-8 buffer size を得る。

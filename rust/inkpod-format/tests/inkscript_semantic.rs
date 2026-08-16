@@ -2,7 +2,7 @@ use inkpod_format::{
     InkScriptCommandSchema, InkScriptFieldSchema, InkScriptGeneratedNames, InkScriptRecordSchema,
     InkScriptSchemaDefault, InkScriptSchemaView, InkScriptSemanticErrorCode,
     InkScriptSemanticSection, InkScriptSource, InkScriptSourceId, build_inkscript_semantic,
-    emit_inkscript_canonical, parse_inkscript,
+    emit_inkscript_canonical, parse_inkscript, parse_inkscript_value,
 };
 
 const TEST_OPTIONS_FIELDS: &[InkScriptFieldSchema] = &[
@@ -292,4 +292,20 @@ fn generated_names_use_stable_occurrence_order_and_minimum_suffixes() {
         names.reserve_or_rename("Not-An-Identifier").unwrap_err(),
         InkScriptSemanticErrorCode::InvalidGeneratedName
     );
+}
+
+#[test]
+fn standalone_value_parser_reuses_the_bounded_exact_value_grammar() {
+    let source = InkScriptSource::new(
+        InkScriptSourceId::new(91),
+        br#"{ color = rgba16(1, 2, 3, 65535); points = [point(q16(-1), q16(2))]; }"#,
+    )
+    .unwrap();
+    let value = parse_inkscript_value(&source).expect("closed override value");
+    assert!(matches!(value, inkpod_format::InkScriptValue::Record(_)));
+
+    for invalid in [b"".as_slice(), b"[1,,2]", b"true trailing", b"{"] {
+        let source = InkScriptSource::new(InkScriptSourceId::new(92), invalid).unwrap();
+        assert!(parse_inkscript_value(&source).is_err());
+    }
 }

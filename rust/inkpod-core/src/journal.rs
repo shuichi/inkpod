@@ -443,7 +443,7 @@ pub struct HistoryVisualizationBuilder {
     assets: crate::asset::AssetStore,
     nodes: BTreeMap<StateId, ReplayNode>,
     branches: BTreeMap<BranchId, StateId>,
-    rows: Vec<HistoryVisualizationRow>,
+    rows: Option<Vec<HistoryVisualizationRow>>,
     index: usize,
     current_state: StateId,
     active_branch: BranchId,
@@ -486,7 +486,7 @@ impl HistoryVisualizationBuilder {
         HistoryVisualizationProgress {
             completed_events: self.index as u64,
             total_events: self.journal.len() as u64,
-            completed_rows: self.rows.len() as u64,
+            completed_rows: self.rows.as_ref().map_or(0, |rows| rows.len() as u64),
             total_rows: self.total_rows,
         }
     }
@@ -527,7 +527,9 @@ impl HistoryVisualizationBuilder {
         if !self.validated {
             self.validate_completion()?;
         }
-        Ok(self.rows)
+        self.rows.ok_or(CoreError::InvalidState(
+            "history visualization rows were not requested",
+        ))
     }
 
     fn replay_next_event(&mut self) -> Result<(), CoreError> {
@@ -609,19 +611,21 @@ impl HistoryVisualizationBuilder {
         cached.branch_id = commit.branch_id;
         let next_id = replay.next_id;
         let document = replay.document.ok_or(CoreError::NoDocument)?;
-        let (primitive_name, arguments) = display_procedure(&commit.procedure)?;
-        let thumbnail =
-            thumbnail_for_document(&document, &self.assets, commit.committed_state_id.get())?;
-        self.rows.push(HistoryVisualizationRow {
-            journal_event_id: commit.event_id,
-            procedure_id: commit.procedure.procedure_id(),
-            primitive_id: commit.procedure.primitive_id(),
-            committed_state_id: commit.committed_state_id,
-            branch_id: commit.branch_id,
-            primitive_name,
-            arguments,
-            thumbnail,
-        });
+        if let Some(rows) = &mut self.rows {
+            let (primitive_name, arguments) = display_procedure(&commit.procedure)?;
+            let thumbnail =
+                thumbnail_for_document(&document, &self.assets, commit.committed_state_id.get())?;
+            rows.push(HistoryVisualizationRow {
+                journal_event_id: commit.event_id,
+                procedure_id: commit.procedure.procedure_id(),
+                primitive_id: commit.procedure.primitive_id(),
+                committed_state_id: commit.committed_state_id,
+                branch_id: commit.branch_id,
+                primitive_name,
+                arguments,
+                thumbnail,
+            });
+        }
         self.nodes.insert(
             commit.committed_state_id,
             ReplayNode {
@@ -746,7 +750,10 @@ impl HistoryVisualizationBuilder {
             || self.expected_procedure != self.target_next_procedure
             || self.expected_state != self.target_next_state
             || self.next_branch != self.target_next_branch
-            || self.rows.len() as u64 != self.total_rows
+            || self
+                .rows
+                .as_ref()
+                .is_some_and(|rows| rows.len() as u64 != self.total_rows)
         {
             return Err(CoreError::InvalidState(
                 "journal replay high-watermarks do not match Core state",
@@ -757,6 +764,56 @@ impl HistoryVisualizationBuilder {
 }
 
 impl Core {
+    pub(super) fn replay_prefix_for_inkscript_export(
+        &self,
+        event_count: usize,
+        cancelled: &mut dyn FnMut() -> bool,
+    ) -> Result<Self, CoreError> {
+        if event_count > self.journal.len() {
+            return Err(CoreError::InvalidArgument(
+                "InkScript export prefix exceeds the journal",
+            ));
+        }
+        let mut builder = self.begin_journal_replay(false)?;
+        for _ in 0..event_count {
+            if cancelled() {
+                return Err(CoreError::Cancelled);
+            }
+            builder.step(1)?;
+        }
+        if cancelled() {
+            return Err(CoreError::Cancelled);
+        }
+        let node = builder
+            .nodes
+            .get(&builder.current_state)
+            .ok_or(CoreError::InvalidState(
+                "InkScript export prefix state is missing",
+            ))?;
+        let next_id = builder
+            .nodes
+            .values()
+            .map(|node| node.next_id)
+            .max_by_key(|cursor| cursor.next_raw())
+            .ok_or(CoreError::InvalidState(
+                "InkScript export prefix allocator is missing",
+            ))?;
+        let mut prefix = self.clone();
+        prefix.document = Some(node.document.clone());
+        prefix.current_state = builder.current_state;
+        prefix.active_branch = builder.active_branch;
+        prefix.next_journal_event = builder.expected_event;
+        prefix.next_procedure = builder.expected_procedure;
+        prefix.next_state = builder.expected_state;
+        prefix.next_branch = builder.next_branch;
+        prefix.next_id = next_id;
+        prefix.document_revision = DocumentRevision::from_raw(1);
+        prefix.savepoint = None;
+        prefix.current_path = None;
+        *prefix.canonical_state_cache.get_mut() = None;
+        Ok(prefix)
+    }
+
     /// Borrows the append-only canonical procedure/history-control journal.
     ///
     /// Querying the journal does not change document, history, revision, dirty,
@@ -802,6 +859,13 @@ impl Core {
     /// The returned builder owns everything required by later [`HistoryVisualizationBuilder::step`]
     /// calls. Beginning and stepping are read-only with respect to this Core.
     pub fn begin_history_visualization(&self) -> Result<HistoryVisualizationBuilder, CoreError> {
+        self.begin_journal_replay(true)
+    }
+
+    fn begin_journal_replay(
+        &self,
+        materialize_visualization: bool,
+    ) -> Result<HistoryVisualizationBuilder, CoreError> {
         if self.document.is_none() {
             return Err(CoreError::NoDocument);
         }
@@ -838,9 +902,14 @@ impl Core {
             .iter()
             .filter(|entry| matches!(entry, JournalEntry::Commit(_)))
             .count() as u64;
-        let mut rows = Vec::new();
-        rows.try_reserve(total_rows as usize)
-            .map_err(|_| CoreError::InvalidState("history visualization allocation failed"))?;
+        let rows = if materialize_visualization {
+            let mut rows = Vec::new();
+            rows.try_reserve(total_rows as usize)
+                .map_err(|_| CoreError::InvalidState("history visualization allocation failed"))?;
+            Some(rows)
+        } else {
+            None
+        };
 
         Ok(HistoryVisualizationBuilder {
             journal: self.journal.clone(),

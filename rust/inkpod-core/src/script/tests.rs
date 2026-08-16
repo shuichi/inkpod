@@ -44,6 +44,101 @@ fn source(text: String) -> InkScriptSource {
         .expect("fixture source must be valid UTF-8")
 }
 
+fn assert_export_round_trip(base: &Core, scripted: &Core) {
+    let base_journal_len = base.journal_entries().len();
+    let selected = scripted
+        .journal_entries()
+        .iter()
+        .skip(base_journal_len)
+        .filter_map(|entry| match entry {
+            crate::JournalEntry::Commit(commit) => Some(commit.event_id()),
+            crate::JournalEntry::HistoryMove(_) | crate::JournalEntry::BranchCut(_) => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(!selected.is_empty());
+    let mut never_cancel = || false;
+    let exported = export_inkscript_fragment(scripted, &selected, &mut never_cancel)
+        .unwrap_or_else(|error| {
+            let individual = selected
+                .iter()
+                .map(|event| {
+                    let procedure = scripted
+                        .journal_entries()
+                        .iter()
+                        .find_map(|entry| match entry {
+                            crate::JournalEntry::Commit(commit) if commit.event_id() == *event => {
+                                Some(commit.procedure())
+                            }
+                            crate::JournalEntry::Commit(_)
+                            | crate::JournalEntry::HistoryMove(_)
+                            | crate::JournalEntry::BranchCut(_) => None,
+                        })
+                        .unwrap();
+                    (
+                        event,
+                        procedure.primitive_id(),
+                        procedure.input_ids().to_vec(),
+                        procedure.asset_ids().to_vec(),
+                        export_inkscript_fragment(scripted, &[*event], &mut never_cancel)
+                            .map(|fragment| fragment.text().to_owned()),
+                    )
+                })
+                .collect::<Vec<_>>();
+            panic!("journal export failed for catalog fixture: {error:?}; {individual:?}")
+        });
+    let text = exported
+        .text()
+        .replacen("inkscript_fragment 2;", "inkscript 2;", 1)
+        .replacen("program {", "inputs { current_document; }\nprogram {", 1);
+    let text = format!(
+        "{text}output {{ policy = duplicate; format = inkpod; folder = \"out\"; cell_folder = false; basename = \"export\"; start_number = 1; direction = ascending; }}\nexecution {{ failure = stop; wait_ms = 0; preview_before_save = false; }}\n"
+    );
+    let source = InkScriptSource::new(InkScriptSourceId::new(2402), text.as_bytes()).unwrap();
+    let program = compile_inkscript(&source, InkScriptRunParameterDecision::Resolve(Vec::new()))
+        .unwrap_or_else(|error| panic!("exported fragment did not compile: {error:?}\n{text}"));
+    let assets = freeze_inkscript_assets(
+        program.model.assets(),
+        &mut [],
+        ScriptAssetLimits::exact_current(),
+        &mut never_cancel,
+    )
+    .unwrap();
+    let mut replay_base = base.clone();
+    replay_base.release_history_cache().unwrap();
+    let replay =
+        run_inkscript_on_staged_core(&program, replay_base, Some(&assets), &mut never_cancel)
+            .unwrap_or_else(|error| panic!("exported fragment did not replay: {error:?}\n{text}"));
+    assert_eq!(
+        replay.staged.document_state_digest().unwrap(),
+        scripted.document_state_digest().unwrap(),
+        "exported fragment final state diverged\n{text}"
+    );
+    assert_eq!(replay.staged.next_id, scripted.next_id);
+    let expected = scripted
+        .journal_entries()
+        .iter()
+        .skip(base_journal_len)
+        .filter_map(|entry| match entry {
+            crate::JournalEntry::Commit(commit) => Some(commit.procedure()),
+            crate::JournalEntry::HistoryMove(_) | crate::JournalEntry::BranchCut(_) => None,
+        })
+        .collect::<Vec<_>>();
+    let actual = replay
+        .staged
+        .journal_entries()
+        .iter()
+        .skip(base_journal_len)
+        .filter_map(|entry| match entry {
+            crate::JournalEntry::Commit(commit) => Some(commit.procedure()),
+            crate::JournalEntry::HistoryMove(_) | crate::JournalEntry::BranchCut(_) => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        actual, expected,
+        "exported canonical procedures diverged\n{text}"
+    );
+}
+
 fn complete_source(parameters: &str, bindings: &str, program: &str) -> InkScriptSource {
     source(format!(
         r#"inkscript 2;
@@ -766,6 +861,7 @@ fn stroke_geometry_import_execute_typed_assets_and_round_trip_native_history() {
     let mut scripted =
         run_inkscript_on_staged_core(&program, base.clone(), Some(&assets), &mut never_cancel)
             .unwrap();
+    assert_export_round_trip(&base, &scripted.staged);
     assert_eq!(scripted.report.commit_count, 3);
     assert_eq!(
         scripted.report.statements,
@@ -1186,6 +1282,7 @@ fn fill_gradient_execute_native_depth_q16_selection_tile_boundary_and_reopen() {
     let mut never_cancel = || false;
     let mut scripted =
         run_inkscript_on_staged_core(&program, base.clone(), None, &mut never_cancel).unwrap();
+    assert_export_round_trip(&base, &scripted.staged);
     assert_eq!(scripted.report.commit_count, 2);
     assert_eq!(
         scripted.report.statements,
@@ -1832,6 +1929,7 @@ fn gesture_alpha_adjustment_execute_matches_direct_and_round_trips_native_histor
     let mut scripted =
         run_inkscript_on_staged_core(&program, base.clone(), Some(&assets), &mut never_cancel)
             .unwrap();
+    assert_export_round_trip(&base, &scripted.staged);
     assert_eq!(scripted.report.statements.len(), 12);
     assert_eq!(
         scripted.report.statements.last(),
@@ -2324,6 +2422,7 @@ fn selection_family_bounds_results_direct_equivalence_and_native_reopen() {
     let mut never_cancel = || false;
     let mut scripted =
         run_inkscript_on_staged_core(&program, base.clone(), None, &mut never_cancel).unwrap();
+    assert_export_round_trip(&base, &scripted.staged);
     assert_eq!(scripted.report.commit_count, 11);
     assert_eq!(scripted.report.results.len(), 1);
     assert_eq!(scripted.report.results[0].field, "layer");
@@ -2906,6 +3005,7 @@ step "Vectorize new" as traced {{ enabled = true; invoke vectorize_raster_plane_
     let mut never_cancel = || false;
     let mut scripted =
         run_inkscript_on_staged_core(&program, base.clone(), None, &mut never_cancel).unwrap();
+    assert_export_round_trip(&base, &scripted.staged);
 
     assert_eq!(scripted.report.statements.len(), 10);
     assert_eq!(scripted.report.commit_count, 9);
@@ -3431,6 +3531,7 @@ step "Delete vanishing points" { enabled = true; invoke edit_vanishing_points { 
     let mut never_cancel = || false;
     let mut scripted =
         run_inkscript_on_staged_core(&program, base.clone(), None, &mut never_cancel).unwrap();
+    assert_export_round_trip(&base, &scripted.staged);
     assert_eq!(scripted.report.commit_count, 6);
     assert_eq!(scripted.report.statements.len(), 10);
     assert!(
@@ -4603,6 +4704,7 @@ fn light_table_catalog_results_assets_direct_replay_and_native_reopen_are_exact(
     let mut scripted =
         run_inkscript_on_staged_core(&program, base.clone(), Some(&assets), &mut never_cancel)
             .unwrap();
+    assert_export_round_trip(&base, &scripted.staged);
     assert_eq!(scripted.report.commit_count, 13);
     assert_eq!(scripted.report.statements.len(), 17);
     assert_eq!(

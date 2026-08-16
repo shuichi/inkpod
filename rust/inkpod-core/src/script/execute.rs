@@ -27,7 +27,8 @@ use inkpod_format::{
 use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct InMemoryInputFingerprint {
+/// Immutable identity and revision fingerprint for one captured in-memory input.
+pub struct InMemoryInputFingerprint {
     document_uuid: u128,
     document_revision: u64,
     state_digest: DocumentStateDigest,
@@ -37,30 +38,68 @@ pub(crate) struct InMemoryInputFingerprint {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) enum CapturedScriptInput<'a> {
+/// Borrowed input captured for one staged InkScript run.
+pub enum CapturedScriptInput<'a> {
+    /// A `Core` and its immutable capture-time fingerprint.
     InMemory {
+        /// Borrowed source document; the staged runner never mutates it.
         core: &'a Core,
+        /// Capture-time identity, revision, digest, and ID high-watermarks.
         fingerprint: InMemoryInputFingerprint,
     },
+    /// Exact-current native `.inkpod` bytes decoded into a new staged `Core`.
     NativeBytes(&'a [u8]),
 }
 
 #[derive(Debug)]
-pub(crate) struct ScriptDryRunResult {
+/// A successful staged run and its deterministic report.
+pub struct ScriptDryRunResult {
     pub(crate) report: ScriptDryRunReport,
     pub(crate) staged: Core,
 }
 
+impl ScriptDryRunResult {
+    /// Returns the immutable execution report.
+    pub const fn report(&self) -> &ScriptDryRunReport {
+        &self.report
+    }
+
+    /// Returns the staged document. The captured source document remains unchanged.
+    pub const fn staged(&self) -> &Core {
+        &self.staged
+    }
+
+    /// Returns the staged document mutably for explicit post-run inspection such as Undo/Redo.
+    pub fn staged_mut(&mut self) -> &mut Core {
+        &mut self.staged
+    }
+
+    /// Consumes the result and returns the staged document.
+    pub fn into_staged(self) -> Core {
+        self.staged
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum ScriptRunError {
+/// Stable failures from initial binding or staged execution.
+pub enum ScriptRunError {
+    /// Initial selector or assertion binding failed.
     Binding(InkScriptBindingError),
+    /// The compiled program no longer satisfies the exact catalog contract.
     Compile(ScriptCompileError),
+    /// The caller cancelled before a staged result was published.
     Cancelled,
+    /// The captured input changed after capture.
     StaleInput,
+    /// A checked execution or allocation resource bound was exceeded.
     ResourceLimit,
+    /// The captured input kind or native bytes are invalid for this program.
     InvalidInput,
+    /// One typed invocation is invalid for the staged document.
     InvalidStep,
+    /// A later reference requires a result that was not produced.
     MissingResult,
+    /// The canonical Core executor or native decoder failed.
     Core(CoreError),
 }
 
@@ -80,9 +119,11 @@ impl From<InkScriptBindingError> for ScriptRunError {
     }
 }
 
-pub(crate) fn capture_in_memory_fingerprint(
-    core: &Core,
-) -> Result<InMemoryInputFingerprint, CoreError> {
+/// Captures the identity, revision, state digest, and ID high-watermarks of one document.
+///
+/// The returned value is opaque and can be paired with [`capture_in_memory_input_at`] to prove
+/// stale-input rejection. This query does not mutate the document.
+pub fn capture_in_memory_fingerprint(core: &Core) -> Result<InMemoryInputFingerprint, CoreError> {
     let info = core.document_info()?;
     Ok(InMemoryInputFingerprint {
         document_uuid: info.document_uuid,
@@ -94,25 +135,33 @@ pub(crate) fn capture_in_memory_fingerprint(
     })
 }
 
-pub(crate) fn capture_in_memory_input(core: &Core) -> Result<CapturedScriptInput<'_>, CoreError> {
+/// Captures one borrowed in-memory input without mutating or cloning its document state.
+pub fn capture_in_memory_input(core: &Core) -> Result<CapturedScriptInput<'_>, CoreError> {
     Ok(CapturedScriptInput::InMemory {
         core,
         fingerprint: capture_in_memory_fingerprint(core)?,
     })
 }
 
-pub(crate) const fn capture_in_memory_input_at(
+/// Pairs a document with an earlier fingerprint for explicit stale-input validation.
+pub const fn capture_in_memory_input_at(
     core: &Core,
     fingerprint: InMemoryInputFingerprint,
 ) -> CapturedScriptInput<'_> {
     CapturedScriptInput::InMemory { core, fingerprint }
 }
 
-pub(crate) const fn native_script_input(bytes: &[u8]) -> CapturedScriptInput<'_> {
+/// Captures borrowed exact-current native bytes for staged decoding and execution.
+pub const fn native_script_input(bytes: &[u8]) -> CapturedScriptInput<'_> {
     CapturedScriptInput::NativeBytes(bytes)
 }
 
-pub(crate) fn run_inkscript_dry(
+/// Binds and executes a compiled program against a private staged `Core`.
+///
+/// The source `Core` or native byte slice is never mutated. Cancellation, stale input, invalid
+/// binding, overflow, resource failure, and canonical execution failure return no partial staged
+/// result. A successful result preserves ordinary per-invocation history and Undo/Redo behavior.
+pub fn run_inkscript_dry(
     program: &StaticScriptProgram,
     input: CapturedScriptInput<'_>,
     cancelled: &mut dyn FnMut() -> bool,
@@ -707,7 +756,7 @@ fn preflight_resources(core: &Core, program: &StaticScriptProgram) -> Result<(),
     Ok(())
 }
 
-fn initial_snapshot(core: &Core) -> Result<InkScriptInitialDocumentSnapshot, CoreError> {
+pub(super) fn initial_snapshot(core: &Core) -> Result<InkScriptInitialDocumentSnapshot, CoreError> {
     let info = core.document_info()?;
     let mut entities = Vec::new();
     for layer in core.layers()? {

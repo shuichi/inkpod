@@ -480,7 +480,7 @@ impl RuntimeInvocation {
         })
     }
 
-    pub(super) fn invocation(&self) -> &CanonicalInvocation {
+    pub(crate) fn invocation(&self) -> &CanonicalInvocation {
         &self.invocation
     }
 
@@ -1134,7 +1134,7 @@ impl CanonicalInvocation {
         }
     }
 
-    pub(super) const fn primitive_id(&self) -> PrimitiveId {
+    pub(crate) const fn primitive_id(&self) -> PrimitiveId {
         match self {
             Self::UpdatePaperFrames { .. } => PrimitiveId::UPDATE_PAPER_FRAMES,
             Self::CreateLayer { .. } => PrimitiveId::CREATE_LAYER,

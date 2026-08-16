@@ -18,6 +18,21 @@ pub(crate) enum InkScriptEntityKind {
 }
 
 impl InkScriptEntityKind {
+    pub(crate) const fn name(self) -> &'static str {
+        match self {
+            Self::Layer => "layer",
+            Self::Plane => "plane",
+            Self::Guide => "guide",
+            Self::VectorPath => "vector_path",
+            Self::VectorFill => "vector_fill",
+            Self::Annotation => "annotation",
+            Self::ShootingFrame => "shooting_frame",
+            Self::VanishingPoint => "vanishing_point",
+            Self::LightTableSet => "light_table_set",
+            Self::LightTableItem => "light_table_item",
+        }
+    }
+
     pub(crate) fn from_name(name: &str) -> Option<Self> {
         match name {
             "layer" | "layer_ref" => Some(Self::Layer),
@@ -87,6 +102,12 @@ impl InkScriptRuntimeReferences {
             return Err(InkScriptReferenceError::KindMismatch);
         }
         Ok(resolved.persistent_id)
+    }
+
+    pub(crate) fn entries(&self) -> impl Iterator<Item = (&str, InkScriptEntityKind, u64)> + '_ {
+        self.entries
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.kind, value.persistent_id))
     }
 
     #[cfg(test)]

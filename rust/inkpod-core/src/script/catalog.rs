@@ -166,16 +166,25 @@ pub(crate) struct CatalogEntry {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum CatalogError {
+/// Stable failures from the exact-current InkScript procedure catalog.
+pub enum CatalogError {
+    /// A command entry or command lookup is invalid.
     InvalidEntry,
     #[cfg_attr(not(test), allow(dead_code))]
+    /// More than one entry declares the same command name.
     DuplicateCommand,
     #[cfg_attr(not(test), allow(dead_code))]
+    /// A query, view, or session command was offered as a document mutation.
     NonMutationCommand,
+    /// A catalog expression references an unknown typed field.
     UnknownField,
+    /// A catalog expression received a value of the wrong type.
     TypeMismatch,
+    /// Checked catalog arithmetic overflowed.
     Overflow,
+    /// A catalog expression attempted division by zero.
     ZeroDivisor,
+    /// A catalog expression exceeded its declared resource bound.
     ResourceLimit,
 }
 

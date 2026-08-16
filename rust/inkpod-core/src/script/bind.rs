@@ -89,15 +89,25 @@ pub(crate) struct InkScriptInitialPreparation {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum InkScriptBindingError {
+/// Stable failures while binding a compiled InkScript program to one initial document snapshot.
+pub enum InkScriptBindingError {
+    /// The captured initial snapshot violates the exact-current snapshot contract.
     InvalidSnapshot,
+    /// A required selector matched no entity.
     MissingSelector,
+    /// A scalar selector matched more than one entity.
     AmbiguousSelector,
+    /// A selector result has the wrong owner relation.
     OwnerMismatch,
+    /// An exact-source or state precondition is stale.
     StalePrecondition,
+    /// An executable assertion failed.
     AssertFailed,
+    /// A bound value has the wrong exact type.
     TypeMismatch,
+    /// Checked binding or resource arithmetic overflowed.
     Overflow,
+    /// The catalog rejected the binding or its resource formula.
     Catalog(CatalogError),
 }
 
@@ -622,7 +632,7 @@ fn add_work(
     Ok(())
 }
 
-fn id_allocation_digest_from_snapshot(
+pub(super) fn id_allocation_digest_from_snapshot(
     snapshot: &InkScriptInitialDocumentSnapshot,
 ) -> Result<String, InkScriptBindingError> {
     let mut payload = Vec::new();

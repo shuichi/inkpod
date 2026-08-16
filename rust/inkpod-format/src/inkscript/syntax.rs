@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 
 use super::lexer::{InkScriptKeyword, InkScriptPunctuation, InkScriptToken, InkScriptTokenKind};
-use super::parser::{InkScriptDocumentKind, InkScriptParsed};
+use super::parser::{
+    InkScriptDocumentKind, InkScriptParsed, InkScriptParserLimits, parse_inkscript_value_tokens,
+};
 use super::schema::{
     InkScriptFieldSchema, InkScriptSchemaDefault, InkScriptSchemaView, InkScriptSemanticError,
     InkScriptSemanticErrorCode,
@@ -176,6 +178,21 @@ pub fn build_inkscript_semantic(
     SemanticParser::new(parsed, schema).parse()
 }
 
+/// Parses one standalone exact-current value spelling with the same bounded grammar used by
+/// parameter defaults and command fields.
+///
+/// The source must contain exactly one value and optional trivia. The returned value owns every
+/// decoded string and aggregate. It performs no filesystem or Core operation, does not accept a
+/// partial prefix, and returns an explicit semantic error rather than panicking.
+pub fn parse_inkscript_value(
+    source: &super::source::InkScriptSource,
+) -> Result<InkScriptValue, InkScriptSemanticError> {
+    let tokens = parse_inkscript_value_tokens(source, InkScriptParserLimits::exact_current())
+        .ok_or_else(|| error(InkScriptSemanticErrorCode::InvalidSyntax, "value"))?;
+    let schema = InkScriptSchemaView::exact_current(&[], &[])?;
+    SemanticParser::new_value(source, &tokens, &schema).parse_value()
+}
+
 struct SemanticParser<'a, 'schema> {
     kind: InkScriptDocumentKind,
     source: &'a super::source::InkScriptSource,
@@ -193,6 +210,28 @@ impl<'a, 'schema> SemanticParser<'a, 'schema> {
             cursor: 0,
             schema,
         }
+    }
+
+    fn new_value(
+        source: &'a super::source::InkScriptSource,
+        tokens: &'a [InkScriptToken],
+        schema: &'a InkScriptSchemaView<'schema>,
+    ) -> Self {
+        Self {
+            kind: InkScriptDocumentKind::Unknown,
+            source,
+            tokens,
+            cursor: 0,
+            schema,
+        }
+    }
+
+    fn parse_value(mut self) -> Result<InkScriptValue, InkScriptSemanticError> {
+        let value = self.value()?;
+        if self.peek_kind() != InkScriptTokenKind::EndOfSource {
+            return Err(self.syntax("value.trailing"));
+        }
+        Ok(value)
     }
 
     fn parse(mut self) -> Result<InkScriptSemanticDocument, InkScriptSemanticError> {

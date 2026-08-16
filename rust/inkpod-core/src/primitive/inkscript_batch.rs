@@ -451,9 +451,9 @@ impl LegacyImageScriptStep {
     }
 }
 
-type LiftedArguments = (&'static str, Option<u64>, u64, String);
+pub(crate) type LiftedArguments = (&'static str, Option<u64>, u64, String);
 
-fn lift_arguments(
+pub(crate) fn lift_arguments(
     invocation: &CanonicalInvocation,
 ) -> Result<LiftedArguments, LegacyImageAdapterError> {
     Ok(match invocation {
@@ -685,7 +685,9 @@ fn filter_literal(filter: &Filter) -> String {
     )
 }
 
-fn selection_shape_literal(shape: &SelectionShape) -> Result<String, LegacyImageAdapterError> {
+pub(crate) fn selection_shape_literal(
+    shape: &SelectionShape,
+) -> Result<String, LegacyImageAdapterError> {
     let mut rect = "none".to_owned();
     let mut anchor = "none".to_owned();
     let mut current = "none".to_owned();
@@ -797,7 +799,7 @@ fn selection_sample_literal(sample: &SelectionSample) -> Result<String, LegacyIm
     ))
 }
 
-fn q16_literal(value: f32) -> Result<String, LegacyImageAdapterError> {
+pub(crate) fn q16_literal(value: f32) -> Result<String, LegacyImageAdapterError> {
     canonical_q16_from_f32(value)
         .map(|raw| format!("q16({raw})"))
         .ok_or(LegacyImageAdapterError::InvalidValue)
@@ -809,7 +811,7 @@ fn rect_literal(rect: RectI32) -> Result<String, LegacyImageAdapterError> {
     Ok(format!("rect({}, {}, {width}, {height})", rect.x, rect.y))
 }
 
-fn pixel_literal(value: PixelValue) -> String {
+pub(crate) fn pixel_literal(value: PixelValue) -> String {
     match value {
         PixelValue::Binary(value) => format!("mask8({value})"),
         PixelValue::Grayscale8(value) => format!("gray8({value})"),
@@ -822,7 +824,7 @@ fn pixel_literal(value: PixelValue) -> String {
     }
 }
 
-fn rgba16_literal(value: [u16; 4]) -> String {
+pub(crate) fn rgba16_literal(value: [u16; 4]) -> String {
     format!(
         "rgba16({}, {}, {}, {})",
         value[0], value[1], value[2], value[3]

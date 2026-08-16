@@ -73,9 +73,11 @@ pub use model::{
 pub use catalog::replay_contract;
 
 use digest::canonical_payload_digest;
+pub(crate) use digest::decode_color;
 pub(crate) use digest::{CanonicalDocumentStateCache, canonical_document_state};
 pub(crate) use display::display_procedure;
 pub(crate) use executor::validate_persisted_procedure;
+pub(crate) use executor::{decode_color_chart, decode_palette, decode_stroke_arguments_for_export};
 pub(crate) use inkscript::{LegacySimpleAdapterError, LegacySimpleScriptStep};
 pub(crate) use inkscript_annotation_frame::{
     AnnotationFrameAdapterError, AnnotationFrameScriptStep,
@@ -102,5 +104,5 @@ pub(crate) use model::CanonicalStrokeArguments;
 pub(crate) use raster::{
     RasterStrokePreview, apply as apply_raster_stroke, begin_preview as begin_stroke_preview,
     canonicalize as canonicalize_stroke, canonicalize_exact as canonicalize_exact_stroke,
-    validate_public_stroke as validate_stroke_request,
+    decode_payload as decode_stroke_payload, validate_public_stroke as validate_stroke_request,
 };

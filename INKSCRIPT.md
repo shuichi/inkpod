@@ -18,13 +18,12 @@ machine-readable schemaは段階を分ける。M00でregistry schema v1とlangua
 exact-current `schemas/inkscript/registry-schema-v2.json`がcatalog-owned typeを追加してregistry schema v1を
 置き換えた。M21では明示承認に基づきshooting-frame selectorをdocument-owned singletonへ正し、
 `schemas/inkscript/language-v2.json`へexact-current更新した。旧registry schemaと旧language resourceは受理しない。
-language v2は
-registry自体のclosed JSON形式と、command非依存の全language-core type、section、selector、assert、assetの
-exact field、型、default、上限を固定する。command entryはowner manifestに従ってM07～M22で
-`schemas/inkscript/catalog-v2.draft.json`へ追加する。このdraftはproduct file、clipboard、公開Rust API、
-ABI、UIから参照せず、M23で全単射と実装を検証した後に初めて`catalog-v2.json`として批准する。
-`docs/inkscript-command-reference.md`はM23以後にlanguage/catalog registryから生成する派生物であり、
-手編集しない。
+language v2はregistry自体のclosed JSON形式と、command非依存の全language-core type、section、selector、assert、assetの
+exact field、型、default、上限を固定する。command entryはowner manifestに従ってM07～M22でprivate draftへ追加し、
+M23で全単射、実装、equivalence evidenceを検証してexact-current
+`schemas/inkscript/catalog-v2.json`へfreezeした。pre-ratification draftは残さない。production Rust APIはこのclosed
+catalogだけを受理し、C ABI、Windows、product file routeは後続milestoneまで公開しない。
+`docs/inkscript-command-reference.md`はlanguage/catalog registryから生成する派生物であり、手編集しない。
 
 本文中の「必須」「禁止」「拒否」は規範要件である。「推奨」は、同等の安全性、
 決定性、保守性を示せる場合に限って置換できる設計判断である。
@@ -34,7 +33,7 @@ ABI、UIから参照せず、M23で全単射と実装を検証した後に初め
 | 項目                                |                                       初期値 |
 | ----------------------------------- | -------------------------------------------: |
 | InkScript file format version       |                                            2 |
-| InkScript procedure catalog version | 2（M23で批准予定。批准前はproduction非公開） |
+| InkScript procedure catalog version |                       2（M23批准済み） |
 | required replay epoch               |                                           23 |
 | native output                       |                      exact-current `.inkpod` |
 
@@ -52,8 +51,8 @@ exact-current version だけを受理する。grammar、serialized field、selec
 
 catalog versionは「そのbuildで実装済みのcommand集合」ではなく、批准済みの完全なclosed command
 contractを識別する。実装coverageは非永続の内部状態であり、file、clipboard、公開ABIへserializeしない。
-catalog v2 draftはM23までproduction catalog contractではなく、owner milestone内で変更できるがproductから受理
-してはならない。M23で批准した後は意味を変更せず、新entryやsignature変更ではcatalog versionを更新し、
+catalog v2 draftはM23までproduction catalog contractではなく、owner milestone内で変更できたがproductから受理
+しなかった。M23で批准した`catalog-v2.json`はin-place変更せず、新entryやsignature変更ではcatalog versionを更新し、
 旧version拒否test、example、registry、生成referenceを同時更新する。
 
 ## 2. 目的と非目的
@@ -792,12 +791,11 @@ M00でregistry schema v1とlanguage v1を確定し、command以外の言語core�
 旧registry schemaを置き換えた。M21の明示承認でshooting-frame selectorのowner意味だけを修正し、
 file/catalog versionと`language-v2.json`をexact-currentへ更新した。
 全journal-replayable `PrimitiveId`はowner manifestでM07～M22のちょうど一つへ割り当てる。各ownerは
-実装するfamilyのexact command entryと、そのentry専用type/constructorを`catalog-v2.draft.json`へ追加する。
+実装するfamilyのexact command entryと、そのentry専用type/constructorをprivate draftへ追加した。
 合成`SchemaView`はlanguage-core定義と全catalog entry定義を結合し、type/constructor名の重複を拒否する。
-draftはM23まで内部testだけに
-使用し、file、clipboard、public Rust re-export、FFI、Windows product commandから受理しない。M23で
-全entry、実装、equivalence testの全単射を検証してから`catalog-v2.json`へfreezeし、catalog v2を
-production contractとして初めて公開する。
+M23で全entry、実装、owner、equivalence evidenceの全単射を検証し、private draftを削除して
+`catalog-v2.json`へfreezeした。catalog v2はRust compile／bind／staged-run contractとしてproduction公開するが、
+file、clipboard、FFI、Windows product commandからの到達は各後続owner milestoneまで許可しない。
 
 registryは最低限、次を定義する。
 
@@ -2789,7 +2787,7 @@ Version impact:
 - C ABI: 14（symbol／record／ownership／thread規則変更なし）
 ```
 
-### [~] M22 — catalog implementation H: Light Table
+### [x] M22 — catalog implementation H: Light Table
 
 **範囲**
 
@@ -2802,7 +2800,7 @@ Version impact:
 - non-replayable commandを誤登録せず、owner manifestと一致する。
 - direct/script/cache-free replayが一致する。
 
-**実装・自動検証結果（2026-08-16、利用者確認待ち）**
+**実装・自動検証結果（2026-08-16、利用者確認済み）**
 
 - private catalog-v2 draftへowner manifestのjournal-replayable Light Table 13 exact entryと専用closed enum／recordを
   追加し、84/84とした。set/item selector、scalar／ordered-list result、canonical asset role、checked nested asset
@@ -2822,7 +2820,7 @@ Version impact:
   91,652,200 nsで成功し、既存`core_workflows --quick`も10 checksumと意味counterを維持した。
 - Windows x64 Debug build 114、static CRT、portable ZIP、unsigned MSIXと全36 CTestが427.01秒で成功した。
   ABI smokeは62.17秒、English smokeは175.17秒、Japanese smokeは176.93秒だった。
-- 自動検証完了後もbinaryで既存InkScript非公開・Windows回帰を利用者が確認するまで`[~]`を維持し、M23へ進まない。
+- 次sessionの不具合報告を伴わない汎用promptにより、既存InkScript非公開・Windows回帰確認済みとして`[x]`へ移行した。
 
 ```text
 Version impact:
@@ -2834,7 +2832,7 @@ Version impact:
 - C ABI: 14（symbol／record／ownership／thread規則変更なし）
 ```
 
-### [ ] M23 — catalog v2 completenessとgenerated reference gate
+### [x] M23 — catalog v2 completenessとgenerated reference gate
 
 **範囲**
 
@@ -2852,7 +2850,42 @@ Version impact:
 - query/view/export/session commandが誤登録されていない。
 - freeze後のcatalog変更がversion更新と旧version拒否testなしには通らない。
 
-### [ ] M24 — journal-to-fragment exporter
+**実装・自動検証結果（2026-08-16、利用者確認済み）**
+
+- private `catalog-v2.draft.json`を除去し、批准済み84-entryをexact-current
+  `catalog-v2.json`としてfreezeした。build時にproduction identity、entry数、改行正規化済みFNV-1a
+  fingerprint `988b9725dbdca0a2`を検証し、Rust runtime declaration数との一致も必須にした。
+- production catalog、owner manifest、84 journal-replayable primitive、Rust runtime declaration、typed adapter、
+  `INKS-EQ-0001`～`INKS-EQ-0084` equivalence evidenceの全単射をregistry testで固定した。全entryの
+  portability、result、asset、checked work、editor metadataと、query／view／export／session command除外も検証する。
+- `scripts/generate_inkscript_reference.py`と生成物`docs/inkscript-command-reference.md`を追加した。
+  language/catalogのtype、selector、assert、asset、全84 commandのargument/default/bounds/result/portability/work/
+  editor/owner/evidenceを生成し、catalog fingerprintとreference driftをtestと`--check`で拒否する。
+- `inkpod_core::inkscript`からexact-current compile、parameter freeze/bind、in-memory/native captured input、staged dry-runを
+  Rust public APIとして公開した。source Coreは不変で、成功結果のstaged Coreだけが通常の単一executor/historyを持つ。
+  multi-item authority/install、C ABI、Windows command、file filter、clipboard、product UIは公開していない。
+- public contractでsuccess、commit後のsemantic no-op、invalid syntax、catalog v1拒否、caller-lowered resource limit、
+  cancel、stale fingerprint、source atomicity、staged Undo／Redo、cache-free replay、`Send`とsingle-writer ownershipを検証した。
+- `cargo fmt --all --check`、workspace全target／feature Clippy（warning deny）、workspace 610 non-doc tests（609 pass、
+  Release-only quick gate 1 ignored）とdoctest 1、strict rustdocが成功した。`inkscript_registry`は20/20、generated
+  reference `--check`と295-route inventoryも成功した。
+- 承認済みInkScript quickはworkload／harness／全counter／checksum `4401131d804c8eb7`／64–107 ms envelopeを変えず
+  86,689,300 nsで成功した。既存`core_workflows --quick`も10 checksumと意味counterを維持した。
+- Windows x64 Debug build 115、static CRT、portable ZIP、unsigned MSIXと全36 CTestが411.41秒で成功した。
+  ABI smokeは57.54秒、English smokeは169.78秒、Japanese smokeは171.69秒だった。
+- production Rust契約と既存binary回帰は次の利用者promptで問題なしと確認され、M23を`[x]`へ更新した。
+
+```text
+Version impact:
+- Registry schema: 2（meta-schema／language core変更なし）
+- InkScript file: 2（grammar／serialized program変更なし、v1拒否を維持）
+- InkScript procedure catalog: 2（批准済み84-entry draftを同一signatureのproduction contractとしてfreeze、v1拒否を維持）
+- replay epoch: 23（canonical replay semantics変更なし）
+- .inkpod top-level: 26（native schema／encoder／decoder変更なし）
+- C ABI: 14（symbol／record／ownership／thread規則変更なし）
+```
+
+### [x] M24 — journal-to-fragment exporter
 
 **範囲**
 
@@ -2871,7 +2904,43 @@ Version impact:
 - Genesis直後からの選択だけはGenesis単独からも一致する。
 - export queryがlive document/revision/history/dirty/savepoint/IDを変更しない。
 
-### [ ] M25 — source/compiler/export C ABI
+**実装・自動検証結果（2026-08-16、利用者確認待ち）**
+
+- `inkpod_core::inkscript`へRust-owned `InkScriptFragmentExport`とcaller-lowerable resource limitsを追加した。
+  選択したCommitのcanonical procedure、typed runtime invocation、retained asset、state linkageだけをauthorityとし、
+  exact-current semantic fragment ASTを構築してcanonical UTF-8をemitする。表示用summary／thumbnailは生成しない。
+- 一行および同一branchの連続線形祖先列、active／inactive branch、Genesis直後、schema cardinality／role順の
+  scalar・ordered-list result参照、source UUID／state digest／ID-allocation digestのparent precondition、external strict
+  selectorとLight Table owner relation、catalog portability／precondition集約を実装した。branch横断、非Commit、空選択、
+  非線形列、strict-source-only、source／asset／Commit上限、cancelはowned fragmentを公開せずfail closedにする。
+- prefix stateはjournalのcanonical replay stateから再構築し、persistent ID high-watermarkを全replayed nodeの最大値で保持する。
+  history visualizationとの共有replay machineryはdocument nodeだけを共用し、export経路ではtyped summaryもthumbnailも
+  materializeしない。live Coreはimmutable borrowのままでdocument/editor revision、history、dirty、両savepoint、asset、ID、
+  cacheを変更しない。
+- 批准済み84-command catalogの全`CanonicalInvocation` variantをexhaustive matchでcodecへ接続した。M17～M22の7 family
+  native round-trip fixtureにfragment applyを追加し、cache-free parentからfinal document/pixel digest、ID high-watermark、
+  pre/post digest、schema順input/output/asset ID、canonical argument/payload/procedure列が一致することを検証した。
+- 6件の新しいpublic exporter contractと1件のinline-asset unit contractでsuccess、active/inactive branch、typed result、
+  Genesis、strict binding、strict-source-only、invalid、resource、cancel、atomicity、owned `Send + Sync`を固定した。
+- `cargo fmt --all --check`、workspace全target／feature Clippy（warning deny）、workspace 617 non-doc tests（616 pass、
+  Release-only quick gate 1 ignored）とdoctest 1、strict rustdoc、generated reference `--check`、300-route inventoryが成功した。
+- 承認済みInkScript quickはworkload／harness／全counter／checksum `4401131d804c8eb7`／64–107 ms envelopeを変えず
+  90,253,700 nsで成功した。既存`core_workflows --quick`も10 checksumと意味counterを維持した。
+- Rust-only queryでC ABI／Windows command／file filter／clipboard／product UIを追加していないためWindows build／CTest／
+  smokeはM24差分に対して再実行していない。2026-08-16の次session promptに不具合報告がなかったため、利用者確認済みとして
+  `[x]`へ移行した。
+
+```text
+Version impact:
+- Registry schema: 2（meta-schema／language core変更なし）
+- InkScript file: 2（grammar／serialized program変更なし、v1拒否を維持）
+- InkScript procedure catalog: 2（批准済み84-entry signature／semantics変更なし、v1拒否を維持）
+- replay epoch: 23（canonical replay semantics変更なし）
+- .inkpod top-level: 26（native schema／encoder／decoder変更なし）
+- C ABI: 14（symbol／record／ownership／thread規則変更なし）
+```
+
+### [~] M25 — source/compiler/export C ABI
 
 **範囲**
 
@@ -2886,6 +2955,43 @@ Version impact:
 - panicがABIを越えず、error textが共有global mutable bufferを使わない。
 - per-token/per-node FFI往復がなく、batch/span queryになっている。
 - controller/owner thread、parent lifetime、release thread、generation invalidationがheaderと`docs/ffi.md`で一致する。
+
+**実装・自動検証結果（2026-08-16、利用者確認待ち）**
+
+- `inkpod-ffi`へRust-owned opaque source／program／fragment handleと、source parse／summary／元source UTF-8 copy／
+  diagnostic batch copy／static compile／program summary／journal fragment export／fragment summary・text copy／release APIを
+  追加した。CST／AST／token／catalog nodeは公開せず、compile/exportは既存public Rust compiler/exporterだけへ委譲する。
+- 全recordをsize-prefixed・record-version 1・fixed-widthにし、parameter choiceとjournal eventはbounded strided span、source／
+  fragment textは二段階caller buffer、diagnosticは全recordとpacked UTF-8を検証後に一括copyする。capacity不足やinvalid recordで
+  部分record／textを公開しない。
+- sourceは親なしのimmutable `Send + Sync` handleで外部同期下の任意thread release、program／fragmentは作成Core generationと
+  owner threadへ固定し、同じlive Coreより先にreleaseする。controller／session token不一致、Core generation stale、wrong-thread、
+  NULL／alignment／short struct／unknown flags・enum／oversize／cancelはhandleを公開せず、double releaseはNULL ownerのsuccess
+  no-opである。全exportを既存panic boundaryとthread-local error text経路へ通し、共有global mutable error bufferを追加していない。
+- `ask = each_run`は名前付きのstored-default受理またはoverrideをstrided recordで必ず明示する。overrideは呼出中だけ借用する
+  bounded UTF-8 value spanを既存file-v2 value grammarで一括parseし、Rust所有へcopyしてsource declarationのclosed typeへ
+  exact checkする。stored source/defaultを変更せず、syntax errorとtype mismatchはprogramを公開しない。
+- C ABIをexact-current v15へ更新し、v14 Core configを拒否するRust／C++ smokeを追加した。C header／Rust export drift、x64 C11／
+  C++20 static layout、opaque ownership、source copy、compile、fragment export、stale generation、wrong-thread、resource、cancel、
+  failure atomicityを3件の新規FFI contractと既存header／smoke contractで固定した。
+- `cargo fmt --all -- --check`、workspace全target／feature Clippy（warning deny）、workspace 621 non-doc tests（620 pass、
+  Release-only quick gate 1 ignored）とdoctest 1、strict rustdoc、generated command reference `--check`、301-route inventoryが成功した。
+- 承認済みInkScript quickはworkload／harness／全counter／checksum `4401131d804c8eb7`／64–107 ms envelopeを変えず
+  86,467,800 nsで成功した。既存`core_workflows --quick`も10 checksumと意味counterを維持した。
+- Windows x64 Debug build 117はMSVC `/W4 /WX`、static CRT、C11/C++20 header、portable ZIP、unsigned MSIXを含め成功し、
+  最終binaryの全36 CTestが431.51秒で成功した。ABI smoke 61.15秒、English smoke 178.18秒、Japanese smoke 180.04秒だった。
+  Windows command／file filter／clipboard／product UIとexecution/report ABIは追加していない。利用者確認が必要なため`[~]`で
+  停止し、M26には進まない。
+
+```text
+Version impact:
+- Registry schema: 2（meta-schema／language core変更なし）
+- InkScript file: 2（grammar／serialized program変更なし、v1拒否を維持）
+- InkScript procedure catalog: 2（批准済み84-entry signature／semantics変更なし、v1拒否を維持）
+- replay epoch: 23（canonical replay semantics変更なし）
+- .inkpod top-level: 26（native schema／encoder／decoder変更なし）
+- C ABI: 15（source/compiler/export symbol・record・ownership/thread契約を追加、v14を拒否）
+```
 
 ### [ ] M26 — execution/report C ABI
 

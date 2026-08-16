@@ -60,6 +60,9 @@ route|rust|document-primitive|rust-core|Core::apply_vanishing_point_preview Core
 route|rust|transient-preview-stroke|rust-core|Core::begin_vanishing_point_preview Core::cancel_vanishing_point_preview Core::update_vanishing_point_preview
 route|rust|query-snapshot|rust-core|Core::vanishing_points
 route|rust|query-snapshot|rust-core|Core::begin_history_visualization Core::history_visualization_rows Core::history_visualization_rows_with_progress HistoryVisualizationBuilder::step
+route|rust|document-primitive|rust-core|inkpod_core::run_inkscript_dry
+route|rust|query-snapshot|rust-core|ScriptDryRunResult::staged_mut inkpod_core::export_inkscript_fragment inkpod_core::export_inkscript_fragment_with_limits
+route|rust|os-application-adapter|rust-core|InkScriptExportLimits::with_asset_bytes InkScriptExportLimits::with_commits InkScriptExportLimits::with_source_bytes ScriptCompileLimits::with_invocations
 
 ## C ABI surface
 
@@ -73,6 +76,7 @@ route|ffi|query-snapshot|rust-ffi-adapter|inkpod_batch_graph_get_operation inkpo
 route|ffi|asset-data-plane|rust-ffi-adapter|inkpod_byte_buffer_release inkpod_byte_buffer_view inkpod_clipboard_create_rgba8 inkpod_clipboard_release inkpod_clipboard_render_rgba8 inkpod_color_chart_file_count inkpod_color_chart_file_get inkpod_color_chart_file_load inkpod_color_chart_file_release inkpod_color_chart_file_save inkpod_core_autosave inkpod_core_clipboard_copy inkpod_core_document_thumbnail_get inkpod_core_export_common_raster inkpod_core_export_common_raster_id_v3 inkpod_core_object_bytes_copy_v3 inkpod_core_object_release_v3 inkpod_core_open inkpod_core_open_recovery inkpod_core_register_color_array_v3 inkpod_core_register_raster_asset_v3 inkpod_core_register_sample_stream_v3 inkpod_core_revert inkpod_core_save inkpod_core_sequence_export_encoded inkpod_core_sequence_import_encoded inkpod_core_sequence_import_mixed_encoded inkpod_core_sequence_set inkpod_core_vector_rasterize inkpod_core_write_compacted_copy inkpod_encoded_sequence_count inkpod_encoded_sequence_get inkpod_encoded_sequence_release inkpod_palette_file_load inkpod_palette_file_save
 route|ffi|query-snapshot|rust-ffi-adapter|inkpod_core_get_replay_contract inkpod_snapshot_get_canonical_digest
 route|ffi|query-snapshot|rust-ffi-adapter|inkpod_core_history_visualization_builder_begin inkpod_core_history_visualization_create inkpod_core_history_visualization_create_with_task inkpod_history_visualization_builder_release inkpod_history_visualization_builder_step inkpod_history_visualization_release inkpod_history_visualization_row_count inkpod_history_visualization_row_get
+route|ffi|query-snapshot|rust-ffi-adapter|inkpod_core_inkscript_compile inkpod_core_inkscript_fragment_export inkpod_core_inkscript_fragment_release inkpod_core_inkscript_fragment_summary inkpod_core_inkscript_fragment_text_copy inkpod_core_inkscript_program_release inkpod_core_inkscript_program_summary inkpod_inkscript_source_diagnostics_copy inkpod_inkscript_source_parse inkpod_inkscript_source_release inkpod_inkscript_source_summary inkpod_inkscript_source_text_copy
 route|ffi|query-snapshot|rust-ffi-adapter|inkpod_cell_creation_plan_copy inkpod_cell_creation_plan_count
 route|ffi|os-application-adapter|rust-ffi-adapter|inkpod_abi_version inkpod_batch_graph_clone_with_operations inkpod_batch_graph_create inkpod_batch_graph_get_info inkpod_batch_graph_load inkpod_batch_graph_release inkpod_batch_graph_save inkpod_batch_task_cancel inkpod_batch_task_create inkpod_batch_task_release inkpod_cell_creation_plan_create inkpod_cell_creation_plan_release inkpod_core_batch_execute inkpod_core_create inkpod_core_destroy inkpod_core_get_id_v3 inkpod_core_shortcut_defaults_set inkpod_core_shortcut_rebind inkpod_core_shortcut_reset inkpod_core_shortcut_resolve inkpod_core_shortcut_sequences_copy inkpod_core_shortcut_sequences_set inkpod_core_task_cancel_v3 inkpod_core_task_create_v3 inkpod_shortcut_sequence_resolve inkpod_task_cancel inkpod_task_create inkpod_task_release
 route|ffi|document-primitive|rust-core|inkpod_core_apply_edit_target_command
@@ -151,7 +155,7 @@ route|windows|document-primitive|rust-core|IDM_SELECTION_OUTPUT_COLOR_GUARD
 - Production `.inkpod` is exact-current v26. Its authoritative journal retains
   Genesis/assets/procedures/EditorState; optional CKPT is verified acceleration
   only, and explicit compaction writes a separate new-Genesis file.
-- Floating paste dialog, Canvas handles, renderer preview, ABI v14 record, Core
+- Floating paste dialog, Canvas handles, renderer preview, ABI v15 record, Core
   commit, Undo/Redo, and replay all use one half-open five-point absolute-anchor
   contract. Preview retries remain transient and Windows does not own a second
   document transform implementation.
@@ -171,7 +175,7 @@ route|windows|document-primitive|rust-core|IDM_SELECTION_OUTPUT_COLOR_GUARD
   and Canvas-handle edits share one canonical primitive and transient preview.
   Radial snapping is resolved beside explicit guides and grid in the Core.
 
-The source-derived inventory currently contains 292 Rust routes, 296 C ABI
+The source-derived inventory currently contains 300 Rust routes, 296 C ABI
 exports, and 381 Windows commands. Its architecture test requires every symbol
 to have exactly one class and owner; unclassified and direct C++ document
 mutation counts are both zero.

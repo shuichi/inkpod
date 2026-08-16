@@ -82,6 +82,10 @@ impl ObjectRegistry {
         })
     }
 
+    pub(crate) const fn generation(&self) -> u64 {
+        self.generation
+    }
+
     fn core_id(&self) -> InkpodObjectId {
         object_id(INKPOD_OBJECT_CORE, self.generation, 1)
     }

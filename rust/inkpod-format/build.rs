@@ -215,14 +215,16 @@ impl<'a> Parser<'a> {
 
 fn main() {
     if let Err(error) = generate() {
-        panic!("failed to generate InkScript language schema projection: {error}");
+        panic!("failed to generate exact-current InkScript registry projection: {error}");
     }
 }
 
 fn generate() -> Result<(), String> {
     let crate_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").ok_or("missing manifest dir")?);
     let language = crate_dir.join("../../schemas/inkscript/language-v2.json");
+    let catalog = crate_dir.join("../../schemas/inkscript/catalog-v2.json");
     println!("cargo:rerun-if-changed={}", language.display());
+    println!("cargo:rerun-if-changed={}", catalog.display());
     println!("cargo:rerun-if-changed=build.rs");
     let root = Parser::parse(&fs::read(&language).map_err(|error| error.to_string())?)?;
     let registry_schema_version = number(member(&root, "registry_schema_version")?)?;
@@ -237,9 +239,28 @@ fn generate() -> Result<(), String> {
     {
         return Err("language registry identity/version mismatch".to_owned());
     }
+    let catalog_bytes = fs::read(&catalog).map_err(|error| error.to_string())?;
+    let catalog_root = Parser::parse(&catalog_bytes)?;
+    let catalog_version = number(member(&catalog_root, "catalog_version")?)?;
+    let command_count = array(member(&catalog_root, "entries")?)?.len();
+    let catalog_fingerprint = fnv1a64(&catalog_bytes);
+    const FROZEN_CATALOG_V2_FNV1A64: u64 = 0x988b_9725_dbdc_a0a2;
+    if string(member(&catalog_root, "kind")?)? != "inkpod.inkscript.catalog"
+        || number(member(&catalog_root, "registry_schema_version")?)? != 2
+        || number(member(&catalog_root, "file_version")?)? != file_version
+        || catalog_version != procedure_catalog_version
+        || number(member(&catalog_root, "required_replay_epoch")?)? != required_replay_epoch
+        || !boolean(member(&catalog_root, "production")?)?
+        || command_count != 84
+        || catalog_fingerprint != FROZEN_CATALOG_V2_FNV1A64
+    {
+        return Err(format!(
+            "production catalog v2 identity/freeze mismatch: version={catalog_version}, commands={command_count}, fingerprint={catalog_fingerprint:016x}"
+        ));
+    }
 
     let mut generated = String::from(
-        "// @generated from the exact-current InkScript language registry; do not edit.\n",
+        "// @generated from the exact-current InkScript language and production catalog registries; do not edit.\n",
     );
     writeln!(
         generated,
@@ -249,6 +270,16 @@ fn generate() -> Result<(), String> {
     writeln!(
         generated,
         "const GENERATED_REQUIRED_REPLAY_EPOCH: u32 = {required_replay_epoch};\n"
+    )
+    .unwrap();
+    writeln!(
+        generated,
+        "const GENERATED_PRODUCTION_CATALOG_COMMAND_COUNT: usize = {command_count};"
+    )
+    .unwrap();
+    writeln!(
+        generated,
+        "const GENERATED_PRODUCTION_CATALOG_FINGERPRINT: u64 = 0x{catalog_fingerprint:016x};\n"
     )
     .unwrap();
     emit_type_names(&mut generated, &root)?;
@@ -268,6 +299,15 @@ fn generate() -> Result<(), String> {
     let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("missing OUT_DIR")?)
         .join("inkscript_language_schema.rs");
     fs::write(output, generated).map_err(|error| error.to_string())
+}
+
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    bytes
+        .iter()
+        .filter(|byte| **byte != b'\r')
+        .fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+        })
 }
 
 fn emit_section_order(output: &mut String, root: &Json) -> Result<(), String> {

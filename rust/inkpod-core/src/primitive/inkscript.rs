@@ -195,7 +195,8 @@ const LEGACY_SIMPLE_CATALOG: &[LegacySimpleCatalogEntry] = &[
     ),
 ];
 
-type LegacySimpleLiftedArguments = (&'static str, Option<(InkScriptEntityKind, u64)>, String);
+pub(crate) type LegacySimpleLiftedArguments =
+    (&'static str, Option<(InkScriptEntityKind, u64)>, String);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct LegacySimpleWorkEstimate {
@@ -401,7 +402,7 @@ fn legacy_simple_schema() -> Result<InkScriptSchemaView<'static>, LegacySimpleAd
     .map_err(|_| LegacySimpleAdapterError::InvalidTypedStep)
 }
 
-fn lift_arguments(
+pub(crate) fn lift_arguments(
     invocation: &CanonicalInvocation,
 ) -> Result<LegacySimpleLiftedArguments, LegacySimpleAdapterError> {
     Ok(match invocation {

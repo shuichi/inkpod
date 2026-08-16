@@ -1,10 +1,10 @@
 {
-  "kind": "inkpod.inkscript.catalog-draft",
+  "kind": "inkpod.inkscript.catalog",
   "registry_schema_version": 2,
   "file_version": 2,
   "catalog_version": 2,
   "required_replay_epoch": 23,
-  "production": false,
+  "production": true,
   "enums": [
     { "name": "mirror_axis", "members": ["horizontal", "vertical"] },
     { "name": "rotate_direction", "members": ["left_90", "right_90"] },

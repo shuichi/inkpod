@@ -156,6 +156,21 @@ static_assert(sizeof(InkpodSnapshotVectorView) == 80U);
 static_assert(sizeof(InkpodSnapshotVectorEndpoint) == 32U);
 static_assert(sizeof(InkpodSnapshotVectorDiagnostics) == 40U);
 static_assert(sizeof(InkpodLayerThumbnailBuffer) == 80U);
+static_assert(std::is_standard_layout_v<InkpodInkScriptSourceInput>);
+static_assert(std::is_standard_layout_v<InkpodInkScriptDiagnostic>);
+static_assert(std::is_standard_layout_v<InkpodInkScriptCompileRequest>);
+static_assert(std::is_standard_layout_v<InkpodInkScriptExportRequest>);
+static_assert(sizeof(InkpodInkScriptSourceInput) == 56U);
+static_assert(sizeof(InkpodInkScriptSourceSummary) == 72U);
+static_assert(sizeof(InkpodInkScriptUtf8Buffer) == 48U);
+static_assert(sizeof(InkpodInkScriptDiagnostic) == 128U);
+static_assert(sizeof(InkpodInkScriptDiagnosticBuffer) == 96U);
+static_assert(sizeof(InkpodInkScriptParameterChoice) == 56U);
+static_assert(sizeof(InkpodInkScriptCompileRequest) == 80U);
+static_assert(sizeof(InkpodInkScriptProgramSummary) == 152U);
+static_assert(sizeof(InkpodInkScriptJournalEvent) == 24U);
+static_assert(sizeof(InkpodInkScriptExportRequest) == 96U);
+static_assert(sizeof(InkpodInkScriptFragmentSummary) == 88U);
 
 extern "C" int inkpod_header_c11_smoke(void);
 
@@ -166,6 +181,14 @@ int InkpodRunAbiSmoke() {
     if (inkpod_abi_version() != INKPOD_ABI_VERSION) {
         return 1;
     }
+    InkpodCoreConfig old_config{
+        sizeof(InkpodCoreConfig), 14U, INKPOD_FEATURE_NONE};
+    InkpodCore* old_core = nullptr;
+    if (inkpod_core_create(&old_config, &old_core)
+            != INKPOD_STATUS_INCOMPATIBLE_ABI
+        || old_core != nullptr) {
+        return 138;
+    }
 
     InkpodCoreConfig config{
         sizeof(InkpodCoreConfig), INKPOD_ABI_VERSION, INKPOD_FEATURE_NONE};
@@ -173,6 +196,75 @@ int InkpodRunAbiSmoke() {
     if (inkpod_core_create(&config, &core) != INKPOD_STATUS_OK
         || core == nullptr) {
         return 2;
+    }
+    constexpr char script_text[] = R"(inkscript 2;
+requires { procedure_catalog = 2; replay_epoch = 23; }
+inputs { current_document; }
+program {
+    step "Set grid" {
+        enabled = true;
+        invoke set_grid {
+            grid = { origin_x = 1; origin_y = 2; spacing_x = 8; spacing_y = 9; subdivisions = 2; };
+        };
+    }
+}
+output { policy = duplicate; format = inkpod; folder = "out"; cell_folder = false; basename = "abi"; start_number = 1; direction = ascending; }
+execution { failure = stop; wait_ms = 0; preview_before_save = false; }
+)";
+    InkpodInkScriptSourceInput script_input{};
+    script_input.struct_size = sizeof(script_input);
+    script_input.version = INKPOD_INKSCRIPT_RECORD_VERSION;
+    script_input.controller_id = 501U;
+    script_input.session_generation = 9U;
+    script_input.source_id = 77U;
+    script_input.source_utf8 = reinterpret_cast<const std::uint8_t*>(script_text);
+    script_input.source_bytes = sizeof(script_text) - 1U;
+    InkpodInkScriptSource* script_source = nullptr;
+    if (inkpod_inkscript_source_parse(&script_input, &script_source)
+            != INKPOD_STATUS_OK
+        || script_source == nullptr) {
+        return 139;
+    }
+    InkpodInkScriptSourceSummary script_source_summary{};
+    script_source_summary.struct_size = sizeof(script_source_summary);
+    if (inkpod_inkscript_source_summary(script_source, &script_source_summary)
+            != INKPOD_STATUS_OK
+        || script_source_summary.version != INKPOD_INKSCRIPT_RECORD_VERSION
+        || (script_source_summary.flags & INKPOD_INKSCRIPT_SOURCE_VALID) == 0U
+        || script_source_summary.diagnostic_count != 0U) {
+        return 140;
+    }
+    InkpodInkScriptCompileRequest script_compile{};
+    script_compile.struct_size = sizeof(script_compile);
+    script_compile.version = INKPOD_INKSCRIPT_RECORD_VERSION;
+    script_compile.controller_id = script_input.controller_id;
+    script_compile.session_generation = script_input.session_generation;
+    InkpodInkScriptProgram* script_program = nullptr;
+    if (inkpod_core_inkscript_compile(
+            core, script_source, &script_compile, &script_program)
+            != INKPOD_STATUS_OK
+        || script_program == nullptr) {
+        return 141;
+    }
+    InkpodInkScriptProgramSummary script_program_summary{};
+    script_program_summary.struct_size = sizeof(script_program_summary);
+    if (inkpod_core_inkscript_program_summary(
+            core, script_program, &script_program_summary)
+            != INKPOD_STATUS_OK
+        || script_program_summary.version != INKPOD_INKSCRIPT_RECORD_VERSION
+        || script_program_summary.core_generation == 0U
+        || script_program_summary.max_invocations != 1U) {
+        return 142;
+    }
+    if (inkpod_inkscript_source_release(&script_source) != INKPOD_STATUS_OK
+        || script_source != nullptr
+        || inkpod_inkscript_source_release(&script_source) != INKPOD_STATUS_OK
+        || inkpod_core_inkscript_program_release(core, &script_program)
+            != INKPOD_STATUS_OK
+        || script_program != nullptr
+        || inkpod_core_inkscript_program_release(core, &script_program)
+            != INKPOD_STATUS_OK) {
+        return 143;
     }
     InkpodObjectId core_id{};
     core_id.struct_size = sizeof(core_id);

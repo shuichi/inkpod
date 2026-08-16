@@ -6,7 +6,7 @@
     "procedure_catalog_version": 2,
     "replay_epoch": 23,
     "inkpod_top_level_version": 26,
-    "c_abi_version": 14
+    "c_abi_version": 15
   },
   "owners": [
     { "primitive_rust": "UPDATE_PAPER_FRAMES", "primitive_id": "0x00010001", "canonical_name": "UpdatePaperFrames", "primitive_schema_version": 2, "semantics_revision": 2, "command_name": "update_paper_frames", "owner_milestone": "M15", "planned_equivalence_test": "INKS-EQ-0001" },

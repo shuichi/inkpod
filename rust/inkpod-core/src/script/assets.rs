@@ -134,24 +134,43 @@ const fn minimum_nonzero(requested: u64, exact: u64) -> u64 {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ScriptAssetError {
+/// Stable failure categories produced while validating or freezing InkScript assets.
+pub enum ScriptAssetError {
+    /// The typed source model does not match the exact-current asset schema.
     InvalidTypedModel,
+    /// An asset descriptor is invalid.
     InvalidDescriptor,
+    /// An inline or authorized payload is invalid.
     InvalidPayload,
+    /// The payload digest does not match its descriptor.
     DigestMismatch,
+    /// The payload length does not match its descriptor.
     LengthMismatch,
+    /// Duplicate declarations disagree about one content-addressed asset.
     DuplicateDescriptorMismatch,
+    /// More than one authorized stream was supplied for one asset.
     DuplicateAuthorizedStream,
+    /// A required authorized stream was not supplied.
     MissingAuthorizedStream,
+    /// A stream was supplied for an inline-only or undeclared asset.
     UnexpectedAuthorizedStream,
+    /// The authorized stream identity changed after authority was granted.
     StaleAuthorizedStream,
+    /// The authorized stream identity could not be validated.
     StreamIdentityFailed,
+    /// Reading an authorized asset failed.
     StreamReadFailed,
+    /// The authorized stream ended before its declared length.
     Truncated,
+    /// The caller cancelled before the immutable asset set was published.
     Cancelled,
+    /// A declared or aggregate asset bound was exceeded.
     ResourceLimit,
+    /// A step referenced an undeclared asset.
     UnknownAsset,
+    /// An asset does not satisfy the command's catalog role.
     RoleMismatch,
+    /// The command catalog does not permit the supplied source form.
     SourceNotPermitted,
 }
 

@@ -42,7 +42,8 @@ pub use parser::{
     parse_inkscript_with_limits,
 };
 pub use schema::{
-    INKSCRIPT_PROCEDURE_CATALOG_VERSION, INKSCRIPT_REQUIRED_REPLAY_EPOCH,
+    INKSCRIPT_PROCEDURE_CATALOG_VERSION, INKSCRIPT_PRODUCTION_CATALOG_COMMAND_COUNT,
+    INKSCRIPT_PRODUCTION_CATALOG_FINGERPRINT, INKSCRIPT_REQUIRED_REPLAY_EPOCH,
     InkScriptAssertComparison, InkScriptCommandResultSchema, InkScriptCommandSchema,
     InkScriptConstructorArgumentSchema, InkScriptConstructorSchema, InkScriptEnumSchema,
     InkScriptFieldSchema, InkScriptRecordSchema, InkScriptResultAvailability,
@@ -61,7 +62,7 @@ pub use syntax::{
     InkScriptAsset, InkScriptBinding, InkScriptInput, InkScriptInputKind, InkScriptParameter,
     InkScriptProgramStatement, InkScriptRecord, InkScriptReferenceSegment,
     InkScriptSemanticDocument, InkScriptSemanticSection, InkScriptTypeReference, InkScriptValue,
-    build_inkscript_semantic,
+    build_inkscript_semantic, parse_inkscript_value,
 };
 pub use types::{
     InkScriptAnalysisLimits, InkScriptDeclarationModel, InkScriptDependencyEdge,

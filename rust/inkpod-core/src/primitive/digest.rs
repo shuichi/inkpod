@@ -1150,7 +1150,7 @@ pub(super) fn color_bytes(color: PixelValue) -> Result<Vec<u8>, CoreError> {
     Ok(bytes)
 }
 
-pub(super) fn decode_color(bytes: &[u8]) -> Result<PixelValue, CoreError> {
+pub(crate) fn decode_color(bytes: &[u8]) -> Result<PixelValue, CoreError> {
     match bytes {
         [1, red, green, blue, alpha] => Ok(PixelValue::Rgba([*red, *green, *blue, *alpha])),
         [2, rest @ ..] if rest.len() == 8 => {
