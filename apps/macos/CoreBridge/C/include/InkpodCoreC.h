@@ -648,6 +648,18 @@ static inline uint64_t inkpod_bridge_snapshot_solid_white_base(void) {
     return INKPOD_SNAPSHOT_FEATURE_SOLID_WHITE_BASE;
 }
 
+static inline uint64_t inkpod_bridge_snapshot_color_check_legacy_white(void) {
+    return INKPOD_SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE;
+}
+
+static inline uint64_t inkpod_bridge_snapshot_color_check_native_alpha(void) {
+    return INKPOD_SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA;
+}
+
+static inline uint32_t inkpod_bridge_snapshot_overlay_transparent_view(void) {
+    return INKPOD_SNAPSHOT_OVERLAY_TRANSPARENT_VIEW;
+}
+
 static inline InkpodViewCommandKind inkpod_bridge_view_set_alpha_visible(void) {
     return INKPOD_VIEW_SET_ALPHA_VISIBLE;
 }

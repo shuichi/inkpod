@@ -1,3 +1,4 @@
+import InkpodCoreC
 import XCTest
 @testable import InkpodCoreBridge
 
@@ -267,6 +268,82 @@ final class CanvasCoreIntegrationTests: XCTestCase {
                 tilt: nil
             )
         )
+    }
+
+    func testRetinaCanvasPaperPlanSeparatesDocumentFromLargerBackingViewport() throws {
+        let drawableSize = CGSize(width: 2_706, height: 1_516)
+        let transform = CoreSnapshotTransform(
+            flags: 0,
+            viewRevision: 1,
+            zoom: 1,
+            panX: 0,
+            panY: 0,
+            documentWidth: 1_920,
+            documentHeight: 1_080
+        )
+
+        let plan = try XCTUnwrap(MetalCanvasPaperPlan(
+            featureFlags: inkpod_bridge_snapshot_solid_white_base(),
+            overlayFlags: 0,
+            transform: transform,
+            drawableSize: drawableSize
+        ))
+
+        XCTAssertEqual(plan.documentRect, CGRect(x: 0, y: 0, width: 1_920, height: 1_080))
+        XCTAssertEqual(plan.visibleDocumentRect, plan.documentRect)
+        XCTAssertNotEqual(plan.viewportColor, plan.paperColor)
+        XCTAssertTrue(plan.documentRect.contains(CGPoint(x: 1_919.999, y: 1_079.999)))
+        XCTAssertFalse(plan.documentRect.contains(CGPoint(x: 1_920, y: 1_080)))
+        XCTAssertTrue(plan.drawableRect.contains(CGPoint(x: 1_920, y: 1_080)))
+    }
+
+    func testCanvasPaperPlanTracksPanZoomFlipAndBoundsTransparentCheckerWork() throws {
+        let transform = CoreSnapshotTransform(
+            flags: 3,
+            viewRevision: 2,
+            zoom: 1.5,
+            panX: -12.5,
+            panY: 7.25,
+            documentWidth: 100,
+            documentHeight: 50
+        )
+        let plan = try XCTUnwrap(MetalCanvasPaperPlan(
+            featureFlags: 0,
+            overlayFlags: inkpod_bridge_snapshot_overlay_transparent_view(),
+            transform: transform,
+            drawableSize: CGSize(width: 200, height: 100)
+        ))
+
+        XCTAssertEqual(
+            plan.documentRect,
+            CGRect(x: -12.5, y: 7.25, width: 150, height: 75)
+        )
+        XCTAssertEqual(
+            plan.visibleDocumentRect,
+            CGRect(x: 0, y: 7.25, width: 137.5, height: 75)
+        )
+        XCTAssertEqual(plan.paperColor, .transparentPaper)
+        XCTAssertEqual(plan.checkerColor, .transparentChecker)
+        XCTAssertTrue(plan.permitsCheckerboard(documentWidth: 100, documentHeight: 50))
+        XCTAssertFalse(plan.permitsCheckerboard(
+            documentWidth: UInt32.max,
+            documentHeight: UInt32.max
+        ))
+
+        XCTAssertNil(MetalCanvasPaperPlan(
+            featureFlags: inkpod_bridge_snapshot_solid_white_base(),
+            overlayFlags: 0,
+            transform: CoreSnapshotTransform(
+                flags: 0,
+                viewRevision: 3,
+                zoom: .nan,
+                panX: 0,
+                panY: 0,
+                documentWidth: 100,
+                documentHeight: 50
+            ),
+            drawableSize: CGSize(width: 200, height: 100)
+        ))
     }
 
     func testStrokeBoundariesUseReservedOrderedInputCapacity() {

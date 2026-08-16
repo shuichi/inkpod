@@ -292,13 +292,13 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - snap master が off の場合は bounded raw document point を使う。grid は原点と分割後の間隔ごとに各軸を最近点へ丸め、ちょうど半分は 0 から遠ざかる側を選ぶ。guide は元の各軸が guide から 4 document pixel 以内の場合に grid より優先し、複数候補は position、stable ID の昇順で最後の guide を選ぶ。解決前後は用紙の左上から右下の far edge までへ clamp する。
 - `Ctrl` を pointer-down 時に押している間は図形入力の guide／grid snap だけを一時解除する。`Shift` の45度／縦横比制約、`Alt` の既存操作は変更しない。snap 解決は文書、view revision、history、journal、dirty、savepoint を変更せず、確定した geometry だけが既存の一つの Undo 単位になる。
 - 透明表示は設定色または checkerboard で示し、pixel 値を変更しない。
-- color locator は cursor 周辺を別倍率で表示し、X/Y、selection 幅 H、高さ V、対角長 L、RGBA を表示する。active raster stroke 中は、確定前の最新 preview と最新の処理済み pointer 座標へ bounded/coalesced に非同期追従し、query 自体は document revision、history、journal、dirty、savepoint を変更しない。End 後は確定結果、Cancel 後は元の文書へ再同期する。固定 mode では locator 上で編集でき、edge 付近は自動 scroll を選べる。
+- color locator は cursor 周辺を別倍率で表示し、X/Y、selection 幅 H、高さ V、対角長 L、RGBA を表示する。可視化領域は Canvas の用紙背景色を共有し、利用可能な矩形へ収まる最大の等寸 pixel cell で拡大して中央配置する。active raster stroke 中は、確定前の最新 preview と最新の処理済み pointer 座標へ bounded/coalesced に非同期追従し、query 自体は document revision、history、journal、dirty、savepoint を変更しない。End 後は確定結果、Cancel 後は元の文書へ再同期する。固定 mode では locator 上で編集でき、edge 付近は自動 scroll を選べる。
 - multi-view は一つの document state と history を共有し、viewport transform だけを別に持つ。
 - vector overlay は view ごとに antialias on/off、中心線、中心線のみ、未接続端点を切り替えられる。中心線のみは通常 stroke を隠すが vector fill は保持する。未接続判定は stable path/start-or-end ID の明示接続だけを正本とし、座標一致や近接距離から推測しない。中心線幅と端点 marker は zoom に依存しない device-pixel 寸法とし、各 toggle は view revision だけを進めて document/history/journal/dirty/savepoint を変えない。
 
 ### 9. 描画・線修正ツール
 
-すべての tool option は tool options pane に表示し、stroke/shape 確定前の preview と確定後の command を分離してください。
+すべての tool option は tool options surface に表示し、stroke/shape 確定前の preview と確定後の command を分離してください。Windows frontend は既存の tool options pane を使う。macOS frontend は左の tool surface を 54 point の一列に保ち、各行を tool 選択 button と明示的な設定開示 button に分ける。設定開示は tool icon に anchor した標準 popover を Canvas 側へ出し、その tool の option を表示する。長押しや右 click だけを発見経路にしない。popover は既定で transient として外側の click で閉じ、任意の pin で非 modal のまま維持でき、unpin と明示的な close を持つ。transient popover は active tool の変更時に閉じ、pinned popover は新しい active tool の option へ追従する。tool surface を隠した場合は popover も閉じる。pin 状態は document、history、workspace layout へ永続化しない。menu と shortcut の Tool Options は同じ presentation state と command checked state を使う。
 
 #### スポイト
 

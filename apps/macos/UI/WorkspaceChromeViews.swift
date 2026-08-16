@@ -61,7 +61,12 @@ struct WorkspaceChromeView: View {
                 Divider()
             }
             GlassEffectContainer(spacing: 8) {
-                M6ToolSidebar(model: model, language: language)
+                M6ToolSidebar(
+                    model: model,
+                    language: language,
+                    popoverArrowEdge: model.chromePreference.inspectorEdge == .trailing
+                        ? .leading : .trailing
+                )
                     .background {
                         if reduceTransparency {
                             RoundedRectangle(cornerRadius: 14)

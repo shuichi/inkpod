@@ -830,6 +830,7 @@ final class WorkspaceModel: ObservableObject {
         .defaultColoring,
         availableWidth: 1_200
     )
+    @Published private(set) var toolOptionsPresentation = WorkspaceToolOptionsPresentation.closed
     @Published var pendingNewCellDraft: NewCellDraft?
     @Published var pendingNewCellPlan: CoreCellCreationPlanProjection?
     @Published var pendingCellEditor: CellEditorDraft?
@@ -924,8 +925,9 @@ final class WorkspaceModel: ObservableObject {
         adaptiveChrome.toolPresentation != .hidden
     }
 
-    var toolOptionsVisible: Bool {
-        adaptiveChrome.toolPresentation == .expanded
+    var activePaintEditor: CoreEditorProjection? {
+        guard let session = commandContext?.session else { return nil }
+        return paintProjections[session]?.editor
     }
 
     var layerInspectorVisible: Bool {
@@ -997,6 +999,9 @@ final class WorkspaceModel: ObservableObject {
         chromePreference = replacementPreference
         workspaceLayout.chrome = chromePreference
         adaptiveChrome = replacementAdaptive
+        if adaptiveChrome.toolPresentation == .hidden {
+            _ = closeToolOptions()
+        }
         handleInspectorProjectionTransition(wasVisible: wasVisible)
         if explicitlyDismissesInspector, !wasVisible, !adaptiveChrome.inspectorVisible {
             suspendedInspectorTarget = WorkspaceInspectorTarget(commandContext)
@@ -1058,6 +1063,9 @@ final class WorkspaceModel: ObservableObject {
         }
         guard replacement != adaptiveChrome else { return }
         adaptiveChrome = replacement
+        if adaptiveChrome.toolPresentation == .hidden {
+            _ = closeToolOptions()
+        }
         handleInspectorProjectionTransition(wasVisible: wasVisible)
     }
 
@@ -1074,7 +1082,7 @@ final class WorkspaceModel: ObservableObject {
             true
         case let .restore(preference):
             preference.inspectorRequestedVisible
-        case .toggleToolSurface, .toggleToolOptions, .setToolPresentation,
+        case .toggleToolSurface, .setToolPresentation,
              .selectInspectorSection, .mirrorEdges, .setInspectorWidth:
             false
         }
@@ -1091,7 +1099,7 @@ final class WorkspaceModel: ObservableObject {
             !isPresented
         case let .restore(preference):
             !preference.inspectorRequestedVisible
-        case .toggleToolSurface, .toggleToolOptions, .setToolPresentation,
+        case .toggleToolSurface, .setToolPresentation,
              .selectInspectorSection, .showInspectorSection, .mirrorEdges,
              .setInspectorWidth:
             false
@@ -2373,6 +2381,52 @@ final class WorkspaceModel: ObservableObject {
         _ = execute(command, context: context)
     }
 
+    func selectTool(_ command: InkpodCommandID) {
+        perform(command)
+    }
+
+    func toggleToolOptions(for tool: CoreEditorTool) {
+        if adaptiveChrome.toolPresentation == .hidden {
+            _ = reduceChrome(.setToolPresentation(.compact))
+        }
+        var replacement = toolOptionsPresentation
+        _ = replacement.toggle(tool)
+        toolOptionsPresentation = replacement
+    }
+
+    @discardableResult
+    func presentToolOptions(for tool: CoreEditorTool) -> Bool {
+        if adaptiveChrome.toolPresentation == .hidden {
+            _ = reduceChrome(.setToolPresentation(.compact))
+        }
+        var replacement = toolOptionsPresentation
+        let changed = replacement.present(tool)
+        guard changed else { return false }
+        toolOptionsPresentation = replacement
+        return true
+    }
+
+    func setToolOptionsPinned(_ pinned: Bool) {
+        var replacement = toolOptionsPresentation
+        guard replacement.setPinned(pinned) else { return }
+        toolOptionsPresentation = replacement
+    }
+
+    func dismissToolOptions(for tool: CoreEditorTool) {
+        guard toolOptionsPresentation.tool == tool else { return }
+        var replacement = toolOptionsPresentation
+        guard replacement.dismissTransient() else { return }
+        toolOptionsPresentation = replacement
+    }
+
+    @discardableResult
+    func closeToolOptions() -> Bool {
+        var replacement = toolOptionsPresentation
+        guard replacement.close() else { return false }
+        toolOptionsPresentation = replacement
+        return true
+    }
+
     func performLayerPane(_ command: InkpodCommandID) {
         guard let context = layerPaneContext() else {
             lastCommandResult = .stale
@@ -3491,7 +3545,7 @@ final class WorkspaceModel: ObservableObject {
         case .toolFillOptions:
             return CommandState(
                 enabled: paintProjections[context.session] != nil,
-                checked: adaptiveChrome.toolPresentation == .expanded
+                checked: toolOptionsPresentation.tool == .fill
             )
         case .toolClosedFill, .toolFillExtension:
             let operation = paintProjections[context.session]?.editor.fillOptions.operation
@@ -3624,7 +3678,7 @@ final class WorkspaceModel: ObservableObject {
         case .selectionOptions:
             return CommandState(
                 enabled: paintProjections[context.session] != nil,
-                checked: adaptiveChrome.toolPresentation == .expanded
+                checked: toolOptionsPresentation.tool == .selection
             )
         case .windowToolPalette:
             return CommandState(
@@ -3633,8 +3687,8 @@ final class WorkspaceModel: ObservableObject {
             )
         case .windowToolOptions:
             return CommandState(
-                enabled: true,
-                checked: adaptiveChrome.toolPresentation == .expanded
+                enabled: paintProjections[context.session] != nil,
+                checked: toolOptionsPresentation.isPresented
             )
         case .windowColorPane:
             return CommandState(enabled: true, checked: inspectorSectionIsActive(.color))
@@ -3984,7 +4038,7 @@ final class WorkspaceModel: ObservableObject {
                 viewID: viewID(for: context)
             )
         case .selectionOptions:
-            _ = reduceChrome(.setToolPresentation(.expanded))
+            _ = presentToolOptions(for: .selection)
         case .zoomIn:
             routeView(
                 .zoomAt(
@@ -4155,9 +4209,17 @@ final class WorkspaceModel: ObservableObject {
         case .windowLayerPalette:
             return reduceChromeCommand(.toggleInspectorSection(.layerPlane))
         case .windowToolPalette:
-            return reduceChromeCommand(.toggleToolSurface)
+            let result = reduceChromeCommand(.toggleToolSurface)
+            if adaptiveChrome.toolPresentation == .hidden {
+                _ = closeToolOptions()
+            }
+            return result
         case .windowToolOptions:
-            return reduceChromeCommand(.toggleToolOptions)
+            guard let tool = paintProjections[context.session]?.editor.activeTool else {
+                return .noOp
+            }
+            toggleToolOptions(for: tool)
+            return .started
         case .windowColorPane:
             return reduceChromeCommand(.toggleInspectorSection(.color))
         case .windowLocator:
@@ -4249,7 +4311,7 @@ final class WorkspaceModel: ObservableObject {
         case .toolEyedropper:
             updateEditor(.activeTool(.eyedropper), viewID: viewID(for: context))
         case .toolFillOptions:
-            _ = reduceChrome(.setToolPresentation(.expanded))
+            _ = presentToolOptions(for: .fill)
         case .toolClosedFill, .toolFillExtension:
             updateFillOperationAndSelectTool(
                 command == .toolClosedFill ? .closedRegion : .extensionRegion,
@@ -5547,6 +5609,7 @@ final class WorkspaceModel: ObservableObject {
                 guard let self, case let .paint(projection) = outcome else { return }
                 guard !self.isOlderPaintProjection(projection, for: target) else { return }
                 self.paintProjections[target] = projection
+                self.syncToolOptions(with: projection)
                 self.updateSessionProjection(projection.editor.session)
                 if self.colorPaneContext()?.session == target {
                     self.paint = projection
@@ -5748,6 +5811,13 @@ final class WorkspaceModel: ObservableObject {
                 && candidate.editor.editorRevision < current.editor.editorRevision)
     }
 
+    private func syncToolOptions(with projection: CorePaintProjection) {
+        guard commandContext?.session == projection.editor.session.target else { return }
+        var replacement = toolOptionsPresentation
+        guard replacement.activeToolChanged(to: projection.editor.activeTool) else { return }
+        toolOptionsPresentation = replacement
+    }
+
     private func colorPaneContext() -> CommandTargetContext? {
         guard let view = colorPaneTarget.resolve(
             active: editorGraph?.activeView,
@@ -5816,6 +5886,7 @@ final class WorkspaceModel: ObservableObject {
                     for: projection.editor.session.target
                 ) else { return }
                 self.paintProjections[projection.editor.session.target] = projection
+                self.syncToolOptions(with: projection)
                 self.updateSessionProjection(projection.editor.session)
                 if self.colorPaneContext()?.session == projection.editor.session.target {
                     self.paint = projection

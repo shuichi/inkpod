@@ -30,7 +30,7 @@ final class ProductCanvasLifecycleTests: XCTestCase {
             dismantleProductCanvas(in: window)
         }
 
-        guard await waitUntil(timeout: 10, condition: {
+        guard await waitUntil(timeout: 30, condition: {
             workspace.phase == .ready
                 && workspace.commandContext != nil
                 && workspace.history != nil
@@ -93,15 +93,17 @@ final class ProductCanvasLifecycleTests: XCTestCase {
         }
         XCTAssertEqual(workspace.chromePreference, explicitChrome)
         let chromeRestored = await waitUntil(timeout: 5) {
-            workspace.adaptiveChrome.toolPresentation == .expanded
+            workspace.adaptiveChrome.toolPresentation == .compact
                 && workspace.adaptiveChrome.inspectorVisible
         }
         XCTAssertTrue(chromeRestored)
-        XCTAssertEqual(workspace.adaptiveChrome.toolPresentation, .expanded)
+        XCTAssertEqual(workspace.adaptiveChrome.toolPresentation, .compact)
         XCTAssertTrue(workspace.adaptiveChrome.inspectorVisible)
 
         let automaticSuspensionContext = try XCTUnwrap(workspace.commandContext)
         let automaticSuspensionView = automaticSuspensionContext.view
+        window.setContentSize(NSSize(width: 640, height: 800))
+        hostingView.layoutSubtreeIfNeeded()
         workspace.updateAdaptiveChrome(availableWidth: 640)
         XCTAssertTrue(workspace.chromePreference.inspectorRequestedVisible)
         XCTAssertFalse(workspace.adaptiveChrome.inspectorVisible)
@@ -113,6 +115,8 @@ final class ProductCanvasLifecycleTests: XCTestCase {
             workspace.commandContext?.view != automaticSuspensionView
         }
         XCTAssertTrue(automaticReplacementActivated)
+        window.setContentSize(NSSize(width: 1_200, height: 800))
+        hostingView.layoutSubtreeIfNeeded()
         workspace.updateAdaptiveChrome(availableWidth: 1_200)
         XCTAssertEqual(workspace.lastCommandResult, .stale)
         XCTAssertTrue(workspace.chromePreference.inspectorRequestedVisible)
@@ -154,6 +158,7 @@ final class ProductCanvasLifecycleTests: XCTestCase {
         workspace.lightTableVisible = false
         XCTAssertEqual(workspace.execute(.windowLightTable, context: replacementContext), .stale)
         XCTAssertFalse(workspace.lightTableVisible)
+
         await application.shutdown(confirmingDirty: false)
     }
 

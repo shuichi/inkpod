@@ -6,6 +6,39 @@ import Metal
 import QuartzCore
 import simd
 
+struct CanvasBackgroundColor: Equatable, Sendable {
+    let red: Double
+    let green: Double
+    let blue: Double
+    let alpha: Double
+
+    static let solidPaper = CanvasBackgroundColor(red: 1, green: 1, blue: 1, alpha: 1)
+    static let neutral = CanvasBackgroundColor(red: 0.18, green: 0.18, blue: 0.18, alpha: 1)
+    static let viewport = CanvasBackgroundColor(red: 0.12, green: 0.13, blue: 0.15, alpha: 1)
+    static let transparentPaper = CanvasBackgroundColor(
+        red: 0.78,
+        green: 0.78,
+        blue: 0.78,
+        alpha: 1
+    )
+    static let transparentChecker = CanvasBackgroundColor(
+        red: 0.9,
+        green: 0.9,
+        blue: 0.9,
+        alpha: 1
+    )
+    static let legacyColorCheck = CanvasBackgroundColor(red: 0, green: 0, blue: 0, alpha: 1)
+    static let nativeColorCheck = CanvasBackgroundColor(red: 1, green: 0, blue: 1, alpha: 1)
+
+    var metalClearColor: MTLClearColor {
+        MTLClearColor(red: red, green: green, blue: blue, alpha: alpha)
+    }
+
+    var premultipliedFloat4: SIMD4<Float> {
+        SIMD4(Float(red), Float(green), Float(blue), Float(alpha))
+    }
+}
+
 struct MetalRendererMetrics: Equatable, Sendable {
     var executionThreadID: UInt64 = 0
     var surfaceCount = 0
@@ -18,6 +51,103 @@ struct MetalRendererMetrics: Equatable, Sendable {
     var hiddenDrawCount: UInt64 = 0
     var deviceRebuildCount: UInt64 = 0
     var memoryPressurePurgeCount: UInt64 = 0
+}
+
+struct MetalCanvasPaperPlan: Equatable, Sendable {
+    static let checkerSize: UInt32 = 16
+    static let maximumCheckerCount: UInt64 = 16_384
+
+    let drawableRect: CGRect
+    let documentRect: CGRect
+    let visibleDocumentRect: CGRect
+    let viewportColor: CanvasBackgroundColor
+    let paperColor: CanvasBackgroundColor
+    let checkerColor: CanvasBackgroundColor?
+
+    init?(
+        featureFlags: UInt64,
+        overlayFlags: UInt32,
+        transform: CoreSnapshotTransform,
+        drawableSize: CGSize
+    ) {
+        guard drawableSize.width.isFinite,
+              drawableSize.height.isFinite,
+              drawableSize.width > 0,
+              drawableSize.height > 0,
+              transform.zoom.isFinite,
+              transform.zoom > 0,
+              transform.panX.isFinite,
+              transform.panY.isFinite,
+              transform.documentWidth > 0,
+              transform.documentHeight > 0
+        else {
+            return nil
+        }
+        let farX = transform.panX.addingProduct(
+            Double(transform.documentWidth),
+            transform.zoom
+        )
+        let farY = transform.panY.addingProduct(
+            Double(transform.documentHeight),
+            transform.zoom
+        )
+        guard farX.isFinite, farY.isFinite else { return nil }
+
+        drawableRect = CGRect(origin: .zero, size: drawableSize)
+        documentRect = CGRect(
+            x: min(transform.panX, farX),
+            y: min(transform.panY, farY),
+            width: abs(farX - transform.panX),
+            height: abs(farY - transform.panY)
+        )
+        guard documentRect.width.isFinite,
+              documentRect.height.isFinite,
+              documentRect.width > 0,
+              documentRect.height > 0,
+              Float(documentRect.minX).isFinite,
+              Float(documentRect.minY).isFinite,
+              Float(documentRect.maxX).isFinite,
+              Float(documentRect.maxY).isFinite
+        else {
+            return nil
+        }
+        visibleDocumentRect = documentRect.intersection(drawableRect)
+        viewportColor = .viewport
+
+        let solidWhite = featureFlags & inkpod_bridge_snapshot_solid_white_base() != 0
+        let legacyCheck = featureFlags
+            & inkpod_bridge_snapshot_color_check_legacy_white() != 0
+        let nativeCheck = featureFlags
+            & inkpod_bridge_snapshot_color_check_native_alpha() != 0
+        let transparentView = overlayFlags
+            & inkpod_bridge_snapshot_overlay_transparent_view() != 0
+        if solidWhite {
+            paperColor = .solidPaper
+        } else if legacyCheck {
+            paperColor = .legacyColorCheck
+        } else if nativeCheck {
+            paperColor = .nativeColorCheck
+        } else if transparentView {
+            paperColor = .transparentPaper
+        } else {
+            paperColor = .solidPaper
+        }
+        checkerColor = transparentView && !solidWhite
+            ? .transparentChecker
+            : nil
+    }
+
+    var hasVisibleDocument: Bool {
+        !visibleDocumentRect.isNull && !visibleDocumentRect.isEmpty
+    }
+
+    func permitsCheckerboard(documentWidth: UInt32, documentHeight: UInt32) -> Bool {
+        guard checkerColor != nil else { return false }
+        let size = UInt64(Self.checkerSize)
+        let columns = (UInt64(documentWidth) + size - 1) / size
+        let rows = (UInt64(documentHeight) + size - 1) / size
+        return columns > 0 && rows <= Self.maximumCheckerCount / columns
+    }
 }
 
 private final class MetalRendererMetricsStore: @unchecked Sendable {
@@ -533,11 +663,15 @@ private final class MetalRendererLoop {
                 else {
                     return false
                 }
-                let whiteBase = snapshot.featureFlags
-                    & inkpod_bridge_snapshot_solid_white_base() != 0
-                let clearColor = whiteBase
-                    ? MTLClearColor(red: 1, green: 1, blue: 1, alpha: 1)
-                    : MTLClearColor(red: 0.18, green: 0.18, blue: 0.18, alpha: 1)
+                guard let paperPlan = MetalCanvasPaperPlan(
+                    featureFlags: snapshot.featureFlags,
+                    overlayFlags: snapshot.overlayFlags,
+                    transform: snapshot.transform,
+                    drawableSize: surface.drawableSize
+                ) else {
+                    return false
+                }
+                let viewportClearColor = paperPlan.viewportColor.metalClearColor
                 var viewport = SIMD2<Float>(
                     Float(surface.drawableSize.width),
                     Float(surface.drawableSize.height)
@@ -547,8 +681,33 @@ private final class MetalRendererLoop {
                     commandBuffer: commandBuffer,
                     texture: primary,
                     loadAction: .clear,
-                    clearColor: clearColor
+                    clearColor: viewportClearColor
                 ) else { return false }
+                if paperPlan.hasVisibleDocument {
+                    configure(
+                        initial,
+                        pipeline: solidPipeline,
+                        viewport: &viewport,
+                        sampler: nil
+                    )
+                    encodeSolid(
+                        quadVertices(for: paperPlan.documentRect),
+                        color: paperPlan.paperColor.premultipliedFloat4,
+                        encoder: initial
+                    )
+                    if let checkerColor = paperPlan.checkerColor,
+                       paperPlan.permitsCheckerboard(
+                           documentWidth: snapshot.transform.documentWidth,
+                           documentHeight: snapshot.transform.documentHeight
+                       )
+                    {
+                        encodeSolid(
+                            checkerboardVertices(transform: snapshot.transform),
+                            color: checkerColor.premultipliedFloat4,
+                            encoder: initial
+                        )
+                    }
+                }
                 initial.endEncoding()
 
                 var source = primary
@@ -582,7 +741,7 @@ private final class MetalRendererLoop {
                             commandBuffer: commandBuffer,
                             texture: activeLayerOpacity == nil ? source : layerTexture,
                             loadAction: .load,
-                            clearColor: clearColor,
+                            clearColor: viewportClearColor,
                             stencilTexture: stencilTexture
                         ) else { return false }
                         configure(
@@ -615,7 +774,7 @@ private final class MetalRendererLoop {
                             commandBuffer: commandBuffer,
                             texture: activeLayerOpacity == nil ? source : layerTexture,
                             loadAction: .load,
-                            clearColor: clearColor
+                            clearColor: viewportClearColor
                         ) else { return false }
                         configure(
                             encoder,
@@ -645,7 +804,7 @@ private final class MetalRendererLoop {
                             commandBuffer: commandBuffer,
                             texture: activeLayerOpacity == nil ? source : layerTexture,
                             loadAction: .load,
-                            clearColor: clearColor
+                            clearColor: viewportClearColor
                         ) else { return false }
                         configure(
                             encoder,
@@ -675,8 +834,8 @@ private final class MetalRendererLoop {
                         let encoder = makeEncoder(
                             commandBuffer: commandBuffer,
                             texture: destination,
-                            loadAction: .dontCare,
-                            clearColor: clearColor
+                            loadAction: .clear,
+                            clearColor: viewportClearColor
                         ) else { return false }
                         configure(
                             encoder,
@@ -684,7 +843,10 @@ private final class MetalRendererLoop {
                             viewport: &viewport,
                             sampler: sampler
                         )
-                        var vertices = fullScreenVertices(surface.drawableSize)
+                        var vertices = documentTextureVertices(
+                            documentRect: paperPlan.documentRect,
+                            drawableSize: surface.drawableSize
+                        )
                         encoder.setVertexBytes(
                             &vertices,
                             length: MemoryLayout<MetalVertex>.stride * vertices.count,
@@ -706,7 +868,7 @@ private final class MetalRendererLoop {
                             commandBuffer: commandBuffer,
                             texture: activeLayerOpacity == nil ? source : layerTexture,
                             loadAction: .load,
-                            clearColor: clearColor
+                            clearColor: viewportClearColor
                         ) else { return false }
                         configure(
                             encoder,
@@ -735,7 +897,7 @@ private final class MetalRendererLoop {
                                   commandBuffer: commandBuffer,
                                   texture: source,
                                   loadAction: .load,
-                                  clearColor: clearColor
+                                  clearColor: viewportClearColor
                               )
                         else { return false }
                         configure(
@@ -765,7 +927,7 @@ private final class MetalRendererLoop {
                     commandBuffer: commandBuffer,
                     texture: source,
                     loadAction: .load,
-                    clearColor: clearColor
+                    clearColor: viewportClearColor
                 ) else { return false }
                 configure(
                     overlay,
@@ -780,7 +942,7 @@ private final class MetalRendererLoop {
                     commandBuffer: commandBuffer,
                     texture: drawable.texture,
                     loadAction: .dontCare,
-                    clearColor: clearColor
+                    clearColor: viewportClearColor
                 ) else { return false }
                 configure(final, pipeline: pipeline, viewport: &viewport, sampler: sampler)
                 var finalVertices = fullScreenVertices(surface.drawableSize)
@@ -1097,6 +1259,69 @@ private final class MetalRendererLoop {
             MetalVertex(position: .init(0, y), textureCoordinate: .init(0, 1)),
             MetalVertex(position: .init(x, y), textureCoordinate: .init(1, 1)),
         ]
+    }
+
+    private func quadVertices(for rect: CGRect) -> [MetalVertex] {
+        quadVertices(
+            from: SIMD2(Float(rect.minX), Float(rect.minY)),
+            to: SIMD2(Float(rect.maxX), Float(rect.maxY))
+        )
+    }
+
+    private func documentTextureVertices(
+        documentRect: CGRect,
+        drawableSize: CGSize
+    ) -> [MetalVertex] {
+        let width = Float(drawableSize.width)
+        let height = Float(drawableSize.height)
+        let x0 = Float(documentRect.minX)
+        let y0 = Float(documentRect.minY)
+        let x1 = Float(documentRect.maxX)
+        let y1 = Float(documentRect.maxY)
+        let u0 = x0 / width
+        let v0 = y0 / height
+        let u1 = x1 / width
+        let v1 = y1 / height
+        return [
+            MetalVertex(position: SIMD2(x0, y0), textureCoordinate: SIMD2(u0, v0)),
+            MetalVertex(position: SIMD2(x0, y1), textureCoordinate: SIMD2(u0, v1)),
+            MetalVertex(position: SIMD2(x1, y0), textureCoordinate: SIMD2(u1, v0)),
+            MetalVertex(position: SIMD2(x1, y0), textureCoordinate: SIMD2(u1, v0)),
+            MetalVertex(position: SIMD2(x0, y1), textureCoordinate: SIMD2(u0, v1)),
+            MetalVertex(position: SIMD2(x1, y1), textureCoordinate: SIMD2(u1, v1)),
+        ]
+    }
+
+    private func checkerboardVertices(
+        transform: CoreSnapshotTransform
+    ) -> [MetalVertex] {
+        let size = UInt64(MetalCanvasPaperPlan.checkerSize)
+        let width = UInt64(transform.documentWidth)
+        let height = UInt64(transform.documentHeight)
+        let columns = (width + size - 1) / size
+        let rows = (height + size - 1) / size
+        guard columns > 0,
+              rows <= MetalCanvasPaperPlan.maximumCheckerCount / columns
+        else {
+            return []
+        }
+        var vertices: [MetalVertex] = []
+        vertices.reserveCapacity(Int((columns * rows) / 2) * 6)
+        for y in stride(from: UInt64(0), to: height, by: Int(size)) {
+            for x in stride(from: UInt64(0), to: width, by: Int(size)) {
+                guard ((x / size) + (y / size)) % 2 != 0 else { continue }
+                let p0 = devicePoint(
+                    SIMD2(Float(x), Float(y)),
+                    transform: transform
+                )
+                let p1 = devicePoint(
+                    SIMD2(Float(min(width, x + size)), Float(min(height, y + size))),
+                    transform: transform
+                )
+                vertices.append(contentsOf: quadVertices(from: p0, to: p1))
+            }
+        }
+        return vertices
     }
 
     private func boundedSlice<Value>(

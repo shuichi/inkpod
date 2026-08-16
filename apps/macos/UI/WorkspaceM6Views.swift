@@ -4,75 +4,236 @@ import SwiftUI
 struct M6ToolSidebar: View {
     @ObservedObject var model: WorkspaceModel
     @ObservedObject var language: AppLanguageController
+    let popoverArrowEdge: Edge
 
-    private let tools: [(InkpodCommandID, String)] = [
-        (.toolPencil, "pencil"),
-        (.toolBrush, "paintbrush"),
-        (.toolEraser, "eraser"),
-        (.toolFill, "paintbrush.pointed.fill"),
-        (.toolEyedropper, "eyedropper"),
-        (.selectionRectangle, "rectangle.dashed"),
-        (.toolColorReplaceTarget, "arrow.triangle.2.circlepath"),
+    private let tools: [M6ToolDescriptor] = [
+        M6ToolDescriptor(.toolPencil, .pencil, "pencil"),
+        M6ToolDescriptor(.toolBrush, .brush, "paintbrush"),
+        M6ToolDescriptor(.toolEraser, .eraser, "eraser"),
+        M6ToolDescriptor(.toolFill, .fill, "paintbrush.pointed.fill"),
+        M6ToolDescriptor(.toolEyedropper, .eyedropper, "eyedropper"),
+        M6ToolDescriptor(.selectionRectangle, .selection, "rectangle.dashed"),
+        M6ToolDescriptor(
+            .toolColorReplaceTarget,
+            .colorReplace,
+            "arrow.triangle.2.circlepath"
+        ),
     ]
 
     var body: some View {
         VStack(spacing: 8) {
-            ForEach(tools, id: \.0) { command, symbol in
-                commandButton(command, symbol: symbol)
-            }
-            Divider()
-            if model.toolOptionsVisible, let editor = model.paint?.editor {
-                VStack(spacing: 4) {
-                    Text(language.text("m6.tools.size"))
-                        .font(.caption)
-                    Slider(
-                        value: Binding(
-                            get: { editor.diameter },
-                            set: { model.updateEditor(.diameter($0)) }
-                        ),
-                        in: 1 ... 256
-                    )
-                    .frame(width: 136)
-                    Text(String(format: "%.1f", editor.diameter))
-                        .font(.caption.monospacedDigit())
-                }
-                if editor.activeTool == .fill {
-                    commandButton(.toolClosedFill, symbol: "square.dashed")
-                    commandButton(.toolFillExtension, symbol: "arrow.up.left.and.down.right.magnifyingglass")
-                    fillOptions(editor.fillOptions)
-                }
-                if editor.activeTool == .brush || editor.activeTool == .pencil {
-                    brushOptions(editor.brushOptions)
-                }
-                if editor.activeTool == .colorReplace {
-                    commandButton(.toolColorReplaceRectangle, symbol: "rectangle.dashed")
-                    commandButton(.toolColorReplacePen, symbol: "scribble.variable")
-                    commandButton(.toolColorReplaceLasso, symbol: "lasso")
-                    commandButton(.toolColorReplaceAll, symbol: "rectangle.inset.filled")
-                    if let preview = model.colorReplacePreview {
-                        Text(language.text("m6.replace.preview"))
-                            .font(.caption.weight(.semibold))
-                        Text("\(preview.matchedPixels)")
-                            .font(.caption.monospacedDigit())
-                    }
-                }
-                if editor.activeTool == .selection {
-                    selectionOptions(editor.selectionOptions)
-                }
+            ForEach(tools) { descriptor in
+                toolButton(descriptor)
             }
             Spacer()
         }
         .padding(7)
-        .frame(width: model.toolOptionsVisible ? 178 : 54)
+        .frame(width: 54)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("inkpod.m6.tool-sidebar")
     }
 
-    private func commandButton(_ command: InkpodCommandID, symbol: String) -> some View {
+    private func toolButton(_ descriptor: M6ToolDescriptor) -> some View {
+        let state = model.commandContext.map {
+            model.commandState(descriptor.command, context: $0)
+        }
+            ?? CommandState(enabled: false)
+        return HStack(spacing: 0) {
+            Button { model.selectTool(descriptor.command) } label: {
+                Image(systemName: descriptor.symbol)
+                    .frame(width: 29, height: 34)
+            }
+            .buttonStyle(.borderless)
+            .disabled(!state.enabled)
+            .help(language.commandLabel(descriptor.command))
+            .accessibilityLabel(language.commandLabel(descriptor.command))
+            .accessibilityIdentifier("inkpod.command.\(descriptor.command.rawValue)")
+            .accessibilityAddTraits(state.checked ? .isSelected : [])
+
+            Button {
+                model.toggleToolOptions(for: descriptor.tool)
+            } label: {
+                Image(systemName: popoverArrowEdge == .leading
+                    ? "chevron.compact.right" : "chevron.compact.left")
+                    .font(.system(size: 9, weight: .semibold))
+                    .frame(width: 11, height: 34)
+            }
+            .buttonStyle(.borderless)
+            .disabled(!state.enabled)
+            .help(language.text("m6.tool.options.open"))
+            .accessibilityLabel(language.text("m6.tool.options.open"))
+            .accessibilityIdentifier("inkpod.tool-options.\(descriptor.tool.rawValue)")
+            .popover(
+                isPresented: popoverBinding(for: descriptor.tool),
+                attachmentAnchor: .rect(.bounds),
+                arrowEdge: popoverArrowEdge
+            ) {
+                M6ToolOptionsPopover(
+                    model: model,
+                    language: language,
+                    descriptor: descriptor
+                )
+                .interactiveDismissDisabled(model.toolOptionsPresentation.isPinned)
+            }
+        }
+        .frame(width: 40, height: 34)
+        .background(
+            state.checked ? Color.accentColor.opacity(0.24) : Color.clear,
+            in: RoundedRectangle(cornerRadius: 6)
+        )
+        .accessibilityElement(children: .contain)
+    }
+
+    private func popoverBinding(for tool: CoreEditorTool) -> Binding<Bool> {
+        Binding(
+            get: { model.toolOptionsPresentation.tool == tool },
+            set: { isPresented in
+                if !isPresented { model.dismissToolOptions(for: tool) }
+            }
+        )
+    }
+}
+
+private struct M6ToolDescriptor: Identifiable {
+    let command: InkpodCommandID
+    let tool: CoreEditorTool
+    let symbol: String
+
+    var id: InkpodCommandID { command }
+
+    init(_ command: InkpodCommandID, _ tool: CoreEditorTool, _ symbol: String) {
+        self.command = command
+        self.tool = tool
+        self.symbol = symbol
+    }
+}
+
+private struct M6ToolOptionsPopover: View {
+    @ObservedObject var model: WorkspaceModel
+    @ObservedObject var language: AppLanguageController
+    let descriptor: M6ToolDescriptor
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: descriptor.symbol)
+                Text(language.commandLabel(descriptor.command))
+                    .font(.headline)
+                Spacer()
+                Button {
+                    model.setToolOptionsPinned(!model.toolOptionsPresentation.isPinned)
+                } label: {
+                    Image(systemName: model.toolOptionsPresentation.isPinned
+                        ? "pin.fill" : "pin")
+                }
+                .buttonStyle(.borderless)
+                .help(language.text(model.toolOptionsPresentation.isPinned
+                    ? "m6.tool.options.unpin" : "m6.tool.options.pin"))
+                .accessibilityLabel(language.text(model.toolOptionsPresentation.isPinned
+                    ? "m6.tool.options.unpin" : "m6.tool.options.pin"))
+                .accessibilityIdentifier("inkpod.tool-options.pin")
+
+                Button { _ = model.closeToolOptions() } label: {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(.borderless)
+                .help(language.text("m6.tool.options.close"))
+                .accessibilityLabel(language.text("m6.tool.options.close"))
+                .accessibilityIdentifier("inkpod.tool-options.close")
+            }
+            Divider()
+            ScrollView {
+                if let editor = model.activePaintEditor {
+                    VStack(alignment: .leading, spacing: 10) {
+                        options(editor)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .frame(minHeight: 96, idealHeight: 280, maxHeight: 520)
+        }
+        .padding(12)
+        .frame(width: 286)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(language.text("m6.tool.options.title"))
+        .accessibilityIdentifier("inkpod.tool-options.popover")
+    }
+
+    @ViewBuilder
+    private func options(_ editor: CoreEditorProjection) -> some View {
+        if descriptor.tool != .eyedropper {
+            sizeOptions(editor)
+        }
+        switch descriptor.tool {
+        case .fill:
+            HStack(spacing: 8) {
+                commandButton(.toolClosedFill, symbol: "square.dashed")
+                commandButton(
+                    .toolFillExtension,
+                    symbol: "arrow.up.left.and.down.right.magnifyingglass"
+                )
+            }
+            fillOptions(editor.fillOptions)
+        case .brush, .pencil:
+            brushOptions(editor.brushOptions)
+        case .colorReplace:
+            HStack(spacing: 8) {
+                commandButton(.toolColorReplaceRectangle, symbol: "rectangle.dashed")
+                commandButton(.toolColorReplacePen, symbol: "scribble.variable")
+                commandButton(.toolColorReplaceLasso, symbol: "lasso")
+                commandButton(.toolColorReplaceAll, symbol: "rectangle.inset.filled")
+            }
+            if let preview = model.colorReplacePreview {
+                LabeledContent(language.text("m6.replace.preview")) {
+                    Text("\(preview.matchedPixels)")
+                        .monospacedDigit()
+                }
+            }
+        case .selection:
+            selectionOptions(editor.selectionOptions)
+        case .eyedropper:
+            Picker(
+                language.text("m6.color.eyedropperSource"),
+                selection: $model.eyedropperSource
+            ) {
+                Text(language.commandLabel(.colorSourceTopmost))
+                    .tag(CoreEyedropperSource.topmostNontransparent)
+                Text(language.commandLabel(.colorSourceSelected))
+                    .tag(CoreEyedropperSource.selectedPlane)
+                Text(language.commandLabel(.colorSourceComposite))
+                    .tag(CoreEyedropperSource.composite)
+                Text(language.commandLabel(.colorSourceLightTable))
+                    .tag(CoreEyedropperSource.lightTableTopmost)
+            }
+        case .eraser, .floatingTransform:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private func sizeOptions(_ editor: CoreEditorProjection) -> some View {
+        Text(language.text("m6.tools.size"))
+            .font(.caption)
+        Slider(
+            value: Binding(
+                get: { editor.diameter },
+                set: { model.updateEditor(.diameter($0)) }
+            ),
+            in: 1 ... 256
+        )
+        Text(String(format: "%.1f", editor.diameter))
+            .font(.caption.monospacedDigit())
+    }
+
+    private func commandButton(
+        _ command: InkpodCommandID,
+        symbol: String
+    ) -> some View {
         let state = model.commandContext.map { model.commandState(command, context: $0) }
             ?? CommandState(enabled: false)
         return Button { model.perform(command) } label: {
             Image(systemName: symbol)
-                .frame(width: 28, height: 28)
+                .frame(width: 26, height: 26)
                 .background(
                     state.checked ? Color.accentColor.opacity(0.24) : Color.clear,
                     in: RoundedRectangle(cornerRadius: 6)
@@ -436,7 +597,8 @@ struct M6ColorInspector: View {
                 HStack { swatch(color); Text(color.componentDescription) }
             }
             LocatorNeighborhood(model: model, projection: locator)
-                .frame(width: 126, height: 126)
+                .frame(maxWidth: .infinity)
+                .aspectRatio(1, contentMode: .fit)
                 .accessibilityLabel(language.text("m6.locator.neighborhood"))
         } else {
             Text(language.text("m6.locator.movePointer"))
@@ -489,72 +651,159 @@ struct M6ColorInspector: View {
     }
 }
 
+struct LocatorNeighborhoodCell: Equatable {
+    let column: Int
+    let row: Int
+}
+
+struct LocatorNeighborhoodLayout: Equatable {
+    let contentRect: CGRect
+    let cellSize: CGFloat
+    let columns: Int
+    let rows: Int
+
+    init?(availableSize: CGSize, columns: Int, rows: Int) {
+        guard availableSize.width.isFinite,
+              availableSize.height.isFinite,
+              availableSize.width > 0,
+              availableSize.height > 0,
+              columns > 0,
+              rows > 0
+        else {
+            return nil
+        }
+        let cellSize = min(
+            availableSize.width / CGFloat(columns),
+            availableSize.height / CGFloat(rows)
+        )
+        guard cellSize.isFinite, cellSize > 0 else { return nil }
+        let contentWidth = cellSize * CGFloat(columns)
+        let contentHeight = cellSize * CGFloat(rows)
+        self.contentRect = CGRect(
+            x: (availableSize.width - contentWidth) / 2,
+            y: (availableSize.height - contentHeight) / 2,
+            width: contentWidth,
+            height: contentHeight
+        )
+        self.cellSize = cellSize
+        self.columns = columns
+        self.rows = rows
+    }
+
+    func cell(at location: CGPoint) -> LocatorNeighborhoodCell? {
+        guard location.x.isFinite, location.y.isFinite else { return nil }
+        let localX = location.x - contentRect.minX
+        let localY = location.y - contentRect.minY
+        guard localX >= 0,
+              localY >= 0,
+              localX < contentRect.width,
+              localY < contentRect.height
+        else {
+            return nil
+        }
+        let column = Int(localX / cellSize)
+        let row = Int(localY / cellSize)
+        guard column >= 0, column < columns, row >= 0, row < rows else {
+            return nil
+        }
+        return LocatorNeighborhoodCell(column: column, row: row)
+    }
+}
+
+enum LocatorNeighborhoodPresentation {
+    static let background = CanvasBackgroundColor.solidPaper
+}
+
 private struct LocatorNeighborhood: View {
     @ObservedObject var model: WorkspaceModel
     let projection: CoreLocatorProjection
 
     var body: some View {
-        Canvas { context, size in
-            let width = Int(projection.neighborhoodWidth)
-            let height = Int(projection.neighborhoodHeight)
-            guard width > 0, height > 0,
-                  projection.neighborhoodRGBA8.count == width * height * 4
-            else { return }
-            let cellWidth = size.width / CGFloat(width)
-            let cellHeight = size.height / CGFloat(height)
-            for y in 0 ..< height {
-                for x in 0 ..< width {
-                    let offset = (y * width + x) * 4
-                    let color = Color(
-                        .sRGB,
-                        red: Double(projection.neighborhoodRGBA8[offset]) / 255,
-                        green: Double(projection.neighborhoodRGBA8[offset + 1]) / 255,
-                        blue: Double(projection.neighborhoodRGBA8[offset + 2]) / 255,
-                        opacity: Double(projection.neighborhoodRGBA8[offset + 3]) / 255
-                    )
-                    context.fill(
-                        Path(CGRect(
-                            x: CGFloat(x) * cellWidth,
-                            y: CGFloat(y) * cellHeight,
-                            width: cellWidth + 0.5,
-                            height: cellHeight + 0.5
-                        )),
-                        with: .color(color)
-                    )
+        GeometryReader { geometry in
+            Canvas { context, size in
+                guard let layout = neighborhoodLayout(availableSize: size) else { return }
+                let width = layout.columns
+                let height = layout.rows
+                for y in 0 ..< height {
+                    for x in 0 ..< width {
+                        let offset = (y * width + x) * 4
+                        let color = Color(
+                            .sRGB,
+                            red: Double(projection.neighborhoodRGBA8[offset]) / 255,
+                            green: Double(projection.neighborhoodRGBA8[offset + 1]) / 255,
+                            blue: Double(projection.neighborhoodRGBA8[offset + 2]) / 255,
+                            opacity: Double(projection.neighborhoodRGBA8[offset + 3]) / 255
+                        )
+                        context.fill(
+                            Path(CGRect(
+                                x: layout.contentRect.minX + CGFloat(x) * layout.cellSize,
+                                y: layout.contentRect.minY + CGFloat(y) * layout.cellSize,
+                                width: layout.cellSize + 0.5,
+                                height: layout.cellSize + 0.5
+                            )),
+                            with: .color(color)
+                        )
+                    }
                 }
+                let center = CGRect(
+                    x: layout.contentRect.minX + CGFloat(width / 2) * layout.cellSize,
+                    y: layout.contentRect.minY + CGFloat(height / 2) * layout.cellSize,
+                    width: layout.cellSize,
+                    height: layout.cellSize
+                )
+                context.stroke(Path(center), with: .color(.accentColor), lineWidth: 1.5)
             }
-            let center = CGRect(
-                x: CGFloat(width / 2) * cellWidth,
-                y: CGFloat(height / 2) * cellHeight,
-                width: cellWidth,
-                height: cellHeight
+            .background(LocatorNeighborhoodPresentation.background.swiftUIColor)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onEnded { value in
+                        guard model.locatorFixed,
+                              let layout = neighborhoodLayout(
+                                  availableSize: geometry.size
+                              ),
+                              let cell = layout.cell(at: value.location)
+                        else {
+                            return
+                        }
+                        model.selectLocatorPixel(
+                            documentX: projection.neighborhoodOriginX + Int32(cell.column),
+                            documentY: projection.neighborhoodOriginY + Int32(cell.row)
+                        )
+                    }
             )
-            context.stroke(Path(center), with: .color(.primary), lineWidth: 1.5)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
-        .contentShape(Rectangle())
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onEnded { value in
-                    guard model.locatorFixed,
-                          projection.neighborhoodWidth > 0,
-                          projection.neighborhoodHeight > 0
-                    else { return }
-                    let x = min(
-                        Int(projection.neighborhoodWidth) - 1,
-                        max(0, Int(value.location.x / 126
-                            * CGFloat(projection.neighborhoodWidth)))
-                    )
-                    let y = min(
-                        Int(projection.neighborhoodHeight) - 1,
-                        max(0, Int(value.location.y / 126
-                            * CGFloat(projection.neighborhoodHeight)))
-                    )
-                    model.selectLocatorPixel(
-                        documentX: projection.neighborhoodOriginX + Int32(x),
-                        documentY: projection.neighborhoodOriginY + Int32(y)
-                    )
-                }
+    }
+
+    private func neighborhoodLayout(
+        availableSize: CGSize
+    ) -> LocatorNeighborhoodLayout? {
+        let width = Int(projection.neighborhoodWidth)
+        let height = Int(projection.neighborhoodHeight)
+        guard width > 0,
+              height > 0,
+              width <= 33,
+              height <= 33,
+              projection.neighborhoodRGBA8.count == width * height * 4
+        else {
+            return nil
+        }
+        return LocatorNeighborhoodLayout(
+            availableSize: availableSize,
+            columns: width,
+            rows: height
+        )
+    }
+}
+
+private extension CanvasBackgroundColor {
+    var swiftUIColor: Color {
+        Color(
+            .sRGB,
+            red: red,
+            green: green,
+            blue: blue,
+            opacity: alpha
         )
     }
 }

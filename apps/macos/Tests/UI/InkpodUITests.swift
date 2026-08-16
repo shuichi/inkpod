@@ -303,6 +303,32 @@ final class InkpodUITests: XCTestCase {
         try application.performAccessibilityAudit { issue in
             self.isKnownMacOSFrameworkAuditFalsePositive(issue)
         }
+
+        let fillOptions = application.descendants(matching: .any)[
+            "inkpod.tool-options.1001"
+        ]
+        XCTAssertTrue(fillOptions.waitForExistence(timeout: 5))
+        fillOptions.click()
+        let optionsPopover = application.descendants(matching: .any)[
+            "inkpod.tool-options.popover"
+        ]
+        XCTAssertTrue(optionsPopover.waitForExistence(timeout: 5))
+        let pin = application.descendants(matching: .any)["inkpod.tool-options.pin"]
+        XCTAssertTrue(pin.waitForExistence(timeout: 5))
+        pin.click()
+
+        let pencil = toolSurface.descendants(matching: .button)[
+            "inkpod.command.40301"
+        ]
+        XCTAssertTrue(pencil.waitForExistence(timeout: 5))
+        pencil.click()
+        XCTAssertTrue(optionsPopover.waitForExistence(timeout: 2))
+
+        pin.click()
+        let close = application.descendants(matching: .any)["inkpod.tool-options.close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 5))
+        close.click()
+        XCTAssertFalse(optionsPopover.waitForExistence(timeout: 2))
     }
 
     @MainActor

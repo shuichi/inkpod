@@ -597,14 +597,89 @@ public enum WorkspacePreset: String, CaseIterable, Codable, Sendable {
 public enum WorkspaceToolPresentation: String, CaseIterable, Codable, Sendable {
     case hidden
     case compact
-    case expanded
 
     public var width: Double {
         switch self {
         case .hidden: 0
         case .compact: 54
-        case .expanded: 178
         }
+    }
+}
+
+public enum WorkspaceToolOptionsPresentation: Equatable, Sendable {
+    case closed
+    case transient(CoreEditorTool)
+    case pinned(CoreEditorTool)
+
+    public var tool: CoreEditorTool? {
+        switch self {
+        case .closed: nil
+        case let .transient(tool), let .pinned(tool): tool
+        }
+    }
+
+    public var isPresented: Bool { tool != nil }
+
+    public var isPinned: Bool {
+        if case .pinned = self { return true }
+        return false
+    }
+
+    @discardableResult
+    public mutating func present(_ tool: CoreEditorTool) -> Bool {
+        guard self.tool != tool else { return false }
+        self = isPinned ? .pinned(tool) : .transient(tool)
+        return true
+    }
+
+    @discardableResult
+    public mutating func toggle(_ tool: CoreEditorTool) -> Bool {
+        if self.tool == tool {
+            self = .closed
+        } else {
+            self = isPinned ? .pinned(tool) : .transient(tool)
+        }
+        return true
+    }
+
+    @discardableResult
+    public mutating func setPinned(_ pinned: Bool) -> Bool {
+        guard let tool else { return false }
+        let replacement: Self = pinned ? .pinned(tool) : .transient(tool)
+        guard replacement != self else { return false }
+        self = replacement
+        return true
+    }
+
+    @discardableResult
+    public mutating func activeToolChanged(to tool: CoreEditorTool) -> Bool {
+        let replacement: Self = switch self {
+        case .closed:
+            .closed
+        case let .transient(presented) where presented != tool:
+            .closed
+        case .transient:
+            self
+        case .pinned:
+            .pinned(tool)
+        }
+        guard replacement != self else { return false }
+        self = replacement
+        return true
+    }
+
+    @discardableResult
+    public mutating func dismissTransient() -> Bool {
+        guard case .transient = self else { return false }
+        self = .closed
+        return true
+    }
+
+    @discardableResult
+    public mutating func close() -> Bool {
+        guard self != .closed else { return false }
+        self = .closed
+        return true
     }
 }
 
@@ -623,7 +698,6 @@ public enum WorkspaceInspectorEdge: String, CaseIterable, Codable, Sendable {
 
 public enum WorkspaceChromeAction: Equatable, Sendable {
     case toggleToolSurface
-    case toggleToolOptions
     case setToolPresentation(WorkspaceToolPresentation)
     case toggleInspector
     case setInspectorPresented(Bool)
@@ -657,7 +731,7 @@ public struct WorkspaceChromePreference: Equatable, Codable, Sendable {
     }
 
     public static let defaultColoring = WorkspaceChromePreference(
-        toolPresentation: .expanded,
+        toolPresentation: .compact,
         inspectorRequestedVisible: true,
         selectedInspectorSection: .layerPlane,
         inspectorEdge: .trailing,
@@ -670,11 +744,6 @@ public struct WorkspaceChromePreference: Equatable, Codable, Sendable {
         switch action {
         case .toggleToolSurface:
             toolPresentation = toolPresentation == .hidden ? .compact : .hidden
-        case .toggleToolOptions:
-            toolPresentation = switch toolPresentation {
-            case .hidden, .compact: .expanded
-            case .expanded: .compact
-            }
         case let .setToolPresentation(presentation):
             toolPresentation = presentation
         case .toggleInspector:
@@ -729,9 +798,6 @@ public struct AdaptiveChromeState: Equatable, Sendable {
             max(0, width - tool.width - (inspectorVisible ? preference.inspectorWidth : 0))
         }
 
-        if projectedCanvasWidth() < minimumCanvasWidth, tool == .expanded {
-            tool = .compact
-        }
         if projectedCanvasWidth() < minimumCanvasWidth, inspectorVisible {
             inspectorVisible = false
         }
@@ -747,7 +813,7 @@ public struct AdaptiveChromeState: Equatable, Sendable {
 }
 
 public struct WorkspaceLayoutRecord: Equatable, Codable, Sendable {
-    private static let currentVersion: UInt32 = 2
+    private static let currentVersion: UInt32 = 3
 
     public let version: UInt32
     public var preset: WorkspacePreset
@@ -774,7 +840,7 @@ public struct WorkspaceLayoutRecord: Equatable, Codable, Sendable {
         self.split = split
         self.splitRatio = splitRatio
         chrome = WorkspaceChromePreference(
-            toolPresentation: .expanded,
+            toolPresentation: .compact,
             inspectorRequestedVisible: layerInspectorVisible,
             selectedInspectorSection: .layerPlane,
             inspectorEdge: inspectorOnLeadingEdge ? .leading : .trailing,
@@ -896,12 +962,63 @@ private struct WorkspaceLayoutRecordV1: Codable {
             split: split,
             splitRatio: splitRatio,
             chrome: WorkspaceChromePreference(
-                toolPresentation: .expanded,
+                toolPresentation: .compact,
                 inspectorRequestedVisible: layerInspectorVisible,
                 selectedInspectorSection: .layerPlane,
                 inspectorEdge: inspectorOnLeadingEdge ? .leading : .trailing,
                 inspectorWidth: inspectorWidth
             ),
+            layerPlaneRatio: layerPlaneRatio,
+            windowFrame: windowFrame,
+            customName: customName
+        )
+    }
+}
+
+private enum WorkspaceToolPresentationV2: String, Codable {
+    case hidden
+    case compact
+    case expanded
+
+    var migrated: WorkspaceToolPresentation {
+        self == .hidden ? .hidden : .compact
+    }
+}
+
+private struct WorkspaceChromePreferenceV2: Codable {
+    var toolPresentation: WorkspaceToolPresentationV2
+    var inspectorRequestedVisible: Bool
+    var selectedInspectorSection: WorkspaceInspectorSection
+    var inspectorEdge: WorkspaceInspectorEdge
+    var inspectorWidth: Double
+
+    var migrated: WorkspaceChromePreference {
+        WorkspaceChromePreference(
+            toolPresentation: toolPresentation.migrated,
+            inspectorRequestedVisible: inspectorRequestedVisible,
+            selectedInspectorSection: selectedInspectorSection,
+            inspectorEdge: inspectorEdge,
+            inspectorWidth: inspectorWidth
+        )
+    }
+}
+
+private struct WorkspaceLayoutRecordV2: Codable {
+    let version: UInt32
+    var preset: WorkspacePreset
+    var split: WorkspaceSplitOrientation?
+    var splitRatio: Double
+    var chrome: WorkspaceChromePreferenceV2
+    var layerPlaneRatio: Double
+    var windowFrame: CGRect
+    var customName: String?
+
+    var migrated: WorkspaceLayoutRecord {
+        WorkspaceLayoutRecord(
+            preset: preset,
+            split: split,
+            splitRatio: splitRatio,
+            chrome: chrome.migrated,
             layerPlaneRatio: layerPlaneRatio,
             windowFrame: windowFrame,
             customName: customName
@@ -950,6 +1067,8 @@ public final class WorkspaceLayoutStore: @unchecked Sendable {
         case 1:
             decoded = try? decoder.decode(WorkspaceLayoutRecordV1.self, from: data).migrated
         case 2:
+            decoded = try? decoder.decode(WorkspaceLayoutRecordV2.self, from: data).migrated
+        case 3:
             decoded = try? decoder.decode(WorkspaceLayoutRecord.self, from: data)
         default:
             decoded = nil

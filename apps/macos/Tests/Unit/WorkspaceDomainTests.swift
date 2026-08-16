@@ -145,9 +145,7 @@ final class WorkspaceDomainTests: XCTestCase {
 
         XCTAssertTrue(preference.reduce(.toggleToolSurface))
         XCTAssertEqual(preference.toolPresentation, .hidden)
-        XCTAssertTrue(preference.reduce(.toggleToolOptions))
-        XCTAssertEqual(preference.toolPresentation, .expanded)
-        XCTAssertTrue(preference.reduce(.toggleToolOptions))
+        XCTAssertTrue(preference.reduce(.toggleToolSurface))
         XCTAssertEqual(preference.toolPresentation, .compact)
 
         XCTAssertTrue(preference.reduce(.toggleInspectorSection(.color)))
@@ -167,13 +165,12 @@ final class WorkspaceDomainTests: XCTestCase {
 
     func testAdaptiveChromeProjectionIsOrderedReversibleAndNeverPersisted() {
         var preference = WorkspaceChromePreference.defaultColoring
-        preference.toolPresentation = .expanded
         preference.inspectorWidth = 320
 
         let wide = AdaptiveChromeState.project(preference, availableWidth: 1_200)
-        XCTAssertEqual(wide.toolPresentation, .expanded)
+        XCTAssertEqual(wide.toolPresentation, .compact)
         XCTAssertTrue(wide.inspectorVisible)
-        XCTAssertEqual(wide.canvasWidth, 702)
+        XCTAssertEqual(wide.canvasWidth, 826)
 
         let medium = AdaptiveChromeState.project(preference, availableWidth: 800)
         XCTAssertEqual(medium.toolPresentation, .compact)
@@ -185,7 +182,7 @@ final class WorkspaceDomainTests: XCTestCase {
         XCTAssertFalse(narrow.inspectorVisible)
         XCTAssertEqual(narrow.canvasWidth, 500)
 
-        XCTAssertEqual(preference.toolPresentation, .expanded)
+        XCTAssertEqual(preference.toolPresentation, .compact)
         XCTAssertTrue(preference.inspectorRequestedVisible)
         XCTAssertEqual(
             AdaptiveChromeState.project(preference, availableWidth: 1_200),
@@ -197,7 +194,7 @@ final class WorkspaceDomainTests: XCTestCase {
         )
     }
 
-    func testWorkspaceLayoutMigratesV1AndRoundTripsExplicitV2Chrome() throws {
+    func testWorkspaceLayoutMigratesV1AndRoundTripsExplicitV3Chrome() throws {
         let suite = "inkpod.workspace-m11.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -219,8 +216,8 @@ final class WorkspaceDomainTests: XCTestCase {
         defaults.set(legacyData, forKey: "layout")
 
         let migrated = try XCTUnwrap(store.load(visibleWorkAreas: [workArea]))
-        XCTAssertEqual(migrated.version, 2)
-        XCTAssertEqual(migrated.chrome.toolPresentation, .expanded)
+        XCTAssertEqual(migrated.version, 3)
+        XCTAssertEqual(migrated.chrome.toolPresentation, .compact)
         XCTAssertTrue(migrated.chrome.inspectorRequestedVisible)
         XCTAssertEqual(migrated.chrome.selectedInspectorSection, .layerPlane)
         XCTAssertEqual(migrated.chrome.inspectorEdge, .leading)
@@ -242,7 +239,7 @@ final class WorkspaceDomainTests: XCTestCase {
         XCTAssertEqual(store.load(visibleWorkAreas: [workArea]), fallback)
     }
 
-    func testWorkspaceLayoutRejectsEveryInvalidV2ChromeField() throws {
+    func testWorkspaceLayoutRejectsEveryInvalidV3ChromeField() throws {
         let suite = "inkpod.workspace-m11-invalid.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -291,14 +288,119 @@ final class WorkspaceDomainTests: XCTestCase {
 
     func testAdaptiveProjectionIsNotWrittenIntoWorkspaceRecord() {
         var record = WorkspaceLayoutRecord.defaultColoring
-        record.chrome.toolPresentation = .expanded
         record.chrome.inspectorRequestedVisible = true
         let projected = AdaptiveChromeState.project(record.chrome, availableWidth: 640)
 
         XCTAssertEqual(projected.toolPresentation, .compact)
         XCTAssertFalse(projected.inspectorVisible)
-        XCTAssertEqual(record.chrome.toolPresentation, .expanded)
+        XCTAssertEqual(record.chrome.toolPresentation, .compact)
         XCTAssertTrue(record.chrome.inspectorRequestedVisible)
+    }
+
+    func testWorkspaceLayoutMigratesV2ExpandedToolSurfaceToCompactPopoverAnchor() throws {
+        let suite = "inkpod.workspace-m12-tool-popover.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = WorkspaceLayoutStore(defaults: defaults, key: "layout")
+        let workArea = CGRect(x: 0, y: 0, width: 1_440, height: 900)
+        let legacy = TestWorkspaceLayoutRecordV2(
+            version: 2,
+            preset: .coloring,
+            split: nil,
+            splitRatio: 0.5,
+            chrome: TestWorkspaceChromePreferenceV2(
+                toolPresentation: .expanded,
+                inspectorRequestedVisible: true,
+                selectedInspectorSection: .layerPlane,
+                inspectorEdge: .trailing,
+                inspectorWidth: 320
+            ),
+            layerPlaneRatio: 0.55,
+            windowFrame: CGRect(x: 120, y: 120, width: 1_200, height: 800),
+            customName: nil
+        )
+        defaults.set(try PropertyListEncoder().encode(legacy), forKey: "layout")
+
+        let migrated = try XCTUnwrap(store.load(visibleWorkAreas: [workArea]))
+        XCTAssertEqual(migrated.version, 3)
+        XCTAssertEqual(migrated.chrome.toolPresentation, .compact)
+        XCTAssertTrue(migrated.chrome.inspectorRequestedVisible)
+    }
+
+    func testToolOptionsPresentationSupportsTransientPinRetargetAndDismiss() {
+        var presentation = WorkspaceToolOptionsPresentation.closed
+
+        XCTAssertTrue(presentation.present(.fill))
+        XCTAssertEqual(presentation, .transient(.fill))
+        XCTAssertFalse(presentation.present(.fill))
+        XCTAssertTrue(presentation.setPinned(true))
+        XCTAssertEqual(presentation, .pinned(.fill))
+
+        XCTAssertTrue(presentation.activeToolChanged(to: .brush))
+        XCTAssertEqual(presentation, .pinned(.brush))
+        XCTAssertFalse(presentation.dismissTransient())
+
+        XCTAssertTrue(presentation.setPinned(false))
+        XCTAssertEqual(presentation, .transient(.brush))
+        XCTAssertTrue(presentation.dismissTransient())
+        XCTAssertEqual(presentation, .closed)
+    }
+
+    func testLocatorNeighborhoodLayoutCentersAndExpandsSquareCells() throws {
+        let wide = try XCTUnwrap(LocatorNeighborhoodLayout(
+            availableSize: CGSize(width: 270, height: 180),
+            columns: 9,
+            rows: 9
+        ))
+        XCTAssertEqual(wide.cellSize, 20)
+        XCTAssertEqual(wide.contentRect, CGRect(x: 45, y: 0, width: 180, height: 180))
+
+        let square = try XCTUnwrap(LocatorNeighborhoodLayout(
+            availableSize: CGSize(width: 270, height: 270),
+            columns: 9,
+            rows: 9
+        ))
+        XCTAssertEqual(square.cellSize, 30)
+        XCTAssertEqual(square.contentRect, CGRect(x: 0, y: 0, width: 270, height: 270))
+
+        let narrowGrid = try XCTUnwrap(LocatorNeighborhoodLayout(
+            availableSize: CGSize(width: 270, height: 270),
+            columns: 5,
+            rows: 9
+        ))
+        XCTAssertEqual(narrowGrid.cellSize, 30)
+        XCTAssertEqual(
+            narrowGrid.contentRect,
+            CGRect(x: 60, y: 0, width: 150, height: 270)
+        )
+    }
+
+    func testLocatorNeighborhoodHitTestingUsesCenteredRenderedArea() throws {
+        let layout = try XCTUnwrap(LocatorNeighborhoodLayout(
+            availableSize: CGSize(width: 270, height: 180),
+            columns: 9,
+            rows: 9
+        ))
+
+        XCTAssertNil(layout.cell(at: CGPoint(x: 44.99, y: 90)))
+        XCTAssertEqual(
+            layout.cell(at: CGPoint(x: 45, y: 0)),
+            LocatorNeighborhoodCell(column: 0, row: 0)
+        )
+        XCTAssertEqual(
+            layout.cell(at: CGPoint(x: 224.99, y: 179.99)),
+            LocatorNeighborhoodCell(column: 8, row: 8)
+        )
+        XCTAssertNil(layout.cell(at: CGPoint(x: 225, y: 90)))
+        XCTAssertNil(layout.cell(at: CGPoint(x: 100, y: 180)))
+    }
+
+    func testLocatorNeighborhoodUsesCanvasPaperBackground() {
+        XCTAssertEqual(
+            LocatorNeighborhoodPresentation.background,
+            CanvasBackgroundColor.solidPaper
+        )
+        XCTAssertEqual(LocatorNeighborhoodPresentation.background.alpha, 1)
     }
 }
 
@@ -310,6 +412,31 @@ private struct TestWorkspaceLayoutRecordV1: Codable {
     var layerInspectorVisible: Bool
     var inspectorOnLeadingEdge: Bool
     var inspectorWidth: Double
+    var layerPlaneRatio: Double
+    var windowFrame: CGRect
+    var customName: String?
+}
+
+private enum TestWorkspaceToolPresentationV2: String, Codable {
+    case hidden
+    case compact
+    case expanded
+}
+
+private struct TestWorkspaceChromePreferenceV2: Codable {
+    var toolPresentation: TestWorkspaceToolPresentationV2
+    var inspectorRequestedVisible: Bool
+    var selectedInspectorSection: WorkspaceInspectorSection
+    var inspectorEdge: WorkspaceInspectorEdge
+    var inspectorWidth: Double
+}
+
+private struct TestWorkspaceLayoutRecordV2: Codable {
+    let version: UInt32
+    var preset: WorkspacePreset
+    var split: WorkspaceSplitOrientation?
+    var splitRatio: Double
+    var chrome: TestWorkspaceChromePreferenceV2
     var layerPlaneRatio: Double
     var windowFrame: CGRect
     var customName: String?

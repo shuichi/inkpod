@@ -122,6 +122,7 @@ struct CoreSnapshotRenderPassValue {
 struct BorrowedCoreSnapshotView {
     let revision: UInt64
     let featureFlags: UInt64
+    let overlayFlags: UInt32
     let transform: CoreSnapshotTransform
     let tiles: [BorrowedCoreSnapshotTile]
     let vectorSegments: [CoreSnapshotVectorSegment]
@@ -140,6 +141,7 @@ enum CoreSnapshotReadError: Error, Equatable {
     case released
     case invalidView(CoreStatus)
     case invalidTransform(CoreStatus)
+    case invalidOverlay(CoreStatus)
     case unsupportedPixelFormat
     case invalidTileLayout
     case invalidM8Layout
@@ -179,6 +181,14 @@ final class CoreOwnedSnapshot: @unchecked Sendable {
             )
             guard transformStatus == .ok else {
                 throw CoreSnapshotReadError.invalidTransform(transformStatus)
+            }
+            var overlay = InkpodSnapshotOverlay()
+            overlay.struct_size = UInt32(MemoryLayout<InkpodSnapshotOverlay>.size)
+            let overlayStatus = CoreStatus(
+                cValue: inkpod_snapshot_get_overlay(raw, &overlay)
+            )
+            guard overlayStatus == .ok else {
+                throw CoreSnapshotReadError.invalidOverlay(overlayStatus)
             }
             guard view.tile_stride_bytes == UInt64(MemoryLayout<InkpodSnapshotTile>.stride),
                   view.tile_count <= 262_144,
@@ -496,6 +506,7 @@ final class CoreOwnedSnapshot: @unchecked Sendable {
                 BorrowedCoreSnapshotView(
                     revision: view.revision,
                     featureFlags: view.feature_flags,
+                    overlayFlags: overlay.flags,
                     transform: CoreSnapshotTransform(
                         flags: transform.flags,
                         viewRevision: transform.view_revision,

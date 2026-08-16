@@ -500,12 +500,22 @@ M11 replaces the accumulated horizontal pane columns with one
 `WorkspaceChromeView`. The MainActor `WorkspaceModel` owns a value-type
 `WorkspaceChromePreference`; toolbar, menu, shortcut, preset, mirror, native
 `InspectorCommands`, and scene-restoration binding changes all enter its one pure
-reducer. A separate derived `AdaptiveChromeState` temporarily compacts the tool
-surface, hides the inspector, and finally hides the tool surface when the Canvas
-would fall below 480 points. Only the explicit preference is persisted. The
-app-scoped layout record is version 2; a bounded version probe selects a distinct
-v1 migration DTO or v2 decoder, while malformed and unknown versions restore the
-default. This changes neither document persistence nor replay.
+reducer. The left tool surface is either hidden or a fixed 54-point icon strip.
+Each row has a separate tool-selection button and settings-disclosure button; the
+latter anchors one standard SwiftUI popover on the Canvas side. Its transient or
+pinned presentation is MainActor-only ephemeral state: transient options close
+on outside click or active-tool change, while pinned options remain nonmodal and
+retarget to the new active tool. Hiding the tool surface closes either form, and
+pin state is never persisted. Tool Options menu and shortcut commands use that
+same presentation state.
+
+A separate derived `AdaptiveChromeState` hides the inspector and then the tool
+surface when the Canvas would fall below 480 points. Only the explicit chrome
+preference is persisted. The app-scoped layout record is version 3; a bounded
+version probe selects distinct v1 and v2 migration DTOs or the v3 decoder. A v2
+expanded tool surface migrates to the fixed compact strip; malformed and unknown
+versions restore the default. This changes neither document persistence nor
+replay.
 
 The default trailing edge uses SwiftUI's native single `.inspector`; the mirrored
 leading edge hosts the same inspector content and model in a thin
@@ -1210,6 +1220,14 @@ pixel units and a 96-DPI target, so Per-Monitor DPI scaling applies to native UI
 not a second Canvas transform. DPI notification alone does not move or resize the
 document. Fit uses current client-device dimensions; manual pan/zoom survives
 viewport resize.
+
+The viewport background and document paper are separate renderer passes. The
+renderer clears the complete backing-pixel viewport to the neutral Canvas color,
+then fills only the transformed half-open document rectangle with the snapshot's
+paper, color-check, or bounded transparency-checker presentation. Adjustment LUTs
+operate on that document rectangle rather than recoloring the surrounding Canvas.
+This keeps 1:1 defined as one document pixel per backing pixel on Retina displays
+without presenting out-of-document pixels as editable paper.
 
 Core keeps document points/sizes/rectangles, device points/sizes/offsets, and
 zoom as distinct private types. Public Rust commands and state accessors retain
