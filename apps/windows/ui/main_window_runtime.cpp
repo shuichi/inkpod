@@ -472,6 +472,16 @@ InkpodStatus SetEditorPaletteCursor(
     bool present) noexcept;
 bool RefreshColorPanes(ApplicationHost& state) noexcept;
 void RefreshDockPaneViews(ApplicationHost& state) noexcept;
+UINT ActiveToolOptionsCommand(const ApplicationHost& state) noexcept;
+bool QueryToolOptionsDetail(
+    void* context,
+    UINT command,
+    inkpod::windows::ui::panes::ToolOptionsDetailModel& output) noexcept;
+bool ChangeToolOptionsDetail(
+    void* context,
+    UINT command,
+    const inkpod::windows::ui::panes::ToolOptionsDetailModel& value,
+    bool execute) noexcept;
 void RefreshLocatorPane(ApplicationHost& state) noexcept;
 std::wstring LocatorDocumentName(const DocumentSession& document);
 void DispatchSequencePaneCommand(void* context, UINT command) noexcept;
@@ -651,7 +661,36 @@ void DispatchToolPaletteCommand(void* context, UINT command) noexcept {
             state->Workspace().windows.window,
             command,
             state->routing.tool_pane);
+        if (inkpod::windows::ui::ToolPaletteCommandHasOptions(command)
+            && inkpod::windows::ui::panes::IsToolOptionsFlyoutVisible(
+                state->Workspace().windows.tool_options_flyout)) {
+            inkpod::windows::ui::panes::ShowToolOptionsFlyout(
+                state->Workspace().windows.tool_options_flyout,
+                inkpod::windows::ui::ToolPaletteCheckedOptionsAnchor(
+                    state->Workspace().tools.palette),
+                command);
+        }
     }
+}
+
+void RequestToolPaletteOptions(
+    void* context, UINT command, HWND anchor) noexcept {
+    auto* state = ActivateWorkspaceContext(context);
+    if (state == nullptr || state->Workspace().windows.window == nullptr) {
+        return;
+    }
+    if (command != IDM_EFFECT_BOUNDARY_AIRBRUSH) {
+        DispatchEnabledCommand(
+            *state,
+            state->Workspace().windows.window,
+            command,
+            state->routing.tool_pane);
+    }
+    inkpod::windows::ui::panes::ToggleToolOptionsFlyout(
+        state->Workspace().windows.tool_options_flyout,
+        anchor,
+        command);
+    UpdateMenuState(*state);
 }
 
 void ChangeToolOptionsDiameter(void* context, float diameter) noexcept {
@@ -3195,6 +3234,12 @@ void RefreshDockPaneViews(ApplicationHost& state) noexcept {
         state.Workspace().tools.active_plane,
         state.Workspace().tools.diameter,
         state.Workspace().tools.brush);
+    if (inkpod::windows::ui::panes::IsToolOptionsFlyoutVisible(
+            state.Workspace().windows.tool_options_flyout)) {
+        inkpod::windows::ui::panes::RefreshToolOptionsDetail(
+            state.Workspace().windows.tool_options,
+            state.Workspace().tools.options_flyout.command);
+    }
     inkpod::windows::ui::panes::UpdateColorDockPane(
         state.Workspace().windows.color_pane,
         state.Workspace().panes.main_line_color,
@@ -3464,7 +3509,6 @@ bool FocusIsWithin(HWND owner, HWND focus) noexcept {
 HWND FirstVisibleDockFocusTarget(ApplicationHost& state) noexcept {
     constexpr std::array pane_types{
         inkpod::windows::ui::DockPaneType::Tool,
-        inkpod::windows::ui::DockPaneType::ToolOptions,
         inkpod::windows::ui::DockPaneType::Color,
         inkpod::windows::ui::DockPaneType::Layer};
     for (const auto pane_type : pane_types) {
@@ -3482,7 +3526,6 @@ HWND FirstVisibleDockFocusTarget(ApplicationHost& state) noexcept {
 bool FocusIsInDock(ApplicationHost& state, HWND focus) noexcept {
     constexpr std::array pane_types{
         inkpod::windows::ui::DockPaneType::Tool,
-        inkpod::windows::ui::DockPaneType::ToolOptions,
         inkpod::windows::ui::DockPaneType::Color,
         inkpod::windows::ui::DockPaneType::Layer};
     return std::any_of(pane_types.cbegin(), pane_types.cend(), [&](const auto pane_type) {
@@ -5982,11 +6025,11 @@ InkpodStatus QueueBoundaryAirbrush(
         : INKPOD_STATUS_INVALID_STATE;
 }
 
-bool ConfigureCanvasEffect(
-    ApplicationHost& state,
-    const CommandContext& context,
-    UINT command) noexcept {
-    EffectEditorState editor{};
+bool PrepareCanvasEffectEditor(
+    UINT command,
+    EffectEditorState& editor,
+    std::uint32_t& interaction) noexcept {
+    editor = {};
     editor.option1 = false;
     editor.option2 = false;
     editor.channel_labels = {UiText(UiStringId::Text0345), UiText(UiStringId::Text0821), UiText(UiStringId::ToolVectorPolyline), UiText(UiStringId::Text0664), nullptr};
@@ -5999,7 +6042,7 @@ bool ConfigureCanvasEffect(
     editor.channel_count = 4U;
     editor.channel = INKPOD_SELECTION_TRACE;
     editor.points = L"0:00000000;500:80808080;1000:ffffffff";
-    std::uint32_t interaction{};
+    interaction = 0U;
     switch (command) {
         case IDM_EFFECT_GRADIENT:
         case IDM_EFFECT_ALPHA_GRADIENT:
@@ -6109,10 +6152,14 @@ bool ConfigureCanvasEffect(
         default:
             return false;
     }
-    if (ShowEffectEditor(state.lifetime.instance, state.Workspace().windows.window, state.lifetime.smoke_test, editor) != IDOK) {
-        return false;
-    }
-    CanvasEffectOptions options{};
+    return true;
+}
+
+bool CanvasEffectOptionsFromEditor(
+    UINT command,
+    const EffectEditorState& editor,
+    CanvasEffectOptions& options) noexcept {
+    options = {};
     options.parameters = editor.parameters;
     options.shape = editor.channel;
     options.mode = editor.mode;
@@ -6122,34 +6169,61 @@ bool ConfigureCanvasEffect(
         || command == IDM_EFFECT_BOUNDARY_AIRBRUSH) {
         const std::size_t minimum_stops = command == IDM_EFFECT_BOUNDARY_AIRBRUSH ? 2U : 3U;
         if (!ParseGradientStops(editor.points, options.stops, minimum_stops)) {
-            if (!state.lifetime.smoke_test) {
-                MessageBoxW(
-                    state.Workspace().windows.window,
-                    command == IDM_EFFECT_BOUNDARY_AIRBRUSH
-                        ? UiText(UiStringId::Text0602)
-                        : UiText(UiStringId::Text0101),
-                    L"inkpod",
-                    MB_OK | MB_ICONWARNING);
-            }
             return false;
         }
     }
     if (command == IDM_EFFECT_GRADIENT || command == IDM_EFFECT_ALPHA_GRADIENT) {
         options.parameters[0] = editor.option1 ? 1 : 0;
     }
+    return true;
+}
+
+void ApplyCanvasEffectOptionsToEditor(
+    const CanvasEffectOptions& options,
+    EffectEditorState& editor) noexcept {
+    editor.parameters = options.parameters;
+    editor.channel = options.shape;
+    editor.mode = options.mode;
+    editor.option1 = options.option;
+    editor.option2 = options.option2;
+    if (!options.stops.empty()) {
+        std::wstring points;
+        try {
+            for (std::size_t index = 0U; index < options.stops.size(); ++index) {
+                if (index != 0U) points.push_back(L';');
+                std::array<wchar_t, 32U> entry{};
+                _snwprintf_s(
+                    entry.data(),
+                    entry.size(),
+                    _TRUNCATE,
+                    L"%u:%08x",
+                    options.stops[index].position_milli,
+                    options.stops[index].rgba);
+                points.append(entry.data());
+            }
+            editor.points = std::move(points);
+        } catch (const std::bad_alloc&) {
+        }
+    }
+}
+
+bool SelectCanvasEffect(ApplicationHost& state, UINT command) noexcept {
+    EffectEditorState editor{};
+    std::uint32_t interaction{};
+    if (!PrepareCanvasEffectEditor(command, editor, interaction)
+        || command == IDM_EFFECT_BOUNDARY_AIRBRUSH) {
+        return false;
+    }
+    CanvasEffectOptions options{};
+    if (!CanvasEffectOptionsFromEditor(command, editor, options)) {
+        return false;
+    }
+    state.effects.options_command = command;
     state.effects.options = std::move(options);
     if (SetEditorActiveTool(state, interaction) != INKPOD_STATUS_OK) {
         return false;
     }
     state.effects.samples.clear();
-    if (command == IDM_EFFECT_BOUNDARY_AIRBRUSH) {
-        if (SetEditorActiveTool(state, INKPOD_TOOL_BRUSH)
-            != INKPOD_STATUS_OK) {
-            return false;
-        }
-        return QueueBoundaryAirbrush(state, context, state.effects.options)
-            == INKPOD_STATUS_OK;
-    }
     return true;
 }
 
@@ -6605,8 +6679,8 @@ CommandStateInputs BuildCommandStateInputs(
         state.Workspace().windows.workspace.dock.IsPaneVisible(
             DockPaneType::Tool);
     inputs.workspace.tool_options_visible =
-        state.Workspace().windows.workspace.dock.IsPaneVisible(
-            DockPaneType::ToolOptions);
+        inkpod::windows::ui::panes::IsToolOptionsFlyoutVisible(
+            state.Workspace().windows.tool_options_flyout);
     inputs.workspace.color_visible =
         state.Workspace().windows.workspace.dock.IsPaneVisible(
             DockPaneType::Color);
@@ -8092,7 +8166,9 @@ InkpodGeometryPrimitive GeometryPrimitiveForTool(std::uint32_t tool) noexcept {
     return INKPOD_GEOMETRY_LINE;
 }
 
-bool ShowGeometryToolOptions(ApplicationHost& state) noexcept {
+bool BuildGeometryToolOptions(
+    const ToolUiState& tools,
+    inkpod::windows::ui::ViewOptionsDialogState& dialog) noexcept {
     using Choice = inkpod::windows::ui::ViewOptionsDialogState::Choice;
     static const std::array<Choice, 3U> style_choices{{
         {UiText(UiStringId::Text0948), 1}, {UiText(UiStringId::Text0595), 2}, {UiText(UiStringId::Text0949), 3}}};
@@ -8109,8 +8185,7 @@ bool ShowGeometryToolOptions(ApplicationHost& state) noexcept {
         {L"3", 3}, {L"4", 4}, {L"5", 5}, {L"6", 6}, {L"8", 8}, {L"12", 12}}};
     static constexpr std::array<Choice, 4U> rotation_choices{{
         {L"0°", 0}, {L"45°", 45}, {L"90°", 90}, {L"135°", 135}}};
-    auto& tools = state.Workspace().tools;
-    inkpod::windows::ui::ViewOptionsDialogState dialog{};
+    dialog = {};
     dialog.title = UiText(UiStringId::Text0582);
     dialog.centered_on_owner = true;
     const std::uint32_t tool = tools.active_tool;
@@ -8173,13 +8248,13 @@ bool ShowGeometryToolOptions(ApplicationHost& state) noexcept {
             style_choices.data(), off_on_choices.data(), off_on_choices.data(), rotation_choices.data()};
         dialog.choice_counts = {3U, 2U, 2U, 4U};
     }
-    if (ShowViewOptions(
-            state.lifetime.instance,
-            state.Workspace().windows.window,
-            state.lifetime.smoke_test,
-            dialog) != IDOK) {
-        return false;
-    }
+    return true;
+}
+
+void ApplyGeometryToolOptions(
+    ToolUiState& tools,
+    const inkpod::windows::ui::ViewOptionsDialogState& dialog) noexcept {
+    const std::uint32_t tool = tools.active_tool;
     auto set_flag = [&tools](std::uint64_t flag, bool enabled) {
         if (enabled) tools.vector_geometry_flags |= flag;
         else tools.vector_geometry_flags &= ~flag;
@@ -8211,7 +8286,274 @@ bool ShowGeometryToolOptions(ApplicationHost& state) noexcept {
                 static_cast<std::uint64_t>(dialog.values[3]) * UINT64_C(4294967296) / 360U);
         }
     }
+}
+
+void BuildSelectionToolOptions(
+    const ToolUiState& tools,
+    inkpod::windows::ui::ViewOptionsDialogState& dialog) noexcept {
+    using Choice = inkpod::windows::ui::ViewOptionsDialogState::Choice;
+    static const std::array<Choice, 5U> ranges{{
+        {UiText(UiStringId::Text0956), INKPOD_RANGE_NORMAL},
+        {UiText(UiStringId::Text0682), INKPOD_RANGE_TIGHT},
+        {UiText(UiStringId::Text1015), INKPOD_RANGE_ENCLOSED_INTERIOR},
+        {UiText(UiStringId::Text0681), INKPOD_RANGE_DRAWING},
+        {UiText(UiStringId::Text0601), INKPOD_RANGE_BOUNDARY}}};
+    static const std::array<Choice, 4U> aspects{{
+        {UiText(UiStringId::Text0864), 0},
+        {L"1:1", 1 << 16},
+        {L"4:3", (4 << 16) / 3},
+        {L"16:9", (16 << 16) / 9}}};
+    static const std::array<Choice, 4U> construction{{
+        {UiText(UiStringId::Text0956), 0},
+        {UiText(UiStringId::Text0441), 1},
+        {UiText(UiStringId::Text0033), 2},
+        {UiText(UiStringId::Text0438), 3}}};
+    dialog = {};
+    dialog.title = UiText(UiStringId::Text0976);
+    dialog.labels = {
+        UiText(UiStringId::Text0507),
+        UiText(UiStringId::Text0125),
+        UiText(UiStringId::Text0461),
+        UiText(UiStringId::Text0580)};
+    dialog.values = {
+        static_cast<std::int32_t>(tools.selection_interpretation),
+        static_cast<std::int32_t>(tools.selection_aspect_ratio_q16),
+        static_cast<std::int32_t>(tools.selection_construction_flags & 3U),
+        static_cast<std::int32_t>(
+            (static_cast<std::uint64_t>(tools.selection_rotation_turns) * 360U
+                + (UINT64_C(1) << 31U))
+            >> 32U)};
+    dialog.choices = {
+        ranges.data(), aspects.data(), construction.data(), nullptr};
+    dialog.choice_counts = {
+        static_cast<std::uint32_t>(ranges.size()),
+        static_cast<std::uint32_t>(aspects.size()),
+        static_cast<std::uint32_t>(construction.size()),
+        0U};
+    dialog.value_count = 4U;
+}
+
+bool ApplySelectionToolOptions(
+    ApplicationHost& state,
+    const inkpod::windows::ui::ViewOptionsDialogState& dialog) noexcept {
+    if (dialog.values[3] < 0 || dialog.values[3] > 359) {
+        return false;
+    }
+    auto& tools = state.Workspace().tools;
+    tools.selection_interpretation =
+        static_cast<InkpodRangeInterpretation>(dialog.values[0]);
+    tools.selection_aspect_ratio_q16 =
+        static_cast<std::uint32_t>(dialog.values[1]);
+    tools.selection_construction_flags =
+        (tools.selection_construction_flags & ~UINT64_C(3))
+        | static_cast<std::uint64_t>(dialog.values[2]);
+    tools.selection_rotation_turns = static_cast<std::uint32_t>(
+        (static_cast<std::uint64_t>(dialog.values[3]) << 32U) / 360U);
+    if (SetEditorSelectionOptions(state) != INKPOD_STATUS_OK) {
+        return false;
+    }
+    CancelSelectionGeometryPreview(tools, state.Workspace().windows.canvas);
     return true;
+}
+
+UINT ActiveToolOptionsCommand(const ApplicationHost& state) noexcept {
+    const auto& tools = state.Workspace().tools;
+    switch (tools.active_tool) {
+        case INKPOD_TOOL_PENCIL: return IDM_TOOL_PENCIL;
+        case INKPOD_TOOL_BRUSH: return IDM_TOOL_BRUSH;
+        case INKPOD_TOOL_ERASER: return IDM_TOOL_ERASER;
+        case kInteractionFill:
+            return tools.fill_options.operation == INKPOD_FILL_CLOSED_REGION
+                ? IDM_TOOL_CLOSED_FILL
+                : (tools.fill_options.operation == INKPOD_FILL_EXTENSION
+                          ? IDM_TOOL_FILL_EXTENSION
+                          : IDM_TOOL_FILL);
+        case kInteractionEyedropper: return IDM_TOOL_EYEDROPPER;
+        case kInteractionVectorLine: return IDM_VECTOR_LINE;
+        case kInteractionVectorCurve: return IDM_VECTOR_CURVE;
+        case kInteractionVectorRectangle: return IDM_VECTOR_RECTANGLE;
+        case kInteractionVectorEllipse: return IDM_VECTOR_ELLIPSE;
+        case kInteractionVectorPolyline: return IDM_VECTOR_POLYLINE;
+        case kInteractionVectorPolygon: return IDM_GEOMETRY_OPTIONS;
+        case kInteractionVectorEraser: return IDM_VECTOR_ERASER;
+        case kInteractionEffectGradient: return IDM_EFFECT_GRADIENT;
+        case kInteractionEffectAirbrush: return IDM_EFFECT_AIRBRUSH;
+        case kInteractionEffectBlur: return IDM_EFFECT_BLUR;
+        case kInteractionEffectStamp: return IDM_EFFECT_STAMP;
+        case kInteractionEffectDust: return IDM_EFFECT_DUST;
+        case kInteractionEffectAlphaGradient: return IDM_EFFECT_ALPHA_GRADIENT;
+        case kInteractionSelection: return IDM_SELECTION_OPTIONS;
+        default: return IDM_TOOL_BRUSH;
+    }
+}
+
+bool QueryToolOptionsDetail(
+    void* context,
+    UINT command,
+    inkpod::windows::ui::panes::ToolOptionsDetailModel& output) noexcept {
+    auto* state = ActivateWorkspaceContext(context);
+    if (state == nullptr) return false;
+    using DetailKind =
+        inkpod::windows::ui::panes::ToolOptionsDetailKind;
+    try {
+        output = {};
+        switch (command) {
+            case IDM_TOOL_FILL:
+            case IDM_TOOL_CLOSED_FILL:
+            case IDM_TOOL_FILL_EXTENSION:
+            case IDM_TOOL_FILL_OPTIONS:
+                output.kind = DetailKind::Fill;
+                output.fill = state->Workspace().tools.fill_options;
+                return true;
+            case IDM_SELECTION_OPTIONS:
+                output.kind = DetailKind::View;
+                BuildSelectionToolOptions(
+                    state->Workspace().tools, output.view);
+                return true;
+            case IDM_VECTOR_LINE:
+            case IDM_VECTOR_CURVE:
+            case IDM_VECTOR_RECTANGLE:
+            case IDM_VECTOR_ELLIPSE:
+            case IDM_VECTOR_POLYLINE:
+            case IDM_GEOMETRY_OPTIONS:
+                output.kind = DetailKind::View;
+                return BuildGeometryToolOptions(
+                    state->Workspace().tools, output.view);
+            case IDM_TOOL_EYEDROPPER: {
+                using Choice =
+                    inkpod::windows::ui::ViewOptionsDialogState::Choice;
+                static const std::array<Choice, 4U> sources{{
+                    {UiText(UiStringId::Text0728), INKPOD_EYEDROPPER_TOPMOST_NONTRANSPARENT},
+                    {UiText(UiStringId::Text0984), INKPOD_EYEDROPPER_SELECTED_PLANE},
+                    {UiText(UiStringId::Text0562), INKPOD_EYEDROPPER_COMPOSITE},
+                    {UiText(UiStringId::Text0374), INKPOD_EYEDROPPER_LIGHT_TABLE_TOPMOST}}};
+                output.kind = DetailKind::View;
+                output.view.title = UiText(UiStringId::ToolEyedropper);
+                output.view.labels = {
+                    UiText(UiStringId::Text0213), nullptr, nullptr, nullptr};
+                output.view.values[0] = static_cast<std::int32_t>(
+                    state->Workspace().tools.eyedropper_source);
+                output.view.choices[0] = sources.data();
+                output.view.choice_counts[0] =
+                    static_cast<std::uint32_t>(sources.size());
+                output.view.value_count = 1U;
+                return true;
+            }
+            case IDM_VECTOR_ERASER: {
+                using Choice =
+                    inkpod::windows::ui::ViewOptionsDialogState::Choice;
+                static const std::array<Choice, 3U> modes{{
+                    {UiText(UiStringId::Text0909), INKPOD_VECTOR_ERASE_PARTIAL},
+                    {UiText(UiStringId::Text0453), INKPOD_VECTOR_ERASE_TO_INTERSECTION},
+                    {UiText(UiStringId::Text0847), INKPOD_VECTOR_ERASE_WHOLE_PATH}}};
+                output.kind = DetailKind::View;
+                output.view.title = UiText(UiStringId::ToolVectorEraser);
+                output.view.labels = {
+                    UiText(UiStringId::Text0582), nullptr, nullptr, nullptr};
+                output.view.values[0] = static_cast<std::int32_t>(
+                    state->Workspace().tools.vector_erase_mode);
+                output.view.choices[0] = modes.data();
+                output.view.choice_counts[0] =
+                    static_cast<std::uint32_t>(modes.size());
+                output.view.value_count = 1U;
+                return true;
+            }
+            case IDM_EFFECT_GRADIENT:
+            case IDM_EFFECT_AIRBRUSH:
+            case IDM_EFFECT_BOUNDARY_AIRBRUSH:
+            case IDM_EFFECT_BLUR:
+            case IDM_EFFECT_STAMP:
+            case IDM_EFFECT_DUST:
+            case IDM_EFFECT_ALPHA_GRADIENT: {
+                std::uint32_t interaction{};
+                output.kind = command == IDM_EFFECT_BOUNDARY_AIRBRUSH
+                    ? DetailKind::BoundaryEffect
+                    : DetailKind::Effect;
+                if (!PrepareCanvasEffectEditor(
+                        command, output.effect, interaction)) {
+                    return false;
+                }
+                if (state->effects.options_command == command) {
+                    ApplyCanvasEffectOptionsToEditor(
+                        state->effects.options, output.effect);
+                }
+                return true;
+            }
+            default:
+                output.kind = DetailKind::None;
+                return true;
+        }
+    } catch (const std::bad_alloc&) {
+        output = {};
+        return false;
+    }
+}
+
+bool ChangeToolOptionsDetail(
+    void* context,
+    UINT command,
+    const inkpod::windows::ui::panes::ToolOptionsDetailModel& value,
+    bool execute) noexcept {
+    auto* state = ActivateWorkspaceContext(context);
+    if (state == nullptr) return false;
+    using DetailKind =
+        inkpod::windows::ui::panes::ToolOptionsDetailKind;
+    bool changed{};
+    try {
+        if (value.kind == DetailKind::Fill) {
+            changed = SetEditorFillOptions(*state, value.fill)
+                == INKPOD_STATUS_OK;
+            if (changed) {
+                state->Workspace().tools.fill_options = value.fill;
+            }
+        } else if (value.kind == DetailKind::View) {
+            if (command == IDM_SELECTION_OPTIONS) {
+                changed = ApplySelectionToolOptions(*state, value.view);
+            } else if (command == IDM_TOOL_EYEDROPPER) {
+                state->Workspace().tools.eyedropper_source =
+                    static_cast<InkpodEyedropperSource>(value.view.values[0]);
+                changed = true;
+            } else if (command == IDM_VECTOR_ERASER) {
+                state->Workspace().tools.vector_erase_mode =
+                    static_cast<InkpodVectorEraseMode>(value.view.values[0]);
+                changed = SetEditorVectorOptions(*state) == INKPOD_STATUS_OK;
+            } else {
+                CancelCoreVectorGeometryPreview(*state);
+                ApplyGeometryToolOptions(
+                    state->Workspace().tools, value.view);
+                changed = true;
+            }
+        } else if (value.kind == DetailKind::Effect
+            || value.kind == DetailKind::BoundaryEffect) {
+            CanvasEffectOptions options{};
+            changed = CanvasEffectOptionsFromEditor(
+                command, value.effect, options);
+            if (changed) {
+                state->effects.options_command = command;
+                state->effects.options = std::move(options);
+                if (value.kind == DetailKind::Effect) {
+                    std::uint32_t interaction{};
+                    EffectEditorState defaults{};
+                    changed = PrepareCanvasEffectEditor(
+                                  command, defaults, interaction)
+                        && SetEditorActiveTool(*state, interaction)
+                            == INKPOD_STATUS_OK;
+                } else if (execute) {
+                    changed = QueueBoundaryAirbrush(
+                                  *state,
+                                  state->routing.targets.Capture(),
+                                  state->effects.options)
+                        == INKPOD_STATUS_OK;
+                }
+            }
+        }
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+    if (changed) {
+        UpdateMenuState(*state);
+    }
+    return changed;
 }
 
 InkpodStatus GeometryPointsFromGesture(
@@ -14194,6 +14536,8 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
     state.Workspace().tools.palette_dialog = {};
     state.Workspace().tools.palette_dialog.context = &state.Workspace();
     state.Workspace().tools.palette_dialog.dispatch_command = DispatchToolPaletteCommand;
+    state.Workspace().tools.palette_dialog.request_options =
+        RequestToolPaletteOptions;
     state.Workspace().tools.palette_dialog.visibility_changed =
         NotifyToolPaletteVisibilityChanged;
     state.Workspace().tools.palette = inkpod::windows::ui::CreateToolPaletteDialog(
@@ -14208,16 +14552,22 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
     state.Workspace().tools.options_pane.dispatch_command = DispatchToolPaletteCommand;
     state.Workspace().tools.options_pane.change_diameter = ChangeToolOptionsDiameter;
     state.Workspace().tools.options_pane.change_brush = ChangeToolOptionsBrush;
+    state.Workspace().tools.options_pane.query_detail = QueryToolOptionsDetail;
+    state.Workspace().tools.options_pane.change_detail = ChangeToolOptionsDetail;
     state.Workspace().tools.options_pane.active_tool = state.Workspace().tools.active_tool;
     state.Workspace().tools.options_pane.active_plane = state.Workspace().tools.active_plane;
     state.Workspace().tools.options_pane.diameter = state.Workspace().tools.diameter;
     state.Workspace().tools.options_pane.brush = state.Workspace().tools.brush;
-    state.Workspace().windows.tool_options =
-        inkpod::windows::ui::panes::CreateToolOptionsPane(
+    state.Workspace().windows.tool_options_flyout =
+        inkpod::windows::ui::panes::CreateToolOptionsFlyout(
             state.lifetime.instance,
             state.Workspace().windows.window,
+            state.Workspace().tools.options_flyout,
             state.Workspace().tools.options_pane);
-    if (state.Workspace().windows.tool_options == nullptr) {
+    state.Workspace().windows.tool_options =
+        state.Workspace().tools.options_flyout.pane;
+    if (state.Workspace().windows.tool_options_flyout == nullptr
+        || state.Workspace().windows.tool_options == nullptr) {
         return false;
     }
     state.Workspace().panes.color_pane.context = &state.Workspace();
@@ -14257,8 +14607,6 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
         NotifyDockHostChanged, &state.Workspace());
     if (!state.Workspace().windows.dock_host.AttachPane(
             DockPaneType::Tool, state.Workspace().windows.tool_palette)
-        || !state.Workspace().windows.dock_host.AttachPane(
-            DockPaneType::ToolOptions, state.Workspace().windows.tool_options)
         || !state.Workspace().windows.dock_host.AttachPane(
             DockPaneType::Color, state.Workspace().windows.color_pane)
         || !state.Workspace().windows.dock_host.AttachPane(
@@ -17453,6 +17801,14 @@ std::optional<LRESULT> RouteSelectionViewCommand(
         return std::nullopt;
     }
     switch (LOWORD(wparam)) {
+        case IDM_SELECTION_OPTIONS:
+            return inkpod::windows::ui::panes::ShowToolOptionsFlyout(
+                       state->Workspace().windows.tool_options_flyout,
+                       inkpod::windows::ui::ToolPaletteCheckedOptionsAnchor(
+                           state->Workspace().tools.palette),
+                       IDM_SELECTION_OPTIONS)
+                ? 1
+                : 0;
         case IDM_SELECTION_RECTANGLE:
         case IDM_SELECTION_ELLIPSE:
         case IDM_SELECTION_LASSO:
@@ -17562,69 +17918,6 @@ std::optional<LRESULT> RouteSelectionViewCommand(
             }
             CancelSelectionGeometryPreview(
                 state->Workspace().tools, state->Workspace().windows.canvas);
-            UpdateMenuState(*state);
-            return 0;
-        }
-        case IDM_SELECTION_OPTIONS: {
-            static const std::array<ViewOptionsDialogState::Choice, 5U> kRanges{
-                ViewOptionsDialogState::Choice{UiText(UiStringId::Text0956), INKPOD_RANGE_NORMAL},
-                ViewOptionsDialogState::Choice{UiText(UiStringId::Text0682), INKPOD_RANGE_TIGHT},
-                ViewOptionsDialogState::Choice{UiText(UiStringId::Text1015), INKPOD_RANGE_ENCLOSED_INTERIOR},
-                ViewOptionsDialogState::Choice{UiText(UiStringId::Text0681), INKPOD_RANGE_DRAWING},
-                ViewOptionsDialogState::Choice{UiText(UiStringId::Text0601), INKPOD_RANGE_BOUNDARY}};
-            static const std::array<ViewOptionsDialogState::Choice, 4U> kAspects{
-                ViewOptionsDialogState::Choice{UiText(UiStringId::Text0864), 0},
-                ViewOptionsDialogState::Choice{L"1:1", 1 << 16},
-                ViewOptionsDialogState::Choice{L"4:3", (4 << 16) / 3},
-                ViewOptionsDialogState::Choice{L"16:9", (16 << 16) / 9}};
-            static const std::array<ViewOptionsDialogState::Choice, 4U> kConstruction{
-                ViewOptionsDialogState::Choice{UiText(UiStringId::Text0956), 0},
-                ViewOptionsDialogState::Choice{UiText(UiStringId::Text0441), 1},
-                ViewOptionsDialogState::Choice{UiText(UiStringId::Text0033), 2},
-                ViewOptionsDialogState::Choice{UiText(UiStringId::Text0438), 3}};
-            auto& tools = state->Workspace().tools;
-            ViewOptionsDialogState dialog{};
-            dialog.title = UiText(UiStringId::Text0976);
-            dialog.labels = {UiText(UiStringId::Text0507), UiText(UiStringId::Text0125), UiText(UiStringId::Text0461), UiText(UiStringId::Text0580)};
-            dialog.values = {
-                static_cast<std::int32_t>(tools.selection_interpretation),
-                static_cast<std::int32_t>(tools.selection_aspect_ratio_q16),
-                static_cast<std::int32_t>(tools.selection_construction_flags & 3U),
-                static_cast<std::int32_t>(
-                    (static_cast<std::uint64_t>(tools.selection_rotation_turns) * 360U
-                        + (UINT64_C(1) << 31U))
-                    >> 32U)};
-            dialog.choices[0] = kRanges.data();
-            dialog.choice_counts[0] = static_cast<std::uint32_t>(kRanges.size());
-            dialog.choices[1] = kAspects.data();
-            dialog.choice_counts[1] = static_cast<std::uint32_t>(kAspects.size());
-            dialog.choices[2] = kConstruction.data();
-            dialog.choice_counts[2] = static_cast<std::uint32_t>(kConstruction.size());
-            dialog.value_count = 4U;
-            if (ShowViewOptions(
-                    state->lifetime.instance,
-                    window,
-                    state->lifetime.smoke_test,
-                    dialog)
-                != IDOK
-                || dialog.values[3] < 0 || dialog.values[3] > 359) {
-                return 0;
-            }
-            tools.selection_interpretation =
-                static_cast<InkpodRangeInterpretation>(dialog.values[0]);
-            tools.selection_aspect_ratio_q16 =
-                static_cast<std::uint32_t>(dialog.values[1]);
-            tools.selection_construction_flags =
-                (tools.selection_construction_flags & ~UINT64_C(3))
-                | static_cast<std::uint64_t>(dialog.values[2]);
-            tools.selection_rotation_turns = static_cast<std::uint32_t>(
-                (static_cast<std::uint64_t>(dialog.values[3]) << 32U) / 360U);
-            if (SetEditorSelectionOptions(*state) != INKPOD_STATUS_OK) {
-                (void)state->RefreshEditorPresentation(
-                    state->Document().id, state->Document().generation);
-                return 0;
-            }
-            CancelSelectionGeometryPreview(tools, state->Workspace().windows.canvas);
             UpdateMenuState(*state);
             return 0;
         }
@@ -18248,7 +18541,7 @@ std::optional<LRESULT> RouteToolCommand(
     HWND window,
     WPARAM wparam,
     LPARAM,
-    const CommandContext& context) noexcept {
+    const CommandContext&) noexcept {
     if (state == nullptr) {
         return std::nullopt;
     }
@@ -18263,11 +18556,16 @@ std::optional<LRESULT> RouteToolCommand(
             }
             return 0;
         case IDM_WINDOW_TOOL_OPTIONS:
-            return state->Workspace().windows.dock_host.TogglePane(
-                       DockPaneType::ToolOptions)
-                    == DockResult::Ok
-                ? 1
-                : 0;
+        {
+            const bool toggled =
+                inkpod::windows::ui::panes::ToggleToolOptionsFlyout(
+                    state->Workspace().windows.tool_options_flyout,
+                    inkpod::windows::ui::ToolPaletteCheckedOptionsAnchor(
+                        state->Workspace().tools.palette),
+                    ActiveToolOptionsCommand(*state));
+            UpdateMenuState(*state);
+            return toggled ? 1 : 0;
+        }
         case IDM_TOOL_PENCIL:
             (void)SetEditorActiveTool(*state, INKPOD_TOOL_PENCIL);
             UpdateMenuState(*state);
@@ -18302,23 +18600,13 @@ std::optional<LRESULT> RouteToolCommand(
             return 0;
         }
         case IDM_TOOL_FILL_OPTIONS: {
-            auto options = state->Workspace().tools.fill_options;
-            if (inkpod::windows::ui::ShowFillOptions(
-                    state->lifetime.instance,
-                    state->Workspace().windows.window,
-                    state->lifetime.smoke_test,
-                    options)) {
-                if (state->Workspace().tools.active_tool == kInteractionFill) {
-                    CancelFillGeometryPreview(
-                        state->Workspace().tools, state->Workspace().windows.canvas);
-                }
-                if (SetEditorFillOptions(*state, options) == INKPOD_STATUS_OK
-                    && SetEditorActiveTool(*state, kInteractionFill)
-                        == INKPOD_STATUS_OK) {
-                    UpdateMenuState(*state);
-                }
-            }
-            return 0;
+            return inkpod::windows::ui::panes::ShowToolOptionsFlyout(
+                       state->Workspace().windows.tool_options_flyout,
+                       inkpod::windows::ui::ToolPaletteCheckedOptionsAnchor(
+                           state->Workspace().tools.palette),
+                       IDM_TOOL_FILL)
+                ? 1
+                : 0;
         }
         case IDM_TOOL_EYEDROPPER:
             (void)SetEditorActiveTool(*state, kInteractionEyedropper);
@@ -18420,12 +18708,13 @@ std::optional<LRESULT> RouteToolCommand(
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
         case IDM_GEOMETRY_OPTIONS:
-            CancelCoreVectorGeometryPreview(*state);
-            if (!ShowGeometryToolOptions(*state)) {
-                return 0;
-            }
-            UpdateMenuState(*state);
-            return 1;
+            return inkpod::windows::ui::panes::ShowToolOptionsFlyout(
+                       state->Workspace().windows.tool_options_flyout,
+                       inkpod::windows::ui::ToolPaletteCheckedOptionsAnchor(
+                           state->Workspace().tools.palette),
+                       ActiveToolOptionsCommand(*state))
+                ? 1
+                : 0;
         case IDM_VECTOR_LINE:
         case IDM_VECTOR_CURVE:
         case IDM_VECTOR_RECTANGLE:
@@ -18650,8 +18939,17 @@ std::optional<LRESULT> RouteToolCommand(
         case IDM_EFFECT_STAMP:
         case IDM_EFFECT_DUST:
         case IDM_EFFECT_ALPHA_GRADIENT:
+            if (LOWORD(wparam) == IDM_EFFECT_BOUNDARY_AIRBRUSH) {
+                return inkpod::windows::ui::panes::ShowToolOptionsFlyout(
+                           state->Workspace().windows.tool_options_flyout,
+                           inkpod::windows::ui::ToolPaletteCheckedOptionsAnchor(
+                               state->Workspace().tools.palette),
+                           IDM_EFFECT_BOUNDARY_AIRBRUSH)
+                    ? 1
+                    : 0;
+            }
             if (state->Workspace().tools.active_plane == INKPOD_PLANE_COLOR
-                && ConfigureCanvasEffect(*state, context, LOWORD(wparam))) {
+                && SelectCanvasEffect(*state, LOWORD(wparam))) {
                 UpdateMenuState(*state);
             }
             return 0;

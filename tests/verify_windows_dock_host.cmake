@@ -274,7 +274,6 @@ endforeach()
 file(READ "${RUNTIME_SOURCE}" RUNTIME)
 foreach(REQUIRED IN ITEMS
         "DockPaneType::Tool, state.Workspace().windows.tool_palette"
-        "DockPaneType::ToolOptions, state.Workspace().windows.tool_options"
         "DockPaneType::Color, state.Workspace().windows.color_pane"
         "DockPaneType::Layer, state.Workspace().windows.layer_palette"
         "DockPaneType::Locator, state.Workspace().locator_palette"
@@ -289,6 +288,15 @@ foreach(REQUIRED IN ITEMS
     string(FIND "${RUNTIME}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
         message(FATAL_ERROR "Primary pane DockHost integration is missing: ${REQUIRED}")
+    endif()
+endforeach()
+foreach(REQUIRED IN ITEMS
+        "CreateToolOptionsFlyout"
+        "ToggleToolOptionsFlyout"
+        "state.Workspace().windows.tool_options_flyout")
+    string(FIND "${RUNTIME}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR "Tool options flyout integration is missing: ${REQUIRED}")
     endif()
 endforeach()
 

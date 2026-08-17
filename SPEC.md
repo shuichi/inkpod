@@ -72,16 +72,16 @@ Windows GUI は標準的な Windows 11 desktop application とし、古典的 MD
 や別 GUI framework へ移行せず、次の構造を持たせてください。
 
 - process には一つの `ApplicationHost` を置き、同一 UI/Input thread 上で複数の `WorkspaceWindow` を所有できるようにする。各 window は独立した menu bar、制約付き dock、editor area、status bar、focus history を持つ。`WM_QUIT` は最後の workspace window が閉じたときだけ発行する。
-- 独立した常設 toolbar は置かない。利用者が実行できる全機能を menu bar の末端項目から呼び出せることを優先する。選択中 tool の option strip は toolbar ではなく、同じ command/state を表示する context pane とする。
+- 独立した常設 toolbar は置かない。利用者が実行できる全機能を menu bar の末端項目から呼び出せることを優先する。選択中 tool の option は、左 tool button の独立した展開領域から開く縦型の owned flyout に表示し、同じ command/state と既存の option callback を使う。flyout は owner workspace に追従し、monitor work area 内で button の右側を優先して配置し、収まらない場合は左右を反転して clamp する。
 - editor area は一つまたは二つの `EditorGroup` を持つ。二分割は左右または上下だけを許し、再帰分割しない。各 group は独立した tab strip、active `DocumentView`、一つの可視 Canvas slot、focus history を持つ。
 - 一つの `DocumentSession` は一つの `InkpodCore` handle、file identity、dirty/savepoint、Undo/Redo、autosave/recovery を所有する。同じ document の全 `DocumentView` は session を共有し、zoom、pan、flip、表示補助、表示中 frame 等の view logical state だけを分離する。文書 raster、layer、history、保存先を view ごとに複製しない。
 - tab label は active sequence cell 名、保存 file 名、`無題セル N`、`復元セル`の順で意味のある識別名を使い、dirty は `*`、同じ document の追加 view は `[ビュー N]` で示す。read-only、処理中、error も compact かつ accessible な状態として示す。tab を閉じる操作は view を閉じ、最後の view の場合だけ document close と dirty 確認へ進む。
 - `CanvasSurface` は非表示 tab ではなく可視 `EditorGroup` ごとに一つ持つ。active tab の切替時に同じ surface を別 `DocumentView` へ bind し直し、非表示 tab 数に比例して swap chain や renderer thread を増やさない。
 - dock zone は `TopContext`、`Left`、`Right`、`Bottom`、`Floating`、`Hidden`、`AutoHide` に制限する。各 zone は一方向に並ぶ比率分割枠を持ち、各分割枠は一つ以上の pane からなる tab stack とする。pane の表示、非表示、tab 選択は他の分割枠とその比率を変更せず、任意に再帰する dock tree を作らない。docked tab の内容領域に pane 固有の常設 close button を重複配置せず、非表示化は共通 pane command、floating 時の system close、または keyboard route から行う。pane descriptor は stable type ID、default/allowed zone、scope、multiplicity、float/autohide 可否、最小寸法を宣言する。
-- Color、Layer/Plane、Locator 等の inspector pane は、一つだけの split stack でも descriptor の localized title を dock header に表示する。Tool と Tool Options の専用 strip はこの単独 header の対象外とする。splitter は 4 DIP の操作領域を維持し、通常、hover、pointer capture、keyboard focus、high contrast の各状態で system color により境界と操作可能性を識別できるようにする。
+- Color、Layer/Plane、Locator 等の inspector pane は、一つだけの split stack でも descriptor の localized title を dock header に表示する。Tool の専用 strip はこの単独 header の対象外とし、Tool Options は dock pane ではなく owned flyout とする。splitter は 4 DIP の操作領域を維持し、通常、hover、pointer capture、keyboard focus、high contrast の各状態で system color により境界と操作可能性を識別できるようにする。
 - pane の target scope は `Application`、`FollowActiveView`、`PinnedDocument`、`Job` を区別する。pin 先 document が閉じた場合は別文書へ silent に向けず、追従 mode へ戻して accessible notification を出す。pane action は発行時の target ID と generation を保持する。
-- 現在相当の一 window、一 group 配置を初期 named workspace `彩色` として維持する。96 DPI の初期値は上端に全幅 40 DIP の tool options、body 左端に幅 80 DIP の一列 tool pane、中央に document tabs と Canvas、右端に幅 320 DIP の上段 color/palette/chart と下段 layer/plane・Light Table・subpalette/reference の tab stack、最下段に status bar とする。既存の 32:68、55:45 比率と 4 DIP splitter を初期値に使うが、これは固定所有権ではなく復元可能な layout state である。
-- tool pane の既定 button は 72 x 34 DIP、一列、7 pt の読み取れる一語ラベルとする。正規ラベルは `鉛筆`、`ブラシ`、`消しゴム`、`塗りつぶし`、`閉領域塗り`、`塗り延ばし`、`スポイト`、`直線`、`曲線`、`長方形`、`楕円`、`折れ線`、`線消しゴム`、`グラデーション`、`エアブラシ`、`境界ブラシ`、`ぼかし`、`スタンプ`、`ゴミ取り`、`アルファ階調` とする。意味を推測させる一文字略号へ戻さず、詳細名は tooltip で補う。
+- 現在相当の一 window、一 group 配置を初期 named workspace `彩色` として維持する。96 DPI の初期値は body 左端に幅 80 DIP の一列 tool pane、中央に document tabs と Canvas、右端に幅 320 DIP の上段 color/palette/chart と下段 layer/plane・Light Table・subpalette/reference の tab stack、最下段に status bar とし、上端の Tool Options dock strip は配置しない。既存の 32:68、55:45 比率と 4 DIP splitter を初期値に使うが、これは固定所有権ではなく復元可能な layout state である。
+- tool pane の既定 button row は 72 x 34 DIP、一列とし、tool 選択用の主領域と幅 24 DIP の展開領域に分ける。両領域は bezel/border のない owner-draw の flat 表示とし、通常時は pane 背景へ溶け込ませ、hover 時だけ system color で背景を弱く反転し、checked/pressed、disabled、keyboard focus、high contrast を system color で区別する。展開領域は chevron と `詳細` tooltip/accessibility name を持つ。主領域の正規ラベルは `鉛筆`、`ブラシ`、`消しゴム`、`塗りつぶし`、`閉領域塗り`、`塗り延ばし`、`スポイト`、`直線`、`曲線`、`長方形`、`楕円`、`折れ線`、`線消しゴム`、`グラデーション`、`エアブラシ`、`境界ブラシ`、`ぼかし`、`スタンプ`、`ゴミ取り`、`アルファ階調` とし、詳細名は tooltip で補う。
 - named workspace と per-window layout は versioned、bounded な application setting として保存し、`.inkpod` 文書へ混ぜない。monitor/DPI 構成が変わった場合は可視 work area へ clamp し、不正 record は拒否して初期配置へ戻す。temporary な narrow-window adaptation で保存済み logical layout を上書きしない。
 - built-in named workspace は `彩色`、`線整理`、`参照・チェック`、`バッチ`、`集中` を提供する。layout record は window、split、dock、pane、floating placement と選択 preset だけを保持し、開いている文書 path や Core 所有状態を含めない。未知 pane は無視し、不足する既知 pane は既定値で補う。
 - floating pane は owner workspace を持つ通常の owned top-level window とし、閉じる操作では既定で非表示にする。`WS_EX_TOPMOST`、`WS_EX_PALETTEWINDOW`、`WS_EX_NOACTIVATE` は使わず、独立した `WM_DPICHANGED`、keyboard navigation、high contrast、screen reader を扱う。
@@ -167,7 +167,7 @@ UI 表示文字列は、日本語と英語を言語非依存の型付き ID で�
 
 #### ウィンドウ
 
-- pane 表示切替は `ツールパレット`、`ツールオプション`、`カラー`、`レイヤー／プレーン` と、実装済みの補助 pane を列挙する。menu、shortcut、pane control は同じ command ID と checked state を使う。
+- 表示切替は `ツールパレット`、`ツールオプション` flyout、`カラー`、`レイヤー／プレーン` と、実装済みの補助 pane を列挙する。menu、shortcut、pane control は同じ command ID と checked state を使い、`ツールオプション` の checked state は flyout の可視性を表す。
 - `新しいビュー`: active document の別 `DocumentView` を active group に作る。
 - `ビューを閉じる`、`文書を閉じる`: 前者は focused view だけを閉じ、後者は全 window/group の該当 view を列挙して document session を一度だけ閉じる。
 - `右へ分割`、`下へ分割`、`別グループへ移動`、`別グループに新しいビュー`、`グループを閉じる`: 最大二 group の editor area を command/keyboard から操作する。
@@ -298,7 +298,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 
 ### 9. 描画・線修正ツール
 
-すべての tool option は tool options pane に表示し、stroke/shape 確定前の preview と確定後の command を分離してください。
+すべての tool option は tool button から開く Tool Options flyout の縦型 page に表示し、別の `詳細…` modal dialog へ転送しない。flyout は pencil/brush/eraser の共通値と、fill、selection、geometry、eyedropper、vector eraser、gradient/airbrush/blur/stamp/dust/alpha-gradient/boundary-airbrush の tool 固有値を既存 state/callback と双方向同期する。stroke/shape 確定前の preview と確定後の command を分離し、開いただけでは文書を変更しない。boundary airbrush のような即時破壊処理は page 内の明示的な `適用` でだけ実行する。
 
 #### スポイト
 

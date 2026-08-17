@@ -63,6 +63,10 @@ constexpr int kMarginDip = 4;
 constexpr int kButtonWidthDip = 72;
 constexpr int kButtonHeightDip = 34;
 constexpr int kGapDip = 3;
+constexpr int kExpandWidthDip = 24;
+constexpr UINT_PTR kToolButtonSubclass = 1U;
+constexpr LONG_PTR kButtonChecked = 1;
+constexpr LONG_PTR kButtonHovered = 2;
 
 int ScaleForDpi(int value, UINT dpi) noexcept {
     return MulDiv(value, static_cast<int>(dpi == 0U ? kReferenceDpi : dpi), kReferenceDpi);
@@ -81,6 +85,71 @@ const ToolPaletteEntry* EntryForCommand(UINT command) noexcept {
             return entry.command == command;
         });
     return found == kToolPaletteEntries.end() ? nullptr : &*found;
+}
+
+std::size_t EntryIndexForCommand(UINT command) noexcept {
+    const auto found = std::find_if(
+        kToolPaletteEntries.begin(),
+        kToolPaletteEntries.end(),
+        [command](const ToolPaletteEntry& entry) {
+            return entry.command == command;
+        });
+    return found == kToolPaletteEntries.end()
+        ? kToolPaletteEntries.size()
+        : static_cast<std::size_t>(found - kToolPaletteEntries.begin());
+}
+
+UINT ExpandControlId(std::size_t index) noexcept {
+    return IDC_TOOL_OPTIONS_EXPAND_FIRST + static_cast<UINT>(index);
+}
+
+const ToolPaletteEntry* EntryForExpandControl(UINT control) noexcept {
+    if (control < IDC_TOOL_OPTIONS_EXPAND_FIRST
+        || control > IDC_TOOL_OPTIONS_EXPAND_LAST) {
+        return nullptr;
+    }
+    const std::size_t index = static_cast<std::size_t>(
+        control - IDC_TOOL_OPTIONS_EXPAND_FIRST);
+    return index < kToolPaletteEntries.size()
+        ? &kToolPaletteEntries[index]
+        : nullptr;
+}
+
+LRESULT CALLBACK ToolButtonSubclassProcedure(
+    HWND button,
+    UINT message,
+    WPARAM wparam,
+    LPARAM lparam,
+    UINT_PTR,
+    DWORD_PTR) noexcept {
+    LONG_PTR flags = GetWindowLongPtrW(button, GWLP_USERDATA);
+    switch (message) {
+        case WM_MOUSEMOVE:
+            if ((flags & kButtonHovered) == 0) {
+                TRACKMOUSEEVENT tracking{};
+                tracking.cbSize = sizeof(tracking);
+                tracking.dwFlags = TME_LEAVE;
+                tracking.hwndTrack = button;
+                if (TrackMouseEvent(&tracking) != FALSE) {
+                    SetWindowLongPtrW(
+                        button, GWLP_USERDATA, flags | kButtonHovered);
+                    InvalidateRect(button, nullptr, TRUE);
+                }
+            }
+            break;
+        case WM_MOUSELEAVE:
+            SetWindowLongPtrW(
+                button, GWLP_USERDATA, flags & ~kButtonHovered);
+            InvalidateRect(button, nullptr, TRUE);
+            return 0;
+        case WM_NCDESTROY:
+            RemoveWindowSubclass(
+                button, ToolButtonSubclassProcedure, kToolButtonSubclass);
+            break;
+        default:
+            break;
+    }
+    return DefSubclassProc(button, message, wparam, lparam);
 }
 
 void SetScrollPosition(
@@ -106,6 +175,8 @@ void LayoutButtons(HWND dialog, ToolPaletteDialogState& state) noexcept {
     const int margin = ScaleForDpi(kMarginDip, dpi);
     const int button_width = ScaleForDpi(kButtonWidthDip, dpi);
     const int button_height = ScaleForDpi(kButtonHeightDip, dpi);
+    const int expand_width = std::min(
+        button_width, ScaleForDpi(kExpandWidthDip, dpi));
     const int gap = ScaleForDpi(kGapDip, dpi);
     const int viewport = std::max(
         0, static_cast<int>(client.bottom) - margin * 2);
@@ -127,7 +198,8 @@ void LayoutButtons(HWND dialog, ToolPaletteDialogState& state) noexcept {
     const int actual_width = std::min(button_width, available_width);
     const int x = margin + std::max(0, (available_width - actual_width) / 2);
     int y = margin - state.scroll_position;
-    for (const auto& entry : kToolPaletteEntries) {
+    for (std::size_t index = 0U; index < kToolPaletteEntries.size(); ++index) {
+        const auto& entry = kToolPaletteEntries[index];
         const HWND control = GetDlgItem(dialog, static_cast<int>(entry.command));
         if (control != nullptr) {
             SetWindowPos(
@@ -135,7 +207,19 @@ void LayoutButtons(HWND dialog, ToolPaletteDialogState& state) noexcept {
                 nullptr,
                 x,
                 y,
-                actual_width,
+                std::max(0, actual_width - expand_width),
+                button_height,
+                SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER);
+        }
+        const HWND expand = GetDlgItem(
+            dialog, static_cast<int>(ExpandControlId(index)));
+        if (expand != nullptr) {
+            SetWindowPos(
+                expand,
+                nullptr,
+                x + std::max(0, actual_width - expand_width),
+                y,
+                std::min(expand_width, actual_width),
                 button_height,
                 SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER);
         }
@@ -198,7 +282,8 @@ bool CreateButtons(HWND dialog, ToolPaletteDialogState& state) noexcept {
     if (state.tooltip == nullptr) {
         return false;
     }
-    for (const auto& entry : kToolPaletteEntries) {
+    for (std::size_t index = 0U; index < kToolPaletteEntries.size(); ++index) {
+        const auto& entry = kToolPaletteEntries[index];
         const wchar_t* label = UiText(entry.label);
         const HWND button = CreateWindowExW(
             0,
@@ -216,6 +301,13 @@ bool CreateButtons(HWND dialog, ToolPaletteDialogState& state) noexcept {
         if (button == nullptr) {
             return false;
         }
+        if (SetWindowSubclass(
+                button,
+                ToolButtonSubclassProcedure,
+                kToolButtonSubclass,
+                0U) == FALSE) {
+            return false;
+        }
         TOOLINFOW tool{};
         tool.cbSize = sizeof(tool);
         tool.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
@@ -227,19 +319,59 @@ bool CreateButtons(HWND dialog, ToolPaletteDialogState& state) noexcept {
             TTM_ADDTOOLW,
             0,
             reinterpret_cast<LPARAM>(&tool));
+        const HWND expand = CreateWindowExW(
+            0,
+            L"BUTTON",
+            UiText(UiStringId::ToolDetails),
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+            0,
+            0,
+            0,
+            0,
+            dialog,
+            reinterpret_cast<HMENU>(
+                static_cast<INT_PTR>(ExpandControlId(index))),
+            instance,
+            nullptr);
+        if (expand == nullptr
+            || SetWindowSubclass(
+                   expand,
+                   ToolButtonSubclassProcedure,
+                   kToolButtonSubclass,
+                   0U) == FALSE) {
+            return false;
+        }
+        TOOLINFOW expand_tool{};
+        expand_tool.cbSize = sizeof(expand_tool);
+        expand_tool.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
+        expand_tool.hwnd = dialog;
+        expand_tool.uId = reinterpret_cast<UINT_PTR>(expand);
+        expand_tool.lpszText = const_cast<wchar_t*>(
+            UiText(UiStringId::ToolDetails));
+        SendMessageW(
+            state.tooltip,
+            TTM_ADDTOOLW,
+            0,
+            reinterpret_cast<LPARAM>(&expand_tool));
     }
     return true;
 }
 
-void DrawToolButton(const DRAWITEMSTRUCT& draw) noexcept {
-    const ToolPaletteEntry* entry = EntryForCommand(draw.CtlID);
+void DrawToolButton(const DRAWITEMSTRUCT& draw, bool expand) noexcept {
+    const ToolPaletteEntry* entry = expand
+        ? EntryForExpandControl(draw.CtlID)
+        : EntryForCommand(draw.CtlID);
     if (entry == nullptr) {
         return;
     }
     const bool disabled = (draw.itemState & ODS_DISABLED) != 0U;
     const bool pressed = (draw.itemState & ODS_SELECTED) != 0U;
-    const bool checked = GetWindowLongPtrW(draw.hwndItem, GWLP_USERDATA) != 0;
-    const int background = checked || pressed ? COLOR_HIGHLIGHT : COLOR_BTNFACE;
+    const LONG_PTR flags = GetWindowLongPtrW(draw.hwndItem, GWLP_USERDATA);
+    const bool checked = (flags & kButtonChecked) != 0;
+    const bool hovered = (flags & kButtonHovered) != 0;
+    const int background = checked || pressed
+        ? COLOR_HIGHLIGHT
+        : (hovered ? COLOR_3DLIGHT : COLOR_BTNFACE);
     const int foreground = disabled
         ? COLOR_GRAYTEXT
         : (checked || pressed ? COLOR_HIGHLIGHTTEXT : COLOR_BTNTEXT);
@@ -247,12 +379,28 @@ void DrawToolButton(const DRAWITEMSTRUCT& draw) noexcept {
         draw.hDC,
         &draw.rcItem,
         GetSysColorBrush(background));
-    FrameRect(
-        draw.hDC,
-        &draw.rcItem,
-        GetSysColorBrush(checked ? COLOR_HIGHLIGHT : COLOR_3DSHADOW));
     SetBkMode(draw.hDC, TRANSPARENT);
     SetTextColor(draw.hDC, GetSysColor(foreground));
+    if (expand) {
+        const int center_x = (draw.rcItem.left + draw.rcItem.right) / 2;
+        const int center_y = (draw.rcItem.top + draw.rcItem.bottom) / 2;
+        const int radius = std::max(
+            2, ScaleForDpi(3, GetDpiForWindow(draw.hwndItem)));
+        const HPEN pen = CreatePen(
+            PS_SOLID,
+            std::max(1, ScaleForDpi(1, GetDpiForWindow(draw.hwndItem))),
+            GetSysColor(foreground));
+        if (pen != nullptr) {
+            const HGDIOBJ previous = SelectObject(draw.hDC, pen);
+            MoveToEx(draw.hDC, center_x - radius, center_y - radius, nullptr);
+            LineTo(draw.hDC, center_x + radius, center_y);
+            LineTo(draw.hDC, center_x - radius, center_y + radius);
+            if (previous != nullptr) {
+                SelectObject(draw.hDC, previous);
+            }
+            DeleteObject(pen);
+        }
+    } else {
     const int icon_size = ScaleForDpi(20, GetDpiForWindow(draw.hwndItem));
     RECT icon_bounds = draw.rcItem;
     icon_bounds.left += std::max(
@@ -284,6 +432,7 @@ void DrawToolButton(const DRAWITEMSTRUCT& draw) noexcept {
             SelectObject(draw.hDC, previous);
         }
     }
+    }
     if ((draw.itemState & ODS_FOCUS) != 0U) {
         RECT focus = draw.rcItem;
         InflateRect(&focus, -3, -3);
@@ -301,6 +450,7 @@ INT_PTR CALLBACK ToolPaletteDialogProcedure(
         case WM_INITDIALOG:
             state = reinterpret_cast<ToolPaletteDialogState*>(lparam);
             if (state == nullptr || state->dispatch_command == nullptr
+                || state->request_options == nullptr
                 || state->visibility_changed == nullptr) {
                 return FALSE;
             }
@@ -318,12 +468,27 @@ INT_PTR CALLBACK ToolPaletteDialogProcedure(
                 state->dispatch_command(state->context, LOWORD(wparam));
                 return TRUE;
             }
+            if (state != nullptr && HIWORD(wparam) == BN_CLICKED) {
+                const ToolPaletteEntry* entry = EntryForExpandControl(
+                    LOWORD(wparam));
+                if (entry != nullptr) {
+                    state->request_options(
+                        state->context,
+                        entry->command,
+                        reinterpret_cast<HWND>(lparam));
+                    return TRUE;
+                }
+            }
             break;
         case WM_DRAWITEM:
-            if (EntryForCommand(static_cast<UINT>(wparam)) != nullptr) {
+            if (EntryForCommand(static_cast<UINT>(wparam)) != nullptr
+                || EntryForExpandControl(static_cast<UINT>(wparam)) != nullptr) {
                 const auto* draw = reinterpret_cast<const DRAWITEMSTRUCT*>(lparam);
                 if (draw != nullptr) {
-                    DrawToolButton(*draw);
+                    DrawToolButton(
+                        *draw,
+                        EntryForExpandControl(static_cast<UINT>(wparam))
+                            != nullptr);
                 }
                 return TRUE;
             }
@@ -409,14 +574,33 @@ void UpdateToolPaletteDialog(
     if (dialog == nullptr) {
         return;
     }
-    for (const auto& entry : kToolPaletteEntries) {
+    for (std::size_t index = 0U; index < kToolPaletteEntries.size(); ++index) {
+        const auto& entry = kToolPaletteEntries[index];
         const CommandState* state = FindCommandState(states, entry.command);
         const HWND control = GetDlgItem(dialog, static_cast<int>(entry.command));
         if (state != nullptr && control != nullptr) {
             EnableWindow(control, state->enabled ? TRUE : FALSE);
+            const LONG_PTR main_flags = GetWindowLongPtrW(
+                control, GWLP_USERDATA);
             SetWindowLongPtrW(
-                control, GWLP_USERDATA, state->checked ? 1 : 0);
+                control,
+                GWLP_USERDATA,
+                (main_flags & ~kButtonChecked)
+                    | (state->checked ? kButtonChecked : 0));
             InvalidateRect(control, nullptr, TRUE);
+        }
+        const HWND expand = GetDlgItem(
+            dialog, static_cast<int>(ExpandControlId(index)));
+        if (state != nullptr && expand != nullptr) {
+            EnableWindow(expand, state->enabled ? TRUE : FALSE);
+            const LONG_PTR expand_flags = GetWindowLongPtrW(
+                expand, GWLP_USERDATA);
+            SetWindowLongPtrW(
+                expand,
+                GWLP_USERDATA,
+                (expand_flags & ~kButtonChecked)
+                    | (state->checked ? kButtonChecked : 0));
+            InvalidateRect(expand, nullptr, TRUE);
         }
     }
 }
@@ -427,17 +611,46 @@ bool ToolPaletteMatchesCommandState(
     if (dialog == nullptr) {
         return false;
     }
-    for (const auto& entry : kToolPaletteEntries) {
+    for (std::size_t index = 0U; index < kToolPaletteEntries.size(); ++index) {
+        const auto& entry = kToolPaletteEntries[index];
         const CommandState* state = FindCommandState(states, entry.command);
         const HWND control = GetDlgItem(dialog, static_cast<int>(entry.command));
+        const HWND expand = GetDlgItem(
+            dialog, static_cast<int>(ExpandControlId(index)));
         if (state == nullptr || control == nullptr
+            || expand == nullptr
             || (IsWindowEnabled(control) != FALSE) != state->enabled
-            || (GetWindowLongPtrW(control, GWLP_USERDATA) != 0)
+            || (IsWindowEnabled(expand) != FALSE) != state->enabled
+            || ((GetWindowLongPtrW(control, GWLP_USERDATA)
+                    & kButtonChecked) != 0)
+                != state->checked
+            || ((GetWindowLongPtrW(expand, GWLP_USERDATA)
+                    & kButtonChecked) != 0)
                 != state->checked) {
             return false;
         }
     }
     return true;
+}
+
+HWND ToolPaletteCheckedOptionsAnchor(HWND dialog) noexcept {
+    if (dialog == nullptr) {
+        return nullptr;
+    }
+    for (std::size_t index = 0U; index < kToolPaletteEntries.size(); ++index) {
+        const HWND main = GetDlgItem(
+            dialog, static_cast<int>(kToolPaletteEntries[index].command));
+        if (main != nullptr
+            && (GetWindowLongPtrW(main, GWLP_USERDATA) & kButtonChecked) != 0) {
+            return GetDlgItem(
+                dialog, static_cast<int>(ExpandControlId(index)));
+        }
+    }
+    return nullptr;
+}
+
+bool ToolPaletteCommandHasOptions(UINT command) noexcept {
+    return EntryIndexForCommand(command) < kToolPaletteEntries.size();
 }
 
 }  // namespace inkpod::windows::ui

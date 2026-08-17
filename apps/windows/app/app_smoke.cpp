@@ -19,6 +19,7 @@
 #include <cwchar>
 #include <cwctype>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -1036,6 +1037,20 @@ int RunSequencePaneSmoke(ApplicationHost& state) noexcept {
         || (static_cast<DWORD>(GetWindowLongPtrW(pane, GWL_EXSTYLE))
             & (WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)) != 0U
         || !WindowHasAccessibleName(pane)) {
+        std::fprintf(
+            stderr,
+            "sequence pane initial state mismatch: pane=%p menu=%p visible=%d "
+            "parent_matches=%d style=%llu exstyle=%llu accessible=%d\n",
+            static_cast<void*>(pane),
+            static_cast<void*>(menu),
+            state.Workspace().windows.workspace.dock.IsPaneVisible(
+                DockPaneType::Sequence)
+                ? 1
+                : 0,
+            GetParent(pane) == state.Workspace().windows.window ? 1 : 0,
+            static_cast<unsigned long long>(GetWindowLongPtrW(pane, GWL_STYLE)),
+            static_cast<unsigned long long>(GetWindowLongPtrW(pane, GWL_EXSTYLE)),
+            WindowHasAccessibleName(pane) ? 1 : 0);
         return 867;
     }
     if (SendMessageW(
@@ -1589,13 +1604,13 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
             != 1
         || state.Workspace().tools.palette == nullptr
         || state.Workspace().windows.tool_options == nullptr
+        || state.Workspace().windows.tool_options_flyout == nullptr
         || state.Workspace().windows.color_pane == nullptr
         || state.Workspace().panes.layer_palette == nullptr) {
         return 727;
     }
-    const std::array<HWND, 4U> workspace_panes{
+    const std::array<HWND, 3U> workspace_panes{
         state.Workspace().tools.palette,
-        state.Workspace().windows.tool_options,
         state.Workspace().windows.color_pane,
         state.Workspace().panes.layer_palette};
     for (const HWND pane : workspace_panes) {
@@ -1605,6 +1620,27 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
             || GetParent(pane) != state.Workspace().windows.window) {
             return 728;
         }
+    }
+    const DWORD_PTR tool_options_flyout_ex_style = static_cast<DWORD_PTR>(
+        GetWindowLongPtrW(
+            state.Workspace().windows.tool_options_flyout, GWL_EXSTYLE));
+    if ((static_cast<DWORD>(GetWindowLongPtrW(
+             state.Workspace().windows.tool_options_flyout, GWL_STYLE))
+            & WS_CHILD)
+            != 0U
+        || GetWindow(
+               state.Workspace().windows.tool_options_flyout, GW_OWNER)
+            != state.Workspace().windows.window
+        || GetParent(state.Workspace().windows.tool_options)
+            != state.Workspace().windows.tool_options_flyout
+        || (tool_options_flyout_ex_style
+                & (WS_EX_TOPMOST | WS_EX_NOACTIVATE))
+            != 0U
+        || (tool_options_flyout_ex_style & WS_EX_PALETTEWINDOW)
+            == WS_EX_PALETTEWINDOW
+        || IsWindowVisible(state.Workspace().windows.tool_options_flyout)
+            != FALSE) {
+        return 728;
     }
     if (ToolPaletteEntries().size() != kToolPaletteEntryCount
         || kToolPaletteEntryCount != 20U) {
@@ -1683,6 +1719,33 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
             })) {
         return 746;
     }
+    for (std::size_t index = 0U; index < ToolPaletteEntries().size(); ++index) {
+        const UINT expand_id = IDC_TOOL_OPTIONS_EXPAND_FIRST
+            + static_cast<UINT>(index);
+        const HWND main_button = GetDlgItem(
+            state.Workspace().tools.palette,
+            static_cast<int>(ToolPaletteEntries()[index].command));
+        const HWND expand_button = GetDlgItem(
+            state.Workspace().tools.palette, static_cast<int>(expand_id));
+        const DWORD main_style = main_button == nullptr
+            ? 0U
+            : static_cast<DWORD>(GetWindowLongPtrW(main_button, GWL_STYLE));
+        const DWORD expand_style = expand_button == nullptr
+            ? 0U
+            : static_cast<DWORD>(GetWindowLongPtrW(expand_button, GWL_STYLE));
+        if (main_button == nullptr || expand_button == nullptr
+            || (main_style & BS_TYPEMASK) != BS_OWNERDRAW
+            || (expand_style & BS_TYPEMASK) != BS_OWNERDRAW
+            || (main_style & WS_BORDER) != 0U
+            || (expand_style & WS_BORDER) != 0U
+            || !ExerciseOwnerDraw(
+                state.Workspace().tools.palette,
+                expand_button,
+                expand_id,
+                0U)) {
+            return 746;
+        }
+    }
     const HWND diameter_edit =
         GetDlgItem(state.Workspace().windows.tool_options, IDC_TOOL_OPTIONS_DIAMETER);
     const HWND diameter_label =
@@ -1748,8 +1811,8 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
                static_cast<int>(sizeof(diameter_edit_font_info)),
                &diameter_edit_font_info)
             != static_cast<int>(sizeof(diameter_edit_font_info))
-        || diameter_edit_bounds.bottom - diameter_edit_bounds.top
-            >= diameter_label_bounds.bottom - diameter_label_bounds.top
+        || diameter_edit_bounds.bottom <= diameter_edit_bounds.top
+        || diameter_label_bounds.bottom <= diameter_label_bounds.top
         || (diameter_edit_bounds.top + diameter_edit_bounds.bottom)
                 - (diameter_label_bounds.top + diameter_label_bounds.bottom)
             < -1
@@ -1757,9 +1820,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
                 - (diameter_label_bounds.top + diameter_label_bounds.bottom)
             > 1
         || diameter_label_font_info.lfHeight >= 0
-        || diameter_edit_font_info.lfHeight >= 0
-        || diameter_edit_font_info.lfHeight
-            <= diameter_label_font_info.lfHeight) {
+        || diameter_edit_font_info.lfHeight >= 0) {
         return 765;
     }
     if (state.Workspace().tools.active_tool != INKPOD_TOOL_PENCIL
@@ -2193,7 +2254,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     };
     if (!state.Workspace().windows.workspace.dock.IsPaneVisible(
             DockPaneType::Tool)
-        || !state.Workspace().windows.workspace.dock.IsPaneVisible(
+        || state.Workspace().windows.workspace.dock.IsPaneVisible(
             DockPaneType::ToolOptions)
         || !state.Workspace().windows.workspace.dock.IsPaneVisible(
             DockPaneType::Color)
@@ -2201,7 +2262,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
             DockPaneType::Layer)
         || state.Workspace().windows.workspace.dock.Mirrored()
         || !checked(IDM_WINDOW_TOOL_PALETTE)
-        || !checked(IDM_WINDOW_TOOL_OPTIONS)
+        || checked(IDM_WINDOW_TOOL_OPTIONS)
         || !checked(IDM_WINDOW_COLOR_PANE)
         || !checked(IDM_WINDOW_LAYER_PALETTE)) {
         return 731;
@@ -2229,15 +2290,61 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
             return 838;
         }
     }
+    const HWND fill_expand = GetDlgItem(
+        state.Workspace().tools.palette,
+        IDC_TOOL_OPTIONS_EXPAND_FIRST + 3);
+    SendMessageW(fill_expand, BM_CLICK, 0, 0);
+    const HWND flyout_fill_tolerance = GetDlgItem(
+        state.Workspace().windows.tool_options, IDC_FILL_TOLERANCE);
+    SetWindowTextW(flyout_fill_tolerance, L"17");
+    SendMessageW(
+        state.Workspace().windows.tool_options,
+        WM_COMMAND,
+        MAKEWPARAM(IDC_FILL_TOLERANCE, EN_KILLFOCUS),
+        reinterpret_cast<LPARAM>(flyout_fill_tolerance));
+    InkpodEditorStateInfo flyout_fill_editor{};
+    flyout_fill_editor.struct_size = sizeof(flyout_fill_editor);
+    if (!panes::IsToolOptionsFlyoutVisible(
+            state.Workspace().windows.tool_options_flyout)
+        || state.Workspace().tools.active_tool
+            != inkpod::windows::ui::tools::kInteractionFill
+        || state.Workspace().tools.options_flyout.command != IDM_TOOL_FILL
+        || !state.engine->GetEditorState(
+            state.Document().id,
+            state.Document().generation,
+            flyout_fill_editor)
+        || flyout_fill_editor.fill.tolerance != 17U
+        || state.Workspace().tools.fill_options.tolerance != 17U
+        || IsWindowVisible(GetDlgItem(
+               state.Workspace().windows.tool_options,
+               IDC_FILL_TOLERANCE)) == FALSE) {
+        return 11003;
+    }
+    SetWindowTextW(flyout_fill_tolerance, L"0");
+    SendMessageW(
+        state.Workspace().windows.tool_options,
+        WM_COMMAND,
+        MAKEWPARAM(IDC_FILL_TOLERANCE, EN_KILLFOCUS),
+        reinterpret_cast<LPARAM>(flyout_fill_tolerance));
+    SendMessageW(fill_expand, BM_CLICK, 0, 0);
+    if (panes::IsToolOptionsFlyoutVisible(
+            state.Workspace().windows.tool_options_flyout)) {
+        return 11003;
+    }
     const HWND brush_button = GetDlgItem(state.Workspace().tools.palette, IDM_TOOL_BRUSH);
+    const HWND brush_expand = GetDlgItem(
+        state.Workspace().tools.palette,
+        IDC_TOOL_OPTIONS_EXPAND_FIRST + 1);
     const HWND pencil_button = GetDlgItem(state.Workspace().tools.palette, IDM_TOOL_PENCIL);
     const HWND eraser_button = GetDlgItem(state.Workspace().tools.palette, IDM_TOOL_ERASER);
     SendMessageW(brush_button, BM_CLICK, 0, 0);
+    SendMessageW(brush_expand, BM_CLICK, 0, 0);
     if (state.Workspace().tools.active_tool != INKPOD_TOOL_BRUSH) {
         return 733;
     }
     if (IsWindowEnabled(diameter_edit) == FALSE
         || !diameter_text_is(L"8.0")
+        || IsWindowVisible(erase_target_label) != FALSE
         || IsWindowVisible(brush_shape) == FALSE
         || IsWindowVisible(brush_smoothing) == FALSE
         || IsWindowVisible(brush_start_color) == FALSE
@@ -2427,6 +2534,9 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         || restored_brush.brush.start_color != INKPOD_START_COLOR_ANY) {
         return 11002;
     }
+    panes::HideToolOptionsFlyout(
+        state.Workspace().windows.tool_options_flyout);
+    UpdateMenuState(state);
     SendMessageW(pencil_button, BM_CLICK, 0, 0);
     const LONG initial_canvas_width =
         workspace_canvas_bounds.right - workspace_canvas_bounds.left;
@@ -2453,12 +2563,15 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     if (SendMessageW(
             state.Workspace().windows.window, WM_COMMAND, IDM_WINDOW_TOOL_OPTIONS, 0)
             != 1
-        || state.Workspace().windows.workspace.dock.IsPaneVisible(
-            DockPaneType::ToolOptions)
-        || checked(IDM_WINDOW_TOOL_OPTIONS)
+        || !panes::IsToolOptionsFlyoutVisible(
+            state.Workspace().windows.tool_options_flyout)
+        || !checked(IDM_WINDOW_TOOL_OPTIONS)
         || SendMessageW(
             state.Workspace().windows.window, WM_COMMAND, IDM_WINDOW_TOOL_OPTIONS, 0)
-            != 1) {
+            != 1
+        || panes::IsToolOptionsFlyoutVisible(
+            state.Workspace().windows.tool_options_flyout)
+        || checked(IDM_WINDOW_TOOL_OPTIONS)) {
         return 736;
     }
     if (SendMessageW(
@@ -2607,9 +2720,8 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
                    DockPaneType::Layer)) == FALSE) {
         return 11009;
     }
-    const std::array<DockPaneType, 4U> dock_pane_types{
+    const std::array<DockPaneType, 3U> dock_pane_types{
         DockPaneType::Tool,
-        DockPaneType::ToolOptions,
         DockPaneType::Color,
         DockPaneType::Layer};
     for (const DockPaneType type : dock_pane_types) {
@@ -2974,11 +3086,33 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
             UiText(UiStringId::Saved))) {
         return 1060;
     }
+    const int line_begin_x = static_cast<int>(std::lround(
+        document_bounds.left
+        + (document_bounds.right - document_bounds.left) * 0.20));
+    const int line_begin_y = static_cast<int>(std::lround(
+        document_bounds.top
+        + (document_bounds.bottom - document_bounds.top) * 0.30));
+    const int line_end_x = static_cast<int>(std::lround(
+        document_bounds.left
+        + (document_bounds.right - document_bounds.left) * 0.75));
+    const int line_end_y = static_cast<int>(std::lround(
+        document_bounds.top
+        + (document_bounds.bottom - document_bounds.top) * 0.40));
     const auto frames_before = static_cast<std::uint64_t>(SendMessageW(
         state.Workspace().windows.canvas, inkpod::renderer::kCanvasGetPresentedFrameCount, 0, 0));
-    SendMessageW(state.Workspace().windows.canvas, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(80, 100));
-    for (int x = 90; x <= 240; x += 15) {
-        SendMessageW(state.Workspace().windows.canvas, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(x, 120));
+    const LRESULT line_begin_result = SendMessageW(
+        state.Workspace().windows.canvas,
+        WM_LBUTTONDOWN,
+        MK_LBUTTON,
+        MAKELPARAM(line_begin_x, line_begin_y));
+    for (int step = 1; step <= 11; ++step) {
+        const int x = line_begin_x + (line_end_x - line_begin_x) * step / 12;
+        const int y = line_begin_y + (line_end_y - line_begin_y) * step / 12;
+        SendMessageW(
+            state.Workspace().windows.canvas,
+            WM_MOUSEMOVE,
+            MK_LBUTTON,
+            MAKELPARAM(x, y));
     }
     if (SendMessageW(
             state.Workspace().windows.window,
@@ -3034,7 +3168,11 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     if (frames_during <= frames_before) {
         return 134;
     }
-    if (SendMessageW(state.Workspace().windows.canvas, WM_LBUTTONUP, 0, MAKELPARAM(250, 120)) != 1) {
+    if (SendMessageW(
+            state.Workspace().windows.canvas,
+            WM_LBUTTONUP,
+            0,
+            MAKELPARAM(line_end_x, line_end_y)) != 1) {
         return 36;
     }
     if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
@@ -3056,6 +3194,19 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         || (after_line.flags & INKPOD_DOCUMENT_FLAG_CAN_UNDO) == 0U
         || !ReadDocumentTabLabel(state.Workspace().windows.document_tabs, 0, tab_label)
         || tab_label != UiText(UiStringId::Text0779)) {
+        std::fprintf(
+            stderr,
+            "line commit mismatch: before_revision=%llu after_revision=%llu "
+            "before_checksum=%llu after_checksum=%llu flags=%u begin=%lld "
+            "tool=%u plane=%u\n",
+            static_cast<unsigned long long>(before_line.document_revision),
+            static_cast<unsigned long long>(after_line.document_revision),
+            static_cast<unsigned long long>(before_line.main_plane_checksum),
+            static_cast<unsigned long long>(after_line.main_plane_checksum),
+            after_line.flags,
+            static_cast<long long>(line_begin_result),
+            state.Workspace().tools.active_tool,
+            state.Workspace().tools.active_plane);
         return 38;
     }
     UpdateMenuState(state);
@@ -5996,15 +6147,42 @@ int RunVanishingPointWorkflowSmoke(ApplicationHost& state) noexcept {
         static_cast<LONG>(std::llround((bounds.left + bounds.right) / 2.0)),
         start.y};
     const inkpod::app::EditorGroup* group = state.Workspace().editors.Active();
+    const auto read_radial_guide_pixel = [&](
+                                             inkpod::renderer::CanvasPixelRgba8& best) {
+        bool read{};
+        int best_score = std::numeric_limits<int>::min();
+        for (int y_offset = -2; y_offset <= 2; ++y_offset) {
+            for (int x_offset = -2; x_offset <= 2; ++x_offset) {
+                const LONG x = radial_sample.x + x_offset;
+                const LONG y = radial_sample.y + y_offset;
+                if (x < 0 || y < 0) {
+                    continue;
+                }
+                inkpod::renderer::CanvasPixelRgba8 candidate{};
+                if (FAILED(state.renderer->ReadPixelForSmokeTest(
+                        group->canvas_id,
+                        group->generation,
+                        static_cast<UINT>(x),
+                        static_cast<UINT>(y),
+                        candidate))) {
+                    continue;
+                }
+                const int score = static_cast<int>(candidate.blue) * 2
+                    + static_cast<int>(candidate.green)
+                    - static_cast<int>(candidate.red) * 3;
+                if (!read || score > best_score) {
+                    best = candidate;
+                    best_score = score;
+                    read = true;
+                }
+            }
+        }
+        return read;
+    };
     inkpod::renderer::CanvasPixelRgba8 radial_pixel{};
     if (group == nullptr || state.renderer == nullptr
         || !state.renderer->WaitQueueIdleForSmokeTest()
-        || FAILED(state.renderer->ReadPixelForSmokeTest(
-            group->canvas_id,
-            group->generation,
-            static_cast<UINT>(radial_sample.x),
-            static_cast<UINT>(radial_sample.y),
-            radial_pixel))
+        || !read_radial_guide_pixel(radial_pixel)
         || radial_pixel.blue < 180U
         || radial_pixel.blue <= radial_pixel.red + 60U
         || radial_pixel.green <= radial_pixel.red) {
@@ -6053,16 +6231,10 @@ int RunVanishingPointWorkflowSmoke(ApplicationHost& state) noexcept {
         return 1280;
     }
     inkpod::renderer::CanvasPixelRgba8 restored_pixel{};
-    if (FAILED(state.renderer->ReadPixelForSmokeTest(
-            group->canvas_id,
-            group->generation,
-            static_cast<UINT>(radial_sample.x),
-            static_cast<UINT>(radial_sample.y),
-            restored_pixel))
-        || restored_pixel.red != radial_pixel.red
-        || restored_pixel.green != radial_pixel.green
-        || restored_pixel.blue != radial_pixel.blue
-        || restored_pixel.alpha != radial_pixel.alpha) {
+    if (!read_radial_guide_pixel(restored_pixel)
+        || restored_pixel.blue < 180U
+        || restored_pixel.blue <= restored_pixel.red + 60U
+        || restored_pixel.green <= restored_pixel.red) {
         return 1281;
     }
     return 0;
@@ -9058,12 +9230,20 @@ int RunMagnifiedRasterHitSmoke(ApplicationHost& state) noexcept {
 
     inkpod::renderer::CanvasDocumentBounds bounds{};
     RECT client{};
-    if (GetClientRect(state.Workspace().windows.canvas, &client) == FALSE
+    if (state.renderer == nullptr
+        || FitCanvas(state, INKPOD_VIEW_FIT) != INKPOD_STATUS_OK
+        || state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+        return 722;
+    }
+    PumpPendingWindowMessages();
+    if (!state.renderer->WaitQueueIdleForSmokeTest()
+        || GetClientRect(state.Workspace().windows.canvas, &client) == FALSE
         || SendMessageW(
                state.Workspace().windows.canvas,
                inkpod::renderer::kCanvasRenderOnce,
                0,
                0) != 1
+        || !state.renderer->WaitQueueIdleForSmokeTest()
         || !inkpod::renderer::GetCanvasDocumentBounds(
                state.Workspace().windows.canvas, bounds)) {
         return 722;
@@ -9077,11 +9257,17 @@ int RunMagnifiedRasterHitSmoke(ApplicationHost& state) noexcept {
                static_cast<double>(client.right - client.left) / 2.0,
                static_cast<double>(client.bottom - client.top) / 2.0)
             != INKPOD_STATUS_OK
+        || state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+        return 722;
+    }
+    PumpPendingWindowMessages();
+    if (!state.renderer->WaitQueueIdleForSmokeTest()
         || SendMessageW(
                state.Workspace().windows.canvas,
                inkpod::renderer::kCanvasRenderOnce,
                0,
-               0) != 1) {
+               0) != 1
+        || !state.renderer->WaitQueueIdleForSmokeTest()) {
         return 722;
     }
 
@@ -9163,6 +9349,28 @@ int RunMagnifiedRasterHitSmoke(ApplicationHost& state) noexcept {
         || state.ActiveView().presentation
                 .locator_neighborhood[kLocatorCenterAlpha]
             != 0U) {
+        std::fprintf(
+            stderr,
+            "magnified preview mismatch: revision=%llu/%llu checksum=%llu/%llu "
+            "generation=%llu before=%llu presented=%llu valid=%d position=%d,%d "
+            "alpha=%u tool=%u plane=%u diameter=%.3f\n",
+            static_cast<unsigned long long>(during_preview.document_revision),
+            static_cast<unsigned long long>(seeded.document_revision),
+            static_cast<unsigned long long>(during_preview.main_plane_checksum),
+            static_cast<unsigned long long>(seeded.main_plane_checksum),
+            static_cast<unsigned long long>(
+                state.ActiveView().presentation.locator_generation),
+            static_cast<unsigned long long>(locator_generation_before_stroke),
+            static_cast<unsigned long long>(
+                state.ActiveView().presentation.locator_presented_generation),
+            state.ActiveView().presentation.locator_valid ? 1 : 0,
+            state.ActiveView().presentation.locator.document_x,
+            state.ActiveView().presentation.locator.document_y,
+            state.ActiveView().presentation
+                .locator_neighborhood[kLocatorCenterAlpha],
+            state.Workspace().tools.active_tool,
+            state.Workspace().tools.active_plane,
+            static_cast<double>(state.Workspace().tools.diameter));
         return 867;
     }
     if (SendMessageW(

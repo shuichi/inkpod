@@ -149,6 +149,14 @@ struct FillToolOptions {
     bool light_table_color{};
 };
 
+bool ParseFillOptionColors(
+    const wchar_t* text,
+    std::vector<InkpodColorValue>& colors) noexcept;
+
+bool FormatFillOptionColors(
+    const std::vector<InkpodColorValue>& colors,
+    std::wstring& text) noexcept;
+
 bool ShowFillOptions(
     HINSTANCE instance,
     HWND owner,

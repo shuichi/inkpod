@@ -67,12 +67,12 @@ const std::array<PaneDescriptor, kDockPaneCount> kPaneDescriptors{{
      IDS_DOCK_PANE_TOOL_OPTIONS,
      UiText(UiStringId::Text0241),
      DockZone::TopContext,
-     DockedAndTransientZones({DockZone::TopContext, DockZone::Bottom}),
+     DockZoneBit(DockZone::TopContext) | DockZoneBit(DockZone::Hidden),
       PaneTargetScope::FollowActiveView,
       1U,
-      true,
-      true,
-      true,
+      false,
+      false,
+      false,
       false,
       false,
      320,
@@ -607,7 +607,7 @@ void DockLayoutModel::Reset() noexcept {
         panes_[index] = DefaultPlacement(static_cast<DockPaneType>(index));
     }
     zones_[ZoneIndex(DockZone::TopContext)] =
-        DockZoneState{DockStackMode::Split, DockPaneType::ToolOptions, 40};
+        DockZoneState{DockStackMode::Split, DockPaneType::Count, 40};
     zones_[ZoneIndex(DockZone::Left)] =
         DockZoneState{DockStackMode::Split, DockPaneType::Tool, 80};
     zones_[ZoneIndex(DockZone::Right)] =

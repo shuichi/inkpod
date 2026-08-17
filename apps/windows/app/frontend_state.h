@@ -259,6 +259,7 @@ struct ToolUiState {
     HWND palette{};
     windows::ui::ToolPaletteDialogState palette_dialog{};
     windows::ui::panes::ToolOptionsPaneState options_pane{};
+    windows::ui::panes::ToolOptionsFlyoutState options_flyout{};
 };
 
 struct ViewUiState {
@@ -384,6 +385,7 @@ struct EffectsUiState {
     bool alpha_view{};
     bool stamp_source_valid{};
     InkpodStrokeSample stamp_source{};
+    UINT options_command{};
     CanvasEffectOptions options{};
     CanvasEffectOptions gesture_options{};
     bool gesture_options_valid{};

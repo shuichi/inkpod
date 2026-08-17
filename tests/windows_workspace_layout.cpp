@@ -100,11 +100,15 @@ bool DowngradeGroupedLayoutToV5(
             return false;
         }
     }
-    return ReplaceFirst(bytes, UINT32_C(7), UINT32_C(5));
+    return ReplaceFirst(bytes, UINT32_C(8), UINT32_C(5));
 }
 
 bool DowngradeGroupedLayoutToV6(std::span<std::byte> bytes) noexcept {
-    return ReplaceFirst(bytes, UINT32_C(7), UINT32_C(6));
+    return ReplaceFirst(bytes, UINT32_C(8), UINT32_C(6));
+}
+
+bool DowngradeGroupedLayoutToV7(std::span<std::byte> bytes) noexcept {
+    return ReplaceFirst(bytes, UINT32_C(8), UINT32_C(7));
 }
 
 struct LegacyWorkspaceV2 {
@@ -150,12 +154,65 @@ struct LegacyWorkspaceV3 {
     std::array<LegacyDockZoneV3, kDockedZoneCount> zones{};
 };
 
+struct PersistedDockPaneForMigration {
+    std::uint32_t stable_type_id{};
+    std::uint32_t zone{};
+    std::uint32_t restore_zone{};
+    std::uint32_t order{};
+    std::uint32_t split_weight{};
+    std::int32_t floating_x_dip{};
+    std::int32_t floating_y_dip{};
+    std::int32_t floating_width_dip{};
+    std::int32_t floating_height_dip{};
+};
+
+struct PersistedScreenPlacementForMigration {
+    std::int32_t x_px{};
+    std::int32_t y_px{};
+    std::int32_t width_px{};
+    std::int32_t height_px{};
+    std::uint32_t capture_dpi{};
+    std::uint32_t valid{};
+};
+
+struct PersistedAuxiliaryPaneForMigration {
+    std::uint32_t stable_type_id{};
+    std::uint32_t flags{};
+    std::uint32_t edge{};
+    std::uint32_t reserved{};
+    PersistedScreenPlacementForMigration floating{};
+};
+
+struct PersistedWorkspaceForMigration {
+    std::uint32_t magic{};
+    std::uint32_t version{};
+    std::uint32_t struct_size{};
+    std::uint32_t flags{};
+    std::uint32_t pane_count{};
+    std::uint32_t zone_count{};
+    std::uint32_t auxiliary_count{};
+    std::uint32_t selected_preset{};
+    std::uint32_t density{};
+    std::uint32_t split_orientation{};
+    std::uint32_t split_ratio_milli{};
+    std::uint32_t layer_split_milli{};
+    std::uint32_t reserved0{};
+    std::uint32_t window_show_command{};
+    PersistedScreenPlacementForMigration window{};
+    std::array<wchar_t, 64U> custom_name{};
+    std::array<PersistedDockPaneForMigration, 16U> panes{};
+    std::array<LegacyDockZoneV3, kDockedZoneCount> zones{};
+    std::array<PersistedAuxiliaryPaneForMigration, 16U> auxiliary{};
+};
+
 }  // namespace
 
 int main() {
     const auto& descriptors = PaneDescriptors();
     const auto& locator_descriptor = descriptors[
         static_cast<std::size_t>(DockPaneType::Locator)];
+    const auto& tool_options_descriptor = descriptors[
+        static_cast<std::size_t>(DockPaneType::ToolOptions)];
     const auto& color_descriptor = descriptors[
         static_cast<std::size_t>(DockPaneType::Color)];
     const auto& layer_descriptor = descriptors[
@@ -172,6 +229,12 @@ int main() {
         || !PaneDescriptors()[0].can_float
         || PaneDescriptors()[0].show_header_when_singleton
         || PaneDescriptors()[1].show_header_when_singleton
+        || tool_options_descriptor.default_visible
+        || tool_options_descriptor.persist_layout
+        || tool_options_descriptor.can_float
+        || tool_options_descriptor.allowed_zones
+            != (inkpod::windows::ui::DockZoneBit(DockZone::TopContext)
+                | inkpod::windows::ui::DockZoneBit(DockZone::Hidden))
         || !color_descriptor.show_header_when_singleton
         || !layer_descriptor.show_header_when_singleton
         || locator_descriptor.default_visible
@@ -507,19 +570,18 @@ int main() {
         normal.dock.panes[static_cast<std::size_t>(DockPaneType::ToolOptions)];
     const auto& color = normal.dock.panes[static_cast<std::size_t>(DockPaneType::Color)];
     const auto& layer = normal.dock.panes[static_cast<std::size_t>(DockPaneType::Layer)];
-    if (!tool.shown || !options.shown || !color.shown || !layer.shown
-        || options.bounds.x != 0 || options.bounds.y != 0
-        || options.bounds.width != 1'200 || options.bounds.height != 40
-        || tool.bounds.x != 0 || tool.bounds.y != 44 || tool.bounds.width != 80
+    if (!tool.shown || options.shown || !color.shown || !layer.shown
+        || options.bounds.width != 0 || options.bounds.height != 0
+        || tool.bounds.x != 0 || tool.bounds.y != 0 || tool.bounds.width != 80
         || normal.editor.left != 84 || normal.editor.right != 876
         || color.bounds.x != 880 || color.bounds.width != 320
         || layer.bounds.x != 880 || layer.bounds.width != 320
         || normal.dock.right_tool_tabs.x != 880
-        || normal.dock.right_tool_tabs.y != 44
+        || normal.dock.right_tool_tabs.y != 0
         || normal.dock.right_tool_tabs.width != 320
         || normal.dock.right_tool_tabs.height != 28
-        || color.bounds.y != 72 || layer.bounds.y != 301
-        || color.bounds.height != 225 || layer.bounds.height != 479
+        || color.bounds.y != 28 || layer.bounds.y != 271
+        || color.bounds.height != 239 || layer.bounds.height != 509
         || Height(normal.document_tabs) != 28
         || normal.canvas.top != normal.document_tabs.bottom) {
         return 9;
@@ -559,7 +621,8 @@ int main() {
         high_dpi.dock.panes[static_cast<std::size_t>(DockPaneType::ToolOptions)];
     const auto& high_color =
         high_dpi.dock.panes[static_cast<std::size_t>(DockPaneType::Color)];
-    if (high_options.bounds.height != 60 || high_tool.bounds.width != 120
+    if (high_options.shown || high_options.bounds.height != 0
+        || high_tool.bounds.width != 120
         || high_color.bounds.width != 480 || high_dpi.editor.left != 126
         || high_dpi.editor.right != 1'314) {
         return 12;
@@ -571,14 +634,12 @@ int main() {
                 .bounds.width
             != 100
         || dpi_120.dock.panes[static_cast<std::size_t>(DockPaneType::ToolOptions)]
-                .bounds.height
-            != 50
+                .shown
         || dpi_192.dock.panes[static_cast<std::size_t>(DockPaneType::Tool)]
                 .bounds.width
             != 160
         || dpi_192.dock.panes[static_cast<std::size_t>(DockPaneType::ToolOptions)]
-                .bounds.height
-            != 80) {
+                .shown) {
         return 17;
     }
 
@@ -596,7 +657,6 @@ int main() {
 
     for (const DockPaneType type : {
              DockPaneType::Tool,
-             DockPaneType::ToolOptions,
              DockPaneType::Color,
              DockPaneType::Layer}) {
         if (state.dock.HidePane(type) != DockResult::Ok) {
@@ -688,6 +748,45 @@ int main() {
         || decoded.dock.IsPaneVisible(DockPaneType::JobProgress)
         || !decoded.window.valid || decoded.window.show_command != SW_SHOWMAXIMIZED) {
         return 27;
+    }
+    auto version7_bytes = bytes;
+    if (written != sizeof(PersistedWorkspaceForMigration)) {
+        return 129;
+    }
+    PersistedWorkspaceForMigration version7_record{};
+    std::memcpy(
+        &version7_record, version7_bytes.data(), sizeof(version7_record));
+    if (version7_record.pane_count >= version7_record.panes.size()) {
+        return 129;
+    }
+    const auto& legacy_options_descriptor = PaneDescriptors()[
+        static_cast<std::size_t>(DockPaneType::ToolOptions)];
+    version7_record.panes[version7_record.pane_count++] =
+        PersistedDockPaneForMigration{
+            legacy_options_descriptor.stable_type_id,
+            static_cast<std::uint32_t>(DockZone::TopContext),
+            static_cast<std::uint32_t>(DockZone::TopContext),
+            UINT32_C(0x81000000),
+            1000U,
+            120,
+            120,
+            720,
+            40};
+    version7_record.zones[static_cast<std::size_t>(DockZone::TopContext)]
+        .active_tab = legacy_options_descriptor.stable_type_id;
+    std::memcpy(
+        version7_bytes.data(), &version7_record, sizeof(version7_record));
+    WorkspaceLayoutState migrated_version7{};
+    if (!DowngradeGroupedLayoutToV7(std::span<std::byte>(
+            version7_bytes.data(), written))
+        || DecodeWorkspaceLayout(
+               migrated_version7,
+               std::span<const std::byte>(version7_bytes.data(), written))
+            != WorkspaceLayoutDecodeResult::Migrated
+        || migrated_version7.dock.IsPaneVisible(DockPaneType::ToolOptions)
+        || migrated_version7.dock.Zone(DockZone::TopContext)->active_tab
+            != DockPaneType::Count) {
+        return 129;
     }
 
     WorkspaceLayoutState mixed_serialized{};
@@ -903,7 +1002,8 @@ int main() {
                 reinterpret_cast<const std::byte*>(&legacy), sizeof(legacy)))
             != WorkspaceLayoutDecodeResult::Migrated
         || migrated.layer_split_milli != 550U
-        || !migrated.dock.IsPaneVisible(DockPaneType::Tool)) {
+        || !migrated.dock.IsPaneVisible(DockPaneType::Tool)
+        || migrated.dock.IsPaneVisible(DockPaneType::ToolOptions)) {
         return 32;
     }
     const auto& legacy_record = serialized_record;

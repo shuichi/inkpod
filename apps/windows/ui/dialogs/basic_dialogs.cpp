@@ -1373,6 +1373,48 @@ INT_PTR CALLBACK HistoryDialogProcedure(
 
 }  // namespace
 
+bool ParseFillOptionColors(
+    const wchar_t* text,
+    std::vector<InkpodColorValue>& colors) noexcept {
+    return ParseFillColors(text, colors);
+}
+
+bool FormatFillOptionColors(
+    const std::vector<InkpodColorValue>& colors,
+    std::wstring& text) noexcept {
+    if (colors.size() > 6U) {
+        return false;
+    }
+    try {
+        std::wstring candidate;
+        std::array<wchar_t, 20U> token{};
+        for (std::size_t index = 0U; index < colors.size(); ++index) {
+            if (index != 0U) {
+                candidate += L';';
+            }
+            const InkpodColorValue& color = colors[index];
+            if (color.depth == INKPOD_COLOR_DEPTH_16) {
+                _snwprintf_s(
+                    token.data(), token.size(), _TRUNCATE,
+                    L"%04X%04X%04X%04X",
+                    color.red, color.green, color.blue, color.alpha);
+            } else if (color.depth == INKPOD_COLOR_DEPTH_8) {
+                _snwprintf_s(
+                    token.data(), token.size(), _TRUNCATE,
+                    L"%02X%02X%02X%02X",
+                    color.red, color.green, color.blue, color.alpha);
+            } else {
+                return false;
+            }
+            candidate += token.data();
+        }
+        text = std::move(candidate);
+        return true;
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+}
+
 UINT ShortcutMenuCommand(std::uint32_t command_id) noexcept {
     switch (command_id) {
         case 1U: return IDM_EDIT_UNDO;

@@ -172,7 +172,7 @@ InkpodStatus StopCore(ApplicationHost& state) noexcept {
         const std::array<HWND*, 8U> owned{
             &workspace->job_progress,
             &workspace->tools.palette,
-            &workspace->windows.tool_options,
+            &workspace->windows.tool_options_flyout,
             &workspace->windows.color_pane,
             &workspace->panes.layer_palette,
             &workspace->batch_palette,
@@ -184,6 +184,8 @@ InkpodStatus StopCore(ApplicationHost& state) noexcept {
                 *handle = nullptr;
             }
         }
+        workspace->windows.tool_options = nullptr;
+        workspace->tools.options_flyout = {};
         if (workspace->light_table_palette != nullptr) {
             DestroyWindow(workspace->light_table_palette);
             workspace->light_table_palette = nullptr;
@@ -412,8 +414,9 @@ int RunMessageLoop(ApplicationHost& state) noexcept {
             if (workspace == nullptr) {
                 continue;
             }
-            const std::array<HWND, 7U> palettes{
+            const std::array<HWND, 8U> palettes{
                 workspace->tools.palette,
+                workspace->windows.tool_options_flyout,
                 workspace->panes.layer_palette,
                 workspace->batch_palette,
                 workspace->locator_palette,

@@ -18,6 +18,7 @@ struct MainWindowHandles {
     HWND status_bar{};
     HWND document_tabs{};
     HWND tool_options{};
+    HWND tool_options_flyout{};
     HWND tool_palette{};
     HWND color_pane{};
     HWND layer_palette{};

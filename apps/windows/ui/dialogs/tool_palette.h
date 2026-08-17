@@ -22,10 +22,13 @@ inline constexpr std::size_t kToolPaletteEntryCount = 20U;
 using ToolPaletteCommandCallback = void (*)(
     void* context, UINT command) noexcept;
 using ToolPaletteVisibilityCallback = void (*)(void* context) noexcept;
+using ToolPaletteOptionsCallback = void (*)(
+    void* context, UINT command, HWND anchor) noexcept;
 
 struct ToolPaletteDialogState {
     void* context{};
     ToolPaletteCommandCallback dispatch_command{};
+    ToolPaletteOptionsCallback request_options{};
     ToolPaletteVisibilityCallback visibility_changed{};
     int scroll_position{};
     HFONT font{};
@@ -47,5 +50,9 @@ void UpdateToolPaletteDialog(
 bool ToolPaletteMatchesCommandState(
     HWND dialog,
     const CommandStateSet& states) noexcept;
+
+HWND ToolPaletteCheckedOptionsAnchor(HWND dialog) noexcept;
+
+bool ToolPaletteCommandHasOptions(UINT command) noexcept;
 
 }  // namespace inkpod::windows::ui

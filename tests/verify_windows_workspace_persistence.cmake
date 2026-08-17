@@ -46,7 +46,7 @@ endforeach()
 
 file(READ "${LAYOUT_SOURCE}" LAYOUT_SOURCE_TEXT)
 foreach(REQUIRED IN ITEMS
-        "kVersion = 7U"
+        "kVersion = 8U"
         "PersistedWorkspaceLayoutV4"
         "EncodeGroupedPaneOrder"
         "DecodeGroupedPaneOrder"
@@ -54,6 +54,7 @@ foreach(REQUIRED IN ITEMS
         "DecodeVersion4Or5"
         "value.version != 5U"
         "migrate_version6_reference_stack"
+        "legacy_tool_options"
         "LoadLegacyLayout"
         "FindPaneDescriptorByStableId"
         "kMaximumWorkspaceLayoutRecordBytes"

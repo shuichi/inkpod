@@ -17,7 +17,7 @@ namespace {
 constexpr wchar_t kSettingsKey[] = L"Software\\Inkpod";
 constexpr wchar_t kWorkspaceWindowCountValue[] = L"WorkspaceWindowCountV1";
 constexpr std::uint32_t kMagic = UINT32_C(0x4c574b49);
-constexpr std::uint32_t kVersion = 7U;
+constexpr std::uint32_t kVersion = 8U;
 constexpr std::uint32_t kGroupedPaneMarker = UINT32_C(0x80000000);
 constexpr std::uint32_t kGroupedPaneReservedMask = UINT32_C(0x7e000000);
 constexpr int kReferenceDpi = 96;
@@ -408,7 +408,8 @@ bool DecodeVersion4Or5(
     bool migrate_auxiliary,
     bool grouped) noexcept {
     if (value.magic != kMagic
-        || (grouped ? (value.version != kVersion && value.version != 6U)
+        || (grouped ? (value.version != kVersion && value.version != 7U
+                          && value.version != 6U)
                     : (value.version != 4U && value.version != 5U))
         || value.struct_size != sizeof(value) || value.flags > 1U
         || value.pane_count > value.panes.size()
@@ -485,6 +486,16 @@ bool DecodeVersion4Or5(
         }
         record.zones[index] = DockZoneState{
             static_cast<DockStackMode>(source.mode), active, source.extent_dip};
+    }
+    DockPanePlacement& legacy_tool_options =
+        record.panes[PaneIndex(DockPaneType::ToolOptions)];
+    legacy_tool_options.zone = DockZone::Hidden;
+    legacy_tool_options.restore_zone = DockZone::TopContext;
+    legacy_tool_options.active_tab = false;
+    for (DockZoneState& zone : record.zones) {
+        if (zone.active_tab == DockPaneType::ToolOptions) {
+            zone.active_tab = DockPaneType::Count;
+        }
     }
     if (!grouped) {
         const std::size_t right_index = static_cast<std::size_t>(DockZone::Right);
@@ -1111,7 +1122,7 @@ WorkspaceLayoutDecodeResult DecodeWorkspaceLayout(
     bool decoded{};
     WorkspaceLayoutDecodeResult result = WorkspaceLayoutDecodeResult::Invalid;
     if (header[0] == kMagic
-        && (header[1] == kVersion || header[1] == 6U)
+        && (header[1] == kVersion || header[1] == 7U || header[1] == 6U)
         && header[2] == sizeof(PersistedWorkspaceLayoutV4)
         && input.size() == sizeof(PersistedWorkspaceLayoutV4)) {
         PersistedWorkspaceLayoutV4 value{};
