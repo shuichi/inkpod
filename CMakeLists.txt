@@ -607,6 +607,27 @@ if(WIN32)
         NAME inkpod_windows_core_host
         COMMAND inkpod_windows_core_host_tests)
 
+    add_executable(inkpod_windows_inkscript_file_authority_tests
+        apps/windows/app/blake3_digest.cpp
+        apps/windows/app/blake3_digest.h
+        apps/windows/app/inkscript_file_authority.cpp
+        apps/windows/app/inkscript_file_authority.h
+        tests/windows_inkscript_file_authority.cpp)
+    target_include_directories(inkpod_windows_inkscript_file_authority_tests PRIVATE
+        "${CMAKE_SOURCE_DIR}/apps/windows"
+        "${CMAKE_SOURCE_DIR}/include")
+    target_compile_definitions(inkpod_windows_inkscript_file_authority_tests PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(inkpod_windows_inkscript_file_authority_tests PRIVATE
+        inkpod_ffi_static)
+    if(MSVC)
+        inkpod_enable_strict_warnings(inkpod_windows_inkscript_file_authority_tests)
+        target_compile_options(inkpod_windows_inkscript_file_authority_tests PRIVATE /EHsc)
+    endif()
+    add_test(
+        NAME inkpod_windows_inkscript_file_authority
+        COMMAND inkpod_windows_inkscript_file_authority_tests)
+
     add_executable(inkpod_windows_renderer_host_tests
         apps/windows/app/identity.h
         apps/windows/renderer/canvas.cpp
@@ -674,6 +695,10 @@ if(WIN32)
         apps/windows/app/document_shell.cpp
         apps/windows/app/launch_options.cpp
         apps/windows/app/launch_options.h
+        apps/windows/app/blake3_digest.cpp
+        apps/windows/app/blake3_digest.h
+        apps/windows/app/inkscript_file_authority.cpp
+        apps/windows/app/inkscript_file_authority.h
         apps/windows/app/app.rc
         apps/windows/renderer/canvas.cpp
         apps/windows/renderer/renderer_host.h

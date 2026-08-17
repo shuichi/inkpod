@@ -2993,7 +2993,7 @@ Version impact:
 - C ABI: 15（source/compiler/export symbol・record・ownership/thread契約を追加、v14を拒否）
 ```
 
-### [~] M26 — execution/report C ABI
+### [x] M26 — execution/report C ABI
 
 **範囲**
 
@@ -3038,6 +3038,8 @@ Version impact:
 - Windows x64 Debug build 119はMSVC `/W4 /WX`、static CRT、C11/C++20 header、portable ZIP、unsigned MSIXを含め成功し、
   最終binaryの全36 CTestが454.56秒で成功した。ABI smoke 62.73秒、English smoke 191.22秒、Japanese smoke 187.45秒だった。
   M27A／M27BのWindows authority adapter／Core engine route、command／file filter／clipboard／product UIは追加していない。
+- 2026-08-17の今回promptに不具合報告がなかったため、前回のbinary回帰とInkScript UI非公開を利用者確認済みとして
+  `[x]`へ移行した。
 
 ```text
 Version impact:
@@ -3049,7 +3051,7 @@ Version impact:
 - C ABI: 16（authority／plan／task／run／report symbol・record・callback・ownership/thread契約を追加、v15を拒否）
 ```
 
-### [ ] M27A — Windows authority/file-identity adapter
+### [~] M27A — Windows authority/file-identity adapter
 
 **範囲**
 
@@ -3065,6 +3067,52 @@ Version impact:
   temp name collision/reparse/authority失効/writer-close後identity swapで別objectをcleanup/installしないtestがある。
 - open-session backing pathのaliasを含むoverwriteを拒否し、別file/sessionをread/replaceしない。
 - Rust Coreと公開DTOに`HANDLE`、Windows path token、reparse固有型が入らない。
+
+**実装・自動検証結果（2026-08-17、利用者確認待ち）**
+
+- Windows private `InkScriptFileAuthorityAdapter`をpimpl／owner-thread ownerとして追加し、ABI v16の既存fixed DTO host
+  callbackへ接続した。adapter recordのcontextはadapter lifetime中だけborrowし、構築・全操作・破棄を同じowner threadへ固定する。
+  `HANDLE`、NT path、reparse型はC++ private実装だけに置き、Rust Core、C ABI record、公開DTOへ追加していない。
+- 既存objectはdrive rootから必要最小限のlist／traverse／read-attributes権限で`NtCreateFile`のparent-handle相対／no-followに
+  一componentずつ開き、target／parent handleの
+  `GetFinalPathNameByHandleW(FILE_NAME_OPENED)`、`FileIdInfo`、attribute/reparse tag、generationをRust-owned path identityへ写す。
+  missing tailは検証済みparent handleのfinal pathから組み立て、directory作成、temporary `FILE_CREATE`、install renameも
+  parent handle相対にした。hard-linkは同じvolume/object identity、別alias keyとして扱う。
+- authorityとopen-sessionは別のchecked generation registryにし、registry挿入成功時だけgeneration／guard counterを進める。
+  path grant、authorized external asset、open native sessionを
+  owner threadで登録・失効する。native content fingerprintは別Core handleでexact-current `inkpod_core_open`を呼び、既存v26
+  decoder／replayだけを使う。raw bytesとalias keyはprivate portable BLAKE3で固定し、empty／`abc`／2049-byte chunk-tree vectorを
+  Rust `blake3`と照合したため、native parser／fingerprintの二重実装はない。
+- temporaryはverified parent identity／generation、component、volume/object identityを保持し、write／flush／close後も再openした
+  same objectだけをrevalidate／cleanup／installする。name collisionは`FILE_CREATE`で再試行し、regular-file／junction identity swap、
+  stale authority、parent swapで別objectを削除・installしない。overwrite guardはdestination exact identityを再確認して外部write／
+  deleteをshare modeで拒否し、open-session backing fileのhard-link aliasを含むoverwriteを拒否する。
+- 新規Windows contractは実native v26 resolve/read/fingerprint/enumerate、実replacement、hard-link alias、junction／missing-middle
+  race、two-level missing create、authority generation/revoke、UTF-8 resource counter、temporary collision／regular-file・reparse swap／
+  cleanup、normal install、guard中external writer拒否、atomic overwrite、open-session alias、cross-thread wrong-threadを実filesystemで
+  検証する。success/no-op/invalid/stale/resource/ownership/threadと別file/session非到達を固定し、product command/UIは追加していない。
+- Rust format、全target／feature Clippy、strict rustdoc、generated referenceのCRLF正規化、route inventory以外のworkspace
+  623 testsとdoctest 1が成功した。作業前から存在するtool-tab 3 commandのWindows route inventory driftはM27A外として未修正で、
+  unfiltered workspace runはその1件だけ失敗する。既存`core_workflows --quick`は10 checksumを維持した。
+- 承認済みInkScript quickはworkload／harness／全counter／checksum `4401131d804c8eb7`を維持した。今回hostは
+  `aarch64-pc-windows-msvc`／Parallelsで承認済みx64 Ryzen envelopeの対象外であり、5-process中央値176,319,250 nsは
+  64–107 ms envelopeの合否には使用しない。
+- Windows x64 Debugの全target／static CRT／portable ZIP／unsigned MSIX buildとM27A testが成功し、CTest 1–32はABI smoke
+  179.23秒、English smoke 527.48秒を含め成功した。Japanese x64 smokeはemulationで30分超CPU実行を続けたため中断した。
+  fresh Windows ARM64 Debugの全137 target／packagesが成功し、最終binaryの全38 CTestが840.52秒で成功した。ABI smoke
+  107.65秒、English smoke 357.66秒、Japanese smoke 359.46秒で、portable ZIP／MSIX payload smokeも成功した。
+  最終のleast-privilege／overflow atomicity補強後にもx64／ARM64の製品とM27A test targetを再buildし、専用実filesystem
+  CTestを各architectureで5回連続実行して全て成功した。
+
+```text
+Version impact:
+- Registry schema: 2（meta-schema／language core変更なし）
+- InkScript file: 2（grammar／serialized program変更なし、v1拒否を維持）
+- InkScript procedure catalog: 2（批准済み84-entry signature／semantics変更なし、v1拒否を維持）
+- replay epoch: 23（canonical replay semantics変更なし）
+- .inkpod top-level: 26（native schema／encoder／decoder変更なし）
+- C ABI: 16（既存host DTO callbackのWindows private実装だけを追加、symbol／record／ownership契約変更なし）
+```
 
 ### [ ] M27B — Windows Core engine routeとprivate smoke
 
