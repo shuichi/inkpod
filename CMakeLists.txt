@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 cmake_policy(SET CMP0091 NEW)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
-project(inkpod VERSION 0.2.4 LANGUAGES C CXX)
+project(inkpod VERSION 0.2.5 LANGUAGES C CXX)
 
 set(INKPOD_BUILD_NUMBER "0" CACHE STRING
     "Numeric application build number (0-65535)")
