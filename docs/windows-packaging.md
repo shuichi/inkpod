@@ -24,6 +24,13 @@ by the MSIX manifest; they are not duplicated as About-specific Win32 resources.
 The dialog also displays the semantic application version and the configured
 numeric build number as `Version <version> (Build <number>)`.
 
+Windows Tool/pane icons are a separate fixed subset of Fluent UI System Icons
+under `apps/windows/ui/icons/fluent`. Their checked-in SVG sources, provenance,
+per-file hashes, MIT license, and generated A8 mask atlas are verified by
+`inkpod_windows_fluent_icons`. The atlas is embedded in `inkpod.exe` as
+`RCDATA`; MSIX and portable ZIP therefore need no extra icon payload and normal
+or distribution builds never contact the network or run the generator.
+
 The winapp CLI 0.5.0 SVG renderer omits a group when the group itself uses the
 SVG `feDropShadow` primitive. Keep optional filter effects on separate shadow
 elements rather than on `icon-body`; otherwise the background can disappear

@@ -9,6 +9,7 @@
 #include <cstddef>
 
 #include "app/resource.h"
+#include "ui/icons/fluent_icons.h"
 #include "ui/panes/pane_dialog_layout.h"
 
 namespace inkpod::windows::ui {
@@ -382,6 +383,10 @@ void UpdateBatchPaletteDialog(
     EnableWindow(
         GetDlgItem(dialog, IDC_BATCH_PIN),
         view.target_available && view.idle ? TRUE : FALSE);
+    static_cast<void>(SetPaneIconButton(
+        GetDlgItem(dialog, IDC_BATCH_PIN),
+        view.pinned ? PaneIconId::ReturnToFollowing
+                    : PaneIconId::PinDocument));
     if (view.idle) {
         KillTimer(dialog, kBatchRefreshTimer);
     } else {
@@ -437,6 +442,7 @@ void UpdateBatchPaletteDialog(
     }
     EnableWindow(
         GetDlgItem(dialog, IDC_BATCH_CANCEL), view.idle ? FALSE : TRUE);
+    LayoutBatchPane(dialog);
 }
 
 }  // namespace inkpod::windows::ui

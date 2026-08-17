@@ -5,6 +5,7 @@
 #include <array>
 
 #include "ui/command_state.h"
+#include "ui/icons/fluent_icons.h"
 #include "ui/localization.h"
 
 namespace inkpod::windows::ui {
@@ -12,7 +13,8 @@ namespace inkpod::windows::ui {
 struct ToolPaletteEntry {
     UINT command;
     UiStringId label;
-    UiStringId glyph;
+    UiStringId fallback_label;
+    ToolIconId icon;
 };
 
 inline constexpr std::size_t kToolPaletteEntryCount = 20U;

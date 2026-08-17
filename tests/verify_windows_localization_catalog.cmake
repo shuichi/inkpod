@@ -284,7 +284,7 @@ file(READ
     TOOL_PALETTE_SOURCE)
 foreach(REQUIRED_TOKEN IN ITEMS
         "ToolPaletteEntry" "UiText(entry.label)" "TTM_ADDTOOLW"
-        "UiText(entry->glyph)")
+        "UiText(entry->fallback_label)" "DrawToolIcon" "ToolIconId")
     string(FIND "${TOOL_PALETTE_SOURCE}" "${REQUIRED_TOKEN}" TOKEN_POSITION)
     if(TOKEN_POSITION LESS 0)
         message(FATAL_ERROR "tool palette typed localization is incomplete: ${REQUIRED_TOKEN}")
@@ -349,6 +349,7 @@ foreach(REQUIRED_TOKEN IN ITEMS
         "state.status_cell_width"
         "MeasureLayerPaletteStatusCellWidth"
         "LayoutLayerPaletteStatusCells"
+        "DrawPaneIcon" "PaneIconId::Visible" "PaneIconId::Protected"
         "PtInRect(&status_layout.editability"
         "PtInRect(&status_layout.visibility")
     string(FIND "${LAYER_PALETTE_SOURCE}" "${REQUIRED_TOKEN}" TOKEN_POSITION)

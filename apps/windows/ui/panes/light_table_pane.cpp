@@ -10,6 +10,7 @@
 #include "app/resource.h"
 #include "inkpod/core_ffi.h"
 #include "pane_dialog_layout.h"
+#include "ui/icons/fluent_icons.h"
 #include "ui/localization.h"
 
 namespace inkpod::windows::ui::panes {
@@ -403,6 +404,10 @@ void UpdateLightTablePaneDialog(HWND dialog, LightTablePaneView view) noexcept {
         IDC_LIGHT_TABLE_PIN,
         state->view.pinned ? UiText(UiStringId::ReturnToFollowing)
                            : UiText(UiStringId::PinDocument));
+    static_cast<void>(SetPaneIconButton(
+        GetDlgItem(dialog, IDC_LIGHT_TABLE_PIN),
+        state->view.pinned ? PaneIconId::ReturnToFollowing
+                           : PaneIconId::PinDocument));
 
     const HWND sets = GetDlgItem(dialog, IDC_LIGHT_TABLE_SETS);
     SendMessageW(sets, WM_SETREDRAW, FALSE, 0);
@@ -476,6 +481,7 @@ void UpdateLightTablePaneDialog(HWND dialog, LightTablePaneView view) noexcept {
         dialog,
         IDC_LIGHT_TABLE_EMPTY,
         has_item ? L"" : state->view.empty_text.c_str());
+    LayoutLightTablePane(dialog);
 }
 
 }  // namespace inkpod::windows::ui::panes

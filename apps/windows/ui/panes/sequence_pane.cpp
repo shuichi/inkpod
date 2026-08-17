@@ -12,6 +12,7 @@
 
 #include "app/resource.h"
 #include "pane_dialog_layout.h"
+#include "ui/icons/fluent_icons.h"
 #include "ui/localization.h"
 
 namespace inkpod::windows::ui::panes {
@@ -448,6 +449,10 @@ void UpdateSequencePaneDialog(HWND dialog, SequencePaneView view) noexcept {
         IDC_SEQUENCE_PIN,
         state->view.pinned ? UiText(UiStringId::ReturnToFollowing)
                            : UiText(UiStringId::PinDocument));
+    static_cast<void>(SetPaneIconButton(
+        GetDlgItem(dialog, IDC_SEQUENCE_PIN),
+        state->view.pinned ? PaneIconId::ReturnToFollowing
+                           : PaneIconId::PinDocument));
     const HWND list = GetDlgItem(dialog, IDC_SEQUENCE_CELLS);
     SendMessageW(list, WM_SETREDRAW, FALSE, 0);
     SendMessageW(list, LB_RESETCONTENT, 0, 0);
@@ -498,6 +503,7 @@ void UpdateSequencePaneDialog(HWND dialog, SequencePaneView view) noexcept {
         dialog,
         IDC_SEQUENCE_EMPTY,
         has_sequence ? L"" : state->view.empty_text.c_str());
+    LayoutSequencePane(dialog);
 }
 
 bool SequencePaneItemHasThumbnail(HWND dialog, std::size_t index) noexcept {

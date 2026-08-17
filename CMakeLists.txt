@@ -214,6 +214,12 @@ add_test(
             -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_assets.cmake")
 
 add_test(
+    NAME inkpod_windows_fluent_icons
+    COMMAND "${CMAKE_COMMAND}"
+            "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+            -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_fluent_icons.cmake")
+
+add_test(
     NAME inkpod_windows_command_routes
     COMMAND "${CMAKE_COMMAND}"
             "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
@@ -316,6 +322,8 @@ if(WIN32)
         OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/html/acknowledgements.html")
     set_property(SOURCE apps/windows/app/app.rc APPEND PROPERTY OBJECT_DEPENDS
         "${CMAKE_SOURCE_DIR}/apps/windows/app/app_common.rc")
+    set_property(SOURCE apps/windows/app/app.rc APPEND PROPERTY OBJECT_DEPENDS
+        "${CMAKE_SOURCE_DIR}/apps/windows/ui/icons/fluent/fluent_icon_masks.bin")
     set_property(SOURCE apps/windows/app/app.rc APPEND PROPERTY OBJECT_DEPENDS
         "${CMAKE_SOURCE_DIR}/apps/windows/app/app_ui_ja.generated.rc")
     set_property(SOURCE apps/windows/app/app.rc APPEND PROPERTY OBJECT_DEPENDS
@@ -679,6 +687,8 @@ if(WIN32)
         apps/windows/ui/dialogs/modal_dialog_position.h
         apps/windows/ui/dialogs/tool_palette.cpp
         apps/windows/ui/dialogs/tool_palette.h
+        apps/windows/ui/icons/fluent_icons.cpp
+        apps/windows/ui/icons/fluent_icons.h
         apps/windows/ui/panes/document_panes.cpp
         apps/windows/ui/panes/light_table_pane.cpp
         apps/windows/ui/panes/light_table_pane.h
@@ -755,6 +765,7 @@ if(WIN32)
         ole32
         oleacc
         oleaut32
+        msimg32
         uiautomationcore
         advapi32
         shcore

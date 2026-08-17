@@ -97,6 +97,40 @@ Microsoft Visual Studio license terms に従って再配布し、inkpod の GPL 
 MSIX と portable ZIP は app-local の MSVC CRT DLL を収録せず、この文書を package root の
 `ThirdPartyNotices.txt` として収録する。
 
+Windows の Tool pane と pane action icon には
+[Fluent UI System Icons](https://github.com/microsoft/fluentui-system-icons) 1.1.337、commit
+`84e8a2ae0e55b3cbe176b5cc33154fe82ef363cc` の選択済み SVG subset を使用する。license は MIT。
+選択した source file、semantic key、個別 SHA-256 は
+`apps/windows/ui/icons/fluent/selected-icons.tsv` に固定し、生成済み A8 mask atlas を Windows
+executable の resource として収録する。配布 build は upstream package、font、network access、
+または icon generator を必要としない。以下が Fluent UI System Icons に適用する完全な通知である。
+
+### Fluent UI System Icons 1.1.337 — MIT
+
+```text
+MIT License
+
+Copyright (c) 2020 Microsoft Corporation
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## BLAKE3 production dependency license texts
 
 以下は、lock 済み BLAKE3 production dependency closure について実配布の

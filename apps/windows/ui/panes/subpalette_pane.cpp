@@ -9,6 +9,7 @@
 #include "app/resource.h"
 #include "pane_dialog_layout.h"
 #include "renderer/renderer_host.h"
+#include "ui/icons/fluent_icons.h"
 #include "ui/localization.h"
 
 namespace inkpod::windows::ui::panes {
@@ -313,6 +314,10 @@ void UpdateSubpalettePaneDialog(HWND dialog, SubpalettePaneView view) noexcept {
         IDC_SUBPALETTE_PIN,
         state->view.pinned ? UiText(UiStringId::ReturnToFollowing)
                            : UiText(UiStringId::PinDocument));
+    static_cast<void>(SetPaneIconButton(
+        GetDlgItem(dialog, IDC_SUBPALETTE_PIN),
+        state->view.pinned ? PaneIconId::ReturnToFollowing
+                           : PaneIconId::PinDocument));
     CheckDlgButton(
         dialog,
         IDC_SUBPALETTE_AUTO_PREVIOUS,
@@ -342,6 +347,7 @@ void UpdateSubpalettePaneDialog(HWND dialog, SubpalettePaneView view) noexcept {
     ShowWindow(
         GetDlgItem(dialog, IDC_SUBPALETTE_EMPTY),
         source ? SW_HIDE : SW_SHOW);
+    LayoutSubpalettePaneDialog(dialog);
 }
 
 }  // namespace inkpod::windows::ui::panes

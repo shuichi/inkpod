@@ -13,6 +13,7 @@
 
 #include "app/resource.h"
 #include "pane_dialog_layout.h"
+#include "ui/icons/fluent_icons.h"
 #include "ui/localization.h"
 
 namespace inkpod::windows::ui::panes {
@@ -401,6 +402,10 @@ void UpdateLocatorPaneDialog(
         view.pinned ? UiText(UiStringId::ReturnToFollowing)
                     : UiText(UiStringId::PinDocument),
         first_presentation);
+    static_cast<void>(SetPaneIconButton(
+        GetDlgItem(dialog, IDC_LOCATOR_PIN),
+        view.pinned ? PaneIconId::ReturnToFollowing
+                    : PaneIconId::PinDocument));
     if (fixed_mode_changed) {
         CheckDlgButton(
             dialog,
@@ -419,6 +424,7 @@ void UpdateLocatorPaneDialog(
         InvalidateRect(
             GetDlgItem(dialog, IDC_LOCATOR_NEIGHBORHOOD), nullptr, FALSE);
     }
+    LayoutLocatorPane(dialog);
 }
 
 }  // namespace inkpod::windows::ui::panes

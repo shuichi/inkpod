@@ -17,6 +17,7 @@
 
 #include "app/resource.h"
 #include "pane_dialog_layout.h"
+#include "ui/icons/fluent_icons.h"
 #include "ui/localization.h"
 
 namespace inkpod::windows::ui::panes {
@@ -2413,6 +2414,9 @@ void UpdateColorDockPaneTarget(
         IDC_COLOR_PIN,
         pinned ? UiText(UiStringId::ReturnToFollowing) : UiText(UiStringId::PinDocument));
     EnableWindow(GetDlgItem(pane, IDC_COLOR_PIN), target_available ? TRUE : FALSE);
+    static_cast<void>(SetPaneIconButton(
+        GetDlgItem(pane, IDC_COLOR_PIN),
+        pinned ? PaneIconId::ReturnToFollowing : PaneIconId::PinDocument));
     for (const int control : {
              IDC_PALETTE_LIST,
              IDC_PALETTE_PREVIOUS,
@@ -2424,6 +2428,7 @@ void UpdateColorDockPaneTarget(
              IDC_PALETTE_SAVE_BUTTON}) {
         EnableWindow(GetDlgItem(pane, control), target_available ? TRUE : FALSE);
     }
+    LayoutPane(pane);
 }
 
 void UpdateColorDockPaneDrawingColor(

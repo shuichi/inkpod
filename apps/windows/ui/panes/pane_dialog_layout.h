@@ -74,6 +74,11 @@ inline int PaneButtonIdealWidthAtDpi(
     const UINT dpi = requested_dpi != 0U
         ? requested_dpi
         : (window_dpi == 0U ? 96U : window_dpi);
+    const DWORD style = static_cast<DWORD>(
+        GetWindowLongPtrW(button, GWL_STYLE));
+    if ((style & BS_ICON) != 0U) {
+        return MulDiv(32, static_cast<int>(dpi), 96);
+    }
     int text_length = GetWindowTextLengthW(button);
     if (text_length < 0) {
         text_length = 0;

@@ -76,7 +76,9 @@ foreach(required_text IN ITEMS
         "ThirdPartyNotices.txt"
         "GPL-3.0-only"
         "Apache-2.0"
-        "MIT OR Apache-2.0")
+        "MIT OR Apache-2.0"
+        "data-dependency=\"fluent-ui-system-icons\" data-version=\"1.1.337\""
+        "84e8a2ae0e55b3cbe176b5cc33154fe82ef363cc")
     string(FIND "${acknowledgements_text}" "${required_text}" text_offset)
     if(text_offset LESS 0)
         message(FATAL_ERROR
@@ -85,4 +87,4 @@ foreach(required_text IN ITEMS
 endforeach()
 
 message(STATUS
-    "Verified acknowledgements for blake3 ${blake3_version} and png ${png_version}")
+    "Verified acknowledgements for blake3 ${blake3_version}, png ${png_version}, and Fluent UI System Icons 1.1.337")

@@ -55,6 +55,7 @@
 #include "ui/tools/view_controller.h"
 #include "ui/tools/vector_controller.h"
 #include "ui/effects_controller.h"
+#include "ui/icons/fluent_icons.h"
 #include "ui/batch_controller.h"
 #include "ui/main_window.h"
 #include "ui/main_window_runtime.h"
@@ -186,6 +187,14 @@ bool WindowHasVisibleStyle(HWND window) noexcept {
     return window != nullptr
         && (static_cast<DWORD>(GetWindowLongPtrW(window, GWL_STYLE))
             & WS_VISIBLE)
+            != 0U;
+}
+
+bool WindowUsesNamedIconButton(HWND window) noexcept {
+    return window != nullptr
+        && GetWindowTextLengthW(window) > 0
+        && (static_cast<DWORD>(GetWindowLongPtrW(window, GWL_STYLE))
+            & BS_ICON)
             != 0U;
 }
 
@@ -798,6 +807,7 @@ int RunLocatorPaneSmoke(ApplicationHost& state) noexcept {
         || (GetMenuState(menu, IDM_WINDOW_LOCATOR, MF_BYCOMMAND) & MF_CHECKED) == 0U
         || GetDlgItem(pane, IDC_LOCATOR_TARGET) == nullptr
         || GetDlgItem(pane, IDC_LOCATOR_PIN) == nullptr
+        || !WindowUsesNamedIconButton(GetDlgItem(pane, IDC_LOCATOR_PIN))
         || GetDlgItem(pane, IDC_LOCATOR_NEIGHBORHOOD) == nullptr
         || GetDlgItem(pane, IDC_LOCATOR_FIXED) == nullptr
         || GetDlgItem(pane, IDC_LOCATOR_AUTOSCROLL) == nullptr
@@ -1038,6 +1048,7 @@ int RunSequencePaneSmoke(ApplicationHost& state) noexcept {
         || (GetMenuState(menu, IDM_WINDOW_SEQUENCE, MF_BYCOMMAND) & MF_CHECKED) == 0U
         || GetDlgItem(pane, IDC_SEQUENCE_TARGET) == nullptr
         || GetDlgItem(pane, IDC_SEQUENCE_PIN) == nullptr
+        || !WindowUsesNamedIconButton(GetDlgItem(pane, IDC_SEQUENCE_PIN))
         || GetDlgItem(pane, IDC_SEQUENCE_CELLS) == nullptr
         || GetDlgItem(pane, IDC_SEQUENCE_PREVIOUS) == nullptr
         || GetDlgItem(pane, IDC_SEQUENCE_NEXT) == nullptr
@@ -1139,6 +1150,7 @@ int RunLightTablePaneSmoke(ApplicationHost& state) noexcept {
         || (GetMenuState(menu, IDM_WINDOW_LIGHT_TABLE, MF_BYCOMMAND) & MF_CHECKED) == 0U
         || GetDlgItem(pane, IDC_LIGHT_TABLE_TARGET) == nullptr
         || GetDlgItem(pane, IDC_LIGHT_TABLE_PIN) == nullptr
+        || !WindowUsesNamedIconButton(GetDlgItem(pane, IDC_LIGHT_TABLE_PIN))
         || GetDlgItem(pane, IDC_LIGHT_TABLE_SETS) == nullptr
         || GetDlgItem(pane, IDC_LIGHT_TABLE_ITEMS) == nullptr
         || GetDlgItem(pane, IDC_LIGHT_TABLE_ITEM_ADD) == nullptr
@@ -1246,6 +1258,7 @@ int RunSubpalettePaneSmoke(ApplicationHost& state) noexcept {
             DockPaneType::Reference)
         || GetDlgItem(pane, IDC_SUBPALETTE_TARGET) == nullptr
         || GetDlgItem(pane, IDC_SUBPALETTE_PIN) == nullptr
+        || !WindowUsesNamedIconButton(GetDlgItem(pane, IDC_SUBPALETTE_PIN))
         || GetDlgItem(pane, IDC_SUBPALETTE_PREVIOUS) == nullptr
         || GetDlgItem(pane, IDC_SUBPALETTE_NEXT) == nullptr
         || GetDlgItem(pane, IDC_SUBPALETTE_CURRENT) == nullptr
@@ -1602,7 +1615,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
             ToolPaletteEntries().end(),
             [&](const ToolPaletteEntry& entry) {
                 const HWND button = GetDlgItem(state.Workspace().tools.palette, entry.command);
-                const wchar_t* glyph = UiText(entry.glyph);
+                const wchar_t* fallback_label = UiText(entry.fallback_label);
                 std::array<wchar_t, 64U> caption{};
                 std::array<wchar_t, 64U> tooltip_text{};
                 const int caption_length = button == nullptr
@@ -1628,7 +1641,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
                     tooltip_name = std::wstring_view(tooltip_text.data())
                         == UiText(entry.label);
                 }
-                const auto glyph_length = std::wcslen(glyph);
+                const auto fallback_label_length = std::wcslen(fallback_label);
                 const bool msaa_name =
                     AccessibleWindowNameContains(button, UiText(entry.label));
                 const bool automation_name =
@@ -1638,7 +1651,9 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
                     button,
                     entry.command,
                     0U);
-                const bool valid = glyph_length >= 2U && glyph_length <= 16U
+                const bool valid = fallback_label_length >= 2U
+                    && fallback_label_length <= 16U
+                    && FluentIconResourceAvailable(GetModuleHandleW(nullptr))
                     && button != nullptr
                     && caption_length > 0
                     && std::wstring_view(caption.data()) == UiText(entry.label)
@@ -1647,7 +1662,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
                     && automation_name
                     && owner_draw
                     && (CurrentUiLanguage() != UiLanguage::English
-                        || (!HasJapaneseCharacters(glyph)
+                        || (!HasJapaneseCharacters(fallback_label)
                             && !HasJapaneseCharacters(caption.data())))
                     && (static_cast<DWORD>(
                             GetWindowLongPtrW(button, GWL_STYLE))
@@ -1789,6 +1804,8 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         || GetDlgItem(
                state.Workspace().windows.color_pane,
                IDC_PALETTE_SAVE_BUTTON) == nullptr
+        || !WindowUsesNamedIconButton(GetDlgItem(
+               state.Workspace().windows.color_pane, IDC_COLOR_PIN))
         || main_line_label == nullptr || main_line_swatch == nullptr
         || drawing_swatch == nullptr
         || drawing_label == nullptr || color_picker == nullptr
@@ -8584,7 +8601,8 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
         return 701;
     }
     if (GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_TARGET) == nullptr
-        || GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_PIN) == nullptr
+        || !WindowUsesNamedIconButton(
+            GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_PIN))
         || GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_JOB) == nullptr
         || !WindowHasAccessibleName(
             GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_TARGET))
@@ -10638,13 +10656,24 @@ int RunTabDragSmoke(ApplicationHost& state) noexcept {
     TabCtrl_SetCurSel(group->document_tabs, 0);
     TabCtrl_SetCurFocus(group->document_tabs, 0);
     RECT second_tab_bounds{};
+    RECT tab_client_bounds{};
     if (TabCtrl_GetItemRect(
-            group->document_tabs, 1, &second_tab_bounds) == FALSE) {
+            group->document_tabs, 1, &second_tab_bounds) == FALSE
+        || GetClientRect(group->document_tabs, &tab_client_bounds) == FALSE) {
+        return 952;
+    }
+    const LONG second_midpoint =
+        (second_tab_bounds.left + second_tab_bounds.right) / 2;
+    const LONG visible_right = tab_client_bounds.right - 1;
+    const LONG target_x = std::min(
+        second_tab_bounds.left
+            + (second_tab_bounds.right - second_tab_bounds.left) * 3 / 4,
+        visible_right);
+    if (target_x <= second_midpoint) {
         return 952;
     }
     POINT after_second{
-        second_tab_bounds.left
-            + (second_tab_bounds.right - second_tab_bounds.left) * 3 / 4,
+        target_x,
         (second_tab_bounds.top + second_tab_bounds.bottom) / 2};
     ClientToScreen(group->document_tabs, &after_second);
     if (!QueryDocument(state, before)

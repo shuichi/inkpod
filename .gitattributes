@@ -1,1 +1,6 @@
 tests/revision_max_native_harness_3f164db.patch text eol=lf
+apps/windows/ui/icons/fluent/*.md text eol=lf
+apps/windows/ui/icons/fluent/*.tsv text eol=lf
+apps/windows/ui/icons/fluent/*.txt text eol=lf
+apps/windows/ui/icons/fluent/*.bin binary
+apps/windows/ui/icons/fluent/svg/*.svg text eol=lf

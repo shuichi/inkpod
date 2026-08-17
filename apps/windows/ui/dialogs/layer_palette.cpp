@@ -19,6 +19,7 @@
 #include "app/resource.h"
 #include "ui/localization.h"
 #include "ui/panes/pane_dialog_layout.h"
+#include "ui/icons/fluent_icons.h"
 
 namespace inkpod::windows::ui {
 namespace {
@@ -572,21 +573,39 @@ void DrawStatusButton(
     HDC dc,
     RECT bounds,
     const wchar_t* label,
-    bool active) noexcept {
+    bool active,
+    HINSTANCE instance,
+    PaneIconId icon,
+    UINT dpi) noexcept {
     DrawFrameControl(
         dc,
         &bounds,
         DFC_BUTTON,
         static_cast<UINT>(DFCS_BUTTONPUSH)
             | (active ? static_cast<UINT>(DFCS_PUSHED) : 0U));
-    SetBkMode(dc, TRANSPARENT);
-    SetTextColor(dc, GetSysColor(COLOR_BTNTEXT));
-    DrawTextW(
-        dc,
-        label,
-        -1,
-        &bounds,
-        DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    const int icon_size = ScaleForDpi(16, dpi);
+    RECT icon_bounds = bounds;
+    icon_bounds.left += std::max(
+        0, (static_cast<int>(bounds.right - bounds.left) - icon_size) / 2);
+    icon_bounds.top += std::max(
+        0, (static_cast<int>(bounds.bottom - bounds.top) - icon_size) / 2);
+    icon_bounds.right = std::min(bounds.right, icon_bounds.left + icon_size);
+    icon_bounds.bottom = std::min(bounds.bottom, icon_bounds.top + icon_size);
+    if (!DrawPaneIcon(
+            instance,
+            dc,
+            icon_bounds,
+            icon,
+            GetSysColor(COLOR_BTNTEXT))) {
+        SetBkMode(dc, TRANSPARENT);
+        SetTextColor(dc, GetSysColor(COLOR_BTNTEXT));
+        DrawTextW(
+            dc,
+            label,
+            -1,
+            &bounds,
+            DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    }
 }
 
 void DrawItem(
@@ -662,12 +681,24 @@ void DrawItem(
         draw.hDC,
         status_layout.visibility,
         item.visibility_text.c_str(),
-        (item.flags & INKPOD_NODE_VISIBLE) != 0U);
+        (item.flags & INKPOD_NODE_VISIBLE) != 0U,
+        reinterpret_cast<HINSTANCE>(
+            GetWindowLongPtrW(draw.hwndItem, GWLP_HINSTANCE)),
+        (item.flags & INKPOD_NODE_VISIBLE) != 0U
+            ? PaneIconId::Visible
+            : PaneIconId::Hidden,
+        dpi);
     DrawStatusButton(
         draw.hDC,
         status_layout.editability,
         item.editability_text.c_str(),
-        (item.flags & INKPOD_NODE_EDITABLE) != 0U);
+        (item.flags & INKPOD_NODE_EDITABLE) != 0U,
+        reinterpret_cast<HINSTANCE>(
+            GetWindowLongPtrW(draw.hwndItem, GWLP_HINSTANCE)),
+        (item.flags & INKPOD_NODE_EDITABLE) != 0U
+            ? PaneIconId::Editable
+            : PaneIconId::Protected,
+        dpi);
     if (previous != nullptr) {
         SelectObject(draw.hDC, previous);
     }

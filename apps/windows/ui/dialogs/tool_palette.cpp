@@ -16,26 +16,46 @@ namespace {
 
 constexpr std::array<ToolPaletteEntry, kToolPaletteEntryCount>
     kToolPaletteEntries{{
-        {IDM_TOOL_PENCIL, UiStringId::ToolPencil, UiStringId::ToolPencil},
-        {IDM_TOOL_BRUSH, UiStringId::ToolBrush, UiStringId::ToolBrush},
-        {IDM_TOOL_ERASER, UiStringId::ToolEraser, UiStringId::ToolEraser},
-        {IDM_TOOL_FILL, UiStringId::ToolFill, UiStringId::ToolFill},
-        {IDM_TOOL_CLOSED_FILL, UiStringId::ToolClosedRegionFill, UiStringId::ToolClosedRegionFillCompact},
-        {IDM_TOOL_FILL_EXTENSION, UiStringId::ToolFillExtension, UiStringId::ToolFillExtensionCompact},
-        {IDM_TOOL_EYEDROPPER, UiStringId::ToolEyedropper, UiStringId::ToolEyedropper},
-        {IDM_VECTOR_LINE, UiStringId::ToolVectorLine, UiStringId::ToolVectorLine},
-        {IDM_VECTOR_CURVE, UiStringId::ToolVectorCurve, UiStringId::ToolVectorCurve},
-        {IDM_VECTOR_RECTANGLE, UiStringId::ToolVectorRectangle, UiStringId::ToolVectorRectangle},
-        {IDM_VECTOR_ELLIPSE, UiStringId::ToolVectorEllipse, UiStringId::ToolVectorEllipse},
-        {IDM_VECTOR_POLYLINE, UiStringId::ToolVectorPolyline, UiStringId::ToolVectorPolyline},
-        {IDM_VECTOR_ERASER, UiStringId::ToolVectorEraser, UiStringId::ToolVectorEraserCompact},
-        {IDM_EFFECT_GRADIENT, UiStringId::ToolGradient, UiStringId::ToolGradient},
-        {IDM_EFFECT_AIRBRUSH, UiStringId::ToolAirbrush, UiStringId::ToolAirbrush},
-        {IDM_EFFECT_BOUNDARY_AIRBRUSH, UiStringId::ToolBoundaryAirbrush, UiStringId::ToolBoundaryAirbrushCompact},
-        {IDM_EFFECT_BLUR, UiStringId::ToolBlur, UiStringId::ToolBlur},
-        {IDM_EFFECT_STAMP, UiStringId::ToolStamp, UiStringId::ToolStamp},
-        {IDM_EFFECT_DUST, UiStringId::ToolDustRemoval, UiStringId::ToolDustRemovalCompact},
-        {IDM_EFFECT_ALPHA_GRADIENT, UiStringId::ToolAlphaGradient, UiStringId::ToolAlphaGradientCompact},
+        {IDM_TOOL_PENCIL, UiStringId::ToolPencil, UiStringId::ToolPencil,
+         ToolIconId::Pencil},
+        {IDM_TOOL_BRUSH, UiStringId::ToolBrush, UiStringId::ToolBrush,
+         ToolIconId::Brush},
+        {IDM_TOOL_ERASER, UiStringId::ToolEraser, UiStringId::ToolEraser,
+         ToolIconId::Eraser},
+        {IDM_TOOL_FILL, UiStringId::ToolFill, UiStringId::ToolFill,
+         ToolIconId::Fill},
+        {IDM_TOOL_CLOSED_FILL, UiStringId::ToolClosedRegionFill,
+         UiStringId::ToolClosedRegionFillCompact, ToolIconId::ClosedRegionFill},
+        {IDM_TOOL_FILL_EXTENSION, UiStringId::ToolFillExtension,
+         UiStringId::ToolFillExtensionCompact, ToolIconId::FillExtension},
+        {IDM_TOOL_EYEDROPPER, UiStringId::ToolEyedropper,
+         UiStringId::ToolEyedropper, ToolIconId::Eyedropper},
+        {IDM_VECTOR_LINE, UiStringId::ToolVectorLine, UiStringId::ToolVectorLine,
+         ToolIconId::VectorLine},
+        {IDM_VECTOR_CURVE, UiStringId::ToolVectorCurve,
+         UiStringId::ToolVectorCurve, ToolIconId::VectorCurve},
+        {IDM_VECTOR_RECTANGLE, UiStringId::ToolVectorRectangle,
+         UiStringId::ToolVectorRectangle, ToolIconId::VectorRectangle},
+        {IDM_VECTOR_ELLIPSE, UiStringId::ToolVectorEllipse,
+         UiStringId::ToolVectorEllipse, ToolIconId::VectorEllipse},
+        {IDM_VECTOR_POLYLINE, UiStringId::ToolVectorPolyline,
+         UiStringId::ToolVectorPolyline, ToolIconId::VectorPolyline},
+        {IDM_VECTOR_ERASER, UiStringId::ToolVectorEraser,
+         UiStringId::ToolVectorEraserCompact, ToolIconId::VectorEraser},
+        {IDM_EFFECT_GRADIENT, UiStringId::ToolGradient, UiStringId::ToolGradient,
+         ToolIconId::Gradient},
+        {IDM_EFFECT_AIRBRUSH, UiStringId::ToolAirbrush, UiStringId::ToolAirbrush,
+         ToolIconId::Airbrush},
+        {IDM_EFFECT_BOUNDARY_AIRBRUSH, UiStringId::ToolBoundaryAirbrush,
+         UiStringId::ToolBoundaryAirbrushCompact, ToolIconId::BoundaryAirbrush},
+        {IDM_EFFECT_BLUR, UiStringId::ToolBlur, UiStringId::ToolBlur,
+         ToolIconId::Blur},
+        {IDM_EFFECT_STAMP, UiStringId::ToolStamp, UiStringId::ToolStamp,
+         ToolIconId::Stamp},
+        {IDM_EFFECT_DUST, UiStringId::ToolDustRemoval,
+         UiStringId::ToolDustRemovalCompact, ToolIconId::DustRemoval},
+        {IDM_EFFECT_ALPHA_GRADIENT, UiStringId::ToolAlphaGradient,
+         UiStringId::ToolAlphaGradientCompact, ToolIconId::AlphaGradient},
     }};
 
 constexpr int kReferenceDpi = 96;
@@ -233,18 +253,36 @@ void DrawToolButton(const DRAWITEMSTRUCT& draw) noexcept {
         GetSysColorBrush(checked ? COLOR_HIGHLIGHT : COLOR_3DSHADOW));
     SetBkMode(draw.hDC, TRANSPARENT);
     SetTextColor(draw.hDC, GetSysColor(foreground));
-    const HFONT font = reinterpret_cast<HFONT>(
-        SendMessageW(draw.hwndItem, WM_GETFONT, 0, 0));
-    const HGDIOBJ previous = font == nullptr ? nullptr : SelectObject(draw.hDC, font);
-    RECT text = draw.rcItem;
-    DrawTextW(
-        draw.hDC,
-        UiText(entry->glyph),
-        -1,
-        &text,
-        DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-    if (previous != nullptr) {
-        SelectObject(draw.hDC, previous);
+    const int icon_size = ScaleForDpi(20, GetDpiForWindow(draw.hwndItem));
+    RECT icon_bounds = draw.rcItem;
+    icon_bounds.left += std::max(
+        0, (static_cast<int>(draw.rcItem.right - draw.rcItem.left) - icon_size) / 2);
+    icon_bounds.top += std::max(
+        0, (static_cast<int>(draw.rcItem.bottom - draw.rcItem.top) - icon_size) / 2);
+    icon_bounds.right = std::min(draw.rcItem.right, icon_bounds.left + icon_size);
+    icon_bounds.bottom = std::min(draw.rcItem.bottom, icon_bounds.top + icon_size);
+    const HINSTANCE instance = reinterpret_cast<HINSTANCE>(
+        GetWindowLongPtrW(draw.hwndItem, GWLP_HINSTANCE));
+    if (!DrawToolIcon(
+            instance,
+            draw.hDC,
+            icon_bounds,
+            entry->icon,
+            GetSysColor(foreground))) {
+        const HFONT font = reinterpret_cast<HFONT>(
+            SendMessageW(draw.hwndItem, WM_GETFONT, 0, 0));
+        const HGDIOBJ previous =
+            font == nullptr ? nullptr : SelectObject(draw.hDC, font);
+        RECT text = draw.rcItem;
+        DrawTextW(
+            draw.hDC,
+            UiText(entry->fallback_label),
+            -1,
+            &text,
+            DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        if (previous != nullptr) {
+            SelectObject(draw.hDC, previous);
+        }
     }
     if ((draw.itemState & ODS_FOCUS) != 0U) {
         RECT focus = draw.rcItem;

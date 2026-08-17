@@ -10,6 +10,7 @@ IDI_APP_ICON ICON "../package/Assets/app.ico"
 IDR_MANUAL_HTML RCDATA "../../../html/manual.html"
 IDR_FILE_FORMAT_HTML RCDATA "../../../html/file_format.html"
 IDR_ACKNOWLEDGEMENTS_HTML RCDATA "../../../html/acknowledgements.html"
+IDR_FLUENT_ICON_MASK_ATLAS RCDATA "../ui/icons/fluent/fluent_icon_masks.bin"
 
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION INKPOD_VERSION_RESOURCE
