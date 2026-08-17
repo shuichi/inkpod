@@ -31,7 +31,7 @@ struct CommandState {
     bool checked{};
 };
 
-inline constexpr std::size_t kProductionCommandStateCount = 384U;
+inline constexpr std::size_t kProductionCommandStateCount = 387U;
 using CommandStateSet = std::array<CommandState, kProductionCommandStateCount>;
 
 struct DocumentCommandStateInput {
@@ -151,6 +151,9 @@ struct WorkspaceCommandStateInput {
     bool batch_target_available{};
     bool batch_pinned{};
     bool job_progress_visible{};
+    bool coloring_tool_tab_visible{true};
+    bool reference_tool_tab_visible{true};
+    bool workflow_tool_tab_visible{true};
     bool mirrored{};
     std::uint32_t selected_workspace_preset{};
     bool locator_auto_hidden{};

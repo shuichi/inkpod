@@ -23,6 +23,8 @@ using inkpod::windows::ui::DockResult;
 using inkpod::windows::ui::DockStackMode;
 using inkpod::windows::ui::DockZone;
 using inkpod::windows::ui::PaneDescriptors;
+using inkpod::windows::ui::RightToolTabsModel;
+using inkpod::windows::ui::ToolTabResult;
 using inkpod::windows::ui::ApplyWorkspacePreset;
 using inkpod::windows::ui::ClampWorkspaceFloatingPanes;
 using inkpod::windows::ui::ClampWorkspacePlacement;
@@ -44,6 +46,9 @@ using inkpod::windows::ui::WorkspaceWorkArea;
 using inkpod::windows::ui::kDockedZoneCount;
 using inkpod::windows::ui::kDockPaneCount;
 using inkpod::windows::ui::kMaximumWorkspaceLayoutRecordBytes;
+using inkpod::windows::ui::kToolTabColoring;
+using inkpod::windows::ui::kToolTabReference;
+using inkpod::windows::ui::kToolTabWorkflow;
 
 int Width(const RECT& value) noexcept {
     return value.right - value.left;
@@ -180,6 +185,123 @@ int main() {
         || job_descriptor.can_auto_hide
         || !job_descriptor.show_header_when_singleton) {
         return 1;
+    }
+
+    RightToolTabsModel tool_tabs{};
+    if (tool_tabs.Tabs().size() != 3U
+        || tool_tabs.Selected() != kToolTabColoring
+        || !tool_tabs.IsVisible(kToolTabColoring)
+        || !tool_tabs.IsVisible(kToolTabReference)
+        || !tool_tabs.IsVisible(kToolTabWorkflow)
+        || tool_tabs.TabForPane(DockPaneType::Color) != kToolTabColoring
+        || tool_tabs.TabForPane(DockPaneType::Locator) != kToolTabReference
+        || tool_tabs.TabForPane(DockPaneType::Batch) != kToolTabWorkflow) {
+        return 120;
+    }
+    if (tool_tabs.MovePane(DockPaneType::Color, kToolTabReference)
+            != ToolTabResult::Ok
+        || tool_tabs.TabForPane(DockPaneType::Color) != kToolTabReference
+        || tool_tabs.MovePane(DockPaneType::Color, kToolTabReference)
+            != ToolTabResult::NoOp
+        || tool_tabs.SetSelected(kToolTabReference) != ToolTabResult::Ok
+        || tool_tabs.SetVisible(kToolTabReference, false) != ToolTabResult::Ok
+        || tool_tabs.Selected() != kToolTabWorkflow
+        || tool_tabs.SetVisible(kToolTabWorkflow, false) != ToolTabResult::Ok
+        || tool_tabs.Selected() != kToolTabColoring
+        || tool_tabs.SetVisible(kToolTabColoring, false) != ToolTabResult::Ok
+        || tool_tabs.Selected()
+        || tool_tabs.HasVisibleTabs()
+        || tool_tabs.SetVisible(kToolTabReference, true) != ToolTabResult::Ok
+        || tool_tabs.Selected() != kToolTabReference) {
+        return 121;
+    }
+    tool_tabs.Reset();
+    if (tool_tabs.Reorder(kToolTabColoring, kToolTabWorkflow, true)
+            != ToolTabResult::Ok
+        || tool_tabs.Tabs()[0].id != kToolTabReference
+        || tool_tabs.Tabs()[1].id != kToolTabWorkflow
+        || tool_tabs.Tabs()[2].id != kToolTabColoring
+        || tool_tabs.Reorder(kToolTabColoring, kToolTabReference, false)
+            != ToolTabResult::Ok
+        || tool_tabs.Tabs()[0].id != kToolTabColoring
+        || tool_tabs.Tabs()[1].id != kToolTabReference
+        || tool_tabs.Tabs()[2].id != kToolTabWorkflow) {
+        return 122;
+    }
+    RightToolTabsModel empty_tab_model{};
+    DockLayoutModel empty_tab_dock{};
+    if (empty_tab_model.MovePane(DockPaneType::Tool, kToolTabReference)
+            != ToolTabResult::Ok
+        || empty_tab_model.MovePane(DockPaneType::Color, kToolTabReference)
+            != ToolTabResult::Ok
+        || empty_tab_model.MovePane(DockPaneType::Layer, kToolTabReference)
+            != ToolTabResult::Ok) {
+        return 123;
+    }
+    const auto empty_tab_geometry = ComputeDockLayout(
+        empty_tab_dock, 1'200, 720, 96U, &empty_tab_model);
+    if (empty_tab_geometry.right_tool_tabs.height != 28
+        || empty_tab_geometry.zones[
+               static_cast<std::size_t>(DockZone::Right)].width
+            != 320
+        || empty_tab_geometry.panes[
+               static_cast<std::size_t>(DockPaneType::Color)].shown
+        || empty_tab_geometry.panes[
+               static_cast<std::size_t>(DockPaneType::Layer)].shown) {
+        return 124;
+    }
+    if (empty_tab_model.SetSelected(kToolTabReference) != ToolTabResult::Ok
+        || empty_tab_dock.RestorePane(DockPaneType::Locator) != DockResult::Ok
+        || empty_tab_dock.RestorePane(DockPaneType::LightTable)
+            != DockResult::Ok
+        || empty_tab_dock.RestorePane(DockPaneType::Reference)
+            != DockResult::Ok) {
+        return 125;
+    }
+    const auto reference_geometry = ComputeDockLayout(
+        empty_tab_dock, 1'200, 720, 96U, &empty_tab_model);
+    if (!reference_geometry.panes[
+             static_cast<std::size_t>(DockPaneType::Color)].shown
+        || !reference_geometry.panes[
+             static_cast<std::size_t>(DockPaneType::Layer)].shown
+        || !reference_geometry.panes[
+             static_cast<std::size_t>(DockPaneType::Locator)].shown
+        || !reference_geometry.panes[
+             static_cast<std::size_t>(DockPaneType::LightTable)].shown
+        || !reference_geometry.panes[
+             static_cast<std::size_t>(DockPaneType::Reference)].shown
+        || reference_geometry.panes[
+               static_cast<std::size_t>(DockPaneType::Locator)].bounds.height
+            <= 0
+        || reference_geometry.panes[
+               static_cast<std::size_t>(DockPaneType::LightTable)].bounds.height
+            <= 0
+        || reference_geometry.panes[
+               static_cast<std::size_t>(DockPaneType::Reference)].bounds.height
+            <= 0) {
+        return 126;
+    }
+    const std::array<DockPaneType, 5U> constrained_right_panes{
+        DockPaneType::Locator,
+        DockPaneType::LightTable,
+        DockPaneType::Reference,
+        DockPaneType::Color,
+        DockPaneType::Layer};
+    for (const DockPaneType type : constrained_right_panes) {
+        auto* pane = empty_tab_dock.Pane(type);
+        if (pane == nullptr) {
+            return 127;
+        }
+        pane->split_weight = type == DockPaneType::Locator ? 100'000U : 100U;
+    }
+    const auto constrained_geometry = ComputeDockLayout(
+        empty_tab_dock, 1'200, 180, 96U, &empty_tab_model);
+    for (const DockPaneType type : constrained_right_panes) {
+        const auto& pane = constrained_geometry.panes[
+            static_cast<std::size_t>(type)];
+        if (!pane.shown || pane.bounds.height <= 0) {
+            return 128;
+        }
     }
 
     DockLayoutModel auxiliary_model{};
@@ -392,7 +514,12 @@ int main() {
         || normal.editor.left != 84 || normal.editor.right != 876
         || color.bounds.x != 880 || color.bounds.width != 320
         || layer.bounds.x != 880 || layer.bounds.width != 320
-        || color.bounds.height != 234 || layer.bounds.height != 498
+        || normal.dock.right_tool_tabs.x != 880
+        || normal.dock.right_tool_tabs.y != 44
+        || normal.dock.right_tool_tabs.width != 320
+        || normal.dock.right_tool_tabs.height != 28
+        || color.bounds.y != 72 || layer.bounds.y != 301
+        || color.bounds.height != 225 || layer.bounds.height != 479
         || Height(normal.document_tabs) != 28
         || normal.canvas.top != normal.document_tabs.bottom) {
         return 9;
@@ -455,15 +582,14 @@ int main() {
         return 17;
     }
 
-    if (state.dock.SetZoneMode(DockZone::Right, DockStackMode::Tabs)
-            != DockResult::Ok
-        || state.dock.SetActiveTab(DockZone::Right, DockPaneType::Layer)
-            != DockResult::Ok) {
+    if (state.right_tool_tabs.SetSelected(kToolTabReference)
+            != ToolTabResult::Ok) {
         return 13;
     }
     const auto tabbed = ComputeWorkspaceLayout(1'200, 800, 0, 96U, state);
     if (tabbed.dock.panes[static_cast<std::size_t>(DockPaneType::Color)].shown
-        || !tabbed.dock.panes[static_cast<std::size_t>(DockPaneType::Layer)].shown
+        || tabbed.dock.panes[static_cast<std::size_t>(DockPaneType::Layer)].shown
+        || tabbed.dock.right_tool_tabs.height != 28
         || tabbed.dock.splitter_count >= normal.dock.splitter_count) {
         return 14;
     }
@@ -476,6 +602,16 @@ int main() {
         if (state.dock.HidePane(type) != DockResult::Ok) {
             return 15;
         }
+    }
+    if (state.right_tool_tabs.SetVisible(kToolTabColoring, false)
+            != ToolTabResult::Ok
+        || state.right_tool_tabs.SetVisible(kToolTabReference, false)
+            != ToolTabResult::Ok
+        || state.right_tool_tabs.SetVisible(kToolTabWorkflow, false)
+            != ToolTabResult::Ok
+        || state.right_tool_tabs.Selected()
+        || state.right_tool_tabs.HasVisibleTabs()) {
+        return 15;
     }
     const auto canvas_only = ComputeWorkspaceLayout(1'200, 800, 0, 96U, state);
     if (Width(canvas_only.editor) != 1'200 || Height(canvas_only.editor) != 800) {

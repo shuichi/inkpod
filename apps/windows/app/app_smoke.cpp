@@ -2472,12 +2472,141 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         || state.Workspace().windows.workspace.dock.IsPaneVisible(
             DockPaneType::Layer)
         || GetWindowRect(state.Workspace().windows.canvas, &workspace_canvas_bounds) == FALSE
+        || state.Workspace().windows.dock_host.ToolTabWindow() == nullptr
+        || IsWindowVisible(
+               state.Workspace().windows.dock_host.ToolTabWindow()) == FALSE
         || workspace_canvas_bounds.right - workspace_canvas_bounds.left
-            <= initial_canvas_width) {
+            != initial_canvas_width) {
         return 737;
     }
     SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_WINDOW_COLOR_PANE, 0);
     SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_WINDOW_LAYER_PALETTE, 0);
+    const HWND right_tool_tabs =
+        state.Workspace().windows.dock_host.ToolTabWindow();
+    if (right_tool_tabs == nullptr || TabCtrl_GetItemCount(right_tool_tabs) != 3
+        || state.Workspace().windows.workspace.right_tool_tabs.Selected()
+            != inkpod::windows::ui::kToolTabColoring
+        || GetWindowRect(state.Workspace().windows.canvas, &workspace_canvas_bounds)
+            == FALSE) {
+        return 11003;
+    }
+    const LONG docked_canvas_width =
+        workspace_canvas_bounds.right - workspace_canvas_bounds.left;
+    for (const UINT command : {
+             IDM_WINDOW_TOOL_TAB_COLORING,
+             IDM_WINDOW_TOOL_TAB_REFERENCE,
+             IDM_WINDOW_TOOL_TAB_WORKFLOW}) {
+        if (SendMessageW(
+                state.Workspace().windows.window, WM_COMMAND, command, 0)
+                != 1
+            || checked(command)) {
+            return 11004;
+        }
+    }
+    if (state.Workspace().windows.workspace.right_tool_tabs.Selected()
+        || state.Workspace().windows.workspace.right_tool_tabs.HasVisibleTabs()
+        || IsWindowVisible(right_tool_tabs) != FALSE
+        || GetWindowRect(state.Workspace().windows.canvas, &workspace_canvas_bounds)
+            == FALSE
+        || workspace_canvas_bounds.right - workspace_canvas_bounds.left
+            <= docked_canvas_width) {
+        return 11005;
+    }
+    for (const UINT command : {
+             IDM_WINDOW_TOOL_TAB_COLORING,
+             IDM_WINDOW_TOOL_TAB_REFERENCE,
+             IDM_WINDOW_TOOL_TAB_WORKFLOW}) {
+        if (SendMessageW(
+                state.Workspace().windows.window, WM_COMMAND, command, 0)
+                != 1
+            || !checked(command)) {
+            return 11006;
+        }
+    }
+    if (state.Workspace().windows.workspace.right_tool_tabs.Selected()
+            != inkpod::windows::ui::kToolTabColoring
+        || IsWindowVisible(right_tool_tabs) == FALSE
+        || TabCtrl_GetItemCount(right_tool_tabs) != 3) {
+        return 11007;
+    }
+    const auto drag_tool_tab = [right_tool_tabs](
+                                   int source,
+                                   int target,
+                                   bool after_target) noexcept {
+        RECT source_bounds{};
+        RECT target_bounds{};
+        if (TabCtrl_GetItemRect(right_tool_tabs, source, &source_bounds) == FALSE
+            || TabCtrl_GetItemRect(right_tool_tabs, target, &target_bounds)
+                == FALSE) {
+            return false;
+        }
+        const POINT start{
+            (source_bounds.left + source_bounds.right) / 2,
+            (source_bounds.top + source_bounds.bottom) / 2};
+        const POINT finish{
+            target_bounds.left
+                + (target_bounds.right - target_bounds.left)
+                    * (after_target ? 3 : 1) / 4,
+            (target_bounds.top + target_bounds.bottom) / 2};
+        SendMessageW(
+            right_tool_tabs,
+            WM_LBUTTONDOWN,
+            MK_LBUTTON,
+            MAKELPARAM(start.x, start.y));
+        SendMessageW(
+            right_tool_tabs,
+            WM_MOUSEMOVE,
+            MK_LBUTTON,
+            MAKELPARAM(finish.x, finish.y));
+        SendMessageW(
+            right_tool_tabs,
+            WM_LBUTTONUP,
+            0,
+            MAKELPARAM(finish.x, finish.y));
+        return true;
+    };
+    if (!drag_tool_tab(0, 2, true)
+        || state.Workspace().windows.workspace.right_tool_tabs.Tabs()[0].id
+            != inkpod::windows::ui::kToolTabReference
+        || state.Workspace().windows.workspace.right_tool_tabs.Tabs()[1].id
+            != inkpod::windows::ui::kToolTabWorkflow
+        || state.Workspace().windows.workspace.right_tool_tabs.Tabs()[2].id
+            != inkpod::windows::ui::kToolTabColoring) {
+        return 11010;
+    }
+    if (!drag_tool_tab(2, 0, false)
+        || state.Workspace().windows.workspace.right_tool_tabs.Tabs()[0].id
+            != inkpod::windows::ui::kToolTabColoring
+        || state.Workspace().windows.workspace.right_tool_tabs.Tabs()[1].id
+            != inkpod::windows::ui::kToolTabReference
+        || state.Workspace().windows.workspace.right_tool_tabs.Tabs()[2].id
+            != inkpod::windows::ui::kToolTabWorkflow) {
+        return 11011;
+    }
+    TabCtrl_SetCurSel(right_tool_tabs, 1);
+    SendMessageW(right_tool_tabs, WM_KEYUP, VK_RIGHT, 0);
+    if (state.Workspace().windows.workspace.right_tool_tabs.Selected()
+            != inkpod::windows::ui::kToolTabReference
+        || IsWindowVisible(
+               state.Workspace().windows.dock_host.ContentWindow(
+                   DockPaneType::Color)) != FALSE
+        || IsWindowVisible(
+               state.Workspace().windows.dock_host.ContentWindow(
+                   DockPaneType::Layer)) != FALSE) {
+        return 11008;
+    }
+    TabCtrl_SetCurSel(right_tool_tabs, 0);
+    SendMessageW(right_tool_tabs, WM_KEYUP, VK_LEFT, 0);
+    if (state.Workspace().windows.workspace.right_tool_tabs.Selected()
+            != inkpod::windows::ui::kToolTabColoring
+        || IsWindowVisible(
+               state.Workspace().windows.dock_host.ContentWindow(
+                   DockPaneType::Color)) == FALSE
+        || IsWindowVisible(
+               state.Workspace().windows.dock_host.ContentWindow(
+                   DockPaneType::Layer)) == FALSE) {
+        return 11009;
+    }
     const std::array<DockPaneType, 4U> dock_pane_types{
         DockPaneType::Tool,
         DockPaneType::ToolOptions,
@@ -10655,8 +10784,34 @@ int RunTabDragSmoke(ApplicationHost& state) noexcept {
     }
     TabCtrl_SetCurSel(group->document_tabs, 0);
     TabCtrl_SetCurFocus(group->document_tabs, 0);
+    RECT first_tab_bounds{};
     RECT second_tab_bounds{};
     RECT tab_client_bounds{};
+    RECT tab_parent_bounds{};
+    if (TabCtrl_GetItemRect(
+            group->document_tabs, 0, &first_tab_bounds) == FALSE
+        || TabCtrl_GetItemRect(
+            group->document_tabs, 1, &second_tab_bounds) == FALSE
+        || GetClientRect(GetParent(group->document_tabs), &tab_parent_bounds)
+            == FALSE) {
+        return 952;
+    }
+    const LONG source_midpoint =
+        (first_tab_bounds.left + first_tab_bounds.right) / 2;
+    const LONG desired_target = second_tab_bounds.left
+        + (second_tab_bounds.right - second_tab_bounds.left) * 3 / 4;
+    constexpr LONG kTestMargin = 16;
+    if (desired_target - source_midpoint + kTestMargin * 2
+        < tab_parent_bounds.right - tab_parent_bounds.left) {
+        SetWindowPos(
+            group->document_tabs,
+            nullptr,
+            kTestMargin - source_midpoint,
+            64,
+            std::max<LONG>(640, desired_target + kTestMargin),
+            32,
+            SWP_NOACTIVATE | SWP_NOZORDER);
+    }
     if (TabCtrl_GetItemRect(
             group->document_tabs, 1, &second_tab_bounds) == FALSE
         || GetClientRect(group->document_tabs, &tab_client_bounds) == FALSE) {

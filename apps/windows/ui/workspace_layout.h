@@ -9,6 +9,7 @@
 #include <string_view>
 
 #include "dock_layout.h"
+#include "right_tool_tabs.h"
 
 namespace inkpod::windows::ui {
 
@@ -92,6 +93,7 @@ enum class WorkspaceLayoutDecodeResult : std::uint8_t {
 
 struct WorkspaceLayoutState {
     DockLayoutModel dock{};
+    RightToolTabsModel right_tool_tabs{};
     // This is the internal layer/plane split inside the Layer pane, not a dock
     // geometry value.
     std::uint32_t layer_split_milli{550U};

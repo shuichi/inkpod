@@ -112,6 +112,9 @@ const wchar_t* GroupName(UINT command) noexcept {
                     || command == IDM_BATCH_PIN
                     || command == IDM_WINDOW_BATCH
                     || command == IDM_WINDOW_JOB_PROGRESS
+                    || command == IDM_WINDOW_TOOL_TAB_COLORING
+                    || command == IDM_WINDOW_TOOL_TAB_REFERENCE
+                    || command == IDM_WINDOW_TOOL_TAB_WORKFLOW
                 ? UiText(UiStringId::Text0133)
                 : UiText(UiStringId::Text0255);
         case 420: return UiText(UiStringId::Text0269);

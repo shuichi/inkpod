@@ -381,7 +381,11 @@ bool CreateMainChrome(
     windows.document_tabs = primary_group->document_tabs;
     windows.canvas = primary_group->canvas;
     if (windows.status_bar == nullptr || windows.document_tabs == nullptr
-        || !windows.dock_host.Initialize(windows.window, instance, windows.workspace.dock)) {
+        || !windows.dock_host.Initialize(
+            windows.window,
+            instance,
+            windows.workspace.dock,
+            windows.workspace.right_tool_tabs)) {
         return false;
     }
     for (std::size_t index = 0U; index < windows.auto_hide_buttons.size(); ++index) {

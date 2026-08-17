@@ -7,6 +7,8 @@ set(MODEL_HEADER "${UI_DIR}/dock_layout.h")
 set(MODEL_SOURCE "${UI_DIR}/dock_layout.cpp")
 set(HOST_HEADER "${UI_DIR}/dock_host.h")
 set(HOST_SOURCE "${UI_DIR}/dock_host.cpp")
+set(TOOL_TABS_HEADER "${UI_DIR}/right_tool_tabs.h")
+set(TOOL_TABS_SOURCE "${UI_DIR}/right_tool_tabs.cpp")
 set(MAIN_HEADER "${UI_DIR}/main_window.h")
 set(MAIN_SOURCE "${UI_DIR}/main_window.cpp")
 set(RUNTIME_SOURCE "${UI_DIR}/main_window_runtime.cpp")
@@ -27,6 +29,8 @@ foreach(FILE IN ITEMS
         "${MODEL_SOURCE}"
         "${HOST_HEADER}"
         "${HOST_SOURCE}"
+        "${TOOL_TABS_HEADER}"
+        "${TOOL_TABS_SOURCE}"
         "${MAIN_HEADER}"
         "${MAIN_SOURCE}"
         "${RUNTIME_SOURCE}"
@@ -177,7 +181,11 @@ foreach(REQUIRED IN ITEMS
         "ShowDockPreview"
         "PreviewZoneAt"
         "DockSplitterKind::StackBoundary"
-        "DockStackMode::Tabs"
+        "ApplyToolTabLayout"
+        "ToolTabSubclassProcedure"
+        "MovePaneToToolTab"
+        "DockMovePaneToTab"
+        "DockClose"
         "UpdateTabFont(GetDpiForWindow(owner_))"
         "UpdateTabFont(dpi_)"
         "WM_SETFONT"
@@ -186,6 +194,33 @@ foreach(REQUIRED IN ITEMS
     string(FIND "${HOST}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
         message(FATAL_ERROR "DockHost implementation is missing: ${REQUIRED}")
+    endif()
+endforeach()
+
+file(READ "${TOOL_TABS_HEADER}" TOOL_TABS_MODEL)
+file(READ "${TOOL_TABS_SOURCE}" TOOL_TABS_IMPLEMENTATION)
+foreach(REQUIRED IN ITEMS
+        "class RightToolTabsModel final"
+        "struct ToolTab final"
+        "ToolTabId id"
+        "bool visible"
+        "ToolTabId Selected"
+        "ToolTabResult MovePane"
+        "ToolTabResult Reorder")
+    string(FIND "${TOOL_TABS_MODEL}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR "Right tool-tab model is missing: ${REQUIRED}")
+    endif()
+endforeach()
+foreach(REQUIRED IN ITEMS
+        "kToolTabColoring"
+        "kToolTabReference"
+        "kToolTabWorkflow"
+        "SelectReplacement"
+        "std::rotate")
+    string(FIND "${TOOL_TABS_IMPLEMENTATION}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR "Right tool-tab implementation is missing: ${REQUIRED}")
     endif()
 endforeach()
 if(HOST MATCHES "WS_EX_TOPMOST" OR HOST MATCHES "WS_EX_PALETTEWINDOW"

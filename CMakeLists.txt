@@ -502,6 +502,8 @@ if(WIN32)
         apps/windows/ui/localization.h
         apps/windows/ui/dock_layout.cpp
         apps/windows/ui/dock_layout.h
+        apps/windows/ui/right_tool_tabs.cpp
+        apps/windows/ui/right_tool_tabs.h
         apps/windows/ui/workspace_layout.cpp
         apps/windows/ui/workspace_layout.h
         tests/windows_workspace_layout.cpp)
@@ -554,6 +556,8 @@ if(WIN32)
         apps/windows/ui/dock_layout.h
         apps/windows/ui/dock_host.cpp
         apps/windows/ui/dock_host.h
+        apps/windows/ui/right_tool_tabs.cpp
+        apps/windows/ui/right_tool_tabs.h
         apps/windows/ui/localization.cpp
         apps/windows/ui/localization.h
         apps/windows/ui/history_presentation.h
@@ -728,6 +732,8 @@ if(WIN32)
         apps/windows/ui/dock_layout.h
         apps/windows/ui/dock_host.cpp
         apps/windows/ui/dock_host.h
+        apps/windows/ui/right_tool_tabs.cpp
+        apps/windows/ui/right_tool_tabs.h
         apps/windows/ui/main_window.cpp
         apps/windows/ui/main_window_command_router.cpp
         apps/windows/ui/main_window_document_presenter.cpp

@@ -6685,6 +6685,15 @@ CommandStateInputs BuildCommandStateInputs(
     inputs.workspace.job_progress_visible =
         state.Workspace().windows.workspace.dock.IsPaneVisible(
             DockPaneType::JobProgress);
+    inputs.workspace.coloring_tool_tab_visible =
+        state.Workspace().windows.workspace.right_tool_tabs.IsVisible(
+            inkpod::windows::ui::kToolTabColoring);
+    inputs.workspace.reference_tool_tab_visible =
+        state.Workspace().windows.workspace.right_tool_tabs.IsVisible(
+            inkpod::windows::ui::kToolTabReference);
+    inputs.workspace.workflow_tool_tab_visible =
+        state.Workspace().windows.workspace.right_tool_tabs.IsVisible(
+            inkpod::windows::ui::kToolTabWorkflow);
     inputs.workspace.mirrored =
         state.Workspace().windows.workspace.dock.Mirrored();
     inputs.workspace.selected_workspace_preset = static_cast<std::uint32_t>(
@@ -19190,6 +19199,29 @@ std::optional<LRESULT> RouteApplicationCommand(
         return std::nullopt;
     }
     switch (LOWORD(wparam)) {
+        case IDM_WINDOW_TOOL_TAB_COLORING:
+        case IDM_WINDOW_TOOL_TAB_REFERENCE:
+        case IDM_WINDOW_TOOL_TAB_WORKFLOW: {
+            inkpod::windows::ui::ToolTabId tab{};
+            switch (LOWORD(wparam)) {
+                case IDM_WINDOW_TOOL_TAB_COLORING:
+                    tab = inkpod::windows::ui::kToolTabColoring;
+                    break;
+                case IDM_WINDOW_TOOL_TAB_REFERENCE:
+                    tab = inkpod::windows::ui::kToolTabReference;
+                    break;
+                case IDM_WINDOW_TOOL_TAB_WORKFLOW:
+                    tab = inkpod::windows::ui::kToolTabWorkflow;
+                    break;
+                default:
+                    break;
+            }
+            return state->Workspace().windows.dock_host
+                           .ToggleToolTabVisibility(tab)
+                    == inkpod::windows::ui::ToolTabResult::Ok
+                ? 1
+                : 0;
+        }
         case IDM_FILE_NEW_CUT: {
             const InkpodStatus status = CreateNewCut(*state, window);
             if (status != INKPOD_STATUS_OK

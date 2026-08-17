@@ -21,17 +21,12 @@ constexpr wchar_t kFloatingPaneClass[] = L"InkpodFloatingDockPaneV1";
 constexpr UINT_PTR kPaneSubclass = 1U;
 constexpr UINT_PTR kSplitterSubclass = 1U;
 constexpr UINT_PTR kTabSubclass = 1U;
+constexpr UINT_PTR kToolTabSubclass = 1U;
 constexpr int kTabHeightDip = 28;
 
-constexpr UINT kContextDockTop = 1U;
-constexpr UINT kContextDockLeft = 2U;
-constexpr UINT kContextDockRight = 3U;
-constexpr UINT kContextDockBottom = 4U;
-constexpr UINT kContextFloat = 5U;
-constexpr UINT kContextHide = 6U;
-constexpr UINT kContextReset = 7U;
-constexpr UINT kContextSplit = 8U;
-constexpr UINT kContextTabs = 9U;
+constexpr UINT kContextFloat = 1U;
+constexpr UINT kContextClose = 2U;
+constexpr UINT kContextMoveFirst = 100U;
 
 int ScaleDip(int value, UINT dpi) noexcept {
     return MulDiv(value, static_cast<int>(dpi == 0U ? 96U : dpi), 96);
@@ -90,16 +85,6 @@ void PlaceWindow(HWND window, const DockRect& bounds, bool visible) noexcept {
             | (show ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
 }
 
-const wchar_t* ZoneLabel(DockZone zone) noexcept {
-    switch (zone) {
-        case DockZone::TopContext: return UiText(UiStringId::DockTop);
-        case DockZone::Left: return UiText(UiStringId::DockLeft);
-        case DockZone::Right: return UiText(UiStringId::DockRight);
-        case DockZone::Bottom: return UiText(UiStringId::DockBottom);
-        default: return UiText(UiStringId::DockGeneric);
-    }
-}
-
 const wchar_t* LoadPaneTitle(
     HINSTANCE instance,
     const PaneDescriptor& descriptor,
@@ -114,26 +99,6 @@ const wchar_t* LoadPaneTitle(
         return buffer;
     }
     return descriptor.fallback_title;
-}
-
-UINT ZoneCommand(DockZone zone) noexcept {
-    switch (zone) {
-        case DockZone::TopContext: return kContextDockTop;
-        case DockZone::Left: return kContextDockLeft;
-        case DockZone::Right: return kContextDockRight;
-        case DockZone::Bottom: return kContextDockBottom;
-        default: return 0U;
-    }
-}
-
-DockZone CommandZone(UINT command) noexcept {
-    switch (command) {
-        case kContextDockTop: return DockZone::TopContext;
-        case kContextDockLeft: return DockZone::Left;
-        case kContextDockRight: return DockZone::Right;
-        case kContextDockBottom: return DockZone::Bottom;
-        default: return DockZone::Count;
-    }
 }
 
 const wchar_t* SplitterName(const DockSplitterGeometry& splitter) noexcept {
@@ -244,11 +209,17 @@ DockHost::~DockHost() noexcept {
             SendMessageW(tabs.control, WM_SETFONT, 0, FALSE);
         }
     }
+    if (right_tool_tab_control_ != nullptr) {
+        SendMessageW(right_tool_tab_control_, WM_SETFONT, 0, FALSE);
+    }
     DeleteObject(tab_font_);
 }
 
 bool DockHost::Initialize(
-    HWND owner, HINSTANCE instance, DockLayoutModel& model) noexcept {
+    HWND owner,
+    HINSTANCE instance,
+    DockLayoutModel& model,
+    RightToolTabsModel& right_tool_tabs) noexcept {
     if (initialized_ || owner == nullptr || instance == nullptr) {
         return false;
     }
@@ -266,6 +237,7 @@ bool DockHost::Initialize(
     owner_ = owner;
     instance_ = instance;
     model_ = &model;
+    right_tool_tabs_ = &right_tool_tabs;
     preview_ = CreateWindowExW(
         WS_EX_TRANSPARENT | WS_EX_NOACTIVATE,
         L"STATIC",
@@ -331,6 +303,30 @@ bool DockHost::Initialize(
             return false;
         }
     }
+    right_tool_tab_control_ = CreateWindowExW(
+        0,
+        WC_TABCONTROLW,
+        nullptr,
+        WS_CHILD | WS_CLIPSIBLINGS | WS_TABSTOP | TCS_SINGLELINE,
+        0,
+        0,
+        0,
+        0,
+        owner_,
+        nullptr,
+        instance_,
+        nullptr);
+    if (right_tool_tab_control_ == nullptr
+        || SetWindowSubclass(
+               right_tool_tab_control_,
+               ToolTabSubclassProcedure,
+               kToolTabSubclass,
+               reinterpret_cast<DWORD_PTR>(this))
+            == FALSE) {
+        return false;
+    }
+    SetAccessibleName(
+        right_tool_tab_control_, UiText(UiStringId::RightToolTabsAccessibleName));
     if (!UpdateTabFont(GetDpiForWindow(owner_))) {
         return false;
     }
@@ -372,6 +368,7 @@ void DockHost::ApplyLayout(
     geometry_ = geometry;
     dpi_ = dpi == 0U ? 96U : dpi;
     static_cast<void>(UpdateTabFont(dpi_));
+    ApplyToolTabLayout();
     for (TabHostState& tabs : tab_states_) {
         ApplyTabLayout(tabs);
     }
@@ -417,6 +414,11 @@ DockResult DockHost::TogglePane(DockPaneType type) noexcept {
         ? model_->HidePane(type)
         : model_->RestorePane(type);
     if (result == DockResult::Ok) {
+        const DockPanePlacement* pane = model_->Pane(type);
+        if (pane != nullptr && pane->zone == DockZone::Right
+            && right_tool_tabs_ != nullptr) {
+            SelectVisibleToolTabForPane(type);
+        }
         NotifyChanged();
     }
     return result;
@@ -428,6 +430,9 @@ DockResult DockHost::DockPane(DockPaneType type, DockZone zone) noexcept {
     }
     const DockResult result = model_->MovePane(type, zone);
     if (result == DockResult::Ok) {
+        if (zone == DockZone::Right && right_tool_tabs_ != nullptr) {
+            SelectVisibleToolTabForPane(type);
+        }
         NotifyChanged();
     }
     return result;
@@ -480,6 +485,11 @@ DockResult DockHost::RestorePane(DockPaneType type) noexcept {
     }
     const DockResult result = model_->RestorePane(type);
     if (result == DockResult::Ok) {
+        const DockPanePlacement* pane = model_->Pane(type);
+        if (pane != nullptr && pane->zone == DockZone::Right
+            && right_tool_tabs_ != nullptr) {
+            SelectVisibleToolTabForPane(type);
+        }
         NotifyChanged();
     }
     return result;
@@ -491,6 +501,11 @@ DockResult DockHost::ResetPane(DockPaneType type) noexcept {
     }
     const DockResult result = model_->ResetPane(type);
     if (result == DockResult::Ok) {
+        const DockPanePlacement* pane = model_->Pane(type);
+        if (pane != nullptr && pane->zone == DockZone::Right
+            && right_tool_tabs_ != nullptr) {
+            SelectVisibleToolTabForPane(type);
+        }
         NotifyChanged();
     }
     return result;
@@ -517,14 +532,44 @@ DockResult DockHost::ActivatePane(DockPaneType type) noexcept {
         return DockResult::InvalidState;
     }
     const DockZone zone = pane->zone;
+    bool tool_tab_changed{};
+    if (zone == DockZone::Right && right_tool_tabs_ != nullptr) {
+        const ToolTabId tab = right_tool_tabs_->TabForPane(type);
+        if (tab && right_tool_tabs_->IsVisible(tab)) {
+            tool_tab_changed = right_tool_tabs_->SetSelected(tab)
+                == ToolTabResult::Ok;
+        }
+    }
     if (model_->StackPaneCount(zone, pane->stack) < 2U) {
+        if (tool_tab_changed) {
+            NotifyChanged();
+            return DockResult::Ok;
+        }
         return DockResult::NoOp;
     }
     const DockResult active_result = model_->SetActiveTab(zone, type);
-    if (active_result == DockResult::Ok) {
+    if (active_result == DockResult::Ok || tool_tab_changed) {
         NotifyChanged();
     }
-    return active_result;
+    return tool_tab_changed && active_result == DockResult::NoOp
+        ? DockResult::Ok
+        : active_result;
+}
+
+ToolTabResult DockHost::ToggleToolTabVisibility(ToolTabId id) noexcept {
+    if (right_tool_tabs_ == nullptr) {
+        return ToolTabResult::InvalidTab;
+    }
+    const ToolTabResult result = right_tool_tabs_->SetVisible(
+        id, !right_tool_tabs_->IsVisible(id));
+    if (result == ToolTabResult::Ok) {
+        NotifyChanged();
+    }
+    return result;
+}
+
+bool DockHost::ToolTabVisible(ToolTabId id) const noexcept {
+    return right_tool_tabs_ != nullptr && right_tool_tabs_->IsVisible(id);
 }
 
 HWND DockHost::FloatingWindow(DockPaneType type) const noexcept {
@@ -560,8 +605,12 @@ HWND DockHost::HeaderWindow(DockPaneType type) const noexcept {
     if (pane == nullptr || !pane->present || !IsDockedZone(pane->zone)) {
         return nullptr;
     }
+    const std::uint8_t header_stack = pane->zone == DockZone::Right
+            && right_tool_tabs_ != nullptr
+        ? static_cast<std::uint8_t>(PaneIndex(type))
+        : pane->stack;
     for (const TabHostState& tabs : tab_states_) {
-        if (tabs.zone == pane->zone && tabs.stack == pane->stack) {
+        if (tabs.zone == pane->zone && tabs.stack == header_stack) {
             return tabs.control;
         }
     }
@@ -767,6 +816,49 @@ bool DockHost::ShouldShowStackHeader(
     return false;
 }
 
+bool DockHost::PaneInSelectedToolTab(DockPaneType type) const noexcept {
+    if (right_tool_tabs_ == nullptr) {
+        return true;
+    }
+    const ToolTab* selected = right_tool_tabs_->SelectedTab();
+    if (selected == nullptr) {
+        return false;
+    }
+    return std::find(
+               selected->panes.begin(),
+               selected->panes.begin()
+                   + static_cast<std::ptrdiff_t>(selected->pane_count),
+               type)
+        != selected->panes.begin()
+            + static_cast<std::ptrdiff_t>(selected->pane_count);
+}
+
+void DockHost::SelectVisibleToolTabForPane(DockPaneType type) noexcept {
+    if (right_tool_tabs_ == nullptr) {
+        return;
+    }
+    static_cast<void>(right_tool_tabs_->EnsurePaneAssigned(type));
+    const ToolTabId tab = right_tool_tabs_->TabForPane(type);
+    if (tab && right_tool_tabs_->IsVisible(tab)) {
+        static_cast<void>(right_tool_tabs_->SetSelected(tab));
+    }
+}
+
+bool DockHost::ShouldShowPaneHeader(DockPaneType type) const noexcept {
+    if (model_ == nullptr) {
+        return false;
+    }
+    const DockPanePlacement* pane = model_->Pane(type);
+    if (pane == nullptr || !pane->present || !IsDockedZone(pane->zone)) {
+        return false;
+    }
+    if (pane->zone != DockZone::Right || right_tool_tabs_ == nullptr) {
+        return ShouldShowStackHeader(pane->zone, pane->stack);
+    }
+    const PaneDescriptor* descriptor = FindPaneDescriptor(type);
+    return PaneInSelectedToolTab(type) && descriptor != nullptr;
+}
+
 bool DockHost::UpdateTabFont(UINT dpi) noexcept {
     const UINT normalized_dpi = dpi == 0U ? 96U : dpi;
     if (tab_font_ != nullptr && tab_font_dpi_ == normalized_dpi) {
@@ -798,6 +890,13 @@ bool DockHost::UpdateTabFont(UINT dpi) noexcept {
                 reinterpret_cast<WPARAM>(replacement),
                 TRUE);
         }
+    }
+    if (right_tool_tab_control_ != nullptr) {
+        SendMessageW(
+            right_tool_tab_control_,
+            WM_SETFONT,
+            reinterpret_cast<WPARAM>(replacement),
+            TRUE);
     }
     if (tab_font_ != nullptr) {
         DeleteObject(tab_font_);
@@ -878,8 +977,7 @@ void DockHost::ApplyPaneLayout(PaneHostState& pane) noexcept {
         SetParent(pane.content, owner_);
     }
     DockPaneGeometry geometry = geometry_.panes[PaneIndex(pane.type)];
-    if (ShouldShowStackHeader(placement->zone, placement->stack)
-        && geometry.shown) {
+    if (ShouldShowPaneHeader(pane.type) && geometry.shown) {
         const int tab_height = std::min(
             geometry.bounds.height, ScaleDip(kTabHeightDip, dpi_));
         geometry.bounds.y += tab_height;
@@ -893,6 +991,33 @@ void DockHost::ApplyPaneLayout(PaneHostState& pane) noexcept {
 
 void DockHost::ApplyTabLayout(TabHostState& tabs) noexcept {
     if (model_ == nullptr || !IsDockedZone(tabs.zone)) {
+        return;
+    }
+    if (tabs.zone == DockZone::Right && right_tool_tabs_ != nullptr) {
+        const auto type = static_cast<DockPaneType>(tabs.stack);
+        const DockPanePlacement* placement = model_->Pane(type);
+        const PaneDescriptor* descriptor = FindPaneDescriptor(type);
+        const DockPaneGeometry& pane_geometry = geometry_.panes[PaneIndex(type)];
+        const bool show = placement != nullptr && placement->present
+            && placement->zone == DockZone::Right && pane_geometry.shown
+            && !pane_geometry.temporarily_auto_hidden
+            && PaneInSelectedToolTab(type) && descriptor != nullptr;
+        if (!show) {
+            PlaceWindow(tabs.control, {}, false);
+            return;
+        }
+        TabCtrl_DeleteAllItems(tabs.control);
+        wchar_t title[128]{};
+        TCITEMW item{};
+        item.mask = TCIF_TEXT | TCIF_PARAM;
+        item.pszText = const_cast<wchar_t*>(
+            LoadPaneTitle(instance_, *descriptor, title));
+        item.lParam = static_cast<LPARAM>(type);
+        TabCtrl_InsertItem(tabs.control, 0, &item);
+        TabCtrl_SetCurSel(tabs.control, 0);
+        DockRect bounds = pane_geometry.bounds;
+        bounds.height = std::min(bounds.height, ScaleDip(kTabHeightDip, dpi_));
+        PlaceWindow(tabs.control, bounds, true);
         return;
     }
     const bool show = ShouldShowStackHeader(tabs.zone, tabs.stack)
@@ -949,6 +1074,34 @@ void DockHost::ApplyTabLayout(TabHostState& tabs) noexcept {
     PlaceWindow(tabs.control, bounds, true);
 }
 
+void DockHost::ApplyToolTabLayout() noexcept {
+    if (right_tool_tab_control_ == nullptr || right_tool_tabs_ == nullptr) {
+        return;
+    }
+    TabCtrl_DeleteAllItems(right_tool_tab_control_);
+    int selected = -1;
+    int visible_index{};
+    for (const ToolTab& tab : right_tool_tabs_->Tabs()) {
+        if (!tab.visible) {
+            continue;
+        }
+        TCITEMW item{};
+        item.mask = TCIF_TEXT | TCIF_PARAM;
+        item.pszText = const_cast<wchar_t*>(ToolTabTitle(tab));
+        item.lParam = static_cast<LPARAM>(tab.id.Value());
+        TabCtrl_InsertItem(right_tool_tab_control_, visible_index, &item);
+        if (tab.id == right_tool_tabs_->Selected()) {
+            selected = visible_index;
+        }
+        ++visible_index;
+    }
+    TabCtrl_SetCurSel(right_tool_tab_control_, selected);
+    PlaceWindow(
+        right_tool_tab_control_,
+        geometry_.right_tool_tabs,
+        visible_index > 0);
+}
+
 void DockHost::NotifyChanged() noexcept {
     if (!applying_ && changed_ != nullptr) {
         changed_(changed_context_);
@@ -957,7 +1110,8 @@ void DockHost::NotifyChanged() noexcept {
 
 void DockHost::ShowContextMenu(
     DockPaneType type, POINT screen) noexcept {
-    if (model_ == nullptr || FindPaneDescriptor(type) == nullptr) {
+    const PaneDescriptor* descriptor = FindPaneDescriptor(type);
+    if (model_ == nullptr || descriptor == nullptr) {
         return;
     }
     if (screen.x == -1 && screen.y == -1) {
@@ -971,19 +1125,39 @@ void DockHost::ShowContextMenu(
             (bounds.top + bounds.bottom) / 2};
     }
     HMENU menu = CreatePopupMenu();
-    if (menu == nullptr) {
+    HMENU move_menu = CreatePopupMenu();
+    if (menu == nullptr || move_menu == nullptr) {
+        if (menu != nullptr) {
+            DestroyMenu(menu);
+        }
+        if (move_menu != nullptr) {
+            DestroyMenu(move_menu);
+        }
         return;
     }
     const DockPanePlacement* pane = model_->Pane(type);
-    for (const DockZone zone : {
-             DockZone::TopContext, DockZone::Left, DockZone::Right, DockZone::Bottom}) {
-        if (!model_->IsZoneAllowed(type, zone)) {
-            continue;
+    std::array<ToolTabId, kMaximumToolTabs> destinations{};
+    std::size_t destination_count{};
+    const ToolTabId current_tab = right_tool_tabs_ == nullptr
+        ? ToolTabId{}
+        : right_tool_tabs_->TabForPane(type);
+    if (right_tool_tabs_ != nullptr) {
+        for (const ToolTab& tab : right_tool_tabs_->Tabs()) {
+            const UINT command = kContextMoveFirst
+                + static_cast<UINT>(destination_count);
+            const UINT flags = MF_STRING
+                | (tab.id == current_tab ? MF_CHECKED | MF_GRAYED : 0U);
+            AppendMenuW(move_menu, flags, command, ToolTabTitle(tab));
+            destinations[destination_count++] = tab.id;
         }
-        const UINT flags = MF_STRING
-            | (pane != nullptr && pane->zone == zone ? MF_CHECKED : 0U);
-        AppendMenuW(menu, flags, ZoneCommand(zone), ZoneLabel(zone));
     }
+    AppendMenuW(
+        menu,
+        MF_POPUP | (model_->IsZoneAllowed(type, DockZone::Right)
+                           ? MF_ENABLED
+                           : MF_GRAYED),
+        reinterpret_cast<UINT_PTR>(move_menu),
+        UiText(UiStringId::DockMovePaneToTab));
     AppendMenuW(menu, MF_SEPARATOR, 0U, nullptr);
     AppendMenuW(
         menu,
@@ -991,34 +1165,10 @@ void DockHost::ShowContextMenu(
             | (pane != nullptr && pane->zone == DockZone::Floating ? MF_CHECKED : 0U),
         kContextFloat,
         UiText(UiStringId::DockFloating));
-    const PaneDescriptor* descriptor = FindPaneDescriptor(type);
-    if (descriptor == nullptr || !descriptor->can_float) {
+    if (!descriptor->can_float) {
         EnableMenuItem(menu, kContextFloat, MF_BYCOMMAND | MF_GRAYED);
     }
-    if (pane != nullptr && IsDockedZone(pane->zone)
-        && model_->PaneCount(pane->zone) > 1U) {
-        const DockZoneState* zone = model_->Zone(pane->zone);
-        AppendMenuW(menu, MF_SEPARATOR, 0U, nullptr);
-        AppendMenuW(
-            menu,
-            MF_STRING
-                | (zone != nullptr && zone->mode == DockStackMode::Split
-                       ? MF_CHECKED
-                       : 0U),
-            kContextSplit,
-            UiText(UiStringId::DockSplitView));
-        AppendMenuW(
-            menu,
-            MF_STRING
-                | (zone != nullptr && zone->mode == DockStackMode::Tabs
-                       ? MF_CHECKED
-                       : 0U),
-            kContextTabs,
-            UiText(UiStringId::DockTabView));
-    }
-    AppendMenuW(menu, MF_SEPARATOR, 0U, nullptr);
-    AppendMenuW(menu, MF_STRING, kContextHide, UiText(UiStringId::DockHide));
-    AppendMenuW(menu, MF_STRING, kContextReset, UiText(UiStringId::DockResetPane));
+    AppendMenuW(menu, MF_STRING, kContextClose, UiText(UiStringId::DockClose));
     const UINT command = TrackPopupMenu(
         menu,
         TPM_RETURNCMD | TPM_RIGHTBUTTON,
@@ -1028,22 +1178,68 @@ void DockHost::ShowContextMenu(
         owner_,
         nullptr);
     DestroyMenu(menu);
-    const DockZone target = CommandZone(command);
-    if (target != DockZone::Count) {
-        static_cast<void>(DockPane(type, target));
+    if (command >= kContextMoveFirst
+        && command < kContextMoveFirst + destination_count) {
+        static_cast<void>(MovePaneToToolTab(
+            type, destinations[command - kContextMoveFirst]));
     } else if (command == kContextFloat) {
         static_cast<void>(FloatPane(type));
-    } else if (command == kContextHide) {
+    } else if (command == kContextClose) {
         static_cast<void>(HidePane(type));
-    } else if (command == kContextReset) {
-        static_cast<void>(ResetPane(type));
-    } else if (pane != nullptr && IsDockedZone(pane->zone)
-               && command == kContextSplit) {
-        static_cast<void>(SetZoneMode(pane->zone, DockStackMode::Split));
-    } else if (pane != nullptr && IsDockedZone(pane->zone)
-               && command == kContextTabs) {
-        static_cast<void>(SetZoneMode(pane->zone, DockStackMode::Tabs));
     }
+}
+
+ToolTabResult DockHost::MovePaneToToolTab(
+    DockPaneType type, ToolTabId destination) noexcept {
+    if (model_ == nullptr || right_tool_tabs_ == nullptr
+        || right_tool_tabs_->Find(destination) == nullptr
+        || !model_->IsZoneAllowed(type, DockZone::Right)) {
+        return ToolTabResult::InvalidTab;
+    }
+    const ToolTabId previous = right_tool_tabs_->TabForPane(type);
+    const ToolTabResult move_result = right_tool_tabs_->MovePane(
+        type, destination);
+    if (move_result != ToolTabResult::Ok) {
+        return move_result;
+    }
+    const DockPanePlacement* pane = model_->Pane(type);
+    if (pane == nullptr || pane->zone != DockZone::Right) {
+        const DockResult dock_result = model_->MovePane(type, DockZone::Right);
+        if (dock_result != DockResult::Ok && dock_result != DockResult::NoOp) {
+            if (previous) {
+                static_cast<void>(right_tool_tabs_->MovePane(type, previous));
+            }
+            return ToolTabResult::InvalidPane;
+        }
+    }
+    if (right_tool_tabs_->IsVisible(destination)) {
+        static_cast<void>(right_tool_tabs_->SetSelected(destination));
+    }
+    NotifyChanged();
+    return ToolTabResult::Ok;
+}
+
+std::array<DockPaneType, kDockPaneCount>
+DockHost::SelectedRightDockedPanes(std::size_t& count) const noexcept {
+    std::array<DockPaneType, kDockPaneCount> output{};
+    count = 0U;
+    if (model_ == nullptr || right_tool_tabs_ == nullptr) {
+        return output;
+    }
+    const ToolTab* selected = right_tool_tabs_->SelectedTab();
+    if (selected == nullptr) {
+        return output;
+    }
+    for (std::size_t index = 0U;
+         index < selected->pane_count && count < output.size();
+         ++index) {
+        const DockPaneType type = selected->panes[index];
+        const DockPanePlacement* pane = model_->Pane(type);
+        if (pane != nullptr && pane->present && pane->zone == DockZone::Right) {
+            output[count++] = type;
+        }
+    }
+    return output;
 }
 
 DockZone DockHost::PreviewZoneAt(
@@ -1138,6 +1334,9 @@ void DockHost::FinishFloatingMove(PaneHostState& pane) noexcept {
     if (target != DockZone::Count) {
         const DockResult result = model_->MovePane(pane.type, target);
         if (result == DockResult::Ok) {
+            if (target == DockZone::Right && right_tool_tabs_ != nullptr) {
+                SelectVisibleToolTabForPane(pane.type);
+            }
             NotifyChanged();
         }
         return;
@@ -1206,8 +1405,22 @@ void DockHost::UpdateStackBoundaryFromPoint(
     const int extent = std::max(1, horizontal ? zone.width : zone.height);
     splitter.last_screen = screen;
     const int delta_milli = delta * 1000 / extent;
-    const DockResult result = model_->AdjustSplitBoundary(
-        splitter.geometry.zone, splitter.geometry.boundary, delta_milli);
+    DockResult result = DockResult::InvalidState;
+    if (splitter.geometry.zone == DockZone::Right
+        && right_tool_tabs_ != nullptr) {
+        std::size_t count{};
+        const auto panes = SelectedRightDockedPanes(count);
+        const std::size_t boundary = splitter.geometry.boundary;
+        if (boundary + 1U < count) {
+            result = model_->AdjustPaneBoundary(
+                panes[boundary], panes[boundary + 1U], delta_milli);
+        }
+    } else {
+        result = model_->AdjustSplitBoundary(
+            splitter.geometry.zone,
+            splitter.geometry.boundary,
+            delta_milli);
+    }
     if (result == DockResult::Ok) {
         NotifyChanged();
     }
@@ -1229,6 +1442,27 @@ void DockHost::ActivateSelectedTab(TabHostState& tabs) noexcept {
     const DockResult result = model_->SetActiveTab(
         tabs.zone, static_cast<DockPaneType>(item.lParam));
     if (result == DockResult::Ok) {
+        NotifyChanged();
+    }
+}
+
+void DockHost::ActivateSelectedToolTab() noexcept {
+    if (applying_ || right_tool_tabs_ == nullptr
+        || right_tool_tab_control_ == nullptr) {
+        return;
+    }
+    const int selected = TabCtrl_GetCurSel(right_tool_tab_control_);
+    if (selected < 0) {
+        return;
+    }
+    TCITEMW item{};
+    item.mask = TCIF_PARAM;
+    if (TabCtrl_GetItem(right_tool_tab_control_, selected, &item) == FALSE) {
+        return;
+    }
+    const ToolTabResult result = right_tool_tabs_->SetSelected(
+        ToolTabId{static_cast<std::uint32_t>(item.lParam)});
+    if (result == ToolTabResult::Ok) {
         NotifyChanged();
     }
 }
@@ -1441,10 +1675,24 @@ LRESULT CALLBACK DockHost::SplitterSubclassProcedure(
             }
             DockResult result = DockResult::NoOp;
             if (splitter->geometry.kind == DockSplitterKind::StackBoundary) {
-                result = splitter->host->model_->AdjustSplitBoundary(
-                    splitter->geometry.zone,
-                    splitter->geometry.boundary,
-                    direction * 20);
+                if (splitter->geometry.zone == DockZone::Right
+                    && splitter->host->right_tool_tabs_ != nullptr) {
+                    std::size_t count{};
+                    const auto panes =
+                        splitter->host->SelectedRightDockedPanes(count);
+                    const std::size_t boundary = splitter->geometry.boundary;
+                    if (boundary + 1U < count) {
+                        result = splitter->host->model_->AdjustPaneBoundary(
+                            panes[boundary],
+                            panes[boundary + 1U],
+                            direction * 20);
+                    }
+                } else {
+                    result = splitter->host->model_->AdjustSplitBoundary(
+                        splitter->geometry.zone,
+                        splitter->geometry.boundary,
+                        direction * 20);
+                }
             } else {
                 const DockZoneState* zone = splitter->host->model_->Zone(
                     splitter->geometry.zone);
@@ -1483,6 +1731,18 @@ LRESULT CALLBACK DockHost::TabSubclassProcedure(
     UINT_PTR,
     DWORD_PTR reference) noexcept {
     auto* tabs = reinterpret_cast<TabHostState*>(reference);
+    if (tabs != nullptr && tabs->host != nullptr
+        && message == WM_CONTEXTMENU) {
+        const int selected = TabCtrl_GetCurSel(window);
+        TCITEMW item{};
+        item.mask = TCIF_PARAM;
+        if (selected >= 0 && TabCtrl_GetItem(window, selected, &item) != FALSE) {
+            tabs->host->ShowContextMenu(
+                static_cast<DockPaneType>(item.lParam),
+                POINT{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)});
+            return 0;
+        }
+    }
     const LRESULT result = DefSubclassProc(window, message, wparam, lparam);
     if (tabs != nullptr && tabs->host != nullptr
         && (message == WM_LBUTTONUP || message == WM_KEYUP)) {
@@ -1493,6 +1753,72 @@ LRESULT CALLBACK DockHost::TabSubclassProcedure(
         if (tabs != nullptr) {
             tabs->control = nullptr;
         }
+    }
+    return result;
+}
+
+LRESULT CALLBACK DockHost::ToolTabSubclassProcedure(
+    HWND window,
+    UINT message,
+    WPARAM wparam,
+    LPARAM lparam,
+    UINT_PTR,
+    DWORD_PTR reference) noexcept {
+    auto* host = reinterpret_cast<DockHost*>(reference);
+    if (host == nullptr) {
+        return DefSubclassProc(window, message, wparam, lparam);
+    }
+    if (message == WM_LBUTTONDOWN) {
+        TCHITTESTINFO hit{};
+        hit.pt = POINT{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+        const int index = TabCtrl_HitTest(window, &hit);
+        TCITEMW item{};
+        item.mask = TCIF_PARAM;
+        if (index >= 0 && TabCtrl_GetItem(window, index, &item) != FALSE) {
+            host->dragging_tool_tab_ = ToolTabId{
+                static_cast<std::uint32_t>(item.lParam)};
+            SetCapture(window);
+        }
+    }
+
+    const LRESULT result = DefSubclassProc(window, message, wparam, lparam);
+    if (message == WM_MOUSEMOVE && GetCapture() == window
+        && host->dragging_tool_tab_ && host->right_tool_tabs_ != nullptr) {
+        TCHITTESTINFO hit{};
+        hit.pt = POINT{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+        const int index = TabCtrl_HitTest(window, &hit);
+        TCITEMW item{};
+        item.mask = TCIF_PARAM;
+        RECT bounds{};
+        if (index >= 0 && TabCtrl_GetItem(window, index, &item) != FALSE
+            && TabCtrl_GetItemRect(window, index, &bounds) != FALSE) {
+            const ToolTabId target{static_cast<std::uint32_t>(item.lParam)};
+            if (target != host->dragging_tool_tab_) {
+                const bool after = hit.pt.x >= bounds.left
+                    + (bounds.right - bounds.left) / 2;
+                if (host->right_tool_tabs_->Reorder(
+                        host->dragging_tool_tab_, target, after)
+                    == ToolTabResult::Ok) {
+                    host->NotifyChanged();
+                }
+            }
+        }
+    }
+    if (message == WM_LBUTTONUP) {
+        if (GetCapture() == window) {
+            ReleaseCapture();
+        }
+        host->dragging_tool_tab_ = {};
+        host->ActivateSelectedToolTab();
+    } else if (message == WM_KEYUP) {
+        host->ActivateSelectedToolTab();
+    } else if (message == WM_CANCELMODE || message == WM_CAPTURECHANGED) {
+        host->dragging_tool_tab_ = {};
+    } else if (message == WM_NCDESTROY) {
+        RemoveWindowSubclass(
+            window, ToolTabSubclassProcedure, kToolTabSubclass);
+        host->right_tool_tab_control_ = nullptr;
+        host->dragging_tool_tab_ = {};
     }
     return result;
 }

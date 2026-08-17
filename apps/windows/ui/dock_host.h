@@ -6,6 +6,7 @@
 #include <cstddef>
 
 #include "dock_layout.h"
+#include "right_tool_tabs.h"
 
 namespace inkpod::windows::ui {
 
@@ -19,7 +20,10 @@ public:
     DockHost& operator=(const DockHost&) = delete;
 
     [[nodiscard]] bool Initialize(
-        HWND owner, HINSTANCE instance, DockLayoutModel& model) noexcept;
+        HWND owner,
+        HINSTANCE instance,
+        DockLayoutModel& model,
+        RightToolTabsModel& right_tool_tabs) noexcept;
     void SetChangedCallback(
         DockHostChangedCallback callback, void* context) noexcept;
     [[nodiscard]] bool AttachPane(DockPaneType type, HWND content) noexcept;
@@ -37,11 +41,17 @@ public:
     [[nodiscard]] DockResult SetZoneMode(
         DockZone zone, DockStackMode mode) noexcept;
     [[nodiscard]] DockResult ActivatePane(DockPaneType type) noexcept;
+    [[nodiscard]] ToolTabResult ToggleToolTabVisibility(
+        ToolTabId id) noexcept;
+    [[nodiscard]] bool ToolTabVisible(ToolTabId id) const noexcept;
 
     [[nodiscard]] HWND FloatingWindow(DockPaneType type) const noexcept;
     [[nodiscard]] HWND ContentWindow(DockPaneType type) const noexcept;
     [[nodiscard]] HWND HeaderWindow(DockPaneType type) const noexcept;
     [[nodiscard]] HWND TabWindow(DockZone zone) const noexcept;
+    [[nodiscard]] HWND ToolTabWindow() const noexcept {
+        return right_tool_tab_control_;
+    }
     [[nodiscard]] HWND SplitterWindow(
         DockZone zone, DockSplitterKind kind) const noexcept;
     [[nodiscard]] bool PreviewVisible() const noexcept;
@@ -98,6 +108,13 @@ private:
         LPARAM lparam,
         UINT_PTR subclass_id,
         DWORD_PTR reference) noexcept;
+    static LRESULT CALLBACK ToolTabSubclassProcedure(
+        HWND window,
+        UINT message,
+        WPARAM wparam,
+        LPARAM lparam,
+        UINT_PTR subclass_id,
+        DWORD_PTR reference) noexcept;
 
     [[nodiscard]] static std::size_t PaneIndex(DockPaneType type) noexcept;
     [[nodiscard]] PaneHostState* PaneState(DockPaneType type) noexcept;
@@ -107,9 +124,15 @@ private:
     void LayoutAutoHiddenContent(PaneHostState& pane) noexcept;
     [[nodiscard]] bool ShouldShowStackHeader(
         DockZone zone, std::uint8_t stack) const noexcept;
+    [[nodiscard]] bool ShouldShowPaneHeader(
+        DockPaneType type) const noexcept;
+    [[nodiscard]] bool PaneInSelectedToolTab(
+        DockPaneType type) const noexcept;
+    void SelectVisibleToolTabForPane(DockPaneType type) noexcept;
     [[nodiscard]] bool UpdateTabFont(UINT dpi) noexcept;
     void ApplyPaneLayout(PaneHostState& pane) noexcept;
     void ApplyTabLayout(TabHostState& tabs) noexcept;
+    void ApplyToolTabLayout() noexcept;
     void NotifyChanged() noexcept;
     void ShowContextMenu(DockPaneType type, POINT screen) noexcept;
     [[nodiscard]] DockZone PreviewZoneAt(
@@ -123,10 +146,16 @@ private:
     void UpdateStackBoundaryFromPoint(
         SplitterHostState& splitter, POINT screen) noexcept;
     void ActivateSelectedTab(TabHostState& tabs) noexcept;
+    void ActivateSelectedToolTab() noexcept;
+    [[nodiscard]] ToolTabResult MovePaneToToolTab(
+        DockPaneType type, ToolTabId destination) noexcept;
+    [[nodiscard]] std::array<DockPaneType, kDockPaneCount>
+    SelectedRightDockedPanes(std::size_t& count) const noexcept;
 
     HWND owner_{};
     HINSTANCE instance_{};
     DockLayoutModel* model_{};
+    RightToolTabsModel* right_tool_tabs_{};
     DockHostChangedCallback changed_{};
     void* changed_context_{};
     UINT dpi_{96U};
@@ -135,6 +164,8 @@ private:
     std::array<SplitterHostState, kMaximumDockSplitters> splitter_states_{};
     std::array<HWND, kMaximumDockSplitters> splitters_{};
     std::array<TabHostState, kMaximumDockTabStacks> tab_states_{};
+    HWND right_tool_tab_control_{};
+    ToolTabId dragging_tool_tab_{};
     HFONT tab_font_{};
     UINT tab_font_dpi_{};
     HWND preview_{};

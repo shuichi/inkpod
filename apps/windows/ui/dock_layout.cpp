@@ -8,12 +8,14 @@
 #include <initializer_list>
 
 #include "app/resource.h"
+#include "ui/right_tool_tabs.h"
 
 namespace inkpod::windows::ui {
 namespace {
 
 constexpr int kReferenceDpi = 96;
 constexpr int kSplitterDip = 4;
+constexpr int kToolTabHeightDip = 28;
 constexpr int kMinimumEditorWidthDip = 320;
 constexpr int kMinimumEditorHeightDip = 240;
 constexpr std::uint32_t kMinimumSplitWeight = 100U;
@@ -396,9 +398,34 @@ struct OrderedDockStack {
 std::array<OrderedDockStack, kDockPaneCount> OrderedStacks(
     const DockLayoutModel& model,
     DockZone zone,
-    std::size_t& count) noexcept {
+    std::size_t& count,
+    const RightToolTabsModel* right_tool_tabs = nullptr) noexcept {
     std::array<OrderedDockStack, kDockPaneCount> output{};
     count = 0U;
+    if (zone == DockZone::Right && right_tool_tabs != nullptr) {
+        const ToolTab* selected = right_tool_tabs->SelectedTab();
+        if (selected == nullptr) {
+            return output;
+        }
+        for (std::size_t index = 0U;
+             index < selected->pane_count && count < output.size();
+             ++index) {
+            const DockPaneType type = selected->panes[index];
+            const DockPanePlacement* pane = model.Pane(type);
+            if (pane == nullptr || !pane->present || pane->zone != zone) {
+                continue;
+            }
+            OrderedDockStack& stack = output[count];
+            stack.id = static_cast<std::uint8_t>(PaneIndex(type));
+            stack.order = static_cast<std::uint8_t>(count);
+            stack.split_weight = pane->split_weight;
+            stack.panes[0] = pane;
+            stack.pane_count = 1U;
+            stack.active = type;
+            ++count;
+        }
+        return output;
+    }
     std::size_t pane_count{};
     const auto panes = OrderedPanes(model, zone, pane_count);
     for (std::size_t pane_index = 0U; pane_index < pane_count; ++pane_index) {
@@ -464,12 +491,13 @@ void LayoutZone(
     DockZone zone,
     const DockRect& bounds,
     int splitter,
-    unsigned int dpi) noexcept {
+    unsigned int dpi,
+    const RightToolTabsModel* right_tool_tabs) noexcept {
     if (!HasArea(bounds)) {
         return;
     }
     std::size_t count{};
-    const auto stacks = OrderedStacks(model, zone, count);
+    const auto stacks = OrderedStacks(model, zone, count, right_tool_tabs);
     if (count == 0U) {
         return;
     }
@@ -504,6 +532,9 @@ void LayoutZone(
     int remaining = available;
     int remaining_minimum = minimum_total;
     std::uint64_t remaining_weight = std::max<std::uint64_t>(1U, weight_total);
+    const bool preserve_positive_right_panes = zone == DockZone::Right
+        && right_tool_tabs != nullptr
+        && available >= static_cast<int>(count);
     for (std::size_t index = 0U; index < count; ++index) {
         if (index + 1U == count) {
             sizes[index] = std::max(0, remaining);
@@ -512,10 +543,14 @@ void LayoutZone(
         const int raw = static_cast<int>(
             static_cast<std::int64_t>(remaining) * stacks[index].split_weight
             / static_cast<std::int64_t>(remaining_weight));
-        const int minimum = available >= minimum_total ? minimums[index] : 0;
+        const int minimum = available >= minimum_total
+            ? minimums[index]
+            : preserve_positive_right_panes ? 1 : 0;
         const int remaining_after_minimum = available >= minimum_total
             ? remaining_minimum - minimums[index]
-            : 0;
+            : preserve_positive_right_panes
+                ? static_cast<int>(count - index - 1U)
+                : 0;
         const int maximum = std::max(minimum, remaining - remaining_after_minimum);
         sizes[index] = std::clamp(raw, minimum, maximum);
         remaining -= sizes[index];
@@ -949,6 +984,35 @@ DockResult DockLayoutModel::AdjustSplitBoundary(
     return DockResult::Ok;
 }
 
+DockResult DockLayoutModel::AdjustPaneBoundary(
+    DockPaneType first,
+    DockPaneType second,
+    int delta_milli) noexcept {
+    DockPanePlacement* first_pane = Pane(first);
+    DockPanePlacement* second_pane = Pane(second);
+    if (first_pane == nullptr || second_pane == nullptr
+        || !first_pane->present || !second_pane->present
+        || first_pane->zone != DockZone::Right
+        || second_pane->zone != DockZone::Right) {
+        return DockResult::InvalidState;
+    }
+    if (delta_milli == 0) {
+        return DockResult::NoOp;
+    }
+    const int combined = static_cast<int>(
+        first_pane->split_weight + second_pane->split_weight);
+    const int adjusted = std::clamp(
+        static_cast<int>(first_pane->split_weight) + delta_milli,
+        static_cast<int>(kMinimumSplitWeight),
+        combined - static_cast<int>(kMinimumSplitWeight));
+    if (adjusted == static_cast<int>(first_pane->split_weight)) {
+        return DockResult::NoOp;
+    }
+    first_pane->split_weight = static_cast<std::uint32_t>(adjusted);
+    second_pane->split_weight = static_cast<std::uint32_t>(combined - adjusted);
+    return DockResult::Ok;
+}
+
 bool DockLayoutModel::IsPaneVisible(DockPaneType type) const noexcept {
     const DockPanePlacement* pane = Pane(type);
     return pane != nullptr && pane->present && pane->zone != DockZone::Hidden;
@@ -1252,7 +1316,8 @@ DockLayoutGeometry ComputeDockLayout(
     const DockLayoutModel& model,
     int width,
     int height,
-    unsigned int dpi) noexcept {
+    unsigned int dpi,
+    const RightToolTabsModel* right_tool_tabs) noexcept {
     DockLayoutGeometry output{};
     for (std::size_t index = 0U; index < kDockPaneCount; ++index) {
         output.panes[index].type = static_cast<DockPaneType>(index);
@@ -1265,7 +1330,9 @@ DockLayoutGeometry ComputeDockLayout(
     for (std::size_t index = 0U; index < kDockedZoneCount; ++index) {
         const DockZone zone = static_cast<DockZone>(index);
         const DockZoneState* state = model.Zone(zone);
-        active[index] = model.PaneCount(zone) > 0U;
+        active[index] = zone == DockZone::Right && right_tool_tabs != nullptr
+            ? right_tool_tabs->HasVisibleTabs()
+            : model.PaneCount(zone) > 0U;
         if (active[index] && state != nullptr) {
             extents[index] = ScaleDip(
                 std::max(state->extent_dip, MinimumZoneExtent(model, zone)), dpi);
@@ -1378,11 +1445,30 @@ DockLayoutGeometry ComputeDockLayout(
     place_side(DockZone::Left, !mirrored, left);
     place_side(DockZone::Right, mirrored, right);
 
+    if (active[ZoneIndex(DockZone::Right)] && right_tool_tabs != nullptr) {
+        DockRect& right_bounds = output.zones[ZoneIndex(DockZone::Right)];
+        const int tab_height = std::min(
+            right_bounds.height, ScaleDip(kToolTabHeightDip, dpi));
+        output.right_tool_tabs = DockRect{
+            right_bounds.x,
+            right_bounds.y,
+            right_bounds.width,
+            tab_height};
+        right_bounds.y += tab_height;
+        right_bounds.height = std::max(0, right_bounds.height - tab_height);
+    }
+
     for (std::size_t index = 0U; index < kDockedZoneCount; ++index) {
         const DockZone zone = static_cast<DockZone>(index);
         if (active[index]) {
             LayoutZone(
-                output, model, zone, output.zones[index], splitter, dpi);
+                output,
+                model,
+                zone,
+                output.zones[index],
+                splitter,
+                dpi,
+                right_tool_tabs);
         }
     }
     return output;

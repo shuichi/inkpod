@@ -750,6 +750,15 @@ void ProvideWorkspaceCommandStates(
     SetEnabled(states, IDM_BATCH_PIN, input.batch_target_available);
     SetChecked(
         states, IDM_WINDOW_JOB_PROGRESS, input.job_progress_visible);
+    SetChecked(
+        states, IDM_WINDOW_TOOL_TAB_COLORING,
+        input.coloring_tool_tab_visible);
+    SetChecked(
+        states, IDM_WINDOW_TOOL_TAB_REFERENCE,
+        input.reference_tool_tab_visible);
+    SetChecked(
+        states, IDM_WINDOW_TOOL_TAB_WORKFLOW,
+        input.workflow_tool_tab_visible);
     SetChecked(states, IDM_WORKSPACE_MIRROR, input.mirrored);
     SetChecked(
         states, IDM_WORKSPACE_PRESET_COLORING,

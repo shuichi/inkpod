@@ -8992,6 +8992,48 @@
       "ja": "試行のみ",
       "en": "Dry run",
       "resource": true
+    },
+    {
+      "id": "RightToolTabColoring",
+      "kind": "text",
+      "ja": "彩色",
+      "en": "Coloring",
+      "resource": true
+    },
+    {
+      "id": "RightToolTabReference",
+      "kind": "text",
+      "ja": "参照",
+      "en": "Reference",
+      "resource": true
+    },
+    {
+      "id": "RightToolTabWorkflow",
+      "kind": "text",
+      "ja": "進行管理",
+      "en": "Workflow",
+      "resource": true
+    },
+    {
+      "id": "RightToolTabsAccessibleName",
+      "kind": "text",
+      "ja": "ツールタブ",
+      "en": "Tool tabs",
+      "resource": false
+    },
+    {
+      "id": "DockMovePaneToTab",
+      "kind": "text",
+      "ja": "このペインを移動",
+      "en": "Move This Pane",
+      "resource": false
+    },
+    {
+      "id": "DockClose",
+      "kind": "text",
+      "ja": "閉じる",
+      "en": "Close",
+      "resource": false
     }
   ]
 }

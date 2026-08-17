@@ -6,6 +6,8 @@
 
 namespace inkpod::windows::ui {
 
+class RightToolTabsModel;
+
 enum class DockPaneType : std::uint8_t {
     Tool,
     ToolOptions,
@@ -160,6 +162,7 @@ struct DockSplitterGeometry {
 struct DockLayoutGeometry {
     DockRect editor{};
     std::array<DockRect, kDockedZoneCount> zones{};
+    DockRect right_tool_tabs{};
     std::array<DockPaneGeometry, kDockPaneCount> panes{};
     std::array<DockSplitterGeometry, kMaximumDockSplitters> splitters{};
     std::size_t splitter_count{};
@@ -191,6 +194,10 @@ public:
     [[nodiscard]] DockResult AdjustSplitBoundary(
         DockZone zone,
         std::uint8_t boundary,
+        int delta_milli) noexcept;
+    [[nodiscard]] DockResult AdjustPaneBoundary(
+        DockPaneType first,
+        DockPaneType second,
         int delta_milli) noexcept;
 
     void SetMirrored(bool mirrored) noexcept { mirrored_ = mirrored; }
@@ -228,6 +235,7 @@ PaneDescriptors() noexcept;
     const DockLayoutModel& model,
     int width,
     int height,
-    unsigned int dpi) noexcept;
+    unsigned int dpi,
+    const RightToolTabsModel* right_tool_tabs = nullptr) noexcept;
 
 }  // namespace inkpod::windows::ui
