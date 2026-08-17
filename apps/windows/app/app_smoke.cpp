@@ -12057,7 +12057,13 @@ int RunMultiWorkspaceWindowSmoke(ApplicationHost& state) noexcept {
     const DocumentSessionId isolated_session = state.Document().id;
     const DocumentViewId isolated_view = state.Document().ActiveView()->id;
     InkpodDocumentInfo isolated_before{};
+    InkpodSnapshotTransform isolated_edit_transform{};
     if (!QueryDocument(state, isolated_before)
+        || !DispatchEnabledCommand(
+               state, destination->windows.window, IDM_VIEW_FIT)
+        || !QuerySnapshotTransform(state, isolated_edit_transform)
+        || !std::isfinite(isolated_edit_transform.zoom)
+        || isolated_edit_transform.zoom <= 0.0
         || !DispatchEnabledCommand(
                state, destination->windows.window, IDM_PLANE_MAIN_LINE)
         || !DispatchEnabledCommand(
@@ -12066,33 +12072,89 @@ int RunMultiWorkspaceWindowSmoke(ApplicationHost& state) noexcept {
                destination->windows.canvas,
                WM_LBUTTONDOWN,
                MK_LBUTTON,
-               MAKELPARAM(120, 120)) != 1) {
+               MAKELPARAM(
+                   static_cast<int>(std::lround(
+                       isolated_edit_transform.pan_x
+                       + static_cast<double>(
+                             isolated_edit_transform.document_width)
+                           * isolated_edit_transform.zoom * 0.4)),
+                   static_cast<int>(std::lround(
+                       isolated_edit_transform.pan_y
+                       + static_cast<double>(
+                             isolated_edit_transform.document_height)
+                           * isolated_edit_transform.zoom * 0.5)))) != 1) {
         return 806;
     }
     SendMessageW(
         destination->windows.canvas,
         WM_MOUSEMOVE,
         MK_LBUTTON,
-        MAKELPARAM(180, 136));
-    SendMessageW(
-        destination->windows.canvas,
-        WM_LBUTTONUP,
-        0,
-        MAKELPARAM(220, 144));
-    if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+        MAKELPARAM(
+            static_cast<int>(std::lround(
+                isolated_edit_transform.pan_x
+                + static_cast<double>(isolated_edit_transform.document_width)
+                    * isolated_edit_transform.zoom * 0.5)),
+            static_cast<int>(std::lround(
+                isolated_edit_transform.pan_y
+                + static_cast<double>(isolated_edit_transform.document_height)
+                    * isolated_edit_transform.zoom * 0.5))));
+    if (SendMessageW(
+            destination->windows.canvas,
+            WM_LBUTTONUP,
+            0,
+            MAKELPARAM(
+                static_cast<int>(std::lround(
+                    isolated_edit_transform.pan_x
+                    + static_cast<double>(
+                          isolated_edit_transform.document_width)
+                        * isolated_edit_transform.zoom * 0.6)),
+                static_cast<int>(std::lround(
+                    isolated_edit_transform.pan_y
+                    + static_cast<double>(
+                          isolated_edit_transform.document_height)
+                        * isolated_edit_transform.zoom * 0.5)))) != 1
+        || state.engine->WaitIdle() != INKPOD_STATUS_OK) {
         return 807;
     }
     PumpPendingWindowMessages();
     InkpodDocumentInfo isolated_after{};
     InkpodDocumentInfo source_after_isolated_edit{};
-    if (!state.ActivateDocumentView(isolated_view)
-        || !QueryDocument(state, isolated_after)
+    const bool activated_isolated = state.ActivateDocumentView(isolated_view);
+    const bool queried_isolated = activated_isolated
+        && QueryDocument(state, isolated_after);
+    const bool activated_source_after_isolated_edit = queried_isolated
+        && state.ActivateDocumentView(source_view);
+    const bool queried_source_after_isolated_edit =
+        activated_source_after_isolated_edit
+        && QueryDocument(state, source_after_isolated_edit);
+    if (!queried_isolated
         || isolated_after.main_plane_checksum
             == isolated_before.main_plane_checksum
-        || !state.ActivateDocumentView(source_view)
-        || !QueryDocument(state, source_after_isolated_edit)
+        || !queried_source_after_isolated_edit
         || source_after_isolated_edit.main_plane_checksum
             != source_undo.main_plane_checksum) {
+        std::fprintf(
+            stderr,
+            "isolated workspace edit mismatch: activate_isolated=%d "
+            "query_isolated=%d checksum=%llu/%llu activate_source=%d "
+            "query_source=%d source_checksum=%llu/%llu zoom=%.6f "
+            "pan=%.3f,%.3f document=%u,%u\n",
+            activated_isolated ? 1 : 0,
+            queried_isolated ? 1 : 0,
+            static_cast<unsigned long long>(
+                isolated_after.main_plane_checksum),
+            static_cast<unsigned long long>(
+                isolated_before.main_plane_checksum),
+            activated_source_after_isolated_edit ? 1 : 0,
+            queried_source_after_isolated_edit ? 1 : 0,
+            static_cast<unsigned long long>(
+                source_after_isolated_edit.main_plane_checksum),
+            static_cast<unsigned long long>(source_undo.main_plane_checksum),
+            isolated_edit_transform.zoom,
+            isolated_edit_transform.pan_x,
+            isolated_edit_transform.pan_y,
+            isolated_edit_transform.document_width,
+            isolated_edit_transform.document_height);
         return 808;
     }
 

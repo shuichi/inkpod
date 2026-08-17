@@ -72,6 +72,14 @@ its compact historical record is retained in [`legacy.md`](legacy.md).
 
 ## Latest representative verification
 
+The latest Windows product-smoke hardening on 2026-08-18 replaces the
+multi-workspace isolated-document stroke's fixed client-pixel coordinates with
+document-relative points derived from the post-Fit snapshot transform. ARM64
+Debug rebuilt the executable, portable ZIP, and unsigned MSIX under MSVC
+`/W4 /WX` with static CRT; the English product smoke passed in 335.32 s and the
+Japanese product smoke passed in 343.86 s. Product behavior, Rust Core, C ABI,
+native/replay versions, and compatibility status are unchanged.
+
 The latest automatic work is the Windows Tool Options flyout slice on 2026-08-18. x64 Debug rebuilt the executable, four-file portable ZIP,
 and unsigned MSIX under MSVC `/W4 /WX` with static CRT. The complete 38-test split passed: the 35 non-product tests other than command-route
 inventory passed together in 186.29 s with ABI smoke at 169.71 s, the corrected command-route inventory passed independently, English product
