@@ -3051,7 +3051,7 @@ Version impact:
 - C ABI: 16（authority／plan／task／run／report symbol・record・callback・ownership/thread契約を追加、v15を拒否）
 ```
 
-### [~] M27A — Windows authority/file-identity adapter
+### [x] M27A — Windows authority/file-identity adapter
 
 **範囲**
 
@@ -3068,7 +3068,7 @@ Version impact:
 - open-session backing pathのaliasを含むoverwriteを拒否し、別file/sessionをread/replaceしない。
 - Rust Coreと公開DTOに`HANDLE`、Windows path token、reparse固有型が入らない。
 
-**実装・自動検証結果（2026-08-17、利用者確認待ち）**
+**実装・自動検証結果（2026-08-17、2026-08-18利用者確認済み）**
 
 - Windows private `InkScriptFileAuthorityAdapter`をpimpl／owner-thread ownerとして追加し、ABI v16の既存fixed DTO host
   callbackへ接続した。adapter recordのcontextはadapter lifetime中だけborrowし、構築・全操作・破棄を同じowner threadへ固定する。
@@ -3103,6 +3103,9 @@ Version impact:
   107.65秒、English smoke 357.66秒、Japanese smoke 359.46秒で、portable ZIP／MSIX payload smokeも成功した。
   最終のleast-privilege／overflow atomicity補強後にもx64／ARM64の製品とM27A test targetを再buildし、専用実filesystem
   CTestを各architectureで5回連続実行して全て成功した。
+- 2026-08-18の不具合報告を伴わない今回promptにより、前回最終報告のbinary確認は問題なしとして完了した。
+  M27Bの実経路接続時に、empty spanのcanonical zero stride、expected-absent parent generation、Replace grantの
+  file identity検証を補強した。いずれも既存ABI v16 DTO契約へのadapter適合修正であり、公開recordや意味論は変更していない。
 
 ```text
 Version impact:
@@ -3114,7 +3117,7 @@ Version impact:
 - C ABI: 16（既存host DTO callbackのWindows private実装だけを追加、symbol／record／ownership契約変更なし）
 ```
 
-### [ ] M27B — Windows Core engine routeとprivate smoke
+### [~] M27B — Windows Core engine routeとprivate smoke
 
 **範囲**
 
@@ -3127,6 +3130,37 @@ Version impact:
 - queue saturation、close中task、stale session、save failure、shutdown race testがある。
 - UI threadがCore execution、PlanTask、Presentを同期waitせず、wait_ms中もengineをblockしない。
 - smokeが実parser、catalog、executor、native writerを通る。
+
+**実装・自動検証結果（2026-08-18、利用者確認待ち）**
+
+- immutableな`CommandContext`、source／authority入力とjob IDをbounded `CoreHost` queueへ取り込み、source parse、static compile、
+  journal fragment export、PathIntent順のauthority grant、plan、confirmation、run、report releaseを同じCore engine threadへ固定した。
+  Rust ownerやC++ adapter pointerをUIへ渡さず、固定長diagnosticとplan／progress／terminal値だけをtokenized messageで返す。
+- 最大64 jobと既存4096 work上限を維持し、同一jobの未取得notificationを値更新してcoalesceする。`wait_ms`はdeadline付き再queueで
+  yieldし、待機中にも通常Core workを実行する。close／rebind／shutdown／explicit Cancelは待機deadlineとqueue saturationを越えて
+  owner threadでtaskをcancel／releaseし、stale `CommandContext`を現在activeな別sessionへ再解決しない。
+- private production smokeを`--abi-smoke-test`と`--smoke-test`へ接続し、exact-current parser／catalog／single canonical executor／
+  journal exporter／native v26 atomic writerを通す。通常Batch command、pane、file filter、clipboard、`.inkbatch` v2契約は変更していない。
+- Windows実経路contractはsuccess、duplicate／unknown no-op、invalid v1、Cancel、stale session、number overflow、resource上限、
+  atomic overwrite save failure、queue saturation、close中task、shutdown race、非blocking enqueue／confirm／`wait_ms`を検証する。
+  native outputはsave/reopen、Undo/Redo、cache-free full replay、ID high-watermark、document/editor savepointを検証する。
+- Rust format、全target／feature Clippy、workspace 624 non-doc tests（623成功、Release-only quick 1 ignored）、doctest 1、strict
+  rustdocが成功した。承認済みInkScript quickは全counterとchecksum `4401131d804c8eb7`を維持し、今回の
+  ARM64／Parallels sample 189,976,208 nsは変更していないx64 Ryzen envelopeの合否に使用しない。`core_workflows --quick`も
+  10 scenarioのsemantic checksumを維持した。
+- Windows ARM64 Debugをconfigureし、全target、static CRT、portable ZIP、unsigned MSIXを`/W4 /WX`でbuildした。全39 CTestは
+  792.10秒で成功し、M27B route 1.28秒、ABI smoke 112.17秒、English smoke 324.13秒、Japanese smoke 337.92秒だった。
+  既存CoreHost shutdown／race binaryも10回連続成功した。x64は今回再実行していない。
+
+```text
+Version impact:
+- Registry schema: 2（meta-schema／language core変更なし）
+- InkScript file: 2（grammar／serialized program変更なし、v1拒否を維持）
+- InkScript procedure catalog: 2（批准済み84-entry signature／semantics変更なし、v1拒否を維持）
+- replay epoch: 23（canonical replay semantics変更なし）
+- .inkpod top-level: 26（native schema／encoder／decoder変更なし）
+- C ABI: 16（既存ABI v16 symbol／record／ownership/thread契約を使用し、公開ABI変更なし）
+```
 
 ### [ ] M28A — private controller、source edit、file lifecycle
 

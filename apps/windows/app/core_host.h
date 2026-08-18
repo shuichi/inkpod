@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "command_context.h"
+#include "inkscript_engine_route.h"
 #include "inkpod/core_ffi.h"
 
 namespace inkpod::renderer {
@@ -20,6 +21,7 @@ namespace inkpod::app {
 
 inline constexpr UINT kCoreStateChanged = WM_APP + 0x160U;
 inline constexpr UINT kCoreAsyncFailed = WM_APP + 0x161U;
+inline constexpr UINT kCoreInkScriptNotification = WM_APP + 0x162U;
 
 enum class StrokeEventKind : std::uint32_t {
     Begin,
@@ -65,6 +67,7 @@ struct CoreSessionState {
 enum class CoreNotificationKind : std::uint8_t {
     StateChanged,
     AsyncFailed,
+    InkScript,
 };
 
 struct CoreNotification {
@@ -72,6 +75,7 @@ struct CoreNotification {
     CoreNotificationKind kind{CoreNotificationKind::StateChanged};
     CommandContext context;
     InkpodStatus status{INKPOD_STATUS_OK};
+    InkScriptEngineResult inkscript;
 };
 
 // Owns every InkpodCore on one engine thread. Public calls capture a
@@ -151,6 +155,17 @@ public:
         bool refresh_document_info,
         bool defer_during_active_stroke,
         std::function<void(InkpodStatus)> completion = {}) noexcept;
+    // Captures one private InkScript request without synchronously waiting for
+    // parse/compile/plan/run. PlanReady and terminal results are delivered as
+    // pointer-free kCoreInkScriptNotification values.
+    bool EnqueueInkScript(InkScriptEngineRequest request) noexcept;
+    bool ConfirmInkScript(
+        std::uint64_t job_id,
+        const CommandContext& context,
+        std::uint32_t scope) noexcept;
+    bool CancelInkScript(
+        std::uint64_t job_id,
+        const CommandContext& context) noexcept;
     bool EnqueueStroke(StrokeEvent event) noexcept;
     InkpodStatus WaitIdle() noexcept;
     InkpodStatus WaitIdle(

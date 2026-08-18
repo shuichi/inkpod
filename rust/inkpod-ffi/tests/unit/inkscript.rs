@@ -706,7 +706,7 @@ impl ExecutionHostPath {
             object_generation: if absent { 0 } else { 1 },
             alias_key: [if absent { 10 } else { object }; 32],
             parent_object_id: [parent; 32],
-            parent_generation: 1,
+            parent_generation: if absent { 7 } else { 1 },
             parent_alias_key: [parent.saturating_add(1); 32],
             flags: if absent {
                 INKPOD_INKSCRIPT_PATH_EXPECTED_ABSENT
@@ -760,7 +760,7 @@ impl ExecutionHost {
             temporary: InkpodInkScriptTemporaryIdentity {
                 volume_id: [1; 16],
                 parent_object_id: [60; 32],
-                parent_generation: 1,
+                parent_generation: 7,
                 object_id: [88; 32],
                 object_generation: 1,
             },

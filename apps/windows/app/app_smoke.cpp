@@ -33,6 +33,7 @@
 #include "canvas.h"
 #include "app/clipboard_adapter.h"
 #include "app/core_host.h"
+#include "app/inkscript_engine_smoke.h"
 #include "app/document_shell.h"
 #include "inkpod/core_ffi.h"
 #include "app/resource.h"
@@ -13781,6 +13782,9 @@ int RunApplicationSmoke(app::ApplicationHost& state) noexcept {
             || state.Document().ActiveView()->id != context.document_view.value()
         ? 731
         : 0;
+    if (exit_code == 0) {
+        exit_code = app::RunPrivateInkScriptEngineSmoke() == 0 ? 0 : 828;
+    }
     if (exit_code == 0) {
         const InkpodShortcutSequence* original = FindShortcutSequence(
             state.shortcuts.bindings, IDM_VIEW_VECTOR_ENDPOINTS);

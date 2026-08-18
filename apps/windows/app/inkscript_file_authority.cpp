@@ -1436,7 +1436,9 @@ struct InkScriptFileAuthorityAdapter::Impl final {
             ? nullptr
             : scratch_open_sessions.data();
         response.record_count = scratch_open_sessions.size();
-        response.record_stride_bytes = sizeof(InkpodInkScriptOpenSession);
+        response.record_stride_bytes = scratch_open_sessions.empty()
+            ? 0U
+            : sizeof(InkpodInkScriptOpenSession);
         return INKPOD_STATUS_OK;
     }
 
@@ -1539,7 +1541,9 @@ struct InkScriptFileAuthorityAdapter::Impl final {
             ? nullptr
             : scratch_fingerprint_records.data();
         response.record_count = scratch_fingerprint_records.size();
-        response.record_stride_bytes = sizeof(InkpodInkScriptNativeFingerprint);
+        response.record_stride_bytes = scratch_fingerprint_records.empty()
+            ? 0U
+            : sizeof(InkpodInkScriptNativeFingerprint);
         return INKPOD_STATUS_OK;
     }
 
@@ -1731,7 +1735,9 @@ struct InkScriptFileAuthorityAdapter::Impl final {
             ? nullptr
             : scratch_path_records.data();
         response.record_count = scratch_path_records.size();
-        response.record_stride_bytes = sizeof(InkpodInkScriptPathIdentity);
+        response.record_stride_bytes = scratch_path_records.empty()
+            ? 0U
+            : sizeof(InkpodInkScriptPathIdentity);
         return INKPOD_STATUS_OK;
     }
 
@@ -2208,11 +2214,11 @@ InkpodStatus InkScriptFileAuthorityAdapter::AuthorizePath(
         ObservedPath observed;
         const InkpodStatus status = ObserveAbsolute(path, false, observed);
         if (status != INKPOD_STATUS_OK
-            || (access == INKPOD_INKSCRIPT_PATH_ENUMERATE
+            || ((access == INKPOD_INKSCRIPT_PATH_ENUMERATE
+                    || access == INKPOD_INKSCRIPT_PATH_CREATE)
                 && !observed.path.directory)
-            || ((access == INKPOD_INKSCRIPT_PATH_CREATE
-                    || access == INKPOD_INKSCRIPT_PATH_REPLACE)
-                && !observed.path.directory)) {
+            || (access == INKPOD_INKSCRIPT_PATH_REPLACE
+                && observed.path.directory)) {
             return status == INKPOD_STATUS_OK
                 ? INKPOD_STATUS_INVALID_ARGUMENT
                 : status;

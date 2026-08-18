@@ -585,10 +585,16 @@ if(WIN32)
         COMMAND inkpod_windows_owner_model_tests)
 
     add_executable(inkpod_windows_core_host_tests
+        apps/windows/app/blake3_digest.cpp
+        apps/windows/app/blake3_digest.h
         apps/windows/app/core_host.cpp
         apps/windows/app/core_host.h
         apps/windows/app/command_context.h
         apps/windows/app/identity.h
+        apps/windows/app/inkscript_engine_route.cpp
+        apps/windows/app/inkscript_engine_route.h
+        apps/windows/app/inkscript_file_authority.cpp
+        apps/windows/app/inkscript_file_authority.h
         tests/windows_core_host.cpp)
     target_include_directories(inkpod_windows_core_host_tests PRIVATE
         "${CMAKE_SOURCE_DIR}/apps/windows"
@@ -606,6 +612,35 @@ if(WIN32)
     add_test(
         NAME inkpod_windows_core_host
         COMMAND inkpod_windows_core_host_tests)
+
+    add_executable(inkpod_windows_inkscript_engine_route_tests
+        apps/windows/app/blake3_digest.cpp
+        apps/windows/app/blake3_digest.h
+        apps/windows/app/core_host.cpp
+        apps/windows/app/core_host.h
+        apps/windows/app/command_context.h
+        apps/windows/app/identity.h
+        apps/windows/app/inkscript_engine_route.cpp
+        apps/windows/app/inkscript_engine_route.h
+        apps/windows/app/inkscript_file_authority.cpp
+        apps/windows/app/inkscript_file_authority.h
+        tests/windows_inkscript_engine_route.cpp)
+    target_include_directories(inkpod_windows_inkscript_engine_route_tests PRIVATE
+        "${CMAKE_SOURCE_DIR}/apps/windows"
+        "${CMAKE_SOURCE_DIR}/apps/windows/renderer"
+        "${CMAKE_SOURCE_DIR}/include")
+    target_compile_definitions(inkpod_windows_inkscript_engine_route_tests PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(inkpod_windows_inkscript_engine_route_tests PRIVATE
+        inkpod_ffi_static
+        user32)
+    if(MSVC)
+        inkpod_enable_strict_warnings(inkpod_windows_inkscript_engine_route_tests)
+        target_compile_options(inkpod_windows_inkscript_engine_route_tests PRIVATE /EHsc)
+    endif()
+    add_test(
+        NAME inkpod_windows_inkscript_engine_route
+        COMMAND inkpod_windows_inkscript_engine_route_tests)
 
     add_executable(inkpod_windows_inkscript_file_authority_tests
         apps/windows/app/blake3_digest.cpp
@@ -692,6 +727,10 @@ if(WIN32)
         apps/windows/app/com_runtime.cpp
         apps/windows/app/main.cpp
         apps/windows/app/core_host.cpp
+        apps/windows/app/inkscript_engine_route.cpp
+        apps/windows/app/inkscript_engine_route.h
+        apps/windows/app/inkscript_engine_smoke.cpp
+        apps/windows/app/inkscript_engine_smoke.h
         apps/windows/app/document_shell.cpp
         apps/windows/app/launch_options.cpp
         apps/windows/app/launch_options.h

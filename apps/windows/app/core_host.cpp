@@ -25,6 +25,7 @@ constexpr std::size_t kMaximumFrontendViews = kMaximumSessions * 64U;
 constexpr std::size_t kMaximumQueuedWork = 4096U;
 constexpr std::size_t kReservedStrokeControlWork = 64U;
 constexpr std::size_t kMaximumNotifications = 256U;
+constexpr std::size_t kMaximumInkScriptJobs = 64U;
 constexpr std::size_t kMaximumStrokeSamples = 1048576U;
 constexpr auto kPreviewFrameInterval = std::chrono::milliseconds(8);
 
@@ -103,6 +104,34 @@ struct AdapterInput {
     std::function<void(InkpodStatus)> async_completion;
 };
 
+struct InkScriptWork {
+    SessionBinding binding;
+    std::uint64_t sequence{};
+    std::uint64_t job_id{};
+    CommandContext context;
+    std::chrono::steady_clock::time_point not_before{
+        std::chrono::steady_clock::now()};
+    std::chrono::steady_clock::time_point queued_at{
+        std::chrono::steady_clock::now()};
+};
+
+struct InkScriptInput {
+    explicit InkScriptInput(InkScriptEngineRequest input)
+        : job_id(input.job_id),
+          context(input.context),
+          request(std::move(input)) {}
+
+    std::uint64_t job_id{};
+    std::uint64_t sequence{};
+    CommandContext context;
+    InkScriptEngineRequest request;
+    std::unique_ptr<InkScriptEngineTask> task;
+    std::atomic<bool> cancel_requested{};
+    std::uint32_t confirmation_scope{};
+    bool waiting_confirmation{};
+    bool work_scheduled{};
+};
+
 struct StrokeWork {
     SessionBinding binding;
     std::uint64_t sequence{};
@@ -137,7 +166,7 @@ struct ControlWork {
 };
 
 using WorkItem =
-    std::variant<AdapterWork, PrimitiveWork, StrokeWork, ControlWork>;
+    std::variant<AdapterWork, PrimitiveWork, StrokeWork, InkScriptWork, ControlWork>;
 
 struct PublishedSession {
     SessionBinding binding;
@@ -195,6 +224,7 @@ struct CoreHost::Impl final {
             }
             entries.reserve(kMaximumSessions);
             adapter_inputs.reserve(kMaximumQueuedWork + kReservedStrokeControlWork);
+            inkscript_inputs.reserve(kMaximumInkScriptJobs);
             auto ready = std::make_shared<std::promise<InkpodStatus>>();
             auto future = ready->get_future();
             worker = std::thread([this, ready] { Run(ready); });
@@ -389,10 +419,7 @@ struct CoreHost::Impl final {
             return true;
         }
         for (const CoreNotification& notification : notifications) {
-            const UINT message = notification.kind
-                    == CoreNotificationKind::StateChanged
-                ? kCoreStateChanged
-                : kCoreAsyncFailed;
+            const UINT message = NotificationMessage(notification.kind);
             if (PostMessageW(
                     replacement_owner,
                     message,
@@ -611,6 +638,149 @@ struct CoreHost::Impl final {
                 std::nullopt,
                 nullptr,
                 std::move(completion)});
+    }
+
+    bool EnqueueInkScript(InkScriptEngineRequest request) noexcept {
+        if (request.job_id == 0U || !request.context.document_session.has_value()
+            || !request.context.generation.has_value()) {
+            return false;
+        }
+        const SessionBinding binding{
+            request.context.document_session.value(),
+            request.context.generation.value()};
+        std::unique_ptr<InkScriptInput> input;
+        try {
+            input = std::make_unique<InkScriptInput>(std::move(request));
+        } catch (const std::bad_alloc&) {
+            return false;
+        }
+
+        std::lock_guard acceptance_lock(acceptance_mutex);
+        {
+            std::lock_guard state_lock(state_mutex);
+            const auto session = FindPublishedLocked(binding);
+            if (session == published.end() || !session->state.accepting_work) {
+                if (session != published.end()) {
+                    ++session->metrics.rejected_work_items;
+                }
+                return false;
+            }
+            input->sequence = ++session->state.last_accepted_sequence;
+            ++session->state.pending_operations;
+        }
+        const std::uint64_t sequence = input->sequence;
+        const std::uint64_t job_id = input->job_id;
+        const CommandContext context = input->context;
+        bool queued{};
+        try {
+            std::lock_guard lock(mutex);
+            const bool duplicate = std::any_of(
+                inkscript_inputs.cbegin(),
+                inkscript_inputs.cend(),
+                [job_id](const auto& candidate) {
+                    return candidate->job_id == job_id;
+                });
+            if (!stopping && !duplicate
+                && inkscript_inputs.size() < kMaximumInkScriptJobs
+                && work.size() < kMaximumQueuedWork) {
+                input->work_scheduled = true;
+                inkscript_inputs.push_back(std::move(input));
+                try {
+                    work.emplace_back(InkScriptWork{
+                        binding,
+                        sequence,
+                        job_id,
+                        context});
+                    queued = true;
+                } catch (...) {
+                    inkscript_inputs.pop_back();
+                    throw;
+                }
+            }
+        } catch (const std::bad_alloc&) {
+            queued = false;
+        }
+        if (!queued) {
+            RollbackPending(binding, sequence);
+            RecordRejected(binding);
+            return false;
+        }
+        RecordAccepted(binding);
+        wake.notify_one();
+        return true;
+    }
+
+    bool ConfirmInkScript(
+        std::uint64_t job_id,
+        const CommandContext& context,
+        std::uint32_t scope) noexcept {
+        if (job_id == 0U || scope == 0U) {
+            return false;
+        }
+        bool queued{};
+        try {
+            std::lock_guard lock(mutex);
+            const auto found = FindInkScriptInput(job_id);
+            if (found == inkscript_inputs.end() || (*found)->context != context
+                || !(*found)->waiting_confirmation
+                || (*found)->work_scheduled || stopping
+                || work.size() >= kMaximumQueuedWork) {
+                return false;
+            }
+            (*found)->confirmation_scope = scope;
+            (*found)->waiting_confirmation = false;
+            (*found)->work_scheduled = true;
+            work.emplace_back(InkScriptWork{
+                SessionBinding{
+                    context.document_session.value(),
+                    context.generation.value()},
+                (*found)->sequence,
+                job_id,
+                context});
+            queued = true;
+        } catch (const std::bad_alloc&) {
+            queued = false;
+        }
+        if (queued) {
+            wake.notify_one();
+        }
+        return queued;
+    }
+
+    bool CancelInkScript(
+        std::uint64_t job_id,
+        const CommandContext& context) noexcept {
+        bool accepted{};
+        try {
+            std::lock_guard lock(mutex);
+            const auto found = FindInkScriptInput(job_id);
+            if (found == inkscript_inputs.end() || (*found)->context != context) {
+                return false;
+            }
+            (*found)->cancel_requested.store(true, std::memory_order_release);
+            if (!(*found)->work_scheduled) {
+                if (work.size() >= kMaximumQueuedWork + kReservedStrokeControlWork) {
+                    accepted = true;
+                } else {
+                    (*found)->waiting_confirmation = false;
+                    (*found)->work_scheduled = true;
+                    work.emplace_back(InkScriptWork{
+                        SessionBinding{
+                            context.document_session.value(),
+                            context.generation.value()},
+                        (*found)->sequence,
+                        job_id,
+                        context});
+                }
+            }
+            accepted = true;
+        } catch (const std::bad_alloc&) {
+            accepted = false;
+        }
+        if (accepted) {
+            wake.notify_one();
+        }
+        return accepted;
     }
 
     InkpodStatus InvokePrimitive(
@@ -1315,6 +1485,124 @@ struct CoreHost::Impl final {
         }
     }
 
+    void ProcessInkScript(InkScriptWork item) noexcept {
+        RecordQueueWait(item.binding, item.queued_at);
+        InkScriptInput* input{};
+        {
+            std::lock_guard lock(mutex);
+            const auto found = FindInkScriptInput(item.job_id);
+            if (found != inkscript_inputs.end()) {
+                input = found->get();
+                input->work_scheduled = false;
+            }
+        }
+        CoreEntry* entry = FindEntry(item.binding);
+        if (input == nullptr) {
+            CompletePending(item.binding, item.sequence, 1U, false);
+            return;
+        }
+
+        InkScriptEngineStep step{};
+        if (entry == nullptr || input->context != item.context) {
+            InkScriptEngineResult result{};
+            result.job_id = item.job_id;
+            result.status = INKPOD_STATUS_CANCELLED;
+            step.kind = InkScriptEngineStepKind::Completed;
+            step.has_notification = true;
+            step.notification = result;
+        } else {
+            try {
+                if (input->task == nullptr) {
+                    input->task = std::make_unique<InkScriptEngineTask>(
+                        std::move(input->request));
+                }
+                bool transitioning{};
+                {
+                    std::lock_guard lock(mutex);
+                    transitioning = stopping
+                        || HasTransitionControlLocked(item.binding);
+                }
+                const bool cancel = transitioning
+                    || input->cancel_requested.load(std::memory_order_acquire);
+                const std::uint32_t scope = std::exchange(
+                    input->confirmation_scope, 0U);
+                step = input->task->Advance(entry->core, cancel, scope);
+            } catch (const std::bad_alloc&) {
+                InkScriptEngineResult result{};
+                result.job_id = item.job_id;
+                result.status = INKPOD_STATUS_INVALID_STATE;
+                step.kind = InkScriptEngineStepKind::Completed;
+                step.has_notification = true;
+                step.notification = result;
+            }
+        }
+
+        if (step.has_notification) {
+            PostInkScriptNotification(item.context, step.notification);
+        }
+        if (step.kind == InkScriptEngineStepKind::PlanReady) {
+            std::lock_guard lock(mutex);
+            const auto found = FindInkScriptInput(item.job_id);
+            if (found != inkscript_inputs.end()) {
+                (*found)->waiting_confirmation = true;
+            }
+            return;
+        }
+        if (step.kind == InkScriptEngineStepKind::Continue) {
+            item.not_before = std::chrono::steady_clock::now()
+                + std::chrono::milliseconds(step.delay_milliseconds);
+            item.queued_at = std::chrono::steady_clock::now();
+            bool requeued{};
+            try {
+                std::lock_guard lock(mutex);
+                const auto found = FindInkScriptInput(item.job_id);
+                if (found != inkscript_inputs.end() && !stopping
+                    && work.size() < kMaximumQueuedWork) {
+                    (*found)->work_scheduled = true;
+                    work.emplace_back(std::move(item));
+                    requeued = true;
+                }
+            } catch (const std::bad_alloc&) {
+                requeued = false;
+            }
+            if (requeued) {
+                wake.notify_one();
+                return;
+            }
+            if (entry != nullptr && input->task != nullptr) {
+                for (std::uint32_t attempt = 0U; attempt < 8U; ++attempt) {
+                    step = input->task->Advance(entry->core, true, 0U);
+                    if (step.kind == InkScriptEngineStepKind::Completed) {
+                        break;
+                    }
+                }
+            }
+            if (step.kind != InkScriptEngineStepKind::Completed) {
+                step = {};
+                step.kind = InkScriptEngineStepKind::Completed;
+                step.has_notification = true;
+                step.notification.job_id = input->job_id;
+                step.notification.status = INKPOD_STATUS_INVALID_STATE;
+            }
+            if (step.has_notification) {
+                PostInkScriptNotification(input->context, step.notification);
+            }
+        }
+
+        const InkpodStatus status = step.notification.status;
+        if (entry != nullptr) {
+            CaptureFailure(*entry, status, true, item.context);
+        }
+        {
+            std::lock_guard lock(mutex);
+            const auto found = FindInkScriptInput(input->job_id);
+            if (found != inkscript_inputs.end()) {
+                inkscript_inputs.erase(found);
+            }
+        }
+        CompletePending(item.binding, item.sequence, 1U, false);
+    }
+
     void ProcessControl(ControlWork item) noexcept {
         InkpodStatus status = INKPOD_STATUS_OK;
         switch (item.kind) {
@@ -1411,6 +1699,60 @@ struct CoreHost::Impl final {
         }
     }
 
+    auto FindInkScriptInput(std::uint64_t job_id) noexcept {
+        return std::find_if(
+            inkscript_inputs.begin(),
+            inkscript_inputs.end(),
+            [job_id](const auto& input) { return input->job_id == job_id; });
+    }
+
+    auto FindInkScriptInput(std::uint64_t job_id) const noexcept {
+        return std::find_if(
+            inkscript_inputs.cbegin(),
+            inkscript_inputs.cend(),
+            [job_id](const auto& input) { return input->job_id == job_id; });
+    }
+
+    bool HasInkScriptInputLocked(SessionBinding binding) const noexcept {
+        return std::any_of(
+            inkscript_inputs.cbegin(),
+            inkscript_inputs.cend(),
+            [binding](const auto& input) {
+                return input->context.document_session == binding.session
+                    && input->context.generation == binding.generation;
+            });
+    }
+
+    bool HasTransitionControlLocked(SessionBinding binding) const noexcept {
+        return std::any_of(
+            work.cbegin(), work.cend(), [binding](const WorkItem& candidate) {
+                const auto* control = std::get_if<ControlWork>(&candidate);
+                return control != nullptr && control->kind != ControlKind::Create
+                    && control->binding == binding;
+            });
+    }
+
+    std::optional<InkScriptWork> ActionableCancellationWorkLocked() const noexcept {
+        for (const auto& input : inkscript_inputs) {
+            if (input->work_scheduled) {
+                continue;
+            }
+            const SessionBinding binding{
+                input->context.document_session.value(),
+                input->context.generation.value()};
+            if (stopping
+                || input->cancel_requested.load(std::memory_order_acquire)
+                || HasTransitionControlLocked(binding)) {
+                return InkScriptWork{
+                    binding,
+                    input->sequence,
+                    input->job_id,
+                    input->context};
+            }
+        }
+        return std::nullopt;
+    }
+
     bool CanProcess(const WorkItem& item) const noexcept {
         if (const auto* sync = std::get_if<AdapterWork>(&item)) {
             const CoreEntry* entry = FindEntry(sync->binding);
@@ -1422,12 +1764,25 @@ struct CoreHost::Impl final {
             return entry == nullptr || !entry->stroke_active
                 || !primitive->defer_during_active_stroke;
         }
+        if (const auto* script = std::get_if<InkScriptWork>(&item)) {
+            const CoreEntry* entry = FindEntry(script->binding);
+            if (entry != nullptr && entry->stroke_active) {
+                return false;
+            }
+            const auto input = FindInkScriptInput(script->job_id);
+            const bool cancelled = input != inkscript_inputs.cend()
+                && (*input)->cancel_requested.load(std::memory_order_acquire);
+            return entry == nullptr || stopping || cancelled
+                || HasTransitionControlLocked(script->binding)
+                || std::chrono::steady_clock::now() >= script->not_before;
+        }
         if (const auto* control = std::get_if<ControlWork>(&item)) {
             if (control->kind == ControlKind::Create) {
                 return true;
             }
             const CoreEntry* entry = FindEntry(control->binding);
-            return entry == nullptr || !entry->stroke_active;
+            return (entry == nullptr || !entry->stroke_active)
+                && !HasInkScriptInputLocked(control->binding);
         }
         return true;
     }
@@ -1437,6 +1792,16 @@ struct CoreHost::Impl final {
         for (const auto& entry : entries) {
             if (entry->preview_dirty) {
                 result = std::min(result, entry->next_preview_frame);
+            }
+        }
+        return result;
+    }
+
+    std::chrono::steady_clock::time_point NextInkScriptDeadline() const noexcept {
+        auto result = std::chrono::steady_clock::time_point::max();
+        for (const WorkItem& item : work) {
+            if (const auto* script = std::get_if<InkScriptWork>(&item)) {
+                result = std::min(result, script->not_before);
             }
         }
         return result;
@@ -1514,12 +1879,15 @@ struct CoreHost::Impl final {
             bool has_item{};
             bool cancel_for_shutdown{};
             std::optional<SessionBinding> cancel_for_close;
+            std::optional<InkScriptWork> cancel_inkscript;
             {
                 std::unique_lock lock(mutex);
-                const auto deadline = NextPreviewDeadline();
+                const auto deadline = std::min(
+                    NextPreviewDeadline(), NextInkScriptDeadline());
                 wake.wait_until(lock, deadline, [this] {
                     return stopping
                         || TransitioningActiveStroke().has_value()
+                        || ActionableCancellationWorkLocked().has_value()
                         || std::any_of(work.cbegin(), work.cend(), [this](const WorkItem& candidate) {
                                return CanProcess(candidate);
                            });
@@ -1534,6 +1902,9 @@ struct CoreHost::Impl final {
                     has_item = true;
                 } else if (const auto closing = TransitioningActiveStroke(); closing.has_value()) {
                     cancel_for_close = closing;
+                } else if (const auto pending = ActionableCancellationWorkLocked();
+                           pending.has_value()) {
+                    cancel_inkscript = pending;
                 } else if (stopping) {
                     cancel_for_shutdown = std::any_of(
                         entries.cbegin(), entries.cend(), [](const auto& entry) {
@@ -1553,6 +1924,10 @@ struct CoreHost::Impl final {
                 CancelActiveStroke(cancel_for_close.value());
                 continue;
             }
+            if (cancel_inkscript.has_value()) {
+                ProcessInkScript(std::move(cancel_inkscript.value()));
+                continue;
+            }
             if (has_item) {
                 if (auto* sync = std::get_if<AdapterWork>(&item)) {
                     ProcessAdapter(std::move(*sync));
@@ -1560,6 +1935,8 @@ struct CoreHost::Impl final {
                     ProcessPrimitive(std::move(*primitive));
                 } else if (auto* stroke = std::get_if<StrokeWork>(&item)) {
                     ProcessStroke(std::move(*stroke));
+                } else if (auto* script = std::get_if<InkScriptWork>(&item)) {
+                    ProcessInkScript(std::move(*script));
                 } else {
                     ProcessControl(std::move(std::get<ControlWork>(item)));
                 }
@@ -1830,14 +2207,13 @@ struct CoreHost::Impl final {
                 token = next_notification_token++;
             }
             try {
-                notifications.push_back(CoreNotification{token, kind, context, status});
+                notifications.push_back(
+                    CoreNotification{token, kind, context, status, {}});
             } catch (const std::bad_alloc&) {
                 return;
             }
         }
-        const UINT message = kind == CoreNotificationKind::StateChanged
-            ? kCoreStateChanged
-            : kCoreAsyncFailed;
+        const UINT message = NotificationMessage(kind);
         bool posted{};
         {
             std::lock_guard lock(notification_owner_mutex);
@@ -1852,6 +2228,98 @@ struct CoreHost::Impl final {
             CoreNotification ignored{};
             (void)TakeNotification(token, context.generation.value(), ignored);
         }
+    }
+
+    void PostInkScriptNotification(
+        const CommandContext& context,
+        const InkScriptEngineResult& result) noexcept {
+        if (!context.generation.has_value() || !context.document_session.has_value()) {
+            return;
+        }
+        std::uint64_t token{};
+        {
+            std::lock_guard lock(state_mutex);
+            const auto existing = std::find_if(
+                notifications.begin(),
+                notifications.end(),
+                [&result](const CoreNotification& item) {
+                    return item.kind == CoreNotificationKind::InkScript
+                        && item.inkscript.job_id == result.job_id;
+                });
+            if (existing != notifications.end()) {
+                existing->status = result.status;
+                existing->inkscript = result;
+                return;
+            }
+            if (notifications.size() >= kMaximumNotifications) {
+                auto replaceable = std::find_if(
+                    notifications.begin(),
+                    notifications.end(),
+                    [](const CoreNotification& item) {
+                        return item.kind == CoreNotificationKind::StateChanged;
+                    });
+                if (replaceable == notifications.end()) {
+                    replaceable = std::find_if(
+                        notifications.begin(),
+                        notifications.end(),
+                        [](const CoreNotification& item) {
+                            return item.kind == CoreNotificationKind::InkScript
+                                && item.inkscript.kind
+                                    == InkScriptEngineNotificationKind::Progress;
+                        });
+                }
+                if (replaceable == notifications.end()) {
+                    if (result.kind == InkScriptEngineNotificationKind::Progress) {
+                        return;
+                    }
+                    replaceable = notifications.begin();
+                }
+                notifications.erase(replaceable);
+            }
+            token = next_notification_token++;
+            if (next_notification_token == 0U) {
+                next_notification_token = 1U;
+            }
+            if (token == 0U) {
+                token = next_notification_token++;
+            }
+            try {
+                notifications.push_back(CoreNotification{
+                    token,
+                    CoreNotificationKind::InkScript,
+                    context,
+                    result.status,
+                    result});
+            } catch (const std::bad_alloc&) {
+                return;
+            }
+        }
+        bool posted{};
+        {
+            std::lock_guard lock(notification_owner_mutex);
+            posted = PostMessageW(
+                         owner,
+                         kCoreInkScriptNotification,
+                         static_cast<WPARAM>(token),
+                         static_cast<LPARAM>(context.generation->Value()))
+                != FALSE;
+        }
+        if (!posted) {
+            CoreNotification ignored{};
+            (void)TakeNotification(token, context.generation.value(), ignored);
+        }
+    }
+
+    static UINT NotificationMessage(CoreNotificationKind kind) noexcept {
+        switch (kind) {
+            case CoreNotificationKind::StateChanged:
+                return kCoreStateChanged;
+            case CoreNotificationKind::AsyncFailed:
+                return kCoreAsyncFailed;
+            case CoreNotificationKind::InkScript:
+                return kCoreInkScriptNotification;
+        }
+        return kCoreAsyncFailed;
     }
 
     bool TakeNotification(
@@ -1880,6 +2348,7 @@ struct CoreHost::Impl final {
     std::condition_variable wake;
     std::deque<WorkItem> work;
     std::vector<AdapterInput> adapter_inputs;
+    std::vector<std::unique_ptr<InkScriptInput>> inkscript_inputs;
     AdapterInputToken next_adapter_input_token{1U};
     bool stopping{};
     std::thread worker;
@@ -2114,6 +2583,25 @@ bool CoreHost::Enqueue(
             refresh_document_info,
             defer_during_active_stroke,
             std::move(completion));
+}
+
+bool CoreHost::EnqueueInkScript(InkScriptEngineRequest request) noexcept {
+    return impl_ != nullptr && impl_->EnqueueInkScript(std::move(request));
+}
+
+bool CoreHost::ConfirmInkScript(
+    std::uint64_t job_id,
+    const CommandContext& context,
+    std::uint32_t scope) noexcept {
+    return impl_ != nullptr
+        && impl_->ConfirmInkScript(job_id, context, scope);
+}
+
+bool CoreHost::CancelInkScript(
+    std::uint64_t job_id,
+    const CommandContext& context) noexcept {
+    return impl_ != nullptr
+        && impl_->CancelInkScript(job_id, context);
 }
 
 bool CoreHost::EnqueueStroke(StrokeEvent event) noexcept {

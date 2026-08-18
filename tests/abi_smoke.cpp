@@ -1,4 +1,5 @@
 #include "inkpod/core_ffi.h"
+#include "app/inkscript_engine_smoke.h"
 
 #include <algorithm>
 #include <array>
@@ -203,6 +204,9 @@ int InkpodRunAbiSmoke() {
     }
     if (inkpod_abi_version() != INKPOD_ABI_VERSION) {
         return 1;
+    }
+    if (inkpod::app::RunPrivateInkScriptEngineSmoke() != 0) {
+        return 162;
     }
     InkpodCoreConfig old_config{
         sizeof(InkpodCoreConfig), 15U, INKPOD_FEATURE_NONE};

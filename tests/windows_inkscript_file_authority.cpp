@@ -418,6 +418,8 @@ int Run() {
     }
     InkpodInkScriptAuthorityGrant native_grant{};
     InkpodInkScriptAuthorityGrant native_folder_grant{};
+    InkpodInkScriptAuthorityGrant replace_grant{};
+    InkpodInkScriptAuthorityGrant rejected_grant{};
     if (adapter.AuthorizePath(
             4U, INKPOD_INKSCRIPT_PATH_READ, native_path, native_grant)
             != INKPOD_STATUS_OK
@@ -426,7 +428,23 @@ int Run() {
                INKPOD_INKSCRIPT_PATH_ENUMERATE,
                native_directory,
                native_folder_grant)
-            != INKPOD_STATUS_OK) {
+            != INKPOD_STATUS_OK
+        || adapter.AuthorizePath(
+               6U, INKPOD_INKSCRIPT_PATH_REPLACE, native_path, replace_grant)
+            != INKPOD_STATUS_OK
+        || !SameObject(*native_grant.resolved, *replace_grant.resolved)
+        || adapter.AuthorizePath(
+               7U,
+               INKPOD_INKSCRIPT_PATH_REPLACE,
+               native_directory,
+               rejected_grant)
+            != INKPOD_STATUS_INVALID_ARGUMENT
+        || adapter.AuthorizePath(
+               8U,
+               INKPOD_INKSCRIPT_PATH_CREATE,
+               native_path,
+               rejected_grant)
+            != INKPOD_STATUS_INVALID_ARGUMENT) {
         return 36;
     }
     request = {};

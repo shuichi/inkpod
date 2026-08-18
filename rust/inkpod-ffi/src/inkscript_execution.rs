@@ -321,6 +321,7 @@ unsafe fn path_from_record(
             value.alias_key,
             value.parent_alias_key,
         )
+        .and_then(|identity| identity.with_generations(None, value.parent_generation))
     } else {
         if value.object_generation == 0 {
             return Err(fail(
