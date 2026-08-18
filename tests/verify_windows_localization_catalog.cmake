@@ -346,8 +346,6 @@ foreach(REQUIRED_TOKEN IN ITEMS
         "kind_label_id" "format_label_id" "visibility_label_id"
         "editability_label_id" "badge_label_id" "accessible_text"
         "item.kind_text" "item.badge_text"
-        "state.status_cell_width"
-        "MeasureLayerPaletteStatusCellWidth"
         "LayoutLayerPaletteStatusCells"
         "DrawPaneIcon" "PaneIconId::Visible" "PaneIconId::Protected"
         "PtInRect(&status_layout.editability"
@@ -357,10 +355,13 @@ foreach(REQUIRED_TOKEN IN ITEMS
         message(FATAL_ERROR "layer/plane presentation is not pre-resolved: ${REQUIRED_TOKEN}")
     endif()
 endforeach()
-string(FIND "${LAYER_PALETTE_SOURCE}" "kActionWidth" FIXED_WIDTH_POSITION)
-if(NOT FIXED_WIDTH_POSITION LESS 0)
+string(FIND
+    "${LAYER_PALETTE_SOURCE}"
+    "MeasureLayerPaletteStatusCellWidth"
+    MEASURED_STATUS_CELL_POSITION)
+if(NOT MEASURED_STATUS_CELL_POSITION LESS 0)
     message(FATAL_ERROR
-        "layer/plane owner-draw status cells reverted to a fixed action width")
+        "layer/plane compact status cells reverted to localized text measurement")
 endif()
 foreach(REQUIRED_TOKEN IN ITEMS
         "PlaneKindBadgeLabelId"
@@ -410,9 +411,8 @@ file(READ
     "${INKPOD_SOURCE_DIR}/apps/windows/ui/dialogs/layer_palette_status_layout.h"
     LAYER_PALETTE_STATUS_LAYOUT_SOURCE)
 foreach(REQUIRED_TOKEN IN ITEMS
-        "kLayerPaletteStatusMinimumWidthDip"
-        "kLayerPaletteStatusHorizontalPaddingDip"
-        "MeasureLayerPaletteStatusCellWidth"
+        "kLayerPaletteStatusButtonSizeDip"
+        "kLayerPaletteStatusGapDip"
         "LayerPaletteStatusCellLayout"
         "LayoutLayerPaletteStatusCells")
     string(FIND
@@ -421,17 +421,18 @@ foreach(REQUIRED_TOKEN IN ITEMS
         TOKEN_POSITION)
     if(TOKEN_POSITION LESS 0)
         message(FATAL_ERROR
-            "layer/plane owner-draw width gate is incomplete: ${REQUIRED_TOKEN}")
+            "layer/plane compact status-cell gate is incomplete: ${REQUIRED_TOKEN}")
     endif()
 endforeach()
 foreach(REQUIRED_TOKEN IN ITEMS
-        "LayerPaletteOwnerDrawCellWidthContract"
+        "LayerPaletteOwnerDrawCompactCellContract"
+        "kLayerPaletteStatusButtonSizeDip"
         "UiStringId::Visible" "UiStringId::Hidden"
         "UiStringId::Editable" "UiStringId::Protected")
     string(FIND "${LOCALIZATION_TEST_SOURCE}" "${REQUIRED_TOKEN}" TOKEN_POSITION)
     if(TOKEN_POSITION LESS 0)
         message(FATAL_ERROR
-            "layer/plane owner-draw width test is incomplete: ${REQUIRED_TOKEN}")
+            "layer/plane compact status-cell test is incomplete: ${REQUIRED_TOKEN}")
     endif()
 endforeach()
 foreach(REQUIRED_TOKEN IN ITEMS

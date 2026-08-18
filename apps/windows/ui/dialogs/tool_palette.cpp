@@ -60,10 +60,10 @@ constexpr std::array<ToolPaletteEntry, kToolPaletteEntryCount>
 
 constexpr int kReferenceDpi = 96;
 constexpr int kMarginDip = 4;
-constexpr int kButtonWidthDip = 72;
+constexpr int kButtonWidthDip = 64;
 constexpr int kButtonHeightDip = 34;
 constexpr int kGapDip = 3;
-constexpr int kExpandWidthDip = 24;
+constexpr int kExpandWidthDip = 20;
 constexpr UINT_PTR kToolButtonSubclass = 1U;
 constexpr LONG_PTR kButtonChecked = 1;
 constexpr LONG_PTR kButtonHovered = 2;
@@ -374,7 +374,9 @@ void DrawToolButton(const DRAWITEMSTRUCT& draw, bool expand) noexcept {
         : (hovered ? COLOR_3DLIGHT : COLOR_BTNFACE);
     const int foreground = disabled
         ? COLOR_GRAYTEXT
-        : (checked || pressed ? COLOR_HIGHLIGHTTEXT : COLOR_BTNTEXT);
+        : (checked || pressed
+               ? COLOR_HIGHLIGHTTEXT
+               : (expand && !hovered ? COLOR_GRAYTEXT : COLOR_BTNTEXT));
     FillRect(
         draw.hDC,
         &draw.rcItem,
@@ -384,17 +386,25 @@ void DrawToolButton(const DRAWITEMSTRUCT& draw, bool expand) noexcept {
     if (expand) {
         const int center_x = (draw.rcItem.left + draw.rcItem.right) / 2;
         const int center_y = (draw.rcItem.top + draw.rcItem.bottom) / 2;
-        const int radius = std::max(
-            2, ScaleForDpi(3, GetDpiForWindow(draw.hwndItem)));
+        const UINT dpi = GetDpiForWindow(draw.hwndItem);
+        const int horizontal_radius = std::max(2, ScaleForDpi(2, dpi));
+        const int vertical_radius = std::max(2, ScaleForDpi(3, dpi));
         const HPEN pen = CreatePen(
             PS_SOLID,
-            std::max(1, ScaleForDpi(1, GetDpiForWindow(draw.hwndItem))),
+            std::max(1, ScaleForDpi(1, dpi)),
             GetSysColor(foreground));
         if (pen != nullptr) {
             const HGDIOBJ previous = SelectObject(draw.hDC, pen);
-            MoveToEx(draw.hDC, center_x - radius, center_y - radius, nullptr);
-            LineTo(draw.hDC, center_x + radius, center_y);
-            LineTo(draw.hDC, center_x - radius, center_y + radius);
+            MoveToEx(
+                draw.hDC,
+                center_x - horizontal_radius,
+                center_y - vertical_radius,
+                nullptr);
+            LineTo(draw.hDC, center_x + horizontal_radius, center_y);
+            LineTo(
+                draw.hDC,
+                center_x - horizontal_radius,
+                center_y + vertical_radius);
             if (previous != nullptr) {
                 SelectObject(draw.hDC, previous);
             }

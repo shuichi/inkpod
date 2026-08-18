@@ -3,59 +3,14 @@
 #include <windows.h>
 
 #include <algorithm>
-#include <climits>
-#include <span>
-#include <string_view>
 
 namespace inkpod::windows::ui {
 
-constexpr int kLayerPaletteStatusMinimumWidthDip = 42;
-constexpr int kLayerPaletteStatusHorizontalPaddingDip = 16;
-constexpr int kLayerPaletteStatusGapDip = 2;
+constexpr int kLayerPaletteStatusButtonSizeDip = 32;
+constexpr int kLayerPaletteStatusGapDip = 4;
 
 inline int ScaleLayerPaletteStatusDip(int value, UINT dpi) noexcept {
     return MulDiv(value, static_cast<int>(dpi == 0U ? 96U : dpi), 96);
-}
-
-inline int MeasureLayerPaletteStatusCellWidth(
-    HDC device,
-    HFONT font,
-    UINT dpi,
-    std::span<const std::wstring_view> labels) noexcept {
-    const int minimum = ScaleLayerPaletteStatusDip(
-        kLayerPaletteStatusMinimumWidthDip, dpi);
-    if (device == nullptr) {
-        return minimum;
-    }
-
-    const HGDIOBJ previous = font == nullptr ? nullptr : SelectObject(device, font);
-    int widest{};
-    for (const std::wstring_view label : labels) {
-        if (label.size() > static_cast<std::size_t>(INT_MAX)) {
-            continue;
-        }
-        SIZE extent{};
-        if (GetTextExtentPoint32W(
-                device,
-                label.data(),
-                static_cast<int>(label.size()),
-                &extent) != FALSE) {
-            widest = std::max(
-                widest,
-                static_cast<int>(std::max<LONG>(0L, extent.cx)));
-        }
-    }
-    if (previous != nullptr) {
-        SelectObject(device, previous);
-    }
-
-    const int padding = ScaleLayerPaletteStatusDip(
-        kLayerPaletteStatusHorizontalPaddingDip, dpi);
-    constexpr int maximum = INT_MAX / 4;
-    const int measured = widest > maximum - padding
-        ? maximum
-        : widest + padding;
-    return std::min(maximum, std::max(minimum, measured));
 }
 
 struct LayerPaletteStatusCellLayout {
@@ -65,20 +20,31 @@ struct LayerPaletteStatusCellLayout {
 };
 
 inline LayerPaletteStatusCellLayout LayoutLayerPaletteStatusCells(
-    RECT content_bounds, int cell_width, UINT dpi) noexcept {
-    const int width = std::max(0, cell_width);
-    const int gap = ScaleLayerPaletteStatusDip(kLayerPaletteStatusGapDip, dpi);
+    RECT content_bounds, UINT dpi) noexcept {
+    const int available_width = std::max(
+        0, static_cast<int>(content_bounds.right - content_bounds.left));
+    const int available_height = std::max(
+        0, static_cast<int>(content_bounds.bottom - content_bounds.top));
+    const int gap = std::min(
+        available_width,
+        ScaleLayerPaletteStatusDip(kLayerPaletteStatusGapDip, dpi));
+    const int button_size = std::min({
+        ScaleLayerPaletteStatusDip(kLayerPaletteStatusButtonSizeDip, dpi),
+        available_height,
+        std::max(0, (available_width - gap) / 2)});
+    const int button_top = content_bounds.top
+        + (available_height - button_size) / 2;
     LayerPaletteStatusCellLayout layout{};
     layout.editability = RECT{
-        content_bounds.right - width,
-        content_bounds.top,
+        content_bounds.right - button_size,
+        button_top,
         content_bounds.right,
-        content_bounds.bottom};
+        button_top + button_size};
     layout.visibility = RECT{
-        layout.editability.left - gap - width,
-        content_bounds.top,
+        layout.editability.left - gap - button_size,
+        button_top,
         layout.editability.left - gap,
-        content_bounds.bottom};
+        button_top + button_size};
     layout.text_right = layout.visibility.left;
     return layout;
 }

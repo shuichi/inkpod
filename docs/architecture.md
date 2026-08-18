@@ -711,14 +711,24 @@ Tool Options surfaces opt out of singleton headers. The model permits only
 `TopContext`, `Left`, `Right`,
 and `Bottom` stacks around the central `EditorArea`, plus floating and hidden
 placements. A stack is either tabbed or split in one direction; recursive/free
-dock trees cannot be represented. At the 96-DPI reset baseline, active-tool
-options occupy the top 40 DIP, the 80-DIP tool strip is left, and the 320-DIP
-color/layer stack is right at 32:68. The layer pane retains its internal 55:45
+dock trees cannot be represented. At the 96-DPI reset baseline, the 80-DIP tool
+strip is left and the 320-DIP color/layer stack is right at 32:68; active-tool
+options are not part of the dock model. The layer pane retains its internal 55:45
 layer/plane split. Its shared action row has a resource-backed label naming the
 currently active Layer or Plane target, and each button exposes the same target
-in its accessible name. Tool buttons remain 72 x 34 DIP with meaningful
+in its accessible name. Tool buttons remain 64 x 34 DIP with meaningful
 single-word Japanese labels, forward the menu command IDs, and consume the same
 cached command state.
+
+Each Tool expansion region anchors one UI-thread-owned Tool Options popup. The
+popup has a thin system-color border and a captionless 30-DIP client header
+rather than a system caption or resize frame. Real child buttons provide the
+localized pin/close accessibility names; pin is a session-only presentation
+state and never requests system-wide topmost. Deferred activation-loss handling
+distinguishes the popup and its owned combo windows from an outside target before
+hiding an unpinned popup. The page layout returns its natural content height;
+the owner clamps that size to the monitor work area and enables pane-local
+vertical scrolling only when the natural content cannot fit.
 
 `WorkspaceWindow` owns one UI-thread `DockHost`, which applies the pure geometry
 to the existing primary pane child windows. Docked content is parented to the

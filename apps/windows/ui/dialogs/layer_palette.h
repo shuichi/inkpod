@@ -79,7 +79,6 @@ struct LayerPaletteDialogState {
     bool has_command_states{};
     bool updating{};
     HFONT font{};
-    int status_cell_width{};
 };
 
 HWND CreateLayerPaletteDialog(

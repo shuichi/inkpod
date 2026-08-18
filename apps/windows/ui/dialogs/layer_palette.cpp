@@ -197,14 +197,6 @@ UiStringId LayerKindLabelId(std::uint32_t kind) noexcept {
     }
 }
 
-std::array<std::wstring_view, 4U> StatusCellLabels() noexcept {
-    return {
-        UiTextView(UiStringId::Visible),
-        UiTextView(UiStringId::Hidden),
-        UiTextView(UiStringId::Editable),
-        UiTextView(UiStringId::Protected)};
-}
-
 UiStringId PlaneKindLabelId(std::uint32_t kind) noexcept {
     switch (kind) {
         case INKPOD_TYPED_PLANE_MAIN_LINE: return UiStringId::MainLine;
@@ -441,13 +433,6 @@ bool UpdatePaletteFont(HWND dialog, LayerPaletteDialogState& state) noexcept {
         DeleteObject(state.font);
     }
     state.font = replacement;
-    HDC device = GetDC(dialog);
-    const auto status_labels = StatusCellLabels();
-    state.status_cell_width = MeasureLayerPaletteStatusCellWidth(
-        device, replacement, dpi, status_labels);
-    if (device != nullptr) {
-        ReleaseDC(dialog, device);
-    }
     return true;
 }
 
@@ -641,11 +626,8 @@ void DrawItem(
         dpi,
         plane);
 
-    const int action_width = std::max(
-        state.status_cell_width,
-        ScaleLayerPaletteStatusDip(kLayerPaletteStatusMinimumWidthDip, dpi));
     const LayerPaletteStatusCellLayout status_layout =
-        LayoutLayerPaletteStatusCells(inner, action_width, dpi);
+        LayoutLayerPaletteStatusCells(inner, dpi);
     const int thumbnail_width = plane
         ? ScaleLayerPaletteBadgeDip(kLayerPalettePlaneBadgeWidthDip, dpi)
         : ScaleForDpi(kThumbnailWidth, dpi);
@@ -757,12 +739,8 @@ LRESULT CALLBACK ListSubclassProcedure(
             const UINT dpi = GetDpiForWindow(list);
             const int margin = ScaleForDpi(kMargin, dpi);
             InflateRect(&item_bounds, -margin, -ScaleForDpi(4, dpi));
-            const int action_width = std::max(
-                state->status_cell_width,
-                ScaleLayerPaletteStatusDip(
-                    kLayerPaletteStatusMinimumWidthDip, dpi));
             const LayerPaletteStatusCellLayout status_layout =
-                LayoutLayerPaletteStatusCells(item_bounds, action_width, dpi);
+                LayoutLayerPaletteStatusCells(item_bounds, dpi);
             if (PtInRect(&status_layout.editability, point) != FALSE) {
                 state->dispatch_command(
                     state->context,
@@ -1142,7 +1120,6 @@ INT_PTR CALLBACK LayerPaletteDialogProcedure(
             if (state != nullptr && state->font != nullptr) {
                 DeleteObject(state->font);
                 state->font = nullptr;
-                state->status_cell_width = 0;
             }
             SetWindowLongPtrW(dialog, GWLP_USERDATA, 0);
             return TRUE;

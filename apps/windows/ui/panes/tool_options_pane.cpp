@@ -1,6 +1,7 @@
 #include "tool_options_pane.h"
 
 #include <commctrl.h>
+#include <windowsx.h>
 
 #include <algorithm>
 #include <array>
@@ -12,6 +13,7 @@
 #include <string>
 
 #include "app/resource.h"
+#include "ui/icons/fluent_icons.h"
 #include "ui/localization.h"
 #include "ui/tools/tool_state.h"
 
@@ -20,6 +22,17 @@ namespace {
 
 constexpr UINT_PTR kPaneSubclass = 1U;
 constexpr wchar_t kFlyoutClassName[] = L"InkpodToolOptionsFlyout";
+constexpr int kFlyoutClientWidthDip = 360;
+constexpr int kFlyoutHeaderHeightDip = 30;
+constexpr int kFlyoutHeaderButtonDip = 26;
+constexpr int kFlyoutHeaderInsetDip = 2;
+constexpr int kFlyoutAnchorGapDip = 8;
+constexpr int kFlyoutWorkAreaInsetDip = 8;
+constexpr UINT kFitFlyoutToContentMessage = WM_APP + 0x260U;
+constexpr UINT kDismissFlyoutMessage = WM_APP + 0x261U;
+constexpr UINT kRelayoutToolOptionsPaneMessage = WM_APP + 0x262U;
+constexpr UINT_PTR kHeaderButtonSubclass = 1U;
+constexpr LONG_PTR kHeaderButtonHovered = 1;
 
 constexpr std::array<int, 4U> kViewLabelIds{
     IDC_VIEW_VALUE_LABEL,
@@ -401,12 +414,12 @@ void LayoutLabeledRow(
         row);
 }
 
-void LayoutPane(HWND pane) noexcept {
+int LayoutPane(HWND pane) noexcept {
     RECT client{};
-    if (GetClientRect(pane, &client) == FALSE) return;
+    if (GetClientRect(pane, &client) == FALSE) return 0;
     auto* state = reinterpret_cast<ToolOptionsPaneState*>(
         GetWindowLongPtrW(pane, GWLP_USERDATA));
-    if (state == nullptr) return;
+    if (state == nullptr) return 0;
     const UINT dpi = GetDpiForWindow(pane);
     const int margin = ScaleForDpi(12, dpi);
     const int gap = ScaleForDpi(6, dpi);
@@ -415,6 +428,31 @@ void LayoutPane(HWND pane) noexcept {
     const int label_width = std::min(
         ScaleForDpi(126, dpi), std::max(0, width / 2));
     int y = margin;
+    y -= state->scroll_position;
+    const auto finish = [&](int bottom) noexcept {
+        const int content_height = std::max(
+            0, bottom + state->scroll_position + margin);
+        state->content_height = content_height;
+        const int maximum_scroll = std::max(
+            0, content_height - static_cast<int>(client.bottom));
+        const int clamped_scroll = std::clamp(
+            state->scroll_position, 0, maximum_scroll);
+        SCROLLINFO scroll{};
+        scroll.cbSize = sizeof(scroll);
+        scroll.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+        scroll.nMin = 0;
+        scroll.nMax = std::max(0, content_height - 1);
+        scroll.nPage = static_cast<UINT>(
+            std::max(0, static_cast<int>(client.bottom)));
+        scroll.nPos = clamped_scroll;
+        SetScrollInfo(pane, SB_VERT, &scroll, TRUE);
+        ShowScrollBar(pane, SB_VERT, maximum_scroll > 0 ? TRUE : FALSE);
+        if (clamped_scroll != state->scroll_position) {
+            state->scroll_position = clamped_scroll;
+            PostMessageW(pane, kRelayoutToolOptionsPaneMessage, 0, 0);
+        }
+        return content_height;
+    };
     SetControlBounds(
         pane,
         IDC_TOOL_OPTIONS_LABEL,
@@ -485,7 +523,7 @@ void LayoutPane(HWND pane) noexcept {
         y += row + gap;
     }
 
-    if (state->detail.kind == ToolOptionsDetailKind::None) return;
+    if (state->detail.kind == ToolOptionsDetailKind::None) return finish(y);
     SetControlBounds(
         pane,
         IDC_TOOL_OPTIONS_PAGE_TITLE,
@@ -522,7 +560,7 @@ void LayoutPane(HWND pane) noexcept {
             }
             y += row + gap;
         }
-        return;
+        return finish(y);
     }
     if (state->detail.kind == ToolOptionsDetailKind::Fill) {
         const std::array<int, 6U> controls{
@@ -567,7 +605,7 @@ void LayoutPane(HWND pane) noexcept {
                 row);
             y += row;
         }
-        return;
+        return finish(y);
     }
 
     for (std::size_t index = 0U; index < kEffectEditIds.size(); ++index) {
@@ -653,7 +691,9 @@ void LayoutPane(HWND pane) noexcept {
             y + gap,
             ScaleForDpi(96, dpi),
             row);
+        y += gap + row;
     }
+    return finish(y);
 }
 
 void UpdateFont(HWND pane, ToolOptionsPaneState& state) noexcept {
@@ -890,6 +930,19 @@ bool IsDetailCheckControl(UINT control) noexcept {
         || control == IDC_EFFECT_OPTION1 || control == IDC_EFFECT_OPTION2;
 }
 
+void SetPaneScrollPosition(
+    HWND pane, ToolOptionsPaneState& state, int requested) noexcept {
+    RECT client{};
+    if (GetClientRect(pane, &client) == FALSE) return;
+    const int maximum = std::max(
+        0, state.content_height - static_cast<int>(client.bottom));
+    const int position = std::clamp(requested, 0, maximum);
+    if (position == state.scroll_position) return;
+    state.scroll_position = position;
+    SetScrollPos(pane, SB_VERT, position, TRUE);
+    LayoutPane(pane);
+}
+
 LRESULT CALLBACK PaneSubclassProcedure(
     HWND pane,
     UINT message,
@@ -901,6 +954,55 @@ LRESULT CALLBACK PaneSubclassProcedure(
     switch (message) {
         case WM_SIZE:
             LayoutPane(pane);
+            return 0;
+        case kRelayoutToolOptionsPaneMessage:
+            LayoutPane(pane);
+            return 0;
+        case WM_VSCROLL:
+            if (state != nullptr) {
+                SCROLLINFO scroll{};
+                scroll.cbSize = sizeof(scroll);
+                scroll.fMask = SIF_ALL;
+                GetScrollInfo(pane, SB_VERT, &scroll);
+                int requested = state->scroll_position;
+                switch (LOWORD(wparam)) {
+                    case SB_LINEUP:
+                        requested -= ScaleForDpi(32, GetDpiForWindow(pane));
+                        break;
+                    case SB_LINEDOWN:
+                        requested += ScaleForDpi(32, GetDpiForWindow(pane));
+                        break;
+                    case SB_PAGEUP:
+                        requested -= static_cast<int>(scroll.nPage);
+                        break;
+                    case SB_PAGEDOWN:
+                        requested += static_cast<int>(scroll.nPage);
+                        break;
+                    case SB_THUMBPOSITION:
+                    case SB_THUMBTRACK:
+                        requested = scroll.nTrackPos;
+                        break;
+                    case SB_TOP:
+                        requested = 0;
+                        break;
+                    case SB_BOTTOM:
+                        requested = state->content_height;
+                        break;
+                    default:
+                        return 0;
+                }
+                SetPaneScrollPosition(pane, *state, requested);
+            }
+            return 0;
+        case WM_MOUSEWHEEL:
+            if (state != nullptr) {
+                const int lines = GET_WHEEL_DELTA_WPARAM(wparam) / WHEEL_DELTA;
+                SetPaneScrollPosition(
+                    pane,
+                    *state,
+                    state->scroll_position
+                        - lines * ScaleForDpi(48, GetDpiForWindow(pane)));
+            }
             return 0;
         case WM_KEYDOWN:
             if (wparam == VK_ESCAPE) {
@@ -1137,6 +1239,217 @@ bool CreateDetailControls(HINSTANCE instance, HWND pane) noexcept {
                WS_TABSTOP | BS_PUSHBUTTON, IDC_TOOL_OPTIONS_APPLY) != nullptr;
 }
 
+ToolOptionsFlyoutState* FlyoutState(HWND flyout) noexcept {
+    return flyout == nullptr
+        ? nullptr
+        : reinterpret_cast<ToolOptionsFlyoutState*>(
+              GetWindowLongPtrW(flyout, GWLP_USERDATA));
+}
+
+void UpdateFlyoutTooltip(
+    HWND tooltip, HWND control, const wchar_t* text) noexcept {
+    if (tooltip == nullptr || control == nullptr || text == nullptr) return;
+    TOOLINFOW tool{};
+    tool.cbSize = sizeof(tool);
+    tool.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
+    tool.hwnd = GetParent(control);
+    tool.uId = reinterpret_cast<UINT_PTR>(control);
+    tool.lpszText = const_cast<wchar_t*>(text);
+    SendMessageW(
+        tooltip,
+        TTM_UPDATETIPTEXTW,
+        0,
+        reinterpret_cast<LPARAM>(&tool));
+}
+
+void AddFlyoutTooltip(
+    HWND tooltip, HWND control, const wchar_t* text) noexcept {
+    if (tooltip == nullptr || control == nullptr || text == nullptr) return;
+    TOOLINFOW tool{};
+    tool.cbSize = sizeof(tool);
+    tool.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
+    tool.hwnd = GetParent(control);
+    tool.uId = reinterpret_cast<UINT_PTR>(control);
+    tool.lpszText = const_cast<wchar_t*>(text);
+    SendMessageW(
+        tooltip,
+        TTM_ADDTOOLW,
+        0,
+        reinterpret_cast<LPARAM>(&tool));
+}
+
+void UpdateFlyoutPinPresentation(ToolOptionsFlyoutState& state) noexcept {
+    if (state.pin_button == nullptr) return;
+    const wchar_t* label = UiText(
+        state.pinned
+            ? UiStringId::ToolOptionsUnpinWindow
+            : UiStringId::ToolOptionsPinWindow);
+    SetWindowTextW(state.pin_button, label);
+    SendMessageW(
+        state.pin_button,
+        BM_SETCHECK,
+        state.pinned ? BST_CHECKED : BST_UNCHECKED,
+        0);
+    static_cast<void>(SetPaneIconButton(
+        state.pin_button,
+        state.pinned
+            ? PaneIconId::ReturnToFollowing
+            : PaneIconId::PinDocument));
+    UpdateFlyoutTooltip(state.tooltip, state.pin_button, label);
+}
+
+void LayoutFlyoutChildren(
+    HWND window, ToolOptionsFlyoutState& state) noexcept {
+    RECT client{};
+    if (GetClientRect(window, &client) == FALSE) return;
+    const UINT dpi = GetDpiForWindow(window);
+    const int inset = ScaleForDpi(kFlyoutHeaderInsetDip, dpi);
+    const int header_height = std::min(
+        static_cast<int>(client.bottom),
+        ScaleForDpi(kFlyoutHeaderHeightDip, dpi));
+    const int button_size = std::max(
+        0,
+        std::min(
+            ScaleForDpi(kFlyoutHeaderButtonDip, dpi),
+            header_height - inset * 2));
+    int button_x = std::max(0, static_cast<int>(client.right) - inset - button_size);
+    if (state.close_button != nullptr) {
+        SetWindowPos(
+            state.close_button,
+            HWND_TOP,
+            button_x,
+            inset,
+            button_size,
+            button_size,
+            SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
+    }
+    button_x = std::max(0, button_x - inset - button_size);
+    if (state.pin_button != nullptr) {
+        SetWindowPos(
+            state.pin_button,
+            HWND_TOP,
+            button_x,
+            inset,
+            button_size,
+            button_size,
+            SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
+    }
+    if (state.pane != nullptr) {
+        SetWindowPos(
+            state.pane,
+            nullptr,
+            0,
+            header_height,
+            std::max(0, static_cast<int>(client.right)),
+            std::max(0, static_cast<int>(client.bottom) - header_height),
+            SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER
+                | SWP_SHOWWINDOW);
+    }
+}
+
+LRESULT CALLBACK HeaderButtonSubclassProcedure(
+    HWND button,
+    UINT message,
+    WPARAM wparam,
+    LPARAM lparam,
+    UINT_PTR,
+    DWORD_PTR) noexcept {
+    LONG_PTR flags = GetWindowLongPtrW(button, GWLP_USERDATA);
+    switch (message) {
+        case WM_MOUSEMOVE:
+            if ((flags & kHeaderButtonHovered) == 0) {
+                TRACKMOUSEEVENT tracking{};
+                tracking.cbSize = sizeof(tracking);
+                tracking.dwFlags = TME_LEAVE;
+                tracking.hwndTrack = button;
+                if (TrackMouseEvent(&tracking) != FALSE) {
+                    SetWindowLongPtrW(
+                        button,
+                        GWLP_USERDATA,
+                        flags | kHeaderButtonHovered);
+                    InvalidateRect(button, nullptr, TRUE);
+                }
+            }
+            break;
+        case WM_MOUSELEAVE:
+            SetWindowLongPtrW(
+                button, GWLP_USERDATA, flags & ~kHeaderButtonHovered);
+            InvalidateRect(button, nullptr, TRUE);
+            return 0;
+        case WM_NCDESTROY:
+            RemoveWindowSubclass(
+                button,
+                HeaderButtonSubclassProcedure,
+                kHeaderButtonSubclass);
+            break;
+        default:
+            break;
+    }
+    return DefSubclassProc(button, message, wparam, lparam);
+}
+
+void DrawFlyoutCloseButton(const DRAWITEMSTRUCT& draw) noexcept {
+    const bool disabled = (draw.itemState & ODS_DISABLED) != 0U;
+    const bool pressed = (draw.itemState & ODS_SELECTED) != 0U;
+    const bool hovered =
+        (GetWindowLongPtrW(draw.hwndItem, GWLP_USERDATA)
+            & kHeaderButtonHovered)
+        != 0;
+    const int background = pressed
+        ? COLOR_3DSHADOW
+        : (hovered ? COLOR_3DLIGHT : COLOR_BTNFACE);
+    const int foreground = disabled ? COLOR_GRAYTEXT : COLOR_BTNTEXT;
+    FillRect(draw.hDC, &draw.rcItem, GetSysColorBrush(background));
+    const UINT dpi = GetDpiForWindow(draw.hwndItem);
+    const int inset = std::max(4, ScaleForDpi(7, dpi));
+    const int offset = pressed ? std::max(1, ScaleForDpi(1, dpi)) : 0;
+    const HPEN pen = CreatePen(
+        PS_SOLID,
+        std::max(1, ScaleForDpi(1, dpi)),
+        GetSysColor(foreground));
+    if (pen != nullptr) {
+        const HGDIOBJ previous = SelectObject(draw.hDC, pen);
+        MoveToEx(
+            draw.hDC,
+            draw.rcItem.left + inset + offset,
+            draw.rcItem.top + inset + offset,
+            nullptr);
+        LineTo(
+            draw.hDC,
+            draw.rcItem.right - inset + offset,
+            draw.rcItem.bottom - inset + offset);
+        MoveToEx(
+            draw.hDC,
+            draw.rcItem.right - inset + offset,
+            draw.rcItem.top + inset + offset,
+            nullptr);
+        LineTo(
+            draw.hDC,
+            draw.rcItem.left + inset + offset,
+            draw.rcItem.bottom - inset + offset);
+        if (previous != nullptr) SelectObject(draw.hDC, previous);
+        DeleteObject(pen);
+    }
+    if ((draw.itemState & ODS_FOCUS) != 0U) {
+        RECT focus = draw.rcItem;
+        InflateRect(&focus, -3, -3);
+        DrawFocusRect(draw.hDC, &focus);
+    }
+}
+
+bool IsFlyoutRelatedWindow(HWND flyout, HWND candidate) noexcept {
+    if (flyout == nullptr || candidate == nullptr) return false;
+    if (candidate == flyout || IsChild(flyout, candidate) != FALSE) return true;
+    for (HWND current = GetAncestor(candidate, GA_ROOT);
+         current != nullptr;
+         current = GetWindow(current, GW_OWNER)) {
+        if (current == flyout || IsChild(flyout, current) != FALSE) return true;
+    }
+    return false;
+}
+
+void PositionFlyout(HWND flyout, HWND anchor) noexcept;
+
 LRESULT CALLBACK FlyoutWindowProcedure(
     HWND window, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
     auto* state = reinterpret_cast<ToolOptionsFlyoutState*>(
@@ -1153,38 +1466,108 @@ LRESULT CALLBACK FlyoutWindowProcedure(
     }
     switch (message) {
         case WM_SIZE:
-            if (state != nullptr && state->pane != nullptr) {
-                RECT client{};
-                if (GetClientRect(window, &client) != FALSE) {
-                    SetWindowPos(
-                        state->pane,
-                        nullptr,
-                        0,
-                        0,
-                        client.right,
-                        client.bottom,
-                        SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER
-                            | SWP_SHOWWINDOW);
+            if (state != nullptr) LayoutFlyoutChildren(window, *state);
+            return 0;
+        case WM_PAINT: {
+            PAINTSTRUCT paint{};
+            const HDC dc = BeginPaint(window, &paint);
+            RECT client{};
+            if (dc != nullptr && GetClientRect(window, &client) != FALSE) {
+                const int header_height = std::min(
+                    static_cast<int>(client.bottom),
+                    ScaleForDpi(
+                        kFlyoutHeaderHeightDip,
+                        GetDpiForWindow(window)));
+                RECT header{0, 0, client.right, header_height};
+                FillRect(dc, &header, GetSysColorBrush(COLOR_BTNFACE));
+                if (header_height > 0) {
+                    RECT separator{
+                        0, header_height - 1, client.right, header_height};
+                    FillRect(
+                        dc,
+                        &separator,
+                        GetSysColorBrush(COLOR_3DSHADOW));
                 }
+            }
+            EndPaint(window, &paint);
+            return 0;
+        }
+        case WM_NCHITTEST: {
+            const LRESULT hit = DefWindowProcW(window, message, wparam, lparam);
+            if (hit != HTCLIENT) return hit;
+            POINT point{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+            if (ScreenToClient(window, &point) != FALSE
+                && point.y >= 0
+                && point.y < ScaleForDpi(
+                    kFlyoutHeaderHeightDip,
+                    GetDpiForWindow(window))) {
+                const HWND child = ChildWindowFromPointEx(
+                    window,
+                    point,
+                    CWP_SKIPINVISIBLE | CWP_SKIPDISABLED
+                        | CWP_SKIPTRANSPARENT);
+                if (state != nullptr
+                    && (child == state->pin_button
+                        || child == state->close_button)) {
+                    return HTCLIENT;
+                }
+                return HTCAPTION;
+            }
+            return HTCLIENT;
+        }
+        case WM_ACTIVATE:
+            if (state != nullptr && LOWORD(wparam) == WA_INACTIVE
+                && !state->pinned && IsWindowVisible(window) != FALSE) {
+                PostMessageW(window, kDismissFlyoutMessage, 0, 0);
+            }
+            break;
+        case kDismissFlyoutMessage:
+            if (state != nullptr && !state->pinned
+                && IsWindowVisible(window) != FALSE
+                && !IsFlyoutRelatedWindow(window, GetForegroundWindow())) {
+                ShowWindow(window, SW_HIDE);
+            }
+            return 0;
+        case kFitFlyoutToContentMessage:
+            if (state != nullptr && IsWindowVisible(window) != FALSE) {
+                PositionFlyout(window, state->anchor);
             }
             return 0;
         case WM_CLOSE:
             ShowWindow(window, SW_HIDE);
             return 0;
         case WM_COMMAND:
-            if (LOWORD(wparam) == IDCANCEL) {
+            if (state != nullptr
+                && LOWORD(wparam) == IDC_TOOL_OPTIONS_FLYOUT_PIN
+                && HIWORD(wparam) == BN_CLICKED) {
+                state->pinned = SendMessageW(
+                    state->pin_button, BM_GETCHECK, 0, 0) == BST_CHECKED;
+                UpdateFlyoutPinPresentation(*state);
+                SetWindowPos(
+                    window,
+                    HWND_TOP,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE
+                        | SWP_NOOWNERZORDER);
+                return 0;
+            }
+            if (LOWORD(wparam) == IDC_TOOL_OPTIONS_FLYOUT_CLOSE
+                || LOWORD(wparam) == IDCANCEL) {
                 ShowWindow(window, SW_HIDE);
                 return 0;
             }
             break;
-        case WM_GETMINMAXINFO: {
-            auto* limits = reinterpret_cast<MINMAXINFO*>(lparam);
-            if (limits != nullptr) {
-                const UINT dpi = GetDpiForWindow(window);
-                limits->ptMinTrackSize.x = ScaleForDpi(320, dpi);
-                limits->ptMinTrackSize.y = ScaleForDpi(320, dpi);
+        case WM_DRAWITEM: {
+            const auto* draw = reinterpret_cast<const DRAWITEMSTRUCT*>(lparam);
+            if (draw != nullptr
+                && draw->CtlID == IDC_TOOL_OPTIONS_FLYOUT_CLOSE) {
+                DrawFlyoutCloseButton(*draw);
+                return TRUE;
             }
-            return 0;
+            break;
         }
         case WM_DPICHANGED:
             if (const auto* suggested = reinterpret_cast<const RECT*>(lparam);
@@ -1197,12 +1580,25 @@ LRESULT CALLBACK FlyoutWindowProcedure(
                     suggested->right - suggested->left,
                     suggested->bottom - suggested->top,
                     SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER);
+                PostMessageW(window, kFitFlyoutToContentMessage, 0, 0);
             }
             return 0;
+        case WM_THEMECHANGED:
+        case WM_SYSCOLORCHANGE:
+            if (state != nullptr) UpdateFlyoutPinPresentation(*state);
+            InvalidateRect(window, nullptr, TRUE);
+            break;
         case WM_NCDESTROY:
             if (state != nullptr) {
+                if (state->tooltip != nullptr
+                    && IsWindow(state->tooltip) != FALSE) {
+                    DestroyWindow(state->tooltip);
+                }
                 state->window = nullptr;
                 state->pane = nullptr;
+                state->pin_button = nullptr;
+                state->close_button = nullptr;
+                state->tooltip = nullptr;
                 state->anchor = nullptr;
                 state->command = 0U;
             }
@@ -1229,47 +1625,91 @@ bool RegisterFlyoutClass(HINSTANCE instance) noexcept {
     return RegisterClassExW(&window_class) != 0U;
 }
 
-ToolOptionsFlyoutState* FlyoutState(HWND flyout) noexcept {
-    return flyout == nullptr
-        ? nullptr
-        : reinterpret_cast<ToolOptionsFlyoutState*>(
-              GetWindowLongPtrW(flyout, GWLP_USERDATA));
-}
-
 void PositionFlyout(HWND flyout, HWND anchor) noexcept {
-    if (flyout == nullptr) return;
-    const UINT dpi = anchor == nullptr ? GetDpiForWindow(flyout) : GetDpiForWindow(anchor);
-    RECT anchor_bounds{};
-    if (anchor == nullptr || GetWindowRect(anchor, &anchor_bounds) == FALSE) {
-        HWND owner = GetWindow(flyout, GW_OWNER);
-        GetWindowRect(owner, &anchor_bounds);
+    ToolOptionsFlyoutState* state = FlyoutState(flyout);
+    if (state == nullptr || state->pane == nullptr) return;
+    const bool anchor_available =
+        anchor != nullptr && IsWindow(anchor) != FALSE;
+    const UINT dpi = anchor_available
+        ? GetDpiForWindow(anchor)
+        : GetDpiForWindow(flyout);
+    const int header_height = ScaleForDpi(kFlyoutHeaderHeightDip, dpi);
+    const int client_width = ScaleForDpi(kFlyoutClientWidthDip, dpi);
+    const int saved_scroll_position = state->pane_state == nullptr
+        ? 0
+        : state->pane_state->scroll_position;
+    SetWindowPos(
+        state->pane,
+        nullptr,
+        0,
+        header_height,
+        client_width,
+        ScaleForDpi(640, dpi),
+        SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER);
+    const int content_height = std::max(
+        ScaleForDpi(48, dpi), LayoutPane(state->pane));
+    if (state->pane_state != nullptr) {
+        state->pane_state->scroll_position = saved_scroll_position;
     }
-    const int width = ScaleForDpi(380, dpi);
-    const int height = ScaleForDpi(620, dpi);
-    RECT desired{
-        anchor_bounds.right + ScaleForDpi(8, dpi),
-        anchor_bounds.top,
-        anchor_bounds.right + ScaleForDpi(8, dpi) + width,
-        anchor_bounds.top + height};
-    const HMONITOR monitor = MonitorFromRect(&anchor_bounds, MONITOR_DEFAULTTONEAREST);
+    RECT outer{0, 0, client_width, header_height + content_height};
+    const DWORD style = static_cast<DWORD>(
+        GetWindowLongPtrW(flyout, GWL_STYLE));
+    const DWORD ex_style = static_cast<DWORD>(
+        GetWindowLongPtrW(flyout, GWL_EXSTYLE));
+    AdjustWindowRectExForDpi(&outer, style, FALSE, ex_style, dpi);
+    int width = std::max(1, static_cast<int>(outer.right - outer.left));
+    int height = std::max(1, static_cast<int>(outer.bottom - outer.top));
+    RECT anchor_bounds{};
+    if (!anchor_available || GetWindowRect(anchor, &anchor_bounds) == FALSE) {
+        const HWND owner = GetWindow(flyout, GW_OWNER);
+        if (owner == nullptr || GetWindowRect(owner, &anchor_bounds) == FALSE) {
+            GetWindowRect(flyout, &anchor_bounds);
+        }
+    }
+    RECT current{};
+    const bool retain_position = state->pinned
+        && GetWindowRect(flyout, &current) != FALSE
+        && current.right > current.left && current.bottom > current.top;
+    const RECT monitor_target = retain_position ? current : anchor_bounds;
+    const HMONITOR monitor = MonitorFromRect(
+        &monitor_target, MONITOR_DEFAULTTONEAREST);
     MONITORINFO info{};
     info.cbSize = sizeof(info);
+    RECT work{};
     if (GetMonitorInfoW(monitor, &info) != FALSE) {
-        if (desired.right > info.rcWork.right) {
-            desired.left = anchor_bounds.left - ScaleForDpi(8, dpi) - width;
-            desired.right = desired.left + width;
-        }
-        desired.left = std::clamp(
-            static_cast<int>(desired.left),
-            static_cast<int>(info.rcWork.left),
-            std::max(static_cast<int>(info.rcWork.left),
-                     static_cast<int>(info.rcWork.right) - width));
-        desired.top = std::clamp(
-            static_cast<int>(desired.top),
-            static_cast<int>(info.rcWork.top),
-            std::max(static_cast<int>(info.rcWork.top),
-                     static_cast<int>(info.rcWork.bottom) - height));
+        const int work_inset = ScaleForDpi(kFlyoutWorkAreaInsetDip, dpi);
+        work = info.rcWork;
+        InflateRect(&work, -work_inset, -work_inset);
+        width = std::min(width, std::max(1, static_cast<int>(work.right - work.left)));
+        height = std::min(
+            height, std::max(1, static_cast<int>(work.bottom - work.top)));
+    } else {
+        work = anchor_bounds;
     }
+    const int anchor_gap = ScaleForDpi(kFlyoutAnchorGapDip, dpi);
+    RECT desired{};
+    if (retain_position) {
+        desired.left = current.left;
+        desired.top = current.top;
+    } else {
+        desired.left = anchor_bounds.right + anchor_gap;
+        desired.top = anchor_bounds.top;
+        if (desired.left + width > work.right) {
+            desired.left = anchor_bounds.left - anchor_gap - width;
+        }
+    }
+    desired.left = std::clamp(
+        static_cast<int>(desired.left),
+        static_cast<int>(work.left),
+        std::max(static_cast<int>(work.left),
+                 static_cast<int>(work.right) - width));
+    desired.top = std::clamp(
+        static_cast<int>(desired.top),
+        static_cast<int>(work.top),
+        std::max(static_cast<int>(work.top),
+                 static_cast<int>(work.bottom) - height));
+    desired.right = desired.left + width;
+    desired.bottom = desired.top + height;
     SetWindowPos(
         flyout,
         HWND_TOP,
@@ -1290,7 +1730,7 @@ HWND CreateToolOptionsPane(
         WS_EX_CONTROLPARENT,
         L"STATIC",
         nullptr,
-        WS_CHILD | WS_CLIPCHILDREN,
+        WS_CHILD | WS_CLIPCHILDREN | WS_VSCROLL,
         0,
         0,
         0,
@@ -1447,6 +1887,10 @@ void UpdateToolOptionsPane(
     }
     state->updating = false;
     LayoutPane(pane);
+    const HWND flyout = GetParent(pane);
+    if (flyout != nullptr && IsWindowVisible(flyout) != FALSE) {
+        PostMessageW(flyout, kFitFlyoutToContentMessage, 0, 0);
+    }
 }
 
 void RefreshToolOptionsDetail(HWND pane, UINT command) noexcept {
@@ -1455,6 +1899,7 @@ void RefreshToolOptionsDetail(HWND pane, UINT command) noexcept {
         : reinterpret_cast<ToolOptionsPaneState*>(
               GetWindowLongPtrW(pane, GWLP_USERDATA));
     if (state == nullptr) return;
+    state->scroll_position = 0;
     state->detail_command = command;
     ToolOptionsDetailModel detail{};
     if (command != 0U && state->query_detail != nullptr
@@ -1465,6 +1910,10 @@ void RefreshToolOptionsDetail(HWND pane, UINT command) noexcept {
     }
     PopulateDetailControls(pane, *state);
     LayoutPane(pane);
+    const HWND flyout = GetParent(pane);
+    if (flyout != nullptr && IsWindowVisible(flyout) != FALSE) {
+        PostMessageW(flyout, kFitFlyoutToContentMessage, 0, 0);
+    }
 }
 
 HWND CreateToolOptionsFlyout(
@@ -1475,19 +1924,83 @@ HWND CreateToolOptionsFlyout(
     if (!RegisterFlyoutClass(instance)) return nullptr;
     flyout.pane_state = &pane_state;
     const HWND window = CreateWindowExW(
-        0,
+        WS_EX_CONTROLPARENT | WS_EX_TOOLWINDOW,
         kFlyoutClassName,
         UiText(UiStringId::ToolGeneric),
-        WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_CLIPCHILDREN,
+        WS_POPUP | WS_BORDER | WS_CLIPCHILDREN,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
-        ScaleForDpi(380, GetDpiForWindow(owner)),
-        ScaleForDpi(620, GetDpiForWindow(owner)),
+        ScaleForDpi(kFlyoutClientWidthDip, GetDpiForWindow(owner)),
+        ScaleForDpi(180, GetDpiForWindow(owner)),
         owner,
         nullptr,
         instance,
         &flyout);
     if (window == nullptr) return nullptr;
+    const HWND pin_button = CreateWindowExW(
+        0,
+        L"BUTTON",
+        UiText(UiStringId::ToolOptionsPinWindow),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX | BS_PUSHLIKE
+            | BS_FLAT,
+        0,
+        0,
+        0,
+        0,
+        window,
+        reinterpret_cast<HMENU>(
+            static_cast<INT_PTR>(IDC_TOOL_OPTIONS_FLYOUT_PIN)),
+        instance,
+        nullptr);
+    const HWND close_button = CreateWindowExW(
+        0,
+        L"BUTTON",
+        UiText(UiStringId::DockClose),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+        0,
+        0,
+        0,
+        0,
+        window,
+        reinterpret_cast<HMENU>(
+            static_cast<INT_PTR>(IDC_TOOL_OPTIONS_FLYOUT_CLOSE)),
+        instance,
+        nullptr);
+    if (pin_button == nullptr || close_button == nullptr
+        || SetWindowSubclass(
+               close_button,
+               HeaderButtonSubclassProcedure,
+               kHeaderButtonSubclass,
+               0U) == FALSE) {
+        DestroyWindow(window);
+        return nullptr;
+    }
+    flyout.pin_button = pin_button;
+    flyout.close_button = close_button;
+    flyout.tooltip = CreateWindowExW(
+        WS_EX_TOPMOST,
+        TOOLTIPS_CLASSW,
+        nullptr,
+        WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX,
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        window,
+        nullptr,
+        instance,
+        nullptr);
+    if (flyout.tooltip != nullptr) {
+        AddFlyoutTooltip(
+            flyout.tooltip,
+            pin_button,
+            UiText(UiStringId::ToolOptionsPinWindow));
+        AddFlyoutTooltip(
+            flyout.tooltip,
+            close_button,
+            UiText(UiStringId::DockClose));
+    }
+    UpdateFlyoutPinPresentation(flyout);
     const HWND pane = CreateToolOptionsPane(instance, window, pane_state);
     if (pane == nullptr) {
         DestroyWindow(window);
@@ -1495,16 +2008,7 @@ HWND CreateToolOptionsFlyout(
     }
     flyout.window = window;
     flyout.pane = pane;
-    RECT client{};
-    GetClientRect(window, &client);
-    SetWindowPos(
-        pane,
-        nullptr,
-        0,
-        0,
-        client.right,
-        client.bottom,
-        SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER | SWP_SHOWWINDOW);
+    LayoutFlyoutChildren(window, flyout);
     ShowWindow(window, SW_HIDE);
     return window;
 }

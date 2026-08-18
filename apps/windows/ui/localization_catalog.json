@@ -265,6 +265,20 @@
       "resource": false
     },
     {
+      "id": "ToolOptionsPinWindow",
+      "kind": "text",
+      "ja": "このウィンドウを固定",
+      "en": "Pin This Window",
+      "resource": false
+    },
+    {
+      "id": "ToolOptionsUnpinWindow",
+      "kind": "text",
+      "ja": "ウィンドウの固定を解除",
+      "en": "Unpin This Window",
+      "resource": false
+    },
+    {
       "id": "ToolDiameter",
       "kind": "text",
       "ja": "直径",

@@ -63,6 +63,8 @@ struct ToolOptionsPaneState {
     ToolOptionsDetailModel detail{};
     HFONT font{};
     HFONT edit_font{};
+    int scroll_position{};
+    int content_height{};
     bool updating{};
     bool editing{};
     bool editing_smoothing{};
@@ -73,8 +75,12 @@ struct ToolOptionsFlyoutState {
     ToolOptionsPaneState* pane_state{};
     HWND window{};
     HWND pane{};
+    HWND pin_button{};
+    HWND close_button{};
+    HWND tooltip{};
     HWND anchor{};
     UINT command{};
+    bool pinned{};
 };
 
 HWND CreateToolOptionsPane(
