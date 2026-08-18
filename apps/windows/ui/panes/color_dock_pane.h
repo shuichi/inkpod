@@ -87,10 +87,10 @@ struct ColorDockPaneState {
     double drawing_hue_degrees{};
     int picker_drag_target{};
     bool picker_targets_main_line{};
-    InkpodColorValue main_line_drag_origin{
+    InkpodColorValue picker_drag_origin{
         sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 0U, 0U, 0U, 255U};
-    double main_line_drag_origin_hue{};
-    bool main_line_preview_active{};
+    double picker_drag_origin_hue{};
+    bool picker_preview_active{};
     std::vector<std::uint32_t> picker_ring_pixels;
     std::vector<std::uint32_t> picker_triangle_pixels;
     std::vector<std::uint32_t> picker_frame_pixels;

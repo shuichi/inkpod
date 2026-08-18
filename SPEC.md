@@ -365,6 +365,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 
 - 描画色は sRGB RGBA 8/16 bit を保持し、RGB と HSV editor、alpha 数値/percent 表示を切り替える。
 - 色を使う active command は、鉛筆、ブラシ、フィル、選択、エアブラシ、各ベクター描画 tool ごとに独立した現在色を持つ。鉛筆の既定色は黒、その他の彩色用 command の既定色は彩色用の初期色とする。command 切替時はその command の現在色を復元し、color editor、swatch、数値欄へ即時反映する。color pane は文書の主線色と active command の彩色用描画色を別のラベルと swatch で常時区別する。スポイト等の色を持たない一時 tool は直前の色付き command を変更先として維持する。
+- color ring、HSV triangle、alpha track の pointer drag は pane-local preview を各入力 sample で即時描画し、button release 時だけ現在色を Core/editor state へ公開する。capture cancellation は drag 開始時の色と hue へ復元し、preview 中に palette/chart list や他 pane を全更新しない。
 - color palette は複数 page/group を持ち、cell click で描画色取得、modifier+click で現在色登録、clear/save/load ができる。
 - 高頻度の10色は `1`から`0`へ割り当て、`Tab`で次の10色 group へ切り替える。shortcut editor で変更可能にする。
 - color chart は色と名前を表形式で管理し、複数 page、検索、次候補、lock、cut/copy/paste、save/load を持つ。旧版の5文字制限は native 形式へ課さない。

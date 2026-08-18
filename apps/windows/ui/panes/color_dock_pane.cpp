@@ -1542,11 +1542,22 @@ int HitPickerTarget(const PickerGeometry& geometry, int x, int y) noexcept {
     return kPickerDragNone;
 }
 
-void CommitPickerColor(
+void PublishPickerColor(ColorDockPaneState& state) noexcept {
+    const InkpodColorValue color = ActivePickerColor(state);
+    if (state.picker_targets_main_line) {
+        if (state.change_main_line_color != nullptr) {
+            state.change_main_line_color(state.context, color);
+        }
+    } else if (state.change_color != nullptr) {
+        state.change_color(state.context, color);
+    }
+}
+
+void PresentPickerColor(
     HWND picker,
     ColorDockPaneState& state,
     const InkpodColorValue& color,
-    bool commit_main_line) noexcept {
+    bool publish) noexcept {
     const HWND pane = GetParent(picker);
     if (state.picker_targets_main_line) {
         state.main_line_color = color;
@@ -1558,13 +1569,14 @@ void CommitPickerColor(
     SetColorFields(pane, color);
     InvalidateRect(GetDlgItem(pane, IDC_COLOR_MAIN_LINE_SWATCH), nullptr, FALSE);
     InvalidateRect(picker, nullptr, FALSE);
-    if (state.picker_targets_main_line) {
-        if (commit_main_line && state.change_main_line_color != nullptr) {
-            state.change_main_line_color(state.context, color);
-        }
-    } else if (state.change_color != nullptr) {
-        state.change_color(state.context, color);
+    // WM_PAINT is lower priority than the continuous mouse-input stream. Paint
+    // the local preview before any external state publication so the ring,
+    // triangle, and markers remain attached to the pointer while dragging.
+    UpdateWindow(picker);
+    if (!publish) {
+        return;
     }
+    PublishPickerColor(state);
 }
 
 void UpdatePickerFromPoint(
@@ -1572,7 +1584,7 @@ void UpdatePickerFromPoint(
     ColorDockPaneState& state,
     int x,
     int y,
-    bool commit_main_line) noexcept {
+    bool commit) noexcept {
     double& hue_degrees = ActivePickerHue(state);
     const PickerGeometry geometry = MakePickerGeometry(picker, hue_degrees);
     if (!geometry.valid) {
@@ -1634,7 +1646,7 @@ void UpdatePickerFromPoint(
         default:
             return;
     }
-    CommitPickerColor(picker, state, color, commit_main_line);
+    PresentPickerColor(picker, state, color, commit);
 }
 
 void UpdatePickerFromKeyboard(
@@ -1697,7 +1709,7 @@ void UpdatePickerFromKeyboard(
             break;
     }
     if (handled) {
-        CommitPickerColor(picker, state, color, true);
+        PresentPickerColor(picker, state, color, true);
     }
 }
 
@@ -1826,12 +1838,9 @@ LRESULT CALLBACK PickerSubclassProcedure(
                 state->picker_drag_target = HitPickerTarget(
                     geometry, GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam));
                 if (state->picker_drag_target != kPickerDragNone) {
-                    if (state->picker_targets_main_line) {
-                        state->main_line_drag_origin = state->main_line_color;
-                        state->main_line_drag_origin_hue =
-                            state->main_line_hue_degrees;
-                        state->main_line_preview_active = true;
-                    }
+                    state->picker_drag_origin = ActivePickerColor(*state);
+                    state->picker_drag_origin_hue = ActivePickerHue(*state);
+                    state->picker_preview_active = true;
                     SetCapture(picker);
                     UpdatePickerFromPoint(
                         picker,
@@ -1862,10 +1871,11 @@ LRESULT CALLBACK PickerSubclassProcedure(
                     *state,
                         GET_X_LPARAM(lparam),
                         GET_Y_LPARAM(lparam),
-                        true);
+                        false);
                 state->picker_drag_target = kPickerDragNone;
-                state->main_line_preview_active = false;
+                state->picker_preview_active = false;
                 ReleaseCapture();
+                PublishPickerColor(*state);
                 return 0;
             }
             break;
@@ -1873,23 +1883,27 @@ LRESULT CALLBACK PickerSubclassProcedure(
         case WM_CANCELMODE:
             if (state != nullptr) {
                 state->picker_drag_target = kPickerDragNone;
-                if (state->main_line_preview_active) {
-                    state->main_line_color = state->main_line_drag_origin;
-                    state->main_line_hue_degrees =
-                        state->main_line_drag_origin_hue;
-                    state->main_line_preview_active = false;
+                if (state->picker_preview_active) {
+                    ActivePickerColor(*state) = state->picker_drag_origin;
+                    ActivePickerHue(*state) = state->picker_drag_origin_hue;
+                    state->picker_preview_active = false;
                     const HWND pane = GetParent(picker);
                     SetColorLabel(
                         pane,
-                        IDC_COLOR_MAIN_LINE_LABEL,
-                        UiText(UiStringId::MainLineColor),
-                        state->main_line_color);
-                    SetColorFields(pane, state->main_line_color);
+                        state->picker_targets_main_line
+                            ? IDC_COLOR_MAIN_LINE_LABEL
+                            : IDC_COLOR_DRAWING_LABEL,
+                        state->picker_targets_main_line
+                            ? UiText(UiStringId::MainLineColor)
+                            : UiText(UiStringId::DrawingColor),
+                        ActivePickerColor(*state));
+                    SetColorFields(pane, ActivePickerColor(*state));
                     InvalidateRect(
                         GetDlgItem(pane, IDC_COLOR_MAIN_LINE_SWATCH),
                         nullptr,
                         FALSE);
                     InvalidateRect(picker, nullptr, FALSE);
+                    UpdateWindow(picker);
                 }
             }
             break;
