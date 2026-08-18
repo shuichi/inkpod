@@ -267,6 +267,79 @@ final class ProductCanvasLifecycleTests: XCTestCase {
     }
 
     @MainActor
+    func testViewportUpdatesCoalesceAndDeferCanvasInputUntilRevisionConverges() async throws {
+        _ = NSApplication.shared
+        let application = ApplicationCoordinator()
+        let workspaceID = WorkspaceID(
+            rawValue: UUID(uuidString: "A2020000-0000-0000-0000-000000000012")!
+        )
+        let workspace = application.workspace(for: workspaceID)
+        workspace.start()
+        guard await waitUntil(timeout: 10, condition: {
+            workspace.phase == .ready
+                && workspace.paint != nil
+                && workspace.editorGraph?.activeView != nil
+        }), let initial = workspace.projection,
+            let viewID = workspace.editorGraph?.activeView?.id
+        else {
+            XCTFail("viewport coordination fixture did not become ready")
+            await application.shutdown(confirmingDirty: false)
+            return
+        }
+
+        let paused = await application.coreHost
+            .setNormalProcessingEnabledForTesting(false).value()
+        XCTAssertEqual(paused, .acknowledged)
+        workspace.viewportChanged(CGSize(width: 321, height: 241), viewID: viewID)
+        workspace.viewportChanged(CGSize(width: 641, height: 481), viewID: viewID)
+        workspace.viewportChanged(CGSize(width: 777, height: 555), viewID: viewID)
+
+        workspace.beginStroke(
+            .init(deviceX: 32, deviceY: 32, pressure: 1),
+            viewID: viewID
+        )
+        workspace.appendStroke(
+            .init(deviceX: 48, deviceY: 48, pressure: 1),
+            viewID: viewID
+        )
+        workspace.endStroke(
+            finalSample: .init(deviceX: 64, deviceY: 64, pressure: 1),
+            viewID: viewID
+        )
+
+        let committedBeforeViewportConverged = await waitUntil(timeout: 0.5) {
+            (workspace.projection?.documentRevision ?? 0) > initial.documentRevision
+        }
+        XCTAssertFalse(
+            committedBeforeViewportConverged,
+            "Canvas input must remain deferred while a viewport update is pending"
+        )
+
+        let resumed = await application.coreHost
+            .setNormalProcessingEnabledForTesting(true).value()
+        XCTAssertEqual(resumed, .acknowledged)
+        let convergedAndCommitted = await waitUntil(timeout: 10) {
+            guard let projection = workspace.projection,
+                  let view = workspace.editorGraph?.activeView
+            else { return false }
+            return projection.documentRevision > initial.documentRevision
+                && projection.viewRevision == initial.viewRevision + 2
+                && view.viewRevision == projection.viewRevision
+                && projection.canUndo
+        }
+        XCTAssertTrue(
+            convergedAndCommitted,
+            "latest viewport must converge after one in-flight and one coalesced update, "
+                + "then commit the deferred input; projection="
+                + "\(String(describing: workspace.projection)); view="
+                + "\(String(describing: workspace.editorGraph?.activeView))"
+        )
+        XCTAssertNotEqual(workspace.lastCommandResult, .stale)
+
+        await application.shutdown(confirmingDirty: false)
+    }
+
+    @MainActor
     func testM9LightTableSnapshotPresentsThroughMetalAndReleasesExactlyOnce() async throws {
         _ = NSApplication.shared
         let host = CoreHost()
@@ -724,6 +797,7 @@ final class ProductCanvasLifecycleTests: XCTestCase {
             canvas.accessibilityValue() as? String
                 != nil && application.rendererHost.metrics().presentedFrameCount > 0
                 && workspace.paint != nil
+                && workspace.canvasViewRevisionIsConverged()
         }) else {
             XCTFail(
                 "product scene did not present its first Metal frame; "

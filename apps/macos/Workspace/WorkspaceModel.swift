@@ -746,11 +746,13 @@ enum M8CanvasTool: Equatable {
 }
 
 private struct M8CanvasGesture {
-    let context: CommandTargetContext
+    var context: CommandTargetContext
     let viewID: WorkspaceViewID
     let tool: M8CanvasTool
     let start: CorePointerSample
     var samples: [CorePointerSample]
+    var waitingForViewport: Bool
+    var ended: Bool
 }
 
 private struct M8AnnotationSeed {
@@ -766,9 +768,18 @@ private struct CanvasPaintGesture {
     let viewID: WorkspaceViewID
     let target: CoreViewTarget
     let tool: CoreEditorTool
-    let expectation: CorePaintExpectation
+    var expectation: CorePaintExpectation
     let start: CorePointerSample
     var samples: [CorePointerSample]
+    var waitingForViewport: Bool
+    var rasterBeganInCore: Bool
+    var ended: Bool
+}
+
+private struct CanvasViewportUpdate {
+    let target: CoreViewTarget
+    var inFlightSize: CGSize
+    var pendingSize: CGSize?
 }
 
 private struct WorkspaceInspectorTarget: Equatable {
@@ -896,6 +907,7 @@ final class WorkspaceModel: ObservableObject {
     private var surfaces: [WorkspaceViewID: CoreSurfaceTarget] = [:]
     private var routes: [WorkspaceViewID: CoreSnapshotRoute] = [:]
     private var drawableSizes: [WorkspaceViewID: CGSize] = [:]
+    private var viewportUpdates: [WorkspaceViewID: CanvasViewportUpdate] = [:]
     private var sessionProjections: [CoreSessionTarget: CoreSessionProjection] = [:]
     private var treeProjections: [CoreSessionTarget: CoreTreeProjection] = [:]
     private var paintProjections: [CoreSessionTarget: CorePaintProjection] = [:]
@@ -1287,6 +1299,8 @@ final class WorkspaceModel: ObservableObject {
     func unregisterCanvas(_ target: CoreSurfaceTarget) {
         guard let pair = surfaces.first(where: { $0.value == target }) else { return }
         cancelStroke(viewID: pair.key)
+        cancelM8CanvasGesture(viewID: pair.key)
+        viewportUpdates.removeValue(forKey: pair.key)
         _ = application.rendererHost.unregisterSurface(target)
         surfaces.removeValue(forKey: pair.key)
         routes.removeValue(forKey: pair.key)
@@ -1297,17 +1311,111 @@ final class WorkspaceModel: ObservableObject {
         guard let view = viewRecord(viewID) else { return }
         self.drawableSize = drawableSize
         drawableSizes[view.id] = drawableSize
-        observeCoreMutation(
-            application.coreHost.applyView(
-                target: view.coreTarget,
-                command: .viewportResized(
-                    width: drawableSize.width,
-                    height: drawableSize.height
-                )
-            ),
-            requestsSnapshot: true,
-            viewID: view.id
+        if var gesture = canvasPaintGesture,
+           gesture.viewID == view.id,
+           !gesture.rasterBeganInCore
+        {
+            gesture.waitingForViewport = true
+            canvasPaintGesture = gesture
+        }
+        if var gesture = m8CanvasGesture, gesture.viewID == view.id {
+            gesture.waitingForViewport = true
+            m8CanvasGesture = gesture
+        }
+        if var update = viewportUpdates[view.id] {
+            guard update.target == view.coreTarget else { return }
+            update.pendingSize = drawableSize == update.inFlightSize ? nil : drawableSize
+            viewportUpdates[view.id] = update
+            return
+        }
+        viewportUpdates[view.id] = CanvasViewportUpdate(
+            target: view.coreTarget,
+            inFlightSize: drawableSize,
+            pendingSize: nil
         )
+        submitViewportUpdate(viewID: view.id, target: view.coreTarget, size: drawableSize)
+    }
+
+    func canvasViewRevisionIsConverged(viewID: WorkspaceViewID? = nil) -> Bool {
+        guard let view = viewRecord(viewID) else { return false }
+        return viewportUpdates[view.id] == nil
+    }
+
+    private func submitViewportUpdate(
+        viewID: WorkspaceViewID,
+        target: CoreViewTarget,
+        size: CGSize
+    ) {
+        let generation = lifecycleGeneration
+        observe(
+            application.coreHost.applyView(
+                target: target,
+                command: .viewportResized(width: size.width, height: size.height)
+            ),
+            generation: generation
+        ) { [weak self] outcome in
+            self?.completeViewportUpdate(
+                outcome,
+                viewID: viewID,
+                target: target,
+                size: size
+            )
+        }
+    }
+
+    private func completeViewportUpdate(
+        _ outcome: CoreRequestOutcome,
+        viewID: WorkspaceViewID,
+        target: CoreViewTarget,
+        size: CGSize
+    ) {
+        guard var update = viewportUpdates[viewID],
+              update.target == target,
+              update.inFlightSize == size
+        else { return }
+
+        switch outcome {
+        case let .viewUpdated(projection):
+            applyViewportProjection(projection, target: target)
+        case let .logicalViewUpdated(projection):
+            updateLogicalView(projection)
+        case let .noOp(projection):
+            if let projection {
+                updateSessionProjection(projection)
+            }
+        case let .failed(failure):
+            if failure == .staleTarget || failure == .invalidTarget {
+                viewportUpdates.removeValue(forKey: viewID)
+                discardDeferredCanvasInput(viewID: viewID)
+                phase = .failed(failure)
+                return
+            }
+            lastCommandResult = .failed(failure)
+        default:
+            lastCommandResult = .invalid
+        }
+
+        if let pendingSize = update.pendingSize, pendingSize != size {
+            update.inFlightSize = pendingSize
+            update.pendingSize = nil
+            viewportUpdates[viewID] = update
+            submitViewportUpdate(viewID: viewID, target: target, size: pendingSize)
+            return
+        }
+
+        viewportUpdates.removeValue(forKey: viewID)
+        requestSnapshot(viewID: viewID)
+        resumeDeferredCanvasInput(viewID: viewID)
+    }
+
+    private func applyViewportProjection(
+        _ projection: CoreSessionProjection,
+        target: CoreViewTarget
+    ) {
+        updateSessionProjection(projection)
+        guard var graph = editorGraph else { return }
+        _ = graph.updateViewRevision(target: target, revision: projection.viewRevision)
+        editorGraph = graph
     }
 
     func setCanvasVisible(_ visible: Bool, viewID: WorkspaceViewID? = nil) {
@@ -1335,14 +1443,20 @@ final class WorkspaceModel: ObservableObject {
             refreshPaint()
             return
         }
+        let waitingForViewport = !canvasViewRevisionIsConverged(viewID: view.id)
+        let isRasterStroke = [.pencil, .brush, .eraser].contains(paint.editor.activeTool)
         canvasPaintGesture = CanvasPaintGesture(
             viewID: view.id,
             target: view.coreTarget,
             tool: paint.editor.activeTool,
             expectation: expectation,
             start: sample,
-            samples: [sample]
+            samples: [sample],
+            waitingForViewport: waitingForViewport,
+            rasterBeganInCore: isRasterStroke && !waitingForViewport,
+            ended: false
         )
+        guard !waitingForViewport else { return }
         switch paint.editor.activeTool {
         case .pencil, .brush, .eraser:
             observePaintMutation(
@@ -1367,6 +1481,16 @@ final class WorkspaceModel: ObservableObject {
         }
         switch gesture.tool {
         case .pencil, .brush, .eraser:
+            if gesture.waitingForViewport {
+                guard gesture.samples.count < 65_536 else {
+                    cancelStroke(viewID: gesture.viewID)
+                    lastCommandResult = .failed(.coreOperation(.invalidArgument))
+                    return
+                }
+                gesture.samples.append(sample)
+                canvasPaintGesture = gesture
+                return
+            }
             observePaintMutation(
                 application.coreHost.appendRasterStroke(
                     target: gesture.target,
@@ -1396,7 +1520,9 @@ final class WorkspaceModel: ObservableObject {
             }
             gesture.samples.append(sample)
             canvasPaintGesture = gesture
-            if gesture.samples.count == 2 || gesture.samples.count.isMultiple(of: 8) {
+            if !gesture.waitingForViewport,
+               (gesture.samples.count == 2 || gesture.samples.count.isMultiple(of: 8))
+            {
                 requestColorReplacePreview(for: gesture)
             }
         }
@@ -1408,10 +1534,30 @@ final class WorkspaceModel: ObservableObject {
         else {
             return
         }
-        canvasPaintGesture = nil
         if let finalSample, gesture.samples.last != finalSample {
+            if gesture.waitingForViewport,
+               [.pencil, .brush, .eraser].contains(gesture.tool),
+               gesture.samples.count >= 65_536
+            {
+                cancelStroke(viewID: gesture.viewID)
+                lastCommandResult = .failed(.coreOperation(.invalidArgument))
+                return
+            }
             gesture.samples.append(finalSample)
         }
+        if gesture.waitingForViewport {
+            gesture.ended = true
+            canvasPaintGesture = gesture
+            return
+        }
+        canvasPaintGesture = nil
+        finishCanvasPaintGesture(gesture, finalSample: finalSample)
+    }
+
+    private func finishCanvasPaintGesture(
+        _ gesture: CanvasPaintGesture,
+        finalSample: CorePointerSample?
+    ) {
         switch gesture.tool {
         case .pencil, .brush, .eraser:
             if let finalSample {
@@ -1494,7 +1640,7 @@ final class WorkspaceModel: ObservableObject {
         }
         canvasPaintGesture = nil
         colorReplacePreview = nil
-        if [.pencil, .brush, .eraser].contains(gesture.tool) {
+        if gesture.rasterBeganInCore {
             observePaintMutation(
                 application.coreHost.cancelStroke(target: gesture.target),
                 requestsSnapshot: true,
@@ -1502,6 +1648,81 @@ final class WorkspaceModel: ObservableObject {
             )
         } else {
             lastCommandResult = .cancelled
+        }
+    }
+
+    private func resumeDeferredCanvasInput(viewID: WorkspaceViewID) {
+        resumeDeferredPaintGesture(viewID: viewID)
+        resumeDeferredM8CanvasGesture(viewID: viewID)
+    }
+
+    private func resumeDeferredPaintGesture(viewID: WorkspaceViewID) {
+        guard var gesture = canvasPaintGesture,
+              gesture.viewID == viewID,
+              gesture.waitingForViewport,
+              viewportUpdates[viewID] == nil
+        else { return }
+        guard let view = viewRecord(viewID), view.coreTarget == gesture.target else {
+            canvasPaintGesture = nil
+            colorReplacePreview = nil
+            lastCommandResult = .stale
+            return
+        }
+
+        gesture.expectation = CorePaintExpectation(
+            documentRevision: gesture.expectation.documentRevision,
+            viewRevision: view.viewRevision,
+            editorRevision: gesture.expectation.editorRevision,
+            layerID: gesture.expectation.layerID,
+            planeID: gesture.expectation.planeID
+        )
+        gesture.waitingForViewport = false
+
+        if [.pencil, .brush, .eraser].contains(gesture.tool) {
+            gesture.rasterBeganInCore = true
+            if gesture.ended {
+                canvasPaintGesture = nil
+            } else {
+                canvasPaintGesture = gesture
+            }
+            observePaintMutation(
+                application.coreHost.beginRasterStroke(
+                    target: gesture.target,
+                    expectation: gesture.expectation,
+                    samples: gesture.samples
+                ),
+                requestsSnapshot: true,
+                viewID: gesture.viewID
+            )
+            if gesture.ended {
+                observePaintMutation(
+                    application.coreHost.endStroke(target: gesture.target),
+                    requestsSnapshot: true,
+                    viewID: gesture.viewID
+                )
+            }
+            return
+        }
+
+        if gesture.ended {
+            canvasPaintGesture = nil
+            finishCanvasPaintGesture(gesture, finalSample: nil)
+        } else {
+            canvasPaintGesture = gesture
+        }
+    }
+
+    private func discardDeferredCanvasInput(viewID: WorkspaceViewID) {
+        if canvasPaintGesture?.viewID == viewID,
+           canvasPaintGesture?.waitingForViewport == true
+        {
+            canvasPaintGesture = nil
+            colorReplacePreview = nil
+        }
+        if m8CanvasGesture?.viewID == viewID,
+           m8CanvasGesture?.waitingForViewport == true
+        {
+            m8CanvasGesture = nil
         }
     }
 
@@ -2741,6 +2962,9 @@ final class WorkspaceModel: ObservableObject {
         else {
             return
         }
+        cancelStroke(viewID: removed.id)
+        cancelM8CanvasGesture(viewID: removed.id)
+        viewportUpdates.removeValue(forKey: removed.id)
         if let surface = surfaces.removeValue(forKey: removed.id) {
             _ = application.rendererHost.unregisterSurface(surface)
         }
@@ -4963,7 +5187,9 @@ final class WorkspaceModel: ObservableObject {
             viewID: viewID,
             tool: tool,
             start: sample,
-            samples: [sample]
+            samples: [sample],
+            waitingForViewport: !canvasViewRevisionIsConverged(viewID: viewID),
+            ended: false
         )
         return true
     }
@@ -4978,8 +5204,24 @@ final class WorkspaceModel: ObservableObject {
 
     func endM8CanvasGesture(_ sample: CorePointerSample?, viewID: WorkspaceViewID) {
         guard var gesture = m8CanvasGesture, gesture.viewID == viewID else { return }
+        if let sample, sample.isValid, gesture.samples.last != sample {
+            guard gesture.samples.count < 65_536 else {
+                m8CanvasGesture = nil
+                lastCommandResult = .failed(.coreOperation(.invalidArgument))
+                return
+            }
+            gesture.samples.append(sample)
+        }
+        if gesture.waitingForViewport {
+            gesture.ended = true
+            m8CanvasGesture = gesture
+            return
+        }
         m8CanvasGesture = nil
-        if let sample, sample.isValid { gesture.samples.append(sample) }
+        resolveM8CanvasGesture(gesture)
+    }
+
+    private func resolveM8CanvasGesture(_ gesture: M8CanvasGesture) {
         guard matches(gesture.context), !gesture.samples.isEmpty else {
             lastCommandResult = .stale
             return
@@ -5007,6 +5249,37 @@ final class WorkspaceModel: ObservableObject {
             default:
                 self.lastCommandResult = .invalid
             }
+        }
+    }
+
+    private func resumeDeferredM8CanvasGesture(viewID: WorkspaceViewID) {
+        guard var gesture = m8CanvasGesture,
+              gesture.viewID == viewID,
+              gesture.waitingForViewport,
+              viewportUpdates[viewID] == nil
+        else { return }
+        guard let view = viewRecord(viewID),
+              view.coreTarget == gesture.context.view,
+              view.session == gesture.context.session
+        else {
+            m8CanvasGesture = nil
+            lastCommandResult = .stale
+            return
+        }
+        gesture.context = CommandTargetContext(
+            workspaceID: gesture.context.workspaceID,
+            lifecycleGeneration: gesture.context.lifecycleGeneration,
+            session: gesture.context.session,
+            view: gesture.context.view,
+            documentRevision: gesture.context.documentRevision,
+            viewRevision: view.viewRevision
+        )
+        gesture.waitingForViewport = false
+        if gesture.ended {
+            m8CanvasGesture = nil
+            resolveM8CanvasGesture(gesture)
+        } else {
+            m8CanvasGesture = gesture
         }
     }
 
@@ -5477,9 +5750,7 @@ final class WorkspaceModel: ObservableObject {
         historyRows = []
         historyProgress = nil
         history = nil
-        if let gesture = canvasPaintGesture,
-           [.pencil, .brush, .eraser].contains(gesture.tool)
-        {
+        if let gesture = canvasPaintGesture, gesture.rasterBeganInCore {
             _ = await application.coreHost.cancelStroke(target: gesture.target).value()
         }
         canvasPaintGesture = nil
@@ -5514,6 +5785,7 @@ final class WorkspaceModel: ObservableObject {
         surfaces.removeAll(keepingCapacity: false)
         routes.removeAll(keepingCapacity: false)
         drawableSizes.removeAll(keepingCapacity: false)
+        viewportUpdates.removeAll(keepingCapacity: false)
         for target in sessionProjections.keys {
             application.fileIdentityRegistry.release(session: target)
             application.releaseSession(target, for: id)
