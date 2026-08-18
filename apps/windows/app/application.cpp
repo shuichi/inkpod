@@ -510,7 +510,9 @@ int Application::Run() {
 
     INITCOMMONCONTROLSEX controls{};
     controls.dwSize = sizeof(controls);
-    controls.dwICC = ICC_STANDARD_CLASSES | ICC_BAR_CLASSES | ICC_TAB_CLASSES;
+    controls.dwICC = ICC_STANDARD_CLASSES | ICC_BAR_CLASSES | ICC_TAB_CLASSES
+        | ICC_LISTVIEW_CLASSES | ICC_UPDOWN_CLASS | ICC_PROGRESS_CLASS
+        | ICC_HOTKEY_CLASS;
     if (!InitCommonControlsEx(&controls)) {
         MessageBoxW(
             nullptr,

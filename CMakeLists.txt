@@ -830,6 +830,7 @@ if(WIN32)
         d2d1
         d3d11
         dwrite
+        dwmapi
         dxguid
         dxgi
         ole32

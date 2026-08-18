@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <commdlg.h>
+#include <dwmapi.h>
 #include <shlobj.h>
 #include <shellapi.h>
 #include <windowsx.h>
@@ -14670,6 +14671,14 @@ inkpod::app::WorkspaceWindow* CreateWorkspaceWindow(
         menu,
         state.lifetime.instance,
         workspace);
+    if (window != nullptr) {
+        const BOOL use_dark_mode = TRUE;
+        (void)DwmSetWindowAttribute(
+            window,
+            DWMWA_USE_IMMERSIVE_DARK_MODE,
+            &use_dark_mode,
+            sizeof(use_dark_mode));
+    }
     if (window == nullptr) {
         DestroyMenu(menu);
     }
