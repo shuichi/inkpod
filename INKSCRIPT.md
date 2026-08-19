@@ -3117,7 +3117,7 @@ Version impact:
 - C ABI: 16（既存host DTO callbackのWindows private実装だけを追加、symbol／record／ownership契約変更なし）
 ```
 
-### [~] M27B — Windows Core engine routeとprivate smoke
+### [x] M27B — Windows Core engine routeとprivate smoke
 
 **範囲**
 
