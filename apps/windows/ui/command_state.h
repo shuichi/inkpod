@@ -31,7 +31,7 @@ struct CommandState {
     bool checked{};
 };
 
-inline constexpr std::size_t kProductionCommandStateCount = 387U;
+inline constexpr std::size_t kProductionCommandStateCount = 354U;
 using CommandStateSet = std::array<CommandState, kProductionCommandStateCount>;
 
 struct DocumentCommandStateInput {
@@ -65,9 +65,6 @@ struct EffectsCommandStateInput {
 struct DocumentPaneCommandStateInput {
     bool removable_layer_available{};
     bool layer_palette_visible{};
-    bool annotation_available{};
-    bool annotation_selected{};
-    bool annotation_draw_active{};
 };
 
 struct AnimationCommandStateInput {
@@ -87,9 +84,6 @@ struct SelectionViewCommandStateInput {
     bool snap_guides{};
     bool snap_grid{};
     bool transparent_visible{true};
-    bool vector_antialias{true};
-    InkpodVectorCenterlineMode vector_centerline_mode{INKPOD_VECTOR_CENTERLINE_HIDDEN};
-    bool vector_endpoints_visible{};
     bool selection_layer_available{};
     std::size_t document_count{};
     std::size_t view_count{};
@@ -104,9 +98,6 @@ struct ToolCommandStateInput {
     InkpodPlaneKind active_plane{INKPOD_PLANE_MAIN_LINE};
     InkpodFillOperation fill_operation{INKPOD_FILL_SEED};
     InkpodSelectionShape color_replace_shape{INKPOD_SELECTION_TRACE};
-    InkpodVectorEraseMode vector_erase_mode{INKPOD_VECTOR_ERASE_PARTIAL};
-    InkpodVectorSelectionMode vector_selection_mode{INKPOD_VECTOR_SELECT_TOUCHING};
-    bool vector_stroke_plane{};
     bool geometry_drawable_plane{};
     bool palette_visible{};
 };
@@ -151,9 +142,6 @@ struct WorkspaceCommandStateInput {
     bool batch_target_available{};
     bool batch_pinned{};
     bool job_progress_visible{};
-    bool coloring_tool_tab_visible{true};
-    bool reference_tool_tab_visible{true};
-    bool workflow_tool_tab_visible{true};
     bool mirrored{};
     std::uint32_t selected_workspace_preset{};
     bool locator_auto_hidden{};

@@ -1,9 +1,13 @@
 # Cross-architecture determinism contract
 
-The current runtime replay contract is procedure format 26, replay epoch 23,
-canonical numeric version 1, and the digest of the closed 85-entry primitive
-catalog. Production `.inkpod` is exact-current v26; an optional verified
+The current runtime replay contract is procedure format 27, replay epoch 24,
+canonical numeric version 1, and the digest of the closed 76-entry primitive
+catalog. Production `.inkpod` is exact-current v27; an optional verified
 checkpoint preserves this contract and never replaces the authoritative journal.
+Epoch 24 and format 27 remove vector and Text/Annotation state, canonical
+procedures, persistent IDs, assets, snapshots, and composite inputs from the
+accepted replay model. Their former primitive IDs remain reserved tombstones;
+epoch 23 and format 26 input is rejected without migration.
 Epoch 23 and format 26 add `EditVanishingPoints/canonical-v2`: bounded stable-ID
 objects encode owner layer, signed milli-pixel origin, normalized milli-degree
 interval/phase, exact RGBA8/16 color, opacity, and visibility. Snapshot radial
@@ -13,9 +17,9 @@ Epoch 22 and format 25 add `EditShootingFrame/canonical-v2`: one optional
 stable-ID angled frame uses signed milli-pixel center, positive size, `u32`
 binary turns, a closed five-anchor code, and exact display/instruction-export
 flags. Deterministic fixed-point CORDIC derives corners and hit targets; no OS
-trigonometry enters replay. Epoch 21 and format 24 added `EditAnnotations/canonical-v2`: bounded stable-ID
-Text/Stroke/Leader/Value objects, atomic multi-object edits, and committed
-instruction strokes share one deterministic replay contract. Epoch 20 and format
+trigonometry enters replay. The epoch 21 annotation procedure and epoch 14 vector
+procedures are historical records only and are not accepted by the exact-current
+catalog or executor. Epoch 20 and format
 23 added ordered atomic Cut membership editing, the separated
 immutable member-asset table, and membership-bearing Cut history; Cell-document
 procedure semantics remain closed. Epoch 19 and format 22 added the current-only
@@ -32,10 +36,8 @@ independent named chart/lock plus EditorState cursor. The prior epoch 15/format
 18 added `LightTableBulkRegister/canonical-v2`; its resolved, ordered immutable
 source assets and item properties remain the replay input, while
 sequence discovery and duplicate preview remain live control-plane queries.
-Epoch 14/format 17 introduced resolved geometry procedure schema 2 and persistent
-vector square cross-sections; those semantics remain unchanged. Stable vector
-endpoint connections remain explicit; coordinate proximity is never an implicit
-topology input.
+Epoch 14/format 17 introduced resolved raster geometry procedure schema 2; its
+fixed-point geometry semantics remain unchanged.
 
 ## Canonical numeric authority
 
@@ -58,7 +60,7 @@ start-color restriction compares the immutable pre-stroke native pixel,
 including alpha, and never depends on connectivity or mutable dab order.
 Production Rust source is guarded against platform `exp`, `powf`, trigonometric,
 square-root, hypot, and atan2 calls. Remaining IEEE arithmetic is limited to
-validated polynomial/vector geometry whose operation order is explicit; its
+validated polynomial geometry whose operation order is explicit; its
 stored and replayed inputs are first canonicalized.
 
 Raster traversal is row-major, tiles and stable-object sets are ordered, and no
@@ -80,7 +82,7 @@ The primitive catalog digest covers entries in ascending stable-ID order:
 primitive ID, schema version, length-framed canonical name, BLAKE3 argument-
 schema digest, semantics revision, work-formula ID, and replay-policy byte.
 Tests lock its digest
-together with format version 26 and replay epoch 23. A semantic change that updates
+together with format version 27 and replay epoch 24. A semantic change that updates
 the catalog or any golden without advancing both version and epoch therefore
 fails the public contract review rather than silently accepting a new result.
 

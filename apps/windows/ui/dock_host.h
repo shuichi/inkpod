@@ -41,10 +41,6 @@ public:
     [[nodiscard]] DockResult SetZoneMode(
         DockZone zone, DockStackMode mode) noexcept;
     [[nodiscard]] DockResult ActivatePane(DockPaneType type) noexcept;
-    [[nodiscard]] ToolTabResult ToggleToolTabVisibility(
-        ToolTabId id) noexcept;
-    [[nodiscard]] bool ToolTabVisible(ToolTabId id) const noexcept;
-
     [[nodiscard]] HWND FloatingWindow(DockPaneType type) const noexcept;
     [[nodiscard]] HWND ContentWindow(DockPaneType type) const noexcept;
     [[nodiscard]] HWND HeaderWindow(DockPaneType type) const noexcept;
@@ -129,6 +125,8 @@ private:
     [[nodiscard]] bool PaneInSelectedToolTab(
         DockPaneType type) const noexcept;
     void SelectVisibleToolTabForPane(DockPaneType type) noexcept;
+    void RemovePaneFromToolTabs(DockPaneType type) noexcept;
+    void FocusPane(DockPaneType type) noexcept;
     [[nodiscard]] bool UpdateTabFont(UINT dpi) noexcept;
     void ApplyPaneLayout(PaneHostState& pane) noexcept;
     void ApplyTabLayout(TabHostState& tabs) noexcept;
@@ -149,6 +147,8 @@ private:
     void ActivateSelectedToolTab() noexcept;
     [[nodiscard]] ToolTabResult MovePaneToToolTab(
         DockPaneType type, ToolTabId destination) noexcept;
+    [[nodiscard]] ToolTabResult MovePaneToNewToolTab(
+        DockPaneType type) noexcept;
     [[nodiscard]] std::array<DockPaneType, kDockPaneCount>
     SelectedRightDockedPanes(std::size_t& count) const noexcept;
 

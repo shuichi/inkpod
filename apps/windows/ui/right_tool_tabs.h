@@ -4,10 +4,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
-#include <string_view>
 
 #include "dock_layout.h"
-#include "ui/localization.h"
 
 namespace inkpod::windows::ui {
 
@@ -30,11 +28,10 @@ private:
     std::uint32_t value_{};
 };
 
-inline constexpr ToolTabId kToolTabColoring{UINT32_C(0x524c4f43)};
-inline constexpr ToolTabId kToolTabReference{UINT32_C(0x45464552)};
-inline constexpr ToolTabId kToolTabWorkflow{UINT32_C(0x574f4c46)};
-inline constexpr std::size_t kMaximumToolTabs = 16U;
-inline constexpr std::size_t kMaximumToolTabTitleLength = 64U;
+// A right-side tab can never outnumber the known pane descriptors because each
+// tab is non-empty and a pane type belongs to at most one tab.
+inline constexpr std::size_t kMaximumToolTabs = kDockPaneCount;
+inline constexpr std::size_t kMaximumToolTabDescriptionLength = 512U;
 
 enum class ToolTabResult : std::uint8_t {
     Ok,
@@ -46,19 +43,17 @@ enum class ToolTabResult : std::uint8_t {
 
 struct ToolTab final {
     ToolTabId id{};
-    UiStringId title_id{UiStringId::Count};
-    std::array<wchar_t, kMaximumToolTabTitleLength> custom_title{};
-    bool predefined{};
-    bool visible{};
     std::array<DockPaneType, kDockPaneCount> panes{};
     std::size_t pane_count{};
 };
 
+// The label is always the localized title of the vertically first pane.
 [[nodiscard]] const wchar_t* ToolTabTitle(const ToolTab& tab) noexcept;
+// Tooltip/accessibility text lists every pane title in vertical order.
+[[nodiscard]] bool ToolTabDescription(
+    const ToolTab& tab,
+    std::span<wchar_t> output) noexcept;
 
-// Runtime source of truth for the right-side top-level tabs. Pane HWND
-// visibility is a projection of this model plus DockLayoutModel; it never
-// determines membership, tab visibility, selection, or ordering.
 class RightToolTabsModel final {
 public:
     RightToolTabsModel() noexcept;
@@ -69,28 +64,61 @@ public:
     [[nodiscard]] const ToolTab* Find(ToolTabId id) const noexcept;
     [[nodiscard]] ToolTabId Selected() const noexcept { return selected_; }
     [[nodiscard]] const ToolTab* SelectedTab() const noexcept;
-    [[nodiscard]] bool HasVisibleTabs() const noexcept;
-    [[nodiscard]] bool IsVisible(ToolTabId id) const noexcept;
+    [[nodiscard]] bool HasVisibleTabs() const noexcept {
+        return tab_count_ != 0U;
+    }
+    [[nodiscard]] bool IsVisible(ToolTabId id) const noexcept {
+        return Find(id) != nullptr;
+    }
     [[nodiscard]] ToolTabId TabForPane(DockPaneType type) const noexcept;
+    [[nodiscard]] std::uint32_t NextStableId() const noexcept {
+        return next_id_;
+    }
 
     [[nodiscard]] ToolTabResult SetSelected(ToolTabId id) noexcept;
-    [[nodiscard]] ToolTabResult SetVisible(
-        ToolTabId id, bool visible) noexcept;
+    [[nodiscard]] ToolTabResult AddPaneToSelected(
+        DockPaneType type,
+        int available_height_px,
+        unsigned int dpi,
+        int splitter_px) noexcept;
+    [[nodiscard]] ToolTabResult RemovePane(DockPaneType type) noexcept;
     [[nodiscard]] ToolTabResult MovePane(
         DockPaneType type, ToolTabId destination) noexcept;
+    [[nodiscard]] ToolTabResult MovePaneToNewTab(DockPaneType type) noexcept;
     [[nodiscard]] ToolTabResult EnsurePaneAssigned(
         DockPaneType type) noexcept;
+    [[nodiscard]] ToolTabResult ReorderPane(
+        DockPaneType type,
+        DockPaneType target,
+        bool after_target) noexcept;
     [[nodiscard]] ToolTabResult Reorder(
         ToolTabId source, ToolTabId target, bool after_target) noexcept;
 
+    // Used by the V9 decoder after it has validated counts and wire records.
+    [[nodiscard]] bool Load(
+        std::span<const ToolTab> tabs,
+        ToolTabId selected,
+        std::uint32_t next_id) noexcept;
+
 private:
+    [[nodiscard]] static bool EligiblePane(DockPaneType type) noexcept;
     [[nodiscard]] ToolTab* FindMutable(ToolTabId id) noexcept;
     [[nodiscard]] std::size_t IndexOf(ToolTabId id) const noexcept;
-    void SelectReplacement(std::size_t hidden_index) noexcept;
+    [[nodiscard]] ToolTabResult CreateTab(DockPaneType type) noexcept;
+    [[nodiscard]] ToolTabResult RemovePaneInPlace(DockPaneType type) noexcept;
+    [[nodiscard]] ToolTabResult MovePaneInPlace(
+        DockPaneType type, ToolTabId destination) noexcept;
+    [[nodiscard]] bool FitsSelected(
+        DockPaneType type,
+        int available_height_px,
+        unsigned int dpi,
+        int splitter_px) const noexcept;
+    void RemoveTab(std::size_t index) noexcept;
 
     std::array<ToolTab, kMaximumToolTabs> tabs_{};
     std::size_t tab_count_{};
     ToolTabId selected_{};
+    std::uint32_t next_id_{1U};
 };
 
 }  // namespace inkpod::windows::ui

@@ -271,49 +271,6 @@ fn guard_scans_visible_committed_layers_and_excludes_solid_paper_and_selection_o
 }
 
 #[test]
-fn guard_preserves_rgba16_vector_color_before_classification() {
-    let mut core = Core::new();
-    core.new_cell(3, 1, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
-        .unwrap();
-    let (_, layer_id) = core
-        .create_layer(LayerKind::VectorColoring, "Vector")
-        .unwrap();
-    let (main_plane_id, _, _) = core.vector_layer_planes(layer_id).unwrap();
-    core.vector_add_path(
-        main_plane_id,
-        VectorPathInput {
-            segments: vec![VectorCubicSegment {
-                p0: PointF32 { x: 0.0, y: 0.5 },
-                p1: PointF32 { x: 1.0, y: 0.5 },
-                p2: PointF32 { x: 2.0, y: 0.5 },
-                p3: PointF32 { x: 3.0, y: 0.5 },
-                width_start: 1.0,
-                width_end: 1.0,
-            }],
-            // 4,111 is one native-depth code below the inclusive Y minimum.
-            // RGBA8 down-conversion would round it up to 16 * 257 and miss it.
-            color: PixelValue::Rgba16([4_111, 4_111, 4_111, u16::MAX]),
-            closed: false,
-        },
-    )
-    .unwrap();
-
-    let base = core.document_info().unwrap().document_revision;
-    let result = core
-        .select_output_color_guard(
-            OutputColorGuardProfile::Bt709ConservativeYCbCr,
-            SelectionOperation::New,
-            base,
-        )
-        .unwrap();
-    assert!(result.summary.scanned_pixel_count > 0);
-    assert_eq!(
-        result.summary.selected_pixel_count,
-        result.summary.scanned_pixel_count
-    );
-}
-
-#[test]
 fn large_sparse_guard_allocates_only_the_changed_selection_tile() {
     let width = 257_u32;
     let height = 257_u32;

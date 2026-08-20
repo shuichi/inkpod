@@ -386,14 +386,6 @@ impl Core {
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
         let bounds = mask_bounds(&document.selection)?
             .ok_or(CoreError::InvalidState("selection is empty"))?;
-        let vector_selection = self.vector_select(bounds, VectorSelectionMode::FullyContained)?;
-        let selected_path_ids = vector_selection
-            .path_ranges
-            .iter()
-            .map(|range| range.path_id)
-            .collect::<BTreeSet<_>>();
-        let vector_paths = self.vector_paths()?;
-        let vector_fills = self.vector_fills()?;
         let targets = self.effective_edit_targets()?;
         let mut selected_planes = BTreeSet::new();
         for target in targets {
@@ -420,13 +412,7 @@ impl Core {
             }
             if !matches!(
                 plane.kind,
-                PlaneType::MainLine
-                    | PlaneType::Color
-                    | PlaneType::Raster
-                    | PlaneType::Selection
-                    | PlaneType::VectorMainLine
-                    | PlaneType::ColorTrace
-                    | PlaneType::VectorFill
+                PlaneType::MainLine | PlaneType::Color | PlaneType::Raster | PlaneType::Selection
             ) {
                 return Err(CoreError::InvalidState(
                     "an edit target is not copyable as raster content",
@@ -456,25 +442,6 @@ impl Core {
                 origin_x: bounds.x,
                 origin_y: bounds.y,
                 pixels,
-                vector_paths: vector_paths
-                    .iter()
-                    .filter(|path| {
-                        path.plane_id == plane.id.get() && selected_path_ids.contains(&path.id)
-                    })
-                    .cloned()
-                    .collect(),
-                vector_fills: vector_fills
-                    .iter()
-                    .filter(|fill| {
-                        fill.plane_id == plane.id.get()
-                            && !fill.boundary_path_ids.is_empty()
-                            && fill
-                                .boundary_path_ids
-                                .iter()
-                                .all(|path_id| selected_path_ids.contains(path_id))
-                    })
-                    .cloned()
-                    .collect(),
             });
         }
         if planes.is_empty() {
@@ -1021,9 +988,7 @@ impl Core {
                     }
                 }
             }
-            contains_content |= !staged.is_empty()
-                || !source.vector_paths.is_empty()
-                || !source.vector_fills.is_empty();
+            contains_content |= !staged.is_empty();
             staged_planes.push(staged);
         }
         if !contains_content {
@@ -1034,26 +999,10 @@ impl Core {
         let payload_planes = floating.payload.planes;
         match floating.destination {
             FloatingDestination::ExistingPlanes(plane_ids) => {
-                let mut next_id = self.next_id;
                 let mut edit = self.begin_document_edit()?;
                 let revision = edit.revision().get();
                 let after = edit.working_mut();
-                let width_scale = (scale_x as f64 + scale_y as f64) / (2.0 * one as f64);
-                let transform_vector_point = |point: PointF32| -> Result<PointF32, CoreError> {
-                    let x = canonical_q16_from_f64(f64::from(point.x)).ok_or(
-                        CoreError::InvalidArgument("clipboard vector X is outside canonical Q16"),
-                    )?;
-                    let y = canonical_q16_from_f64(f64::from(point.y)).ok_or(
-                        CoreError::InvalidArgument("clipboard vector Y is outside canonical Q16"),
-                    )?;
-                    let (x, y) = transform_point(x, y)?;
-                    Ok(PointF32 {
-                        x: (x as f64 / one as f64) as f32,
-                        y: (y as f64 / one as f64) as f32,
-                    })
-                };
-                let mut path_map = BTreeMap::new();
-                for ((plane_id, staged), source) in plane_ids
+                for ((plane_id, staged), _source) in plane_ids
                     .iter()
                     .copied()
                     .zip(staged_planes)
@@ -1071,33 +1020,8 @@ impl Core {
                             plane.raster.set_pixel(x, y, value, revision)?;
                         }
                     }
-                    after.vector.paste_clipboard_paths(
-                        source,
-                        plane_id,
-                        |mut segment| {
-                            segment.p0 = transform_vector_point(segment.p0)?;
-                            segment.p1 = transform_vector_point(segment.p1)?;
-                            segment.p2 = transform_vector_point(segment.p2)?;
-                            segment.p3 = transform_vector_point(segment.p3)?;
-                            segment.width_start =
-                                (f64::from(segment.width_start) * width_scale) as f32;
-                            segment.width_end = (f64::from(segment.width_end) * width_scale) as f32;
-                            Ok(segment)
-                        },
-                        &mut next_id,
-                        &mut path_map,
-                    )?;
-                }
-                for (plane_id, source) in plane_ids.iter().copied().zip(&payload_planes) {
-                    after.vector.paste_clipboard_fills(
-                        source,
-                        plane_id,
-                        &mut next_id,
-                        &path_map,
-                    )?;
                 }
                 let outcome = edit.commit(self)?;
-                self.next_id = next_id;
                 self.floating = None;
                 self.assets = retained_assets;
                 Ok(outcome)

@@ -153,7 +153,6 @@ impl Core {
         }
 
         let mut next_id = self.next_id;
-        let mut plane_map = BTreeMap::new();
         let mut output_targets = Vec::with_capacity(targets.len());
         let mut next_layers = Vec::with_capacity(before.layers.len() + layer_count);
         for source_layer in &before.layers {
@@ -165,9 +164,7 @@ impl Core {
                 duplicate.name =
                     unique_layer_name(&next_layers, &format!("{} Copy", duplicate.name));
                 for plane in &mut duplicate.planes {
-                    let source = plane.id;
                     plane.id = next_id.take_plane();
-                    plane_map.insert(source, plane.id);
                     plane.name = format!("{} Copy", plane.name);
                 }
                 if let Some(adjustment) = before.adjustments.get(&source_layer_id).cloned() {
@@ -197,7 +194,6 @@ impl Core {
                     duplicate.id = next_id.take_plane();
                     duplicate.name =
                         unique_plane_name(&next_planes, &format!("{} Copy", duplicate.name));
-                    plane_map.insert(source_plane.id, duplicate.id);
                     output_targets.push(EditTarget::Plane(EditorTarget {
                         layer_id: source_layer.id.get(),
                         plane_id: duplicate.id.get(),
@@ -208,8 +204,6 @@ impl Core {
             destination.planes = next_planes;
         }
         after.layers = next_layers;
-        after.vector.duplicate_planes(&plane_map, &mut next_id);
-        after.vector.ensure_limits()?;
         let preferred_active = preferred_active_target(after, &output_targets);
         edit.prefer_edit_targets(output_targets.clone());
         if let Some(target) = preferred_active {
@@ -239,12 +233,9 @@ impl Core {
             match target {
                 EditTarget::Layer(layer_id) => {
                     let id = LayerId::from_raw(*layer_id);
-                    after.vector.remove_layer(before, id);
                     after.adjustments.remove(&id);
                 }
-                EditTarget::Plane(target) => after
-                    .vector
-                    .remove_plane(PlaneId::from_raw(target.plane_id)),
+                EditTarget::Plane(_) => {}
             }
         }
         after
@@ -327,11 +318,6 @@ impl Core {
             let source = before
                 .plane_by_id(PlaneId::from_raw(target.plane_id))
                 .ok_or(CoreError::InvalidArgument("plane ID does not exist"))?;
-            if is_vector_plane(source.kind) || is_vector_plane(kind) {
-                return Err(CoreError::InvalidArgument(
-                    "vector plane conversion requires explicit rasterize/vectorize",
-                ));
-            }
             let converted = convert_plane_raster(&source.raster, format, revision)?;
             let destination = after
                 .plane_by_id_mut(source.id)
@@ -433,7 +419,6 @@ impl Core {
                     after.layers[lower].planes.iter_mut().zip(&source_planes)
                 {
                     merge_raster(&mut destination.raster, &source.raster, revision)?;
-                    after.vector.reassign_plane(source.id, destination.id);
                 }
                 after.layers.remove(upper);
                 EditTarget::Layer(lower_id.get())
@@ -450,7 +435,6 @@ impl Core {
                     &source.raster,
                     revision,
                 )?;
-                after.vector.reassign_plane(source.id, destination_id);
                 after.layers[layer].planes.remove(upper);
                 validate_layer_kind(after.layers[layer].kind, &after.layers[layer].planes)?;
                 EditTarget::Plane(EditorTarget {
@@ -570,12 +554,7 @@ fn grouped_merge_pair(document: &CellDocument, targets: &[EditTarget]) -> Option
             let destination = &document.layers[layer].planes[lower];
             (lower == upper + 1
                 && source.kind == destination.kind
-                && source.raster.format() == destination.raster.format()
-                && !(document.layers[layer].kind == LayerKind::VectorColoring
-                    && matches!(
-                        source.kind,
-                        PlaneType::VectorMainLine | PlaneType::VectorFill
-                    )))
+                && source.raster.format() == destination.raster.format())
             .then_some(MergePair::Planes {
                 layer,
                 upper,
@@ -587,15 +566,5 @@ fn grouped_merge_pair(document: &CellDocument, targets: &[EditTarget]) -> Option
 }
 
 const fn is_required_singleton_plane(kind: PlaneType) -> bool {
-    matches!(
-        kind,
-        PlaneType::MainLine | PlaneType::Color | PlaneType::VectorMainLine | PlaneType::VectorFill
-    )
-}
-
-const fn is_vector_plane(kind: PlaneType) -> bool {
-    matches!(
-        kind,
-        PlaneType::VectorMainLine | PlaneType::ColorTrace | PlaneType::VectorFill
-    )
+    matches!(kind, PlaneType::MainLine | PlaneType::Color)
 }

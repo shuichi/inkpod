@@ -779,7 +779,6 @@ if(WIN32)
         apps/windows/ui/tools/selection_controller.cpp
         apps/windows/ui/tools/floating_paste_controller.cpp
         apps/windows/ui/tools/tool_state.cpp
-        apps/windows/ui/tools/vector_controller.cpp
         apps/windows/ui/command_state.cpp
         apps/windows/ui/command_state_catalog.inc
         apps/windows/ui/command_catalog.cpp

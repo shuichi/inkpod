@@ -290,7 +290,6 @@ impl Core {
             EditorStateUpdate::SetBrushOptions(options) => state.brush = options,
             EditorStateUpdate::SetFillOptions(options) => state.fill = options,
             EditorStateUpdate::SetSelectionOptions(options) => state.selection = options,
-            EditorStateUpdate::SetVectorOptions(options) => state.vector = options,
             EditorStateUpdate::SetActiveTarget(target) => {
                 self.validate_editor_target(target)?;
                 state.target = Some(target);

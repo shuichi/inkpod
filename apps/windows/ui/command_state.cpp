@@ -197,23 +197,6 @@ void ProvideDocumentPaneCommandStates(
         states,
         IDM_LAYER_DELETE,
         input.document.has_document && input.document_pane.removable_layer_available);
-    SetEnabled(
-        states,
-        {IDM_ANNOTATION_ADD_TEXT, IDM_ANNOTATION_DRAW_INSTRUCTION},
-        input.document.has_document);
-    SetEnabled(
-        states,
-        {IDM_ANNOTATION_EDIT_TEXT, IDM_ANNOTATION_SELECT_PREVIOUS,
-         IDM_ANNOTATION_SELECT_NEXT},
-        input.document.has_document && input.document_pane.annotation_available);
-    SetEnabled(
-        states,
-        {IDM_ANNOTATION_MOVE_LEFT, IDM_ANNOTATION_MOVE_RIGHT, IDM_ANNOTATION_DELETE},
-        input.document.has_document && input.document_pane.annotation_selected);
-    SetChecked(
-        states,
-        IDM_ANNOTATION_DRAW_INSTRUCTION,
-        input.document_pane.annotation_draw_active);
 }
 
 void ProvideAnimationCommandStates(
@@ -280,10 +263,6 @@ void ProvideSelectionViewCommandStates(
          IDM_VIEW_SNAP_GUIDES,
          IDM_VIEW_SNAP_GRID,
          IDM_VIEW_TRANSPARENT,
-         IDM_VIEW_VECTOR_ANTIALIAS,
-         IDM_VIEW_VECTOR_CENTERLINE,
-         IDM_VIEW_VECTOR_CENTERLINE_ONLY,
-         IDM_VIEW_VECTOR_ENDPOINTS,
          IDM_VIEW_GUIDE_VERTICAL,
          IDM_VIEW_GUIDE_HORIZONTAL,
          IDM_VIEW_GUIDE_MOVE,
@@ -346,19 +325,6 @@ void ProvideSelectionViewCommandStates(
     SetChecked(states, IDM_VIEW_SNAP_GUIDES, input.selection_view.snap_guides);
     SetChecked(states, IDM_VIEW_SNAP_GRID, input.selection_view.snap_grid);
     SetChecked(states, IDM_VIEW_TRANSPARENT, input.selection_view.transparent_visible);
-    SetChecked(states, IDM_VIEW_VECTOR_ANTIALIAS, input.selection_view.vector_antialias);
-    SetChecked(
-        states,
-        IDM_VIEW_VECTOR_CENTERLINE,
-        input.selection_view.vector_centerline_mode != INKPOD_VECTOR_CENTERLINE_HIDDEN);
-    SetChecked(
-        states,
-        IDM_VIEW_VECTOR_CENTERLINE_ONLY,
-        input.selection_view.vector_centerline_mode == INKPOD_VECTOR_CENTERLINE_ONLY);
-    SetChecked(
-        states,
-        IDM_VIEW_VECTOR_ENDPOINTS,
-        input.selection_view.vector_endpoints_visible);
     SetChecked(
         states,
         IDM_VIEW_BOX_ZOOM,
@@ -462,7 +428,7 @@ void ProvideToolCommandStates(
         && input.tool.active_tool != tools::kInteractionFloatingTransform
         && input.tool.active_tool != tools::kInteractionLightTableMove
         && input.tool.active_tool != tools::kInteractionShootingFrame
-        && !tools::IsVectorCanvasTool(input.tool.active_tool)
+        && !tools::IsGeometryCanvasTool(input.tool.active_tool)
         && !(input.tool.active_tool >= tools::kInteractionEffectGradient
             && input.tool.active_tool <= tools::kInteractionEffectAlphaGradient);
     if (ordinary_tool) {
@@ -471,91 +437,37 @@ void ProvideToolCommandStates(
 
     SetEnabled(
         states,
-        {IDM_VECTOR_LINE,
-         IDM_VECTOR_CURVE,
-         IDM_VECTOR_RECTANGLE,
-         IDM_VECTOR_ELLIPSE,
-         IDM_VECTOR_POLYLINE,
-         IDM_VECTOR_POLYGON},
+        {IDM_GEOMETRY_LINE,
+         IDM_GEOMETRY_CURVE,
+         IDM_GEOMETRY_RECTANGLE,
+         IDM_GEOMETRY_ELLIPSE,
+         IDM_GEOMETRY_POLYGON,
+         IDM_GEOMETRY_POLYLINE},
         input.tool.geometry_drawable_plane);
-    SetEnabled(states, IDM_VECTOR_ERASER, input.tool.vector_stroke_plane);
     SetUnchecked(
         states,
-        {IDM_VECTOR_LINE,
-         IDM_VECTOR_CURVE,
-         IDM_VECTOR_RECTANGLE,
-         IDM_VECTOR_ELLIPSE,
-         IDM_VECTOR_POLYLINE,
-         IDM_VECTOR_POLYGON,
-         IDM_VECTOR_ERASER});
-    const UINT vector_command = input.tool.active_tool == tools::kInteractionVectorLine
-        ? IDM_VECTOR_LINE
-        : (input.tool.active_tool == tools::kInteractionVectorCurve
-                  ? IDM_VECTOR_CURVE
-                  : (input.tool.active_tool == tools::kInteractionVectorRectangle
-                            ? IDM_VECTOR_RECTANGLE
-                            : (input.tool.active_tool == tools::kInteractionVectorEllipse
-                                      ? IDM_VECTOR_ELLIPSE
-                                      : (input.tool.active_tool
-                                                    == tools::kInteractionVectorPolyline
-                                                ? IDM_VECTOR_POLYLINE
-                                                : (input.tool.active_tool
-                                                              == tools::kInteractionVectorPolygon
-                                                      ? IDM_VECTOR_POLYGON
-                                                      : IDM_VECTOR_ERASER)))));
-    if (tools::IsVectorCanvasTool(input.tool.active_tool)) {
-        SetChecked(states, vector_command, true);
+        {IDM_GEOMETRY_LINE,
+         IDM_GEOMETRY_CURVE,
+         IDM_GEOMETRY_RECTANGLE,
+         IDM_GEOMETRY_ELLIPSE,
+         IDM_GEOMETRY_POLYGON,
+         IDM_GEOMETRY_POLYLINE});
+    const UINT geometry_command =
+        input.tool.active_tool == tools::kInteractionGeometryLine
+        ? IDM_GEOMETRY_LINE
+        : (input.tool.active_tool == tools::kInteractionGeometryCurve
+              ? IDM_GEOMETRY_CURVE
+              : (input.tool.active_tool == tools::kInteractionGeometryRectangle
+                    ? IDM_GEOMETRY_RECTANGLE
+                    : (input.tool.active_tool == tools::kInteractionGeometryEllipse
+                          ? IDM_GEOMETRY_ELLIPSE
+                          : (input.tool.active_tool == tools::kInteractionGeometryPolygon
+                                ? IDM_GEOMETRY_POLYGON
+                                : IDM_GEOMETRY_POLYLINE))));
+    if (tools::IsGeometryCanvasTool(input.tool.active_tool)) {
+        SetChecked(states, geometry_command, true);
     }
-    SetEnabled(
-        states,
-        IDM_GEOMETRY_OPTIONS,
-        input.tool.geometry_drawable_plane
-            && tools::IsVectorCanvasTool(input.tool.active_tool)
-            && input.tool.active_tool != tools::kInteractionVectorEraser);
 
-    SetUnchecked(
-        states,
-        {IDM_VECTOR_ERASE_PARTIAL, IDM_VECTOR_ERASE_INTERSECTION,
-         IDM_VECTOR_ERASE_WHOLE});
-    SetChecked(
-        states,
-        input.tool.vector_erase_mode == INKPOD_VECTOR_ERASE_TO_INTERSECTION
-            ? IDM_VECTOR_ERASE_INTERSECTION
-            : (input.tool.vector_erase_mode == INKPOD_VECTOR_ERASE_WHOLE_PATH
-                      ? IDM_VECTOR_ERASE_WHOLE
-                      : IDM_VECTOR_ERASE_PARTIAL),
-        true);
-    SetUnchecked(
-        states,
-        {IDM_VECTOR_SELECT_CUT,
-         IDM_VECTOR_SELECT_TOUCH,
-         IDM_VECTOR_SELECT_CONTAINED,
-         IDM_VECTOR_SELECT_LINE,
-         IDM_VECTOR_SELECT_WHOLE_LINE,
-         IDM_VECTOR_SELECT_INTERSECTION,
-         IDM_VECTOR_SELECT_FILL_BOUNDARY,
-         IDM_VECTOR_SELECT_FILL});
-    const UINT vector_selection_command =
-        input.tool.vector_selection_mode == INKPOD_VECTOR_SELECT_CUT_BY_SELECTION
-        ? IDM_VECTOR_SELECT_CUT
-        : (input.tool.vector_selection_mode == INKPOD_VECTOR_SELECT_FULLY_CONTAINED
-                  ? IDM_VECTOR_SELECT_CONTAINED
-                  : (input.tool.vector_selection_mode == INKPOD_VECTOR_SELECT_LINE
-                            ? IDM_VECTOR_SELECT_LINE
-                            : (input.tool.vector_selection_mode
-                                          == INKPOD_VECTOR_SELECT_WHOLE_LINE
-                                      ? IDM_VECTOR_SELECT_WHOLE_LINE
-                                      : (input.tool.vector_selection_mode
-                                                    == INKPOD_VECTOR_SELECT_TO_INTERSECTION
-                                                ? IDM_VECTOR_SELECT_INTERSECTION
-                                                : (input.tool.vector_selection_mode
-                                                              == INKPOD_VECTOR_SELECT_FILL_BOUNDARY
-                                                          ? IDM_VECTOR_SELECT_FILL_BOUNDARY
-                                                          : (input.tool.vector_selection_mode
-                                                                        == INKPOD_VECTOR_SELECT_FILL
-                                                                    ? IDM_VECTOR_SELECT_FILL
-                                                                    : IDM_VECTOR_SELECT_TOUCH))))));
-    SetChecked(states, vector_selection_command, true);
     SetChecked(
         states,
         input.tool.active_plane == INKPOD_PLANE_MAIN_LINE ? IDM_PLANE_MAIN_LINE
@@ -656,7 +568,6 @@ void ProvideBatchCommandStates(
          IDM_BATCH_ADD_CONTINUOUS_FILL,
          IDM_BATCH_ADD_SEPARATION,
          IDM_BATCH_ADD_VISIBILITY,
-         IDM_BATCH_ADD_LINE_WIDTH,
          IDM_BATCH_ADD_BOUNDARY_AIRBRUSH,
          IDM_BATCH_ADD_DUST,
          IDM_BATCH_ADD_MIRROR,
@@ -750,15 +661,6 @@ void ProvideWorkspaceCommandStates(
     SetEnabled(states, IDM_BATCH_PIN, input.batch_target_available);
     SetChecked(
         states, IDM_WINDOW_JOB_PROGRESS, input.job_progress_visible);
-    SetChecked(
-        states, IDM_WINDOW_TOOL_TAB_COLORING,
-        input.coloring_tool_tab_visible);
-    SetChecked(
-        states, IDM_WINDOW_TOOL_TAB_REFERENCE,
-        input.reference_tool_tab_visible);
-    SetChecked(
-        states, IDM_WINDOW_TOOL_TAB_WORKFLOW,
-        input.workflow_tool_tab_visible);
     SetChecked(states, IDM_WORKSPACE_MIRROR, input.mirrored);
     SetChecked(
         states, IDM_WORKSPACE_PRESET_COLORING,

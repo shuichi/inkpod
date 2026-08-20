@@ -190,9 +190,6 @@ UiStringId LayerKindLabelId(std::uint32_t kind) noexcept {
         case INKPOD_LAYER_FRAME: return UiStringId::LayerFrame;
         case INKPOD_LAYER_VANISHING_POINT: return UiStringId::LayerVanishingPoint;
         case INKPOD_LAYER_ADJUSTMENT: return UiStringId::LayerAdjustment;
-        case INKPOD_LAYER_TEXT: return UiStringId::LayerText;
-        case INKPOD_LAYER_ANNOTATION: return UiStringId::LayerInstruction;
-        case INKPOD_LAYER_VECTOR_COLORING: return UiStringId::LayerVectorColoring;
         default: return UiStringId::LayerUnknown;
     }
 }
@@ -201,11 +198,8 @@ UiStringId PlaneKindLabelId(std::uint32_t kind) noexcept {
     switch (kind) {
         case INKPOD_TYPED_PLANE_MAIN_LINE: return UiStringId::MainLine;
         case INKPOD_TYPED_PLANE_COLOR: return UiStringId::Coloring;
-        case INKPOD_TYPED_PLANE_COLOR_TRACE: return UiStringId::PlaneColorTrace;
         case INKPOD_TYPED_PLANE_RASTER: return UiStringId::PlaneRaster;
         case INKPOD_TYPED_PLANE_SELECTION: return UiStringId::PlaneSelection;
-        case INKPOD_TYPED_PLANE_VECTOR_MAIN_LINE: return UiStringId::PlaneVectorMainLine;
-        case INKPOD_TYPED_PLANE_VECTOR_FILL: return UiStringId::PlaneVectorFill;
         default: return UiStringId::LayerUnknown;
     }
 }
@@ -214,14 +208,8 @@ UiStringId PlaneKindBadgeLabelId(std::uint32_t kind) noexcept {
     switch (kind) {
         case INKPOD_TYPED_PLANE_MAIN_LINE: return UiStringId::PlaneBadgeMainLine;
         case INKPOD_TYPED_PLANE_COLOR: return UiStringId::PlaneBadgeColoring;
-        case INKPOD_TYPED_PLANE_COLOR_TRACE:
-            return UiStringId::PlaneBadgeColorTrace;
         case INKPOD_TYPED_PLANE_RASTER: return UiStringId::PlaneBadgeRaster;
         case INKPOD_TYPED_PLANE_SELECTION: return UiStringId::PlaneBadgeSelection;
-        case INKPOD_TYPED_PLANE_VECTOR_MAIN_LINE:
-            return UiStringId::PlaneBadgeVectorMainLine;
-        case INKPOD_TYPED_PLANE_VECTOR_FILL:
-            return UiStringId::PlaneBadgeVectorFill;
         default: return UiStringId::PlaneBadgeUnknown;
     }
 }

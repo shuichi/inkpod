@@ -34,21 +34,19 @@ native-format model.
 
 | Crate           | Responsibility                                                                                                                                                                     |
 | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `inkpod-image`  | Typed pixel formats, 64 x 64 sparse tiles, `Arc` copy-on-write storage, selection, fill/sampling/palette logic, vector geometry, and deterministic raster/filter/effect operations |
-| `inkpod-format` | Bounded procedure-authoritative `.inkpod` v26 Cell/Cut containers and `.inkbatch` v2 models, streaming encode/decode/validation, atomic file I/O, and PNG/TIFF/TGA/BMP codecs                     |
-| `inkpod-core`   | Stable-ID document/layer/plane state, immutable Genesis/base surfaces, a content-addressed canonical asset registry, StateId savepoints, views, clipboard, previews, animation, vector/effects/Batch commands, persistence mapping, immutable render snapshots, and canonical primitive execution plus append-only journal/cache-free replay and semantic document digests for the migrated Core slice |
-| `inkpod-ffi`    | ABI v16 fixed records and generation-tagged runtime IDs, InkScript source/compiler/fragment plus authority/plan/run/report handles and fixed DTO host callbacks, persistence/compaction diagnostics, validation/conversion, panic containment, ownership functions, and feature-specific exports |
+| `inkpod-image`  | Typed pixel formats, 64 x 64 sparse tiles, `Arc` copy-on-write storage, selection, fill/sampling/palette logic, and deterministic raster/filter/effect operations |
+| `inkpod-format` | Bounded procedure-authoritative `.inkpod` v27 Cell/Cut containers and `.inkbatch` v2 models, streaming encode/decode/validation, atomic file I/O, and PNG/TIFF/TGA/BMP codecs |
+| `inkpod-core`   | Stable-ID document/layer/plane state, immutable Genesis/base surfaces, a content-addressed canonical asset registry, StateId savepoints, views, raster clipboard, previews, animation, effects/Batch commands, persistence mapping, immutable render snapshots, and canonical primitive execution plus append-only journal/cache-free replay and semantic document digests for the migrated Core slice |
+| `inkpod-ffi`    | ABI v17 fixed records and generation-tagged runtime IDs, InkScript source/compiler/fragment plus authority/plan/run/report handles and fixed DTO host callbacks, persistence/compaction diagnostics, validation/conversion, panic containment, ownership functions, and feature-specific exports |
 
 Binary, grayscale, RGBA8/16, straight-alpha, premultiplied display data, and
-selection masks remain distinct types. Core stores vector geometry in
-milli-document units, so view transforms never rewrite it. Win32 may provide a
+selection masks remain distinct types. Win32 may provide a
 platform UUID at document creation, but Core persists it without acquiring an OS
 dependency.
 
 Each crate root is limited to module declarations and stable public re-exports.
 Responsibility-specific modules contain implementation. `inkpod-core` keeps
-vector path/selection/rasterization/conversion/thumbnail work, Batch codec
-codes/operations/filters/payloads, destructive transform orchestration/raster/
+thumbnail work, Batch codec codes/operations/filters/payloads, destructive transform orchestration/raster/
 frame/numeric helpers, and view commands/coordinates/guides/secondary views/
 shortcuts in separate modules; their `mod.rs` files remain declarative indices.
 `inkpod-core` keeps
@@ -118,13 +116,13 @@ typed frontend request
 
 The control plane contains only fixed-width values and Rust-owned object/asset
 IDs. A borrowed C record is call-by-value in meaning and is not retained after
-return. Variable samples, paths, encoded images, and clipboard payloads enter
+return. Variable samples, encoded images, and clipboard payloads enter
 through bounded data-plane APIs. Every ABI-v2 ingestion route synchronously
 validates and copies borrowed data before returning. Raster open/import,
 clipboard, and Light Table sources are interned in the canonical asset registry;
 stroke samples become an owned inline payload up to 4 MiB and one immutable
 sample asset above that cutoff. Sequence sources remain bounded Rust-owned raster
-copies, and vector edits retain their typed geometry in the canonical invocation. Neither Core nor a
+copies. Neither Core nor a
 committed procedure retains the caller's record, buffer, file name, or path. A
 committed procedure contains bounded inline canonical bytes or immutable
 content-addressed `AssetId` values, never a raw pointer, path, native enum layout,
@@ -185,13 +183,13 @@ cache release, and later history movement reconstructs the cache on demand.
 
 This is deliberately not a generic snapshot- or diff-procedure bridge. Every
 production history entry references its route-specific canonical procedure,
-and there is no supported incomplete-journal state. The v26 writer serializes
+and there is no supported incomplete-journal state. The v27 writer serializes
 Genesis, retained assets, the complete journal/control-event sequence, editor
 state, savepoints, cursor, branch graph, and ID authorities. Open validates and
 either fully replays that graph or uses a prefix/state/policy-verified optional
 checkpoint in a staged Core before one replacement of the live generation.
 Checkpoint mismatch selects full replay; malformed/hash/bound failure rejects.
-The journal remains authoritative and every non-v26 version is rejected.
+The journal remains authoritative and every non-v27 version is rejected.
 
 History visualization is a read-only derived view of that journal. Core replays
 the complete retained graph through the canonical executor, visits only `Commit`
@@ -216,10 +214,9 @@ selection mask. `BaseSurface::Asset` instead names one immutable canonical raste
 asset whose dimensions and pixel semantics match the document paper. Replacing
 the earlier temporary Document-ID-as-Cell bridge and persisting the shooting and
 maximum-close frames change canonical document-state bytes. The current document-state
-commitment is schema 9/domain 8, the replay contract is epoch 23, and the native
-format is version 26. Text/Annotation layers own bounded stable-ID annotation
-objects, and `EditAnnotations/canonical-v2` commits create/update/move/delete or
-one completed stroke through the shared executor. Cut payload schema 2 separates immutable member assets from
+commitment is schema 10/domain 8, the replay contract is epoch 24, and the native
+format is version 27. VectorColoring, Text, and Annotation layers and their object
+namespaces are absent from the exact-current model. Cut payload schema 2 separates immutable member assets from
 ordered membership and records membership before/after states in Cut history, while
 retaining Cell-document primitive semantics. Sequence edits stage bounded ordered
 insert/remove/move/renumber operations and publish one Cut revision only after final
@@ -227,9 +224,9 @@ validation. Removed members are not physically deleted and remain addressable by
 stable `(CellId, document UUID)` while retained Cut history can restore them. The
 optional angled shooting frame and stable-ID vanishing points are independent document
 objects. Their canonical edits, previews, transform rules, snapshot overlays, output
-inclusion policies, and Core-owned radial snapping are persisted by v26; flat normal
+inclusion policies, and Core-owned radial snapping are persisted by v27; flat normal
 output excludes both overlay families, while explicit instruction export may include
-the shooting-frame outline and annotations. Epoch 19/version 22 added the independent
+the shooting-frame outline. Epoch 19/version 22 added the independent
 current-only Cut descriptor and Cut metadata/
 default history. Epoch
 18/version 21 added the canonical floating-transform v3 procedure with
@@ -244,8 +241,8 @@ benchmark gate are specified in [`determinism.md`](determinism.md).
 The Core-owned asset registry interns canonical descriptors and logical payload
 bytes under a content-addressed `AssetId`. A raster descriptor fixes pixel format,
 color space, alpha semantics, dimensions, canonical stride, element count, and
-payload length before the digest is accepted. Vector and sample streams use their
-own closed canonical descriptors. Equal descriptor-plus-payload inputs deduplicate
+payload length before the digest is accepted. Sample streams use their own closed
+canonical descriptors. Equal descriptor-plus-payload inputs deduplicate
 regardless of source path or codec, while a different format, alpha meaning,
 dimension, stride, or logical payload produces a different identity. Encoded
 source bytes, file names, paths, timestamps, and optional provenance do not enter
@@ -266,8 +263,7 @@ Genesis asset base. Import into an existing document, private clipboard payloads
 and Light Table sources pass through the same bounded asset-ingestion boundary.
 Stroke samples are always copied into bounded Rust-owned canonical bytes; payloads
 larger than 4 MiB are promoted to a canonical sample asset, while smaller payloads
-stay inline. Vector document primitives retain typed canonical geometry and
-stable target/output IDs. The Windows path/clipboard adapters retain
+stay inline. The Windows path/clipboard adapters retain
 OS authority only long enough to obtain input bytes; later replay does not reopen
 a path or borrow C++ memory.
 
@@ -275,7 +271,7 @@ Cache-free verification first builds a detached asset archive from every semanti
 retention root, deep-copies each logical payload, and re-ingests it into an empty
 registry with the expected `AssetId`. Fresh Genesis/journal replay uses only that
 detached registry, so passing verification cannot be an artifact of shared
-`AssetRecord`, payload, or `TileRaster` ownership. Production v26 persists the
+`AssetRecord`, payload, or `TileRaster` ownership. Production v27 persists the
 same rooted graph in GENS/ASST.
 
 The present ABI is v12. `InkpodObjectId` separates Core, snapshot, task, color,
@@ -431,7 +427,7 @@ session.
 copies an `InkpodEditorStateInfo` presentation record into the matching
 `DocumentSession`. `WorkspaceWindow` and tool controls may project that copy,
 keyed by session, generation, editor revision, and digest, but do not own
-authoritative tool, color, fill, selection, vector, or brush defaults. Document, view,
+authoritative tool, color, fill, selection, or brush defaults. Document, view,
 or workspace switching therefore refreshes from the target Core and never
 writes a previous workspace value into it. Commands, strokes, and previews
 capture the exact-depth color, diameter/options, brush shape, smoothing,
@@ -711,8 +707,9 @@ Tool Options surfaces opt out of singleton headers. The model permits only
 `TopContext`, `Left`, `Right`,
 and `Bottom` stacks around the central `EditorArea`, plus floating and hidden
 placements. A stack is either tabbed or split in one direction; recursive/free
-dock trees cannot be represented. At the 96-DPI reset baseline, the 80-DIP tool
-strip is left and the 320-DIP color/layer stack is right at 32:68; active-tool
+dock trees cannot be represented. At the 96-DPI reset baseline, the fixed 80-DIP
+tool strip is left without a zone-extent splitter, and the 320-DIP color/layer
+stack is right at 32:68; active-tool
 options are not part of the dock model. The layer pane retains its internal 55:45
 layer/plane split. Its shared action row has a resource-backed label naming the
 currently active Layer or Plane target, and each button exposes the same target
@@ -736,24 +733,41 @@ main frame; floating content is reparented into an ordinary main-window-owned
 top-level frame and returns to the same child HWND when docked. Drag preview is
 limited to descriptor-allowed zones. Resource-titled standard tab controls stay
 visible for singleton inspector stacks so the content and action scope remain
-identifiable. Mouse/keyboard splitters retain a 4-DIP hit target and paint a
+identifiable. The singleton Tool strip can only be shown or hidden: it cannot
+float or AutoHide, exposes only Close in its context menu, and has no adjacent
+splitter. Other mouse/keyboard splitters retain a 4-DIP hit target and paint a
 centered system-color rule, highlighted on hover, capture, or keyboard focus;
 the internal Layer/Plane splitter follows the same presentation and accessibility
-rules. Pane context menus and the Window menu provide tab/split, dock, float,
-hide, restore, and reset without retargeting a document command. Floating close
+rules. Inspector pane context menus provide tab/split, dock, float, hide, restore,
+and reset without retargeting a document command. Window-menu pane visibility
+entries, including Batch, are direct checked toggles; Color and Batch target
+pin/follow commands remain pane-local. Floating close
 maps to hide, preserving the pane's controller state. All HWND and Common
 Controls activity remains on the UI/Input thread; Core and renderer ownership is
 unchanged.
 
-The frontend persists a bounded version 7 workspace record in HKCU. It contains only main
+The right zone uses a bounded flat `RightToolTabsModel`: each nonempty tab owns a
+stable layout ID and an ordered unique pane-type list, and one selected ID is
+stored separately. The first pane supplies the localized tab label; the full
+ordered list supplies tooltip and accessibility text. Adding a hidden pane uses
+the selected tab only when the DPI-scaled minimum heights plus splitters fit,
+otherwise it creates a singleton tab. Moving and reordering use copy-then-publish
+model updates, while removing the last pane deletes the tab and selects previous,
+next, then first. Tool and Tool Options never enter this model.
+
+The frontend persists a bounded version 9 workspace record in HKCU. It contains only main
 window placement, editor split orientation/ratio, dock zones/order/ratios,
 primary and secondary pane visibility/size/floating placement, AutoHide edge,
-density, and selected or user-named preset; document paths and document/Core
+density, selected or user-named preset, and the dynamic right-tab IDs/order/
+selection/pane membership; document paths, active strokes, jobs, and document/Core
 identities are excluded. The decoder validates its exact size, counts, enums,
-stable pane IDs, duplicate IDs, placement bounds, and bounded terminated name.
-Unknown pane IDs are ignored, absent known panes retain current defaults, and an
-invalid or unsupported record restores the default without aborting startup.
-Supported version 4, 5, and 6 records migrate once to version 7.
+stable pane/tab IDs, duplicate pane/tab IDs, nonempty tabs, selected/next ID,
+unused storage, placement bounds, and bounded terminated name. Unknown pane IDs
+are ignored, absent visible known panes receive preset defaults, and an invalid
+or unsupported record restores the default without aborting startup. Supported
+version 2 through 8 records migrate once to version 9; V8's visible fixed groups
+become dynamic nonempty tabs. Transient narrow-window label suppression is never
+persisted.
 
 The UI thread owns a fixed-capacity `WorkspaceWindowRegistry`. Each heap-stable
 `WorkspaceWindow` owns its top-level
@@ -873,7 +887,7 @@ their established scalar/record shapes, and the legacy C records retain their
 fixed layout beside the additive runtime-ID records; those boundaries validate and convert before calling the typed
 `ViewTransform`. Locator sampling, guide/grid snapping, and stroke/effect input
 use document points after their single `CoordinateSpace` conversion. Snapshot
-raster origins/sizes are likewise typed internally, while raster, vector, and
+raster origins/sizes are likewise typed internally, while raster and
 overlay output coordinates remain document-space public records.
 
 Geometry gestures use the same boundary explicitly: Windows downsamples a
@@ -892,39 +906,26 @@ quantization uses the same half-open pixel-cell rule as locator sampling and
 nearest-neighbor rendering, including magnified lower/right clicks, final edges,
 and flipped views.
 
-Immutable snapshots own raster tiles, overlays, flattened cubic segments with
-explicit endpoint-connection bits, vector fills, packed boundary path IDs, and
-bounded annotation records backed by snapshot-owned UTF-8 and milli-pixel point
-pools.
-The Rust snapshot adapter derives the target view's bounded disconnected
-endpoint records once, and the FFI snapshot handle owns that borrowed span.
-Borrowed spans remain valid only for the FFI snapshot lifetime. Endpoint
-identity is the Rust-owned explicit stable path/start-or-end topology;
-coordinate equality and proximity are not connection evidence. Antialias,
-centerline overlay/only, and endpoint visibility remain view-local and advance
-only view revision. The renderer validates counts, strides, flag consistency,
-endpoint order, and path grouping, creates D2D geometry, sizes centerlines and
-markers in device pixels, and reconstructs GPU resources from the retained
-snapshot after device loss. Core geometry remains in document coordinates;
-zoom, pan, and flip are render transforms only.
+Immutable snapshots own raster tiles plus bounded frame, guide, grid,
+vanishing-point, selection, and preview overlays. Borrowed spans remain valid
+only for the FFI snapshot lifetime. The renderer validates counts, strides,
+item order, and group structure, and reconstructs GPU resources from the
+retained snapshot after device loss. Core geometry remains in document
+coordinates; zoom, pan, and flip are render transforms only.
 
 Snapshots also own a bottom-to-top render plan. Layer/plane index 0 is the
 palette top, so Core walks each tree in reverse and emits closed layer groups,
-raster-tile spans, vector-fill spans, vector-stroke spans, annotation spans, and adjustment LUT
+raster-tile spans and adjustment LUT
 references in one semantic order. Layer opacity is applied once by the group;
-plane opacity is already resolved into its raster or vector records. The C ABI
+plane opacity is already resolved into its raster records. The C ABI
 publishes only borrowed bounded spans, and the renderer rejects malformed group
 structure, kinds, or item ranges before retaining the snapshot. Direct2D draws
 the plan sequentially. An adjustment boundary closes the current command list,
 applies the Core-resolved RGB lookup tables through TableTransfer, and continues
-in a new command list, preserving editable vector geometry and document-scale
-quality. DirectWrite font resolution and text-format caching stay on the renderer
-thread; a missing annotation family falls back to Segoe UI with a visible Canvas
-warning. Device-loss recovery rebuilds the same plan from the retained snapshot.
-Thumbnail and flat export use the same bottom-to-top Core semantics and the
-Core-owned deterministic portable annotation rasterizer; instruction-output
-objects are filtered only from ordinary flat export. Raster-only
-documents retain the existing precomposed tile path and its revision-max cache.
+in a new command list while retaining document-scale raster quality. Device-loss
+recovery rebuilds the same plan from the retained snapshot. Thumbnail and flat
+export use the same bottom-to-top Core semantics. Raster documents retain the
+existing precomposed tile path and its revision-max cache.
 
 ### Canonical revision-max render-cache identity
 
@@ -1017,7 +1018,7 @@ Core; the frontend does not substitute an active target. Color, diameter, and
 target-only changes therefore cannot add an Undo entry.
 
 Core-owned identities use distinct internal newtypes for documents, layers,
-planes, vector paths/fills, light-table sets/items, and secondary views. History
+planes, light-table sets/items, and secondary views. History
 state plus document, view, render-cache, and preview revisions are separate
 tokens with their own increment policy. A typed cursor allocates the one
 document-wide stable-ID namespace through domain-specific methods; there is no
@@ -1026,7 +1027,7 @@ conversion between identity domains. Public Rust records, C records, runtime IDs
 convert only at those boundaries. The public `Guide` slice and
 `LightTableSource` input value remain raw compatibility boundary objects because
 changing their stored field types would break the existing Rust API; Core still
-allocates guide identities through `GuideId`, and no private layer/plane/vector
+allocates guide identities through `GuideId`, and no private layer/plane
 lookup accepts either boundary value as another identity kind. Pure raster-
 building helpers are the documented revision exception: their raw value is
 passed directly to `inkpod-image` tile mutation APIs and may originate from a
@@ -1059,7 +1060,7 @@ an incomplete journal; a history-producing commit without its procedure is an
 invalid internal state rather than a supported fallback.
 
 Preview/session, floating-selection, cancellable Batch/effect, external reload,
-and potentially long-running raster/vector conversion paths retain their
+and potentially long-running raster conversion paths retain their
 specialized staging ownership. Their completed candidate state passes through
 the same stale-checked atomic publish boundary; cancel or failure drops the
 candidate without changing committed document, history, revision, or cache.
@@ -1091,7 +1092,7 @@ stroke. Long-running tasks expose progress and cancellation; cancellation,
 failure, or stale revision does not partially commit. Format limits and recovery
 details are specified in [`file-format.md`](file-format.md).
 
-The current `.inkpod` v26 Cell container requires `META`, `GENS`, `ASST`, `PROC`, and
+The current `.inkpod` v27 Cell container requires `META`, `GENS`, `ASST`, `PROC`, and
 `EDIT`. Save first verifies cache-free journal replay, encodes prospective
 document/editor savepoints, and streams the complete validated container to an
 exclusive same-directory temporary file. Header, records, asset chunks,
@@ -1104,7 +1105,7 @@ digests in a staged Core, then swaps once and rebases `DocumentRevision` to 1.
 Normal-save output therefore reopens clean with Undo/Redo and inactive branches
 intact. Autosave retains the existing normal path/savepoints; recovery open
 clears both savepoints and path authority and marks the restored session dirty.
-Partial selection revert reconstructs the saved document through this same v26
+Partial selection revert reconstructs the saved document through this same v27
 reader and commits the selected delta as one new canonical undo unit.
 
 Checkpoint policy is deterministic over procedure count, replay work, and dirty
@@ -1155,7 +1156,7 @@ The `large_document` image benchmark exercises maximum-dimension sparse
 allocation, distributed writes, copy-on-write isolation, and a bounded dense
 filter workload. The `core_workflows` benchmark separately covers sparse and
 dirty-tile snapshots, view-only cache reuse, Undo/Redo, light-table composition,
-vector snapshot/rasterization, and in-memory Batch preview/dry-run. Both expose
+and in-memory Batch preview/dry-run. Both expose
 fixed quick/full inputs and semantic counters/checksums. Routine wall-clock
 acceptance for protected `pan_zoom_snapshot` and `dirty_tile_rebuild` scenarios
 uses a matching approved environment envelope from

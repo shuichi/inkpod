@@ -1,3 +1,5 @@
+//! Native v27 and replay epoch 24 public persistence contracts.
+
 use super::*;
 use inkpod_format::{
     NativeRecord, NativeSection, OPAQUE_PRESERVE, read_procedure_file, save_procedure_file_atomic,
@@ -124,7 +126,7 @@ fn io_001_save_reopen_restores_full_journal_editor_and_all_next_id_authorities()
 }
 
 #[test]
-fn io_001_v26_rejects_v25_and_corrupt_open_is_atomic_for_the_live_core() {
+fn io_001_v27_rejects_v26_and_corrupt_open_is_atomic_for_the_live_core() {
     let path = native_path("v25-rejected");
     let mut legacy = vec![0_u8; 128];
     legacy[0..8].copy_from_slice(b"INKPOD\0\0");

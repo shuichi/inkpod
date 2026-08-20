@@ -227,8 +227,6 @@ pub enum BatchOperationKind {
         /// New visibility state.
         visible: bool,
     },
-    /// Changes vector stroke width.
-    LineWidth(VectorWidthMode),
     /// Applies an image filter.
     Filter(Filter),
     /// Applies boundary-aware airbrush settings.

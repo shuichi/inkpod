@@ -1,4 +1,4 @@
-use crate::{FileAdjustmentMetadata, FileColorChart, FileLightTableMetadata, FileVectorMetadata};
+use crate::{FileAdjustmentMetadata, FileColorChart, FileLightTableMetadata};
 use inkpod_image::{FNV_OFFSET, PixelFormat, PixelValue, TileCoord, fnv_bytes};
 use std::fmt;
 #[cfg(test)]
@@ -6,7 +6,7 @@ use std::sync::atomic::AtomicU64;
 pub(super) const MAGIC: [u8; 8] = *b"INKPOD\0\0";
 /// Current development format. Increment for every serialized schema change
 /// until the user declares a format freeze; older versions are not migrated.
-pub const DOCUMENT_ARCHIVE_VERSION: u32 = 5;
+pub const DOCUMENT_ARCHIVE_VERSION: u32 = 6;
 pub(super) const DOCUMENT_METADATA_MAGIC: [u8; 4] = *b"DOCM";
 pub(super) const HEADER_BYTES: usize = 32;
 pub(super) const FIXED_MANIFEST_BYTES: usize = 200;
@@ -17,7 +17,6 @@ pub(super) const BLOB_DESCRIPTOR_BYTES: usize = 48;
 pub(super) const CONTAINER_FLAG_COLOR_METADATA: u32 = 1 << 0;
 pub(super) const CONTAINER_FLAG_DOCUMENT_METADATA: u32 = 1 << 1;
 pub(super) const CONTAINER_FLAG_LIGHT_TABLE_METADATA: u32 = 1 << 2;
-pub(super) const CONTAINER_FLAG_VECTOR_METADATA: u32 = 1 << 3;
 pub(super) const CONTAINER_FLAG_ADJUSTMENT_METADATA: u32 = 1 << 4;
 pub(super) const MAX_FILE_BYTES: u64 = 1 << 30;
 pub(crate) const MAX_MANIFEST_BYTES: u64 = 16 << 20;
@@ -26,9 +25,6 @@ pub(super) const MAX_BLOBS: usize = 262_144;
 pub(super) const MAX_LAYERS: usize = 4_096;
 pub(super) const MAX_GUIDES: usize = 4_096;
 pub(crate) const MAX_NODE_NAME_BYTES: usize = 1_024;
-pub(crate) const MAX_ANNOTATION_OBJECTS: usize = 16_384;
-pub(crate) const MAX_ANNOTATION_TEXT_BYTES: usize = 65_536;
-pub(crate) const MAX_ANNOTATION_POINTS: usize = 65_536;
 pub(crate) const MAX_VANISHING_POINTS: usize = 64;
 #[cfg(test)]
 pub(crate) static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(1);
@@ -40,9 +36,6 @@ pub enum PlaneKind {
     Raster,
     Selection,
     LightTable,
-    VectorMainLine,
-    ColorTrace,
-    VectorFill,
 }
 
 impl PlaneKind {
@@ -53,9 +46,6 @@ impl PlaneKind {
             Self::Raster => 3,
             Self::Selection => 4,
             Self::LightTable => 5,
-            Self::VectorMainLine => 6,
-            Self::ColorTrace => 7,
-            Self::VectorFill => 8,
         }
     }
 
@@ -66,9 +56,6 @@ impl PlaneKind {
             3 => Ok(Self::Raster),
             4 => Ok(Self::Selection),
             5 => Ok(Self::LightTable),
-            6 => Ok(Self::VectorMainLine),
-            7 => Ok(Self::ColorTrace),
-            8 => Ok(Self::VectorFill),
             _ => Err(FormatError::Unsupported("unknown required plane kind")),
         }
     }
@@ -83,9 +70,6 @@ pub enum LayerKind {
     Frame,
     VanishingPoint,
     Adjustment,
-    Text,
-    Annotation,
-    VectorColoring,
 }
 
 impl LayerKind {
@@ -98,9 +82,6 @@ impl LayerKind {
             Self::Frame => 5,
             Self::VanishingPoint => 6,
             Self::Adjustment => 7,
-            Self::Text => 8,
-            Self::Annotation => 9,
-            Self::VectorColoring => 10,
         }
     }
 
@@ -113,9 +94,6 @@ impl LayerKind {
             5 => Ok(Self::Frame),
             6 => Ok(Self::VanishingPoint),
             7 => Ok(Self::Adjustment),
-            8 => Ok(Self::Text),
-            9 => Ok(Self::Annotation),
-            10 => Ok(Self::VectorColoring),
             _ => Err(FormatError::Unsupported("unknown required layer kind")),
         }
     }
@@ -175,8 +153,6 @@ pub struct FileDocumentMetadata {
     pub color_chart: FileColorChart,
     /// Whether document-changing Color chart commands are locked.
     pub color_chart_locked: bool,
-    /// Ordered editable Text/Annotation objects keyed by stable ID.
-    pub annotations: Vec<FileAnnotationObject>,
     /// Optional independent angled shooting-frame instruction overlay.
     pub shooting_frame: Option<FileShootingFrame>,
     /// Ordered persistent vanishing-point objects keyed by stable ID.
@@ -216,42 +192,6 @@ pub struct FileShootingFrame {
     pub anchor: FileShootingFrameAnchor,
     pub visible: bool,
     pub include_in_instruction_export: bool,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum FileAnnotationKind {
-    Text,
-    Stroke,
-    Leader,
-    Value,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum FileAnnotationOutput {
-    Normal,
-    Instruction,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct FileAnnotationPoint {
-    pub x_milli: i32,
-    pub y_milli: i32,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FileAnnotationObject {
-    pub id: u64,
-    pub layer_id: u64,
-    pub kind: FileAnnotationKind,
-    pub output: FileAnnotationOutput,
-    pub bounds: RectI32,
-    pub font_family_hint: String,
-    pub font_size_milli: u32,
-    pub style_flags: u32,
-    pub color: PixelValue,
-    pub text: String,
-    pub points: Vec<FileAnnotationPoint>,
-    pub stroke_width_milli: u32,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -321,9 +261,6 @@ pub struct DocumentArchive {
     /// Additive light-table/workflow metadata. Source rasters are blob-backed
     /// planes referenced by this section and remain outside the editable tree.
     pub light_table_metadata: Option<FileLightTableMetadata>,
-    /// Additive vector geometry/topology. Vector plane descriptors remain
-    /// in the typed document layer tree while this section owns their stable path/fill IDs.
-    pub vector_metadata: Option<FileVectorMetadata>,
     /// Optional non-destructive adjustment parameters. Adjustment layers remain
     /// in the document layer tree and never own a raster payload.
     pub adjustment_metadata: Option<FileAdjustmentMetadata>,

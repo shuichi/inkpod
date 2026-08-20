@@ -9,7 +9,6 @@ mod pixel;
 mod raster;
 mod sampling;
 mod selection;
-mod vector;
 
 pub use edit::{
     Adjustment, AirbrushGesture, AirbrushStroke, BoundaryAirbrush, Channel, ColorBalance,
@@ -40,13 +39,6 @@ pub use sampling::{
     eyedropper,
 };
 pub use selection::{RasterRangeInterpretation, interpret_raster_selection};
-pub use vector::{
-    VECTOR_UNITS_PER_PIXEL, VectorFixedCubic, VectorFixedPoint, VectorFlatSample,
-    evaluate_vector_cubic, flatten_vector_path, split_vector_cubic, sub_vector_cubic,
-    vector_distance_to_segment, vector_fixed_xy, vector_lerp, vector_lerp_point, vector_line_cubic,
-    vector_line_intersection, vector_path_intersections, vector_point_at, vector_source_over,
-    vector_squared_distance, vector_stroke_contains,
-};
 
 #[cfg(test)]
 #[path = "../tests/unit/output_color_guard.rs"]

@@ -18,12 +18,6 @@ pub(crate) fn validate_plane_format(kind: PlaneType, format: PixelFormat) -> Res
             PixelFormat::StraightRgba8 | PixelFormat::StraightRgba16
         ),
         PlaneType::Selection => format == PixelFormat::BinaryMask8,
-        PlaneType::VectorMainLine | PlaneType::ColorTrace | PlaneType::VectorFill => {
-            matches!(
-                format,
-                PixelFormat::StraightRgba8 | PixelFormat::StraightRgba16
-            )
-        }
     };
     if valid {
         Ok(())
@@ -40,9 +34,6 @@ fn plane_type_index(kind: PlaneType) -> usize {
         PlaneType::Color => 1,
         PlaneType::Raster => 2,
         PlaneType::Selection => 3,
-        PlaneType::VectorMainLine => 4,
-        PlaneType::ColorTrace => 5,
-        PlaneType::VectorFill => 6,
     }
 }
 
@@ -50,12 +41,11 @@ fn validate_layer_entries(
     kind: LayerKind,
     entries: impl IntoIterator<Item = (PlaneType, PixelFormat)>,
 ) -> Result<(), CoreError> {
-    let mut counts = [0_usize; 7];
+    let mut counts = [0_usize; 4];
     let mut plane_count = 0_usize;
     let mut main_line_format = None;
     let mut all_raster = true;
     let mut all_selection = true;
-    let mut all_vector_compatible = true;
     for (plane_kind, format) in entries {
         validate_plane_format(plane_kind, format)?;
         counts[plane_type_index(plane_kind)] += 1;
@@ -65,13 +55,6 @@ fn validate_layer_entries(
         }
         all_raster &= plane_kind == PlaneType::Raster;
         all_selection &= plane_kind == PlaneType::Selection;
-        all_vector_compatible &= matches!(
-            plane_kind,
-            PlaneType::VectorMainLine
-                | PlaneType::ColorTrace
-                | PlaneType::VectorFill
-                | PlaneType::Raster
-        );
     }
     let count = |plane_kind| counts[plane_type_index(plane_kind)];
     let valid = match kind {
@@ -91,17 +74,7 @@ fn validate_layer_entries(
         }
         LayerKind::Raster => plane_count != 0 && all_raster,
         LayerKind::Selection => plane_count != 0 && all_selection,
-        LayerKind::VectorColoring => {
-            count(PlaneType::VectorMainLine) == 1
-                && count(PlaneType::ColorTrace) >= 1
-                && count(PlaneType::VectorFill) == 1
-                && all_vector_compatible
-        }
-        LayerKind::Frame
-        | LayerKind::VanishingPoint
-        | LayerKind::Adjustment
-        | LayerKind::Text
-        | LayerKind::Annotation => plane_count == 0,
+        LayerKind::Frame | LayerKind::VanishingPoint | LayerKind::Adjustment => plane_count == 0,
     };
     if valid {
         Ok(())

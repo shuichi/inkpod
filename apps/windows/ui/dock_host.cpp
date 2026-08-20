@@ -26,6 +26,7 @@ constexpr int kTabHeightDip = 28;
 
 constexpr UINT kContextFloat = 1U;
 constexpr UINT kContextClose = 2U;
+constexpr UINT kContextMoveToNewTab = 3U;
 constexpr UINT kContextMoveFirst = 100U;
 
 int ScaleDip(int value, UINT dpi) noexcept {
@@ -307,7 +308,7 @@ bool DockHost::Initialize(
         0,
         WC_TABCONTROLW,
         nullptr,
-        WS_CHILD | WS_CLIPSIBLINGS | WS_TABSTOP | TCS_SINGLELINE,
+        WS_CHILD | WS_CLIPSIBLINGS | WS_TABSTOP | TCS_SINGLELINE | TCS_TOOLTIPS,
         0,
         0,
         0,
@@ -410,18 +411,7 @@ DockResult DockHost::TogglePane(DockPaneType type) noexcept {
     if (model_ == nullptr) {
         return DockResult::InvalidState;
     }
-    const DockResult result = model_->IsPaneVisible(type)
-        ? model_->HidePane(type)
-        : model_->RestorePane(type);
-    if (result == DockResult::Ok) {
-        const DockPanePlacement* pane = model_->Pane(type);
-        if (pane != nullptr && pane->zone == DockZone::Right
-            && right_tool_tabs_ != nullptr) {
-            SelectVisibleToolTabForPane(type);
-        }
-        NotifyChanged();
-    }
-    return result;
+    return model_->IsPaneVisible(type) ? HidePane(type) : RestorePane(type);
 }
 
 DockResult DockHost::DockPane(DockPaneType type, DockZone zone) noexcept {
@@ -432,6 +422,8 @@ DockResult DockHost::DockPane(DockPaneType type, DockZone zone) noexcept {
     if (result == DockResult::Ok) {
         if (zone == DockZone::Right && right_tool_tabs_ != nullptr) {
             SelectVisibleToolTabForPane(type);
+        } else {
+            RemovePaneFromToolTabs(type);
         }
         NotifyChanged();
     }
@@ -448,6 +440,7 @@ DockResult DockHost::FloatPane(DockPaneType type) noexcept {
     }
     const DockResult result = model_->FloatPane(type, pane->floating);
     if (result == DockResult::Ok) {
+        RemovePaneFromToolTabs(type);
         NotifyChanged();
     }
     return result;
@@ -459,6 +452,7 @@ DockResult DockHost::HidePane(DockPaneType type) noexcept {
     }
     const DockResult result = model_->HidePane(type);
     if (result == DockResult::Ok) {
+        RemovePaneFromToolTabs(type);
         NotifyChanged();
     }
     return result;
@@ -471,6 +465,12 @@ DockResult DockHost::SetPaneAutoHide(
     }
     const DockResult result = model_->SetPaneAutoHide(type, auto_hide);
     if (result == DockResult::Ok) {
+        const DockPanePlacement* placement = model_->Pane(type);
+        if (placement != nullptr && placement->zone == DockZone::Right) {
+            SelectVisibleToolTabForPane(type);
+        } else {
+            RemovePaneFromToolTabs(type);
+        }
         if (PaneHostState* pane = PaneState(type); pane != nullptr) {
             pane->auto_hide_expanded = false;
         }
@@ -491,6 +491,7 @@ DockResult DockHost::RestorePane(DockPaneType type) noexcept {
             SelectVisibleToolTabForPane(type);
         }
         NotifyChanged();
+        FocusPane(type);
     }
     return result;
 }
@@ -554,22 +555,6 @@ DockResult DockHost::ActivatePane(DockPaneType type) noexcept {
     return tool_tab_changed && active_result == DockResult::NoOp
         ? DockResult::Ok
         : active_result;
-}
-
-ToolTabResult DockHost::ToggleToolTabVisibility(ToolTabId id) noexcept {
-    if (right_tool_tabs_ == nullptr) {
-        return ToolTabResult::InvalidTab;
-    }
-    const ToolTabResult result = right_tool_tabs_->SetVisible(
-        id, !right_tool_tabs_->IsVisible(id));
-    if (result == ToolTabResult::Ok) {
-        NotifyChanged();
-    }
-    return result;
-}
-
-bool DockHost::ToolTabVisible(ToolTabId id) const noexcept {
-    return right_tool_tabs_ != nullptr && right_tool_tabs_->IsVisible(id);
 }
 
 HWND DockHost::FloatingWindow(DockPaneType type) const noexcept {
@@ -837,11 +822,50 @@ void DockHost::SelectVisibleToolTabForPane(DockPaneType type) noexcept {
     if (right_tool_tabs_ == nullptr) {
         return;
     }
-    static_cast<void>(right_tool_tabs_->EnsurePaneAssigned(type));
+    const DockRect right = geometry_.zones[static_cast<std::size_t>(
+        DockZone::Right)];
+    int available_height = right.height;
+    if (available_height <= 0 && owner_ != nullptr) {
+        RECT client{};
+        if (GetClientRect(owner_, &client) != FALSE) {
+            available_height = std::max(
+                0L, client.bottom - client.top - ScaleDip(kTabHeightDip, dpi_));
+        }
+    }
+    if (!right_tool_tabs_->TabForPane(type)) {
+        DockPanePlacement* placement = model_ == nullptr
+            ? nullptr
+            : model_->Pane(type);
+        const PaneDescriptor* descriptor = FindPaneDescriptor(type);
+        if (placement != nullptr && descriptor != nullptr) {
+            placement->split_weight = static_cast<std::uint32_t>(
+                std::max(1, descriptor->preferred_height_dip));
+        }
+    }
+    static_cast<void>(right_tool_tabs_->AddPaneToSelected(
+        type,
+        available_height,
+        dpi_,
+        ScaleDip(4, dpi_)));
     const ToolTabId tab = right_tool_tabs_->TabForPane(type);
-    if (tab && right_tool_tabs_->IsVisible(tab)) {
+    if (tab) {
         static_cast<void>(right_tool_tabs_->SetSelected(tab));
     }
+}
+
+void DockHost::RemovePaneFromToolTabs(DockPaneType type) noexcept {
+    if (right_tool_tabs_ != nullptr) {
+        static_cast<void>(right_tool_tabs_->RemovePane(type));
+    }
+}
+
+void DockHost::FocusPane(DockPaneType type) noexcept {
+    HWND content = ContentWindow(type);
+    if (content == nullptr) {
+        return;
+    }
+    HWND target = GetNextDlgTabItem(content, nullptr, FALSE);
+    SetFocus(target == nullptr ? content : target);
 }
 
 bool DockHost::ShouldShowPaneHeader(DockPaneType type) const noexcept {
@@ -1082,9 +1106,6 @@ void DockHost::ApplyToolTabLayout() noexcept {
     int selected = -1;
     int visible_index{};
     for (const ToolTab& tab : right_tool_tabs_->Tabs()) {
-        if (!tab.visible) {
-            continue;
-        }
         TCITEMW item{};
         item.mask = TCIF_TEXT | TCIF_PARAM;
         item.pszText = const_cast<wchar_t*>(ToolTabTitle(tab));
@@ -1096,6 +1117,13 @@ void DockHost::ApplyToolTabLayout() noexcept {
         ++visible_index;
     }
     TabCtrl_SetCurSel(right_tool_tab_control_, selected);
+    if (const ToolTab* active = right_tool_tabs_->SelectedTab(); active != nullptr) {
+        std::array<wchar_t, kMaximumToolTabDescriptionLength> description{};
+        if (ToolTabDescription(*active, description)) {
+            static_cast<void>(SetAccessibleName(
+                right_tool_tab_control_, description.data()));
+        }
+    }
     PlaceWindow(
         right_tool_tab_control_,
         geometry_.right_tool_tabs,
@@ -1123,6 +1151,26 @@ void DockHost::ShowContextMenu(
         screen = POINT{
             (bounds.left + bounds.right) / 2,
             (bounds.top + bounds.bottom) / 2};
+    }
+    if (type == DockPaneType::Tool) {
+        HMENU menu = CreatePopupMenu();
+        if (menu == nullptr) {
+            return;
+        }
+        AppendMenuW(menu, MF_STRING, kContextClose, UiText(UiStringId::DockClose));
+        const UINT command = TrackPopupMenu(
+            menu,
+            TPM_RETURNCMD | TPM_RIGHTBUTTON,
+            screen.x,
+            screen.y,
+            0,
+            owner_,
+            nullptr);
+        DestroyMenu(menu);
+        if (command == kContextClose) {
+            static_cast<void>(HidePane(type));
+        }
+        return;
     }
     HMENU menu = CreatePopupMenu();
     HMENU move_menu = CreatePopupMenu();
@@ -1158,6 +1206,11 @@ void DockHost::ShowContextMenu(
                            : MF_GRAYED),
         reinterpret_cast<UINT_PTR>(move_menu),
         UiText(UiStringId::DockMovePaneToTab));
+    AppendMenuW(
+        move_menu,
+        MF_STRING,
+        kContextMoveToNewTab,
+        UiText(UiStringId::Text0706));
     AppendMenuW(menu, MF_SEPARATOR, 0U, nullptr);
     AppendMenuW(
         menu,
@@ -1182,6 +1235,8 @@ void DockHost::ShowContextMenu(
         && command < kContextMoveFirst + destination_count) {
         static_cast<void>(MovePaneToToolTab(
             type, destinations[command - kContextMoveFirst]));
+    } else if (command == kContextMoveToNewTab) {
+        static_cast<void>(MovePaneToNewToolTab(type));
     } else if (command == kContextFloat) {
         static_cast<void>(FloatPane(type));
     } else if (command == kContextClose) {
@@ -1212,10 +1267,33 @@ ToolTabResult DockHost::MovePaneToToolTab(
             return ToolTabResult::InvalidPane;
         }
     }
-    if (right_tool_tabs_->IsVisible(destination)) {
-        static_cast<void>(right_tool_tabs_->SetSelected(destination));
+    static_cast<void>(right_tool_tabs_->SetSelected(destination));
+    NotifyChanged();
+    FocusPane(type);
+    return ToolTabResult::Ok;
+}
+
+ToolTabResult DockHost::MovePaneToNewToolTab(
+    DockPaneType type) noexcept {
+    if (model_ == nullptr || right_tool_tabs_ == nullptr
+        || !model_->IsZoneAllowed(type, DockZone::Right)) {
+        return ToolTabResult::InvalidPane;
+    }
+    RightToolTabsModel original = *right_tool_tabs_;
+    const ToolTabResult result = right_tool_tabs_->MovePaneToNewTab(type);
+    if (result != ToolTabResult::Ok) {
+        return result;
+    }
+    const DockPanePlacement* pane = model_->Pane(type);
+    if (pane == nullptr || pane->zone != DockZone::Right) {
+        const DockResult dock_result = model_->MovePane(type, DockZone::Right);
+        if (dock_result != DockResult::Ok && dock_result != DockResult::NoOp) {
+            *right_tool_tabs_ = original;
+            return ToolTabResult::InvalidPane;
+        }
     }
     NotifyChanged();
+    FocusPane(type);
     return ToolTabResult::Ok;
 }
 

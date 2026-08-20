@@ -125,7 +125,7 @@ pub unsafe extern "C" fn inkpod_core_export_common_raster(
     })
 }
 
-/// Encodes explicit instruction output, including instruction annotations and
+/// Encodes explicit instruction output, including instruction overlays and
 /// the angled shooting-frame overlay, into a Rust-owned common-raster buffer.
 ///
 /// # Safety

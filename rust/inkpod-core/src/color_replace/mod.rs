@@ -1,10 +1,9 @@
-//! Transactional, region-scoped raster and vector color replacement.
+//! Transactional, region-scoped raster color replacement.
 
 use super::*;
 use crate::document::bounded_document_pixels;
 use crate::primitive::CanonicalInvocation;
 use crate::selection::{combine_selection_masks, mask_bounds, selection_mask_for_shape};
-use crate::vector::{apply_scoped_vector_color_replace, scoped_vector_color_replace_matches};
 
 mod model;
 
@@ -39,7 +38,7 @@ impl Core {
     /// Evaluates one scoped color replacement without changing document state.
     ///
     /// The request revision must equal the current document revision. The result
-    /// counts exact native-depth raster pixels or whole stable vector objects and
+    /// counts exact native-depth raster pixels and
     /// can be discarded to cancel the interaction. No history, dirty state,
     /// savepoint, revision, or persistent ID changes are made.
     pub fn preview_scoped_color_replace(
@@ -64,8 +63,7 @@ impl Core {
     /// Commits one exact scoped color replacement as a canonical undo unit.
     ///
     /// `base_document_revision` must still be current. Raster replacement compares
-    /// native-depth values including alpha. Vector line modes recolor each touched
-    /// whole stable path and fill mode recolors each touched whole stable fill.
+    /// native-depth values including alpha.
     /// A semantic no-op preserves revision, history, dirty state, savepoint, and IDs.
     pub fn apply_scoped_color_replace(
         &mut self,
@@ -119,7 +117,7 @@ impl Core {
         if target == replacement || effective.bounds.is_none() {
             return Ok(self.noop_outcome());
         }
-        let raster_revision_cache = match mode {
+        match mode {
             ScopedColorReplaceMode::RasterColor | ScopedColorReplaceMode::RasterMainLine => {
                 let raster = &mut after
                     .plane_by_id_mut(PlaneId::from_raw(plane_id))
@@ -141,26 +139,9 @@ impl Core {
                 for coord in touched {
                     raster.remove_tile_if_empty(coord);
                 }
-                true
             }
-            ScopedColorReplaceMode::VectorColorLine
-            | ScopedColorReplaceMode::VectorMainLine
-            | ScopedColorReplaceMode::VectorFill => {
-                let matches = scoped_vector_color_replace_matches(
-                    before,
-                    PlaneId::from_raw(plane_id),
-                    mode,
-                    target,
-                    effective.mask.as_ref(),
-                    effective.bounds,
-                )?;
-                apply_scoped_vector_color_replace(after, mode, &matches, replacement);
-                false
-            }
-        };
-        if raster_revision_cache {
-            edit.preserve_render_cache_by_raster_revision();
         }
+        edit.preserve_render_cache_by_raster_revision();
         edit.commit(self)
     }
 
@@ -180,7 +161,6 @@ impl Core {
             return Ok(ScopedColorReplacePreview {
                 base_document_revision: self.document_revision.get(),
                 matched_pixels: 0,
-                matched_objects: 0,
                 affected_bounds: None,
             });
         }
@@ -206,27 +186,7 @@ impl Core {
                 Ok(ScopedColorReplacePreview {
                     base_document_revision: self.document_revision.get(),
                     matched_pixels: count,
-                    matched_objects: 0,
                     affected_bounds: affected,
-                })
-            }
-            ScopedColorReplaceMode::VectorColorLine
-            | ScopedColorReplaceMode::VectorMainLine
-            | ScopedColorReplaceMode::VectorFill => {
-                let matches = scoped_vector_color_replace_matches(
-                    document,
-                    plane_id,
-                    mode,
-                    target,
-                    effective.mask.as_ref(),
-                    effective.bounds,
-                )?;
-                Ok(ScopedColorReplacePreview {
-                    base_document_revision: self.document_revision.get(),
-                    matched_pixels: 0,
-                    matched_objects: matches.len() as u64,
-                    affected_bounds: (!matches.is_empty())
-                        .then_some(effective.bounds.expect("non-empty region was checked")),
                 })
             }
         }
@@ -332,9 +292,6 @@ fn validate_target(
             matches!(plane.kind, PlaneType::Color | PlaneType::Raster)
         }
         ScopedColorReplaceMode::RasterMainLine => plane.kind == PlaneType::MainLine,
-        ScopedColorReplaceMode::VectorColorLine => plane.kind == PlaneType::ColorTrace,
-        ScopedColorReplaceMode::VectorMainLine => plane.kind == PlaneType::VectorMainLine,
-        ScopedColorReplaceMode::VectorFill => plane.kind == PlaneType::VectorFill,
     };
     if !mode_matches {
         return Err(CoreError::InvalidArgument(

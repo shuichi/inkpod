@@ -28,21 +28,24 @@ inline constexpr std::uint32_t kInteractionEffectBlur = 1103U;
 inline constexpr std::uint32_t kInteractionEffectStamp = 1104U;
 inline constexpr std::uint32_t kInteractionEffectDust = 1105U;
 inline constexpr std::uint32_t kInteractionEffectAlphaGradient = 1106U;
-inline constexpr std::uint32_t kInteractionVectorLine = 1201U;
-inline constexpr std::uint32_t kInteractionVectorCurve = 1202U;
-inline constexpr std::uint32_t kInteractionVectorRectangle = 1203U;
-inline constexpr std::uint32_t kInteractionVectorEllipse = 1204U;
-inline constexpr std::uint32_t kInteractionVectorPolyline = 1205U;
-inline constexpr std::uint32_t kInteractionVectorEraser = 1206U;
-inline constexpr std::uint32_t kInteractionVectorPolygon = 1207U;
+inline constexpr std::uint32_t kInteractionGeometryLine =
+    INKPOD_EDITOR_TOOL_GEOMETRY_LINE;
+inline constexpr std::uint32_t kInteractionGeometryCurve =
+    INKPOD_EDITOR_TOOL_GEOMETRY_CURVE;
+inline constexpr std::uint32_t kInteractionGeometryRectangle =
+    INKPOD_EDITOR_TOOL_GEOMETRY_RECTANGLE;
+inline constexpr std::uint32_t kInteractionGeometryEllipse =
+    INKPOD_EDITOR_TOOL_GEOMETRY_ELLIPSE;
+inline constexpr std::uint32_t kInteractionGeometryPolygon =
+    INKPOD_EDITOR_TOOL_GEOMETRY_POLYGON;
+inline constexpr std::uint32_t kInteractionGeometryPolyline =
+    INKPOD_EDITOR_TOOL_GEOMETRY_POLYLINE;
 
-bool IsVectorCanvasTool(std::uint32_t tool) noexcept;
-bool IsVectorStrokePlane(std::uint32_t kind) noexcept;
+bool IsGeometryCanvasTool(std::uint32_t tool) noexcept;
 bool IsGeometryCanvasPlane(std::uint32_t kind) noexcept;
-
-// All active-tool changes go through this boundary so leaving a vector,
-// selection, or ranged-fill tool cannot retain a geometry preview owned by the
-// prior interaction.
+// All active-tool changes go through this boundary so leaving a geometry,
+// selection, or ranged-fill tool cannot retain a preview owned by the prior
+// interaction.
 void TransitionActiveTool(
     app::ToolUiState& tools, HWND canvas, std::uint32_t next_tool) noexcept;
 
@@ -55,7 +58,7 @@ void SetActiveCommandColor(
 void HandleActivePlaneTransition(
     app::ToolUiState& tools, HWND canvas, std::uint32_t plane_kind) noexcept;
 
-void CancelVectorGeometryPreview(
+void CancelRasterGeometryPreview(
     app::ToolUiState& tools, HWND canvas) noexcept;
 
 void CancelSelectionGeometryPreview(

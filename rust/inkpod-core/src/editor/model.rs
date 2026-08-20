@@ -3,7 +3,6 @@
 use crate::{
     BrushShape, CoordinateSpace, DEFAULT_DPI_MILLI, FillOperation, InclusionMode, PixelValue,
     RangeInterpretation, SelectionOperation, StartColorPredicate, StrokeSample, TraceBrushShape,
-    VectorEraseMode, VectorSelectionMode,
 };
 use std::collections::BTreeMap;
 
@@ -54,7 +53,6 @@ impl EditorDefaults {
                 brush: EditorBrushOptions::default(),
                 fill: EditorFillOptions::default(),
                 selection: EditorSelectionOptions::default(),
-                vector: EditorVectorOptions::default(),
                 target: None,
                 edit_targets: Vec::new(),
                 palette_cursor: None,
@@ -107,6 +105,18 @@ pub enum EditorTool {
     ShootingFrame = 1_009,
     /// Persistent vanishing-point handle editor.
     VanishingPoint = 1_010,
+    /// Raster line geometry tool.
+    GeometryLine = 1_011,
+    /// Raster curve geometry tool.
+    GeometryCurve = 1_012,
+    /// Raster rectangle geometry tool.
+    GeometryRectangle = 1_013,
+    /// Raster ellipse geometry tool.
+    GeometryEllipse = 1_014,
+    /// Raster regular-polygon geometry tool.
+    GeometryPolygon = 1_015,
+    /// Raster polyline geometry tool.
+    GeometryPolyline = 1_016,
     /// Gradient effect command.
     EffectGradient = 1_101,
     /// Airbrush effect command.
@@ -119,24 +129,10 @@ pub enum EditorTool {
     EffectDust = 1_105,
     /// Alpha-gradient effect command.
     EffectAlphaGradient = 1_106,
-    /// Vector line command.
-    VectorLine = 1_201,
-    /// Vector curve command.
-    VectorCurve = 1_202,
-    /// Vector rectangle command.
-    VectorRectangle = 1_203,
-    /// Vector ellipse command.
-    VectorEllipse = 1_204,
-    /// Vector polyline command.
-    VectorPolyline = 1_205,
-    /// Vector eraser command.
-    VectorEraser = 1_206,
-    /// Regular polygon geometry command.
-    VectorPolygon = 1_207,
 }
 
 impl EditorTool {
-    pub(crate) const ALL: [Self; 26] = [
+    pub(crate) const ALL: [Self; 25] = [
         Self::Pencil,
         Self::Brush,
         Self::Eraser,
@@ -150,19 +146,18 @@ impl EditorTool {
         Self::ColorReplace,
         Self::ShootingFrame,
         Self::VanishingPoint,
+        Self::GeometryLine,
+        Self::GeometryCurve,
+        Self::GeometryRectangle,
+        Self::GeometryEllipse,
+        Self::GeometryPolygon,
+        Self::GeometryPolyline,
         Self::EffectGradient,
         Self::EffectAirbrush,
         Self::EffectBlur,
         Self::EffectStamp,
         Self::EffectDust,
         Self::EffectAlphaGradient,
-        Self::VectorLine,
-        Self::VectorCurve,
-        Self::VectorRectangle,
-        Self::VectorEllipse,
-        Self::VectorPolyline,
-        Self::VectorEraser,
-        Self::VectorPolygon,
     ];
 
     pub(crate) const fn consumes_color(self) -> bool {
@@ -174,12 +169,12 @@ impl EditorTool {
                 | Self::Selection
                 | Self::ColorReplace
                 | Self::EffectAirbrush
-                | Self::VectorLine
-                | Self::VectorCurve
-                | Self::VectorRectangle
-                | Self::VectorEllipse
-                | Self::VectorPolyline
-                | Self::VectorPolygon
+                | Self::GeometryLine
+                | Self::GeometryCurve
+                | Self::GeometryRectangle
+                | Self::GeometryEllipse
+                | Self::GeometryPolygon
+                | Self::GeometryPolyline
         )
     }
 
@@ -349,24 +344,6 @@ impl Default for EditorSelectionOptions {
     }
 }
 
-/// Core-owned vector erase, selection, and tool options.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct EditorVectorOptions {
-    /// Vector eraser hit behavior.
-    pub erase_mode: VectorEraseMode,
-    /// Vector selection hit behavior.
-    pub selection_mode: VectorSelectionMode,
-}
-
-impl Default for EditorVectorOptions {
-    fn default() -> Self {
-        Self {
-            erase_mode: VectorEraseMode::Partial,
-            selection_mode: VectorSelectionMode::Touching,
-        }
-    }
-}
-
 /// Stable active edit target in the current document namespace.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct EditorTarget {
@@ -382,7 +359,7 @@ pub struct EditorTarget {
 /// whole layer and therefore suppresses redundant child-plane targets.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum EditTarget {
-    /// One complete layer and all of its owned plane/vector content.
+    /// One complete layer and all of its owned planes.
     Layer(u64),
     /// One plane identified together with its owning layer.
     Plane(EditorTarget),
@@ -423,8 +400,6 @@ pub struct EditorState {
     pub fill: EditorFillOptions,
     /// Selection tool options.
     pub selection: EditorSelectionOptions,
-    /// Vector tool options.
-    pub vector: EditorVectorOptions,
     /// Stable active document target, absent only before a document exists.
     pub target: Option<EditorTarget>,
     /// Ordered, unique grouped edit targets, independent from the active target.
@@ -524,8 +499,6 @@ pub enum EditorStateUpdate {
     SetFillOptions(EditorFillOptions),
     /// Replaces selection options.
     SetSelectionOptions(EditorSelectionOptions),
-    /// Replaces vector options.
-    SetVectorOptions(EditorVectorOptions),
     /// Selects a stable active layer/plane pair.
     SetActiveTarget(EditorTarget),
     /// Replaces the grouped edit-target set after document-tree normalization.

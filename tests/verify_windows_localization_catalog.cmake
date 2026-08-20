@@ -43,6 +43,20 @@ foreach(GENERATED_FILE IN ITEMS
         message(FATAL_ERROR
             "generated localization artifact is stale: ${GENERATED_FILE}")
     endif()
+    foreach(DUPLICATED_CONTROL_ESCAPE IN ITEMS
+            [=[\t\u0009]=]
+            [=[\n\u000a]=]
+            [=[\r\u000d]=]
+            [=[\0\u0000]=])
+        string(FIND
+            "${GENERATED_CONTENT}"
+            "${DUPLICATED_CONTROL_ESCAPE}"
+            DUPLICATED_CONTROL_POSITION)
+        if(NOT DUPLICATED_CONTROL_POSITION LESS 0)
+            message(FATAL_ERROR
+                "generated localization artifact duplicates a control escape: ${GENERATED_FILE}")
+        endif()
+    endforeach()
 endforeach()
 
 file(READ "${RESOURCE_JA}" RESOURCE_JA_CONTENT)
@@ -367,11 +381,8 @@ foreach(REQUIRED_TOKEN IN ITEMS
         "PlaneKindBadgeLabelId"
         "UiStringId::PlaneBadgeMainLine"
         "UiStringId::PlaneBadgeColoring"
-        "UiStringId::PlaneBadgeColorTrace"
         "UiStringId::PlaneBadgeRaster"
         "UiStringId::PlaneBadgeSelection"
-        "UiStringId::PlaneBadgeVectorMainLine"
-        "UiStringId::PlaneBadgeVectorFill"
         "UiStringId::PlaneBadgeUnknown"
         "kLayerPalettePlaneBadgeTextFlags")
     string(FIND "${LAYER_PALETTE_SOURCE}" "${REQUIRED_TOKEN}" TOKEN_POSITION)
@@ -439,9 +450,7 @@ foreach(REQUIRED_TOKEN IN ITEMS
         "LayerPalettePlaneBadgeLayoutContract"
         "LayerPalettePlaneBadgeTextFits"
         "UiStringId::PlaneBadgeMainLine"
-        "UiStringId::PlaneBadgeColoring"
-        "UiStringId::PlaneBadgeColorTrace"
-        "UiStringId::PlaneBadgeVectorMainLine")
+        "UiStringId::PlaneBadgeColoring")
     string(FIND "${LOCALIZATION_TEST_SOURCE}" "${REQUIRED_TOKEN}" TOKEN_POSITION)
     if(TOKEN_POSITION LESS 0)
         message(FATAL_ERROR

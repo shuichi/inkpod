@@ -25,15 +25,6 @@ pub(super) fn resize_anchor_offset(
     })
 }
 
-pub(super) fn checked_dimension_milli(dimension: u32) -> Result<i32, CoreError> {
-    i32::try_from(dimension)
-        .ok()
-        .and_then(|value| value.checked_mul(1_000))
-        .ok_or(CoreError::InvalidArgument(
-            "document dimension exceeds vector coordinate range",
-        ))
-}
-
 pub(super) fn checked_scaled_i32(value: i32, scale: f64) -> Result<i32, CoreError> {
     let scaled = f64::from(value) * scale;
     if !scaled.is_finite() || scaled < f64::from(i32::MIN) || scaled > f64::from(i32::MAX) {

@@ -9,7 +9,7 @@ use inkpod_core::{
     BatchOutputPolicy, BatchOutputSettings, BatchPairExtraction, BatchRunOptions, BatchRunScope,
     BatchSeed, BatchSeparation, BatchSeparationDestination, BatchTargetSelector, DocumentResize,
     LayerKind, MirrorAxis, PixelFormat, PlaneType, ResizeAnchor, RotateDirection,
-    SequenceSourceIdentity, VectorWidthMode,
+    SequenceSourceIdentity,
 };
 use std::path::PathBuf;
 
@@ -29,7 +29,7 @@ pub const INKPOD_BATCH_OPERATION_COLOR_REPLACE: u32 = 1;
 pub const INKPOD_BATCH_OPERATION_CONTINUOUS_FILL: u32 = 2;
 pub const INKPOD_BATCH_OPERATION_SEPARATION: u32 = 3;
 pub const INKPOD_BATCH_OPERATION_VISIBILITY: u32 = 4;
-pub const INKPOD_BATCH_OPERATION_LINE_WIDTH: u32 = 5;
+// Operation code 5 is retired and intentionally remains unassigned.
 pub const INKPOD_BATCH_OPERATION_FILTER: u32 = 6;
 pub const INKPOD_BATCH_OPERATION_BOUNDARY_AIRBRUSH: u32 = 7;
 pub const INKPOD_BATCH_OPERATION_DUST_REMOVAL: u32 = 8;

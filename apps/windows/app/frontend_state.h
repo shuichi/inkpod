@@ -157,9 +157,6 @@ struct DocumentShellState {
     std::wstring recovery_original_path;
     std::uint64_t smoke_layer_id{};
     std::uint64_t selection_layer_id{};
-    std::uint64_t annotation_layer_id{};
-    std::uint64_t active_annotation_id{};
-    bool annotation_draw_active{};
 };
 
 // A workspace only retains a copied presentation of the Core-owned editor
@@ -223,28 +220,17 @@ struct ToolUiState {
     std::uint32_t selection_rotation_turns{};
     InkpodTraceBrushShape selection_trace_shape{INKPOD_TRACE_ROUND};
     std::vector<InkpodStrokeSample> selection_gesture_samples;
+    std::vector<InkpodStrokeSample> geometry_gesture_samples;
+    std::uint64_t geometry_base_revision{};
+    std::uint64_t geometry_view_revision{};
+    bool geometry_preview_active{};
+    bool geometry_snap_bypass{};
     InkpodColorValue color_replace_target{sizeof(InkpodColorValue)};
     InkpodSelectionShape color_replace_shape{INKPOD_SELECTION_TRACE};
     InkpodScopedColorReplaceMode color_replace_mode{INKPOD_COLOR_REPLACE_RASTER_COLOR};
     float color_replace_diameter{8.0F};
     std::uint64_t color_replace_base_revision{};
     std::vector<InkpodStrokeSample> color_replace_gesture_samples;
-    std::vector<InkpodStrokeSample> vector_gesture_samples;
-    std::vector<InkpodGeometryPoint> vector_geometry_points;
-    std::uint64_t vector_geometry_base_revision{};
-    std::uint64_t vector_geometry_view_revision{};
-    std::uint64_t vector_geometry_flags{INKPOD_GEOMETRY_OUTLINE};
-    std::uint32_t vector_geometry_polygon_sides{5U};
-    std::uint32_t vector_geometry_aspect_ratio_q16{};
-    std::uint32_t vector_geometry_rotation_turns{};
-    std::uint32_t vector_geometry_phase{};
-    DWORD vector_last_click_time{};
-    POINT vector_last_click_device{};
-    bool vector_geometry_preview_active{};
-    bool vector_geometry_snap_bypass{};
-    InkpodVectorEraseMode vector_erase_mode{INKPOD_VECTOR_ERASE_PARTIAL};
-    InkpodVectorSelectionMode vector_selection_mode{INKPOD_VECTOR_SELECT_TOUCHING};
-    std::vector<std::uint64_t> vector_selected_path_ids;
     InkpodShootingFrameInput shooting_frame_drag_value{
         sizeof(InkpodShootingFrameInput)};
     std::vector<InkpodStrokeSample> shooting_frame_gesture_samples;
@@ -274,9 +260,6 @@ struct ViewUiState {
     bool snap_guides{};
     bool snap_grid{};
     bool transparent_visible{true};
-    bool vector_antialias{true};
-    InkpodVectorCenterlineMode vector_centerline_mode{INKPOD_VECTOR_CENTERLINE_HIDDEN};
-    bool vector_endpoints_visible{};
     std::int32_t pointer_device_x{};
     std::int32_t pointer_device_y{};
     std::uint64_t locator_generation{};

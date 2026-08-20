@@ -9,7 +9,7 @@ impl Core {
     /// Mirrors all document content and document-space metadata about an axis.
     ///
     /// This is a destructive document transform, distinct from view flip. Success
-    /// is one undoable edit; any raster/vector failure is atomic.
+    /// is one undoable edit; any raster failure is atomic.
     pub fn mirror_document(&mut self, axis: MirrorAxis) -> Result<DispatchOutcome, CoreError> {
         if !self.canonical_invocation_is_active() {
             return self
@@ -53,27 +53,6 @@ impl Core {
                 _ => {}
             }
         }
-        let width_milli = checked_dimension_milli(after.width)?;
-        let height_milli = checked_dimension_milli(after.height)?;
-        after.vector.transform_coordinates(
-            |point| {
-                Ok(match axis {
-                    MirrorAxis::Horizontal => VectorFixedPoint {
-                        x_milli: width_milli.checked_sub(point.x_milli).ok_or(
-                            CoreError::InvalidArgument("mirrored vector point overflowed"),
-                        )?,
-                        y_milli: point.y_milli,
-                    },
-                    MirrorAxis::Vertical => VectorFixedPoint {
-                        x_milli: point.x_milli,
-                        y_milli: height_milli.checked_sub(point.y_milli).ok_or(
-                            CoreError::InvalidArgument("mirrored vector point overflowed"),
-                        )?,
-                    },
-                })
-            },
-            1.0,
-        )?;
         edit.commit(self)
     }
 
@@ -132,27 +111,6 @@ impl Core {
         };
         after.grid.spacing_x = old_grid.spacing_y;
         after.grid.spacing_y = old_grid.spacing_x;
-        let old_width_milli = checked_dimension_milli(before.width)?;
-        let old_height_milli = checked_dimension_milli(before.height)?;
-        after.vector.transform_coordinates(
-            |point| {
-                Ok(match direction {
-                    RotateDirection::Left90 => VectorFixedPoint {
-                        x_milli: point.y_milli,
-                        y_milli: old_width_milli.checked_sub(point.x_milli).ok_or(
-                            CoreError::InvalidArgument("rotated vector point overflowed"),
-                        )?,
-                    },
-                    RotateDirection::Right90 => VectorFixedPoint {
-                        x_milli: old_height_milli.checked_sub(point.y_milli).ok_or(
-                            CoreError::InvalidArgument("rotated vector point overflowed"),
-                        )?,
-                        y_milli: point.x_milli,
-                    },
-                })
-            },
-            1.0,
-        )?;
         after.width = before_size.height;
         after.height = before_size.width;
         after.dpi_x_milli = before.dpi_y_milli;
@@ -248,15 +206,6 @@ impl Core {
             after.grid.origin_y = checked_scaled_i32(after.grid.origin_y, scale.y)?;
             after.grid.spacing_x = checked_scaled_spacing(after.grid.spacing_x, scale.x)?;
             after.grid.spacing_y = checked_scaled_spacing(after.grid.spacing_y, scale.y)?;
-            after.vector.transform_coordinates(
-                |point| {
-                    Ok(VectorFixedPoint {
-                        x_milli: checked_scaled_i32(point.x_milli, scale.x)?,
-                        y_milli: checked_scaled_i32(point.y_milli, scale.y)?,
-                    })
-                },
-                (scale.x.abs() + scale.y.abs()) / 2.0,
-            )?;
         } else {
             let offset = resize_anchor_offset(before_size, after_size, resize.anchor)?;
             if let Some(frame) = &mut after.shooting_frame {
@@ -301,27 +250,6 @@ impl Core {
                     .ok_or(CoreError::InvalidArgument(
                         "translated grid origin overflowed",
                     ))?;
-            let offset_x_milli = offset
-                .x
-                .checked_mul(1_000)
-                .ok_or(CoreError::InvalidArgument("vector translation overflowed"))?;
-            let offset_y_milli = offset
-                .y
-                .checked_mul(1_000)
-                .ok_or(CoreError::InvalidArgument("vector translation overflowed"))?;
-            after.vector.transform_coordinates(
-                |point| {
-                    Ok(VectorFixedPoint {
-                        x_milli: point.x_milli.checked_add(offset_x_milli).ok_or(
-                            CoreError::InvalidArgument("translated vector point overflowed"),
-                        )?,
-                        y_milli: point.y_milli.checked_add(offset_y_milli).ok_or(
-                            CoreError::InvalidArgument("translated vector point overflowed"),
-                        )?,
-                    })
-                },
-                1.0,
-            )?;
         }
         after.guides.retain(|guide| {
             let limit = if guide.axis == GuideAxis::Vertical {

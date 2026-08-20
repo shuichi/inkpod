@@ -7,14 +7,13 @@ use super::bind::{
 use super::compile::{ScriptCompileError, ScriptSchemas, StaticScriptProgram, catalog};
 use super::report::{ScriptDryRunReport, ScriptResultValue, ScriptStatementOutcome};
 use crate::primitive::{
-    AnnotationFrameAdapterError, AnnotationFrameScriptStep, DocumentTreeAdapterError,
-    DocumentTreeScriptStep, FillGradientAdapterError, FillGradientScriptStep,
-    GestureAdjustmentAdapterError, GestureAdjustmentScriptAction, InkScriptEntityKind,
-    InkScriptRuntimeReferences, InvocationResult, LegacyImageAdapterError, LegacyImageScriptStep,
-    LegacySimpleAdapterError, LegacySimpleScriptStep, LightTableAdapterError,
-    LightTableScriptAction, MetadataColorGuideAdapterError, MetadataColorGuideScriptStep,
-    SelectionFloatingAdapterError, SelectionFloatingScriptAction, StrokeGeometryImportAction,
-    StrokeGeometryImportAdapterError, VectorAdapterError, VectorScriptStep,
+    DocumentTreeAdapterError, DocumentTreeScriptStep, FillGradientAdapterError,
+    FillGradientScriptStep, FrameAdapterError, FrameScriptStep, GestureAdjustmentAdapterError,
+    GestureAdjustmentScriptAction, InkScriptEntityKind, InkScriptRuntimeReferences,
+    InvocationResult, LegacyImageAdapterError, LegacyImageScriptStep, LegacySimpleAdapterError,
+    LegacySimpleScriptStep, LightTableAdapterError, LightTableScriptAction,
+    MetadataColorGuideAdapterError, MetadataColorGuideScriptStep, SelectionFloatingAdapterError,
+    SelectionFloatingScriptAction, StrokeGeometryImportAction, StrokeGeometryImportAdapterError,
 };
 use crate::{
     Core, CoreError, DocumentStateDigest, LayerKind, MAX_PERSISTENT_NUMERIC_ID, PixelFormat,
@@ -414,29 +413,17 @@ pub(super) fn run_inkscript_on_staged_core(
                         .output_entity_kinds(result.output_ids.len())
                         .map_err(selection_floating_adapter_error)?;
                     (Ok(result), output_kinds)
-                } else if is_vector(step.command()) {
-                    let invocation = VectorScriptStep::from_compiled(
+                } else if is_frame(step.command()) {
+                    let invocation = FrameScriptStep::from_compiled(
                         step,
                         &program.frozen_arguments[index],
                         &runtime_references,
                     )
-                    .map_err(vector_adapter_error)?;
+                    .map_err(frame_adapter_error)?;
                     let result = working.execute_canonical_invocation(invocation.to_canonical())?;
                     let output_kinds = invocation
                         .output_entity_kinds(result.output_ids.len())
-                        .map_err(vector_adapter_error)?;
-                    (Ok(result), output_kinds)
-                } else if is_annotation_frame(step.command()) {
-                    let invocation = AnnotationFrameScriptStep::from_compiled(
-                        step,
-                        &program.frozen_arguments[index],
-                        &runtime_references,
-                    )
-                    .map_err(annotation_frame_adapter_error)?;
-                    let result = working.execute_canonical_invocation(invocation.to_canonical())?;
-                    let output_kinds = invocation
-                        .output_entity_kinds(result.output_ids.len())
-                        .map_err(annotation_frame_adapter_error)?;
+                        .map_err(frame_adapter_error)?;
                     (Ok(result), output_kinds)
                 } else if is_light_table(step.command()) {
                     let action = LightTableScriptAction::from_compiled(
@@ -576,14 +563,8 @@ fn is_selection_floating(command: &str) -> bool {
         .any(|schema| schema.name() == command)
 }
 
-fn is_vector(command: &str) -> bool {
-    crate::primitive::inkscript_vector::VECTOR_COMMANDS
-        .iter()
-        .any(|schema| schema.name() == command)
-}
-
-fn is_annotation_frame(command: &str) -> bool {
-    crate::primitive::inkscript_annotation_frame::ANNOTATION_FRAME_COMMANDS
+fn is_frame(command: &str) -> bool {
+    crate::primitive::inkscript_frame::FRAME_COMMANDS
         .iter()
         .any(|schema| schema.name() == command)
 }
@@ -691,18 +672,10 @@ fn selection_floating_adapter_error(error: SelectionFloatingAdapterError) -> Scr
     }
 }
 
-fn vector_adapter_error(error: VectorAdapterError) -> ScriptRunError {
+fn frame_adapter_error(error: FrameAdapterError) -> ScriptRunError {
     match error {
-        VectorAdapterError::MissingReference => ScriptRunError::MissingResult,
-        VectorAdapterError::ResourceLimit => ScriptRunError::ResourceLimit,
-        _ => ScriptRunError::InvalidStep,
-    }
-}
-
-fn annotation_frame_adapter_error(error: AnnotationFrameAdapterError) -> ScriptRunError {
-    match error {
-        AnnotationFrameAdapterError::MissingReference => ScriptRunError::MissingResult,
-        AnnotationFrameAdapterError::ResourceLimit => ScriptRunError::ResourceLimit,
+        FrameAdapterError::MissingReference => ScriptRunError::MissingResult,
+        FrameAdapterError::ResourceLimit => ScriptRunError::ResourceLimit,
         _ => ScriptRunError::InvalidStep,
     }
 }
@@ -851,58 +824,6 @@ pub(super) fn initial_snapshot(core: &Core) -> Result<InkScriptInitialDocumentSn
             properties,
         });
     }
-    for path in core.vector_paths()? {
-        entities.push(InkScriptEntitySnapshot {
-            reference: InkScriptEntityReference {
-                entity: "vector_path".to_owned(),
-                persistent_id: path.id,
-            },
-            owner: Some(InkScriptEntityReference {
-                entity: "plane".to_owned(),
-                persistent_id: path.plane_id,
-            }),
-            properties: BTreeMap::new(),
-        });
-    }
-    for fill in core.vector_fills()? {
-        entities.push(InkScriptEntitySnapshot {
-            reference: InkScriptEntityReference {
-                entity: "vector_fill".to_owned(),
-                persistent_id: fill.id,
-            },
-            owner: Some(InkScriptEntityReference {
-                entity: "plane".to_owned(),
-                persistent_id: fill.plane_id,
-            }),
-            properties: BTreeMap::new(),
-        });
-    }
-    for annotation in core.annotation_objects()? {
-        let mut properties = BTreeMap::new();
-        properties.insert(
-            "kind".to_owned(),
-            InkScriptComparableValue::Enum(
-                match annotation.kind {
-                    crate::AnnotationKind::Text => "text",
-                    crate::AnnotationKind::Stroke => "stroke",
-                    crate::AnnotationKind::Leader => "leader",
-                    crate::AnnotationKind::Value => "value",
-                }
-                .to_owned(),
-            ),
-        );
-        entities.push(InkScriptEntitySnapshot {
-            reference: InkScriptEntityReference {
-                entity: "annotation".to_owned(),
-                persistent_id: annotation.id,
-            },
-            owner: Some(InkScriptEntityReference {
-                entity: "layer".to_owned(),
-                persistent_id: annotation.layer_id,
-            }),
-            properties,
-        });
-    }
     if let Some(frame) = core.shooting_frame()? {
         entities.push(InkScriptEntitySnapshot {
             reference: InkScriptEntityReference {
@@ -1024,9 +945,6 @@ fn layer_kind(value: LayerKind) -> &'static str {
         LayerKind::Frame => "frame",
         LayerKind::VanishingPoint => "vanishing_point",
         LayerKind::Adjustment => "adjustment",
-        LayerKind::Text => "text",
-        LayerKind::Annotation => "annotation",
-        LayerKind::VectorColoring => "vector_coloring",
     }
 }
 
@@ -1036,9 +954,6 @@ fn plane_kind(value: PlaneType) -> &'static str {
         PlaneType::Color => "color",
         PlaneType::Raster => "raster",
         PlaneType::Selection => "selection",
-        PlaneType::VectorMainLine => "vector_main_line",
-        PlaneType::ColorTrace => "color_trace",
-        PlaneType::VectorFill => "vector_fill",
     }
 }
 
@@ -1080,9 +995,6 @@ fn materialize_results(
                     "layers" => InkScriptEntityKind::Layer,
                     "planes" => InkScriptEntityKind::Plane,
                     "guides" => InkScriptEntityKind::Guide,
-                    "paths" => InkScriptEntityKind::VectorPath,
-                    "fills" => InkScriptEntityKind::VectorFill,
-                    "annotations" => InkScriptEntityKind::Annotation,
                     "shooting_frames" => InkScriptEntityKind::ShootingFrame,
                     "vanishing_points" => InkScriptEntityKind::VanishingPoint,
                     "set" => InkScriptEntityKind::LightTableSet,

@@ -179,7 +179,6 @@ foreach(required_smoke IN ITEMS
         "RunPaintingRecoverySmoke"
         "RunDocumentEditingSmoke"
         "RunProductionWorkflowSmoke"
-        "RunVectorWorkflowSmoke"
         "RunImageEffectsSmoke"
         "RunBatchWorkflowSmoke"
         "RunLightTablePaneSmoke")
@@ -299,6 +298,30 @@ foreach(forbidden_runtime_token IN ITEMS
         message(FATAL_ERROR
             "MainWindow runtime contains bootstrap/smoke responsibility: "
             "${forbidden_runtime_token}")
+    endif()
+endforeach()
+
+foreach(required_raster_geometry_token IN ITEMS
+        "HandleRasterGeometryCanvasEvent"
+        "inkpod_core_geometry_points_resolve"
+        "inkpod_core_geometry_preview_begin"
+        "inkpod_core_geometry_preview_update"
+        "inkpod_core_geometry_preview_commit"
+        "inkpod_core_geometry_preview_cancel"
+        "IDM_GEOMETRY_LINE"
+        "IDM_GEOMETRY_CURVE"
+        "IDM_GEOMETRY_RECTANGLE"
+        "IDM_GEOMETRY_ELLIPSE"
+        "IDM_GEOMETRY_POLYGON"
+        "IDM_GEOMETRY_POLYLINE")
+    string(FIND
+        "${runtime_text}"
+        "${required_raster_geometry_token}"
+        raster_geometry_offset)
+    if(raster_geometry_offset LESS 0)
+        message(FATAL_ERROR
+            "MainWindow runtime lost Raster Geometry route: "
+            "${required_raster_geometry_token}")
     endif()
 endforeach()
 

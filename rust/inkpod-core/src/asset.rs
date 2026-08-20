@@ -54,8 +54,6 @@ impl AssetId {
 pub enum AssetKind {
     /// A tightly packed, top-to-bottom canonical raster.
     CanonicalRaster,
-    /// A primitive-schema-defined ordered vector record stream.
-    CanonicalVectorStream,
     /// A primitive-schema-defined ordered input-sample stream.
     CanonicalSampleStream,
 }
@@ -64,7 +62,6 @@ impl AssetKind {
     const fn code(self) -> u32 {
         match self {
             Self::CanonicalRaster => 1,
-            Self::CanonicalVectorStream => 2,
             Self::CanonicalSampleStream => 3,
         }
     }
@@ -108,7 +105,7 @@ impl AssetAlphaSemantics {
 
 /// Canonical metadata included in an immutable asset's content identity.
 ///
-/// Raster assets have every optional raster field present. Vector and sample
+/// Raster assets have every optional raster field present. Sample
 /// streams have all raster-specific fields absent and define their element
 /// records in the primitive schema that references them.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -202,15 +199,14 @@ impl RasterAssetInput {
     }
 }
 
-/// Owned canonical bytes for a vector or input-sample stream asset.
+/// Owned canonical bytes for an input-sample stream asset.
 ///
 /// The referencing primitive schema defines and validates individual element
 /// records before ingestion. The store enforces the common count, byte, and
 /// identity bounds and retains no caller-owned memory.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CanonicalStreamInput {
-    /// Either [`AssetKind::CanonicalVectorStream`] or
-    /// [`AssetKind::CanonicalSampleStream`].
+    /// Must be [`AssetKind::CanonicalSampleStream`].
     pub kind: AssetKind,
     /// Number of canonical records in `payload`.
     pub element_count: u64,
@@ -320,13 +316,12 @@ impl AssetStore {
                 pixels: payload,
                 expected_id: Some(id),
             })?,
-            AssetKind::CanonicalVectorStream | AssetKind::CanonicalSampleStream => self
-                .ingest_stream(CanonicalStreamInput {
-                    kind: descriptor.kind,
-                    element_count: descriptor.logical_element_count,
-                    payload,
-                    expected_id: Some(id),
-                })?,
+            AssetKind::CanonicalSampleStream => self.ingest_stream(CanonicalStreamInput {
+                kind: descriptor.kind,
+                element_count: descriptor.logical_element_count,
+                payload,
+                expected_id: Some(id),
+            })?,
         };
         if record.descriptor() != descriptor {
             return Err(CoreError::Format(
@@ -527,13 +522,14 @@ impl AssetStore {
                     pixels: payload,
                     expected_id: Some(id),
                 })?,
-                AssetKind::CanonicalVectorStream | AssetKind::CanonicalSampleStream => detached
-                    .ingest_stream(CanonicalStreamInput {
+                AssetKind::CanonicalSampleStream => {
+                    detached.ingest_stream(CanonicalStreamInput {
                         kind: descriptor.kind,
                         element_count: descriptor.logical_element_count,
                         payload,
                         expected_id: Some(id),
-                    })?,
+                    })?
+                }
             };
             if record.descriptor() != descriptor || record.payload() != source.payload() {
                 return Err(CoreError::InvalidState(
@@ -672,10 +668,7 @@ fn validate_raster_input(input: &RasterAssetInput) -> Result<AssetDescriptor, Co
 }
 
 fn validate_stream_input(input: &CanonicalStreamInput) -> Result<AssetDescriptor, CoreError> {
-    if !matches!(
-        input.kind,
-        AssetKind::CanonicalVectorStream | AssetKind::CanonicalSampleStream
-    ) {
+    if input.kind != AssetKind::CanonicalSampleStream {
         return Err(CoreError::InvalidArgument(
             "canonical stream asset kind is invalid",
         ));
@@ -1177,19 +1170,19 @@ mod tests {
                 expected_id: None,
             },
             CanonicalStreamInput {
-                kind: AssetKind::CanonicalVectorStream,
+                kind: AssetKind::CanonicalSampleStream,
                 element_count: MAX_STREAM_ELEMENTS + 1,
                 payload: vec![1],
                 expected_id: None,
             },
             CanonicalStreamInput {
-                kind: AssetKind::CanonicalVectorStream,
+                kind: AssetKind::CanonicalSampleStream,
                 element_count: 0,
                 payload: vec![1],
                 expected_id: None,
             },
             CanonicalStreamInput {
-                kind: AssetKind::CanonicalVectorStream,
+                kind: AssetKind::CanonicalSampleStream,
                 element_count: 1,
                 payload: Vec::new(),
                 expected_id: None,
@@ -1202,7 +1195,7 @@ mod tests {
         store.logical_payload_bytes = MAX_TOTAL_ASSET_BYTES;
         assert!(matches!(
             store.ingest_stream(CanonicalStreamInput {
-                kind: AssetKind::CanonicalVectorStream,
+                kind: AssetKind::CanonicalSampleStream,
                 element_count: 1,
                 payload: vec![9],
                 expected_id: None,
@@ -1219,7 +1212,7 @@ mod tests {
         let mut store = AssetStore::default();
         let retained = store
             .ingest_stream(CanonicalStreamInput {
-                kind: AssetKind::CanonicalVectorStream,
+                kind: AssetKind::CanonicalSampleStream,
                 element_count: 1,
                 payload: vec![1],
                 expected_id: None,
@@ -1227,7 +1220,7 @@ mod tests {
             .unwrap();
         let collected = store
             .ingest_stream(CanonicalStreamInput {
-                kind: AssetKind::CanonicalVectorStream,
+                kind: AssetKind::CanonicalSampleStream,
                 element_count: 1,
                 payload: vec![2],
                 expected_id: None,
@@ -1284,7 +1277,7 @@ mod tests {
             .unwrap();
         let unrooted = source
             .ingest_stream(CanonicalStreamInput {
-                kind: AssetKind::CanonicalVectorStream,
+                kind: AssetKind::CanonicalSampleStream,
                 element_count: 1,
                 payload: vec![13],
                 expected_id: None,

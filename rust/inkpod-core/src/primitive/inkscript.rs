@@ -233,7 +233,7 @@ impl LegacySimpleScriptStep {
     ) -> Result<Self, LegacySimpleAdapterError> {
         let (command, binding, arguments) = lift_arguments(invocation)?;
         let mut source = String::from(
-            "inkscript_fragment 2;\nrequires { procedure_catalog = 2; replay_epoch = 23; }\n",
+            "inkscript_fragment 2;\nrequires { procedure_catalog = 3; replay_epoch = 24; }\n",
         );
         let mut bindings = InkScriptRuntimeReferences::default();
         if let Some((entity, persistent_id)) = binding {
@@ -246,10 +246,7 @@ impl LegacySimpleScriptStep {
                 InkScriptEntityKind::Guide => {
                     return Err(LegacySimpleAdapterError::UnsupportedPrimitive);
                 }
-                InkScriptEntityKind::VectorPath
-                | InkScriptEntityKind::VectorFill
-                | InkScriptEntityKind::Annotation
-                | InkScriptEntityKind::ShootingFrame
+                InkScriptEntityKind::ShootingFrame
                 | InkScriptEntityKind::VanishingPoint
                 | InkScriptEntityKind::LightTableSet
                 | InkScriptEntityKind::LightTableItem => {
@@ -605,9 +602,6 @@ fn plane_kind(value: &InkScriptTypedValue) -> Result<PlaneType, LegacySimpleAdap
         "color" => Ok(PlaneType::Color),
         "raster" => Ok(PlaneType::Raster),
         "selection" => Ok(PlaneType::Selection),
-        "vector_main_line" => Ok(PlaneType::VectorMainLine),
-        "color_trace" => Ok(PlaneType::ColorTrace),
-        "vector_fill" => Ok(PlaneType::VectorFill),
         _ => Err(LegacySimpleAdapterError::InvalidValue),
     }
 }
@@ -632,9 +626,6 @@ fn layer_kind(value: &InkScriptTypedValue) -> Result<LayerKind, LegacySimpleAdap
         "frame" => Ok(LayerKind::Frame),
         "vanishing_point" => Ok(LayerKind::VanishingPoint),
         "adjustment" => Ok(LayerKind::Adjustment),
-        "text" => Ok(LayerKind::Text),
-        "annotation" => Ok(LayerKind::Annotation),
-        "vector_coloring" => Ok(LayerKind::VectorColoring),
         _ => Err(LegacySimpleAdapterError::InvalidValue),
     }
 }
@@ -728,9 +719,6 @@ const fn plane_kind_name(value: PlaneType) -> &'static str {
         PlaneType::Color => "color",
         PlaneType::Raster => "raster",
         PlaneType::Selection => "selection",
-        PlaneType::VectorMainLine => "vector_main_line",
-        PlaneType::ColorTrace => "color_trace",
-        PlaneType::VectorFill => "vector_fill",
     }
 }
 
@@ -754,9 +742,6 @@ const fn layer_kind_name(value: LayerKind) -> &'static str {
         LayerKind::Frame => "frame",
         LayerKind::VanishingPoint => "vanishing_point",
         LayerKind::Adjustment => "adjustment",
-        LayerKind::Text => "text",
-        LayerKind::Annotation => "annotation",
-        LayerKind::VectorColoring => "vector_coloring",
     }
 }
 
@@ -962,7 +947,7 @@ mod tests {
 
     #[test]
     fn unknown_field_type_enum_and_format_mismatch_are_rejected() {
-        let prefix = "inkscript_fragment 2; requires { procedure_catalog = 2; replay_epoch = 23; }";
+        let prefix = "inkscript_fragment 2; requires { procedure_catalog = 3; replay_epoch = 24; }";
         let unknown_field = format!(
             "{prefix} program {{ step \"Bad\" {{ enabled = true; invoke mirror_document {{ axis = horizontal; extra = true; }}; }} }}"
         );

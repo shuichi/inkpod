@@ -1324,7 +1324,6 @@ fn format_error(message: &'static str) -> CoreError {
 fn asset_kind_code(kind: AssetKind) -> u32 {
     match kind {
         AssetKind::CanonicalRaster => 1,
-        AssetKind::CanonicalVectorStream => 2,
         AssetKind::CanonicalSampleStream => 3,
     }
 }
@@ -1332,7 +1331,6 @@ fn asset_kind_code(kind: AssetKind) -> u32 {
 fn decode_asset_kind(value: u32) -> Result<AssetKind, CoreError> {
     match value {
         1 => Ok(AssetKind::CanonicalRaster),
-        2 => Ok(AssetKind::CanonicalVectorStream),
         3 => Ok(AssetKind::CanonicalSampleStream),
         _ => Err(format_error("ASST asset kind is invalid")),
     }

@@ -380,7 +380,7 @@
             <li><a href="#workspace">5. 画面とワークスペース</a></li>
             <li><a href="#menus">6. メニューリファレンス</a></li>
             <li><a href="#panes">7. ペインリファレンス</a></li>
-            <li><a href="#tools">8. 描画・選択・ベクターツール</a></li>
+            <li><a href="#tools">8. 描画・選択・図形ツール</a></li>
             <li><a href="#color">9. カラー、パレット、カラーチャート</a></li>
             <li><a href="#layers">10. レイヤーとプレーン</a></li>
             <li><a href="#animation">11. ライトテーブル、連番、サブパレット、モーションチェック</a></li>
@@ -410,7 +410,7 @@
           <li><a href="#workspace">5. 画面とワークスペース</a></li>
           <li><a href="#menus">6. メニューリファレンス</a></li>
           <li><a href="#panes">7. ペインリファレンス</a></li>
-          <li><a href="#tools">8. 描画・選択・ベクターツール</a></li>
+          <li><a href="#tools">8. 描画・選択・図形ツール</a></li>
           <li><a href="#color">9. カラー、パレット、カラーチャート</a></li>
           <li><a href="#layers">10. レイヤーとプレーン</a></li>
           <li><a href="#animation">11. ライトテーブル、連番、サブパレット、モーションチェック</a></li>
@@ -490,7 +490,7 @@
                 <thead><tr><th>位置</th><th>領域</th><th>役割</th></tr></thead>
                 <tbody>
                   <tr><td>上端</td><td>メニューバー／ツールオプション</td><td>すべてのコマンドと、選択ツールに応じた設定を表示します。</td></tr>
-                  <tr><td>左</td><td>ツールパレット</td><td>20個の描画・彩色・修正ツールを切り替えます。</td></tr>
+                  <tr><td>左</td><td>ツールパレット</td><td>14個の描画・彩色・修正ツールを切り替えます。</td></tr>
                   <tr><td>中央</td><td>文書タブ／Canvas</td><td>文書や追加ビューを切り替え、実際に描画します。</td></tr>
                   <tr><td>右</td><td>カラー／レイヤー／プレーン</td><td>描画色と編集対象、表示・編集可否を管理します。</td></tr>
                   <tr><td>下端</td><td>ステータスバー</td><td>ツール、対象プレーン、座標、倍率、色、選択、処理、未保存状態、ショートカット入力待ちを表示します。</td></tr>
@@ -543,9 +543,6 @@
             <div class="card search-unit" id="term-selection" data-search="selection mask 選択範囲">
               <h3>選択範囲</h3><p>処理を適用する範囲を示すマスクです。描画、フィルター、変形などを選択の内側へ限定できます。</p>
             </div>
-            <div class="card search-unit" id="term-annotation" data-search="annotation text instruction 注釈 テキスト 指示">
-              <h3>テキスト／指示注釈</h3><p>文字や手描き線で制作指示を残す、安定ID付きの非破壊オブジェクトです。通常の平坦画像には含めず、指示画像へ明示的に書き出せます。</p>
-            </div>
             <div class="card search-unit" id="term-shooting-frame" data-search="shooting frame angled capture 撮影フレーム 角度">
               <h3>撮影フレーム</h3><p>中心、幅、高さ、角度を持つ任意の撮影範囲です。プロパティ入力とCanvas上の5ハンドルで編集できます。</p>
             </div>
@@ -584,7 +581,7 @@
             <ul>
               <li><strong>メニューバー:</strong> すべての利用者向けコマンドへ到達できます。項目には現在のショートカットが表示され、実行できない状況では無効になります。</li>
               <li><strong>ツールオプション:</strong> 選択中ツール名、ブラシ／消しゴムの太さ、消しゴムの対象「主線／彩色」、詳細設定ボタンを表示します。</li>
-              <li><strong>ツールパレット:</strong> 20個のツールを一列で表示し、選択中ツールを視覚的に示します。狭い場合は縦スクロールできます。</li>
+              <li><strong>ツールパレット:</strong> 14個のツールを一列で表示し、選択中ツールを視覚的に示します。狭い場合は縦スクロールできます。</li>
               <li><strong>Canvas:</strong> 文書を描画する中心領域です。倍率、パン、表示反転はビュー固有で、画像データそのものは変えません。</li>
               <li><strong>文書タブ:</strong> セル名やファイル名、追加ビュー番号、未保存状態を示します。</li>
               <li><strong>ステータスバー:</strong> 現在の対象と、処理・ショートカット入力待ちを確認する最後の手掛かりです。</li>
@@ -688,9 +685,6 @@
               <li class="search-unit"><div class="command-name">表示 › ガイド › すべて削除 <span class="tag caution">注意</span></div><div class="command-desc">文書の全ガイドを削除します。画像ピクセルは変えません。</div></li>
               <li class="search-unit"><div class="command-name">表示 › グリッド設定...</div><div class="command-desc">グリッド間隔、分割、原点などを設定します。キャンセルでは現在設定を維持します。</div></li>
               <li class="search-unit"><div class="command-name">表示 › 透明部分</div><div class="command-desc">透明領域の表示を切り替えます。アルファ値や書き出し結果自体は変更しません。<span class="tag view">表示のみ</span></div></li>
-              <li class="search-unit"><div class="command-name">表示 › アンチエイリアス表示</div><div class="command-desc">ベクター輪郭のアンチエイリアス表示を切り替えます。ベクターデータ自体は変更しません。<span class="tag view">表示のみ</span></div></li>
-              <li class="search-unit"><div class="command-name">表示 › 中心線表示／中心線チェック</div><div class="command-desc">ベクター線の中心線を通常表示へ重ねるか、中心線だけの確認表示へ切り替えます。<span class="tag view">表示のみ</span></div></li>
-              <li class="search-unit"><div class="command-name">表示 › 端点表示</div><div class="command-desc">ベクターパスの端点を表示して、線つなぎや線消去前の確認に使います。<span class="tag view">表示のみ</span></div></li>
             </ul></div>
           </details>
 
@@ -709,7 +703,7 @@
               <li class="search-unit"><div class="command-name">セル › 画像解像度...</div><div class="command-desc">物理寸法、DPI、ピクセル数、再サンプルの有無を設定します。再サンプルなしではピクセル数を変えません。</div></li>
               <li class="search-unit"><div class="command-name">セル › 鏡像 › 水平方向 <span class="tag undo">Undo可</span></div><div class="command-desc">全文書の実データと関連座標を左右反転します。「表示を左右反転」と異なり保存結果も変わります。</div></li>
               <li class="search-unit"><div class="command-name">セル › 鏡像 › 垂直方向 <span class="tag undo">Undo可</span></div><div class="command-desc">全文書の実データと関連座標を上下反転します。</div></li>
-              <li class="search-unit"><div class="command-name">セル › 回転 › 左90度 <span class="tag undo">Undo可</span></div><div class="command-desc">全文書の画像、ベクター、選択、フレーム、ガイドを左へ90度回転します。</div></li>
+              <li class="search-unit"><div class="command-name">セル › 回転 › 左90度 <span class="tag undo">Undo可</span></div><div class="command-desc">全文書のラスター画像、選択、フレーム、ガイドを左へ90度回転します。</div></li>
               <li class="search-unit"><div class="command-name">セル › 回転 › 右90度 <span class="tag undo">Undo可</span></div><div class="command-desc">全文書の関連データを右へ90度回転します。</div></li>
               <li class="search-unit"><div class="command-name">セル › フレーム設定 › 100フレーム...</div><div class="command-desc">制作基準となる100フレームの物理寸法、DPI、ピクセル寸法を設定します。</div></li>
               <li class="search-unit"><div class="command-name">セル › フレーム設定 › 基準フレーム...</div><div class="command-desc">異なる用紙や参照画像を重ねる位置合わせ基準を設定します。</div></li>
@@ -729,11 +723,6 @@
               <li class="search-unit"><div class="command-name">セル › レイヤー › 変換...</div><div class="command-desc">選択レイヤーを別の対応種類へ変換します。表現できない情報がある場合は内容を確認してから確定します。</div></li>
               <li class="search-unit"><div class="command-name">セル › レイヤー › 同種を統合 <span class="tag caution">注意</span></div><div class="command-desc">互換性のある同種レイヤーを順序に従って統合します。異種または統合できない構成では無効です。</div></li>
               <li class="search-unit"><div class="command-name">セル › レイヤー › プロパティ...</div><div class="command-desc">選択レイヤーの名前、種類、状態など確認可能な属性を表示・編集します。</div></li>
-              <li class="search-unit"><div class="command-name">セル › レイヤー › テキスト／指示 › テキストを追加...／選択テキストを編集...</div><div class="command-desc">テキスト注釈の文字列、位置、書式等を作成・編集します。日本語を含むUTF-8文字列を保持し、フォントがない場合はWindows側で代替表示します。</div></li>
-              <li class="search-unit"><div class="command-name">セル › レイヤー › テキスト／指示 › 手描き指示モード</div><div class="command-desc">Canvas入力を通常描画ではなく指示ストロークとして記録するモードへ切り替えます。開始から終了までが一回のUndo単位です。</div></li>
-              <li class="search-unit"><div class="command-name">セル › レイヤー › テキスト／指示 › 前／次の注釈を選択</div><div class="command-desc">安定ID順に注釈の選択を移動します。選択ハンドルとステータスで対象を確認できます。</div></li>
-              <li class="search-unit"><div class="command-name">セル › レイヤー › テキスト／指示 › 選択注釈を左／右へ</div><div class="command-desc">注釈の重なり順を一段移動します。画像レイヤー／プレーンの順序は変更しません。</div></li>
-              <li class="search-unit"><div class="command-name">セル › レイヤー › テキスト／指示 › 選択注釈を削除 <span class="tag undo">Undo可</span></div><div class="command-desc">選択中の注釈だけを削除します。注釈が選択されていない場合は無効です。</div></li>
               <li class="search-unit"><div class="command-name">セル › プレーン › 主線</div><div class="command-desc">選択中レイヤーの主線プレーンを編集対象にします。存在しない／編集不可なら無効です。</div></li>
               <li class="search-unit"><div class="command-name">セル › プレーン › 彩色</div><div class="command-desc">選択中レイヤーの彩色プレーンを編集対象にします。</div></li>
               <li class="search-unit"><div class="command-name">セル › プレーン › 新規...</div><div class="command-desc">プレーン種類と形式（2値、グレースケール、RGBA等）を選んで追加します。レイヤーに使えない組み合わせは確定されず、画面を開いたままエラー表示します。</div></li>
@@ -795,7 +784,7 @@
               <li class="search-unit"><div class="command-name">フィルタ › 色相・彩度・明度...</div><div class="command-desc">HSVの各値を調整してプレビューします。</div></li>
               <li class="search-unit"><div class="command-name">フィルタ › カラーバランス...</div><div class="command-desc">色の偏りを調整します。確定まで元画像へ累積適用しません。</div></li>
               <li class="search-unit"><div class="command-name">フィルタ › アンシャープマスク...</div><div class="command-desc">半径、量、しきい値を指定して輪郭を強調します。</div></li>
-              <li class="search-unit"><div class="command-name">フィルタ › ゴミ取り...</div><div class="command-desc">選択またはプレーン全体の小点／小穴／異色小領域を一括処理します。必要な線を消す可能性があるためプレビューを確認します。ベクターでは無効です。</div></li>
+              <li class="search-unit"><div class="command-name">フィルタ › ゴミ取り...</div><div class="command-desc">選択またはラスター全体の小点／小穴／異色小領域を一括処理します。必要な線を消す可能性があるためプレビューを確認します。</div></li>
               <li class="search-unit"><div class="command-name">フィルタ › 調整レイヤーを作成...</div><div class="command-desc">元ピクセルを変えず、明るさ・コントラスト、レベル、トーンカーブ等の調整を持つレイヤーを作ります。</div></li>
               <li class="search-unit"><div class="command-name">フィルタ › 前の調整レイヤーを選択</div><div class="command-desc">レイヤー順で前の調整レイヤーを選びます。候補がなければ無効です。</div></li>
               <li class="search-unit"><div class="command-name">フィルタ › 次の調整レイヤーを選択</div><div class="command-desc">レイヤー順で次の調整レイヤーを選びます。</div></li>
@@ -805,10 +794,10 @@
             </ul></div>
           </details>
 
-          <details class="reference search-unit" id="menu-tools" open data-search="ツール tool pencil brush eraser fill eyedropper vector gradient airbrush blur stamp dust alpha">
+          <details class="reference search-unit" id="menu-tools" open data-search="ツール tool pencil brush eraser fill eyedropper raster geometry gradient airbrush blur stamp dust alpha">
             <summary>ツール</summary>
             <div class="details-body"><ul class="command-list">
-              <li class="search-unit"><div class="command-name">ツール › 鉛筆 <kbd>P</kbd></div><div class="command-desc">硬い線を描きます。ベクター彩色レイヤーでは使用できません。開始色と同じならストローク全体を消去にする自動消去を使えます。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › 鉛筆 <kbd>P</kbd></div><div class="command-desc">ラスターへ硬い線を描きます。開始色と同じならストローク全体を消去にする自動消去を使えます。</div></li>
               <li class="search-unit"><div class="command-name">ツール › ブラシ <kbd>B</kbd></div><div class="command-desc">丸／角、太さ、筆圧、平滑化などを使う描画ツールです。適合する編集可能プレーンが必要です。</div></li>
               <li class="search-unit"><div class="command-name">ツール › 消しゴム <kbd>E</kbd></div><div class="command-desc">ツールオプションで明示された「主線／彩色」対象を消します。ツールを選んだだけでは対象を自動変更しません。</div></li>
               <li class="search-unit"><div class="command-name">ツール › フィル <kbd>F</kbd></div><div class="command-desc">クリック位置と許容差内で連結する領域を塗ります。成功時は実際に塗ったプレーンが選択され、0ピクセル、失敗、キャンセルでは対象選択を変えません。</div></li>
@@ -816,33 +805,20 @@
               <li class="search-unit"><div class="command-name">ツール › 塗りのばし <kbd>X</kbd></div><div class="command-desc">既存色をドラッグ方向の狭い未着色領域へ広げます。</div></li>
               <li class="search-unit"><div class="command-name">ツール › フィル設定...</div><div class="command-desc">操作、許容差、隙間、のばし距離、含み塗り、最大6対象色、あふれ中断、離れた同色、透明だけ、選択制限、ライトテーブル境界／色を設定します。</div></li>
               <li class="search-unit"><div class="command-name">ツール › スポイト <kbd>I</kbd></div><div class="command-desc">指定した参照元から色を採取し、直前の色付きツールの描画色へ設定します。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › ベクター描画 › 直線</div><div class="command-desc">開始点から終点へドラッグし、離したときに直線を確定します。ベクタープレーンが必要です。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › ベクター描画 › 曲線</div><div class="command-desc">始終点を指定後、制御点を調整してクリックで曲線を確定します。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › ベクター描画 › 長方形</div><div class="command-desc">ドラッグ範囲へベクター長方形を作ります。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › ベクター描画 › 楕円</div><div class="command-desc">ドラッグ範囲へベクター楕円を作ります。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › ベクター描画 › 折れ線</div><div class="command-desc">クリックで頂点を増やし、ダブルクリックで終了します。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › ベクター描画 › ベクター消しゴム</div><div class="command-desc">選択中のベクター消去モードに従って線を消します。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › ベクター消去モード › 触れた部分</div><div class="command-desc">消しゴムが触れた区間だけを切り取ります。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › ベクター消去モード › 交点まで</div><div class="command-desc">触れた位置から近い交点までの線を消します。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › ベクター消去モード › 線全体</div><div class="command-desc">触れたベクターパス全体を消します。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › 線つなぎ...</div><div class="command-desc">選択範囲内の近い端点を距離・角度に基づいて接続します。誤接続を確認し、確定後は一回のUndoで戻せます。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › 線幅修正...</div><div class="command-desc">太く／細く、倍率、一定幅などを対象形式に応じて適用します。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › ベクター選択 › 選択範囲で切断</div><div class="command-desc">選択境界でベクター線を切断します。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › ベクター選択 › 一部でも触れる線</div><div class="command-desc">選択に一部でも触れるベクター線を対象にします。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › ベクター選択 › 完全に含まれる線</div><div class="command-desc">選択の内側に完全に収まる線だけを対象にします。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › ベクター選択 › 線を選択</div><div class="command-desc">Canvasで指した線をベクター編集対象にします。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › ベクター選択 › 線全体</div><div class="command-desc">指したパス全体を選択します。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › ベクター選択 › 交点まで</div><div class="command-desc">指した区間から交点までを選択します。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › ベクター選択 › 塗りを囲む線</div><div class="command-desc">塗り領域の境界を構成する線を選択します。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › ベクター選択 › 塗り</div><div class="command-desc">ベクター塗り領域を選択します。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › ベクターをラスタライズ...</div><div class="command-desc">ベクター内容を指定形式のラスターデータへ変換します。編集特性が変わるため変換先を確認します。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › ラスターをベクター化...</div><div class="command-desc">ラスター線からベクター内容を生成します。プレビューで追跡結果を確認します。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › Raster Geometry › 直線</div><div class="command-desc">開始点から終点へドラッグし、離したときに現在色と線幅でラスター直線を確定します。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › Raster Geometry › 曲線</div><div class="command-desc">始終点と制御点からラスター曲線を作ります。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › Raster Geometry › 長方形</div><div class="command-desc">ドラッグ範囲へラスター輪郭の長方形を作ります。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › Raster Geometry › 楕円</div><div class="command-desc">ドラッグ範囲へラスター輪郭の楕円を作ります。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › Raster Geometry › 多角形</div><div class="command-desc">ドラッグ範囲へラスター輪郭の多角形を作ります。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › Raster Geometry › 折れ線</div><div class="command-desc">入力点列をラスター折れ線として確定します。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › 線つなぎ...</div><div class="command-desc">選択範囲内のラスター線端を距離・角度に基づいて接続します。誤接続を確認し、確定後は一回のUndoで戻せます。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › 線幅修正...</div><div class="command-desc">ラスター線を太く／細く、倍率、一定幅などの設定で修正します。</div></li>
               <li class="search-unit"><div class="command-name">ツール › グラデーション... <kbd>G</kbd></div><div class="command-desc">線形／放射、3色以上の停止点、各アルファ、合成方法等を設定して適用します。選択なしでは対象プレーン全体です。</div></li>
               <li class="search-unit"><div class="command-name">ツール › エアブラシ... <kbd>A</kbd></div><div class="command-desc">太さ、硬さ、間隔、フェード、筆圧を設定した噴霧描画を行います。</div></li>
               <li class="search-unit"><div class="command-name">ツール › 境界色エアブラシ...</div><div class="command-desc">指定した複数色の境界部分だけへ設定幅のグラデーションを作ります。</div></li>
               <li class="search-unit"><div class="command-name">ツール › ぼかしツール...</div><div class="command-desc">ペン／長方形／折れ線／投げ縄範囲で局所的にぼかします。</div></li>
               <li class="search-unit"><div class="command-name">ツール › スタンプ...</div><div class="command-desc">採取した元位置から一定オフセットで画像を複製して描きます。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › ゴミ取り...</div><div class="command-desc">ペン／長方形／折れ線／投げ縄の局所範囲で小点、小穴、異色小領域を修正します。ベクターでは無効です。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › ゴミ取り...</div><div class="command-desc">ペン／長方形／折れ線／投げ縄の局所範囲でラスターの小点、小穴、異色小領域を修正します。</div></li>
               <li class="search-unit"><div class="command-name">ツール › アルファグラデーション...</div><div class="command-desc">対象ラスターのアルファだけへ階調を作ります。通常の色チャンネルを変更しません。</div></li>
               <li class="search-unit"><div class="command-name">ツール › アルファをグレースケール表示</div><div class="command-desc">アルファ編集用のグレースケール表示を切り替えます。<span class="tag view">表示モード</span></div></li>
             </ul></div>
@@ -1113,31 +1089,25 @@
         </section>
 
         <section class="chapter" id="tools" aria-labelledby="tools-heading">
-          <h2 id="tools-heading">8. 描画・選択・ベクターツール</h2>
-          <div class="search-unit" id="tool-list" data-search="all tools 20 全ツール">
-            <h3>ツールパレットの全20ツール</h3>
+          <h2 id="tools-heading">8. 描画・選択・図形ツール</h2>
+          <div class="search-unit" id="tool-list" data-search="all tools 14 全ツール">
+            <h3>ツールパレットの全14ツール</h3>
             <div class="table-scroll"><table class="compare">
               <thead><tr><th>ツール</th><th>主な用途</th><th>主な設定・条件</th></tr></thead>
               <tbody>
-                <tr><td>鉛筆</td><td>硬い主線／彩色線</td><td>固定太さ。ベクター彩色では無効。<kbd>P</kbd></td></tr>
+                <tr><td>鉛筆</td><td>硬い主線／彩色線</td><td>ラスター用の固定太さ。<kbd>P</kbd></td></tr>
                 <tr><td>ブラシ</td><td>筆圧を使う描画</td><td>丸／角、太さ、筆圧、平滑化、同色領域制限。<kbd>B</kbd></td></tr>
-                <tr><td>消しゴム</td><td>ラスターまたはベクターの消去</td><td>太さ、筆圧、主線／彩色対象、ベクター消去モード。<kbd>E</kbd></td></tr>
+                <tr><td>消しゴム</td><td>ラスターの消去</td><td>太さ、筆圧、主線／彩色対象。<kbd>E</kbd></td></tr>
                 <tr><td>塗りつぶし</td><td>つながった領域を塗る</td><td>許容差、隙間、含み塗り、あふれ中断、LT境界／色。<kbd>F</kbd></td></tr>
                 <tr><td>閉領域塗り</td><td>囲んだ範囲の複数領域を塗る</td><td>透明だけ、選択制限、含み塗り。<kbd>Shift</kbd>+<kbd>F</kbd></td></tr>
                 <tr><td>塗り延ばし</td><td>既存色を未着色部へ広げる</td><td>距離、強さ、囲み範囲。<kbd>X</kbd></td></tr>
                 <tr><td>スポイト</td><td>Canvas／参照から色を採る</td><td>最上位、選択プレーン、合成、ライトテーブル。<kbd>I</kbd></td></tr>
-                <tr><td>直線</td><td>ベクター直線</td><td>線色／幅、吸着、45度、入り抜き</td></tr>
-                <tr><td>曲線</td><td>制御点付き曲線</td><td>始終点後に制御点を調整</td></tr>
-                <tr><td>長方形</td><td>ベクター長方形</td><td>輪郭／塗り、比率、中心、回転</td></tr>
-                <tr><td>楕円</td><td>ベクター楕円</td><td>輪郭／塗り、比率、中心、回転</td></tr>
-                <tr><td>折れ線</td><td>複数頂点の線</td><td>ダブルクリックで終了、閉じる／曲線化</td></tr>
-                <tr><td>線消しゴム</td><td>ベクター線の消去</td><td>触れた部分／交点まで／線全体</td></tr>
                 <tr><td>グラデーション</td><td>線形／放射の多色階調</td><td>3色以上、アルファ、合成／上書き、ディザー。<kbd>G</kbd></td></tr>
                 <tr><td>エアブラシ</td><td>噴霧状の描画</td><td>太さ、硬さ、間隔、フェード、筆圧、連続噴霧。<kbd>A</kbd></td></tr>
                 <tr><td>境界ブラシ</td><td>色境界だけへ階調効果</td><td>境界色群と幅</td></tr>
                 <tr><td>ぼかし</td><td>局所ぼかし</td><td>範囲形状、太さ、ぼかし量、筆圧</td></tr>
                 <tr><td>スタンプ</td><td>別位置から画像を複製</td><td>元位置、形、硬さ、間隔、筆圧</td></tr>
-                <tr><td>ゴミ取り</td><td>小点／小穴／異色小領域の修正</td><td>範囲形状、モード、最大サイズ。ベクター不可</td></tr>
+                <tr><td>ゴミ取り</td><td>小点／小穴／異色小領域の修正</td><td>範囲形状、モード、最大サイズ</td></tr>
                 <tr><td>アルファ階調</td><td>アルファだけへグラデーション</td><td>ラスターのアルファ編集表示と組み合わせる</td></tr>
               </tbody>
             </table></div>
@@ -1146,9 +1116,9 @@
             <h3 id="selection-tools">選択ツールと作成モード</h3>
             <p>長方形、楕円、投げ縄、折れ線、トレース、色の杖があります。作成モードは新規、追加、削除、交差です。修飾キーの基本は<kbd>Shift</kbd>=追加、<kbd>Alt</kbd>=削除、<kbd>Shift</kbd>+<kbd>Alt</kbd>=交差です。選択中の内容を動かす場合、マスクだけを動かす操作と、対象プレーンの内容をフローティング選択として動かす操作を区別してください。</p>
           </div>
-          <div class="search-unit" data-search="vector select erase rasterize vectorize line connect width">
-            <h3 id="vector-tools">ベクターの選択・消去・変換</h3>
-            <p>ベクターは「一部でも触れる」「完全に含まれる」「線全体」「交点まで」「塗りを囲む線」「塗り」など、ラスター選択と異なる単位を持ちます。ベクター消去も「触れた部分」「交点まで」「線全体」を明示します。「線つなぎ」「線幅修正」は範囲と対象形式を確認して適用します。「ベクターをラスタライズ」「ラスターをベクター化」は編集特性が変わるため、プレビューとUndoを利用してください。</p>
+          <div class="search-unit" data-search="raster geometry line curve rectangle ellipse polygon polyline">
+            <h3 id="raster-geometry-tools">Raster Geometry</h3>
+            <p>直線、曲線、長方形、楕円、多角形、折れ線を、現在色と線幅で編集可能なラスターへ描きます。図形は確定前にプレビューされ、<kbd>Ctrl</kbd>でguide／grid snapを一時的に回避できます。確定は一回のUndo単位、キャンセルや無効な対象では文書を変更しません。</p>
           </div>
         </section>
 
@@ -1179,19 +1149,16 @@
             <h3>active layerとactive plane</h3>
             <p>active layerはプレーンを含む上位単位、active planeは実際の編集先です。レイヤーを選んだだけで意図したプレーンが編集対象とは限りません。プレーン行、表示アイコン、編集可否、ツールオプション、ステータスバーを合わせて確認してください。フィルがピクセルを変更した場合は、実際に塗った標準彩色または汎用ラスタープレーンが選択へ同期します。</p>
           </div>
-          <div class="table-scroll search-unit" data-search="layer types binary grayscale vector adjustment selection raster plane kinds storage">
+          <div class="table-scroll search-unit" data-search="layer types binary grayscale adjustment selection raster plane kinds storage">
             <table class="compare">
               <thead><tr><th>構成</th><th>主なプレーン</th><th>用途／注意</th></tr></thead>
               <tbody>
                 <tr><td>2値彩色レイヤー</td><td>主線、彩色、任意ラスター</td><td>硬い主線と彩色を分離。彩色時に主線を保護</td></tr>
                 <tr><td>階調彩色レイヤー</td><td>グレースケール主線、彩色</td><td>主線のカバレッジと基本線色を合成</td></tr>
-                <tr><td>ベクター彩色レイヤー</td><td>ベクター主線、色トレース、ベクター塗り</td><td>パスと閉領域を編集。鉛筆など一部ラスター用ツールは無効</td></tr>
                 <tr><td>ラスター汎用レイヤー</td><td>任意ラスター</td><td>一般画像や中間結果を、対応する8／16 bit形式で保持</td></tr>
                 <tr><td>フレームレイヤー</td><td>なし</td><td>制作フレーム情報を保持する非描画レイヤー</td></tr>
                 <tr><td>消失点レイヤー</td><td>なし</td><td>複数の消失点と放射ガイド設定を安定ID付きで所有</td></tr>
                 <tr><td>調整レイヤー</td><td>調整パラメーター</td><td>元ピクセルを変えず明るさ等を適用</td></tr>
-                <tr><td>テキストレイヤー</td><td>なし</td><td>テキスト注釈オブジェクトを所有</td></tr>
-                <tr><td>注釈レイヤー</td><td>なし</td><td>手描き線、引出線、値などの制作指示オブジェクトを所有</td></tr>
                 <tr><td>選択レイヤー</td><td>選択マスク</td><td>選択範囲の保存・編集・相互変換</td></tr>
               </tbody>
             </table>
@@ -1422,7 +1389,7 @@
               <li>文書と可視Canvasがあるか確認します。</li>
               <li>レイヤーだけでなく、目的のプレーン行が選択中か確認します。</li>
               <li>レイヤー／プレーンが編集可能か確認します。表示中でも編集不可の場合があります。</li>
-              <li>ツールとレイヤー種類が適合するか確認します。例: ベクター彩色レイヤーでは鉛筆が無効です。</li>
+              <li>ツールとプレーン種類が適合するか確認します。描画・Raster Geometryには編集可能なラスタープレーンが必要です。</li>
               <li>消しゴムはツールオプションの「主線／彩色」対象を確認します。</li>
             </ul>
           </div>

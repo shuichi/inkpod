@@ -80,9 +80,6 @@ pub(super) fn layer_kind_code(kind: LayerKind) -> u32 {
         LayerKind::Frame => 5,
         LayerKind::VanishingPoint => 6,
         LayerKind::Adjustment => 7,
-        LayerKind::Text => 8,
-        LayerKind::Annotation => 9,
-        LayerKind::VectorColoring => 10,
     }
 }
 
@@ -95,9 +92,6 @@ pub(super) fn parse_layer_kind(value: u32) -> Result<LayerKind, CoreError> {
         5 => Ok(LayerKind::Frame),
         6 => Ok(LayerKind::VanishingPoint),
         7 => Ok(LayerKind::Adjustment),
-        8 => Ok(LayerKind::Text),
-        9 => Ok(LayerKind::Annotation),
-        10 => Ok(LayerKind::VectorColoring),
         _ => Err(CoreError::InvalidArgument("batch layer kind is unknown")),
     }
 }
@@ -108,9 +102,6 @@ pub(super) fn plane_kind_code(kind: PlaneType) -> u32 {
         PlaneType::Color => 2,
         PlaneType::Raster => 3,
         PlaneType::Selection => 4,
-        PlaneType::VectorMainLine => 5,
-        PlaneType::ColorTrace => 6,
-        PlaneType::VectorFill => 7,
     }
 }
 
@@ -120,9 +111,6 @@ pub(super) fn parse_plane_kind(value: u32) -> Result<PlaneType, CoreError> {
         2 => Ok(PlaneType::Color),
         3 => Ok(PlaneType::Raster),
         4 => Ok(PlaneType::Selection),
-        5 => Ok(PlaneType::VectorMainLine),
-        6 => Ok(PlaneType::ColorTrace),
-        7 => Ok(PlaneType::VectorFill),
         _ => Err(CoreError::InvalidArgument("batch plane kind is unknown")),
     }
 }

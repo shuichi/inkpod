@@ -203,9 +203,14 @@ foreach(REQUIRED IN ITEMS
         "class RightToolTabsModel final"
         "struct ToolTab final"
         "ToolTabId id"
-        "bool visible"
+        "kMaximumToolTabs"
+        "pane_count"
         "ToolTabId Selected"
+        "ToolTabDescription"
+        "ToolTabResult AddPaneToSelected"
         "ToolTabResult MovePane"
+        "ToolTabResult MovePaneToNewTab"
+        "ToolTabResult ReorderPane"
         "ToolTabResult Reorder")
     string(FIND "${TOOL_TABS_MODEL}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
@@ -213,14 +218,26 @@ foreach(REQUIRED IN ITEMS
     endif()
 endforeach()
 foreach(REQUIRED IN ITEMS
-        "kToolTabColoring"
-        "kToolTabReference"
-        "kToolTabWorkflow"
-        "SelectReplacement"
-        "std::rotate")
+        "FitsSelected"
+        "CreateTab"
+        "RemoveTab"
+        "selected_ = tabs_[index - 1U].id"
+        "ToolTabTitle"
+        "ToolTabDescription"
+        "RightToolTabsModel candidate")
     string(FIND "${TOOL_TABS_IMPLEMENTATION}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
         message(FATAL_ERROR "Right tool-tab implementation is missing: ${REQUIRED}")
+    endif()
+endforeach()
+foreach(FORBIDDEN IN ITEMS
+        "kToolTabColoring"
+        "kToolTabReference"
+        "kToolTabWorkflow"
+        "SetVisible")
+    string(FIND "${TOOL_TABS_MODEL}${TOOL_TABS_IMPLEMENTATION}" "${FORBIDDEN}" OFFSET)
+    if(NOT OFFSET LESS 0)
+        message(FATAL_ERROR "Fixed right tool-tab contract remains: ${FORBIDDEN}")
     endif()
 endforeach()
 if(HOST MATCHES "WS_EX_TOPMOST" OR HOST MATCHES "WS_EX_PALETTEWINDOW"

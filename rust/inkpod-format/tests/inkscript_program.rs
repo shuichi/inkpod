@@ -16,8 +16,8 @@ const CREATE_RESULTS: &[InkScriptCommandResultSchema] = &[
         0,
     ),
     InkScriptCommandResultSchema::ordered_list(
-        "paths",
-        "vector_path_ref",
+        "planes",
+        "plane_ref",
         InkScriptResultAvailability::OnlyOnChange,
         1,
     ),
@@ -27,18 +27,18 @@ const USE_LAYER_FIELDS: &[InkScriptFieldSchema] = &[
     InkScriptFieldSchema::required("value", "u32", 1),
     InkScriptFieldSchema::required("payload", "asset_ref", 2),
 ];
-const USE_PATH_FIELDS: &[InkScriptFieldSchema] =
-    &[InkScriptFieldSchema::required("path", "vector_path_ref", 0)];
-const USE_PATH_LIST_FIELDS: &[InkScriptFieldSchema] = &[InkScriptFieldSchema::required(
-    "paths",
-    "list<vector_path_ref>",
+const USE_PLANE_FIELDS: &[InkScriptFieldSchema] =
+    &[InkScriptFieldSchema::required("plane", "plane_ref", 0)];
+const USE_PLANE_LIST_FIELDS: &[InkScriptFieldSchema] = &[InkScriptFieldSchema::required(
+    "planes",
+    "list<plane_ref>",
     0,
 )];
 const TEST_COMMANDS: &[InkScriptCommandSchema] = &[
     InkScriptCommandSchema::with_results("create_test", &[], CREATE_RESULTS),
     InkScriptCommandSchema::new("use_layer_test", USE_LAYER_FIELDS),
-    InkScriptCommandSchema::new("use_path_test", USE_PATH_FIELDS),
-    InkScriptCommandSchema::new("use_path_list_test", USE_PATH_LIST_FIELDS),
+    InkScriptCommandSchema::new("use_plane_test", USE_PLANE_FIELDS),
+    InkScriptCommandSchema::new("use_plane_list_test", USE_PLANE_LIST_FIELDS),
 ];
 
 fn source(bytes: &[u8]) -> InkScriptSource {
@@ -73,7 +73,7 @@ fn asset(name: &str) -> String {
 #[test]
 fn typed_steps_results_groups_and_all_reference_edges_are_owned_and_ordered() {
     let empty = analyze(
-        b"inkscript_fragment 2; requires { procedure_catalog = 2; replay_epoch = 23; } program {}",
+        b"inkscript_fragment 2; requires { procedure_catalog = 3; replay_epoch = 24; } program {}",
     )
     .unwrap();
     assert!(empty.steps().is_empty());
@@ -82,13 +82,13 @@ fn typed_steps_results_groups_and_all_reference_edges_are_owned_and_ordered() {
 
     let text = format!(
         r#"inkscript_fragment 2;
-requires {{ procedure_catalog = 2; replay_epoch = 23; }}
+requires {{ procedure_catalog = 3; replay_epoch = 24; }}
 parameters {{ param threshold: u32 = 7; }}
 bindings {{ let target = select layer {{}}; let target_plane = select plane {{ layer = $target; }}; }}
 program {{
     step "Create" as made {{ enabled = true; editor_group = "pair"; invoke create_test {{}}; }}
     step "Use layer" {{ enabled = true; editor_group = "pair"; invoke use_layer_test {{ layer = $made.layer; value = $threshold; payload = asset(image); }}; }}
-    step "Use path" {{ enabled = true; invoke use_path_test {{ path = $made.paths[0]; }}; }}
+    step "Use plane" {{ enabled = true; invoke use_plane_test {{ plane = $made.planes[0]; }}; }}
 }}
 assets {{ {} }}
 "#,
@@ -130,7 +130,7 @@ assets {{ {} }}
     assert!(matches!(
         model.steps()[2].arguments().kind(),
         InkScriptTypedValueKind::Record(fields)
-            if fields["path"].type_name() == "vector_path_ref"
+            if fields["plane"].type_name() == "plane_ref"
     ));
 
     fn assert_send_sync<T: Send + Sync>() {}
@@ -141,34 +141,34 @@ assets {{ {} }}
 fn result_field_index_availability_and_cardinality_fail_with_source_ranges() {
     let cases = [
         (
-            "step \"Create\" as made { enabled = true; invoke create_test {}; } step \"Use\" { enabled = true; invoke use_path_test { path = $made.missing; }; }",
+            "step \"Create\" as made { enabled = true; invoke create_test {}; } step \"Use\" { enabled = true; invoke use_plane_test { plane = $made.missing; }; }",
             InkScriptTypeDiagnosticCode::UnknownResultField,
         ),
         (
-            "step \"Create\" as made { enabled = true; invoke create_test {}; } step \"Use\" { enabled = true; invoke use_path_test { path = $made.layer[0]; }; }",
+            "step \"Create\" as made { enabled = true; invoke create_test {}; } step \"Use\" { enabled = true; invoke use_plane_test { plane = $made.layer[0]; }; }",
             InkScriptTypeDiagnosticCode::InvalidResultIndex,
         ),
         (
-            "step \"Create\" as made { enabled = true; invoke create_test {}; } step \"Use\" { enabled = true; invoke use_path_test { path = $made.paths[18446744073709551616]; }; }",
+            "step \"Create\" as made { enabled = true; invoke create_test {}; } step \"Use\" { enabled = true; invoke use_plane_test { plane = $made.planes[18446744073709551616]; }; }",
             InkScriptTypeDiagnosticCode::NumericOverflow,
         ),
         (
-            "step \"Create\" as made { enabled = true; invoke create_test {}; } step \"Use\" { enabled = true; invoke use_path_test { path = $made.paths; }; }",
+            "step \"Create\" as made { enabled = true; invoke create_test {}; } step \"Use\" { enabled = true; invoke use_plane_test { plane = $made.planes; }; }",
             InkScriptTypeDiagnosticCode::ResultCardinalityMismatch,
         ),
         (
-            "step \"Create\" as made { enabled = false; invoke create_test {}; } step \"Use\" { enabled = true; invoke use_path_test { path = $made.paths[0]; }; }",
+            "step \"Create\" as made { enabled = false; invoke create_test {}; } step \"Use\" { enabled = true; invoke use_plane_test { plane = $made.planes[0]; }; }",
             InkScriptTypeDiagnosticCode::UnavailableResult,
         ),
         (
-            "step \"Use\" { enabled = true; invoke use_path_test { path = $made.paths[0]; }; } step \"Create\" as made { enabled = true; invoke create_test {}; }",
+            "step \"Use\" { enabled = true; invoke use_plane_test { plane = $made.planes[0]; }; } step \"Create\" as made { enabled = true; invoke create_test {}; }",
             InkScriptTypeDiagnosticCode::ForwardReference,
         ),
     ];
 
     for (program, expected) in cases {
         let text = format!(
-            "inkscript_fragment 2;\nrequires {{ procedure_catalog = 2; replay_epoch = 23; }}\nprogram {{ {program} }}\n"
+            "inkscript_fragment 2;\nrequires {{ procedure_catalog = 3; replay_epoch = 24; }}\nprogram {{ {program} }}\n"
         );
         let error = analyze(text.as_bytes()).unwrap_err();
         assert_eq!(error.code(), expected, "{program}");
@@ -179,7 +179,7 @@ fn result_field_index_availability_and_cardinality_fail_with_source_ranges() {
     }
 
     let valid_list = analyze(
-        b"inkscript_fragment 2; requires { procedure_catalog = 2; replay_epoch = 23; } program { step \"Create\" as made { enabled = true; invoke create_test {}; } step \"Use\" { enabled = true; invoke use_path_list_test { paths = $made.paths; }; } }",
+        b"inkscript_fragment 2; requires { procedure_catalog = 3; replay_epoch = 24; } program { step \"Create\" as made { enabled = true; invoke create_test {}; } step \"Use\" { enabled = true; invoke use_plane_list_test { planes = $made.planes; }; } }",
     )
     .unwrap();
     assert_eq!(valid_list.steps().len(), 2);
@@ -229,7 +229,7 @@ fn result_schema_and_unknown_commands_fail_closed_without_debug_name_fallback() 
     }
 
     let input = source(
-        b"inkscript_fragment 2; requires { procedure_catalog = 2; replay_epoch = 23; } program { step \"Unknown\" { enabled = true; invoke rust_debug_variant {}; } }",
+        b"inkscript_fragment 2; requires { procedure_catalog = 3; replay_epoch = 24; } program { step \"Unknown\" { enabled = true; invoke rust_debug_variant {}; } }",
     );
     let parsed = parse_inkscript(&input);
     let error = build_inkscript_declaration_model(&parsed, &schema()).unwrap_err();
@@ -242,7 +242,7 @@ fn result_schema_and_unknown_commands_fail_closed_without_debug_name_fallback() 
 #[test]
 fn dependency_resource_limit_rejects_without_partial_model() {
     let input = source(
-        b"inkscript_fragment 2; requires { procedure_catalog = 2; replay_epoch = 23; } parameters { param value: u32 = 1; } bindings { let target = select layer {}; } program { step \"Create\" as made { enabled = true; invoke create_test {}; } step \"Use\" { enabled = true; invoke use_layer_test { layer = $made.layer; value = $value; payload = asset(image); }; } } assets { asset image { asset_id = blake3\"0000000000000000000000000000000000000000000000000000000000000000\"; kind = \"canonical_raster\"; descriptor = { pixel_format = rgba8; color_space = srgb; alpha = straight; width = 1; height = 1; stride = 4; element_count = 1; }; data = base64\"\"\"AAAAAA==\"\"\"; }; }",
+        b"inkscript_fragment 2; requires { procedure_catalog = 3; replay_epoch = 24; } parameters { param value: u32 = 1; } bindings { let target = select layer {}; } program { step \"Create\" as made { enabled = true; invoke create_test {}; } step \"Use\" { enabled = true; invoke use_layer_test { layer = $made.layer; value = $value; payload = asset(image); }; } } assets { asset image { asset_id = blake3\"0000000000000000000000000000000000000000000000000000000000000000\"; kind = \"canonical_raster\"; descriptor = { pixel_format = rgba8; color_space = srgb; alpha = straight; width = 1; height = 1; stride = 4; element_count = 1; }; data = base64\"\"\"AAAAAA==\"\"\"; }; }",
     );
     let parsed = parse_inkscript(&input);
     assert!(parsed.is_valid(), "{:?}", parsed.diagnostics());
@@ -260,7 +260,7 @@ fn dependency_resource_limit_rejects_without_partial_model() {
 #[test]
 fn selectors_and_asserts_fail_closed_and_share_the_dependency_graph() {
     let strict_without_uuid = analyze(
-        b"inkscript_fragment 2; requires { procedure_catalog = 2; replay_epoch = 23; } bindings { let target = select layer { persistent_id = 7; }; } program {}",
+        b"inkscript_fragment 2; requires { procedure_catalog = 3; replay_epoch = 24; } bindings { let target = select layer { persistent_id = 7; }; } program {}",
     )
     .unwrap_err();
     assert_eq!(
@@ -269,7 +269,7 @@ fn selectors_and_asserts_fail_closed_and_share_the_dependency_graph() {
     );
 
     let forbidden_all = analyze(
-        b"inkscript_fragment 2; requires { procedure_catalog = 2; replay_epoch = 23; } bindings { let frame = select shooting_frame { cardinality = all; }; } program {}",
+        b"inkscript_fragment 2; requires { procedure_catalog = 3; replay_epoch = 24; } bindings { let frame = select shooting_frame { cardinality = all; }; } program {}",
     )
     .unwrap_err();
     assert_eq!(
@@ -278,7 +278,7 @@ fn selectors_and_asserts_fail_closed_and_share_the_dependency_graph() {
     );
 
     let zero_width = analyze(
-        b"inkscript_fragment 2; requires { procedure_catalog = 2; replay_epoch = 23; } program { assert document { width = 0; }; }",
+        b"inkscript_fragment 2; requires { procedure_catalog = 3; replay_epoch = 24; } program { assert document { width = 0; }; }",
     )
     .unwrap_err();
     assert_eq!(
@@ -287,7 +287,7 @@ fn selectors_and_asserts_fail_closed_and_share_the_dependency_graph() {
     );
 
     let list_target = analyze(
-        b"inkscript_fragment 2; requires { procedure_catalog = 2; replay_epoch = 23; } bindings { let targets = select layer { cardinality = all; }; } program { assert object { target = $targets; }; }",
+        b"inkscript_fragment 2; requires { procedure_catalog = 3; replay_epoch = 24; } bindings { let targets = select layer { cardinality = all; }; } program { assert object { target = $targets; }; }",
     )
     .unwrap_err();
     assert_eq!(
@@ -296,7 +296,7 @@ fn selectors_and_asserts_fail_closed_and_share_the_dependency_graph() {
     );
 
     let model = analyze(
-        b"inkscript_fragment 2; requires { procedure_catalog = 2; replay_epoch = 23; } bindings { let target = select layer {}; } program { assert object { target = $target; visible = true; }; step \"Use\" { enabled = true; invoke use_layer_test { layer = $target; value = 1; payload = asset(image); }; } } assets { asset image { asset_id = blake3\"0000000000000000000000000000000000000000000000000000000000000000\"; kind = \"canonical_raster\"; descriptor = { pixel_format = rgba8; color_space = srgb; alpha = straight; width = 1; height = 1; stride = 4; element_count = 1; }; data = base64\"\"\"AAAAAA==\"\"\"; }; }",
+        b"inkscript_fragment 2; requires { procedure_catalog = 3; replay_epoch = 24; } bindings { let target = select layer {}; } program { assert object { target = $target; visible = true; }; step \"Use\" { enabled = true; invoke use_layer_test { layer = $target; value = 1; payload = asset(image); }; } } assets { asset image { asset_id = blake3\"0000000000000000000000000000000000000000000000000000000000000000\"; kind = \"canonical_raster\"; descriptor = { pixel_format = rgba8; color_space = srgb; alpha = straight; width = 1; height = 1; stride = 4; element_count = 1; }; data = base64\"\"\"AAAAAA==\"\"\"; }; }",
     )
     .unwrap();
     assert!(model.dependency_edges().iter().any(|edge| {
@@ -309,13 +309,13 @@ fn selectors_and_asserts_fail_closed_and_share_the_dependency_graph() {
 fn fragment_closure_rebinds_external_results_without_adding_mutations_and_renames_atomically() {
     let text = format!(
         r#"inkscript_fragment 2;
-requires {{ procedure_catalog = 2; replay_epoch = 23; }}
+requires {{ procedure_catalog = 3; replay_epoch = 24; }}
 parameters {{ param threshold: u32 = 7; param unused: u32 = 9; }}
 program {{
     step "Outside" as outside {{ enabled = true; invoke create_test {{}}; }}
     step "Use outside" {{ enabled = true; editor_group = "selected"; invoke use_layer_test {{ layer = $outside.layer; value = $threshold; payload = asset(image); }}; }}
     step "Inside producer" as inside {{ enabled = true; editor_group = "selected"; invoke create_test {{}}; }}
-    step "Inside consumer" {{ enabled = true; editor_group = "selected"; invoke use_path_test {{ path = $inside.paths[0]; }}; }}
+    step "Inside consumer" {{ enabled = true; editor_group = "selected"; invoke use_plane_test {{ plane = $inside.planes[0]; }}; }}
     step "Use duplicate asset" {{ enabled = true; editor_group = "selected"; invoke use_layer_test {{ layer = $outside.layer; value = $threshold; payload = asset(image_copy); }}; }}
 }}
 assets {{ {} {} }}
@@ -380,7 +380,7 @@ assets {{ {} {} }}
     assert!(canonical.contains("let outside_layer_2 = select layer"));
     assert!(canonical.contains("layer = $outside_layer_2;"));
     assert!(canonical.contains("as inside_2"));
-    assert!(canonical.contains("path = $inside_2.paths[0];"));
+    assert!(canonical.contains("plane = $inside_2.planes[0];"));
     assert!(canonical.contains("editor_group = \"selected_2\";"));
     assert!(canonical.contains("asset(image_2)"));
     assert!(canonical.contains("asset image_2"));

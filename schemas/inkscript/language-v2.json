@@ -2,8 +2,8 @@
   "kind": "inkpod.inkscript.language",
   "registry_schema_version": 2,
   "file_version": 2,
-  "procedure_catalog_version": 2,
-  "required_replay_epoch": 23,
+  "procedure_catalog_version": 3,
+  "required_replay_epoch": 24,
   "canonicalization": {
     "encoding": "utf-8",
     "bom": false,
@@ -152,9 +152,6 @@
     { "name": "layer_ref", "kind": "reference", "constraints": ["document-stable-id-role:layer"] },
     { "name": "plane_ref", "kind": "reference", "constraints": ["document-stable-id-role:plane"] },
     { "name": "guide_ref", "kind": "reference", "constraints": ["document-stable-id-role:guide"] },
-    { "name": "vector_path_ref", "kind": "reference", "constraints": ["document-stable-id-role:vector_path"] },
-    { "name": "vector_fill_ref", "kind": "reference", "constraints": ["document-stable-id-role:vector_fill"] },
-    { "name": "annotation_ref", "kind": "reference", "constraints": ["document-stable-id-role:annotation"] },
     { "name": "shooting_frame_ref", "kind": "reference", "constraints": ["document-stable-id-role:shooting_frame"] },
     { "name": "vanishing_point_ref", "kind": "reference", "constraints": ["document-stable-id-role:vanishing_point"] },
     { "name": "light_table_set_ref", "kind": "reference", "constraints": ["document-stable-id-role:light_table_set"] },
@@ -185,10 +182,9 @@
     { "name": "pixel_format", "members": ["mask8", "gray8", "gray16", "rgba8", "rgba16"] },
     { "name": "color_space", "members": ["srgb"] },
     { "name": "alpha_mode", "members": ["straight"] },
-    { "name": "layer_kind", "members": ["binary_coloring", "grayscale_coloring", "raster", "selection", "frame", "vanishing_point", "adjustment", "text", "annotation", "vector_coloring"] },
-    { "name": "plane_kind", "members": ["main_line", "color", "raster", "selection", "light_table", "vector_main_line", "color_trace", "vector_fill"] },
-    { "name": "guide_axis", "members": ["horizontal", "vertical"] },
-    { "name": "annotation_kind", "members": ["text", "stroke", "leader", "value"] }
+    { "name": "layer_kind", "members": ["binary_coloring", "grayscale_coloring", "raster", "selection", "frame", "vanishing_point", "adjustment"] },
+    { "name": "plane_kind", "members": ["main_line", "color", "raster", "selection", "light_table"] },
+    { "name": "guide_axis", "members": ["horizontal", "vertical"] }
   ],
   "constructors": [
     { "name": "q16", "result": "q16", "arguments": [{ "name": "raw", "type": "i64", "constraints": [] }], "conversion": "exact" },
@@ -428,37 +424,6 @@
         { "name": "persistent_id", "type": "nullable<u64>", "required": false, "default": null, "canonical_order": 1, "constraints": ["nonzero", "requires:source_document_uuid"] },
         { "name": "axis", "type": "nullable<guide_axis>", "required": false, "default": null, "canonical_order": 2, "constraints": [] },
         { "name": "position", "type": "nullable<i32>", "required": false, "default": null, "canonical_order": 3, "constraints": ["document-pixel"] },
-        { "name": "cardinality", "type": "cardinality", "required": false, "default": "one", "canonical_order": 4, "constraints": [] },
-        { "name": "missing", "type": "missing_policy", "required": false, "default": "error", "canonical_order": 5, "constraints": [] }
-      ]
-    },
-    {
-      "name": "vector_path", "reference_type": "vector_path_ref", "owner": "plane", "initial_order": "vector_order",
-      "filters": [
-        { "name": "plane", "type": "nullable<plane_ref>", "required": false, "default": null, "canonical_order": 0, "constraints": ["owner-filter"] },
-        { "name": "source_document_uuid", "type": "nullable<uuid>", "required": false, "default": null, "canonical_order": 1, "constraints": ["required-with:persistent_id"] },
-        { "name": "persistent_id", "type": "nullable<u64>", "required": false, "default": null, "canonical_order": 2, "constraints": ["nonzero", "requires:source_document_uuid"] },
-        { "name": "cardinality", "type": "cardinality", "required": false, "default": "one", "canonical_order": 3, "constraints": [] },
-        { "name": "missing", "type": "missing_policy", "required": false, "default": "error", "canonical_order": 4, "constraints": [] }
-      ]
-    },
-    {
-      "name": "vector_fill", "reference_type": "vector_fill_ref", "owner": "plane", "initial_order": "vector_order",
-      "filters": [
-        { "name": "plane", "type": "nullable<plane_ref>", "required": false, "default": null, "canonical_order": 0, "constraints": ["owner-filter"] },
-        { "name": "source_document_uuid", "type": "nullable<uuid>", "required": false, "default": null, "canonical_order": 1, "constraints": ["required-with:persistent_id"] },
-        { "name": "persistent_id", "type": "nullable<u64>", "required": false, "default": null, "canonical_order": 2, "constraints": ["nonzero", "requires:source_document_uuid"] },
-        { "name": "cardinality", "type": "cardinality", "required": false, "default": "one", "canonical_order": 3, "constraints": [] },
-        { "name": "missing", "type": "missing_policy", "required": false, "default": "error", "canonical_order": 4, "constraints": [] }
-      ]
-    },
-    {
-      "name": "annotation", "reference_type": "annotation_ref", "owner": "layer", "initial_order": "annotation_order",
-      "filters": [
-        { "name": "layer", "type": "nullable<layer_ref>", "required": false, "default": null, "canonical_order": 0, "constraints": ["owner-filter"] },
-        { "name": "source_document_uuid", "type": "nullable<uuid>", "required": false, "default": null, "canonical_order": 1, "constraints": ["required-with:persistent_id"] },
-        { "name": "persistent_id", "type": "nullable<u64>", "required": false, "default": null, "canonical_order": 2, "constraints": ["nonzero", "requires:source_document_uuid"] },
-        { "name": "kind", "type": "nullable<annotation_kind>", "required": false, "default": null, "canonical_order": 3, "constraints": [] },
         { "name": "cardinality", "type": "cardinality", "required": false, "default": "one", "canonical_order": 4, "constraints": [] },
         { "name": "missing", "type": "missing_policy", "required": false, "default": "error", "canonical_order": 5, "constraints": [] }
       ]

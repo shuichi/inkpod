@@ -87,7 +87,6 @@ impl Core {
         assets = self.prepare_asset_store_for_session_reset(assets, &document)?;
         let revision = self.next_document_revision()?;
         self.cancel_stroke();
-        self.annotation_stroke = None;
         self.shooting_frame_preview = None;
         self.vanishing_point_preview = None;
         self.filter_preview = None;
@@ -130,7 +129,7 @@ impl Core {
         Ok(encode_common_raster(format, &raster, composite_white)?)
     }
 
-    /// Flattens the document with instruction annotations and the optional
+    /// Flattens the document with instruction overlays and the optional
     /// angled shooting-frame overlay, then encodes a common raster.
     ///
     /// This explicit query does not change ordinary export authority, paper-fit

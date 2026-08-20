@@ -23,9 +23,9 @@ or widen an existing range.
 ## Deterministic fixture
 
 - Source ID is 913. It requires InkScript file v1, procedure catalog v1, and
-  replay epoch 23, reads a naturally ordered folder, writes duplicate current
+  replay epoch 24, reads a naturally ordered folder, writes duplicate current
   `.inkpod` outputs, uses `failure = continue`, and has no wait.
-- Every input is an empty 4-by-4 current-v26 Cell with UUIDs beginning at
+- Every input is an empty 4-by-4 current-v27 Cell with UUIDs beginning at
   `0x1001`. Its exact native image is 6,192 bytes. Inputs are named
   `cell1.inkpod` through `cellN.inkpod`.
 - One binding selects the unique color plane. One selection-empty assertion

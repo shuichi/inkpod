@@ -266,7 +266,7 @@ pub fn export_inkscript_fragment_with_limits(
     let strict_owners = augment_light_table_owner_bindings(&snapshot, &mut strict)?;
 
     let mut source = String::from(
-        "inkscript_fragment 2;\nrequires { procedure_catalog = 2; replay_epoch = 23; }\n",
+        "inkscript_fragment 2;\nrequires { procedure_catalog = 3; replay_epoch = 24; }\n",
     );
     if !strict.is_empty() {
         source.push_str("bindings {\n");
@@ -866,9 +866,6 @@ const fn plane_kind_name(value: crate::PlaneType) -> &'static str {
         crate::PlaneType::Color => "color",
         crate::PlaneType::Raster => "raster",
         crate::PlaneType::Selection => "selection",
-        crate::PlaneType::VectorMainLine => "vector_main_line",
-        crate::PlaneType::ColorTrace => "color_trace",
-        crate::PlaneType::VectorFill => "vector_fill",
     }
 }
 
@@ -935,23 +932,6 @@ fn output_entity_kinds(
         CanonicalInvocation::AddGuide { .. } => vec![InkScriptEntityKind::Guide],
         CanonicalInvocation::SelectionToLayer { .. }
         | CanonicalInvocation::CreateAdjustmentLayer { .. } => vec![InkScriptEntityKind::Layer],
-        CanonicalInvocation::VectorAddPath { .. } => vec![InkScriptEntityKind::VectorPath],
-        CanonicalInvocation::VectorAddFill { .. } => vec![InkScriptEntityKind::VectorFill],
-        CanonicalInvocation::VectorConnect { .. } if output_count <= 1 => {
-            vec![InkScriptEntityKind::VectorPath; output_count]
-        }
-        CanonicalInvocation::RasterizeVectorLayer { .. } => vec![InkScriptEntityKind::Layer],
-        CanonicalInvocation::VectorizeRasterPlane { .. } => {
-            vec![InkScriptEntityKind::VectorFill; output_count]
-        }
-        CanonicalInvocation::VectorizeRasterPlaneIntoNewLayer { .. } if output_count > 0 => {
-            let mut kinds = vec![InkScriptEntityKind::VectorFill; output_count];
-            kinds[0] = InkScriptEntityKind::Layer;
-            kinds
-        }
-        CanonicalInvocation::EditAnnotations { .. } => {
-            vec![InkScriptEntityKind::Annotation; output_count]
-        }
         CanonicalInvocation::EditShootingFrame { .. } => {
             vec![InkScriptEntityKind::ShootingFrame; output_count]
         }
@@ -962,15 +942,7 @@ fn output_entity_kinds(
         | CanonicalInvocation::LightTableDuplicateSet { .. } => {
             vec![InkScriptEntityKind::LightTableSet]
         }
-        CanonicalInvocation::ApplyGeometry { .. } => match output_count {
-            0 => Vec::new(),
-            1 => vec![InkScriptEntityKind::VectorPath],
-            2 => vec![
-                InkScriptEntityKind::VectorPath,
-                InkScriptEntityKind::VectorFill,
-            ],
-            _ => return Err(InkScriptExportError::InvalidSource),
-        },
+        CanonicalInvocation::ApplyGeometry { .. } if output_count == 0 => Vec::new(),
         _ if output_count == 0 => Vec::new(),
         _ => return Err(InkScriptExportError::InvalidSource),
     };
@@ -1264,117 +1236,6 @@ fn lift_invocation(
                 resolve_reference("plane", target.plane_id, produced, strict)
             ),
         },
-        CanonicalInvocation::VectorAddPath { plane_id, input } => LiftedInvocation {
-            command: "vector_add_path",
-            arguments: format!(
-                "plane_id = {}; input = {};",
-                resolve_reference("plane", *plane_id, produced, strict),
-                vector_path_input_literal(input)?
-            ),
-        },
-        CanonicalInvocation::VectorAddFill {
-            plane_id,
-            boundary_path_ids,
-            color,
-        } => LiftedInvocation {
-            command: "vector_add_fill",
-            arguments: format!(
-                "plane_id = {}; boundary_path_ids = [{}]; color = {};",
-                resolve_reference("plane", *plane_id, produced, strict),
-                boundary_path_ids
-                    .iter()
-                    .map(|id| resolve_reference("vector_path", *id, produced, strict))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                pixel_literal(*color)
-            ),
-        },
-        CanonicalInvocation::VectorErase {
-            plane_id,
-            point,
-            radius,
-            mode,
-        } => LiftedInvocation {
-            command: "vector_erase",
-            arguments: format!(
-                "plane_id = {}; point = point({}, {}); radius = {}; mode = {};",
-                resolve_reference("plane", *plane_id, produced, strict),
-                q16_literal(point.x)?,
-                q16_literal(point.y)?,
-                q16_literal(*radius)?,
-                vector_erase_mode_name(*mode)
-            ),
-        },
-        CanonicalInvocation::VectorConnect {
-            plane_id,
-            maximum_gap,
-        } => LiftedInvocation {
-            command: "vector_connect",
-            arguments: format!(
-                "plane_id = {}; maximum_gap = {};",
-                resolve_reference("plane", *plane_id, produced, strict),
-                q16_literal(*maximum_gap)?
-            ),
-        },
-        CanonicalInvocation::VectorCorrectWidth { path_ids, mode } => LiftedInvocation {
-            command: "vector_correct_width",
-            arguments: format!(
-                "path_ids = [{}]; width = {};",
-                path_ids
-                    .iter()
-                    .map(|id| resolve_reference("vector_path", *id, produced, strict))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                vector_width_literal(*mode)?
-            ),
-        },
-        CanonicalInvocation::RasterizeVectorLayer {
-            layer_id,
-            antialias,
-            name,
-        } => LiftedInvocation {
-            command: "rasterize_vector_layer",
-            arguments: format!(
-                "layer_id = {}; antialias = {antialias}; name = {};",
-                resolve_reference("layer", *layer_id, produced, strict),
-                string_literal(name)
-            ),
-        },
-        CanonicalInvocation::VectorizeRasterPlane {
-            source_plane_id,
-            target_vector_layer_id,
-            alpha_threshold,
-        } => LiftedInvocation {
-            command: "vectorize_raster_plane",
-            arguments: format!(
-                "source_plane_id = {}; target_vector_layer_id = {}; alpha_threshold = {alpha_threshold};",
-                resolve_reference("plane", *source_plane_id, produced, strict),
-                resolve_reference("layer", *target_vector_layer_id, produced, strict)
-            ),
-        },
-        CanonicalInvocation::VectorizeRasterPlaneIntoNewLayer {
-            source_plane_id,
-            alpha_threshold,
-            name,
-        } => LiftedInvocation {
-            command: "vectorize_raster_plane_into_new_layer",
-            arguments: format!(
-                "source_plane_id = {}; alpha_threshold = {alpha_threshold}; name = {};",
-                resolve_reference("plane", *source_plane_id, produced, strict),
-                string_literal(name)
-            ),
-        },
-        CanonicalInvocation::EditAnnotations { edits } => LiftedInvocation {
-            command: "edit_annotations",
-            arguments: format!(
-                "edits = [{}];",
-                edits
-                    .iter()
-                    .map(|edit| annotation_edit_literal(edit, produced, strict))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-        },
         CanonicalInvocation::EditShootingFrame { edit } => LiftedInvocation {
             command: "edit_shooting_frame",
             arguments: format!(
@@ -1566,78 +1427,6 @@ fn geometry_arguments(
     )
 }
 
-fn annotation_edit_literal(
-    edit: &crate::AnnotationEdit,
-    produced: &BTreeMap<u64, String>,
-    strict: &mut StrictBindings,
-) -> String {
-    match edit {
-        crate::AnnotationEdit::Create(input) => format!(
-            "{{ operation = 1; object_id = none; input = {}; delta_x = 0; delta_y = 0; }}",
-            annotation_input_literal(input, produced, strict)
-        ),
-        crate::AnnotationEdit::Update { object_id, input } => format!(
-            "{{ operation = 2; object_id = {}; input = {}; delta_x = 0; delta_y = 0; }}",
-            resolve_reference("annotation", *object_id, produced, strict),
-            annotation_input_literal(input, produced, strict)
-        ),
-        crate::AnnotationEdit::Move {
-            object_id,
-            delta_x,
-            delta_y,
-        } => format!(
-            "{{ operation = 3; object_id = {}; input = none; delta_x = {delta_x}; delta_y = {delta_y}; }}",
-            resolve_reference("annotation", *object_id, produced, strict)
-        ),
-        crate::AnnotationEdit::Delete { object_id } => format!(
-            "{{ operation = 4; object_id = {}; input = none; delta_x = 0; delta_y = 0; }}",
-            resolve_reference("annotation", *object_id, produced, strict)
-        ),
-    }
-}
-
-fn annotation_input_literal(
-    input: &crate::AnnotationObjectInput,
-    produced: &BTreeMap<u64, String>,
-    strict: &mut StrictBindings,
-) -> String {
-    let points = input
-        .points
-        .iter()
-        .map(|point| {
-            format!(
-                "{{ x_milli = {}; y_milli = {}; }}",
-                point.x_milli, point.y_milli
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!(
-        "{{ layer_id = {}; kind = {}; output = {}; bounds = rect({}, {}, {}, {}); font_family_hint = {}; font_size_milli = {}; style_flags = {}; color = {}; text = {}; points = [{points}]; stroke_width_milli = {}; }}",
-        resolve_reference("layer", input.layer_id, produced, strict),
-        match input.kind {
-            crate::AnnotationKind::Text => "text",
-            crate::AnnotationKind::Stroke => "stroke",
-            crate::AnnotationKind::Leader => "leader",
-            crate::AnnotationKind::Value => "value",
-        },
-        match input.output {
-            crate::AnnotationOutput::Normal => "normal",
-            crate::AnnotationOutput::Instruction => "instruction",
-        },
-        input.bounds.x,
-        input.bounds.y,
-        input.bounds.width,
-        input.bounds.height,
-        string_literal(&input.font_family_hint),
-        input.font_size_milli,
-        input.style_flags,
-        pixel_literal(input.color),
-        string_literal(&input.text),
-        input.stroke_width_milli
-    )
-}
-
 fn shooting_frame_edit_literal(
     edit: crate::ShootingFrameEdit,
     produced: &BTreeMap<u64, String>,
@@ -1725,57 +1514,6 @@ fn vanishing_point_input_literal(
         input.opacity_milli,
         input.visible
     )
-}
-
-fn vector_path_input_literal(
-    input: &crate::VectorPathInput,
-) -> Result<String, InkScriptExportError> {
-    let segments = input
-        .segments
-        .iter()
-        .map(|segment| {
-            Ok(format!(
-                "{{ p0 = point({}, {}); p1 = point({}, {}); p2 = point({}, {}); p3 = point({}, {}); width_start = {}; width_end = {}; }}",
-                q16_literal(segment.p0.x)?,
-                q16_literal(segment.p0.y)?,
-                q16_literal(segment.p1.x)?,
-                q16_literal(segment.p1.y)?,
-                q16_literal(segment.p2.x)?,
-                q16_literal(segment.p2.y)?,
-                q16_literal(segment.p3.x)?,
-                q16_literal(segment.p3.y)?,
-                q16_literal(segment.width_start)?,
-                q16_literal(segment.width_end)?
-            ))
-        })
-        .collect::<Result<Vec<_>, InkScriptExportError>>()?
-        .join(", ");
-    Ok(format!(
-        "{{ segments = [{segments}]; color = {}; closed = {}; }}",
-        pixel_literal(input.color),
-        input.closed
-    ))
-}
-
-fn vector_width_literal(value: crate::VectorWidthMode) -> Result<String, InkScriptExportError> {
-    let (operation, value) = match value {
-        crate::VectorWidthMode::Add(value) => ("add", value),
-        crate::VectorWidthMode::Subtract(value) => ("subtract", value),
-        crate::VectorWidthMode::Scale(value) => ("scale", value),
-        crate::VectorWidthMode::Constant(value) => ("constant", value),
-    };
-    Ok(format!(
-        "{{ operation = {operation}; value = {}; }}",
-        q16_literal(value)?
-    ))
-}
-
-const fn vector_erase_mode_name(value: crate::VectorEraseMode) -> &'static str {
-    match value {
-        crate::VectorEraseMode::Partial => "partial",
-        crate::VectorEraseMode::ToIntersection => "to_intersection",
-        crate::VectorEraseMode::WholePath => "whole_path",
-    }
 }
 
 fn fixed_q16_literal(value: i64) -> String {
@@ -2003,9 +1741,6 @@ const fn scoped_color_mode_name(mode: crate::ScopedColorReplaceMode) -> &'static
     match mode {
         crate::ScopedColorReplaceMode::RasterColor => "raster_color",
         crate::ScopedColorReplaceMode::RasterMainLine => "raster_main_line",
-        crate::ScopedColorReplaceMode::VectorColorLine => "vector_color_line",
-        crate::ScopedColorReplaceMode::VectorMainLine => "vector_main_line",
-        crate::ScopedColorReplaceMode::VectorFill => "vector_fill",
     }
 }
 

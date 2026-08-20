@@ -79,8 +79,6 @@ impl PrimitiveId {
     pub const DELETE_HIDDEN_LAYERS: Self = Self(0x0002_0023);
     /// Primitive ID for one grouped layer/plane edit-target command.
     pub const EDIT_TARGETS: Self = Self(0x0002_0030);
-    /// Primitive ID for one atomic bounded Text/Annotation object edit.
-    pub const EDIT_ANNOTATIONS: Self = Self(0x0002_0040);
     /// Primitive ID for one typed angled shooting-frame object edit.
     pub const EDIT_SHOOTING_FRAME: Self = Self(0x0002_0050);
     /// Primitive ID for one atomic bounded vanishing-point edit batch.
@@ -95,7 +93,7 @@ impl PrimitiveId {
     pub const APPLY_RASTER_STROKE: Self = Self(0x0005_0001);
     /// Primitive ID for one bounded raster fill transaction.
     pub const APPLY_FILL: Self = Self(0x0005_0002);
-    /// Primitive ID for one canonical raster or vector geometry transaction.
+    /// Primitive ID for one canonical raster geometry transaction.
     pub const APPLY_GEOMETRY: Self = Self(0x0005_0003);
     /// Primitive ID for applying a raster gradient.
     pub const APPLY_GRADIENT: Self = Self(0x0005_0010);
@@ -131,7 +129,7 @@ impl PrimitiveId {
     pub const SEPARATE_RASTER_COLORS: Self = Self(0x0005_0041);
     /// Primitive ID for restoring selected raster pixels from an ingested source.
     pub const RESTORE_SELECTED_PIXELS: Self = Self(0x0005_0042);
-    /// Primitive ID for exact region-scoped raster or vector color replacement.
+    /// Primitive ID for exact region-scoped raster color replacement.
     pub const SCOPED_COLOR_REPLACE: Self = Self(0x0005_0043);
     /// Primitive ID for replacing one existing raster plane from an immutable asset.
     pub const IMPORT_RASTER_ASSET: Self = Self(0x0009_0001);
@@ -171,22 +169,6 @@ impl PrimitiveId {
     pub const ROTATE_DOCUMENT: Self = Self(0x0007_0002);
     /// Primitive ID for resizing document data and frame metadata.
     pub const RESIZE_DOCUMENT: Self = Self(0x0007_0003);
-    /// Primitive ID for adding a vector path.
-    pub const VECTOR_ADD_PATH: Self = Self(0x0008_0001);
-    /// Primitive ID for adding a vector fill.
-    pub const VECTOR_ADD_FILL: Self = Self(0x0008_0002);
-    /// Primitive ID for erasing vector geometry.
-    pub const VECTOR_ERASE: Self = Self(0x0008_0003);
-    /// Primitive ID for connecting vector endpoints.
-    pub const VECTOR_CONNECT: Self = Self(0x0008_0004);
-    /// Primitive ID for correcting vector path widths.
-    pub const VECTOR_CORRECT_WIDTH: Self = Self(0x0008_0005);
-    /// Primitive ID for rasterizing a vector layer into the document.
-    pub const RASTERIZE_VECTOR_LAYER: Self = Self(0x0008_0010);
-    /// Primitive ID for vectorizing one raster plane.
-    pub const VECTORIZE_RASTER_PLANE: Self = Self(0x0008_0011);
-    /// Primitive ID for creating a vector layer and vectorizing into it atomically.
-    pub const VECTORIZE_RASTER_PLANE_INTO_NEW_LAYER: Self = Self(0x0008_0012);
     /// Primitive ID for replacing Light Table global opacity.
     pub const LIGHT_TABLE_SET_GLOBAL_OPACITY: Self = Self(0x000a_0001);
     /// Primitive ID for creating a Light Table set.
@@ -254,14 +236,14 @@ impl StateId {
 
 impl ReplayEpoch {
     /// Replay epoch used by every built-in primitive in this Core version.
-    pub const CURRENT: Self = Self(23);
+    pub const CURRENT: Self = Self(24);
 }
 
 /// Exact current top-level procedure-authoritative native format version.
 ///
 /// The build, reader, writer, and replay contract all use this value. Earlier
 /// and later top-level versions are rejected without migration.
-pub const PROCEDURE_FORMAT_VERSION: u32 = 26;
+pub const PROCEDURE_FORMAT_VERSION: u32 = 27;
 
 /// Version of the canonical scalar, rounding, alpha, and geometry contract.
 pub const CANONICAL_NUMERIC_VERSION: u32 = 1;
@@ -313,9 +295,9 @@ impl ReplayContract {
     }
 }
 
-/// A BLAKE3-256 digest of canonical semantic document-state schema-6 bytes.
+/// A BLAKE3-256 digest of canonical semantic document-state schema-10 bytes.
 ///
-/// The compact root and semantic metadata frames use schema version 4 in the
+/// The compact root and semantic metadata frames use schema version 10 in the
 /// `org.inkpod.digest.document-state.v8` derive-key domain. Raster payloads
 /// enter that root through separately domain-separated, content-addressed tile
 /// and raster commitments, so the digest is independent of edit order and

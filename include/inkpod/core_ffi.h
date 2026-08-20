@@ -10,7 +10,7 @@
  *
  * @par 共通の構造体規則
  * 拡張可能な入出力構造体は先頭が `uint32_t struct_size` である。呼び出し側は
- * `struct_size = sizeof(その構造体)` を設定する。Core は ABI v16 で既知の末尾まで
+ * `struct_size = sizeof(その構造体)` を設定する。Core は ABI v17 で既知の末尾まで
  * 読み書きできるサイズ、アラインメント、stride、count と全バイト範囲を検証してから
  * ポインターを参照する。構造体ポインターは個別に NULL 可と明記したものを除き非 NULL。
  * count が 0 の任意 span だけはデータポインターを NULL にできる。入力構造体、出力構造体、
@@ -66,7 +66,7 @@
 extern "C" {
 #endif
 
-#define INKPOD_ABI_VERSION UINT32_C(16)
+#define INKPOD_ABI_VERSION UINT32_C(17)
 #define INKPOD_FEATURE_NONE UINT64_C(0)
 
 /** @brief InkScript ABI record の exact-current version。 */
@@ -235,7 +235,14 @@ typedef uint32_t InkpodEditorTool;
 #define INKPOD_EDITOR_TOOL_GUIDE_MOVE UINT32_C(1004)
 #define INKPOD_EDITOR_TOOL_SELECTION UINT32_C(1005)
 #define INKPOD_EDITOR_TOOL_COLOR_REPLACE UINT32_C(1008)
+#define INKPOD_EDITOR_TOOL_SHOOTING_FRAME UINT32_C(1009)
 #define INKPOD_EDITOR_TOOL_VANISHING_POINT UINT32_C(1010)
+#define INKPOD_EDITOR_TOOL_GEOMETRY_LINE UINT32_C(1011)
+#define INKPOD_EDITOR_TOOL_GEOMETRY_CURVE UINT32_C(1012)
+#define INKPOD_EDITOR_TOOL_GEOMETRY_RECTANGLE UINT32_C(1013)
+#define INKPOD_EDITOR_TOOL_GEOMETRY_ELLIPSE UINT32_C(1014)
+#define INKPOD_EDITOR_TOOL_GEOMETRY_POLYGON UINT32_C(1015)
+#define INKPOD_EDITOR_TOOL_GEOMETRY_POLYLINE UINT32_C(1016)
 #define INKPOD_EDITOR_TOOL_FLOATING_TRANSFORM UINT32_C(1006)
 #define INKPOD_EDITOR_TOOL_LIGHT_TABLE_MOVE UINT32_C(1007)
 #define INKPOD_EDITOR_TOOL_EFFECT_GRADIENT UINT32_C(1101)
@@ -244,13 +251,7 @@ typedef uint32_t InkpodEditorTool;
 #define INKPOD_EDITOR_TOOL_EFFECT_STAMP UINT32_C(1104)
 #define INKPOD_EDITOR_TOOL_EFFECT_DUST UINT32_C(1105)
 #define INKPOD_EDITOR_TOOL_EFFECT_ALPHA_GRADIENT UINT32_C(1106)
-#define INKPOD_EDITOR_TOOL_VECTOR_LINE UINT32_C(1201)
-#define INKPOD_EDITOR_TOOL_VECTOR_CURVE UINT32_C(1202)
-#define INKPOD_EDITOR_TOOL_VECTOR_RECTANGLE UINT32_C(1203)
-#define INKPOD_EDITOR_TOOL_VECTOR_ELLIPSE UINT32_C(1204)
-#define INKPOD_EDITOR_TOOL_VECTOR_POLYLINE UINT32_C(1205)
-#define INKPOD_EDITOR_TOOL_VECTOR_ERASER UINT32_C(1206)
-#define INKPOD_EDITOR_TOOL_VECTOR_POLYGON UINT32_C(1207)
+/* Retired vector editor-tool codes 1201..1207 remain unassigned. */
 
 #define INKPOD_EDITOR_STATE_DIRTY (UINT32_C(1) << 0)
 #define INKPOD_EDITOR_STATE_HAS_LAST_COLOR_TOOL (UINT32_C(1) << 1)
@@ -272,7 +273,7 @@ typedef uint32_t InkpodEditorUpdateKind;
 #define INKPOD_EDITOR_UPDATE_TOOL_DIAMETER UINT32_C(3)
 #define INKPOD_EDITOR_UPDATE_FILL_OPTIONS UINT32_C(4)
 #define INKPOD_EDITOR_UPDATE_SELECTION_OPTIONS UINT32_C(5)
-#define INKPOD_EDITOR_UPDATE_VECTOR_OPTIONS UINT32_C(6)
+/* Editor update code 6 is retired and remains unassigned. */
 #define INKPOD_EDITOR_UPDATE_ACTIVE_TARGET UINT32_C(7)
 #define INKPOD_EDITOR_UPDATE_PALETTE_CURSOR UINT32_C(8)
 #define INKPOD_EDITOR_UPDATE_BRUSH_OPTIONS UINT32_C(9)
@@ -330,23 +331,7 @@ typedef uint32_t InkpodViewCommandKind;
 #define INKPOD_VIEW_SET_ALPHA_VISIBLE UINT32_C(14)
 #define INKPOD_VIEW_SET_GUIDE_SNAP_ENABLED UINT32_C(15)
 #define INKPOD_VIEW_SET_GRID_SNAP_ENABLED UINT32_C(16)
-#define INKPOD_VIEW_SET_VECTOR_ANTIALIAS UINT32_C(17)
-#define INKPOD_VIEW_SET_VECTOR_CENTERLINE_MODE UINT32_C(18)
-#define INKPOD_VIEW_SET_VECTOR_ENDPOINTS_VISIBLE UINT32_C(19)
-
-typedef uint32_t InkpodVectorCenterlineMode;
-#define INKPOD_VECTOR_CENTERLINE_HIDDEN UINT32_C(0)
-#define INKPOD_VECTOR_CENTERLINE_OVERLAY UINT32_C(1)
-#define INKPOD_VECTOR_CENTERLINE_ONLY UINT32_C(2)
-
-#define INKPOD_VECTOR_DIAGNOSTIC_ANTIALIAS (UINT32_C(1) << 0)
-#define INKPOD_VECTOR_DIAGNOSTIC_CENTERLINE_VISIBLE (UINT32_C(1) << 1)
-#define INKPOD_VECTOR_DIAGNOSTIC_CENTERLINE_ONLY (UINT32_C(1) << 2)
-#define INKPOD_VECTOR_DIAGNOSTIC_ENDPOINTS_VISIBLE (UINT32_C(1) << 3)
-
-typedef uint32_t InkpodVectorEndpointKind;
-#define INKPOD_VECTOR_ENDPOINT_START UINT32_C(1)
-#define INKPOD_VECTOR_ENDPOINT_END UINT32_C(2)
+/* View command codes 17..19 are retired and remain unassigned. */
 
 #define INKPOD_SNAPSHOT_TRANSFORM_FLIP_HORIZONTAL (UINT32_C(1) << 0)
 #define INKPOD_SNAPSHOT_TRANSFORM_FLIP_VERTICAL (UINT32_C(1) << 1)
@@ -418,9 +403,7 @@ typedef uint32_t InkpodLayerKind;
 #define INKPOD_LAYER_FRAME UINT32_C(5)
 #define INKPOD_LAYER_VANISHING_POINT UINT32_C(6)
 #define INKPOD_LAYER_ADJUSTMENT UINT32_C(7)
-#define INKPOD_LAYER_TEXT UINT32_C(8)
-#define INKPOD_LAYER_ANNOTATION UINT32_C(9)
-#define INKPOD_LAYER_VECTOR_COLORING UINT32_C(10)
+/* Layer-kind codes 8..10 are retired and remain unassigned. */
 
 /** @brief layer 内の typed plane の種類。 */
 typedef uint32_t InkpodTypedPlaneKind;
@@ -428,9 +411,7 @@ typedef uint32_t InkpodTypedPlaneKind;
 #define INKPOD_TYPED_PLANE_COLOR UINT32_C(2)
 #define INKPOD_TYPED_PLANE_RASTER UINT32_C(3)
 #define INKPOD_TYPED_PLANE_SELECTION UINT32_C(4)
-#define INKPOD_TYPED_PLANE_VECTOR_MAIN_LINE UINT32_C(5)
-#define INKPOD_TYPED_PLANE_COLOR_TRACE UINT32_C(6)
-#define INKPOD_TYPED_PLANE_VECTOR_FILL UINT32_C(7)
+/* Typed-plane codes 5..7 are retired and remain unassigned. */
 #define INKPOD_EDIT_TARGET_LAYER UINT32_C(1)
 #define INKPOD_EDIT_TARGET_PLANE UINT32_C(2)
 #define INKPOD_EDIT_TARGET_DUPLICATE UINT32_C(1)
@@ -441,33 +422,6 @@ typedef uint32_t InkpodTypedPlaneKind;
 #define INKPOD_EDIT_TARGET_CONVERT_LAYERS UINT32_C(6)
 #define INKPOD_EDIT_TARGET_MERGE UINT32_C(7)
 #define INKPOD_MAX_EDIT_TARGETS UINT32_C(4096)
-
-#define INKPOD_VECTOR_PATH_CLOSED (UINT64_C(1) << 0)
-/** @brief vector 消去範囲のモード型。 */
-typedef uint32_t InkpodVectorEraseMode;
-#define INKPOD_VECTOR_ERASE_PARTIAL UINT32_C(1)
-#define INKPOD_VECTOR_ERASE_TO_INTERSECTION UINT32_C(2)
-#define INKPOD_VECTOR_ERASE_WHOLE_PATH UINT32_C(3)
-/** @brief vector 線幅補正の演算型。 */
-typedef uint32_t InkpodVectorWidthMode;
-#define INKPOD_VECTOR_WIDTH_ADD UINT32_C(1)
-#define INKPOD_VECTOR_WIDTH_SUBTRACT UINT32_C(2)
-#define INKPOD_VECTOR_WIDTH_SCALE UINT32_C(3)
-#define INKPOD_VECTOR_WIDTH_CONSTANT UINT32_C(4)
-/** @brief vector object 選択規則の型。 */
-typedef uint32_t InkpodVectorSelectionMode;
-#define INKPOD_VECTOR_SELECT_CUT_BY_SELECTION UINT32_C(1)
-#define INKPOD_VECTOR_SELECT_TOUCHING UINT32_C(2)
-#define INKPOD_VECTOR_SELECT_FULLY_CONTAINED UINT32_C(3)
-#define INKPOD_VECTOR_SELECT_LINE UINT32_C(4)
-#define INKPOD_VECTOR_SELECT_WHOLE_LINE UINT32_C(5)
-#define INKPOD_VECTOR_SELECT_TO_INTERSECTION UINT32_C(6)
-#define INKPOD_VECTOR_SELECT_FILL_BOUNDARY UINT32_C(7)
-#define INKPOD_VECTOR_SELECT_FILL UINT32_C(8)
-#define INKPOD_VECTOR_RASTERIZE_ANTIALIAS (UINT64_C(1) << 0)
-#define INKPOD_SNAPSHOT_VECTOR_CLOSED (UINT32_C(1) << 0)
-#define INKPOD_SNAPSHOT_VECTOR_STROKE_VISIBLE (UINT32_C(1) << 1)
-#define INKPOD_SNAPSHOT_VECTOR_SQUARE_CROSS_SECTION (UINT32_C(1) << 2)
 
 /** @brief Core-owned geometry primitive discriminator. */
 typedef uint32_t InkpodGeometryPrimitive;
@@ -493,34 +447,9 @@ typedef uint32_t InkpodGeometryPrimitive;
 typedef uint32_t InkpodRenderPassKind;
 #define INKPOD_RENDER_PASS_LAYER_BEGIN UINT32_C(1)
 #define INKPOD_RENDER_PASS_RASTER_TILES UINT32_C(2)
-#define INKPOD_RENDER_PASS_VECTOR_FILLS UINT32_C(3)
-#define INKPOD_RENDER_PASS_VECTOR_STROKES UINT32_C(4)
 #define INKPOD_RENDER_PASS_ADJUSTMENT UINT32_C(5)
-#define INKPOD_RENDER_PASS_ANNOTATIONS UINT32_C(6)
 #define INKPOD_RENDER_PASS_LAYER_END UINT32_C(7)
-
-/** @brief Editable text/instruction object kind. */
-typedef uint32_t InkpodAnnotationKind;
-#define INKPOD_ANNOTATION_TEXT UINT32_C(1)
-#define INKPOD_ANNOTATION_STROKE UINT32_C(2)
-#define INKPOD_ANNOTATION_LEADER UINT32_C(3)
-#define INKPOD_ANNOTATION_VALUE UINT32_C(4)
-
-/** @brief Whether an annotation participates in finished-image export. */
-typedef uint32_t InkpodAnnotationOutput;
-#define INKPOD_ANNOTATION_OUTPUT_NORMAL UINT32_C(1)
-#define INKPOD_ANNOTATION_OUTPUT_INSTRUCTION UINT32_C(2)
-
-/** @brief Atomic annotation object edit. */
-typedef uint32_t InkpodAnnotationEditKind;
-#define INKPOD_ANNOTATION_EDIT_CREATE UINT32_C(1)
-#define INKPOD_ANNOTATION_EDIT_UPDATE UINT32_C(2)
-#define INKPOD_ANNOTATION_EDIT_MOVE UINT32_C(3)
-#define INKPOD_ANNOTATION_EDIT_DELETE UINT32_C(4)
-
-#define INKPOD_ANNOTATION_STYLE_BOLD (UINT32_C(1) << 0)
-#define INKPOD_ANNOTATION_STYLE_ITALIC (UINT32_C(1) << 1)
-#define INKPOD_ANNOTATION_STYLE_UNDERLINE (UINT32_C(1) << 2)
+/* Render pass codes 3, 4, and 6 are retired and remain unassigned. */
 
 /** @brief Persistent manipulation anchor for an angled shooting frame. */
 typedef uint32_t InkpodShootingFrameAnchor;
@@ -628,7 +557,7 @@ typedef uint32_t InkpodBatchOperationKind;
 #define INKPOD_BATCH_OPERATION_CONTINUOUS_FILL UINT32_C(2)
 #define INKPOD_BATCH_OPERATION_SEPARATION UINT32_C(3)
 #define INKPOD_BATCH_OPERATION_VISIBILITY UINT32_C(4)
-#define INKPOD_BATCH_OPERATION_LINE_WIDTH UINT32_C(5)
+/* Batch operation code 5 is retired and remains unassigned. */
 #define INKPOD_BATCH_OPERATION_FILTER UINT32_C(6)
 #define INKPOD_BATCH_OPERATION_BOUNDARY_AIRBRUSH UINT32_C(7)
 #define INKPOD_BATCH_OPERATION_DUST_REMOVAL UINT32_C(8)
@@ -750,13 +679,11 @@ typedef uint32_t InkpodSelectionShape;
 #define INKPOD_SELECTION_POLYLINE UINT32_C(4)
 #define INKPOD_SELECTION_TRACE UINT32_C(5)
 #define INKPOD_SELECTION_WAND UINT32_C(6)
-/** @brief Explicit raster/vector topology for scoped exact color replacement. */
+/** @brief Explicit raster topology for scoped exact color replacement. */
 typedef uint32_t InkpodScopedColorReplaceMode;
 #define INKPOD_COLOR_REPLACE_RASTER_COLOR UINT32_C(1)
 #define INKPOD_COLOR_REPLACE_RASTER_MAIN_LINE UINT32_C(2)
-#define INKPOD_COLOR_REPLACE_VECTOR_COLOR_LINE UINT32_C(3)
-#define INKPOD_COLOR_REPLACE_VECTOR_MAIN_LINE UINT32_C(4)
-#define INKPOD_COLOR_REPLACE_VECTOR_FILL UINT32_C(5)
+/* Color-replace target-mode codes 3..5 are retired and remain unassigned. */
 #define INKPOD_COLOR_REPLACE_HAS_REGION (UINT64_C(1) << 0)
 #define INKPOD_COLOR_REPLACE_FLAGS INKPOD_COLOR_REPLACE_HAS_REGION
 #define INKPOD_COLOR_REPLACE_PREVIEW_HAS_BOUNDS (UINT32_C(1) << 0)
@@ -1823,81 +1750,6 @@ typedef struct InkpodColorValue {
     uint16_t alpha;
 } InkpodColorValue;
 
-/** @brief One fixed-point document-space annotation point (1/1000 pixel). */
-typedef struct InkpodAnnotationPoint {
-    uint32_t struct_size;
-    uint32_t reserved;
-    int32_t x_milli;
-    int32_t y_milli;
-} InkpodAnnotationPoint;
-
-/**
- * @brief Borrowed input for a Text or Annotation layer object.
- *
- * All nested pointers are borrowed only for the duration of the call. Empty
- * UTF-8 and point spans use NULL with a zero length/stride. Text and font bytes
- * must be valid UTF-8 and all spans are subject to implementation bounds.
- */
-typedef struct InkpodAnnotationObjectInput {
-    uint32_t struct_size;
-    InkpodAnnotationKind kind;
-    uint64_t feature_flags;
-    uint64_t layer_id;
-    InkpodAnnotationOutput output;
-    uint32_t style_flags;
-    InkpodFrameRect bounds;
-    const uint8_t* font_family_utf8;
-    uint64_t font_family_bytes;
-    uint32_t font_size_milli;
-    uint32_t stroke_width_milli;
-    InkpodColorValue color;
-    const uint8_t* text_utf8;
-    uint64_t text_bytes;
-    const InkpodAnnotationPoint* points;
-    uint64_t point_count;
-    uint64_t point_stride_bytes;
-} InkpodAnnotationObjectInput;
-
-/** @brief One create/update/move/delete entry in an atomic annotation edit. */
-typedef struct InkpodAnnotationEdit {
-    uint32_t struct_size;
-    InkpodAnnotationEditKind kind;
-    uint64_t feature_flags;
-    uint64_t object_id;
-    const InkpodAnnotationObjectInput* input;
-    int32_t delta_x;
-    int32_t delta_y;
-} InkpodAnnotationEdit;
-
-/**
- * @brief Caller-owned result and optional stable-ID output span.
- *
- * `created_ids` is never retained. A too-small span returns
- * `INKPOD_STATUS_BUFFER_TOO_SMALL`, reports `created_count`, and commits nothing.
- */
-typedef struct InkpodAnnotationEditResult {
-    uint32_t struct_size;
-    uint32_t reserved;
-    uint64_t feature_flags;
-    uint64_t revision;
-    uint64_t* created_ids;
-    uint64_t created_capacity;
-    uint64_t created_count;
-} InkpodAnnotationEditResult;
-
-/** @brief Input that begins one long-lived handwritten annotation stroke. */
-typedef struct InkpodAnnotationStrokeInput {
-    uint32_t struct_size;
-    InkpodAnnotationOutput output;
-    uint64_t feature_flags;
-    uint64_t base_document_revision;
-    uint64_t layer_id;
-    InkpodColorValue color;
-    uint32_t stroke_width_milli;
-    uint32_t reserved;
-    InkpodAnnotationPoint start;
-} InkpodAnnotationStrokeInput;
-
 /**
  * @brief Borrowed numeric shooting-frame value for edit or preview.
  *
@@ -2054,9 +1906,6 @@ typedef struct InkpodSnapshotInfoV3 {
     uint64_t view_revision;
     uint64_t tile_count;
     uint64_t guide_count;
-    uint64_t vector_segment_count;
-    uint64_t vector_fill_count;
-    uint64_t vector_boundary_path_count;
     double zoom;
     double pan_x;
     double pan_y;
@@ -2182,14 +2031,6 @@ typedef struct InkpodEditorSelectionOptions {
     InkpodTraceBrushShape trace_shape;
 } InkpodEditorSelectionOptions;
 
-/** @brief vector erase/select option をコピーする値 record。 */
-typedef struct InkpodEditorVectorOptions {
-    uint32_t struct_size;
-    InkpodVectorEraseMode erase_mode;
-    InkpodVectorSelectionMode selection_mode;
-    uint32_t reserved;
-} InkpodEditorVectorOptions;
-
 /**
  * @brief Core-owned raster brush options copied by value.
  *
@@ -2230,7 +2071,6 @@ typedef struct InkpodEditorStateInfo {
     uint32_t palette_index;
     InkpodEditorFillOptions fill;
     InkpodEditorSelectionOptions selection;
-    InkpodEditorVectorOptions vector;
     InkpodEditorBrushOptions brush;
 } InkpodEditorStateInfo;
 
@@ -2267,7 +2107,6 @@ typedef struct InkpodEditorStateUpdate {
     uint32_t palette_index;
     InkpodEditorFillOptions fill;
     InkpodEditorSelectionOptions selection;
-    InkpodEditorVectorOptions vector;
     InkpodEditorBrushOptions brush;
 } InkpodEditorStateUpdate;
 
@@ -2432,12 +2271,6 @@ typedef struct InkpodSnapshotOverlay {
     uint64_t guide_stride_bytes;
 } InkpodSnapshotOverlay;
 
-/** @brief document logical 座標の 2 次元点。`struct_size` を持たない値型。 */
-typedef struct InkpodVectorPoint {
-    float x;
-    float y;
-} InkpodVectorPoint;
-
 /** @brief One size-versioned document-space point in a borrowed geometry span. */
 typedef struct InkpodGeometryPoint {
     uint32_t struct_size;
@@ -2466,7 +2299,7 @@ typedef struct InkpodGeometryPointResolveResult {
     uint64_t point_count;
 } InkpodGeometryPointResolveResult;
 
-/** @brief Bounded raster/vector geometry request copied by Core before return. */
+/** @brief Bounded raster geometry request copied by Core before return. */
 typedef struct InkpodGeometryInput {
     uint32_t struct_size;
     InkpodGeometryPrimitive primitive;
@@ -2492,124 +2325,6 @@ typedef struct InkpodGeometryPreviewInfo {
     uint64_t base_revision;
     uint64_t preview_revision;
 } InkpodGeometryPreviewInfo;
-
-/** @brief cubic control points と両端線幅を持つ borrowed vector segment record。 */
-typedef struct InkpodVectorCubicSegment {
-    uint32_t struct_size;
-    uint32_t reserved;
-    InkpodVectorPoint p0;
-    InkpodVectorPoint p1;
-    InkpodVectorPoint p2;
-    InkpodVectorPoint p3;
-    float width_start;
-    float width_end;
-} InkpodVectorCubicSegment;
-
-/** @brief 1 vector path と segment span を作成する borrowed 入力。Core は値をコピーする。 */
-typedef struct InkpodVectorPathInput {
-    uint32_t struct_size;
-    uint32_t reserved;
-    uint64_t flags;
-    uint64_t plane_id;
-    InkpodColorValue color;
-    const InkpodVectorCubicSegment* segments;
-    uint64_t segment_count;
-    uint64_t segment_stride_bytes;
-} InkpodVectorPathInput;
-
-/** @brief fill color と閉じた boundary path ID span を渡す borrowed 入力。 */
-typedef struct InkpodVectorFillInput {
-    uint32_t struct_size;
-    uint32_t reserved;
-    uint64_t feature_flags;
-    uint64_t plane_id;
-    InkpodColorValue color;
-    const uint64_t* boundary_path_ids;
-    uint64_t boundary_path_count;
-} InkpodVectorFillInput;
-
-/** @brief vector erase の plane、位置、半径、mode を渡す borrowed 入力。 */
-typedef struct InkpodVectorEraseInput {
-    uint32_t struct_size;
-    InkpodVectorEraseMode mode;
-    uint64_t plane_id;
-    float x;
-    float y;
-    float radius;
-    uint32_t reserved;
-} InkpodVectorEraseInput;
-
-/** @brief path ID span と線幅補正演算を渡す borrowed 入力。 */
-typedef struct InkpodVectorWidthInput {
-    uint32_t struct_size;
-    InkpodVectorWidthMode mode;
-    uint64_t feature_flags;
-    const uint64_t* path_ids;
-    uint64_t path_count;
-    float parameter;
-    uint32_t reserved;
-} InkpodVectorWidthInput;
-
-/** @brief vector 選択 mode と document bounds を渡す borrowed 入力。 */
-typedef struct InkpodVectorSelectionInput {
-    uint32_t struct_size;
-    InkpodVectorSelectionMode mode;
-    uint64_t feature_flags;
-    InkpodFrameRect bounds;
-} InkpodVectorSelectionInput;
-
-/** @brief path 上の選択区間を 0..1,000,000 で表す caller-owned 出力 record。 */
-typedef struct InkpodVectorSelectionRange {
-    uint32_t struct_size;
-    uint32_t reserved;
-    uint64_t path_id;
-    uint32_t start_million;
-    uint32_t end_million;
-} InkpodVectorSelectionRange;
-
-/** @brief 選択 range と fill ID を受け取る caller-owned count-query 対応 buffer。 */
-typedef struct InkpodVectorSelectionBuffer {
-    uint32_t struct_size;
-    uint32_t reserved;
-    InkpodVectorSelectionRange* ranges;
-    uint64_t range_capacity;
-    uint64_t range_count;
-    uint64_t* fill_ids;
-    uint64_t fill_capacity;
-    uint64_t fill_count;
-} InkpodVectorSelectionBuffer;
-
-/** @brief vector layer の rasterize scale/flags を渡す borrowed 入力。 */
-typedef struct InkpodVectorRasterizeInput {
-    uint32_t struct_size;
-    uint32_t reserved;
-    uint64_t feature_flags;
-    uint64_t layer_id;
-    uint32_t scale;
-    uint32_t reserved_2;
-} InkpodVectorRasterizeInput;
-
-/** @brief straight RGBA8 raster を受け取る caller-owned size-query 対応 buffer。 */
-typedef struct InkpodVectorRasterBuffer {
-    uint32_t struct_size;
-    uint32_t reserved;
-    uint8_t* pixels;
-    uint64_t pixel_capacity;
-    uint64_t required_bytes;
-    uint32_t width;
-    uint32_t height;
-    uint32_t stride_bytes;
-    uint32_t reserved_2;
-} InkpodVectorRasterBuffer;
-
-/** @brief raster plane から vector layer へ変換する閾値と stable ID の borrowed 入力。 */
-typedef struct InkpodRasterVectorizeInput {
-    uint32_t struct_size;
-    uint32_t alpha_threshold;
-    uint64_t feature_flags;
-    uint64_t source_plane_id;
-    uint64_t target_layer_id;
-} InkpodRasterVectorizeInput;
 
 /** @brief 正規化 16-bit 入出力値を持つ tone-curve point record。 */
 typedef struct InkpodCurvePoint {
@@ -3033,95 +2748,6 @@ typedef struct InkpodBatchPairCandidate {
     int32_t bounds_height;
 } InkpodBatchPairCandidate;
 
-/** @brief snapshot 内の path/plane/order/color/cubic/width を持つ borrowed segment record。 */
-typedef struct InkpodSnapshotVectorSegment {
-    uint32_t struct_size;
-    uint32_t flags;
-    uint64_t path_id;
-    uint64_t plane_id;
-    uint32_t z_order;
-    uint32_t segment_index;
-    uint32_t segment_count;
-    uint32_t color_rgba;
-    InkpodVectorPoint p0;
-    InkpodVectorPoint p1;
-    InkpodVectorPoint p2;
-    InkpodVectorPoint p3;
-    float width_start;
-    float width_end;
-} InkpodSnapshotVectorSegment;
-
-/** @brief snapshot 内 vector fill と boundary ID 範囲を持つ borrowed record。 */
-typedef struct InkpodSnapshotVectorFill {
-    uint32_t struct_size;
-    uint32_t reserved;
-    uint64_t fill_id;
-    uint64_t plane_id;
-    uint32_t z_order;
-    uint32_t color_rgba;
-    uint64_t first_boundary_path;
-    uint64_t boundary_path_count;
-} InkpodSnapshotVectorFill;
-
-/**
- * @brief snapshot の segment/fill/boundary-ID span を返す caller-owned view record。
- * すべての span は親 snapshot の release まで borrowed。
- */
-typedef struct InkpodSnapshotVectorView {
-    uint32_t struct_size;
-    uint32_t abi_version;
-    uint64_t feature_flags;
-    const InkpodSnapshotVectorSegment* segments;
-    uint64_t segment_count;
-    uint64_t segment_stride_bytes;
-    const InkpodSnapshotVectorFill* fills;
-    uint64_t fill_count;
-    uint64_t fill_stride_bytes;
-    const uint64_t* boundary_path_ids;
-    uint64_t boundary_path_count;
-} InkpodSnapshotVectorView;
-
-/** @brief Immutable annotation record indexing snapshot-owned UTF-8/point pools. */
-typedef struct InkpodSnapshotAnnotation {
-    uint32_t struct_size;
-    InkpodAnnotationKind kind;
-    uint64_t feature_flags;
-    uint64_t object_id;
-    uint64_t layer_id;
-    InkpodAnnotationOutput output;
-    uint32_t style_flags;
-    InkpodFrameRect bounds;
-    uint32_t font_size_milli;
-    uint32_t stroke_width_milli;
-    InkpodColorValue color;
-    uint64_t font_utf8_offset;
-    uint64_t font_utf8_bytes;
-    uint64_t text_utf8_offset;
-    uint64_t text_utf8_bytes;
-    uint64_t first_point;
-    uint64_t point_count;
-} InkpodSnapshotAnnotation;
-
-/**
- * @brief Snapshot-owned annotation records and immutable backing pools.
- *
- * Every borrowed pointer remains valid until the snapshot is released. Object
- * offsets/counts index the UTF-8 byte and fixed-point point pools in this view.
- */
-typedef struct InkpodSnapshotAnnotationView {
-    uint32_t struct_size;
-    uint32_t abi_version;
-    uint64_t feature_flags;
-    const InkpodSnapshotAnnotation* objects;
-    uint64_t object_count;
-    uint64_t object_stride_bytes;
-    const uint8_t* utf8_bytes;
-    uint64_t utf8_byte_count;
-    const InkpodAnnotationPoint* points;
-    uint64_t point_count;
-    uint64_t point_stride_bytes;
-} InkpodSnapshotAnnotationView;
-
 /**
  * @brief Snapshot-owned optional angled shooting-frame span.
  *
@@ -3161,31 +2787,6 @@ typedef struct InkpodSnapshotVanishingPointView {
     uint64_t radial_guide_count;
     uint64_t radial_guide_stride_bytes;
 } InkpodSnapshotVanishingPointView;
-
-/** @brief Explicitly disconnected vector endpoint in stable path/plane identity order. */
-typedef struct InkpodSnapshotVectorEndpoint {
-    uint32_t struct_size;
-    InkpodVectorEndpointKind endpoint;
-    uint64_t path_id;
-    uint64_t plane_id;
-    InkpodVectorPoint point;
-} InkpodSnapshotVectorEndpoint;
-
-/**
- * @brief View-local vector diagnostic flags and snapshot-owned endpoint span.
- *
- * Endpoint marker size is a renderer concern in device pixels. The Core emits
- * only exact topological disconnections and never infers a connection from
- * coordinate proximity.
- */
-typedef struct InkpodSnapshotVectorDiagnostics {
-    uint32_t struct_size;
-    uint32_t flags;
-    uint64_t feature_flags;
-    const InkpodSnapshotVectorEndpoint* endpoints;
-    uint64_t endpoint_count;
-    uint64_t endpoint_stride_bytes;
-} InkpodSnapshotVectorDiagnostics;
 
 /** @brief One bottom-to-top operation in a snapshot-owned render plan. */
 typedef struct InkpodSnapshotRenderPass {
@@ -3359,7 +2960,6 @@ typedef struct InkpodScopedColorReplacePreview {
     uint32_t feature_flags;
     uint64_t base_document_revision;
     uint64_t matched_pixels;
-    uint64_t matched_objects;
     InkpodFrameRect affected_bounds;
 } InkpodScopedColorReplacePreview;
 
@@ -5156,7 +4756,7 @@ InkpodStatus inkpod_core_export_common_raster(
     InkpodCommonRasterFormat format,
     uint32_t composite_white,
     InkpodByteBuffer** out_buffer);
-/** @brief 明示的な指示annotation／角度付き撮影frameを含むraster bytesを返す。 */
+/** @brief 明示的な指示overlay／角度付き撮影frameを含むraster bytesを返す。 */
 InkpodStatus inkpod_core_export_instruction_common_raster(
     InkpodCore* core,
     InkpodCommonRasterFormat format,
@@ -5754,21 +5354,6 @@ InkpodStatus inkpod_core_geometry_points_resolve(
     InkpodGeometryPoint* points,
     uint64_t point_capacity);
 
-/**
- * @brief Apply one bounded annotation edit span as one canonical transaction.
- *
- * The Core owner thread must call this function. All nested spans are copied and
- * never retained. `expected_revision` rejects stale input before IDs are consumed.
- * Success, including an all-no-op edit list, reports the resulting revision.
- */
-InkpodStatus inkpod_core_annotation_edit(
-    InkpodCore* core,
-    uint64_t expected_revision,
-    const InkpodAnnotationEdit* edits,
-    uint64_t edit_count,
-    uint64_t edit_stride_bytes,
-    InkpodAnnotationEditResult* result);
-
 /** @brief Persistent angled shooting-frame query; `out_present` is zero or one. */
 InkpodStatus inkpod_core_shooting_frame_get(
     InkpodCore* core,
@@ -5853,35 +5438,16 @@ InkpodStatus inkpod_core_vanishing_point_preview_apply(
     uint64_t* out_revision,
     uint64_t* out_point_id);
 
-/** @brief Begin an instruction/normal stroke without changing document history. */
-InkpodStatus inkpod_core_annotation_stroke_begin(
-    InkpodCore* core,
-    const InkpodAnnotationStrokeInput* input);
-/** @brief Append a bounded borrowed fixed-point point span to the active stroke. */
-InkpodStatus inkpod_core_annotation_stroke_append(
-    InkpodCore* core,
-    const InkpodAnnotationPoint* points,
-    uint64_t point_count,
-    uint64_t point_stride_bytes);
-/** @brief Commit the active stroke as one canonical edit and one Undo unit. */
-InkpodStatus inkpod_core_annotation_stroke_end(
-    InkpodCore* core,
-    InkpodAnnotationEditResult* result);
-/** @brief Cancel the active annotation stroke without consuming an ID or revision. */
-InkpodStatus inkpod_core_annotation_stroke_cancel(InkpodCore* core);
-
 /**
  * @brief Apply one bounded Core-owned geometry request as one history unit.
  *
  * `base_revision` must be zero. The point span is copied during the call and is
- * never retained. Vector targets return stable IDs; raster targets return zero.
+ * never retained.
  */
 InkpodStatus inkpod_core_geometry_apply(
     InkpodCore* core,
     const InkpodGeometryInput* input,
-    InkpodDispatchResult* result,
-    uint64_t* out_path_id,
-    uint64_t* out_fill_id);
+    InkpodDispatchResult* result);
 /** @brief Begin a non-persistent geometry preview at `base_revision`. */
 InkpodStatus inkpod_core_geometry_preview_begin(
     InkpodCore* core,
@@ -5895,133 +5461,9 @@ InkpodStatus inkpod_core_geometry_preview_update(
 /** @brief Commit the active preview through the canonical geometry executor. */
 InkpodStatus inkpod_core_geometry_preview_commit(
     InkpodCore* core,
-    InkpodDispatchResult* result,
-    uint64_t* out_path_id,
-    uint64_t* out_fill_id);
+    InkpodDispatchResult* result);
 /** @brief Cancel the active preview without changing document or history state. */
 InkpodStatus inkpod_core_geometry_preview_cancel(InkpodCore* core);
-
-/**
- * @brief cubic segment span から document-coordinate vector path を追加する。
- * @par 契約
- * Core owner thread。4 pointer は非 NULL・非重複。input/segment span は完全サイズ/stride で呼び出し中だけ borrowed。
- * 成功時 stable path ID/result を書き 1 revision/dirty/Undo 単位。失敗時不変。view zoom は geometry を変えない。
- * stroke/preview/floating 中は `INVALID_STATE`。
- * @par 主なステータス
- * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
- */
-InkpodStatus inkpod_core_vector_add_path(
-    InkpodCore* core,
-    const InkpodVectorPathInput* input,
-    InkpodDispatchResult* result,
-    uint64_t* out_path_id);
-/**
- * @brief closed boundary path ID span から vector fill を追加する。
- * @par 契約
- * Core owner thread。4 pointer は非 NULL・非重複。input/ID span は一時 borrowed。
- * 成功時 stable fill ID/result を書き 1 revision/dirty/Undo 単位。失敗時 topology/出力不変。stroke/preview/floating 中は不可。
- * @par 主なステータス
- * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
- */
-InkpodStatus inkpod_core_vector_add_fill(
-    InkpodCore* core,
-    const InkpodVectorFillInput* input,
-    InkpodDispatchResult* result,
-    uint64_t* out_fill_id);
-/**
- * @brief partial/to-intersection/whole-path mode で vector を消去する。
- * @par 契約
- * Core owner thread。3 pointer は非 NULL・非重複、input は完全サイズ/finite/bounded。
- * 成功時実変更を 1 revision/dirty/Undo 単位、失敗時 topology 不変。stroke/preview/floating 中は不可。
- * @par 主なステータス
- * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
- */
-InkpodStatus inkpod_core_vector_erase(
-    InkpodCore* core,
-    const InkpodVectorEraseInput* input,
-    InkpodDispatchResult* result);
-/**
- * @brief maximum gap 内の最近傍 endpoint を deterministic に接続する。
- * @par 契約
- * Core owner thread。`core`/`result`/`out_path_id` は非 NULL、plane ID と finite gap を検証。
- * 成功時 ID/result を書き実変更を 1 revision/dirty/Undo 単位。失敗時出力/topology 不変。stroke/preview/floating 中は不可。
- * @par 主なステータス
- * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
- */
-InkpodStatus inkpod_core_vector_connect(
-    InkpodCore* core,
-    uint64_t plane_id,
-    float maximum_gap,
-    InkpodDispatchResult* result,
-    uint64_t* out_path_id);
-/**
- * @brief path ID span の線幅を add/subtract/scale/constant で補正する。
- * @par 契約
- * Core owner thread。3 pointer は非 NULL、input/ID span は一時 borrowed、parameter は finite/bounded。
- * 成功時実変更を 1 revision/dirty/Undo 単位、失敗時 geometry 不変。stroke/preview/floating 中は不可。
- * @par 主なステータス
- * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
- */
-InkpodStatus inkpod_core_vector_correct_width(
-    InkpodCore* core,
-    const InkpodVectorWidthInput* input,
-    InkpodDispatchResult* result);
-/**
- * @brief mode/bounds に一致する path ranges と fill IDs を caller buffer へ返す。
- * @par 契約
- * Core owner thread。`core`/`input`/`output` は非 NULL・非重複、構造体は完全サイズ。
- * 各出力 pointer が NULL/capacity 0 なら count query。成功時 complete records、`BUFFER_TOO_SMALL` 時も両必要 count を返す。
- * caller-owned storage は保持しない。query のため revision、dirty、Undo、排他状態は不変。
- * @par 主なステータス
- * `OK`、`BUFFER_TOO_SMALL`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
- */
-InkpodStatus inkpod_core_vector_select(
-    InkpodCore* core,
-    const InkpodVectorSelectionInput* input,
-    InkpodVectorSelectionBuffer* output);
-/**
- * @brief vector layer を straight RGBA8 caller buffer へ rasterize する。
- * @par 契約
- * Core owner thread。3 pointer は非 NULL・非重複、input/output は完全サイズ。NULL/capacity 0 は size query。
- * 成功時 metadata/bytes、`BUFFER_TOO_SMALL` 時も required bytes/dimensions を返す。document/revision/dirty/Undo は不変。
- * @par 主なステータス
- * `OK`、`BUFFER_TOO_SMALL`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
- */
-InkpodStatus inkpod_core_vector_rasterize(
-    InkpodCore* core,
-    const InkpodVectorRasterizeInput* input,
-    InkpodVectorRasterBuffer* output);
-/**
- * @brief vector layer を document scale で新規 RGBA8 raster layer へ変換する。
- * @par 契約
- * Core owner thread。`core`/`input`/非空 UTF-8 name/`result`/`out_layer_id` は非 NULL・非重複。
- * name は一時 borrowed。成功時 source vector を保持して新 stable ID/result を書き、ちょうど 1 revision/dirty/Undo 単位。
- * 失敗時 layer tree/出力不変。stroke/preview/floating 中は不可。
- * @par 主なステータス
- * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
- */
-InkpodStatus inkpod_core_vector_rasterize_to_layer(
-    InkpodCore* core,
-    const InkpodVectorRasterizeInput* input,
-    const uint8_t* name_utf8,
-    uint64_t name_bytes,
-    InkpodDispatchResult* result,
-    uint64_t* out_layer_id);
-/**
- * @brief raster/color plane の nonzero-alpha row run を vector path/fill topology へ変換する。
- * @par 契約
- * Core owner thread。`core`/`input`/`result`/`out_fill_count` は非 NULL・非重複、input は完全サイズ。
- * `target_layer_id == 0` は `Vectorized` layer 作成と変換を一つの canonical primitive として行う。
- * 成功時 fill count/result を書き 1 revision/dirty/Undo 単位。予測上限超過や失敗時は部分 topology/出力を残さない。
- * stroke/preview/floating 中は `INVALID_STATE`。
- * @par 主なステータス
- * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
- */
-InkpodStatus inkpod_core_raster_vectorize(
-    InkpodCore* core,
-    const InkpodRasterVectorizeInput* input,
-    InkpodDispatchResult* result,
-    uint64_t* out_fill_count);
 
 /**
  * @brief filter preview を original committed base から計算して開始する。
@@ -6669,29 +6111,6 @@ InkpodStatus inkpod_snapshot_get_overlay(
     const InkpodSnapshot* snapshot,
     InkpodSnapshotOverlay* out_overlay);
 
-/**
- * @brief snapshot の vector segment/fill/boundary-ID spans を取得する。
- * @par 契約
- * 任意スレッド。`snapshot`/完全サイズの `out_vectors` は非 NULL、release と同期。
- * 成功時全 span は snapshot-owned borrowed で release まで有効。fill の範囲は boundary_path_ids を index し、segment は path ID ごとに並ぶ。
- * 失敗時出力未使用。状態変更なし。
- * @par 主なステータス
- * `OK`、`INVALID_ARGUMENT`、`PANIC`。
- */
-InkpodStatus inkpod_snapshot_get_vectors(
-    const InkpodSnapshot* snapshot,
-    InkpodSnapshotVectorView* out_vectors);
-
-/**
- * @brief Borrow immutable editable annotation records from a live snapshot.
- *
- * Returned spans are owned by the snapshot and expire at release. The function
- * may be called by a renderer read thread and changes no Core or snapshot state.
- */
-InkpodStatus inkpod_snapshot_get_annotations(
-    const InkpodSnapshot* snapshot,
-    InkpodSnapshotAnnotationView* out_annotations);
-
 /** @brief Borrow the snapshot-owned optional angled shooting-frame span. */
 InkpodStatus inkpod_snapshot_get_shooting_frames(
     const InkpodSnapshot* snapshot,
@@ -6707,40 +6126,12 @@ InkpodStatus inkpod_snapshot_get_vanishing_points(
     const InkpodSnapshot* snapshot,
     InkpodSnapshotVanishingPointView* out_view);
 
-/** @brief Two-stage copy of one annotation font-family hint, without a terminator. */
-InkpodStatus inkpod_snapshot_annotation_copy_font_family(
-    const InkpodSnapshot* snapshot,
-    uint64_t object_index,
-    uint8_t* buffer,
-    uint64_t capacity,
-    uint64_t* out_required);
-
-/** @brief Two-stage copy of one annotation text value, without a terminator. */
-InkpodStatus inkpod_snapshot_annotation_copy_text(
-    const InkpodSnapshot* snapshot,
-    uint64_t object_index,
-    uint8_t* buffer,
-    uint64_t capacity,
-    uint64_t* out_required);
-
-/**
- * @brief snapshot の view-local vector 診断設定と未接続端点 span を取得する。
- * @par 契約
- * 任意スレッド。`snapshot`/完全サイズの `out_diagnostics` は非 NULL、release と同期。
- * 成功時 endpoint span は snapshot-owned borrowed で release まで有効。文書、履歴、dirty は変更しない。
- * @par 主なステータス
- * `OK`、`INVALID_ARGUMENT`、`INCOMPATIBLE_ABI`、`PANIC`。
- */
-InkpodStatus inkpod_snapshot_get_vector_diagnostics(
-    const InkpodSnapshot* snapshot,
-    InkpodSnapshotVectorDiagnostics* out_diagnostics);
-
 /**
  * @brief Copies the bottom-to-top render plan for a live immutable snapshot.
  * @par Contract
  * `snapshot` and exact-size `out_plan` are non-NULL and externally synchronized.
  * Returned spans are snapshot-owned and valid until release. Pass item ranges
- * index the tile, vector-fill, vector-segment, or adjustment-LUT span selected
+ * index the tile or adjustment-LUT span selected
  * by `kind`. Unknown kinds are not emitted. Failure does not partially write
  * document state or transfer ownership.
  */
@@ -6776,7 +6167,7 @@ InkpodStatus inkpod_snapshot_get_canonical_digest(
  * @brief snapshot の Rust 所有権を解放し owner 変数を NULL にする。
  * @par 契約
  * 任意の外部同期済み renderer thread。owner pointer は非 NULL、`*snapshot == NULL` は成功 no-op。
- * 成功後 tile/pixel/guide/vector を含む全 borrowed alias は無効。Core/document revision、dirty、Undo、preview は不変。
+ * 成功後 tile/pixel/guide を含む全 borrowed alias は無効。Core/document revision、dirty、Undo、preview は不変。
  * @par 主なステータス
  * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
@@ -6856,36 +6247,6 @@ InkpodStatus inkpod_core_snapshot_guides_copy_v3(
     const InkpodObjectId* id,
     uint64_t first,
     InkpodSnapshotGuide* output,
-    uint64_t capacity,
-    uint64_t stride_bytes,
-    uint64_t* out_copied);
-
-/** @brief snapshot vector segment recordsをcaller-owned strided batchへbounded copyする。 */
-InkpodStatus inkpod_core_snapshot_vector_segments_copy_v3(
-    InkpodCore* core,
-    const InkpodObjectId* id,
-    uint64_t first,
-    InkpodSnapshotVectorSegment* output,
-    uint64_t capacity,
-    uint64_t stride_bytes,
-    uint64_t* out_copied);
-
-/** @brief snapshot vector fill recordsをcaller-owned strided batchへbounded copyする。 */
-InkpodStatus inkpod_core_snapshot_vector_fills_copy_v3(
-    InkpodCore* core,
-    const InkpodObjectId* id,
-    uint64_t first,
-    InkpodSnapshotVectorFill* output,
-    uint64_t capacity,
-    uint64_t stride_bytes,
-    uint64_t* out_copied);
-
-/** @brief snapshot vector boundary path IDsをcaller-owned strided batchへbounded copyする。 */
-InkpodStatus inkpod_core_snapshot_vector_boundary_ids_copy_v3(
-    InkpodCore* core,
-    const InkpodObjectId* id,
-    uint64_t first,
-    uint64_t* output,
     uint64_t capacity,
     uint64_t stride_bytes,
     uint64_t* out_copied);
@@ -7207,7 +6568,7 @@ InkpodStatus inkpod_core_inkscript_confirmation_release(
 
 /**
  * Consumes plan and confirmation owners only on success and creates one sequential RunTask.
- * The callback context remains borrowed through task release. Item execution, current-v26 encode,
+ * The callback context remains borrowed through task release. Item execution, current-v27 encode,
  * and atomic install use the existing canonical runner. Shutdown must cancel, drain, and release
  * the task before releasing the program, host context, session Cores, or parent Core.
  */

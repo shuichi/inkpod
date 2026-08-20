@@ -2,7 +2,6 @@ use super::model::*;
 use super::validate::{validate_document, validate_document_metadata};
 use crate::adjustment::encode_adjustment_metadata;
 use crate::light_table::encode_light_table_metadata;
-use crate::vector::encode_vector_metadata;
 use inkpod_image::{PixelFormat, PixelValue};
 pub fn encode_document_archive(document: &DocumentArchive) -> Result<Vec<u8>, FormatError> {
     validate_document(document)?;
@@ -15,11 +14,6 @@ pub fn encode_document_archive(document: &DocumentArchive) -> Result<Vec<u8>, Fo
         .light_table_metadata
         .as_ref()
         .map(encode_light_table_metadata)
-        .transpose()?;
-    let vector_metadata = document
-        .vector_metadata
-        .as_ref()
-        .map(encode_vector_metadata)
         .transpose()?;
     let adjustment_metadata = document
         .adjustment_metadata
@@ -55,13 +49,6 @@ pub fn encode_document_archive(document: &DocumentArchive) -> Result<Vec<u8>, Fo
         .and_then(|value| {
             value.checked_add(
                 light_table_metadata
-                    .as_ref()
-                    .map_or(0, |bytes| bytes.len().saturating_add(8)),
-            )
-        })
-        .and_then(|value| {
-            value.checked_add(
-                vector_metadata
                     .as_ref()
                     .map_or(0, |bytes| bytes.len().saturating_add(8)),
             )
@@ -132,11 +119,6 @@ pub fn encode_document_archive(document: &DocumentArchive) -> Result<Vec<u8>, Fo
             } else {
                 0
             }
-            | if vector_metadata.is_some() {
-                CONTAINER_FLAG_VECTOR_METADATA
-            } else {
-                0
-            }
             | if adjustment_metadata.is_some() {
                 CONTAINER_FLAG_ADJUSTMENT_METADATA
             } else {
@@ -204,17 +186,6 @@ pub fn encode_document_archive(document: &DocumentArchive) -> Result<Vec<u8>, Fo
         push_u32(&mut output, 0);
         output.extend_from_slice(metadata);
     }
-    if let Some(metadata) = &vector_metadata {
-        push_u32(
-            &mut output,
-            metadata
-                .len()
-                .try_into()
-                .map_err(|_| FormatError::Invalid("vector metadata length is not representable"))?,
-        );
-        push_u32(&mut output, 0);
-        output.extend_from_slice(metadata);
-    }
     if let Some(metadata) = &adjustment_metadata {
         push_u32(
             &mut output,
@@ -260,13 +231,12 @@ fn encode_document_metadata(metadata: &FileDocumentMetadata) -> Result<Vec<u8>, 
     let color_chart = crate::encode_color_chart(&metadata.color_chart)?;
     let mut output = Vec::new();
     output.extend_from_slice(&DOCUMENT_METADATA_MAGIC);
-    push_u32(&mut output, 5);
+    push_u32(&mut output, 6);
     push_u64(&mut output, metadata.active_layer_id);
     push_u64(&mut output, metadata.active_plane_id);
     push_u64(&mut output, metadata.selection_plane_id);
     push_u32(&mut output, metadata.layers.len() as u32);
     push_u32(&mut output, metadata.guides.len() as u32);
-    push_u32(&mut output, metadata.annotations.len() as u32);
     push_u32(&mut output, u32::from(metadata.shooting_frame.is_some()));
     push_u32(&mut output, metadata.vanishing_points.len() as u32);
     push_i32(&mut output, metadata.grid.origin_x);
@@ -345,43 +315,6 @@ fn encode_document_metadata(metadata: &FileDocumentMetadata) -> Result<Vec<u8>, 
         push_u32(&mut output, u32::from(point.visible));
         push_u32(&mut output, 0);
         push_color_value(&mut output, point.color)?;
-    }
-    for object in &metadata.annotations {
-        push_u64(&mut output, object.id);
-        push_u64(&mut output, object.layer_id);
-        push_u32(
-            &mut output,
-            match object.kind {
-                FileAnnotationKind::Text => 1,
-                FileAnnotationKind::Stroke => 2,
-                FileAnnotationKind::Leader => 3,
-                FileAnnotationKind::Value => 4,
-            },
-        );
-        push_u32(
-            &mut output,
-            match object.output {
-                FileAnnotationOutput::Normal => 1,
-                FileAnnotationOutput::Instruction => 2,
-            },
-        );
-        push_i32(&mut output, object.bounds.x);
-        push_i32(&mut output, object.bounds.y);
-        push_i32(&mut output, object.bounds.width);
-        push_i32(&mut output, object.bounds.height);
-        push_u32(&mut output, object.font_family_hint.len() as u32);
-        push_u32(&mut output, object.text.len() as u32);
-        push_u32(&mut output, object.points.len() as u32);
-        push_u32(&mut output, object.font_size_milli);
-        push_u32(&mut output, object.style_flags);
-        push_u32(&mut output, object.stroke_width_milli);
-        push_color_value(&mut output, object.color)?;
-        output.extend_from_slice(object.font_family_hint.as_bytes());
-        output.extend_from_slice(object.text.as_bytes());
-        for point in &object.points {
-            push_i32(&mut output, point.x_milli);
-            push_i32(&mut output, point.y_milli);
-        }
     }
     output.extend_from_slice(&color_chart);
     if output.len() > MAX_MANIFEST_BYTES as usize {

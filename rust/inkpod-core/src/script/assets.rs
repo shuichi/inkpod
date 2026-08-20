@@ -872,7 +872,6 @@ fn poll_cancel(is_cancelled: &mut dyn FnMut() -> bool) -> Result<(), ScriptAsset
 const fn asset_kind_name(kind: AssetKind) -> &'static str {
     match kind {
         AssetKind::CanonicalRaster => "canonical_raster",
-        AssetKind::CanonicalVectorStream => "canonical_vector_stream",
         AssetKind::CanonicalSampleStream => "canonical_sample_stream",
     }
 }
@@ -918,7 +917,7 @@ mod tests {
     ) -> Result<InkScriptDeclarationModel, InkScriptTypeDiagnosticCode> {
         let text = format!(
             r#"inkscript 2;
-requires {{ procedure_catalog = 2; replay_epoch = 23; }}
+requires {{ procedure_catalog = 3; replay_epoch = 24; }}
 inputs {{ current_document; }}
 program {{}}
 output {{ policy = duplicate; format = inkpod; folder = "out"; cell_folder = false; basename = "asset"; start_number = 1; direction = ascending; }}

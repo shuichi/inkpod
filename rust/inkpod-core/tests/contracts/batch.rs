@@ -909,46 +909,6 @@ fn review_every_operation_and_filter_variant_round_trips() {
             BatchOperationKind::Visibility { visible: false },
         ),
         operation(
-            Some(BatchTargetSelector {
-                layer_id: None,
-                plane_id: None,
-                layer_kind: Some(LayerKind::VectorColoring),
-                plane_kind: Some(PlaneType::VectorMainLine),
-                missing_policy: BatchMissingTargetPolicy::Skip,
-            }),
-            BatchOperationKind::LineWidth(VectorWidthMode::Add(0.5)),
-        ),
-        operation(
-            Some(BatchTargetSelector {
-                layer_id: None,
-                plane_id: None,
-                layer_kind: Some(LayerKind::VectorColoring),
-                plane_kind: Some(PlaneType::VectorMainLine),
-                missing_policy: BatchMissingTargetPolicy::Skip,
-            }),
-            BatchOperationKind::LineWidth(VectorWidthMode::Subtract(0.25)),
-        ),
-        operation(
-            Some(BatchTargetSelector {
-                layer_id: None,
-                plane_id: None,
-                layer_kind: Some(LayerKind::VectorColoring),
-                plane_kind: Some(PlaneType::VectorMainLine),
-                missing_policy: BatchMissingTargetPolicy::Skip,
-            }),
-            BatchOperationKind::LineWidth(VectorWidthMode::Scale(1.5)),
-        ),
-        operation(
-            Some(BatchTargetSelector {
-                layer_id: None,
-                plane_id: None,
-                layer_kind: Some(LayerKind::VectorColoring),
-                plane_kind: Some(PlaneType::VectorMainLine),
-                missing_policy: BatchMissingTargetPolicy::Skip,
-            }),
-            BatchOperationKind::LineWidth(VectorWidthMode::Constant(2.0)),
-        ),
-        operation(
             target(),
             BatchOperationKind::BoundaryAirbrush(BoundaryAirbrush {
                 colors: vec![[0, 0, 0, u16::MAX], [u16::MAX; 4]],

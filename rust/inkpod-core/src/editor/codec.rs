@@ -3,12 +3,12 @@
 use super::model::*;
 use crate::{
     BrushShape, CoreError, FillOperation, InclusionMode, PixelValue, RangeInterpretation,
-    SelectionOperation, StartColorPredicate, TraceBrushShape, VectorEraseMode, VectorSelectionMode,
+    SelectionOperation, StartColorPredicate, TraceBrushShape,
 };
 use std::collections::BTreeMap;
 
-const FRAME_SCHEMA: u32 = 6;
-const STATE_FIELD_COUNT: usize = 14;
+const FRAME_SCHEMA: u32 = 7;
+const STATE_FIELD_COUNT: usize = 13;
 const EDIT_FIELD_COUNT: usize = 4;
 const DIGEST_CONTEXT: &str = "org.inkpod.digest.editor-state.v2";
 const MAX_DIAMETER_Q16: i64 = 256_i64 << 16;
@@ -208,7 +208,6 @@ fn encode_state_frame(state: &EditorState) -> Vec<u8> {
         Some(encode_brush(state.brush)),
         Some(encode_fill(&state.fill)),
         Some(encode_selection(&state.selection)),
-        Some(encode_vector(&state.vector)),
         layer,
         plane,
         state.palette_cursor.map(|cursor| {
@@ -269,7 +268,7 @@ fn decode_state_frame(bytes: &[u8]) -> Result<EditorState, CoreError> {
             },
         );
     }
-    let target = match (fields[9], fields[10]) {
+    let target = match (fields[8], fields[9]) {
         (Some(layer), Some(plane)) => Some(EditorTarget {
             layer_id: read_u64(layer)?,
             plane_id: read_u64(plane)?,
@@ -277,7 +276,7 @@ fn decode_state_frame(bytes: &[u8]) -> Result<EditorState, CoreError> {
         (None, None) => None,
         _ => return malformed("partial editor target"),
     };
-    let palette_cursor = fields[11]
+    let palette_cursor = fields[10]
         .map(|field| -> Result<PaletteCursor, CoreError> {
             let cursor = decode_frame(field, 2)?;
             Ok(PaletteCursor {
@@ -286,7 +285,7 @@ fn decode_state_frame(bytes: &[u8]) -> Result<EditorState, CoreError> {
             })
         })
         .transpose()?;
-    let color_chart_cursor = fields[12]
+    let color_chart_cursor = fields[11]
         .map(|field| -> Result<ColorChartCursor, CoreError> {
             let cursor = decode_frame(field, 2)?;
             Ok(ColorChartCursor {
@@ -295,7 +294,7 @@ fn decode_state_frame(bytes: &[u8]) -> Result<EditorState, CoreError> {
             })
         })
         .transpose()?;
-    let edit_targets = decode_sequence(required(fields[13])?, MAX_EDIT_TARGETS)?
+    let edit_targets = decode_sequence(required(fields[12])?, MAX_EDIT_TARGETS)?
         .into_iter()
         .map(|record| {
             let fields = decode_frame(record, 3)?;
@@ -318,7 +317,6 @@ fn decode_state_frame(bytes: &[u8]) -> Result<EditorState, CoreError> {
         brush: decode_brush(required(fields[5])?)?,
         fill: decode_fill(required(fields[6])?)?,
         selection: decode_selection(required(fields[7])?)?,
-        vector: decode_vector(required(fields[8])?)?,
         target,
         edit_targets,
         palette_cursor,
@@ -512,25 +510,6 @@ fn decode_selection(bytes: &[u8]) -> Result<EditorSelectionOptions, CoreError> {
         },
         trace_pressure_size: read_bool(required(fields[11])?)?,
         trace_screen_size: read_bool(required(fields[12])?)?,
-    })
-}
-
-fn encode_vector(vector: &EditorVectorOptions) -> Vec<u8> {
-    encode_frame(&[
-        Some(vector_erase_code(vector.erase_mode).to_le_bytes().to_vec()),
-        Some(
-            vector_selection_code(vector.selection_mode)
-                .to_le_bytes()
-                .to_vec(),
-        ),
-    ])
-}
-
-fn decode_vector(bytes: &[u8]) -> Result<EditorVectorOptions, CoreError> {
-    let fields = decode_frame(bytes, 2)?;
-    Ok(EditorVectorOptions {
-        erase_mode: decode_vector_erase(read_u32(required(fields[0])?)?)?,
-        selection_mode: decode_vector_selection(read_u32(required(fields[1])?)?)?,
     })
 }
 
@@ -742,50 +721,6 @@ fn decode_selection_operation(code: u32) -> Result<SelectionOperation, CoreError
     }
 }
 
-fn vector_erase_code(value: VectorEraseMode) -> u32 {
-    match value {
-        VectorEraseMode::Partial => 1,
-        VectorEraseMode::ToIntersection => 2,
-        VectorEraseMode::WholePath => 3,
-    }
-}
-
-fn decode_vector_erase(code: u32) -> Result<VectorEraseMode, CoreError> {
-    match code {
-        1 => Ok(VectorEraseMode::Partial),
-        2 => Ok(VectorEraseMode::ToIntersection),
-        3 => Ok(VectorEraseMode::WholePath),
-        _ => malformed("unknown vector erase mode enum"),
-    }
-}
-
-fn vector_selection_code(value: VectorSelectionMode) -> u32 {
-    match value {
-        VectorSelectionMode::CutBySelection => 1,
-        VectorSelectionMode::Touching => 2,
-        VectorSelectionMode::FullyContained => 3,
-        VectorSelectionMode::Line => 4,
-        VectorSelectionMode::WholeLine => 5,
-        VectorSelectionMode::ToIntersection => 6,
-        VectorSelectionMode::FillBoundary => 7,
-        VectorSelectionMode::Fill => 8,
-    }
-}
-
-fn decode_vector_selection(code: u32) -> Result<VectorSelectionMode, CoreError> {
-    match code {
-        1 => Ok(VectorSelectionMode::CutBySelection),
-        2 => Ok(VectorSelectionMode::Touching),
-        3 => Ok(VectorSelectionMode::FullyContained),
-        4 => Ok(VectorSelectionMode::Line),
-        5 => Ok(VectorSelectionMode::WholeLine),
-        6 => Ok(VectorSelectionMode::ToIntersection),
-        7 => Ok(VectorSelectionMode::FillBoundary),
-        8 => Ok(VectorSelectionMode::Fill),
-        _ => malformed("unknown vector selection mode enum"),
-    }
-}
-
 fn malformed<T>(message: &str) -> Result<T, CoreError> {
     Err(format_error(message))
 }
@@ -860,8 +795,8 @@ mod tests {
         assert_eq!(
             state_digest(&state).as_bytes(),
             &[
-                100, 249, 34, 24, 193, 224, 243, 184, 106, 138, 216, 65, 187, 216, 223, 228, 99,
-                219, 127, 169, 46, 154, 203, 121, 21, 107, 99, 93, 189, 74, 138, 241,
+                176, 59, 74, 100, 4, 46, 179, 155, 16, 216, 76, 176, 167, 142, 34, 213, 71, 230,
+                63, 249, 158, 149, 2, 148, 132, 19, 189, 126, 51, 155, 35, 102,
             ]
         );
     }

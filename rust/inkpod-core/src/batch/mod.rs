@@ -5,7 +5,7 @@ use super::{
     CurveInterpolation, CurvePoint, DispatchOutcome, DocumentResize, DustMode, DustRemoval,
     FillOperation, FillRequest, Filter, HsvAdjustment, InclusionMode, LayerKind, Levels,
     MAX_CURVE_POINTS, MAX_IMAGE_EDIT_PIXELS, MirrorAxis, PixelFormat, PixelValue, PlaneType,
-    RectI32, ResizeAnchor, RotateDirection, TILE_SIZE, TileCoord, VectorWidthMode,
+    RectI32, ResizeAnchor, RotateDirection, TILE_SIZE, TileCoord,
 };
 use crate::animation::{SequenceCellSource, parse_cell_number};
 use crate::asset;
@@ -46,7 +46,7 @@ const OP_COLOR_REPLACE: u32 = 1;
 const OP_CONTINUOUS_FILL: u32 = 2;
 const OP_SEPARATION: u32 = 3;
 const OP_VISIBILITY: u32 = 4;
-const OP_LINE_WIDTH: u32 = 5;
+// Operation code 5 was the retired vector line-width operation and stays unused.
 const OP_FILTER: u32 = 6;
 const OP_BOUNDARY_AIRBRUSH: u32 = 7;
 const OP_DUST_REMOVAL: u32 = 8;

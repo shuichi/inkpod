@@ -9,7 +9,6 @@ mod inkscript;
 mod light_table;
 mod native;
 mod procedure;
-mod vector;
 
 pub use adjustment::{FileAdjustmentLayer, FileAdjustmentMetadata, MAX_ADJUSTMENT_LAYERS};
 pub use application_data::{
@@ -84,8 +83,7 @@ pub use light_table::{
     FileLightTableItem, FileLightTableMetadata, FileLightTableSet, LightTableDisplayMode,
 };
 pub use native::{
-    DocumentArchive, FileAnnotationKind, FileAnnotationObject, FileAnnotationOutput,
-    FileAnnotationPoint, FileDocumentMetadata, FileGrid, FileGuide, FileLayer, FilePlane,
+    DocumentArchive, FileDocumentMetadata, FileGrid, FileGuide, FileLayer, FilePlane,
     FilePlaneProperties, FileShootingFrame, FileShootingFrameAnchor, FileTile, FileVanishingPoint,
     FormatError, FrameMetadata, GuideAxis, LayerKind, Margins, PlaneKind, RectI32, checksum,
     discard_recovery, recovery_is_newer,
@@ -108,11 +106,6 @@ pub use procedure::{
 use std::fs;
 #[cfg(test)]
 use std::sync::atomic::Ordering;
-pub use vector::{
-    FileVectorConnection, FileVectorEndpoint, FileVectorFill, FileVectorMetadata, FileVectorPath,
-    FileVectorPoint, FileVectorSegment, MAX_VECTOR_BOUNDARIES, MAX_VECTOR_CONNECTIONS,
-    MAX_VECTOR_FILLS, MAX_VECTOR_PATHS, MAX_VECTOR_SEGMENTS,
-};
 
 #[cfg(test)]
 #[path = "../tests/unit/native.rs"]

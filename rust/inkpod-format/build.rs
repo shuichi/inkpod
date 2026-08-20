@@ -222,7 +222,7 @@ fn main() {
 fn generate() -> Result<(), String> {
     let crate_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").ok_or("missing manifest dir")?);
     let language = crate_dir.join("../../schemas/inkscript/language-v2.json");
-    let catalog = crate_dir.join("../../schemas/inkscript/catalog-v2.json");
+    let catalog = crate_dir.join("../../schemas/inkscript/catalog-v3.json");
     println!("cargo:rerun-if-changed={}", language.display());
     println!("cargo:rerun-if-changed={}", catalog.display());
     println!("cargo:rerun-if-changed=build.rs");
@@ -234,8 +234,8 @@ fn generate() -> Result<(), String> {
     if string(member(&root, "kind")?)? != "inkpod.inkscript.language"
         || registry_schema_version != 2
         || file_version != 2
-        || procedure_catalog_version != 2
-        || required_replay_epoch != 23
+        || procedure_catalog_version != 3
+        || required_replay_epoch != 24
     {
         return Err("language registry identity/version mismatch".to_owned());
     }
@@ -244,18 +244,18 @@ fn generate() -> Result<(), String> {
     let catalog_version = number(member(&catalog_root, "catalog_version")?)?;
     let command_count = array(member(&catalog_root, "entries")?)?.len();
     let catalog_fingerprint = fnv1a64(&catalog_bytes);
-    const FROZEN_CATALOG_V2_FNV1A64: u64 = 0x988b_9725_dbdc_a0a2;
+    const FROZEN_CATALOG_V3_FNV1A64: u64 = 0xd94d_c4d8_adbc_8040;
     if string(member(&catalog_root, "kind")?)? != "inkpod.inkscript.catalog"
         || number(member(&catalog_root, "registry_schema_version")?)? != 2
         || number(member(&catalog_root, "file_version")?)? != file_version
         || catalog_version != procedure_catalog_version
         || number(member(&catalog_root, "required_replay_epoch")?)? != required_replay_epoch
         || !boolean(member(&catalog_root, "production")?)?
-        || command_count != 84
-        || catalog_fingerprint != FROZEN_CATALOG_V2_FNV1A64
+        || command_count != 75
+        || catalog_fingerprint != FROZEN_CATALOG_V3_FNV1A64
     {
         return Err(format!(
-            "production catalog v2 identity/freeze mismatch: version={catalog_version}, commands={command_count}, fingerprint={catalog_fingerprint:016x}"
+            "production catalog v3 identity/freeze mismatch: version={catalog_version}, commands={command_count}, fingerprint={catalog_fingerprint:016x}"
         ));
     }
 
@@ -531,8 +531,6 @@ fn selector_order_expression(value: &str) -> Result<&'static str, String> {
     match value {
         "document_tree" => Ok("InkScriptSelectorOrder::DocumentTree"),
         "guide_order" => Ok("InkScriptSelectorOrder::Guide"),
-        "vector_order" => Ok("InkScriptSelectorOrder::Vector"),
-        "annotation_order" => Ok("InkScriptSelectorOrder::Annotation"),
         "singleton" => Ok("InkScriptSelectorOrder::Singleton"),
         "light_table_order" => Ok("InkScriptSelectorOrder::LightTable"),
         _ => Err(format!("unknown selector initial order {value:?}")),

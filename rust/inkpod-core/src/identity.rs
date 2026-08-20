@@ -45,12 +45,6 @@ numeric_token!(
     LightTableItemId,
     "A light-table item stable ID. Zero is invalid."
 );
-numeric_token!(VectorPathId, "A vector path stable ID. Zero is invalid.");
-numeric_token!(VectorFillId, "A vector fill stable ID. Zero is invalid.");
-numeric_token!(
-    AnnotationObjectId,
-    "An annotation object stable ID. Zero is invalid."
-);
 numeric_token!(
     ShootingFrameId,
     "An angled shooting-frame stable ID. Zero is invalid."
@@ -165,18 +159,6 @@ impl StableIdCursor {
 
     pub(crate) fn take_light_table_item(&mut self) -> LightTableItemId {
         LightTableItemId::from_raw(self.take_raw())
-    }
-
-    pub(crate) fn take_vector_path(&mut self) -> VectorPathId {
-        VectorPathId::from_raw(self.take_raw())
-    }
-
-    pub(crate) fn take_vector_fill(&mut self) -> VectorFillId {
-        VectorFillId::from_raw(self.take_raw())
-    }
-
-    pub(crate) fn take_annotation(&mut self) -> AnnotationObjectId {
-        AnnotationObjectId::from_raw(self.take_raw())
     }
 
     pub(crate) fn take_shooting_frame(&mut self) -> ShootingFrameId {

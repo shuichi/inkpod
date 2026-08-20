@@ -12,6 +12,10 @@ namespace inkpod::windows::ui {
 
 std::span<const UINT> MenuCommandCatalog() noexcept;
 
+bool IsMenuCommand(UINT command) noexcept;
+
+std::span<const UINT> ShortcutCommandCatalog() noexcept;
+
 std::vector<InkpodShortcutSequence> BuildDefaultShortcutSequences();
 
 const InkpodShortcutSequence* FindShortcutSequence(

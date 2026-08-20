@@ -17,7 +17,7 @@ namespace {
 constexpr wchar_t kSettingsKey[] = L"Software\\Inkpod";
 constexpr wchar_t kWorkspaceWindowCountValue[] = L"WorkspaceWindowCountV1";
 constexpr std::uint32_t kMagic = UINT32_C(0x4c574b49);
-constexpr std::uint32_t kVersion = 8U;
+constexpr std::uint32_t kVersion = 9U;
 constexpr std::uint32_t kGroupedPaneMarker = UINT32_C(0x80000000);
 constexpr std::uint32_t kGroupedPaneReservedMask = UINT32_C(0x7e000000);
 constexpr int kReferenceDpi = 96;
@@ -130,8 +130,25 @@ struct PersistedWorkspaceLayoutV4 {
         auxiliary;
 };
 
+struct PersistedRightToolTabV9 {
+    std::uint32_t stable_id;
+    std::uint32_t pane_count;
+    std::array<std::uint32_t, kDockPaneCount> pane_stable_type_ids;
+};
+
+struct PersistedWorkspaceLayoutV9 {
+    PersistedWorkspaceLayoutV4 workspace;
+    std::uint32_t tab_count;
+    std::uint32_t selected_tab_id;
+    std::uint32_t next_tab_id;
+    std::uint32_t reserved;
+    std::array<PersistedRightToolTabV9, kMaximumToolTabs> tabs;
+};
+
 static_assert(
     sizeof(PersistedWorkspaceLayoutV4) <= kMaximumWorkspaceLayoutRecordBytes);
+static_assert(
+    sizeof(PersistedWorkspaceLayoutV9) <= kMaximumWorkspaceLayoutRecordBytes);
 
 std::uint32_t EncodeGroupedPaneOrder(
     const DockPanePlacement& pane) noexcept {
@@ -408,7 +425,7 @@ bool DecodeVersion4Or5(
     bool migrate_auxiliary,
     bool grouped) noexcept {
     if (value.magic != kMagic
-        || (grouped ? (value.version != kVersion && value.version != 7U
+        || (grouped ? (value.version != 8U && value.version != 7U
                           && value.version != 6U)
                     : (value.version != 4U && value.version != 5U))
         || value.struct_size != sizeof(value) || value.flags > 1U
@@ -743,6 +760,210 @@ PersistedWorkspaceLayoutV4 EncodeCurrent(
     return value;
 }
 
+bool EligibleRightTabPane(DockPaneType type) noexcept {
+    const PaneDescriptor* descriptor = FindPaneDescriptor(type);
+    return type != DockPaneType::Tool && type != DockPaneType::ToolOptions
+        && type != DockPaneType::JobProgress && descriptor != nullptr
+        && (descriptor->allowed_zones & DockZoneBit(DockZone::Right)) != 0U;
+}
+
+bool BuildLegacyRightTabs(WorkspaceLayoutState& state) noexcept {
+    constexpr std::array<std::array<DockPaneType, 3U>, 3U> groups{{
+        {DockPaneType::Color, DockPaneType::Layer, DockPaneType::Count},
+        {DockPaneType::Locator, DockPaneType::LightTable, DockPaneType::Reference},
+        {DockPaneType::Sequence, DockPaneType::Batch, DockPaneType::Count},
+    }};
+    std::array<ToolTab, kMaximumToolTabs> tabs{};
+    std::size_t tab_count{};
+    std::uint32_t next_id{1U};
+    const DockZoneState* right_zone = state.dock.Zone(DockZone::Right);
+    const DockPaneType legacy_selected = right_zone == nullptr
+        ? DockPaneType::Count
+        : right_zone->active_tab;
+    ToolTabId selected{};
+    for (const auto& group : groups) {
+        ToolTab tab{};
+        tab.id = ToolTabId{next_id};
+        for (const DockPaneType type : group) {
+            const DockPanePlacement* pane = state.dock.Pane(type);
+            if (type != DockPaneType::Count && EligibleRightTabPane(type)
+                && pane != nullptr && pane->present
+                && pane->zone == DockZone::Right) {
+                tab.panes[tab.pane_count++] = type;
+                if (type == legacy_selected) {
+                    selected = tab.id;
+                }
+            }
+        }
+        if (tab.pane_count != 0U) {
+            tabs[tab_count++] = tab;
+            ++next_id;
+        }
+    }
+    if (!selected && tab_count != 0U) {
+        selected = tabs[0].id;
+    }
+    return state.right_tool_tabs.Load(
+        std::span<const ToolTab>(tabs.data(), tab_count), selected, next_id);
+}
+
+bool ValidateCurrentTabs(const WorkspaceLayoutState& state) noexcept {
+    RightToolTabsModel validation{};
+    if (!validation.Load(
+            state.right_tool_tabs.Tabs(),
+            state.right_tool_tabs.Selected(),
+            state.right_tool_tabs.NextStableId())) {
+        return false;
+    }
+    for (const ToolTab& tab : state.right_tool_tabs.Tabs()) {
+        for (std::size_t index = 0U; index < tab.pane_count; ++index) {
+            const DockPanePlacement* pane = state.dock.Pane(tab.panes[index]);
+            if (pane == nullptr || !pane->present
+                || pane->zone != DockZone::Right) {
+                return false;
+            }
+        }
+    }
+    for (const PaneDescriptor& descriptor : PaneDescriptors()) {
+        const DockPanePlacement* pane = state.dock.Pane(descriptor.type);
+        if (EligibleRightTabPane(descriptor.type) && pane != nullptr
+            && pane->present && pane->zone == DockZone::Right
+            && !state.right_tool_tabs.TabForPane(descriptor.type)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+PersistedWorkspaceLayoutV9 EncodeCurrentV9(
+    const WorkspaceLayoutState& state) noexcept {
+    PersistedWorkspaceLayoutV9 value{};
+    value.workspace = EncodeCurrent(state);
+    value.workspace.version = kVersion;
+    value.workspace.struct_size = sizeof(value);
+    value.tab_count = static_cast<std::uint32_t>(
+        state.right_tool_tabs.Tabs().size());
+    value.selected_tab_id = state.right_tool_tabs.Selected().Value();
+    value.next_tab_id = state.right_tool_tabs.NextStableId();
+    for (std::size_t tab_index = 0U;
+         tab_index < state.right_tool_tabs.Tabs().size();
+         ++tab_index) {
+        const ToolTab& source = state.right_tool_tabs.Tabs()[tab_index];
+        PersistedRightToolTabV9& destination = value.tabs[tab_index];
+        destination.stable_id = source.id.Value();
+        destination.pane_count = static_cast<std::uint32_t>(source.pane_count);
+        for (std::size_t pane_index = 0U;
+             pane_index < source.pane_count;
+             ++pane_index) {
+            const PaneDescriptor* descriptor = FindPaneDescriptor(
+                source.panes[pane_index]);
+            destination.pane_stable_type_ids[pane_index] = descriptor == nullptr
+                ? 0U
+                : descriptor->stable_type_id;
+        }
+    }
+    return value;
+}
+
+bool DecodeVersion9(
+    WorkspaceLayoutState& state,
+    const PersistedWorkspaceLayoutV9& value) noexcept {
+    if (value.workspace.magic != kMagic
+        || value.workspace.version != kVersion
+        || value.workspace.struct_size != sizeof(value)
+        || value.tab_count > value.tabs.size() || value.reserved != 0U
+        || value.next_tab_id == 0U
+        || (value.tab_count == 0U && value.selected_tab_id != 0U)
+        || (value.tab_count != 0U && value.selected_tab_id == 0U)) {
+        return false;
+    }
+    PersistedWorkspaceLayoutV4 base = value.workspace;
+    base.version = 8U;
+    base.struct_size = sizeof(base);
+    WorkspaceLayoutState candidate{};
+    if (!DecodeVersion4Or5(candidate, base, false, true)) {
+        return false;
+    }
+
+    std::array<ToolTab, kMaximumToolTabs> tabs{};
+    std::size_t known_tab_count{};
+    for (std::size_t tab_index = 0U; tab_index < value.tabs.size(); ++tab_index) {
+        const PersistedRightToolTabV9& source = value.tabs[tab_index];
+        if (tab_index >= value.tab_count) {
+            const bool nonzero = source.stable_id != 0U || source.pane_count != 0U
+                || std::any_of(
+                    source.pane_stable_type_ids.begin(),
+                    source.pane_stable_type_ids.end(),
+                    [](std::uint32_t item) { return item != 0U; });
+            if (nonzero) {
+                return false;
+            }
+            continue;
+        }
+        if (source.stable_id == 0U
+            || source.pane_count == 0U
+            || source.pane_count > source.pane_stable_type_ids.size()) {
+            return false;
+        }
+        ToolTab tab{};
+        tab.id = ToolTabId{source.stable_id};
+        for (std::size_t pane_index = 0U;
+             pane_index < source.pane_stable_type_ids.size();
+             ++pane_index) {
+            const std::uint32_t stable_type_id =
+                source.pane_stable_type_ids[pane_index];
+            if (pane_index >= source.pane_count) {
+                if (stable_type_id != 0U) {
+                    return false;
+                }
+                continue;
+            }
+            const PaneDescriptor* descriptor = FindPaneDescriptorByStableId(
+                stable_type_id);
+            if (descriptor == nullptr) {
+                continue;
+            }
+            const DockPanePlacement* placement = candidate.dock.Pane(
+                descriptor->type);
+            if (!EligibleRightTabPane(descriptor->type)
+                || placement == nullptr || !placement->present
+                || placement->zone != DockZone::Right) {
+                return false;
+            }
+            tab.panes[tab.pane_count++] = descriptor->type;
+        }
+        if (tab.pane_count == 0U) {
+            return false;
+        }
+        tabs[known_tab_count++] = tab;
+    }
+    ToolTabId selected{value.selected_tab_id};
+    if (known_tab_count == 0U) {
+        selected = {};
+    }
+    if (!candidate.right_tool_tabs.Load(
+            std::span<const ToolTab>(tabs.data(), known_tab_count),
+            selected,
+            value.next_tab_id)) {
+        return false;
+    }
+    for (const PaneDescriptor& descriptor : PaneDescriptors()) {
+        const DockPanePlacement* pane = candidate.dock.Pane(descriptor.type);
+        if (EligibleRightTabPane(descriptor.type) && pane != nullptr
+            && pane->present && pane->zone == DockZone::Right
+            && !candidate.right_tool_tabs.TabForPane(descriptor.type)) {
+            const ToolTabResult result =
+                candidate.right_tool_tabs.EnsurePaneAssigned(descriptor.type);
+            if (result != ToolTabResult::Ok
+                && result != ToolTabResult::NoOp) {
+                return false;
+            }
+        }
+    }
+    state = candidate;
+    return true;
+}
+
 void SetAuxiliaryPreset(
     WorkspaceLayoutState& state,
     WorkspaceAuxiliaryPane type,
@@ -1018,7 +1239,7 @@ bool ApplyWorkspacePreset(
         case WorkspacePreset::Count:
             return false;
     }
-    return true;
+    return BuildLegacyRightTabs(state);
 }
 
 const wchar_t* WorkspacePresetDisplayName(WorkspacePreset preset) noexcept {
@@ -1080,7 +1301,7 @@ bool EncodeWorkspaceLayout(
     std::span<std::byte> output,
     std::size_t& written) noexcept {
     written = 0U;
-    if (output.size() < sizeof(PersistedWorkspaceLayoutV4)
+    if (output.size() < sizeof(PersistedWorkspaceLayoutV9)
         || state.selected_preset >= WorkspacePreset::Count
         || state.density > WorkspaceDensity::Compact
         || state.split_orientation > WorkspaceSplitOrientation::Horizontal
@@ -1089,6 +1310,7 @@ bool EncodeWorkspaceLayout(
         || !ValidScreenPlacement(state.window)
         || (state.window.show_command != SW_SHOWNORMAL
             && state.window.show_command != SW_SHOWMAXIMIZED)
+        || !ValidateCurrentTabs(state)
         ) {
         return false;
     }
@@ -1104,7 +1326,7 @@ bool EncodeWorkspaceLayout(
             return false;
         }
     }
-    const PersistedWorkspaceLayoutV4 value = EncodeCurrent(state);
+    const PersistedWorkspaceLayoutV9 value = EncodeCurrentV9(state);
     std::memcpy(output.data(), &value, sizeof(value));
     written = sizeof(value);
     return true;
@@ -1121,15 +1343,24 @@ WorkspaceLayoutDecodeResult DecodeWorkspaceLayout(
     std::memcpy(header.data(), input.data(), sizeof(header));
     bool decoded{};
     WorkspaceLayoutDecodeResult result = WorkspaceLayoutDecodeResult::Invalid;
-    if (header[0] == kMagic
-        && (header[1] == kVersion || header[1] == 7U || header[1] == 6U)
+    if (header[0] == kMagic && header[1] == kVersion
+        && header[2] == sizeof(PersistedWorkspaceLayoutV9)
+        && input.size() == sizeof(PersistedWorkspaceLayoutV9)) {
+        PersistedWorkspaceLayoutV9 value{};
+        std::memcpy(&value, input.data(), sizeof(value));
+        decoded = DecodeVersion9(state, value);
+        result = WorkspaceLayoutDecodeResult::Current;
+    } else if (header[0] == kMagic
+        && (header[1] == 8U || header[1] == 7U || header[1] == 6U)
         && header[2] == sizeof(PersistedWorkspaceLayoutV4)
         && input.size() == sizeof(PersistedWorkspaceLayoutV4)) {
         PersistedWorkspaceLayoutV4 value{};
         std::memcpy(&value, input.data(), sizeof(value));
         decoded = DecodeVersion4Or5(state, value, false, true);
-        result = header[1] == kVersion ? WorkspaceLayoutDecodeResult::Current
-                                      : WorkspaceLayoutDecodeResult::Migrated;
+        if (decoded) {
+            decoded = BuildLegacyRightTabs(state);
+        }
+        result = WorkspaceLayoutDecodeResult::Migrated;
     } else if (header[0] == kMagic
         && (header[1] == 4U || header[1] == 5U)
         && header[2] == sizeof(PersistedWorkspaceLayoutV4)
@@ -1137,6 +1368,9 @@ WorkspaceLayoutDecodeResult DecodeWorkspaceLayout(
         PersistedWorkspaceLayoutV4 value{};
         std::memcpy(&value, input.data(), sizeof(value));
         decoded = DecodeVersion4Or5(state, value, header[1] == 4U, false);
+        if (decoded) {
+            decoded = BuildLegacyRightTabs(state);
+        }
         result = WorkspaceLayoutDecodeResult::Migrated;
     } else if (header[0] == kMagic && header[1] == 3U
         && header[2] == sizeof(PersistedWorkspaceLayoutV3)
@@ -1144,6 +1378,9 @@ WorkspaceLayoutDecodeResult DecodeWorkspaceLayout(
         PersistedWorkspaceLayoutV3 value{};
         std::memcpy(&value, input.data(), sizeof(value));
         decoded = DecodeVersion3(state, value);
+        if (decoded) {
+            decoded = BuildLegacyRightTabs(state);
+        }
         result = WorkspaceLayoutDecodeResult::Migrated;
     } else if (header[0] == kMagic && header[1] == 2U
         && header[2] == sizeof(LegacyPersistedWorkspaceLayoutV2)
@@ -1151,6 +1388,9 @@ WorkspaceLayoutDecodeResult DecodeWorkspaceLayout(
         LegacyPersistedWorkspaceLayoutV2 value{};
         std::memcpy(&value, input.data(), sizeof(value));
         decoded = LoadLegacyLayout(state, value);
+        if (decoded) {
+            decoded = BuildLegacyRightTabs(state);
+        }
         result = WorkspaceLayoutDecodeResult::Migrated;
     }
     if (!decoded) {

@@ -49,12 +49,12 @@ const std::array<PaneDescriptor, kDockPaneCount> kPaneDescriptors{{
      IDS_DOCK_PANE_TOOL,
      UiText(UiStringId::Text0242),
      DockZone::Left,
-     DockedAndTransientZones({DockZone::Left, DockZone::Right}),
+     DockedAndTransientZones({DockZone::Left}),
       PaneTargetScope::Application,
       1U,
       true,
       true,
-      true,
+      false,
       false,
       false,
      80,
@@ -315,6 +315,12 @@ bool SameFloatingPlacement(
     return left.x_dip == right.x_dip && left.y_dip == right.y_dip
         && left.width_dip == right.width_dip
         && left.height_dip == right.height_dip;
+}
+
+bool IsFixedToolPaletteZone(const DockLayoutModel& model) noexcept {
+    const DockPanePlacement* tool = model.Pane(DockPaneType::Tool);
+    return tool != nullptr && tool->present && tool->zone == DockZone::Left
+        && model.PaneCount(DockZone::Left) == 1U;
 }
 
 int MinimumZoneExtent(
@@ -939,6 +945,9 @@ DockResult DockLayoutModel::SetZoneExtentDip(
     if (state == nullptr) {
         return DockResult::InvalidState;
     }
+    if (zone == DockZone::Left && IsFixedToolPaletteZone(*this)) {
+        return DockResult::NoOp;
+    }
     const int minimum = MinimumZoneExtent(*this, zone);
     const int maximum = zone == DockZone::TopContext || zone == DockZone::Bottom
         ? 480
@@ -982,6 +991,26 @@ DockResult DockLayoutModel::AdjustSplitBoundary(
         }
     }
     return DockResult::Ok;
+}
+
+int MinimumRightToolTabExtent(
+    const DockLayoutModel& model,
+    const RightToolTabsModel& tabs) noexcept {
+    int minimum = 64;
+    const ToolTab* selected = tabs.SelectedTab();
+    if (selected == nullptr) {
+        return minimum;
+    }
+    for (std::size_t index = 0U; index < selected->pane_count; ++index) {
+        const DockPaneType type = selected->panes[index];
+        const DockPanePlacement* pane = model.Pane(type);
+        const PaneDescriptor* descriptor = FindPaneDescriptor(type);
+        if (pane != nullptr && pane->present && pane->zone == DockZone::Right
+            && descriptor != nullptr) {
+            minimum = std::max(minimum, descriptor->minimum_width_dip);
+        }
+    }
+    return minimum;
 }
 
 DockResult DockLayoutModel::AdjustPaneBoundary(
@@ -1325,6 +1354,7 @@ DockLayoutGeometry ComputeDockLayout(
     width = std::max(0, width);
     height = std::max(0, height);
     const int splitter = std::max(1, ScaleDip(kSplitterDip, dpi));
+    const bool fixed_tool_zone = IsFixedToolPaletteZone(model);
     std::array<int, kDockedZoneCount> extents{};
     std::array<bool, kDockedZoneCount> active{};
     for (std::size_t index = 0U; index < kDockedZoneCount; ++index) {
@@ -1334,8 +1364,18 @@ DockLayoutGeometry ComputeDockLayout(
             ? right_tool_tabs->HasVisibleTabs()
             : model.PaneCount(zone) > 0U;
         if (active[index] && state != nullptr) {
-            extents[index] = ScaleDip(
-                std::max(state->extent_dip, MinimumZoneExtent(model, zone)), dpi);
+            const int minimum = zone == DockZone::Right
+                    && right_tool_tabs != nullptr
+                ? MinimumRightToolTabExtent(model, *right_tool_tabs)
+                : MinimumZoneExtent(model, zone);
+            const PaneDescriptor* tool_descriptor = fixed_tool_zone
+                    && zone == DockZone::Left
+                ? FindPaneDescriptor(DockPaneType::Tool)
+                : nullptr;
+            const int extent_dip = tool_descriptor == nullptr
+                ? std::max(state->extent_dip, minimum)
+                : tool_descriptor->preferred_width_dip;
+            extents[index] = ScaleDip(extent_dip, dpi);
         }
     }
 
@@ -1395,7 +1435,8 @@ DockLayoutGeometry ComputeDockLayout(
         for (const DockZone zone : {DockZone::Left, DockZone::Right}) {
             const std::size_t index = ZoneIndex(zone);
             if (active[index]) {
-                value += extents[index] + splitter;
+                value += extents[index]
+                    + (zone == DockZone::Left && fixed_tool_zone ? 0 : splitter);
             }
         }
         return value;
@@ -1417,8 +1458,10 @@ DockLayoutGeometry ComputeDockLayout(
     const bool mirrored = model.Mirrored();
     const int physical_left = mirrored ? right : left;
     const int physical_right = mirrored ? left : right;
-    const int physical_left_gap = physical_left > 0 ? splitter : 0;
-    const int physical_right_gap = physical_right > 0 ? splitter : 0;
+    const int left_gap = left > 0 && !fixed_tool_zone ? splitter : 0;
+    const int right_gap = right > 0 ? splitter : 0;
+    const int physical_left_gap = mirrored ? right_gap : left_gap;
+    const int physical_right_gap = mirrored ? left_gap : right_gap;
     output.editor = DockRect{
         physical_left + physical_left_gap,
         body_y,
@@ -1434,6 +1477,9 @@ DockLayoutGeometry ComputeDockLayout(
         }
         const int x = on_left ? 0 : width - extent;
         output.zones[ZoneIndex(zone)] = DockRect{x, body_y, extent, body_height};
+        if (zone == DockZone::Left && fixed_tool_zone) {
+            return;
+        }
         const int split_x = on_left ? extent : x - splitter;
         AddSplitter(
             output,

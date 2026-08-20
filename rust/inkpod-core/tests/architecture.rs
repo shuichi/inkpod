@@ -224,12 +224,7 @@ fn core_responsibility_modules_remain_split_and_declarative() {
     let core_root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let source_root = core_root.join("src");
 
-    for legacy_path in [
-        "vector/operations.rs",
-        "batch/codec.rs",
-        "transform.rs",
-        "view.rs",
-    ] {
+    for legacy_path in ["batch/codec.rs", "transform.rs", "view.rs"] {
         assert!(
             !source_root.join(legacy_path).exists(),
             "legacy Core monolith must not return: {legacy_path}"
@@ -237,11 +232,6 @@ fn core_responsibility_modules_remain_split_and_declarative() {
     }
 
     for module_path in [
-        "vector/path_operations.rs",
-        "vector/selection.rs",
-        "vector/rasterization.rs",
-        "vector/vectorization.rs",
-        "vector/thumbnail.rs",
         "batch/codec/codes.rs",
         "batch/codec/operation.rs",
         "batch/codec/filter.rs",
@@ -262,12 +252,7 @@ fn core_responsibility_modules_remain_split_and_declarative() {
         );
     }
 
-    for index_path in [
-        "vector/mod.rs",
-        "batch/codec/mod.rs",
-        "transform/mod.rs",
-        "view/mod.rs",
-    ] {
+    for index_path in ["batch/codec/mod.rs", "transform/mod.rs", "view/mod.rs"] {
         let path = source_root.join(index_path);
         let contents = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
@@ -340,6 +325,8 @@ fn production_and_test_identifiers_are_semantic() {
 
         if source.ends_with(Path::new("schemas/inkscript/owner-manifest-v2.json"))
             || source.ends_with(Path::new("schemas/inkscript/catalog-v2.json"))
+            || source.ends_with(Path::new("schemas/inkscript/owner-manifest-v3.json"))
+            || source.ends_with(Path::new("schemas/inkscript/catalog-v3.json"))
         {
             // The InkScript ownership and production catalog registries intentionally retain
             // stable owner-milestone and equivalence-evidence IDs. Separate integration tests

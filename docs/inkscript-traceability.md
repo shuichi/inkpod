@@ -3,31 +3,33 @@
 This document is the M00 traceability authority connecting the product requirements in
 [`SPEC.md`](../SPEC.md), the normative language contract in
 [`INKSCRIPT.md`](../INKSCRIPT.md), the machine-readable registries, milestones, and
-planned evidence. It is not a command reference. M23 froze the completed command signatures in
-[`catalog-v2.json`](../schemas/inkscript/catalog-v2.json); the derived presentation is
+planned evidence. It is not a command reference. The exact-current command signatures are in
+[`catalog-v3.json`](../schemas/inkscript/catalog-v3.json); the derived presentation is
 [`inkscript-command-reference.md`](inkscript-command-reference.md).
 
 ## Ratified contract
 
-M00's starting contract was explicitly accepted before M01 implementation, and M21's
-selector correction was separately approved before implementation:
+M00's starting contract was explicitly accepted before M01 implementation. M21's
+selector correction and the M27 drawing-model rebaseline were separately approved
+before implementation:
 
-- InkScript file version 2, procedure catalog version 2, replay epoch 23, `.inkpod`
-  top-level version 26, and C ABI version 15 are the exact-current registry values.
+- InkScript registry schema/language/file version 2, procedure catalog and owner
+  manifest version 3, replay epoch 24, `.inkpod` top-level version 27, and C ABI
+  version 17 are the exact-current values. Catalog/owner v3 expose 75 commands.
 - M07's approved exact-current registry schema v2 supersedes registry schema v1 solely to add
   closed catalog-owned enum, record, and constructor definitions; schema v1 is not accepted.
-- M21's approved option A changes only the shooting-frame selector from a layer owner to the
-  document-owned singleton required by SPEC/Core. It supersedes file/catalog v1 with exact-current
-  v2 while leaving registry schema v2, replay epoch 23, `.inkpod` v26, and C ABI v14 unchanged.
+- M21's approved option A changed only the shooting-frame selector from a layer owner to the
+  document-owned singleton required by SPEC/Core. Its file/catalog-v2 result is historical;
+  M27 retains file/language/schema v2 while superseding catalog/owner v2 with v3.
 - `schemas/inkscript/language-v2.json` freezes the command-independent language core.
   Later discovery of a missing grammar, section, type, selector, assert, asset, or
   resource rule requires an explicit InkScript file-version decision; it is not a silent
   M01+ fix.
-- Catalog v2 remained a non-production draft through M22. M23 proved the bijection among all 84
-  replayable primitives, exact command entries, owners, implementations, and equivalence IDs,
-  removed the draft, and froze `catalog-v2.json` as the production Rust contract. Owner additions
-  made before M23 did not bump catalog version; any post-freeze change requires a new versioned
-  resource, old-version rejection, and regenerated reference.
+- Catalog v2 was the 84-command production contract after M23. The M27
+  drawing-model rebaseline retires nine commands, reserves their assignments as
+  tombstones, and replaces it with exact-current catalog/owner v3 and a 75-way
+  bijection. Catalog/owner v2 are rejected; generated reference and fingerprints
+  are regenerated from v3.
 - Exact-source equivalence compares canonical state/pixel digests, ID high-watermarks,
   typed result roles and output ordinals, pre/post state digests, stable input/output/asset
   roles, and canonical invocations. Rebound execution guarantees deterministic execution
@@ -69,10 +71,10 @@ M29C must compare input order, output plan, each-run resolution, canonical proce
 sequence, state/composite digest, history, Undo/Redo, next IDs, report, semantic work
 counters, save/reopen, cache-free replay, and failure atomicity before cutover.
 
-## M00 machine-readable ownership
+## Current machine-readable ownership
 
-[`owner-manifest-v2.json`](../schemas/inkscript/owner-manifest-v2.json) assigns all 84
-current replayable `PrimitiveId` values exactly once. The allocation is deliberately
+[`owner-manifest-v3.json`](../schemas/inkscript/owner-manifest-v3.json) assigns all 75
+current command owners exactly once. The allocation is deliberately
 reviewable before signatures are added:
 
 | Owner | Replayable primitives | Scope |
@@ -85,14 +87,13 @@ reviewable before signatures are added:
 | M18A | 1 | gradient |
 | M18B | 11 | gesture effects, alpha, adjustment and scoped color operations |
 | M19 | 11 | selection, selected-source restoration and floating selection |
-| M20 | 8 | vector operations |
-| M21 | 3 | annotation, shooting frame and vanishing point |
+| M21 | 2 | shooting frame and vanishing point |
 | M22 | 13 | replayable Light Table set/item operations |
 
 `LIGHT_TABLE_SWAP_WITH_ACTIVE` is the sole current catalog exclusion because it is
 session-only. Query, view, preview, export, save/open, history-control, and frontend
 command IDs remain outside the manifest. M24's journal-fragment query therefore remains
-outside the 84-entry procedure catalog while exhaustively consuming its typed runtime variants.
+outside the 75-command catalog while exhaustively consuming its typed runtime variants.
 
 ## Registry and completeness evidence
 
@@ -111,7 +112,7 @@ The `inkscript_registry` integration target provides these current checks:
 PowerShell `Test-Json -SchemaFile` additionally validates the language, production catalog, and owner
 documents against the formal Draft 2020-12 meta-schema. The Rust tests validate the closed
 meta-schema and JSON syntax, duplicate/malformed/overflow rejection, language type/nonterminal
-references, unique field/order/type names, current version constants, the 84-entry
+references, unique field/order/type names, current version constants, the 75-entry
 primitive-owner bijection, the one explicit session-only exclusion, requirement/document
 drift, immutable catalog fingerprint, generated-reference drift, public Rust ownership, absence of
 the removed draft, and absence of private typed catalog models or Windows InkScript routes.
@@ -130,7 +131,7 @@ replay path does not materialize history visualization summaries or thumbnails.
 ## M25 C ABI evidence
 
 Three `inkpod-ffi` contracts plus the C header/export drift, C11 include, C++20 ABI smoke, and
-route-inventory gates cover the exact-current ABI v15 source/compiler/export boundary. They prove
+route-inventory gates cover the historical ABI-v15 source/compiler/export boundary. They prove
 bounded source ownership, two-stage original-text and canonical-fragment copy, atomic strided
 diagnostic records with packed UTF-8, stored-default/typed-override static compilation through the public Rust compiler, and
 journal export through the M24 public exporter. Negative evidence covers v14 rejection, NULL,
@@ -142,10 +143,10 @@ or Windows product route is exposed.
 ## M26 execution/report C ABI evidence
 
 Three `inkpod-ffi` execution contracts plus the C header/export drift, C11 include, C++20 ABI
-layout smoke, route inventory, and exact-old-version rejection cover ABI v16 PathIntent, copied
+layout smoke, route inventory, and exact-old-version rejection cover the historical ABI-v16 PathIntent, copied
 authority grants, fixed DTO host callbacks, immutable plan/preview, one-shot confirmation,
 PlanTask/RunTask event flow, cancellation, atomic native install, and detached batched reports.
-Success evidence reopens the current-v26 output, verifies cache-free full replay, Undo/Redo,
+Success evidence reopens the current-v27 output, verifies cache-free full replay, Undo/Redo,
 document/editor savepoints, history, state digest, and ID high-watermark while proving the input
 Core is unchanged. Negative evidence covers v15 rejection, NULL, short/unknown records, queue
 saturation, cancellation, stale authority/confirmation and save failure. The ABI delegates to the

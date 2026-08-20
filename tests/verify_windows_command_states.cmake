@@ -30,12 +30,39 @@ endif()
 string(REGEX MATCHALL "IDM_[A-Z0-9_]+" resource_ids "${resource_text}")
 list(REMOVE_DUPLICATES resource_ids)
 list(SORT resource_ids)
+
+# These commands moved from the menu into pane-local accessible controls. They
+# still require one command-state owner, but must not remain in the localized
+# menu resource.
+set(pane_control_ids
+    IDM_BATCH_PIN
+    IDM_COLOR_PIN
+    IDM_LOCATOR_PIN
+    IDM_LOCATOR_FIXED
+    IDM_LOCATOR_AUTOSCROLL
+    IDM_SEQUENCE_PIN
+    IDM_LIGHT_TABLE_PIN
+    IDM_SUBPALETTE_PIN)
+foreach(command_id IN LISTS pane_control_ids)
+    list(FIND unique_catalog_ids "${command_id}" catalog_index)
+    if(catalog_index EQUAL -1)
+        message(FATAL_ERROR
+            "pane-local command ${command_id} has no command-state owner")
+    endif()
+    list(FIND resource_ids "${command_id}" resource_index)
+    if(NOT resource_index EQUAL -1)
+        message(FATAL_ERROR
+            "pane-local command ${command_id} remains exposed in the menu resource")
+    endif()
+    list(REMOVE_ITEM unique_catalog_ids "${command_id}")
+endforeach()
+
 list(SORT unique_catalog_ids)
 if(NOT resource_ids STREQUAL unique_catalog_ids)
     message(FATAL_ERROR
         "command-state catalog differs from the production localized resource command set")
 endif()
 
-list(LENGTH resource_ids production_count)
+list(LENGTH catalog_ids production_count)
 message(STATUS
-    "Verified ${production_count} production command IDs with one state owner each")
+    "Verified ${production_count} production command IDs with one state owner each, including pane-local controls")

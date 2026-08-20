@@ -78,12 +78,15 @@ Windows GUI は標準的な Windows 11 desktop application とし、古典的 MD
 - tab label は active sequence cell 名、保存 file 名、`無題セル N`、`復元セル`の順で意味のある識別名を使い、dirty は `*`、同じ document の追加 view は `[ビュー N]` で示す。read-only、処理中、error も compact かつ accessible な状態として示す。tab を閉じる操作は view を閉じ、最後の view の場合だけ document close と dirty 確認へ進む。
 - `CanvasSurface` は非表示 tab ではなく可視 `EditorGroup` ごとに一つ持つ。active tab の切替時に同じ surface を別 `DocumentView` へ bind し直し、非表示 tab 数に比例して swap chain や renderer thread を増やさない。
 - dock zone は `TopContext`、`Left`、`Right`、`Bottom`、`Floating`、`Hidden`、`AutoHide` に制限する。各 zone は一方向に並ぶ比率分割枠を持ち、各分割枠は一つ以上の pane からなる tab stack とする。pane の表示、非表示、tab 選択は他の分割枠とその比率を変更せず、任意に再帰する dock tree を作らない。docked tab の内容領域に pane 固有の常設 close button を重複配置せず、非表示化は共通 pane command、floating 時の system close、または keyboard route から行う。pane descriptor は stable type ID、default/allowed zone、scope、multiplicity、float/autohide 可否、最小寸法を宣言する。
-- Color、Layer/Plane、Locator 等の inspector pane は、一つだけの split stack でも descriptor の localized title を dock header に表示する。Tool の専用 strip はこの単独 header の対象外とし、Tool Options は dock pane ではなく owned flyout とする。splitter は 4 DIP の操作領域を維持し、通常、hover、pointer capture、keyboard focus、high contrast の各状態で system color により境界と操作可能性を識別できるようにする。
+- Color、Layer/Plane、Locator 等の inspector pane は、一つだけの split stack でも descriptor の localized title を dock header に表示する。Tool の専用 strip はこの単独 header の対象外とし、Tool Options は dock pane ではなく owned flyout とする。単独の Tool strip は固定幅で zone-extent splitter、float、AutoHide を持たず、表示／非表示だけを許す。それ以外の splitter は 4 DIP の操作領域を維持し、通常、hover、pointer capture、keyboard focus、high contrast の各状態で system color により境界と操作可能性を識別できるようにする。
+- Right zone の top-level tab は固定カテゴリを持たない動的な非空 tab とする。一つの pane type は高々一つの tab に属し、tab 数、各 tab の pane 数、縦順序は既知 pane descriptor 数で bounded にする。tab identity は label や配列 index ではなく nonzero stable layout ID を使う。label は縦方向の先頭 pane の localized title、tooltip と accessible description は所属 pane の全 localized title を順序付きで示す。
+- 非表示の right pane を表示するときは、選択 tab の content height から tab strip と splitter を除いた高さに、全 pane の 96-DPI 基準 minimum height を一か所で DPI 変換した合計が収まれば末尾へ追加する。収まらない場合または選択 tab がない場合は、その pane だけを持つ新しい tab を作る。追加先を選択して pane の自然な先頭 focus target へ移す。表示済み pane の toggle は dock／floating／AutoHide の別によらず非表示にし、古い hidden membership は保持しない。
+- 最後の pane が外れた空 tab は直ちに削除し、選択 tab の replacement は直前、次、先頭の順で決める。pane header／context menu／keyboard から `新しいタブへ移動`、既存 tab への移動、tab／pane の並べ替えへ到達でき、Cancel、invalid、capacity failure は配置と stable ID high-watermark を変更しない。window が狭い場合は editor area を優先し、必要なら未選択 tab label を一時的に抑制するが、model、selection、保存 record は変更しない。
 - pane の target scope は `Application`、`FollowActiveView`、`PinnedDocument`、`Job` を区別する。pin 先 document が閉じた場合は別文書へ silent に向けず、追従 mode へ戻して accessible notification を出す。pane action は発行時の target ID と generation を保持する。
-- 現在相当の一 window、一 group 配置を初期 named workspace `彩色` として維持する。96 DPI の初期値は body 左端に幅 80 DIP の一列 tool pane、中央に document tabs と Canvas、右端に幅 320 DIP の上段 color/palette/chart と下段 layer/plane・Light Table・subpalette/reference の tab stack、最下段に status bar とし、上端の Tool Options dock strip は配置しない。既存の 32:68、55:45 比率と 4 DIP splitter を初期値に使うが、これは固定所有権ではなく復元可能な layout state である。
+- 現在相当の一 window、一 group 配置を初期 named workspace `彩色` として維持する。96 DPI の初期値は body 左端に splitter なしの固定幅 80 DIP の一列 tool pane、中央に document tabs と Canvas、右端に幅 320 DIP の Color と Layer/Plane を縦配置した一つの動的 tab、最下段に status bar とし、上端の Tool Options dock strip は配置しない。既存の 32:68、55:45 比率と 4 DIP splitter は inspector 側の復元可能な layout state とし、単独 Tool strip の幅は対象外とする。
 - tool pane の既定 button row は 64 x 34 DIP、一列とし、tool 選択用の主領域と幅 20 DIP の展開領域に分ける。両領域は bezel/border のない owner-draw の flat 表示とし、通常時は pane 背景へ溶け込ませ、hover 時だけ system color で背景を弱く反転し、checked/pressed、disabled、keyboard focus、high contrast を system color で区別する。展開領域の chevron は通常時に system gray text color で主 icon より弱く表示し、hover 時は通常 text color、checked/pressed 時は highlight text color とする。展開領域は `詳細` tooltip/accessibility name を持つ。主領域の正規ラベルは `鉛筆`、`ブラシ`、`消しゴム`、`塗りつぶし`、`閉領域塗り`、`塗り延ばし`、`スポイト`、`直線`、`曲線`、`長方形`、`楕円`、`折れ線`、`線消しゴム`、`グラデーション`、`エアブラシ`、`境界ブラシ`、`ぼかし`、`スタンプ`、`ゴミ取り`、`アルファ階調` とし、詳細名は tooltip で補う。
-- named workspace と per-window layout は versioned、bounded な application setting として保存し、`.inkpod` 文書へ混ぜない。monitor/DPI 構成が変わった場合は可視 work area へ clamp し、不正 record は拒否して初期配置へ戻す。temporary な narrow-window adaptation で保存済み logical layout を上書きしない。
-- built-in named workspace は `彩色`、`線整理`、`参照・チェック`、`バッチ`、`集中` を提供する。layout record は window、split、dock、pane、floating placement と選択 preset だけを保持し、開いている文書 path や Core 所有状態を含めない。未知 pane は無視し、不足する既知 pane は既定値で補う。
+- named workspace と per-window layout は Workspace V9 の versioned、bounded な application setting として保存し、`.inkpod` 文書へ混ぜない。V9 は動的 tab の stable ID／順序／選択、tab ごとの pane membership／縦順序、pane split weight／visibility／dock・floating・AutoHide placement、選択 preset と既存 window／editor split を保持する。V2–V8 は最終的に V9 へ正規化し、V8 の可視な旧固定3 tab membership は動的な非空 tab へ移す。monitor/DPI 構成が変わった場合は可視 work area へ clamp し、不正 record、重複 pane／tab ID、空 tab、範囲外 count、不正 selected tab、overflow、trailing garbage は拒否して初期配置へ戻す。temporary な narrow-window adaptation で保存済み logical layout を上書きしない。
+- built-in named workspace は `彩色`、`線整理`、`参照・チェック`、`バッチ`、`集中` を提供する。全 preset は空 tab と重複 pane を持たない。layout record は開いている文書 path、Core state、active stroke、job owner を含めず、未知 pane は無視し、不足する既知 pane は preset 既定値で補う。
 - floating pane は owner workspace を持つ通常の owned top-level window とし、閉じる操作では既定で非表示にする。`WS_EX_TOPMOST`、`WS_EX_PALETTEWINDOW`、`WS_EX_NOACTIVATE` は使わず、独立した `WM_DPICHANGED`、keyboard navigation、high contrast、screen reader を扱う。
 - 下段の status bar は現在 tool/active plane、document 座標、zoom/view flip/grid、pixel RGBA/selection 寸法、文書寸法/DPI、処理進捗、dirty 状態、複数ストローク入力待ちを短く表示する。
 - menu、shortcut、context menu、pane button は同じ command ID と enable/checked state を共有する。command 発行時に immutable な `CommandContext` として workspace、group、session、view、pane/job、generation を確定し、非同期実行時に active tab を再解決しない。stale target は明示 error または安全な no-op とし、現在 active な別文書へ fallback しない。
@@ -92,7 +95,7 @@ Windows GUI は標準的な Windows 11 desktop application とし、古典的 MD
 - tab drag は同一 group 内の並べ替え、別 group/window への移動、window 外 drop による新規 window を扱う。active stroke、pointer capture、modal preview 中は開始せず、`Esc` で cancel した場合は元の位置を完全復元する。同じ操作は drag に依存せず menu と keyboard からも実行できる。
 - `Ctrl+Tab`/`Ctrl+Shift+Tab` は tab、`Ctrl+F6`/`Ctrl+Shift+F6` は editor group/view、`F6`/`Shift+F6` は menu・dock pane・editor area・status の focus、`Ctrl+F4` は view close に使う。tab、splitter、pane header、AutoHide、target、dirty、job progress と command の disabled state は UI Automation から取得できるようにする。
 - 数値入力と選択肢を共有する modal dialog は、選択肢ごとに標準 combo box を使い、owner window の中央かつ monitor work area 内へ配置する。Cancel は表示前の状態を変えない。
-- 実行不能 command は disable する。例として vector layer で pencil、選択なしの一部 command、対象 layer 未指定の batch を無言で成功させない。未接続 button、空 pane、常時成功する stub は生成しない。
+- 実行不能 command は disable する。例として選択なしの一部 command、対象 layer 未指定の batch を無言で成功させない。未接続 button、空 pane、常時成功する stub は生成しない。
 
 ### 3. メニュー構成
 
@@ -162,12 +165,11 @@ UI 表示文字列は、日本語と英語を言語非依存の型付き ID で�
 - `左右反転`、`上下反転`: view だけを変え、document history/dirty を変更しない。
 - `ルーラー`、`ガイド線`、`グリッド`、`透明部分`、`作画フレーム`、`安全フレーム` の checked toggle。
 - `彩色チェック表示`: 完全な白と透明を検査する一時表示。
-- vector 用に `アンチエイリアス表示`、`中心線表示`、`中心線チェック`、`端点表示`。
 - overlay 表示は document pixel へ焼き込まない。
 
 #### ウィンドウ
 
-- 表示切替は `ツールパレット`、`ツールオプション` flyout、`カラー`、`レイヤー／プレーン` と、実装済みの補助 pane を列挙する。menu、shortcut、pane control は同じ command ID と checked state を使い、`ツールオプション` の checked state は flyout の可視性を表す。
+- 表示切替は `ツールパレット`、`ツールオプション` flyout、`カラー`、`レイヤー／プレーン` と、実装済みの補助 pane を列挙する。`ロケーター`、`シーケンス`、`ライトテーブル`、`サブパレット`、`参照`、`バッチ` は submenu ではなく、それぞれ一つの直接 checked toggle とする。menu、shortcut、pane control は同じ command ID と checked state を使い、checked state は dock／floating／AutoHide を含む実可視性、`ツールオプション` は flyout の可視性を表す。Color と Batch の文書固定／追従 command は Window menu に重複配置せず、各 pane の target control から操作する。
 - `新しいビュー`: active document の別 `DocumentView` を active group に作る。
 - `ビューを閉じる`、`文書を閉じる`: 前者は focused view だけを閉じ、後者は全 window/group の該当 view を列挙して document session を一度だけ閉じる。
 - `右へ分割`、`下へ分割`、`別グループへ移動`、`別グループに新しいビュー`、`グループを閉じる`: 最大二 group の editor area を command/keyboard から操作する。
@@ -218,14 +220,6 @@ UI 表示文字列は、日本語と英語を言語非依存の型付き ID で�
 - 主線の灰色 coverage 自体を fill 境界とみなさず、彩色 plane の境界が切れた場合に漏れる。
 - eyedropper で階調主線を拾うと、中間表示色ではなく基本線色を返す。
 
-#### ベクター彩色レイヤー
-
-- `主線プレーン`: variable-width vector path。
-- 一つ以上の `色トレース線プレーン`: 色別の vector path。
-- `塗りプレーン`: 閉領域 topology と塗り色。
-- 任意の raster plane。
-- vector geometry は zoom で変化せず、表示時だけ rasterize する。
-
 #### その他のレイヤー
 
 - `ラスター汎用`: 背景・特効用 RGBA 8/16 bit。alpha channel を持てる。
@@ -233,18 +227,9 @@ UI 表示文字列は、日本語と英語を言語非依存の型付き ID で�
 - `消失点`: 一つ以上の消失点と補助線設定。
 - `選択範囲`: selection mask の保存と編集。
 - `調整`: 明るさ/contrast、levels、tone curve を非破壊で保持する。
-- `テキスト`: 再編集可能な文字。指示用 variant は通常 export から除外できる。
-- `指示`: 手書き annotation。通常の完成画像 export から除外する。
 
 composite は layer/plane 順、visibility、opacity、alpha、adjustment を決定的に適用してください。プレーンは所属 layer を越えて並べ替えず、layer 同士と同一 layer 内 plane 同士を別に並べ替えます。
-layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最上段、すなわち合成結果の最上位とする。Canvas、layer thumbnail、flatten export は、raster と vector が任意に混在しても同じ木順序を下から上へ合成し、adjustment は置かれた位置までの合成結果へ適用する。
-
-#### テキスト／指示 annotation の確定 contract
-
-- Text／Annotation layer は、document namespace 内で生成後に再利用しない stable `AnnotationObjectId` を持つ `Text`、`Stroke`、`Leader`、`Value` object を保持する。object は owning layer、通常／指示 output、正の document-pixel bounds、straight-alpha sRGB RGBA8/16、最大 65,536 byte の UTF-8 text、最大 1,024 byte の logical font-family hint、1..1,000,000 milli-pixel の font size／stroke width、bold／italic／underline style、最大 65,536 個の milli-pixel document point を typed に保持する。文書当たりの object は 16,384、単一 transaction の edit は 4,096 を上限とする。
-- `Text` は空でない text と正の font size、`Stroke` は 2 点以上、`Leader` はちょうど 2 点、`Value` は空でない text とちょうど 2 点を必要とする。create／complete-replacement edit／integral-pixel move／delete と stroke begin／append／end は同じ canonical executor を使う。複数 edit と完了 stroke はそれぞれ一回の transaction／Undo 単位であり、no-op、invalid、Cancel、stale、overflow、failure は state、revision、history、dirty、ID high-watermark を進めない。
-- immutable render snapshot は text、logical bounds、font hint／size／style、geometry、color、output policy だけを渡す。Windows Canvas の font 解決、glyph／text-format cache、DirectWrite resource は renderer thread が所有する。空の hint は `Segoe UI`、存在しない family は `Segoe UI` へ fallback し、Canvas 上部へ `Font fallback: Segoe UI` warning を表示する。OS font、fallback、glyph metrics は canonical procedure、document digest、replay の入力にしない。
-- 保存された logical bounds と code-point order が意味上の layout authority である。通常 flat export と thumbnail の描画 owner は OS 非依存の Rust Core とし、font file を参照せず、font size から得た固定 advance の portable deterministic glyph-cell raster を用いる。したがって system-font の glyph outline は完成画像の canonical layout ではなく Canvas preview であり、別 platform の font metrics を暗黙に確定結果として採用しない。通常 variant は Canvas、thumbnail、flat export に含め、指示 variant は Canvas と layer thumbnail に含めるが通常の完成画像 flat export から必ず除外する。
+layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最上段、すなわち合成結果の最上位とする。Canvas、layer thumbnail、flatten export は、raster と adjustment が混在しても同じ木順序を下から上へ合成し、adjustment は置かれた位置までの合成結果へ適用する。
 
 #### 角度付き撮影 frame の確定 contract
 
@@ -295,11 +280,9 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - 透明表示は設定色または checkerboard で示し、pixel 値を変更しない。
 - color locator は cursor 周辺を別倍率で表示し、X/Y、selection 幅 H、高さ V、対角長 L、RGBA を表示する。active raster stroke 中は、確定前の最新 preview と最新の処理済み pointer 座標へ bounded/coalesced に非同期追従し、query 自体は document revision、history、journal、dirty、savepoint を変更しない。End 後は確定結果、Cancel 後は元の文書へ再同期する。固定 mode では locator 上で編集でき、edge 付近は自動 scroll を選べる。
 - multi-view は一つの document state と history を共有し、viewport transform だけを別に持つ。
-- vector overlay は view ごとに antialias on/off、中心線、中心線のみ、未接続端点を切り替えられる。中心線のみは通常 stroke を隠すが vector fill は保持する。未接続判定は stable path/start-or-end ID の明示接続だけを正本とし、座標一致や近接距離から推測しない。中心線幅と端点 marker は zoom に依存しない device-pixel 寸法とし、各 toggle は view revision だけを進めて document/history/journal/dirty/savepoint を変えない。
-
 ### 9. 描画・線修正ツール
 
-すべての tool option は tool button から開く Tool Options flyout の縦型 page に表示し、別の `詳細…` modal dialog へ転送しない。flyout は pencil/brush/eraser の共通値と、fill、selection、geometry、eyedropper、vector eraser、gradient/airbrush/blur/stamp/dust/alpha-gradient/boundary-airbrush の tool 固有値を既存 state/callback と双方向同期する。stroke/shape 確定前の preview と確定後の command を分離し、開いただけでは文書を変更しない。boundary airbrush のような即時破壊処理は page 内の明示的な `適用` でだけ実行する。
+すべての tool option は tool button から開く Tool Options flyout の縦型 page に表示し、別の `詳細…` modal dialog へ転送しない。flyout は pencil/brush/eraser の共通値と、fill、selection、geometry、eyedropper、gradient/airbrush/blur/stamp/dust/alpha-gradient/boundary-airbrush の tool 固有値を既存 state/callback と双方向同期する。stroke/shape 確定前の preview と確定後の command を分離し、開いただけでは文書を変更しない。boundary airbrush のような即時破壊処理は page 内の明示的な `適用` でだけ実行する。
 
 #### スポイト
 
@@ -310,7 +293,6 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 
 - click で一点、drag で1 document pixelの線を描く。
 - 階調主線では1 pixel相当の antialias coverage を描く。
-- ベクター彩色 layer では使用不可。
 - stroke 開始 pixel が描画色と同色なら stroke 全体を erase mode にする auto erase を持つ。`Shift` で auto erase を一時無効にする。
 
 #### 消しゴム
@@ -318,7 +300,6 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - tool options の先頭に `消去対象: 主線 / 彩色` を常時明示し、選択中の layer/plane、menu の主線/彩色 command、status bar と双方向に同期する。消しゴム選択だけでは対象を自動変更しない。
 - shape、太さ、zoom に対して screen size を維持するか、pressure を太さへ反映するかを選ぶ。
 - raster は cursor footprint 内を透明/背景へ消す。
-- vector は `触れた部分だけ`、`触れた線の交点まで`、`触れた線全体` の三 mode を持つ。切断端は不必要に丸めない。
 
 #### 直線・曲線・図形・折れ線
 
@@ -340,7 +321,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - 適用範囲は pen、rectangle、polyline、lasso。
 - mode は `背景/透明以外の小点を除去`、`透明/背景の小穴を周囲色で埋める`、`周囲と異なる小領域を周囲色へ置換`。
 - 最大サイズを指定し、必要な線を消す可能性を preview で確認する。
-- tool は局所、filter は選択または plane 全体を一括処理する。vector では無効。
+- tool は局所、filter は選択または plane 全体を一括処理する。
 
 #### 線つなぎ
 
@@ -350,9 +331,8 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 
 #### 線幅修正
 
-- 適用範囲は pen/rectangle/polyline/lasso。vector は触れた線全体 option を持つ。
-- `指定幅だけ太く`、`指定幅だけ細く`、vector の `指定倍率で拡大/縮小`、`一定幅` を別 mode にする。
-- raster は morphology、vector は path width edit とし、結果の意味を揃えても内部処理を混ぜない。
+- 適用範囲は pen/rectangle/polyline/lasso。
+- `指定幅だけ太く`、`指定幅だけ細く` を別 mode にし、raster morphology として処理する。
 
 #### 消失点
 
@@ -364,7 +344,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 ### 10. 色、パレット、チャート、参照画像
 
 - 描画色は sRGB RGBA 8/16 bit を保持し、RGB と HSV editor、alpha 数値/percent 表示を切り替える。
-- 色を使う active command は、鉛筆、ブラシ、フィル、選択、エアブラシ、各ベクター描画 tool ごとに独立した現在色を持つ。鉛筆の既定色は黒、その他の彩色用 command の既定色は彩色用の初期色とする。command 切替時はその command の現在色を復元し、color editor、swatch、数値欄へ即時反映する。color pane は文書の主線色と active command の彩色用描画色を別のラベルと swatch で常時区別する。スポイト等の色を持たない一時 tool は直前の色付き command を変更先として維持する。
+- 色を使う active command は、鉛筆、ブラシ、フィル、選択、エアブラシ等の raster command ごとに独立した現在色を持つ。鉛筆の既定色は黒、その他の彩色用 command の既定色は彩色用の初期色とする。command 切替時はその command の現在色を復元し、color editor、swatch、数値欄へ即時反映する。color pane は文書の主線色と active command の彩色用描画色を別のラベルと swatch で常時区別する。スポイト等の色を持たない一時 tool は直前の色付き command を変更先として維持する。
 - color ring、HSV triangle、alpha track の pointer drag は pane-local preview を各入力 sample で即時描画し、button release 時だけ現在色を Core/editor state へ公開する。capture cancellation は drag 開始時の色と hue へ復元し、preview 中に palette/chart list や他 pane を全更新しない。
 - color palette は複数 page/group を持ち、cell click で描画色取得、modifier+click で現在色登録、clear/save/load ができる。
 - 高頻度の10色は `1`から`0`へ割り当て、`Tab`で次の10色 group へ切り替える。shortcut editor で変更可能にする。
@@ -392,7 +372,6 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - `なし`、`指定色`、`指定色以外` を持つ。
 - 基本の赤/緑/青を含め最大6色相当を登録でき、対象色は境界とみなさず fill 領域と一緒に描画色へ置換する。
 - 色トレース線を消して影色等へ含める用途を満たす。
-- vector の `線全体を塗る` は一部に触れた path 全体の色を変更する。
 - fill 実行直前の modifier で含み塗りを一時 off にできる。
 
 #### 塗りあふれ中断
@@ -417,8 +396,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 
 - 色置換 tool は pen、rectangle、polyline、lasso の document-space region と既存 selection の積集合だけで、対象色を描画色へ変更する。region がなく selection だけがある場合は selection、両方がない場合は文書全体を対象とし、文書全体の実行は Windows frontend が確定 request の発行前に明示確認する。region preview は button release まで文書を変更せず、Cancel または tool／view 切替で消去する。
 - raster 色置換は対象 plane の native depth で alpha を含む全格納成分が対象色と完全一致する pixel だけを置換する。表示変換、premultiply 後の値、tolerance、連結性を判定へ使わず、selection／region 外の同色 pixel は変更しない。
-- vector 色置換は `線` と `塗り` を明示 mode として分ける。`線` mode の一単位は stable `VectorPathId` を持つ一つの path とし、segment、表示 stroke、複合境界を別単位にしない。可変線幅を含む path の幾何学的 coverage が region と交差した場合は、その path 全体の色を変更する。`塗り` mode は stable `VectorFillId` を持つ一つの fill object の幾何学的内部が region と交差した場合に、その fill 全体の色を変更する。線 mode から fill を、fill mode から境界 path を暗黙に変更しない。
-- vector の接触判定は Core が document 座標の固定 geometry と width から決定し、Direct2D の antialias fringe、zoom、pan、view flip、OS DPI、layer／plane opacityへ依存させない。彩色 mode は raster／vector とも主線 plane を対象にできず、主線 mode の明示 command だけが editable な主線 pixel／path を変更できる。raster／vector とも hidden または non-editable target は実行前に拒否する。
+- 彩色 mode は主線 plane を対象にできず、主線 mode の明示 command だけが editable な主線 pixel を変更できる。hidden または non-editable target は実行前に拒否する。
 - 塗りのばしは既存色を drag 方向の狭い未着色領域へ広げ、効果範囲、強さ、drag で囲まれた範囲も処理する option を持つ。
 - 組み線彩色では light table の線を境界として参照し、参照画像自体を変更しない。
 - 合成動画では親セルの必要 layer/plane を typed clipboard で子セルへ座標維持 paste できる。
@@ -427,7 +405,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 
 - `彩色チェック表示` は legacy white-transparency mode で完全な白 RGB(255,255,255) を未彩色/透明候補として残し、それ以外を黒等の高 contrast で表示する。native alpha mode では透明 alpha も別 category で示す。
 - `出力色安全ガード`は正式な放送規格適合判定ではなく、BT.709のY′CbCr係数とnominal code相当の閾値を使うinkpod独自の保守的QAとする。closed profileの初期値は`BT.709 conservative Y′CbCr guard`だけとし、旧NTSC固定式、EBU R103適合表示、自動legalizeを行わない。
-- sourceは確定済みのvisible layer compositeとGenesis assetであり、solid-white paper、Light Table、guide、grid、selection overlay、color-check overlay、previewを含めない。raster／vector／adjustment、visibility、opacity、layer／plane順を通常のdocument compositeと共有する。8 bit channelは`value * 257`で16 bitへ正確に昇格し、RGBA16 straight alphaで合成する。alphaが0のpixelは検査せず、alphaが正のpixelはpremultiplied表示値ではなく合成後のstraight RGBを検査する。
+- sourceは確定済みのvisible layer compositeとGenesis assetであり、solid-white paper、Light Table、guide、grid、selection overlay、color-check overlay、previewを含めない。raster／adjustment、visibility、opacity、layer／plane順を通常のdocument compositeと共有する。8 bit channelは`value * 257`で16 bitへ正確に昇格し、RGBA16 straight alphaで合成する。alphaが0のpixelは検査せず、alphaが正のpixelはpremultiplied表示値ではなく合成後のstraight RGBを検査する。
 - 16 bit compositeの`R,G,B`を0以上65535以下とし、`Y_num = 2126*R + 7152*G + 722*B`、`Y′ = round_half_up(Y_num / 10000)`とする。`Cb = round_half_up((65535*18556 + 2*(10000*B - Y_num)) / (2*18556))`、`Cr = round_half_up((65535*15748 + 2*(10000*R - Y_num)) / (2*15748))`とし、検査付き整数演算だけを使う。Y′の安全域は8 bit code相当`16..=235`、Cb／Crは`16..=240`、16 bitでは各境界を257倍した値とする。境界値は安全で、一成分でも範囲外ならそのpixelを規格外候補にする。spatial filterと画像全体1% thresholdは適用せず、pixel単位の候補選択と件数／検査数／透明skip数を返す。
 - ガード結果は元pixelを変更せず、`新規`、`追加`、`削除`、`交差`で既存selectionへ一transaction、一canonical procedure、一Undo単位として合成する。`新規`が非空selectionを空maskへ置換する場合は変更、既に同じ空maskの場合だけno-opとする。他operationの同一結果もno-opとし、Cancel、invalid profile、stale base revision、overflow、allocation／composition failureではselection、revision、history、journal、dirty、IDを進めない。
 - 大画像scanはrow単位のprogressとcooperative cancellationを持ち、発行時document UUID／base revision／profile／selection operationへ固定する。profile semanticsはcanonical procedureへ保存するが、profileのUI既定値はapplication settingでありdocumentへ永続化しない。
@@ -457,7 +435,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - selection は document 寸法の mask として保持し、処理効果をその mask 内へ限定する。
 - tool は rectangle/ellipse、magic wand、lasso、polyline、trace brush。
 - operation は `新規`、`追加`、`削除`、`交差`。modifier は Shift=追加、Alt=削除、Shift+Alt=交差を基本とする。
-- selection 内を drag したとき、mask だけを移動するか、選択された active plane pixel/vector も floating content として移動するかを option で分ける。
+- selection 内を drag したとき、mask だけを移動するか、選択された active plane pixel も floating content として移動するかを option で分ける。
 - rectangle/ellipse は aspect ratio、中心から作成、作成後回転、45度 constraint を持つ。
 - magic wand は connected same-color、color tolerance、gap close を持つ。階調主線では基本色と coverage semantics を使う。
 - trace brush は丸/角、太さ、pressure、screen-size固定を持つ。
@@ -465,13 +443,12 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - raster 内容の coverage は Binary／Grayscale 8/16 bit の非ゼロ値、RGBA 8/16 bit の非ゼロ alpha とする。探索は candidate 内の 4 近傍で行い、`描線に密着` は candidate 外周へ到達する未 coverage を除いた coverage と穴、`閉領域内部` は外周へ到達しない未 coverage、`描線形状` は coverage、`境界` は未 coverage または用紙外へ 4 近傍で接する coverage とする。通常は raster 内容を読まず candidate をそのまま使う。
 - rectangle／ellipse の aspect は入力範囲を縮めず不足軸を拡張し、中心指定時は開始点を中心とする。回転値は一周を `u32` 全域で表し、45 度 constraint は最寄りの 1/8 周へ丸める。trace の screen-size 固定は gesture 開始時の view zoom で document 径へ正規化し、pressure は各 sample の径へ適用する。
 - geometry preview と commit は同じ正規化済み option と mask generator を使う。Cancel、invalid、stale、overflow は mask、revision、履歴、journal を変えない。`新規` が非空 mask を空へ置換する場合は一変更、既に同じ空 mask なら no-op とする。
-- vector selection は selection で切断、一部でも触れれば選択、完全包含のみ、線を選択、線全体、交点まで、塗りを囲む線、塗りを選択を区別する。
 - 描画色と同じ/異なる領域の全選択、追加、mask expand/shrink を提供する。
 - selection layer との相互変換、現在 mask への追加/削除、selection layer 自体を通常描画 tool で編集する操作を round-trip 可能にする。
 
 ### 15. カット、コピー、ペースト
 
-- clipboard payload は source document ID、layer/plane type、document origin に対する bounds、pixel/vector/selection、色深度を持つ。
+- clipboard payload は source document ID、layer/plane type、document origin に対する bounds、pixel/selection、色深度を持つ。
 - `コピー` は対象として選択された layer/plane だけを格納する。主線と彩色の両方を target にした場合は両方の typed payload を保持する。
 - 通常 `ペースト` は payload と同じ属性の destination plane を優先する。現在別種類の plane が選ばれていても、互換 destination が存在すれば元属性へ貼る。
 - `選択プレーンにペースト` は明示的に現在 plane へ変換・合成する。損失がある型変換は preview/確認する。
@@ -485,11 +462,11 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 
 - view flip/zoom/pan と、document data の mirror/rotate/resize を別 command にする。
 - image size は canvas width/height と元画像 anchor を変更する。resolution は物理寸法、DPI、pixel 数と再 sample algorithm を変更する。
-- 全文書の左右/上下 mirror、90度回転はすべての画像 plane、vector、selection、frame、guide の座標整合を保つ。
+- 全文書の左右/上下 mirror、90度回転はすべての画像 plane、selection、frame、guide の座標整合を保つ。
 - 部分 transform は selection content を floating state にし、X/Y移動、幅/高さscale、aspect lock、五点基準、任意角回転を dialog と handle drag の双方で操作する。
 - floating transform の元領域は document 座標の half-open 矩形 `[x, x + width) × [y, y + height)` とする。五点基準は左上 `(x, y)`、右上 `(x + width, y)`、中央 `(x + width/2, y + height/2)`、左下 `(x, y + height)`、右下 `(x + width, y + height)` であり、中央の半pixelは Q16.16 で正確に保持する。
 - floating transform dialog の X/Y は移動量ではなく、選択した五点基準を配置する絶対 document 座標である。変換は元の同じ floating content に対し、選択anchorをpivotとしてlocal X/Y scale、時計回りrotation、anchorをX/Yへ配置する順で一回だけ評価する。preview update、anchor変更、retry、dialog、Canvas handleは前回preview結果へ累積適用せず、この同じ変換を使う。
-- raster は変換後のhalf-open edge boundsをQ16.16で求め、外接destination pixel範囲を下端floor／上端ceilで決める。各destination pixel中心を逆写像し、source half-open cellをfloorで一意に選ぶ。用紙外はclipし、far edge、負座標、half-pixel、非一様scale、任意角回転でもOS DPI、renderer、thread数に依存しない。vector pointとCanvas preview／handleも同じanchorと変換順序を使う。
+- raster は変換後のhalf-open edge boundsをQ16.16で求め、外接destination pixel範囲を下端floor／上端ceilで決める。各destination pixel中心を逆写像し、source half-open cellをfloorで一意に選ぶ。用紙外はclipし、far edge、負座標、half-pixel、非一様scale、任意角回転でもOS DPI、renderer、thread数に依存しない。Canvas preview／handleも同じanchorと変換順序を使う。
 - selection 内に描画内容がなければ明確な no-content error とし、履歴を増やさない。
 
 ### 17. 履歴、復帰、preview
@@ -555,12 +532,13 @@ contractとして維持する。M23で批准済みcatalogを使うRust compile�
 
 ### 20. 形式、白透過、一般画像入出力
 
+- exact-current 契約は `.inkpod` top-level format v27、runtime replay epoch 24、C ABI v17、InkScript registry schema／language／file v2、production catalog／owner manifest v3（75 command）とする。v26／epoch 23、ABI v16、catalog／owner manifest v2、および削除済み primitive ID／canonical invocation／procedure entry は migration や shim を設けず拒否する。今回の更新は native format freeze 宣言ではない。
 - native `.inkpod` は、保存時点の可変 raster snapshot を意味上の正本にしない。正本は immutable な `Genesis`、content-addressed な `Assets`、Core が検証・正規化して実変更を確定した `Procedures` と history control event、history の現在位置と high-watermark を持つ `META`、文書単位の `EditorState` とする。materialized document、inverse delta、COW snapshot、render/checkpoint cache は派生物であり、これらだけで文書を成立させない。
 - frontend request は target/revision/ID と上限を検証し、座標、色、option、可変長入力、transaction 内の output ID を正規化してから一つの `CanonicalProcedure` として確定する。procedure は monotonic ID、primitive ID/schema、replay epoch、base/committed `StateId`、固定幅引数、stable input/output ID、immutable `AssetId` または bounded inline payload、pre/post document-state digest を持ち、raw pointer、外部 path、native enum layout、frontend command ID、一時 object ID を含めない。
 - `Genesis` は document UUID、paper、DPI、sRGB、frame、margin、初期 stable-ID topology、immutable base surface を完全記述する。白紙の base surface は全面 tile を割り当てない opaque white の `SolidWhite` underlay とし、flat canonical composite/export には参加するが、個別 layer/plane export や selection mask へ暗黙に混入させない。
-- import、clipboard、Light Table 等の外部入力は ingestion 時に Rust が canonical pixel/vector payload へ変換し、immutable `AssetId` を発行する。procedure は外部 path、codec の再実行、caller buffer の lifetime を参照しない。元 encoded bytes や provenance は replay に影響しない任意 metadata としてのみ保持できる。
+- import、clipboard、Light Table 等の外部入力は ingestion 時に Rust が canonical pixel payload へ変換し、immutable `AssetId` を発行する。procedure は外部 path、codec の再実行、caller buffer の lifetime を参照しない。元 encoded bytes や provenance は replay に影響しない任意 metadata としてのみ保持できる。
 - 永続 journal は閉じた型 `Commit`、`HistoryMove`、`BranchCut` だけを持つ。実変更を確定した document transaction、実際に移動した Undo/Redo/history jump、history cursor が active branch の tail 以外にある状態からの新規 commit による branch cut だけを順序どおり記録し、query、invalid、failure、cancel、stale、overflow、no-op、stroke/preview の途中更新は記録しない。stroke end、preview apply、floating commit は成功時にそれぞれ一つの canonical procedure とする。
-- `.inkpod` section は history procedure/control event を `PROC`、history cursor、active branch、document/editor savepoint と各 persistent ID の high-watermark を `META` に置く。独立した `HIST` section は作らない。`EDIT` は active tool、最後の色付き command、tool ごとの exact-depth color、diameter、fill/selection/vector option、active layer/plane、palette cursor 等の再開に必要な文書単位 editor state を保持する。`CKPT` は任意の open 高速化 cache、`EXTM` は replay に影響しない任意 metadata とする。checkpoint の hash、構造、resource bound 違反は file corruption として拒否し、構造上有効な epoch/prefix/state 不一致だけは checkpoint を無視して full replay する。checkpoint を全て除いても同じ state、pixel、history、次 ID を再構成できなければならない。
+- `.inkpod` section は history procedure/control event を `PROC`、history cursor、active branch、document/editor savepoint と各 persistent ID の high-watermark を `META` に置く。独立した `HIST` section は作らない。`EDIT` は active tool、最後の色付き command、tool ごとの exact-depth color、diameter、fill/selection option、active layer/plane、palette cursor 等の再開に必要な文書単位 editor state を保持する。`CKPT` は任意の open 高速化 cache、`EXTM` は replay に影響しない任意 metadata とする。checkpoint の hash、構造、resource bound 違反は file corruption として拒否し、構造上有効な epoch/prefix/state 不一致だけは checkpoint を無視して full replay する。checkpoint を全て除いても同じ state、pixel、history、次 ID を再構成できなければならない。
 - 通常保存後の reopen は画像だけでなく、history list/cursor、Undo/Redo availability、active/non-active branch、document/editor savepoint、persistent ID high-watermark、EditorState を復元する。通常 UI から外れた redo branch も監査可能な append-only journal と asset retention root に残し、自動 squash しない。
 - open は decode、全参照・asset 検証、replay を staged Core で完了し、成功時だけ live Core を一回で置換する。通常保存は current `StateId` と `EditorStateDigest` を prospective savepoint として一時 file へ書き、flush、close、destination 置換の成功後だけ live path と両 savepoint を公開する。autosave、recovery、export は通常 savepoint を進めず、recovery open は以前の通常保存先への authority を継承しない pathless かつ dirty な session とする。
 - 履歴を失う compaction は自動実行しない。利用者へ失われる event/procedure 数を事前表示し、revision と digest で対象を再確認したうえで、open session の path とは別の file へ新しい Genesis として書き出す。成功しても live path、history、dirty、savepoint を変更しない。
@@ -637,8 +615,7 @@ contractとして維持する。M23で批准済みcatalogを使うRust compile�
 - `CELL-001`: image/frame size、DPI、六種 frame、五点 anchor、初期 layer、8/16 bit、bounded 複数枚を同一 plan から all-or-none で作る新規 Cell workflow
 - `DOC-002`: stable ID を持つ typed layer/plane tree
 - `DOC-003`: create/duplicate/delete/reorder/show/edit/opacity/convert/merge
-- `RENDER-001`: raster/vector 混在時の layer/plane 木順序、visibility、opacity、alpha、adjustment を共有する Canvas/thumbnail/flatten 合成
-- `ANNOTATION-001`: stable ID、bounded UTF-8／geometry、通常／指示 output policy を持つ再編集可能 Text／Stroke／Leader／Value annotation と、その canonical edit／stroke、Canvas／thumbnail／flat export、save／reopen contract
+- `RENDER-001`: raster／adjustment の layer/plane 木順序、visibility、opacity、alpha を共有する Canvas/thumbnail/flatten 合成
 - `SHOOTING-FRAME-001`: stable ID、center／size／binary-turn rotation／五点 anchor／表示・指示 export policy を持つ独立した角度付き撮影 frame object、preview/transaction、document transform、Canvas／指示 export／save／reopen contract
 - `VANISHING-POINT-001`: Canvas内外の複数stable-ID消失点、bounded fixed-point放射線、exact color／opacity／visibility、preview／transaction、radial snap、document transform、Canvas overlay、save／reopen contract
 - `VIEW-001`: zoom、box zoom、fit、1:1、pan、horizontal/vertical flip
@@ -646,7 +623,6 @@ contractとして維持する。M23で批准済みcatalogを使うRust compile�
 - `SNAP-001`: view-targeted device/document座標変換、guide/grid優先順位、Ctrl一時解除を共有するproduction図形入力snap
 - `VIEW-003`: color locator の座標/RGBA/selection sampling と magnified neighborhood 表示・編集
 - `VIEW-004`: 複数文書 tab、同一文書 view、二分割 group、group/window 間の移動と複製
-- `VIEW-005`: view-local vector antialias、中心線 overlay／中心線のみ、明示 topology に基づく未接続端点診断
 - `HIST-001`: transaction、Undo/Redo、savepoint、revert、preview cancel
 - `HIST-002`: open native document の canonical procedure journal、typed 引数、commit 後 thumbnail のモードレス可視化
 
@@ -659,7 +635,7 @@ contractとして維持する。M23で批准済みcatalogを使うRust compile�
 - `FILL-001`: connected seed fill、tolerance、selection
 - `FILL-002`: 含み塗り、overflow abort、gap close、detached regions
 - `FILL-003`: closed-region fill、transparent-only、fill extension
-- `COLOR-REPLACE-001`: pen／rectangle／polyline／lassoとselectionで限定したnative-depth raster置換、およびstable path／fill単位のcoverage接触vector置換
+- `COLOR-REPLACE-001`: pen／rectangle／polyline／lassoとselectionで限定したnative-depth raster置換
 - `COLOR-001`: RGBA 8/16、RGB/HSV、eyedropper source
 - `COLOR-002`: palette、chart、subpalette、color check
 - `COLOR-CHART-PREVIEW-001`: 同一base compositeからの非累積Color chart生成preview、頻度／差分summary、revision-bound Apply、exact-color名前継承、lock拒否、cursor継承、Cancel無変更、一回Undo／Redoとsave/reopen
@@ -669,12 +645,12 @@ contractとして維持する。M23で批准済みcatalogを使うRust compile�
 
 - `SEL-001`: rect/ellipse/lasso/polyline/trace/wand selection
 - `SEL-002`: new/add/subtract/intersect/invert/expand/shrink/color selection
-- `SEL-003`: selection layer conversion と vector selection modes
+- `SEL-003`: selection layer conversion
 - `SEL-004`: raster range interpretation と rectangle／ellipse／trace construction options
 - `CLIP-001`: typed clipboard、standard clipboard、document coordinate preservation
 - `XFORM-001`: destructive mirror/rotate/size/resolution と非破壊 view transform の分離
 - `XFORM-002`: floating selection move/scale/rotate、preview/commit/cancel
-- `XFORM-003`: half-open boundsの五点anchorをpivotとするscale→時計回りrotate→絶対document X/Y配置、非累積preview、dialog／Canvas handle／raster／vectorの同一結果
+- `XFORM-003`: half-open boundsの五点anchorをpivotとするscale→時計回りrotate→絶対document X/Y配置、非累積preview、dialog／Canvas handle／rasterの同一結果
 
 ### Animation workflow
 
@@ -700,9 +676,7 @@ contractとして維持する。M23で批准済みcatalogを使うRust compile�
 - `BATCH-003`: dry-run、preview、progress、cancel、per-output atomicity、failure report
 - `BATCH-004`: bounded multi-row seed／pair authoring、exact native-depth二セルpair抽出とambiguity解決、typed separation destination、実行前immutable per-run configuration
 - `SCRIPT-001`: exact-current UTF-8 `.inkscript`／fragmentのclosed grammar、lossless CST、typed semantic AST、canonical emitter、schema registry、bounded diagnostic／resource contract
-- `SCRIPT-002`: 全journal-replayable primitiveのclosed typed catalog、同一canonical executor、exact-source／rebound等価性、selector／assert／result／asset／portability／work formula、Continuous Fillの一seed一stepと1:N `editor_group`
+- `SCRIPT-002`: 全現行journal-replayable primitiveのclosed typed catalog、同一canonical executor、exact-source／rebound等価性、selector／assert／result／asset／portability／work formula、Continuous Fillの一seed一stepと1:N `editor_group`
 - `SCRIPT-003`: authority-bound immutable plan、dry-run／progress／cancel／failure report、inputごとのstaged executionとexact-current `.inkpod` atomic install、save/reopen／Undo/Redo／cache-free replay／ID／savepoint保持
 - `SCRIPT-004`: journalからのexact fragment export、dependency closure、strict bindingの明示rebind、Batch／History間のtransactional clipboard、source-preserving structured edit
 - `SCRIPT-005`: `.inkbatch`現行productionを維持したprivate実装、M29C shadow parity、M34明示cutover、M35旧形式削除、承認済みperformance gateと最終hardening
-- `VECTOR-001`: path/variable width/fill/color-trace model と rendering
-- `VECTOR-002`: vector draw/erase/connect/width/select/convert

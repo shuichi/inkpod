@@ -7,12 +7,6 @@ pub enum ScopedColorReplaceMode {
     RasterColor,
     /// Editable raster main-line plane.
     RasterMainLine,
-    /// Whole stable paths on an editable vector color-trace plane.
-    VectorColorLine,
-    /// Whole stable paths on an editable vector main-line plane.
-    VectorMainLine,
-    /// Whole stable fill objects on an editable vector-fill plane.
-    VectorFill,
 }
 
 /// Complete caller-owned input for one preview or canonical scoped replacement.
@@ -22,7 +16,7 @@ pub struct ScopedColorReplaceRequest {
     pub base_document_revision: u64,
     /// Stable destination plane ID.
     pub plane_id: u64,
-    /// Explicit raster/vector and coloring/main-line mode.
+    /// Explicit raster coloring/main-line mode.
     pub mode: ScopedColorReplaceMode,
     /// Exact native-depth source value, including alpha.
     pub target: PixelValue,
@@ -43,8 +37,6 @@ pub struct ScopedColorReplacePreview {
     pub base_document_revision: u64,
     /// Exact raster pixels that would change.
     pub matched_pixels: u64,
-    /// Whole stable vector paths or fills that would change.
-    pub matched_objects: u64,
-    /// Smallest half-open raster match bounds or effective vector contact bounds.
+    /// Smallest half-open raster match bounds.
     pub affected_bounds: Option<RectI32>,
 }

@@ -20,11 +20,17 @@ using inkpod::windows::ui::DockFloatingPlacement;
 using inkpod::windows::ui::DockLayoutModel;
 using inkpod::windows::ui::DockPaneType;
 using inkpod::windows::ui::DockResult;
+using inkpod::windows::ui::DockSplitterGeometry;
+using inkpod::windows::ui::DockSplitterKind;
 using inkpod::windows::ui::DockStackMode;
 using inkpod::windows::ui::DockZone;
 using inkpod::windows::ui::PaneDescriptors;
 using inkpod::windows::ui::RightToolTabsModel;
+using inkpod::windows::ui::ToolTab;
+using inkpod::windows::ui::ToolTabDescription;
+using inkpod::windows::ui::ToolTabId;
 using inkpod::windows::ui::ToolTabResult;
+using inkpod::windows::ui::ToolTabTitle;
 using inkpod::windows::ui::ApplyWorkspacePreset;
 using inkpod::windows::ui::ClampWorkspaceFloatingPanes;
 using inkpod::windows::ui::ClampWorkspacePlacement;
@@ -46,9 +52,6 @@ using inkpod::windows::ui::WorkspaceWorkArea;
 using inkpod::windows::ui::kDockedZoneCount;
 using inkpod::windows::ui::kDockPaneCount;
 using inkpod::windows::ui::kMaximumWorkspaceLayoutRecordBytes;
-using inkpod::windows::ui::kToolTabColoring;
-using inkpod::windows::ui::kToolTabReference;
-using inkpod::windows::ui::kToolTabWorkflow;
 
 int Width(const RECT& value) noexcept {
     return value.right - value.left;
@@ -205,6 +208,88 @@ struct PersistedWorkspaceForMigration {
     std::array<PersistedAuxiliaryPaneForMigration, 16U> auxiliary{};
 };
 
+struct PersistedRightToolTabForMigration {
+    std::uint32_t stable_id{};
+    std::uint32_t pane_count{};
+    std::array<std::uint32_t, kDockPaneCount> pane_stable_type_ids{};
+};
+
+struct PersistedWorkspaceV9ForMigration {
+    PersistedWorkspaceForMigration workspace{};
+    std::uint32_t tab_count{};
+    std::uint32_t selected_tab_id{};
+    std::uint32_t next_tab_id{};
+    std::uint32_t reserved{};
+    std::array<PersistedRightToolTabForMigration, kDockPaneCount> tabs{};
+};
+
+bool ExtractVersion8Workspace(
+    std::span<const std::byte> current,
+    std::span<std::byte> legacy,
+    std::size_t& written) noexcept {
+    written = 0U;
+    if (current.size() != sizeof(PersistedWorkspaceV9ForMigration)
+        || legacy.size() < sizeof(PersistedWorkspaceForMigration)) {
+        return false;
+    }
+    PersistedWorkspaceV9ForMigration value{};
+    std::memcpy(&value, current.data(), sizeof(value));
+    value.workspace.version = 8U;
+    value.workspace.struct_size = sizeof(PersistedWorkspaceForMigration);
+    std::memcpy(legacy.data(), &value.workspace, sizeof(value.workspace));
+    written = sizeof(value.workspace);
+    return true;
+}
+
+bool ValidDynamicRightTabs(const WorkspaceLayoutState& state) noexcept {
+    std::array<bool, kDockPaneCount> seen_panes{};
+    std::array<std::uint32_t, kDockPaneCount> seen_ids{};
+    std::size_t seen_id_count{};
+    bool selected_seen = !state.right_tool_tabs.Selected()
+        && state.right_tool_tabs.Tabs().empty();
+    for (const ToolTab& tab : state.right_tool_tabs.Tabs()) {
+        if (!tab.id || tab.pane_count == 0U
+            || tab.pane_count > tab.panes.size()) {
+            return false;
+        }
+        for (std::size_t index = 0U; index < seen_id_count; ++index) {
+            if (seen_ids[index] == tab.id.Value()) {
+                return false;
+            }
+        }
+        seen_ids[seen_id_count++] = tab.id.Value();
+        selected_seen = selected_seen || tab.id == state.right_tool_tabs.Selected();
+        for (std::size_t index = 0U; index < tab.pane_count; ++index) {
+            const std::size_t pane_index = static_cast<std::size_t>(
+                tab.panes[index]);
+            const auto* placement = state.dock.Pane(tab.panes[index]);
+            if (pane_index >= seen_panes.size() || seen_panes[pane_index]
+                || placement == nullptr || !placement->present
+                || placement->zone != DockZone::Right) {
+                return false;
+            }
+            seen_panes[pane_index] = true;
+        }
+    }
+    if (!selected_seen) {
+        return false;
+    }
+    for (const auto& descriptor : PaneDescriptors()) {
+        const auto* placement = state.dock.Pane(descriptor.type);
+        if (descriptor.type != DockPaneType::Tool
+            && descriptor.type != DockPaneType::ToolOptions
+            && descriptor.type != DockPaneType::JobProgress
+            && (descriptor.allowed_zones
+                & inkpod::windows::ui::DockZoneBit(DockZone::Right)) != 0U
+            && placement != nullptr && placement->present
+            && placement->zone == DockZone::Right
+            && !seen_panes[static_cast<std::size_t>(descriptor.type)]) {
+            return false;
+        }
+    }
+    return true;
+}
+
 }  // namespace
 
 int main() {
@@ -226,7 +311,7 @@ int main() {
         || PaneDescriptors()[1].scope
             != inkpod::windows::ui::PaneTargetScope::FollowActiveView
         || PaneDescriptors()[0].can_auto_hide
-        || !PaneDescriptors()[0].can_float
+        || PaneDescriptors()[0].can_float
         || PaneDescriptors()[0].show_header_when_singleton
         || PaneDescriptors()[1].show_header_when_singleton
         || tool_options_descriptor.default_visible
@@ -251,81 +336,164 @@ int main() {
     }
 
     RightToolTabsModel tool_tabs{};
-    if (tool_tabs.Tabs().size() != 3U
-        || tool_tabs.Selected() != kToolTabColoring
-        || !tool_tabs.IsVisible(kToolTabColoring)
-        || !tool_tabs.IsVisible(kToolTabReference)
-        || !tool_tabs.IsVisible(kToolTabWorkflow)
-        || tool_tabs.TabForPane(DockPaneType::Color) != kToolTabColoring
-        || tool_tabs.TabForPane(DockPaneType::Locator) != kToolTabReference
-        || tool_tabs.TabForPane(DockPaneType::Batch) != kToolTabWorkflow) {
+    const ToolTabId initial_tab{1U};
+    std::array<wchar_t, 512U> tab_description{};
+    std::wstring initial_description = color_descriptor.fallback_title;
+    initial_description.append(L", ");
+    initial_description.append(layer_descriptor.fallback_title);
+    if (tool_tabs.Tabs().size() != 1U
+        || tool_tabs.Selected() != initial_tab
+        || tool_tabs.Tabs()[0].pane_count != 2U
+        || tool_tabs.Tabs()[0].panes[0] != DockPaneType::Color
+        || tool_tabs.Tabs()[0].panes[1] != DockPaneType::Layer
+        || tool_tabs.TabForPane(DockPaneType::Color) != initial_tab
+        || tool_tabs.TabForPane(DockPaneType::Locator)
+        || std::wstring(ToolTabTitle(tool_tabs.Tabs()[0]))
+            != color_descriptor.fallback_title
+        || !ToolTabDescription(tool_tabs.Tabs()[0], tab_description)
+        || std::wstring(tab_description.data()) != initial_description) {
         return 120;
     }
-    if (tool_tabs.MovePane(DockPaneType::Color, kToolTabReference)
+    if (tool_tabs.AddPaneToSelected(DockPaneType::Locator, 10'000, 96U, 6)
             != ToolTabResult::Ok
-        || tool_tabs.TabForPane(DockPaneType::Color) != kToolTabReference
-        || tool_tabs.MovePane(DockPaneType::Color, kToolTabReference)
-            != ToolTabResult::NoOp
-        || tool_tabs.SetSelected(kToolTabReference) != ToolTabResult::Ok
-        || tool_tabs.SetVisible(kToolTabReference, false) != ToolTabResult::Ok
-        || tool_tabs.Selected() != kToolTabWorkflow
-        || tool_tabs.SetVisible(kToolTabWorkflow, false) != ToolTabResult::Ok
-        || tool_tabs.Selected() != kToolTabColoring
-        || tool_tabs.SetVisible(kToolTabColoring, false) != ToolTabResult::Ok
-        || tool_tabs.Selected()
-        || tool_tabs.HasVisibleTabs()
-        || tool_tabs.SetVisible(kToolTabReference, true) != ToolTabResult::Ok
-        || tool_tabs.Selected() != kToolTabReference) {
+        || tool_tabs.Tabs().size() != 1U
+        || tool_tabs.ReorderPane(
+               DockPaneType::Locator, DockPaneType::Color, false)
+            != ToolTabResult::Ok
+        || tool_tabs.Tabs()[0].panes[0] != DockPaneType::Locator
+        || std::wstring(ToolTabTitle(tool_tabs.Tabs()[0]))
+            != locator_descriptor.fallback_title
+        || tool_tabs.MovePaneToNewTab(DockPaneType::Locator)
+            != ToolTabResult::Ok
+        || tool_tabs.Tabs().size() != 2U
+        || tool_tabs.Selected() != ToolTabId{2U}
+        || tool_tabs.AddPaneToSelected(
+               DockPaneType::Reference, 10'000, 96U, 6)
+            != ToolTabResult::Ok
+        || tool_tabs.TabForPane(DockPaneType::Reference) != ToolTabId{2U}
+        || tool_tabs.AddPaneToSelected(
+               DockPaneType::LightTable, 0, 96U, 6)
+            != ToolTabResult::Ok
+        || tool_tabs.Tabs().size() != 3U
+        || tool_tabs.Selected() != ToolTabId{3U}) {
         return 121;
     }
-    tool_tabs.Reset();
-    if (tool_tabs.Reorder(kToolTabColoring, kToolTabWorkflow, true)
+    if (tool_tabs.Reorder(ToolTabId{3U}, ToolTabId{1U}, false)
             != ToolTabResult::Ok
-        || tool_tabs.Tabs()[0].id != kToolTabReference
-        || tool_tabs.Tabs()[1].id != kToolTabWorkflow
-        || tool_tabs.Tabs()[2].id != kToolTabColoring
-        || tool_tabs.Reorder(kToolTabColoring, kToolTabReference, false)
+        || tool_tabs.Tabs()[0].id != ToolTabId{3U}
+        || tool_tabs.Tabs()[1].id != ToolTabId{1U}
+        || tool_tabs.Tabs()[2].id != ToolTabId{2U}
+        || tool_tabs.ReorderPane(
+               DockPaneType::Reference, DockPaneType::Locator, false)
             != ToolTabResult::Ok
-        || tool_tabs.Tabs()[0].id != kToolTabColoring
-        || tool_tabs.Tabs()[1].id != kToolTabReference
-        || tool_tabs.Tabs()[2].id != kToolTabWorkflow) {
+        || std::wstring(ToolTabTitle(*tool_tabs.Find(ToolTabId{2U})))
+            != PaneDescriptors()[static_cast<std::size_t>(
+                   DockPaneType::Reference)].fallback_title
+        || tool_tabs.MovePane(DockPaneType::Color, ToolTabId{2U})
+            != ToolTabResult::Ok
+        || tool_tabs.MovePane(DockPaneType::Layer, ToolTabId{2U})
+            != ToolTabResult::Ok
+        || tool_tabs.Tabs().size() != 2U
+        || tool_tabs.Find(ToolTabId{1U}) != nullptr
+        || tool_tabs.TabForPane(DockPaneType::Layer) != ToolTabId{2U}) {
         return 122;
     }
-    RightToolTabsModel empty_tab_model{};
-    DockLayoutModel empty_tab_dock{};
-    if (empty_tab_model.MovePane(DockPaneType::Tool, kToolTabReference)
-            != ToolTabResult::Ok
-        || empty_tab_model.MovePane(DockPaneType::Color, kToolTabReference)
-            != ToolTabResult::Ok
-        || empty_tab_model.MovePane(DockPaneType::Layer, kToolTabReference)
-            != ToolTabResult::Ok) {
+    const auto stable_count = tool_tabs.Tabs().size();
+    const ToolTabId stable_selected = tool_tabs.Selected();
+    const std::uint32_t stable_next_id = tool_tabs.NextStableId();
+    if (tool_tabs.MovePane(DockPaneType::Tool, ToolTabId{2U})
+            != ToolTabResult::InvalidPane
+        || tool_tabs.MovePane(DockPaneType::Layer, ToolTabId{99U})
+            != ToolTabResult::InvalidTab
+        || tool_tabs.Tabs().size() != stable_count
+        || tool_tabs.Selected() != stable_selected
+        || tool_tabs.NextStableId() != stable_next_id) {
         return 123;
     }
-    const auto empty_tab_geometry = ComputeDockLayout(
-        empty_tab_dock, 1'200, 720, 96U, &empty_tab_model);
-    if (empty_tab_geometry.right_tool_tabs.height != 28
-        || empty_tab_geometry.zones[
-               static_cast<std::size_t>(DockZone::Right)].width
-            != 320
-        || empty_tab_geometry.panes[
-               static_cast<std::size_t>(DockPaneType::Color)].shown
-        || empty_tab_geometry.panes[
-               static_cast<std::size_t>(DockPaneType::Layer)].shown) {
+
+    const std::array<ToolTab, 3U> replacement_tabs{{
+        ToolTab{ToolTabId{11U}, {DockPaneType::Sequence}, 1U},
+        ToolTab{ToolTabId{12U}, {DockPaneType::Batch}, 1U},
+        ToolTab{ToolTabId{13U}, {DockPaneType::Reference}, 1U},
+    }};
+    RightToolTabsModel replacement_model{};
+    if (!replacement_model.Load(replacement_tabs, ToolTabId{12U}, 14U)
+        || replacement_model.RemovePane(DockPaneType::Batch)
+            != ToolTabResult::Ok
+        || replacement_model.Selected() != ToolTabId{11U}
+        || replacement_model.RemovePane(DockPaneType::Sequence)
+            != ToolTabResult::Ok
+        || replacement_model.Selected() != ToolTabId{13U}
+        || replacement_model.RemovePane(DockPaneType::Reference)
+            != ToolTabResult::Ok
+        || replacement_model.HasVisibleTabs()
+        || replacement_model.Selected()
+        || replacement_model.AddPaneToSelected(
+               DockPaneType::Color, 0, 96U, 6)
+            != ToolTabResult::Ok
+        || replacement_model.Selected() != ToolTabId{14U}) {
         return 124;
     }
-    if (empty_tab_model.SetSelected(kToolTabReference) != ToolTabResult::Ok
-        || empty_tab_dock.RestorePane(DockPaneType::Locator) != DockResult::Ok
-        || empty_tab_dock.RestorePane(DockPaneType::LightTable)
-            != DockResult::Ok
-        || empty_tab_dock.RestorePane(DockPaneType::Reference)
-            != DockResult::Ok) {
+
+    ToolTab capacity_tab{};
+    capacity_tab.id = ToolTabId{41U};
+    capacity_tab.panes[0] = DockPaneType::Color;
+    capacity_tab.panes[1] = DockPaneType::Layer;
+    capacity_tab.pane_count = 2U;
+    RightToolTabsModel capacity_model{};
+    const std::array<ToolTab, 1U> capacity_tabs{capacity_tab};
+    if (!capacity_model.Load(
+            capacity_tabs, ToolTabId{41U}, UINT32_MAX - 1U)
+        || capacity_model.AddPaneToSelected(
+               DockPaneType::Locator, 0, 96U, 6)
+            != ToolTabResult::Ok
+        || capacity_model.AddPaneToSelected(
+               DockPaneType::Reference, 0, 96U, 6)
+            != ToolTabResult::CapacityExceeded
+        || capacity_model.TabForPane(DockPaneType::Reference)
+        || capacity_model.Tabs().size() != 2U
+        || capacity_model.NextStableId() != UINT32_MAX
+        || capacity_model.Load(capacity_tabs, ToolTabId{41U}, 41U)) {
         return 125;
     }
+
+    RightToolTabsModel selected_tab_model{};
+    DockLayoutModel selected_tab_dock{};
+    if (selected_tab_model.MovePaneToNewTab(DockPaneType::Layer)
+            != ToolTabResult::Ok) {
+        return 126;
+    }
+    const auto layer_tab_geometry = ComputeDockLayout(
+        selected_tab_dock, 1'200, 720, 96U, &selected_tab_model);
+    if (layer_tab_geometry.right_tool_tabs.height != 28
+        || layer_tab_geometry.zones[
+               static_cast<std::size_t>(DockZone::Right)].width
+            != 320
+        || layer_tab_geometry.panes[
+               static_cast<std::size_t>(DockPaneType::Color)].shown
+        || !layer_tab_geometry.panes[
+               static_cast<std::size_t>(DockPaneType::Layer)].shown) {
+        return 127;
+    }
+    if (selected_tab_model.SetSelected(initial_tab) != ToolTabResult::Ok
+        || selected_tab_dock.RestorePane(DockPaneType::Locator) != DockResult::Ok
+        || selected_tab_dock.RestorePane(DockPaneType::LightTable)
+            != DockResult::Ok
+        || selected_tab_dock.RestorePane(DockPaneType::Reference)
+            != DockResult::Ok
+        || selected_tab_model.EnsurePaneAssigned(DockPaneType::Locator)
+            != ToolTabResult::Ok
+        || selected_tab_model.EnsurePaneAssigned(DockPaneType::LightTable)
+            != ToolTabResult::Ok
+        || selected_tab_model.EnsurePaneAssigned(DockPaneType::Reference)
+            != ToolTabResult::Ok) {
+        return 128;
+    }
     const auto reference_geometry = ComputeDockLayout(
-        empty_tab_dock, 1'200, 720, 96U, &empty_tab_model);
+        selected_tab_dock, 1'200, 720, 96U, &selected_tab_model);
     if (!reference_geometry.panes[
              static_cast<std::size_t>(DockPaneType::Color)].shown
-        || !reference_geometry.panes[
+        || reference_geometry.panes[
              static_cast<std::size_t>(DockPaneType::Layer)].shown
         || !reference_geometry.panes[
              static_cast<std::size_t>(DockPaneType::Locator)].shown
@@ -342,28 +510,27 @@ int main() {
         || reference_geometry.panes[
                static_cast<std::size_t>(DockPaneType::Reference)].bounds.height
             <= 0) {
-        return 126;
+        return 130;
     }
-    const std::array<DockPaneType, 5U> constrained_right_panes{
+    const std::array<DockPaneType, 4U> constrained_right_panes{
         DockPaneType::Locator,
         DockPaneType::LightTable,
         DockPaneType::Reference,
-        DockPaneType::Color,
-        DockPaneType::Layer};
+        DockPaneType::Color};
     for (const DockPaneType type : constrained_right_panes) {
-        auto* pane = empty_tab_dock.Pane(type);
+        auto* pane = selected_tab_dock.Pane(type);
         if (pane == nullptr) {
-            return 127;
+            return 131;
         }
         pane->split_weight = type == DockPaneType::Locator ? 100'000U : 100U;
     }
     const auto constrained_geometry = ComputeDockLayout(
-        empty_tab_dock, 1'200, 180, 96U, &empty_tab_model);
+        selected_tab_dock, 1'200, 180, 96U, &selected_tab_model);
     for (const DockPaneType type : constrained_right_panes) {
         const auto& pane = constrained_geometry.panes[
             static_cast<std::size_t>(type)];
         if (!pane.shown || pane.bounds.height <= 0) {
-            return 128;
+            return 132;
         }
     }
 
@@ -456,6 +623,7 @@ int main() {
         || model.AdjustSplitBoundary(DockZone::Right, 2U, 20)
             != DockResult::InvalidState
         || model.SetZoneExtentDip(DockZone::Left, 1) != DockResult::NoOp
+        || model.SetZoneExtentDip(DockZone::Left, 200) != DockResult::NoOp
         || model.Zone(DockZone::Left)->extent_dip != 80) {
         return 6;
     }
@@ -570,10 +738,22 @@ int main() {
         normal.dock.panes[static_cast<std::size_t>(DockPaneType::ToolOptions)];
     const auto& color = normal.dock.panes[static_cast<std::size_t>(DockPaneType::Color)];
     const auto& layer = normal.dock.panes[static_cast<std::size_t>(DockPaneType::Layer)];
+    const auto has_zone_extent_splitter = [&normal](DockZone zone) noexcept {
+        for (std::size_t index = 0U; index < normal.dock.splitter_count; ++index) {
+            const DockSplitterGeometry& splitter = normal.dock.splitters[index];
+            if (splitter.kind == DockSplitterKind::ZoneExtent
+                && splitter.zone == zone) {
+                return true;
+            }
+        }
+        return false;
+    };
     if (!tool.shown || options.shown || !color.shown || !layer.shown
         || options.bounds.width != 0 || options.bounds.height != 0
         || tool.bounds.x != 0 || tool.bounds.y != 0 || tool.bounds.width != 80
-        || normal.editor.left != 84 || normal.editor.right != 876
+        || normal.editor.left != 80 || normal.editor.right != 876
+        || has_zone_extent_splitter(DockZone::Left)
+        || !has_zone_extent_splitter(DockZone::Right)
         || color.bounds.x != 880 || color.bounds.width != 320
         || layer.bounds.x != 880 || layer.bounds.width != 320
         || normal.dock.right_tool_tabs.x != 880
@@ -594,7 +774,7 @@ int main() {
     const auto& mirrored_color =
         mirrored.dock.panes[static_cast<std::size_t>(DockPaneType::Color)];
     if (mirrored_color.bounds.x != 0 || mirrored.editor.left != 324
-        || mirrored.editor.right != 1'116 || mirrored_tool.bounds.x != 1'120
+        || mirrored.editor.right != 1'120 || mirrored_tool.bounds.x != 1'120
         || mirrored_tool.bounds.width != 80) {
         return 10;
     }
@@ -610,7 +790,7 @@ int main() {
         || !narrow_layer.temporarily_auto_hidden
         || !state.dock.IsPaneVisible(DockPaneType::Color)
         || !state.dock.IsPaneVisible(DockPaneType::Layer)
-        || narrow.editor.left != 84 || narrow.editor.right != 600) {
+        || narrow.editor.left != 80 || narrow.editor.right != 600) {
         return 11;
     }
 
@@ -623,7 +803,7 @@ int main() {
         high_dpi.dock.panes[static_cast<std::size_t>(DockPaneType::Color)];
     if (high_options.shown || high_options.bounds.height != 0
         || high_tool.bounds.width != 120
-        || high_color.bounds.width != 480 || high_dpi.editor.left != 126
+        || high_color.bounds.width != 480 || high_dpi.editor.left != 120
         || high_dpi.editor.right != 1'314) {
         return 12;
     }
@@ -643,13 +823,17 @@ int main() {
         return 17;
     }
 
-    if (state.right_tool_tabs.SetSelected(kToolTabReference)
+    if (state.dock.RestorePane(DockPaneType::Reference) != DockResult::Ok
+        || state.right_tool_tabs.AddPaneToSelected(
+               DockPaneType::Reference, 0, 96U, 6)
             != ToolTabResult::Ok) {
         return 13;
     }
     const auto tabbed = ComputeWorkspaceLayout(1'200, 800, 0, 96U, state);
     if (tabbed.dock.panes[static_cast<std::size_t>(DockPaneType::Color)].shown
         || tabbed.dock.panes[static_cast<std::size_t>(DockPaneType::Layer)].shown
+        || !tabbed.dock.panes[
+               static_cast<std::size_t>(DockPaneType::Reference)].shown
         || tabbed.dock.right_tool_tabs.height != 28
         || tabbed.dock.splitter_count >= normal.dock.splitter_count) {
         return 14;
@@ -658,16 +842,17 @@ int main() {
     for (const DockPaneType type : {
              DockPaneType::Tool,
              DockPaneType::Color,
-             DockPaneType::Layer}) {
+             DockPaneType::Layer,
+             DockPaneType::Reference}) {
         if (state.dock.HidePane(type) != DockResult::Ok) {
             return 15;
         }
     }
-    if (state.right_tool_tabs.SetVisible(kToolTabColoring, false)
+    if (state.right_tool_tabs.RemovePane(DockPaneType::Color)
             != ToolTabResult::Ok
-        || state.right_tool_tabs.SetVisible(kToolTabReference, false)
+        || state.right_tool_tabs.RemovePane(DockPaneType::Layer)
             != ToolTabResult::Ok
-        || state.right_tool_tabs.SetVisible(kToolTabWorkflow, false)
+        || state.right_tool_tabs.RemovePane(DockPaneType::Reference)
             != ToolTabResult::Ok
         || state.right_tool_tabs.Selected()
         || state.right_tool_tabs.HasVisibleTabs()) {
@@ -676,6 +861,23 @@ int main() {
     const auto canvas_only = ComputeWorkspaceLayout(1'200, 800, 0, 96U, state);
     if (Width(canvas_only.editor) != 1'200 || Height(canvas_only.editor) != 800) {
         return 16;
+    }
+
+    WorkspaceLayoutState default_workspace{};
+    if (!ValidDynamicRightTabs(default_workspace)) {
+        return 137;
+    }
+    for (const WorkspacePreset workspace_preset : {
+             WorkspacePreset::Coloring,
+             WorkspacePreset::LineCleanup,
+             WorkspacePreset::ReferenceCheck,
+             WorkspacePreset::Batch,
+             WorkspacePreset::Focus}) {
+        WorkspaceLayoutState preset_contract{};
+        if (!ApplyWorkspacePreset(preset_contract, workspace_preset)
+            || !ValidDynamicRightTabs(preset_contract)) {
+            return 138;
+        }
     }
 
     WorkspaceLayoutState preset{};
@@ -697,7 +899,9 @@ int main() {
             == false
         || preset.dock.Zone(DockZone::Right)->mode != DockStackMode::Tabs
         || preset.dock.Zone(DockZone::Right)->active_tab
-            != DockPaneType::Reference) {
+            != DockPaneType::Reference
+        || preset.right_tool_tabs.Selected()
+            != preset.right_tool_tabs.TabForPane(DockPaneType::Reference)) {
         return 22;
     }
     const auto reference_layout = ComputeWorkspaceLayout(
@@ -749,10 +953,127 @@ int main() {
         || !decoded.window.valid || decoded.window.show_command != SW_SHOWMAXIMIZED) {
         return 27;
     }
-    auto version7_bytes = bytes;
-    if (written != sizeof(PersistedWorkspaceForMigration)) {
+
+    WorkspaceLayoutState dynamic_tabs{};
+    if (dynamic_tabs.right_tool_tabs.ReorderPane(
+            DockPaneType::Layer, DockPaneType::Color, false)
+            != ToolTabResult::Ok
+        || dynamic_tabs.dock.RestorePane(DockPaneType::Reference)
+            != DockResult::Ok
+        || dynamic_tabs.dock.RestorePane(DockPaneType::Locator)
+            != DockResult::Ok
+        || dynamic_tabs.right_tool_tabs.AddPaneToSelected(
+               DockPaneType::Reference, 0, 96U, 6)
+            != ToolTabResult::Ok
+        || dynamic_tabs.right_tool_tabs.AddPaneToSelected(
+               DockPaneType::Locator, 10'000, 96U, 6)
+            != ToolTabResult::Ok) {
+        return 133;
+    }
+    std::array<std::byte, kMaximumWorkspaceLayoutRecordBytes>
+        dynamic_tab_bytes{};
+    std::size_t dynamic_tab_written{};
+    WorkspaceLayoutState dynamic_tab_decoded{};
+    if (!EncodeWorkspaceLayout(
+            dynamic_tabs, dynamic_tab_bytes, dynamic_tab_written)
+        || dynamic_tab_written != sizeof(PersistedWorkspaceV9ForMigration)
+        || DecodeWorkspaceLayout(
+               dynamic_tab_decoded,
+               std::span<const std::byte>(
+                   dynamic_tab_bytes.data(), dynamic_tab_written))
+            != WorkspaceLayoutDecodeResult::Current
+        || dynamic_tab_decoded.right_tool_tabs.Tabs().size() != 2U
+        || dynamic_tab_decoded.right_tool_tabs.Selected() != ToolTabId{2U}
+        || dynamic_tab_decoded.right_tool_tabs.NextStableId() != 3U
+        || dynamic_tab_decoded.right_tool_tabs.Tabs()[0].panes[0]
+            != DockPaneType::Layer
+        || dynamic_tab_decoded.right_tool_tabs.Tabs()[1].panes[0]
+            != DockPaneType::Reference
+        || dynamic_tab_decoded.right_tool_tabs.Tabs()[1].panes[1]
+            != DockPaneType::Locator) {
+        return 134;
+    }
+    PersistedWorkspaceV9ForMigration dynamic_tab_record{};
+    std::memcpy(
+        &dynamic_tab_record,
+        dynamic_tab_bytes.data(),
+        sizeof(dynamic_tab_record));
+    const auto rejects_v9 = [](const PersistedWorkspaceV9ForMigration& value) {
+        WorkspaceLayoutState candidate{};
+        return DecodeWorkspaceLayout(
+                   candidate,
+                   std::span<const std::byte>(
+                       reinterpret_cast<const std::byte*>(&value),
+                       sizeof(value)))
+                == WorkspaceLayoutDecodeResult::Invalid
+            && candidate.selected_preset == WorkspacePreset::Coloring;
+    };
+    auto duplicate_tab_id = dynamic_tab_record;
+    duplicate_tab_id.tabs[1].stable_id = duplicate_tab_id.tabs[0].stable_id;
+    auto duplicate_pane = dynamic_tab_record;
+    duplicate_pane.tabs[1].pane_stable_type_ids[0] =
+        duplicate_pane.tabs[0].pane_stable_type_ids[0];
+    auto empty_tab = dynamic_tab_record;
+    empty_tab.tabs[0].pane_count = 0U;
+    auto invalid_selected_tab = dynamic_tab_record;
+    invalid_selected_tab.selected_tab_id = UINT32_C(0xfefefefe);
+    auto invalid_next_tab_id = dynamic_tab_record;
+    invalid_next_tab_id.next_tab_id = invalid_next_tab_id.tabs[1].stable_id;
+    auto tab_count_overflow = dynamic_tab_record;
+    tab_count_overflow.tab_count = static_cast<std::uint32_t>(kDockPaneCount + 1U);
+    auto pane_count_overflow = dynamic_tab_record;
+    pane_count_overflow.tabs[0].pane_count =
+        static_cast<std::uint32_t>(kDockPaneCount + 1U);
+    auto stable_id_overflow = dynamic_tab_record;
+    stable_id_overflow.tabs[1].stable_id = UINT32_MAX;
+    stable_id_overflow.next_tab_id = UINT32_MAX;
+    auto dirty_unused_tab = dynamic_tab_record;
+    dirty_unused_tab.tabs[dynamic_tab_record.tab_count].stable_id = 99U;
+    if (!rejects_v9(duplicate_tab_id)
+        || !rejects_v9(duplicate_pane)
+        || !rejects_v9(empty_tab)
+        || !rejects_v9(invalid_selected_tab)
+        || !rejects_v9(invalid_next_tab_id)
+        || !rejects_v9(tab_count_overflow)
+        || !rejects_v9(pane_count_overflow)
+        || !rejects_v9(stable_id_overflow)
+        || !rejects_v9(dirty_unused_tab)) {
+        return 135;
+    }
+    auto unknown_tab_pane = dynamic_tab_record;
+    unknown_tab_pane.tabs[0].pane_stable_type_ids[0] = UINT32_C(0xfefefefe);
+    WorkspaceLayoutState ignored_unknown_tab_pane{};
+    if (DecodeWorkspaceLayout(
+            ignored_unknown_tab_pane,
+            std::span<const std::byte>(
+                reinterpret_cast<const std::byte*>(&unknown_tab_pane),
+                sizeof(unknown_tab_pane)))
+            != WorkspaceLayoutDecodeResult::Current
+        || !ignored_unknown_tab_pane.right_tool_tabs.TabForPane(
+            DockPaneType::Layer)) {
+        return 136;
+    }
+
+    std::array<std::byte, kMaximumWorkspaceLayoutRecordBytes> version8_bytes{};
+    std::size_t legacy_written{};
+    if (!ExtractVersion8Workspace(
+            std::span<const std::byte>(bytes.data(), written),
+            version8_bytes,
+            legacy_written)
+        || legacy_written != sizeof(PersistedWorkspaceForMigration)) {
         return 129;
     }
+    WorkspaceLayoutState migrated_version8{};
+    if (DecodeWorkspaceLayout(
+            migrated_version8,
+            std::span<const std::byte>(
+                version8_bytes.data(), legacy_written))
+            != WorkspaceLayoutDecodeResult::Migrated
+        || !migrated_version8.right_tool_tabs.HasVisibleTabs()
+        || migrated_version8.right_tool_tabs.Tabs()[0].pane_count == 0U) {
+        return 129;
+    }
+    auto version7_bytes = version8_bytes;
     PersistedWorkspaceForMigration version7_record{};
     std::memcpy(
         &version7_record, version7_bytes.data(), sizeof(version7_record));
@@ -778,10 +1099,11 @@ int main() {
         version7_bytes.data(), &version7_record, sizeof(version7_record));
     WorkspaceLayoutState migrated_version7{};
     if (!DowngradeGroupedLayoutToV7(std::span<std::byte>(
-            version7_bytes.data(), written))
+            version7_bytes.data(), legacy_written))
         || DecodeWorkspaceLayout(
                migrated_version7,
-               std::span<const std::byte>(version7_bytes.data(), written))
+               std::span<const std::byte>(
+                   version7_bytes.data(), legacy_written))
             != WorkspaceLayoutDecodeResult::Migrated
         || migrated_version7.dock.IsPaneVisible(DockPaneType::ToolOptions)
         || migrated_version7.dock.Zone(DockZone::TopContext)->active_tab
@@ -794,6 +1116,12 @@ int main() {
             != DockResult::Ok
         || mixed_serialized.dock.RestorePane(DockPaneType::Reference)
             != DockResult::Ok
+        || mixed_serialized.right_tool_tabs.EnsurePaneAssigned(
+               DockPaneType::LightTable)
+            != ToolTabResult::Ok
+        || mixed_serialized.right_tool_tabs.EnsurePaneAssigned(
+               DockPaneType::Reference)
+            != ToolTabResult::Ok
         || mixed_serialized.dock.SetActiveTab(
                DockZone::Right, DockPaneType::Reference)
             != DockResult::Ok) {
@@ -820,7 +1148,10 @@ int main() {
 
     WorkspaceLayoutState legacy_reference_split{};
     if (legacy_reference_split.dock.RestorePane(DockPaneType::Reference)
-            != DockResult::Ok) {
+            != DockResult::Ok
+        || legacy_reference_split.right_tool_tabs.EnsurePaneAssigned(
+               DockPaneType::Reference)
+            != ToolTabResult::Ok) {
         return 58;
     }
     auto legacy_reference_record = legacy_reference_split.dock.ToRecord();
@@ -841,19 +1172,29 @@ int main() {
     std::array<std::byte, kMaximumWorkspaceLayoutRecordBytes>
         legacy_reference_bytes{};
     std::size_t legacy_reference_written{};
+    std::array<std::byte, kMaximumWorkspaceLayoutRecordBytes>
+        legacy_reference_v8_bytes{};
+    std::size_t legacy_reference_v8_written{};
     if (!EncodeWorkspaceLayout(
             legacy_reference_split,
             legacy_reference_bytes,
             legacy_reference_written)
+        || !ExtractVersion8Workspace(
+            std::span<const std::byte>(
+                legacy_reference_bytes.data(), legacy_reference_written),
+            legacy_reference_v8_bytes,
+            legacy_reference_v8_written)
         || !DowngradeGroupedLayoutToV6(std::span<std::byte>(
-            legacy_reference_bytes.data(), legacy_reference_written))) {
+            legacy_reference_v8_bytes.data(),
+            legacy_reference_v8_written))) {
         return 60;
     }
     WorkspaceLayoutState migrated_reference_stack{};
     if (DecodeWorkspaceLayout(
             migrated_reference_stack,
             std::span<const std::byte>(
-                legacy_reference_bytes.data(), legacy_reference_written))
+                legacy_reference_v8_bytes.data(),
+                legacy_reference_v8_written))
             != WorkspaceLayoutDecodeResult::Migrated
         || migrated_reference_stack.dock.StackCount(DockZone::Right) != 2U
         || migrated_reference_stack.dock.Pane(DockPaneType::Reference)->stack
@@ -868,7 +1209,10 @@ int main() {
     WorkspaceLayoutState legacy_explicit_reference_split{};
     if (legacy_explicit_reference_split.dock.RestorePane(
             DockPaneType::Reference)
-            != DockResult::Ok) {
+            != DockResult::Ok
+        || legacy_explicit_reference_split.right_tool_tabs.EnsurePaneAssigned(
+               DockPaneType::Reference)
+            != ToolTabResult::Ok) {
         return 62;
     }
     auto explicit_reference_record =
@@ -891,17 +1235,27 @@ int main() {
     std::array<std::byte, kMaximumWorkspaceLayoutRecordBytes>
         explicit_reference_bytes{};
     std::size_t explicit_reference_written{};
+    std::array<std::byte, kMaximumWorkspaceLayoutRecordBytes>
+        explicit_reference_v8_bytes{};
+    std::size_t explicit_reference_v8_written{};
     WorkspaceLayoutState preserved_reference_split{};
     if (!EncodeWorkspaceLayout(
             legacy_explicit_reference_split,
             explicit_reference_bytes,
             explicit_reference_written)
+        || !ExtractVersion8Workspace(
+            std::span<const std::byte>(
+                explicit_reference_bytes.data(), explicit_reference_written),
+            explicit_reference_v8_bytes,
+            explicit_reference_v8_written)
         || !DowngradeGroupedLayoutToV6(std::span<std::byte>(
-            explicit_reference_bytes.data(), explicit_reference_written))
+            explicit_reference_v8_bytes.data(),
+            explicit_reference_v8_written))
         || DecodeWorkspaceLayout(
                preserved_reference_split,
                std::span<const std::byte>(
-                   explicit_reference_bytes.data(), explicit_reference_written))
+                   explicit_reference_v8_bytes.data(),
+                   explicit_reference_v8_written))
             != WorkspaceLayoutDecodeResult::Migrated
         || preserved_reference_split.dock.StackCount(DockZone::Right) != 3U
         || preserved_reference_split.dock.Pane(DockPaneType::Reference)->stack
@@ -912,6 +1266,9 @@ int main() {
     WorkspaceLayoutState legacy_light_table_tabs{};
     if (legacy_light_table_tabs.dock.RestorePane(DockPaneType::LightTable)
             != DockResult::Ok
+        || legacy_light_table_tabs.right_tool_tabs.EnsurePaneAssigned(
+               DockPaneType::LightTable)
+            != ToolTabResult::Ok
         || legacy_light_table_tabs.dock.SetZoneMode(
                DockZone::Right, DockStackMode::Tabs)
             != DockResult::Ok) {
@@ -919,11 +1276,19 @@ int main() {
     }
     std::array<std::byte, kMaximumWorkspaceLayoutRecordBytes> legacy_tabs_bytes{};
     std::size_t legacy_tabs_written{};
+    std::array<std::byte, kMaximumWorkspaceLayoutRecordBytes>
+        legacy_tabs_v8_bytes{};
+    std::size_t legacy_tabs_v8_written{};
     if (!EncodeWorkspaceLayout(
             legacy_light_table_tabs, legacy_tabs_bytes, legacy_tabs_written)
+        || !ExtractVersion8Workspace(
+            std::span<const std::byte>(
+                legacy_tabs_bytes.data(), legacy_tabs_written),
+            legacy_tabs_v8_bytes,
+            legacy_tabs_v8_written)
         || !DowngradeGroupedLayoutToV5(
             std::span<std::byte>(
-                legacy_tabs_bytes.data(), legacy_tabs_written),
+                legacy_tabs_v8_bytes.data(), legacy_tabs_v8_written),
             legacy_light_table_tabs.dock.ToRecord())) {
         return 56;
     }
@@ -931,7 +1296,7 @@ int main() {
     if (DecodeWorkspaceLayout(
             migrated_light_table_tabs,
             std::span<const std::byte>(
-                legacy_tabs_bytes.data(), legacy_tabs_written))
+                legacy_tabs_v8_bytes.data(), legacy_tabs_v8_written))
             != WorkspaceLayoutDecodeResult::Migrated
         || migrated_light_table_tabs.dock.Zone(DockZone::Right)->mode
             != DockStackMode::Mixed
@@ -945,17 +1310,18 @@ int main() {
         return 57;
     }
 
-    auto legacy_v5_bytes = bytes;
+    auto legacy_v5_bytes = version8_bytes;
     const auto serialized_record = serialized.dock.ToRecord();
     if (!DowngradeGroupedLayoutToV5(
-            std::span<std::byte>(legacy_v5_bytes.data(), written),
+            std::span<std::byte>(legacy_v5_bytes.data(), legacy_written),
             serialized_record)) {
         return 45;
     }
     WorkspaceLayoutState migrated_v5{};
     if (DecodeWorkspaceLayout(
             migrated_v5,
-            std::span<const std::byte>(legacy_v5_bytes.data(), written))
+            std::span<const std::byte>(
+                legacy_v5_bytes.data(), legacy_written))
             != WorkspaceLayoutDecodeResult::Migrated
         || migrated_v5.dock.Pane(DockPaneType::Locator)->zone
             != DockZone::AutoHide

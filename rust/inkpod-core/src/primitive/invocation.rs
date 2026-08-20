@@ -94,9 +94,6 @@ pub(crate) enum CanonicalInvocation {
         targets: Vec<EditTarget>,
         command: EditTargetCommand,
     },
-    EditAnnotations {
-        edits: Vec<AnnotationEdit>,
-    },
     EditShootingFrame {
         edit: ShootingFrameEdit,
     },
@@ -259,44 +256,6 @@ pub(crate) enum CanonicalInvocation {
     ResizeDocument {
         resize: DocumentResize,
     },
-    VectorAddPath {
-        plane_id: u64,
-        input: VectorPathInput,
-    },
-    VectorAddFill {
-        plane_id: u64,
-        boundary_path_ids: Vec<u64>,
-        color: PixelValue,
-    },
-    VectorErase {
-        plane_id: u64,
-        point: PointF32,
-        radius: f32,
-        mode: VectorEraseMode,
-    },
-    VectorConnect {
-        plane_id: u64,
-        maximum_gap: f32,
-    },
-    VectorCorrectWidth {
-        path_ids: Vec<u64>,
-        mode: VectorWidthMode,
-    },
-    RasterizeVectorLayer {
-        layer_id: u64,
-        antialias: bool,
-        name: String,
-    },
-    VectorizeRasterPlane {
-        source_plane_id: u64,
-        target_vector_layer_id: u64,
-        alpha_threshold: u8,
-    },
-    VectorizeRasterPlaneIntoNewLayer {
-        source_plane_id: u64,
-        alpha_threshold: u8,
-        name: String,
-    },
     LightTableSetGlobalOpacity {
         opacity_milli: u32,
     },
@@ -445,15 +404,6 @@ fn canonical_selection_options(
         ));
     }
     Ok(options)
-}
-
-fn canonical_vector_width_mode(mode: VectorWidthMode) -> Result<VectorWidthMode, CoreError> {
-    Ok(match mode {
-        VectorWidthMode::Add(value) => VectorWidthMode::Add(canonical_f32_q16(value)?),
-        VectorWidthMode::Subtract(value) => VectorWidthMode::Subtract(canonical_f32_q16(value)?),
-        VectorWidthMode::Scale(value) => VectorWidthMode::Scale(canonical_f32_q16(value)?),
-        VectorWidthMode::Constant(value) => VectorWidthMode::Constant(canonical_f32_q16(value)?),
-    })
 }
 
 #[derive(Clone, Debug)]
@@ -636,10 +586,6 @@ fn decode_persistent_invocation(
         CanonicalInvocation::EditTargets {
             targets,
             command: read_edit_target_command(&mut reader)?,
-        }
-    } else if primitive_id == PrimitiveId::EDIT_ANNOTATIONS {
-        CanonicalInvocation::EditAnnotations {
-            edits: reader.annotation_edits()?,
         }
     } else if primitive_id == PrimitiveId::EDIT_SHOOTING_FRAME {
         CanonicalInvocation::EditShootingFrame {
@@ -852,52 +798,6 @@ fn decode_persistent_invocation(
         CanonicalInvocation::ResizeDocument {
             resize: reader.document_resize()?,
         }
-    } else if primitive_id == PrimitiveId::VECTOR_ADD_PATH {
-        CanonicalInvocation::VectorAddPath {
-            plane_id: reader.u64()?,
-            input: reader.vector_path()?,
-        }
-    } else if primitive_id == PrimitiveId::VECTOR_ADD_FILL {
-        CanonicalInvocation::VectorAddFill {
-            plane_id: reader.u64()?,
-            boundary_path_ids: reader.ids()?,
-            color: reader.pixel()?,
-        }
-    } else if primitive_id == PrimitiveId::VECTOR_ERASE {
-        CanonicalInvocation::VectorErase {
-            plane_id: reader.u64()?,
-            point: reader.point()?,
-            radius: reader.q16_f32()?,
-            mode: reader.vector_erase_mode()?,
-        }
-    } else if primitive_id == PrimitiveId::VECTOR_CONNECT {
-        CanonicalInvocation::VectorConnect {
-            plane_id: reader.u64()?,
-            maximum_gap: reader.q16_f32()?,
-        }
-    } else if primitive_id == PrimitiveId::VECTOR_CORRECT_WIDTH {
-        CanonicalInvocation::VectorCorrectWidth {
-            path_ids: reader.ids()?,
-            mode: reader.vector_width_mode()?,
-        }
-    } else if primitive_id == PrimitiveId::RASTERIZE_VECTOR_LAYER {
-        CanonicalInvocation::RasterizeVectorLayer {
-            layer_id: reader.u64()?,
-            antialias: reader.boolean()?,
-            name: reader.string()?,
-        }
-    } else if primitive_id == PrimitiveId::VECTORIZE_RASTER_PLANE {
-        CanonicalInvocation::VectorizeRasterPlane {
-            source_plane_id: reader.u64()?,
-            target_vector_layer_id: reader.u64()?,
-            alpha_threshold: reader.u8()?,
-        }
-    } else if primitive_id == PrimitiveId::VECTORIZE_RASTER_PLANE_INTO_NEW_LAYER {
-        CanonicalInvocation::VectorizeRasterPlaneIntoNewLayer {
-            source_plane_id: reader.u64()?,
-            alpha_threshold: reader.u8()?,
-            name: reader.string()?,
-        }
     } else if primitive_id == PrimitiveId::LIGHT_TABLE_SET_GLOBAL_OPACITY {
         CanonicalInvocation::LightTableSetGlobalOpacity {
             opacity_milli: reader.u32()?,
@@ -1094,42 +994,6 @@ impl CanonicalInvocation {
                 floating.transform.rotation_degrees = f64::from(turns) * 360.0 / 4_294_967_296.0;
                 Ok(Self::CommitFloating { floating })
             }
-            Self::VectorAddPath {
-                plane_id,
-                mut input,
-            } => {
-                for segment in &mut input.segments {
-                    segment.p0 = canonical_point(segment.p0)?;
-                    segment.p1 = canonical_point(segment.p1)?;
-                    segment.p2 = canonical_point(segment.p2)?;
-                    segment.p3 = canonical_point(segment.p3)?;
-                    segment.width_start = canonical_f32_q16(segment.width_start)?;
-                    segment.width_end = canonical_f32_q16(segment.width_end)?;
-                }
-                Ok(Self::VectorAddPath { plane_id, input })
-            }
-            Self::VectorErase {
-                plane_id,
-                point,
-                radius,
-                mode,
-            } => Ok(Self::VectorErase {
-                plane_id,
-                point: canonical_point(point)?,
-                radius: canonical_f32_q16(radius)?,
-                mode,
-            }),
-            Self::VectorConnect {
-                plane_id,
-                maximum_gap,
-            } => Ok(Self::VectorConnect {
-                plane_id,
-                maximum_gap: canonical_f32_q16(maximum_gap)?,
-            }),
-            Self::VectorCorrectWidth { path_ids, mode } => Ok(Self::VectorCorrectWidth {
-                path_ids,
-                mode: canonical_vector_width_mode(mode)?,
-            }),
             other => Ok(other),
         }
     }
@@ -1153,7 +1017,6 @@ impl CanonicalInvocation {
             Self::MergeLayer { .. } => PrimitiveId::MERGE_LAYER,
             Self::DeleteHiddenLayers => PrimitiveId::DELETE_HIDDEN_LAYERS,
             Self::EditTargets { .. } => PrimitiveId::EDIT_TARGETS,
-            Self::EditAnnotations { .. } => PrimitiveId::EDIT_ANNOTATIONS,
             Self::EditShootingFrame { .. } => PrimitiveId::EDIT_SHOOTING_FRAME,
             Self::EditVanishingPoints { .. } => PrimitiveId::EDIT_VANISHING_POINTS,
             Self::AddGuide { .. } => PrimitiveId::ADD_GUIDE,
@@ -1196,16 +1059,6 @@ impl CanonicalInvocation {
             Self::MirrorDocument { .. } => PrimitiveId::MIRROR_DOCUMENT,
             Self::RotateDocument { .. } => PrimitiveId::ROTATE_DOCUMENT,
             Self::ResizeDocument { .. } => PrimitiveId::RESIZE_DOCUMENT,
-            Self::VectorAddPath { .. } => PrimitiveId::VECTOR_ADD_PATH,
-            Self::VectorAddFill { .. } => PrimitiveId::VECTOR_ADD_FILL,
-            Self::VectorErase { .. } => PrimitiveId::VECTOR_ERASE,
-            Self::VectorConnect { .. } => PrimitiveId::VECTOR_CONNECT,
-            Self::VectorCorrectWidth { .. } => PrimitiveId::VECTOR_CORRECT_WIDTH,
-            Self::RasterizeVectorLayer { .. } => PrimitiveId::RASTERIZE_VECTOR_LAYER,
-            Self::VectorizeRasterPlane { .. } => PrimitiveId::VECTORIZE_RASTER_PLANE,
-            Self::VectorizeRasterPlaneIntoNewLayer { .. } => {
-                PrimitiveId::VECTORIZE_RASTER_PLANE_INTO_NEW_LAYER
-            }
             Self::LightTableSetGlobalOpacity { .. } => PrimitiveId::LIGHT_TABLE_SET_GLOBAL_OPACITY,
             Self::LightTableCreateSet { .. } => PrimitiveId::LIGHT_TABLE_CREATE_SET,
             Self::LightTableDuplicateSet { .. } => PrimitiveId::LIGHT_TABLE_DUPLICATE_SET,
@@ -1237,17 +1090,6 @@ impl CanonicalInvocation {
                 .flat_map(|target| match target {
                     EditTarget::Layer(layer_id) => vec![*layer_id],
                     EditTarget::Plane(target) => vec![target.layer_id, target.plane_id],
-                })
-                .collect(),
-            Self::EditAnnotations { edits } => edits
-                .iter()
-                .flat_map(|edit| match edit {
-                    AnnotationEdit::Create(input) => vec![input.layer_id],
-                    AnnotationEdit::Update { object_id, input } => {
-                        vec![*object_id, input.layer_id]
-                    }
-                    AnnotationEdit::Move { object_id, .. }
-                    | AnnotationEdit::Delete { object_id } => vec![*object_id],
                 })
                 .collect(),
             Self::EditShootingFrame { edit } => match edit {
@@ -1306,20 +1148,6 @@ impl CanonicalInvocation {
                 }
                 FloatingDestination::NewPlane { layer_id, .. } => vec![layer_id.get()],
             },
-            Self::VectorAddPath { plane_id, .. }
-            | Self::VectorAddFill { plane_id, .. }
-            | Self::VectorErase { plane_id, .. }
-            | Self::VectorConnect { plane_id, .. } => vec![*plane_id],
-            Self::VectorCorrectWidth { path_ids, .. } => path_ids.clone(),
-            Self::RasterizeVectorLayer { layer_id, .. } => vec![*layer_id],
-            Self::VectorizeRasterPlane {
-                source_plane_id,
-                target_vector_layer_id,
-                ..
-            } => vec![*source_plane_id, *target_vector_layer_id],
-            Self::VectorizeRasterPlaneIntoNewLayer {
-                source_plane_id, ..
-            } => vec![*source_plane_id],
             Self::LightTableDuplicateSet { set_id }
             | Self::LightTableDeleteSet { set_id }
             | Self::LightTableRenameSet { set_id, .. }
@@ -1475,15 +1303,6 @@ impl CanonicalInvocation {
                             .collect(),
                     )
                 }),
-            Self::EditAnnotations { edits } => core.apply_annotation_edits(edits).map(|outcome| {
-                InvocationResult::outputs(
-                    DispatchOutcome {
-                        revision: outcome.revision(),
-                        accepted_commands: 1,
-                    },
-                    outcome.created_object_ids().to_vec(),
-                )
-            }),
             Self::EditShootingFrame { edit } => {
                 core.apply_shooting_frame_edit(*edit).map(|outcome| {
                     InvocationResult::outputs(
@@ -1530,18 +1349,9 @@ impl CanonicalInvocation {
                     *use_light_table_color,
                 )
                 .map(InvocationResult::fill),
-            Self::ApplyGeometry { geometry } => {
-                core.apply_canonical_geometry(geometry).map(|commit| {
-                    let mut ids = Vec::with_capacity(2);
-                    if commit.path_id != 0 {
-                        ids.push(commit.path_id);
-                    }
-                    if commit.fill_id != 0 {
-                        ids.push(commit.fill_id);
-                    }
-                    InvocationResult::outputs(commit.dispatch, ids)
-                })
-            }
+            Self::ApplyGeometry { geometry } => core
+                .apply_canonical_geometry(geometry)
+                .map(|commit| InvocationResult::dispatch(commit.dispatch)),
             Self::ApplyGradient { plane_id, gradient } => core
                 .apply_gradient_to_plane(*plane_id, gradient)
                 .map(InvocationResult::dispatch),
@@ -1716,64 +1526,6 @@ impl CanonicalInvocation {
             Self::ResizeDocument { resize } => core
                 .resize_document(*resize)
                 .map(InvocationResult::dispatch),
-            Self::VectorAddPath { plane_id, input } => core
-                .vector_add_path(*plane_id, input.clone())
-                .map(|(dispatch, id)| InvocationResult::output(dispatch, id)),
-            Self::VectorAddFill {
-                plane_id,
-                boundary_path_ids,
-                color,
-            } => core
-                .vector_add_fill(*plane_id, boundary_path_ids, *color)
-                .map(|(dispatch, id)| InvocationResult::output(dispatch, id)),
-            Self::VectorErase {
-                plane_id,
-                point,
-                radius,
-                mode,
-            } => core
-                .vector_erase(*plane_id, *point, *radius, *mode)
-                .map(InvocationResult::dispatch),
-            Self::VectorConnect {
-                plane_id,
-                maximum_gap,
-            } => core
-                .vector_connect(*plane_id, *maximum_gap)
-                .map(|(dispatch, id)| {
-                    InvocationResult::outputs(dispatch, id.into_iter().collect())
-                }),
-            Self::VectorCorrectWidth { path_ids, mode } => core
-                .vector_correct_width(path_ids, *mode)
-                .map(InvocationResult::dispatch),
-            Self::RasterizeVectorLayer {
-                layer_id,
-                antialias,
-                name,
-            } => core
-                .rasterize_vector_layer_to_document(*layer_id, *antialias, name)
-                .map(|(dispatch, id)| InvocationResult::output(dispatch, id)),
-            Self::VectorizeRasterPlane {
-                source_plane_id,
-                target_vector_layer_id,
-                alpha_threshold,
-            } => core
-                .vectorize_raster_plane(*source_plane_id, *target_vector_layer_id, *alpha_threshold)
-                .map(|(dispatch, ids)| InvocationResult::outputs(dispatch, ids)),
-            Self::VectorizeRasterPlaneIntoNewLayer {
-                source_plane_id,
-                alpha_threshold,
-                name,
-            } => core
-                .vectorize_raster_plane_into_new_layer(*source_plane_id, *alpha_threshold, name)
-                .map(|(dispatch, layer_id, fill_ids)| {
-                    if layer_id == 0 {
-                        return InvocationResult::outputs(dispatch, Vec::new());
-                    }
-                    let mut ids = Vec::with_capacity(fill_ids.len() + 1);
-                    ids.push(layer_id);
-                    ids.extend(fill_ids);
-                    InvocationResult::outputs(dispatch, ids)
-                }),
             Self::LightTableSetGlobalOpacity { opacity_milli } => core
                 .light_table_set_global_opacity(*opacity_milli)
                 .map(InvocationResult::dispatch),
@@ -1869,7 +1621,6 @@ impl CanonicalInvocation {
                 }
                 write_edit_target_command(&mut writer, *command);
             }
-            Self::EditAnnotations { edits } => writer.annotation_edits(edits)?,
             Self::EditShootingFrame { edit } => writer.shooting_frame_edit(*edit),
             Self::EditVanishingPoints { edits } => writer.vanishing_point_edits(edits)?,
             Self::ReorderLayer {
@@ -2137,68 +1888,6 @@ impl CanonicalInvocation {
             Self::MirrorDocument { axis } => writer.u32(mirror_axis_code(*axis)),
             Self::RotateDocument { direction } => writer.u32(rotate_direction_code(*direction)),
             Self::ResizeDocument { resize } => writer.document_resize(*resize),
-            Self::VectorAddPath { plane_id, input } => {
-                writer.u64(*plane_id);
-                writer.vector_path(input)?;
-            }
-            Self::VectorAddFill {
-                plane_id,
-                boundary_path_ids,
-                color,
-            } => {
-                writer.u64(*plane_id);
-                writer.ids(boundary_path_ids)?;
-                writer.pixel(*color);
-            }
-            Self::VectorErase {
-                plane_id,
-                point,
-                radius,
-                mode,
-            } => {
-                writer.u64(*plane_id);
-                writer.point(*point)?;
-                writer.q16_f32(*radius)?;
-                writer.u32(vector_erase_mode_code(*mode));
-            }
-            Self::VectorConnect {
-                plane_id,
-                maximum_gap,
-            } => {
-                writer.u64(*plane_id);
-                writer.q16_f32(*maximum_gap)?;
-            }
-            Self::VectorCorrectWidth { path_ids, mode } => {
-                writer.ids(path_ids)?;
-                writer.vector_width_mode(*mode)?;
-            }
-            Self::RasterizeVectorLayer {
-                layer_id,
-                antialias,
-                name,
-            } => {
-                writer.u64(*layer_id);
-                writer.boolean(*antialias);
-                writer.string(name)?;
-            }
-            Self::VectorizeRasterPlane {
-                source_plane_id,
-                target_vector_layer_id,
-                alpha_threshold,
-            } => {
-                writer.u64(*source_plane_id);
-                writer.u64(*target_vector_layer_id);
-                writer.u8(*alpha_threshold);
-            }
-            Self::VectorizeRasterPlaneIntoNewLayer {
-                source_plane_id,
-                alpha_threshold,
-                name,
-            } => {
-                writer.u64(*source_plane_id);
-                writer.u8(*alpha_threshold);
-                writer.string(name)?;
-            }
             Self::LightTableSetGlobalOpacity { opacity_milli } => writer.u32(*opacity_milli),
             Self::LightTableCreateSet { name } => writer.string(name)?,
             Self::LightTableDuplicateSet { set_id }
@@ -2437,7 +2126,6 @@ pub(super) const fn schema_version(primitive_id: PrimitiveId) -> Option<u16> {
         || value == PrimitiveId::MERGE_LAYER.get()
         || value == PrimitiveId::DELETE_HIDDEN_LAYERS.get()
         || value == PrimitiveId::EDIT_TARGETS.get()
-        || value == PrimitiveId::EDIT_ANNOTATIONS.get()
         || value == PrimitiveId::EDIT_SHOOTING_FRAME.get()
         || value == PrimitiveId::EDIT_VANISHING_POINTS.get()
         || value == PrimitiveId::ADD_GUIDE.get()
@@ -2478,14 +2166,6 @@ pub(super) const fn schema_version(primitive_id: PrimitiveId) -> Option<u16> {
         || value == PrimitiveId::MIRROR_DOCUMENT.get()
         || value == PrimitiveId::ROTATE_DOCUMENT.get()
         || value == PrimitiveId::RESIZE_DOCUMENT.get()
-        || value == PrimitiveId::VECTOR_ADD_PATH.get()
-        || value == PrimitiveId::VECTOR_ADD_FILL.get()
-        || value == PrimitiveId::VECTOR_ERASE.get()
-        || value == PrimitiveId::VECTOR_CONNECT.get()
-        || value == PrimitiveId::VECTOR_CORRECT_WIDTH.get()
-        || value == PrimitiveId::RASTERIZE_VECTOR_LAYER.get()
-        || value == PrimitiveId::VECTORIZE_RASTER_PLANE.get()
-        || value == PrimitiveId::VECTORIZE_RASTER_PLANE_INTO_NEW_LAYER.get()
         || value == PrimitiveId::LIGHT_TABLE_SET_GLOBAL_OPACITY.get()
         || value == PrimitiveId::LIGHT_TABLE_CREATE_SET.get()
         || value == PrimitiveId::LIGHT_TABLE_DUPLICATE_SET.get()
@@ -2604,80 +2284,7 @@ impl<'a> CanonicalReader<'a> {
             .map_err(|_| self.invalid("canonical string is not valid UTF-8"))
     }
 
-    fn annotation_edits(&mut self) -> Result<Vec<AnnotationEdit>, CoreError> {
-        let count = self.count(1)?;
-        if count == 0 || count > MAX_ANNOTATION_BATCH_EDITS {
-            return Err(self.invalid("canonical annotation edit count is outside bounds"));
-        }
-        let mut edits = Vec::with_capacity(count);
-        for _ in 0..count {
-            edits.push(match self.u32()? {
-                1 => AnnotationEdit::Create(self.annotation_input()?),
-                2 => AnnotationEdit::Update {
-                    object_id: self.u64()?,
-                    input: self.annotation_input()?,
-                },
-                3 => AnnotationEdit::Move {
-                    object_id: self.u64()?,
-                    delta_x: self.i32()?,
-                    delta_y: self.i32()?,
-                },
-                4 => AnnotationEdit::Delete {
-                    object_id: self.u64()?,
-                },
-                _ => return Err(self.invalid("canonical annotation edit kind is unknown")),
-            });
-        }
-        Ok(edits)
-    }
-
-    fn annotation_input(&mut self) -> Result<AnnotationObjectInput, CoreError> {
-        let layer_id = self.u64()?;
-        let kind = match self.u32()? {
-            1 => AnnotationKind::Text,
-            2 => AnnotationKind::Stroke,
-            3 => AnnotationKind::Leader,
-            4 => AnnotationKind::Value,
-            _ => return Err(self.invalid("canonical annotation object kind is unknown")),
-        };
-        let output = match self.u32()? {
-            1 => AnnotationOutput::Normal,
-            2 => AnnotationOutput::Instruction,
-            _ => return Err(self.invalid("canonical annotation output kind is unknown")),
-        };
-        let bounds = self.rect()?;
-        let font_family_hint = self.string()?;
-        let font_size_milli = self.u32()?;
-        let style_flags = self.u32()?;
-        let color = self.annotation_color()?;
-        let text = self.string()?;
-        let point_count = self.count(8)?;
-        if point_count > MAX_ANNOTATION_POINTS {
-            return Err(self.invalid("canonical annotation point count exceeds its bound"));
-        }
-        let mut points = Vec::with_capacity(point_count);
-        for _ in 0..point_count {
-            points.push(AnnotationPoint {
-                x_milli: self.i32()?,
-                y_milli: self.i32()?,
-            });
-        }
-        Ok(AnnotationObjectInput {
-            layer_id,
-            kind,
-            output,
-            bounds,
-            font_family_hint,
-            font_size_milli,
-            style_flags,
-            color,
-            text,
-            points,
-            stroke_width_milli: self.u32()?,
-        })
-    }
-
-    fn annotation_color(&mut self) -> Result<PixelValue, CoreError> {
+    fn rgba_color(&mut self) -> Result<PixelValue, CoreError> {
         let depth = self.u32()?;
         let channels = [self.u16()?, self.u16()?, self.u16()?, self.u16()?];
         match depth {
@@ -2688,7 +2295,7 @@ impl<'a> CanonicalReader<'a> {
                 Ok(PixelValue::Rgba(channels.map(|channel| channel as u8)))
             }
             16 => Ok(PixelValue::Rgba16(channels)),
-            _ => Err(self.invalid("canonical annotation color depth is invalid")),
+            _ => Err(self.invalid("canonical RGBA color depth is invalid")),
         }
     }
 
@@ -2762,7 +2369,7 @@ impl<'a> CanonicalReader<'a> {
             y_milli: self.i64()?,
             interval_milli_degrees: self.u32()?,
             angle_milli_degrees: self.u32()?,
-            color: self.annotation_color()?,
+            color: self.rgba_color()?,
             opacity_milli: self.u32()?,
             visible: self.boolean()?,
         })
@@ -2825,9 +2432,6 @@ impl<'a> CanonicalReader<'a> {
             5 => Ok(LayerKind::Frame),
             6 => Ok(LayerKind::VanishingPoint),
             7 => Ok(LayerKind::Adjustment),
-            8 => Ok(LayerKind::Text),
-            9 => Ok(LayerKind::Annotation),
-            10 => Ok(LayerKind::VectorColoring),
             _ => Err(self.invalid("canonical layer kind is invalid")),
         }
     }
@@ -2838,9 +2442,6 @@ impl<'a> CanonicalReader<'a> {
             2 => Ok(PlaneType::Color),
             3 => Ok(PlaneType::Raster),
             4 => Ok(PlaneType::Selection),
-            5 => Ok(PlaneType::VectorMainLine),
-            6 => Ok(PlaneType::ColorTrace),
-            7 => Ok(PlaneType::VectorFill),
             _ => Err(self.invalid("canonical plane kind is invalid")),
         }
     }
@@ -3445,39 +3046,12 @@ impl<'a> CanonicalReader<'a> {
                     value: self.pixel()?,
                 });
             }
-            let path_count = self.count(32)?;
-            let mut vector_paths = Vec::with_capacity(path_count);
-            for _ in 0..path_count {
-                let id = self.u64()?;
-                let plane_id = self.u64()?;
-                let input = self.vector_path()?;
-                vector_paths.push(VectorPathInfo {
-                    id,
-                    plane_id,
-                    segments: input.segments,
-                    color: input.color,
-                    closed: input.closed,
-                    square_cross_section: self.boolean()?,
-                });
-            }
-            let fill_count = self.count(32)?;
-            let mut vector_fills = Vec::with_capacity(fill_count);
-            for _ in 0..fill_count {
-                vector_fills.push(VectorFillInfo {
-                    id: self.u64()?,
-                    plane_id: self.u64()?,
-                    color: self.pixel()?,
-                    boundary_path_ids: self.ids()?,
-                });
-            }
             planes.push(ClipboardPlane {
                 kind,
                 pixel_format,
                 origin_x,
                 origin_y,
                 pixels,
-                vector_paths,
-                vector_fills,
             });
         }
         let anchor = match self.u32()? {
@@ -3533,15 +3107,6 @@ impl<'a> CanonicalReader<'a> {
             anchor,
             resample: self.boolean()?,
         })
-    }
-
-    fn ids(&mut self) -> Result<Vec<u64>, CoreError> {
-        let count = self.count(8)?;
-        let mut result = Vec::with_capacity(count);
-        for _ in 0..count {
-            result.push(self.u64()?);
-        }
-        Ok(result)
     }
 
     fn geometry(&mut self) -> Result<CanonicalGeometry, CoreError> {
@@ -3611,45 +3176,6 @@ impl<'a> CanonicalReader<'a> {
             outline: flags & 0x1 != 0,
             fill: flags & 0x2 != 0,
             closed: flags & 0x4 != 0,
-        })
-    }
-
-    fn vector_path(&mut self) -> Result<VectorPathInput, CoreError> {
-        let count = self.count(48)?;
-        let mut segments = Vec::with_capacity(count);
-        for _ in 0..count {
-            segments.push(VectorCubicSegment {
-                p0: self.point()?,
-                p1: self.point()?,
-                p2: self.point()?,
-                p3: self.point()?,
-                width_start: self.q16_f32()?,
-                width_end: self.q16_f32()?,
-            });
-        }
-        Ok(VectorPathInput {
-            segments,
-            color: self.pixel()?,
-            closed: self.boolean()?,
-        })
-    }
-
-    fn vector_erase_mode(&mut self) -> Result<VectorEraseMode, CoreError> {
-        match self.u32()? {
-            1 => Ok(VectorEraseMode::Partial),
-            2 => Ok(VectorEraseMode::ToIntersection),
-            3 => Ok(VectorEraseMode::WholePath),
-            _ => Err(self.invalid("canonical vector eraser mode is invalid")),
-        }
-    }
-
-    fn vector_width_mode(&mut self) -> Result<VectorWidthMode, CoreError> {
-        Ok(match self.u32()? {
-            1 => VectorWidthMode::Add(self.q16_f32()?),
-            2 => VectorWidthMode::Subtract(self.q16_f32()?),
-            3 => VectorWidthMode::Scale(self.q16_f32()?),
-            4 => VectorWidthMode::Constant(self.q16_f32()?),
-            _ => return Err(self.invalid("canonical vector-width mode is invalid")),
         })
     }
 
@@ -3809,70 +3335,7 @@ impl CanonicalWriter {
         Ok(())
     }
 
-    fn annotation_edits(&mut self, edits: &[AnnotationEdit]) -> Result<(), CoreError> {
-        self.u32(u32::try_from(edits.len()).map_err(|_| {
-            CoreError::InvalidArgument("annotation edit count is not representable")
-        })?);
-        for edit in edits {
-            match edit {
-                AnnotationEdit::Create(input) => {
-                    self.u32(1);
-                    self.annotation_input(input)?;
-                }
-                AnnotationEdit::Update { object_id, input } => {
-                    self.u32(2);
-                    self.u64(*object_id);
-                    self.annotation_input(input)?;
-                }
-                AnnotationEdit::Move {
-                    object_id,
-                    delta_x,
-                    delta_y,
-                } => {
-                    self.u32(3);
-                    self.u64(*object_id);
-                    self.i32(*delta_x);
-                    self.i32(*delta_y);
-                }
-                AnnotationEdit::Delete { object_id } => {
-                    self.u32(4);
-                    self.u64(*object_id);
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn annotation_input(&mut self, input: &AnnotationObjectInput) -> Result<(), CoreError> {
-        self.u64(input.layer_id);
-        self.u32(match input.kind {
-            AnnotationKind::Text => 1,
-            AnnotationKind::Stroke => 2,
-            AnnotationKind::Leader => 3,
-            AnnotationKind::Value => 4,
-        });
-        self.u32(match input.output {
-            AnnotationOutput::Normal => 1,
-            AnnotationOutput::Instruction => 2,
-        });
-        self.rect(input.bounds);
-        self.string(&input.font_family_hint)?;
-        self.u32(input.font_size_milli);
-        self.u32(input.style_flags);
-        self.annotation_color(input.color)?;
-        self.string(&input.text)?;
-        self.u32(u32::try_from(input.points.len()).map_err(|_| {
-            CoreError::InvalidArgument("annotation point count is not representable")
-        })?);
-        for point in &input.points {
-            self.i32(point.x_milli);
-            self.i32(point.y_milli);
-        }
-        self.u32(input.stroke_width_milli);
-        Ok(())
-    }
-
-    fn annotation_color(&mut self, color: PixelValue) -> Result<(), CoreError> {
+    fn rgba_color(&mut self, color: PixelValue) -> Result<(), CoreError> {
         match color {
             PixelValue::Rgba(channels) => {
                 self.u32(8);
@@ -3887,9 +3350,7 @@ impl CanonicalWriter {
                 }
             }
             _ => {
-                return Err(CoreError::InvalidArgument(
-                    "annotation color must be straight RGBA",
-                ));
+                return Err(CoreError::InvalidArgument("color must be straight RGBA"));
             }
         }
         Ok(())
@@ -3961,7 +3422,7 @@ impl CanonicalWriter {
         self.i64(input.y_milli);
         self.u32(input.interval_milli_degrees);
         self.u32(input.angle_milli_degrees);
-        self.annotation_color(input.color)?;
+        self.rgba_color(input.color)?;
         self.u32(input.opacity_milli);
         self.boolean(input.visible);
         Ok(())
@@ -4534,28 +3995,6 @@ impl CanonicalWriter {
                 self.i32(pixel.y);
                 self.pixel(pixel.value);
             }
-            self.u32(u32::try_from(plane.vector_paths.len()).map_err(|_| {
-                CoreError::InvalidArgument("canonical clipboard has too many vector paths")
-            })?);
-            for path in &plane.vector_paths {
-                self.u64(path.id);
-                self.u64(path.plane_id);
-                self.vector_path(&VectorPathInput {
-                    segments: path.segments.clone(),
-                    color: path.color,
-                    closed: path.closed,
-                })?;
-                self.boolean(path.square_cross_section);
-            }
-            self.u32(u32::try_from(plane.vector_fills.len()).map_err(|_| {
-                CoreError::InvalidArgument("canonical clipboard has too many vector fills")
-            })?);
-            for fill in &plane.vector_fills {
-                self.u64(fill.id);
-                self.u64(fill.plane_id);
-                self.pixel(fill.color);
-                self.ids(&fill.boundary_path_ids)?;
-            }
         }
         self.u32(floating_transform_anchor_code(floating.transform.anchor));
         self.q16_f64(floating.transform.target_x)?;
@@ -4577,16 +4016,6 @@ impl CanonicalWriter {
         self.u32(resize.dpi_y_milli);
         self.u32(resize_anchor_code(resize.anchor));
         self.boolean(resize.resample);
-    }
-
-    fn ids(&mut self, ids: &[u64]) -> Result<(), CoreError> {
-        let count = u32::try_from(ids.len())
-            .map_err(|_| CoreError::InvalidArgument("too many canonical stable IDs"))?;
-        self.u32(count);
-        for id in ids {
-            self.u64(*id);
-        }
-        Ok(())
     }
 
     fn geometry(&mut self, geometry: &CanonicalGeometry) -> Result<(), CoreError> {
@@ -4630,45 +4059,6 @@ impl CanonicalWriter {
         for point in &geometry.fill_boundary {
             self.i64(point.x_q16);
             self.i64(point.y_q16);
-        }
-        Ok(())
-    }
-
-    fn vector_path(&mut self, input: &VectorPathInput) -> Result<(), CoreError> {
-        let count = u32::try_from(input.segments.len())
-            .map_err(|_| CoreError::InvalidArgument("too many canonical vector segments"))?;
-        self.u32(count);
-        for segment in &input.segments {
-            self.point(segment.p0)?;
-            self.point(segment.p1)?;
-            self.point(segment.p2)?;
-            self.point(segment.p3)?;
-            self.q16_f32(segment.width_start)?;
-            self.q16_f32(segment.width_end)?;
-        }
-        self.pixel(input.color);
-        self.boolean(input.closed);
-        Ok(())
-    }
-
-    fn vector_width_mode(&mut self, mode: VectorWidthMode) -> Result<(), CoreError> {
-        match mode {
-            VectorWidthMode::Add(value) => {
-                self.u32(1);
-                self.q16_f32(value)?;
-            }
-            VectorWidthMode::Subtract(value) => {
-                self.u32(2);
-                self.q16_f32(value)?;
-            }
-            VectorWidthMode::Scale(value) => {
-                self.u32(3);
-                self.q16_f32(value)?;
-            }
-            VectorWidthMode::Constant(value) => {
-                self.u32(4);
-                self.q16_f32(value)?;
-            }
         }
         Ok(())
     }
@@ -4768,9 +4158,6 @@ const fn layer_kind_code(value: LayerKind) -> u32 {
         LayerKind::Frame => 5,
         LayerKind::VanishingPoint => 6,
         LayerKind::Adjustment => 7,
-        LayerKind::Text => 8,
-        LayerKind::Annotation => 9,
-        LayerKind::VectorColoring => 10,
     }
 }
 
@@ -4780,9 +4167,6 @@ const fn plane_type_code(value: PlaneType) -> u32 {
         PlaneType::Color => 2,
         PlaneType::Raster => 3,
         PlaneType::Selection => 4,
-        PlaneType::VectorMainLine => 5,
-        PlaneType::ColorTrace => 6,
-        PlaneType::VectorFill => 7,
     }
 }
 
@@ -4833,9 +4217,6 @@ const fn scoped_color_replace_mode_code(value: ScopedColorReplaceMode) -> u32 {
     match value {
         ScopedColorReplaceMode::RasterColor => 1,
         ScopedColorReplaceMode::RasterMainLine => 2,
-        ScopedColorReplaceMode::VectorColorLine => 3,
-        ScopedColorReplaceMode::VectorMainLine => 4,
-        ScopedColorReplaceMode::VectorFill => 5,
     }
 }
 
@@ -4843,9 +4224,6 @@ fn scoped_color_replace_mode(code: u32) -> Result<ScopedColorReplaceMode, CoreEr
     match code {
         1 => Ok(ScopedColorReplaceMode::RasterColor),
         2 => Ok(ScopedColorReplaceMode::RasterMainLine),
-        3 => Ok(ScopedColorReplaceMode::VectorColorLine),
-        4 => Ok(ScopedColorReplaceMode::VectorMainLine),
-        5 => Ok(ScopedColorReplaceMode::VectorFill),
         _ => Err(CoreError::Format(
             "unknown scoped color replacement mode".to_owned(),
         )),
@@ -4907,14 +4285,6 @@ const fn floating_transform_anchor_code(value: FloatingTransformAnchor) -> u32 {
         FloatingTransformAnchor::Center => 3,
         FloatingTransformAnchor::BottomLeft => 4,
         FloatingTransformAnchor::BottomRight => 5,
-    }
-}
-
-const fn vector_erase_mode_code(value: VectorEraseMode) -> u32 {
-    match value {
-        VectorEraseMode::Partial => 1,
-        VectorEraseMode::ToIntersection => 2,
-        VectorEraseMode::WholePath => 3,
     }
 }
 

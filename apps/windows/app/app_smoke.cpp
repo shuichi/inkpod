@@ -55,7 +55,6 @@
 #include "ui/tools/selection_controller.h"
 #include "ui/tools/tool_state.h"
 #include "ui/tools/view_controller.h"
-#include "ui/tools/vector_controller.h"
 #include "ui/effects_controller.h"
 #include "ui/icons/fluent_icons.h"
 #include "ui/batch_controller.h"
@@ -551,6 +550,31 @@ bool IsCaptionlessAccessibleSplitter(HWND window) noexcept {
         && WindowHasAccessibleName(window);
 }
 
+HMENU DirectCommandParent(HMENU menu, UINT command) noexcept {
+    if (menu == nullptr) {
+        return nullptr;
+    }
+    const int count = GetMenuItemCount(menu);
+    for (int index = 0; index < count; ++index) {
+        MENUITEMINFOW item{sizeof(item)};
+        item.fMask = MIIM_FTYPE | MIIM_ID | MIIM_SUBMENU;
+        if (GetMenuItemInfoW(menu, static_cast<UINT>(index), TRUE, &item) == FALSE) {
+            continue;
+        }
+        if ((item.fType & MFT_SEPARATOR) == 0U && item.hSubMenu == nullptr
+            && item.wID == command) {
+            return menu;
+        }
+        if (item.hSubMenu != nullptr) {
+            HMENU parent = DirectCommandParent(item.hSubMenu, command);
+            if (parent != nullptr) {
+                return parent;
+            }
+        }
+    }
+    return nullptr;
+}
+
 InkpodStatus CreateCell(ApplicationHost& state, std::uint32_t width, std::uint32_t height, std::uint32_t dpi_milli) noexcept;
 InkpodStatus CreateCellsFromOptions(
     ApplicationHost& state,
@@ -580,7 +604,6 @@ bool ActivateDocumentTab(
     ApplicationHost& state,
     inkpod::app::DocumentViewId view) noexcept;
 bool ConfirmAllDocuments(ApplicationHost& state) noexcept;
-InkpodStatus FinishVectorCanvasGesture(ApplicationHost& state) noexcept;
 InkpodStatus FitCanvas(ApplicationHost& state, InkpodViewCommandKind kind) noexcept;
 InkpodStatus ImportCommonRasterFromPath(
     ApplicationHost& state, const std::wstring& path) noexcept;
@@ -957,7 +980,6 @@ int RunLocatorPaneSmoke(ApplicationHost& state) noexcept {
     target_text.fill(L'\0');
     if (binding == nullptr
         || binding->policy != inkpod::app::PaneTargetPolicy::PinnedDocument
-        || (GetMenuState(menu, IDM_LOCATOR_PIN, MF_BYCOMMAND) & MF_CHECKED) == 0U
         || GetDlgItemTextW(
                pane,
                IDC_LOCATOR_TARGET,
@@ -1099,7 +1121,6 @@ int RunSequencePaneSmoke(ApplicationHost& state) noexcept {
     target_text.fill(L'\0');
     if (binding == nullptr
         || binding->policy != inkpod::app::PaneTargetPolicy::PinnedDocument
-        || (GetMenuState(menu, IDM_SEQUENCE_PIN, MF_BYCOMMAND) & MF_CHECKED) == 0U
         || GetDlgItemTextW(
                pane,
                IDC_SEQUENCE_TARGET,
@@ -1208,7 +1229,6 @@ int RunLightTablePaneSmoke(ApplicationHost& state) noexcept {
     target_text.fill(L'\0');
     if (binding == nullptr
         || binding->policy != inkpod::app::PaneTargetPolicy::PinnedDocument
-        || (GetMenuState(menu, IDM_LIGHT_TABLE_PIN, MF_BYCOMMAND) & MF_CHECKED) == 0U
         || GetDlgItemTextW(
                pane,
                IDC_LIGHT_TABLE_TARGET,
@@ -1644,7 +1664,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         return 728;
     }
     if (ToolPaletteEntries().size() != kToolPaletteEntryCount
-        || kToolPaletteEntryCount != 20U) {
+        || kToolPaletteEntryCount != 14U) {
         return 729;
     }
     if (!std::all_of(
@@ -2278,18 +2298,18 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         || GetWindowRect(state.Workspace().panes.layer_palette, &layer_bounds) == FALSE) {
         return 732;
     }
-    if (tool_bounds.right > workspace_canvas_bounds.left
+    if (tool_bounds.right != workspace_canvas_bounds.left
         || workspace_canvas_bounds.right > color_bounds.left
         || color_bounds.left != layer_bounds.left
         || color_bounds.right != layer_bounds.right) {
         return 732;
     }
-    for (const DockZone zone : {DockZone::Left, DockZone::Right}) {
-        if (!IsCaptionlessAccessibleSplitter(
-                state.Workspace().windows.dock_host.SplitterWindow(
-                    zone, DockSplitterKind::ZoneExtent))) {
-            return 838;
-        }
+    if (state.Workspace().windows.dock_host.SplitterWindow(
+            DockZone::Left, DockSplitterKind::ZoneExtent) != nullptr
+        || !IsCaptionlessAccessibleSplitter(
+            state.Workspace().windows.dock_host.SplitterWindow(
+                DockZone::Right, DockSplitterKind::ZoneExtent))) {
+        return 838;
     }
     const HWND fill_expand = GetDlgItem(
         state.Workspace().tools.palette,
@@ -2588,141 +2608,36 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         || GetWindowRect(state.Workspace().windows.canvas, &workspace_canvas_bounds) == FALSE
         || state.Workspace().windows.dock_host.ToolTabWindow() == nullptr
         || IsWindowVisible(
-               state.Workspace().windows.dock_host.ToolTabWindow()) == FALSE
+               state.Workspace().windows.dock_host.ToolTabWindow()) != FALSE
+        || state.Workspace().windows.workspace.right_tool_tabs.HasVisibleTabs()
         || workspace_canvas_bounds.right - workspace_canvas_bounds.left
-            != initial_canvas_width) {
+            <= initial_canvas_width) {
         return 737;
     }
     SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_WINDOW_COLOR_PANE, 0);
     SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_WINDOW_LAYER_PALETTE, 0);
     const HWND right_tool_tabs =
         state.Workspace().windows.dock_host.ToolTabWindow();
-    if (right_tool_tabs == nullptr || TabCtrl_GetItemCount(right_tool_tabs) != 3
+    const auto tabs = state.Workspace().windows.workspace.right_tool_tabs.Tabs();
+    if (right_tool_tabs == nullptr || TabCtrl_GetItemCount(right_tool_tabs) != 1
+        || tabs.size() != 1U || tabs.front().pane_count != 2U
+        || state.Workspace().windows.workspace.right_tool_tabs.TabForPane(
+               DockPaneType::Color)
+            != tabs.front().id
+        || state.Workspace().windows.workspace.right_tool_tabs.TabForPane(
+               DockPaneType::Layer)
+            != tabs.front().id
         || state.Workspace().windows.workspace.right_tool_tabs.Selected()
-            != inkpod::windows::ui::kToolTabColoring
-        || GetWindowRect(state.Workspace().windows.canvas, &workspace_canvas_bounds)
-            == FALSE) {
+            != tabs.front().id) {
         return 11003;
     }
-    const LONG docked_canvas_width =
-        workspace_canvas_bounds.right - workspace_canvas_bounds.left;
-    for (const UINT command : {
-             IDM_WINDOW_TOOL_TAB_COLORING,
-             IDM_WINDOW_TOOL_TAB_REFERENCE,
-             IDM_WINDOW_TOOL_TAB_WORKFLOW}) {
-        if (SendMessageW(
-                state.Workspace().windows.window, WM_COMMAND, command, 0)
-                != 1
-            || checked(command)) {
-            return 11004;
-        }
+    if (state.Workspace().windows.dock_host.FloatPane(DockPaneType::Tool)
+            != DockResult::ZoneNotAllowed
+        || state.Workspace().windows.dock_host.FloatingWindow(
+            DockPaneType::Tool) != nullptr) {
+        return 832;
     }
-    if (state.Workspace().windows.workspace.right_tool_tabs.Selected()
-        || state.Workspace().windows.workspace.right_tool_tabs.HasVisibleTabs()
-        || IsWindowVisible(right_tool_tabs) != FALSE
-        || GetWindowRect(state.Workspace().windows.canvas, &workspace_canvas_bounds)
-            == FALSE
-        || workspace_canvas_bounds.right - workspace_canvas_bounds.left
-            <= docked_canvas_width) {
-        return 11005;
-    }
-    for (const UINT command : {
-             IDM_WINDOW_TOOL_TAB_COLORING,
-             IDM_WINDOW_TOOL_TAB_REFERENCE,
-             IDM_WINDOW_TOOL_TAB_WORKFLOW}) {
-        if (SendMessageW(
-                state.Workspace().windows.window, WM_COMMAND, command, 0)
-                != 1
-            || !checked(command)) {
-            return 11006;
-        }
-    }
-    if (state.Workspace().windows.workspace.right_tool_tabs.Selected()
-            != inkpod::windows::ui::kToolTabColoring
-        || IsWindowVisible(right_tool_tabs) == FALSE
-        || TabCtrl_GetItemCount(right_tool_tabs) != 3) {
-        return 11007;
-    }
-    const auto drag_tool_tab = [right_tool_tabs](
-                                   int source,
-                                   int target,
-                                   bool after_target) noexcept {
-        RECT source_bounds{};
-        RECT target_bounds{};
-        if (TabCtrl_GetItemRect(right_tool_tabs, source, &source_bounds) == FALSE
-            || TabCtrl_GetItemRect(right_tool_tabs, target, &target_bounds)
-                == FALSE) {
-            return false;
-        }
-        const POINT start{
-            (source_bounds.left + source_bounds.right) / 2,
-            (source_bounds.top + source_bounds.bottom) / 2};
-        const POINT finish{
-            target_bounds.left
-                + (target_bounds.right - target_bounds.left)
-                    * (after_target ? 3 : 1) / 4,
-            (target_bounds.top + target_bounds.bottom) / 2};
-        SendMessageW(
-            right_tool_tabs,
-            WM_LBUTTONDOWN,
-            MK_LBUTTON,
-            MAKELPARAM(start.x, start.y));
-        SendMessageW(
-            right_tool_tabs,
-            WM_MOUSEMOVE,
-            MK_LBUTTON,
-            MAKELPARAM(finish.x, finish.y));
-        SendMessageW(
-            right_tool_tabs,
-            WM_LBUTTONUP,
-            0,
-            MAKELPARAM(finish.x, finish.y));
-        return true;
-    };
-    if (!drag_tool_tab(0, 2, true)
-        || state.Workspace().windows.workspace.right_tool_tabs.Tabs()[0].id
-            != inkpod::windows::ui::kToolTabReference
-        || state.Workspace().windows.workspace.right_tool_tabs.Tabs()[1].id
-            != inkpod::windows::ui::kToolTabWorkflow
-        || state.Workspace().windows.workspace.right_tool_tabs.Tabs()[2].id
-            != inkpod::windows::ui::kToolTabColoring) {
-        return 11010;
-    }
-    if (!drag_tool_tab(2, 0, false)
-        || state.Workspace().windows.workspace.right_tool_tabs.Tabs()[0].id
-            != inkpod::windows::ui::kToolTabColoring
-        || state.Workspace().windows.workspace.right_tool_tabs.Tabs()[1].id
-            != inkpod::windows::ui::kToolTabReference
-        || state.Workspace().windows.workspace.right_tool_tabs.Tabs()[2].id
-            != inkpod::windows::ui::kToolTabWorkflow) {
-        return 11011;
-    }
-    TabCtrl_SetCurSel(right_tool_tabs, 1);
-    SendMessageW(right_tool_tabs, WM_KEYUP, VK_RIGHT, 0);
-    if (state.Workspace().windows.workspace.right_tool_tabs.Selected()
-            != inkpod::windows::ui::kToolTabReference
-        || IsWindowVisible(
-               state.Workspace().windows.dock_host.ContentWindow(
-                   DockPaneType::Color)) != FALSE
-        || IsWindowVisible(
-               state.Workspace().windows.dock_host.ContentWindow(
-                   DockPaneType::Layer)) != FALSE) {
-        return 11008;
-    }
-    TabCtrl_SetCurSel(right_tool_tabs, 0);
-    SendMessageW(right_tool_tabs, WM_KEYUP, VK_LEFT, 0);
-    if (state.Workspace().windows.workspace.right_tool_tabs.Selected()
-            != inkpod::windows::ui::kToolTabColoring
-        || IsWindowVisible(
-               state.Workspace().windows.dock_host.ContentWindow(
-                   DockPaneType::Color)) == FALSE
-        || IsWindowVisible(
-               state.Workspace().windows.dock_host.ContentWindow(
-                   DockPaneType::Layer)) == FALSE) {
-        return 11009;
-    }
-    const std::array<DockPaneType, 3U> dock_pane_types{
-        DockPaneType::Tool,
+    const std::array<DockPaneType, 2U> dock_pane_types{
         DockPaneType::Color,
         DockPaneType::Layer};
     for (const DockPaneType type : dock_pane_types) {
@@ -2935,25 +2850,6 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     if (DispatchEnabledCommand(state, state.Workspace().windows.window, IDM_EDIT_UNDO)) {
         return 714;
     }
-    constexpr std::array<UINT, 6U> geometry_draw_commands{
-        IDM_VECTOR_LINE,
-        IDM_VECTOR_CURVE,
-        IDM_VECTOR_RECTANGLE,
-        IDM_VECTOR_ELLIPSE,
-        IDM_VECTOR_POLYLINE,
-        IDM_VECTOR_POLYGON};
-    for (const UINT command : geometry_draw_commands) {
-        const UINT command_state = GetMenuState(menu, command, MF_BYCOMMAND);
-        if (command_state == static_cast<UINT>(-1)
-            || (command_state & (MF_DISABLED | MF_GRAYED)) != 0U) {
-            return 701;
-        }
-    }
-    const UINT eraser_state = GetMenuState(menu, IDM_VECTOR_ERASER, MF_BYCOMMAND);
-    if (eraser_state == static_cast<UINT>(-1)
-        || (eraser_state & (MF_DISABLED | MF_GRAYED)) == 0U) {
-        return 701;
-    }
     if (!RefreshSequencePane(state) || state.Workspace().panes.sequence_count != 0U) {
         return 702;
     }
@@ -2969,13 +2865,6 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         || state.engine->LastError().find(L"no sequence is configured")
             == std::wstring::npos) {
         return 703;
-    }
-    const std::uint32_t initial_tool = state.Workspace().tools.active_tool;
-    if (SendMessageW(
-            state.Workspace().windows.window, WM_COMMAND, IDM_VECTOR_ERASER, 0)
-            != 0
-        || state.Workspace().tools.active_tool != initial_tool) {
-        return 705;
     }
     const std::wstring initial_recovery_path = state.Document().shell.recovery_path;
     RecoveryMetadata initial_recovery_metadata{};
@@ -5683,229 +5572,6 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
         : 333;
 }
 
-int RunAnnotationWorkflowSmoke(ApplicationHost& state) noexcept {
-    if (state.engine == nullptr || state.Workspace().windows.canvas == nullptr) {
-        return 1250;
-    }
-    if (CreateCell(state, 128U, 96U, 96000U) != INKPOD_STATUS_OK) {
-        return 1251;
-    }
-    if (!state.RefreshEditorPresentation(state.Document().id, state.Document().generation)) {
-        return 1252;
-    }
-    if (FitCanvas(state, INKPOD_VIEW_FIT) != INKPOD_STATUS_OK) {
-        return 1264;
-    }
-    const HMENU menu = GetMenu(state.Workspace().windows.window);
-    for (const UINT command : {
-             IDM_ANNOTATION_ADD_TEXT, IDM_ANNOTATION_EDIT_TEXT,
-             IDM_ANNOTATION_DRAW_INSTRUCTION, IDM_ANNOTATION_SELECT_PREVIOUS,
-             IDM_ANNOTATION_SELECT_NEXT, IDM_ANNOTATION_MOVE_LEFT,
-             IDM_ANNOTATION_MOVE_RIGHT, IDM_ANNOTATION_DELETE}) {
-        wchar_t accessible_name[96]{};
-        if (menu == nullptr || GetMenuState(menu, command, MF_BYCOMMAND) == static_cast<UINT>(-1)
-            || GetMenuStringW(
-                   menu, command, accessible_name,
-                   static_cast<int>(std::size(accessible_name)), MF_BYCOMMAND) == 0) {
-            return 1253;
-        }
-    }
-    SendMessageW(
-        state.Workspace().windows.window, WM_COMMAND, IDM_ANNOTATION_ADD_TEXT, 0);
-    InkpodDocumentInfo after_text = EmptyDocumentInfo();
-    if (!QueryDocument(state, after_text)
-        || state.Document().shell.annotation_layer_id == 0U
-        || state.Document().shell.active_annotation_id == 0U) {
-        return 1254;
-    }
-    SendMessageW(
-        state.Workspace().windows.window, WM_COMMAND, IDM_ANNOTATION_EDIT_TEXT, 0);
-    SendMessageW(
-        state.Workspace().windows.window, WM_COMMAND, IDM_ANNOTATION_MOVE_RIGHT, 0);
-    InkpodDocumentInfo after_move = EmptyDocumentInfo();
-    if (!QueryDocument(state, after_move)
-        || after_move.document_revision != after_text.document_revision + 1U) {
-        return 1255;
-    }
-    SendMessageW(
-        state.Workspace().windows.window, WM_COMMAND, IDM_ANNOTATION_DRAW_INSTRUCTION, 0);
-    if (!state.Document().shell.annotation_draw_active) {
-        return 1256;
-    }
-    inkpod::renderer::CanvasDocumentBounds bounds{};
-    if (!inkpod::renderer::GetCanvasDocumentBounds(
-            state.Workspace().windows.canvas, bounds)) {
-        return 1257;
-    }
-    const std::array<InkpodStrokeSample, 3U> samples{
-        InkpodStrokeSample{sizeof(InkpodStrokeSample), 0U,
-            static_cast<float>(bounds.left + 20.0),
-            static_cast<float>(bounds.top + 20.0), 1.0F, 0U},
-        InkpodStrokeSample{sizeof(InkpodStrokeSample), 0U,
-            static_cast<float>(bounds.left + 45.0),
-            static_cast<float>(bounds.top + 32.0), 0.8F, 0U},
-        InkpodStrokeSample{sizeof(InkpodStrokeSample), 0U,
-            static_cast<float>(bounds.left + 70.0),
-            static_cast<float>(bounds.top + 25.0), 1.0F, 0U}};
-    const inkpod::renderer::CanvasStrokeEvent begin{
-        inkpod::renderer::CanvasStrokeEventKind::Begin, samples.data(), 1U};
-    const inkpod::renderer::CanvasStrokeEvent append{
-        inkpod::renderer::CanvasStrokeEventKind::Append, samples.data() + 1U, 2U};
-    const inkpod::renderer::CanvasStrokeEvent end{
-        inkpod::renderer::CanvasStrokeEventKind::End, nullptr, 0U};
-    if (!inkpod::renderer::SubmitCanvasStrokeEvent(
-            state.Workspace().windows.canvas, begin)
-        || !inkpod::renderer::SubmitCanvasStrokeEvent(
-            state.Workspace().windows.canvas, append)
-        || !inkpod::renderer::SubmitCanvasStrokeEvent(
-            state.Workspace().windows.canvas, end)
-        || state.engine->WaitIdle() != INKPOD_STATUS_OK) {
-        return 1258;
-    }
-    bool annotation_snapshot_ok{};
-    const InkpodStatus snapshot_status = state.engine->Invoke(
-        [&annotation_snapshot_ok](InkpodCore* core) {
-            InkpodSnapshotOptions snapshot_options{};
-            snapshot_options.struct_size = sizeof(snapshot_options);
-            InkpodSnapshot* snapshot{};
-            InkpodStatus status = inkpod_core_build_snapshot(
-                core, &snapshot_options, &snapshot);
-            InkpodSnapshotAnnotationView view{};
-            view.struct_size = sizeof(view);
-            if (status == INKPOD_STATUS_OK) {
-                status = inkpod_snapshot_get_annotations(snapshot, &view);
-            }
-            bool has_text{};
-            bool has_instruction_stroke{};
-            if (status == INKPOD_STATUS_OK) {
-                const auto* bytes = reinterpret_cast<const std::byte*>(view.objects);
-                for (std::uint64_t index = 0U; index < view.object_count; ++index) {
-                    const auto* object = reinterpret_cast<const InkpodSnapshotAnnotation*>(
-                        bytes + static_cast<std::size_t>(index * view.object_stride_bytes));
-                    has_text = has_text || object->kind == INKPOD_ANNOTATION_TEXT;
-                    has_instruction_stroke = has_instruction_stroke
-                        || (object->kind == INKPOD_ANNOTATION_STROKE
-                            && object->output == INKPOD_ANNOTATION_OUTPUT_INSTRUCTION);
-                }
-            }
-            annotation_snapshot_ok = status == INKPOD_STATUS_OK
-                && has_text && has_instruction_stroke;
-            const InkpodStatus release = snapshot == nullptr
-                ? INKPOD_STATUS_OK : inkpod_snapshot_release(&snapshot);
-            return status == INKPOD_STATUS_OK ? release : status;
-        },
-        false,
-        false);
-    if (snapshot_status != INKPOD_STATUS_OK || !annotation_snapshot_ok) {
-        return 1259;
-    }
-    const std::uint64_t selected_annotation_id =
-        state.Document().shell.active_annotation_id;
-    const InkpodStatus fallback_status = state.engine->Invoke(
-        [selected_annotation_id](InkpodCore* core) {
-            InkpodSnapshotOptions snapshot_options{};
-            snapshot_options.struct_size = sizeof(snapshot_options);
-            InkpodSnapshot* snapshot{};
-            InkpodStatus status = inkpod_core_build_snapshot(
-                core, &snapshot_options, &snapshot);
-            InkpodSnapshotAnnotationView view{};
-            view.struct_size = sizeof(view);
-            if (status == INKPOD_STATUS_OK) {
-                status = inkpod_snapshot_get_annotations(snapshot, &view);
-            }
-            const InkpodSnapshotAnnotation* found{};
-            if (status == INKPOD_STATUS_OK) {
-                const auto* bytes = reinterpret_cast<const std::byte*>(view.objects);
-                for (std::uint64_t index = 0U; index < view.object_count; ++index) {
-                    const auto* object = reinterpret_cast<const InkpodSnapshotAnnotation*>(
-                        bytes + static_cast<std::size_t>(index * view.object_stride_bytes));
-                    if (object->object_id == selected_annotation_id) {
-                        found = object;
-                        break;
-                    }
-                }
-                if (found == nullptr) {
-                    status = INKPOD_STATUS_INVALID_STATE;
-                }
-            }
-            InkpodDocumentInfo info = EmptyDocumentInfo();
-            if (status == INKPOD_STATUS_OK) {
-                status = inkpod_core_get_document_info(core, &info);
-            }
-            constexpr char missing_font[] = "__inkpod_missing_font__";
-            InkpodAnnotationObjectInput input{};
-            InkpodAnnotationEdit edit{};
-            InkpodAnnotationEditResult result{};
-            if (status == INKPOD_STATUS_OK) {
-                input.struct_size = sizeof(input);
-                input.kind = found->kind;
-                input.layer_id = found->layer_id;
-                input.output = found->output;
-                input.style_flags = found->style_flags;
-                input.bounds = found->bounds;
-                input.font_family_utf8 = reinterpret_cast<const std::uint8_t*>(missing_font);
-                input.font_family_bytes = std::size(missing_font) - 1U;
-                input.font_size_milli = found->font_size_milli;
-                input.stroke_width_milli = found->stroke_width_milli;
-                input.color = found->color;
-                input.text_utf8 = view.utf8_bytes
-                    + static_cast<std::size_t>(found->text_utf8_offset);
-                input.text_bytes = found->text_utf8_bytes;
-                input.points = nullptr;
-                input.point_count = 0U;
-                input.point_stride_bytes = 0U;
-                edit.struct_size = sizeof(edit);
-                edit.kind = INKPOD_ANNOTATION_EDIT_UPDATE;
-                edit.object_id = found->object_id;
-                edit.input = &input;
-                result.struct_size = sizeof(result);
-                status = inkpod_core_annotation_edit(
-                    core, info.document_revision, &edit, 1U, sizeof(edit), &result);
-            }
-            const InkpodStatus release = snapshot == nullptr
-                ? INKPOD_STATUS_OK : inkpod_snapshot_release(&snapshot);
-            return status == INKPOD_STATUS_OK ? release : status;
-        },
-        true,
-        true);
-    if (fallback_status != INKPOD_STATUS_OK
-        || SendMessageW(
-               state.Workspace().windows.canvas,
-               inkpod::renderer::kCanvasRenderOnce,
-               0,
-               0) != 1) {
-        return 1263;
-    }
-    InkpodDocumentInfo before_cancel = EmptyDocumentInfo();
-    InkpodDocumentInfo after_cancel = EmptyDocumentInfo();
-    const inkpod::renderer::CanvasStrokeEvent cancel{
-        inkpod::renderer::CanvasStrokeEventKind::Cancel, nullptr, 0U};
-    if (!QueryDocument(state, before_cancel)
-        || !inkpod::renderer::SubmitCanvasStrokeEvent(
-            state.Workspace().windows.canvas, begin)
-        || !inkpod::renderer::SubmitCanvasStrokeEvent(
-            state.Workspace().windows.canvas, cancel)
-        || state.engine->WaitIdle() != INKPOD_STATUS_OK
-        || !QueryDocument(state, after_cancel)
-        || after_cancel.document_revision != before_cancel.document_revision) {
-        return 1260;
-    }
-    if (SendMessageW(
-            state.Workspace().windows.canvas,
-            inkpod::renderer::kCanvasSimulateDeviceLoss,
-            0,
-            0) != 1
-        || SendMessageW(
-               state.Workspace().windows.canvas,
-               inkpod::renderer::kCanvasRenderOnce,
-               0,
-               0) != 1) {
-        return 1261;
-    }
-    SendMessageW(
-        state.Workspace().windows.window, WM_COMMAND, IDM_ANNOTATION_DRAW_INSTRUCTION, 0);
-    return state.Document().shell.annotation_draw_active ? 1262 : 0;
-}
 
 int RunShootingFrameWorkflowSmoke(ApplicationHost& state) noexcept {
     InkpodDocumentInfo before{};
@@ -7749,801 +7415,6 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     return 0;
 }
 
-int RunVectorWorkflowSmoke(ApplicationHost& state) noexcept {
-    if (state.engine == nullptr) {
-        return 500;
-    }
-    const InkpodCellCreateOptions options{
-        sizeof(InkpodCellCreateOptions),
-        0U,
-        INKPOD_FEATURE_NONE,
-        UINT64_C(0x4d35000000000001),
-        UINT64_C(0x4d35000000000002),
-        64U,
-        64U,
-        96000U,
-        96000U};
-    if (state.engine->Invoke(
-            [options](InkpodCore* core) {
-                InkpodDocumentInfo info = EmptyDocumentInfo();
-                return inkpod_core_new_cell(core, &options, &info);
-            },
-            true,
-            true) != INKPOD_STATUS_OK) {
-        return 501;
-    }
-    ResetUiForNewActiveDocument(state);
-    if (!state.RefreshEditorPresentation(
-            state.Document().id, state.Document().generation)
-        || FitCanvas(state, INKPOD_VIEW_FIT) != INKPOD_STATUS_OK) {
-        return 501;
-    }
-
-    InkpodSnapshotVectorSegment geometry_before{};
-    std::uint64_t vector_layer_id{};
-    std::uint64_t vector_trace_plane_id{};
-    std::uint64_t vector_path_id{};
-    std::uint64_t vector_fill_id{};
-    const InkpodStatus vector_status = state.engine->Invoke(
-        [&geometry_before,
-         &vector_layer_id,
-         &vector_trace_plane_id,
-         &vector_path_id,
-         &vector_fill_id](InkpodCore* core) {
-            static constexpr std::array<std::uint8_t, 6U> name{
-                'V', 'e', 'c', 't', 'o', 'r'};
-            InkpodTreeEdit edit{};
-            edit.struct_size = sizeof(edit);
-            edit.operation = INKPOD_TREE_CREATE_LAYER;
-            edit.kind = INKPOD_LAYER_VECTOR_COLORING;
-            edit.name_utf8 = name.data();
-            edit.name_bytes = name.size();
-            InkpodDispatchResult result{};
-            result.struct_size = sizeof(result);
-            InkpodStatus status = inkpod_core_tree_edit(
-                core, &edit, &result, &vector_layer_id);
-            InkpodNodeInfo trace{};
-            trace.struct_size = sizeof(trace);
-            InkpodNodeInfo fill{};
-            fill.struct_size = sizeof(fill);
-            if (status == INKPOD_STATUS_OK) {
-                status = inkpod_core_node_get(core, 1U, 1U, &trace);
-            }
-            if (status == INKPOD_STATUS_OK) {
-                status = inkpod_core_node_get(core, 1U, 2U, &fill);
-            }
-            if (status != INKPOD_STATUS_OK || vector_layer_id == 0U
-                || trace.kind != INKPOD_TYPED_PLANE_COLOR_TRACE
-                || fill.kind != INKPOD_TYPED_PLANE_VECTOR_FILL) {
-                return status == INKPOD_STATUS_OK
-                    ? INKPOD_STATUS_INVALID_STATE
-                    : status;
-            }
-            vector_trace_plane_id = trace.id;
-            constexpr auto point = [](float x, float y) noexcept {
-                return InkpodVectorPoint{x, y};
-            };
-            constexpr auto line = [](InkpodVectorPoint start, InkpodVectorPoint end) noexcept {
-                return InkpodVectorCubicSegment{
-                    sizeof(InkpodVectorCubicSegment),
-                    0U,
-                    start,
-                    InkpodVectorPoint{
-                        (start.x * 2.0F + end.x) / 3.0F,
-                        (start.y * 2.0F + end.y) / 3.0F},
-                    InkpodVectorPoint{
-                        (start.x + end.x * 2.0F) / 3.0F,
-                        (start.y + end.y * 2.0F) / 3.0F},
-                    end,
-                    1.0F,
-                    5.0F};
-            };
-            constexpr std::array<InkpodVectorPoint, 5U> corners{
-                point(8.0F, 8.0F),
-                point(56.0F, 8.0F),
-                point(56.0F, 56.0F),
-                point(8.0F, 56.0F),
-                point(8.0F, 8.0F)};
-            const std::array<InkpodVectorCubicSegment, 4U> segments{
-                line(corners[0], corners[1]),
-                line(corners[1], corners[2]),
-                line(corners[2], corners[3]),
-                line(corners[3], corners[4])};
-            const InkpodVectorPathInput path{
-                sizeof(InkpodVectorPathInput),
-                0U,
-                INKPOD_VECTOR_PATH_CLOSED,
-                trace.id,
-                InkpodColorValue{
-                    sizeof(InkpodColorValue),
-                    INKPOD_COLOR_DEPTH_8,
-                    20U,
-                    40U,
-                    220U,
-                    255U},
-                segments.data(),
-                segments.size(),
-                sizeof(InkpodVectorCubicSegment)};
-            status = inkpod_core_vector_add_path(
-                core, &path, &result, &vector_path_id);
-            const InkpodVectorFillInput topology{
-                sizeof(InkpodVectorFillInput),
-                0U,
-                0U,
-                fill.id,
-                InkpodColorValue{
-                    sizeof(InkpodColorValue),
-                    INKPOD_COLOR_DEPTH_8,
-                    240U,
-                    120U,
-                    20U,
-                    180U},
-                &vector_path_id,
-                1U};
-            if (status == INKPOD_STATUS_OK) {
-                status = inkpod_core_vector_add_fill(
-                    core, &topology, &result, &vector_fill_id);
-            }
-            const InkpodSnapshotOptions snapshot_options{
-                sizeof(InkpodSnapshotOptions), 0U, INKPOD_FEATURE_NONE};
-            InkpodSnapshot* snapshot{};
-            if (status == INKPOD_STATUS_OK) {
-                status = inkpod_core_build_snapshot(
-                    core, &snapshot_options, &snapshot);
-            }
-            InkpodSnapshotVectorView vectors{};
-            vectors.struct_size = sizeof(vectors);
-            if (status == INKPOD_STATUS_OK) {
-                status = inkpod_snapshot_get_vectors(snapshot, &vectors);
-            }
-            if (status == INKPOD_STATUS_OK
-                && (vectors.segment_count != 4U || vectors.fill_count != 1U
-                    || vectors.boundary_path_count != 1U || vectors.segments == nullptr
-                    || vectors.fills == nullptr || vectors.boundary_path_ids == nullptr
-                    || vectors.segments->path_id != vector_path_id
-                    || vectors.fills->fill_id != vector_fill_id
-                    || *vectors.boundary_path_ids != vector_path_id)) {
-                status = INKPOD_STATUS_INVALID_STATE;
-            }
-            if (status == INKPOD_STATUS_OK) {
-                geometry_before = *vectors.segments;
-            }
-            const InkpodStatus release_status = inkpod_snapshot_release(&snapshot);
-            return status == INKPOD_STATUS_OK ? release_status : status;
-        },
-        true,
-        true);
-    if (vector_status != INKPOD_STATUS_OK || vector_layer_id == 0U
-        || vector_trace_plane_id == 0U || vector_path_id == 0U || vector_fill_id == 0U) {
-        return 502;
-    }
-    if (ApplyView(state, INKPOD_VIEW_ZOOM_AT, 2.0, 32.0, 32.0)
-        != INKPOD_STATUS_OK) {
-        return 503;
-    }
-    bool geometry_unchanged{};
-    const InkpodStatus zoom_status = state.engine->Invoke(
-        [&geometry_before, &geometry_unchanged](InkpodCore* core) {
-            const InkpodSnapshotOptions options{
-                sizeof(InkpodSnapshotOptions), 0U, INKPOD_FEATURE_NONE};
-            InkpodSnapshot* snapshot{};
-            InkpodStatus status = inkpod_core_build_snapshot(core, &options, &snapshot);
-            InkpodSnapshotVectorView vectors{};
-            vectors.struct_size = sizeof(vectors);
-            if (status == INKPOD_STATUS_OK) {
-                status = inkpod_snapshot_get_vectors(snapshot, &vectors);
-            }
-            if (status == INKPOD_STATUS_OK && vectors.segment_count != 0U
-                && vectors.segments != nullptr) {
-                const InkpodSnapshotVectorSegment& after = *vectors.segments;
-                geometry_unchanged = after.path_id == geometry_before.path_id
-                    && after.p0.x == geometry_before.p0.x
-                    && after.p0.y == geometry_before.p0.y
-                    && after.p1.x == geometry_before.p1.x
-                    && after.p1.y == geometry_before.p1.y
-                    && after.p2.x == geometry_before.p2.x
-                    && after.p2.y == geometry_before.p2.y
-                    && after.p3.x == geometry_before.p3.x
-                    && after.p3.y == geometry_before.p3.y
-                    && after.width_start == geometry_before.width_start
-                    && after.width_end == geometry_before.width_end;
-            }
-            const InkpodStatus release_status = inkpod_snapshot_release(&snapshot);
-            return status == INKPOD_STATUS_OK ? release_status : status;
-        },
-        false,
-        false);
-    if (zoom_status != INKPOD_STATUS_OK || !geometry_unchanged) {
-        return 504;
-    }
-    if (SendMessageW(
-            state.Workspace().windows.canvas,
-            inkpod::renderer::kCanvasRenderOnce,
-            0,
-            0) != 1) {
-        return 505;
-    }
-    if (SendMessageW(
-            state.Workspace().windows.canvas,
-            inkpod::renderer::kCanvasValidateClosedVectorStroke,
-            0,
-            0) != 1) {
-        return 507;
-    }
-
-    std::uint64_t diagnostic_path_id{};
-    const InkpodStatus diagnostic_path_status = state.engine->Invoke(
-        [vector_trace_plane_id, &diagnostic_path_id](InkpodCore* core) {
-            const InkpodVectorCubicSegment segment{
-                sizeof(InkpodVectorCubicSegment),
-                0U,
-                InkpodVectorPoint{12.0F, 24.0F},
-                InkpodVectorPoint{20.0F, 26.6667F},
-                InkpodVectorPoint{28.0F, 29.3333F},
-                InkpodVectorPoint{36.0F, 32.0F},
-                3.0F,
-                3.0F};
-            const InkpodVectorPathInput path{
-                sizeof(InkpodVectorPathInput),
-                0U,
-                0U,
-                vector_trace_plane_id,
-                InkpodColorValue{
-                    sizeof(InkpodColorValue),
-                    INKPOD_COLOR_DEPTH_8,
-                    20U,
-                    40U,
-                    220U,
-                    255U},
-                &segment,
-                1U,
-                sizeof(InkpodVectorCubicSegment)};
-            InkpodDispatchResult result{};
-            result.struct_size = sizeof(result);
-            return inkpod_core_vector_add_path(
-                core, &path, &result, &diagnostic_path_id);
-        },
-        true,
-        true);
-    InkpodDocumentInfo diagnostics_before = EmptyDocumentInfo();
-    InkpodHistoryInfo diagnostics_history_before{};
-    diagnostics_history_before.struct_size = sizeof(diagnostics_history_before);
-    if (diagnostic_path_status != INKPOD_STATUS_OK || diagnostic_path_id == 0U
-        || !QueryDocument(state, diagnostics_before)
-        || state.engine->Invoke(
-               [&diagnostics_history_before](InkpodCore* core) {
-                   return inkpod_core_history_info(core, &diagnostics_history_before);
-               },
-               false,
-               false) != INKPOD_STATUS_OK) {
-        return 530;
-    }
-    const inkpod::app::EditorGroup* diagnostic_group =
-        state.Workspace().editors.Active();
-    inkpod::renderer::CanvasDocumentBounds diagnostic_bounds{};
-    if (diagnostic_group == nullptr || state.renderer == nullptr
-        || !state.renderer->WaitQueueIdleForSmokeTest()
-        || SendMessageW(
-               diagnostic_group->canvas,
-               inkpod::renderer::kCanvasRenderOnce,
-               0,
-               0) != 1
-        || !inkpod::renderer::GetCanvasDocumentBounds(
-            diagnostic_group->canvas, diagnostic_bounds)) {
-        return 535;
-    }
-    const double diagnostic_zoom = (diagnostic_bounds.right - diagnostic_bounds.left)
-        / static_cast<double>(diagnostics_before.width);
-    const auto device_coordinate = [diagnostic_zoom](double origin, double document) {
-        return static_cast<UINT>(std::max(
-            0L, std::lround(origin + document * diagnostic_zoom)));
-    };
-    const UINT antialias_x = device_coordinate(diagnostic_bounds.left, 23.526F);
-    const UINT antialias_y = device_coordinate(diagnostic_bounds.top, 29.423F);
-    const auto read_antialias_samples = [diagnostic_group, &state, antialias_x, antialias_y](
-                                           std::array<inkpod::renderer::CanvasPixelRgba8, 3U>&
-                                               samples) {
-        for (std::size_t index = 0U; index < samples.size(); ++index) {
-            const int offset = static_cast<int>(index) - 1;
-            if (FAILED(state.renderer->ReadPixelForSmokeTest(
-                    diagnostic_group->canvas_id,
-                    diagnostic_group->generation,
-                    antialias_x,
-                    static_cast<UINT>(static_cast<int>(antialias_y) + offset),
-                    samples[index]))) {
-                return false;
-            }
-        }
-        return true;
-    };
-    std::array<inkpod::renderer::CanvasPixelRgba8, 3U> antialias_on{};
-    if (!read_antialias_samples(antialias_on)) {
-        return 536;
-    }
-    SendMessageW(
-        state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_VECTOR_ANTIALIAS, 0);
-    std::array<inkpod::renderer::CanvasPixelRgba8, 3U> antialias_off{};
-    if (!state.renderer->WaitQueueIdleForSmokeTest()
-        || SendMessageW(
-               diagnostic_group->canvas,
-               inkpod::renderer::kCanvasRenderOnce,
-               0,
-               0) != 1
-        || !read_antialias_samples(antialias_off)) {
-        return 536;
-    }
-    const bool antialias_pixels_identical = std::equal(
-        antialias_on.begin(),
-        antialias_on.end(),
-        antialias_off.begin(),
-        [](const auto& left, const auto& right) {
-            return left.red == right.red && left.green == right.green
-                && left.blue == right.blue && left.alpha == right.alpha;
-        });
-    if (antialias_pixels_identical) {
-        return 536;
-    }
-    SendMessageW(
-        state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_VECTOR_CENTERLINE, 0);
-    SendMessageW(
-        state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_VECTOR_CENTERLINE_ONLY, 0);
-    SendMessageW(
-        state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_VECTOR_ENDPOINTS, 0);
-    UpdateMenuState(state);
-    const auto checked = [&state](UINT command) {
-        const UINT menu_state = GetMenuState(
-            GetMenu(state.Workspace().windows.window), command, MF_BYCOMMAND);
-        return menu_state != static_cast<UINT>(-1)
-            && (menu_state & MF_CHECKED) != 0U;
-    };
-    if (state.ActiveView().presentation.vector_antialias
-        || state.ActiveView().presentation.vector_centerline_mode
-            != INKPOD_VECTOR_CENTERLINE_ONLY
-        || !state.ActiveView().presentation.vector_endpoints_visible
-        || checked(IDM_VIEW_VECTOR_ANTIALIAS)
-        || !checked(IDM_VIEW_VECTOR_CENTERLINE)
-        || !checked(IDM_VIEW_VECTOR_CENTERLINE_ONLY)
-        || !checked(IDM_VIEW_VECTOR_ENDPOINTS)) {
-        return 531;
-    }
-
-    InkpodDocumentInfo diagnostics_after = EmptyDocumentInfo();
-    InkpodHistoryInfo diagnostics_history_after{};
-    diagnostics_history_after.struct_size = sizeof(diagnostics_history_after);
-    bool diagnostics_snapshot_valid{};
-    const std::uint64_t diagnostic_view_id =
-        state.ActiveView().presentation.active_view_id;
-    const InkpodStatus diagnostics_status = state.engine->Invoke(
-        [diagnostic_view_id,
-         diagnostic_path_id,
-         &diagnostics_history_after,
-         &diagnostics_snapshot_valid](InkpodCore* core) {
-            InkpodStatus status = inkpod_core_history_info(
-                core, &diagnostics_history_after);
-            const InkpodSnapshotOptions options{
-                sizeof(InkpodSnapshotOptions), 0U, INKPOD_FEATURE_NONE};
-            InkpodSnapshot* snapshot{};
-            if (status == INKPOD_STATUS_OK) {
-                status = diagnostic_view_id == 0U
-                    ? inkpod_core_build_snapshot(core, &options, &snapshot)
-                    : inkpod_core_build_snapshot_for_view(
-                          core, diagnostic_view_id, &options, &snapshot);
-            }
-            InkpodSnapshotVectorDiagnostics diagnostics{};
-            diagnostics.struct_size = sizeof(diagnostics);
-            if (status == INKPOD_STATUS_OK) {
-                status = inkpod_snapshot_get_vector_diagnostics(
-                    snapshot, &diagnostics);
-            }
-            if (status == INKPOD_STATUS_OK) {
-                diagnostics_snapshot_valid = diagnostics.flags
-                        == (INKPOD_VECTOR_DIAGNOSTIC_CENTERLINE_VISIBLE
-                            | INKPOD_VECTOR_DIAGNOSTIC_CENTERLINE_ONLY
-                            | INKPOD_VECTOR_DIAGNOSTIC_ENDPOINTS_VISIBLE)
-                    && diagnostics.endpoint_count == 2U
-                    && diagnostics.endpoints != nullptr
-                    && diagnostics.endpoints[0].path_id == diagnostic_path_id
-                    && diagnostics.endpoints[0].endpoint
-                        == INKPOD_VECTOR_ENDPOINT_START
-                    && diagnostics.endpoints[1].path_id == diagnostic_path_id
-                    && diagnostics.endpoints[1].endpoint
-                        == INKPOD_VECTOR_ENDPOINT_END;
-            }
-            const InkpodStatus release_status = inkpod_snapshot_release(&snapshot);
-            return status == INKPOD_STATUS_OK ? release_status : status;
-        },
-        false,
-        false);
-    if (diagnostics_status != INKPOD_STATUS_OK || !diagnostics_snapshot_valid
-        || !QueryDocument(state, diagnostics_after)
-        || diagnostics_after.document_revision != diagnostics_before.document_revision
-        || diagnostics_after.flags != diagnostics_before.flags
-        || diagnostics_after.main_plane_checksum != diagnostics_before.main_plane_checksum
-        || diagnostics_after.color_plane_checksum != diagnostics_before.color_plane_checksum
-        || diagnostics_after.view_revision <= diagnostics_before.view_revision
-        || diagnostics_history_after.cursor != diagnostics_history_before.cursor
-        || diagnostics_history_after.item_count != diagnostics_history_before.item_count) {
-        return 532;
-    }
-
-    if (!state.renderer->WaitQueueIdleForSmokeTest()
-        || SendMessageW(
-               diagnostic_group->canvas,
-               inkpod::renderer::kCanvasRenderOnce,
-               0,
-               0) != 1
-        || !inkpod::renderer::GetCanvasDocumentBounds(
-            diagnostic_group->canvas, diagnostic_bounds)) {
-        return 535;
-    }
-    const auto diagnostic_color_present = [diagnostic_group, &state](
-                                              UINT center_x,
-                                              UINT center_y,
-                                              bool endpoint) {
-        constexpr std::array<int, 5U> offsets{0, -1, 1, -2, 2};
-        for (const int y : offsets) {
-            for (const int x : offsets) {
-                if ((x < 0 && center_x < static_cast<UINT>(-x))
-                    || (y < 0 && center_y < static_cast<UINT>(-y))) {
-                    continue;
-                }
-                inkpod::renderer::CanvasPixelRgba8 pixel{};
-                if (FAILED(state.renderer->ReadPixelForSmokeTest(
-                        diagnostic_group->canvas_id,
-                        diagnostic_group->generation,
-                        static_cast<UINT>(static_cast<int>(center_x) + x),
-                        static_cast<UINT>(static_cast<int>(center_y) + y),
-                        pixel))) {
-                    return false;
-                }
-                if (pixel.red >= 180U && pixel.green <= 120U
-                    && (endpoint ? pixel.blue <= 100U : pixel.blue >= 80U)) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    };
-    if (!diagnostic_color_present(
-            device_coordinate(diagnostic_bounds.left, 32.0),
-            device_coordinate(diagnostic_bounds.top, 8.0),
-            false)) {
-        return 537;
-    }
-    if (!diagnostic_color_present(
-            device_coordinate(diagnostic_bounds.left, 12.0),
-            device_coordinate(diagnostic_bounds.top, 24.0),
-            true)) {
-        return 538;
-    }
-    if (SendMessageW(
-               diagnostic_group->canvas,
-               inkpod::renderer::kCanvasSimulateDeviceLoss,
-               0,
-               0) != 1
-        || SendMessageW(
-               diagnostic_group->canvas,
-               inkpod::renderer::kCanvasRenderOnce,
-               0,
-               0) != 1) {
-        return 539;
-    }
-    SendMessageW(
-        state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_VECTOR_CENTERLINE_ONLY, 0);
-    SendMessageW(
-        state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_VECTOR_CENTERLINE, 0);
-    SendMessageW(
-        state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_VECTOR_ENDPOINTS, 0);
-    SendMessageW(
-        state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_VECTOR_ANTIALIAS, 0);
-
-    state.Workspace().panes.active_tree_layer_id = vector_layer_id;
-    state.Workspace().panes.active_tree_plane_id = vector_trace_plane_id;
-    if (!RefreshTreePane(state)) {
-        return 506;
-    }
-    UpdateMenuState(state);
-    for (const UINT command : {
-             IDM_VECTOR_LINE, IDM_VECTOR_CURVE, IDM_VECTOR_RECTANGLE,
-             IDM_VECTOR_ELLIPSE, IDM_VECTOR_POLYGON, IDM_VECTOR_POLYLINE,
-             IDM_VECTOR_ERASER}) {
-        const UINT command_state = GetMenuState(GetMenu(state.Workspace().windows.window), command, MF_BYCOMMAND);
-        if (command_state == static_cast<UINT>(-1)
-            || (command_state & (MF_DISABLED | MF_GRAYED)) != 0U) {
-            return 508;
-        }
-    }
-    inkpod::renderer::CanvasDocumentBounds canvas_bounds{};
-    InkpodDocumentInfo document{};
-    if (!QueryDocument(state, document)
-        || !inkpod::renderer::GetCanvasDocumentBounds(
-               state.Workspace().windows.canvas, canvas_bounds)) {
-        return 506;
-    }
-    const double canvas_zoom = (canvas_bounds.right - canvas_bounds.left)
-        / static_cast<double>(document.width);
-    const auto sample = [&](float x, float y) {
-        return InkpodStrokeSample{
-            sizeof(InkpodStrokeSample),
-            0U,
-            static_cast<float>(canvas_bounds.left + static_cast<double>(x) * canvas_zoom),
-            static_cast<float>(canvas_bounds.top + static_cast<double>(y) * canvas_zoom),
-            1.0F,
-            0U};
-    };
-    const auto gesture = [&](UINT command, const std::array<InkpodStrokeSample, 4U>& samples) {
-        if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, command, 0) != 1) {
-            return false;
-        }
-        const inkpod::renderer::CanvasStrokeEvent begin{
-            inkpod::renderer::CanvasStrokeEventKind::Begin, samples.data(), 1U};
-        const inkpod::renderer::CanvasStrokeEvent append{
-            inkpod::renderer::CanvasStrokeEventKind::Append, samples.data() + 1U, 2U};
-        const inkpod::renderer::CanvasStrokeEvent end{
-            inkpod::renderer::CanvasStrokeEventKind::End, samples.data() + 3U, 1U};
-        return inkpod::renderer::SubmitCanvasStrokeEvent(
-                   state.Workspace().windows.canvas, begin)
-            && inkpod::renderer::SubmitCanvasStrokeEvent(
-                   state.Workspace().windows.canvas, append)
-            && inkpod::renderer::SubmitCanvasStrokeEvent(
-                   state.Workspace().windows.canvas, end);
-    };
-    const auto curve_gesture = [&](const std::array<InkpodStrokeSample, 4U>& samples) {
-        if (SendMessageW(
-                state.Workspace().windows.window, WM_COMMAND, IDM_VECTOR_CURVE, 0) != 1) {
-            return false;
-        }
-        const inkpod::renderer::CanvasStrokeEvent begin{
-            inkpod::renderer::CanvasStrokeEventKind::Begin, samples.data(), 1U};
-        const inkpod::renderer::CanvasStrokeEvent end{
-            inkpod::renderer::CanvasStrokeEventKind::End, samples.data() + 3U, 1U};
-        const inkpod::renderer::CanvasStrokeEvent control_begin{
-            inkpod::renderer::CanvasStrokeEventKind::Begin, samples.data() + 1U, 1U};
-        const inkpod::renderer::CanvasStrokeEvent control_end{
-            inkpod::renderer::CanvasStrokeEventKind::End, samples.data() + 1U, 1U};
-        return inkpod::renderer::SubmitCanvasStrokeEvent(
-                   state.Workspace().windows.canvas, begin)
-            && inkpod::renderer::SubmitCanvasStrokeEvent(
-                   state.Workspace().windows.canvas, end)
-            && inkpod::renderer::SubmitCanvasStrokeEvent(
-                   state.Workspace().windows.canvas, control_begin)
-            && inkpod::renderer::SubmitCanvasStrokeEvent(
-                   state.Workspace().windows.canvas, control_end);
-    };
-    const auto polyline_gesture = [&](const std::array<InkpodStrokeSample, 4U>& samples) {
-        if (SendMessageW(
-                state.Workspace().windows.window, WM_COMMAND, IDM_VECTOR_POLYLINE, 0) != 1) {
-            return false;
-        }
-        const auto click = [&](const InkpodStrokeSample& sample) {
-            const inkpod::renderer::CanvasStrokeEvent begin{
-                inkpod::renderer::CanvasStrokeEventKind::Begin, &sample, 1U};
-            const inkpod::renderer::CanvasStrokeEvent end{
-                inkpod::renderer::CanvasStrokeEventKind::End, &sample, 1U};
-            return inkpod::renderer::SubmitCanvasStrokeEvent(
-                       state.Workspace().windows.canvas, begin)
-                && inkpod::renderer::SubmitCanvasStrokeEvent(
-                       state.Workspace().windows.canvas, end);
-        };
-        for (const auto& sample : samples) {
-            if (!click(sample)) {
-                return false;
-            }
-        }
-        return click(samples.back());
-    };
-    const InkpodStatus snap_setup = state.engine->Invoke(
-        [](InkpodCore* core) {
-            InkpodDispatchResult result{};
-            result.struct_size = sizeof(result);
-            InkpodStatus status = inkpod_core_guide_delete_all(core, &result);
-            const InkpodGridInput grid{
-                sizeof(InkpodGridInput), 0U, 0, 0, 8U, 8U, 2U, 0U};
-            if (status == INKPOD_STATUS_OK) {
-                status = inkpod_core_grid_set(core, &grid, &result);
-            }
-            std::uint64_t guide_id{};
-            if (status == INKPOD_STATUS_OK) {
-                status = inkpod_core_guide_add(
-                    core, INKPOD_GUIDE_VERTICAL, 5, &result, &guide_id);
-            }
-            return status;
-        },
-        true,
-        true);
-    const auto set_snap_enabled = [&state](UINT command, bool& current, bool enabled) {
-        if (current != enabled) {
-            SendMessageW(state.Workspace().windows.window, WM_COMMAND, command, 0);
-        }
-        UpdateMenuState(state);
-        const UINT menu_state = GetMenuState(
-            GetMenu(state.Workspace().windows.window), command, MF_BYCOMMAND);
-        return current == enabled && menu_state != static_cast<UINT>(-1)
-            && ((menu_state & MF_CHECKED) != 0U) == enabled;
-    };
-    if (snap_setup != INKPOD_STATUS_OK
-        || !set_snap_enabled(
-            IDM_VIEW_SNAP_GUIDES,
-            state.ActiveView().presentation.snap_guides,
-            true)
-        || !set_snap_enabled(
-            IDM_VIEW_SNAP_GRID,
-            state.ActiveView().presentation.snap_grid,
-            true)) {
-        return 540;
-    }
-    struct GeometryProbe final {
-        InkpodSnapshotVectorSegment last{};
-        InkpodCanonicalDigest digest{sizeof(InkpodCanonicalDigest)};
-        std::uint64_t segment_count{};
-        bool valid{};
-    };
-    const auto probe_geometry = [&state](GeometryProbe& probe) {
-        return state.engine->Invoke(
-            [&probe](InkpodCore* core) {
-                const InkpodSnapshotOptions options{
-                    sizeof(InkpodSnapshotOptions), 0U, INKPOD_FEATURE_NONE};
-                InkpodSnapshot* snapshot{};
-                InkpodStatus status = inkpod_core_build_snapshot(core, &options, &snapshot);
-                InkpodSnapshotVectorView vectors{};
-                vectors.struct_size = sizeof(vectors);
-                if (status == INKPOD_STATUS_OK) {
-                    status = inkpod_snapshot_get_vectors(snapshot, &vectors);
-                }
-                if (status == INKPOD_STATUS_OK) {
-                    status = inkpod_snapshot_get_canonical_digest(snapshot, &probe.digest);
-                }
-                if (status == INKPOD_STATUS_OK) {
-                    probe.segment_count = vectors.segment_count;
-                    probe.valid = vectors.segment_count != 0U && vectors.segments != nullptr;
-                    if (probe.valid) {
-                        probe.last = vectors.segments[vectors.segment_count - 1U];
-                    }
-                }
-                const InkpodStatus released = inkpod_snapshot_release(&snapshot);
-                return status == INKPOD_STATUS_OK ? released : status;
-            },
-            false,
-            false);
-    };
-    const auto same_digest = [](const GeometryProbe& left, const GeometryProbe& right) {
-        return left.digest.algorithm == right.digest.algorithm
-            && std::memcmp(
-                left.digest.bytes, right.digest.bytes, sizeof(left.digest.bytes)) == 0;
-    };
-    const std::array<InkpodStrokeSample, 4U> snap_line_samples{
-        sample(5.2F, 7.8F), sample(8.0F, 10.0F),
-        sample(14.0F, 14.0F), sample(18.1F, 17.9F)};
-    GeometryProbe snap_before{};
-    GeometryProbe snap_after{};
-    if (probe_geometry(snap_before) != INKPOD_STATUS_OK
-        || !gesture(IDM_VECTOR_LINE, snap_line_samples)
-        || probe_geometry(snap_after) != INKPOD_STATUS_OK
-        || !snap_after.valid
-        || snap_after.segment_count != snap_before.segment_count + 1U
-        || snap_after.last.p0.x != 5.0F || snap_after.last.p0.y != 8.0F
-        || snap_after.last.p3.x != 20.0F || snap_after.last.p3.y != 16.0F
-        || same_digest(snap_before, snap_after)) {
-        return 541;
-    }
-    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
-    GeometryProbe snap_undone{};
-    if (probe_geometry(snap_undone) != INKPOD_STATUS_OK
-        || snap_undone.segment_count != snap_before.segment_count
-        || !same_digest(snap_undone, snap_before)) {
-        return 542;
-    }
-    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_REDO, 0);
-    GeometryProbe snap_redone{};
-    if (probe_geometry(snap_redone) != INKPOD_STATUS_OK
-        || snap_redone.segment_count != snap_after.segment_count
-        || !same_digest(snap_redone, snap_after)
-        || snap_redone.last.p0.x != 5.0F || snap_redone.last.p0.y != 8.0F
-        || snap_redone.last.p3.x != 20.0F || snap_redone.last.p3.y != 16.0F) {
-        return 543;
-    }
-    if (!set_snap_enabled(
-            IDM_VIEW_SNAP_GUIDES,
-            state.ActiveView().presentation.snap_guides,
-            false)
-        || !set_snap_enabled(
-            IDM_VIEW_SNAP_GRID,
-            state.ActiveView().presentation.snap_grid,
-            false)
-        || !gesture(IDM_VECTOR_LINE, snap_line_samples)) {
-        return 544;
-    }
-    GeometryProbe raw_probe{};
-    if (probe_geometry(raw_probe) != INKPOD_STATUS_OK || !raw_probe.valid
-        || std::abs(raw_probe.last.p0.x - 5.2F) > 0.001F
-        || std::abs(raw_probe.last.p0.y - 7.8F) > 0.001F
-        || std::abs(raw_probe.last.p3.x - 18.1F) > 0.001F
-        || std::abs(raw_probe.last.p3.y - 17.9F) > 0.001F) {
-        return 545;
-    }
-    if (!set_snap_enabled(
-            IDM_VIEW_SNAP_GUIDES,
-            state.ActiveView().presentation.snap_guides,
-            true)
-        || !set_snap_enabled(
-            IDM_VIEW_SNAP_GRID,
-            state.ActiveView().presentation.snap_grid,
-            true)) {
-        return 546;
-    }
-    std::array<BYTE, 256U> snap_keyboard{};
-    GetKeyboardState(snap_keyboard.data());
-    const BYTE previous_control = snap_keyboard[VK_CONTROL];
-    snap_keyboard[VK_CONTROL] = static_cast<BYTE>(0x80U);
-    SetKeyboardState(snap_keyboard.data());
-    const bool bypass_gesture = gesture(IDM_VECTOR_LINE, snap_line_samples);
-    snap_keyboard[VK_CONTROL] = previous_control;
-    SetKeyboardState(snap_keyboard.data());
-    GeometryProbe bypass_probe{};
-    if (!bypass_gesture || probe_geometry(bypass_probe) != INKPOD_STATUS_OK
-        || !bypass_probe.valid
-        || std::abs(bypass_probe.last.p0.x - 5.2F) > 0.001F
-        || std::abs(bypass_probe.last.p0.y - 7.8F) > 0.001F
-        || std::abs(bypass_probe.last.p3.x - 18.1F) > 0.001F
-        || std::abs(bypass_probe.last.p3.y - 17.9F) > 0.001F) {
-        return 547;
-    }
-    const std::array<InkpodStrokeSample, 4U> line_samples{
-        sample(4.0F, 8.0F), sample(5.0F, 8.0F),
-        sample(6.0F, 8.0F), sample(7.0F, 8.0F)};
-    const std::array<InkpodStrokeSample, 4U> curve_samples{
-        sample(10.0F, 12.0F), sample(16.0F, 4.0F),
-        sample(24.0F, 20.0F), sample(30.0F, 12.0F)};
-    const std::array<InkpodStrokeSample, 4U> shape_samples{
-        sample(34.0F, 10.0F), sample(38.0F, 16.0F),
-        sample(44.0F, 24.0F), sample(50.0F, 30.0F)};
-    const std::array<InkpodStrokeSample, 4U> polyline_samples{
-        sample(10.0F, 40.0F), sample(20.0F, 45.0F),
-        sample(28.0F, 38.0F), sample(36.0F, 48.0F)};
-    if (!gesture(IDM_VECTOR_LINE, line_samples)
-        || !curve_gesture(curve_samples)
-        || !gesture(IDM_VECTOR_RECTANGLE, shape_samples)
-        || !gesture(IDM_VECTOR_ELLIPSE, shape_samples)
-        || !gesture(IDM_VECTOR_POLYGON, shape_samples)
-        || !polyline_gesture(polyline_samples)) {
-        return 507;
-    }
-    const std::array<UINT, 8U> selection_commands{
-        IDM_VECTOR_SELECT_CUT,
-        IDM_VECTOR_SELECT_TOUCH,
-        IDM_VECTOR_SELECT_CONTAINED,
-        IDM_VECTOR_SELECT_LINE,
-        IDM_VECTOR_SELECT_WHOLE_LINE,
-        IDM_VECTOR_SELECT_INTERSECTION,
-        IDM_VECTOR_SELECT_FILL_BOUNDARY,
-        IDM_VECTOR_SELECT_FILL};
-    for (std::size_t index = 0U; index < selection_commands.size(); ++index) {
-        const UINT command = selection_commands[index];
-        if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, command, 0) != 1) {
-            return 520 + static_cast<int>(index);
-        }
-    }
-    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VECTOR_SELECT_TOUCH, 0) != 1
-        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VECTOR_WIDTH, 0) != 1
-        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VECTOR_CONNECT, 0) != 1
-        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VECTOR_ERASE_WHOLE, 0) != 1) {
-        return 509;
-    }
-    const inkpod::renderer::CanvasStrokeEvent erase_begin{
-        inkpod::renderer::CanvasStrokeEventKind::Begin, line_samples.data() + 2U, 1U};
-    const inkpod::renderer::CanvasStrokeEvent erase_end{
-        inkpod::renderer::CanvasStrokeEventKind::End, line_samples.data() + 2U, 1U};
-    if (!inkpod::renderer::SubmitCanvasStrokeEvent(
-            state.Workspace().windows.canvas, erase_begin)
-        || !inkpod::renderer::SubmitCanvasStrokeEvent(
-               state.Workspace().windows.canvas, erase_end)
-        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VECTOR_RASTERIZE, 0) != 1
-        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VECTOR_VECTORIZE, 0) != 1) {
-        return 510;
-    }
-    PumpPendingWindowMessages();
-    return 0;
-}
 
 int RunImageEffectsSmoke(ApplicationHost& state) noexcept {
     if (state.engine == nullptr) {
@@ -8896,35 +7767,42 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
     HMENU menu = GetMenu(state.Workspace().windows.window);
     if (menu == nullptr
         || GetMenuState(menu, IDM_WINDOW_BATCH, MF_BYCOMMAND) == static_cast<UINT>(-1)
+        || DirectCommandParent(menu, IDM_WINDOW_BATCH) == nullptr
+        || DirectCommandParent(menu, IDM_WINDOW_BATCH)
+            != DirectCommandParent(menu, IDM_WINDOW_TOOL_PALETTE)
+        || GetMenuState(menu, IDM_COLOR_PIN, MF_BYCOMMAND)
+            != static_cast<UINT>(-1)
+        || GetMenuState(menu, IDM_BATCH_PIN, MF_BYCOMMAND)
+            != static_cast<UINT>(-1)
         || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_WINDOW_BATCH, 0) != 1
         || !state.Workspace().windows.workspace.dock.IsPaneVisible(
             DockPaneType::Batch)) {
         cleanup();
         return 701;
     }
+    const HWND batch_pin = GetDlgItem(
+        state.Workspace().batch_palette, IDC_BATCH_PIN);
     if (GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_TARGET) == nullptr
         || !WindowUsesNamedIconButton(
-            GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_PIN))
+            batch_pin)
         || GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_JOB) == nullptr
         || !WindowHasAccessibleName(
             GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_TARGET))
         || !WindowHasAccessibleName(
             GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_JOB))
-        || !PaneButtonsFit(state.Workspace().batch_palette)
-        || SendMessageW(
-               state.Workspace().windows.window,
-               WM_COMMAND,
-               IDM_BATCH_PIN,
-               0) != 1
-        || state.routing.pane_targets.Find(state.routing.batch_pane)->policy
-            != inkpod::app::PaneTargetPolicy::PinnedDocument
-        || SendMessageW(
-               state.Workspace().windows.window,
-               WM_COMMAND,
-               IDM_BATCH_PIN,
-               0) != 1
-        || state.routing.pane_targets.Find(state.routing.batch_pane)->policy
-            != inkpod::app::PaneTargetPolicy::FollowActiveView) {
+        || !PaneButtonsFit(state.Workspace().batch_palette)) {
+        cleanup();
+        return 925;
+    }
+    SendMessageW(batch_pin, BM_CLICK, 0, 0);
+    if (state.routing.pane_targets.Find(state.routing.batch_pane)->policy
+        != inkpod::app::PaneTargetPolicy::PinnedDocument) {
+        cleanup();
+        return 925;
+    }
+    SendMessageW(batch_pin, BM_CLICK, 0, 0);
+    if (state.routing.pane_targets.Find(state.routing.batch_pane)->policy
+        != inkpod::app::PaneTargetPolicy::FollowActiveView) {
         cleanup();
         return 925;
     }
@@ -10368,20 +9246,19 @@ int RunSplitEditorGroupSmoke(ApplicationHost& state) noexcept {
         || editors.Active()->focus_history != first_tabs) {
         return 783;
     }
-    if (SendMessageW(
-            state.Workspace().windows.window,
-            WM_COMMAND,
-            IDM_COLOR_PIN,
-            0) != 1
-        || state.routing.pane_targets.Find(state.routing.color_pane)->policy
-            != inkpod::app::PaneTargetPolicy::PinnedDocument
-        || SendMessageW(
-               state.Workspace().windows.window,
-               WM_COMMAND,
-               IDM_COLOR_PIN,
-               0) != 1
-        || state.routing.pane_targets.Find(state.routing.color_pane)->policy
-            != inkpod::app::PaneTargetPolicy::FollowActiveView) {
+    const HWND color_pin = GetDlgItem(
+        state.Workspace().windows.color_pane, IDC_COLOR_PIN);
+    if (color_pin == nullptr) {
+        return 924;
+    }
+    SendMessageW(color_pin, BM_CLICK, 0, 0);
+    if (state.routing.pane_targets.Find(state.routing.color_pane)->policy
+        != inkpod::app::PaneTargetPolicy::PinnedDocument) {
+        return 924;
+    }
+    SendMessageW(color_pin, BM_CLICK, 0, 0);
+    if (state.routing.pane_targets.Find(state.routing.color_pane)->policy
+        != inkpod::app::PaneTargetPolicy::FollowActiveView) {
         return 924;
     }
     SendMessageW(second_canvas, WM_SETFOCUS, reinterpret_cast<WPARAM>(first_canvas), 0);
@@ -12434,26 +11311,24 @@ int RunEditorStateOwnershipSmoke(ApplicationHost& state) noexcept {
         return 1009;
     }
 
-    InkpodEditorStateUpdate external_vector_update{};
-    external_vector_update.struct_size = sizeof(external_vector_update);
-    external_vector_update.kind = INKPOD_EDITOR_UPDATE_VECTOR_OPTIONS;
-    external_vector_update.expected_editor_revision =
+    InkpodEditorStateUpdate external_tool_update{};
+    external_tool_update.struct_size = sizeof(external_tool_update);
+    external_tool_update.kind = INKPOD_EDITOR_UPDATE_ACTIVE_TOOL;
+    external_tool_update.expected_editor_revision =
         second_editor.editor_revision;
-    external_vector_update.vector = second_editor.vector;
-    external_vector_update.vector.erase_mode =
-        second_editor.vector.erase_mode == INKPOD_VECTOR_ERASE_PARTIAL
-        ? INKPOD_VECTOR_ERASE_WHOLE_PATH
-        : INKPOD_VECTOR_ERASE_PARTIAL;
+    external_tool_update.tool = second_editor.active_tool == INKPOD_TOOL_PENCIL
+        ? INKPOD_TOOL_BRUSH
+        : INKPOD_TOOL_PENCIL;
     InkpodEditorStateInfo externally_updated_editor{};
     externally_updated_editor.struct_size = sizeof(externally_updated_editor);
     if (state.engine->Invoke(
             second_session,
             second_generation,
-            [&external_vector_update, &externally_updated_editor](
+            [&external_tool_update, &externally_updated_editor](
                 InkpodCore* core) {
                 return inkpod_core_update_editor_state(
                     core,
-                    &external_vector_update,
+                    &external_tool_update,
                     &externally_updated_editor);
             },
             false,
@@ -12462,28 +11337,27 @@ int RunEditorStateOwnershipSmoke(ApplicationHost& state) noexcept {
             != second_editor.editor_revision + 1U) {
         return 1010;
     }
-    state.Workspace().tools.vector_selection_mode = INKPOD_VECTOR_SELECT_FILL;
-    const std::optional<LRESULT> failed_vector_command = IssueCommand(
+    const std::optional<LRESULT> failed_tool_command = IssueCommand(
         &state,
         state.Workspace().windows.window,
-        IDM_VECTOR_SELECT_FILL,
+        IDM_TOOL_ERASER,
         0,
         std::nullopt);
-    if (!failed_vector_command.has_value()
-        || failed_vector_command.value() != 0) {
+    if (!failed_tool_command.has_value()
+        || failed_tool_command.value() != 0) {
         return 1011;
     }
-    InkpodEditorStateInfo editor_after_failed_vector_update{};
-    editor_after_failed_vector_update.struct_size =
-        sizeof(editor_after_failed_vector_update);
+    InkpodEditorStateInfo editor_after_failed_tool_update{};
+    editor_after_failed_tool_update.struct_size =
+        sizeof(editor_after_failed_tool_update);
     if (!state.engine->GetEditorState(
             second_session,
             second_generation,
-            editor_after_failed_vector_update)
-        || editor_after_failed_vector_update.editor_revision
+            editor_after_failed_tool_update)
+        || editor_after_failed_tool_update.editor_revision
             != externally_updated_editor.editor_revision
         || std::memcmp(
-               editor_after_failed_vector_update.editor_digest,
+               editor_after_failed_tool_update.editor_digest,
                externally_updated_editor.editor_digest,
                sizeof(externally_updated_editor.editor_digest))
             != 0
@@ -12491,10 +11365,8 @@ int RunEditorStateOwnershipSmoke(ApplicationHost& state) noexcept {
         || state.Workspace().tools.editor.generation != second_generation
         || state.Workspace().tools.editor.editor_revision
             != externally_updated_editor.editor_revision
-        || state.Workspace().tools.vector_erase_mode
-            != externally_updated_editor.vector.erase_mode
-        || state.Workspace().tools.vector_selection_mode
-            != externally_updated_editor.vector.selection_mode) {
+        || state.Workspace().tools.active_tool
+            != externally_updated_editor.active_tool) {
         return 1012;
     }
     return 0;
@@ -13787,14 +12659,14 @@ int RunApplicationSmoke(app::ApplicationHost& state) noexcept {
     }
     if (exit_code == 0) {
         const InkpodShortcutSequence* original = FindShortcutSequence(
-            state.shortcuts.bindings, IDM_VIEW_VECTOR_ENDPOINTS);
+            state.shortcuts.bindings, IDM_VIEW_GRID);
         if (original == nullptr) {
             exit_code = 732;
         } else {
             const InkpodShortcutSequence saved = *original;
             InkpodShortcutSequence replacement{};
             replacement.struct_size = sizeof(replacement);
-            replacement.command_id = IDM_VIEW_VECTOR_ENDPOINTS;
+            replacement.command_id = IDM_VIEW_GRID;
             replacement.stroke_count = 1U;
             replacement.strokes[0] = {
                 static_cast<std::uint32_t>('9'),
@@ -13808,7 +12680,7 @@ int RunApplicationSmoke(app::ApplicationHost& state) noexcept {
                     static_cast<std::uint32_t>('9'),
                     INKPOD_SHORTCUT_MODIFIER_CONTROL | INKPOD_SHORTCUT_MODIFIER_ALT,
                     resolved)
-                && resolved == IDM_VIEW_VECTOR_ENDPOINTS;
+                && resolved == IDM_VIEW_GRID;
             const InkpodStatus restore = rebind == INKPOD_STATUS_OK
                 ? RebindShortcut(*state.engine, state.shortcuts, saved, false)
                 : rebind;
@@ -13845,9 +12717,6 @@ int RunApplicationSmoke(app::ApplicationHost& state) noexcept {
         exit_code = runtime::RunDocumentEditingSmoke(state);
     }
     if (exit_code == 0) {
-        exit_code = runtime::RunAnnotationWorkflowSmoke(state);
-    }
-    if (exit_code == 0) {
         exit_code = runtime::RunShootingFrameWorkflowSmoke(state);
     }
     if (exit_code == 0) {
@@ -13855,9 +12724,6 @@ int RunApplicationSmoke(app::ApplicationHost& state) noexcept {
     }
     if (exit_code == 0) {
         exit_code = runtime::RunProductionWorkflowSmoke(state);
-    }
-    if (exit_code == 0) {
-        exit_code = runtime::RunVectorWorkflowSmoke(state);
     }
     if (exit_code == 0) {
         exit_code = runtime::RunImageEffectsSmoke(state);

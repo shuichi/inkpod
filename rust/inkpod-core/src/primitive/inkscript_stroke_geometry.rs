@@ -7,9 +7,8 @@ use super::{CanonicalInvocation, CanonicalStrokeArguments};
 use crate::geometry::{CanonicalGeometry, CanonicalGeometryPoint, CanonicalGeometrySegment};
 use crate::{GeometryCrossSection, GeometryPrimitive, PixelValue};
 use inkpod_format::{
-    InkScriptCommandResultSchema, InkScriptCommandSchema, InkScriptEnumSchema,
-    InkScriptFieldSchema, InkScriptRecordSchema, InkScriptResultAvailability, InkScriptTypedStep,
-    InkScriptTypedValue, InkScriptTypedValueKind,
+    InkScriptCommandSchema, InkScriptEnumSchema, InkScriptFieldSchema, InkScriptRecordSchema,
+    InkScriptTypedStep, InkScriptTypedValue, InkScriptTypedValueKind,
 };
 use std::collections::BTreeMap;
 
@@ -93,24 +92,9 @@ const IMPORT_RASTER_ASSET_FIELDS: &[InkScriptFieldSchema] = &[
     InkScriptFieldSchema::required("plane_id", "plane_ref", 0),
     InkScriptFieldSchema::required("raster", "asset_ref", 1),
 ];
-const GEOMETRY_RESULTS: &[InkScriptCommandResultSchema] = &[
-    InkScriptCommandResultSchema::ordered_list(
-        "paths",
-        "vector_path_ref",
-        InkScriptResultAvailability::AlwaysOnSuccess,
-        0,
-    ),
-    InkScriptCommandResultSchema::ordered_list(
-        "fills",
-        "vector_fill_ref",
-        InkScriptResultAvailability::AlwaysOnSuccess,
-        1,
-    ),
-];
-
 pub(crate) const STROKE_GEOMETRY_COMMANDS: &[InkScriptCommandSchema] = &[
     InkScriptCommandSchema::new("apply_raster_stroke", APPLY_RASTER_STROKE_FIELDS),
-    InkScriptCommandSchema::with_results("apply_geometry", APPLY_GEOMETRY_FIELDS, GEOMETRY_RESULTS),
+    InkScriptCommandSchema::new("apply_geometry", APPLY_GEOMETRY_FIELDS),
     InkScriptCommandSchema::new("import_raster_asset", IMPORT_RASTER_ASSET_FIELDS),
 ];
 
@@ -166,19 +150,12 @@ impl StrokeGeometryImportAction {
         output_count: usize,
     ) -> Result<Vec<InkScriptEntityKind>, StrokeGeometryImportAdapterError> {
         match self {
-            Self::Geometry(_) => match output_count {
-                0 => Ok(Vec::new()),
-                1 => Ok(vec![InkScriptEntityKind::VectorPath]),
-                2 => Ok(vec![
-                    InkScriptEntityKind::VectorPath,
-                    InkScriptEntityKind::VectorFill,
-                ]),
-                _ => Err(StrokeGeometryImportAdapterError::InvalidValue),
-            },
-            Self::RasterStroke(_) | Self::ImportRaster { .. } if output_count == 0 => {
+            Self::Geometry(_) | Self::RasterStroke(_) | Self::ImportRaster { .. }
+                if output_count == 0 =>
+            {
                 Ok(Vec::new())
             }
-            Self::RasterStroke(_) | Self::ImportRaster { .. } => {
+            Self::Geometry(_) | Self::RasterStroke(_) | Self::ImportRaster { .. } => {
                 Err(StrokeGeometryImportAdapterError::InvalidValue)
             }
         }
@@ -470,9 +447,8 @@ fn reserve_exact<T>(
 mod tests {
     use super::*;
     use crate::{
-        ActivePlane, BrushShape, CoordinateSpace, Core, DEFAULT_DPI_MILLI, GeometryOptions,
-        GeometryRequest, LayerKind, PaintTool, PointF32, PrimitiveRequest, StartColorPredicate,
-        Stroke, StrokeSample,
+        ActivePlane, BrushShape, CoordinateSpace, Core, DEFAULT_DPI_MILLI, PaintTool,
+        PrimitiveRequest, StartColorPredicate, Stroke, StrokeSample,
     };
     use inkpod_format::{
         InkScriptSchemaView, InkScriptSource, InkScriptSourceId, build_inkscript_declaration_model,
@@ -511,7 +487,7 @@ mod tests {
 
     fn fragment(command: &str) -> String {
         format!(
-            "inkscript_fragment 2;\nrequires {{ procedure_catalog = 2; replay_epoch = 23; }}\nbindings {{ let paint = select plane {{ source_document_uuid = uuid\"00000000-0000-0000-0000-000000000017\"; persistent_id = 1; }}; }}\nprogram {{ step \"Stroke geometry command\" {{ enabled = true; {command} }} }}\n"
+            "inkscript_fragment 2;\nrequires {{ procedure_catalog = 3; replay_epoch = 24; }}\nbindings {{ let paint = select plane {{ source_document_uuid = uuid\"00000000-0000-0000-0000-000000000017\"; persistent_id = 1; }}; }}\nprogram {{ step \"Stroke geometry command\" {{ enabled = true; {command} }} }}\n"
         )
     }
 
@@ -592,70 +568,6 @@ mod tests {
         assert_eq!(
             direct.document_info().unwrap(),
             scripted.document_info().unwrap()
-        );
-    }
-
-    #[test]
-    fn canonical_geometry_matches_direct_request_and_typed_vector_results() {
-        let mut base = Core::new();
-        base.new_cell(16, 16, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
-            .unwrap();
-        let (_, layer_id) = base
-            .create_layer(LayerKind::VectorColoring, "Vector geometry")
-            .unwrap();
-        let (target, _, _) = base.vector_layer_planes(layer_id).unwrap();
-        let request = GeometryRequest {
-            plane_id: target,
-            primitive: GeometryPrimitive::Line,
-            points: vec![PointF32 { x: 1.0, y: 2.0 }, PointF32 { x: 5.0, y: 2.0 }],
-            outline_color: PixelValue::Rgba16([257, 514, 771, u16::MAX]),
-            fill_color: PixelValue::Rgba16([0, 0, 0, 0]),
-            outline_width: 2.0,
-            options: GeometryOptions {
-                outline: true,
-                fill: false,
-                close_path: false,
-                bezier_segments: false,
-                constrain_45_degrees: false,
-                from_center: false,
-                taper_start: false,
-                taper_end: false,
-                cross_section: GeometryCrossSection::Round,
-                aspect_ratio_q16: 0,
-                polygon_sides: 3,
-                rotation_turns: 0,
-            },
-        };
-        let expected = crate::geometry::canonicalize_geometry_request(&request).unwrap();
-        let action = action(
-            &fragment(
-                "invoke apply_geometry { plane_id = $paint; primitive = line; segments = [{ p0 = point(q16(65536), q16(131072)); p1 = point(q16(152917), q16(131072)); p2 = point(q16(240299), q16(131072)); p3 = point(q16(327680), q16(131072)); width_start = q16(131072); width_end = q16(131072); }]; fill_boundary = []; outline_color = rgba16(257, 514, 771, 65535); fill_color = rgba16(0, 0, 0, 0); outline_width = q16(131072); cross_section = round; outline = true; fill = false; closed = false; };",
-            ),
-            target,
-        );
-        let StrokeGeometryImportAction::Geometry(CanonicalInvocation::ApplyGeometry { geometry }) =
-            action.clone()
-        else {
-            panic!("geometry action expected")
-        };
-        assert_eq!(geometry, expected);
-        let mut direct = base.clone();
-        let direct_result = direct.apply_geometry(&request).unwrap();
-        let mut scripted = base;
-        let StrokeGeometryImportAction::Geometry(invocation) = action.clone() else {
-            panic!("geometry action expected")
-        };
-        let scripted_result = scripted.execute_canonical_invocation(invocation).unwrap();
-        assert_eq!(direct_result.path_id, scripted_result.output_ids[0]);
-        assert_eq!(
-            action
-                .output_entity_kinds(scripted_result.output_ids.len())
-                .unwrap(),
-            [InkScriptEntityKind::VectorPath]
-        );
-        assert_eq!(
-            direct.document_state_digest().unwrap(),
-            scripted.document_state_digest().unwrap()
         );
     }
 

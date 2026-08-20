@@ -110,21 +110,6 @@ impl Core {
                 clear_render_cache = changed;
                 changed
             }
-            ViewCommand::SetVectorAntialias(value) => {
-                let changed = toggle_candidate.vector_diagnostics.antialias != value;
-                toggle_candidate.vector_diagnostics.antialias = value;
-                changed
-            }
-            ViewCommand::SetVectorCenterlineMode(value) => {
-                let changed = toggle_candidate.vector_diagnostics.centerline_mode != value;
-                toggle_candidate.vector_diagnostics.centerline_mode = value;
-                changed
-            }
-            ViewCommand::SetVectorEndpointsVisible(value) => {
-                let changed = toggle_candidate.vector_diagnostics.endpoints_visible != value;
-                toggle_candidate.vector_diagnostics.endpoints_visible = value;
-                changed
-            }
             _ => false,
         };
         if matches!(
@@ -138,9 +123,6 @@ impl Core {
                 | ViewCommand::SetGridSnapEnabled(_)
                 | ViewCommand::SetTransparentView(_)
                 | ViewCommand::SetAlphaView(_)
-                | ViewCommand::SetVectorAntialias(_)
-                | ViewCommand::SetVectorCenterlineMode(_)
-                | ViewCommand::SetVectorEndpointsVisible(_)
         ) {
             if toggle_changed {
                 toggle_candidate.revision = toggle_candidate

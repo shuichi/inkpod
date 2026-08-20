@@ -36,8 +36,6 @@ struct SemanticSnapshotObservation {
     guides: Vec<Guide>,
     grid: GridConfig,
     tiles: Vec<TileObservation>,
-    vector_segments: Vec<RenderVectorSegment>,
-    vector_fills: Vec<RenderVectorFill>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -64,8 +62,6 @@ struct FeatureObservation {
     grid: GridConfig,
     light_table_sets: Vec<LightTableSetInfo>,
     light_table_items: Vec<LightTableItemInfo>,
-    vector_paths: Vec<VectorPathInfo>,
-    vector_fills: Vec<VectorFillInfo>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -87,8 +83,6 @@ struct DocumentSemanticObservation {
     color_plane_checksum: u64,
     topology: Vec<LayerInfo>,
     snapshot_tiles: Vec<SemanticTileObservation>,
-    snapshot_vector_segments: Vec<RenderVectorSegment>,
-    snapshot_vector_fills: Vec<RenderVectorFill>,
     features: FeatureObservation,
 }
 
@@ -126,8 +120,6 @@ impl CoreObservation {
                     tile_revision: tile.tile_revision(),
                 })
                 .collect(),
-            vector_segments: snapshot.vector_segments().to_vec(),
-            vector_fills: snapshot.vector_fills().to_vec(),
         };
         let features = FeatureObservation {
             selection_bounds: core.selection_bounds()?,
@@ -137,8 +129,6 @@ impl CoreObservation {
             grid: core.grid()?,
             light_table_sets: core.light_table_sets()?,
             light_table_items: core.light_table_items()?,
-            vector_paths: core.vector_paths()?,
-            vector_fills: core.vector_fills()?,
         };
         Ok(Self {
             common: CommonObservation {
@@ -172,8 +162,6 @@ impl CoreObservation {
                 .iter()
                 .map(|tile| tile.semantic.clone())
                 .collect(),
-            snapshot_vector_segments: self.common.snapshot.vector_segments.clone(),
-            snapshot_vector_fills: self.common.snapshot.vector_fills.clone(),
             features: self.features.clone(),
         }
     }
@@ -198,7 +186,6 @@ enum MutationKind {
     Document,
     View,
     History,
-    ReadOnly,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -206,7 +193,6 @@ enum ResultValue {
     None,
     Id(u64),
     Count(u64),
-    VectorSelection(VectorSelectionResult),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -282,7 +268,7 @@ struct ActionSpec {
 
 fn action_strategy() -> impl Strategy<Value = Vec<ActionSpec>> {
     proptest::collection::vec(
-        (0_u8..7, any::<u8>(), any::<u8>(), any::<i8>()).prop_map(|(domain, opcode, a, b)| {
+        (0_u8..6, any::<u8>(), any::<u8>(), any::<i8>()).prop_map(|(domain, opcode, a, b)| {
             ActionSpec {
                 domain,
                 opcode,
@@ -329,11 +315,6 @@ enum ConcreteAction {
     Fill(u32, u32, [u8; 4]),
     InvalidFill,
     CancelFill,
-    CreateVectorLayer,
-    AddVectorPath(u64, u8),
-    CorrectVectorWidth(u64),
-    SelectVector,
-    InvalidVector,
     CreateLightSet(String),
     RenameLightSet(u64, String),
     SetActiveLightSet(u64),
@@ -349,14 +330,13 @@ enum ConcreteAction {
 impl ConcreteAction {
     fn expected_class(&self) -> Option<ResultClass> {
         match self {
-            Self::SelectRect(_, _) => None,
+            Self::SelectRect(_, _) | Self::Stroke(_, _, _) | Self::Fill(_, _, _) => None,
             Self::InvalidDeleteLayer
             | Self::InvalidGuide
             | Self::InvalidView
             | Self::InvalidCloseView
             | Self::InvalidSelection
             | Self::InvalidFill
-            | Self::InvalidVector
             | Self::InvalidLightSet
             | Self::InvalidHistoryJump => Some(ResultClass::Invalid),
             Self::CancelFill => Some(ResultClass::Cancel),
@@ -372,7 +352,6 @@ impl ConcreteAction {
             | Self::SetActiveLightSet(_)
             | Self::SetLightOpacity(_)
             | Self::JumpHistory(_) => Some(ResultClass::NoOp),
-            Self::SelectVector => Some(ResultClass::NoOp),
             _ => Some(ResultClass::Success),
         }
     }
@@ -390,7 +369,6 @@ impl ConcreteAction {
             Self::Undo | Self::Redo | Self::JumpHistory(_) | Self::InvalidHistoryJump => {
                 MutationKind::History
             }
-            Self::SelectVector => MutationKind::ReadOnly,
             _ => MutationKind::Document,
         }
     }
@@ -593,23 +571,47 @@ impl ConcreteAction {
                         value: ResultValue::None,
                     };
                 }
-                ExecutionResult::dispatch(core.apply_stroke(&Stroke {
-                    tool: PaintTool::Pencil,
-                    plane: ActivePlane::Color,
-                    color: *color,
-                    diameter: 1.0,
-                    shape: BrushShape::Round,
-                    smoothing: 0,
-                    start_color: StartColorPredicate::Any,
-                    auto_erase: false,
-                    pressure_size: false,
-                    coordinate_space: CoordinateSpace::Document,
-                    samples: vec![StrokeSample {
-                        x: *x as f32,
-                        y: *y as f32,
-                        pressure: 1.0,
-                    }],
-                }))
+                let before = core.document_info().map(|info| info.document_revision);
+                match (
+                    before,
+                    core.apply_stroke(&Stroke {
+                        tool: PaintTool::Pencil,
+                        plane: ActivePlane::Color,
+                        color: *color,
+                        diameter: 1.0,
+                        shape: BrushShape::Round,
+                        smoothing: 0,
+                        start_color: StartColorPredicate::Any,
+                        auto_erase: false,
+                        pressure_size: false,
+                        coordinate_space: CoordinateSpace::Document,
+                        samples: vec![StrokeSample {
+                            x: *x as f32,
+                            y: *y as f32,
+                            pressure: 1.0,
+                        }],
+                    }),
+                ) {
+                    (Ok(before), Ok(_)) => ExecutionResult {
+                        class: if core
+                            .document_info()
+                            .is_ok_and(|info| info.document_revision == before)
+                        {
+                            ResultClass::NoOp
+                        } else {
+                            ResultClass::Success
+                        },
+                        value: ResultValue::None,
+                    },
+                    (_, Err(CoreError::Cancelled)) => ExecutionResult {
+                        class: ResultClass::Cancel,
+                        value: ResultValue::None,
+                    },
+                    _ => ExecutionResult {
+                        class: ResultClass::Invalid,
+                        value: ResultValue::None,
+                    },
+                }
             }
             Self::Fill(x, y, color) => {
                 if core.set_active_plane(ActivePlane::Color).is_err() {
@@ -662,36 +664,6 @@ impl ConcreteAction {
                         value: ResultValue::None,
                     },
                 }
-            }
-            Self::CreateVectorLayer => {
-                ExecutionResult::created(core.create_layer(LayerKind::VectorColoring, "Vector"))
-            }
-            Self::AddVectorPath(plane_id, salt) => {
-                ExecutionResult::created(core.vector_add_path(*plane_id, vector_line(*salt)))
-            }
-            Self::CorrectVectorWidth(path_id) => ExecutionResult::dispatch(
-                core.vector_correct_width(&[*path_id], VectorWidthMode::Add(0.25)),
-            ),
-            Self::SelectVector => match core.vector_select(
-                RectI32 {
-                    x: 0,
-                    y: 0,
-                    width: 16,
-                    height: 16,
-                },
-                VectorSelectionMode::Touching,
-            ) {
-                Ok(selection) => ExecutionResult {
-                    class: ResultClass::NoOp,
-                    value: ResultValue::VectorSelection(selection),
-                },
-                Err(_) => ExecutionResult {
-                    class: ResultClass::Invalid,
-                    value: ResultValue::None,
-                },
-            },
-            Self::InvalidVector => {
-                ExecutionResult::created(core.vector_add_path(u64::MAX, vector_line(0)))
             }
             Self::CreateLightSet(name) => {
                 ExecutionResult::created(core.light_table_create_set(name.clone()))
@@ -749,22 +721,6 @@ impl ConcreteAction {
     }
 }
 
-fn vector_line(salt: u8) -> VectorPathInput {
-    let y = f32::from(salt % 8 + 2);
-    VectorPathInput {
-        segments: vec![VectorCubicSegment {
-            p0: PointF32 { x: 1.0, y },
-            p1: PointF32 { x: 4.0, y },
-            p2: PointF32 { x: 8.0, y },
-            p3: PointF32 { x: 14.0, y },
-            width_start: 1.0,
-            width_end: 1.0,
-        }],
-        color: PixelValue::Rgba([salt, 40, 80, 255]),
-        closed: false,
-    }
-}
-
 #[derive(Default)]
 struct AbstractState {
     view_ids: Vec<u64>,
@@ -791,10 +747,6 @@ fn resolve_action(
     let raster_layers: Vec<_> = layers
         .iter()
         .filter(|layer| layer.kind == LayerKind::Raster)
-        .collect();
-    let vector_layers: Vec<_> = layers
-        .iter()
-        .filter(|layer| layer.kind == LayerKind::VectorColoring)
         .collect();
     let choose = |length: usize| usize::from(spec.a) % length.max(1);
     match spec.domain {
@@ -995,23 +947,7 @@ fn resolve_action(
                 _ => Ok(ConcreteAction::CancelFill),
             }
         }
-        4 => match spec.opcode % 5 {
-            0 if vector_layers.is_empty() => Ok(ConcreteAction::CreateVectorLayer),
-            0 => {
-                let (_, trace, _) = core.vector_layer_planes(vector_layers[0].id)?;
-                Ok(ConcreteAction::AddVectorPath(trace, spec.a))
-            }
-            1 => Ok(core
-                .vector_paths()?
-                .first()
-                .map_or(ConcreteAction::InvalidVector, |path| {
-                    ConcreteAction::CorrectVectorWidth(path.id)
-                })),
-            2 => Ok(ConcreteAction::SelectVector),
-            3 => Ok(ConcreteAction::InvalidVector),
-            _ => Ok(ConcreteAction::CreateVectorLayer),
-        },
-        5 => {
+        4 => {
             let sets = core.light_table_sets()?;
             let active = sets.iter().find(|set| set.active).unwrap();
             match spec.opcode % 6 {
@@ -1075,17 +1011,9 @@ fn mandatory_specs() -> Vec<ActionSpec> {
             b: 0,
         });
     }
-    for opcode in 0..5 {
-        specs.push(ActionSpec {
-            domain: 4,
-            opcode,
-            a: 5,
-            b: 0,
-        });
-    }
     for opcode in 0..6 {
         specs.push(ActionSpec {
-            domain: 5,
+            domain: 4,
             opcode,
             a: 6,
             b: 0,
@@ -1093,7 +1021,7 @@ fn mandatory_specs() -> Vec<ActionSpec> {
     }
     for opcode in 0..4 {
         specs.push(ActionSpec {
-            domain: 6,
+            domain: 5,
             opcode,
             a: 0,
             b: 0,
@@ -1147,39 +1075,6 @@ fn assert_id_integrity(
             }
         }
     }
-    let plane_ids: BTreeSet<_> = observation
-        .common
-        .topology
-        .iter()
-        .flat_map(|layer| layer.planes.iter().map(|plane| plane.id))
-        .collect();
-    let path_ids: BTreeSet<_> = observation
-        .features
-        .vector_paths
-        .iter()
-        .map(|path| path.id)
-        .collect();
-    if observation
-        .features
-        .vector_paths
-        .iter()
-        .any(|path| !plane_ids.contains(&path.plane_id))
-        || observation.features.vector_fills.iter().any(|fill| {
-            !plane_ids.contains(&fill.plane_id)
-                || fill
-                    .boundary_path_ids
-                    .iter()
-                    .any(|id| !path_ids.contains(id))
-        })
-    {
-        return Err(fail(
-            seed,
-            case,
-            step,
-            actions,
-            "vector object refers to a missing plane or path",
-        ));
-    }
     Ok(())
 }
 
@@ -1225,7 +1120,10 @@ fn assert_document_round_trip(
             case,
             step,
             actions,
-            "successful document edit was not exactly one history unit",
+            format!(
+                "successful document edit was not exactly one history unit: before={} after={}",
+                before.common.history.cursor, after.common.history.cursor
+            ),
         ));
     }
     core.undo()
@@ -1530,8 +1428,6 @@ fn cancel_sessions_and_cancellable_fill_restore_the_common_observation() {
                 y: 0,
                 value: PixelValue::Rgba([1, 2, 3, 255]),
             }],
-            vector_paths: Vec::new(),
-            vector_fills: Vec::new(),
         }],
     };
     core.begin_paste(&payload).unwrap();

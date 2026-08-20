@@ -4,7 +4,6 @@ use super::*;
 use crate::document::ensure_editable_plane;
 use crate::effects::{FilterPreview, PreviewProcedure};
 use crate::primitive::CanonicalInvocation;
-use crate::vector::{geometry_fill_plane_for_stroke, stage_geometry_fill, stage_geometry_path};
 use inkpod_image::{canonical_q16_from_f32, div_round_ties_even_i128};
 
 /// Maximum number of caller points accepted by one geometry request.
@@ -12,7 +11,7 @@ pub const MAX_GEOMETRY_POINTS: usize = 256;
 const MAX_POLYGON_SIDES: u16 = 64;
 const Q16_ONE: i64 = 1 << 16;
 const Q30_ONE: i64 = 1 << 30;
-const MIN_VECTOR_WIDTH_Q16: i64 = 66;
+const MIN_SEGMENT_WIDTH_Q16: i64 = 66;
 const CUBIC_FLATTEN_STEPS: i64 = 32;
 const TAN_22_5_Q16: i64 = 27_146;
 const KAPPA_Q30: i64 = 593_011_235;
@@ -85,16 +84,16 @@ pub enum GeometryPrimitive {
     Polyline,
 }
 
-/// Brush footprint and open-vector cap shape.
+/// Brush footprint shape.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GeometryCrossSection {
-    /// Circular raster footprint and round vector cap.
+    /// Circular raster footprint.
     Round,
-    /// Square raster footprint and square vector cap.
+    /// Square raster footprint.
     Square,
 }
 
-/// Typed construction and appearance options shared by raster and vector targets.
+/// Typed construction and appearance options for raster targets.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct GeometryOptions {
     /// Draws an outline on the target stroke plane.
@@ -109,11 +108,11 @@ pub struct GeometryOptions {
     pub constrain_45_degrees: bool,
     /// Builds rectangle and ellipse extents around the first point.
     pub from_center: bool,
-    /// Tapers an open outline from the minimum native vector width.
+    /// Tapers an open outline from the minimum width.
     pub taper_start: bool,
-    /// Tapers an open outline to the minimum native vector width.
+    /// Tapers an open outline to the minimum width.
     pub taper_end: bool,
-    /// Raster footprint and open-vector cap shape.
+    /// Raster footprint shape.
     pub cross_section: GeometryCrossSection,
     /// Optional positive width/height ratio in unsigned Q16.16; zero disables it.
     pub aspect_ratio_q16: u32,
@@ -126,7 +125,7 @@ pub struct GeometryOptions {
 /// Owned, bounded document-space geometry request.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GeometryRequest {
-    /// Stable raster or vector stroke plane target.
+    /// Stable raster plane target.
     pub plane_id: u64,
     /// Requested primitive.
     pub primitive: GeometryPrimitive,
@@ -158,10 +157,6 @@ pub struct GeometryPreviewInfo {
 pub struct GeometryCommit {
     /// Shared revision/result contract.
     pub dispatch: DispatchOutcome,
-    /// Created vector path ID, or zero for raster/no-op work.
-    pub path_id: u64,
-    /// Created vector fill ID, or zero when no vector fill was created.
-    pub fill_id: u64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -211,7 +206,7 @@ impl Core {
         let result = self.execute_canonical_invocation(CanonicalInvocation::ApplyGeometry {
             geometry: canonical,
         })?;
-        Ok(geometry_commit(result.dispatch, &result.output_ids))
+        Ok(geometry_commit(result.dispatch))
     }
 
     /// Begins an isolated geometry preview from the committed base document.
@@ -231,13 +226,7 @@ impl Core {
         validate_geometry_target(&base_document, &canonical)?;
         let mut preview_document = base_document.clone();
         let preview_revision = self.allocate_preview_revision()?;
-        let mut preview_ids = self.next_id;
-        stage_canonical_geometry(
-            &mut preview_document,
-            &canonical,
-            preview_revision.get(),
-            &mut preview_ids,
-        )?;
+        stage_canonical_geometry(&mut preview_document, &canonical, preview_revision.get())?;
         self.filter_preview = Some(FilterPreview {
             plane_id: PlaneId::from_raw(canonical.plane_id),
             base_revision: self.document_revision,
@@ -296,13 +285,7 @@ impl Core {
         validate_geometry_target(&prior.base_document, &canonical)?;
         let mut preview_document = prior.base_document.clone();
         let preview_revision = self.allocate_preview_revision()?;
-        let mut preview_ids = self.next_id;
-        stage_canonical_geometry(
-            &mut preview_document,
-            &canonical,
-            preview_revision.get(),
-            &mut preview_ids,
-        )?;
+        stage_canonical_geometry(&mut preview_document, &canonical, preview_revision.get())?;
         let plane_id = canonical.plane_id;
         self.filter_preview = Some(FilterPreview {
             plane_id: PlaneId::from_raw(canonical.plane_id),
@@ -344,7 +327,7 @@ impl Core {
         match self.execute_canonical_invocation(CanonicalInvocation::ApplyGeometry {
             geometry: canonical.clone(),
         }) {
-            Ok(result) => Ok(geometry_commit(result.dispatch, &result.output_ids)),
+            Ok(result) => Ok(geometry_commit(result.dispatch)),
             Err(error) => {
                 self.filter_preview = Some(session);
                 Err(error)
@@ -376,35 +359,20 @@ impl Core {
         let mut edit = self.begin_document_edit()?;
         validate_geometry_target(edit.documents().0, geometry)?;
         let revision = edit.revision().get();
-        let mut next_id = self.next_id;
-        let output_ids =
-            stage_canonical_geometry(edit.working_mut(), geometry, revision, &mut next_id)?;
-        if !target_is_vector(edit.documents().0, PlaneId::from_raw(geometry.plane_id))? {
-            edit.preserve_render_cache_by_raster_revision();
-        }
+        stage_canonical_geometry(edit.working_mut(), geometry, revision)?;
+        edit.preserve_render_cache_by_raster_revision();
         let dispatch = edit.commit(self)?;
         if dispatch.revision != self.document_revision.get() {
             return Err(CoreError::InvalidState(
                 "geometry commit revision was not published",
             ));
         }
-        if dispatch.revision != 0 && output_ids != [0, 0] {
-            self.next_id = next_id;
-        }
-        Ok(GeometryCommit {
-            dispatch,
-            path_id: output_ids[0],
-            fill_id: output_ids[1],
-        })
+        Ok(GeometryCommit { dispatch })
     }
 }
 
-fn geometry_commit(dispatch: DispatchOutcome, output_ids: &[u64]) -> GeometryCommit {
-    GeometryCommit {
-        dispatch,
-        path_id: output_ids.first().copied().unwrap_or(0),
-        fill_id: output_ids.get(1).copied().unwrap_or(0),
-    }
+fn geometry_commit(dispatch: DispatchOutcome) -> GeometryCommit {
+    GeometryCommit { dispatch }
 }
 
 pub(crate) fn canonicalize_geometry_request(
@@ -561,7 +529,7 @@ fn resolve_segments(
                     let turns = options
                         .rotation_turns
                         .wrapping_add(((u64::from(index) << 32) / u64::from(sides)) as u32);
-                    let rotated = rotate_vector(radius, turns)?;
+                    let rotated = rotate_offset(radius, turns)?;
                     Ok(CanonicalGeometryPoint {
                         x_q16: points[0].x_q16.checked_add(rotated.x_q16).ok_or(
                             CoreError::InvalidArgument("geometry polygon coordinate overflows"),
@@ -874,10 +842,10 @@ fn apply_segment_widths(
         segment.width_end_q16 = width_q16;
     }
     if let Some(first) = segments.first_mut().filter(|_| options.taper_start) {
-        first.width_start_q16 = MIN_VECTOR_WIDTH_Q16.min(width_q16);
+        first.width_start_q16 = MIN_SEGMENT_WIDTH_Q16.min(width_q16);
     }
     if let Some(last) = segments.last_mut().filter(|_| options.taper_end) {
-        last.width_end_q16 = MIN_VECTOR_WIDTH_Q16.min(width_q16);
+        last.width_end_q16 = MIN_SEGMENT_WIDTH_Q16.min(width_q16);
     }
     Ok(())
 }
@@ -975,7 +943,7 @@ fn rotate_local(
     y_q16: i64,
     turns: u32,
 ) -> Result<CanonicalGeometryPoint, CoreError> {
-    let rotated = rotate_vector(CanonicalGeometryPoint { x_q16, y_q16 }, turns)?;
+    let rotated = rotate_offset(CanonicalGeometryPoint { x_q16, y_q16 }, turns)?;
     Ok(CanonicalGeometryPoint {
         x_q16: center
             .x_q16
@@ -988,18 +956,18 @@ fn rotate_local(
     })
 }
 
-fn rotate_vector(
-    vector: CanonicalGeometryPoint,
+fn rotate_offset(
+    offset: CanonicalGeometryPoint,
     turns: u32,
 ) -> Result<CanonicalGeometryPoint, CoreError> {
     let (cosine, sine) = sin_cos_turns(turns);
     let x = div_round_ties_even_i128(
-        i128::from(vector.x_q16) * i128::from(cosine) - i128::from(vector.y_q16) * i128::from(sine),
+        i128::from(offset.x_q16) * i128::from(cosine) - i128::from(offset.y_q16) * i128::from(sine),
         i128::from(Q30_ONE),
     )
     .ok_or(CoreError::InvalidArgument("geometry rotation overflows"))?;
     let y = div_round_ties_even_i128(
-        i128::from(vector.x_q16) * i128::from(sine) + i128::from(vector.y_q16) * i128::from(cosine),
+        i128::from(offset.x_q16) * i128::from(sine) + i128::from(offset.y_q16) * i128::from(cosine),
         i128::from(Q30_ONE),
     )
     .ok_or(CoreError::InvalidArgument("geometry rotation overflows"))?;
@@ -1063,12 +1031,6 @@ fn validate_geometry_target(
         ))?;
     ensure_editable_plane(document, plane_id)?;
     match plane.kind {
-        PlaneType::VectorMainLine | PlaneType::ColorTrace => {
-            crate::vector::ensure_vector_stroke_plane(document, plane_id, true)?;
-            if geometry.fill {
-                geometry_fill_plane_for_stroke(document, plane_id)?;
-            }
-        }
         PlaneType::MainLine => {
             if geometry.fill {
                 return Err(CoreError::InvalidArgument(
@@ -1150,83 +1112,17 @@ fn validate_resolved_geometry(geometry: &CanonicalGeometry) -> Result<(), CoreEr
     Ok(())
 }
 
-fn target_is_vector(document: &CellDocument, plane_id: PlaneId) -> Result<bool, CoreError> {
-    let kind = document
-        .plane_by_id(plane_id)
-        .ok_or(CoreError::InvalidArgument(
-            "geometry target plane does not exist",
-        ))?
-        .kind;
-    Ok(matches!(
-        kind,
-        PlaneType::VectorMainLine | PlaneType::ColorTrace
-    ))
-}
-
 fn stage_canonical_geometry(
     document: &mut CellDocument,
     geometry: &CanonicalGeometry,
     revision: u64,
-    next_id: &mut StableIdCursor,
-) -> Result<[u64; 2], CoreError> {
+) -> Result<(), CoreError> {
     validate_resolved_geometry(geometry)?;
     validate_geometry_target(document, geometry)?;
     if geometry.segments.is_empty() {
-        return Ok([0, 0]);
+        return Ok(());
     }
-    let plane_id = PlaneId::from_raw(geometry.plane_id);
-    if target_is_vector(document, plane_id)? {
-        stage_vector_geometry(document, geometry, next_id)
-    } else {
-        stage_raster_geometry(document, geometry, revision)?;
-        Ok([0, 0])
-    }
-}
-
-fn stage_vector_geometry(
-    document: &mut CellDocument,
-    geometry: &CanonicalGeometry,
-    next_id: &mut StableIdCursor,
-) -> Result<[u64; 2], CoreError> {
-    let path_id = next_id.take_vector_path();
-    let path_color = if geometry.outline {
-        geometry.outline_color
-    } else {
-        transparent_color(geometry.outline_color)?
-    };
-    let input = VectorPathInput {
-        segments: geometry
-            .segments
-            .iter()
-            .map(|segment| VectorCubicSegment {
-                p0: public_point(segment.p0),
-                p1: public_point(segment.p1),
-                p2: public_point(segment.p2),
-                p3: public_point(segment.p3),
-                width_start: q16_f32(segment.width_start_q16),
-                width_end: q16_f32(segment.width_end_q16),
-            })
-            .collect(),
-        color: path_color,
-        closed: geometry.closed,
-    };
-    stage_geometry_path(
-        document,
-        path_id,
-        PlaneId::from_raw(geometry.plane_id),
-        input,
-        geometry.cross_section == GeometryCrossSection::Square,
-    )?;
-    let fill_id = if geometry.fill {
-        let fill_id = next_id.take_vector_fill();
-        let fill_plane =
-            geometry_fill_plane_for_stroke(document, PlaneId::from_raw(geometry.plane_id))?;
-        stage_geometry_fill(document, fill_id, fill_plane, path_id, geometry.fill_color)?;
-        fill_id.get()
-    } else {
-        0
-    };
-    Ok([path_id.get(), fill_id])
+    stage_raster_geometry(document, geometry, revision)
 }
 
 fn stage_raster_geometry(
@@ -1425,27 +1321,6 @@ fn raster_color(format: PixelFormat, color: PixelValue) -> Result<PixelValue, Co
         _ => Err(CoreError::InvalidState(
             "geometry color target has an incompatible pixel format",
         )),
-    }
-}
-
-fn transparent_color(color: PixelValue) -> Result<PixelValue, CoreError> {
-    match color {
-        PixelValue::Rgba(mut rgba) => {
-            rgba[3] = 0;
-            Ok(PixelValue::Rgba(rgba))
-        }
-        PixelValue::Rgba16(mut rgba) => {
-            rgba[3] = 0;
-            Ok(PixelValue::Rgba16(rgba))
-        }
-        _ => Err(CoreError::InvalidArgument("geometry color must be RGBA")),
-    }
-}
-
-fn public_point(point: CanonicalGeometryPoint) -> PointF32 {
-    PointF32 {
-        x: q16_f32(point.x_q16),
-        y: q16_f32(point.y_q16),
     }
 }
 

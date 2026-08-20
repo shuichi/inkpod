@@ -20,7 +20,7 @@ fn source(text: &str) -> InkScriptSource {
 fn program_source() -> InkScriptSource {
     source(
         r#"inkscript 2;
-requires { procedure_catalog = 2; replay_epoch = 23; }
+requires { procedure_catalog = 3; replay_epoch = 24; }
 inputs { current_document; }
 program {
     step "Set grid" {
@@ -131,7 +131,7 @@ fn public_compile_bind_and_staged_run_fail_closed() {
 
     assert_eq!(
         compile_inkscript(
-            &source("inkscript 2; requires { procedure_catalog = 2; replay_epoch = 23; }"),
+            &source("inkscript 2; requires { procedure_catalog = 3; replay_epoch = 24; }"),
             defaults(),
         ),
         Err(ScriptCompileError::Syntax)
@@ -139,7 +139,7 @@ fn public_compile_bind_and_staged_run_fail_closed() {
     let old_catalog = source(
         &program_source()
             .text()
-            .replace("procedure_catalog = 2", "procedure_catalog = 1"),
+            .replace("procedure_catalog = 3", "procedure_catalog = 1"),
     );
     assert_eq!(
         compile_inkscript(&old_catalog, defaults()),
@@ -199,7 +199,7 @@ fn journal_export_round_trips_a_linear_selection_with_typed_results() {
     base.verify_journal_replay().unwrap();
 
     let text = r#"inkscript 2;
-requires { procedure_catalog = 2; replay_epoch = 23; }
+requires { procedure_catalog = 3; replay_epoch = 24; }
 inputs { current_document; }
 program {
     step "Add guide" as created { enabled = true; invoke add_guide { axis = vertical; position = 2; }; }
@@ -513,7 +513,7 @@ fn journal_export_uses_schema_role_indices_for_deleted_intermediate_outputs() {
     let info = base.document_info().unwrap();
     let script = format!(
         r#"inkscript 2;
-requires {{ procedure_catalog = 2; replay_epoch = 23; }}
+requires {{ procedure_catalog = 3; replay_epoch = 24; }}
 inputs {{ current_document; }}
 bindings {{
     let target = select layer {{ source_document_uuid = uuid"{}"; persistent_id = {}; }};

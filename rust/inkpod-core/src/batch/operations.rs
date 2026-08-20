@@ -104,21 +104,6 @@ pub(super) fn apply_operation(
                 )?;
             }
         }
-        BatchOperationKind::LineWidth(mode) => {
-            let plane_id = target_plane()?;
-            let ids: Vec<_> = core
-                .vector_paths()?
-                .into_iter()
-                .filter(|path| path.plane_id == plane_id)
-                .map(|path| path.id)
-                .collect();
-            if ids.is_empty() {
-                return Err(CoreError::InvalidArgument(
-                    "line-width target has no vector paths",
-                ));
-            }
-            core.vector_correct_width(&ids, *mode)?;
-        }
         BatchOperationKind::Filter(filter) => {
             let plane_id = target_plane()?;
             core.begin_filter_preview_with_progress(plane_id, filter.clone(), &mut progress)?;
@@ -565,7 +550,7 @@ mod tests {
         let selector = BatchTargetSelector {
             layer_id: Some(coloring.id),
             plane_id: Some(color_plane.id),
-            layer_kind: Some(LayerKind::VectorColoring),
+            layer_kind: Some(LayerKind::Frame),
             plane_kind: Some(PlaneType::Color),
             missing_policy: BatchMissingTargetPolicy::Skip,
         };

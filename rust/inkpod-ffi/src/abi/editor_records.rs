@@ -38,15 +38,6 @@ pub struct InkpodEditorSelectionOptions {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-pub struct InkpodEditorVectorOptions {
-    pub struct_size: u32,
-    pub erase_mode: u32,
-    pub selection_mode: u32,
-    pub reserved: u32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
 pub struct InkpodEditorBrushOptions {
     pub struct_size: u32,
     pub shape: u32,
@@ -75,7 +66,6 @@ pub struct InkpodEditorStateInfo {
     pub palette_index: u32,
     pub fill: InkpodEditorFillOptions,
     pub selection: InkpodEditorSelectionOptions,
-    pub vector: InkpodEditorVectorOptions,
     pub brush: InkpodEditorBrushOptions,
 }
 
@@ -109,7 +99,6 @@ pub struct InkpodEditorStateUpdate {
     pub palette_index: u32,
     pub fill: InkpodEditorFillOptions,
     pub selection: InkpodEditorSelectionOptions,
-    pub vector: InkpodEditorVectorOptions,
     pub brush: InkpodEditorBrushOptions,
 }
 

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>inkpod — アニメーション彩色のための非破壊ペイントエンジン</title>
-<meta name="description" content="inkpod は、GPU アクセラレーションとベクターストロークに対応した、アニメーション彩色向けの非破壊ペイントエンジン。Windows 11 ネイティブ。">
+<meta name="description" content="inkpod は、GPU アクセラレーションに対応した、アニメーション彩色向けの非破壊ラスター・ペイントエンジン。Windows 11 ネイティブ。">
 <link rel="icon" id="favicon" href="">
 <script>
 /* テーマのフラッシュ防止: CSS 適用前に保存済みテーマを反映 */
@@ -520,7 +520,7 @@ footer{border-top:1px solid var(--border);padding:44px 0 56px;margin-top:40px}
       <svg class="app-icon" role="img" aria-label="inkpod"><use href="#inkpod-icon"/></svg>
       <div class="badge" data-i18n="hero.badge">Windows 11 ネイティブ · x64 / ARM64</div>
       <h1 data-i18n="hero.title">一枚ずつ、<span class="ink-text">動きに命を</span>。</h1>
-      <p class="sub" data-i18n="hero.sub">inkpod は、アニメーション彩色のための非破壊ペイントエンジン。GPU アクセラレーションとベクターストロークに対応した Rust Core を、Windows 11 ネイティブアプリとして。</p>
+      <p class="sub" data-i18n="hero.sub">inkpod は、アニメーション彩色のための非破壊ラスター・ペイントエンジン。GPU アクセラレーション対応の Rust Core を、Windows 11 ネイティブアプリとして。</p>
       <div class="cta-row">
         <a class="btn primary" href="#download">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -557,7 +557,7 @@ footer{border-top:1px solid var(--border);padding:44px 0 56px;margin-top:40px}
     <div class="wrap">
       <div class="stats-grid">
         <div class="stat reveal"><b data-i18n="stats.1.v">8 / 16 bit</b><span data-i18n="stats.1.k">2値・グレースケール・RGBA</span></div>
-        <div class="stat reveal" data-d="80"><b data-i18n="stats.2.v">ラスター + ベクター</b><span data-i18n="stats.2.k">ハイブリッド彩色レイヤー</span></div>
+        <div class="stat reveal" data-d="80"><b data-i18n="stats.2.v">型付きラスター</b><span data-i18n="stats.2.k">2値・階調・RGBA 彩色</span></div>
         <div class="stat reveal" data-d="160"><b data-i18n="stats.3.v">3 スレッド</b><span data-i18n="stats.3.k">UI / エンジン / 描画を分離</span></div>
         <div class="stat reveal" data-d="240"><b data-i18n="stats.4.v">bit-exact</b><span data-i18n="stats.4.k">決定的リプレイ（x64 / ARM64）</span></div>
       </div>
@@ -582,7 +582,7 @@ footer{border-top:1px solid var(--border);padding:44px 0 56px;margin-top:40px}
         <div class="card reveal" data-d="90">
           <div class="ico c-cyan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg></div>
           <h3 data-i18n="bigf.2.t">レイヤー &amp; プレーン</h3>
-          <p data-i18n="bigf.2.d">2値・階調・ベクターの彩色データを、主線・彩色・色トレース・塗りのプレーンに分離して保持。レイヤーは合成の単位、プレーンは編集の単位です。</p>
+          <p data-i18n="bigf.2.d">2値・階調・RGBA の彩色データを、主線・彩色・色トレース・塗りのプレーンに分離して保持。レイヤーは合成の単位、プレーンは編集の単位です。</p>
         </div>
         <div class="card reveal" data-d="180">
           <div class="ico c-pink"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg></div>
@@ -634,8 +634,8 @@ footer{border-top:1px solid var(--border);padding:44px 0 56px;margin-top:40px}
         </div>
         <div class="card reveal">
           <div class="ico c-amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v12H8l-4 4z"/><path d="M8 8h8M8 12h5"/></svg></div>
-          <h3 data-i18n="grid.9.t">テキスト &amp; 撮影指示</h3>
-          <p data-i18n="grid.9.d">テキストや手描き注釈、角度付き撮影フレームを非破壊で保持。通常画像と分け、確認用の指示画像へ明示的に出力します。</p>
+          <h3 data-i18n="grid.9.t">撮影フレーム</h3>
+          <p data-i18n="grid.9.d">中心・寸法・角度を持つ撮影フレームを非破壊で保持。Canvas 上のハンドルと数値入力で編集できます。</p>
         </div>
         <div class="card reveal" data-d="60">
           <div class="ico c-blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="2"/><path d="M7 12h14M6.5 10.5l12-6M6.5 13.5l12 6"/></svg></div>
@@ -695,7 +695,7 @@ footer{border-top:1px solid var(--border);padding:44px 0 56px;margin-top:40px}
           <div class="doc-layer dim">
             <div class="doc-layer-head">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-              <span data-i18n="concept.layer2">ベクター彩色レイヤー</span>
+              <span data-i18n="concept.layer2">階調彩色レイヤー</span>
             </div>
           </div>
           <div class="doc-layer dim">
@@ -814,7 +814,7 @@ footer{border-top:1px solid var(--border);padding:44px 0 56px;margin-top:40px}
       <div class="formats reveal">
         <div class="fl" data-i18n="formats.label">対応フォーマット</div>
         <div class="fmt-row">
-          <span class="fmt native">.inkpod v26</span>
+          <span class="fmt native">.inkpod v27</span>
           <span class="fmt">PNG</span>
           <span class="fmt">TIFF</span>
           <span class="fmt">TGA</span>
@@ -891,7 +891,7 @@ footer{border-top:1px solid var(--border);padding:44px 0 56px;margin-top:40px}
 const I18N = {
   ja: {
     "meta.title": "inkpod — アニメーション彩色のための非破壊ペイントエンジン",
-    "meta.desc": "inkpod は、GPU アクセラレーションとベクターストロークに対応した、アニメーション彩色向けの非破壊ペイントエンジン。Windows 11 ネイティブ。",
+    "meta.desc": "inkpod は、GPU アクセラレーションに対応した、アニメーション彩色向けの非破壊ラスター・ペイントエンジン。Windows 11 ネイティブ。",
     "nav.features": "機能",
     "nav.concept": "レイヤーとプレーン",
     "nav.workflow": "ワークフロー",
@@ -899,7 +899,7 @@ const I18N = {
     "nav.download": "ダウンロード",
     "hero.badge": "Windows 11 ネイティブ · x64 / ARM64",
     "hero.title": "一枚ずつ、<span class=\"ink-text\">動きに命を</span>。",
-    "hero.sub": "inkpod は、アニメーション彩色のための非破壊ペイントエンジン。GPU アクセラレーションとベクターストロークに対応した Rust Core を、Windows 11 ネイティブアプリとして。",
+    "hero.sub": "inkpod は、アニメーション彩色のための非破壊ラスター・ペイントエンジン。GPU アクセラレーション対応の Rust Core を、Windows 11 ネイティブアプリとして。",
     "hero.cta1": "ダウンロード",
     "hero.cta2": "機能を見る",
     "hero.note": "ポータブル ZIP · インストール不要 · 追加ランタイム不要",
@@ -907,8 +907,8 @@ const I18N = {
     "ph.screenshot": "スクリーンショット（準備中）",
     "stats.1.v": "8 / 16 bit",
     "stats.1.k": "2値・グレースケール・RGBA",
-    "stats.2.v": "ラスター + ベクター",
-    "stats.2.k": "ハイブリッド彩色レイヤー",
+    "stats.2.v": "型付きラスター",
+    "stats.2.k": "2値・階調・RGBA 彩色",
     "stats.3.v": "3 スレッド",
     "stats.3.k": "UI / エンジン / 描画を分離",
     "stats.4.v": "bit-exact",
@@ -919,7 +919,7 @@ const I18N = {
     "bigf.1.t": "主線保護",
     "bigf.1.d": "塗りつぶしもブラシも、主線プレーンには決して触れません。線画をフィル境界として表示したまま、色は彩色プレーンだけに置かれます。",
     "bigf.2.t": "レイヤー &amp; プレーン",
-    "bigf.2.d": "2値・階調・ベクターの彩色データを、主線・彩色・色トレース・塗りのプレーンに分離して保持。レイヤーは合成の単位、プレーンは編集の単位です。",
+    "bigf.2.d": "2値・階調・RGBA の彩色データを、主線・彩色・色トレース・塗りのプレーンに分離して保持。レイヤーは合成の単位、プレーンは編集の単位です。",
     "bigf.3.t": "賢いフィル",
     "bigf.3.d": "隙間閉じ、含み塗り、閉領域フィル、塗りあふれ検出。小さな線切れや色トレースがあっても、高速かつ安全に塗れます。",
     "grid.1.t": "描画ツール",
@@ -933,13 +933,13 @@ const I18N = {
     "grid.5.t": "フィルター &amp; 調整レイヤー",
     "grid.5.d": "色調カーブ、レベル補正、色相・彩度、カラーバランス。調整レイヤーで非破壊に適用。",
     "grid.6.t": "バッチ処理",
-    "grid.6.d": "色置換、連続フィル、線幅修正などを多量の連番セルへ一括適用。dry-run と原子的な出力で安全に。",
+    "grid.6.d": "色置換、連続フィル、フィルターなどを多量の連番セルへ一括適用。dry-run と原子的な出力で安全に。",
     "grid.7.t": "履歴 &amp; 復元",
     "grid.7.d": "元に戻す／やり直し、複数段階ジャンプ、自動保存とクラッシュ復元。分岐した履歴も失われません。",
     "grid.8.t": "カラーチャート",
     "grid.8.d": "色と名前を表で管理し、ページ・検索・ロックに対応。セルから一意色を抽出して自動生成も。",
-    "grid.9.t": "テキスト &amp; 撮影指示",
-    "grid.9.d": "テキストや手描き注釈、角度付き撮影フレームを非破壊で保持。通常画像と分け、確認用の指示画像へ明示的に出力します。",
+    "grid.9.t": "撮影フレーム",
+    "grid.9.d": "中心・寸法・角度を持つ撮影フレームを非破壊で保持。Canvas 上のハンドルと数値入力で編集できます。",
     "grid.10.t": "消失点ガイド",
     "grid.10.d": "Canvas外も含む複数の消失点を設定し、間隔・位相・色・不透明度を調整。放射ガイドへ作図ツールを吸着できます。",
     "concept.eyebrow": "コンセプト",
@@ -947,7 +947,7 @@ const I18N = {
     "concept.lead": "inkpod の文書は「セル → レイヤー → プレーン」の階層で構成されます。レイヤーはセル画を重ねる合成の単位。プレーンは主線・彩色・色トレース・塗りを分離して保持する、最小の編集単位です。",
     "concept.cell": "セル（1 枚の文書）",
     "concept.layer1": "2値彩色レイヤー",
-    "concept.layer2": "ベクター彩色レイヤー",
+    "concept.layer2": "階調彩色レイヤー",
     "concept.layer3": "ラスター汎用レイヤー",
     "concept.plane1": "主線プレーン",
     "concept.plane2": "彩色プレーン",
@@ -994,7 +994,7 @@ const I18N = {
   },
   en: {
     "meta.title": "inkpod — A non-destructive paint engine for animation coloring",
-    "meta.desc": "inkpod is a GPU-accelerated, non-destructive paint engine for animation coloring with vector strokes. Native on Windows 11.",
+    "meta.desc": "inkpod is a GPU-accelerated, non-destructive raster paint engine for animation coloring. Native on Windows 11.",
     "nav.features": "Features",
     "nav.concept": "Layers &amp; Planes",
     "nav.workflow": "Workflow",
@@ -1002,7 +1002,7 @@ const I18N = {
     "nav.download": "Download",
     "hero.badge": "Native on Windows 11 · x64 / ARM64",
     "hero.title": "Bring every frame<br><span class=\"ink-text\">to life.</span>",
-    "hero.sub": "inkpod is a non-destructive paint engine built for animation coloring — a GPU-accelerated, vector-capable Rust core, shipped as a native Windows 11 app.",
+    "hero.sub": "inkpod is a non-destructive raster paint engine built for animation coloring — a GPU-accelerated Rust core shipped as a native Windows 11 app.",
     "hero.cta1": "Download",
     "hero.cta2": "Explore features",
     "hero.note": "Portable ZIP · no installer · no extra runtimes",
@@ -1010,8 +1010,8 @@ const I18N = {
     "ph.screenshot": "Screenshot coming soon",
     "stats.1.v": "8 / 16 bit",
     "stats.1.k": "Binary, grayscale &amp; RGBA",
-    "stats.2.v": "Raster + Vector",
-    "stats.2.k": "Hybrid coloring layers",
+    "stats.2.v": "Typed raster",
+    "stats.2.k": "Binary, grayscale &amp; RGBA",
     "stats.3.v": "3 threads",
     "stats.3.k": "UI / engine / renderer",
     "stats.4.v": "bit-exact",
@@ -1022,7 +1022,7 @@ const I18N = {
     "bigf.1.t": "Line protection",
     "bigf.1.d": "Fills and brushes never touch the line-art plane. The drawing stays visible as a fill boundary while color lands only on the paint plane.",
     "bigf.2.t": "Layers &amp; planes",
-    "bigf.2.d": "Binary, grayscale and vector coloring data, split into line, paint, color-trace and fill planes. Layers composite; planes are what you edit.",
+    "bigf.2.d": "Binary, grayscale and RGBA coloring data, split into line, paint, color-trace and fill planes. Layers composite; planes are what you edit.",
     "bigf.3.t": "Smart fills",
     "bigf.3.d": "Gap closing, inclusion fill, closed-region fill and overflow detection. Paint fast and safely — even over broken lines and color traces.",
     "grid.1.t": "Drawing tools",
@@ -1036,13 +1036,13 @@ const I18N = {
     "grid.5.t": "Filters &amp; adjustment layers",
     "grid.5.d": "Tone curves, levels, hue/saturation and color balance — applied non-destructively as adjustment layers.",
     "grid.6.t": "Batch processing",
-    "grid.6.d": "Apply color replacement, continuous fill, line-width fixes and more across whole sequences — with dry-runs and atomic output.",
+    "grid.6.d": "Apply color replacement, continuous fill, filters and more across whole sequences — with dry-runs and atomic output.",
     "grid.7.t": "History &amp; recovery",
     "grid.7.d": "Undo/redo, multi-step jumps, autosave and crash recovery. Even divergent history branches are preserved.",
     "grid.8.t": "Color charts",
     "grid.8.d": "Manage colors and names in searchable, lockable pages — or auto-generate a chart from a painted cell.",
-    "grid.9.t": "Text &amp; shooting notes",
-    "grid.9.d": "Keep text, hand-drawn annotations and angled shooting frames non-destructively, then export them explicitly as an instruction image.",
+    "grid.9.t": "Shooting frame",
+    "grid.9.d": "Keep a centered, sized and angled shooting frame non-destructively, and edit it with Canvas handles or numeric fields.",
     "grid.10.t": "Vanishing-point guides",
     "grid.10.d": "Place multiple vanishing points, even outside the canvas; tune spacing, phase, color and opacity, then snap drawing tools to their radial guides.",
     "concept.eyebrow": "Concept",
@@ -1050,7 +1050,7 @@ const I18N = {
     "concept.lead": "An inkpod document is structured as cell → layer → plane. Layers are the units you composite; planes are the smallest units you edit — line art, paint, color trace and fill are kept apart.",
     "concept.cell": "Cell (one document)",
     "concept.layer1": "Binary coloring layer",
-    "concept.layer2": "Vector coloring layer",
+    "concept.layer2": "Grayscale coloring layer",
     "concept.layer3": "General raster layer",
     "concept.plane1": "Line-art plane",
     "concept.plane2": "Paint plane",

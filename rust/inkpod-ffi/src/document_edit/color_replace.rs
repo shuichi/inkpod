@@ -109,9 +109,6 @@ unsafe fn parse_scoped_color_replace(
     let mode = match input.mode {
         INKPOD_COLOR_REPLACE_RASTER_COLOR => ScopedColorReplaceMode::RasterColor,
         INKPOD_COLOR_REPLACE_RASTER_MAIN_LINE => ScopedColorReplaceMode::RasterMainLine,
-        INKPOD_COLOR_REPLACE_VECTOR_COLOR_LINE => ScopedColorReplaceMode::VectorColorLine,
-        INKPOD_COLOR_REPLACE_VECTOR_MAIN_LINE => ScopedColorReplaceMode::VectorMainLine,
-        INKPOD_COLOR_REPLACE_VECTOR_FILL => ScopedColorReplaceMode::VectorFill,
         _ => {
             return Err(fail(
                 INKPOD_STATUS_INVALID_ARGUMENT,
@@ -264,7 +261,6 @@ fn write_preview(output: &mut InkpodScopedColorReplacePreview, preview: ScopedCo
     output.feature_flags = u32::from(preview.affected_bounds.is_some());
     output.base_document_revision = preview.base_document_revision;
     output.matched_pixels = preview.matched_pixels;
-    output.matched_objects = preview.matched_objects;
     output.affected_bounds = preview
         .affected_bounds
         .map(|bounds| InkpodFrameRect {

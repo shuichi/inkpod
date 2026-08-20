@@ -48,17 +48,6 @@ fn raster_color_plane(core: &Core) -> u64 {
         .id
 }
 
-fn vector_core() -> (Core, u64, u64) {
-    let mut core = Core::new();
-    core.new_cell(32, 32, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
-        .unwrap();
-    let (_, layer_id) = core
-        .create_layer(LayerKind::VectorColoring, "Geometry")
-        .unwrap();
-    let (main, _, fill) = core.vector_layer_planes(layer_id).unwrap();
-    (core, main, fill)
-}
-
 fn raster_core() -> (Core, u64) {
     let mut core = Core::new();
     core.new_cell(32, 32, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
@@ -398,17 +387,16 @@ fn paint_002_geometry_input_is_view_targeted_dpi_independent_and_stale_safe() {
     );
 }
 
-fn primitive_fixture(primitive: GeometryPrimitive) -> (Vec<PointF32>, bool, usize) {
+fn primitive_fixture(primitive: GeometryPrimitive) -> (Vec<PointF32>, bool) {
     match primitive {
-        GeometryPrimitive::Line => (vec![point(4.0, 5.0), point(20.0, 11.0)], false, 1),
+        GeometryPrimitive::Line => (vec![point(4.0, 5.0), point(20.0, 11.0)], false),
         GeometryPrimitive::Curve => (
             vec![point(4.0, 5.0), point(20.0, 11.0), point(12.0, 20.0)],
             false,
-            1,
         ),
-        GeometryPrimitive::Rectangle => (vec![point(4.0, 5.0), point(20.0, 18.0)], true, 4),
-        GeometryPrimitive::Ellipse => (vec![point(4.0, 5.0), point(20.0, 18.0)], true, 4),
-        GeometryPrimitive::Polygon => (vec![point(12.0, 12.0), point(20.0, 12.0)], true, 5),
+        GeometryPrimitive::Rectangle => (vec![point(4.0, 5.0), point(20.0, 18.0)], true),
+        GeometryPrimitive::Ellipse => (vec![point(4.0, 5.0), point(20.0, 18.0)], true),
+        GeometryPrimitive::Polygon => (vec![point(12.0, 12.0), point(20.0, 12.0)], true),
         GeometryPrimitive::Polyline => (
             vec![
                 point(4.0, 4.0),
@@ -417,13 +405,12 @@ fn primitive_fixture(primitive: GeometryPrimitive) -> (Vec<PointF32>, bool, usiz
                 point(4.0, 20.0),
             ],
             true,
-            4,
         ),
     }
 }
 
 #[test]
-fn paint_002_raster_vector_capability_table_and_goldens_cover_every_primitive() {
+fn paint_002_raster_goldens_cover_every_primitive() {
     let primitives = [
         GeometryPrimitive::Line,
         GeometryPrimitive::Curve,
@@ -434,7 +421,7 @@ fn paint_002_raster_vector_capability_table_and_goldens_cover_every_primitive() 
     ];
     let mut raster_digests = Vec::new();
     for primitive in primitives {
-        let (points, closed, segment_count) = primitive_fixture(primitive);
+        let (points, closed) = primitive_fixture(primitive);
         let mut style = options(true, closed);
         style.close_path = primitive == GeometryPrimitive::Polyline;
 
@@ -450,20 +437,6 @@ fn paint_002_raster_vector_capability_table_and_goldens_cover_every_primitive() 
                 .as_bytes(),
         );
 
-        let (mut vector, vector_plane, _) = vector_core();
-        let commit = vector
-            .apply_geometry(&request(vector_plane, primitive, points.clone(), style))
-            .unwrap();
-        let path = vector
-            .vector_paths()
-            .unwrap()
-            .into_iter()
-            .find(|path| path.id == commit.path_id)
-            .unwrap();
-        assert_eq!(path.segments.len(), segment_count, "{primitive:?}");
-        assert_eq!(path.closed, closed, "{primitive:?}");
-        assert_eq!(commit.fill_id != 0, closed, "{primitive:?}");
-
         if closed {
             let mut fill_only = options(false, true);
             fill_only.close_path = primitive == GeometryPrimitive::Polyline;
@@ -471,12 +444,6 @@ fn paint_002_raster_vector_capability_table_and_goldens_cover_every_primitive() 
             raster
                 .apply_geometry(&request(raster_plane, primitive, points.clone(), fill_only))
                 .unwrap();
-            let (mut vector, vector_plane, _) = vector_core();
-            let fill_commit = vector
-                .apply_geometry(&request(vector_plane, primitive, points, fill_only))
-                .unwrap();
-            assert_ne!(fill_commit.path_id, 0);
-            assert_ne!(fill_commit.fill_id, 0);
         } else {
             let fill_only = request(
                 raster_plane,
@@ -488,16 +455,6 @@ fn paint_002_raster_vector_capability_table_and_goldens_cover_every_primitive() 
                 raster.apply_geometry(&fill_only),
                 Err(CoreError::InvalidArgument(_))
             ));
-            let (mut vector, vector_plane, _) = vector_core();
-            assert!(matches!(
-                vector.apply_geometry(&request(
-                    vector_plane,
-                    primitive,
-                    points,
-                    options(false, true),
-                )),
-                Err(CoreError::InvalidArgument(_))
-            ));
         }
     }
 
@@ -505,64 +462,31 @@ fn paint_002_raster_vector_capability_table_and_goldens_cover_every_primitive() 
         raster_digests,
         vec![
             [
-                232, 83, 181, 145, 172, 221, 212, 192, 53, 214, 34, 173, 55, 227, 132, 91, 192,
-                153, 63, 17, 43, 97, 50, 45, 78, 106, 76, 128, 244, 83, 123, 169
+                61, 244, 206, 74, 71, 70, 209, 153, 202, 14, 14, 66, 0, 174, 178, 159, 224, 124,
+                13, 198, 28, 114, 114, 117, 68, 106, 94, 195, 100, 42, 158, 31
             ],
             [
-                221, 50, 193, 238, 236, 170, 75, 0, 24, 56, 183, 101, 199, 66, 96, 229, 38, 198,
-                68, 37, 86, 154, 71, 13, 34, 44, 202, 29, 187, 123, 115, 254
+                100, 6, 64, 89, 42, 93, 0, 61, 81, 206, 147, 15, 175, 198, 115, 198, 183, 130, 54,
+                158, 167, 254, 40, 134, 165, 9, 38, 245, 150, 206, 194, 44
             ],
             [
-                210, 146, 200, 106, 255, 75, 182, 235, 107, 197, 47, 91, 254, 163, 116, 249, 231,
-                246, 208, 213, 255, 188, 45, 61, 236, 178, 66, 55, 14, 52, 38, 42
+                220, 78, 13, 215, 62, 182, 103, 192, 210, 32, 202, 191, 206, 157, 231, 131, 213,
+                146, 80, 224, 16, 148, 171, 126, 10, 7, 59, 31, 168, 74, 169, 158
             ],
             [
-                46, 103, 40, 126, 78, 47, 234, 70, 119, 170, 74, 57, 74, 27, 57, 75, 179, 9, 46,
-                175, 175, 184, 74, 220, 125, 163, 229, 127, 244, 109, 29, 116
+                75, 28, 222, 10, 220, 31, 219, 158, 135, 170, 216, 123, 109, 56, 183, 229, 164, 39,
+                130, 149, 205, 238, 114, 164, 68, 54, 61, 162, 168, 228, 53, 182
             ],
             [
-                130, 63, 19, 20, 5, 174, 183, 108, 241, 165, 95, 197, 80, 42, 81, 124, 200, 219,
-                15, 1, 75, 233, 214, 239, 123, 251, 91, 105, 49, 229, 146, 206
+                102, 245, 15, 162, 122, 154, 218, 202, 238, 136, 222, 208, 49, 188, 124, 42, 254,
+                19, 128, 161, 145, 130, 133, 52, 166, 194, 108, 252, 110, 93, 73, 209
             ],
             [
-                209, 25, 130, 52, 7, 158, 159, 219, 247, 89, 200, 40, 104, 71, 3, 221, 54, 45, 44,
-                61, 163, 238, 80, 150, 32, 246, 254, 21, 164, 213, 243, 208
+                23, 121, 24, 187, 18, 37, 109, 224, 237, 139, 163, 10, 235, 220, 127, 243, 10, 120,
+                236, 186, 191, 173, 70, 69, 250, 151, 243, 251, 154, 94, 49, 91
             ],
         ]
     );
-}
-
-#[test]
-fn paint_002_vector_rectangle_commits_outline_and_fill_as_one_procedure() {
-    let (mut core, main_plane, fill_plane) = vector_core();
-    let before = core.document_info().unwrap();
-    let committed = core
-        .apply_geometry(&request(
-            main_plane,
-            GeometryPrimitive::Rectangle,
-            vec![point(4.0, 5.0), point(20.0, 18.0)],
-            options(true, true),
-        ))
-        .unwrap();
-
-    assert_eq!(committed.dispatch.revision(), before.document_revision + 1);
-    assert_ne!(committed.path_id, 0);
-    assert_ne!(committed.fill_id, 0);
-    let path = core.vector_paths().unwrap().pop().unwrap();
-    assert_eq!(path.id, committed.path_id);
-    assert_eq!(path.plane_id, main_plane);
-    assert!(path.closed);
-    assert_eq!(path.segments.len(), 4);
-    let fill = core.vector_fills().unwrap().pop().unwrap();
-    assert_eq!(fill.id, committed.fill_id);
-    assert_eq!(fill.plane_id, fill_plane);
-    assert_eq!(fill.boundary_path_ids, vec![path.id]);
-    core.undo().unwrap();
-    assert!(core.vector_paths().unwrap().is_empty());
-    assert!(core.vector_fills().unwrap().is_empty());
-    core.redo().unwrap();
-    assert_eq!(core.vector_paths().unwrap().len(), 1);
-    assert_eq!(core.vector_fills().unwrap().len(), 1);
 }
 
 #[test]
@@ -680,139 +604,9 @@ fn paint_002_raster_target_matrix_and_selection_clip_are_exact() {
 }
 
 #[test]
-fn paint_002_curve_polyline_constraints_and_current_only_save_reopen_are_stable() {
-    let (mut core, main_plane, _) = vector_core();
-    let mut curve = request(
-        main_plane,
-        GeometryPrimitive::Curve,
-        vec![point(2.0, 3.0), point(22.0, 3.0), point(12.0, 18.0)],
-        options(true, false),
-    );
-    curve.options.taper_start = true;
-    curve.options.taper_end = true;
-    curve.options.cross_section = GeometryCrossSection::Square;
-    let curve_id = core.apply_geometry(&curve).unwrap().path_id;
-    let curve_info = core
-        .vector_paths()
-        .unwrap()
-        .into_iter()
-        .find(|path| path.id == curve_id)
-        .unwrap();
-    assert_eq!(curve_info.segments.len(), 2);
-    assert!(curve_info.square_cross_section);
-    assert!(curve_info.segments[0].width_start < curve_info.segments[0].width_end.max(0.01));
-
-    let mut polyline = request(
-        main_plane,
-        GeometryPrimitive::Polyline,
-        vec![
-            point(3.0, 24.0),
-            point(8.0, 16.0),
-            point(16.0, 24.0),
-            point(24.0, 16.0),
-        ],
-        options(true, true),
-    );
-    polyline.options.close_path = true;
-    polyline.options.bezier_segments = true;
-    core.apply_geometry(&polyline).unwrap();
-
-    let path = std::env::temp_dir().join(format!(
-        "inkpod-geometry-{}-{}.inkpod",
-        std::process::id(),
-        TEST_PATH_SEQUENCE.fetch_add(1, Ordering::Relaxed)
-    ));
-    core.save(&path).unwrap();
-    let expected_paths = core.vector_paths().unwrap();
-    let expected_fills = core.vector_fills().unwrap();
-    let mut reopened = Core::new();
-    reopened.open(&path).unwrap();
-    assert_eq!(reopened.vector_paths().unwrap(), expected_paths);
-    assert_eq!(reopened.vector_fills().unwrap(), expected_fills);
-    fs::remove_file(path).unwrap();
-}
-
-#[test]
-fn paint_002_constraints_rotation_cross_section_and_side_bounds_are_canonical() {
-    let (mut core, main_plane, _) = vector_core();
-    let mut line = request(
-        main_plane,
-        GeometryPrimitive::Line,
-        vec![point(2.0, 2.0), point(10.0, 7.0)],
-        options(true, false),
-    );
-    line.options.constrain_45_degrees = true;
-    let line_id = core.apply_geometry(&line).unwrap().path_id;
-    let line_path = core
-        .vector_paths()
-        .unwrap()
-        .into_iter()
-        .find(|path| path.id == line_id)
-        .unwrap();
-    assert_eq!(line_path.segments[0].p0, point(2.0, 2.0));
-    assert_eq!(line_path.segments[0].p3, point(10.0, 10.0));
-
-    let mut rectangle = request(
-        main_plane,
-        GeometryPrimitive::Rectangle,
-        vec![point(16.0, 16.0), point(22.0, 19.0)],
-        options(true, false),
-    );
-    rectangle.options.from_center = true;
-    rectangle.options.aspect_ratio_q16 = 1 << 16;
-    rectangle.options.rotation_turns = 1 << 30;
-    rectangle.options.cross_section = GeometryCrossSection::Square;
-    let rectangle_id = core.apply_geometry(&rectangle).unwrap().path_id;
-    let rectangle_path = core
-        .vector_paths()
-        .unwrap()
-        .into_iter()
-        .find(|path| path.id == rectangle_id)
-        .unwrap();
-    assert_eq!(rectangle_path.segments[0].p0, point(22.0, 10.0));
-    assert_eq!(rectangle_path.segments[0].p3, point(22.0, 22.0));
-    assert!(rectangle_path.square_cross_section);
-
-    for side_count in [3, 64] {
-        let mut polygon = request(
-            main_plane,
-            GeometryPrimitive::Polygon,
-            vec![point(16.0, 16.0), point(24.0, 16.0)],
-            options(true, false),
-        );
-        polygon.options.polygon_sides = side_count;
-        let id = core.apply_geometry(&polygon).unwrap().path_id;
-        assert_eq!(
-            core.vector_paths()
-                .unwrap()
-                .into_iter()
-                .find(|path| path.id == id)
-                .unwrap()
-                .segments
-                .len(),
-            usize::from(side_count)
-        );
-    }
-    for side_count in [2, 65] {
-        let mut polygon = request(
-            main_plane,
-            GeometryPrimitive::Polygon,
-            vec![point(16.0, 16.0), point(24.0, 16.0)],
-            options(true, false),
-        );
-        polygon.options.polygon_sides = side_count;
-        assert!(matches!(
-            core.apply_geometry(&polygon),
-            Err(CoreError::InvalidArgument(_))
-        ));
-    }
-}
-
-#[test]
 fn paint_002_invalid_stale_no_content_and_point_bounds_are_atomic() {
-    let (mut core, main_plane, _) = vector_core();
+    let (mut core, main_plane) = raster_core();
     let before = core.document_info().unwrap();
-    let before_paths = core.vector_paths().unwrap();
 
     let stale = request(
         main_plane,
@@ -835,7 +629,6 @@ fn paint_002_invalid_stale_no_content_and_point_bounds_are_atomic() {
     );
     let outcome = core.apply_geometry(&no_content).unwrap();
     assert_eq!(outcome.dispatch.revision(), before.document_revision);
-    assert_eq!(outcome.path_id, 0);
 
     let mut invalid = stale.clone();
     invalid.points[1].x = f32::NAN;
@@ -850,7 +643,6 @@ fn paint_002_invalid_stale_no_content_and_point_bounds_are_atomic() {
         Err(CoreError::InvalidArgument(_))
     ));
     assert_eq!(core.document_info().unwrap(), before);
-    assert_eq!(core.vector_paths().unwrap(), before_paths);
 
     core.begin_geometry_preview(before.document_revision, &no_content)
         .unwrap();

@@ -38,21 +38,12 @@ using Microsoft::WRL::ComPtr;
 constexpr wchar_t kCanvasClassName[] = L"InkpodCanvasWindow";
 constexpr std::uint64_t kMaximumSnapshotTiles = 262144U;
 constexpr std::uint64_t kMaximumSnapshotGuides = 4096U;
-constexpr std::uint64_t kMaximumVectorSegments = 262144U;
-constexpr std::uint64_t kMaximumVectorFills = 65536U;
-constexpr std::uint64_t kMaximumVectorBoundaries = 262144U;
-constexpr std::uint64_t kMaximumVectorEndpoints = 131072U;
 constexpr std::uint64_t kMaximumRenderPasses = 1048576U;
 constexpr std::uint64_t kMaximumAdjustmentLuts = 4096U;
-constexpr std::uint64_t kMaximumAnnotations = 16384U;
-constexpr std::uint64_t kMaximumAnnotationPoints = 16384U * 65536U;
-constexpr std::uint64_t kMaximumAnnotationUtf8Bytes = UINT64_C(1) << 30;
 constexpr std::uint64_t kMaximumOverlayLines = 8192U;
 constexpr std::size_t kMaximumPointerHistory = 256U;
 constexpr std::size_t kMaximumPendingCanvasInput = 64U;
 constexpr std::uint64_t kMaximumStrokeSamples = UINT64_C(1048576);
-constexpr std::uint32_t kVectorSamplesPerSegment = 24U;
-constexpr float kVectorMiterLimit = 4.0F;
 constexpr std::uint64_t kApplicationGpuTileBudgetBytes = UINT64_C(512) * 1024U * 1024U;
 std::atomic<std::uint64_t> gApplicationTileUseSequence{};
 
@@ -84,35 +75,23 @@ std::uint64_t EstimateSnapshotPayloadBytes(InkpodSnapshot* snapshot) noexcept {
     view.struct_size = sizeof(view);
     InkpodSnapshotOverlay overlay{};
     overlay.struct_size = sizeof(overlay);
-    InkpodSnapshotVectorView vectors{};
-    vectors.struct_size = sizeof(vectors);
-    InkpodSnapshotAnnotationView annotations{};
-    annotations.struct_size = sizeof(annotations);
     InkpodSnapshotShootingFrameView shooting_frames{};
     shooting_frames.struct_size = sizeof(shooting_frames);
     InkpodSnapshotVanishingPointView vanishing_points{};
     vanishing_points.struct_size = sizeof(vanishing_points);
-    InkpodSnapshotVectorDiagnostics diagnostics{};
-    diagnostics.struct_size = sizeof(diagnostics);
     InkpodSnapshotRenderPlan plan{};
     plan.struct_size = sizeof(plan);
     if (inkpod_snapshot_get_view(snapshot, &view) != INKPOD_STATUS_OK
         || inkpod_snapshot_get_overlay(snapshot, &overlay) != INKPOD_STATUS_OK
-        || inkpod_snapshot_get_vectors(snapshot, &vectors) != INKPOD_STATUS_OK
-        || inkpod_snapshot_get_annotations(snapshot, &annotations) != INKPOD_STATUS_OK
         || inkpod_snapshot_get_shooting_frames(snapshot, &shooting_frames) != INKPOD_STATUS_OK
         || inkpod_snapshot_get_vanishing_points(snapshot, &vanishing_points) != INKPOD_STATUS_OK
-        || inkpod_snapshot_get_vector_diagnostics(snapshot, &diagnostics)
-            != INKPOD_STATUS_OK
         || inkpod_snapshot_get_render_plan(snapshot, &plan) != INKPOD_STATUS_OK) {
         return 0U;
     }
     std::uint64_t bytes = sizeof(InkpodSnapshotView) + sizeof(InkpodSnapshotTransform)
-        + sizeof(InkpodSnapshotOverlay) + sizeof(InkpodSnapshotVectorView)
-        + sizeof(InkpodSnapshotAnnotationView)
+        + sizeof(InkpodSnapshotOverlay)
         + sizeof(InkpodSnapshotShootingFrameView)
         + sizeof(InkpodSnapshotVanishingPointView)
-        + sizeof(InkpodSnapshotVectorDiagnostics)
         + sizeof(InkpodSnapshotRenderPlan);
     bytes = SaturatingAdd(bytes, SaturatingProduct(
         view.tile_count, view.tile_stride_bytes));
@@ -138,19 +117,6 @@ std::uint64_t EstimateSnapshotPayloadBytes(InkpodSnapshot* snapshot) noexcept {
     bytes = SaturatingAdd(bytes, SaturatingProduct(
         vanishing_points.radial_guide_count,
         vanishing_points.radial_guide_stride_bytes));
-    bytes = SaturatingAdd(bytes, SaturatingProduct(
-        vectors.segment_count, vectors.segment_stride_bytes));
-    bytes = SaturatingAdd(bytes, SaturatingProduct(
-        vectors.fill_count, vectors.fill_stride_bytes));
-    bytes = SaturatingAdd(bytes, SaturatingProduct(
-        vectors.boundary_path_count, sizeof(std::uint64_t)));
-    bytes = SaturatingAdd(bytes, SaturatingProduct(
-        annotations.object_count, annotations.object_stride_bytes));
-    bytes = SaturatingAdd(bytes, annotations.utf8_byte_count);
-    bytes = SaturatingAdd(bytes, SaturatingProduct(
-        annotations.point_count, annotations.point_stride_bytes));
-    bytes = SaturatingAdd(bytes, SaturatingProduct(
-        diagnostics.endpoint_count, diagnostics.endpoint_stride_bytes));
     bytes = SaturatingAdd(bytes, SaturatingProduct(
         plan.pass_count, plan.pass_stride_bytes));
     bytes = SaturatingAdd(bytes, SaturatingProduct(
@@ -369,7 +335,6 @@ public:
             }
         }
 
-        font_fallback_used_ = false;
         ComPtr<ID2D1Image> adjusted_content;
         if (HasAdjustmentPass()) {
             const HRESULT adjusted_result = BuildAdjustedContent(adjusted_content);
@@ -452,12 +417,6 @@ public:
                 d2d_context_->EndDraw();
                 return result;
             }
-            result = DrawVectorDiagnostics();
-            if (FAILED(result)) {
-                d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
-                d2d_context_->EndDraw();
-                return result;
-            }
             result = DrawOverlays();
             if (FAILED(result)) {
                 d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
@@ -488,19 +447,8 @@ public:
                 d2d_context_->EndDraw();
                 return result;
             }
-            result = DrawAnnotationSelection();
-            if (FAILED(result)) {
-                d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
-                d2d_context_->EndDraw();
-                return result;
-            }
             d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
             result = DrawRulers();
-            if (FAILED(result)) {
-                d2d_context_->EndDraw();
-                return result;
-            }
-            result = DrawFontFallbackWarning();
             if (FAILED(result)) {
                 d2d_context_->EndDraw();
                 return result;
@@ -537,16 +485,10 @@ public:
         transform.struct_size = sizeof(transform);
         InkpodSnapshotOverlay overlay{};
         overlay.struct_size = sizeof(overlay);
-        InkpodSnapshotVectorView vectors{};
-        vectors.struct_size = sizeof(vectors);
-        InkpodSnapshotAnnotationView annotations{};
-        annotations.struct_size = sizeof(annotations);
         InkpodSnapshotShootingFrameView shooting_frames{};
         shooting_frames.struct_size = sizeof(shooting_frames);
         InkpodSnapshotVanishingPointView vanishing_points{};
         vanishing_points.struct_size = sizeof(vanishing_points);
-        InkpodSnapshotVectorDiagnostics diagnostics{};
-        diagnostics.struct_size = sizeof(diagnostics);
         InkpodSnapshotRenderPlan render_plan{};
         render_plan.struct_size = sizeof(render_plan);
         const InkpodStatus view_status = inkpod_snapshot_get_view(snapshot, &view);
@@ -556,36 +498,24 @@ public:
         const InkpodStatus overlay_status = transform_status == INKPOD_STATUS_OK
             ? inkpod_snapshot_get_overlay(snapshot, &overlay)
             : transform_status;
-        const InkpodStatus vector_status = overlay_status == INKPOD_STATUS_OK
-            ? inkpod_snapshot_get_vectors(snapshot, &vectors)
-            : overlay_status;
-        const InkpodStatus annotation_status = vector_status == INKPOD_STATUS_OK
-            ? inkpod_snapshot_get_annotations(snapshot, &annotations)
-            : vector_status;
-        const InkpodStatus shooting_frame_status = annotation_status == INKPOD_STATUS_OK
+        const InkpodStatus shooting_frame_status = overlay_status == INKPOD_STATUS_OK
             ? inkpod_snapshot_get_shooting_frames(snapshot, &shooting_frames)
-            : annotation_status;
+            : overlay_status;
         const InkpodStatus vanishing_point_status = shooting_frame_status == INKPOD_STATUS_OK
             ? inkpod_snapshot_get_vanishing_points(snapshot, &vanishing_points)
             : shooting_frame_status;
-        const InkpodStatus diagnostics_status = vanishing_point_status == INKPOD_STATUS_OK
-            ? inkpod_snapshot_get_vector_diagnostics(snapshot, &diagnostics)
-            : vanishing_point_status;
-        const InkpodStatus render_plan_status = diagnostics_status == INKPOD_STATUS_OK
+        const InkpodStatus render_plan_status = vanishing_point_status == INKPOD_STATUS_OK
             ? inkpod_snapshot_get_render_plan(snapshot, &render_plan)
-            : diagnostics_status;
+            : vanishing_point_status;
         if (view_status != INKPOD_STATUS_OK || transform_status != INKPOD_STATUS_OK
-            || overlay_status != INKPOD_STATUS_OK || vector_status != INKPOD_STATUS_OK
-            || diagnostics_status != INKPOD_STATUS_OK || annotation_status != INKPOD_STATUS_OK
+            || overlay_status != INKPOD_STATUS_OK
             || shooting_frame_status != INKPOD_STATUS_OK
             || vanishing_point_status != INKPOD_STATUS_OK
             || render_plan_status != INKPOD_STATUS_OK
-            || !ValidateOverlay(overlay) || !ValidateVectors(vectors)
-            || !ValidateAnnotations(annotations)
+            || !ValidateOverlay(overlay)
             || !ValidateShootingFrames(shooting_frames)
             || !ValidateVanishingPoints(vanishing_points)
-            || !ValidateVectorDiagnostics(diagnostics)
-            || !ValidateRenderPlan(render_plan, view, vectors, annotations)) {
+            || !ValidateRenderPlan(render_plan, view)) {
             inkpod_snapshot_release(&snapshot);
             return E_INVALIDARG;
         }
@@ -596,11 +526,8 @@ public:
         snapshot_view_ = view;
         transform_ = transform;
         overlay_ = overlay;
-        vectors_ = vectors;
-        annotations_ = annotations;
         shooting_frames_ = shooting_frames;
         vanishing_points_ = vanishing_points;
-        vector_diagnostics_ = diagnostics;
         render_plan_ = render_plan;
         retained_snapshot_bytes_ = EstimateSnapshotPayloadBytes(snapshot);
         return RebuildTileCache();
@@ -651,11 +578,6 @@ public:
         return S_OK;
     }
 
-    HRESULT SetAnnotationSelection(std::uint64_t object_id) noexcept {
-        annotation_selection_id_ = object_id;
-        return S_OK;
-    }
-
     HRESULT GetGeometryPreviewForSmokeTest(
         CanvasGeometryPreview& preview) const noexcept {
         preview = geometry_preview_;
@@ -683,9 +605,6 @@ public:
         snapshot_view_ = {};
         transform_ = {};
         overlay_ = {};
-        vectors_ = {};
-        annotations_ = {};
-        vector_diagnostics_ = {};
         render_plan_ = {};
         tile_cache_.clear();
         retained_snapshot_bytes_ = 0U;
@@ -760,97 +679,6 @@ public:
         return true;
     }
 
-    HRESULT ValidateClosedVectorStrokeForSmokeTest() noexcept {
-        const auto* segment_bytes = reinterpret_cast<const std::byte*>(vectors_.segments);
-        for (std::uint64_t index = 0U; index < vectors_.segment_count;) {
-            const auto* segment = reinterpret_cast<const InkpodSnapshotVectorSegment*>(
-                segment_bytes + static_cast<std::size_t>(index * vectors_.segment_stride_bytes));
-            const VectorPathSpan path{
-                segment->path_id,
-                segment->z_order,
-                segment->flags,
-                segment,
-                segment->segment_count};
-            if ((path.flags & INKPOD_SNAPSHOT_VECTOR_CLOSED) != 0U) {
-                ComPtr<ID2D1PathGeometry> geometry;
-                const HRESULT create_result = CreateStrokeGeometry(path, geometry);
-                if (FAILED(create_result)) {
-                    return create_result;
-                }
-                const auto* last = reinterpret_cast<const InkpodSnapshotVectorSegment*>(
-                    reinterpret_cast<const std::byte*>(path.first)
-                    + static_cast<std::size_t>(
-                        (path.count - 1U) * vectors_.segment_stride_bytes));
-                constexpr float seam_probe_amount =
-                    (static_cast<float>(kVectorSamplesPerSegment) - 0.5F)
-                    / static_cast<float>(kVectorSamplesPerSegment);
-                BOOL contains{};
-                const HRESULT contains_result = geometry->FillContainsPoint(
-                    CubicPoint(*last, seam_probe_amount),
-                    nullptr,
-                    0.01F,
-                    &contains);
-                if (FAILED(contains_result)) {
-                    return contains_result;
-                }
-                if (contains == FALSE || path.count < 2U) {
-                    return E_FAIL;
-                }
-                const auto* next = reinterpret_cast<const InkpodSnapshotVectorSegment*>(
-                    reinterpret_cast<const std::byte*>(path.first)
-                    + static_cast<std::size_t>(vectors_.segment_stride_bytes));
-                float incoming_x{};
-                float incoming_y{};
-                float outgoing_x{};
-                float outgoing_y{};
-                if (!UnitDirection(
-                        D2D1::Point2F(path.first->p2.x, path.first->p2.y),
-                        D2D1::Point2F(path.first->p3.x, path.first->p3.y),
-                        incoming_x,
-                        incoming_y)
-                    || !UnitDirection(
-                        D2D1::Point2F(next->p0.x, next->p0.y),
-                        D2D1::Point2F(next->p1.x, next->p1.y),
-                        outgoing_x,
-                        outgoing_y)) {
-                    return E_FAIL;
-                }
-                float miter_x = -incoming_y - outgoing_y;
-                float miter_y = incoming_x + outgoing_x;
-                const float miter_length = std::hypot(miter_x, miter_y);
-                if (miter_length <= 0.000001F) {
-                    return E_FAIL;
-                }
-                miter_x /= miter_length;
-                miter_y /= miter_length;
-                const float denominator =
-                    miter_x * -outgoing_y + miter_y * outgoing_x;
-                const float half_width = path.first->width_end * 0.5F;
-                if (denominator <= 0.000001F || half_width <= 0.0F) {
-                    return E_FAIL;
-                }
-                const float corrected_miter = half_width / denominator;
-                if (corrected_miter <= half_width
-                    || corrected_miter > half_width * kVectorMiterLimit) {
-                    return E_FAIL;
-                }
-                const float corner_probe_distance =
-                    (half_width + corrected_miter) * 0.5F;
-                const D2D1_POINT_2F corner_probe = D2D1::Point2F(
-                    path.first->p3.x + miter_x * corner_probe_distance,
-                    path.first->p3.y + miter_y * corner_probe_distance);
-                contains = FALSE;
-                const HRESULT corner_result = geometry->FillContainsPoint(
-                    corner_probe, nullptr, 0.01F, &contains);
-                if (FAILED(corner_result)) {
-                    return corner_result;
-                }
-                return contains != FALSE ? S_OK : E_FAIL;
-            }
-            index += path.count;
-        }
-        return E_INVALIDARG;
-    }
 
     HRESULT RenderAndReadPixelForSmokeTest(
         UINT x,
@@ -969,217 +797,6 @@ private:
         return true;
     }
 
-    static bool ValidateVectors(const InkpodSnapshotVectorView& vectors) noexcept {
-        if (vectors.abi_version != INKPOD_ABI_VERSION || vectors.feature_flags != 0U
-            || vectors.segment_count > kMaximumVectorSegments
-            || vectors.fill_count > kMaximumVectorFills
-            || vectors.boundary_path_count > kMaximumVectorBoundaries
-            || vectors.segment_stride_bytes < sizeof(InkpodSnapshotVectorSegment)
-            || vectors.segment_stride_bytes % alignof(InkpodSnapshotVectorSegment) != 0U
-            || vectors.fill_stride_bytes < sizeof(InkpodSnapshotVectorFill)
-            || vectors.fill_stride_bytes % alignof(InkpodSnapshotVectorFill) != 0U
-            || (vectors.segment_count != 0U && vectors.segments == nullptr)
-            || (vectors.fill_count != 0U && vectors.fills == nullptr)
-            || (vectors.boundary_path_count != 0U && vectors.boundary_path_ids == nullptr)
-            || (vectors.segments != nullptr
-                && reinterpret_cast<std::uintptr_t>(vectors.segments)
-                    % alignof(InkpodSnapshotVectorSegment) != 0U)
-            || (vectors.fills != nullptr
-                && reinterpret_cast<std::uintptr_t>(vectors.fills)
-                    % alignof(InkpodSnapshotVectorFill) != 0U)
-            || (vectors.boundary_path_ids != nullptr
-                && reinterpret_cast<std::uintptr_t>(vectors.boundary_path_ids)
-                    % alignof(std::uint64_t) != 0U)
-            || vectors.segment_stride_bytes
-                > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())
-            || vectors.fill_stride_bytes
-                > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())
-            || (vectors.segment_count > 1U
-                && vectors.segment_stride_bytes
-                    > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())
-                        / (vectors.segment_count - 1U))
-            || (vectors.fill_count > 1U
-                && vectors.fill_stride_bytes
-                    > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())
-                        / (vectors.fill_count - 1U))) {
-            return false;
-        }
-        const auto* segment_bytes = reinterpret_cast<const std::byte*>(vectors.segments);
-        std::uint64_t active_path_id = 0U;
-        std::uint32_t active_count = 0U;
-        std::uint32_t next_index = 0U;
-        std::uint32_t active_flags = 0U;
-        for (std::uint64_t index = 0; index < vectors.segment_count; ++index) {
-            const auto* segment = reinterpret_cast<const InkpodSnapshotVectorSegment*>(
-                segment_bytes + static_cast<std::size_t>(index * vectors.segment_stride_bytes));
-            constexpr std::uint32_t known_flags = INKPOD_SNAPSHOT_VECTOR_CLOSED
-                | INKPOD_SNAPSHOT_VECTOR_STROKE_VISIBLE
-                | INKPOD_SNAPSHOT_VECTOR_SQUARE_CROSS_SECTION;
-            const auto finite_point = [](const InkpodVectorPoint& point) noexcept {
-                return std::isfinite(point.x) && std::isfinite(point.y)
-                    && std::abs(point.x) <= 2000000.0F && std::abs(point.y) <= 2000000.0F;
-            };
-            if (segment->struct_size < sizeof(InkpodSnapshotVectorSegment)
-                || segment->struct_size > vectors.segment_stride_bytes
-                || (segment->flags & ~known_flags) != 0U || segment->path_id == 0U
-                || segment->plane_id == 0U || segment->z_order > 4096U
-                || segment->segment_count == 0U
-                || segment->segment_index >= segment->segment_count
-                || !finite_point(segment->p0) || !finite_point(segment->p1)
-                || !finite_point(segment->p2) || !finite_point(segment->p3)
-                || !std::isfinite(segment->width_start)
-                || !std::isfinite(segment->width_end) || segment->width_start <= 0.0F
-                || segment->width_end <= 0.0F || segment->width_start > 4096.0F
-                || segment->width_end > 4096.0F) {
-                return false;
-            }
-            if (segment->segment_index == 0U) {
-                if (next_index != active_count) {
-                    return false;
-                }
-                active_path_id = segment->path_id;
-                active_count = segment->segment_count;
-                next_index = 0U;
-                active_flags = segment->flags;
-            }
-            if (segment->path_id != active_path_id || segment->segment_count != active_count
-                || segment->segment_index != next_index || segment->flags != active_flags) {
-                return false;
-            }
-            ++next_index;
-        }
-        if (vectors.segment_count != 0U && next_index != active_count) {
-            return false;
-        }
-        const auto* fill_bytes = reinterpret_cast<const std::byte*>(vectors.fills);
-        for (std::uint64_t index = 0; index < vectors.fill_count; ++index) {
-            const auto* fill = reinterpret_cast<const InkpodSnapshotVectorFill*>(
-                fill_bytes + static_cast<std::size_t>(index * vectors.fill_stride_bytes));
-            if (fill->struct_size < sizeof(InkpodSnapshotVectorFill)
-                || fill->struct_size > vectors.fill_stride_bytes || fill->reserved != 0U
-                || fill->fill_id == 0U || fill->plane_id == 0U || fill->z_order > 4096U
-                || fill->boundary_path_count == 0U
-                || fill->first_boundary_path > vectors.boundary_path_count
-                || fill->boundary_path_count
-                    > vectors.boundary_path_count - fill->first_boundary_path) {
-                return false;
-            }
-            for (std::uint64_t boundary = 0; boundary < fill->boundary_path_count; ++boundary) {
-                if (vectors.boundary_path_ids[fill->first_boundary_path + boundary] == 0U) {
-                    return false;
-                }
-            }
-        }
-        return true;
-    }
-
-    static bool ValidateVectorDiagnostics(
-        const InkpodSnapshotVectorDiagnostics& diagnostics) noexcept {
-        constexpr std::uint32_t known_flags = INKPOD_VECTOR_DIAGNOSTIC_ANTIALIAS
-            | INKPOD_VECTOR_DIAGNOSTIC_CENTERLINE_VISIBLE
-            | INKPOD_VECTOR_DIAGNOSTIC_CENTERLINE_ONLY
-            | INKPOD_VECTOR_DIAGNOSTIC_ENDPOINTS_VISIBLE;
-        if (diagnostics.feature_flags != INKPOD_FEATURE_NONE
-            || (diagnostics.flags & ~known_flags) != 0U
-            || ((diagnostics.flags & INKPOD_VECTOR_DIAGNOSTIC_CENTERLINE_ONLY) != 0U
-                && (diagnostics.flags & INKPOD_VECTOR_DIAGNOSTIC_CENTERLINE_VISIBLE) == 0U)
-            || diagnostics.endpoint_count > kMaximumVectorEndpoints
-            || diagnostics.endpoint_stride_bytes < sizeof(InkpodSnapshotVectorEndpoint)
-            || diagnostics.endpoint_stride_bytes
-                    % alignof(InkpodSnapshotVectorEndpoint)
-                != 0U
-            || (diagnostics.endpoint_count != 0U && diagnostics.endpoints == nullptr)
-            || (diagnostics.endpoint_count != 0U
-                && (diagnostics.flags & INKPOD_VECTOR_DIAGNOSTIC_ENDPOINTS_VISIBLE) == 0U)
-            || (diagnostics.endpoints != nullptr
-                && reinterpret_cast<std::uintptr_t>(diagnostics.endpoints)
-                        % alignof(InkpodSnapshotVectorEndpoint)
-                    != 0U)
-            || diagnostics.endpoint_stride_bytes
-                > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())
-            || (diagnostics.endpoint_count > 1U
-                && diagnostics.endpoint_stride_bytes
-                    > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())
-                        / (diagnostics.endpoint_count - 1U))) {
-            return false;
-        }
-        const auto* bytes = reinterpret_cast<const std::byte*>(diagnostics.endpoints);
-        std::uint64_t previous_path_id{};
-        std::uint32_t previous_endpoint{};
-        for (std::uint64_t index = 0U; index < diagnostics.endpoint_count; ++index) {
-            const auto* endpoint = reinterpret_cast<const InkpodSnapshotVectorEndpoint*>(
-                bytes + static_cast<std::size_t>(
-                    index * diagnostics.endpoint_stride_bytes));
-            if (endpoint->struct_size < sizeof(InkpodSnapshotVectorEndpoint)
-                || endpoint->struct_size > diagnostics.endpoint_stride_bytes
-                || (endpoint->endpoint != INKPOD_VECTOR_ENDPOINT_START
-                    && endpoint->endpoint != INKPOD_VECTOR_ENDPOINT_END)
-                || endpoint->path_id == 0U || endpoint->plane_id == 0U
-                || !std::isfinite(endpoint->point.x)
-                || !std::isfinite(endpoint->point.y)
-                || std::abs(endpoint->point.x) > 2000000.0F
-                || std::abs(endpoint->point.y) > 2000000.0F
-                || (index != 0U
-                    && (endpoint->path_id < previous_path_id
-                        || (endpoint->path_id == previous_path_id
-                            && endpoint->endpoint <= previous_endpoint)))) {
-                return false;
-            }
-            previous_path_id = endpoint->path_id;
-            previous_endpoint = endpoint->endpoint;
-        }
-        return true;
-    }
-
-    static bool ValidateAnnotations(const InkpodSnapshotAnnotationView& view) noexcept {
-        constexpr std::uint32_t known_styles = INKPOD_ANNOTATION_STYLE_BOLD
-            | INKPOD_ANNOTATION_STYLE_ITALIC | INKPOD_ANNOTATION_STYLE_UNDERLINE;
-        if (view.abi_version != INKPOD_ABI_VERSION || view.feature_flags != 0U
-            || view.object_count > kMaximumAnnotations
-            || view.point_count > kMaximumAnnotationPoints
-            || view.utf8_byte_count > kMaximumAnnotationUtf8Bytes
-            || view.object_stride_bytes < sizeof(InkpodSnapshotAnnotation)
-            || view.object_stride_bytes % alignof(InkpodSnapshotAnnotation) != 0U
-            || view.point_stride_bytes < sizeof(InkpodAnnotationPoint)
-            || view.point_stride_bytes % alignof(InkpodAnnotationPoint) != 0U
-            || (view.object_count != 0U && view.objects == nullptr)
-            || (view.point_count != 0U && view.points == nullptr)
-            || (view.utf8_byte_count != 0U && view.utf8_bytes == nullptr)
-            || view.object_stride_bytes > static_cast<std::uint64_t>(SIZE_MAX)
-            || view.point_stride_bytes > static_cast<std::uint64_t>(SIZE_MAX)
-            || (view.object_count > 1U && view.object_stride_bytes
-                > static_cast<std::uint64_t>(SIZE_MAX) / (view.object_count - 1U))
-            || (view.point_count > 1U && view.point_stride_bytes
-                > static_cast<std::uint64_t>(SIZE_MAX) / (view.point_count - 1U))) {
-            return false;
-        }
-        const auto range_is_valid = [](std::uint64_t first, std::uint64_t count,
-                                        std::uint64_t total) noexcept {
-            return first <= total && count <= total - first;
-        };
-        const auto* object_bytes = reinterpret_cast<const std::byte*>(view.objects);
-        for (std::uint64_t index = 0U; index < view.object_count; ++index) {
-            const auto* object = reinterpret_cast<const InkpodSnapshotAnnotation*>(
-                object_bytes + static_cast<std::size_t>(index * view.object_stride_bytes));
-            if (object->struct_size < sizeof(InkpodSnapshotAnnotation)
-                || object->struct_size > view.object_stride_bytes || object->feature_flags != 0U
-                || object->object_id == 0U || object->layer_id == 0U
-                || object->bounds.width <= 0 || object->bounds.height <= 0
-                || (object->style_flags & ~known_styles) != 0U
-                || (object->kind < INKPOD_ANNOTATION_TEXT
-                    || object->kind > INKPOD_ANNOTATION_VALUE)
-                || (object->output != INKPOD_ANNOTATION_OUTPUT_NORMAL
-                    && object->output != INKPOD_ANNOTATION_OUTPUT_INSTRUCTION)
-                || !range_is_valid(
-                    object->font_utf8_offset, object->font_utf8_bytes, view.utf8_byte_count)
-                || !range_is_valid(
-                    object->text_utf8_offset, object->text_utf8_bytes, view.utf8_byte_count)
-                || !range_is_valid(object->first_point, object->point_count, view.point_count)) {
-                return false;
-            }
-        }
-        return true;
-    }
 
     static bool ValidateShootingFrames(
         const InkpodSnapshotShootingFrameView& view) noexcept {
@@ -1249,9 +866,7 @@ private:
 
     static bool ValidateRenderPlan(
         const InkpodSnapshotRenderPlan& plan,
-        const InkpodSnapshotView& view,
-        const InkpodSnapshotVectorView& vectors,
-        const InkpodSnapshotAnnotationView& annotations) noexcept {
+        const InkpodSnapshotView& view) noexcept {
         constexpr std::uint64_t adjustment_lut_bytes = 3U * 256U;
         if (plan.abi_version != INKPOD_ABI_VERSION || plan.feature_flags != 0U
             || plan.pass_count > kMaximumRenderPasses
@@ -1311,33 +926,6 @@ private:
                         return false;
                     }
                     break;
-                case INKPOD_RENDER_PASS_VECTOR_FILLS:
-                    if (active_layer == 0U || pass->layer_id != active_layer
-                        || pass->plane_id == 0U || pass->item_count == 0U
-                        || pass->opacity_milli != 1000U
-                        || !range_is_valid(
-                            pass->first_item, pass->item_count, vectors.fill_count)) {
-                        return false;
-                    }
-                    break;
-                case INKPOD_RENDER_PASS_VECTOR_STROKES:
-                    if (active_layer == 0U || pass->layer_id != active_layer
-                        || pass->plane_id == 0U || pass->item_count == 0U
-                        || pass->opacity_milli != 1000U
-                        || !range_is_valid(
-                            pass->first_item, pass->item_count, vectors.segment_count)) {
-                        return false;
-                    }
-                    break;
-                case INKPOD_RENDER_PASS_ANNOTATIONS:
-                    if (active_layer == 0U || pass->layer_id != active_layer
-                        || pass->plane_id != 0U || pass->item_count == 0U
-                        || pass->opacity_milli != 1000U
-                        || !range_is_valid(
-                            pass->first_item, pass->item_count, annotations.object_count)) {
-                        return false;
-                    }
-                    break;
                 case INKPOD_RENDER_PASS_ADJUSTMENT:
                     if (active_layer != 0U || pass->layer_id == 0U || pass->plane_id != 0U
                         || pass->opacity_milli != 1000U || pass->item_count != 1U
@@ -1352,409 +940,9 @@ private:
         return active_layer == 0U;
     }
 
-    struct VectorPathSpan {
-        std::uint64_t id{};
-        std::uint32_t z_order{};
-        std::uint32_t flags{};
-        const InkpodSnapshotVectorSegment* first{};
-        std::uint32_t count{};
-    };
 
-    static D2D1_COLOR_F VectorColor(std::uint32_t rgba) noexcept {
-        return D2D1::ColorF(
-            static_cast<float>((rgba >> 24U) & 0xffU) / 255.0F,
-            static_cast<float>((rgba >> 16U) & 0xffU) / 255.0F,
-            static_cast<float>((rgba >> 8U) & 0xffU) / 255.0F,
-            static_cast<float>(rgba & 0xffU) / 255.0F);
-    }
 
-    static D2D1_POINT_2F CubicPoint(
-        const InkpodSnapshotVectorSegment& segment,
-        float amount) noexcept {
-        const float inverse = 1.0F - amount;
-        const std::array<float, 4> weights{
-            inverse * inverse * inverse,
-            3.0F * inverse * inverse * amount,
-            3.0F * inverse * amount * amount,
-            amount * amount * amount};
-        return D2D1::Point2F(
-            weights[0] * segment.p0.x + weights[1] * segment.p1.x
-                + weights[2] * segment.p2.x + weights[3] * segment.p3.x,
-            weights[0] * segment.p0.y + weights[1] * segment.p1.y
-                + weights[2] * segment.p2.y + weights[3] * segment.p3.y);
-    }
-
-    static float CubicWidth(
-        const InkpodSnapshotVectorSegment& segment,
-        float amount) noexcept {
-        return segment.width_start + (segment.width_end - segment.width_start) * amount;
-    }
-
-    static bool UnitDirection(
-        D2D1_POINT_2F start,
-        D2D1_POINT_2F end,
-        float& x,
-        float& y) noexcept {
-        x = end.x - start.x;
-        y = end.y - start.y;
-        const float length = std::hypot(x, y);
-        if (length <= 0.000001F) {
-            return false;
-        }
-        x /= length;
-        y /= length;
-        return true;
-    }
-
-    HRESULT DrawFillGeometry(
-        const InkpodSnapshotVectorFill& fill,
-        const std::unordered_map<std::uint64_t, VectorPathSpan>& paths,
-        ID2D1SolidColorBrush* brush) noexcept {
-        ComPtr<ID2D1PathGeometry> geometry;
-        HRESULT result = shared_.D2dFactory()->CreatePathGeometry(&geometry);
-        if (FAILED(result)) {
-            return result;
-        }
-        ComPtr<ID2D1GeometrySink> sink;
-        result = geometry->Open(&sink);
-        if (FAILED(result)) {
-            return result;
-        }
-        sink->SetFillMode(D2D1_FILL_MODE_ALTERNATE);
-        for (std::uint64_t index = 0; index < fill.boundary_path_count; ++index) {
-            const std::uint64_t path_id =
-                vectors_.boundary_path_ids[fill.first_boundary_path + index];
-            const auto iterator = paths.find(path_id);
-            if (iterator == paths.end()
-                || (iterator->second.flags & INKPOD_SNAPSHOT_VECTOR_CLOSED) == 0U) {
-                sink->Close();
-                return E_INVALIDARG;
-            }
-            const VectorPathSpan& path = iterator->second;
-            sink->BeginFigure(
-                D2D1::Point2F(path.first->p0.x, path.first->p0.y),
-                D2D1_FIGURE_BEGIN_FILLED);
-            for (std::uint32_t segment_index = 0; segment_index < path.count;
-                 ++segment_index) {
-                const auto* segment = reinterpret_cast<const InkpodSnapshotVectorSegment*>(
-                    reinterpret_cast<const std::byte*>(path.first)
-                    + static_cast<std::size_t>(segment_index * vectors_.segment_stride_bytes));
-                sink->AddBezier(D2D1::BezierSegment(
-                    D2D1::Point2F(segment->p1.x, segment->p1.y),
-                    D2D1::Point2F(segment->p2.x, segment->p2.y),
-                    D2D1::Point2F(segment->p3.x, segment->p3.y)));
-            }
-            sink->EndFigure(D2D1_FIGURE_END_CLOSED);
-        }
-        result = sink->Close();
-        if (FAILED(result)) {
-            return result;
-        }
-        brush->SetColor(VectorColor(fill.color_rgba));
-        const D2D1_ANTIALIAS_MODE previous_antialias = d2d_context_->GetAntialiasMode();
-        d2d_context_->SetAntialiasMode(
-            (vector_diagnostics_.flags & INKPOD_VECTOR_DIAGNOSTIC_ANTIALIAS) != 0U
-                ? D2D1_ANTIALIAS_MODE_PER_PRIMITIVE
-                : D2D1_ANTIALIAS_MODE_ALIASED);
-        d2d_context_->FillGeometry(geometry.Get(), brush);
-        d2d_context_->SetAntialiasMode(previous_antialias);
-        return S_OK;
-    }
-
-    HRESULT CreateStrokeGeometry(
-        const VectorPathSpan& path,
-        ComPtr<ID2D1PathGeometry>& geometry) noexcept {
-        try {
-            std::vector<D2D1_POINT_2F> centers;
-            std::vector<float> widths;
-            centers.reserve(
-                static_cast<std::size_t>(path.count) * kVectorSamplesPerSegment + 1U);
-            widths.reserve(centers.capacity());
-            for (std::uint32_t segment_index = 0; segment_index < path.count;
-                 ++segment_index) {
-                const auto* segment = reinterpret_cast<const InkpodSnapshotVectorSegment*>(
-                    reinterpret_cast<const std::byte*>(path.first)
-                    + static_cast<std::size_t>(segment_index * vectors_.segment_stride_bytes));
-                for (std::uint32_t sample = 0U; sample <= kVectorSamplesPerSegment;
-                     ++sample) {
-                    if (segment_index != 0U && sample == 0U) {
-                        continue;
-                    }
-                    const float amount = static_cast<float>(sample)
-                        / static_cast<float>(kVectorSamplesPerSegment);
-                    centers.push_back(CubicPoint(*segment, amount));
-                    widths.push_back(CubicWidth(*segment, amount));
-                }
-            }
-            const bool closed = (path.flags & INKPOD_SNAPSHOT_VECTOR_CLOSED) != 0U;
-            if (closed && centers.size() > 1U
-                && std::abs(centers.front().x - centers.back().x) < 0.0001F
-                && std::abs(centers.front().y - centers.back().y) < 0.0001F) {
-                centers.pop_back();
-                widths.pop_back();
-            }
-            if (centers.size() < 2U) {
-                return E_INVALIDARG;
-            }
-            const bool square_cross_section =
-                (path.flags & INKPOD_SNAPSHOT_VECTOR_SQUARE_CROSS_SECTION) != 0U;
-            if (!closed && square_cross_section) {
-                float start_x{};
-                float start_y{};
-                float end_x{};
-                float end_y{};
-                if (UnitDirection(centers[0], centers[1], start_x, start_y)) {
-                    centers[0].x -= start_x * widths[0] * 0.5F;
-                    centers[0].y -= start_y * widths[0] * 0.5F;
-                }
-                const std::size_t last = centers.size() - 1U;
-                if (UnitDirection(centers[last - 1U], centers[last], end_x, end_y)) {
-                    centers[last].x += end_x * widths[last] * 0.5F;
-                    centers[last].y += end_y * widths[last] * 0.5F;
-                }
-            }
-            std::vector<D2D1_POINT_2F> left;
-            std::vector<D2D1_POINT_2F> right;
-            left.reserve(centers.size() * 2U);
-            right.reserve(centers.size() * 2U);
-            for (std::size_t index = 0; index < centers.size(); ++index) {
-                const std::size_t previous = index == 0U
-                    ? (closed ? centers.size() - 1U : 0U)
-                    : index - 1U;
-                const std::size_t next = index + 1U == centers.size()
-                    ? (closed ? 0U : centers.size() - 1U)
-                    : index + 1U;
-                float incoming_x{};
-                float incoming_y{};
-                float outgoing_x{};
-                float outgoing_y{};
-                const bool has_incoming = (closed || index != 0U)
-                    && UnitDirection(
-                        centers[previous], centers[index], incoming_x, incoming_y);
-                const bool has_outgoing = (closed || index + 1U != centers.size())
-                    && UnitDirection(
-                        centers[index], centers[next], outgoing_x, outgoing_y);
-                if (!has_incoming && !has_outgoing) {
-                    incoming_x = 1.0F;
-                    incoming_y = 0.0F;
-                    outgoing_x = incoming_x;
-                    outgoing_y = incoming_y;
-                } else if (!has_incoming) {
-                    incoming_x = outgoing_x;
-                    incoming_y = outgoing_y;
-                } else if (!has_outgoing) {
-                    outgoing_x = incoming_x;
-                    outgoing_y = incoming_y;
-                }
-                const float half_width = widths[index] * 0.5F;
-                const float incoming_normal_x = -incoming_y;
-                const float incoming_normal_y = incoming_x;
-                const float outgoing_normal_x = -outgoing_y;
-                const float outgoing_normal_y = outgoing_x;
-                float miter_x = incoming_normal_x + outgoing_normal_x;
-                float miter_y = incoming_normal_y + outgoing_normal_y;
-                const float miter_vector_length = std::hypot(miter_x, miter_y);
-                if (miter_vector_length > 0.000001F) {
-                    miter_x /= miter_vector_length;
-                    miter_y /= miter_vector_length;
-                    const float denominator =
-                        miter_x * outgoing_normal_x + miter_y * outgoing_normal_y;
-                    if (denominator > 0.000001F) {
-                        const float miter_length = half_width / denominator;
-                        if (miter_length <= half_width * kVectorMiterLimit) {
-                            left.push_back(D2D1::Point2F(
-                                centers[index].x + miter_x * miter_length,
-                                centers[index].y + miter_y * miter_length));
-                            right.push_back(D2D1::Point2F(
-                                centers[index].x - miter_x * miter_length,
-                                centers[index].y - miter_y * miter_length));
-                            continue;
-                        }
-                    }
-                }
-                left.push_back(D2D1::Point2F(
-                    centers[index].x + incoming_normal_x * half_width,
-                    centers[index].y + incoming_normal_y * half_width));
-                right.push_back(D2D1::Point2F(
-                    centers[index].x - incoming_normal_x * half_width,
-                    centers[index].y - incoming_normal_y * half_width));
-                if (incoming_normal_x != outgoing_normal_x
-                    || incoming_normal_y != outgoing_normal_y) {
-                    left.push_back(D2D1::Point2F(
-                        centers[index].x + outgoing_normal_x * half_width,
-                        centers[index].y + outgoing_normal_y * half_width));
-                    right.push_back(D2D1::Point2F(
-                        centers[index].x - outgoing_normal_x * half_width,
-                        centers[index].y - outgoing_normal_y * half_width));
-                }
-            }
-            geometry.Reset();
-            HRESULT result = shared_.D2dFactory()->CreatePathGeometry(&geometry);
-            if (FAILED(result)) {
-                return result;
-            }
-            ComPtr<ID2D1GeometrySink> sink;
-            result = geometry->Open(&sink);
-            if (FAILED(result)) {
-                return result;
-            }
-            sink->SetFillMode(D2D1_FILL_MODE_ALTERNATE);
-            if (closed) {
-                sink->BeginFigure(left.front(), D2D1_FIGURE_BEGIN_FILLED);
-                sink->AddLines(
-                    left.data() + 1U, static_cast<UINT32>(left.size() - 1U));
-                sink->EndFigure(D2D1_FIGURE_END_CLOSED);
-                sink->BeginFigure(right.front(), D2D1_FIGURE_BEGIN_FILLED);
-                sink->AddLines(
-                    right.data() + 1U, static_cast<UINT32>(right.size() - 1U));
-                sink->EndFigure(D2D1_FIGURE_END_CLOSED);
-            } else {
-                sink->BeginFigure(left.front(), D2D1_FIGURE_BEGIN_FILLED);
-                sink->AddLines(
-                    left.data() + 1U, static_cast<UINT32>(left.size() - 1U));
-                if (!square_cross_section) {
-                    const float radius = widths.back() * 0.5F;
-                    sink->AddArc(D2D1::ArcSegment(
-                        right.back(),
-                        D2D1::SizeF(radius, radius),
-                        0.0F,
-                        D2D1_SWEEP_DIRECTION_CLOCKWISE,
-                        D2D1_ARC_SIZE_SMALL));
-                }
-                for (auto iterator = right.rbegin() + (square_cross_section ? 0U : 1U);
-                     iterator != right.rend(); ++iterator) {
-                    sink->AddLine(*iterator);
-                }
-                if (!square_cross_section) {
-                    const float radius = widths.front() * 0.5F;
-                    sink->AddArc(D2D1::ArcSegment(
-                        left.front(),
-                        D2D1::SizeF(radius, radius),
-                        0.0F,
-                        D2D1_SWEEP_DIRECTION_CLOCKWISE,
-                        D2D1_ARC_SIZE_SMALL));
-                }
-                sink->EndFigure(D2D1_FIGURE_END_CLOSED);
-            }
-            result = sink->Close();
-            if (FAILED(result)) {
-                return result;
-            }
-            return S_OK;
-        } catch (const std::bad_alloc&) {
-            return E_OUTOFMEMORY;
-        }
-    }
-
-    HRESULT DrawStrokeGeometry(
-        const VectorPathSpan& path,
-        ID2D1SolidColorBrush* brush) noexcept {
-        ComPtr<ID2D1PathGeometry> geometry;
-        const HRESULT result = CreateStrokeGeometry(path, geometry);
-        if (FAILED(result)) {
-            return result;
-        }
-        brush->SetColor(VectorColor(path.first->color_rgba));
-        const D2D1_ANTIALIAS_MODE previous_antialias = d2d_context_->GetAntialiasMode();
-        d2d_context_->SetAntialiasMode(
-            (vector_diagnostics_.flags & INKPOD_VECTOR_DIAGNOSTIC_ANTIALIAS) != 0U
-                ? D2D1_ANTIALIAS_MODE_PER_PRIMITIVE
-                : D2D1_ANTIALIAS_MODE_ALIASED);
-        d2d_context_->FillGeometry(geometry.Get(), brush);
-        d2d_context_->SetAntialiasMode(previous_antialias);
-        return S_OK;
-    }
-
-    HRESULT CreateCenterlineGeometry(
-        const VectorPathSpan& path,
-        ComPtr<ID2D1PathGeometry>& geometry) noexcept {
-        geometry.Reset();
-        HRESULT result = shared_.D2dFactory()->CreatePathGeometry(&geometry);
-        if (FAILED(result)) {
-            return result;
-        }
-        ComPtr<ID2D1GeometrySink> sink;
-        result = geometry->Open(&sink);
-        if (FAILED(result)) {
-            return result;
-        }
-        sink->BeginFigure(
-            D2D1::Point2F(path.first->p0.x, path.first->p0.y),
-            D2D1_FIGURE_BEGIN_HOLLOW);
-        for (std::uint32_t index = 0U; index < path.count; ++index) {
-            const auto* segment = reinterpret_cast<const InkpodSnapshotVectorSegment*>(
-                reinterpret_cast<const std::byte*>(path.first)
-                + static_cast<std::size_t>(index * vectors_.segment_stride_bytes));
-            sink->AddBezier(D2D1::BezierSegment(
-                D2D1::Point2F(segment->p1.x, segment->p1.y),
-                D2D1::Point2F(segment->p2.x, segment->p2.y),
-                D2D1::Point2F(segment->p3.x, segment->p3.y)));
-        }
-        sink->EndFigure(
-            (path.flags & INKPOD_SNAPSHOT_VECTOR_CLOSED) != 0U
-                ? D2D1_FIGURE_END_CLOSED
-                : D2D1_FIGURE_END_OPEN);
-        return sink->Close();
-    }
-
-    HRESULT BuildVectorPathMap(
-        std::unordered_map<std::uint64_t, VectorPathSpan>& paths) const noexcept {
-        try {
-            paths.clear();
-            paths.reserve(static_cast<std::size_t>(vectors_.segment_count));
-            const auto* segment_bytes = reinterpret_cast<const std::byte*>(vectors_.segments);
-            for (std::uint64_t index = 0; index < vectors_.segment_count;) {
-                const auto* segment = reinterpret_cast<const InkpodSnapshotVectorSegment*>(
-                    segment_bytes + static_cast<std::size_t>(index * vectors_.segment_stride_bytes));
-                const VectorPathSpan span{
-                    segment->path_id,
-                    segment->z_order,
-                    segment->flags,
-                    segment,
-                    segment->segment_count};
-                if (!paths.emplace(span.id, span).second) {
-                    return E_INVALIDARG;
-                }
-                index += span.count;
-            }
-            return S_OK;
-        } catch (const std::bad_alloc&) {
-            return E_OUTOFMEMORY;
-        }
-    }
-
-    static HRESULT Utf8ToWide(
-        const std::uint8_t* bytes,
-        std::uint64_t byte_count,
-        std::wstring& output) noexcept {
-        output.clear();
-        if (byte_count == 0U) {
-            return S_OK;
-        }
-        if (bytes == nullptr || byte_count > static_cast<std::uint64_t>(INT_MAX)) {
-            return E_INVALIDARG;
-        }
-        const int count = MultiByteToWideChar(
-            CP_UTF8, MB_ERR_INVALID_CHARS, reinterpret_cast<const char*>(bytes),
-            static_cast<int>(byte_count), nullptr, 0);
-        if (count <= 0) {
-            return E_INVALIDARG;
-        }
-        try {
-            output.resize(static_cast<std::size_t>(count));
-        } catch (const std::bad_alloc&) {
-            return E_OUTOFMEMORY;
-        }
-        if (MultiByteToWideChar(
-                CP_UTF8, MB_ERR_INVALID_CHARS, reinterpret_cast<const char*>(bytes),
-                static_cast<int>(byte_count), output.data(), count) != count) {
-            output.clear();
-            return E_INVALIDARG;
-        }
-        return S_OK;
-    }
-
-    static D2D1_COLOR_F AnnotationColor(const InkpodColorValue& value) noexcept {
+    static D2D1_COLOR_F CanvasColor(const InkpodColorValue& value) noexcept {
         const float maximum = value.depth == INKPOD_COLOR_DEPTH_16 ? 65535.0F : 255.0F;
         return D2D1::ColorF(
             static_cast<float>(value.red) / maximum,
@@ -1763,181 +951,6 @@ private:
             static_cast<float>(value.alpha) / maximum);
     }
 
-    HRESULT ResolveAnnotationFont(
-        const InkpodSnapshotAnnotation& object,
-        std::wstring& family) noexcept {
-        HRESULT result = Utf8ToWide(
-            annotations_.utf8_bytes + static_cast<std::size_t>(object.font_utf8_offset),
-            object.font_utf8_bytes,
-            family);
-        if (FAILED(result)) {
-            return result;
-        }
-        if (family.empty()) {
-            family.assign(L"Segoe UI");
-            return S_OK;
-        }
-        ComPtr<IDWriteFontCollection> fonts;
-        result = shared_.DwriteFactory()->GetSystemFontCollection(&fonts, FALSE);
-        if (FAILED(result)) {
-            return result;
-        }
-        UINT32 family_index{};
-        BOOL exists{};
-        result = fonts->FindFamilyName(family.c_str(), &family_index, &exists);
-        if (FAILED(result)) {
-            return result;
-        }
-        if (exists == FALSE) {
-            family.assign(L"Segoe UI");
-            font_fallback_used_ = true;
-        }
-        return S_OK;
-    }
-
-    HRESULT AnnotationTextFormat(
-        const InkpodSnapshotAnnotation& object,
-        IDWriteTextFormat** output) noexcept {
-        if (output == nullptr || shared_.DwriteFactory() == nullptr) {
-            return E_INVALIDARG;
-        }
-        *output = nullptr;
-        std::wstring family;
-        HRESULT result = ResolveAnnotationFont(object, family);
-        if (FAILED(result)) {
-            return result;
-        }
-        std::wstring key;
-        try {
-            key = family + L"\x1f" + std::to_wstring(object.font_size_milli) + L"\x1f"
-                + std::to_wstring(object.style_flags);
-        } catch (const std::bad_alloc&) {
-            return E_OUTOFMEMORY;
-        }
-        const auto cached = text_format_cache_.find(key);
-        if (cached != text_format_cache_.end()) {
-            *output = cached->second.Get();
-            (*output)->AddRef();
-            return S_OK;
-        }
-        ComPtr<IDWriteTextFormat> format;
-        result = shared_.DwriteFactory()->CreateTextFormat(
-            family.c_str(),
-            nullptr,
-            (object.style_flags & INKPOD_ANNOTATION_STYLE_BOLD) != 0U
-                ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
-            (object.style_flags & INKPOD_ANNOTATION_STYLE_ITALIC) != 0U
-                ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,
-            DWRITE_FONT_STRETCH_NORMAL,
-            static_cast<float>(object.font_size_milli) / 1000.0F,
-            L"",
-            &format);
-        if (FAILED(result)) {
-            return result;
-        }
-        try {
-            if (text_format_cache_.size() >= 64U) {
-                text_format_cache_.clear();
-            }
-            const auto [entry, inserted] = text_format_cache_.emplace(key, format);
-            (void)inserted;
-            *output = entry->second.Get();
-            (*output)->AddRef();
-            return S_OK;
-        } catch (const std::bad_alloc&) {
-            return E_OUTOFMEMORY;
-        }
-    }
-
-    HRESULT DrawAnnotationText(
-        const InkpodSnapshotAnnotation& object,
-        ID2D1SolidColorBrush* brush) noexcept {
-        std::wstring text;
-        HRESULT result = Utf8ToWide(
-            annotations_.utf8_bytes + static_cast<std::size_t>(object.text_utf8_offset),
-            object.text_utf8_bytes,
-            text);
-        if (FAILED(result)) {
-            return result;
-        }
-        ComPtr<IDWriteTextFormat> format;
-        result = AnnotationTextFormat(object, &format);
-        if (FAILED(result)) {
-            return result;
-        }
-        ComPtr<IDWriteTextLayout> layout;
-        result = shared_.DwriteFactory()->CreateTextLayout(
-            text.data(), static_cast<UINT32>(text.size()), format.Get(),
-            static_cast<float>(object.bounds.width),
-            static_cast<float>(object.bounds.height),
-            &layout);
-        if (FAILED(result)) {
-            return result;
-        }
-        if ((object.style_flags & INKPOD_ANNOTATION_STYLE_UNDERLINE) != 0U) {
-            const DWRITE_TEXT_RANGE range{0U, static_cast<UINT32>(text.size())};
-            result = layout->SetUnderline(TRUE, range);
-            if (FAILED(result)) {
-                return result;
-            }
-        }
-        d2d_context_->DrawTextLayout(
-            D2D1::Point2F(
-                static_cast<float>(object.bounds.x), static_cast<float>(object.bounds.y)),
-            layout.Get(), brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
-        return S_OK;
-    }
-
-    HRESULT DrawAnnotationGeometry(
-        const InkpodSnapshotAnnotation& object,
-        ID2D1SolidColorBrush* brush) noexcept {
-        if (object.point_count < 2U) {
-            return E_INVALIDARG;
-        }
-        const auto* point_bytes = reinterpret_cast<const std::byte*>(annotations_.points);
-        const float width = static_cast<float>(object.stroke_width_milli) / 1000.0F;
-        const auto point_at = [&](std::uint64_t offset) noexcept {
-            const auto* point = reinterpret_cast<const InkpodAnnotationPoint*>(
-                point_bytes + static_cast<std::size_t>(
-                    (object.first_point + offset) * annotations_.point_stride_bytes));
-            return D2D1::Point2F(
-                static_cast<float>(point->x_milli) / 1000.0F,
-                static_cast<float>(point->y_milli) / 1000.0F);
-        };
-        D2D1_POINT_2F previous = point_at(0U);
-        for (std::uint64_t index = 1U; index < object.point_count; ++index) {
-            const D2D1_POINT_2F current = point_at(index);
-            d2d_context_->DrawLine(previous, current, brush, width);
-            previous = current;
-        }
-        return S_OK;
-    }
-
-    HRESULT DrawAnnotationPass(
-        const InkpodSnapshotRenderPass& pass,
-        ID2D1SolidColorBrush* brush) noexcept {
-        const auto* object_bytes = reinterpret_cast<const std::byte*>(annotations_.objects);
-        for (std::uint64_t offset = 0U; offset < pass.item_count; ++offset) {
-            const auto* object = reinterpret_cast<const InkpodSnapshotAnnotation*>(
-                object_bytes + static_cast<std::size_t>(
-                    (pass.first_item + offset) * annotations_.object_stride_bytes));
-            brush->SetColor(AnnotationColor(object->color));
-            HRESULT result = S_OK;
-            if (object->kind == INKPOD_ANNOTATION_TEXT
-                || object->kind == INKPOD_ANNOTATION_VALUE) {
-                result = DrawAnnotationText(*object, brush);
-            }
-            if (SUCCEEDED(result) && (object->kind == INKPOD_ANNOTATION_STROKE
-                    || object->kind == INKPOD_ANNOTATION_LEADER
-                    || object->kind == INKPOD_ANNOTATION_VALUE)) {
-                result = DrawAnnotationGeometry(*object, brush);
-            }
-            if (FAILED(result)) {
-                return result;
-            }
-        }
-        return S_OK;
-    }
 
     HRESULT DrawShootingFrame() noexcept {
         if (shooting_frames_.frame_count == 0U || shooting_frames_.frames == nullptr) {
@@ -2020,7 +1033,7 @@ private:
             const auto* guide = reinterpret_cast<const InkpodSnapshotRadialGuide*>(
                 guide_bytes + static_cast<std::size_t>(
                     index * vanishing_points_.radial_guide_stride_bytes));
-            D2D1_COLOR_F color = AnnotationColor(guide->color);
+            D2D1_COLOR_F color = CanvasColor(guide->color);
             color.a *= static_cast<float>(guide->opacity_milli) / 1000.0F;
             brush->SetColor(color);
             d2d_context_->DrawLine(
@@ -2039,7 +1052,7 @@ private:
             const auto* point = reinterpret_cast<const InkpodVanishingPointInfo*>(
                 point_bytes + static_cast<std::size_t>(
                     index * vanishing_points_.point_stride_bytes));
-            D2D1_COLOR_F color = AnnotationColor(point->color);
+            D2D1_COLOR_F color = CanvasColor(point->color);
             color.a *= static_cast<float>(point->opacity_milli) / 1000.0F;
             brush->SetColor(color);
             const D2D1_POINT_2F center = D2D1::Point2F(
@@ -2057,96 +1070,9 @@ private:
         return S_OK;
     }
 
-    HRESULT DrawAnnotationSelection() noexcept {
-        if (annotation_selection_id_ == 0U || annotations_.objects == nullptr) {
-            return S_OK;
-        }
-        const auto* object_bytes = reinterpret_cast<const std::byte*>(annotations_.objects);
-        const InkpodSnapshotAnnotation* selected{};
-        for (std::uint64_t index = 0U; index < annotations_.object_count; ++index) {
-            const auto* object = reinterpret_cast<const InkpodSnapshotAnnotation*>(
-                object_bytes + static_cast<std::size_t>(
-                    index * annotations_.object_stride_bytes));
-            if (object->object_id == annotation_selection_id_) {
-                selected = object;
-                break;
-            }
-        }
-        if (selected == nullptr) {
-            return S_OK;
-        }
-        ComPtr<ID2D1SolidColorBrush> shadow;
-        ComPtr<ID2D1SolidColorBrush> foreground;
-        HRESULT result = d2d_context_->CreateSolidColorBrush(
-            D2D1::ColorF(0.02F, 0.05F, 0.08F, 0.75F), &shadow);
-        if (SUCCEEDED(result)) {
-            result = d2d_context_->CreateSolidColorBrush(
-                D2D1::ColorF(0.1F, 0.85F, 1.0F, 1.0F), &foreground);
-        }
-        if (FAILED(result)) {
-            return result;
-        }
-        const float stroke_width = static_cast<float>(std::max(1.0, 1.5 / transform_.zoom));
-        const float shadow_width = stroke_width * 2.5F;
-        const float handle_radius = static_cast<float>(std::max(2.0, 3.0 / transform_.zoom));
-        const auto bounds = D2D1::RectF(
-            static_cast<float>(selected->bounds.x),
-            static_cast<float>(selected->bounds.y),
-            static_cast<float>(selected->bounds.x + selected->bounds.width),
-            static_cast<float>(selected->bounds.y + selected->bounds.height));
-        d2d_context_->DrawRectangle(bounds, shadow.Get(), shadow_width);
-        d2d_context_->DrawRectangle(bounds, foreground.Get(), stroke_width);
-        const std::array<D2D1_POINT_2F, 4U> corners{
-            D2D1::Point2F(bounds.left, bounds.top),
-            D2D1::Point2F(bounds.right, bounds.top),
-            D2D1::Point2F(bounds.right, bounds.bottom),
-            D2D1::Point2F(bounds.left, bounds.bottom)};
-        for (const auto corner : corners) {
-            d2d_context_->FillEllipse(
-                D2D1::Ellipse(corner, handle_radius * 1.5F, handle_radius * 1.5F),
-                shadow.Get());
-            d2d_context_->FillEllipse(
-                D2D1::Ellipse(corner, handle_radius, handle_radius), foreground.Get());
-        }
-        return S_OK;
-    }
-
-    HRESULT DrawFontFallbackWarning() noexcept {
-        if (!font_fallback_used_) {
-            return S_OK;
-        }
-        ComPtr<ID2D1SolidColorBrush> background;
-        HRESULT result = d2d_context_->CreateSolidColorBrush(
-            D2D1::ColorF(1.0F, 0.78F, 0.12F, 0.96F), &background);
-        if (FAILED(result)) {
-            return result;
-        }
-        ComPtr<ID2D1SolidColorBrush> foreground;
-        result = d2d_context_->CreateSolidColorBrush(
-            D2D1::ColorF(0.08F, 0.08F, 0.08F, 1.0F), &foreground);
-        if (FAILED(result)) {
-            return result;
-        }
-        constexpr D2D1_RECT_F bounds{8.0F, 8.0F, 260.0F, 34.0F};
-        d2d_context_->FillRectangle(bounds, background.Get());
-        ComPtr<IDWriteTextFormat> format;
-        result = shared_.DwriteFactory()->CreateTextFormat(
-            L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD,
-            DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 13.0F, L"", &format);
-        if (FAILED(result)) {
-            return result;
-        }
-        constexpr wchar_t message[] = L"Font fallback: Segoe UI";
-        d2d_context_->DrawTextW(
-            message, static_cast<UINT32>(std::size(message) - 1U), format.Get(), bounds,
-            foreground.Get(), D2D1_DRAW_TEXT_OPTIONS_NONE, DWRITE_MEASURING_MODE_NATURAL);
-        return S_OK;
-    }
 
     HRESULT DrawRenderPass(
         const InkpodSnapshotRenderPass& pass,
-        const std::unordered_map<std::uint64_t, VectorPathSpan>& paths,
-        ID2D1SolidColorBrush* brush,
         bool& layer_active) noexcept {
         switch (pass.kind) {
             case INKPOD_RENDER_PASS_LAYER_BEGIN: {
@@ -2194,56 +1120,6 @@ private:
                 }
                 return S_OK;
             }
-            case INKPOD_RENDER_PASS_VECTOR_FILLS: {
-                const auto* fill_bytes = reinterpret_cast<const std::byte*>(vectors_.fills);
-                for (std::uint64_t offset = 0; offset < pass.item_count; ++offset) {
-                    const auto* fill = reinterpret_cast<const InkpodSnapshotVectorFill*>(
-                        fill_bytes + static_cast<std::size_t>(
-                            (pass.first_item + offset) * vectors_.fill_stride_bytes));
-                    if ((fill->color_rgba & 0xffU) != 0U) {
-                        const HRESULT result = DrawFillGeometry(*fill, paths, brush);
-                        if (FAILED(result)) {
-                            return result;
-                        }
-                    }
-                }
-                return S_OK;
-            }
-            case INKPOD_RENDER_PASS_VECTOR_STROKES: {
-                if ((vector_diagnostics_.flags
-                        & INKPOD_VECTOR_DIAGNOSTIC_CENTERLINE_ONLY)
-                    != 0U) {
-                    return S_OK;
-                }
-                const auto* segment_bytes = reinterpret_cast<const std::byte*>(vectors_.segments);
-                std::uint64_t index = pass.first_item;
-                const std::uint64_t end = pass.first_item + pass.item_count;
-                while (index < end) {
-                    const auto* segment = reinterpret_cast<const InkpodSnapshotVectorSegment*>(
-                        segment_bytes
-                        + static_cast<std::size_t>(index * vectors_.segment_stride_bytes));
-                    const VectorPathSpan path{
-                        segment->path_id,
-                        segment->z_order,
-                        segment->flags,
-                        segment,
-                        segment->segment_count};
-                    if (path.count == 0U || path.count > end - index) {
-                        return E_INVALIDARG;
-                    }
-                    if ((path.flags & INKPOD_SNAPSHOT_VECTOR_STROKE_VISIBLE) != 0U
-                        && (path.first->color_rgba & 0xffU) != 0U) {
-                        const HRESULT result = DrawStrokeGeometry(path, brush);
-                        if (FAILED(result)) {
-                            return result;
-                        }
-                    }
-                    index += path.count;
-                }
-                return S_OK;
-            }
-            case INKPOD_RENDER_PASS_ANNOTATIONS:
-                return DrawAnnotationPass(pass, brush);
             case INKPOD_RENDER_PASS_ADJUSTMENT:
                 return E_UNEXPECTED;
             default:
@@ -2264,23 +1140,13 @@ private:
     }
 
     HRESULT DrawOrderedContent() noexcept {
-        std::unordered_map<std::uint64_t, VectorPathSpan> paths;
-        HRESULT result = BuildVectorPathMap(paths);
-        if (FAILED(result)) {
-            return result;
-        }
-        ComPtr<ID2D1SolidColorBrush> brush;
-        result = d2d_context_->CreateSolidColorBrush(
-            D2D1::ColorF(D2D1::ColorF::Black), &brush);
-        if (FAILED(result)) {
-            return result;
-        }
+        HRESULT result = S_OK;
         bool layer_active{};
         const auto* pass_bytes = reinterpret_cast<const std::byte*>(render_plan_.passes);
         for (std::uint64_t index = 0; index < render_plan_.pass_count; ++index) {
             const auto* pass = reinterpret_cast<const InkpodSnapshotRenderPass*>(
                 pass_bytes + static_cast<std::size_t>(index * render_plan_.pass_stride_bytes));
-            result = DrawRenderPass(*pass, paths, brush.Get(), layer_active);
+            result = DrawRenderPass(*pass, layer_active);
             if (FAILED(result)) {
                 if (layer_active) {
                     d2d_context_->PopLayer();
@@ -2337,13 +1203,8 @@ private:
         output.Reset();
         ComPtr<ID2D1Image> original_target;
         d2d_context_->GetTarget(&original_target);
-        std::unordered_map<std::uint64_t, VectorPathSpan> paths;
-        HRESULT result = BuildVectorPathMap(paths);
-        if (FAILED(result)) {
-            return result;
-        }
         ComPtr<ID2D1SolidColorBrush> brush;
-        result = d2d_context_->CreateSolidColorBrush(
+        HRESULT result = d2d_context_->CreateSolidColorBrush(
             D2D1::ColorF(D2D1::ColorF::Black), &brush);
         if (FAILED(result)) {
             return result;
@@ -2373,7 +1234,7 @@ private:
             const auto* pass = reinterpret_cast<const InkpodSnapshotRenderPass*>(
                 pass_bytes + static_cast<std::size_t>(index * render_plan_.pass_stride_bytes));
             if (pass->kind != INKPOD_RENDER_PASS_ADJUSTMENT) {
-                result = DrawRenderPass(*pass, paths, brush.Get(), layer_active);
+                result = DrawRenderPass(*pass, layer_active);
                 if (FAILED(result)) {
                     break;
                 }
@@ -2439,137 +1300,6 @@ private:
         return result;
     }
 
-    HRESULT DrawVectors() noexcept {
-        if (vectors_.segment_count == 0U && vectors_.fill_count == 0U) {
-            return S_OK;
-        }
-        try {
-            std::vector<VectorPathSpan> ordered_paths;
-            std::unordered_map<std::uint64_t, VectorPathSpan> paths;
-            ordered_paths.reserve(static_cast<std::size_t>(vectors_.segment_count));
-            const auto* segment_bytes = reinterpret_cast<const std::byte*>(vectors_.segments);
-            for (std::uint64_t index = 0; index < vectors_.segment_count;) {
-                const auto* segment = reinterpret_cast<const InkpodSnapshotVectorSegment*>(
-                    segment_bytes + static_cast<std::size_t>(index * vectors_.segment_stride_bytes));
-                VectorPathSpan span{
-                    segment->path_id,
-                    segment->z_order,
-                    segment->flags,
-                    segment,
-                    segment->segment_count};
-                ordered_paths.push_back(span);
-                paths.emplace(span.id, span);
-                index += span.count;
-            }
-            ComPtr<ID2D1SolidColorBrush> brush;
-            HRESULT result = d2d_context_->CreateSolidColorBrush(
-                D2D1::ColorF(D2D1::ColorF::Black), &brush);
-            if (FAILED(result)) {
-                return result;
-            }
-            std::uint32_t maximum_z = 0U;
-            for (const auto& path : ordered_paths) {
-                maximum_z = std::max(maximum_z, path.z_order);
-            }
-            const auto* fill_bytes = reinterpret_cast<const std::byte*>(vectors_.fills);
-            for (std::uint64_t index = 0; index < vectors_.fill_count; ++index) {
-                const auto* fill = reinterpret_cast<const InkpodSnapshotVectorFill*>(
-                    fill_bytes + static_cast<std::size_t>(index * vectors_.fill_stride_bytes));
-                maximum_z = std::max(maximum_z, fill->z_order);
-            }
-            for (std::uint32_t z_order = 0U; z_order <= maximum_z; ++z_order) {
-                for (std::uint64_t index = 0; index < vectors_.fill_count; ++index) {
-                    const auto* fill = reinterpret_cast<const InkpodSnapshotVectorFill*>(
-                        fill_bytes + static_cast<std::size_t>(index * vectors_.fill_stride_bytes));
-                    if (fill->z_order == z_order && (fill->color_rgba & 0xffU) != 0U) {
-                        result = DrawFillGeometry(*fill, paths, brush.Get());
-                        if (FAILED(result)) {
-                            return result;
-                        }
-                    }
-                }
-                for (const auto& path : ordered_paths) {
-                    if (path.z_order == z_order
-                        && (path.flags & INKPOD_SNAPSHOT_VECTOR_STROKE_VISIBLE) != 0U
-                        && (path.first->color_rgba & 0xffU) != 0U) {
-                        result = DrawStrokeGeometry(path, brush.Get());
-                        if (FAILED(result)) {
-                            return result;
-                        }
-                    }
-                }
-            }
-            return S_OK;
-        } catch (const std::bad_alloc&) {
-            return E_OUTOFMEMORY;
-        }
-    }
-
-    HRESULT DrawVectorDiagnostics() noexcept {
-        if ((vector_diagnostics_.flags
-                & (INKPOD_VECTOR_DIAGNOSTIC_CENTERLINE_VISIBLE
-                    | INKPOD_VECTOR_DIAGNOSTIC_ENDPOINTS_VISIBLE))
-            == 0U) {
-            return S_OK;
-        }
-        ComPtr<ID2D1SolidColorBrush> brush;
-        HRESULT result = d2d_context_->CreateSolidColorBrush(
-            D2D1::ColorF(0.95F, 0.15F, 0.55F, 0.95F), &brush);
-        if (FAILED(result)) {
-            return result;
-        }
-        const D2D1_ANTIALIAS_MODE previous_antialias = d2d_context_->GetAntialiasMode();
-        d2d_context_->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-        if ((vector_diagnostics_.flags
-                & INKPOD_VECTOR_DIAGNOSTIC_CENTERLINE_VISIBLE)
-            != 0U) {
-            const float width = static_cast<float>(1.0 / transform_.zoom);
-            const auto* bytes = reinterpret_cast<const std::byte*>(vectors_.segments);
-            for (std::uint64_t index = 0U; index < vectors_.segment_count;) {
-                const auto* segment = reinterpret_cast<const InkpodSnapshotVectorSegment*>(
-                    bytes + static_cast<std::size_t>(index * vectors_.segment_stride_bytes));
-                const VectorPathSpan path{
-                    segment->path_id,
-                    segment->z_order,
-                    segment->flags,
-                    segment,
-                    segment->segment_count};
-                if ((path.flags & INKPOD_SNAPSHOT_VECTOR_STROKE_VISIBLE) == 0U) {
-                    index += path.count;
-                    continue;
-                }
-                ComPtr<ID2D1PathGeometry> geometry;
-                result = CreateCenterlineGeometry(path, geometry);
-                if (FAILED(result)) {
-                    d2d_context_->SetAntialiasMode(previous_antialias);
-                    return result;
-                }
-                d2d_context_->DrawGeometry(geometry.Get(), brush.Get(), width);
-                index += path.count;
-            }
-        }
-        if ((vector_diagnostics_.flags & INKPOD_VECTOR_DIAGNOSTIC_ENDPOINTS_VISIBLE)
-            != 0U) {
-            brush->SetColor(D2D1::ColorF(0.95F, 0.2F, 0.15F, 1.0F));
-            const float radius = static_cast<float>(4.0 / transform_.zoom);
-            const auto* bytes = reinterpret_cast<const std::byte*>(
-                vector_diagnostics_.endpoints);
-            for (std::uint64_t index = 0U; index < vector_diagnostics_.endpoint_count;
-                 ++index) {
-                const auto* endpoint = reinterpret_cast<const InkpodSnapshotVectorEndpoint*>(
-                    bytes + static_cast<std::size_t>(
-                        index * vector_diagnostics_.endpoint_stride_bytes));
-                d2d_context_->FillEllipse(
-                    D2D1::Ellipse(
-                        D2D1::Point2F(endpoint->point.x, endpoint->point.y),
-                        radius,
-                        radius),
-                    brush.Get());
-            }
-        }
-        d2d_context_->SetAntialiasMode(previous_antialias);
-        return S_OK;
-    }
 
     HRESULT DrawOverlays() noexcept {
         ComPtr<ID2D1SolidColorBrush> brush;
@@ -3088,17 +1818,11 @@ private:
     InkpodSnapshotView snapshot_view_{};
     InkpodSnapshotTransform transform_{};
     InkpodSnapshotOverlay overlay_{};
-    InkpodSnapshotVectorView vectors_{};
-    InkpodSnapshotAnnotationView annotations_{};
     InkpodSnapshotShootingFrameView shooting_frames_{};
     InkpodSnapshotVanishingPointView vanishing_points_{};
-    InkpodSnapshotVectorDiagnostics vector_diagnostics_{};
     InkpodSnapshotRenderPlan render_plan_{};
-    std::unordered_map<std::wstring, ComPtr<IDWriteTextFormat>> text_format_cache_;
-    bool font_fallback_used_{};
     CanvasFloatingPreview floating_preview_{};
     CanvasGeometryPreview geometry_preview_{};
-    std::uint64_t annotation_selection_id_{};
     std::unordered_map<std::uint64_t, CachedTile> tile_cache_;
     ComPtr<IDXGISwapChain1> swap_chain_;
     ComPtr<ID2D1DeviceContext> d2d_context_;
@@ -3121,13 +1845,11 @@ enum class HostControlKind {
     Render,
     DpiChanged,
     SimulateDeviceLoss,
-    ValidateClosedVectorStroke,
     ReadPixel,
     GetDocumentBounds,
     GetGeometryPreview,
     SetFloatingPreview,
     SetGeometryPreview,
-    SetAnnotationSelection,
 };
 
 struct HostControl {
@@ -3147,7 +1869,6 @@ struct HostControl {
     CanvasGeometryPreview* out_geometry_preview{};
     CanvasFloatingPreview floating_preview{};
     CanvasGeometryPreview geometry_preview{};
-    std::uint64_t annotation_object_id{};
     std::shared_ptr<std::promise<HRESULT>> completion;
 };
 
@@ -3785,9 +2506,6 @@ private:
                 result = surface.surface->SimulateDeviceLossForSmokeTest();
                 render = surface.visible;
                 break;
-            case HostControlKind::ValidateClosedVectorStroke:
-                result = surface.surface->ValidateClosedVectorStrokeForSmokeTest();
-                break;
             case HostControlKind::ReadPixel:
                 if (control.out_pixel == nullptr) {
                     result = E_POINTER;
@@ -3820,11 +2538,6 @@ private:
                 break;
             case HostControlKind::SetGeometryPreview:
                 result = surface.surface->SetGeometryPreview(control.geometry_preview);
-                render = surface.visible;
-                break;
-            case HostControlKind::SetAnnotationSelection:
-                result = surface.surface->SetAnnotationSelection(
-                    control.annotation_object_id);
                 render = surface.visible;
                 break;
             case HostControlKind::Register:
@@ -4568,12 +3281,6 @@ LRESULT CALLBACK CanvasWindowProcedure(
                         host->Canvas(), host->SurfaceGeneration()))
                 ? 1
                 : 0;
-        case kCanvasValidateClosedVectorStroke:
-            return host != nullptr
-                    && SUCCEEDED(host->Renderer().ValidateClosedVectorStroke(
-                        host->Canvas(), host->SurfaceGeneration()))
-                ? 1
-                : 0;
         case kCanvasClearGeometryPreview: {
             CanvasGeometryPreview preview{};
             preview.struct_size = sizeof(preview);
@@ -4789,18 +3496,6 @@ HRESULT RendererHost::SimulateDeviceLoss(
     return impl_->state.Invoke(std::move(control));
 }
 
-HRESULT RendererHost::ValidateClosedVectorStroke(
-    app::CanvasId canvas,
-    app::Generation surface_generation) noexcept {
-    if (impl_ == nullptr) {
-        return E_UNEXPECTED;
-    }
-    HostControl control{};
-    control.kind = HostControlKind::ValidateClosedVectorStroke;
-    control.canvas = canvas;
-    control.surface_generation = surface_generation;
-    return impl_->state.Invoke(std::move(control));
-}
 
 HRESULT RendererHost::ReadPixelForSmokeTest(
     app::CanvasId canvas,
@@ -4881,20 +3576,6 @@ HRESULT RendererHost::SetGeometryPreview(
     return impl_->state.Invoke(std::move(control));
 }
 
-HRESULT RendererHost::SetAnnotationSelection(
-    app::CanvasId canvas,
-    app::Generation surface_generation,
-    std::uint64_t object_id) noexcept {
-    if (impl_ == nullptr) {
-        return E_UNEXPECTED;
-    }
-    HostControl control{};
-    control.kind = HostControlKind::SetAnnotationSelection;
-    control.canvas = canvas;
-    control.surface_generation = surface_generation;
-    control.annotation_object_id = object_id;
-    return impl_->state.Invoke(std::move(control));
-}
 
 DWORD RendererHost::ThreadId() const noexcept {
     return impl_ == nullptr ? 0U : impl_->state.ThreadId();
@@ -5081,12 +3762,5 @@ bool SetCanvasGeometryPreview(
             host->Canvas(), host->SurfaceGeneration(), preview));
 }
 
-bool SetCanvasAnnotationSelection(HWND canvas, std::uint64_t object_id) noexcept {
-    auto* host = reinterpret_cast<CanvasHost*>(
-        GetWindowLongPtrW(canvas, GWLP_USERDATA));
-    return host != nullptr
-        && SUCCEEDED(host->Renderer().SetAnnotationSelection(
-            host->Canvas(), host->SurfaceGeneration(), object_id));
-}
 
 }  // namespace inkpod::renderer

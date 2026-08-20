@@ -106,13 +106,6 @@ const wchar_t* ToolLabel(std::uint32_t tool) noexcept {
     if (tool == tools::kInteractionFill) return UiText(UiStringId::ToolFill);
     if (tool == tools::kInteractionEyedropper) return UiText(UiStringId::ToolEyedropper);
     if (tool == tools::kInteractionSelection) return UiText(UiStringId::Text0976);
-    if (tool == tools::kInteractionVectorLine) return UiText(UiStringId::ToolVectorLine);
-    if (tool == tools::kInteractionVectorCurve) return UiText(UiStringId::ToolVectorCurve);
-    if (tool == tools::kInteractionVectorRectangle) return UiText(UiStringId::ToolVectorRectangle);
-    if (tool == tools::kInteractionVectorEllipse) return UiText(UiStringId::ToolVectorEllipse);
-    if (tool == tools::kInteractionVectorPolyline) return UiText(UiStringId::ToolVectorPolyline);
-    if (tool == tools::kInteractionVectorPolygon) return UiText(UiStringId::ToolVectorPolygon);
-    if (tool == tools::kInteractionVectorEraser) return UiText(UiStringId::ToolVectorEraser);
     if (tool == tools::kInteractionEffectGradient) return UiText(UiStringId::ToolGradient);
     if (tool == tools::kInteractionEffectAirbrush) return UiText(UiStringId::ToolAirbrush);
     if (tool == tools::kInteractionEffectBlur) return UiText(UiStringId::ToolBlur);
@@ -124,12 +117,12 @@ const wchar_t* ToolLabel(std::uint32_t tool) noexcept {
 
 bool HasDiameter(std::uint32_t tool) noexcept {
     return tool == INKPOD_TOOL_PENCIL || tool == INKPOD_TOOL_BRUSH
-        || tool == INKPOD_TOOL_ERASER || tools::IsVectorCanvasTool(tool);
+        || tool == INKPOD_TOOL_ERASER;
 }
 
 bool CanEditDiameter(std::uint32_t tool) noexcept {
     return tool == INKPOD_TOOL_BRUSH || tool == INKPOD_TOOL_ERASER
-        || tools::IsVectorCanvasTool(tool);
+        || tool == tools::kInteractionSelection;
 }
 
 HWND CreateControl(

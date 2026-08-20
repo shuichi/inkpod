@@ -38,8 +38,6 @@ fn raster_payload() -> ClipboardPayload {
                     value: PixelValue::Rgba([255, 255, 0, 255]),
                 },
             ],
-            vector_paths: Vec::new(),
-            vector_fills: Vec::new(),
         }],
     }
 }
@@ -138,95 +136,6 @@ fn xform_003_five_half_open_anchors_place_uniform_scale_at_absolute_target() {
     ];
     for (anchor, expected) in cases {
         assert_eq!(transformed_raster_bounds(anchor), expected, "{anchor:?}");
-    }
-}
-
-fn vector_payload(anchor: FloatingTransformAnchor) -> ClipboardPayload {
-    let point = match anchor {
-        FloatingTransformAnchor::TopLeft => PointF32 { x: 2.0, y: 3.0 },
-        FloatingTransformAnchor::TopRight => PointF32 { x: 4.0, y: 3.0 },
-        FloatingTransformAnchor::Center => PointF32 { x: 3.0, y: 4.0 },
-        FloatingTransformAnchor::BottomLeft => PointF32 { x: 2.0, y: 5.0 },
-        FloatingTransformAnchor::BottomRight => PointF32 { x: 4.0, y: 5.0 },
-    };
-    let other = PointF32 {
-        x: point.x + 1.0,
-        y: point.y,
-    };
-    let segment = VectorCubicSegment {
-        p0: point,
-        p1: point,
-        p2: other,
-        p3: other,
-        width_start: 1.0,
-        width_end: 1.0,
-    };
-    ClipboardPayload {
-        source_document_uuid: 0x4d31_3600_0000_0000_0000_0000_0000_0002,
-        bounds: RectI32 {
-            x: 2,
-            y: 3,
-            width: 2,
-            height: 2,
-        },
-        planes: vec![ClipboardPlane {
-            kind: PlaneType::ColorTrace,
-            pixel_format: PixelFormat::StraightRgba8,
-            origin_x: 2,
-            origin_y: 3,
-            pixels: Vec::new(),
-            vector_paths: vec![VectorPathInfo {
-                id: 41,
-                plane_id: 17,
-                segments: vec![segment],
-                color: PixelValue::Rgba([10, 20, 30, 255]),
-                closed: false,
-                square_cross_section: false,
-            }],
-            vector_fills: Vec::new(),
-        }],
-    }
-}
-
-#[test]
-fn xform_003_anchor_is_shared_by_nonuniform_scale_and_positive_negative_rotation() {
-    for anchor in [
-        FloatingTransformAnchor::TopLeft,
-        FloatingTransformAnchor::TopRight,
-        FloatingTransformAnchor::Center,
-        FloatingTransformAnchor::BottomLeft,
-        FloatingTransformAnchor::BottomRight,
-    ] {
-        for (rotation_degrees, expected_y) in [(90.0, 14.0), (-90.0, 10.0)] {
-            let mut core = Core::new();
-            core.new_cell(24, 24, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
-                .unwrap();
-            core.create_layer(LayerKind::VectorColoring, "Vector")
-                .unwrap();
-            core.begin_paste(&vector_payload(anchor)).unwrap();
-            core.set_floating_transform(FloatingTransform {
-                anchor,
-                target_x: TARGET,
-                target_y: TARGET,
-                scale_x: 2.0,
-                scale_y: 3.0,
-                rotation_degrees,
-            })
-            .unwrap();
-            core.commit_floating().unwrap();
-            let path = core.vector_paths().unwrap().pop().unwrap();
-            assert_eq!(path.segments[0].p0, PointF32 { x: 12.0, y: 12.0 });
-            assert_eq!(
-                path.segments[0].p3,
-                PointF32 {
-                    x: 12.0,
-                    y: expected_y
-                }
-            );
-            core.undo().unwrap();
-            core.redo().unwrap();
-            core.verify_journal_replay().unwrap();
-        }
     }
 }
 

@@ -2,7 +2,6 @@ use super::model::*;
 use super::validate::{validate_document, validate_document_metadata, validate_tile_shape};
 use crate::adjustment::decode_adjustment_metadata;
 use crate::light_table::decode_light_table_metadata;
-use crate::vector::decode_vector_metadata;
 use inkpod_image::{MAX_PALETTE_COLORS, PixelFormat, PixelValue, TileCoord};
 use std::collections::BTreeSet;
 pub fn decode_document_archive(bytes: &[u8]) -> Result<DocumentArchive, FormatError> {
@@ -21,7 +20,6 @@ pub fn decode_document_archive(bytes: &[u8]) -> Result<DocumentArchive, FormatEr
         & !(CONTAINER_FLAG_COLOR_METADATA
             | CONTAINER_FLAG_DOCUMENT_METADATA
             | CONTAINER_FLAG_LIGHT_TABLE_METADATA
-            | CONTAINER_FLAG_VECTOR_METADATA
             | CONTAINER_FLAG_ADJUSTMENT_METADATA)
         != 0
     {
@@ -147,22 +145,6 @@ pub fn decode_document_archive(bytes: &[u8]) -> Result<DocumentArchive, FormatEr
         } else {
             (None, 0)
         };
-    let (vector_metadata, vector_metadata_len) =
-        if container_flags & CONTAINER_FLAG_VECTOR_METADATA != 0 {
-            let byte_count = reader.u32()? as usize;
-            if reader.u32()? != 0 {
-                return Err(FormatError::Unsupported(
-                    "vector metadata reserved field is not zero",
-                ));
-            }
-            if byte_count > MAX_MANIFEST_BYTES as usize {
-                return Err(FormatError::Invalid("vector metadata exceeds its bound"));
-            }
-            let metadata = decode_vector_metadata(reader.take(byte_count)?)?;
-            (Some(metadata), byte_count.saturating_add(8))
-        } else {
-            (None, 0)
-        };
     let (adjustment_metadata, adjustment_metadata_len) =
         if container_flags & CONTAINER_FLAG_ADJUSTMENT_METADATA != 0 {
             let byte_count = reader.u32()? as usize;
@@ -185,7 +167,6 @@ pub fn decode_document_archive(bytes: &[u8]) -> Result<DocumentArchive, FormatEr
         .checked_add(color_metadata_len)
         .and_then(|value| value.checked_add(document_metadata_len))
         .and_then(|value| value.checked_add(light_table_metadata_len))
-        .and_then(|value| value.checked_add(vector_metadata_len))
         .and_then(|value| value.checked_add(adjustment_metadata_len))
         .and_then(|value| value.checked_add(plane_count.checked_mul(PLANE_DESCRIPTOR_BYTES)?))
         .and_then(|value| {
@@ -384,7 +365,6 @@ pub fn decode_document_archive(bytes: &[u8]) -> Result<DocumentArchive, FormatEr
         planes,
         document_metadata,
         light_table_metadata,
-        vector_metadata,
         adjustment_metadata,
     };
     validate_document(&document)?;
@@ -393,7 +373,7 @@ pub fn decode_document_archive(bytes: &[u8]) -> Result<DocumentArchive, FormatEr
 
 fn decode_document_metadata(bytes: &[u8]) -> Result<FileDocumentMetadata, FormatError> {
     let mut reader = Reader::new(bytes);
-    if reader.take(4)? != DOCUMENT_METADATA_MAGIC || reader.u32()? != 5 {
+    if reader.take(4)? != DOCUMENT_METADATA_MAGIC || reader.u32()? != 6 {
         return Err(FormatError::Unsupported(
             "document metadata version is not supported",
         ));
@@ -403,7 +383,6 @@ fn decode_document_metadata(bytes: &[u8]) -> Result<FileDocumentMetadata, Format
     let selection_plane_id = reader.u64()?;
     let layer_count = reader.u32()? as usize;
     let guide_count = reader.u32()? as usize;
-    let annotation_count = reader.u32()? as usize;
     let shooting_frame_present = match reader.u32()? {
         0 => false,
         1 => true,
@@ -417,7 +396,6 @@ fn decode_document_metadata(bytes: &[u8]) -> Result<FileDocumentMetadata, Format
     if layer_count == 0
         || layer_count > MAX_LAYERS
         || guide_count > MAX_GUIDES
-        || annotation_count > MAX_ANNOTATION_OBJECTS
         || vanishing_point_count > MAX_VANISHING_POINTS
     {
         return Err(FormatError::Invalid(
@@ -575,67 +553,6 @@ fn decode_document_metadata(bytes: &[u8]) -> Result<FileDocumentMetadata, Format
             visible,
         });
     }
-    let mut annotations = Vec::with_capacity(annotation_count);
-    for _ in 0..annotation_count {
-        let id = reader.u64()?;
-        let layer_id = reader.u64()?;
-        let kind = match reader.u32()? {
-            1 => FileAnnotationKind::Text,
-            2 => FileAnnotationKind::Stroke,
-            3 => FileAnnotationKind::Leader,
-            4 => FileAnnotationKind::Value,
-            _ => return Err(FormatError::Unsupported("unknown annotation object kind")),
-        };
-        let output = match reader.u32()? {
-            1 => FileAnnotationOutput::Normal,
-            2 => FileAnnotationOutput::Instruction,
-            _ => return Err(FormatError::Unsupported("unknown annotation output kind")),
-        };
-        let bounds = RectI32 {
-            x: reader.i32()?,
-            y: reader.i32()?,
-            width: reader.i32()?,
-            height: reader.i32()?,
-        };
-        let font_length = reader.u32()? as usize;
-        let text_length = reader.u32()? as usize;
-        let point_count = reader.u32()? as usize;
-        let font_size_milli = reader.u32()?;
-        let style_flags = reader.u32()?;
-        let stroke_width_milli = reader.u32()?;
-        let color = reader.color_value()?;
-        if font_length > MAX_NODE_NAME_BYTES
-            || text_length > MAX_ANNOTATION_TEXT_BYTES
-            || point_count > MAX_ANNOTATION_POINTS
-        {
-            return Err(FormatError::Invalid(
-                "annotation variable-length field exceeds its bound",
-            ));
-        }
-        let font_family_hint = read_utf8(&mut reader, font_length, "annotation font is invalid")?;
-        let text = read_utf8(&mut reader, text_length, "annotation text is invalid")?;
-        let mut points = Vec::with_capacity(point_count);
-        for _ in 0..point_count {
-            points.push(FileAnnotationPoint {
-                x_milli: reader.i32()?,
-                y_milli: reader.i32()?,
-            });
-        }
-        annotations.push(FileAnnotationObject {
-            id,
-            layer_id,
-            kind,
-            output,
-            bounds,
-            font_family_hint,
-            font_size_milli,
-            style_flags,
-            color,
-            text,
-            points,
-            stroke_width_milli,
-        });
-    }
     let color_chart = crate::decode_color_chart(reader.take(color_chart_length)?)?;
     if reader.position != bytes.len() {
         return Err(FormatError::Invalid("document metadata has trailing bytes"));
@@ -649,7 +566,6 @@ fn decode_document_metadata(bytes: &[u8]) -> Result<FileDocumentMetadata, Format
         grid,
         color_chart,
         color_chart_locked,
-        annotations,
         shooting_frame,
         vanishing_points,
     };
@@ -673,16 +589,6 @@ fn read_name(reader: &mut Reader<'_>, length: usize) -> Result<String, FormatErr
         ));
     }
     Ok(text.to_owned())
-}
-
-fn read_utf8(
-    reader: &mut Reader<'_>,
-    length: usize,
-    message: &'static str,
-) -> Result<String, FormatError> {
-    std::str::from_utf8(reader.take(length)?)
-        .map(str::to_owned)
-        .map_err(|_| FormatError::Invalid(message))
 }
 
 fn pixel_format_from_code(value: u32) -> Result<PixelFormat, FormatError> {

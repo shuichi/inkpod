@@ -9,9 +9,6 @@ pub(crate) fn parse_layer_kind(value: u32) -> Result<LayerKind, u32> {
         INKPOD_LAYER_FRAME => Ok(LayerKind::Frame),
         INKPOD_LAYER_VANISHING_POINT => Ok(LayerKind::VanishingPoint),
         INKPOD_LAYER_ADJUSTMENT => Ok(LayerKind::Adjustment),
-        INKPOD_LAYER_TEXT => Ok(LayerKind::Text),
-        INKPOD_LAYER_ANNOTATION => Ok(LayerKind::Annotation),
-        INKPOD_LAYER_VECTOR_COLORING => Ok(LayerKind::VectorColoring),
         _ => Err(fail(
             INKPOD_STATUS_INVALID_ARGUMENT,
             "layer kind is not defined",
@@ -28,9 +25,6 @@ pub(crate) fn layer_kind_code(value: LayerKind) -> u32 {
         LayerKind::Frame => INKPOD_LAYER_FRAME,
         LayerKind::VanishingPoint => INKPOD_LAYER_VANISHING_POINT,
         LayerKind::Adjustment => INKPOD_LAYER_ADJUSTMENT,
-        LayerKind::Text => INKPOD_LAYER_TEXT,
-        LayerKind::Annotation => INKPOD_LAYER_ANNOTATION,
-        LayerKind::VectorColoring => INKPOD_LAYER_VECTOR_COLORING,
     }
 }
 
@@ -40,9 +34,6 @@ pub(crate) fn parse_plane_type(value: u32) -> Result<PlaneType, u32> {
         INKPOD_TYPED_PLANE_COLOR => Ok(PlaneType::Color),
         INKPOD_TYPED_PLANE_RASTER => Ok(PlaneType::Raster),
         INKPOD_TYPED_PLANE_SELECTION => Ok(PlaneType::Selection),
-        INKPOD_TYPED_PLANE_VECTOR_MAIN_LINE => Ok(PlaneType::VectorMainLine),
-        INKPOD_TYPED_PLANE_COLOR_TRACE => Ok(PlaneType::ColorTrace),
-        INKPOD_TYPED_PLANE_VECTOR_FILL => Ok(PlaneType::VectorFill),
         _ => Err(fail(
             INKPOD_STATUS_INVALID_ARGUMENT,
             "typed plane kind is not defined",
@@ -56,9 +47,6 @@ pub(crate) fn plane_type_code(value: PlaneType) -> u32 {
         PlaneType::Color => INKPOD_TYPED_PLANE_COLOR,
         PlaneType::Raster => INKPOD_TYPED_PLANE_RASTER,
         PlaneType::Selection => INKPOD_TYPED_PLANE_SELECTION,
-        PlaneType::VectorMainLine => INKPOD_TYPED_PLANE_VECTOR_MAIN_LINE,
-        PlaneType::ColorTrace => INKPOD_TYPED_PLANE_COLOR_TRACE,
-        PlaneType::VectorFill => INKPOD_TYPED_PLANE_VECTOR_FILL,
     }
 }
 
@@ -344,136 +332,6 @@ pub(crate) unsafe fn parse_color_value(color: *const InkpodColorValue) -> Result
         _ => Err(fail(
             INKPOD_STATUS_INVALID_ARGUMENT,
             "color depth is not 8 or 16 bits",
-        )),
-    }
-}
-
-pub(crate) unsafe fn parse_vector_path_input(
-    input: &InkpodVectorPathInput,
-) -> Result<VectorPathInput, u32> {
-    if input.reserved != 0 || input.flags & !INKPOD_VECTOR_PATH_CLOSED != 0 {
-        return Err(fail(
-            INKPOD_STATUS_UNSUPPORTED,
-            "vector path input contains unsupported values",
-        ));
-    }
-    let count = usize::try_from(input.segment_count).map_err(|_| {
-        fail(
-            INKPOD_STATUS_INVALID_ARGUMENT,
-            "vector segment count is not representable",
-        )
-    })?;
-    if count == 0 || count > 262_144 {
-        return Err(fail(
-            INKPOD_STATUS_INVALID_ARGUMENT,
-            "vector segment count is outside bounds",
-        ));
-    }
-    let stride = usize::try_from(input.segment_stride_bytes).map_err(|_| {
-        fail(
-            INKPOD_STATUS_INVALID_ARGUMENT,
-            "vector segment stride is not representable",
-        )
-    })?;
-    if input.segments.is_null()
-        || !is_aligned(input.segments)
-        || stride < size_of::<InkpodVectorCubicSegment>()
-        || stride % align_of::<InkpodVectorCubicSegment>() != 0
-        || count
-            .checked_mul(stride)
-            .is_none_or(|bytes| bytes > isize::MAX as usize)
-    {
-        return Err(fail(
-            INKPOD_STATUS_INVALID_ARGUMENT,
-            "vector segment span is null, misaligned, or outside bounds",
-        ));
-    }
-    let mut segments = Vec::with_capacity(count);
-    for index in 0..count {
-        // SAFETY: The validated borrowed strided span contains this record.
-        let pointer = unsafe {
-            input
-                .segments
-                .cast::<u8>()
-                .add(index * stride)
-                .cast::<InkpodVectorCubicSegment>()
-        };
-        // SAFETY: Every record exposes its readable size prefix.
-        let size = unsafe { validate_struct(pointer, "InkpodVectorCubicSegment") }?;
-        if u64::from(size) > input.segment_stride_bytes {
-            return Err(fail(
-                INKPOD_STATUS_INCOMPATIBLE_ABI,
-                "vector segment struct_size exceeds its stride",
-            ));
-        }
-        // SAFETY: The complete known record is readable after validation.
-        let segment = unsafe { &*pointer };
-        if segment.reserved != 0 {
-            return Err(fail(
-                INKPOD_STATUS_UNSUPPORTED,
-                "vector segment reserved field is not zero",
-            ));
-        }
-        let point = |value: InkpodVectorPoint| PointF32 {
-            x: value.x,
-            y: value.y,
-        };
-        segments.push(VectorCubicSegment {
-            p0: point(segment.p0),
-            p1: point(segment.p1),
-            p2: point(segment.p2),
-            p3: point(segment.p3),
-            width_start: segment.width_start,
-            width_end: segment.width_end,
-        });
-    }
-    // SAFETY: The nested color record is a complete field of the validated input.
-    let color = unsafe { parse_color_value(&raw const input.color) }?;
-    Ok(VectorPathInput {
-        segments,
-        color,
-        closed: input.flags & INKPOD_VECTOR_PATH_CLOSED != 0,
-    })
-}
-
-pub(crate) fn parse_vector_erase_mode(value: u32) -> Result<VectorEraseMode, u32> {
-    match value {
-        INKPOD_VECTOR_ERASE_PARTIAL => Ok(VectorEraseMode::Partial),
-        INKPOD_VECTOR_ERASE_TO_INTERSECTION => Ok(VectorEraseMode::ToIntersection),
-        INKPOD_VECTOR_ERASE_WHOLE_PATH => Ok(VectorEraseMode::WholePath),
-        _ => Err(fail(
-            INKPOD_STATUS_INVALID_ARGUMENT,
-            "vector erase mode is not defined",
-        )),
-    }
-}
-
-pub(crate) fn parse_vector_width_mode(value: u32, parameter: f32) -> Result<VectorWidthMode, u32> {
-    match value {
-        INKPOD_VECTOR_WIDTH_ADD => Ok(VectorWidthMode::Add(parameter)),
-        INKPOD_VECTOR_WIDTH_SUBTRACT => Ok(VectorWidthMode::Subtract(parameter)),
-        INKPOD_VECTOR_WIDTH_SCALE => Ok(VectorWidthMode::Scale(parameter)),
-        INKPOD_VECTOR_WIDTH_CONSTANT => Ok(VectorWidthMode::Constant(parameter)),
-        _ => Err(fail(
-            INKPOD_STATUS_INVALID_ARGUMENT,
-            "vector width mode is not defined",
-        )),
-    }
-}
-
-pub(crate) fn parse_vector_selection_mode(value: u32) -> Result<VectorSelectionMode, u32> {
-    match value {
-        INKPOD_VECTOR_SELECT_CUT_BY_SELECTION => Ok(VectorSelectionMode::CutBySelection),
-        INKPOD_VECTOR_SELECT_TOUCHING => Ok(VectorSelectionMode::Touching),
-        INKPOD_VECTOR_SELECT_FULLY_CONTAINED => Ok(VectorSelectionMode::FullyContained),
-        INKPOD_VECTOR_SELECT_LINE => Ok(VectorSelectionMode::Line),
-        INKPOD_VECTOR_SELECT_WHOLE_LINE => Ok(VectorSelectionMode::WholeLine),
-        INKPOD_VECTOR_SELECT_TO_INTERSECTION => Ok(VectorSelectionMode::ToIntersection),
-        INKPOD_VECTOR_SELECT_FILL_BOUNDARY => Ok(VectorSelectionMode::FillBoundary),
-        INKPOD_VECTOR_SELECT_FILL => Ok(VectorSelectionMode::Fill),
-        _ => Err(fail(
-            INKPOD_STATUS_INVALID_ARGUMENT,
-            "vector selection mode is not defined",
         )),
     }
 }

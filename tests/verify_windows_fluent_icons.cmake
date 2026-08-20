@@ -18,8 +18,6 @@ set(PROVENANCE "${ICON_ROOT}/README.md")
 set(EXPECTED_SEMANTIC_KEYS
     "Tool.Pencil" "Tool.Brush" "Tool.Eraser" "Tool.Fill"
     "Tool.ClosedRegionFill" "Tool.FillExtension" "Tool.Eyedropper"
-    "Tool.VectorLine" "Tool.VectorCurve" "Tool.VectorRectangle"
-    "Tool.VectorEllipse" "Tool.VectorPolyline" "Tool.VectorEraser"
     "Tool.Gradient" "Tool.Airbrush" "Tool.BoundaryAirbrush" "Tool.Blur"
     "Tool.Stamp" "Tool.DustRemoval" "Tool.AlphaGradient"
     "Pane.Visible" "Pane.Hidden" "Pane.Editable" "Pane.Protected"
@@ -83,8 +81,8 @@ foreach(ROW IN LISTS MANIFEST_ROWS)
     list(APPEND SOURCE_FILES "${SOURCE_FILE}")
     math(EXPR EXPECTED_INDEX "${EXPECTED_INDEX} + 1")
 endforeach()
-if(NOT EXPECTED_INDEX EQUAL 26)
-    message(FATAL_ERROR "Expected 26 selected Fluent icons, found ${EXPECTED_INDEX}")
+if(NOT EXPECTED_INDEX EQUAL 20)
+    message(FATAL_ERROR "Expected 20 selected Fluent icons, found ${EXPECTED_INDEX}")
 endif()
 if(NOT SEMANTIC_KEYS STREQUAL EXPECTED_SEMANTIC_KEYS)
     message(FATAL_ERROR
@@ -100,17 +98,17 @@ endif()
 
 file(SIZE "${ATLAS}" ATLAS_SIZE)
 file(SHA256 "${ATLAS}" ATLAS_SHA256)
-if(NOT ATLAS_SIZE EQUAL 59928)
+if(NOT ATLAS_SIZE EQUAL 46104)
     message(FATAL_ERROR "Fluent mask atlas has unexpected size: ${ATLAS_SIZE}")
 endif()
 if(NOT ATLAS_SHA256 STREQUAL
-        "b908c9c43e620b8728c537e43e13a968c9d83a4ea1c817e2a37e320d3eb7387e")
+        "aa34caed4109e44a354f04300a5d23ed41b71f8ee8cac1c48f8bf522b66dcaea")
     message(FATAL_ERROR "Fluent mask atlas hash mismatch: ${ATLAS_SHA256}")
 endif()
 file(READ "${ATLAS}" ATLAS_HEADER LIMIT 24 HEX)
 string(TOLOWER "${ATLAS_HEADER}" ATLAS_HEADER)
 if(NOT ATLAS_HEADER STREQUAL
-        "494e4b504f4449410100300030001a0000ea00000608e83b")
+        "494e4b504f444941010030003000140000b400007508bcb4")
     message(FATAL_ERROR "Fluent mask atlas header is invalid: ${ATLAS_HEADER}")
 endif()
 
@@ -160,9 +158,7 @@ endforeach()
 file(READ "${TOOL_PALETTE}" TOOL_PALETTE_TEXT)
 set(EXPECTED_TOOL_IDS
     Pencil Brush Eraser Fill ClosedRegionFill FillExtension Eyedropper
-    VectorLine VectorCurve VectorRectangle VectorEllipse VectorPolyline
-    VectorEraser Gradient Airbrush BoundaryAirbrush Blur Stamp DustRemoval
-    AlphaGradient)
+    Gradient Airbrush BoundaryAirbrush Blur Stamp DustRemoval AlphaGradient)
 foreach(TOOL_ID IN LISTS EXPECTED_TOOL_IDS)
     string(REGEX MATCHALL "ToolIconId::${TOOL_ID}([^A-Za-z0-9_]|$)" TOOL_ID_MATCHES
         "${TOOL_PALETTE_TEXT}")

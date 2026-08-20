@@ -68,7 +68,7 @@ bool Conflicts(
 }
 
 bool HasCompleteCatalog(std::span<const InkpodShortcutSequence> bindings) noexcept {
-    const auto commands = MenuCommandCatalog();
+    const auto commands = ShortcutCommandCatalog();
     if (bindings.size() != commands.size()) {
         return false;
     }

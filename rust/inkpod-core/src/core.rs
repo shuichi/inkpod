@@ -86,7 +86,6 @@ impl Core {
             current_path: None,
             recovered: false,
             active_stroke: None,
-            annotation_stroke: None,
             shooting_frame_preview: None,
             vanishing_point_preview: None,
             filter_preview: None,
@@ -290,7 +289,6 @@ impl Core {
         let revision = self.next_document_revision()?;
 
         self.cancel_stroke();
-        self.annotation_stroke = None;
         self.shooting_frame_preview = None;
         self.vanishing_point_preview = None;
         self.filter_preview = None;
@@ -349,7 +347,6 @@ pub struct Core {
     pub(super) current_path: Option<PathBuf>,
     pub(super) recovered: bool,
     pub(super) active_stroke: Option<StrokeSession>,
-    pub(super) annotation_stroke: Option<annotation::AnnotationStrokeSession>,
     pub(super) shooting_frame_preview: Option<shooting_frame::ShootingFramePreviewSession>,
     pub(super) vanishing_point_preview: Option<vanishing_point::VanishingPointPreviewSession>,
     pub(super) filter_preview: Option<effects::FilterPreview>,
@@ -523,19 +520,6 @@ impl Core {
         DocumentEdit::from_staged(before, working, base_revision, commit_revision).commit(self)
     }
 
-    pub(super) fn commit_deferred_document_edit_with_target(
-        &mut self,
-        before: CellDocument,
-        working: CellDocument,
-        base_revision: DocumentRevision,
-        commit_revision: DocumentRevision,
-        target: EditorTarget,
-    ) -> Result<DispatchOutcome, CoreError> {
-        let mut edit = DocumentEdit::from_staged(before, working, base_revision, commit_revision);
-        edit.prefer_editor_target(target);
-        edit.commit(self)
-    }
-
     pub(super) fn commit_deferred_document_edit_current(
         &mut self,
         before: CellDocument,
@@ -563,7 +547,6 @@ impl Core {
 
     pub(super) fn ensure_no_active_stroke(&self) -> Result<(), CoreError> {
         if self.active_stroke.is_some()
-            || self.annotation_stroke.is_some()
             || self.shooting_frame_preview.is_some()
             || self.vanishing_point_preview.is_some()
             || self.filter_preview.is_some()
@@ -577,7 +560,7 @@ impl Core {
     }
 
     pub(super) fn ensure_no_active_raster_stroke(&self) -> Result<(), CoreError> {
-        if self.active_stroke.is_some() || self.annotation_stroke.is_some() {
+        if self.active_stroke.is_some() {
             Err(CoreError::InvalidState(
                 "operation is not allowed during an active stroke transaction",
             ))

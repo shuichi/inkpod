@@ -89,7 +89,6 @@ fn base_fixture() -> DocumentArchive {
         ],
         document_metadata: None,
         light_table_metadata: None,
-        vector_metadata: None,
         adjustment_metadata: None,
     }
 }
@@ -148,43 +147,8 @@ fn document_tree_fixture() -> DocumentArchive {
             entries: Vec::new(),
         },
         color_chart_locked: false,
-        annotations: Vec::new(),
         shooting_frame: None,
         vanishing_points: Vec::new(),
-    });
-    document
-}
-
-fn annotation_fixture() -> DocumentArchive {
-    let mut document = document_tree_fixture();
-    let metadata = document.document_metadata.as_mut().unwrap();
-    metadata.layers.push(FileLayer {
-        id: 7,
-        kind: LayerKind::Text,
-        name: "Text".to_owned(),
-        visible: true,
-        editable: true,
-        opacity_milli: 1_000,
-        planes: Vec::new(),
-    });
-    metadata.annotations.push(FileAnnotationObject {
-        id: 8,
-        layer_id: 7,
-        kind: FileAnnotationKind::Text,
-        output: FileAnnotationOutput::Normal,
-        bounds: RectI32 {
-            x: 2,
-            y: 3,
-            width: 40,
-            height: 20,
-        },
-        font_family_hint: "Segoe UI".to_owned(),
-        font_size_milli: 18_000,
-        style_flags: 1,
-        color: PixelValue::Rgba16([1_000, 2_000, 3_000, 65_535]),
-        text: "日本語 e\u{301}".to_owned(),
-        points: Vec::new(),
-        stroke_width_milli: 0,
     });
     document
 }
@@ -239,179 +203,11 @@ fn light_table_fixture() -> DocumentArchive {
     document
 }
 
-fn vector_fixture() -> DocumentArchive {
-    let mut document = document_tree_fixture();
-    for (id, kind) in [
-        (8, PlaneKind::VectorMainLine),
-        (9, PlaneKind::ColorTrace),
-        (10, PlaneKind::VectorFill),
-    ] {
-        document.planes.push(FilePlane {
-            id,
-            kind,
-            pixel_format: PixelFormat::StraightRgba8,
-            width: document.width,
-            height: document.height,
-            tiles: Vec::new(),
-        });
-    }
-    document
-        .document_metadata
-        .as_mut()
-        .unwrap()
-        .layers
-        .push(FileLayer {
-            id: 7,
-            kind: LayerKind::VectorColoring,
-            name: "Vector".to_owned(),
-            visible: true,
-            editable: true,
-            opacity_milli: 1_000,
-            planes: [(8, "Vector Main"), (9, "Color Trace"), (10, "Vector Fill")]
-                .into_iter()
-                .map(|(id, name)| FilePlaneProperties {
-                    id,
-                    name: name.to_owned(),
-                    visible: true,
-                    editable: true,
-                    opacity_milli: 1_000,
-                })
-                .collect(),
-        });
-    let point = |x_milli, y_milli| FileVectorPoint { x_milli, y_milli };
-    let line = |p0: FileVectorPoint, p3: FileVectorPoint| FileVectorSegment {
-        p0,
-        p1: FileVectorPoint {
-            x_milli: (p0.x_milli * 2 + p3.x_milli) / 3,
-            y_milli: (p0.y_milli * 2 + p3.y_milli) / 3,
-        },
-        p2: FileVectorPoint {
-            x_milli: (p0.x_milli + p3.x_milli * 2) / 3,
-            y_milli: (p0.y_milli + p3.y_milli * 2) / 3,
-        },
-        p3,
-        width_start_milli: 1_000,
-        width_end_milli: 2_000,
-    };
-    let corners = [
-        point(1_000, 1_000),
-        point(5_000, 1_000),
-        point(5_000, 5_000),
-        point(1_000, 5_000),
-        point(1_000, 1_000),
-    ];
-    document.vector_metadata = Some(FileVectorMetadata {
-        paths: vec![FileVectorPath {
-            id: 11,
-            plane_id: 9,
-            color: PixelValue::Rgba16([1, 2, 3, 65_535]),
-            closed: true,
-            square_cross_section: false,
-            segments: corners
-                .windows(2)
-                .map(|pair| line(pair[0], pair[1]))
-                .collect(),
-        }],
-        fills: vec![FileVectorFill {
-            id: 12,
-            plane_id: 10,
-            color: PixelValue::Rgba([20, 40, 60, 200]),
-            boundary_path_ids: vec![11],
-        }],
-        connections: Vec::new(),
-    });
-    document
-}
-
 #[test]
 fn io_001_manifest_and_blobs_round_trip() {
     let document = base_fixture();
     let bytes = encode(&document).unwrap();
     assert_eq!(decode(&bytes).unwrap(), document);
-}
-
-#[test]
-fn pm_gap_018_vector_connections_round_trip_and_reject_invalid_topology() {
-    let mut document = vector_fixture();
-    let segment = |x0, x1| FileVectorSegment {
-        p0: FileVectorPoint {
-            x_milli: x0,
-            y_milli: 2_000,
-        },
-        p1: FileVectorPoint {
-            x_milli: (x0 * 2 + x1) / 3,
-            y_milli: 2_000,
-        },
-        p2: FileVectorPoint {
-            x_milli: (x0 + x1 * 2) / 3,
-            y_milli: 2_000,
-        },
-        p3: FileVectorPoint {
-            x_milli: x1,
-            y_milli: 2_000,
-        },
-        width_start_milli: 1_000,
-        width_end_milli: 1_000,
-    };
-    document.vector_metadata = Some(FileVectorMetadata {
-        paths: vec![
-            FileVectorPath {
-                id: 21,
-                plane_id: 9,
-                color: PixelValue::Rgba([0, 0, 0, 255]),
-                closed: false,
-                square_cross_section: false,
-                segments: vec![segment(1_000, 8_000)],
-            },
-            FileVectorPath {
-                id: 22,
-                plane_id: 9,
-                color: PixelValue::Rgba([0, 0, 0, 255]),
-                closed: false,
-                square_cross_section: false,
-                segments: vec![segment(8_000, 16_000)],
-            },
-        ],
-        fills: Vec::new(),
-        connections: vec![FileVectorConnection {
-            first_path_id: 21,
-            first_endpoint: FileVectorEndpoint::End,
-            second_path_id: 22,
-            second_endpoint: FileVectorEndpoint::Start,
-        }],
-    });
-    let bytes = encode(&document).unwrap();
-    assert_eq!(decode(&bytes).unwrap(), document);
-
-    let mut legacy_vector = bytes;
-    let vector_offset = legacy_vector
-        .windows(4)
-        .position(|window| window == b"VECT")
-        .expect("vector metadata section");
-    legacy_vector[vector_offset + 4..vector_offset + 8].copy_from_slice(&1_u32.to_le_bytes());
-    assert!(matches!(
-        decode(&legacy_vector),
-        Err(FormatError::Unsupported(
-            "vector metadata version is not supported"
-        ))
-    ));
-
-    let mut invalid = document;
-    invalid
-        .vector_metadata
-        .as_mut()
-        .unwrap()
-        .connections
-        .push(FileVectorConnection {
-            first_path_id: 21,
-            first_endpoint: FileVectorEndpoint::End,
-            second_path_id: 22,
-            second_endpoint: FileVectorEndpoint::End,
-        });
-    assert!(matches!(
-        encode(&invalid),
-        Err(FormatError::Invalid("vector connection is invalid"))
-    ));
 }
 
 #[test]
@@ -467,7 +263,7 @@ fn procedure_file_fixture() -> NativeFile {
 }
 
 #[test]
-fn io_001_v26_directory_digest_and_opaque_sections_round_trip() {
+fn io_001_v27_directory_digest_and_opaque_sections_round_trip() {
     let file = procedure_file_fixture();
     let bytes = encode_procedure_file(&file).unwrap();
     assert_eq!(&bytes[0..8], b"INKPOD\0\0");
@@ -497,7 +293,7 @@ fn io_001_v26_directory_digest_and_opaque_sections_round_trip() {
 }
 
 #[test]
-fn io_001_v26_accepts_checkpoint_and_rejects_noncurrent_missing_duplicate_overlap_and_bad_digest() {
+fn io_001_v27_accepts_checkpoint_and_rejects_noncurrent_missing_duplicate_overlap_and_bad_digest() {
     let file = procedure_file_fixture();
     let encoded = encode_procedure_file(&file).unwrap();
 
@@ -560,9 +356,9 @@ fn io_001_v26_accepts_checkpoint_and_rejects_noncurrent_missing_duplicate_overla
 }
 
 #[test]
-fn io_001_v26_streaming_cancel_keeps_existing_destination_and_removes_temp() {
+fn io_001_v27_streaming_cancel_keeps_existing_destination_and_removes_temp() {
     let directory = std::env::temp_dir().join(format!(
-        "inkpod-v26-cancel-test-{}-{}",
+        "inkpod-v27-cancel-test-{}-{}",
         std::process::id(),
         TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
     ));
@@ -589,9 +385,9 @@ fn io_001_v26_streaming_cancel_keeps_existing_destination_and_removes_temp() {
 }
 
 #[test]
-fn io_001_v26_atomic_save_replaces_an_existing_container() {
+fn io_001_v27_atomic_save_replaces_an_existing_container() {
     let directory = std::env::temp_dir().join(format!(
-        "inkpod-v26-replace-test-{}-{}",
+        "inkpod-v27-replace-test-{}-{}",
         std::process::id(),
         TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
     ));
@@ -625,45 +421,6 @@ fn color_metadata_round_trips() {
     let decoded = decode(&encode(&document).unwrap()).unwrap();
     assert_eq!(decoded.main_line_color, document.main_line_color);
     assert_eq!(decoded.palette, document.palette);
-}
-
-#[test]
-fn annotation_metadata_round_trips_and_rejects_malformed_text_and_geometry() {
-    let document = annotation_fixture();
-    let encoded = encode(&document).unwrap();
-    assert_eq!(decode(&encoded).unwrap(), document);
-
-    let needle = "日本語".as_bytes();
-    let mut invalid_utf8 = encoded;
-    let offset = invalid_utf8
-        .windows(needle.len())
-        .position(|window| window == needle)
-        .unwrap();
-    invalid_utf8[offset] = 0xff;
-    assert!(matches!(
-        decode(&invalid_utf8),
-        Err(FormatError::Invalid(_))
-    ));
-
-    let mut outside = annotation_fixture();
-    outside.document_metadata.as_mut().unwrap().annotations[0]
-        .bounds
-        .width = 64;
-    assert!(matches!(
-        encode(&outside),
-        Err(FormatError::Invalid(
-            "annotation geometry is outside the document"
-        ))
-    ));
-
-    let mut oversized = annotation_fixture();
-    oversized.document_metadata.as_mut().unwrap().annotations[0].text = "x".repeat(65_537);
-    assert!(matches!(
-        encode(&oversized),
-        Err(FormatError::Invalid(
-            "annotation object properties are invalid"
-        ))
-    ));
 }
 
 #[test]
@@ -872,100 +629,6 @@ fn light_table_metadata_round_trips_and_rejects_malformed_source_relationships()
     let mut no_tree = light_table_fixture();
     no_tree.document_metadata = None;
     assert!(matches!(encode(&no_tree), Err(FormatError::Invalid(_))));
-}
-
-#[test]
-fn vector_metadata_round_trips_and_rejects_malformed_topology() {
-    let document = vector_fixture();
-    assert_eq!(decode(&encode(&document).unwrap()).unwrap(), document);
-
-    let mut missing_boundary = vector_fixture();
-    missing_boundary.vector_metadata.as_mut().unwrap().fills[0].boundary_path_ids[0] = 99;
-    assert!(matches!(
-        encode(&missing_boundary),
-        Err(FormatError::Invalid(_))
-    ));
-
-    let mut open_boundary = vector_fixture();
-    open_boundary.vector_metadata.as_mut().unwrap().paths[0].closed = false;
-    assert!(matches!(
-        encode(&open_boundary),
-        Err(FormatError::Invalid(_))
-    ));
-
-    let mut cross_layer = vector_fixture();
-    for (id, kind) in [
-        (14, PlaneKind::VectorMainLine),
-        (15, PlaneKind::ColorTrace),
-        (16, PlaneKind::VectorFill),
-    ] {
-        cross_layer.planes.push(FilePlane {
-            id,
-            kind,
-            pixel_format: PixelFormat::StraightRgba8,
-            width: cross_layer.width,
-            height: cross_layer.height,
-            tiles: Vec::new(),
-        });
-    }
-    cross_layer
-        .document_metadata
-        .as_mut()
-        .unwrap()
-        .layers
-        .push(FileLayer {
-            id: 13,
-            kind: LayerKind::VectorColoring,
-            name: "Other vector".to_owned(),
-            visible: true,
-            editable: true,
-            opacity_milli: 1_000,
-            planes: [(14, "Main"), (15, "Trace"), (16, "Fill")]
-                .into_iter()
-                .map(|(id, name)| FilePlaneProperties {
-                    id,
-                    name: name.to_owned(),
-                    visible: true,
-                    editable: true,
-                    opacity_milli: 1_000,
-                })
-                .collect(),
-        });
-    cross_layer.vector_metadata.as_mut().unwrap().fills[0].plane_id = 16;
-    assert!(matches!(
-        encode(&cross_layer),
-        Err(FormatError::Invalid(
-            "vector fill boundary crosses vector layers"
-        ))
-    ));
-
-    let mut out_of_bounds = vector_fixture();
-    out_of_bounds.vector_metadata.as_mut().unwrap().paths[0].segments[0]
-        .p1
-        .x_milli = i32::MAX;
-    assert!(matches!(
-        encode(&out_of_bounds),
-        Err(FormatError::Invalid(
-            "vector segment coordinate is outside bounds"
-        ))
-    ));
-
-    let mut colliding_path = vector_fixture();
-    colliding_path.vector_metadata.as_mut().unwrap().paths[0].id = 6;
-    colliding_path.vector_metadata.as_mut().unwrap().fills[0].boundary_path_ids[0] = 6;
-    assert!(matches!(
-        encode(&colliding_path),
-        Err(FormatError::Invalid(
-            "vector path collides with an existing stable ID"
-        ))
-    ));
-
-    let mut missing_metadata = vector_fixture();
-    missing_metadata.vector_metadata = None;
-    assert!(matches!(
-        encode(&missing_metadata),
-        Err(FormatError::Invalid(_))
-    ));
 }
 
 #[test]

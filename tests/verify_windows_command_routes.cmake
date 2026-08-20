@@ -36,49 +36,40 @@ if(NOT route_count EQUAL unique_route_count)
         "${unique_route_count} unique IDs")
 endif()
 
+# These pane-owned actions are dispatched by buttons inside the dynamic pane
+# tabs. They intentionally have no top-level menu resource after the direct
+# pane-toggle migration, but still require one production command owner.
+set(pane_only_route_ids
+    IDM_BATCH_PIN
+    IDM_COLOR_PIN
+    IDM_LIGHT_TABLE_PIN
+    IDM_LOCATOR_AUTOSCROLL
+    IDM_LOCATOR_FIXED
+    IDM_LOCATOR_PIN
+    IDM_SEQUENCE_PIN
+    IDM_SUBPALETTE_PIN)
+foreach(pane_only_route_id IN LISTS pane_only_route_ids)
+    if(NOT pane_only_route_id IN_LIST unique_route_ids)
+        message(FATAL_ERROR
+            "pane-only command has no route owner: ${pane_only_route_id}")
+    endif()
+endforeach()
+list(REMOVE_ITEM unique_route_ids ${pane_only_route_ids})
+
 string(REGEX MATCHALL "IDM_[A-Z0-9_]+" resource_ids "${resource_text}")
 list(REMOVE_DUPLICATES resource_ids)
 list(SORT resource_ids)
 list(SORT unique_route_ids)
 if(NOT resource_ids STREQUAL unique_route_ids)
+    set(unrouted_resource_ids ${resource_ids})
+    list(REMOVE_ITEM unrouted_resource_ids ${unique_route_ids})
+    set(resource_less_route_ids ${unique_route_ids})
+    list(REMOVE_ITEM resource_less_route_ids ${resource_ids})
     message(FATAL_ERROR
-        "command routes differ from the production localized resource command set")
+        "command routes differ from the production localized resource command set: "
+        "unrouted resources=${unrouted_resource_ids}; "
+        "resource-less routes=${resource_less_route_ids}")
 endif()
-
-set(vector_select_begin "        case IDM_VECTOR_SELECT_CUT:")
-set(vector_select_end "        case IDM_VECTOR_RASTERIZE:")
-string(FIND "${route_text}" "${vector_select_begin}" vector_select_begin_offset)
-string(FIND "${route_text}" "${vector_select_end}" vector_select_end_offset)
-if(vector_select_begin_offset LESS 0
-        OR vector_select_end_offset LESS_EQUAL vector_select_begin_offset)
-    message(FATAL_ERROR "vector selection route boundaries were not found")
-endif()
-math(EXPR vector_select_length
-    "${vector_select_end_offset} - ${vector_select_begin_offset}")
-string(SUBSTRING
-    "${route_text}"
-    ${vector_select_begin_offset}
-    ${vector_select_length}
-    vector_select_text)
-foreach(required_vector_select_token IN ITEMS
-        "const CommandContext captured_context ="
-        "state->routing.targets.Capture()"
-        "option_status != INKPOD_STATUS_OK"
-        "captured_context.document_session.has_value()"
-        "captured_context.generation.has_value()"
-        "state->RefreshEditorPresentation("
-        "captured_context.document_session.value()"
-        "captured_context.generation.value()")
-    string(FIND
-        "${vector_select_text}"
-        "${required_vector_select_token}"
-        vector_select_token_offset)
-    if(vector_select_token_offset LESS 0)
-        message(FATAL_ERROR
-            "vector selection failure does not restore the captured Core "
-            "presentation: ${required_vector_select_token}")
-    endif()
-endforeach()
 
 list(LENGTH resource_ids production_count)
 message(STATUS

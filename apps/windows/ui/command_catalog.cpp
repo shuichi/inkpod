@@ -25,6 +25,36 @@ constexpr UINT kCommandIds[] = {
 #undef INKPOD_COMMAND_STATE
 };
 
+constexpr bool IsPaneLocalCommand(UINT command) noexcept {
+    switch (command) {
+        case IDM_LOCATOR_PIN:
+        case IDM_LOCATOR_FIXED:
+        case IDM_LOCATOR_AUTOSCROLL:
+        case IDM_SEQUENCE_PIN:
+        case IDM_LIGHT_TABLE_PIN:
+        case IDM_SUBPALETTE_PIN:
+        case IDM_COLOR_PIN:
+        case IDM_BATCH_PIN:
+            return true;
+        default:
+            return false;
+    }
+}
+
+consteval auto BuildMenuCommandIds() {
+    std::array<UINT, std::size(kCommandIds) - 8U> result{};
+    std::size_t index{};
+    for (const UINT command : kCommandIds) {
+        if (!IsPaneLocalCommand(command)) {
+            result[index++] = command;
+        }
+    }
+    return result;
+}
+
+constexpr auto kMenuCommandIds = BuildMenuCommandIds();
+static_assert(kMenuCommandIds.size() == 346U);
+
 constexpr InkpodShortcutStroke Stroke(UINT key, std::uint32_t modifiers = 0U) noexcept {
     return {key, modifiers};
 }
@@ -60,7 +90,7 @@ wchar_t GroupKey(UINT group) noexcept {
         case 415: return L'P';
         case 416: return L'R';
         case 417: return L'M';
-        case 418: return L'X';
+        case 418: return L'Y';
         default: return 0;
     }
 }
@@ -85,7 +115,7 @@ const wchar_t* GroupName(UINT command) noexcept {
         case 415: return UiText(UiStringId::Plane);
         case 416: return UiText(UiStringId::LightTable);
         case 417: return UiText(UiStringId::Text0967);
-        case 418: return UiText(UiStringId::Text0334);
+        case 418: return UiText(UiStringId::ToolGeometry);
         case 419:
             return command == IDM_WINDOW_TOOL_PALETTE
                     || command == IDM_WINDOW_LAYER_PALETTE
@@ -112,9 +142,6 @@ const wchar_t* GroupName(UINT command) noexcept {
                     || command == IDM_BATCH_PIN
                     || command == IDM_WINDOW_BATCH
                     || command == IDM_WINDOW_JOB_PROGRESS
-                    || command == IDM_WINDOW_TOOL_TAB_COLORING
-                    || command == IDM_WINDOW_TOOL_TAB_REFERENCE
-                    || command == IDM_WINDOW_TOOL_TAB_WORKFLOW
                 ? UiText(UiStringId::Text0133)
                 : UiText(UiStringId::Text0255);
         case 420: return UiText(UiStringId::Text0269);
@@ -439,6 +466,15 @@ std::wstring KeyName(const InkpodShortcutStroke& stroke) {
 }  // namespace
 
 std::span<const UINT> MenuCommandCatalog() noexcept {
+    return kMenuCommandIds;
+}
+
+bool IsMenuCommand(UINT command) noexcept {
+    return std::find(kMenuCommandIds.begin(), kMenuCommandIds.end(), command)
+        != kMenuCommandIds.end();
+}
+
+std::span<const UINT> ShortcutCommandCatalog() noexcept {
     return kCommandIds;
 }
 

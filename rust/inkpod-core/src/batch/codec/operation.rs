@@ -119,17 +119,6 @@ pub(super) fn encode_operation_kind(
             output.u32(u32::from(*visible));
             OP_VISIBILITY
         }
-        BatchOperationKind::LineWidth(mode) => {
-            let (mode, value) = match mode {
-                VectorWidthMode::Add(value) => (1, *value),
-                VectorWidthMode::Subtract(value) => (2, *value),
-                VectorWidthMode::Scale(value) => (3, *value),
-                VectorWidthMode::Constant(value) => (4, *value),
-            };
-            output.u32(mode);
-            output.u32(value.to_bits());
-            OP_LINE_WIDTH
-        }
         BatchOperationKind::Filter(filter) => {
             encode_filter(&mut output, filter)?;
             OP_FILTER
@@ -249,21 +238,6 @@ pub(super) fn decode_operation_kind(
         OP_VISIBILITY => BatchOperationKind::Visibility {
             visible: input.boolean()?,
         },
-        OP_LINE_WIDTH => {
-            let mode = input.u32()?;
-            let value = f32::from_bits(input.u32()?);
-            BatchOperationKind::LineWidth(match mode {
-                1 => VectorWidthMode::Add(value),
-                2 => VectorWidthMode::Subtract(value),
-                3 => VectorWidthMode::Scale(value),
-                4 => VectorWidthMode::Constant(value),
-                _ => {
-                    return Err(CoreError::InvalidArgument(
-                        "batch line-width mode is unknown",
-                    ));
-                }
-            })
-        }
         OP_FILTER => BatchOperationKind::Filter(decode_filter(&mut input)?),
         OP_BOUNDARY_AIRBRUSH => {
             let count = input.count(MAX_BATCH_COLORS)?;

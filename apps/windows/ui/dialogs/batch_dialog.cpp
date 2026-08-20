@@ -22,7 +22,6 @@ const std::array<BatchPaletteEntry, 24U> kBatchPaletteEntries{{
     {IDM_BATCH_ADD_CONTINUOUS_FILL, UiText(UiStringId::Text0970)},
     {IDM_BATCH_ADD_SEPARATION, UiText(UiStringId::Text0870)},
     {IDM_BATCH_ADD_VISIBILITY, UiText(UiStringId::Text0406)},
-    {IDM_BATCH_ADD_LINE_WIDTH, UiText(UiStringId::Text0848)},
     {IDM_BATCH_ADD_BOUNDARY_AIRBRUSH, UiText(UiStringId::Text0603)},
     {IDM_BATCH_ADD_DUST, UiText(UiStringId::ToolDustRemoval)},
     {IDM_BATCH_ADD_MIRROR, UiText(UiStringId::Text1009)},

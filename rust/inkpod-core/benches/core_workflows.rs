@@ -6,29 +6,27 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 const BENCHMARK_UUID: u128 = 0x494e_4b50_4f44_2d4d_322d_4245_4e43_4801;
-const EXPECTED_QUICK_CHECKSUMS: [u64; 10] = [
+const EXPECTED_QUICK_CHECKSUMS: [u64; 9] = [
     0x517e_d7ae_78bf_0487,
     0x9e13_576d_ef6f_539b,
     0x517e_d7ae_78bf_0487,
     0x3f10_53b9_fde3_7d35,
     0x255a_b9ba_d114_dfdd,
-    0x2813_c527_f273_11c8,
     0xf31d_31fe_1bb0_0fd7,
-    0x264b_9802_8ac9_2ac6,
-    0x07da_1b4e_6bc5_d289,
-    0xcfb6_b288_963c_78ba,
+    0x70d3_465b_6732_887e,
+    0xbcf4_8208_2855_c1f2,
+    0x1005_f890_1846_f431,
 ];
-const EXPECTED_FULL_CHECKSUMS: [u64; 10] = [
+const EXPECTED_FULL_CHECKSUMS: [u64; 9] = [
     0x4390_40e0_244d_5773,
     0xa33f_7534_fcdd_61e7,
     0x4390_40e0_244d_5773,
     0xa2c1_a74e_7f97_81a3,
     0x77f6_3d83_e130_185f,
-    0xb975_f3cf_db78_24fd,
     0x6732_b8b0_a656_5d03,
-    0x264b_9802_8ac9_2ac6,
-    0x07da_1b4e_6bc5_d289,
-    0x2b21_96e0_6f71_98b3,
+    0x70d3_465b_6732_887e,
+    0xbcf4_8208_2855_c1f2,
+    0x558c_b3aa_cd55_afd9,
 ];
 
 #[derive(Clone, Copy)]
@@ -40,8 +38,6 @@ struct Profile {
     undo_edits: u32,
     light_table_side: u32,
     light_table_references: u32,
-    vector_side: u32,
-    vector_paths: u32,
     batch_cells: u32,
     batch_side: u32,
     checkpoint_samples: u32,
@@ -59,8 +55,6 @@ impl Profile {
                 undo_edits: 12,
                 light_table_side: 128,
                 light_table_references: 3,
-                vector_side: 128,
-                vector_paths: 8,
                 batch_cells: 4,
                 batch_side: 16,
                 checkpoint_samples: 175_000,
@@ -75,8 +69,6 @@ impl Profile {
                 undo_edits: 48,
                 light_table_side: 256,
                 light_table_references: 6,
-                vector_side: 256,
-                vector_paths: 32,
                 batch_cells: 16,
                 batch_side: 32,
                 checkpoint_samples: 1_000_000,
@@ -129,7 +121,6 @@ fn main() {
         pan_zoom_snapshot(profile),
         undo_redo(profile),
         light_table_composite(profile),
-        vector_snapshot(profile),
         batch_preview(profile),
         canonical_replay(profile),
         checkpoint_open(profile),
@@ -756,83 +747,6 @@ fn light_table_composite(profile: Profile) -> ScenarioResult {
     }
 }
 
-fn vector_snapshot(profile: Profile) -> ScenarioResult {
-    let mut core = Core::new();
-    core.new_cell_with_uuid(
-        profile.vector_side,
-        profile.vector_side,
-        DEFAULT_DPI_MILLI,
-        DEFAULT_DPI_MILLI,
-        BENCHMARK_UUID + 3,
-    )
-    .expect("bounded vector document must be valid");
-    let (_, layer_id) = core
-        .create_layer(LayerKind::VectorColoring, "Benchmark vectors")
-        .expect("vector layer creation must succeed");
-    let (_, trace_plane, fill_plane) = core
-        .vector_layer_planes(layer_id)
-        .expect("required vector planes must exist");
-    let columns = if profile.vector_paths <= 8 { 4 } else { 8 };
-    let cell = profile.vector_side / columns;
-    for index in 0..profile.vector_paths {
-        let column = index % columns;
-        let row = index / columns;
-        let x0 = (column * cell + 2) as f32;
-        let y0 = (row * cell + 2) as f32;
-        let x1 = (column * cell + cell - 2) as f32;
-        let y1 = (row * cell + cell - 2) as f32;
-        let (_, path_id) = core
-            .vector_add_path(trace_plane, vector_rectangle(x0, y0, x1, y1, index as u8))
-            .expect("bounded vector path must be accepted");
-        core.vector_add_fill(
-            fill_plane,
-            &[path_id],
-            PixelValue::Rgba([40, index as u8, 180, 220]),
-        )
-        .expect("bounded vector fill must be accepted");
-    }
-
-    let started = Instant::now();
-    let snapshot = core.build_snapshot();
-    let rasterized = core
-        .rasterize_vector_layer(layer_id, 1, true)
-        .expect("bounded vector rasterization must succeed");
-    let elapsed = started.elapsed();
-
-    assert_eq!(
-        snapshot.vector_segments().len(),
-        profile.vector_paths as usize * 4
-    );
-    assert_eq!(snapshot.vector_fills().len(), profile.vector_paths as usize);
-    assert_eq!(snapshot.tile_count(), 0);
-    assert_eq!(snapshot.revision(), u64::from(profile.vector_paths) * 2 + 2);
-    assert_eq!(
-        core.history_entries().len(),
-        profile.vector_paths as usize * 2 + 1
-    );
-    assert_eq!(rasterized.width, profile.vector_side);
-    assert_eq!(rasterized.height, profile.vector_side);
-    let checksum = hash_combine(
-        vector_snapshot_checksum(&snapshot),
-        fnv1a64(&rasterized.pixels),
-    );
-    black_box((&snapshot, &rasterized));
-
-    ScenarioResult {
-        scenario: "vector_snapshot",
-        elapsed,
-        iterations: 2,
-        input_items: profile.vector_paths.into(),
-        output_items: (snapshot.vector_segments().len() + snapshot.vector_fills().len()) as u64,
-        reused_items: 0,
-        document_revision: snapshot.revision(),
-        history_entries: core.history_entries().len() as u64,
-        successes: 2,
-        failures: 0,
-        checksum,
-    }
-}
-
 fn batch_preview(profile: Profile) -> ScenarioResult {
     let mut core = Core::new();
     let cells = (0..profile.batch_cells)
@@ -999,41 +913,6 @@ fn centered_frame(width: u32, height: u32) -> RectI32 {
     }
 }
 
-fn vector_rectangle(x0: f32, y0: f32, x1: f32, y1: f32, salt: u8) -> VectorPathInput {
-    let points = [(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)];
-    let segments = points
-        .windows(2)
-        .map(|pair| {
-            let start = pair[0];
-            let end = pair[1];
-            let third_x = (end.0 - start.0) / 3.0;
-            let third_y = (end.1 - start.1) / 3.0;
-            VectorCubicSegment {
-                p0: PointF32 {
-                    x: start.0,
-                    y: start.1,
-                },
-                p1: PointF32 {
-                    x: start.0 + third_x,
-                    y: start.1 + third_y,
-                },
-                p2: PointF32 {
-                    x: start.0 + third_x * 2.0,
-                    y: start.1 + third_y * 2.0,
-                },
-                p3: PointF32 { x: end.0, y: end.1 },
-                width_start: 1.0 + f32::from(salt % 3),
-                width_end: 1.0 + f32::from((salt + 1) % 3),
-            }
-        })
-        .collect();
-    VectorPathInput {
-        segments,
-        color: PixelValue::Rgba([20, 40 + salt, 80, 255]),
-        closed: true,
-    }
-}
-
 fn tile_revisions(snapshot: &RenderSnapshot) -> BTreeMap<u64, u64> {
     snapshot
         .tiles()
@@ -1052,43 +931,6 @@ fn snapshot_checksum(snapshot: &RenderSnapshot) -> u64 {
         hash.write(&tile.height().to_le_bytes());
         hash.write(&tile.stride_bytes().to_le_bytes());
         hash.write(tile.pixels());
-    }
-    hash.finish()
-}
-
-fn vector_snapshot_checksum(snapshot: &RenderSnapshot) -> u64 {
-    let mut hash = Fnv1a64::new();
-    for segment in snapshot.vector_segments() {
-        hash.write(&segment.path_id.to_le_bytes());
-        hash.write(&segment.plane_id.to_le_bytes());
-        hash.write(&segment.z_order.to_le_bytes());
-        hash.write(&segment.segment_index.to_le_bytes());
-        hash.write(&segment.segment_count.to_le_bytes());
-        hash.write(&segment.color_rgba);
-        hash.write(&[segment.closed as u8, segment.stroke_visible as u8]);
-        for value in [
-            segment.cubic.p0.x,
-            segment.cubic.p0.y,
-            segment.cubic.p1.x,
-            segment.cubic.p1.y,
-            segment.cubic.p2.x,
-            segment.cubic.p2.y,
-            segment.cubic.p3.x,
-            segment.cubic.p3.y,
-            segment.cubic.width_start,
-            segment.cubic.width_end,
-        ] {
-            hash.write(&value.to_bits().to_le_bytes());
-        }
-    }
-    for fill in snapshot.vector_fills() {
-        hash.write(&fill.fill_id.to_le_bytes());
-        hash.write(&fill.plane_id.to_le_bytes());
-        hash.write(&fill.z_order.to_le_bytes());
-        hash.write(&fill.color_rgba);
-        for boundary in &fill.boundary_path_ids {
-            hash.write(&boundary.to_le_bytes());
-        }
     }
     hash.finish()
 }
@@ -1125,13 +967,6 @@ fn benchmark_non_output_path(profile: Profile) -> PathBuf {
 fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut hash = Fnv1a64::new();
     hash.write(bytes);
-    hash.finish()
-}
-
-fn hash_combine(left: u64, right: u64) -> u64 {
-    let mut hash = Fnv1a64::new();
-    hash.write(&left.to_le_bytes());
-    hash.write(&right.to_le_bytes());
     hash.finish()
 }
 

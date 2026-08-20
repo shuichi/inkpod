@@ -21,7 +21,7 @@ cargo bench --package inkpod-core --bench core_workflows
 cargo test --release --package inkpod-core --lib script::tests::approved_quick_performance_contract -- --ignored --exact --nocapture --test-threads=1
 ```
 
-Both commands use the release benchmark profile and the same ten scenarios.
+Both commands use the release benchmark profile and the same nine scenarios.
 Quick is the bounded CI profile; full increases inputs for local before/after
 comparison. The checkpoint fixture is written outside its timed open interval
 and removed afterward. Batch uses in-memory sequence cells and asserts that its
@@ -41,7 +41,6 @@ cache-free reopen, checksum construction, and exact counter assertions.
 | pan/zoom view-only snapshot pairs | 2,048 | 8,192 |
 | Undo/Redo edits | 12 | 48 |
 | light-table document | 128 square, 3 references | 256 square, 6 references |
-| vector document | 128 square, 8 closed paths/fills | 256 square, 32 closed paths/fills |
 | Batch sequence | 4 cells at 16 square | 16 cells at 32 square |
 | canonical replay fixture | 64 square, 5 canonical edits | same |
 | checkpoint policy fixture | 256 procedures, 175,000 stroke samples | 256 procedures, 1,000,000 stroke samples |
@@ -71,9 +70,8 @@ scenario assertions are:
 | `pan_zoom_snapshot` | every zoom/pan pair builds a snapshot without changing document revision, history, pixels, or tile revisions |
 | `undo_redo` | every edit is one history entry, Undo reaches the clean savepoint, and Redo restores the exact checksum |
 | `light_table_composite` | every reference contributes to the expected tile grid and checksum |
-| `vector_snapshot` | ordered pass, segment/fill counts, zero legacy raster snapshot tiles, and rasterized pixels match |
 | `batch_preview` | one invalid graph is rejected, valid inputs dry-run successfully, and no output is generated |
-| `canonical_replay` | six boundaries replay bit-exactly; final digest and runtime epoch 23 / native v26 / numeric v1 contract match |
+| `canonical_replay` | six boundaries replay bit-exactly; final digest and runtime epoch 24 / native v27 / numeric v1 contract match |
 | `checkpoint_open` | policy emits CKPT; verified open restores the journal/document digest and exact Undo/Redo; full crosses one million replay-work units |
 | `output_color_guard` | exact scanned/selected/transparent counts, one canonical commit, revision 2/history 1, exact sparse selection bounds/tile bytes, zero CPU staging bytes, and result digest match |
 
@@ -87,11 +85,10 @@ wall-clock time, addresses, cache allocation order, and Batch output paths.
 | `pan_zoom_snapshot` | `517ed7ae78bf0487` | `439040e0244d5773` |
 | `undo_redo` | `3f1053b9fde37d35` | `a2c1a74e7f9781a3` |
 | `light_table_composite` | `255ab9bad114dfdd` | `77f63d83e130185f` |
-| `vector_snapshot` | `2813c527f27311c8` | `b975f3cfdb7824fd` |
 | `batch_preview` | `f31d31fe1bb00fd7` | `6732b8b0a6565d03` |
-| `canonical_replay` | `264b98028ac92ac6` | `264b98028ac92ac6` |
-| `checkpoint_open` | `07da1b4e6bc5d289` | `07da1b4e6bc5d289` |
-| `output_color_guard` | `cfb6b288963c78ba` | `2b2196e06f7198b3` |
+| `canonical_replay` | `70d3465b6732887e` | `70d3465b6732887e` |
+| `checkpoint_open` | `bcf482082855c1f2` | `bcf482082855c1f2` |
+| `output_color_guard` | `1005f8901846f431` | `558cb3aacd55afd9` |
 
 The v19/schema-6 Color-chart commitment changed only the `checkpoint_open`
 document-digest checksum from `eca2df7e74020108` to `8847f8440d290c18`.
@@ -119,25 +116,15 @@ harness, counter mapping, envelope, or `revision-max` expression. The recorded
 the same new contract checksum.
 
 The v22/epoch-19 individual-Cell Cut descriptor adds a separate bounded persistence
-and history domain. It advances the closed current contract without changing the
-ten benchmark workloads, their semantic counters/checksums, the harness, any
-approved envelope, payload-access route, or the `revision-max` expression.
+and history domain. It advances that historical contract without changing the
+then-current benchmark workloads, their semantic counters/checksums, the harness,
+any approved envelope, payload-access route, or the `revision-max` expression.
 
 The v23/epoch-20 ordered Cut-membership transaction separates immutable member
 assets from ordered membership and extends Cut history outside the document/render
 hot path. It changes no benchmark workload, semantic counter/checksum, harness,
 approved envelope, payload-access route, or `revision-max` expression. The required
-quick run must therefore retain all ten recorded checksums and reuse/rebuild gates.
-
-The v24/epoch-21 annotation primitive adds persisted annotation objects to the
-canonical document frame and normal-output annotations to flattened snapshot output.
-Unchanged quick and full workloads independently reproduced the new
-`canonical_replay` checksum `264b98028ac92ac6` and `checkpoint_open` checksum
-`b63e39424fbad396`. The output-color-guard result digest changed to
-`8b2bd6bfbf8eada8` (quick) and `53bbe70c027a2864` (full), while retaining the exact
-quick/full scanned, selected, transparent, revision, history, success, and failure
-counters recorded above. No workload, harness logic, approved envelope,
-payload-access route, or `revision-max` expression changed.
+quick run had to retain the recorded checksums and reuse/rebuild gates.
 
 The v25/epoch-22 shooting-frame primitive adds the optional angled-frame field
 to the canonical document commitment without changing any benchmark workload,
@@ -149,17 +136,26 @@ output-color-guard result digest to `650300bdff9044cb` quick and
 `290f6150f7718c2d` full; scanned/selected/transparent counts, revision 2,
 history 1, success 1, and failure 0 are unchanged.
 
-The v26/epoch-23 vanishing-point primitive adds persistent point fields to the
+The historical v26/epoch-23 vanishing-point primitive added persistent point fields to the
 canonical document commitment and bounded viewport-derived radial overlay
 records. It does not change any benchmark workload, harness logic, approved
 wall-clock envelope, payload-access route, or the `revision-max` expression.
-Two independent quick and two independent full runs retained all ten scenario
+Two independent quick and two independent full runs retained all then-current scenario
 counters, `canonical_replay` checksum `264b98028ac92ac6`, and every audited
 reuse/rebuild gate. The intentional schema-9 commitment changes
 `checkpoint_open` to `07da1b4e6bc5d289` in both profiles and changes the
 output-color-guard result digest to `cfb6b288963c78ba` quick and
 `2b2196e06f7198b3` full. Workload, harness logic, approved envelope,
-payload-access route, and `revision-max` remain unchanged.
+payload-access route, and `revision-max` remained unchanged.
+
+The explicitly approved M27B rebaseline removes the retired drawing-model
+scenario and retains the nine raster/current-product scenarios listed above.
+Native v27/replay epoch 24, document digest schema 10, editor schema 7, and
+composite schema 4 are the exact-current contract. Those versioned commitments
+change `canonical_replay` to `70d3465b6732887e`, `checkpoint_open` to
+`bcf482082855c1f2`, and `output_color_guard` to `1005f8901846f431` quick /
+`558cb3aacd55afd9` full. All retained workload parameters and semantic counters
+remain unchanged; no wall-clock envelope or `revision-max` expression is widened.
 
 After one discarded warm-up per profile, the accepted M22
 `output_color_guard` samples were 74,551,800; 74,892,300; 75,355,400;
@@ -179,8 +175,8 @@ to Windows build 26200.9168 on the MSI MS-7E26 host with an AMD Ryzen 9
 scheme. A materially different host, target, toolchain, or power mode needs a
 separately approved range.
 
-The fixed quick fixture uses InkScript source ID 913, exact-current file/catalog v2 and replay
-epoch 23, 128 `set_plane_properties` steps, four successful 4-by-4 current-v26
+The fixed quick fixture uses InkScript source ID 913, exact-current file v2/catalog v3 and replay
+epoch 24, 128 `set_plane_properties` steps, four successful 4-by-4 current-v27
 inputs, one 256 KiB inline straight-sRGB RGBA8 asset, one Save failure and one
 pre-linearization cancellation. Every successful output is reopened through
 full Genesis/asset/procedure replay without a checkpoint cache. The runner is

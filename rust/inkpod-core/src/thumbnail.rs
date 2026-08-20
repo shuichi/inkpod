@@ -1,10 +1,14 @@
-use super::geometry::*;
-use super::*;
+//! Bounded raster layer thumbnails.
+
+use crate::document::{CellDocument, LayerNode};
+use crate::identity::LayerId;
+use crate::{Core, CoreError, LayerThumbnail, PixelValue, PlaneType};
+use inkpod_image::source_over_rgba8;
 
 impl Core {
     /// Builds a small, aspect-preserving straight RGBA8 preview of exactly one
-    /// layer. Hidden layers are still previewed, while per-plane visibility and
-    /// both layer/plane opacity values remain part of the result.
+    /// raster layer. Hidden layers are still previewed, while per-plane
+    /// visibility and both layer/plane opacity values remain part of the result.
     pub fn layer_thumbnail(
         &self,
         layer_id: u64,
@@ -41,27 +45,16 @@ impl Core {
             .checked_mul(height)
             .and_then(|bytes| usize::try_from(bytes).ok())
             .ok_or(CoreError::InvalidState("layer thumbnail bytes overflow"))?;
-        let pixels = if layer.kind == LayerKind::VectorColoring {
-            self.rasterize_vector_layer_dimensions(layer_id, width, height, stride_bytes, true)?
-                .pixels
-        } else if matches!(layer.kind, LayerKind::Text | LayerKind::Annotation) {
-            crate::annotation::rasterize_annotation_layer(document, layer_id, width, height, true)?
-                .into_iter()
-                .flatten()
-                .collect()
-        } else {
-            let mut pixels = vec![0_u8; byte_count];
-            for output_y in 0..height {
-                for output_x in 0..width {
-                    let rgba = sample_layer_thumbnail_pixel(
-                        document, layer, output_x, output_y, width, height,
-                    )?;
-                    let offset = output_y as usize * stride_bytes as usize + output_x as usize * 4;
-                    pixels[offset..offset + 4].copy_from_slice(&rgba);
-                }
+        let mut pixels = vec![0_u8; byte_count];
+        for output_y in 0..height {
+            for output_x in 0..width {
+                let rgba = sample_layer_thumbnail_pixel(
+                    document, layer, output_x, output_y, width, height,
+                )?;
+                let offset = output_y as usize * stride_bytes as usize + output_x as usize * 4;
+                pixels[offset..offset + 4].copy_from_slice(&rgba);
             }
-            pixels
-        };
+        }
         Ok(LayerThumbnail {
             revision: self.document_revision.get(),
             layer_id: layer_id.get(),
@@ -173,11 +166,18 @@ fn sample_layer_raster(
                 };
                 [0, 160, 255, coverage / 3]
             }
-            PlaneType::VectorMainLine | PlaneType::ColorTrace | PlaneType::VectorFill => continue,
         };
         rgba[3] = ((u32::from(rgba[3]) * plane.opacity_milli + 500) / 1_000) as u8;
-        composite = source_over_rgba(composite, rgba);
+        composite = source_over_rgba8(composite, rgba);
     }
     composite[3] = ((u32::from(composite[3]) * layer.opacity_milli + 500) / 1_000) as u8;
     Ok(composite)
+}
+
+fn rgba8(color: PixelValue) -> [u8; 4] {
+    match color {
+        PixelValue::Rgba(value) => value,
+        PixelValue::Rgba16(value) => value.map(|channel| ((u32::from(channel) + 128) / 257) as u8),
+        _ => [0, 0, 0, 0],
+    }
 }

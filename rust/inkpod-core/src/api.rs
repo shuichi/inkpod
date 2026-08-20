@@ -101,12 +101,6 @@ pub enum PlaneType {
     Raster,
     /// Document selection mask.
     Selection,
-    /// Vector main-line artwork.
-    VectorMainLine,
-    /// Vector color-trace artwork.
-    ColorTrace,
-    /// Vector fill artwork.
-    VectorFill,
 }
 
 impl PlaneType {
@@ -116,9 +110,6 @@ impl PlaneType {
             Self::Color => FilePlaneKind::Color,
             Self::Raster => FilePlaneKind::Raster,
             Self::Selection => FilePlaneKind::Selection,
-            Self::VectorMainLine => FilePlaneKind::VectorMainLine,
-            Self::ColorTrace => FilePlaneKind::ColorTrace,
-            Self::VectorFill => FilePlaneKind::VectorFill,
         }
     }
 
@@ -129,9 +120,6 @@ impl PlaneType {
             FilePlaneKind::Raster => Self::Raster,
             FilePlaneKind::Selection => Self::Selection,
             FilePlaneKind::LightTable => Self::Raster,
-            FilePlaneKind::VectorMainLine => Self::VectorMainLine,
-            FilePlaneKind::ColorTrace => Self::ColorTrace,
-            FilePlaneKind::VectorFill => Self::VectorFill,
         }
     }
 }
@@ -536,10 +524,6 @@ pub struct ClipboardPlane {
     pub origin_y: i32,
     /// Owned non-transparent pixel samples.
     pub pixels: Vec<ClipboardPixel>,
-    /// Owned vector paths when this is a vector plane.
-    pub vector_paths: Vec<VectorPathInfo>,
-    /// Owned vector fills whose boundaries are entirely present in `vector_paths`.
-    pub vector_fills: Vec<VectorFillInfo>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -838,61 +822,6 @@ pub enum ViewCommand {
     SetTransparentView(bool),
     /// Selects alpha-channel visualization.
     SetAlphaView(bool),
-    /// Enables or disables antialiasing for editable vector content.
-    SetVectorAntialias(bool),
-    /// Selects the non-destructive vector centerline presentation.
-    SetVectorCenterlineMode(VectorCenterlineMode),
-    /// Shows or hides markers for topologically unconnected vector endpoints.
-    SetVectorEndpointsVisible(bool),
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-/// Mutually exclusive presentation of vector path centerlines.
-pub enum VectorCenterlineMode {
-    /// Centerlines are hidden and normal strokes are shown.
-    Hidden,
-    /// Centerlines are drawn over normal strokes.
-    Overlay,
-    /// Centerlines are drawn while normal strokes are hidden.
-    Only,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-/// Mutually consistent, non-destructive vector diagnostic presentation flags.
-pub struct VectorDiagnosticFlags {
-    pub(super) antialias: bool,
-    pub(super) centerline_mode: VectorCenterlineMode,
-    pub(super) endpoints_visible: bool,
-}
-
-impl Default for VectorDiagnosticFlags {
-    fn default() -> Self {
-        Self {
-            antialias: true,
-            centerline_mode: VectorCenterlineMode::Hidden,
-            endpoints_visible: false,
-        }
-    }
-}
-
-impl VectorDiagnosticFlags {
-    /// Reports whether editable vector content uses antialiasing.
-    #[must_use]
-    pub const fn antialias(self) -> bool {
-        self.antialias
-    }
-
-    /// Returns the mutually exclusive centerline presentation.
-    #[must_use]
-    pub const fn centerline_mode(self) -> VectorCenterlineMode {
-        self.centerline_mode
-    }
-
-    /// Reports whether unconnected endpoint markers are visible.
-    #[must_use]
-    pub const fn endpoints_visible(self) -> bool {
-        self.endpoints_visible
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -923,7 +852,6 @@ pub struct ViewState {
     pub(super) grid_snap_enabled: bool,
     pub(super) transparent_view: bool,
     pub(super) alpha_view: bool,
-    pub(super) vector_diagnostics: VectorDiagnosticFlags,
     pub(super) viewport: DeviceSizeF64,
 }
 
@@ -944,7 +872,6 @@ impl Default for ViewState {
             grid_snap_enabled: false,
             transparent_view: true,
             alpha_view: false,
-            vector_diagnostics: VectorDiagnosticFlags::default(),
             viewport: DeviceSizeF64::ONE,
         }
     }
@@ -1039,30 +966,6 @@ impl ViewState {
     #[must_use]
     pub const fn alpha_view(self) -> bool {
         self.alpha_view
-    }
-
-    /// Reports whether editable vector content uses antialiasing.
-    #[must_use]
-    pub const fn vector_antialias(self) -> bool {
-        self.vector_diagnostics.antialias()
-    }
-
-    /// Returns the mutually exclusive vector centerline presentation.
-    #[must_use]
-    pub const fn vector_centerline_mode(self) -> VectorCenterlineMode {
-        self.vector_diagnostics.centerline_mode()
-    }
-
-    /// Reports whether unconnected vector endpoint markers are visible.
-    #[must_use]
-    pub const fn vector_endpoints_visible(self) -> bool {
-        self.vector_diagnostics.endpoints_visible()
-    }
-
-    /// Returns all typed vector diagnostic presentation flags.
-    #[must_use]
-    pub const fn vector_diagnostics(self) -> VectorDiagnosticFlags {
-        self.vector_diagnostics
     }
 
     /// Returns the current viewport width in device pixels.

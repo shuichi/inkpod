@@ -50,51 +50,13 @@ pub(crate) fn flatten_document(
             Some(record)
         }
     };
-    let vector_rasters = document
-        .layers
-        .iter()
-        .map(|layer| {
-            (layer.kind == LayerKind::VectorColoring)
-                .then(|| {
-                    crate::vector::rasterize_vector_layer_content(
-                        document,
-                        layer,
-                        document.width,
-                        document.height,
-                        document.width.saturating_mul(4),
-                        true,
-                    )
-                })
-                .transpose()
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let annotation_rasters = document
-        .layers
-        .iter()
-        .map(|layer| {
-            matches!(layer.kind, LayerKind::Text | LayerKind::Annotation)
-                .then(|| {
-                    crate::annotation::rasterize_annotation_layer(
-                        document,
-                        layer.id,
-                        document.width,
-                        document.height,
-                        false,
-                    )
-                })
-                .transpose()
-        })
-        .collect::<Result<Vec<_>, _>>()?;
     let composite_source = CompositeDocumentSource {
         document,
         base_asset: base_asset.as_deref(),
-        vector_rasters: &vector_rasters,
-        annotation_rasters: &annotation_rasters,
-        rendered_width: document.width,
     };
     for y in 0..document.height {
         for x in 0..document.width {
-            let composite = composite_source.pixel(x, y, x, y)?;
+            let composite = composite_source.pixel(x, y)?;
             if composite != [0; 4] {
                 raster.set_pixel(x, y, PixelValue::Rgba(composite), revision)?;
             }
@@ -106,19 +68,10 @@ pub(crate) fn flatten_document(
 struct CompositeDocumentSource<'a> {
     document: &'a CellDocument,
     base_asset: Option<&'a asset::AssetRecord>,
-    vector_rasters: &'a [Option<VectorRaster>],
-    annotation_rasters: &'a [Option<Vec<[u8; 4]>>],
-    rendered_width: u32,
 }
 
 impl CompositeDocumentSource<'_> {
-    fn pixel(
-        &self,
-        x: u32,
-        y: u32,
-        rendered_x: u32,
-        rendered_y: u32,
-    ) -> Result<[u8; 4], CoreError> {
+    fn pixel(&self, x: u32, y: u32) -> Result<[u8; 4], CoreError> {
         let mut composite = match self.base_asset {
             None => [u8::MAX; 4],
             Some(record) => base_raster_pixel(
@@ -129,14 +82,12 @@ impl CompositeDocumentSource<'_> {
                 y,
             )?,
         };
-        for ((layer, vector_raster), annotation_raster) in self
+        for layer in self
             .document
             .layers
             .iter()
-            .zip(self.vector_rasters)
-            .zip(self.annotation_rasters)
             .rev()
-            .filter(|((layer, _), _)| layer.visible)
+            .filter(|layer| layer.visible)
         {
             if layer.kind == LayerKind::Adjustment {
                 let adjustment =
@@ -161,23 +112,6 @@ impl CompositeDocumentSource<'_> {
                 });
                 continue;
             }
-            if let Some(vector_raster) = vector_raster {
-                let offset = rendered_y as usize * vector_raster.stride_bytes as usize
-                    + rendered_x as usize * 4;
-                composite = blend_rgba_over(
-                    composite,
-                    vector_raster.pixels[offset..offset + 4]
-                        .try_into()
-                        .map_err(|_| CoreError::InvalidState("vector raster is truncated"))?,
-                );
-                continue;
-            }
-            if let Some(annotation_raster) = annotation_raster {
-                let offset =
-                    rendered_y as usize * self.rendered_width as usize + rendered_x as usize;
-                composite = blend_rgba_over(composite, annotation_raster[offset]);
-                continue;
-            }
             let mut layer_pixel = [0_u8; 4];
             for plane in layer.planes.iter().rev().filter(|plane| plane.visible) {
                 let value = plane.raster.pixel(x, y)?;
@@ -199,10 +133,7 @@ impl CompositeDocumentSource<'_> {
                     }
                     PlaneType::Color | PlaneType::Raster => rgba8_for_display(value)
                         .ok_or(CoreError::InvalidState("flatten source is not RGBA"))?,
-                    PlaneType::Selection
-                    | PlaneType::VectorMainLine
-                    | PlaneType::ColorTrace
-                    | PlaneType::VectorFill => continue,
+                    PlaneType::Selection => continue,
                 };
                 rgba[3] = ((u32::from(rgba[3]) * plane.opacity_milli + 500) / 1_000) as u8;
                 layer_pixel = blend_rgba_over(layer_pixel, rgba);
@@ -221,20 +152,6 @@ pub(crate) fn flatten_document_with_instructions(
     revision: u64,
 ) -> Result<TileRaster, CoreError> {
     let mut raster = flatten_document(document, assets, revision)?;
-    let annotation_rasters = document
-        .layers
-        .iter()
-        .filter(|layer| layer.visible)
-        .filter(|layer| matches!(layer.kind, LayerKind::Text | LayerKind::Annotation))
-        .map(|layer| {
-            crate::annotation::rasterize_instruction_annotation_layer(
-                document,
-                layer.id,
-                document.width,
-                document.height,
-            )
-        })
-        .collect::<Result<Vec<_>, _>>()?;
     let shooting_frame = crate::shooting_frame::instruction_overlay(document)?;
     for y in 0..document.height {
         for x in 0..document.width {
@@ -244,9 +161,6 @@ pub(crate) fn flatten_document_with_instructions(
                     "instruction export base is not RGBA8",
                 ));
             };
-            for overlay in annotation_rasters.iter().rev() {
-                composite = blend_rgba_over(composite, overlay[index]);
-            }
             if let Some(overlay) = &shooting_frame {
                 composite = blend_rgba_over(composite, overlay[index]);
             }
@@ -284,26 +198,6 @@ pub(crate) fn visit_visible_document_composite_rgba16(
             Some(record)
         }
     };
-    let mut vector_rasters = Vec::new();
-    vector_rasters
-        .try_reserve(document.layers.len())
-        .map_err(|_| CoreError::InvalidState("visible composite allocation failed"))?;
-    for layer in &document.layers {
-        vector_rasters.push(
-            (layer.kind == LayerKind::VectorColoring)
-                .then(|| {
-                    crate::vector::rasterize_vector_layer_content_rgba16(
-                        document,
-                        layer,
-                        document.width,
-                        document.height,
-                        true,
-                    )
-                })
-                .transpose()?,
-        );
-    }
-
     for y in 0..document.height {
         for x in 0..document.width {
             let mut composite = match &base_asset {
@@ -316,13 +210,7 @@ pub(crate) fn visit_visible_document_composite_rgba16(
                     y,
                 )?,
             };
-            for (layer, vector_raster) in document
-                .layers
-                .iter()
-                .zip(&vector_rasters)
-                .rev()
-                .filter(|(layer, _)| layer.visible)
-            {
+            for layer in document.layers.iter().rev().filter(|layer| layer.visible) {
                 if layer.kind == LayerKind::Adjustment {
                     let adjustment =
                         document
@@ -343,14 +231,6 @@ pub(crate) fn visit_visible_document_composite_rgba16(
                             + 500)
                             / 1_000) as u16
                     });
-                    continue;
-                }
-                if let Some(vector_raster) = vector_raster {
-                    let offset = y as usize * document.width as usize + x as usize;
-                    let pixel = *vector_raster
-                        .get(offset)
-                        .ok_or(CoreError::InvalidState("vector raster is truncated"))?;
-                    composite = blend_rgba16_over(composite, pixel);
                     continue;
                 }
                 let mut layer_pixel = [0_u16; 4];
@@ -380,10 +260,7 @@ pub(crate) fn visit_visible_document_composite_rgba16(
                         PlaneType::Color | PlaneType::Raster => value.rgba16().ok_or(
                             CoreError::InvalidState("visible composite source is not RGBA"),
                         )?,
-                        PlaneType::Selection
-                        | PlaneType::VectorMainLine
-                        | PlaneType::ColorTrace
-                        | PlaneType::VectorFill => continue,
+                        PlaneType::Selection => continue,
                     };
                     rgba[3] = ((u64::from(rgba[3]) * u64::from(plane.opacity_milli) + 500) / 1_000)
                         as u16;
@@ -603,43 +480,9 @@ pub(crate) fn thumbnail_for_document(
         .max(1.0);
     let width = (f64::from(document.width) / scale).round().max(1.0) as u32;
     let height = (f64::from(document.height) / scale).round().max(1.0) as u32;
-    let vector_rasters = document
-        .layers
-        .iter()
-        .map(|layer| {
-            (layer.kind == LayerKind::VectorColoring)
-                .then(|| {
-                    crate::vector::rasterize_vector_layer_content(
-                        document,
-                        layer,
-                        width,
-                        height,
-                        width.saturating_mul(4),
-                        true,
-                    )
-                })
-                .transpose()
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let annotation_rasters = document
-        .layers
-        .iter()
-        .map(|layer| {
-            matches!(layer.kind, LayerKind::Text | LayerKind::Annotation)
-                .then(|| {
-                    crate::annotation::rasterize_annotation_layer(
-                        document, layer.id, width, height, false,
-                    )
-                })
-                .transpose()
-        })
-        .collect::<Result<Vec<_>, _>>()?;
     let composite_source = CompositeDocumentSource {
         document,
         base_asset: base_asset.as_deref(),
-        vector_rasters: &vector_rasters,
-        annotation_rasters: &annotation_rasters,
-        rendered_width: width,
     };
     let mut rgba8 = Vec::with_capacity(width as usize * height as usize * 4);
     for y in 0..height {
@@ -650,7 +493,7 @@ pub(crate) fn thumbnail_for_document(
             let source_y = ((f64::from(y) + 0.5) * scale)
                 .floor()
                 .min(f64::from(document.height - 1)) as u32;
-            rgba8.extend_from_slice(&composite_source.pixel(source_x, source_y, x, y)?);
+            rgba8.extend_from_slice(&composite_source.pixel(source_x, source_y)?);
         }
     }
     let checksum = inkpod_image::fnv_bytes(inkpod_image::FNV_OFFSET, &rgba8);

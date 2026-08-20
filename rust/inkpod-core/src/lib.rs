@@ -15,7 +15,6 @@
 //! # Ok::<(), inkpod_core::CoreError>(())
 //! ```
 mod animation;
-mod annotation;
 mod api;
 mod asset;
 mod asset_operations;
@@ -47,9 +46,9 @@ mod selection;
 mod shooting_frame;
 mod snapshot;
 mod stroke;
+mod thumbnail;
 mod transform;
 mod vanishing_point;
-mod vector;
 mod view;
 pub use animation::{
     LightTableBulkDirection, LightTableBulkRegistrationAction, LightTableBulkRegistrationEntry,
@@ -60,8 +59,6 @@ pub use animation::{
     SequenceDirection, SequenceEndpointPolicy, SequenceStepPlan, SequenceStepResult,
     SequenceSwitchPolicy, SequenceSwitchRequest, Thumbnail,
 };
-use annotation::AnnotationObject;
-pub use annotation::*;
 pub use api::*;
 pub use asset::{
     AssetAlphaSemantics, AssetColorSpace, AssetDescriptor, AssetId, AssetInfo, AssetKind,
@@ -90,8 +87,8 @@ pub use editor::{
     ColorChartCursor, EditTarget, EditorBrushOptions, EditorDefaults, EditorFillOptions,
     EditorFrameDisposition, EditorRevision, EditorSavepointToken, EditorSelectionOptions,
     EditorSelectionShape, EditorState, EditorStateDigest, EditorStateInfo, EditorStateUpdate,
-    EditorStrokeInput, EditorTarget, EditorTool, EditorToolStyle, EditorVectorOptions,
-    InitialDocumentSpec, MAX_EDIT_TARGETS, PaletteCursor,
+    EditorStrokeInput, EditorTarget, EditorTool, EditorToolStyle, InitialDocumentSpec,
+    MAX_EDIT_TARGETS, PaletteCursor,
 };
 pub use effects::FilterPreviewInfo;
 pub use error::CoreError;
@@ -106,16 +103,16 @@ pub(crate) use identity::*;
 pub use inkpod_format::CommonRasterFormat;
 use inkpod_format::NativeSection;
 use inkpod_format::{
-    CommonRaster, DocumentArchive, FileAdjustmentLayer, FileAdjustmentMetadata, FileAnnotationKind,
-    FileAnnotationObject, FileAnnotationOutput, FileAnnotationPoint, FileDocumentMetadata,
-    FileGrid, FileGuide, FileLayer, FilePlane, FilePlaneProperties, FileShootingFrame,
-    FileShootingFrameAnchor, FileTile, FileVanishingPoint, FormatError, PlaneKind as FilePlaneKind,
+    CommonRaster, DocumentArchive, FileAdjustmentLayer, FileAdjustmentMetadata,
+    FileDocumentMetadata, FileGrid, FileGuide, FileLayer, FilePlane, FilePlaneProperties,
+    FileShootingFrame, FileShootingFrameAnchor, FileTile, FileVanishingPoint, FormatError,
+    PlaneKind as FilePlaneKind,
 };
 pub use inkpod_image::RasterRangeInterpretation as RangeInterpretation;
 use inkpod_image::{
     ColorCheckCategory, FillError, FillOptions, MAX_FILL_PIXELS, Palette, PlaneSample, RasterError,
-    TILE_SIZE, TileCoord, TileData, TileView, VectorFixedPoint, closed_region_fill_with_cancel,
-    color_check_category, extend_fill_with_cancel, eyedropper, seed_fill_with_cancel,
+    TILE_SIZE, TileCoord, TileData, TileView, closed_region_fill_with_cancel, color_check_category,
+    extend_fill_with_cancel, eyedropper, seed_fill_with_cancel,
 };
 pub use journal::{
     BranchId, HistoryMoveKind, HistoryVisualizationBuilder, HistoryVisualizationProgress,
@@ -140,11 +137,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use stroke::StrokeSession;
 pub use vanishing_point::*;
-pub use vector::{
-    RenderVectorEndpoint, RenderVectorFill, RenderVectorSegment, VectorCubicSegment,
-    VectorEndpoint, VectorEraseMode, VectorFillInfo, VectorPathInfo, VectorPathInput, VectorRaster,
-    VectorSelectionMode, VectorSelectionRange, VectorSelectionResult, VectorWidthMode,
-};
 use view::default_shortcuts;
 /// Feature bits supported by this version of the Rust Core API.
 pub const CORE_FEATURES: u64 = 1;

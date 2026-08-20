@@ -234,6 +234,18 @@ fn graph_preview_dry_run_and_owned_report_cross_ffi() {
         },
         INKPOD_STATUS_OK
     );
+    let mut task_info = InkpodTaskInfo {
+        struct_size: size_of::<InkpodTaskInfo>() as u32,
+        state: 0,
+        completed_work: 0,
+        total_work: 0,
+        reserved: 0,
+    };
+    assert_eq!(
+        unsafe { inkpod_batch_task_query(task, &mut task_info) },
+        INKPOD_STATUS_OK
+    );
+    assert_eq!(task_info.state, INKPOD_TASK_COMPLETED);
     let mut report_info = InkpodBatchReportInfo {
         struct_size: size_of::<InkpodBatchReportInfo>() as u32,
         cancelled: 0,

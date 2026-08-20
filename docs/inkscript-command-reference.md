@@ -11,10 +11,10 @@ The JSON registries remain normative when this presentation differs.
 | --- | ---: |
 | Registry schema | 2 |
 | InkScript file | 2 |
-| Procedure catalog | 2 |
-| Required replay epoch | 23 |
-| Commands | 84 |
-| Catalog FNV-1a drift fingerprint | `988b9725dbdca0a2` |
+| Procedure catalog | 3 |
+| Required replay epoch | 24 |
+| Commands | 75 |
+| Catalog FNV-1a drift fingerprint | `d94dc4d8adbc8040` |
 
 ## Language selectors
 
@@ -23,9 +23,6 @@ The JSON registries remain normative when this presentation differs.
 | `layer` | `layer_ref` | `document` | `document_tree` |
 | `plane` | `plane_ref` | `layer` | `document_tree` |
 | `guide` | `guide_ref` | `document` | `guide_order` |
-| `vector_path` | `vector_path_ref` | `plane` | `vector_order` |
-| `vector_fill` | `vector_fill_ref` | `plane` | `vector_order` |
-| `annotation` | `annotation_ref` | `layer` | `annotation_order` |
 | `shooting_frame` | `shooting_frame_ref` | `document` | `singleton` |
 | `vanishing_point` | `vanishing_point_ref` | `layer` | `document_tree` |
 | `light_table_set` | `light_table_set_ref` | `document` | `light_table_order` |
@@ -67,7 +64,7 @@ The JSON registries remain normative when this presentation differs.
 - `gradient_mode`: `composite`, `overwrite`
 - `stamp_shape`: `round`, `square`
 - `adjustment_kind`: `brightness_contrast`, `tone_curve`, `levels`
-- `scoped_color_mode`: `raster_color`, `raster_main_line`, `vector_color_line`, `vector_main_line`, `vector_fill`
+- `scoped_color_mode`: `raster_color`, `raster_main_line`
 - `selection_operation`: `new`, `add`, `subtract`, `intersect`
 - `range_interpretation`: `normal`, `tight`, `enclosed_interior`, `drawing`, `boundary`
 - `trace_brush_shape`: `round`, `square`
@@ -75,9 +72,6 @@ The JSON registries remain normative when this presentation differs.
 - `output_color_guard_profile`: `bt709_conservative_ycbcr`
 - `floating_destination_kind`: `existing_planes`, `new_plane`
 - `floating_anchor`: `top_left`, `top_right`, `center`, `bottom_left`, `bottom_right`
-- `vector_erase_mode`: `partial`, `to_intersection`, `whole_path`
-- `vector_width_operation`: `add`, `subtract`, `scale`, `constant`
-- `annotation_output`: `normal`, `instruction`
 - `shooting_frame_anchor`: `top_left`, `top_right`, `center`, `bottom_left`, `bottom_right`
 - `light_table_display_mode`: `color`, `monotone`, `halftone`
 
@@ -135,13 +129,7 @@ The JSON registries remain normative when this presentation differs.
 - `floating_plane`: kind: plane_kind [bound=copyable-plane-kind,raster-payload]; pixel_format: pixel_format [bound=exact-native-depth]; origin_x: i32 [bound=matches-payload-bounds]; origin_y: i32 [bound=matches-payload-bounds]; raster: asset_ref [bound=canonical-raster,matches-bounds-and-format]
 - `floating_transform`: anchor: floating_anchor; target_x: q16 [bound=document-coordinate]; target_y: q16 [bound=document-coordinate]; scale_x: q16 [bound=positive]; scale_y: q16 [bound=positive]; rotation_turns: u32 [bound=binary-turns]
 - `floating_destination`: kind: floating_destination_kind [bound=variant-exact]; existing_plane_ids: list<plane_ref> [bound=bounded:0..4096,source-order,existing-planes-only]; new_layer_id: nullable<layer_ref> [bound=new-plane-only]; new_plane_kind: nullable<plane_kind> [bound=new-plane-only]; new_pixel_format: nullable<pixel_format> [bound=new-plane-only]; new_name: nullable<string> [bound=new-plane-only,utf8-bytes:1..1024]; new_opacity_milli: nullable<u32> [bound=new-plane-only,0..1000]
-- `floating_payload`: source_document_uuid: uuid; bounds: pixel_rect [bound=nonempty,half-open]; planes: list<floating_plane> [bound=bounded:1..4096,source-order,raster-only-before-vector-owner]
-- `vector_cubic_segment`: p0: point [bound=document-q16]; p1: point [bound=document-q16]; p2: point [bound=document-q16]; p3: point [bound=document-q16]; width_start: q16 [bound=positive,maximum:4096]; width_end: q16 [bound=positive,maximum:4096]
-- `vector_path_input`: segments: list<vector_cubic_segment> [bound=bounded:1..262144,source-order,contiguous]; color: pixel_value [bound=rgba-only,exact-native-depth]; closed: bool
-- `vector_width`: operation: vector_width_operation; value: q16 [bound=positive,maximum:4096]
-- `annotation_point_milli`: x_milli: i32 [bound=document-milli-pixel]; y_milli: i32 [bound=document-milli-pixel]
-- `annotation_object_input`: layer_id: layer_ref [bound=nonzero,text-or-annotation-layer]; kind: annotation_kind; output: annotation_output; bounds: pixel_rect [bound=positive,document-bounded]; font_family_hint: string [bound=utf8-bytes:0..1024]; font_size_milli: u32 [bound=variant-exact,0..1000000]; style_flags: u32 [bound=mask:0x00000007]; color: pixel_value [bound=rgba-only,exact-depth]; text: string [bound=utf8-bytes:0..65536,variant-exact]; points: list<annotation_point_milli> [bound=bounded:0..65536,source-order,variant-exact]; stroke_width_milli: u32 [bound=variant-exact,0..1000000]
-- `annotation_edit`: operation: u32 [bound=closed:1=create,2=update,3=move,4=delete]; object_id: nullable<annotation_ref> [bound=variant-exact]; input: nullable<annotation_object_input> [bound=variant-exact]; delta_x: i32 [bound=variant-exact,document-pixel]; delta_y: i32 [bound=variant-exact,document-pixel]
+- `floating_payload`: source_document_uuid: uuid; bounds: pixel_rect [bound=nonempty,half-open]; planes: list<floating_plane> [bound=bounded:1..4096,source-order,raster-only]
 - `shooting_frame_input`: center_x_milli: i64 [bound=document-milli-pixel,bounded]; center_y_milli: i64 [bound=document-milli-pixel,bounded]; width_milli: u64 [bound=positive,bounded]; height_milli: u64 [bound=positive,bounded]; rotation_turns: u32 [bound=binary-turns]; anchor: shooting_frame_anchor; visible: bool; include_in_instruction_export: bool
 - `shooting_frame_edit`: operation: u32 [bound=closed:1=create,2=update,3=delete]; frame_id: nullable<shooting_frame_ref> [bound=variant-exact]; input: nullable<shooting_frame_input> [bound=variant-exact]
 - `vanishing_point_input`: layer_id: layer_ref [bound=nonzero,vanishing-point-layer]; x_milli: i64 [bound=document-milli-pixel,bounded]; y_milli: i64 [bound=document-milli-pixel,bounded]; interval_milli_degrees: u32 [bound=1000..180000]; angle_milli_degrees: u32 [bound=normalize-modulo:180000]; color: pixel_value [bound=rgba-only,exact-depth]; opacity_milli: u32 [bound=0..1000]; visible: bool
@@ -154,7 +142,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `update_paper_frames`
 
-- Primitive: `0x00010001`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00010001`; schema 2; semantics 2; replay epoch 24.
 - Arguments: frames: paper_frames [bound=valid-frame-geometry].
 - Results: none.
 - Portability: portable; ordered rules: 0 ([]).
@@ -164,7 +152,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `create_layer`
 
-- Primitive: `0x00020001`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00020001`; schema 2; semantics 2; replay epoch 24.
 - Arguments: kind: layer_kind [bound=canonical-layer-kind]; name: string [bound=utf8-bytes:1..1024,no-control-scalars].
 - Results: layer: layer_ref [always_on_success; scalar; namespace=document_stable; role=layer; output=0].
 - Portability: portable; ordered rules: 0 ([]).
@@ -174,7 +162,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `duplicate_layer`
 
-- Primitive: `0x00020002`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00020002`; schema 2; semantics 2; replay epoch 24.
 - Arguments: layer_id: layer_ref [bound=nonzero; id=source_layer:document_stable:scalar].
 - Results: layer: layer_ref [always_on_success; scalar; namespace=document_stable; role=layer; output=0].
 - Portability: requires_binding (semantic_target); ordered rules: 0 ([]).
@@ -184,7 +172,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `delete_layer`
 
-- Primitive: `0x00020003`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00020003`; schema 2; semantics 2; replay epoch 24.
 - Arguments: layer_id: layer_ref [bound=nonzero; id=target_layer:document_stable:scalar].
 - Results: none.
 - Portability: requires_binding (semantic_target); ordered rules: 0 ([]).
@@ -194,7 +182,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `reorder_layer`
 
-- Primitive: `0x00020004`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00020004`; schema 2; semantics 2; replay epoch 24.
 - Arguments: layer_id: layer_ref [bound=nonzero; id=target_layer:document_stable:scalar]; destination_index: u64 [bound=initial-document-tree-index].
 - Results: none.
 - Portability: requires_binding (semantic_target, initial_document_tree_order); ordered rules: 0 ([]).
@@ -204,7 +192,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `create_plane`
 
-- Primitive: `0x00020011`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00020011`; schema 2; semantics 2; replay epoch 24.
 - Arguments: layer_id: layer_ref [bound=nonzero; id=owner_layer:document_stable:scalar]; kind: plane_kind [bound=canonical-plane-kind]; format: pixel_format [bound=straight-alpha-or-scalar]; name: string [bound=utf8-bytes:1..1024,no-control-scalars].
 - Results: plane: plane_ref [always_on_success; scalar; namespace=document_stable; role=plane; output=0].
 - Portability: requires_binding (semantic_target); ordered rules: 0 ([]).
@@ -214,7 +202,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `duplicate_plane`
 
-- Primitive: `0x00020012`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00020012`; schema 2; semantics 2; replay epoch 24.
 - Arguments: plane_id: plane_ref [bound=nonzero; id=source_plane:document_stable:scalar].
 - Results: plane: plane_ref [always_on_success; scalar; namespace=document_stable; role=plane; output=0].
 - Portability: requires_binding (semantic_target); ordered rules: 0 ([]).
@@ -224,7 +212,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `delete_plane`
 
-- Primitive: `0x00020013`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00020013`; schema 2; semantics 2; replay epoch 24.
 - Arguments: plane_id: plane_ref [bound=nonzero; id=target_plane:document_stable:scalar].
 - Results: none.
 - Portability: requires_binding (semantic_target); ordered rules: 0 ([]).
@@ -234,7 +222,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `reorder_plane`
 
-- Primitive: `0x00020014`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00020014`; schema 2; semantics 2; replay epoch 24.
 - Arguments: plane_id: plane_ref [bound=nonzero; id=target_plane:document_stable:scalar]; destination_index: u64 [bound=initial-document-tree-index].
 - Results: none.
 - Portability: requires_binding (semantic_target, initial_document_tree_order); ordered rules: 0 ([]).
@@ -244,7 +232,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `merge_plane`
 
-- Primitive: `0x00020017`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00020017`; schema 2; semantics 2; replay epoch 24.
 - Arguments: plane_id: plane_ref [bound=nonzero,has-adjacent-below; id=source_plane:document_stable:scalar].
 - Results: none.
 - Portability: requires_binding (semantic_target, adjacent_merge_target); ordered rules: 0 ([]).
@@ -254,7 +242,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `merge_layer`
 
-- Primitive: `0x00020022`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00020022`; schema 2; semantics 2; replay epoch 24.
 - Arguments: layer_id: layer_ref [bound=nonzero,has-adjacent-below; id=source_layer:document_stable:scalar].
 - Results: none.
 - Portability: requires_binding (semantic_target, adjacent_merge_target); ordered rules: 0 ([]).
@@ -264,7 +252,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `delete_hidden_layers`
 
-- Primitive: `0x00020023`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00020023`; schema 2; semantics 2; replay epoch 24.
 - Arguments: none.
 - Results: none.
 - Portability: portable; ordered rules: 0 ([]).
@@ -274,7 +262,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `edit_targets`
 
-- Primitive: `0x00020030`; schema 2; semantics 1; replay epoch 23.
+- Primitive: `0x00020030`; schema 2; semantics 1; replay epoch 24.
 - Arguments: targets: list<edit_target> [bound=bounded:1..4096,unique,owner-exact; id=targets:document_stable:ordered_list]; command: edit_target_command [bound=variant-exact].
 - Results: layers: list<layer_ref> [always_on_success; ordered_list; namespace=document_stable; role=layer]; planes: list<plane_ref> [always_on_success; ordered_list; namespace=document_stable; role=plane].
 - Portability: requires_binding (semantic_target); ordered rules: 0 ([]).
@@ -284,7 +272,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `set_main_line_color`
 
-- Primitive: `0x00030001`; schema 1; semantics 3; replay epoch 23.
+- Primitive: `0x00030001`; schema 1; semantics 3; replay epoch 24.
 - Arguments: color: pixel_value [bound=rgba-only,exact-native-depth].
 - Results: none.
 - Portability: portable; ordered rules: 0 ([]).
@@ -294,7 +282,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `replace_palette`
 
-- Primitive: `0x00030002`; schema 1; semantics 3; replay epoch 23.
+- Primitive: `0x00030002`; schema 1; semantics 3; replay epoch 24.
 - Arguments: colors: list<pixel_value> [bound=bounded:4096,rgba-only,exact-native-depth].
 - Results: none.
 - Portability: portable; ordered rules: 0 ([]).
@@ -304,7 +292,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `replace_color_chart`
 
-- Primitive: `0x00030003`; schema 1; semantics 1; replay epoch 23.
+- Primitive: `0x00030003`; schema 1; semantics 1; replay epoch 24.
 - Arguments: entries: list<color_chart_entry> [bound=bounded:4096,unique-name-not-required,exact-native-depth]; locked: bool.
 - Results: none.
 - Portability: portable; ordered rules: 0 ([]).
@@ -314,7 +302,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `add_guide`
 
-- Primitive: `0x00040001`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00040001`; schema 2; semantics 2; replay epoch 24.
 - Arguments: axis: guide_axis; position: i32 [bound=document-pixel,within-paper-axis].
 - Results: guide: guide_ref [always_on_success; scalar; namespace=document_stable; role=guide; output=0].
 - Portability: portable; ordered rules: 0 ([]).
@@ -324,7 +312,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `move_guide`
 
-- Primitive: `0x00040002`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00040002`; schema 2; semantics 2; replay epoch 24.
 - Arguments: guide_id: guide_ref [bound=nonzero; id=target_guide:document_stable:scalar]; position: i32 [bound=document-pixel,within-paper-axis].
 - Results: none.
 - Portability: requires_binding (semantic_target); ordered rules: 0 ([]).
@@ -334,7 +322,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `delete_guide`
 
-- Primitive: `0x00040003`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00040003`; schema 2; semantics 2; replay epoch 24.
 - Arguments: guide_id: guide_ref [bound=nonzero; id=target_guide:document_stable:scalar].
 - Results: none.
 - Portability: requires_binding (semantic_target); ordered rules: 0 ([]).
@@ -344,7 +332,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `set_grid`
 
-- Primitive: `0x00040010`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00040010`; schema 2; semantics 2; replay epoch 24.
 - Arguments: grid: grid_config [bound=valid-grid].
 - Results: none.
 - Portability: portable; ordered rules: 0 ([]).
@@ -354,7 +342,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `delete_all_guides`
 
-- Primitive: `0x00040011`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00040011`; schema 2; semantics 2; replay epoch 24.
 - Arguments: none.
 - Results: none.
 - Portability: portable; ordered rules: 0 ([]).
@@ -364,7 +352,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `apply_raster_stroke`
 
-- Primitive: `0x00050001`; schema 3; semantics 5; replay epoch 23.
+- Primitive: `0x00050001`; schema 3; semantics 5; replay epoch 24.
 - Arguments: plane_id: plane_ref [bound=nonzero; id=target_plane:document_stable:scalar]; stroke: canonical_raster_stroke [bound=canonical-sample-order,exact-native-depth,inline-or-procedure-asset].
 - Results: none.
 - Portability: requires_binding (semantic_target); ordered rules: 0 ([]).
@@ -374,9 +362,9 @@ The JSON registries remain normative when this presentation differs.
 
 ### `apply_geometry`
 
-- Primitive: `0x00050003`; schema 2; semantics 1; replay epoch 23.
+- Primitive: `0x00050003`; schema 2; semantics 1; replay epoch 24.
 - Arguments: plane_id: plane_ref [bound=nonzero; id=target_plane:document_stable:scalar]; primitive: geometry_primitive; segments: list<canonical_geometry_segment> [bound=bounded:1..512,source-order]; fill_boundary: list<point> [bound=bounded:0..8192,source-order,gesture-gradient-boundary]; outline_color: pixel_value [bound=rgba-only,exact-native-depth]; fill_color: pixel_value [bound=rgba-only,exact-native-depth]; outline_width: q16 [bound=positive]; cross_section: geometry_cross_section; outline: bool; fill: bool; closed: bool.
-- Results: paths: list<vector_path_ref> [always_on_success; ordered_list; namespace=document_stable; role=vector_path]; fills: list<vector_fill_ref> [always_on_success; ordered_list; namespace=document_stable; role=vector_fill].
+- Results: none.
 - Portability: requires_binding (semantic_target); ordered rules: 0 ([]).
 - Work: max_invocations={"op":"u64","value":1}; max_output_ids={"op":"u64","value":2}; max_asset_bytes={"op":"u64","value":0}; max_work_units={"op":"u64","value":16777216}; max_output_growth={"op":"u64","value":16777216}; cancellation: `before_primitive`.
 - Editor: family `stroke_geometry_import`; legacy projection none; skip dependents false.
@@ -384,7 +372,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `import_raster_asset`
 
-- Primitive: `0x00090001`; schema 1; semantics 1; replay epoch 23.
+- Primitive: `0x00090001`; schema 1; semantics 1; replay epoch 24.
 - Arguments: plane_id: plane_ref [bound=nonzero; id=target_plane:document_stable:scalar]; raster: asset_ref [bound=descriptor-exact,native-depth; asset=source_raster:canonical_raster:inline=true:external=true].
 - Results: none.
 - Portability: requires_binding (semantic_target); ordered rules: 0 ([]).
@@ -394,7 +382,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `set_layer_properties`
 
-- Primitive: `0x00020005`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00020005`; schema 2; semantics 2; replay epoch 24.
 - Arguments: layer_id: layer_ref [bound=nonzero; id=target_layer:document_stable:scalar]; visible: bool; editable: bool; opacity_milli: u32 [bound=0..1000]; name: string [bound=utf8-bytes:1..1024,no-control-scalars].
 - Results: none.
 - Portability: requires_binding (semantic_target); ordered rules: 0 ([]).
@@ -404,7 +392,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `set_plane_properties`
 
-- Primitive: `0x00020015`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00020015`; schema 2; semantics 2; replay epoch 24.
 - Arguments: plane_id: plane_ref [bound=nonzero; id=target_plane:document_stable:scalar]; visible: bool; editable: bool; opacity_milli: u32 [bound=0..1000]; name: string [bound=utf8-bytes:1..1024,no-control-scalars].
 - Results: none.
 - Portability: requires_binding (semantic_target); ordered rules: 0 ([]).
@@ -414,7 +402,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `convert_plane`
 
-- Primitive: `0x00020016`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00020016`; schema 2; semantics 2; replay epoch 24.
 - Arguments: plane_id: plane_ref [bound=nonzero; id=target_plane:document_stable:scalar]; destination_kind: plane_kind [bound=canonical-plane-kind]; destination_format: pixel_format [bound=straight-alpha-or-scalar].
 - Results: none.
 - Portability: requires_binding (semantic_target); ordered rules: 0 ([]).
@@ -424,7 +412,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `convert_layer`
 
-- Primitive: `0x00020021`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00020021`; schema 2; semantics 2; replay epoch 24.
 - Arguments: layer_id: layer_ref [bound=nonzero; id=target_layer:document_stable:scalar]; destination: layer_kind [bound=convertible-layer-kind].
 - Results: none.
 - Portability: requires_binding (semantic_target); ordered rules: 0 ([]).
@@ -434,7 +422,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `mirror_document`
 
-- Primitive: `0x00070001`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00070001`; schema 2; semantics 2; replay epoch 24.
 - Arguments: axis: mirror_axis.
 - Results: none.
 - Portability: portable; ordered rules: 0 ([]).
@@ -444,7 +432,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `rotate_document`
 
-- Primitive: `0x00070002`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00070002`; schema 2; semantics 2; replay epoch 24.
 - Arguments: direction: rotate_direction.
 - Results: none.
 - Portability: portable; ordered rules: 0 ([]).
@@ -454,7 +442,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `resize_document`
 
-- Primitive: `0x00070003`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00070003`; schema 2; semantics 2; replay epoch 24.
 - Arguments: resize: document_resize [bound=bounded-document-pixels].
 - Results: none.
 - Portability: portable; ordered rules: 0 ([]).
@@ -464,7 +452,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `apply_fill`
 
-- Primitive: `0x00050002`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00050002`; schema 2; semantics 2; replay epoch 24.
 - Arguments: layer_id: layer_ref [bound=nonzero; id=target_layer:document_stable:scalar]; plane_id: plane_ref [bound=nonzero,owned-by:layer_id; id=target_plane:document_stable:scalar]; request: fill_request [bound=bounded-fill-request]; use_light_table_boundary: bool; use_light_table_color: bool.
 - Results: none.
 - Portability: requires_binding (semantic_target, state_coupled_fill_boundary); ordered rules: 0 ([]).
@@ -474,7 +462,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `apply_gradient`
 
-- Primitive: `0x00050010`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00050010`; schema 2; semantics 2; replay epoch 24.
 - Arguments: plane_id: plane_ref [bound=nonzero; id=target_plane:document_stable:scalar]; gradient: gradient_spec [bound=bounded-gradient,document-q16,exact-native-depth,source-order].
 - Results: none.
 - Portability: requires_binding (semantic_target, state_coupled_raster, state_coupled_selection); ordered rules: 0 ([]).
@@ -484,7 +472,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `apply_blur`
 
-- Primitive: `0x00050012`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00050012`; schema 2; semantics 2; replay epoch 24.
 - Arguments: plane_id: plane_ref [bound=nonzero; id=target_plane:document_stable:scalar]; radius: u32 [bound=1..64]; strength_milli: u32 [bound=0..1000].
 - Results: none.
 - Portability: requires_binding (semantic_target, state_coupled_raster, state_coupled_selection); ordered rules: 0 ([]).
@@ -494,7 +482,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `apply_airbrush`
 
-- Primitive: `0x00050013`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00050013`; schema 2; semantics 2; replay epoch 24.
 - Arguments: plane_id: plane_ref [bound=nonzero; id=target_plane:document_stable:scalar]; stroke: airbrush_stroke [bound=bounded-image-effect,document-q16,exact-native-depth].
 - Results: none.
 - Portability: requires_binding (semantic_target, state_coupled_raster, state_coupled_selection); ordered rules: 0 ([]).
@@ -504,7 +492,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `apply_airbrush_gesture`
 
-- Primitive: `0x00050014`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00050014`; schema 2; semantics 2; replay epoch 24.
 - Arguments: plane_id: plane_ref [bound=nonzero; id=target_plane:document_stable:scalar]; gesture: airbrush_gesture [bound=bounded:1..1048576,source-order,document-q16,exact-native-depth].
 - Results: none.
 - Portability: requires_binding (semantic_target, state_coupled_raster, state_coupled_selection); ordered rules: 0 ([]).
@@ -514,7 +502,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `apply_stamp`
 
-- Primitive: `0x00050015`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00050015`; schema 2; semantics 2; replay epoch 24.
 - Arguments: plane_id: plane_ref [bound=nonzero; id=target_plane:document_stable:scalar]; stamp: stamp_spec [bound=bounded-image-effect,source-before-destination].
 - Results: none.
 - Portability: requires_binding (semantic_target, state_coupled_raster, state_coupled_selection); ordered rules: 0 ([]).
@@ -524,7 +512,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `apply_stamp_gesture`
 
-- Primitive: `0x00050016`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00050016`; schema 2; semantics 2; replay epoch 24.
 - Arguments: plane_id: plane_ref [bound=nonzero; id=target_plane:document_stable:scalar]; gesture: stamp_gesture [bound=bounded:1..1048576,source-order,document-q16,source-before-destination].
 - Results: none.
 - Portability: requires_binding (semantic_target, state_coupled_raster, state_coupled_selection); ordered rules: 0 ([]).
@@ -534,7 +522,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `apply_blur_tool`
 
-- Primitive: `0x00050017`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00050017`; schema 2; semantics 2; replay epoch 24.
 - Arguments: plane_id: plane_ref [bound=nonzero; id=target_plane:document_stable:scalar]; shape: selection_shape [bound=bounded-selection-shape,document-q16,source-order]; radius: u32 [bound=1..64]; strength_milli: u32 [bound=0..1000].
 - Results: none.
 - Portability: requires_binding (semantic_target, state_coupled_raster, state_coupled_selection); ordered rules: 0 ([]).
@@ -544,7 +532,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `edit_plane_alpha`
 
-- Primitive: `0x00050019`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00050019`; schema 2; semantics 2; replay epoch 24.
 - Arguments: plane_id: plane_ref [bound=nonzero; id=target_plane:document_stable:scalar]; alpha: asset_ref [bound=same-size,grayscale8-or-16,exact-native-depth; asset=alpha_raster:canonical_raster:inline=true:external=true].
 - Results: none.
 - Portability: requires_binding (semantic_target, state_coupled_raster, state_coupled_selection); ordered rules: 0 ([]).
@@ -554,7 +542,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `apply_alpha_gradient`
 
-- Primitive: `0x0005001a`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x0005001a`; schema 2; semantics 2; replay epoch 24.
 - Arguments: plane_id: plane_ref [bound=nonzero; id=target_plane:document_stable:scalar]; gradient: gradient_spec [bound=bounded-gradient,document-q16,alpha-only,source-order].
 - Results: none.
 - Portability: requires_binding (semantic_target, state_coupled_raster, state_coupled_selection); ordered rules: 0 ([]).
@@ -564,7 +552,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `create_adjustment_layer`
 
-- Primitive: `0x00050030`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00050030`; schema 2; semantics 2; replay epoch 24.
 - Arguments: name: string [bound=utf8-bytes:1..1024]; adjustment: adjustment_spec [bound=variant-exact,bounded:64].
 - Results: layer: layer_ref [always_on_success; scalar; namespace=document_stable; role=layer; output=0].
 - Portability: portable; ordered rules: 0 ([]).
@@ -574,7 +562,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `update_adjustment_layer`
 
-- Primitive: `0x00050031`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00050031`; schema 2; semantics 2; replay epoch 24.
 - Arguments: layer_id: layer_ref [bound=nonzero,adjustment-layer; id=target_layer:document_stable:scalar]; adjustment: adjustment_spec [bound=variant-exact,bounded:64].
 - Results: none.
 - Portability: requires_binding (semantic_target, state_coupled_adjustment); ordered rules: 0 ([]).
@@ -584,17 +572,17 @@ The JSON registries remain normative when this presentation differs.
 
 ### `scoped_color_replace`
 
-- Primitive: `0x00050043`; schema 2; semantics 1; replay epoch 23.
+- Primitive: `0x00050043`; schema 2; semantics 1; replay epoch 24.
 - Arguments: plane_id: plane_ref [bound=nonzero; id=target_plane:document_stable:scalar]; mode: scoped_color_mode [bound=target-topology-exact]; target: pixel_value [bound=exact-native-depth]; replacement: pixel_value [bound=exact-native-depth]; region: nullable<selection_shape> [nullable; bound=bounded-selection-shape,document-q16,source-order].
 - Results: none.
-- Portability: requires_binding (semantic_target, state_coupled_raster_or_vector, state_coupled_selection); ordered rules: 0 ([]).
+- Portability: requires_binding (semantic_target, state_coupled_raster, state_coupled_selection); ordered rules: 0 ([]).
 - Work: max_invocations={"op":"u64","value":1}; max_output_ids={"op":"u64","value":0}; max_asset_bytes={"op":"u64","value":37748800}; max_work_units={"op":"u64","value":67108864}; max_output_growth={"op":"u64","value":0}; cancellation: `before_primitive`.
 - Editor: family `gesture_alpha_adjustment`; legacy projection none; skip dependents false.
 - Ownership: `M18B`; equivalence `INKS-EQ-0049`.
 
 ### `apply_boundary_airbrush`
 
-- Primitive: `0x00050011`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00050011`; schema 2; semantics 2; replay epoch 24.
 - Arguments: plane_id: plane_ref [bound=nonzero; id=target_plane:document_stable:scalar]; effect: boundary_airbrush [bound=bounded-image-effect].
 - Results: none.
 - Portability: requires_binding (semantic_target); ordered rules: 0 ([]).
@@ -604,7 +592,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `apply_dust_removal`
 
-- Primitive: `0x00050018`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00050018`; schema 2; semantics 2; replay epoch 24.
 - Arguments: plane_id: plane_ref [bound=nonzero; id=target_plane:document_stable:scalar]; shape: nullable<selection_shape> [nullable; bound=bounded-selection-shape]; options: dust_removal [bound=bounded-dust-area].
 - Results: none.
 - Portability: requires_binding (semantic_target); ordered rules: 0 ([]).
@@ -614,7 +602,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `apply_filter`
 
-- Primitive: `0x00050020`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00050020`; schema 2; semantics 2; replay epoch 24.
 - Arguments: plane_id: plane_ref [bound=nonzero; id=target_plane:document_stable:scalar]; filter: filter_spec [bound=variant-exact,bounded-filter-work].
 - Results: none.
 - Portability: requires_binding (semantic_target); ordered rules: 0 ([]).
@@ -624,7 +612,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `replace_raster_colors`
 
-- Primitive: `0x00050040`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00050040`; schema 2; semantics 2; replay epoch 24.
 - Arguments: plane_id: plane_ref [bound=nonzero; id=target_plane:document_stable:scalar]; pairs: list<color_pair> [bound=bounded:1..4096,unique-enabled-old,exact-native-depth].
 - Results: none.
 - Portability: requires_binding (semantic_target); ordered rules: 0 ([]).
@@ -634,7 +622,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `separate_raster_colors`
 
-- Primitive: `0x00050041`; schema 2; semantics 3; replay epoch 23.
+- Primitive: `0x00050041`; schema 2; semantics 3; replay epoch 24.
 - Arguments: plane_id: plane_ref [bound=nonzero; id=target_plane:document_stable:scalar]; options: separation [bound=bounded:1..4096,exact-native-depth,typed-destination].
 - Results: none.
 - Portability: requires_binding (semantic_target, typed_destination); ordered rules: 0 ([]).
@@ -644,7 +632,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `restore_selected_pixels`
 
-- Primitive: `0x00050042`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00050042`; schema 2; semantics 2; replay epoch 24.
 - Arguments: plane_id: plane_ref [bound=nonzero; id=target_plane:document_stable:scalar]; changes: list<selection_pixel_change> [bound=bounded:0..1048576,unique-coordinate,source-order,exact-native-depth].
 - Results: none.
 - Portability: requires_binding (semantic_target, exact_pixel_precondition, state_coupled_selection); ordered rules: 0 ([]).
@@ -654,7 +642,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `apply_selection`
 
-- Primitive: `0x00060001`; schema 2; semantics 3; replay epoch 23.
+- Primitive: `0x00060001`; schema 2; semantics 3; replay epoch 24.
 - Arguments: shape: selection_shape [bound=bounded-selection-shape,document-q16,source-order]; operation: selection_operation; interpretation: range_interpretation; options: selection_construction_options [bound=normalized-selection-options]; target_layer_id: layer_ref [bound=nonzero; id=target_layer:document_stable:scalar]; target_plane_id: plane_ref [bound=nonzero,owned-by:target_layer_id; id=target_plane:document_stable:scalar].
 - Results: none.
 - Portability: requires_binding (semantic_target, state_coupled_raster, state_coupled_selection); ordered rules: 0 ([]).
@@ -664,7 +652,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `invert_selection`
 
-- Primitive: `0x00060002`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00060002`; schema 2; semantics 2; replay epoch 24.
 - Arguments: none.
 - Results: none.
 - Portability: requires_binding (state_coupled_selection); ordered rules: 0 ([]).
@@ -674,7 +662,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `clear_selection`
 
-- Primitive: `0x00060003`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00060003`; schema 2; semantics 2; replay epoch 24.
 - Arguments: none.
 - Results: none.
 - Portability: requires_binding (state_coupled_selection); ordered rules: 0 ([]).
@@ -684,7 +672,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `resize_selection`
 
-- Primitive: `0x00060004`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00060004`; schema 2; semantics 2; replay epoch 24.
 - Arguments: pixels: i32 [bound=-4096..4096].
 - Results: none.
 - Portability: requires_binding (state_coupled_selection); ordered rules: 0 ([]).
@@ -694,7 +682,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `select_color`
 
-- Primitive: `0x00060005`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00060005`; schema 2; semantics 2; replay epoch 24.
 - Arguments: color: pixel_value [bound=exact-native-depth]; tolerance: u32 [bound=0..65535]; different: bool; operation: selection_operation; target_layer_id: layer_ref [bound=nonzero; id=target_layer:document_stable:scalar]; target_plane_id: plane_ref [bound=nonzero,owned-by:target_layer_id; id=target_plane:document_stable:scalar].
 - Results: none.
 - Portability: requires_binding (semantic_target, state_coupled_raster, state_coupled_selection); ordered rules: 0 ([]).
@@ -704,7 +692,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `select_output_color_guard`
 
-- Primitive: `0x00060006`; schema 2; semantics 1; replay epoch 23.
+- Primitive: `0x00060006`; schema 2; semantics 1; replay epoch 24.
 - Arguments: profile: output_color_guard_profile; operation: selection_operation; base_revision: u64 [bound=nonzero,exact-issue-revision].
 - Results: none.
 - Portability: strict_source_only (exact_document_revision, state_coupled_composite, state_coupled_selection); ordered rules: 0 ([]).
@@ -714,7 +702,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `selection_to_layer`
 
-- Primitive: `0x00060010`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00060010`; schema 2; semantics 2; replay epoch 24.
 - Arguments: name: string [bound=utf8-bytes:1..1024,no-control-scalars].
 - Results: layer: layer_ref [always_on_success; scalar; namespace=document_stable; role=layer; output=0].
 - Portability: requires_binding (state_coupled_selection); ordered rules: 0 ([]).
@@ -724,7 +712,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `selection_from_layer`
 
-- Primitive: `0x00060011`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00060011`; schema 2; semantics 2; replay epoch 24.
 - Arguments: layer_id: layer_ref [bound=nonzero,selection-layer; id=source_layer:document_stable:scalar]; operation: selection_layer_operation.
 - Results: none.
 - Portability: requires_binding (semantic_target, state_coupled_selection); ordered rules: 0 ([]).
@@ -734,137 +722,47 @@ The JSON registries remain normative when this presentation differs.
 
 ### `clear_selected_content`
 
-- Primitive: `0x00060020`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x00060020`; schema 2; semantics 2; replay epoch 24.
 - Arguments: target_layer_id: layer_ref [bound=nonzero; id=target_layer:document_stable:scalar]; target_plane_id: plane_ref [bound=nonzero,owned-by:target_layer_id; id=target_plane:document_stable:scalar].
 - Results: none.
-- Portability: requires_binding (semantic_target, state_coupled_raster_or_vector, state_coupled_selection); ordered rules: 0 ([]).
+- Portability: requires_binding (semantic_target, state_coupled_raster, state_coupled_selection); ordered rules: 0 ([]).
 - Work: max_invocations={"op":"u64","value":1}; max_output_ids={"op":"u64","value":0}; max_asset_bytes={"op":"u64","value":0}; max_work_units={"op":"u64","value":67108864}; max_output_growth={"op":"u64","value":0}; cancellation: `before_primitive`.
 - Editor: family `selection_floating`; legacy projection none; skip dependents false.
 - Ownership: `M19`; equivalence `INKS-EQ-0058`.
 
 ### `commit_floating`
 
-- Primitive: `0x00060021`; schema 3; semantics 3; replay epoch 23.
+- Primitive: `0x00060021`; schema 3; semantics 3; replay epoch 24.
 - Arguments: payload: floating_payload [bound=bounded:1..4096,raster-assets-match-plane-order; asset=floating_rasters:canonical_raster:inline=true:external=true]; destination: floating_destination [bound=variant-exact,typed-destination; id=destination_planes_or_layer:document_stable:ordered_list]; transform: floating_transform [bound=canonical-q16,noncumulative].
 - Results: none.
-- Portability: requires_binding (semantic_target, state_coupled_raster_or_vector, floating_asset_payload); ordered rules: 0 ([]).
+- Portability: requires_binding (semantic_target, state_coupled_raster, floating_asset_payload); ordered rules: 0 ([]).
 - Work: max_invocations={"op":"u64","value":1}; max_output_ids={"op":"u64","value":1}; max_asset_bytes={"op":"u64","value":536870912}; max_work_units={"op":"u64","value":1100000000}; max_output_growth={"op":"u64","value":67108864}; cancellation: `before_primitive`.
 - Editor: family `selection_floating`; legacy projection none; skip dependents false.
 - Ownership: `M19`; equivalence `INKS-EQ-0059`.
 
-### `vector_add_path`
-
-- Primitive: `0x00080001`; schema 2; semantics 2; replay epoch 23.
-- Arguments: plane_id: plane_ref [bound=nonzero,vector-stroke-plane; id=target_plane:document_stable:scalar]; input: vector_path_input [bound=canonical-q16,exact-native-depth,source-order].
-- Results: paths: list<vector_path_ref> [always_on_success; ordered_list; namespace=document_stable; role=vector_path; output=0].
-- Portability: requires_binding (semantic_target); ordered rules: 0 ([]).
-- Work: max_invocations={"op":"u64","value":1}; max_output_ids={"op":"u64","value":1}; max_asset_bytes={"left":{"left":{"maximum":262144,"op":"list_length","path":["input","segments"]},"op":"checked_multiply","right":{"op":"u64","value":48}},"op":"checked_add","right":{"op":"u64","value":9}}; max_work_units={"maximum":262144,"op":"list_length","path":["input","segments"]}; max_output_growth={"op":"u64","value":1}; cancellation: `before_primitive`.
-- Editor: family `vector`; legacy projection none; skip dependents false.
-- Ownership: `M20`; equivalence `INKS-EQ-0063`.
-
-### `vector_add_fill`
-
-- Primitive: `0x00080002`; schema 2; semantics 2; replay epoch 23.
-- Arguments: plane_id: plane_ref [bound=nonzero,vector-fill-plane; id=target_plane:document_stable:scalar]; boundary_path_ids: list<vector_path_ref> [bound=bounded:1..262144,unique,closed,same-vector-layer,source-order; id=boundary_paths:document_stable:ordered_list]; color: pixel_value [bound=rgba-only,exact-native-depth].
-- Results: fills: list<vector_fill_ref> [always_on_success; ordered_list; namespace=document_stable; role=vector_fill; output=0].
-- Portability: requires_binding (semantic_target, state_coupled_vector_topology); ordered rules: 0 ([]).
-- Work: max_invocations={"op":"u64","value":1}; max_output_ids={"op":"u64","value":1}; max_asset_bytes={"left":{"left":{"maximum":262144,"op":"list_length","path":["boundary_path_ids"]},"op":"checked_multiply","right":{"op":"u64","value":8}},"op":"checked_add","right":{"op":"u64","value":8}}; max_work_units={"maximum":262144,"op":"list_length","path":["boundary_path_ids"]}; max_output_growth={"op":"u64","value":1}; cancellation: `before_primitive`.
-- Editor: family `vector`; legacy projection none; skip dependents false.
-- Ownership: `M20`; equivalence `INKS-EQ-0064`.
-
-### `vector_erase`
-
-- Primitive: `0x00080003`; schema 2; semantics 2; replay epoch 23.
-- Arguments: plane_id: plane_ref [bound=nonzero,vector-stroke-plane; id=target_plane:document_stable:scalar]; point: point [bound=document-q16]; radius: q16 [bound=positive,maximum:4096]; mode: vector_erase_mode.
-- Results: none.
-- Portability: strict_source_only (semantic_target, state_coupled_vector_geometry); ordered rules: 0 ([]).
-- Work: max_invocations={"op":"u64","value":1}; max_output_ids={"op":"u64","value":131072}; max_asset_bytes={"op":"u64","value":0}; max_work_units={"op":"u64","value":67108864}; max_output_growth={"op":"u64","value":65536}; cancellation: `before_primitive`.
-- Editor: family `vector`; legacy projection none; skip dependents false.
-- Ownership: `M20`; equivalence `INKS-EQ-0065`.
-
-### `vector_connect`
-
-- Primitive: `0x00080004`; schema 2; semantics 2; replay epoch 23.
-- Arguments: plane_id: plane_ref [bound=nonzero,vector-stroke-plane; id=target_plane:document_stable:scalar]; maximum_gap: q16 [bound=positive,maximum:4096].
-- Results: paths: list<vector_path_ref> [only_on_change; ordered_list; namespace=document_stable; role=vector_path; output=0].
-- Portability: strict_source_only (semantic_target, state_coupled_vector_geometry); ordered rules: 0 ([]).
-- Work: max_invocations={"op":"u64","value":1}; max_output_ids={"op":"u64","value":1}; max_asset_bytes={"op":"u64","value":0}; max_work_units={"op":"u64","value":65536}; max_output_growth={"op":"u64","value":1}; cancellation: `before_primitive`.
-- Editor: family `vector`; legacy projection none; skip dependents false.
-- Ownership: `M20`; equivalence `INKS-EQ-0066`.
-
-### `vector_correct_width`
-
-- Primitive: `0x00080005`; schema 2; semantics 2; replay epoch 23.
-- Arguments: path_ids: list<vector_path_ref> [bound=bounded:1..65536,unique,source-order; id=target_paths:document_stable:ordered_list]; width: vector_width [bound=canonical-q16,variant-exact].
-- Results: none.
-- Portability: requires_binding (semantic_target, state_coupled_vector_geometry); ordered rules: 0 ([]).
-- Work: max_invocations={"op":"u64","value":1}; max_output_ids={"op":"u64","value":0}; max_asset_bytes={"op":"u64","value":0}; max_work_units={"maximum":65536,"op":"list_length","path":["path_ids"]}; max_output_growth={"op":"u64","value":0}; cancellation: `before_primitive`.
-- Editor: family `vector`; legacy projection `line_width`; skip dependents false.
-- Ownership: `M20`; equivalence `INKS-EQ-0067`.
-
-### `rasterize_vector_layer`
-
-- Primitive: `0x00080010`; schema 2; semantics 2; replay epoch 23.
-- Arguments: layer_id: layer_ref [bound=nonzero,vector-coloring-layer; id=source_layer:document_stable:scalar]; antialias: bool; name: string [bound=utf8-bytes:1..1024].
-- Results: layer: layer_ref [always_on_success; scalar; namespace=document_stable; role=layer; output=0].
-- Portability: strict_source_only (semantic_target, state_coupled_vector_geometry); ordered rules: 0 ([]).
-- Work: max_invocations={"op":"u64","value":1}; max_output_ids={"op":"u64","value":2}; max_asset_bytes={"op":"u64","value":0}; max_work_units={"op":"u64","value":16777216}; max_output_growth={"op":"u64","value":16777216}; cancellation: `before_primitive`.
-- Editor: family `vector`; legacy projection none; skip dependents false.
-- Ownership: `M20`; equivalence `INKS-EQ-0068`.
-
-### `vectorize_raster_plane`
-
-- Primitive: `0x00080011`; schema 2; semantics 2; replay epoch 23.
-- Arguments: source_plane_id: plane_ref [bound=nonzero,rgba8-raster-plane; id=source_plane:document_stable:scalar]; target_vector_layer_id: layer_ref [bound=nonzero,vector-coloring-layer; id=target_layer:document_stable:scalar]; alpha_threshold: u32 [bound=0..255,exact-native-alpha8].
-- Results: fills: list<vector_fill_ref> [always_on_success; ordered_list; namespace=document_stable; role=vector_fill; output=0].
-- Portability: requires_binding (semantic_target, state_coupled_raster, state_coupled_vector_topology); ordered rules: 0 ([]).
-- Work: max_invocations={"op":"u64","value":1}; max_output_ids={"op":"u64","value":131072}; max_asset_bytes={"op":"u64","value":0}; max_work_units={"op":"u64","value":67108864}; max_output_growth={"op":"u64","value":131072}; cancellation: `before_primitive`.
-- Editor: family `vector`; legacy projection none; skip dependents false.
-- Ownership: `M20`; equivalence `INKS-EQ-0069`.
-
-### `vectorize_raster_plane_into_new_layer`
-
-- Primitive: `0x00080012`; schema 2; semantics 2; replay epoch 23.
-- Arguments: source_plane_id: plane_ref [bound=nonzero,rgba8-raster-plane; id=source_plane:document_stable:scalar]; alpha_threshold: u32 [bound=0..255,exact-native-alpha8]; name: string [bound=utf8-bytes:1..1024].
-- Results: layer: layer_ref [only_on_change; scalar; namespace=document_stable; role=layer; output=0]; fills: list<vector_fill_ref> [only_on_change; ordered_list; namespace=document_stable; role=vector_fill; output=1].
-- Portability: requires_binding (semantic_target, state_coupled_raster); ordered rules: 0 ([]).
-- Work: max_invocations={"op":"u64","value":1}; max_output_ids={"op":"u64","value":131076}; max_asset_bytes={"op":"u64","value":0}; max_work_units={"op":"u64","value":67108864}; max_output_growth={"op":"u64","value":131076}; cancellation: `before_primitive`.
-- Editor: family `vector`; legacy projection none; skip dependents false.
-- Ownership: `M20`; equivalence `INKS-EQ-0070`.
-
-### `edit_annotations`
-
-- Primitive: `0x00020040`; schema 2; semantics 1; replay epoch 23.
-- Arguments: edits: list<annotation_edit> [bound=bounded:1..4096,source-order,variant-exact; id=annotation_edits:document_stable:ordered_list].
-- Results: annotations: list<annotation_ref> [always_on_success; ordered_list; namespace=document_stable; role=annotation; output=0].
-- Portability: requires_binding (semantic_target); ordered rules: 1 ([{"result":{"class":"strict_source_only","required_preconditions":["exact_document_revision","state_coupled_annotation_geometry"]},"when":{"left":{"body":{"condition":{"left":{"op":"field","path":["operation"],"type":"u64"},"op":"equal","right":{"op":"u64","value":3}},"op":"conditional","when_false":{"op":"u64","value":0},"when_true":{"op":"u64","value":1}},"maximum_items":4096,"op":"bounded_sum","path":["edits"]},"op":"greater","right":{"op":"u64","value":0}}}]).
-- Work: max_invocations={"op":"u64","value":1}; max_output_ids={"body":{"condition":{"left":{"op":"field","path":["operation"],"type":"u64"},"op":"equal","right":{"op":"u64","value":1}},"op":"conditional","when_false":{"op":"u64","value":0},"when_true":{"op":"u64","value":1}},"maximum_items":4096,"op":"bounded_sum","path":["edits"]}; max_asset_bytes={"body":{"condition":{"left":{"left":{"op":"field","path":["operation"],"type":"u64"},"op":"equal","right":{"op":"u64","value":1}},"op":"or","right":{"left":{"op":"field","path":["operation"],"type":"u64"},"op":"equal","right":{"op":"u64","value":2}}},"op":"conditional","when_false":{"op":"u64","value":0},"when_true":{"left":{"op":"u64","value":66560},"op":"checked_add","right":{"left":{"maximum":65536,"op":"list_length","path":["input","points"]},"op":"checked_multiply","right":{"op":"u64","value":8}}}},"maximum_items":4096,"op":"bounded_sum","path":["edits"]}; max_work_units={"body":{"condition":{"left":{"left":{"op":"field","path":["operation"],"type":"u64"},"op":"equal","right":{"op":"u64","value":1}},"op":"or","right":{"left":{"op":"field","path":["operation"],"type":"u64"},"op":"equal","right":{"op":"u64","value":2}}},"op":"conditional","when_false":{"op":"u64","value":1},"when_true":{"left":{"op":"u64","value":1},"op":"max","right":{"maximum":65536,"op":"list_length","path":["input","points"]}}},"maximum_items":4096,"op":"bounded_sum","path":["edits"]}; max_output_growth={"body":{"condition":{"left":{"op":"field","path":["operation"],"type":"u64"},"op":"equal","right":{"op":"u64","value":1}},"op":"conditional","when_false":{"op":"u64","value":0},"when_true":{"op":"u64","value":1}},"maximum_items":4096,"op":"bounded_sum","path":["edits"]}; cancellation: `before_primitive`.
-- Editor: family `annotation_frame_vanishing`; legacy projection none; skip dependents false.
-- Ownership: `M21`; equivalence `INKS-EQ-0018`.
-
 ### `edit_shooting_frame`
 
-- Primitive: `0x00020050`; schema 2; semantics 1; replay epoch 23.
+- Primitive: `0x00020050`; schema 2; semantics 1; replay epoch 24.
 - Arguments: edit: shooting_frame_edit [bound=variant-exact,singleton; id=shooting_frame_edit:document_stable:scalar].
 - Results: shooting_frames: list<shooting_frame_ref> [always_on_success; ordered_list; namespace=document_stable; role=shooting_frame; output=0].
 - Portability: requires_binding (semantic_target); ordered rules: 1 ([{"result":{"class":"portable","required_preconditions":["shooting_frame_absent"]},"when":{"left":{"op":"field","path":["edit","operation"],"type":"u64"},"op":"equal","right":{"op":"u64","value":1}}}]).
 - Work: max_invocations={"op":"u64","value":1}; max_output_ids={"condition":{"left":{"op":"field","path":["edit","operation"],"type":"u64"},"op":"equal","right":{"op":"u64","value":3}},"op":"conditional","when_false":{"op":"u64","value":1},"when_true":{"op":"u64","value":0}}; max_asset_bytes={"op":"u64","value":56}; max_work_units={"op":"u64","value":1}; max_output_growth={"condition":{"left":{"op":"field","path":["edit","operation"],"type":"u64"},"op":"equal","right":{"op":"u64","value":1}},"op":"conditional","when_false":{"op":"u64","value":0},"when_true":{"op":"u64","value":1}}; cancellation: `before_primitive`.
-- Editor: family `annotation_frame_vanishing`; legacy projection none; skip dependents false.
+- Editor: family `frame_vanishing`; legacy projection none; skip dependents false.
 - Ownership: `M21`; equivalence `INKS-EQ-0019`.
 
 ### `edit_vanishing_points`
 
-- Primitive: `0x00020060`; schema 2; semantics 1; replay epoch 23.
+- Primitive: `0x00020060`; schema 2; semantics 1; replay epoch 24.
 - Arguments: edits: list<vanishing_point_edit> [bound=bounded:1..1024,source-order,delete-all-exclusive,variant-exact; id=vanishing_point_edits:document_stable:ordered_list].
 - Results: vanishing_points: list<vanishing_point_ref> [always_on_success; ordered_list; namespace=document_stable; role=vanishing_point; output=0].
 - Portability: requires_binding (semantic_target); ordered rules: 1 ([{"result":{"class":"strict_source_only","required_preconditions":["exact_document_revision","state_coupled_vanishing_points"]},"when":{"left":{"body":{"condition":{"left":{"op":"field","path":["operation"],"type":"u64"},"op":"equal","right":{"op":"u64","value":4}},"op":"conditional","when_false":{"op":"u64","value":0},"when_true":{"op":"u64","value":1}},"maximum_items":1024,"op":"bounded_sum","path":["edits"]},"op":"greater","right":{"op":"u64","value":0}}}]).
 - Work: max_invocations={"op":"u64","value":1}; max_output_ids={"body":{"condition":{"left":{"left":{"op":"field","path":["operation"],"type":"u64"},"op":"equal","right":{"op":"u64","value":1}},"op":"or","right":{"left":{"op":"field","path":["operation"],"type":"u64"},"op":"equal","right":{"op":"u64","value":2}}},"op":"conditional","when_false":{"op":"u64","value":0},"when_true":{"op":"u64","value":1}},"maximum_items":1024,"op":"bounded_sum","path":["edits"]}; max_asset_bytes={"left":{"maximum":1024,"op":"list_length","path":["edits"]},"op":"checked_multiply","right":{"op":"u64","value":48}}; max_work_units={"maximum":1024,"op":"list_length","path":["edits"]}; max_output_growth={"body":{"condition":{"left":{"op":"field","path":["operation"],"type":"u64"},"op":"equal","right":{"op":"u64","value":1}},"op":"conditional","when_false":{"op":"u64","value":0},"when_true":{"op":"u64","value":1}},"maximum_items":1024,"op":"bounded_sum","path":["edits"]}; cancellation: `before_primitive`.
-- Editor: family `annotation_frame_vanishing`; legacy projection none; skip dependents false.
+- Editor: family `frame_vanishing`; legacy projection none; skip dependents false.
 - Ownership: `M21`; equivalence `INKS-EQ-0020`.
 
 ### `light_table_set_global_opacity`
 
-- Primitive: `0x000a0001`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x000a0001`; schema 2; semantics 2; replay epoch 24.
 - Arguments: opacity_milli: u32 [bound=0..1000].
 - Results: none.
 - Portability: strict_source_only (active_light_table_set); ordered rules: 0 ([]).
@@ -874,7 +772,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `light_table_create_set`
 
-- Primitive: `0x000a0002`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x000a0002`; schema 2; semantics 2; replay epoch 24.
 - Arguments: name: string [bound=utf8-bytes:1..1024,no-control].
 - Results: set: light_table_set_ref [always_on_success; scalar; namespace=document_stable; role=light_table_set; output=0].
 - Portability: requires_binding (initial_light_table_set_names); ordered rules: 0 ([]).
@@ -884,7 +782,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `light_table_duplicate_set`
 
-- Primitive: `0x000a0003`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x000a0003`; schema 2; semantics 2; replay epoch 24.
 - Arguments: set_id: light_table_set_ref [bound=nonzero; id=source_set:document_stable:scalar].
 - Results: set: light_table_set_ref [always_on_success; scalar; namespace=document_stable; role=light_table_set; output=0].
 - Portability: requires_binding (semantic_target, state_coupled_light_table_items, initial_light_table_set_names); ordered rules: 0 ([]).
@@ -894,7 +792,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `light_table_delete_set`
 
-- Primitive: `0x000a0004`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x000a0004`; schema 2; semantics 2; replay epoch 24.
 - Arguments: set_id: light_table_set_ref [bound=nonzero,not-last-set; id=target_set:document_stable:scalar].
 - Results: none.
 - Portability: requires_binding (semantic_target, initial_light_table_set_order); ordered rules: 0 ([]).
@@ -904,7 +802,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `light_table_rename_set`
 
-- Primitive: `0x000a0005`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x000a0005`; schema 2; semantics 2; replay epoch 24.
 - Arguments: set_id: light_table_set_ref [bound=nonzero; id=target_set:document_stable:scalar]; name: string [bound=utf8-bytes:1..1024,no-control].
 - Results: none.
 - Portability: requires_binding (semantic_target); ordered rules: 0 ([]).
@@ -914,7 +812,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `light_table_reorder_set`
 
-- Primitive: `0x000a0006`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x000a0006`; schema 2; semantics 2; replay epoch 24.
 - Arguments: set_id: light_table_set_ref [bound=nonzero; id=target_set:document_stable:scalar]; destination_index: u64 [bound=initial-light-table-set-order,usize-representable].
 - Results: none.
 - Portability: requires_binding (semantic_target, initial_light_table_set_order); ordered rules: 0 ([]).
@@ -924,7 +822,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `light_table_set_active`
 
-- Primitive: `0x000a0007`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x000a0007`; schema 2; semantics 2; replay epoch 24.
 - Arguments: set_id: light_table_set_ref [bound=nonzero; id=target_set:document_stable:scalar].
 - Results: none.
 - Portability: requires_binding (semantic_target); ordered rules: 0 ([]).
@@ -934,7 +832,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `light_table_add_item`
 
-- Primitive: `0x000a0010`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x000a0010`; schema 2; semantics 2; replay epoch 24.
 - Arguments: input: light_table_item_input [bound=active-set,validated-item,rgba-source; asset=source_rasters:canonical_raster:inline=true:external=true].
 - Results: item: light_table_item_ref [always_on_success; scalar; namespace=document_stable; role=light_table_item; output=0].
 - Portability: strict_source_only (active_light_table_set, source_raster_asset); ordered rules: 0 ([]).
@@ -944,7 +842,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `light_table_update_item_properties`
 
-- Primitive: `0x000a0011`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x000a0011`; schema 2; semantics 2; replay epoch 24.
 - Arguments: item_id: light_table_item_ref [bound=nonzero,active-set-item; id=target_item:document_stable:scalar]; properties: light_table_item_properties [bound=validated-item-properties].
 - Results: none.
 - Portability: requires_binding (semantic_target, active_light_table_set); ordered rules: 0 ([]).
@@ -954,7 +852,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `light_table_update_item`
 
-- Primitive: `0x000a0012`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x000a0012`; schema 2; semantics 2; replay epoch 24.
 - Arguments: item_id: light_table_item_ref [bound=nonzero,active-set-item; id=target_item:document_stable:scalar]; input: light_table_item_input [bound=validated-item,rgba-source; asset=source_rasters:canonical_raster:inline=true:external=true].
 - Results: none.
 - Portability: requires_binding (semantic_target, active_light_table_set, source_raster_asset); ordered rules: 0 ([]).
@@ -964,7 +862,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `light_table_remove_item`
 
-- Primitive: `0x000a0013`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x000a0013`; schema 2; semantics 2; replay epoch 24.
 - Arguments: item_id: light_table_item_ref [bound=nonzero,active-set-item; id=target_item:document_stable:scalar].
 - Results: none.
 - Portability: requires_binding (semantic_target, active_light_table_set); ordered rules: 0 ([]).
@@ -974,7 +872,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `light_table_reorder_item`
 
-- Primitive: `0x000a0014`; schema 2; semantics 2; replay epoch 23.
+- Primitive: `0x000a0014`; schema 2; semantics 2; replay epoch 24.
 - Arguments: item_id: light_table_item_ref [bound=nonzero,active-set-item; id=target_item:document_stable:scalar]; destination_index: u64 [bound=active-light-table-item-order,usize-representable].
 - Results: none.
 - Portability: requires_binding (semantic_target, active_light_table_set, initial_light_table_item_order); ordered rules: 0 ([]).
@@ -984,7 +882,7 @@ The JSON registries remain normative when this presentation differs.
 
 ### `light_table_bulk_register`
 
-- Primitive: `0x000a0016`; schema 2; semantics 1; replay epoch 23.
+- Primitive: `0x000a0016`; schema 2; semantics 1; replay epoch 24.
 - Arguments: target_set_id: light_table_set_ref [bound=nonzero; id=target_set:document_stable:scalar]; inputs: list<light_table_item_input> [bound=bounded:1..4096,source-order,validated-items,rgba-sources; asset=source_rasters:canonical_raster:inline=true:external=true].
 - Results: items: list<light_table_item_ref> [always_on_success; ordered_list; namespace=document_stable; role=light_table_item; output=0].
 - Portability: requires_binding (semantic_target, source_raster_assets); ordered rules: 0 ([]).

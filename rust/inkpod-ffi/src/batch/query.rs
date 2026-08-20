@@ -181,17 +181,6 @@ fn operation_info(
             output.kind = INKPOD_BATCH_OPERATION_VISIBILITY;
             output.parameters[0] = i64::from(*visible);
         }
-        BatchOperationKind::LineWidth(mode) => {
-            output.kind = INKPOD_BATCH_OPERATION_LINE_WIDTH;
-            let (mode, value) = match mode {
-                VectorWidthMode::Add(value) => (1, value),
-                VectorWidthMode::Subtract(value) => (2, value),
-                VectorWidthMode::Scale(value) => (3, value),
-                VectorWidthMode::Constant(value) => (4, value),
-            };
-            output.parameters[0] = mode;
-            output.parameters[1] = (*value * 1_000.0).round() as i64;
-        }
         BatchOperationKind::Filter(filter) => {
             output.kind = INKPOD_BATCH_OPERATION_FILTER;
             write_filter_info(filter, &mut output);

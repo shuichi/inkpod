@@ -1237,9 +1237,6 @@ const fn layer_kind_code(value: LayerKind) -> u32 {
         LayerKind::Frame => 5,
         LayerKind::VanishingPoint => 6,
         LayerKind::Adjustment => 7,
-        LayerKind::Text => 8,
-        LayerKind::Annotation => 9,
-        LayerKind::VectorColoring => 10,
     }
 }
 
@@ -1252,9 +1249,6 @@ fn layer_kind_from_code(value: u32) -> Result<LayerKind, CoreError> {
         5 => Ok(LayerKind::Frame),
         6 => Ok(LayerKind::VanishingPoint),
         7 => Ok(LayerKind::Adjustment),
-        8 => Ok(LayerKind::Text),
-        9 => Ok(LayerKind::Annotation),
-        10 => Ok(LayerKind::VectorColoring),
         _ => Err(CoreError::Format("Cut layer kind is unknown".to_owned())),
     }
 }

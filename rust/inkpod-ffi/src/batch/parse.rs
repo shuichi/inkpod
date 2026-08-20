@@ -412,21 +412,6 @@ pub(super) unsafe fn parse_operation(
         INKPOD_BATCH_OPERATION_VISIBILITY => BatchOperationKind::Visibility {
             visible: parameter_bool(record.parameters[0], "batch visibility")?,
         },
-        INKPOD_BATCH_OPERATION_LINE_WIDTH => {
-            let value = record.parameters[1] as f32 / 1_000.0;
-            BatchOperationKind::LineWidth(match record.parameters[0] {
-                1 => VectorWidthMode::Add(value),
-                2 => VectorWidthMode::Subtract(value),
-                3 => VectorWidthMode::Scale(value),
-                4 => VectorWidthMode::Constant(value),
-                _ => {
-                    return Err(fail(
-                        INKPOD_STATUS_INVALID_ARGUMENT,
-                        "batch line-width mode is unknown",
-                    ));
-                }
-            })
-        }
         INKPOD_BATCH_OPERATION_FILTER => {
             if record.filter.is_null() {
                 return Err(fail(
@@ -604,9 +589,6 @@ pub(super) fn parse_layer_kind(value: u32) -> Result<LayerKind, u32> {
         INKPOD_LAYER_FRAME => Ok(LayerKind::Frame),
         INKPOD_LAYER_VANISHING_POINT => Ok(LayerKind::VanishingPoint),
         INKPOD_LAYER_ADJUSTMENT => Ok(LayerKind::Adjustment),
-        INKPOD_LAYER_TEXT => Ok(LayerKind::Text),
-        INKPOD_LAYER_ANNOTATION => Ok(LayerKind::Annotation),
-        INKPOD_LAYER_VECTOR_COLORING => Ok(LayerKind::VectorColoring),
         _ => Err(fail(
             INKPOD_STATUS_INVALID_ARGUMENT,
             "batch layer kind is unknown",
@@ -620,9 +602,6 @@ pub(super) fn parse_plane_kind(value: i64) -> Result<PlaneType, u32> {
         Some(INKPOD_TYPED_PLANE_COLOR) => Ok(PlaneType::Color),
         Some(INKPOD_TYPED_PLANE_RASTER) => Ok(PlaneType::Raster),
         Some(INKPOD_TYPED_PLANE_SELECTION) => Ok(PlaneType::Selection),
-        Some(INKPOD_TYPED_PLANE_VECTOR_MAIN_LINE) => Ok(PlaneType::VectorMainLine),
-        Some(INKPOD_TYPED_PLANE_COLOR_TRACE) => Ok(PlaneType::ColorTrace),
-        Some(INKPOD_TYPED_PLANE_VECTOR_FILL) => Ok(PlaneType::VectorFill),
         _ => Err(fail(
             INKPOD_STATUS_INVALID_ARGUMENT,
             "batch plane kind is unknown",

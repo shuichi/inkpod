@@ -17,19 +17,18 @@ fn editor_tool(code: u32) -> Result<EditorTool, u32> {
         1_008 => EditorTool::ColorReplace,
         1_009 => EditorTool::ShootingFrame,
         1_010 => EditorTool::VanishingPoint,
+        1_011 => EditorTool::GeometryLine,
+        1_012 => EditorTool::GeometryCurve,
+        1_013 => EditorTool::GeometryRectangle,
+        1_014 => EditorTool::GeometryEllipse,
+        1_015 => EditorTool::GeometryPolygon,
+        1_016 => EditorTool::GeometryPolyline,
         1_101 => EditorTool::EffectGradient,
         1_102 => EditorTool::EffectAirbrush,
         1_103 => EditorTool::EffectBlur,
         1_104 => EditorTool::EffectStamp,
         1_105 => EditorTool::EffectDust,
         1_106 => EditorTool::EffectAlphaGradient,
-        1_201 => EditorTool::VectorLine,
-        1_202 => EditorTool::VectorCurve,
-        1_203 => EditorTool::VectorRectangle,
-        1_204 => EditorTool::VectorEllipse,
-        1_205 => EditorTool::VectorPolyline,
-        1_206 => EditorTool::VectorEraser,
-        1_207 => EditorTool::VectorPolygon,
         _ => {
             return Err(fail(
                 INKPOD_STATUS_INVALID_ARGUMENT,
@@ -213,56 +212,6 @@ fn parse_brush(input: &InkpodEditorBrushOptions) -> Result<EditorBrushOptions, u
     })
 }
 
-const fn vector_erase_code(mode: VectorEraseMode) -> u32 {
-    match mode {
-        VectorEraseMode::Partial => INKPOD_VECTOR_ERASE_PARTIAL,
-        VectorEraseMode::ToIntersection => INKPOD_VECTOR_ERASE_TO_INTERSECTION,
-        VectorEraseMode::WholePath => INKPOD_VECTOR_ERASE_WHOLE_PATH,
-    }
-}
-
-fn vector_erase(code: u32) -> Result<VectorEraseMode, u32> {
-    match code {
-        INKPOD_VECTOR_ERASE_PARTIAL => Ok(VectorEraseMode::Partial),
-        INKPOD_VECTOR_ERASE_TO_INTERSECTION => Ok(VectorEraseMode::ToIntersection),
-        INKPOD_VECTOR_ERASE_WHOLE_PATH => Ok(VectorEraseMode::WholePath),
-        _ => Err(fail(
-            INKPOD_STATUS_INVALID_ARGUMENT,
-            "editor vector erase mode is unknown",
-        )),
-    }
-}
-
-const fn vector_selection_code(mode: VectorSelectionMode) -> u32 {
-    match mode {
-        VectorSelectionMode::CutBySelection => INKPOD_VECTOR_SELECT_CUT_BY_SELECTION,
-        VectorSelectionMode::Touching => INKPOD_VECTOR_SELECT_TOUCHING,
-        VectorSelectionMode::FullyContained => INKPOD_VECTOR_SELECT_FULLY_CONTAINED,
-        VectorSelectionMode::Line => INKPOD_VECTOR_SELECT_LINE,
-        VectorSelectionMode::WholeLine => INKPOD_VECTOR_SELECT_WHOLE_LINE,
-        VectorSelectionMode::ToIntersection => INKPOD_VECTOR_SELECT_TO_INTERSECTION,
-        VectorSelectionMode::FillBoundary => INKPOD_VECTOR_SELECT_FILL_BOUNDARY,
-        VectorSelectionMode::Fill => INKPOD_VECTOR_SELECT_FILL,
-    }
-}
-
-fn vector_selection(code: u32) -> Result<VectorSelectionMode, u32> {
-    match code {
-        INKPOD_VECTOR_SELECT_CUT_BY_SELECTION => Ok(VectorSelectionMode::CutBySelection),
-        INKPOD_VECTOR_SELECT_TOUCHING => Ok(VectorSelectionMode::Touching),
-        INKPOD_VECTOR_SELECT_FULLY_CONTAINED => Ok(VectorSelectionMode::FullyContained),
-        INKPOD_VECTOR_SELECT_LINE => Ok(VectorSelectionMode::Line),
-        INKPOD_VECTOR_SELECT_WHOLE_LINE => Ok(VectorSelectionMode::WholeLine),
-        INKPOD_VECTOR_SELECT_TO_INTERSECTION => Ok(VectorSelectionMode::ToIntersection),
-        INKPOD_VECTOR_SELECT_FILL_BOUNDARY => Ok(VectorSelectionMode::FillBoundary),
-        INKPOD_VECTOR_SELECT_FILL => Ok(VectorSelectionMode::Fill),
-        _ => Err(fail(
-            INKPOD_STATUS_INVALID_ARGUMENT,
-            "editor vector selection mode is unknown",
-        )),
-    }
-}
-
 fn write_fill(output: &mut InkpodEditorFillOptions, fill: &EditorFillOptions) -> Result<(), u32> {
     if fill.inclusion_colors.len() > INKPOD_EDITOR_MAX_INCLUSION_COLORS {
         return Err(fail(
@@ -415,12 +364,6 @@ fn write_editor_state(
         rotation_turns: state.selection.rotation_turns,
         trace_shape: trace_shape_code(state.selection.trace_shape),
     };
-    output.vector = InkpodEditorVectorOptions {
-        struct_size: size_of::<InkpodEditorVectorOptions>() as u32,
-        erase_mode: vector_erase_code(state.vector.erase_mode),
-        selection_mode: vector_selection_code(state.vector.selection_mode),
-        reserved: 0,
-    };
     output.brush = write_brush(state.brush);
     Ok(())
 }
@@ -452,19 +395,6 @@ fn parse_selection(input: &InkpodEditorSelectionOptions) -> Result<EditorSelecti
         trace_shape: trace_shape(input.trace_shape)?,
         trace_pressure_size: input.construction_flags & INKPOD_SELECTION_TRACE_PRESSURE_SIZE != 0,
         trace_screen_size: input.construction_flags & INKPOD_SELECTION_TRACE_SCREEN_SIZE != 0,
-    })
-}
-
-fn parse_vector(input: &InkpodEditorVectorOptions) -> Result<EditorVectorOptions, u32> {
-    if input.struct_size < size_of::<InkpodEditorVectorOptions>() as u32 || input.reserved != 0 {
-        return Err(fail(
-            INKPOD_STATUS_INVALID_ARGUMENT,
-            "editor vector options are malformed",
-        ));
-    }
-    Ok(EditorVectorOptions {
-        erase_mode: vector_erase(input.erase_mode)?,
-        selection_mode: vector_selection(input.selection_mode)?,
     })
 }
 
@@ -600,9 +530,6 @@ pub unsafe extern "C" fn inkpod_core_update_editor_state(
             }
             INKPOD_EDITOR_UPDATE_SELECTION_OPTIONS if input.flags == 0 => {
                 parse_selection(&input.selection).map(EditorStateUpdate::SetSelectionOptions)
-            }
-            INKPOD_EDITOR_UPDATE_VECTOR_OPTIONS if input.flags == 0 => {
-                parse_vector(&input.vector).map(EditorStateUpdate::SetVectorOptions)
             }
             INKPOD_EDITOR_UPDATE_ACTIVE_TARGET if input.flags == 0 => Ok(
                 EditorStateUpdate::SetActiveTarget(inkpod_core::EditorTarget {

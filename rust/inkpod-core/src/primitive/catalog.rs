@@ -82,7 +82,6 @@ const PRIMITIVE_CATALOG: &[PrimitiveCatalogEntry] = &[
         0x0002_0023
     ),
     entry!(EDIT_TARGETS, 2, "EditTargets", 1, 0x0002_0030),
-    entry!(EDIT_ANNOTATIONS, 2, "EditAnnotations", 1, 0x0002_0040),
     entry!(EDIT_SHOOTING_FRAME, 2, "EditShootingFrame", 1, 0x0002_0050),
     entry!(
         EDIT_VANISHING_POINTS,
@@ -205,38 +204,6 @@ const PRIMITIVE_CATALOG: &[PrimitiveCatalogEntry] = &[
     entry!(MIRROR_DOCUMENT, 2, "MirrorDocument", 2, 0x0007_0001),
     entry!(ROTATE_DOCUMENT, 2, "RotateDocument", 2, 0x0007_0002),
     entry!(RESIZE_DOCUMENT, 2, "ResizeDocument", 2, 0x0007_0003),
-    entry!(VECTOR_ADD_PATH, 2, "VectorAddPath", 2, 0x0008_0001),
-    entry!(VECTOR_ADD_FILL, 2, "VectorAddFill", 2, 0x0008_0002),
-    entry!(VECTOR_ERASE, 2, "VectorErase", 2, 0x0008_0003),
-    entry!(VECTOR_CONNECT, 2, "VectorConnect", 2, 0x0008_0004),
-    entry!(
-        VECTOR_CORRECT_WIDTH,
-        2,
-        "VectorCorrectWidth",
-        2,
-        0x0008_0005
-    ),
-    entry!(
-        RASTERIZE_VECTOR_LAYER,
-        2,
-        "RasterizeVectorLayer",
-        2,
-        0x0008_0010
-    ),
-    entry!(
-        VECTORIZE_RASTER_PLANE,
-        2,
-        "VectorizeRasterPlane",
-        2,
-        0x0008_0011
-    ),
-    entry!(
-        VECTORIZE_RASTER_PLANE_INTO_NEW_LAYER,
-        2,
-        "VectorizeRasterPlaneIntoNewLayer",
-        2,
-        0x0008_0012
-    ),
     entry!(IMPORT_RASTER_ASSET, 1, "ImportRasterAsset", 1, 4),
     entry!(
         LIGHT_TABLE_SET_GLOBAL_OPACITY,
@@ -383,7 +350,7 @@ mod tests {
 
     #[test]
     fn catalog_is_sorted_unique_bounded_and_matches_replay_schema_lookup() {
-        assert_eq!(PRIMITIVE_CATALOG.len(), 85);
+        assert_eq!(PRIMITIVE_CATALOG.len(), 76);
         for pair in PRIMITIVE_CATALOG.windows(2) {
             assert!(pair[0].id < pair[1].id);
         }

@@ -32,6 +32,7 @@ foreach(REQUIRED IN ITEMS
         "WorkspaceAuxiliaryPaneState"
         "WorkspaceAutoHideEdge"
         "WorkspaceSplitOrientation"
+        "RightToolTabsModel right_tool_tabs"
         "EncodeWorkspaceLayout"
         "DecodeWorkspaceLayout"
         "DeleteWorkspaceLayout"
@@ -46,8 +47,10 @@ endforeach()
 
 file(READ "${LAYOUT_SOURCE}" LAYOUT_SOURCE_TEXT)
 foreach(REQUIRED IN ITEMS
-        "kVersion = 8U"
+        "kVersion = 9U"
         "PersistedWorkspaceLayoutV4"
+        "PersistedWorkspaceLayoutV9"
+        "PersistedRightToolTabV9"
         "EncodeGroupedPaneOrder"
         "DecodeGroupedPaneOrder"
         "DecodeVersion3"
@@ -55,6 +58,9 @@ foreach(REQUIRED IN ITEMS
         "value.version != 5U"
         "migrate_version6_reference_stack"
         "legacy_tool_options"
+        "BuildLegacyRightTabs"
+        "DecodeVersion9"
+        "ValidateCurrentTabs"
         "LoadLegacyLayout"
         "FindPaneDescriptorByStableId"
         "kMaximumWorkspaceLayoutRecordBytes"
@@ -135,6 +141,11 @@ foreach(REQUIRED IN ITEMS
         "DecodeWorkspaceLayout"
         "WorkspaceLayoutDecodeResult::Migrated"
         "LegacyWorkspaceV3"
+        "PersistedWorkspaceV9ForMigration"
+        "ExtractVersion8Workspace"
+        "migrated_version8"
+        "replacement_tabs"
+        "capacity_model"
         "legacy_v5_bytes"
         "mixed_serialized"
         "legacy_light_table_tabs"
@@ -154,6 +165,6 @@ foreach(REQUIRED IN ITEMS
 endforeach()
 
 message(STATUS
-    "Verified G9 bounded v7 persistence, v2/v3/v4/v5/v6 migration, split tab stacks, named presets, "
+    "Verified bounded V9 dynamic-tab persistence, V2-V8 migration, split tab stacks, named presets, "
     "monitor recovery, accessible auxiliary-pane auto-hide integration, "
     "and G10 bounded workspace-window count persistence")

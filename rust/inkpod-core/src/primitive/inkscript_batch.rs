@@ -310,7 +310,7 @@ impl LegacyImageScriptStep {
         }
         let (command, layer_id, plane_id, arguments) = lift_arguments(invocation)?;
         let mut source = String::from(
-            "inkscript_fragment 2;\nrequires { procedure_catalog = 2; replay_epoch = 23; }\n",
+            "inkscript_fragment 2;\nrequires { procedure_catalog = 3; replay_epoch = 24; }\n",
         );
         let mut bindings = InkScriptRuntimeReferences::default();
         source.push_str("bindings { ");
@@ -1755,7 +1755,7 @@ mod tests {
     #[test]
     fn unknown_field_enum_and_nonexact_filter_variant_are_rejected() {
         let prefix = format!(
-            "inkscript_fragment 2; requires {{ procedure_catalog = 2; replay_epoch = 23; }} bindings {{ let target_plane = select plane {{ source_document_uuid = uuid\"{ADAPTER_SOURCE_UUID}\"; persistent_id = 12; }}; }} "
+            "inkscript_fragment 2; requires {{ procedure_catalog = 3; replay_epoch = 24; }} bindings {{ let target_plane = select plane {{ source_document_uuid = uuid\"{ADAPTER_SOURCE_UUID}\"; persistent_id = 12; }}; }} "
         );
         let fields = "radius = none; strength_milli = none; amount_milli = none; threshold = none; channel = none; brightness_milli = none; contrast_milli = none; interpolation = none; points = []; levels = none; hsv = none; color_balance = none;";
         let unknown_enum = format!(

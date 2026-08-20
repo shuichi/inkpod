@@ -471,42 +471,6 @@ fn v3_snapshot_thumbnail_export_and_task_ids_use_bounded_copy_and_exact_release(
             INKPOD_STATUS_OK
         );
         assert_eq!(zero, 0);
-        assert_eq!(
-            inkpod_core_snapshot_vector_segments_copy_v3(
-                core,
-                &snapshot_id,
-                0,
-                ptr::null_mut(),
-                0,
-                0,
-                &mut zero,
-            ),
-            INKPOD_STATUS_OK
-        );
-        assert_eq!(
-            inkpod_core_snapshot_vector_fills_copy_v3(
-                core,
-                &snapshot_id,
-                0,
-                ptr::null_mut(),
-                0,
-                0,
-                &mut zero,
-            ),
-            INKPOD_STATUS_OK
-        );
-        assert_eq!(
-            inkpod_core_snapshot_vector_boundary_ids_copy_v3(
-                core,
-                &snapshot_id,
-                0,
-                ptr::null_mut(),
-                0,
-                0,
-                &mut zero,
-            ),
-            INKPOD_STATUS_OK
-        );
     }
 
     let mut thumbnail_id = object_id();

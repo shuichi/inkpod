@@ -543,14 +543,11 @@ bool LayerPalettePlaneBadgeLayoutContract(
     }
     HDC device = GetDC(nullptr);
     bool passed = device != nullptr;
-    const std::array<UiStringId, 8U> labels{
+    const std::array<UiStringId, 5U> labels{
         UiStringId::PlaneBadgeMainLine,
         UiStringId::PlaneBadgeColoring,
-        UiStringId::PlaneBadgeColorTrace,
         UiStringId::PlaneBadgeRaster,
         UiStringId::PlaneBadgeSelection,
-        UiStringId::PlaneBadgeVectorMainLine,
-        UiStringId::PlaneBadgeVectorFill,
         UiStringId::PlaneBadgeUnknown};
     const std::array<UINT, 4U> dpis{96U, 120U, 144U, 192U};
     for (const UINT dpi : dpis) {
@@ -607,10 +604,6 @@ bool LayerPalettePlaneBadgeLayoutContract(
             && UiTextView(UiStringId::PlaneBadgeMainLine).find(L'\n')
                 != std::wstring_view::npos
             && UiTextView(UiStringId::PlaneBadgeColoring).find(L'\n')
-                != std::wstring_view::npos
-            && UiTextView(UiStringId::PlaneBadgeColorTrace).find(L'\n')
-                != std::wstring_view::npos
-            && UiTextView(UiStringId::PlaneBadgeVectorMainLine).find(L'\n')
                 != std::wstring_view::npos;
     }
     if (device != nullptr) {

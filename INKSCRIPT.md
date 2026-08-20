@@ -20,9 +20,11 @@ exact-current `schemas/inkscript/registry-schema-v2.json`がcatalog-owned type�
 `schemas/inkscript/language-v2.json`へexact-current更新した。旧registry schemaと旧language resourceは受理しない。
 language v2はregistry自体のclosed JSON形式と、command非依存の全language-core type、section、selector、assert、assetの
 exact field、型、default、上限を固定する。command entryはowner manifestに従ってM07～M22でprivate draftへ追加し、
-M23で全単射、実装、equivalence evidenceを検証してexact-current
-`schemas/inkscript/catalog-v2.json`へfreezeした。pre-ratification draftは残さない。production Rust APIはこのclosed
-catalogだけを受理し、C ABI、Windows、product file routeは後続milestoneまで公開しない。
+M23で全単射、実装、equivalence evidenceを検証して当時の
+`schemas/inkscript/catalog-v2.json`へfreezeした。M27B後の描画モデル再ベースラインでは削除対象9 commandを除いた
+75 commandを`schemas/inkscript/catalog-v3.json`とowner manifest v3へfreezeし、v2を現行readerから外した。
+pre-ratification draftは残さない。production Rust APIはexact-currentのclosed catalogだけを受理し、C ABI、Windows、
+product file routeは後続milestoneまで公開しない。
 `docs/inkscript-command-reference.md`はlanguage/catalog registryから生成する派生物であり、手編集しない。
 
 本文中の「必須」「禁止」「拒否」は規範要件である。「推奨」は、同等の安全性、
@@ -33,9 +35,11 @@ catalogだけを受理し、C ABI、Windows、product file routeは後続milesto
 | 項目                                |                                       初期値 |
 | ----------------------------------- | -------------------------------------------: |
 | InkScript file format version       |                                            2 |
-| InkScript procedure catalog version |                       2（M23批准済み） |
-| required replay epoch               |                                           23 |
+| InkScript procedure catalog version | 3（M27B後再ベースライン、75 command） |
+| required replay epoch               |                                           24 |
 | native output                       |                      exact-current `.inkpod` |
+| native top-level format             |                                           27 |
+| C ABI                               |                                           17 |
 
 フォーマットフリーズ前のため、reader、writer、clipboard fragment は常に
 exact-current version だけを受理する。grammar、serialized field、selector の
@@ -52,8 +56,8 @@ exact-current version だけを受理する。grammar、serialized field、selec
 catalog versionは「そのbuildで実装済みのcommand集合」ではなく、批准済みの完全なclosed command
 contractを識別する。実装coverageは非永続の内部状態であり、file、clipboard、公開ABIへserializeしない。
 catalog v2 draftはM23までproduction catalog contractではなく、owner milestone内で変更できたがproductから受理
-しなかった。M23で批准した`catalog-v2.json`はin-place変更せず、新entryやsignature変更ではcatalog versionを更新し、
-旧version拒否test、example、registry、生成referenceを同時更新する。
+しなかった。M23で批准した`catalog-v2.json`も履歴としてin-place変更せず、現行は`catalog-v3.json`だけを受理する。
+新entryやsignature変更ではcatalog versionを更新し、旧version拒否test、example、registry、生成referenceを同時更新する。
 
 ## 2. 目的と非目的
 
@@ -671,9 +675,7 @@ required/default、owner relation、initial-order規則はschema registryと生�
 | `layer`                                | kind、name、initial document order、persistent ID                             |
 | `plane`                                | owning layer binding/filter、kind、format、name、initial order、persistent ID |
 | `guide`                                | axis、position、persistent ID                                                 |
-| `vector_path` / `vector_fill`          | owning plane、persistent ID                                                   |
-| `annotation`                           | owning layer、kind、persistent ID                                             |
-| `shooting_frame`                       | owning layer、persistent ID                                                   |
+| `shooting_frame`                       | document-owned singleton                                                      |
 | `vanishing_point`                      | owning layer、persistent ID                                                   |
 | `light_table_set` / `light_table_item` | owner、name/order、persistent ID                                              |
 
@@ -793,8 +795,9 @@ file/catalog versionと`language-v2.json`をexact-currentへ更新した。
 全journal-replayable `PrimitiveId`はowner manifestでM07～M22のちょうど一つへ割り当てる。各ownerは
 実装するfamilyのexact command entryと、そのentry専用type/constructorをprivate draftへ追加した。
 合成`SchemaView`はlanguage-core定義と全catalog entry定義を結合し、type/constructor名の重複を拒否する。
-M23で全entry、実装、owner、equivalence evidenceの全単射を検証し、private draftを削除して
-`catalog-v2.json`へfreezeした。catalog v2はRust compile／bind／staged-run contractとしてproduction公開するが、
+M23で全entry、実装、owner、equivalence evidenceの全単射を検証し、private draftを削除して当時の
+`catalog-v2.json`へfreezeした。M27B後の再ベースラインでvector 8 commandとannotation 1 commandを削除し、残る
+75 entryを`catalog-v3.json`へfreezeした。catalog v3はRust compile／bind／staged-run contractとしてproduction公開するが、
 file、clipboard、FFI、Windows product commandからの到達は各後続owner milestoneまで許可しない。
 
 registryは最低限、次を定義する。
@@ -2437,7 +2440,7 @@ Version impact:
 - 文書変更は既存の単一canonical executorだけを通り、別model／executorを追加していない。全13 primitiveのcodecと
   direct-vs-script state／revision／history／ID／savepoint同値性、success／no-op／invalid／Cancel／stale／overflow／
   resource／atomicity、mixed result順序、missing-result、Undo／Redo、ID high-watermarkを7契約で検証した。
-- 作成resultを後続create/propertyへ渡す3-step runをcurrent-v26 native bytesへencodeし、checkpointなしのfull replayでreopenした。
+- 作成resultを後続create/propertyへ渡す3-step runをmilestone時点のv26 native bytesへencodeし、checkpointなしのfull replayでreopenした。
   document digest、history、next stable/procedure/state ID、document/editor savepoint、3回のUndo／Redoが一致した。
 - `cargo fmt --check`、workspace全target／feature Clippy（warning deny）、workspace 563 passed／Release gate 1 ignored
   （doctest 1）、workspace strict rustdocが成功した。承認済みInkScript quickは全counterとchecksum
@@ -2486,7 +2489,7 @@ Version impact:
   catalog-owned `chart_name_scalars(list<u32>)` constructorでUnicode scalar列としてlosslessに表現する。
 - 全8 primitiveのcodec／direct-vs-script state・revision・history・ID同値性、exact-depth color、metadata no-op、
   guide order、strict/rebound、success／invalid／Cancel／stale／overflow／resource／atomicity、ownership／thread suitabilityを
-  検証した。guide resultの後続参照、Undo／Redo、ID high-watermark、document/editor savepoint、current-v26 encodeと
+  検証した。guide resultの後続参照、Undo／Redo、ID high-watermark、document/editor savepoint、milestone時点のv26 encodeと
   checkpointなしfull replay reopenも一致した。
 - `cargo fmt --check`、workspace全target／feature Clippy（warning deny）、workspace 570 non-doc tests／Release gate 1 ignored
   とdoctest 1、workspace strict rustdocが成功した。`inkscript_registry`は11/11。承認済みInkScript quickは全counterと
@@ -2535,7 +2538,7 @@ Version impact:
   評価する。geometryのpath/fill resultはstable vector IDのtyped ordered-listとして後続参照可能である。
 - native depth、Q16、sample order、inline raster asset role、direct-vs-script canonical arguments／payload／state、
   success／no-op／invalid／Cancel／stale／overflow／allocation/resource／atomicity、ownership／thread suitabilityを検証した。
-  Undo／Redo、cache-free replay、ID high-watermark、document/editor savepoint、current-v26 encodeとfull replay reopenも一致した。
+  Undo／Redo、cache-free replay、ID high-watermark、document/editor savepoint、milestone時点のv26 encodeとfull replay reopenも一致した。
 - `cargo fmt --check`、workspace全target／feature Clippy（warning deny）、workspace 577 non-doc tests／Release gate 1 ignoredと
   doctest 1、workspace strict rustdocが成功した。`inkscript_registry`は12/12。承認済みInkScript quickは全counterと
   checksum `0f84d2c54cfe1e2c`を維持して85,434,600 ns、既存`core_workflows --quick`も10 checksumを維持した。
@@ -2582,7 +2585,7 @@ Version impact:
   clipping、direct canonical arguments/state digest一致を検証した。
 - success／no-op／invalid／Cancel（即時および先行step staged後）／stale／procedure ID overflow／resource超過／
   atomicity、ownership／thread suitabilityを検証した。Undo／Redo、cache-free replay、ID high-watermark、
-  document/editor savepoint、current-v26 encodeとfull replay reopenも一致した。
+  document/editor savepoint、milestone時点のv26 encodeとfull replay reopenも一致した。
 - `cargo fmt --check`、workspace全target／feature Clippy（warning deny）、workspace 581 non-doc tests／Release gate 1 ignoredと
   doctest 1、workspace strict rustdocが成功した。`inkscript_registry`は13/13。承認済みInkScript quickは全counterと
   checksum `0f84d2c54cfe1e2c`を維持して88,304,800 ns、既存`core_workflows --quick`も10 checksumを維持した。
@@ -2629,7 +2632,7 @@ Version impact:
 - RGBA16 documentとgrayscale8 alpha assetでgesture order、selection外不変、alpha-only/native depth、payload ownership、
   adjustment resultの後続参照、direct／script canonical argumentsとstate digestを検証した。success／no-op／invalid／Cancel
   （即時および先行step staged後）／stale／stable/procedure ID overflow／resource超過／atomicity、ownership／thread suitability、
-  Undo／Redo、cache-free replay、ID high-watermark、document/editor savepoint、current-v26 full-replay reopenも一致した。
+  Undo／Redo、cache-free replay、ID high-watermark、document/editor savepoint、milestone時点のv26 full-replay reopenも一致した。
 - `cargo fmt --check`、workspace全target／feature Clippy（warning deny）、workspace 586 non-doc tests／Release gate 1 ignoredと
   doctest 1、workspace strict rustdocが成功した。`inkscript_registry`は14/14。承認済みInkScript quickは全counterとchecksum
   `0f84d2c54cfe1e2c`を維持して86,469,200 ns、既存`core_workflows --quick`も10 checksumを維持した。
@@ -2674,7 +2677,7 @@ Version impact:
 - selection bounds、typed resultと後続参照、semantic no-op、strict precondition、floating asset ownership、direct／scriptの
   canonical state parityを検証した。success／invalid／Cancel（即時および先行step staged後）／stale／stable/procedure ID overflow／
   resource超過／asset不一致／atomicity、ownership／thread suitability、Undo／Redo、cache-free replay、ID high-watermark、
-  document/editor savepoint、current-v26 full-replay reopenも一致した。既存`selection_from_layer`の同一mask経路が文書化済み
+  document/editor savepoint、milestone時点のv26 full-replay reopenも一致した。既存`selection_from_layer`の同一mask経路が文書化済み
   no-op契約に反してCommitを作る不具合もtest-firstで修正し、revision／history／ID非進行を固定した。
 - `cargo fmt --check`、workspace全target／feature Clippy（warning deny）、workspace 591 non-doc tests／Release gate 1 ignoredと
   doctest 1、workspace strict rustdocが成功した。`inkscript_registry`は15/15。承認済みInkScript quickは全counterとchecksum
@@ -2722,7 +2725,7 @@ Version impact:
 - 8 commandのsuccess／semantic no-op、list index後続参照、全`output_ids`の重複なしordinal coverage、RGBA16 native depth、
   strict UUID+stable-ID binding、semantic rebound、direct canonical state parityを検証した。invalid／Cancel（即時および
   先行step staged後）／stale／stable/procedure ID overflow／resource超過／atomicity、ownership／thread suitability、
-  Undo／Redo、cache-free replay、ID high-watermark、document/editor savepoint、current-v26 full-replay reopenも一致した。
+  Undo／Redo、cache-free replay、ID high-watermark、document/editor savepoint、milestone時点のv26 full-replay reopenも一致した。
 - `cargo fmt --check`、workspace全target／feature Clippy（warning deny）、workspace 598 non-doc tests（597 pass、Release-only gate
   1 ignored）とdoctest 1、workspace strict rustdocが成功した。`inkscript_registry`は16/16。承認済みInkScript quickは
   全counterとchecksum `0f84d2c54cfe1e2c`を維持して87,233,900 ns、既存`core_workflows --quick`も10 checksumを維持した。
@@ -2765,7 +2768,7 @@ Version impact:
 - create/update/move/delete/delete-all、no-op result availability、list index、owner role、invocation依存portability、
   exact-source/rebound binding、invalid／Cancel／stale document・ID allocation／stable・procedure ID overflow／resource／
   atomicity、ownership／thread suitabilityを契約化した。direct route同値、Undo／Redo、cache-free replay、ID high-watermark、
-  current-v26 save/reopenとdocument/editor savepointも検証した。
+  milestone時点のv26 save/reopenとdocument/editor savepointも検証した。
 - `cargo fmt --check`、workspace全target／feature Clippy（warning deny）、workspace 603 non-doc tests（602 pass、Release-only gate
   1 ignored）とdoctest 1、strict rustdoc、renamed v2 fuzz targetのstandalone checkが成功した。`inkscript_registry`は17/17。
   承認済みInkScript quickはfile/catalog v2によるstatic compile digest変更だけをchecksum `4401131d804c8eb7`へ再固定し、
@@ -2808,7 +2811,7 @@ Version impact:
 - global opacity、set create／duplicate／delete／rename／reorder／active、item add／property update／full update／
   remove／reorder／bulk registerを一つのsequential programで検証した。direct routeとdocument／history／journal／
   ID high-watermarkが一致し、3 no-op、5 ordered result、4 frozen RGBA asset、Undo／Redo、cache-free replay、
-  current-v26 save/reopenとdocument/editor savepointが一致した。
+  milestone時点のv26 save/reopenとdocument/editor savepointが一致した。
 - invalid、即時／途中Cancel、stale input、stable／procedure ID overflow、resource limit、missing asset、非RGBA assetを
   失敗前後のdigest／history／counter不変で検証した。adapter値のCore-engine thread間`Send + Sync`も固定した。
 - session-only `LIGHT_TABLE_SWAP_WITH_ACTIVE`はowner manifestの除外理由`session_only`と照合し、query／previewを含め
@@ -3024,7 +3027,7 @@ Version impact:
   UTF-8をspan単位で一括copyする。全caller-owned recordを先にsize／version／flag検証し、capacity不足、short record、unknown
   flagでrecord／textを部分copyしない。
 - 3件の新規FFI contractでsuccess、PathIntent／preview／report batch、NULL、short record、unknown flag、queue saturation、
-  cross-thread plan query／plan・run cancel、stale authority／confirmation、save failure、double release、入力Core非変更を固定した。成功outputはcurrent-v26
+  cross-thread plan query／plan・run cancel、stale authority／confirmation、save failure、double release、入力Core非変更を固定した。成功outputはmilestone時点のv26
   decode／save-reopen／cache-free full replay、Undo／Redo、history、ID high-watermark、document/editor savepointを検証し、失敗／
   cancelではtemporary／install／入力revision・history・savepoint・IDを変更しない。
 - C ABIをexact-current v16へ更新し、v15 Core config拒否、C header／Rust export drift、C11 include、C++20全新規record static layoutを
@@ -3131,7 +3134,7 @@ Version impact:
 - UI threadがCore execution、PlanTask、Presentを同期waitせず、wait_ms中もengineをblockしない。
 - smokeが実parser、catalog、executor、native writerを通る。
 
-**実装・自動検証結果（2026-08-18、利用者確認待ち）**
+**実装・自動検証結果（2026-08-18、2026-08-20 利用者確認完了）**
 
 - immutableな`CommandContext`、source／authority入力とjob IDをbounded `CoreHost` queueへ取り込み、source parse、static compile、
   journal fragment export、PathIntent順のauthority grant、plan、confirmation、run、report releaseを同じCore engine threadへ固定した。
@@ -3161,6 +3164,23 @@ Version impact:
 - .inkpod top-level: 26（native schema／encoder／decoder変更なし）
 - C ABI: 16（既存ABI v16 symbol／record／ownership/thread契約を使用し、公開ABI変更なし）
 ```
+
+### M27B後の描画モデル再ベースライン（2026-08-20）
+
+M20、M21、M27Bを含む完了済みmilestone本文と上のVersion impactは、当時の実装履歴として保持する。
+後続milestoneが参照するexact-current契約は、vector描画モデルとText／Annotation layerの製品全層からの削除後に
+次へ更新された。
+
+- registry schema／language／InkScript fileはv2を維持する。
+- production catalog／owner manifestはv3、75 commandとし、旧v2、vector 8 command、annotation 1 commandを拒否する。
+- runtime replay epochは24、`.inkpod` top-level formatはv27、C ABIはv17とし、epoch 23／v26／ABI v16を拒否する。
+- Shooting FrameとVanishing Pointのcommand、Cut instruction metadata、raster Geometry、selection／transform／clipboard、
+  guide／grid／adjustment／Light Table／subpalette／Locator／Sequence／Batchは現行ownerのまま維持する。
+- 削除済みprimitive ID、canonical invocation、procedure catalog entryは予約済みtombstoneであり、writerは発行せず、
+  current reader／executorは受理しない。
+
+**Freeze gate:** InkScript開発はM27Bを利用者確認済みの停止点とする。利用者がInkScript再開を明示的に指示するまで、
+M28Aまたは後続milestoneへ着手してはならない。この停止は`.inkpod` format freeze宣言ではない。
 
 ### [ ] M28A — private controller、source edit、file lifecycle
 

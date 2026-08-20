@@ -27,8 +27,7 @@ mod inkscript_ffi_tests;
 
 use inkpod_core::history_visualization::HistoryVisualizationRow;
 use inkpod_core::{
-    ActivePlane, Adjustment, AirbrushGesture, AirbrushStroke, AnnotationEdit, AnnotationKind,
-    AnnotationObjectInput, AnnotationOutput, AnnotationPoint, ApplicationColor,
+    ActivePlane, Adjustment, AirbrushGesture, AirbrushStroke, ApplicationColor,
     AssetAlphaSemantics, AssetColorSpace, BoundaryAirbrush, BrushShape, CellCreationOptions,
     CellCreationPlan, CellSizing, Channel, ClipboardPayload, ClipboardPixel, ClipboardPlane,
     ColorBalance, ColorChartEntry, ColorChartPreview, ColorCheckMode, CommonRasterFormat,
@@ -37,11 +36,11 @@ use inkpod_core::{
     DocumentResize, DustMode, DustRemoval, EditTarget, EditTargetCommand, EditorBrushOptions,
     EditorDefaults, EditorFillOptions, EditorSelectionOptions, EditorSelectionShape, EditorState,
     EditorStateInfo, EditorStateUpdate, EditorStrokeInput, EditorTarget, EditorTool,
-    EditorVectorOptions, EffectRegionKind, EyedropperSource, FileColorChart, FileColorChartEntry,
-    FilePalette, FillOperation, FillRequest, Filter, FloatingTransform, FloatingTransformAnchor,
-    FrameAnchor, FrameMetadata, GeometryCommit, GeometryCrossSection, GeometryOptions,
-    GeometryPreviewInfo, GeometryPrimitive, GeometryRequest, GeometrySnapMode, Gradient,
-    GradientKind, GradientMode, GradientStop, GridConfig, GuideAxis,
+    EffectRegionKind, EyedropperSource, FileColorChart, FileColorChartEntry, FilePalette,
+    FillOperation, FillRequest, Filter, FloatingTransform, FloatingTransformAnchor, FrameAnchor,
+    FrameMetadata, GeometryCommit, GeometryCrossSection, GeometryOptions, GeometryPreviewInfo,
+    GeometryPrimitive, GeometryRequest, GeometrySnapMode, Gradient, GradientKind, GradientMode,
+    GradientStop, GridConfig, GuideAxis,
     HistoryVisualizationBuilder as CoreHistoryVisualizationBuilder, HistoryVisualizationProgress,
     HsvAdjustment, InclusionMode, LayerKind, Levels, LightTableBulkDirection,
     LightTableBulkRegistrationAction, LightTableBulkRegistrationRequest, LightTableDisplayMode,
@@ -62,9 +61,8 @@ use inkpod_core::{
     ShortcutBinding, ShortcutSequenceBinding, ShortcutStroke, Stamp, StampGesture, StampShape,
     StartColorPredicate, Stroke, StrokeSample, TileRaster, TraceBrushOptions, TraceBrushShape,
     VanishingPointEdit, VanishingPointInfo, VanishingPointInput, VanishingPointPreviewTarget,
-    VectorCenterlineMode, VectorCubicSegment, VectorEndpoint, VectorEraseMode, VectorPathInput,
-    VectorSelectionMode, VectorWidthMode, ViewCommand, plan_cell_creation, read_color_chart,
-    read_palette, save_color_chart_atomic, save_palette_atomic,
+    ViewCommand, plan_cell_creation, read_color_chart, read_palette, save_color_chart_atomic,
+    save_palette_atomic,
 };
 use std::cell::RefCell;
 use std::mem::{align_of, size_of};
@@ -77,7 +75,6 @@ use std::thread::{self, ThreadId};
 
 mod abi;
 mod animation;
-mod annotation;
 mod determinism;
 mod document_edit;
 mod editor_state;
@@ -88,10 +85,10 @@ mod inkscript_execution;
 mod lifecycle_document;
 mod paint_history;
 mod shooting_frame;
+mod snapshot_api;
 mod support;
 mod v3;
 mod vanishing_point;
-mod vector_snapshot;
 
 pub use abi::*;
 pub(crate) use abi::{
@@ -99,7 +96,6 @@ pub(crate) use abi::{
     MAX_SELECTION_POINT_COUNT, MAX_STROKE_SAMPLE_COUNT,
 };
 pub use animation::*;
-pub use annotation::*;
 pub use application_data::*;
 pub use color_chart::*;
 pub use cut::*;
@@ -114,7 +110,7 @@ pub use lifecycle_document::*;
 pub(crate) use paint_history::parse_view_command;
 pub use paint_history::*;
 pub use shooting_frame::*;
+pub use snapshot_api::*;
 pub(crate) use support::*;
 pub use v3::*;
 pub use vanishing_point::*;
-pub use vector_snapshot::*;

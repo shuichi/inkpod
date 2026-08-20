@@ -64,7 +64,7 @@ fn semantic_ast_and_canonical_file_round_trip_use_registry_order_and_values() {
             "  }\r\n",
             "}\r\n",
             "inputs { file \"a.inkpod\" { cells = all; }; current_document {}; }\r\n",
-            "requires { replay_epoch = 23; procedure_catalog = 2; }\r\n",
+            "requires { replay_epoch = 24; procedure_catalog = 3; }\r\n",
         )
         .as_bytes(),
     );
@@ -83,8 +83,8 @@ fn semantic_ast_and_canonical_file_round_trip_use_registry_order_and_values() {
             "inkscript 2;\n",
             "\n",
             "requires {\n",
-            "    procedure_catalog = 2;\n",
-            "    replay_epoch = 23;\n",
+            "    procedure_catalog = 3;\n",
+            "    replay_epoch = 24;\n",
             "}\n",
             "\n",
             "inputs {\n",
@@ -159,7 +159,7 @@ program {
   step "second" { enabled = false; invoke test_command { count = 2; ratio = 1.00; text = "b"; options = { zeta = 2; }; values = []; payload = base64""""""; }; }
   step "first" { enabled = true; invoke test_command { count = 1; ratio = 0.0; text = "a"; options = { zeta = 1; }; values = []; payload = base64""""""; }; }
 }
-requires { replay_epoch = 23; procedure_catalog = 2; }
+requires { replay_epoch = 24; procedure_catalog = 3; }
 "#,
     );
     let parsed = parse_inkscript(&input);
@@ -183,7 +183,7 @@ requires { replay_epoch = 23; procedure_catalog = 2; }
 fn compound_literals_references_and_constructors_round_trip_canonically() {
     let input = source(
         br#"inkscript_fragment 2;
-requires { replay_epoch = 23; procedure_catalog = 2; }
+requires { replay_epoch = 24; procedure_catalog = 3; }
 program {
   step "literals" { enabled = true; invoke literal_command {
     asset_value = asset(blob);
@@ -219,7 +219,7 @@ fn invalid_syntax_and_missing_command_schema_never_fallback() {
 
     let valid = source(
         br#"inkscript_fragment 2;
-requires { procedure_catalog = 2; replay_epoch = 23; }
+requires { procedure_catalog = 3; replay_epoch = 24; }
 program { step "x" { enabled = true; invoke test_command { count = 0; ratio = 0.0; text = ""; options = { zeta = 1; }; values = []; payload = base64""""""; }; } }
 "#,
     );

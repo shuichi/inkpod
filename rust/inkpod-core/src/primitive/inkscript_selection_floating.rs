@@ -542,8 +542,6 @@ fn build_floating(
             origin_x: plane.origin_x,
             origin_y: plane.origin_y,
             pixels,
-            vector_paths: Vec::new(),
-            vector_fills: Vec::new(),
         });
     }
     let destination = match &spec.destination {
@@ -671,9 +669,6 @@ fn plane_kind(value: &InkScriptTypedValue) -> Result<PlaneType, SelectionFloatin
         "color" => Ok(PlaneType::Color),
         "raster" => Ok(PlaneType::Raster),
         "selection" => Ok(PlaneType::Selection),
-        "vector_main_line" => Ok(PlaneType::VectorMainLine),
-        "color_trace" => Ok(PlaneType::ColorTrace),
-        "vector_fill" => Ok(PlaneType::VectorFill),
         _ => Err(SelectionFloatingAdapterError::InvalidValue),
     }
 }

@@ -176,9 +176,6 @@ fn every_initial_layer_and_depth_is_created_and_reopens_without_loss() {
         LayerKind::Frame,
         LayerKind::VanishingPoint,
         LayerKind::Adjustment,
-        LayerKind::Text,
-        LayerKind::Annotation,
-        LayerKind::VectorColoring,
     ];
     let formats = [PixelFormat::StraightRgba8, PixelFormat::StraightRgba16];
     for (kind_index, kind) in kinds.into_iter().enumerate() {

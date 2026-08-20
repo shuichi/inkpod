@@ -109,7 +109,12 @@ fn editor_defaults_are_deterministic_and_copied_into_each_new_document() {
         EditorTool::Brush,
         EditorTool::Fill,
         EditorTool::Selection,
-        EditorTool::VectorLine,
+        EditorTool::GeometryLine,
+        EditorTool::GeometryCurve,
+        EditorTool::GeometryRectangle,
+        EditorTool::GeometryEllipse,
+        EditorTool::GeometryPolygon,
+        EditorTool::GeometryPolyline,
     ] {
         assert_eq!(
             defaults.state.tool_style(tool).unwrap().color,
@@ -141,11 +146,6 @@ fn editor_defaults_are_deterministic_and_copied_into_each_new_document() {
         EditorSelectionShape::Rectangle
     );
     assert_eq!(defaults.state.selection.operation, SelectionOperation::New);
-    assert_eq!(defaults.state.vector.erase_mode, VectorEraseMode::Partial);
-    assert_eq!(
-        defaults.state.vector.selection_mode,
-        VectorSelectionMode::Touching
-    );
 
     let mut core = Core::new();
     core.new_cell(
@@ -193,7 +193,7 @@ fn tool_switch_restores_exact_depth_color_diameter_and_last_color_tool() {
     for tool in [
         EditorTool::Fill,
         EditorTool::Selection,
-        EditorTool::VectorLine,
+        EditorTool::GeometryLine,
     ] {
         state = core
             .update_editor_state(state.revision, EditorStateUpdate::SetActiveTool(tool))
@@ -218,8 +218,8 @@ fn tool_switch_restores_exact_depth_color_diameter_and_last_color_tool() {
             6 * 65_536 + 2,
         ),
         (
-            EditorTool::VectorLine,
-            PixelValue::Rgba16([0xaaaa, 0xbbbb, 0xcccc, 0xdddd]),
+            EditorTool::GeometryRectangle,
+            PixelValue::Rgba([90, 80, 70, 60]),
             7 * 65_536 + 3,
         ),
     ];
@@ -449,7 +449,7 @@ fn editor_state_is_session_owned_shared_by_views_and_independent_between_documen
     second
         .update_editor_state(
             second.editor_state().unwrap().revision,
-            EditorStateUpdate::SetActiveTool(EditorTool::VectorCurve),
+            EditorStateUpdate::SetActiveTool(EditorTool::Brush),
         )
         .unwrap();
     assert_eq!(first.editor_state().unwrap(), changed);
@@ -633,45 +633,6 @@ fn target_changing_topology_editor_overflow_is_fully_atomic() {
         .add_guide(GuideAxis::Vertical, 2)
         .unwrap();
     let (_, control_guide_id) = selection_control.add_guide(GuideAxis::Vertical, 2).unwrap();
-    assert_eq!(candidate_guide_id, control_guide_id);
-
-    let mut vector_candidate = editor_core();
-    let mut vector_control = editor_core();
-    let (_, candidate_vector_layer_id) = vector_candidate
-        .create_layer(LayerKind::VectorColoring, "Vector source")
-        .unwrap();
-    let (_, control_vector_layer_id) = vector_control
-        .create_layer(LayerKind::VectorColoring, "Vector source")
-        .unwrap();
-    assert_eq!(candidate_vector_layer_id, control_vector_layer_id);
-    set_maximum_editor_revision(&mut vector_candidate);
-    set_maximum_editor_revision(&mut vector_control);
-    let vector_document_before = observe_document(&mut vector_candidate);
-    let vector_editor_before = vector_candidate.editor_state().unwrap();
-    let vector_topology_before = vector_candidate.layers().unwrap();
-    let vector_resources_before = vector_candidate.resource_usage();
-    assert!(matches!(
-        vector_candidate.rasterize_vector_layer_to_document(
-            candidate_vector_layer_id,
-            true,
-            "Rejected raster",
-        ),
-        Err(CoreError::InvalidState("editor revision overflow"))
-    ));
-    assert_eq!(
-        observe_document(&mut vector_candidate),
-        vector_document_before
-    );
-    assert_eq!(
-        vector_candidate.editor_state().unwrap(),
-        vector_editor_before
-    );
-    assert_eq!(vector_candidate.layers().unwrap(), vector_topology_before);
-    assert_eq!(vector_candidate.resource_usage(), vector_resources_before);
-    let (_, candidate_guide_id) = vector_candidate
-        .add_guide(GuideAxis::Horizontal, 2)
-        .unwrap();
-    let (_, control_guide_id) = vector_control.add_guide(GuideAxis::Horizontal, 2).unwrap();
     assert_eq!(candidate_guide_id, control_guide_id);
 }
 

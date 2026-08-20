@@ -720,8 +720,6 @@ pub unsafe extern "C" fn inkpod_clipboard_create_rgba8(
                 origin_x: input.origin_x,
                 origin_y: input.origin_y,
                 pixels,
-                vector_paths: Vec::new(),
-                vector_fills: Vec::new(),
             }],
         };
         let clipboard = Box::new(InkpodClipboard { payload });

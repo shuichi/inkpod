@@ -126,7 +126,7 @@ pub unsafe extern "C" fn inkpod_core_geometry_points_resolve(
     })
 }
 
-/// Applies one bounded raster or vector geometry request as one canonical edit.
+/// Applies one bounded raster geometry request as one canonical edit.
 ///
 /// # Safety
 /// Every pointer must name a complete, aligned, live, non-overlapping record on
@@ -136,26 +136,9 @@ pub unsafe extern "C" fn inkpod_core_geometry_apply(
     core: *mut InkpodCore,
     input: *const InkpodGeometryInput,
     result: *mut InkpodDispatchResult,
-    out_path_id: *mut u64,
-    out_fill_id: *mut u64,
 ) -> u32 {
     ffi_boundary(|| {
         clear_last_error();
-        if out_path_id.is_null()
-            || !is_aligned(out_path_id)
-            || out_fill_id.is_null()
-            || !is_aligned(out_fill_id)
-        {
-            return fail(
-                INKPOD_STATUS_INVALID_ARGUMENT,
-                "geometry output ID storage is null or misaligned",
-            );
-        }
-        // SAFETY: Writable outputs are required by contract and zeroed before work.
-        unsafe {
-            out_path_id.write(0);
-            out_fill_id.write(0);
-        }
         let (core, request, base_revision) = match unsafe { geometry_call(core, input) } {
             Ok(call) => call,
             Err(status) => return status,
@@ -172,7 +155,7 @@ pub unsafe extern "C" fn inkpod_core_geometry_apply(
         }
         match core.core.apply_geometry(&request) {
             Ok(commit) => {
-                write_geometry_commit(commit, unsafe { &mut *result }, out_path_id, out_fill_id);
+                write_geometry_commit(commit, unsafe { &mut *result });
                 INKPOD_STATUS_OK
             }
             Err(error) => map_core_error(error),
@@ -247,33 +230,20 @@ pub unsafe extern "C" fn inkpod_core_geometry_preview_update(
 /// Commits the active preview through the same canonical executor as apply.
 ///
 /// # Safety
-/// Core/result/ID outputs must be complete, aligned, live, and non-overlapping
+/// Core and result must be complete, aligned, live, and non-overlapping
 /// on the Core owner thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn inkpod_core_geometry_preview_commit(
     core: *mut InkpodCore,
     result: *mut InkpodDispatchResult,
-    out_path_id: *mut u64,
-    out_fill_id: *mut u64,
 ) -> u32 {
     ffi_boundary(|| {
         clear_last_error();
-        if core.is_null()
-            || !is_aligned(core)
-            || out_path_id.is_null()
-            || !is_aligned(out_path_id)
-            || out_fill_id.is_null()
-            || !is_aligned(out_fill_id)
-        {
+        if core.is_null() || !is_aligned(core) {
             return fail(
                 INKPOD_STATUS_INVALID_ARGUMENT,
                 "geometry preview commit pointer is null or misaligned",
             );
-        }
-        // SAFETY: Writable outputs are required by contract.
-        unsafe {
-            out_path_id.write(0);
-            out_fill_id.write(0);
         }
         if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
         {
@@ -287,7 +257,7 @@ pub unsafe extern "C" fn inkpod_core_geometry_preview_commit(
         }
         match core.core.commit_geometry_preview() {
             Ok(commit) => {
-                write_geometry_commit(commit, unsafe { &mut *result }, out_path_id, out_fill_id);
+                write_geometry_commit(commit, unsafe { &mut *result });
                 INKPOD_STATUS_OK
             }
             Err(error) => map_core_error(error),
@@ -467,16 +437,6 @@ fn write_geometry_preview(output: &mut InkpodGeometryPreviewInfo, info: Geometry
     output.preview_revision = info.preview_revision;
 }
 
-fn write_geometry_commit(
-    commit: GeometryCommit,
-    result: &mut InkpodDispatchResult,
-    out_path_id: *mut u64,
-    out_fill_id: *mut u64,
-) {
+fn write_geometry_commit(commit: GeometryCommit, result: &mut InkpodDispatchResult) {
     write_dispatch_result(result, commit.dispatch);
-    // SAFETY: Callers validated both writable scalar outputs.
-    unsafe {
-        out_path_id.write(commit.path_id);
-        out_fill_id.write(commit.fill_id);
-    }
 }

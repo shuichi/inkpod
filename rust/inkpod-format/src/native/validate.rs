@@ -1,7 +1,6 @@
 use super::model::*;
 use crate::adjustment::validate_adjustment_metadata;
 use crate::light_table::validate_light_table_metadata;
-use crate::vector::validate_vector_metadata;
 use inkpod_image::{MAX_PALETTE_COLORS, PixelFormat, TileCoord};
 use std::collections::BTreeSet;
 pub(super) fn validate_document_metadata(
@@ -12,7 +11,6 @@ pub(super) fn validate_document_metadata(
     if metadata.layers.is_empty()
         || metadata.layers.len() > MAX_LAYERS
         || metadata.guides.len() > MAX_GUIDES
-        || metadata.annotations.len() > MAX_ANNOTATION_OBJECTS
         || metadata.vanishing_points.len() > MAX_VANISHING_POINTS
         || metadata.grid.spacing_x == 0
         || metadata.grid.spacing_y == 0
@@ -54,71 +52,6 @@ pub(super) fn validate_document_metadata(
     for guide in &metadata.guides {
         if guide.id == 0 || !ids.insert(guide.id) {
             return Err(FormatError::Invalid("guide ID is invalid"));
-        }
-    }
-    for object in &metadata.annotations {
-        let layer = metadata
-            .layers
-            .iter()
-            .find(|layer| layer.id == object.layer_id)
-            .ok_or(FormatError::Invalid(
-                "annotation object layer does not exist",
-            ))?;
-        if object.id == 0
-            || !ids.insert(object.id)
-            || !matches!(layer.kind, LayerKind::Text | LayerKind::Annotation)
-            || object.bounds.width <= 0
-            || object.bounds.height <= 0
-            || object.font_family_hint.len() > MAX_NODE_NAME_BYTES
-            || object.font_family_hint.chars().any(char::is_control)
-            || object.text.len() > MAX_ANNOTATION_TEXT_BYTES
-            || object.points.len() > MAX_ANNOTATION_POINTS
-            || object.style_flags & !7 != 0
-            || object.color.rgba16().is_none()
-        {
-            return Err(FormatError::Invalid(
-                "annotation object properties are invalid",
-            ));
-        }
-        let fields_valid = match object.kind {
-            FileAnnotationKind::Text => {
-                !object.text.is_empty()
-                    && object.points.is_empty()
-                    && object.font_size_milli != 0
-                    && object.font_size_milli <= 1_000_000
-                    && object.stroke_width_milli == 0
-            }
-            FileAnnotationKind::Stroke => {
-                object.text.is_empty()
-                    && object.font_family_hint.is_empty()
-                    && object.font_size_milli == 0
-                    && object.style_flags == 0
-                    && object.points.len() >= 2
-                    && object.stroke_width_milli != 0
-                    && object.stroke_width_milli <= 1_000_000
-            }
-            FileAnnotationKind::Leader => {
-                object.text.is_empty()
-                    && object.font_family_hint.is_empty()
-                    && object.font_size_milli == 0
-                    && object.style_flags == 0
-                    && object.points.len() == 2
-                    && object.stroke_width_milli != 0
-                    && object.stroke_width_milli <= 1_000_000
-            }
-            FileAnnotationKind::Value => {
-                !object.text.is_empty()
-                    && object.font_size_milli != 0
-                    && object.font_size_milli <= 1_000_000
-                    && object.points.len() == 2
-                    && object.stroke_width_milli != 0
-                    && object.stroke_width_milli <= 1_000_000
-            }
-        };
-        if !fields_valid {
-            return Err(FormatError::Invalid(
-                "annotation object fields are inconsistent",
-            ));
         }
     }
     if let Some(frame) = metadata.shooting_frame {
@@ -306,13 +239,6 @@ pub(super) fn validate_document(document: &DocumentArchive) -> Result<(), Format
                     plane.pixel_format,
                     PixelFormat::StraightRgba8 | PixelFormat::StraightRgba16
                 ))
-            || (matches!(
-                plane.kind,
-                PlaneKind::VectorMainLine | PlaneKind::ColorTrace | PlaneKind::VectorFill
-            ) && (!matches!(
-                plane.pixel_format,
-                PixelFormat::StraightRgba8 | PixelFormat::StraightRgba16
-            ) || !plane.tiles.is_empty()))
         {
             return Err(FormatError::Invalid("plane manifest is inconsistent"));
         }
@@ -351,30 +277,6 @@ pub(super) fn validate_document(document: &DocumentArchive) -> Result<(), Format
         }) {
             return Err(FormatError::Invalid(
                 "guide position is outside the document",
-            ));
-        }
-        let maximum_x_milli = i64::from(width) * 1_000;
-        let maximum_y_milli = i64::from(height) * 1_000;
-        if metadata.annotations.iter().any(|object| {
-            object.bounds.x < 0
-                || object.bounds.y < 0
-                || object
-                    .bounds
-                    .x
-                    .checked_add(object.bounds.width)
-                    .is_none_or(|right| right > width)
-                || object
-                    .bounds
-                    .y
-                    .checked_add(object.bounds.height)
-                    .is_none_or(|bottom| bottom > height)
-                || object.points.iter().any(|point| {
-                    !(0..=maximum_x_milli).contains(&i64::from(point.x_milli))
-                        || !(0..=maximum_y_milli).contains(&i64::from(point.y_milli))
-                })
-        }) {
-            return Err(FormatError::Invalid(
-                "annotation geometry is outside the document",
             ));
         }
         let selection = document
@@ -493,158 +395,6 @@ pub(super) fn validate_document(document: &DocumentArchive) -> Result<(), Format
         ));
     }
 
-    let mut stroke_plane_ids = BTreeSet::new();
-    let mut fill_plane_ids = BTreeSet::new();
-    let mut vector_layer_for_plane = std::collections::BTreeMap::new();
-    let mut has_vector_layer = false;
-    if let Some(document_metadata) = &document.document_metadata {
-        for layer in &document_metadata.layers {
-            let payloads: Vec<_> = layer
-                .planes
-                .iter()
-                .map(|properties| {
-                    document
-                        .planes
-                        .iter()
-                        .find(|plane| plane.id == properties.id)
-                        .ok_or(FormatError::Invalid("vector plane payload is missing"))
-                })
-                .collect::<Result<_, _>>()?;
-            if layer.kind == LayerKind::VectorColoring {
-                has_vector_layer = true;
-                let main_count = payloads
-                    .iter()
-                    .filter(|plane| plane.kind == PlaneKind::VectorMainLine)
-                    .count();
-                let trace_count = payloads
-                    .iter()
-                    .filter(|plane| plane.kind == PlaneKind::ColorTrace)
-                    .count();
-                let fill_count = payloads
-                    .iter()
-                    .filter(|plane| plane.kind == PlaneKind::VectorFill)
-                    .count();
-                if main_count != 1
-                    || trace_count == 0
-                    || fill_count != 1
-                    || payloads.iter().any(|plane| {
-                        !matches!(
-                            plane.kind,
-                            PlaneKind::VectorMainLine
-                                | PlaneKind::ColorTrace
-                                | PlaneKind::VectorFill
-                                | PlaneKind::Raster
-                        )
-                    })
-                {
-                    return Err(FormatError::Invalid(
-                        "vector layer and plane types are inconsistent",
-                    ));
-                }
-                for plane in payloads {
-                    match plane.kind {
-                        PlaneKind::VectorMainLine | PlaneKind::ColorTrace => {
-                            stroke_plane_ids.insert(plane.id);
-                            vector_layer_for_plane.insert(plane.id, layer.id);
-                        }
-                        PlaneKind::VectorFill => {
-                            fill_plane_ids.insert(plane.id);
-                            vector_layer_for_plane.insert(plane.id, layer.id);
-                        }
-                        _ => {}
-                    }
-                }
-            } else if payloads.iter().any(|plane| {
-                matches!(
-                    plane.kind,
-                    PlaneKind::VectorMainLine | PlaneKind::ColorTrace | PlaneKind::VectorFill
-                )
-            }) {
-                return Err(FormatError::Invalid(
-                    "vector plane belongs to a non-vector layer",
-                ));
-            }
-        }
-    }
-    if let Some(metadata) = &document.vector_metadata {
-        if document.document_metadata.is_none() || !has_vector_layer {
-            return Err(FormatError::Invalid(
-                "vector metadata requires a vector layer in the document tree",
-            ));
-        }
-        validate_vector_metadata(
-            metadata,
-            Some(&stroke_plane_ids),
-            Some(&fill_plane_ids),
-            Some(&vector_layer_for_plane),
-        )?;
-        let mut occupied_ids = BTreeSet::from([document.document_id]);
-        if let Some(document_metadata) = &document.document_metadata {
-            for layer in &document_metadata.layers {
-                occupied_ids.insert(layer.id);
-                for plane in &layer.planes {
-                    occupied_ids.insert(plane.id);
-                }
-            }
-            for id in document_metadata
-                .guides
-                .iter()
-                .map(|guide| guide.id)
-                .chain([document_metadata.selection_plane_id])
-            {
-                occupied_ids.insert(id);
-            }
-        }
-        if let Some(light_table_metadata) = &document.light_table_metadata {
-            for set in &light_table_metadata.sets {
-                occupied_ids.insert(set.id);
-                for item in &set.items {
-                    occupied_ids.insert(item.id);
-                    occupied_ids.insert(item.source_plane_id);
-                }
-            }
-        }
-        for path in &metadata.paths {
-            if !occupied_ids.insert(path.id) {
-                return Err(FormatError::Invalid(
-                    "vector path collides with an existing stable ID",
-                ));
-            }
-        }
-        for fill in &metadata.fills {
-            if !occupied_ids.insert(fill.id) {
-                return Err(FormatError::Invalid(
-                    "vector fill collides with an existing stable ID",
-                ));
-            }
-            let fill_layer = vector_layer_for_plane
-                .get(&fill.plane_id)
-                .ok_or(FormatError::Invalid("vector fill plane is missing"))?;
-            for boundary_id in &fill.boundary_path_ids {
-                let boundary = metadata
-                    .paths
-                    .iter()
-                    .find(|path| path.id == *boundary_id)
-                    .ok_or(FormatError::Invalid("vector fill boundary is missing"))?;
-                if vector_layer_for_plane.get(&boundary.plane_id) != Some(fill_layer) {
-                    return Err(FormatError::Invalid(
-                        "vector fill boundary crosses vector layers",
-                    ));
-                }
-            }
-        }
-    } else if has_vector_layer
-        || document.planes.iter().any(|plane| {
-            matches!(
-                plane.kind,
-                PlaneKind::VectorMainLine | PlaneKind::ColorTrace | PlaneKind::VectorFill
-            )
-        })
-    {
-        return Err(FormatError::Invalid(
-            "vector layers require vector metadata",
-        ));
-    }
     Ok(())
 }
 

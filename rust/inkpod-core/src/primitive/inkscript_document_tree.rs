@@ -271,7 +271,7 @@ impl DocumentTreeScriptStep {
         invocation: &CanonicalInvocation,
     ) -> Result<Self, DocumentTreeAdapterError> {
         let mut source = String::from(
-            "inkscript_fragment 2;\nrequires { procedure_catalog = 2; replay_epoch = 23; }\n",
+            "inkscript_fragment 2;\nrequires { procedure_catalog = 3; replay_epoch = 24; }\n",
         );
         let mut references = InkScriptRuntimeReferences::default();
         let (command, arguments, has_result) =
@@ -656,9 +656,6 @@ fn bind_declaration(
         InkScriptEntityKind::Layer => "layer",
         InkScriptEntityKind::Plane => "plane",
         InkScriptEntityKind::Guide
-        | InkScriptEntityKind::VectorPath
-        | InkScriptEntityKind::VectorFill
-        | InkScriptEntityKind::Annotation
         | InkScriptEntityKind::ShootingFrame
         | InkScriptEntityKind::VanishingPoint
         | InkScriptEntityKind::LightTableSet
@@ -870,9 +867,6 @@ fn layer_kind(value: &InkScriptTypedValue) -> Result<LayerKind, DocumentTreeAdap
         "frame" => Ok(LayerKind::Frame),
         "vanishing_point" => Ok(LayerKind::VanishingPoint),
         "adjustment" => Ok(LayerKind::Adjustment),
-        "text" => Ok(LayerKind::Text),
-        "annotation" => Ok(LayerKind::Annotation),
-        "vector_coloring" => Ok(LayerKind::VectorColoring),
         _ => Err(DocumentTreeAdapterError::InvalidValue),
     }
 }
@@ -883,9 +877,6 @@ fn plane_kind(value: &InkScriptTypedValue) -> Result<PlaneType, DocumentTreeAdap
         "color" => Ok(PlaneType::Color),
         "raster" => Ok(PlaneType::Raster),
         "selection" => Ok(PlaneType::Selection),
-        "vector_main_line" => Ok(PlaneType::VectorMainLine),
-        "color_trace" => Ok(PlaneType::ColorTrace),
-        "vector_fill" => Ok(PlaneType::VectorFill),
         _ => Err(DocumentTreeAdapterError::InvalidValue),
     }
 }
@@ -981,9 +972,6 @@ const fn layer_kind_name(value: LayerKind) -> &'static str {
         LayerKind::Frame => "frame",
         LayerKind::VanishingPoint => "vanishing_point",
         LayerKind::Adjustment => "adjustment",
-        LayerKind::Text => "text",
-        LayerKind::Annotation => "annotation",
-        LayerKind::VectorColoring => "vector_coloring",
     }
 }
 
@@ -993,9 +981,6 @@ const fn plane_kind_name(value: PlaneType) -> &'static str {
         PlaneType::Color => "color",
         PlaneType::Raster => "raster",
         PlaneType::Selection => "selection",
-        PlaneType::VectorMainLine => "vector_main_line",
-        PlaneType::ColorTrace => "color_trace",
-        PlaneType::VectorFill => "vector_fill",
     }
 }
 

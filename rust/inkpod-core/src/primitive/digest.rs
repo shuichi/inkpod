@@ -10,7 +10,7 @@ const DOCUMENT_METADATA_CONTEXT: &str = "org.inkpod.digest.document-metadata.v5"
 const DOCUMENT_RASTER_CONTEXT: &str = "org.inkpod.digest.document-raster.v1";
 const DOCUMENT_TILE_CONTEXT: &str = "org.inkpod.digest.document-raster-tile.v1";
 const PROCEDURE_PAYLOAD_CONTEXT: &str = "org.inkpod.digest.procedure-payload.v1";
-const DOCUMENT_STATE_SCHEMA_VERSION: u32 = 9;
+const DOCUMENT_STATE_SCHEMA_VERSION: u32 = 10;
 const DOCUMENT_TILE_SCHEMA_VERSION: u32 = 1;
 const PROCEDURE_PAYLOAD_SCHEMA_VERSION: u32 = 1;
 
@@ -425,16 +425,10 @@ fn canonical_layer_tree(
     document: &CellDocument,
     rasters: &BTreeMap<u64, Arc<CanonicalRasterCommitment>>,
 ) -> Result<Vec<u8>, CoreError> {
-    let vector = document.vector.to_file(
-        document
-            .layers
-            .iter()
-            .any(|layer| layer.kind == LayerKind::VectorColoring),
-    );
     let layers = document
         .layers
         .iter()
-        .map(|layer| canonical_layer(document, layer, vector.as_ref(), rasters))
+        .map(|layer| canonical_layer(document, layer, rasters))
         .collect::<Result<Vec<_>, _>>()?;
     sequence(layers.iter().map(Vec::as_slice))
 }
@@ -442,25 +436,18 @@ fn canonical_layer_tree(
 fn canonical_layer(
     document: &CellDocument,
     layer: &LayerNode,
-    vector: Option<&inkpod_format::FileVectorMetadata>,
     rasters: &BTreeMap<u64, Arc<CanonicalRasterCommitment>>,
 ) -> Result<Vec<u8>, CoreError> {
     let planes = layer
         .planes
         .iter()
-        .map(|plane| canonical_plane(plane, vector, rasters))
+        .map(|plane| canonical_plane(plane, rasters))
         .collect::<Result<Vec<_>, _>>()?;
     let adjustment = document
         .adjustments
         .get(&layer.id)
         .map(canonical_adjustment)
         .transpose()?;
-    let annotations = document
-        .annotations
-        .iter()
-        .filter(|object| object.input.layer_id == layer.id.get())
-        .map(canonical_annotation)
-        .collect::<Result<Vec<_>, _>>()?;
     let vanishing_points = document
         .vanishing_points
         .iter()
@@ -476,7 +463,6 @@ fn canonical_layer(
         present(normalized_opacity(layer.opacity_milli)?.to_le_bytes()),
         present(sequence(planes.iter().map(Vec::as_slice))?),
         adjustment,
-        present(sequence(annotations.iter().map(Vec::as_slice))?),
         present(sequence(vanishing_points.iter().map(Vec::as_slice))?),
     ])
 }
@@ -496,79 +482,16 @@ fn canonical_vanishing_point(object: &VanishingPointObject) -> Result<Vec<u8>, C
     ])
 }
 
-fn canonical_annotation(object: &AnnotationObject) -> Result<Vec<u8>, CoreError> {
-    let input = &object.input;
-    let points = input
-        .points
-        .iter()
-        .map(|point| {
-            frame(&[
-                present(point.x_milli.to_le_bytes()),
-                present(point.y_milli.to_le_bytes()),
-            ])
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    frame(&[
-        present(object.id.get().to_le_bytes()),
-        present(input.layer_id.to_le_bytes()),
-        present(
-            (match input.kind {
-                AnnotationKind::Text => 1_u32,
-                AnnotationKind::Stroke => 2,
-                AnnotationKind::Leader => 3,
-                AnnotationKind::Value => 4,
-            })
-            .to_le_bytes(),
-        ),
-        present(
-            (match input.output {
-                AnnotationOutput::Normal => 1_u32,
-                AnnotationOutput::Instruction => 2,
-            })
-            .to_le_bytes(),
-        ),
-        present(input.bounds.x.to_le_bytes()),
-        present(input.bounds.y.to_le_bytes()),
-        present(input.bounds.width.to_le_bytes()),
-        present(input.bounds.height.to_le_bytes()),
-        present(input.font_family_hint.as_bytes().to_vec()),
-        present(input.font_size_milli.to_le_bytes()),
-        present(input.style_flags.to_le_bytes()),
-        present(color_bytes(input.color)?),
-        present(input.text.as_bytes().to_vec()),
-        present(sequence(points.iter().map(Vec::as_slice))?),
-        present(input.stroke_width_milli.to_le_bytes()),
-    ])
-}
-
 fn canonical_plane(
     plane: &PlaneNode,
-    vector: Option<&inkpod_format::FileVectorMetadata>,
     rasters: &BTreeMap<u64, Arc<CanonicalRasterCommitment>>,
 ) -> Result<Vec<u8>, CoreError> {
-    let paths = vector
-        .into_iter()
-        .flat_map(|metadata| &metadata.paths)
-        .filter(|path| path.plane_id == plane.id.get())
-        .map(canonical_vector_path)
-        .collect::<Result<Vec<_>, _>>()?;
-    let fills = vector
-        .into_iter()
-        .flat_map(|metadata| &metadata.fills)
-        .filter(|fill| fill.plane_id == plane.id.get())
-        .map(canonical_vector_fill)
-        .collect::<Result<Vec<_>, _>>()?;
-    let raster = match plane.kind {
-        PlaneType::VectorMainLine | PlaneType::ColorTrace | PlaneType::VectorFill => None,
-        PlaneType::MainLine | PlaneType::Color | PlaneType::Raster | PlaneType::Selection => {
-            Some(canonical_raster(
-                &plane.raster,
-                rasters.get(&plane.id.get()).ok_or(CoreError::InvalidState(
-                    "canonical plane raster cache is missing",
-                ))?,
-            )?)
-        }
-    };
+    let raster = canonical_raster(
+        &plane.raster,
+        rasters.get(&plane.id.get()).ok_or(CoreError::InvalidState(
+            "canonical plane raster cache is missing",
+        ))?,
+    )?;
     frame(&[
         present(plane.id.get().to_le_bytes()),
         present(plane_kind_code(plane.kind).to_le_bytes()),
@@ -577,59 +500,7 @@ fn canonical_plane(
         present(boolean_bytes(plane.visible)),
         present(boolean_bytes(plane.editable)),
         present(normalized_opacity(plane.opacity_milli)?.to_le_bytes()),
-        raster,
-        present(sequence(paths.iter().map(Vec::as_slice))?),
-        present(sequence(fills.iter().map(Vec::as_slice))?),
-    ])
-}
-
-fn canonical_vector_path(path: &inkpod_format::FileVectorPath) -> Result<Vec<u8>, CoreError> {
-    let segments = path
-        .segments
-        .iter()
-        .map(|segment| {
-            let points = [segment.p0, segment.p1, segment.p2, segment.p3];
-            frame(&[
-                present(milli_q16(i64::from(points[0].x_milli), "vector p0 x")?.to_le_bytes()),
-                present(milli_q16(i64::from(points[0].y_milli), "vector p0 y")?.to_le_bytes()),
-                present(milli_q16(i64::from(points[1].x_milli), "vector p1 x")?.to_le_bytes()),
-                present(milli_q16(i64::from(points[1].y_milli), "vector p1 y")?.to_le_bytes()),
-                present(milli_q16(i64::from(points[2].x_milli), "vector p2 x")?.to_le_bytes()),
-                present(milli_q16(i64::from(points[2].y_milli), "vector p2 y")?.to_le_bytes()),
-                present(milli_q16(i64::from(points[3].x_milli), "vector p3 x")?.to_le_bytes()),
-                present(milli_q16(i64::from(points[3].y_milli), "vector p3 y")?.to_le_bytes()),
-                present(
-                    milli_q16(i64::from(segment.width_start_milli), "vector start width")?
-                        .to_le_bytes(),
-                ),
-                present(
-                    milli_q16(i64::from(segment.width_end_milli), "vector end width")?
-                        .to_le_bytes(),
-                ),
-            ])
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    frame(&[
-        present(path.id.to_le_bytes()),
-        present(path.plane_id.to_le_bytes()),
-        present(color_bytes(path.color)?),
-        present(boolean_bytes(path.closed)),
-        present(boolean_bytes(path.square_cross_section)),
-        present(sequence(segments.iter().map(Vec::as_slice))?),
-    ])
-}
-
-fn canonical_vector_fill(fill: &inkpod_format::FileVectorFill) -> Result<Vec<u8>, CoreError> {
-    let boundaries = fill
-        .boundary_path_ids
-        .iter()
-        .map(|id| id.to_le_bytes().to_vec())
-        .collect::<Vec<_>>();
-    frame(&[
-        present(fill.id.to_le_bytes()),
-        present(fill.plane_id.to_le_bytes()),
-        present(color_bytes(fill.color)?),
-        present(sequence(boundaries.iter().map(Vec::as_slice))?),
+        present(raster),
     ])
 }
 
@@ -777,9 +648,6 @@ const fn layer_kind_code(kind: LayerKind) -> u32 {
         LayerKind::Frame => 5,
         LayerKind::VanishingPoint => 6,
         LayerKind::Adjustment => 7,
-        LayerKind::Text => 8,
-        LayerKind::Annotation => 9,
-        LayerKind::VectorColoring => 10,
     }
 }
 
@@ -789,9 +657,6 @@ const fn plane_kind_code(kind: PlaneType) -> u32 {
         PlaneType::Color => 2,
         PlaneType::Raster => 3,
         PlaneType::Selection => 4,
-        PlaneType::VectorMainLine => 5,
-        PlaneType::ColorTrace => 6,
-        PlaneType::VectorFill => 7,
     }
 }
 
@@ -1424,10 +1289,10 @@ mod tests {
         assert_eq!(
             digest.as_bytes(),
             &[
-                238, 29, 145, 102, 44, 83, 15, 64, 116, 61, 207, 125, 181, 150, 233, 139, 79, 238,
-                77, 116, 246, 173, 182, 159, 242, 42, 109, 116, 87, 98, 53, 168,
+                100, 75, 150, 226, 128, 244, 100, 188, 91, 145, 11, 119, 118, 155, 57, 84, 125,
+                210, 185, 215, 102, 53, 60, 76, 253, 64, 170, 151, 139, 171, 117, 40,
             ],
-            "schema-9 digest changes require an explicit golden update"
+            "schema-10 digest changes require an explicit golden update"
         );
     }
 

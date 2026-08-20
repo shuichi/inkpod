@@ -173,36 +173,14 @@ impl Core {
         let mut duplicate = before.layers[index].clone();
         duplicate.id = next_id.take_layer();
         duplicate.name = unique_layer_name(&before.layers, &format!("{} Copy", duplicate.name));
-        let mut plane_map = BTreeMap::new();
         for plane in &mut duplicate.planes {
-            let source_id = plane.id;
             plane.id = next_id.take_plane();
-            plane_map.insert(source_id, plane.id);
             plane.name = format!("{} Copy", plane.name);
         }
         let duplicate_id = duplicate.id;
         let active_plane_id = duplicate.planes.first().map(|plane| plane.id);
-        after.vector.duplicate_planes(&plane_map, &mut next_id);
         if let Some(adjustment) = before.adjustments.get(&layer_id).cloned() {
             after.adjustments.insert(duplicate_id, adjustment);
-        }
-        let annotation_count = before
-            .annotations
-            .iter()
-            .filter(|object| object.input.layer_id == layer_id.get())
-            .count();
-        if after.annotations.len().saturating_add(annotation_count) > MAX_ANNOTATION_OBJECTS {
-            return Err(CoreError::InvalidState("annotation object limit reached"));
-        }
-        for object in before
-            .annotations
-            .iter()
-            .filter(|object| object.input.layer_id == layer_id.get())
-        {
-            let mut object = object.clone();
-            object.id = next_id.take_annotation();
-            object.input.layer_id = duplicate_id.get();
-            after.annotations.push(object);
         }
         let vanishing_point_count = before
             .vanishing_points
@@ -227,7 +205,6 @@ impl Core {
             object.input.layer_id = duplicate_id.get();
             after.vanishing_points.push(object);
         }
-        after.vector.ensure_limits()?;
         after.layers.insert(index + 1, duplicate);
         if let Some(id) = active_plane_id {
             edit.prefer_editor_target(EditorTarget {
@@ -275,11 +252,7 @@ impl Core {
                 "the final coloring layer cannot be deleted",
             ));
         }
-        after.vector.remove_layer(before, layer_id);
         after.adjustments.remove(&layer_id);
-        after
-            .annotations
-            .retain(|object| object.input.layer_id != layer_id.get());
         after
             .vanishing_points
             .retain(|object| object.input.layer_id != layer_id.get());
@@ -344,16 +317,10 @@ impl Core {
                 .any(|layer_id| layer_id.get() == target.layer_id)
         });
         let mut edit = self.begin_document_edit()?;
-        let (before, after) = edit.documents();
+        let (_, after) = edit.documents();
         for layer_id in &hidden_ids {
-            after.vector.remove_layer(before, *layer_id);
             after.adjustments.remove(layer_id);
         }
-        after.annotations.retain(|object| {
-            !hidden_ids
-                .iter()
-                .any(|layer_id| layer_id.get() == object.input.layer_id)
-        });
         after.vanishing_points.retain(|object| {
             !hidden_ids
                 .iter()
@@ -573,17 +540,13 @@ impl Core {
         }
         if matches!(
             before.layers[layer_index].planes[plane_index].kind,
-            PlaneType::MainLine
-                | PlaneType::Color
-                | PlaneType::VectorMainLine
-                | PlaneType::VectorFill
+            PlaneType::MainLine | PlaneType::Color
         ) {
             return Err(CoreError::InvalidState(
                 "required singleton planes cannot be duplicated",
             ));
         }
         let mut duplicate = before.layers[layer_index].planes[plane_index].clone();
-        let source_plane_id = duplicate.id;
         let mut next_id = self.next_id;
         let duplicate_id = next_id.take_plane();
         duplicate.id = duplicate_id;
@@ -591,10 +554,6 @@ impl Core {
             &before.layers[layer_index].planes,
             &format!("{} Copy", duplicate.name),
         );
-        let mut plane_map = BTreeMap::new();
-        plane_map.insert(source_plane_id, duplicate_id);
-        after.vector.duplicate_planes(&plane_map, &mut next_id);
-        after.vector.ensure_limits()?;
         after.layers[layer_index]
             .planes
             .insert(plane_index + 1, duplicate);
@@ -627,7 +586,6 @@ impl Core {
         let mut edit = self.begin_document_edit()?;
         let (before, after) = edit.documents();
         let (layer_index, plane_index) = find_plane_indices(before, plane_id)?;
-        after.vector.remove_plane(plane_id);
         after.layers[layer_index].planes.remove(plane_index);
         validate_layer_kind(
             after.layers[layer_index].kind,
@@ -740,8 +698,7 @@ impl Core {
 
     /// Converts a raster plane to a compatible semantic kind and pixel format.
     ///
-    /// An identical destination is a no-op. Vector conversions require the explicit
-    /// rasterize/vectorize APIs. Success is one undoable, atomic document edit.
+    /// An identical destination is a no-op. Success is one undoable, atomic document edit.
     pub fn convert_plane(
         &mut self,
         plane_id: u64,
@@ -767,17 +724,6 @@ impl Core {
         let source = &before.layers[layer_index].planes[plane_index];
         if source.kind == destination_kind && source.raster.format() == destination_format {
             return Ok(self.noop_outcome());
-        }
-        if matches!(
-            source.kind,
-            PlaneType::VectorMainLine | PlaneType::ColorTrace | PlaneType::VectorFill
-        ) || matches!(
-            destination_kind,
-            PlaneType::VectorMainLine | PlaneType::ColorTrace | PlaneType::VectorFill
-        ) {
-            return Err(CoreError::InvalidArgument(
-                "vector plane conversion requires explicit rasterize/vectorize",
-            ));
         }
         let converted = convert_plane_raster(&source.raster, destination_format, revision.get())?;
         let plane = &mut after.layers[layer_index].planes[plane_index];
@@ -818,16 +764,6 @@ impl Core {
                 "only planes with compatible type and pixel format can merge",
             ));
         }
-        if before.layers[layer_index].kind == LayerKind::VectorColoring
-            && matches!(
-                source.kind,
-                PlaneType::VectorMainLine | PlaneType::VectorFill
-            )
-        {
-            return Err(CoreError::InvalidArgument(
-                "required singleton vector planes cannot be merged",
-            ));
-        }
         let source = after.layers[layer_index].planes[upper].clone();
         let destination_id = after.layers[layer_index].planes[lower].id;
         merge_raster(
@@ -835,7 +771,6 @@ impl Core {
             &source.raster,
             revision.get(),
         )?;
-        after.vector.reassign_plane(source.id, destination_id);
         after.layers[layer_index].planes.remove(upper);
         let preferred_target = EditorTarget {
             layer_id: after.layers[layer_index].id.get(),
@@ -953,13 +888,8 @@ impl Core {
             .planes
             .first()
             .map_or(after.primary_ids().1, |plane| plane.id);
-        let mut plane_reassignments = Vec::new();
         for (destination, source) in after.layers[lower].planes.iter_mut().zip(&source_planes) {
             merge_raster(&mut destination.raster, &source.raster, revision.get())?;
-            plane_reassignments.push((source.id, destination.id));
-        }
-        for (source_id, destination_id) in plane_reassignments {
-            after.vector.reassign_plane(source_id, destination_id);
         }
         if before.layers[upper].kind == LayerKind::VanishingPoint {
             for object in &mut after.vanishing_points {
@@ -1076,28 +1006,7 @@ pub(crate) fn build_layer_node_with_format(
             opacity_milli: 1_000,
             raster: TileRaster::new(width, height, PixelFormat::BinaryMask8)?,
         }),
-        LayerKind::VectorColoring => {
-            for (plane_kind, plane_name) in [
-                (PlaneType::VectorMainLine, "Vector Main Line"),
-                (PlaneType::ColorTrace, "Color Trace"),
-                (PlaneType::VectorFill, "Vector Fill"),
-            ] {
-                planes.push(PlaneNode {
-                    id: next_id.take_plane(),
-                    kind: plane_kind,
-                    name: plane_name.to_owned(),
-                    visible: true,
-                    editable: true,
-                    opacity_milli: 1_000,
-                    raster: TileRaster::new(width, height, color_format)?,
-                });
-            }
-        }
-        LayerKind::Frame
-        | LayerKind::VanishingPoint
-        | LayerKind::Adjustment
-        | LayerKind::Text
-        | LayerKind::Annotation => {}
+        LayerKind::Frame | LayerKind::VanishingPoint | LayerKind::Adjustment => {}
     }
     validate_layer_kind(kind, &planes)?;
     Ok(LayerNode {

@@ -91,7 +91,6 @@ fn scoped_color_replace_ffi_validates_borrowed_records_preview_stale_and_noop() 
             INKPOD_STATUS_OK
         );
         assert_eq!(preview.matched_pixels, 16);
-        assert_eq!(preview.matched_objects, 0);
         assert_eq!(
             preview.feature_flags,
             INKPOD_COLOR_REPLACE_PREVIEW_HAS_BOUNDS
@@ -329,7 +328,7 @@ fn persistence_checkpoint_and_compaction_abi_are_bounded_confirmed_and_atomic() 
             inkpod_core_get_persistence_info(core, &mut persistence),
             INKPOD_STATUS_OK
         );
-        assert_eq!(persistence.format_version, 26);
+        assert_eq!(persistence.format_version, 27);
         assert_eq!(persistence.open_strategy, INKPOD_NATIVE_OPEN_NOT_OPENED);
         assert_eq!(persistence.flags, 0);
 
@@ -2604,419 +2603,6 @@ fn multi_stroke_shortcut_table_copies_resolves_and_rejects_conflicts() {
 }
 
 #[test]
-fn vector_commands_snapshot_and_nested_span_validation_are_connected() {
-    unsafe {
-        let mut core = ptr::null_mut();
-        assert_eq!(inkpod_core_create(&config(), &mut core), INKPOD_STATUS_OK);
-        let create = InkpodCellCreateOptions {
-            struct_size: size_of::<InkpodCellCreateOptions>() as u32,
-            reserved: 0,
-            feature_flags: 0,
-            document_uuid_high: 0x494e_4b50_4f44_4d35,
-            document_uuid_low: 1,
-            width: 8,
-            height: 8,
-            dpi_x_milli: 96_000,
-            dpi_y_milli: 96_000,
-        };
-        let mut info = InkpodDocumentInfo {
-            struct_size: size_of::<InkpodDocumentInfo>() as u32,
-            ..InkpodDocumentInfo::default()
-        };
-        assert_eq!(
-            inkpod_core_new_cell(core, &create, &mut info),
-            INKPOD_STATUS_OK
-        );
-        let name = b"Vector";
-        let edit = InkpodTreeEdit {
-            struct_size: size_of::<InkpodTreeEdit>() as u32,
-            operation: INKPOD_TREE_CREATE_LAYER,
-            flags: 0,
-            object_id: 0,
-            parent_id: 0,
-            destination_index: 0,
-            kind: INKPOD_LAYER_VECTOR_COLORING,
-            pixel_format: 0,
-            opacity_milli: 0,
-            name_utf8: name.as_ptr(),
-            name_bytes: name.len() as u64,
-        };
-        let mut dispatch = InkpodDispatchResult {
-            struct_size: size_of::<InkpodDispatchResult>() as u32,
-            reserved: 0,
-            revision: 0,
-            accepted_command_count: 0,
-        };
-        let mut layer_id = 0;
-        assert_eq!(
-            inkpod_core_tree_edit(core, &edit, &mut dispatch, &mut layer_id),
-            INKPOD_STATUS_OK
-        );
-        assert_ne!(layer_id, 0);
-        let mut node = InkpodNodeInfo {
-            struct_size: size_of::<InkpodNodeInfo>() as u32,
-            ..InkpodNodeInfo::default()
-        };
-        assert_eq!(
-            inkpod_core_node_get(core, 1, 1, &mut node),
-            INKPOD_STATUS_OK
-        );
-        assert_eq!(node.kind, INKPOD_TYPED_PLANE_COLOR_TRACE);
-        let trace_plane_id = node.id;
-        assert_eq!(
-            inkpod_core_node_get(core, 1, 2, &mut node),
-            INKPOD_STATUS_OK
-        );
-        assert_eq!(node.kind, INKPOD_TYPED_PLANE_VECTOR_FILL);
-        let fill_plane_id = node.id;
-
-        let point = |x, y| InkpodVectorPoint { x, y };
-        let line = |p0: InkpodVectorPoint, p3: InkpodVectorPoint| InkpodVectorCubicSegment {
-            struct_size: size_of::<InkpodVectorCubicSegment>() as u32,
-            reserved: 0,
-            p0,
-            p1: point((p0.x * 2.0 + p3.x) / 3.0, (p0.y * 2.0 + p3.y) / 3.0),
-            p2: point((p0.x + p3.x * 2.0) / 3.0, (p0.y + p3.y * 2.0) / 3.0),
-            p3,
-            width_start: 1.0,
-            width_end: 2.0,
-        };
-        let corners = [
-            point(1.0, 1.0),
-            point(7.0, 1.0),
-            point(7.0, 7.0),
-            point(1.0, 7.0),
-            point(1.0, 1.0),
-        ];
-        let segments: Vec<_> = corners
-            .windows(2)
-            .map(|pair| line(pair[0], pair[1]))
-            .collect();
-        let path_input = InkpodVectorPathInput {
-            struct_size: size_of::<InkpodVectorPathInput>() as u32,
-            reserved: 0,
-            flags: INKPOD_VECTOR_PATH_CLOSED,
-            plane_id: trace_plane_id,
-            color: InkpodColorValue {
-                struct_size: size_of::<InkpodColorValue>() as u32,
-                depth: INKPOD_COLOR_DEPTH_8,
-                red: 10,
-                green: 20,
-                blue: 30,
-                alpha: 255,
-            },
-            segments: segments.as_ptr(),
-            segment_count: segments.len() as u64,
-            segment_stride_bytes: size_of::<InkpodVectorCubicSegment>() as u64,
-        };
-        let mut path_id = 0;
-        assert_eq!(
-            inkpod_core_vector_add_path(core, &path_input, &mut dispatch, &mut path_id),
-            INKPOD_STATUS_OK
-        );
-        assert_ne!(path_id, 0);
-        let boundary_path_id = path_id;
-        let mut short_segment = segments[0];
-        short_segment.struct_size = size_of::<u32>() as u32;
-        let short_input = InkpodVectorPathInput {
-            segments: &short_segment,
-            segment_count: 1,
-            ..path_input
-        };
-        let revision = dispatch.revision;
-        let mut rejected_path_id = u64::MAX;
-        assert_eq!(
-            inkpod_core_vector_add_path(core, &short_input, &mut dispatch, &mut rejected_path_id,),
-            INKPOD_STATUS_INCOMPATIBLE_ABI
-        );
-        assert_eq!(rejected_path_id, 0);
-        assert_eq!(dispatch.revision, revision);
-
-        let mut too_thin_segments = segments.clone();
-        too_thin_segments[0].width_start = 0.0001;
-        too_thin_segments[0].width_end = 0.0001;
-        let too_thin_input = InkpodVectorPathInput {
-            segments: too_thin_segments.as_ptr(),
-            ..path_input
-        };
-        rejected_path_id = u64::MAX;
-        assert_eq!(
-            inkpod_core_vector_add_path(
-                core,
-                &too_thin_input,
-                &mut dispatch,
-                &mut rejected_path_id,
-            ),
-            INKPOD_STATUS_INVALID_ARGUMENT
-        );
-        assert_eq!(rejected_path_id, 0);
-        assert_eq!(dispatch.revision, revision);
-
-        let fill_input = InkpodVectorFillInput {
-            struct_size: size_of::<InkpodVectorFillInput>() as u32,
-            reserved: 0,
-            feature_flags: 0,
-            plane_id: fill_plane_id,
-            color: InkpodColorValue {
-                struct_size: size_of::<InkpodColorValue>() as u32,
-                depth: INKPOD_COLOR_DEPTH_16,
-                red: 60_000,
-                green: 1_000,
-                blue: 2_000,
-                alpha: 50_000,
-            },
-            boundary_path_ids: &boundary_path_id,
-            boundary_path_count: 1,
-        };
-        let mut fill_id = 0;
-        assert_eq!(
-            inkpod_core_vector_add_fill(core, &fill_input, &mut dispatch, &mut fill_id),
-            INKPOD_STATUS_OK
-        );
-        assert_ne!(fill_id, 0);
-
-        let selection_input = InkpodVectorSelectionInput {
-            struct_size: size_of::<InkpodVectorSelectionInput>() as u32,
-            mode: INKPOD_VECTOR_SELECT_FULLY_CONTAINED,
-            feature_flags: 0,
-            bounds: InkpodFrameRect {
-                x: 0,
-                y: 0,
-                width: 8,
-                height: 8,
-            },
-        };
-        let mut selection_output = InkpodVectorSelectionBuffer {
-            struct_size: size_of::<InkpodVectorSelectionBuffer>() as u32,
-            reserved: 0,
-            ranges: ptr::null_mut(),
-            range_capacity: 0,
-            range_count: 0,
-            fill_ids: ptr::null_mut(),
-            fill_capacity: 0,
-            fill_count: 0,
-        };
-        assert_eq!(
-            inkpod_core_vector_select(core, &selection_input, &mut selection_output),
-            INKPOD_STATUS_BUFFER_TOO_SMALL
-        );
-        assert_eq!(selection_output.range_count, 1);
-        let mut selection_ranges = [InkpodVectorSelectionRange {
-            struct_size: 0,
-            reserved: u32::MAX,
-            path_id: 0,
-            start_million: u32::MAX,
-            end_million: 0,
-        }];
-        selection_output.ranges = selection_ranges.as_mut_ptr();
-        selection_output.range_capacity = selection_ranges.len() as u64;
-        assert_eq!(
-            inkpod_core_vector_select(core, &selection_input, &mut selection_output),
-            INKPOD_STATUS_OK
-        );
-        assert_eq!(selection_ranges[0].path_id, path_id);
-        assert_eq!(selection_ranges[0].start_million, 0);
-        assert_eq!(selection_ranges[0].end_million, 1_000_000);
-
-        let rasterize_input = InkpodVectorRasterizeInput {
-            struct_size: size_of::<InkpodVectorRasterizeInput>() as u32,
-            reserved: 0,
-            feature_flags: INKPOD_VECTOR_RASTERIZE_ANTIALIAS,
-            layer_id,
-            scale: 2,
-            reserved_2: 0,
-        };
-        let mut raster_output = InkpodVectorRasterBuffer {
-            struct_size: size_of::<InkpodVectorRasterBuffer>() as u32,
-            reserved: 0,
-            pixels: ptr::null_mut(),
-            pixel_capacity: 0,
-            required_bytes: 0,
-            width: 0,
-            height: 0,
-            stride_bytes: 0,
-            reserved_2: 0,
-        };
-        assert_eq!(
-            inkpod_core_vector_rasterize(core, &rasterize_input, &mut raster_output),
-            INKPOD_STATUS_OK
-        );
-        assert_eq!((raster_output.width, raster_output.height), (16, 16));
-        assert_eq!(raster_output.required_bytes, 16 * 16 * 4);
-        let mut raster_pixels = vec![0_u8; raster_output.required_bytes as usize];
-        raster_output.pixels = raster_pixels.as_mut_ptr();
-        raster_output.pixel_capacity = raster_pixels.len() as u64;
-        assert_eq!(
-            inkpod_core_vector_rasterize(core, &rasterize_input, &mut raster_output),
-            INKPOD_STATUS_OK
-        );
-        assert!(raster_pixels.iter().any(|value| *value != 0));
-
-        let rasterize_layer_input = InkpodVectorRasterizeInput {
-            scale: 1,
-            ..rasterize_input
-        };
-        let rasterized_name = b"Rasterized";
-        let mut raster_layer_id = 0_u64;
-        assert_eq!(
-            inkpod_core_vector_rasterize_to_layer(
-                core,
-                &rasterize_layer_input,
-                rasterized_name.as_ptr(),
-                rasterized_name.len() as u64,
-                &mut dispatch,
-                &mut raster_layer_id,
-            ),
-            INKPOD_STATUS_OK
-        );
-        assert_ne!(raster_layer_id, 0);
-        assert_eq!(dispatch.accepted_command_count, 1);
-
-        assert_eq!(
-            inkpod_core_set_active_plane(core, INKPOD_PLANE_COLOR),
-            INKPOD_STATUS_OK
-        );
-        let sample = InkpodStrokeSample {
-            struct_size: size_of::<InkpodStrokeSample>() as u32,
-            flags: 0,
-            x: 3.0,
-            y: 3.0,
-            pressure: 1.0,
-            reserved: 0,
-        };
-        let stroke = InkpodStrokeInput {
-            struct_size: size_of::<InkpodStrokeInput>() as u32,
-            tool: INKPOD_TOOL_PENCIL,
-            plane: INKPOD_PLANE_COLOR,
-            coordinate_space: INKPOD_COORDINATE_SPACE_DOCUMENT,
-            flags: 0,
-            color_rgba: 0x0102_03ff,
-            diameter: 1.0,
-            samples: &sample,
-            sample_count: 1,
-            sample_stride_bytes: size_of::<InkpodStrokeSample>() as u64,
-            shape: INKPOD_BRUSH_ROUND,
-            smoothing: 0,
-            reserved_2: 0,
-            start_color: INKPOD_START_COLOR_ANY,
-            reserved_3: 0,
-        };
-        assert_eq!(
-            inkpod_core_apply_stroke(core, &stroke, &mut dispatch),
-            INKPOD_STATUS_OK
-        );
-        let vectorize_input = InkpodRasterVectorizeInput {
-            struct_size: size_of::<InkpodRasterVectorizeInput>() as u32,
-            alpha_threshold: 1,
-            feature_flags: 0,
-            source_plane_id: info.color_plane_id,
-            target_layer_id: layer_id,
-        };
-        let mut vectorized_fill_count = 0;
-        let vector_source_input = InkpodRasterVectorizeInput {
-            source_plane_id: trace_plane_id,
-            ..vectorize_input
-        };
-        assert_eq!(
-            inkpod_core_raster_vectorize(
-                core,
-                &vector_source_input,
-                &mut dispatch,
-                &mut vectorized_fill_count,
-            ),
-            INKPOD_STATUS_INVALID_ARGUMENT
-        );
-        assert_eq!(vectorized_fill_count, 0);
-        assert_eq!(
-            inkpod_core_raster_vectorize(
-                core,
-                &vectorize_input,
-                &mut dispatch,
-                &mut vectorized_fill_count,
-            ),
-            INKPOD_STATUS_OK
-        );
-        assert_eq!(vectorized_fill_count, 1);
-
-        let options = InkpodSnapshotOptions {
-            struct_size: size_of::<InkpodSnapshotOptions>() as u32,
-            reserved: 0,
-            feature_flags: 0,
-        };
-        let mut snapshot = ptr::null_mut();
-        assert_eq!(
-            inkpod_core_build_snapshot(core, &options, &mut snapshot),
-            INKPOD_STATUS_OK
-        );
-        let mut vectors = InkpodSnapshotVectorView {
-            struct_size: size_of::<InkpodSnapshotVectorView>() as u32,
-            abi_version: 0,
-            feature_flags: u64::MAX,
-            segments: ptr::null(),
-            segment_count: 0,
-            segment_stride_bytes: 0,
-            fills: ptr::null(),
-            fill_count: 0,
-            fill_stride_bytes: 0,
-            boundary_path_ids: ptr::null(),
-            boundary_path_count: 0,
-        };
-        assert_eq!(
-            inkpod_snapshot_get_vectors(snapshot, &mut vectors),
-            INKPOD_STATUS_OK
-        );
-        assert_eq!(vectors.abi_version, INKPOD_ABI_VERSION);
-        assert_eq!(vectors.segment_count, 8);
-        assert_eq!(vectors.fill_count, 2);
-        assert_eq!(vectors.boundary_path_count, 2);
-        assert!(!vectors.segments.is_null() && !vectors.fills.is_null());
-        assert_eq!((*vectors.segments).path_id, boundary_path_id);
-        assert_eq!((*vectors.fills).fill_id, fill_id);
-        assert_eq!(*vectors.boundary_path_ids, boundary_path_id);
-        assert_eq!(inkpod_snapshot_release(&mut snapshot), INKPOD_STATUS_OK);
-        let atomic_new_vector_layer = InkpodRasterVectorizeInput {
-            target_layer_id: 0,
-            ..vectorize_input
-        };
-        let mut history_before_atomic_vectorize = InkpodHistoryInfo {
-            struct_size: size_of::<InkpodHistoryInfo>() as u32,
-            reserved: 0,
-            cursor: 0,
-            item_count: 0,
-        };
-        assert_eq!(
-            inkpod_core_history_info(core, &mut history_before_atomic_vectorize),
-            INKPOD_STATUS_OK
-        );
-        assert_eq!(
-            inkpod_core_raster_vectorize(
-                core,
-                &atomic_new_vector_layer,
-                &mut dispatch,
-                &mut vectorized_fill_count,
-            ),
-            INKPOD_STATUS_OK
-        );
-        assert_eq!(vectorized_fill_count, 1);
-        let mut history_after_atomic_vectorize = InkpodHistoryInfo {
-            struct_size: size_of::<InkpodHistoryInfo>() as u32,
-            reserved: 0,
-            cursor: 0,
-            item_count: 0,
-        };
-        assert_eq!(
-            inkpod_core_history_info(core, &mut history_after_atomic_vectorize),
-            INKPOD_STATUS_OK
-        );
-        assert_eq!(
-            history_after_atomic_vectorize.item_count,
-            history_before_atomic_vectorize.item_count + 1
-        );
-        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
-    }
-}
-
-#[test]
 fn filter_effect_adjustment_and_alpha_records_are_copied_and_atomic() {
     unsafe {
         let config = InkpodCoreConfig {
@@ -3083,6 +2669,11 @@ fn filter_effect_adjustment_and_alpha_records_are_copied_and_atomic() {
         assert_eq!(preview.base_checksum, original);
         assert_ne!(preview.preview_checksum, original);
         assert_eq!(
+            inkpod_core_filter_preview_update(core, &filter, &mut preview),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(preview.base_checksum, original);
+        assert_eq!(
             inkpod_core_filter_preview_cancel(core, &mut preview),
             INKPOD_STATUS_OK
         );
@@ -3107,6 +2698,11 @@ fn filter_effect_adjustment_and_alpha_records_are_copied_and_atomic() {
             INKPOD_STATUS_OK
         );
         assert_eq!(document.color_plane_checksum, original);
+        assert_eq!(
+            inkpod_core_filter_apply_last(core, document.color_plane_id, &mut dispatch),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(inkpod_core_undo(core, &mut dispatch), INKPOD_STATUS_OK);
 
         let curve_points = [
             InkpodCurvePoint {
@@ -3504,6 +3100,13 @@ fn gesture_dust_task_ownership_and_cancel_are_connected() {
             inkpod_core_filter_preview_begin_task(core, &filter, task, &mut preview),
             INKPOD_STATUS_OK
         );
+        let mut update_task = ptr::null_mut();
+        assert_eq!(inkpod_task_create(&mut update_task), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_core_filter_preview_update_task(core, &filter, update_task, &mut preview),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(inkpod_task_release(&mut update_task), INKPOD_STATUS_OK);
         assert_eq!(
             inkpod_core_filter_preview_apply(core, &mut dispatch),
             INKPOD_STATUS_OK

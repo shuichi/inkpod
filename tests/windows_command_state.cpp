@@ -1,4 +1,5 @@
 #include <array>
+#include <cstdio>
 #include <cstdint>
 
 #include "app/frontend_state.h"
@@ -20,16 +21,17 @@ using inkpod::windows::ui::FindCommandState;
 using inkpod::windows::ui::IsCommandChecked;
 using inkpod::windows::ui::IsCommandEnabled;
 using inkpod::windows::ui::MenuCommandCatalog;
+using inkpod::windows::ui::ShortcutCommandCatalog;
 using inkpod::windows::ui::kProductionCommandStateCount;
-using inkpod::windows::ui::tools::HandleActivePlaneTransition;
 using inkpod::windows::ui::tools::SetActiveCommandColor;
 using inkpod::windows::ui::tools::TransitionActiveTool;
+using inkpod::windows::ui::tools::HandleActivePlaneTransition;
 using inkpod::windows::ui::tools::kInteractionEyedropper;
 using inkpod::windows::ui::tools::kInteractionEffectGradient;
 using inkpod::windows::ui::tools::kInteractionFill;
 using inkpod::windows::ui::tools::kInteractionSelection;
 using inkpod::windows::ui::tools::kInteractionColorReplace;
-using inkpod::windows::ui::tools::kInteractionVectorLine;
+using inkpod::windows::ui::tools::kInteractionGeometryRectangle;
 
 bool SameStates(const CommandStateSet& left, const CommandStateSet& right) noexcept {
     for (std::size_t index = 0; index < left.size(); ++index) {
@@ -91,9 +93,29 @@ bool StartsWith(
 }
 
 bool ShortcutCatalogIsCompleteAndPrefixFree() {
-    const auto commands = MenuCommandCatalog();
+    const auto commands = ShortcutCommandCatalog();
+    const auto menu_commands = MenuCommandCatalog();
     const auto shortcuts = BuildDefaultShortcutSequences();
-    if (shortcuts.size() != commands.size() || commands.size() != kProductionCommandStateCount) {
+    const auto is_menu_command = [menu_commands](UINT command) noexcept {
+        for (const UINT candidate : menu_commands) {
+            if (candidate == command) {
+                return true;
+            }
+        }
+        return false;
+    };
+    if (menu_commands.size() != 346U
+        || shortcuts.size() != kProductionCommandStateCount
+        || shortcuts.size() != commands.size()
+        || is_menu_command(IDM_COLOR_PIN)
+        || is_menu_command(IDM_BATCH_PIN)
+        || !is_menu_command(IDM_WINDOW_BATCH)) {
+        std::fprintf(
+            stderr,
+            "catalog count mismatch: menu=%zu shortcuts=%zu states=%zu\n",
+            menu_commands.size(),
+            shortcuts.size(),
+            kProductionCommandStateCount);
         return false;
     }
     for (const UINT command : commands) {
@@ -102,10 +124,16 @@ bool ShortcutCatalogIsCompleteAndPrefixFree() {
             || sequence->struct_size != sizeof(InkpodShortcutSequence)
             || sequence->stroke_count == 0U
             || sequence->stroke_count > INKPOD_SHORTCUT_MAX_STROKES) {
+            std::fprintf(stderr, "invalid shortcut for command=%u\n", command);
             return false;
         }
         for (std::uint32_t index = 0; index < sequence->stroke_count; ++index) {
             if (sequence->strokes[index].virtual_key == 0U) {
+                std::fprintf(
+                    stderr,
+                    "zero shortcut stroke for command=%u index=%u\n",
+                    command,
+                    index);
                 return false;
             }
         }
@@ -115,6 +143,11 @@ bool ShortcutCatalogIsCompleteAndPrefixFree() {
             if (shortcuts[left].command_id == shortcuts[right].command_id
                 || StartsWith(shortcuts[left], shortcuts[right])
                 || StartsWith(shortcuts[right], shortcuts[left])) {
+                std::fprintf(
+                    stderr,
+                    "shortcut conflict: left=%u right=%u\n",
+                    shortcuts[left].command_id,
+                    shortcuts[right].command_id);
                 return false;
             }
         }
@@ -174,9 +207,13 @@ bool ShortcutCatalogIsCompleteAndPrefixFree() {
 int main() {
     CommandStateInputs inputs{};
     CommandStateSet states = ComputeCommandStates(inputs);
-    if (!CatalogHasExactlyOneOwner(states)
-        || !ShortcutCatalogIsCompleteAndPrefixFree()
-        || FindCommandState(states, IDM_HELP_MANUAL) == nullptr
+    if (!CatalogHasExactlyOneOwner(states)) {
+        return 101;
+    }
+    if (!ShortcutCatalogIsCompleteAndPrefixFree()) {
+        return 102;
+    }
+    if (FindCommandState(states, IDM_HELP_MANUAL) == nullptr
         || FindCommandState(states, IDM_HELP_FILE_FORMAT) == nullptr
         || FindCommandState(states, IDM_HELP_ACKNOWLEDGEMENTS) == nullptr
         || FindCommandState(states, IDM_HELP_WEB_PAGE) == nullptr
@@ -184,10 +221,6 @@ int main() {
         || IsCommandEnabled(states, IDM_FILE_SAVE)
         || IsCommandEnabled(states, IDM_VIEW_FIT)
         || IsCommandEnabled(states, IDM_VIEW_ONE_TO_ONE)
-        || IsCommandEnabled(states, IDM_VIEW_VECTOR_ANTIALIAS)
-        || IsCommandEnabled(states, IDM_VIEW_VECTOR_CENTERLINE)
-        || IsCommandEnabled(states, IDM_VIEW_VECTOR_CENTERLINE_ONLY)
-        || IsCommandEnabled(states, IDM_VIEW_VECTOR_ENDPOINTS)
         || IsCommandEnabled(states, IDM_SELECTION_ALL)
         || IsCommandEnabled(states, IDM_FILTER_INVERT)
         || IsCommandEnabled(states, IDM_BATCH_ADD_COLOR_REPLACE)
@@ -236,6 +269,8 @@ int main() {
         || IsCommandEnabled(states, IDM_FILE_RECENT_1)
         || IsCommandEnabled(states, IDM_TOOL_COLOR_REPLACE_TARGET)
         || IsCommandEnabled(states, IDM_TOOL_COLOR_REPLACE_RECTANGLE)
+        || IsCommandEnabled(states, IDM_GEOMETRY_LINE)
+        || IsCommandEnabled(states, IDM_GEOMETRY_RECTANGLE)
         || !IsCommandEnabled(states, IDM_FILE_RESTORE_PREVIOUS)
         || IsCommandChecked(states, IDM_FILE_RESTORE_PREVIOUS)
         || !IsCommandEnabled(states, IDM_LANGUAGE_SYSTEM)
@@ -349,30 +384,6 @@ int main() {
         return 2;
     }
 
-    if (!IsCommandEnabled(states, IDM_VIEW_VECTOR_ANTIALIAS)
-        || !IsCommandEnabled(states, IDM_VIEW_VECTOR_CENTERLINE)
-        || !IsCommandEnabled(states, IDM_VIEW_VECTOR_CENTERLINE_ONLY)
-        || !IsCommandEnabled(states, IDM_VIEW_VECTOR_ENDPOINTS)
-        || !IsCommandChecked(states, IDM_VIEW_VECTOR_ANTIALIAS)
-        || IsCommandChecked(states, IDM_VIEW_VECTOR_CENTERLINE)
-        || IsCommandChecked(states, IDM_VIEW_VECTOR_CENTERLINE_ONLY)
-        || IsCommandChecked(states, IDM_VIEW_VECTOR_ENDPOINTS)) {
-        return 53;
-    }
-    inputs.selection_view.vector_antialias = false;
-    inputs.selection_view.vector_centerline_mode = INKPOD_VECTOR_CENTERLINE_ONLY;
-    inputs.selection_view.vector_endpoints_visible = true;
-    states = ComputeCommandStates(inputs);
-    if (IsCommandChecked(states, IDM_VIEW_VECTOR_ANTIALIAS)
-        || !IsCommandChecked(states, IDM_VIEW_VECTOR_CENTERLINE)
-        || !IsCommandChecked(states, IDM_VIEW_VECTOR_CENTERLINE_ONLY)
-        || !IsCommandChecked(states, IDM_VIEW_VECTOR_ENDPOINTS)) {
-        return 54;
-    }
-    inputs.selection_view.vector_antialias = true;
-    inputs.selection_view.vector_centerline_mode = INKPOD_VECTOR_CENTERLINE_HIDDEN;
-    inputs.selection_view.vector_endpoints_visible = false;
-
     inputs.document.recent_document_count = 2U;
     states = ComputeCommandStates(inputs);
     if (!IsCommandEnabled(states, IDM_FILE_RECENT_1)
@@ -444,29 +455,32 @@ int main() {
         return 3;
     }
 
-    inputs.tool.vector_stroke_plane = true;
-    inputs.tool.geometry_drawable_plane = true;
-    inputs.tool.active_tool = kInteractionVectorLine;
-    inputs.tool.vector_selection_mode = INKPOD_VECTOR_SELECT_FILL_BOUNDARY;
+    inputs.tool.active_tool = INKPOD_TOOL_PENCIL;
     inputs.tool.palette_visible = true;
     inputs.document_pane.layer_palette_visible = true;
-    inputs.selection_view.active_tool = kInteractionVectorLine;
+    inputs.selection_view.active_tool = INKPOD_TOOL_PENCIL;
     states = ComputeCommandStates(inputs);
-    if (!IsCommandEnabled(states, IDM_VECTOR_LINE)
-        || !IsCommandChecked(states, IDM_VECTOR_LINE)
-        || !IsCommandChecked(states, IDM_VECTOR_SELECT_FILL_BOUNDARY)
+    if (!IsCommandEnabled(states, IDM_TOOL_PENCIL)
+        || !IsCommandChecked(states, IDM_TOOL_PENCIL)
         || !IsCommandChecked(states, IDM_WINDOW_TOOL_PALETTE)
         || !IsCommandChecked(states, IDM_WINDOW_LAYER_PALETTE)) {
         return 4;
     }
-    inputs.tool.vector_stroke_plane = false;
+
+    inputs.tool.geometry_drawable_plane = true;
+    inputs.tool.active_tool = kInteractionGeometryRectangle;
     states = ComputeCommandStates(inputs);
-    if (!IsCommandEnabled(states, IDM_VECTOR_LINE)
-        || IsCommandEnabled(states, IDM_VECTOR_ERASER)
-        || inputs.tool.active_tool != kInteractionVectorLine) {
-        return 5;
+    if (!IsCommandEnabled(states, IDM_GEOMETRY_LINE)
+        || !IsCommandEnabled(states, IDM_GEOMETRY_CURVE)
+        || !IsCommandEnabled(states, IDM_GEOMETRY_RECTANGLE)
+        || !IsCommandEnabled(states, IDM_GEOMETRY_ELLIPSE)
+        || !IsCommandEnabled(states, IDM_GEOMETRY_POLYGON)
+        || !IsCommandEnabled(states, IDM_GEOMETRY_POLYLINE)
+        || !IsCommandChecked(states, IDM_GEOMETRY_RECTANGLE)
+        || IsCommandChecked(states, IDM_GEOMETRY_LINE)
+        || IsCommandChecked(states, IDM_TOOL_PENCIL)) {
+        return 24;
     }
-    inputs.tool.geometry_drawable_plane = false;
 
     inputs.effects.color_plane_active = true;
     inputs.tool.active_tool = kInteractionEffectGradient;
@@ -531,12 +545,21 @@ int main() {
         return 23;
     }
 
-    tools.active_tool = kInteractionVectorLine;
-    tools.vector_gesture_samples.push_back(InkpodStrokeSample{});
-    HandleActivePlaneTransition(tools, nullptr, false);
+
+    TransitionActiveTool(tools, nullptr, kInteractionGeometryRectangle);
+    tools.geometry_gesture_samples.push_back(InkpodStrokeSample{});
+    tools.geometry_base_revision = 11U;
+    tools.geometry_view_revision = 12U;
+    tools.geometry_preview_active = true;
+    tools.geometry_snap_bypass = true;
+    HandleActivePlaneTransition(tools, nullptr, INKPOD_TYPED_PLANE_SELECTION);
     if (tools.active_tool != INKPOD_TOOL_PENCIL
-        || !tools.vector_gesture_samples.empty()) {
-        return 6;
+        || !tools.geometry_gesture_samples.empty()
+        || tools.geometry_base_revision != 0U
+        || tools.geometry_view_revision != 0U
+        || tools.geometry_preview_active
+        || tools.geometry_snap_bypass) {
+        return 25;
     }
 
     inputs.edit.clipboard_available = true;

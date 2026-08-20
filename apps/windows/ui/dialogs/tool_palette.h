@@ -17,7 +17,7 @@ struct ToolPaletteEntry {
     ToolIconId icon;
 };
 
-inline constexpr std::size_t kToolPaletteEntryCount = 20U;
+inline constexpr std::size_t kToolPaletteEntryCount = 14U;
 
 using ToolPaletteCommandCallback = void (*)(
     void* context, UINT command) noexcept;

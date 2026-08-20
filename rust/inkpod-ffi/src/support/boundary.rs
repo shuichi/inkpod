@@ -33,76 +33,6 @@ pub(crate) fn snapshot_handle(snapshot: RenderSnapshot) -> Box<InkpodSnapshot> {
             id: guide.id,
         })
         .collect();
-    let vector_segments = snapshot
-        .vector_segments()
-        .iter()
-        .map(|segment| InkpodSnapshotVectorSegment {
-            struct_size: size_of::<InkpodSnapshotVectorSegment>() as u32,
-            flags: (if segment.closed {
-                INKPOD_SNAPSHOT_VECTOR_CLOSED
-            } else {
-                0
-            }) | if segment.stroke_visible {
-                INKPOD_SNAPSHOT_VECTOR_STROKE_VISIBLE
-            } else {
-                0
-            } | if segment.square_cross_section {
-                INKPOD_SNAPSHOT_VECTOR_SQUARE_CROSS_SECTION
-            } else {
-                0
-            },
-            path_id: segment.path_id,
-            plane_id: segment.plane_id,
-            z_order: segment.z_order,
-            segment_index: segment.segment_index,
-            segment_count: segment.segment_count,
-            color_rgba: pack_rgba(segment.color_rgba),
-            p0: vector_point(segment.cubic.p0),
-            p1: vector_point(segment.cubic.p1),
-            p2: vector_point(segment.cubic.p2),
-            p3: vector_point(segment.cubic.p3),
-            width_start: segment.cubic.width_start,
-            width_end: segment.cubic.width_end,
-        })
-        .collect();
-    let vector_boundary_path_ids: Box<[u64]> = snapshot
-        .vector_fills()
-        .iter()
-        .flat_map(|fill| fill.boundary_path_ids.iter().copied())
-        .collect();
-    let vector_endpoints = snapshot
-        .vector_endpoints()
-        .iter()
-        .map(|endpoint| InkpodSnapshotVectorEndpoint {
-            struct_size: size_of::<InkpodSnapshotVectorEndpoint>() as u32,
-            endpoint: match endpoint.endpoint {
-                VectorEndpoint::Start => INKPOD_VECTOR_ENDPOINT_START,
-                VectorEndpoint::End => INKPOD_VECTOR_ENDPOINT_END,
-            },
-            path_id: endpoint.path_id,
-            plane_id: endpoint.plane_id,
-            point: vector_point(endpoint.point),
-        })
-        .collect();
-    let mut first_boundary_path = 0_u64;
-    let vector_fills = snapshot
-        .vector_fills()
-        .iter()
-        .map(|fill| {
-            let output = InkpodSnapshotVectorFill {
-                struct_size: size_of::<InkpodSnapshotVectorFill>() as u32,
-                reserved: 0,
-                fill_id: fill.fill_id,
-                plane_id: fill.plane_id,
-                z_order: fill.z_order,
-                color_rgba: pack_rgba(fill.color_rgba),
-                first_boundary_path,
-                boundary_path_count: fill.boundary_path_ids.len() as u64,
-            };
-            first_boundary_path += fill.boundary_path_ids.len() as u64;
-            output
-        })
-        .collect();
     let render_passes = snapshot
         .render_passes()
         .iter()
@@ -111,10 +41,7 @@ pub(crate) fn snapshot_handle(snapshot: RenderSnapshot) -> Box<InkpodSnapshot> {
             kind: match pass.kind() {
                 RenderPassKind::LayerBegin => INKPOD_RENDER_PASS_LAYER_BEGIN,
                 RenderPassKind::RasterTiles => INKPOD_RENDER_PASS_RASTER_TILES,
-                RenderPassKind::VectorFills => INKPOD_RENDER_PASS_VECTOR_FILLS,
-                RenderPassKind::VectorStrokes => INKPOD_RENDER_PASS_VECTOR_STROKES,
                 RenderPassKind::Adjustment => INKPOD_RENDER_PASS_ADJUSTMENT,
-                RenderPassKind::Annotations => INKPOD_RENDER_PASS_ANNOTATIONS,
                 RenderPassKind::LayerEnd => INKPOD_RENDER_PASS_LAYER_END,
             },
             layer_id: pass.layer_id(),
@@ -129,58 +56,6 @@ pub(crate) fn snapshot_handle(snapshot: RenderSnapshot) -> Box<InkpodSnapshot> {
         .adjustment_luts()
         .iter()
         .flat_map(|lut| lut.channels().iter().flatten().copied())
-        .collect();
-    let mut annotation_utf8 = Vec::new();
-    let mut annotation_points = Vec::new();
-    let annotations = snapshot
-        .annotations()
-        .iter()
-        .map(|object| {
-            let font_utf8_offset = annotation_utf8.len() as u64;
-            annotation_utf8.extend_from_slice(object.font_family_hint.as_bytes());
-            let text_utf8_offset = annotation_utf8.len() as u64;
-            annotation_utf8.extend_from_slice(object.text.as_bytes());
-            let first_point = annotation_points.len() as u64;
-            annotation_points.extend(object.points.iter().map(|point| InkpodAnnotationPoint {
-                struct_size: size_of::<InkpodAnnotationPoint>() as u32,
-                reserved: 0,
-                x_milli: point.x_milli,
-                y_milli: point.y_milli,
-            }));
-            InkpodSnapshotAnnotation {
-                struct_size: size_of::<InkpodSnapshotAnnotation>() as u32,
-                kind: match object.kind {
-                    AnnotationKind::Text => INKPOD_ANNOTATION_TEXT,
-                    AnnotationKind::Stroke => INKPOD_ANNOTATION_STROKE,
-                    AnnotationKind::Leader => INKPOD_ANNOTATION_LEADER,
-                    AnnotationKind::Value => INKPOD_ANNOTATION_VALUE,
-                },
-                feature_flags: INKPOD_FEATURE_NONE,
-                object_id: object.id,
-                layer_id: object.layer_id,
-                output: match object.output {
-                    AnnotationOutput::Normal => INKPOD_ANNOTATION_OUTPUT_NORMAL,
-                    AnnotationOutput::Instruction => INKPOD_ANNOTATION_OUTPUT_INSTRUCTION,
-                },
-                style_flags: object.style_flags,
-                bounds: InkpodFrameRect {
-                    x: object.bounds.x,
-                    y: object.bounds.y,
-                    width: object.bounds.width,
-                    height: object.bounds.height,
-                },
-                font_size_milli: object.font_size_milli,
-                stroke_width_milli: object.stroke_width_milli,
-                color: color_value_record(object.color)
-                    .expect("validated snapshot annotation color must be RGBA"),
-                font_utf8_offset,
-                font_utf8_bytes: object.font_family_hint.len() as u64,
-                text_utf8_offset,
-                text_utf8_bytes: object.text.len() as u64,
-                first_point,
-                point_count: object.points.len() as u64,
-            }
-        })
         .collect();
     let shooting_frames = snapshot
         .shooting_frames()
@@ -215,15 +90,8 @@ pub(crate) fn snapshot_handle(snapshot: RenderSnapshot) -> Box<InkpodSnapshot> {
         snapshot,
         tiles,
         guides,
-        vector_segments,
-        vector_fills,
-        vector_boundary_path_ids,
-        vector_endpoints,
         render_passes,
         adjustment_luts_rgb8,
-        annotations,
-        annotation_utf8: annotation_utf8.into_boxed_slice(),
-        annotation_points: annotation_points.into_boxed_slice(),
         shooting_frames,
         vanishing_points,
         radial_guides,
@@ -362,20 +230,6 @@ pub(crate) fn frame_rect(rect: inkpod_core::RectI32) -> InkpodFrameRect {
         y: rect.y,
         width: rect.width,
         height: rect.height,
-    }
-}
-
-pub(crate) const fn pack_rgba(color: [u8; 4]) -> u32 {
-    ((color[0] as u32) << 24)
-        | ((color[1] as u32) << 16)
-        | ((color[2] as u32) << 8)
-        | color[3] as u32
-}
-
-pub(crate) const fn vector_point(point: PointF32) -> InkpodVectorPoint {
-    InkpodVectorPoint {
-        x: point.x,
-        y: point.y,
     }
 }
 

@@ -11,10 +11,6 @@ use crate::primitive::{
 enum LegacyBatchScriptStep {
     Simple(LegacySimpleScriptStep),
     Image(LegacyImageScriptStep),
-    VectorWidth {
-        invocation: CanonicalInvocation,
-        editor_group: String,
-    },
 }
 
 #[derive(Clone, Debug)]
@@ -30,7 +26,6 @@ enum LegacyBatchProjection {
         name: String,
         plane: bool,
     },
-    LineWidth,
     Filter,
     BoundaryAirbrush,
     DustRemoval,
@@ -56,7 +51,6 @@ enum LegacyBatchProjectionError {
     InvalidOperation,
     MissingTarget,
     AmbiguousTarget,
-    EmptyVectorTarget,
     ImageAdapter(LegacyImageAdapterError),
     SimpleAdapter(LegacySimpleAdapterError),
     NotProjectable,
@@ -77,7 +71,7 @@ impl From<LegacySimpleAdapterError> for LegacyBatchProjectionError {
 impl LegacyBatchScriptStep {
     fn enabled(&self) -> bool {
         match self {
-            Self::Simple(_) | Self::VectorWidth { .. } => true,
+            Self::Simple(_) => true,
             Self::Image(step) => step.enabled(),
         }
     }
@@ -86,7 +80,6 @@ impl LegacyBatchScriptStep {
         match self {
             Self::Simple(_) => None,
             Self::Image(step) => step.editor_group(),
-            Self::VectorWidth { editor_group, .. } => Some(editor_group),
         }
     }
 
@@ -94,7 +87,6 @@ impl LegacyBatchScriptStep {
         match self {
             Self::Simple(step) => step.to_canonical().map_err(Into::into),
             Self::Image(step) => step.to_canonical().map_err(Into::into),
-            Self::VectorWidth { invocation, .. } => Ok(invocation.clone()),
         }
     }
 }
@@ -235,29 +227,6 @@ impl LegacyBatchScriptGroup {
                         vec![simple(&invocation)?],
                     )
                 }
-            }
-            BatchOperationKind::LineWidth(mode) => {
-                let plane_id = target_plane()?;
-                let path_ids = core
-                    .vector_paths()
-                    .map_err(|_| LegacyBatchProjectionError::MissingTarget)?
-                    .into_iter()
-                    .filter(|path| path.plane_id == plane_id)
-                    .map(|path| path.id)
-                    .collect::<Vec<_>>();
-                if path_ids.is_empty() {
-                    return Err(LegacyBatchProjectionError::EmptyVectorTarget);
-                }
-                (
-                    LegacyBatchProjection::LineWidth,
-                    vec![LegacyBatchScriptStep::VectorWidth {
-                        invocation: CanonicalInvocation::VectorCorrectWidth {
-                            path_ids,
-                            mode: *mode,
-                        },
-                        editor_group: editor_group.to_owned(),
-                    }],
-                )
             }
             BatchOperationKind::Filter(filter) => {
                 let invocation = CanonicalInvocation::ApplyFilter {
@@ -461,12 +430,6 @@ impl LegacyBatchScriptGroup {
                 }
                 _ => return Err(LegacyBatchProjectionError::NotProjectable),
             },
-            LegacyBatchProjection::LineWidth => match canonical.as_slice() {
-                [CanonicalInvocation::VectorCorrectWidth { mode, .. }] => {
-                    BatchOperationKind::LineWidth(*mode)
-                }
-                _ => return Err(LegacyBatchProjectionError::NotProjectable),
-            },
             LegacyBatchProjection::Filter => match canonical.as_slice() {
                 [CanonicalInvocation::ApplyFilter { plane_id, filter }]
                     if self.matches_plane(*plane_id) =>
@@ -618,8 +581,7 @@ mod tests {
     use crate::primitive::canonical_document_state;
     use crate::{
         BrushShape, ColorBalance, CurveInterpolation, CurvePoint, DustMode, HsvAdjustment, Levels,
-        PaintTool, PointF32, StartColorPredicate, Stroke, StrokeSample, VectorCubicSegment,
-        VectorPathInput,
+        PaintTool, StartColorPredicate, Stroke, StrokeSample,
     };
 
     fn core() -> Core {
@@ -914,50 +876,6 @@ mod tests {
                 "operation {index}"
             );
         }
-    }
-
-    #[test]
-    fn line_width_projects_to_existing_canonical_invocation_without_an_m08_catalog_entry() {
-        let mut core = core();
-        let (_, layer_id) = core
-            .create_layer(LayerKind::VectorColoring, "Vector")
-            .unwrap();
-        let (plane_id, _, _) = core.vector_layer_planes(layer_id).unwrap();
-        core.vector_add_path(
-            plane_id,
-            VectorPathInput {
-                segments: vec![VectorCubicSegment {
-                    p0: PointF32 { x: 1.0, y: 1.0 },
-                    p1: PointF32 { x: 2.0, y: 1.0 },
-                    p2: PointF32 { x: 3.0, y: 2.0 },
-                    p3: PointF32 { x: 4.0, y: 2.0 },
-                    width_start: 1.0,
-                    width_end: 2.0,
-                }],
-                color: PixelValue::Rgba([0, 0, 0, 255]),
-                closed: false,
-            },
-        )
-        .unwrap();
-        let operation = BatchOperation {
-            version: BATCH_OPERATION_VERSION,
-            enabled: true,
-            configure_each_run: false,
-            target: Some(BatchTargetSelector {
-                layer_id: Some(layer_id),
-                plane_id: Some(plane_id),
-                layer_kind: Some(LayerKind::VectorColoring),
-                plane_kind: Some(PlaneType::VectorMainLine),
-                missing_policy: BatchMissingTargetPolicy::Error,
-            }),
-            kind: BatchOperationKind::LineWidth(VectorWidthMode::Scale(1.5)),
-        };
-        let group = LegacyBatchScriptGroup::from_operation(&core, &operation, "width").unwrap();
-        assert!(matches!(
-            group.canonical_invocations().unwrap().as_slice(),
-            [CanonicalInvocation::VectorCorrectWidth { path_ids, .. }] if path_ids.len() == 1
-        ));
-        assert_eq!(group.to_operation().unwrap(), operation);
     }
 
     #[test]

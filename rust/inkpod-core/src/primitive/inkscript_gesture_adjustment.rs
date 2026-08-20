@@ -25,16 +25,7 @@ pub(crate) const GESTURE_ADJUSTMENT_ENUMS: &[InkScriptEnumSchema] = &[
         "adjustment_kind",
         &["brightness_contrast", "tone_curve", "levels"],
     ),
-    InkScriptEnumSchema::new(
-        "scoped_color_mode",
-        &[
-            "raster_color",
-            "raster_main_line",
-            "vector_color_line",
-            "vector_main_line",
-            "vector_fill",
-        ],
-    ),
+    InkScriptEnumSchema::new("scoped_color_mode", &["raster_color", "raster_main_line"]),
 ];
 
 const EFFECT_SAMPLE_FIELDS: &[InkScriptFieldSchema] = &[
@@ -454,9 +445,6 @@ fn scoped_color_mode(
     match enum_value(value)? {
         "raster_color" => Ok(ScopedColorReplaceMode::RasterColor),
         "raster_main_line" => Ok(ScopedColorReplaceMode::RasterMainLine),
-        "vector_color_line" => Ok(ScopedColorReplaceMode::VectorColorLine),
-        "vector_main_line" => Ok(ScopedColorReplaceMode::VectorMainLine),
-        "vector_fill" => Ok(ScopedColorReplaceMode::VectorFill),
         _ => Err(GestureAdjustmentAdapterError::InvalidValue),
     }
 }

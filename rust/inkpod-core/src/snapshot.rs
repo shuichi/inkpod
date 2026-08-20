@@ -1,15 +1,14 @@
 //! Document inspection and immutable render snapshots.
 
 use super::*;
-use inkpod_image::{canonical_q16_from_f32, source_over_rgba8, source_over_rgba16};
+use inkpod_image::{source_over_rgba8, source_over_rgba16};
 
-const COMPOSITE_DIGEST_CONTEXT: &str = "org.inkpod.digest.canonical-composite.v3";
+const COMPOSITE_DIGEST_CONTEXT: &str = "org.inkpod.digest.canonical-composite.v4";
 
 /// Architecture-independent digest of one snapshot's document result.
 ///
 /// View-only state, transient revision numbers, and cache revisions are excluded.
-/// Raster pixels are hashed as their public premultiplied BGRA8 tile stream and
-/// vector document coordinates are first normalized to canonical signed Q16.
+/// Raster pixels are hashed as their public premultiplied BGRA8 tile stream.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CanonicalCompositeDigest([u8; 32]);
 
@@ -109,14 +108,8 @@ pub enum RenderPassKind {
     LayerBegin,
     /// Draws a contiguous span of premultiplied raster tiles.
     RasterTiles,
-    /// Draws a contiguous span of vector fills.
-    VectorFills,
-    /// Draws a contiguous span of vector paths.
-    VectorStrokes,
     /// Applies one Core-resolved RGB lookup table to the accumulated result.
     Adjustment,
-    /// Draws a contiguous span of immutable Text/Annotation objects.
-    Annotations,
     /// Ends the current logical layer group.
     LayerEnd,
 }
@@ -187,7 +180,7 @@ impl RenderAdjustmentLut {
 
 /// Immutable document render data with a separate device-pixel view transform.
 ///
-/// Raster tile origins, vector control points, guides, and grid values are all
+/// Raster tile origins, guides, and grid values are all
 /// document coordinates. `view()` is the only document-to-device transform and
 /// follows `device = flipped_document * zoom + pan`; pan and viewport use client
 /// device pixels. Core does not apply OS DPI to that Canvas transform.
@@ -200,11 +193,8 @@ pub struct RenderSnapshot {
     guides: Vec<Guide>,
     grid: GridConfig,
     tiles: Vec<RenderTile>,
-    vector_segments: Vec<RenderVectorSegment>,
-    vector_fills: Vec<RenderVectorFill>,
     render_passes: Vec<RenderPass>,
     adjustment_luts: Vec<RenderAdjustmentLut>,
-    annotations: Vec<AnnotationObjectInfo>,
     shooting_frames: Vec<ShootingFrameInfo>,
     vanishing_points: Vec<VanishingPointInfo>,
     radial_guides: Vec<RenderRadialGuide>,
@@ -265,58 +255,6 @@ impl RenderSnapshot {
         &self.tiles
     }
 
-    /// Borrows immutable document-space vector segments for the snapshot lifetime.
-    #[must_use]
-    pub fn vector_segments(&self) -> &[RenderVectorSegment] {
-        &self.vector_segments
-    }
-
-    /// Borrows immutable document-space vector fills for the snapshot lifetime.
-    #[must_use]
-    pub fn vector_fills(&self) -> &[RenderVectorFill] {
-        &self.vector_fills
-    }
-
-    /// Returns topologically unconnected vector endpoints requested by this view.
-    #[must_use]
-    pub fn vector_endpoints(&self) -> Vec<RenderVectorEndpoint> {
-        if !self.view.vector_endpoints_visible() {
-            return Vec::new();
-        }
-        let mut endpoints = Vec::new();
-        let mut index = 0_usize;
-        while let Some(first) = self.vector_segments.get(index) {
-            let count = first.segment_count as usize;
-            let Some(last) = count
-                .checked_sub(1)
-                .and_then(|offset| self.vector_segments.get(index + offset))
-            else {
-                break;
-            };
-            if first.stroke_visible && !first.closed {
-                if !first.start_connected {
-                    endpoints.push(RenderVectorEndpoint {
-                        path_id: first.path_id,
-                        plane_id: first.plane_id,
-                        endpoint: VectorEndpoint::Start,
-                        point: first.cubic.p0,
-                    });
-                }
-                if !last.end_connected {
-                    endpoints.push(RenderVectorEndpoint {
-                        path_id: last.path_id,
-                        plane_id: last.plane_id,
-                        endpoint: VectorEndpoint::End,
-                        point: last.cubic.p3,
-                    });
-                }
-            }
-            index += count;
-        }
-        endpoints.sort_by_key(|endpoint| (endpoint.path_id, endpoint.endpoint));
-        endpoints
-    }
-
     /// Borrows the immutable bottom-to-top render plan.
     #[must_use]
     pub fn render_passes(&self) -> &[RenderPass] {
@@ -327,12 +265,6 @@ impl RenderSnapshot {
     #[must_use]
     pub fn adjustment_luts(&self) -> &[RenderAdjustmentLut] {
         &self.adjustment_luts
-    }
-
-    /// Borrows immutable Text/Annotation objects in render-pass span order.
-    #[must_use]
-    pub fn annotations(&self) -> &[AnnotationObjectInfo] {
-        &self.annotations
     }
 
     /// Borrows the optional visible angled shooting-frame instruction overlay.
@@ -357,11 +289,10 @@ impl RenderSnapshot {
     ///
     /// This operation is deterministic across supported architectures and does
     /// not alter revision, history, dirty state, or ownership. It returns an
-    /// error only if an internally produced vector coordinate is non-finite or
-    /// outside the canonical signed-Q16 range.
+    /// error only if internally produced snapshot state is invalid.
     pub fn canonical_composite_digest(&self) -> Result<CanonicalCompositeDigest, CoreError> {
         let mut hasher = blake3::Hasher::new_derive_key(COMPOSITE_DIGEST_CONTEXT);
-        hasher.update(&3_u32.to_le_bytes());
+        hasher.update(&4_u32.to_le_bytes());
         hasher.update(&self.feature_flags.to_le_bytes());
         hasher.update(&self.document_size.width.to_le_bytes());
         hasher.update(&self.document_size.height.to_le_bytes());
@@ -376,58 +307,13 @@ impl RenderSnapshot {
             hasher.update(&(tile.pixels.len() as u64).to_le_bytes());
             hasher.update(&tile.pixels);
         }
-        hasher.update(&(self.vector_segments.len() as u64).to_le_bytes());
-        for segment in &self.vector_segments {
-            hasher.update(&segment.path_id.to_le_bytes());
-            hasher.update(&segment.plane_id.to_le_bytes());
-            hasher.update(&segment.z_order.to_le_bytes());
-            hasher.update(&segment.segment_index.to_le_bytes());
-            hasher.update(&segment.segment_count.to_le_bytes());
-            hasher.update(&segment.color_rgba);
-            hasher.update(&[
-                u8::from(segment.closed),
-                u8::from(segment.square_cross_section),
-                u8::from(segment.stroke_visible),
-            ]);
-            for value in [
-                segment.cubic.p0.x,
-                segment.cubic.p0.y,
-                segment.cubic.p1.x,
-                segment.cubic.p1.y,
-                segment.cubic.p2.x,
-                segment.cubic.p2.y,
-                segment.cubic.p3.x,
-                segment.cubic.p3.y,
-                segment.cubic.width_start,
-                segment.cubic.width_end,
-            ] {
-                let canonical = canonical_q16_from_f32(value).ok_or(CoreError::InvalidState(
-                    "render snapshot vector geometry is outside canonical Q16",
-                ))?;
-                hasher.update(&canonical.to_le_bytes());
-            }
-        }
-        hasher.update(&(self.vector_fills.len() as u64).to_le_bytes());
-        for fill in &self.vector_fills {
-            hasher.update(&fill.fill_id.to_le_bytes());
-            hasher.update(&fill.plane_id.to_le_bytes());
-            hasher.update(&fill.z_order.to_le_bytes());
-            hasher.update(&fill.color_rgba);
-            hasher.update(&(fill.boundary_path_ids.len() as u64).to_le_bytes());
-            for path_id in &fill.boundary_path_ids {
-                hasher.update(&path_id.to_le_bytes());
-            }
-        }
         hasher.update(&(self.render_passes.len() as u64).to_le_bytes());
         for pass in &self.render_passes {
             let kind = match pass.kind {
                 RenderPassKind::LayerBegin => 1_u32,
                 RenderPassKind::RasterTiles => 2,
-                RenderPassKind::VectorFills => 3,
-                RenderPassKind::VectorStrokes => 4,
-                RenderPassKind::Adjustment => 5,
-                RenderPassKind::Annotations => 6,
-                RenderPassKind::LayerEnd => 7,
+                RenderPassKind::Adjustment => 3,
+                RenderPassKind::LayerEnd => 4,
             };
             hasher.update(&kind.to_le_bytes());
             hasher.update(&pass.layer_id.to_le_bytes());
@@ -441,60 +327,6 @@ impl RenderSnapshot {
             for channel in &lut.channels {
                 hasher.update(channel);
             }
-        }
-        hasher.update(&(self.annotations.len() as u64).to_le_bytes());
-        for object in &self.annotations {
-            hasher.update(&object.id.to_le_bytes());
-            hasher.update(&object.layer_id.to_le_bytes());
-            hasher.update(
-                &(match object.kind {
-                    AnnotationKind::Text => 1_u32,
-                    AnnotationKind::Stroke => 2,
-                    AnnotationKind::Leader => 3,
-                    AnnotationKind::Value => 4,
-                })
-                .to_le_bytes(),
-            );
-            hasher.update(
-                &(match object.output {
-                    AnnotationOutput::Normal => 1_u32,
-                    AnnotationOutput::Instruction => 2,
-                })
-                .to_le_bytes(),
-            );
-            for value in [
-                object.bounds.x,
-                object.bounds.y,
-                object.bounds.width,
-                object.bounds.height,
-            ] {
-                hasher.update(&value.to_le_bytes());
-            }
-            hasher.update(&(object.font_family_hint.len() as u64).to_le_bytes());
-            hasher.update(object.font_family_hint.as_bytes());
-            hasher.update(&object.font_size_milli.to_le_bytes());
-            hasher.update(&object.style_flags.to_le_bytes());
-            match object.color {
-                PixelValue::Rgba(channels) => {
-                    hasher.update(&8_u32.to_le_bytes());
-                    hasher.update(&channels);
-                }
-                PixelValue::Rgba16(channels) => {
-                    hasher.update(&16_u32.to_le_bytes());
-                    for channel in channels {
-                        hasher.update(&channel.to_le_bytes());
-                    }
-                }
-                _ => unreachable!("validated annotation color is RGBA"),
-            }
-            hasher.update(&(object.text.len() as u64).to_le_bytes());
-            hasher.update(object.text.as_bytes());
-            hasher.update(&(object.points.len() as u64).to_le_bytes());
-            for point in &object.points {
-                hasher.update(&point.x_milli.to_le_bytes());
-                hasher.update(&point.y_milli.to_le_bytes());
-            }
-            hasher.update(&object.stroke_width_milli.to_le_bytes());
         }
         Ok(CanonicalCompositeDigest(*hasher.finalize().as_bytes()))
     }
@@ -588,11 +420,8 @@ impl Core {
                 guides: Vec::new(),
                 grid: GridConfig::default(),
                 tiles: Vec::new(),
-                vector_segments: Vec::new(),
-                vector_fills: Vec::new(),
                 render_passes: Vec::new(),
                 adjustment_luts: Vec::new(),
-                annotations: Vec::new(),
                 shooting_frames: Vec::new(),
                 vanishing_points: Vec::new(),
                 radial_guides: Vec::new(),
@@ -633,69 +462,6 @@ impl Core {
             BaseSurface::Asset(id) => self.assets.get(id),
         };
         let base_raster = base_asset.as_ref().and_then(|asset| asset.raster());
-        let has_visible_ordered_layer = self.annotation_stroke.is_some()
-            || document.layers.iter().any(|layer| {
-                layer.visible
-                    && (layer.kind == LayerKind::VectorColoring
-                        || document
-                            .annotations
-                            .iter()
-                            .any(|object| object.input.layer_id == layer.id.get()))
-            });
-        if has_visible_ordered_layer && !self.view.alpha_view && self.color_check.is_none() {
-            let document_size = DocumentSizeU32::new(document.width, document.height);
-            let (
-                tiles,
-                vector_segments,
-                vector_fills,
-                mut render_passes,
-                adjustment_luts,
-                mut annotations,
-            ) = build_ordered_content(
-                document,
-                base_raster.map(Arc::as_ref),
-                &mut cache,
-                &mut self.next_render_tile_revision,
-            );
-            if let Some(preview) = self
-                .annotation_stroke
-                .as_ref()
-                .map(|stroke| stroke.preview())
-            {
-                let first = annotations.len() as u64;
-                annotations.push(preview);
-                render_passes.push(RenderPass {
-                    kind: RenderPassKind::Annotations,
-                    layer_id: annotations[first as usize].layer_id,
-                    plane_id: 0,
-                    opacity_milli: 1_000,
-                    first_item: first,
-                    item_count: 1,
-                });
-            }
-            self.render_cache = cache;
-            return RenderSnapshot {
-                revision: snapshot_revision,
-                feature_flags,
-                view: self.view,
-                document_size,
-                guides: document.guides.clone(),
-                grid: document.grid,
-                tiles,
-                vector_segments,
-                vector_fills,
-                render_passes,
-                adjustment_luts,
-                annotations,
-                shooting_frames: document
-                    .shooting_frame
-                    .filter(|frame| frame.input.visible)
-                    .map(|frame| vec![frame.info()])
-                    .unwrap_or_default(),
-                vanishing_points: visible_vanishing_point_infos(document),
-                radial_guides: build_radial_guides(document, self.view),
-            };
-        }
         let mut coords: Vec<_> = document
             .layers
             .iter()
@@ -767,11 +533,6 @@ impl Core {
         }
         cache.retain(|(band, coord), _| *band == 0 && coords.binary_search(coord).is_ok());
         let document_size = DocumentSizeU32::new(document.width, document.height);
-        let (vector_segments, vector_fills) = if self.view.alpha_view {
-            (Vec::new(), Vec::new())
-        } else {
-            document.vector.render_items(document)
-        };
         self.render_cache = cache;
         let render_passes = (!tiles.is_empty())
             .then_some(RenderPass {
@@ -792,15 +553,8 @@ impl Core {
             guides: document.guides.clone(),
             grid: document.grid,
             tiles,
-            vector_segments,
-            vector_fills,
             render_passes,
             adjustment_luts: Vec::new(),
-            annotations: self
-                .annotation_stroke
-                .as_ref()
-                .map(|stroke| vec![stroke.preview()])
-                .unwrap_or_default(),
             shooting_frames: document
                 .shooting_frame
                 .filter(|frame| frame.input.visible)
@@ -851,8 +605,6 @@ impl Core {
             guides: Vec::new(),
             grid: GridConfig::default(),
             tiles,
-            vector_segments: Vec::new(),
-            vector_fills: Vec::new(),
             render_passes: vec![RenderPass {
                 kind: RenderPassKind::RasterTiles,
                 layer_id: 0,
@@ -862,7 +614,6 @@ impl Core {
                 item_count: tile_count,
             }],
             adjustment_luts: Vec::new(),
-            annotations: Vec::new(),
             shooting_frames: Vec::new(),
             vanishing_points: Vec::new(),
             radial_guides: Vec::new(),
@@ -890,15 +641,12 @@ fn revision_max_tile_source_revision(document: &CellDocument, coord: TileCoord) 
     RenderRevision::from_raw(source_revision)
 }
 
-type OrderedContent = (
-    Vec<RenderTile>,
-    Vec<RenderVectorSegment>,
-    Vec<RenderVectorFill>,
-    Vec<RenderPass>,
-    Vec<RenderAdjustmentLut>,
-    Vec<AnnotationObjectInfo>,
-);
+type OrderedContent = (Vec<RenderTile>, Vec<RenderPass>, Vec<RenderAdjustmentLut>);
 
+#[allow(
+    dead_code,
+    reason = "retained for ordered raster adjustment validation"
+)]
 fn build_ordered_content(
     document: &CellDocument,
     base_raster: Option<&TileRaster>,
@@ -908,11 +656,8 @@ fn build_ordered_content(
     const BACKGROUND_CACHE_KEY: u64 = u64::MAX;
     const SELECTION_CACHE_KEY: u64 = u64::MAX - 1;
     let mut tiles = Vec::new();
-    let mut vector_segments = Vec::new();
-    let mut vector_fills = Vec::new();
     let mut passes = Vec::new();
     let mut adjustment_luts = Vec::new();
-    let mut annotations = Vec::new();
     let mut active_cache_keys = BTreeSet::new();
     let mut raster_pass_index = 0_u32;
 
@@ -1057,60 +802,7 @@ fn build_ordered_content(
                         raster_pass_index = raster_pass_index.saturating_add(1);
                     }
                 }
-                PlaneType::VectorFill => {
-                    let (_, fills) = document
-                        .vector
-                        .render_plane_items(plane, u32::try_from(passes.len()).unwrap_or(u32::MAX));
-                    if !fills.is_empty() {
-                        let first = vector_fills.len() as u64;
-                        vector_fills.extend(fills);
-                        passes.push(RenderPass {
-                            kind: RenderPassKind::VectorFills,
-                            layer_id: layer.id.get(),
-                            plane_id: plane.id.get(),
-                            opacity_milli: 1_000,
-                            first_item: first,
-                            item_count: vector_fills.len() as u64 - first,
-                        });
-                    }
-                }
-                PlaneType::VectorMainLine | PlaneType::ColorTrace => {
-                    let (segments, _) = document
-                        .vector
-                        .render_plane_items(plane, u32::try_from(passes.len()).unwrap_or(u32::MAX));
-                    let first = vector_segments.len() as u64;
-                    vector_segments.extend(segments);
-                    if plane.visible && vector_segments.len() as u64 != first {
-                        passes.push(RenderPass {
-                            kind: RenderPassKind::VectorStrokes,
-                            layer_id: layer.id.get(),
-                            plane_id: plane.id.get(),
-                            opacity_milli: 1_000,
-                            first_item: first,
-                            item_count: vector_segments.len() as u64 - first,
-                        });
-                    }
-                }
             }
-        }
-        let first = annotations.len() as u64;
-        annotations.extend(
-            document
-                .annotations
-                .iter()
-                .filter(|object| object.input.layer_id == layer.id.get())
-                .map(AnnotationObject::info),
-        );
-        let count = annotations.len() as u64 - first;
-        if count != 0 {
-            passes.push(RenderPass {
-                kind: RenderPassKind::Annotations,
-                layer_id: layer.id.get(),
-                plane_id: 0,
-                opacity_milli: 1_000,
-                first_item: first,
-                item_count: count,
-            });
         }
         passes.push(RenderPass {
             kind: RenderPassKind::LayerEnd,
@@ -1164,14 +856,7 @@ fn build_ordered_content(
         }
     }
     cache.retain(|key, _| active_cache_keys.contains(key));
-    (
-        tiles,
-        vector_segments,
-        vector_fills,
-        passes,
-        adjustment_luts,
-        annotations,
-    )
+    (tiles, passes, adjustment_luts)
 }
 
 fn ordered_tile_id(pass_index: u32, coord: TileCoord) -> u64 {
@@ -1410,9 +1095,6 @@ fn prepare_layers_for_tile<'a>(
                 }
                 (PlaneType::Selection, PixelFormat::BinaryMask8) => {
                     Some(PreparedPlaneKind::Selection8)
-                }
-                (PlaneType::VectorMainLine | PlaneType::ColorTrace | PlaneType::VectorFill, _) => {
-                    None
                 }
                 _ => return None,
             };
@@ -1889,7 +1571,6 @@ mod tests {
                 };
                 [0, 160, 255, coverage / 3]
             }
-            PlaneType::VectorMainLine | PlaneType::ColorTrace | PlaneType::VectorFill => [0; 4],
         };
         rgba[3] = ((u32::from(rgba[3]) * plane.opacity_milli + 500) / 1_000) as u8;
         let mut layer_pixel = blend_rgba_over_reference([0; 4], rgba);
@@ -2189,7 +1870,7 @@ mod tests {
             blake3::hash(validation_call_graph.as_bytes())
                 .to_hex()
                 .to_string(),
-            "eacb8e888e9ca03298923b797f3532950144b4a3f978aa0fcc630cb0a88d023b",
+            "6ff0bb8ba0871c57d848f28b79984086121ff3d6299b7a1ba8a3481becce88f8",
             "primary snapshot validation call graph changed; audit payload/hash access before updating this lock"
         );
     }
@@ -2323,7 +2004,7 @@ mod tests {
     }
 
     #[test]
-    fn vector_coord_collection_deduplicates_and_preserves_tilecoord_order() {
+    fn tile_coord_collection_deduplicates_and_preserves_order() {
         let mut core = Core::new();
         core.new_cell(130, 65, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
             .unwrap();

@@ -34,6 +34,11 @@ struct CanvasFloatingPreview {
     InkpodFloatingTransform transform;
 };
 
+struct CanvasGeometryPoint {
+    float x{};
+    float y{};
+};
+
 struct CanvasGeometryPreview {
     std::uint32_t struct_size;
     std::uint32_t active;
@@ -41,7 +46,7 @@ struct CanvasGeometryPreview {
     std::uint32_t closed;
     float stroke_width;
     std::uint32_t reserved;
-    InkpodVectorPoint points[kCanvasGeometryPreviewPoints];
+    CanvasGeometryPoint points[kCanvasGeometryPreviewPoints];
 };
 
 struct SnapshotRoute {
@@ -160,9 +165,6 @@ public:
     HRESULT SimulateDeviceLoss(
         app::CanvasId canvas,
         app::Generation surface_generation) noexcept;
-    HRESULT ValidateClosedVectorStroke(
-        app::CanvasId canvas,
-        app::Generation surface_generation) noexcept;
     HRESULT ReadPixelForSmokeTest(
         app::CanvasId canvas,
         app::Generation surface_generation,
@@ -185,11 +187,6 @@ public:
         app::CanvasId canvas,
         app::Generation surface_generation,
         const CanvasGeometryPreview& preview) noexcept;
-    HRESULT SetAnnotationSelection(
-        app::CanvasId canvas,
-        app::Generation surface_generation,
-        std::uint64_t object_id) noexcept;
-
     [[nodiscard]] DWORD ThreadId() const noexcept;
     [[nodiscard]] std::uint64_t PresentedFrameCount(
         app::CanvasId canvas,

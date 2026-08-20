@@ -96,8 +96,6 @@ bool ProjectEditorPresentation(
         tools.selection_construction_flags = editor.selection.construction_flags;
         tools.selection_rotation_turns = editor.selection.rotation_turns;
         tools.selection_trace_shape = editor.selection.trace_shape;
-        tools.vector_erase_mode = editor.vector.erase_mode;
-        tools.vector_selection_mode = editor.vector.selection_mode;
 
         if ((editor.flags & INKPOD_EDITOR_STATE_HAS_TARGET) != 0U) {
             workspace.panes.active_tree_layer_id = editor.active_layer_id;

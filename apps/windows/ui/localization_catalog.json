@@ -55,53 +55,53 @@
       "resource": false
     },
     {
-      "id": "ToolVectorLine",
+      "id": "ToolGeometry",
+      "kind": "text",
+      "ja": "ラスター図形",
+      "en": "Raster Geometry",
+      "resource": true
+    },
+    {
+      "id": "ToolLine",
       "kind": "text",
       "ja": "直線",
       "en": "Line",
       "resource": true
     },
     {
-      "id": "ToolVectorCurve",
+      "id": "ToolCurve",
       "kind": "text",
       "ja": "曲線",
       "en": "Curve",
       "resource": true
     },
     {
-      "id": "ToolVectorRectangle",
+      "id": "ToolRectangle",
       "kind": "text",
       "ja": "長方形",
       "en": "Rectangle",
       "resource": true
     },
     {
-      "id": "ToolVectorEllipse",
+      "id": "ToolEllipse",
       "kind": "text",
       "ja": "楕円",
       "en": "Ellipse",
       "resource": true
     },
     {
-      "id": "ToolVectorPolyline",
+      "id": "ToolPolyline",
       "kind": "text",
       "ja": "折れ線",
       "en": "Polyline",
       "resource": true
     },
     {
-      "id": "ToolVectorPolygon",
+      "id": "ToolPolygon",
       "kind": "text",
       "ja": "正多角形",
       "en": "Regular Polygon",
       "resource": true
-    },
-    {
-      "id": "ToolVectorEraser",
-      "kind": "text",
-      "ja": "線消しゴム",
-      "en": "Vector Eraser",
-      "resource": false
     },
     {
       "id": "ToolGradient",
@@ -164,13 +164,6 @@
       "kind": "text",
       "ja": "塗り延ばし",
       "en": "Fill Extend",
-      "resource": false
-    },
-    {
-      "id": "ToolVectorEraserCompact",
-      "kind": "text",
-      "ja": "線消しゴム",
-      "en": "Vector Erase",
       "resource": false
     },
     {
@@ -559,25 +552,11 @@
       "resource": false
     },
     {
-      "id": "LayerText",
-      "kind": "text",
-      "ja": "テキスト",
-      "en": "Text",
-      "resource": false
-    },
-    {
-      "id": "LayerInstruction",
+      "id": "Instruction",
       "kind": "text",
       "ja": "指示",
       "en": "Instruction",
       "resource": true
-    },
-    {
-      "id": "LayerVectorColoring",
-      "kind": "text",
-      "ja": "ベクター彩色",
-      "en": "Vector Coloring",
-      "resource": false
     },
     {
       "id": "LayerUnknown",
@@ -585,13 +564,6 @@
       "ja": "不明",
       "en": "Unknown",
       "resource": false
-    },
-    {
-      "id": "PlaneColorTrace",
-      "kind": "text",
-      "ja": "色トレース",
-      "en": "Color Trace",
-      "resource": true
     },
     {
       "id": "PlaneRaster",
@@ -608,20 +580,6 @@
       "resource": false
     },
     {
-      "id": "PlaneVectorMainLine",
-      "kind": "text",
-      "ja": "ベクター主線",
-      "en": "Vector Main Line",
-      "resource": true
-    },
-    {
-      "id": "PlaneVectorFill",
-      "kind": "text",
-      "ja": "ベクター塗り",
-      "en": "Vector Fill",
-      "resource": true
-    },
-    {
       "id": "PlaneBadgeMainLine",
       "kind": "text",
       "ja": "主線",
@@ -636,13 +594,6 @@
       "resource": false
     },
     {
-      "id": "PlaneBadgeColorTrace",
-      "kind": "text",
-      "ja": "色トレ",
-      "en": "Color\nTrace",
-      "resource": false
-    },
-    {
       "id": "PlaneBadgeRaster",
       "kind": "text",
       "ja": "ラス\nター",
@@ -654,20 +605,6 @@
       "kind": "text",
       "ja": "選択",
       "en": "Select",
-      "resource": false
-    },
-    {
-      "id": "PlaneBadgeVectorMainLine",
-      "kind": "text",
-      "ja": "ベク\n主線",
-      "en": "Vector\nLine",
-      "resource": false
-    },
-    {
-      "id": "PlaneBadgeVectorFill",
-      "kind": "text",
-      "ja": "ベク\n塗り",
-      "en": "Vector\nFill",
       "resource": false
     },
     {
@@ -2176,13 +2113,6 @@
       "resource": true
     },
     {
-      "id": "Text0132",
-      "kind": "text",
-      "ja": "アンチエイリアス表示",
-      "en": "Antialiasing",
-      "resource": true
-    },
-    {
       "id": "Text0133",
       "kind": "text",
       "ja": "ウィンドウ",
@@ -2570,8 +2500,8 @@
     {
       "id": "Text0188",
       "kind": "text",
-      "ja": "ゴミ取り（全体または領域を指定、vector planeは拒否）",
-      "en": "Dust Removal (whole image or selected region; vector planes are rejected)",
+      "ja": "ゴミ取り（全体または領域を指定）",
+      "en": "Dust Removal (whole image or selected region)",
       "resource": false
     },
     {
@@ -2950,48 +2880,6 @@
       "kind": "text",
       "ja": "ツールパレット",
       "en": "Tool Palette",
-      "resource": true
-    },
-    {
-      "id": "Text0243",
-      "kind": "text",
-      "ja": "テキストを追加...",
-      "en": "Add Text...",
-      "resource": true
-    },
-    {
-      "id": "Text0244",
-      "kind": "text",
-      "ja": "テキスト注釈",
-      "en": "Text Annotation",
-      "resource": false
-    },
-    {
-      "id": "Text0245",
-      "kind": "text",
-      "ja": "テキスト注釈の編集",
-      "en": "Edit Text Annotation",
-      "resource": false
-    },
-    {
-      "id": "Text0246",
-      "kind": "text",
-      "ja": "テキスト注釈の追加",
-      "en": "Add Text Annotation",
-      "resource": false
-    },
-    {
-      "id": "Text0247",
-      "kind": "text",
-      "ja": "テキスト注釈を再編集",
-      "en": "Re-edit Text Annotation",
-      "resource": false
-    },
-    {
-      "id": "Text0248",
-      "kind": "text",
-      "ja": "テキスト／指示",
-      "en": "Text / Instruction",
       "resource": true
     },
     {
@@ -3590,83 +3478,6 @@
       "resource": true
     },
     {
-      "id": "Text0334",
-      "kind": "text",
-      "ja": "ベクター",
-      "en": "Vector",
-      "resource": false
-    },
-    {
-      "id": "Text0335",
-      "kind": "text",
-      "ja": "ベクターをラスタライズ",
-      "en": "Rasterize Vector",
-      "resource": false
-    },
-    {
-      "id": "Text0336",
-      "kind": "text",
-      "ja": "ベクターをラスタライズ...",
-      "en": "Rasterize Vector...",
-      "resource": true
-    },
-    {
-      "id": "Text0337",
-      "kind": "text",
-      "ja": "ベクター描画",
-      "en": "Vector Drawing",
-      "resource": true
-    },
-    {
-      "id": "Text0338",
-      "kind": "text",
-      "ja": "ベクター描画の入力点を文書座標へ変換できませんでした。",
-      "en": "The vector drawing input points could not be converted to document coordinates.",
-      "resource": false
-    },
-    {
-      "id": "Text0339",
-      "kind": "text",
-      "ja": "ベクター消しゴム",
-      "en": "Vector Eraser",
-      "resource": true
-    },
-    {
-      "id": "Text0340",
-      "kind": "text",
-      "ja": "ベクター消去モード",
-      "en": "Vector Erase Mode",
-      "resource": true
-    },
-    {
-      "id": "Text0341",
-      "kind": "text",
-      "ja": "ベクター線つなぎ",
-      "en": "Connect Vector Lines",
-      "resource": false
-    },
-    {
-      "id": "Text0342",
-      "kind": "text",
-      "ja": "ベクター線幅修正",
-      "en": "Adjust Vector Line Width",
-      "resource": false
-    },
-    {
-      "id": "Text0343",
-      "kind": "text",
-      "ja": "ベクター診断表示の切替",
-      "en": "Toggle Vector Diagnostics",
-      "resource": false
-    },
-    {
-      "id": "Text0344",
-      "kind": "text",
-      "ja": "ベクター選択",
-      "en": "Vector Selection",
-      "resource": true
-    },
-    {
       "id": "Text0345",
       "kind": "text",
       "ja": "ペン",
@@ -3931,20 +3742,6 @@
       "ja": "ライブプレビュー",
       "en": "Live Preview",
       "resource": false
-    },
-    {
-      "id": "Text0383",
-      "kind": "text",
-      "ja": "ラスターをベクター化",
-      "en": "Vectorize Raster",
-      "resource": false
-    },
-    {
-      "id": "Text0384",
-      "kind": "text",
-      "ja": "ラスターをベクター化...",
-      "en": "Vectorize Raster...",
-      "resource": true
     },
     {
       "id": "Text0385",
@@ -4213,13 +4010,6 @@
       "resource": false
     },
     {
-      "id": "Text0423",
-      "kind": "text",
-      "ja": "一部でも触れる線",
-      "en": "Lines Touching Selection",
-      "resource": true
-    },
-    {
       "id": "Text0424",
       "kind": "text",
       "ja": "上",
@@ -4346,20 +4136,6 @@
       "resource": false
     },
     {
-      "id": "Text0442",
-      "kind": "text",
-      "ja": "中心線チェック",
-      "en": "Centerlines Only",
-      "resource": true
-    },
-    {
-      "id": "Text0443",
-      "kind": "text",
-      "ja": "中心線表示",
-      "en": "Show Centerlines",
-      "resource": true
-    },
-    {
       "id": "Text0444",
       "kind": "text",
       "ja": "中止",
@@ -4420,13 +4196,6 @@
       "kind": "text",
       "ja": "交差",
       "en": "Intersect",
-      "resource": true
-    },
-    {
-      "id": "Text0453",
-      "kind": "text",
-      "ja": "交点まで",
-      "en": "To Intersection",
       "resource": true
     },
     {
@@ -4969,13 +4738,6 @@
       "resource": true
     },
     {
-      "id": "Text0531",
-      "kind": "text",
-      "ja": "前の注釈を選択",
-      "en": "Select Previous Annotation",
-      "resource": true
-    },
-    {
       "id": "Text0532",
       "kind": "text",
       "ja": "前の調整レイヤーを選択",
@@ -5333,13 +5095,6 @@
       "resource": false
     },
     {
-      "id": "Text0583",
-      "kind": "text",
-      "ja": "図形オプション...",
-      "en": "Shape Options...",
-      "resource": true
-    },
-    {
       "id": "Text0584",
       "kind": "text",
       "ja": "図形プレビューが開始されていません。",
@@ -5417,13 +5172,6 @@
       "resource": true
     },
     {
-      "id": "Text0595",
-      "kind": "text",
-      "ja": "塗り",
-      "en": "Fill",
-      "resource": true
-    },
-    {
       "id": "Text0596",
       "kind": "text",
       "ja": "塗りあふれを中断",
@@ -5442,13 +5190,6 @@
       "kind": "text",
       "ja": "塗りのばし",
       "en": "Fill Extension",
-      "resource": true
-    },
-    {
-      "id": "Text0599",
-      "kind": "text",
-      "ja": "塗りを囲む線",
-      "en": "Fill Boundary Lines",
       "resource": true
     },
     {
@@ -5610,13 +5351,6 @@
       "kind": "text",
       "ja": "完全な白をチェック",
       "en": "Check Pure White",
-      "resource": true
-    },
-    {
-      "id": "Text0623",
-      "kind": "text",
-      "ja": "完全に含まれる線",
-      "en": "Lines Fully Contained",
       "resource": true
     },
     {
@@ -5876,13 +5610,6 @@
       "kind": "text",
       "ja": "復帰(&R)",
       "en": "&Revert",
-      "resource": true
-    },
-    {
-      "id": "Text0661",
-      "kind": "text",
-      "ja": "手描き指示モード",
-      "en": "Hand-drawn Instruction Mode",
       "resource": true
     },
     {
@@ -6572,13 +6299,6 @@
       "resource": true
     },
     {
-      "id": "Text0760",
-      "kind": "text",
-      "ja": "次の注釈を選択",
-      "en": "Select Next Annotation",
-      "resource": true
-    },
-    {
       "id": "Text0761",
       "kind": "text",
       "ja": "次の調整レイヤーを選択",
@@ -6619,13 +6339,6 @@
       "ja": "水平方向",
       "en": "Horizontal",
       "resource": true
-    },
-    {
-      "id": "Text0767",
-      "kind": "text",
-      "ja": "注釈オブジェクト操作",
-      "en": "Annotation Object Operation",
-      "resource": false
     },
     {
       "id": "Text0768",
@@ -7090,13 +6803,6 @@
       "resource": true
     },
     {
-      "id": "Text0834",
-      "kind": "text",
-      "ja": "端点表示",
-      "en": "Show Endpoints",
-      "resource": true
-    },
-    {
       "id": "Text0835",
       "kind": "text",
       "ja": "筆圧でサイズ",
@@ -7165,41 +6871,6 @@
       "ja": "結果: ",
       "en": "Result: ",
       "resource": false
-    },
-    {
-      "id": "Text0845",
-      "kind": "text",
-      "ja": "線つなぎ...",
-      "en": "Connect Lines...",
-      "resource": true
-    },
-    {
-      "id": "Text0846",
-      "kind": "text",
-      "ja": "線を選択",
-      "en": "Select Line",
-      "resource": true
-    },
-    {
-      "id": "Text0847",
-      "kind": "text",
-      "ja": "線全体",
-      "en": "Whole Line",
-      "resource": true
-    },
-    {
-      "id": "Text0848",
-      "kind": "text",
-      "ja": "線幅",
-      "en": "Line Width",
-      "resource": true
-    },
-    {
-      "id": "Text0849",
-      "kind": "text",
-      "ja": "線幅修正...",
-      "en": "Correct Line Width...",
-      "resource": true
     },
     {
       "id": "Text0850",
@@ -7612,13 +7283,6 @@
       "kind": "text",
       "ja": "角度間隔 (度)",
       "en": "Angular interval (degrees)",
-      "resource": true
-    },
-    {
-      "id": "Text0909",
-      "kind": "text",
-      "ja": "触れた部分",
-      "en": "Touched Segment",
       "resource": true
     },
     {
@@ -8112,13 +7776,6 @@
       "resource": true
     },
     {
-      "id": "Text0980",
-      "kind": "text",
-      "ja": "選択テキストを編集...",
-      "en": "Edit Selected Text...",
-      "resource": true
-    },
-    {
       "id": "Text0981",
       "kind": "text",
       "ja": "選択トレース",
@@ -8147,34 +7804,6 @@
       "resource": true
     },
     {
-      "id": "Text0985",
-      "kind": "text",
-      "ja": "選択注釈 ID ",
-      "en": "Selected annotation ID ",
-      "resource": false
-    },
-    {
-      "id": "Text0986",
-      "kind": "text",
-      "ja": "選択注釈を削除",
-      "en": "Delete Selected Annotation",
-      "resource": true
-    },
-    {
-      "id": "Text0987",
-      "kind": "text",
-      "ja": "選択注釈を右へ",
-      "en": "Move Selected Annotation Right",
-      "resource": true
-    },
-    {
-      "id": "Text0988",
-      "kind": "text",
-      "ja": "選択注釈を左へ",
-      "en": "Move Selected Annotation Left",
-      "resource": true
-    },
-    {
       "id": "Text0989",
       "kind": "text",
       "ja": "選択演算",
@@ -8187,13 +7816,6 @@
       "ja": "選択範囲がありません。文書全体の対象色を置換しますか？",
       "en": "There is no selection. Replace the target color throughout the document?",
       "resource": false
-    },
-    {
-      "id": "Text0991",
-      "kind": "text",
-      "ja": "選択範囲で切断",
-      "en": "Cut at Selection Boundary",
-      "resource": true
     },
     {
       "id": "Text0992",
@@ -8695,8 +8317,8 @@
     {
       "id": "AboutDescription",
       "kind": "text",
-      "ja": "Inkpod は、ベクターベースのストロークによる非破壊編集に対応した、GPU アクセラレーション型ペイントエンジンです。",
-      "en": "Inkpod is a GPU-accelerated painting engine with vector-based strokes for non-destructive editing.",
+      "ja": "Inkpod は、アニメーション彩色向けの GPU アクセラレーション型ペイントエンジンです。",
+      "en": "Inkpod is a GPU-accelerated painting engine for animation coloring workflows.",
       "resource": true
     },
     {
@@ -9005,27 +8627,6 @@
       "kind": "text",
       "ja": "試行のみ",
       "en": "Dry run",
-      "resource": true
-    },
-    {
-      "id": "RightToolTabColoring",
-      "kind": "text",
-      "ja": "彩色",
-      "en": "Coloring",
-      "resource": true
-    },
-    {
-      "id": "RightToolTabReference",
-      "kind": "text",
-      "ja": "参照",
-      "en": "Reference",
-      "resource": true
-    },
-    {
-      "id": "RightToolTabWorkflow",
-      "kind": "text",
-      "ja": "進行管理",
-      "en": "Workflow",
       "resource": true
     },
     {
