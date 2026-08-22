@@ -6,6 +6,30 @@ use crate::primitive::{CanonicalInvocation, InvocationResult};
 use crate::selection::{combine_selection_masks, selection_from_rect};
 
 impl Core {
+    /// Returns sparse fill-protection mask metrics without changing document state.
+    pub fn fill_protection_mask_info(&self) -> Result<FillProtectionMaskInfo, CoreError> {
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let mask = &document.fill_protection;
+        let mut wall_pixel_count = 0_u64;
+        for coord in mask.allocated_coords() {
+            let start_x = coord.x.saturating_mul(TILE_SIZE);
+            let start_y = coord.y.saturating_mul(TILE_SIZE);
+            let end_x = start_x.saturating_add(TILE_SIZE).min(mask.width());
+            let end_y = start_y.saturating_add(TILE_SIZE).min(mask.height());
+            for y in start_y..end_y {
+                for x in start_x..end_x {
+                    if mask.pixel(x, y)? == PixelValue::Binary(u8::MAX) {
+                        wall_pixel_count = wall_pixel_count.saturating_add(1);
+                    }
+                }
+            }
+        }
+        Ok(FillProtectionMaskInfo {
+            allocated_tile_count: mask.allocated_tile_count() as u64,
+            wall_pixel_count,
+        })
+    }
+
     /// Applies a fill atomically to the active editable raster plane.
     pub fn apply_fill(&mut self, request: &FillRequest) -> Result<FillOutcome, CoreError> {
         let target = self.active_editor_target()?;
@@ -242,10 +266,11 @@ impl Core {
             request.color
         };
         let plan = match request.operation {
-            FillOperation::Seed => seed_fill_with_cancel(
+            FillOperation::Seed => seed_fill_with_protection_and_cancel(
                 main_line,
                 target_raster,
                 selection.as_ref(),
+                Some(&document.fill_protection),
                 (request.seed_x, request.seed_y),
                 fill_color,
                 &options,
@@ -255,10 +280,11 @@ impl Core {
                 let operation = selection.as_ref().ok_or(CoreError::InvalidArgument(
                     "closed-region fill requires an operation selection",
                 ))?;
-                closed_region_fill_with_cancel(
+                closed_region_fill_with_protection_and_cancel(
                     main_line,
                     target_raster,
                     operation,
+                    Some(&document.fill_protection),
                     fill_color,
                     &options,
                     &mut *is_cancelled,
@@ -268,9 +294,10 @@ impl Core {
                 let operation = selection.as_ref().ok_or(CoreError::InvalidArgument(
                     "fill extension requires an operation selection",
                 ))?;
-                extend_fill_with_cancel(
+                extend_fill_with_protection_and_cancel(
                     target_raster,
                     operation,
+                    Some(&document.fill_protection),
                     (request.seed_x, request.seed_y),
                     request.extension_distance,
                     &mut *is_cancelled,

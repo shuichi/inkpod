@@ -13,6 +13,12 @@ and explicit user approval. Replace current values instead of appending dated
 acceptance logs. Historical calibration and milestone results are summarized in
 [`legacy.md`](legacy.md).
 
+Batch v3 advances the product contract to native v28/replay epoch 25 and uses
+the explicitly approved v3 `batch_preview` replacement described below. The
+benchmark has no sequence input, Filter operation, or v2 authoring record. Its
+native files, exact Color Replace rows, semantic counters, checksums, and complete
+samples are locked together with the current product contract.
+
 ## Commands and profiles
 
 ```text
@@ -24,8 +30,10 @@ cargo test --release --package inkpod-core --lib script::tests::approved_quick_p
 Both commands use the release benchmark profile and the same nine scenarios.
 Quick is the bounded CI profile; full increases inputs for local before/after
 comparison. The checkpoint fixture is written outside its timed open interval
-and removed afterward. Batch uses in-memory sequence cells and asserts that its
-absent output directory remains absent.
+and removed afterward. Batch creates its native inputs outside the timed
+interval, opens and replays them through the production path during preview and
+dry-run, removes them afterward, and asserts that its absent output directory
+remains absent.
 
 The ignored InkScript command is a separate Release process-level quick gate.
 It does not add an eleventh `core_workflows` scenario or change either existing
@@ -41,7 +49,7 @@ cache-free reopen, checksum construction, and exact counter assertions.
 | pan/zoom view-only snapshot pairs | 2,048 | 8,192 |
 | Undo/Redo edits | 12 | 48 |
 | light-table document | 128 square, 3 references | 256 square, 6 references |
-| Batch sequence | 4 cells at 16 square | 16 cells at 32 square |
+| Batch native inputs | 4 `.inkpod` files at 16 square | 16 `.inkpod` files at 32 square |
 | canonical replay fixture | 64 square, 5 canonical edits | same |
 | checkpoint policy fixture | 256 procedures, 175,000 stroke samples | 256 procedures, 1,000,000 stroke samples |
 | output-color guard fixture | 1,024-square straight RGBA16, 1,048,576 pixels | 2,048-square straight RGBA16, 4,194,304 pixels |
@@ -70,8 +78,8 @@ scenario assertions are:
 | `pan_zoom_snapshot` | every zoom/pan pair builds a snapshot without changing document revision, history, pixels, or tile revisions |
 | `undo_redo` | every edit is one history entry, Undo reaches the clean savepoint, and Redo restores the exact checksum |
 | `light_table_composite` | every reference contributes to the expected tile grid and checksum |
-| `batch_preview` | one invalid graph is rejected, valid inputs dry-run successfully, and no output is generated |
-| `canonical_replay` | six boundaries replay bit-exactly; final digest and runtime epoch 24 / native v27 / numeric v1 contract match |
+| `batch_preview` | one invalid graph is rejected; every unique native input opens, replays, and applies its exact native-depth Color Replace row in preview and dry-run; no output is generated |
+| `canonical_replay` | six boundaries replay bit-exactly; final digest and runtime epoch 25 / native v28 / numeric v1 contract match |
 | `checkpoint_open` | policy emits CKPT; verified open restores the journal/document digest and exact Undo/Redo; full crosses one million replay-work units |
 | `output_color_guard` | exact scanned/selected/transparent counts, one canonical commit, revision 2/history 1, exact sparse selection bounds/tile bytes, zero CPU staging bytes, and result digest match |
 
@@ -85,10 +93,10 @@ wall-clock time, addresses, cache allocation order, and Batch output paths.
 | `pan_zoom_snapshot` | `517ed7ae78bf0487` | `439040e0244d5773` |
 | `undo_redo` | `3f1053b9fde37d35` | `a2c1a74e7f9781a3` |
 | `light_table_composite` | `255ab9bad114dfdd` | `77f63d83e130185f` |
-| `batch_preview` | `f31d31fe1bb00fd7` | `6732b8b0a6565d03` |
+| `batch_preview` | `9ae6835726a36053` | `d1be39275687aa9b` |
 | `canonical_replay` | `70d3465b6732887e` | `70d3465b6732887e` |
-| `checkpoint_open` | `bcf482082855c1f2` | `bcf482082855c1f2` |
-| `output_color_guard` | `1005f8901846f431` | `558cb3aacd55afd9` |
+| `checkpoint_open` | `a90e56558c9eaaab` | `a90e56558c9eaaab` |
+| `output_color_guard` | `f169350a6a43e727` | `cfea73e284d62ae4` |
 
 The v19/schema-6 Color-chart commitment changed only the `checkpoint_open`
 document-digest checksum from `eca2df7e74020108` to `8847f8440d290c18`.
@@ -148,14 +156,40 @@ output-color-guard result digest to `cfb6b288963c78ba` quick and
 `2b2196e06f7198b3` full. Workload, harness logic, approved envelope,
 payload-access route, and `revision-max` remained unchanged.
 
-The explicitly approved M27B rebaseline removes the retired drawing-model
-scenario and retains the nine raster/current-product scenarios listed above.
+The explicitly approved M27B rebaseline removed the retired drawing-model
+scenario and retained the nine raster/current-product scenarios listed above.
 Native v27/replay epoch 24, document digest schema 10, editor schema 7, and
-composite schema 4 are the exact-current contract. Those versioned commitments
-change `canonical_replay` to `70d3465b6732887e`, `checkpoint_open` to
+composite schema 4 were that baseline's exact-current contract. Those versioned commitments
+changed `canonical_replay` to `70d3465b6732887e`, `checkpoint_open` to
 `bcf482082855c1f2`, and `output_color_guard` to `1005f8901846f431` quick /
 `558cb3aacd55afd9` full. All retained workload parameters and semantic counters
 remain unchanged; no wall-clock envelope or `revision-max` expression is widened.
+
+The explicitly approved Batch v3 replacement advances the current contract to
+native v28/replay epoch 25/document-state schema 11. It replaces only the retired
+`batch_preview` sequence/Filter fixture: construction now writes four quick or
+sixteen full native files before timing, each with one patterned straight-RGBA8
+color plane and one unique exact Color Replace row. The timed interval opens and
+fully replays every file in both preview and dry-run, while `{stem}` plus a
+four-digit index keeps all prospective output paths unique. Input dimensions
+remain 16 square quick and 32 square full. Semantic counters remain exactly
+`iterations=2`, `input_items=4/16`, `output_items=8/32`, `reused_items=0`,
+`document_revision=0`, `history_entries=0`, `successes=4/16`, and `failures=1`
+for the intentional invalid-version probe.
+
+After one discarded warm-up per profile, the complete primary `batch_preview`
+samples were 14,767,375; 6,771,084; 6,250,334; 6,072,125; 6,706,042 ns quick
+(median 6,706,042 ns) and 31,496,500; 21,184,833; 23,868,166; 17,591,958;
+20,480,292 ns full (median 21,184,833 ns). A separate diagnostic batch retained
+the same counters and checksums with 14,216,292; 4,049,542; 3,598,625; 4,280,333;
+3,788,792 ns quick (median 4,049,542 ns) and 22,633,209; 20,987,917; 19,087,125;
+21,122,625; 18,912,500 ns full (median 20,987,917 ns). All processes produced
+`9ae6835726a36053` quick and `d1be39275687aa9b` full. Measurements were taken on
+an `aarch64-pc-windows-msvc` Parallels host with 8 GiB memory and therefore do
+not establish or modify the approved x64 wall-clock envelopes. The new empty
+fill-protection commitment changes only `checkpoint_open` and
+`output_color_guard` digests as recorded above; their workloads, counters,
+envelopes, and the `revision-max` expression are unchanged.
 
 After one discarded warm-up per profile, the accepted M22
 `output_color_guard` samples were 74,551,800; 74,892,300; 75,355,400;
@@ -175,8 +209,8 @@ to Windows build 26200.9168 on the MSI MS-7E26 host with an AMD Ryzen 9
 scheme. A materially different host, target, toolchain, or power mode needs a
 separately approved range.
 
-The fixed quick fixture uses InkScript source ID 913, exact-current file v2/catalog v3 and replay
-epoch 24, 128 `set_plane_properties` steps, four successful 4-by-4 current-v27
+The fixed quick fixture uses InkScript source ID 913, exact-current file v2/catalog v4 and replay
+epoch 25, 128 `set_plane_properties` steps, four successful 4-by-4 current-v28
 inputs, one 256 KiB inline straight-sRGB RGBA8 asset, one Save failure and one
 pre-linearization cancellation. Every successful output is reopened through
 full Genesis/asset/procedure replay without a checkpoint cache. The runner is

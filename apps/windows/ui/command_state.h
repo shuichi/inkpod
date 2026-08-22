@@ -31,7 +31,7 @@ struct CommandState {
     bool checked{};
 };
 
-inline constexpr std::size_t kProductionCommandStateCount = 354U;
+inline constexpr std::size_t kProductionCommandStateCount = 335U;
 using CommandStateSet = std::array<CommandState, kProductionCommandStateCount>;
 
 struct DocumentCommandStateInput {
@@ -111,10 +111,10 @@ struct ColorCommandStateInput {
 struct BatchCommandStateInput {
     bool idle{true};
     bool has_operations{};
-    bool loaded_graph{};
     bool editable_item{};
     bool palette_visible{};
-    InkpodBatchOutputPolicy output_policy{INKPOD_BATCH_OUTPUT_DUPLICATE};
+    InkpodBatchOutputDestination output_destination{
+        INKPOD_BATCH_OUTPUT_NEW_TABS};
     InkpodBatchFailurePolicy failure_policy{INKPOD_BATCH_FAILURE_CONTINUE};
 };
 

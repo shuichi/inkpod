@@ -1,13 +1,16 @@
 # Cross-architecture determinism contract
 
-The current runtime replay contract is procedure format 27, replay epoch 24,
-canonical numeric version 1, and the digest of the closed 76-entry primitive
-catalog. Production `.inkpod` is exact-current v27; an optional verified
+The current runtime replay contract is procedure format 28, replay epoch 25,
+canonical numeric version 1, and the digest of the closed 77-entry primitive
+catalog. Production `.inkpod` is exact-current v28; an optional verified
 checkpoint preserves this contract and never replaces the authoritative journal.
-Epoch 24 and format 27 remove vector and Text/Annotation state, canonical
+Epoch 25 and format 28 add the dedicated sparse fill-protection mask and private
+`ApplyBatchOperations/canonical-v2`; exact-depth color replacement, atomic
+move-to-color-plane, mask replacement and erase replay as one ordered transaction.
+Epoch 24 and format 27 removed vector and Text/Annotation state, canonical
 procedures, persistent IDs, assets, snapshots, and composite inputs from the
-accepted replay model. Their former primitive IDs remain reserved tombstones;
-epoch 23 and format 26 input is rejected without migration.
+accepted replay model. Their former primitive IDs remain reserved tombstones.
+Epoch 24/format 27 input is rejected without migration.
 Epoch 23 and format 26 add `EditVanishingPoints/canonical-v2`: bounded stable-ID
 objects encode owner layer, signed milli-pixel origin, normalized milli-degree
 interval/phase, exact RGBA8/16 color, opacity, and visibility. Snapshot radial
@@ -82,7 +85,7 @@ The primitive catalog digest covers entries in ascending stable-ID order:
 primitive ID, schema version, length-framed canonical name, BLAKE3 argument-
 schema digest, semantics revision, work-formula ID, and replay-policy byte.
 Tests lock its digest
-together with format version 27 and replay epoch 24. A semantic change that updates
+together with format version 28 and replay epoch 25. A semantic change that updates
 the catalog or any golden without advancing both version and epoch therefore
 fails the public contract review rather than silently accepting a new result.
 

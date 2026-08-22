@@ -7702,328 +7702,310 @@ int RunImageEffectsSmoke(ApplicationHost& state) noexcept {
         : 604;
 }
 
+
 int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
     constexpr wchar_t settings_path[] = L"inkpod-batch-ui-smoke.inkbatch";
-    constexpr wchar_t output_path[] = L"inkpod-batch-windows-smoke_0001.inkpod";
+    DeleteFileW(settings_path);
     const auto cleanup = [&]() noexcept {
+        inkpod_batch_task_release(&state.batch.task);
         DeleteFileW(settings_path);
-        DeleteFileW(output_path);
     };
-    cleanup();
     if (state.engine == nullptr || state.Workspace().batch_palette == nullptr
         || GetParent(state.Workspace().batch_palette)
             != state.Workspace().windows.window
-        || (static_cast<DWORD>(GetWindowLongPtrW(
-                state.Workspace().batch_palette,
-                GWL_STYLE))
-            & WS_CHILD)
-            == 0U) {
-        return 700;
-    }
-    InkpodDocumentInfo pair_document = EmptyDocumentInfo();
-    if (!QueryDocument(state, pair_document)) {
-        return 926;
-    }
-    constexpr std::array<std::uint8_t, 4U> pair_source_old{1U, 2U, 3U, 255U};
-    constexpr std::array<std::uint8_t, 4U> pair_source_new{4U, 5U, 6U, 255U};
-    constexpr std::array<std::uint8_t, 4U> pair_name_old{'o', 'l', 'd', '1'};
-    constexpr std::array<std::uint8_t, 4U> pair_name_new{'n', 'e', 'w', '2'};
-    const std::array<InkpodSequenceCellInput, 2U> pair_cells{
-        InkpodSequenceCellInput{
-            sizeof(InkpodSequenceCellInput),
-            0U,
-            pair_name_old.data(),
-            pair_name_old.size(),
-            InkpodRasterSourceInput{
-                sizeof(InkpodRasterSourceInput), INKPOD_STORAGE_RGBA8, 0U,
-                pair_document.document_uuid_high,
-                pair_document.document_uuid_low,
-                1U, 1U, 1U, 96000U, 96000U,
-                InkpodFrameRect{0, 0, 1, 1}, pair_source_old.data(),
-                pair_source_old.size(), 4U}},
-        InkpodSequenceCellInput{
-            sizeof(InkpodSequenceCellInput),
-            0U,
-            pair_name_new.data(),
-            pair_name_new.size(),
-            InkpodRasterSourceInput{
-                sizeof(InkpodRasterSourceInput), INKPOD_STORAGE_RGBA8, 0U,
-                pair_document.document_uuid_high ^ UINT64_C(1),
-                pair_document.document_uuid_low,
-                2U, 1U, 1U, 96000U, 96000U,
-                InkpodFrameRect{0, 0, 1, 1}, pair_source_new.data(),
-                pair_source_new.size(), 4U}}};
-    const InkpodSequenceInput pair_sequence{
-        sizeof(InkpodSequenceInput), 0U, 0U, pair_cells.data(), pair_cells.size(),
-        sizeof(InkpodSequenceCellInput)};
-    if (state.engine->Invoke(
-            [&pair_sequence](InkpodCore* core) {
-                return inkpod_core_sequence_set(core, &pair_sequence);
-            },
-            false,
-            false) != INKPOD_STATUS_OK) {
-        return 926;
-    }
-    HMENU menu = GetMenu(state.Workspace().windows.window);
-    if (menu == nullptr
-        || GetMenuState(menu, IDM_WINDOW_BATCH, MF_BYCOMMAND) == static_cast<UINT>(-1)
-        || DirectCommandParent(menu, IDM_WINDOW_BATCH) == nullptr
-        || DirectCommandParent(menu, IDM_WINDOW_BATCH)
-            != DirectCommandParent(menu, IDM_WINDOW_TOOL_PALETTE)
-        || GetMenuState(menu, IDM_COLOR_PIN, MF_BYCOMMAND)
-            != static_cast<UINT>(-1)
-        || GetMenuState(menu, IDM_BATCH_PIN, MF_BYCOMMAND)
-            != static_cast<UINT>(-1)
-        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_WINDOW_BATCH, 0) != 1
-        || !state.Workspace().windows.workspace.dock.IsPaneVisible(
-            DockPaneType::Batch)) {
+        || BatchPaletteEntries().size() != 4U
+        || BatchPaletteEntries()[0].command != IDM_BATCH_ADD_COLOR_REPLACE
+        || BatchPaletteEntries()[1].command
+            != IDM_BATCH_ADD_MOVE_TO_COLOR_PLANE
+        || BatchPaletteEntries()[2].command != IDM_BATCH_ADD_MASKING
+        || BatchPaletteEntries()[3].command != IDM_BATCH_ADD_ERASE
+        || GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_OPERATIONS)
+            == nullptr
+        || state.Workspace().batch_dialog.parameter_host == nullptr) {
         cleanup();
         return 701;
     }
-    const HWND batch_pin = GetDlgItem(
-        state.Workspace().batch_palette, IDC_BATCH_PIN);
-    if (GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_TARGET) == nullptr
-        || !WindowUsesNamedIconButton(
-            batch_pin)
-        || GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_JOB) == nullptr
-        || !WindowHasAccessibleName(
-            GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_TARGET))
-        || !WindowHasAccessibleName(
-            GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_JOB))
-        || !PaneButtonsFit(state.Workspace().batch_palette)) {
-        cleanup();
-        return 925;
-    }
-    SendMessageW(batch_pin, BM_CLICK, 0, 0);
-    if (state.routing.pane_targets.Find(state.routing.batch_pane)->policy
-        != inkpod::app::PaneTargetPolicy::PinnedDocument) {
-        cleanup();
-        return 925;
-    }
-    SendMessageW(batch_pin, BM_CLICK, 0, 0);
-    if (state.routing.pane_targets.Find(state.routing.batch_pane)->policy
-        != inkpod::app::PaneTargetPolicy::FollowActiveView) {
-        cleanup();
-        return 925;
-    }
-    state.batch.output_folder = L".";
-    state.batch.basename = L"inkpod-batch-windows-smoke";
-    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_INPUT_CURRENT, 0) != 1
-        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_INPUT_RANGE, 0) != 1
-        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_OUTPUT_SETTINGS, 0) != 1
-        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_ADD_COLOR_REPLACE, 0) != 1
-        || state.batch.operations.size() != 1U
-        || state.batch.operations[0].color_pairs.size() != 1U
-        || SendMessageW(
-               state.Workspace().windows.window,
-               WM_COMMAND,
-               IDM_BATCH_EXTRACT_PAIRS,
-               0) != 1
-        || state.batch.operations[0].color_pairs.size() != 1U
-        || state.batch.last_result.find(UiText(UiStringId::Text0447)) == std::wstring::npos) {
-        cleanup();
-        return 702;
-    }
-    try {
-        state.batch.operations[0].color_pairs.push_back(
-            state.batch.operations[0].color_pairs.front());
-    } catch (const std::bad_alloc&) {
-        cleanup();
-        return 702;
-    }
-    state.batch.operations[0].color_pairs[1].enabled = 0U;
     if (SendMessageW(
             state.Workspace().windows.window,
             WM_COMMAND,
-            IDM_BATCH_OPERATION_EDIT,
-            0) != 1
-        || state.batch.operations[0].color_pairs.size() != 2U
-        || state.batch.operations[0].color_pairs[1].enabled != 0U) {
+            IDM_WINDOW_BATCH,
+            0)
+            != 1
+        || !state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Batch)) {
         cleanup();
         return 702;
     }
-    const InkpodColorValue old_before = state.batch.operations[0].color_pairs[0].old_color;
-    const InkpodColorValue new_before = state.batch.operations[0].color_pairs[0].new_color;
-    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_REPLACE_SWAP, 0) != 1) {
+    state.batch.output_destination = INKPOD_BATCH_OUTPUT_NEW_TABS;
+    state.batch.naming_template = L"{stem}_{index:4}";
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_BATCH_INPUT_CURRENT,
+            0)
+            != 1
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_BATCH_ADD_COLOR_REPLACE,
+               0)
+            != 1
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_BATCH_ADD_MOVE_TO_COLOR_PLANE,
+               0)
+            != 1
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_BATCH_ADD_MASKING,
+               0)
+            != 1
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_BATCH_ADD_ERASE,
+               0)
+            != 1
+        || state.batch.operations.size() != 4U
+        || state.batch.operations[0].kind
+            != INKPOD_BATCH_OPERATION_COLOR_REPLACE
+        || state.batch.operations[1].kind
+            != INKPOD_BATCH_OPERATION_MOVE_TO_COLOR_PLANE
+        || state.batch.operations[2].kind != INKPOD_BATCH_OPERATION_MASKING
+        || state.batch.operations[3].kind != INKPOD_BATCH_OPERATION_ERASE) {
         cleanup();
         return 703;
     }
-    const auto& swapped = state.batch.operations[0].color_pairs[0];
-    if (std::memcmp(&swapped.old_color, &new_before, sizeof(new_before)) != 0
-        || std::memcmp(&swapped.new_color, &old_before, sizeof(old_before)) != 0
-        || state.batch.operations[0].color_pairs[1].enabled != 0U) {
+    BatchController::RefreshPalette(
+        state.batch, state.Workspace().batch_palette);
+    const HWND stages = GetDlgItem(
+        state.Workspace().batch_palette, IDC_BATCH_OPERATIONS);
+    if (ListView_GetItemCount(stages) != 6) {
         cleanup();
         return 704;
     }
-    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_ADD_BOUNDARY_AIRBRUSH, 0) != 1
-        || state.batch.operations.size() != 2U
-        || state.batch.operations.back().colors.size() < 2U
-        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_DRY_RUN, 0) != 1
-        || state.batch.report == nullptr
-        || state.batch.job_id.has_value()
-        || state.routing.pane_targets.Find(state.routing.batch_pane)->policy
-            != inkpod::app::PaneTargetPolicy::FollowActiveView
-        || state.batch.job_text.find(UiText(UiStringId::Text0621)) == std::wstring::npos
-        || !WindowHasAccessibleName(
-            GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_TARGET))
-        || !WindowHasAccessibleName(
-            GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_JOB))
-        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_OPERATION_REMOVE, 0) != 1
-        || state.batch.operations.size() != 1U) {
+    ListView_SetItemState(
+        stages, 0, LVIS_SELECTED | LVIS_FOCUSED,
+        LVIS_SELECTED | LVIS_FOCUSED);
+    PumpPendingWindowMessages();
+    if (state.batch.selected_stage != 0U
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_BATCH_OPERATION_REMOVE,
+               0)
+            != 0) {
         cleanup();
         return 705;
     }
-    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_ADD_MIRROR, 0) != 1
-        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_OPERATION_UP, 0) != 1
-        || state.batch.operations.front().kind != INKPOD_BATCH_OPERATION_MIRROR
-        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_OPERATION_DOWN, 0) != 1
-        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_OPERATION_EDIT, 0) != 1
-        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_OPERATION_REMOVE, 0) != 1
-        || state.batch.operations.size() != 1U
-        || state.batch.operations[0].kind != INKPOD_BATCH_OPERATION_COLOR_REPLACE) {
+    ListView_SetItemState(
+        stages, 2, LVIS_SELECTED | LVIS_FOCUSED,
+        LVIS_SELECTED | LVIS_FOCUSED);
+    PumpPendingWindowMessages();
+    if (state.batch.selected_stage != 2U
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_BATCH_OPERATION_DUPLICATE,
+               0)
+            != 1
+        || state.batch.operations.size() != 5U
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_BATCH_OPERATION_REMOVE,
+               0)
+            != 1
+        || state.batch.operations.size() != 4U) {
         cleanup();
         return 706;
     }
-    if (SendMessageW(
-            state.Workspace().windows.window,
-            WM_COMMAND,
-            IDM_BATCH_ADD_SEPARATION,
-            0) != 1
-        || state.batch.operations.back().kind != INKPOD_BATCH_OPERATION_SEPARATION) {
-        cleanup();
-        return 927;
+    for (auto& operation : state.batch.operations) {
+        operation.flags &= ~INKPOD_BATCH_OPERATION_ENABLED;
     }
-    state.batch.operations.back().parameters[1] =
-        INKPOD_BATCH_SEPARATION_SELECTION_MASK;
-    if (SendMessageW(
-            state.Workspace().windows.window,
-            WM_COMMAND,
-            IDM_BATCH_OPERATION_EDIT,
-            0) != 1
-        || state.batch.operations.back().parameters[1]
-            != INKPOD_BATCH_SEPARATION_SELECTION_MASK
-        || SendMessageW(
-               state.Workspace().windows.window,
-               WM_COMMAND,
-               IDM_BATCH_OPERATION_REMOVE,
-               0) != 1) {
-        cleanup();
-        return 927;
+    state.batch.operations.back().flags |= INKPOD_BATCH_OPERATION_ENABLED;
+    const LRESULT save_result = SendMessageW(
+        state.Workspace().windows.window,
+        WM_COMMAND,
+        IDM_BATCH_SAVE_SET,
+        0);
+    const DWORD saved_attributes = GetFileAttributesW(settings_path);
+    const LRESULT load_result = saved_attributes == INVALID_FILE_ATTRIBUTES
+        ? 0
+        : SendMessageW(
+              state.Workspace().windows.window,
+              WM_COMMAND,
+              IDM_BATCH_LOAD_SET,
+              0);
+    const std::size_t loaded_operation_count = state.batch.operations.size();
+    const bool loaded_graph_available = state.batch.graph != nullptr;
+    if (load_result == 1 && loaded_operation_count != 0U) {
+        ListView_SetItemState(
+            stages,
+            1,
+            LVIS_SELECTED | LVIS_FOCUSED,
+            LVIS_SELECTED | LVIS_FOCUSED);
+        PumpPendingWindowMessages();
     }
-    if (SendMessageW(
-            state.Workspace().windows.window,
-            WM_COMMAND,
-            IDM_BATCH_ADD_CONTINUOUS_FILL,
-            0) != 1
-        || state.batch.operations.back().seeds.size() != 1U) {
-        cleanup();
-        return 928;
-    }
-    try {
-        state.batch.operations.back().seeds.push_back(
-            state.batch.operations.back().seeds.front());
-    } catch (const std::bad_alloc&) {
-        cleanup();
-        return 928;
-    }
-    state.batch.operations.back().seeds[1].flags &= ~INKPOD_BATCH_SEED_ENABLED;
-    state.batch.operations.back().flags |=
-        INKPOD_BATCH_OPERATION_CONFIGURE_EACH_RUN;
-    if (SendMessageW(
-            state.Workspace().windows.window,
-            WM_COMMAND,
-            IDM_BATCH_OPERATION_EDIT,
-            0) != 1
-        || state.batch.operations.back().seeds.size() != 2U
-        || (state.batch.operations.back().seeds[1].flags
-                & INKPOD_BATCH_SEED_ENABLED)
-            != 0U
-        || SendMessageW(
-               state.Workspace().windows.window,
-               WM_COMMAND,
-               IDM_BATCH_OPERATION_REMOVE,
-               0) != 1
-        || state.batch.operations.size() != 1U) {
-        cleanup();
-        return 928;
-    }
-    const LRESULT input_count = SendDlgItemMessageW(
-        state.Workspace().batch_palette, IDC_BATCH_INPUTS, LB_GETCOUNT, 0, 0);
-    const LRESULT operation_count = SendDlgItemMessageW(
-        state.Workspace().batch_palette, IDC_BATCH_OPERATIONS, LB_GETCOUNT, 0, 0);
-    if (input_count != 1 || operation_count != 1
-        || GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_OUTPUT) == nullptr) {
+    const LRESULT duplicate_result = load_result == 1
+        ? SendMessageW(
+              state.Workspace().windows.window,
+              WM_COMMAND,
+              IDM_BATCH_OPERATION_DUPLICATE,
+              0)
+        : 0;
+    if (save_result != 1 || saved_attributes == INVALID_FILE_ATTRIBUTES
+        || load_result != 1 || !loaded_graph_available
+        || loaded_operation_count != 4U || duplicate_result != 1
+        || state.batch.operations.size() != 5U) {
+        std::fprintf(
+            stderr,
+            "batch save/load mismatch: save=%lld attrs=%lu load=%lld graph=%u "
+            "loaded=%llu duplicate=%lld final=%llu\n",
+            static_cast<long long>(save_result),
+            saved_attributes,
+            static_cast<long long>(load_result),
+            loaded_graph_available ? 1U : 0U,
+            static_cast<unsigned long long>(loaded_operation_count),
+            static_cast<long long>(duplicate_result),
+            static_cast<unsigned long long>(state.batch.operations.size()));
         cleanup();
         return 707;
     }
-    state.batch.operations[0].flags |=
-        INKPOD_BATCH_OPERATION_CONFIGURE_EACH_RUN;
-    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_SAVE_SET, 0) != 1
-        || GetFileAttributesW(settings_path) == INVALID_FILE_ATTRIBUTES
-        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_LOAD_SET, 0) != 1
-        || !state.batch.loaded_graph || state.batch.graph == nullptr) {
+    state.batch.operations.erase(
+        state.batch.operations.begin() + state.batch.selected_operation);
+    state.batch.selected_operation = 3U;
+    state.batch.selected_stage = 4U;
+    BatchController::ResetDerivedState(state.batch);
+    BatchController::RefreshPalette(
+        state.batch, state.Workspace().batch_palette);
+    const LRESULT preview_result = SendMessageW(
+        state.Workspace().windows.window,
+        WM_COMMAND,
+        IDM_BATCH_PREVIEW,
+        0);
+    const bool preview_available = state.batch.preview != nullptr;
+    const LRESULT dry_run_result = preview_result == 1
+        ? SendMessageW(
+              state.Workspace().windows.window,
+              WM_COMMAND,
+              IDM_BATCH_DRY_RUN,
+              0)
+        : 0;
+    if (preview_result != 1 || !preview_available || dry_run_result != 1
+        || state.batch.report == nullptr) {
+        const auto issued = state.routing.targets.Capture();
+        const auto pane_target = state.routing.pane_targets.CaptureAction(
+            state.routing.batch_pane, issued, state.routing.targets);
+        BatchController diagnostic_controller(
+            state.lifetime,
+            state.Workspace().windows,
+            state.Workspace().job_progress,
+            state.Workspace().job_progress_state,
+            state.Workspace().batch_palette,
+            state.batch,
+            *state.engine);
+        const InkpodStatus diagnostic_status = diagnostic_controller.Preview(
+            pane_target.context, INKPOD_BATCH_SCOPE_ALL);
+        std::array<std::uint8_t, 1024U> ffi_diagnostic{};
+        std::uint64_t ffi_diagnostic_bytes{};
+        const InkpodStatus ffi_diagnostic_status = inkpod_error_message_copy(
+            ffi_diagnostic.data(),
+            ffi_diagnostic.size(),
+            &ffi_diagnostic_bytes);
+        std::fprintf(
+            stderr,
+            "batch preview mismatch: preview=%lld handle=%u dry=%lld report=%u "
+            "pane=%u doc=%u generation=%u enabled=%u status=%u "
+            "diagnostic_status=%u diagnostic=%s\n",
+            static_cast<long long>(preview_result),
+            preview_available ? 1U : 0U,
+            static_cast<long long>(dry_run_result),
+            state.batch.report != nullptr ? 1U : 0U,
+            static_cast<unsigned>(pane_target.status),
+            pane_target.context.document_session.has_value() ? 1U : 0U,
+            pane_target.context.generation.has_value() ? 1U : 0U,
+            IsCommandEnabled(
+                state.Workspace().command_states, IDM_BATCH_PREVIEW) ? 1U : 0U,
+            diagnostic_status,
+            ffi_diagnostic_status,
+            reinterpret_cast<const char*>(ffi_diagnostic.data()));
         cleanup();
         return 708;
     }
-    InkpodBatchGraphInfo graph_info{};
-    graph_info.struct_size = sizeof(graph_info);
-    if (inkpod_batch_graph_get_info(state.batch.graph, &graph_info) != INKPOD_STATUS_OK
-        || graph_info.version != INKPOD_BATCH_GRAPH_VERSION
-        || graph_info.operation_count != 1U
-        || graph_info.output_policy != INKPOD_BATCH_OUTPUT_DUPLICATE
-        || state.batch.operations.size() != 1U
-        || (state.batch.operations[0].flags
-                & INKPOD_BATCH_OPERATION_CONFIGURE_EACH_RUN)
-            == 0U) {
+    InkpodBatchReportInfo report_info{};
+    report_info.struct_size = sizeof(report_info);
+    if (inkpod_batch_report_get_info(state.batch.report, &report_info)
+            != INKPOD_STATUS_OK
+        || report_info.failure_count != 0U || report_info.item_count == 0U) {
         cleanup();
         return 709;
     }
-    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_PREVIEW, 0) != 1
-        || state.batch.preview == nullptr
-        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_DRY_RUN, 0) != 1
-        || state.batch.report == nullptr
-        || GetFileAttributesW(output_path) != INVALID_FILE_ATTRIBUTES) {
-        cleanup();
-        return 710;
-    }
-    InkpodBatchReportInfo report_info{};
-    report_info.struct_size = sizeof(report_info);
-    InkpodBatchReportItem report_item{};
-    report_item.struct_size = sizeof(report_item);
-    if (inkpod_batch_report_get_info(state.batch.report, &report_info) != INKPOD_STATUS_OK
-        || report_info.failure_count != 0U || report_info.item_count == 0U
-        || inkpod_batch_report_get(state.batch.report, 0U, &report_item)
-            != INKPOD_STATUS_OK
-        || report_item.outcome != INKPOD_BATCH_ITEM_DRY_RUN) {
-        cleanup();
-        return 711;
-    }
+    const std::size_t sessions_before = state.engine->SessionCount();
+    const auto previous_session = state.routing.targets.DocumentSession();
     if (SendMessageW(
             state.Workspace().windows.window,
             WM_COMMAND,
             IDM_BATCH_RUN_CURRENT,
-            0) != 1) {
-        std::fwprintf(
+            0)
+            != 1
+        || state.engine->SessionCount() != sessions_before + 1U
+        || state.routing.targets.DocumentSession() == previous_session) {
+        cleanup();
+        return 710;
+    }
+    InkpodDocumentInfo staged_document{};
+    staged_document.struct_size = sizeof(staged_document);
+    const auto staged_session = state.routing.targets.DocumentSession();
+    const bool staged_info_available = state.engine->GetDocumentInfo(
+            staged_session,
+            state.routing.targets.CurrentGeneration(),
+            staged_document);
+    const bool staged_dirty = staged_info_available
+        && (staged_document.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U;
+    const bool staged_closed = state.CloseDocumentSession(staged_session);
+    if (!staged_info_available || !staged_dirty || !staged_closed) {
+        std::fprintf(
             stderr,
-            L"batch production run failed: %ls\n",
-            state.engine->LastError().c_str());
+            "batch new-tab mismatch: info=%u flags=%u dirty=%u close=%u\n",
+            staged_info_available ? 1U : 0U,
+            staged_document.flags,
+            staged_dirty ? 1U : 0U,
+            staged_closed ? 1U : 0U);
         cleanup();
-        return 941;
+        return 710;
     }
-    if (GetFileAttributesW(output_path) == INVALID_FILE_ATTRIBUTES) {
+    if (inkpod_batch_task_create(&state.batch.task) != INKPOD_STATUS_OK) {
         cleanup();
-        return 942;
+        return 711;
     }
-    if (inkpod_batch_report_get_info(state.batch.report, &report_info)
-        != INKPOD_STATUS_OK) {
+    BatchController::RefreshPalette(
+        state.batch, state.Workspace().batch_palette);
+    if (IsWindowEnabled(GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_ADD))
+        || IsWindowEnabled(
+            GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_RUN_ALL))
+        || !IsWindowEnabled(
+            GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_CANCEL))
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_BATCH_CANCEL,
+               0)
+            != 1) {
         cleanup();
-        return 943;
+        return 712;
     }
-    if (report_info.failure_count != 0U) {
-        cleanup();
-        return 944;
-    }
-    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_WINDOW_BATCH, 0) != 1
+    inkpod_batch_task_release(&state.batch.task);
+    BatchController::RefreshPalette(
+        state.batch, state.Workspace().batch_palette);
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_WINDOW_BATCH,
+            0)
+            != 1
         || state.Workspace().windows.workspace.dock.IsPaneVisible(
             DockPaneType::Batch)) {
         cleanup();

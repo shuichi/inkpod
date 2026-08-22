@@ -55,29 +55,44 @@ bool WidePathToUtf8(
         == required;
 }
 
-InkpodFilterInput FilterInputFor(const app::FilterJob& job) noexcept {
-    InkpodFilterInput input{};
-    input.struct_size = sizeof(input);
-    input.kind = job.kind;
-    input.plane_id = job.plane_id;
-    input.channel = job.channel;
-    input.interpolation = job.interpolation;
-    input.parameter_0 = job.parameters[0];
-    input.parameter_1 = job.parameters[1];
-    input.parameter_2 = job.parameters[2];
-    input.parameter_3 = job.parameters[3];
-    input.parameter_4 = job.parameters[4];
-    if (!job.points.empty()) {
-        input.points = job.points.data();
-        input.point_count = job.points.size();
-        input.point_stride_bytes = sizeof(InkpodCurvePoint);
+bool Utf8ToWide(
+    const std::uint8_t* text,
+    std::uint64_t bytes,
+    std::wstring& output) noexcept {
+    if (bytes == 0U) {
+        output.clear();
+        return true;
     }
-    return input;
+    if (text == nullptr || bytes > static_cast<std::uint64_t>(INT_MAX)) {
+        return false;
+    }
+    const int required = MultiByteToWideChar(
+        CP_UTF8,
+        MB_ERR_INVALID_CHARS,
+        reinterpret_cast<const char*>(text),
+        static_cast<int>(bytes),
+        nullptr,
+        0);
+    if (required <= 0) {
+        return false;
+    }
+    try {
+        output.resize(static_cast<std::size_t>(required));
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+    return MultiByteToWideChar(
+               CP_UTF8,
+               MB_ERR_INVALID_CHARS,
+               reinterpret_cast<const char*>(text),
+               static_cast<int>(bytes),
+               output.data(),
+               required)
+        == required;
 }
 
 void FillOperationInput(
     const app::BatchOperationUi& source,
-    InkpodFilterInput& filter,
     InkpodBatchOperationInput& destination) noexcept {
     destination = {};
     destination.struct_size = sizeof(destination);
@@ -89,30 +104,19 @@ void FillOperationInput(
     destination.layer_kind = source.layer_kind;
     destination.plane_kind = source.plane_kind;
     destination.missing_policy = source.missing_policy;
-    std::copy(
-        source.parameters.begin(),
-        source.parameters.end(),
-        std::begin(destination.parameters));
-    destination.color_0 = source.color_0;
-    destination.color_1 = source.color_1;
     destination.colors.struct_size = sizeof(destination.colors);
+    destination.colors.reserved = 0U;
+    destination.colors.feature_flags = INKPOD_FEATURE_NONE;
     destination.colors.colors = source.colors.empty()
         ? nullptr
         : source.colors.data();
     destination.colors.color_count = source.colors.size();
     destination.colors.color_stride_bytes = sizeof(InkpodColorValue);
-    if (source.kind == INKPOD_BATCH_OPERATION_FILTER) {
-        filter = FilterInputFor(source.filter);
-        destination.filter = &filter;
-    }
     destination.color_pairs = source.color_pairs.empty()
         ? nullptr
         : source.color_pairs.data();
     destination.color_pair_count = source.color_pairs.size();
     destination.color_pair_stride_bytes = sizeof(InkpodBatchColorPairInput);
-    destination.seeds = source.seeds.empty() ? nullptr : source.seeds.data();
-    destination.seed_count = source.seeds.size();
-    destination.seed_stride_bytes = sizeof(InkpodBatchSeedInput);
 }
 
 bool ReadOperation(
@@ -123,8 +127,7 @@ bool ReadOperation(
     info.struct_size = sizeof(info);
     if (inkpod_batch_graph_get_operation(graph, index, &info)
         != INKPOD_STATUS_OK
-        || info.color_count > 4'096U || info.color_pair_count > 4'096U
-        || info.seed_count > 4'096U || info.curve_point_count > 4'096U) {
+        || info.color_count > 4'096U || info.color_pair_count > 4'096U) {
         return false;
     }
     try {
@@ -136,26 +139,25 @@ bool ReadOperation(
         operation.layer_kind = info.layer_kind;
         operation.plane_kind = info.plane_kind;
         operation.missing_policy = info.missing_policy;
-        std::copy(
-            std::begin(info.parameters),
-            std::end(info.parameters),
-            operation.parameters.begin());
-        operation.color_0 = info.color_0;
-        operation.color_1 = info.color_1;
-        operation.filter.kind = info.filter_kind;
-        operation.filter.channel = info.filter_channel;
-        operation.filter.interpolation = info.filter_interpolation;
-        std::copy(
-            std::begin(info.filter_parameters),
-            std::end(info.filter_parameters),
-            operation.filter.parameters.begin());
         operation.colors.resize(static_cast<std::size_t>(info.color_count));
         operation.color_pairs.resize(
             static_cast<std::size_t>(info.color_pair_count));
-        operation.seeds.resize(static_cast<std::size_t>(info.seed_count));
-        operation.filter.points.resize(
-            static_cast<std::size_t>(info.curve_point_count));
-        operation.label = UiText(UiStringId::Text0925);
+        switch (operation.kind) {
+            case INKPOD_BATCH_OPERATION_COLOR_REPLACE:
+                operation.label = UiText(UiStringId::ToolColorReplacement);
+                break;
+            case INKPOD_BATCH_OPERATION_MOVE_TO_COLOR_PLANE:
+                operation.label = UiText(UiStringId::BatchMoveToColorPlane);
+                break;
+            case INKPOD_BATCH_OPERATION_MASKING:
+                operation.label = UiText(UiStringId::BatchMasking);
+                break;
+            case INKPOD_BATCH_OPERATION_ERASE:
+                operation.label = UiText(UiStringId::BatchErase);
+                break;
+            default:
+                return false;
+        }
     } catch (const std::bad_alloc&) {
         return false;
     }
@@ -172,22 +174,6 @@ bool ReadOperation(
             sizeof(InkpodBatchColorPairInput);
         if (inkpod_batch_graph_get_operation_color_pair(
                 graph, index, row, &operation.color_pairs[row])
-            != INKPOD_STATUS_OK) {
-            return false;
-        }
-    }
-    for (std::size_t row = 0U; row < operation.seeds.size(); ++row) {
-        operation.seeds[row].struct_size = sizeof(InkpodBatchSeedInput);
-        if (inkpod_batch_graph_get_operation_seed(
-                graph, index, row, &operation.seeds[row])
-            != INKPOD_STATUS_OK) {
-            return false;
-        }
-    }
-    for (std::size_t row = 0U; row < operation.filter.points.size(); ++row) {
-        operation.filter.points[row].struct_size = sizeof(InkpodCurvePoint);
-        if (inkpod_batch_graph_get_operation_curve_point(
-                graph, index, row, &operation.filter.points[row])
             != INKPOD_STATUS_OK) {
             return false;
         }
@@ -214,85 +200,72 @@ BatchController::BatchController(
       engine_(engine) {}
 
 InkpodStatus BatchController::BuildGraph() noexcept {
-    const auto& source_operations = batch_.run_operations.empty()
-        ? batch_.operations
-        : batch_.run_operations;
-    if (source_operations.empty()) {
+    if (batch_.inputs.empty() || batch_.operations.empty()) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     try {
-        std::vector<InkpodFilterInput> filters(source_operations.size());
-        std::vector<InkpodBatchOperationInput> operations(source_operations.size());
-        for (std::size_t index = 0; index < source_operations.size(); ++index) {
-            FillOperationInput(
-                source_operations[index], filters[index], operations[index]);
+        std::vector<InkpodBatchOperationInput> operations(batch_.operations.size());
+        for (std::size_t index = 0; index < batch_.operations.size(); ++index) {
+            FillOperationInput(batch_.operations[index], operations[index]);
         }
-        if (batch_.loaded_graph && batch_.graph != nullptr) {
-            if (batch_.run_operations.empty()) {
-                return INKPOD_STATUS_OK;
-            }
-            InkpodBatchGraph* run_graph{};
-            const InkpodStatus status = inkpod_batch_graph_clone_with_operations(
-                batch_.graph,
-                operations.data(),
-                operations.size(),
-                sizeof(InkpodBatchOperationInput),
-                &run_graph);
-            if (status == INKPOD_STATUS_OK) {
-                inkpod_batch_graph_release(&batch_.run_graph);
-                batch_.run_graph = run_graph;
-            }
-            return status;
-        }
+
         inkpod_batch_graph_release(&batch_.run_graph);
-        std::vector<std::uint8_t> input_path;
+        std::vector<std::vector<std::uint8_t>> input_paths(batch_.inputs.size());
+        std::vector<InkpodBatchInput> inputs(batch_.inputs.size());
         std::vector<std::uint8_t> output_folder;
-        std::vector<std::uint8_t> basename;
-        if ((!batch_.input_path.empty()
-                && !WidePathToUtf8(batch_.input_path, input_path))
-            || (!batch_.output_folder.empty()
+        std::vector<std::uint8_t> naming_template;
+        std::vector<std::uint8_t> graph_name;
+        for (std::size_t index = 0U; index < batch_.inputs.size(); ++index) {
+            const auto& source = batch_.inputs[index];
+            if (!source.path.empty()
+                && !WidePathToUtf8(source.path, input_paths[index])) {
+                return INKPOD_STATUS_INVALID_ARGUMENT;
+            }
+            auto& destination = inputs[index];
+            destination.struct_size = sizeof(destination);
+            destination.kind = source.kind;
+            destination.feature_flags = INKPOD_FEATURE_NONE;
+            destination.path_utf8 = input_paths[index].empty()
+                ? nullptr
+                : input_paths[index].data();
+            destination.path_bytes = input_paths[index].size();
+            destination.first_cell = source.first_cell;
+            destination.last_cell = source.last_cell;
+        }
+        if ((!batch_.output_folder.empty()
                 && !WidePathToUtf8(batch_.output_folder, output_folder))
-            || (!batch_.basename.empty()
-                && !WidePathToUtf8(batch_.basename, basename))) {
+            || (!batch_.naming_template.empty()
+                && !WidePathToUtf8(batch_.naming_template, naming_template))
+            || !WidePathToUtf8(batch_.set_name, graph_name)) {
             return INKPOD_STATUS_INVALID_ARGUMENT;
         }
-        InkpodBatchInput batch_input{};
-        batch_input.struct_size = sizeof(batch_input);
-        batch_input.kind = batch_.input_kind;
-        batch_input.path_utf8 = input_path.empty() ? nullptr : input_path.data();
-        batch_input.path_bytes = input_path.size();
-        batch_input.first_cell = batch_.first_cell;
-        batch_input.last_cell = batch_.last_cell;
 
-        static constexpr std::array<std::uint8_t, 17U> graph_name{
-            'W','i','n','d','o','w','s',' ','B','a','t','c','h',' ','S','e','t'};
         InkpodBatchGraphInput input{};
         input.struct_size = sizeof(input);
         input.version = INKPOD_BATCH_GRAPH_VERSION;
+        input.feature_flags = INKPOD_FEATURE_NONE;
         input.name_utf8 = graph_name.data();
         input.name_bytes = graph_name.size();
-        input.inputs = &batch_input;
-        input.input_count = 1U;
-        input.input_stride_bytes = sizeof(batch_input);
+        input.inputs = inputs.data();
+        input.input_count = inputs.size();
+        input.input_stride_bytes = sizeof(InkpodBatchInput);
         input.operations = operations.data();
         input.operation_count = operations.size();
         input.operation_stride_bytes = sizeof(InkpodBatchOperationInput);
-        input.output_policy = batch_.output_policy;
+        input.output_destination = batch_.output_destination;
         input.failure_policy = batch_.failure_policy;
-        input.output_flags = (batch_.cell_folder
-                                  ? INKPOD_BATCH_OUTPUT_CELL_FOLDER
-                                  : 0U)
-            | (batch_.descending ? INKPOD_BATCH_OUTPUT_DESCENDING : 0U)
-            | (batch_.preview_before_save
-                   ? INKPOD_BATCH_OUTPUT_PREVIEW_BEFORE_SAVE
-                   : 0U);
+        input.output_flags = batch_.preview_before_save
+            ? INKPOD_BATCH_OUTPUT_PREVIEW_BEFORE_SAVE
+            : 0U;
         input.output_folder_utf8 = output_folder.empty()
             ? nullptr
             : output_folder.data();
         input.output_folder_bytes = output_folder.size();
-        input.basename_utf8 = basename.empty() ? nullptr : basename.data();
-        input.basename_bytes = basename.size();
-        input.start_number = batch_.start_number;
+        input.naming_template_utf8 = naming_template.empty()
+            ? nullptr
+            : naming_template.data();
+        input.naming_template_bytes = naming_template.size();
+        input.output_format = batch_.output_format;
         input.wait_milliseconds = batch_.wait_milliseconds;
         InkpodBatchGraph* graph{};
         const InkpodStatus status = inkpod_batch_graph_create(&input, &graph);
@@ -314,7 +287,6 @@ InkpodStatus BatchController::Preview(
         return INKPOD_STATUS_INVALID_STATE;
     }
     const InkpodStatus graph_status = BuildGraph();
-    batch_.run_operations.clear();
     if (graph_status != INKPOD_STATUS_OK) {
         return graph_status;
     }
@@ -324,11 +296,8 @@ InkpodStatus BatchController::Preview(
         *context.document_session,
         *context.generation,
         [batch, scope](InkpodCore* core) {
-            const InkpodBatchGraph* graph = batch->run_graph != nullptr
-                ? batch->run_graph
-                : batch->graph;
             return inkpod_core_batch_preview(
-                core, graph, scope, &batch->preview);
+                core, batch->graph, scope, &batch->preview);
         },
         false,
         false);
@@ -369,9 +338,40 @@ InkpodStatus BatchController::Start(
         return INKPOD_STATUS_INVALID_STATE;
     }
     const InkpodStatus graph_status = BuildGraph();
-    batch_.run_operations.clear();
     if (graph_status != INKPOD_STATUS_OK) {
         return graph_status;
+    }
+    if (!dry_run
+        && batch_.output_destination == INKPOD_BATCH_OUTPUT_NEW_TABS) {
+        if (!context.document_session.has_value()
+            || !context.generation.has_value()) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        InkpodBatchPreview* capacity_preview{};
+        InkpodStatus capacity_status = engine_.Invoke(
+            *context.document_session,
+            *context.generation,
+            [this, scope, &capacity_preview](InkpodCore* core) {
+                return inkpod_core_batch_preview(
+                    core, batch_.graph, scope, &capacity_preview);
+            },
+            false,
+            false);
+        std::uint64_t result_count{};
+        if (capacity_status == INKPOD_STATUS_OK) {
+            capacity_status = inkpod_batch_preview_count(
+                capacity_preview, &result_count);
+        }
+        inkpod_batch_preview_release(&capacity_preview);
+        if (capacity_status != INKPOD_STATUS_OK) {
+            return capacity_status;
+        }
+        const std::size_t existing = engine_.SessionCount();
+        if (existing > app::CoreHost::kMaximumDocumentSessions
+            || result_count
+                > app::CoreHost::kMaximumDocumentSessions - existing) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
     }
     bool preview_confirmed = !batch_.preview_before_save || dry_run;
     if (!preview_confirmed) {
@@ -408,12 +408,9 @@ InkpodStatus BatchController::Start(
             *context.document_session,
             *context.generation,
             [batch, scope, flags](InkpodCore* core) {
-                const InkpodBatchGraph* graph = batch->run_graph != nullptr
-                    ? batch->run_graph
-                    : batch->graph;
                 return inkpod_core_batch_execute(
                     core,
-                    graph,
+                    batch->graph,
                     scope,
                     flags,
                     batch->task,
@@ -455,12 +452,9 @@ InkpodStatus BatchController::Start(
     if (!engine_.Enqueue(
             context,
             [batch, scope, flags](InkpodCore* core) {
-                const InkpodBatchGraph* graph = batch->run_graph != nullptr
-                    ? batch->run_graph
-                    : batch->graph;
                 return inkpod_core_batch_execute(
                     core,
-                    graph,
+                    batch->graph,
                     scope,
                     flags,
                     batch->task,
@@ -508,16 +502,48 @@ InkpodStatus BatchController::LoadGraph(
     InkpodBatchGraphInfo info{};
     info.struct_size = sizeof(info);
     if (inkpod_batch_graph_get_info(loaded, &info) != INKPOD_STATUS_OK
+        || info.input_count == 0U || info.input_count > 16'384U
         || info.operation_count == 0U || info.operation_count > 1'024U) {
         inkpod_batch_graph_release(&loaded);
         return INKPOD_STATUS_INVALID_ARGUMENT;
     }
+    std::vector<app::BatchInputUi> inputs;
     std::vector<app::BatchOperationUi> operations;
+    std::wstring set_name;
+    std::wstring output_folder;
+    std::wstring naming_template;
     try {
+        inputs.resize(static_cast<std::size_t>(info.input_count));
         operations.resize(static_cast<std::size_t>(info.operation_count));
     } catch (const std::bad_alloc&) {
         inkpod_batch_graph_release(&loaded);
         return INKPOD_STATUS_INVALID_STATE;
+    }
+    if (!Utf8ToWide(info.name_utf8, info.name_bytes, set_name)
+        || !Utf8ToWide(
+            info.output_folder_utf8,
+            info.output_folder_bytes,
+            output_folder)
+        || !Utf8ToWide(
+            info.naming_template_utf8,
+            info.naming_template_bytes,
+            naming_template)) {
+        inkpod_batch_graph_release(&loaded);
+        return INKPOD_STATUS_INVALID_ARGUMENT;
+    }
+    for (std::size_t index = 0U; index < inputs.size(); ++index) {
+        InkpodBatchInput input{};
+        input.struct_size = sizeof(input);
+        if (inkpod_batch_graph_get_input(loaded, index, &input)
+                != INKPOD_STATUS_OK
+            || !Utf8ToWide(
+                input.path_utf8, input.path_bytes, inputs[index].path)) {
+            inkpod_batch_graph_release(&loaded);
+            return INKPOD_STATUS_INVALID_ARGUMENT;
+        }
+        inputs[index].kind = input.kind;
+        inputs[index].first_cell = input.first_cell;
+        inputs[index].last_cell = input.last_cell;
     }
     for (std::size_t index = 0U; index < operations.size(); ++index) {
         if (!ReadOperation(loaded, index, operations[index])) {
@@ -530,16 +556,17 @@ InkpodStatus BatchController::LoadGraph(
     inkpod_batch_graph_release(&batch_.run_graph);
     inkpod_batch_graph_release(&batch_.graph);
     batch_.graph = loaded;
+    batch_.set_name = std::move(set_name);
+    batch_.inputs = std::move(inputs);
     batch_.operations = std::move(operations);
-    batch_.run_operations.clear();
+    batch_.selected_stage = 0U;
     batch_.selected_operation = 0U;
-    batch_.loaded_graph = true;
-    batch_.output_policy = info.output_policy;
+    batch_.output_destination = info.output_destination;
+    batch_.output_format = info.output_format;
     batch_.failure_policy = info.failure_policy;
-    batch_.cell_folder =
-        (info.output_flags & INKPOD_BATCH_OUTPUT_CELL_FOLDER) != 0U;
-    batch_.descending =
-        (info.output_flags & INKPOD_BATCH_OUTPUT_DESCENDING) != 0U;
+    batch_.output_folder = std::move(output_folder);
+    batch_.naming_template = std::move(naming_template);
+    batch_.wait_milliseconds = info.wait_milliseconds;
     batch_.preview_before_save =
         (info.output_flags & INKPOD_BATCH_OUTPUT_PREVIEW_BEFORE_SAVE) != 0U;
     return INKPOD_STATUS_OK;
@@ -577,6 +604,7 @@ void BatchController::RefreshPalette(
     try {
         view.target_text = batch.target_text;
         view.job_text = batch.job_text;
+        view.set_name = batch.set_name;
         view.target_available = batch.target_available;
         view.pinned = batch.target_pinned;
         if (batch.task != nullptr && batch.job_id.has_value()) {
@@ -588,72 +616,56 @@ void BatchController::RefreshPalette(
                     + std::to_wstring(progress.total_work);
             }
         }
-        if (batch.input_kind == INKPOD_BATCH_INPUT_CURRENT_SEQUENCE) {
-            view.input_label = UiText(UiStringId::Text0790);
-        } else if (batch.input_kind == INKPOD_BATCH_INPUT_FOLDER) {
-            view.input_label = UiText(UiStringId::Text0303) + batch.input_path;
-        } else {
-            view.input_label = UiText(UiStringId::Text0281) + batch.input_path;
+        view.stage_labels.reserve(batch.operations.size() + 2U);
+        view.stage_labels.push_back(
+            std::wstring(UiText(UiStringId::BatchInput)) + L" — "
+            + std::to_wstring(batch.inputs.size()));
+        bool any_enabled = false;
+        for (const auto& operation : batch.operations) {
+            const bool enabled =
+                (operation.flags & INKPOD_BATCH_OPERATION_ENABLED) != 0U;
+            any_enabled = any_enabled || enabled;
+            view.stage_labels.push_back(
+                std::wstring(enabled ? L"✓ " : L"– ") + operation.label);
         }
-        if (batch.first_cell != 0U || batch.last_cell != 0U) {
-            view.input_label += UiText(UiStringId::Text0010);
-            view.input_label += batch.first_cell == 0U
-                ? UiText(UiStringId::Text0491)
-                : std::to_wstring(batch.first_cell);
-            view.input_label += UiText(UiStringId::RangeSeparator);
-            view.input_label += batch.last_cell == 0U
-                ? UiText(UiStringId::Text0747)
-                : std::to_wstring(batch.last_cell);
-        }
-
-        view.loaded_graph = batch.loaded_graph;
-        if (batch.loaded_graph && batch.graph != nullptr) {
-            InkpodBatchGraphInfo info{};
-            info.struct_size = sizeof(info);
-            if (inkpod_batch_graph_get_info(batch.graph, &info) == INKPOD_STATUS_OK) {
-                view.operation_labels.push_back(
-                    UiText(UiStringId::Text0924)
-                    + std::to_wstring(info.operation_count) + UiText(UiStringId::Text0014));
-            }
-        } else {
-            view.operation_labels.reserve(batch.operations.size());
-            for (const auto& operation : batch.operations) {
-                std::wstring label = operation.flags & INKPOD_BATCH_OPERATION_ENABLED
-                    ? L"✓ "
-                    : L"– ";
-                label += operation.label;
-                if (operation.flags & INKPOD_BATCH_OPERATION_CONFIGURE_EACH_RUN) {
-                    label += UiText(UiStringId::Text1046);
-                }
-                view.operation_labels.push_back(std::move(label));
-            }
-            if (!batch.operations.empty()) {
-                batch.selected_operation = std::min<std::uint32_t>(
-                    batch.selected_operation,
-                    static_cast<std::uint32_t>(batch.operations.size() - 1U));
-                view.selected_operation = batch.selected_operation;
-            }
+        view.stage_labels.push_back(UiText(UiStringId::BatchOutput));
+        batch.selected_stage = std::min<std::uint32_t>(
+            batch.selected_stage,
+            static_cast<std::uint32_t>(view.stage_labels.size() - 1U));
+        view.selected_stage = batch.selected_stage;
+        if (batch.selected_stage > 0U
+            && batch.selected_stage <= batch.operations.size()) {
+            batch.selected_operation = batch.selected_stage - 1U;
         }
 
-        const wchar_t* policy = UiText(UiStringId::Text0904);
-        if (batch.output_policy == INKPOD_BATCH_OUTPUT_NEW_SAVE) {
-            policy = UiText(UiStringId::Text0716);
-        } else if (batch.output_policy == INKPOD_BATCH_OUTPUT_EXPLICIT_OVERWRITE) {
-            policy = UiText(UiStringId::Text0727);
+        bool valid = true;
+        if (batch.inputs.empty()) {
+            view.validation_text = UiText(UiStringId::BatchInputRequired);
+            valid = false;
+        } else if (batch.operations.empty()) {
+            view.validation_text = UiText(UiStringId::BatchOperationRequired);
+            valid = false;
+        } else if (!any_enabled) {
+            view.validation_text =
+                UiText(UiStringId::BatchEnabledOperationRequired);
+            valid = false;
+        } else if (batch.output_destination == INKPOD_BATCH_OUTPUT_FOLDER
+                   && batch.output_folder.empty()) {
+            view.validation_text =
+                UiText(UiStringId::BatchOutputFolderRequired);
+            valid = false;
+        } else {
+            view.validation_text = batch.validation_text;
+            valid = view.validation_text.empty();
         }
-        view.output_text = UiText(UiStringId::Text0515);
-        view.output_text += policy;
-        view.output_text += L" / ";
-        view.output_text += batch.output_folder.empty()
-            ? UiText(UiStringId::Text1045)
-            : batch.output_folder;
         if (!batch.last_result.empty()) {
-            view.output_text += L"\r\n";
-            view.output_text += batch.last_result;
+            if (!view.validation_text.empty()) {
+                view.validation_text += L"\r\n";
+            }
+            view.validation_text += batch.last_result;
         }
         view.idle = batch.task == nullptr;
-        view.runnable = view.idle
-            && (batch.graph != nullptr || !batch.operations.empty());
+        view.runnable = view.idle && valid;
     } catch (const std::bad_alloc&) {
         return;
     }
@@ -665,7 +677,6 @@ void BatchController::ResetDerivedState(app::BatchUiState& batch) noexcept {
     inkpod_batch_report_release(&batch.report);
     inkpod_batch_graph_release(&batch.graph);
     inkpod_batch_graph_release(&batch.run_graph);
-    batch.loaded_graph = false;
     batch.last_result.clear();
 }
 

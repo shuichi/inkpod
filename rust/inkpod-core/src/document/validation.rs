@@ -219,8 +219,9 @@ mod tests {
                 main_plane: PlaneId::from_raw(3),
                 color_plane: PlaneId::from_raw(4),
                 selection_plane: PlaneId::from_raw(5),
-                light_table_set: LightTableSetId::from_raw(6),
-                cell: CellId::from_raw(7),
+                fill_protection_plane: PlaneId::from_raw(6),
+                light_table_set: LightTableSetId::from_raw(7),
+                cell: CellId::from_raw(8),
             },
             7,
             PaperSpec {
@@ -235,6 +236,7 @@ mod tests {
         assert!(ids.insert(document.id.get()));
         assert!(ids.insert(document.cell_id.get()));
         assert!(ids.insert(document.selection_plane_id.get()));
+        assert!(ids.insert(document.fill_protection_plane_id.get()));
         for layer in &document.layers {
             assert!(ids.insert(layer.id.get()));
             for plane in &layer.planes {

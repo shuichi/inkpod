@@ -791,6 +791,8 @@ if(WIN32)
         apps/windows/ui/ui_resources.h
         apps/windows/ui/effects_controller.cpp
         apps/windows/ui/batch_controller.cpp
+        apps/windows/ui/batch_parameter_editor.cpp
+        apps/windows/ui/batch_parameter_editor.h
         apps/windows/ui/dock_layout.cpp
         apps/windows/ui/dock_layout.h
         apps/windows/ui/dock_host.cpp

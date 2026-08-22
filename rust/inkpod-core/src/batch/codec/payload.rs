@@ -10,10 +10,6 @@ impl PayloadWriter {
         self.bytes.extend_from_slice(&value.to_le_bytes());
     }
 
-    pub(super) fn i32(&mut self, value: i32) {
-        self.bytes.extend_from_slice(&value.to_le_bytes());
-    }
-
     pub(super) fn pixel(&mut self, value: PixelValue) {
         match value {
             PixelValue::Binary(value) => {
@@ -71,10 +67,6 @@ impl<'a> PayloadReader<'a> {
             .map_err(|_| CoreError::InvalidArgument("batch u32 payload is truncated"))?;
         self.cursor = end;
         Ok(u32::from_le_bytes(bytes))
-    }
-
-    pub(super) fn i32(&mut self) -> Result<i32, CoreError> {
-        Ok(i32::from_le_bytes(self.u32()?.to_le_bytes()))
     }
 
     pub(super) fn u16(&mut self) -> Result<u16, CoreError> {

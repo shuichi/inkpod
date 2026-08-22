@@ -66,7 +66,7 @@
 extern "C" {
 #endif
 
-#define INKPOD_ABI_VERSION UINT32_C(17)
+#define INKPOD_ABI_VERSION UINT32_C(18)
 #define INKPOD_FEATURE_NONE UINT64_C(0)
 
 /** @brief InkScript ABI record の exact-current version。 */
@@ -532,17 +532,24 @@ typedef uint32_t InkpodTaskState;
 #define INKPOD_TASK_CANCELLED UINT32_C(3)
 #define INKPOD_TASK_FAILED UINT32_C(4)
 
-#define INKPOD_BATCH_GRAPH_VERSION UINT32_C(2)
+#define INKPOD_BATCH_GRAPH_VERSION UINT32_C(3)
 /** @brief batch graph の入力 selector 種類。 */
 typedef uint32_t InkpodBatchInputKind;
 #define INKPOD_BATCH_INPUT_FILE UINT32_C(1)
 #define INKPOD_BATCH_INPUT_FOLDER UINT32_C(2)
-#define INKPOD_BATCH_INPUT_CURRENT_SEQUENCE UINT32_C(3)
-/** @brief batch output の重複／上書き方針型。 */
-typedef uint32_t InkpodBatchOutputPolicy;
-#define INKPOD_BATCH_OUTPUT_DUPLICATE UINT32_C(1)
-#define INKPOD_BATCH_OUTPUT_NEW_SAVE UINT32_C(2)
-#define INKPOD_BATCH_OUTPUT_EXPLICIT_OVERWRITE UINT32_C(3)
+#define INKPOD_BATCH_INPUT_ACTIVE_DOCUMENT UINT32_C(3)
+/** @brief batch output destination 型。 */
+typedef uint32_t InkpodBatchOutputDestination;
+#define INKPOD_BATCH_OUTPUT_FOLDER UINT32_C(1)
+#define INKPOD_BATCH_OUTPUT_ACTIVE_DOCUMENT UINT32_C(2)
+#define INKPOD_BATCH_OUTPUT_NEW_TABS UINT32_C(3)
+/** @brief folder output の file format 型。 */
+typedef uint32_t InkpodBatchOutputFormat;
+#define INKPOD_BATCH_FORMAT_INKPOD UINT32_C(1)
+#define INKPOD_BATCH_FORMAT_PNG UINT32_C(2)
+#define INKPOD_BATCH_FORMAT_TIFF UINT32_C(3)
+#define INKPOD_BATCH_FORMAT_TGA UINT32_C(4)
+#define INKPOD_BATCH_FORMAT_BMP UINT32_C(5)
 /** @brief batch item 失敗後の続行／停止方針型。 */
 typedef uint32_t InkpodBatchFailurePolicy;
 #define INKPOD_BATCH_FAILURE_CONTINUE UINT32_C(1)
@@ -554,30 +561,11 @@ typedef uint32_t InkpodBatchMissingPolicy;
 /** @brief batch graph 内 operation の識別子型。 */
 typedef uint32_t InkpodBatchOperationKind;
 #define INKPOD_BATCH_OPERATION_COLOR_REPLACE UINT32_C(1)
-#define INKPOD_BATCH_OPERATION_CONTINUOUS_FILL UINT32_C(2)
-#define INKPOD_BATCH_OPERATION_SEPARATION UINT32_C(3)
-#define INKPOD_BATCH_OPERATION_VISIBILITY UINT32_C(4)
-/* Batch operation code 5 is retired and remains unassigned. */
-#define INKPOD_BATCH_OPERATION_FILTER UINT32_C(6)
-#define INKPOD_BATCH_OPERATION_BOUNDARY_AIRBRUSH UINT32_C(7)
-#define INKPOD_BATCH_OPERATION_DUST_REMOVAL UINT32_C(8)
-#define INKPOD_BATCH_OPERATION_MIRROR UINT32_C(9)
-#define INKPOD_BATCH_OPERATION_ROTATE_90 UINT32_C(10)
-#define INKPOD_BATCH_OPERATION_RESIZE UINT32_C(11)
-#define INKPOD_BATCH_OPERATION_CONVERT_PLANE UINT32_C(12)
+#define INKPOD_BATCH_OPERATION_MOVE_TO_COLOR_PLANE UINT32_C(2)
+#define INKPOD_BATCH_OPERATION_MASKING UINT32_C(3)
+#define INKPOD_BATCH_OPERATION_ERASE UINT32_C(4)
 #define INKPOD_BATCH_OPERATION_ENABLED UINT64_C(1)
-#define INKPOD_BATCH_OPERATION_CONFIGURE_EACH_RUN (UINT64_C(1) << 1)
-#define INKPOD_BATCH_OUTPUT_CELL_FOLDER UINT64_C(1)
-#define INKPOD_BATCH_OUTPUT_DESCENDING (UINT64_C(1) << 1)
-#define INKPOD_BATCH_OUTPUT_PREVIEW_BEFORE_SAVE (UINT64_C(1) << 2)
-#define INKPOD_BATCH_SEPARATION_INVERT INT64_C(1)
-#define INKPOD_BATCH_SEED_HAS_EXPECTED_COLOR UINT32_C(1)
-#define INKPOD_BATCH_SEED_ENABLED (UINT32_C(1) << 1)
-#define INKPOD_BATCH_SEPARATION_REPLACE_SOURCE INT64_C(1)
-#define INKPOD_BATCH_SEPARATION_SELECTION_MASK INT64_C(2)
-#define INKPOD_BATCH_SEPARATION_MAIN_LINE_PLANE INT64_C(3)
-#define INKPOD_BATCH_SEPARATION_COLOR_PLANE INT64_C(4)
-#define INKPOD_BATCH_SEPARATION_NATIVE_FILE INT64_C(5)
+#define INKPOD_BATCH_OUTPUT_PREVIEW_BEFORE_SAVE UINT64_C(1)
 /** @brief batch 実行対象を current/all から選ぶ型。 */
 typedef uint32_t InkpodBatchRunScope;
 #define INKPOD_BATCH_SCOPE_CURRENT UINT32_C(1)
@@ -2529,7 +2517,7 @@ typedef struct InkpodTaskInfo {
 } InkpodTaskInfo;
 
 /**
- * @brief batch graph の file/folder/current-sequence selector 入力。
+ * @brief batch graph の file/folder/active-document selector 入力。
  * path span は `inkpod_batch_graph_create` 中だけ borrowed で、graph へコピーされる。
  */
 typedef struct InkpodBatchInput {
@@ -2552,30 +2540,10 @@ typedef struct InkpodBatchColorPairInput {
     InkpodColorValue new_color;
 } InkpodBatchColorPairInput;
 
-/** @brief continuous fill の行単位 enable、seed、許容差、期待色を持つ borrowed record。 */
-typedef struct InkpodBatchSeedInput {
-    uint32_t struct_size;
-    uint32_t flags;
-    uint32_t x;
-    uint32_t y;
-    uint32_t tolerance;
-    uint32_t gap_close;
-    uint64_t reserved;
-    InkpodColorValue fill_color;
-    InkpodColorValue expected_color;
-} InkpodBatchSeedInput;
-
 /**
- * @brief kind ごとの parameter と nested span を持つ versioned batch operation 入力。
- *
- * visibility [0]=0/1、line width [0]=mode/[1]=value*1000、
- * separation [0]=`INKPOD_BATCH_SEPARATION_INVERT` または 0、[1] は
- * `INKPOD_BATCH_SEPARATION_*` typed destination、seed flags は
- * `INKPOD_BATCH_SEED_ENABLED` と任意の期待色検査を持つ。
- * boundary effect [0]=width/[1]=strength_milli、dust [0]=`InkpodDustMode`/[1]=maximum_pixels、
- * mirror/rotate [0]=axis/direction、resize [0..5]=width,height,dpi_x,dpi_y,resample,anchor、
- * convert [0..1]=`InkpodTypedPlaneKind`,`InkpodStoragePixelFormat`。
- * 全 nested pointer は graph 作成中だけ borrowed で、成功時に graph が値をコピーする。
+ * @brief exact color rows を持つ Batch v3 operation 入力。
+ * `colors` は移動、マスキング、消去、`color_pairs` は色置換だけで使う。全 nested pointer は
+ * graph 作成中だけ borrowed で、成功時に graph が値をコピーする。
  */
 typedef struct InkpodBatchOperationInput {
     uint32_t struct_size;
@@ -2589,17 +2557,10 @@ typedef struct InkpodBatchOperationInput {
     InkpodTypedPlaneKind plane_kind;
     InkpodBatchMissingPolicy missing_policy;
     uint32_t reserved_2;
-    int64_t parameters[8];
-    InkpodColorValue color_0;
-    InkpodColorValue color_1;
     InkpodColorArray colors;
-    const InkpodFilterInput* filter;
     const InkpodBatchColorPairInput* color_pairs;
     uint64_t color_pair_count;
     uint64_t color_pair_stride_bytes;
-    const InkpodBatchSeedInput* seeds;
-    uint64_t seed_count;
-    uint64_t seed_stride_bytes;
     uint64_t reserved_3;
 } InkpodBatchOperationInput;
 
@@ -2619,14 +2580,14 @@ typedef struct InkpodBatchGraphInput {
     const InkpodBatchOperationInput* operations;
     uint64_t operation_count;
     uint64_t operation_stride_bytes;
-    InkpodBatchOutputPolicy output_policy;
+    InkpodBatchOutputDestination output_destination;
     InkpodBatchFailurePolicy failure_policy;
     uint64_t output_flags;
     const uint8_t* output_folder_utf8;
     uint64_t output_folder_bytes;
-    const uint8_t* basename_utf8;
-    uint64_t basename_bytes;
-    uint32_t start_number;
+    const uint8_t* naming_template_utf8;
+    uint64_t naming_template_bytes;
+    InkpodBatchOutputFormat output_format;
     uint32_t wait_milliseconds;
     uint64_t reserved;
 } InkpodBatchGraphInput;
@@ -2637,14 +2598,23 @@ typedef struct InkpodBatchGraphInfo {
     uint32_t version;
     uint64_t input_count;
     uint64_t operation_count;
-    InkpodBatchOutputPolicy output_policy;
+    InkpodBatchOutputDestination output_destination;
+    InkpodBatchOutputFormat output_format;
     InkpodBatchFailurePolicy failure_policy;
     uint64_t output_flags;
+    const uint8_t* name_utf8;
+    uint64_t name_bytes;
+    const uint8_t* output_folder_utf8;
+    uint64_t output_folder_bytes;
+    const uint8_t* naming_template_utf8;
+    uint64_t naming_template_bytes;
+    uint32_t wait_milliseconds;
+    uint32_t reserved;
 } InkpodBatchGraphInfo;
 
 /**
  * @brief immutable graph 内の一操作を caller-owned scalar/count record へコピーする。
- * nested colors/pairs/seeds/curve points は対応する indexed query で取得する。
+ * nested colors/pairs は対応する indexed query で取得する。
  */
 typedef struct InkpodBatchOperationInfo {
     uint32_t struct_size;
@@ -2658,19 +2628,9 @@ typedef struct InkpodBatchOperationInfo {
     InkpodTypedPlaneKind plane_kind;
     InkpodBatchMissingPolicy missing_policy;
     uint32_t reserved_2;
-    int64_t parameters[8];
-    InkpodColorValue color_0;
-    InkpodColorValue color_1;
-    uint32_t filter_kind;
-    uint32_t filter_channel;
-    uint32_t filter_interpolation;
-    uint32_t reserved_3;
-    int32_t filter_parameters[5];
-    uint32_t reserved_4;
     uint64_t color_count;
     uint64_t color_pair_count;
-    uint64_t seed_count;
-    uint64_t curve_point_count;
+    uint64_t reserved_3[2];
 } InkpodBatchOperationInfo;
 
 /**
@@ -2688,13 +2648,13 @@ typedef struct InkpodBatchPreviewItem {
     uint64_t warning_bytes;
 } InkpodBatchPreviewItem;
 
-/** @brief batch report の cancelled/item/failure count を受け取る caller-owned 出力。 */
+/** @brief batch report の cancelled/item/failure/staged-result count を受け取る caller-owned 出力。 */
 typedef struct InkpodBatchReportInfo {
     uint32_t struct_size;
     uint32_t cancelled;
     uint64_t item_count;
     uint64_t failure_count;
-    uint64_t reserved;
+    uint64_t staged_result_count;
 } InkpodBatchReportInfo;
 
 /**
@@ -5862,12 +5822,23 @@ InkpodStatus inkpod_batch_graph_save(
 InkpodStatus inkpod_batch_graph_get_info(
     const InkpodBatchGraph* graph,
     InkpodBatchGraphInfo* out_info);
+/**
+ * @brief Copies one input selector; returned UTF-8 path is borrowed from `graph`.
+ *
+ * The path remains valid until `graph` is released or externally mutated. The
+ * immutable graph can be queried from any thread with caller-provided external
+ * synchronization.
+ */
+InkpodStatus inkpod_batch_graph_get_input(
+    const InkpodBatchGraph* graph,
+    uint64_t index,
+    InkpodBatchInput* out_input);
 /** Copies one operation's scalar fields and nested row counts. */
 InkpodStatus inkpod_batch_graph_get_operation(
     const InkpodBatchGraph* graph,
     uint64_t index,
     InkpodBatchOperationInfo* out_info);
-/** Copies one separation/boundary-airbrush color row. */
+/** Copies one move/masking/erase exact-color row. */
 InkpodStatus inkpod_batch_graph_get_operation_color(
     const InkpodBatchGraph* graph,
     uint64_t operation_index,
@@ -5879,18 +5850,6 @@ InkpodStatus inkpod_batch_graph_get_operation_color_pair(
     uint64_t operation_index,
     uint64_t pair_index,
     InkpodBatchColorPairInput* out_pair);
-/** Copies one continuous-fill seed row. */
-InkpodStatus inkpod_batch_graph_get_operation_seed(
-    const InkpodBatchGraph* graph,
-    uint64_t operation_index,
-    uint64_t seed_index,
-    InkpodBatchSeedInput* out_seed);
-/** Copies one tone-curve point. */
-InkpodStatus inkpod_batch_graph_get_operation_curve_point(
-    const InkpodBatchGraph* graph,
-    uint64_t operation_index,
-    uint64_t point_index,
-    InkpodCurvePoint* out_point);
 /**
  * Creates an immutable run graph by replacing all source operations with a
  * complete borrowed operation span. Count must match and every per-run flag
@@ -5997,6 +5956,19 @@ InkpodStatus inkpod_batch_report_get(
     const InkpodBatchReport* report,
     uint64_t index,
     InkpodBatchReportItem* out_item);
+/**
+ * @brief new-tab result を report owner thread で一度だけ Rust-owned Core として取り出す。
+ * @par 契約
+ * `report`/`out_generation`/`out_core` は非 NULL、`*out_core == NULL`、index は
+ * `staged_result_count` 未満。成功時だけ slot を消費し、新しい Core handle と generation を返す。
+ * 失敗時 slot と出力所有権は不変。返却 Core は呼出 thread が owner となり
+ * `inkpod_core_destroy` で解放する。
+ */
+InkpodStatus inkpod_batch_report_take_staged_result(
+    InkpodBatchReport* report,
+    uint64_t index,
+    uint64_t* out_generation,
+    InkpodCore** out_core);
 /**
  * @brief batch report handle を解放し owner 変数を NULL にする。
  * @par 契約

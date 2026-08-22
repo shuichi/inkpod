@@ -120,6 +120,7 @@ impl PlaneType {
             FilePlaneKind::Raster => Self::Raster,
             FilePlaneKind::Selection => Self::Selection,
             FilePlaneKind::LightTable => Self::Raster,
+            FilePlaneKind::FillProtection => Self::Selection,
         }
     }
 }
@@ -822,6 +823,15 @@ pub enum ViewCommand {
     SetTransparentView(bool),
     /// Selects alpha-channel visualization.
     SetAlphaView(bool),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Sparse allocation and wall-pixel metrics for the document fill-protection mask.
+pub struct FillProtectionMaskInfo {
+    /// Number of allocated mask tiles; empty tiles are never retained.
+    pub allocated_tile_count: u64,
+    /// Number of stored `255 = fill wall` pixels.
+    pub wall_pixel_count: u64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

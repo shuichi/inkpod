@@ -231,10 +231,11 @@ fn encode_document_metadata(metadata: &FileDocumentMetadata) -> Result<Vec<u8>, 
     let color_chart = crate::encode_color_chart(&metadata.color_chart)?;
     let mut output = Vec::new();
     output.extend_from_slice(&DOCUMENT_METADATA_MAGIC);
-    push_u32(&mut output, 6);
+    push_u32(&mut output, 7);
     push_u64(&mut output, metadata.active_layer_id);
     push_u64(&mut output, metadata.active_plane_id);
     push_u64(&mut output, metadata.selection_plane_id);
+    push_u64(&mut output, metadata.fill_protection_plane_id);
     push_u32(&mut output, metadata.layers.len() as u32);
     push_u32(&mut output, metadata.guides.len() as u32);
     push_u32(&mut output, u32::from(metadata.shooting_frame.is_some()));

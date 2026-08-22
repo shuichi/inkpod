@@ -87,6 +87,7 @@ public:
     // The application supports up to eight workspace windows with two visible
     // editor groups in each. Only visible editor-group canvases are registered.
     static constexpr std::size_t kMaximumSnapshotSinks = 16U;
+    static constexpr std::size_t kMaximumDocumentSessions = 64U;
 
     CoreHost();
     ~CoreHost();
@@ -100,6 +101,11 @@ public:
     InkpodStatus CreateSession(
         DocumentSessionId session,
         Generation generation) noexcept;
+    InkpodStatus AdoptBatchResult(
+        DocumentSessionId session,
+        Generation generation,
+        InkpodBatchReport* report,
+        std::uint64_t result_index) noexcept;
     InkpodStatus RebindSession(
         DocumentSessionId old_session,
         Generation old_generation,

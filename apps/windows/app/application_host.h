@@ -91,6 +91,9 @@ public:
     [[nodiscard]] std::optional<DocumentBinding> AddDocumentSession() noexcept;
     [[nodiscard]] std::optional<DocumentBinding>
     PrepareDocumentSession() noexcept;
+    [[nodiscard]] std::optional<DocumentBinding> PrepareBatchResultSession(
+        InkpodBatchReport* report,
+        std::uint64_t result_index) noexcept;
     [[nodiscard]] bool PublishPreparedDocumentSession(
         const DocumentBinding& binding,
         EditorGroupId destination_group) noexcept;

@@ -206,6 +206,9 @@ pub(crate) enum CanonicalInvocation {
         plane_id: u64,
         options: BatchSeparation,
     },
+    ApplyBatchOperations {
+        operations: Vec<BatchOperation>,
+    },
     RestoreSelectedPixels {
         plane_id: u64,
         changes: Vec<PixelChange>,
@@ -734,6 +737,10 @@ fn decode_persistent_invocation(
             plane_id: reader.u64()?,
             options: reader.batch_separation()?,
         }
+    } else if primitive_id == PrimitiveId::APPLY_BATCH_OPERATIONS {
+        CanonicalInvocation::ApplyBatchOperations {
+            operations: reader.batch_operations()?,
+        }
     } else if primitive_id == PrimitiveId::RESTORE_SELECTED_PIXELS {
         CanonicalInvocation::RestoreSelectedPixels {
             plane_id: reader.u64()?,
@@ -1045,6 +1052,7 @@ impl CanonicalInvocation {
             Self::ReplaceRasterColors { .. } => PrimitiveId::REPLACE_RASTER_COLORS,
             Self::ScopedColorReplace { .. } => PrimitiveId::SCOPED_COLOR_REPLACE,
             Self::SeparateRasterColors { .. } => PrimitiveId::SEPARATE_RASTER_COLORS,
+            Self::ApplyBatchOperations { .. } => PrimitiveId::APPLY_BATCH_OPERATIONS,
             Self::RestoreSelectedPixels { .. } => PrimitiveId::RESTORE_SELECTED_PIXELS,
             Self::ApplySelection { .. } => PrimitiveId::APPLY_SELECTION,
             Self::InvertSelection => PrimitiveId::INVERT_SELECTION,
@@ -1140,6 +1148,16 @@ impl CanonicalInvocation {
             | Self::ScopedColorReplace { plane_id, .. }
             | Self::SeparateRasterColors { plane_id, .. }
             | Self::RestoreSelectedPixels { plane_id, .. } => vec![*plane_id],
+            Self::ApplyBatchOperations { operations } => operations
+                .iter()
+                .flat_map(|operation| {
+                    operation
+                        .target
+                        .layer_id
+                        .into_iter()
+                        .chain(operation.target.plane_id)
+                })
+                .collect(),
             Self::UpdateAdjustmentLayer { layer_id, .. } => vec![*layer_id],
             Self::SelectionFromLayer { layer_id, .. } => vec![*layer_id],
             Self::CommitFloating { floating } => match &floating.destination {
@@ -1460,6 +1478,10 @@ impl CanonicalInvocation {
                 .map(InvocationResult::dispatch),
             Self::SeparateRasterColors { plane_id, options } => {
                 crate::batch::apply_separation(core, *plane_id, options, &mut |_, _| true)
+                    .map(InvocationResult::dispatch)
+            }
+            Self::ApplyBatchOperations { operations } => {
+                crate::batch::apply_batch_operations_canonical(core, operations, &mut || false)
                     .map(InvocationResult::dispatch)
             }
             Self::RestoreSelectedPixels { plane_id, changes } => core
@@ -1834,6 +1856,9 @@ impl CanonicalInvocation {
                 writer.u64(*plane_id);
                 writer.batch_separation(options)?;
             }
+            Self::ApplyBatchOperations { operations } => {
+                writer.batch_operations(operations)?;
+            }
             Self::RestoreSelectedPixels { plane_id, changes } => {
                 writer.u64(*plane_id);
                 writer.pixel_changes(changes)?;
@@ -2152,6 +2177,7 @@ pub(super) const fn schema_version(primitive_id: PrimitiveId) -> Option<u16> {
         || value == PrimitiveId::REPLACE_RASTER_COLORS.get()
         || value == PrimitiveId::SCOPED_COLOR_REPLACE.get()
         || value == PrimitiveId::SEPARATE_RASTER_COLORS.get()
+        || value == PrimitiveId::APPLY_BATCH_OPERATIONS.get()
         || value == PrimitiveId::RESTORE_SELECTED_PIXELS.get()
         || value == PrimitiveId::APPLY_SELECTION.get()
         || value == PrimitiveId::INVERT_SELECTION.get()
@@ -2873,6 +2899,66 @@ impl<'a> CanonicalReader<'a> {
                 }
             },
         })
+    }
+
+    fn batch_operations(&mut self) -> Result<Vec<BatchOperation>, CoreError> {
+        let count = self.count(18)?;
+        if count == 0 || count > 1_024 {
+            return Err(self.invalid("canonical batch operation count is outside bounds"));
+        }
+        let mut operations = Vec::with_capacity(count);
+        for _ in 0..count {
+            let version = self.u32()?;
+            let enabled = self.boolean()?;
+            let layer_id = self.boolean()?.then(|| self.u64()).transpose()?;
+            let plane_id = self.boolean()?.then(|| self.u64()).transpose()?;
+            let layer_kind = self.boolean()?.then(|| self.layer_kind()).transpose()?;
+            let plane_kind = self.boolean()?.then(|| self.plane_type()).transpose()?;
+            let missing_policy = match self.u32()? {
+                1 => BatchMissingTargetPolicy::Skip,
+                2 => BatchMissingTargetPolicy::Error,
+                _ => return Err(self.invalid("canonical batch missing policy is invalid")),
+            };
+            let kind = match self.u32()? {
+                1 => BatchOperationKind::ColorReplace(self.batch_color_pairs()?),
+                kind @ 2..=4 => {
+                    let color_count = self.count(5)?;
+                    if color_count == 0 || color_count > 4_096 {
+                        return Err(self.invalid("canonical batch color count is outside bounds"));
+                    }
+                    let mut colors = Vec::with_capacity(color_count);
+                    for _ in 0..color_count {
+                        colors.push(self.pixel()?);
+                    }
+                    match kind {
+                        2 => BatchOperationKind::MoveToColorPlane(colors),
+                        3 => BatchOperationKind::Masking(colors),
+                        4 => BatchOperationKind::Erase(colors),
+                        _ => unreachable!(),
+                    }
+                }
+                _ => return Err(self.invalid("canonical batch operation kind is invalid")),
+            };
+            let operation = BatchOperation {
+                version,
+                enabled,
+                target: BatchTargetSelector {
+                    layer_id,
+                    plane_id,
+                    layer_kind,
+                    plane_kind,
+                    missing_policy,
+                },
+                kind,
+            };
+            crate::batch::validate_operation(&operation)
+                .map_err(|_| self.invalid("canonical batch operation is invalid"))?;
+            operations.push(operation);
+        }
+        if !operations.iter().any(|operation| operation.enabled) {
+            return Err(self.invalid("canonical batch operation list has no enabled operation"));
+        }
+        Ok(operations)
     }
 
     fn pixel_changes(&mut self) -> Result<Vec<PixelChange>, CoreError> {
@@ -3808,6 +3894,71 @@ impl CanonicalWriter {
             BatchSeparationDestination::ColorPlane => 4,
             BatchSeparationDestination::NativeFile => 5,
         });
+        Ok(())
+    }
+
+    fn batch_operations(&mut self, operations: &[BatchOperation]) -> Result<(), CoreError> {
+        if operations.is_empty() || operations.len() > 1_024 {
+            return Err(CoreError::InvalidArgument(
+                "canonical batch operation count is outside bounds",
+            ));
+        }
+        let count = u32::try_from(operations.len())
+            .map_err(|_| CoreError::InvalidArgument("too many canonical batch operations"))?;
+        self.u32(count);
+        for operation in operations {
+            crate::batch::validate_operation(operation)?;
+            self.u32(operation.version);
+            self.boolean(operation.enabled);
+            self.boolean(operation.target.layer_id.is_some());
+            if let Some(layer_id) = operation.target.layer_id {
+                self.u64(layer_id);
+            }
+            self.boolean(operation.target.plane_id.is_some());
+            if let Some(plane_id) = operation.target.plane_id {
+                self.u64(plane_id);
+            }
+            self.boolean(operation.target.layer_kind.is_some());
+            if let Some(layer_kind) = operation.target.layer_kind {
+                self.u32(layer_kind_code(layer_kind));
+            }
+            self.boolean(operation.target.plane_kind.is_some());
+            if let Some(plane_kind) = operation.target.plane_kind {
+                self.u32(plane_type_code(plane_kind));
+            }
+            self.u32(match operation.target.missing_policy {
+                BatchMissingTargetPolicy::Skip => 1,
+                BatchMissingTargetPolicy::Error => 2,
+            });
+            match &operation.kind {
+                BatchOperationKind::ColorReplace(pairs) => {
+                    self.u32(1);
+                    self.batch_color_pairs(pairs)?;
+                }
+                BatchOperationKind::MoveToColorPlane(colors) => {
+                    self.u32(2);
+                    self.batch_colors(colors)?;
+                }
+                BatchOperationKind::Masking(colors) => {
+                    self.u32(3);
+                    self.batch_colors(colors)?;
+                }
+                BatchOperationKind::Erase(colors) => {
+                    self.u32(4);
+                    self.batch_colors(colors)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn batch_colors(&mut self, colors: &[PixelValue]) -> Result<(), CoreError> {
+        let count = u32::try_from(colors.len())
+            .map_err(|_| CoreError::InvalidArgument("too many canonical batch colors"))?;
+        self.u32(count);
+        for color in colors {
+            self.pixel(*color);
+        }
         Ok(())
     }
 

@@ -53,7 +53,7 @@ meta {
         { key = "com.example.owner"; value = "ink"; },
     ];
 }
-requires { replay_epoch = 24; procedure_catalog = 3; }
+requires { replay_epoch = 25; procedure_catalog = 4; }
 "#,
     );
     let parsed = parse_inkscript(&input);
@@ -164,21 +164,21 @@ requires { replay_epoch = 24; procedure_catalog = 3; }
 #[test]
 fn exact_current_versions_and_complete_file_boundary_fail_closed() {
     assert_eq!(INKSCRIPT_FILE_VERSION, 2);
-    assert_eq!(INKSCRIPT_PROCEDURE_CATALOG_VERSION, 3);
-    assert_eq!(INKSCRIPT_REQUIRED_REPLAY_EPOCH, 24);
+    assert_eq!(INKSCRIPT_PROCEDURE_CATALOG_VERSION, 4);
+    assert_eq!(INKSCRIPT_REQUIRED_REPLAY_EPOCH, 25);
 
     let noncurrent_file = source(
-        b"inkscript 1; requires { procedure_catalog = 3; replay_epoch = 24; } inputs {} program {} output { policy = explicit_overwrite; format = inkpod; } execution { failure = stop; wait_ms = 0; preview_before_save = true; }",
+        b"inkscript 1; requires { procedure_catalog = 4; replay_epoch = 25; } inputs {} program {} output { policy = explicit_overwrite; format = inkpod; } execution { failure = stop; wait_ms = 0; preview_before_save = true; }",
     );
     assert!(!parse_inkscript(&noncurrent_file).is_valid());
 
     for (requires, expected) in [
         (
-            "procedure_catalog = 1; replay_epoch = 24;",
+            "procedure_catalog = 1; replay_epoch = 25;",
             InkScriptEnvelopeErrorCode::NonCurrentProcedureCatalog,
         ),
         (
-            "procedure_catalog = 3; replay_epoch = 23;",
+            "procedure_catalog = 4; replay_epoch = 23;",
             InkScriptEnvelopeErrorCode::NonCurrentReplayEpoch,
         ),
     ] {
@@ -195,7 +195,7 @@ fn exact_current_versions_and_complete_file_boundary_fail_closed() {
     }
 
     let fragment = source(
-        b"inkscript_fragment 2; requires { procedure_catalog = 3; replay_epoch = 24; } program {}",
+        b"inkscript_fragment 2; requires { procedure_catalog = 4; replay_epoch = 25; } program {}",
     );
     let parsed = parse_inkscript(&fragment);
     let semantic = build_inkscript_semantic(&parsed, &schema()).unwrap();
@@ -227,7 +227,7 @@ fn metadata_ranges_and_execution_bounds_reject_invalid_values_atomically() {
         ),
     ] {
         let text = format!(
-            "inkscript 2; requires {{ procedure_catalog = 3; replay_epoch = 24; }} {meta} inputs {{ file \"a.inkpod\"; }} program {{}} output {{ {base_output} }} execution {{ {base_execution} }}"
+            "inkscript 2; requires {{ procedure_catalog = 4; replay_epoch = 25; }} {meta} inputs {{ file \"a.inkpod\"; }} program {{}} output {{ {base_output} }} execution {{ {base_execution} }}"
         );
         assert_eq!(envelope(text.as_bytes()).unwrap_err().code(), expected);
     }
@@ -255,7 +255,7 @@ fn metadata_ranges_and_execution_bounds_reject_invalid_values_atomically() {
         ),
     ] {
         let text = complete_file(
-            "procedure_catalog = 3; replay_epoch = 24;",
+            "procedure_catalog = 4; replay_epoch = 25;",
             inputs,
             base_output,
             base_execution,
@@ -269,7 +269,7 @@ fn metadata_ranges_and_execution_bounds_reject_invalid_values_atomically() {
         "failure = continue; wait_ms = 4294967296; preview_before_save = false;",
     ] {
         let text = complete_file(
-            "procedure_catalog = 3; replay_epoch = 24;",
+            "procedure_catalog = 4; replay_epoch = 25;",
             "file \"a.inkpod\";",
             base_output,
             execution,
@@ -284,7 +284,7 @@ fn metadata_ranges_and_execution_bounds_reject_invalid_values_atomically() {
 
     let invalid = source(
         complete_file(
-            "procedure_catalog = 3; replay_epoch = 24;",
+            "procedure_catalog = 4; replay_epoch = 25;",
             "file \"a.inkpod\" { cells = range(0, 1); };",
             base_output,
             base_execution,
@@ -308,7 +308,7 @@ fn metadata_ranges_and_execution_bounds_reject_invalid_values_atomically() {
 
 #[test]
 fn output_variants_are_closed_and_explicit_overwrite_intents_are_typed() {
-    let common_requires = "procedure_catalog = 3; replay_epoch = 24;";
+    let common_requires = "procedure_catalog = 4; replay_epoch = 25;";
     let common_execution = "failure = stop; wait_ms = 0; preview_before_save = true;";
     let file_input = "file \"A001.inkpod\";";
 

@@ -271,7 +271,7 @@ impl DocumentTreeScriptStep {
         invocation: &CanonicalInvocation,
     ) -> Result<Self, DocumentTreeAdapterError> {
         let mut source = String::from(
-            "inkscript_fragment 2;\nrequires { procedure_catalog = 3; replay_epoch = 24; }\n",
+            "inkscript_fragment 2;\nrequires { procedure_catalog = 4; replay_epoch = 25; }\n",
         );
         let mut references = InkScriptRuntimeReferences::default();
         let (command, arguments, has_result) =

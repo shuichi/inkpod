@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+#include "ui/batch_parameter_editor.h"
+
 namespace inkpod::windows::ui {
 
 struct BatchPaletteEntry {
@@ -14,7 +16,7 @@ struct BatchPaletteEntry {
     const wchar_t* label;
 };
 
-const std::array<BatchPaletteEntry, 24U>& BatchPaletteEntries() noexcept;
+const std::array<BatchPaletteEntry, 4U>& BatchPaletteEntries() noexcept;
 
 using BatchPaletteCommandCallback = void (*)(
     void* context, UINT command) noexcept;
@@ -27,17 +29,17 @@ struct BatchPaletteDialogState {
     BatchPaletteCommandCallback dispatch_command{};
     BatchPaletteSelectionCallback select_operation{};
     BatchPaletteRefreshCallback refresh{};
-    bool loaded_graph{};
+    BatchParameterEditorBinding parameter_editor{};
+    HWND parameter_host{};
 };
 
 struct BatchPaletteView {
     std::wstring target_text;
     std::wstring job_text;
-    std::wstring input_label;
-    std::vector<std::wstring> operation_labels;
-    std::uint32_t selected_operation{};
-    std::wstring output_text;
-    bool loaded_graph{};
+    std::wstring set_name;
+    std::vector<std::wstring> stage_labels;
+    std::uint32_t selected_stage{};
+    std::wstring validation_text;
     bool idle{true};
     bool runnable{};
     bool target_available{};

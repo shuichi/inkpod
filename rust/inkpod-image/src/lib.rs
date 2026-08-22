@@ -22,7 +22,9 @@ pub use edit::{
 pub use fill::{
     FillError, FillOptions, FillPlan, InclusionMode, MAX_FILL_PIXELS, MAX_GAP_CLOSE,
     MAX_INCLUSION_COLORS, PixelEdit, closed_region_fill, closed_region_fill_with_cancel,
-    extend_fill, extend_fill_with_cancel, seed_fill, seed_fill_with_cancel,
+    closed_region_fill_with_protection_and_cancel, extend_fill, extend_fill_with_cancel,
+    extend_fill_with_protection_and_cancel, seed_fill, seed_fill_with_cancel,
+    seed_fill_with_protection_and_cancel,
 };
 pub use output_color_guard::{
     Bt709Ycbcr16, OutputColorGuardCategory, bt709_conservative_guard_category,

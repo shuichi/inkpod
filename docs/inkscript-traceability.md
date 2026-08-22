@@ -4,18 +4,19 @@ This document is the M00 traceability authority connecting the product requireme
 [`SPEC.md`](../SPEC.md), the normative language contract in
 [`INKSCRIPT.md`](../INKSCRIPT.md), the machine-readable registries, milestones, and
 planned evidence. It is not a command reference. The exact-current command signatures are in
-[`catalog-v3.json`](../schemas/inkscript/catalog-v3.json); the derived presentation is
+[`catalog-v4.json`](../schemas/inkscript/catalog-v4.json); the derived presentation is
 [`inkscript-command-reference.md`](inkscript-command-reference.md).
 
 ## Ratified contract
 
 M00's starting contract was explicitly accepted before M01 implementation. M21's
-selector correction and the M27 drawing-model rebaseline were separately approved
-before implementation:
+selector correction, the M27 drawing-model rebaseline, and the Batch v3 version
+rebaseline were separately approved before implementation:
 
 - InkScript registry schema/language/file version 2, procedure catalog and owner
-  manifest version 3, replay epoch 24, `.inkpod` top-level version 27, and C ABI
-  version 17 are the exact-current values. Catalog/owner v3 expose 75 commands.
+  manifest version 4, replay epoch 25, `.inkpod` top-level version 28, and C ABI
+  version 18 are the exact-current values. Catalog/owner v4 expose the same 75 public
+  commands; the private Batch v3 canonical procedure is not an InkScript command.
 - M07's approved exact-current registry schema v2 supersedes registry schema v1 solely to add
   closed catalog-owned enum, record, and constructor definitions; schema v1 is not accepted.
 - M21's approved option A changed only the shooting-frame selector from a layer owner to the
@@ -27,9 +28,10 @@ before implementation:
   M01+ fix.
 - Catalog v2 was the 84-command production contract after M23. The M27
   drawing-model rebaseline retires nine commands, reserves their assignments as
-  tombstones, and replaces it with exact-current catalog/owner v3 and a 75-way
-  bijection. Catalog/owner v2 are rejected; generated reference and fingerprints
-  are regenerated from v3.
+  tombstones, and replaced it with catalog/owner v3 and a 75-way bijection. Batch v3
+  advances the exact-current catalog/owner envelope to v4 solely to bind epoch 25,
+  native v28 and ABI v18; it does not add a public command. Older catalog/owner
+  resources are rejected; generated reference and fingerprints are regenerated from v4.
 - Exact-source equivalence compares canonical state/pixel digests, ID high-watermarks,
   typed result roles and output ordinals, pre/post state digests, stable input/output/asset
   roles, and canonical invocations. Rebound execution guarantees deterministic execution
@@ -51,9 +53,11 @@ before implementation:
   checksums, samples, environment, and proposed envelope and stop at `[~]`. M14 may change
   the benchmark harness or envelope only after that explicit approval. Existing workload,
   counter, `revision-max`, and envelope contracts are unchanged by M00.
-- Existing `.inkbatch` v2, Batch UI, and Batch ABI remain production until M29C shadow
-  parity and the separately accepted M34 cutover. M35 removes the test-private legacy
-  implementation only after cutover. No production `.inkbatch` importer is added.
+- The Batch v3 product decision supersedes the earlier `.inkbatch` v2 shadow-parity
+  cutover plan. `.inkbatch` v3 is the independent product authority and is editable in
+  the Batch pane. It lowers its closed four-operation graph directly to a private typed
+  canonical procedure. No `.inkscript` file filter, clipboard payload, or Batch
+  InkScript authoring UI is added.
 
 ## Batch parity matrix
 
@@ -62,18 +66,19 @@ passing tests in M00. M00's actual registry tests are listed in the next section
 
 | Existing requirement | InkScript requirements | Owning milestones | Required planned evidence |
 | --- | --- | --- | --- |
-| `BATCH-001` | `SCRIPT-001`, `SCRIPT-002`, `SCRIPT-003`, `SCRIPT-005` | M04–M05B, M11–M12, M28A–M29C | `INKS-TRACE-BATCH-001`, `INKS-PARITY-BATCH-001`: parse/emit/save/reopen, group/order/enable/set and shadow result parity |
-| `BATCH-002` | `SCRIPT-002`, `SCRIPT-005` | M07–M09, M29C | `INKS-TRACE-BATCH-002`, `INKS-PARITY-BATCH-002`: every legacy operation to grouped steps to canonical invocations and direct result parity |
-| `BATCH-003` | `SCRIPT-003`, `SCRIPT-005` | M11–M12, M26–M29C | `INKS-TRACE-BATCH-003`, `INKS-PARITY-BATCH-003`: immutable plan, outcome/temp/output/cancel/failure/report and atomic install parity |
-| `BATCH-004` | `SCRIPT-002`, `SCRIPT-003`, `SCRIPT-004`, `SCRIPT-005` | M05A–M05B, M08–M09, M28B–M29C | `INKS-TRACE-BATCH-004`, `INKS-PARITY-BATCH-004`: 1:N fill Commit, exact-depth pair/ambiguity, typed destination and transient parameters |
+| `BATCH-001` | `SCRIPT-001`, `SCRIPT-003`, `SCRIPT-005` | Batch v3 | `.inkbatch` v3 owns fixed Input/Output, ordered enabled operations, immutable preview/run/save construction and staged output ownership without exposing InkScript |
+| `BATCH-002` | `SCRIPT-002`, `SCRIPT-005` | Batch v3 | The public Batch catalog is exactly Color Replace, Move to Color Plane, Masking and Erase; retained legacy Core primitives are not authorable through Batch or InkScript |
+| `BATCH-003` | `SCRIPT-003`, `SCRIPT-005` | Batch v3 | File/folder/issue-time active input and folder/issue-time active/new-tab output reuse native/common-raster codecs, bounded path planning and owner-thread staged results |
+| `BATCH-004` | `SCRIPT-002`, `SCRIPT-003`, `SCRIPT-004`, `SCRIPT-005` | Batch v3 | Exact-depth colors, atomic multi-plane movement and sparse fill-protection replacement use one private canonical procedure and one transaction |
 
-M29C must compare input order, output plan, each-run resolution, canonical procedure
-sequence, state/composite digest, history, Undo/Redo, next IDs, report, semantic work
-counters, save/reopen, cache-free replay, and failure atomicity before cutover.
+Any future request to expose Batch primitives through InkScript must make a new explicit
+catalog/file-version decision and prove input/output authority, canonical procedure,
+state/composite digest, history, Undo/Redo, IDs, save/reopen, cache-free replay and failure
+atomicity parity. Batch v3 itself does not imply that product route.
 
 ## Current machine-readable ownership
 
-[`owner-manifest-v3.json`](../schemas/inkscript/owner-manifest-v3.json) assigns all 75
+[`owner-manifest-v4.json`](../schemas/inkscript/owner-manifest-v4.json) assigns all 75
 current command owners exactly once. The allocation is deliberately
 reviewable before signatures are added:
 

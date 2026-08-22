@@ -505,34 +505,33 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 
 ### 19. バッチ処理
 
-- batch palette は上から `入力`、順序付き `バッチ項目`、`出力` を表示する。set を複数保存、追加、削除、rename、並べ替えできる。
-- 入力は folder、file、現在セルを含む sequence。対象 file の自然順と範囲を preview する。
-- 各 operation は enabled、対象 layer selector、versioned parameters、必要なら `実行ごとに設定` を持つ。対象 layer が必要なのに空なら validation error。
-- 出力は新規保存、複製保存、明示上書き、folder、cell folder、format、basename、開始番号、増減方向を持つ。
-- `実行` は現在セルだけ、`全実行` は入力全体。file 間 wait、保存前 preview、progress、cancel、failure policy を持つ。
-- operation 候補はゴミ取り、color replace、continuous fill、airbrush effect、全 filter、image size/resolution、mirror、90度回転、line width、2値彩色変換、raster汎用変換、layer visibility、separation。
-- line width batch は加算/減算/倍率/一定幅を対象 type に応じて検証する。
-- continuous fill は色と document X/Y seed の複数行を持ち、同じ座標が全 frame で意図した領域に残るか再生 preview する。各 frame で通常 fill semantics を使う。
-- color replace は旧色/新色の複数 pair、行ごとのenable、全pair反転、native preset save/load を持つ。
+- 一つの batch set は削除・無効化・並べ替え不能な一つの `入力`、一個以上の順序付き処理、削除・無効化・並べ替え不能な一つの `出力` から成る。入力と出力は `BatchOperationKind` に混在させず、全処理が無効な graph は実行不能とする。処理は enabled、複製、削除、上下移動を持つ。
+- 公開 authoring catalog、`.inkbatch`、C ABI、Windows UI が扱う処理は `色置換`、`彩色プレーンへ送る`、`マスキング`、`消去` の四種類だけとする。既存 filter、continuous fill、visibility、resize 等の基礎 Core 機能は削除しないが、Batch v3 から到達可能にしない。
+- 入力 node は、複数 file、非再帰 folder、job 発行時 active document の三種類の入力元を複数内包できる。file/folder は `.inkpod`、PNG、TIFF、TGA、BMP だけを受理し、folder は対応 file だけを自然順に列挙する。重複、missing、未対応形式、range、解決件数を preview する。active document は発行時の `DocumentSession` ID と generation に固定し、実行時に別の active document へ再解決しない。
+- 出力 node は folder、発行時に固定した active document、新規 tab を選べる。folder format は `.inkpod`、PNG、TIFF、TGA、BMP とし、一件ごとに同一 volume の temporary file を完成してから atomic replace する。active document への適用は結果全体を一つの Undo 単位として dirty にし、path authority と savepoint を進めない。stale generation では何も適用しない。新規 tab は各結果に Rust が新しい document identity を割り当て、pathless/dirty な `DocumentSession` とする。session/tab 上限超過は job 開始前に拒否する。
+- folder の命名は bounded template とし、初期 token は `{stem}` と `{index:N}` だけを許可する。拡張子は output format から決め、absolute path、separator、`..`、拡張子 token を拒否する。dry-run は全出力 path、graph 内重複、既存 file 衝突を表示し、一切書き込まない。
+- native 色一致は対象 plane の格納 depth で判定する。RGBA は straight alpha を含む全成分の完全一致、Binary/Grayscale は格納 scalar の完全一致とし、表示変換、premultiply 後の値、tolerance、連結性、暗黙 depth/format 変換を使わない。不一致は item 単位の preview validation error とする。
+- color replace は `旧色 -> 新色` の bounded 複数行、行ごとの enable、追加、削除、全行反転を持つ。同じ旧色を持つ enabled 行の重複を拒否し、一致 pixel がなければ revision、history、journal、dirty を進めない。既存の exact color pair 抽出機能は維持する。
 - 二枚の同位置セルから color pair を抽出する場合は、Core が所有する非zero document UUIDと非zero source generationの組で各immutable raster sourceを固定する。両sourceは同じ幅、高さ、native pixel formatを必要とし、異なる寸法、形式、stale／missing identityを変換、resample、現在activeな別cellへの再解決なしに拒否する。比較は同じdocument X/Yの格納値をnative depthで行い、RGBA 8/16 bitではstraight alphaを含む全成分、Binary／Grayscale 8/16 bitでは格納scalarの完全一致を使う。表示変換、premultiply後の値、toleranceを使わない。
 - 同じ格納値のpixelは置換pairへ出さず、unchanged件数としてpreviewする。RGBが同じでもalphaが異なれば差分候補とする。各`旧色 -> 新色`候補はpixel件数と、その候補が現れたhalf-open document boundsを持つ。旧色groupは最初の差分pixelのscanline順、同じ旧色内の候補はpixel件数の降順、同数なら新色のnative値順で決定的に並べる。
 - 一つの旧色が複数の新色へ対応するone-to-manyは未解決ambiguityとし、最多候補を自動採用しない。利用者がその旧色について一候補だけを選ぶか旧色group全体を除外するまで、graph作成と実行を拒否する。複数の異なる旧色が同じ新色へ対応するmany-to-oneは、それぞれがone-to-oneなら有効な複数pairとして許可する。previewは候補、件数、bounds、alphaを表示する。
-- layer visibility batch は名前だけでなく安定selector/typeを使い、存在しない対象のskip/error policyを明示する。
-- separation は指定色をmask化し、元planeの単色置換、同じlayerの主線plane、同じlayerの彩色plane、Batchのnative別file出力をtyped destinationとして選べる。mask destinationはdocument selectionを置換し、plane destinationはsourceを保持して選択pixelだけをdestination native depthの指定色、非選択pixelをその形式のempty値へ置換する。主線／彩色destinationは既存のstable planeを明示解決し、欠落、hidden、non-editable、形式不一致、主線保護違反をcommit前に拒否する。別file destinationは既存のatomic `.inkpod` Batch出力だけを使い、入力fileの明示上書きを許可せず、外部形式や副carを追加しない。
-- `実行ごとに設定`のoperationはjob enqueue前に全行のimmutable実行configを完成させる。このflagは`.inkbatch`へ保存して再読込後も維持し、読込済みgraphでも毎回stored parameterを初期値として再設定する。確定時は元のpersisted graphを変更せず、全operationを含む一時run graphを一件作り、flagが一件でも未解決のgraphはdry-runを含め実行拒否する。Cancel、invalid、未解決ambiguityではjobを作らず、実行中のgraphを変更しない。変更する場合は進行中jobをcancelして新しいconfigで別jobを作る。
-- airbrush effect batch は境界を構成する複数色と幅を設定する。
-- 一件ごとにtemp outputからatomic commitし、cancel/失敗したfileに部分出力を残さない。dry-runは一切書かない。
+- `彩色プレーンへ送る` は、指定色に一致した source pixel の native 値を同じ layer の彩色 plane の同一座標へ移す。destination の非対象座標は保持し、書いた座標の source は source format の empty 値へする。両 plane の format/dimensions は完全一致を必須とし、missing、hidden、non-editable、主線保護、stale revision は source/destination のどちらも変更しない。一つの Core transaction、一つの canonical procedure、一つの Undo 単位とする。
+- `マスキング` は selection を流用せず、document 専用の sparse `fill protection mask` を置換する。指定色と一致する座標だけを `255 = 塗りの壁` として保持し、source raster は変更しない。壁 tile だけを割り当てる。mask は全 Core fill 経路の hard boundary、Undo/Redo、branch、replay、save/reopen、snapshot revision、cache invalidation の一部とする。追加/削除合成は初期 scope 外とする。
+- `消去` は指定色と一致する source pixel だけを native empty 値へする。RGBA は transparent black、Binary/Grayscale は 0 とし、非対象 pixel は保持する。一致なしは no-op とする。
+- マスキングを含む graph は情報を保持できない PNG/TIFF/TGA/BMP folder 出力を拒否し、`.inkpod`、active document、新規 tab だけを許可する。
+- Batch pane は set 名と新規/開く/保存、follow/pin target、Input/処理/Output を一列に置く工程 List-View、追加/複製/削除/上下移動、選択項目別の scrollable parameter host、validation、実行内容を確認/実行/Cancel を持つ。`＋処理` は上記四候補だけとし、parameter は標準 Common Controls で inline 編集する。色は swatch、RGBA 数値、depth、現在の描画色から取得を常時確認可能にする。
+- UI は選択変更で document/immutable graph を変更せず draft view model を編集し、preview/run/save 時だけ検証済み immutable graph を一回構築する。読込済み `.inkbatch` v3 は input/operation/output を draft へ完全復元して編集可能にする。狭い pane は縦 scroll と responsive button wrap を使い、日本語/英語、96/120/144/192 DPI、high contrast、Tab/F6、screen reader name を扱う。
+- 一件ごとに temporary output から atomic commit し、cancel/失敗した item に部分 output を残さない。dry-run は一切書かない。
 
 将来のBatch authoring／execution形式であるInkScriptのlanguage core、schema registry、exact-source／rebound
-等価性、実装gateは[`INKSCRIPT.md`](INKSCRIPT.md)を規範とする。InkScriptがM29Cのshadow parityとM34の
-production cutoverを完了するまでは、exact-current `.inkbatch` v2と既存Batch UI／ABIを現行production
-contractとして維持する。M23で批准済みcatalogを使うRust compile／bind／staged-run APIはproductから独立して
+等価性、実装gateは[`INKSCRIPT.md`](INKSCRIPT.md)を規範とする。exact-current `.inkbatch` v3 と Batch v3
+UI／ABIを production contract とする。M23で批准済みcatalogを使うRust compile／bind／staged-run APIはproductから独立して
 公開してよいが、`.inkscript` file filter、clipboard、C ABI、Windows command／UI、Batch production executorからは
 各owner milestoneとM34 cutoverまで到達可能にしない。
 
 ### 20. 形式、白透過、一般画像入出力
 
-- exact-current 契約は `.inkpod` top-level format v27、runtime replay epoch 24、C ABI v17、InkScript registry schema／language／file v2、production catalog／owner manifest v3（75 command）とする。v26／epoch 23、ABI v16、catalog／owner manifest v2、および削除済み primitive ID／canonical invocation／procedure entry は migration や shim を設けず拒否する。今回の更新は native format freeze 宣言ではない。
+- exact-current 契約は `.inkpod` top-level format v28、runtime replay epoch 25、C ABI v18、`.inkbatch` v3、InkScript registry schema／language／file v2、production catalog／owner manifest v4 とする。native v27／epoch 24、ABI v17、`.inkbatch` v2、catalog／owner manifest v3、および削除済み Batch authoring operation は migration や shim を設けず拒否する。今回の更新は native format freeze 宣言ではない。
 - native `.inkpod` は、保存時点の可変 raster snapshot を意味上の正本にしない。正本は immutable な `Genesis`、content-addressed な `Assets`、Core が検証・正規化して実変更を確定した `Procedures` と history control event、history の現在位置と high-watermark を持つ `META`、文書単位の `EditorState` とする。materialized document、inverse delta、COW snapshot、render/checkpoint cache は派生物であり、これらだけで文書を成立させない。
 - frontend request は target/revision/ID と上限を検証し、座標、色、option、可変長入力、transaction 内の output ID を正規化してから一つの `CanonicalProcedure` として確定する。procedure は monotonic ID、primitive ID/schema、replay epoch、base/committed `StateId`、固定幅引数、stable input/output ID、immutable `AssetId` または bounded inline payload、pre/post document-state digest を持ち、raw pointer、外部 path、native enum layout、frontend command ID、一時 object ID を含めない。
 - `Genesis` は document UUID、paper、DPI、sRGB、frame、margin、初期 stable-ID topology、immutable base surface を完全記述する。白紙の base surface は全面 tile を割り当てない opaque white の `SolidWhite` underlay とし、flat canonical composite/export には参加するが、個別 layer/plane export や selection mask へ暗黙に混入させない。
@@ -635,6 +634,7 @@ contractとして維持する。M23で批准済みcatalogを使うRust compile�
 - `FILL-001`: connected seed fill、tolerance、selection
 - `FILL-002`: 含み塗り、overflow abort、gap close、detached regions
 - `FILL-003`: closed-region fill、transparent-only、fill extension
+- `FILL-004`: sparse fill protection mask を全 fill 経路の hard boundary とし、Undo/Redo、replay、save/reopen、snapshot/cache revisionへ含める
 - `COLOR-REPLACE-001`: pen／rectangle／polyline／lassoとselectionで限定したnative-depth raster置換
 - `COLOR-001`: RGBA 8/16、RGB/HSV、eyedropper source
 - `COLOR-002`: palette、chart、subpalette、color check
@@ -671,10 +671,10 @@ contractとして維持する。M23で批准済みcatalogを使うRust compile�
 - `FILTER-PREVIEW-001`: filter／色調補正dialogの非累積live preview、bounded latest-wins更新、発行時target固定、OK一commit／Cancel完全復元
 - `EFFECT-001`: gradient、airbrush、airbrush boundary effect、blur tool、stamp
 - `ADJUST-001`: non-destructive adjustment layer と alpha edit
-- `BATCH-001`: persisted Input -> Operations -> Output graph
-- `BATCH-002`: line width、continuous fill、replace、visibility、separate、filter/effect
-- `BATCH-003`: dry-run、preview、progress、cancel、per-output atomicity、failure report
-- `BATCH-004`: bounded multi-row seed／pair authoring、exact native-depth二セルpair抽出とambiguity解決、typed separation destination、実行前immutable per-run configuration
+- `BATCH-001`: fixed Input -> one-or-more ordered Operations -> fixed Output graph、draft編集、`.inkbatch` v3
+- `BATCH-002`: 公開四処理（exact color replace、move-to-color-plane、fill-protection masking、erase）とnative-depth一致
+- `BATCH-003`: file/folder/issue-time-active input、folder/issue-time-active/new-tab output、bounded naming dry-run、progress/cancel、per-output atomicity
+- `BATCH-004`: exact native-depth二セルpair抽出、複数行色置換、mask-aware output validation、staged result ownership、inline parameter hostとloaded-set編集
 - `SCRIPT-001`: exact-current UTF-8 `.inkscript`／fragmentのclosed grammar、lossless CST、typed semantic AST、canonical emitter、schema registry、bounded diagnostic／resource contract
 - `SCRIPT-002`: 全現行journal-replayable primitiveのclosed typed catalog、同一canonical executor、exact-source／rebound等価性、selector／assert／result／asset／portability／work formula、Continuous Fillの一seed一stepと1:N `editor_group`
 - `SCRIPT-003`: authority-bound immutable plan、dry-run／progress／cancel／failure report、inputごとのstaged executionとexact-current `.inkpod` atomic install、save/reopen／Undo/Redo／cache-free replay／ID／savepoint保持

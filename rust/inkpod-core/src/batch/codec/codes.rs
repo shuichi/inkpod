@@ -4,7 +4,7 @@ pub(in crate::batch) fn input_kind_code(kind: BatchInputKind) -> u32 {
     match kind {
         BatchInputKind::File => INPUT_FILE,
         BatchInputKind::Folder => INPUT_FOLDER,
-        BatchInputKind::CurrentSequence => INPUT_CURRENT_SEQUENCE,
+        BatchInputKind::ActiveDocument => INPUT_ACTIVE_DOCUMENT,
     }
 }
 
@@ -12,25 +12,48 @@ pub(in crate::batch) fn parse_input_kind(value: u32) -> Result<BatchInputKind, C
     match value {
         INPUT_FILE => Ok(BatchInputKind::File),
         INPUT_FOLDER => Ok(BatchInputKind::Folder),
-        INPUT_CURRENT_SEQUENCE => Ok(BatchInputKind::CurrentSequence),
+        INPUT_ACTIVE_DOCUMENT => Ok(BatchInputKind::ActiveDocument),
         _ => Err(CoreError::InvalidArgument("batch input kind is unknown")),
     }
 }
 
-pub(in crate::batch) fn output_policy_code(policy: BatchOutputPolicy) -> u32 {
+pub(in crate::batch) fn output_policy_code(policy: BatchOutputDestination) -> u32 {
     match policy {
-        BatchOutputPolicy::Duplicate => OUTPUT_DUPLICATE,
-        BatchOutputPolicy::NewSave => OUTPUT_NEW_SAVE,
-        BatchOutputPolicy::ExplicitOverwrite => OUTPUT_OVERWRITE,
+        BatchOutputDestination::Folder => OUTPUT_FOLDER,
+        BatchOutputDestination::ActiveDocument => OUTPUT_ACTIVE_DOCUMENT,
+        BatchOutputDestination::NewTabs => OUTPUT_NEW_TABS,
     }
 }
 
-pub(in crate::batch) fn parse_output_policy(value: u32) -> Result<BatchOutputPolicy, CoreError> {
+pub(in crate::batch) fn parse_output_policy(
+    value: u32,
+) -> Result<BatchOutputDestination, CoreError> {
     match value {
-        OUTPUT_DUPLICATE => Ok(BatchOutputPolicy::Duplicate),
-        OUTPUT_NEW_SAVE => Ok(BatchOutputPolicy::NewSave),
-        OUTPUT_OVERWRITE => Ok(BatchOutputPolicy::ExplicitOverwrite),
+        OUTPUT_FOLDER => Ok(BatchOutputDestination::Folder),
+        OUTPUT_ACTIVE_DOCUMENT => Ok(BatchOutputDestination::ActiveDocument),
+        OUTPUT_NEW_TABS => Ok(BatchOutputDestination::NewTabs),
         _ => Err(CoreError::InvalidArgument("batch output policy is unknown")),
+    }
+}
+
+pub(in crate::batch) const fn output_format_code(format: BatchOutputFormat) -> u32 {
+    match format {
+        BatchOutputFormat::Inkpod => OUTPUT_NATIVE_INKPOD,
+        BatchOutputFormat::Png => OUTPUT_PNG,
+        BatchOutputFormat::Tiff => OUTPUT_TIFF,
+        BatchOutputFormat::Tga => OUTPUT_TGA,
+        BatchOutputFormat::Bmp => OUTPUT_BMP,
+    }
+}
+
+pub(in crate::batch) fn parse_output_format(value: u32) -> Result<BatchOutputFormat, CoreError> {
+    match value {
+        OUTPUT_NATIVE_INKPOD => Ok(BatchOutputFormat::Inkpod),
+        OUTPUT_PNG => Ok(BatchOutputFormat::Png),
+        OUTPUT_TIFF => Ok(BatchOutputFormat::Tiff),
+        OUTPUT_TGA => Ok(BatchOutputFormat::Tga),
+        OUTPUT_BMP => Ok(BatchOutputFormat::Bmp),
+        _ => Err(CoreError::InvalidArgument("batch output format is unknown")),
     }
 }
 
@@ -50,27 +73,6 @@ pub(in crate::batch) fn parse_failure_policy(value: u32) -> Result<BatchFailureP
         )),
     }
 }
-pub(super) fn channel_code(channel: Channel) -> u32 {
-    match channel {
-        Channel::Rgb => 1,
-        Channel::Red => 2,
-        Channel::Green => 3,
-        Channel::Blue => 4,
-    }
-}
-
-pub(super) fn parse_channel(value: u32) -> Result<Channel, CoreError> {
-    match value {
-        1 => Ok(Channel::Rgb),
-        2 => Ok(Channel::Red),
-        3 => Ok(Channel::Green),
-        4 => Ok(Channel::Blue),
-        _ => Err(CoreError::InvalidArgument(
-            "batch filter channel is unknown",
-        )),
-    }
-}
-
 pub(super) fn layer_kind_code(kind: LayerKind) -> u32 {
     match kind {
         LayerKind::BinaryColoring => 1,
@@ -115,52 +117,6 @@ pub(super) fn parse_plane_kind(value: u32) -> Result<PlaneType, CoreError> {
     }
 }
 
-pub(super) fn pixel_format_code(format: PixelFormat) -> u32 {
-    match format {
-        PixelFormat::BinaryMask8 => 1,
-        PixelFormat::Grayscale8 => 2,
-        PixelFormat::Grayscale16 => 3,
-        PixelFormat::StraightRgba8 => 4,
-        PixelFormat::StraightRgba16 => 5,
-        PixelFormat::PremultipliedBgra8 => 6,
-    }
-}
-
-pub(super) fn parse_pixel_format(value: u32) -> Result<PixelFormat, CoreError> {
-    match value {
-        1 => Ok(PixelFormat::BinaryMask8),
-        2 => Ok(PixelFormat::Grayscale8),
-        3 => Ok(PixelFormat::Grayscale16),
-        4 => Ok(PixelFormat::StraightRgba8),
-        5 => Ok(PixelFormat::StraightRgba16),
-        6 => Ok(PixelFormat::PremultipliedBgra8),
-        _ => Err(CoreError::InvalidArgument(
-            "batch destination pixel format is unknown",
-        )),
-    }
-}
-
-pub(super) fn resize_anchor_code(anchor: ResizeAnchor) -> u32 {
-    match anchor {
-        ResizeAnchor::TopLeft => 1,
-        ResizeAnchor::TopRight => 2,
-        ResizeAnchor::Center => 3,
-        ResizeAnchor::BottomLeft => 4,
-        ResizeAnchor::BottomRight => 5,
-    }
-}
-
-pub(super) fn parse_resize_anchor(value: u32) -> Result<ResizeAnchor, CoreError> {
-    match value {
-        1 => Ok(ResizeAnchor::TopLeft),
-        2 => Ok(ResizeAnchor::TopRight),
-        3 => Ok(ResizeAnchor::Center),
-        4 => Ok(ResizeAnchor::BottomLeft),
-        5 => Ok(ResizeAnchor::BottomRight),
-        _ => Err(CoreError::InvalidArgument("batch resize anchor is unknown")),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,10 +126,8 @@ mod tests {
         assert!(parse_input_kind(u32::MAX).is_err());
         assert!(parse_output_policy(u32::MAX).is_err());
         assert!(parse_failure_policy(u32::MAX).is_err());
-        assert!(parse_channel(u32::MAX).is_err());
         assert!(parse_layer_kind(u32::MAX).is_err());
         assert!(parse_plane_kind(u32::MAX).is_err());
-        assert!(parse_pixel_format(u32::MAX).is_err());
-        assert!(parse_resize_anchor(u32::MAX).is_err());
+        assert!(parse_output_format(u32::MAX).is_err());
     }
 }

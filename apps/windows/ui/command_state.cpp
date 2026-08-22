@@ -554,43 +554,24 @@ void ProvideBatchCommandStates(
          IDM_BATCH_INPUT_FOLDER,
          IDM_BATCH_INPUT_CURRENT,
          IDM_BATCH_INPUT_RANGE,
-         IDM_BATCH_OUTPUT_DUPLICATE,
-         IDM_BATCH_OUTPUT_NEW,
-         IDM_BATCH_OUTPUT_OVERWRITE,
+         IDM_BATCH_OUTPUT_FOLDER,
+         IDM_BATCH_OUTPUT_ACTIVE_DOCUMENT,
+         IDM_BATCH_OUTPUT_NEW_TABS,
          IDM_BATCH_OUTPUT_SETTINGS,
          IDM_BATCH_FAILURE_CONTINUE,
          IDM_BATCH_FAILURE_STOP},
-        input.batch.idle && !input.batch.loaded_graph);
+        input.batch.idle);
     SetEnabled(states, IDM_BATCH_LOAD_SET, input.batch.idle);
     SetEnabled(
         states,
         {IDM_BATCH_ADD_COLOR_REPLACE,
-         IDM_BATCH_ADD_CONTINUOUS_FILL,
-         IDM_BATCH_ADD_SEPARATION,
-         IDM_BATCH_ADD_VISIBILITY,
-         IDM_BATCH_ADD_BOUNDARY_AIRBRUSH,
-         IDM_BATCH_ADD_DUST,
-         IDM_BATCH_ADD_MIRROR,
-         IDM_BATCH_ADD_ROTATE,
-         IDM_BATCH_ADD_RESIZE,
-         IDM_BATCH_ADD_CONVERT,
-         IDM_BATCH_ADD_FILTER_SHARPEN_WEAK,
-         IDM_BATCH_ADD_FILTER_SHARPEN_STRONG,
-         IDM_BATCH_ADD_FILTER_BLUR_WEAK,
-         IDM_BATCH_ADD_FILTER_BLUR_STRONG,
-         IDM_BATCH_ADD_FILTER_GAUSSIAN,
-         IDM_BATCH_ADD_FILTER_INVERT,
-         IDM_BATCH_ADD_FILTER_AUTO_CONTRAST,
-         IDM_BATCH_ADD_FILTER_BRIGHTNESS,
-         IDM_BATCH_ADD_FILTER_TONE_CURVE,
-         IDM_BATCH_ADD_FILTER_LEVELS,
-         IDM_BATCH_ADD_FILTER_HSV,
-         IDM_BATCH_ADD_FILTER_COLOR_BALANCE,
-         IDM_BATCH_ADD_FILTER_UNSHARP},
+         IDM_BATCH_ADD_MOVE_TO_COLOR_PLANE,
+         IDM_BATCH_ADD_MASKING,
+         IDM_BATCH_ADD_ERASE},
         input.batch.idle && input.document.has_document);
     SetEnabled(
         states,
-        {IDM_BATCH_OPERATION_EDIT,
+        {IDM_BATCH_OPERATION_DUPLICATE,
          IDM_BATCH_OPERATION_REMOVE,
          IDM_BATCH_OPERATION_UP,
          IDM_BATCH_OPERATION_DOWN,
@@ -609,18 +590,18 @@ void ProvideBatchCommandStates(
 
     SetUnchecked(
         states,
-        {IDM_BATCH_OUTPUT_DUPLICATE,
-         IDM_BATCH_OUTPUT_NEW,
-         IDM_BATCH_OUTPUT_OVERWRITE,
+        {IDM_BATCH_OUTPUT_FOLDER,
+         IDM_BATCH_OUTPUT_ACTIVE_DOCUMENT,
+         IDM_BATCH_OUTPUT_NEW_TABS,
          IDM_BATCH_FAILURE_CONTINUE,
          IDM_BATCH_FAILURE_STOP});
     SetChecked(
         states,
-        input.batch.output_policy == INKPOD_BATCH_OUTPUT_NEW_SAVE
-            ? IDM_BATCH_OUTPUT_NEW
-            : (input.batch.output_policy == INKPOD_BATCH_OUTPUT_EXPLICIT_OVERWRITE
-                      ? IDM_BATCH_OUTPUT_OVERWRITE
-                      : IDM_BATCH_OUTPUT_DUPLICATE),
+        input.batch.output_destination == INKPOD_BATCH_OUTPUT_ACTIVE_DOCUMENT
+            ? IDM_BATCH_OUTPUT_ACTIVE_DOCUMENT
+            : (input.batch.output_destination == INKPOD_BATCH_OUTPUT_NEW_TABS
+                      ? IDM_BATCH_OUTPUT_NEW_TABS
+                      : IDM_BATCH_OUTPUT_FOLDER),
         true);
     SetChecked(
         states,

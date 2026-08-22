@@ -12,10 +12,10 @@ const EXPECTED_QUICK_CHECKSUMS: [u64; 9] = [
     0x517e_d7ae_78bf_0487,
     0x3f10_53b9_fde3_7d35,
     0x255a_b9ba_d114_dfdd,
-    0xf31d_31fe_1bb0_0fd7,
+    0x9ae6_8357_26a3_6053,
     0x70d3_465b_6732_887e,
-    0xbcf4_8208_2855_c1f2,
-    0x1005_f890_1846_f431,
+    0xa90e_5655_8c9e_aaab,
+    0xf169_350a_6a43_e727,
 ];
 const EXPECTED_FULL_CHECKSUMS: [u64; 9] = [
     0x4390_40e0_244d_5773,
@@ -23,10 +23,10 @@ const EXPECTED_FULL_CHECKSUMS: [u64; 9] = [
     0x4390_40e0_244d_5773,
     0xa2c1_a74e_7f97_81a3,
     0x77f6_3d83_e130_185f,
-    0x6732_b8b0_a656_5d03,
+    0xd1be_3927_5687_aa9b,
     0x70d3_465b_6732_887e,
-    0xbcf4_8208_2855_c1f2,
-    0x558c_b3aa_cd55_afd9,
+    0xa90e_5655_8c9e_aaab,
+    0xcfea_73e2_84d6_2ae4,
 ];
 
 #[derive(Clone, Copy)]
@@ -749,18 +749,64 @@ fn light_table_composite(profile: Profile) -> ScenarioResult {
 
 fn batch_preview(profile: Profile) -> ScenarioResult {
     let mut core = Core::new();
-    let cells = (0..profile.batch_cells)
-        .map(|index| {
-            SequenceCellSource::from_rgba_bytes(
-                format!("A{:04}", index + 1),
+    let input_folder = benchmark_batch_input_path(profile);
+    assert!(
+        !input_folder.exists(),
+        "benchmark input path must start absent"
+    );
+    std::fs::create_dir(&input_folder).expect("benchmark input folder must be creatable");
+    let mut inputs = Vec::with_capacity(profile.batch_cells as usize);
+    let mut replacements = Vec::with_capacity(profile.batch_cells as usize);
+    for index in 0..profile.batch_cells {
+        let salt = index as u8;
+        let old = PixelValue::Rgba([salt, salt.wrapping_mul(7), salt.wrapping_mul(11), 255]);
+        replacements.push(BatchColorPair {
+            enabled: true,
+            old,
+            new: PixelValue::Rgba([
+                salt ^ 0xff,
+                salt.wrapping_mul(7) ^ 0xff,
+                salt.wrapping_mul(11) ^ 0xff,
+                255,
+            ]),
+        });
+
+        let mut input = Core::new();
+        let document = input
+            .new_cell_with_uuid(
+                profile.batch_side,
+                profile.batch_side,
+                DEFAULT_DPI_MILLI,
+                DEFAULT_DPI_MILLI,
                 BENCHMARK_UUID + 1_000 + u128::from(index),
-                patterned_rgba(profile.batch_side, profile.batch_side, index as u8),
             )
-            .expect("bounded sequence source must be valid")
-        })
-        .collect();
-    core.set_sequence(cells)
-        .expect("bounded benchmark sequence must be valid");
+            .expect("bounded benchmark input must be valid");
+        let raster = patterned_rgba(profile.batch_side, profile.batch_side, salt);
+        input
+            .execute_primitive(PrimitiveRequest::ImportRasterAsset {
+                expected_revision: document.document_revision,
+                target_plane_id: document.color_plane_id,
+                raster: RasterAssetInput {
+                    width: raster.width,
+                    height: raster.height,
+                    pixel_format: raster.pixel_format,
+                    color_space: Some(AssetColorSpace::Srgb),
+                    alpha_semantics: AssetAlphaSemantics::Straight,
+                    canonical_stride: u64::from(raster.width) * 4,
+                    pixels: raster.pixels,
+                    expected_id: None,
+                },
+            })
+            .expect("benchmark color-plane raster must import");
+        let path = input_folder.join(format!("A{:04}.inkpod", index + 1));
+        input.save(&path).expect("benchmark input must save");
+        inputs.push(BatchInputSelector {
+            kind: BatchInputKind::File,
+            path: path.to_string_lossy().into_owned(),
+            first_cell: 0,
+            last_cell: 0,
+        });
+    }
 
     let output_folder = benchmark_non_output_path(profile);
     assert!(
@@ -770,18 +816,16 @@ fn batch_preview(profile: Profile) -> ScenarioResult {
     let graph = BatchGraph {
         version: inkpod_format::BATCH_GRAPH_VERSION,
         name: "Core benchmark".to_owned(),
-        inputs: vec![BatchInputSelector::current_sequence()],
+        inputs,
         operations: vec![BatchOperation {
             version: BATCH_OPERATION_VERSION,
             enabled: true,
-            configure_each_run: false,
-            target: Some(BatchTargetSelector::color_plane()),
-            kind: BatchOperationKind::Filter(Filter::Invert {
-                channel: Channel::Rgb,
-            }),
+            target: BatchTargetSelector::color_plane(),
+            kind: BatchOperationKind::ColorReplace(replacements),
         }],
         output: BatchOutputSettings {
             folder: output_folder.to_string_lossy().into_owned(),
+            naming_template: "{stem}_batch_{index:4}".to_owned(),
             ..BatchOutputSettings::default()
         },
     };
@@ -812,6 +856,7 @@ fn batch_preview(profile: Profile) -> ScenarioResult {
         .filter(|item| item.outcome == BatchItemOutcome::DryRun)
         .count();
     assert_eq!(preview.items.len(), profile.batch_cells as usize);
+    assert!(preview.items.iter().all(|item| item.warnings.is_empty()));
     assert_eq!(successes, profile.batch_cells as usize);
     assert_eq!(report.failure_count(), 0);
     assert!(!report.cancelled);
@@ -821,6 +866,7 @@ fn batch_preview(profile: Profile) -> ScenarioResult {
     );
     let checksum = batch_checksum(&preview, &report);
     black_box((&preview, &report));
+    std::fs::remove_dir_all(input_folder).expect("benchmark input folder must be removable");
 
     ScenarioResult {
         scenario: "batch_preview",
@@ -959,6 +1005,14 @@ fn batch_checksum(preview: &BatchPreview, report: &BatchRunReport) -> u64 {
 fn benchmark_non_output_path(profile: Profile) -> PathBuf {
     std::env::temp_dir().join(format!(
         "inkpod-core-benchmark-no-output-{}-{}",
+        std::process::id(),
+        profile.name
+    ))
+}
+
+fn benchmark_batch_input_path(profile: Profile) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "inkpod-core-benchmark-input-{}-{}",
         std::process::id(),
         profile.name
     ))

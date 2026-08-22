@@ -794,6 +794,48 @@ ApplicationHost::PrepareDocumentSession() noexcept {
     return binding;
 }
 
+std::optional<ApplicationHost::DocumentBinding>
+ApplicationHost::PrepareBatchResultSession(
+    InkpodBatchReport* report,
+    std::uint64_t result_index) noexcept {
+    if (engine == nullptr || report == nullptr) {
+        return std::nullopt;
+    }
+    const CommandContext previous = routing.targets.Capture();
+    const auto issued = routing.targets.AddDocument();
+    if (!issued.has_value()) {
+        return std::nullopt;
+    }
+    const DocumentBinding binding{
+        issued.value(),
+        routing.targets.ActiveDocumentView(),
+        routing.targets.CurrentGeneration()};
+    if (engine->AdoptBatchResult(
+            binding.session, binding.generation, report, result_index)
+            != INKPOD_STATUS_OK
+        || !engine->RegisterDocumentView(
+            binding.session, binding.generation, binding.view, 0U)) {
+        (void)engine->UnregisterDocumentView(
+            binding.session, binding.generation, binding.view);
+        (void)engine->CloseSession(binding.session, binding.generation);
+        (void)routing.targets.RemoveDocument(binding.session);
+        if (previous.document_session.has_value()
+            && previous.document_view.has_value()) {
+            (void)routing.targets.ActivateDocument(
+                previous.document_session.value(), previous.document_view.value());
+        }
+        return std::nullopt;
+    }
+    if (previous.document_session.has_value()
+        && previous.document_view.has_value()
+        && !routing.targets.ActivateDocument(
+            previous.document_session.value(), previous.document_view.value())) {
+        (void)DiscardPreparedDocumentSession(binding);
+        return std::nullopt;
+    }
+    return binding;
+}
+
 bool ApplicationHost::PublishPreparedDocumentSession(
     const DocumentBinding& binding,
     EditorGroupId destination_group) noexcept {

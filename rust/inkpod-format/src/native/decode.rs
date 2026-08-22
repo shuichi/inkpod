@@ -373,7 +373,7 @@ pub fn decode_document_archive(bytes: &[u8]) -> Result<DocumentArchive, FormatEr
 
 fn decode_document_metadata(bytes: &[u8]) -> Result<FileDocumentMetadata, FormatError> {
     let mut reader = Reader::new(bytes);
-    if reader.take(4)? != DOCUMENT_METADATA_MAGIC || reader.u32()? != 6 {
+    if reader.take(4)? != DOCUMENT_METADATA_MAGIC || reader.u32()? != 7 {
         return Err(FormatError::Unsupported(
             "document metadata version is not supported",
         ));
@@ -381,6 +381,7 @@ fn decode_document_metadata(bytes: &[u8]) -> Result<FileDocumentMetadata, Format
     let active_layer_id = reader.u64()?;
     let active_plane_id = reader.u64()?;
     let selection_plane_id = reader.u64()?;
+    let fill_protection_plane_id = reader.u64()?;
     let layer_count = reader.u32()? as usize;
     let guide_count = reader.u32()? as usize;
     let shooting_frame_present = match reader.u32()? {
@@ -561,6 +562,7 @@ fn decode_document_metadata(bytes: &[u8]) -> Result<FileDocumentMetadata, Format
         active_layer_id,
         active_plane_id,
         selection_plane_id,
+        fill_protection_plane_id,
         layers,
         guides,
         grid,

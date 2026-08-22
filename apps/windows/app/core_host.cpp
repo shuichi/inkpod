@@ -20,7 +20,8 @@
 namespace inkpod::app {
 namespace {
 
-constexpr std::size_t kMaximumSessions = 64U;
+constexpr std::size_t kMaximumSessions =
+    CoreHost::kMaximumDocumentSessions;
 constexpr std::size_t kMaximumFrontendViews = kMaximumSessions * 64U;
 constexpr std::size_t kMaximumQueuedWork = 4096U;
 constexpr std::size_t kReservedStrokeControlWork = 64U;
@@ -154,6 +155,7 @@ struct PrimitiveWork {
 
 enum class ControlKind : std::uint8_t {
     Create,
+    AdoptBatchResult,
     Rebind,
     Close,
 };
@@ -162,8 +164,15 @@ struct ControlWork {
     ControlKind kind{ControlKind::Create};
     SessionBinding binding;
     SessionBinding replacement;
+    InkpodBatchReport* batch_report{};
+    std::uint64_t batch_result_index{};
     std::shared_ptr<std::promise<InkpodStatus>> completion;
 };
+
+constexpr bool IsCreationControl(ControlKind kind) noexcept {
+    return kind == ControlKind::Create
+        || kind == ControlKind::AdoptBatchResult;
+}
 
 using WorkItem =
     std::variant<AdapterWork, PrimitiveWork, StrokeWork, InkScriptWork, ControlWork>;
@@ -266,11 +275,19 @@ struct CoreHost::Impl final {
     InkpodStatus Control(
         ControlKind kind,
         SessionBinding binding,
-        SessionBinding replacement = {}) noexcept {
+        SessionBinding replacement = {},
+        InkpodBatchReport* batch_report = nullptr,
+        std::uint64_t batch_result_index = 0U) noexcept {
         try {
             auto completion = std::make_shared<std::promise<InkpodStatus>>();
             auto future = completion->get_future();
-            if (!PushControl(ControlWork{kind, binding, replacement, completion})) {
+            if (!PushControl(ControlWork{
+                    kind,
+                    binding,
+                    replacement,
+                    batch_report,
+                    batch_result_index,
+                    completion})) {
                 return INKPOD_STATUS_INVALID_STATE;
             }
             return future.get();
@@ -309,6 +326,55 @@ struct CoreHost::Impl final {
         } catch (const std::bad_alloc&) {
             (void)Control(ControlKind::Close, binding);
             return INKPOD_STATUS_INVALID_STATE;
+        }
+        return INKPOD_STATUS_OK;
+    }
+
+    InkpodStatus AdoptBatchResult(
+        SessionBinding binding,
+        InkpodBatchReport* report,
+        std::uint64_t result_index) noexcept {
+        if (!binding || report == nullptr) {
+            return INKPOD_STATUS_INVALID_ARGUMENT;
+        }
+        {
+            std::lock_guard lock(state_mutex);
+            if (published.size() >= kMaximumSessions
+                || FindPublishedLocked(binding.session) != published.end()) {
+                return INKPOD_STATUS_INVALID_STATE;
+            }
+        }
+        const InkpodStatus status = Control(
+            ControlKind::AdoptBatchResult,
+            binding,
+            {},
+            report,
+            result_index);
+        if (status != INKPOD_STATUS_OK) {
+            return status;
+        }
+        try {
+            std::lock_guard lock(state_mutex);
+            PublishedSession session{};
+            session.binding = binding;
+            session.state.generation = binding.generation;
+            session.state.accepting_work = true;
+            published.push_back(std::move(session));
+            if (!active) {
+                active = binding;
+            }
+        } catch (const std::bad_alloc&) {
+            (void)Control(ControlKind::Close, binding);
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        const InkpodStatus refresh_status = Invoke(
+            binding,
+            [](InkpodCore*) { return INKPOD_STATUS_OK; },
+            false,
+            true);
+        if (refresh_status != INKPOD_STATUS_OK) {
+            (void)CloseSession(binding);
+            return refresh_status;
         }
         return INKPOD_STATUS_OK;
     }
@@ -1657,6 +1723,32 @@ struct CoreHost::Impl final {
                 }
                 break;
             }
+            case ControlKind::AdoptBatchResult: {
+                if (FindEntry(item.binding) != nullptr
+                    || entries.size() >= kMaximumSessions
+                    || item.batch_report == nullptr) {
+                    status = INKPOD_STATUS_INVALID_STATE;
+                    break;
+                }
+                std::unique_ptr<CoreEntry> entry;
+                try {
+                    entry = std::make_unique<CoreEntry>();
+                } catch (const std::bad_alloc&) {
+                    status = INKPOD_STATUS_INVALID_STATE;
+                    break;
+                }
+                entry->binding = item.binding;
+                std::uint64_t staged_generation{};
+                status = inkpod_batch_report_take_staged_result(
+                    item.batch_report,
+                    item.batch_result_index,
+                    &staged_generation,
+                    &entry->core);
+                if (status == INKPOD_STATUS_OK) {
+                    entries.push_back(std::move(entry));
+                }
+                break;
+            }
             case ControlKind::Rebind: {
                 CoreEntry* entry = FindEntry(item.binding);
                 if (entry == nullptr
@@ -1727,7 +1819,7 @@ struct CoreHost::Impl final {
         return std::any_of(
             work.cbegin(), work.cend(), [binding](const WorkItem& candidate) {
                 const auto* control = std::get_if<ControlWork>(&candidate);
-                return control != nullptr && control->kind != ControlKind::Create
+                return control != nullptr && !IsCreationControl(control->kind)
                     && control->binding == binding;
             });
     }
@@ -1777,7 +1869,7 @@ struct CoreHost::Impl final {
                 || std::chrono::steady_clock::now() >= script->not_before;
         }
         if (const auto* control = std::get_if<ControlWork>(&item)) {
-            if (control->kind == ControlKind::Create) {
+            if (IsCreationControl(control->kind)) {
                 return true;
             }
             const CoreEntry* entry = FindEntry(control->binding);
@@ -1847,7 +1939,7 @@ struct CoreHost::Impl final {
     std::optional<SessionBinding> TransitioningActiveStroke() const noexcept {
         for (const auto& item : work) {
             const auto* control = std::get_if<ControlWork>(&item);
-            if (control == nullptr || control->kind == ControlKind::Create) {
+            if (control == nullptr || IsCreationControl(control->kind)) {
                 continue;
             }
             const CoreEntry* entry = FindEntry(control->binding);
@@ -2436,6 +2528,17 @@ InkpodStatus CoreHost::CreateSession(
     return impl_ == nullptr
         ? INKPOD_STATUS_INVALID_STATE
         : impl_->CreateSession(SessionBinding{session, generation});
+}
+
+InkpodStatus CoreHost::AdoptBatchResult(
+    DocumentSessionId session,
+    Generation generation,
+    InkpodBatchReport* report,
+    std::uint64_t result_index) noexcept {
+    return impl_ == nullptr
+        ? INKPOD_STATUS_INVALID_STATE
+        : impl_->AdoptBatchResult(
+              SessionBinding{session, generation}, report, result_index);
 }
 
 InkpodStatus CoreHost::RebindSession(

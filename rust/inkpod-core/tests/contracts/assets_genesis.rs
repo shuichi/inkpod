@@ -619,12 +619,11 @@ fn batch_copies_asset_backed_sources_and_writes_current_native_output() {
     let graph = BatchGraph {
         version: BATCH_GRAPH_VERSION,
         name: "asset-base".to_owned(),
-        inputs: vec![BatchInputSelector::current_sequence()],
+        inputs: vec![BatchInputSelector::active_document()],
         operations: vec![BatchOperation {
             version: BATCH_OPERATION_VERSION,
             enabled: true,
-            configure_each_run: false,
-            target: Some(BatchTargetSelector::color_plane()),
+            target: BatchTargetSelector::color_plane(),
             kind: BatchOperationKind::ColorReplace(vec![BatchColorPair {
                 enabled: true,
                 old: PixelValue::Rgba([1, 2, 3, 255]),

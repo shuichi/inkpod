@@ -36,6 +36,7 @@ pub enum PlaneKind {
     Raster,
     Selection,
     LightTable,
+    FillProtection,
 }
 
 impl PlaneKind {
@@ -46,6 +47,7 @@ impl PlaneKind {
             Self::Raster => 3,
             Self::Selection => 4,
             Self::LightTable => 5,
+            Self::FillProtection => 6,
         }
     }
 
@@ -56,6 +58,7 @@ impl PlaneKind {
             3 => Ok(Self::Raster),
             4 => Ok(Self::Selection),
             5 => Ok(Self::LightTable),
+            6 => Ok(Self::FillProtection),
             _ => Err(FormatError::Unsupported("unknown required plane kind")),
         }
     }
@@ -146,6 +149,7 @@ pub struct FileDocumentMetadata {
     pub active_layer_id: u64,
     pub active_plane_id: u64,
     pub selection_plane_id: u64,
+    pub fill_protection_plane_id: u64,
     pub layers: Vec<FileLayer>,
     pub guides: Vec<FileGuide>,
     pub grid: FileGrid,

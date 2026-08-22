@@ -70,6 +70,7 @@ impl Core {
             main_plane: next_id.take_plane(),
             color_plane: next_id.take_plane(),
             selection_plane: next_id.take_plane(),
+            fill_protection_plane: next_id.take_plane(),
             light_table_set: next_id.take_light_table_set(),
             cell: next_id.take_cell(),
         };

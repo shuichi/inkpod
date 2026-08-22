@@ -1,137 +1,383 @@
 use super::model::{BatchSource, BatchSourceContent};
-use super::validation::{empty_pixel, ensure_pixel_matches_format, validate_operation};
+use super::validation::{
+    empty_pixel, ensure_pixel_matches_format, validate_component, validate_naming_template,
+    validate_operation,
+};
 use super::*;
 use crate::primitive::{CanonicalInvocation, InvocationResult};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum OperationResult {
-    Applied,
-    Skipped,
+impl Core {
+    /// Applies an ordered Batch v3 operation list as one canonical procedure and Undo unit.
+    ///
+    /// Disabled operations are ignored. Invalid targets, cancellation, stale revision,
+    /// overflow, and allocation failure publish no partial document state.
+    pub fn apply_batch_operations(
+        &mut self,
+        operations: &[BatchOperation],
+        mut is_cancelled: impl FnMut() -> bool,
+    ) -> Result<DispatchOutcome, CoreError> {
+        let enabled = operations
+            .iter()
+            .filter(|operation| operation.enabled)
+            .cloned()
+            .collect::<Vec<_>>();
+        if enabled.is_empty() {
+            return Err(CoreError::InvalidArgument(
+                "batch operation list has no enabled operation",
+            ));
+        }
+        for operation in &enabled {
+            validate_operation(operation)?;
+        }
+        if !self.canonical_invocation_is_active() {
+            let staged = enabled.clone();
+            return self
+                .execute_canonical_invocation_with(
+                    CanonicalInvocation::ApplyBatchOperations {
+                        operations: enabled,
+                    },
+                    move |core| {
+                        apply_batch_operations_canonical(core, &staged, &mut is_cancelled)
+                            .map(InvocationResult::dispatch)
+                    },
+                )
+                .map(|result| result.dispatch);
+        }
+        apply_batch_operations_canonical(self, &enabled, &mut is_cancelled)
+    }
 }
 
-pub(super) fn apply_operation(
+pub(crate) fn apply_batch_operations_canonical(
     core: &mut Core,
-    operation: &BatchOperation,
-    mut progress: impl FnMut(u64, u64) -> bool,
-) -> Result<OperationResult, CoreError> {
-    validate_operation(operation)?;
-    let target = match operation.target.as_ref() {
-        Some(selector) => match resolve_target(core, selector)? {
-            Some(target) => Some(target),
-            None => return Ok(OperationResult::Skipped),
-        },
-        None => None,
-    };
-    let target_plane = || {
-        target
-            .and_then(|(_, plane)| plane)
-            .ok_or(CoreError::InvalidArgument(
-                "batch operation requires a target plane",
-            ))
-    };
-    match &operation.kind {
-        BatchOperationKind::ColorReplace(pairs) => {
-            apply_color_replacement(core, target_plane()?, pairs, &mut progress)?;
+    operations: &[BatchOperation],
+    is_cancelled: &mut dyn FnMut() -> bool,
+) -> Result<DispatchOutcome, CoreError> {
+    if !core.canonical_invocation_is_active() {
+        return Err(CoreError::InvalidState(
+            "batch operations require a canonical primitive",
+        ));
+    }
+    let base_revision = core.document_revision;
+    let before = core.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+    let revision = core.next_document_revision()?;
+    let mut after = before.clone();
+    let mut total_work = 0_u64;
+
+    for operation in operations {
+        validate_operation(operation)?;
+        if !operation.enabled {
+            continue;
         }
-        BatchOperationKind::ContinuousFill(seeds) => {
-            let (layer_id, plane_id) = target.ok_or(CoreError::InvalidArgument(
-                "continuous fill requires a stable target",
-            ))?;
-            let plane_id = plane_id.ok_or(CoreError::InvalidArgument(
-                "continuous fill requires a target plane",
-            ))?;
-            core.set_active_node(layer_id, plane_id)?;
-            for (index, seed) in seeds.iter().enumerate() {
-                if !seed.enabled {
-                    continue;
-                }
-                if !progress(index as u64, seeds.len() as u64) {
-                    return Err(CoreError::Cancelled);
-                }
-                core.apply_fill_with_cancel(
-                    &FillRequest {
-                        operation: FillOperation::Seed,
-                        seed_x: seed.x,
-                        seed_y: seed.y,
-                        color: seed.color,
-                        selection: None,
-                        use_document_selection: false,
-                        tolerance: seed.tolerance,
-                        detached_regions: false,
-                        overflow_abort: true,
-                        gap_close: seed.gap_close,
-                        transparent_only: false,
-                        inclusion_mode: InclusionMode::None,
-                        inclusion_colors: Vec::new(),
-                        extension_distance: 0,
-                    },
-                    || !progress(index as u64, seeds.len() as u64),
-                )?;
+        if is_cancelled() {
+            return Err(CoreError::Cancelled);
+        }
+        let Some((_, plane_id)) = resolve_target_in_document(&after, &operation.target)? else {
+            continue;
+        };
+        let plane_id = PlaneId::from_raw(plane_id);
+        let source = after
+            .plane_by_id(plane_id)
+            .ok_or(CoreError::InvalidState("batch target plane disappeared"))?;
+        let work = u64::from(source.raster.width())
+            .checked_mul(u64::from(source.raster.height()))
+            .ok_or(CoreError::InvalidArgument("batch raster work overflows"))?;
+        total_work = total_work
+            .checked_add(work)
+            .ok_or(CoreError::InvalidArgument("batch operation work overflows"))?;
+        if total_work > MAX_IMAGE_EDIT_PIXELS {
+            return Err(CoreError::InvalidArgument(
+                "batch operation list exceeds the bounded work limit",
+            ));
+        }
+
+        match &operation.kind {
+            BatchOperationKind::ColorReplace(pairs) => apply_color_replace_to_document(
+                &mut after,
+                plane_id,
+                pairs,
+                revision,
+                is_cancelled,
+            )?,
+            BatchOperationKind::MoveToColorPlane(colors) => {
+                move_colors_to_color_plane(&mut after, plane_id, colors, revision, is_cancelled)?
             }
-        }
-        BatchOperationKind::Separation(options) => {
-            apply_separation(core, target_plane()?, options, &mut progress)?;
-        }
-        BatchOperationKind::Visibility { visible } => {
-            let (layer_id, plane_id) = target.ok_or(CoreError::InvalidArgument(
-                "visibility requires a stable target",
-            ))?;
-            let layers = core.layers()?;
-            let layer = layers
-                .iter()
-                .find(|layer| layer.id == layer_id)
-                .ok_or(CoreError::InvalidState("batch layer target disappeared"))?;
-            if let Some(plane_id) = plane_id {
-                let plane = layer
-                    .planes
-                    .iter()
-                    .find(|plane| plane.id == plane_id)
-                    .ok_or(CoreError::InvalidState("batch plane target disappeared"))?;
-                core.set_plane_properties(
-                    plane.id,
-                    *visible,
-                    plane.editable,
-                    plane.opacity_milli,
-                    &plane.name,
-                )?;
-            } else {
-                core.set_layer_properties(
-                    layer.id,
-                    *visible,
-                    layer.editable,
-                    layer.opacity_milli,
-                    &layer.name,
-                )?;
+            BatchOperationKind::Masking(colors) => {
+                replace_fill_protection_mask(&mut after, plane_id, colors, revision, is_cancelled)?
             }
-        }
-        BatchOperationKind::Filter(filter) => {
-            let plane_id = target_plane()?;
-            core.begin_filter_preview_with_progress(plane_id, filter.clone(), &mut progress)?;
-            core.apply_filter_preview()?;
-        }
-        BatchOperationKind::BoundaryAirbrush(effect) => {
-            core.apply_boundary_airbrush_to_plane(target_plane()?, effect)?;
-        }
-        BatchOperationKind::DustRemoval(options) => {
-            core.apply_dust_removal_to_plane(target_plane()?, None, *options, &mut progress)?;
-        }
-        BatchOperationKind::Mirror(axis) => {
-            core.mirror_document(*axis)?;
-        }
-        BatchOperationKind::Rotate90(direction) => {
-            core.rotate_document(*direction)?;
-        }
-        BatchOperationKind::Resize(resize) => {
-            core.resize_document(*resize)?;
-        }
-        BatchOperationKind::ConvertPlane {
-            destination_kind,
-            destination_format,
-        } => {
-            core.convert_plane(target_plane()?, *destination_kind, *destination_format)?;
+            BatchOperationKind::Erase(colors) => {
+                erase_colors_from_document(&mut after, plane_id, colors, revision, is_cancelled)?
+            }
         }
     }
-    Ok(OperationResult::Applied)
+
+    core.commit_deferred_document_edit(before, after, base_revision, revision)
+}
+
+fn resolve_target_in_document(
+    document: &CellDocument,
+    selector: &BatchTargetSelector,
+) -> Result<Option<(LayerId, u64)>, CoreError> {
+    let layer = document.layers.iter().find(|layer| {
+        selector.layer_id.is_none_or(|id| layer.id.get() == id)
+            && selector.layer_kind.is_none_or(|kind| layer.kind == kind)
+    });
+    let Some(layer) = layer else {
+        return match selector.missing_policy {
+            BatchMissingTargetPolicy::Skip => Ok(None),
+            BatchMissingTargetPolicy::Error => Err(CoreError::InvalidArgument(
+                "batch stable target does not exist in this cell",
+            )),
+        };
+    };
+    let plane = layer.planes.iter().find(|plane| {
+        selector.plane_id.is_none_or(|id| plane.id.get() == id)
+            && selector.plane_kind.is_none_or(|kind| plane.kind == kind)
+    });
+    let Some(plane) = plane else {
+        return match selector.missing_policy {
+            BatchMissingTargetPolicy::Skip => Ok(None),
+            BatchMissingTargetPolicy::Error => Err(CoreError::InvalidArgument(
+                "batch stable target does not exist in this cell",
+            )),
+        };
+    };
+    Ok(Some((layer.id, plane.id.get())))
+}
+
+fn validate_editable_source(document: &CellDocument, plane_id: PlaneId) -> Result<(), CoreError> {
+    let layer = document
+        .layers
+        .iter()
+        .find(|layer| layer.planes.iter().any(|plane| plane.id == plane_id))
+        .ok_or(CoreError::InvalidArgument(
+            "batch plane target does not exist",
+        ))?;
+    let plane = layer
+        .planes
+        .iter()
+        .find(|plane| plane.id == plane_id)
+        .ok_or(CoreError::InvalidState("batch target plane disappeared"))?;
+    if !layer.visible || !layer.editable || !plane.visible || !plane.editable {
+        return Err(CoreError::InvalidArgument(
+            "batch target is hidden or non-editable",
+        ));
+    }
+    Ok(())
+}
+
+fn apply_color_replace_to_document(
+    document: &mut CellDocument,
+    plane_id: PlaneId,
+    pairs: &[BatchColorPair],
+    revision: DocumentRevision,
+    is_cancelled: &mut dyn FnMut() -> bool,
+) -> Result<(), CoreError> {
+    validate_editable_source(document, plane_id)?;
+    let raster = &mut document
+        .plane_by_id_mut(plane_id)
+        .ok_or(CoreError::InvalidState("batch target plane disappeared"))?
+        .raster;
+    for pair in pairs.iter().filter(|pair| pair.enabled) {
+        ensure_pixel_matches_format(pair.old, raster.format())?;
+        ensure_pixel_matches_format(pair.new, raster.format())?;
+    }
+    let mut touched = BTreeSet::new();
+    for y in 0..raster.height() {
+        if is_cancelled() {
+            return Err(CoreError::Cancelled);
+        }
+        for x in 0..raster.width() {
+            let value = raster.pixel(x, y)?;
+            if let Some(replacement) = pairs
+                .iter()
+                .find(|pair| pair.enabled && pair.old == value)
+                .map(|pair| pair.new)
+                && replacement != value
+            {
+                raster.set_pixel(x, y, replacement, revision.get())?;
+                touched.insert(TileCoord {
+                    x: x / TILE_SIZE,
+                    y: y / TILE_SIZE,
+                });
+            }
+        }
+    }
+    for coord in touched {
+        raster.remove_tile_if_empty(coord);
+    }
+    Ok(())
+}
+
+fn move_colors_to_color_plane(
+    document: &mut CellDocument,
+    source_id: PlaneId,
+    colors: &[PixelValue],
+    revision: DocumentRevision,
+    is_cancelled: &mut dyn FnMut() -> bool,
+) -> Result<(), CoreError> {
+    validate_editable_source(document, source_id)?;
+    let layer_index = document
+        .layers
+        .iter()
+        .position(|layer| layer.planes.iter().any(|plane| plane.id == source_id))
+        .ok_or(CoreError::InvalidArgument(
+            "batch move source plane does not exist",
+        ))?;
+    let source_index = document.layers[layer_index]
+        .planes
+        .iter()
+        .position(|plane| plane.id == source_id)
+        .ok_or(CoreError::InvalidState("batch move source disappeared"))?;
+    if document.layers[layer_index].planes[source_index].kind == PlaneType::MainLine {
+        return Err(CoreError::InvalidArgument(
+            "batch move cannot modify the protected main-line plane",
+        ));
+    }
+    let destination_index = document.layers[layer_index]
+        .planes
+        .iter()
+        .position(|plane| plane.kind == PlaneType::Color)
+        .ok_or(CoreError::InvalidArgument(
+            "batch move color-plane destination is missing",
+        ))?;
+    if source_index == destination_index {
+        return Err(CoreError::InvalidArgument(
+            "batch move source and destination must be different planes",
+        ));
+    }
+    let source = &document.layers[layer_index].planes[source_index];
+    let destination = &document.layers[layer_index].planes[destination_index];
+    if !destination.visible || !destination.editable {
+        return Err(CoreError::InvalidArgument(
+            "batch move destination is hidden or non-editable",
+        ));
+    }
+    if source.raster.format() != destination.raster.format()
+        || source.raster.width() != destination.raster.width()
+        || source.raster.height() != destination.raster.height()
+    {
+        return Err(CoreError::InvalidArgument(
+            "batch move source and destination raster contracts do not match",
+        ));
+    }
+    for color in colors {
+        ensure_pixel_matches_format(*color, source.raster.format())?;
+    }
+    let source_raster = source.raster.clone();
+    let mut matches = Vec::new();
+    for y in 0..source_raster.height() {
+        if is_cancelled() {
+            return Err(CoreError::Cancelled);
+        }
+        for x in 0..source_raster.width() {
+            let value = source_raster.pixel(x, y)?;
+            if colors.contains(&value) {
+                matches
+                    .try_reserve(1)
+                    .map_err(|_| CoreError::InvalidState("batch move allocation failed"))?;
+                matches.push((x, y, value));
+            }
+        }
+    }
+    let empty = empty_pixel(source_raster.format());
+    let layer = &mut document.layers[layer_index];
+    let (source, destination) = if source_index < destination_index {
+        let (left, right) = layer.planes.split_at_mut(destination_index);
+        (&mut left[source_index], &mut right[0])
+    } else {
+        let (left, right) = layer.planes.split_at_mut(source_index);
+        (&mut right[0], &mut left[destination_index])
+    };
+    let mut source_tiles = BTreeSet::new();
+    let mut destination_tiles = BTreeSet::new();
+    for (x, y, value) in matches {
+        destination.raster.set_pixel(x, y, value, revision.get())?;
+        source.raster.set_pixel(x, y, empty, revision.get())?;
+        let coord = TileCoord {
+            x: x / TILE_SIZE,
+            y: y / TILE_SIZE,
+        };
+        source_tiles.insert(coord);
+        destination_tiles.insert(coord);
+    }
+    for coord in source_tiles {
+        source.raster.remove_tile_if_empty(coord);
+    }
+    for coord in destination_tiles {
+        destination.raster.remove_tile_if_empty(coord);
+    }
+    Ok(())
+}
+
+fn replace_fill_protection_mask(
+    document: &mut CellDocument,
+    source_id: PlaneId,
+    colors: &[PixelValue],
+    revision: DocumentRevision,
+    is_cancelled: &mut dyn FnMut() -> bool,
+) -> Result<(), CoreError> {
+    validate_editable_source(document, source_id)?;
+    let source = document
+        .plane_by_id(source_id)
+        .ok_or(CoreError::InvalidState("batch mask source disappeared"))?;
+    for color in colors {
+        ensure_pixel_matches_format(*color, source.raster.format())?;
+    }
+    let source_raster = source.raster.clone();
+    let mut mask = inkpod_image::TileRaster::new(
+        source_raster.width(),
+        source_raster.height(),
+        PixelFormat::BinaryMask8,
+    )?;
+    for y in 0..source_raster.height() {
+        if is_cancelled() {
+            return Err(CoreError::Cancelled);
+        }
+        for x in 0..source_raster.width() {
+            if colors.contains(&source_raster.pixel(x, y)?) {
+                mask.set_pixel(x, y, PixelValue::Binary(u8::MAX), revision.get())?;
+            }
+        }
+    }
+    document.fill_protection = mask;
+    Ok(())
+}
+
+fn erase_colors_from_document(
+    document: &mut CellDocument,
+    plane_id: PlaneId,
+    colors: &[PixelValue],
+    revision: DocumentRevision,
+    is_cancelled: &mut dyn FnMut() -> bool,
+) -> Result<(), CoreError> {
+    validate_editable_source(document, plane_id)?;
+    let raster = &mut document
+        .plane_by_id_mut(plane_id)
+        .ok_or(CoreError::InvalidState("batch erase target disappeared"))?
+        .raster;
+    for color in colors {
+        ensure_pixel_matches_format(*color, raster.format())?;
+    }
+    let empty = empty_pixel(raster.format());
+    let mut touched = BTreeSet::new();
+    for y in 0..raster.height() {
+        if is_cancelled() {
+            return Err(CoreError::Cancelled);
+        }
+        for x in 0..raster.width() {
+            if colors.contains(&raster.pixel(x, y)?) {
+                raster.set_pixel(x, y, empty, revision.get())?;
+                touched.insert(TileCoord {
+                    x: x / TILE_SIZE,
+                    y: y / TILE_SIZE,
+                });
+            }
+        }
+    }
+    for coord in touched {
+        raster.remove_tile_if_empty(coord);
+    }
+    Ok(())
 }
 
 pub(crate) fn apply_color_replacement(
@@ -338,71 +584,36 @@ pub(crate) fn apply_separation(
     core.commit_deferred_document_edit(before, after, base_revision, revision)
 }
 
-pub(super) fn resolve_target(
-    core: &Core,
-    selector: &BatchTargetSelector,
-) -> Result<Option<(u64, Option<u64>)>, CoreError> {
-    let layers = core.layers()?;
-    let layer = layers.iter().find(|layer| {
-        selector.layer_id.is_none_or(|id| layer.id == id)
-            && selector.layer_kind.is_none_or(|kind| layer.kind == kind)
-    });
-    let Some(layer) = layer else {
-        return missing_target(selector.missing_policy);
-    };
-    let plane = if selector.plane_id.is_none() && selector.plane_kind.is_none() {
-        None
-    } else {
-        layer.planes.iter().find(|plane| {
-            selector.plane_id.is_none_or(|id| plane.id == id)
-                && selector.plane_kind.is_none_or(|kind| plane.kind == kind)
-        })
-    };
-    if (selector.plane_id.is_some() || selector.plane_kind.is_some()) && plane.is_none() {
-        return missing_target(selector.missing_policy);
-    }
-    Ok(Some((layer.id, plane.map(|plane| plane.id))))
-}
-
-pub(super) fn missing_target(
-    policy: BatchMissingTargetPolicy,
-) -> Result<Option<(u64, Option<u64>)>, CoreError> {
-    match policy {
-        BatchMissingTargetPolicy::Skip => Ok(None),
-        BatchMissingTargetPolicy::Error => Err(CoreError::InvalidArgument(
-            "batch stable target does not exist in this cell",
-        )),
-    }
-}
-
 pub(super) fn working_core(source: &BatchSource) -> Result<Core, CoreError> {
     match &source.content {
         BatchSourceContent::Path(path) => {
             let mut core = Core::new();
-            core.open(path)?;
+            if path
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("inkpod"))
+            {
+                core.open(path)?;
+            } else {
+                let extension = path.extension().and_then(|value| value.to_str()).ok_or(
+                    CoreError::InvalidArgument("batch input extension is unsupported"),
+                )?;
+                let format = CommonRasterFormat::from_extension(extension).ok_or(
+                    CoreError::InvalidArgument("batch input extension is unsupported"),
+                )?;
+                let bytes = fs::read(path).map_err(|error| CoreError::Format(error.to_string()))?;
+                let digest = blake3::hash(&bytes);
+                let mut uuid_bytes = [0_u8; 16];
+                uuid_bytes.copy_from_slice(&digest.as_bytes()[..16]);
+                let mut uuid = u128::from_le_bytes(uuid_bytes);
+                if uuid == 0 {
+                    uuid = 1;
+                }
+                core.import_common_raster(format, &bytes, uuid)?;
+            }
             Ok(core)
         }
         BatchSourceContent::Document { document, assets } => {
             core_from_document(document.as_ref().clone(), assets.clone())
-        }
-        BatchSourceContent::Sequence(cell) => {
-            let mut core = Core::new();
-            core.new_cell_with_uuid(
-                cell.raster.width(),
-                cell.raster.height(),
-                cell.dpi_x_milli,
-                cell.dpi_y_milli,
-                cell.document_uuid,
-            )?;
-            let revision = core.next_document_revision()?;
-            let document = core.document.as_mut().ok_or(CoreError::NoDocument)?;
-            document.frames = cell.frames;
-            document
-                .raster_mut(ActivePlane::Color)
-                .clone_from(&cell.raster);
-            core.document_revision = revision;
-            core.reset_history(true);
-            Ok(core)
         }
     }
 }
@@ -427,55 +638,73 @@ pub(super) fn output_path_for(
     source: &BatchSource,
     index: usize,
 ) -> Result<PathBuf, CoreError> {
-    if graph.output.policy == BatchOutputPolicy::ExplicitOverwrite {
-        return source.input_path.clone().ok_or(CoreError::InvalidArgument(
-            "explicit overwrite requires a file-backed input",
+    if graph.output.destination != BatchOutputDestination::Folder {
+        return Err(CoreError::InvalidArgument(
+            "non-folder batch output has no file path",
         ));
     }
     let source_stem = Path::new(&source.label)
         .file_stem()
         .and_then(|stem| stem.to_str())
         .unwrap_or("cell");
-    let number = if graph.output.descending {
-        graph.output.start_number.saturating_sub(index as u32)
-    } else {
-        graph.output.start_number.saturating_add(index as u32)
-    };
-    let base_folder = if graph.output.folder.is_empty() {
-        source
-            .input_path
-            .as_deref()
-            .and_then(Path::parent)
-            .unwrap_or_else(|| Path::new(""))
-            .to_path_buf()
-    } else {
-        PathBuf::from(&graph.output.folder)
-    };
+    let base_folder = PathBuf::from(&graph.output.folder);
     if base_folder.as_os_str().is_empty() {
         return Err(CoreError::InvalidArgument(
             "batch output folder is required for an in-memory input",
         ));
     }
-    let folder = if graph.output.cell_folder {
-        base_folder.join(source_stem)
-    } else {
-        base_folder
+    let basename = render_naming_template(&graph.output.naming_template, source_stem, index)?;
+    let extension = match graph.output.format {
+        BatchOutputFormat::Inkpod => "inkpod",
+        BatchOutputFormat::Png => "png",
+        BatchOutputFormat::Tiff => "tiff",
+        BatchOutputFormat::Tga => "tga",
+        BatchOutputFormat::Bmp => "bmp",
     };
-    let file_name = match graph.output.policy {
-        BatchOutputPolicy::Duplicate if graph.output.basename.is_empty() => {
-            format!("{source_stem}_batch.inkpod")
+    Ok(base_folder.join(format!("{basename}.{extension}")))
+}
+
+fn render_naming_template(template: &str, stem: &str, index: usize) -> Result<String, CoreError> {
+    validate_naming_template(template)?;
+    let mut rendered = String::new();
+    let mut remaining = template;
+    while let Some(open) = remaining.find('{') {
+        rendered.push_str(&remaining[..open]);
+        remaining = &remaining[open..];
+        if let Some(rest) = remaining.strip_prefix("{stem}") {
+            rendered.push_str(stem);
+            remaining = rest;
+            continue;
         }
-        BatchOutputPolicy::Duplicate | BatchOutputPolicy::NewSave => {
-            let basename = if graph.output.basename.is_empty() {
-                "cell"
-            } else {
-                &graph.output.basename
-            };
-            format!("{basename}_{number:04}.inkpod")
+        let Some(rest) = remaining.strip_prefix("{index:") else {
+            return Err(CoreError::InvalidArgument(
+                "batch naming template contains an unknown token",
+            ));
+        };
+        let Some(close) = rest.find('}') else {
+            return Err(CoreError::InvalidArgument(
+                "batch naming template token is unterminated",
+            ));
+        };
+        let width = rest[..close]
+            .parse::<usize>()
+            .map_err(|_| CoreError::InvalidArgument("batch index width is invalid"))?;
+        if !(1..=12).contains(&width) {
+            return Err(CoreError::InvalidArgument(
+                "batch index width is outside bounds",
+            ));
         }
-        BatchOutputPolicy::ExplicitOverwrite => unreachable!(),
-    };
-    Ok(folder.join(file_name))
+        rendered.push_str(&format!("{index:0width$}", index = index + 1));
+        remaining = &rest[close + 1..];
+    }
+    if remaining.contains('}') {
+        return Err(CoreError::InvalidArgument(
+            "batch naming template contains an unmatched brace",
+        ));
+    }
+    rendered.push_str(remaining);
+    validate_component(&rendered, true)?;
+    Ok(rendered)
 }
 
 pub(super) fn save_batch_output(
@@ -486,17 +715,13 @@ pub(super) fn save_batch_output(
     mut is_cancelled: impl FnMut() -> bool,
 ) -> Result<(), CoreError> {
     working.document.as_ref().ok_or(CoreError::NoDocument)?;
-    if graph.output.policy != BatchOutputPolicy::ExplicitOverwrite {
-        if source.input_path.as_deref() == Some(path) {
-            return Err(CoreError::InvalidState(
-                "non-overwrite batch policy resolved to the input path",
-            ));
-        }
-        if path.exists() {
-            return Err(CoreError::InvalidState(
-                "non-overwrite batch output already exists",
-            ));
-        }
+    if source.input_path.as_deref() == Some(path) {
+        return Err(CoreError::InvalidState(
+            "batch output resolves to the input path",
+        ));
+    }
+    if path.exists() {
+        return Err(CoreError::InvalidState("batch output already exists"));
     }
     if is_cancelled() {
         return Err(CoreError::Cancelled);
@@ -507,13 +732,33 @@ pub(super) fn save_batch_output(
     if let Some(parent) = parent {
         fs::create_dir_all(parent).map_err(|error| CoreError::Format(error.to_string()))?;
     }
-    let editor_savepoint = working
-        .editor_session
-        .as_ref()
-        .ok_or(CoreError::NoDocument)?
-        .digest;
-    let file = working.build_procedure_file(Some(working.current_state), Some(editor_savepoint))?;
-    inkpod_format::save_procedure_file_atomic_with_cancel(path, &file, &mut is_cancelled)?;
+    match graph.output.format {
+        BatchOutputFormat::Inkpod => {
+            let editor_savepoint = working
+                .editor_session
+                .as_ref()
+                .ok_or(CoreError::NoDocument)?
+                .digest;
+            let file = working
+                .build_procedure_file(Some(working.current_state), Some(editor_savepoint))?;
+            inkpod_format::save_procedure_file_atomic_with_cancel(path, &file, &mut is_cancelled)?;
+        }
+        format => {
+            let common = match format {
+                BatchOutputFormat::Png => CommonRasterFormat::Png,
+                BatchOutputFormat::Tiff => CommonRasterFormat::Tiff,
+                BatchOutputFormat::Tga => CommonRasterFormat::Tga,
+                BatchOutputFormat::Bmp => CommonRasterFormat::Bmp,
+                BatchOutputFormat::Inkpod => unreachable!(),
+            };
+            let bytes = working.export_common_raster(common, false)?;
+            inkpod_format::save_common_raster_bytes_atomic_with_cancel(
+                path,
+                &bytes,
+                &mut is_cancelled,
+            )?;
+        }
+    }
     Ok(())
 }
 
@@ -526,34 +771,5 @@ pub(super) fn cancelled_item(
         output_path,
         outcome: BatchItemOutcome::Cancelled,
         message: "cancelled before atomic commit".to_owned(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn type_mismatched_target_selector_is_skipped() {
-        let mut core = Core::new();
-        core.new_cell(2, 2, 96_000, 96_000).unwrap();
-        let layers = core.layers().unwrap();
-        let coloring = layers
-            .iter()
-            .find(|layer| layer.kind == LayerKind::BinaryColoring)
-            .unwrap();
-        let color_plane = coloring
-            .planes
-            .iter()
-            .find(|plane| plane.kind == PlaneType::Color)
-            .unwrap();
-        let selector = BatchTargetSelector {
-            layer_id: Some(coloring.id),
-            plane_id: Some(color_plane.id),
-            layer_kind: Some(LayerKind::Frame),
-            plane_kind: Some(PlaneType::Color),
-            missing_policy: BatchMissingTargetPolicy::Skip,
-        };
-        assert_eq!(resolve_target(&core, &selector).unwrap(), None);
     }
 }

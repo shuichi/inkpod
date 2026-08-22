@@ -547,11 +547,32 @@ void DispatchBatchPaletteCommand(void* context, UINT command) noexcept {
     }
 }
 
+void UpdateMenuState(ApplicationHost& state) noexcept;
+
 void SelectBatchPaletteOperation(
     void* context, std::uint32_t selected_index) noexcept {
     auto* state = ActivateWorkspaceContext(context);
-    if (state != nullptr && !state->batch.loaded_graph) {
-        state->batch.selected_operation = selected_index;
+    if (state != nullptr) {
+        state->batch.selected_stage = selected_index;
+        if (selected_index > 0U
+            && selected_index <= state->batch.operations.size()) {
+            state->batch.selected_operation = selected_index - 1U;
+        }
+        UpdateBatchParameterEditor(
+            state->Workspace().batch_dialog.parameter_host,
+            selected_index,
+            state->batch.task == nullptr);
+        UpdateMenuState(*state);
+    }
+}
+
+void BatchDraftChanged(void* context) noexcept {
+    auto* state = ActivateWorkspaceContext(context);
+    if (state != nullptr && state->batch.task == nullptr) {
+        BatchController::ResetDerivedState(state->batch);
+        RefreshBatchPalette(
+            state->batch, state->Workspace().batch_palette);
+        UpdateMenuState(*state);
     }
 }
 
@@ -6618,16 +6639,15 @@ CommandStateInputs BuildCommandStateInputs(
     inputs.color.chart_locked = state.Workspace().panes.color_chart_locked;
 
     inputs.batch.idle = state.batch.task == nullptr;
-    inputs.batch.has_operations = state.batch.loaded_graph
-        ? state.batch.graph != nullptr
-        : !state.batch.operations.empty();
-    inputs.batch.loaded_graph = state.batch.loaded_graph;
-    inputs.batch.editable_item = inputs.batch.idle && !state.batch.loaded_graph
+    inputs.batch.has_operations = !state.batch.operations.empty();
+    inputs.batch.editable_item = inputs.batch.idle
+        && state.batch.selected_stage > 0U
+        && state.batch.selected_stage == state.batch.selected_operation + 1U
         && state.batch.selected_operation < state.batch.operations.size();
     inputs.batch.palette_visible =
         state.Workspace().windows.workspace.dock.IsPaneVisible(
             DockPaneType::Batch);
-    inputs.batch.output_policy = state.batch.output_policy;
+    inputs.batch.output_destination = state.batch.output_destination;
     inputs.batch.failure_policy = state.batch.failure_policy;
     inputs.workspace.tool_visible =
         state.Workspace().windows.workspace.dock.IsPaneVisible(
@@ -12998,236 +13018,10 @@ void ResetBatchDerivedState(BatchUiState& batch) noexcept {
     BatchController::ResetDerivedState(batch);
 }
 
+
 InkpodColorValue BatchTransparentColor() noexcept {
     return InkpodColorValue{
         sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 0U, 0U, 0U, 0U};
-}
-
-bool EditBatchColorValue(
-    ApplicationHost& state,
-    const wchar_t* title,
-    InkpodColorValue& color) noexcept {
-    ViewOptionsDialogState channels{};
-    channels.title = title;
-    channels.labels = {
-        UiText(UiStringId::Text0774),
-        UiText(UiStringId::ChannelR),
-        UiText(UiStringId::ChannelG),
-        UiText(UiStringId::ChannelB)};
-    channels.values = {
-        static_cast<std::int32_t>(color.depth),
-        static_cast<std::int32_t>(color.red),
-        static_cast<std::int32_t>(color.green),
-        static_cast<std::int32_t>(color.blue)};
-    channels.value_count = 4U;
-    if (ShowViewOptions(
-            state.lifetime.instance,
-            state.Workspace().windows.window,
-            state.lifetime.smoke_test,
-            channels) != IDOK
-        || (channels.values[0] != 8 && channels.values[0] != 16)) {
-        return false;
-    }
-    const std::int32_t maximum = channels.values[0] == 8 ? 255 : 65535;
-    if (channels.values[1] < 0 || channels.values[1] > maximum
-        || channels.values[2] < 0 || channels.values[2] > maximum
-        || channels.values[3] < 0 || channels.values[3] > maximum) {
-        return false;
-    }
-    ViewOptionsDialogState alpha{};
-    alpha.title = title;
-    alpha.labels = {UiText(UiStringId::AlphaLabel), nullptr, nullptr, nullptr};
-    alpha.values = {static_cast<std::int32_t>(color.alpha), 0, 0, 0};
-    alpha.value_count = 1U;
-    if (ShowViewOptions(
-            state.lifetime.instance,
-            state.Workspace().windows.window,
-            state.lifetime.smoke_test,
-            alpha) != IDOK
-        || alpha.values[0] < 0 || alpha.values[0] > maximum) {
-        return false;
-    }
-    color.struct_size = sizeof(color);
-    color.depth = static_cast<std::uint32_t>(channels.values[0]);
-    color.red = static_cast<std::uint16_t>(channels.values[1]);
-    color.green = static_cast<std::uint16_t>(channels.values[2]);
-    color.blue = static_cast<std::uint16_t>(channels.values[3]);
-    color.alpha = static_cast<std::uint16_t>(alpha.values[0]);
-    return true;
-}
-
-bool EditBatchColorRows(
-    ApplicationHost& state,
-    BatchOperationUi& operation) noexcept {
-    ViewOptionsDialogState count{};
-    count.title = UiText(UiStringId::Text0878);
-    count.labels = {UiText(UiStringId::Text0879), nullptr, nullptr, nullptr};
-    count.values = {
-        static_cast<std::int32_t>(operation.color_pairs.size()), 0, 0, 0};
-    count.value_count = 1U;
-    if (ShowViewOptions(
-            state.lifetime.instance,
-            state.Workspace().windows.window,
-            state.lifetime.smoke_test,
-            count) != IDOK
-        || count.values[0] < 1 || count.values[0] > 4096) {
-        return false;
-    }
-    try {
-        const std::size_t previous = operation.color_pairs.size();
-        operation.color_pairs.resize(static_cast<std::size_t>(count.values[0]));
-        for (std::size_t index = previous; index < operation.color_pairs.size(); ++index) {
-            auto& pair = operation.color_pairs[index];
-            pair.struct_size = sizeof(pair);
-            pair.enabled = 1U;
-            pair.old_color = BatchTransparentColor();
-            pair.new_color = state.Workspace().tools.drawing_color;
-        }
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-    for (auto& pair : operation.color_pairs) {
-        ViewOptionsDialogState enabled{};
-        enabled.title = UiText(UiStringId::Text0878);
-        enabled.labels = {UiText(UiStringId::Text0741), nullptr, nullptr, nullptr};
-        enabled.values = {static_cast<std::int32_t>(pair.enabled), 0, 0, 0};
-        enabled.value_count = 1U;
-        if (ShowViewOptions(
-                state.lifetime.instance,
-                state.Workspace().windows.window,
-                state.lifetime.smoke_test,
-                enabled) != IDOK
-            || enabled.values[0] < 0 || enabled.values[0] > 1
-            || !EditBatchColorValue(state, UiText(UiStringId::Text0723), pair.old_color)
-            || !EditBatchColorValue(state, UiText(UiStringId::Text0705), pair.new_color)) {
-            return false;
-        }
-        pair.struct_size = sizeof(pair);
-        pair.enabled = static_cast<std::uint32_t>(enabled.values[0]);
-        pair.reserved = 0U;
-    }
-    return true;
-}
-
-bool EditBatchSeedRows(
-    ApplicationHost& state,
-    BatchOperationUi& operation) noexcept {
-    ViewOptionsDialogState count{};
-    count.title = UiText(UiStringId::Text0971);
-    count.labels = {UiText(UiStringId::Text0879), nullptr, nullptr, nullptr};
-    count.values = {static_cast<std::int32_t>(operation.seeds.size()), 0, 0, 0};
-    count.value_count = 1U;
-    if (ShowViewOptions(
-            state.lifetime.instance,
-            state.Workspace().windows.window,
-            state.lifetime.smoke_test,
-            count) != IDOK
-        || count.values[0] < 1 || count.values[0] > 4096) {
-        return false;
-    }
-    try {
-        const std::size_t previous = operation.seeds.size();
-        operation.seeds.resize(static_cast<std::size_t>(count.values[0]));
-        for (std::size_t index = previous; index < operation.seeds.size(); ++index) {
-            auto& seed = operation.seeds[index];
-            seed.struct_size = sizeof(seed);
-            seed.flags = INKPOD_BATCH_SEED_ENABLED;
-            seed.fill_color = state.Workspace().tools.drawing_color;
-            seed.expected_color = BatchTransparentColor();
-        }
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-    for (auto& seed : operation.seeds) {
-        ViewOptionsDialogState geometry{};
-        geometry.title = UiText(UiStringId::Text0971);
-        geometry.labels = {
-            UiText(UiStringId::Text0741),
-            UiText(UiStringId::AxisX),
-            UiText(UiStringId::AxisY),
-            UiText(UiStringId::Text0918)};
-        geometry.values = {
-            (seed.flags & INKPOD_BATCH_SEED_ENABLED) != 0U ? 1 : 0,
-            static_cast<std::int32_t>(seed.x),
-            static_cast<std::int32_t>(seed.y),
-            static_cast<std::int32_t>(seed.tolerance)};
-        geometry.value_count = 4U;
-        ViewOptionsDialogState details{};
-        details.title = UiText(UiStringId::Text0971);
-        details.labels = {
-            UiText(UiStringId::GapCloseLabel),
-            UiText(UiStringId::Text0745),
-            nullptr,
-            nullptr};
-        details.values = {
-            static_cast<std::int32_t>(seed.gap_close),
-            (seed.flags & INKPOD_BATCH_SEED_HAS_EXPECTED_COLOR) != 0U ? 1 : 0,
-            0,
-            0};
-        details.value_count = 2U;
-        if (ShowViewOptions(
-                state.lifetime.instance,
-                state.Workspace().windows.window,
-                state.lifetime.smoke_test,
-                geometry) != IDOK
-            || ShowViewOptions(
-                   state.lifetime.instance,
-                   state.Workspace().windows.window,
-                   state.lifetime.smoke_test,
-                   details) != IDOK
-            || geometry.values[0] < 0 || geometry.values[0] > 1
-            || geometry.values[1] < 0 || geometry.values[2] < 0
-            || geometry.values[3] < 0 || geometry.values[3] > UINT16_MAX
-            || details.values[0] < 0 || details.values[0] > UINT8_MAX
-            || details.values[1] < 0 || details.values[1] > 1
-            || !EditBatchColorValue(state, UiText(UiStringId::Text0600), seed.fill_color)
-            || (details.values[1] != 0
-                && !EditBatchColorValue(state, UiText(UiStringId::Text0744), seed.expected_color))) {
-            return false;
-        }
-        seed.struct_size = sizeof(seed);
-        seed.flags = (geometry.values[0] != 0 ? INKPOD_BATCH_SEED_ENABLED : 0U)
-            | (details.values[1] != 0 ? INKPOD_BATCH_SEED_HAS_EXPECTED_COLOR : 0U);
-        seed.x = static_cast<std::uint32_t>(geometry.values[1]);
-        seed.y = static_cast<std::uint32_t>(geometry.values[2]);
-        seed.tolerance = static_cast<std::uint32_t>(geometry.values[3]);
-        seed.gap_close = static_cast<std::uint32_t>(details.values[0]);
-        seed.reserved = 0U;
-    }
-    return true;
-}
-
-UINT FilterEditorCommandForBatchCommand(UINT command) noexcept {
-    switch (command) {
-        case IDM_BATCH_ADD_FILTER_SHARPEN_WEAK:
-            return IDM_FILTER_SHARPEN_WEAK;
-        case IDM_BATCH_ADD_FILTER_SHARPEN_STRONG:
-            return IDM_FILTER_SHARPEN_STRONG;
-        case IDM_BATCH_ADD_FILTER_BLUR_WEAK:
-            return IDM_FILTER_BLUR_WEAK;
-        case IDM_BATCH_ADD_FILTER_BLUR_STRONG:
-            return IDM_FILTER_BLUR_STRONG;
-        case IDM_BATCH_ADD_FILTER_GAUSSIAN:
-            return IDM_FILTER_GAUSSIAN;
-        case IDM_BATCH_ADD_FILTER_INVERT:
-            return IDM_FILTER_INVERT;
-        case IDM_BATCH_ADD_FILTER_AUTO_CONTRAST:
-            return IDM_FILTER_AUTO_CONTRAST;
-        case IDM_BATCH_ADD_FILTER_BRIGHTNESS:
-            return IDM_FILTER_BRIGHTNESS;
-        case IDM_BATCH_ADD_FILTER_TONE_CURVE:
-            return IDM_FILTER_TONE_CURVE;
-        case IDM_BATCH_ADD_FILTER_LEVELS:
-            return IDM_FILTER_LEVELS;
-        case IDM_BATCH_ADD_FILTER_HSV:
-            return IDM_FILTER_HSV;
-        case IDM_BATCH_ADD_FILTER_COLOR_BALANCE:
-            return IDM_FILTER_COLOR_BALANCE;
-        case IDM_BATCH_ADD_FILTER_UNSHARP:
-            return IDM_FILTER_UNSHARP;
-        default:
-            return 0U;
-    }
 }
 
 const wchar_t* BatchOperationLabel(UINT command) noexcept {
@@ -13242,15 +13036,9 @@ const wchar_t* BatchOperationLabel(UINT command) noexcept {
 bool AddBatchOperation(ApplicationHost& state, UINT command) noexcept {
     BatchOperationUi operation{};
     operation.label = BatchOperationLabel(command);
-    operation.color_0 = state.Workspace().tools.drawing_color;
-    operation.color_1 = state.Workspace().tools.drawing_color;
-    const UINT filter_command = FilterEditorCommandForBatchCommand(command);
-    if (filter_command != 0U) {
-        operation.kind = INKPOD_BATCH_OPERATION_FILTER;
-        if (!ConfigureFilterEditor(state, filter_command, operation.filter)) {
-            return false;
-        }
-    } else {
+    operation.layer_kind = INKPOD_LAYER_BINARY_COLORING;
+    operation.plane_kind = INKPOD_TYPED_PLANE_COLOR;
+    try {
         switch (command) {
             case IDM_BATCH_ADD_COLOR_REPLACE: {
                 operation.kind = INKPOD_BATCH_OPERATION_COLOR_REPLACE;
@@ -13262,88 +13050,27 @@ bool AddBatchOperation(ApplicationHost& state, UINT command) noexcept {
                 operation.color_pairs.push_back(pair);
                 break;
             }
-            case IDM_BATCH_ADD_CONTINUOUS_FILL: {
-                operation.kind = INKPOD_BATCH_OPERATION_CONTINUOUS_FILL;
-                InkpodBatchSeedInput seed{};
-                seed.struct_size = sizeof(seed);
-                seed.flags = INKPOD_BATCH_SEED_HAS_EXPECTED_COLOR
-                    | INKPOD_BATCH_SEED_ENABLED;
-                seed.fill_color = state.Workspace().tools.drawing_color;
-                seed.expected_color = BatchTransparentColor();
-                operation.seeds.push_back(seed);
-                break;
-            }
-            case IDM_BATCH_ADD_SEPARATION:
-                operation.kind = INKPOD_BATCH_OPERATION_SEPARATION;
+            case IDM_BATCH_ADD_MOVE_TO_COLOR_PLANE:
+                operation.kind = INKPOD_BATCH_OPERATION_MOVE_TO_COLOR_PLANE;
+                operation.plane_kind = INKPOD_TYPED_PLANE_MAIN_LINE;
                 operation.colors.push_back(state.Workspace().tools.drawing_color);
-                operation.color_0 = BatchTransparentColor();
-                operation.parameters[1] = INKPOD_BATCH_SEPARATION_REPLACE_SOURCE;
                 break;
-            case IDM_BATCH_ADD_VISIBILITY:
-                operation.kind = INKPOD_BATCH_OPERATION_VISIBILITY;
-                operation.plane_kind = 0U;
-                operation.parameters[0] = 1;
-                break;
-            case IDM_BATCH_ADD_BOUNDARY_AIRBRUSH:
-                operation.kind = INKPOD_BATCH_OPERATION_BOUNDARY_AIRBRUSH;
-                operation.colors.push_back(BatchTransparentColor());
+            case IDM_BATCH_ADD_MASKING:
+                operation.kind = INKPOD_BATCH_OPERATION_MASKING;
                 operation.colors.push_back(state.Workspace().tools.drawing_color);
-                operation.parameters[0] = 4;
-                operation.parameters[1] = 1000;
                 break;
-            case IDM_BATCH_ADD_DUST:
-                operation.kind = INKPOD_BATCH_OPERATION_DUST_REMOVAL;
-                operation.parameters[0] = INKPOD_DUST_REMOVE_FOREGROUND;
-                operation.parameters[1] = 4;
-                break;
-            case IDM_BATCH_ADD_MIRROR:
-                operation.kind = INKPOD_BATCH_OPERATION_MIRROR;
-                operation.layer_kind = 0U;
-                operation.plane_kind = 0U;
-                operation.missing_policy = 0U;
-                operation.parameters[0] = INKPOD_MIRROR_HORIZONTAL;
-                break;
-            case IDM_BATCH_ADD_ROTATE:
-                operation.kind = INKPOD_BATCH_OPERATION_ROTATE_90;
-                operation.layer_kind = 0U;
-                operation.plane_kind = 0U;
-                operation.missing_policy = 0U;
-                operation.parameters[0] = INKPOD_ROTATE_RIGHT_90;
-                break;
-            case IDM_BATCH_ADD_RESIZE: {
-                operation.kind = INKPOD_BATCH_OPERATION_RESIZE;
-                operation.layer_kind = 0U;
-                operation.plane_kind = 0U;
-                operation.missing_policy = 0U;
-                InkpodDocumentInfo document = EmptyDocumentInfo();
-                if (!QueryDocument(state, document)) {
-                    return false;
-                }
-                operation.parameters = {
-                    document.width,
-                    document.height,
-                    document.dpi_x_milli,
-                    document.dpi_y_milli,
-                    0,
-                    INKPOD_RESIZE_ANCHOR_CENTER,
-                    0,
-                    0};
-                break;
-            }
-            case IDM_BATCH_ADD_CONVERT:
-                operation.kind = INKPOD_BATCH_OPERATION_CONVERT_PLANE;
-                operation.parameters[0] = INKPOD_TYPED_PLANE_RASTER;
-                operation.parameters[1] = INKPOD_STORAGE_RGBA8;
+            case IDM_BATCH_ADD_ERASE:
+                operation.kind = INKPOD_BATCH_OPERATION_ERASE;
+                operation.colors.push_back(state.Workspace().tools.drawing_color);
                 break;
             default:
                 return false;
         }
-    }
-    try {
         ResetBatchDerivedState(state.batch);
         state.batch.operations.push_back(std::move(operation));
         state.batch.selected_operation =
             static_cast<std::uint32_t>(state.batch.operations.size() - 1U);
+        state.batch.selected_stage = state.batch.selected_operation + 1U;
         RefreshBatchPalette(state.batch, state.Workspace().batch_palette);
         return true;
     } catch (const std::bad_alloc&) {
@@ -13351,232 +13078,7 @@ bool AddBatchOperation(ApplicationHost& state, UINT command) noexcept {
     }
 }
 
-UINT FilterEditorCommandForKind(std::uint32_t kind) noexcept {
-    switch (kind) {
-        case INKPOD_FILTER_SHARPEN_WEAK:
-            return IDM_FILTER_SHARPEN_WEAK;
-        case INKPOD_FILTER_SHARPEN_STRONG:
-            return IDM_FILTER_SHARPEN_STRONG;
-        case INKPOD_FILTER_BLUR_WEAK:
-            return IDM_FILTER_BLUR_WEAK;
-        case INKPOD_FILTER_BLUR_STRONG:
-            return IDM_FILTER_BLUR_STRONG;
-        case INKPOD_FILTER_GAUSSIAN_BLUR:
-            return IDM_FILTER_GAUSSIAN;
-        case INKPOD_FILTER_INVERT:
-            return IDM_FILTER_INVERT;
-        case INKPOD_FILTER_AUTO_CONTRAST:
-            return IDM_FILTER_AUTO_CONTRAST;
-        case INKPOD_FILTER_BRIGHTNESS_CONTRAST:
-            return IDM_FILTER_BRIGHTNESS;
-        case INKPOD_FILTER_TONE_CURVE:
-            return IDM_FILTER_TONE_CURVE;
-        case INKPOD_FILTER_LEVELS:
-            return IDM_FILTER_LEVELS;
-        case INKPOD_FILTER_HSV:
-            return IDM_FILTER_HSV;
-        case INKPOD_FILTER_COLOR_BALANCE:
-            return IDM_FILTER_COLOR_BALANCE;
-        case INKPOD_FILTER_UNSHARP_MASK:
-            return IDM_FILTER_UNSHARP;
-        default:
-            return 0U;
-    }
-}
-
-bool EditSelectedBatchOperation(
-    ApplicationHost& state, bool prepare_loaded_run = false) noexcept {
-    if ((state.batch.loaded_graph && !prepare_loaded_run)
-        || state.batch.selected_operation >= state.batch.operations.size()) {
-        return false;
-    }
-    BatchOperationUi operation{};
-    try {
-        operation = state.batch.operations[state.batch.selected_operation];
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-    ViewOptionsDialogState metadata{};
-    metadata.title = UiText(UiStringId::Text0270);
-    metadata.labels = {
-        UiText(UiStringId::Text0741), UiText(UiStringId::Text0624), nullptr, nullptr};
-    metadata.values = {
-        (operation.flags & INKPOD_BATCH_OPERATION_ENABLED) != 0U ? 1 : 0,
-        (operation.flags & INKPOD_BATCH_OPERATION_CONFIGURE_EACH_RUN) != 0U ? 1 : 0,
-        0,
-        0};
-    metadata.value_count = 2U;
-    if (ShowViewOptions(state.lifetime.instance, state.Workspace().windows.window, state.lifetime.smoke_test, metadata) != IDOK
-        || metadata.values[0] < 0 || metadata.values[0] > 1
-        || metadata.values[1] < 0 || metadata.values[1] > 1) {
-        return false;
-    }
-    operation.flags = (metadata.values[0] != 0 ? INKPOD_BATCH_OPERATION_ENABLED : 0U)
-        | (metadata.values[1] != 0
-                ? INKPOD_BATCH_OPERATION_CONFIGURE_EACH_RUN
-                : 0U);
-    if (operation.missing_policy != 0U) {
-        ViewOptionsDialogState target{};
-        target.title = UiText(UiStringId::Text0268);
-        target.labels = {
-            UiText(UiStringId::Text0097),
-            UiText(UiStringId::Text0100),
-            UiText(UiStringId::Text0751),
-            nullptr};
-        target.values = {
-            static_cast<std::int32_t>(operation.layer_kind),
-            static_cast<std::int32_t>(operation.plane_kind),
-            static_cast<std::int32_t>(operation.missing_policy),
-            0};
-        target.value_count = 3U;
-        if (ShowViewOptions(state.lifetime.instance, state.Workspace().windows.window, state.lifetime.smoke_test, target) != IDOK
-            || target.values[0] < 0 || target.values[1] < 0
-            || (target.values[2]
-                    != static_cast<std::int32_t>(INKPOD_BATCH_MISSING_SKIP)
-                && target.values[2]
-                    != static_cast<std::int32_t>(INKPOD_BATCH_MISSING_ERROR))
-            || (target.values[0] == 0 && target.values[1] == 0
-                && operation.layer_id == 0U && operation.plane_id == 0U)) {
-            return false;
-        }
-        operation.layer_kind = static_cast<InkpodLayerKind>(target.values[0]);
-        operation.plane_kind = static_cast<InkpodTypedPlaneKind>(target.values[1]);
-        operation.missing_policy =
-            static_cast<InkpodBatchMissingPolicy>(target.values[2]);
-    }
-    if (operation.kind == INKPOD_BATCH_OPERATION_FILTER) {
-        const UINT command = FilterEditorCommandForKind(operation.filter.kind);
-        if (command == 0U || !ConfigureFilterEditor(state, command, operation.filter)) {
-            return false;
-        }
-    } else if (operation.kind == INKPOD_BATCH_OPERATION_COLOR_REPLACE) {
-        if (!EditBatchColorRows(state, operation)) {
-            return false;
-        }
-    } else if (operation.kind == INKPOD_BATCH_OPERATION_CONTINUOUS_FILL) {
-        if (!EditBatchSeedRows(state, operation)) {
-            return false;
-        }
-    } else {
-        ViewOptionsDialogState dialog{};
-        dialog.title = UiText(UiStringId::Text0271);
-        dialog.labels = {
-            UiText(UiStringId::ParameterP0),
-            UiText(UiStringId::ParameterP1),
-            UiText(UiStringId::ParameterP2),
-            UiText(UiStringId::ParameterP3)};
-        dialog.values = {
-            static_cast<std::int32_t>(operation.parameters[0]),
-            static_cast<std::int32_t>(operation.parameters[1]),
-            static_cast<std::int32_t>(operation.parameters[2]),
-            static_cast<std::int32_t>(operation.parameters[3])};
-        dialog.value_count = 2U;
-        if (operation.kind == INKPOD_BATCH_OPERATION_SEPARATION) {
-            dialog.labels = {
-                UiText(UiStringId::Text0554),
-                UiText(UiStringId::Text0516),
-                nullptr,
-                nullptr};
-            dialog.value_count = 2U;
-        } else if (operation.kind == INKPOD_BATCH_OPERATION_VISIBILITY) {
-            dialog.labels = {UiText(UiStringId::Text0880), nullptr, nullptr, nullptr};
-            dialog.value_count = 1U;
-        } else if (operation.kind == INKPOD_BATCH_OPERATION_BOUNDARY_AIRBRUSH) {
-            dialog.labels = {UiText(UiStringId::Text0644), UiText(UiStringId::Text0650), nullptr, nullptr};
-        } else if (operation.kind == INKPOD_BATCH_OPERATION_DUST_REMOVAL) {
-            dialog.labels = {
-                UiText(UiStringId::ModeRangeOneToThree),
-                UiText(UiStringId::Text0730),
-                nullptr,
-                nullptr};
-        } else if (operation.kind == INKPOD_BATCH_OPERATION_MIRROR) {
-            dialog.labels = {UiText(UiStringId::Text0718), nullptr, nullptr, nullptr};
-            dialog.value_count = 1U;
-        } else if (operation.kind == INKPOD_BATCH_OPERATION_ROTATE_90) {
-            dialog.labels = {UiText(UiStringId::Text0717), nullptr, nullptr, nullptr};
-            dialog.value_count = 1U;
-        } else if (operation.kind == INKPOD_BATCH_OPERATION_RESIZE) {
-            dialog.labels = {
-                UiText(UiStringId::Text0644),
-                UiText(UiStringId::Text1040),
-                UiText(UiStringId::XDpiTimesThousand),
-                UiText(UiStringId::YDpiTimesThousand)};
-            dialog.value_count = 4U;
-        } else if (operation.kind == INKPOD_BATCH_OPERATION_CONVERT_PLANE) {
-            dialog.labels = {
-                UiText(UiStringId::PlaneKindLabel),
-                UiText(UiStringId::PixelFormatFieldLabel),
-                nullptr,
-                nullptr};
-        }
-        if (ShowViewOptions(state.lifetime.instance, state.Workspace().windows.window, state.lifetime.smoke_test, dialog) != IDOK) {
-            return false;
-        }
-        if (operation.kind == INKPOD_BATCH_OPERATION_SEPARATION) {
-            if (dialog.values[0] < 0 || dialog.values[0] > 1
-                || dialog.values[1] < INKPOD_BATCH_SEPARATION_REPLACE_SOURCE
-                || dialog.values[1] > INKPOD_BATCH_SEPARATION_NATIVE_FILE) {
-                return false;
-            }
-        }
-        for (std::size_t index = 0; index < dialog.value_count; ++index) {
-            operation.parameters[index] = dialog.values[index];
-        }
-    }
-    state.batch.operations[state.batch.selected_operation] = std::move(operation);
-    if (!prepare_loaded_run) {
-        ResetBatchDerivedState(state.batch);
-    }
-    RefreshBatchPalette(state.batch, state.Workspace().batch_palette);
-    return true;
-}
-
-bool PrepareBatchRunOperations(ApplicationHost& state) noexcept {
-    if (std::none_of(
-            state.batch.operations.begin(),
-            state.batch.operations.end(),
-            [](const BatchOperationUi& operation) {
-                return (operation.flags
-                           & INKPOD_BATCH_OPERATION_CONFIGURE_EACH_RUN)
-                    != 0U;
-            })) {
-        state.batch.run_operations.clear();
-        return true;
-    }
-    std::vector<BatchOperationUi> original;
-    try {
-        original = state.batch.operations;
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-    const std::uint32_t original_selection = state.batch.selected_operation;
-    for (std::size_t index = 0U; index < state.batch.operations.size(); ++index) {
-        if ((state.batch.operations[index].flags
-                & INKPOD_BATCH_OPERATION_CONFIGURE_EACH_RUN)
-            == 0U) {
-            continue;
-        }
-        state.batch.selected_operation = static_cast<std::uint32_t>(index);
-        if (!EditSelectedBatchOperation(state, state.batch.loaded_graph)) {
-            state.batch.operations = std::move(original);
-            state.batch.selected_operation = original_selection;
-            state.batch.run_operations.clear();
-            if (!state.batch.loaded_graph) {
-                ResetBatchDerivedState(state.batch);
-            }
-            RefreshBatchPalette(state.batch, state.Workspace().batch_palette);
-            return false;
-        }
-        state.batch.operations[index].flags &=
-            ~INKPOD_BATCH_OPERATION_CONFIGURE_EACH_RUN;
-    }
-    state.batch.run_operations = std::move(state.batch.operations);
-    state.batch.operations = std::move(original);
-    state.batch.selected_operation = original_selection;
-    if (!state.batch.loaded_graph) {
-        ResetBatchDerivedState(state.batch);
-    }
-    RefreshBatchPalette(state.batch, state.Workspace().batch_palette);
+bool PrepareBatchRunOperations(ApplicationHost&) noexcept {
     return true;
 }
 
@@ -13590,7 +13092,9 @@ bool SameBatchColor(
 bool ExtractBatchColorPairs(
     ApplicationHost& state,
     const CommandContext& issued_context) noexcept {
-    if (state.engine == nullptr || state.batch.loaded_graph
+    if (state.engine == nullptr
+        || state.batch.selected_stage == 0U
+        || state.batch.selected_stage != state.batch.selected_operation + 1U
         || state.batch.selected_operation >= state.batch.operations.size()
         || state.batch.operations[state.batch.selected_operation].kind
             != INKPOD_BATCH_OPERATION_COLOR_REPLACE) {
@@ -13761,6 +13265,67 @@ std::wstring BatchReportSummary(const InkpodBatchReport* report) {
     return BatchController::ReportSummary(report);
 }
 
+InkpodStatus InstallBatchNewTabs(
+    ApplicationHost& state, InkpodBatchReport* report) noexcept {
+    if (state.engine == nullptr || report == nullptr) {
+        return INKPOD_STATUS_INVALID_ARGUMENT;
+    }
+    InkpodBatchReportInfo info{};
+    info.struct_size = sizeof(info);
+    if (inkpod_batch_report_get_info(report, &info) != INKPOD_STATUS_OK) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    if (info.staged_result_count == 0U) {
+        return INKPOD_STATUS_OK;
+    }
+    const std::size_t existing = state.engine->SessionCount();
+    if (info.staged_result_count
+        > inkpod::app::CoreHost::kMaximumDocumentSessions - existing) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    std::vector<ApplicationHost::DocumentBinding> staged;
+    try {
+        staged.reserve(static_cast<std::size_t>(info.staged_result_count));
+    } catch (const std::bad_alloc&) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const auto destination_group = state.routing.targets.EditorGroup();
+    for (std::uint64_t index = 0U; index < info.staged_result_count; ++index) {
+        const auto binding = state.PrepareBatchResultSession(report, index);
+        if (!binding.has_value()) {
+            for (const auto& prepared : staged) {
+                (void)state.DiscardPreparedDocumentSession(prepared);
+            }
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        staged.push_back(binding.value());
+    }
+    std::size_t published{};
+    for (; published < staged.size(); ++published) {
+        if (!state.PublishPreparedDocumentSession(
+                staged[published], destination_group)) {
+            break;
+        }
+    }
+    if (published != staged.size()) {
+        for (std::size_t index = 0U; index < published; ++index) {
+            (void)state.CloseDocumentSession(staged[index].session);
+        }
+        for (std::size_t index = published; index < staged.size(); ++index) {
+            (void)state.DiscardPreparedDocumentSession(staged[index]);
+        }
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    if (!state.ActivateDocumentView(staged.back().view)) {
+        for (const auto& binding : staged) {
+            (void)state.CloseDocumentSession(binding.session);
+        }
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    ResetUiForNewActiveDocument(state);
+    return INKPOD_STATUS_OK;
+}
+
 InkpodStatus PreviewBatch(
     ApplicationHost& state,
     const CommandContext& issued_context,
@@ -13839,8 +13404,13 @@ InkpodStatus StartBatch(
         state.Workspace().batch_palette,
         state.batch,
         *state.engine);
-    const InkpodStatus status = controller.Start(
+    InkpodStatus status = controller.Start(
         context, scope, dry_run, kBatchTaskCompleted);
+    if (state.lifetime.smoke_test && status == INKPOD_STATUS_OK && !dry_run
+        && state.batch.output_destination == INKPOD_BATCH_OUTPUT_NEW_TABS
+        && state.batch.report != nullptr) {
+        status = InstallBatchNewTabs(state, state.batch.report);
+    }
     if (status != INKPOD_STATUS_OK || state.lifetime.smoke_test) {
         (void)state.routing.targets.EndJob(job.value());
         if (state.batch.return_to_pinned) {
@@ -14128,12 +13698,16 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
             state.Workspace().windows.window,
             state.Workspace().windows.workspace));
     }
-    state.Workspace().batch_dialog = {
+    state.Workspace().batch_dialog = {};
+    state.Workspace().batch_dialog.context = &state.Workspace();
+    state.Workspace().batch_dialog.dispatch_command = DispatchBatchPaletteCommand;
+    state.Workspace().batch_dialog.select_operation = SelectBatchPaletteOperation;
+    state.Workspace().batch_dialog.refresh = RefreshBatchPaletteTimer;
+    state.Workspace().batch_dialog.parameter_editor = {
         &state.Workspace(),
-        DispatchBatchPaletteCommand,
-        SelectBatchPaletteOperation,
-        RefreshBatchPaletteTimer,
-        state.batch.loaded_graph};
+        &state.batch,
+        &state.Workspace().tools.drawing_color,
+        BatchDraftChanged};
     state.Workspace().batch_palette = inkpod::windows::ui::CreateBatchPaletteDialog(
         state.lifetime.instance,
         state.Workspace().windows.window,
@@ -14563,11 +14137,11 @@ std::optional<LRESULT> RouteBatchCommand(
         case IDM_BATCH_INPUT_FILE:
         case IDM_BATCH_INPUT_FOLDER:
         case IDM_BATCH_INPUT_CURRENT: {
-            if (state->batch.task != nullptr || state->batch.loaded_graph) {
+            if (state->batch.task != nullptr) {
                 return 0;
             }
             std::wstring path;
-            InkpodBatchInputKind kind = INKPOD_BATCH_INPUT_CURRENT_SEQUENCE;
+            InkpodBatchInputKind kind = INKPOD_BATCH_INPUT_ACTIVE_DOCUMENT;
             bool accepted = true;
             if (LOWORD(wparam) == IDM_BATCH_INPUT_FILE) {
                 kind = INKPOD_BATCH_INPUT_FILE;
@@ -14580,16 +14154,14 @@ std::optional<LRESULT> RouteBatchCommand(
                 return 0;
             }
             ResetBatchDerivedState(state->batch);
-            state->batch.input_kind = kind;
-            state->batch.input_path = std::move(path);
-            state->batch.first_cell = 0U;
-            state->batch.last_cell = 0U;
+            state->batch.inputs = {{kind, std::move(path)}};
+            state->batch.selected_stage = 0U;
             RefreshBatchPalette(state->batch, state->Workspace().batch_palette);
             UpdateMenuState(*state);
             return 1;
         }
         case IDM_BATCH_INPUT_RANGE: {
-            if (state->batch.task != nullptr || state->batch.loaded_graph) {
+            if (state->batch.task != nullptr || state->batch.inputs.empty()) {
                 return 0;
             }
             ViewOptionsDialogState dialog{};
@@ -14600,8 +14172,8 @@ std::optional<LRESULT> RouteBatchCommand(
                 nullptr,
                 nullptr};
             dialog.values = {
-                static_cast<std::int32_t>(state->batch.first_cell),
-                static_cast<std::int32_t>(state->batch.last_cell),
+                static_cast<std::int32_t>(state->batch.inputs.front().first_cell),
+                static_cast<std::int32_t>(state->batch.inputs.front().last_cell),
                 0,
                 0};
             dialog.value_count = 2U;
@@ -14613,52 +14185,54 @@ std::optional<LRESULT> RouteBatchCommand(
                 return 0;
             }
             ResetBatchDerivedState(state->batch);
-            state->batch.first_cell =
+            state->batch.inputs.front().first_cell =
                 static_cast<std::uint32_t>(dialog.values[0]);
-            state->batch.last_cell =
+            state->batch.inputs.front().last_cell =
                 static_cast<std::uint32_t>(dialog.values[1]);
             RefreshBatchPalette(state->batch, state->Workspace().batch_palette);
             UpdateMenuState(*state);
             return 1;
         }
         case IDM_BATCH_ADD_COLOR_REPLACE:
-        case IDM_BATCH_ADD_CONTINUOUS_FILL:
-        case IDM_BATCH_ADD_SEPARATION:
-        case IDM_BATCH_ADD_VISIBILITY:
-        case IDM_BATCH_ADD_BOUNDARY_AIRBRUSH:
-        case IDM_BATCH_ADD_DUST:
-        case IDM_BATCH_ADD_MIRROR:
-        case IDM_BATCH_ADD_ROTATE:
-        case IDM_BATCH_ADD_RESIZE:
-        case IDM_BATCH_ADD_CONVERT:
-        case IDM_BATCH_ADD_FILTER_SHARPEN_WEAK:
-        case IDM_BATCH_ADD_FILTER_SHARPEN_STRONG:
-        case IDM_BATCH_ADD_FILTER_BLUR_WEAK:
-        case IDM_BATCH_ADD_FILTER_BLUR_STRONG:
-        case IDM_BATCH_ADD_FILTER_GAUSSIAN:
-        case IDM_BATCH_ADD_FILTER_INVERT:
-        case IDM_BATCH_ADD_FILTER_AUTO_CONTRAST:
-        case IDM_BATCH_ADD_FILTER_BRIGHTNESS:
-        case IDM_BATCH_ADD_FILTER_TONE_CURVE:
-        case IDM_BATCH_ADD_FILTER_LEVELS:
-        case IDM_BATCH_ADD_FILTER_HSV:
-        case IDM_BATCH_ADD_FILTER_COLOR_BALANCE:
-        case IDM_BATCH_ADD_FILTER_UNSHARP:
+        case IDM_BATCH_ADD_MOVE_TO_COLOR_PLANE:
+        case IDM_BATCH_ADD_MASKING:
+        case IDM_BATCH_ADD_ERASE:
             if (state->batch.task == nullptr
                 && AddBatchOperation(*state, LOWORD(wparam))) {
                 UpdateMenuState(*state);
                 return 1;
             }
             return 0;
-        case IDM_BATCH_OPERATION_EDIT:
+        case IDM_BATCH_OPERATION_DUPLICATE:
             if (state->batch.task == nullptr
-                && EditSelectedBatchOperation(*state)) {
-                UpdateMenuState(*state);
-                return 1;
+                && state->batch.selected_stage > 0U
+                && state->batch.selected_stage
+                    == state->batch.selected_operation + 1U
+                && state->batch.selected_operation
+                    < state->batch.operations.size()) {
+                try {
+                    state->batch.operations.insert(
+                        state->batch.operations.begin()
+                            + state->batch.selected_operation + 1U,
+                        state->batch.operations[state->batch.selected_operation]);
+                    ++state->batch.selected_operation;
+                    state->batch.selected_stage =
+                        state->batch.selected_operation + 1U;
+                    ResetBatchDerivedState(state->batch);
+                    RefreshBatchPalette(
+                        state->batch, state->Workspace().batch_palette);
+                    UpdateMenuState(*state);
+                    return 1;
+                } catch (const std::bad_alloc&) {
+                    return 0;
+                }
             }
             return 0;
         case IDM_BATCH_REPLACE_SWAP:
-            if (state->batch.task == nullptr && !state->batch.loaded_graph
+            if (state->batch.task == nullptr
+                && state->batch.selected_stage > 0U
+                && state->batch.selected_stage
+                    == state->batch.selected_operation + 1U
                 && state->batch.selected_operation < state->batch.operations.size()) {
                 BatchOperationUi& operation =
                     state->batch.operations[state->batch.selected_operation];
@@ -14675,7 +14249,10 @@ std::optional<LRESULT> RouteBatchCommand(
             }
             return 0;
         case IDM_BATCH_OPERATION_REMOVE:
-            if (state->batch.task == nullptr && !state->batch.loaded_graph
+            if (state->batch.task == nullptr
+                && state->batch.selected_stage > 0U
+                && state->batch.selected_stage
+                    == state->batch.selected_operation + 1U
                 && state->batch.selected_operation < state->batch.operations.size()) {
                 state->batch.operations.erase(
                     state->batch.operations.begin()
@@ -14688,6 +14265,9 @@ std::optional<LRESULT> RouteBatchCommand(
                 } else {
                     state->batch.selected_operation = 0U;
                 }
+                state->batch.selected_stage = state->batch.operations.empty()
+                    ? 0U
+                    : state->batch.selected_operation + 1U;
                 ResetBatchDerivedState(state->batch);
                 RefreshBatchPalette(state->batch, state->Workspace().batch_palette);
                 UpdateMenuState(*state);
@@ -14696,7 +14276,10 @@ std::optional<LRESULT> RouteBatchCommand(
             return 0;
         case IDM_BATCH_OPERATION_UP:
         case IDM_BATCH_OPERATION_DOWN:
-            if (state->batch.task == nullptr && !state->batch.loaded_graph
+            if (state->batch.task == nullptr
+                && state->batch.selected_stage > 0U
+                && state->batch.selected_stage
+                    == state->batch.selected_operation + 1U
                 && state->batch.selected_operation < state->batch.operations.size()) {
                 const std::uint32_t current = state->batch.selected_operation;
                 const bool up = LOWORD(wparam) == IDM_BATCH_OPERATION_UP;
@@ -14707,6 +14290,7 @@ std::optional<LRESULT> RouteBatchCommand(
                         state->batch.operations[current],
                         state->batch.operations[target]);
                     state->batch.selected_operation = target;
+                    state->batch.selected_stage = target + 1U;
                     ResetBatchDerivedState(state->batch);
                     RefreshBatchPalette(state->batch, state->Workspace().batch_palette);
                     UpdateMenuState(*state);
@@ -14714,89 +14298,36 @@ std::optional<LRESULT> RouteBatchCommand(
                 }
             }
             return 0;
-        case IDM_BATCH_OUTPUT_DUPLICATE:
-        case IDM_BATCH_OUTPUT_NEW:
-        case IDM_BATCH_OUTPUT_OVERWRITE:
-            if (state->batch.task == nullptr && !state->batch.loaded_graph) {
+        case IDM_BATCH_OUTPUT_FOLDER:
+        case IDM_BATCH_OUTPUT_ACTIVE_DOCUMENT:
+        case IDM_BATCH_OUTPUT_NEW_TABS:
+            if (state->batch.task == nullptr) {
                 ResetBatchDerivedState(state->batch);
-                state->batch.output_policy = LOWORD(wparam) == IDM_BATCH_OUTPUT_NEW
-                    ? INKPOD_BATCH_OUTPUT_NEW_SAVE
-                    : (LOWORD(wparam) == IDM_BATCH_OUTPUT_OVERWRITE
-                              ? INKPOD_BATCH_OUTPUT_EXPLICIT_OVERWRITE
-                              : INKPOD_BATCH_OUTPUT_DUPLICATE);
+                state->batch.output_destination =
+                    LOWORD(wparam) == IDM_BATCH_OUTPUT_ACTIVE_DOCUMENT
+                    ? INKPOD_BATCH_OUTPUT_ACTIVE_DOCUMENT
+                    : (LOWORD(wparam) == IDM_BATCH_OUTPUT_NEW_TABS
+                           ? INKPOD_BATCH_OUTPUT_NEW_TABS
+                           : INKPOD_BATCH_OUTPUT_FOLDER);
+                state->batch.selected_stage = static_cast<std::uint32_t>(
+                    state->batch.operations.size() + 1U);
                 RefreshBatchPalette(state->batch, state->Workspace().batch_palette);
                 UpdateMenuState(*state);
                 return 1;
             }
             return 0;
         case IDM_BATCH_OUTPUT_SETTINGS: {
-            if (state->batch.task != nullptr || state->batch.loaded_graph) {
+            if (state->batch.task != nullptr) {
                 return 0;
             }
-            ViewOptionsDialogState dialog{};
-            dialog.title = UiText(UiStringId::Text0266);
-            dialog.labels = {
-                UiText(UiStringId::CellFolderToggleLabel),
-                UiText(UiStringId::Text1023),
-                UiText(UiStringId::Text1027),
-                UiText(UiStringId::Text0090)};
-            dialog.values = {
-                state->batch.cell_folder ? 1 : 0,
-                static_cast<std::int32_t>(state->batch.start_number),
-                state->batch.descending ? 1 : 0,
-                static_cast<std::int32_t>(state->batch.wait_milliseconds)};
-            dialog.value_count = 4U;
-            if (ShowViewOptions(
-                    state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
-                || dialog.values[0] < 0 || dialog.values[0] > 1
-                || dialog.values[1] < 0
-                || dialog.values[2] < 0 || dialog.values[2] > 1
-                || dialog.values[3] < 0 || dialog.values[3] > 3'600'000) {
-                return 0;
-            }
-            TextInputDialogState folder{};
-            folder.title = UiText(UiStringId::Text0265);
-            folder.label = UiText(UiStringId::Text0830);
-            folder.value = state->batch.output_folder;
-            TextInputDialogState basename{};
-            basename.title = UiText(UiStringId::Text0264);
-            basename.label = UiText(UiStringId::Text0831);
-            basename.value = state->batch.basename;
-            if (ShowTextInput(
-                    state->lifetime.instance, window, state->lifetime.smoke_test, folder) != IDOK
-                || ShowTextInput(
-                       state->lifetime.instance, window, state->lifetime.smoke_test, basename) != IDOK) {
-                return 0;
-            }
-            bool preview_before_save = state->batch.preview_before_save;
-            if (!state->lifetime.smoke_test) {
-                const int preview_choice = MessageBoxW(
-                    window,
-                    UiText(UiStringId::Text0470),
-                    UiText(UiStringId::Text0266),
-                    MB_YESNOCANCEL | MB_ICONQUESTION);
-                if (preview_choice == IDCANCEL) {
-                    return 0;
-                }
-                preview_before_save = preview_choice == IDYES;
-            }
-            ResetBatchDerivedState(state->batch);
-            state->batch.cell_folder = dialog.values[0] != 0;
-            state->batch.start_number =
-                static_cast<std::uint32_t>(dialog.values[1]);
-            state->batch.descending = dialog.values[2] != 0;
-            state->batch.wait_milliseconds =
-                static_cast<std::uint32_t>(dialog.values[3]);
-            state->batch.output_folder = std::move(folder.value);
-            state->batch.basename = std::move(basename.value);
-            state->batch.preview_before_save = preview_before_save;
+            state->batch.selected_stage = static_cast<std::uint32_t>(
+                state->batch.operations.size() + 1U);
             RefreshBatchPalette(state->batch, state->Workspace().batch_palette);
-            UpdateMenuState(*state);
             return 1;
         }
         case IDM_BATCH_FAILURE_CONTINUE:
         case IDM_BATCH_FAILURE_STOP:
-            if (state->batch.task == nullptr && !state->batch.loaded_graph) {
+            if (state->batch.task == nullptr) {
                 ResetBatchDerivedState(state->batch);
                 state->batch.failure_policy = LOWORD(wparam) == IDM_BATCH_FAILURE_STOP
                     ? INKPOD_BATCH_FAILURE_STOP
@@ -20710,7 +20241,7 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
             return 0;
         case kBatchTaskCompleted:
             if (state != nullptr) {
-                const InkpodStatus status = static_cast<InkpodStatus>(wparam);
+                InkpodStatus status = static_cast<InkpodStatus>(wparam);
                 const CommandContext completion_context =
                     state->batch.completion_context;
                 auto* completion_workspace = completion_context.workspace.has_value()
@@ -20748,6 +20279,13 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                             completion_workspace->windows.dock_host.HidePane(
                                 DockPaneType::JobProgress));
                     }
+                }
+                if (target_valid && status == INKPOD_STATUS_OK
+                    && state->batch.output_destination
+                        == INKPOD_BATCH_OUTPUT_NEW_TABS
+                    && state->batch.report != nullptr) {
+                    status = InstallBatchNewTabs(
+                        *state, state->batch.report);
                 }
                 if (target_valid && state->batch.report != nullptr) {
                     try {

@@ -85,7 +85,7 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .clone();
     assert_eq!(main_line_procedure.primitive_id().get(), 0x0003_0001);
     assert_eq!(main_line_procedure.primitive_schema_version(), 1);
-    assert_eq!(main_line_procedure.replay_epoch().get(), 24);
+    assert_eq!(main_line_procedure.replay_epoch().get(), 25);
     assert_eq!(main_line_procedure.procedure_id().get(), 1);
     assert_eq!(main_line_procedure.base_state_id().get(), 1);
     assert_eq!(main_line_procedure.committed_state_id().get(), 2);
@@ -112,7 +112,7 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .clone();
     assert_eq!(palette_procedure.primitive_id().get(), 0x0003_0002);
     assert_eq!(palette_procedure.primitive_schema_version(), 1);
-    assert_eq!(palette_procedure.replay_epoch().get(), 24);
+    assert_eq!(palette_procedure.replay_epoch().get(), 25);
     assert_eq!(palette_procedure.procedure_id().get(), 2);
     assert_eq!(palette_procedure.base_state_id().get(), 2);
     assert_eq!(palette_procedure.committed_state_id().get(), 3);
@@ -160,7 +160,7 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .clone();
     assert_eq!(stroke_procedure.primitive_id().get(), 0x0005_0001);
     assert_eq!(stroke_procedure.primitive_schema_version(), 3);
-    assert_eq!(stroke_procedure.replay_epoch().get(), 24);
+    assert_eq!(stroke_procedure.replay_epoch().get(), 25);
     assert_eq!(stroke_procedure.procedure_id().get(), 3);
     assert_eq!(stroke_procedure.base_state_id().get(), 3);
     assert_eq!(stroke_procedure.committed_state_id().get(), 4);
@@ -176,35 +176,35 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .canonical_composite_digest()
         .unwrap()
         .as_bytes();
-    assert_eq!(contract.replay_epoch().get(), 24);
-    assert_eq!(contract.procedure_format_version(), 27);
+    assert_eq!(contract.replay_epoch().get(), 25);
+    assert_eq!(contract.procedure_format_version(), 28);
     assert_eq!(contract.canonical_numeric_version(), 1);
-    assert_eq!(contract.primitive_count(), 76);
+    assert_eq!(contract.primitive_count(), 77);
     assert_eq!(
         *contract.primitive_catalog_digest(),
         [
-            237, 69, 79, 173, 242, 176, 49, 232, 67, 126, 79, 63, 113, 69, 91, 234, 210, 41, 93,
-            10, 161, 125, 135, 68, 64, 196, 199, 233, 241, 134, 194, 190
+            249, 87, 36, 23, 74, 116, 183, 210, 31, 127, 178, 186, 161, 125, 204, 1, 9, 224, 175,
+            29, 70, 118, 86, 195, 250, 93, 118, 74, 85, 155, 69, 65
         ]
     );
     assert_eq!(
         boundary_digests,
         vec![
             [
-                32, 201, 229, 181, 129, 33, 75, 224, 229, 122, 47, 140, 211, 21, 214, 102, 81, 32,
-                68, 23, 56, 222, 55, 125, 2, 115, 145, 77, 88, 246, 84, 45
+                54, 21, 55, 25, 217, 220, 129, 94, 164, 3, 124, 209, 181, 124, 167, 64, 125, 231,
+                191, 194, 70, 169, 149, 235, 210, 40, 111, 177, 212, 37, 10, 228
             ],
             [
-                42, 121, 121, 27, 32, 114, 181, 39, 224, 184, 96, 91, 165, 81, 103, 126, 252, 253,
-                127, 194, 9, 114, 71, 182, 221, 128, 84, 136, 98, 168, 147, 237
+                195, 125, 170, 219, 184, 251, 180, 187, 137, 80, 185, 96, 195, 57, 131, 12, 54,
+                231, 58, 204, 122, 163, 221, 31, 239, 250, 24, 235, 140, 186, 58, 206
             ],
             [
-                49, 44, 184, 246, 49, 168, 219, 40, 254, 247, 230, 63, 183, 39, 24, 174, 84, 216,
-                241, 84, 189, 227, 20, 192, 153, 48, 226, 50, 216, 66, 59, 150
+                129, 209, 239, 220, 100, 227, 255, 131, 223, 107, 132, 116, 69, 177, 186, 136, 129,
+                128, 26, 235, 102, 146, 113, 75, 100, 84, 212, 207, 134, 61, 43, 66
             ],
             [
-                71, 27, 133, 60, 253, 195, 138, 235, 71, 172, 164, 0, 125, 44, 133, 209, 39, 196,
-                40, 221, 166, 80, 223, 174, 109, 129, 216, 209, 115, 42, 255, 130
+                225, 112, 208, 157, 21, 102, 196, 136, 43, 232, 129, 168, 18, 143, 192, 243, 144,
+                107, 10, 123, 1, 201, 36, 105, 135, 139, 29, 139, 73, 219, 190, 131
             ],
         ]
     );

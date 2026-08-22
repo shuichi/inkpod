@@ -7,6 +7,12 @@ mod tiff;
 use super::FormatError;
 use bmp::{decode_bmp, encode_bmp};
 use inkpod_image::{MAX_RASTER_DIMENSION, PixelFormat};
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static COMMON_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 use png_codec::{decode_png, encode_png};
 use tga::{decode_tga, encode_tga};
 use tiff::{decode_tiff, encode_tiff};
@@ -46,6 +52,71 @@ impl CommonRasterFormat {
     pub const fn supports_dpi(self) -> bool {
         !matches!(self, Self::Tga)
     }
+}
+
+/// Writes already encoded common-raster bytes through a same-directory temporary file.
+///
+/// Cancellation and I/O failure leave the destination untouched. Callers that forbid
+/// overwrite must validate destination existence before calling this function.
+pub fn save_common_raster_bytes_atomic_with_cancel(
+    path: &Path,
+    bytes: &[u8],
+    mut cancelled: impl FnMut() -> bool,
+) -> Result<(), FormatError> {
+    if bytes.len() > MAX_COMMON_RASTER_BYTES {
+        return Err(FormatError::Invalid("common raster exceeds byte limit"));
+    }
+    let parent = path.parent().ok_or(FormatError::Invalid(
+        "common raster destination has no parent directory",
+    ))?;
+    let parent = if parent.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        parent
+    };
+    let mut temporary = None;
+    for _ in 0..128 {
+        let sequence = COMMON_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let candidate = parent.join(format!(
+            ".inkpod-common-{}-{sequence}.tmp",
+            std::process::id()
+        ));
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(file) => {
+                temporary = Some((candidate, file));
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error.into()),
+        }
+    }
+    let (temporary_path, mut file) = temporary.ok_or(FormatError::Invalid(
+        "common raster temporary file name space is exhausted",
+    ))?;
+    let result = (|| {
+        for chunk in bytes.chunks(1 << 20) {
+            if cancelled() {
+                return Err(FormatError::Cancelled);
+            }
+            file.write_all(chunk)?;
+        }
+        file.flush()?;
+        file.sync_all()?;
+        drop(file);
+        if cancelled() {
+            return Err(FormatError::Cancelled);
+        }
+        fs::rename(&temporary_path, path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary_path);
+    }
+    result
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

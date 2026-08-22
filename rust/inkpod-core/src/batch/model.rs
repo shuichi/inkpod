@@ -2,9 +2,12 @@ use super::*;
 
 use super::codec::{
     failure_policy_code, input_kind_code, operation_from_file, operation_to_file,
-    output_policy_code, parse_failure_policy, parse_input_kind, parse_output_policy,
+    output_format_code, output_policy_code, parse_failure_policy, parse_input_kind,
+    parse_output_format, parse_output_policy,
 };
-use super::validation::{validate_component, validate_operation, validate_path};
+use super::validation::{
+    validate_component, validate_naming_template, validate_operation, validate_path,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// Source category expanded by a batch graph.
@@ -13,8 +16,8 @@ pub enum BatchInputKind {
     File,
     /// Native document files in one folder.
     Folder,
-    /// Cells currently installed in Core sequence state.
-    CurrentSequence,
+    /// The active document captured when the job is issued.
+    ActiveDocument,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -44,9 +47,9 @@ impl BatchInputSelector {
 
     /// Creates an unbounded selector for current Core sequence state.
     #[must_use]
-    pub fn current_sequence() -> Self {
+    pub fn active_document() -> Self {
         Self {
-            kind: BatchInputKind::CurrentSequence,
+            kind: BatchInputKind::ActiveDocument,
             path: String::new(),
             first_cell: 0,
             last_cell: 0,
@@ -104,49 +107,33 @@ pub struct BatchColorPair {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-/// One document-pixel seed used by continuous batch fill.
-pub struct BatchSeed {
-    /// Whether this seed participates in the operation.
-    pub enabled: bool,
-    /// Seed x-coordinate in document pixels.
-    pub x: u32,
-    /// Seed y-coordinate in document pixels.
-    pub y: u32,
-    /// Straight-alpha fill color.
-    pub color: PixelValue,
-    /// Inclusive channel tolerance.
-    pub tolerance: u16,
-    /// Maximum bounded gap-closing distance.
-    pub gap_close: u8,
-    /// Optional guard color that must match the source seed.
-    pub expected_source: Option<PixelValue>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-/// Palette of colors separated into a replacement value.
+/// Legacy internal separation payload retained for the canonical primitive catalog.
+///
+/// Batch v3 authoring does not serialize this type directly; its public operations
+/// use the four closed [`BatchOperationKind`] variants instead.
 pub struct BatchSeparation {
     /// Source colors to match.
     pub colors: Vec<PixelValue>,
-    /// Replacement pixel value.
+    /// Replacement value written by the retained internal primitive.
     pub replacement: PixelValue,
-    /// Whether matching logic is inverted.
+    /// Whether the retained internal primitive inverts its match set.
     pub invert: bool,
-    /// Destination receiving the separated pixels.
+    /// Destination used by the retained internal primitive.
     pub destination: BatchSeparationDestination,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-/// Semantic destination for one color-separation operation.
+/// Destination for the retained internal separation primitive.
 pub enum BatchSeparationDestination {
-    /// Replaces the selected source plane.
+    /// Replaces the source plane.
     ReplaceSource,
     /// Replaces the document selection mask.
     SelectionMask,
-    /// Replaces the main-line plane in the source layer.
+    /// Writes into the main-line plane.
     MainLinePlane,
-    /// Replaces the color plane in the source layer.
+    /// Writes into the color plane.
     ColorPlane,
-    /// Writes the separated result through the normal native batch output path.
+    /// Retained native-file adapter destination.
     NativeFile,
 }
 
@@ -218,34 +205,12 @@ impl BatchPairExtraction {
 pub enum BatchOperationKind {
     /// Replaces enabled exact color pairs.
     ColorReplace(Vec<BatchColorPair>),
-    /// Applies ordered seed-fill requests.
-    ContinuousFill(Vec<BatchSeed>),
-    /// Separates matching colors.
-    Separation(BatchSeparation),
-    /// Sets target visibility.
-    Visibility {
-        /// New visibility state.
-        visible: bool,
-    },
-    /// Applies an image filter.
-    Filter(Filter),
-    /// Applies boundary-aware airbrush settings.
-    BoundaryAirbrush(BoundaryAirbrush),
-    /// Removes bounded dust regions.
-    DustRemoval(DustRemoval),
-    /// Mirrors the document.
-    Mirror(MirrorAxis),
-    /// Rotates the document by 90 degrees.
-    Rotate90(RotateDirection),
-    /// Resizes the document.
-    Resize(DocumentResize),
-    /// Converts a raster plane.
-    ConvertPlane {
-        /// Destination semantic plane kind.
-        destination_kind: PlaneType,
-        /// Destination pixel format.
-        destination_format: PixelFormat,
-    },
+    /// Moves matching native values into the same layer's color plane.
+    MoveToColorPlane(Vec<PixelValue>),
+    /// Replaces the sparse document fill-protection mask from matching pixels.
+    Masking(Vec<PixelValue>),
+    /// Erases matching native values from the source plane.
+    Erase(Vec<PixelValue>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -255,10 +220,8 @@ pub struct BatchOperation {
     pub version: u32,
     /// Whether execution includes this operation.
     pub enabled: bool,
-    /// Whether a frontend must request parameters for every run.
-    pub configure_each_run: bool,
-    /// Optional plane target selector.
-    pub target: Option<BatchTargetSelector>,
+    /// Required plane target selector.
+    pub target: BatchTargetSelector,
     /// Operation-specific payload.
     pub kind: BatchOperationKind,
 }
@@ -282,13 +245,28 @@ impl BatchOperation {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// Policy used to derive or authorize batch output paths.
-pub enum BatchOutputPolicy {
-    /// Writes a duplicate without replacing the input.
-    Duplicate,
-    /// Writes a newly named normal-save output.
-    NewSave,
-    /// Explicitly authorizes replacement of the input path.
-    ExplicitOverwrite,
+pub enum BatchOutputDestination {
+    /// Writes each result to a folder.
+    Folder,
+    /// Applies the single staged result to the issue-time active document.
+    ActiveDocument,
+    /// Returns each result for installation as a new pathless tab.
+    NewTabs,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Exact output encoding selected by a folder destination.
+pub enum BatchOutputFormat {
+    /// Native `.inkpod` output.
+    Inkpod,
+    /// PNG output.
+    Png,
+    /// TIFF output.
+    Tiff,
+    /// TGA output.
+    Tga,
+    /// BMP output.
+    Bmp,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -303,18 +281,14 @@ pub enum BatchFailurePolicy {
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// Output naming, confirmation, pacing, and failure settings for a batch graph.
 pub struct BatchOutputSettings {
-    /// Output-path policy.
-    pub policy: BatchOutputPolicy,
-    /// Optional output folder path.
+    /// Output destination.
+    pub destination: BatchOutputDestination,
+    /// Output encoding for folder destinations.
+    pub format: BatchOutputFormat,
+    /// Output folder path.
     pub folder: String,
-    /// Whether each input receives a cell subfolder.
-    pub cell_folder: bool,
-    /// Optional output basename.
-    pub basename: String,
-    /// First generated numeric suffix.
-    pub start_number: u32,
-    /// Whether generated numbers descend.
-    pub descending: bool,
+    /// Bounded file-name template supporting only `{stem}` and `{index:N}`.
+    pub naming_template: String,
     /// Behavior after item failure.
     pub failure_policy: BatchFailurePolicy,
     /// Bounded delay between items, in milliseconds.
@@ -326,12 +300,10 @@ pub struct BatchOutputSettings {
 impl Default for BatchOutputSettings {
     fn default() -> Self {
         Self {
-            policy: BatchOutputPolicy::Duplicate,
+            destination: BatchOutputDestination::Folder,
+            format: BatchOutputFormat::Inkpod,
             folder: String::new(),
-            cell_folder: false,
-            basename: String::new(),
-            start_number: 1,
-            descending: false,
+            naming_template: "{stem}_batch".to_owned(),
             failure_policy: BatchFailurePolicy::Continue,
             wait_milliseconds: 0,
             preview_before_save: false,
@@ -388,6 +360,11 @@ impl BatchGraph {
                 "batch operation count is outside bounds",
             ));
         }
+        if !self.operations.iter().any(|operation| operation.enabled) {
+            return Err(CoreError::InvalidArgument(
+                "batch graph must contain an enabled operation",
+            ));
+        }
         for input in &self.inputs {
             if input.first_cell != 0 && input.last_cell != 0 && input.first_cell > input.last_cell {
                 return Err(CoreError::InvalidArgument("batch input range is reversed"));
@@ -398,9 +375,9 @@ impl BatchGraph {
                         "batch file or folder input path is empty",
                     ));
                 }
-                BatchInputKind::CurrentSequence if !input.path.is_empty() => {
+                BatchInputKind::ActiveDocument if !input.path.is_empty() => {
                     return Err(CoreError::InvalidArgument(
-                        "current-sequence input must not contain a path",
+                        "active-document input must not contain a path",
                     ));
                 }
                 _ => {}
@@ -412,22 +389,23 @@ impl BatchGraph {
                 "batch wait duration exceeds one hour",
             ));
         }
-        validate_component(&self.output.basename, false)?;
+        validate_naming_template(&self.output.naming_template)?;
         validate_path(&self.output.folder)?;
-        if self.output.policy == BatchOutputPolicy::ExplicitOverwrite
+        if self.output.destination == BatchOutputDestination::Folder
+            && self.output.folder.is_empty()
+        {
+            return Err(CoreError::InvalidArgument(
+                "batch folder output path is empty",
+            ));
+        }
+        if self.output.destination == BatchOutputDestination::Folder
+            && self.output.format != BatchOutputFormat::Inkpod
             && self.operations.iter().any(|operation| {
-                operation.enabled
-                    && matches!(
-                        operation.kind,
-                        BatchOperationKind::Separation(BatchSeparation {
-                            destination: BatchSeparationDestination::NativeFile,
-                            ..
-                        })
-                    )
+                operation.enabled && matches!(operation.kind, BatchOperationKind::Masking(_))
             })
         {
             return Err(CoreError::InvalidArgument(
-                "native-file separation cannot overwrite its input",
+                "fill-protection masking requires a native-capable output",
             ));
         }
         for operation in &self.operations {
@@ -457,13 +435,10 @@ impl BatchGraph {
                 .map(operation_to_file)
                 .collect::<Result<Vec<_>, _>>()?,
             output: FileBatchOutput {
-                policy: output_policy_code(self.output.policy),
+                destination: output_policy_code(self.output.destination),
                 folder: self.output.folder.clone(),
-                cell_folder: self.output.cell_folder,
-                format: OUTPUT_NATIVE_INKPOD,
-                basename: self.output.basename.clone(),
-                start_number: self.output.start_number,
-                descending: self.output.descending,
+                format: output_format_code(self.output.format),
+                naming_template: self.output.naming_template.clone(),
                 failure_policy: failure_policy_code(self.output.failure_policy),
                 wait_milliseconds: self.output.wait_milliseconds,
                 preview_before_save: self.output.preview_before_save,
@@ -472,11 +447,6 @@ impl BatchGraph {
     }
 
     fn from_file(file: FileBatchGraph) -> Result<Self, CoreError> {
-        if file.output.format != OUTPUT_NATIVE_INKPOD {
-            return Err(CoreError::InvalidArgument(
-                "batch output format is unsupported",
-            ));
-        }
         let graph = Self {
             version: file.version,
             name: file.name,
@@ -498,12 +468,10 @@ impl BatchGraph {
                 .map(operation_from_file)
                 .collect::<Result<Vec<_>, _>>()?,
             output: BatchOutputSettings {
-                policy: parse_output_policy(file.output.policy)?,
+                destination: parse_output_policy(file.output.destination)?,
+                format: parse_output_format(file.output.format)?,
                 folder: file.output.folder,
-                cell_folder: file.output.cell_folder,
-                basename: file.output.basename,
-                start_number: file.output.start_number,
-                descending: file.output.descending,
+                naming_template: file.output.naming_template,
                 failure_policy: parse_failure_policy(file.output.failure_policy)?,
                 wait_milliseconds: file.output.wait_milliseconds,
                 preview_before_save: file.output.preview_before_save,
@@ -580,13 +548,15 @@ pub struct BatchItemResult {
     pub message: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 /// Complete deterministic report for a batch execution.
 pub struct BatchRunReport {
     /// Item results in execution order.
     pub items: Vec<BatchItemResult>,
     /// Whether cancellation stopped the run.
     pub cancelled: bool,
+    /// Rust-owned pathless results awaiting installation as new document sessions.
+    pub staged_results: Vec<BatchStagedResult>,
 }
 
 impl BatchRunReport {
@@ -600,6 +570,43 @@ impl BatchRunReport {
     }
 }
 
+#[derive(Clone, Debug)]
+/// One generation-tagged Rust-owned result for a new pathless document tab.
+pub struct BatchStagedResult {
+    pub(super) generation: u64,
+    pub(super) core: Box<Core>,
+}
+
+impl BatchStagedResult {
+    /// Returns the generation fixed when the result was staged.
+    #[must_use]
+    pub const fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// Returns the result document UUID without transferring ownership.
+    pub fn document_uuid(&self) -> Result<u128, CoreError> {
+        Ok(self
+            .core
+            .document
+            .as_ref()
+            .ok_or(CoreError::NoDocument)?
+            .uuid)
+    }
+
+    /// Returns whether the staged session has no file path authority.
+    #[must_use]
+    pub fn is_pathless(&self) -> bool {
+        self.core.current_path.is_none()
+    }
+
+    /// Transfers the complete pathless Core session to its frontend owner.
+    #[must_use]
+    pub fn into_core(self) -> Core {
+        *self.core
+    }
+}
+
 #[derive(Clone)]
 pub(super) enum BatchSourceContent {
     Path(PathBuf),
@@ -607,7 +614,6 @@ pub(super) enum BatchSourceContent {
         document: Box<CellDocument>,
         assets: asset::AssetStore,
     },
-    Sequence(SequenceCellSource),
 }
 
 #[derive(Clone)]

@@ -67,10 +67,11 @@ pub use asset::{
 pub use batch::{
     BATCH_OPERATION_VERSION, BatchColorPair, BatchFailurePolicy, BatchGraph, BatchInputKind,
     BatchInputSelector, BatchItemOutcome, BatchItemResult, BatchMissingTargetPolicy,
-    BatchOperation, BatchOperationKind, BatchOutputPolicy, BatchOutputSettings, BatchPairCandidate,
-    BatchPairExtraction, BatchPairResolution, BatchPreview, BatchPreviewItem, BatchRunOptions,
-    BatchRunReport, BatchRunScope, BatchSeed, BatchSeparation, BatchSeparationDestination,
-    BatchTargetSelector, SequenceSourceIdentity,
+    BatchOperation, BatchOperationKind, BatchOutputDestination, BatchOutputFormat,
+    BatchOutputSettings, BatchPairCandidate, BatchPairExtraction, BatchPairResolution,
+    BatchPreview, BatchPreviewItem, BatchRunOptions, BatchRunReport, BatchRunScope,
+    BatchSeparation, BatchSeparationDestination, BatchStagedResult, BatchTargetSelector,
+    SequenceSourceIdentity,
 };
 pub use cell_creation::{
     CellCreationOptions, CellCreationPlan, CellCreationPlanItem, CellSizing, FrameAnchor,
@@ -111,8 +112,9 @@ use inkpod_format::{
 pub use inkpod_image::RasterRangeInterpretation as RangeInterpretation;
 use inkpod_image::{
     ColorCheckCategory, FillError, FillOptions, MAX_FILL_PIXELS, Palette, PlaneSample, RasterError,
-    TILE_SIZE, TileCoord, TileData, TileView, closed_region_fill_with_cancel, color_check_category,
-    extend_fill_with_cancel, eyedropper, seed_fill_with_cancel,
+    TILE_SIZE, TileCoord, TileData, TileView, closed_region_fill_with_protection_and_cancel,
+    color_check_category, extend_fill_with_protection_and_cancel, eyedropper,
+    seed_fill_with_protection_and_cancel,
 };
 pub use journal::{
     BranchId, HistoryMoveKind, HistoryVisualizationBuilder, HistoryVisualizationProgress,

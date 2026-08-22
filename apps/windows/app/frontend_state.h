@@ -123,14 +123,18 @@ struct BatchOperationUi {
     InkpodLayerKind layer_kind{INKPOD_LAYER_BINARY_COLORING};
     InkpodTypedPlaneKind plane_kind{INKPOD_TYPED_PLANE_COLOR};
     InkpodBatchMissingPolicy missing_policy{INKPOD_BATCH_MISSING_ERROR};
-    std::array<std::int64_t, 8U> parameters{};
-    InkpodColorValue color_0{};
-    InkpodColorValue color_1{};
     std::vector<InkpodColorValue> colors;
     std::vector<InkpodBatchColorPairInput> color_pairs;
-    std::vector<InkpodBatchSeedInput> seeds;
-    FilterJob filter;
     std::wstring label;
+};
+
+struct BatchInputUi {
+    InkpodBatchInputKind kind{INKPOD_BATCH_INPUT_ACTIVE_DOCUMENT};
+    std::wstring path;
+    std::uint32_t first_cell{};
+    std::uint32_t last_cell{};
+    std::uint64_t resolved_count{};
+    std::wstring validation_text;
 };
 
 struct AppLifetimeState {
@@ -394,23 +398,20 @@ struct BatchUiState {
     bool target_pinned{};
     bool return_to_pinned{};
     CommandContext return_context;
-    InkpodBatchInputKind input_kind{INKPOD_BATCH_INPUT_CURRENT_SEQUENCE};
-    std::wstring input_path;
-    std::uint32_t first_cell{};
-    std::uint32_t last_cell{};
+    std::wstring set_name{L"Windows Batch Set"};
+    std::vector<BatchInputUi> inputs{BatchInputUi{}};
     std::vector<BatchOperationUi> operations;
-    std::vector<BatchOperationUi> run_operations;
+    std::uint32_t selected_stage{};
     std::uint32_t selected_operation{};
-    InkpodBatchOutputPolicy output_policy{INKPOD_BATCH_OUTPUT_DUPLICATE};
+    InkpodBatchOutputDestination output_destination{
+        INKPOD_BATCH_OUTPUT_NEW_TABS};
+    InkpodBatchOutputFormat output_format{INKPOD_BATCH_FORMAT_INKPOD};
     InkpodBatchFailurePolicy failure_policy{INKPOD_BATCH_FAILURE_CONTINUE};
     std::wstring output_folder{L"."};
-    std::wstring basename{L"batch"};
-    std::uint32_t start_number{1U};
+    std::wstring naming_template{L"{stem}_batch"};
     std::uint32_t wait_milliseconds{};
-    bool descending{};
-    bool cell_folder{};
     bool preview_before_save{};
-    bool loaded_graph{};
+    std::wstring validation_text;
     std::wstring last_result;
 
     windows::ui::BatchPaletteDialogState palette_dialog{};

@@ -1,9 +1,6 @@
 use super::*;
-use std::sync::atomic::{AtomicU64, Ordering};
 
-static TEST_SEQUENCE: AtomicU64 = AtomicU64::new(1);
-
-fn color(value: [u16; 4]) -> InkpodColorValue {
+fn rgba8(value: [u16; 4]) -> InkpodColorValue {
     InkpodColorValue {
         struct_size: size_of::<InkpodColorValue>() as u32,
         depth: INKPOD_COLOR_DEPTH_8,
@@ -14,38 +11,37 @@ fn color(value: [u16; 4]) -> InkpodColorValue {
     }
 }
 
-#[test]
-fn graph_preview_dry_run_and_owned_report_cross_ffi() {
-    let directory = std::env::temp_dir().join(format!(
-        "inkpod-test-ffi-{}-{}",
-        std::process::id(),
-        TEST_SEQUENCE.fetch_add(1, Ordering::Relaxed)
-    ));
-    std::fs::create_dir_all(&directory).unwrap();
-    let folder = directory.to_string_lossy().into_owned();
-    let name = b"ffi-batch";
-    let basename = b"cell";
-    let input = InkpodBatchInput {
-        struct_size: size_of::<InkpodBatchInput>() as u32,
-        kind: INKPOD_BATCH_INPUT_CURRENT_SEQUENCE,
+fn binary(value: u8) -> InkpodColorValue {
+    InkpodColorValue {
+        struct_size: size_of::<InkpodColorValue>() as u32,
+        depth: INKPOD_COLOR_DEPTH_BINARY,
+        red: u16::from(value),
+        green: 0,
+        blue: 0,
+        alpha: 0,
+    }
+}
+
+fn color_array(colors: &[InkpodColorValue]) -> InkpodColorArray {
+    InkpodColorArray {
+        struct_size: size_of::<InkpodColorArray>() as u32,
+        reserved: 0,
         feature_flags: INKPOD_FEATURE_NONE,
-        path_utf8: ptr::null(),
-        path_bytes: 0,
-        first_cell: 0,
-        last_cell: 0,
-        reserved: 0,
-    };
-    let pair = InkpodBatchColorPairInput {
-        struct_size: size_of::<InkpodBatchColorPairInput>() as u32,
-        enabled: 1,
-        reserved: 0,
-        old_color: color([0, 0, 0, 0]),
-        new_color: color([255, 0, 0, 255]),
-    };
-    let operation = InkpodBatchOperationInput {
+        colors: colors.as_ptr(),
+        color_count: colors.len() as u64,
+        color_stride_bytes: size_of::<InkpodColorValue>() as u64,
+    }
+}
+
+fn operation(
+    kind: u32,
+    colors: &[InkpodColorValue],
+    pairs: &[InkpodBatchColorPairInput],
+) -> InkpodBatchOperationInput {
+    InkpodBatchOperationInput {
         struct_size: size_of::<InkpodBatchOperationInput>() as u32,
         version: BATCH_OPERATION_VERSION,
-        kind: INKPOD_BATCH_OPERATION_COLOR_REPLACE,
+        kind,
         reserved: 0,
         flags: INKPOD_BATCH_OPERATION_ENABLED,
         layer_id: 0,
@@ -54,248 +50,347 @@ fn graph_preview_dry_run_and_owned_report_cross_ffi() {
         plane_kind: INKPOD_TYPED_PLANE_COLOR,
         missing_policy: INKPOD_BATCH_MISSING_ERROR,
         reserved_2: 0,
-        parameters: [0; 8],
-        color_0: color([0, 0, 0, 0]),
-        color_1: color([0, 0, 0, 0]),
-        colors: InkpodColorArray {
-            struct_size: size_of::<InkpodColorArray>() as u32,
-            reserved: 0,
-            feature_flags: INKPOD_FEATURE_NONE,
-            colors: ptr::null(),
-            color_count: 0,
-            color_stride_bytes: 0,
-        },
-        filter: ptr::null(),
-        color_pairs: &pair,
-        color_pair_count: 1,
+        colors: color_array(colors),
+        color_pairs: pairs.as_ptr(),
+        color_pair_count: pairs.len() as u64,
         color_pair_stride_bytes: size_of::<InkpodBatchColorPairInput>() as u64,
-        seeds: ptr::null(),
-        seed_count: 0,
-        seed_stride_bytes: 0,
         reserved_3: 0,
-    };
-    let graph_input = InkpodBatchGraphInput {
+    }
+}
+
+fn graph_input(
+    inputs: &[InkpodBatchInput],
+    operations: &[InkpodBatchOperationInput],
+    output_destination: u32,
+) -> InkpodBatchGraphInput {
+    static NAME: &[u8] = b"batch-v3-ffi";
+    static TEMPLATE: &[u8] = b"{stem}_{index:3}";
+    InkpodBatchGraphInput {
         struct_size: size_of::<InkpodBatchGraphInput>() as u32,
         version: INKPOD_BATCH_GRAPH_VERSION,
         feature_flags: INKPOD_FEATURE_NONE,
-        name_utf8: name.as_ptr(),
-        name_bytes: name.len() as u64,
-        inputs: &input,
-        input_count: 1,
+        name_utf8: NAME.as_ptr(),
+        name_bytes: NAME.len() as u64,
+        inputs: inputs.as_ptr(),
+        input_count: inputs.len() as u64,
         input_stride_bytes: size_of::<InkpodBatchInput>() as u64,
-        operations: &operation,
-        operation_count: 1,
+        operations: operations.as_ptr(),
+        operation_count: operations.len() as u64,
         operation_stride_bytes: size_of::<InkpodBatchOperationInput>() as u64,
-        output_policy: INKPOD_BATCH_OUTPUT_NEW_SAVE,
-        failure_policy: INKPOD_BATCH_FAILURE_CONTINUE,
+        output_destination,
+        failure_policy: INKPOD_BATCH_FAILURE_STOP,
         output_flags: 0,
-        output_folder_utf8: folder.as_ptr(),
-        output_folder_bytes: folder.len() as u64,
-        basename_utf8: basename.as_ptr(),
-        basename_bytes: basename.len() as u64,
-        start_number: 1,
+        output_folder_utf8: ptr::null(),
+        output_folder_bytes: 0,
+        naming_template_utf8: TEMPLATE.as_ptr(),
+        naming_template_bytes: TEMPLATE.len() as u64,
+        output_format: INKPOD_BATCH_FORMAT_INKPOD,
         wait_milliseconds: 0,
         reserved: 0,
-    };
+    }
+}
+
+fn active_document_input() -> InkpodBatchInput {
+    InkpodBatchInput {
+        struct_size: size_of::<InkpodBatchInput>() as u32,
+        kind: INKPOD_BATCH_INPUT_ACTIVE_DOCUMENT,
+        feature_flags: INKPOD_FEATURE_NONE,
+        path_utf8: ptr::null(),
+        path_bytes: 0,
+        first_cell: 0,
+        last_cell: 0,
+        reserved: 0,
+    }
+}
+
+#[test]
+fn abi18_graph_exposes_only_the_four_batch_v3_operation_shapes() {
+    let colors = [rgba8([1, 2, 3, 4])];
+    let pairs = [InkpodBatchColorPairInput {
+        struct_size: size_of::<InkpodBatchColorPairInput>() as u32,
+        enabled: 1,
+        reserved: 0,
+        old_color: rgba8([1, 2, 3, 4]),
+        new_color: rgba8([5, 6, 7, 8]),
+    }];
+    let operations = [
+        operation(INKPOD_BATCH_OPERATION_COLOR_REPLACE, &[], &pairs),
+        operation(INKPOD_BATCH_OPERATION_MOVE_TO_COLOR_PLANE, &colors, &[]),
+        operation(INKPOD_BATCH_OPERATION_MASKING, &colors, &[]),
+        operation(INKPOD_BATCH_OPERATION_ERASE, &colors, &[]),
+    ];
+    let inputs = [active_document_input()];
+    let input = graph_input(&inputs, &operations, INKPOD_BATCH_OUTPUT_NEW_TABS);
     let mut graph = ptr::null_mut();
     assert_eq!(
-        unsafe { inkpod_batch_graph_create(&graph_input, &mut graph) },
+        unsafe { inkpod_batch_graph_create(&input, &mut graph) },
         INKPOD_STATUS_OK
     );
-    let mut info = InkpodBatchGraphInfo {
+
+    let mut graph_info = InkpodBatchGraphInfo {
         struct_size: size_of::<InkpodBatchGraphInfo>() as u32,
-        version: 0,
-        input_count: 0,
-        operation_count: 0,
-        output_policy: 0,
-        failure_policy: 0,
-        output_flags: 0,
+        ..Default::default()
     };
     assert_eq!(
-        unsafe { inkpod_batch_graph_get_info(graph, &mut info) },
+        unsafe { inkpod_batch_graph_get_info(graph, &mut graph_info) },
         INKPOD_STATUS_OK
     );
-    assert_eq!((info.input_count, info.operation_count), (1, 1));
-    let mut operation_info = InkpodBatchOperationInfo {
-        struct_size: size_of::<InkpodBatchOperationInfo>() as u32,
-        ..InkpodBatchOperationInfo::default()
-    };
+    assert_eq!(graph_info.version, 3);
+    assert_eq!(graph_info.operation_count, 4);
+    assert_eq!(graph_info.output_destination, INKPOD_BATCH_OUTPUT_NEW_TABS);
+    assert_eq!(graph_info.output_format, INKPOD_BATCH_FORMAT_INKPOD);
     assert_eq!(
-        unsafe { inkpod_batch_graph_get_operation(graph, 0, &mut operation_info) },
+        unsafe { slice::from_raw_parts(graph_info.name_utf8, graph_info.name_bytes as usize) },
+        b"batch-v3-ffi"
+    );
+    assert_eq!(
+        unsafe {
+            slice::from_raw_parts(
+                graph_info.naming_template_utf8,
+                graph_info.naming_template_bytes as usize,
+            )
+        },
+        b"{stem}_{index:3}"
+    );
+    let mut queried_input = active_document_input();
+    assert_eq!(
+        unsafe { inkpod_batch_graph_get_input(graph, 0, &mut queried_input) },
         INKPOD_STATUS_OK
     );
-    assert_eq!(operation_info.kind, INKPOD_BATCH_OPERATION_COLOR_REPLACE);
-    assert_eq!(operation_info.color_pair_count, 1);
-    let mut queried_pair = InkpodBatchColorPairInput {
+    assert_eq!(queried_input.kind, INKPOD_BATCH_INPUT_ACTIVE_DOCUMENT);
+    assert_eq!(queried_input.path_bytes, 0);
+
+    for (index, expected) in [
+        INKPOD_BATCH_OPERATION_COLOR_REPLACE,
+        INKPOD_BATCH_OPERATION_MOVE_TO_COLOR_PLANE,
+        INKPOD_BATCH_OPERATION_MASKING,
+        INKPOD_BATCH_OPERATION_ERASE,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut info = InkpodBatchOperationInfo {
+            struct_size: size_of::<InkpodBatchOperationInfo>() as u32,
+            ..Default::default()
+        };
+        assert_eq!(
+            unsafe { inkpod_batch_graph_get_operation(graph, index as u64, &mut info) },
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(info.kind, expected);
+        if index == 0 {
+            assert_eq!((info.color_pair_count, info.color_count), (1, 0));
+        } else {
+            assert_eq!((info.color_pair_count, info.color_count), (0, 1));
+        }
+    }
+
+    let mut pair = InkpodBatchColorPairInput {
         struct_size: size_of::<InkpodBatchColorPairInput>() as u32,
         enabled: 0,
         reserved: u64::MAX,
-        old_color: color([0, 0, 0, 0]),
-        new_color: color([0, 0, 0, 0]),
+        old_color: rgba8([0; 4]),
+        new_color: rgba8([0; 4]),
     };
     assert_eq!(
-        unsafe { inkpod_batch_graph_get_operation_color_pair(graph, 0, 0, &mut queried_pair) },
+        unsafe { inkpod_batch_graph_get_operation_color_pair(graph, 0, 0, &mut pair) },
         INKPOD_STATUS_OK
     );
-    assert_eq!(queried_pair.enabled, 1);
-    assert_eq!(queried_pair.new_color.red, 255);
+    assert_eq!(pair.new_color.alpha, 8);
+    let mut queried = rgba8([0; 4]);
+    assert_eq!(
+        unsafe { inkpod_batch_graph_get_operation_color(graph, 2, 0, &mut queried) },
+        INKPOD_STATUS_OK
+    );
+    assert_eq!(queried.alpha, 4);
 
-    let unresolved_operation = InkpodBatchOperationInput {
-        flags: INKPOD_BATCH_OPERATION_ENABLED | INKPOD_BATCH_OPERATION_CONFIGURE_EACH_RUN,
-        ..operation
-    };
-    let mut run_graph = ptr::null_mut();
+    let replacement = [operation(INKPOD_BATCH_OPERATION_ERASE, &colors, &[])];
+    let mut cloned = ptr::null_mut();
     assert_eq!(
         unsafe {
             inkpod_batch_graph_clone_with_operations(
                 graph,
-                &unresolved_operation,
-                1,
+                replacement.as_ptr(),
+                replacement.len() as u64,
                 size_of::<InkpodBatchOperationInput>() as u64,
-                &mut run_graph,
-            )
-        },
-        INKPOD_STATUS_INVALID_STATE
-    );
-    assert!(run_graph.is_null());
-    assert_eq!(
-        unsafe {
-            inkpod_batch_graph_clone_with_operations(
-                graph,
-                &operation,
-                1,
-                size_of::<InkpodBatchOperationInput>() as u64,
-                &mut run_graph,
+                &mut cloned,
             )
         },
         INKPOD_STATUS_OK
     );
-    assert!(!run_graph.is_null());
+    let mut cloned_info = InkpodBatchGraphInfo {
+        struct_size: size_of::<InkpodBatchGraphInfo>() as u32,
+        ..Default::default()
+    };
+    assert_eq!(
+        unsafe { inkpod_batch_graph_get_info(cloned, &mut cloned_info) },
+        INKPOD_STATUS_OK
+    );
+    assert_eq!(cloned_info.operation_count, 1);
+    assert_eq!(
+        unsafe { inkpod_batch_graph_release(&mut cloned) },
+        INKPOD_STATUS_OK
+    );
+    assert_eq!(
+        unsafe { inkpod_batch_graph_release(&mut graph) },
+        INKPOD_STATUS_OK
+    );
+}
 
+#[test]
+fn abi18_rejects_short_unknown_and_invalid_stride_records() {
+    let colors = [binary(0)];
+    let operations = [operation(INKPOD_BATCH_OPERATION_ERASE, &colors, &[])];
+    let inputs = [active_document_input()];
+    let mut input = graph_input(&inputs, &operations, INKPOD_BATCH_OUTPUT_NEW_TABS);
+    let mut graph = ptr::null_mut();
+    input.struct_size = size_of::<u32>() as u32;
+    assert_eq!(
+        unsafe { inkpod_batch_graph_create(&input, &mut graph) },
+        INKPOD_STATUS_INCOMPATIBLE_ABI
+    );
+    input.struct_size = size_of::<InkpodBatchGraphInput>() as u32;
+    input.operation_stride_bytes = (size_of::<InkpodBatchOperationInput>() - 8) as u64;
+    assert_eq!(
+        unsafe { inkpod_batch_graph_create(&input, &mut graph) },
+        INKPOD_STATUS_INVALID_ARGUMENT
+    );
+    input.operation_stride_bytes = size_of::<InkpodBatchOperationInput>() as u64;
+    let unknown = InkpodBatchOperationInput {
+        kind: 99,
+        ..operations[0]
+    };
+    input.operations = &unknown;
+    assert_eq!(
+        unsafe { inkpod_batch_graph_create(&input, &mut graph) },
+        INKPOD_STATUS_INVALID_ARGUMENT
+    );
+    assert!(graph.is_null());
+}
+
+#[test]
+fn new_tab_result_is_taken_once_on_the_report_owner_thread() {
+    let mut cancelled_task = ptr::null_mut();
+    assert_eq!(
+        unsafe { inkpod_batch_task_create(&mut cancelled_task) },
+        INKPOD_STATUS_OK
+    );
+    let mut task_info = InkpodTaskInfo {
+        struct_size: size_of::<InkpodTaskInfo>() as u32,
+        state: u32::MAX,
+        completed_work: u64::MAX,
+        total_work: u64::MAX,
+        reserved: u64::MAX,
+    };
+    assert_eq!(
+        unsafe { inkpod_batch_task_query(cancelled_task, &mut task_info) },
+        INKPOD_STATUS_OK
+    );
+    assert_eq!(task_info.state, INKPOD_TASK_READY);
+    assert_eq!(
+        unsafe { inkpod_batch_task_cancel(cancelled_task) },
+        INKPOD_STATUS_OK
+    );
+    assert_eq!(
+        unsafe { inkpod_batch_task_query(cancelled_task, &mut task_info) },
+        INKPOD_STATUS_OK
+    );
+    assert_eq!(task_info.state, INKPOD_TASK_CANCELLED);
+    assert_eq!(
+        unsafe { inkpod_batch_task_release(&mut cancelled_task) },
+        INKPOD_STATUS_OK
+    );
+
+    let colors = [rgba8([0, 0, 0, 0])];
+    let operations = [operation(INKPOD_BATCH_OPERATION_ERASE, &colors, &[])];
+    let inputs = [active_document_input()];
+    let input = graph_input(&inputs, &operations, INKPOD_BATCH_OUTPUT_NEW_TABS);
+    let mut graph = ptr::null_mut();
+    assert_eq!(
+        unsafe { inkpod_batch_graph_create(&input, &mut graph) },
+        INKPOD_STATUS_OK
+    );
     let mut core = InkpodCore {
         owner_thread: thread::current().id(),
         core: Core::new(),
         objects: crate::v3::ObjectRegistry::new().expect("test Core generation"),
     };
     core.core.new_cell(2, 2, 96_000, 96_000).unwrap();
-    let mut preview = ptr::null_mut();
-    assert_eq!(
-        unsafe {
-            inkpod_core_batch_preview(&mut core, graph, INKPOD_BATCH_SCOPE_ALL, &mut preview)
-        },
-        INKPOD_STATUS_OK
-    );
-    let mut preview_count = 0;
-    assert_eq!(
-        unsafe { inkpod_batch_preview_count(preview, &mut preview_count) },
-        INKPOD_STATUS_OK
-    );
-    assert_eq!(preview_count, 1);
-    let mut preview_item = InkpodBatchPreviewItem {
-        struct_size: size_of::<InkpodBatchPreviewItem>() as u32,
-        flags: 0,
-        input_name: ptr::null(),
-        input_name_bytes: 0,
-        output_path: ptr::null(),
-        output_path_bytes: 0,
-        warning: ptr::null(),
-        warning_bytes: 0,
-    };
-    assert_eq!(
-        unsafe { inkpod_batch_preview_get(preview, 0, &mut preview_item) },
-        INKPOD_STATUS_OK
-    );
-    assert!(preview_item.input_name_bytes != 0);
-    assert_eq!(
-        unsafe { inkpod_batch_preview_release(&mut preview) },
-        INKPOD_STATUS_OK
-    );
-    assert_eq!(
-        unsafe { inkpod_batch_preview_release(&mut preview) },
-        INKPOD_STATUS_OK
-    );
-
     let mut task = ptr::null_mut();
-    let mut report = ptr::null_mut();
     assert_eq!(
         unsafe { inkpod_batch_task_create(&mut task) },
         INKPOD_STATUS_OK
     );
+    let mut report = ptr::null_mut();
     assert_eq!(
         unsafe {
             inkpod_core_batch_execute(
                 &mut core,
                 graph,
                 INKPOD_BATCH_SCOPE_ALL,
-                INKPOD_BATCH_RUN_DRY | INKPOD_BATCH_RUN_PREVIEW_CONFIRMED,
+                INKPOD_BATCH_RUN_PREVIEW_CONFIRMED,
                 task,
                 &mut report,
             )
         },
         INKPOD_STATUS_OK
     );
-    let mut task_info = InkpodTaskInfo {
-        struct_size: size_of::<InkpodTaskInfo>() as u32,
-        state: 0,
-        completed_work: 0,
-        total_work: 0,
-        reserved: 0,
-    };
-    assert_eq!(
-        unsafe { inkpod_batch_task_query(task, &mut task_info) },
-        INKPOD_STATUS_OK
-    );
-    assert_eq!(task_info.state, INKPOD_TASK_COMPLETED);
-    let mut report_info = InkpodBatchReportInfo {
+    let mut info = InkpodBatchReportInfo {
         struct_size: size_of::<InkpodBatchReportInfo>() as u32,
         cancelled: 0,
         item_count: 0,
         failure_count: 0,
-        reserved: u64::MAX,
+        staged_result_count: 0,
     };
     assert_eq!(
-        unsafe { inkpod_batch_report_get_info(report, &mut report_info) },
+        unsafe { inkpod_batch_report_get_info(report, &mut info) },
         INKPOD_STATUS_OK
     );
-    assert_eq!((report_info.item_count, report_info.failure_count), (1, 0));
-    let mut report_item = InkpodBatchReportItem {
-        struct_size: size_of::<InkpodBatchReportItem>() as u32,
-        outcome: 0,
-        input_name: ptr::null(),
-        input_name_bytes: 0,
-        output_path: ptr::null(),
-        output_path_bytes: 0,
-        message: ptr::null(),
-        message_bytes: 0,
-    };
     assert_eq!(
-        unsafe { inkpod_batch_report_get(report, 0, &mut report_item) },
-        INKPOD_STATUS_OK
+        (
+            info.item_count,
+            info.failure_count,
+            info.staged_result_count
+        ),
+        (1, 0, 1)
     );
-    assert_eq!(report_item.outcome, INKPOD_BATCH_ITEM_DRY_RUN);
-    assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 0);
 
-    let settings = directory.join("settings.inkbatch");
-    let settings_text = settings.to_string_lossy();
+    let report_address = report as usize;
+    let wrong_thread_status = std::thread::spawn(move || {
+        let mut generation = 0;
+        let mut staged_core = ptr::null_mut();
+        unsafe {
+            inkpod_batch_report_take_staged_result(
+                report_address as *mut InkpodBatchReport,
+                0,
+                &mut generation,
+                &mut staged_core,
+            )
+        }
+    })
+    .join()
+    .unwrap();
+    assert_eq!(wrong_thread_status, INKPOD_STATUS_WRONG_THREAD);
+
+    let mut generation = 0;
+    let mut staged_core = ptr::null_mut();
     assert_eq!(
         unsafe {
-            inkpod_batch_graph_save(
-                graph,
-                settings_text.as_bytes().as_ptr(),
-                settings_text.len() as u64,
-            )
+            inkpod_batch_report_take_staged_result(report, 0, &mut generation, &mut staged_core)
         },
         INKPOD_STATUS_OK
     );
-    let mut reopened = ptr::null_mut();
+    assert_ne!(generation, 0);
+    assert!(!staged_core.is_null());
+    let mut second_core = ptr::null_mut();
     assert_eq!(
         unsafe {
-            inkpod_batch_graph_load(
-                settings_text.as_bytes().as_ptr(),
-                settings_text.len() as u64,
-                &mut reopened,
-            )
+            inkpod_batch_report_take_staged_result(report, 0, &mut generation, &mut second_core)
         },
+        INKPOD_STATUS_INVALID_STATE
+    );
+    assert_eq!(
+        unsafe { inkpod_core_destroy(&mut staged_core) },
         INKPOD_STATUS_OK
     );
     assert_eq!(
@@ -307,301 +402,7 @@ fn graph_preview_dry_run_and_owned_report_cross_ffi() {
         INKPOD_STATUS_OK
     );
     assert_eq!(
-        unsafe { inkpod_batch_graph_release(&mut reopened) },
-        INKPOD_STATUS_OK
-    );
-    assert_eq!(
-        unsafe { inkpod_batch_graph_release(&mut run_graph) },
-        INKPOD_STATUS_OK
-    );
-    assert_eq!(
         unsafe { inkpod_batch_graph_release(&mut graph) },
-        INKPOD_STATUS_OK
-    );
-    std::fs::remove_dir_all(directory).unwrap();
-}
-
-#[test]
-fn graph_operation_queries_restore_seed_separation_and_curve_rows() {
-    let graph = InkpodBatchGraph {
-        graph: BatchGraph {
-            version: INKPOD_BATCH_GRAPH_VERSION,
-            name: "query-rows".to_owned(),
-            inputs: vec![BatchInputSelector::current_sequence()],
-            operations: vec![
-                BatchOperation {
-                    version: BATCH_OPERATION_VERSION,
-                    enabled: true,
-                    configure_each_run: true,
-                    target: Some(BatchTargetSelector::color_plane()),
-                    kind: BatchOperationKind::ContinuousFill(vec![BatchSeed {
-                        enabled: false,
-                        x: 7,
-                        y: 9,
-                        color: PixelValue::Rgba([1, 2, 3, 255]),
-                        tolerance: 4,
-                        gap_close: 2,
-                        expected_source: Some(PixelValue::Rgba([9, 8, 7, 255])),
-                    }]),
-                },
-                BatchOperation {
-                    version: BATCH_OPERATION_VERSION,
-                    enabled: true,
-                    configure_each_run: false,
-                    target: Some(BatchTargetSelector::color_plane()),
-                    kind: BatchOperationKind::Separation(BatchSeparation {
-                        colors: vec![
-                            PixelValue::Rgba([10, 20, 30, 255]),
-                            PixelValue::Rgba([40, 50, 60, 128]),
-                        ],
-                        replacement: PixelValue::Rgba([70, 80, 90, 255]),
-                        invert: true,
-                        destination: BatchSeparationDestination::ColorPlane,
-                    }),
-                },
-                BatchOperation {
-                    version: BATCH_OPERATION_VERSION,
-                    enabled: true,
-                    configure_each_run: false,
-                    target: Some(BatchTargetSelector::color_plane()),
-                    kind: BatchOperationKind::Filter(Filter::ToneCurve {
-                        channel: Channel::Blue,
-                        interpolation: CurveInterpolation::BSpline,
-                        points: vec![
-                            CurvePoint {
-                                input: 1,
-                                output: 2,
-                            },
-                            CurvePoint {
-                                input: 3,
-                                output: 4,
-                            },
-                        ],
-                    }),
-                },
-            ],
-            output: BatchOutputSettings::default(),
-        },
-    };
-
-    let mut info = InkpodBatchOperationInfo {
-        struct_size: size_of::<InkpodBatchOperationInfo>() as u32,
-        ..InkpodBatchOperationInfo::default()
-    };
-    assert_eq!(
-        unsafe { inkpod_batch_graph_get_operation(&graph, 0, &mut info) },
-        INKPOD_STATUS_OK
-    );
-    assert_eq!(info.kind, INKPOD_BATCH_OPERATION_CONTINUOUS_FILL);
-    assert_eq!(info.seed_count, 1);
-    assert_ne!(info.flags & INKPOD_BATCH_OPERATION_CONFIGURE_EACH_RUN, 0);
-    let mut seed = InkpodBatchSeedInput {
-        struct_size: size_of::<InkpodBatchSeedInput>() as u32,
-        flags: 0,
-        x: 0,
-        y: 0,
-        tolerance: 0,
-        gap_close: 0,
-        reserved: u64::MAX,
-        fill_color: color([0, 0, 0, 0]),
-        expected_color: color([0, 0, 0, 0]),
-    };
-    assert_eq!(
-        unsafe { inkpod_batch_graph_get_operation_seed(&graph, 0, 0, &mut seed) },
-        INKPOD_STATUS_OK
-    );
-    assert_eq!(
-        (seed.x, seed.y, seed.tolerance, seed.gap_close),
-        (7, 9, 4, 2)
-    );
-    assert_eq!(seed.flags, INKPOD_BATCH_SEED_HAS_EXPECTED_COLOR);
-    assert_eq!(seed.expected_color.red, 9);
-
-    assert_eq!(
-        unsafe { inkpod_batch_graph_get_operation(&graph, 1, &mut info) },
-        INKPOD_STATUS_OK
-    );
-    assert_eq!(info.color_count, 2);
-    assert_eq!(info.parameters[1], INKPOD_BATCH_SEPARATION_COLOR_PLANE);
-    let mut separated_color = color([0, 0, 0, 0]);
-    assert_eq!(
-        unsafe { inkpod_batch_graph_get_operation_color(&graph, 1, 1, &mut separated_color) },
-        INKPOD_STATUS_OK
-    );
-    assert_eq!(
-        (
-            separated_color.red,
-            separated_color.green,
-            separated_color.blue,
-            separated_color.alpha,
-        ),
-        (40, 50, 60, 128)
-    );
-
-    assert_eq!(
-        unsafe { inkpod_batch_graph_get_operation(&graph, 2, &mut info) },
-        INKPOD_STATUS_OK
-    );
-    assert_eq!(info.filter_kind, INKPOD_FILTER_TONE_CURVE);
-    assert_eq!(info.filter_channel, INKPOD_FILTER_CHANNEL_BLUE);
-    assert_eq!(info.filter_interpolation, INKPOD_CURVE_BSPLINE);
-    assert_eq!(info.curve_point_count, 2);
-    let mut point = InkpodCurvePoint {
-        struct_size: size_of::<InkpodCurvePoint>() as u32,
-        reserved: u32::MAX,
-        input: 0,
-        output: 0,
-    };
-    assert_eq!(
-        unsafe { inkpod_batch_graph_get_operation_curve_point(&graph, 2, 1, &mut point) },
-        INKPOD_STATUS_OK
-    );
-    assert_eq!((point.input, point.output), (3, 4));
-
-    #[repr(C, align(8))]
-    struct ShortInfo {
-        struct_size: u32,
-    }
-    let mut short = ShortInfo {
-        struct_size: size_of::<ShortInfo>() as u32,
-    };
-    assert_eq!(
-        unsafe {
-            inkpod_batch_graph_get_operation(
-                &graph,
-                0,
-                (&raw mut short).cast::<InkpodBatchOperationInfo>(),
-            )
-        },
-        INKPOD_STATUS_INCOMPATIBLE_ABI
-    );
-}
-
-#[test]
-fn ffi_rejects_short_graph_and_cancelled_task_is_idempotent() {
-    #[repr(C, align(8))]
-    struct Short {
-        struct_size: u32,
-    }
-    let short = Short {
-        struct_size: size_of::<Short>() as u32,
-    };
-    let mut graph = ptr::null_mut();
-    assert_eq!(
-        unsafe {
-            inkpod_batch_graph_create(
-                (&raw const short).cast::<InkpodBatchGraphInput>(),
-                &mut graph,
-            )
-        },
-        INKPOD_STATUS_INCOMPATIBLE_ABI
-    );
-    assert!(graph.is_null());
-
-    let mut input_record = InkpodBatchInput {
-        struct_size: size_of::<InkpodBatchInput>() as u32,
-        kind: INKPOD_BATCH_INPUT_CURRENT_SEQUENCE,
-        feature_flags: INKPOD_FEATURE_NONE,
-        path_utf8: ptr::null(),
-        path_bytes: 0,
-        first_cell: 0,
-        last_cell: 0,
-        reserved: 0,
-    };
-    let oversized_stride = (isize::MAX as u64).saturating_add(1);
-    assert_eq!(
-        unsafe {
-            record_at(
-                &input_record,
-                2,
-                oversized_stride,
-                0,
-                MAX_BATCH_INPUTS,
-                "InkpodBatchInput",
-            )
-        },
-        Err(INKPOD_STATUS_INVALID_ARGUMENT)
-    );
-    input_record.struct_size = (size_of::<InkpodBatchInput>() + 8) as u32;
-    assert_eq!(
-        unsafe {
-            record_at(
-                &input_record,
-                1,
-                size_of::<InkpodBatchInput>() as u64,
-                0,
-                MAX_BATCH_INPUTS,
-                "InkpodBatchInput",
-            )
-        },
-        Err(INKPOD_STATUS_INCOMPATIBLE_ABI)
-    );
-
-    let filter_storage =
-        vec![0_u8; size_of::<InkpodFilterInput>() + align_of::<InkpodFilterInput>()];
-    let filter_offset = (0..align_of::<InkpodFilterInput>())
-        .find(|offset| {
-            (filter_storage.as_ptr() as usize + offset) % align_of::<InkpodFilterInput>() != 0
-        })
-        .unwrap();
-    // SAFETY: The offset remains within filter_storage; the deliberately
-    // misaligned pointer must be rejected before any record field is read.
-    let misaligned_filter = unsafe {
-        filter_storage
-            .as_ptr()
-            .add(filter_offset)
-            .cast::<InkpodFilterInput>()
-    };
-    let filter_operation = InkpodBatchOperationInput {
-        struct_size: size_of::<InkpodBatchOperationInput>() as u32,
-        version: BATCH_OPERATION_VERSION,
-        kind: INKPOD_BATCH_OPERATION_FILTER,
-        reserved: 0,
-        flags: INKPOD_BATCH_OPERATION_ENABLED,
-        layer_id: 0,
-        plane_id: 0,
-        layer_kind: INKPOD_LAYER_BINARY_COLORING,
-        plane_kind: INKPOD_TYPED_PLANE_COLOR,
-        missing_policy: INKPOD_BATCH_MISSING_ERROR,
-        reserved_2: 0,
-        parameters: [0; 8],
-        color_0: color([0, 0, 0, 0]),
-        color_1: color([0, 0, 0, 0]),
-        colors: InkpodColorArray {
-            struct_size: size_of::<InkpodColorArray>() as u32,
-            reserved: 0,
-            feature_flags: INKPOD_FEATURE_NONE,
-            colors: ptr::null(),
-            color_count: 0,
-            color_stride_bytes: 0,
-        },
-        filter: misaligned_filter,
-        color_pairs: ptr::null(),
-        color_pair_count: 0,
-        color_pair_stride_bytes: 0,
-        seeds: ptr::null(),
-        seed_count: 0,
-        seed_stride_bytes: 0,
-        reserved_3: 0,
-    };
-    assert_eq!(
-        unsafe { parse_operation(&filter_operation) }.unwrap_err(),
-        INKPOD_STATUS_INVALID_ARGUMENT
-    );
-
-    let mut task = ptr::null_mut();
-    assert_eq!(
-        unsafe { inkpod_batch_task_create(&mut task) },
-        INKPOD_STATUS_OK
-    );
-    assert_eq!(unsafe { inkpod_batch_task_cancel(task) }, INKPOD_STATUS_OK);
-    assert_eq!(unsafe { inkpod_batch_task_cancel(task) }, INKPOD_STATUS_OK);
-    assert_eq!(
-        unsafe { inkpod_batch_task_release(&mut task) },
-        INKPOD_STATUS_OK
-    );
-    assert_eq!(
-        unsafe { inkpod_batch_task_release(&mut task) },
         INKPOD_STATUS_OK
     );
 }
@@ -680,10 +481,7 @@ fn owned_pair_preview_reports_ambiguity_and_rejects_short_records() {
         unsafe { inkpod_batch_pair_preview_get_candidate(preview, 0, &mut candidate) },
         INKPOD_STATUS_OK
     );
-    assert_eq!(
-        candidate.flags & INKPOD_BATCH_PAIR_CANDIDATE_AMBIGUOUS,
-        INKPOD_BATCH_PAIR_CANDIDATE_AMBIGUOUS
-    );
+    assert_ne!(candidate.flags & INKPOD_BATCH_PAIR_CANDIDATE_AMBIGUOUS, 0);
     assert_eq!(candidate.old_color.alpha, 40);
 
     #[repr(C, align(8))]

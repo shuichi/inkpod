@@ -6,6 +6,202 @@
   ],
   "entries": [
     {
+      "id": "BatchSetName",
+      "kind": "text",
+      "ja": "バッチセット名",
+      "en": "Batch set name",
+      "resource": false
+    },
+    {
+      "id": "BatchInput",
+      "kind": "text",
+      "ja": "入力",
+      "en": "Input",
+      "resource": false
+    },
+    {
+      "id": "BatchOutput",
+      "kind": "text",
+      "ja": "出力",
+      "en": "Output",
+      "resource": false
+    },
+    {
+      "id": "BatchAddOperation",
+      "kind": "text",
+      "ja": "＋処理",
+      "en": "+ Operation",
+      "resource": false
+    },
+    {
+      "id": "BatchDuplicateOperation",
+      "kind": "text",
+      "ja": "複製",
+      "en": "Duplicate",
+      "resource": true
+    },
+    {
+      "id": "BatchMoveToColorPlane",
+      "kind": "text",
+      "ja": "彩色プレーンへ送る",
+      "en": "Move to color plane",
+      "resource": true
+    },
+    {
+      "id": "BatchMasking",
+      "kind": "text",
+      "ja": "マスキング",
+      "en": "Masking",
+      "resource": true
+    },
+    {
+      "id": "BatchErase",
+      "kind": "text",
+      "ja": "消去",
+      "en": "Erase",
+      "resource": true
+    },
+    {
+      "id": "BatchParameters",
+      "kind": "text",
+      "ja": "パラメーター",
+      "en": "Parameters",
+      "resource": false
+    },
+    {
+      "id": "BatchValidation",
+      "kind": "text",
+      "ja": "検証結果",
+      "en": "Validation",
+      "resource": false
+    },
+    {
+      "id": "BatchNoValidationIssues",
+      "kind": "text",
+      "ja": "検証エラーはありません。",
+      "en": "No validation errors.",
+      "resource": false
+    },
+    {
+      "id": "BatchInputRequired",
+      "kind": "text",
+      "ja": "入力元を1件以上指定してください。",
+      "en": "At least one input source is required.",
+      "resource": false
+    },
+    {
+      "id": "BatchOperationRequired",
+      "kind": "text",
+      "ja": "処理を1件以上追加してください。",
+      "en": "At least one operation is required.",
+      "resource": false
+    },
+    {
+      "id": "BatchEnabledOperationRequired",
+      "kind": "text",
+      "ja": "処理を1件以上有効にしてください。",
+      "en": "At least one operation must be enabled.",
+      "resource": false
+    },
+    {
+      "id": "BatchEnabled",
+      "kind": "text",
+      "ja": "有効",
+      "en": "Enabled",
+      "resource": false
+    },
+    {
+      "id": "BatchLayerId",
+      "kind": "text",
+      "ja": "レイヤーID",
+      "en": "Layer ID",
+      "resource": false
+    },
+    {
+      "id": "BatchPlaneId",
+      "kind": "text",
+      "ja": "プレーンID",
+      "en": "Plane ID",
+      "resource": false
+    },
+    {
+      "id": "BatchColors",
+      "kind": "text",
+      "ja": "色（depth / RGBA）",
+      "en": "Colors (depth / RGBA)",
+      "resource": false
+    },
+    {
+      "id": "BatchInvertAll",
+      "kind": "text",
+      "ja": "全行反転",
+      "en": "Swap all rows",
+      "resource": false
+    },
+    {
+      "id": "BatchCurrentColor",
+      "kind": "text",
+      "ja": "描画色から取得",
+      "en": "Use drawing color",
+      "resource": false
+    },
+    {
+      "id": "BatchFolder",
+      "kind": "text",
+      "ja": "フォルダー",
+      "en": "Folder",
+      "resource": true
+    },
+    {
+      "id": "BatchPath",
+      "kind": "text",
+      "ja": "ファイルまたはフォルダー",
+      "en": "File or folder",
+      "resource": false
+    },
+    {
+      "id": "BatchOutputFolderRequired",
+      "kind": "text",
+      "ja": "出力フォルダーを指定してください。",
+      "en": "An output folder is required.",
+      "resource": false
+    },
+    {
+      "id": "BatchNamingTemplate",
+      "kind": "text",
+      "ja": "命名テンプレート",
+      "en": "Naming template",
+      "resource": false
+    },
+    {
+      "id": "BatchOutputFormat",
+      "kind": "text",
+      "ja": "出力形式",
+      "en": "Output format",
+      "resource": false
+    },
+    {
+      "id": "BatchActiveDocument",
+      "kind": "text",
+      "ja": "発行時のアクティブ文書",
+      "en": "Issue-time active document",
+      "resource": true
+    },
+    {
+      "id": "BatchNewTabs",
+      "kind": "text",
+      "ja": "新規タブとして追加",
+      "en": "Add as new tabs",
+      "resource": true
+    },
+    {
+      "id": "BatchMultipleFiles",
+      "kind": "text",
+      "ja": "複数ファイル",
+      "en": "Multiple files",
+      "resource": false
+    },
+    {
       "id": "ToolPencil",
       "kind": "text",
       "ja": "鉛筆",
@@ -143,7 +339,7 @@
       "kind": "text",
       "ja": "ゴミ取り",
       "en": "Dust Removal",
-      "resource": true
+      "resource": false
     },
     {
       "id": "ToolAlphaGradient",
@@ -647,7 +843,7 @@
       "kind": "text",
       "ja": "表示",
       "en": "Visible",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Hidden",
@@ -1466,7 +1662,7 @@
       "kind": "text",
       "ja": "90度回転",
       "en": "Rotate 90°",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0040",
@@ -2271,7 +2467,7 @@
       "kind": "text",
       "ja": "カラーを文書に固定／追従",
       "en": "Pin Color to Document / Follow",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0156",
@@ -3139,7 +3335,7 @@
       "kind": "text",
       "ja": "フィルタ",
       "en": "Filter",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0286",
@@ -3748,7 +3944,7 @@
       "kind": "text",
       "ja": "ラスター変換",
       "en": "Raster Conversion",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0386",
@@ -3895,7 +4091,7 @@
       "kind": "text",
       "ja": "レイヤー表示",
       "en": "Layer Visibility",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0407",
@@ -5218,7 +5414,7 @@
       "kind": "text",
       "ja": "境界色エアブラシ",
       "en": "Boundary-color Airbrush",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0604",
@@ -5855,7 +6051,7 @@
       "kind": "text",
       "ja": "文書に固定／追従",
       "en": "Pin to Document / Follow",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0697",
@@ -5995,7 +6191,7 @@
       "kind": "text",
       "ja": "新規保存",
       "en": "Save New",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0717",
@@ -6072,7 +6268,7 @@
       "kind": "text",
       "ja": "明示上書き",
       "en": "Explicit Overwrite",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0728",
@@ -6597,7 +6793,7 @@
       "kind": "text",
       "ja": "画像サイズ・解像度",
       "en": "Image Size / Resolution",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0805",
@@ -7017,7 +7213,7 @@
       "kind": "text",
       "ja": "色分解",
       "en": "Color Separation",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0871",
@@ -7262,7 +7458,7 @@
       "kind": "text",
       "ja": "複製保存（既定）",
       "en": "Save Duplicate (Default)",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0906",
@@ -7710,7 +7906,7 @@
       "kind": "text",
       "ja": "連続フィル",
       "en": "Continuous Fill",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0971",
@@ -7913,7 +8109,7 @@
       "kind": "text",
       "ja": "選択項目を編集...",
       "en": "Edit Selected Operation...",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text1006",

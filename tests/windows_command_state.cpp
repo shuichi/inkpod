@@ -104,7 +104,7 @@ bool ShortcutCatalogIsCompleteAndPrefixFree() {
         }
         return false;
     };
-    if (menu_commands.size() != 346U
+    if (menu_commands.size() != 327U
         || shortcuts.size() != kProductionCommandStateCount
         || shortcuts.size() != commands.size()
         || is_menu_command(IDM_COLOR_PIN)
@@ -579,7 +579,7 @@ int main() {
     if (!IsCommandEnabled(states, IDM_BATCH_PREVIEW)
         || !IsCommandEnabled(states, IDM_BATCH_RUN_ALL)
         || IsCommandEnabled(states, IDM_BATCH_CANCEL)
-        || !IsCommandEnabled(states, IDM_BATCH_OPERATION_EDIT)) {
+        || !IsCommandEnabled(states, IDM_BATCH_OPERATION_DUPLICATE)) {
         return 8;
     }
     inputs.batch.idle = false;
@@ -588,7 +588,7 @@ int main() {
     if (IsCommandEnabled(states, IDM_BATCH_PREVIEW)
         || IsCommandEnabled(states, IDM_BATCH_RUN_ALL)
         || !IsCommandEnabled(states, IDM_BATCH_CANCEL)
-        || IsCommandEnabled(states, IDM_BATCH_OPERATION_EDIT)) {
+        || IsCommandEnabled(states, IDM_BATCH_OPERATION_DUPLICATE)) {
         return 9;
     }
 

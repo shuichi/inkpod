@@ -36,35 +36,63 @@ pub(super) fn validate_path(value: &str) -> Result<(), CoreError> {
     Ok(())
 }
 
-pub(super) fn validate_operation(operation: &BatchOperation) -> Result<(), CoreError> {
+pub(super) fn validate_naming_template(template: &str) -> Result<(), CoreError> {
+    if template.is_empty() || template.len() > MAX_BATCH_NAME_BYTES || template.contains('.') {
+        return Err(CoreError::InvalidArgument(
+            "batch naming template is invalid",
+        ));
+    }
+    let mut remaining = template;
+    while let Some(open) = remaining.find('{') {
+        remaining = &remaining[open..];
+        if let Some(rest) = remaining.strip_prefix("{stem}") {
+            remaining = rest;
+            continue;
+        }
+        let Some(rest) = remaining.strip_prefix("{index:") else {
+            return Err(CoreError::InvalidArgument(
+                "batch naming template contains an unknown token",
+            ));
+        };
+        let Some(close) = rest.find('}') else {
+            return Err(CoreError::InvalidArgument(
+                "batch naming template token is unterminated",
+            ));
+        };
+        let width = rest[..close]
+            .parse::<usize>()
+            .map_err(|_| CoreError::InvalidArgument("batch index width is invalid"))?;
+        if !(1..=12).contains(&width) {
+            return Err(CoreError::InvalidArgument(
+                "batch index width is outside bounds",
+            ));
+        }
+        remaining = &rest[close + 1..];
+    }
+    if remaining.contains('}') {
+        return Err(CoreError::InvalidArgument(
+            "batch naming template contains an unmatched brace",
+        ));
+    }
+    validate_component(template, true)
+}
+
+pub(crate) fn validate_operation(operation: &BatchOperation) -> Result<(), CoreError> {
     if operation.version != BATCH_OPERATION_VERSION {
         return Err(CoreError::InvalidArgument(
             "batch operation version is unsupported",
         ));
     }
-    let requires_target = !matches!(
-        operation.kind,
-        BatchOperationKind::Mirror(_)
-            | BatchOperationKind::Rotate90(_)
-            | BatchOperationKind::Resize(_)
-    );
-    if requires_target && operation.target.is_none() {
+    let target = operation.target;
+    if target.layer_id.is_none() && target.layer_kind.is_none() {
         return Err(CoreError::InvalidArgument(
-            "batch operation target selector is empty",
+            "batch target layer selector is empty",
         ));
     }
-    if let Some(target) = operation.target {
-        if target.layer_id.is_none() && target.layer_kind.is_none() {
-            return Err(CoreError::InvalidArgument(
-                "batch target layer selector is empty",
-            ));
-        }
-        let requires_plane = !matches!(operation.kind, BatchOperationKind::Visibility { .. });
-        if requires_plane && target.plane_id.is_none() && target.plane_kind.is_none() {
-            return Err(CoreError::InvalidArgument(
-                "batch target plane selector is empty",
-            ));
-        }
+    if target.plane_id.is_none() && target.plane_kind.is_none() {
+        return Err(CoreError::InvalidArgument(
+            "batch target plane selector is empty",
+        ));
     }
     match &operation.kind {
         BatchOperationKind::ColorReplace(pairs)
@@ -74,25 +102,13 @@ pub(super) fn validate_operation(operation: &BatchOperation) -> Result<(), CoreE
                 "batch color-pair count is outside bounds",
             ));
         }
-        BatchOperationKind::ContinuousFill(seeds)
-            if seeds.is_empty() || seeds.len() > MAX_BATCH_SEEDS =>
+        BatchOperationKind::MoveToColorPlane(colors)
+        | BatchOperationKind::Masking(colors)
+        | BatchOperationKind::Erase(colors)
+            if colors.is_empty() || colors.len() > MAX_BATCH_COLORS =>
         {
             return Err(CoreError::InvalidArgument(
-                "batch fill-seed count is outside bounds",
-            ));
-        }
-        BatchOperationKind::Separation(options)
-            if options.colors.is_empty() || options.colors.len() > MAX_BATCH_COLORS =>
-        {
-            return Err(CoreError::InvalidArgument(
-                "batch separation color count is outside bounds",
-            ));
-        }
-        BatchOperationKind::BoundaryAirbrush(effect)
-            if effect.colors.len() < 2 || effect.colors.len() > MAX_BATCH_COLORS =>
-        {
-            return Err(CoreError::InvalidArgument(
-                "batch boundary-airbrush color count is outside bounds",
+                "batch operation color count is outside bounds",
             ));
         }
         _ => {}
@@ -109,23 +125,14 @@ pub(super) fn validate_operation(operation: &BatchOperation) -> Result<(), CoreE
             }
         }
     }
-    if let BatchOperationKind::ContinuousFill(seeds) = &operation.kind {
-        for (index, seed) in seeds.iter().enumerate().filter(|(_, seed)| seed.enabled) {
-            if seeds[..index]
-                .iter()
-                .any(|previous| previous.enabled && previous.x == seed.x && previous.y == seed.y)
-            {
+    if let BatchOperationKind::MoveToColorPlane(colors)
+    | BatchOperationKind::Masking(colors)
+    | BatchOperationKind::Erase(colors) = &operation.kind
+    {
+        for (index, color) in colors.iter().enumerate() {
+            if colors[..index].contains(color) {
                 return Err(CoreError::InvalidArgument(
-                    "batch continuous fill contains a duplicate enabled seed",
-                ));
-            }
-        }
-    }
-    if let BatchOperationKind::Separation(options) = &operation.kind {
-        for (index, color) in options.colors.iter().enumerate() {
-            if options.colors[..index].contains(color) {
-                return Err(CoreError::InvalidArgument(
-                    "batch separation contains a duplicate color",
+                    "batch operation contains a duplicate color",
                 ));
             }
         }
@@ -172,8 +179,7 @@ mod tests {
         validate_operation(&BatchOperation {
             version: BATCH_OPERATION_VERSION,
             enabled: true,
-            configure_each_run: false,
-            target: Some(BatchTargetSelector::color_plane()),
+            target: BatchTargetSelector::color_plane(),
             kind,
         })
     }
@@ -183,14 +189,13 @@ mod tests {
         let operation = BatchOperation {
             version: BATCH_OPERATION_VERSION,
             enabled: true,
-            configure_each_run: false,
-            target: Some(BatchTargetSelector {
+            target: BatchTargetSelector {
                 layer_id: None,
                 plane_id: None,
                 layer_kind: None,
                 plane_kind: None,
                 missing_policy: BatchMissingTargetPolicy::Skip,
-            }),
+            },
             kind: BatchOperationKind::ColorReplace(vec![BatchColorPair {
                 enabled: true,
                 old: PixelValue::Rgba([0; 4]),
@@ -231,31 +236,6 @@ mod tests {
             );
         }
 
-        let seed = BatchSeed {
-            enabled: false,
-            x: 0,
-            y: 0,
-            color: PixelValue::Rgba([0; 4]),
-            tolerance: 0,
-            gap_close: 0,
-            expected_source: None,
-        };
-        for count in [1, MAX_BATCH_SEEDS] {
-            assert!(
-                validate_kind(BatchOperationKind::ContinuousFill(vec![
-                    seed.clone();
-                    count
-                ]))
-                .is_ok()
-            );
-        }
-        for count in [0, MAX_BATCH_SEEDS + 1] {
-            assert_invalid(
-                BatchOperationKind::ContinuousFill(vec![seed.clone(); count]),
-                "batch fill-seed count is outside bounds",
-            );
-        }
-
         for count in [1, MAX_BATCH_COLORS] {
             let colors = (0..count)
                 .map(|index| {
@@ -267,15 +247,7 @@ mod tests {
                     ])
                 })
                 .collect();
-            assert!(
-                validate_kind(BatchOperationKind::Separation(BatchSeparation {
-                    colors,
-                    replacement: PixelValue::Rgba([1, 2, 3, 4]),
-                    invert: false,
-                    destination: BatchSeparationDestination::ReplaceSource,
-                }))
-                .is_ok()
-            );
+            assert!(validate_kind(BatchOperationKind::Masking(colors)).is_ok());
         }
         for count in [0, MAX_BATCH_COLORS + 1] {
             let colors = (0..count)
@@ -289,13 +261,8 @@ mod tests {
                 })
                 .collect();
             assert_invalid(
-                BatchOperationKind::Separation(BatchSeparation {
-                    colors,
-                    replacement: PixelValue::Rgba([1, 2, 3, 4]),
-                    invert: false,
-                    destination: BatchSeparationDestination::ReplaceSource,
-                }),
-                "batch separation color count is outside bounds",
+                BatchOperationKind::Masking(colors),
+                "batch operation color count is outside bounds",
             );
         }
     }
@@ -321,29 +288,12 @@ mod tests {
             ]))
             .is_ok()
         );
-
-        let seed = |enabled| BatchSeed {
-            enabled,
-            x: 4,
-            y: 5,
-            color: PixelValue::Rgba([1, 2, 3, 4]),
-            tolerance: 0,
-            gap_close: 0,
-            expected_source: None,
-        };
         assert!(
-            validate_kind(BatchOperationKind::ContinuousFill(vec![
-                seed(true),
-                seed(true)
+            validate_kind(BatchOperationKind::Erase(vec![
+                PixelValue::Rgba([1, 2, 3, 4]),
+                PixelValue::Rgba([1, 2, 3, 4]),
             ]))
             .is_err()
-        );
-        assert!(
-            validate_kind(BatchOperationKind::ContinuousFill(vec![
-                seed(true),
-                seed(false)
-            ]))
-            .is_ok()
         );
     }
 }

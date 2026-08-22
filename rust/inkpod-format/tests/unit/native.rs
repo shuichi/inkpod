@@ -103,10 +103,19 @@ fn document_tree_fixture() -> DocumentArchive {
         height: document.height,
         tiles: Vec::new(),
     });
+    document.planes.push(FilePlane {
+        id: 11,
+        kind: PlaneKind::FillProtection,
+        pixel_format: PixelFormat::BinaryMask8,
+        width: document.width,
+        height: document.height,
+        tiles: Vec::new(),
+    });
     document.document_metadata = Some(FileDocumentMetadata {
         active_layer_id: 2,
         active_plane_id: 3,
         selection_plane_id: 5,
+        fill_protection_plane_id: 11,
         layers: vec![FileLayer {
             id: 2,
             kind: LayerKind::BinaryColoring,
@@ -263,7 +272,7 @@ fn procedure_file_fixture() -> NativeFile {
 }
 
 #[test]
-fn io_001_v27_directory_digest_and_opaque_sections_round_trip() {
+fn io_001_v28_directory_digest_and_opaque_sections_round_trip() {
     let file = procedure_file_fixture();
     let bytes = encode_procedure_file(&file).unwrap();
     assert_eq!(&bytes[0..8], b"INKPOD\0\0");
@@ -293,7 +302,7 @@ fn io_001_v27_directory_digest_and_opaque_sections_round_trip() {
 }
 
 #[test]
-fn io_001_v27_accepts_checkpoint_and_rejects_noncurrent_missing_duplicate_overlap_and_bad_digest() {
+fn io_001_v28_accepts_checkpoint_and_rejects_noncurrent_missing_duplicate_overlap_and_bad_digest() {
     let file = procedure_file_fixture();
     let encoded = encode_procedure_file(&file).unwrap();
 
@@ -356,9 +365,9 @@ fn io_001_v27_accepts_checkpoint_and_rejects_noncurrent_missing_duplicate_overla
 }
 
 #[test]
-fn io_001_v27_streaming_cancel_keeps_existing_destination_and_removes_temp() {
+fn io_001_v28_streaming_cancel_keeps_existing_destination_and_removes_temp() {
     let directory = std::env::temp_dir().join(format!(
-        "inkpod-v27-cancel-test-{}-{}",
+        "inkpod-v28-cancel-test-{}-{}",
         std::process::id(),
         TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
     ));
@@ -385,9 +394,9 @@ fn io_001_v27_streaming_cancel_keeps_existing_destination_and_removes_temp() {
 }
 
 #[test]
-fn io_001_v27_atomic_save_replaces_an_existing_container() {
+fn io_001_v28_atomic_save_replaces_an_existing_container() {
     let directory = std::env::temp_dir().join(format!(
-        "inkpod-v27-replace-test-{}-{}",
+        "inkpod-v28-replace-test-{}-{}",
         std::process::id(),
         TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
     ));

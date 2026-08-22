@@ -106,9 +106,42 @@ pub fn seed_fill_with_cancel(
     seed: (u32, u32),
     fill_color: PixelValue,
     options: &FillOptions,
+    is_cancelled: impl FnMut() -> bool,
+) -> Result<FillPlan, FillError> {
+    seed_fill_with_protection_and_cancel(
+        main_line,
+        color_plane,
+        selection,
+        None,
+        seed,
+        fill_color,
+        options,
+        is_cancelled,
+    )
+}
+
+/// Plans a seed fill while treating each `255` protection pixel as a hard wall.
+// Selection, protection, seed, color, options and cancellation are independent
+// semantic inputs at this image-layer boundary.
+#[allow(clippy::too_many_arguments)]
+pub fn seed_fill_with_protection_and_cancel(
+    main_line: &TileRaster,
+    color_plane: &TileRaster,
+    selection: Option<&TileRaster>,
+    fill_protection: Option<&TileRaster>,
+    seed: (u32, u32),
+    fill_color: PixelValue,
+    options: &FillOptions,
     mut is_cancelled: impl FnMut() -> bool,
 ) -> Result<FillPlan, FillError> {
-    let pixel_count = validate_fill_inputs(main_line, color_plane, selection, fill_color, options)?;
+    let pixel_count = validate_fill_inputs(
+        main_line,
+        color_plane,
+        selection,
+        fill_protection,
+        fill_color,
+        options,
+    )?;
     if seed.0 >= color_plane.width() || seed.1 >= color_plane.height() {
         return Err(FillError::InvalidArgument(
             "seed is outside the color plane",
@@ -134,6 +167,7 @@ pub fn seed_fill_with_cancel(
                 main_line,
                 color_plane,
                 selection,
+                fill_protection,
                 start.0,
                 start.1,
                 seed_value,
@@ -143,6 +177,7 @@ pub fn seed_fill_with_cancel(
                 main_line,
                 color_plane,
                 selection,
+                fill_protection,
                 start.0,
                 start.1,
                 seed_value,
@@ -191,6 +226,7 @@ pub fn seed_fill_with_cancel(
                     main_line,
                     color_plane,
                     selection,
+                    fill_protection,
                     next_x,
                     next_y,
                     seed_value,
@@ -199,6 +235,7 @@ pub fn seed_fill_with_cancel(
                     main_line,
                     color_plane,
                     selection,
+                    fill_protection,
                     next_x,
                     next_y,
                     seed_value,
@@ -242,12 +279,34 @@ pub fn closed_region_fill_with_cancel(
     operation_mask: &TileRaster,
     fill_color: PixelValue,
     options: &FillOptions,
+    is_cancelled: impl FnMut() -> bool,
+) -> Result<FillPlan, FillError> {
+    closed_region_fill_with_protection_and_cancel(
+        main_line,
+        color_plane,
+        operation_mask,
+        None,
+        fill_color,
+        options,
+        is_cancelled,
+    )
+}
+
+/// Plans a closed-region fill while treating protection pixels as hard walls.
+pub fn closed_region_fill_with_protection_and_cancel(
+    main_line: &TileRaster,
+    color_plane: &TileRaster,
+    operation_mask: &TileRaster,
+    fill_protection: Option<&TileRaster>,
+    fill_color: PixelValue,
+    options: &FillOptions,
     mut is_cancelled: impl FnMut() -> bool,
 ) -> Result<FillPlan, FillError> {
     let pixel_count = validate_fill_inputs(
         main_line,
         color_plane,
         Some(operation_mask),
+        fill_protection,
         fill_color,
         options,
     )?;
@@ -266,6 +325,7 @@ pub fn closed_region_fill_with_cancel(
                 main_line,
                 color_plane,
                 Some(operation_mask),
+                fill_protection,
                 x,
                 y,
                 target,
@@ -274,6 +334,7 @@ pub fn closed_region_fill_with_cancel(
                 main_line,
                 color_plane,
                 Some(operation_mask),
+                fill_protection,
                 x,
                 y,
                 target,
@@ -314,6 +375,7 @@ pub fn closed_region_fill_with_cancel(
                             main_line,
                             color_plane,
                             None,
+                            fill_protection,
                             next_x,
                             next_y,
                             target,
@@ -331,6 +393,7 @@ pub fn closed_region_fill_with_cancel(
                         main_line,
                         color_plane,
                         Some(operation_mask),
+                        fill_protection,
                         next_x,
                         next_y,
                         target,
@@ -339,6 +402,7 @@ pub fn closed_region_fill_with_cancel(
                         main_line,
                         color_plane,
                         Some(operation_mask),
+                        fill_protection,
                         next_x,
                         next_y,
                         target,
@@ -389,9 +453,31 @@ pub fn extend_fill_with_cancel(
     operation_mask: &TileRaster,
     seed: (u32, u32),
     maximum_distance: u32,
+    is_cancelled: impl FnMut() -> bool,
+) -> Result<FillPlan, FillError> {
+    extend_fill_with_protection_and_cancel(
+        color_plane,
+        operation_mask,
+        None,
+        seed,
+        maximum_distance,
+        is_cancelled,
+    )
+}
+
+/// Plans fill extension without crossing sparse fill-protection wall pixels.
+pub fn extend_fill_with_protection_and_cancel(
+    color_plane: &TileRaster,
+    operation_mask: &TileRaster,
+    fill_protection: Option<&TileRaster>,
+    seed: (u32, u32),
+    maximum_distance: u32,
     mut is_cancelled: impl FnMut() -> bool,
 ) -> Result<FillPlan, FillError> {
     validate_selection(color_plane, operation_mask)?;
+    if let Some(mask) = fill_protection {
+        validate_selection(color_plane, mask)?;
+    }
     if seed.0 >= color_plane.width() || seed.1 >= color_plane.height() {
         return Err(FillError::InvalidArgument(
             "fill-extension seed is outside the plane",
@@ -402,6 +488,9 @@ pub fn extend_fill_with_cancel(
         return Err(FillError::InvalidArgument(
             "fill-extension seed must contain an opaque color",
         ));
+    }
+    if protection_contains(fill_protection, seed.0, seed.1)? {
+        return Ok(FillPlan { edits: Vec::new() });
     }
     let pixel_count = bounded_pixel_count(color_plane.width(), color_plane.height())?;
     let mut distance = vec![u32::MAX; pixel_count];
@@ -423,7 +512,10 @@ pub fn extend_fill_with_cancel(
         }
         for (next_x, next_y) in neighbors(color_plane.width(), color_plane.height(), x, y) {
             let index = pixel_index(color_plane.width(), next_x, next_y);
-            if distance[index] != u32::MAX || !selection_contains(operation_mask, next_x, next_y)? {
+            if distance[index] != u32::MAX
+                || !selection_contains(operation_mask, next_x, next_y)?
+                || protection_contains(fill_protection, next_x, next_y)?
+            {
                 continue;
             }
             let before = color_plane.pixel(next_x, next_y)?;
@@ -451,6 +543,7 @@ fn validate_fill_inputs(
     main_line: &TileRaster,
     color_plane: &TileRaster,
     selection: Option<&TileRaster>,
+    fill_protection: Option<&TileRaster>,
     fill_color: PixelValue,
     options: &FillOptions,
 ) -> Result<usize, FillError> {
@@ -487,6 +580,9 @@ fn validate_fill_inputs(
         return Err(FillError::InvalidArgument("inclusion color is not RGBA"));
     }
     if let Some(mask) = selection {
+        validate_selection(color_plane, mask)?;
+    }
+    if let Some(mask) = fill_protection {
         validate_selection(color_plane, mask)?;
     }
     bounded_pixel_count(color_plane.width(), color_plane.height())
@@ -558,10 +654,23 @@ fn selection_contains(selection: &TileRaster, x: u32, y: u32) -> Result<bool, Fi
     Ok(matches!(selection.pixel(x, y)?, PixelValue::Binary(255)))
 }
 
+fn protection_contains(
+    fill_protection: Option<&TileRaster>,
+    x: u32,
+    y: u32,
+) -> Result<bool, FillError> {
+    fill_protection
+        .map(|mask| selection_contains(mask, x, y))
+        .transpose()
+        .map(Option::unwrap_or_default)
+}
+
+#[allow(clippy::too_many_arguments)]
 fn candidate_pixel(
     main_line: &TileRaster,
     color_plane: &TileRaster,
     selection: Option<&TileRaster>,
+    fill_protection: Option<&TileRaster>,
     x: u32,
     y: u32,
     target: PixelValue,
@@ -571,6 +680,7 @@ fn candidate_pixel(
         main_line,
         color_plane,
         selection,
+        fill_protection,
         x,
         y,
         target,
@@ -578,10 +688,12 @@ fn candidate_pixel(
     )?)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn hard_boundary(
     main_line: &TileRaster,
     color_plane: &TileRaster,
     selection: Option<&TileRaster>,
+    fill_protection: Option<&TileRaster>,
     x: u32,
     y: u32,
     target: PixelValue,
@@ -590,6 +702,9 @@ fn hard_boundary(
     if let Some(mask) = selection
         && !selection_contains(mask, x, y)?
     {
+        return Ok(true);
+    }
+    if protection_contains(fill_protection, x, y)? {
         return Ok(true);
     }
     // Binary main lines participate in legacy topology. Grayscale coverage is
@@ -627,17 +742,28 @@ fn within_tolerance(left: PixelValue, right: PixelValue, tolerance: u16) -> bool
     crate::color_within_tolerance(left, right, tolerance)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn virtual_gap_boundary(
     main_line: &TileRaster,
     color_plane: &TileRaster,
     selection: Option<&TileRaster>,
+    fill_protection: Option<&TileRaster>,
     x: u32,
     y: u32,
     target: PixelValue,
     options: &FillOptions,
 ) -> Result<bool, FillError> {
     if options.gap_close == 0
-        || hard_boundary(main_line, color_plane, selection, x, y, target, options)?
+        || hard_boundary(
+            main_line,
+            color_plane,
+            selection,
+            fill_protection,
+            x,
+            y,
+            target,
+            options,
+        )?
     {
         return Ok(false);
     }
@@ -649,6 +775,7 @@ fn virtual_gap_boundary(
             main_line,
             color_plane,
             selection,
+            fill_protection,
             x,
             y,
             negative_x,
@@ -661,6 +788,7 @@ fn virtual_gap_boundary(
             main_line,
             color_plane,
             selection,
+            fill_protection,
             x,
             y,
             positive_x,
@@ -683,6 +811,7 @@ fn nearest_boundary_distance(
     main_line: &TileRaster,
     color_plane: &TileRaster,
     selection: Option<&TileRaster>,
+    fill_protection: Option<&TileRaster>,
     x: u32,
     y: u32,
     delta_x: i32,
@@ -705,6 +834,7 @@ fn nearest_boundary_distance(
             main_line,
             color_plane,
             selection,
+            fill_protection,
             next_x as u32,
             next_y as u32,
             target,

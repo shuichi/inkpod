@@ -1,16 +1,15 @@
 use super::model::{BatchSource, BatchSourceContent};
 use super::operations::*;
-use super::validation::{path_label, within_cell_range, within_range};
+use super::validation::{path_label, within_range};
 use super::*;
 use crate::animation::natural_cmp;
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 impl Core {
-    /// Expands inputs and derives output paths/warnings without writing outputs.
+    /// Expands inputs, validates native-depth operations, and derives collision data.
     ///
-    /// The graph is fully validated and source documents may be decoded for
-    /// inspection, but the active Core document, revision, history, and dirty state
+    /// The receiver's document, revision, history, journal, dirty state, and savepoint
     /// are unchanged.
     pub fn batch_preview(
         &self,
@@ -19,79 +18,33 @@ impl Core {
     ) -> Result<BatchPreview, CoreError> {
         graph.validate()?;
         let sources = self.resolve_batch_sources(graph, scope)?;
-        let mut expected_seed_colors = BTreeMap::<(usize, usize), PixelValue>::new();
+        let mut paths = BTreeSet::new();
         let mut items = Vec::with_capacity(sources.len());
-        for (source_index, source) in sources.iter().enumerate() {
-            let output_path = output_path_for(graph, source, source_index).ok();
-            let mut warnings = Vec::new();
-            if let Some(path) = &output_path
-                && graph.output.policy != BatchOutputPolicy::ExplicitOverwrite
-                && source.input_path.as_ref() == Some(path)
-            {
-                warnings.push("default output policy would overwrite the input".to_owned());
-            }
-            let working = match working_core(source) {
-                Ok(working) => working,
-                Err(error) => {
-                    warnings.push(error.to_string());
-                    items.push(BatchPreviewItem {
-                        input_name: source.label.clone(),
-                        output_path,
-                        warnings,
-                    });
-                    continue;
-                }
+        for (index, source) in sources.iter().enumerate() {
+            let output_path = if graph.output.destination == BatchOutputDestination::Folder {
+                Some(output_path_for(graph, source, index)?)
+            } else {
+                None
             };
-            for (operation_index, operation) in graph.operations.iter().enumerate() {
-                if !operation.enabled {
-                    continue;
+            let mut warnings = Vec::new();
+            if let Some(path) = &output_path {
+                if !paths.insert(path.clone()) {
+                    warnings.push("multiple inputs resolve to the same output path".to_owned());
                 }
-                if operation.configure_each_run {
-                    warnings.push(format!(
-                        "operation {} requires per-run confirmation",
-                        operation_index + 1
-                    ));
+                if path.exists() {
+                    warnings.push("output path already exists".to_owned());
                 }
-                if let BatchOperationKind::ContinuousFill(seeds) = &operation.kind {
-                    let Some(target) = operation.target.as_ref() else {
-                        continue;
-                    };
-                    let Some((_, plane_id)) = resolve_target(&working, target)? else {
-                        warnings.push(format!(
-                            "operation {} target is absent and will be skipped",
-                            operation_index + 1
-                        ));
-                        continue;
-                    };
-                    let document = working.document.as_ref().ok_or(CoreError::NoDocument)?;
-                    let plane = document
-                        .plane_by_id(PlaneId::from_raw(plane_id.ok_or(
-                            CoreError::InvalidArgument("continuous fill requires a plane selector"),
-                        )?))
-                        .ok_or(CoreError::InvalidState("batch target plane disappeared"))?;
-                    for (seed_index, seed) in seeds.iter().enumerate() {
-                        if !seed.enabled {
-                            continue;
-                        }
-                        let actual = plane.raster.pixel(seed.x, seed.y)?;
-                        let expected = seed.expected_source.or_else(|| {
-                            expected_seed_colors
-                                .get(&(operation_index, seed_index))
-                                .copied()
-                        });
-                        if let Some(expected) = expected
-                            && actual != expected
-                        {
-                            warnings.push(format!(
-                                "continuous-fill seed ({}, {}) moved to a different color in {}",
-                                seed.x, seed.y, source.label
-                            ));
-                        }
-                        expected_seed_colors
-                            .entry((operation_index, seed_index))
-                            .or_insert(actual);
-                    }
+                if source.input_path.as_deref() == Some(path) {
+                    warnings.push("output path resolves to the input path".to_owned());
                 }
+            }
+            match working_core(source).and_then(|mut working| {
+                working
+                    .apply_batch_operations(&graph.operations, || false)
+                    .map(|_| ())
+            }) {
+                Ok(()) => {}
+                Err(error) => warnings.push(error.to_string()),
             }
             items.push(BatchPreviewItem {
                 input_name: source.label.clone(),
@@ -102,54 +55,142 @@ impl Core {
         Ok(BatchPreview { items })
     }
 
-    /// Executes a validated graph using isolated working Core instances.
-    ///
-    /// `progress(completed, total)` may return `false` to cancel before the next
-    /// commit/output boundary. Failed, cancelled, and stale operations never publish
-    /// partial working documents; already completed output files are reported and
-    /// are not rolled back. This method never mutates the receiver's active document.
+    /// Executes a validated Batch v3 graph.
     pub fn batch_execute(
-        &self,
+        &mut self,
         graph: &BatchGraph,
         options: BatchRunOptions,
+        progress: impl FnMut(u64, u64) -> bool,
+    ) -> Result<BatchRunReport, CoreError> {
+        self.batch_execute_with_new_tab_capacity(graph, options, usize::MAX, progress)
+    }
+
+    /// Executes a graph after checking application-wide new-session capacity.
+    pub fn batch_execute_with_new_tab_capacity(
+        &mut self,
+        graph: &BatchGraph,
+        options: BatchRunOptions,
+        new_tab_capacity: usize,
         mut progress: impl FnMut(u64, u64) -> bool,
     ) -> Result<BatchRunReport, CoreError> {
         graph.validate()?;
-        if graph
-            .operations
-            .iter()
-            .any(|operation| operation.enabled && operation.configure_each_run)
-        {
-            return Err(CoreError::InvalidState(
-                "batch run contains unresolved per-run configuration",
-            ));
-        }
         if graph.output.preview_before_save && !options.dry_run && !options.preview_confirmed {
             return Err(CoreError::InvalidState(
-                "batch output requires preview confirmation before save",
+                "batch output requires preview confirmation before execution",
             ));
         }
         let sources = self.resolve_batch_sources(graph, options.scope)?;
-        let enabled_operations = graph
-            .operations
-            .iter()
-            .filter(|operation| operation.enabled)
-            .count() as u64;
-        let per_item = enabled_operations.saturating_add(2);
-        let total = (sources.len() as u64).saturating_mul(per_item).max(1);
-        let mut completed = 0_u64;
+        if graph.output.destination == BatchOutputDestination::NewTabs
+            && sources.len() > new_tab_capacity
+        {
+            return Err(CoreError::InvalidState(
+                "batch new-tab output exceeds the application session capacity",
+            ));
+        }
+        let output_paths = preflight_output_paths(graph, &sources)?;
+        let total = sources.len().max(1) as u64;
         let mut report = BatchRunReport {
             items: Vec::with_capacity(sources.len()),
             cancelled: false,
+            staged_results: Vec::new(),
         };
         if !progress(0, total) {
             report.cancelled = true;
             return Ok(report);
         }
-        for (source_index, source) in sources.iter().enumerate() {
-            let output_path = output_path_for(graph, source, source_index).ok();
-            let mut working = match working_core(source) {
-                Ok(working) => working,
+
+        if graph.output.destination == BatchOutputDestination::ActiveDocument {
+            if sources.len() != 1
+                || !graph
+                    .inputs
+                    .iter()
+                    .all(|input| input.kind == BatchInputKind::ActiveDocument)
+            {
+                return Err(CoreError::InvalidArgument(
+                    "active-document output requires exactly one active-document input",
+                ));
+            }
+            if options.dry_run {
+                let mut working = working_core(&sources[0])?;
+                working.apply_batch_operations(&graph.operations, || false)?;
+                report.items.push(BatchItemResult {
+                    input_name: sources[0].label.clone(),
+                    output_path: None,
+                    outcome: BatchItemOutcome::DryRun,
+                    message: "validated in memory; active document was unchanged".to_owned(),
+                });
+            } else {
+                match self.apply_batch_operations(&graph.operations, || !progress(0, 1)) {
+                    Ok(_) => report.items.push(BatchItemResult {
+                        input_name: sources[0].label.clone(),
+                        output_path: None,
+                        outcome: BatchItemOutcome::Succeeded,
+                        message: "applied to the issue-time active document as one Undo unit"
+                            .to_owned(),
+                    }),
+                    Err(CoreError::Cancelled) => {
+                        report.items.push(cancelled_item(&sources[0], None));
+                        report.cancelled = true;
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+            let _ = progress(1, 1);
+            return Ok(report);
+        }
+
+        for (index, source) in sources.iter().enumerate() {
+            let output_path = output_paths[index].clone();
+            if !progress(index as u64, total) {
+                report.items.push(cancelled_item(source, output_path));
+                report.cancelled = true;
+                break;
+            }
+            let result = (|| {
+                let mut working = working_core(source)?;
+                working
+                    .apply_batch_operations(&graph.operations, || !progress(index as u64, total))?;
+                if options.dry_run {
+                    return Ok((BatchItemOutcome::DryRun, None));
+                }
+                match graph.output.destination {
+                    BatchOutputDestination::Folder => {
+                        let path = output_path.as_deref().ok_or(CoreError::InvalidState(
+                            "batch folder output path is unavailable",
+                        ))?;
+                        save_batch_output(&working, graph, source, path, || {
+                            !progress(index as u64, total)
+                        })?;
+                        Ok((BatchItemOutcome::Succeeded, None))
+                    }
+                    BatchOutputDestination::NewTabs => Ok((
+                        BatchItemOutcome::Succeeded,
+                        Some(stage_new_tab_result(working, index)?),
+                    )),
+                    BatchOutputDestination::ActiveDocument => unreachable!(),
+                }
+            })();
+            match result {
+                Ok((outcome, staged)) => {
+                    if let Some(staged) = staged {
+                        report.staged_results.push(staged);
+                    }
+                    report.items.push(BatchItemResult {
+                        input_name: source.label.clone(),
+                        output_path,
+                        outcome,
+                        message: if outcome == BatchItemOutcome::DryRun {
+                            "validated and processed in memory; no output was written".to_owned()
+                        } else {
+                            "completed".to_owned()
+                        },
+                    });
+                }
+                Err(CoreError::Cancelled) => {
+                    report.items.push(cancelled_item(source, output_path));
+                    report.cancelled = true;
+                    break;
+                }
                 Err(error) => {
                     report.items.push(BatchItemResult {
                         input_name: source.label.clone(),
@@ -157,141 +198,16 @@ impl Core {
                         outcome: BatchItemOutcome::Failed,
                         message: error.to_string(),
                     });
-                    completed = completed.saturating_add(per_item);
                     if graph.output.failure_policy == BatchFailurePolicy::Stop {
                         break;
                     }
-                    continue;
-                }
-            };
-            completed = completed.saturating_add(1);
-            if !progress(completed, total) {
-                report.items.push(cancelled_item(source, output_path));
-                report.cancelled = true;
-                break;
-            }
-            let mut skipped = false;
-            let mut operation_failure = None;
-            for operation in graph
-                .operations
-                .iter()
-                .filter(|operation| operation.enabled)
-            {
-                match apply_operation(&mut working, operation, |done, work| {
-                    let fraction = done.saturating_mul(1_000).checked_div(work).unwrap_or(0);
-                    let staged = completed.saturating_mul(1_000).saturating_add(fraction);
-                    progress(staged, total.saturating_mul(1_000))
-                }) {
-                    Ok(OperationResult::Applied) => {}
-                    Ok(OperationResult::Skipped) => skipped = true,
-                    Err(CoreError::Cancelled) => {
-                        report
-                            .items
-                            .push(cancelled_item(source, output_path.clone()));
-                        report.cancelled = true;
-                        operation_failure = Some(CoreError::Cancelled);
-                        break;
-                    }
-                    Err(error) => {
-                        operation_failure = Some(error);
-                        break;
-                    }
-                }
-                completed = completed.saturating_add(1);
-                if !progress(completed, total) {
-                    report
-                        .items
-                        .push(cancelled_item(source, output_path.clone()));
-                    report.cancelled = true;
-                    operation_failure = Some(CoreError::Cancelled);
-                    break;
                 }
             }
-            if report.cancelled {
-                break;
-            }
-            if let Some(error) = operation_failure {
-                report.items.push(BatchItemResult {
-                    input_name: source.label.clone(),
-                    output_path,
-                    outcome: BatchItemOutcome::Failed,
-                    message: error.to_string(),
-                });
-                completed = completed.saturating_add(1);
-                if graph.output.failure_policy == BatchFailurePolicy::Stop {
-                    break;
-                }
-                continue;
-            }
-            if options.dry_run {
-                completed = completed.saturating_add(1);
-                report.items.push(BatchItemResult {
-                    input_name: source.label.clone(),
-                    output_path,
-                    outcome: BatchItemOutcome::DryRun,
-                    message: "validated and processed in memory; no output was written".to_owned(),
-                });
-                let _ = progress(completed, total);
-            } else {
-                let path = match output_path.clone() {
-                    Some(path) => path,
-                    None => {
-                        report.items.push(BatchItemResult {
-                            input_name: source.label.clone(),
-                            output_path: None,
-                            outcome: BatchItemOutcome::Failed,
-                            message: "batch output path is unavailable".to_owned(),
-                        });
-                        if graph.output.failure_policy == BatchFailurePolicy::Stop {
-                            break;
-                        }
-                        continue;
-                    }
-                };
-                let save_result = save_batch_output(&working, graph, source, &path, || {
-                    !progress(completed, total)
-                });
-                match save_result {
-                    Ok(()) => {
-                        completed = completed.saturating_add(1);
-                        report.items.push(BatchItemResult {
-                            input_name: source.label.clone(),
-                            output_path: Some(path),
-                            outcome: if skipped {
-                                BatchItemOutcome::Skipped
-                            } else {
-                                BatchItemOutcome::Succeeded
-                            },
-                            message: if skipped {
-                                "completed with one or more missing targets skipped".to_owned()
-                            } else {
-                                "completed".to_owned()
-                            },
-                        });
-                        let _ = progress(completed, total);
-                    }
-                    Err(CoreError::Cancelled) => {
-                        report.items.push(cancelled_item(source, Some(path)));
-                        report.cancelled = true;
-                        break;
-                    }
-                    Err(error) => {
-                        report.items.push(BatchItemResult {
-                            input_name: source.label.clone(),
-                            output_path: Some(path),
-                            outcome: BatchItemOutcome::Failed,
-                            message: error.to_string(),
-                        });
-                        if graph.output.failure_policy == BatchFailurePolicy::Stop {
-                            break;
-                        }
-                    }
-                }
-            }
-            if graph.output.wait_milliseconds != 0 && source_index + 1 < sources.len() {
+            let _ = progress((index + 1) as u64, total);
+            if graph.output.wait_milliseconds != 0 && index + 1 < sources.len() {
                 let mut remaining = graph.output.wait_milliseconds;
                 while remaining != 0 {
-                    if !progress(completed, total) {
+                    if !progress((index + 1) as u64, total) {
                         report.cancelled = true;
                         break;
                     }
@@ -313,16 +229,22 @@ impl Core {
         scope: BatchRunScope,
     ) -> Result<Vec<BatchSource>, CoreError> {
         let mut sources = Vec::new();
+        let mut seen_paths = BTreeSet::new();
         for input in &graph.inputs {
             match input.kind {
                 BatchInputKind::File => {
                     let path = PathBuf::from(&input.path);
+                    validate_supported_input_path(&path)?;
+                    if !path.is_file() {
+                        return Err(CoreError::InvalidArgument("batch file input is missing"));
+                    }
                     if within_range(path_label(&path), input) {
-                        sources.push(BatchSource {
-                            label: path_label(&path).to_owned(),
-                            input_path: Some(path.clone()),
-                            content: BatchSourceContent::Path(path),
-                        });
+                        if !seen_paths.insert(path.clone()) {
+                            return Err(CoreError::InvalidArgument(
+                                "batch input contains a duplicate file",
+                            ));
+                        }
+                        sources.push(path_source(path));
                     }
                 }
                 BatchInputKind::Folder => {
@@ -334,78 +256,132 @@ impl Core {
                             .map_err(|error| CoreError::Format(error.to_string()))?
                             .path();
                         if path.is_file()
-                            && path
-                                .extension()
-                                .is_some_and(|extension| extension.eq_ignore_ascii_case("inkpod"))
+                            && is_supported_input_path(&path)
                             && within_range(path_label(&path), input)
                         {
                             paths.push(path);
                         }
                     }
                     paths.sort_by(|left, right| natural_cmp(path_label(left), path_label(right)));
-                    sources.extend(paths.into_iter().map(|path| BatchSource {
-                        label: path_label(&path).to_owned(),
-                        input_path: Some(path.clone()),
-                        content: BatchSourceContent::Path(path),
-                    }));
-                }
-                BatchInputKind::CurrentSequence => {
-                    if let Some(sequence) = &self.sequence {
-                        sources.extend(
-                            sequence
-                                .cells
-                                .iter()
-                                .filter(|cell| within_cell_range(cell.cell_number, input))
-                                .cloned()
-                                .map(|cell| BatchSource {
-                                    label: cell.name.clone(),
-                                    input_path: None,
-                                    content: BatchSourceContent::Sequence(cell),
-                                }),
-                        );
-                    } else {
-                        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
-                        let label = self.current_path.as_deref().map_or_else(
-                            || "current-cell.inkpod".to_owned(),
-                            |path| path_label(path).to_owned(),
-                        );
-                        sources.push(BatchSource {
-                            label,
-                            input_path: self.current_path.clone(),
-                            content: BatchSourceContent::Document {
-                                document: Box::new(document),
-                                assets: self.assets.clone(),
-                            },
-                        });
+                    for path in paths {
+                        if !seen_paths.insert(path.clone()) {
+                            return Err(CoreError::InvalidArgument(
+                                "batch input contains a duplicate file",
+                            ));
+                        }
+                        sources.push(path_source(path));
                     }
+                }
+                BatchInputKind::ActiveDocument => {
+                    let document = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+                    let label = self.current_path.as_deref().map_or_else(
+                        || "active-document.inkpod".to_owned(),
+                        |path| path_label(path).to_owned(),
+                    );
+                    sources.push(BatchSource {
+                        label,
+                        input_path: self.current_path.clone(),
+                        content: BatchSourceContent::Document {
+                            document: Box::new(document),
+                            assets: self.assets.clone(),
+                        },
+                    });
                 }
             }
         }
-        sources.sort_by(|left, right| natural_cmp(&left.label, &right.label));
         if sources.is_empty() {
             return Err(CoreError::InvalidArgument(
-                "batch input selector resolved to no cells",
+                "batch input selector resolved to no supported items",
             ));
         }
         if scope == BatchRunScope::Current {
-            let current_uuid = self.document.as_ref().map(|document| document.uuid);
-            let current_path = self.current_path.as_ref();
-            let index = sources
-                .iter()
-                .position(|source| match &source.content {
-                    BatchSourceContent::Document { document, .. } => {
-                        current_uuid.is_some_and(|uuid| document.uuid == uuid)
-                    }
-                    BatchSourceContent::Sequence(cell) => {
-                        current_uuid.is_some_and(|uuid| cell.document_uuid == uuid)
-                    }
-                    BatchSourceContent::Path(path) => current_path == Some(path),
-                })
-                .ok_or(CoreError::InvalidArgument(
-                    "current cell is not included in the batch input",
-                ))?;
-            return Ok(vec![sources.remove(index)]);
+            return Ok(vec![sources.remove(0)]);
         }
         Ok(sources)
     }
+}
+
+fn path_source(path: PathBuf) -> BatchSource {
+    BatchSource {
+        label: path_label(&path).to_owned(),
+        input_path: Some(path.clone()),
+        content: BatchSourceContent::Path(path),
+    }
+}
+
+fn is_supported_input_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("inkpod")
+                || CommonRasterFormat::from_extension(extension).is_some()
+        })
+}
+
+fn validate_supported_input_path(path: &Path) -> Result<(), CoreError> {
+    if is_supported_input_path(path) {
+        Ok(())
+    } else {
+        Err(CoreError::InvalidArgument(
+            "batch input extension is unsupported",
+        ))
+    }
+}
+
+fn preflight_output_paths(
+    graph: &BatchGraph,
+    sources: &[BatchSource],
+) -> Result<Vec<Option<PathBuf>>, CoreError> {
+    if graph.output.destination != BatchOutputDestination::Folder {
+        return Ok(vec![None; sources.len()]);
+    }
+    let mut seen = BTreeSet::new();
+    let mut paths = Vec::with_capacity(sources.len());
+    for (index, source) in sources.iter().enumerate() {
+        let path = output_path_for(graph, source, index)?;
+        if !seen.insert(path.clone()) {
+            return Err(CoreError::InvalidArgument(
+                "batch output naming produces a duplicate path",
+            ));
+        }
+        if source.input_path.as_deref() == Some(path.as_path()) {
+            return Err(CoreError::InvalidArgument(
+                "batch output naming resolves to an input path",
+            ));
+        }
+        if path.exists() {
+            return Err(CoreError::InvalidState("batch output path already exists"));
+        }
+        paths.push(Some(path));
+    }
+    Ok(paths)
+}
+
+fn stage_new_tab_result(working: Core, index: usize) -> Result<BatchStagedResult, CoreError> {
+    let mut document = working
+        .document
+        .as_ref()
+        .ok_or(CoreError::NoDocument)?
+        .clone();
+    let source_uuid = document.uuid;
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"org.inkpod.batch-new-tab-identity.v1");
+    hasher.update(&source_uuid.to_le_bytes());
+    hasher.update(&(index as u64).to_le_bytes());
+    hasher.update(&working.document_revision.get().to_le_bytes());
+    let digest = hasher.finalize();
+    let mut bytes = [0_u8; 16];
+    bytes.copy_from_slice(&digest.as_bytes()[..16]);
+    let mut uuid = u128::from_le_bytes(bytes);
+    if uuid == 0 || uuid == source_uuid {
+        uuid = source_uuid.wrapping_add(1).max(1);
+    }
+    document.uuid = uuid;
+    let mut core = core_from_document(document, working.assets.clone())?;
+    core.current_path = None;
+    core.savepoint = None;
+    Ok(BatchStagedResult {
+        generation: index as u64 + 1,
+        core: Box::new(core),
+    })
 }

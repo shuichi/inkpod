@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Current development format. Increment for every serialized graph schema
 /// change until the user declares a format freeze; older versions are rejected.
-pub const BATCH_GRAPH_VERSION: u32 = 2;
+pub const BATCH_GRAPH_VERSION: u32 = 3;
 const MAGIC: [u8; 8] = *b"INKBATCH";
 const MAX_BATCH_FILE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_BATCH_INPUTS: usize = 16_384;
@@ -44,13 +44,10 @@ pub struct FileBatchOperation {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FileBatchOutput {
-    pub policy: u32,
+    pub destination: u32,
     pub folder: String,
-    pub cell_folder: bool,
     pub format: u32,
-    pub basename: String,
-    pub start_number: u32,
-    pub descending: bool,
+    pub naming_template: String,
     pub failure_policy: u32,
     pub wait_milliseconds: u32,
     pub preview_before_save: bool,
@@ -88,24 +85,13 @@ pub fn encode_batch_graph(graph: &FileBatchGraph) -> Result<Vec<u8>, FormatError
         push_u32(&mut body, operation.target.missing_policy);
         push_bytes(&mut body, &operation.payload)?;
     }
-    push_u32(&mut body, graph.output.policy);
+    push_u32(&mut body, graph.output.destination);
     push_u32(&mut body, graph.output.format);
-    push_u32(&mut body, graph.output.start_number);
     push_u32(&mut body, graph.output.failure_policy);
     push_u32(&mut body, graph.output.wait_milliseconds);
-    let mut output_flags = 0_u32;
-    if graph.output.cell_folder {
-        output_flags |= 1;
-    }
-    if graph.output.descending {
-        output_flags |= 1 << 1;
-    }
-    if graph.output.preview_before_save {
-        output_flags |= 1 << 2;
-    }
-    push_u32(&mut body, output_flags);
+    push_u32(&mut body, u32::from(graph.output.preview_before_save));
     push_string(&mut body, &graph.output.folder)?;
-    push_string(&mut body, &graph.output.basename)?;
+    push_string(&mut body, &graph.output.naming_template)?;
 
     let body_len = u64::try_from(body.len())
         .map_err(|_| FormatError::Invalid("batch graph body length is not representable"))?;
@@ -177,17 +163,16 @@ pub fn decode_batch_graph(bytes: &[u8]) -> Result<FileBatchGraph, FormatError> {
             payload: body.bytes()?,
         });
     }
-    let policy = body.u32()?;
+    let destination = body.u32()?;
     let format = body.u32()?;
-    let start_number = body.u32()?;
     let failure_policy = body.u32()?;
     let wait_milliseconds = body.u32()?;
     let output_flags = body.u32()?;
-    if output_flags & !0x7 != 0 {
+    if output_flags > 1 {
         return Err(FormatError::Invalid("batch output flags are invalid"));
     }
     let folder = body.string()?;
-    let basename = body.string()?;
+    let naming_template = body.string()?;
     if !body.is_empty() {
         return Err(FormatError::Invalid("batch graph body has trailing bytes"));
     }
@@ -197,16 +182,13 @@ pub fn decode_batch_graph(bytes: &[u8]) -> Result<FileBatchGraph, FormatError> {
         inputs,
         operations,
         output: FileBatchOutput {
-            policy,
+            destination,
             folder,
-            cell_folder: output_flags & 1 != 0,
             format,
-            basename,
-            start_number,
-            descending: output_flags & (1 << 1) != 0,
+            naming_template,
             failure_policy,
             wait_milliseconds,
-            preview_before_save: output_flags & (1 << 2) != 0,
+            preview_before_save: output_flags != 0,
         },
     };
     validate_graph(&graph)?;
@@ -295,7 +277,10 @@ fn validate_graph(graph: &FileBatchGraph) -> Result<(), FormatError> {
         }
     }
     validate_string(&graph.output.folder, "batch output folder")?;
-    validate_string(&graph.output.basename, "batch output basename")?;
+    validate_string(
+        &graph.output.naming_template,
+        "batch output naming template",
+    )?;
     if graph.output.wait_milliseconds > 3_600_000 {
         return Err(FormatError::Invalid("batch wait duration exceeds one hour"));
     }

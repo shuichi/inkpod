@@ -114,11 +114,7 @@ pub(super) unsafe fn parse_graph_input(
     let input = unsafe { &*input };
     if input.feature_flags != INKPOD_FEATURE_NONE
         || input.reserved != 0
-        || input.output_flags
-            & !(INKPOD_BATCH_OUTPUT_CELL_FOLDER
-                | INKPOD_BATCH_OUTPUT_DESCENDING
-                | INKPOD_BATCH_OUTPUT_PREVIEW_BEFORE_SAVE)
-            != 0
+        || input.output_flags & !INKPOD_BATCH_OUTPUT_PREVIEW_BEFORE_SAVE != 0
     {
         return Err(fail(
             INKPOD_STATUS_UNSUPPORTED,
@@ -135,12 +131,12 @@ pub(super) unsafe fn parse_graph_input(
             "batch output folder",
         )
     }?;
-    let basename = unsafe {
+    let naming_template = unsafe {
         utf8_text(
-            input.basename_utf8,
-            input.basename_bytes,
+            input.naming_template_utf8,
+            input.naming_template_bytes,
             true,
-            "batch basename",
+            "batch naming template",
         )
     }?;
     let input_count = usize::try_from(input.input_count).map_err(|_| {
@@ -178,7 +174,7 @@ pub(super) unsafe fn parse_graph_input(
         let kind = match record.kind {
             INKPOD_BATCH_INPUT_FILE => BatchInputKind::File,
             INKPOD_BATCH_INPUT_FOLDER => BatchInputKind::Folder,
-            INKPOD_BATCH_INPUT_CURRENT_SEQUENCE => BatchInputKind::CurrentSequence,
+            INKPOD_BATCH_INPUT_ACTIVE_DOCUMENT => BatchInputKind::ActiveDocument,
             _ => {
                 return Err(fail(
                     INKPOD_STATUS_INVALID_ARGUMENT,
@@ -186,7 +182,7 @@ pub(super) unsafe fn parse_graph_input(
                 ));
             }
         };
-        let allow_empty = kind == BatchInputKind::CurrentSequence;
+        let allow_empty = kind == BatchInputKind::ActiveDocument;
         let path = unsafe {
             utf8_text(
                 record.path_utf8,
@@ -215,10 +211,10 @@ pub(super) unsafe fn parse_graph_input(
         inputs: selectors,
         operations,
         output: BatchOutputSettings {
-            policy: match input.output_policy {
-                INKPOD_BATCH_OUTPUT_DUPLICATE => BatchOutputPolicy::Duplicate,
-                INKPOD_BATCH_OUTPUT_NEW_SAVE => BatchOutputPolicy::NewSave,
-                INKPOD_BATCH_OUTPUT_EXPLICIT_OVERWRITE => BatchOutputPolicy::ExplicitOverwrite,
+            destination: match input.output_destination {
+                INKPOD_BATCH_OUTPUT_FOLDER => BatchOutputDestination::Folder,
+                INKPOD_BATCH_OUTPUT_ACTIVE_DOCUMENT => BatchOutputDestination::ActiveDocument,
+                INKPOD_BATCH_OUTPUT_NEW_TABS => BatchOutputDestination::NewTabs,
                 _ => {
                     return Err(fail(
                         INKPOD_STATUS_INVALID_ARGUMENT,
@@ -226,11 +222,21 @@ pub(super) unsafe fn parse_graph_input(
                     ));
                 }
             },
+            format: match input.output_format {
+                INKPOD_BATCH_FORMAT_INKPOD => BatchOutputFormat::Inkpod,
+                INKPOD_BATCH_FORMAT_PNG => BatchOutputFormat::Png,
+                INKPOD_BATCH_FORMAT_TIFF => BatchOutputFormat::Tiff,
+                INKPOD_BATCH_FORMAT_TGA => BatchOutputFormat::Tga,
+                INKPOD_BATCH_FORMAT_BMP => BatchOutputFormat::Bmp,
+                _ => {
+                    return Err(fail(
+                        INKPOD_STATUS_INVALID_ARGUMENT,
+                        "batch output format is unknown",
+                    ));
+                }
+            },
             folder: folder.to_owned(),
-            cell_folder: input.output_flags & INKPOD_BATCH_OUTPUT_CELL_FOLDER != 0,
-            basename: basename.to_owned(),
-            start_number: input.start_number,
-            descending: input.output_flags & INKPOD_BATCH_OUTPUT_DESCENDING != 0,
+            naming_template: naming_template.to_owned(),
             failure_policy: match input.failure_policy {
                 INKPOD_BATCH_FAILURE_CONTINUE => BatchFailurePolicy::Continue,
                 INKPOD_BATCH_FAILURE_STOP => BatchFailurePolicy::Stop,
@@ -288,9 +294,7 @@ pub(super) unsafe fn parse_operation(
     if record.reserved != 0
         || record.reserved_2 != 0
         || record.reserved_3 != 0
-        || record.flags
-            & !(INKPOD_BATCH_OPERATION_ENABLED | INKPOD_BATCH_OPERATION_CONFIGURE_EACH_RUN)
-            != 0
+        || record.flags & !INKPOD_BATCH_OPERATION_ENABLED != 0
     {
         return Err(fail(
             INKPOD_STATUS_UNSUPPORTED,
@@ -329,172 +333,15 @@ pub(super) unsafe fn parse_operation(
             }
             BatchOperationKind::ColorReplace(pairs)
         }
-        INKPOD_BATCH_OPERATION_CONTINUOUS_FILL => {
-            let count = checked_count(record.seed_count, MAX_BATCH_SEEDS, "fill seed")?;
-            let mut seeds = Vec::with_capacity(count);
-            for index in 0..count {
-                let pointer = unsafe {
-                    record_at(
-                        record.seeds,
-                        record.seed_count,
-                        record.seed_stride_bytes,
-                        index,
-                        MAX_BATCH_SEEDS,
-                        "InkpodBatchSeedInput",
-                    )
-                }?;
-                // SAFETY: record_at validated the complete record.
-                let seed = unsafe { &*pointer };
-                if seed.flags & !(INKPOD_BATCH_SEED_HAS_EXPECTED_COLOR | INKPOD_BATCH_SEED_ENABLED)
-                    != 0
-                    || seed.reserved != 0
-                {
-                    return Err(fail(
-                        INKPOD_STATUS_UNSUPPORTED,
-                        "batch fill seed contains unsupported fields",
-                    ));
-                }
-                seeds.push(BatchSeed {
-                    enabled: seed.flags & INKPOD_BATCH_SEED_ENABLED != 0,
-                    x: seed.x,
-                    y: seed.y,
-                    color: unsafe { parse_color_value(ptr::addr_of!(seed.fill_color)) }?,
-                    tolerance: u16::try_from(seed.tolerance).map_err(|_| {
-                        fail(
-                            INKPOD_STATUS_INVALID_ARGUMENT,
-                            "batch fill tolerance is invalid",
-                        )
-                    })?,
-                    gap_close: u8::try_from(seed.gap_close).map_err(|_| {
-                        fail(
-                            INKPOD_STATUS_INVALID_ARGUMENT,
-                            "batch fill gap-close value is invalid",
-                        )
-                    })?,
-                    expected_source: if seed.flags & INKPOD_BATCH_SEED_HAS_EXPECTED_COLOR != 0 {
-                        Some(unsafe { parse_color_value(ptr::addr_of!(seed.expected_color)) }?)
-                    } else {
-                        None
-                    },
-                });
-            }
-            BatchOperationKind::ContinuousFill(seeds)
+        INKPOD_BATCH_OPERATION_MOVE_TO_COLOR_PLANE => {
+            BatchOperationKind::MoveToColorPlane(unsafe { parse_color_array(&record.colors) }?)
         }
-        INKPOD_BATCH_OPERATION_SEPARATION => BatchOperationKind::Separation(BatchSeparation {
-            colors: unsafe { parse_color_array(&record.colors) }?,
-            replacement: unsafe { parse_color_value(ptr::addr_of!(record.color_0)) }?,
-            invert: match record.parameters[0] {
-                0 => false,
-                INKPOD_BATCH_SEPARATION_INVERT => true,
-                _ => {
-                    return Err(fail(
-                        INKPOD_STATUS_INVALID_ARGUMENT,
-                        "batch separation flags are invalid",
-                    ));
-                }
-            },
-            destination: match record.parameters[1] {
-                INKPOD_BATCH_SEPARATION_REPLACE_SOURCE => BatchSeparationDestination::ReplaceSource,
-                INKPOD_BATCH_SEPARATION_SELECTION_MASK => BatchSeparationDestination::SelectionMask,
-                INKPOD_BATCH_SEPARATION_MAIN_LINE_PLANE => {
-                    BatchSeparationDestination::MainLinePlane
-                }
-                INKPOD_BATCH_SEPARATION_COLOR_PLANE => BatchSeparationDestination::ColorPlane,
-                INKPOD_BATCH_SEPARATION_NATIVE_FILE => BatchSeparationDestination::NativeFile,
-                _ => {
-                    return Err(fail(
-                        INKPOD_STATUS_INVALID_ARGUMENT,
-                        "batch separation destination is invalid",
-                    ));
-                }
-            },
-        }),
-        INKPOD_BATCH_OPERATION_VISIBILITY => BatchOperationKind::Visibility {
-            visible: parameter_bool(record.parameters[0], "batch visibility")?,
-        },
-        INKPOD_BATCH_OPERATION_FILTER => {
-            if record.filter.is_null() {
-                return Err(fail(
-                    INKPOD_STATUS_INVALID_ARGUMENT,
-                    "batch filter input is null",
-                ));
-            }
-            // SAFETY: The nested filter pointer must expose a complete aligned
-            // record before it can be converted to a Rust reference.
-            unsafe { validate_struct(record.filter, "InkpodFilterInput") }?;
-            BatchOperationKind::Filter(unsafe { parse_filter_input(&*record.filter) }?)
+        INKPOD_BATCH_OPERATION_MASKING => {
+            BatchOperationKind::Masking(unsafe { parse_color_array(&record.colors) }?)
         }
-        INKPOD_BATCH_OPERATION_BOUNDARY_AIRBRUSH => {
-            let colors = unsafe { parse_color_array(&record.colors) }?
-                .into_iter()
-                .map(pixel_to_rgba16)
-                .collect::<Result<Vec<_>, _>>()?;
-            BatchOperationKind::BoundaryAirbrush(BoundaryAirbrush {
-                colors,
-                width: parameter_u32(record.parameters[0], "batch boundary width")?,
-                strength_milli: parameter_u32(record.parameters[1], "batch boundary strength")?,
-            })
+        INKPOD_BATCH_OPERATION_ERASE => {
+            BatchOperationKind::Erase(unsafe { parse_color_array(&record.colors) }?)
         }
-        INKPOD_BATCH_OPERATION_DUST_REMOVAL => BatchOperationKind::DustRemoval(DustRemoval {
-            mode: match record.parameters[0] {
-                1 => DustMode::RemoveForeground,
-                2 => DustMode::FillTransparentHoles,
-                3 => DustMode::ReplaceColorOutliers,
-                _ => {
-                    return Err(fail(
-                        INKPOD_STATUS_INVALID_ARGUMENT,
-                        "batch dust mode is unknown",
-                    ));
-                }
-            },
-            maximum_pixels: parameter_u32(record.parameters[1], "batch dust maximum pixels")?,
-        }),
-        INKPOD_BATCH_OPERATION_MIRROR => BatchOperationKind::Mirror(match record.parameters[0] {
-            1 => MirrorAxis::Horizontal,
-            2 => MirrorAxis::Vertical,
-            _ => {
-                return Err(fail(
-                    INKPOD_STATUS_INVALID_ARGUMENT,
-                    "batch mirror axis is unknown",
-                ));
-            }
-        }),
-        INKPOD_BATCH_OPERATION_ROTATE_90 => {
-            BatchOperationKind::Rotate90(match record.parameters[0] {
-                1 => RotateDirection::Left90,
-                2 => RotateDirection::Right90,
-                _ => {
-                    return Err(fail(
-                        INKPOD_STATUS_INVALID_ARGUMENT,
-                        "batch rotation direction is unknown",
-                    ));
-                }
-            })
-        }
-        INKPOD_BATCH_OPERATION_RESIZE => BatchOperationKind::Resize(DocumentResize {
-            width: parameter_u32(record.parameters[0], "batch resize width")?,
-            height: parameter_u32(record.parameters[1], "batch resize height")?,
-            dpi_x_milli: parameter_u32(record.parameters[2], "batch resize X DPI")?,
-            dpi_y_milli: parameter_u32(record.parameters[3], "batch resize Y DPI")?,
-            resample: parameter_bool(record.parameters[4], "batch resize resample")?,
-            anchor: match record.parameters[5] {
-                1 => ResizeAnchor::TopLeft,
-                2 => ResizeAnchor::TopRight,
-                3 => ResizeAnchor::Center,
-                4 => ResizeAnchor::BottomLeft,
-                5 => ResizeAnchor::BottomRight,
-                _ => {
-                    return Err(fail(
-                        INKPOD_STATUS_INVALID_ARGUMENT,
-                        "batch resize anchor is unknown",
-                    ));
-                }
-            },
-        }),
-        INKPOD_BATCH_OPERATION_CONVERT_PLANE => BatchOperationKind::ConvertPlane {
-            destination_kind: parse_plane_kind(record.parameters[0])?,
-            destination_format: parse_storage_format(record.parameters[1])?,
-        },
         _ => {
             return Err(fail(
                 INKPOD_STATUS_INVALID_ARGUMENT,
@@ -505,24 +352,13 @@ pub(super) unsafe fn parse_operation(
     Ok(BatchOperation {
         version: record.version,
         enabled: record.flags & INKPOD_BATCH_OPERATION_ENABLED != 0,
-        configure_each_run: record.flags & INKPOD_BATCH_OPERATION_CONFIGURE_EACH_RUN != 0,
         target,
         kind,
     })
 }
 
-pub(super) fn parse_target(
-    record: &InkpodBatchOperationInput,
-) -> Result<Option<BatchTargetSelector>, u32> {
-    if record.layer_id == 0
-        && record.plane_id == 0
-        && record.layer_kind == 0
-        && record.plane_kind == 0
-        && record.missing_policy == 0
-    {
-        return Ok(None);
-    }
-    Ok(Some(BatchTargetSelector {
+pub(super) fn parse_target(record: &InkpodBatchOperationInput) -> Result<BatchTargetSelector, u32> {
+    Ok(BatchTargetSelector {
         layer_id: (record.layer_id != 0).then_some(record.layer_id),
         plane_id: (record.plane_id != 0).then_some(record.plane_id),
         layer_kind: (record.layer_kind != 0)
@@ -541,7 +377,7 @@ pub(super) fn parse_target(
                 ));
             }
         },
-    }))
+    })
 }
 
 pub(super) fn checked_count(value: u64, maximum: usize, field: &str) -> Result<usize, u32> {
@@ -558,26 +394,6 @@ pub(super) fn checked_count(value: u64, maximum: usize, field: &str) -> Result<u
         ));
     }
     Ok(count)
-}
-
-pub(super) fn parameter_u32(value: i64, field: &str) -> Result<u32, u32> {
-    u32::try_from(value).map_err(|_| {
-        fail(
-            INKPOD_STATUS_INVALID_ARGUMENT,
-            &format!("{field} is outside u32 range"),
-        )
-    })
-}
-
-pub(super) fn parameter_bool(value: i64, field: &str) -> Result<bool, u32> {
-    match value {
-        0 => Ok(false),
-        1 => Ok(true),
-        _ => Err(fail(
-            INKPOD_STATUS_INVALID_ARGUMENT,
-            &format!("{field} is not boolean"),
-        )),
-    }
 }
 
 pub(super) fn parse_layer_kind(value: u32) -> Result<LayerKind, u32> {
@@ -609,31 +425,6 @@ pub(super) fn parse_plane_kind(value: i64) -> Result<PlaneType, u32> {
     }
 }
 
-pub(super) fn parse_storage_format(value: i64) -> Result<PixelFormat, u32> {
-    match u32::try_from(value).ok() {
-        Some(INKPOD_STORAGE_BINARY8) => Ok(PixelFormat::BinaryMask8),
-        Some(INKPOD_STORAGE_GRAYSCALE8) => Ok(PixelFormat::Grayscale8),
-        Some(INKPOD_STORAGE_GRAYSCALE16) => Ok(PixelFormat::Grayscale16),
-        Some(INKPOD_STORAGE_RGBA8) => Ok(PixelFormat::StraightRgba8),
-        Some(INKPOD_STORAGE_RGBA16) => Ok(PixelFormat::StraightRgba16),
-        _ => Err(fail(
-            INKPOD_STATUS_INVALID_ARGUMENT,
-            "batch storage format is unknown",
-        )),
-    }
-}
-
-pub(super) fn pixel_to_rgba16(value: PixelValue) -> Result<[u16; 4], u32> {
-    match value {
-        PixelValue::Rgba(value) => Ok(value.map(|component| u16::from(component) * 257)),
-        PixelValue::Rgba16(value) => Ok(value),
-        _ => Err(fail(
-            INKPOD_STATUS_INVALID_ARGUMENT,
-            "batch boundary color must be RGBA8 or RGBA16",
-        )),
-    }
-}
-
 pub(super) fn scope(value: u32) -> Result<BatchRunScope, u32> {
     match value {
         INKPOD_BATCH_SCOPE_CURRENT => Ok(BatchRunScope::Current),
@@ -645,11 +436,21 @@ pub(super) fn scope(value: u32) -> Result<BatchRunScope, u32> {
     }
 }
 
-pub(super) fn output_policy_value(value: BatchOutputPolicy) -> u32 {
+pub(super) fn output_policy_value(value: BatchOutputDestination) -> u32 {
     match value {
-        BatchOutputPolicy::Duplicate => INKPOD_BATCH_OUTPUT_DUPLICATE,
-        BatchOutputPolicy::NewSave => INKPOD_BATCH_OUTPUT_NEW_SAVE,
-        BatchOutputPolicy::ExplicitOverwrite => INKPOD_BATCH_OUTPUT_EXPLICIT_OVERWRITE,
+        BatchOutputDestination::Folder => INKPOD_BATCH_OUTPUT_FOLDER,
+        BatchOutputDestination::ActiveDocument => INKPOD_BATCH_OUTPUT_ACTIVE_DOCUMENT,
+        BatchOutputDestination::NewTabs => INKPOD_BATCH_OUTPUT_NEW_TABS,
+    }
+}
+
+pub(super) const fn output_format_value(value: BatchOutputFormat) -> u32 {
+    match value {
+        BatchOutputFormat::Inkpod => INKPOD_BATCH_FORMAT_INKPOD,
+        BatchOutputFormat::Png => INKPOD_BATCH_FORMAT_PNG,
+        BatchOutputFormat::Tiff => INKPOD_BATCH_FORMAT_TIFF,
+        BatchOutputFormat::Tga => INKPOD_BATCH_FORMAT_TGA,
+        BatchOutputFormat::Bmp => INKPOD_BATCH_FORMAT_BMP,
     }
 }
 
@@ -661,19 +462,11 @@ pub(super) fn failure_policy_value(value: BatchFailurePolicy) -> u32 {
 }
 
 pub(super) fn output_flags(value: &BatchOutputSettings) -> u64 {
-    (if value.cell_folder {
-        INKPOD_BATCH_OUTPUT_CELL_FOLDER
-    } else {
-        0
-    }) | (if value.descending {
-        INKPOD_BATCH_OUTPUT_DESCENDING
-    } else {
-        0
-    }) | (if value.preview_before_save {
+    if value.preview_before_save {
         INKPOD_BATCH_OUTPUT_PREVIEW_BEFORE_SAVE
     } else {
         0
-    })
+    }
 }
 
 pub(super) fn bytes_for_path(path: Option<PathBuf>) -> Box<[u8]> {

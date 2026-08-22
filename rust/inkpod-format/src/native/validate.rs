@@ -96,11 +96,13 @@ pub(super) fn validate_document_metadata(
     }
     if metadata.selection_plane_id == 0
         || !ids.insert(metadata.selection_plane_id)
+        || metadata.fill_protection_plane_id == 0
+        || !ids.insert(metadata.fill_protection_plane_id)
         || !active_layer_found
         || !active_plane_found
     {
         return Err(FormatError::Invalid(
-            "document active or selection ID is invalid",
+            "document active, selection, or fill-protection ID is invalid",
         ));
     }
     if let Some(planes) = file_planes {
@@ -110,6 +112,7 @@ pub(super) fn validate_document_metadata(
             .map(|plane| plane.id)
             .collect();
         referenced_planes.insert(metadata.selection_plane_id);
+        referenced_planes.insert(metadata.fill_protection_plane_id);
         if referenced_planes != plane_ids {
             return Err(FormatError::Invalid(
                 "document layer tree and plane payload IDs differ",
@@ -291,6 +294,18 @@ pub(super) fn validate_document(document: &DocumentArchive) -> Result<(), Format
                 "selection plane kind or format is invalid",
             ));
         }
+        let fill_protection = document
+            .planes
+            .iter()
+            .find(|plane| plane.id == metadata.fill_protection_plane_id)
+            .ok_or(FormatError::Invalid("fill-protection plane is missing"))?;
+        if fill_protection.kind != PlaneKind::FillProtection
+            || fill_protection.pixel_format != PixelFormat::BinaryMask8
+        {
+            return Err(FormatError::Invalid(
+                "fill-protection plane kind or format is invalid",
+            ));
+        }
     }
     if let Some(metadata) = &document.light_table_metadata {
         if document.document_metadata.is_none() {
@@ -325,7 +340,10 @@ pub(super) fn validate_document(document: &DocumentArchive) -> Result<(), Format
                 .guides
                 .iter()
                 .map(|guide| guide.id)
-                .chain([document_metadata.selection_plane_id])
+                .chain([
+                    document_metadata.selection_plane_id,
+                    document_metadata.fill_protection_plane_id,
+                ])
             {
                 if !occupied_ids.insert(id) {
                     return Err(FormatError::Invalid(

@@ -11,7 +11,7 @@ fn fixture() -> FileBatchGraph {
             last_cell: 12,
         }],
         operations: vec![FileBatchOperation {
-            version: 2,
+            version: BATCH_GRAPH_VERSION,
             kind: 2,
             flags: 1,
             target: FileBatchTarget {
@@ -24,13 +24,10 @@ fn fixture() -> FileBatchGraph {
             payload: vec![1, 2, 3, 4],
         }],
         output: FileBatchOutput {
-            policy: 2,
+            destination: 3,
             folder: "out".to_owned(),
-            cell_folder: true,
             format: 1,
-            basename: "cell".to_owned(),
-            start_number: 100,
-            descending: false,
+            naming_template: "{stem}_{index:3}".to_owned(),
             failure_policy: 1,
             wait_milliseconds: 25,
             preview_before_save: true,
@@ -61,7 +58,7 @@ fn batch_graph_rejects_unknown_container_version_and_cancel_cleans_temp() {
         Err(FormatError::Invalid("batch graph version is unsupported"))
     ));
     let mut old = encode_batch_graph(&graph).unwrap();
-    old[8..12].copy_from_slice(&1_u32.to_le_bytes());
+    old[8..12].copy_from_slice(&2_u32.to_le_bytes());
     assert!(matches!(
         decode_batch_graph(&old),
         Err(FormatError::Invalid("batch graph version is unsupported"))
@@ -98,7 +95,7 @@ fn batch_graph_atomic_save_replaces_existing_settings_without_temp_files() {
     save_batch_graph_atomic(&destination, &first).unwrap();
     let mut replacement = first;
     replacement.name = "replacement".to_owned();
-    replacement.output.start_number = 321;
+    replacement.output.naming_template = "{stem}_replacement".to_owned();
     save_batch_graph_atomic(&destination, &replacement).unwrap();
     assert_eq!(read_batch_graph(&destination).unwrap(), replacement);
     assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);

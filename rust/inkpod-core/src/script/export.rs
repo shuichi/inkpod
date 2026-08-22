@@ -266,7 +266,7 @@ pub fn export_inkscript_fragment_with_limits(
     let strict_owners = augment_light_table_owner_bindings(&snapshot, &mut strict)?;
 
     let mut source = String::from(
-        "inkscript_fragment 2;\nrequires { procedure_catalog = 3; replay_epoch = 24; }\n",
+        "inkscript_fragment 2;\nrequires { procedure_catalog = 4; replay_epoch = 25; }\n",
     );
     if !strict.is_empty() {
         source.push_str("bindings {\n");
@@ -1361,7 +1361,8 @@ fn lift_invocation(
         | CanonicalInvocation::CommitFloating { .. }
         | CanonicalInvocation::LightTableAddItem { .. }
         | CanonicalInvocation::LightTableUpdateItem { .. }
-        | CanonicalInvocation::LightTableBulkRegister { .. } => {
+        | CanonicalInvocation::LightTableBulkRegister { .. }
+        | CanonicalInvocation::ApplyBatchOperations { .. } => {
             return Err(InkScriptExportError::InvalidSource);
         }
     };

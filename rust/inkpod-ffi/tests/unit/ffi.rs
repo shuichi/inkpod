@@ -328,7 +328,7 @@ fn persistence_checkpoint_and_compaction_abi_are_bounded_confirmed_and_atomic() 
             inkpod_core_get_persistence_info(core, &mut persistence),
             INKPOD_STATUS_OK
         );
-        assert_eq!(persistence.format_version, 27);
+        assert_eq!(persistence.format_version, 28);
         assert_eq!(persistence.open_strategy, INKPOD_NATIVE_OPEN_NOT_OPENED);
         assert_eq!(persistence.flags, 0);
 

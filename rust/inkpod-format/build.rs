@@ -222,7 +222,7 @@ fn main() {
 fn generate() -> Result<(), String> {
     let crate_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").ok_or("missing manifest dir")?);
     let language = crate_dir.join("../../schemas/inkscript/language-v2.json");
-    let catalog = crate_dir.join("../../schemas/inkscript/catalog-v3.json");
+    let catalog = crate_dir.join("../../schemas/inkscript/catalog-v4.json");
     println!("cargo:rerun-if-changed={}", language.display());
     println!("cargo:rerun-if-changed={}", catalog.display());
     println!("cargo:rerun-if-changed=build.rs");
@@ -234,8 +234,8 @@ fn generate() -> Result<(), String> {
     if string(member(&root, "kind")?)? != "inkpod.inkscript.language"
         || registry_schema_version != 2
         || file_version != 2
-        || procedure_catalog_version != 3
-        || required_replay_epoch != 24
+        || procedure_catalog_version != 4
+        || required_replay_epoch != 25
     {
         return Err("language registry identity/version mismatch".to_owned());
     }
@@ -244,7 +244,7 @@ fn generate() -> Result<(), String> {
     let catalog_version = number(member(&catalog_root, "catalog_version")?)?;
     let command_count = array(member(&catalog_root, "entries")?)?.len();
     let catalog_fingerprint = fnv1a64(&catalog_bytes);
-    const FROZEN_CATALOG_V3_FNV1A64: u64 = 0xd94d_c4d8_adbc_8040;
+    const FROZEN_CATALOG_V4_FNV1A64: u64 = 0xefc5_4567_37d1_f969;
     if string(member(&catalog_root, "kind")?)? != "inkpod.inkscript.catalog"
         || number(member(&catalog_root, "registry_schema_version")?)? != 2
         || number(member(&catalog_root, "file_version")?)? != file_version
@@ -252,10 +252,10 @@ fn generate() -> Result<(), String> {
         || number(member(&catalog_root, "required_replay_epoch")?)? != required_replay_epoch
         || !boolean(member(&catalog_root, "production")?)?
         || command_count != 75
-        || catalog_fingerprint != FROZEN_CATALOG_V3_FNV1A64
+        || catalog_fingerprint != FROZEN_CATALOG_V4_FNV1A64
     {
         return Err(format!(
-            "production catalog v3 identity/freeze mismatch: version={catalog_version}, commands={command_count}, fingerprint={catalog_fingerprint:016x}"
+            "production catalog v4 identity/freeze mismatch: version={catalog_version}, commands={command_count}, fingerprint={catalog_fingerprint:016x}"
         ));
     }
 

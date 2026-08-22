@@ -5,12 +5,12 @@ use crate::*;
 use blake3::hazmat::HasherExt;
 use std::sync::LazyLock;
 
-const DOCUMENT_STATE_CONTEXT: &str = "org.inkpod.digest.document-state.v8";
-const DOCUMENT_METADATA_CONTEXT: &str = "org.inkpod.digest.document-metadata.v5";
+const DOCUMENT_STATE_CONTEXT: &str = "org.inkpod.digest.document-state.v9";
+const DOCUMENT_METADATA_CONTEXT: &str = "org.inkpod.digest.document-metadata.v6";
 const DOCUMENT_RASTER_CONTEXT: &str = "org.inkpod.digest.document-raster.v1";
 const DOCUMENT_TILE_CONTEXT: &str = "org.inkpod.digest.document-raster-tile.v1";
 const PROCEDURE_PAYLOAD_CONTEXT: &str = "org.inkpod.digest.procedure-payload.v1";
-const DOCUMENT_STATE_SCHEMA_VERSION: u32 = 10;
+const DOCUMENT_STATE_SCHEMA_VERSION: u32 = 11;
 const DOCUMENT_TILE_SCHEMA_VERSION: u32 = 1;
 const PROCEDURE_PAYLOAD_SCHEMA_VERSION: u32 = 1;
 
@@ -257,6 +257,17 @@ fn canonical_document_metadata_bytes(
                 )?,
             )?),
         ])?;
+    let fill_protection = frame(&[
+        present(document.fill_protection_plane_id.get().to_le_bytes()),
+        present(canonical_raster(
+            &document.fill_protection,
+            tree.rasters
+                .get(&document.fill_protection_plane_id.get())
+                .ok_or(CoreError::InvalidState(
+                    "canonical fill-protection raster cache is missing",
+                ))?,
+        )?),
+    ])?;
     let palette = sequence(
         document
             .palette
@@ -349,6 +360,7 @@ fn canonical_document_metadata_bytes(
         present(base_surface),
         present(layer_tree),
         present(selection),
+        present(fill_protection),
         present(palette),
         present(color_chart),
         present(color_bytes(document.main_line_color)?),
@@ -398,6 +410,19 @@ fn canonical_document_state_tree(
     {
         return Err(CoreError::InvalidState(
             "canonical selection plane ID is duplicated",
+        ));
+    }
+    let (fill_protection, reads) = canonical_raster_commitment(&document.fill_protection)?;
+    tile_payload_reads += reads;
+    if rasters
+        .insert(
+            document.fill_protection_plane_id.get(),
+            Arc::new(fill_protection),
+        )
+        .is_some()
+    {
+        return Err(CoreError::InvalidState(
+            "canonical fill-protection plane ID is duplicated",
         ));
     }
 
@@ -1256,7 +1281,7 @@ mod tests {
         let root_fields = parsed_fields(&bytes);
         assert_eq!(root_fields.len(), 2);
         assert_eq!(root_fields[0].unwrap().len(), 32);
-        assert_eq!(parsed_sequence(root_fields[1].unwrap()).len(), 3);
+        assert_eq!(parsed_sequence(root_fields[1].unwrap()).len(), 4);
 
         let (tree, _) = canonical_document_state_tree(&document).unwrap();
         for raster in tree.rasters.values() {
@@ -1268,7 +1293,7 @@ mod tests {
         let metadata = canonical_document_metadata_bytes(&document, &tree).unwrap();
         let fields = parsed_fields(&metadata);
 
-        assert_eq!(fields.len(), 16);
+        assert_eq!(fields.len(), 17);
         assert_eq!(fields[0].unwrap(), &document.uuid.to_be_bytes());
         assert_eq!(fields[1].unwrap(), &document.id.get().to_le_bytes());
         assert_eq!(
@@ -1286,13 +1311,21 @@ mod tests {
         );
         assert_eq!(parsed_fields(selection[1].unwrap()).len(), 5);
 
+        let fill_protection = parsed_fields(fields[7].unwrap());
+        assert_eq!(fill_protection.len(), 2);
+        assert_eq!(
+            fill_protection[0].unwrap(),
+            &document.fill_protection_plane_id.get().to_le_bytes()
+        );
+        assert_eq!(parsed_fields(fill_protection[1].unwrap()).len(), 5);
+
         assert_eq!(
             digest.as_bytes(),
             &[
-                100, 75, 150, 226, 128, 244, 100, 188, 91, 145, 11, 119, 118, 155, 57, 84, 125,
-                210, 185, 215, 102, 53, 60, 76, 253, 64, 170, 151, 139, 171, 117, 40,
+                5, 123, 229, 235, 248, 18, 115, 116, 109, 86, 59, 149, 137, 213, 123, 107, 82, 34,
+                218, 239, 195, 92, 169, 84, 56, 187, 25, 108, 177, 47, 0, 8,
             ],
-            "schema-10 digest changes require an explicit golden update"
+            "schema-11 digest changes require an explicit golden update"
         );
     }
 
@@ -1358,7 +1391,7 @@ mod tests {
         let (tree, _) = canonical_document_state_tree(document).unwrap();
         let metadata = canonical_document_metadata_bytes(document, &tree).unwrap();
         let document_fields = parsed_fields(&metadata);
-        let light_table_fields = parsed_fields(document_fields[12].unwrap());
+        let light_table_fields = parsed_fields(document_fields[13].unwrap());
         let sets = parsed_sequence(light_table_fields[1].unwrap());
         let set_fields = parsed_fields(sets[0]);
         let items = parsed_sequence(set_fields[3].unwrap());

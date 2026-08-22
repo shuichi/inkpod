@@ -67,6 +67,8 @@ pub(crate) struct CellDocument {
     pub(crate) layers: Vec<LayerNode>,
     pub(crate) selection_plane_id: PlaneId,
     pub(crate) selection: TileRaster,
+    pub(crate) fill_protection_plane_id: PlaneId,
+    pub(crate) fill_protection: TileRaster,
     pub(crate) guides: Vec<Guide>,
     pub(crate) grid: GridConfig,
     pub(crate) light_table: animation::LightTableState,
@@ -82,6 +84,7 @@ pub(crate) struct DocumentIds {
     pub(crate) main_plane: PlaneId,
     pub(crate) color_plane: PlaneId,
     pub(crate) selection_plane: PlaneId,
+    pub(crate) fill_protection_plane: PlaneId,
     pub(crate) light_table_set: LightTableSetId,
     pub(crate) cell: CellId,
 }
@@ -96,8 +99,12 @@ pub(crate) struct PaperSpec {
 
 impl CellDocument {
     pub(crate) fn logical_raster_usage(&self) -> (u64, u64) {
-        let mut tile_count = self.selection.allocated_tile_count() as u64;
-        let mut tile_bytes = self.selection.allocated_tile_bytes();
+        let mut tile_count = self.selection.allocated_tile_count() as u64
+            + self.fill_protection.allocated_tile_count() as u64;
+        let mut tile_bytes = self
+            .selection
+            .allocated_tile_bytes()
+            .saturating_add(self.fill_protection.allocated_tile_bytes());
         for plane in self.layers.iter().flat_map(|layer| &layer.planes) {
             tile_count = tile_count.saturating_add(plane.raster.allocated_tile_count() as u64);
             tile_bytes = tile_bytes.saturating_add(plane.raster.allocated_tile_bytes());
@@ -187,6 +194,8 @@ impl CellDocument {
             }],
             selection_plane_id: ids.selection_plane,
             selection: TileRaster::new(paper.width, paper.height, PixelFormat::BinaryMask8)?,
+            fill_protection_plane_id: ids.fill_protection_plane,
+            fill_protection: TileRaster::new(paper.width, paper.height, PixelFormat::BinaryMask8)?,
             guides: Vec::new(),
             grid: GridConfig::default(),
             light_table: animation::LightTableState::new(ids.light_table_set),
@@ -211,6 +220,11 @@ impl CellDocument {
             FilePlaneKind::Selection,
             &self.selection,
         ));
+        planes.push(raster_to_file_plane(
+            self.fill_protection_plane_id.get(),
+            FilePlaneKind::FillProtection,
+            &self.fill_protection,
+        ));
         planes.extend(self.light_table.file_planes());
         DocumentArchive {
             document_uuid: self.uuid.to_le_bytes(),
@@ -234,6 +248,7 @@ impl CellDocument {
                 active_layer_id: layer_id.get(),
                 active_plane_id: main_plane_id.get(),
                 selection_plane_id: self.selection_plane_id.get(),
+                fill_protection_plane_id: self.fill_protection_plane_id.get(),
                 layers: self
                     .layers
                     .iter()
@@ -369,117 +384,138 @@ impl CellDocument {
             })
             .transpose()?
             .unwrap_or_default();
-        let (layers, selection_plane_id, selection, guides, grid) =
-            if let Some(metadata) = &file.document_metadata {
-                let mut layers = Vec::with_capacity(metadata.layers.len());
-                for layer in &metadata.layers {
-                    let mut planes = Vec::with_capacity(layer.planes.len());
-                    for properties in &layer.planes {
-                        let payload = file
-                            .planes
-                            .iter()
-                            .find(|plane| plane.id == properties.id)
-                            .ok_or(CoreError::InvalidState("layer plane payload is missing"))?;
-                        planes.push(PlaneNode {
-                            id: PlaneId::from_raw(properties.id),
-                            kind: PlaneType::from_file(payload.kind),
-                            name: properties.name.clone(),
-                            visible: properties.visible,
-                            editable: properties.editable,
-                            opacity_milli: properties.opacity_milli,
-                            raster: file_plane_to_raster(payload, revision.get())?,
-                        });
-                    }
-                    validate_layer_kind(layer.kind, &planes)?;
-                    layers.push(LayerNode {
-                        id: LayerId::from_raw(layer.id),
-                        kind: layer.kind,
-                        name: layer.name.clone(),
-                        visible: layer.visible,
-                        editable: layer.editable,
-                        opacity_milli: layer.opacity_milli,
-                        planes,
+        let (
+            layers,
+            selection_plane_id,
+            selection,
+            fill_protection_plane_id,
+            fill_protection,
+            guides,
+            grid,
+        ) = if let Some(metadata) = &file.document_metadata {
+            let mut layers = Vec::with_capacity(metadata.layers.len());
+            for layer in &metadata.layers {
+                let mut planes = Vec::with_capacity(layer.planes.len());
+                for properties in &layer.planes {
+                    let payload = file
+                        .planes
+                        .iter()
+                        .find(|plane| plane.id == properties.id)
+                        .ok_or(CoreError::InvalidState("layer plane payload is missing"))?;
+                    planes.push(PlaneNode {
+                        id: PlaneId::from_raw(properties.id),
+                        kind: PlaneType::from_file(payload.kind),
+                        name: properties.name.clone(),
+                        visible: properties.visible,
+                        editable: properties.editable,
+                        opacity_milli: properties.opacity_milli,
+                        raster: file_plane_to_raster(payload, revision.get())?,
                     });
                 }
-                let selection_file = file
-                    .planes
+                validate_layer_kind(layer.kind, &planes)?;
+                layers.push(LayerNode {
+                    id: LayerId::from_raw(layer.id),
+                    kind: layer.kind,
+                    name: layer.name.clone(),
+                    visible: layer.visible,
+                    editable: layer.editable,
+                    opacity_milli: layer.opacity_milli,
+                    planes,
+                });
+            }
+            let selection_file = file
+                .planes
+                .iter()
+                .find(|plane| plane.id == metadata.selection_plane_id)
+                .ok_or(CoreError::InvalidState("selection payload is missing"))?;
+            let fill_protection_file = file
+                .planes
+                .iter()
+                .find(|plane| plane.id == metadata.fill_protection_plane_id)
+                .ok_or(CoreError::InvalidState(
+                    "fill-protection payload is missing",
+                ))?;
+            (
+                layers,
+                PlaneId::from_raw(metadata.selection_plane_id),
+                file_plane_to_raster(selection_file, revision.get())?,
+                PlaneId::from_raw(metadata.fill_protection_plane_id),
+                file_plane_to_raster(fill_protection_file, revision.get())?,
+                metadata
+                    .guides
                     .iter()
-                    .find(|plane| plane.id == metadata.selection_plane_id)
-                    .ok_or(CoreError::InvalidState("selection payload is missing"))?;
-                (
-                    layers,
-                    PlaneId::from_raw(metadata.selection_plane_id),
-                    file_plane_to_raster(selection_file, revision.get())?,
-                    metadata
-                        .guides
-                        .iter()
-                        .map(|guide| Guide {
-                            id: guide.id,
-                            axis: guide.axis,
-                            position: guide.position,
-                        })
-                        .collect(),
-                    GridConfig {
-                        origin_x: metadata.grid.origin_x,
-                        origin_y: metadata.grid.origin_y,
-                        spacing_x: metadata.grid.spacing_x,
-                        spacing_y: metadata.grid.spacing_y,
-                        subdivisions: metadata.grid.subdivisions,
-                    },
-                )
+                    .map(|guide| Guide {
+                        id: guide.id,
+                        axis: guide.axis,
+                        position: guide.position,
+                    })
+                    .collect(),
+                GridConfig {
+                    origin_x: metadata.grid.origin_x,
+                    origin_y: metadata.grid.origin_y,
+                    spacing_x: metadata.grid.spacing_x,
+                    spacing_y: metadata.grid.spacing_y,
+                    subdivisions: metadata.grid.subdivisions,
+                },
+            )
+        } else {
+            let selection_plane_id = file
+                .planes
+                .iter()
+                .map(|plane| plane.id)
+                .chain([file.document_id, file.layer_id])
+                .max()
+                .unwrap_or(0)
+                .checked_add(1)
+                .ok_or(CoreError::InvalidState("selection ID overflow"))?;
+            let fill_protection_plane_id = selection_plane_id
+                .checked_add(1)
+                .ok_or(CoreError::InvalidState("fill-protection ID overflow"))?;
+            let layer_kind = if matches!(
+                main_file.pixel_format,
+                PixelFormat::Grayscale8 | PixelFormat::Grayscale16
+            ) {
+                LayerKind::GrayscaleColoring
             } else {
-                let selection_plane_id = file
-                    .planes
-                    .iter()
-                    .map(|plane| plane.id)
-                    .chain([file.document_id, file.layer_id])
-                    .max()
-                    .unwrap_or(0)
-                    .checked_add(1)
-                    .ok_or(CoreError::InvalidState("selection ID overflow"))?;
-                let layer_kind = if matches!(
-                    main_file.pixel_format,
-                    PixelFormat::Grayscale8 | PixelFormat::Grayscale16
-                ) {
-                    LayerKind::GrayscaleColoring
-                } else {
-                    LayerKind::BinaryColoring
-                };
-                (
-                    vec![LayerNode {
-                        id: LayerId::from_raw(file.layer_id),
-                        kind: layer_kind,
-                        name: "Coloring Layer".to_owned(),
-                        visible: true,
-                        editable: true,
-                        opacity_milli: 1_000,
-                        planes: vec![
-                            PlaneNode {
-                                id: PlaneId::from_raw(file.main_plane_id),
-                                kind: PlaneType::MainLine,
-                                name: "Main Line".to_owned(),
-                                visible: true,
-                                editable: true,
-                                opacity_milli: 1_000,
-                                raster: file_plane_to_raster(main_file, revision.get())?,
-                            },
-                            PlaneNode {
-                                id: PlaneId::from_raw(file.color_plane_id),
-                                kind: PlaneType::Color,
-                                name: "Color".to_owned(),
-                                visible: true,
-                                editable: true,
-                                opacity_milli: 1_000,
-                                raster: file_plane_to_raster(color_file, revision.get())?,
-                            },
-                        ],
-                    }],
-                    PlaneId::from_raw(selection_plane_id),
-                    TileRaster::new(file.width, file.height, PixelFormat::BinaryMask8)?,
-                    Vec::new(),
-                    GridConfig::default(),
-                )
+                LayerKind::BinaryColoring
             };
+            (
+                vec![LayerNode {
+                    id: LayerId::from_raw(file.layer_id),
+                    kind: layer_kind,
+                    name: "Coloring Layer".to_owned(),
+                    visible: true,
+                    editable: true,
+                    opacity_milli: 1_000,
+                    planes: vec![
+                        PlaneNode {
+                            id: PlaneId::from_raw(file.main_plane_id),
+                            kind: PlaneType::MainLine,
+                            name: "Main Line".to_owned(),
+                            visible: true,
+                            editable: true,
+                            opacity_milli: 1_000,
+                            raster: file_plane_to_raster(main_file, revision.get())?,
+                        },
+                        PlaneNode {
+                            id: PlaneId::from_raw(file.color_plane_id),
+                            kind: PlaneType::Color,
+                            name: "Color".to_owned(),
+                            visible: true,
+                            editable: true,
+                            opacity_milli: 1_000,
+                            raster: file_plane_to_raster(color_file, revision.get())?,
+                        },
+                    ],
+                }],
+                PlaneId::from_raw(selection_plane_id),
+                TileRaster::new(file.width, file.height, PixelFormat::BinaryMask8)?,
+                PlaneId::from_raw(fill_protection_plane_id),
+                TileRaster::new(file.width, file.height, PixelFormat::BinaryMask8)?,
+                Vec::new(),
+                GridConfig::default(),
+            )
+        };
         let legacy_light_table_set_id = file
             .planes
             .iter()
@@ -491,7 +527,11 @@ impl CellDocument {
                     .map(|layer| layer.id)
                     .chain(metadata.guides.iter().map(|guide| guide.id))
             }))
-            .chain([file.document_id, selection_plane_id.get()])
+            .chain([
+                file.document_id,
+                selection_plane_id.get(),
+                fill_protection_plane_id.get(),
+            ])
             .max()
             .unwrap_or(0)
             .checked_add(1)
@@ -574,6 +614,8 @@ impl CellDocument {
             layers,
             selection_plane_id,
             selection,
+            fill_protection_plane_id,
+            fill_protection,
             guides,
             grid,
             light_table,
@@ -690,6 +732,7 @@ impl CellDocument {
             .raster
     }
 
+    #[cfg(test)]
     pub(crate) fn raster_mut(&mut self, plane: ActivePlane) -> &mut TileRaster {
         &mut self
             .plane_for_role_mut(plane)
@@ -735,6 +778,7 @@ impl CellDocument {
                 self.id.get(),
                 self.cell_id.get(),
                 self.selection_plane_id.get(),
+                self.fill_protection_plane_id.get(),
             ])
             .max()
             .unwrap_or(0)

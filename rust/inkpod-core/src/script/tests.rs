@@ -138,7 +138,7 @@ fn assert_export_round_trip(base: &Core, scripted: &Core) {
 fn complete_source(parameters: &str, bindings: &str, program: &str) -> InkScriptSource {
     source(format!(
         r#"inkscript 2;
-requires {{ procedure_catalog = 3; replay_epoch = 24; }}
+requires {{ procedure_catalog = 4; replay_epoch = 25; }}
 inputs {{ current_document; }}
 parameters {{ {parameters} }}
 bindings {{ {bindings} }}
@@ -152,7 +152,7 @@ execution {{ failure = stop; wait_ms = 0; preview_before_save = false; }}
 fn complete_source_with_assets(bindings: &str, program: &str, assets: &str) -> InkScriptSource {
     source(format!(
         r#"inkscript 2;
-requires {{ procedure_catalog = 3; replay_epoch = 24; }}
+requires {{ procedure_catalog = 4; replay_epoch = 25; }}
 inputs {{ current_document; }}
 parameters {{}}
 bindings {{ {bindings} }}
@@ -348,7 +348,7 @@ fn compiler_freezes_parameters_and_checks_cancel_invalid_and_aggregate_resources
     assert_eq!(limited, Err(ScriptCompileError::ResourceLimit));
 
     let invalid =
-        source("inkscript 2; requires { procedure_catalog = 3; replay_epoch = 24; }".to_owned());
+        source("inkscript 2; requires { procedure_catalog = 4; replay_epoch = 25; }".to_owned());
     assert!(matches!(
         compile_inkscript(&invalid, InkScriptRunParameterDecision::Resolve(Vec::new())),
         Err(ScriptCompileError::Syntax) | Err(ScriptCompileError::Semantic(_))

@@ -620,7 +620,7 @@ pub const INKSCRIPT_REQUIRED_REPLAY_EPOCH: u32 = GENERATED_REQUIRED_REPLAY_EPOCH
 pub const INKSCRIPT_PRODUCTION_CATALOG_COMMAND_COUNT: usize =
     GENERATED_PRODUCTION_CATALOG_COMMAND_COUNT;
 
-/// FNV-1a drift fingerprint of the immutable `catalog-v3.json` bytes after CRLF normalization.
+/// FNV-1a drift fingerprint of the immutable `catalog-v4.json` bytes after CRLF normalization.
 ///
 /// This is a build/review sentinel rather than a security digest. A catalog change requires a new
 /// exact-current catalog version and a new versioned resource instead of editing the frozen v2

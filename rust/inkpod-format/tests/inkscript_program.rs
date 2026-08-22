@@ -73,7 +73,7 @@ fn asset(name: &str) -> String {
 #[test]
 fn typed_steps_results_groups_and_all_reference_edges_are_owned_and_ordered() {
     let empty = analyze(
-        b"inkscript_fragment 2; requires { procedure_catalog = 3; replay_epoch = 24; } program {}",
+        b"inkscript_fragment 2; requires { procedure_catalog = 4; replay_epoch = 25; } program {}",
     )
     .unwrap();
     assert!(empty.steps().is_empty());
@@ -82,7 +82,7 @@ fn typed_steps_results_groups_and_all_reference_edges_are_owned_and_ordered() {
 
     let text = format!(
         r#"inkscript_fragment 2;
-requires {{ procedure_catalog = 3; replay_epoch = 24; }}
+requires {{ procedure_catalog = 4; replay_epoch = 25; }}
 parameters {{ param threshold: u32 = 7; }}
 bindings {{ let target = select layer {{}}; let target_plane = select plane {{ layer = $target; }}; }}
 program {{
@@ -168,7 +168,7 @@ fn result_field_index_availability_and_cardinality_fail_with_source_ranges() {
 
     for (program, expected) in cases {
         let text = format!(
-            "inkscript_fragment 2;\nrequires {{ procedure_catalog = 3; replay_epoch = 24; }}\nprogram {{ {program} }}\n"
+            "inkscript_fragment 2;\nrequires {{ procedure_catalog = 4; replay_epoch = 25; }}\nprogram {{ {program} }}\n"
         );
         let error = analyze(text.as_bytes()).unwrap_err();
         assert_eq!(error.code(), expected, "{program}");
@@ -179,7 +179,7 @@ fn result_field_index_availability_and_cardinality_fail_with_source_ranges() {
     }
 
     let valid_list = analyze(
-        b"inkscript_fragment 2; requires { procedure_catalog = 3; replay_epoch = 24; } program { step \"Create\" as made { enabled = true; invoke create_test {}; } step \"Use\" { enabled = true; invoke use_plane_list_test { planes = $made.planes; }; } }",
+        b"inkscript_fragment 2; requires { procedure_catalog = 4; replay_epoch = 25; } program { step \"Create\" as made { enabled = true; invoke create_test {}; } step \"Use\" { enabled = true; invoke use_plane_list_test { planes = $made.planes; }; } }",
     )
     .unwrap();
     assert_eq!(valid_list.steps().len(), 2);
@@ -229,7 +229,7 @@ fn result_schema_and_unknown_commands_fail_closed_without_debug_name_fallback() 
     }
 
     let input = source(
-        b"inkscript_fragment 2; requires { procedure_catalog = 3; replay_epoch = 24; } program { step \"Unknown\" { enabled = true; invoke rust_debug_variant {}; } }",
+        b"inkscript_fragment 2; requires { procedure_catalog = 4; replay_epoch = 25; } program { step \"Unknown\" { enabled = true; invoke rust_debug_variant {}; } }",
     );
     let parsed = parse_inkscript(&input);
     let error = build_inkscript_declaration_model(&parsed, &schema()).unwrap_err();
@@ -242,7 +242,7 @@ fn result_schema_and_unknown_commands_fail_closed_without_debug_name_fallback() 
 #[test]
 fn dependency_resource_limit_rejects_without_partial_model() {
     let input = source(
-        b"inkscript_fragment 2; requires { procedure_catalog = 3; replay_epoch = 24; } parameters { param value: u32 = 1; } bindings { let target = select layer {}; } program { step \"Create\" as made { enabled = true; invoke create_test {}; } step \"Use\" { enabled = true; invoke use_layer_test { layer = $made.layer; value = $value; payload = asset(image); }; } } assets { asset image { asset_id = blake3\"0000000000000000000000000000000000000000000000000000000000000000\"; kind = \"canonical_raster\"; descriptor = { pixel_format = rgba8; color_space = srgb; alpha = straight; width = 1; height = 1; stride = 4; element_count = 1; }; data = base64\"\"\"AAAAAA==\"\"\"; }; }",
+        b"inkscript_fragment 2; requires { procedure_catalog = 4; replay_epoch = 25; } parameters { param value: u32 = 1; } bindings { let target = select layer {}; } program { step \"Create\" as made { enabled = true; invoke create_test {}; } step \"Use\" { enabled = true; invoke use_layer_test { layer = $made.layer; value = $value; payload = asset(image); }; } } assets { asset image { asset_id = blake3\"0000000000000000000000000000000000000000000000000000000000000000\"; kind = \"canonical_raster\"; descriptor = { pixel_format = rgba8; color_space = srgb; alpha = straight; width = 1; height = 1; stride = 4; element_count = 1; }; data = base64\"\"\"AAAAAA==\"\"\"; }; }",
     );
     let parsed = parse_inkscript(&input);
     assert!(parsed.is_valid(), "{:?}", parsed.diagnostics());
@@ -260,7 +260,7 @@ fn dependency_resource_limit_rejects_without_partial_model() {
 #[test]
 fn selectors_and_asserts_fail_closed_and_share_the_dependency_graph() {
     let strict_without_uuid = analyze(
-        b"inkscript_fragment 2; requires { procedure_catalog = 3; replay_epoch = 24; } bindings { let target = select layer { persistent_id = 7; }; } program {}",
+        b"inkscript_fragment 2; requires { procedure_catalog = 4; replay_epoch = 25; } bindings { let target = select layer { persistent_id = 7; }; } program {}",
     )
     .unwrap_err();
     assert_eq!(
@@ -269,7 +269,7 @@ fn selectors_and_asserts_fail_closed_and_share_the_dependency_graph() {
     );
 
     let forbidden_all = analyze(
-        b"inkscript_fragment 2; requires { procedure_catalog = 3; replay_epoch = 24; } bindings { let frame = select shooting_frame { cardinality = all; }; } program {}",
+        b"inkscript_fragment 2; requires { procedure_catalog = 4; replay_epoch = 25; } bindings { let frame = select shooting_frame { cardinality = all; }; } program {}",
     )
     .unwrap_err();
     assert_eq!(
@@ -278,7 +278,7 @@ fn selectors_and_asserts_fail_closed_and_share_the_dependency_graph() {
     );
 
     let zero_width = analyze(
-        b"inkscript_fragment 2; requires { procedure_catalog = 3; replay_epoch = 24; } program { assert document { width = 0; }; }",
+        b"inkscript_fragment 2; requires { procedure_catalog = 4; replay_epoch = 25; } program { assert document { width = 0; }; }",
     )
     .unwrap_err();
     assert_eq!(
@@ -287,7 +287,7 @@ fn selectors_and_asserts_fail_closed_and_share_the_dependency_graph() {
     );
 
     let list_target = analyze(
-        b"inkscript_fragment 2; requires { procedure_catalog = 3; replay_epoch = 24; } bindings { let targets = select layer { cardinality = all; }; } program { assert object { target = $targets; }; }",
+        b"inkscript_fragment 2; requires { procedure_catalog = 4; replay_epoch = 25; } bindings { let targets = select layer { cardinality = all; }; } program { assert object { target = $targets; }; }",
     )
     .unwrap_err();
     assert_eq!(
@@ -296,7 +296,7 @@ fn selectors_and_asserts_fail_closed_and_share_the_dependency_graph() {
     );
 
     let model = analyze(
-        b"inkscript_fragment 2; requires { procedure_catalog = 3; replay_epoch = 24; } bindings { let target = select layer {}; } program { assert object { target = $target; visible = true; }; step \"Use\" { enabled = true; invoke use_layer_test { layer = $target; value = 1; payload = asset(image); }; } } assets { asset image { asset_id = blake3\"0000000000000000000000000000000000000000000000000000000000000000\"; kind = \"canonical_raster\"; descriptor = { pixel_format = rgba8; color_space = srgb; alpha = straight; width = 1; height = 1; stride = 4; element_count = 1; }; data = base64\"\"\"AAAAAA==\"\"\"; }; }",
+        b"inkscript_fragment 2; requires { procedure_catalog = 4; replay_epoch = 25; } bindings { let target = select layer {}; } program { assert object { target = $target; visible = true; }; step \"Use\" { enabled = true; invoke use_layer_test { layer = $target; value = 1; payload = asset(image); }; } } assets { asset image { asset_id = blake3\"0000000000000000000000000000000000000000000000000000000000000000\"; kind = \"canonical_raster\"; descriptor = { pixel_format = rgba8; color_space = srgb; alpha = straight; width = 1; height = 1; stride = 4; element_count = 1; }; data = base64\"\"\"AAAAAA==\"\"\"; }; }",
     )
     .unwrap();
     assert!(model.dependency_edges().iter().any(|edge| {
@@ -309,7 +309,7 @@ fn selectors_and_asserts_fail_closed_and_share_the_dependency_graph() {
 fn fragment_closure_rebinds_external_results_without_adding_mutations_and_renames_atomically() {
     let text = format!(
         r#"inkscript_fragment 2;
-requires {{ procedure_catalog = 3; replay_epoch = 24; }}
+requires {{ procedure_catalog = 4; replay_epoch = 25; }}
 parameters {{ param threshold: u32 = 7; param unused: u32 = 9; }}
 program {{
     step "Outside" as outside {{ enabled = true; invoke create_test {{}}; }}

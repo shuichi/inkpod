@@ -339,9 +339,18 @@ pub unsafe extern "C" fn inkpod_batch_graph_get_info(
         output.version = graph.version;
         output.input_count = graph.inputs.len() as u64;
         output.operation_count = graph.operations.len() as u64;
-        output.output_policy = output_policy_value(graph.output.policy);
+        output.output_destination = output_policy_value(graph.output.destination);
+        output.output_format = output_format_value(graph.output.format);
         output.failure_policy = failure_policy_value(graph.output.failure_policy);
         output.output_flags = output_flags(&graph.output);
+        output.name_utf8 = graph.name.as_bytes().as_ptr();
+        output.name_bytes = graph.name.len() as u64;
+        output.output_folder_utf8 = graph.output.folder.as_bytes().as_ptr();
+        output.output_folder_bytes = graph.output.folder.len() as u64;
+        output.naming_template_utf8 = graph.output.naming_template.as_bytes().as_ptr();
+        output.naming_template_bytes = graph.output.naming_template.len() as u64;
+        output.wait_milliseconds = graph.output.wait_milliseconds;
+        output.reserved = 0;
         INKPOD_STATUS_OK
     })
 }
@@ -588,6 +597,7 @@ pub unsafe extern "C" fn inkpod_core_batch_execute(
         match result {
             Ok(report) => {
                 let cancelled = report.cancelled;
+                let staged_results = report.staged_results.into_iter().map(Some).collect();
                 let items = report
                     .items
                     .into_iter()
@@ -608,6 +618,8 @@ pub unsafe extern "C" fn inkpod_core_batch_execute(
                     out_report.write(Box::into_raw(Box::new(InkpodBatchReport {
                         items,
                         cancelled,
+                        owner_thread: thread::current().id(),
+                        staged_results,
                     })))
                 };
                 let status = if cancelled {
@@ -654,7 +666,7 @@ pub unsafe extern "C" fn inkpod_batch_report_get_info(
             .iter()
             .filter(|item| item.outcome == INKPOD_BATCH_ITEM_FAILED)
             .count() as u64;
-        output.reserved = 0;
+        output.staged_result_count = report.staged_results.len() as u64;
         INKPOD_STATUS_OK
     })
 }
@@ -698,6 +710,82 @@ pub unsafe extern "C" fn inkpod_batch_report_get(
         output.output_path_bytes = item.output_path.len() as u64;
         output.message = item.message.as_ptr();
         output.message_bytes = item.message.len() as u64;
+        INKPOD_STATUS_OK
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_batch_report_take_staged_result(
+    report: *mut InkpodBatchReport,
+    index: u64,
+    out_generation: *mut u64,
+    out_core: *mut *mut InkpodCore,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if report.is_null()
+            || !is_aligned(report)
+            || out_generation.is_null()
+            || !is_aligned(out_generation)
+            || out_core.is_null()
+            || !is_aligned(out_core)
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch staged-result pointer is null or misaligned",
+            );
+        }
+        if !unsafe { out_core.read() }.is_null() {
+            return fail(
+                INKPOD_STATUS_INVALID_STATE,
+                "batch staged-result output already owns a Core handle",
+            );
+        }
+        let report = unsafe { &mut *report };
+        if report.owner_thread != thread::current().id() {
+            return fail(
+                INKPOD_STATUS_WRONG_THREAD,
+                "batch staged result must be taken on the report owner thread",
+            );
+        }
+        let Ok(index) = usize::try_from(index) else {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch staged-result index is not representable",
+            );
+        };
+        let Some(slot) = report.staged_results.get_mut(index) else {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch staged-result index is outside bounds",
+            );
+        };
+        let Some(result) = slot.take() else {
+            return fail(
+                INKPOD_STATUS_INVALID_STATE,
+                "batch staged result was already taken",
+            );
+        };
+        let objects = match crate::v3::ObjectRegistry::new() {
+            Some(objects) => objects,
+            None => {
+                *slot = Some(result);
+                return fail(
+                    INKPOD_STATUS_INVALID_STATE,
+                    "ABI-v3 Core generation space is exhausted",
+                );
+            }
+        };
+        let generation = result.generation();
+        let handle = Box::new(InkpodCore {
+            owner_thread: thread::current().id(),
+            core: result.into_core(),
+            objects,
+        });
+        unsafe {
+            out_generation.write(generation);
+            out_core.write(Box::into_raw(handle));
+        }
         INKPOD_STATUS_OK
     })
 }

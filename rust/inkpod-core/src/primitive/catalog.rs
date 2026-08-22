@@ -40,6 +40,17 @@ macro_rules! entry {
             replayable: false,
         }
     };
+    ($id:ident, $schema:expr, $name:literal, $semantics:expr, $work:expr, private) => {
+        PrimitiveCatalogEntry {
+            id: PrimitiveId::$id,
+            schema_version: $schema,
+            canonical_name: $name,
+            argument_schema: concat!($name, "/canonical-v", stringify!($schema)),
+            semantics_revision: $semantics,
+            work_formula_id: $work,
+            replayable: false,
+        }
+    };
 }
 
 // Sorted by stable PrimitiveId. Schema 2 is the canonical typed-invocation layout:
@@ -172,6 +183,14 @@ const PRIMITIVE_CATALOG: &[PrimitiveCatalogEntry] = &[
         "ScopedColorReplace",
         1,
         0x0005_0043
+    ),
+    entry!(
+        APPLY_BATCH_OPERATIONS,
+        2,
+        "ApplyBatchOperations",
+        1,
+        0x0005_0044,
+        private
     ),
     entry!(APPLY_SELECTION, 2, "ApplySelection", 3, 0x0006_0001),
     entry!(INVERT_SELECTION, 2, "InvertSelection", 2, 0x0006_0002),
@@ -350,7 +369,7 @@ mod tests {
 
     #[test]
     fn catalog_is_sorted_unique_bounded_and_matches_replay_schema_lookup() {
-        assert_eq!(PRIMITIVE_CATALOG.len(), 76);
+        assert_eq!(PRIMITIVE_CATALOG.len(), 77);
         for pair in PRIMITIVE_CATALOG.windows(2) {
             assert!(pair[0].id < pair[1].id);
         }
