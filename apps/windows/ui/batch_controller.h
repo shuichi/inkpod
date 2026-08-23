@@ -38,11 +38,14 @@ public:
         const std::uint8_t* path_utf8, std::size_t path_bytes) noexcept;
     InkpodStatus LoadGraph(
         const std::uint8_t* path_utf8, std::size_t path_bytes) noexcept;
+    InkpodStatus SaveStoredGraph() noexcept;
+    InkpodStatus LoadStoredGraph() noexcept;
 
     static bool QueryProgress(
         void* context, ProgressDialogInfo& output) noexcept;
     static void CancelProgress(void* context) noexcept;
     static void RefreshPalette(app::BatchUiState& batch, HWND palette) noexcept;
+    static bool RefreshSetCatalog(app::BatchUiState& batch) noexcept;
     static void ResetDerivedState(app::BatchUiState& batch) noexcept;
     static std::wstring ReportSummary(const InkpodBatchReport* report);
     static bool ChooseFolder(HWND owner, std::wstring& selected_path) noexcept;

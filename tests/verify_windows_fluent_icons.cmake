@@ -196,8 +196,7 @@ foreach(PIN_SOURCE IN ITEMS
         "apps/windows/ui/panes/locator_pane.cpp"
         "apps/windows/ui/panes/sequence_pane.cpp"
         "apps/windows/ui/panes/light_table_pane.cpp"
-        "apps/windows/ui/panes/subpalette_pane.cpp"
-        "apps/windows/ui/dialogs/batch_dialog.cpp")
+        "apps/windows/ui/panes/subpalette_pane.cpp")
     file(READ "${INKPOD_SOURCE_DIR}/${PIN_SOURCE}" PIN_SOURCE_TEXT)
     if(NOT PIN_SOURCE_TEXT MATCHES "SetPaneIconButton"
         OR NOT PIN_SOURCE_TEXT MATCHES "PaneIconId::PinDocument"

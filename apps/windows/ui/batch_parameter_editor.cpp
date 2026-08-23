@@ -138,6 +138,10 @@ std::wstring ColorText(const InkpodColorValue& color) {
         + std::to_wstring(color.alpha);
 }
 
+std::wstring SwatchColorText(const InkpodColorValue& color) {
+    return L"       " + ColorText(color);
+}
+
 std::size_t SelectedRow(const EditorState& state) noexcept {
     const int index = ListView_GetNextItem(state.rows, -1, LVNI_SELECTED);
     return index < 0 ? 0U : static_cast<std::size_t>(index);
@@ -235,13 +239,25 @@ void PopulateOperationRows(EditorState& state, app::BatchOperationUi& operation)
                 static_cast<int>(index),
                 0,
                 pair.enabled != 0U ? L"✓" : L"–");
-            AddCell(state.rows, static_cast<int>(index), 1, ColorText(pair.old_color));
-            AddCell(state.rows, static_cast<int>(index), 2, ColorText(pair.new_color));
+            AddCell(
+                state.rows,
+                static_cast<int>(index),
+                1,
+                SwatchColorText(pair.old_color));
+            AddCell(
+                state.rows,
+                static_cast<int>(index),
+                2,
+                SwatchColorText(pair.new_color));
         }
     } else {
         ResetColumns(state.rows, {UiText(UiStringId::BatchColors)});
         for (std::size_t index = 0U; index < operation.colors.size(); ++index) {
-            AddCell(state.rows, static_cast<int>(index), 0, ColorText(operation.colors[index]));
+            AddCell(
+                state.rows,
+                static_cast<int>(index),
+                0,
+                SwatchColorText(operation.colors[index]));
         }
     }
     if (ListView_GetItemCount(state.rows) > 0) {
@@ -533,6 +549,133 @@ void DrawSwatch(EditorState& state, const DRAWITEMSTRUCT& item) noexcept {
         RECT focus = item.rcItem;
         InflateRect(&focus, -2, -2);
         DrawFocusRect(item.hDC, &focus);
+    }
+}
+
+const InkpodColorValue* ListCellColor(
+    EditorState& state, std::size_t row, int column) noexcept {
+    auto* operation = SelectedOperation(state);
+    if (operation == nullptr) {
+        return nullptr;
+    }
+    if (operation->kind == INKPOD_BATCH_OPERATION_COLOR_REPLACE) {
+        if (row >= operation->color_pairs.size()) {
+            return nullptr;
+        }
+        if (column == 1) {
+            return &operation->color_pairs[row].old_color;
+        }
+        return column == 2 ? &operation->color_pairs[row].new_color : nullptr;
+    }
+    return column == 0 && row < operation->colors.size()
+        ? &operation->colors[row]
+        : nullptr;
+}
+
+COLORREF CompositeSwatchColor(
+    const InkpodColorValue& color, COLORREF background) noexcept {
+    const std::uint32_t maximum = color.depth == INKPOD_COLOR_DEPTH_16
+        ? 65'535U
+        : 255U;
+    const std::uint32_t alpha = std::min<std::uint32_t>(color.alpha, maximum);
+    const auto channel = [maximum, alpha](
+                             std::uint32_t foreground,
+                             std::uint32_t background_channel) noexcept {
+        foreground = std::min(foreground, maximum);
+        return static_cast<std::uint8_t>(
+            (static_cast<std::uint64_t>(foreground) * alpha * 255U
+             + static_cast<std::uint64_t>(background_channel)
+                 * (maximum - alpha) * maximum
+             + static_cast<std::uint64_t>(maximum) * maximum / 2U)
+            / (static_cast<std::uint64_t>(maximum) * maximum));
+    };
+    return RGB(
+        channel(color.red, GetRValue(background)),
+        channel(color.green, GetGValue(background)),
+        channel(color.blue, GetBValue(background)));
+}
+
+void DrawListSwatch(
+    EditorState& state, const NMLVCUSTOMDRAW& draw) noexcept {
+    const std::size_t row = static_cast<std::size_t>(draw.nmcd.dwItemSpec);
+    const int column = draw.iSubItem;
+    const InkpodColorValue* color = ListCellColor(state, row, column);
+    if (color == nullptr) {
+        return;
+    }
+    RECT cell{};
+    if (column == 0) {
+        if (ListView_GetItemRect(
+                state.rows, static_cast<int>(row), &cell, LVIR_BOUNDS)
+            == FALSE) {
+            return;
+        }
+        cell.right = cell.left + ListView_GetColumnWidth(state.rows, 0);
+    } else if (ListView_GetSubItemRect(
+                   state.rows,
+                   static_cast<int>(row),
+                   column,
+                   LVIR_BOUNDS,
+                   &cell)
+               == FALSE) {
+        return;
+    }
+    RECT sample = cell;
+    sample.left += Scale(state.rows, 5);
+    sample.right = std::min(
+        sample.right - Scale(state.rows, 3),
+        sample.left + Scale(state.rows, 26));
+    sample.top += Scale(state.rows, 3);
+    sample.bottom -= Scale(state.rows, 3);
+    if (sample.right <= sample.left || sample.bottom <= sample.top) {
+        return;
+    }
+
+    const COLORREF checker[2]{
+        GetSysColor(COLOR_WINDOW), GetSysColor(COLOR_BTNFACE)};
+    const int square = std::max(1, Scale(state.rows, 4));
+    for (int top = sample.top, y = 0; top < sample.bottom; top += square, ++y) {
+        for (int left = sample.left, x = 0;
+             left < sample.right;
+             left += square, ++x) {
+            RECT tile{
+                left,
+                top,
+                std::min<LONG>(
+                    sample.right, left + static_cast<LONG>(square)),
+                std::min<LONG>(
+                    sample.bottom, top + static_cast<LONG>(square))};
+            const COLORREF rendered = CompositeSwatchColor(
+                *color, checker[(x + y) & 1]);
+            const HBRUSH brush = CreateSolidBrush(rendered);
+            if (brush != nullptr) {
+                FillRect(draw.nmcd.hdc, &tile, brush);
+                DeleteObject(brush);
+            }
+        }
+    }
+    FrameRect(draw.nmcd.hdc, &sample, GetSysColorBrush(COLOR_WINDOWTEXT));
+}
+
+LRESULT DrawListRows(EditorState& state, const NMLVCUSTOMDRAW& draw) noexcept {
+    switch (draw.nmcd.dwDrawStage) {
+        case CDDS_PREPAINT:
+            return CDRF_NOTIFYITEMDRAW;
+        case CDDS_ITEMPREPAINT:
+            return CDRF_NOTIFYSUBITEMDRAW;
+        case CDDS_ITEMPREPAINT | CDDS_SUBITEM:
+            return ListCellColor(
+                       state,
+                       static_cast<std::size_t>(draw.nmcd.dwItemSpec),
+                       draw.iSubItem)
+                    != nullptr
+                ? CDRF_NOTIFYPOSTPAINT
+                : CDRF_DODEFAULT;
+        case CDDS_ITEMPOSTPAINT | CDDS_SUBITEM:
+            DrawListSwatch(state, draw);
+            return CDRF_DODEFAULT;
+        default:
+            return CDRF_DODEFAULT;
     }
 }
 
@@ -856,6 +999,11 @@ LRESULT CALLBACK EditorProcedure(
             }
             break;
         case WM_NOTIFY:
+            if (reinterpret_cast<NMHDR*>(lparam)->idFrom == kRows
+                && reinterpret_cast<NMHDR*>(lparam)->code == NM_CUSTOMDRAW) {
+                return DrawListRows(
+                    *state, *reinterpret_cast<const NMLVCUSTOMDRAW*>(lparam));
+            }
             if (!state->updating
                 && reinterpret_cast<NMHDR*>(lparam)->idFrom == kRows
                 && reinterpret_cast<NMHDR*>(lparam)->code == LVN_ITEMCHANGED

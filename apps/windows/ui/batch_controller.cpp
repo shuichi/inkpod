@@ -15,6 +15,7 @@
 #include "app/frontend_state.h"
 #include "ui/main_window.h"
 #include "app/core_host.h"
+#include "batch_set_store.h"
 #include "dialogs/batch_dialog.h"
 
 namespace inkpod::windows::ui {
@@ -91,6 +92,21 @@ bool Utf8ToWide(
         == required;
 }
 
+const wchar_t* OperationKindLabel(std::uint32_t kind) noexcept {
+    switch (kind) {
+        case INKPOD_BATCH_OPERATION_COLOR_REPLACE:
+            return UiText(UiStringId::ToolColorReplacement);
+        case INKPOD_BATCH_OPERATION_MOVE_TO_COLOR_PLANE:
+            return UiText(UiStringId::BatchMoveToColorPlane);
+        case INKPOD_BATCH_OPERATION_MASKING:
+            return UiText(UiStringId::BatchMasking);
+        case INKPOD_BATCH_OPERATION_ERASE:
+            return UiText(UiStringId::BatchErase);
+        default:
+            return nullptr;
+    }
+}
+
 void FillOperationInput(
     const app::BatchOperationUi& source,
     InkpodBatchOperationInput& destination) noexcept {
@@ -142,22 +158,11 @@ bool ReadOperation(
         operation.colors.resize(static_cast<std::size_t>(info.color_count));
         operation.color_pairs.resize(
             static_cast<std::size_t>(info.color_pair_count));
-        switch (operation.kind) {
-            case INKPOD_BATCH_OPERATION_COLOR_REPLACE:
-                operation.label = UiText(UiStringId::ToolColorReplacement);
-                break;
-            case INKPOD_BATCH_OPERATION_MOVE_TO_COLOR_PLANE:
-                operation.label = UiText(UiStringId::BatchMoveToColorPlane);
-                break;
-            case INKPOD_BATCH_OPERATION_MASKING:
-                operation.label = UiText(UiStringId::BatchMasking);
-                break;
-            case INKPOD_BATCH_OPERATION_ERASE:
-                operation.label = UiText(UiStringId::BatchErase);
-                break;
-            default:
-                return false;
+        const wchar_t* const label = OperationKindLabel(operation.kind);
+        if (label == nullptr) {
+            return false;
         }
+        operation.label = label;
     } catch (const std::bad_alloc&) {
         return false;
     }
@@ -572,6 +577,57 @@ InkpodStatus BatchController::LoadGraph(
     return INKPOD_STATUS_OK;
 }
 
+InkpodStatus BatchController::SaveStoredGraph() noexcept {
+    std::wstring path;
+    if (lifetime_.smoke_test) {
+        path = L"inkpod-batch-ui-smoke.inkbatch";
+    } else {
+        std::wstring directory;
+        std::wstring canonical_name;
+        if (!PrepareDefaultBatchSetDirectory(directory)
+            || !ResolveBatchSetPath(
+                directory, batch_.set_name, path, &canonical_name)) {
+            return INKPOD_STATUS_INVALID_ARGUMENT;
+        }
+        try {
+            batch_.set_name = std::move(canonical_name);
+        } catch (const std::bad_alloc&) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+    }
+    std::vector<std::uint8_t> path_utf8;
+    if (!WidePathToUtf8(path, path_utf8)) {
+        return INKPOD_STATUS_INVALID_ARGUMENT;
+    }
+    const InkpodStatus status = SaveGraph(path_utf8.data(), path_utf8.size());
+    if (status == INKPOD_STATUS_OK && !lifetime_.smoke_test) {
+        static_cast<void>(RefreshSetCatalog(batch_));
+    }
+    return status;
+}
+
+InkpodStatus BatchController::LoadStoredGraph() noexcept {
+    std::wstring path;
+    if (lifetime_.smoke_test) {
+        path = L"inkpod-batch-ui-smoke.inkbatch";
+    } else {
+        std::wstring directory;
+        if (!PrepareDefaultBatchSetDirectory(directory)
+            || !ResolveBatchSetPath(directory, batch_.set_name, path)) {
+            return INKPOD_STATUS_INVALID_ARGUMENT;
+        }
+    }
+    std::vector<std::uint8_t> path_utf8;
+    if (!WidePathToUtf8(path, path_utf8)) {
+        return INKPOD_STATUS_INVALID_ARGUMENT;
+    }
+    const InkpodStatus status = LoadGraph(path_utf8.data(), path_utf8.size());
+    if (status == INKPOD_STATUS_OK && !lifetime_.smoke_test) {
+        static_cast<void>(RefreshSetCatalog(batch_));
+    }
+    return status;
+}
+
 bool BatchController::QueryProgress(
     void* context, ProgressDialogInfo& output) noexcept {
     auto* batch = static_cast<app::BatchUiState*>(context);
@@ -602,11 +658,9 @@ void BatchController::RefreshPalette(
     }
     BatchPaletteView view{};
     try {
-        view.target_text = batch.target_text;
         view.job_text = batch.job_text;
         view.set_name = batch.set_name;
-        view.target_available = batch.target_available;
-        view.pinned = batch.target_pinned;
+        view.set_names = batch.available_set_names;
         if (batch.task != nullptr && batch.job_id.has_value()) {
             ProgressDialogInfo progress{};
             if (QueryProgress(&batch, progress)) {
@@ -621,7 +675,13 @@ void BatchController::RefreshPalette(
             std::wstring(UiText(UiStringId::BatchInput)) + L" — "
             + std::to_wstring(batch.inputs.size()));
         bool any_enabled = false;
-        for (const auto& operation : batch.operations) {
+        for (auto& operation : batch.operations) {
+            const wchar_t* const localized_label =
+                OperationKindLabel(operation.kind);
+            if (localized_label == nullptr) {
+                return;
+            }
+            operation.label = localized_label;
             const bool enabled =
                 (operation.flags & INKPOD_BATCH_OPERATION_ENABLED) != 0U;
             any_enabled = any_enabled || enabled;
@@ -670,6 +730,17 @@ void BatchController::RefreshPalette(
         return;
     }
     UpdateBatchPaletteDialog(palette, view);
+}
+
+bool BatchController::RefreshSetCatalog(app::BatchUiState& batch) noexcept {
+    std::wstring directory;
+    std::vector<std::wstring> names;
+    if (!PrepareDefaultBatchSetDirectory(directory)
+        || !EnumerateBatchSetNames(directory, names)) {
+        return false;
+    }
+    batch.available_set_names.swap(names);
+    return true;
 }
 
 void BatchController::ResetDerivedState(app::BatchUiState& batch) noexcept {

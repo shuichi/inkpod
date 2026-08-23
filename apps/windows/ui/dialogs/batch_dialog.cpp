@@ -9,10 +9,10 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <new>
 
 #include "app/frontend_state.h"
 #include "app/resource.h"
-#include "ui/icons/fluent_icons.h"
 #include "ui/panes/pane_dialog_layout.h"
 
 namespace inkpod::windows::ui {
@@ -20,12 +20,11 @@ namespace {
 
 constexpr UINT_PTR kBatchRefreshTimer = 1U;
 
-const std::array<BatchPaletteEntry, 4U> kBatchPaletteEntries{{
-    {IDM_BATCH_ADD_COLOR_REPLACE, UiText(UiStringId::ToolColorReplacement)},
-    {IDM_BATCH_ADD_MOVE_TO_COLOR_PLANE,
-     UiText(UiStringId::BatchMoveToColorPlane)},
-    {IDM_BATCH_ADD_MASKING, UiText(UiStringId::BatchMasking)},
-    {IDM_BATCH_ADD_ERASE, UiText(UiStringId::BatchErase)},
+constexpr std::array<BatchPaletteEntry, 4U> kBatchPaletteEntries{{
+    {IDM_BATCH_ADD_COLOR_REPLACE, UiStringId::ToolColorReplacement},
+    {IDM_BATCH_ADD_MOVE_TO_COLOR_PLANE, UiStringId::BatchMoveToColorPlane},
+    {IDM_BATCH_ADD_MASKING, UiStringId::BatchMasking},
+    {IDM_BATCH_ADD_ERASE, UiStringId::BatchErase},
 }};
 
 void DispatchCommand(BatchPaletteDialogState& state, UINT command) noexcept {
@@ -51,18 +50,7 @@ void LayoutBatchPane(HWND dialog, BatchPaletteDialogState* state) noexcept {
     const int height = static_cast<int>(client.bottom - client.top);
     const int content = std::max(0, width - margin * 2);
 
-    panes::PlacePaneTargetRow(
-        dialog,
-        IDC_BATCH_TARGET,
-        IDC_BATCH_PIN,
-        margin,
-        margin,
-        content,
-        scale(4),
-        line,
-        row,
-        gap);
-    int top = margin + row + gap;
+    int top = margin;
     PlacePaneDialogControl(dialog, IDC_BATCH_JOB, margin, top, content, line);
     top += line + gap;
     PlacePaneDialogControl(
@@ -78,20 +66,12 @@ void LayoutBatchPane(HWND dialog, BatchPaletteDialogState* state) noexcept {
         dialog, IDC_BATCH_OPERATIONS, margin, top, content, stage_height);
     top += stage_height + gap;
 
-    const int add_width = std::max(scale(62), content / 4);
-    PlacePaneDialogControl(
-        dialog,
-        IDC_BATCH_OPERATION_KIND,
-        margin,
-        top,
-        std::max(0, content - add_width - gap),
-        row);
     PlacePaneDialogControl(
         dialog,
         IDC_BATCH_ADD,
-        margin + std::max(0, content - add_width),
+        margin,
         top,
-        add_width,
+        content,
         row);
     top += row + gap;
     const std::array<int, 4U> edit_controls{
@@ -156,14 +136,72 @@ void LayoutBatchPane(HWND dialog, BatchPaletteDialogState* state) noexcept {
 }
 
 void InitializeStageList(HWND list) noexcept {
+    const LONG_PTR style = GetWindowLongPtrW(list, GWL_STYLE);
+    SetWindowLongPtrW(list, GWL_STYLE, style | LVS_NOCOLUMNHEADER);
     ListView_SetExtendedListViewStyle(
         list,
         LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP);
     LVCOLUMNW column{};
     column.mask = LVCF_TEXT | LVCF_WIDTH;
-    column.pszText = const_cast<wchar_t*>(UiText(UiStringId::BatchParameters));
+    column.pszText = const_cast<wchar_t*>(L"");
     column.cx = 320;
     ListView_InsertColumn(list, 0, &column);
+}
+
+void ShowOperationMenu(HWND dialog, BatchPaletteDialogState& state) noexcept {
+    const HMENU menu = CreatePopupMenu();
+    if (menu == nullptr) {
+        return;
+    }
+    bool complete = true;
+    for (const auto& entry : kBatchPaletteEntries) {
+        if (AppendMenuW(
+                menu,
+                MF_STRING,
+                entry.command,
+                BatchPaletteEntryLabel(entry))
+            == FALSE) {
+            complete = false;
+            break;
+        }
+    }
+    RECT anchor{};
+    const HWND button = GetDlgItem(dialog, IDC_BATCH_ADD);
+    if (complete && button != nullptr && GetWindowRect(button, &anchor) != FALSE) {
+        const UINT command = static_cast<UINT>(TrackPopupMenuEx(
+            menu,
+            TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD,
+            anchor.left,
+            anchor.bottom,
+            dialog,
+            nullptr));
+        if (command != 0U) {
+            DispatchCommand(state, command);
+        }
+    }
+    DestroyMenu(menu);
+}
+
+void CommitSetName(HWND dialog, BatchPaletteDialogState& state) noexcept {
+    const HWND combo = GetDlgItem(dialog, IDC_BATCH_INPUTS);
+    const int length = GetWindowTextLengthW(combo);
+    std::wstring value;
+    try {
+        value.resize(
+            static_cast<std::size_t>(std::max(0, length)) + 1U, L'\0');
+        if (length > 0) {
+            const int copied = GetWindowTextW(combo, value.data(), length + 1);
+            value.resize(static_cast<std::size_t>(std::max(0, copied)));
+        } else {
+            value.clear();
+        }
+        state.parameter_editor.draft->set_name = std::move(value);
+    } catch (const std::bad_alloc&) {
+        return;
+    }
+    if (state.parameter_editor.changed != nullptr) {
+        state.parameter_editor.changed(state.parameter_editor.context);
+    }
 }
 
 INT_PTR CALLBACK BatchPaletteDialogProcedure(
@@ -182,15 +220,6 @@ INT_PTR CALLBACK BatchPaletteDialogProcedure(
             }
             SetWindowLongPtrW(
                 dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
-            const HWND combo = GetDlgItem(dialog, IDC_BATCH_OPERATION_KIND);
-            for (const auto& entry : kBatchPaletteEntries) {
-                SendMessageW(
-                    combo,
-                    CB_ADDSTRING,
-                    0,
-                    reinterpret_cast<LPARAM>(entry.label));
-            }
-            SendMessageW(combo, CB_SETCURSEL, 0, 0);
             InitializeStageList(GetDlgItem(dialog, IDC_BATCH_OPERATIONS));
             state->parameter_host = CreateBatchParameterEditor(
                 reinterpret_cast<HINSTANCE>(
@@ -202,7 +231,7 @@ INT_PTR CALLBACK BatchPaletteDialogProcedure(
                 UiText(UiStringId::BatchSetName));
             SetWindowTextW(
                 GetDlgItem(dialog, IDC_BATCH_OPERATIONS_LABEL),
-                UiText(UiStringId::BatchParameters));
+                UiText(UiStringId::BatchStages));
             SetWindowTextW(
                 GetDlgItem(dialog, IDC_BATCH_OUTPUT_LABEL),
                 UiText(UiStringId::BatchValidation));
@@ -223,22 +252,9 @@ INT_PTR CALLBACK BatchPaletteDialogProcedure(
                 break;
             }
             switch (LOWORD(wparam)) {
-                case IDC_BATCH_PIN:
-                    DispatchCommand(*state, IDM_BATCH_PIN);
+                case IDC_BATCH_ADD:
+                    ShowOperationMenu(dialog, *state);
                     return TRUE;
-                case IDC_BATCH_ADD: {
-                    const LRESULT index = SendDlgItemMessageW(
-                        dialog, IDC_BATCH_OPERATION_KIND, CB_GETCURSEL, 0, 0);
-                    if (index >= 0
-                        && static_cast<std::size_t>(index)
-                            < kBatchPaletteEntries.size()) {
-                        DispatchCommand(
-                            *state,
-                            kBatchPaletteEntries[static_cast<std::size_t>(index)]
-                                .command);
-                    }
-                    return TRUE;
-                }
                 case IDC_BATCH_REMOVE:
                     DispatchCommand(*state, IDM_BATCH_OPERATION_REMOVE);
                     return TRUE;
@@ -273,27 +289,9 @@ INT_PTR CALLBACK BatchPaletteDialogProcedure(
                     DispatchCommand(*state, IDM_BATCH_CANCEL);
                     return TRUE;
                 case IDC_BATCH_INPUTS:
-                    if (HIWORD(wparam) == EN_KILLFOCUS) {
-                        const int length = GetWindowTextLengthW(
-                            GetDlgItem(dialog, IDC_BATCH_INPUTS));
-                        std::wstring value(
-                            static_cast<std::size_t>(std::max(0, length)) + 1U,
-                            L'\0');
-                        if (length > 0) {
-                            const UINT copied = GetDlgItemTextW(
-                                dialog,
-                                IDC_BATCH_INPUTS,
-                                value.data(),
-                                length + 1);
-                            value.resize(copied);
-                        } else {
-                            value.clear();
-                        }
-                        state->parameter_editor.draft->set_name = std::move(value);
-                        if (state->parameter_editor.changed != nullptr) {
-                            state->parameter_editor.changed(
-                                state->parameter_editor.context);
-                        }
+                    if (HIWORD(wparam) == CBN_SELCHANGE
+                        || HIWORD(wparam) == CBN_KILLFOCUS) {
+                        CommitSetName(dialog, *state);
                     }
                     return TRUE;
                 case IDCANCEL:
@@ -348,6 +346,11 @@ const std::array<BatchPaletteEntry, 4U>& BatchPaletteEntries() noexcept {
     return kBatchPaletteEntries;
 }
 
+const wchar_t* BatchPaletteEntryLabel(
+    const BatchPaletteEntry& entry) noexcept {
+    return UiText(entry.label_id);
+}
+
 HWND CreateBatchPaletteDialog(
     HINSTANCE instance, HWND owner, BatchPaletteDialogState& state) noexcept {
     return CreateLocalizedDialogParamW(
@@ -369,21 +372,31 @@ void UpdateBatchPaletteDialog(
     if (state == nullptr || stages == nullptr) {
         return;
     }
-    SetDlgItemTextW(dialog, IDC_BATCH_TARGET, view.target_text.c_str());
     SetDlgItemTextW(dialog, IDC_BATCH_JOB, view.job_text.c_str());
-    SetDlgItemTextW(dialog, IDC_BATCH_INPUTS, view.set_name.c_str());
-    SetDlgItemTextW(
-        dialog,
-        IDC_BATCH_PIN,
-        view.pinned ? UiText(UiStringId::ReturnToFollowing)
-                    : UiText(UiStringId::PinDocument));
-    EnableWindow(
-        GetDlgItem(dialog, IDC_BATCH_PIN),
-        view.target_available && view.idle ? TRUE : FALSE);
-    static_cast<void>(SetPaneIconButton(
-        GetDlgItem(dialog, IDC_BATCH_PIN),
-        view.pinned ? PaneIconId::ReturnToFollowing
-                    : PaneIconId::PinDocument));
+    const HWND set_combo = GetDlgItem(dialog, IDC_BATCH_INPUTS);
+    const HWND focus = GetFocus();
+    if (set_combo != nullptr
+        && focus != set_combo
+        && (focus == nullptr || IsChild(set_combo, focus) == FALSE)) {
+        SendMessageW(set_combo, CB_RESETCONTENT, 0, 0);
+        for (const auto& name : view.set_names) {
+            SendMessageW(
+                set_combo,
+                CB_ADDSTRING,
+                0,
+                reinterpret_cast<LPARAM>(name.c_str()));
+        }
+        const LRESULT selected = SendMessageW(
+            set_combo,
+            CB_FINDSTRINGEXACT,
+            static_cast<WPARAM>(-1),
+            reinterpret_cast<LPARAM>(view.set_name.c_str()));
+        if (selected == CB_ERR) {
+            SetWindowTextW(set_combo, view.set_name.c_str());
+        } else {
+            SendMessageW(set_combo, CB_SETCURSEL, selected, 0);
+        }
+    }
     if (view.idle) {
         KillTimer(dialog, kBatchRefreshTimer);
     } else {
@@ -416,8 +429,6 @@ void UpdateBatchPaletteDialog(
         && view.selected_stage + 1U < view.stage_labels.size();
     const bool editable = view.idle;
     EnableWindow(GetDlgItem(dialog, IDC_BATCH_INPUTS), editable ? TRUE : FALSE);
-    EnableWindow(
-        GetDlgItem(dialog, IDC_BATCH_OPERATION_KIND), editable ? TRUE : FALSE);
     EnableWindow(GetDlgItem(dialog, IDC_BATCH_ADD), editable ? TRUE : FALSE);
     for (const int control : {
              IDC_BATCH_REMOVE, IDC_BATCH_UP, IDC_BATCH_DOWN, IDC_BATCH_EDIT}) {

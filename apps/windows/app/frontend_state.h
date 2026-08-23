@@ -399,6 +399,7 @@ struct BatchUiState {
     bool return_to_pinned{};
     CommandContext return_context;
     std::wstring set_name{L"Windows Batch Set"};
+    std::vector<std::wstring> available_set_names;
     std::vector<BatchInputUi> inputs{BatchInputUi{}};
     std::vector<BatchOperationUi> operations;
     std::uint32_t selected_stage{};

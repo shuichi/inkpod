@@ -354,6 +354,25 @@ if(WIN32)
         NAME inkpod_windows_activation
         COMMAND inkpod_windows_activation_tests)
 
+    add_executable(inkpod_windows_batch_set_store_tests
+        apps/windows/ui/batch_set_store.cpp
+        apps/windows/ui/batch_set_store.h
+        tests/windows_batch_set_store.cpp)
+    target_include_directories(inkpod_windows_batch_set_store_tests PRIVATE
+        "${CMAKE_SOURCE_DIR}/apps/windows")
+    target_compile_definitions(inkpod_windows_batch_set_store_tests PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(inkpod_windows_batch_set_store_tests PRIVATE
+        ole32
+        shell32)
+    if(MSVC)
+        inkpod_enable_strict_warnings(inkpod_windows_batch_set_store_tests)
+        target_compile_options(inkpod_windows_batch_set_store_tests PRIVATE /EHsc)
+    endif()
+    add_test(
+        NAME inkpod_windows_batch_set_store
+        COMMAND inkpod_windows_batch_set_store_tests)
+
     add_executable(inkpod_windows_session_recovery_tests
         apps/windows/app/document_identity.h
         apps/windows/app/identity.h
@@ -791,6 +810,8 @@ if(WIN32)
         apps/windows/ui/ui_resources.h
         apps/windows/ui/effects_controller.cpp
         apps/windows/ui/batch_controller.cpp
+        apps/windows/ui/batch_set_store.cpp
+        apps/windows/ui/batch_set_store.h
         apps/windows/ui/batch_parameter_editor.cpp
         apps/windows/ui/batch_parameter_editor.h
         apps/windows/ui/dock_layout.cpp

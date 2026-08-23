@@ -13027,7 +13027,7 @@ InkpodColorValue BatchTransparentColor() noexcept {
 const wchar_t* BatchOperationLabel(UINT command) noexcept {
     for (const auto& entry : inkpod::windows::ui::BatchPaletteEntries()) {
         if (entry.command == command) {
-            return entry.label;
+            return inkpod::windows::ui::BatchPaletteEntryLabel(entry);
         }
     }
     return UiText(UiStringId::Text0269);
@@ -13434,32 +13434,6 @@ InkpodStatus StartBatch(
     return status;
 }
 
-bool ChooseBatchSettingsPath(
-    HWND owner, bool save, std::wstring& selected_path) noexcept {
-    std::array<wchar_t, 32768> path{};
-    if (!selected_path.empty()) {
-        wcsncpy_s(path.data(), path.size(), selected_path.c_str(), _TRUNCATE);
-    }
-    OPENFILENAMEW dialog{};
-    dialog.lStructSize = sizeof(dialog);
-    dialog.hwndOwner = owner;
-    dialog.lpstrFilter = UiText(UiStringId::Text0093);
-    dialog.lpstrFile = path.data();
-    dialog.nMaxFile = static_cast<DWORD>(path.size());
-    dialog.lpstrDefExt = L"inkbatch";
-    dialog.Flags = OFN_EXPLORER | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR
-        | (save ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
-    if ((save ? GetSaveFileNameW(&dialog) : GetOpenFileNameW(&dialog)) == FALSE) {
-        return false;
-    }
-    try {
-        selected_path.assign(path.data());
-        return true;
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-}
-
 bool ChooseBatchFolder(HWND owner, std::wstring& selected_path) noexcept {
     return BatchController::ChooseFolder(owner, selected_path);
 }
@@ -13714,6 +13688,9 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
         state.Workspace().batch_dialog);
     if (state.Workspace().batch_palette == nullptr) {
         return false;
+    }
+    if (!state.lifetime.smoke_test) {
+        static_cast<void>(BatchController::RefreshSetCatalog(state.batch));
     }
     UpdateBatchTarget(state);
     RefreshBatchPalette(state.batch, state.Workspace().batch_palette);
@@ -14378,18 +14355,6 @@ std::optional<LRESULT> RouteBatchCommand(
         case IDM_BATCH_SAVE_SET:
         case IDM_BATCH_LOAD_SET: {
             const bool save = LOWORD(wparam) == IDM_BATCH_SAVE_SET;
-            std::wstring path = state->lifetime.smoke_test
-                ? L"inkpod-batch-ui-smoke.inkbatch"
-                : L"";
-            if (!state->lifetime.smoke_test
-                && !ChooseBatchSettingsPath(window, save, path)) {
-                return 0;
-            }
-            std::vector<std::uint8_t> utf8;
-            if (!WidePathToUtf8(path, utf8)) {
-                return 0;
-            }
-            InkpodStatus status = INKPOD_STATUS_OK;
             BatchController controller(
                 state->lifetime,
                 state->Workspace().windows,
@@ -14398,11 +14363,9 @@ std::optional<LRESULT> RouteBatchCommand(
                 state->Workspace().batch_palette,
                 state->batch,
                 *state->engine);
-            if (save) {
-                status = controller.SaveGraph(utf8.data(), utf8.size());
-            } else {
-                status = controller.LoadGraph(utf8.data(), utf8.size());
-            }
+            const InkpodStatus status = save
+                ? controller.SaveStoredGraph()
+                : controller.LoadStoredGraph();
             if (status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, save ? UiText(UiStringId::Text0257) : UiText(UiStringId::Text0258));
             }

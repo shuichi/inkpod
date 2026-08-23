@@ -1171,6 +1171,13 @@ length, and FNV-1a 64-bit body checksum. The format-freeze policy above applies:
 only the current graph version is accepted, and any graph schema change increments
 the top-level graph version.
 
+The Windows Batch pane stores and enumerates these files under
+`%APPDATA%\inkpod\batch-sets`. Its editable dropdown displays the filename stem;
+the adapter appends the sole `.inkbatch` extension after normalizing surrounding
+whitespace and rejecting separators, Windows reserved device names, and a
+trailing dot. This application path
+policy does not change the portable v3 byte schema or Core graph name.
+
 The body stores a bounded UTF-8 set name; one or more ordered File, non-recursive
 Folder, or issue-time ActiveDocument input selectors with optional inclusive
 cell-number ranges; one or more ordered operations; and one output record. Input

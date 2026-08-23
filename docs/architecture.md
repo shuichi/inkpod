@@ -692,8 +692,10 @@ owner.
 
 Color and Batch panes use the same target registry. Color registration, clear,
 load, save, and main-line changes capture the pane's exact session/generation;
-the header states follow or pinned policy. A Batch run replaces that policy
-temporarily with a generation-tagged `JobSessionId`. Preview, synchronous smoke,
+the Color header states follow or pinned policy. Batch exposes no target header
+or pin action: its issue-time command context still fixes the exact
+session/generation. A Batch run temporarily binds that target to a
+generation-tagged `JobSessionId`. Preview, synchronous smoke,
 and queued execution all use the captured document session instead of resolving
 the later active tab. Completion validates the original target, publishes
 progress/result only there, closes the job, and restores the prior follow/pin
@@ -707,6 +709,12 @@ four-kind draft operation list. Preview, run, and save each validate the draft
 and construct one Rust-owned immutable v3 graph. Load performs the inverse query
 through `inkpod_batch_graph_get_info`, `get_input`, and operation row queries,
 so a loaded set is editable rather than a count-only opaque object.
+
+The editable set-name combo enumerates extension-free `.inkbatch` filenames in
+`%APPDATA%\inkpod\batch-sets`. The Windows-only `batch_set_store` creates that
+directory, rejects traversal, reserved-device and ambiguous trailing names, and
+maps one validated name to one `.inkbatch` path. Core and the file-format crate
+continue to receive only the resulting UTF-8 path and own the v3 codec.
 
 Batch execution resolves File/Folder/ActiveDocument inputs in Core and reuses
 the general native/common-raster decoders and atomic writers. All enabled

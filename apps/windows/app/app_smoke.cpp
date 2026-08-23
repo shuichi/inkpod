@@ -7710,6 +7710,15 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
         inkpod_batch_task_release(&state.batch.task);
         DeleteFileW(settings_path);
     };
+    const HWND set_selector = GetDlgItem(
+        state.Workspace().batch_palette, IDC_BATCH_INPUTS);
+    std::array<wchar_t, 32U> set_selector_class{};
+    if (set_selector != nullptr) {
+        GetClassNameW(
+            set_selector,
+            set_selector_class.data(),
+            static_cast<int>(set_selector_class.size()));
+    }
     if (state.engine == nullptr || state.Workspace().batch_palette == nullptr
         || GetParent(state.Workspace().batch_palette)
             != state.Workspace().windows.window
@@ -7719,6 +7728,20 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
             != IDM_BATCH_ADD_MOVE_TO_COLOR_PLANE
         || BatchPaletteEntries()[2].command != IDM_BATCH_ADD_MASKING
         || BatchPaletteEntries()[3].command != IDM_BATCH_ADD_ERASE
+        || wcscmp(
+               BatchPaletteEntryLabel(BatchPaletteEntries()[0]),
+               UiText(UiStringId::ToolColorReplacement))
+            != 0
+        || GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_TARGET)
+            != nullptr
+        || GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_PIN) != nullptr
+        || GetDlgItem(
+               state.Workspace().batch_palette, IDC_BATCH_OPERATION_KIND)
+            != nullptr
+        || set_selector == nullptr
+        || _wcsicmp(set_selector_class.data(), WC_COMBOBOXW) != 0
+        || (GetWindowLongPtrW(set_selector, GWL_STYLE) & 0x0003L)
+            != CBS_DROPDOWN
         || GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_OPERATIONS)
             == nullptr
         || state.Workspace().batch_dialog.parameter_host == nullptr) {
@@ -7774,7 +7797,9 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
         || state.batch.operations[1].kind
             != INKPOD_BATCH_OPERATION_MOVE_TO_COLOR_PLANE
         || state.batch.operations[2].kind != INKPOD_BATCH_OPERATION_MASKING
-        || state.batch.operations[3].kind != INKPOD_BATCH_OPERATION_ERASE) {
+        || state.batch.operations[3].kind != INKPOD_BATCH_OPERATION_ERASE
+        || state.batch.operations[0].label
+            != UiText(UiStringId::ToolColorReplacement)) {
         cleanup();
         return 703;
     }
@@ -7782,7 +7807,8 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
         state.batch, state.Workspace().batch_palette);
     const HWND stages = GetDlgItem(
         state.Workspace().batch_palette, IDC_BATCH_OPERATIONS);
-    if (ListView_GetItemCount(stages) != 6) {
+    if (ListView_GetItemCount(stages) != 6
+        || (GetWindowLongPtrW(stages, GWL_STYLE) & LVS_NOCOLUMNHEADER) == 0) {
         cleanup();
         return 704;
     }

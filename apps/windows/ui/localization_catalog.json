@@ -69,6 +69,13 @@
       "resource": false
     },
     {
+      "id": "BatchStages",
+      "kind": "text",
+      "ja": "工程",
+      "en": "Stages",
+      "resource": false
+    },
+    {
       "id": "BatchValidation",
       "kind": "text",
       "ja": "検証結果",
