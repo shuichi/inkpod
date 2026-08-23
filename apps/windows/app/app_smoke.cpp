@@ -7759,6 +7759,56 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
         cleanup();
         return 702;
     }
+    const ToolTabId batch_tab =
+        state.Workspace().windows.workspace.right_tool_tabs.TabForPane(
+            DockPaneType::Batch);
+    const ToolTab* batch_tab_state =
+        state.Workspace().windows.workspace.right_tool_tabs.Find(batch_tab);
+    if (!batch_tab || batch_tab_state == nullptr
+        || batch_tab_state->pane_count != 1U
+        || batch_tab_state->panes[0] != DockPaneType::Batch
+        || state.batch.inputs.empty()) {
+        cleanup();
+        return 708;
+    }
+    state.batch.inputs[0].kind = INKPOD_BATCH_INPUT_FILE;
+    BatchController::RefreshPalette(
+        state.batch, state.Workspace().batch_palette);
+    const HWND parameter_host = state.Workspace().batch_dialog.parameter_host;
+    const HWND input_kind = FindWindowExW(
+        parameter_host, nullptr, WC_COMBOBOXW, nullptr);
+    const HWND input_path = FindWindowExW(
+        parameter_host, nullptr, WC_EDITW, nullptr);
+    const HWND input_rows = FindWindowExW(
+        parameter_host, nullptr, WC_LISTVIEWW, nullptr);
+    const HWND browse = FindWindowExW(
+        parameter_host,
+        nullptr,
+        WC_BUTTONW,
+        UiText(UiStringId::BatchBrowse));
+    RECT input_kind_bounds{};
+    RECT input_rows_bounds{};
+    const int input_page_error =
+        input_kind == nullptr || input_path == nullptr || input_rows == nullptr
+            ? 713
+        : browse == nullptr || IsWindowEnabled(browse) == FALSE
+            ? 714
+        : SendMessageW(browse, WM_GETFONT, 0, 0)
+                != SendMessageW(
+                    state.Workspace().batch_palette, WM_GETFONT, 0, 0)
+            ? 715
+        : GetWindowRect(input_kind, &input_kind_bounds) == FALSE
+                || GetWindowRect(input_rows, &input_rows_bounds) == FALSE
+            ? 716
+        : input_rows_bounds.top - input_kind_bounds.bottom
+                > MulDiv(
+                    132, static_cast<int>(GetDpiForWindow(parameter_host)), 96)
+            ? 717
+            : 0;
+    if (input_page_error != 0) {
+        cleanup();
+        return input_page_error;
+    }
     state.batch.output_destination = INKPOD_BATCH_OUTPUT_NEW_TABS;
     state.batch.naming_template = L"{stem}_{index:4}";
     if (SendMessageW(
@@ -7803,15 +7853,198 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
         cleanup();
         return 703;
     }
+    try {
+        auto second_pair = state.batch.operations[0].color_pairs.front();
+        second_pair.old_color.red = 1U;
+        second_pair.old_color.alpha = 64U;
+        second_pair.new_color.red = 2U;
+        second_pair.new_color.alpha = 192U;
+        auto third_pair = second_pair;
+        third_pair.old_color.red = 3U;
+        third_pair.new_color.red = 4U;
+        state.batch.operations[0].color_pairs.push_back(second_pair);
+        state.batch.operations[0].color_pairs.push_back(third_pair);
+    } catch (const std::bad_alloc&) {
+        cleanup();
+        return 718;
+    }
     BatchController::RefreshPalette(
         state.batch, state.Workspace().batch_palette);
     const HWND stages = GetDlgItem(
         state.Workspace().batch_palette, IDC_BATCH_OPERATIONS);
+    std::array<wchar_t, 96U> expected_input_label{};
+    _snwprintf_s(
+        expected_input_label.data(),
+        expected_input_label.size(),
+        _TRUNCATE,
+        UiText(UiStringId::BatchInputCountFormat),
+        state.batch.inputs.size());
+    std::array<wchar_t, 96U> actual_input_label{};
+    ListView_GetItemText(
+        stages, 0, 0, actual_input_label.data(),
+        static_cast<int>(actual_input_label.size()));
     if (ListView_GetItemCount(stages) != 6
         || (GetWindowLongPtrW(stages, GWL_STYLE) & LVS_NOCOLUMNHEADER) == 0) {
         cleanup();
         return 704;
     }
+    if (std::wstring_view(actual_input_label.data())
+        != expected_input_label.data()) {
+        cleanup();
+        return 740;
+    }
+    if (ListView_GetImageList(stages, LVSIL_STATE) == nullptr) {
+        cleanup();
+        return 741;
+    }
+    if ((ListView_GetItemState(stages, 0, LVIS_STATEIMAGEMASK)
+         & LVIS_STATEIMAGEMASK)
+        != 0U) {
+        cleanup();
+        return 742;
+    }
+    if (((ListView_GetItemState(stages, 1, LVIS_STATEIMAGEMASK)
+          & LVIS_STATEIMAGEMASK)
+         >> 12U) != 2U) {
+        cleanup();
+        return 743;
+    }
+    if ((ListView_GetItemState(
+            stages,
+            ListView_GetItemCount(stages) - 1,
+            LVIS_STATEIMAGEMASK)
+         & LVIS_STATEIMAGEMASK)
+        != 0U) {
+        cleanup();
+        return 744;
+    }
+    RECT first_operation_bounds{};
+    if (ListView_GetItemRect(stages, 1, &first_operation_bounds, LVIR_BOUNDS)
+        == FALSE) {
+        cleanup();
+        return 719;
+    }
+    const int check_x = first_operation_bounds.left
+        + MulDiv(8, static_cast<int>(GetDpiForWindow(stages)), 96);
+    const int check_y = (first_operation_bounds.top + first_operation_bounds.bottom) / 2;
+    SendMessageW(
+        stages, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(check_x, check_y));
+    SendMessageW(stages, WM_LBUTTONUP, 0, MAKELPARAM(check_x, check_y));
+    PumpPendingWindowMessages();
+    if ((state.batch.operations[0].flags & INKPOD_BATCH_OPERATION_ENABLED)
+        != 0U) {
+        cleanup();
+        return 722;
+    }
+    SendMessageW(
+        stages, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(check_x, check_y));
+    SendMessageW(stages, WM_LBUTTONUP, 0, MAKELPARAM(check_x, check_y));
+    PumpPendingWindowMessages();
+    if ((state.batch.operations[0].flags & INKPOD_BATCH_OPERATION_ENABLED)
+        == 0U) {
+        cleanup();
+        return 723;
+    }
+    ListView_SetItemState(
+        stages, -1, 0, LVIS_SELECTED | LVIS_FOCUSED);
+    ListView_SetItemState(
+        stages,
+        1,
+        LVIS_SELECTED | LVIS_FOCUSED,
+        LVIS_SELECTED | LVIS_FOCUSED);
+    SetFocus(stages);
+    if (GetFocus() != stages) {
+        cleanup();
+        return 726;
+    }
+    SendMessageW(stages, WM_KEYDOWN, VK_SPACE, 0);
+    SendMessageW(stages, WM_KEYUP, VK_SPACE, 0);
+    PumpPendingWindowMessages();
+    if ((state.batch.operations[0].flags & INKPOD_BATCH_OPERATION_ENABLED)
+        != 0U) {
+        cleanup();
+        return 724;
+    }
+    SendMessageW(stages, WM_KEYDOWN, VK_SPACE, 0);
+    SendMessageW(stages, WM_KEYUP, VK_SPACE, 0);
+    PumpPendingWindowMessages();
+    if ((state.batch.operations[0].flags & INKPOD_BATCH_OPERATION_ENABLED)
+        == 0U) {
+        cleanup();
+        return 725;
+    }
+    ListView_SetItemState(
+        stages, 1, LVIS_SELECTED | LVIS_FOCUSED,
+        LVIS_SELECTED | LVIS_FOCUSED);
+    PumpPendingWindowMessages();
+    RECT color_rows_client{};
+    if (GetClientRect(input_rows, &color_rows_client) == FALSE
+        || ListView_GetItemCount(input_rows) != 3
+        || ListView_GetColumnWidth(input_rows, 0)
+                + ListView_GetColumnWidth(input_rows, 1)
+                + ListView_GetColumnWidth(input_rows, 2)
+            != color_rows_client.right - color_rows_client.left) {
+        cleanup();
+        return 712;
+    }
+    ListView_SetItemState(
+        input_rows, -1, 0, LVIS_SELECTED | LVIS_FOCUSED);
+    ListView_SetItemState(
+        input_rows, 1, LVIS_SELECTED | LVIS_FOCUSED,
+        LVIS_SELECTED | LVIS_FOCUSED);
+    PumpPendingWindowMessages();
+    int selected_color_rows{};
+    for (int row_index = 0; row_index < ListView_GetItemCount(input_rows);
+         ++row_index) {
+        if ((ListView_GetItemState(input_rows, row_index, LVIS_SELECTED)
+             & LVIS_SELECTED)
+            != 0U) {
+            ++selected_color_rows;
+        }
+    }
+    std::array<HWND, 8U> visible_edits{};
+    std::size_t visible_edit_count{};
+    HWND edit{};
+    while ((edit = FindWindowExW(parameter_host, edit, WC_EDITW, nullptr))
+           != nullptr) {
+        if ((GetWindowLongPtrW(edit, GWL_STYLE) & WS_VISIBLE) != 0
+            && visible_edit_count < visible_edits.size()) {
+            visible_edits[visible_edit_count++] = edit;
+        }
+    }
+    if (selected_color_rows != 1) {
+        cleanup();
+        return 720;
+    }
+    if (visible_edit_count != 4U) {
+        cleanup();
+        return 745;
+    }
+    RECT old_alpha_bounds{};
+    RECT new_alpha_bounds{};
+    if (GetWindowRect(visible_edits[2], &old_alpha_bounds) == FALSE
+        || GetWindowRect(visible_edits[3], &new_alpha_bounds) == FALSE
+        || old_alpha_bounds.right <= old_alpha_bounds.left
+        || new_alpha_bounds.right <= new_alpha_bounds.left
+        || new_alpha_bounds.left <= old_alpha_bounds.right) {
+        cleanup();
+        return 746;
+    }
+    SetWindowTextW(visible_edits[2], L"128");
+    SendMessageW(
+        parameter_host,
+        WM_COMMAND,
+        MAKEWPARAM(GetDlgCtrlID(visible_edits[2]), EN_KILLFOCUS),
+        reinterpret_cast<LPARAM>(visible_edits[2]));
+    PumpPendingWindowMessages();
+    if (state.batch.operations[0].color_pairs[1].old_color.alpha != 128U
+        || ListView_GetNextItem(input_rows, -1, LVNI_SELECTED) != 1) {
+        cleanup();
+        return 721;
+    }
+    state.batch.operations[0].color_pairs.resize(1U);
+    BatchController::RefreshPalette(
+        state.batch, state.Workspace().batch_palette);
     ListView_SetItemState(
         stages, 0, LVIS_SELECTED | LVIS_FOCUSED,
         LVIS_SELECTED | LVIS_FOCUSED);

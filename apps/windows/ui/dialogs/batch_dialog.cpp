@@ -19,6 +19,7 @@ namespace inkpod::windows::ui {
 namespace {
 
 constexpr UINT_PTR kBatchRefreshTimer = 1U;
+constexpr UINT kBatchStageStateChanged = WM_APP + 0x41U;
 
 constexpr std::array<BatchPaletteEntry, 4U> kBatchPaletteEntries{{
     {IDM_BATCH_ADD_COLOR_REPLACE, UiStringId::ToolColorReplacement},
@@ -64,6 +65,11 @@ void LayoutBatchPane(HWND dialog, BatchPaletteDialogState* state) noexcept {
     const int stage_height = std::max(scale(92), height / 5);
     PlacePaneDialogControl(
         dialog, IDC_BATCH_OPERATIONS, margin, top, content, stage_height);
+    const HWND stages = GetDlgItem(dialog, IDC_BATCH_OPERATIONS);
+    RECT stage_client{};
+    if (stages != nullptr && GetClientRect(stages, &stage_client) != FALSE) {
+        ListView_SetColumnWidth(stages, 0, stage_client.right - stage_client.left);
+    }
     top += stage_height + gap;
 
     PlacePaneDialogControl(
@@ -140,12 +146,40 @@ void InitializeStageList(HWND list) noexcept {
     SetWindowLongPtrW(list, GWL_STYLE, style | LVS_NOCOLUMNHEADER);
     ListView_SetExtendedListViewStyle(
         list,
-        LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP);
+        LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP
+            | LVS_EX_CHECKBOXES);
     LVCOLUMNW column{};
     column.mask = LVCF_TEXT | LVCF_WIDTH;
     column.pszText = const_cast<wchar_t*>(L"");
     column.cx = 320;
     ListView_InsertColumn(list, 0, &column);
+}
+
+LRESULT CALLBACK StageListProcedure(
+    HWND list,
+    UINT message,
+    WPARAM wparam,
+    LPARAM lparam,
+    UINT_PTR subclass_id,
+    DWORD_PTR reference) noexcept {
+    auto* state = reinterpret_cast<BatchPaletteDialogState*>(reference);
+    if (message == WM_KEYDOWN && wparam == VK_SPACE && state != nullptr
+        && !state->updating) {
+        const int selected = ListView_GetNextItem(list, -1, LVNI_SELECTED);
+        const auto operation_count =
+            state->parameter_editor.draft->operations.size();
+        if (selected > 0 && selected <= static_cast<int>(operation_count)) {
+            ListView_SetCheckState(
+                list,
+                selected,
+                ListView_GetCheckState(list, selected) == FALSE);
+            return 0;
+        }
+    }
+    if (message == WM_NCDESTROY) {
+        RemoveWindowSubclass(list, StageListProcedure, subclass_id);
+    }
+    return DefSubclassProc(list, message, wparam, lparam);
 }
 
 void ShowOperationMenu(HWND dialog, BatchPaletteDialogState& state) noexcept {
@@ -220,7 +254,13 @@ INT_PTR CALLBACK BatchPaletteDialogProcedure(
             }
             SetWindowLongPtrW(
                 dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
-            InitializeStageList(GetDlgItem(dialog, IDC_BATCH_OPERATIONS));
+            const HWND stages = GetDlgItem(dialog, IDC_BATCH_OPERATIONS);
+            InitializeStageList(stages);
+            SetWindowSubclass(
+                stages,
+                StageListProcedure,
+                1U,
+                reinterpret_cast<DWORD_PTR>(state));
             state->parameter_host = CreateBatchParameterEditor(
                 reinterpret_cast<HINSTANCE>(
                     GetWindowLongPtrW(dialog, GWLP_HINSTANCE)),
@@ -302,17 +342,59 @@ INT_PTR CALLBACK BatchPaletteDialogProcedure(
             }
             break;
         case WM_NOTIFY:
-            if (state != nullptr
+            if (state != nullptr && !state->updating
                 && reinterpret_cast<NMHDR*>(lparam)->idFrom
                     == IDC_BATCH_OPERATIONS
                 && reinterpret_cast<NMHDR*>(lparam)->code == LVN_ITEMCHANGED) {
                 const auto* changed = reinterpret_cast<NMLISTVIEW*>(lparam);
+                const auto operation_count =
+                    state->parameter_editor.draft->operations.size();
+                const bool operation_row = changed->iItem > 0
+                    && changed->iItem <= static_cast<int>(operation_count);
+                if (((changed->uOldState ^ changed->uNewState)
+                     & LVIS_STATEIMAGEMASK)
+                    != 0U) {
+                    if (operation_row) {
+                        auto& operation =
+                            state->parameter_editor.draft->operations[
+                                static_cast<std::size_t>(changed->iItem - 1)];
+                        const bool enabled =
+                            ((changed->uNewState & LVIS_STATEIMAGEMASK) >> 12U)
+                            == 2U;
+                        const auto previous = operation.flags;
+                        if (enabled) {
+                            operation.flags |= INKPOD_BATCH_OPERATION_ENABLED;
+                        } else {
+                            operation.flags &= ~INKPOD_BATCH_OPERATION_ENABLED;
+                        }
+                        if (operation.flags != previous) {
+                            PostMessageW(
+                                dialog, kBatchStageStateChanged, 0, 0);
+                        }
+                    } else if (changed->iItem >= 0) {
+                        state->updating = true;
+                        ListView_SetItemState(
+                            GetDlgItem(dialog, IDC_BATCH_OPERATIONS),
+                            changed->iItem,
+                            0,
+                            LVIS_STATEIMAGEMASK);
+                        state->updating = false;
+                    }
+                }
                 if ((changed->uNewState & LVIS_SELECTED) != 0U
                     && changed->iItem >= 0) {
                     state->select_operation(
                         state->context,
                         static_cast<std::uint32_t>(changed->iItem));
                 }
+                return TRUE;
+            }
+            break;
+        case kBatchStageStateChanged:
+            if (state != nullptr
+                && state->parameter_editor.changed != nullptr) {
+                state->parameter_editor.changed(
+                    state->parameter_editor.context);
                 return TRUE;
             }
             break;
@@ -403,13 +485,27 @@ void UpdateBatchPaletteDialog(
         SetTimer(dialog, kBatchRefreshTimer, 250U, nullptr);
     }
 
+    state->updating = true;
     ListView_DeleteAllItems(stages);
     for (std::size_t index = 0U; index < view.stage_labels.size(); ++index) {
         LVITEMW item{};
-        item.mask = LVIF_TEXT;
+        item.mask = LVIF_TEXT | LVIF_STATE;
         item.iItem = static_cast<int>(index);
         item.pszText = const_cast<wchar_t*>(view.stage_labels[index].c_str());
-        ListView_InsertItem(stages, &item);
+        item.stateMask = LVIS_STATEIMAGEMASK;
+        if (index > 0U && index + 1U < view.stage_labels.size()) {
+            const auto& operation = state->parameter_editor.draft->operations[
+                index - 1U];
+            item.state = INDEXTOSTATEIMAGEMASK(
+                (operation.flags & INKPOD_BATCH_OPERATION_ENABLED) != 0U
+                    ? 2U
+                    : 1U);
+        }
+        const int inserted = ListView_InsertItem(stages, &item);
+        if (inserted >= 0) {
+            ListView_SetItemState(
+                stages, inserted, item.state, LVIS_STATEIMAGEMASK);
+        }
     }
     if (view.selected_stage < view.stage_labels.size()) {
         ListView_SetItemState(
@@ -418,6 +514,7 @@ void UpdateBatchPaletteDialog(
             LVIS_SELECTED | LVIS_FOCUSED,
             LVIS_SELECTED | LVIS_FOCUSED);
     }
+    state->updating = false;
     SetDlgItemTextW(
         dialog,
         IDC_BATCH_OUTPUT,

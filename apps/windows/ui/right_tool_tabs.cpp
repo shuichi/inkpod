@@ -28,6 +28,18 @@ const wchar_t* PaneTitle(DockPaneType type) noexcept {
         : descriptor->fallback_title;
 }
 
+constexpr bool RequiresExclusiveTab(DockPaneType type) noexcept {
+    return type == DockPaneType::Batch;
+}
+
+bool ContainsExclusivePane(const ToolTab& tab) noexcept {
+    return std::find(
+               tab.panes.begin(),
+               tab.panes.begin() + static_cast<std::ptrdiff_t>(tab.pane_count),
+               DockPaneType::Batch)
+        != tab.panes.begin() + static_cast<std::ptrdiff_t>(tab.pane_count);
+}
+
 }  // namespace
 
 RightToolTabsModel::RightToolTabsModel() noexcept {
@@ -196,13 +208,19 @@ ToolTabResult RightToolTabsModel::AddPaneToSelected(
             ? selection
             : ToolTabResult::NoOp;
     }
+    const ToolTab* selected_tab = SelectedTab();
+    if (RequiresExclusiveTab(type)
+        || (selected_tab != nullptr && ContainsExclusivePane(*selected_tab))) {
+        return CreateTab(type);
+    }
     if (selected_ && FitsSelected(
             type, available_height_px, dpi, splitter_px)) {
-        ToolTab* selected = FindMutable(selected_);
-        if (selected == nullptr || selected->pane_count >= selected->panes.size()) {
+        ToolTab* selected_mutable = FindMutable(selected_);
+        if (selected_mutable == nullptr
+            || selected_mutable->pane_count >= selected_mutable->panes.size()) {
             return ToolTabResult::CapacityExceeded;
         }
-        selected->panes[selected->pane_count++] = type;
+        selected_mutable->panes[selected_mutable->pane_count++] = type;
         return ToolTabResult::Ok;
     }
     return CreateTab(type);
@@ -268,6 +286,9 @@ ToolTabResult RightToolTabsModel::MovePaneInPlace(
     if (TabForPane(type) == destination) {
         return ToolTabResult::NoOp;
     }
+    if (RequiresExclusiveTab(type) || ContainsExclusivePane(*target)) {
+        return ToolTabResult::InvalidTab;
+    }
     if (target->pane_count >= target->panes.size()) {
         return ToolTabResult::CapacityExceeded;
     }
@@ -324,6 +345,10 @@ ToolTabResult RightToolTabsModel::EnsurePaneAssigned(
             : ToolTabResult::NoOp;
     }
     ToolTab* selected = FindMutable(selected_);
+    if (RequiresExclusiveTab(type)
+        || (selected != nullptr && ContainsExclusivePane(*selected))) {
+        return CreateTab(type);
+    }
     if (selected != nullptr && selected->pane_count < selected->panes.size()) {
         selected->panes[selected->pane_count++] = type;
         return ToolTabResult::Ok;
@@ -431,7 +456,8 @@ bool RightToolTabsModel::Load(
     bool selected_seen{};
     for (const ToolTab& tab : tabs) {
         if (!tab.id || tab.pane_count == 0U
-            || tab.pane_count > tab.panes.size()) {
+            || tab.pane_count > tab.panes.size()
+            || (ContainsExclusivePane(tab) && tab.pane_count != 1U)) {
             return false;
         }
         const auto id_end = seen_ids.begin()

@@ -20,6 +20,13 @@
       "resource": false
     },
     {
+      "id": "BatchInputCountFormat",
+      "kind": "format",
+      "ja": "入力 (%zu件)",
+      "en": "Input (%zu items)",
+      "resource": false
+    },
+    {
       "id": "BatchOutput",
       "kind": "text",
       "ja": "出力",
@@ -164,6 +171,20 @@
       "kind": "text",
       "ja": "ファイルまたはフォルダー",
       "en": "File or folder",
+      "resource": false
+    },
+    {
+      "id": "BatchBrowse",
+      "kind": "text",
+      "ja": "参照...",
+      "en": "Browse...",
+      "resource": false
+    },
+    {
+      "id": "BatchInputFileFilter",
+      "kind": "text",
+      "ja": "inkpod/対応画像 (*.inkpod;*.png;*.tif;*.tiff;*.tga;*.bmp)\u0000*.inkpod;*.png;*.tif;*.tiff;*.tga;*.bmp\u0000\u0000",
+      "en": "inkpod / Supported Images (*.inkpod;*.png;*.tif;*.tiff;*.tga;*.bmp)\u0000*.inkpod;*.png;*.tif;*.tiff;*.tga;*.bmp\u0000\u0000",
       "resource": false
     },
     {

@@ -411,6 +411,40 @@ int main() {
         return 123;
     }
 
+    RightToolTabsModel exclusive_batch_tabs{};
+    if (exclusive_batch_tabs.AddPaneToSelected(
+            DockPaneType::Batch, 10'000, 96U, 6)
+            != ToolTabResult::Ok
+        || exclusive_batch_tabs.Tabs().size() != 2U
+        || exclusive_batch_tabs.Selected() != ToolTabId{2U}
+        || exclusive_batch_tabs.Tabs()[1].pane_count != 1U
+        || exclusive_batch_tabs.Tabs()[1].panes[0] != DockPaneType::Batch
+        || exclusive_batch_tabs.AddPaneToSelected(
+               DockPaneType::Locator, 10'000, 96U, 6)
+            != ToolTabResult::Ok
+        || exclusive_batch_tabs.Tabs().size() != 3U
+        || exclusive_batch_tabs.Selected() != ToolTabId{3U}
+        || exclusive_batch_tabs.MovePane(
+               DockPaneType::Batch, ToolTabId{1U})
+            != ToolTabResult::InvalidTab
+        || exclusive_batch_tabs.MovePane(
+               DockPaneType::Color, ToolTabId{2U})
+            != ToolTabResult::InvalidTab
+        || exclusive_batch_tabs.TabForPane(DockPaneType::Batch)
+            != ToolTabId{2U}) {
+        return 133;
+    }
+    const std::array<ToolTab, 1U> invalid_mixed_batch_tab{{
+        ToolTab{
+            ToolTabId{21U},
+            {DockPaneType::Batch, DockPaneType::Reference},
+            2U},
+    }};
+    if (exclusive_batch_tabs.Load(
+            invalid_mixed_batch_tab, ToolTabId{21U}, 22U)) {
+        return 134;
+    }
+
     const std::array<ToolTab, 3U> replacement_tabs{{
         ToolTab{ToolTabId{11U}, {DockPaneType::Sequence}, 1U},
         ToolTab{ToolTabId{12U}, {DockPaneType::Batch}, 1U},

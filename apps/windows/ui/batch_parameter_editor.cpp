@@ -10,6 +10,8 @@
 #include <string>
 
 #include "app/frontend_state.h"
+#include "ui/batch_color_editor_model.h"
+#include "ui/batch_input_picker.h"
 #include "ui/localization.h"
 
 namespace inkpod::windows::ui {
@@ -23,7 +25,7 @@ constexpr int kPathLabel = 4;
 constexpr int kPath = 5;
 constexpr int kTemplateLabel = 6;
 constexpr int kTemplate = 7;
-constexpr int kEnabled = 8;
+constexpr int kBrowse = 8;
 constexpr int kFirstLabel = 9;
 constexpr int kFirst = 10;
 constexpr int kLastLabel = 11;
@@ -35,7 +37,10 @@ constexpr int kSwap = 16;
 constexpr int kCurrent = 17;
 constexpr int kOldSwatch = 18;
 constexpr int kNewSwatch = 19;
-constexpr int kContentHeightDip = 370;
+constexpr int kPrimaryAlphaLabel = 20;
+constexpr int kPrimaryAlpha = 21;
+constexpr int kSecondaryAlphaLabel = 22;
+constexpr int kSecondaryAlpha = 23;
 
 struct EditorState {
     BatchParameterEditorBinding* binding{};
@@ -43,6 +48,7 @@ struct EditorState {
     bool updating{};
     bool enabled{true};
     std::size_t selected_input{};
+    std::size_t selected_color_row{};
     int scroll_y{};
     HWND title{};
     HWND primary{};
@@ -51,7 +57,7 @@ struct EditorState {
     HWND path{};
     HWND template_label{};
     HWND naming_template{};
-    HWND enabled_check{};
+    HWND browse{};
     HWND first_label{};
     HWND first{};
     HWND last_label{};
@@ -63,6 +69,10 @@ struct EditorState {
     HWND current{};
     HWND old_swatch{};
     HWND new_swatch{};
+    HWND primary_alpha_label{};
+    HWND primary_alpha{};
+    HWND secondary_alpha_label{};
+    HWND secondary_alpha{};
 };
 
 int Scale(HWND window, int dip) noexcept {
@@ -138,13 +148,10 @@ std::wstring ColorText(const InkpodColorValue& color) {
         + std::to_wstring(color.alpha);
 }
 
-std::wstring SwatchColorText(const InkpodColorValue& color) {
-    return L"       " + ColorText(color);
-}
-
 std::size_t SelectedRow(const EditorState& state) noexcept {
     const int index = ListView_GetNextItem(state.rows, -1, LVNI_SELECTED);
-    return index < 0 ? 0U : static_cast<std::size_t>(index);
+    return index < 0 ? state.selected_color_row
+                     : static_cast<std::size_t>(index);
 }
 
 void Changed(EditorState& state) noexcept {
@@ -162,7 +169,7 @@ void ResetColumns(HWND list, std::initializer_list<const wchar_t*> labels) noexc
         LVCOLUMNW column{};
         column.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
         column.pszText = const_cast<wchar_t*>(label);
-        column.cx = index == 1 ? 180 : 92;
+        column.cx = 100;
         column.iSubItem = index;
         ListView_InsertColumn(list, index, &column);
         ++index;
@@ -243,12 +250,12 @@ void PopulateOperationRows(EditorState& state, app::BatchOperationUi& operation)
                 state.rows,
                 static_cast<int>(index),
                 1,
-                SwatchColorText(pair.old_color));
+                ColorText(pair.old_color));
             AddCell(
                 state.rows,
                 static_cast<int>(index),
                 2,
-                SwatchColorText(pair.new_color));
+                ColorText(pair.new_color));
         }
     } else {
         ResetColumns(state.rows, {UiText(UiStringId::BatchColors)});
@@ -257,11 +264,59 @@ void PopulateOperationRows(EditorState& state, app::BatchOperationUi& operation)
                 state.rows,
                 static_cast<int>(index),
                 0,
-                SwatchColorText(operation.colors[index]));
+                ColorText(operation.colors[index]));
         }
     }
-    if (ListView_GetItemCount(state.rows) > 0) {
-        ListView_SetItemState(state.rows, 0, LVIS_SELECTED, LVIS_SELECTED);
+    const int row_count = ListView_GetItemCount(state.rows);
+    if (row_count > 0) {
+        state.selected_color_row = std::min(
+            state.selected_color_row,
+            static_cast<std::size_t>(row_count - 1));
+        ListView_SetItemState(
+            state.rows,
+            static_cast<int>(state.selected_color_row),
+            LVIS_SELECTED | LVIS_FOCUSED,
+            LVIS_SELECTED | LVIS_FOCUSED);
+    } else {
+        state.selected_color_row = 0U;
+    }
+}
+
+void ResizeRowColumns(EditorState& state) noexcept {
+    RECT client{};
+    if (GetClientRect(state.rows, &client) == FALSE) {
+        return;
+    }
+    const int width = std::max(0, static_cast<int>(client.right - client.left));
+    const std::size_t operation_count = state.binding == nullptr
+            || state.binding->draft == nullptr
+        ? 0U
+        : state.binding->draft->operations.size();
+    if (state.stage == 0U) {
+        const int kind = width * 20 / 100;
+        const int path = width * 42 / 100;
+        const int range = width * 16 / 100;
+        ListView_SetColumnWidth(state.rows, 0, kind);
+        ListView_SetColumnWidth(state.rows, 1, path);
+        ListView_SetColumnWidth(state.rows, 2, range);
+        ListView_SetColumnWidth(state.rows, 3, std::max(0, width - kind - path - range));
+        return;
+    }
+    if (state.stage == 0U || state.stage > operation_count) {
+        return;
+    }
+    const auto& operation = state.binding->draft->operations[
+        static_cast<std::size_t>(state.stage - 1U)];
+    if (operation.kind == INKPOD_BATCH_OPERATION_COLOR_REPLACE) {
+        const int enabled = std::min(Scale(state.rows, 58), width / 4);
+        const int colors = std::max(0, width - enabled);
+        const int old_color = colors / 2;
+        ListView_SetColumnWidth(state.rows, 0, enabled);
+        ListView_SetColumnWidth(state.rows, 1, old_color);
+        ListView_SetColumnWidth(
+            state.rows, 2, std::max(0, colors - old_color));
+    } else {
+        ListView_SetColumnWidth(state.rows, 0, width);
     }
 }
 
@@ -281,38 +336,110 @@ void Layout(EditorState& state, HWND window) noexcept {
     };
     place(state.title, margin, y, width, row);
     y += row + gap;
-    place(state.primary, margin, y, width, row);
-    place(state.secondary, margin, y, width, row);
-    place(state.enabled_check, margin, y, width, row);
-    y += row + gap;
-    place(state.path_label, margin, y, width, row);
-    y += row;
-    place(state.path, margin, y, width, row);
-    y += row + gap;
-    place(state.template_label, margin, y, width, row);
-    y += row;
-    place(state.naming_template, margin, y, width, row);
-    y += row + gap;
     const int half = std::max(0, (width - gap) / 2);
-    place(state.first_label, margin, y, half, row);
-    place(state.last_label, margin + half + gap, y, half, row);
-    y += row;
-    place(state.first, margin, y, half, row);
-    place(state.last, margin + half + gap, y, half, row);
-    y += row + gap;
-    place(state.rows, margin, y, width, Scale(window, 116));
-    y += Scale(window, 116) + gap;
-    const int button_width = std::max(Scale(window, 72), (width - gap * 2) / 3);
-    place(state.add, margin, y, button_width, row);
-    place(state.remove, margin + button_width + gap, y, button_width, row);
-    place(state.swap, margin + (button_width + gap) * 2, y, button_width, row);
-    y += row + gap;
-    place(state.current, margin, y, button_width, row);
-    place(state.old_swatch, margin + button_width + gap, y, button_width, row);
-    place(state.new_swatch, margin + (button_width + gap) * 2, y, button_width, row);
+    const std::size_t operation_count = state.binding == nullptr
+            || state.binding->draft == nullptr
+        ? 0U
+        : state.binding->draft->operations.size();
+    const bool input = state.stage == 0U;
+    const bool output = state.stage == operation_count + 1U;
+    if (input) {
+        place(state.primary, margin, y, width, row);
+        y += row + gap;
+        place(state.path_label, margin, y, width, row);
+        y += row;
+        const int browse_width = std::min(Scale(window, 92), width / 3);
+        place(state.path, margin, y, std::max(0, width - browse_width - gap), row);
+        place(
+            state.browse,
+            margin + std::max(0, width - browse_width),
+            y,
+            browse_width,
+            row);
+        y += row + gap;
+        place(state.first_label, margin, y, half, row);
+        place(state.last_label, margin + half + gap, y, half, row);
+        y += row;
+        place(state.first, margin, y, half, row);
+        place(state.last, margin + half + gap, y, half, row);
+        y += row + gap;
+        const int list_height = Scale(window, 118);
+        place(state.rows, margin, y, width, list_height);
+        y += list_height + gap;
+        const int button_width = std::max(0, (width - gap) / 2);
+        place(state.add, margin, y, button_width, row);
+        place(state.remove, margin + button_width + gap, y, button_width, row);
+        y += row;
+    } else if (output) {
+        place(state.primary, margin, y, half, row);
+        place(state.secondary, margin + half + gap, y, half, row);
+        y += row + gap;
+        if (IsWindowVisible(state.path_label) != FALSE) {
+            place(state.path_label, margin, y, width, row);
+            y += row;
+            const int browse_width = std::min(Scale(window, 92), width / 3);
+            place(state.path, margin, y, std::max(0, width - browse_width - gap), row);
+            place(
+                state.browse,
+                margin + std::max(0, width - browse_width),
+                y,
+                browse_width,
+                row);
+            y += row + gap;
+        }
+        place(state.template_label, margin, y, width, row);
+        y += row;
+        place(state.naming_template, margin, y, width, row);
+        y += row;
+    } else {
+        place(state.first_label, margin, y, half, row);
+        place(state.last_label, margin + half + gap, y, half, row);
+        y += row;
+        place(state.first, margin, y, half, row);
+        place(state.last, margin + half + gap, y, half, row);
+        y += row + gap;
+        const int list_height = Scale(window, 150);
+        place(state.rows, margin, y, width, list_height);
+        y += list_height + gap;
+        const int button_width = std::max(0, (width - gap * 2) / 3);
+        place(state.add, margin, y, button_width, row);
+        place(state.remove, margin + button_width + gap, y, button_width, row);
+        place(state.swap, margin + (button_width + gap) * 2, y, button_width, row);
+        y += row + gap;
+        place(state.current, margin, y, button_width, row);
+        place(state.old_swatch, margin + button_width + gap, y, button_width, row);
+        place(state.new_swatch, margin + (button_width + gap) * 2, y, button_width, row);
+        y += row + gap;
+        const bool two_alpha_fields =
+            (GetWindowLongPtrW(state.secondary_alpha_label, GWL_STYLE)
+             & WS_VISIBLE)
+            != 0;
+        const int alpha_width = two_alpha_fields ? half : width;
+        place(state.primary_alpha_label, margin, y, alpha_width, row);
+        if (two_alpha_fields) {
+            place(
+                state.secondary_alpha_label,
+                margin + alpha_width + gap,
+                y,
+                alpha_width,
+                row);
+        }
+        y += row;
+        place(state.primary_alpha, margin, y, alpha_width, row);
+        if (two_alpha_fields) {
+            place(
+                state.secondary_alpha,
+                margin + alpha_width + gap,
+                y,
+                alpha_width,
+                row);
+        }
+        y += row;
+    }
+    ResizeRowColumns(state);
 
     const int viewport = client.bottom - client.top;
-    const int content = Scale(window, kContentHeightDip);
+    const int content = std::max(0, y + state.scroll_y + margin);
     SCROLLINFO scroll{};
     scroll.cbSize = sizeof(scroll);
     scroll.fMask = SIF_PAGE | SIF_RANGE | SIF_POS;
@@ -333,6 +460,85 @@ app::BatchOperationUi* SelectedOperation(EditorState& state) noexcept {
     return index < operations.size() ? &operations[index] : nullptr;
 }
 
+std::wstring ColorAlphaLabel(
+    bool named_slot,
+    bool secondary,
+    const InkpodColorValue& color) {
+    std::wstring label;
+    if (named_slot) {
+        label = UiText(
+            secondary ? UiStringId::Text0705 : UiStringId::Text0723);
+        label.push_back(L' ');
+    }
+    label += UiText(UiStringId::Opacity);
+    label += L" (0–";
+    label += color.depth == INKPOD_COLOR_DEPTH_16 ? L"65535" : L"255";
+    label.push_back(L')');
+    return label;
+}
+
+void RefreshSelectedColorControls(EditorState& state) noexcept {
+    auto* operation = SelectedOperation(state);
+    const std::size_t row = SelectedRow(state);
+    const bool color_replace = operation != nullptr
+        && operation->kind == INKPOD_BATCH_OPERATION_COLOR_REPLACE;
+    const InkpodColorValue* primary = operation == nullptr
+        ? nullptr
+        : BatchOperationColor(*operation, row, BatchColorSlot::Primary);
+    const InkpodColorValue* secondary = !color_replace
+        ? nullptr
+        : BatchOperationColor(*operation, row, BatchColorSlot::Secondary);
+    if (primary != nullptr) {
+        SetWindowTextW(
+            state.primary_alpha_label,
+            ColorAlphaLabel(color_replace, false, *primary).c_str());
+        SetText(state.primary_alpha, Number(primary->alpha));
+    } else {
+        SetWindowTextW(state.primary_alpha_label, UiText(UiStringId::Opacity));
+        SetWindowTextW(state.primary_alpha, L"");
+    }
+    if (secondary != nullptr) {
+        SetWindowTextW(
+            state.secondary_alpha_label,
+            ColorAlphaLabel(true, true, *secondary).c_str());
+        SetText(state.secondary_alpha, Number(secondary->alpha));
+    } else {
+        SetWindowTextW(state.secondary_alpha_label, L"");
+        SetWindowTextW(state.secondary_alpha, L"");
+    }
+    EnableWindow(
+        state.primary_alpha,
+        state.enabled && primary != nullptr ? TRUE : FALSE);
+    EnableWindow(
+        state.secondary_alpha,
+        state.enabled && secondary != nullptr ? TRUE : FALSE);
+    InvalidateRect(state.old_swatch, nullptr, TRUE);
+    InvalidateRect(state.new_swatch, nullptr, TRUE);
+}
+
+void CommitColorAlpha(
+    EditorState& state, bool secondary_slot) noexcept {
+    auto* operation = SelectedOperation(state);
+    if (operation == nullptr) {
+        return;
+    }
+    const std::size_t row = SelectedRow(state);
+    std::uint64_t alpha{};
+    HWND edit = secondary_slot ? state.secondary_alpha : state.primary_alpha;
+    if (ReadNumber(edit, alpha) && alpha <= UINT32_MAX
+        && SetBatchOperationColorAlpha(
+            *operation,
+            row,
+            secondary_slot ? BatchColorSlot::Secondary
+                           : BatchColorSlot::Primary,
+            static_cast<std::uint32_t>(alpha))) {
+        state.selected_color_row = row;
+        Changed(state);
+    } else {
+        RefreshSelectedColorControls(state);
+    }
+}
+
 void Refresh(EditorState& state, HWND window) noexcept {
     if (state.binding == nullptr || state.binding->draft == nullptr) {
         return;
@@ -342,17 +548,19 @@ void Refresh(EditorState& state, HWND window) noexcept {
     const bool input = state.stage == 0U;
     const bool output = state.stage == draft.operations.size() + 1U;
     const bool operation = !input && !output;
+    const bool folder_output = output
+        && draft.output_destination == INKPOD_BATCH_OUTPUT_FOLDER;
     app::BatchOperationUi* const selected_operation =
         operation ? SelectedOperation(state) : nullptr;
     const bool color_replace = selected_operation != nullptr
         && selected_operation->kind == INKPOD_BATCH_OPERATION_COLOR_REPLACE;
     Show(state.primary, input || output);
     Show(state.secondary, output);
-    Show(state.path_label, input || output);
-    Show(state.path, input || output);
+    Show(state.path_label, input || folder_output);
+    Show(state.path, input || folder_output);
+    Show(state.browse, input || folder_output);
     Show(state.template_label, output);
     Show(state.naming_template, output);
-    Show(state.enabled_check, operation);
     Show(state.first_label, input || operation);
     Show(state.first, input || operation);
     Show(state.last_label, input || operation);
@@ -364,6 +572,10 @@ void Refresh(EditorState& state, HWND window) noexcept {
     Show(state.current, operation);
     Show(state.old_swatch, operation);
     Show(state.new_swatch, color_replace);
+    Show(state.primary_alpha_label, operation);
+    Show(state.primary_alpha, operation);
+    Show(state.secondary_alpha_label, color_replace);
+    Show(state.secondary_alpha, color_replace);
 
     SendMessageW(state.primary, CB_RESETCONTENT, 0, 0);
     SendMessageW(state.secondary, CB_RESETCONTENT, 0, 0);
@@ -429,13 +641,6 @@ void Refresh(EditorState& state, HWND window) noexcept {
         SetText(state.naming_template, draft.naming_template);
     } else if (auto* selected = selected_operation; selected != nullptr) {
         SetText(state.title, selected->label);
-        SendMessageW(
-            state.enabled_check,
-            BM_SETCHECK,
-            (selected->flags & INKPOD_BATCH_OPERATION_ENABLED) != 0U
-                ? BST_CHECKED
-                : BST_UNCHECKED,
-            0);
         SetWindowTextW(state.first_label, UiText(UiStringId::BatchLayerId));
         SetWindowTextW(state.last_label, UiText(UiStringId::BatchPlaneId));
         SetText(state.first, Number(selected->layer_id));
@@ -451,17 +656,21 @@ void Refresh(EditorState& state, HWND window) noexcept {
         SetWindowTextW(state.new_swatch, UiText(UiStringId::Text0705));
         PopulateOperationRows(state, *selected);
     }
-    for (HWND control : {state.primary, state.secondary, state.path,
-                         state.naming_template, state.enabled_check, state.first,
+    SetWindowTextW(state.browse, UiText(UiStringId::BatchBrowse));
+    for (HWND control : {state.primary, state.secondary, state.path, state.browse,
+                         state.naming_template, state.first,
                          state.last, state.rows, state.add, state.remove, state.swap,
-                         state.current, state.old_swatch, state.new_swatch}) {
+                         state.current, state.old_swatch, state.new_swatch,
+                         state.primary_alpha, state.secondary_alpha}) {
         EnableWindow(control, state.enabled ? TRUE : FALSE);
     }
     if (input && !draft.inputs.empty()
         && draft.inputs[state.selected_input].kind
             == INKPOD_BATCH_INPUT_ACTIVE_DOCUMENT) {
         EnableWindow(state.path, FALSE);
+        EnableWindow(state.browse, FALSE);
     }
+    RefreshSelectedColorControls(state);
     state.updating = false;
     Layout(state, window);
 }
@@ -483,15 +692,10 @@ const InkpodColorValue* SelectedSwatchColor(
     if (operation == nullptr) {
         return nullptr;
     }
-    const std::size_t row = SelectedRow(state);
-    if (operation->kind == INKPOD_BATCH_OPERATION_COLOR_REPLACE) {
-        if (row >= operation->color_pairs.size()) {
-            return nullptr;
-        }
-        return old_color ? &operation->color_pairs[row].old_color
-                         : &operation->color_pairs[row].new_color;
-    }
-    return row < operation->colors.size() ? &operation->colors[row] : nullptr;
+    return BatchOperationColor(
+        *operation,
+        SelectedRow(state),
+        old_color ? BatchColorSlot::Primary : BatchColorSlot::Secondary);
 }
 
 void DrawSwatch(EditorState& state, const DRAWITEMSTRUCT& item) noexcept {
@@ -559,16 +763,15 @@ const InkpodColorValue* ListCellColor(
         return nullptr;
     }
     if (operation->kind == INKPOD_BATCH_OPERATION_COLOR_REPLACE) {
-        if (row >= operation->color_pairs.size()) {
-            return nullptr;
-        }
-        if (column == 1) {
-            return &operation->color_pairs[row].old_color;
-        }
-        return column == 2 ? &operation->color_pairs[row].new_color : nullptr;
+        return column == 1
+            ? BatchOperationColor(*operation, row, BatchColorSlot::Primary)
+            : (column == 2
+                   ? BatchOperationColor(
+                         *operation, row, BatchColorSlot::Secondary)
+                   : nullptr);
     }
-    return column == 0 && row < operation->colors.size()
-        ? &operation->colors[row]
+    return column == 0
+        ? BatchOperationColor(*operation, row, BatchColorSlot::Primary)
         : nullptr;
 }
 
@@ -595,7 +798,7 @@ COLORREF CompositeSwatchColor(
         channel(color.blue, GetBValue(background)));
 }
 
-void DrawListSwatch(
+void DrawListColorCell(
     EditorState& state, const NMLVCUSTOMDRAW& draw) noexcept {
     const std::size_t row = static_cast<std::size_t>(draw.nmcd.dwItemSpec);
     const int column = draw.iSubItem;
@@ -620,6 +823,18 @@ void DrawListSwatch(
                == FALSE) {
         return;
     }
+    const bool selected =
+        (ListView_GetItemState(
+             state.rows, static_cast<int>(row), LVIS_SELECTED)
+         & LVIS_SELECTED)
+        != 0U;
+    const COLORREF background = GetSysColor(
+        selected ? COLOR_HIGHLIGHT : COLOR_WINDOW);
+    FillRect(
+        draw.nmcd.hdc,
+        &cell,
+        GetSysColorBrush(selected ? COLOR_HIGHLIGHT : COLOR_WINDOW));
+
     RECT sample = cell;
     sample.left += Scale(state.rows, 5);
     sample.right = std::min(
@@ -632,7 +847,7 @@ void DrawListSwatch(
     }
 
     const COLORREF checker[2]{
-        GetSysColor(COLOR_WINDOW), GetSysColor(COLOR_BTNFACE)};
+        background, GetSysColor(selected ? COLOR_HOTLIGHT : COLOR_BTNFACE)};
     const int square = std::max(1, Scale(state.rows, 4));
     for (int top = sample.top, y = 0; top < sample.bottom; top += square, ++y) {
         for (int left = sample.left, x = 0;
@@ -655,6 +870,29 @@ void DrawListSwatch(
         }
     }
     FrameRect(draw.nmcd.hdc, &sample, GetSysColorBrush(COLOR_WINDOWTEXT));
+
+    RECT text = cell;
+    text.left = sample.right + Scale(state.rows, 6);
+    text.right -= Scale(state.rows, 4);
+    const std::wstring label = ColorText(*color);
+    const HFONT font = reinterpret_cast<HFONT>(
+        SendMessageW(state.rows, WM_GETFONT, 0, 0));
+    const HGDIOBJ previous = font == nullptr
+        ? nullptr
+        : SelectObject(draw.nmcd.hdc, font);
+    SetBkMode(draw.nmcd.hdc, TRANSPARENT);
+    SetTextColor(
+        draw.nmcd.hdc,
+        GetSysColor(selected ? COLOR_HIGHLIGHTTEXT : COLOR_WINDOWTEXT));
+    DrawTextW(
+        draw.nmcd.hdc,
+        label.c_str(),
+        static_cast<int>(label.size()),
+        &text,
+        DT_END_ELLIPSIS | DT_NOPREFIX | DT_SINGLELINE | DT_VCENTER);
+    if (previous != nullptr) {
+        SelectObject(draw.nmcd.hdc, previous);
+    }
 }
 
 LRESULT DrawListRows(EditorState& state, const NMLVCUSTOMDRAW& draw) noexcept {
@@ -664,15 +902,14 @@ LRESULT DrawListRows(EditorState& state, const NMLVCUSTOMDRAW& draw) noexcept {
         case CDDS_ITEMPREPAINT:
             return CDRF_NOTIFYSUBITEMDRAW;
         case CDDS_ITEMPREPAINT | CDDS_SUBITEM:
-            return ListCellColor(
+            if (ListCellColor(
                        state,
                        static_cast<std::size_t>(draw.nmcd.dwItemSpec),
                        draw.iSubItem)
-                    != nullptr
-                ? CDRF_NOTIFYPOSTPAINT
-                : CDRF_DODEFAULT;
-        case CDDS_ITEMPOSTPAINT | CDDS_SUBITEM:
-            DrawListSwatch(state, draw);
+                != nullptr) {
+                DrawListColorCell(state, draw);
+                return CDRF_SKIPDEFAULT;
+            }
             return CDRF_DODEFAULT;
         default:
             return CDRF_DODEFAULT;
@@ -776,36 +1013,190 @@ void ChooseRowColor(EditorState& state, HWND window, bool old_color) noexcept {
         return;
     }
     const std::size_t row = SelectedRow(state);
-    InkpodColorValue* color{};
-    if (operation->kind == INKPOD_BATCH_OPERATION_COLOR_REPLACE) {
-        if (row >= operation->color_pairs.size()) {
-            return;
-        }
-        color = old_color ? &operation->color_pairs[row].old_color
-                          : &operation->color_pairs[row].new_color;
-    } else {
-        if (row >= operation->colors.size()) {
-            return;
-        }
-        color = &operation->colors[row];
+    const BatchColorSlot slot = old_color ? BatchColorSlot::Primary
+                                          : BatchColorSlot::Secondary;
+    const InkpodColorValue* selected = BatchOperationColor(*operation, row, slot);
+    if (selected == nullptr) {
+        return;
     }
+    InkpodColorValue color = *selected;
     static std::array<COLORREF, 16U> custom{};
-    const unsigned divisor = color->depth == INKPOD_COLOR_DEPTH_16 ? 257U : 1U;
+    const unsigned divisor = color.depth == INKPOD_COLOR_DEPTH_16 ? 257U : 1U;
     CHOOSECOLORW chooser{};
     chooser.lStructSize = sizeof(chooser);
     chooser.hwndOwner = window;
     chooser.rgbResult = RGB(
-        color->red / divisor, color->green / divisor, color->blue / divisor);
+        color.red / divisor, color.green / divisor, color.blue / divisor);
     chooser.lpCustColors = custom.data();
     chooser.Flags = CC_FULLOPEN | CC_RGBINIT;
     if (ChooseColorW(&chooser) == FALSE) {
         return;
     }
-    color->red = static_cast<std::uint16_t>(GetRValue(chooser.rgbResult) * divisor);
-    color->green = static_cast<std::uint16_t>(GetGValue(chooser.rgbResult) * divisor);
-    color->blue = static_cast<std::uint16_t>(GetBValue(chooser.rgbResult) * divisor);
+    color.red = static_cast<std::uint16_t>(GetRValue(chooser.rgbResult) * divisor);
+    color.green = static_cast<std::uint16_t>(GetGValue(chooser.rgbResult) * divisor);
+    color.blue = static_cast<std::uint16_t>(GetBValue(chooser.rgbResult) * divisor);
+    if (SetBatchOperationColor(*operation, row, slot, color)) {
+        state.selected_color_row = row;
+        Changed(state);
+    }
+}
+
+void ApplyDrawingColor(EditorState& state, BatchColorSlot slot) noexcept {
+    auto* operation = SelectedOperation(state);
+    if (operation == nullptr) {
+        return;
+    }
+    const std::size_t row = SelectedRow(state);
+    if (SetBatchOperationColor(*operation, row, slot, DrawingColor(state))) {
+        state.selected_color_row = row;
+        Changed(state);
+    }
+}
+
+void ShowDrawingColorMenu(EditorState& state, HWND window) noexcept {
+    auto* operation = SelectedOperation(state);
+    if (operation == nullptr) {
+        return;
+    }
+    if (operation->kind != INKPOD_BATCH_OPERATION_COLOR_REPLACE) {
+        ApplyDrawingColor(state, BatchColorSlot::Primary);
+        return;
+    }
+
+    HMENU menu = CreatePopupMenu();
+    if (menu == nullptr) {
+        return;
+    }
+    constexpr UINT kUseForOldColor = 1U;
+    constexpr UINT kUseForNewColor = 2U;
+    AppendMenuW(
+        menu, MF_STRING, kUseForOldColor, UiText(UiStringId::Text0723));
+    AppendMenuW(
+        menu, MF_STRING, kUseForNewColor, UiText(UiStringId::Text0705));
+    RECT anchor{};
+    GetWindowRect(state.current, &anchor);
+    const UINT command = TrackPopupMenuEx(
+        menu,
+        TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_LEFTALIGN | TPM_TOPALIGN,
+        anchor.left,
+        anchor.bottom,
+        window,
+        nullptr);
+    DestroyMenu(menu);
+    if (command == kUseForOldColor) {
+        ApplyDrawingColor(state, BatchColorSlot::Primary);
+    } else if (command == kUseForNewColor) {
+        ApplyDrawingColor(state, BatchColorSlot::Secondary);
+    }
+}
+
+void BrowsePath(EditorState& state, HWND window) noexcept {
+    if (state.binding == nullptr || state.binding->draft == nullptr) {
+        return;
+    }
+    auto& draft = *state.binding->draft;
+    if (state.stage == 0U) {
+        if (state.selected_input >= draft.inputs.size()) {
+            return;
+        }
+        const auto kind = draft.inputs[state.selected_input].kind;
+        if (kind == INKPOD_BATCH_INPUT_ACTIVE_DOCUMENT) {
+            return;
+        }
+        if (kind == INKPOD_BATCH_INPUT_FOLDER) {
+            std::wstring folder;
+            if (!ChooseBatchFolder(
+                    window, UiText(UiStringId::Text0261), folder)) {
+                return;
+            }
+            try {
+                draft.inputs[state.selected_input].path = std::move(folder);
+            } catch (const std::bad_alloc&) {
+                return;
+            }
+        } else {
+            std::vector<std::wstring> paths;
+            if (!ChooseBatchInputFiles(
+                    window,
+                    UiText(UiStringId::BatchInputFileFilter),
+                    paths)
+                || paths.empty()
+                || draft.inputs.size() > 16'384U
+                || paths.size() > 16'384U - draft.inputs.size() + 1U) {
+                return;
+            }
+            try {
+                auto candidate = draft.inputs;
+                auto selected = candidate[state.selected_input];
+                selected.kind = INKPOD_BATCH_INPUT_FILE;
+                selected.path = paths[0];
+                candidate[state.selected_input] = selected;
+                for (std::size_t index = 1U; index < paths.size(); ++index) {
+                    auto additional = selected;
+                    additional.path = paths[index];
+                    candidate.insert(
+                        candidate.begin()
+                            + static_cast<std::ptrdiff_t>(
+                                state.selected_input + index),
+                        std::move(additional));
+                }
+                draft.inputs.swap(candidate);
+            } catch (const std::bad_alloc&) {
+                return;
+            }
+        }
+    } else if (state.stage == draft.operations.size() + 1U
+               && draft.output_destination == INKPOD_BATCH_OUTPUT_FOLDER) {
+        std::wstring folder;
+        if (!ChooseBatchFolder(
+                window, UiText(UiStringId::Text0261), folder)) {
+            return;
+        }
+        try {
+            draft.output_folder = std::move(folder);
+        } catch (const std::bad_alloc&) {
+            return;
+        }
+    } else {
+        return;
+    }
     Changed(state);
     Refresh(state, window);
+}
+
+void ApplyEditorFont(EditorState& state, HWND window) noexcept {
+    HFONT font = reinterpret_cast<HFONT>(
+        SendMessageW(GetParent(window), WM_GETFONT, 0, 0));
+    if (font == nullptr) {
+        font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+    }
+    SendMessageW(window, WM_SETFONT, reinterpret_cast<WPARAM>(font), FALSE);
+    for (HWND control : {
+             state.title,
+             state.primary,
+             state.secondary,
+             state.path_label,
+             state.path,
+             state.browse,
+             state.template_label,
+             state.naming_template,
+             state.first_label,
+             state.first,
+             state.last_label,
+             state.last,
+             state.rows,
+             state.add,
+             state.remove,
+             state.swap,
+             state.current,
+             state.old_swatch,
+             state.new_swatch,
+             state.primary_alpha_label,
+             state.primary_alpha,
+             state.secondary_alpha_label,
+             state.secondary_alpha}) {
+        SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), FALSE);
+    }
 }
 
 LRESULT CALLBACK EditorProcedure(
@@ -844,9 +1235,9 @@ LRESULT CALLBACK EditorProcedure(
             state->naming_template = Child(
                 window, WS_EX_CLIENTEDGE, WC_EDITW, L"",
                 ES_AUTOHSCROLL | WS_TABSTOP, kTemplate);
-            state->enabled_check = Child(
-                window, 0, WC_BUTTONW, UiText(UiStringId::BatchEnabled),
-                BS_AUTOCHECKBOX | WS_TABSTOP, kEnabled);
+            state->browse = Child(
+                window, 0, WC_BUTTONW, UiText(UiStringId::BatchBrowse),
+                WS_TABSTOP, kBrowse);
             state->first_label = Child(window, 0, WC_STATICW, L"", SS_LEFT, kFirstLabel);
             state->first = Child(
                 window, WS_EX_CLIENTEDGE, WC_EDITW, L"",
@@ -874,6 +1265,19 @@ LRESULT CALLBACK EditorProcedure(
             state->new_swatch = Child(
                 window, 0, WC_BUTTONW, UiText(UiStringId::Text0705),
                 BS_OWNERDRAW | WS_TABSTOP, kNewSwatch);
+            state->primary_alpha_label = Child(
+                window, 0, WC_STATICW, L"", SS_LEFT, kPrimaryAlphaLabel);
+            state->primary_alpha = Child(
+                window, WS_EX_CLIENTEDGE, WC_EDITW, L"",
+                ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP, kPrimaryAlpha);
+            state->secondary_alpha_label = Child(
+                window, 0, WC_STATICW, L"", SS_LEFT, kSecondaryAlphaLabel);
+            state->secondary_alpha = Child(
+                window, WS_EX_CLIENTEDGE, WC_EDITW, L"",
+                ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP, kSecondaryAlpha);
+            SendMessageW(state->primary_alpha, EM_SETLIMITTEXT, 5U, 0);
+            SendMessageW(state->secondary_alpha, EM_SETLIMITTEXT, 5U, 0);
+            ApplyEditorFont(*state, window);
             Refresh(*state, window);
             return 0;
         case WM_SIZE:
@@ -904,17 +1308,7 @@ LRESULT CALLBACK EditorProcedure(
                 return 0;
             }
             switch (LOWORD(wparam)) {
-                case kEnabled:
-                    if (auto* operation = SelectedOperation(*state); operation != nullptr) {
-                        if (SendMessageW(state->enabled_check, BM_GETCHECK, 0, 0)
-                            == BST_CHECKED) {
-                            operation->flags |= INKPOD_BATCH_OPERATION_ENABLED;
-                        } else {
-                            operation->flags &= ~INKPOD_BATCH_OPERATION_ENABLED;
-                        }
-                        Changed(*state);
-                    }
-                    return 0;
+                case kBrowse: BrowsePath(*state, window); return 0;
                 case kPrimary:
                     if (HIWORD(wparam) == CBN_SELCHANGE
                         && state->stage == 0U) {
@@ -941,6 +1335,7 @@ LRESULT CALLBACK EditorProcedure(
                         state->binding->draft->output_destination =
                             static_cast<std::uint32_t>(index + 1);
                         Changed(*state);
+                        Refresh(*state, window);
                     }
                     return 0;
                 case kSecondary:
@@ -959,6 +1354,16 @@ LRESULT CALLBACK EditorProcedure(
                         CommitText(*state);
                     }
                     return 0;
+                case kPrimaryAlpha:
+                    if (HIWORD(wparam) == EN_KILLFOCUS) {
+                        CommitColorAlpha(*state, false);
+                    }
+                    return 0;
+                case kSecondaryAlpha:
+                    if (HIWORD(wparam) == EN_KILLFOCUS) {
+                        CommitColorAlpha(*state, true);
+                    }
+                    return 0;
                 case kAdd: AddRow(*state, window); return 0;
                 case kRemove: RemoveRow(*state, window); return 0;
                 case kSwap:
@@ -973,17 +1378,7 @@ LRESULT CALLBACK EditorProcedure(
                     }
                     return 0;
                 case kCurrent:
-                    if (auto* operation = SelectedOperation(*state); operation != nullptr) {
-                        const std::size_t row = SelectedRow(*state);
-                        if (operation->kind == INKPOD_BATCH_OPERATION_COLOR_REPLACE
-                            && row < operation->color_pairs.size()) {
-                            operation->color_pairs[row].new_color = DrawingColor(*state);
-                        } else if (row < operation->colors.size()) {
-                            operation->colors[row] = DrawingColor(*state);
-                        }
-                        Changed(*state);
-                        Refresh(*state, window);
-                    }
+                    ShowDrawingColorMenu(*state, window);
                     return 0;
                 case kOldSwatch: ChooseRowColor(*state, window, true); return 0;
                 case kNewSwatch: ChooseRowColor(*state, window, false); return 0;
@@ -1014,6 +1409,20 @@ LRESULT CALLBACK EditorProcedure(
                     state->selected_input = static_cast<std::size_t>(
                         changed->iItem);
                     Refresh(*state, window);
+                }
+                return 0;
+            }
+            if (!state->updating
+                && reinterpret_cast<NMHDR*>(lparam)->idFrom == kRows
+                && reinterpret_cast<NMHDR*>(lparam)->code == LVN_ITEMCHANGED
+                && state->stage > 0U) {
+                const auto* changed = reinterpret_cast<NMLISTVIEW*>(lparam);
+                if ((changed->uNewState & LVIS_SELECTED) != 0U
+                    && changed->iItem >= 0) {
+                    state->selected_color_row = static_cast<std::size_t>(
+                        changed->iItem);
+                    RefreshSelectedColorControls(*state);
+                    InvalidateRect(state->rows, nullptr, FALSE);
                 }
                 return 0;
             }
@@ -1091,6 +1500,9 @@ void UpdateBatchParameterEditor(
         GetWindowLongPtrW(editor, GWLP_USERDATA));
     if (state == nullptr) {
         return;
+    }
+    if (state->stage != selected_stage) {
+        state->selected_color_row = 0U;
     }
     state->stage = selected_stage;
     state->enabled = enabled;

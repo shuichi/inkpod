@@ -702,13 +702,30 @@ progress/result only there, closes the job, and restores the prior follow/pin
 policy. Closed/stale targets and queue failure cannot redirect a result.
 
 The Batch pane owns only an editable UI-thread draft. Its stage List-View always
-contains one fixed Input row, ordered operation rows, and one fixed Output row.
+contains one fixed Input row, ordered operation rows, and one fixed Output row;
+only operation rows draw a standard checkbox and accept checkbox-hit/Space
+toggles. Input and Output never reserve a checkbox cell, and the operation flag
+in the draft is the single source of truth rather than a generated state-image
+index.
 Selection changes only the inline scrollable `batch_parameter_editor`; they do
 not mutate Core or an immutable graph. Add/duplicate/remove/move change only the
 four-kind draft operation list. Preview, run, and save each validate the draft
 and construct one Rust-owned immutable v3 graph. Load performs the inverse query
 through `inkpod_batch_graph_get_info`, `get_input`, and operation row queries,
 so a loaded set is editable rather than a count-only opaque object.
+
+The parameter editor inherits the pane font, lays out only the controls for its
+selected page at natural compact spacing, and gives color columns the full list
+client width. Custom-drawn cells reserve separate alpha-aware swatch and native-
+depth RGBA text rectangles and query the List-View's actual single-selection
+state while painting. A small Windows-only color-editor model owns row/slot
+validation: the selected old/new color exposes a native-range alpha edit, the
+common RGB chooser preserves alpha, and the drawing-color button chooses old or
+new through a localized popup for Color Replace. The Windows-only
+`batch_input_picker` provides a
+bounded multi-file common dialog and filesystem folder dialog; it accepts only
+the Batch-supported formats and copies the returned paths into the draft before
+the dialog buffer expires.
 
 The editable set-name combo enumerates extension-free `.inkbatch` filenames in
 `%APPDATA%\inkpod\batch-sets`. The Windows-only `batch_set_store` creates that
@@ -770,8 +787,8 @@ centered system-color rule, highlighted on hover, capture, or keyboard focus;
 the internal Layer/Plane splitter follows the same presentation and accessibility
 rules. Inspector pane context menus provide tab/split, dock, float, hide, restore,
 and reset without retargeting a document command. Window-menu pane visibility
-entries, including Batch, are direct checked toggles; Color and Batch target
-pin/follow commands remain pane-local. Floating close
+entries, including Batch, are direct checked toggles; Color target pin/follow
+commands remain pane-local, while Batch exposes neither. Floating close
 maps to hide, preserving the pane's controller state. All HWND and Common
 Controls activity remains on the UI/Input thread; Core and renderer ownership is
 unchanged.
@@ -781,9 +798,11 @@ stable layout ID and an ordered unique pane-type list, and one selected ID is
 stored separately. The first pane supplies the localized tab label; the full
 ordered list supplies tooltip and accessibility text. Adding a hidden pane uses
 the selected tab only when the DPI-scaled minimum heights plus splitters fit,
-otherwise it creates a singleton tab. Moving and reordering use copy-then-publish
-model updates, while removing the last pane deletes the tab and selects previous,
-next, then first. Tool and Tool Options never enter this model.
+otherwise it creates a singleton tab. Batch is always created as a new singleton
+tab; adding to a selected Batch tab creates another tab, and add/move/load reject
+any mixed Batch membership. Moving and reordering use copy-then-publish model
+updates, while removing the last pane deletes the tab and selects previous, next,
+then first. Tool and Tool Options never enter this model.
 
 The frontend persists a bounded version 9 workspace record in HKCU. It contains only main
 window placement, editor split orientation/ratio, dock zones/order/ratios,

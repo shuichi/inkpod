@@ -1,7 +1,6 @@
 #pragma once
 
 #include <windows.h>
-
 #include <array>
 #include <cstdint>
 #include <string>
@@ -34,6 +33,7 @@ struct BatchPaletteDialogState {
     BatchPaletteRefreshCallback refresh{};
     BatchParameterEditorBinding parameter_editor{};
     HWND parameter_host{};
+    bool updating{};
 };
 
 struct BatchPaletteView {

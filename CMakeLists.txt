@@ -373,6 +373,43 @@ if(WIN32)
         NAME inkpod_windows_batch_set_store
         COMMAND inkpod_windows_batch_set_store_tests)
 
+    add_executable(inkpod_windows_batch_input_picker_tests
+        apps/windows/ui/batch_input_picker.cpp
+        apps/windows/ui/batch_input_picker.h
+        tests/windows_batch_input_picker.cpp)
+    target_include_directories(inkpod_windows_batch_input_picker_tests PRIVATE
+        "${CMAKE_SOURCE_DIR}/apps/windows")
+    target_compile_definitions(inkpod_windows_batch_input_picker_tests PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(inkpod_windows_batch_input_picker_tests PRIVATE
+        comdlg32
+        ole32
+        shell32)
+    if(MSVC)
+        inkpod_enable_strict_warnings(inkpod_windows_batch_input_picker_tests)
+        target_compile_options(inkpod_windows_batch_input_picker_tests PRIVATE /EHsc)
+    endif()
+    add_test(
+        NAME inkpod_windows_batch_input_picker
+        COMMAND inkpod_windows_batch_input_picker_tests)
+
+    add_executable(inkpod_windows_batch_color_editor_tests
+        apps/windows/ui/batch_color_editor_model.cpp
+        apps/windows/ui/batch_color_editor_model.h
+        tests/windows_batch_color_editor.cpp)
+    target_include_directories(inkpod_windows_batch_color_editor_tests PRIVATE
+        "${CMAKE_SOURCE_DIR}/apps/windows"
+        "${CMAKE_SOURCE_DIR}/include")
+    target_compile_definitions(inkpod_windows_batch_color_editor_tests PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    if(MSVC)
+        inkpod_enable_strict_warnings(inkpod_windows_batch_color_editor_tests)
+        target_compile_options(inkpod_windows_batch_color_editor_tests PRIVATE /EHsc)
+    endif()
+    add_test(
+        NAME inkpod_windows_batch_color_editor
+        COMMAND inkpod_windows_batch_color_editor_tests)
+
     add_executable(inkpod_windows_session_recovery_tests
         apps/windows/app/document_identity.h
         apps/windows/app/identity.h
@@ -812,6 +849,10 @@ if(WIN32)
         apps/windows/ui/batch_controller.cpp
         apps/windows/ui/batch_set_store.cpp
         apps/windows/ui/batch_set_store.h
+        apps/windows/ui/batch_input_picker.cpp
+        apps/windows/ui/batch_input_picker.h
+        apps/windows/ui/batch_color_editor_model.cpp
+        apps/windows/ui/batch_color_editor_model.h
         apps/windows/ui/batch_parameter_editor.cpp
         apps/windows/ui/batch_parameter_editor.h
         apps/windows/ui/dock_layout.cpp

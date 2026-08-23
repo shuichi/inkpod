@@ -2,8 +2,6 @@
 
 #include "batch_controller.h"
 
-#include <shlobj.h>
-
 #include <algorithm>
 #include <array>
 #include <climits>
@@ -15,6 +13,7 @@
 #include "app/frontend_state.h"
 #include "ui/main_window.h"
 #include "app/core_host.h"
+#include "batch_input_picker.h"
 #include "batch_set_store.h"
 #include "dialogs/batch_dialog.h"
 
@@ -671,9 +670,14 @@ void BatchController::RefreshPalette(
             }
         }
         view.stage_labels.reserve(batch.operations.size() + 2U);
-        view.stage_labels.push_back(
-            std::wstring(UiText(UiStringId::BatchInput)) + L" — "
-            + std::to_wstring(batch.inputs.size()));
+        std::array<wchar_t, 96U> input_label{};
+        _snwprintf_s(
+            input_label.data(),
+            input_label.size(),
+            _TRUNCATE,
+            UiText(UiStringId::BatchInputCountFormat),
+            batch.inputs.size());
+        view.stage_labels.emplace_back(input_label.data());
         bool any_enabled = false;
         for (auto& operation : batch.operations) {
             const wchar_t* const localized_label =
@@ -685,8 +689,7 @@ void BatchController::RefreshPalette(
             const bool enabled =
                 (operation.flags & INKPOD_BATCH_OPERATION_ENABLED) != 0U;
             any_enabled = any_enabled || enabled;
-            view.stage_labels.push_back(
-                std::wstring(enabled ? L"✓ " : L"– ") + operation.label);
+            view.stage_labels.push_back(operation.label);
         }
         view.stage_labels.push_back(UiText(UiStringId::BatchOutput));
         batch.selected_stage = std::min<std::uint32_t>(
@@ -765,26 +768,8 @@ std::wstring BatchController::ReportSummary(const InkpodBatchReport* report) {
 
 bool BatchController::ChooseFolder(
     HWND owner, std::wstring& selected_path) noexcept {
-    BROWSEINFOW browse{};
-    browse.hwndOwner = owner;
-    browse.lpszTitle = UiText(UiStringId::Text0261);
-    browse.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
-    PIDLIST_ABSOLUTE item = SHBrowseForFolderW(&browse);
-    if (item == nullptr) {
-        return false;
-    }
-    std::array<wchar_t, MAX_PATH> path{};
-    const BOOL resolved = SHGetPathFromIDListW(item, path.data());
-    CoTaskMemFree(item);
-    if (resolved == FALSE) {
-        return false;
-    }
-    try {
-        selected_path.assign(path.data());
-        return true;
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
+    return ChooseBatchFolder(
+        owner, UiText(UiStringId::Text0261), selected_path);
 }
 
 } // namespace inkpod::windows::ui

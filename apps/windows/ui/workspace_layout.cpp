@@ -768,10 +768,11 @@ bool EligibleRightTabPane(DockPaneType type) noexcept {
 }
 
 bool BuildLegacyRightTabs(WorkspaceLayoutState& state) noexcept {
-    constexpr std::array<std::array<DockPaneType, 3U>, 3U> groups{{
+    constexpr std::array<std::array<DockPaneType, 3U>, 4U> groups{{
         {DockPaneType::Color, DockPaneType::Layer, DockPaneType::Count},
         {DockPaneType::Locator, DockPaneType::LightTable, DockPaneType::Reference},
-        {DockPaneType::Sequence, DockPaneType::Batch, DockPaneType::Count},
+        {DockPaneType::Sequence, DockPaneType::Count, DockPaneType::Count},
+        {DockPaneType::Batch, DockPaneType::Count, DockPaneType::Count},
     }};
     std::array<ToolTab, kMaximumToolTabs> tabs{};
     std::size_t tab_count{};
