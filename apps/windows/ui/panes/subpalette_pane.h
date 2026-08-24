@@ -15,13 +15,13 @@ class RendererHost;
 namespace inkpod::windows::ui::panes {
 
 enum class SubpalettePaneAction : std::uint32_t {
+    OpenFiles,
+    OpenFolder,
     Previous,
     Next,
-    Current,
     Fit,
     OneToOne,
-    ToggleAutoPrevious,
-    ToggleScrollSync,
+    RegisterSample,
 };
 
 using SubpalettePaneCommandCallback = void (*)(void*, UINT) noexcept;
@@ -31,14 +31,13 @@ using SubpalettePaneViewCallback = void (*)(
     void*, const renderer::CanvasViewGesture&) noexcept;
 
 struct SubpalettePaneView final {
-    std::wstring target_text;
     std::wstring source_text;
     std::wstring empty_text;
-    bool target_available{};
     bool source_available{};
-    bool pinned{};
-    bool auto_previous{true};
-    bool scroll_sync{};
+    bool loading{};
+    bool can_previous{};
+    bool can_next{};
+    bool sample_available{};
 };
 
 struct SubpalettePaneDialogState final {
@@ -49,6 +48,7 @@ struct SubpalettePaneDialogState final {
     SubpalettePaneViewCallback apply_view{};
     SubpalettePaneView view;
     HWND canvas{};
+    HCURSOR eyedropper_cursor{};
     app::Generation surface_generation{};
 };
 

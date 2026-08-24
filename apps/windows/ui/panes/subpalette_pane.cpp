@@ -2,6 +2,8 @@
 
 #include "subpalette_pane.h"
 
+#include <commctrl.h>
+
 #include <algorithm>
 #include <array>
 #include <utility>
@@ -15,6 +17,8 @@
 namespace inkpod::windows::ui::panes {
 namespace {
 
+constexpr UINT_PTR kSubpaletteCanvasSubclass = 1U;
+
 void Dispatch(SubpalettePaneDialogState& state, UINT command) noexcept {
     if (state.dispatch_command != nullptr) {
         state.dispatch_command(state.context, command);
@@ -25,6 +29,61 @@ void Perform(SubpalettePaneDialogState& state, SubpalettePaneAction action) noex
     if (state.perform_action != nullptr) {
         state.perform_action(state.context, action);
     }
+}
+
+LRESULT CALLBACK SubpaletteCanvasSubclassProcedure(
+    HWND window,
+    UINT message,
+    WPARAM wparam,
+    LPARAM lparam,
+    UINT_PTR,
+    DWORD_PTR reference) noexcept {
+    auto* state = reinterpret_cast<SubpalettePaneDialogState*>(reference);
+    if (state == nullptr) {
+        return DefSubclassProc(window, message, wparam, lparam);
+    }
+    switch (message) {
+        case WM_SETCURSOR:
+            if (LOWORD(lparam) == HTCLIENT && state->eyedropper_cursor != nullptr) {
+                SetCursor(state->eyedropper_cursor);
+                return TRUE;
+            }
+            break;
+        case WM_KEYDOWN:
+            if (wparam == VK_LEFT || wparam == VK_UP || wparam == VK_PRIOR) {
+                Perform(*state, SubpalettePaneAction::Previous);
+                return 0;
+            }
+            if (wparam == VK_RIGHT || wparam == VK_DOWN || wparam == VK_NEXT) {
+                Perform(*state, SubpalettePaneAction::Next);
+                return 0;
+            }
+            break;
+        case WM_DPICHANGED_AFTERPARENT: {
+            const UINT dpi = GetDpiForWindow(window);
+            const HCURSOR cursor = CreateToolCursor(
+                reinterpret_cast<HINSTANCE>(
+                    GetWindowLongPtrW(window, GWLP_HINSTANCE)),
+                ToolIconId::Eyedropper,
+                dpi == 0U ? 96U : dpi);
+            if (cursor != nullptr) {
+                if (state->eyedropper_cursor != nullptr) {
+                    DestroyCursor(state->eyedropper_cursor);
+                }
+                state->eyedropper_cursor = cursor;
+            }
+            break;
+        }
+        case WM_NCDESTROY:
+            RemoveWindowSubclass(
+                window,
+                SubpaletteCanvasSubclassProcedure,
+                kSubpaletteCanvasSubclass);
+            break;
+        default:
+            break;
+    }
+    return DefSubclassProc(window, message, wparam, lparam);
 }
 
 INT_PTR CALLBACK SubpalettePaneProcedure(
@@ -51,8 +110,11 @@ INT_PTR CALLBACK SubpalettePaneProcedure(
                 break;
             }
             switch (LOWORD(wparam)) {
+                case IDC_SUBPALETTE_TARGET:
+                    Perform(*state, SubpalettePaneAction::OpenFiles);
+                    return TRUE;
                 case IDC_SUBPALETTE_PIN:
-                    Dispatch(*state, IDM_SUBPALETTE_PIN);
+                    Perform(*state, SubpalettePaneAction::OpenFolder);
                     return TRUE;
                 case IDC_SUBPALETTE_PREVIOUS:
                     Perform(*state, SubpalettePaneAction::Previous);
@@ -60,23 +122,14 @@ INT_PTR CALLBACK SubpalettePaneProcedure(
                 case IDC_SUBPALETTE_NEXT:
                     Perform(*state, SubpalettePaneAction::Next);
                     return TRUE;
-                case IDC_SUBPALETTE_CURRENT:
-                    Perform(*state, SubpalettePaneAction::Current);
-                    return TRUE;
                 case IDC_SUBPALETTE_FIT:
                     Perform(*state, SubpalettePaneAction::Fit);
                     return TRUE;
                 case IDC_SUBPALETTE_ONE_TO_ONE:
                     Perform(*state, SubpalettePaneAction::OneToOne);
                     return TRUE;
-                case IDC_SUBPALETTE_AUTO_PREVIOUS:
-                    Perform(*state, SubpalettePaneAction::ToggleAutoPrevious);
-                    return TRUE;
-                case IDC_SUBPALETTE_SCROLL_SYNC:
-                    Perform(*state, SubpalettePaneAction::ToggleScrollSync);
-                    return TRUE;
                 case IDC_SUBPALETTE_REGISTER:
-                    Dispatch(*state, IDM_PALETTE_REGISTER);
+                    Perform(*state, SubpalettePaneAction::RegisterSample);
                     return TRUE;
                 case IDCANCEL:
                     Dispatch(*state, IDM_WINDOW_SUBPALETTE);
@@ -114,7 +167,7 @@ INT_PTR CALLBACK SubpalettePaneProcedure(
             return TRUE;
         case renderer::kCanvasViewportChanged:
             if (state != nullptr) {
-                renderer::CanvasViewGesture gesture{
+                const renderer::CanvasViewGesture gesture{
                     INKPOD_VIEW_VIEWPORT_RESIZED,
                     static_cast<double>(LOWORD(lparam)),
                     static_cast<double>(HIWORD(lparam)),
@@ -132,6 +185,10 @@ INT_PTR CALLBACK SubpalettePaneProcedure(
         case WM_NCDESTROY:
             if (state != nullptr) {
                 state->canvas = nullptr;
+                if (state->eyedropper_cursor != nullptr) {
+                    DestroyCursor(state->eyedropper_cursor);
+                    state->eyedropper_cursor = nullptr;
+                }
             }
             SetWindowLongPtrW(dialog, GWLP_USERDATA, 0);
             return TRUE;
@@ -173,6 +230,19 @@ HWND CreateSubpalettePaneDialog(
         DestroyWindow(dialog);
         return nullptr;
     }
+    const UINT window_dpi = GetDpiForWindow(state.canvas);
+    state.eyedropper_cursor = CreateToolCursor(
+        instance,
+        ToolIconId::Eyedropper,
+        window_dpi == 0U ? 96U : window_dpi);
+    if (SetWindowSubclass(
+            state.canvas,
+            SubpaletteCanvasSubclassProcedure,
+            kSubpaletteCanvasSubclass,
+            reinterpret_cast<DWORD_PTR>(&state)) == FALSE) {
+        DestroyWindow(dialog);
+        return nullptr;
+    }
     SetWindowPos(
         state.canvas,
         placeholder,
@@ -182,6 +252,13 @@ HWND CreateSubpalettePaneDialog(
         bounds.bottom - bounds.top,
         SWP_NOACTIVATE | SWP_SHOWWINDOW);
     ShowWindow(placeholder, SW_HIDE);
+    for (const auto [control, icon] : std::array{
+             std::pair{IDC_SUBPALETTE_PREVIOUS, PaneIconId::Previous},
+             std::pair{IDC_SUBPALETTE_NEXT, PaneIconId::Next},
+             std::pair{IDC_SUBPALETTE_FIT, PaneIconId::Fit},
+             std::pair{IDC_SUBPALETTE_ONE_TO_ONE, PaneIconId::OneToOne}}) {
+        (void)SetPaneIconButton(GetDlgItem(dialog, control), icon);
+    }
     LayoutSubpalettePaneDialog(dialog);
     return dialog;
 }
@@ -206,18 +283,38 @@ void LayoutSubpalettePaneDialog(HWND dialog) noexcept {
     const int width = static_cast<int>(client.right - client.left);
     const int height = static_cast<int>(client.bottom - client.top);
     const int content_width = std::max(0, width - margin * 2);
-    PlacePaneTargetRow(
-        dialog,
+
+    const std::array<int, 2U> open_actions{
         IDC_SUBPALETTE_TARGET,
-        IDC_SUBPALETTE_PIN,
+        IDC_SUBPALETTE_PIN};
+    PlacePaneButtonRows(
+        dialog,
+        open_actions,
         margin,
         margin,
         content_width,
-        ScalePaneDip(dialog, 4),
-        line_height,
         row_height,
         gap);
-    const int source_top = margin + row_height + gap;
+    const int navigation_top = margin + row_height + gap;
+    const std::array<int, 5U> navigation_actions{
+        IDC_SUBPALETTE_PREVIOUS,
+        IDC_SUBPALETTE_NEXT,
+        IDC_SUBPALETTE_FIT,
+        IDC_SUBPALETTE_ONE_TO_ONE,
+        IDC_SUBPALETTE_REGISTER};
+    PlacePaneButtonRows(
+        dialog,
+        navigation_actions,
+        margin,
+        navigation_top,
+        content_width,
+        row_height,
+        gap);
+    const std::size_t navigation_rows = PaneButtonRowCount(
+        dialog, navigation_actions, content_width, gap);
+    const int source_top = navigation_top
+        + static_cast<int>(navigation_rows) * row_height
+        + std::max(0, static_cast<int>(navigation_rows) - 1) * gap + gap;
     PlacePaneDialogControl(
         dialog,
         IDC_SUBPALETTE_SOURCE,
@@ -236,49 +333,8 @@ void LayoutSubpalettePaneDialog(HWND dialog) noexcept {
         hint_top,
         content_width,
         line_height);
-    const int check_height = ScalePaneDip(dialog, 22);
-    const std::array<int, 2U> checks{
-        IDC_SUBPALETTE_AUTO_PREVIOUS,
-        IDC_SUBPALETTE_SCROLL_SYNC};
-    const std::size_t check_rows = PaneButtonRowCount(
-        dialog, checks, content_width, gap);
-    const int checks_height = static_cast<int>(check_rows) * check_height
-        + std::max(0, static_cast<int>(check_rows) - 1) * gap;
-    const int checks_top = std::max(
-        source_top + line_height + gap,
-        hint_top - gap - checks_height);
-    PlacePaneButtonRows(
-        dialog,
-        checks,
-        margin,
-        checks_top,
-        content_width,
-        check_height,
-        gap);
-    const std::array<int, 6U> actions{
-        IDC_SUBPALETTE_PREVIOUS,
-        IDC_SUBPALETTE_NEXT,
-        IDC_SUBPALETTE_CURRENT,
-        IDC_SUBPALETTE_FIT,
-        IDC_SUBPALETTE_ONE_TO_ONE,
-        IDC_SUBPALETTE_REGISTER};
-    const std::size_t action_rows = PaneButtonRowCount(
-        dialog, actions, content_width, gap);
-    const int actions_height = static_cast<int>(action_rows) * row_height
-        + std::max(0, static_cast<int>(action_rows) - 1) * gap;
-    const int actions_top = std::max(
-        source_top + line_height + gap,
-        checks_top - gap - actions_height);
-    PlacePaneButtonRows(
-        dialog,
-        actions,
-        margin,
-        actions_top,
-        content_width,
-        row_height,
-        gap);
     const int canvas_top = source_top + line_height + gap;
-    const int canvas_height = std::max(0, actions_top - gap - canvas_top);
+    const int canvas_height = std::max(0, hint_top - gap - canvas_top);
     SetWindowPos(
         state->canvas,
         nullptr,
@@ -306,40 +362,26 @@ void UpdateSubpalettePaneDialog(HWND dialog, SubpalettePaneView view) noexcept {
         return;
     }
     state->view = std::move(view);
-    SetDlgItemTextW(dialog, IDC_SUBPALETTE_TARGET, state->view.target_text.c_str());
     SetDlgItemTextW(dialog, IDC_SUBPALETTE_SOURCE, state->view.source_text.c_str());
     SetDlgItemTextW(dialog, IDC_SUBPALETTE_EMPTY, state->view.empty_text.c_str());
-    SetDlgItemTextW(
-        dialog,
-        IDC_SUBPALETTE_PIN,
-        state->view.pinned ? UiText(UiStringId::ReturnToFollowing)
-                           : UiText(UiStringId::PinDocument));
-    static_cast<void>(SetPaneIconButton(
+    const bool source = state->view.source_available;
+    EnableWindow(
+        GetDlgItem(dialog, IDC_SUBPALETTE_TARGET),
+        state->view.loading ? FALSE : TRUE);
+    EnableWindow(
         GetDlgItem(dialog, IDC_SUBPALETTE_PIN),
-        state->view.pinned ? PaneIconId::ReturnToFollowing
-                           : PaneIconId::PinDocument));
-    CheckDlgButton(
-        dialog,
-        IDC_SUBPALETTE_AUTO_PREVIOUS,
-        state->view.auto_previous ? BST_CHECKED : BST_UNCHECKED);
-    CheckDlgButton(
-        dialog,
-        IDC_SUBPALETTE_SCROLL_SYNC,
-        state->view.scroll_sync ? BST_CHECKED : BST_UNCHECKED);
-    const bool target = state->view.target_available;
-    const bool source = target && state->view.source_available;
-    EnableWindow(GetDlgItem(dialog, IDC_SUBPALETTE_PIN), target ? TRUE : FALSE);
-    for (const int control : {
-             IDC_SUBPALETTE_PREVIOUS,
-             IDC_SUBPALETTE_NEXT,
-             IDC_SUBPALETTE_CURRENT,
-             IDC_SUBPALETTE_FIT,
-             IDC_SUBPALETTE_ONE_TO_ONE,
-             IDC_SUBPALETTE_AUTO_PREVIOUS,
-             IDC_SUBPALETTE_SCROLL_SYNC,
-             IDC_SUBPALETTE_REGISTER}) {
-        EnableWindow(GetDlgItem(dialog, control), source ? TRUE : FALSE);
-    }
+        state->view.loading ? FALSE : TRUE);
+    EnableWindow(
+        GetDlgItem(dialog, IDC_SUBPALETTE_PREVIOUS),
+        state->view.can_previous && !state->view.loading ? TRUE : FALSE);
+    EnableWindow(
+        GetDlgItem(dialog, IDC_SUBPALETTE_NEXT),
+        state->view.can_next && !state->view.loading ? TRUE : FALSE);
+    EnableWindow(GetDlgItem(dialog, IDC_SUBPALETTE_FIT), source ? TRUE : FALSE);
+    EnableWindow(GetDlgItem(dialog, IDC_SUBPALETTE_ONE_TO_ONE), source ? TRUE : FALSE);
+    EnableWindow(
+        GetDlgItem(dialog, IDC_SUBPALETTE_REGISTER),
+        state->view.sample_available ? TRUE : FALSE);
     if (state->canvas != nullptr) {
         EnableWindow(state->canvas, source ? TRUE : FALSE);
         ShowWindow(state->canvas, source ? SW_SHOW : SW_HIDE);

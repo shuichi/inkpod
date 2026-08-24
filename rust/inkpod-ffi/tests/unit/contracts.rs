@@ -4713,6 +4713,169 @@ fn history_visualization_abi_owns_commit_rows_and_supports_bounded_size_queries(
 }
 
 #[test]
+fn external_subpalette_abi_owns_catalog_decode_view_sample_and_snapshot() {
+    unsafe {
+        let mut subpalette = ptr::null_mut();
+        assert_eq!(inkpod_subpalette_create(&mut subpalette), INKPOD_STATUS_OK);
+        assert!(!subpalette.is_null());
+
+        let names = [
+            b"cell10.png".as_slice(),
+            b"palette.png".as_slice(),
+            b"cell2.png".as_slice(),
+        ];
+        let mut sources = Vec::new();
+        for (index, name) in names.iter().enumerate() {
+            sources.push(InkpodSubpaletteSourceInput {
+                struct_size: size_of::<InkpodSubpaletteSourceInput>() as u32,
+                reserved: 0,
+                source_token: index as u64 + 1,
+                name_utf8: name.as_ptr(),
+                name_bytes: name.len() as u64,
+            });
+        }
+        let mut info = InkpodSubpaletteInfo {
+            struct_size: size_of::<InkpodSubpaletteInfo>() as u32,
+            ..InkpodSubpaletteInfo::default()
+        };
+        assert_eq!(
+            inkpod_subpalette_replace_sources(
+                subpalette,
+                sources.as_ptr(),
+                sources.len() as u64,
+                size_of::<InkpodSubpaletteSourceInput>() as u64,
+                &mut info,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(info.item_count, 3);
+        assert_eq!(info.active_index, INKPOD_SUBPALETTE_INDEX_NONE);
+        assert_eq!(info.flags, 0);
+
+        let mut item = InkpodSubpaletteItemInfo {
+            struct_size: size_of::<InkpodSubpaletteItemInfo>() as u32,
+            ..InkpodSubpaletteItemInfo::default()
+        };
+        assert_eq!(
+            inkpod_subpalette_item_get(subpalette, 0, &mut item),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(item.cell_number, 2);
+        assert_ne!(item.flags & INKPOD_SUBPALETTE_ITEM_HAS_CELL_NUMBER, 0);
+        let first_item_id = item.item_id;
+
+        let mut required = 0;
+        assert_eq!(
+            inkpod_subpalette_item_name_copy(subpalette, 0, ptr::null_mut(), 0, &mut required,),
+            INKPOD_STATUS_BUFFER_TOO_SMALL
+        );
+        let mut name = vec![0_u8; required as usize];
+        assert_eq!(
+            inkpod_subpalette_item_name_copy(
+                subpalette,
+                0,
+                name.as_mut_ptr(),
+                name.len() as u64,
+                &mut required,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(name, b"cell2.png");
+
+        let mut adjacent = 0;
+        assert_eq!(
+            inkpod_subpalette_adjacent_item(subpalette, INKPOD_SEQUENCE_NEXT, &mut adjacent,),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(adjacent, first_item_id);
+
+        let (mut source_core, _) = create_core(2, 2, 0x5355_4250);
+        let png = export_png(source_core);
+        assert_eq!(inkpod_core_destroy(&mut source_core), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_subpalette_load_common_raster(
+                subpalette,
+                first_item_id,
+                INKPOD_COMMON_RASTER_PNG,
+                png.as_ptr(),
+                png.len() as u64,
+                &mut info,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(info.active_index, 0);
+        assert_ne!(info.flags & INKPOD_SUBPALETTE_INFO_IMAGE_LOADED, 0);
+
+        let view = InkpodViewInput {
+            struct_size: size_of::<InkpodViewInput>() as u32,
+            kind: INKPOD_VIEW_ONE_TO_ONE,
+            flags: INKPOD_FEATURE_NONE,
+            value1: 2.0,
+            value2: 2.0,
+            value3: 0.0,
+            value4: 0.0,
+        };
+        assert_eq!(
+            inkpod_subpalette_view_apply(subpalette, &view),
+            INKPOD_STATUS_OK
+        );
+        let mut color = InkpodColorValue {
+            struct_size: size_of::<InkpodColorValue>() as u32,
+            ..InkpodColorValue::default()
+        };
+        assert_eq!(
+            inkpod_subpalette_sample(subpalette, 0.5, 0.5, &mut color),
+            INKPOD_STATUS_OK
+        );
+
+        let options = InkpodSnapshotOptions {
+            struct_size: size_of::<InkpodSnapshotOptions>() as u32,
+            reserved: 0,
+            feature_flags: INKPOD_FEATURE_NONE,
+        };
+        let mut snapshot = ptr::null_mut();
+        assert_eq!(
+            inkpod_subpalette_build_snapshot(subpalette, &options, &mut snapshot),
+            INKPOD_STATUS_OK
+        );
+        assert!(!snapshot.is_null());
+        assert_eq!(inkpod_snapshot_release(&mut snapshot), INKPOD_STATUS_OK);
+
+        let stable = info;
+        assert_eq!(
+            inkpod_subpalette_load_common_raster(
+                subpalette,
+                first_item_id,
+                INKPOD_COMMON_RASTER_PNG,
+                b"bad".as_ptr(),
+                3,
+                &mut info,
+            ),
+            INKPOD_STATUS_IO_ERROR
+        );
+        let mut observed = InkpodSubpaletteInfo {
+            struct_size: size_of::<InkpodSubpaletteInfo>() as u32,
+            ..InkpodSubpaletteInfo::default()
+        };
+        assert_eq!(
+            inkpod_subpalette_get_info(subpalette, &mut observed),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(observed.catalog_revision, stable.catalog_revision);
+        assert_eq!(observed.active_index, stable.active_index);
+
+        assert_eq!(
+            inkpod_subpalette_clear(subpalette, &mut info),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(info.item_count, 0);
+        assert_eq!(inkpod_subpalette_release(&mut subpalette), INKPOD_STATUS_OK);
+        assert!(subpalette.is_null());
+        assert_eq!(inkpod_subpalette_release(&mut subpalette), INKPOD_STATUS_OK);
+    }
+}
+
+#[test]
 fn ffi_contract_public_surface_matches_header_and_every_function_has_a_test_reference() {
     let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()

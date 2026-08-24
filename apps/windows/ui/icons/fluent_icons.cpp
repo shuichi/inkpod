@@ -275,6 +275,64 @@ HICON CreateAtlasIcon(
     return scaled;
 }
 
+HCURSOR CreateAtlasCursor(
+    HINSTANCE instance,
+    ToolIconId icon,
+    COLORREF foreground,
+    int requested_size) noexcept {
+    const AtlasView atlas = LoadAtlas(instance);
+    const std::uint8_t* mask = IconMask(atlas, AtlasIndex(icon));
+    if (mask == nullptr) {
+        return nullptr;
+    }
+    constexpr int kSourceSize = static_cast<int>(kAtlasWidth);
+    BITMAPINFO bitmap{};
+    bitmap.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bitmap.bmiHeader.biWidth = kSourceSize;
+    bitmap.bmiHeader.biHeight = -kSourceSize;
+    bitmap.bmiHeader.biPlanes = 1;
+    bitmap.bmiHeader.biBitCount = 32;
+    bitmap.bmiHeader.biCompression = BI_RGB;
+    void* dib_pixels{};
+    const HBITMAP color = CreateDIBSection(
+        nullptr, &bitmap, DIB_RGB_COLORS, &dib_pixels, nullptr, 0U);
+    constexpr std::size_t kMaskStride =
+        ((static_cast<std::size_t>(kSourceSize) + 15U) / 16U) * 2U;
+    std::array<std::uint8_t,
+        kMaskStride * static_cast<std::size_t>(kSourceSize)> mask_bits{};
+    const HBITMAP monochrome = CreateBitmap(
+        kSourceSize, kSourceSize, 1U, 1U, mask_bits.data());
+    if (color == nullptr || monochrome == nullptr || dib_pixels == nullptr) {
+        if (color != nullptr) DeleteObject(color);
+        if (monochrome != nullptr) DeleteObject(monochrome);
+        return nullptr;
+    }
+    auto* pixels = static_cast<std::uint32_t*>(dib_pixels);
+    constexpr std::size_t kMaskPixels =
+        static_cast<std::size_t>(kAtlasWidth)
+        * static_cast<std::size_t>(kAtlasHeight);
+    for (std::size_t pixel = 0; pixel < kMaskPixels; ++pixel) {
+        pixels[pixel] = PremultipliedPixel(foreground, mask[pixel]);
+    }
+    ICONINFO info{};
+    info.fIcon = FALSE;
+    info.xHotspot = 5U;
+    info.yHotspot = 42U;
+    info.hbmColor = color;
+    info.hbmMask = monochrome;
+    const HCURSOR source = static_cast<HCURSOR>(CreateIconIndirect(&info));
+    DeleteObject(color);
+    DeleteObject(monochrome);
+    if (source == nullptr) {
+        return nullptr;
+    }
+    const int size = std::clamp(requested_size, 16, 64);
+    const HCURSOR scaled = static_cast<HCURSOR>(
+        CopyImage(source, IMAGE_CURSOR, size, size, 0U));
+    DestroyCursor(source);
+    return scaled;
+}
+
 void ShowTextFallback(HWND button, PaneButtonIconState& state) noexcept {
     const HICON previous = reinterpret_cast<HICON>(
         SendMessageW(button, BM_SETIMAGE, IMAGE_ICON, 0));
@@ -414,6 +472,16 @@ bool SetPaneIconButton(HWND button, PaneIconId icon) noexcept {
         state->dpi = 0U;
     }
     return UpdatePaneButtonImage(button, *state);
+}
+
+HCURSOR CreateToolCursor(
+    HINSTANCE instance, ToolIconId icon, UINT dpi) noexcept {
+    const UINT effective_dpi = dpi == 0U ? 96U : dpi;
+    return CreateAtlasCursor(
+        instance,
+        icon,
+        GetSysColor(COLOR_WINDOWTEXT),
+        MulDiv(32, static_cast<int>(effective_dpi), 96));
 }
 
 }  // namespace inkpod::windows::ui

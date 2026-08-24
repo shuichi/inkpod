@@ -63,6 +63,7 @@
 #include "ui/tools/view_controller.h"
 #include "ui/effects_controller.h"
 #include "ui/batch_controller.h"
+#include "ui/batch_input_picker.h"
 #include "ui/main_window.h"
 #include "ui/main_window_runtime.h"
 #include "ui/main_window_runtime_internal.h"
@@ -132,6 +133,8 @@ using inkpod::app::EmbeddedHelpDocument;
 using inkpod::app::EmbeddedHelpStatus;
 using inkpod::app::WorkspaceWindowId;
 using inkpod::app::WorkspaceWindow;
+using inkpod::app::SubpaletteLoadJob;
+using inkpod::app::SubpaletteSourceCache;
 
 std::array<wchar_t, 96U> WorkspaceRegistryValueName(
     std::wstring_view base, std::uint32_t slot) noexcept {
@@ -238,9 +241,15 @@ constexpr std::array<UINT, inkpod::app::RecentDocumentList::kCapacity>
 constexpr UINT kEffectTaskCompleted = WM_APP + 0x170U;
 constexpr UINT kBatchTaskCompleted = WM_APP + 0x171U;
 constexpr UINT kColorChartGenerationCompleted = WM_APP + 0x174U;
+constexpr UINT kSubpaletteLoadCompleted = WM_APP + 0x175U;
 constexpr UINT kShortcutSequenceTimerMilliseconds = 100U;
 constexpr UINT kStatusProgressTimerMilliseconds = 100U;
 constexpr UINT kContinuousSprayIntervalMilliseconds = 50U;
+
+InkpodStatus ReplacePalette(
+    ApplicationHost& state,
+    const CommandContext& context,
+    const std::vector<InkpodColorValue>& colors) noexcept;
 
 bool ArmCommandTimer(
     ApplicationHost& state,
@@ -2267,59 +2276,140 @@ bool RefreshSequencePane(ApplicationHost& state) noexcept {
     return true;
 }
 
-void ResetSubpaletteTarget(ApplicationHost& state) noexcept {
-    auto& workspace = state.Workspace();
+bool EnsureSubpaletteHandle(
+    ApplicationHost& state, WorkspaceWindow& workspace) noexcept {
+    if (state.engine == nullptr || workspace.subpalette_dialog.canvas == nullptr) {
+        return false;
+    }
+    if (!workspace.subpalette_source_id) {
+        workspace.subpalette_source_id = inkpod::app::AuxiliarySourceId{
+            workspace.subpalette_canvas_id.Value()};
+    }
+    const auto* sink = renderer::GetCanvasSnapshotSink(
+        workspace.subpalette_dialog.canvas);
+    const renderer::SnapshotRoute route = sink == nullptr
+        ? renderer::SnapshotRoute{}
+        : sink->Route();
+    if ((route.owner_kind != renderer::SnapshotOwnerKind::Auxiliary
+            || route.auxiliary_source != workspace.subpalette_source_id
+            || route.document_generation != workspace.generation)
+        && !renderer::BindAuxiliaryCanvasSnapshotSink(
+            workspace.subpalette_dialog.canvas,
+            workspace.subpalette_source_id,
+            workspace.generation)) {
+        return false;
+    }
+    if (workspace.subpalette != nullptr) {
+        return true;
+    }
+    workspace.subpalette_info = {};
+    workspace.subpalette_info.struct_size = sizeof(workspace.subpalette_info);
+    workspace.subpalette_sample = {};
+    workspace.subpalette_sample.struct_size = sizeof(workspace.subpalette_sample);
+    return state.engine->CreateSubpalette(&workspace.subpalette)
+        == INKPOD_STATUS_OK;
+}
+
+void PresentSubpalettePane(WorkspaceWindow& workspace) noexcept {
+    using inkpod::windows::ui::panes::SubpalettePaneView;
+    using inkpod::windows::ui::panes::UpdateSubpalettePaneDialog;
+    SubpalettePaneView pane{};
+    pane.loading = workspace.subpalette_loading;
+    pane.sample_available = workspace.subpalette_sample_available;
+    pane.source_available =
+        (workspace.subpalette_info.flags
+         & INKPOD_SUBPALETTE_INFO_IMAGE_LOADED) != 0U;
+    pane.empty_text = workspace.subpalette_loading
+        ? UiText(UiStringId::SubpaletteLoading)
+        : UiText(UiStringId::SubpaletteNoImage);
+    const std::uint32_t active = workspace.subpalette_info.active_index;
+    if (!workspace.subpalette_sources.empty()) {
+        pane.can_previous = workspace.subpalette_navigation_index > 0U;
+        pane.can_next = workspace.subpalette_navigation_index + 1U
+            < workspace.subpalette_sources.size();
+    }
+    if (pane.source_available && active < workspace.subpalette_sources.size()) {
+        const auto& source = workspace.subpalette_sources[active];
+        pane.source_text = source.name + L"  ("
+            + std::to_wstring(active + 1U) + L" / "
+            + std::to_wstring(workspace.subpalette_info.item_count) + L")";
+    } else {
+        pane.source_text = UiText(UiStringId::SubpaletteNoImage);
+    }
+    if (!workspace.subpalette_error.empty()) {
+        pane.source_text = workspace.subpalette_error;
+    } else if (workspace.subpalette_loading) {
+        pane.source_text = UiText(UiStringId::SubpaletteLoading);
+    }
+    UpdateSubpalettePaneDialog(
+        workspace.subpalette_palette, std::move(pane));
+}
+
+void ResetSubpaletteTarget(
+    ApplicationHost& state, WorkspaceWindow& workspace) noexcept {
+    ++workspace.subpalette_load_generation;
+    if (state.engine != nullptr && workspace.subpalette_load != nullptr
+        && workspace.subpalette_load->candidate_subpalette != nullptr) {
+        (void)state.engine->ReleaseSubpalette(
+            &workspace.subpalette_load->candidate_subpalette);
+    }
+    workspace.subpalette_load.reset();
+    workspace.subpalette_loading = false;
     if (workspace.subpalette_dialog.canvas != nullptr) {
         renderer::CancelCanvasStroke(workspace.subpalette_dialog.canvas);
         (void)renderer::UnbindCanvasSnapshotSink(
             workspace.subpalette_dialog.canvas);
     }
-    if (state.engine != nullptr && workspace.subpalette_core_view_id != 0U
-        && workspace.subpalette_session
-        && workspace.subpalette_document_generation) {
-        const std::uint64_t view_id = workspace.subpalette_core_view_id;
-        (void)state.engine->Invoke(
-            workspace.subpalette_session,
-            workspace.subpalette_document_generation,
-            [view_id](InkpodCore* core) {
-                return inkpod_core_view_close(core, view_id);
-            },
-            false,
-            false);
+    if (state.engine != nullptr && workspace.subpalette != nullptr) {
+        (void)state.engine->ReleaseSubpalette(&workspace.subpalette);
     }
-    workspace.subpalette_session = {};
-    workspace.subpalette_document_view = {};
-    workspace.subpalette_document_generation = {};
-    workspace.subpalette_core_view_id = 0U;
+    workspace.subpalette_sources.clear();
+    workspace.subpalette_info = {};
+    workspace.subpalette_info.struct_size = sizeof(workspace.subpalette_info);
+    workspace.subpalette_navigation_index = 0U;
+    workspace.subpalette_sample_available = false;
+    workspace.subpalette_error.clear();
     workspace.subpalette_snapshot_revision = 0U;
-    workspace.subpalette_source_count = 0U;
-    workspace.subpalette_active_index = 0U;
 }
 
-bool PublishSubpaletteSnapshot(ApplicationHost& state) noexcept {
-    auto& workspace = state.Workspace();
+bool PublishSubpaletteSnapshot(
+    ApplicationHost& state, WorkspaceWindow& workspace) noexcept {
     auto* sink = renderer::GetCanvasSnapshotSink(
         workspace.subpalette_dialog.canvas);
     if (state.engine == nullptr || sink == nullptr
-        || workspace.subpalette_core_view_id == 0U
-        || !workspace.subpalette_session
-        || !workspace.subpalette_document_generation) {
+        || workspace.subpalette == nullptr
+        || (workspace.subpalette_info.flags
+            & INKPOD_SUBPALETTE_INFO_IMAGE_LOADED) == 0U) {
         return false;
+    }
+    const renderer::SnapshotRoute route = sink->Route();
+    if (route.owner_kind != renderer::SnapshotOwnerKind::Auxiliary
+        || route.auxiliary_source != workspace.subpalette_source_id
+        || route.document_generation != workspace.generation) {
+        if (!renderer::BindAuxiliaryCanvasSnapshotSink(
+                workspace.subpalette_dialog.canvas,
+                workspace.subpalette_source_id,
+                workspace.generation)) {
+            return false;
+        }
+        sink = renderer::GetCanvasSnapshotSink(
+            workspace.subpalette_dialog.canvas);
+        if (sink == nullptr) {
+            return false;
+        }
     }
     InkpodSnapshot* snapshot{};
     InkpodSnapshotView snapshot_view{};
     snapshot_view.struct_size = sizeof(snapshot_view);
     InkpodSnapshotTransform transform{};
     transform.struct_size = sizeof(transform);
-    const std::uint64_t view_id = workspace.subpalette_core_view_id;
-    const InkpodStatus status = state.engine->Invoke(
-        workspace.subpalette_session,
-        workspace.subpalette_document_generation,
-        [view_id, &snapshot, &snapshot_view, &transform](InkpodCore* core) {
+    const InkpodStatus status = state.engine->InvokeSubpalette(
+        workspace.subpalette,
+        [&snapshot, &snapshot_view, &transform](InkpodSubpalette* subpalette) {
             const InkpodSnapshotOptions options{
                 sizeof(InkpodSnapshotOptions), 0U, INKPOD_FEATURE_NONE};
-            InkpodStatus inner = inkpod_core_subpalette_build_snapshot(
-                core, view_id, &options, &snapshot);
+            InkpodStatus inner = inkpod_subpalette_build_snapshot(
+                subpalette, &options, &snapshot);
             if (inner == INKPOD_STATUS_OK) {
                 inner = inkpod_snapshot_get_view(snapshot, &snapshot_view);
             }
@@ -2330,9 +2420,7 @@ bool PublishSubpaletteSnapshot(ApplicationHost& state) noexcept {
                 (void)inkpod_snapshot_release(&snapshot);
             }
             return inner;
-        },
-        false,
-        false);
+        });
     if (status != INKPOD_STATUS_OK || snapshot == nullptr) {
         return false;
     }
@@ -2342,231 +2430,390 @@ bool PublishSubpaletteSnapshot(ApplicationHost& state) noexcept {
 }
 
 bool RefreshSubpalettePane(ApplicationHost& state) noexcept {
-    using inkpod::windows::ui::panes::SubpalettePaneView;
-    using inkpod::windows::ui::panes::UpdateSubpalettePaneDialog;
-
     auto& workspace = state.Workspace();
-    SubpalettePaneView pane{};
-    pane.auto_previous = workspace.subpalette_auto_previous;
-    pane.scroll_sync = workspace.subpalette_scroll_sync;
-    pane.empty_text = UiText(UiStringId::Text0547);
-    const auto* binding = state.routing.pane_targets.Find(
-        state.routing.subpalette_pane);
-    pane.pinned = binding != nullptr
-        && binding->policy == PaneTargetPolicy::PinnedDocument;
-    const PaneActionTarget target = state.routing.pane_targets.CaptureAction(
-        state.routing.subpalette_pane,
-        state.routing.targets.Capture(),
-        state.routing.targets);
-    auto* document = target.context.document_session.has_value()
-        ? state.Documents().Find(target.context.document_session.value())
-        : nullptr;
-    std::uint64_t notice_sequence{};
-    const PaneTargetNotice notice = state.routing.pane_targets.ConsumeNotice(
-        state.routing.subpalette_pane, notice_sequence);
-    if (notice != PaneTargetNotice::None
-        && notice_sequence != workspace.subpalette_notice_sequence) {
-        workspace.subpalette_notice_sequence = notice_sequence;
-        if (workspace.subpalette_palette != nullptr) {
-            NotifyWinEvent(
-                EVENT_SYSTEM_ALERT,
-                workspace.subpalette_palette,
-                OBJID_CLIENT,
-                CHILDID_SELF);
+    const bool available = EnsureSubpaletteHandle(state, workspace);
+    if (!available && workspace.subpalette_error.empty()) {
+        workspace.subpalette_error = UiText(UiStringId::SubpaletteReadFailed);
+    }
+    PresentSubpalettePane(workspace);
+    return available;
+}
+
+std::wstring SubpaletteLeafName(const std::wstring& path) {
+    const std::size_t separator = path.find_last_of(L"\\/");
+    return separator == std::wstring::npos
+        ? path
+        : path.substr(separator + 1U);
+}
+
+bool EnumerateSubpaletteFolder(
+    const std::wstring& folder,
+    std::vector<std::wstring>& paths) noexcept {
+    std::wstring pattern;
+    try {
+        pattern = folder;
+        if (!pattern.empty() && pattern.back() != L'\\'
+            && pattern.back() != L'/') {
+            pattern.push_back(L'\\');
         }
-    }
-    if (state.engine == nullptr || target.status != PaneTargetStatus::Ok
-        || document == nullptr || !target.context.document_view.has_value()
-        || !target.context.generation.has_value()) {
-        ResetSubpaletteTarget(state);
-        pane.target_text = UiText(notice == PaneTargetNotice::PinnedDocumentClosed
-            ? UiStringId::PinnedClosedFollowingNoTarget
-            : UiStringId::FollowingNoTarget);
-        pane.source_text = UiText(UiStringId::Text0546);
-        pane.empty_text = UiText(UiStringId::TargetDocumentUnavailable);
-        UpdateSubpalettePaneDialog(
-            workspace.subpalette_palette, std::move(pane));
+        pattern.push_back(L'*');
+    } catch (const std::bad_alloc&) {
         return false;
     }
-
-    std::vector<SequencePaneCell> cells;
-    DocumentPanesController controller(*state.engine);
-    const InkpodStatus sequence_status = controller.LoadSequence(
-        document->id, document->generation, cells);
-    pane.target_available = true;
-    const std::wstring document_name = LocatorDocumentName(*document);
-    pane.target_text = UiTextWithUserText(
-        pane.pinned ? UiStringId::PinnedPrefix : UiStringId::FollowingPrefix,
-        document_name);
-    if (notice == PaneTargetNotice::PinnedDocumentClosed) {
-        pane.target_text = UiTextWithUserText(
-            UiStringId::PinnedClosedFollowingPrefix, document_name);
-    }
-    if (sequence_status != INKPOD_STATUS_OK || cells.empty()) {
-        ResetSubpaletteTarget(state);
-        pane.source_text = UiText(UiStringId::Text0546);
-        pane.empty_text = sequence_status == INKPOD_STATUS_OK
-            ? UiText(UiStringId::Text0205)
-            : UiText(UiStringId::SequenceLoadFailed);
-        UpdateSubpalettePaneDialog(
-            workspace.subpalette_palette, std::move(pane));
+    WIN32_FIND_DATAW data{};
+    HANDLE find = FindFirstFileW(pattern.c_str(), &data);
+    if (find == INVALID_HANDLE_VALUE) {
         return false;
     }
-
-    InkpodDocumentInfo info{};
-    info.struct_size = sizeof(info);
-    if (!state.engine->GetDocumentInfo(
-            document->id, document->generation, info)) {
-        pane.source_text = UiText(UiStringId::Text0546);
-        pane.empty_text = UiText(UiStringId::Text0627);
-        UpdateSubpalettePaneDialog(
-            workspace.subpalette_palette, std::move(pane));
-        return false;
-    }
-    std::uint32_t active_index{};
-    for (std::size_t index = 0U; index < cells.size(); ++index) {
-        if (cells[index].info.document_uuid_high == info.document_uuid_high
-            && cells[index].info.document_uuid_low == info.document_uuid_low) {
-            active_index = static_cast<std::uint32_t>(index);
+    std::vector<std::wstring> candidate;
+    bool valid = true;
+    do {
+        if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0U
+            || data.cFileName[0] == L'\0') {
+            continue;
+        }
+        std::wstring path;
+        try {
+            path = folder;
+            if (!path.empty() && path.back() != L'\\'
+                && path.back() != L'/') {
+                path.push_back(L'\\');
+            }
+            path.append(data.cFileName);
+            if (CommonRasterFormatFromPath(path) != 0U) {
+                if (candidate.size() >= 10'000U) {
+                    valid = false;
+                    break;
+                }
+                candidate.push_back(std::move(path));
+            }
+        } catch (const std::bad_alloc&) {
+            valid = false;
             break;
         }
+    } while (FindNextFileW(find, &data) != FALSE);
+    FindClose(find);
+    if (!valid || candidate.empty()) {
+        return false;
     }
-    const bool same_target = workspace.subpalette_session == document->id
-        && workspace.subpalette_document_view
-            == target.context.document_view.value()
-        && workspace.subpalette_document_generation == document->generation;
-    if (!same_target) {
-        ResetSubpaletteTarget(state);
-        workspace.subpalette_source_index =
-            workspace.subpalette_auto_previous && active_index != 0U
-            ? active_index - 1U
-            : active_index;
-    }
-    workspace.subpalette_source_count = static_cast<std::uint32_t>(cells.size());
-    workspace.subpalette_active_index = active_index;
-    workspace.subpalette_source_index = std::min<std::uint32_t>(
-        workspace.subpalette_source_index,
-        workspace.subpalette_source_count - 1U);
+    paths.swap(candidate);
+    return true;
+}
 
-    if (workspace.subpalette_core_view_id == 0U) {
-        std::uint64_t view_id{};
-        const std::uint32_t source_index = workspace.subpalette_source_index;
-        const InkpodStatus create_status = state.engine->Invoke(
-            document->id,
-            document->generation,
-            [source_index, &view_id](InkpodCore* core) {
-                InkpodStatus inner = inkpod_core_subpalette_set(
-                    core, source_index);
-                if (inner == INKPOD_STATUS_OK) {
-                    inner = inkpod_core_view_create(core, &view_id);
-                }
-                return inner;
-            },
-            false,
-            false);
-        if (create_status != INKPOD_STATUS_OK || view_id == 0U
-            || workspace.subpalette_dialog.canvas == nullptr
-            || !renderer::BindCanvasSnapshotSink(
-                workspace.subpalette_dialog.canvas,
-                document->id,
-                target.context.document_view.value(),
-                document->generation)) {
-            if (view_id != 0U) {
-                (void)state.engine->Invoke(
-                    document->id,
-                    document->generation,
-                    [view_id](InkpodCore* core) {
-                        return inkpod_core_view_close(core, view_id);
-                    },
-                    false,
-                    false);
+void CALLBACK ReadSubpaletteFileCallback(
+    PTP_CALLBACK_INSTANCE, void* context) noexcept {
+    std::unique_ptr<std::shared_ptr<SubpaletteLoadJob>> owner{
+        static_cast<std::shared_ptr<SubpaletteLoadJob>*>(context)};
+    if (owner == nullptr || *owner == nullptr) {
+        return;
+    }
+    const auto job = *owner;
+    const bool read = ReadBoundedFile(job->path, job->bytes);
+    job->status.store(
+        read ? INKPOD_STATUS_OK : INKPOD_STATUS_IO_ERROR,
+        std::memory_order_release);
+    (void)PostMessageW(
+        job->owner,
+        kSubpaletteLoadCompleted,
+        static_cast<WPARAM>(job->workspace.Value()),
+        static_cast<LPARAM>(job->load_generation));
+}
+
+bool QueueSubpaletteLoad(
+    WorkspaceWindow& workspace,
+    std::uint64_t item_id) noexcept {
+    const auto found = std::find_if(
+        workspace.subpalette_sources.cbegin(),
+        workspace.subpalette_sources.cend(),
+        [item_id](const SubpaletteSourceCache& source) {
+            return source.item_id == item_id;
+        });
+    if (found == workspace.subpalette_sources.cend()
+        || workspace.subpalette_loading) {
+        return false;
+    }
+    std::shared_ptr<SubpaletteLoadJob> job;
+    try {
+        job = std::make_shared<SubpaletteLoadJob>();
+        job->owner = workspace.windows.window;
+        job->workspace = workspace.id;
+        job->workspace_generation = workspace.generation;
+        job->load_generation = ++workspace.subpalette_load_generation;
+        job->item_id = found->item_id;
+        job->format = found->format;
+        job->path = found->path;
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+    auto* callback_owner =
+        new (std::nothrow) std::shared_ptr<SubpaletteLoadJob>(job);
+    if (callback_owner == nullptr
+        || TrySubmitThreadpoolCallback(
+               ReadSubpaletteFileCallback,
+               callback_owner,
+               nullptr) == FALSE) {
+        delete callback_owner;
+        return false;
+    }
+    workspace.subpalette_load = std::move(job);
+    workspace.subpalette_navigation_index = static_cast<std::uint32_t>(
+        std::distance(workspace.subpalette_sources.cbegin(), found));
+    workspace.subpalette_loading = true;
+    workspace.subpalette_error.clear();
+    PresentSubpalettePane(workspace);
+    return true;
+}
+
+bool QueueSubpaletteReplacementLoad(
+    WorkspaceWindow& workspace,
+    InkpodSubpalette* candidate_subpalette,
+    std::vector<SubpaletteSourceCache> candidate_sources) noexcept {
+    if (candidate_subpalette == nullptr || candidate_sources.empty()
+        || workspace.subpalette_loading) {
+        return false;
+    }
+    std::shared_ptr<SubpaletteLoadJob> job;
+    try {
+        job = std::make_shared<SubpaletteLoadJob>();
+        job->owner = workspace.windows.window;
+        job->workspace = workspace.id;
+        job->workspace_generation = workspace.generation;
+        job->load_generation = ++workspace.subpalette_load_generation;
+        job->item_id = candidate_sources.front().item_id;
+        job->format = candidate_sources.front().format;
+        job->path = candidate_sources.front().path;
+        job->candidate_subpalette = candidate_subpalette;
+        job->candidate_sources = std::move(candidate_sources);
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+    auto* callback_owner =
+        new (std::nothrow) std::shared_ptr<SubpaletteLoadJob>(job);
+    if (callback_owner == nullptr
+        || TrySubmitThreadpoolCallback(
+               ReadSubpaletteFileCallback,
+               callback_owner,
+               nullptr) == FALSE) {
+        delete callback_owner;
+        return false;
+    }
+    workspace.subpalette_load = std::move(job);
+    workspace.subpalette_loading = true;
+    workspace.subpalette_error.clear();
+    PresentSubpalettePane(workspace);
+    return true;
+}
+
+bool InstallSubpaletteSources(
+    ApplicationHost& state,
+    WorkspaceWindow& workspace,
+    const std::vector<std::wstring>& paths) noexcept {
+    if (!EnsureSubpaletteHandle(state, workspace) || paths.empty()
+        || paths.size() > 10'000U) {
+        return false;
+    }
+    std::vector<SubpaletteSourceCache> candidate;
+    std::vector<std::vector<std::uint8_t>> names;
+    std::vector<InkpodSubpaletteSourceInput> inputs;
+    try {
+        candidate.reserve(paths.size());
+        names.reserve(paths.size());
+        inputs.reserve(paths.size());
+        for (const auto& path : paths) {
+            const InkpodCommonRasterFormat format =
+                CommonRasterFormatFromPath(path);
+            if (format == 0U) {
+                continue;
             }
-            pane.source_text = UiText(UiStringId::Text0546);
-            pane.empty_text = UiText(UiStringId::Text0548);
-            UpdateSubpalettePaneDialog(
-                workspace.subpalette_palette, std::move(pane));
+            SubpaletteSourceCache source{};
+            source.source_token =
+                static_cast<std::uint64_t>(candidate.size()) + 1U;
+            source.format = format;
+            source.path = path;
+            source.name = SubpaletteLeafName(path);
+            std::vector<std::uint8_t> utf8;
+            if (!WidePathToUtf8(source.name, utf8)) {
+                return false;
+            }
+            candidate.push_back(std::move(source));
+            names.push_back(std::move(utf8));
+        }
+        if (candidate.empty()) {
             return false;
         }
-        workspace.subpalette_session = document->id;
-        workspace.subpalette_document_view =
-            target.context.document_view.value();
-        workspace.subpalette_document_generation = document->generation;
-        workspace.subpalette_core_view_id = view_id;
-        RECT client{};
-        if (GetClientRect(workspace.subpalette_dialog.canvas, &client) != FALSE) {
-            const InkpodViewInput resize{
-                sizeof(InkpodViewInput),
-                INKPOD_VIEW_VIEWPORT_RESIZED,
+        for (std::size_t index = 0U; index < candidate.size(); ++index) {
+            inputs.push_back(InkpodSubpaletteSourceInput{
+                sizeof(InkpodSubpaletteSourceInput),
                 0U,
-                static_cast<double>(client.right - client.left),
-                static_cast<double>(client.bottom - client.top),
-                0.0,
-                0.0};
-            const InkpodViewInput fit{
-                sizeof(InkpodViewInput), INKPOD_VIEW_FIT, 0U, 0.0, 0.0, 0.0, 0.0};
-            (void)state.engine->Invoke(
-                document->id,
-                document->generation,
-                [view_id, resize, fit](InkpodCore* core) {
-                    InkpodStatus inner = inkpod_core_subpalette_view_apply(
-                        core, view_id, &resize);
-                    return inner == INKPOD_STATUS_OK
-                        ? inkpod_core_subpalette_view_apply(
-                              core, view_id, &fit)
-                        : inner;
-                },
-                false,
-                false);
+                candidate[index].source_token,
+                names[index].data(),
+                static_cast<std::uint64_t>(names[index].size())});
         }
-    } else {
-        const std::uint32_t source_index = workspace.subpalette_source_index;
-        (void)state.engine->Invoke(
-            document->id,
-            document->generation,
-            [source_index](InkpodCore* core) {
-                return inkpod_core_subpalette_set(core, source_index);
-            },
-            false,
-            false);
+    } catch (const std::bad_alloc&) {
+        return false;
     }
 
-    pane.source_available = PublishSubpaletteSnapshot(state);
+    InkpodSubpaletteInfo info{};
+    info.struct_size = sizeof(info);
+    std::vector<InkpodSubpaletteItemInfo> item_infos;
     try {
-        const auto& source = cells[workspace.subpalette_source_index];
-        std::wstring source_name;
-        if (!source.name.empty()) {
-            const int required = MultiByteToWideChar(
-                CP_UTF8,
-                MB_ERR_INVALID_CHARS,
-                source.name.data(),
-                static_cast<int>(source.name.size()),
-                nullptr,
-                0);
-            if (required > 0) {
-                source_name.resize(static_cast<std::size_t>(required));
-                (void)MultiByteToWideChar(
-                    CP_UTF8,
-                    MB_ERR_INVALID_CHARS,
-                    source.name.data(),
-                    static_cast<int>(source.name.size()),
-                    source_name.data(),
-                    required);
-            }
+        item_infos.resize(candidate.size());
+        for (auto& item : item_infos) {
+            item.struct_size = sizeof(item);
         }
-        pane.source_text = UiText(UiStringId::Text0545)
-            + std::to_wstring(source.info.cell_number)
-            + (source_name.empty() ? L"" : L" — " + source_name);
-        pane.empty_text = pane.source_available
-            ? L""
-            : UiText(UiStringId::Text0552);
     } catch (const std::bad_alloc&) {
-        pane.source_available = false;
-        pane.source_text = UiText(UiStringId::Text0546);
-        pane.empty_text = UiText(UiStringId::Text0553);
+        return false;
     }
-    UpdateSubpalettePaneDialog(
-        workspace.subpalette_palette, std::move(pane));
-    return workspace.subpalette_dialog.view.source_available;
+    InkpodSubpalette* candidate_subpalette{};
+    if (state.engine->CreateSubpalette(&candidate_subpalette)
+        != INKPOD_STATUS_OK) {
+        return false;
+    }
+    const InkpodStatus status = state.engine->InvokeSubpalette(
+        candidate_subpalette,
+        [&inputs, &item_infos, &info](InkpodSubpalette* subpalette) {
+            InkpodStatus inner = inkpod_subpalette_replace_sources(
+                subpalette,
+                inputs.data(),
+                static_cast<std::uint64_t>(inputs.size()),
+                sizeof(InkpodSubpaletteSourceInput),
+                &info);
+            for (std::uint32_t index = 0U;
+                 inner == INKPOD_STATUS_OK && index < info.item_count;
+                 ++index) {
+                inner = inkpod_subpalette_item_get(
+                    subpalette, index, &item_infos[index]);
+            }
+            return inner;
+        });
+    if (status != INKPOD_STATUS_OK || item_infos.empty()) {
+        (void)state.engine->ReleaseSubpalette(&candidate_subpalette);
+        return false;
+    }
+    std::vector<SubpaletteSourceCache> ordered;
+    try {
+        ordered.reserve(candidate.size());
+        for (const auto& item : item_infos) {
+            const auto source = std::find_if(
+                candidate.cbegin(),
+                candidate.cend(),
+                [&item](const SubpaletteSourceCache& value) {
+                    return value.source_token == item.source_token;
+                });
+            if (source == candidate.cend()) {
+                (void)state.engine->ReleaseSubpalette(&candidate_subpalette);
+                return false;
+            }
+            ordered.push_back(*source);
+            ordered.back().item_id = item.item_id;
+        }
+    } catch (const std::bad_alloc&) {
+        (void)state.engine->ReleaseSubpalette(&candidate_subpalette);
+        return false;
+    }
+    if (!QueueSubpaletteReplacementLoad(
+            workspace,
+            candidate_subpalette,
+            std::move(ordered))) {
+        (void)state.engine->ReleaseSubpalette(&candidate_subpalette);
+        return false;
+    }
+    return true;
+}
+
+void CompleteSubpaletteLoad(
+    ApplicationHost& state,
+    WorkspaceWindow& workspace,
+    const std::shared_ptr<SubpaletteLoadJob>& job) noexcept {
+    workspace.subpalette_loading = false;
+    workspace.subpalette_load.reset();
+    const auto release_candidate = [&state, &job]() noexcept {
+        if (state.engine != nullptr && job->candidate_subpalette != nullptr) {
+            (void)state.engine->ReleaseSubpalette(
+                &job->candidate_subpalette);
+        }
+    };
+    const InkpodStatus read_status = job->status.load(std::memory_order_acquire);
+    InkpodSubpalette* target = job->candidate_subpalette != nullptr
+        ? job->candidate_subpalette
+        : workspace.subpalette;
+    if (read_status != INKPOD_STATUS_OK || state.engine == nullptr
+        || target == nullptr) {
+        release_candidate();
+        workspace.subpalette_error = UiText(UiStringId::SubpaletteReadFailed);
+        PresentSubpalettePane(workspace);
+        return;
+    }
+    InkpodSubpaletteInfo info{};
+    info.struct_size = sizeof(info);
+    const InkpodStatus status = state.engine->InvokeSubpalette(
+        target,
+        [job, &info](InkpodSubpalette* subpalette) {
+            return inkpod_subpalette_load_common_raster(
+                subpalette,
+                job->item_id,
+                job->format,
+                job->bytes.data(),
+                static_cast<std::uint64_t>(job->bytes.size()),
+                &info);
+        });
+    if (status != INKPOD_STATUS_OK) {
+        release_candidate();
+        workspace.subpalette_error = UiText(UiStringId::SubpaletteReadFailed);
+        PresentSubpalettePane(workspace);
+        return;
+    }
+    if (job->candidate_subpalette != nullptr) {
+        if (state.engine->ReleaseSubpalette(&workspace.subpalette)
+            != INKPOD_STATUS_OK) {
+            release_candidate();
+            workspace.subpalette_error = UiText(UiStringId::SubpaletteReadFailed);
+            PresentSubpalettePane(workspace);
+            return;
+        }
+        workspace.subpalette = job->candidate_subpalette;
+        job->candidate_subpalette = nullptr;
+        workspace.subpalette_sources = std::move(job->candidate_sources);
+    }
+    workspace.subpalette_info = info;
+    workspace.subpalette_navigation_index = info.active_index;
+    workspace.subpalette_sample_available = false;
+    workspace.subpalette_error.clear();
+    RECT bounds{};
+    if (workspace.subpalette_dialog.canvas != nullptr
+        && GetClientRect(workspace.subpalette_dialog.canvas, &bounds) != FALSE) {
+        const double width = static_cast<double>(
+            std::max<LONG>(1, bounds.right - bounds.left));
+        const double height = static_cast<double>(
+            std::max<LONG>(1, bounds.bottom - bounds.top));
+        const InkpodViewInput resize{
+            sizeof(InkpodViewInput),
+            INKPOD_VIEW_VIEWPORT_RESIZED,
+            INKPOD_FEATURE_NONE,
+            width,
+            height,
+            0.0,
+            0.0};
+        const InkpodViewInput fit{
+            sizeof(InkpodViewInput),
+            INKPOD_VIEW_FIT,
+            INKPOD_FEATURE_NONE,
+            width,
+            height,
+            0.0,
+            0.0};
+        (void)state.engine->InvokeSubpalette(
+            workspace.subpalette,
+            [&resize, &fit](InkpodSubpalette* subpalette) {
+                InkpodStatus inner = inkpod_subpalette_view_apply(
+                    subpalette, &resize);
+                return inner == INKPOD_STATUS_OK
+                    ? inkpod_subpalette_view_apply(subpalette, &fit)
+                    : inner;
+            });
+    }
+    (void)PublishSubpaletteSnapshot(state, workspace);
+    PresentSubpalettePane(workspace);
 }
 
 void DispatchSubpalettePaneCommand(void* context, UINT command) noexcept {
@@ -2584,54 +2831,43 @@ void DispatchSubpalettePaneCommand(void* context, UINT command) noexcept {
 void ApplySubpaletteViewInput(
     ApplicationHost& state, const InkpodViewInput& input) noexcept {
     auto& workspace = state.Workspace();
-    const PaneActionTarget target = state.routing.pane_targets.CaptureAction(
-        state.routing.subpalette_pane,
-        state.routing.targets.Capture(),
-        state.routing.targets);
-    if (state.engine == nullptr || target.status != PaneTargetStatus::Ok
-        || !target.context.document_session.has_value()
-        || !target.context.document_view.has_value()
-        || !target.context.generation.has_value()
-        || target.context.document_session.value()
-            != workspace.subpalette_session
-        || target.context.document_view.value()
-            != workspace.subpalette_document_view
-        || target.context.generation.value()
-            != workspace.subpalette_document_generation
-        || workspace.subpalette_core_view_id == 0U) {
-        (void)RefreshSubpalettePane(state);
+    if (state.engine == nullptr || workspace.subpalette == nullptr
+        || (workspace.subpalette_info.flags
+            & INKPOD_SUBPALETTE_INFO_IMAGE_LOADED) == 0U) {
         return;
     }
-    auto* document = state.Documents().Find(workspace.subpalette_session);
-    auto* view = document == nullptr
-        ? nullptr
-        : document->FindView(workspace.subpalette_document_view);
-    const std::uint64_t reference_view_id = workspace.subpalette_core_view_id;
-    const std::uint64_t editor_view_id = view == nullptr
-        ? 0U
-        : view->presentation.active_view_id;
-    const bool synchronize = workspace.subpalette_scroll_sync && view != nullptr;
-    const InkpodStatus status = state.engine->Invoke(
-        workspace.subpalette_session,
-        workspace.subpalette_document_generation,
-        [reference_view_id, editor_view_id, synchronize, input](InkpodCore* core) {
-            InkpodStatus inner = inkpod_core_subpalette_view_apply(
-                core, reference_view_id, &input);
-            if (inner == INKPOD_STATUS_OK && synchronize) {
-                if (editor_view_id == 0U) {
-                    InkpodDocumentInfo ignored{};
-                    ignored.struct_size = sizeof(ignored);
-                    inner = inkpod_core_apply_view(core, &input, &ignored);
-                } else {
-                    inner = inkpod_core_view_apply(core, editor_view_id, &input);
-                }
-            }
-            return inner;
-        },
-        synchronize,
-        synchronize);
+    const InkpodStatus status = state.engine->InvokeSubpalette(
+        workspace.subpalette,
+        [&input](InkpodSubpalette* subpalette) {
+            return inkpod_subpalette_view_apply(subpalette, &input);
+        });
     if (status == INKPOD_STATUS_OK) {
-        (void)PublishSubpaletteSnapshot(state);
+        (void)PublishSubpaletteSnapshot(state, workspace);
+    }
+}
+
+void RegisterSubpaletteSample(ApplicationHost& state) noexcept {
+    auto& workspace = state.Workspace();
+    if (!workspace.subpalette_sample_available) {
+        return;
+    }
+    std::vector<InkpodColorValue> colors;
+    try {
+        colors = workspace.panes.palette_colors;
+        if (colors.size() >= 4096U) {
+            return;
+        }
+        colors.push_back(workspace.subpalette_sample);
+    } catch (const std::bad_alloc&) {
+        return;
+    }
+    const CommandContext target = state.routing.targets.Capture();
+    if (ReplacePalette(state, target, colors) == INKPOD_STATUS_OK) {
+        workspace.panes.selected_palette_index =
+            static_cast<std::uint32_t>(colors.size() - 1U);
+        workspace.panes.palette_group =
+            workspace.panes.selected_palette_index / 10U;
+        (void)RefreshColorPanes(state);
     }
 }
 
@@ -2644,54 +2880,85 @@ void PerformSubpalettePaneAction(
     }
     auto& workspace = state->Workspace();
     switch (action) {
-        case inkpod::windows::ui::panes::SubpalettePaneAction::Previous:
-            if (workspace.subpalette_source_index != 0U) {
-                --workspace.subpalette_source_index;
+        case inkpod::windows::ui::panes::SubpalettePaneAction::OpenFiles: {
+            std::vector<std::wstring> paths;
+            if (ChooseCommonRasterPaths(workspace.windows.window, paths)) {
+                if (!InstallSubpaletteSources(*state, workspace, paths)) {
+                    workspace.subpalette_error =
+                        UiText(UiStringId::SubpaletteReadFailed);
+                    PresentSubpalettePane(workspace);
+                }
             }
-            break;
-        case inkpod::windows::ui::panes::SubpalettePaneAction::Next:
-            if (workspace.subpalette_source_index + 1U
-                < workspace.subpalette_source_count) {
-                ++workspace.subpalette_source_index;
-            }
-            break;
-        case inkpod::windows::ui::panes::SubpalettePaneAction::Current:
-            workspace.subpalette_source_index = workspace.subpalette_active_index;
-            break;
-        case inkpod::windows::ui::panes::SubpalettePaneAction::Fit: {
-            const InkpodViewInput input{
-                sizeof(InkpodViewInput), INKPOD_VIEW_FIT, 0U, 0.0, 0.0, 0.0, 0.0};
-            ApplySubpaletteViewInput(*state, input);
             return;
         }
+        case inkpod::windows::ui::panes::SubpalettePaneAction::OpenFolder: {
+            std::wstring folder;
+            std::vector<std::wstring> paths;
+            if (inkpod::windows::ui::ChooseBatchFolder(
+                    workspace.windows.window,
+                    UiText(UiStringId::SubpaletteFolderTitle),
+                    folder)
+                && EnumerateSubpaletteFolder(folder, paths)
+                && InstallSubpaletteSources(*state, workspace, paths)) {
+                return;
+            }
+            if (!folder.empty()) {
+                workspace.subpalette_error =
+                    UiText(UiStringId::SubpaletteReadFailed);
+                PresentSubpalettePane(workspace);
+            }
+            return;
+        }
+        case inkpod::windows::ui::panes::SubpalettePaneAction::Previous:
+        case inkpod::windows::ui::panes::SubpalettePaneAction::Next: {
+            if (workspace.subpalette_loading
+                || workspace.subpalette_sources.empty()) {
+                return;
+            }
+            std::size_t index = workspace.subpalette_navigation_index;
+            if (action
+                    == inkpod::windows::ui::panes::SubpalettePaneAction::Previous) {
+                if (index == 0U) {
+                    return;
+                }
+                --index;
+            } else {
+                if (index + 1U >= workspace.subpalette_sources.size()) {
+                    return;
+                }
+                ++index;
+            }
+            (void)QueueSubpaletteLoad(
+                workspace, workspace.subpalette_sources[index].item_id);
+            return;
+        }
+        case inkpod::windows::ui::panes::SubpalettePaneAction::Fit:
         case inkpod::windows::ui::panes::SubpalettePaneAction::OneToOne: {
+            RECT bounds{};
+            if (workspace.subpalette_dialog.canvas == nullptr
+                || GetClientRect(
+                       workspace.subpalette_dialog.canvas, &bounds) == FALSE) {
+                return;
+            }
             const InkpodViewInput input{
                 sizeof(InkpodViewInput),
-                INKPOD_VIEW_ONE_TO_ONE,
-                0U,
-                0.0,
-                0.0,
+                action == inkpod::windows::ui::panes::SubpalettePaneAction::Fit
+                    ? INKPOD_VIEW_FIT
+                    : INKPOD_VIEW_ONE_TO_ONE,
+                INKPOD_FEATURE_NONE,
+                static_cast<double>(
+                    std::max<LONG>(1, bounds.right - bounds.left)),
+                static_cast<double>(
+                    std::max<LONG>(1, bounds.bottom - bounds.top)),
                 0.0,
                 0.0};
             ApplySubpaletteViewInput(*state, input);
             return;
         }
-        case inkpod::windows::ui::panes::SubpalettePaneAction::ToggleAutoPrevious:
-            workspace.subpalette_auto_previous =
-                !workspace.subpalette_auto_previous;
-            if (workspace.subpalette_auto_previous) {
-                workspace.subpalette_source_index =
-                    workspace.subpalette_active_index == 0U
-                    ? 0U
-                    : workspace.subpalette_active_index - 1U;
-            }
-            break;
-        case inkpod::windows::ui::panes::SubpalettePaneAction::ToggleScrollSync:
-            workspace.subpalette_scroll_sync =
-                !workspace.subpalette_scroll_sync;
-            break;
+        case inkpod::windows::ui::panes::SubpalettePaneAction::RegisterSample:
+            RegisterSubpaletteSample(*state);
+            return;
     }
-    (void)RefreshSubpalettePane(*state);
 }
 
 void SampleSubpalettePane(void* context, double x, double y) noexcept {
@@ -2700,35 +2967,22 @@ void SampleSubpalettePane(void* context, double x, double y) noexcept {
         return;
     }
     auto& workspace = state->Workspace();
-    const PaneActionTarget target = state->routing.pane_targets.CaptureAction(
-        state->routing.subpalette_pane,
-        state->routing.targets.Capture(),
-        state->routing.targets);
-    if (target.status != PaneTargetStatus::Ok
-        || !target.context.document_session.has_value()
-        || !target.context.generation.has_value()
-        || target.context.document_session.value()
-            != workspace.subpalette_session
-        || target.context.generation.value()
-            != workspace.subpalette_document_generation
-        || workspace.subpalette_core_view_id == 0U) {
+    if (workspace.subpalette == nullptr) {
         return;
     }
     InkpodColorValue color{};
     color.struct_size = sizeof(color);
-    const std::uint64_t view_id = workspace.subpalette_core_view_id;
-    const InkpodStatus status = state->engine->Invoke(
-        workspace.subpalette_session,
-        workspace.subpalette_document_generation,
-        [view_id, x, y, &color](InkpodCore* core) {
-            return inkpod_core_subpalette_view_sample(
-                core, view_id, x, y, &color);
-        },
-        false,
-        false);
+    const InkpodStatus status = state->engine->InvokeSubpalette(
+        workspace.subpalette,
+        [x, y, &color](InkpodSubpalette* subpalette) {
+            return inkpod_subpalette_sample(subpalette, x, y, &color);
+        });
     if (status == INKPOD_STATUS_OK) {
+        workspace.subpalette_sample = color;
+        workspace.subpalette_sample_available = true;
         SetDrawingColor(*state, color);
         (void)RefreshColorPanes(*state);
+        PresentSubpalettePane(workspace);
     }
 }
 
@@ -2742,7 +2996,7 @@ void ApplySubpalettePaneView(
     const InkpodViewInput input{
         sizeof(InkpodViewInput),
         gesture.kind,
-        0U,
+        INKPOD_FEATURE_NONE,
         gesture.value1,
         gesture.value2,
         gesture.value3,
@@ -6712,15 +6966,8 @@ CommandStateInputs BuildCommandStateInputs(
     inputs.workspace.subpalette_visible =
         state.Workspace().windows.workspace.dock.IsPaneVisible(
             DockPaneType::Reference);
-    const auto* subpalette_binding = state.routing.pane_targets.Find(
-        state.routing.subpalette_pane);
-    inputs.workspace.subpalette_pinned = subpalette_binding != nullptr
-        && subpalette_binding->policy == PaneTargetPolicy::PinnedDocument;
-    inputs.workspace.subpalette_target_available =
-        state.routing.pane_targets.CaptureAction(
-            state.routing.subpalette_pane,
-            state.routing.targets.Capture(),
-            state.routing.targets).status == PaneTargetStatus::Ok;
+    inputs.workspace.subpalette_pinned = false;
+    inputs.workspace.subpalette_target_available = false;
     const auto* batch_binding = state.routing.pane_targets.Find(
         state.routing.batch_pane);
     inputs.workspace.batch_pinned = batch_binding != nullptr
@@ -12938,28 +13185,12 @@ bool CloseWorkspaceWindow(ApplicationHost& state, HWND window) noexcept {
         (void)SaveWorkspaceLayout(
             closing->windows.workspace, session_name.data());
     }
-    if (closing->subpalette_dialog.canvas != nullptr) {
-        (void)renderer::UnbindCanvasSnapshotSink(
-            closing->subpalette_dialog.canvas);
-    }
-    if (state.engine != nullptr && closing->subpalette_core_view_id != 0U
-        && closing->subpalette_session
-        && closing->subpalette_document_generation) {
-        const std::uint64_t core_view_id = closing->subpalette_core_view_id;
-        (void)state.engine->Invoke(
-            closing->subpalette_session,
-            closing->subpalette_document_generation,
-            [core_view_id](InkpodCore* core) {
-                return inkpod_core_view_close(core, core_view_id);
-            },
-            false,
-            false);
-        closing->subpalette_core_view_id = 0U;
-    }
+    ResetSubpaletteTarget(state, *closing);
     if (closing->subpalette_canvas_id) {
         (void)state.routing.targets.UnregisterAuxiliaryCanvas(
             closing->subpalette_canvas_id);
         closing->subpalette_canvas_id = {};
+        closing->subpalette_source_id = {};
     }
     const WorkspaceWindowId closing_id = closing->id;
     if (DestroyWindow(window) == FALSE) {
@@ -13757,6 +13988,8 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
         return false;
     }
     state.Workspace().subpalette_canvas_id = subpalette_canvas.value();
+    state.Workspace().subpalette_source_id = inkpod::app::AuxiliarySourceId{
+        subpalette_canvas->Value()};
     state.Workspace().subpalette_surface_generation =
         state.routing.targets.CurrentGeneration();
     state.Workspace().subpalette_dialog = {};
@@ -13779,6 +14012,7 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
         (void)state.routing.targets.UnregisterAuxiliaryCanvas(
             state.Workspace().subpalette_canvas_id);
         state.Workspace().subpalette_canvas_id = {};
+        state.Workspace().subpalette_source_id = {};
         return false;
     }
     ShowWindow(state.Workspace().subpalette_palette, SW_HIDE);
@@ -13932,10 +14166,12 @@ inkpod::app::WorkspaceWindow* CreateWorkspaceWindow(
     }
     if (window == nullptr
         || !RegisterWorkspaceSnapshotSinks(state, *workspace)) {
+        ResetSubpaletteTarget(state, *workspace);
         if (workspace->subpalette_canvas_id) {
             (void)state.routing.targets.UnregisterAuxiliaryCanvas(
                 workspace->subpalette_canvas_id);
             workspace->subpalette_canvas_id = {};
+            workspace->subpalette_source_id = {};
         }
         if (window != nullptr) {
             DestroyWindow(window);
@@ -13970,10 +14206,12 @@ void DestroyEmptyWorkspaceWindow(
         (void)state.ActivateWorkspaceWindow(restore, false);
         return;
     }
+    ResetSubpaletteTarget(state, *workspace);
     if (workspace->subpalette_canvas_id) {
         (void)state.routing.targets.UnregisterAuxiliaryCanvas(
             workspace->subpalette_canvas_id);
         workspace->subpalette_canvas_id = {};
+        workspace->subpalette_source_id = {};
     }
     if (workspace->windows.window != nullptr) {
         if (DestroyWindow(workspace->windows.window) == FALSE) {
@@ -18306,23 +18544,6 @@ std::optional<LRESULT> RouteApplicationCommand(
             }
             return 0;
         case IDM_SUBPALETTE_PIN: {
-            const auto* binding = state->routing.pane_targets.Find(
-                state->routing.subpalette_pane);
-            const PaneTargetStatus status = binding != nullptr
-                    && binding->policy == PaneTargetPolicy::PinnedDocument
-                ? state->routing.pane_targets.FollowActive(
-                      state->routing.subpalette_pane)
-                : state->routing.pane_targets.PinDocument(
-                      state->routing.subpalette_pane,
-                      context,
-                      state->routing.targets);
-            if (status == PaneTargetStatus::Ok
-                || status == PaneTargetStatus::NoOp) {
-                ResetSubpaletteTarget(*state);
-                (void)RefreshSubpalettePane(*state);
-                UpdateMenuState(*state);
-                return status == PaneTargetStatus::Ok ? 1 : 0;
-            }
             return 0;
         }
         case IDM_WORKSPACE_RESET:
@@ -19951,6 +20172,27 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                     QueueLocatorSample(*state);
                 }
             }
+            return 0;
+        }
+        case kSubpaletteLoadCompleted: {
+            if (state == nullptr) {
+                return 0;
+            }
+            WorkspaceWindow* workspace = state->FindWorkspace(
+                WorkspaceWindowId{static_cast<std::uint64_t>(wparam)});
+            const auto job = workspace == nullptr
+                ? std::shared_ptr<SubpaletteLoadJob>{}
+                : workspace->subpalette_load;
+            if (workspace == nullptr || job == nullptr
+                || workspace->windows.window != window
+                || workspace->generation != job->workspace_generation
+                || workspace->subpalette_load_generation
+                    != static_cast<std::uint64_t>(lparam)
+                || job->load_generation
+                    != static_cast<std::uint64_t>(lparam)) {
+                return 0;
+            }
+            CompleteSubpaletteLoad(*state, *workspace, job);
             return 0;
         }
         case kColorChartGenerationCompleted: {

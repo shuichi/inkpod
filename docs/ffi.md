@@ -828,24 +828,37 @@ property を canonical procedure へ解決して所有するため、sequence �
 保存されない。Windows は issue-time の `DocumentSessionId + Generation` を固定し、preview の OK 後だけ
 同じ request を apply する。
 
-## サブパレット参照スナップショットの契約
+## 独立サブパレットの契約（ABI v19）
 
-読み取り専用の参照ビューアーは、対象 `DocumentSessionId + Generation` の Core 所有スレッドで
-`inkpod_core_subpalette_set` と `inkpod_core_view_create` を呼び、返された Core 内のビュー ID を
-そのセッション名前空間の外で経路選択キーとして使わない。
+`InkpodSubpalette` は編集可能文書とは別の Rust 所有 opaque object であり、`inkpod_subpalette_create` を
+呼んだ owner thread だけが照会、source 置換、decode、view 操作、sampling、snapshot 構築、release を行う。
+Windows `CoreHost` は document session の有無に関係なく、この object の全操作を同じ Core engine thread
+へ直列化する。ABI v19 caller は v18 header から再コンパイルが必要であるが、native file version と replay
+epoch は変更しない。
 
-- `inkpod_core_subpalette_view_apply` は、そのビューのズーム、パン、反転、ビューポートだけを変更する。
-- `inkpod_core_subpalette_view_sample` は、同じビュー変換を通したデバイス座標を半開区間の境界で検証し、
-  入力元の RGBA8/16 色深度を保って、呼び出し側所有の `InkpodColorValue` へコピーする。
-- `inkpod_core_subpalette_build_snapshot` は、NULL の所有変数へ Rust 所有の不変スナップショットを返す。
-  通常のスナップショットと同様に、成功後は受け取り先または呼び出し側のどちらか一方だけが
-  `inkpod_snapshot_release` の責任を持つ。
+- `inkpod_subpalette_replace_sources` は caller-owned の strided `InkpodSubpaletteSourceInput` 列を呼出し中だけ
+  借用する。各 record は frontend 内だけで意味を持つ非ゼロ `source_token` と UTF-8 表示名を持ち、path や
+  file bytes は Rust object へ渡さない。Core は上限、長さ、UTF-8、重複 token を全件検証し、stem 末尾の
+  十進数字列によるセル順を確定してから一覧を一回で置換する。失敗時は一覧、active image、ID authority を保つ。
+- `inkpod_subpalette_item_get`、`inkpod_subpalette_item_name_copy`、
+  `inkpod_subpalette_adjacent_item` は caller-owned record/buffer へ bounded copy する read-only query である。
+  item ID は一つの `InkpodSubpalette` object 内だけで有効で、source 置換後の stale ID は拒否する。
+- `inkpod_subpalette_load_common_raster` は caller-owned bytes を呼出し中だけ借用し、PNG/TIFF/TGA/BMP を
+  private Core へ staged decode する。成功時だけ active image と private view を置換し、decode failure では
+  直前の active image、view、sample 結果、snapshot を保つ。
+- `inkpod_subpalette_view_apply` は private view の zoom/pan/flip/viewport だけを変更する。
+  `inkpod_subpalette_sample` は同じ変換を通した device-pixel 座標を半開区間で検証し、元画像の RGBA8/16
+  native depth と straight alpha を caller-owned `InkpodColorValue` へコピーする。
+- `inkpod_subpalette_build_snapshot` は NULL の owner slot へ Rust 所有の immutable `InkpodSnapshot` を返す。
+  成功後は renderer sink または caller の一方だけが `inkpod_snapshot_release` を一度呼ぶ。
+- `inkpod_subpalette_clear` と `inkpod_subpalette_release` は decoded raster と private Core/view を解放する。
+  release は owner slot を NULL にする。NULL owner storage と wrong thread は negative status、既に NULL の
+  owner slot を再度 release する操作は no-op とする。
 
-これら三関数とビューのクローズは Core 所有スレッド専用である。スナップショットの参照と解放だけが、
-外部同期した任意のスレッドから利用できる。参照ラスタは編集可能文書へ組み込まれず、文書リビジョン、
-未保存状態、Undo/Redo、保存点を変更しない。Windows Canvas はストローク入力を消費し、編集コマンドを
-Core へ送らない。対象の再割り当て、クローズ、終了処理では、先に Canvas の受け取り先を解除し、
-捕捉済みセッション／世代の Core 上でビューを閉じてから Canvas 所有者を破棄する。
+この object は document revision、EditorRevision、history、journal、dirty、savepoint、persistent ID、native
+serialization を変更しない。Windows は外部 path と bounded file read を platform adapter 内に保持し、completion
+時に workspace ID と generation を再検証する。終了時は Canvas sink を解除し、pending load を stale にしてから、
+owner thread 上で `InkpodSubpalette` を release する。
 
 ## Floating transform（現行 ABI v18）
 

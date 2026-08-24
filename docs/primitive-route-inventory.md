@@ -64,6 +64,8 @@ route|rust|document-primitive|rust-core|inkpod_core::run_inkscript_dry
 route|rust|query-snapshot|rust-core|ScriptDryRunResult::staged_mut inkpod_core::export_inkscript_fragment inkpod_core::export_inkscript_fragment_with_limits
 route|rust|query-snapshot|rust-core|inkpod_core::plan_inkscript
 route|rust|os-application-adapter|rust-core|InkScriptExportLimits::with_asset_bytes InkScriptExportLimits::with_commits InkScriptExportLimits::with_source_bytes ScriptCompileLimits::with_invocations ScriptPlanLimits::with_folder_entries ScriptRunLimits::with_output_bytes ScriptRunTask::advance ValidatedPathIdentity::with_generations inkpod_core::start_inkscript_run
+route|rust|asset-data-plane|rust-core|SubpaletteCatalog::clear SubpaletteCatalog::load_image SubpaletteCatalog::replace_sources
+route|rust|view-only-command|rust-core|SubpaletteCatalog::apply_view
 
 ## C ABI surface
 
@@ -100,6 +102,10 @@ route|ffi|asset-data-plane|rust-ffi-adapter|inkpod_core_export_instruction_commo
 route|ffi|document-primitive|rust-core|inkpod_core_vanishing_point_edit inkpod_core_vanishing_point_preview_apply
 route|ffi|transient-preview-stroke|rust-ffi-adapter|inkpod_core_vanishing_point_preview_begin inkpod_core_vanishing_point_preview_cancel inkpod_core_vanishing_point_preview_update
 route|ffi|query-snapshot|rust-ffi-adapter|inkpod_core_vanishing_points_copy inkpod_snapshot_get_vanishing_points
+route|ffi|asset-data-plane|rust-ffi-adapter|inkpod_subpalette_clear inkpod_subpalette_load_common_raster inkpod_subpalette_replace_sources
+route|ffi|view-only-command|rust-ffi-adapter|inkpod_subpalette_view_apply
+route|ffi|query-snapshot|rust-ffi-adapter|inkpod_subpalette_adjacent_item inkpod_subpalette_build_snapshot inkpod_subpalette_get_info inkpod_subpalette_item_get inkpod_subpalette_item_name_copy inkpod_subpalette_sample
+route|ffi|os-application-adapter|rust-ffi-adapter|inkpod_subpalette_create inkpod_subpalette_release
 
 ## Windows production command surface
 
@@ -172,7 +178,7 @@ route|windows|document-primitive|rust-core|IDM_SELECTION_OUTPUT_COLOR_GUARD
   and Canvas-handle edits share one canonical primitive and transient preview.
   Radial snapping is resolved beside explicit guides and grid in the Core.
 
-The source-derived inventory currently contains 290 Rust routes, 317 C ABI
+The source-derived inventory currently contains 294 Rust routes, 329 C ABI
 exports, and 346 localized Windows menu commands. Its architecture test
 requires every symbol to have exactly one class and owner; unclassified and
 direct C++ document mutation counts are both zero.

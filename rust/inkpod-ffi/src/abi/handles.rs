@@ -17,6 +17,11 @@ pub struct InkpodSnapshot {
     pub(crate) radial_guides: Box<[InkpodSnapshotRadialGuide]>,
 }
 
+pub struct InkpodSubpalette {
+    pub(crate) owner_thread: ThreadId,
+    pub(crate) catalog: SubpaletteCatalog,
+}
+
 pub struct InkpodCut {
     pub(crate) owner_thread: ThreadId,
     pub(crate) cut: CutCore,

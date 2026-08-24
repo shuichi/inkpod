@@ -35,6 +35,7 @@ struct EditorGroupIdTag;
 struct CanvasIdTag;
 struct PaneInstanceIdTag;
 struct JobSessionIdTag;
+struct AuxiliarySourceIdTag;
 struct GenerationTag;
 
 using WorkspaceWindowId = StrongFrontendId<WorkspaceWindowIdTag>;
@@ -44,6 +45,7 @@ using EditorGroupId = StrongFrontendId<EditorGroupIdTag>;
 using CanvasId = StrongFrontendId<CanvasIdTag>;
 using PaneInstanceId = StrongFrontendId<PaneInstanceIdTag>;
 using JobSessionId = StrongFrontendId<JobSessionIdTag>;
+using AuxiliarySourceId = StrongFrontendId<AuxiliarySourceIdTag>;
 using Generation = StrongFrontendId<GenerationTag>;
 
 }  // namespace inkpod::app

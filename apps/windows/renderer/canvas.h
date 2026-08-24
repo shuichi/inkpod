@@ -73,6 +73,10 @@ bool BindCanvasSnapshotSink(
     app::DocumentSessionId document_session,
     app::DocumentViewId document_view,
     app::Generation document_generation) noexcept;
+bool BindAuxiliaryCanvasSnapshotSink(
+    HWND canvas,
+    app::AuxiliarySourceId source,
+    app::Generation generation) noexcept;
 bool UnbindCanvasSnapshotSink(HWND canvas) noexcept;
 void CancelCanvasStroke(HWND canvas) noexcept;
 /* Custom HWND notifications carry only token + generation values. The receiver

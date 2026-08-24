@@ -49,17 +49,26 @@ struct CanvasGeometryPreview {
     CanvasGeometryPoint points[kCanvasGeometryPreviewPoints];
 };
 
+enum class SnapshotOwnerKind : std::uint8_t {
+    Document,
+    Auxiliary,
+};
+
 struct SnapshotRoute {
     app::DocumentSessionId document_session;
     app::DocumentViewId document_view;
     app::CanvasId canvas;
     app::Generation document_generation;
     app::Generation surface_generation;
+    SnapshotOwnerKind owner_kind{SnapshotOwnerKind::Document};
+    app::AuxiliarySourceId auxiliary_source;
 
     [[nodiscard]] explicit constexpr operator bool() const noexcept {
-        return static_cast<bool>(document_session)
-            && static_cast<bool>(document_view)
-            && static_cast<bool>(canvas)
+        const bool owner = owner_kind == SnapshotOwnerKind::Auxiliary
+            ? static_cast<bool>(auxiliary_source)
+            : static_cast<bool>(document_session)
+                && static_cast<bool>(document_view);
+        return owner && static_cast<bool>(canvas)
             && static_cast<bool>(document_generation)
             && static_cast<bool>(surface_generation);
     }

@@ -353,7 +353,10 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - chart生成previewは発行時のdocument revisionと同じbase compositeから毎回再抽出し、直前候補へ再量子化しない。previewは候補色、頻度、色数超過、元chartとの差分summaryをboundedに返し、chart、history、journal、dirtyを変更しない。Apply tokenがstaleなら別revisionや別chartへ適用しない。
 - 生成結果のApplyはdocument paletteではなくdocument所有のColor chart全体を一transactionで置換する。native depthとstraight alphaを含む完全一致色が既存chartにある場合は最初の同色entryの名前を保持し、新規色だけ1始まりの最終順序に基づく`Color N`を既定名とする。消えた色の名前は残さない。chart lock中はpreviewを許可するがApplyを拒否し、lock状態自体を変更しない。
 - chartの現在pageと選択位置はEditorStateでありdocument historyへ含めない。Apply後も選択色が完全一致で残ればそのentryへ追従し、残らない場合だけ先頭entry／page 0へ移す。空chartでは選択なし／page 0とする。Color chart entries、名前、lockとEditorState cursorは通常save/reopenで復元する。
-- subpalette は彩色済み参照セルを独立 viewport で表示し、zoom/pan、前後セル、番号移動、現在セル登録、自動的に一つ前のセルを表示、Canvasとのscroll連動、取得色のpalette登録を持つ。
+- `SUBPALETTE-001`: subpalette は文書や追従先から独立した workspace 単位の参照 viewport とし、ユーザーが複数選択した PNG/TIFF/TGA/BMP または指定 folder 直下の同形式画像を表示する。folder は再帰走査しない。stem の末尾の十進数字列をセル番号として昇順に並べ、番号付き画像を先、番号なし画像を自然順で後に置く。同じ表示名でも別 source として保持する。
+- subpalette viewport 上の pointer は active tool に関係なく常に eyedropper とし、cursor も eyedropper 表示にする。成功した sampling は表示変換を通した半開区間の device-pixel 座標から元画像の exact native-depth RGBA を取得し、現在の描画色と Color pane へ反映する。`取得色を登録` は最後に成功した subpalette sample だけを document palette へ追加し、sample 前は無効とする。
+- 画像は前へ／次へ toolbar button と Left／Up／PageUp、Right／Down／PageDown で順送り・逆送りできる。前へ、次へ、全体表示、等倍表示は localized accessible name を保つ icon button とする。追従先、pin、アクティブ追従、現在セル、自動的に一つ前、Canvas scroll 連動は subpalette UI に置かない。
+- file read/decode は UI thread を塞がない bounded task とし、workspace と request generation を completion 時に再検証する。source 一覧の置換は全件検証後だけ公開し、移動先の read/decode failure、cancel、stale completion は直前に正常表示できた画像とその view state を保つ。外部 path、file bytes、decoded raster、sample は document history、journal、savepoint、native file へ永続化しない。
 - light table から色を拾う場合は、item transform と基準 frame alignment を通した同一 document 座標を使う。
 
 ### 11. フィルと彩色
@@ -639,6 +642,7 @@ UI／ABIを production contract とする。M23で批准済みcatalogを使うRu
 - `COLOR-REPLACE-001`: pen／rectangle／polyline／lassoとselectionで限定したnative-depth raster置換
 - `COLOR-001`: RGBA 8/16、RGB/HSV、eyedropper source
 - `COLOR-002`: palette、chart、subpalette、color check
+- `SUBPALETTE-001`: 外部 file/folder source、自然セル順、独立 viewport、常時 eyedropper、exact sample/register、icon/keyboard navigation、非同期 failure atomicity
 - `COLOR-CHART-PREVIEW-001`: 同一base compositeからの非累積Color chart生成preview、頻度／差分summary、revision-bound Apply、exact-color名前継承、lock拒否、cursor継承、Cancel無変更、一回Undo／Redoとsave/reopen
 - `COLOR-OUTPUT-QA-001`: BT.709係数とnominal code相当閾値を使う非適合表示の保守的Y′CbCr guard、visible straight-alpha composite、透明skip、fixed half-up、selection algebra、progress／Cancel／stale、Undo／Redo、replay、save/reopen
 

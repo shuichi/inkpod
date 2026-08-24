@@ -1294,35 +1294,48 @@ int RunSubpalettePaneSmoke(ApplicationHost& state) noexcept {
             DockPaneType::Reference)
         || GetDlgItem(pane, IDC_SUBPALETTE_TARGET) == nullptr
         || GetDlgItem(pane, IDC_SUBPALETTE_PIN) == nullptr
-        || !WindowUsesNamedIconButton(GetDlgItem(pane, IDC_SUBPALETTE_PIN))
         || GetDlgItem(pane, IDC_SUBPALETTE_PREVIOUS) == nullptr
         || GetDlgItem(pane, IDC_SUBPALETTE_NEXT) == nullptr
-        || GetDlgItem(pane, IDC_SUBPALETTE_CURRENT) == nullptr
+        || GetDlgItem(pane, IDC_SUBPALETTE_CURRENT) != nullptr
         || GetDlgItem(pane, IDC_SUBPALETTE_FIT) == nullptr
         || GetDlgItem(pane, IDC_SUBPALETTE_ONE_TO_ONE) == nullptr
         || GetDlgItem(pane, IDC_SUBPALETTE_REGISTER) == nullptr
-        || GetDlgItem(pane, IDC_SUBPALETTE_AUTO_PREVIOUS) == nullptr
-        || GetDlgItem(pane, IDC_SUBPALETTE_SCROLL_SYNC) == nullptr
+        || GetDlgItem(pane, IDC_SUBPALETTE_AUTO_PREVIOUS) != nullptr
+        || GetDlgItem(pane, IDC_SUBPALETTE_SCROLL_SYNC) != nullptr
+        || !WindowUsesNamedIconButton(
+            GetDlgItem(pane, IDC_SUBPALETTE_PREVIOUS))
+        || !WindowUsesNamedIconButton(
+            GetDlgItem(pane, IDC_SUBPALETTE_NEXT))
+        || !WindowUsesNamedIconButton(GetDlgItem(pane, IDC_SUBPALETTE_FIT))
+        || !WindowUsesNamedIconButton(
+            GetDlgItem(pane, IDC_SUBPALETTE_ONE_TO_ONE))
+        || IsWindowEnabled(GetDlgItem(pane, IDC_SUBPALETTE_REGISTER)) != FALSE
+        || state.Workspace().subpalette_dialog.eyedropper_cursor == nullptr
         || (GetMenuState(menu, IDM_WINDOW_SUBPALETTE, MF_BYCOMMAND)
             & MF_CHECKED) == 0U
         || !PaneButtonsFit(pane)) {
         return 921;
     }
     std::array<wchar_t, 256U> target_text{};
+    std::array<wchar_t, 256U> folder_text{};
     if (GetDlgItemTextW(
             pane,
             IDC_SUBPALETTE_TARGET,
             target_text.data(),
             static_cast<int>(target_text.size())) <= 0
-        || std::wcsstr(
-               target_text.data(), UiText(UiStringId::FollowingPrefix))
-            != target_text.data()
+        || std::wcscmp(
+               target_text.data(), UiText(UiStringId::SubpaletteOpenFiles))
+            != 0
         || HasJapaneseCharacters(target_text.data())
-        || SendMessageW(
-               state.Workspace().windows.window,
-               WM_COMMAND,
-               IDM_SUBPALETTE_PIN,
-               0) != 1) {
+        || GetDlgItemTextW(
+               pane,
+               IDC_SUBPALETTE_PIN,
+               folder_text.data(),
+               static_cast<int>(folder_text.size())) <= 0
+        || std::wcscmp(
+               folder_text.data(), UiText(UiStringId::SubpaletteOpenFolder))
+            != 0
+        || HasJapaneseCharacters(folder_text.data())) {
         return 922;
     }
     if (!PaneButtonsFit(pane)) {
@@ -1331,14 +1344,14 @@ int RunSubpalettePaneSmoke(ApplicationHost& state) noexcept {
     const auto* binding = state.routing.pane_targets.Find(
         state.routing.subpalette_pane);
     if (binding == nullptr
-        || binding->policy != inkpod::app::PaneTargetPolicy::PinnedDocument
+        || binding->policy != inkpod::app::PaneTargetPolicy::Application
         || SendMessageW(
                state.Workspace().windows.window,
                WM_COMMAND,
                IDM_SUBPALETTE_PIN,
-               0) != 1
+               0) != 0
         || state.routing.pane_targets.Find(state.routing.subpalette_pane)->policy
-            != inkpod::app::PaneTargetPolicy::FollowActiveView
+            != inkpod::app::PaneTargetPolicy::Application
         || SendMessageW(
                state.Workspace().windows.window,
                WM_COMMAND,

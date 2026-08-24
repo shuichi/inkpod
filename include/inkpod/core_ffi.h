@@ -66,7 +66,7 @@
 extern "C" {
 #endif
 
-#define INKPOD_ABI_VERSION UINT32_C(18)
+#define INKPOD_ABI_VERSION UINT32_C(19)
 #define INKPOD_FEATURE_NONE UINT64_C(0)
 
 /** @brief InkScript ABI record の exact-current version。 */
@@ -629,6 +629,9 @@ typedef uint32_t InkpodSequenceStepResult;
 #define INKPOD_SEQUENCE_STEP_ADVANCED UINT32_C(4)
 #define INKPOD_SEQUENCE_STEP_WRAPPED UINT32_C(5)
 #define INKPOD_SEQUENCE_INDEX_NONE UINT32_MAX
+#define INKPOD_SUBPALETTE_INDEX_NONE UINT32_MAX
+#define INKPOD_SUBPALETTE_INFO_IMAGE_LOADED (UINT64_C(1) << 0)
+#define INKPOD_SUBPALETTE_ITEM_HAS_CELL_NUMBER (UINT32_C(1) << 0)
 #define INKPOD_SEQUENCE_SWITCH_PROMPT UINT32_C(1)
 #define INKPOD_SEQUENCE_SWITCH_AUTOSAVE UINT32_C(2)
 #define INKPOD_SEQUENCE_SWITCH_REQUIRED (UINT32_C(1) << 0)
@@ -735,6 +738,8 @@ typedef struct InkpodCut InkpodCut;
 typedef struct InkpodCellCreationPlan InkpodCellCreationPlan;
 /** @brief Core から独立して生存できる immutable・Rust-owned snapshot handle。 */
 typedef struct InkpodSnapshot InkpodSnapshot;
+/** @brief Workspace-scoped read-only external-image subpalette owner. */
+typedef struct InkpodSubpalette InkpodSubpalette;
 /** @brief typed clipboard payload を保持する immutable・Rust-owned handle。 */
 typedef struct InkpodClipboard InkpodClipboard;
 /** @brief encode 結果の immutable byte 列を保持する Rust-owned handle。 */
@@ -1727,6 +1732,36 @@ typedef struct InkpodViewInput {
     double value3;
     double value4;
 } InkpodViewInput;
+
+/** @brief One borrowed external-image source name and frontend-owned path token. */
+typedef struct InkpodSubpaletteSourceInput {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t source_token;
+    const uint8_t* name_utf8;
+    uint64_t name_bytes;
+} InkpodSubpaletteSourceInput;
+
+/** @brief Side-effect-free external-image catalog and selection summary. */
+typedef struct InkpodSubpaletteInfo {
+    uint32_t struct_size;
+    uint32_t item_count;
+    uint64_t catalog_revision;
+    uint32_t active_index;
+    uint32_t reserved;
+    uint64_t flags;
+} InkpodSubpaletteInfo;
+
+/** @brief Metadata for one naturally ordered external-image item. */
+typedef struct InkpodSubpaletteItemInfo {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t item_id;
+    uint64_t source_token;
+    uint32_t cell_number;
+    uint32_t reserved;
+    uint64_t name_bytes;
+} InkpodSubpaletteItemInfo;
 
 /** @brief depth を明示した straight-alpha 色値。8-bit 値は各 channel の下位 8 bit を使う。 */
 typedef struct InkpodColorValue {
@@ -5294,6 +5329,109 @@ InkpodStatus inkpod_core_subpalette_view_sample(
 InkpodStatus inkpod_core_subpalette_build_snapshot(
     InkpodCore* core,
     uint64_t view_id,
+    const InkpodSnapshotOptions* options,
+    InkpodSnapshot** out_snapshot);
+
+/**
+ * @brief Creates an empty workspace-scoped external-image subpalette.
+ * @par Contract
+ * The returned owner is single-writer and affined to the creating Core-engine thread. It owns no
+ * OS path, user document, history, dirty state, savepoint, or replay state. Release it with
+ * `inkpod_subpalette_release` on that same thread.
+ */
+InkpodStatus inkpod_subpalette_create(InkpodSubpalette** out_subpalette);
+
+/**
+ * @brief Releases a subpalette and nulls its unique owner pointer.
+ * @par Contract
+ * Owner-thread only. Releasing the same nulled owner is a no-op. Already published snapshots remain
+ * independently owned until `inkpod_snapshot_release`.
+ */
+InkpodStatus inkpod_subpalette_release(InkpodSubpalette** subpalette);
+
+/**
+ * @brief Atomically replaces naturally ordered external source metadata.
+ * @par Contract
+ * Owner-thread only. `inputs` is a bounded strided borrowed span; names are UTF-8 file names and
+ * `source_token` is an opaque nonzero frontend path-authority token returned unchanged. Numbered
+ * names use the final decimal run in the stem, precede unnumbered names, and sort naturally. No
+ * input pointer is retained. Failure publishes no catalog, selection, revision, or item ID.
+ */
+InkpodStatus inkpod_subpalette_replace_sources(
+    InkpodSubpalette* subpalette,
+    const InkpodSubpaletteSourceInput* inputs,
+    uint64_t input_count,
+    uint64_t input_stride_bytes,
+    InkpodSubpaletteInfo* out_info);
+
+/** @brief Clears source metadata and the decoded image without resetting item-ID authority. */
+InkpodStatus inkpod_subpalette_clear(
+    InkpodSubpalette* subpalette,
+    InkpodSubpaletteInfo* out_info);
+
+/** @brief Queries catalog revision, count, active index, and decoded-image availability. */
+InkpodStatus inkpod_subpalette_get_info(
+    InkpodSubpalette* subpalette,
+    InkpodSubpaletteInfo* out_info);
+
+/** @brief Queries one naturally ordered item without decoding its image. */
+InkpodStatus inkpod_subpalette_item_get(
+    InkpodSubpalette* subpalette,
+    uint32_t index,
+    InkpodSubpaletteItemInfo* out_item);
+
+/**
+ * @brief Copies one item's UTF-8 name without a trailing NUL.
+ * @par Contract
+ * A short or zero-capacity buffer returns `BUFFER_TOO_SMALL` after writing the required byte count.
+ */
+InkpodStatus inkpod_subpalette_item_name_copy(
+    InkpodSubpalette* subpalette,
+    uint32_t index,
+    uint8_t* buffer,
+    uint64_t capacity,
+    uint64_t* out_written);
+
+/** @brief Resolves a stopping previous/next item ID without changing selection or decoding data. */
+InkpodStatus inkpod_subpalette_adjacent_item(
+    InkpodSubpalette* subpalette,
+    InkpodSequenceDirection direction,
+    uint64_t* out_item_id);
+
+/**
+ * @brief Decodes PNG/TIFF/TGA/BMP bytes and atomically selects one catalog item.
+ * @par Contract
+ * Owner-thread only. Bytes are borrowed only for this call. Decode/view failure preserves the
+ * previous decoded image, selection, catalog revision, and caller output.
+ */
+InkpodStatus inkpod_subpalette_load_common_raster(
+    InkpodSubpalette* subpalette,
+    uint64_t item_id,
+    InkpodCommonRasterFormat format,
+    const uint8_t* bytes,
+    uint64_t byte_count,
+    InkpodSubpaletteInfo* out_info);
+
+/** @brief Applies pan, zoom-at, fit, one-to-one, or viewport-resize to the private read-only view. */
+InkpodStatus inkpod_subpalette_view_apply(
+    InkpodSubpalette* subpalette,
+    const InkpodViewInput* input);
+
+/** @brief Samples one exact-depth pixel through device-pixel coordinates without mutating a document. */
+InkpodStatus inkpod_subpalette_sample(
+    InkpodSubpalette* subpalette,
+    double device_x,
+    double device_y,
+    InkpodColorValue* out_color);
+
+/**
+ * @brief Builds an immutable Rust-owned snapshot of the decoded external image.
+ * @par Contract
+ * Owner-thread build; release the returned snapshot on any externally synchronized thread with
+ * `inkpod_snapshot_release`. Failure leaves `out_snapshot` NULL.
+ */
+InkpodStatus inkpod_subpalette_build_snapshot(
+    InkpodSubpalette* subpalette,
     const InkpodSnapshotOptions* options,
     InkpodSnapshot** out_snapshot);
 

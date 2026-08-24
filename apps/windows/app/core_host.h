@@ -84,6 +84,8 @@ struct CoreNotification {
 class CoreHost final {
 public:
     using CoreOperation = std::function<InkpodStatus(InkpodCore*)>;
+    using SubpaletteOperation =
+        std::function<InkpodStatus(InkpodSubpalette*)>;
     // The application supports up to eight workspace windows with two visible
     // editor groups in each. Only visible editor-group canvases are registered.
     static constexpr std::size_t kMaximumSnapshotSinks = 16U;
@@ -136,6 +138,14 @@ public:
         CoreOperation operation,
         bool publish_snapshot,
         bool refresh_document_info) noexcept;
+    // These calls dispatch directly to the shared Core engine owner thread.
+    // The subpalette handle has no document target and never follows the active
+    // document.
+    InkpodStatus CreateSubpalette(InkpodSubpalette** out_subpalette) noexcept;
+    InkpodStatus InvokeSubpalette(
+        InkpodSubpalette* subpalette,
+        SubpaletteOperation operation) noexcept;
+    InkpodStatus ReleaseSubpalette(InkpodSubpalette** subpalette) noexcept;
     InkpodStatus InvokePrimitive(
         const InkpodPrimitiveRequestV3& request,
         bool publish_snapshot,

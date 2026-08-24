@@ -46,6 +46,7 @@ mod selection;
 mod shooting_frame;
 mod snapshot;
 mod stroke;
+mod subpalette;
 mod thumbnail;
 mod transform;
 mod vanishing_point;
@@ -138,6 +139,10 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use stroke::StrokeSession;
+pub use subpalette::{
+    MAX_SUBPALETTE_ITEMS, SubpaletteCatalog, SubpaletteCatalogInfo, SubpaletteItem,
+    SubpaletteItemId, SubpaletteSource,
+};
 pub use vanishing_point::*;
 use view::default_shortcuts;
 /// Feature bits supported by this version of the Rust Core API.

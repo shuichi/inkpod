@@ -8873,6 +8873,62 @@
       "ja": "閉じる",
       "en": "Close",
       "resource": false
+    },
+    {
+      "id": "SubpaletteOpenFiles",
+      "kind": "text",
+      "ja": "画像ファイルを開く...",
+      "en": "Open Image Files...",
+      "resource": true
+    },
+    {
+      "id": "SubpaletteOpenFolder",
+      "kind": "text",
+      "ja": "画像フォルダーを開く...",
+      "en": "Open Image Folder...",
+      "resource": true
+    },
+    {
+      "id": "SubpaletteRegisterSample",
+      "kind": "text",
+      "ja": "採取色をパレットに登録",
+      "en": "Register Sampled Color",
+      "resource": true
+    },
+    {
+      "id": "SubpaletteNoImage",
+      "kind": "text",
+      "ja": "画像ファイルまたはフォルダーを開いてください",
+      "en": "Open image files or an image folder",
+      "resource": true
+    },
+    {
+      "id": "SubpaletteLoading",
+      "kind": "text",
+      "ja": "画像を読み込んでいます...",
+      "en": "Loading image...",
+      "resource": false
+    },
+    {
+      "id": "SubpaletteInstruction",
+      "kind": "text",
+      "ja": "画像をクリックして色を採取します。←/→で画像を移動します。",
+      "en": "Click the image to sample a color. Use Left/Right to move images.",
+      "resource": true
+    },
+    {
+      "id": "SubpaletteFolderTitle",
+      "kind": "text",
+      "ja": "サブパレット画像フォルダーを選択",
+      "en": "Select Subpalette Image Folder",
+      "resource": false
+    },
+    {
+      "id": "SubpaletteReadFailed",
+      "kind": "text",
+      "ja": "画像を読み込めませんでした。前の画像を保持します。",
+      "en": "The image could not be loaded. The previous image is retained.",
+      "resource": false
     }
   ]
 }

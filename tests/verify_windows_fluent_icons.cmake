@@ -21,7 +21,8 @@ set(EXPECTED_SEMANTIC_KEYS
     "Tool.Gradient" "Tool.Airbrush" "Tool.BoundaryAirbrush" "Tool.Blur"
     "Tool.Stamp" "Tool.DustRemoval" "Tool.AlphaGradient"
     "Pane.Visible" "Pane.Hidden" "Pane.Editable" "Pane.Protected"
-    "Pane.PinDocument" "Pane.ReturnToFollowing")
+    "Pane.PinDocument" "Pane.ReturnToFollowing" "Pane.Previous" "Pane.Next"
+    "Pane.Fit" "Pane.OneToOne")
 
 foreach(REQUIRED_FILE IN ITEMS
         "${MANIFEST}" "${ATLAS}" "${LICENSE_FILE}" "${APP_RESOURCE}"
@@ -81,8 +82,8 @@ foreach(ROW IN LISTS MANIFEST_ROWS)
     list(APPEND SOURCE_FILES "${SOURCE_FILE}")
     math(EXPR EXPECTED_INDEX "${EXPECTED_INDEX} + 1")
 endforeach()
-if(NOT EXPECTED_INDEX EQUAL 20)
-    message(FATAL_ERROR "Expected 20 selected Fluent icons, found ${EXPECTED_INDEX}")
+if(NOT EXPECTED_INDEX EQUAL 24)
+    message(FATAL_ERROR "Expected 24 selected Fluent icons, found ${EXPECTED_INDEX}")
 endif()
 if(NOT SEMANTIC_KEYS STREQUAL EXPECTED_SEMANTIC_KEYS)
     message(FATAL_ERROR
@@ -98,17 +99,17 @@ endif()
 
 file(SIZE "${ATLAS}" ATLAS_SIZE)
 file(SHA256 "${ATLAS}" ATLAS_SHA256)
-if(NOT ATLAS_SIZE EQUAL 46104)
+if(NOT ATLAS_SIZE EQUAL 55320)
     message(FATAL_ERROR "Fluent mask atlas has unexpected size: ${ATLAS_SIZE}")
 endif()
 if(NOT ATLAS_SHA256 STREQUAL
-        "aa34caed4109e44a354f04300a5d23ed41b71f8ee8cac1c48f8bf522b66dcaea")
+        "82845a88569f3d96ae438f8370727f14f2c3df62fc8b5a7c8f8b779099775080")
     message(FATAL_ERROR "Fluent mask atlas hash mismatch: ${ATLAS_SHA256}")
 endif()
 file(READ "${ATLAS}" ATLAS_HEADER LIMIT 24 HEX)
 string(TOLOWER "${ATLAS_HEADER}" ATLAS_HEADER)
 if(NOT ATLAS_HEADER STREQUAL
-        "494e4b504f444941010030003000140000b400007508bcb4")
+        "494e4b504f444941010030003000180000d80000ad322412")
     message(FATAL_ERROR "Fluent mask atlas header is invalid: ${ATLAS_HEADER}")
 endif()
 
@@ -195,14 +196,27 @@ foreach(PIN_SOURCE IN ITEMS
         "apps/windows/ui/panes/color_dock_pane.cpp"
         "apps/windows/ui/panes/locator_pane.cpp"
         "apps/windows/ui/panes/sequence_pane.cpp"
-        "apps/windows/ui/panes/light_table_pane.cpp"
-        "apps/windows/ui/panes/subpalette_pane.cpp")
+        "apps/windows/ui/panes/light_table_pane.cpp")
     file(READ "${INKPOD_SOURCE_DIR}/${PIN_SOURCE}" PIN_SOURCE_TEXT)
     if(NOT PIN_SOURCE_TEXT MATCHES "SetPaneIconButton"
         OR NOT PIN_SOURCE_TEXT MATCHES "PaneIconId::PinDocument"
         OR NOT PIN_SOURCE_TEXT MATCHES "PaneIconId::ReturnToFollowing")
         message(FATAL_ERROR
             "Pane pin/follow semantic icons are incomplete: ${PIN_SOURCE}")
+    endif()
+endforeach()
+
+file(READ "${INKPOD_SOURCE_DIR}/apps/windows/ui/panes/subpalette_pane.cpp"
+    SUBPALETTE_SOURCE_TEXT)
+foreach(SUBPALETTE_ICON_MARKER IN ITEMS
+        "SetPaneIconButton" "PaneIconId::Previous" "PaneIconId::Next"
+        "PaneIconId::Fit" "PaneIconId::OneToOne" "CreateToolCursor"
+        "ToolIconId::Eyedropper")
+    string(FIND "${SUBPALETTE_SOURCE_TEXT}" "${SUBPALETTE_ICON_MARKER}"
+        SUBPALETTE_ICON_MARKER_OFFSET)
+    if(SUBPALETTE_ICON_MARKER_OFFSET LESS 0)
+        message(FATAL_ERROR
+            "Subpalette navigation/cursor icon contract is incomplete: ${SUBPALETTE_ICON_MARKER}")
     endif()
 endforeach()
 
@@ -270,4 +284,4 @@ foreach(NOTICE_MARKER IN ITEMS
 endforeach()
 
 message(STATUS
-    "Verified 26 Fluent semantic icons, fixed SVG/atlas hashes, resource embedding, and MIT notice")
+    "Verified 24 Fluent semantic icons, fixed SVG/atlas hashes, resource embedding, and MIT notice")

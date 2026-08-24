@@ -2689,6 +2689,25 @@ public:
         return true;
     }
 
+    bool BindAuxiliary(
+        app::AuxiliarySourceId source,
+        app::Generation generation) noexcept {
+        const SnapshotRoute route{
+            {},
+            {},
+            canvas_,
+            generation,
+            surface_generation_,
+            SnapshotOwnerKind::Auxiliary,
+            source};
+        if (FAILED(renderer_.BindSurface(route))) {
+            return false;
+        }
+        std::lock_guard lock(route_mutex_);
+        route_ = route;
+        return true;
+    }
+
     bool Unbind() noexcept {
         if (FAILED(renderer_.UnbindSurface(canvas_, surface_generation_))) {
             return false;
@@ -3674,6 +3693,15 @@ bool BindCanvasSnapshotSink(
         GetWindowLongPtrW(canvas, GWLP_USERDATA));
     return host != nullptr
         && host->Bind(document_session, document_view, document_generation);
+}
+
+bool BindAuxiliaryCanvasSnapshotSink(
+    HWND canvas,
+    app::AuxiliarySourceId source,
+    app::Generation generation) noexcept {
+    auto* host = reinterpret_cast<CanvasHost*>(
+        GetWindowLongPtrW(canvas, GWLP_USERDATA));
+    return host != nullptr && host->BindAuxiliary(source, generation);
 }
 
 bool UnbindCanvasSnapshotSink(HWND canvas) noexcept {

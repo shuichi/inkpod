@@ -117,25 +117,22 @@ InkpodStatus StopCore(ApplicationHost& state) noexcept {
             (void)renderer::UnbindCanvasSnapshotSink(
                 workspace->subpalette_dialog.canvas);
         }
-        if (state.engine != nullptr
-            && workspace->subpalette_core_view_id != 0U
-            && workspace->subpalette_session
-            && workspace->subpalette_document_generation) {
-            const std::uint64_t view_id = workspace->subpalette_core_view_id;
-            (void)state.engine->Invoke(
-                workspace->subpalette_session,
-                workspace->subpalette_document_generation,
-                [view_id](InkpodCore* core) {
-                    return inkpod_core_view_close(core, view_id);
-                },
-                false,
-                false);
-            workspace->subpalette_core_view_id = 0U;
+        ++workspace->subpalette_load_generation;
+        if (state.engine != nullptr && workspace->subpalette_load != nullptr
+            && workspace->subpalette_load->candidate_subpalette != nullptr) {
+            (void)state.engine->ReleaseSubpalette(
+                &workspace->subpalette_load->candidate_subpalette);
+        }
+        workspace->subpalette_load.reset();
+        workspace->subpalette_loading = false;
+        if (state.engine != nullptr && workspace->subpalette != nullptr) {
+            (void)state.engine->ReleaseSubpalette(&workspace->subpalette);
         }
         if (workspace->subpalette_canvas_id) {
             (void)state.routing.targets.UnregisterAuxiliaryCanvas(
                 workspace->subpalette_canvas_id);
             workspace->subpalette_canvas_id = {};
+            workspace->subpalette_source_id = {};
         }
         if (workspace->subpalette_palette != nullptr) {
             DestroyWindow(workspace->subpalette_palette);

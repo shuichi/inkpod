@@ -182,7 +182,7 @@ const std::array<PaneDescriptor, kDockPaneCount> kPaneDescriptors{{
      DockZone::Right,
      DockedAndTransientZones(
          {DockZone::Left, DockZone::Right, DockZone::Bottom}, true),
-     PaneTargetScope::FollowActiveView,
+     PaneTargetScope::Application,
      1U,
      false,
      true,

@@ -352,7 +352,7 @@ bool ApplicationHost::RegisterWorkspacePanes(
         Policy::FollowActiveView,
         Policy::FollowActiveView,
         Policy::FollowActiveView,
-        Policy::FollowActiveView};
+        Policy::Application};
     std::array<PaneInstanceId, policies.size()> panes{};
     std::size_t registered{};
     for (; registered < panes.size(); ++registered) {

@@ -209,6 +209,17 @@ pub(crate) fn validate_core_thread(core: &InkpodCore) -> u32 {
     }
 }
 
+pub(crate) fn validate_subpalette_thread(subpalette: &InkpodSubpalette) -> u32 {
+    if subpalette.owner_thread == thread::current().id() {
+        INKPOD_STATUS_OK
+    } else {
+        fail(
+            INKPOD_STATUS_WRONG_THREAD,
+            "InkpodSubpalette must be used and released on its creating thread",
+        )
+    }
+}
+
 pub(crate) fn map_core_error(error: CoreError) -> u32 {
     let status = match error {
         CoreError::NoDocument => INKPOD_STATUS_NO_DOCUMENT,

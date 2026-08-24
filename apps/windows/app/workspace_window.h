@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -63,6 +64,28 @@ struct HistoryVisualizationMenuTarget final {
     Generation generation{};
 };
 
+struct SubpaletteSourceCache final {
+    std::uint64_t source_token{};
+    std::uint64_t item_id{};
+    InkpodCommonRasterFormat format{};
+    std::wstring path;
+    std::wstring name;
+};
+
+struct SubpaletteLoadJob final {
+    HWND owner{};
+    WorkspaceWindowId workspace{};
+    Generation workspace_generation{};
+    std::uint64_t load_generation{};
+    std::uint64_t item_id{};
+    InkpodCommonRasterFormat format{};
+    std::wstring path;
+    std::vector<std::uint8_t> bytes;
+    InkpodSubpalette* candidate_subpalette{};
+    std::vector<SubpaletteSourceCache> candidate_sources;
+    std::atomic<InkpodStatus> status{INKPOD_STATUS_INVALID_STATE};
+};
+
 struct WorkspaceWindow final {
     ApplicationHost* application{};
     WorkspaceWindowId id{};
@@ -97,18 +120,19 @@ struct WorkspaceWindow final {
     HWND subpalette_palette{};
     windows::ui::panes::SubpalettePaneDialogState subpalette_dialog{};
     CanvasId subpalette_canvas_id{};
+    AuxiliarySourceId subpalette_source_id{};
     Generation subpalette_surface_generation{};
-    DocumentSessionId subpalette_session{};
-    DocumentViewId subpalette_document_view{};
-    Generation subpalette_document_generation{};
-    std::uint64_t subpalette_core_view_id{};
+    InkpodSubpalette* subpalette{};
+    std::vector<SubpaletteSourceCache> subpalette_sources;
+    InkpodSubpaletteInfo subpalette_info{};
+    std::uint32_t subpalette_navigation_index{};
     std::uint64_t subpalette_snapshot_revision{};
-    std::uint32_t subpalette_source_index{};
-    std::uint32_t subpalette_source_count{};
-    std::uint32_t subpalette_active_index{};
-    bool subpalette_auto_previous{true};
-    bool subpalette_scroll_sync{};
-    std::uint64_t subpalette_notice_sequence{};
+    std::uint64_t subpalette_load_generation{};
+    std::shared_ptr<SubpaletteLoadJob> subpalette_load;
+    bool subpalette_loading{};
+    bool subpalette_sample_available{};
+    InkpodColorValue subpalette_sample{};
+    std::wstring subpalette_error;
     std::array<HistoryVisualizationMenuTarget, 64U>
         history_visualization_menu_targets{};
     std::size_t history_visualization_menu_target_count{};

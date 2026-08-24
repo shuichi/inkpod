@@ -9,6 +9,7 @@ mod effect_records;
 mod handles;
 mod inkscript_execution_records;
 mod inkscript_records;
+mod subpalette_records;
 mod v3_records;
 
 pub use constants::*;
@@ -24,4 +25,5 @@ pub use effect_records::*;
 pub use handles::*;
 pub use inkscript_execution_records::*;
 pub use inkscript_records::*;
+pub use subpalette_records::*;
 pub use v3_records::*;

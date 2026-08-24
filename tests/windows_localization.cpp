@@ -352,7 +352,7 @@ bool LocalizedButtonLayoutContract(UiLanguagePreference preference) {
         nullptr,
         instance,
         nullptr);
-    const std::array<UiStringId, 13U> labels{
+    const std::array<UiStringId, 16U> labels{
         UiStringId::Text0706,
         UiStringId::Text0903,
         UiStringId::Delete,
@@ -365,7 +365,10 @@ bool LocalizedButtonLayoutContract(UiLanguagePreference preference) {
         UiStringId::Save,
         UiStringId::ToolEyedropper,
         UiStringId::PinDocument,
-        UiStringId::ReturnToFollowing};
+        UiStringId::ReturnToFollowing,
+        UiStringId::SubpaletteOpenFiles,
+        UiStringId::SubpaletteOpenFolder,
+        UiStringId::SubpaletteRegisterSample};
     std::array<int, labels.size()> controls{};
     bool passed = parent != nullptr;
     for (std::size_t index = 0U; passed && index < labels.size(); ++index) {

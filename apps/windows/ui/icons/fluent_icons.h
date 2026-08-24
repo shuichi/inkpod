@@ -35,6 +35,10 @@ enum class PaneIconId : std::uint16_t {
     Protected,
     PinDocument,
     ReturnToFollowing,
+    Previous,
+    Next,
+    Fit,
+    OneToOne,
     Count,
 };
 
@@ -67,6 +71,10 @@ inline constexpr std::array<PaneIconId, kPaneIconCount> kAllPaneIconIds{
     PaneIconId::Protected,
     PaneIconId::PinDocument,
     PaneIconId::ReturnToFollowing,
+    PaneIconId::Previous,
+    PaneIconId::Next,
+    PaneIconId::Fit,
+    PaneIconId::OneToOne,
 };
 
 [[nodiscard]] bool FluentIconResourceAvailable(HINSTANCE instance) noexcept;
@@ -90,5 +98,12 @@ inline constexpr std::array<PaneIconId, kPaneIconCount> kAllPaneIconIds{
 // or GDI resource failure the BS_ICON style is removed and the text is shown.
 [[nodiscard]] bool SetPaneIconButton(
     HWND button, PaneIconId icon) noexcept;
+
+// Creates a caller-owned DPI-scaled cursor from the same pinned Fluent atlas.
+// The caller must destroy the returned cursor with DestroyCursor.
+[[nodiscard]] HCURSOR CreateToolCursor(
+    HINSTANCE instance,
+    ToolIconId icon,
+    UINT dpi) noexcept;
 
 }  // namespace inkpod::windows::ui

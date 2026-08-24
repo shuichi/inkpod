@@ -105,6 +105,11 @@ struct AdapterInput {
     std::function<void(InkpodStatus)> async_completion;
 };
 
+struct OwnerThreadWork {
+    std::function<InkpodStatus()> operation;
+    std::shared_ptr<std::promise<InkpodStatus>> completion;
+};
+
 struct InkScriptWork {
     SessionBinding binding;
     std::uint64_t sequence{};
@@ -174,8 +179,13 @@ constexpr bool IsCreationControl(ControlKind kind) noexcept {
         || kind == ControlKind::AdoptBatchResult;
 }
 
-using WorkItem =
-    std::variant<AdapterWork, PrimitiveWork, StrokeWork, InkScriptWork, ControlWork>;
+using WorkItem = std::variant<
+    AdapterWork,
+    PrimitiveWork,
+    StrokeWork,
+    InkScriptWork,
+    ControlWork,
+    OwnerThreadWork>;
 
 struct PublishedSession {
     SessionBinding binding;
@@ -675,6 +685,31 @@ struct CoreHost::Impl final {
             }
         }
         return INKPOD_STATUS_OK;
+    }
+
+    InkpodStatus InvokeOwnerThread(
+        std::function<InkpodStatus()> operation) noexcept {
+        if (!operation) {
+            return INKPOD_STATUS_INVALID_ARGUMENT;
+        }
+        try {
+            auto completion = std::make_shared<std::promise<InkpodStatus>>();
+            auto future = completion->get_future();
+            {
+                std::lock_guard lock(mutex);
+                if (stopping || work.size() >= kMaximumQueuedWork) {
+                    return INKPOD_STATUS_INVALID_STATE;
+                }
+                work.emplace_back(OwnerThreadWork{
+                    std::move(operation), std::move(completion)});
+            }
+            wake.notify_one();
+            return future.get();
+        } catch (const std::future_error&) {
+            return INKPOD_STATUS_INVALID_STATE;
+        } catch (const std::bad_alloc&) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
     }
 
     bool Enqueue(
@@ -1516,6 +1551,21 @@ struct CoreHost::Impl final {
         }
     }
 
+    static void ProcessOwnerThread(OwnerThreadWork item) noexcept {
+        InkpodStatus status = INKPOD_STATUS_INVALID_STATE;
+        try {
+            status = item.operation();
+        } catch (...) {
+            status = INKPOD_STATUS_INVALID_STATE;
+        }
+        if (item.completion != nullptr) {
+            try {
+                item.completion->set_value(status);
+            } catch (const std::future_error&) {
+            }
+        }
+    }
+
     void ProcessPrimitive(PrimitiveWork item) noexcept {
         RecordQueueWait(item.binding, item.queued_at);
         CoreEntry* entry = FindEntry(item.binding);
@@ -2029,6 +2079,9 @@ struct CoreHost::Impl final {
                     ProcessStroke(std::move(*stroke));
                 } else if (auto* script = std::get_if<InkScriptWork>(&item)) {
                     ProcessInkScript(std::move(*script));
+                } else if (auto* owner_work =
+                               std::get_if<OwnerThreadWork>(&item)) {
+                    ProcessOwnerThread(std::move(*owner_work));
                 } else {
                     ProcessControl(std::move(std::get<ControlWork>(item)));
                 }
@@ -2618,6 +2671,42 @@ InkpodStatus CoreHost::InvokeAll(
         ? INKPOD_STATUS_INVALID_STATE
         : impl_->InvokeAll(
               std::move(operation), publish_snapshot, refresh_document_info);
+}
+
+InkpodStatus CoreHost::CreateSubpalette(
+    InkpodSubpalette** out_subpalette) noexcept {
+    if (impl_ == nullptr || out_subpalette == nullptr) {
+        return INKPOD_STATUS_INVALID_ARGUMENT;
+    }
+    *out_subpalette = nullptr;
+    return impl_->InvokeOwnerThread([out_subpalette] {
+        return inkpod_subpalette_create(out_subpalette);
+    });
+}
+
+InkpodStatus CoreHost::InvokeSubpalette(
+    InkpodSubpalette* subpalette,
+    SubpaletteOperation operation) noexcept {
+    if (impl_ == nullptr || subpalette == nullptr || !operation) {
+        return INKPOD_STATUS_INVALID_ARGUMENT;
+    }
+    return impl_->InvokeOwnerThread(
+        [subpalette, operation = std::move(operation)] {
+            return operation(subpalette);
+        });
+}
+
+InkpodStatus CoreHost::ReleaseSubpalette(
+    InkpodSubpalette** subpalette) noexcept {
+    if (impl_ == nullptr || subpalette == nullptr) {
+        return INKPOD_STATUS_INVALID_ARGUMENT;
+    }
+    if (*subpalette == nullptr) {
+        return INKPOD_STATUS_OK;
+    }
+    return impl_->InvokeOwnerThread([subpalette] {
+        return inkpod_subpalette_release(subpalette);
+    });
 }
 
 InkpodStatus CoreHost::InvokePrimitive(

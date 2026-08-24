@@ -59,7 +59,8 @@ use inkpod_core::{
     SequenceStepResult, SequenceSwitchPolicy, SequenceSwitchRequest, ShootingFrameAnchor,
     ShootingFrameEdit, ShootingFrameInfo, ShootingFrameInput, ShootingFramePreviewTarget,
     ShortcutBinding, ShortcutSequenceBinding, ShortcutStroke, Stamp, StampGesture, StampShape,
-    StartColorPredicate, Stroke, StrokeSample, TileRaster, TraceBrushOptions, TraceBrushShape,
+    StartColorPredicate, Stroke, StrokeSample, SubpaletteCatalog, SubpaletteCatalogInfo,
+    SubpaletteItemId, SubpaletteSource, TileRaster, TraceBrushOptions, TraceBrushShape,
     VanishingPointEdit, VanishingPointInfo, VanishingPointInput, VanishingPointPreviewTarget,
     ViewCommand, plan_cell_creation, read_color_chart, read_palette, save_color_chart_atomic,
     save_palette_atomic,
@@ -86,6 +87,7 @@ mod lifecycle_document;
 mod paint_history;
 mod shooting_frame;
 mod snapshot_api;
+mod subpalette;
 mod support;
 mod v3;
 mod vanishing_point;
@@ -111,6 +113,7 @@ pub(crate) use paint_history::parse_view_command;
 pub use paint_history::*;
 pub use shooting_frame::*;
 pub use snapshot_api::*;
+pub use subpalette::*;
 pub(crate) use support::*;
 pub use v3::*;
 pub use vanishing_point::*;

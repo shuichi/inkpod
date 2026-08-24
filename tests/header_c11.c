@@ -2,7 +2,10 @@
 
 #include <stdint.h>
 
-_Static_assert(INKPOD_ABI_VERSION == 18U, "unexpected ABI version");
+_Static_assert(INKPOD_ABI_VERSION == 19U, "unexpected ABI version");
+_Static_assert(sizeof(InkpodSubpaletteSourceInput) == 32U, "subpalette source layout drift");
+_Static_assert(sizeof(InkpodSubpaletteInfo) == 32U, "subpalette info layout drift");
+_Static_assert(sizeof(InkpodSubpaletteItemInfo) == 40U, "subpalette item layout drift");
 _Static_assert(sizeof(InkpodCoreConfig) == 16U, "core config layout drift");
 _Static_assert(sizeof(InkpodSnapshotOptions) == 16U, "snapshot options layout drift");
 _Static_assert(sizeof(InkpodPersistenceInfo) == 72U, "persistence info layout drift");

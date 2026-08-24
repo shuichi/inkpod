@@ -176,6 +176,9 @@ static_assert(sizeof(InkpodInkScriptTaskEvent) == 64U);
 static_assert(sizeof(InkpodInkScriptReportSummary) == 40U);
 static_assert(sizeof(InkpodInkScriptReportItem) == 120U);
 static_assert(sizeof(InkpodInkScriptReportBuffer) == 96U);
+static_assert(sizeof(InkpodSubpaletteSourceInput) == 32U);
+static_assert(sizeof(InkpodSubpaletteInfo) == 32U);
+static_assert(sizeof(InkpodSubpaletteItemInfo) == 40U);
 
 extern "C" int inkpod_header_c11_smoke(void);
 
@@ -185,6 +188,68 @@ int InkpodRunAbiSmoke() {
     }
     if (inkpod_abi_version() != INKPOD_ABI_VERSION) {
         return 1;
+    }
+    InkpodSubpalette* subpalette{};
+    constexpr std::array<std::uint8_t, 10U> subpalette_name_10{
+        'c', 'e', 'l', 'l', '1', '0', '.', 'p', 'n', 'g'};
+    constexpr std::array<std::uint8_t, 9U> subpalette_name_2{
+        'c', 'e', 'l', 'l', '2', '.', 'p', 'n', 'g'};
+    const std::array<InkpodSubpaletteSourceInput, 2U> subpalette_sources{
+        InkpodSubpaletteSourceInput{
+            sizeof(InkpodSubpaletteSourceInput),
+            0U,
+            10U,
+            subpalette_name_10.data(),
+            subpalette_name_10.size()},
+        InkpodSubpaletteSourceInput{
+            sizeof(InkpodSubpaletteSourceInput),
+            0U,
+            2U,
+            subpalette_name_2.data(),
+            subpalette_name_2.size()}};
+    InkpodSubpaletteInfo subpalette_info{};
+    subpalette_info.struct_size = sizeof(subpalette_info);
+    InkpodSubpaletteItemInfo subpalette_item{};
+    subpalette_item.struct_size = sizeof(subpalette_item);
+    if (inkpod_subpalette_create(&subpalette) != INKPOD_STATUS_OK
+        || subpalette == nullptr
+        || inkpod_subpalette_replace_sources(
+               subpalette,
+               subpalette_sources.data(),
+               subpalette_sources.size(),
+               sizeof(InkpodSubpaletteSourceInput),
+               &subpalette_info)
+            != INKPOD_STATUS_OK
+        || subpalette_info.item_count != 2U
+        || subpalette_info.active_index != INKPOD_SUBPALETTE_INDEX_NONE
+        || inkpod_subpalette_item_get(subpalette, 0U, &subpalette_item)
+            != INKPOD_STATUS_OK
+        || subpalette_item.source_token != 2U
+        || subpalette_item.cell_number != 2U) {
+        return 163;
+    }
+    std::uint64_t subpalette_name_bytes{};
+    if (inkpod_subpalette_item_name_copy(
+            subpalette, 0U, nullptr, 0U, &subpalette_name_bytes)
+            != INKPOD_STATUS_BUFFER_TOO_SMALL
+        || subpalette_name_bytes != subpalette_name_2.size()) {
+        return 164;
+    }
+    InkpodStatus subpalette_wrong_thread_status = INKPOD_STATUS_OK;
+    std::thread subpalette_wrong_thread([
+        subpalette,
+        &subpalette_wrong_thread_status]() {
+        InkpodSubpaletteInfo info{};
+        info.struct_size = sizeof(info);
+        subpalette_wrong_thread_status =
+            inkpod_subpalette_get_info(subpalette, &info);
+    });
+    subpalette_wrong_thread.join();
+    if (subpalette_wrong_thread_status != INKPOD_STATUS_WRONG_THREAD
+        || inkpod_subpalette_release(&subpalette) != INKPOD_STATUS_OK
+        || subpalette != nullptr
+        || inkpod_subpalette_release(&subpalette) != INKPOD_STATUS_OK) {
+        return 165;
     }
     if (inkpod::app::RunPrivateInkScriptEngineSmoke() != 0) {
         return 162;
