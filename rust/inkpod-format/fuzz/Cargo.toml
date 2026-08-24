@@ -36,6 +36,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "tga_v2"
+path = "fuzz_targets/tga_v2.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "inkscript_lexer_v2"
 path = "fuzz_targets/inkscript_lexer_v2.rs"
 test = false

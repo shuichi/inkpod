@@ -553,6 +553,9 @@ UI／ABIを production contract とする。M23で批准済みcatalogを使うRu
 - ユーザーがフォーマットフリーズを宣言するまで、`.inkpod`、`.inkbatch`、native preset等のapplication固有の永続化ファイル形式は現在versionだけを読み書きし、下位互換reader/writer、migration、互換shimを持たない。現在の要件に対して最も頑健で効率的なschemaを選ぶ。この規則はHKCUのworkspace layout recordには適用しない。
 - コードフリーズまでは、serialized schemaを変更するたびに対象形式の最上位format versionを必ずインクリメントする。section/record versionだけの変更で代用せず、旧versionは明示的に拒否する。
 - 一般 raster import/export は少なくとも PNG、TIFF、TGA、BMP の対応可能な 8/16 bit、alpha、DPI を扱う。形式が表せない情報はflatten/export optionで明示する。
+- TGA は Truevision TGA 2.0 の標準 image type 0、1、2、3、9、10、11 を対象とし、color-mapped／true-color／black-and-white、非圧縮／RLE、4方向の画像原点、Image ID、Color Map、Footer、Extension Area、Developer Area を境界検査付きで読み書きする。true-color は16／24／32 bit、color-map index は8／16 bit、color-map entry は15／16／24／32 bit、black-and-white は8 bitを標準対応範囲とする。image type 128–255 のdeveloper-defined data、予約済みimage type／bit depth、`.vda`／`.icb`／`.vst`別名は対応形式に含めない。RLE writerはpacketをscanline境界で分割し、readerは既存資産互換のため境界越えpacketも画像全体の上限内に限って受理する。
+- TGA import はcanonical straight-alpha RGBA8へ決定的に変換する。5-bit channelはbit replication、premultiplied alphaは整数roundingでstraightへ戻し、alpha attributeが未定義または無効ならopaqueとして扱う。Extension Areaのalpha attribute type、color-correction table、postage stamp、scan-line tableと未知developer fieldは型付きTGA metadataとして境界内で保持し、通常の画像importではpixel結果に必要な情報だけを適用する。pixel aspect ratioはDPIへ読み替えない。
+- TGA exportの既定値は既存互換のtop-left／32-bit BGRA／非圧縮／旧形式footerなしを維持する。TGA固有APIではimage kind、depth、RLE、origin、X/Y origin、Image ID、TGA 2.0 footer／extension／developer metadataを明示できる。alphaまたは色精度を失う形式への変換、grayscale化、palette化は明示optionなしに暗黙実行しない。自動palette化は入力走査順を固定し、表現可能色数を超えた場合は失敗する。日時等をwall clockから自動挿入しない。
 - legacy workflow の `白背景を合成` をexport optionとして持つ。onなら最下層へ白を合成してalphaを除き、offならformatが許すalphaを保持する。
 - legacy white-transparency modeでは完全な白を透明候補としてcheckできるが、native documentでは白色pixelと透明alphaを同一視しない。
 - 一枚 export とcut/sequence exportを分け、後者は対象layer、全体/作画frame、size/DPI、antialias、連番規則を設定する。

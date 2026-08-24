@@ -14,6 +14,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static COMMON_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 use png_codec::{decode_png, encode_png};
+pub use tga::{
+    TgaAlphaLoss, TgaAlphaType, TgaColorMap, TgaCompression, TgaDeveloperField, TgaDocument,
+    TgaDuration, TgaEncodeOptions, TgaExtension, TgaGrayscaleConversion, TgaImageFormat,
+    TgaMetadata, TgaOrigin, TgaRatio, TgaTimestamp, decode_tga_document, encode_tga_document,
+    encode_tga_with_options,
+};
 use tga::{decode_tga, encode_tga};
 use tiff::{decode_tiff, encode_tiff};
 

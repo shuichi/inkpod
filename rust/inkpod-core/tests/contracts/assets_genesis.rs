@@ -282,6 +282,35 @@ fn codec_path_and_external_file_lifetime_do_not_change_asset_identity() {
 }
 
 #[test]
+fn color_mapped_rle_tga_enters_the_shared_canonical_genesis_path() {
+    let mut tga = vec![0_u8; 18];
+    tga[1] = 1;
+    tga[2] = 9;
+    tga[3..5].copy_from_slice(&300_u16.to_le_bytes());
+    tga[5..7].copy_from_slice(&1_u16.to_le_bytes());
+    tga[7] = 32;
+    tga[12..14].copy_from_slice(&2_u16.to_le_bytes());
+    tga[14..16].copy_from_slice(&1_u16.to_le_bytes());
+    tga[16] = 16;
+    tga[17] = 0x20;
+    tga.extend_from_slice(&[30, 20, 10, 128]);
+    tga.push(0x81);
+    tga.extend_from_slice(&300_u16.to_le_bytes());
+
+    let mut core = Core::new();
+    core.import_common_raster(CommonRasterFormat::Tga, &tga, 0x4304)
+        .unwrap();
+    assert_eq!(
+        decoded_png(&core).pixels,
+        [10, 20, 30, 128, 10, 20, 30, 128]
+    );
+    assert!(matches!(
+        core.genesis_info().unwrap().base_surface,
+        BaseSurface::Asset(_)
+    ));
+}
+
+#[test]
 fn existing_document_import_is_an_asset_only_canonical_procedure() {
     let mut core = Core::new();
     let document = core

@@ -21,7 +21,7 @@ past acceptance records are summarized in [`legacy.md`](legacy.md).
 | Windows icon presentation | The 14 permanent Tool commands map typed Windows-only `ToolIconId` values to a fixed Fluent UI System Icons subset. Raster Geometry remains a menu-owned six-command group. Layer/Plane visibility and editability cells plus Color, Locator, Sequence, and Light Table pin/follow buttons use typed pane icon IDs; Subpalette uses open-files/open-folder/previous/next/fit/1:1 icons, a sampled-color registration tile, and a Fluent-derived eyedropper cursor, while Batch exposes no pin button. A checked-in 48-pixel A8 atlas is recolored from system text/highlight/disabled colors and DPI-scaled at draw time; theme, system-color, enable-state, and parent-DPI changes rebuild native button images. Full localized window text remains the Tooltip/MSAA/UIA name, and atlas/GDI failure returns to text presentation. Platform icon names do not cross Rust Core, C ABI, history, document, or workspace persistence boundaries. |
 | Document-tab presentation | Initial and split editor groups apply a DPI-scaled 9-point Segoe UI ClearType font to each document-tab control. Each tab `HWND` recreates its owned font after a parent DPI transition and releases it during destruction. |
 | Rendering and performance | Immutable snapshots carry raster/adjustment spans, shooting-frame and vanishing-point overlays, bounded viewport-clipped radial guides, snapshot-owned pools, view-local diagnostics and previews. The Windows renderer validates and draws radial overlays and handles and rebuilds them after device loss. Canonical composite schema 4 contains only raster passes and adjustment LUTs. Raster revision-max validation remains scalar-only and the audited source-call-graph lock plus payload counters remain green. |
-| Product surface | Cut, structural sequence editing and endpoint Stop/Wrap selection, raster drawing/fill/effects, angled shooting-frame properties/handles/export, vanishing-point properties/handles/radial snap, selection, layer/plane, transform, Light Table, raster clipboard, common-raster import/export including uncompressed and RLE true-color TGA decode, Batch, history visualization, recovery, and compaction-copy commands remain connected from the Windows UI to their owners. Retired drawing-model commands and presentation are absent. |
+| Product surface | Cut, structural sequence editing and endpoint Stop/Wrap selection, raster drawing/fill/effects, angled shooting-frame properties/handles/export, vanishing-point properties/handles/radial snap, selection, layer/plane, transform, Light Table, raster clipboard, common-raster import/export including all seven standard TGA 2.0 image types and old/new metadata containers, Batch, history visualization, recovery, and compaction-copy commands remain connected from the Windows UI to their owners. TGA product export retains the established top-left 32-bit uncompressed default; the typed Rust format API additionally writes every standard color-mapped/true-color/grayscale and uncompressed/RLE variant. Retired drawing-model commands and presentation are absent. |
 | Build and distribution | CMake drives the Rust static library and MSVC C++20 build. Rust domain crates remain OS-independent; Windows x64/ARM64 use static CRT. Unsigned MSIX and four-file portable ZIP packaging paths are maintained. The selected Fluent SVG subset, per-file hashes, upstream commit/release, MIT license, generated atlas hash, resource embedding, notices, and absence of generator/network use in normal builds are checked by `inkpod_windows_fluent_icons`; both packages carry the atlas inside the executable and the notice in `ThirdPartyNotices.txt`. |
 | Locator responsiveness | Selection-bound queries scan sparse allocated mask tiles and reuse a document-identity/revision cache. Windows keeps one locator query in flight plus one latest request, presents processed intermediate generations during continuous input, and rejects reset or target-stale results before requeuing the newest pointer behind accepted stroke work. |
 
@@ -62,6 +62,9 @@ its compact historical record is retained in [`legacy.md`](legacy.md).
   observable, and accepted work is retained without partial commit.
 - Batch v3 folder output supports `.inkpod`, PNG, TIFF, TGA and BMP. A graph containing Masking
   rejects the four common-raster formats because they cannot retain fill-protection state.
+- Alternate TGA storage controls and TGA 2.0 metadata authoring are available through the typed
+  Rust format API; the Windows and Batch product surfaces intentionally continue to emit the
+  existing top-left 32-bit uncompressed TGA default.
 - InkScript remains reachable only by private ABI/application smoke hooks; no product command,
   `.inkscript` file filter, clipboard or pane reaches it. `.inkbatch` v3 is an independent closed
   Batch product contract and does not expose the private Batch procedure through InkScript.
@@ -76,6 +79,21 @@ its compact historical record is retained in [`legacy.md`](legacy.md).
   file-authority adapters; Rust domain crates must remain platform-independent.
 
 ## Latest representative verification
+
+On 2026-08-25, the Truevision TGA 2.0 codec expansion passed `cargo fmt --check`,
+warnings-denied workspace Clippy, the full workspace/all-feature test suite,
+warnings-denied workspace rustdoc, and the unchanged approved Core quick benchmark. The
+format matrix covers standard image types 0/1/2/3/9/10/11, true-color 16/24/32-bit,
+8/16-bit indices, 15/16/24/32-bit color-map entries, grayscale 8-bit, uncompressed/RLE,
+all four origins, old/new containers, Extension/Developer Areas, straight/premultiplied/
+undefined alpha, color correction, postage stamps, scan-line tables, malformed mutations,
+and the buildable `tga_v2` fuzz target. Focused Core and ABI contracts prove palette-RLE
+and grayscale-RLE input use the existing shared import path. The reported `A0001.tga`
+decoded through that format implementation as 1754x1240. Windows x64 Debug then rebuilt
+the static Rust library, application, tests, portable ZIP and unsigned MSIX under the
+explicit no-profile Visual Studio environment; all 42 CTests passed in 675.01 s, including
+ABI smoke and English/Japanese product smokes in 295.69/310.25 s. Native v28, replay epoch
+25, `.inkbatch` v3, and C ABI v21 are unchanged.
 
 On 2026-08-25, the Batch preview-lineage follow-up rebuilt x64 and ARM64 Debug
 under MSVC 19.51 `/W4 /WX`, including static-CRT/package checks. Focused command

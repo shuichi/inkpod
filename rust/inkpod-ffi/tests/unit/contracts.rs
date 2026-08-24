@@ -2503,6 +2503,41 @@ fn ffi_contract_document_history_selection_clipboard_and_raster_round_trip() {
 }
 
 #[test]
+fn ffi_import_accepts_rle_black_and_white_tga_through_the_shared_format_id() {
+    let (mut core, _) = create_core(1, 1, 0x494e_4b50_4f44_5447);
+    let mut tga = vec![0_u8; 18];
+    tga[2] = 11;
+    tga[12..14].copy_from_slice(&2_u16.to_le_bytes());
+    tga[14..16].copy_from_slice(&1_u16.to_le_bytes());
+    tga[16] = 8;
+    tga[17] = 0x20;
+    tga.extend_from_slice(&[0x81, 77]);
+    let mut info = document_info();
+
+    unsafe {
+        assert_eq!(
+            inkpod_core_import_common_raster(
+                core,
+                INKPOD_COMMON_RASTER_TGA,
+                tga.as_ptr(),
+                tga.len() as u64,
+                0x494e_4b50_4f44_5447,
+                1,
+                &mut info,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!((info.width, info.height), (2, 1));
+        let exported = export_png(core);
+        let raster =
+            inkpod_format::decode_common_raster(inkpod_format::CommonRasterFormat::Png, &exported)
+                .unwrap();
+        assert_eq!(raster.pixels, [77, 77, 77, 255, 77, 77, 77, 255]);
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+    }
+}
+
+#[test]
 fn ffi_color_chart_preview_owns_copies_applies_and_rejects_double_release() {
     let (mut core, _) = create_core(2, 1, 1);
     let red_name = b"Red";

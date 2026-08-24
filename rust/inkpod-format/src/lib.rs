@@ -23,8 +23,11 @@ pub use batch::{
     save_batch_graph_atomic, save_batch_graph_atomic_with_cancel,
 };
 pub use common_formats::{
-    CommonRaster, CommonRasterFormat, CommonRasterInfo, MAX_COMMON_RASTER_BYTES,
-    decode_common_raster, encode_common_raster, save_common_raster_bytes_atomic_with_cancel,
+    CommonRaster, CommonRasterFormat, CommonRasterInfo, MAX_COMMON_RASTER_BYTES, TgaAlphaLoss,
+    TgaAlphaType, TgaColorMap, TgaCompression, TgaDeveloperField, TgaDocument, TgaDuration,
+    TgaEncodeOptions, TgaExtension, TgaGrayscaleConversion, TgaImageFormat, TgaMetadata, TgaOrigin,
+    TgaRatio, TgaTimestamp, decode_common_raster, decode_tga_document, encode_common_raster,
+    encode_tga_document, encode_tga_with_options, save_common_raster_bytes_atomic_with_cancel,
 };
 pub use cut::{
     CUT_DESCRIPTOR_REPLAY_EPOCH, FileCutDefaults, FileCutDescriptor, FileCutHistoryEntry,
