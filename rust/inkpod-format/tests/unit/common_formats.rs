@@ -180,6 +180,54 @@ fn tga_honors_right_origin_and_alpha_attribute_bits() {
 }
 
 #[test]
+fn tga_decodes_run_length_encoded_true_color_packets_across_rows() {
+    let mut encoded = vec![0_u8; 18];
+    encoded[2] = 10;
+    encoded[12..14].copy_from_slice(&3_u16.to_le_bytes());
+    encoded[14..16].copy_from_slice(&2_u16.to_le_bytes());
+    encoded[16] = 24;
+
+    encoded.extend_from_slice(&[
+        0x00, 3, 2, 1, // one raw pixel
+        0x82, 6, 5, 4, // three repeated pixels, crossing the row boundary
+        0x01, 9, 8, 7, 12, 11, 10, // two raw pixels
+    ]);
+
+    let decoded = decode_common_raster(CommonRasterFormat::Tga, &encoded).unwrap();
+    assert_eq!(decoded.info.width, 3);
+    assert_eq!(decoded.info.height, 2);
+    assert_eq!(
+        decoded.pixels,
+        [
+            4, 5, 6, 255, 7, 8, 9, 255, 10, 11, 12, 255, // top row
+            1, 2, 3, 255, 4, 5, 6, 255, 4, 5, 6, 255, // bottom row
+        ]
+    );
+}
+
+#[test]
+fn tga_rejects_malformed_run_length_packets() {
+    let mut encoded = vec![0_u8; 18];
+    encoded[2] = 10;
+    encoded[12..14].copy_from_slice(&2_u16.to_le_bytes());
+    encoded[14..16].copy_from_slice(&1_u16.to_le_bytes());
+    encoded[16] = 24;
+
+    encoded.push(0x81);
+    assert!(matches!(
+        decode_common_raster(CommonRasterFormat::Tga, &encoded),
+        Err(FormatError::Invalid("TGA RLE pixel data is truncated"))
+    ));
+
+    encoded.extend_from_slice(&[3, 2, 1]);
+    encoded[18] = 0x82;
+    assert!(matches!(
+        decode_common_raster(CommonRasterFormat::Tga, &encoded),
+        Err(FormatError::Invalid("TGA RLE packet exceeds image bounds"))
+    ));
+}
+
+#[test]
 fn bmp_accepts_padded_24_bit_rows_and_validates_bitfield_masks() {
     let mut encoded = vec![0_u8; 54];
     encoded[..2].copy_from_slice(b"BM");
