@@ -17,6 +17,7 @@ namespace inkpod::windows::ui::runtime {
 
 LRESULT CALLBACK MainWindowProcedure(
     HWND window, UINT message, WPARAM wparam, LPARAM lparam) noexcept;
+void ApplySystemDarkTitleBar(HWND window) noexcept;
 
 // Application bootstrap uses these existing UI-coordinated document paths so
 // startup follows the same reset, Fit, and command-state behavior as commands.

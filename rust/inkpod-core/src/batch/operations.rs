@@ -712,6 +712,16 @@ pub(super) fn save_batch_output(
     graph: &BatchGraph,
     source: &BatchSource,
     path: &Path,
+    is_cancelled: impl FnMut() -> bool,
+) -> Result<(), CoreError> {
+    save_batch_output_with_format(working, graph.output.format, source, path, is_cancelled)
+}
+
+pub(super) fn save_batch_output_with_format(
+    working: &Core,
+    format: BatchOutputFormat,
+    source: &BatchSource,
+    path: &Path,
     mut is_cancelled: impl FnMut() -> bool,
 ) -> Result<(), CoreError> {
     working.document.as_ref().ok_or(CoreError::NoDocument)?;
@@ -732,7 +742,7 @@ pub(super) fn save_batch_output(
     if let Some(parent) = parent {
         fs::create_dir_all(parent).map_err(|error| CoreError::Format(error.to_string()))?;
     }
-    match graph.output.format {
+    match format {
         BatchOutputFormat::Inkpod => {
             let editor_savepoint = working
                 .editor_session

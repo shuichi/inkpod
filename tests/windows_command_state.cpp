@@ -104,7 +104,7 @@ bool ShortcutCatalogIsCompleteAndPrefixFree() {
         }
         return false;
     };
-    if (menu_commands.size() != 327U
+    if (menu_commands.size() != 325U
         || shortcuts.size() != kProductionCommandStateCount
         || shortcuts.size() != commands.size()
         || is_menu_command(IDM_COLOR_PIN)

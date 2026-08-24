@@ -372,6 +372,102 @@ fn folder_outputs_cover_every_public_format_and_preflight_collisions() {
 }
 
 #[test]
+fn contact_sheet_preview_uses_complete_temporary_copies_and_publishes_one_clean_document() {
+    let directory = batch_temp_directory("contact-sheet");
+    fs::create_dir_all(&directory).unwrap();
+    let first_path = directory.join("A001.inkpod");
+    let second_path = directory.join("A002.inkpod");
+    for (path, uuid) in [(&first_path, 0xb421_u128), (&second_path, 0xb422_u128)] {
+        let mut source = Core::new();
+        source
+            .new_cell_with_uuid(2, 2, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI, uuid)
+            .unwrap();
+        source.save(path).unwrap();
+    }
+    let real_output = directory.join("real-output");
+    let graph = graph_with(
+        vec![
+            BatchInputSelector::file(first_path.to_string_lossy()),
+            BatchInputSelector::file(second_path.to_string_lossy()),
+        ],
+        BatchOutputSettings {
+            destination: BatchOutputDestination::Folder,
+            format: BatchOutputFormat::Png,
+            folder: real_output.to_string_lossy().into_owned(),
+            naming_template: "{stem}_real".to_owned(),
+            failure_policy: BatchFailurePolicy::Continue,
+            wait_milliseconds: 0,
+            preview_before_save: true,
+        },
+    );
+    let mut core = Core::new();
+    core.new_cell_with_uuid(1, 1, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI, 0xb423)
+        .unwrap();
+    let before = core.document_info().unwrap();
+    let mut originals_replaced = false;
+    let report = core
+        .batch_contact_sheet_preview(&graph, |completed, _| {
+            if completed == 2 && !originals_replaced {
+                fs::write(&first_path, b"replaced after both inputs were copied").unwrap();
+                fs::write(&second_path, b"replaced after both inputs were copied").unwrap();
+                originals_replaced = true;
+            }
+            true
+        })
+        .unwrap();
+
+    assert!(originals_replaced);
+    assert_eq!(core.document_info().unwrap(), before);
+    assert!(!real_output.exists());
+    assert_eq!(report.items.len(), 2);
+    assert!(
+        report
+            .items
+            .iter()
+            .all(|item| item.outcome == BatchItemOutcome::Succeeded)
+    );
+    assert_eq!(report.staged_results.len(), 1);
+    assert!(report.staged_results[0].is_pathless());
+    let staged = report
+        .staged_results
+        .into_iter()
+        .next()
+        .unwrap()
+        .into_core();
+    let info = staged.document_info().unwrap();
+    assert_eq!((info.width, info.height), (352, 176));
+    assert!(!info.dirty);
+
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn contact_sheet_preview_cancellation_removes_temporary_storage_and_returns_no_result() {
+    let directory = batch_temp_directory("contact-sheet-cancel");
+    fs::create_dir_all(&directory).unwrap();
+    let input_path = directory.join("A001.inkpod");
+    let mut source = Core::new();
+    source
+        .new_cell_with_uuid(2, 2, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI, 0xb424)
+        .unwrap();
+    source.save(&input_path).unwrap();
+    let graph = graph_with(
+        vec![BatchInputSelector::file(input_path.to_string_lossy())],
+        BatchOutputSettings {
+            destination: BatchOutputDestination::NewTabs,
+            ..BatchOutputSettings::default()
+        },
+    );
+    let core = Core::new();
+    assert!(matches!(
+        core.batch_contact_sheet_preview(&graph, |completed, total| completed < total),
+        Err(CoreError::Cancelled)
+    ));
+
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn active_output_is_one_dirty_undo_unit_and_new_tab_capacity_is_preflighted() {
     let mut core = Core::new();
     core.new_cell_with_uuid(1, 1, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI, 0xb430)

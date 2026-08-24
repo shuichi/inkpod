@@ -66,7 +66,7 @@
 extern "C" {
 #endif
 
-#define INKPOD_ABI_VERSION UINT32_C(20)
+#define INKPOD_ABI_VERSION UINT32_C(21)
 #define INKPOD_FEATURE_NONE UINT64_C(0)
 
 /** @brief InkScript ABI record の exact-current version。 */
@@ -6107,6 +6107,21 @@ InkpodStatus inkpod_core_batch_execute(
     const InkpodBatchGraph* graph,
     InkpodBatchRunScope scope,
     uint64_t flags,
+    InkpodBatchTask* task,
+    InkpodBatchReport** out_report);
+/**
+ * @brief 全入力を専用一時領域へコピーして処理し、一枚の contact sheet を staged result として返す。
+ * @par 契約
+ * Core owner thread。`core`/`graph`/`task`/`out_report` は非 NULL・非重複、`*out_report == NULL`。
+ * task は READY で call 終了まで生存。全入力の copy/materialize 完了後だけ処理を開始し、設定された実出力先は
+ * 書き込まない。成功時は一つの clean/pathless staged Core を持つ Rust-owned report を返し、専用一時 job directory は
+ * return 前に削除済み。cancel／cleanup failure 時は staged result を返さず current Core の revision、dirty、Undo、savepoint は不変。
+ * @par 主なステータス
+ * `OK`、`CANCELLED`、`INVALID_ARGUMENT`、`INVALID_STATE`、`IO_ERROR`、`WRONG_THREAD`、`PANIC`。
+ */
+InkpodStatus inkpod_core_batch_contact_sheet_preview(
+    InkpodCore* core,
+    const InkpodBatchGraph* graph,
     InkpodBatchTask* task,
     InkpodBatchReport** out_report);
 /**

@@ -76,6 +76,18 @@ namespace inkpod::windows::ui::runtime {
 inline constexpr UINT kLocatorSampleReady = WM_APP + 0x172U;
 inline constexpr UINT kSequenceSwitchCompleted = WM_APP + 0x173U;
 
+void ApplySystemDarkTitleBar(HWND window) noexcept {
+    if (window == nullptr) {
+        return;
+    }
+    const BOOL use_dark_mode = TRUE;
+    (void)DwmSetWindowAttribute(
+        window,
+        DWMWA_USE_IMMERSIVE_DARK_MODE,
+        &use_dark_mode,
+        sizeof(use_dark_mode));
+}
+
 using inkpod::windows::ui::HistoryDialogState;
 using inkpod::windows::ui::CellCreationDialogState;
 using inkpod::windows::ui::CutPropertiesDialogState;
@@ -3234,7 +3246,9 @@ void TrackAcceptedStrokePointer(
 std::wstring LocatorDocumentName(const DocumentSession& document) {
     const std::wstring& path = !document.shell.current_path.empty()
         ? document.shell.current_path
-        : document.shell.source_path;
+        : (!document.shell.display_name.empty()
+               ? document.shell.display_name
+               : document.shell.source_path);
     if (!path.empty()) {
         const std::size_t separator = path.find_last_of(L"\\/");
         const std::wstring leaf = separator == std::wstring::npos
@@ -3733,15 +3747,62 @@ void RefreshBatchPalette(BatchUiState& batch, HWND palette) noexcept {
     BatchController::RefreshPalette(batch, palette);
 }
 
+PaneActionTarget ResolveBatchActionTarget(
+    ApplicationHost& state,
+    const CommandContext& issued_context) noexcept {
+    PaneActionTarget target = state.routing.pane_targets.CaptureAction(
+        state.routing.batch_pane,
+        issued_context,
+        state.routing.targets);
+    if (target.status != PaneTargetStatus::Ok
+        || !target.context.document_session.has_value()) {
+        return target;
+    }
+    const auto* display_document = state.Documents().Find(
+        target.context.document_session.value());
+    if (display_document == nullptr
+        || !display_document->shell.batch_preview_source_context.has_value()) {
+        return target;
+    }
+
+    CommandContext source =
+        display_document->shell.batch_preview_source_context.value();
+    if (!source.document_view.has_value()) {
+        target.context = source;
+        target.status = PaneTargetStatus::MissingTarget;
+        return target;
+    }
+    const EditorGroupId source_group = state.routing.targets.GroupForView(
+        source.document_view.value());
+    const auto source_workspace = state.routing.targets.WorkspaceForView(
+        source.document_view.value());
+    if (!source_group || !source_workspace) {
+        target.context = source;
+        target.status = PaneTargetStatus::StaleTarget;
+        return target;
+    }
+    source.workspace = source_workspace;
+    source.editor_group = source_group;
+    source.pane = state.routing.batch_pane;
+    source.job.reset();
+    target.context = source;
+    target.status = state.routing.targets.Resolve(
+                        source,
+                        inkpod::app::kDocumentViewCommandScope
+                            | CommandTargetScope::Pane)
+            == CommandResolveStatus::Ok
+        ? PaneTargetStatus::Ok
+        : PaneTargetStatus::StaleTarget;
+    return target;
+}
+
 void UpdateBatchTarget(ApplicationHost& state) noexcept {
     const auto* binding = state.routing.pane_targets.Find(
         state.routing.batch_pane);
     state.batch.target_pinned = binding != nullptr
         && binding->policy == PaneTargetPolicy::PinnedDocument;
-    const PaneActionTarget target = state.routing.pane_targets.CaptureAction(
-        state.routing.batch_pane,
-        state.routing.targets.Capture(),
-        state.routing.targets);
+    const PaneActionTarget target = ResolveBatchActionTarget(
+        state, state.routing.targets.Capture());
     auto* document = target.context.document_session.has_value()
         ? state.Documents().Find(target.context.document_session.value())
         : nullptr;
@@ -7040,10 +7101,10 @@ CommandStateInputs BuildCommandStateInputs(
     inputs.workspace.batch_pinned = batch_binding != nullptr
         && batch_binding->policy == PaneTargetPolicy::PinnedDocument;
     inputs.workspace.batch_target_available =
-        inputs.batch.idle && state.routing.pane_targets.CaptureAction(
-            state.routing.batch_pane,
-            state.routing.targets.Capture(),
-            state.routing.targets).status == PaneTargetStatus::Ok;
+        inputs.batch.idle
+        && ResolveBatchActionTarget(
+               state, state.routing.targets.Capture()).status
+            == PaneTargetStatus::Ok;
     inputs.workspace.job_progress_visible =
         state.Workspace().windows.workspace.dock.IsPaneVisible(
             DockPaneType::JobProgress);
@@ -7181,7 +7242,9 @@ std::wstring DocumentTabBaseName(
     }
     const std::wstring& path = !document.shell.current_path.empty()
         ? document.shell.current_path
-        : document.shell.source_path;
+        : (!document.shell.display_name.empty()
+               ? document.shell.display_name
+               : document.shell.source_path);
     if (!path.empty()) {
         const wchar_t* leaf = path.c_str();
         for (const wchar_t* cursor = leaf; *cursor != L'\0'; ++cursor) {
@@ -13564,7 +13627,10 @@ std::wstring BatchReportSummary(const InkpodBatchReport* report) {
 }
 
 InkpodStatus InstallBatchNewTabs(
-    ApplicationHost& state, InkpodBatchReport* report) noexcept {
+    ApplicationHost& state,
+    InkpodBatchReport* report,
+    const wchar_t* display_name = nullptr,
+    const CommandContext* preview_source_context = nullptr) noexcept {
     if (state.engine == nullptr || report == nullptr) {
         return INKPOD_STATUS_INVALID_ARGUMENT;
     }
@@ -13614,6 +13680,23 @@ InkpodStatus InstallBatchNewTabs(
         }
         return INKPOD_STATUS_INVALID_STATE;
     }
+    if (display_name != nullptr && staged.size() == 1U) {
+        auto* preview_document = state.Documents().Find(staged.front().session);
+        if (preview_document == nullptr) {
+            (void)state.CloseDocumentSession(staged.front().session);
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        try {
+            preview_document->shell.display_name = display_name;
+        } catch (const std::bad_alloc&) {
+            (void)state.CloseDocumentSession(staged.front().session);
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        if (preview_source_context != nullptr) {
+            preview_document->shell.batch_preview_source_context =
+                *preview_source_context;
+        }
+    }
     if (!state.ActivateDocumentView(staged.back().view)) {
         for (const auto& binding : staged) {
             (void)state.CloseDocumentSession(binding.session);
@@ -13624,48 +13707,18 @@ InkpodStatus InstallBatchNewTabs(
     return INKPOD_STATUS_OK;
 }
 
-InkpodStatus PreviewBatch(
-    ApplicationHost& state,
-    const CommandContext& issued_context,
-    InkpodBatchRunScope scope) noexcept {
-    if (state.engine == nullptr) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    const PaneActionTarget pane_target =
-        state.routing.pane_targets.CaptureAction(
-            state.routing.batch_pane,
-            issued_context,
-            state.routing.targets);
-    if (pane_target.status != PaneTargetStatus::Ok) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    BatchController controller(
-        state.lifetime,
-        state.Workspace().windows,
-        state.Workspace().job_progress,
-        state.Workspace().job_progress_state,
-        state.Workspace().batch_palette,
-        state.batch,
-        *state.engine);
-    return controller.Preview(pane_target.context, scope);
-}
-
 InkpodStatus StartBatch(
     ApplicationHost& state,
     const CommandContext& issued_context,
-    InkpodBatchRunScope scope,
-    bool dry_run) noexcept {
+    bool contact_sheet_preview) noexcept {
     if (state.engine == nullptr || state.batch.task != nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     if (!PrepareBatchRunOperations(state)) {
         return INKPOD_STATUS_CANCELLED;
     }
-    const PaneActionTarget pane_target =
-        state.routing.pane_targets.CaptureAction(
-            state.routing.batch_pane,
-            issued_context,
-            state.routing.targets);
+    const PaneActionTarget pane_target = ResolveBatchActionTarget(
+        state, issued_context);
     if (pane_target.status != PaneTargetStatus::Ok) {
         return INKPOD_STATUS_INVALID_STATE;
     }
@@ -13674,7 +13727,7 @@ InkpodStatus StartBatch(
     state.batch.return_to_pinned = previous_binding != nullptr
         && previous_binding->policy == PaneTargetPolicy::PinnedDocument;
     state.batch.return_context = pane_target.context;
-    const auto job = state.routing.targets.BeginJob();
+    const auto job = state.routing.targets.BeginJob(pane_target.context);
     if (!job.has_value()) {
         return INKPOD_STATUS_INVALID_STATE;
     }
@@ -13692,6 +13745,9 @@ InkpodStatus StartBatch(
     }
     state.batch.job_text = L"Job " + std::to_wstring(job->Value())
         + UiText(UiStringId::Text0013);
+    state.batch.job_kind = contact_sheet_preview
+        ? inkpod::app::BatchJobKind::ContactSheetPreview
+        : inkpod::app::BatchJobKind::Execute;
     UpdateBatchTarget(state);
     RefreshBatchPalette(state.batch, state.Workspace().batch_palette);
     BatchController controller(
@@ -13702,12 +13758,25 @@ InkpodStatus StartBatch(
         state.Workspace().batch_palette,
         state.batch,
         *state.engine);
-    InkpodStatus status = controller.Start(
-        context, scope, dry_run, kBatchTaskCompleted);
-    if (state.lifetime.smoke_test && status == INKPOD_STATUS_OK && !dry_run
-        && state.batch.output_destination == INKPOD_BATCH_OUTPUT_NEW_TABS
+    InkpodStatus status = contact_sheet_preview
+        ? controller.StartContactSheetPreview(context, kBatchTaskCompleted)
+        : controller.Start(
+              context,
+              INKPOD_BATCH_SCOPE_ALL,
+              false,
+              kBatchTaskCompleted);
+    if (state.lifetime.smoke_test && status == INKPOD_STATUS_OK
         && state.batch.report != nullptr) {
-        status = InstallBatchNewTabs(state, state.batch.report);
+        if (contact_sheet_preview) {
+            status = InstallBatchNewTabs(
+                state,
+                state.batch.report,
+                UiText(UiStringId::Text0259),
+                &state.batch.return_context);
+        } else if (state.batch.output_destination
+                   == INKPOD_BATCH_OUTPUT_NEW_TABS) {
+            status = InstallBatchNewTabs(state, state.batch.report);
+        }
     }
     if (status != INKPOD_STATUS_OK || state.lifetime.smoke_test) {
         (void)state.routing.targets.EndJob(job.value());
@@ -13721,6 +13790,7 @@ InkpodStatus StartBatch(
                 state.routing.batch_pane);
         }
         state.batch.job_id.reset();
+        state.batch.job_kind = inkpod::app::BatchJobKind::None;
         state.batch.completion_context = {};
         state.batch.return_context = {};
         state.batch.job_text = status == INKPOD_STATUS_OK
@@ -14220,14 +14290,7 @@ inkpod::app::WorkspaceWindow* CreateWorkspaceWindow(
         menu,
         state.lifetime.instance,
         workspace);
-    if (window != nullptr) {
-        const BOOL use_dark_mode = TRUE;
-        (void)DwmSetWindowAttribute(
-            window,
-            DWMWA_USE_IMMERSIVE_DARK_MODE,
-            &use_dark_mode,
-            sizeof(use_dark_mode));
-    }
+    ApplySystemDarkTitleBar(window);
     if (window == nullptr) {
         DestroyMenu(menu);
     }
@@ -14627,24 +14690,18 @@ std::optional<LRESULT> RouteBatchCommand(
             }
             return 0;
         case IDM_BATCH_PREVIEW: {
-            const InkpodStatus status = PreviewBatch(
-                *state, context, INKPOD_BATCH_SCOPE_ALL);
-            if (status != INKPOD_STATUS_OK) {
+            const InkpodStatus status = StartBatch(*state, context, true);
+            if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
                 ShowCoreError(*state, window, UiText(UiStringId::Text0259));
             }
+            UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
-        case IDM_BATCH_DRY_RUN:
-        case IDM_BATCH_RUN_CURRENT:
         case IDM_BATCH_RUN_ALL: {
-            const UINT command = LOWORD(wparam);
             const InkpodStatus status = StartBatch(
                 *state,
                 context,
-                command == IDM_BATCH_RUN_CURRENT
-                    ? INKPOD_BATCH_SCOPE_CURRENT
-                    : INKPOD_BATCH_SCOPE_ALL,
-                command == IDM_BATCH_DRY_RUN);
+                false);
             if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
                 ShowCoreError(*state, window, UiText(UiStringId::Text0267));
             }
@@ -20560,11 +20617,19 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                     }
                 }
                 if (target_valid && status == INKPOD_STATUS_OK
-                    && state->batch.output_destination
-                        == INKPOD_BATCH_OUTPUT_NEW_TABS
                     && state->batch.report != nullptr) {
-                    status = InstallBatchNewTabs(
-                        *state, state->batch.report);
+                    if (state->batch.job_kind
+                        == inkpod::app::BatchJobKind::ContactSheetPreview) {
+                        status = InstallBatchNewTabs(
+                            *state,
+                            state->batch.report,
+                            UiText(UiStringId::Text0259),
+                            &state->batch.return_context);
+                    } else if (state->batch.output_destination
+                               == INKPOD_BATCH_OUTPUT_NEW_TABS) {
+                        status = InstallBatchNewTabs(
+                            *state, state->batch.report);
+                    }
                 }
                 if (target_valid && state->batch.report != nullptr) {
                     try {
@@ -20592,6 +20657,7 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                         state->routing.batch_pane);
                 }
                 state->batch.job_id.reset();
+                state->batch.job_kind = inkpod::app::BatchJobKind::None;
                 state->batch.completion_context = {};
                 state->batch.return_context = {};
                 state->batch.job_text = status == INKPOD_STATUS_OK

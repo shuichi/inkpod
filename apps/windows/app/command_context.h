@@ -110,6 +110,8 @@ public:
     [[nodiscard]] std::optional<CanvasId> RegisterAuxiliaryCanvas() noexcept;
     bool UnregisterAuxiliaryCanvas(CanvasId canvas) noexcept;
     [[nodiscard]] std::optional<JobSessionId> BeginJob() noexcept;
+    [[nodiscard]] std::optional<JobSessionId> BeginJob(
+        const CommandContext& target) noexcept;
     bool EndJob(JobSessionId job) noexcept;
 
     [[nodiscard]] CommandContext Capture(

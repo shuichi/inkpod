@@ -157,6 +157,10 @@ struct AppLifetimeState {
 struct DocumentShellState {
     std::wstring current_path;
     std::wstring source_path;
+    std::wstring display_name;
+    // A Batch preview is a display-only document. Batch commands issued while
+    // it is active keep targeting this exact issue-time source view.
+    std::optional<CommandContext> batch_preview_source_context;
     std::wstring recovery_path;
     std::wstring recovery_original_path;
     std::uint64_t smoke_layer_id{};
@@ -389,6 +393,12 @@ struct EffectsUiState {
     std::wstring last_output_color_guard_summary;
 };
 
+enum class BatchJobKind : std::uint8_t {
+    None,
+    Execute,
+    ContactSheetPreview,
+};
+
 struct BatchUiState {
     std::wstring target_text{
         windows::ui::UiText(windows::ui::UiStringId::FollowingNoTarget)};
@@ -423,6 +433,7 @@ struct BatchUiState {
     InkpodBatchTask* task{};
     windows::ui::ProgressDialogState progress_dialog{};
     std::optional<JobSessionId> job_id;
+    BatchJobKind job_kind{BatchJobKind::None};
     CommandContext completion_context;
 };
 

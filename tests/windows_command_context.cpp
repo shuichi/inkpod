@@ -149,6 +149,40 @@ bool PaneAndJobTargetsDoNotFallback() {
         == CommandResolveStatus::StaleTarget;
 }
 
+bool JobsCanBindAnExactInactiveDocument() {
+    CommandTargetRegistry registry;
+    registry.Initialize();
+    (void)registry.ReplaceDocument();
+    const CommandContext source = registry.Capture();
+    const auto second_document = registry.AddDocument();
+    if (!second_document.has_value()) {
+        return false;
+    }
+    const CommandContext active = registry.Capture();
+    const auto job = registry.BeginJob(source);
+    if (!job.has_value()) {
+        return false;
+    }
+    CommandContext source_job = source;
+    source_job.job = job;
+    CommandContext crossed = active;
+    crossed.job = job;
+    CommandContext stale = source;
+    stale.generation = Generation(registry.CurrentGeneration().Value() + 1U);
+    const bool valid = registry.Resolve(
+                           source_job,
+                           inkpod::app::kDocumentSessionCommandScope
+                               | inkpod::app::CommandTargetScope::Job)
+            == CommandResolveStatus::Ok
+        && registry.Resolve(
+               crossed,
+               inkpod::app::kDocumentSessionCommandScope
+                   | inkpod::app::CommandTargetScope::Job)
+            == CommandResolveStatus::StaleTarget
+        && !registry.BeginJob(stale).has_value();
+    return registry.EndJob(job.value()) && valid;
+}
+
 bool AuxiliaryCanvasIdsHaveIndependentBoundedLifetime() {
     CommandTargetRegistry registry;
     registry.Initialize();
@@ -450,6 +484,7 @@ int main() {
             && CapturedSessionDoesNotFollowTabFocus()
             && InvalidRequestsAreRejected()
             && PaneAndJobTargetsDoNotFallback()
+            && JobsCanBindAnExactInactiveDocument()
             && AuxiliaryCanvasIdsHaveIndependentBoundedLifetime()
             && GenerationTaggedTokensNeverRetarget()
             && EditorGroupsRouteCapturedViewsWithoutRetargeting()

@@ -1,8 +1,9 @@
 //! Batch processing graph and execution.
 
 use super::{
-    CellDocument, Core, CoreError, DispatchOutcome, LayerKind, MAX_IMAGE_EDIT_PIXELS, PixelFormat,
-    PixelValue, PlaneType, RectI32, TILE_SIZE, TileCoord,
+    AssetAlphaSemantics, AssetColorSpace, CellDocument, Core, CoreError, DEFAULT_DPI_MILLI,
+    DispatchOutcome, LayerKind, MAX_IMAGE_EDIT_PIXELS, PixelFormat, PixelValue, PlaneType,
+    RasterAssetInput, RectI32, TILE_SIZE, TileCoord,
 };
 use crate::animation::parse_cell_number;
 use crate::asset;
@@ -50,6 +51,7 @@ const OP_ERASE: u32 = 4;
 const OP_ENABLED: u64 = 1;
 
 mod codec;
+mod contact_sheet;
 mod execute;
 mod model;
 mod operations;

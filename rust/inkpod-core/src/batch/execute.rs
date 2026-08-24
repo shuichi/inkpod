@@ -223,7 +223,7 @@ impl Core {
         Ok(report)
     }
 
-    fn resolve_batch_sources(
+    pub(super) fn resolve_batch_sources(
         &self,
         graph: &BatchGraph,
         scope: BatchRunScope,

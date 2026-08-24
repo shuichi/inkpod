@@ -159,10 +159,17 @@ impl Core {
     /// The returned straight-alpha RGBA8 pixels are owned by the caller. This is
     /// a query and does not change revisions, history, dirty state, or savepoint.
     pub fn document_thumbnail(&self) -> Result<Thumbnail, CoreError> {
+        self.document_thumbnail_with_max(THUMBNAIL_MAX_DIMENSION)
+    }
+
+    pub(crate) fn document_thumbnail_with_max(
+        &self,
+        maximum_dimension: u32,
+    ) -> Result<Thumbnail, CoreError> {
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
         let flattened =
             flatten_document(document, &self.assets, self.document_revision.get().max(1))?;
-        thumbnail_for_raster(&flattened)
+        thumbnail_for_raster_with_max(&flattened, maximum_dimension)
     }
 
     /// Quantizes visible composite colors into a replacement document palette.

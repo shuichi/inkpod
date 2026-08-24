@@ -594,49 +594,109 @@ pub unsafe extern "C" fn inkpod_core_batch_execute(
             },
             |completed, total| task.progress(completed, total),
         );
-        match result {
-            Ok(report) => {
-                let cancelled = report.cancelled;
-                let staged_results = report.staged_results.into_iter().map(Some).collect();
-                let items = report
-                    .items
-                    .into_iter()
-                    .map(|item| OwnedReportItem {
-                        outcome: match item.outcome {
-                            BatchItemOutcome::Succeeded => INKPOD_BATCH_ITEM_SUCCEEDED,
-                            BatchItemOutcome::Skipped => INKPOD_BATCH_ITEM_SKIPPED,
-                            BatchItemOutcome::Failed => INKPOD_BATCH_ITEM_FAILED,
-                            BatchItemOutcome::Cancelled => INKPOD_BATCH_ITEM_CANCELLED,
-                            BatchItemOutcome::DryRun => INKPOD_BATCH_ITEM_DRY_RUN,
-                        },
-                        input_name: item.input_name.into_bytes().into_boxed_slice(),
-                        output_path: bytes_for_path(item.output_path),
-                        message: item.message.into_bytes().into_boxed_slice(),
-                    })
-                    .collect();
-                unsafe {
-                    out_report.write(Box::into_raw(Box::new(InkpodBatchReport {
-                        items,
-                        cancelled,
-                        owner_thread: thread::current().id(),
-                        staged_results,
-                    })))
-                };
-                let status = if cancelled {
-                    INKPOD_STATUS_CANCELLED
-                } else {
-                    INKPOD_STATUS_OK
-                };
-                task.finish(status);
-                status
-            }
-            Err(error) => {
-                let status = map_core_error(error);
-                task.finish(status);
-                status
-            }
-        }
+        finish_batch_report(result, task, out_report)
     })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_batch_contact_sheet_preview(
+    core: *mut InkpodCore,
+    graph: *const InkpodBatchGraph,
+    task: *mut InkpodTask,
+    out_report: *mut *mut InkpodBatchReport,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null()
+            || !is_aligned(core)
+            || graph.is_null()
+            || !is_aligned(graph)
+            || task.is_null()
+            || !is_aligned(task)
+            || out_report.is_null()
+            || !is_aligned(out_report)
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch contact-sheet preview handle pointer is null or misaligned",
+            );
+        }
+        if !unsafe { out_report.read() }.is_null() {
+            return fail(
+                INKPOD_STATUS_INVALID_STATE,
+                "batch contact-sheet preview report output already owns a handle",
+            );
+        }
+        let core = unsafe { &mut *core };
+        let task = unsafe { &*task };
+        let status = validate_core_thread(core);
+        if status != INKPOD_STATUS_OK {
+            return status;
+        }
+        if !task.begin() {
+            return fail(
+                INKPOD_STATUS_INVALID_STATE,
+                "batch contact-sheet preview task is not READY",
+            );
+        }
+        let result = core
+            .core
+            .batch_contact_sheet_preview(&unsafe { &*graph }.graph, |completed, total| {
+                task.progress(completed, total)
+            });
+        finish_batch_report(result, task, out_report)
+    })
+}
+
+fn finish_batch_report(
+    result: Result<BatchRunReport, CoreError>,
+    task: &InkpodTask,
+    out_report: *mut *mut InkpodBatchReport,
+) -> u32 {
+    match result {
+        Ok(report) => {
+            let cancelled = report.cancelled;
+            let staged_results = report.staged_results.into_iter().map(Some).collect();
+            let items = report
+                .items
+                .into_iter()
+                .map(|item| OwnedReportItem {
+                    outcome: match item.outcome {
+                        BatchItemOutcome::Succeeded => INKPOD_BATCH_ITEM_SUCCEEDED,
+                        BatchItemOutcome::Skipped => INKPOD_BATCH_ITEM_SKIPPED,
+                        BatchItemOutcome::Failed => INKPOD_BATCH_ITEM_FAILED,
+                        BatchItemOutcome::Cancelled => INKPOD_BATCH_ITEM_CANCELLED,
+                        BatchItemOutcome::DryRun => INKPOD_BATCH_ITEM_DRY_RUN,
+                    },
+                    input_name: item.input_name.into_bytes().into_boxed_slice(),
+                    output_path: bytes_for_path(item.output_path),
+                    message: item.message.into_bytes().into_boxed_slice(),
+                })
+                .collect();
+            // SAFETY: Both exported callers validate this pointer, its alignment, and
+            // empty owner slot before beginning the one-shot task.
+            unsafe {
+                out_report.write(Box::into_raw(Box::new(InkpodBatchReport {
+                    items,
+                    cancelled,
+                    owner_thread: thread::current().id(),
+                    staged_results,
+                })))
+            };
+            let status = if cancelled {
+                INKPOD_STATUS_CANCELLED
+            } else {
+                INKPOD_STATUS_OK
+            };
+            task.finish(status);
+            status
+        }
+        Err(error) => {
+            let status = map_core_error(error);
+            task.finish(status);
+            status
+        }
+    }
 }
 
 #[unsafe(no_mangle)]

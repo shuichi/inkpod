@@ -1739,7 +1739,7 @@
       "kind": "text",
       "ja": "Canvas スクロール同期",
       "en": "Synchronize Canvas scrolling",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0047",
@@ -2635,7 +2635,7 @@
       "kind": "text",
       "ja": "クリックで色を採取。描画入力は文書へ送信しません。",
       "en": "Click to sample a color. Drawing input is not sent to the document.",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0176",
@@ -4980,7 +4980,7 @@
       "kind": "text",
       "ja": "前セルを自動参照",
       "en": "Automatically reference previous cell",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0535",
@@ -5064,14 +5064,14 @@
       "kind": "text",
       "ja": "参照セル: —",
       "en": "Reference cell: —",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0547",
       "kind": "text",
       "ja": "参照セルがありません",
       "en": "No reference cell",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0548",
@@ -6716,7 +6716,7 @@
       "kind": "text",
       "ja": "現在セル",
       "en": "Current cell",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0790",
@@ -6730,7 +6730,7 @@
       "kind": "text",
       "ja": "現在セルを実行",
       "en": "Run Current Cell",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0792",
@@ -8851,7 +8851,7 @@
       "kind": "text",
       "ja": "試行のみ",
       "en": "Dry run",
-      "resource": true
+      "resource": false
     },
     {
       "id": "RightToolTabsAccessibleName",

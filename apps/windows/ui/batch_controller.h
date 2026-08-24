@@ -26,9 +26,9 @@ public:
         app::BatchUiState& batch,
         app::CoreHost& engine) noexcept;
 
-    InkpodStatus Preview(
+    InkpodStatus StartContactSheetPreview(
         const app::CommandContext& context,
-        InkpodBatchRunScope scope) noexcept;
+        UINT completion_message) noexcept;
     InkpodStatus Start(
         const app::CommandContext& context,
         InkpodBatchRunScope scope,
@@ -52,6 +52,9 @@ public:
 
 private:
     InkpodStatus BuildGraph() noexcept;
+    InkpodStatus PlanPreview(
+        const app::CommandContext& context,
+        InkpodBatchRunScope scope) noexcept;
 
     app::AppLifetimeState& lifetime_;
     app::MainWindowHandles& windows_;

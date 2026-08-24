@@ -8309,34 +8309,23 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
     BatchController::ResetDerivedState(state.batch);
     BatchController::RefreshPalette(
         state.batch, state.Workspace().batch_palette);
+    const std::size_t sessions_before_preview = state.engine->SessionCount();
+    const auto preview_source_session = state.routing.targets.DocumentSession();
+    InkpodDocumentInfo preview_source_document{};
+    preview_source_document.struct_size = sizeof(preview_source_document);
+    const bool preview_source_info_available = state.engine->GetDocumentInfo(
+        preview_source_session,
+        state.routing.targets.CurrentGeneration(),
+        preview_source_document);
     const LRESULT preview_result = SendMessageW(
         state.Workspace().windows.window,
         WM_COMMAND,
         IDM_BATCH_PREVIEW,
         0);
-    const bool preview_available = state.batch.preview != nullptr;
-    const LRESULT dry_run_result = preview_result == 1
-        ? SendMessageW(
-              state.Workspace().windows.window,
-              WM_COMMAND,
-              IDM_BATCH_DRY_RUN,
-              0)
-        : 0;
-    if (preview_result != 1 || !preview_available || dry_run_result != 1
-        || state.batch.report == nullptr) {
-        const auto issued = state.routing.targets.Capture();
-        const auto pane_target = state.routing.pane_targets.CaptureAction(
-            state.routing.batch_pane, issued, state.routing.targets);
-        BatchController diagnostic_controller(
-            state.lifetime,
-            state.Workspace().windows,
-            state.Workspace().job_progress,
-            state.Workspace().job_progress_state,
-            state.Workspace().batch_palette,
-            state.batch,
-            *state.engine);
-        const InkpodStatus diagnostic_status = diagnostic_controller.Preview(
-            pane_target.context, INKPOD_BATCH_SCOPE_ALL);
+    if (!preview_source_info_available || preview_result != 1
+        || state.batch.report == nullptr
+        || state.engine->SessionCount() != sessions_before_preview + 1U
+        || state.routing.targets.DocumentSession() == preview_source_session) {
         std::array<std::uint8_t, 1024U> ffi_diagnostic{};
         std::uint64_t ffi_diagnostic_bytes{};
         const InkpodStatus ffi_diagnostic_status = inkpod_error_message_copy(
@@ -8345,19 +8334,15 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
             &ffi_diagnostic_bytes);
         std::fprintf(
             stderr,
-            "batch preview mismatch: preview=%lld handle=%u dry=%lld report=%u "
-            "pane=%u doc=%u generation=%u enabled=%u status=%u "
-            "diagnostic_status=%u diagnostic=%s\n",
+            "batch preview mismatch: preview=%lld report=%u sessions=%llu/%llu "
+            "changed=%u enabled=%u diagnostic_status=%u diagnostic=%s\n",
             static_cast<long long>(preview_result),
-            preview_available ? 1U : 0U,
-            static_cast<long long>(dry_run_result),
             state.batch.report != nullptr ? 1U : 0U,
-            static_cast<unsigned>(pane_target.status),
-            pane_target.context.document_session.has_value() ? 1U : 0U,
-            pane_target.context.generation.has_value() ? 1U : 0U,
+            static_cast<unsigned long long>(state.engine->SessionCount()),
+            static_cast<unsigned long long>(sessions_before_preview + 1U),
+            state.routing.targets.DocumentSession() != preview_source_session ? 1U : 0U,
             IsCommandEnabled(
                 state.Workspace().command_states, IDM_BATCH_PREVIEW) ? 1U : 0U,
-            diagnostic_status,
             ffi_diagnostic_status,
             reinterpret_cast<const char*>(ffi_diagnostic.data()));
         cleanup();
@@ -8367,22 +8352,60 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
     report_info.struct_size = sizeof(report_info);
     if (inkpod_batch_report_get_info(state.batch.report, &report_info)
             != INKPOD_STATUS_OK
-        || report_info.failure_count != 0U || report_info.item_count == 0U) {
+        || report_info.failure_count != 0U || report_info.item_count == 0U
+        || report_info.staged_result_count != 1U) {
         cleanup();
         return 709;
     }
+    InkpodDocumentInfo preview_document{};
+    preview_document.struct_size = sizeof(preview_document);
+    const auto preview_session = state.routing.targets.DocumentSession();
+    const bool preview_info_available = state.engine->GetDocumentInfo(
+        preview_session,
+        state.routing.targets.CurrentGeneration(),
+        preview_document);
+    std::wstring preview_tab_label;
+    const int preview_tab_index = TabCtrl_GetCurSel(
+        state.Workspace().windows.document_tabs);
+    const bool preview_label_available = ReadDocumentTabLabel(
+        state.Workspace().windows.document_tabs,
+        preview_tab_index,
+        preview_tab_label);
+    const auto* preview_shell_document = state.Documents().Find(preview_session);
+    const bool preview_source_retained = preview_shell_document != nullptr
+        && preview_shell_document->shell.batch_preview_source_context.has_value()
+        && preview_shell_document->shell.batch_preview_source_context
+               ->document_session
+            == preview_source_session;
+    if (!preview_info_available
+        || (preview_document.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
+        || !preview_label_available
+        || preview_tab_label.find(UiText(UiStringId::Text0259)) == std::wstring::npos
+        || !preview_source_retained) {
+        std::fprintf(
+            stderr,
+            "batch contact-sheet tab mismatch: info=%u flags=%u label=%u "
+            "source=%u\n",
+            preview_info_available ? 1U : 0U,
+            preview_document.flags,
+            preview_label_available ? 1U : 0U,
+            preview_source_retained ? 1U : 0U);
+        cleanup();
+        return 710;
+    }
+
     const std::size_t sessions_before = state.engine->SessionCount();
     const auto previous_session = state.routing.targets.DocumentSession();
     if (SendMessageW(
             state.Workspace().windows.window,
             WM_COMMAND,
-            IDM_BATCH_RUN_CURRENT,
+            IDM_BATCH_RUN_ALL,
             0)
             != 1
         || state.engine->SessionCount() != sessions_before + 1U
         || state.routing.targets.DocumentSession() == previous_session) {
         cleanup();
-        return 710;
+        return 711;
     }
     InkpodDocumentInfo staged_document{};
     staged_document.struct_size = sizeof(staged_document);
@@ -8393,21 +8416,29 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
             staged_document);
     const bool staged_dirty = staged_info_available
         && (staged_document.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U;
+    const bool staged_matches_source = staged_info_available
+        && staged_document.width == preview_source_document.width
+        && staged_document.height == preview_source_document.height;
     const bool staged_closed = state.CloseDocumentSession(staged_session);
-    if (!staged_info_available || !staged_dirty || !staged_closed) {
+    const bool preview_closed = state.CloseDocumentSession(preview_session);
+    if (!staged_info_available || !staged_dirty || !staged_matches_source
+        || !staged_closed || !preview_closed) {
         std::fprintf(
             stderr,
-            "batch new-tab mismatch: info=%u flags=%u dirty=%u close=%u\n",
+            "batch new-tab mismatch: info=%u flags=%u dirty=%u dimensions=%u "
+            "close=%u preview_close=%u\n",
             staged_info_available ? 1U : 0U,
             staged_document.flags,
             staged_dirty ? 1U : 0U,
-            staged_closed ? 1U : 0U);
+            staged_matches_source ? 1U : 0U,
+            staged_closed ? 1U : 0U,
+            preview_closed ? 1U : 0U);
         cleanup();
-        return 710;
+        return 711;
     }
     if (inkpod_batch_task_create(&state.batch.task) != INKPOD_STATUS_OK) {
         cleanup();
-        return 711;
+        return 712;
     }
     BatchController::RefreshPalette(
         state.batch, state.Workspace().batch_palette);
@@ -8423,7 +8454,7 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
                0)
             != 1) {
         cleanup();
-        return 712;
+        return 713;
     }
     inkpod_batch_task_release(&state.batch.task);
     BatchController::RefreshPalette(
@@ -8437,7 +8468,7 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
         || state.Workspace().windows.workspace.dock.IsPaneVisible(
             DockPaneType::Batch)) {
         cleanup();
-        return 713;
+        return 714;
     }
     cleanup();
     return 0;

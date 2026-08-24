@@ -104,7 +104,7 @@ fn active_document_input() -> InkpodBatchInput {
 }
 
 #[test]
-fn abi18_graph_exposes_only_the_four_batch_v3_operation_shapes() {
+fn current_abi_graph_exposes_only_the_four_batch_v3_operation_shapes() {
     let colors = [rgba8([1, 2, 3, 4])];
     let pairs = [InkpodBatchColorPairInput {
         struct_size: size_of::<InkpodBatchColorPairInput>() as u32,
@@ -238,7 +238,7 @@ fn abi18_graph_exposes_only_the_four_batch_v3_operation_shapes() {
 }
 
 #[test]
-fn abi18_rejects_short_unknown_and_invalid_stride_records() {
+fn current_abi_rejects_short_unknown_and_invalid_stride_records() {
     let colors = [binary(0)];
     let operations = [operation(INKPOD_BATCH_OPERATION_ERASE, &colors, &[])];
     let inputs = [active_document_input()];
@@ -399,6 +399,73 @@ fn new_tab_result_is_taken_once_on_the_report_owner_thread() {
     );
     assert_eq!(
         unsafe { inkpod_batch_task_release(&mut task) },
+        INKPOD_STATUS_OK
+    );
+
+    let mut preview_task = ptr::null_mut();
+    assert_eq!(
+        unsafe { inkpod_batch_task_create(&mut preview_task) },
+        INKPOD_STATUS_OK
+    );
+    let mut preview_report = ptr::null_mut();
+    assert_eq!(
+        unsafe {
+            inkpod_core_batch_contact_sheet_preview(
+                &mut core,
+                graph,
+                preview_task,
+                &mut preview_report,
+            )
+        },
+        INKPOD_STATUS_OK
+    );
+    info.item_count = 0;
+    info.failure_count = 0;
+    info.staged_result_count = 0;
+    assert_eq!(
+        unsafe { inkpod_batch_report_get_info(preview_report, &mut info) },
+        INKPOD_STATUS_OK
+    );
+    assert_eq!(
+        (
+            info.item_count,
+            info.failure_count,
+            info.staged_result_count
+        ),
+        (1, 0, 1)
+    );
+    let mut preview_generation = 0;
+    let mut preview_core = ptr::null_mut();
+    assert_eq!(
+        unsafe {
+            inkpod_batch_report_take_staged_result(
+                preview_report,
+                0,
+                &mut preview_generation,
+                &mut preview_core,
+            )
+        },
+        INKPOD_STATUS_OK
+    );
+    assert_ne!(preview_generation, 0);
+    assert!(!preview_core.is_null());
+    assert!(
+        !unsafe { &mut *preview_core }
+            .core
+            .document_info()
+            .unwrap()
+            .dirty
+    );
+    assert_eq!(
+        unsafe { inkpod_core_destroy(&mut preview_core) },
+        INKPOD_STATUS_OK
+    );
+    assert_eq!(
+        unsafe { inkpod_batch_report_release(&mut preview_report) },
+        INKPOD_STATUS_OK
+    );
+    assert_eq!(
+        unsafe { inkpod_batch_task_release(&mut preview_task) },
         INKPOD_STATUS_OK
     );
     assert_eq!(

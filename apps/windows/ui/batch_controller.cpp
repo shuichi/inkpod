@@ -283,7 +283,7 @@ InkpodStatus BatchController::BuildGraph() noexcept {
     }
 }
 
-InkpodStatus BatchController::Preview(
+InkpodStatus BatchController::PlanPreview(
     const app::CommandContext& context,
     InkpodBatchRunScope scope) noexcept {
     if (!context.document_session.has_value()
@@ -379,7 +379,7 @@ InkpodStatus BatchController::Start(
     }
     bool preview_confirmed = !batch_.preview_before_save || dry_run;
     if (!preview_confirmed) {
-        const InkpodStatus preview_status = Preview(context, scope);
+        const InkpodStatus preview_status = PlanPreview(context, scope);
         if (preview_status != INKPOD_STATUS_OK) {
             return preview_status;
         }
@@ -466,6 +466,103 @@ InkpodStatus BatchController::Start(
             },
             true,
             true,
+            true,
+            [window, completion_message, context](InkpodStatus completion_status) {
+                const LPARAM generation = context.generation.has_value()
+                    ? static_cast<LPARAM>(context.generation->Value())
+                    : 0;
+                PostMessageW(
+                    window, completion_message, completion_status, generation);
+            })) {
+        ClearJobProgress(progress_, progress_state_, JobProgressSlot::Batch);
+        if (!HasActiveJobProgress(progress_state_)) {
+            static_cast<void>(windows_.dock_host.HidePane(
+                DockPaneType::JobProgress));
+        }
+        inkpod_batch_task_release(&batch_.task);
+        batch_.completion_context = {};
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    return INKPOD_STATUS_OK;
+}
+
+InkpodStatus BatchController::StartContactSheetPreview(
+    const app::CommandContext& context,
+    UINT completion_message) noexcept {
+    if (batch_.task != nullptr
+        || !context.document_session.has_value()
+        || !context.generation.has_value()) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const InkpodStatus graph_status = BuildGraph();
+    if (graph_status != INKPOD_STATUS_OK) {
+        return graph_status;
+    }
+    if (engine_.SessionCount() >= app::CoreHost::kMaximumDocumentSessions) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+
+    inkpod_batch_report_release(&batch_.report);
+    InkpodStatus status = inkpod_batch_task_create(&batch_.task);
+    if (status != INKPOD_STATUS_OK) {
+        return status;
+    }
+    app::BatchUiState* const batch = &batch_;
+    if (lifetime_.smoke_test) {
+        status = engine_.Invoke(
+            *context.document_session,
+            *context.generation,
+            [batch](InkpodCore* core) {
+                return inkpod_core_batch_contact_sheet_preview(
+                    core,
+                    batch->graph,
+                    batch->task,
+                    &batch->report);
+            },
+            false,
+            false);
+        if (batch_.report != nullptr) {
+            try {
+                batch_.last_result = ReportSummary(batch_.report);
+            } catch (const std::bad_alloc&) {
+                status = INKPOD_STATUS_INVALID_STATE;
+            }
+        }
+        inkpod_batch_task_release(&batch_.task);
+        RefreshPalette(batch_, palette_);
+        return status;
+    }
+
+    batch_.progress_dialog = {
+        &batch_,
+        QueryProgress,
+        CancelProgress,
+        UiText(UiStringId::Text0259),
+        UiText(UiStringId::Text0263),
+        UiText(UiStringId::Cancelling)};
+    if (!BindJobProgress(
+            progress_,
+            progress_state_,
+            JobProgressSlot::Batch,
+            batch_.progress_dialog)) {
+        inkpod_batch_task_release(&batch_.task);
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    static_cast<void>(windows_.dock_host.RestorePane(DockPaneType::JobProgress));
+    static_cast<void>(windows_.dock_host.ActivatePane(DockPaneType::JobProgress));
+    batch_.completion_context = context;
+    const HWND window = windows_.window;
+    if (!engine_.Enqueue(
+            context,
+            [batch](InkpodCore* core) {
+                return inkpod_core_batch_contact_sheet_preview(
+                    core,
+                    batch->graph,
+                    batch->task,
+                    &batch->report);
+            },
+            false,
+            false,
             true,
             [window, completion_message, context](InkpodStatus completion_status) {
                 const LPARAM generation = context.generation.has_value()

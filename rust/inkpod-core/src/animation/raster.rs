@@ -424,8 +424,20 @@ pub(super) fn tile_to_common(
 }
 
 pub(super) fn thumbnail_for_raster(raster: &TileRaster) -> Result<Thumbnail, CoreError> {
-    let scale = (f64::from(raster.width()) / f64::from(THUMBNAIL_MAX_DIMENSION))
-        .max(f64::from(raster.height()) / f64::from(THUMBNAIL_MAX_DIMENSION))
+    thumbnail_for_raster_with_max(raster, THUMBNAIL_MAX_DIMENSION)
+}
+
+pub(crate) fn thumbnail_for_raster_with_max(
+    raster: &TileRaster,
+    maximum_dimension: u32,
+) -> Result<Thumbnail, CoreError> {
+    if maximum_dimension == 0 {
+        return Err(CoreError::InvalidArgument(
+            "thumbnail maximum dimension must be positive",
+        ));
+    }
+    let scale = (f64::from(raster.width()) / f64::from(maximum_dimension))
+        .max(f64::from(raster.height()) / f64::from(maximum_dimension))
         .max(1.0);
     let width = (f64::from(raster.width()) / scale).round().max(1.0) as u32;
     let height = (f64::from(raster.height()) / scale).round().max(1.0) as u32;

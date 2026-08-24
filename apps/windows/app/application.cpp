@@ -606,6 +606,7 @@ int Application::Run() {
         menu,
         launch_.instance,
         &state.Workspace());
+    windows::ui::runtime::ApplySystemDarkTitleBar(window);
     if (window == nullptr) {
         DestroyMenu(menu);
         state.renderer->Stop();

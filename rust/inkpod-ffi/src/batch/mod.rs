@@ -7,8 +7,8 @@ use inkpod_core::{
     BatchColorPair, BatchFailurePolicy, BatchGraph, BatchInputKind, BatchInputSelector,
     BatchItemOutcome, BatchMissingTargetPolicy, BatchOperation, BatchOperationKind,
     BatchOutputDestination, BatchOutputFormat, BatchOutputSettings, BatchPairExtraction,
-    BatchRunOptions, BatchRunScope, BatchStagedResult, BatchTargetSelector, LayerKind, PlaneType,
-    SequenceSourceIdentity,
+    BatchRunOptions, BatchRunReport, BatchRunScope, BatchStagedResult, BatchTargetSelector,
+    CoreError, LayerKind, PlaneType, SequenceSourceIdentity,
 };
 use std::path::PathBuf;
 

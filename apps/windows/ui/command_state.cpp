@@ -581,8 +581,6 @@ void ProvideBatchCommandStates(
     SetEnabled(
         states,
         {IDM_BATCH_PREVIEW,
-         IDM_BATCH_DRY_RUN,
-         IDM_BATCH_RUN_CURRENT,
          IDM_BATCH_RUN_ALL,
          IDM_BATCH_SAVE_SET},
         input.batch.idle && input.batch.has_operations && input.document.has_document);

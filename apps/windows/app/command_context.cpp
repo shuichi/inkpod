@@ -477,11 +477,18 @@ bool CommandTargetRegistry::UnregisterAuxiliaryCanvas(CanvasId canvas) noexcept 
 }
 
 std::optional<JobSessionId> CommandTargetRegistry::BeginJob() noexcept {
-    if (!active_document_ || job_count_ >= jobs_.size()) {
+    return BeginJob(Capture());
+}
+
+std::optional<JobSessionId> CommandTargetRegistry::BeginJob(
+    const CommandContext& target) noexcept {
+    if (job_count_ >= jobs_.size()
+        || Resolve(target, kDocumentSessionCommandScope)
+            != CommandResolveStatus::Ok) {
         return std::nullopt;
     }
     const JobSessionId job = Issue<JobSessionId>();
-    jobs_[job_count_++] = JobTarget{job, active_document_};
+    jobs_[job_count_++] = JobTarget{job, target.document_session.value()};
     return job;
 }
 

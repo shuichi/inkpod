@@ -99,10 +99,8 @@ void LayoutBatchPane(HWND dialog, BatchPaletteDialogState* state) noexcept {
     panes::PlacePaneButtonRows(
         dialog, bottom_controls, margin, bottom_top, content, row, gap);
 
-    const std::array<int, 5U> run_controls{
+    const std::array<int, 3U> run_controls{
         IDC_BATCH_PREVIEW,
-        IDC_BATCH_DRY_RUN,
-        IDC_BATCH_RUN_CURRENT,
         IDC_BATCH_RUN_ALL,
         IDC_BATCH_CANCEL};
     const std::size_t run_rows = panes::PaneButtonRowCount(
@@ -309,12 +307,6 @@ INT_PTR CALLBACK BatchPaletteDialogProcedure(
                     return TRUE;
                 case IDC_BATCH_PREVIEW:
                     DispatchCommand(*state, IDM_BATCH_PREVIEW);
-                    return TRUE;
-                case IDC_BATCH_DRY_RUN:
-                    DispatchCommand(*state, IDM_BATCH_DRY_RUN);
-                    return TRUE;
-                case IDC_BATCH_RUN_CURRENT:
-                    DispatchCommand(*state, IDM_BATCH_RUN_CURRENT);
                     return TRUE;
                 case IDC_BATCH_RUN_ALL:
                     DispatchCommand(*state, IDM_BATCH_RUN_ALL);
@@ -535,8 +527,6 @@ void UpdateBatchPaletteDialog(
     }
     for (const int control : {
              IDC_BATCH_PREVIEW,
-             IDC_BATCH_DRY_RUN,
-             IDC_BATCH_RUN_CURRENT,
              IDC_BATCH_RUN_ALL,
              IDC_BATCH_SAVE_SET,
              IDC_BATCH_LOAD_SET}) {
