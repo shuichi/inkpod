@@ -89,6 +89,21 @@ using inkpod::app::DocumentViewId;
 using inkpod::app::Generation;
 using inkpod::windows::ui::tools::kInteractionEffectAirbrush;
 
+struct SubpaletteSampleProbe final {
+    std::uint32_t count{};
+    double x{};
+    double y{};
+};
+
+void RecordSubpaletteSample(void* context, double x, double y) noexcept {
+    auto* probe = static_cast<SubpaletteSampleProbe*>(context);
+    if (probe != nullptr) {
+        ++probe->count;
+        probe->x = x;
+        probe->y = y;
+    }
+}
+
 bool CommandSurfacesMatchComputedState(const ApplicationHost& state) noexcept;
 
 template <typename Mutator>
@@ -390,6 +405,28 @@ bool PaneButtonsFit(HWND pane) noexcept {
                VerifyButtonFit,
                reinterpret_cast<LPARAM>(&context)) != FALSE
         && context.passed;
+}
+
+bool TooltipMatches(
+    HWND tooltip, HWND parent, int control, UiStringId expected) noexcept {
+    const HWND child = GetDlgItem(parent, control);
+    if (tooltip == nullptr || child == nullptr) {
+        return false;
+    }
+    std::array<wchar_t, 256U> text{};
+    TOOLINFOW tool{};
+    tool.cbSize = sizeof(tool);
+    tool.uFlags = TTF_IDISHWND;
+    tool.hwnd = parent;
+    tool.uId = reinterpret_cast<UINT_PTR>(child);
+    tool.lpszText = text.data();
+    SendMessageW(
+        tooltip,
+        TTM_GETTEXTW,
+        static_cast<WPARAM>(text.size()),
+        reinterpret_cast<LPARAM>(&tool));
+    return std::wcscmp(text.data(), UiText(expected)) == 0
+        && !HasJapaneseCharacters(text.data());
 }
 
 bool ExerciseOwnerDraw(
@@ -1301,6 +1338,7 @@ int RunSubpalettePaneSmoke(ApplicationHost& state) noexcept {
         || GetDlgItem(pane, IDC_SUBPALETTE_ONE_TO_ONE) == nullptr
         || GetDlgItem(pane, IDC_SUBPALETTE_REGISTER) == nullptr
         || GetDlgItem(pane, IDC_SUBPALETTE_SAMPLE_SWATCH) == nullptr
+        || IsWindowVisible(GetDlgItem(pane, IDC_SUBPALETTE_SAMPLE_SWATCH)) != FALSE
         || GetDlgItem(pane, IDC_SUBPALETTE_AUTO_PREVIOUS) != nullptr
         || GetDlgItem(pane, IDC_SUBPALETTE_SCROLL_SYNC) != nullptr
         || !WindowUsesNamedIconButton(
@@ -1320,9 +1358,14 @@ int RunSubpalettePaneSmoke(ApplicationHost& state) noexcept {
                 VK_RIGHT,
                 0)
             & DLGC_WANTARROWS) == 0
-        || !WindowHasAccessibleName(
-            GetDlgItem(pane, IDC_SUBPALETTE_SAMPLE_SWATCH))
+        || !WindowHasAccessibleName(GetDlgItem(pane, IDC_SUBPALETTE_REGISTER))
         || IsWindowEnabled(GetDlgItem(pane, IDC_SUBPALETTE_REGISTER)) != FALSE
+        || state.Workspace().subpalette_dialog.tooltip == nullptr
+        || SendMessageW(
+               state.Workspace().subpalette_dialog.tooltip,
+               TTM_GETTOOLCOUNT,
+               0,
+               0) != 7
         || state.Workspace().subpalette_dialog.eyedropper_cursor == nullptr
         || (GetMenuState(menu, IDM_WINDOW_SUBPALETTE, MF_BYCOMMAND)
             & MF_CHECKED) == 0U
@@ -1353,6 +1396,106 @@ int RunSubpalettePaneSmoke(ApplicationHost& state) noexcept {
     }
     if (!PaneButtonsFit(pane)) {
         return 924;
+    }
+    const std::array tooltip_contracts{
+        std::pair{IDC_SUBPALETTE_TARGET, UiStringId::SubpaletteOpenFiles},
+        std::pair{IDC_SUBPALETTE_PIN, UiStringId::SubpaletteOpenFolder},
+        std::pair{IDC_SUBPALETTE_PREVIOUS, UiStringId::Text0533},
+        std::pair{IDC_SUBPALETTE_NEXT, UiStringId::Text0762},
+        std::pair{IDC_SUBPALETTE_FIT, UiStringId::Text0501},
+        std::pair{IDC_SUBPALETTE_ONE_TO_ONE, UiStringId::Text0838},
+        std::pair{
+            IDC_SUBPALETTE_REGISTER,
+            UiStringId::SubpaletteRegisterSample}};
+    const HWND tooltip = state.Workspace().subpalette_dialog.tooltip;
+    if (!std::all_of(
+            tooltip_contracts.cbegin(),
+            tooltip_contracts.cend(),
+            [tooltip, pane](const auto& entry) {
+                return TooltipMatches(
+                    tooltip, pane, entry.first, entry.second);
+            })) {
+        return 928;
+    }
+    const std::array<int, 7U> toolbar_controls{
+        IDC_SUBPALETTE_TARGET,
+        IDC_SUBPALETTE_PIN,
+        IDC_SUBPALETTE_PREVIOUS,
+        IDC_SUBPALETTE_NEXT,
+        IDC_SUBPALETTE_FIT,
+        IDC_SUBPALETTE_ONE_TO_ONE,
+        IDC_SUBPALETTE_REGISTER};
+    RECT first_bounds{};
+    if (GetWindowRect(
+            GetDlgItem(pane, toolbar_controls.front()),
+            &first_bounds) == FALSE) {
+        return 929;
+    }
+    for (const int control : toolbar_controls) {
+        RECT bounds{};
+        if (GetWindowRect(GetDlgItem(pane, control), &bounds) == FALSE
+            || bounds.top != first_bounds.top
+            || bounds.bottom != first_bounds.bottom) {
+            return 929;
+        }
+    }
+    for (const int control : std::array{
+             IDC_SUBPALETTE_TARGET,
+             IDC_SUBPALETTE_PIN}) {
+        RECT bounds{};
+        if (GetWindowRect(GetDlgItem(pane, control), &bounds) == FALSE
+            || bounds.right - bounds.left
+                != panes::PaneButtonIdealWidth(pane, control)) {
+            return 929;
+        }
+    }
+    auto& subpalette_dialog = state.Workspace().subpalette_dialog;
+    void* const original_context = subpalette_dialog.context;
+    const auto original_sample = subpalette_dialog.sample;
+    SubpaletteSampleProbe sample_probe{};
+    subpalette_dialog.context = &sample_probe;
+    subpalette_dialog.sample = RecordSubpaletteSample;
+    const std::array<InkpodStrokeSample, 3U> sample_points{{
+        {sizeof(InkpodStrokeSample), 0U, 10.25F, 20.5F, 1.0F, 0U},
+        {sizeof(InkpodStrokeSample), 0U, 21.5F, 30.25F, 1.0F, 0U},
+        {sizeof(InkpodStrokeSample), 0U, 32.75F, 40.5F, 1.0F, 0U}}};
+    const bool begin_dispatched = inkpod::renderer::SubmitCanvasStrokeEvent(
+        canvas,
+        inkpod::renderer::CanvasStrokeEventKind::Begin,
+        sample_points.data(),
+        1U);
+    const bool append_dispatched = inkpod::renderer::SubmitCanvasStrokeEvent(
+        canvas,
+        inkpod::renderer::CanvasStrokeEventKind::Append,
+        sample_points.data() + 1U,
+        1U);
+    const bool end_dispatched = inkpod::renderer::SubmitCanvasStrokeEvent(
+        canvas,
+        inkpod::renderer::CanvasStrokeEventKind::End,
+        sample_points.data() + 2U,
+        1U);
+    const bool cancel_dispatched = inkpod::renderer::SubmitCanvasStrokeEvent(
+        canvas,
+        inkpod::renderer::CanvasStrokeEventKind::Cancel,
+        nullptr,
+        0U);
+    const bool samples_dispatched = begin_dispatched && append_dispatched
+        && end_dispatched && cancel_dispatched;
+    subpalette_dialog.context = original_context;
+    subpalette_dialog.sample = original_sample;
+    if (!samples_dispatched || sample_probe.count != 3U
+        || sample_probe.x != 32.75 || sample_probe.y != 40.5) {
+        std::fprintf(
+            stderr,
+            "subpalette sample probe failed: begin=%d append=%d end=%d cancel=%d count=%u x=%.3f y=%.3f\n",
+            begin_dispatched ? 1 : 0,
+            append_dispatched ? 1 : 0,
+            end_dispatched ? 1 : 0,
+            cancel_dispatched ? 1 : 0,
+            sample_probe.count,
+            sample_probe.x,
+            sample_probe.y);
+        return 925;
     }
     const auto* binding = state.routing.pane_targets.Find(
         state.routing.subpalette_pane);

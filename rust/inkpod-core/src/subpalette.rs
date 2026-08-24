@@ -2,13 +2,20 @@ use crate::animation::{MAX_SEQUENCE_CELLS, natural_cmp, parse_cell_number};
 use crate::document::validate_node_name;
 use crate::{
     CommonRasterFormat, Core, CoreError, DEFAULT_DPI_MILLI, PixelValue, RenderSnapshot,
-    ViewCommand, ViewState,
+    SequenceCellSource, ViewCommand, ViewState,
 };
+use inkpod_format::decode_common_raster;
 use std::cmp::Ordering;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Maximum number of external image entries accepted by one subpalette catalog.
 pub const MAX_SUBPALETTE_ITEMS: usize = MAX_SEQUENCE_CELLS;
+
+/// Maximum aggregate decoded pixel payload retained by one subpalette cache.
+///
+/// The limit is checked before each decoded image is converted to tiled Core
+/// storage. Encoded caller buffers are borrowed and are not retained.
+pub const MAX_SUBPALETTE_CACHE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 
 /// Stable nonzero identity of one entry within a [`SubpaletteCatalog`].
 ///
@@ -44,6 +51,21 @@ pub struct SubpaletteSource {
     pub name: String,
 }
 
+/// One borrowed encoded image used to populate a complete subpalette cache.
+///
+/// Bytes are decoded during [`SubpaletteCatalog::load_cached_images`] and are
+/// never retained. `item_id` must identify exactly one item in the current
+/// catalog, and the complete input span must cover every catalog item once.
+#[derive(Clone, Copy, Debug)]
+pub struct SubpaletteImageInput<'a> {
+    /// Stable catalog item receiving this decoded image.
+    pub item_id: SubpaletteItemId,
+    /// Explicit common-raster codec for the borrowed bytes.
+    pub format: CommonRasterFormat,
+    /// Nonempty encoded PNG/TIFF/TGA/BMP bytes.
+    pub bytes: &'a [u8],
+}
+
 /// Immutable metadata for one naturally ordered external image.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SubpaletteItem {
@@ -68,6 +90,8 @@ pub struct SubpaletteCatalogInfo {
     pub active_index: Option<u32>,
     /// Whether the selected item has a successfully decoded raster.
     pub image_loaded: bool,
+    /// Whether every catalog item is decoded and available without encoded input.
+    pub cache_complete: bool,
 }
 
 /// Workspace-scoped, read-only external-image catalog used by the subpalette.
@@ -84,6 +108,7 @@ pub struct SubpaletteCatalog {
     next_item_id: u64,
     catalog_revision: u64,
     active_index: Option<usize>,
+    cache_complete: bool,
     viewport_width: f64,
     viewport_height: f64,
 }
@@ -117,6 +142,7 @@ impl SubpaletteCatalog {
             next_item_id: 1,
             catalog_revision: 0,
             active_index: None,
+            cache_complete: false,
             viewport_width: 1.0,
             viewport_height: 1.0,
         })
@@ -188,6 +214,7 @@ impl SubpaletteCatalog {
         self.next_item_id = next_item_id;
         self.catalog_revision = next_revision;
         self.active_index = None;
+        self.cache_complete = false;
         Ok(self.info())
     }
 
@@ -206,6 +233,7 @@ impl SubpaletteCatalog {
         self.catalog_revision = next_revision;
         self.items.clear();
         self.active_index = None;
+        self.cache_complete = false;
         self.core = core;
         self.view_id = view_id;
         Ok(self.info())
@@ -219,6 +247,7 @@ impl SubpaletteCatalog {
             item_count: self.items.len() as u32,
             active_index: self.active_index.map(|index| index as u32),
             image_loaded: self.active_index.is_some(),
+            cache_complete: self.cache_complete,
         }
     }
 
@@ -294,6 +323,138 @@ impl SubpaletteCatalog {
         self.core = staged_core;
         self.view_id = staged_view_id;
         self.active_index = Some(index);
+        self.cache_complete = false;
+        Ok(self.info())
+    }
+
+    /// Decodes every catalog image into one memory-resident sequence and selects
+    /// `active_item_id` atomically.
+    ///
+    /// Input order is irrelevant; stable item IDs restore natural catalog order.
+    /// Every current item must appear exactly once. The aggregate decoded pixel
+    /// payload may not exceed [`MAX_SUBPALETTE_CACHE_BYTES`]. Success releases no
+    /// caller memory because encoded bytes are only borrowed for this call.
+    /// Missing/duplicate IDs, decode/allocation/view failure, or aggregate-size
+    /// overflow preserves the previous decoded cache, active item, view, and
+    /// catalog revision.
+    pub fn load_cached_images(
+        &mut self,
+        inputs: &[SubpaletteImageInput<'_>],
+        active_item_id: SubpaletteItemId,
+    ) -> Result<SubpaletteCatalogInfo, CoreError> {
+        if inputs.len() != self.items.len() || inputs.is_empty() {
+            return Err(CoreError::InvalidArgument(
+                "subpalette cache input count does not match the catalog",
+            ));
+        }
+        let active_index = self
+            .items
+            .iter()
+            .position(|item| item.id == active_item_id)
+            .ok_or(CoreError::InvalidArgument(
+                "subpalette active cache item does not exist",
+            ))?;
+        let mut by_id = BTreeMap::new();
+        for input in inputs {
+            if input.bytes.is_empty() || by_id.insert(input.item_id, input).is_some() {
+                return Err(CoreError::InvalidArgument(
+                    "subpalette cache input is empty or duplicated",
+                ));
+            }
+        }
+
+        let mut cells = Vec::with_capacity(self.items.len());
+        let mut decoded_bytes = 0_u64;
+        for (index, item) in self.items.iter().enumerate() {
+            let input = by_id.remove(&item.id).ok_or(CoreError::InvalidArgument(
+                "subpalette cache input omits a catalog item",
+            ))?;
+            let raster = decode_common_raster(input.format, input.bytes)?;
+            decoded_bytes = decoded_bytes
+                .checked_add(raster.pixels.len() as u64)
+                .filter(|total| *total <= MAX_SUBPALETTE_CACHE_BYTES)
+                .ok_or(CoreError::InvalidArgument(
+                    "subpalette decoded cache exceeds its aggregate byte bound",
+                ))?;
+            let uuid = (u128::from(0x494e_4b50_5355_4250_u64) << 64) | u128::from(item.id.get());
+            cells.push(SequenceCellSource::from_common_raster(
+                format!("subpalette{}", index + 1),
+                uuid,
+                &raster,
+            )?);
+        }
+        if !by_id.is_empty() {
+            return Err(CoreError::InvalidArgument(
+                "subpalette cache input contains an unknown item",
+            ));
+        }
+
+        let mut staged_core = Core::new();
+        staged_core.new_cell(1, 1, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)?;
+        let staged_view_id = staged_core.create_view()?;
+        staged_core.set_sequence(cells)?;
+        staged_core.set_subpalette_cell(active_index)?;
+        staged_core.apply_subpalette_view_for(
+            staged_view_id,
+            ViewCommand::ViewportResized {
+                viewport_width: self.viewport_width,
+                viewport_height: self.viewport_height,
+            },
+        )?;
+        staged_core.apply_subpalette_view_for(
+            staged_view_id,
+            ViewCommand::Fit {
+                viewport_width: self.viewport_width,
+                viewport_height: self.viewport_height,
+            },
+        )?;
+
+        self.core = staged_core;
+        self.view_id = staged_view_id;
+        self.active_index = Some(active_index);
+        self.cache_complete = true;
+        Ok(self.info())
+    }
+
+    /// Selects one already-decoded cache item without reading or decoding bytes.
+    ///
+    /// Selection fits the private view to the newly active image. Invalid IDs or
+    /// an incomplete cache preserve the previous active item and view.
+    pub fn select_cached_image(
+        &mut self,
+        item_id: SubpaletteItemId,
+    ) -> Result<SubpaletteCatalogInfo, CoreError> {
+        if !self.cache_complete {
+            return Err(CoreError::InvalidState(
+                "subpalette decoded cache is incomplete",
+            ));
+        }
+        let index = self
+            .items
+            .iter()
+            .position(|item| item.id == item_id)
+            .ok_or(CoreError::InvalidArgument(
+                "subpalette cached item ID does not exist",
+            ))?;
+        if self.active_index == Some(index) {
+            return Ok(self.info());
+        }
+
+        let previous_index = self.active_index;
+        self.core.set_subpalette_cell(index)?;
+        if let Err(error) = self.core.apply_subpalette_view_for(
+            self.view_id,
+            ViewCommand::Fit {
+                viewport_width: self.viewport_width,
+                viewport_height: self.viewport_height,
+            },
+        ) {
+            if let Some(previous) = previous_index {
+                let _ = self.core.set_subpalette_cell(previous);
+            }
+            return Err(error);
+        }
+        self.active_index = Some(index);
         Ok(self.info())
     }
 
@@ -334,7 +495,7 @@ impl SubpaletteCatalog {
     }
 
     /// Builds an immutable read-only snapshot of the loaded image.
-    pub fn build_snapshot(&self) -> Result<RenderSnapshot, CoreError> {
+    pub fn build_snapshot(&mut self) -> Result<RenderSnapshot, CoreError> {
         if self.active_index.is_none() {
             return Err(CoreError::InvalidState("subpalette has no decoded image"));
         }
@@ -460,5 +621,135 @@ mod tests {
             PixelValue::Rgba([10, 20, 30, 255])
         );
         assert_eq!(catalog.build_snapshot().unwrap().document_width(), 1);
+    }
+
+    #[test]
+    fn complete_cache_switches_after_encoded_inputs_are_dropped() {
+        let mut catalog = SubpaletteCatalog::new().unwrap();
+        catalog
+            .replace_sources(vec![
+                SubpaletteSource {
+                    source_token: 1,
+                    name: "cell2.png".into(),
+                },
+                SubpaletteSource {
+                    source_token: 2,
+                    name: "cell1.png".into(),
+                },
+            ])
+            .unwrap();
+        let first = catalog.item(0).unwrap().id;
+        let second = catalog.item(1).unwrap().id;
+        let first_bytes = png([10, 20, 30, 255]);
+        let second_bytes = png([40, 50, 60, 255]);
+        let loaded = catalog
+            .load_cached_images(
+                &[
+                    SubpaletteImageInput {
+                        item_id: second,
+                        format: CommonRasterFormat::Png,
+                        bytes: &second_bytes,
+                    },
+                    SubpaletteImageInput {
+                        item_id: first,
+                        format: CommonRasterFormat::Png,
+                        bytes: &first_bytes,
+                    },
+                ],
+                first,
+            )
+            .unwrap();
+        assert!(loaded.cache_complete);
+        assert_eq!(loaded.active_index, Some(0));
+        drop(first_bytes);
+        drop(second_bytes);
+
+        assert_eq!(
+            catalog.sample(0.5, 0.5).unwrap(),
+            PixelValue::Rgba([10, 20, 30, 255])
+        );
+        let first_snapshot = catalog.build_snapshot().unwrap();
+        let first_tile_id = first_snapshot.tiles()[0].tile_id();
+        let first_tile_revision = first_snapshot.tiles()[0].tile_revision();
+        let selected = catalog.select_cached_image(second).unwrap();
+        assert_eq!(selected.active_index, Some(1));
+        assert!(selected.cache_complete);
+        assert_eq!(
+            catalog.sample(0.5, 0.5).unwrap(),
+            PixelValue::Rgba([40, 50, 60, 255])
+        );
+        let second_snapshot = catalog.build_snapshot().unwrap();
+        assert_ne!(second_snapshot.tiles()[0].tile_id(), first_tile_id);
+        catalog.select_cached_image(first).unwrap();
+        assert_eq!(
+            catalog.sample(0.5, 0.5).unwrap(),
+            PixelValue::Rgba([10, 20, 30, 255])
+        );
+        let repeated = catalog.build_snapshot().unwrap();
+        assert_eq!(repeated.tiles()[0].tile_id(), first_tile_id);
+        assert_eq!(repeated.tiles()[0].tile_revision(), first_tile_revision);
+    }
+
+    #[test]
+    fn complete_cache_failure_preserves_previous_cache_and_selection() {
+        let mut catalog = SubpaletteCatalog::new().unwrap();
+        catalog
+            .replace_sources(vec![
+                SubpaletteSource {
+                    source_token: 1,
+                    name: "cell1.png".into(),
+                },
+                SubpaletteSource {
+                    source_token: 2,
+                    name: "cell2.png".into(),
+                },
+            ])
+            .unwrap();
+        let first = catalog.item(0).unwrap().id;
+        let second = catalog.item(1).unwrap().id;
+        let first_bytes = png([1, 2, 3, 255]);
+        let second_bytes = png([4, 5, 6, 255]);
+        catalog
+            .load_cached_images(
+                &[
+                    SubpaletteImageInput {
+                        item_id: first,
+                        format: CommonRasterFormat::Png,
+                        bytes: &first_bytes,
+                    },
+                    SubpaletteImageInput {
+                        item_id: second,
+                        format: CommonRasterFormat::Png,
+                        bytes: &second_bytes,
+                    },
+                ],
+                second,
+            )
+            .unwrap();
+        let before = catalog.info();
+        assert!(
+            catalog
+                .load_cached_images(
+                    &[
+                        SubpaletteImageInput {
+                            item_id: first,
+                            format: CommonRasterFormat::Png,
+                            bytes: &first_bytes,
+                        },
+                        SubpaletteImageInput {
+                            item_id: second,
+                            format: CommonRasterFormat::Png,
+                            bytes: b"not png",
+                        },
+                    ],
+                    first,
+                )
+                .is_err()
+        );
+        assert_eq!(catalog.info(), before);
+        assert_eq!(
+            catalog.sample(0.5, 0.5).unwrap(),
+            PixelValue::Rgba([4, 5, 6, 255])
+        );
     }
 }

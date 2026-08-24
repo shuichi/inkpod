@@ -569,8 +569,13 @@ impl Core {
     ///
     /// The source raster is never installed as the editable document. The supplied
     /// secondary view contributes only its independent zoom, pan, flip, and viewport
-    /// state; document revisions, history, dirty state, and render cache are unchanged.
-    pub fn build_subpalette_snapshot_for(&self, view_id: u64) -> Result<RenderSnapshot, CoreError> {
+    /// state; document revisions, history, and dirty state are unchanged. Reference tiles may be
+    /// added to the private Core render cache so repeated item selection reuses stable tile IDs and
+    /// revisions.
+    pub fn build_subpalette_snapshot_for(
+        &mut self,
+        view_id: u64,
+    ) -> Result<RenderSnapshot, CoreError> {
         let view = *self
             .secondary_views
             .get(&ViewId::from_raw(view_id))
@@ -588,12 +593,31 @@ impl Core {
             .ok_or(CoreError::InvalidState("subpalette source disappeared"))?;
         let raster = &cell.raster;
         let mut tiles = Vec::new();
+        let cache_key = (1_u64 << 62) | index as u64;
         for coord in raster.allocated_coords() {
             let source_revision = RenderRevision::from_raw(raster.tile_revision(coord));
-            if let Some(tile) =
-                compose_reference_tile(raster, coord, source_revision, source_revision)
+            if self
+                .render_cache
+                .get(&(cache_key, coord))
+                .is_none_or(|tile| tile.source_revision != source_revision)
             {
-                tiles.push(tile);
+                let tile_revision = self.next_render_tile_revision;
+                self.next_render_tile_revision =
+                    self.next_render_tile_revision.wrapping_next_nonzero();
+                if let Some(tile_id) = subpalette_reference_tile_id(index, coord)
+                    && let Some(tile) = compose_reference_tile(
+                        raster,
+                        coord,
+                        source_revision,
+                        tile_revision,
+                        tile_id,
+                    )
+                {
+                    self.render_cache.insert((cache_key, coord), tile);
+                }
+            }
+            if let Some(tile) = self.render_cache.get(&(cache_key, coord)) {
+                tiles.push(tile.clone());
             }
         }
         let tile_count = tiles.len() as u64;
@@ -1463,6 +1487,7 @@ fn compose_reference_tile(
     coord: TileCoord,
     source_revision: RenderRevision,
     tile_revision: RenderRevision,
+    tile_id: u64,
 ) -> Option<RenderTile> {
     let origin_x = coord.x.checked_mul(TILE_SIZE)?;
     let origin_y = coord.y.checked_mul(TILE_SIZE)?;
@@ -1492,7 +1517,7 @@ fn compose_reference_tile(
         return None;
     }
     Some(RenderTile {
-        tile_id: (u64::from(coord.y) << 32) | u64::from(coord.x) | (1_u64 << 62),
+        tile_id,
         origin: DocumentPointI32 {
             x: origin_x as i32,
             y: origin_y as i32,
@@ -1503,6 +1528,13 @@ fn compose_reference_tile(
         source_revision,
         tile_revision,
     })
+}
+
+fn subpalette_reference_tile_id(index: usize, coord: TileCoord) -> Option<u64> {
+    let index = u16::try_from(index).ok()?;
+    let x = u16::try_from(coord.x).ok()?;
+    let y = u16::try_from(coord.y).ok()?;
+    Some((1_u64 << 62) | (u64::from(index) << 32) | (u64::from(y) << 16) | u64::from(x))
 }
 
 pub(super) fn blend_rgba_over(background: [u8; 4], foreground: [u8; 4]) -> [u8; 4] {

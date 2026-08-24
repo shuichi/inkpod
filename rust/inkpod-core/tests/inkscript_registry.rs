@@ -2428,7 +2428,7 @@ fn inkscript_versions_and_traceability_match_repository_contracts() {
     assert!(model.contains("pub const CURRENT: Self = Self(25);"));
     assert!(model.contains("pub const PROCEDURE_FORMAT_VERSION: u32 = 28;"));
     assert!(format.contains("pub const FORMAT_VERSION: u32 = 28;"));
-    assert!(header.contains("#define INKPOD_ABI_VERSION UINT32_C(19)"));
+    assert!(header.contains("#define INKPOD_ABI_VERSION UINT32_C(20)"));
 
     let spec = fs::read_to_string(repository.join("SPEC.md")).expect("SPEC must be readable");
     let compatibility = fs::read_to_string(repository.join("docs/compatibility.md"))

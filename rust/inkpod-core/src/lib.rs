@@ -140,8 +140,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use stroke::StrokeSession;
 pub use subpalette::{
-    MAX_SUBPALETTE_ITEMS, SubpaletteCatalog, SubpaletteCatalogInfo, SubpaletteItem,
-    SubpaletteItemId, SubpaletteSource,
+    MAX_SUBPALETTE_CACHE_BYTES, MAX_SUBPALETTE_ITEMS, SubpaletteCatalog, SubpaletteCatalogInfo,
+    SubpaletteImageInput, SubpaletteItem, SubpaletteItemId, SubpaletteSource,
 };
 pub use vanishing_point::*;
 use view::default_shortcuts;

@@ -4792,19 +4792,96 @@ fn external_subpalette_abi_owns_catalog_decode_view_sample_and_snapshot() {
         let (mut source_core, _) = create_core(2, 2, 0x5355_4250);
         let png = export_png(source_core);
         assert_eq!(inkpod_core_destroy(&mut source_core), INKPOD_STATUS_OK);
+        let mut item_ids = Vec::new();
+        for index in 0..info.item_count {
+            let mut cached_item = InkpodSubpaletteItemInfo {
+                struct_size: size_of::<InkpodSubpaletteItemInfo>() as u32,
+                ..InkpodSubpaletteItemInfo::default()
+            };
+            assert_eq!(
+                inkpod_subpalette_item_get(subpalette, index, &mut cached_item),
+                INKPOD_STATUS_OK
+            );
+            item_ids.push(cached_item.item_id);
+        }
+        let mut cached_rasters = item_ids
+            .iter()
+            .map(|item_id| InkpodSubpaletteRasterInput {
+                struct_size: size_of::<InkpodSubpaletteRasterInput>() as u32,
+                format: INKPOD_COMMON_RASTER_PNG,
+                item_id: *item_id,
+                bytes: png.as_ptr(),
+                byte_count: png.len() as u64,
+            })
+            .collect::<Vec<_>>();
+        let unchanged_output = info;
+        cached_rasters[0].struct_size -= 1;
         assert_eq!(
-            inkpod_subpalette_load_common_raster(
+            inkpod_subpalette_load_cached_rasters(
                 subpalette,
+                cached_rasters.as_ptr(),
+                cached_rasters.len() as u64,
+                size_of::<InkpodSubpaletteRasterInput>() as u64,
                 first_item_id,
-                INKPOD_COMMON_RASTER_PNG,
-                png.as_ptr(),
-                png.len() as u64,
                 &mut info,
             ),
-            INKPOD_STATUS_OK
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+        assert_eq!(info.catalog_revision, unchanged_output.catalog_revision);
+        assert_eq!(info.active_index, unchanged_output.active_index);
+        cached_rasters[0].struct_size = size_of::<InkpodSubpaletteRasterInput>() as u32;
+        let cache_status = inkpod_subpalette_load_cached_rasters(
+            subpalette,
+            cached_rasters.as_ptr(),
+            cached_rasters.len() as u64,
+            size_of::<InkpodSubpaletteRasterInput>() as u64,
+            first_item_id,
+            &mut info,
+        );
+        let mut diagnostic_size = 0_u64;
+        let _ = inkpod_error_message_size(&mut diagnostic_size);
+        let mut diagnostic = vec![0_u8; diagnostic_size as usize];
+        let _ = inkpod_error_message_copy(
+            diagnostic.as_mut_ptr(),
+            diagnostic.len() as u64,
+            &mut diagnostic_size,
+        );
+        assert_eq!(
+            cache_status,
+            INKPOD_STATUS_OK,
+            "{}",
+            String::from_utf8_lossy(&diagnostic)
         );
         assert_eq!(info.active_index, 0);
         assert_ne!(info.flags & INKPOD_SUBPALETTE_INFO_IMAGE_LOADED, 0);
+        assert_ne!(info.flags & INKPOD_SUBPALETTE_INFO_CACHE_COMPLETE, 0);
+        assert_eq!(
+            inkpod_subpalette_select_cached_raster(subpalette, item_ids[1], &mut info),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(info.active_index, 1);
+        assert_eq!(
+            inkpod_subpalette_select_cached_raster(subpalette, first_item_id, &mut info),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(info.active_index, 0);
+
+        let complete = info;
+        cached_rasters[1].item_id = first_item_id;
+        assert_eq!(
+            inkpod_subpalette_load_cached_rasters(
+                subpalette,
+                cached_rasters.as_ptr(),
+                cached_rasters.len() as u64,
+                size_of::<InkpodSubpaletteRasterInput>() as u64,
+                first_item_id,
+                &mut info,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(info.active_index, complete.active_index);
+        assert_eq!(info.flags, complete.flags);
+        cached_rasters[1].item_id = item_ids[1];
 
         let view = InkpodViewInput {
             struct_size: size_of::<InkpodViewInput>() as u32,

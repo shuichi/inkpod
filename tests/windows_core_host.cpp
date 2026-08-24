@@ -631,6 +631,33 @@ int wmain() {
         return 4;
     }
 
+    InkpodSubpalette* asynchronous_subpalette{};
+    std::atomic<DWORD> subpalette_thread{};
+    std::promise<InkpodStatus> subpalette_completion;
+    auto subpalette_future = subpalette_completion.get_future();
+    if (host.CreateSubpalette(&asynchronous_subpalette) != INKPOD_STATUS_OK
+        || asynchronous_subpalette == nullptr
+        || !host.EnqueueSubpalette(
+            asynchronous_subpalette,
+            [&subpalette_thread](InkpodSubpalette* subpalette) {
+                subpalette_thread.store(
+                    GetCurrentThreadId(), std::memory_order_release);
+                InkpodSubpaletteInfo info{};
+                info.struct_size = sizeof(info);
+                return inkpod_subpalette_get_info(subpalette, &info);
+            },
+            [&subpalette_completion](InkpodStatus status) {
+                subpalette_completion.set_value(status);
+            })
+        || subpalette_future.get() != INKPOD_STATUS_OK
+        || subpalette_thread.load(std::memory_order_acquire) != host.ThreadId()
+        || host.ReleaseSubpalette(&asynchronous_subpalette) != INKPOD_STATUS_OK
+        || asynchronous_subpalette != nullptr) {
+        host.Stop();
+        DestroyWindow(owner);
+        return 81;
+    }
+
     constexpr inkpod::app::DocumentViewId first_frontend_view{21U};
     constexpr inkpod::app::DocumentViewId second_frontend_view{22U};
     std::uint64_t second_core_view{};

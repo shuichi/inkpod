@@ -66,7 +66,7 @@
 extern "C" {
 #endif
 
-#define INKPOD_ABI_VERSION UINT32_C(19)
+#define INKPOD_ABI_VERSION UINT32_C(20)
 #define INKPOD_FEATURE_NONE UINT64_C(0)
 
 /** @brief InkScript ABI record の exact-current version。 */
@@ -631,6 +631,7 @@ typedef uint32_t InkpodSequenceStepResult;
 #define INKPOD_SEQUENCE_INDEX_NONE UINT32_MAX
 #define INKPOD_SUBPALETTE_INDEX_NONE UINT32_MAX
 #define INKPOD_SUBPALETTE_INFO_IMAGE_LOADED (UINT64_C(1) << 0)
+#define INKPOD_SUBPALETTE_INFO_CACHE_COMPLETE (UINT64_C(1) << 1)
 #define INKPOD_SUBPALETTE_ITEM_HAS_CELL_NUMBER (UINT32_C(1) << 0)
 #define INKPOD_SEQUENCE_SWITCH_PROMPT UINT32_C(1)
 #define INKPOD_SEQUENCE_SWITCH_AUTOSAVE UINT32_C(2)
@@ -1741,6 +1742,15 @@ typedef struct InkpodSubpaletteSourceInput {
     const uint8_t* name_utf8;
     uint64_t name_bytes;
 } InkpodSubpaletteSourceInput;
+
+/** @brief One borrowed encoded image for a complete memory-resident subpalette cache. */
+typedef struct InkpodSubpaletteRasterInput {
+    uint32_t struct_size;
+    InkpodCommonRasterFormat format;
+    uint64_t item_id;
+    const uint8_t* bytes;
+    uint64_t byte_count;
+} InkpodSubpaletteRasterInput;
 
 /** @brief Side-effect-free external-image catalog and selection summary. */
 typedef struct InkpodSubpaletteInfo {
@@ -5410,6 +5420,34 @@ InkpodStatus inkpod_subpalette_load_common_raster(
     InkpodCommonRasterFormat format,
     const uint8_t* bytes,
     uint64_t byte_count,
+    InkpodSubpaletteInfo* out_info);
+
+/**
+ * @brief Decodes every catalog item into one complete memory-resident cache.
+ * @par Contract
+ * Owner-thread only. `inputs` is a bounded strided borrowed span containing every current item ID
+ * exactly once; mixed PNG/TIFF/TGA/BMP formats are allowed. No input pointer or encoded byte is
+ * retained. Aggregate decoded pixels are bounded by the Core cache limit. Success selects
+ * `active_item_id`; any invalid record, missing/duplicate/unknown item, decode/allocation/view
+ * failure, or aggregate overflow preserves the previous cache, selection, view, and output.
+ */
+InkpodStatus inkpod_subpalette_load_cached_rasters(
+    InkpodSubpalette* subpalette,
+    const InkpodSubpaletteRasterInput* inputs,
+    uint64_t input_count,
+    uint64_t input_stride_bytes,
+    uint64_t active_item_id,
+    InkpodSubpaletteInfo* out_info);
+
+/**
+ * @brief Selects one already-decoded cache item without reading or decoding encoded bytes.
+ * @par Contract
+ * Owner-thread only. A missing item or incomplete cache preserves selection and view. Success fits
+ * the private viewport to the selected image and writes the updated catalog summary.
+ */
+InkpodStatus inkpod_subpalette_select_cached_raster(
+    InkpodSubpalette* subpalette,
+    uint64_t item_id,
     InkpodSubpaletteInfo* out_info);
 
 /** @brief Applies pan, zoom-at, fit, one-to-one, or viewport-resize to the private read-only view. */

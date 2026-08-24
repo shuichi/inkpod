@@ -60,10 +60,10 @@ use inkpod_core::{
     ShootingFrameEdit, ShootingFrameInfo, ShootingFrameInput, ShootingFramePreviewTarget,
     ShortcutBinding, ShortcutSequenceBinding, ShortcutStroke, Stamp, StampGesture, StampShape,
     StartColorPredicate, Stroke, StrokeSample, SubpaletteCatalog, SubpaletteCatalogInfo,
-    SubpaletteItemId, SubpaletteSource, TileRaster, TraceBrushOptions, TraceBrushShape,
-    VanishingPointEdit, VanishingPointInfo, VanishingPointInput, VanishingPointPreviewTarget,
-    ViewCommand, plan_cell_creation, read_color_chart, read_palette, save_color_chart_atomic,
-    save_palette_atomic,
+    SubpaletteImageInput, SubpaletteItemId, SubpaletteSource, TileRaster, TraceBrushOptions,
+    TraceBrushShape, VanishingPointEdit, VanishingPointInfo, VanishingPointInput,
+    VanishingPointPreviewTarget, ViewCommand, plan_cell_creation, read_color_chart, read_palette,
+    save_color_chart_atomic, save_palette_atomic,
 };
 use std::cell::RefCell;
 use std::mem::{align_of, size_of};

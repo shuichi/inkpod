@@ -85,7 +85,7 @@ fn assert_send_sync<T: Send + Sync>() {}
 
 #[test]
 fn inkscript_source_parse_copies_diagnostics_and_text_in_batches() {
-    assert_eq!(INKPOD_ABI_VERSION, 19);
+    assert_eq!(INKPOD_ABI_VERSION, 20);
     assert_send_sync::<InkpodInkScriptSource>();
     assert_send_sync::<InkpodInkScriptProgram>();
     assert_send_sync::<InkpodInkScriptFragment>();

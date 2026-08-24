@@ -108,6 +108,7 @@ struct AdapterInput {
 struct OwnerThreadWork {
     std::function<InkpodStatus()> operation;
     std::shared_ptr<std::promise<InkpodStatus>> completion;
+    std::function<void(InkpodStatus)> async_completion;
 };
 
 struct InkScriptWork {
@@ -701,7 +702,7 @@ struct CoreHost::Impl final {
                     return INKPOD_STATUS_INVALID_STATE;
                 }
                 work.emplace_back(OwnerThreadWork{
-                    std::move(operation), std::move(completion)});
+                    std::move(operation), std::move(completion), {}});
             }
             wake.notify_one();
             return future.get();
@@ -709,6 +710,28 @@ struct CoreHost::Impl final {
             return INKPOD_STATUS_INVALID_STATE;
         } catch (const std::bad_alloc&) {
             return INKPOD_STATUS_INVALID_STATE;
+        }
+    }
+
+    bool EnqueueOwnerThread(
+        std::function<InkpodStatus()> operation,
+        std::function<void(InkpodStatus)> completion) noexcept {
+        if (!operation || !completion) {
+            return false;
+        }
+        try {
+            {
+                std::lock_guard lock(mutex);
+                if (stopping || work.size() >= kMaximumQueuedWork) {
+                    return false;
+                }
+                work.emplace_back(OwnerThreadWork{
+                    std::move(operation), {}, std::move(completion)});
+            }
+            wake.notify_one();
+            return true;
+        } catch (const std::bad_alloc&) {
+            return false;
         }
     }
 
@@ -1562,6 +1585,12 @@ struct CoreHost::Impl final {
             try {
                 item.completion->set_value(status);
             } catch (const std::future_error&) {
+            }
+        }
+        if (item.async_completion) {
+            try {
+                item.async_completion(status);
+            } catch (...) {
             }
         }
     }
@@ -2694,6 +2723,20 @@ InkpodStatus CoreHost::InvokeSubpalette(
         [subpalette, operation = std::move(operation)] {
             return operation(subpalette);
         });
+}
+
+bool CoreHost::EnqueueSubpalette(
+    InkpodSubpalette* subpalette,
+    SubpaletteOperation operation,
+    std::function<void(InkpodStatus)> completion) noexcept {
+    if (impl_ == nullptr || subpalette == nullptr || !operation || !completion) {
+        return false;
+    }
+    return impl_->EnqueueOwnerThread(
+        [subpalette, operation = std::move(operation)] {
+            return operation(subpalette);
+        },
+        std::move(completion));
 }
 
 InkpodStatus CoreHost::ReleaseSubpalette(

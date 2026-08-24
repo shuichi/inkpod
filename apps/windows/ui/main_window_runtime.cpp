@@ -134,6 +134,7 @@ using inkpod::app::EmbeddedHelpDocument;
 using inkpod::app::EmbeddedHelpStatus;
 using inkpod::app::WorkspaceWindowId;
 using inkpod::app::WorkspaceWindow;
+using inkpod::app::SubpaletteEncodedImage;
 using inkpod::app::SubpaletteLoadJob;
 using inkpod::app::SubpaletteSourceCache;
 
@@ -243,6 +244,8 @@ constexpr UINT kEffectTaskCompleted = WM_APP + 0x170U;
 constexpr UINT kBatchTaskCompleted = WM_APP + 0x171U;
 constexpr UINT kColorChartGenerationCompleted = WM_APP + 0x174U;
 constexpr UINT kSubpaletteLoadCompleted = WM_APP + 0x175U;
+constexpr std::uint64_t kMaxSubpaletteCacheBytes =
+    UINT64_C(8) * UINT64_C(1024) * UINT64_C(1024) * UINT64_C(1024);
 constexpr UINT kShortcutSequenceTimerMilliseconds = 100U;
 constexpr UINT kStatusProgressTimerMilliseconds = 100U;
 constexpr UINT kContinuousSprayIntervalMilliseconds = 50U;
@@ -2529,60 +2532,41 @@ void CALLBACK ReadSubpaletteFileCallback(
         return;
     }
     const auto job = *owner;
-    const bool read = ReadBoundedFile(job->path, job->bytes);
-    job->status.store(
-        read ? INKPOD_STATUS_OK : INKPOD_STATUS_IO_ERROR,
-        std::memory_order_release);
+    InkpodStatus status = INKPOD_STATUS_OK;
+    std::uint64_t total_bytes = 0U;
+    try {
+        job->encoded_images.reserve(job->candidate_sources.size());
+        for (const SubpaletteSourceCache& source : job->candidate_sources) {
+            SubpaletteEncodedImage image{};
+            image.item_id = source.item_id;
+            image.format = source.format;
+            if (!ReadBoundedFile(source.path, image.bytes)) {
+                status = INKPOD_STATUS_IO_ERROR;
+                break;
+            }
+            const std::uint64_t byte_count =
+                static_cast<std::uint64_t>(image.bytes.size());
+            if (byte_count > kMaxSubpaletteCacheBytes - total_bytes) {
+                status = INKPOD_STATUS_IO_ERROR;
+                break;
+            }
+            total_bytes += byte_count;
+            job->encoded_images.push_back(std::move(image));
+        }
+    } catch (const std::bad_alloc&) {
+        status = INKPOD_STATUS_IO_ERROR;
+    }
+    if (status != INKPOD_STATUS_OK
+        || job->encoded_images.size() != job->candidate_sources.size()) {
+        job->encoded_images.clear();
+        status = INKPOD_STATUS_IO_ERROR;
+    }
+    job->status.store(status, std::memory_order_release);
     (void)PostMessageW(
         job->owner,
         kSubpaletteLoadCompleted,
         static_cast<WPARAM>(job->workspace.Value()),
         static_cast<LPARAM>(job->load_generation));
-}
-
-bool QueueSubpaletteLoad(
-    WorkspaceWindow& workspace,
-    std::uint64_t item_id) noexcept {
-    const auto found = std::find_if(
-        workspace.subpalette_sources.cbegin(),
-        workspace.subpalette_sources.cend(),
-        [item_id](const SubpaletteSourceCache& source) {
-            return source.item_id == item_id;
-        });
-    if (found == workspace.subpalette_sources.cend()
-        || workspace.subpalette_loading) {
-        return false;
-    }
-    std::shared_ptr<SubpaletteLoadJob> job;
-    try {
-        job = std::make_shared<SubpaletteLoadJob>();
-        job->owner = workspace.windows.window;
-        job->workspace = workspace.id;
-        job->workspace_generation = workspace.generation;
-        job->load_generation = ++workspace.subpalette_load_generation;
-        job->item_id = found->item_id;
-        job->format = found->format;
-        job->path = found->path;
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-    auto* callback_owner =
-        new (std::nothrow) std::shared_ptr<SubpaletteLoadJob>(job);
-    if (callback_owner == nullptr
-        || TrySubmitThreadpoolCallback(
-               ReadSubpaletteFileCallback,
-               callback_owner,
-               nullptr) == FALSE) {
-        delete callback_owner;
-        return false;
-    }
-    workspace.subpalette_load = std::move(job);
-    workspace.subpalette_navigation_index = static_cast<std::uint32_t>(
-        std::distance(workspace.subpalette_sources.cbegin(), found));
-    workspace.subpalette_loading = true;
-    workspace.subpalette_error.clear();
-    PresentSubpalettePane(workspace);
-    return true;
 }
 
 bool QueueSubpaletteReplacementLoad(
@@ -2600,9 +2584,6 @@ bool QueueSubpaletteReplacementLoad(
         job->workspace = workspace.id;
         job->workspace_generation = workspace.generation;
         job->load_generation = ++workspace.subpalette_load_generation;
-        job->item_id = candidate_sources.front().item_id;
-        job->format = candidate_sources.front().format;
-        job->path = candidate_sources.front().path;
         job->candidate_subpalette = candidate_subpalette;
         job->candidate_sources = std::move(candidate_sources);
     } catch (const std::bad_alloc&) {
@@ -2742,6 +2723,56 @@ bool InstallSubpaletteSources(
     return true;
 }
 
+bool QueueSubpaletteDecode(
+    ApplicationHost& state,
+    const std::shared_ptr<SubpaletteLoadJob>& job) noexcept {
+    if (state.engine == nullptr || job == nullptr
+        || job->candidate_subpalette == nullptr || job->decode_queued
+        || job->status.load(std::memory_order_acquire) != INKPOD_STATUS_OK
+        || job->candidate_sources.empty()
+        || job->encoded_images.size() != job->candidate_sources.size()) {
+        return false;
+    }
+    job->decoded_info = {};
+    job->decoded_info.struct_size = sizeof(job->decoded_info);
+    job->decode_queued = true;
+    job->status.store(INKPOD_STATUS_INVALID_STATE, std::memory_order_release);
+    const bool queued = state.engine->EnqueueSubpalette(
+        job->candidate_subpalette,
+        [job](InkpodSubpalette* subpalette) {
+            std::vector<InkpodSubpaletteRasterInput> inputs;
+            inputs.reserve(job->encoded_images.size());
+            for (const SubpaletteEncodedImage& image : job->encoded_images) {
+                inputs.push_back(InkpodSubpaletteRasterInput{
+                    sizeof(InkpodSubpaletteRasterInput),
+                    image.format,
+                    image.item_id,
+                    image.bytes.data(),
+                    static_cast<std::uint64_t>(image.bytes.size())});
+            }
+            return inkpod_subpalette_load_cached_rasters(
+                subpalette,
+                inputs.data(),
+                static_cast<std::uint64_t>(inputs.size()),
+                sizeof(InkpodSubpaletteRasterInput),
+                job->candidate_sources.front().item_id,
+                &job->decoded_info);
+        },
+        [job](InkpodStatus status) {
+            job->status.store(status, std::memory_order_release);
+            (void)PostMessageW(
+                job->owner,
+                kSubpaletteLoadCompleted,
+                static_cast<WPARAM>(job->workspace.Value()),
+                static_cast<LPARAM>(job->load_generation));
+        });
+    if (!queued) {
+        job->decode_queued = false;
+        job->status.store(INKPOD_STATUS_INVALID_STATE, std::memory_order_release);
+    }
+    return queued;
+}
+
 void CompleteSubpaletteLoad(
     ApplicationHost& state,
     WorkspaceWindow& workspace,
@@ -2755,49 +2786,29 @@ void CompleteSubpaletteLoad(
         }
     };
     const InkpodStatus read_status = job->status.load(std::memory_order_acquire);
-    InkpodSubpalette* target = job->candidate_subpalette != nullptr
-        ? job->candidate_subpalette
-        : workspace.subpalette;
     if (read_status != INKPOD_STATUS_OK || state.engine == nullptr
-        || target == nullptr) {
+        || job->candidate_subpalette == nullptr
+        || job->candidate_sources.empty()
+        || job->encoded_images.size() != job->candidate_sources.size()
+        || (job->decoded_info.flags
+            & INKPOD_SUBPALETTE_INFO_CACHE_COMPLETE) == 0U) {
         release_candidate();
         workspace.subpalette_error = UiText(UiStringId::SubpaletteReadFailed);
         PresentSubpalettePane(workspace);
         return;
     }
-    InkpodSubpaletteInfo info{};
-    info.struct_size = sizeof(info);
-    const InkpodStatus status = state.engine->InvokeSubpalette(
-        target,
-        [job, &info](InkpodSubpalette* subpalette) {
-            return inkpod_subpalette_load_common_raster(
-                subpalette,
-                job->item_id,
-                job->format,
-                job->bytes.data(),
-                static_cast<std::uint64_t>(job->bytes.size()),
-                &info);
-        });
-    if (status != INKPOD_STATUS_OK) {
+    if (state.engine->ReleaseSubpalette(&workspace.subpalette)
+        != INKPOD_STATUS_OK) {
         release_candidate();
         workspace.subpalette_error = UiText(UiStringId::SubpaletteReadFailed);
         PresentSubpalettePane(workspace);
         return;
     }
-    if (job->candidate_subpalette != nullptr) {
-        if (state.engine->ReleaseSubpalette(&workspace.subpalette)
-            != INKPOD_STATUS_OK) {
-            release_candidate();
-            workspace.subpalette_error = UiText(UiStringId::SubpaletteReadFailed);
-            PresentSubpalettePane(workspace);
-            return;
-        }
-        workspace.subpalette = job->candidate_subpalette;
-        job->candidate_subpalette = nullptr;
-        workspace.subpalette_sources = std::move(job->candidate_sources);
-    }
-    workspace.subpalette_info = info;
-    workspace.subpalette_navigation_index = info.active_index;
+    workspace.subpalette = job->candidate_subpalette;
+    job->candidate_subpalette = nullptr;
+    workspace.subpalette_sources = std::move(job->candidate_sources);
+    workspace.subpalette_info = job->decoded_info;
+    workspace.subpalette_navigation_index = job->decoded_info.active_index;
     workspace.subpalette_sample_available = false;
     workspace.subpalette_error.clear();
     if (!RebindSubpaletteImageRoute(workspace)) {
@@ -2954,8 +2965,35 @@ void PerformSubpalettePaneAction(
                 }
                 ++index;
             }
-            (void)QueueSubpaletteLoad(
-                workspace, workspace.subpalette_sources[index].item_id);
+            if (state->engine == nullptr || workspace.subpalette == nullptr
+                || (workspace.subpalette_info.flags
+                    & INKPOD_SUBPALETTE_INFO_CACHE_COMPLETE) == 0U) {
+                return;
+            }
+            InkpodSubpaletteInfo info{};
+            info.struct_size = sizeof(info);
+            const InkpodStatus status = state->engine->InvokeSubpalette(
+                workspace.subpalette,
+                [item_id = workspace.subpalette_sources[index].item_id,
+                 &info](InkpodSubpalette* subpalette) {
+                    return inkpod_subpalette_select_cached_raster(
+                        subpalette, item_id, &info);
+                });
+            if (status != INKPOD_STATUS_OK) {
+                workspace.subpalette_error =
+                    UiText(UiStringId::SubpaletteReadFailed);
+                PresentSubpalettePane(workspace);
+                return;
+            }
+            workspace.subpalette_info = info;
+            workspace.subpalette_navigation_index = info.active_index;
+            workspace.subpalette_sample_available = false;
+            workspace.subpalette_error.clear();
+            if (!PublishSubpaletteSnapshot(*state, workspace)) {
+                workspace.subpalette_error =
+                    UiText(UiStringId::SubpaletteReadFailed);
+            }
+            PresentSubpalettePane(workspace);
             return;
         }
         case inkpod::windows::ui::panes::SubpalettePaneAction::Fit:
@@ -20220,6 +20258,13 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                 || job->load_generation
                     != static_cast<std::uint64_t>(lparam)) {
                 return 0;
+            }
+            if (!job->decode_queued
+                && job->status.load(std::memory_order_acquire)
+                    == INKPOD_STATUS_OK) {
+                if (QueueSubpaletteDecode(*state, job)) {
+                    return 0;
+                }
             }
             CompleteSubpaletteLoad(*state, *workspace, job);
             return 0;

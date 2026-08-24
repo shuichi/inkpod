@@ -145,6 +145,12 @@ public:
     InkpodStatus InvokeSubpalette(
         InkpodSubpalette* subpalette,
         SubpaletteOperation operation) noexcept;
+    // Returns after queueing. completion runs on the Core owner thread, so it
+    // must transfer only pointer-free completion state back to the UI thread.
+    bool EnqueueSubpalette(
+        InkpodSubpalette* subpalette,
+        SubpaletteOperation operation,
+        std::function<void(InkpodStatus)> completion) noexcept;
     InkpodStatus ReleaseSubpalette(InkpodSubpalette** subpalette) noexcept;
     InkpodStatus InvokePrimitive(
         const InkpodPrimitiveRequestV3& request,

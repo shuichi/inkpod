@@ -220,7 +220,10 @@ foreach(SUBPALETTE_ICON_MARKER IN ITEMS
     endif()
 endforeach()
 foreach(SUBPALETTE_INTERACTION_MARKER IN ITEMS
-        "DLGC_WANTARROWS" "IDC_SUBPALETTE_SAMPLE_SWATCH")
+        "DLGC_WANTARROWS" "IDC_SUBPALETTE_SAMPLE_SWATCH"
+        "PlaceCompactSubpaletteButtonRows" "TOOLTIPS_CLASSW"
+        "TTM_ADDTOOLW" "UiStringId::SubpaletteOpenFiles"
+        "UiStringId::SubpaletteOpenFolder")
     string(FIND "${SUBPALETTE_SOURCE_TEXT}" "${SUBPALETTE_INTERACTION_MARKER}"
         SUBPALETTE_INTERACTION_OFFSET)
     if(SUBPALETTE_INTERACTION_OFFSET LESS 0)
@@ -231,12 +234,24 @@ endforeach()
 file(READ "${INKPOD_SOURCE_DIR}/apps/windows/ui/main_window_runtime.cpp"
     MAIN_WINDOW_RUNTIME_TEXT)
 foreach(SUBPALETTE_RUNTIME_MARKER IN ITEMS
-        "RebindSubpaletteImageRoute" "SelectColorDockPaneDrawingColor")
+        "RebindSubpaletteImageRoute" "SelectColorDockPaneDrawingColor"
+        "QueueSubpaletteDecode" "EnqueueSubpalette"
+        "inkpod_subpalette_load_cached_rasters"
+        "inkpod_subpalette_select_cached_raster")
     string(FIND "${MAIN_WINDOW_RUNTIME_TEXT}" "${SUBPALETTE_RUNTIME_MARKER}"
         SUBPALETTE_RUNTIME_OFFSET)
     if(SUBPALETTE_RUNTIME_OFFSET LESS 0)
         message(FATAL_ERROR
             "Subpalette runtime interaction is incomplete: ${SUBPALETTE_RUNTIME_MARKER}")
+    endif()
+endforeach()
+foreach(SUBPALETTE_LEGACY_LOAD_MARKER IN ITEMS
+        "QueueSubpaletteLoad(" "inkpod_subpalette_load_common_raster(")
+    string(FIND "${MAIN_WINDOW_RUNTIME_TEXT}" "${SUBPALETTE_LEGACY_LOAD_MARKER}"
+        SUBPALETTE_LEGACY_LOAD_OFFSET)
+    if(SUBPALETTE_LEGACY_LOAD_OFFSET GREATER_EQUAL 0)
+        message(FATAL_ERROR
+            "Subpalette navigation restored per-image file/decode loading: ${SUBPALETTE_LEGACY_LOAD_MARKER}")
     endif()
 endforeach()
 

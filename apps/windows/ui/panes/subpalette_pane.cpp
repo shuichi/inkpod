@@ -20,6 +20,62 @@ namespace {
 constexpr UINT_PTR kSubpaletteCanvasSubclass = 1U;
 constexpr UINT_PTR kSubpaletteKeySubclass = 2U;
 
+bool AddSubpaletteTooltip(
+    HWND tooltip, HWND dialog, int control, UiStringId text) noexcept {
+    const HWND button = GetDlgItem(dialog, control);
+    if (tooltip == nullptr || button == nullptr) {
+        return false;
+    }
+    TOOLINFOW tool{};
+    tool.cbSize = sizeof(tool);
+    tool.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
+    tool.hwnd = dialog;
+    tool.uId = reinterpret_cast<UINT_PTR>(button);
+    tool.lpszText = const_cast<wchar_t*>(UiText(text));
+    return SendMessageW(
+               tooltip,
+               TTM_ADDTOOLW,
+               0,
+               reinterpret_cast<LPARAM>(&tool))
+        != FALSE;
+}
+
+std::size_t PlaceCompactSubpaletteButtonRows(
+    HWND dialog,
+    std::span<const int> controls,
+    int x,
+    int y,
+    int available_width,
+    int row_height,
+    int gap) noexcept {
+    if (controls.empty()) {
+        return 0U;
+    }
+    std::size_t row{};
+    int used{};
+    for (const int control : controls) {
+        const int ideal_width = control == IDC_SUBPALETTE_REGISTER
+            ? ScalePaneDip(dialog, 32)
+            : PaneButtonIdealWidth(dialog, control);
+        const int control_width =
+            std::min(std::max(0, available_width), ideal_width);
+        if (used != 0 && used + gap + control_width > available_width) {
+            ++row;
+            used = 0;
+        }
+        const int offset = used == 0 ? 0 : gap;
+        PlacePaneDialogControl(
+            dialog,
+            control,
+            x + used + offset,
+            y + static_cast<int>(row) * (row_height + gap),
+            control_width,
+            row_height);
+        used += offset + control_width;
+    }
+    return row + 1U;
+}
+
 void Dispatch(SubpalettePaneDialogState& state, UINT command) noexcept {
     if (state.dispatch_command != nullptr) {
         state.dispatch_command(state.context, command);
@@ -112,11 +168,18 @@ COLORREF CompositeSampleColor(
         blend(SampleChannel8(color, color.blue), GetBValue(background)));
 }
 
-void DrawSampleSwatch(
+void DrawSampleRegisterButton(
     const DRAWITEMSTRUCT& draw, const SubpalettePaneView& view) noexcept {
     RECT bounds = draw.rcItem;
-    FillRect(draw.hDC, &bounds, GetSysColorBrush(COLOR_3DFACE));
-    InflateRect(&bounds, -1, -1);
+    UINT frame_state = DFCS_BUTTONPUSH;
+    if ((draw.itemState & ODS_SELECTED) != 0U) {
+        frame_state |= DFCS_PUSHED;
+    }
+    if ((draw.itemState & ODS_DISABLED) != 0U) {
+        frame_state |= DFCS_INACTIVE;
+    }
+    DrawFrameControl(draw.hDC, &bounds, DFC_BUTTON, frame_state);
+    InflateRect(&bounds, -ScalePaneDip(draw.hwndItem, 4), -ScalePaneDip(draw.hwndItem, 4));
     if (view.sample_available) {
         const COLORREF light = GetSysColor(COLOR_WINDOW);
         const COLORREF dark = GetSysColor(COLOR_3DLIGHT);
@@ -151,7 +214,12 @@ void DrawSampleSwatch(
             DeleteObject(brushes[1]);
         }
     }
-    FrameRect(draw.hDC, &draw.rcItem, GetSysColorBrush(COLOR_WINDOWTEXT));
+    FrameRect(draw.hDC, &bounds, GetSysColorBrush(COLOR_WINDOWTEXT));
+    if ((draw.itemState & ODS_FOCUS) != 0U) {
+        RECT focus = draw.rcItem;
+        InflateRect(&focus, -ScalePaneDip(draw.hwndItem, 2), -ScalePaneDip(draw.hwndItem, 2));
+        DrawFocusRect(draw.hDC, &focus);
+    }
 }
 
 LRESULT CALLBACK SubpaletteCanvasSubclassProcedure(
@@ -260,30 +328,36 @@ INT_PTR CALLBACK SubpalettePaneProcedure(
             break;
         case WM_DRAWITEM:
             if (state != nullptr
-                && static_cast<int>(wparam) == IDC_SUBPALETTE_SAMPLE_SWATCH) {
+                && static_cast<int>(wparam) == IDC_SUBPALETTE_REGISTER) {
                 const auto* draw = reinterpret_cast<const DRAWITEMSTRUCT*>(lparam);
                 if (draw != nullptr) {
-                    DrawSampleSwatch(*draw, state->view);
+                    DrawSampleRegisterButton(*draw, state->view);
                 }
                 return TRUE;
             }
             break;
-        case renderer::kCanvasStrokeReady:
+        case renderer::kCanvasStrokeReady: {
+            bool handled{};
             if (state != nullptr && state->canvas != nullptr) {
                 renderer::OwnedCanvasStrokeEvent event{};
                 if (renderer::TakeCanvasStrokeEvent(
                         state->canvas,
                         static_cast<std::uint64_t>(wparam),
                         app::Generation{static_cast<std::uint64_t>(lparam)},
-                        event)
-                    && event.kind == renderer::CanvasStrokeEventKind::End
-                    && !event.samples.empty()) {
-                    const auto& sample = event.samples.back();
-                    state->sample(state->context, sample.x, sample.y);
+                        event)) {
+                    handled = true;
+                    if (event.kind != renderer::CanvasStrokeEventKind::Cancel
+                        && !event.samples.empty()) {
+                        const auto& sample = event.samples.back();
+                        state->sample(state->context, sample.x, sample.y);
+                    }
                 }
             }
+            SetWindowLongPtrW(dialog, DWLP_MSGRESULT, handled ? 1 : 0);
             return TRUE;
-        case renderer::kCanvasViewGesture:
+        }
+        case renderer::kCanvasViewGesture: {
+            bool handled{};
             if (state != nullptr && state->canvas != nullptr) {
                 renderer::CanvasViewGesture gesture{};
                 if (renderer::TakeCanvasViewGesture(
@@ -292,9 +366,12 @@ INT_PTR CALLBACK SubpalettePaneProcedure(
                         app::Generation{static_cast<std::uint64_t>(lparam)},
                         gesture)) {
                     state->apply_view(state->context, gesture);
+                    handled = true;
                 }
             }
+            SetWindowLongPtrW(dialog, DWLP_MSGRESULT, handled ? 1 : 0);
             return TRUE;
+        }
         case renderer::kCanvasViewportChanged:
             if (state != nullptr) {
                 const renderer::CanvasViewGesture gesture{
@@ -315,6 +392,7 @@ INT_PTR CALLBACK SubpalettePaneProcedure(
         case WM_NCDESTROY:
             if (state != nullptr) {
                 state->canvas = nullptr;
+                state->tooltip = nullptr;
                 if (state->eyedropper_cursor != nullptr) {
                     DestroyCursor(state->eyedropper_cursor);
                     state->eyedropper_cursor = nullptr;
@@ -385,6 +463,19 @@ HWND CreateSubpalettePaneDialog(
     SetWindowTextW(
         GetDlgItem(dialog, IDC_SUBPALETTE_SAMPLE_SWATCH),
         UiText(UiStringId::DrawingColor));
+    const HWND register_button = GetDlgItem(dialog, IDC_SUBPALETTE_REGISTER);
+    if (register_button == nullptr) {
+        DestroyWindow(dialog);
+        return nullptr;
+    }
+    const LONG_PTR register_style =
+        GetWindowLongPtrW(register_button, GWL_STYLE);
+    SetWindowLongPtrW(
+        register_button,
+        GWL_STYLE,
+        (register_style & ~static_cast<LONG_PTR>(BS_TYPEMASK))
+            | BS_OWNERDRAW | BS_ICON);
+    ShowWindow(GetDlgItem(dialog, IDC_SUBPALETTE_SAMPLE_SWATCH), SW_HIDE);
     for (const auto [control, icon] : std::array{
              std::pair{IDC_SUBPALETTE_TARGET, PaneIconId::OpenFiles},
              std::pair{IDC_SUBPALETTE_PIN, PaneIconId::OpenFolder},
@@ -393,6 +484,40 @@ HWND CreateSubpalettePaneDialog(
              std::pair{IDC_SUBPALETTE_FIT, PaneIconId::Fit},
              std::pair{IDC_SUBPALETTE_ONE_TO_ONE, PaneIconId::OneToOne}}) {
         (void)SetPaneIconButton(GetDlgItem(dialog, control), icon);
+    }
+    state.tooltip = CreateWindowExW(
+        WS_EX_TOPMOST,
+        TOOLTIPS_CLASSW,
+        nullptr,
+        WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX,
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        dialog,
+        nullptr,
+        instance,
+        nullptr);
+    const std::array tooltips{
+        std::pair{IDC_SUBPALETTE_TARGET, UiStringId::SubpaletteOpenFiles},
+        std::pair{IDC_SUBPALETTE_PIN, UiStringId::SubpaletteOpenFolder},
+        std::pair{IDC_SUBPALETTE_PREVIOUS, UiStringId::Text0533},
+        std::pair{IDC_SUBPALETTE_NEXT, UiStringId::Text0762},
+        std::pair{IDC_SUBPALETTE_FIT, UiStringId::Text0501},
+        std::pair{IDC_SUBPALETTE_ONE_TO_ONE, UiStringId::Text0838},
+        std::pair{
+            IDC_SUBPALETTE_REGISTER,
+            UiStringId::SubpaletteRegisterSample}};
+    if (state.tooltip == nullptr
+        || !std::all_of(
+            tooltips.cbegin(),
+            tooltips.cend(),
+            [tooltip = state.tooltip, dialog](const auto& entry) {
+                return AddSubpaletteTooltip(
+                    tooltip, dialog, entry.first, entry.second);
+            })) {
+        DestroyWindow(dialog);
+        return nullptr;
     }
     for (const int control : std::array{
              IDC_SUBPALETTE_TARGET,
@@ -438,46 +563,25 @@ void LayoutSubpalettePaneDialog(HWND dialog) noexcept {
     const int height = static_cast<int>(client.bottom - client.top);
     const int content_width = std::max(0, width - margin * 2);
 
-    const std::array<int, 2U> open_actions{
+    const std::array<int, 7U> toolbar_actions{
         IDC_SUBPALETTE_TARGET,
-        IDC_SUBPALETTE_PIN};
-    PlacePaneButtonRows(
-        dialog,
-        open_actions,
-        margin,
-        margin,
-        content_width,
-        row_height,
-        gap);
-    const int navigation_top = margin + row_height + gap;
-    const std::array<int, 5U> navigation_actions{
+        IDC_SUBPALETTE_PIN,
         IDC_SUBPALETTE_PREVIOUS,
         IDC_SUBPALETTE_NEXT,
         IDC_SUBPALETTE_FIT,
         IDC_SUBPALETTE_ONE_TO_ONE,
         IDC_SUBPALETTE_REGISTER};
-    const int swatch_width = row_height;
-    const int navigation_width = std::max(0, content_width - swatch_width - gap);
-    PlacePaneButtonRows(
+    const std::size_t toolbar_rows = PlaceCompactSubpaletteButtonRows(
         dialog,
-        navigation_actions,
+        toolbar_actions,
         margin,
-        navigation_top,
-        navigation_width,
+        margin,
+        content_width,
         row_height,
         gap);
-    const std::size_t navigation_rows = PaneButtonRowCount(
-        dialog, navigation_actions, navigation_width, gap);
-    PlacePaneDialogControl(
-        dialog,
-        IDC_SUBPALETTE_SAMPLE_SWATCH,
-        margin + std::max(0, content_width - swatch_width),
-        navigation_top,
-        swatch_width,
-        row_height);
-    const int source_top = navigation_top
-        + static_cast<int>(navigation_rows) * row_height
-        + std::max(0, static_cast<int>(navigation_rows) - 1) * gap + gap;
+    const int source_top = margin
+        + static_cast<int>(toolbar_rows) * row_height
+        + std::max(0, static_cast<int>(toolbar_rows) - 1) * gap + gap;
     PlacePaneDialogControl(
         dialog,
         IDC_SUBPALETTE_SOURCE,
@@ -546,7 +650,7 @@ void UpdateSubpalettePaneDialog(HWND dialog, SubpalettePaneView view) noexcept {
         GetDlgItem(dialog, IDC_SUBPALETTE_REGISTER),
         state->view.sample_available ? TRUE : FALSE);
     InvalidateRect(
-        GetDlgItem(dialog, IDC_SUBPALETTE_SAMPLE_SWATCH), nullptr, TRUE);
+        GetDlgItem(dialog, IDC_SUBPALETTE_REGISTER), nullptr, TRUE);
     if (state->canvas != nullptr) {
         EnableWindow(state->canvas, source ? TRUE : FALSE);
         ShowWindow(state->canvas, source ? SW_SHOW : SW_HIDE);

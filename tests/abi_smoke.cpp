@@ -177,6 +177,7 @@ static_assert(sizeof(InkpodInkScriptReportSummary) == 40U);
 static_assert(sizeof(InkpodInkScriptReportItem) == 120U);
 static_assert(sizeof(InkpodInkScriptReportBuffer) == 96U);
 static_assert(sizeof(InkpodSubpaletteSourceInput) == 32U);
+static_assert(sizeof(InkpodSubpaletteRasterInput) == 32U);
 static_assert(sizeof(InkpodSubpaletteInfo) == 32U);
 static_assert(sizeof(InkpodSubpaletteItemInfo) == 40U);
 

@@ -51,6 +51,7 @@ struct SubpalettePaneDialogState final {
     SubpalettePaneViewCallback apply_view{};
     SubpalettePaneView view;
     HWND canvas{};
+    HWND tooltip{};
     HCURSOR eyedropper_cursor{};
     app::Generation surface_generation{};
 };

@@ -5,8 +5,12 @@ fn write_subpalette_info(output: &mut InkpodSubpaletteInfo, info: SubpaletteCata
     output.catalog_revision = info.catalog_revision;
     output.active_index = info.active_index.unwrap_or(INKPOD_SUBPALETTE_INDEX_NONE);
     output.reserved = 0;
-    output.flags = if info.image_loaded {
+    output.flags = (if info.image_loaded {
         INKPOD_SUBPALETTE_INFO_IMAGE_LOADED
+    } else {
+        INKPOD_FEATURE_NONE
+    }) | if info.cache_complete {
+        INKPOD_SUBPALETTE_INFO_CACHE_COMPLETE
     } else {
         INKPOD_FEATURE_NONE
     };
@@ -472,6 +476,179 @@ pub unsafe extern "C" fn inkpod_subpalette_load_common_raster(
         // SAFETY: Caller exposes byte_count readable bytes for this call.
         let owned = unsafe { slice::from_raw_parts(bytes, length) }.to_vec();
         let info = match subpalette.catalog.load_image(item_id, format, owned) {
+            Ok(info) => info,
+            Err(error) => return map_core_error(error),
+        };
+        // SAFETY: Complete writable output was validated above.
+        write_subpalette_info(unsafe { &mut *out_info }, info);
+        INKPOD_STATUS_OK
+    })
+}
+
+/// Decodes one complete borrowed mixed-format image span into a memory-resident cache.
+///
+/// # Safety
+/// Handle, every strided record/byte span, and output must remain live for this owner-thread call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_subpalette_load_cached_rasters(
+    subpalette: *mut InkpodSubpalette,
+    inputs: *const InkpodSubpaletteRasterInput,
+    input_count: u64,
+    input_stride_bytes: u64,
+    active_item_id: u64,
+    out_info: *mut InkpodSubpaletteInfo,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        let subpalette = match validate_subpalette(subpalette) {
+            Ok(subpalette) => subpalette,
+            Err(status) => return status,
+        };
+        if let Err(status) =
+            unsafe { validate_struct(out_info.cast_const(), "InkpodSubpaletteInfo") }
+        {
+            return status;
+        }
+        let active_item_id = match SubpaletteItemId::from_raw(active_item_id) {
+            Some(item_id) => item_id,
+            None => return fail(INKPOD_STATUS_INVALID_ARGUMENT, "active item ID is zero"),
+        };
+        let count = match usize::try_from(input_count) {
+            Ok(count) if count > 0 && count <= inkpod_core::MAX_SUBPALETTE_ITEMS => count,
+            _ => {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "subpalette cache input count is outside bounds",
+                );
+            }
+        };
+        let stride = match usize::try_from(input_stride_bytes) {
+            Ok(stride)
+                if stride >= size_of::<InkpodSubpaletteRasterInput>()
+                    && stride % align_of::<InkpodSubpaletteRasterInput>() == 0 =>
+            {
+                stride
+            }
+            _ => {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "subpalette cache input stride is invalid",
+                );
+            }
+        };
+        if inputs.is_null() || !is_aligned(inputs) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "subpalette cache records are null or misaligned",
+            );
+        }
+        let total_record_bytes = match (count - 1)
+            .checked_mul(stride)
+            .and_then(|offset| offset.checked_add(size_of::<InkpodSubpaletteRasterInput>()))
+        {
+            Some(total) if total <= isize::MAX as usize => total,
+            _ => {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "cache record span overflows",
+                );
+            }
+        };
+        let _ = total_record_bytes;
+
+        let mut borrowed = Vec::with_capacity(count);
+        let mut encoded_bytes = 0_u64;
+        for index in 0..count {
+            // SAFETY: Validated base, stride, count, and readable caller span cover this record.
+            let record_ptr = unsafe { inputs.cast::<u8>().add(index * stride) }
+                .cast::<InkpodSubpaletteRasterInput>();
+            if let Err(status) =
+                unsafe { validate_struct(record_ptr, "InkpodSubpaletteRasterInput") }
+            {
+                return status;
+            }
+            // SAFETY: Complete record readability is required by the public contract.
+            let record = unsafe { &*record_ptr };
+            let item_id = match SubpaletteItemId::from_raw(record.item_id) {
+                Some(item_id) => item_id,
+                None => return fail(INKPOD_STATUS_INVALID_ARGUMENT, "cache item ID is zero"),
+            };
+            let format = match parse_common_raster_format(record.format) {
+                Ok(format) => format,
+                Err(status) => return status,
+            };
+            let length = match usize::try_from(record.byte_count) {
+                Ok(length) if length > 0 && length <= MAX_COMMON_RASTER_BYTES => length,
+                _ => {
+                    return fail(
+                        INKPOD_STATUS_INVALID_ARGUMENT,
+                        "cached raster byte count is outside bounds",
+                    );
+                }
+            };
+            encoded_bytes = match encoded_bytes.checked_add(record.byte_count) {
+                Some(total) if total <= inkpod_core::MAX_SUBPALETTE_CACHE_BYTES => total,
+                _ => {
+                    return fail(
+                        INKPOD_STATUS_INVALID_ARGUMENT,
+                        "encoded subpalette cache exceeds its aggregate byte bound",
+                    );
+                }
+            };
+            if record.bytes.is_null() {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "cached raster bytes are null",
+                );
+            }
+            // SAFETY: Caller exposes byte_count readable bytes for this call only.
+            let bytes = unsafe { slice::from_raw_parts(record.bytes, length) };
+            borrowed.push(SubpaletteImageInput {
+                item_id,
+                format,
+                bytes,
+            });
+        }
+
+        let info = match subpalette
+            .catalog
+            .load_cached_images(&borrowed, active_item_id)
+        {
+            Ok(info) => info,
+            Err(error) => return map_core_error(error),
+        };
+        // SAFETY: Complete writable output was validated above.
+        write_subpalette_info(unsafe { &mut *out_info }, info);
+        INKPOD_STATUS_OK
+    })
+}
+
+/// Selects one already-decoded cached item without encoded input.
+///
+/// # Safety
+/// Handle and output must remain live for this owner-thread call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_subpalette_select_cached_raster(
+    subpalette: *mut InkpodSubpalette,
+    item_id: u64,
+    out_info: *mut InkpodSubpaletteInfo,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        let subpalette = match validate_subpalette(subpalette) {
+            Ok(subpalette) => subpalette,
+            Err(status) => return status,
+        };
+        if let Err(status) =
+            unsafe { validate_struct(out_info.cast_const(), "InkpodSubpaletteInfo") }
+        {
+            return status;
+        }
+        let item_id = match SubpaletteItemId::from_raw(item_id) {
+            Some(item_id) => item_id,
+            None => return fail(INKPOD_STATUS_INVALID_ARGUMENT, "item ID is zero"),
+        };
+        let info = match subpalette.catalog.select_cached_image(item_id) {
             Ok(info) => info,
             Err(error) => return map_core_error(error),
         };

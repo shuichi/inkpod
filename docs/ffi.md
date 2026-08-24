@@ -828,12 +828,12 @@ property を canonical procedure へ解決して所有するため、sequence �
 保存されない。Windows は issue-time の `DocumentSessionId + Generation` を固定し、preview の OK 後だけ
 同じ request を apply する。
 
-## 独立サブパレットの契約（ABI v19）
+## 独立サブパレットの契約（ABI v20）
 
 `InkpodSubpalette` は編集可能文書とは別の Rust 所有 opaque object であり、`inkpod_subpalette_create` を
 呼んだ owner thread だけが照会、source 置換、decode、view 操作、sampling、snapshot 構築、release を行う。
 Windows `CoreHost` は document session の有無に関係なく、この object の全操作を同じ Core engine thread
-へ直列化する。ABI v19 caller は v18 header から再コンパイルが必要であるが、native file version と replay
+へ直列化する。ABI v20 caller は v19 header から再コンパイルが必要であるが、native file version と replay
 epoch は変更しない。
 
 - `inkpod_subpalette_replace_sources` は caller-owned の strided `InkpodSubpaletteSourceInput` 列を呼出し中だけ
@@ -846,6 +846,16 @@ epoch は変更しない。
 - `inkpod_subpalette_load_common_raster` は caller-owned bytes を呼出し中だけ借用し、PNG/TIFF/TGA/BMP を
   private Core へ staged decode する。成功時だけ active image と private view を置換し、decode failure では
   直前の active image、view、sample 結果、snapshot を保つ。
+- `inkpod_subpalette_load_cached_rasters` は caller-owned の strided
+  `InkpodSubpaletteRasterInput` 列と各 encoded byte span を呼出し中だけ借用する。現在の全 item ID が一度ずつ
+  含まれること、record／span／codec／個数／aggregate decoded bytes を検証し、mixed PNG/TIFF/TGA/BMP を
+  一つの private sequence へ staged decode する。成功時だけ完全な memory-resident cache、active item、view を
+  一括置換し、input pointer と encoded bytes は保持しない。`INKPOD_SUBPALETTE_INFO_CACHE_COMPLETE` は全 item が
+  encoded input なしで選択可能であることを示す。
+- `inkpod_subpalette_select_cached_raster` は complete cache 内の stable item ID だけを受け取り、file I/O と decode
+  を行わず active image と Fit view を切り替える。unknown／stale ID または incomplete cache は選択と view を
+  変更しない。item ごとに安定した snapshot tile ID／revision を使うため、frontend は同じ renderer source
+  generation の GPU tile cache を再利用できる。
 - `inkpod_subpalette_view_apply` は private view の zoom/pan/flip/viewport だけを変更する。
   `inkpod_subpalette_sample` は同じ変換を通した device-pixel 座標を半開区間で検証し、元画像の RGBA8/16
   native depth と straight alpha を caller-owned `InkpodColorValue` へコピーする。
@@ -856,9 +866,10 @@ epoch は変更しない。
   owner slot を再度 release する操作は no-op とする。
 
 この object は document revision、EditorRevision、history、journal、dirty、savepoint、persistent ID、native
-serialization を変更しない。Windows は外部 path と bounded file read を platform adapter 内に保持し、completion
-時に workspace ID と generation を再検証する。終了時は Canvas sink を解除し、pending load を stale にしてから、
-owner thread 上で `InkpodSubpalette` を release する。
+serialization を変更しない。Windows は外部 path と bounded file read を platform adapter 内に保持し、全 file
+read 後の bulk decode を nonblocking Core-owner queue へ渡す。read／decode の各 completion 時に workspace ID と
+generation を再検証する。終了時は Canvas sink を解除し、pending load を stale にしてから、owner thread 上で
+`InkpodSubpalette` を release する。
 
 ## Floating transform（現行 ABI v18）
 

@@ -9,6 +9,16 @@ pub struct InkpodSubpaletteSourceInput {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodSubpaletteRasterInput {
+    pub struct_size: u32,
+    pub format: u32,
+    pub item_id: u64,
+    pub bytes: *const u8,
+    pub byte_count: u64,
+}
+
+#[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct InkpodSubpaletteInfo {
     pub struct_size: u32,
