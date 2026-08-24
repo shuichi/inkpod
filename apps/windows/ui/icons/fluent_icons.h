@@ -39,6 +39,8 @@ enum class PaneIconId : std::uint16_t {
     Next,
     Fit,
     OneToOne,
+    OpenFiles,
+    OpenFolder,
     Count,
 };
 
@@ -75,6 +77,8 @@ inline constexpr std::array<PaneIconId, kPaneIconCount> kAllPaneIconIds{
     PaneIconId::Next,
     PaneIconId::Fit,
     PaneIconId::OneToOne,
+    PaneIconId::OpenFiles,
+    PaneIconId::OpenFolder,
 };
 
 [[nodiscard]] bool FluentIconResourceAvailable(HINSTANCE instance) noexcept;

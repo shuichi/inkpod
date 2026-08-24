@@ -34,7 +34,7 @@ Only the following requirements are not yet `Verified` in
 | --- | --- | --- |
 | `WIN-001` | Native Windows shell with explicit Common Controls registration and a system-dark title-bar opt-in, Japanese/English UI with persisted System/Japanese/English selection and non-Japanese English fallback, offline Help/About/Acknowledgements with locked BLAKE3/PNG/Fluent icon dependency attribution, typed Fluent icons for all 14 Tool commands and the applicable Layer/Plane/pin states with localized text fallback, owner-centered work-area-clamped modal dialogs, DPI-aware layout, keyboard routes, MSAA/UIA names, theme and accessibility hooks | Dark presentation is limited to the system title bar; physical high-contrast/200%-DPI, complete screen-reader, and Japanese IME validation/fixes remain; the embedded offline Help body is Japanese-only |
 | `WORKSPACE-001` | Persistent and auxiliary panes retain DockHost and Tool Options remains an owned flyout. The right side uses dynamic stable-ID tabs with nonempty unique membership, deterministic add/remove/move/reorder, accessible descriptions and Workspace V9 persistence/migration from V2–V8. The transient Job Progress pane and transient narrow-width suppression are not persisted. | Reference Check AutoHide edge buttons are not reachable by F6/Tab/Shift+Tab |
-| `SUBPALETTE-001` | Standalone Core/ABI v19 object, independent workspace UI, bounded asynchronous external-image loading, natural cell ordering, exact sampling/registration, icon/keyboard navigation, and failure-preserving decode are implemented and covered at Core/ABI and pane-surface boundaries. | Complete the physical file/folder-dialog multi-image confirmation and the remaining Windows preset matrix before `Verified` |
+| `SUBPALETTE-001` | Standalone Core/ABI v19 object, independent workspace UI, bounded asynchronous external-image loading, natural cell ordering, exact sampling/registration, accessible file/folder and navigation icons, focus-independent keyboard navigation, renderer-cache-safe source switching, a sampled-color swatch, compact eyedropper cursor, Color-pane drawing-color selection, and failure-preserving decode are implemented and covered at Core/ABI and product-smoke boundaries. | Complete the physical file/folder-dialog multi-image confirmation and the remaining Windows preset matrix before `Verified` |
 | `BATCH-001`–`BATCH-004` | Batch v3 Core/format/ABI/Windows implementation, approved quick/full benchmark replacement and focused contracts are present with exact four-operation popup authoring, clickable/Space operation-row checkboxes, compact bounded input pickers, full-width single-selection alpha-aware color cells, native-range old/new alpha editors, drawing-color destination selection, an exclusive singleton right-side tab, `%APPDATA%` set catalog, sparse mask persistence, three input and three output modes, dry-run validation and editable loaded sets | Physical high-contrast and screen-reader checks remain before `Verified` |
 | `SCRIPT-001`, `SCRIPT-002`, `SCRIPT-005` | Exact-current registry schema/language/file v2 and catalog/owner manifest v4 with 75 public commands are aligned to native/replay/ABI v28/25/19; private Batch v3 orchestration is excluded | Product `.inkscript` acceptance and the M36 full gate remain pending |
 | `SCRIPT-003` | M12 authority/plan/run/install and the M27A/M27B private CoreHost route remain; its current native output follows v28/epoch 25/ABI 19 | Product `.inkscript` file acceptance remains absent |
@@ -85,6 +85,12 @@ with static CRT, portable ZIP, and unsigned MSIX; its 40 non-product tests
 passed in 49.40 s and its English/Japanese product smokes passed in
 303.40/272.13 s. Native v28 and replay epoch 25 are unchanged; the standalone
 read-only Subpalette contract increments only the C ABI to v19.
+
+The same-day Subpalette interaction follow-up rebuilt ARM64 Debug under
+`/W4 /WX` with static CRT and regenerated portable ZIP/unsigned MSIX payloads.
+The Fluent-icon/localization contracts, all 40 non-product tests (39.46 s),
+and English/Japanese product smokes (271.99/269.14 s) passed when run from the
+same explicit ARM64 developer environment.
 
 On 2026-08-23, this reviewed Batch Pane UI follow-up passed Rust
 `cargo fmt --check`, warnings-denied Clippy, the workspace/all-feature test,

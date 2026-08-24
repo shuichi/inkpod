@@ -20,6 +20,7 @@
 #include <cwchar>
 #include <cwctype>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <new>
 #include <optional>
@@ -2316,6 +2317,7 @@ void PresentSubpalettePane(WorkspaceWindow& workspace) noexcept {
     SubpalettePaneView pane{};
     pane.loading = workspace.subpalette_loading;
     pane.sample_available = workspace.subpalette_sample_available;
+    pane.sample_color = workspace.subpalette_sample;
     pane.source_available =
         (workspace.subpalette_info.flags
          & INKPOD_SUBPALETTE_INFO_IMAGE_LOADED) != 0U;
@@ -2427,6 +2429,25 @@ bool PublishSubpaletteSnapshot(
     ++workspace.subpalette_snapshot_revision;
     return sink->Submit(renderer::SnapshotEnvelope{
         sink->Route(), snapshot_view.revision, transform.view_revision, snapshot});
+}
+
+bool RebindSubpaletteImageRoute(WorkspaceWindow& workspace) noexcept {
+    if (workspace.subpalette_dialog.canvas == nullptr
+        || !workspace.subpalette_source_id
+        || workspace.subpalette_source_id.Value()
+            == std::numeric_limits<std::uint64_t>::max()) {
+        return false;
+    }
+    const inkpod::app::AuxiliarySourceId next_source{
+        workspace.subpalette_source_id.Value() + 1U};
+    if (!renderer::BindAuxiliaryCanvasSnapshotSink(
+            workspace.subpalette_dialog.canvas,
+            next_source,
+            workspace.generation)) {
+        return false;
+    }
+    workspace.subpalette_source_id = next_source;
+    return true;
 }
 
 bool RefreshSubpalettePane(ApplicationHost& state) noexcept {
@@ -2779,6 +2800,11 @@ void CompleteSubpaletteLoad(
     workspace.subpalette_navigation_index = info.active_index;
     workspace.subpalette_sample_available = false;
     workspace.subpalette_error.clear();
+    if (!RebindSubpaletteImageRoute(workspace)) {
+        workspace.subpalette_error = UiText(UiStringId::SubpaletteReadFailed);
+        PresentSubpalettePane(workspace);
+        return;
+    }
     RECT bounds{};
     if (workspace.subpalette_dialog.canvas != nullptr
         && GetClientRect(workspace.subpalette_dialog.canvas, &bounds) != FALSE) {
@@ -2982,6 +3008,9 @@ void SampleSubpalettePane(void* context, double x, double y) noexcept {
         workspace.subpalette_sample_available = true;
         SetDrawingColor(*state, color);
         (void)RefreshColorPanes(*state);
+        RefreshDockPaneViews(*state);
+        inkpod::windows::ui::panes::SelectColorDockPaneDrawingColor(
+            workspace.windows.color_pane);
         PresentSubpalettePane(workspace);
     }
 }

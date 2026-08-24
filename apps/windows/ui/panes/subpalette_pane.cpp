@@ -18,6 +18,7 @@ namespace inkpod::windows::ui::panes {
 namespace {
 
 constexpr UINT_PTR kSubpaletteCanvasSubclass = 1U;
+constexpr UINT_PTR kSubpaletteKeySubclass = 2U;
 
 void Dispatch(SubpalettePaneDialogState& state, UINT command) noexcept {
     if (state.dispatch_command != nullptr) {
@@ -29,6 +30,128 @@ void Perform(SubpalettePaneDialogState& state, SubpalettePaneAction action) noex
     if (state.perform_action != nullptr) {
         state.perform_action(state.context, action);
     }
+}
+
+bool PerformNavigationKey(
+    SubpalettePaneDialogState& state, WPARAM virtual_key) noexcept {
+    if (virtual_key == VK_LEFT || virtual_key == VK_UP
+        || virtual_key == VK_PRIOR) {
+        Perform(state, SubpalettePaneAction::Previous);
+        return true;
+    }
+    if (virtual_key == VK_RIGHT || virtual_key == VK_DOWN
+        || virtual_key == VK_NEXT) {
+        Perform(state, SubpalettePaneAction::Next);
+        return true;
+    }
+    return false;
+}
+
+LRESULT NavigationDialogCode(
+    HWND window, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
+    const LRESULT base = DefSubclassProc(window, message, wparam, lparam);
+    if (wparam == VK_LEFT || wparam == VK_RIGHT
+        || wparam == VK_UP || wparam == VK_DOWN) {
+        return base | DLGC_WANTARROWS;
+    }
+    if (wparam == VK_PRIOR || wparam == VK_NEXT) {
+        return base | DLGC_WANTMESSAGE;
+    }
+    return base;
+}
+
+LRESULT CALLBACK SubpaletteKeySubclassProcedure(
+    HWND window,
+    UINT message,
+    WPARAM wparam,
+    LPARAM lparam,
+    UINT_PTR,
+    DWORD_PTR reference) noexcept {
+    auto* state = reinterpret_cast<SubpalettePaneDialogState*>(reference);
+    switch (message) {
+        case WM_GETDLGCODE:
+            return NavigationDialogCode(window, message, wparam, lparam);
+        case WM_KEYDOWN:
+            if (state != nullptr && PerformNavigationKey(*state, wparam)) {
+                return 0;
+            }
+            break;
+        case WM_NCDESTROY:
+            RemoveWindowSubclass(
+                window,
+                SubpaletteKeySubclassProcedure,
+                kSubpaletteKeySubclass);
+            break;
+        default:
+            break;
+    }
+    return DefSubclassProc(window, message, wparam, lparam);
+}
+
+std::uint8_t SampleChannel8(
+    const InkpodColorValue& color, std::uint16_t channel) noexcept {
+    return static_cast<std::uint8_t>(
+        color.depth == INKPOD_COLOR_DEPTH_16
+            ? (static_cast<std::uint32_t>(channel) + 128U) / 257U
+            : channel & 0xffU);
+}
+
+COLORREF CompositeSampleColor(
+    const InkpodColorValue& color, COLORREF background) noexcept {
+    const std::uint32_t alpha = SampleChannel8(color, color.alpha);
+    const auto blend = [alpha](std::uint8_t source, std::uint8_t destination) noexcept {
+        return static_cast<std::uint8_t>(
+            (static_cast<std::uint32_t>(source) * alpha
+             + static_cast<std::uint32_t>(destination) * (255U - alpha)
+             + 127U)
+            / 255U);
+    };
+    return RGB(
+        blend(SampleChannel8(color, color.red), GetRValue(background)),
+        blend(SampleChannel8(color, color.green), GetGValue(background)),
+        blend(SampleChannel8(color, color.blue), GetBValue(background)));
+}
+
+void DrawSampleSwatch(
+    const DRAWITEMSTRUCT& draw, const SubpalettePaneView& view) noexcept {
+    RECT bounds = draw.rcItem;
+    FillRect(draw.hDC, &bounds, GetSysColorBrush(COLOR_3DFACE));
+    InflateRect(&bounds, -1, -1);
+    if (view.sample_available) {
+        const COLORREF light = GetSysColor(COLOR_WINDOW);
+        const COLORREF dark = GetSysColor(COLOR_3DLIGHT);
+        const COLORREF colors[]{
+            CompositeSampleColor(view.sample_color, light),
+            CompositeSampleColor(view.sample_color, dark)};
+        HBRUSH brushes[]{CreateSolidBrush(colors[0]), CreateSolidBrush(colors[1])};
+        if (brushes[0] != nullptr && brushes[1] != nullptr) {
+            const int checker = std::max(2, ScalePaneDip(draw.hwndItem, 4));
+            for (int y = bounds.top; y < bounds.bottom; y += checker) {
+                for (int x = bounds.left; x < bounds.right; x += checker) {
+                    const RECT tile{
+                        x,
+                        y,
+                        std::min<LONG>(
+                            bounds.right, static_cast<LONG>(x + checker)),
+                        std::min<LONG>(
+                            bounds.bottom, static_cast<LONG>(y + checker))};
+                    FillRect(
+                        draw.hDC,
+                        &tile,
+                        brushes[((x - bounds.left) / checker
+                                 + (y - bounds.top) / checker)
+                                & 1]);
+                }
+            }
+        }
+        if (brushes[0] != nullptr) {
+            DeleteObject(brushes[0]);
+        }
+        if (brushes[1] != nullptr) {
+            DeleteObject(brushes[1]);
+        }
+    }
+    FrameRect(draw.hDC, &draw.rcItem, GetSysColorBrush(COLOR_WINDOWTEXT));
 }
 
 LRESULT CALLBACK SubpaletteCanvasSubclassProcedure(
@@ -43,6 +166,8 @@ LRESULT CALLBACK SubpaletteCanvasSubclassProcedure(
         return DefSubclassProc(window, message, wparam, lparam);
     }
     switch (message) {
+        case WM_GETDLGCODE:
+            return NavigationDialogCode(window, message, wparam, lparam);
         case WM_SETCURSOR:
             if (LOWORD(lparam) == HTCLIENT && state->eyedropper_cursor != nullptr) {
                 SetCursor(state->eyedropper_cursor);
@@ -50,12 +175,7 @@ LRESULT CALLBACK SubpaletteCanvasSubclassProcedure(
             }
             break;
         case WM_KEYDOWN:
-            if (wparam == VK_LEFT || wparam == VK_UP || wparam == VK_PRIOR) {
-                Perform(*state, SubpalettePaneAction::Previous);
-                return 0;
-            }
-            if (wparam == VK_RIGHT || wparam == VK_DOWN || wparam == VK_NEXT) {
-                Perform(*state, SubpalettePaneAction::Next);
+            if (PerformNavigationKey(*state, wparam)) {
                 return 0;
             }
             break;
@@ -136,6 +256,16 @@ INT_PTR CALLBACK SubpalettePaneProcedure(
                     return TRUE;
                 default:
                     break;
+            }
+            break;
+        case WM_DRAWITEM:
+            if (state != nullptr
+                && static_cast<int>(wparam) == IDC_SUBPALETTE_SAMPLE_SWATCH) {
+                const auto* draw = reinterpret_cast<const DRAWITEMSTRUCT*>(lparam);
+                if (draw != nullptr) {
+                    DrawSampleSwatch(*draw, state->view);
+                }
+                return TRUE;
             }
             break;
         case renderer::kCanvasStrokeReady:
@@ -252,12 +382,36 @@ HWND CreateSubpalettePaneDialog(
         bounds.bottom - bounds.top,
         SWP_NOACTIVATE | SWP_SHOWWINDOW);
     ShowWindow(placeholder, SW_HIDE);
+    SetWindowTextW(
+        GetDlgItem(dialog, IDC_SUBPALETTE_SAMPLE_SWATCH),
+        UiText(UiStringId::DrawingColor));
     for (const auto [control, icon] : std::array{
+             std::pair{IDC_SUBPALETTE_TARGET, PaneIconId::OpenFiles},
+             std::pair{IDC_SUBPALETTE_PIN, PaneIconId::OpenFolder},
              std::pair{IDC_SUBPALETTE_PREVIOUS, PaneIconId::Previous},
              std::pair{IDC_SUBPALETTE_NEXT, PaneIconId::Next},
              std::pair{IDC_SUBPALETTE_FIT, PaneIconId::Fit},
              std::pair{IDC_SUBPALETTE_ONE_TO_ONE, PaneIconId::OneToOne}}) {
         (void)SetPaneIconButton(GetDlgItem(dialog, control), icon);
+    }
+    for (const int control : std::array{
+             IDC_SUBPALETTE_TARGET,
+             IDC_SUBPALETTE_PIN,
+             IDC_SUBPALETTE_PREVIOUS,
+             IDC_SUBPALETTE_NEXT,
+             IDC_SUBPALETTE_FIT,
+             IDC_SUBPALETTE_ONE_TO_ONE,
+             IDC_SUBPALETTE_REGISTER}) {
+        const HWND child = GetDlgItem(dialog, control);
+        if (child == nullptr
+            || SetWindowSubclass(
+                   child,
+                   SubpaletteKeySubclassProcedure,
+                   kSubpaletteKeySubclass,
+                   reinterpret_cast<DWORD_PTR>(&state)) == FALSE) {
+            DestroyWindow(dialog);
+            return nullptr;
+        }
     }
     LayoutSubpalettePaneDialog(dialog);
     return dialog;
@@ -302,16 +456,25 @@ void LayoutSubpalettePaneDialog(HWND dialog) noexcept {
         IDC_SUBPALETTE_FIT,
         IDC_SUBPALETTE_ONE_TO_ONE,
         IDC_SUBPALETTE_REGISTER};
+    const int swatch_width = row_height;
+    const int navigation_width = std::max(0, content_width - swatch_width - gap);
     PlacePaneButtonRows(
         dialog,
         navigation_actions,
         margin,
         navigation_top,
-        content_width,
+        navigation_width,
         row_height,
         gap);
     const std::size_t navigation_rows = PaneButtonRowCount(
-        dialog, navigation_actions, content_width, gap);
+        dialog, navigation_actions, navigation_width, gap);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_SUBPALETTE_SAMPLE_SWATCH,
+        margin + std::max(0, content_width - swatch_width),
+        navigation_top,
+        swatch_width,
+        row_height);
     const int source_top = navigation_top
         + static_cast<int>(navigation_rows) * row_height
         + std::max(0, static_cast<int>(navigation_rows) - 1) * gap + gap;
@@ -382,6 +545,8 @@ void UpdateSubpalettePaneDialog(HWND dialog, SubpalettePaneView view) noexcept {
     EnableWindow(
         GetDlgItem(dialog, IDC_SUBPALETTE_REGISTER),
         state->view.sample_available ? TRUE : FALSE);
+    InvalidateRect(
+        GetDlgItem(dialog, IDC_SUBPALETTE_SAMPLE_SWATCH), nullptr, TRUE);
     if (state->canvas != nullptr) {
         EnableWindow(state->canvas, source ? TRUE : FALSE);
         ShowWindow(state->canvas, source ? SW_SHOW : SW_HIDE);

@@ -22,7 +22,7 @@ set(EXPECTED_SEMANTIC_KEYS
     "Tool.Stamp" "Tool.DustRemoval" "Tool.AlphaGradient"
     "Pane.Visible" "Pane.Hidden" "Pane.Editable" "Pane.Protected"
     "Pane.PinDocument" "Pane.ReturnToFollowing" "Pane.Previous" "Pane.Next"
-    "Pane.Fit" "Pane.OneToOne")
+    "Pane.Fit" "Pane.OneToOne" "Pane.OpenFiles" "Pane.OpenFolder")
 
 foreach(REQUIRED_FILE IN ITEMS
         "${MANIFEST}" "${ATLAS}" "${LICENSE_FILE}" "${APP_RESOURCE}"
@@ -82,8 +82,8 @@ foreach(ROW IN LISTS MANIFEST_ROWS)
     list(APPEND SOURCE_FILES "${SOURCE_FILE}")
     math(EXPR EXPECTED_INDEX "${EXPECTED_INDEX} + 1")
 endforeach()
-if(NOT EXPECTED_INDEX EQUAL 24)
-    message(FATAL_ERROR "Expected 24 selected Fluent icons, found ${EXPECTED_INDEX}")
+if(NOT EXPECTED_INDEX EQUAL 26)
+    message(FATAL_ERROR "Expected 26 selected Fluent icons, found ${EXPECTED_INDEX}")
 endif()
 if(NOT SEMANTIC_KEYS STREQUAL EXPECTED_SEMANTIC_KEYS)
     message(FATAL_ERROR
@@ -99,17 +99,17 @@ endif()
 
 file(SIZE "${ATLAS}" ATLAS_SIZE)
 file(SHA256 "${ATLAS}" ATLAS_SHA256)
-if(NOT ATLAS_SIZE EQUAL 55320)
+if(NOT ATLAS_SIZE EQUAL 59928)
     message(FATAL_ERROR "Fluent mask atlas has unexpected size: ${ATLAS_SIZE}")
 endif()
 if(NOT ATLAS_SHA256 STREQUAL
-        "82845a88569f3d96ae438f8370727f14f2c3df62fc8b5a7c8f8b779099775080")
+        "bc7bbfecb25057cc7cfdbae88f8b1ac34a88e1f3b00ec5fa34f7825062cb42c4")
     message(FATAL_ERROR "Fluent mask atlas hash mismatch: ${ATLAS_SHA256}")
 endif()
-file(READ "${ATLAS}" ATLAS_HEADER LIMIT 24 HEX)
+file(READ "${ATLAS}" ATLAS_HEADER LIMIT 20 HEX)
 string(TOLOWER "${ATLAS_HEADER}" ATLAS_HEADER)
 if(NOT ATLAS_HEADER STREQUAL
-        "494e4b504f444941010030003000180000d80000ad322412")
+        "494e4b504f4449410100300030001a0000ea0000")
     message(FATAL_ERROR "Fluent mask atlas header is invalid: ${ATLAS_HEADER}")
 endif()
 
@@ -210,13 +210,33 @@ file(READ "${INKPOD_SOURCE_DIR}/apps/windows/ui/panes/subpalette_pane.cpp"
     SUBPALETTE_SOURCE_TEXT)
 foreach(SUBPALETTE_ICON_MARKER IN ITEMS
         "SetPaneIconButton" "PaneIconId::Previous" "PaneIconId::Next"
-        "PaneIconId::Fit" "PaneIconId::OneToOne" "CreateToolCursor"
-        "ToolIconId::Eyedropper")
+        "PaneIconId::Fit" "PaneIconId::OneToOne" "PaneIconId::OpenFiles"
+        "PaneIconId::OpenFolder" "CreateToolCursor" "ToolIconId::Eyedropper")
     string(FIND "${SUBPALETTE_SOURCE_TEXT}" "${SUBPALETTE_ICON_MARKER}"
         SUBPALETTE_ICON_MARKER_OFFSET)
     if(SUBPALETTE_ICON_MARKER_OFFSET LESS 0)
         message(FATAL_ERROR
             "Subpalette navigation/cursor icon contract is incomplete: ${SUBPALETTE_ICON_MARKER}")
+    endif()
+endforeach()
+foreach(SUBPALETTE_INTERACTION_MARKER IN ITEMS
+        "DLGC_WANTARROWS" "IDC_SUBPALETTE_SAMPLE_SWATCH")
+    string(FIND "${SUBPALETTE_SOURCE_TEXT}" "${SUBPALETTE_INTERACTION_MARKER}"
+        SUBPALETTE_INTERACTION_OFFSET)
+    if(SUBPALETTE_INTERACTION_OFFSET LESS 0)
+        message(FATAL_ERROR
+            "Subpalette interaction contract is incomplete: ${SUBPALETTE_INTERACTION_MARKER}")
+    endif()
+endforeach()
+file(READ "${INKPOD_SOURCE_DIR}/apps/windows/ui/main_window_runtime.cpp"
+    MAIN_WINDOW_RUNTIME_TEXT)
+foreach(SUBPALETTE_RUNTIME_MARKER IN ITEMS
+        "RebindSubpaletteImageRoute" "SelectColorDockPaneDrawingColor")
+    string(FIND "${MAIN_WINDOW_RUNTIME_TEXT}" "${SUBPALETTE_RUNTIME_MARKER}"
+        SUBPALETTE_RUNTIME_OFFSET)
+    if(SUBPALETTE_RUNTIME_OFFSET LESS 0)
+        message(FATAL_ERROR
+            "Subpalette runtime interaction is incomplete: ${SUBPALETTE_RUNTIME_MARKER}")
     endif()
 endforeach()
 
@@ -284,4 +304,4 @@ foreach(NOTICE_MARKER IN ITEMS
 endforeach()
 
 message(STATUS
-    "Verified 24 Fluent semantic icons, fixed SVG/atlas hashes, resource embedding, and MIT notice")
+    "Verified 26 Fluent semantic icons, fixed SVG/atlas hashes, resource embedding, and MIT notice")

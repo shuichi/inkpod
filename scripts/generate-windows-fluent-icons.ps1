@@ -32,8 +32,8 @@ foreach ($line in [System.IO.File]::ReadAllLines($manifestPath)) {
         Sha256 = $fields[4]
     }
 }
-if ($entries.Count -ne 24) {
-    throw "Expected 24 selected icons, found $($entries.Count)"
+if ($entries.Count -ne 26) {
+    throw "Expected 26 selected icons, found $($entries.Count)"
 }
 
 $payload = [System.Collections.Generic.List[byte]]::new($entries.Count * $maskSize * $maskSize)

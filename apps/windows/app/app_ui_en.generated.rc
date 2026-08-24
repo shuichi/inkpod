@@ -873,6 +873,7 @@ BEGIN
     PUSHBUTTON      "Next", IDC_SUBPALETTE_NEXT, 56, 342, 44, 20
     PUSHBUTTON      "Entire Document", IDC_SUBPALETTE_FIT, 170, 342, 44, 20
     PUSHBUTTON      "Actual size", IDC_SUBPALETTE_ONE_TO_ONE, 218, 342, 44, 20
+    CONTROL         "", IDC_SUBPALETTE_SAMPLE_SWATCH, "Static", SS_OWNERDRAW | SS_NOTIFY, 266, 342, 26, 20
     PUSHBUTTON      "Register Sampled Color", IDC_SUBPALETTE_REGISTER, 232, 342, 90, 20
     LTEXT           "Click the image to sample a color. Use Left/Right to move images.", IDC_SUBPALETTE_HINT, 8, 396, 314, 14, SS_NOPREFIX
 END

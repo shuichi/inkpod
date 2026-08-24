@@ -132,6 +132,10 @@ void UpdateColorDockPaneDrawingColor(
     HWND pane,
     const InkpodColorValue& drawing_color) noexcept;
 
+// Selects the drawing-color swatch as the active picker target without
+// publishing a color edit. Used when another pane chooses a drawing color.
+void SelectColorDockPaneDrawingColor(HWND pane) noexcept;
+
 void UpdateColorDockPaneMainLineColor(
     HWND pane,
     const InkpodColorValue& main_line_color) noexcept;

@@ -1300,6 +1300,7 @@ int RunSubpalettePaneSmoke(ApplicationHost& state) noexcept {
         || GetDlgItem(pane, IDC_SUBPALETTE_FIT) == nullptr
         || GetDlgItem(pane, IDC_SUBPALETTE_ONE_TO_ONE) == nullptr
         || GetDlgItem(pane, IDC_SUBPALETTE_REGISTER) == nullptr
+        || GetDlgItem(pane, IDC_SUBPALETTE_SAMPLE_SWATCH) == nullptr
         || GetDlgItem(pane, IDC_SUBPALETTE_AUTO_PREVIOUS) != nullptr
         || GetDlgItem(pane, IDC_SUBPALETTE_SCROLL_SYNC) != nullptr
         || !WindowUsesNamedIconButton(
@@ -1309,6 +1310,18 @@ int RunSubpalettePaneSmoke(ApplicationHost& state) noexcept {
         || !WindowUsesNamedIconButton(GetDlgItem(pane, IDC_SUBPALETTE_FIT))
         || !WindowUsesNamedIconButton(
             GetDlgItem(pane, IDC_SUBPALETTE_ONE_TO_ONE))
+        || !WindowUsesNamedIconButton(
+            GetDlgItem(pane, IDC_SUBPALETTE_TARGET))
+        || !WindowUsesNamedIconButton(
+            GetDlgItem(pane, IDC_SUBPALETTE_PIN))
+        || (SendMessageW(
+                GetDlgItem(pane, IDC_SUBPALETTE_TARGET),
+                WM_GETDLGCODE,
+                VK_RIGHT,
+                0)
+            & DLGC_WANTARROWS) == 0
+        || !WindowHasAccessibleName(
+            GetDlgItem(pane, IDC_SUBPALETTE_SAMPLE_SWATCH))
         || IsWindowEnabled(GetDlgItem(pane, IDC_SUBPALETTE_REGISTER)) != FALSE
         || state.Workspace().subpalette_dialog.eyedropper_cursor == nullptr
         || (GetMenuState(menu, IDM_WINDOW_SUBPALETTE, MF_BYCOMMAND)

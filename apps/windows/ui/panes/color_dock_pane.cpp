@@ -2468,6 +2468,17 @@ void UpdateColorDockPaneDrawingColor(
     state->updating = false;
 }
 
+void SelectColorDockPaneDrawingColor(HWND pane) noexcept {
+    ColorDockPaneState* state = pane == nullptr ? nullptr : PaneState(pane);
+    const HWND swatch = pane == nullptr
+        ? nullptr
+        : GetDlgItem(pane, IDC_COLOR_MAIN_LINE_SWATCH);
+    if (state == nullptr || swatch == nullptr) {
+        return;
+    }
+    SelectSwatchTarget(swatch, *state, kSwatchDrawing);
+}
+
 void UpdateColorDockPaneMainLineColor(
     HWND pane,
     const InkpodColorValue& main_line_color) noexcept {

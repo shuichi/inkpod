@@ -481,7 +481,7 @@ HCURSOR CreateToolCursor(
         instance,
         icon,
         GetSysColor(COLOR_WINDOWTEXT),
-        MulDiv(32, static_cast<int>(effective_dpi), 96));
+        MulDiv(24, static_cast<int>(effective_dpi), 96));
 }
 
 }  // namespace inkpod::windows::ui

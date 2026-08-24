@@ -6,6 +6,7 @@
 #include <string>
 
 #include "app/identity.h"
+#include "inkpod/core_ffi.h"
 #include "renderer/canvas.h"
 
 namespace inkpod::renderer {
@@ -38,6 +39,8 @@ struct SubpalettePaneView final {
     bool can_previous{};
     bool can_next{};
     bool sample_available{};
+    InkpodColorValue sample_color{
+        sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 0U, 0U, 0U, 255U};
 };
 
 struct SubpalettePaneDialogState final {
