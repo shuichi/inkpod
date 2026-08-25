@@ -4,13 +4,20 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 
 #include "dock_layout.h"
 #include "right_tool_tabs.h"
 
 namespace inkpod::windows::ui {
 
-using DockHostChangedCallback = void (*)(void* context) noexcept;
+enum class DockHostChangeKind : std::uint8_t {
+    Geometry,
+    Structure,
+};
+
+using DockHostChangedCallback = void (*)(
+    void* context, DockHostChangeKind kind) noexcept;
 
 class DockHost final {
 public:
@@ -27,7 +34,10 @@ public:
     void SetChangedCallback(
         DockHostChangedCallback callback, void* context) noexcept;
     [[nodiscard]] bool AttachPane(DockPaneType type, HWND content) noexcept;
-    void ApplyLayout(const DockLayoutGeometry& geometry, UINT dpi) noexcept;
+    void ApplyLayout(
+        const DockLayoutGeometry& geometry,
+        UINT dpi,
+        DockHostChangeKind kind = DockHostChangeKind::Structure) noexcept;
 
     [[nodiscard]] DockResult TogglePane(DockPaneType type) noexcept;
     [[nodiscard]] DockResult DockPane(
@@ -129,9 +139,10 @@ private:
     void FocusPane(DockPaneType type) noexcept;
     [[nodiscard]] bool UpdateTabFont(UINT dpi) noexcept;
     void ApplyPaneLayout(PaneHostState& pane) noexcept;
-    void ApplyTabLayout(TabHostState& tabs) noexcept;
-    void ApplyToolTabLayout() noexcept;
-    void NotifyChanged() noexcept;
+    void ApplyTabLayout(TabHostState& tabs, bool synchronize_items) noexcept;
+    void ApplyToolTabLayout(bool synchronize_items) noexcept;
+    void NotifyChanged(
+        DockHostChangeKind kind = DockHostChangeKind::Structure) noexcept;
     void ShowContextMenu(DockPaneType type, POINT screen) noexcept;
     [[nodiscard]] DockZone PreviewZoneAt(
         DockPaneType type, POINT screen) const noexcept;

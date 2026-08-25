@@ -306,52 +306,53 @@ void LayoutControls(HWND dialog) noexcept {
             available_lists - ScaleForDpi(80, dpi));
     }
     int y = margin;
-    SetWindowPos(
-        GetDlgItem(dialog, IDC_LAYER_SECTION),
-        nullptr,
+    panes::PlacePaneDialogControl(
+        dialog,
+        IDC_LAYER_SECTION,
         margin,
         y,
         width,
-        label_height,
-        SWP_NOACTIVATE | SWP_NOZORDER);
+        label_height);
     y += label_height;
-    SetWindowPos(
-        GetDlgItem(dialog, IDC_LAYER_LIST),
-        nullptr,
+    const HWND layer_list = GetDlgItem(dialog, IDC_LAYER_LIST);
+    const bool layer_list_geometry_changed = !panes::PaneWindowHasBounds(
+        layer_list, margin, y, width, layer_height);
+    panes::PlacePaneDialogControl(
+        dialog,
+        IDC_LAYER_LIST,
         margin,
         y,
         width,
-        layer_height,
-        SWP_NOACTIVATE | SWP_NOZORDER);
+        layer_height);
     y += layer_height;
-    SetWindowPos(
-        GetDlgItem(dialog, IDC_LAYER_PLANE_SPLITTER),
-        nullptr,
+    panes::PlacePaneDialogControl(
+        dialog,
+        IDC_LAYER_PLANE_SPLITTER,
         margin,
         y,
         width,
-        split_height,
-        SWP_NOACTIVATE | SWP_NOZORDER);
+        split_height);
     y += split_height;
-    SetWindowPos(
-        GetDlgItem(dialog, IDC_PLANE_SECTION),
-        nullptr,
+    panes::PlacePaneDialogControl(
+        dialog,
+        IDC_PLANE_SECTION,
         margin,
         y,
         width,
-        label_height,
-        SWP_NOACTIVATE | SWP_NOZORDER);
+        label_height);
     y += label_height;
     const int plane_height = std::max(
         0, list_bottom - y);
-    SetWindowPos(
-        GetDlgItem(dialog, IDC_PLANE_LIST),
-        nullptr,
+    const HWND plane_list = GetDlgItem(dialog, IDC_PLANE_LIST);
+    const bool plane_list_geometry_changed = !panes::PaneWindowHasBounds(
+        plane_list, margin, y, width, plane_height);
+    panes::PlacePaneDialogControl(
+        dialog,
+        IDC_PLANE_LIST,
         margin,
         y,
         width,
-        plane_height,
-        SWP_NOACTIVATE | SWP_NOZORDER);
+        plane_height);
     SendDlgItemMessageW(
         dialog,
         IDC_LAYER_LIST,
@@ -364,15 +365,29 @@ void LayoutControls(HWND dialog) noexcept {
         LB_SETITEMHEIGHT,
         0,
         ScaleForDpi(kPlaneTileHeight, dpi));
+    for (const auto [list, geometry_changed] : {
+             std::pair{layer_list, layer_list_geometry_changed},
+             std::pair{plane_list, plane_list_geometry_changed}}) {
+        if (geometry_changed && list != nullptr
+            && IsWindowVisible(list) != FALSE) {
+            // Owner-draw status cells depend on the full row width. Paint the
+            // new layout before the next splitter sample so their old right-
+            // aligned positions cannot remain visible during a live resize.
+            RedrawWindow(
+                list,
+                nullptr,
+                nullptr,
+                RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
+        }
+    }
 
-    SetWindowPos(
-        GetDlgItem(dialog, IDC_LAYER_ACTION_TARGET),
-        nullptr,
+    panes::PlacePaneDialogControl(
+        dialog,
+        IDC_LAYER_ACTION_TARGET,
         margin,
         action_target_y,
         width,
-        action_target_height,
-        SWP_NOACTIVATE | SWP_NOZORDER);
+        action_target_height);
 
     panes::PlacePaneButtonRows(
         dialog,
@@ -1247,12 +1262,17 @@ HWND CreateLayerPaletteDialog(
     HINSTANCE instance,
     HWND owner,
     LayerPaletteDialogState& state) noexcept {
-    return CreateLocalizedDialogParamW(
+    const HWND dialog = CreateLocalizedDialogParamW(
         instance,
         MAKEINTRESOURCEW(IDD_LAYER_PALETTE),
         owner,
         LayerPaletteDialogProcedure,
         reinterpret_cast<LPARAM>(&state));
+    if (dialog != nullptr) {
+        const LONG_PTR style = GetWindowLongPtrW(dialog, GWL_STYLE);
+        SetWindowLongPtrW(dialog, GWL_STYLE, style | WS_CLIPCHILDREN);
+    }
+    return dialog;
 }
 
 void UpdateLayerPaletteDialog(

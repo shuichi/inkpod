@@ -53,7 +53,8 @@ void LayoutMainChrome(
     app::MainWindowHandles& windows,
     bool smoke_test,
     int width,
-    int height) noexcept;
+    int height,
+    DockHostChangeKind dock_change = DockHostChangeKind::Structure) noexcept;
 
 bool RegisterMainWindowClass(
     HINSTANCE instance,

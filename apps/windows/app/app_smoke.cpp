@@ -2473,12 +2473,105 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         || color_bounds.right != layer_bounds.right) {
         return 732;
     }
+    HWND right_zone_splitter =
+        state.Workspace().windows.dock_host.SplitterWindow(
+            DockZone::Right, DockSplitterKind::ZoneExtent);
     if (state.Workspace().windows.dock_host.SplitterWindow(
             DockZone::Left, DockSplitterKind::ZoneExtent) != nullptr
-        || !IsCaptionlessAccessibleSplitter(
-            state.Workspace().windows.dock_host.SplitterWindow(
-                DockZone::Right, DockSplitterKind::ZoneExtent))) {
+        || !IsCaptionlessAccessibleSplitter(right_zone_splitter)) {
         return 838;
+    }
+    const HWND resize_right_tool_tabs =
+        state.Workspace().windows.dock_host.ToolTabWindow();
+    const HWND resize_color_list = GetDlgItem(
+        state.Workspace().windows.color_pane, IDC_PALETTE_LIST);
+    const HWND resize_layer_list = GetDlgItem(
+        state.Workspace().panes.layer_palette, IDC_LAYER_LIST);
+    WindowMessageCounter tool_tab_rebuilds{TCM_DELETEALLITEMS};
+    WindowMessageCounter color_list_rebuilds{LB_RESETCONTENT};
+    WindowMessageCounter layer_list_rebuilds{LB_RESETCONTENT};
+    constexpr UINT_PTR kToolTabRebuildCounterSubclass = 21U;
+    constexpr UINT_PTR kColorListRebuildCounterSubclass = 22U;
+    constexpr UINT_PTR kLayerListRebuildCounterSubclass = 23U;
+    const bool tool_counter_attached = resize_right_tool_tabs != nullptr
+        && SetWindowSubclass(
+               resize_right_tool_tabs,
+               WindowMessageCounterProcedure,
+               kToolTabRebuildCounterSubclass,
+               reinterpret_cast<DWORD_PTR>(&tool_tab_rebuilds)) != FALSE;
+    const bool color_counter_attached = resize_color_list != nullptr
+        && SetWindowSubclass(
+               resize_color_list,
+               WindowMessageCounterProcedure,
+               kColorListRebuildCounterSubclass,
+               reinterpret_cast<DWORD_PTR>(&color_list_rebuilds)) != FALSE;
+    const bool layer_counter_attached = resize_layer_list != nullptr
+        && SetWindowSubclass(
+               resize_layer_list,
+               WindowMessageCounterProcedure,
+               kLayerListRebuildCounterSubclass,
+               reinterpret_cast<DWORD_PTR>(&layer_list_rebuilds)) != FALSE;
+    const DockZoneState* right_zone =
+        state.Workspace().windows.workspace.dock.Zone(DockZone::Right);
+    const int right_extent_before =
+        right_zone == nullptr ? 0 : right_zone->extent_dip;
+    const auto has_no_pending_update = [](HWND window) noexcept {
+        RECT update{};
+        return GetUpdateRect(window, &update, FALSE) == FALSE;
+    };
+    bool layer_list_shrink_painted{};
+    bool layer_list_grow_painted{};
+    if (tool_counter_attached && color_counter_attached
+        && layer_counter_attached && right_zone != nullptr) {
+        SetFocus(right_zone_splitter);
+        ValidateRect(resize_layer_list, nullptr);
+        SendMessageW(right_zone_splitter, WM_KEYDOWN, VK_LEFT, 0);
+        layer_list_shrink_painted =
+            has_no_pending_update(resize_layer_list);
+        ValidateRect(resize_layer_list, nullptr);
+        SendMessageW(right_zone_splitter, WM_KEYDOWN, VK_RIGHT, 0);
+        layer_list_grow_painted = has_no_pending_update(resize_layer_list);
+    }
+    if (tool_counter_attached) {
+        RemoveWindowSubclass(
+            resize_right_tool_tabs,
+            WindowMessageCounterProcedure,
+            kToolTabRebuildCounterSubclass);
+    }
+    if (color_counter_attached) {
+        RemoveWindowSubclass(
+            resize_color_list,
+            WindowMessageCounterProcedure,
+            kColorListRebuildCounterSubclass);
+    }
+    if (layer_counter_attached) {
+        RemoveWindowSubclass(
+            resize_layer_list,
+            WindowMessageCounterProcedure,
+            kLayerListRebuildCounterSubclass);
+    }
+    right_zone = state.Workspace().windows.workspace.dock.Zone(DockZone::Right);
+    if (!tool_counter_attached || !color_counter_attached
+        || !layer_counter_attached || right_zone == nullptr) {
+        return 11006;
+    }
+    if (right_zone->extent_dip != right_extent_before) {
+        return 11007;
+    }
+    if (tool_tab_rebuilds.count != 0U) {
+        return 11008;
+    }
+    if (color_list_rebuilds.count != 0U) {
+        return 11009;
+    }
+    if (layer_list_rebuilds.count != 0U) {
+        return 11010;
+    }
+    if (!layer_list_shrink_painted) {
+        return 11011;
+    }
+    if (!layer_list_grow_painted) {
+        return 11012;
     }
     const HWND fill_expand = GetDlgItem(
         state.Workspace().tools.palette,

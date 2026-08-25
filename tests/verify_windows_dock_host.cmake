@@ -21,8 +21,10 @@ set(LIGHT_TABLE_SOURCE "${UI_DIR}/panes/light_table_pane.cpp")
 set(REFERENCE_SOURCE "${UI_DIR}/panes/subpalette_pane.cpp")
 set(BATCH_SOURCE "${UI_DIR}/dialogs/batch_dialog.cpp")
 set(LAYER_PALETTE_SOURCE "${UI_DIR}/dialogs/layer_palette.cpp")
+set(COLOR_PANE_SOURCE "${UI_DIR}/panes/color_dock_pane.cpp")
 set(PROGRESS_SOURCE "${UI_DIR}/dialogs/effects_dialogs.cpp")
 set(PROGRESS_HEADER "${UI_DIR}/dialogs/effects_dialogs.h")
+set(SMOKE_SOURCE "${INKPOD_SOURCE_DIR}/apps/windows/app/app_smoke.cpp")
 
 foreach(FILE IN ITEMS
         "${MODEL_HEADER}"
@@ -43,8 +45,10 @@ foreach(FILE IN ITEMS
         "${REFERENCE_SOURCE}"
         "${BATCH_SOURCE}"
         "${LAYER_PALETTE_SOURCE}"
+        "${COLOR_PANE_SOURCE}"
         "${PROGRESS_SOURCE}"
-        "${PROGRESS_HEADER}")
+        "${PROGRESS_HEADER}"
+        "${SMOKE_SOURCE}")
     if(NOT EXISTS "${FILE}")
         message(FATAL_ERROR "Missing G7 source: ${FILE}")
     endif()
@@ -160,7 +164,17 @@ foreach(REQUIRED IN ITEMS "case IDCANCEL:" "case WM_CLOSE:")
     endif()
 endforeach()
 
+file(READ "${HOST_HEADER}" HOST_INTERFACE)
 file(READ "${HOST_SOURCE}" HOST)
+foreach(REQUIRED IN ITEMS
+        "enum class DockHostChangeKind"
+        "DockHostChangeKind::Geometry"
+        "DockHostChangeKind::Structure")
+    string(FIND "${HOST_INTERFACE}${HOST}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR "DockHost change classification is missing: ${REQUIRED}")
+    endif()
+endforeach()
 foreach(REQUIRED IN ITEMS
         "WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME"
         "SetParent(pane.content, pane.floating_window)"
@@ -256,11 +270,28 @@ foreach(REQUIRED IN ITEMS
         "WM_PAINT"
         "WM_MOUSELEAVE"
         "WM_GETDLGCODE"
+        "WS_CLIPCHILDREN"
+        "layer_list_geometry_changed"
+        "RDW_UPDATENOW | RDW_NOERASE"
         "IDS_LAYER_PLANE_SPLITTER")
     string(FIND "${LAYER_PALETTE}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
         message(FATAL_ERROR
             "Layer/Plane pane presentation is missing: ${REQUIRED}")
+    endif()
+endforeach()
+
+file(READ "${COLOR_PANE_SOURCE}" COLOR_PANE)
+if(COLOR_PANE MATCHES "RDW_ALLCHILDREN")
+    message(FATAL_ERROR
+        "Color pane resize still forces an erase/redraw of every child")
+endif()
+foreach(REQUIRED IN ITEMS
+        "InvalidateRect(picker, nullptr, FALSE)"
+        "PlacePaneDialogControl")
+    string(FIND "${COLOR_PANE}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR "Color pane bounded resize repaint is missing: ${REQUIRED}")
     endif()
 endforeach()
 
@@ -301,10 +332,27 @@ foreach(REQUIRED IN ITEMS
         "DockPaneType::JobProgress, state.Workspace().job_progress"
         "WM_SYSCOLORCHANGE"
         "RDW_ALLCHILDREN"
+        "if (kind == DockHostChangeKind::Structure)"
+        "RelayoutWorkspace(*state, kind)"
         "NotifyDockHostChanged")
     string(FIND "${RUNTIME}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
         message(FATAL_ERROR "Primary pane DockHost integration is missing: ${REQUIRED}")
+    endif()
+endforeach()
+
+file(READ "${SMOKE_SOURCE}" SMOKE)
+foreach(REQUIRED IN ITEMS
+        "right_zone_splitter"
+        "TCM_DELETEALLITEMS"
+        "color_list_rebuilds"
+        "layer_list_rebuilds"
+        "layer_list_shrink_painted"
+        "layer_list_grow_painted")
+    string(FIND "${SMOKE}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR
+            "Right splitter continuous-resize regression evidence is missing: ${REQUIRED}")
     endif()
 endforeach()
 foreach(REQUIRED IN ITEMS

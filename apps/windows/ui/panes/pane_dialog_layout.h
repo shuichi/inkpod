@@ -16,6 +16,25 @@ inline int ScalePaneDip(HWND dialog, int value) noexcept {
     return MulDiv(value, static_cast<int>(dpi == 0U ? 96U : dpi), 96);
 }
 
+inline bool PaneWindowHasBounds(
+    HWND child, int x, int y, int width, int height) noexcept {
+    RECT bounds{};
+    if (child == nullptr || GetWindowRect(child, &bounds) == FALSE) {
+        return false;
+    }
+    const HWND parent = GetParent(child);
+    POINT top_left{bounds.left, bounds.top};
+    POINT bottom_right{bounds.right, bounds.bottom};
+    if (parent != nullptr
+        && (ScreenToClient(parent, &top_left) == FALSE
+            || ScreenToClient(parent, &bottom_right) == FALSE)) {
+        return false;
+    }
+    return top_left.x == x && top_left.y == y
+        && bottom_right.x - top_left.x == std::max(0, width)
+        && bottom_right.y - top_left.y == std::max(0, height);
+}
+
 inline void PlacePaneDialogControl(
     HWND dialog,
     int control,
@@ -25,6 +44,9 @@ inline void PlacePaneDialogControl(
     int height) noexcept {
     const HWND child = GetDlgItem(dialog, control);
     if (child == nullptr) {
+        return;
+    }
+    if (PaneWindowHasBounds(child, x, y, width, height)) {
         return;
     }
     SetWindowPos(

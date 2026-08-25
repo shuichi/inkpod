@@ -1237,7 +1237,8 @@ void RelayoutEditorArea(ApplicationHost& state) noexcept {
             state.Workspace().windows,
             state.lifetime.smoke_test,
             client.right - client.left,
-            client.bottom - client.top);
+            client.bottom - client.top,
+            DockHostChangeKind::Geometry);
     }
 }
 
@@ -13949,14 +13950,17 @@ void ClampWorkspaceOwnedWindows(ApplicationHost& state) noexcept {
         state.Workspace().windows.window, layout));
 }
 
-void RelayoutWorkspace(ApplicationHost& state) noexcept {
+void RelayoutWorkspace(
+    ApplicationHost& state,
+    DockHostChangeKind dock_change = DockHostChangeKind::Structure) noexcept {
     RECT client{};
     if (GetClientRect(state.Workspace().windows.window, &client) != FALSE) {
         inkpod::windows::ui::LayoutMainChrome(
             state.Workspace().windows,
             state.lifetime.smoke_test,
             client.right - client.left,
-            client.bottom - client.top);
+            client.bottom - client.top,
+            dock_change);
     }
 }
 
@@ -13987,18 +13991,49 @@ void ApplyOrDeferWorkspacePresentation(ApplicationHost& state) noexcept {
     UpdateMenuState(state);
 }
 
-void NotifyDockHostChanged(void* context) noexcept {
+void ClearWorkspacePresetSelection(ApplicationHost& state) noexcept {
+    constexpr std::array<UINT, 5U> kPresetCommands{
+        IDM_WORKSPACE_PRESET_COLORING,
+        IDM_WORKSPACE_PRESET_LINE_CLEANUP,
+        IDM_WORKSPACE_PRESET_REFERENCE,
+        IDM_WORKSPACE_PRESET_BATCH,
+        IDM_WORKSPACE_PRESET_FOCUS};
+    const HMENU menu = GetMenu(state.Workspace().windows.window);
+    for (const UINT command : kPresetCommands) {
+        if (menu != nullptr) {
+            CheckMenuItem(menu, command, MF_BYCOMMAND | MF_UNCHECKED);
+        }
+        for (auto& command_state : state.Workspace().command_states) {
+            if (command_state.command == command) {
+                command_state.checked = false;
+                break;
+            }
+        }
+    }
+}
+
+void NotifyDockHostChanged(
+    void* context, DockHostChangeKind kind) noexcept {
     auto* state = ActivateWorkspaceContext(context);
     if (state == nullptr) {
         return;
     }
+    const bool preset_changed =
+        state->Workspace().windows.workspace.selected_preset
+        != WorkspacePreset::Custom;
     state->Workspace().windows.workspace.selected_preset =
         WorkspacePreset::Custom;
-    RelayoutWorkspace(*state);
-    RefreshColorPanes(*state);
-    RefreshDockPaneViews(*state);
-    RefreshTreePane(*state);
-    UpdateMenuState(*state);
+    RelayoutWorkspace(*state, kind);
+    if (kind == DockHostChangeKind::Structure) {
+        RefreshColorPanes(*state);
+        RefreshDockPaneViews(*state);
+        RefreshTreePane(*state);
+    }
+    if (kind == DockHostChangeKind::Structure) {
+        UpdateMenuState(*state);
+    } else if (preset_changed) {
+        ClearWorkspacePresetSelection(*state);
+    }
 }
 
 bool InitializeMainChrome(ApplicationHost& state) noexcept {
@@ -19037,7 +19072,8 @@ std::optional<LRESULT> RouteWindowLifecycleMessage(
                     state->Workspace().windows,
                     state->lifetime.smoke_test,
                     LOWORD(lparam),
-                    HIWORD(lparam));
+                    HIWORD(lparam),
+                    DockHostChangeKind::Geometry);
             }
             return 0;
         case WM_NOTIFY:

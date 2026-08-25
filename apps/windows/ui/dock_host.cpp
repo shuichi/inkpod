@@ -70,11 +70,42 @@ bool HasArea(const DockRect& value) noexcept {
     return value.width > 0 && value.height > 0;
 }
 
+bool WindowMatchesPlacement(
+    HWND window, const DockRect& bounds, bool visible) noexcept {
+    const bool show = visible && HasArea(bounds);
+    const bool has_visible_style =
+        (GetWindowLongPtrW(window, GWL_STYLE) & WS_VISIBLE) != 0;
+    if (has_visible_style != show) {
+        return false;
+    }
+    if (!show) {
+        return true;
+    }
+    RECT current{};
+    if (GetWindowRect(window, &current) == FALSE) {
+        return false;
+    }
+    const HWND parent = GetParent(window);
+    POINT top_left{current.left, current.top};
+    POINT bottom_right{current.right, current.bottom};
+    if (parent != nullptr
+        && (ScreenToClient(parent, &top_left) == FALSE
+            || ScreenToClient(parent, &bottom_right) == FALSE)) {
+        return false;
+    }
+    return top_left.x == bounds.x && top_left.y == bounds.y
+        && bottom_right.x - top_left.x == std::max(0, bounds.width)
+        && bottom_right.y - top_left.y == std::max(0, bounds.height);
+}
+
 void PlaceWindow(HWND window, const DockRect& bounds, bool visible) noexcept {
     if (window == nullptr) {
         return;
     }
     const bool show = visible && HasArea(bounds);
+    if (WindowMatchesPlacement(window, bounds, visible)) {
+        return;
+    }
     SetWindowPos(
         window,
         nullptr,
@@ -361,7 +392,9 @@ bool DockHost::AttachPane(DockPaneType type, HWND content) noexcept {
 }
 
 void DockHost::ApplyLayout(
-    const DockLayoutGeometry& geometry, UINT dpi) noexcept {
+    const DockLayoutGeometry& geometry,
+    UINT dpi,
+    DockHostChangeKind kind) noexcept {
     if (!initialized_ || model_ == nullptr) {
         return;
     }
@@ -369,9 +402,10 @@ void DockHost::ApplyLayout(
     geometry_ = geometry;
     dpi_ = dpi == 0U ? 96U : dpi;
     static_cast<void>(UpdateTabFont(dpi_));
-    ApplyToolTabLayout();
+    const bool synchronize_items = kind == DockHostChangeKind::Structure;
+    ApplyToolTabLayout(synchronize_items);
     for (TabHostState& tabs : tab_states_) {
-        ApplyTabLayout(tabs);
+        ApplyTabLayout(tabs, synchronize_items);
     }
     for (PaneHostState& pane : panes_) {
         ApplyPaneLayout(pane);
@@ -1013,7 +1047,8 @@ void DockHost::ApplyPaneLayout(PaneHostState& pane) noexcept {
         geometry.shown && !geometry.temporarily_auto_hidden);
 }
 
-void DockHost::ApplyTabLayout(TabHostState& tabs) noexcept {
+void DockHost::ApplyTabLayout(
+    TabHostState& tabs, bool synchronize_items) noexcept {
     if (model_ == nullptr || !IsDockedZone(tabs.zone)) {
         return;
     }
@@ -1030,15 +1065,17 @@ void DockHost::ApplyTabLayout(TabHostState& tabs) noexcept {
             PlaceWindow(tabs.control, {}, false);
             return;
         }
-        TabCtrl_DeleteAllItems(tabs.control);
-        wchar_t title[128]{};
-        TCITEMW item{};
-        item.mask = TCIF_TEXT | TCIF_PARAM;
-        item.pszText = const_cast<wchar_t*>(
-            LoadPaneTitle(instance_, *descriptor, title));
-        item.lParam = static_cast<LPARAM>(type);
-        TabCtrl_InsertItem(tabs.control, 0, &item);
-        TabCtrl_SetCurSel(tabs.control, 0);
+        if (synchronize_items) {
+            TabCtrl_DeleteAllItems(tabs.control);
+            wchar_t title[128]{};
+            TCITEMW item{};
+            item.mask = TCIF_TEXT | TCIF_PARAM;
+            item.pszText = const_cast<wchar_t*>(
+                LoadPaneTitle(instance_, *descriptor, title));
+            item.lParam = static_cast<LPARAM>(type);
+            TabCtrl_InsertItem(tabs.control, 0, &item);
+            TabCtrl_SetCurSel(tabs.control, 0);
+        }
         DockRect bounds = pane_geometry.bounds;
         bounds.height = std::min(bounds.height, ScaleDip(kTabHeightDip, dpi_));
         PlaceWindow(tabs.control, bounds, true);
@@ -1070,26 +1107,29 @@ void DockHost::ApplyTabLayout(TabHostState& tabs) noexcept {
         [](const OrderedPane& left, const OrderedPane& right) {
             return left.order < right.order;
         });
-    TabCtrl_DeleteAllItems(tabs.control);
-    int selected{};
-    for (std::size_t index = 0U; index < count; ++index) {
-        const PaneDescriptor* descriptor = FindPaneDescriptor(ordered[index].type);
-        if (descriptor == nullptr) {
-            continue;
+    if (synchronize_items) {
+        TabCtrl_DeleteAllItems(tabs.control);
+        int selected{};
+        for (std::size_t index = 0U; index < count; ++index) {
+            const PaneDescriptor* descriptor = FindPaneDescriptor(
+                ordered[index].type);
+            if (descriptor == nullptr) {
+                continue;
+            }
+            wchar_t title[128]{};
+            TCITEMW item{};
+            item.mask = TCIF_TEXT | TCIF_PARAM;
+            item.pszText = const_cast<wchar_t*>(
+                LoadPaneTitle(instance_, *descriptor, title));
+            item.lParam = static_cast<LPARAM>(ordered[index].type);
+            TabCtrl_InsertItem(tabs.control, static_cast<int>(index), &item);
+            const DockPanePlacement* pane = model_->Pane(ordered[index].type);
+            if (pane != nullptr && pane->active_tab) {
+                selected = static_cast<int>(index);
+            }
         }
-        wchar_t title[128]{};
-        TCITEMW item{};
-        item.mask = TCIF_TEXT | TCIF_PARAM;
-        item.pszText = const_cast<wchar_t*>(
-            LoadPaneTitle(instance_, *descriptor, title));
-        item.lParam = static_cast<LPARAM>(ordered[index].type);
-        TabCtrl_InsertItem(tabs.control, static_cast<int>(index), &item);
-        const DockPanePlacement* pane = model_->Pane(ordered[index].type);
-        if (pane != nullptr && pane->active_tab) {
-            selected = static_cast<int>(index);
-        }
+        TabCtrl_SetCurSel(tabs.control, selected);
     }
-    TabCtrl_SetCurSel(tabs.control, selected);
     DockRect bounds{};
     if (count > 0U) {
         bounds = geometry_.panes[PaneIndex(ordered[0].type)].bounds;
@@ -1098,41 +1138,44 @@ void DockHost::ApplyTabLayout(TabHostState& tabs) noexcept {
     PlaceWindow(tabs.control, bounds, true);
 }
 
-void DockHost::ApplyToolTabLayout() noexcept {
+void DockHost::ApplyToolTabLayout(bool synchronize_items) noexcept {
     if (right_tool_tab_control_ == nullptr || right_tool_tabs_ == nullptr) {
         return;
     }
-    TabCtrl_DeleteAllItems(right_tool_tab_control_);
-    int selected = -1;
-    int visible_index{};
-    for (const ToolTab& tab : right_tool_tabs_->Tabs()) {
-        TCITEMW item{};
-        item.mask = TCIF_TEXT | TCIF_PARAM;
-        item.pszText = const_cast<wchar_t*>(ToolTabTitle(tab));
-        item.lParam = static_cast<LPARAM>(tab.id.Value());
-        TabCtrl_InsertItem(right_tool_tab_control_, visible_index, &item);
-        if (tab.id == right_tool_tabs_->Selected()) {
-            selected = visible_index;
+    const int visible_count = static_cast<int>(right_tool_tabs_->Tabs().size());
+    if (synchronize_items) {
+        TabCtrl_DeleteAllItems(right_tool_tab_control_);
+        int selected = -1;
+        int visible_index{};
+        for (const ToolTab& tab : right_tool_tabs_->Tabs()) {
+            TCITEMW item{};
+            item.mask = TCIF_TEXT | TCIF_PARAM;
+            item.pszText = const_cast<wchar_t*>(ToolTabTitle(tab));
+            item.lParam = static_cast<LPARAM>(tab.id.Value());
+            TabCtrl_InsertItem(right_tool_tab_control_, visible_index, &item);
+            if (tab.id == right_tool_tabs_->Selected()) {
+                selected = visible_index;
+            }
+            ++visible_index;
         }
-        ++visible_index;
-    }
-    TabCtrl_SetCurSel(right_tool_tab_control_, selected);
-    if (const ToolTab* active = right_tool_tabs_->SelectedTab(); active != nullptr) {
-        std::array<wchar_t, kMaximumToolTabDescriptionLength> description{};
-        if (ToolTabDescription(*active, description)) {
-            static_cast<void>(SetAccessibleName(
-                right_tool_tab_control_, description.data()));
+        TabCtrl_SetCurSel(right_tool_tab_control_, selected);
+        if (const ToolTab* active = right_tool_tabs_->SelectedTab(); active != nullptr) {
+            std::array<wchar_t, kMaximumToolTabDescriptionLength> description{};
+            if (ToolTabDescription(*active, description)) {
+                static_cast<void>(SetAccessibleName(
+                    right_tool_tab_control_, description.data()));
+            }
         }
     }
     PlaceWindow(
         right_tool_tab_control_,
         geometry_.right_tool_tabs,
-        visible_index > 0);
+        visible_count > 0);
 }
 
-void DockHost::NotifyChanged() noexcept {
+void DockHost::NotifyChanged(DockHostChangeKind kind) noexcept {
     if (!applying_ && changed_ != nullptr) {
-        changed_(changed_context_);
+        changed_(changed_context_, kind);
     }
 }
 
@@ -1438,7 +1481,7 @@ void DockHost::CaptureFloatingPlacement(PaneHostState& pane) noexcept {
         PixelsToDip(bounds.top, dpi),
         PixelsToDip(bounds.right - bounds.left, dpi),
         PixelsToDip(bounds.bottom - bounds.top, dpi)};
-    NotifyChanged();
+    NotifyChanged(DockHostChangeKind::Geometry);
 }
 
 void DockHost::UpdateZoneExtentFromPoint(
@@ -1464,7 +1507,7 @@ void DockHost::UpdateZoneExtentFromPoint(
     const DockResult result = model_->SetZoneExtentDip(
         splitter.geometry.zone, PixelsToDip(std::max(1, extent), dpi_));
     if (result == DockResult::Ok) {
-        NotifyChanged();
+        NotifyChanged(DockHostChangeKind::Geometry);
     }
 }
 
@@ -1500,7 +1543,7 @@ void DockHost::UpdateStackBoundaryFromPoint(
             delta_milli);
     }
     if (result == DockResult::Ok) {
-        NotifyChanged();
+        NotifyChanged(DockHostChangeKind::Geometry);
     }
 }
 
@@ -1781,7 +1824,7 @@ LRESULT CALLBACK DockHost::SplitterSubclassProcedure(
                 }
             }
             if (result == DockResult::Ok) {
-                splitter->host->NotifyChanged();
+                splitter->host->NotifyChanged(DockHostChangeKind::Geometry);
             }
             return 0;
         }

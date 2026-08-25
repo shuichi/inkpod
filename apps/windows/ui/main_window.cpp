@@ -140,7 +140,8 @@ void RelayoutFromSplitter(app::MainWindowHandles& windows) noexcept {
             windows,
             false,
             client.right - client.left,
-            client.bottom - client.top);
+            client.bottom - client.top,
+            DockHostChangeKind::Geometry);
     }
 }
 
@@ -471,7 +472,8 @@ void LayoutMainChrome(
     app::MainWindowHandles& windows,
     bool smoke_test,
     int width,
-    int height) noexcept {
+    int height,
+    DockHostChangeKind dock_change) noexcept {
     int status_height{};
     if (!smoke_test && windows.status_bar != nullptr) {
         SendMessageW(windows.status_bar, WM_SIZE, 0, 0);
@@ -501,7 +503,7 @@ void LayoutMainChrome(
         windows.workspace);
     windows.workspace.last_client_width = width;
     windows.workspace.last_client_height = height;
-    windows.dock_host.ApplyLayout(layout.dock, dpi);
+    windows.dock_host.ApplyLayout(layout.dock, dpi, dock_change);
     for (std::size_t index = 0U; index < windows.auto_hide_buttons.size(); ++index) {
         const auto* pane = FindWorkspaceAuxiliaryPane(
             windows.workspace, static_cast<WorkspaceAuxiliaryPane>(index));
