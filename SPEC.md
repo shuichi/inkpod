@@ -91,7 +91,10 @@ Windows GUI は標準的な Windows 11 desktop application とし、古典的 MD
 - 下段の status bar は現在 tool/active plane、document 座標、zoom/view flip/grid、pixel RGBA/selection 寸法、文書寸法/DPI、処理進捗、dirty 状態、複数ストローク入力待ちを短く表示する。
 - menu、shortcut、context menu、pane button は同じ command ID と enable/checked state を共有する。command 発行時に immutable な `CommandContext` として workspace、group、session、view、pane/job、generation を確定し、非同期実行時に active tab を再解決しない。stale target は明示 error または安全な no-op とし、現在 active な別文書へ fallback しない。
 - 全ての実行可能な menu 末端項目に shortcut を割り当て、menu label に現在の割当を表示する。`Ctrl+S`、`Ctrl+O`、Undo/Redo、clipboard など標準操作は一般的な割当を維持する。描画・選択・塗りなど高頻度操作は、text 入力に focus がないときの single stroke を基本とする。その他は短い prefix-free な multi-stroke を使い、入力待ちを status bar に表示する。
-- 色 palette の `1`–`0`、次 group の `Tab` は数値入力中でない場合の高速操作として保持する。shortcut は検索可能な設定 dialog で最大4 strokeまで再割当てでき、完全一致の衝突は元の割当と交換し、prefix 衝突は拒否する。
+- 色 palette の `1`–`0`、次 group の `Tab` は数値入力中でない場合の高速操作として保持する。shortcut は検索可能なタブ式の環境設定 dialog で編集し、組み込み preset は全 command に完全な既定割当を持つ。ユーザー preset は組み込み preset の複製から作成し、command ごとに主キーと任意の副キーを持ち、各割当を未設定または最大4 stroke の列として再割当てできる。
+- shortcut 割当は `Global`、`Canvas`、`Timeline`、`Pane` の context、`Execute`、`Hold`、`Toggle` の action、論理キーまたは物理位置の照合方式を型付き値として持つ。`Global` は全 context と重なり、その他は同じ context 同士だけが重なる。重なる context の完全一致は解決待ちの競合として編集候補内に保持できるが、未解決競合がある候補は適用または永続化しない。解決操作は競合相手の解除または主／副割当の交換とし、prefix 衝突は候補作成時に拒否する。`Hold` は一時 tool 等の明示対応 command、`Toggle` は表示切替等の明示対応 command だけが選択できる。
+- shortcut editor は command 名、stable command key、割当キーの文字検索、入力キー検索、context filter、category／競合／変更あり／未割当の件数と絞り込み、競合の前後移動、選択 command の詳細と既定値、修飾キー別の物理 keyboard 可視化を持つ。keyboard 表示は自動、JIS 109、US ANSI 104 を選択でき、キー選択で割当へ移動し、command の drag で割当を作成できる。Win 修飾キーは表示と通常の foreground 入力で扱うが、OS 予約 shortcut を奪う global hook は使わない。
+- shortcut preset の import/export は current-version の `.inkshortcuts` だけを受理する versioned、length-bounded な application data format とする。unknown version、不正 UTF、duplicate command/slot、範囲外 count、trailing data、未対応 enum、未解決競合を拒否し、export は同一 volume の temporary file を完成、flush、close してから置換する。
 - tab drag は同一 group 内の並べ替え、別 group/window への移動、window 外 drop による新規 window を扱う。active stroke、pointer capture、modal preview 中は開始せず、`Esc` で cancel した場合は元の位置を完全復元する。同じ操作は drag に依存せず menu と keyboard からも実行できる。
 - `Ctrl+Tab`/`Ctrl+Shift+Tab` は tab、`Ctrl+F6`/`Ctrl+Shift+F6` は editor group/view、`F6`/`Shift+F6` は menu・dock pane・editor area・status の focus、`Ctrl+F4` は view close に使う。tab、splitter、pane header、AutoHide、target、dirty、job progress と command の disabled state は UI Automation から取得できるようにする。
 - 数値入力と選択肢を共有する modal dialog は、選択肢ごとに標準 combo box を使い、owner window の中央かつ monitor work area 内へ配置する。Cancel は表示前の状態を変えない。
@@ -99,7 +102,7 @@ Windows GUI は標準的な Windows 11 desktop application とし、古典的 MD
 
 ### 3. メニュー構成
 
-UI 表示文字列は、日本語と英語を言語非依存の型付き ID で参照する一つの catalog で管理する。単語単位の部分置換で表示文を組み立てず、各言語の完成した文または format string を catalog に置く。文書名、path、Light Table set 名等のユーザー所有文字列は翻訳せず、catalog 由来の prefix/suffix と明示的に合成する。`編集 > 設定 > 言語` で `システム設定`、`日本語`、`English` を選択でき、次回起動から process 内の全 workspace に適用する。`システム設定` は Windows の第1優先 UI 言語が `ja` の場合だけ日本語を選び、それ以外または判定不能時は英語を選ぶ。選択値は versioned、bounded な HKCU application setting として保存し、不正 record は `システム設定` へ戻す。言語は文書、履歴、native file、ユーザー入力の名前や path に混ぜない。実行可能な button、checkbox 等の catalog 由来 caption は、各 pane の最小幅と 96/120/144/192 DPI 相当の標準 UI font で全文を表示し、必要なら操作行を折り返す。省略表示を許すのは文書名や path 等の可変長ユーザー所有文字列であり、操作 caption の切り詰め、略称化、font 縮小で代用しない。以下は機能上必要な top-level menu と command です。Windows の標準慣習に合わせた mnemonic、ellipsis、並びの小調整は許可します。
+UI 表示文字列は、日本語と英語を言語非依存の型付き ID で参照する一つの catalog で管理する。単語単位の部分置換で表示文を組み立てず、各言語の完成した文または format string を catalog に置く。文書名、path、Light Table set 名等のユーザー所有文字列は翻訳せず、catalog 由来の prefix/suffix と明示的に合成する。`編集 > 環境設定 > 全般` で `システム設定`、`日本語`、`English` を選択でき、次回起動から process 内の全 workspace に適用する。`システム設定` は Windows の第1優先 UI 言語が `ja` の場合だけ日本語を選び、それ以外または判定不能時は英語を選ぶ。選択値は versioned、bounded な HKCU application setting として保存し、不正 record は `システム設定` へ戻す。言語は文書、履歴、native file、ユーザー入力の名前や path に混ぜない。実行可能な button、checkbox 等の catalog 由来 caption は、各 pane の最小幅と 96/120/144/192 DPI 相当の標準 UI font で全文を表示し、必要なら操作行を折り返す。省略表示を許すのは文書名や path 等の可変長ユーザー所有文字列であり、操作 caption の切り詰め、略称化、font 縮小で代用しない。以下は機能上必要な top-level menu と command です。Windows の標準慣習に合わせた mnemonic、ellipsis、並びの小調整は許可します。
 
 #### ファイル
 
@@ -125,10 +128,8 @@ UI 表示文字列は、日本語と英語を言語非依存の型付き ID で�
 - `線修正 > 線つなぎ/線幅修正`: selection または tool で指定した範囲へ適用する。
 - `スナップ > ガイド/グリッド`: checked state を表示する。
 - `アルファ使用モード`: alpha 対応の描画、読み込み、保存を有効にする。
-- `設定 > ショートカット`: menu/tool/other command を分類し、衝突する新割当は既存 command から解除する。`すべて戻す` で既定値へ戻す。
-- `設定 > 言語`: `システム設定`、`日本語`、`English` の checked state を表示し、選択を次回起動用に保存する。
+- `編集 > 環境設定`: application／workspace 単位の環境設定を category tab に集約する。少なくとも全般、保存・復元、workspace、animation、color 管理、keyboard shortcut を持ち、document、view、tool、batch operation 固有の設定を混ぜない。dialog は typed initial value と候補だけを所有し、`適用`／`OK` の検証と永続化が成功するまで live state を変更せず、`キャンセル` は最後の適用後の状態へ完全に戻す。shortcut page は上記の preset、検索、競合、一覧、詳細、物理 keyboard を提供し、command 数と各 category 件数を production command catalog から算出する。
 - `設定 > グリッド`: 間隔、分割数、原点を指定する。
-- `設定 > 環境設定`: 色、透明表示、保存、cursor、performance、language 等を分類する。
 
 #### セル
 
@@ -673,7 +674,8 @@ UI／ABIを production contract とする。M23で批准済みcatalogを使うRu
 - `SEQ-ENDPOINT-001`: application-wideの`Stop`／`Wrap`端点policy、empty／one／stopped／advanced／wrapped result、issue-time cell identity、motion loopとの分離、versioned HKCU persistence
 - `SEQ-STRUCT-001`: Cut membership の add／remove／move-before／move-after／range renumber を stable Cell identity の一 transaction として行い、表示順／番号を file 名から分離し、Cut 専用 Undo／Redo、save／reopen、orphan 状態を提供する
 - `SEQ-002`: motion check、FPS、loop、step、selection/light table option
-- `SHORT-001`: 全 menu command への single/multi-stroke shortcut、text-focus guard、prefix-free resolve、conflict replacement、永続化、reset
+- `PREF-001`: application／workspace 環境設定を集約するタブ式 dialog、候補 state、Apply／OK／Cancel 原子性、scope と再起動要否の表示
+- `SHORT-001`: 完全な組み込み preset と未割当可能なユーザー preset、主／副の最大4-stroke shortcut、Global／Canvas／Timeline／Pane context、Execute／Hold／Toggle action、論理／物理照合、text-focus guard、context-aware prefix-free resolve、競合解決、検索／分類／keyboard 可視化、`.inkshortcuts` current-version import/export、永続化、reset
 
 ### Image processing and batch
 

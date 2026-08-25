@@ -2824,7 +2824,7 @@
       "kind": "text",
       "ja": "システム設定",
       "en": "System Default",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0196",
@@ -2859,7 +2859,7 @@
       "kind": "text",
       "ja": "ショートカットを初期化",
       "en": "Reset Shortcuts",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0201",
@@ -2878,8 +2878,8 @@
     {
       "id": "Text0203",
       "kind": "text",
-      "ja": "ショートカット編集...",
-      "en": "Edit Shortcuts...",
+      "ja": "環境設定...",
+      "en": "Preferences...",
       "resource": true
     },
     {
@@ -6303,7 +6303,7 @@
       "kind": "text",
       "ja": "日本語",
       "en": "Japanese",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0722",
@@ -7563,7 +7563,7 @@
       "kind": "text",
       "ja": "言語",
       "en": "Language",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0911",
@@ -8578,7 +8578,7 @@
       "kind": "text",
       "ja": "English",
       "en": "English",
-      "resource": true
+      "resource": false
     },
     {
       "id": "AboutInkpod",
@@ -8977,6 +8977,552 @@
       "kind": "text",
       "ja": "画像を読み込めませんでした。前の画像を保持します。",
       "en": "The image could not be loaded. The previous image is retained.",
+      "resource": false
+    },
+    {
+      "id": "PreferencesTitle",
+      "kind": "text",
+      "ja": "環境設定",
+      "en": "Preferences",
+      "resource": false
+    },
+    {
+      "id": "PreferencesTabGeneral",
+      "kind": "text",
+      "ja": "一般",
+      "en": "General",
+      "resource": false
+    },
+    {
+      "id": "PreferencesTabSaveRecovery",
+      "kind": "text",
+      "ja": "保存・Recovery",
+      "en": "Save and Recovery",
+      "resource": false
+    },
+    {
+      "id": "PreferencesTabWorkspace",
+      "kind": "text",
+      "ja": "ワークスペース",
+      "en": "Workspace",
+      "resource": false
+    },
+    {
+      "id": "PreferencesTabAnimation",
+      "kind": "text",
+      "ja": "アニメーション",
+      "en": "Animation",
+      "resource": false
+    },
+    {
+      "id": "PreferencesTabColor",
+      "kind": "text",
+      "ja": "カラー管理",
+      "en": "Color Management",
+      "resource": false
+    },
+    {
+      "id": "PreferencesTabShortcuts",
+      "kind": "text",
+      "ja": "キーボードショートカット",
+      "en": "Keyboard Shortcuts",
+      "resource": false
+    },
+    {
+      "id": "PreferencesLanguage",
+      "kind": "text",
+      "ja": "表示言語",
+      "en": "Display language",
+      "resource": false
+    },
+    {
+      "id": "PreferencesLanguageSystem",
+      "kind": "text",
+      "ja": "システム設定に従う",
+      "en": "Use system setting",
+      "resource": false
+    },
+    {
+      "id": "PreferencesLanguageJapanese",
+      "kind": "text",
+      "ja": "日本語",
+      "en": "Japanese",
+      "resource": false
+    },
+    {
+      "id": "PreferencesLanguageEnglish",
+      "kind": "text",
+      "ja": "英語",
+      "en": "English",
+      "resource": false
+    },
+    {
+      "id": "PreferencesLanguageRestart",
+      "kind": "text",
+      "ja": "表示言語の変更は次回起動時に反映されます。",
+      "en": "The display language change takes effect the next time inkpod starts.",
+      "resource": false
+    },
+    {
+      "id": "PreferencesRestoreDocuments",
+      "kind": "text",
+      "ja": "前回開いていた文書を起動時に復元する",
+      "en": "Restore previously open documents at startup",
+      "resource": false
+    },
+    {
+      "id": "PreferencesSequenceSwitch",
+      "kind": "text",
+      "ja": "未保存セルからの移動",
+      "en": "Leaving a modified cell",
+      "resource": false
+    },
+    {
+      "id": "PreferencesSequencePrompt",
+      "kind": "text",
+      "ja": "確認する",
+      "en": "Ask before switching",
+      "resource": false
+    },
+    {
+      "id": "PreferencesSequenceAutosave",
+      "kind": "text",
+      "ja": "保存してから移動する",
+      "en": "Save before switching",
+      "resource": false
+    },
+    {
+      "id": "PreferencesEndpoint",
+      "kind": "text",
+      "ja": "先頭・末尾での移動",
+      "en": "Navigation at sequence endpoints",
+      "resource": false
+    },
+    {
+      "id": "PreferencesEndpointStop",
+      "kind": "text",
+      "ja": "停止する",
+      "en": "Stop",
+      "resource": false
+    },
+    {
+      "id": "PreferencesEndpointWrap",
+      "kind": "text",
+      "ja": "反対側へ循環する",
+      "en": "Wrap to the other end",
+      "resource": false
+    },
+    {
+      "id": "PreferencesOutputGuard",
+      "kind": "text",
+      "ja": "出力色域チェックのプロファイル",
+      "en": "Output color guard profile",
+      "resource": false
+    },
+    {
+      "id": "PreferencesOutputGuardBt709",
+      "kind": "text",
+      "ja": "BT.709 保守的 YCbCr",
+      "en": "BT.709 conservative YCbCr",
+      "resource": false
+    },
+    {
+      "id": "PreferencesWorkspacePreset",
+      "kind": "text",
+      "ja": "レイアウトプリセット",
+      "en": "Layout preset",
+      "resource": false
+    },
+    {
+      "id": "PreferencesWorkspaceMirror",
+      "kind": "text",
+      "ja": "左右のペイン配置を反転する",
+      "en": "Mirror left and right pane placement",
+      "resource": false
+    },
+    {
+      "id": "PreferencesWorkspaceDensity",
+      "kind": "text",
+      "ja": "表示密度",
+      "en": "Display density",
+      "resource": false
+    },
+    {
+      "id": "PreferencesWorkspaceStandard",
+      "kind": "text",
+      "ja": "標準",
+      "en": "Standard",
+      "resource": false
+    },
+    {
+      "id": "PreferencesWorkspaceCompact",
+      "kind": "text",
+      "ja": "コンパクト",
+      "en": "Compact",
+      "resource": false
+    },
+    {
+      "id": "ShortcutPresetLabel",
+      "kind": "text",
+      "ja": "プリセット",
+      "en": "Preset",
+      "resource": false
+    },
+    {
+      "id": "ShortcutBuiltInPreset",
+      "kind": "text",
+      "ja": "既定（inkpod 標準）",
+      "en": "Default (inkpod standard)",
+      "resource": false
+    },
+    {
+      "id": "ShortcutDuplicate",
+      "kind": "text",
+      "ja": "複製",
+      "en": "Duplicate",
+      "resource": false
+    },
+    {
+      "id": "ShortcutImport",
+      "kind": "text",
+      "ja": "インポート",
+      "en": "Import",
+      "resource": false
+    },
+    {
+      "id": "ShortcutExport",
+      "kind": "text",
+      "ja": "エクスポート",
+      "en": "Export",
+      "resource": false
+    },
+    {
+      "id": "ShortcutReset",
+      "kind": "text",
+      "ja": "初期化",
+      "en": "Reset",
+      "resource": false
+    },
+    {
+      "id": "ShortcutSearchPlaceholder",
+      "kind": "text",
+      "ja": "コマンド名・キー名で検索",
+      "en": "Search command or key name",
+      "resource": false
+    },
+    {
+      "id": "ShortcutSearchByKey",
+      "kind": "text",
+      "ja": "キーを押して検索",
+      "en": "Press a key to search",
+      "resource": false
+    },
+    {
+      "id": "ShortcutContextAll",
+      "kind": "text",
+      "ja": "全コンテキスト",
+      "en": "All contexts",
+      "resource": false
+    },
+    {
+      "id": "ShortcutConflictSummaryFormat",
+      "kind": "format",
+      "ja": "重複 %zu 件・要確認 %zu 件",
+      "en": "%zu conflicts · %zu items need review",
+      "resource": false
+    },
+    {
+      "id": "ShortcutPrevious",
+      "kind": "text",
+      "ja": "前へ",
+      "en": "Previous",
+      "resource": false
+    },
+    {
+      "id": "ShortcutNext",
+      "kind": "text",
+      "ja": "次へ",
+      "en": "Next",
+      "resource": false
+    },
+    {
+      "id": "ShortcutConflictsOnly",
+      "kind": "text",
+      "ja": "重複のみ表示",
+      "en": "Show conflicts only",
+      "resource": false
+    },
+    {
+      "id": "ShortcutAllCommands",
+      "kind": "text",
+      "ja": "すべてのコマンド",
+      "en": "All commands",
+      "resource": false
+    },
+    {
+      "id": "ShortcutConflicts",
+      "kind": "text",
+      "ja": "重複",
+      "en": "Conflicts",
+      "resource": false
+    },
+    {
+      "id": "ShortcutChanged",
+      "kind": "text",
+      "ja": "変更あり",
+      "en": "Changed",
+      "resource": false
+    },
+    {
+      "id": "ShortcutUnassigned",
+      "kind": "text",
+      "ja": "未割り当て",
+      "en": "Unassigned",
+      "resource": false
+    },
+    {
+      "id": "ShortcutCommandColumn",
+      "kind": "text",
+      "ja": "コマンド",
+      "en": "Command",
+      "resource": false
+    },
+    {
+      "id": "ShortcutPrimary",
+      "kind": "text",
+      "ja": "主キー",
+      "en": "Primary",
+      "resource": false
+    },
+    {
+      "id": "ShortcutSecondary",
+      "kind": "text",
+      "ja": "副キー",
+      "en": "Secondary",
+      "resource": false
+    },
+    {
+      "id": "ShortcutAction",
+      "kind": "text",
+      "ja": "動作",
+      "en": "Action",
+      "resource": false
+    },
+    {
+      "id": "ShortcutContext",
+      "kind": "text",
+      "ja": "コンテキスト",
+      "en": "Context",
+      "resource": false
+    },
+    {
+      "id": "ShortcutStableKey",
+      "kind": "text",
+      "ja": "コマンド識別子",
+      "en": "Command identifier",
+      "resource": false
+    },
+    {
+      "id": "ShortcutRecordKey",
+      "kind": "text",
+      "ja": "● キーを記録",
+      "en": "● Record keys",
+      "resource": false
+    },
+    {
+      "id": "ShortcutAdd",
+      "kind": "text",
+      "ja": "＋ 追加",
+      "en": "+ Add",
+      "resource": false
+    },
+    {
+      "id": "ShortcutExecute",
+      "kind": "text",
+      "ja": "実行",
+      "en": "Execute",
+      "resource": false
+    },
+    {
+      "id": "ShortcutHold",
+      "kind": "text",
+      "ja": "押している間",
+      "en": "While held",
+      "resource": false
+    },
+    {
+      "id": "ShortcutToggle",
+      "kind": "text",
+      "ja": "切り替え",
+      "en": "Toggle",
+      "resource": false
+    },
+    {
+      "id": "ShortcutGlobal",
+      "kind": "text",
+      "ja": "グローバル",
+      "en": "Global",
+      "resource": false
+    },
+    {
+      "id": "ShortcutCanvas",
+      "kind": "text",
+      "ja": "キャンバス",
+      "en": "Canvas",
+      "resource": false
+    },
+    {
+      "id": "ShortcutTimeline",
+      "kind": "text",
+      "ja": "タイムライン",
+      "en": "Timeline",
+      "resource": false
+    },
+    {
+      "id": "ShortcutPane",
+      "kind": "text",
+      "ja": "ペイン",
+      "en": "Pane",
+      "resource": false
+    },
+    {
+      "id": "ShortcutLogical",
+      "kind": "text",
+      "ja": "論理キー",
+      "en": "Logical key",
+      "resource": false
+    },
+    {
+      "id": "ShortcutPhysical",
+      "kind": "text",
+      "ja": "物理位置",
+      "en": "Physical position",
+      "resource": false
+    },
+    {
+      "id": "ShortcutExactConflict",
+      "kind": "text",
+      "ja": "同じコンテキストでキーが重複しています。",
+      "en": "This key conflicts in the same context.",
+      "resource": false
+    },
+    {
+      "id": "ShortcutGoToOther",
+      "kind": "text",
+      "ja": "相手へ",
+      "en": "Go to other",
+      "resource": false
+    },
+    {
+      "id": "ShortcutClearOther",
+      "kind": "text",
+      "ja": "相手を解除",
+      "en": "Clear other",
+      "resource": false
+    },
+    {
+      "id": "ShortcutSwap",
+      "kind": "text",
+      "ja": "入れ替え",
+      "en": "Swap",
+      "resource": false
+    },
+    {
+      "id": "ShortcutResetCommand",
+      "kind": "text",
+      "ja": "このコマンドを既定に戻す",
+      "en": "Reset this command to default",
+      "resource": false
+    },
+    {
+      "id": "ShortcutModifiers",
+      "kind": "text",
+      "ja": "修飾",
+      "en": "Modifiers",
+      "resource": false
+    },
+    {
+      "id": "ShortcutNone",
+      "kind": "text",
+      "ja": "なし",
+      "en": "None",
+      "resource": false
+    },
+    {
+      "id": "ShortcutKeyboardLayout",
+      "kind": "text",
+      "ja": "キーボード配列",
+      "en": "Keyboard layout",
+      "resource": false
+    },
+    {
+      "id": "ShortcutKeyboardAuto",
+      "kind": "text",
+      "ja": "自動",
+      "en": "Auto",
+      "resource": false
+    },
+    {
+      "id": "ShortcutKeyboardJis",
+      "kind": "text",
+      "ja": "JIS 109",
+      "en": "JIS 109",
+      "resource": false
+    },
+    {
+      "id": "ShortcutKeyboardUs",
+      "kind": "text",
+      "ja": "US ANSI 104",
+      "en": "US ANSI 104",
+      "resource": false
+    },
+    {
+      "id": "ShortcutKeyboardInstruction",
+      "kind": "text",
+      "ja": "キーをクリックすると割り当てへ移動します。コマンドをキーへドラッグして割り当てることもできます。\n凡例: 青=割り当て済み、赤=重複、白=空き",
+      "en": "Click a key to find its assignments, or drag a command onto a key to assign it.\nLegend: blue=assigned, red=conflict, white=unassigned",
+      "resource": false
+    },
+    {
+      "id": "ShortcutStatusFormat",
+      "kind": "format",
+      "ja": "%zu コマンド／割り当て済み %zu／重複 %zu／変更 %zu",
+      "en": "%zu commands / %zu assigned / %zu conflicts / %zu changed",
+      "resource": false
+    },
+    {
+      "id": "ShortcutPresetFileFilter",
+      "kind": "text",
+      "ja": "inkpod ショートカット (*.inkshortcuts)\u0000*.inkshortcuts\u0000\u0000",
+      "en": "inkpod Shortcuts (*.inkshortcuts)\u0000*.inkshortcuts\u0000\u0000",
+      "resource": false
+    },
+    {
+      "id": "ShortcutImportFailed",
+      "kind": "text",
+      "ja": "ショートカットプリセットを読み込めませんでした。現在版の .inkshortcuts を選択してください。",
+      "en": "The shortcut preset could not be read. Select a current-version .inkshortcuts file.",
+      "resource": false
+    },
+    {
+      "id": "ShortcutExportFailed",
+      "kind": "text",
+      "ja": "ショートカットプリセットを安全に書き出せませんでした。",
+      "en": "The shortcut preset could not be exported safely.",
+      "resource": false
+    },
+    {
+      "id": "ShortcutBuiltInReadOnly",
+      "kind": "text",
+      "ja": "組み込みプリセットは読み取り専用です。編集すると複製が作成されます。",
+      "en": "The built-in preset is read-only. Editing creates a duplicate.",
+      "resource": false
+    },
+    {
+      "id": "PreferencesApplyFailed",
+      "kind": "text",
+      "ja": "環境設定を保存または適用できませんでした。変更前の設定を保持します。",
+      "en": "The preferences could not be saved or applied. The previous settings are retained.",
       "resource": false
     }
   ]

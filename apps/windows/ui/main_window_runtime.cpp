@@ -43,6 +43,7 @@
 #include "ui/dialogs/effects_dialogs.h"
 #include "ui/dialogs/history_visualization_dialog.h"
 #include "ui/dialogs/layer_palette.h"
+#include "ui/dialogs/preferences_dialog.h"
 #include "ui/command_state.h"
 #include "ui/command_catalog.h"
 #include "ui/localization.h"
@@ -93,6 +94,8 @@ using inkpod::windows::ui::CellCreationDialogState;
 using inkpod::windows::ui::CutPropertiesDialogState;
 using inkpod::windows::ui::EffectEditorState;
 using inkpod::windows::ui::ShortcutDialogState;
+using inkpod::windows::ui::PreferencesDialogState;
+using inkpod::windows::ui::PreferencesValues;
 using inkpod::windows::ui::TextInputDialogState;
 using inkpod::windows::ui::ViewOptionsDialogState;
 using inkpod::windows::ui::ShootingFrameDialogState;
@@ -105,6 +108,7 @@ using inkpod::windows::ui::ShowEffectEditor;
 using inkpod::windows::ui::SetEffectEditorPreviewStatus;
 using inkpod::windows::ui::ProgressDialogInfo;
 using inkpod::windows::ui::ShowShortcutEditor;
+using inkpod::windows::ui::ShowPreferencesDialog;
 using inkpod::windows::ui::ShowTextInput;
 using inkpod::windows::ui::ShowViewOptions;
 using inkpod::windows::ui::ShowShootingFrameOptions;
@@ -3869,6 +3873,10 @@ std::uint32_t CurrentShortcutModifiers(LPARAM key_data) noexcept {
     if ((GetKeyState(VK_MENU) & 0x8000) != 0) {
         modifiers |= INKPOD_SHORTCUT_MODIFIER_ALT;
     }
+    if ((GetKeyState(VK_LWIN) & 0x8000) != 0
+        || (GetKeyState(VK_RWIN) & 0x8000) != 0) {
+        modifiers |= kShortcutModifierWindows;
+    }
     if ((static_cast<std::uint64_t>(key_data) & (UINT64_C(1) << 24)) != 0U) {
         modifiers |= INKPOD_SHORTCUT_MODIFIER_EXTENDED;
     }
@@ -4059,33 +4067,6 @@ void ShowEmbeddedHelpError(
         return;
     }
     MessageBoxW(owner, message.data(), L"inkpod", MB_OK | MB_ICONERROR);
-}
-
-void ShowShortcutError(
-    const ApplicationHost& state,
-    HWND owner,
-    const wchar_t* operation,
-    InkpodStatus status) noexcept {
-    if (state.lifetime.smoke_test) {
-        return;
-    }
-    if (status == INKPOD_STATUS_INVALID_ARGUMENT) {
-        MessageBoxW(
-            owner,
-            UiText(UiStringId::ShortcutPrefixConflict),
-            L"inkpod",
-            MB_OK | MB_ICONWARNING);
-        return;
-    }
-    if (status == INKPOD_STATUS_IO_ERROR) {
-        MessageBoxW(
-            owner,
-            UiText(UiStringId::Text0543),
-            L"inkpod",
-            MB_OK | MB_ICONWARNING);
-        return;
-    }
-    ShowCoreError(state, owner, operation);
 }
 
 void UpdateFloatingPreview(ApplicationHost& state) noexcept {
@@ -5114,6 +5095,105 @@ void ClearEditorProcedureCapture(ApplicationHost& state) noexcept {
 std::int64_t FloatToQ16(float value) noexcept {
     return static_cast<std::int64_t>(
         std::llround(static_cast<double>(value) * 65536.0));
+}
+
+ShortcutContext ShortcutContextForFocus(
+    WorkspaceWindow& workspace, HWND focus) noexcept {
+    if (focus == nullptr) {
+        return ShortcutContext::Global;
+    }
+    for (std::size_t index = 0U; index < workspace.editors.GroupCount(); ++index) {
+        const auto* group = workspace.editors.GroupAt(index);
+        if (group != nullptr && FocusIsWithin(group->canvas, focus)) {
+            return ShortcutContext::Canvas;
+        }
+    }
+    if (FocusIsWithin(workspace.sequence_palette, focus)
+        || FocusIsWithin(workspace.light_table_palette, focus)) {
+        return ShortcutContext::Timeline;
+    }
+    for (std::size_t index = 0U; index < kDockPaneCount; ++index) {
+        const auto pane = static_cast<DockPaneType>(index);
+        if (pane == DockPaneType::Sequence || pane == DockPaneType::LightTable) {
+            continue;
+        }
+        if (FocusIsWithin(workspace.windows.dock_host.ContentWindow(pane), focus)
+            || FocusIsWithin(workspace.windows.dock_host.FloatingWindow(pane), focus)) {
+            return ShortcutContext::Pane;
+        }
+    }
+    if (FocusIsWithin(workspace.subpalette_palette, focus)) {
+        return ShortcutContext::Pane;
+    }
+    return ShortcutContext::Global;
+}
+
+void ClearHeldShortcut(ShortcutUiState& shortcuts) noexcept {
+    shortcuts.hold_active = false;
+    shortcuts.hold_workspace_window = nullptr;
+    shortcuts.hold_physical_key = 0U;
+    shortcuts.hold_restore_tool = 0U;
+    shortcuts.hold_restore_selection_shape = INKPOD_SELECTION_RECTANGLE;
+    shortcuts.hold_restore_fill_operation = INKPOD_FILL_SEED;
+}
+
+bool ReleaseHeldShortcut(
+    ApplicationHost& state,
+    std::uint32_t physical_key,
+    bool force) noexcept {
+    auto& shortcuts = state.shortcuts;
+    if (!shortcuts.hold_active
+        || (!force && physical_key != shortcuts.hold_physical_key)) {
+        return false;
+    }
+    const HWND target_window = shortcuts.hold_workspace_window;
+    const std::uint32_t restore_tool = shortcuts.hold_restore_tool;
+    const InkpodSelectionShape restore_selection =
+        shortcuts.hold_restore_selection_shape;
+    const InkpodFillOperation restore_fill = shortcuts.hold_restore_fill_operation;
+    ClearHeldShortcut(shortcuts);
+
+    const WorkspaceWindowId previous_workspace = state.Workspace().id;
+    WorkspaceWindow* target = state.WorkspaceForWindow(target_window);
+    if (target == nullptr || !state.ActivateWorkspaceWindow(target->id, false)) {
+        return true;
+    }
+    auto& tools = state.Workspace().tools;
+    if (restore_tool == kInteractionSelection) {
+        tools.selection_shape = restore_selection;
+        (void)SetEditorSelectionOptions(state);
+    } else if (restore_tool == kInteractionFill) {
+        tools.fill_options.operation = restore_fill;
+        (void)SetEditorFillOptions(state, tools.fill_options);
+    }
+    (void)SetEditorActiveTool(state, restore_tool);
+    UpdateMenuState(state);
+    if (previous_workspace != target->id) {
+        (void)state.ActivateWorkspaceWindow(previous_workspace, false);
+    }
+    return true;
+}
+
+bool BeginHeldShortcut(
+    ApplicationHost& state,
+    HWND window,
+    UINT command,
+    std::uint32_t physical_key) noexcept {
+    if (state.shortcuts.hold_active) {
+        return state.shortcuts.hold_physical_key == physical_key;
+    }
+    auto& tools = state.Workspace().tools;
+    state.shortcuts.hold_active = true;
+    state.shortcuts.hold_workspace_window = window;
+    state.shortcuts.hold_physical_key = physical_key;
+    state.shortcuts.hold_restore_tool = tools.active_tool;
+    state.shortcuts.hold_restore_selection_shape = tools.selection_shape;
+    state.shortcuts.hold_restore_fill_operation = tools.fill_options.operation;
+    if (!DispatchEnabledCommand(state, window, command)) {
+        ClearHeldShortcut(state.shortcuts);
+        return false;
+    }
+    return true;
 }
 
 void CancelCoreRasterGeometryPreview(ApplicationHost& state) noexcept {
@@ -13991,6 +14071,72 @@ void ApplyOrDeferWorkspacePresentation(ApplicationHost& state) noexcept {
     UpdateMenuState(state);
 }
 
+bool ApplyPreferencesValues(
+    void* context,
+    const PreferencesValues& values,
+    HWND) noexcept {
+    auto* state = static_cast<ApplicationHost*>(context);
+    if (state == nullptr || state->engine == nullptr) {
+        return false;
+    }
+    const PreferencesValues previous{
+        CurrentUiLanguagePreference(),
+        state->lifetime.restore_previous_documents,
+        state->lifetime.sequence_switch_policy,
+        state->lifetime.sequence_endpoint_policy,
+        OutputColorGuardProfileSetting::Bt709ConservativeYcbcr,
+        state->Workspace().windows.workspace.selected_preset,
+        state->Workspace().windows.workspace.density,
+        state->Workspace().windows.workspace.dock.Mirrored(),
+        state->shortcuts.profile_set};
+
+    CaptureWorkspacePresentation(*state);
+    const WorkspaceLayoutState previous_layout =
+        state->Workspace().windows.workspace;
+    WorkspaceLayoutState candidate_layout = previous_layout;
+    if (values.workspace_preset != WorkspacePreset::Custom
+        && !ApplyWorkspacePreset(candidate_layout, values.workspace_preset)) {
+        return false;
+    }
+    candidate_layout.selected_preset = values.workspace_preset;
+    candidate_layout.density = values.workspace_density;
+    candidate_layout.dock.SetMirrored(values.workspace_mirrored);
+    const auto session_name = WorkspaceRegistryValueName(
+        L"WorkspaceSessionV5", state->Workspace().persistence_slot);
+
+    const auto save_scalar_values = [](const PreferencesValues& item) noexcept {
+        return SaveUiLanguagePreference(item.language)
+            && SaveRestorePreviousDocumentsSetting(
+                item.restore_previous_documents)
+            && SaveSequenceCellSwitchPolicy(item.sequence_switch_policy)
+            && SaveSequenceEndpointPolicy(item.sequence_endpoint_policy)
+            && SaveOutputColorGuardProfileSetting(item.color_profile);
+    };
+    if (!save_scalar_values(values)
+        || !SaveWorkspaceLayout(candidate_layout, session_name.data())) {
+        (void)save_scalar_values(previous);
+        (void)SaveWorkspaceLayout(previous_layout, session_name.data());
+        return false;
+    }
+    const InkpodStatus shortcut_status = ApplyShortcutProfileSet(
+        *state->engine, state->shortcuts, values.shortcuts, true);
+    if (shortcut_status != INKPOD_STATUS_OK) {
+        (void)save_scalar_values(previous);
+        (void)SaveWorkspaceLayout(previous_layout, session_name.data());
+        return false;
+    }
+
+    state->lifetime.restore_previous_documents =
+        values.restore_previous_documents;
+    state->lifetime.sequence_switch_policy = values.sequence_switch_policy;
+    state->lifetime.sequence_endpoint_policy = values.sequence_endpoint_policy;
+    state->effects.output_color_guard_profile =
+        INKPOD_OUTPUT_COLOR_GUARD_BT709_CONSERVATIVE_YCBCR;
+    state->Workspace().windows.workspace = std::move(candidate_layout);
+    ApplyOrDeferWorkspacePresentation(*state);
+    return true;
+}
+
 void ClearWorkspacePresetSelection(ApplicationHost& state) noexcept {
     constexpr std::array<UINT, 5U> kPresetCommands{
         IDM_WORKSPACE_PRESET_COLORING,
@@ -18888,89 +19034,30 @@ std::optional<LRESULT> RouteApplicationCommand(
             RelayoutWorkspace(*state);
             UpdateMenuState(*state);
             return 1;
-        case IDM_SHORTCUT_RESET: {
-            const InkpodStatus status = state->engine == nullptr
-                ? INKPOD_STATUS_INVALID_STATE
-                : ResetShortcuts(
-                      *state->engine, state->shortcuts, !state->lifetime.smoke_test);
-            if (status != INKPOD_STATUS_OK) {
-                ShowShortcutError(
-                    *state, window, UiText(UiStringId::Text0199), status);
-            }
-            UpdateMenuState(*state);
-            return 0;
-        }
         case IDM_SHORTCUT_EDIT: {
-            ShortcutDialogState dialog_state{};
+            PreferencesDialogState dialog_state{};
             try {
-                dialog_state.entries.reserve(state->shortcuts.bindings.size());
-                const HMENU menu = GetMenu(window);
-                for (const auto& binding : state->shortcuts.bindings) {
-                    dialog_state.entries.push_back({
-                        binding.command_id,
-                        MenuCommandDisplayName(menu, binding.command_id),
-                        binding});
-                }
+                dialog_state.values = {
+                    CurrentUiLanguagePreference(),
+                    state->lifetime.restore_previous_documents,
+                    state->lifetime.sequence_switch_policy,
+                    state->lifetime.sequence_endpoint_policy,
+                    OutputColorGuardProfileSetting::Bt709ConservativeYcbcr,
+                    state->Workspace().windows.workspace.selected_preset,
+                    state->Workspace().windows.workspace.density,
+                    state->Workspace().windows.workspace.dock.Mirrored(),
+                    state->shortcuts.profile_set};
             } catch (const std::bad_alloc&) {
                 ShowCoreError(*state, window, UiText(UiStringId::Text0201));
                 return 0;
             }
-            if (ShowShortcutEditor(
-                    state->lifetime.instance,
-                    window,
-                    state->lifetime.smoke_test,
-                    dialog_state) != IDOK) {
-                return 0;
-            }
-            const InkpodStatus status = state->engine == nullptr
-                ? INKPOD_STATUS_INVALID_STATE
-                : RebindShortcut(
-                      *state->engine,
-                      state->shortcuts,
-                      dialog_state.sequence,
-                      !state->lifetime.smoke_test);
-            if (status != INKPOD_STATUS_OK) {
-                ShowShortcutError(*state, window, UiText(UiStringId::Text0202), status);
-                if (status == INKPOD_STATUS_IO_ERROR) {
-                    UpdateMenuState(*state);
-                    return 1;
-                }
-                return 0;
-            }
+            dialog_state.apply_context = state;
+            dialog_state.apply = ApplyPreferencesValues;
+            dialog_state.close_immediately = state->lifetime.smoke_test;
+            const INT_PTR result = ShowPreferencesDialog(
+                state->lifetime.instance, window, dialog_state);
             UpdateMenuState(*state);
-            return 1;
-        }
-        case IDM_LANGUAGE_SYSTEM:
-        case IDM_LANGUAGE_JAPANESE:
-        case IDM_LANGUAGE_ENGLISH: {
-            UiLanguagePreference preference = UiLanguagePreference::System;
-            if (LOWORD(wparam) == IDM_LANGUAGE_JAPANESE) {
-                preference = UiLanguagePreference::Japanese;
-            } else if (LOWORD(wparam) == IDM_LANGUAGE_ENGLISH) {
-                preference = UiLanguagePreference::English;
-            }
-            if (preference == CurrentUiLanguagePreference()) {
-                return 0;
-            }
-            if (!SaveUiLanguagePreference(preference)) {
-                if (!state->lifetime.smoke_test) {
-                    MessageBoxW(
-                        window,
-                        UiText(UiStringId::Text0912),
-                        L"inkpod",
-                        MB_OK | MB_ICONERROR);
-                }
-                return 0;
-            }
-            UpdateMenuState(*state);
-            if (!state->lifetime.smoke_test) {
-                MessageBoxW(
-                    window,
-                    UiText(UiStringId::Text0911),
-                    L"inkpod",
-                    MB_OK | MB_ICONINFORMATION);
-            }
-            return 1;
+            return result == IDOK ? 1 : 0;
         }
         case IDM_HELP_MANUAL:
         case IDM_HELP_FILE_FORMAT:
@@ -19110,9 +19197,13 @@ std::optional<LRESULT> RouteWindowLifecycleMessage(
             }
             break;
         case WM_ACTIVATE:
-            if (state != nullptr && LOWORD(wparam) != WA_INACTIVE) {
-                CollapseAutoHiddenPanes(*state);
-                UpdateMenuState(*state);
+            if (state != nullptr) {
+                if (LOWORD(wparam) == WA_INACTIVE) {
+                    (void)ReleaseHeldShortcut(*state, 0U, true);
+                } else {
+                    CollapseAutoHiddenPanes(*state);
+                    UpdateMenuState(*state);
+                }
             }
             break;
         case WM_DISPLAYCHANGE:
@@ -19171,6 +19262,16 @@ std::optional<LRESULT> RouteKeyboardMessage(
     WPARAM wparam,
     LPARAM lparam) noexcept {
     switch (message) {
+        case WM_KEYUP:
+        case WM_SYSKEYUP:
+            if (state != nullptr
+                && ReleaseHeldShortcut(
+                    *state,
+                    ShortcutPhysicalKeyFromMessage(wparam, lparam),
+                    false)) {
+                return 0;
+            }
+            break;
         case WM_KEYDOWN:
         case WM_SYSKEYDOWN:
             if (state != nullptr) {
@@ -19216,12 +19317,15 @@ std::optional<LRESULT> RouteKeyboardMessage(
                         modifiers)) {
                     return 0;
                 }
-                UINT menu_command{};
-                const InkpodShortcutMatch shortcut_match = ResolveShortcutStroke(
+                const ShortcutInputStroke input{
+                    static_cast<std::uint32_t>(wparam),
+                    ShortcutPhysicalKeyFromMessage(wparam, lparam),
+                    modifiers};
+                const ShortcutResolution resolution = ResolveShortcutStroke(
                     state->shortcuts,
-                    InkpodShortcutStroke{static_cast<std::uint32_t>(wparam), modifiers},
-                    menu_command);
-                if (shortcut_match == INKPOD_SHORTCUT_MATCH_PREFIX) {
+                    ShortcutContextForFocus(state->Workspace(), GetFocus()),
+                    input);
+                if (resolution.match == INKPOD_SHORTCUT_MATCH_PREFIX) {
                     ArmCommandTimer(
                         *state,
                         window,
@@ -19232,10 +19336,19 @@ std::optional<LRESULT> RouteKeyboardMessage(
                 }
                 DisarmCommandTimer(
                     *state, window, CommandTimerKind::ShortcutSequence);
-                if (shortcut_match == INKPOD_SHORTCUT_MATCH_EXACT) {
-                    const UINT resolved_command = ShortcutMenuCommand(menu_command);
+                if (resolution.match == INKPOD_SHORTCUT_MATCH_EXACT) {
+                    const UINT resolved_command = ShortcutMenuCommand(
+                        resolution.command_id);
                     if (resolved_command != 0U) {
-                        DispatchEnabledCommand(*state, window, resolved_command);
+                        const bool repeated = (static_cast<std::uint64_t>(lparam)
+                            & (UINT64_C(1) << 30U)) != 0U;
+                        if (resolution.action == ShortcutAction::Hold) {
+                            (void)BeginHeldShortcut(
+                                *state, window, resolved_command, input.physical_key);
+                        } else if (!repeated
+                                   || resolution.action == ShortcutAction::Execute) {
+                            DispatchEnabledCommand(*state, window, resolved_command);
+                        }
                     }
                     return 0;
                 }
@@ -20844,6 +20957,7 @@ std::optional<LRESULT> RouteTimerAndCloseMessage(
         }
         case WM_CLOSE:
             if (state != nullptr) {
+                (void)ReleaseHeldShortcut(*state, 0U, true);
                 CancelDocumentTabDrag(*state);
             }
             if (state != nullptr && state->Workspaces().Count() > 1U) {

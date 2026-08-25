@@ -498,6 +498,32 @@ if(WIN32)
         NAME inkpod_windows_command_state
         COMMAND inkpod_windows_command_state_tests)
 
+    add_executable(inkpod_windows_shortcut_profile_tests
+        apps/windows/ui/localization.cpp
+        apps/windows/ui/localization.h
+        apps/windows/ui/command_catalog.cpp
+        apps/windows/ui/command_catalog.h
+        apps/windows/ui/shortcut_profile.cpp
+        apps/windows/ui/shortcut_profile.h
+        apps/windows/ui/shortcut_preset.cpp
+        apps/windows/ui/shortcut_preset.h
+        tests/windows_shortcut_profile.cpp)
+    target_include_directories(inkpod_windows_shortcut_profile_tests PRIVATE
+        "${CMAKE_SOURCE_DIR}/apps/windows"
+        "${CMAKE_SOURCE_DIR}/include")
+    target_compile_definitions(inkpod_windows_shortcut_profile_tests PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(inkpod_windows_shortcut_profile_tests PRIVATE
+        advapi32
+        user32)
+    if(MSVC)
+        inkpod_enable_strict_warnings(inkpod_windows_shortcut_profile_tests)
+        target_compile_options(inkpod_windows_shortcut_profile_tests PRIVATE /EHsc)
+    endif()
+    add_test(
+        NAME inkpod_windows_shortcut_profile
+        COMMAND inkpod_windows_shortcut_profile_tests)
+
     add_executable(inkpod_windows_localization_tests
         apps/windows/ui/localization.cpp
         apps/windows/ui/localization.h
@@ -809,6 +835,8 @@ if(WIN32)
         apps/windows/ui/dialogs/layer_palette_status_layout.h
         apps/windows/ui/dialogs/modal_dialog_position.cpp
         apps/windows/ui/dialogs/modal_dialog_position.h
+        apps/windows/ui/dialogs/preferences_dialog.cpp
+        apps/windows/ui/dialogs/preferences_dialog.h
         apps/windows/ui/dialogs/tool_palette.cpp
         apps/windows/ui/dialogs/tool_palette.h
         apps/windows/ui/icons/fluent_icons.cpp
@@ -841,6 +869,10 @@ if(WIN32)
         apps/windows/ui/command_catalog.h
         apps/windows/ui/shortcut_controller.cpp
         apps/windows/ui/shortcut_controller.h
+        apps/windows/ui/shortcut_profile.cpp
+        apps/windows/ui/shortcut_profile.h
+        apps/windows/ui/shortcut_preset.cpp
+        apps/windows/ui/shortcut_preset.h
         apps/windows/ui/localization.cpp
         apps/windows/ui/localization.h
         apps/windows/ui/ui_resources.cpp

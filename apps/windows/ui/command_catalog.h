@@ -3,10 +3,12 @@
 #include <windows.h>
 
 #include <span>
+#include <string_view>
 #include <string>
 #include <vector>
 
 #include "inkpod/core_ffi.h"
+#include "shortcut_profile.h"
 
 namespace inkpod::windows::ui {
 
@@ -25,6 +27,16 @@ const InkpodShortcutSequence* FindShortcutSequence(
 std::wstring FormatShortcutSequence(const InkpodShortcutSequence& sequence);
 
 std::wstring MenuCommandDisplayName(HMENU menu, UINT command);
+
+std::string CommandStableKey(UINT command);
+
+UINT CommandFromStableKey(std::string_view key) noexcept;
+
+ShortcutContext DefaultShortcutContext(UINT command) noexcept;
+
+std::uint32_t SupportedShortcutActionMask(UINT command) noexcept;
+
+ShortcutAction DefaultShortcutAction(UINT command) noexcept;
 
 void ApplyShortcutLabelsToMenu(
     HMENU menu,

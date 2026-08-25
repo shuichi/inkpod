@@ -104,7 +104,7 @@ bool ShortcutCatalogIsCompleteAndPrefixFree() {
         }
         return false;
     };
-    if (menu_commands.size() != 325U
+    if (menu_commands.size() != 321U
         || shortcuts.size() != kProductionCommandStateCount
         || shortcuts.size() != commands.size()
         || is_menu_command(IDM_COLOR_PIN)
@@ -273,10 +273,6 @@ int main() {
         || IsCommandEnabled(states, IDM_GEOMETRY_RECTANGLE)
         || !IsCommandEnabled(states, IDM_FILE_RESTORE_PREVIOUS)
         || IsCommandChecked(states, IDM_FILE_RESTORE_PREVIOUS)
-        || !IsCommandEnabled(states, IDM_LANGUAGE_SYSTEM)
-        || !IsCommandChecked(states, IDM_LANGUAGE_SYSTEM)
-        || IsCommandChecked(states, IDM_LANGUAGE_JAPANESE)
-        || IsCommandChecked(states, IDM_LANGUAGE_ENGLISH)
         || !IsCommandEnabled(states, IDM_FILE_SEQUENCE_AUTOSAVE)
         || IsCommandChecked(states, IDM_FILE_SEQUENCE_AUTOSAVE)
         || !IsCommandEnabled(states, IDM_SEQ_WRAP_ENDPOINTS)
@@ -292,10 +288,7 @@ int main() {
     states = ComputeCommandStates(inputs);
     if (!IsCommandChecked(states, IDM_FILE_RESTORE_PREVIOUS)
         || !IsCommandChecked(states, IDM_FILE_SEQUENCE_AUTOSAVE)
-        || !IsCommandChecked(states, IDM_SEQ_WRAP_ENDPOINTS)
-        || IsCommandChecked(states, IDM_LANGUAGE_SYSTEM)
-        || IsCommandChecked(states, IDM_LANGUAGE_JAPANESE)
-        || !IsCommandChecked(states, IDM_LANGUAGE_ENGLISH)) {
+        || !IsCommandChecked(states, IDM_SEQ_WRAP_ENDPOINTS)) {
         return 21;
     }
 

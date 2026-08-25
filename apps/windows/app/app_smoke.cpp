@@ -4469,8 +4469,7 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
              IDM_VIEW_FLIP_VERTICAL,
              IDM_VIEW_GRID,
              IDM_VIEW_NEW,
-             IDM_SHORTCUT_EDIT,
-             IDM_SHORTCUT_RESET}) {
+             IDM_SHORTCUT_EDIT}) {
         if (menu == nullptr
             || GetMenuState(menu, command, MF_BYCOMMAND)
                 == static_cast<UINT>(-1)) {
@@ -5735,7 +5734,9 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
             shortcut_menu_command)) {
         return 330;
     }
-    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SHORTCUT_RESET, 0);
+    if (ResetShortcuts(*state.engine, state.shortcuts, true) != INKPOD_STATUS_OK) {
+        return 361;
+    }
     if (!ResolveConfiguredShortcut(
             state,
             static_cast<std::uint32_t>('Z'),

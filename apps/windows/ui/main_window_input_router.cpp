@@ -11,7 +11,14 @@ namespace inkpod::windows::ui::runtime {
 bool PreTranslateKeyboardMessage(
     app::ApplicationHost& state,
     const MSG& message) noexcept {
-    if (message.message != WM_KEYDOWN && message.message != WM_SYSKEYDOWN) {
+    const bool key_down = message.message == WM_KEYDOWN
+        || message.message == WM_SYSKEYDOWN;
+    const bool key_up = message.message == WM_KEYUP
+        || message.message == WM_SYSKEYUP;
+    if (!key_down && !key_up) {
+        return false;
+    }
+    if (key_up && !state.shortcuts.hold_active) {
         return false;
     }
     const bool control = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
@@ -24,7 +31,7 @@ bool PreTranslateKeyboardMessage(
                 focus, class_name, static_cast<int>(std::size(class_name))) > 0
             && (_wcsicmp(class_name, L"Edit") == 0
                 || _wcsnicmp(class_name, L"RichEdit", 8) == 0)) {
-            if (!workspace_navigation) {
+            if (!workspace_navigation && !state.shortcuts.hold_active) {
                 return false;
             }
         }

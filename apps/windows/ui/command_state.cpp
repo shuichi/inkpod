@@ -688,18 +688,6 @@ void ProvideApplicationCommandStates(
         states,
         IDM_SEQ_WRAP_ENDPOINTS,
         input.sequence_wrap_endpoints);
-    SetChecked(
-        states,
-        IDM_LANGUAGE_SYSTEM,
-        input.ui_language_preference == 1U);
-    SetChecked(
-        states,
-        IDM_LANGUAGE_JAPANESE,
-        input.ui_language_preference == 2U);
-    SetChecked(
-        states,
-        IDM_LANGUAGE_ENGLISH,
-        input.ui_language_preference == 3U);
 }
 
 } // namespace

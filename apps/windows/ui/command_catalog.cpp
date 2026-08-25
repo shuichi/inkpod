@@ -12,6 +12,7 @@
 #include <map>
 #include <new>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "app/resource.h"
@@ -24,6 +25,14 @@ constexpr UINT kCommandIds[] = {
 #include "command_state_catalog.inc"
 #undef INKPOD_COMMAND_STATE
 };
+
+constexpr const char* kCommandNames[] = {
+#define INKPOD_COMMAND_STATE(owner, command) #command,
+#include "command_state_catalog.inc"
+#undef INKPOD_COMMAND_STATE
+};
+
+static_assert(std::size(kCommandIds) == std::size(kCommandNames));
 
 constexpr bool IsPaneLocalCommand(UINT command) noexcept {
     switch (command) {
@@ -53,7 +62,7 @@ consteval auto BuildMenuCommandIds() {
 }
 
 constexpr auto kMenuCommandIds = BuildMenuCommandIds();
-static_assert(kMenuCommandIds.size() == 325U);
+static_assert(kMenuCommandIds.size() == 321U);
 
 constexpr InkpodShortcutStroke Stroke(UINT key, std::uint32_t modifiers = 0U) noexcept {
     return {key, modifiers};
@@ -465,6 +474,123 @@ std::wstring KeyName(const InkpodShortcutStroke& stroke) {
 
 }  // namespace
 
+std::string CommandStableKey(UINT command) {
+    const auto found = std::find(std::begin(kCommandIds), std::end(kCommandIds), command);
+    if (found == std::end(kCommandIds)) {
+        return {};
+    }
+    const std::size_t index = static_cast<std::size_t>(found - std::begin(kCommandIds));
+    std::string key(kCommandNames[index]);
+    if (key.starts_with("IDM_")) {
+        key.erase(0U, 4U);
+    }
+    std::transform(key.begin(), key.end(), key.begin(), [](char value) {
+        if (value == '_') {
+            return '.';
+        }
+        return value >= 'A' && value <= 'Z'
+            ? static_cast<char>(value - 'A' + 'a')
+            : value;
+    });
+    return key;
+}
+
+UINT CommandFromStableKey(std::string_view key) noexcept {
+    for (std::size_t index = 0U; index < std::size(kCommandIds); ++index) {
+        const char* symbol = kCommandNames[index];
+        if (std::char_traits<char>::compare(symbol, "IDM_", 4U) != 0) {
+            continue;
+        }
+        std::size_t key_index{};
+        bool match = true;
+        for (std::size_t symbol_index = 4U; symbol[symbol_index] != '\0'; ++symbol_index) {
+            const char raw = symbol[symbol_index];
+            const char normalized = raw == '_'
+                ? '.'
+                : (raw >= 'A' && raw <= 'Z' ? static_cast<char>(raw - 'A' + 'a') : raw);
+            if (key_index >= key.size() || key[key_index++] != normalized) {
+                match = false;
+                break;
+            }
+        }
+        if (match && key_index == key.size()) {
+            return kCommandIds[index];
+        }
+    }
+    return 0U;
+}
+
+ShortcutContext DefaultShortcutContext(UINT command) noexcept {
+    const UINT group = command / 100U;
+    if (group == 403U || group == 404U || group == 405U || group == 408U
+        || group == 410U || group == 411U || group == 412U || group == 418U) {
+        return ShortcutContext::Canvas;
+    }
+    if (group == 416U || group == 417U) {
+        return ShortcutContext::Timeline;
+    }
+    if (IsPaneLocalCommand(command)) {
+        return ShortcutContext::Pane;
+    }
+    return ShortcutContext::Global;
+}
+
+std::uint32_t SupportedShortcutActionMask(UINT command) noexcept {
+    const auto action_bit = [](ShortcutAction action) constexpr {
+        return 1U << (static_cast<std::uint32_t>(action) - 1U);
+    };
+    std::uint32_t result = action_bit(ShortcutAction::Execute);
+    switch (command) {
+        case IDM_TOOL_PENCIL:
+        case IDM_TOOL_BRUSH:
+        case IDM_TOOL_ERASER:
+        case IDM_TOOL_FILL:
+        case IDM_TOOL_CLOSED_FILL:
+        case IDM_TOOL_FILL_EXTENSION:
+        case IDM_TOOL_EYEDROPPER:
+        case IDM_SELECTION_RECTANGLE:
+        case IDM_SELECTION_ELLIPSE:
+        case IDM_SELECTION_LASSO:
+            result |= action_bit(ShortcutAction::Hold);
+            break;
+        default:
+            break;
+    }
+    switch (command) {
+        case IDM_VIEW_FLIP_HORIZONTAL:
+        case IDM_VIEW_FLIP_VERTICAL:
+        case IDM_VIEW_RULER:
+        case IDM_VIEW_GUIDES:
+        case IDM_VIEW_GRID:
+        case IDM_VIEW_SNAP_GUIDES:
+        case IDM_VIEW_SNAP_GRID:
+        case IDM_VIEW_TRANSPARENT:
+        case IDM_WINDOW_TOOL_PALETTE:
+        case IDM_WINDOW_TOOL_OPTIONS:
+        case IDM_WINDOW_COLOR_PANE:
+        case IDM_WINDOW_LAYER_PALETTE:
+        case IDM_WINDOW_LOCATOR:
+        case IDM_WINDOW_SEQUENCE:
+        case IDM_WINDOW_LIGHT_TABLE:
+        case IDM_WINDOW_SUBPALETTE:
+        case IDM_WINDOW_BATCH:
+        case IDM_SEQ_WRAP_ENDPOINTS:
+            result |= action_bit(ShortcutAction::Toggle);
+            break;
+        default:
+            break;
+    }
+    return result;
+}
+
+ShortcutAction DefaultShortcutAction(UINT command) noexcept {
+    constexpr std::uint32_t toggle_bit =
+        1U << (static_cast<std::uint32_t>(ShortcutAction::Toggle) - 1U);
+    return (SupportedShortcutActionMask(command) & toggle_bit) != 0U
+        ? ShortcutAction::Toggle
+        : ShortcutAction::Execute;
+}
+
 std::span<const UINT> MenuCommandCatalog() noexcept {
     return kMenuCommandIds;
 }
@@ -534,6 +660,9 @@ std::wstring FormatShortcutSequence(const InkpodShortcutSequence& sequence) {
         }
         if ((stroke.modifiers & INKPOD_SHORTCUT_MODIFIER_ALT) != 0U) {
             output += L"Alt+";
+        }
+        if ((stroke.modifiers & kShortcutModifierWindows) != 0U) {
+            output += L"Win+";
         }
         output += KeyName(stroke);
     }
