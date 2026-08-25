@@ -96,7 +96,7 @@ fn batch_seed() -> Vec<u8> {
             version: 1,
             kind: 1,
             flags: 1,
-            target: FileBatchTarget::default(),
+            targets: vec![FileBatchTarget::default()],
             payload: vec![1, 2, 3, 4],
         }],
         output: FileBatchOutput {

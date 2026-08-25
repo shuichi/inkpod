@@ -6,11 +6,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Current development format. Increment for every serialized graph schema
 /// change until the user declares a format freeze; older versions are rejected.
-pub const BATCH_GRAPH_VERSION: u32 = 3;
+pub const BATCH_GRAPH_VERSION: u32 = 4;
 const MAGIC: [u8; 8] = *b"INKBATCH";
 const MAX_BATCH_FILE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_BATCH_INPUTS: usize = 16_384;
 const MAX_BATCH_OPERATIONS: usize = 1_024;
+const MAX_BATCH_TARGETS: usize = 64;
 const MAX_BATCH_STRING_BYTES: usize = 32_768;
 const MAX_OPERATION_PAYLOAD_BYTES: usize = 1_048_576;
 const ATOMIC_WRITE_CHUNK_BYTES: usize = 1_048_576;
@@ -38,7 +39,7 @@ pub struct FileBatchOperation {
     pub version: u32,
     pub kind: u32,
     pub flags: u64,
-    pub target: FileBatchTarget,
+    pub targets: Vec<FileBatchTarget>,
     pub payload: Vec<u8>,
 }
 
@@ -78,11 +79,14 @@ pub fn encode_batch_graph(graph: &FileBatchGraph) -> Result<Vec<u8>, FormatError
         push_u32(&mut body, operation.version);
         push_u32(&mut body, operation.kind);
         push_u64(&mut body, operation.flags);
-        push_u64(&mut body, operation.target.layer_id);
-        push_u64(&mut body, operation.target.plane_id);
-        push_u32(&mut body, operation.target.layer_kind);
-        push_u32(&mut body, operation.target.plane_kind);
-        push_u32(&mut body, operation.target.missing_policy);
+        push_u32(&mut body, operation.targets.len() as u32);
+        for target in &operation.targets {
+            push_u64(&mut body, target.layer_id);
+            push_u64(&mut body, target.plane_id);
+            push_u32(&mut body, target.layer_kind);
+            push_u32(&mut body, target.plane_kind);
+            push_u32(&mut body, target.missing_policy);
+        }
         push_bytes(&mut body, &operation.payload)?;
     }
     push_u32(&mut body, graph.output.destination);
@@ -149,17 +153,25 @@ pub fn decode_batch_graph(bytes: &[u8]) -> Result<FileBatchGraph, FormatError> {
         bounded_count(body.u32()?, MAX_BATCH_OPERATIONS, "batch operation count")?;
     let mut operations = Vec::with_capacity(operation_count);
     for _ in 0..operation_count {
-        operations.push(FileBatchOperation {
-            version: body.u32()?,
-            kind: body.u32()?,
-            flags: body.u64()?,
-            target: FileBatchTarget {
+        let version = body.u32()?;
+        let kind = body.u32()?;
+        let flags = body.u64()?;
+        let target_count = bounded_count(body.u32()?, MAX_BATCH_TARGETS, "batch target count")?;
+        let mut targets = Vec::with_capacity(target_count);
+        for _ in 0..target_count {
+            targets.push(FileBatchTarget {
                 layer_id: body.u64()?,
                 plane_id: body.u64()?,
                 layer_kind: body.u32()?,
                 plane_kind: body.u32()?,
                 missing_policy: body.u32()?,
-            },
+            });
+        }
+        operations.push(FileBatchOperation {
+            version,
+            kind,
+            flags,
+            targets,
             payload: body.bytes()?,
         });
     }
@@ -274,6 +286,9 @@ fn validate_graph(graph: &FileBatchGraph) -> Result<(), FormatError> {
             return Err(FormatError::Invalid(
                 "batch operation payload exceeds the bounded size",
             ));
+        }
+        if operation.targets.is_empty() || operation.targets.len() > MAX_BATCH_TARGETS {
+            return Err(FormatError::Invalid("batch target count is outside bounds"));
         }
     }
     validate_string(&graph.output.folder, "batch output folder")?;

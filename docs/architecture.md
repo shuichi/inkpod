@@ -37,7 +37,7 @@ native-format model.
 | `inkpod-image`  | Typed pixel formats, 64 x 64 sparse tiles, `Arc` copy-on-write storage, selection, fill/sampling/palette logic, and deterministic raster/filter/effect operations |
 | `inkpod-format` | Bounded procedure-authoritative `.inkpod` v28 Cell/Cut containers and `.inkbatch` v3 models, streaming encode/decode/validation, atomic file I/O, and PNG/TIFF/TGA/BMP codecs |
 | `inkpod-core`   | Stable-ID document/layer/plane state, immutable Genesis/base surfaces, a content-addressed canonical asset registry, StateId savepoints, views, raster clipboard, previews, animation, effects/Batch commands, persistence mapping, immutable render snapshots, and canonical primitive execution plus append-only journal/cache-free replay and semantic document digests for the migrated Core slice |
-| `inkpod-ffi`    | ABI v18 fixed records and generation-tagged runtime IDs, Batch v3 graph/staged-result handles, InkScript source/compiler/fragment plus authority/plan/run/report handles and fixed DTO host callbacks, persistence/compaction diagnostics, validation/conversion, panic containment, ownership functions, and feature-specific exports |
+| `inkpod-ffi`    | ABI v22 fixed records and generation-tagged runtime IDs, Batch v4 multi-target graph/staged-result handles, InkScript source/compiler/fragment plus authority/plan/run/report handles and fixed DTO host callbacks, persistence/compaction diagnostics, validation/conversion, panic containment, ownership functions, and feature-specific exports |
 
 Binary, grayscale, RGBA8/16, straight-alpha, premultiplied display data, and
 selection masks remain distinct types. Win32 may provide a
@@ -46,7 +46,7 @@ dependency.
 
 Each crate root is limited to module declarations and stable public re-exports.
 Responsibility-specific modules contain implementation. `inkpod-core` keeps
-thumbnail work, Batch v3 model/codec/input-output execution/typed operations, destructive transform orchestration/raster/
+thumbnail work, Batch v4 model/codec/input-output execution/typed operations, destructive transform orchestration/raster/
 frame/numeric helpers, and view commands/coordinates/guides/secondary views/
 shortcuts in separate modules; their `mod.rs` files remain declarative indices.
 `inkpod-core` keeps

@@ -131,7 +131,7 @@ impl PrimitiveId {
     pub const RESTORE_SELECTED_PIXELS: Self = Self(0x0005_0042);
     /// Primitive ID for exact region-scoped raster color replacement.
     pub const SCOPED_COLOR_REPLACE: Self = Self(0x0005_0043);
-    /// Primitive ID for one ordered atomic Batch v3 operation list.
+    /// Primitive ID for one ordered atomic Batch v4 operation list.
     pub const APPLY_BATCH_OPERATIONS: Self = Self(0x0005_0044);
     /// Primitive ID for replacing one existing raster plane from an immutable asset.
     pub const IMPORT_RASTER_ASSET: Self = Self(0x0009_0001);

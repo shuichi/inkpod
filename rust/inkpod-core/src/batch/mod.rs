@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 
 /// Version required in every [`BatchOperation`] payload.
 pub const BATCH_OPERATION_VERSION: u32 = 3;
+pub(crate) const MAX_BATCH_TARGETS: usize = 64;
 const MAX_BATCH_COLOR_PAIRS: usize = 4_096;
 const MAX_BATCH_COLORS: usize = 4_096;
 const MAX_BATCH_INPUTS: usize = 16_384;

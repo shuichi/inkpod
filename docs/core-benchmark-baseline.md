@@ -13,8 +13,8 @@ and explicit user approval. Replace current values instead of appending dated
 acceptance logs. Historical calibration and milestone results are summarized in
 [`legacy.md`](legacy.md).
 
-Batch v3 advances the product contract to native v28/replay epoch 25 and uses
-the explicitly approved v3 `batch_preview` replacement described below. The
+Batch v4 retains native v28/replay epoch 25 and the explicitly approved v3
+`batch_preview` replacement described below. The
 benchmark has no sequence input, Filter operation, or v2 authoring record. Its
 native files, exact Color Replace rows, semantic counters, checksums, and complete
 samples are locked together with the current product contract.
@@ -165,7 +165,7 @@ changed `canonical_replay` to `70d3465b6732887e`, `checkpoint_open` to
 `558cb3aacd55afd9` full. All retained workload parameters and semantic counters
 remain unchanged; no wall-clock envelope or `revision-max` expression is widened.
 
-The explicitly approved Batch v3 replacement advances the current contract to
+The explicitly approved Batch v3 replacement advanced the then-current contract to
 native v28/replay epoch 25/document-state schema 11. It replaces only the retired
 `batch_preview` sequence/Filter fixture: construction now writes four quick or
 sixteen full native files before timing, each with one patterned straight-RGBA8

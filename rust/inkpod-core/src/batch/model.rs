@@ -109,7 +109,7 @@ pub struct BatchColorPair {
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// Legacy internal separation payload retained for the canonical primitive catalog.
 ///
-/// Batch v3 authoring does not serialize this type directly; its public operations
+/// Batch v4 authoring does not serialize this type directly; its public operations
 /// use the four closed [`BatchOperationKind`] variants instead.
 pub struct BatchSeparation {
     /// Source colors to match.
@@ -220,8 +220,13 @@ pub struct BatchOperation {
     pub version: u32,
     /// Whether execution includes this operation.
     pub enabled: bool,
-    /// Required plane target selector.
+    /// Primary required plane target selector.
     pub target: BatchTargetSelector,
+    /// Additional target selectors used only by color replacement.
+    ///
+    /// Every matching plane is resolved before the canonical primitive begins;
+    /// duplicate resolved planes are applied only once.
+    pub additional_targets: Vec<BatchTargetSelector>,
     /// Operation-specific payload.
     pub kind: BatchOperationKind,
 }

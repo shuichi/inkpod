@@ -128,7 +128,8 @@ static_assert(sizeof(InkpodDustInput) == 80U);
 static_assert(sizeof(InkpodTaskInfo) == 32U);
 static_assert(sizeof(InkpodBatchInput) == 48U);
 static_assert(sizeof(InkpodBatchColorPairInput) == 48U);
-static_assert(sizeof(InkpodBatchOperationInput) == 128U);
+static_assert(sizeof(InkpodBatchTargetInput) == 48U);
+static_assert(sizeof(InkpodBatchOperationInput) == 160U);
 static_assert(sizeof(InkpodBatchGraphInput) == 144U);
 static_assert(sizeof(InkpodBatchGraphInfo) == 104U);
 static_assert(sizeof(InkpodBatchPreviewItem) == 56U);
@@ -1613,7 +1614,7 @@ execution { failure = stop; wait_ms = 0; preview_before_save = false; }
         sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 255U, 0U, 0U, 255U};
     InkpodBatchOperationInput batch_operation{};
     batch_operation.struct_size = sizeof(batch_operation);
-    batch_operation.version = INKPOD_BATCH_GRAPH_VERSION;
+    batch_operation.version = INKPOD_BATCH_OPERATION_VERSION;
     batch_operation.kind = INKPOD_BATCH_OPERATION_COLOR_REPLACE;
     batch_operation.flags = INKPOD_BATCH_OPERATION_ENABLED;
     batch_operation.layer_kind = INKPOD_LAYER_BINARY_COLORING;

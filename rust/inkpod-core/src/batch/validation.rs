@@ -83,16 +83,41 @@ pub(crate) fn validate_operation(operation: &BatchOperation) -> Result<(), CoreE
             "batch operation version is unsupported",
         ));
     }
-    let target = operation.target;
-    if target.layer_id.is_none() && target.layer_kind.is_none() {
+    if operation.additional_targets.len() >= MAX_BATCH_TARGETS {
         return Err(CoreError::InvalidArgument(
-            "batch target layer selector is empty",
+            "batch target count is outside bounds",
         ));
     }
-    if target.plane_id.is_none() && target.plane_kind.is_none() {
+    if !matches!(operation.kind, BatchOperationKind::ColorReplace(_))
+        && !operation.additional_targets.is_empty()
+    {
         return Err(CoreError::InvalidArgument(
-            "batch target plane selector is empty",
+            "batch operation kind does not support multiple targets",
         ));
+    }
+    for (index, target) in std::iter::once(&operation.target)
+        .chain(operation.additional_targets.iter())
+        .enumerate()
+    {
+        if target.layer_id.is_none() && target.layer_kind.is_none() {
+            return Err(CoreError::InvalidArgument(
+                "batch target layer selector is empty",
+            ));
+        }
+        if target.plane_id.is_none() && target.plane_kind.is_none() {
+            return Err(CoreError::InvalidArgument(
+                "batch target plane selector is empty",
+            ));
+        }
+        if std::iter::once(&operation.target)
+            .chain(operation.additional_targets.iter())
+            .take(index)
+            .any(|previous| previous == target)
+        {
+            return Err(CoreError::InvalidArgument(
+                "batch operation contains a duplicate target selector",
+            ));
+        }
     }
     match &operation.kind {
         BatchOperationKind::ColorReplace(pairs)
@@ -180,6 +205,7 @@ mod tests {
             version: BATCH_OPERATION_VERSION,
             enabled: true,
             target: BatchTargetSelector::color_plane(),
+            additional_targets: Vec::new(),
             kind,
         })
     }
@@ -196,6 +222,7 @@ mod tests {
                 plane_kind: None,
                 missing_policy: BatchMissingTargetPolicy::Skip,
             },
+            additional_targets: Vec::new(),
             kind: BatchOperationKind::ColorReplace(vec![BatchColorPair {
                 enabled: true,
                 old: PixelValue::Rgba([0; 4]),

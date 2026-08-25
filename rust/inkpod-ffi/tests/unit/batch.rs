@@ -55,6 +55,10 @@ fn operation(
         color_pair_count: pairs.len() as u64,
         color_pair_stride_bytes: size_of::<InkpodBatchColorPairInput>() as u64,
         reserved_3: 0,
+        additional_targets: ptr::null(),
+        additional_target_count: 0,
+        additional_target_stride_bytes: size_of::<InkpodBatchTargetInput>() as u64,
+        reserved_4: 0,
     }
 }
 
@@ -63,7 +67,7 @@ fn graph_input(
     operations: &[InkpodBatchOperationInput],
     output_destination: u32,
 ) -> InkpodBatchGraphInput {
-    static NAME: &[u8] = b"batch-v3-ffi";
+    static NAME: &[u8] = b"batch-v4-ffi";
     static TEMPLATE: &[u8] = b"{stem}_{index:3}";
     InkpodBatchGraphInput {
         struct_size: size_of::<InkpodBatchGraphInput>() as u32,
@@ -104,7 +108,7 @@ fn active_document_input() -> InkpodBatchInput {
 }
 
 #[test]
-fn current_abi_graph_exposes_only_the_four_batch_v3_operation_shapes() {
+fn current_abi_graph_exposes_only_the_four_batch_v4_operation_shapes() {
     let colors = [rgba8([1, 2, 3, 4])];
     let pairs = [InkpodBatchColorPairInput {
         struct_size: size_of::<InkpodBatchColorPairInput>() as u32,
@@ -113,8 +117,27 @@ fn current_abi_graph_exposes_only_the_four_batch_v3_operation_shapes() {
         old_color: rgba8([1, 2, 3, 4]),
         new_color: rgba8([5, 6, 7, 8]),
     }];
+    let additional_targets = [
+        InkpodBatchTargetInput {
+            struct_size: size_of::<InkpodBatchTargetInput>() as u32,
+            layer_kind: INKPOD_LAYER_RASTER,
+            plane_kind: INKPOD_TYPED_PLANE_RASTER,
+            missing_policy: INKPOD_BATCH_MISSING_ERROR,
+            ..Default::default()
+        },
+        InkpodBatchTargetInput {
+            struct_size: size_of::<InkpodBatchTargetInput>() as u32,
+            layer_kind: INKPOD_LAYER_GRAYSCALE_COLORING,
+            plane_kind: INKPOD_TYPED_PLANE_COLOR,
+            missing_policy: INKPOD_BATCH_MISSING_ERROR,
+            ..Default::default()
+        },
+    ];
+    let mut replace = operation(INKPOD_BATCH_OPERATION_COLOR_REPLACE, &[], &pairs);
+    replace.additional_targets = additional_targets.as_ptr();
+    replace.additional_target_count = additional_targets.len() as u64;
     let operations = [
-        operation(INKPOD_BATCH_OPERATION_COLOR_REPLACE, &[], &pairs),
+        replace,
         operation(INKPOD_BATCH_OPERATION_MOVE_TO_COLOR_PLANE, &colors, &[]),
         operation(INKPOD_BATCH_OPERATION_MASKING, &colors, &[]),
         operation(INKPOD_BATCH_OPERATION_ERASE, &colors, &[]),
@@ -135,13 +158,13 @@ fn current_abi_graph_exposes_only_the_four_batch_v3_operation_shapes() {
         unsafe { inkpod_batch_graph_get_info(graph, &mut graph_info) },
         INKPOD_STATUS_OK
     );
-    assert_eq!(graph_info.version, 3);
+    assert_eq!(graph_info.version, 4);
     assert_eq!(graph_info.operation_count, 4);
     assert_eq!(graph_info.output_destination, INKPOD_BATCH_OUTPUT_NEW_TABS);
     assert_eq!(graph_info.output_format, INKPOD_BATCH_FORMAT_INKPOD);
     assert_eq!(
         unsafe { slice::from_raw_parts(graph_info.name_utf8, graph_info.name_bytes as usize) },
-        b"batch-v3-ffi"
+        b"batch-v4-ffi"
     );
     assert_eq!(
         unsafe {
@@ -180,10 +203,22 @@ fn current_abi_graph_exposes_only_the_four_batch_v3_operation_shapes() {
         assert_eq!(info.kind, expected);
         if index == 0 {
             assert_eq!((info.color_pair_count, info.color_count), (1, 0));
+            assert_eq!(info.target_count, 3);
         } else {
             assert_eq!((info.color_pair_count, info.color_count), (0, 1));
+            assert_eq!(info.target_count, 1);
         }
     }
+
+    let mut queried_target = InkpodBatchTargetInput {
+        struct_size: size_of::<InkpodBatchTargetInput>() as u32,
+        ..Default::default()
+    };
+    assert_eq!(
+        unsafe { inkpod_batch_graph_get_operation_target(graph, 0, 2, &mut queried_target) },
+        INKPOD_STATUS_OK
+    );
+    assert_eq!(queried_target.layer_kind, INKPOD_LAYER_GRAYSCALE_COLORING);
 
     let mut pair = InkpodBatchColorPairInput {
         struct_size: size_of::<InkpodBatchColorPairInput>() as u32,

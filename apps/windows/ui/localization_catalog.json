@@ -132,6 +132,13 @@
       "resource": false
     },
     {
+      "id": "BatchFixedTarget",
+      "kind": "text",
+      "ja": "固定ID指定",
+      "en": "Fixed ID target",
+      "resource": false
+    },
+    {
       "id": "BatchPlaneId",
       "kind": "text",
       "ja": "プレーンID",

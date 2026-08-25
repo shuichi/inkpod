@@ -66,7 +66,7 @@
 extern "C" {
 #endif
 
-#define INKPOD_ABI_VERSION UINT32_C(21)
+#define INKPOD_ABI_VERSION UINT32_C(22)
 #define INKPOD_FEATURE_NONE UINT64_C(0)
 
 /** @brief InkScript ABI record の exact-current version。 */
@@ -532,7 +532,8 @@ typedef uint32_t InkpodTaskState;
 #define INKPOD_TASK_CANCELLED UINT32_C(3)
 #define INKPOD_TASK_FAILED UINT32_C(4)
 
-#define INKPOD_BATCH_GRAPH_VERSION UINT32_C(3)
+#define INKPOD_BATCH_GRAPH_VERSION UINT32_C(4)
+#define INKPOD_BATCH_OPERATION_VERSION UINT32_C(3)
 /** @brief batch graph の入力 selector 種類。 */
 typedef uint32_t InkpodBatchInputKind;
 #define INKPOD_BATCH_INPUT_FILE UINT32_C(1)
@@ -2586,9 +2587,25 @@ typedef struct InkpodBatchColorPairInput {
 } InkpodBatchColorPairInput;
 
 /**
- * @brief exact color rows を持つ Batch v3 operation 入力。
+ * @brief 一つのBatch対象plane selector。
+ */
+typedef struct InkpodBatchTargetInput {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    uint64_t layer_id;
+    uint64_t plane_id;
+    InkpodLayerKind layer_kind;
+    InkpodTypedPlaneKind plane_kind;
+    InkpodBatchMissingPolicy missing_policy;
+    uint32_t reserved_2;
+} InkpodBatchTargetInput;
+
+/**
+ * @brief exact color rows を持つ Batch v4 operation 入力。
  * `colors` は移動、マスキング、消去、`color_pairs` は色置換だけで使う。全 nested pointer は
- * graph 作成中だけ borrowed で、成功時に graph が値をコピーする。
+ * graph 作成中だけ borrowed で、成功時に graph が値をコピーする。先頭targetはscalar fields、
+ * 色置換の二件目以降は `additional_targets` で渡す。
  */
 typedef struct InkpodBatchOperationInput {
     uint32_t struct_size;
@@ -2607,6 +2624,10 @@ typedef struct InkpodBatchOperationInput {
     uint64_t color_pair_count;
     uint64_t color_pair_stride_bytes;
     uint64_t reserved_3;
+    const InkpodBatchTargetInput* additional_targets;
+    uint64_t additional_target_count;
+    uint64_t additional_target_stride_bytes;
+    uint64_t reserved_4;
 } InkpodBatchOperationInput;
 
 /**
@@ -2675,7 +2696,8 @@ typedef struct InkpodBatchOperationInfo {
     uint32_t reserved_2;
     uint64_t color_count;
     uint64_t color_pair_count;
-    uint64_t reserved_3[2];
+    uint64_t target_count;
+    uint64_t reserved_3;
 } InkpodBatchOperationInfo;
 
 /**
@@ -6014,6 +6036,12 @@ InkpodStatus inkpod_batch_graph_get_operation(
     const InkpodBatchGraph* graph,
     uint64_t index,
     InkpodBatchOperationInfo* out_info);
+/** Copies one operation target selector, including the primary target at index zero. */
+InkpodStatus inkpod_batch_graph_get_operation_target(
+    const InkpodBatchGraph* graph,
+    uint64_t operation_index,
+    uint64_t target_index,
+    InkpodBatchTargetInput* out_target);
 /** Copies one move/masking/erase exact-color row. */
 InkpodStatus inkpod_batch_graph_get_operation_color(
     const InkpodBatchGraph* graph,

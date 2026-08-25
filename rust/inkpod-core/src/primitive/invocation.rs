@@ -1151,11 +1151,9 @@ impl CanonicalInvocation {
             Self::ApplyBatchOperations { operations } => operations
                 .iter()
                 .flat_map(|operation| {
-                    operation
-                        .target
-                        .layer_id
-                        .into_iter()
-                        .chain(operation.target.plane_id)
+                    std::iter::once(&operation.target)
+                        .chain(operation.additional_targets.iter())
+                        .flat_map(|target| target.layer_id.into_iter().chain(target.plane_id))
                 })
                 .collect(),
             Self::UpdateAdjustmentLayer { layer_id, .. } => vec![*layer_id],
@@ -2949,6 +2947,7 @@ impl<'a> CanonicalReader<'a> {
                     plane_kind,
                     missing_policy,
                 },
+                additional_targets: Vec::new(),
                 kind,
             };
             crate::batch::validate_operation(&operation)
@@ -3908,6 +3907,11 @@ impl CanonicalWriter {
         self.u32(count);
         for operation in operations {
             crate::batch::validate_operation(operation)?;
+            if !operation.additional_targets.is_empty() {
+                return Err(CoreError::InvalidArgument(
+                    "canonical batch operation target was not lowered",
+                ));
+            }
             self.u32(operation.version);
             self.boolean(operation.enabled);
             self.boolean(operation.target.layer_id.is_some());

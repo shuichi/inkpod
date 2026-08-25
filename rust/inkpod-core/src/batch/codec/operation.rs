@@ -8,22 +8,24 @@ pub(in crate::batch) fn operation_to_file(
 ) -> Result<FileBatchOperation, CoreError> {
     validate_operation(operation)?;
     let (kind, payload) = encode_operation_kind(&operation.kind)?;
-    let target = operation.target;
-    let target = FileBatchTarget {
-        layer_id: target.layer_id.unwrap_or(0),
-        plane_id: target.plane_id.unwrap_or(0),
-        layer_kind: target.layer_kind.map_or(0, layer_kind_code),
-        plane_kind: target.plane_kind.map_or(0, plane_kind_code),
-        missing_policy: match target.missing_policy {
-            BatchMissingTargetPolicy::Skip => MISSING_SKIP,
-            BatchMissingTargetPolicy::Error => MISSING_ERROR,
-        },
-    };
+    let targets = std::iter::once(&operation.target)
+        .chain(operation.additional_targets.iter())
+        .map(|target| FileBatchTarget {
+            layer_id: target.layer_id.unwrap_or(0),
+            plane_id: target.plane_id.unwrap_or(0),
+            layer_kind: target.layer_kind.map_or(0, layer_kind_code),
+            plane_kind: target.plane_kind.map_or(0, plane_kind_code),
+            missing_policy: match target.missing_policy {
+                BatchMissingTargetPolicy::Skip => MISSING_SKIP,
+                BatchMissingTargetPolicy::Error => MISSING_ERROR,
+            },
+        })
+        .collect();
     Ok(FileBatchOperation {
         version: operation.version,
         kind,
         flags: if operation.enabled { OP_ENABLED } else { 0 },
-        target,
+        targets,
         payload,
     })
 }
@@ -36,34 +38,42 @@ pub(in crate::batch) fn operation_from_file(
             "batch operation flags are invalid",
         ));
     }
-    if file.target == FileBatchTarget::default() {
+    if file.targets.is_empty() {
         return Err(CoreError::InvalidArgument(
             "batch operation target is missing",
         ));
     }
-    let target = BatchTargetSelector {
-        layer_id: (file.target.layer_id != 0).then_some(file.target.layer_id),
-        plane_id: (file.target.plane_id != 0).then_some(file.target.plane_id),
-        layer_kind: (file.target.layer_kind != 0)
-            .then(|| parse_layer_kind(file.target.layer_kind))
-            .transpose()?,
-        plane_kind: (file.target.plane_kind != 0)
-            .then(|| parse_plane_kind(file.target.plane_kind))
-            .transpose()?,
-        missing_policy: match file.target.missing_policy {
-            MISSING_SKIP => BatchMissingTargetPolicy::Skip,
-            MISSING_ERROR => BatchMissingTargetPolicy::Error,
-            _ => {
-                return Err(CoreError::InvalidArgument(
-                    "batch missing-target policy is unknown",
-                ));
-            }
-        },
-    };
+    let mut targets = file
+        .targets
+        .into_iter()
+        .map(|target| {
+            Ok(BatchTargetSelector {
+                layer_id: (target.layer_id != 0).then_some(target.layer_id),
+                plane_id: (target.plane_id != 0).then_some(target.plane_id),
+                layer_kind: (target.layer_kind != 0)
+                    .then(|| parse_layer_kind(target.layer_kind))
+                    .transpose()?,
+                plane_kind: (target.plane_kind != 0)
+                    .then(|| parse_plane_kind(target.plane_kind))
+                    .transpose()?,
+                missing_policy: match target.missing_policy {
+                    MISSING_SKIP => BatchMissingTargetPolicy::Skip,
+                    MISSING_ERROR => BatchMissingTargetPolicy::Error,
+                    _ => {
+                        return Err(CoreError::InvalidArgument(
+                            "batch missing-target policy is unknown",
+                        ));
+                    }
+                },
+            })
+        })
+        .collect::<Result<Vec<_>, CoreError>>()?;
+    let target = targets.remove(0);
     let operation = BatchOperation {
         version: file.version,
         enabled: file.flags & OP_ENABLED != 0,
         target,
+        additional_targets: targets,
         kind: decode_operation_kind(file.kind, &file.payload)?,
     };
     validate_operation(&operation)?;

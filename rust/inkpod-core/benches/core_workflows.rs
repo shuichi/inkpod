@@ -821,6 +821,7 @@ fn batch_preview(profile: Profile) -> ScenarioResult {
             version: BATCH_OPERATION_VERSION,
             enabled: true,
             target: BatchTargetSelector::color_plane(),
+            additional_targets: Vec::new(),
             kind: BatchOperationKind::ColorReplace(replacements),
         }],
         output: BatchOutputSettings {

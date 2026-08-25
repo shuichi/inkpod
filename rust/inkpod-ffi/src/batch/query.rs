@@ -48,6 +48,7 @@ fn operation_info(
         BatchMissingTargetPolicy::Skip => INKPOD_BATCH_MISSING_SKIP,
         BatchMissingTargetPolicy::Error => INKPOD_BATCH_MISSING_ERROR,
     };
+    output.target_count = 1_u64.saturating_add(operation.additional_targets.len() as u64);
     match &operation.kind {
         BatchOperationKind::ColorReplace(pairs) => {
             output.kind = INKPOD_BATCH_OPERATION_COLOR_REPLACE;
@@ -137,6 +138,56 @@ pub unsafe extern "C" fn inkpod_batch_graph_get_operation(
             Err(status) => return status,
         };
         unsafe { out_info.write(info) };
+        INKPOD_STATUS_OK
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_batch_graph_get_operation_target(
+    graph: *const InkpodBatchGraph,
+    operation_index: u64,
+    target_index: u64,
+    out_target: *mut InkpodBatchTargetInput,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if let Err(status) =
+            unsafe { validate_struct(out_target.cast_const(), "InkpodBatchTargetInput") }
+        {
+            return status;
+        }
+        let operation = match operation_at(graph, operation_index) {
+            Ok(operation) => operation,
+            Err(status) => return status,
+        };
+        let target = if target_index == 0 {
+            Some(&operation.target)
+        } else {
+            usize::try_from(target_index - 1)
+                .ok()
+                .and_then(|index| operation.additional_targets.get(index))
+        };
+        let Some(target) = target else {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch target index is outside bounds",
+            );
+        };
+        let output = InkpodBatchTargetInput {
+            struct_size: unsafe { (*out_target).struct_size },
+            reserved: 0,
+            feature_flags: INKPOD_FEATURE_NONE,
+            layer_id: target.layer_id.unwrap_or(0),
+            plane_id: target.plane_id.unwrap_or(0),
+            layer_kind: target.layer_kind.map_or(0, layer_kind_code),
+            plane_kind: target.plane_kind.map_or(0, plane_type_code),
+            missing_policy: match target.missing_policy {
+                BatchMissingTargetPolicy::Skip => INKPOD_BATCH_MISSING_SKIP,
+                BatchMissingTargetPolicy::Error => INKPOD_BATCH_MISSING_ERROR,
+            },
+            reserved_2: 0,
+        };
+        unsafe { out_target.write(output) };
         INKPOD_STATUS_OK
     })
 }

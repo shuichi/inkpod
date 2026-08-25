@@ -99,7 +99,7 @@ impl Drop for PreviewTemporaryDirectory {
 }
 
 impl Core {
-    /// Runs every expanded Batch v3 input in isolated temporary storage and returns one
+    /// Runs every expanded Batch v4 input in isolated temporary storage and returns one
     /// clean, pathless contact-sheet document as a staged result.
     ///
     /// All file and active-document inputs are fully copied or materialized before the

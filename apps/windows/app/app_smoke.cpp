@@ -8146,6 +8146,120 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
         stages, 1, LVIS_SELECTED | LVIS_FOCUSED,
         LVIS_SELECTED | LVIS_FOCUSED);
     PumpPendingWindowMessages();
+    const HWND target_label = GetDlgItem(
+        parameter_host, IDC_BATCH_PARAMETER_TARGET_LABEL);
+    const HWND target = GetDlgItem(
+        parameter_host, IDC_BATCH_PARAMETER_TARGET);
+    const HWND target_binary = GetDlgItem(
+        parameter_host, IDC_BATCH_PARAMETER_TARGET_BINARY);
+    const HWND target_grayscale = GetDlgItem(
+        parameter_host, IDC_BATCH_PARAMETER_TARGET_GRAYSCALE);
+    std::array<wchar_t, 64U> target_label_text{};
+    if (target_label != nullptr) {
+        GetWindowTextW(
+            target_label,
+            target_label_text.data(),
+            static_cast<int>(target_label_text.size()));
+    }
+    const bool target_text_matches = std::wstring_view(target_label_text.data())
+        == UiText(UiStringId::OperationTargetLayer);
+    if (!WindowHasVisibleStyle(target_label) || !WindowHasVisibleStyle(target)
+        || !WindowHasVisibleStyle(target_binary)
+        || !WindowHasVisibleStyle(target_grayscale)
+        || IsWindowEnabled(target) == FALSE
+        || IsWindowEnabled(target_binary) == FALSE
+        || IsWindowEnabled(target_grayscale) == FALSE
+        || !target_text_matches
+        || SendMessageW(target, BM_GETCHECK, 0, 0) != BST_UNCHECKED
+        || SendMessageW(target_binary, BM_GETCHECK, 0, 0) != BST_CHECKED
+        || SendMessageW(target_grayscale, BM_GETCHECK, 0, 0) != BST_UNCHECKED) {
+        std::fprintf(
+            stderr,
+            "batch target selector mismatch: label=%p targets=%p/%p/%p "
+            "visible=%u/%u/%u enabled=%u/%u/%u checks=%lld/%lld/%lld "
+            "text_match=%u layer=%u plane=%u ids=%llu/%llu\n",
+            static_cast<void*>(target_label),
+            static_cast<void*>(target),
+            static_cast<void*>(target_binary),
+            static_cast<void*>(target_grayscale),
+            WindowHasVisibleStyle(target) ? 1U : 0U,
+            WindowHasVisibleStyle(target_binary) ? 1U : 0U,
+            WindowHasVisibleStyle(target_grayscale) ? 1U : 0U,
+            target != nullptr && IsWindowEnabled(target) != FALSE ? 1U : 0U,
+            target_binary != nullptr && IsWindowEnabled(target_binary) != FALSE ? 1U : 0U,
+            target_grayscale != nullptr && IsWindowEnabled(target_grayscale) != FALSE ? 1U : 0U,
+            static_cast<long long>(target == nullptr
+                                       ? BST_INDETERMINATE
+                                       : SendMessageW(target, BM_GETCHECK, 0, 0)),
+            static_cast<long long>(target_binary == nullptr
+                                       ? BST_INDETERMINATE
+                                       : SendMessageW(target_binary, BM_GETCHECK, 0, 0)),
+            static_cast<long long>(target_grayscale == nullptr
+                                       ? BST_INDETERMINATE
+                                       : SendMessageW(target_grayscale, BM_GETCHECK, 0, 0)),
+            target_text_matches ? 1U : 0U,
+            state.batch.operations[0].layer_kind,
+            state.batch.operations[0].plane_kind,
+            static_cast<unsigned long long>(state.batch.operations[0].layer_id),
+            static_cast<unsigned long long>(state.batch.operations[0].plane_id));
+        cleanup();
+        return 747;
+    }
+    SendMessageW(target, BM_SETCHECK, BST_CHECKED, 0);
+    SendMessageW(
+        parameter_host,
+        WM_COMMAND,
+        MAKEWPARAM(IDC_BATCH_PARAMETER_TARGET, BN_CLICKED),
+        reinterpret_cast<LPARAM>(target));
+    SendMessageW(target_grayscale, BM_SETCHECK, BST_CHECKED, 0);
+    SendMessageW(
+        parameter_host,
+        WM_COMMAND,
+        MAKEWPARAM(IDC_BATCH_PARAMETER_TARGET_GRAYSCALE, BN_CLICKED),
+        reinterpret_cast<LPARAM>(target_grayscale));
+    PumpPendingWindowMessages();
+    if (state.batch.operations[0].layer_id != 0U
+        || state.batch.operations[0].plane_id != 0U
+        || state.batch.operations[0].layer_kind
+            != INKPOD_LAYER_RASTER
+        || state.batch.operations[0].plane_kind != INKPOD_TYPED_PLANE_RASTER
+        || state.batch.operations[0].additional_targets.size() != 2U
+        || state.batch.operations[0].additional_targets[0].layer_kind
+            != INKPOD_LAYER_BINARY_COLORING
+        || state.batch.operations[0].additional_targets[0].plane_kind
+            != INKPOD_TYPED_PLANE_COLOR
+        || state.batch.operations[0].additional_targets[1].layer_kind
+            != INKPOD_LAYER_GRAYSCALE_COLORING
+        || state.batch.operations[0].additional_targets[1].plane_kind
+            != INKPOD_TYPED_PLANE_COLOR) {
+        const auto& failed_operation = state.batch.operations[0];
+        std::fprintf(
+            stderr,
+            "batch multi-target update mismatch: primary=%u/%u ids=%llu/%llu "
+            "additional=%zu checks=%lld/%lld/%lld\n",
+            failed_operation.layer_kind,
+            failed_operation.plane_kind,
+            static_cast<unsigned long long>(failed_operation.layer_id),
+            static_cast<unsigned long long>(failed_operation.plane_id),
+            failed_operation.additional_targets.size(),
+            static_cast<long long>(SendMessageW(target, BM_GETCHECK, 0, 0)),
+            static_cast<long long>(SendMessageW(target_binary, BM_GETCHECK, 0, 0)),
+            static_cast<long long>(SendMessageW(target_grayscale, BM_GETCHECK, 0, 0)));
+        for (std::size_t index = 0U;
+             index < failed_operation.additional_targets.size(); ++index) {
+            const auto& failed_target = failed_operation.additional_targets[index];
+            std::fprintf(
+                stderr,
+                "  additional[%zu]=%u/%u ids=%llu/%llu\n",
+                index,
+                failed_target.layer_kind,
+                failed_target.plane_kind,
+                static_cast<unsigned long long>(failed_target.layer_id),
+                static_cast<unsigned long long>(failed_target.plane_id));
+        }
+        cleanup();
+        return 748;
+    }
     RECT color_rows_client{};
     if (GetClientRect(input_rows, &color_rows_client) == FALSE
         || ListView_GetItemCount(input_rows) != 3
@@ -8185,26 +8299,26 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
         cleanup();
         return 720;
     }
-    if (visible_edit_count != 4U) {
+    if (visible_edit_count != 2U) {
         cleanup();
         return 745;
     }
     RECT old_alpha_bounds{};
     RECT new_alpha_bounds{};
-    if (GetWindowRect(visible_edits[2], &old_alpha_bounds) == FALSE
-        || GetWindowRect(visible_edits[3], &new_alpha_bounds) == FALSE
+    if (GetWindowRect(visible_edits[0], &old_alpha_bounds) == FALSE
+        || GetWindowRect(visible_edits[1], &new_alpha_bounds) == FALSE
         || old_alpha_bounds.right <= old_alpha_bounds.left
         || new_alpha_bounds.right <= new_alpha_bounds.left
         || new_alpha_bounds.left <= old_alpha_bounds.right) {
         cleanup();
         return 746;
     }
-    SetWindowTextW(visible_edits[2], L"128");
+    SetWindowTextW(visible_edits[0], L"128");
     SendMessageW(
         parameter_host,
         WM_COMMAND,
-        MAKEWPARAM(GetDlgCtrlID(visible_edits[2]), EN_KILLFOCUS),
-        reinterpret_cast<LPARAM>(visible_edits[2]));
+        MAKEWPARAM(GetDlgCtrlID(visible_edits[0]), EN_KILLFOCUS),
+        reinterpret_cast<LPARAM>(visible_edits[0]));
     PumpPendingWindowMessages();
     if (state.batch.operations[0].color_pairs[1].old_color.alpha != 128U
         || ListView_GetNextItem(input_rows, -1, LVNI_SELECTED) != 1) {
@@ -8286,7 +8400,16 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
         : 0;
     if (save_result != 1 || saved_attributes == INVALID_FILE_ATTRIBUTES
         || load_result != 1 || !loaded_graph_available
-        || loaded_operation_count != 4U || duplicate_result != 1
+        || loaded_operation_count != 4U
+        || state.batch.operations[0].layer_kind
+            != INKPOD_LAYER_RASTER
+        || state.batch.operations[0].plane_kind != INKPOD_TYPED_PLANE_RASTER
+        || state.batch.operations[0].additional_targets.size() != 2U
+        || state.batch.operations[0].additional_targets[0].layer_kind
+            != INKPOD_LAYER_BINARY_COLORING
+        || state.batch.operations[0].additional_targets[1].layer_kind
+            != INKPOD_LAYER_GRAYSCALE_COLORING
+        || duplicate_result != 1
         || state.batch.operations.size() != 5U) {
         std::fprintf(
             stderr,

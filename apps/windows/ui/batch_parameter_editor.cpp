@@ -10,6 +10,7 @@
 #include <string>
 
 #include "app/frontend_state.h"
+#include "app/resource.h"
 #include "ui/batch_color_editor_model.h"
 #include "ui/batch_input_picker.h"
 #include "ui/localization.h"
@@ -42,6 +43,21 @@ constexpr int kPrimaryAlpha = 21;
 constexpr int kSecondaryAlphaLabel = 22;
 constexpr int kSecondaryAlpha = 23;
 
+struct ColorReplaceTargetOption {
+    InkpodLayerKind layer_kind;
+    InkpodTypedPlaneKind plane_kind;
+    UiStringId label;
+};
+
+constexpr std::array<ColorReplaceTargetOption, 3U> kColorReplaceTargets{{
+    {INKPOD_LAYER_RASTER, INKPOD_TYPED_PLANE_RASTER,
+     UiStringId::LayerRasterGeneral},
+    {INKPOD_LAYER_BINARY_COLORING, INKPOD_TYPED_PLANE_COLOR,
+     UiStringId::LayerBinaryColoring},
+    {INKPOD_LAYER_GRAYSCALE_COLORING, INKPOD_TYPED_PLANE_COLOR,
+     UiStringId::LayerGrayscaleColoring},
+}};
+
 struct EditorState {
     BatchParameterEditorBinding* binding{};
     std::uint32_t stage{};
@@ -73,6 +89,11 @@ struct EditorState {
     HWND primary_alpha{};
     HWND secondary_alpha_label{};
     HWND secondary_alpha{};
+    HWND target_label{};
+    HWND target{};
+    HWND target_binary{};
+    HWND target_grayscale{};
+    HWND target_fixed{};
 };
 
 int Scale(HWND window, int dip) noexcept {
@@ -392,12 +413,28 @@ void Layout(EditorState& state, HWND window) noexcept {
         place(state.naming_template, margin, y, width, row);
         y += row;
     } else {
-        place(state.first_label, margin, y, half, row);
-        place(state.last_label, margin + half + gap, y, half, row);
-        y += row;
-        place(state.first, margin, y, half, row);
-        place(state.last, margin + half + gap, y, half, row);
-        y += row + gap;
+        if (IsWindowVisible(state.target) != FALSE) {
+            place(state.target_label, margin, y, width, row);
+            y += row;
+            place(state.target, margin, y, width, row);
+            y += row + gap;
+            place(state.target_binary, margin, y, width, row);
+            y += row + gap;
+            place(state.target_grayscale, margin, y, width, row);
+            y += row + gap;
+            if (IsWindowVisible(state.target_fixed) != FALSE) {
+                place(state.target_fixed, margin, y, width, row);
+                y += row + gap;
+            }
+        }
+        if (IsWindowVisible(state.first_label) != FALSE) {
+            place(state.first_label, margin, y, half, row);
+            place(state.last_label, margin + half + gap, y, half, row);
+            y += row;
+            place(state.first, margin, y, half, row);
+            place(state.last, margin + half + gap, y, half, row);
+            y += row + gap;
+        }
         const int list_height = Scale(window, 150);
         place(state.rows, margin, y, width, list_height);
         y += list_height + gap;
@@ -458,6 +495,126 @@ app::BatchOperationUi* SelectedOperation(EditorState& state) noexcept {
     auto& operations = state.binding->draft->operations;
     const std::size_t index = static_cast<std::size_t>(state.stage - 1U);
     return index < operations.size() ? &operations[index] : nullptr;
+}
+
+bool MatchesTarget(
+    std::uint64_t layer_id,
+    std::uint64_t plane_id,
+    InkpodLayerKind layer_kind,
+    InkpodTypedPlaneKind plane_kind,
+    const ColorReplaceTargetOption& option) noexcept {
+    return layer_id == 0U && plane_id == 0U
+        && layer_kind == option.layer_kind && plane_kind == option.plane_kind;
+}
+
+bool HasColorReplaceTarget(
+    const app::BatchOperationUi& operation,
+    const ColorReplaceTargetOption& option) noexcept {
+    if (MatchesTarget(
+            operation.layer_id,
+            operation.plane_id,
+            operation.layer_kind,
+            operation.plane_kind,
+            option)) {
+        return true;
+    }
+    return std::any_of(
+        operation.additional_targets.begin(),
+        operation.additional_targets.end(),
+        [&](const InkpodBatchTargetInput& target) {
+            return MatchesTarget(
+                target.layer_id,
+                target.plane_id,
+                target.layer_kind,
+                target.plane_kind,
+                option);
+        });
+}
+
+bool HasFixedColorReplaceTarget(const app::BatchOperationUi& operation) noexcept {
+    const auto known = [](
+                           std::uint64_t layer_id,
+                           std::uint64_t plane_id,
+                           InkpodLayerKind layer_kind,
+                           InkpodTypedPlaneKind plane_kind) {
+        return std::any_of(
+            kColorReplaceTargets.begin(),
+            kColorReplaceTargets.end(),
+            [&](const ColorReplaceTargetOption& option) {
+                return MatchesTarget(
+                    layer_id, plane_id, layer_kind, plane_kind, option);
+            });
+    };
+    if (!known(
+            operation.layer_id,
+            operation.plane_id,
+            operation.layer_kind,
+            operation.plane_kind)) {
+        return true;
+    }
+    return std::any_of(
+        operation.additional_targets.begin(),
+        operation.additional_targets.end(),
+        [&](const InkpodBatchTargetInput& target) {
+            return !known(
+                target.layer_id,
+                target.plane_id,
+                target.layer_kind,
+                target.plane_kind);
+        });
+}
+
+InkpodBatchTargetInput TargetRecord(
+    const ColorReplaceTargetOption& option,
+    InkpodBatchMissingPolicy missing_policy) noexcept {
+    InkpodBatchTargetInput target{};
+    target.struct_size = sizeof(target);
+    target.layer_kind = option.layer_kind;
+    target.plane_kind = option.plane_kind;
+    target.missing_policy = missing_policy;
+    return target;
+}
+
+bool SetColorReplaceTargetChecked(
+    app::BatchOperationUi& operation,
+    std::size_t changed_index,
+    bool checked) noexcept {
+    if (changed_index >= kColorReplaceTargets.size()) {
+        return false;
+    }
+    std::array<bool, kColorReplaceTargets.size()> selected{};
+    if (!HasFixedColorReplaceTarget(operation)) {
+        for (std::size_t index = 0U; index < selected.size(); ++index) {
+            selected[index] = HasColorReplaceTarget(
+                operation, kColorReplaceTargets[index]);
+        }
+    }
+    selected[changed_index] = checked;
+    if (std::none_of(selected.begin(), selected.end(), [](bool value) { return value; })) {
+        return false;
+    }
+    const auto primary = std::find(selected.begin(), selected.end(), true);
+    const std::size_t primary_index = static_cast<std::size_t>(primary - selected.begin());
+    const auto primary_target = TargetRecord(
+        kColorReplaceTargets[primary_index], operation.missing_policy);
+    std::vector<InkpodBatchTargetInput> additional_targets;
+    try {
+        additional_targets.reserve(selected.size() - primary_index - 1U);
+        for (std::size_t index = primary_index + 1U; index < selected.size(); ++index) {
+            if (selected[index]) {
+                additional_targets.push_back(TargetRecord(
+                    kColorReplaceTargets[index], operation.missing_policy));
+            }
+        }
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+    operation.layer_id = primary_target.layer_id;
+    operation.plane_id = primary_target.plane_id;
+    operation.layer_kind = primary_target.layer_kind;
+    operation.plane_kind = primary_target.plane_kind;
+    operation.additional_targets = std::move(additional_targets);
+    return true;
 }
 
 std::wstring ColorAlphaLabel(
@@ -561,10 +718,10 @@ void Refresh(EditorState& state, HWND window) noexcept {
     Show(state.browse, input || folder_output);
     Show(state.template_label, output);
     Show(state.naming_template, output);
-    Show(state.first_label, input || operation);
-    Show(state.first, input || operation);
-    Show(state.last_label, input || operation);
-    Show(state.last, input || operation);
+    Show(state.first_label, input || (operation && !color_replace));
+    Show(state.first, input || (operation && !color_replace));
+    Show(state.last_label, input || (operation && !color_replace));
+    Show(state.last, input || (operation && !color_replace));
     Show(state.rows, input || operation);
     Show(state.add, input || operation);
     Show(state.remove, input || operation);
@@ -576,6 +733,13 @@ void Refresh(EditorState& state, HWND window) noexcept {
     Show(state.primary_alpha, operation);
     Show(state.secondary_alpha_label, color_replace);
     Show(state.secondary_alpha, color_replace);
+    Show(state.target_label, color_replace);
+    Show(state.target, color_replace);
+    Show(state.target_binary, color_replace);
+    Show(state.target_grayscale, color_replace);
+    const bool fixed_color_target = color_replace
+        && HasFixedColorReplaceTarget(*selected_operation);
+    Show(state.target_fixed, fixed_color_target);
 
     SendMessageW(state.primary, CB_RESETCONTENT, 0, 0);
     SendMessageW(state.secondary, CB_RESETCONTENT, 0, 0);
@@ -641,6 +805,26 @@ void Refresh(EditorState& state, HWND window) noexcept {
         SetText(state.naming_template, draft.naming_template);
     } else if (auto* selected = selected_operation; selected != nullptr) {
         SetText(state.title, selected->label);
+        SetWindowTextW(
+            state.target_label, UiText(UiStringId::OperationTargetLayer));
+        if (color_replace) {
+            const std::array<HWND, 3U> controls{
+                state.target, state.target_binary, state.target_grayscale};
+            for (std::size_t index = 0U; index < controls.size(); ++index) {
+                SetWindowTextW(
+                    controls[index], UiText(kColorReplaceTargets[index].label));
+                SendMessageW(
+                    controls[index],
+                    BM_SETCHECK,
+                    HasColorReplaceTarget(*selected, kColorReplaceTargets[index])
+                        ? BST_CHECKED
+                        : BST_UNCHECKED,
+                    0);
+            }
+            SetWindowTextW(
+                state.target_fixed, UiText(UiStringId::BatchFixedTarget));
+            SendMessageW(state.target_fixed, BM_SETCHECK, BST_CHECKED, 0);
+        }
         SetWindowTextW(state.first_label, UiText(UiStringId::BatchLayerId));
         SetWindowTextW(state.last_label, UiText(UiStringId::BatchPlaneId));
         SetText(state.first, Number(selected->layer_id));
@@ -661,9 +845,12 @@ void Refresh(EditorState& state, HWND window) noexcept {
                          state.naming_template, state.first,
                          state.last, state.rows, state.add, state.remove, state.swap,
                          state.current, state.old_swatch, state.new_swatch,
-                         state.primary_alpha, state.secondary_alpha}) {
+                         state.primary_alpha, state.secondary_alpha,
+                         state.target, state.target_binary,
+                         state.target_grayscale}) {
         EnableWindow(control, state.enabled ? TRUE : FALSE);
     }
+    EnableWindow(state.target_fixed, FALSE);
     if (input && !draft.inputs.empty()
         && draft.inputs[state.selected_input].kind
             == INKPOD_BATCH_INPUT_ACTIVE_DOCUMENT) {
@@ -1194,7 +1381,12 @@ void ApplyEditorFont(EditorState& state, HWND window) noexcept {
              state.primary_alpha_label,
              state.primary_alpha,
              state.secondary_alpha_label,
-             state.secondary_alpha}) {
+             state.secondary_alpha,
+             state.target_label,
+             state.target,
+             state.target_binary,
+             state.target_grayscale,
+             state.target_fixed}) {
         SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), FALSE);
     }
 }
@@ -1275,6 +1467,25 @@ LRESULT CALLBACK EditorProcedure(
             state->secondary_alpha = Child(
                 window, WS_EX_CLIENTEDGE, WC_EDITW, L"",
                 ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP, kSecondaryAlpha);
+            state->target_label = Child(
+                window, 0, WC_STATICW, L"", SS_LEFT,
+                IDC_BATCH_PARAMETER_TARGET_LABEL);
+            state->target = Child(
+                window, 0, WC_BUTTONW, L"",
+                BS_AUTOCHECKBOX | WS_TABSTOP,
+                IDC_BATCH_PARAMETER_TARGET);
+            state->target_binary = Child(
+                window, 0, WC_BUTTONW, L"",
+                BS_AUTOCHECKBOX | WS_TABSTOP,
+                IDC_BATCH_PARAMETER_TARGET_BINARY);
+            state->target_grayscale = Child(
+                window, 0, WC_BUTTONW, L"",
+                BS_AUTOCHECKBOX | WS_TABSTOP,
+                IDC_BATCH_PARAMETER_TARGET_GRAYSCALE);
+            state->target_fixed = Child(
+                window, 0, WC_BUTTONW, L"",
+                BS_AUTOCHECKBOX,
+                IDC_BATCH_PARAMETER_TARGET_FIXED);
             SendMessageW(state->primary_alpha, EM_SETLIMITTEXT, 5U, 0);
             SendMessageW(state->secondary_alpha, EM_SETLIMITTEXT, 5U, 0);
             ApplyEditorFont(*state, window);
@@ -1344,6 +1555,38 @@ LRESULT CALLBACK EditorProcedure(
                         state->binding->draft->output_format =
                             static_cast<std::uint32_t>(index + 1);
                         Changed(*state);
+                    }
+                    return 0;
+                case IDC_BATCH_PARAMETER_TARGET:
+                case IDC_BATCH_PARAMETER_TARGET_BINARY:
+                case IDC_BATCH_PARAMETER_TARGET_GRAYSCALE:
+                    if (HIWORD(wparam) == BN_CLICKED) {
+                        auto* operation = SelectedOperation(*state);
+                        const std::size_t selected = LOWORD(wparam)
+                                == IDC_BATCH_PARAMETER_TARGET
+                            ? 0U
+                            : (LOWORD(wparam)
+                                       == IDC_BATCH_PARAMETER_TARGET_BINARY
+                                   ? 1U
+                                   : 2U);
+                        const std::array<HWND, 3U> controls{
+                            state->target,
+                            state->target_binary,
+                            state->target_grayscale};
+                        const bool checked = SendMessageW(
+                                                 controls[selected],
+                                                 BM_GETCHECK,
+                                                 0,
+                                                 0)
+                            == BST_CHECKED;
+                        if (operation != nullptr
+                            && operation->kind
+                                == INKPOD_BATCH_OPERATION_COLOR_REPLACE
+                            && SetColorReplaceTargetChecked(
+                                *operation, selected, checked)) {
+                            Changed(*state);
+                        }
+                        Refresh(*state, window);
                     }
                     return 0;
                 case kPath:

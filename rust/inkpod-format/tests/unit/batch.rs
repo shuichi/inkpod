@@ -11,16 +11,25 @@ fn fixture() -> FileBatchGraph {
             last_cell: 12,
         }],
         operations: vec![FileBatchOperation {
-            version: BATCH_GRAPH_VERSION,
+            version: 3,
             kind: 2,
             flags: 1,
-            target: FileBatchTarget {
-                layer_id: 10,
-                plane_id: 12,
-                layer_kind: 1,
-                plane_kind: 2,
-                missing_policy: 1,
-            },
+            targets: vec![
+                FileBatchTarget {
+                    layer_id: 10,
+                    plane_id: 12,
+                    layer_kind: 1,
+                    plane_kind: 2,
+                    missing_policy: 1,
+                },
+                FileBatchTarget {
+                    layer_id: 20,
+                    plane_id: 22,
+                    layer_kind: 2,
+                    plane_kind: 2,
+                    missing_policy: 2,
+                },
+            ],
             payload: vec![1, 2, 3, 4],
         }],
         output: FileBatchOutput {
@@ -57,12 +66,14 @@ fn batch_graph_rejects_unknown_container_version_and_cancel_cleans_temp() {
         decode_batch_graph(&encoded),
         Err(FormatError::Invalid("batch graph version is unsupported"))
     ));
-    let mut old = encode_batch_graph(&graph).unwrap();
-    old[8..12].copy_from_slice(&2_u32.to_le_bytes());
-    assert!(matches!(
-        decode_batch_graph(&old),
-        Err(FormatError::Invalid("batch graph version is unsupported"))
-    ));
+    for old_version in [1_u32, 2, 3] {
+        let mut old = encode_batch_graph(&graph).unwrap();
+        old[8..12].copy_from_slice(&old_version.to_le_bytes());
+        assert!(matches!(
+            decode_batch_graph(&old),
+            Err(FormatError::Invalid("batch graph version is unsupported"))
+        ));
+    }
 
     let directory = std::env::temp_dir().join(format!(
         "inkpod-batch-format-{}-{}",

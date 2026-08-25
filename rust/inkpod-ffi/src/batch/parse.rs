@@ -294,6 +294,7 @@ pub(super) unsafe fn parse_operation(
     if record.reserved != 0
         || record.reserved_2 != 0
         || record.reserved_3 != 0
+        || record.reserved_4 != 0
         || record.flags & !INKPOD_BATCH_OPERATION_ENABLED != 0
     {
         return Err(fail(
@@ -302,6 +303,34 @@ pub(super) unsafe fn parse_operation(
         ));
     }
     let target = parse_target(record)?;
+    let additional_target_count =
+        usize::try_from(record.additional_target_count).map_err(|_| {
+            fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch additional target count is not representable",
+            )
+        })?;
+    if additional_target_count >= MAX_BATCH_TARGETS {
+        return Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "batch target count is outside bounds",
+        ));
+    }
+    let mut additional_targets = Vec::with_capacity(additional_target_count);
+    for index in 0..additional_target_count {
+        let pointer = unsafe {
+            record_at(
+                record.additional_targets,
+                record.additional_target_count,
+                record.additional_target_stride_bytes,
+                index,
+                MAX_BATCH_TARGETS - 1,
+                "InkpodBatchTargetInput",
+            )
+        }?;
+        // SAFETY: record_at validated this complete target record.
+        additional_targets.push(parse_target_record(unsafe { &*pointer })?);
+    }
     let kind = match record.kind {
         INKPOD_BATCH_OPERATION_COLOR_REPLACE => {
             let count = checked_count(record.color_pair_count, MAX_BATCH_PAIRS, "color pair")?;
@@ -353,21 +382,54 @@ pub(super) unsafe fn parse_operation(
         version: record.version,
         enabled: record.flags & INKPOD_BATCH_OPERATION_ENABLED != 0,
         target,
+        additional_targets,
         kind,
     })
 }
 
 pub(super) fn parse_target(record: &InkpodBatchOperationInput) -> Result<BatchTargetSelector, u32> {
+    parse_target_fields(
+        record.layer_id,
+        record.plane_id,
+        record.layer_kind,
+        record.plane_kind,
+        record.missing_policy,
+    )
+}
+
+fn parse_target_record(record: &InkpodBatchTargetInput) -> Result<BatchTargetSelector, u32> {
+    if record.reserved != 0 || record.feature_flags != 0 || record.reserved_2 != 0 {
+        return Err(fail(
+            INKPOD_STATUS_UNSUPPORTED,
+            "batch target contains unsupported flags or reserved fields",
+        ));
+    }
+    parse_target_fields(
+        record.layer_id,
+        record.plane_id,
+        record.layer_kind,
+        record.plane_kind,
+        record.missing_policy,
+    )
+}
+
+fn parse_target_fields(
+    layer_id: u64,
+    plane_id: u64,
+    layer_kind: u32,
+    plane_kind: u32,
+    missing_policy: u32,
+) -> Result<BatchTargetSelector, u32> {
     Ok(BatchTargetSelector {
-        layer_id: (record.layer_id != 0).then_some(record.layer_id),
-        plane_id: (record.plane_id != 0).then_some(record.plane_id),
-        layer_kind: (record.layer_kind != 0)
-            .then(|| parse_layer_kind(record.layer_kind))
+        layer_id: (layer_id != 0).then_some(layer_id),
+        plane_id: (plane_id != 0).then_some(plane_id),
+        layer_kind: (layer_kind != 0)
+            .then(|| parse_layer_kind(layer_kind))
             .transpose()?,
-        plane_kind: (record.plane_kind != 0)
-            .then(|| parse_plane_kind(i64::from(record.plane_kind)))
+        plane_kind: (plane_kind != 0)
+            .then(|| parse_plane_kind(i64::from(plane_kind)))
             .transpose()?,
-        missing_policy: match record.missing_policy {
+        missing_policy: match missing_policy {
             INKPOD_BATCH_MISSING_SKIP => BatchMissingTargetPolicy::Skip,
             INKPOD_BATCH_MISSING_ERROR => BatchMissingTargetPolicy::Error,
             _ => {

@@ -111,7 +111,7 @@ void FillOperationInput(
     InkpodBatchOperationInput& destination) noexcept {
     destination = {};
     destination.struct_size = sizeof(destination);
-    destination.version = INKPOD_BATCH_GRAPH_VERSION;
+    destination.version = INKPOD_BATCH_OPERATION_VERSION;
     destination.kind = source.kind;
     destination.flags = source.flags;
     destination.layer_id = source.layer_id;
@@ -132,6 +132,11 @@ void FillOperationInput(
         : source.color_pairs.data();
     destination.color_pair_count = source.color_pairs.size();
     destination.color_pair_stride_bytes = sizeof(InkpodBatchColorPairInput);
+    destination.additional_targets = source.additional_targets.empty()
+        ? nullptr
+        : source.additional_targets.data();
+    destination.additional_target_count = source.additional_targets.size();
+    destination.additional_target_stride_bytes = sizeof(InkpodBatchTargetInput);
 }
 
 bool ReadOperation(
@@ -142,7 +147,8 @@ bool ReadOperation(
     info.struct_size = sizeof(info);
     if (inkpod_batch_graph_get_operation(graph, index, &info)
         != INKPOD_STATUS_OK
-        || info.color_count > 4'096U || info.color_pair_count > 4'096U) {
+        || info.color_count > 4'096U || info.color_pair_count > 4'096U
+        || info.target_count == 0U || info.target_count > 64U) {
         return false;
     }
     try {
@@ -154,6 +160,8 @@ bool ReadOperation(
         operation.layer_kind = info.layer_kind;
         operation.plane_kind = info.plane_kind;
         operation.missing_policy = info.missing_policy;
+        operation.additional_targets.resize(
+            static_cast<std::size_t>(info.target_count - 1U));
         operation.colors.resize(static_cast<std::size_t>(info.color_count));
         operation.color_pairs.resize(
             static_cast<std::size_t>(info.color_pair_count));
@@ -164,6 +172,16 @@ bool ReadOperation(
         operation.label = label;
     } catch (const std::bad_alloc&) {
         return false;
+    }
+    for (std::size_t target_index = 0U;
+         target_index < operation.additional_targets.size(); ++target_index) {
+        auto& target = operation.additional_targets[target_index];
+        target.struct_size = sizeof(target);
+        if (inkpod_batch_graph_get_operation_target(
+                graph, index, target_index + 1U, &target)
+            != INKPOD_STATUS_OK) {
+            return false;
+        }
     }
     for (std::size_t row = 0U; row < operation.colors.size(); ++row) {
         operation.colors[row].struct_size = sizeof(InkpodColorValue);

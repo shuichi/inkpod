@@ -7,7 +7,7 @@ use super::*;
 use crate::primitive::{CanonicalInvocation, InvocationResult};
 
 impl Core {
-    /// Applies an ordered Batch v3 operation list as one canonical procedure and Undo unit.
+    /// Applies an ordered Batch v4 operation list as one canonical procedure and Undo unit.
     ///
     /// Disabled operations are ignored. Invalid targets, cancellation, stale revision,
     /// overflow, and allocation failure publish no partial document state.
@@ -30,11 +30,18 @@ impl Core {
             validate_operation(operation)?;
         }
         if !self.canonical_invocation_is_active() {
-            let staged = enabled.clone();
+            let canonical = lower_batch_operations(
+                self.document.as_ref().ok_or(CoreError::NoDocument)?,
+                &enabled,
+            )?;
+            if canonical.is_empty() {
+                return Ok(self.noop_outcome());
+            }
+            let staged = canonical.clone();
             return self
                 .execute_canonical_invocation_with(
                     CanonicalInvocation::ApplyBatchOperations {
-                        operations: enabled,
+                        operations: canonical,
                     },
                     move |core| {
                         apply_batch_operations_canonical(core, &staged, &mut is_cancelled)
@@ -111,6 +118,72 @@ pub(crate) fn apply_batch_operations_canonical(
     }
 
     core.commit_deferred_document_edit(before, after, base_revision, revision)
+}
+
+fn lower_batch_operations(
+    document: &CellDocument,
+    operations: &[BatchOperation],
+) -> Result<Vec<BatchOperation>, CoreError> {
+    let mut lowered = Vec::new();
+    for operation in operations {
+        let all_matches = matches!(operation.kind, BatchOperationKind::ColorReplace(_));
+        let mut resolved = Vec::new();
+        for selector in
+            std::iter::once(&operation.target).chain(operation.additional_targets.iter())
+        {
+            for target in resolve_targets_in_document(document, selector, all_matches)? {
+                if !resolved.iter().any(|existing: &BatchTargetSelector| {
+                    existing.layer_id == target.layer_id && existing.plane_id == target.plane_id
+                }) {
+                    resolved.push(target);
+                }
+            }
+        }
+        for target in resolved {
+            lowered.push(BatchOperation {
+                version: operation.version,
+                enabled: operation.enabled,
+                target,
+                additional_targets: Vec::new(),
+                kind: operation.kind.clone(),
+            });
+        }
+    }
+    Ok(lowered)
+}
+
+fn resolve_targets_in_document(
+    document: &CellDocument,
+    selector: &BatchTargetSelector,
+    all_matches: bool,
+) -> Result<Vec<BatchTargetSelector>, CoreError> {
+    let mut matches = Vec::new();
+    for layer in document.layers.iter().filter(|layer| {
+        selector.layer_id.is_none_or(|id| layer.id.get() == id)
+            && selector.layer_kind.is_none_or(|kind| layer.kind == kind)
+    }) {
+        for plane in layer.planes.iter().filter(|plane| {
+            selector.plane_id.is_none_or(|id| plane.id.get() == id)
+                && selector.plane_kind.is_none_or(|kind| plane.kind == kind)
+        }) {
+            matches.push(BatchTargetSelector {
+                layer_id: Some(layer.id.get()),
+                plane_id: Some(plane.id.get()),
+                layer_kind: Some(layer.kind),
+                plane_kind: Some(plane.kind),
+                missing_policy: BatchMissingTargetPolicy::Error,
+            });
+            if !all_matches {
+                return Ok(matches);
+            }
+        }
+    }
+    if matches.is_empty() && selector.missing_policy == BatchMissingTargetPolicy::Error {
+        return Err(CoreError::InvalidArgument(
+            "batch stable target does not exist in this cell",
+        ));
+    }
+    Ok(matches)
 }
 
 fn resolve_target_in_document(

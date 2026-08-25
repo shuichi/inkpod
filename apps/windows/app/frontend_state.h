@@ -123,6 +123,7 @@ struct BatchOperationUi {
     InkpodLayerKind layer_kind{INKPOD_LAYER_BINARY_COLORING};
     InkpodTypedPlaneKind plane_kind{INKPOD_TYPED_PLANE_COLOR};
     InkpodBatchMissingPolicy missing_policy{INKPOD_BATCH_MISSING_ERROR};
+    std::vector<InkpodBatchTargetInput> additional_targets;
     std::vector<InkpodColorValue> colors;
     std::vector<InkpodBatchColorPairInput> color_pairs;
     std::wstring label;

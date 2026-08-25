@@ -60,6 +60,7 @@ fn new_tab_output_is_pathless_dirty_and_has_a_new_uuid() {
             version: BATCH_OPERATION_VERSION,
             enabled: true,
             target: BatchTargetSelector::color_plane(),
+            additional_targets: Vec::new(),
             kind: BatchOperationKind::Erase(vec![PixelValue::Rgba([1, 2, 3, 4])]),
         }],
         output: BatchOutputSettings {
@@ -99,6 +100,7 @@ fn no_op_operation() -> BatchOperation {
         version: BATCH_OPERATION_VERSION,
         enabled: true,
         target: BatchTargetSelector::color_plane(),
+        additional_targets: Vec::new(),
         kind: BatchOperationKind::Erase(vec![PixelValue::Rgba([1, 2, 3, 4])]),
     }
 }
@@ -106,7 +108,7 @@ fn no_op_operation() -> BatchOperation {
 fn graph_with(inputs: Vec<BatchInputSelector>, output: BatchOutputSettings) -> BatchGraph {
     BatchGraph {
         version: BATCH_GRAPH_VERSION,
-        name: "batch-v3-contract".to_owned(),
+        name: "batch-v4-contract".to_owned(),
         inputs,
         operations: vec![no_op_operation()],
         output,
@@ -116,7 +118,7 @@ fn graph_with(inputs: Vec<BatchInputSelector>, output: BatchOutputSettings) -> B
 fn batch_temp_directory(label: &str) -> PathBuf {
     let sequence = TEST_PATH_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir().join(format!(
-        "inkpod-batch-v3-{label}-{}-{sequence}",
+        "inkpod-batch-v4-{label}-{}-{sequence}",
         std::process::id()
     ))
 }

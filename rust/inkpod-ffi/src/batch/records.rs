@@ -22,6 +22,20 @@ pub struct InkpodBatchColorPairInput {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodBatchTargetInput {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub feature_flags: u64,
+    pub layer_id: u64,
+    pub plane_id: u64,
+    pub layer_kind: u32,
+    pub plane_kind: u32,
+    pub missing_policy: u32,
+    pub reserved_2: u32,
+}
+
+#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct InkpodBatchOperationInput {
     pub struct_size: u32,
@@ -40,6 +54,10 @@ pub struct InkpodBatchOperationInput {
     pub color_pair_count: u64,
     pub color_pair_stride_bytes: u64,
     pub reserved_3: u64,
+    pub additional_targets: *const InkpodBatchTargetInput,
+    pub additional_target_count: u64,
+    pub additional_target_stride_bytes: u64,
+    pub reserved_4: u64,
 }
 
 #[repr(C)]
@@ -104,7 +122,8 @@ pub struct InkpodBatchOperationInfo {
     pub reserved_2: u32,
     pub color_count: u64,
     pub color_pair_count: u64,
-    pub reserved_3: [u64; 2],
+    pub target_count: u64,
+    pub reserved_3: u64,
 }
 
 #[repr(C)]

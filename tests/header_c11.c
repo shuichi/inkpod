@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-_Static_assert(INKPOD_ABI_VERSION == 21U, "unexpected ABI version");
+_Static_assert(INKPOD_ABI_VERSION == 22U, "unexpected ABI version");
 _Static_assert(sizeof(InkpodSubpaletteSourceInput) == 32U, "subpalette source layout drift");
 _Static_assert(sizeof(InkpodSubpaletteRasterInput) == 32U, "subpalette raster layout drift");
 _Static_assert(sizeof(InkpodSubpaletteInfo) == 32U, "subpalette info layout drift");

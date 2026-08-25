@@ -2,11 +2,15 @@ use super::*;
 use crate::{PaintTool, Stroke, StrokeSample};
 
 fn target(kind: PlaneType) -> BatchTargetSelector {
+    semantic_target(LayerKind::BinaryColoring, kind)
+}
+
+fn semantic_target(layer_kind: LayerKind, plane_kind: PlaneType) -> BatchTargetSelector {
     BatchTargetSelector {
         layer_id: None,
         plane_id: None,
-        layer_kind: Some(LayerKind::BinaryColoring),
-        plane_kind: Some(kind),
+        layer_kind: Some(layer_kind),
+        plane_kind: Some(plane_kind),
         missing_policy: BatchMissingTargetPolicy::Error,
     }
 }
@@ -16,6 +20,7 @@ fn operation(target_kind: PlaneType, kind: BatchOperationKind) -> BatchOperation
         version: BATCH_OPERATION_VERSION,
         enabled: true,
         target: target(target_kind),
+        additional_targets: Vec::new(),
         kind,
     }
 }
@@ -36,6 +41,7 @@ fn exact_operation(
             plane_kind: Some(plane_kind),
             missing_policy: BatchMissingTargetPolicy::Error,
         },
+        additional_targets: Vec::new(),
         kind,
     }
 }
@@ -133,10 +139,10 @@ fn dot(core: &mut Core, color: [u8; 4], x: f32, y: f32) {
 }
 
 #[test]
-fn batch_v3_catalog_is_closed_and_disabled_only_graph_is_invalid() {
+fn batch_v4_catalog_is_closed_and_disabled_only_graph_is_invalid() {
     let graph = BatchGraph {
         version: BATCH_GRAPH_VERSION,
-        name: "v3".to_owned(),
+        name: "v4".to_owned(),
         inputs: vec![BatchInputSelector::active_document()],
         operations: vec![BatchOperation {
             enabled: false,
@@ -150,7 +156,7 @@ fn batch_v3_catalog_is_closed_and_disabled_only_graph_is_invalid() {
             ..BatchOutputSettings::default()
         },
     };
-    assert_eq!(BATCH_GRAPH_VERSION, 3);
+    assert_eq!(BATCH_GRAPH_VERSION, 4);
     assert_eq!(BATCH_OPERATION_VERSION, 3);
     assert!(graph.validate().is_err());
 
@@ -165,6 +171,115 @@ fn batch_v3_catalog_is_closed_and_disabled_only_graph_is_invalid() {
         BatchOperationKind::Erase(vec![PixelValue::Rgba([1, 2, 3, 4])]),
     ];
     assert_eq!(kinds.len(), 4);
+}
+
+#[test]
+fn one_color_replace_operation_updates_all_selected_layers_as_one_undo_unit() {
+    let mut core = Core::new();
+    let document = core
+        .new_cell_with_uuid(2, 1, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI, 0xb304)
+        .unwrap();
+    let (_, second_binary) = core
+        .create_layer(LayerKind::BinaryColoring, "Binary 2")
+        .unwrap();
+    let (_, grayscale) = core
+        .create_layer(LayerKind::GrayscaleColoring, "Grayscale")
+        .unwrap();
+    let (_, raster) = core.create_layer(LayerKind::Raster, "Raster").unwrap();
+    let plane = |core: &Core, layer_id: u64, kind: PlaneType| {
+        core.layers()
+            .unwrap()
+            .into_iter()
+            .find(|layer| layer.id == layer_id)
+            .and_then(|layer| layer.planes.into_iter().find(|plane| plane.kind == kind))
+            .map(|plane| plane.id)
+            .unwrap()
+    };
+    let targets = [
+        EditorTarget {
+            layer_id: document.layer_id,
+            plane_id: document.color_plane_id,
+        },
+        EditorTarget {
+            layer_id: second_binary,
+            plane_id: plane(&core, second_binary, PlaneType::Color),
+        },
+        EditorTarget {
+            layer_id: grayscale,
+            plane_id: plane(&core, grayscale, PlaneType::Color),
+        },
+        EditorTarget {
+            layer_id: raster,
+            plane_id: plane(&core, raster, PlaneType::Raster),
+        },
+    ];
+    let old = PixelValue::Rgba([10, 20, 30, 40]);
+    let new = PixelValue::Rgba([90, 80, 70, 60]);
+    for target in targets {
+        fill_native(&mut core, target, old, None);
+    }
+    let before = core.document_state_digest().unwrap();
+    let history_before = core.history_entries().len();
+    let procedures_before = core.persistence_info().unwrap().procedure_count;
+    let operation = BatchOperation {
+        version: BATCH_OPERATION_VERSION,
+        enabled: true,
+        target: semantic_target(LayerKind::Raster, PlaneType::Raster),
+        additional_targets: vec![
+            semantic_target(LayerKind::BinaryColoring, PlaneType::Color),
+            semantic_target(LayerKind::GrayscaleColoring, PlaneType::Color),
+        ],
+        kind: BatchOperationKind::ColorReplace(vec![BatchColorPair {
+            enabled: true,
+            old,
+            new,
+        }]),
+    };
+    core.apply_batch_operations(std::slice::from_ref(&operation), || false)
+        .unwrap();
+    let after = core.document_state_digest().unwrap();
+    assert_ne!(after, before);
+    assert_eq!(core.history_entries().len(), history_before + 1);
+    assert_eq!(
+        core.persistence_info().unwrap().procedure_count,
+        procedures_before + 1
+    );
+    assert_eq!(
+        core.verify_journal_replay()
+            .unwrap()
+            .document_state_digest(),
+        after
+    );
+    core.undo().unwrap();
+    assert_eq!(core.document_state_digest().unwrap(), before);
+    core.redo().unwrap();
+    assert_eq!(core.document_state_digest().unwrap(), after);
+
+    let mut previous = after;
+    for target in targets {
+        core.apply_batch_operations(
+            &[exact_operation(
+                target.layer_id,
+                target.plane_id,
+                if target.layer_id == raster {
+                    PlaneType::Raster
+                } else {
+                    PlaneType::Color
+                },
+                BatchOperationKind::ColorReplace(vec![BatchColorPair {
+                    enabled: true,
+                    old: new,
+                    new: old,
+                }]),
+            )],
+            || false,
+        )
+        .unwrap();
+        let current = core.document_state_digest().unwrap();
+        assert_ne!(current, previous, "selected target was not replaced");
+        previous = current;
+    }
+    assert_eq!(previous, before);
 }
 
 #[test]

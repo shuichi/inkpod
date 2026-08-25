@@ -653,6 +653,7 @@ fn batch_copies_asset_backed_sources_and_writes_current_native_output() {
             version: BATCH_OPERATION_VERSION,
             enabled: true,
             target: BatchTargetSelector::color_plane(),
+            additional_targets: Vec::new(),
             kind: BatchOperationKind::ColorReplace(vec![BatchColorPair {
                 enabled: true,
                 old: PixelValue::Rgba([1, 2, 3, 255]),
