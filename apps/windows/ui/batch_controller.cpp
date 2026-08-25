@@ -7,6 +7,7 @@
 #include <climits>
 #include <cstdint>
 #include <new>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -89,6 +90,64 @@ bool Utf8ToWide(
                output.data(),
                required)
         == required;
+}
+
+constexpr std::uint64_t kMaximumDisplayedBatchFailures = 8U;
+constexpr std::size_t kMaximumDisplayedBatchInputCharacters = 128U;
+constexpr std::size_t kMaximumDisplayedBatchDiagnosticCharacters = 256U;
+
+std::wstring TruncateBatchReportText(
+    std::wstring_view text, std::size_t maximum_characters) {
+    if (text.size() <= maximum_characters) {
+        return std::wstring(text);
+    }
+    std::size_t length = maximum_characters;
+    if (length > 0U
+        && text[length - 1U] >= static_cast<wchar_t>(0xd800U)
+        && text[length - 1U] <= static_cast<wchar_t>(0xdbffU)) {
+        --length;
+    }
+    std::wstring truncated(text.substr(0U, length));
+    truncated += L"...";
+    return truncated;
+}
+
+std::wstring BatchFailureReasonText(std::wstring_view diagnostic) {
+    if (diagnostic.find(L"batch stable target does not exist")
+            != std::wstring_view::npos
+        || diagnostic.find(L"batch plane target does not exist")
+            != std::wstring_view::npos) {
+        return UiText(UiStringId::BatchFailureTargetMissing);
+    }
+    if (diagnostic.find(L"hidden or non-editable")
+        != std::wstring_view::npos) {
+        return UiText(UiStringId::BatchFailureTargetUnavailable);
+    }
+    if (diagnostic.find(L"pixel value does not match the raster pixel format")
+            != std::wstring_view::npos
+        || diagnostic.find(L"raster contracts do not match")
+            != std::wstring_view::npos) {
+        return UiText(UiStringId::BatchFailureFormatMismatch);
+    }
+    if (diagnostic.empty()) {
+        return UiText(UiStringId::BatchFailureDetailsUnavailable);
+    }
+    return UiText(UiStringId::BatchFailureTechnicalDetails)
+        + TruncateBatchReportText(
+            diagnostic, kMaximumDisplayedBatchDiagnosticCharacters);
+}
+
+void AppendBatchFailureLine(
+    std::wstring& output,
+    std::wstring_view input_name,
+    std::wstring_view diagnostic) {
+    output += L"\r\n- ";
+    output += input_name.empty()
+        ? UiText(UiStringId::Text0496)
+        : TruncateBatchReportText(
+              input_name, kMaximumDisplayedBatchInputCharacters);
+    output += L": ";
+    output += BatchFailureReasonText(diagnostic);
 }
 
 const wchar_t* OperationKindLabel(std::uint32_t kind) noexcept {
@@ -876,9 +935,47 @@ std::wstring BatchController::ReportSummary(const InkpodBatchReport* report) {
         || inkpod_batch_report_get_info(report, &info) != INKPOD_STATUS_OK) {
         return UiText(UiStringId::Text0409);
     }
-    return UiText(UiStringId::Text0844) + std::to_wstring(info.item_count) + UiText(UiStringId::Text0454)
+    std::wstring result = UiText(UiStringId::Text0844)
+        + std::to_wstring(info.item_count) + UiText(UiStringId::Text0454)
         + std::to_wstring(info.failure_count)
         + (info.cancelled != 0U ? UiText(UiStringId::Text0007) : L"");
+    std::uint64_t displayed_failures{};
+    for (std::uint64_t index = 0U;
+         index < info.item_count
+         && displayed_failures < kMaximumDisplayedBatchFailures;
+         ++index) {
+        InkpodBatchReportItem item{};
+        item.struct_size = sizeof(item);
+        if (inkpod_batch_report_get(report, index, &item)
+            != INKPOD_STATUS_OK) {
+            AppendBatchFailureLine(result, {}, {});
+            break;
+        }
+        if (item.outcome != INKPOD_BATCH_ITEM_FAILED) {
+            continue;
+        }
+        std::wstring input_name;
+        std::wstring diagnostic;
+        if (!Utf8ToWide(item.input_name, item.input_name_bytes, input_name)
+            || !Utf8ToWide(item.message, item.message_bytes, diagnostic)) {
+            diagnostic.clear();
+        }
+        AppendBatchFailureLine(result, input_name, diagnostic);
+        ++displayed_failures;
+    }
+    if (info.failure_count > displayed_failures) {
+        std::array<wchar_t, 96U> additional{};
+        _snwprintf_s(
+            additional.data(),
+            additional.size(),
+            _TRUNCATE,
+            UiText(UiStringId::BatchAdditionalFailuresFormat),
+            static_cast<unsigned long long>(
+                info.failure_count - displayed_failures));
+        result += L"\r\n";
+        result += additional.data();
+    }
+    return result;
 }
 
 bool BatchController::ChooseFolder(

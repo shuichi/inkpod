@@ -111,7 +111,8 @@ void LayoutBatchPane(HWND dialog, BatchPaletteDialogState* state) noexcept {
     panes::PlacePaneButtonRows(
         dialog, run_controls, margin, run_top, content, row, gap);
 
-    const int validation_height = scale(40);
+    const int validation_height = std::clamp(
+        height / 5, scale(72), scale(120));
     const int validation_top = std::max(top, run_top - gap - validation_height);
     PlacePaneDialogControl(
         dialog,
@@ -507,12 +508,14 @@ void UpdateBatchPaletteDialog(
             LVIS_SELECTED | LVIS_FOCUSED);
     }
     state->updating = false;
-    SetDlgItemTextW(
-        dialog,
-        IDC_BATCH_OUTPUT,
+    const HWND output = GetDlgItem(dialog, IDC_BATCH_OUTPUT);
+    SetWindowTextW(
+        output,
         view.validation_text.empty()
             ? UiText(UiStringId::BatchNoValidationIssues)
             : view.validation_text.c_str());
+    SendMessageW(output, EM_SETSEL, 0, 0);
+    SendMessageW(output, EM_SCROLLCARET, 0, 0);
 
     const bool operation_selected = view.selected_stage > 0U
         && view.selected_stage + 1U < view.stage_labels.size();

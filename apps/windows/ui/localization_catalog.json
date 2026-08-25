@@ -85,8 +85,8 @@
     {
       "id": "BatchValidation",
       "kind": "text",
-      "ja": "検証結果",
-      "en": "Validation",
+      "ja": "検証・実行結果",
+      "en": "Validation and run results",
       "resource": false
     },
     {
@@ -94,6 +94,48 @@
       "kind": "text",
       "ja": "検証エラーはありません。",
       "en": "No validation errors.",
+      "resource": false
+    },
+    {
+      "id": "BatchFailureTargetMissing",
+      "kind": "text",
+      "ja": "対象レイヤーまたはプレーンが見つかりません。",
+      "en": "The target layer or plane was not found.",
+      "resource": false
+    },
+    {
+      "id": "BatchFailureTargetUnavailable",
+      "kind": "text",
+      "ja": "対象レイヤーまたはプレーンが非表示、または編集不可です。",
+      "en": "The target layer or plane is hidden or not editable.",
+      "resource": false
+    },
+    {
+      "id": "BatchFailureFormatMismatch",
+      "kind": "text",
+      "ja": "対象の画像形式が処理条件と一致しません。",
+      "en": "The target image format does not match the operation.",
+      "resource": false
+    },
+    {
+      "id": "BatchFailureTechnicalDetails",
+      "kind": "text",
+      "ja": "技術詳細: ",
+      "en": "Technical details: ",
+      "resource": false
+    },
+    {
+      "id": "BatchFailureDetailsUnavailable",
+      "kind": "text",
+      "ja": "失敗の詳細を取得できません。",
+      "en": "Failure details are unavailable.",
+      "resource": false
+    },
+    {
+      "id": "BatchAdditionalFailuresFormat",
+      "kind": "format",
+      "ja": "ほか %llu 件の失敗があります。",
+      "en": "There are %llu additional failures.",
       "resource": false
     },
     {

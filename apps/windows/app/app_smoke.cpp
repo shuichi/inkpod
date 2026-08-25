@@ -8429,6 +8429,18 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
         state.batch.operations.begin() + state.batch.selected_operation);
     state.batch.selected_operation = 3U;
     state.batch.selected_stage = 4U;
+    inkpod::app::BatchOperationUi successful_operation;
+    try {
+        successful_operation = state.batch.operations.back();
+    } catch (const std::bad_alloc&) {
+        cleanup();
+        return 760;
+    }
+    auto& failing_operation = state.batch.operations.back();
+    failing_operation.layer_id = std::numeric_limits<std::uint64_t>::max();
+    failing_operation.plane_id = std::numeric_limits<std::uint64_t>::max();
+    failing_operation.missing_policy = INKPOD_BATCH_MISSING_ERROR;
+    failing_operation.additional_targets.clear();
     BatchController::ResetDerivedState(state.batch);
     BatchController::RefreshPalette(
         state.batch, state.Workspace().batch_palette);
@@ -8473,10 +8485,35 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
     }
     InkpodBatchReportInfo report_info{};
     report_info.struct_size = sizeof(report_info);
+    const HWND batch_output = GetDlgItem(
+        state.Workspace().batch_palette, IDC_BATCH_OUTPUT);
+    std::array<wchar_t, 32U> batch_output_class{};
+    std::array<wchar_t, 1'024U> batch_output_text{};
+    if (batch_output != nullptr) {
+        GetClassNameW(
+            batch_output,
+            batch_output_class.data(),
+            static_cast<int>(batch_output_class.size()));
+        GetWindowTextW(
+            batch_output,
+            batch_output_text.data(),
+            static_cast<int>(batch_output_text.size()));
+    }
+    const LONG_PTR batch_output_style = batch_output == nullptr
+        ? 0
+        : GetWindowLongPtrW(batch_output, GWL_STYLE);
     if (inkpod_batch_report_get_info(state.batch.report, &report_info)
             != INKPOD_STATUS_OK
-        || report_info.failure_count != 0U || report_info.item_count == 0U
-        || report_info.staged_result_count != 1U) {
+        || report_info.failure_count != 1U || report_info.item_count == 0U
+        || report_info.staged_result_count != 1U
+        || _wcsicmp(batch_output_class.data(), L"Edit") != 0
+        || (batch_output_style & ES_MULTILINE) == 0
+        || (batch_output_style & ES_READONLY) == 0
+        || (batch_output_style & WS_VSCROLL) == 0
+        || wcsstr(
+               batch_output_text.data(),
+               UiText(UiStringId::BatchFailureTargetMissing))
+            == nullptr) {
         cleanup();
         return 709;
     }
@@ -8516,6 +8553,10 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
         cleanup();
         return 710;
     }
+
+    state.batch.operations.back() = std::move(successful_operation);
+    BatchController::RefreshPalette(
+        state.batch, state.Workspace().batch_palette);
 
     const std::size_t sessions_before = state.engine->SessionCount();
     const auto previous_session = state.routing.targets.DocumentSession();
