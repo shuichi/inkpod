@@ -13,6 +13,7 @@ namespace inkpod::windows::ui {
 
 enum class DockHostChangeKind : std::uint8_t {
     Geometry,
+    StackBoundary,
     Structure,
 };
 
@@ -141,6 +142,8 @@ private:
     void ApplyPaneLayout(PaneHostState& pane) noexcept;
     void ApplyTabLayout(TabHostState& tabs, bool synchronize_items) noexcept;
     void ApplyToolTabLayout(bool synchronize_items) noexcept;
+    void RepaintChangedStackBoundaries(
+        const DockLayoutGeometry& previous) noexcept;
     void NotifyChanged(
         DockHostChangeKind kind = DockHostChangeKind::Structure) noexcept;
     void ShowContextMenu(DockPaneType type, POINT screen) noexcept;
@@ -154,6 +157,10 @@ private:
         const SplitterHostState& splitter, POINT screen) noexcept;
     void UpdateStackBoundaryFromPoint(
         SplitterHostState& splitter, POINT screen) noexcept;
+    [[nodiscard]] DockResult AdjustRightPaneBoundary(
+        DockPaneType first,
+        DockPaneType second,
+        int delta_milli) noexcept;
     void ActivateSelectedTab(TabHostState& tabs) noexcept;
     void ActivateSelectedToolTab() noexcept;
     [[nodiscard]] ToolTabResult MovePaneToToolTab(

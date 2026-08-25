@@ -509,6 +509,7 @@ int main() {
                static_cast<std::size_t>(DockPaneType::Layer)].shown) {
         return 127;
     }
+
     if (selected_tab_model.SetSelected(initial_tab) != ToolTabResult::Ok
         || selected_tab_dock.RestorePane(DockPaneType::Locator) != DockResult::Ok
         || selected_tab_dock.RestorePane(DockPaneType::LightTable)
@@ -566,6 +567,93 @@ int main() {
         if (!pane.shown || pane.bounds.height <= 0) {
             return 132;
         }
+    }
+
+    DockLayoutModel minimum_height_dock{};
+    RightToolTabsModel minimum_height_tabs{};
+    const auto& minimum_color_descriptor = PaneDescriptors()[
+        static_cast<std::size_t>(DockPaneType::Color)];
+    const auto& minimum_layer_descriptor = PaneDescriptors()[
+        static_cast<std::size_t>(DockPaneType::Layer)];
+    const auto minimum_height_geometry = ComputeDockLayout(
+        minimum_height_dock, 1'200, 720, 96U, &minimum_height_tabs);
+    const auto& minimum_color = minimum_height_geometry.panes[
+        static_cast<std::size_t>(DockPaneType::Color)];
+    const auto& minimum_layer = minimum_height_geometry.panes[
+        static_cast<std::size_t>(DockPaneType::Layer)];
+    if (minimum_color_descriptor.minimum_height_dip < 300
+        || !minimum_color.shown || !minimum_layer.shown
+        || minimum_color.bounds.height
+            < minimum_color_descriptor.minimum_height_dip
+        || minimum_layer.bounds.height
+            < minimum_layer_descriptor.minimum_height_dip) {
+        return 139;
+    }
+    const std::uint32_t minimum_color_weight =
+        minimum_height_dock.Pane(DockPaneType::Color)->split_weight;
+    const std::uint32_t minimum_layer_weight =
+        minimum_height_dock.Pane(DockPaneType::Layer)->split_weight;
+    if (minimum_height_dock.AdjustPaneBoundary(
+            DockPaneType::Color,
+            DockPaneType::Layer,
+            -1'000,
+            minimum_color.bounds.height + minimum_layer.bounds.height)
+            != DockResult::NoOp
+        || minimum_height_dock.Pane(DockPaneType::Color)->split_weight
+            != minimum_color_weight
+        || minimum_height_dock.Pane(DockPaneType::Layer)->split_weight
+            != minimum_layer_weight) {
+        return 140;
+    }
+    if (minimum_height_dock.AdjustPaneBoundary(
+            DockPaneType::Color,
+            DockPaneType::Layer,
+            1'000,
+            minimum_color.bounds.height + minimum_layer.bounds.height)
+        != DockResult::Ok) {
+        return 141;
+    }
+    const auto maximum_color_geometry = ComputeDockLayout(
+        minimum_height_dock, 1'200, 720, 96U, &minimum_height_tabs);
+    const auto& minimum_layer_after_grow = maximum_color_geometry.panes[
+        static_cast<std::size_t>(DockPaneType::Layer)];
+    if (minimum_layer_after_grow.bounds.height
+        < minimum_layer_descriptor.minimum_height_dip) {
+        return 142;
+    }
+    const std::uint32_t maximum_color_weight =
+        minimum_height_dock.Pane(DockPaneType::Color)->split_weight;
+    const std::uint32_t minimum_layer_weight_after_grow =
+        minimum_height_dock.Pane(DockPaneType::Layer)->split_weight;
+    if (minimum_height_dock.AdjustPaneBoundary(
+            DockPaneType::Color,
+            DockPaneType::Layer,
+            1'000,
+            minimum_color.bounds.height + minimum_layer.bounds.height)
+            != DockResult::NoOp
+        || minimum_height_dock.Pane(DockPaneType::Color)->split_weight
+            != maximum_color_weight
+        || minimum_height_dock.Pane(DockPaneType::Layer)->split_weight
+            != minimum_layer_weight_after_grow) {
+        return 143;
+    }
+    DockLayoutModel high_dpi_minimum_dock{};
+    RightToolTabsModel high_dpi_minimum_tabs{};
+    const auto high_dpi_minimum_geometry = ComputeDockLayout(
+        high_dpi_minimum_dock,
+        2'400,
+        1'440,
+        192U,
+        &high_dpi_minimum_tabs);
+    const auto& high_dpi_color = high_dpi_minimum_geometry.panes[
+        static_cast<std::size_t>(DockPaneType::Color)];
+    const auto& high_dpi_layer = high_dpi_minimum_geometry.panes[
+        static_cast<std::size_t>(DockPaneType::Layer)];
+    if (high_dpi_color.bounds.height
+            < minimum_color_descriptor.minimum_height_dip * 2
+        || high_dpi_layer.bounds.height
+            < minimum_layer_descriptor.minimum_height_dip * 2) {
+        return 144;
     }
 
     DockLayoutModel auxiliary_model{};
@@ -794,8 +882,8 @@ int main() {
         || normal.dock.right_tool_tabs.y != 0
         || normal.dock.right_tool_tabs.width != 320
         || normal.dock.right_tool_tabs.height != 28
-        || color.bounds.y != 28 || layer.bounds.y != 271
-        || color.bounds.height != 239 || layer.bounds.height != 509
+        || color.bounds.y != 28 || layer.bounds.y != 332
+        || color.bounds.height != 300 || layer.bounds.height != 448
         || Height(normal.document_tabs) != 28
         || normal.canvas.top != normal.document_tabs.bottom) {
         return 9;

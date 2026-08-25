@@ -198,7 +198,8 @@ public:
     [[nodiscard]] DockResult AdjustPaneBoundary(
         DockPaneType first,
         DockPaneType second,
-        int delta_milli) noexcept;
+        int delta_milli,
+        int available_extent_dip) noexcept;
 
     void SetMirrored(bool mirrored) noexcept { mirrored_ = mirrored; }
     [[nodiscard]] bool Mirrored() const noexcept { return mirrored_; }

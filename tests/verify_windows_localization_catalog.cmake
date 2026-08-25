@@ -67,6 +67,11 @@ foreach(GENERATED_RESOURCE_CONTENT IN ITEMS
     if(NOT MARKER_POSITION LESS 0)
         message(FATAL_ERROR "generated resource contains an unresolved catalog marker")
     endif()
+    string(FIND "${GENERATED_RESOURCE_CONTENT}" [=[\u]=] JSON_UNICODE_ESCAPE_POSITION)
+    if(NOT JSON_UNICODE_ESCAPE_POSITION LESS 0)
+        message(FATAL_ERROR
+            "generated resource contains a JSON Unicode escape that rc.exe displays literally")
+    endif()
 endforeach()
 if(NOT RESOURCE_JA_CONTENT MATCHES
         "LANGUAGE[ \t]+LANG_JAPANESE,[ \t]+SUBLANG_JAPANESE_JAPAN")

@@ -95,9 +95,9 @@ const std::array<PaneDescriptor, kDockPaneCount> kPaneDescriptors{{
       false,
       true,
      240,
-     120,
+     300,
      320,
-     220,
+     360,
      60U},
     {DockPaneType::Layer,
      UINT32_C(0x5259414c),
@@ -1016,10 +1016,14 @@ int MinimumRightToolTabExtent(
 DockResult DockLayoutModel::AdjustPaneBoundary(
     DockPaneType first,
     DockPaneType second,
-    int delta_milli) noexcept {
+    int delta_milli,
+    int available_extent_dip) noexcept {
     DockPanePlacement* first_pane = Pane(first);
     DockPanePlacement* second_pane = Pane(second);
+    const PaneDescriptor* first_descriptor = FindPaneDescriptor(first);
+    const PaneDescriptor* second_descriptor = FindPaneDescriptor(second);
     if (first_pane == nullptr || second_pane == nullptr
+        || first_descriptor == nullptr || second_descriptor == nullptr
         || !first_pane->present || !second_pane->present
         || first_pane->zone != DockZone::Right
         || second_pane->zone != DockZone::Right) {
@@ -1030,10 +1034,41 @@ DockResult DockLayoutModel::AdjustPaneBoundary(
     }
     const int combined = static_cast<int>(
         first_pane->split_weight + second_pane->split_weight);
-    const int adjusted = std::clamp(
-        static_cast<int>(first_pane->split_weight) + delta_milli,
-        static_cast<int>(kMinimumSplitWeight),
-        combined - static_cast<int>(kMinimumSplitWeight));
+    const int minimum_total = first_descriptor->minimum_height_dip
+        + second_descriptor->minimum_height_dip;
+    if (available_extent_dip < minimum_total) {
+        return DockResult::NoOp;
+    }
+    const auto minimum_first = static_cast<int>(std::max<std::int64_t>(
+        kMinimumSplitWeight,
+        (static_cast<std::int64_t>(combined)
+             * first_descriptor->minimum_height_dip
+         + available_extent_dip - 1)
+            / available_extent_dip));
+    const auto maximum_first = static_cast<int>(std::min<std::int64_t>(
+        combined - static_cast<int>(kMinimumSplitWeight),
+        static_cast<std::int64_t>(combined)
+            * (available_extent_dip - second_descriptor->minimum_height_dip)
+            / available_extent_dip));
+    if (minimum_first > maximum_first) {
+        return DockResult::NoOp;
+    }
+    const int current = static_cast<int>(first_pane->split_weight);
+    if ((current <= minimum_first && delta_milli < 0)
+        || (current >= maximum_first && delta_milli > 0)) {
+        return DockResult::NoOp;
+    }
+    const int effective_current =
+        std::clamp(current, minimum_first, maximum_first);
+    const std::int64_t weighted_delta =
+        static_cast<std::int64_t>(delta_milli) * combined;
+    const std::int64_t rounded_delta = weighted_delta >= 0
+        ? (weighted_delta + 500) / 1000
+        : -((-weighted_delta + 500) / 1000);
+    const int adjusted = static_cast<int>(std::clamp<std::int64_t>(
+        static_cast<std::int64_t>(effective_current) + rounded_delta,
+        minimum_first,
+        maximum_first));
     if (adjusted == static_cast<int>(first_pane->split_weight)) {
         return DockResult::NoOp;
     }

@@ -47,14 +47,14 @@ END
 
 IDR_MAIN_MENU MENU
 BEGIN
-    POPUP "ファイル(\u0026F)"
+    POPUP "ファイル(&F)"
     BEGIN
-        POPUP "新規(\u0026N)"
+        POPUP "新規(&N)"
         BEGIN
-            MENUITEM "セル(\u0026C)\tCtrl+N", IDM_FILE_NEW
-            MENUITEM "カット(\u0026T)...", IDM_FILE_NEW_CUT
+            MENUITEM "セル(&C)\tCtrl+N", IDM_FILE_NEW
+            MENUITEM "カット(&T)...", IDM_FILE_NEW_CUT
         END
-        MENUITEM "開く(\u0026O)...\tCtrl+O", IDM_FILE_OPEN
+        MENUITEM "開く(&O)...\tCtrl+O", IDM_FILE_OPEN
         POPUP "最近使ったファイル"
         BEGIN
             MENUITEM "1 (なし)", IDM_FILE_RECENT_1
@@ -66,8 +66,8 @@ BEGIN
             MENUITEM "7 (なし)", IDM_FILE_RECENT_7
             MENUITEM "8 (なし)", IDM_FILE_RECENT_8
         END
-        MENUITEM "保存(\u0026S)\tCtrl+S", IDM_FILE_SAVE
-        MENUITEM "名前を付けて保存(\u0026A)...", IDM_FILE_SAVE_AS
+        MENUITEM "保存(&S)\tCtrl+S", IDM_FILE_SAVE
+        MENUITEM "名前を付けて保存(&A)...", IDM_FILE_SAVE_AS
         MENUITEM "カットを保存", IDM_CUT_SAVE
         MENUITEM "カットのプロパティ...", IDM_CUT_PROPERTIES
         MENUITEM "カットを元に戻す", IDM_CUT_UNDO
@@ -81,28 +81,28 @@ BEGIN
             MENUITEM "表示番号を付け直す...", IDM_CUT_SEQUENCE_RENUMBER
         END
         MENUITEM "履歴を破棄してコピー...", IDM_FILE_COMPACT_COPY
-        MENUITEM "復帰(\u0026R)", IDM_FILE_REVERT
+        MENUITEM "復帰(&R)", IDM_FILE_REVERT
         MENUITEM "レイヤーを部分的に復帰", IDM_FILE_REVERT_PARTIAL
         MENUITEM "ラスタ－を読み込み...", IDM_FILE_IMPORT_RASTER
         MENUITEM "ラスタ－を書き出し...", IDM_FILE_EXPORT_RASTER
         MENUITEM "指示画像を書き出し...", IDM_FILE_EXPORT_INSTRUCTION_RASTER
-        MENUITEM "Recoveryを保存(\u0026V)", IDM_FILE_AUTOSAVE_NOW
-        MENUITEM "Recoveryを開く(\u0026Y)...", IDM_FILE_OPEN_RECOVERY
-        MENUITEM "起動時に前回の文書を復元(\u0026P)", IDM_FILE_RESTORE_PREVIOUS
-        MENUITEM "セル切替前に自動保存(\u0026W)", IDM_FILE_SEQUENCE_AUTOSAVE
+        MENUITEM "Recoveryを保存(&V)", IDM_FILE_AUTOSAVE_NOW
+        MENUITEM "Recoveryを開く(&Y)...", IDM_FILE_OPEN_RECOVERY
+        MENUITEM "起動時に前回の文書を復元(&P)", IDM_FILE_RESTORE_PREVIOUS
+        MENUITEM "セル切替前に自動保存(&W)", IDM_FILE_SEQUENCE_AUTOSAVE
         MENUITEM SEPARATOR
-        MENUITEM "終了(\u0026X)", IDM_APP_EXIT
+        MENUITEM "終了(&X)", IDM_APP_EXIT
     END
-    POPUP "編集(\u0026E)"
+    POPUP "編集(&E)"
     BEGIN
-        MENUITEM "元に戻す(\u0026U)\tCtrl+Z", IDM_EDIT_UNDO
-        MENUITEM "やり直し(\u0026R)\tCtrl+Y", IDM_EDIT_REDO
+        MENUITEM "元に戻す(&U)\tCtrl+Z", IDM_EDIT_UNDO
+        MENUITEM "やり直し(&R)\tCtrl+Y", IDM_EDIT_REDO
         MENUITEM "複数段階戻る...", IDM_EDIT_HISTORY_BACK
         MENUITEM "複数段階進む...", IDM_EDIT_HISTORY_FORWARD
         MENUITEM SEPARATOR
-        MENUITEM "カット(\u0026X)\tCtrl+X", IDM_EDIT_CUT
-        MENUITEM "コピー(\u0026C)\tCtrl+C", IDM_EDIT_COPY
-        MENUITEM "貼り付け(\u0026P)\tCtrl+V", IDM_EDIT_PASTE
+        MENUITEM "カット(&X)\tCtrl+X", IDM_EDIT_CUT
+        MENUITEM "コピー(&C)\tCtrl+C", IDM_EDIT_COPY
+        MENUITEM "貼り付け(&P)\tCtrl+V", IDM_EDIT_PASTE
         MENUITEM "選択プレーンにペースト", IDM_EDIT_PASTE_SELECTED
         MENUITEM "変換してペースト...", IDM_EDIT_PASTE_CONVERTED
         POPUP "フローティング選択"
@@ -113,12 +113,12 @@ BEGIN
         END
         MENUITEM "環境設定...", IDM_SHORTCUT_EDIT
     END
-    POPUP "表示(\u0026V)"
+    POPUP "表示(&V)"
     BEGIN
-        MENUITEM "拡大(\u0026I)", IDM_VIEW_ZOOM_IN
-        MENUITEM "縮小(\u0026O)", IDM_VIEW_ZOOM_OUT
-        MENUITEM "全体表示(\u0026F)", IDM_VIEW_FIT
-        MENUITEM "ピクセル等倍(\u00261)", IDM_VIEW_ONE_TO_ONE
+        MENUITEM "拡大(&I)", IDM_VIEW_ZOOM_IN
+        MENUITEM "縮小(&O)", IDM_VIEW_ZOOM_OUT
+        MENUITEM "全体表示(&F)", IDM_VIEW_FIT
+        MENUITEM "ピクセル等倍(&1)", IDM_VIEW_ONE_TO_ONE
         MENUITEM "表示倍率...", IDM_VIEW_ZOOM_PERCENT
         MENUITEM "範囲を拡大", IDM_VIEW_BOX_ZOOM
         MENUITEM SEPARATOR
@@ -142,7 +142,7 @@ BEGIN
         MENUITEM "グリッド設定...", IDM_VIEW_GRID_SETTINGS
         MENUITEM "透明部分", IDM_VIEW_TRANSPARENT
     END
-    POPUP "セル(\u0026D)"
+    POPUP "セル(&D)"
     BEGIN
         MENUITEM "用紙設定...", IDM_CELL_PAPER_SETTINGS
         MENUITEM "撮影フレームを考慮して用紙サイズ変更", IDM_CELL_FIT_CAPTURE_FRAME
@@ -174,7 +174,7 @@ BEGIN
             MENUITEM "安全フレーム...", IDM_CELL_FRAME_SAFE
             MENUITEM "余白...", IDM_CELL_MARGINS
         END
-        POPUP "レイヤー(\u0026L)"
+        POPUP "レイヤー(&L)"
         BEGIN
             MENUITEM "新規...", IDM_LAYER_NEW
             MENUITEM "複製", IDM_LAYER_DUPLICATE
@@ -190,10 +190,10 @@ BEGIN
             MENUITEM "同種を統合", IDM_LAYER_MERGE
             MENUITEM "プロパティ...", IDM_LAYER_PROPERTIES
         END
-        POPUP "プレーン(\u0026P)"
+        POPUP "プレーン(&P)"
         BEGIN
-            MENUITEM "主線(\u0026L)", IDM_PLANE_MAIN_LINE
-            MENUITEM "彩色(\u0026C)", IDM_PLANE_COLOR
+            MENUITEM "主線(&L)", IDM_PLANE_MAIN_LINE
+            MENUITEM "彩色(&C)", IDM_PLANE_COLOR
             MENUITEM SEPARATOR
             MENUITEM "新規...", IDM_PLANE_NEW
             MENUITEM "複製", IDM_PLANE_DUPLICATE
@@ -208,7 +208,7 @@ BEGIN
             MENUITEM "プロパティ...", IDM_PLANE_PROPERTIES
         END
     END
-    POPUP "選択(\u0026S)"
+    POPUP "選択(&S)"
     BEGIN
         MENUITEM "すべて選択", IDM_SELECTION_ALL
         MENUITEM "選択解除", IDM_SELECTION_CLEAR
@@ -245,7 +245,7 @@ BEGIN
             MENUITEM "レイヤーを削除", IDM_SELECTION_LAYER_SUBTRACT
         END
     END
-    POPUP "フィルタ(\u0026I)"
+    POPUP "フィルタ(&I)"
     BEGIN
         MENUITEM "直前のフィルタを再実行", IDM_FILTER_LAST
         MENUITEM SEPARATOR
@@ -271,21 +271,21 @@ BEGIN
         MENUITEM "調整レイヤーの表示切替", IDM_ADJUSTMENT_TOGGLE
         MENUITEM "調整レイヤーを最前面へ", IDM_ADJUSTMENT_MOVE_TOP
     END
-    POPUP "ツール(\u0026T)"
+    POPUP "ツール(&T)"
     BEGIN
         POPUP "Inkpodファイルの可視化"
         BEGIN
             MENUITEM "(なし)", 40315, GRAYED
         END
         MENUITEM SEPARATOR
-        MENUITEM "鉛筆(\u0026P)", IDM_TOOL_PENCIL
-        MENUITEM "ブラシ(\u0026B)", IDM_TOOL_BRUSH
-        MENUITEM "消しゴム(\u0026E)", IDM_TOOL_ERASER
-        MENUITEM "フィル(\u0026F)", IDM_TOOL_FILL
+        MENUITEM "鉛筆(&P)", IDM_TOOL_PENCIL
+        MENUITEM "ブラシ(&B)", IDM_TOOL_BRUSH
+        MENUITEM "消しゴム(&E)", IDM_TOOL_ERASER
+        MENUITEM "フィル(&F)", IDM_TOOL_FILL
         MENUITEM "閉領域フィル", IDM_TOOL_CLOSED_FILL
         MENUITEM "塗りのばし", IDM_TOOL_FILL_EXTENSION
         MENUITEM "フィル設定...", IDM_TOOL_FILL_OPTIONS
-        MENUITEM "スポイト(\u0026I)", IDM_TOOL_EYEDROPPER
+        MENUITEM "スポイト(&I)", IDM_TOOL_EYEDROPPER
         POPUP "ラスター図形"
         BEGIN
             MENUITEM "直線", IDM_GEOMETRY_LINE
@@ -313,7 +313,7 @@ BEGIN
         MENUITEM "アルファグラデーション...", IDM_EFFECT_ALPHA_GRADIENT
         MENUITEM "アルファをグレースケール表示", IDM_EFFECT_ALPHA_VIEW
     END
-    POPUP "色(\u0026C)"
+    POPUP "色(&C)"
     BEGIN
         MENUITEM "描画色（RGB/HSV・RGBA8/16）...", IDM_COLOR_EDITOR
         MENUITEM "Windows色選択...", IDM_COLOR_CHOOSE
@@ -352,7 +352,7 @@ BEGIN
         MENUITEM "完全な白をチェック", IDM_COLOR_CHECK_LEGACY
         MENUITEM "白と透明をチェック", IDM_COLOR_CHECK_NATIVE
     END
-    POPUP "制作(\u0026W)"
+    POPUP "制作(&W)"
     BEGIN
         POPUP "ライトテーブルセット"
         BEGIN
@@ -389,7 +389,7 @@ BEGIN
             MENUITEM "前のセル", IDM_SEQ_PREVIOUS
             MENUITEM "次のセル", IDM_SEQ_NEXT
             MENUITEM "セル番号で移動...", IDM_SEQ_GOTO
-            MENUITEM "端点で循環(\u0026L)", IDM_SEQ_WRAP_ENDPOINTS
+            MENUITEM "端点で循環(&L)", IDM_SEQ_WRAP_ENDPOINTS
             MENUITEM "選択セルをサブパレット登録", IDM_SUBPALETTE_SET
             MENUITEM "サブパレット色サンプル...", IDM_SUBPALETTE_SAMPLE
         END
@@ -453,7 +453,7 @@ BEGIN
             MENUITEM "セットを読み込み...", IDM_BATCH_LOAD_SET
         END
     END
-    POPUP "ウィンドウ(\u0026N)"
+    POPUP "ウィンドウ(&N)"
     BEGIN
         MENUITEM "新しいビュー", IDM_VIEW_NEW
         MENUITEM "ビューを閉じる", IDM_VIEW_CLOSE
@@ -513,14 +513,14 @@ BEGIN
             MENUITEM "左右を反転", IDM_WORKSPACE_MIRROR
         END
     END
-    POPUP "ヘルプ(\u0026H)"
+    POPUP "ヘルプ(&H)"
     BEGIN
-        MENUITEM "inkpod ヘルプ(\u0026H)\tF1", IDM_HELP_MANUAL
-        MENUITEM "Inkpodファイルフォーマット(\u0026F)", IDM_HELP_FILE_FORMAT
-        MENUITEM "謝辞(\u0026C)", IDM_HELP_ACKNOWLEDGEMENTS
-        MENUITEM "Inkpodウェブページ(\u0026W)", IDM_HELP_WEB_PAGE
+        MENUITEM "inkpod ヘルプ(&H)\tF1", IDM_HELP_MANUAL
+        MENUITEM "Inkpodファイルフォーマット(&F)", IDM_HELP_FILE_FORMAT
+        MENUITEM "謝辞(&C)", IDM_HELP_ACKNOWLEDGEMENTS
+        MENUITEM "Inkpodウェブページ(&W)", IDM_HELP_WEB_PAGE
         MENUITEM SEPARATOR
-        MENUITEM "Inkpodについて(\u0026A)...", IDM_HELP_ABOUT
+        MENUITEM "Inkpodについて(&A)...", IDM_HELP_ABOUT
     END
 END
 

@@ -412,6 +412,64 @@ void ShowTabControls(HWND pane, int tab) noexcept {
         GetDlgItem(pane, IDC_COLOR_CHART_LIST), tab == 2 ? SW_SHOW : SW_HIDE);
 }
 
+void RepaintVisibleTabControls(HWND pane, int tab) noexcept {
+    const auto repaint = [pane](int control, bool erase) noexcept {
+        const HWND child = GetDlgItem(pane, control);
+        if (child == nullptr || IsWindowVisible(child) == FALSE) {
+            return;
+        }
+        if (control != IDC_COLOR_TABS) {
+            SetWindowPos(
+                child,
+                HWND_TOP,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE
+                    | SWP_NOOWNERZORDER | SWP_NOREDRAW);
+        }
+        InvalidateRect(child, nullptr, erase ? TRUE : FALSE);
+        UpdateWindow(child);
+    };
+    repaint(IDC_COLOR_TABS, true);
+    repaint(IDC_COLOR_TARGET, true);
+    repaint(IDC_COLOR_PIN, true);
+    if (tab == 0) {
+        for (const int control : {
+                 IDC_COLOR_MAIN_LINE_LABEL,
+                 IDC_COLOR_MAIN_LINE_SWATCH,
+                 IDC_COLOR_DRAWING_LABEL,
+                 IDC_COLOR_PICKER,
+                 IDC_COLOR_EYEDROPPER,
+                 IDC_COLOR_RED,
+                 IDC_COLOR_GREEN,
+                 IDC_COLOR_BLUE,
+                 IDC_COLOR_ALPHA,
+                 IDC_COLOR_APPLY}) {
+            const bool standard_control = control == IDC_COLOR_EYEDROPPER
+                || control == IDC_COLOR_RED || control == IDC_COLOR_GREEN
+                || control == IDC_COLOR_BLUE || control == IDC_COLOR_ALPHA
+                || control == IDC_COLOR_APPLY;
+            repaint(control, standard_control);
+        }
+    } else if (tab == 1) {
+        for (const int control : {
+                 IDC_PALETTE_LIST,
+                 IDC_PALETTE_PREVIOUS,
+                 IDC_PALETTE_NEXT,
+                 IDC_PALETTE_REGISTER_BUTTON,
+                 IDC_PALETTE_DELETE_BUTTON,
+                 IDC_PALETTE_CLEAR_BUTTON,
+                 IDC_PALETTE_LOAD_BUTTON,
+                 IDC_PALETTE_SAVE_BUTTON}) {
+            repaint(control, true);
+        }
+    } else if (tab == 2) {
+        repaint(IDC_COLOR_CHART_LIST, true);
+    }
+}
+
 void LayoutPane(HWND pane) noexcept {
     RECT client{};
     if (GetClientRect(pane, &client) == FALSE) {
@@ -419,9 +477,12 @@ void LayoutPane(HWND pane) noexcept {
     }
     const UINT dpi = GetDpiForWindow(pane);
     const int margin = ScaleForDpi(6, dpi);
-    const int tabs_height = ScaleForDpi(28, dpi);
-    const int target_height = ScaleForDpi(22, dpi);
-    const int row = ScaleForDpi(24, dpi);
+    const int tabs_height = PaneReadableControlHeight(
+        pane, IDC_COLOR_TABS, 28, 10);
+    const int target_height = PaneReadableControlHeight(
+        pane, IDC_COLOR_TARGET, 22, 6);
+    const int row = PaneReadableControlHeight(
+        pane, IDC_COLOR_RED, 24, 8);
     const int gap = ScaleForDpi(5, dpi);
     PlacePaneDialogControl(
         pane,
@@ -431,7 +492,8 @@ void LayoutPane(HWND pane) noexcept {
         std::max(0, static_cast<int>(client.right) - margin * 2),
         std::max(
             0,
-            static_cast<int>(client.bottom) - margin * 2 - target_height));
+            static_cast<int>(client.bottom) - margin * 2 - target_height),
+        false);
     PlacePaneTargetRow(
         pane,
         IDC_COLOR_TARGET,
@@ -442,16 +504,23 @@ void LayoutPane(HWND pane) noexcept {
         0,
         target_height,
         target_height,
-        gap);
+        gap,
+        false);
     RECT content{margin * 2, margin + target_height + tabs_height,
                  client.right - margin * 2,
                  client.bottom - margin * 2};
-    const int top_row = ScaleForDpi(44, dpi);
+    const int label_line_height = std::max(
+        PaneReadableControlHeight(
+            pane, IDC_COLOR_MAIN_LINE_LABEL, 22, 4),
+        PaneReadableControlHeight(
+            pane, IDC_COLOR_DRAWING_LABEL, 22, 4));
+    const int top_row = label_line_height * 2;
     const int swatch_width = ScaleForDpi(60, dpi);
     const int eyedropper_width = std::min(
         std::max(0, static_cast<int>(content.right - content.left)),
         PaneButtonIdealWidth(pane, IDC_COLOR_EYEDROPPER));
-    const int eyedropper_height = ScaleForDpi(24, dpi);
+    const int eyedropper_height = PaneReadableControlHeight(
+        pane, IDC_COLOR_EYEDROPPER, 24, 8);
     const int swatch_left = content.left + ScaleForDpi(3, dpi);
     const int label_left = content.left + ScaleForDpi(67, dpi);
     const int label_width = std::max(
@@ -463,35 +532,40 @@ void LayoutPane(HWND pane) noexcept {
         label_left,
         content.top,
         label_width,
-        top_row / 2);
+        label_line_height,
+        false);
     PlacePaneDialogControl(
         pane,
         IDC_COLOR_MAIN_LINE_SWATCH,
         swatch_left,
         content.top,
         swatch_width,
-        top_row);
+        top_row,
+        false);
     PlacePaneDialogControl(
         pane,
         IDC_COLOR_DRAWING_LABEL,
         label_left,
-        content.top + top_row / 2,
+        content.top + label_line_height,
         label_width,
-        top_row / 2);
+        label_line_height,
+        false);
     PlacePaneDialogControl(
         pane,
         IDC_COLOR_SWATCH,
         0,
         0,
         0,
-        0);
+        0,
+        false);
     PlacePaneDialogControl(
         pane,
         IDC_COLOR_EYEDROPPER,
         content.right - eyedropper_width,
         content.top + (top_row - eyedropper_height) / 2,
         eyedropper_width,
-        eyedropper_height);
+        eyedropper_height,
+        false);
     const int fields_top = std::max(
         static_cast<int>(content.top) + top_row + gap,
         static_cast<int>(content.bottom) - row);
@@ -502,7 +576,8 @@ void LayoutPane(HWND pane) noexcept {
         content.left,
         picker_top,
         std::max(0, static_cast<int>(content.right - content.left)),
-        std::max(0, fields_top - gap - picker_top));
+        std::max(0, fields_top - gap - picker_top),
+        false);
     const int apply_width = std::min(
         std::max(0, static_cast<int>(content.right - content.left)),
         PaneButtonIdealWidth(pane, IDC_COLOR_APPLY));
@@ -520,7 +595,8 @@ void LayoutPane(HWND pane) noexcept {
             x,
             fields_top,
             field_width,
-            row);
+            row,
+            false);
         x += field_width + gap;
     }
     PlacePaneDialogControl(
@@ -529,7 +605,8 @@ void LayoutPane(HWND pane) noexcept {
         content.right - apply_width,
         fields_top,
         apply_width,
-        row);
+        row,
+        false);
     const int button_width = ScaleForDpi(32, dpi);
     PlacePaneDialogControl(
         pane,
@@ -537,14 +614,16 @@ void LayoutPane(HWND pane) noexcept {
         content.left,
         content.top,
         button_width,
-        row);
+        row,
+        false);
     PlacePaneDialogControl(
         pane,
         IDC_PALETTE_NEXT,
         content.right - button_width,
         content.top,
         button_width,
-        row);
+        row,
+        false);
     const std::array<int, 5U> palette_action_controls{
         IDC_PALETTE_REGISTER_BUTTON,
         IDC_PALETTE_DELETE_BUTTON,
@@ -565,7 +644,9 @@ void LayoutPane(HWND pane) noexcept {
         palette_action_top,
         palette_content_width,
         row,
-        gap);
+        gap,
+        0U,
+        false);
     PlacePaneDialogControl(
         pane,
         IDC_PALETTE_LIST,
@@ -575,14 +656,32 @@ void LayoutPane(HWND pane) noexcept {
         std::max(
             0,
             static_cast<int>(content.bottom)
-                - palette_action_top - palette_action_height - gap));
+                - palette_action_top - palette_action_height - gap),
+        false);
     PlacePaneDialogControl(
         pane,
         IDC_COLOR_CHART_LIST,
         content.left,
         content.top,
         std::max(0, static_cast<int>(content.right - content.left)),
-        std::max(0, static_cast<int>(content.bottom - content.top)));
+        std::max(0, static_cast<int>(content.bottom - content.top)),
+        false);
+    if (const HWND tabs = GetDlgItem(pane, IDC_COLOR_TABS); tabs != nullptr) {
+        SetWindowPos(
+            tabs,
+            HWND_BOTTOM,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE
+                | SWP_NOOWNERZORDER | SWP_NOREDRAW);
+    }
+    const ColorDockPaneState* state = PaneState(pane);
+    const int active_tab = state == nullptr
+        ? std::max(0, TabCtrl_GetCurSel(GetDlgItem(pane, IDC_COLOR_TABS)))
+        : state->active_tab;
+    RepaintVisibleTabControls(pane, active_tab);
 }
 
 void UpdateFont(HWND pane, ColorDockPaneState& state) noexcept {
@@ -1935,10 +2034,6 @@ LRESULT CALLBACK PaneSubclassProcedure(
     switch (message) {
         case WM_SIZE:
             LayoutPane(pane);
-            if (const HWND picker = GetDlgItem(pane, IDC_COLOR_PICKER);
-                picker != nullptr) {
-                InvalidateRect(picker, nullptr, FALSE);
-            }
             return 0;
         case WM_NOTIFY:
             if (state != nullptr) {
@@ -2066,7 +2161,6 @@ LRESULT CALLBACK PaneSubclassProcedure(
             if (state != nullptr) {
                 UpdateFont(pane, *state);
                 LayoutPane(pane);
-                InvalidateRect(GetDlgItem(pane, IDC_COLOR_PICKER), nullptr, TRUE);
             }
             return 0;
         case WM_NCDESTROY:

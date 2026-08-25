@@ -37,6 +37,10 @@ constexpr int kAnimationPage = 3;
 constexpr int kColorPage = 4;
 constexpr int kShortcutPage = 5;
 constexpr int kAnonymousControlFirst = 30'000;
+constexpr int kInitialDialogWidthDip = 920;
+constexpr int kInitialDialogHeightDip = 680;
+constexpr int kMinimumDialogWidthDip = 860;
+constexpr int kMinimumDialogHeightDip = 660;
 
 struct PageControl final {
     HWND window{};
@@ -58,6 +62,7 @@ struct DialogModel final {
     PreferencesValues working;
     HWND dialog{};
     HFONT font{};
+    bool owns_font{};
     std::vector<PageControl> page_controls;
     std::vector<KeyboardKey> keyboard;
     std::vector<UINT> visible_commands;
@@ -83,6 +88,118 @@ DialogModel* Model(HWND dialog) noexcept {
 
 int Scale(HWND window, int value) noexcept {
     return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96);
+}
+
+int DialogTextHeight(const DialogModel& model) noexcept {
+    HDC device = GetDC(model.dialog);
+    if (device == nullptr) {
+        return 0;
+    }
+    const HGDIOBJ previous = model.font == nullptr
+        ? nullptr
+        : SelectObject(device, model.font);
+    TEXTMETRICW metrics{};
+    const bool measured = GetTextMetricsW(device, &metrics) != FALSE;
+    if (previous != nullptr && previous != HGDI_ERROR) {
+        SelectObject(device, previous);
+    }
+    ReleaseDC(model.dialog, device);
+    return measured
+        ? static_cast<int>(metrics.tmHeight + metrics.tmExternalLeading)
+        : 0;
+}
+
+int ReadableHeight(
+    const DialogModel& model,
+    int minimum_height_dip,
+    int vertical_padding_dip) noexcept {
+    return std::max(
+        Scale(model.dialog, minimum_height_dip),
+        DialogTextHeight(model) + Scale(model.dialog, vertical_padding_dip));
+}
+
+int ControlTextWidth(const DialogModel& model, HWND control) noexcept {
+    if (control == nullptr) {
+        return 0;
+    }
+    std::array<wchar_t, 256U> text{};
+    const int length = GetWindowTextW(
+        control, text.data(), static_cast<int>(text.size()));
+    if (length <= 0) {
+        return 0;
+    }
+    HDC device = GetDC(control);
+    if (device == nullptr) {
+        return 0;
+    }
+    const HGDIOBJ previous = model.font == nullptr
+        ? nullptr
+        : SelectObject(device, model.font);
+    SIZE extent{};
+    const bool measured = GetTextExtentPoint32W(
+                              device, text.data(), length, &extent)
+        != FALSE;
+    if (previous != nullptr && previous != HGDI_ERROR) {
+        SelectObject(device, previous);
+    }
+    ReleaseDC(control, device);
+    return measured ? extent.cx : 0;
+}
+
+int ReadableWidth(
+    const DialogModel& model,
+    HWND control,
+    int minimum_width_dip,
+    int horizontal_padding_dip) noexcept {
+    return std::max(
+        Scale(model.dialog, minimum_width_dip),
+        ControlTextWidth(model, control)
+            + Scale(model.dialog, horizontal_padding_dip));
+}
+
+bool IsPageControl(const DialogModel& model, HWND window) noexcept {
+    return std::any_of(
+        model.page_controls.begin(),
+        model.page_controls.end(),
+        [window](const PageControl& control) noexcept {
+            return control.window == window;
+        });
+}
+
+BOOL CALLBACK ApplyFontToChild(HWND child, LPARAM parameter) noexcept {
+    SendMessageW(child, WM_SETFONT, static_cast<WPARAM>(parameter), TRUE);
+    return TRUE;
+}
+
+bool UpdateDialogFont(DialogModel& model) noexcept {
+    LOGFONTW description{};
+    description.lfHeight =
+        -MulDiv(9, static_cast<int>(GetDpiForWindow(model.dialog)), 72);
+    description.lfWeight = FW_NORMAL;
+    description.lfCharSet = DEFAULT_CHARSET;
+    description.lfQuality = CLEARTYPE_QUALITY;
+    wcscpy_s(description.lfFaceName, L"Segoe UI");
+    HFONT replacement = CreateFontIndirectW(&description);
+    if (replacement == nullptr) {
+        return false;
+    }
+    const HFONT previous = model.font;
+    const bool delete_previous = model.owns_font;
+    model.font = replacement;
+    model.owns_font = true;
+    SendMessageW(
+        model.dialog,
+        WM_SETFONT,
+        reinterpret_cast<WPARAM>(replacement),
+        TRUE);
+    EnumChildWindows(
+        model.dialog,
+        ApplyFontToChild,
+        reinterpret_cast<LPARAM>(replacement));
+    if (delete_previous) {
+        DeleteObject(previous);
+    }
+    return true;
 }
 
 HWND AddControl(
@@ -631,137 +748,264 @@ RECT PageRect(HWND dialog) noexcept {
     return bounds;
 }
 
+void InvalidatePage(DialogModel& model) noexcept {
+    InvalidateRect(
+        GetDlgItem(model.dialog, IDC_PREFERENCES_TABS), nullptr, TRUE);
+    for (const PageControl& control : model.page_controls) {
+        if (control.page == model.selected_page) {
+            InvalidateRect(control.window, nullptr, TRUE);
+        }
+    }
+}
+
 void Place(HWND window, int x, int y, int width, int height) noexcept {
     MoveWindow(window, x, y, std::max(width, 1), std::max(height, 1), TRUE);
 }
 
 void LayoutSimplePage(DialogModel& model, const RECT& page) noexcept {
+    const auto dip = [&model](int value) noexcept {
+        return Scale(model.dialog, value);
+    };
     const int x = page.left + Scale(model.dialog, 28);
     const int y = page.top + Scale(model.dialog, 28);
     const int label_width = Scale(model.dialog, 210);
     const int control_x = x + label_width;
     const int control_width = Scale(model.dialog, 300);
+    const int label_height = ReadableHeight(model, 24, 4);
+    const int checkbox_height = ReadableHeight(model, 28, 8);
     if (model.selected_page == kGeneralPage) {
-        Place(model.page_controls[0].window, x, y + 4, label_width, 24);
-        Place(GetDlgItem(model.dialog, IDC_PREFERENCES_LANGUAGE), control_x, y, control_width, 180);
-        Place(model.page_controls[2].window, x, y + 48, page.right - x - 30, 38);
+        Place(model.page_controls[0].window, x, y + dip(4), label_width, label_height);
+        Place(GetDlgItem(model.dialog, IDC_PREFERENCES_LANGUAGE), control_x, y, control_width, dip(180));
+        Place(model.page_controls[2].window, x, y + dip(48), page.right - x - dip(30), dip(38));
     } else if (model.selected_page == kSavePage) {
-        Place(GetDlgItem(model.dialog, IDC_PREFERENCES_RESTORE_DOCUMENTS), x, y, 520, 28);
+        Place(
+            GetDlgItem(model.dialog, IDC_PREFERENCES_RESTORE_DOCUMENTS),
+            x,
+            y,
+            dip(520),
+            checkbox_height);
     } else if (model.selected_page == kWorkspacePage) {
-        Place(model.page_controls[4].window, x, y + 4, label_width, 24);
-        Place(GetDlgItem(model.dialog, IDC_PREFERENCES_WORKSPACE_PRESET), control_x, y, control_width, 200);
-        Place(GetDlgItem(model.dialog, IDC_PREFERENCES_WORKSPACE_MIRROR), x, y + 50, 520, 26);
-        Place(model.page_controls[7].window, x, y + 100, label_width, 24);
-        Place(GetDlgItem(model.dialog, IDC_PREFERENCES_WORKSPACE_DENSITY), control_x, y + 96, control_width, 100);
+        Place(model.page_controls[4].window, x, y + dip(4), label_width, label_height);
+        Place(GetDlgItem(model.dialog, IDC_PREFERENCES_WORKSPACE_PRESET), control_x, y, control_width, dip(200));
+        Place(GetDlgItem(model.dialog, IDC_PREFERENCES_WORKSPACE_MIRROR), x, y + dip(50), dip(520), checkbox_height);
+        Place(model.page_controls[7].window, x, y + dip(100), label_width, label_height);
+        Place(GetDlgItem(model.dialog, IDC_PREFERENCES_WORKSPACE_DENSITY), control_x, y + dip(96), control_width, dip(100));
     } else if (model.selected_page == kAnimationPage) {
-        Place(model.page_controls[9].window, x, y + 4, label_width, 24);
-        Place(GetDlgItem(model.dialog, IDC_PREFERENCES_SEQUENCE_SWITCH), control_x, y, control_width, 120);
-        Place(model.page_controls[11].window, x, y + 54, label_width, 24);
-        Place(GetDlgItem(model.dialog, IDC_PREFERENCES_SEQUENCE_ENDPOINT), control_x, y + 50, control_width, 120);
+        Place(model.page_controls[9].window, x, y + dip(4), label_width, label_height);
+        Place(GetDlgItem(model.dialog, IDC_PREFERENCES_SEQUENCE_SWITCH), control_x, y, control_width, dip(120));
+        Place(model.page_controls[11].window, x, y + dip(54), label_width, label_height);
+        Place(GetDlgItem(model.dialog, IDC_PREFERENCES_SEQUENCE_ENDPOINT), control_x, y + dip(50), control_width, dip(120));
     } else if (model.selected_page == kColorPage) {
-        Place(model.page_controls[13].window, x, y + 4, label_width, 24);
-        Place(GetDlgItem(model.dialog, IDC_PREFERENCES_COLOR_PROFILE), control_x, y, control_width, 100);
+        Place(model.page_controls[13].window, x, y + dip(4), label_width, label_height);
+        Place(GetDlgItem(model.dialog, IDC_PREFERENCES_COLOR_PROFILE), control_x, y, control_width, dip(100));
     }
 }
 
 void LayoutKeyboard(DialogModel& model, int left, int top, int width, int height) noexcept {
     const int unit = std::max(Scale(model.dialog, 34), width / 25);
-    const int key_height = std::max(Scale(model.dialog, 25), height / 6);
+    const int key_height = std::max(
+        ReadableHeight(model, 25, 8), height / 6);
+    const int key_gap = Scale(model.dialog, 3);
     for (const auto& key : model.keyboard) {
         const int indent = key.row == 1 ? unit / 2 : (key.row == 2 ? unit : 0);
         Place(
             key.window,
-            left + indent + key.column * (unit + 3),
-            top + key.row * (key_height + 3),
-            key.width_units * unit + (key.width_units - 1) * 3,
+            left + indent + key.column * (unit + key_gap),
+            top + key.row * (key_height + key_gap),
+            key.width_units * unit + (key.width_units - 1) * key_gap,
             key_height);
     }
 }
 
 void LayoutShortcutPage(DialogModel& model, const RECT& page) noexcept {
-    const int gap = Scale(model.dialog, 8);
-    const int row = Scale(model.dialog, 30);
+    const auto dip = [&model](int value) noexcept {
+        return Scale(model.dialog, value);
+    };
+    const int gap = dip(4);
+    const int row = ReadableHeight(model, 26, 8);
     const int x = page.left + gap;
     const int width = page.right - page.left - 2 * gap;
     int y = page.top + gap;
-    const int label_width = Scale(model.dialog, 72);
-    Place(model.page_controls[15].window, x, y + 5, label_width, 22);
-    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_PRESET), x + label_width, y, Scale(model.dialog, 260), 200);
-    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_DUPLICATE), x + label_width + Scale(model.dialog, 268), y, Scale(model.dialog, 78), row);
-    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_IMPORT), page.right - Scale(model.dialog, 292), y, Scale(model.dialog, 86), row);
-    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_EXPORT), page.right - Scale(model.dialog, 198), y, Scale(model.dialog, 86), row);
-    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_RESET_PROFILE), page.right - Scale(model.dialog, 104), y, Scale(model.dialog, 96), row);
+    const int label_width = ReadableWidth(
+        model, model.page_controls[15].window, 72, 12);
+    Place(
+        model.page_controls[15].window,
+        x,
+        y + dip(4),
+        label_width,
+        dip(22));
+    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_PRESET), x + label_width, y, dip(260), dip(160));
+    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_DUPLICATE), x + label_width + dip(268), y, dip(78), row);
+    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_IMPORT), page.right - dip(292), y, dip(86), row);
+    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_EXPORT), page.right - dip(198), y, dip(86), row);
+    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_RESET_PROFILE), page.right - dip(104), y, dip(96), row);
     y += row + gap;
     Place(GetDlgItem(model.dialog, IDC_SHORTCUT_SEARCH), x, y, width / 2, row);
-    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_KEY_SEARCH), x + width / 2 + gap, y, Scale(model.dialog, 155), row);
-    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_CONTEXT_FILTER), x + width / 2 + Scale(model.dialog, 171), y, width / 2 - Scale(model.dialog, 171), 160);
+    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_KEY_SEARCH), x + width / 2 + gap, y, dip(155), row);
+    Place(
+        GetDlgItem(model.dialog, IDC_SHORTCUT_CONTEXT_FILTER),
+        x + width / 2 + dip(171),
+        y,
+        width / 2 - dip(171),
+        dip(140));
     y += row + gap;
-    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_CONFLICT_BANNER), x, y, width - Scale(model.dialog, 300), row);
-    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_CONFLICT_PREVIOUS), page.right - Scale(model.dialog, 292), y, Scale(model.dialog, 82), row);
-    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_CONFLICT_NEXT), page.right - Scale(model.dialog, 202), y, Scale(model.dialog, 82), row);
-    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_CONFLICTS_ONLY), page.right - Scale(model.dialog, 112), y, Scale(model.dialog, 104), row);
+    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_CONFLICT_BANNER), x, y, width - dip(300), row);
+    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_CONFLICT_PREVIOUS), page.right - dip(292), y, dip(82), row);
+    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_CONFLICT_NEXT), page.right - dip(202), y, dip(82), row);
+    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_CONFLICTS_ONLY), page.right - dip(112), y, dip(104), row);
     y += row + gap;
 
-    const int keyboard_height = Scale(model.dialog, 170);
-    const int status_height = Scale(model.dialog, 24);
+    const int keyboard_height = dip(150);
+    const int status_height = ReadableHeight(model, 20, 4);
     const int main_bottom = page.bottom - keyboard_height - status_height - 2 * gap;
-    const int left_width = Scale(model.dialog, 175);
-    const int right_width = Scale(model.dialog, 300);
+    const int left_width = dip(140);
+    const int right_width = dip(340);
     const int center_x = x + left_width + gap;
     const int right_x = page.right - right_width - gap;
     Place(GetDlgItem(model.dialog, IDC_SHORTCUT_CATEGORIES), x, y, left_width, main_bottom - y);
     Place(GetDlgItem(model.dialog, IDC_SHORTCUT_COMMANDS), center_x, y, right_x - center_x - gap, main_bottom - y);
 
     int detail_y = y;
-    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_DETAIL_TITLE), right_x, detail_y, right_width, 25);
-    detail_y += 25;
-    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_DETAIL_KEY), right_x, detail_y, right_width, 20);
-    detail_y += 28;
-    Place(model.page_controls[32].window, right_x, detail_y + 4, 70, 20);
-    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_PRIMARY_VALUE), right_x + 72, detail_y, right_width - 72, 26);
-    detail_y += 30;
-    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_PRIMARY_RECORD), right_x, detail_y, 122, 27);
-    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_PRIMARY_CLEAR), right_x + 130, detail_y, 78, 27);
-    detail_y += 34;
-    Place(model.page_controls[36].window, right_x, detail_y + 4, 70, 20);
-    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_SECONDARY_VALUE), right_x + 72, detail_y, right_width - 72, 26);
-    detail_y += 30;
-    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_SECONDARY_RECORD), right_x, detail_y, 122, 27);
-    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_SECONDARY_CLEAR), right_x + 130, detail_y, 78, 27);
-    detail_y += 36;
-    Place(model.page_controls[40].window, right_x, detail_y + 3, 58, 20);
-    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_ACTION_EXECUTE), right_x + 60, detail_y, 72, 24);
-    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_ACTION_HOLD), right_x + 134, detail_y, 86, 24);
-    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_ACTION_TOGGLE), right_x + 222, detail_y, 76, 24);
-    detail_y += 30;
-    Place(model.page_controls[44].window, right_x, detail_y + 3, 68, 20);
-    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_DETAIL_CONTEXT), right_x + 70, detail_y, 104, 120);
-    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_KEY_MATCH), right_x + 180, detail_y, 118, 100);
-    detail_y += 34;
-    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_CONFLICT_CARD), right_x, detail_y, right_width, 40);
-    detail_y += 44;
-    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_CONFLICT_GOTO), right_x, detail_y, 88, 26);
-    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_CONFLICT_CLEAR), right_x + 94, detail_y, 98, 26);
-    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_CONFLICT_SWAP), right_x + 198, detail_y, 88, 26);
-    detail_y += 34;
-    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_RESET_COMMAND), right_x, detail_y, right_width, 27);
+    const int detail_title_height = ReadableHeight(model, 20, 4);
+    const int detail_key_height = ReadableHeight(model, 18, 4);
+    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_DETAIL_TITLE), right_x, detail_y, right_width, detail_title_height);
+    detail_y += detail_title_height;
+    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_DETAIL_KEY), right_x, detail_y, right_width, detail_key_height);
+    detail_y += detail_key_height;
+
+    const int detail_label_width = std::max({
+        ReadableWidth(model, model.page_controls[32].window, 58, 12),
+        ReadableWidth(model, model.page_controls[36].window, 58, 12),
+        ReadableWidth(model, model.page_controls[40].window, 58, 12),
+        ReadableWidth(model, model.page_controls[44].window, 58, 12)});
+    const int detail_gap = dip(6);
+    const int record_width = dip(104);
+    const int clear_width = dip(62);
+    const int binding_height = ReadableHeight(model, 26, 8);
+    const int record_x = right_x + right_width - record_width - clear_width - detail_gap;
+    const int value_x = right_x + detail_label_width;
+    const int value_width = record_x - value_x - detail_gap;
+    const auto layout_binding_row = [&](
+                                        std::size_t label_index,
+                                        int value_id,
+                                        int record_id,
+                                        int clear_id) noexcept {
+        Place(model.page_controls[label_index].window, right_x, detail_y + dip(2), detail_label_width, dip(20));
+        Place(GetDlgItem(model.dialog, value_id), value_x, detail_y, value_width, binding_height);
+        Place(GetDlgItem(model.dialog, record_id), record_x, detail_y, record_width, binding_height);
+        Place(GetDlgItem(model.dialog, clear_id), record_x + record_width + detail_gap, detail_y, clear_width, binding_height);
+        detail_y += binding_height + dip(2);
+    };
+    layout_binding_row(
+        32U,
+        IDC_SHORTCUT_PRIMARY_VALUE,
+        IDC_SHORTCUT_PRIMARY_RECORD,
+        IDC_SHORTCUT_PRIMARY_CLEAR);
+    layout_binding_row(
+        36U,
+        IDC_SHORTCUT_SECONDARY_VALUE,
+        IDC_SHORTCUT_SECONDARY_RECORD,
+        IDC_SHORTCUT_SECONDARY_CLEAR);
+
+    Place(model.page_controls[40].window, right_x, detail_y + dip(3), detail_label_width, dip(20));
+    const int action_x = right_x + detail_label_width;
+    const int action_gap = dip(4);
+    const int execute_width = dip(72);
+    const int hold_width = dip(108);
+    const int choice_height = ReadableHeight(model, 24, 8);
+    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_ACTION_EXECUTE), action_x, detail_y, execute_width, choice_height);
+    Place(
+        GetDlgItem(model.dialog, IDC_SHORTCUT_ACTION_HOLD),
+        action_x + execute_width + action_gap,
+        detail_y,
+        hold_width,
+        choice_height);
+    const int toggle_x = action_x + execute_width + hold_width + 2 * action_gap;
+    Place(
+        GetDlgItem(model.dialog, IDC_SHORTCUT_ACTION_TOGGLE),
+        toggle_x,
+        detail_y,
+        right_x + right_width - toggle_x,
+        choice_height);
+    detail_y += choice_height + dip(2);
+
+    Place(model.page_controls[44].window, right_x, detail_y + dip(3), detail_label_width, dip(20));
+    const int context_width = (right_width - detail_label_width - detail_gap) / 2;
+    Place(
+        GetDlgItem(model.dialog, IDC_SHORTCUT_DETAIL_CONTEXT),
+        right_x + detail_label_width,
+        detail_y,
+        context_width,
+        dip(120));
+    Place(
+        GetDlgItem(model.dialog, IDC_SHORTCUT_KEY_MATCH),
+        right_x + detail_label_width + context_width + detail_gap,
+        detail_y,
+        right_width - detail_label_width - context_width - detail_gap,
+        dip(100));
+    detail_y += choice_height + dip(2);
+    const int conflict_card_height = ReadableHeight(model, 28, 6);
+    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_CONFLICT_CARD), right_x, detail_y, right_width, conflict_card_height);
+    detail_y += conflict_card_height + dip(2);
+    const int conflict_button_width = (right_width - 2 * detail_gap) / 3;
+    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_CONFLICT_GOTO), right_x, detail_y, conflict_button_width, choice_height);
+    Place(
+        GetDlgItem(model.dialog, IDC_SHORTCUT_CONFLICT_CLEAR),
+        right_x + conflict_button_width + detail_gap,
+        detail_y,
+        conflict_button_width,
+        choice_height);
+    Place(
+        GetDlgItem(model.dialog, IDC_SHORTCUT_CONFLICT_SWAP),
+        right_x + 2 * (conflict_button_width + detail_gap),
+        detail_y,
+        right_width - 2 * (conflict_button_width + detail_gap),
+        choice_height);
+    detail_y += choice_height + dip(2);
+    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_RESET_COMMAND), right_x, detail_y, right_width, row);
 
     const int keyboard_top = main_bottom + gap;
-    Place(model.page_controls[52].window, x, keyboard_top + 4, 48, 22);
-    int mod_x = x + 50;
+    const int modifier_label_width = ReadableWidth(
+        model, model.page_controls[52].window, 48, 12);
+    Place(
+        model.page_controls[52].window,
+        x,
+        keyboard_top + dip(3),
+        modifier_label_width,
+        dip(20));
+    int mod_x = x + modifier_label_width + dip(2);
     for (const int id : {
              IDC_SHORTCUT_MOD_NONE,
              IDC_SHORTCUT_MOD_CTRL,
              IDC_SHORTCUT_MOD_SHIFT,
              IDC_SHORTCUT_MOD_ALT,
              IDC_SHORTCUT_MOD_WIN}) {
-        Place(GetDlgItem(model.dialog, id), mod_x, keyboard_top, 62, 27);
-        mod_x += 66;
+        Place(GetDlgItem(model.dialog, id), mod_x, keyboard_top, dip(62), dip(27));
+        mod_x += dip(66);
     }
-    Place(model.page_controls[58].window, page.right - 276, keyboard_top + 4, 112, 22);
-    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_KEYBOARD_LAYOUT), page.right - 158, keyboard_top, 150, 120);
-    LayoutKeyboard(model, x + 8, keyboard_top + 34, width / 2, keyboard_height - 40);
-    Place(GetDlgItem(model.dialog, IDC_SHORTCUT_KEYBOARD_INSTRUCTION), x + width / 2 + 20, keyboard_top + 42, width / 2 - 28, 54);
+    const int keyboard_layout_width = dip(150);
+    const int keyboard_layout_x = page.right - gap - keyboard_layout_width;
+    const int keyboard_label_width = ReadableWidth(
+        model, model.page_controls[58].window, 112, 12);
+    Place(
+        model.page_controls[58].window,
+        keyboard_layout_x - gap - keyboard_label_width,
+        keyboard_top + dip(3),
+        keyboard_label_width,
+        dip(20));
+    Place(
+        GetDlgItem(model.dialog, IDC_SHORTCUT_KEYBOARD_LAYOUT),
+        keyboard_layout_x,
+        keyboard_top,
+        keyboard_layout_width,
+        dip(100));
+    LayoutKeyboard(model, x + dip(8), keyboard_top + dip(30), width / 2, keyboard_height - dip(36));
+    Place(
+        GetDlgItem(model.dialog, IDC_SHORTCUT_KEYBOARD_INSTRUCTION),
+        x + width / 2 + dip(20),
+        keyboard_top + dip(36),
+        width / 2 - dip(28),
+        dip(48));
     Place(GetDlgItem(model.dialog, IDC_SHORTCUT_STATUS), x, page.bottom - status_height, width, status_height);
 }
 
@@ -782,6 +1026,7 @@ void LayoutDialog(DialogModel& model) noexcept {
     } else {
         LayoutSimplePage(model, page);
     }
+    InvalidatePage(model);
 }
 
 void ShowSelectedPage(DialogModel& model) noexcept {
@@ -1678,6 +1923,193 @@ void HandleCommand(DialogModel& model, int id, int notification, HWND source) {
     }
 }
 
+bool ControlHasReadableFontHeight(
+    const DialogModel& model, HWND control) noexcept {
+    const auto font = reinterpret_cast<HFONT>(
+        SendMessageW(control, WM_GETFONT, 0U, 0U));
+    if (font != model.font) {
+        return false;
+    }
+    HDC context = GetDC(control);
+    if (context == nullptr) {
+        return false;
+    }
+    const HGDIOBJ previous = SelectObject(context, font);
+    TEXTMETRICW metrics{};
+    const bool measured = previous != nullptr
+        && GetTextMetricsW(context, &metrics) != FALSE;
+    if (previous != nullptr) {
+        SelectObject(context, previous);
+    }
+    ReleaseDC(control, context);
+    RECT bounds{};
+    return measured && GetWindowRect(control, &bounds) != FALSE
+        && bounds.bottom - bounds.top
+            >= metrics.tmHeight + Scale(model.dialog, 2);
+}
+
+bool ControlHasReadableTextWidth(
+    const DialogModel& model, HWND control) noexcept {
+    RECT bounds{};
+    return control != nullptr && GetClientRect(control, &bounds) != FALSE
+        && bounds.right - bounds.left
+            >= ControlTextWidth(model, control) + Scale(model.dialog, 4);
+}
+
+bool StaticUsesPageBackground(
+    const DialogModel& model, HWND control) noexcept {
+    HDC context = GetDC(control);
+    if (context == nullptr) {
+        return false;
+    }
+    const LRESULT brush = SendMessageW(
+        model.dialog,
+        WM_CTLCOLORSTATIC,
+        reinterpret_cast<WPARAM>(context),
+        reinterpret_cast<LPARAM>(control));
+    ReleaseDC(control, context);
+    return reinterpret_cast<HBRUSH>(brush)
+        == GetSysColorBrush(COLOR_WINDOW);
+}
+
+bool ValidateSmokeLayout(DialogModel& model) noexcept {
+    LOGFONTW description{};
+    if (model.font == nullptr
+        || GetObjectW(
+               model.font,
+               static_cast<int>(sizeof(description)),
+               &description)
+            != static_cast<int>(sizeof(description))
+        || description.lfHeight
+            != -MulDiv(9, static_cast<int>(GetDpiForWindow(model.dialog)), 72)
+        || description.lfWeight != FW_NORMAL || description.lfItalic != FALSE
+        || description.lfUnderline != FALSE
+        || description.lfStrikeOut != FALSE
+        || description.lfCharSet != DEFAULT_CHARSET
+        || description.lfQuality != CLEARTYPE_QUALITY
+        || std::wcscmp(description.lfFaceName, L"Segoe UI") != 0) {
+        return false;
+    }
+
+    RECT window_bounds{};
+    if (GetWindowRect(model.dialog, &window_bounds) == FALSE
+        || window_bounds.right - window_bounds.left
+            != Scale(model.dialog, kInitialDialogWidthDip)
+        || window_bounds.bottom - window_bounds.top
+            != Scale(model.dialog, kInitialDialogHeightDip)) {
+        return false;
+    }
+
+    for (const int id : {
+             IDC_PREFERENCES_TABS,
+             IDOK,
+             IDCANCEL,
+             IDC_PREFERENCES_APPLY}) {
+        if (!ControlHasReadableFontHeight(model, GetDlgItem(model.dialog, id))) {
+            return false;
+        }
+    }
+
+    const int selected_page = model.selected_page;
+    const int tolerance = Scale(model.dialog, 2);
+    const auto dialog_bounds = [&model](HWND control, RECT& bounds) noexcept {
+        if (control == nullptr || GetWindowRect(control, &bounds) == FALSE) {
+            return false;
+        }
+        MapWindowPoints(
+            nullptr,
+            model.dialog,
+            reinterpret_cast<POINT*>(&bounds),
+            2U);
+        return true;
+    };
+    for (int page = kGeneralPage; page <= kShortcutPage; ++page) {
+        model.selected_page = page;
+        ShowSelectedPage(model);
+        const RECT page_bounds = PageRect(model.dialog);
+        for (const auto& item : model.page_controls) {
+            if (item.page != page) {
+                continue;
+            }
+            if (!ControlHasReadableFontHeight(model, item.window)) {
+                model.selected_page = selected_page;
+                ShowSelectedPage(model);
+                return false;
+            }
+            std::array<wchar_t, 32U> class_name{};
+            if (GetClassNameW(
+                    item.window,
+                    class_name.data(),
+                    static_cast<int>(class_name.size()))
+                    > 0
+                && lstrcmpiW(class_name.data(), WC_STATICW) == 0
+                && !StaticUsesPageBackground(model, item.window)) {
+                model.selected_page = selected_page;
+                ShowSelectedPage(model);
+                return false;
+            }
+            RECT control_bounds{};
+            if (!dialog_bounds(item.window, control_bounds)) {
+                model.selected_page = selected_page;
+                ShowSelectedPage(model);
+                return false;
+            }
+            if (control_bounds.left < page_bounds.left - tolerance
+                || control_bounds.top < page_bounds.top - tolerance
+                || control_bounds.right > page_bounds.right + tolerance
+                || control_bounds.bottom > page_bounds.bottom + tolerance) {
+                model.selected_page = selected_page;
+                ShowSelectedPage(model);
+                return false;
+            }
+        }
+        if (page == kShortcutPage) {
+            for (const std::size_t label_index : {
+                     15U, 32U, 36U, 40U, 44U, 52U, 58U}) {
+                if (!ControlHasReadableTextWidth(
+                        model, model.page_controls[label_index].window)) {
+                    model.selected_page = selected_page;
+                    ShowSelectedPage(model);
+                    return false;
+                }
+            }
+            RECT reset{};
+            RECT keyboard_heading{};
+            RECT instruction{};
+            RECT status{};
+            if (!dialog_bounds(
+                    GetDlgItem(model.dialog, IDC_SHORTCUT_RESET_COMMAND),
+                    reset)
+                || !dialog_bounds(
+                    model.page_controls[52].window, keyboard_heading)
+                || !dialog_bounds(
+                    GetDlgItem(
+                        model.dialog, IDC_SHORTCUT_KEYBOARD_INSTRUCTION),
+                    instruction)
+                || !dialog_bounds(
+                    GetDlgItem(model.dialog, IDC_SHORTCUT_STATUS), status)
+                || reset.bottom > keyboard_heading.top
+                || instruction.bottom > status.top) {
+                model.selected_page = selected_page;
+                ShowSelectedPage(model);
+                return false;
+            }
+            for (const KeyboardKey& key : model.keyboard) {
+                RECT key_bounds{};
+                if (!dialog_bounds(key.window, key_bounds)
+                    || key_bounds.bottom > status.top) {
+                    model.selected_page = selected_page;
+                    ShowSelectedPage(model);
+                    return false;
+                }
+            }
+        }
+    }
+    model.selected_page = selected_page;
+    ShowSelectedPage(model);
+    return true;
+}
+
 INT_PTR OnInit(HWND dialog, LPARAM parameter) {
     auto* state = reinterpret_cast<PreferencesDialogState*>(parameter);
     if (state == nullptr) {
@@ -1694,6 +2126,9 @@ INT_PTR OnInit(HWND dialog, LPARAM parameter) {
             ? 0U
             : ShortcutCommandCatalog().front();
         SetWindowLongPtrW(dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(model));
+        if (!UpdateDialogFont(*model)) {
+            throw std::bad_alloc();
+        }
         SetWindowTextW(dialog, UiText(UiStringId::PreferencesTitle));
         SetDlgItemTextW(dialog, IDOK, UiText(UiStringId::Ok));
         SetDlgItemTextW(dialog, IDCANCEL, UiText(UiStringId::Text0171));
@@ -1720,18 +2155,20 @@ INT_PTR OnInit(HWND dialog, LPARAM parameter) {
         ShowSelectedPage(*model);
         RECT bounds{};
         GetWindowRect(dialog, &bounds);
-        const int minimum_width = Scale(dialog, 1'180);
-        const int minimum_height = Scale(dialog, 780);
         SetWindowPos(
             dialog,
             nullptr,
             bounds.left,
             bounds.top,
-            std::max(static_cast<int>(bounds.right - bounds.left), minimum_width),
-            std::max(static_cast<int>(bounds.bottom - bounds.top), minimum_height),
+            Scale(dialog, kInitialDialogWidthDip),
+            Scale(dialog, kInitialDialogHeightDip),
             SWP_NOZORDER | SWP_NOACTIVATE);
         static_cast<void>(CenterModalDialogOnOwner(dialog));
         if (state->close_immediately) {
+            if (!ValidateSmokeLayout(*model)) {
+                EndDialog(dialog, -1);
+                return TRUE;
+            }
             PostMessageW(dialog, WM_COMMAND, IDOK, 0U);
         }
         return TRUE;
@@ -1755,13 +2192,40 @@ INT_PTR CALLBACK PreferencesProcedure(
     }
     try {
         switch (message) {
+            case WM_CTLCOLORSTATIC: {
+                HWND control = reinterpret_cast<HWND>(lparam);
+                if (IsPageControl(*model, control)) {
+                    HDC context = reinterpret_cast<HDC>(wparam);
+                    SetTextColor(context, GetSysColor(COLOR_WINDOWTEXT));
+                    SetBkColor(context, GetSysColor(COLOR_WINDOW));
+                    return reinterpret_cast<INT_PTR>(
+                        GetSysColorBrush(COLOR_WINDOW));
+                }
+                break;
+            }
             case WM_SIZE:
                 LayoutDialog(*model);
                 return TRUE;
             case WM_GETMINMAXINFO: {
                 auto* info = reinterpret_cast<MINMAXINFO*>(lparam);
-                info->ptMinTrackSize.x = Scale(dialog, 1'000);
-                info->ptMinTrackSize.y = Scale(dialog, 680);
+                info->ptMinTrackSize.x = Scale(dialog, kMinimumDialogWidthDip);
+                info->ptMinTrackSize.y = Scale(dialog, kMinimumDialogHeightDip);
+                return TRUE;
+            }
+            case WM_DPICHANGED: {
+                const auto* suggested = reinterpret_cast<const RECT*>(lparam);
+                if (suggested != nullptr) {
+                    SetWindowPos(
+                        dialog,
+                        nullptr,
+                        suggested->left,
+                        suggested->top,
+                        suggested->right - suggested->left,
+                        suggested->bottom - suggested->top,
+                        SWP_NOZORDER | SWP_NOACTIVATE);
+                }
+                static_cast<void>(UpdateDialogFont(*model));
+                LayoutDialog(*model);
                 return TRUE;
             }
             case WM_KEYDOWN:
@@ -1848,6 +2312,9 @@ INT_PTR CALLBACK PreferencesProcedure(
                 return TRUE;
             }
             case WM_DESTROY:
+                if (model->owns_font) {
+                    DeleteObject(model->font);
+                }
                 delete model;
                 SetWindowLongPtrW(dialog, GWLP_USERDATA, 0);
                 return TRUE;

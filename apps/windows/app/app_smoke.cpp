@@ -2372,42 +2372,117 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     }
     const int color_pane_width = color_pane_bounds.right - color_pane_bounds.left;
     const int color_pane_height = color_pane_bounds.bottom - color_pane_bounds.top;
-    SetWindowPos(
-        state.Workspace().windows.color_pane,
-        nullptr,
-        0,
-        0,
-        std::max(color_pane_width, 420),
-        std::max(color_pane_height, 360),
-        SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER);
-    RECT color_pane_client{};
-    ValidateRect(color_picker, nullptr);
-    if (GetClientRect(state.Workspace().windows.color_pane, &color_pane_client) == FALSE) {
+    const PaneDescriptor* color_descriptor =
+        FindPaneDescriptor(DockPaneType::Color);
+    const UINT color_resize_dpi = GetDpiForWindow(
+        state.Workspace().windows.color_pane);
+    constexpr int kDockPaneHeaderHeightDip = 28;
+    const int minimum_color_content_height = color_descriptor == nullptr
+        ? 0
+        : MulDiv(
+              std::max(
+                  1,
+                  color_descriptor->minimum_height_dip
+                      - kDockPaneHeaderHeightDip),
+              static_cast<int>(color_resize_dpi == 0U ? 96U : color_resize_dpi),
+              96);
+    if (minimum_color_content_height <= 0) {
+        return 11017;
+    }
+    const std::array<HWND, 6U> color_resize_controls{
+        GetDlgItem(state.Workspace().windows.color_pane, IDC_COLOR_TABS),
+        main_line_label,
+        main_line_swatch,
+        color_picker,
+        GetDlgItem(state.Workspace().windows.color_pane, IDC_COLOR_RED),
+        GetDlgItem(state.Workspace().windows.color_pane, IDC_COLOR_APPLY)};
+    std::array<WindowMessageCounter, color_resize_controls.size()>
+        color_resize_paints{};
+    std::size_t color_resize_attached{};
+    for (; color_resize_attached < color_resize_controls.size();
+         ++color_resize_attached) {
+        color_resize_paints[color_resize_attached].message = WM_PAINT;
+        const HWND control = color_resize_controls[color_resize_attached];
+        if (control == nullptr || IsWindowVisible(control) == FALSE
+            || SetWindowSubclass(
+                   control,
+                   WindowMessageCounterProcedure,
+                   30U + color_resize_attached,
+                   reinterpret_cast<DWORD_PTR>(
+                       &color_resize_paints[color_resize_attached]))
+                == FALSE) {
+            break;
+        }
+        ValidateRect(control, nullptr);
+    }
+    if (color_resize_attached != color_resize_controls.size()) {
+        for (std::size_t index = 0U; index < color_resize_attached; ++index) {
+            RemoveWindowSubclass(
+                color_resize_controls[index],
+                WindowMessageCounterProcedure,
+                30U + index);
+        }
+        return 11017;
+    }
+    const int color_resize_width = std::max(
+        color_pane_width,
+        MulDiv(
+            420,
+            static_cast<int>(color_resize_dpi == 0U ? 96U : color_resize_dpi),
+            96));
+    if (SetWindowPos(
+            state.Workspace().windows.color_pane,
+            nullptr,
+            0,
+            0,
+            color_resize_width,
+            minimum_color_content_height,
+            SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER)
+        == FALSE) {
+        for (std::size_t index = 0U; index < color_resize_controls.size(); ++index) {
+            RemoveWindowSubclass(
+                color_resize_controls[index],
+                WindowMessageCounterProcedure,
+                30U + index);
+        }
         return 840;
     }
-    SendMessageW(
-        state.Workspace().windows.color_pane,
-        WM_SIZE,
-        SIZE_RESTORED,
-        MAKELPARAM(
-            color_pane_client.right - color_pane_client.left,
-            color_pane_client.bottom - color_pane_client.top));
+    int color_resize_failure{};
+    for (std::size_t index = 0U; index < color_resize_controls.size(); ++index) {
+        RECT update{};
+        RECT control_client{};
+        if (color_resize_failure == 0
+            && (GetClientRect(
+                    color_resize_controls[index], &control_client)
+                    == FALSE
+                || IsRectEmpty(&control_client) != FALSE)) {
+            color_resize_failure = 11130 + static_cast<int>(index);
+        } else if (color_resize_failure == 0
+            && color_resize_paints[index].count == 0U) {
+            color_resize_failure = 11110 + static_cast<int>(index);
+        } else if (color_resize_failure == 0
+                   && GetUpdateRect(
+                          color_resize_controls[index], &update, FALSE)
+                       != FALSE) {
+            color_resize_failure = 11120 + static_cast<int>(index);
+        }
+        RemoveWindowSubclass(
+            color_resize_controls[index],
+            WindowMessageCounterProcedure,
+            30U + index);
+    }
+    if (color_resize_failure != 0) {
+        return color_resize_failure;
+    }
     RECT color_picker_client{};
-    RECT color_picker_update{};
     if (GetClientRect(color_picker, &color_picker_client) == FALSE
-        || IsRectEmpty(&color_picker_client) != FALSE) {
+        || IsRectEmpty(&color_picker_client) != FALSE
+        || color_picker_client.bottom - color_picker_client.top
+            < MulDiv(
+                118,
+                static_cast<int>(color_resize_dpi == 0U ? 96U : color_resize_dpi),
+                96)) {
         return 841;
-    }
-    if (GetUpdateRect(color_picker, &color_picker_update, FALSE) == FALSE) {
-        return 842;
-    }
-    // A child window's update region can be clipped or coalesced by Windows
-    // according to its parent and siblings, so its bounding rectangle is not
-    // required to match the full client rectangle. Any pending picker paint
-    // redraws the complete current-size surface; verify that path directly.
-    if (UpdateWindow(color_picker) == FALSE
-        || GetUpdateRect(color_picker, &color_picker_update, FALSE) != FALSE) {
-        return 843;
     }
     HDC picker_dc = GetDC(color_picker);
     if (picker_dc == nullptr) {
@@ -2573,6 +2648,102 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     if (!layer_list_grow_painted) {
         return 11012;
     }
+    const HWND right_stack_splitter =
+        state.Workspace().windows.dock_host.SplitterWindow(
+            DockZone::Right, DockSplitterKind::StackBoundary);
+    const DockPanePlacement* color_placement =
+        state.Workspace().windows.workspace.dock.Pane(DockPaneType::Color);
+    const DockPanePlacement* layer_placement =
+        state.Workspace().windows.workspace.dock.Pane(DockPaneType::Layer);
+    WindowMessageCounter stack_repaints{WM_PAINT};
+    constexpr UINT_PTR kStackRepaintCounterSubclass = 24U;
+    RECT stack_bounds_before{};
+    const bool stack_counter_attached = right_stack_splitter != nullptr
+        && color_placement != nullptr && layer_placement != nullptr
+        && GetWindowRect(right_stack_splitter, &stack_bounds_before) != FALSE
+        && SetWindowSubclass(
+               state.Workspace().windows.window,
+               WindowMessageCounterProcedure,
+               kStackRepaintCounterSubclass,
+               reinterpret_cast<DWORD_PTR>(&stack_repaints)) != FALSE;
+    const std::uint32_t color_weight_before = color_placement == nullptr
+        ? 0U
+        : color_placement->split_weight;
+    const std::uint32_t layer_weight_before = layer_placement == nullptr
+        ? 0U
+        : layer_placement->split_weight;
+    bool stack_grow_completed{};
+    bool stack_restore_completed{};
+    if (stack_counter_attached) {
+        SetFocus(right_stack_splitter);
+        ValidateRect(state.Workspace().windows.window, nullptr);
+        const std::uint32_t paints_before = stack_repaints.count;
+        SendMessageW(right_stack_splitter, WM_KEYDOWN, VK_DOWN, 0);
+        color_placement =
+            state.Workspace().windows.workspace.dock.Pane(DockPaneType::Color);
+        layer_placement =
+            state.Workspace().windows.workspace.dock.Pane(DockPaneType::Layer);
+        const bool grow_changed = color_placement != nullptr
+            && layer_placement != nullptr
+            && (color_placement->split_weight != color_weight_before
+                || layer_placement->split_weight != layer_weight_before);
+        RECT update{};
+        stack_grow_completed = GetUpdateRect(
+                                   state.Workspace().windows.window,
+                                   &update,
+                                   FALSE)
+                == FALSE
+            && (grow_changed ? stack_repaints.count > paints_before
+                             : stack_repaints.count == paints_before);
+        ValidateRect(state.Workspace().windows.window, nullptr);
+        const std::uint32_t paints_after_grow = stack_repaints.count;
+        const std::uint32_t color_weight_after_grow =
+            color_placement == nullptr ? 0U : color_placement->split_weight;
+        const std::uint32_t layer_weight_after_grow =
+            layer_placement == nullptr ? 0U : layer_placement->split_weight;
+        SendMessageW(right_stack_splitter, WM_KEYDOWN, VK_UP, 0);
+        color_placement =
+            state.Workspace().windows.workspace.dock.Pane(DockPaneType::Color);
+        layer_placement =
+            state.Workspace().windows.workspace.dock.Pane(DockPaneType::Layer);
+        const bool restore_changed = color_placement != nullptr
+            && layer_placement != nullptr
+            && (color_placement->split_weight != color_weight_after_grow
+                || layer_placement->split_weight != layer_weight_after_grow);
+        stack_restore_completed = GetUpdateRect(
+                                      state.Workspace().windows.window,
+                                      &update,
+                                      FALSE)
+                == FALSE
+            && (restore_changed
+                    ? stack_repaints.count > paints_after_grow
+                    : stack_repaints.count == paints_after_grow);
+    }
+    if (stack_counter_attached) {
+        RemoveWindowSubclass(
+            state.Workspace().windows.window,
+            WindowMessageCounterProcedure,
+            kStackRepaintCounterSubclass);
+    }
+    color_placement =
+        state.Workspace().windows.workspace.dock.Pane(DockPaneType::Color);
+    layer_placement =
+        state.Workspace().windows.workspace.dock.Pane(DockPaneType::Layer);
+    RECT stack_bounds_after{};
+    if (!stack_counter_attached) {
+        return 11013;
+    }
+    if (!stack_grow_completed) {
+        return 11014;
+    }
+    if (!stack_restore_completed) {
+        return 11015;
+    }
+    if (color_placement == nullptr || layer_placement == nullptr
+        || GetWindowRect(right_stack_splitter, &stack_bounds_after) == FALSE
+        || EqualRect(&stack_bounds_before, &stack_bounds_after) == FALSE) {
+        return 11016;
+    }
     const HWND fill_expand = GetDlgItem(
         state.Workspace().tools.palette,
         IDC_TOOL_OPTIONS_EXPAND_FIRST + 3);
@@ -2601,7 +2772,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         || IsWindowVisible(GetDlgItem(
                state.Workspace().windows.tool_options,
                IDC_FILL_TOLERANCE)) == FALSE) {
-        return 11003;
+        return 11019;
     }
     SetWindowTextW(flyout_fill_tolerance, L"0");
     SendMessageW(
@@ -2612,7 +2783,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     SendMessageW(fill_expand, BM_CLICK, 0, 0);
     if (panes::IsToolOptionsFlyoutVisible(
             state.Workspace().windows.tool_options_flyout)) {
-        return 11003;
+        return 11019;
     }
     const HWND brush_button = GetDlgItem(state.Workspace().tools.palette, IDM_TOOL_BRUSH);
     const HWND brush_expand = GetDlgItem(
@@ -2881,17 +3052,26 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     const HWND right_tool_tabs =
         state.Workspace().windows.dock_host.ToolTabWindow();
     const auto tabs = state.Workspace().windows.workspace.right_tool_tabs.Tabs();
-    if (right_tool_tabs == nullptr || TabCtrl_GetItemCount(right_tool_tabs) != 1
-        || tabs.size() != 1U || tabs.front().pane_count != 2U
-        || state.Workspace().windows.workspace.right_tool_tabs.TabForPane(
-               DockPaneType::Color)
-            != tabs.front().id
-        || state.Workspace().windows.workspace.right_tool_tabs.TabForPane(
-               DockPaneType::Layer)
-            != tabs.front().id
+    const ToolTabId color_tool_tab =
+        state.Workspace().windows.workspace.right_tool_tabs.TabForPane(
+            DockPaneType::Color);
+    const ToolTabId layer_tool_tab =
+        state.Workspace().windows.workspace.right_tool_tabs.TabForPane(
+            DockPaneType::Layer);
+    const bool combined_tool_tab = tabs.size() == 1U
+        && tabs.front().pane_count == 2U
+        && color_tool_tab == tabs.front().id
+        && layer_tool_tab == tabs.front().id;
+    const bool split_tool_tabs = tabs.size() == 2U
+        && tabs[0].pane_count == 1U && tabs[1].pane_count == 1U
+        && color_tool_tab && layer_tool_tab && color_tool_tab != layer_tool_tab;
+    if (right_tool_tabs == nullptr
+        || TabCtrl_GetItemCount(right_tool_tabs)
+            != static_cast<int>(tabs.size())
+        || (!combined_tool_tab && !split_tool_tabs)
         || state.Workspace().windows.workspace.right_tool_tabs.Selected()
-            != tabs.front().id) {
-        return 11003;
+            != layer_tool_tab) {
+        return 11020;
     }
     if (state.Workspace().windows.dock_host.FloatPane(DockPaneType::Tool)
             != DockResult::ZoneNotAllowed
@@ -2967,7 +3147,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         return 836;
     }
     if (!WindowFontsAreEquivalent(dock_tabs, color_tabs)) {
-        return 11003;
+        return 11021;
     }
     SetFocus(dock_tabs);
     SendMessageW(dock_tabs, WM_KEYDOWN, VK_RIGHT, 0);

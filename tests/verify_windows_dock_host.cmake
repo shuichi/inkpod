@@ -22,6 +22,7 @@ set(REFERENCE_SOURCE "${UI_DIR}/panes/subpalette_pane.cpp")
 set(BATCH_SOURCE "${UI_DIR}/dialogs/batch_dialog.cpp")
 set(LAYER_PALETTE_SOURCE "${UI_DIR}/dialogs/layer_palette.cpp")
 set(COLOR_PANE_SOURCE "${UI_DIR}/panes/color_dock_pane.cpp")
+set(PANE_DIALOG_LAYOUT_HEADER "${UI_DIR}/panes/pane_dialog_layout.h")
 set(PROGRESS_SOURCE "${UI_DIR}/dialogs/effects_dialogs.cpp")
 set(PROGRESS_HEADER "${UI_DIR}/dialogs/effects_dialogs.h")
 set(SMOKE_SOURCE "${INKPOD_SOURCE_DIR}/apps/windows/app/app_smoke.cpp")
@@ -46,6 +47,7 @@ foreach(FILE IN ITEMS
         "${BATCH_SOURCE}"
         "${LAYER_PALETTE_SOURCE}"
         "${COLOR_PANE_SOURCE}"
+        "${PANE_DIALOG_LAYOUT_HEADER}"
         "${PROGRESS_SOURCE}"
         "${PROGRESS_HEADER}"
         "${SMOKE_SOURCE}")
@@ -169,6 +171,7 @@ file(READ "${HOST_SOURCE}" HOST)
 foreach(REQUIRED IN ITEMS
         "enum class DockHostChangeKind"
         "DockHostChangeKind::Geometry"
+        "DockHostChangeKind::StackBoundary"
         "DockHostChangeKind::Structure")
     string(FIND "${HOST_INTERFACE}${HOST}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
@@ -195,6 +198,8 @@ foreach(REQUIRED IN ITEMS
         "ShowDockPreview"
         "PreviewZoneAt"
         "DockSplitterKind::StackBoundary"
+        "RepaintChangedStackBoundaries"
+        "RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN"
         "ApplyToolTabLayout"
         "ToolTabSubclassProcedure"
         "MovePaneToToolTab"
@@ -282,18 +287,27 @@ foreach(REQUIRED IN ITEMS
 endforeach()
 
 file(READ "${COLOR_PANE_SOURCE}" COLOR_PANE)
+file(READ "${PANE_DIALOG_LAYOUT_HEADER}" PANE_DIALOG_LAYOUT)
 if(COLOR_PANE MATCHES "RDW_ALLCHILDREN")
     message(FATAL_ERROR
         "Color pane resize still forces an erase/redraw of every child")
 endif()
 foreach(REQUIRED IN ITEMS
         "InvalidateRect(picker, nullptr, FALSE)"
-        "PlacePaneDialogControl")
+        "PlacePaneDialogControl"
+        "RepaintVisibleTabControls"
+        "HWND_BOTTOM"
+        "HWND_TOP"
+        "UpdateWindow(child)")
     string(FIND "${COLOR_PANE}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
         message(FATAL_ERROR "Color pane bounded resize repaint is missing: ${REQUIRED}")
     endif()
 endforeach()
+if(NOT PANE_DIALOG_LAYOUT MATCHES "SWP_NOREDRAW")
+    message(FATAL_ERROR
+        "Color pane layout cannot defer child redraw until placement completes")
+endif()
 
 file(READ "${MAIN_HEADER}" MAIN_HEADER_TEXT)
 if(NOT MAIN_HEADER_TEXT MATCHES "DockHost dock_host")
@@ -348,7 +362,13 @@ foreach(REQUIRED IN ITEMS
         "color_list_rebuilds"
         "layer_list_rebuilds"
         "layer_list_shrink_painted"
-        "layer_list_grow_painted")
+        "layer_list_grow_painted"
+        "color_resize_controls"
+        "color_resize_paints"
+        "minimum_color_content_height"
+        "right_stack_splitter"
+        "stack_grow_completed"
+        "stack_restore_completed")
     string(FIND "${SMOKE}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
         message(FATAL_ERROR

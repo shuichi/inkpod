@@ -45,6 +45,12 @@ function Cpp-Quote([string]$Value) {
     return $builder.ToString()
 }
 
+function Rc-Quote([string]$Value) {
+    # rc.exe does not decode JSON Unicode escapes such as \u0026. Reuse the
+    # C-style escaping above and remove only the wide-string prefix.
+    return (Cpp-Quote $Value).Substring(1)
+}
+
 $catalogText = Normalize-Newlines ([IO.File]::ReadAllText($catalogPath, $utf8))
 $catalog = $catalogText | ConvertFrom-Json
 $sha = [Security.Cryptography.SHA256]::Create()
@@ -83,7 +89,7 @@ function Generate-Resource([string]$Language, [string]$LanguageId) {
                 throw "Unknown localization marker: $($match.Groups[1].Value)"
             }
             $value = if ($Language -eq 'ja') { $entry.ja } else { $entry.en }
-            return ConvertTo-Json ([string]$value) -Compress
+            return Rc-Quote ([string]$value)
         })
     return $banner + "#include <windows.h>`n#include <commctrl.h>`n#include `"resource.h`"`n`n" +
         "#pragma code_page(65001)`nLANGUAGE $LanguageId`n`n" + $body

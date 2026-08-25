@@ -70,6 +70,11 @@ bool HasArea(const DockRect& value) noexcept {
     return value.width > 0 && value.height > 0;
 }
 
+bool SameBounds(const DockRect& left, const DockRect& right) noexcept {
+    return left.x == right.x && left.y == right.y
+        && left.width == right.width && left.height == right.height;
+}
+
 bool WindowMatchesPlacement(
     HWND window, const DockRect& bounds, bool visible) noexcept {
     const bool show = visible && HasArea(bounds);
@@ -399,6 +404,7 @@ void DockHost::ApplyLayout(
         return;
     }
     applying_ = true;
+    const DockLayoutGeometry previous_geometry = geometry_;
     geometry_ = geometry;
     dpi_ = dpi == 0U ? 96U : dpi;
     static_cast<void>(UpdateTabFont(dpi_));
@@ -437,6 +443,9 @@ void DockHost::ApplyLayout(
             0,
             0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+    if (kind == DockHostChangeKind::StackBoundary) {
+        RepaintChangedStackBoundaries(previous_geometry);
     }
     applying_ = false;
 }
@@ -1173,6 +1182,71 @@ void DockHost::ApplyToolTabLayout(bool synchronize_items) noexcept {
         visible_count > 0);
 }
 
+void DockHost::RepaintChangedStackBoundaries(
+    const DockLayoutGeometry& previous) noexcept {
+    if (owner_ == nullptr) {
+        return;
+    }
+    RECT dirty{};
+    bool has_dirty{};
+    const int header_padding = ScaleDip(kTabHeightDip, dpi_);
+    for (std::size_t index = 0U; index < geometry_.splitter_count; ++index) {
+        const DockSplitterGeometry& next = geometry_.splitters[index];
+        if (next.kind != DockSplitterKind::StackBoundary) {
+            continue;
+        }
+        const DockSplitterGeometry* prior{};
+        for (std::size_t previous_index = 0U;
+             previous_index < previous.splitter_count;
+             ++previous_index) {
+            const DockSplitterGeometry& candidate =
+                previous.splitters[previous_index];
+            if (candidate.kind == DockSplitterKind::StackBoundary
+                && candidate.zone == next.zone
+                && candidate.boundary == next.boundary) {
+                prior = &candidate;
+                break;
+            }
+        }
+        if (prior == nullptr || SameBounds(prior->bounds, next.bounds)) {
+            continue;
+        }
+        RECT old_bounds = ToRect(prior->bounds);
+        RECT new_bounds = ToRect(next.bounds);
+        RECT moved_bounds{};
+        if (UnionRect(&moved_bounds, &old_bounds, &new_bounds) == FALSE) {
+            continue;
+        }
+        if (SplitterHasHorizontalLine(next)) {
+            moved_bounds.top -= header_padding;
+            moved_bounds.bottom += header_padding;
+        } else {
+            moved_bounds.left -= header_padding;
+            moved_bounds.right += header_padding;
+        }
+        if (has_dirty) {
+            RECT combined{};
+            if (UnionRect(&combined, &dirty, &moved_bounds) != FALSE) {
+                dirty = combined;
+            }
+        } else {
+            dirty = moved_bounds;
+            has_dirty = true;
+        }
+    }
+    RECT client{};
+    RECT clipped{};
+    if (!has_dirty || GetClientRect(owner_, &client) == FALSE
+        || IntersectRect(&clipped, &dirty, &client) == FALSE) {
+        return;
+    }
+    RedrawWindow(
+        owner_,
+        &clipped,
+        nullptr,
+        RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+}
+
 void DockHost::NotifyChanged(DockHostChangeKind kind) noexcept {
     if (!applying_ && changed_ != nullptr) {
         changed_(changed_context_, kind);
@@ -1521,11 +1595,7 @@ void DockHost::UpdateStackBoundaryFromPoint(
     const int delta = horizontal
         ? screen.x - splitter.last_screen.x
         : screen.y - splitter.last_screen.y;
-    const DockRect zone = geometry_.zones[static_cast<std::size_t>(
-        splitter.geometry.zone)];
-    const int extent = std::max(1, horizontal ? zone.width : zone.height);
     splitter.last_screen = screen;
-    const int delta_milli = delta * 1000 / extent;
     DockResult result = DockResult::InvalidState;
     if (splitter.geometry.zone == DockZone::Right
         && right_tool_tabs_ != nullptr) {
@@ -1533,18 +1603,69 @@ void DockHost::UpdateStackBoundaryFromPoint(
         const auto panes = SelectedRightDockedPanes(count);
         const std::size_t boundary = splitter.geometry.boundary;
         if (boundary + 1U < count) {
-            result = model_->AdjustPaneBoundary(
+            const DockPaneGeometry& first_geometry = geometry_.panes[
+                PaneIndex(panes[boundary])];
+            const DockPaneGeometry& second_geometry = geometry_.panes[
+                PaneIndex(panes[boundary + 1U])];
+            const int pair_extent = std::max(
+                1,
+                first_geometry.bounds.height
+                    + second_geometry.bounds.height);
+            int delta_milli = static_cast<int>(
+                static_cast<std::int64_t>(delta) * 1000 / pair_extent);
+            if (delta_milli == 0 && delta != 0) {
+                delta_milli = delta < 0 ? -1 : 1;
+            }
+            result = AdjustRightPaneBoundary(
                 panes[boundary], panes[boundary + 1U], delta_milli);
         }
     } else {
+        const DockRect zone = geometry_.zones[static_cast<std::size_t>(
+            splitter.geometry.zone)];
+        const int extent = std::max(1, horizontal ? zone.width : zone.height);
+        const int delta_milli = delta * 1000 / extent;
         result = model_->AdjustSplitBoundary(
             splitter.geometry.zone,
             splitter.geometry.boundary,
             delta_milli);
     }
     if (result == DockResult::Ok) {
-        NotifyChanged(DockHostChangeKind::Geometry);
+        NotifyChanged(DockHostChangeKind::StackBoundary);
     }
+}
+
+DockResult DockHost::AdjustRightPaneBoundary(
+    DockPaneType first,
+    DockPaneType second,
+    int delta_milli) noexcept {
+    if (model_ == nullptr) {
+        return DockResult::InvalidState;
+    }
+    const DockPaneGeometry& first_geometry = geometry_.panes[PaneIndex(first)];
+    const DockPaneGeometry& second_geometry = geometry_.panes[PaneIndex(second)];
+    const PaneDescriptor* first_descriptor = FindPaneDescriptor(first);
+    const PaneDescriptor* second_descriptor = FindPaneDescriptor(second);
+    if (first_descriptor == nullptr || second_descriptor == nullptr) {
+        return DockResult::InvalidState;
+    }
+    if ((delta_milli < 0
+            && first_geometry.bounds.height
+                <= ScaleDip(first_descriptor->minimum_height_dip, dpi_))
+        || (delta_milli > 0
+            && second_geometry.bounds.height
+                <= ScaleDip(second_descriptor->minimum_height_dip, dpi_))) {
+        return DockResult::NoOp;
+    }
+    const int available_extent_pixels = first_geometry.bounds.height
+        + second_geometry.bounds.height;
+    if (available_extent_pixels <= 0) {
+        return DockResult::InvalidState;
+    }
+    return model_->AdjustPaneBoundary(
+        first,
+        second,
+        delta_milli,
+        PixelsToDip(available_extent_pixels, dpi_));
 }
 
 void DockHost::ActivateSelectedTab(TabHostState& tabs) noexcept {
@@ -1803,7 +1924,7 @@ LRESULT CALLBACK DockHost::SplitterSubclassProcedure(
                         splitter->host->SelectedRightDockedPanes(count);
                     const std::size_t boundary = splitter->geometry.boundary;
                     if (boundary + 1U < count) {
-                        result = splitter->host->model_->AdjustPaneBoundary(
+                        result = splitter->host->AdjustRightPaneBoundary(
                             panes[boundary],
                             panes[boundary + 1U],
                             direction * 20);
@@ -1824,7 +1945,10 @@ LRESULT CALLBACK DockHost::SplitterSubclassProcedure(
                 }
             }
             if (result == DockResult::Ok) {
-                splitter->host->NotifyChanged(DockHostChangeKind::Geometry);
+                splitter->host->NotifyChanged(
+                    splitter->geometry.kind == DockSplitterKind::StackBoundary
+                        ? DockHostChangeKind::StackBoundary
+                        : DockHostChangeKind::Geometry);
             }
             return 0;
         }

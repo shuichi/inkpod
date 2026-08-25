@@ -47,14 +47,14 @@ END
 
 IDR_MAIN_MENU MENU
 BEGIN
-    POPUP "\u0026File"
+    POPUP "&File"
     BEGIN
-        POPUP "\u0026New"
+        POPUP "&New"
         BEGIN
-            MENUITEM "\u0026Cell\tCtrl+N", IDM_FILE_NEW
-            MENUITEM "Cu\u0026t...", IDM_FILE_NEW_CUT
+            MENUITEM "&Cell\tCtrl+N", IDM_FILE_NEW
+            MENUITEM "Cu&t...", IDM_FILE_NEW_CUT
         END
-        MENUITEM "\u0026Open...\tCtrl+O", IDM_FILE_OPEN
+        MENUITEM "&Open...\tCtrl+O", IDM_FILE_OPEN
         POPUP "Recent Files"
         BEGIN
             MENUITEM "1 (None)", IDM_FILE_RECENT_1
@@ -66,8 +66,8 @@ BEGIN
             MENUITEM "7 (None)", IDM_FILE_RECENT_7
             MENUITEM "8 (None)", IDM_FILE_RECENT_8
         END
-        MENUITEM "\u0026Save\tCtrl+S", IDM_FILE_SAVE
-        MENUITEM "Save \u0026As...", IDM_FILE_SAVE_AS
+        MENUITEM "&Save\tCtrl+S", IDM_FILE_SAVE
+        MENUITEM "Save &As...", IDM_FILE_SAVE_AS
         MENUITEM "Save Cut", IDM_CUT_SAVE
         MENUITEM "Cut Properties...", IDM_CUT_PROPERTIES
         MENUITEM "Undo Cut", IDM_CUT_UNDO
@@ -81,28 +81,28 @@ BEGIN
             MENUITEM "Renumber Display Numbers...", IDM_CUT_SEQUENCE_RENUMBER
         END
         MENUITEM "Copy Without History...", IDM_FILE_COMPACT_COPY
-        MENUITEM "\u0026Revert", IDM_FILE_REVERT
+        MENUITEM "&Revert", IDM_FILE_REVERT
         MENUITEM "Partially Revert Layer", IDM_FILE_REVERT_PARTIAL
         MENUITEM "Import Raster...", IDM_FILE_IMPORT_RASTER
         MENUITEM "Export Raster...", IDM_FILE_EXPORT_RASTER
         MENUITEM "Export Instruction Image...", IDM_FILE_EXPORT_INSTRUCTION_RASTER
-        MENUITEM "Sa\u0026ve Recovery", IDM_FILE_AUTOSAVE_NOW
-        MENUITEM "Open Recover\u0026y...", IDM_FILE_OPEN_RECOVERY
-        MENUITEM "Restore \u0026Previous Documents at Startup", IDM_FILE_RESTORE_PREVIOUS
-        MENUITEM "Autosave Before Cell S\u0026witch", IDM_FILE_SEQUENCE_AUTOSAVE
+        MENUITEM "Sa&ve Recovery", IDM_FILE_AUTOSAVE_NOW
+        MENUITEM "Open Recover&y...", IDM_FILE_OPEN_RECOVERY
+        MENUITEM "Restore &Previous Documents at Startup", IDM_FILE_RESTORE_PREVIOUS
+        MENUITEM "Autosave Before Cell S&witch", IDM_FILE_SEQUENCE_AUTOSAVE
         MENUITEM SEPARATOR
-        MENUITEM "E\u0026xit", IDM_APP_EXIT
+        MENUITEM "E&xit", IDM_APP_EXIT
     END
-    POPUP "\u0026Edit"
+    POPUP "&Edit"
     BEGIN
-        MENUITEM "\u0026Undo\tCtrl+Z", IDM_EDIT_UNDO
-        MENUITEM "\u0026Redo\tCtrl+Y", IDM_EDIT_REDO
+        MENUITEM "&Undo\tCtrl+Z", IDM_EDIT_UNDO
+        MENUITEM "&Redo\tCtrl+Y", IDM_EDIT_REDO
         MENUITEM "Undo Multiple Steps...", IDM_EDIT_HISTORY_BACK
         MENUITEM "Redo Multiple Steps...", IDM_EDIT_HISTORY_FORWARD
         MENUITEM SEPARATOR
-        MENUITEM "Cu\u0026t\tCtrl+X", IDM_EDIT_CUT
-        MENUITEM "\u0026Copy\tCtrl+C", IDM_EDIT_COPY
-        MENUITEM "\u0026Paste\tCtrl+V", IDM_EDIT_PASTE
+        MENUITEM "Cu&t\tCtrl+X", IDM_EDIT_CUT
+        MENUITEM "&Copy\tCtrl+C", IDM_EDIT_COPY
+        MENUITEM "&Paste\tCtrl+V", IDM_EDIT_PASTE
         MENUITEM "Paste into Selected Plane", IDM_EDIT_PASTE_SELECTED
         MENUITEM "Paste with Conversion...", IDM_EDIT_PASTE_CONVERTED
         POPUP "Floating Selection"
@@ -113,12 +113,12 @@ BEGIN
         END
         MENUITEM "Preferences...", IDM_SHORTCUT_EDIT
     END
-    POPUP "\u0026View"
+    POPUP "&View"
     BEGIN
-        MENUITEM "Zoom \u0026In", IDM_VIEW_ZOOM_IN
-        MENUITEM "Zoom \u0026Out", IDM_VIEW_ZOOM_OUT
-        MENUITEM "\u0026Fit", IDM_VIEW_FIT
-        MENUITEM "\u0026Actual Pixels", IDM_VIEW_ONE_TO_ONE
+        MENUITEM "Zoom &In", IDM_VIEW_ZOOM_IN
+        MENUITEM "Zoom &Out", IDM_VIEW_ZOOM_OUT
+        MENUITEM "&Fit", IDM_VIEW_FIT
+        MENUITEM "&Actual Pixels", IDM_VIEW_ONE_TO_ONE
         MENUITEM "Zoom Percentage...", IDM_VIEW_ZOOM_PERCENT
         MENUITEM "Zoom to Box", IDM_VIEW_BOX_ZOOM
         MENUITEM SEPARATOR
@@ -142,7 +142,7 @@ BEGIN
         MENUITEM "Grid Settings...", IDM_VIEW_GRID_SETTINGS
         MENUITEM "Transparency", IDM_VIEW_TRANSPARENT
     END
-    POPUP "\u0026Cell"
+    POPUP "&Cell"
     BEGIN
         MENUITEM "Paper Settings...", IDM_CELL_PAPER_SETTINGS
         MENUITEM "Resize Paper to Shooting Frame", IDM_CELL_FIT_CAPTURE_FRAME
@@ -174,7 +174,7 @@ BEGIN
             MENUITEM "Safe Frame...", IDM_CELL_FRAME_SAFE
             MENUITEM "Margins...", IDM_CELL_MARGINS
         END
-        POPUP "\u0026Layer"
+        POPUP "&Layer"
         BEGIN
             MENUITEM "New...", IDM_LAYER_NEW
             MENUITEM "Duplicate", IDM_LAYER_DUPLICATE
@@ -190,10 +190,10 @@ BEGIN
             MENUITEM "Merge Same Kind", IDM_LAYER_MERGE
             MENUITEM "Properties...", IDM_LAYER_PROPERTIES
         END
-        POPUP "\u0026Plane"
+        POPUP "&Plane"
         BEGIN
-            MENUITEM "Main \u0026Line", IDM_PLANE_MAIN_LINE
-            MENUITEM "\u0026Color", IDM_PLANE_COLOR
+            MENUITEM "Main &Line", IDM_PLANE_MAIN_LINE
+            MENUITEM "&Color", IDM_PLANE_COLOR
             MENUITEM SEPARATOR
             MENUITEM "New...", IDM_PLANE_NEW
             MENUITEM "Duplicate", IDM_PLANE_DUPLICATE
@@ -208,7 +208,7 @@ BEGIN
             MENUITEM "Properties...", IDM_PLANE_PROPERTIES
         END
     END
-    POPUP "\u0026Selection"
+    POPUP "&Selection"
     BEGIN
         MENUITEM "Select All", IDM_SELECTION_ALL
         MENUITEM "Clear Selection", IDM_SELECTION_CLEAR
@@ -245,7 +245,7 @@ BEGIN
             MENUITEM "Subtract Layer", IDM_SELECTION_LAYER_SUBTRACT
         END
     END
-    POPUP "F\u0026ilter"
+    POPUP "F&ilter"
     BEGIN
         MENUITEM "Repeat Last Filter", IDM_FILTER_LAST
         MENUITEM SEPARATOR
@@ -271,21 +271,21 @@ BEGIN
         MENUITEM "Toggle Adjustment Layer Visibility", IDM_ADJUSTMENT_TOGGLE
         MENUITEM "Move Adjustment Layer to Top", IDM_ADJUSTMENT_MOVE_TOP
     END
-    POPUP "\u0026Tools"
+    POPUP "&Tools"
     BEGIN
         POPUP "Inkpod File Visualization"
         BEGIN
             MENUITEM "(None)", 40315, GRAYED
         END
         MENUITEM SEPARATOR
-        MENUITEM "\u0026Pencil", IDM_TOOL_PENCIL
-        MENUITEM "\u0026Brush", IDM_TOOL_BRUSH
-        MENUITEM "\u0026Eraser", IDM_TOOL_ERASER
-        MENUITEM "\u0026Fill", IDM_TOOL_FILL
+        MENUITEM "&Pencil", IDM_TOOL_PENCIL
+        MENUITEM "&Brush", IDM_TOOL_BRUSH
+        MENUITEM "&Eraser", IDM_TOOL_ERASER
+        MENUITEM "&Fill", IDM_TOOL_FILL
         MENUITEM "Closed-region Fill", IDM_TOOL_CLOSED_FILL
         MENUITEM "Fill Extension", IDM_TOOL_FILL_EXTENSION
         MENUITEM "Fill Settings...", IDM_TOOL_FILL_OPTIONS
-        MENUITEM "Eyedropper (\u0026I)", IDM_TOOL_EYEDROPPER
+        MENUITEM "Eyedropper (&I)", IDM_TOOL_EYEDROPPER
         POPUP "Raster Geometry"
         BEGIN
             MENUITEM "Line", IDM_GEOMETRY_LINE
@@ -313,7 +313,7 @@ BEGIN
         MENUITEM "Alpha Gradient...", IDM_EFFECT_ALPHA_GRADIENT
         MENUITEM "Show Alpha as Grayscale", IDM_EFFECT_ALPHA_VIEW
     END
-    POPUP "\u0026Color"
+    POPUP "&Color"
     BEGIN
         MENUITEM "Drawing Color (RGB/HSV, RGBA8/16)...", IDM_COLOR_EDITOR
         MENUITEM "Windows Color Picker...", IDM_COLOR_CHOOSE
@@ -352,7 +352,7 @@ BEGIN
         MENUITEM "Check Pure White", IDM_COLOR_CHECK_LEGACY
         MENUITEM "Check White and Transparency", IDM_COLOR_CHECK_NATIVE
     END
-    POPUP "\u0026Production"
+    POPUP "&Production"
     BEGIN
         POPUP "Light Table Sets"
         BEGIN
@@ -389,7 +389,7 @@ BEGIN
             MENUITEM "Previous Cell", IDM_SEQ_PREVIOUS
             MENUITEM "Next Cell", IDM_SEQ_NEXT
             MENUITEM "Go to Cell Number...", IDM_SEQ_GOTO
-            MENUITEM "\u0026Wrap at Endpoints", IDM_SEQ_WRAP_ENDPOINTS
+            MENUITEM "&Wrap at Endpoints", IDM_SEQ_WRAP_ENDPOINTS
             MENUITEM "Register Selected Cell in Subpalette", IDM_SUBPALETTE_SET
             MENUITEM "Sample Subpalette Color...", IDM_SUBPALETTE_SAMPLE
         END
@@ -453,7 +453,7 @@ BEGIN
             MENUITEM "Load Set...", IDM_BATCH_LOAD_SET
         END
     END
-    POPUP "Wi\u0026ndow"
+    POPUP "Wi&ndow"
     BEGIN
         MENUITEM "New View", IDM_VIEW_NEW
         MENUITEM "Close View", IDM_VIEW_CLOSE
@@ -513,14 +513,14 @@ BEGIN
             MENUITEM "Mirror Horizontally", IDM_WORKSPACE_MIRROR
         END
     END
-    POPUP "\u0026Help"
+    POPUP "&Help"
     BEGIN
-        MENUITEM "inkpod \u0026Help\tF1", IDM_HELP_MANUAL
-        MENUITEM "Inkpod \u0026File Format", IDM_HELP_FILE_FORMAT
-        MENUITEM "A\u0026cknowledgements", IDM_HELP_ACKNOWLEDGEMENTS
-        MENUITEM "Inkpod \u0026Website", IDM_HELP_WEB_PAGE
+        MENUITEM "inkpod &Help\tF1", IDM_HELP_MANUAL
+        MENUITEM "Inkpod &File Format", IDM_HELP_FILE_FORMAT
+        MENUITEM "A&cknowledgements", IDM_HELP_ACKNOWLEDGEMENTS
+        MENUITEM "Inkpod &Website", IDM_HELP_WEB_PAGE
         MENUITEM SEPARATOR
-        MENUITEM "\u0026About Inkpod...", IDM_HELP_ABOUT
+        MENUITEM "&About Inkpod...", IDM_HELP_ABOUT
     END
 END
 

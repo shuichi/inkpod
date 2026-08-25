@@ -273,10 +273,16 @@ void LayoutControls(HWND dialog) noexcept {
     const UINT dpi = GetDpiForWindow(dialog);
     const int margin = ScaleForDpi(kMargin, dpi);
     const int gap = ScaleForDpi(kButtonGap, dpi);
-    const int label_height = ScaleForDpi(18, dpi);
+    const int label_height = std::max(
+        panes::PaneReadableControlHeight(
+            dialog, IDC_LAYER_SECTION, 18, 4),
+        panes::PaneReadableControlHeight(
+            dialog, IDC_PLANE_SECTION, 18, 4));
     const int split_height = ScaleForDpi(4, dpi);
-    const int action_target_height = ScaleForDpi(18, dpi);
-    const int button_height = ScaleForDpi(kButtonHeight, dpi);
+    const int action_target_height = panes::PaneReadableControlHeight(
+        dialog, IDC_LAYER_ACTION_TARGET, 18, 4);
+    const int button_height = panes::PaneReadableControlHeight(
+        dialog, IDM_LAYER_NEW, kButtonHeight, 8);
     const int width = std::max(
         0, static_cast<int>(client.right) - margin * 2);
     std::array<int, kLayerActionCommands.size()> action_controls{};

@@ -167,7 +167,11 @@ def utf16_length(value: str) -> int:
 
 
 def rc_quote(value: str) -> str:
-    return json.dumps(value, ensure_ascii=False)
+    # rc.exe string literals use C-style escaping, not JSON's optional Unicode
+    # escapes. In particular, a JSON serializer may emit ``\u0026`` for an
+    # ampersand, which rc.exe preserves as visible menu text instead of treating
+    # it as a mnemonic marker.
+    return cpp_quote(value)[1:]
 
 
 def banner(catalog_hash: str, comment: str = "//") -> str:

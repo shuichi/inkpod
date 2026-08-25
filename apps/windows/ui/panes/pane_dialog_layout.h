@@ -16,6 +16,39 @@ inline int ScalePaneDip(HWND dialog, int value) noexcept {
     return MulDiv(value, static_cast<int>(dpi == 0U ? 96U : dpi), 96);
 }
 
+inline int PaneControlTextHeight(HWND control) noexcept {
+    if (control == nullptr) {
+        return 0;
+    }
+    HDC device = GetDC(control);
+    if (device == nullptr) {
+        return 0;
+    }
+    const HFONT font = reinterpret_cast<HFONT>(
+        SendMessageW(control, WM_GETFONT, 0, 0));
+    const HGDIOBJ previous = font == nullptr ? nullptr : SelectObject(device, font);
+    TEXTMETRICW metrics{};
+    const bool measured = GetTextMetricsW(device, &metrics) != FALSE;
+    if (previous != nullptr && previous != HGDI_ERROR) {
+        SelectObject(device, previous);
+    }
+    ReleaseDC(control, device);
+    return measured
+        ? static_cast<int>(metrics.tmHeight + metrics.tmExternalLeading)
+        : 0;
+}
+
+inline int PaneReadableControlHeight(
+    HWND dialog,
+    int control,
+    int minimum_height_dip,
+    int vertical_padding_dip) noexcept {
+    return std::max(
+        ScalePaneDip(dialog, minimum_height_dip),
+        PaneControlTextHeight(GetDlgItem(dialog, control))
+            + ScalePaneDip(dialog, vertical_padding_dip));
+}
+
 inline bool PaneWindowHasBounds(
     HWND child, int x, int y, int width, int height) noexcept {
     RECT bounds{};
@@ -41,13 +74,18 @@ inline void PlacePaneDialogControl(
     int x,
     int y,
     int width,
-    int height) noexcept {
+    int height,
+    bool redraw = true) noexcept {
     const HWND child = GetDlgItem(dialog, control);
     if (child == nullptr) {
         return;
     }
     if (PaneWindowHasBounds(child, x, y, width, height)) {
         return;
+    }
+    UINT flags = SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER;
+    if (!redraw) {
+        flags |= SWP_NOREDRAW;
     }
     SetWindowPos(
         child,
@@ -56,7 +94,7 @@ inline void PlacePaneDialogControl(
         y,
         std::max(0, width),
         std::max(0, height),
-        SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER);
+        flags);
 }
 
 inline int MeasurePaneButtonTextWidth(
@@ -166,7 +204,8 @@ inline std::size_t PlacePaneButtonRows(
     int available_width,
     int row_height,
     int gap,
-    UINT dpi = 0U) noexcept {
+    UINT dpi = 0U,
+    bool redraw = true) noexcept {
     std::size_t first{};
     std::size_t row{};
     while (first < controls.size()) {
@@ -204,7 +243,8 @@ inline std::size_t PlacePaneButtonRows(
                 cursor,
                 y + static_cast<int>(row) * (row_height + gap),
                 width,
-                row_height);
+                row_height,
+                redraw);
             cursor += width + gap;
         }
         first = last;
@@ -223,7 +263,8 @@ inline void PlacePaneTargetRow(
     int target_y_offset,
     int target_height,
     int button_height,
-    int gap) noexcept {
+    int gap,
+    bool redraw = true) noexcept {
     const int button_width = std::min(
         std::max(0, available_width),
         PaneButtonIdealWidth(dialog, button_control));
@@ -233,14 +274,16 @@ inline void PlacePaneTargetRow(
         margin + std::max(0, available_width - button_width),
         y,
         button_width,
-        button_height);
+        button_height,
+        redraw);
     PlacePaneDialogControl(
         dialog,
         target_control,
         margin,
         y + target_y_offset,
         std::max(0, available_width - button_width - gap),
-        target_height);
+        target_height,
+        redraw);
 }
 
 }  // namespace inkpod::windows::ui::panes
