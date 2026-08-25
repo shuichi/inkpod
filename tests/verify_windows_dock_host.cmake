@@ -23,6 +23,8 @@ set(BATCH_SOURCE "${UI_DIR}/dialogs/batch_dialog.cpp")
 set(LAYER_PALETTE_SOURCE "${UI_DIR}/dialogs/layer_palette.cpp")
 set(COLOR_PANE_SOURCE "${UI_DIR}/panes/color_dock_pane.cpp")
 set(PANE_DIALOG_LAYOUT_HEADER "${UI_DIR}/panes/pane_dialog_layout.h")
+set(TAB_SURFACE_HEADER "${UI_DIR}/tab_surface_background.h")
+set(PREFERENCES_SOURCE "${UI_DIR}/dialogs/preferences_dialog.cpp")
 set(PROGRESS_SOURCE "${UI_DIR}/dialogs/effects_dialogs.cpp")
 set(PROGRESS_HEADER "${UI_DIR}/dialogs/effects_dialogs.h")
 set(SMOKE_SOURCE "${INKPOD_SOURCE_DIR}/apps/windows/app/app_smoke.cpp")
@@ -48,6 +50,8 @@ foreach(FILE IN ITEMS
         "${LAYER_PALETTE_SOURCE}"
         "${COLOR_PANE_SOURCE}"
         "${PANE_DIALOG_LAYOUT_HEADER}"
+        "${TAB_SURFACE_HEADER}"
+        "${PREFERENCES_SOURCE}"
         "${PROGRESS_SOURCE}"
         "${PROGRESS_HEADER}"
         "${SMOKE_SOURCE}")
@@ -288,6 +292,8 @@ endforeach()
 
 file(READ "${COLOR_PANE_SOURCE}" COLOR_PANE)
 file(READ "${PANE_DIALOG_LAYOUT_HEADER}" PANE_DIALOG_LAYOUT)
+file(READ "${TAB_SURFACE_HEADER}" TAB_SURFACE)
+file(READ "${PREFERENCES_SOURCE}" PREFERENCES)
 if(COLOR_PANE MATCHES "RDW_ALLCHILDREN")
     message(FATAL_ERROR
         "Color pane resize still forces an erase/redraw of every child")
@@ -296,6 +302,7 @@ foreach(REQUIRED IN ITEMS
         "InvalidateRect(picker, nullptr, FALSE)"
         "PlacePaneDialogControl"
         "RepaintVisibleTabControls"
+        "PaintTabSurfaceBackground"
         "HWND_BOTTOM"
         "HWND_TOP"
         "UpdateWindow(child)")
@@ -308,6 +315,28 @@ if(NOT PANE_DIALOG_LAYOUT MATCHES "SWP_NOREDRAW")
     message(FATAL_ERROR
         "Color pane layout cannot defer child redraw until placement completes")
 endif()
+foreach(REQUIRED IN ITEMS
+        "PaintTabSurfaceBackground"
+        "WM_PRINTCLIENT"
+        "PRF_CLIENT | PRF_ERASEBKGND")
+    string(FIND "${TAB_SURFACE}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR
+            "Shared themed tab-surface background helper is missing: ${REQUIRED}")
+    endif()
+endforeach()
+foreach(REQUIRED IN ITEMS
+        "PaintTabSurfaceBackground(tabs, control, context, client)"
+        "GetStockObject(HOLLOW_BRUSH)"
+        "WS_EX_CLIENTEDGE"
+        "WM_THEMECHANGED"
+        "WM_SYSCOLORCHANGE")
+    string(FIND "${PREFERENCES}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR
+            "Preferences tab-label themed background integration is missing: ${REQUIRED}")
+    endif()
+endforeach()
 
 file(READ "${MAIN_HEADER}" MAIN_HEADER_TEXT)
 if(NOT MAIN_HEADER_TEXT MATCHES "DockHost dock_host")
@@ -363,6 +392,7 @@ foreach(REQUIRED IN ITEMS
         "layer_list_rebuilds"
         "layer_list_shrink_painted"
         "layer_list_grow_painted"
+        "color_label_backgrounds_match"
         "color_resize_controls"
         "color_resize_paints"
         "minimum_color_content_height"

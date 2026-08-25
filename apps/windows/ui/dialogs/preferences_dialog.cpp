@@ -25,6 +25,7 @@
 #include "ui/dialogs/modal_dialog_position.h"
 #include "ui/command_catalog.h"
 #include "ui/shortcut_preset.h"
+#include "ui/tab_surface_background.h"
 #include "ui/ui_resources.h"
 
 namespace inkpod::windows::ui {
@@ -1958,18 +1959,97 @@ bool ControlHasReadableTextWidth(
 
 bool StaticUsesPageBackground(
     const DialogModel& model, HWND control) noexcept {
-    HDC context = GetDC(control);
-    if (context == nullptr) {
+    const bool framed = control != nullptr
+        && (GetWindowLongPtrW(control, GWL_EXSTYLE) & WS_EX_CLIENTEDGE) != 0;
+    HDC window_context = control == nullptr ? nullptr : GetDC(control);
+    if (window_context == nullptr) {
         return false;
     }
-    const LRESULT brush = SendMessageW(
-        model.dialog,
-        WM_CTLCOLORSTATIC,
-        reinterpret_cast<WPARAM>(context),
-        reinterpret_cast<LPARAM>(control));
-    ReleaseDC(control, context);
-    return reinterpret_cast<HBRUSH>(brush)
-        == GetSysColorBrush(COLOR_WINDOW);
+    if (framed) {
+        const LRESULT brush = SendMessageW(
+            model.dialog,
+            WM_CTLCOLORSTATIC,
+            reinterpret_cast<WPARAM>(window_context),
+            reinterpret_cast<LPARAM>(control));
+        ReleaseDC(control, window_context);
+        return reinterpret_cast<HBRUSH>(brush)
+            == GetSysColorBrush(COLOR_WINDOW);
+    }
+    RECT client{};
+    if (GetClientRect(control, &client) == FALSE
+        || IsRectEmpty(&client) != FALSE) {
+        ReleaseDC(control, window_context);
+        return false;
+    }
+    HDC context = CreateCompatibleDC(window_context);
+    HBITMAP bitmap = context == nullptr
+        ? nullptr
+        : CreateCompatibleBitmap(
+              window_context,
+              static_cast<int>(client.right - client.left),
+              static_cast<int>(client.bottom - client.top));
+    const HGDIOBJ previous = bitmap == nullptr
+        ? nullptr
+        : SelectObject(context, bitmap);
+    constexpr COLORREF kSentinel = RGB(1, 2, 3);
+    HBRUSH sentinel = CreateSolidBrush(kSentinel);
+    bool matches{};
+    if (context != nullptr && bitmap != nullptr && previous != nullptr
+        && previous != HGDI_ERROR && sentinel != nullptr) {
+        FillRect(context, &client, sentinel);
+        SetBkMode(context, OPAQUE);
+        const LRESULT brush = SendMessageW(
+            model.dialog,
+            WM_CTLCOLORSTATIC,
+            reinterpret_cast<WPARAM>(context),
+            reinterpret_cast<LPARAM>(control));
+        const int background_mode = GetBkMode(context);
+        const POINT sample{
+            std::max(0, static_cast<int>(client.right) - 2),
+            std::min(1, std::max(0, static_cast<int>(client.bottom) - 1))};
+        const COLORREF actual = GetPixel(context, sample.x, sample.y);
+        FillRect(context, &client, sentinel);
+        const HWND tabs = GetDlgItem(model.dialog, IDC_PREFERENCES_TABS);
+        POINT control_origin{};
+        MapWindowPoints(control, tabs, &control_origin, 1U);
+        const int saved = tabs == nullptr ? 0 : SaveDC(context);
+        if (saved != 0) {
+            SetViewportOrgEx(
+                context, -control_origin.x, -control_origin.y, nullptr);
+            IntersectClipRect(
+                context,
+                control_origin.x + client.left,
+                control_origin.y + client.top,
+                control_origin.x + client.right,
+                control_origin.y + client.bottom);
+            SendMessageW(
+                tabs,
+                WM_PRINTCLIENT,
+                reinterpret_cast<WPARAM>(context),
+                PRF_CLIENT | PRF_ERASEBKGND);
+            RestoreDC(context, saved);
+            const COLORREF expected = GetPixel(context, sample.x, sample.y);
+            matches = reinterpret_cast<HBRUSH>(brush)
+                    == reinterpret_cast<HBRUSH>(GetStockObject(HOLLOW_BRUSH))
+                && background_mode == TRANSPARENT
+                && actual != CLR_INVALID && actual != kSentinel
+                && actual == expected;
+        }
+    }
+    if (sentinel != nullptr) {
+        DeleteObject(sentinel);
+    }
+    if (previous != nullptr && previous != HGDI_ERROR) {
+        SelectObject(context, previous);
+    }
+    if (bitmap != nullptr) {
+        DeleteObject(bitmap);
+    }
+    if (context != nullptr) {
+        DeleteDC(context);
+    }
+    ReleaseDC(control, window_context);
+    return matches;
 }
 
 bool ValidateSmokeLayout(DialogModel& model) noexcept {
@@ -2197,15 +2277,31 @@ INT_PTR CALLBACK PreferencesProcedure(
                 if (IsPageControl(*model, control)) {
                     HDC context = reinterpret_cast<HDC>(wparam);
                     SetTextColor(context, GetSysColor(COLOR_WINDOWTEXT));
-                    SetBkColor(context, GetSysColor(COLOR_WINDOW));
+                    if ((GetWindowLongPtrW(control, GWL_EXSTYLE)
+                         & WS_EX_CLIENTEDGE)
+                        != 0) {
+                        SetBkColor(context, GetSysColor(COLOR_WINDOW));
+                        return reinterpret_cast<INT_PTR>(
+                            GetSysColorBrush(COLOR_WINDOW));
+                    }
+                    RECT client{};
+                    if (GetClientRect(control, &client) != FALSE) {
+                        HWND tabs = GetDlgItem(dialog, IDC_PREFERENCES_TABS);
+                        PaintTabSurfaceBackground(tabs, control, context, client);
+                    }
+                    SetBkMode(context, TRANSPARENT);
                     return reinterpret_cast<INT_PTR>(
-                        GetSysColorBrush(COLOR_WINDOW));
+                        GetStockObject(HOLLOW_BRUSH));
                 }
                 break;
             }
             case WM_SIZE:
                 LayoutDialog(*model);
                 return TRUE;
+            case WM_THEMECHANGED:
+            case WM_SYSCOLORCHANGE:
+                InvalidatePage(*model);
+                return FALSE;
             case WM_GETMINMAXINFO: {
                 auto* info = reinterpret_cast<MINMAXINFO*>(lparam);
                 info->ptMinTrackSize.x = Scale(dialog, kMinimumDialogWidthDip);

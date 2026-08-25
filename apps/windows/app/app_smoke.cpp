@@ -488,6 +488,104 @@ bool ExerciseOwnerDraw(
     return handled || changed;
 }
 
+template <typename Paint>
+COLORREF RenderClientPixel(
+    HWND reference,
+    const RECT& client,
+    POINT sample,
+    Paint paint) noexcept {
+    const int width = static_cast<int>(client.right - client.left);
+    const int height = static_cast<int>(client.bottom - client.top);
+    if (reference == nullptr || width <= 0 || height <= 0
+        || sample.x < 0 || sample.y < 0
+        || sample.x >= width || sample.y >= height) {
+        return CLR_INVALID;
+    }
+    HDC window_dc = GetDC(reference);
+    HDC memory_dc = window_dc == nullptr ? nullptr : CreateCompatibleDC(window_dc);
+    HBITMAP bitmap = memory_dc == nullptr
+        ? nullptr
+        : CreateCompatibleBitmap(window_dc, width, height);
+    const HGDIOBJ previous = bitmap == nullptr
+        ? nullptr
+        : SelectObject(memory_dc, bitmap);
+    constexpr COLORREF kSentinel = RGB(1, 2, 3);
+    HBRUSH sentinel_brush = CreateSolidBrush(kSentinel);
+    COLORREF pixel = CLR_INVALID;
+    if (memory_dc != nullptr && bitmap != nullptr && previous != nullptr
+        && previous != HGDI_ERROR && sentinel_brush != nullptr) {
+        FillRect(memory_dc, &client, sentinel_brush);
+        paint(memory_dc);
+        pixel = GetPixel(memory_dc, sample.x, sample.y);
+        if (pixel == kSentinel) {
+            pixel = CLR_INVALID;
+        }
+    }
+    if (sentinel_brush != nullptr) {
+        DeleteObject(sentinel_brush);
+    }
+    if (previous != nullptr && previous != HGDI_ERROR) {
+        SelectObject(memory_dc, previous);
+    }
+    if (bitmap != nullptr) {
+        DeleteObject(bitmap);
+    }
+    if (memory_dc != nullptr) {
+        DeleteDC(memory_dc);
+    }
+    if (window_dc != nullptr) {
+        ReleaseDC(reference, window_dc);
+    }
+    return pixel;
+}
+
+COLORREF RenderWindowClientPixel(HWND window, POINT sample) noexcept {
+    RECT client{};
+    if (window == nullptr || GetClientRect(window, &client) == FALSE) {
+        return CLR_INVALID;
+    }
+    return RenderClientPixel(
+        window,
+        client,
+        sample,
+        [window](HDC target) noexcept {
+            SendMessageW(
+                window,
+                WM_PRINTCLIENT,
+                reinterpret_cast<WPARAM>(target),
+                PRF_CLIENT | PRF_ERASEBKGND);
+        });
+}
+
+COLORREF RenderOwnerDrawPixel(
+    HWND item,
+    UINT control_id,
+    POINT sample) noexcept {
+    const HWND parent = item == nullptr ? nullptr : GetParent(item);
+    RECT client{};
+    if (parent == nullptr || GetClientRect(item, &client) == FALSE) {
+        return CLR_INVALID;
+    }
+    return RenderClientPixel(
+        item,
+        client,
+        sample,
+        [parent, item, control_id, client](HDC target) noexcept {
+            DRAWITEMSTRUCT draw{};
+            draw.CtlType = ODT_STATIC;
+            draw.CtlID = control_id;
+            draw.itemAction = ODA_DRAWENTIRE;
+            draw.hwndItem = item;
+            draw.hDC = target;
+            draw.rcItem = client;
+            SendMessageW(
+                parent,
+                WM_DRAWITEM,
+                static_cast<WPARAM>(control_id),
+                reinterpret_cast<LPARAM>(&draw));
+        });
+}
+
 bool ReadListItemText(HWND list, int index, std::wstring& text) {
     const LRESULT length = SendMessageW(list, LB_GETTEXTLEN, index, 0);
     if (length == LB_ERR || length < 0 || length > 1024) {
@@ -2024,6 +2122,8 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         || IsWindowVisible(brush_start_color) != FALSE) {
         return 750;
     }
+    const HWND color_page_tabs =
+        GetDlgItem(state.Workspace().windows.color_pane, IDC_COLOR_TABS);
     const HWND main_line_label =
         GetDlgItem(state.Workspace().windows.color_pane, IDC_COLOR_MAIN_LINE_LABEL);
     const HWND main_line_swatch =
@@ -2036,7 +2136,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         GetDlgItem(state.Workspace().windows.color_pane, IDC_COLOR_PICKER);
     const HWND color_eyedropper =
         GetDlgItem(state.Workspace().windows.color_pane, IDC_COLOR_EYEDROPPER);
-    if (GetDlgItem(state.Workspace().windows.color_pane, IDC_COLOR_TABS) == nullptr
+    if (color_page_tabs == nullptr
         || GetDlgItem(state.Workspace().windows.color_pane, IDC_COLOR_TARGET) == nullptr
         || GetDlgItem(state.Workspace().windows.color_pane, IDC_COLOR_PIN) == nullptr
         || GetDlgItem(state.Workspace().windows.color_pane, IDC_PALETTE_LIST) == nullptr
@@ -2085,6 +2185,34 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         || std::wcscmp(
                eyedropper_text.data(), std::wstring(UiText(UiStringId::ToolEyedropper)).c_str()) != 0) {
         return 783;
+    }
+    const auto label_background_matches_tab = [color_page_tabs](
+                                                  HWND label,
+                                                  UINT control_id) noexcept {
+        RECT label_client{};
+        if (GetClientRect(label, &label_client) == FALSE
+            || IsRectEmpty(&label_client) != FALSE) {
+            return false;
+        }
+        const POINT label_sample{
+            std::max(0, static_cast<int>(label_client.right) - 2),
+            std::min(1, std::max(0, static_cast<int>(label_client.bottom) - 1))};
+        POINT tab_sample = label_sample;
+        MapWindowPoints(label, color_page_tabs, &tab_sample, 1U);
+        const COLORREF tab_background = RenderWindowClientPixel(
+            color_page_tabs, tab_sample);
+        const COLORREF label_background = RenderOwnerDrawPixel(
+            label, control_id, label_sample);
+        return tab_background != CLR_INVALID
+            && label_background == tab_background;
+    };
+    const bool color_label_backgrounds_match =
+        label_background_matches_tab(
+            main_line_label, IDC_COLOR_MAIN_LINE_LABEL)
+        && label_background_matches_tab(
+            drawing_label, IDC_COLOR_DRAWING_LABEL);
+    if (!color_label_backgrounds_match) {
+        return 11140;
     }
     const auto is_opaque_black = [](const InkpodColorValue& color) noexcept {
         return color.depth == INKPOD_COLOR_DEPTH_8 && color.red == 0U

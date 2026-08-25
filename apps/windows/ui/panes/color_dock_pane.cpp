@@ -19,6 +19,7 @@
 #include "pane_dialog_layout.h"
 #include "ui/icons/fluent_icons.h"
 #include "ui/localization.h"
+#include "ui/tab_surface_background.h"
 
 namespace inkpod::windows::ui::panes {
 
@@ -1500,7 +1501,11 @@ void DrawColorLabel(
         text.data(),
         static_cast<int>(text.size()));
     const auto paint = [&](HDC target) noexcept {
-        FillRect(target, &client, GetSysColorBrush(COLOR_3DFACE));
+        const HWND pane = GetParent(draw.hwndItem);
+        const HWND tabs = pane == nullptr
+            ? nullptr
+            : GetDlgItem(pane, IDC_COLOR_TABS);
+        PaintTabSurfaceBackground(tabs, draw.hwndItem, target, client);
         const HGDIOBJ old_font = state.font == nullptr
             ? nullptr
             : SelectObject(target, state.font);
@@ -2163,6 +2168,15 @@ LRESULT CALLBACK PaneSubclassProcedure(
                 LayoutPane(pane);
             }
             return 0;
+        case WM_THEMECHANGED:
+        case WM_SYSCOLORCHANGE: {
+            const LRESULT result = DefSubclassProc(
+                pane, message, wparam, lparam);
+            if (state != nullptr) {
+                RepaintVisibleTabControls(pane, state->active_tab);
+            }
+            return result;
+        }
         case WM_NCDESTROY:
             if (state != nullptr && state->font != nullptr) {
                 DeleteObject(state->font);
