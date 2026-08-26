@@ -131,7 +131,7 @@ dependencies = [
 
 [[package]]
 name = "inkpod-core"
-version = "0.2.6"
+version = "0.2.8"
 dependencies = [
  "blake3",
  "inkpod-format",
@@ -142,7 +142,7 @@ dependencies = [
 
 [[package]]
 name = "inkpod-ffi"
-version = "0.2.6"
+version = "0.2.8"
 dependencies = [
  "inkpod-core",
  "inkpod-format",
@@ -150,7 +150,7 @@ dependencies = [
 
 [[package]]
 name = "inkpod-format"
-version = "0.2.6"
+version = "0.2.8"
 dependencies = [
  "blake3",
  "inkpod-image",
@@ -159,7 +159,7 @@ dependencies = [
 
 [[package]]
 name = "inkpod-image"
-version = "0.2.6"
+version = "0.2.8"
 
 [[package]]
 name = "libc"
