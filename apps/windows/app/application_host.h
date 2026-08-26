@@ -6,6 +6,7 @@
 
 #include "core_host.h"
 #include "activation.h"
+#include "application_settings.h"
 #include "document_session.h"
 #include "recent_documents.h"
 #include "renderer/renderer_host.h"
@@ -130,6 +131,7 @@ public:
     [[nodiscard]] bool DestroyAllCutSessions() noexcept;
 
     AppLifetimeState lifetime{};
+    ApplicationSettingsStore settings{};
     EffectsUiState effects{};
     BatchUiState batch{};
     windows::ui::ShortcutUiState shortcuts{};

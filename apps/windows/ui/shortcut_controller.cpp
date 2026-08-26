@@ -5,56 +5,18 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
-#include <limits>
 #include <new>
 #include <span>
 #include <string>
 #include <vector>
 
 #include "command_catalog.h"
-#include "shortcut_preset.h"
 #include "ui/localization.h"
 
 namespace inkpod::windows::ui {
 namespace {
 
-constexpr wchar_t kSettingsKey[] = L"Software\\Inkpod";
-constexpr wchar_t kSettingsValue[] = L"ShortcutSequences";
-constexpr std::uint32_t kSettingsMagic = UINT32_C(0x534b5049);
-constexpr std::uint32_t kLegacySettingsVersion = 1U;
-constexpr std::uint32_t kSettingsVersion = 2U;
-constexpr std::size_t kMaximumSettingsBytes = 8U * 1024U * 1024U;
 constexpr ULONGLONG kSequenceTimeoutMilliseconds = 1'500U;
-
-struct LegacySettingsHeader final {
-    std::uint32_t magic;
-    std::uint32_t version;
-    std::uint32_t count;
-    std::uint32_t reserved;
-};
-
-void PushU32(std::vector<std::uint8_t>& bytes, std::uint32_t value) {
-    bytes.push_back(static_cast<std::uint8_t>(value));
-    bytes.push_back(static_cast<std::uint8_t>(value >> 8U));
-    bytes.push_back(static_cast<std::uint8_t>(value >> 16U));
-    bytes.push_back(static_cast<std::uint8_t>(value >> 24U));
-}
-
-bool ReadU32(
-    std::span<const std::uint8_t> bytes,
-    std::size_t& cursor,
-    std::uint32_t& value) noexcept {
-    if (cursor > bytes.size() || bytes.size() - cursor < 4U) {
-        return false;
-    }
-    value = static_cast<std::uint32_t>(bytes[cursor])
-        | (static_cast<std::uint32_t>(bytes[cursor + 1U]) << 8U)
-        | (static_cast<std::uint32_t>(bytes[cursor + 2U]) << 16U)
-        | (static_cast<std::uint32_t>(bytes[cursor + 3U]) << 24U);
-    cursor += 4U;
-    return true;
-}
 
 std::wstring PresetName(std::size_t ordinal) {
     std::wstring result(UiText(
@@ -66,31 +28,6 @@ std::wstring PresetName(std::size_t ordinal) {
         result += std::to_wstring(ordinal);
     }
     return result;
-}
-
-bool SameSequence(
-    const InkpodShortcutSequence& left,
-    const InkpodShortcutSequence& right) noexcept {
-    if (left.command_id != right.command_id || left.stroke_count != right.stroke_count) {
-        return false;
-    }
-    for (std::uint32_t index = 0U; index < left.stroke_count; ++index) {
-        if (left.strokes[index].virtual_key != right.strokes[index].virtual_key
-            || left.strokes[index].modifiers != right.strokes[index].modifiers) {
-            return false;
-        }
-    }
-    return true;
-}
-
-bool HasCompleteCatalog(std::span<const InkpodShortcutSequence> bindings) noexcept {
-    const auto commands = ShortcutCommandCatalog();
-    if (bindings.size() != commands.size()) {
-        return false;
-    }
-    return std::all_of(commands.begin(), commands.end(), [bindings](UINT command) {
-        return FindShortcutSequence(bindings, command) != nullptr;
-    });
 }
 
 bool BuiltInIsComplete(const ShortcutProfile& profile) noexcept {
@@ -207,211 +144,6 @@ std::vector<InkpodShortcutSequence> BuildCoreCompatibilityMirror() {
     return BuildDefaultShortcutSequences();
 }
 
-bool ReadRegistryBytes(std::vector<std::uint8_t>& bytes) noexcept {
-    HKEY key{};
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, kSettingsKey, 0U, KEY_QUERY_VALUE, &key)
-        != ERROR_SUCCESS) {
-        return false;
-    }
-    DWORD type{};
-    DWORD byte_count{};
-    LONG result = RegQueryValueExW(
-        key, kSettingsValue, nullptr, &type, nullptr, &byte_count);
-    if (result != ERROR_SUCCESS || type != REG_BINARY || byte_count == 0U
-        || byte_count > kMaximumSettingsBytes) {
-        RegCloseKey(key);
-        return false;
-    }
-    try {
-        bytes.resize(byte_count);
-    } catch (const std::bad_alloc&) {
-        RegCloseKey(key);
-        return false;
-    }
-    result = RegQueryValueExW(
-        key, kSettingsValue, nullptr, &type, bytes.data(), &byte_count);
-    RegCloseKey(key);
-    return result == ERROR_SUCCESS
-        && static_cast<std::size_t>(byte_count) == bytes.size();
-}
-
-bool WriteRegistryBytes(std::span<const std::uint8_t> bytes) noexcept {
-    if (bytes.empty() || bytes.size() > kMaximumSettingsBytes
-        || bytes.size() > std::numeric_limits<DWORD>::max()) {
-        return false;
-    }
-    HKEY key{};
-    if (RegCreateKeyExW(
-            HKEY_CURRENT_USER,
-            kSettingsKey,
-            0U,
-            nullptr,
-            REG_OPTION_NON_VOLATILE,
-            KEY_SET_VALUE,
-            nullptr,
-            &key,
-            nullptr)
-        != ERROR_SUCCESS) {
-        return false;
-    }
-    const LONG result = RegSetValueExW(
-        key,
-        kSettingsValue,
-        0U,
-        REG_BINARY,
-        bytes.data(),
-        static_cast<DWORD>(bytes.size()));
-    RegCloseKey(key);
-    return result == ERROR_SUCCESS;
-}
-
-bool SavePersistedProfileSet(const ShortcutProfileSet& set) noexcept {
-    if (!ValidProfileSet(set)
-        || set.profiles.size() - 1U > std::numeric_limits<std::uint32_t>::max()
-        || set.active_profile > std::numeric_limits<std::uint32_t>::max()) {
-        return false;
-    }
-    try {
-        std::vector<std::uint8_t> bytes;
-        bytes.reserve(1'024U);
-        PushU32(bytes, kSettingsMagic);
-        PushU32(bytes, kSettingsVersion);
-        PushU32(bytes, static_cast<std::uint32_t>(set.profiles.size() - 1U));
-        PushU32(bytes, static_cast<std::uint32_t>(set.active_profile));
-        PushU32(bytes, static_cast<std::uint32_t>(set.keyboard_layout));
-        for (std::size_t index = 1U; index < set.profiles.size(); ++index) {
-            std::vector<std::uint8_t> encoded;
-            if (EncodeShortcutPreset(set.profiles[index], encoded)
-                != ShortcutPresetStatus::Ok
-                || encoded.size() > std::numeric_limits<std::uint32_t>::max()) {
-                return false;
-            }
-            PushU32(bytes, static_cast<std::uint32_t>(encoded.size()));
-            bytes.insert(bytes.end(), encoded.begin(), encoded.end());
-            if (bytes.size() > kMaximumSettingsBytes) {
-                return false;
-            }
-        }
-        return WriteRegistryBytes(bytes);
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-}
-
-bool LoadVersionTwo(
-    std::span<const std::uint8_t> bytes,
-    ShortcutProfileSet& set) noexcept {
-    std::size_t cursor{};
-    std::uint32_t magic{};
-    std::uint32_t version{};
-    std::uint32_t custom_count{};
-    std::uint32_t active{};
-    std::uint32_t layout{};
-    if (!ReadU32(bytes, cursor, magic) || !ReadU32(bytes, cursor, version)
-        || !ReadU32(bytes, cursor, custom_count) || !ReadU32(bytes, cursor, active)
-        || !ReadU32(bytes, cursor, layout) || magic != kSettingsMagic
-        || version != kSettingsVersion
-        || custom_count >= kMaximumShortcutProfiles) {
-        return false;
-    }
-    set.keyboard_layout = static_cast<ShortcutKeyboardLayout>(layout);
-    try {
-        for (std::uint32_t index = 0U; index < custom_count; ++index) {
-            std::uint32_t encoded_size{};
-            if (!ReadU32(bytes, cursor, encoded_size) || encoded_size == 0U
-                || cursor > bytes.size() || encoded_size > bytes.size() - cursor) {
-                return false;
-            }
-            ShortcutProfile profile{};
-            if (DecodeShortcutPreset(bytes.subspan(cursor, encoded_size), profile)
-                != ShortcutPresetStatus::Ok) {
-                return false;
-            }
-            set.profiles.push_back(std::move(profile));
-            cursor += encoded_size;
-        }
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-    if (cursor != bytes.size()) {
-        return false;
-    }
-    set.active_profile = active < set.profiles.size() ? active : 0U;
-    return ValidProfileSet(set);
-}
-
-bool LoadLegacyVersionOne(
-    std::span<const std::uint8_t> bytes,
-    std::span<const InkpodShortcutSequence> defaults,
-    ShortcutProfileSet& set) noexcept {
-    if (bytes.size() < sizeof(LegacySettingsHeader)) {
-        return false;
-    }
-    LegacySettingsHeader header{};
-    std::memcpy(&header, bytes.data(), sizeof(header));
-    if (header.magic != kSettingsMagic || header.version != kLegacySettingsVersion
-        || header.reserved != 0U
-        || header.count > std::numeric_limits<std::size_t>::max()
-            / sizeof(InkpodShortcutSequence)) {
-        return false;
-    }
-    const std::size_t expected = sizeof(header)
-        + static_cast<std::size_t>(header.count) * sizeof(InkpodShortcutSequence);
-    if (expected != bytes.size()) {
-        return false;
-    }
-    std::vector<InkpodShortcutSequence> migrated;
-    try {
-        migrated.resize(header.count);
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-    std::memcpy(
-        migrated.data(),
-        bytes.data() + sizeof(header),
-        migrated.size() * sizeof(migrated.front()));
-    if (!HasCompleteCatalog(migrated)) {
-        return false;
-    }
-    const bool same_as_default = migrated.size() == defaults.size()
-        && std::equal(migrated.begin(), migrated.end(), defaults.begin(), SameSequence);
-    if (same_as_default) {
-        set.active_profile = 0U;
-        return true;
-    }
-    try {
-        set.profiles.push_back(BuildShortcutProfileFromLegacy(
-            PresetName(1U), false, migrated));
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-    set.active_profile = 1U;
-    return ValidProfileSet(set);
-}
-
-bool LoadPersistedProfileSet(
-    std::span<const InkpodShortcutSequence> defaults,
-    ShortcutProfileSet& set) noexcept {
-    std::vector<std::uint8_t> bytes;
-    if (!ReadRegistryBytes(bytes) || bytes.size() < 8U) {
-        return false;
-    }
-    std::size_t cursor{};
-    std::uint32_t magic{};
-    std::uint32_t version{};
-    if (!ReadU32(bytes, cursor, magic) || !ReadU32(bytes, cursor, version)
-        || magic != kSettingsMagic) {
-        return false;
-    }
-    if (version == kSettingsVersion) {
-        return LoadVersionTwo(bytes, set);
-    }
-    if (version == kLegacySettingsVersion) {
-        return LoadLegacyVersionOne(bytes, defaults, set);
-    }
-    return false;
-}
-
 void UpdatePendingText(ShortcutUiState& state) noexcept {
     InkpodShortcutSequence pending{};
     pending.struct_size = sizeof(pending);
@@ -445,19 +177,14 @@ ShortcutProfile* ActiveShortcutProfile(ShortcutUiState& state) noexcept {
 InkpodStatus InitializeShortcuts(
     app::CoreHost& engine,
     ShortcutUiState& state,
-    bool load_persisted) noexcept {
+    const ShortcutProfileSet& initial_profiles) noexcept {
     try {
         const std::vector<InkpodShortcutSequence> defaults =
             BuildDefaultShortcutSequences();
-        ShortcutProfileSet set{};
-        set.profiles.push_back(BuildShortcutProfileFromLegacy(
-            PresetName(0U), true, defaults));
-        if (load_persisted) {
-            ShortcutProfileSet loaded = set;
-            if (LoadPersistedProfileSet(defaults, loaded)) {
-                set = std::move(loaded);
-            }
+        if (!ValidProfileSet(initial_profiles)) {
+            return INKPOD_STATUS_INVALID_ARGUMENT;
         }
+        ShortcutProfileSet set = initial_profiles;
         const std::vector<InkpodShortcutSequence> mirror =
             BuildCoreCompatibilityMirror();
         InkpodStatus status = SetCoreBindings(engine, defaults, true);
@@ -479,11 +206,17 @@ InkpodStatus InitializeShortcuts(
     }
 }
 
+ShortcutProfileSet BuildDefaultShortcutProfileSet() {
+    ShortcutProfileSet result{};
+    result.profiles.push_back(BuildShortcutProfileFromLegacy(
+        PresetName(0U), true, BuildDefaultShortcutSequences()));
+    return result;
+}
+
 InkpodStatus ApplyShortcutProfileSet(
     app::CoreHost& engine,
     ShortcutUiState& state,
-    const ShortcutProfileSet& replacement,
-    bool persist) noexcept {
+    const ShortcutProfileSet& replacement) noexcept {
     if (!ValidProfileSet(replacement)) {
         return INKPOD_STATUS_INVALID_ARGUMENT;
     }
@@ -493,18 +226,11 @@ InkpodStatus ApplyShortcutProfileSet(
         std::vector<InkpodShortcutSequence> mirror = BuildCoreCompatibilityMirror();
         std::vector<InkpodShortcutSequence> menu = BuildMenuBindings(
             candidate.profiles[candidate.active_profile]);
-        const ShortcutProfileSet previous = state.profile_set;
-        if (persist && !SavePersistedProfileSet(candidate)) {
-            return INKPOD_STATUS_IO_ERROR;
-        }
         InkpodStatus status = SetCoreBindings(engine, mirror, false);
         if (status == INKPOD_STATUS_OK) {
             status = UpdateSessionInitializer(engine, defaults, mirror);
         }
         if (status != INKPOD_STATUS_OK) {
-            if (persist) {
-                (void)SavePersistedProfileSet(previous);
-            }
             return status;
         }
         state.profile_set = std::move(candidate);
@@ -518,12 +244,11 @@ InkpodStatus ApplyShortcutProfileSet(
 
 InkpodStatus ResetShortcuts(
     app::CoreHost& engine,
-    ShortcutUiState& state,
-    bool persist) noexcept {
+    ShortcutUiState& state) noexcept {
     try {
         ShortcutProfileSet replacement = state.profile_set;
         replacement.active_profile = 0U;
-        return ApplyShortcutProfileSet(engine, state, replacement, persist);
+        return ApplyShortcutProfileSet(engine, state, replacement);
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
     }
@@ -532,8 +257,7 @@ InkpodStatus ResetShortcuts(
 InkpodStatus RebindShortcut(
     app::CoreHost& engine,
     ShortcutUiState& state,
-    const InkpodShortcutSequence& replacement,
-    bool persist) noexcept {
+    const InkpodShortcutSequence& replacement) noexcept {
     if (replacement.command_id == 0U || replacement.stroke_count == 0U
         || replacement.stroke_count > INKPOD_SHORTCUT_MAX_STROKES) {
         return INKPOD_STATUS_INVALID_ARGUMENT;
@@ -605,7 +329,7 @@ InkpodStatus RebindShortcut(
             other = prior;
             other.command_id = other_command;
         }
-        return ApplyShortcutProfileSet(engine, state, candidate, persist);
+        return ApplyShortcutProfileSet(engine, state, candidate);
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
     }

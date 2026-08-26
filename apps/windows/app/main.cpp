@@ -3,6 +3,7 @@
 #include <utility>
 
 #include "application.h"
+#include "application_settings.h"
 #include "launch_options.h"
 #include "ui/localization.h"
 
@@ -18,7 +19,7 @@ int APIENTRY wWinMain(
     using inkpod::windows::ui::UiStringId;
     using inkpod::windows::ui::UiText;
     UiLanguagePreference language_preference = UiLanguagePreference::System;
-    (void)inkpod::windows::ui::LoadUiLanguagePreference(language_preference);
+    (void)inkpod::app::LoadApplicationUiLanguagePreference(language_preference);
     if (!inkpod::windows::ui::InitializeUiLocalization(
             instance, language_preference)) {
         MessageBoxW(

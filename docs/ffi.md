@@ -1211,8 +1211,9 @@ allocation も返さない。未知 profile／operation、短い record、予約
 Cancel、stale、overflow、failure は selection、revision、history、journal、dirty、ID
 を変更しない。意味上の no-op も revision と履歴を進めない。Windows adapter は
 発行時 `CommandContext` と文書世代を固定し、完了時に同じ target へ summary を表示する。
-profile の UI 既定値は versioned HKCU application setting へ保存し、次回通常起動時に
-closed enum として復元する。smoke mode は利用者の registry を変更せず、この設定は
+profile の UI 既定値は `%LOCALAPPDATA%\inkpod\Settings\inkpod-settings.json` の
+`colorManagement.outputGuardProfile` へ読みやすい closed-enum 文字列として保存し、
+次回通常起動時に復元する。smoke mode は利用者の設定 file を変更せず、この設定は
 document、EditorState、canonical procedure、`.inkpod` section のいずれにも含めない。
 
 バッチ実行だけは、キャンセル／失敗時にもレポートの所有権を返すことがある。戻りステータスを確認した後も、

@@ -1172,11 +1172,11 @@ only the current graph version is accepted, and any graph schema change incremen
 the top-level graph version.
 
 The Windows Batch pane stores and enumerates these files under
-`%APPDATA%\inkpod\batch-sets`. Its editable dropdown displays the filename stem;
+`%LOCALAPPDATA%\inkpod\batch-sets`. Its editable dropdown displays the filename stem;
 the adapter appends the sole `.inkbatch` extension after normalizing surrounding
 whitespace and rejecting separators, Windows reserved device names, and a
 trailing dot. This application path
-policy does not change the portable v3 byte schema or Core graph name.
+policy does not change the portable current-v4 byte schema or Core graph name.
 
 The body stores a bounded UTF-8 set name; one or more ordered File, non-recursive
 Folder, or issue-time ActiveDocument input selectors with optional inclusive
@@ -1311,7 +1311,8 @@ the source document UUID and sequence-source generation; revisiting that entry
 opens, validates, and replays the full native artifact in a staged Core rather
 than reconstructing a document from the flattened sequence raster. The
 association and its artifact generation are `DocumentSession` state, while the
-versioned Prompt/Autosave policy is an HKCU application setting. Neither is a
+Prompt/Autosave policy is the readable `animation.sequenceCellSwitch` field in
+`%LOCALAPPDATA%\inkpod\Settings\inkpod-settings.json`. Neither is a
 new `.inkpod` section or serialized canonical procedure. That M11 change did
 not alter its then-current v17/runtime replay epoch 14, EDIT schema 4, or
 `.inkbatch` v2 contract; M12 independently advances native persistence to

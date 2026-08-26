@@ -28,40 +28,6 @@ using inkpod::windows::ui::UiStringId;
 using inkpod::windows::ui::UiText;
 using inkpod::windows::ui::UiTextView;
 
-bool SettingRoundTrip() {
-    using inkpod::windows::ui::DecodeUiLanguagePreference;
-    using inkpod::windows::ui::EncodeUiLanguagePreference;
-    for (const UiLanguagePreference expected : {
-             UiLanguagePreference::System,
-             UiLanguagePreference::Japanese,
-             UiLanguagePreference::English}) {
-        std::vector<std::uint8_t> bytes;
-        if (!EncodeUiLanguagePreference(expected, bytes) || bytes.size() != 16U) {
-            return false;
-        }
-        UiLanguagePreference actual{};
-        if (!DecodeUiLanguagePreference(bytes.data(), bytes.size(), actual)
-            || actual != expected) {
-            return false;
-        }
-        std::vector<std::uint8_t> corrupt = bytes;
-        corrupt[4] = 2U;
-        if (DecodeUiLanguagePreference(corrupt.data(), corrupt.size(), actual)) {
-            return false;
-        }
-        corrupt = bytes;
-        corrupt[8] = 99U;
-        if (DecodeUiLanguagePreference(corrupt.data(), corrupt.size(), actual)
-            || DecodeUiLanguagePreference(bytes.data(), bytes.size() - 1U, actual)) {
-            return false;
-        }
-    }
-    std::vector<std::uint8_t> unchanged{1U, 2U, 3U};
-    return !EncodeUiLanguagePreference(
-               static_cast<UiLanguagePreference>(99U), unchanged)
-        && unchanged == std::vector<std::uint8_t>({1U, 2U, 3U});
-}
-
 bool ResolverContract() {
     using inkpod::windows::ui::ResolveUiLanguage;
     const std::array<std::wstring_view, 1U> japanese{L"ja-JP"};
@@ -678,7 +644,6 @@ bool LayerPalettePlaneBadgeLayoutContract(
 }  // namespace
 
 int wmain() {
-    if (!SettingRoundTrip()) return 1;
     if (!ResolverContract()) return 2;
     if (!TypedCatalogContract()) return 3;
     if (!ResourceLanguageContract(UiLanguagePreference::English)) return 4;

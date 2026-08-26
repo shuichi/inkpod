@@ -32,11 +32,7 @@ namespace inkpod::windows::ui {
 namespace {
 
 constexpr int kGeneralPage = 0;
-constexpr int kSavePage = 1;
-constexpr int kWorkspacePage = 2;
-constexpr int kAnimationPage = 3;
-constexpr int kColorPage = 4;
-constexpr int kShortcutPage = 5;
+constexpr int kShortcutPage = 1;
 constexpr int kAnonymousControlFirst = 30'000;
 constexpr int kInitialDialogWidthDip = 920;
 constexpr int kInitialDialogHeightDip = 680;
@@ -57,6 +53,27 @@ struct KeyboardKey final {
     int width_units{1};
 };
 
+struct GeneralPageControls final {
+    std::array<HWND, 5U> section_headings{};
+    HWND language_label{};
+    HWND language_restart{};
+    HWND workspace_preset_label{};
+    HWND workspace_density_label{};
+    HWND sequence_switch_label{};
+    HWND sequence_endpoint_label{};
+    HWND color_profile_label{};
+};
+
+struct ShortcutPageLabels final {
+    HWND preset{};
+    HWND primary{};
+    HWND secondary{};
+    HWND action{};
+    HWND context{};
+    HWND modifiers{};
+    HWND keyboard_layout{};
+};
+
 struct DialogModel final {
     PreferencesDialogState* state{};
     PreferencesValues initial;
@@ -64,6 +81,8 @@ struct DialogModel final {
     HWND dialog{};
     HFONT font{};
     bool owns_font{};
+    GeneralPageControls general;
+    ShortcutPageLabels shortcut_labels;
     std::vector<PageControl> page_controls;
     std::vector<KeyboardKey> keyboard;
     std::vector<UINT> visible_commands;
@@ -73,7 +92,7 @@ struct DialogModel final {
     std::optional<ShortcutProfileBinding> previous_assignment;
     UINT selected_command{};
     ShortcutSlot selected_slot{ShortcutSlot::Primary};
-    int selected_page{kShortcutPage};
+    int selected_page{kGeneralPage};
     int category_filter{-1};
     std::uint32_t modifier_filter{};
     int recording_control{};
@@ -243,6 +262,17 @@ HWND AddLabel(DialogModel& model, int page, UiStringId text) {
         WC_STATICW,
         UiText(text),
         SS_LEFT | SS_NOPREFIX,
+        0);
+}
+
+HWND AddSectionHeading(DialogModel& model, UiStringId text) {
+    return AddControl(
+        model,
+        kGeneralPage,
+        0U,
+        WC_STATICW,
+        UiText(text),
+        SS_LEFT | SS_NOPREFIX | WS_GROUP,
         0);
 }
 
@@ -763,43 +793,98 @@ void Place(HWND window, int x, int y, int width, int height) noexcept {
     MoveWindow(window, x, y, std::max(width, 1), std::max(height, 1), TRUE);
 }
 
-void LayoutSimplePage(DialogModel& model, const RECT& page) noexcept {
+void LayoutGeneralPage(DialogModel& model, const RECT& page) noexcept {
     const auto dip = [&model](int value) noexcept {
         return Scale(model.dialog, value);
     };
-    const int x = page.left + Scale(model.dialog, 28);
-    const int y = page.top + Scale(model.dialog, 28);
-    const int label_width = Scale(model.dialog, 210);
-    const int control_x = x + label_width;
-    const int control_width = Scale(model.dialog, 300);
+    const int x = page.left + dip(24);
+    const int content_right = page.right - dip(24);
+    const int field_x = x + dip(14);
+    int y = page.top + dip(14);
+    const int label_width = std::max({
+        ReadableWidth(model, model.general.language_label, 210, 12),
+        ReadableWidth(model, model.general.workspace_preset_label, 210, 12),
+        ReadableWidth(model, model.general.workspace_density_label, 210, 12),
+        ReadableWidth(model, model.general.sequence_switch_label, 210, 12),
+        ReadableWidth(model, model.general.sequence_endpoint_label, 210, 12),
+        ReadableWidth(model, model.general.color_profile_label, 210, 12)});
+    const int control_x = field_x + label_width + dip(8);
+    const int control_width = std::max(
+        1, std::min(dip(300), content_right - control_x));
+    const int heading_height = ReadableHeight(model, 22, 4);
     const int label_height = ReadableHeight(model, 24, 4);
     const int checkbox_height = ReadableHeight(model, 28, 8);
-    if (model.selected_page == kGeneralPage) {
-        Place(model.page_controls[0].window, x, y + dip(4), label_width, label_height);
-        Place(GetDlgItem(model.dialog, IDC_PREFERENCES_LANGUAGE), control_x, y, control_width, dip(180));
-        Place(model.page_controls[2].window, x, y + dip(48), page.right - x - dip(30), dip(38));
-    } else if (model.selected_page == kSavePage) {
+    const int row_height = std::max(label_height, checkbox_height);
+    const int row_gap = dip(4);
+    const int section_gap = dip(10);
+    const auto place_heading = [&](HWND heading) noexcept {
+        Place(heading, x, y, content_right - x, heading_height);
+        y += heading_height + dip(4);
+    };
+    const auto place_field = [&](HWND label, int control_id, int drop_height) noexcept {
+        Place(label, field_x, y + dip(2), label_width, label_height);
         Place(
-            GetDlgItem(model.dialog, IDC_PREFERENCES_RESTORE_DOCUMENTS),
-            x,
+            GetDlgItem(model.dialog, control_id),
+            control_x,
             y,
-            dip(520),
-            checkbox_height);
-    } else if (model.selected_page == kWorkspacePage) {
-        Place(model.page_controls[4].window, x, y + dip(4), label_width, label_height);
-        Place(GetDlgItem(model.dialog, IDC_PREFERENCES_WORKSPACE_PRESET), control_x, y, control_width, dip(200));
-        Place(GetDlgItem(model.dialog, IDC_PREFERENCES_WORKSPACE_MIRROR), x, y + dip(50), dip(520), checkbox_height);
-        Place(model.page_controls[7].window, x, y + dip(100), label_width, label_height);
-        Place(GetDlgItem(model.dialog, IDC_PREFERENCES_WORKSPACE_DENSITY), control_x, y + dip(96), control_width, dip(100));
-    } else if (model.selected_page == kAnimationPage) {
-        Place(model.page_controls[9].window, x, y + dip(4), label_width, label_height);
-        Place(GetDlgItem(model.dialog, IDC_PREFERENCES_SEQUENCE_SWITCH), control_x, y, control_width, dip(120));
-        Place(model.page_controls[11].window, x, y + dip(54), label_width, label_height);
-        Place(GetDlgItem(model.dialog, IDC_PREFERENCES_SEQUENCE_ENDPOINT), control_x, y + dip(50), control_width, dip(120));
-    } else if (model.selected_page == kColorPage) {
-        Place(model.page_controls[13].window, x, y + dip(4), label_width, label_height);
-        Place(GetDlgItem(model.dialog, IDC_PREFERENCES_COLOR_PROFILE), control_x, y, control_width, dip(100));
-    }
+            control_width,
+            dip(drop_height));
+        y += row_height + row_gap;
+    };
+
+    place_heading(model.general.section_headings[0]);
+    place_field(model.general.language_label, IDC_PREFERENCES_LANGUAGE, 180);
+    Place(
+        model.general.language_restart,
+        control_x,
+        y,
+        content_right - control_x,
+        dip(32));
+    y += dip(32) + section_gap;
+
+    place_heading(model.general.section_headings[1]);
+    Place(
+        GetDlgItem(model.dialog, IDC_PREFERENCES_RESTORE_DOCUMENTS),
+        field_x,
+        y,
+        content_right - field_x,
+        checkbox_height);
+    y += row_height + section_gap;
+
+    place_heading(model.general.section_headings[2]);
+    place_field(
+        model.general.workspace_preset_label,
+        IDC_PREFERENCES_WORKSPACE_PRESET,
+        200);
+    Place(
+        GetDlgItem(model.dialog, IDC_PREFERENCES_WORKSPACE_MIRROR),
+        field_x,
+        y,
+        content_right - field_x,
+        checkbox_height);
+    y += row_height + row_gap;
+    place_field(
+        model.general.workspace_density_label,
+        IDC_PREFERENCES_WORKSPACE_DENSITY,
+        100);
+    y += section_gap - row_gap;
+
+    place_heading(model.general.section_headings[3]);
+    place_field(
+        model.general.sequence_switch_label,
+        IDC_PREFERENCES_SEQUENCE_SWITCH,
+        120);
+    place_field(
+        model.general.sequence_endpoint_label,
+        IDC_PREFERENCES_SEQUENCE_ENDPOINT,
+        120);
+    y += section_gap - row_gap;
+
+    place_heading(model.general.section_headings[4]);
+    place_field(
+        model.general.color_profile_label,
+        IDC_PREFERENCES_COLOR_PROFILE,
+        100);
 }
 
 void LayoutKeyboard(DialogModel& model, int left, int top, int width, int height) noexcept {
@@ -828,9 +913,9 @@ void LayoutShortcutPage(DialogModel& model, const RECT& page) noexcept {
     const int width = page.right - page.left - 2 * gap;
     int y = page.top + gap;
     const int label_width = ReadableWidth(
-        model, model.page_controls[15].window, 72, 12);
+        model, model.shortcut_labels.preset, 72, 12);
     Place(
-        model.page_controls[15].window,
+        model.shortcut_labels.preset,
         x,
         y + dip(4),
         label_width,
@@ -875,10 +960,10 @@ void LayoutShortcutPage(DialogModel& model, const RECT& page) noexcept {
     detail_y += detail_key_height;
 
     const int detail_label_width = std::max({
-        ReadableWidth(model, model.page_controls[32].window, 58, 12),
-        ReadableWidth(model, model.page_controls[36].window, 58, 12),
-        ReadableWidth(model, model.page_controls[40].window, 58, 12),
-        ReadableWidth(model, model.page_controls[44].window, 58, 12)});
+        ReadableWidth(model, model.shortcut_labels.primary, 58, 12),
+        ReadableWidth(model, model.shortcut_labels.secondary, 58, 12),
+        ReadableWidth(model, model.shortcut_labels.action, 58, 12),
+        ReadableWidth(model, model.shortcut_labels.context, 58, 12)});
     const int detail_gap = dip(6);
     const int record_width = dip(104);
     const int clear_width = dip(62);
@@ -887,28 +972,28 @@ void LayoutShortcutPage(DialogModel& model, const RECT& page) noexcept {
     const int value_x = right_x + detail_label_width;
     const int value_width = record_x - value_x - detail_gap;
     const auto layout_binding_row = [&](
-                                        std::size_t label_index,
+                                        HWND label,
                                         int value_id,
                                         int record_id,
                                         int clear_id) noexcept {
-        Place(model.page_controls[label_index].window, right_x, detail_y + dip(2), detail_label_width, dip(20));
+        Place(label, right_x, detail_y + dip(2), detail_label_width, dip(20));
         Place(GetDlgItem(model.dialog, value_id), value_x, detail_y, value_width, binding_height);
         Place(GetDlgItem(model.dialog, record_id), record_x, detail_y, record_width, binding_height);
         Place(GetDlgItem(model.dialog, clear_id), record_x + record_width + detail_gap, detail_y, clear_width, binding_height);
         detail_y += binding_height + dip(2);
     };
     layout_binding_row(
-        32U,
+        model.shortcut_labels.primary,
         IDC_SHORTCUT_PRIMARY_VALUE,
         IDC_SHORTCUT_PRIMARY_RECORD,
         IDC_SHORTCUT_PRIMARY_CLEAR);
     layout_binding_row(
-        36U,
+        model.shortcut_labels.secondary,
         IDC_SHORTCUT_SECONDARY_VALUE,
         IDC_SHORTCUT_SECONDARY_RECORD,
         IDC_SHORTCUT_SECONDARY_CLEAR);
 
-    Place(model.page_controls[40].window, right_x, detail_y + dip(3), detail_label_width, dip(20));
+    Place(model.shortcut_labels.action, right_x, detail_y + dip(3), detail_label_width, dip(20));
     const int action_x = right_x + detail_label_width;
     const int action_gap = dip(4);
     const int execute_width = dip(72);
@@ -930,7 +1015,7 @@ void LayoutShortcutPage(DialogModel& model, const RECT& page) noexcept {
         choice_height);
     detail_y += choice_height + dip(2);
 
-    Place(model.page_controls[44].window, right_x, detail_y + dip(3), detail_label_width, dip(20));
+    Place(model.shortcut_labels.context, right_x, detail_y + dip(3), detail_label_width, dip(20));
     const int context_width = (right_width - detail_label_width - detail_gap) / 2;
     Place(
         GetDlgItem(model.dialog, IDC_SHORTCUT_DETAIL_CONTEXT),
@@ -967,9 +1052,9 @@ void LayoutShortcutPage(DialogModel& model, const RECT& page) noexcept {
 
     const int keyboard_top = main_bottom + gap;
     const int modifier_label_width = ReadableWidth(
-        model, model.page_controls[52].window, 48, 12);
+        model, model.shortcut_labels.modifiers, 48, 12);
     Place(
-        model.page_controls[52].window,
+        model.shortcut_labels.modifiers,
         x,
         keyboard_top + dip(3),
         modifier_label_width,
@@ -989,9 +1074,9 @@ void LayoutShortcutPage(DialogModel& model, const RECT& page) noexcept {
     const int keyboard_layout_width = dip(150);
     const int keyboard_layout_x = page.right - gap - keyboard_layout_width;
     const int keyboard_label_width = ReadableWidth(
-        model, model.page_controls[58].window, 112, 12);
+        model, model.shortcut_labels.keyboard_layout, 112, 12);
     Place(
-        model.page_controls[58].window,
+        model.shortcut_labels.keyboard_layout,
         keyboard_layout_x - gap - keyboard_label_width,
         keyboard_top + dip(3),
         keyboard_label_width,
@@ -1027,7 +1112,7 @@ void LayoutDialog(DialogModel& model) noexcept {
     if (model.selected_page == kShortcutPage) {
         LayoutShortcutPage(model, page);
     } else {
-        LayoutSimplePage(model, page);
+        LayoutGeneralPage(model, page);
     }
     InvalidatePage(model);
 }
@@ -1039,23 +1124,32 @@ void ShowSelectedPage(DialogModel& model) noexcept {
     LayoutDialog(model);
 }
 
-void CreateSimplePages(DialogModel& model) {
-    AddLabel(model, kGeneralPage, UiStringId::PreferencesLanguage);
+void CreateGeneralPage(DialogModel& model) {
+    model.general.section_headings[0] = AddSectionHeading(
+        model, UiStringId::PreferencesTabGeneral);
+    model.general.language_label = AddLabel(
+        model, kGeneralPage, UiStringId::PreferencesLanguage);
     HWND language = AddCombo(model, kGeneralPage, IDC_PREFERENCES_LANGUAGE);
     AddComboText(language, UiStringId::PreferencesLanguageSystem);
     AddComboText(language, UiStringId::PreferencesLanguageJapanese);
     AddComboText(language, UiStringId::PreferencesLanguageEnglish);
-    AddLabel(model, kGeneralPage, UiStringId::PreferencesLanguageRestart);
+    model.general.language_restart = AddLabel(
+        model, kGeneralPage, UiStringId::PreferencesLanguageRestart);
 
+    model.general.section_headings[1] = AddSectionHeading(
+        model, UiStringId::PreferencesTabSaveRecovery);
     AddButton(
         model,
-        kSavePage,
+        kGeneralPage,
         UiStringId::PreferencesRestoreDocuments,
         IDC_PREFERENCES_RESTORE_DOCUMENTS,
         BS_AUTOCHECKBOX | WS_TABSTOP);
 
-    AddLabel(model, kWorkspacePage, UiStringId::PreferencesWorkspacePreset);
-    HWND preset = AddCombo(model, kWorkspacePage, IDC_PREFERENCES_WORKSPACE_PRESET);
+    model.general.section_headings[2] = AddSectionHeading(
+        model, UiStringId::PreferencesTabWorkspace);
+    model.general.workspace_preset_label = AddLabel(
+        model, kGeneralPage, UiStringId::PreferencesWorkspacePreset);
+    HWND preset = AddCombo(model, kGeneralPage, IDC_PREFERENCES_WORKSPACE_PRESET);
     for (std::uint32_t index = 0U;
          index < static_cast<std::uint32_t>(WorkspacePreset::Count);
          ++index) {
@@ -1068,28 +1162,36 @@ void CreateSimplePages(DialogModel& model) {
     }
     AddButton(
         model,
-        kWorkspacePage,
+        kGeneralPage,
         UiStringId::PreferencesWorkspaceMirror,
         IDC_PREFERENCES_WORKSPACE_MIRROR,
         BS_AUTOCHECKBOX | WS_TABSTOP);
-    AddLabel(model, kWorkspacePage, UiStringId::PreferencesWorkspaceDensity);
-    HWND density = AddCombo(model, kWorkspacePage, IDC_PREFERENCES_WORKSPACE_DENSITY);
+    model.general.workspace_density_label = AddLabel(
+        model, kGeneralPage, UiStringId::PreferencesWorkspaceDensity);
+    HWND density = AddCombo(model, kGeneralPage, IDC_PREFERENCES_WORKSPACE_DENSITY);
     AddComboText(density, UiStringId::PreferencesWorkspaceStandard);
     AddComboText(density, UiStringId::PreferencesWorkspaceCompact);
 
-    AddLabel(model, kAnimationPage, UiStringId::PreferencesSequenceSwitch);
+    model.general.section_headings[3] = AddSectionHeading(
+        model, UiStringId::PreferencesTabAnimation);
+    model.general.sequence_switch_label = AddLabel(
+        model, kGeneralPage, UiStringId::PreferencesSequenceSwitch);
     HWND switch_policy = AddCombo(
-        model, kAnimationPage, IDC_PREFERENCES_SEQUENCE_SWITCH);
+        model, kGeneralPage, IDC_PREFERENCES_SEQUENCE_SWITCH);
     AddComboText(switch_policy, UiStringId::PreferencesSequencePrompt);
     AddComboText(switch_policy, UiStringId::PreferencesSequenceAutosave);
-    AddLabel(model, kAnimationPage, UiStringId::PreferencesEndpoint);
+    model.general.sequence_endpoint_label = AddLabel(
+        model, kGeneralPage, UiStringId::PreferencesEndpoint);
     HWND endpoint = AddCombo(
-        model, kAnimationPage, IDC_PREFERENCES_SEQUENCE_ENDPOINT);
+        model, kGeneralPage, IDC_PREFERENCES_SEQUENCE_ENDPOINT);
     AddComboText(endpoint, UiStringId::PreferencesEndpointStop);
     AddComboText(endpoint, UiStringId::PreferencesEndpointWrap);
 
-    AddLabel(model, kColorPage, UiStringId::PreferencesOutputGuard);
-    HWND color = AddCombo(model, kColorPage, IDC_PREFERENCES_COLOR_PROFILE);
+    model.general.section_headings[4] = AddSectionHeading(
+        model, UiStringId::PreferencesTabColor);
+    model.general.color_profile_label = AddLabel(
+        model, kGeneralPage, UiStringId::PreferencesOutputGuard);
+    HWND color = AddCombo(model, kGeneralPage, IDC_PREFERENCES_COLOR_PROFILE);
     AddComboText(color, UiStringId::PreferencesOutputGuardBt709);
 }
 
@@ -1171,7 +1273,8 @@ void BuildKeyboard(DialogModel& model) {
 }
 
 void CreateShortcutPage(DialogModel& model) {
-    AddLabel(model, kShortcutPage, UiStringId::ShortcutPresetLabel);
+    model.shortcut_labels.preset = AddLabel(
+        model, kShortcutPage, UiStringId::ShortcutPresetLabel);
     AddCombo(model, kShortcutPage, IDC_SHORTCUT_PRESET);
     AddButton(model, kShortcutPage, UiStringId::ShortcutDuplicate, IDC_SHORTCUT_DUPLICATE);
     AddButton(model, kShortcutPage, UiStringId::ShortcutImport, IDC_SHORTCUT_IMPORT);
@@ -1241,19 +1344,23 @@ void CreateShortcutPage(DialogModel& model) {
 
     AddControl(model, kShortcutPage, 0U, WC_STATICW, L"", SS_LEFT | SS_NOPREFIX, IDC_SHORTCUT_DETAIL_TITLE);
     AddControl(model, kShortcutPage, 0U, WC_STATICW, L"", SS_LEFT | SS_NOPREFIX, IDC_SHORTCUT_DETAIL_KEY);
-    AddLabel(model, kShortcutPage, UiStringId::ShortcutPrimary);
+    model.shortcut_labels.primary = AddLabel(
+        model, kShortcutPage, UiStringId::ShortcutPrimary);
     AddControl(model, kShortcutPage, WS_EX_CLIENTEDGE, WC_STATICW, L"", SS_LEFT | SS_CENTERIMAGE | SS_NOPREFIX, IDC_SHORTCUT_PRIMARY_VALUE);
     AddButton(model, kShortcutPage, UiStringId::ShortcutRecordKey, IDC_SHORTCUT_PRIMARY_RECORD);
     AddButton(model, kShortcutPage, UiStringId::Clear, IDC_SHORTCUT_PRIMARY_CLEAR);
-    AddLabel(model, kShortcutPage, UiStringId::ShortcutSecondary);
+    model.shortcut_labels.secondary = AddLabel(
+        model, kShortcutPage, UiStringId::ShortcutSecondary);
     AddControl(model, kShortcutPage, WS_EX_CLIENTEDGE, WC_STATICW, L"", SS_LEFT | SS_CENTERIMAGE | SS_NOPREFIX, IDC_SHORTCUT_SECONDARY_VALUE);
     AddButton(model, kShortcutPage, UiStringId::ShortcutAdd, IDC_SHORTCUT_SECONDARY_RECORD);
     AddButton(model, kShortcutPage, UiStringId::Clear, IDC_SHORTCUT_SECONDARY_CLEAR);
-    AddLabel(model, kShortcutPage, UiStringId::ShortcutAction);
+    model.shortcut_labels.action = AddLabel(
+        model, kShortcutPage, UiStringId::ShortcutAction);
     AddButton(model, kShortcutPage, UiStringId::ShortcutExecute, IDC_SHORTCUT_ACTION_EXECUTE, BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP);
     AddButton(model, kShortcutPage, UiStringId::ShortcutHold, IDC_SHORTCUT_ACTION_HOLD, BS_AUTORADIOBUTTON | WS_TABSTOP);
     AddButton(model, kShortcutPage, UiStringId::ShortcutToggle, IDC_SHORTCUT_ACTION_TOGGLE, BS_AUTORADIOBUTTON | WS_TABSTOP);
-    AddLabel(model, kShortcutPage, UiStringId::ShortcutContext);
+    model.shortcut_labels.context = AddLabel(
+        model, kShortcutPage, UiStringId::ShortcutContext);
     HWND context = AddCombo(model, kShortcutPage, IDC_SHORTCUT_DETAIL_CONTEXT);
     AddComboText(context, UiStringId::ShortcutGlobal);
     AddComboText(context, UiStringId::ShortcutCanvas);
@@ -1267,7 +1374,8 @@ void CreateShortcutPage(DialogModel& model) {
     AddButton(model, kShortcutPage, UiStringId::ShortcutClearOther, IDC_SHORTCUT_CONFLICT_CLEAR);
     AddButton(model, kShortcutPage, UiStringId::ShortcutSwap, IDC_SHORTCUT_CONFLICT_SWAP);
     AddButton(model, kShortcutPage, UiStringId::ShortcutResetCommand, IDC_SHORTCUT_RESET_COMMAND);
-    AddLabel(model, kShortcutPage, UiStringId::ShortcutModifiers);
+    model.shortcut_labels.modifiers = AddLabel(
+        model, kShortcutPage, UiStringId::ShortcutModifiers);
     AddButton(model, kShortcutPage, UiStringId::ShortcutNone, IDC_SHORTCUT_MOD_NONE, BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP);
     AddButton(
         model,
@@ -1293,7 +1401,8 @@ void CreateShortcutPage(DialogModel& model) {
         UiStringId::ShortcutModifierWin,
         IDC_SHORTCUT_MOD_WIN,
         BS_AUTORADIOBUTTON | WS_TABSTOP);
-    AddLabel(model, kShortcutPage, UiStringId::ShortcutKeyboardLayout);
+    model.shortcut_labels.keyboard_layout = AddLabel(
+        model, kShortcutPage, UiStringId::ShortcutKeyboardLayout);
     HWND layout = AddCombo(model, kShortcutPage, IDC_SHORTCUT_KEYBOARD_LAYOUT);
     AddComboText(layout, UiStringId::ShortcutKeyboardAuto);
     AddComboText(layout, UiStringId::ShortcutKeyboardJis);
@@ -2132,6 +2241,13 @@ bool ValidateSmokeLayout(DialogModel& model) noexcept {
         }
     }
 
+    HWND tabs = GetDlgItem(model.dialog, IDC_PREFERENCES_TABS);
+    if (tabs == nullptr || TabCtrl_GetItemCount(tabs) != 2
+        || TabCtrl_GetCurSel(tabs) != kGeneralPage
+        || model.selected_page != kGeneralPage) {
+        return false;
+    }
+
     const int selected_page = model.selected_page;
     const int tolerance = Scale(model.dialog, 2);
     const auto dialog_bounds = [&model](HWND control, RECT& bounds) noexcept {
@@ -2185,11 +2301,46 @@ bool ValidateSmokeLayout(DialogModel& model) noexcept {
                 return false;
             }
         }
-        if (page == kShortcutPage) {
-            for (const std::size_t label_index : {
-                     15U, 32U, 36U, 40U, 44U, 52U, 58U}) {
+        if (page == kGeneralPage) {
+            const std::array<HWND, 14U> vertical_order{{
+                model.general.section_headings[0],
+                GetDlgItem(model.dialog, IDC_PREFERENCES_LANGUAGE),
+                model.general.language_restart,
+                model.general.section_headings[1],
+                GetDlgItem(model.dialog, IDC_PREFERENCES_RESTORE_DOCUMENTS),
+                model.general.section_headings[2],
+                GetDlgItem(model.dialog, IDC_PREFERENCES_WORKSPACE_PRESET),
+                GetDlgItem(model.dialog, IDC_PREFERENCES_WORKSPACE_MIRROR),
+                GetDlgItem(model.dialog, IDC_PREFERENCES_WORKSPACE_DENSITY),
+                model.general.section_headings[3],
+                GetDlgItem(model.dialog, IDC_PREFERENCES_SEQUENCE_SWITCH),
+                GetDlgItem(model.dialog, IDC_PREFERENCES_SEQUENCE_ENDPOINT),
+                model.general.section_headings[4],
+                GetDlgItem(model.dialog, IDC_PREFERENCES_COLOR_PROFILE)}};
+            RECT previous{};
+            bool has_previous = false;
+            for (HWND control : vertical_order) {
+                RECT bounds{};
+                if (!dialog_bounds(control, bounds)
+                    || (has_previous && previous.bottom > bounds.top)) {
+                    model.selected_page = selected_page;
+                    ShowSelectedPage(model);
+                    return false;
+                }
+                previous = bounds;
+                has_previous = true;
+            }
+        } else if (page == kShortcutPage) {
+            for (HWND label : {
+                     model.shortcut_labels.preset,
+                     model.shortcut_labels.primary,
+                     model.shortcut_labels.secondary,
+                     model.shortcut_labels.action,
+                     model.shortcut_labels.context,
+                     model.shortcut_labels.modifiers,
+                     model.shortcut_labels.keyboard_layout}) {
                 if (!ControlHasReadableTextWidth(
-                        model, model.page_controls[label_index].window)) {
+                        model, label)) {
                     model.selected_page = selected_page;
                     ShowSelectedPage(model);
                     return false;
@@ -2217,7 +2368,7 @@ bool ValidateSmokeLayout(DialogModel& model) noexcept {
                     GetDlgItem(model.dialog, IDC_SHORTCUT_RESET_COMMAND),
                     reset)
                 || !dialog_bounds(
-                    model.page_controls[52].window, keyboard_heading)
+                    model.shortcut_labels.modifiers, keyboard_heading)
                 || !dialog_bounds(
                     GetDlgItem(
                         model.dialog, IDC_SHORTCUT_KEYBOARD_INSTRUCTION),
@@ -2270,12 +2421,8 @@ INT_PTR OnInit(HWND dialog, LPARAM parameter) {
         SetDlgItemTextW(dialog, IDCANCEL, UiText(UiStringId::Text0171));
         SetDlgItemTextW(dialog, IDC_PREFERENCES_APPLY, UiText(UiStringId::Apply));
         HWND tabs = GetDlgItem(dialog, IDC_PREFERENCES_TABS);
-        const std::array<UiStringId, 6U> tab_texts{
+        const std::array<UiStringId, 2U> tab_texts{
             UiStringId::PreferencesTabGeneral,
-            UiStringId::PreferencesTabSaveRecovery,
-            UiStringId::PreferencesTabWorkspace,
-            UiStringId::PreferencesTabAnimation,
-            UiStringId::PreferencesTabColor,
             UiStringId::PreferencesTabShortcuts};
         for (std::size_t index = 0U; index < tab_texts.size(); ++index) {
             TCITEMW item{};
@@ -2283,8 +2430,8 @@ INT_PTR OnInit(HWND dialog, LPARAM parameter) {
             item.pszText = const_cast<wchar_t*>(UiText(tab_texts[index]));
             TabCtrl_InsertItem(tabs, static_cast<int>(index), &item);
         }
-        TabCtrl_SetCurSel(tabs, kShortcutPage);
-        CreateSimplePages(*model);
+        TabCtrl_SetCurSel(tabs, kGeneralPage);
+        CreateGeneralPage(*model);
         CreateShortcutPage(*model);
         LoadControls(*model);
         RefreshShortcutUi(*model);

@@ -9080,7 +9080,7 @@
     {
       "id": "PreferencesTabSaveRecovery",
       "kind": "text",
-      "ja": "保存・Recovery",
+      "ja": "保存と復元",
       "en": "Save and Recovery",
       "resource": false
     },

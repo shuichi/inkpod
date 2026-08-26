@@ -1,7 +1,5 @@
 #include "session_recovery.h"
 
-#include <shlobj.h>
-
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -10,6 +8,8 @@
 #include <new>
 #include <string_view>
 #include <utility>
+
+#include "application_data_paths.h"
 
 namespace inkpod::app {
 namespace {
@@ -20,22 +20,7 @@ constexpr std::uint16_t kMetadataHeaderBytes = 100U;
 constexpr std::size_t kMaximumMetadataBytes = 512U * 1024U;
 constexpr std::uint32_t kSessionPathsMagic = UINT32_C(0x53524b49);
 constexpr std::uint16_t kSessionPathsVersion = 1U;
-constexpr std::uint32_t kSequenceSwitchPolicyMagic = UINT32_C(0x50534b49);
-constexpr std::uint16_t kSequenceSwitchPolicyVersion = 1U;
-constexpr std::size_t kSequenceSwitchPolicyBytes = 16U;
-constexpr std::uint32_t kSequenceEndpointPolicyMagic = UINT32_C(0x45534b49);
-constexpr std::uint16_t kSequenceEndpointPolicyVersion = 1U;
-constexpr std::size_t kSequenceEndpointPolicyBytes = 16U;
-constexpr std::uint32_t kOutputColorGuardProfileMagic = UINT32_C(0x47434b49);
-constexpr std::uint16_t kOutputColorGuardProfileVersion = 1U;
-constexpr std::size_t kOutputColorGuardProfileBytes = 16U;
 constexpr std::size_t kMaximumSessionRecordBytes = 1024U * 1024U;
-constexpr wchar_t kSettingsKey[] = L"Software\\inkpod";
-constexpr wchar_t kRestoreSettingValue[] = L"RestorePreviousDocumentsV1";
-constexpr wchar_t kPreviousPathsValue[] = L"PreviousDocumentPathsV1";
-constexpr wchar_t kSequenceSwitchPolicyValue[] = L"SequenceCellSwitchPolicyV1";
-constexpr wchar_t kSequenceEndpointPolicyValue[] = L"SequenceEndpointPolicyV1";
-constexpr wchar_t kOutputColorGuardProfileValue[] = L"OutputColorGuardProfileV1";
 constexpr std::size_t kMaximumRestoredDocumentPaths = 64U;
 
 void AppendU16(std::vector<std::uint8_t>& bytes, std::uint16_t value) {
@@ -97,18 +82,6 @@ bool ReadU64(
         value |= static_cast<std::uint64_t>(bytes[cursor++]) << shift;
     }
     return true;
-}
-
-bool EnsureDirectory(const std::wstring& path) noexcept {
-    if (CreateDirectoryW(path.c_str(), nullptr) != FALSE) {
-        return true;
-    }
-    if (GetLastError() != ERROR_ALREADY_EXISTS) {
-        return false;
-    }
-    const DWORD attributes = GetFileAttributesW(path.c_str());
-    return attributes != INVALID_FILE_ATTRIBUTES
-        && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0U;
 }
 
 bool WideToUtf8(std::wstring_view text, std::vector<std::uint8_t>& output) {
@@ -289,21 +262,6 @@ bool WriteFileAtomic(
     return replaced;
 }
 
-bool OpenSettingsKey(REGSAM access, HKEY& key) noexcept {
-    key = nullptr;
-    return RegCreateKeyExW(
-               HKEY_CURRENT_USER,
-               kSettingsKey,
-               0U,
-               nullptr,
-               REG_OPTION_NON_VOLATILE,
-               access,
-               nullptr,
-               &key,
-               nullptr)
-        == ERROR_SUCCESS;
-}
-
 bool DeleteIfPresent(const std::wstring& path) noexcept {
     return DeleteFileW(path.c_str()) != FALSE || GetLastError() == ERROR_FILE_NOT_FOUND;
 }
@@ -337,31 +295,8 @@ bool ValidIdentity(const DocumentIdentity& identity) noexcept {
 }  // namespace
 
 bool RecoveryRootDirectory(std::wstring& output) noexcept {
-    PWSTR local_app_data{};
-    if (FAILED(SHGetKnownFolderPath(
-            FOLDERID_LocalAppData, KF_FLAG_CREATE, nullptr, &local_app_data))) {
-        return false;
-    }
-    try {
-        std::wstring root(local_app_data);
-        CoTaskMemFree(local_app_data);
-        local_app_data = nullptr;
-        root += L"\\inkpod";
-        if (!EnsureDirectory(root)) {
-            return false;
-        }
-        root += L"\\Recovery";
-        if (!EnsureDirectory(root)) {
-            return false;
-        }
-        output = std::move(root);
-        return true;
-    } catch (const std::bad_alloc&) {
-        if (local_app_data != nullptr) {
-            CoTaskMemFree(local_app_data);
-        }
-        return false;
-    }
+    return EnsureApplicationDataDirectory(
+        ApplicationDataDirectory::Recovery, output);
 }
 
 bool RecoveryMetadataPath(
@@ -645,51 +580,6 @@ bool DiscardRecoveryArtifact(const std::wstring& recovery_path) noexcept {
         && DeleteIfPresent(recovery_path) && DeleteIfPresent(metadata_path);
 }
 
-bool LoadRestorePreviousDocumentsSetting(bool& enabled) noexcept {
-    enabled = false;
-    HKEY key{};
-    if (!OpenSettingsKey(KEY_QUERY_VALUE, key)) {
-        return false;
-    }
-    DWORD type{};
-    DWORD value{};
-    DWORD bytes = sizeof(value);
-    const LSTATUS status = RegQueryValueExW(
-        key,
-        kRestoreSettingValue,
-        nullptr,
-        &type,
-        reinterpret_cast<LPBYTE>(&value),
-        &bytes);
-    RegCloseKey(key);
-    if (status == ERROR_FILE_NOT_FOUND) {
-        return true;
-    }
-    if (status != ERROR_SUCCESS || type != REG_DWORD || bytes != sizeof(value)
-        || value > 1U) {
-        return false;
-    }
-    enabled = value != 0U;
-    return true;
-}
-
-bool SaveRestorePreviousDocumentsSetting(bool enabled) noexcept {
-    HKEY key{};
-    if (!OpenSettingsKey(KEY_SET_VALUE, key)) {
-        return false;
-    }
-    const DWORD value = enabled ? 1U : 0U;
-    const bool saved = RegSetValueExW(
-        key,
-        kRestoreSettingValue,
-        0U,
-        REG_DWORD,
-        reinterpret_cast<const BYTE*>(&value),
-        sizeof(value)) == ERROR_SUCCESS;
-    RegCloseKey(key);
-    return saved;
-}
-
 bool SequenceRecoveryPath(
     std::uint64_t document_uuid_high,
     std::uint64_t document_uuid_low,
@@ -720,359 +610,25 @@ bool SequenceRecoveryPath(
     }
 }
 
-bool EncodeSequenceCellSwitchPolicy(
-    SequenceCellSwitchPolicy policy,
-    std::vector<std::uint8_t>& output) noexcept {
-    if (policy != SequenceCellSwitchPolicy::Prompt
-        && policy != SequenceCellSwitchPolicy::AutosaveBeforeSwitch) {
-        return false;
-    }
-    try {
-        output.clear();
-        output.reserve(kSequenceSwitchPolicyBytes);
-        AppendU32(output, kSequenceSwitchPolicyMagic);
-        AppendU16(output, kSequenceSwitchPolicyVersion);
-        AppendU16(output, 0U);
-        AppendU32(output, static_cast<std::uint32_t>(kSequenceSwitchPolicyBytes));
-        AppendU32(output, static_cast<std::uint32_t>(policy));
-        return output.size() == kSequenceSwitchPolicyBytes;
-    } catch (const std::bad_alloc&) {
-        output.clear();
-        return false;
-    }
-}
-
-bool DecodeSequenceCellSwitchPolicy(
-    const std::uint8_t* bytes,
-    std::size_t length,
-    SequenceCellSwitchPolicy& policy) noexcept {
-    if (bytes == nullptr || length != kSequenceSwitchPolicyBytes) {
-        return false;
-    }
-    std::size_t cursor{};
-    std::uint32_t magic{};
-    std::uint16_t version{};
-    std::uint16_t reserved{};
-    std::uint32_t total{};
-    std::uint32_t raw_policy{};
-    if (!ReadU32(bytes, length, cursor, magic)
-        || !ReadU16(bytes, length, cursor, version)
-        || !ReadU16(bytes, length, cursor, reserved)
-        || !ReadU32(bytes, length, cursor, total)
-        || !ReadU32(bytes, length, cursor, raw_policy)
-        || cursor != length || magic != kSequenceSwitchPolicyMagic
-        || version != kSequenceSwitchPolicyVersion || reserved != 0U
-        || total != length
-        || (raw_policy
-                != static_cast<std::uint32_t>(SequenceCellSwitchPolicy::Prompt)
-            && raw_policy != static_cast<std::uint32_t>(
-                SequenceCellSwitchPolicy::AutosaveBeforeSwitch))) {
-        return false;
-    }
-    policy = static_cast<SequenceCellSwitchPolicy>(raw_policy);
-    return true;
-}
-
-bool LoadSequenceCellSwitchPolicy(
-    SequenceCellSwitchPolicy& policy) noexcept {
-    policy = SequenceCellSwitchPolicy::Prompt;
-    HKEY key{};
-    if (!OpenSettingsKey(KEY_QUERY_VALUE, key)) {
-        return false;
-    }
-    DWORD type{};
-    DWORD byte_count{};
-    LSTATUS status = RegQueryValueExW(
-        key, kSequenceSwitchPolicyValue, nullptr, &type, nullptr, &byte_count);
-    if (status == ERROR_FILE_NOT_FOUND) {
-        RegCloseKey(key);
-        return true;
-    }
-    if (status != ERROR_SUCCESS || type != REG_BINARY
-        || byte_count != kSequenceSwitchPolicyBytes) {
-        RegCloseKey(key);
-        return false;
-    }
-    std::array<std::uint8_t, kSequenceSwitchPolicyBytes> bytes{};
-    status = RegQueryValueExW(
-        key,
-        kSequenceSwitchPolicyValue,
-        nullptr,
-        &type,
-        bytes.data(),
-        &byte_count);
-    RegCloseKey(key);
-    return status == ERROR_SUCCESS
-        && DecodeSequenceCellSwitchPolicy(bytes.data(), bytes.size(), policy);
-}
-
-bool SaveSequenceCellSwitchPolicy(
-    SequenceCellSwitchPolicy policy) noexcept {
-    std::vector<std::uint8_t> bytes;
-    if (!EncodeSequenceCellSwitchPolicy(policy, bytes)) {
-        return false;
-    }
-    HKEY key{};
-    if (!OpenSettingsKey(KEY_SET_VALUE, key)) {
-        return false;
-    }
-    const bool saved = RegSetValueExW(
-        key,
-        kSequenceSwitchPolicyValue,
-        0U,
-        REG_BINARY,
-        bytes.data(),
-        static_cast<DWORD>(bytes.size())) == ERROR_SUCCESS;
-    RegCloseKey(key);
-    return saved;
-}
-
-bool EncodeSequenceEndpointPolicy(
-    SequenceEndpointPolicy policy,
-    std::vector<std::uint8_t>& output) noexcept {
-    if (policy != SequenceEndpointPolicy::Stop
-        && policy != SequenceEndpointPolicy::Wrap) {
-        return false;
-    }
-    try {
-        output.clear();
-        output.reserve(kSequenceEndpointPolicyBytes);
-        AppendU32(output, kSequenceEndpointPolicyMagic);
-        AppendU16(output, kSequenceEndpointPolicyVersion);
-        AppendU16(output, 0U);
-        AppendU32(output, static_cast<std::uint32_t>(kSequenceEndpointPolicyBytes));
-        AppendU32(output, static_cast<std::uint32_t>(policy));
-        return output.size() == kSequenceEndpointPolicyBytes;
-    } catch (const std::bad_alloc&) {
-        output.clear();
-        return false;
-    }
-}
-
-bool DecodeSequenceEndpointPolicy(
-    const std::uint8_t* bytes,
-    std::size_t length,
-    SequenceEndpointPolicy& policy) noexcept {
-    if (bytes == nullptr || length != kSequenceEndpointPolicyBytes) {
-        return false;
-    }
-    std::size_t cursor{};
-    std::uint32_t magic{};
-    std::uint16_t version{};
-    std::uint16_t reserved{};
-    std::uint32_t total{};
-    std::uint32_t raw_policy{};
-    if (!ReadU32(bytes, length, cursor, magic)
-        || !ReadU16(bytes, length, cursor, version)
-        || !ReadU16(bytes, length, cursor, reserved)
-        || !ReadU32(bytes, length, cursor, total)
-        || !ReadU32(bytes, length, cursor, raw_policy)
-        || cursor != length || magic != kSequenceEndpointPolicyMagic
-        || version != kSequenceEndpointPolicyVersion || reserved != 0U
-        || total != length
-        || (raw_policy != static_cast<std::uint32_t>(SequenceEndpointPolicy::Stop)
-            && raw_policy
-                != static_cast<std::uint32_t>(SequenceEndpointPolicy::Wrap))) {
-        return false;
-    }
-    policy = static_cast<SequenceEndpointPolicy>(raw_policy);
-    return true;
-}
-
-bool LoadSequenceEndpointPolicy(
-    SequenceEndpointPolicy& policy) noexcept {
-    policy = SequenceEndpointPolicy::Stop;
-    HKEY key{};
-    if (!OpenSettingsKey(KEY_QUERY_VALUE, key)) {
-        return false;
-    }
-    DWORD type{};
-    DWORD byte_count{};
-    LSTATUS status = RegQueryValueExW(
-        key, kSequenceEndpointPolicyValue, nullptr, &type, nullptr, &byte_count);
-    if (status == ERROR_FILE_NOT_FOUND) {
-        RegCloseKey(key);
-        return true;
-    }
-    if (status != ERROR_SUCCESS || type != REG_BINARY
-        || byte_count != kSequenceEndpointPolicyBytes) {
-        RegCloseKey(key);
-        return false;
-    }
-    std::array<std::uint8_t, kSequenceEndpointPolicyBytes> bytes{};
-    status = RegQueryValueExW(
-        key,
-        kSequenceEndpointPolicyValue,
-        nullptr,
-        &type,
-        bytes.data(),
-        &byte_count);
-    RegCloseKey(key);
-    return status == ERROR_SUCCESS
-        && DecodeSequenceEndpointPolicy(bytes.data(), bytes.size(), policy);
-}
-
-bool SaveSequenceEndpointPolicy(
-    SequenceEndpointPolicy policy) noexcept {
-    std::vector<std::uint8_t> bytes;
-    if (!EncodeSequenceEndpointPolicy(policy, bytes)) {
-        return false;
-    }
-    HKEY key{};
-    if (!OpenSettingsKey(KEY_SET_VALUE, key)) {
-        return false;
-    }
-    const bool saved = RegSetValueExW(
-        key,
-        kSequenceEndpointPolicyValue,
-        0U,
-        REG_BINARY,
-        bytes.data(),
-        static_cast<DWORD>(bytes.size())) == ERROR_SUCCESS;
-    RegCloseKey(key);
-    return saved;
-}
-
-bool EncodeOutputColorGuardProfileSetting(
-    OutputColorGuardProfileSetting profile,
-    std::vector<std::uint8_t>& output) noexcept {
-    if (profile != OutputColorGuardProfileSetting::Bt709ConservativeYcbcr) {
-        return false;
-    }
-    try {
-        output.clear();
-        output.reserve(kOutputColorGuardProfileBytes);
-        AppendU32(output, kOutputColorGuardProfileMagic);
-        AppendU16(output, kOutputColorGuardProfileVersion);
-        AppendU16(output, 0U);
-        AppendU32(output, static_cast<std::uint32_t>(kOutputColorGuardProfileBytes));
-        AppendU32(output, static_cast<std::uint32_t>(profile));
-        return output.size() == kOutputColorGuardProfileBytes;
-    } catch (const std::bad_alloc&) {
-        output.clear();
-        return false;
-    }
-}
-
-bool DecodeOutputColorGuardProfileSetting(
-    const std::uint8_t* bytes,
-    std::size_t length,
-    OutputColorGuardProfileSetting& profile) noexcept {
-    if (bytes == nullptr || length != kOutputColorGuardProfileBytes) {
-        return false;
-    }
-    std::size_t cursor{};
-    std::uint32_t magic{};
-    std::uint16_t version{};
-    std::uint16_t reserved{};
-    std::uint32_t total{};
-    std::uint32_t raw_profile{};
-    if (!ReadU32(bytes, length, cursor, magic)
-        || !ReadU16(bytes, length, cursor, version)
-        || !ReadU16(bytes, length, cursor, reserved)
-        || !ReadU32(bytes, length, cursor, total)
-        || !ReadU32(bytes, length, cursor, raw_profile)
-        || cursor != length || magic != kOutputColorGuardProfileMagic
-        || version != kOutputColorGuardProfileVersion || reserved != 0U
-        || total != length
-        || raw_profile != static_cast<std::uint32_t>(
-            OutputColorGuardProfileSetting::Bt709ConservativeYcbcr)) {
-        return false;
-    }
-    profile = static_cast<OutputColorGuardProfileSetting>(raw_profile);
-    return true;
-}
-
-bool LoadOutputColorGuardProfileSetting(
-    OutputColorGuardProfileSetting& profile) noexcept {
-    profile = OutputColorGuardProfileSetting::Bt709ConservativeYcbcr;
-    HKEY key{};
-    if (!OpenSettingsKey(KEY_QUERY_VALUE, key)) {
-        return false;
-    }
-    DWORD type{};
-    DWORD byte_count{};
-    LSTATUS status = RegQueryValueExW(
-        key, kOutputColorGuardProfileValue, nullptr, &type, nullptr, &byte_count);
-    if (status == ERROR_FILE_NOT_FOUND) {
-        RegCloseKey(key);
-        return true;
-    }
-    if (status != ERROR_SUCCESS || type != REG_BINARY
-        || byte_count != kOutputColorGuardProfileBytes) {
-        RegCloseKey(key);
-        return false;
-    }
-    std::array<std::uint8_t, kOutputColorGuardProfileBytes> bytes{};
-    status = RegQueryValueExW(
-        key,
-        kOutputColorGuardProfileValue,
-        nullptr,
-        &type,
-        bytes.data(),
-        &byte_count);
-    RegCloseKey(key);
-    return status == ERROR_SUCCESS
-        && DecodeOutputColorGuardProfileSetting(bytes.data(), bytes.size(), profile);
-}
-
-bool SaveOutputColorGuardProfileSetting(
-    OutputColorGuardProfileSetting profile) noexcept {
-    std::vector<std::uint8_t> bytes;
-    if (!EncodeOutputColorGuardProfileSetting(profile, bytes)) {
-        return false;
-    }
-    HKEY key{};
-    if (!OpenSettingsKey(KEY_SET_VALUE, key)) {
-        return false;
-    }
-    const bool saved = RegSetValueExW(
-        key,
-        kOutputColorGuardProfileValue,
-        0U,
-        REG_BINARY,
-        bytes.data(),
-        static_cast<DWORD>(bytes.size())) == ERROR_SUCCESS;
-    RegCloseKey(key);
-    return saved;
-}
-
 bool LoadPreviousDocumentPaths(
     std::vector<std::wstring>& paths) noexcept {
-    HKEY key{};
-    if (!OpenSettingsKey(KEY_QUERY_VALUE, key)) {
+    std::wstring path;
+    if (!ResolveApplicationSessionPath(path)) {
         return false;
     }
-    DWORD type{};
-    DWORD byte_count{};
-    LSTATUS status = RegQueryValueExW(
-        key, kPreviousPathsValue, nullptr, &type, nullptr, &byte_count);
-    if (status == ERROR_FILE_NOT_FOUND) {
-        RegCloseKey(key);
+    const DWORD attributes = GetFileAttributesW(path.c_str());
+    const DWORD attribute_error = GetLastError();
+    if (attributes == INVALID_FILE_ATTRIBUTES
+        && (attribute_error == ERROR_FILE_NOT_FOUND
+            || attribute_error == ERROR_PATH_NOT_FOUND)) {
         paths.clear();
         return true;
     }
-    if (status != ERROR_SUCCESS || type != REG_BINARY
-        || byte_count > kMaximumSessionRecordBytes) {
-        RegCloseKey(key);
+    if (attributes == INVALID_FILE_ATTRIBUTES) {
         return false;
     }
     std::vector<std::uint8_t> bytes;
-    try {
-        bytes.resize(byte_count);
-    } catch (const std::bad_alloc&) {
-        RegCloseKey(key);
-        return false;
-    }
-    status = RegQueryValueExW(
-        key,
-        kPreviousPathsValue,
-        nullptr,
-        &type,
-        bytes.data(),
-        &byte_count);
-    RegCloseKey(key);
-    if (status != ERROR_SUCCESS) {
+    if (!ReadFileBounded(path, kMaximumSessionRecordBytes, bytes)) {
         return false;
     }
     return DecodePreviousDocumentPaths(bytes.data(), bytes.size(), paths);
@@ -1164,29 +720,22 @@ bool SavePreviousDocumentPaths(
     if (!EncodePreviousDocumentPaths(paths, bytes)) {
         return false;
     }
-    HKEY key{};
-    if (!OpenSettingsKey(KEY_SET_VALUE, key)) {
+    std::wstring directory;
+    std::wstring path;
+    if (!EnsureApplicationDataDirectory(
+            ApplicationDataDirectory::Session, directory)
+        || !ResolveApplicationSessionPath(path)) {
         return false;
     }
-    const bool saved = RegSetValueExW(
-        key,
-        kPreviousPathsValue,
-        0U,
-        REG_BINARY,
-        bytes.data(),
-        static_cast<DWORD>(bytes.size())) == ERROR_SUCCESS;
-    RegCloseKey(key);
-    return saved;
+    return WriteFileAtomic(path, bytes);
 }
 
 bool ClearPreviousDocumentPaths() noexcept {
-    HKEY key{};
-    if (!OpenSettingsKey(KEY_SET_VALUE, key)) {
+    std::wstring path;
+    if (!ResolveApplicationSessionPath(path)) {
         return false;
     }
-    const LSTATUS status = RegDeleteValueW(key, kPreviousPathsValue);
-    RegCloseKey(key);
-    return status == ERROR_SUCCESS || status == ERROR_FILE_NOT_FOUND;
+    return DeleteIfPresent(path);
 }
 
 }  // namespace inkpod::app

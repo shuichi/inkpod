@@ -30,24 +30,23 @@ struct ShortcutUiState {
 InkpodStatus InitializeShortcuts(
     app::CoreHost& engine,
     ShortcutUiState& state,
-    bool load_persisted) noexcept;
+    const ShortcutProfileSet& initial_profiles) noexcept;
+
+[[nodiscard]] ShortcutProfileSet BuildDefaultShortcutProfileSet();
 
 InkpodStatus ResetShortcuts(
     app::CoreHost& engine,
-    ShortcutUiState& state,
-    bool persist) noexcept;
+    ShortcutUiState& state) noexcept;
 
 InkpodStatus RebindShortcut(
     app::CoreHost& engine,
     ShortcutUiState& state,
-    const InkpodShortcutSequence& replacement,
-    bool persist) noexcept;
+    const InkpodShortcutSequence& replacement) noexcept;
 
 InkpodStatus ApplyShortcutProfileSet(
     app::CoreHost& engine,
     ShortcutUiState& state,
-    const ShortcutProfileSet& replacement,
-    bool persist) noexcept;
+    const ShortcutProfileSet& replacement) noexcept;
 
 [[nodiscard]] const ShortcutProfile* ActiveShortcutProfile(
     const ShortcutUiState& state) noexcept;

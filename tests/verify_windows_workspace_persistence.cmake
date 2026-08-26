@@ -4,21 +4,29 @@ endif()
 
 set(LAYOUT_HEADER "${INKPOD_SOURCE_DIR}/apps/windows/ui/workspace_layout.h")
 set(LAYOUT_SOURCE "${INKPOD_SOURCE_DIR}/apps/windows/ui/workspace_layout.cpp")
+set(SETTINGS_HEADER "${INKPOD_SOURCE_DIR}/apps/windows/app/application_settings.h")
+set(SETTINGS_SOURCE "${INKPOD_SOURCE_DIR}/apps/windows/app/application_settings.cpp")
+set(DATA_PATH_SOURCE "${INKPOD_SOURCE_DIR}/apps/windows/app/application_data_paths.cpp")
 set(MAIN_SOURCE "${INKPOD_SOURCE_DIR}/apps/windows/ui/main_window.cpp")
 set(RUNTIME_SOURCE "${INKPOD_SOURCE_DIR}/apps/windows/ui/main_window_runtime.cpp")
 set(CANVAS_HEADER "${INKPOD_SOURCE_DIR}/apps/windows/renderer/canvas.h")
 set(CANVAS_SOURCE "${INKPOD_SOURCE_DIR}/apps/windows/renderer/canvas.cpp")
 set(TEST_SOURCE "${INKPOD_SOURCE_DIR}/tests/windows_workspace_layout.cpp")
+set(SETTINGS_TEST "${INKPOD_SOURCE_DIR}/tests/windows_application_settings.cpp")
 set(RESOURCE_SOURCE "${INKPOD_SOURCE_DIR}/apps/windows/app/app_ui_ja.generated.rc")
 
 foreach(FILE IN ITEMS
         "${LAYOUT_HEADER}"
         "${LAYOUT_SOURCE}"
+        "${SETTINGS_HEADER}"
+        "${SETTINGS_SOURCE}"
+        "${DATA_PATH_SOURCE}"
         "${MAIN_SOURCE}"
         "${RUNTIME_SOURCE}"
         "${CANVAS_HEADER}"
         "${CANVAS_SOURCE}"
         "${TEST_SOURCE}"
+        "${SETTINGS_TEST}"
         "${RESOURCE_SOURCE}")
     if(NOT EXISTS "${FILE}")
         message(FATAL_ERROR "Missing G9 source: ${FILE}")
@@ -33,11 +41,7 @@ foreach(REQUIRED IN ITEMS
         "WorkspaceAutoHideEdge"
         "WorkspaceSplitOrientation"
         "RightToolTabsModel right_tool_tabs"
-        "EncodeWorkspaceLayout"
-        "DecodeWorkspaceLayout"
-        "DeleteWorkspaceLayout"
-        "SaveWorkspaceWindowCount"
-        "LoadWorkspaceWindowCount"
+        "kMaximumPersistedWorkspaceWindows"
         "ClampWorkspacePlacement")
     string(FIND "${LAYOUT_HEADER_TEXT}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
@@ -47,31 +51,13 @@ endforeach()
 
 file(READ "${LAYOUT_SOURCE}" LAYOUT_SOURCE_TEXT)
 foreach(REQUIRED IN ITEMS
-        "kVersion = 9U"
-        "PersistedWorkspaceLayoutV4"
-        "PersistedWorkspaceLayoutV9"
-        "PersistedRightToolTabV9"
-        "EncodeGroupedPaneOrder"
-        "DecodeGroupedPaneOrder"
-        "DecodeVersion3"
-        "DecodeVersion4Or5"
-        "value.version != 5U"
-        "migrate_version6_reference_stack"
-        "legacy_tool_options"
-        "BuildLegacyRightTabs"
-        "DecodeVersion9"
         "ValidateCurrentTabs"
-        "LoadLegacyLayout"
-        "FindPaneDescriptorByStableId"
         "kMaximumWorkspaceLayoutRecordBytes"
         "WorkspacePreset::ReferenceCheck"
         "WorkspacePreset::Focus"
         "MONITORINFO"
         "GetDpiForMonitor"
-        "g_monitor_collection"
-        "RegGetValueW"
-        "RegSetValueExW"
-        "WorkspaceWindowCountV1")
+        "g_monitor_collection")
     string(FIND "${LAYOUT_SOURCE_TEXT}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
         message(FATAL_ERROR "G9 persistence implementation is missing: ${REQUIRED}")
@@ -94,10 +80,10 @@ foreach(REQUIRED IN ITEMS
         "CaptureWorkspacePresentation"
         "ApplyWorkspacePresentation"
         "CollapseAutoHiddenPanes"
-        "WorkspaceSessionV5"
-        "WorkspaceSessionV4"
-        "WorkspaceSavedV5"
-        "WorkspaceSavedV4"
+        "PersistApplicationSettings"
+        "SaveApplicationSettingsUpdate"
+        "SaveWorkspaceSnapshot"
+        "state.settings.Workspace"
         "IDM_WORKSPACE_SAVE_AS"
         "IDM_WORKSPACE_PRESET_COLORING"
         "IDM_WORKSPACE_AUTOHIDE_LOCATOR"
@@ -108,6 +94,38 @@ foreach(REQUIRED IN ITEMS
     string(FIND "${RUNTIME_TEXT}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
         message(FATAL_ERROR "G9 UI integration is missing: ${REQUIRED}")
+    endif()
+endforeach()
+
+file(READ "${SETTINGS_HEADER}" SETTINGS_HEADER_TEXT)
+file(READ "${SETTINGS_SOURCE}" SETTINGS_SOURCE_TEXT)
+file(READ "${DATA_PATH_SOURCE}" DATA_PATH_SOURCE_TEXT)
+foreach(REQUIRED IN ITEMS
+        "kApplicationSettingsFormatVersion = 1U"
+        "ApplicationSettingsStore"
+        "PersistedWorkspace"
+        "inkpod-settings.json"
+        "inkpod-settings"
+        "formatVersion"
+        "savedLayouts"
+        "right-tab-"
+        "layer-plane"
+        "SaveApplicationSettingsFile"
+        "MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH")
+    string(FIND "${SETTINGS_HEADER_TEXT}${SETTINGS_SOURCE_TEXT}${DATA_PATH_SOURCE_TEXT}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR "Readable application-settings contract is missing: ${REQUIRED}")
+    endif()
+endforeach()
+foreach(FORBIDDEN IN ITEMS
+        "HKEY_CURRENT_USER"
+        "RegGetValueW"
+        "RegSetValueExW"
+        "WorkspaceSessionV"
+        "WorkspaceSavedV")
+    string(FIND "${SETTINGS_SOURCE_TEXT}${RUNTIME_TEXT}" "${FORBIDDEN}" OFFSET)
+    if(NOT OFFSET LESS 0)
+        message(FATAL_ERROR "Application settings still use retired registry persistence: ${FORBIDDEN}")
     endif()
 endforeach()
 
@@ -137,34 +155,37 @@ endforeach()
 
 file(READ "${TEST_SOURCE}" TEST_TEXT)
 foreach(REQUIRED IN ITEMS
-        "EncodeWorkspaceLayout"
-        "DecodeWorkspaceLayout"
-        "WorkspaceLayoutDecodeResult::Migrated"
-        "LegacyWorkspaceV3"
-        "PersistedWorkspaceV9ForMigration"
-        "ExtractVersion8Workspace"
-        "migrated_version8"
         "replacement_tabs"
         "capacity_model"
-        "legacy_v5_bytes"
         "mixed_serialized"
-        "legacy_light_table_tabs"
-        "legacy_reference_split"
-        "legacy_explicit_reference_split"
         "DockPaneType::JobProgress"
         "unknown_pane"
         "missing_monitor"
         "added_monitor"
-        "WorkspaceDensity::Compact"
-        "SaveWorkspaceLayout"
-        "LoadWorkspaceLayout")
+        "WorkspaceDensity::Compact")
     string(FIND "${TEST_TEXT}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
         message(FATAL_ERROR "G9 persistence test evidence is missing: ${REQUIRED}")
     endif()
 endforeach()
 
+file(READ "${SETTINGS_TEST}" SETTINGS_TEST_TEXT)
+foreach(REQUIRED IN ITEMS
+        "inkpod-settings"
+        "formatVersion"
+        "file.save"
+        "logicalKey"
+        "physicalKey"
+        "base64"
+        "wrong_version"
+        "duplicate"
+        "unknown")
+    string(FIND "${SETTINGS_TEST_TEXT}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR "Readable settings test evidence is missing: ${REQUIRED}")
+    endif()
+endforeach()
+
 message(STATUS
-    "Verified bounded V9 dynamic-tab persistence, V2-V8 migration, split tab stacks, named presets, "
-    "monitor recovery, accessible auxiliary-pane auto-hide integration, "
-    "and G10 bounded workspace-window count persistence")
+    "Verified bounded human-readable settings JSON, dynamic-tab and saved-layout persistence, "
+    "monitor recovery, accessible auxiliary-pane auto-hide integration, and bounded workspace count")

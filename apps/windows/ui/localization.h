@@ -32,18 +32,6 @@ enum class UiStringId : std::uint16_t {
     Count,
 };
 
-[[nodiscard]] bool EncodeUiLanguagePreference(
-    UiLanguagePreference preference,
-    std::vector<std::uint8_t>& output) noexcept;
-[[nodiscard]] bool DecodeUiLanguagePreference(
-    const std::uint8_t* bytes,
-    std::size_t length,
-    UiLanguagePreference& preference) noexcept;
-[[nodiscard]] bool LoadUiLanguagePreference(
-    UiLanguagePreference& preference) noexcept;
-[[nodiscard]] bool SaveUiLanguagePreference(
-    UiLanguagePreference preference) noexcept;
-
 [[nodiscard]] UiLanguage ResolveUiLanguage(
     UiLanguagePreference preference,
     std::span<const std::wstring_view> preferred_ui_languages) noexcept;

@@ -38,15 +38,6 @@ using windows::ui::UiText;
 
 namespace {
 
-std::array<wchar_t, 96U> WorkspaceRegistryValueName(
-    std::wstring_view base, std::uint32_t slot) noexcept {
-    std::array<wchar_t, 96U> result{};
-    _snwprintf_s(
-        result.data(), result.size(), _TRUNCATE, L"%.*ls.%u",
-        static_cast<int>(base.size()), base.data(), slot);
-    return result;
-}
-
 bool InitializeFrontendRouting(ApplicationHost& state) noexcept {
     return state.InitializeOwners();
 }
@@ -84,7 +75,7 @@ InkpodStatus StartCore(ApplicationHost& state) noexcept {
         return INKPOD_STATUS_INVALID_STATE;
     }
     return windows::ui::InitializeShortcuts(
-        *state.engine, state.shortcuts, !state.lifetime.smoke_test);
+        *state.engine, state.shortcuts, state.settings.Values().shortcuts);
 }
 
 InkpodStatus StopCore(ApplicationHost& state) noexcept {
@@ -96,10 +87,7 @@ InkpodStatus StopCore(ApplicationHost& state) noexcept {
     if (state.batch.task != nullptr) {
         inkpod_batch_task_cancel(state.batch.task);
     }
-    if (!state.lifetime.smoke_test) {
-        (void)windows::ui::SaveWorkspaceWindowCount(
-            static_cast<std::uint32_t>(state.Workspaces().Count()));
-    }
+    (void)windows::ui::runtime::PersistApplicationSettings(state);
     for (std::size_t index = 0U; index < state.Workspaces().Count(); ++index) {
         WorkspaceWindow* workspace = state.Workspaces().At(index);
         if (workspace == nullptr) {
@@ -158,14 +146,6 @@ InkpodStatus StopCore(ApplicationHost& state) noexcept {
             continue;
         }
         (void)state.ActivateWorkspaceWindow(workspace->id, false);
-        if (!state.lifetime.smoke_test) {
-            windows::ui::runtime::CaptureWorkspacePresentation(state);
-            const auto session_name =
-                WorkspaceRegistryValueName(
-                    L"WorkspaceSessionV5", workspace->persistence_slot);
-            windows::ui::SaveWorkspaceLayout(
-                workspace->windows.workspace, session_name.data());
-        }
         const std::array<HWND*, 8U> owned{
             &workspace->job_progress,
             &workspace->tools.palette,
@@ -505,6 +485,27 @@ int Application::Run() {
         }
     }
 
+    windows::ui::ShortcutProfileSet default_shortcuts{};
+    try {
+        default_shortcuts = windows::ui::BuildDefaultShortcutProfileSet();
+    } catch (const std::bad_alloc&) {
+        host_.reset();
+        return 14;
+    }
+    const ApplicationSettingsLoadResult settings_result = launch_.smoke_test
+        ? (host_->settings.UseDefaults(default_shortcuts)
+               ? ApplicationSettingsLoadResult::Missing
+               : ApplicationSettingsLoadResult::IoError)
+        : host_->settings.Load(default_shortcuts);
+    if (settings_result == ApplicationSettingsLoadResult::IoError) {
+        host_.reset();
+        return 14;
+    }
+    if (settings_result == ApplicationSettingsLoadResult::Invalid) {
+        OutputDebugStringW(
+            L"inkpod: inkpod-settings.json is invalid; defaults are active.\n");
+    }
+
     INITCOMMONCONTROLSEX controls{};
     controls.dwSize = sizeof(controls);
     controls.dwICC = ICC_STANDARD_CLASSES | ICC_BAR_CLASSES | ICC_TAB_CLASSES
@@ -557,25 +558,14 @@ int Application::Run() {
     state.lifetime.window_title = title.data();
     state.lifetime.show_command = launch_.show_command;
     state.lifetime.smoke_test = launch_.smoke_test;
-    if (!launch_.smoke_test) {
-        bool restore_previous{};
-        state.lifetime.restore_previous_documents =
-            LoadRestorePreviousDocumentsSetting(restore_previous)
-            && restore_previous;
-        SequenceCellSwitchPolicy sequence_policy{};
-        if (LoadSequenceCellSwitchPolicy(sequence_policy)) {
-            state.lifetime.sequence_switch_policy = sequence_policy;
-        }
-        SequenceEndpointPolicy endpoint_policy{};
-        if (LoadSequenceEndpointPolicy(endpoint_policy)) {
-            state.lifetime.sequence_endpoint_policy = endpoint_policy;
-        }
-        OutputColorGuardProfileSetting output_color_guard_profile{};
-        if (LoadOutputColorGuardProfileSetting(output_color_guard_profile)) {
-            state.effects.output_color_guard_profile =
-                static_cast<InkpodOutputColorGuardProfile>(output_color_guard_profile);
-        }
-    }
+    const ApplicationSettings& settings = state.settings.Values();
+    state.lifetime.restore_previous_documents =
+        settings.restore_previous_documents;
+    state.lifetime.sequence_switch_policy = settings.sequence_switch_policy;
+    state.lifetime.sequence_endpoint_policy = settings.sequence_endpoint_policy;
+    state.effects.output_color_guard_profile =
+        static_cast<InkpodOutputColorGuardProfile>(
+            settings.output_color_guard_profile);
     if (!InitializeFrontendRouting(state)) {
         host_.reset();
         return 14;
@@ -656,8 +646,8 @@ int Application::Run() {
     }
     const WorkspaceWindowId initial_workspace = state.Workspace().id;
     if (!launch_.smoke_test) {
-        std::uint32_t window_count{1U};
-        (void)windows::ui::LoadWorkspaceWindowCount(window_count);
+        const std::uint32_t window_count = static_cast<std::uint32_t>(
+            std::max<std::size_t>(1U, state.settings.Values().workspaces.size()));
         for (std::uint32_t index = 1U; index < window_count; ++index) {
             if (windows::ui::runtime::CreateWorkspaceWindow(state, false)
                 == nullptr) {

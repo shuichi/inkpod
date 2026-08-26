@@ -8,7 +8,7 @@ namespace inkpod::windows::ui {
 
 inline constexpr std::wstring_view kBatchSetExtension = L".inkbatch";
 
-// Resolves and creates %APPDATA%\inkpod\batch-sets. The returned path never
+// Resolves and creates %LOCALAPPDATA%\inkpod\batch-sets. The returned path never
 // contains a batch-set filename.
 bool PrepareDefaultBatchSetDirectory(std::wstring& directory) noexcept;
 

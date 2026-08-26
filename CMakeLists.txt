@@ -355,6 +355,8 @@ if(WIN32)
         COMMAND inkpod_windows_activation_tests)
 
     add_executable(inkpod_windows_batch_set_store_tests
+        apps/windows/app/application_data_paths.cpp
+        apps/windows/app/application_data_paths.h
         apps/windows/ui/batch_set_store.cpp
         apps/windows/ui/batch_set_store.h
         tests/windows_batch_set_store.cpp)
@@ -411,6 +413,8 @@ if(WIN32)
         COMMAND inkpod_windows_batch_color_editor_tests)
 
     add_executable(inkpod_windows_session_recovery_tests
+        apps/windows/app/application_data_paths.cpp
+        apps/windows/app/application_data_paths.h
         apps/windows/app/document_identity.h
         apps/windows/app/identity.h
         apps/windows/app/session_recovery.cpp
@@ -431,6 +435,44 @@ if(WIN32)
     add_test(
         NAME inkpod_windows_session_recovery
         COMMAND inkpod_windows_session_recovery_tests)
+
+    add_executable(inkpod_windows_application_settings_tests
+        apps/windows/app/application_data_paths.cpp
+        apps/windows/app/application_data_paths.h
+        apps/windows/app/application_settings.cpp
+        apps/windows/app/application_settings.h
+        apps/windows/app/session_recovery.h
+        apps/windows/ui/localization.cpp
+        apps/windows/ui/localization.h
+        apps/windows/ui/command_catalog.cpp
+        apps/windows/ui/command_catalog.h
+        apps/windows/ui/dock_layout.cpp
+        apps/windows/ui/dock_layout.h
+        apps/windows/ui/right_tool_tabs.cpp
+        apps/windows/ui/right_tool_tabs.h
+        apps/windows/ui/shortcut_profile.cpp
+        apps/windows/ui/shortcut_profile.h
+        apps/windows/ui/workspace_layout.cpp
+        apps/windows/ui/workspace_layout.h
+        tests/windows_application_settings.cpp)
+    target_include_directories(inkpod_windows_application_settings_tests PRIVATE
+        "${CMAKE_SOURCE_DIR}/apps/windows"
+        "${CMAKE_SOURCE_DIR}/include")
+    target_compile_definitions(inkpod_windows_application_settings_tests PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(inkpod_windows_application_settings_tests PRIVATE
+        advapi32
+        ole32
+        shell32
+        shcore
+        user32)
+    if(MSVC)
+        inkpod_enable_strict_warnings(inkpod_windows_application_settings_tests)
+        target_compile_options(inkpod_windows_application_settings_tests PRIVATE /EHsc)
+    endif()
+    add_test(
+        NAME inkpod_windows_application_settings
+        COMMAND inkpod_windows_application_settings_tests)
 
     add_executable(inkpod_windows_embedded_manual_tests
         apps/windows/app/embedded_manual.cpp
@@ -499,6 +541,10 @@ if(WIN32)
         COMMAND inkpod_windows_command_state_tests)
 
     add_executable(inkpod_windows_shortcut_profile_tests
+        apps/windows/app/application_data_paths.cpp
+        apps/windows/app/application_data_paths.h
+        apps/windows/app/application_settings.cpp
+        apps/windows/app/application_settings.h
         apps/windows/ui/localization.cpp
         apps/windows/ui/localization.h
         apps/windows/ui/command_catalog.cpp
@@ -507,6 +553,12 @@ if(WIN32)
         apps/windows/ui/shortcut_profile.h
         apps/windows/ui/shortcut_preset.cpp
         apps/windows/ui/shortcut_preset.h
+        apps/windows/ui/dock_layout.cpp
+        apps/windows/ui/dock_layout.h
+        apps/windows/ui/right_tool_tabs.cpp
+        apps/windows/ui/right_tool_tabs.h
+        apps/windows/ui/workspace_layout.cpp
+        apps/windows/ui/workspace_layout.h
         tests/windows_shortcut_profile.cpp)
     target_include_directories(inkpod_windows_shortcut_profile_tests PRIVATE
         "${CMAKE_SOURCE_DIR}/apps/windows"
@@ -515,6 +567,9 @@ if(WIN32)
         UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
     target_link_libraries(inkpod_windows_shortcut_profile_tests PRIVATE
         advapi32
+        ole32
+        shell32
+        shcore
         user32)
     if(MSVC)
         inkpod_enable_strict_warnings(inkpod_windows_shortcut_profile_tests)
@@ -776,6 +831,10 @@ if(WIN32)
     add_executable(inkpod WIN32
         apps/windows/app/activation.cpp
         apps/windows/app/activation.h
+        apps/windows/app/application_data_paths.cpp
+        apps/windows/app/application_data_paths.h
+        apps/windows/app/application_settings.cpp
+        apps/windows/app/application_settings.h
         apps/windows/app/application_host.cpp
         apps/windows/app/application_host.h
         apps/windows/app/application_owner_graph.h

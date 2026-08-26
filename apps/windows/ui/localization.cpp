@@ -9,11 +9,6 @@
 namespace inkpod::windows::ui {
 namespace {
 
-constexpr std::uint32_t kLanguageSettingMagic = UINT32_C(0x4c554b49);
-constexpr std::uint32_t kLanguageSettingVersion = 1U;
-constexpr std::size_t kLanguageSettingBytes = 16U;
-constexpr wchar_t kSettingsKey[] = L"Software\\inkpod";
-constexpr wchar_t kSettingsValue[] = L"UiLanguagePreferenceV1";
 constexpr std::size_t kMaximumPreferredLanguageBytes = 64U * 1024U;
 
 UiLanguage g_language{UiLanguage::English};
@@ -37,30 +32,6 @@ bool IsValidPreference(UiLanguagePreference preference) noexcept {
     return preference == UiLanguagePreference::System
         || preference == UiLanguagePreference::Japanese
         || preference == UiLanguagePreference::English;
-}
-
-void AppendU32(
-    std::vector<std::uint8_t>& output, std::uint32_t value) {
-    output.push_back(static_cast<std::uint8_t>(value));
-    output.push_back(static_cast<std::uint8_t>(value >> 8U));
-    output.push_back(static_cast<std::uint8_t>(value >> 16U));
-    output.push_back(static_cast<std::uint8_t>(value >> 24U));
-}
-
-bool ReadU32(
-    const std::uint8_t* bytes,
-    std::size_t length,
-    std::size_t& cursor,
-    std::uint32_t& value) noexcept {
-    if (cursor > length || length - cursor < sizeof(std::uint32_t)) {
-        return false;
-    }
-    value = static_cast<std::uint32_t>(bytes[cursor])
-        | static_cast<std::uint32_t>(bytes[cursor + 1U]) << 8U
-        | static_cast<std::uint32_t>(bytes[cursor + 2U]) << 16U
-        | static_cast<std::uint32_t>(bytes[cursor + 3U]) << 24U;
-    cursor += sizeof(std::uint32_t);
-    return true;
 }
 
 bool StartsWithJapaneseLanguage(std::wstring_view language) noexcept {
@@ -93,104 +64,6 @@ bool HasJapaneseCharacters(std::wstring_view text) noexcept {
 }
 
 }  // namespace
-
-bool EncodeUiLanguagePreference(
-    UiLanguagePreference preference,
-    std::vector<std::uint8_t>& output) noexcept {
-    if (!IsValidPreference(preference)) {
-        return false;
-    }
-    try {
-        std::vector<std::uint8_t> encoded;
-        encoded.reserve(kLanguageSettingBytes);
-        AppendU32(encoded, kLanguageSettingMagic);
-        AppendU32(encoded, kLanguageSettingVersion);
-        AppendU32(encoded, static_cast<std::uint32_t>(preference));
-        AppendU32(encoded, 0U);
-        output = std::move(encoded);
-        return true;
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-}
-
-bool DecodeUiLanguagePreference(
-    const std::uint8_t* bytes,
-    std::size_t length,
-    UiLanguagePreference& preference) noexcept {
-    if (length != kLanguageSettingBytes || bytes == nullptr) {
-        return false;
-    }
-    std::size_t cursor{};
-    std::uint32_t magic{};
-    std::uint32_t version{};
-    std::uint32_t raw_preference{};
-    std::uint32_t reserved{};
-    if (!ReadU32(bytes, length, cursor, magic)
-        || !ReadU32(bytes, length, cursor, version)
-        || !ReadU32(bytes, length, cursor, raw_preference)
-        || !ReadU32(bytes, length, cursor, reserved)
-        || cursor != length || magic != kLanguageSettingMagic
-        || version != kLanguageSettingVersion || reserved != 0U) {
-        return false;
-    }
-    const auto decoded = static_cast<UiLanguagePreference>(raw_preference);
-    if (!IsValidPreference(decoded)) {
-        return false;
-    }
-    preference = decoded;
-    return true;
-}
-
-bool LoadUiLanguagePreference(UiLanguagePreference& preference) noexcept {
-    HKEY key{};
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, kSettingsKey, 0, KEY_QUERY_VALUE, &key)
-        != ERROR_SUCCESS) {
-        return false;
-    }
-    std::array<std::uint8_t, kLanguageSettingBytes> bytes{};
-    DWORD type{};
-    DWORD byte_count = static_cast<DWORD>(bytes.size());
-    const LSTATUS status = RegQueryValueExW(
-        key, kSettingsValue, nullptr, &type, bytes.data(), &byte_count);
-    RegCloseKey(key);
-    return status == ERROR_SUCCESS && type == REG_BINARY
-        && byte_count == bytes.size()
-        && DecodeUiLanguagePreference(bytes.data(), bytes.size(), preference);
-}
-
-bool SaveUiLanguagePreference(UiLanguagePreference preference) noexcept {
-    std::vector<std::uint8_t> bytes;
-    if (!EncodeUiLanguagePreference(preference, bytes)) {
-        return false;
-    }
-    HKEY key{};
-    if (RegCreateKeyExW(
-            HKEY_CURRENT_USER,
-            kSettingsKey,
-            0,
-            nullptr,
-            REG_OPTION_NON_VOLATILE,
-            KEY_SET_VALUE,
-            nullptr,
-            &key,
-            nullptr) != ERROR_SUCCESS) {
-        return false;
-    }
-    const LSTATUS status = RegSetValueExW(
-        key,
-        kSettingsValue,
-        0,
-        REG_BINARY,
-        bytes.data(),
-        static_cast<DWORD>(bytes.size()));
-    RegCloseKey(key);
-    if (status == ERROR_SUCCESS) {
-        g_preference = preference;
-        return true;
-    }
-    return false;
-}
 
 UiLanguage ResolveUiLanguage(
     UiLanguagePreference preference,

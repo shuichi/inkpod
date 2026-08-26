@@ -97,13 +97,13 @@ endforeach()
 
 file(READ "${APPLICATION_SOURCE}" APPLICATION)
 foreach(REQUIRED IN ITEMS
-        "LoadWorkspaceWindowCount"
+        "state.settings.Values().workspaces.size()"
         "CreateWorkspaceWindow"
         "state.Workspaces().Count()"
         "state.Workspaces().At(index)")
     string(FIND "${APPLICATION}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
-        message(FATAL_ERROR "G10 registry-driven application loop is missing: ${REQUIRED}")
+        message(FATAL_ERROR "G10 settings-driven application loop is missing: ${REQUIRED}")
     endif()
 endforeach()
 
@@ -119,4 +119,4 @@ endforeach()
 
 message(STATUS
     "Verified ApplicationHost/WorkspaceWindow/DocumentSession/DocumentView ownership, "
-    "G2 runtime boundaries, and G10 bounded multi-window registry/routing")
+    "G2 runtime boundaries, and G10 bounded multi-window settings/routing")

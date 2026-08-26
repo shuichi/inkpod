@@ -1,11 +1,12 @@
 #include "batch_set_store.h"
 
 #include <windows.h>
-#include <shlobj.h>
 
 #include <algorithm>
 #include <cwctype>
 #include <new>
+
+#include "app/application_data_paths.h"
 
 namespace inkpod::windows::ui {
 namespace {
@@ -125,35 +126,8 @@ bool NameLess(const std::wstring& left, const std::wstring& right) noexcept {
 } // namespace
 
 bool PrepareDefaultBatchSetDirectory(std::wstring& directory) noexcept {
-    PWSTR roaming_path{};
-    if (SHGetKnownFolderPath(
-            FOLDERID_RoamingAppData, KF_FLAG_DEFAULT, nullptr, &roaming_path)
-        != S_OK
-        || roaming_path == nullptr) {
-        CoTaskMemFree(roaming_path);
-        return false;
-    }
-    std::wstring app_directory;
-    try {
-        app_directory.assign(roaming_path);
-    } catch (const std::bad_alloc&) {
-        CoTaskMemFree(roaming_path);
-        return false;
-    }
-    CoTaskMemFree(roaming_path);
-    if (!AppendComponent(app_directory, L"inkpod")
-        || !EnsureDirectory(app_directory)) {
-        return false;
-    }
-    try {
-        directory = app_directory;
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-    if (!AppendComponent(directory, L"batch-sets")) {
-        return false;
-    }
-    return EnsureDirectory(directory);
+    return inkpod::app::EnsureApplicationDataDirectory(
+        inkpod::app::ApplicationDataDirectory::BatchSets, directory);
 }
 
 bool EnsureBatchSetDirectory(const std::wstring& directory) noexcept {

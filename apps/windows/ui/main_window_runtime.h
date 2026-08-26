@@ -35,6 +35,8 @@ bool HandleApplicationActivation(
 void UpdateMenuState(app::ApplicationHost& state) noexcept;
 void ShowInitialPalettes(app::ApplicationHost& state) noexcept;
 void CaptureWorkspacePresentation(app::ApplicationHost& state) noexcept;
+[[nodiscard]] bool PersistApplicationSettings(
+    app::ApplicationHost& state) noexcept;
 void ShowCoreError(
     const app::ApplicationHost& state,
     HWND owner,

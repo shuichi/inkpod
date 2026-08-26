@@ -3,7 +3,9 @@
 #include "ui/command_catalog.h"
 #include "app/resource.h"
 
+#include <algorithm>
 #include <cstdio>
+#include <string>
 #include <vector>
 
 namespace {
@@ -35,7 +37,9 @@ ShortcutProfileBinding Binding(
     binding.context = context;
     binding.key_match = match;
     for (const std::uint32_t key : logical_keys) {
-        binding.strokes[binding.stroke_count++] = ShortcutInputStroke{key, key + 100U, 0U};
+        const UINT scan = MapVirtualKeyW(key, MAPVK_VK_TO_VSC_EX);
+        binding.strokes[binding.stroke_count++] = ShortcutInputStroke{
+            key, scan == 0U ? key : scan, 0U};
     }
     return binding;
 }
@@ -72,7 +76,8 @@ int main() {
         return 1;
     }
 
-    const ShortcutInputStroke canvas_b{'B', static_cast<std::uint32_t>('B') + 100U, 0U};
+    const ShortcutInputStroke canvas_b{
+        'B', MapVirtualKeyW('B', MAPVK_VK_TO_VSC_EX), 0U};
     const auto canvas = ResolveShortcutProfile(
         profile.bindings, ShortcutContext::Canvas, std::span(&canvas_b, 1U));
     const auto timeline = ResolveShortcutProfile(
@@ -84,7 +89,8 @@ int main() {
         return 2;
     }
 
-    const ShortcutInputStroke pane_q{'Q', static_cast<std::uint32_t>('Q') + 100U, 0U};
+    const ShortcutInputStroke pane_q{
+        'Q', MapVirtualKeyW('Q', MAPVK_VK_TO_VSC_EX), 0U};
     const auto prefix = ResolveShortcutProfile(
         profile.bindings, ShortcutContext::Pane, std::span(&pane_q, 1U));
     if (prefix.match != INKPOD_SHORTCUT_MATCH_PREFIX) {
@@ -116,7 +122,8 @@ int main() {
         ShortcutContext::Canvas,
         {'X'},
         ShortcutKeyMatch::Physical);
-    const ShortcutInputStroke physical_input{'Y', static_cast<std::uint32_t>('X') + 100U, 0U};
+    const ShortcutInputStroke physical_input{
+        'Y', MapVirtualKeyW('X', MAPVK_VK_TO_VSC_EX), 0U};
     const auto physical = ResolveShortcutProfile(
         profile.bindings, ShortcutContext::Canvas, std::span(&physical_input, 1U));
     if (physical.match != INKPOD_SHORTCUT_MATCH_EXACT
@@ -146,6 +153,13 @@ int main() {
         != ShortcutPresetStatus::Ok) {
         return 9;
     }
+    const std::string json(encoded.begin(), encoded.end());
+    if (json.find("\"format\": \"inkpod-shortcuts\"") == std::string::npos
+        || json.find("\"command\": \"tool.brush\"") == std::string::npos
+        || json.find("\"logicalKey\": \"B\"") == std::string::npos
+        || json.find("base64") != std::string::npos) {
+        return 9;
+    }
     ShortcutProfile decoded{};
     if (inkpod::windows::ui::DecodeShortcutPreset(encoded, decoded)
             != ShortcutPresetStatus::Ok
@@ -153,7 +167,16 @@ int main() {
         return 10;
     }
     std::vector<std::uint8_t> noncurrent = encoded;
-    noncurrent[8] = 2U;
+    const std::string version_token = "\"formatVersion\": 2";
+    const auto version = std::search(
+        noncurrent.begin(),
+        noncurrent.end(),
+        version_token.begin(),
+        version_token.end());
+    if (version == noncurrent.end()) {
+        return 11;
+    }
+    version[version_token.size() - 1U] = static_cast<std::uint8_t>('3');
     if (inkpod::windows::ui::DecodeShortcutPreset(noncurrent, decoded)
         != ShortcutPresetStatus::UnsupportedVersion) {
         return 11;

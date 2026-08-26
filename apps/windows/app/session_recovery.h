@@ -86,43 +86,6 @@ enum class OutputColorGuardProfileSetting : std::uint32_t {
 [[nodiscard]] bool DiscardRecoveryArtifact(
     const std::wstring& recovery_path) noexcept;
 
-[[nodiscard]] bool LoadRestorePreviousDocumentsSetting(
-    bool& enabled) noexcept;
-[[nodiscard]] bool SaveRestorePreviousDocumentsSetting(
-    bool enabled) noexcept;
-[[nodiscard]] bool EncodeSequenceCellSwitchPolicy(
-    SequenceCellSwitchPolicy policy,
-    std::vector<std::uint8_t>& output) noexcept;
-[[nodiscard]] bool DecodeSequenceCellSwitchPolicy(
-    const std::uint8_t* bytes,
-    std::size_t length,
-    SequenceCellSwitchPolicy& policy) noexcept;
-[[nodiscard]] bool LoadSequenceCellSwitchPolicy(
-    SequenceCellSwitchPolicy& policy) noexcept;
-[[nodiscard]] bool SaveSequenceCellSwitchPolicy(
-    SequenceCellSwitchPolicy policy) noexcept;
-[[nodiscard]] bool EncodeSequenceEndpointPolicy(
-    SequenceEndpointPolicy policy,
-    std::vector<std::uint8_t>& output) noexcept;
-[[nodiscard]] bool DecodeSequenceEndpointPolicy(
-    const std::uint8_t* bytes,
-    std::size_t length,
-    SequenceEndpointPolicy& policy) noexcept;
-[[nodiscard]] bool LoadSequenceEndpointPolicy(
-    SequenceEndpointPolicy& policy) noexcept;
-[[nodiscard]] bool SaveSequenceEndpointPolicy(
-    SequenceEndpointPolicy policy) noexcept;
-[[nodiscard]] bool EncodeOutputColorGuardProfileSetting(
-    OutputColorGuardProfileSetting profile,
-    std::vector<std::uint8_t>& output) noexcept;
-[[nodiscard]] bool DecodeOutputColorGuardProfileSetting(
-    const std::uint8_t* bytes,
-    std::size_t length,
-    OutputColorGuardProfileSetting& profile) noexcept;
-[[nodiscard]] bool LoadOutputColorGuardProfileSetting(
-    OutputColorGuardProfileSetting& profile) noexcept;
-[[nodiscard]] bool SaveOutputColorGuardProfileSetting(
-    OutputColorGuardProfileSetting profile) noexcept;
 [[nodiscard]] bool LoadPreviousDocumentPaths(
     std::vector<std::wstring>& paths) noexcept;
 [[nodiscard]] bool EncodePreviousDocumentPaths(

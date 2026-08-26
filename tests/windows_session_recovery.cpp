@@ -11,25 +11,16 @@ namespace {
 
 using inkpod::app::DecodePreviousDocumentPaths;
 using inkpod::app::DecodeRecoveryMetadata;
-using inkpod::app::DecodeSequenceCellSwitchPolicy;
-using inkpod::app::DecodeSequenceEndpointPolicy;
-using inkpod::app::DecodeOutputColorGuardProfileSetting;
 using inkpod::app::DiscardRecoveryArtifact;
 using inkpod::app::DocumentIdentity;
 using inkpod::app::DocumentIdentityKind;
 using inkpod::app::DocumentSessionId;
 using inkpod::app::EncodePreviousDocumentPaths;
 using inkpod::app::EncodeRecoveryMetadata;
-using inkpod::app::EncodeSequenceCellSwitchPolicy;
-using inkpod::app::EncodeSequenceEndpointPolicy;
-using inkpod::app::EncodeOutputColorGuardProfileSetting;
 using inkpod::app::EnumerateRecoveryCandidatesInDirectory;
 using inkpod::app::Generation;
 using inkpod::app::ReadRecoveryMetadata;
 using inkpod::app::RecoveryMetadata;
-using inkpod::app::SequenceCellSwitchPolicy;
-using inkpod::app::SequenceEndpointPolicy;
-using inkpod::app::OutputColorGuardProfileSetting;
 using inkpod::app::SequenceRecoveryPath;
 using inkpod::app::WriteRecoveryMetadata;
 
@@ -127,28 +118,7 @@ int TestSessionPathCodec() {
     return 0;
 }
 
-int TestSequenceSwitchPolicyCodec() {
-    std::vector<std::uint8_t> bytes;
-    SequenceCellSwitchPolicy decoded{SequenceCellSwitchPolicy::Prompt};
-    if (!EncodeSequenceCellSwitchPolicy(
-            SequenceCellSwitchPolicy::AutosaveBeforeSwitch, bytes)
-        || bytes.size() != 16U
-        || !DecodeSequenceCellSwitchPolicy(bytes.data(), bytes.size(), decoded)
-        || decoded != SequenceCellSwitchPolicy::AutosaveBeforeSwitch) {
-        return 15;
-    }
-    std::vector<std::uint8_t> wrong_version = bytes;
-    wrong_version[4] = 2U;
-    if (DecodeSequenceCellSwitchPolicy(
-            wrong_version.data(), wrong_version.size(), decoded)) {
-        return 16;
-    }
-    bytes[12] = 3U;
-    if (DecodeSequenceCellSwitchPolicy(bytes.data(), bytes.size(), decoded)
-        || EncodeSequenceCellSwitchPolicy(
-            static_cast<SequenceCellSwitchPolicy>(3U), bytes)) {
-        return 17;
-    }
+int TestSequenceRecoveryPath() {
     std::wstring first_path;
     std::wstring second_path;
     std::wstring repeated_path;
@@ -160,56 +130,6 @@ int TestSequenceSwitchPolicyCodec() {
         || SequenceRecoveryPath(1U, 2U, 0U, repeated_path)
         || SequenceRecoveryPath(0U, 0U, 1U, repeated_path)) {
         return 18;
-    }
-    return 0;
-}
-
-int TestSequenceEndpointPolicyCodec() {
-    std::vector<std::uint8_t> bytes;
-    SequenceEndpointPolicy decoded{SequenceEndpointPolicy::Stop};
-    if (!EncodeSequenceEndpointPolicy(SequenceEndpointPolicy::Wrap, bytes)
-        || bytes.size() != 16U
-        || !DecodeSequenceEndpointPolicy(bytes.data(), bytes.size(), decoded)
-        || decoded != SequenceEndpointPolicy::Wrap) {
-        return 30;
-    }
-    std::vector<std::uint8_t> wrong_version = bytes;
-    wrong_version[4] = 2U;
-    if (DecodeSequenceEndpointPolicy(
-            wrong_version.data(), wrong_version.size(), decoded)) {
-        return 31;
-    }
-    bytes[12] = 3U;
-    if (DecodeSequenceEndpointPolicy(bytes.data(), bytes.size(), decoded)
-        || EncodeSequenceEndpointPolicy(
-            static_cast<SequenceEndpointPolicy>(3U), bytes)) {
-        return 32;
-    }
-    return 0;
-}
-
-int TestOutputColorGuardProfileCodec() {
-    std::vector<std::uint8_t> bytes;
-    OutputColorGuardProfileSetting decoded{
-        OutputColorGuardProfileSetting::Bt709ConservativeYcbcr};
-    if (!EncodeOutputColorGuardProfileSetting(
-            OutputColorGuardProfileSetting::Bt709ConservativeYcbcr, bytes)
-        || bytes.size() != 16U
-        || !DecodeOutputColorGuardProfileSetting(bytes.data(), bytes.size(), decoded)
-        || decoded != OutputColorGuardProfileSetting::Bt709ConservativeYcbcr) {
-        return 19;
-    }
-    std::vector<std::uint8_t> wrong_version = bytes;
-    wrong_version[4] = 2U;
-    if (DecodeOutputColorGuardProfileSetting(
-            wrong_version.data(), wrong_version.size(), decoded)) {
-        return 28;
-    }
-    bytes[12] = 2U;
-    if (DecodeOutputColorGuardProfileSetting(bytes.data(), bytes.size(), decoded)
-        || EncodeOutputColorGuardProfileSetting(
-            static_cast<OutputColorGuardProfileSetting>(2U), bytes)) {
-        return 29;
     }
     return 0;
 }
@@ -273,16 +193,6 @@ int main() {
     if (session_paths != 0) {
         return session_paths;
     }
-    const int switch_policy = TestSequenceSwitchPolicyCodec();
-    if (switch_policy != 0) {
-        return switch_policy;
-    }
-    const int endpoint_policy = TestSequenceEndpointPolicyCodec();
-    if (endpoint_policy != 0) {
-        return endpoint_policy;
-    }
-    const int output_color_guard_profile = TestOutputColorGuardProfileCodec();
-    return output_color_guard_profile == 0
-        ? TestCatalog()
-        : output_color_guard_profile;
+    const int sequence_recovery = TestSequenceRecoveryPath();
+    return sequence_recovery == 0 ? TestCatalog() : sequence_recovery;
 }

@@ -101,9 +101,9 @@ The script writes a unique temporary archive beside the destination, verifies
 the exact entry set and each source-file SHA-256, and only then atomically
 replaces an older artifact. Creation or validation failure before replacement
 leaves an existing valid ZIP unchanged. The portable build registers no `.inkpod`
-association and still uses the current
-Windows user profile and HKCU for workspace, recent-file, autosave, recovery,
-and Help-cache state.
+association. Like the installed build, it uses `%LOCALAPPDATA%\inkpod` for settings,
+session, autosave/recovery, Batch sets, and cache data. It does not use HKCU for
+ordinary application settings.
 
 `inkpod_windows_msix_payload_smoke` unpacks the produced artifact with `MakeAppx`
 without elevation and verifies the executable, identity/version/architecture, license,

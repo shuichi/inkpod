@@ -52,8 +52,8 @@ foreach(REQUIRED IN ITEMS
         "kMaximumRecoveryCandidates"
         "EnumerateRecoveryCandidatesInDirectory"
         "DiscardRecoveryArtifact"
-        "RestorePreviousDocumentsV1"
-        "PreviousDocumentPathsV1"
+        "ResolveApplicationSessionPath"
+        "kSessionPathsVersion"
         "WriteFileAtomic")
     string(FIND "${RECOVERY_TEXT}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)

@@ -6479,7 +6479,7 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
     undo_shortcut.strokes[0] = {
         static_cast<std::uint32_t>('U'), INKPOD_SHORTCUT_MODIFIER_CONTROL};
     const InkpodStatus navigation_status = windows::ui::RebindShortcut(
-        *state.engine, state.shortcuts, undo_shortcut, false);
+        *state.engine, state.shortcuts, undo_shortcut);
     if (navigation_status != INKPOD_STATUS_OK) {
         return 327;
     }
@@ -6641,7 +6641,7 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
             shortcut_menu_command)) {
         return 330;
     }
-    if (ResetShortcuts(*state.engine, state.shortcuts, true) != INKPOD_STATUS_OK) {
+    if (ResetShortcuts(*state.engine, state.shortcuts) != INKPOD_STATUS_OK) {
         return 361;
     }
     if (!ResolveConfiguredShortcut(
@@ -14471,7 +14471,7 @@ int RunApplicationSmoke(app::ApplicationHost& state) noexcept {
                 INKPOD_SHORTCUT_MODIFIER_CONTROL | INKPOD_SHORTCUT_MODIFIER_ALT};
             UINT resolved{};
             const InkpodStatus rebind = RebindShortcut(
-                *state.engine, state.shortcuts, replacement, false);
+                *state.engine, state.shortcuts, replacement);
             const bool shortcut_resolved = rebind == INKPOD_STATUS_OK
                 && runtime::ResolveConfiguredShortcut(
                     state,
@@ -14480,7 +14480,7 @@ int RunApplicationSmoke(app::ApplicationHost& state) noexcept {
                     resolved)
                 && resolved == IDM_VIEW_GRID;
             const InkpodStatus restore = rebind == INKPOD_STATUS_OK
-                ? RebindShortcut(*state.engine, state.shortcuts, saved, false)
+                ? RebindShortcut(*state.engine, state.shortcuts, saved)
                 : rebind;
             if (!shortcut_resolved || restore != INKPOD_STATUS_OK) {
                 exit_code = 733;

@@ -119,6 +119,8 @@ using inkpod::app::SequenceCellSwitchPolicy;
 using inkpod::app::SequenceEndpointPolicy;
 using inkpod::app::SequenceSwitchAsyncResult;
 using inkpod::app::ApplicationHost;
+using inkpod::app::ApplicationSettings;
+using inkpod::app::PersistedWorkspace;
 using inkpod::app::BatchOperationUi;
 using inkpod::app::ColorChartGenerationJob;
 using inkpod::app::OutputColorGuardJob;
@@ -154,19 +156,6 @@ using inkpod::app::SubpaletteEncodedImage;
 using inkpod::app::SubpaletteLoadJob;
 using inkpod::app::SubpaletteSourceCache;
 
-std::array<wchar_t, 96U> WorkspaceRegistryValueName(
-    std::wstring_view base, std::uint32_t slot) noexcept {
-    std::array<wchar_t, 96U> result{};
-    _snwprintf_s(
-        result.data(),
-        result.size(),
-        _TRUNCATE,
-        L"%.*ls.%u",
-        static_cast<int>(base.size()),
-        base.data(),
-        slot);
-    return result;
-}
 using inkpod::app::LocatorAsyncResult;
 using inkpod::app::PaneActionTarget;
 using inkpod::app::PaneTargetNotice;
@@ -190,10 +179,6 @@ using inkpod::app::RecoveryMetadata;
 using inkpod::app::BuildRecoveryMetadata;
 using inkpod::app::DiscardRecoveryArtifact;
 using inkpod::app::ClearPreviousDocumentPaths;
-using inkpod::app::SaveRestorePreviousDocumentsSetting;
-using inkpod::app::SaveSequenceCellSwitchPolicy;
-using inkpod::app::SaveSequenceEndpointPolicy;
-using inkpod::app::SaveOutputColorGuardProfileSetting;
 using inkpod::app::OutputColorGuardProfileSetting;
 using inkpod::app::SequenceRecoveryPath;
 using inkpod::app::ResolveDocumentFileIdentity;
@@ -13393,12 +13378,6 @@ bool CloseWorkspaceWindow(ApplicationHost& state, HWND window) noexcept {
 
     (void)state.ActivateWorkspaceWindow(closing->id, false);
     CaptureWorkspacePresentation(state);
-    if (!state.lifetime.smoke_test) {
-        const auto session_name = WorkspaceRegistryValueName(
-            L"WorkspaceSessionV5", closing->persistence_slot);
-        (void)SaveWorkspaceLayout(
-            closing->windows.workspace, session_name.data());
-    }
     ResetSubpaletteTarget(state, *closing);
     if (closing->subpalette_canvas_id) {
         (void)state.routing.targets.UnregisterAuxiliaryCanvas(
@@ -13415,6 +13394,7 @@ bool CloseWorkspaceWindow(ApplicationHost& state, HWND window) noexcept {
     if (!state.RemoveWorkspaceWindow(closing_id)) {
         return false;
     }
+    (void)PersistApplicationSettings(state);
     inkpod::app::WorkspaceWindow* remaining = state.Workspaces().LastFocused();
     if (remaining == nullptr) {
         remaining = state.Workspaces().Current();
@@ -14074,6 +14054,98 @@ void ApplyOrDeferWorkspacePresentation(ApplicationHost& state) noexcept {
     UpdateMenuState(state);
 }
 
+bool PersistApplicationSettings(ApplicationHost& state) noexcept {
+    if (state.lifetime.smoke_test) {
+        return true;
+    }
+    try {
+        ApplicationSettings candidate = state.settings.Values();
+        candidate.restore_previous_documents =
+            state.lifetime.restore_previous_documents;
+        candidate.sequence_switch_policy =
+            state.lifetime.sequence_switch_policy;
+        candidate.sequence_endpoint_policy =
+            state.lifetime.sequence_endpoint_policy;
+        candidate.output_color_guard_profile =
+            static_cast<inkpod::app::OutputColorGuardProfileSetting>(
+                state.effects.output_color_guard_profile);
+        candidate.shortcuts = state.shortcuts.profile_set;
+        candidate.workspaces.clear();
+        candidate.workspaces.reserve(state.Workspaces().Count());
+        std::vector<PersistedWorkspace> saved_workspaces;
+        saved_workspaces.reserve(state.Workspaces().Count());
+        const WorkspaceWindowId active = state.Workspace().id;
+        for (std::size_t index = 0U; index < state.Workspaces().Count(); ++index) {
+            WorkspaceWindow* workspace = state.Workspaces().At(index);
+            if (workspace == nullptr
+                || !state.ActivateWorkspaceWindow(workspace->id, false)) {
+                (void)state.ActivateWorkspaceWindow(active, false);
+                return false;
+            }
+            CaptureWorkspacePresentation(state);
+            const std::uint32_t previous_slot = workspace->persistence_slot;
+            const std::uint32_t normalized_slot =
+                static_cast<std::uint32_t>(index);
+            candidate.workspaces.push_back(PersistedWorkspace{
+                normalized_slot,
+                workspace->windows.workspace});
+            const auto saved = std::find_if(
+                candidate.saved_workspaces.begin(),
+                candidate.saved_workspaces.end(),
+                [previous_slot](const PersistedWorkspace& item) {
+                    return item.slot == previous_slot;
+                });
+            if (saved != candidate.saved_workspaces.end()) {
+                saved_workspaces.push_back(PersistedWorkspace{
+                    normalized_slot,
+                    saved->layout});
+            }
+            workspace->persistence_slot = normalized_slot;
+        }
+        candidate.saved_workspaces = std::move(saved_workspaces);
+        (void)state.ActivateWorkspaceWindow(active, false);
+        return state.settings.SaveAutomatic(candidate);
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+}
+
+template <typename Mutation>
+bool SaveApplicationSettingsUpdate(
+    ApplicationHost& state, Mutation&& mutation) noexcept {
+    try {
+        ApplicationSettings candidate = state.settings.Values();
+        mutation(candidate);
+        return state.lifetime.smoke_test
+            ? state.settings.ReplaceTransient(candidate)
+            : state.settings.Save(candidate);
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+}
+
+bool SaveWorkspaceSnapshot(
+    ApplicationHost& state,
+    const WorkspaceLayoutState& layout) noexcept {
+    const std::uint32_t slot = state.Workspace().persistence_slot;
+    return SaveApplicationSettingsUpdate(
+        state,
+        [slot, &layout](ApplicationSettings& settings) {
+            auto saved = std::find_if(
+                settings.saved_workspaces.begin(),
+                settings.saved_workspaces.end(),
+                [slot](const PersistedWorkspace& item) {
+                    return item.slot == slot;
+                });
+            if (saved == settings.saved_workspaces.end()) {
+                settings.saved_workspaces.push_back(
+                    PersistedWorkspace{slot, layout});
+            } else {
+                saved->layout = layout;
+            }
+        });
+}
+
 bool ApplyPreferencesValues(
     void* context,
     const PreferencesValues& values,
@@ -14082,21 +14154,8 @@ bool ApplyPreferencesValues(
     if (state == nullptr || state->engine == nullptr) {
         return false;
     }
-    const PreferencesValues previous{
-        CurrentUiLanguagePreference(),
-        state->lifetime.restore_previous_documents,
-        state->lifetime.sequence_switch_policy,
-        state->lifetime.sequence_endpoint_policy,
-        OutputColorGuardProfileSetting::Bt709ConservativeYcbcr,
-        state->Workspace().windows.workspace.selected_preset,
-        state->Workspace().windows.workspace.density,
-        state->Workspace().windows.workspace.dock.Mirrored(),
-        state->shortcuts.profile_set};
-
     CaptureWorkspacePresentation(*state);
-    const WorkspaceLayoutState previous_layout =
-        state->Workspace().windows.workspace;
-    WorkspaceLayoutState candidate_layout = previous_layout;
+    WorkspaceLayoutState candidate_layout = state->Workspace().windows.workspace;
     if (values.workspace_preset != WorkspacePreset::Custom
         && !ApplyWorkspacePreset(candidate_layout, values.workspace_preset)) {
         return false;
@@ -14104,28 +14163,42 @@ bool ApplyPreferencesValues(
     candidate_layout.selected_preset = values.workspace_preset;
     candidate_layout.density = values.workspace_density;
     candidate_layout.dock.SetMirrored(values.workspace_mirrored);
-    const auto session_name = WorkspaceRegistryValueName(
-        L"WorkspaceSessionV5", state->Workspace().persistence_slot);
-
-    const auto save_scalar_values = [](const PreferencesValues& item) noexcept {
-        return SaveUiLanguagePreference(item.language)
-            && SaveRestorePreviousDocumentsSetting(
-                item.restore_previous_documents)
-            && SaveSequenceCellSwitchPolicy(item.sequence_switch_policy)
-            && SaveSequenceEndpointPolicy(item.sequence_endpoint_policy)
-            && SaveOutputColorGuardProfileSetting(item.color_profile);
-    };
-    if (!save_scalar_values(values)
-        || !SaveWorkspaceLayout(candidate_layout, session_name.data())) {
-        (void)save_scalar_values(previous);
-        (void)SaveWorkspaceLayout(previous_layout, session_name.data());
-        return false;
-    }
-    const InkpodStatus shortcut_status = ApplyShortcutProfileSet(
-        *state->engine, state->shortcuts, values.shortcuts, true);
-    if (shortcut_status != INKPOD_STATUS_OK) {
-        (void)save_scalar_values(previous);
-        (void)SaveWorkspaceLayout(previous_layout, session_name.data());
+    try {
+        const ApplicationSettings previous_settings = state->settings.Values();
+        ApplicationSettings candidate_settings = previous_settings;
+        candidate_settings.ui_language = values.language;
+        candidate_settings.restore_previous_documents =
+            values.restore_previous_documents;
+        candidate_settings.sequence_switch_policy = values.sequence_switch_policy;
+        candidate_settings.sequence_endpoint_policy = values.sequence_endpoint_policy;
+        candidate_settings.output_color_guard_profile = values.color_profile;
+        candidate_settings.shortcuts = values.shortcuts;
+        const std::uint32_t slot = state->Workspace().persistence_slot;
+        auto workspace = std::find_if(
+            candidate_settings.workspaces.begin(),
+            candidate_settings.workspaces.end(),
+            [slot](const PersistedWorkspace& item) { return item.slot == slot; });
+        if (workspace == candidate_settings.workspaces.end()) {
+            candidate_settings.workspaces.push_back(
+                PersistedWorkspace{slot, candidate_layout});
+        } else {
+            workspace->layout = candidate_layout;
+        }
+        const bool settings_saved = state->lifetime.smoke_test
+            ? state->settings.ReplaceTransient(candidate_settings)
+            : state->settings.Save(candidate_settings);
+        if (!settings_saved) {
+            return false;
+        }
+        const InkpodStatus shortcut_status = ApplyShortcutProfileSet(
+            *state->engine, state->shortcuts, values.shortcuts);
+        if (shortcut_status != INKPOD_STATUS_OK) {
+            (void)(state->lifetime.smoke_test
+                ? state->settings.ReplaceTransient(previous_settings)
+                : state->settings.Save(previous_settings));
+            return false;
+        }
+    } catch (const std::bad_alloc&) {
         return false;
     }
 
@@ -14186,30 +14259,11 @@ void NotifyDockHostChanged(
 }
 
 bool InitializeMainChrome(ApplicationHost& state) noexcept {
-    const auto session_name = WorkspaceRegistryValueName(
-        L"WorkspaceSessionV5", state.Workspace().persistence_slot);
-    const auto legacy_session_name = WorkspaceRegistryValueName(
-        L"WorkspaceSessionV4", state.Workspace().persistence_slot);
     if (!state.lifetime.smoke_test) {
-        if (!LoadWorkspaceLayout(
-                state.Workspace().windows.workspace, session_name.data())
-            && (LoadWorkspaceLayout(
-                    state.Workspace().windows.workspace,
-                    legacy_session_name.data())
-                || (state.Workspace().persistence_slot == 0U
-                    && (LoadWorkspaceLayout(
-                            state.Workspace().windows.workspace,
-                            L"WorkspaceSessionV4")
-                        || LoadWorkspaceLayout(
-                            state.Workspace().windows.workspace,
-                            L"WorkspaceSessionV2"))))) {
-            if (SaveWorkspaceLayout(
-                    state.Workspace().windows.workspace, session_name.data())) {
-                static_cast<void>(DeleteWorkspaceLayout(
-                    legacy_session_name.data()));
-                static_cast<void>(DeleteWorkspaceLayout(L"WorkspaceSessionV4"));
-                static_cast<void>(DeleteWorkspaceLayout(L"WorkspaceSessionV2"));
-            }
+        const WorkspaceLayoutState* persisted = state.settings.Workspace(
+            state.Workspace().persistence_slot);
+        if (persisted != nullptr) {
+            state.Workspace().windows.workspace = *persisted;
         }
     }
     if (!inkpod::windows::ui::CreateMainChrome(
@@ -16787,7 +16841,11 @@ std::optional<LRESULT> RouteAnimationCommand(
                     == SequenceEndpointPolicy::Wrap
                 ? SequenceEndpointPolicy::Stop
                 : SequenceEndpointPolicy::Wrap;
-            if (!SaveSequenceEndpointPolicy(policy)) {
+            if (!SaveApplicationSettingsUpdate(
+                    *state,
+                    [policy](ApplicationSettings& settings) {
+                        settings.sequence_endpoint_policy = policy;
+                    })) {
                 MessageBoxW(
                     window,
                     UiText(UiStringId::Text0963),
@@ -17352,7 +17410,11 @@ std::optional<LRESULT> RouteSelectionViewCommand(
             const auto profile_setting =
                 static_cast<OutputColorGuardProfileSetting>(dialog.values[0]);
             if (!state->lifetime.smoke_test
-                && !SaveOutputColorGuardProfileSetting(profile_setting)) {
+                && !SaveApplicationSettingsUpdate(
+                    *state,
+                    [profile_setting](ApplicationSettings& settings) {
+                        settings.output_color_guard_profile = profile_setting;
+                    })) {
                 MessageBoxW(
                     window,
                     UiText(UiStringId::Text0520),
@@ -18685,8 +18747,20 @@ std::optional<LRESULT> RouteApplicationCommand(
         }
         case IDM_FILE_RESTORE_PREVIOUS: {
             const bool enabled = !state->lifetime.restore_previous_documents;
-            if (!SaveRestorePreviousDocumentsSetting(enabled)
+            if (!SaveApplicationSettingsUpdate(
+                    *state,
+                    [enabled](ApplicationSettings& settings) {
+                        settings.restore_previous_documents = enabled;
+                    })
                 || (!enabled && !ClearPreviousDocumentPaths())) {
+                if (!state->lifetime.smoke_test) {
+                    (void)SaveApplicationSettingsUpdate(
+                        *state,
+                        [state](ApplicationSettings& settings) {
+                            settings.restore_previous_documents =
+                                state->lifetime.restore_previous_documents;
+                        });
+                }
                 MessageBoxW(
                     window,
                     UiText(UiStringId::Text0535),
@@ -18704,7 +18778,11 @@ std::optional<LRESULT> RouteApplicationCommand(
                     == SequenceCellSwitchPolicy::AutosaveBeforeSwitch
                 ? SequenceCellSwitchPolicy::Prompt
                 : SequenceCellSwitchPolicy::AutosaveBeforeSwitch;
-            if (!SaveSequenceCellSwitchPolicy(policy)) {
+            if (!SaveApplicationSettingsUpdate(
+                    *state,
+                    [policy](ApplicationSettings& settings) {
+                        settings.sequence_switch_policy = policy;
+                    })) {
                 MessageBoxW(
                     window,
                     UiText(UiStringId::Text0229),
@@ -18716,8 +18794,14 @@ std::optional<LRESULT> RouteApplicationCommand(
             UpdateMenuState(*state);
             return 1;
         }
-        case IDM_WORKSPACE_NEW_WINDOW:
-            return CreateWorkspaceWindow(*state, true) != nullptr ? 1 : 0;
+        case IDM_WORKSPACE_NEW_WINDOW: {
+            WorkspaceWindow* created = CreateWorkspaceWindow(*state, true);
+            if (created == nullptr) {
+                return 0;
+            }
+            (void)PersistApplicationSettings(*state);
+            return 1;
+        }
         case IDM_WINDOW_LOCATOR:
             if (state->Workspace().locator_palette != nullptr) {
                 const bool shown = ToggleAuxiliaryPaneVisibility(
@@ -18899,10 +18983,8 @@ std::optional<LRESULT> RouteApplicationCommand(
         }
         case IDM_WORKSPACE_SAVE: {
             CaptureWorkspacePresentation(*state);
-            const auto saved_name = WorkspaceRegistryValueName(
-                L"WorkspaceSavedV5", state->Workspace().persistence_slot);
-            const bool saved = SaveWorkspaceLayout(
-                state->Workspace().windows.workspace, saved_name.data());
+            const bool saved = SaveWorkspaceSnapshot(
+                *state, state->Workspace().windows.workspace);
             if (!saved && !state->lifetime.smoke_test) {
                 MessageBoxW(
                     window,
@@ -18932,6 +19014,7 @@ std::optional<LRESULT> RouteApplicationCommand(
             }
             CaptureWorkspacePresentation(*state);
             WorkspaceLayoutState& layout = state->Workspace().windows.workspace;
+            const WorkspaceLayoutState previous_layout = layout;
             if (!SetWorkspaceCustomName(layout, dialog.value)) {
                 if (!state->lifetime.smoke_test) {
                     MessageBoxW(
@@ -18942,32 +19025,25 @@ std::optional<LRESULT> RouteApplicationCommand(
                 }
                 return 0;
             }
-            const auto saved_name = WorkspaceRegistryValueName(
-                L"WorkspaceSavedV5", state->Workspace().persistence_slot);
-            const bool saved = SaveWorkspaceLayout(layout, saved_name.data());
+            const bool saved = SaveWorkspaceSnapshot(*state, layout);
+            if (!saved) {
+                layout = previous_layout;
+            }
             UpdateMenuState(*state);
             return saved ? 1 : 0;
         }
         case IDM_WORKSPACE_RESTORE: {
-            WorkspaceLayoutState restored = state->Workspace().windows.workspace;
-            const auto saved_name = WorkspaceRegistryValueName(
-                L"WorkspaceSavedV5", state->Workspace().persistence_slot);
-            const auto legacy_saved_name = WorkspaceRegistryValueName(
-                L"WorkspaceSavedV4", state->Workspace().persistence_slot);
-            bool loaded = LoadWorkspaceLayout(restored, saved_name.data());
-            if (!loaded
-                && (LoadWorkspaceLayout(restored, legacy_saved_name.data())
-                    || (state->Workspace().persistence_slot == 0U
-                        && LoadWorkspaceLayout(restored, L"WorkspaceSavedV2")))) {
-                if (SaveWorkspaceLayout(restored, saved_name.data())) {
-                    static_cast<void>(DeleteWorkspaceLayout(
-                        legacy_saved_name.data()));
-                    static_cast<void>(DeleteWorkspaceLayout(L"WorkspaceSavedV2"));
-                }
-                loaded = true;
-            }
+            const std::uint32_t slot = state->Workspace().persistence_slot;
+            const auto& saved_workspaces = state->settings.Values().saved_workspaces;
+            const auto saved = std::find_if(
+                saved_workspaces.begin(),
+                saved_workspaces.end(),
+                [slot](const PersistedWorkspace& item) {
+                    return item.slot == slot;
+                });
+            const bool loaded = saved != saved_workspaces.end();
             if (loaded) {
-                state->Workspace().windows.workspace = restored;
+                state->Workspace().windows.workspace = saved->layout;
                 PreserveActiveJobProgressPane(*state);
                 ApplyOrDeferWorkspacePresentation(*state);
             } else if (!state->lifetime.smoke_test) {

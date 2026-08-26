@@ -185,16 +185,4 @@ void ClampWorkspaceFloatingPanes(
     WorkspaceLayoutState& state,
     WorkspaceAuxiliaryPane type) noexcept;
 
-bool LoadWorkspaceLayout(
-    WorkspaceLayoutState& state,
-    const wchar_t* value_name) noexcept;
-
-bool SaveWorkspaceLayout(
-    const WorkspaceLayoutState& state,
-    const wchar_t* value_name) noexcept;
-bool DeleteWorkspaceLayout(const wchar_t* value_name) noexcept;
-
-[[nodiscard]] bool LoadWorkspaceWindowCount(std::uint32_t& count) noexcept;
-[[nodiscard]] bool SaveWorkspaceWindowCount(std::uint32_t count) noexcept;
-
 }  // namespace inkpod::windows::ui

@@ -15,7 +15,6 @@ namespace {
 using inkpod::windows::ui::ComputeWorkspaceLayout;
 using inkpod::windows::ui::ComputeDockLayout;
 using inkpod::windows::ui::DecodeWorkspaceLayout;
-using inkpod::windows::ui::DeleteWorkspaceLayout;
 using inkpod::windows::ui::DockFloatingPlacement;
 using inkpod::windows::ui::DockLayoutModel;
 using inkpod::windows::ui::DockPaneType;
@@ -34,9 +33,7 @@ using inkpod::windows::ui::ClampWorkspaceFloatingPanes;
 using inkpod::windows::ui::ClampWorkspacePlacement;
 using inkpod::windows::ui::EncodeWorkspaceLayout;
 using inkpod::windows::ui::FindWorkspaceAuxiliaryPane;
-using inkpod::windows::ui::LoadWorkspaceLayout;
 using inkpod::windows::ui::ResetWorkspaceLayout;
-using inkpod::windows::ui::SaveWorkspaceLayout;
 using inkpod::windows::ui::SetWorkspaceCustomName;
 using inkpod::windows::ui::WorkspaceAutoHideEdge;
 using inkpod::windows::ui::WorkspaceAuxiliaryPane;
@@ -1607,84 +1604,6 @@ int main() {
             + floating_locator->floating.width_px
             > 1'920) {
         return 35;
-    }
-
-    std::array<wchar_t, 96U> registry_name{};
-    _snwprintf_s(
-        registry_name.data(),
-        registry_name.size(),
-        _TRUNCATE,
-        L"WorkspaceG9Test_%lu",
-        static_cast<unsigned long>(GetCurrentProcessId()));
-    if (!SaveWorkspaceLayout(serialized, registry_name.data())) {
-        return 36;
-    }
-    WorkspaceLayoutState restarted{};
-    const bool restart_loaded = LoadWorkspaceLayout(
-        restarted, registry_name.data());
-    static_cast<void>(DeleteWorkspaceLayout(registry_name.data()));
-    if (!restart_loaded
-        || restarted.selected_preset != WorkspacePreset::Custom
-        || restarted.split_ratio_milli != 650U) {
-        return 37;
-    }
-
-    _snwprintf_s(
-        registry_name.data(),
-        registry_name.size(),
-        _TRUNCATE,
-        L"WorkspaceG9MigrationTest_%lu",
-        static_cast<unsigned long>(GetCurrentProcessId()));
-    HKEY settings{};
-    DWORD disposition{};
-    if (RegCreateKeyExW(
-            HKEY_CURRENT_USER,
-            L"Software\\Inkpod",
-            0,
-            nullptr,
-            0,
-            KEY_SET_VALUE,
-            nullptr,
-            &settings,
-            &disposition)
-            != ERROR_SUCCESS
-        || RegSetValueExW(
-               settings,
-               registry_name.data(),
-               0,
-               REG_BINARY,
-               reinterpret_cast<const BYTE*>(&legacy),
-               sizeof(legacy))
-            != ERROR_SUCCESS) {
-        if (settings != nullptr) {
-            RegCloseKey(settings);
-        }
-        return 41;
-    }
-    RegCloseKey(settings);
-    WorkspaceLayoutState registry_migrated{};
-    std::array<std::byte, kMaximumWorkspaceLayoutRecordBytes> migrated_bytes{};
-    DWORD migrated_type{};
-    DWORD migrated_size = static_cast<DWORD>(migrated_bytes.size());
-    const bool loaded_legacy = LoadWorkspaceLayout(
-        registry_migrated, registry_name.data());
-    const LSTATUS read_migrated = RegGetValueW(
-        HKEY_CURRENT_USER,
-        L"Software\\Inkpod",
-        registry_name.data(),
-        RRF_RT_REG_BINARY,
-        &migrated_type,
-        migrated_bytes.data(),
-        &migrated_size);
-    static_cast<void>(DeleteWorkspaceLayout(registry_name.data()));
-    WorkspaceLayoutState migrated_again{};
-    if (!loaded_legacy || read_migrated != ERROR_SUCCESS
-        || DecodeWorkspaceLayout(
-               migrated_again,
-               std::span<const std::byte>(
-                   migrated_bytes.data(), migrated_size))
-            != WorkspaceLayoutDecodeResult::Current) {
-        return 42;
     }
 
     return 0;

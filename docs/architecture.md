@@ -675,9 +675,11 @@ Undo/Redo, and save/reopen therefore preserve the thumbnail-to-member binding,
 while an invalid or mismatched source never substitutes pixels from another Cell.
 
 Normal previous/next navigation has a separate application-level endpoint
-policy. `SequenceEndpointPolicyV1` is a versioned, bounded HKCU record shared by
-every workspace window in the process; missing, malformed, and noncurrent input
-falls back to `Stop`. `Stop` and `Wrap` are closed values and are independent of
+policy. It is stored once as the readable `animation.sequenceEndpoint` field in
+`%LOCALAPPDATA%\inkpod\Settings\inkpod-settings.json` and is shared by every
+workspace window in the process. A missing field falls back to `Stop`; malformed
+or noncurrent settings reject the staged settings file and use all current defaults.
+`Stop` and `Wrap` are closed values and are independent of
 motion-check loop state. The menu checked state, configurable shortcut, status,
 and accessibility presentation all read the same `AppLifetimeState` value, so
 changing it never changes document/editor revision, history, dirty state,
@@ -713,8 +715,8 @@ pre-reserved association, active cell, pathless recovery shell state, panes, and
 menu state only for the captured live session. Save, metadata, queue, or stale
 failure leaves the source cell active and never advances the normal path or
 savepoint; close or shutdown invalidates and discards that session without
-retargeting completion to another document. Both HKCU policy records are
-versioned frontend state, not part of the `.inkpod` schema.
+retargeting completion to another document. Both policy values are fields of the
+single versioned settings JSON and are not part of the `.inkpod` schema.
 
 The Light Table palette also uses the pane-target registry. Its set/item
 selection is valid only with the captured session/generation namespace, and
@@ -777,10 +779,10 @@ the Batch-supported formats and copies the returned paths into the draft before
 the dialog buffer expires.
 
 The editable set-name combo enumerates extension-free `.inkbatch` filenames in
-`%APPDATA%\inkpod\batch-sets`. The Windows-only `batch_set_store` creates that
+`%LOCALAPPDATA%\inkpod\batch-sets`. The Windows-only `batch_set_store` creates that
 directory, rejects traversal, reserved-device and ambiguous trailing names, and
 maps one validated name to one `.inkbatch` path. Core and the file-format crate
-continue to receive only the resulting UTF-8 path and own the v3 codec.
+continue to receive only the resulting UTF-8 path and own the current v4 codec.
 
 Batch execution resolves File/Folder/ActiveDocument inputs in Core and reuses
 the general native/common-raster decoders and atomic writers. All enabled
@@ -853,19 +855,21 @@ any mixed Batch membership. Moving and reordering use copy-then-publish model
 updates, while removing the last pane deletes the tab and selects previous, next,
 then first. Tool and Tool Options never enter this model.
 
-The frontend persists a bounded version 9 workspace record in HKCU. It contains only main
-window placement, editor split orientation/ratio, dock zones/order/ratios,
+The frontend persists each workspace in the bounded, current-version
+`%LOCALAPPDATA%\inkpod\Settings\inkpod-settings.json` file. Pane types, zones,
+dynamic tabs, presets, and other enums use stable readable strings rather than
+Win32 IDs or binary payloads. The workspace section contains only main window
+placement, editor split orientation/ratio, dock zones/order/ratios,
 primary and secondary pane visibility/size/floating placement, AutoHide edge,
 density, selected or user-named preset, and the dynamic right-tab IDs/order/
 selection/pane membership; document paths, active strokes, jobs, and document/Core
 identities are excluded. The decoder validates its exact size, counts, enums,
 stable pane/tab IDs, duplicate pane/tab IDs, nonempty tabs, selected/next ID,
-unused storage, placement bounds, and bounded terminated name. Unknown pane IDs
-are ignored, absent visible known panes receive preset defaults, and an invalid
-or unsupported record restores the default without aborting startup. Supported
-version 2 through 8 records migrate once to version 9; V8's visible fixed groups
-become dynamic nonempty tabs. Transient narrow-window label suppression is never
-persisted.
+placement bounds, and bounded names. Unknown fields and pane values are rejected,
+and an invalid or unsupported settings file restores defaults without aborting
+startup or automatically overwriting that invalid file. Development builds do
+not migrate old registry workspace records or old settings files. Transient
+narrow-window label suppression is never persisted.
 
 The UI thread owns a fixed-capacity `WorkspaceWindowRegistry`. Each heap-stable
 `WorkspaceWindow` owns its top-level
@@ -1225,8 +1229,9 @@ metadata never causes silent deletion, and restore/discard/defer is per candidat
 Opening recovery preserves its original identity namespace and retains the artifact
 until a normal save explicitly removes the recovery and sidecar. Autosave does not
 advance the normal savepoint. Workspace layout never contains document paths. A
-separate bounded current-version HKCU path record is read and written only when the
-default-off `起動時に前回の文書を復元` setting is enabled; crash recovery remains
+separate bounded current-version binary path record at
+`%LOCALAPPDATA%\inkpod\Session\inkpod-session.bin` is read and written only when
+the default-off `起動時に前回の文書を復元` setting is enabled; crash recovery remains
 independent of that privacy choice.
 
 ## Build, portability, and verification boundaries
