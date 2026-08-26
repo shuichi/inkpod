@@ -19,6 +19,7 @@ file(READ "${APP_DIR}/application_host.h" HOST_HEADER)
 file(READ "${APP_DIR}/application_host.cpp" HOST_SOURCE)
 file(READ "${APP_DIR}/tab_drag.h" MODEL_HEADER)
 file(READ "${UI_DIR}/tab_drag.cpp" UI_SOURCE)
+file(READ "${UI_DIR}/tab_drag.h" UI_HEADER)
 file(READ "${UI_DIR}/main_window.cpp" MAIN_SOURCE)
 file(READ "${UI_DIR}/main_window_runtime.cpp" RUNTIME_SOURCE)
 file(READ "${INKPOD_SOURCE_DIR}/apps/windows/app/app_smoke.cpp" SMOKE_SOURCE)
@@ -70,6 +71,31 @@ if(NOT MAIN_SOURCE MATCHES "AttachDocumentTabDrag"
     message(FATAL_ERROR "tab HWND attach or DPI/window cancellation is missing")
 endif()
 
+foreach(required IN ITEMS
+        "SyncDocumentTabCloseButtons"
+        "IDC_DOCUMENT_TAB_CLOSE"
+        "BS_OWNERDRAW"
+        "WM_DRAWITEM"
+        "BN_CLICKED"
+        "IDM_VIEW_CLOSE"
+        "WM_DPICHANGED_AFTERPARENT"
+        "WM_THEMECHANGED"
+        "WM_SYSCOLORCHANGE")
+    if(NOT UI_HEADER MATCHES "${required}"
+            AND NOT UI_SOURCE MATCHES "${required}"
+            AND NOT RUNTIME_SOURCE MATCHES "${required}")
+        message(FATAL_ERROR
+            "document-tab close-button contract is missing: ${required}")
+    endif()
+endforeach()
+
+if(NOT RUNTIME_SOURCE MATCHES "SyncDocumentTabCloseButtons"
+        OR NOT UI_SOURCE MATCHES "DocumentViewId"
+        OR UI_SOURCE MATCHES "PostMessageW?\\([^\n]*DocumentViewId")
+    message(FATAL_ERROR
+        "document-tab close buttons must synchronize and route by value identity")
+endif()
+
 foreach(command IN ITEMS
         IDM_TAB_MOVE_LEFT
         IDM_TAB_MOVE_RIGHT
@@ -89,7 +115,10 @@ foreach(required IN ITEMS
         "IDM_TAB_MOVE_LEFT"
         "IDM_EDITOR_MOVE_OTHER_GROUP"
         "IDM_WORKSPACE_NEW_WINDOW"
-        "before_copy_views")
+        "before_copy_views"
+        "IDC_DOCUMENT_TAB_CLOSE"
+        "BM_CLICK"
+        "smoke_dirty_prompt_choice")
     if(NOT SMOKE_SOURCE MATCHES "${required}")
         message(FATAL_ERROR "G11 native smoke is missing: ${required}")
     endif()

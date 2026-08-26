@@ -91,6 +91,9 @@ file(READ "${LOCATOR_SOURCE}" LOCATOR_IMPLEMENTATION)
 foreach(REQUIRED IN ITEMS
         "std::wstring_view(presented) == next"
         "replacement.size() < presented.size()"
+        "EnablePaneDialogResizePainting(dialog)"
+        "LayoutLocatorPane(dialog, false)"
+        "CompletePaneDialogResize(dialog)"
         "RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW")
     string(FIND "${LOCATOR_IMPLEMENTATION}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
@@ -180,6 +183,17 @@ foreach(REQUIRED IN ITEMS
     string(FIND "${HOST_INTERFACE}${HOST}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
         message(FATAL_ERROR "DockHost change classification is missing: ${REQUIRED}")
+    endif()
+endforeach()
+
+foreach(REQUIRED IN ITEMS
+        "EnablePaneDialogResizePainting(dialog)"
+        "LayoutLightTablePane(dialog, false)"
+        "CompletePaneDialogResize(dialog)")
+    string(FIND "${LIGHT_TABLE_IMPLEMENTATION}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR
+            "Light Table atomic resize repaint contract is missing: ${REQUIRED}")
     endif()
 endforeach()
 foreach(REQUIRED IN ITEMS
@@ -293,6 +307,17 @@ endforeach()
 file(READ "${COLOR_PANE_SOURCE}" COLOR_PANE)
 file(READ "${PANE_DIALOG_LAYOUT_HEADER}" PANE_DIALOG_LAYOUT)
 file(READ "${TAB_SURFACE_HEADER}" TAB_SURFACE)
+foreach(REQUIRED IN ITEMS
+        "EnablePaneDialogResizePainting"
+        "WS_CLIPCHILDREN"
+        "CompletePaneDialogResize"
+        "RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN")
+    string(FIND "${PANE_DIALOG_LAYOUT}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR
+            "Pane dialog resize repaint helper is missing: ${REQUIRED}")
+    endif()
+endforeach()
 file(READ "${PREFERENCES_SOURCE}" PREFERENCES)
 if(COLOR_PANE MATCHES "RDW_ALLCHILDREN")
     message(FATAL_ERROR

@@ -7,11 +7,13 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <new>
 #include <optional>
 
 #include "app/application_host.h"
 #include "app/resource.h"
 #include "app/workspace_window.h"
+#include "localization.h"
 #include "main_window_runtime.h"
 #include "main_window_runtime_internal.h"
 
@@ -19,7 +21,28 @@ namespace inkpod::windows::ui {
 namespace {
 
 constexpr UINT_PTR kTabDragSubclass = 2U;
+constexpr UINT_PTR kTabCloseButtonSubclass = 3U;
 constexpr wchar_t kDragImageProperty[] = L"Inkpod.TabDragImage";
+
+struct DocumentTabCloseButtonSlot final {
+    HWND button{};
+    app::DocumentViewId view{};
+    bool hovered{};
+};
+
+struct DocumentTabInteractionState final {
+    app::EditorGroupId group{};
+    std::array<
+        DocumentTabCloseButtonSlot,
+        app::EditorGroup::kMaximumViews>
+        close_buttons{};
+};
+
+int ScaleForTabDpi(HWND window, int value) noexcept {
+    const UINT window_dpi = window == nullptr ? 96U : GetDpiForWindow(window);
+    const UINT dpi = window_dpi == 0U ? 96U : window_dpi;
+    return MulDiv(value, static_cast<int>(dpi), 96);
+}
 
 bool ContainsScreenPoint(HWND window, POINT point) noexcept {
     RECT bounds{};
@@ -48,6 +71,283 @@ int HitTab(HWND tabs, POINT client) noexcept {
     hit.pt = client;
     const int index = TabCtrl_HitTest(tabs, &hit);
     return index >= 0 && (hit.flags & TCHT_NOWHERE) == 0U ? index : -1;
+}
+
+DocumentTabCloseButtonSlot* FindCloseButtonSlot(
+    DocumentTabInteractionState& interaction,
+    app::DocumentViewId view) noexcept {
+    const auto found = std::find_if(
+        interaction.close_buttons.begin(),
+        interaction.close_buttons.end(),
+        [view](const DocumentTabCloseButtonSlot& slot) {
+            return slot.view == view;
+        });
+    return found == interaction.close_buttons.end() ? nullptr : &*found;
+}
+
+DocumentTabCloseButtonSlot* FindCloseButtonSlot(
+    DocumentTabInteractionState& interaction, HWND button) noexcept {
+    const auto found = std::find_if(
+        interaction.close_buttons.begin(),
+        interaction.close_buttons.end(),
+        [button](const DocumentTabCloseButtonSlot& slot) {
+            return slot.button == button;
+        });
+    return found == interaction.close_buttons.end() ? nullptr : &*found;
+}
+
+LRESULT CALLBACK TabCloseButtonSubclassProcedure(
+    HWND button,
+    UINT message,
+    WPARAM wparam,
+    LPARAM lparam,
+    UINT_PTR,
+    DWORD_PTR reference) noexcept {
+    auto* slot = reinterpret_cast<DocumentTabCloseButtonSlot*>(reference);
+    switch (message) {
+        case WM_MOUSEMOVE:
+            if (slot != nullptr && !slot->hovered) {
+                TRACKMOUSEEVENT tracking{};
+                tracking.cbSize = sizeof(tracking);
+                tracking.dwFlags = TME_LEAVE;
+                tracking.hwndTrack = button;
+                if (TrackMouseEvent(&tracking) != FALSE) {
+                    slot->hovered = true;
+                    InvalidateRect(button, nullptr, TRUE);
+                }
+            }
+            break;
+        case WM_MOUSELEAVE:
+            if (slot != nullptr && slot->hovered) {
+                slot->hovered = false;
+                InvalidateRect(button, nullptr, TRUE);
+            }
+            return 0;
+        case WM_THEMECHANGED:
+        case WM_SYSCOLORCHANGE:
+        case WM_DPICHANGED_AFTERPARENT:
+            InvalidateRect(button, nullptr, TRUE);
+            break;
+        case WM_NCDESTROY:
+            RemoveWindowSubclass(
+                button,
+                TabCloseButtonSubclassProcedure,
+                kTabCloseButtonSubclass);
+            if (slot != nullptr && slot->button == button) {
+                slot->button = nullptr;
+                slot->hovered = false;
+            }
+            break;
+        default:
+            break;
+    }
+    return DefSubclassProc(button, message, wparam, lparam);
+}
+
+void DestroyCloseButton(DocumentTabCloseButtonSlot& slot) noexcept {
+    const HWND button = slot.button;
+    slot.view = {};
+    slot.hovered = false;
+    if (button != nullptr && IsWindow(button) != FALSE) {
+        DestroyWindow(button);
+    }
+    slot.button = nullptr;
+}
+
+HWND CreateCloseButton(
+    HWND tabs, DocumentTabCloseButtonSlot& slot) noexcept {
+    const HINSTANCE instance = reinterpret_cast<HINSTANCE>(
+        GetWindowLongPtrW(tabs, GWLP_HINSTANCE));
+    const HWND button = CreateWindowExW(
+        0,
+        L"BUTTON",
+        UiText(UiStringId::Text0277),
+        WS_CHILD | BS_OWNERDRAW | BS_FLAT,
+        0,
+        0,
+        0,
+        0,
+        tabs,
+        reinterpret_cast<HMENU>(
+            static_cast<INT_PTR>(IDC_DOCUMENT_TAB_CLOSE)),
+        instance,
+        nullptr);
+    if (button == nullptr
+        || SetWindowSubclass(
+               button,
+               TabCloseButtonSubclassProcedure,
+               kTabCloseButtonSubclass,
+               reinterpret_cast<DWORD_PTR>(&slot)) == FALSE) {
+        if (button != nullptr) {
+            DestroyWindow(button);
+        }
+        return nullptr;
+    }
+    return button;
+}
+
+int TabIndexForView(HWND tabs, app::DocumentViewId view) noexcept {
+    const int count = std::max(0, TabCtrl_GetItemCount(tabs));
+    for (int index = 0; index < count; ++index) {
+        if (TabViewAt(tabs, index) == view) {
+            return index;
+        }
+    }
+    return -1;
+}
+
+void UpdateDocumentTabPadding(HWND tabs) noexcept {
+    const int horizontal = std::max(1, ScaleForTabDpi(tabs, 24));
+    const int vertical = std::max(1, ScaleForTabDpi(tabs, 3));
+    SendMessageW(
+        tabs,
+        TCM_SETPADDING,
+        0,
+        MAKELPARAM(horizontal, vertical));
+}
+
+void LayoutDocumentTabCloseButtons(
+    HWND tabs, DocumentTabInteractionState& interaction) noexcept {
+    RECT client{};
+    if (GetClientRect(tabs, &client) == FALSE) {
+        return;
+    }
+    const int button_size = std::max(1, ScaleForTabDpi(tabs, 20));
+    const int edge = std::max(1, ScaleForTabDpi(tabs, 3));
+    const int minimum_item_width = button_size + edge * 2;
+    for (auto& slot : interaction.close_buttons) {
+        if (slot.button == nullptr || !slot.view) {
+            continue;
+        }
+        const int index = TabIndexForView(tabs, slot.view);
+        RECT item{};
+        const bool item_available = index >= 0
+            && TabCtrl_GetItemRect(tabs, index, &item) != FALSE;
+        const bool fully_visible = item_available
+            && item.left >= client.left && item.right <= client.right
+            && item.top >= client.top && item.bottom <= client.bottom
+            && item.right - item.left >= minimum_item_width;
+        if (!fully_visible) {
+            ShowWindow(slot.button, SW_HIDE);
+            continue;
+        }
+        const int item_height = item.bottom - item.top;
+        const int size = std::min(button_size, std::max(1, item_height - edge * 2));
+        const int x = item.right - edge - size;
+        const int y = item.top + std::max(0, (item_height - size) / 2);
+        SetWindowPos(
+            slot.button,
+            HWND_TOP,
+            x,
+            y,
+            size,
+            size,
+            SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
+        InvalidateRect(slot.button, nullptr, TRUE);
+    }
+}
+
+bool SynchronizeDocumentTabCloseButtons(
+    HWND tabs, DocumentTabInteractionState& interaction) noexcept {
+    std::array<bool, app::EditorGroup::kMaximumViews> retained{};
+    const int item_count = std::max(0, TabCtrl_GetItemCount(tabs));
+    bool complete = static_cast<std::size_t>(item_count) <= retained.size();
+    const int bounded_count = std::min(
+        item_count, static_cast<int>(retained.size()));
+    for (int index = 0; index < bounded_count; ++index) {
+        const app::DocumentViewId view = TabViewAt(tabs, index);
+        if (!view) {
+            continue;
+        }
+        DocumentTabCloseButtonSlot* slot = FindCloseButtonSlot(interaction, view);
+        if (slot == nullptr) {
+            const auto available = std::find_if(
+                interaction.close_buttons.begin(),
+                interaction.close_buttons.end(),
+                [](const DocumentTabCloseButtonSlot& candidate) {
+                    return !candidate.view && candidate.button == nullptr;
+                });
+            if (available == interaction.close_buttons.end()) {
+                complete = false;
+                continue;
+            }
+            slot = &*available;
+            slot->view = view;
+            slot->button = CreateCloseButton(tabs, *slot);
+            if (slot->button == nullptr) {
+                slot->view = {};
+                complete = false;
+                continue;
+            }
+        }
+        retained[static_cast<std::size_t>(slot - interaction.close_buttons.data())]
+            = true;
+    }
+    for (std::size_t index = 0U; index < interaction.close_buttons.size(); ++index) {
+        if (!retained[index] && interaction.close_buttons[index].view) {
+            DestroyCloseButton(interaction.close_buttons[index]);
+        }
+    }
+    LayoutDocumentTabCloseButtons(tabs, interaction);
+    return complete;
+}
+
+bool DrawDocumentTabCloseButton(
+    HWND tabs,
+    DocumentTabInteractionState& interaction,
+    const DRAWITEMSTRUCT& draw) noexcept {
+    DocumentTabCloseButtonSlot* slot = FindCloseButtonSlot(
+        interaction, draw.hwndItem);
+    if (slot == nullptr) {
+        return false;
+    }
+    const bool disabled = (draw.itemState & ODS_DISABLED) != 0U;
+    const bool pressed = (draw.itemState & ODS_SELECTED) != 0U;
+    const int selected = TabCtrl_GetCurSel(tabs);
+    const bool active = selected >= 0 && TabViewAt(tabs, selected) == slot->view;
+    const int background = pressed
+        ? COLOR_3DSHADOW
+        : (slot->hovered ? COLOR_3DLIGHT : (active ? COLOR_WINDOW : COLOR_BTNFACE));
+    const int foreground = disabled ? COLOR_GRAYTEXT : COLOR_BTNTEXT;
+    FillRect(draw.hDC, &draw.rcItem, GetSysColorBrush(background));
+
+    const int inset = std::max(4, ScaleForTabDpi(draw.hwndItem, 6));
+    const int offset = pressed ? std::max(1, ScaleForTabDpi(draw.hwndItem, 1)) : 0;
+    const HPEN pen = CreatePen(
+        PS_SOLID,
+        std::max(1, ScaleForTabDpi(draw.hwndItem, 1)),
+        GetSysColor(foreground));
+    if (pen != nullptr) {
+        const HGDIOBJ previous = SelectObject(draw.hDC, pen);
+        MoveToEx(
+            draw.hDC,
+            draw.rcItem.left + inset + offset,
+            draw.rcItem.top + inset + offset,
+            nullptr);
+        LineTo(
+            draw.hDC,
+            draw.rcItem.right - inset + offset,
+            draw.rcItem.bottom - inset + offset);
+        MoveToEx(
+            draw.hDC,
+            draw.rcItem.right - inset + offset,
+            draw.rcItem.top + inset + offset,
+            nullptr);
+        LineTo(
+            draw.hDC,
+            draw.rcItem.left + inset + offset,
+            draw.rcItem.bottom - inset + offset);
+        if (previous != nullptr) {
+            SelectObject(draw.hDC, previous);
+        }
+        DeleteObject(pen);
+    }
+    if ((draw.itemState & ODS_FOCUS) != 0U) {
+        RECT focus = draw.rcItem;
+        InflateRect(&focus, -2, -2);
+        DrawFocusRect(draw.hDC, &focus);
+    }
+    return true;
 }
 
 std::size_t InsertionIndex(HWND tabs, POINT screen) noexcept {
@@ -400,6 +700,33 @@ void ShowTabContextMenu(
     }
 }
 
+void CloseDocumentTab(
+    app::ApplicationHost& state,
+    app::WorkspaceWindow& workspace,
+    app::EditorGroup& group,
+    app::DocumentViewId view) noexcept {
+    const app::CommandContext restore = state.routing.targets.Capture();
+    if (!view || !group.Contains(view)
+        || !state.ActivateWorkspaceWindow(workspace.id, true)
+        || !state.ActivateDocumentView(view)) {
+        RestoreCapturedContext(state, restore);
+        return;
+    }
+    const app::CommandContext target = state.routing.targets.Capture();
+    if (target.workspace != workspace.id || target.editor_group != group.id
+        || target.document_view != view) {
+        RestoreCapturedContext(state, restore);
+        return;
+    }
+    runtime::UpdateMenuState(state);
+    static_cast<void>(runtime::IssueCommand(
+        &state,
+        workspace.windows.window,
+        IDM_VIEW_CLOSE,
+        0));
+    RestoreCapturedContext(state, restore);
+}
+
 LRESULT CALLBACK TabSubclassProcedure(
     HWND tabs,
     UINT message,
@@ -407,15 +734,43 @@ LRESULT CALLBACK TabSubclassProcedure(
     LPARAM lparam,
     UINT_PTR,
     DWORD_PTR reference) noexcept {
+    auto* interaction = reinterpret_cast<DocumentTabInteractionState*>(reference);
     app::WorkspaceWindow* workspace = WorkspaceFromTabs(tabs);
     app::ApplicationHost* state = workspace == nullptr
         ? nullptr
         : workspace->application;
-    const app::EditorGroupId group_id{static_cast<std::uint64_t>(reference)};
+    const app::EditorGroupId group_id = interaction == nullptr
+        ? app::EditorGroupId{}
+        : interaction->group;
     app::EditorGroup* group = workspace == nullptr
         ? nullptr
         : workspace->editors.Find(group_id);
     switch (message) {
+        case WM_COMMAND:
+            if (interaction != nullptr
+                && LOWORD(wparam) == IDC_DOCUMENT_TAB_CLOSE
+                && HIWORD(wparam) == BN_CLICKED) {
+                const HWND button = reinterpret_cast<HWND>(lparam);
+                const DocumentTabCloseButtonSlot* slot = FindCloseButtonSlot(
+                    *interaction, button);
+                if (state != nullptr && workspace != nullptr && group != nullptr
+                    && slot != nullptr && slot->view) {
+                    const app::DocumentViewId view = slot->view;
+                    CloseDocumentTab(*state, *workspace, *group, view);
+                }
+                return 0;
+            }
+            break;
+        case WM_DRAWITEM:
+            if (interaction != nullptr) {
+                const auto* draw = reinterpret_cast<const DRAWITEMSTRUCT*>(lparam);
+                if (draw != nullptr
+                    && draw->CtlID == IDC_DOCUMENT_TAB_CLOSE
+                    && DrawDocumentTabCloseButton(tabs, *interaction, *draw)) {
+                    return TRUE;
+                }
+            }
+            break;
         case WM_LBUTTONDOWN: {
             POINT client{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
             const int index = HitTab(tabs, client);
@@ -544,6 +899,45 @@ LRESULT CALLBACK TabSubclassProcedure(
                 CancelDocumentTabDrag(*state);
             }
             break;
+        case WM_SIZE: {
+            const LRESULT result = DefSubclassProc(tabs, message, wparam, lparam);
+            if (interaction != nullptr) {
+                LayoutDocumentTabCloseButtons(tabs, *interaction);
+            }
+            return result;
+        }
+        case TCM_SETCURSEL: {
+            const LRESULT result = DefSubclassProc(tabs, message, wparam, lparam);
+            if (interaction != nullptr) {
+                for (const auto& slot : interaction->close_buttons) {
+                    if (slot.button != nullptr) {
+                        InvalidateRect(slot.button, nullptr, TRUE);
+                    }
+                }
+            }
+            return result;
+        }
+        case WM_DPICHANGED_AFTERPARENT: {
+            const LRESULT result = DefSubclassProc(tabs, message, wparam, lparam);
+            if (interaction != nullptr) {
+                UpdateDocumentTabPadding(tabs);
+                LayoutDocumentTabCloseButtons(tabs, *interaction);
+            }
+            return result;
+        }
+        case WM_THEMECHANGED:
+        case WM_SYSCOLORCHANGE:
+        case WM_SETTINGCHANGE: {
+            const LRESULT result = DefSubclassProc(tabs, message, wparam, lparam);
+            if (interaction != nullptr) {
+                for (const auto& slot : interaction->close_buttons) {
+                    if (slot.button != nullptr) {
+                        InvalidateRect(slot.button, nullptr, TRUE);
+                    }
+                }
+            }
+            return result;
+        }
         case WM_NCDESTROY:
             if (state != nullptr && state->TabDrag().ReferencesGroup(group_id)) {
                 CancelDocumentTabDrag(*state, false);
@@ -554,9 +948,15 @@ LRESULT CALLBACK TabSubclassProcedure(
                 ImageList_EndDrag();
                 ImageList_Destroy(image);
             }
+            if (interaction != nullptr) {
+                for (auto& slot : interaction->close_buttons) {
+                    DestroyCloseButton(slot);
+                }
+            }
             RemoveWindowSubclass(
                 tabs, TabSubclassProcedure, kTabDragSubclass);
-            break;
+            delete interaction;
+            return DefSubclassProc(tabs, message, wparam, lparam);
         default:
             break;
     }
@@ -566,12 +966,41 @@ LRESULT CALLBACK TabSubclassProcedure(
 }  // namespace
 
 bool AttachDocumentTabDrag(HWND tabs, app::EditorGroupId group) noexcept {
-    return tabs != nullptr && group
-        && SetWindowSubclass(
+    if (tabs == nullptr || !group) {
+        return false;
+    }
+    auto* interaction = new (std::nothrow) DocumentTabInteractionState{};
+    if (interaction == nullptr) {
+        return false;
+    }
+    interaction->group = group;
+    if (SetWindowSubclass(
             tabs,
             TabSubclassProcedure,
             kTabDragSubclass,
-            static_cast<DWORD_PTR>(group.Value())) != FALSE;
+            reinterpret_cast<DWORD_PTR>(interaction)) == FALSE) {
+        delete interaction;
+        return false;
+    }
+    UpdateDocumentTabPadding(tabs);
+    return true;
+}
+
+bool SyncDocumentTabCloseButtons(HWND tabs) noexcept {
+    if (tabs == nullptr) {
+        return false;
+    }
+    DWORD_PTR reference{};
+    if (GetWindowSubclass(
+            tabs,
+            TabSubclassProcedure,
+            kTabDragSubclass,
+            &reference) == FALSE) {
+        return false;
+    }
+    auto* interaction = reinterpret_cast<DocumentTabInteractionState*>(reference);
+    return interaction != nullptr
+        && SynchronizeDocumentTabCloseButtons(tabs, *interaction);
 }
 
 void CancelDocumentTabDrag(

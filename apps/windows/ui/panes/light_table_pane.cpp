@@ -22,7 +22,7 @@ void Dispatch(LightTablePaneDialogState& state, UINT command) noexcept {
     }
 }
 
-void LayoutLightTablePane(HWND dialog) noexcept {
+void LayoutLightTablePane(HWND dialog, bool redraw = true) noexcept {
     RECT client{};
     if (GetClientRect(dialog, &client) == FALSE) {
         return;
@@ -45,7 +45,8 @@ void LayoutLightTablePane(HWND dialog) noexcept {
         ScalePaneDip(dialog, 4),
         line_height,
         row_height,
-        gap);
+        gap,
+        redraw);
 
     const int set_top = margin + row_height + gap;
     const int set_label_width = ScalePaneDip(dialog, 48);
@@ -55,14 +56,16 @@ void LayoutLightTablePane(HWND dialog) noexcept {
         margin,
         set_top + ScalePaneDip(dialog, 4),
         set_label_width,
-        line_height);
+        line_height,
+        redraw);
     PlacePaneDialogControl(
         dialog,
         IDC_LIGHT_TABLE_SETS,
         margin + set_label_width + gap,
         set_top,
         std::max(0, content_width - set_label_width - gap),
-        row_height);
+        row_height,
+        redraw);
 
     const int set_actions_top = set_top + row_height + gap;
     const std::array<int, 4U> set_action_controls{
@@ -81,7 +84,9 @@ void LayoutLightTablePane(HWND dialog) noexcept {
         set_actions_top,
         content_width,
         row_height,
-        gap);
+        gap,
+        0U,
+        redraw);
 
     const int items_label_top = set_actions_top + set_actions_height + gap;
     PlacePaneDialogControl(
@@ -90,7 +95,8 @@ void LayoutLightTablePane(HWND dialog) noexcept {
         margin,
         items_label_top,
         content_width,
-        line_height);
+        line_height,
+        redraw);
     const int list_top = items_label_top + line_height;
 
     const int hint_top = std::max(list_top, height - margin - line_height);
@@ -100,7 +106,8 @@ void LayoutLightTablePane(HWND dialog) noexcept {
         margin,
         hint_top,
         content_width,
-        line_height);
+        line_height,
+        redraw);
     const int cell_label_width = ScalePaneDip(dialog, 58);
     const int labelled_button_width = std::max(
         0, content_width - cell_label_width - gap);
@@ -118,7 +125,8 @@ void LayoutLightTablePane(HWND dialog) noexcept {
         margin,
         cell_top + ScalePaneDip(dialog, 4),
         cell_label_width,
-        line_height);
+        line_height,
+        redraw);
     PlacePaneButtonRows(
         dialog,
         cell_controls,
@@ -126,7 +134,9 @@ void LayoutLightTablePane(HWND dialog) noexcept {
         cell_top,
         labelled_button_width,
         row_height,
-        gap);
+        gap,
+        0U,
+        redraw);
 
     const std::array<int, 3U> bulk_controls{
         IDC_LIGHT_TABLE_BULK_PREVIOUS,
@@ -143,7 +153,8 @@ void LayoutLightTablePane(HWND dialog) noexcept {
         margin,
         bulk_top + ScalePaneDip(dialog, 4),
         cell_label_width,
-        line_height);
+        line_height,
+        redraw);
     PlacePaneButtonRows(
         dialog,
         bulk_controls,
@@ -151,7 +162,9 @@ void LayoutLightTablePane(HWND dialog) noexcept {
         bulk_top,
         labelled_button_width,
         row_height,
-        gap);
+        gap,
+        0U,
+        redraw);
 
     const std::array<int, 3U> property_controls{
         IDC_LIGHT_TABLE_ITEM_PROPERTIES,
@@ -169,7 +182,9 @@ void LayoutLightTablePane(HWND dialog) noexcept {
         property_top,
         content_width,
         row_height,
-        gap);
+        gap,
+        0U,
+        redraw);
 
     const std::array<int, 5U> item_controls{
         IDC_LIGHT_TABLE_ITEM_ADD,
@@ -190,7 +205,9 @@ void LayoutLightTablePane(HWND dialog) noexcept {
         item_actions_top,
         content_width,
         row_height,
-        gap);
+        gap,
+        0U,
+        redraw);
     const int list_height = std::max(0, item_actions_top - gap - list_top);
     PlacePaneDialogControl(
         dialog,
@@ -198,14 +215,16 @@ void LayoutLightTablePane(HWND dialog) noexcept {
         margin,
         list_top,
         content_width,
-        list_height);
+        list_height,
+        redraw);
     PlacePaneDialogControl(
         dialog,
         IDC_LIGHT_TABLE_EMPTY,
         margin + gap,
         list_top + std::max(0, (list_height - line_height) / 2),
         std::max(0, content_width - gap * 2),
-        line_height);
+        line_height,
+        redraw);
 }
 
 void SelectSet(HWND dialog, LightTablePaneDialogState& state) noexcept {
@@ -242,7 +261,8 @@ INT_PTR CALLBACK LightTablePaneProcedure(
         case WM_INITDIALOG:
             return TRUE;
         case WM_SIZE:
-            LayoutLightTablePane(dialog);
+            LayoutLightTablePane(dialog, false);
+            CompletePaneDialogResize(dialog);
             return TRUE;
         case WM_COMMAND:
             if (state == nullptr) {
@@ -378,6 +398,7 @@ HWND CreateLightTablePaneDialog(
     }
     SetWindowLongPtrW(
         dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(&state));
+    EnablePaneDialogResizePainting(dialog);
     LayoutLightTablePane(dialog);
     SetWindowTextW(
         GetDlgItem(dialog, IDC_LIGHT_TABLE_SETS),

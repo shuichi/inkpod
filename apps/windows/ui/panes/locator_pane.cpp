@@ -59,7 +59,7 @@ void SetControlTextIfChanged(
     }
 }
 
-void LayoutLocatorPane(HWND dialog) noexcept {
+void LayoutLocatorPane(HWND dialog, bool redraw = true) noexcept {
     RECT client{};
     if (GetClientRect(dialog, &client) == FALSE) {
         return;
@@ -84,7 +84,8 @@ void LayoutLocatorPane(HWND dialog) noexcept {
         ScalePaneDip(dialog, 4),
         line_height,
         header_height,
-        gap);
+        gap,
+        redraw);
 
     const int options_top = std::max(
         margin + header_height + gap,
@@ -105,28 +106,32 @@ void LayoutLocatorPane(HWND dialog) noexcept {
         margin,
         neighborhood_top,
         std::max(0, width - margin * 2),
-        std::max(0, coordinate_top - gap - neighborhood_top));
+        std::max(0, coordinate_top - gap - neighborhood_top),
+        redraw);
     PlacePaneDialogControl(
         dialog,
         IDC_LOCATOR_COORDINATE,
         margin,
         coordinate_top,
         std::max(0, width - margin * 2),
-        line_height);
+        line_height,
+        redraw);
     PlacePaneDialogControl(
         dialog,
         IDC_LOCATOR_SELECTION,
         margin,
         selection_top,
         std::max(0, width - margin * 2),
-        line_height);
+        line_height,
+        redraw);
     PlacePaneDialogControl(
         dialog,
         IDC_LOCATOR_COLOR,
         margin,
         color_top,
         std::max(0, width - margin * 2),
-        line_height);
+        line_height,
+        redraw);
     const int option_width = std::max(0, (width - margin * 2 - gap) / 2);
     PlacePaneDialogControl(
         dialog,
@@ -134,14 +139,16 @@ void LayoutLocatorPane(HWND dialog) noexcept {
         margin,
         options_top,
         option_width,
-        option_height);
+        option_height,
+        redraw);
     PlacePaneDialogControl(
         dialog,
         IDC_LOCATOR_AUTOSCROLL,
         margin + option_width + gap,
         options_top,
         std::max(0, width - margin * 2 - gap - option_width),
-        option_height);
+        option_height,
+        redraw);
 }
 
 void DrawNeighborhood(
@@ -260,7 +267,8 @@ INT_PTR CALLBACK LocatorPaneProcedure(
         case WM_INITDIALOG:
             return TRUE;
         case WM_SIZE:
-            LayoutLocatorPane(dialog);
+            LayoutLocatorPane(dialog, false);
+            CompletePaneDialogResize(dialog);
             return TRUE;
         case WM_DRAWITEM:
             if (state != nullptr
@@ -328,6 +336,7 @@ HWND CreateLocatorPaneDialog(
     }
     SetWindowLongPtrW(
         dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(&state));
+    EnablePaneDialogResizePainting(dialog);
     LayoutLocatorPane(dialog);
     SetWindowTextW(
         GetDlgItem(dialog, IDC_LOCATOR_NEIGHBORHOOD),

@@ -16,6 +16,30 @@ inline int ScalePaneDip(HWND dialog, int value) noexcept {
     return MulDiv(value, static_cast<int>(dpi == 0U ? 96U : dpi), 96);
 }
 
+inline void EnablePaneDialogResizePainting(HWND dialog) noexcept {
+    if (dialog == nullptr) {
+        return;
+    }
+    const LONG_PTR style = GetWindowLongPtrW(dialog, GWL_STYLE);
+    if ((style & WS_CLIPCHILDREN) == 0) {
+        SetWindowLongPtrW(dialog, GWL_STYLE, style | WS_CLIPCHILDREN);
+    }
+}
+
+inline void CompletePaneDialogResize(HWND dialog) noexcept {
+    if (dialog == nullptr) {
+        return;
+    }
+    // The pane owns the vacated pixels from every child moved during WM_SIZE.
+    // Erase them once, then synchronously paint the final child geometry so a
+    // rapid splitter drag cannot present intermediate frames or leave trails.
+    RedrawWindow(
+        dialog,
+        nullptr,
+        nullptr,
+        RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+}
+
 inline int PaneControlTextHeight(HWND control) noexcept {
     if (control == nullptr) {
         return 0;

@@ -61,6 +61,7 @@
 #include "ui/batch_controller.h"
 #include "ui/main_window.h"
 #include "ui/main_window_runtime.h"
+#include "ui/tab_drag.h"
 #include "ui/localization.h"
 
 #include "app/app_smoke.h"
@@ -686,6 +687,88 @@ int VerifyColorPinResizeRepaint(HWND pane) noexcept {
     return failure;
 }
 
+int VerifyPaneHeightResizeRepaint(
+    HWND pane, int moving_control_id, int failure_base) noexcept {
+    const HWND moving_control = GetDlgItem(pane, moving_control_id);
+    RECT pane_before{};
+    RECT control_before{};
+    if (pane == nullptr || moving_control == nullptr
+        || GetWindowRect(pane, &pane_before) == FALSE
+        || GetWindowRect(moving_control, &control_before) == FALSE) {
+        return failure_base;
+    }
+    MapWindowPoints(
+        HWND_DESKTOP,
+        pane,
+        reinterpret_cast<POINT*>(&control_before),
+        2U);
+    const UINT window_dpi = GetDpiForWindow(pane);
+    const int resize_step = std::max(
+        2,
+        MulDiv(
+            8,
+            static_cast<int>(window_dpi == 0U ? 96U : window_dpi),
+            96));
+    const int pane_width = pane_before.right - pane_before.left;
+    const int pane_height = pane_before.bottom - pane_before.top;
+    if (pane_width <= 0 || pane_height <= 0) {
+        return failure_base + 1;
+    }
+    ValidateRect(pane, nullptr);
+    ValidateRect(moving_control, nullptr);
+    const bool resized = SetWindowPos(
+        pane,
+        nullptr,
+        0,
+        0,
+        pane_width,
+        pane_height + resize_step,
+        SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER) != FALSE;
+
+    RECT control_after{};
+    RECT pending{};
+    int failure{};
+    if (!resized || GetWindowRect(moving_control, &control_after) == FALSE) {
+        failure = failure_base + 2;
+    } else {
+        MapWindowPoints(
+            HWND_DESKTOP,
+            pane,
+            reinterpret_cast<POINT*>(&control_after),
+            2U);
+        if (control_after.top - control_before.top != resize_step) {
+            failure = failure_base + 3;
+        } else {
+            const bool pane_pending =
+                GetUpdateRect(pane, &pending, FALSE) != FALSE;
+            const bool control_pending =
+                GetUpdateRect(moving_control, &pending, FALSE) != FALSE;
+            if (pane_pending || control_pending) {
+                std::fprintf(
+                    stderr,
+                    "pane resize repaint probe base=%d "
+                    "pane_pending=%d control_pending=%d\n",
+                    failure_base,
+                    pane_pending ? 1 : 0,
+                    control_pending ? 1 : 0);
+                failure = failure_base + 4;
+            }
+        }
+    }
+    if (SetWindowPos(
+            pane,
+            nullptr,
+            0,
+            0,
+            pane_width,
+            pane_height,
+            SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER)
+        == FALSE) {
+        return failure_base + 5;
+    }
+    return failure;
+}
+
 COLORREF RenderOwnerDrawPixel(
     HWND item,
     UINT control_id,
@@ -1105,6 +1188,11 @@ int RunLocatorPaneSmoke(ApplicationHost& state) noexcept {
         || !PaneButtonsFit(state.Workspace().panes.layer_palette)) {
         return 851;
     }
+    if (const int resize_failure = VerifyPaneHeightResizeRepaint(
+            pane, IDC_LOCATOR_FIXED, 11160);
+        resize_failure != 0) {
+        return resize_failure;
+    }
     const HWND locator_header =
         state.Workspace().windows.dock_host.HeaderWindow(DockPaneType::Locator);
     std::array<wchar_t, 64U> locator_title{};
@@ -1463,6 +1551,11 @@ int RunLightTablePaneSmoke(ApplicationHost& state) noexcept {
         || GetDlgItem(pane, IDCANCEL) != nullptr
         || !PaneButtonsFit(pane)) {
         return 875;
+    }
+    if (const int resize_failure = VerifyPaneHeightResizeRepaint(
+            pane, IDC_LIGHT_TABLE_HINT, 11170);
+        resize_failure != 0) {
+        return resize_failure;
     }
     std::array<wchar_t, 256U> target_text{};
     const HWND sets = GetDlgItem(pane, IDC_LIGHT_TABLE_SETS);
@@ -11065,6 +11158,198 @@ int RunTabDragSmoke(ApplicationHost& state) noexcept {
             tabs, WM_LBUTTONUP, 0, MAKELPARAM(client.x, client.y));
         PumpPendingWindowMessages();
     };
+
+    const auto close_button_for_tab = [](HWND tabs, int index) noexcept {
+        RECT item{};
+        if (tabs == nullptr || index < 0
+            || TabCtrl_GetItemRect(tabs, index, &item) == FALSE) {
+            return HWND{};
+        }
+        for (HWND child = GetWindow(tabs, GW_CHILD);
+             child != nullptr;
+             child = GetWindow(child, GW_HWNDNEXT)) {
+            if (GetDlgCtrlID(child) != IDC_DOCUMENT_TAB_CLOSE) {
+                continue;
+            }
+            RECT bounds{};
+            if (GetWindowRect(child, &bounds) == FALSE) {
+                continue;
+            }
+            MapWindowPoints(
+                HWND_DESKTOP,
+                tabs,
+                reinterpret_cast<POINT*>(&bounds),
+                2U);
+            const POINT center{
+                (bounds.left + bounds.right) / 2,
+                (bounds.top + bounds.bottom) / 2};
+            if (PtInRect(&item, center) != FALSE) {
+                return child;
+            }
+        }
+        return HWND{};
+    };
+
+    const DocumentViewId close_retained = group->ViewAt(0U);
+    const DocumentViewId close_target = group->ViewAt(1U);
+    if (!state.ActivateDocumentView(close_retained)) {
+        return 11180;
+    }
+    RECT close_target_item{};
+    RECT close_tabs_client{};
+    if (TabCtrl_GetItemRect(
+            group->document_tabs, 1, &close_target_item) == FALSE
+        || GetClientRect(group->document_tabs, &close_tabs_client) == FALSE) {
+        return 11180;
+    }
+    SetWindowPos(
+        group->document_tabs,
+        nullptr,
+        0,
+        0,
+        std::max<LONG>(
+            2048,
+            close_target_item.right + 16),
+        std::max<LONG>(
+            close_tabs_client.bottom - close_tabs_client.top,
+            close_target_item.bottom + 4),
+        SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER);
+    UpdateMenuState(state);
+    PumpPendingWindowMessages();
+    const bool close_buttons_synchronized =
+        SyncDocumentTabCloseButtons(group->document_tabs);
+    const HWND close_button = close_button_for_tab(group->document_tabs, 1);
+    std::array<wchar_t, 64U> close_name{};
+    const DWORD close_style = close_button == nullptr
+        ? 0U
+        : static_cast<DWORD>(GetWindowLongPtrW(close_button, GWL_STYLE));
+    const int close_name_length = close_button == nullptr
+        ? 0
+        : GetWindowTextW(
+              close_button,
+              close_name.data(),
+              static_cast<int>(close_name.size()));
+    if (close_button == nullptr
+        || (close_style & BS_TYPEMASK) != BS_OWNERDRAW
+        || (close_style & WS_VISIBLE) == 0U
+        || close_name_length == 0
+        || std::wstring_view(close_name.data()) != UiText(UiStringId::Text0277)) {
+        std::fprintf(
+            stderr,
+            "document-tab close button presentation mismatch: synchronized=%d hwnd=%p style=%08lx name_length=%d\n",
+            close_buttons_synchronized ? 1 : 0,
+            static_cast<void*>(close_button),
+            static_cast<unsigned long>(close_style),
+            close_name_length);
+        RECT expected{};
+        TabCtrl_GetItemRect(group->document_tabs, 1, &expected);
+        std::fprintf(
+            stderr,
+            "document-tab expected item: %ld,%ld,%ld,%ld count=%d\n",
+            expected.left,
+            expected.top,
+            expected.right,
+            expected.bottom,
+            TabCtrl_GetItemCount(group->document_tabs));
+        for (HWND child = GetWindow(group->document_tabs, GW_CHILD);
+             child != nullptr;
+             child = GetWindow(child, GW_HWNDNEXT)) {
+            if (GetDlgCtrlID(child) == IDC_DOCUMENT_TAB_CLOSE) {
+                RECT bounds{};
+                GetWindowRect(child, &bounds);
+                MapWindowPoints(
+                    HWND_DESKTOP,
+                    group->document_tabs,
+                    reinterpret_cast<POINT*>(&bounds),
+                    2U);
+                std::fprintf(
+                    stderr,
+                    "document-tab close child: hwnd=%p bounds=%ld,%ld,%ld,%ld style=%08lx\n",
+                    static_cast<void*>(child),
+                    bounds.left,
+                    bounds.top,
+                    bounds.right,
+                    bounds.bottom,
+                    static_cast<unsigned long>(GetWindowLongPtrW(child, GWL_STYLE)));
+            }
+        }
+        return 11181;
+    }
+    SendMessageW(close_button, BM_CLICK, 0, 0);
+    PumpPendingWindowMessages();
+    group = state.Workspace().editors.Active();
+    if (group == nullptr || !group->Contains(close_retained)
+        || group->Contains(close_target)
+        || state.routing.targets.ActiveDocumentView() != close_retained
+        || state.TabDrag().IsArmed()
+        || TabCtrl_GetItemCount(group->document_tabs)
+            != static_cast<int>(group->ViewCount())) {
+        return 11182;
+    }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_VIEW_NEW,
+            0) != 1) {
+        return 11183;
+    }
+    group = state.Workspace().editors.Active();
+    if (group != nullptr) {
+        SetWindowPos(
+            group->document_tabs,
+            nullptr,
+            0,
+            0,
+            16384,
+            64,
+            SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER);
+    }
+    UpdateMenuState(state);
+    PumpPendingWindowMessages();
+    const bool recreated_buttons_synchronized = group != nullptr
+        && SyncDocumentTabCloseButtons(group->document_tabs);
+    const HWND recreated_first_button = group == nullptr
+        ? nullptr
+        : close_button_for_tab(group->document_tabs, 0);
+    const HWND recreated_second_button = group == nullptr
+        ? nullptr
+        : close_button_for_tab(group->document_tabs, 1);
+    if (group == nullptr || group->ViewCount() < 2U
+        || recreated_first_button == nullptr
+        || recreated_second_button == nullptr) {
+        std::fprintf(
+            stderr,
+            "recreated document-tab close buttons mismatch: synchronized=%d first=%p second=%p views=%zu tabs=%d\n",
+            recreated_buttons_synchronized ? 1 : 0,
+            static_cast<void*>(recreated_first_button),
+            static_cast<void*>(recreated_second_button),
+            group == nullptr ? 0U : group->ViewCount(),
+            group == nullptr ? 0 : TabCtrl_GetItemCount(group->document_tabs));
+        if (group != nullptr) {
+            RECT client{};
+            RECT first_item{};
+            RECT second_item{};
+            GetClientRect(group->document_tabs, &client);
+            TabCtrl_GetItemRect(group->document_tabs, 0, &first_item);
+            TabCtrl_GetItemRect(group->document_tabs, 1, &second_item);
+            std::fprintf(
+                stderr,
+                "recreated document-tab geometry: client=%ld,%ld,%ld,%ld first=%ld,%ld,%ld,%ld second=%ld,%ld,%ld,%ld\n",
+                client.left,
+                client.top,
+                client.right,
+                client.bottom,
+                first_item.left,
+                first_item.top,
+                first_item.right,
+                first_item.bottom,
+                second_item.left,
+                second_item.top,
+                second_item.right,
+                second_item.bottom);
+        }
+        return 11184;
+    }
 
     InkpodDocumentInfo before{};
     InkpodDocumentInfo after{};

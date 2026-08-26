@@ -7430,6 +7430,9 @@ void UpdateDocumentTabLabels(
             if (selected_index >= 0) {
                 TabCtrl_SetCurSel(group->document_tabs, selected_index);
             }
+            if (!SyncDocumentTabCloseButtons(group->document_tabs)) {
+                return;
+            }
         }
     } catch (const std::bad_alloc&) {
         return;
