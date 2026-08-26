@@ -110,6 +110,7 @@ constexpr UINT_PTR kPaneSubclass = 1U;
 constexpr UINT_PTR kPickerSubclass = 2U;
 constexpr UINT_PTR kSwatchSubclass = 3U;
 constexpr UINT_PTR kColorLabelSubclass = 4U;
+constexpr UINT_PTR kColorTabsSubclass = 5U;
 constexpr double kPi = 3.14159265358979323846;
 
 enum PickerDragTarget : int {
@@ -383,7 +384,60 @@ void SetColorLabel(
     SetDlgItemTextW(pane, control, text.data());
 }
 
-void ShowTabControls(HWND pane, int tab) noexcept {
+bool IsValidColorDockTab(ColorDockTabId tab) noexcept {
+    return static_cast<std::uint8_t>(tab)
+        < static_cast<std::uint8_t>(ColorDockTabId::Count);
+}
+
+ColorDockTabId ColorTabAt(HWND tabs, int index) noexcept {
+    if (tabs == nullptr || index < 0) {
+        return ColorDockTabId::Count;
+    }
+    TCITEMW item{};
+    item.mask = TCIF_PARAM;
+    if (TabCtrl_GetItem(tabs, index, &item) == FALSE) {
+        return ColorDockTabId::Count;
+    }
+    const auto tab = static_cast<ColorDockTabId>(item.lParam);
+    return IsValidColorDockTab(tab) ? tab : ColorDockTabId::Count;
+}
+
+const wchar_t* ColorTabLabel(ColorDockTabId tab) noexcept {
+    switch (tab) {
+        case ColorDockTabId::Color: return UiText(UiStringId::Color);
+        case ColorDockTabId::Palette: return UiText(UiStringId::Palette);
+        case ColorDockTabId::Chart: return UiText(UiStringId::Chart);
+        default: return L"";
+    }
+}
+
+int ColorTabIndex(HWND tabs, ColorDockTabId tab) noexcept {
+    const int count = tabs == nullptr ? 0 : std::max(0, TabCtrl_GetItemCount(tabs));
+    for (int index = 0; index < count; ++index) {
+        if (ColorTabAt(tabs, index) == tab) {
+            return index;
+        }
+    }
+    return -1;
+}
+
+void PopulateColorTabs(
+    HWND tabs, const ColorDockPaneState& state) noexcept {
+    if (tabs == nullptr) {
+        return;
+    }
+    TabCtrl_DeleteAllItems(tabs);
+    for (const ColorDockTabId tab : state.tab_order) {
+        TCITEMW item{};
+        item.mask = TCIF_TEXT | TCIF_PARAM;
+        item.pszText = const_cast<wchar_t*>(ColorTabLabel(tab));
+        item.lParam = static_cast<LPARAM>(tab);
+        TabCtrl_InsertItem(tabs, TabCtrl_GetItemCount(tabs), &item);
+    }
+    TabCtrl_SetCurSel(tabs, ColorTabIndex(tabs, state.active_tab));
+}
+
+void ShowTabControls(HWND pane, ColorDockTabId tab) noexcept {
     for (const int control : {
              IDC_COLOR_MAIN_LINE_LABEL,
              IDC_COLOR_MAIN_LINE_SWATCH,
@@ -395,7 +449,9 @@ void ShowTabControls(HWND pane, int tab) noexcept {
              IDC_COLOR_BLUE,
              IDC_COLOR_ALPHA,
              IDC_COLOR_APPLY}) {
-        ShowWindow(GetDlgItem(pane, control), tab == 0 ? SW_SHOW : SW_HIDE);
+        ShowWindow(
+            GetDlgItem(pane, control),
+            tab == ColorDockTabId::Color ? SW_SHOW : SW_HIDE);
     }
     ShowWindow(GetDlgItem(pane, IDC_COLOR_SWATCH), SW_HIDE);
     for (const int control : {
@@ -407,10 +463,13 @@ void ShowTabControls(HWND pane, int tab) noexcept {
              IDC_PALETTE_CLEAR_BUTTON,
              IDC_PALETTE_LOAD_BUTTON,
              IDC_PALETTE_SAVE_BUTTON}) {
-        ShowWindow(GetDlgItem(pane, control), tab == 1 ? SW_SHOW : SW_HIDE);
+        ShowWindow(
+            GetDlgItem(pane, control),
+            tab == ColorDockTabId::Palette ? SW_SHOW : SW_HIDE);
     }
     ShowWindow(
-        GetDlgItem(pane, IDC_COLOR_CHART_LIST), tab == 2 ? SW_SHOW : SW_HIDE);
+        GetDlgItem(pane, IDC_COLOR_CHART_LIST),
+        tab == ColorDockTabId::Chart ? SW_SHOW : SW_HIDE);
 }
 
 struct PaneTargetRowBounds {
@@ -515,7 +574,7 @@ void RepaintMovedPaneTargetRow(
     }
 }
 
-void RepaintVisibleTabControls(HWND pane, int tab) noexcept {
+void RepaintVisibleTabControls(HWND pane, ColorDockTabId tab) noexcept {
     const auto repaint = [pane](int control, bool erase) noexcept {
         const HWND child = GetDlgItem(pane, control);
         if (child == nullptr || IsWindowVisible(child) == FALSE) {
@@ -538,7 +597,7 @@ void RepaintVisibleTabControls(HWND pane, int tab) noexcept {
     repaint(IDC_COLOR_TABS, true);
     repaint(IDC_COLOR_TARGET, true);
     repaint(IDC_COLOR_PIN, true);
-    if (tab == 0) {
+    if (tab == ColorDockTabId::Color) {
         for (const int control : {
                  IDC_COLOR_MAIN_LINE_LABEL,
                  IDC_COLOR_MAIN_LINE_SWATCH,
@@ -556,7 +615,7 @@ void RepaintVisibleTabControls(HWND pane, int tab) noexcept {
                 || control == IDC_COLOR_APPLY;
             repaint(control, standard_control);
         }
-    } else if (tab == 1) {
+    } else if (tab == ColorDockTabId::Palette) {
         for (const int control : {
                  IDC_PALETTE_LIST,
                  IDC_PALETTE_PREVIOUS,
@@ -568,7 +627,7 @@ void RepaintVisibleTabControls(HWND pane, int tab) noexcept {
                  IDC_PALETTE_SAVE_BUTTON}) {
             repaint(control, true);
         }
-    } else if (tab == 2) {
+    } else if (tab == ColorDockTabId::Chart) {
         repaint(IDC_COLOR_CHART_LIST, true);
     }
 }
@@ -785,8 +844,9 @@ void LayoutPane(HWND pane) noexcept {
     RepaintMovedPaneTargetRow(
         pane, target_row_before, CapturePaneTargetRowBounds(pane));
     const ColorDockPaneState* state = PaneState(pane);
-    const int active_tab = state == nullptr
-        ? std::max(0, TabCtrl_GetCurSel(GetDlgItem(pane, IDC_COLOR_TABS)))
+    const HWND tabs = GetDlgItem(pane, IDC_COLOR_TABS);
+    const ColorDockTabId active_tab = state == nullptr
+        ? ColorTabAt(tabs, TabCtrl_GetCurSel(tabs))
         : state->active_tab;
     RepaintVisibleTabControls(pane, active_tab);
 }
@@ -2181,6 +2241,143 @@ LRESULT CALLBACK PickerSubclassProcedure(
     return DefSubclassProc(picker, message, wparam, lparam);
 }
 
+bool ReorderColorTab(
+    ColorDockPaneState& state,
+    ColorDockTabId source,
+    ColorDockTabId target,
+    bool after_target) noexcept {
+    const auto source_it = std::find(
+        state.tab_order.begin(), state.tab_order.end(), source);
+    const auto target_it = std::find(
+        state.tab_order.begin(), state.tab_order.end(), target);
+    if (source_it == state.tab_order.end() || target_it == state.tab_order.end()
+        || source_it == target_it) {
+        return false;
+    }
+    const std::size_t source_index = static_cast<std::size_t>(
+        source_it - state.tab_order.begin());
+    const std::size_t target_index = static_cast<std::size_t>(
+        target_it - state.tab_order.begin());
+    std::size_t final_index = target_index + (after_target ? 1U : 0U);
+    if (source_index < final_index) {
+        --final_index;
+    }
+    if (source_index == final_index) {
+        return false;
+    }
+    const ColorDockTabId value = state.tab_order[source_index];
+    if (source_index < final_index) {
+        std::move(
+            state.tab_order.begin()
+                + static_cast<std::ptrdiff_t>(source_index + 1U),
+            state.tab_order.begin()
+                + static_cast<std::ptrdiff_t>(final_index + 1U),
+            state.tab_order.begin()
+                + static_cast<std::ptrdiff_t>(source_index));
+    } else {
+        std::move_backward(
+            state.tab_order.begin()
+                + static_cast<std::ptrdiff_t>(final_index),
+            state.tab_order.begin()
+                + static_cast<std::ptrdiff_t>(source_index),
+            state.tab_order.begin()
+                + static_cast<std::ptrdiff_t>(source_index + 1U));
+    }
+    state.tab_order[final_index] = value;
+    return true;
+}
+
+LRESULT CALLBACK ColorTabSubclassProcedure(
+    HWND tabs,
+    UINT message,
+    WPARAM wparam,
+    LPARAM lparam,
+    UINT_PTR,
+    DWORD_PTR reference) noexcept {
+    auto* state = reinterpret_cast<ColorDockPaneState*>(reference);
+    if (state == nullptr) {
+        return DefSubclassProc(tabs, message, wparam, lparam);
+    }
+    if (message == WM_LBUTTONDOWN) {
+        TCHITTESTINFO hit{};
+        hit.pt = POINT{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+        const int index = TabCtrl_HitTest(tabs, &hit);
+        const ColorDockTabId source = index >= 0
+                && (hit.flags & TCHT_NOWHERE) == 0U
+            ? ColorTabAt(tabs, index)
+            : ColorDockTabId::Count;
+        if (IsValidColorDockTab(source)) {
+            state->dragging_tab = source;
+            state->tab_drag_origin = hit.pt;
+            state->tab_drag_active = false;
+            SetCapture(tabs);
+        }
+    }
+
+    const LRESULT result = DefSubclassProc(tabs, message, wparam, lparam);
+    if (message == WM_MOUSEMOVE && GetCapture() == tabs
+        && IsValidColorDockTab(state->dragging_tab)) {
+        const POINT current{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+        if (!state->tab_drag_active
+            && (std::abs(current.x - state->tab_drag_origin.x)
+                    >= GetSystemMetrics(SM_CXDRAG)
+                || std::abs(current.y - state->tab_drag_origin.y)
+                    >= GetSystemMetrics(SM_CYDRAG))) {
+            state->tab_drag_active = true;
+        }
+    }
+    if (message == WM_LBUTTONUP) {
+        bool reordered{};
+        if (state->tab_drag_active
+            && IsValidColorDockTab(state->dragging_tab)) {
+            TCHITTESTINFO hit{};
+            hit.pt = POINT{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+            const int index = TabCtrl_HitTest(tabs, &hit);
+            RECT bounds{};
+            const ColorDockTabId target = index >= 0
+                    && (hit.flags & TCHT_NOWHERE) == 0U
+                ? ColorTabAt(tabs, index)
+                : ColorDockTabId::Count;
+            if (IsValidColorDockTab(target)
+                && target != state->dragging_tab
+                && TabCtrl_GetItemRect(tabs, index, &bounds) != FALSE) {
+                const bool after = hit.pt.x
+                    >= bounds.left + (bounds.right - bounds.left) / 2;
+                reordered = ReorderColorTab(
+                    *state, state->dragging_tab, target, after);
+            }
+        }
+        state->dragging_tab = ColorDockTabId::Count;
+        state->tab_drag_active = false;
+        if (GetCapture() == tabs) {
+            ReleaseCapture();
+        }
+        if (reordered) {
+            PopulateColorTabs(tabs, *state);
+            const HWND pane = GetParent(tabs);
+            ShowTabControls(pane, state->active_tab);
+            LayoutPane(pane);
+        }
+    } else if (message == WM_KEYDOWN && wparam == VK_ESCAPE
+               && IsValidColorDockTab(state->dragging_tab)) {
+        state->dragging_tab = ColorDockTabId::Count;
+        state->tab_drag_active = false;
+        if (GetCapture() == tabs) {
+            ReleaseCapture();
+        }
+        return 0;
+    } else if (message == WM_CANCELMODE || message == WM_CAPTURECHANGED) {
+        state->dragging_tab = ColorDockTabId::Count;
+        state->tab_drag_active = false;
+    } else if (message == WM_NCDESTROY) {
+        RemoveWindowSubclass(
+            tabs, ColorTabSubclassProcedure, kColorTabsSubclass);
+        state->dragging_tab = ColorDockTabId::Count;
+        state->tab_drag_active = false;
+    }
+    return result;
+}
+
 LRESULT CALLBACK PaneSubclassProcedure(
     HWND pane,
     UINT message,
@@ -2207,9 +2404,14 @@ LRESULT CALLBACK PaneSubclassProcedure(
                 const auto* notification = reinterpret_cast<const NMHDR*>(lparam);
                 if (notification != nullptr && notification->idFrom == IDC_COLOR_TABS
                     && notification->code == TCN_SELCHANGE) {
-                    state->active_tab = std::max(
-                        0, TabCtrl_GetCurSel(notification->hwndFrom));
-                    if (state->active_tab == 0) {
+                    const ColorDockTabId selected = ColorTabAt(
+                        notification->hwndFrom,
+                        TabCtrl_GetCurSel(notification->hwndFrom));
+                    if (!IsValidColorDockTab(selected)) {
+                        return 0;
+                    }
+                    state->active_tab = selected;
+                    if (state->active_tab == ColorDockTabId::Color) {
                         InvalidatePickerCaches(*state);
                     }
                     ShowTabControls(pane, state->active_tab);
@@ -2580,6 +2782,11 @@ HWND CreateColorDockPane(
     if (!controls_created || picker == nullptr || swatch == nullptr
         || main_line_label == nullptr || drawing_label == nullptr
         || SetWindowSubclass(
+               tabs,
+               ColorTabSubclassProcedure,
+               kColorTabsSubclass,
+               reinterpret_cast<DWORD_PTR>(&state)) == FALSE
+        || SetWindowSubclass(
                picker,
                PickerSubclassProcedure,
                kPickerSubclass,
@@ -2617,15 +2824,7 @@ HWND CreateColorDockPane(
             TRUE,
             reinterpret_cast<LPARAM>(cue));
     }
-    for (const wchar_t* label : {
-             UiText(UiStringId::Color),
-             UiText(UiStringId::Palette),
-             UiText(UiStringId::Chart)}) {
-        TCITEMW item{};
-        item.mask = TCIF_TEXT;
-        item.pszText = const_cast<wchar_t*>(label);
-        TabCtrl_InsertItem(tabs, TabCtrl_GetItemCount(tabs), &item);
-    }
+    PopulateColorTabs(tabs, state);
     SetWindowLongPtrW(
         pane, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(&state));
     SetWindowSubclass(
@@ -2634,7 +2833,7 @@ HWND CreateColorDockPane(
         kPaneSubclass,
         reinterpret_cast<DWORD_PTR>(&state));
     UpdateFont(pane, state);
-    ShowTabControls(pane, 0);
+    ShowTabControls(pane, state.active_tab);
     LayoutPane(pane);
     return pane;
 }

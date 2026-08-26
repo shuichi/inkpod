@@ -86,6 +86,19 @@ synchronously repaints the exposed parent area before repainting the children. A
 focused smoke contract moves Pin by less than the target-to-Pin gap and requires
 that parent-background erase, preventing the old themed button frame from remaining.
 
+The current `WORKSPACE-001` right-pane evidence additionally covers thresholded
+same-strip drag reordering of stable-ID top-level tabs, a DPI-scaled owner-drawn
+close icon that atomically hides every member pane and removes the addressed tab,
+and top-level labels/descriptions resolved from the existing localized pane
+catalog at the Windows presentation boundary. Color/Palette/Chart use semantic
+IDs and support reorder-only drag within their existing Common Controls tab;
+the active page and child windows remain loaded, and outside/cancel paths are
+nonmutating. Splitter focus gain and loss synchronously repaint the rule so the
+highlight cannot remain after focus moves elsewhere. Static DockHost/model tests,
+the workspace-layout executable, localization/catalog checks, and English and
+Japanese ARM64 product smokes cover these paths. The Color inner-tab order is
+session-local and is intentionally absent from Workspace V9 and `.inkpod`.
+
 The current `BATCH-004` evidence supersedes the older Batch member of the broad
 `WIN-001` pin-icon inventory: Batch now has no pane-header document-target label or pin
 action, while issue-time session/generation capture remains unchanged. Removal

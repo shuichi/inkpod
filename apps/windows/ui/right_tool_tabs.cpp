@@ -1,7 +1,6 @@
 #include "right_tool_tabs.h"
 
 #include <algorithm>
-#include <cwchar>
 #include <limits>
 
 namespace inkpod::windows::ui {
@@ -19,13 +18,6 @@ int ScaleDip(int value, unsigned int dpi) noexcept {
         (scaled + 48) / 96,
         0,
         std::numeric_limits<int>::max()));
-}
-
-const wchar_t* PaneTitle(DockPaneType type) noexcept {
-    const PaneDescriptor* descriptor = FindPaneDescriptor(type);
-    return descriptor == nullptr || descriptor->fallback_title == nullptr
-        ? L""
-        : descriptor->fallback_title;
 }
 
 constexpr bool RequiresExclusiveTab(DockPaneType type) noexcept {
@@ -55,36 +47,6 @@ void RightToolTabsModel::Reset() noexcept {
     tabs_[0].pane_count = 2U;
     selected_ = tabs_[0].id;
     next_id_ = 2U;
-}
-
-const wchar_t* ToolTabTitle(const ToolTab& tab) noexcept {
-    return tab.pane_count == 0U ? L"" : PaneTitle(tab.panes[0]);
-}
-
-bool ToolTabDescription(
-    const ToolTab& tab,
-    std::span<wchar_t> output) noexcept {
-    if (tab.pane_count == 0U || output.empty()) {
-        return false;
-    }
-    std::size_t written{};
-    for (std::size_t index = 0U; index < tab.pane_count; ++index) {
-        const wchar_t* title = PaneTitle(tab.panes[index]);
-        const std::size_t length = std::wcslen(title);
-        const std::size_t separator = index == 0U ? 0U : 2U;
-        if (length + separator >= output.size() - written) {
-            output[0] = L'\0';
-            return false;
-        }
-        if (separator != 0U) {
-            output[written++] = L',';
-            output[written++] = L' ';
-        }
-        std::copy_n(title, length, output.begin() + written);
-        written += length;
-    }
-    output[written] = L'\0';
-    return true;
 }
 
 std::span<const ToolTab> RightToolTabsModel::Tabs() const noexcept {
@@ -331,6 +293,25 @@ ToolTabResult RightToolTabsModel::MovePaneToNewTab(
         *this = candidate;
     }
     return result;
+}
+
+ToolTabResult RightToolTabsModel::CloseTab(
+    ToolTabId id,
+    std::span<DockPaneType> closed_panes,
+    std::size_t& closed_count) noexcept {
+    closed_count = 0U;
+    const std::size_t index = IndexOf(id);
+    if (index >= tab_count_) {
+        return ToolTabResult::InvalidTab;
+    }
+    const ToolTab& tab = tabs_[index];
+    if (closed_panes.size() < tab.pane_count) {
+        return ToolTabResult::CapacityExceeded;
+    }
+    std::copy_n(tab.panes.begin(), tab.pane_count, closed_panes.begin());
+    closed_count = tab.pane_count;
+    RemoveTab(index);
+    return ToolTabResult::Ok;
 }
 
 ToolTabResult RightToolTabsModel::EnsurePaneAssigned(

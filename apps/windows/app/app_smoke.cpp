@@ -49,6 +49,7 @@
 #include "ui/command_state.h"
 #include "ui/shortcut_controller.h"
 #include "ui/panes/document_panes.h"
+#include "ui/panes/color_dock_pane.h"
 #include "ui/panes/color_panes.h"
 #include "ui/panes/pane_dialog_layout.h"
 #include "ui/tools/fill_controller.h"
@@ -63,6 +64,7 @@
 #include "ui/main_window_runtime.h"
 #include "ui/tab_drag.h"
 #include "ui/localization.h"
+#include "ui/ui_resources.h"
 
 #include "app/app_smoke.h"
 
@@ -3026,6 +3028,38 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         RECT update{};
         return GetUpdateRect(window, &update, FALSE) == FALSE;
     };
+    const HWND splitter_focus_target = GetDlgItem(
+        state.Workspace().windows.color_pane, IDC_COLOR_RED);
+    RECT splitter_client{};
+    COLORREF focused_splitter_pixel = CLR_INVALID;
+    COLORREF unfocused_splitter_pixel = CLR_INVALID;
+    if (right_zone_splitter != nullptr && splitter_focus_target != nullptr
+        && GetClientRect(right_zone_splitter, &splitter_client) != FALSE) {
+        SendMessageW(right_zone_splitter, WM_MOUSELEAVE, 0, 0);
+        SetFocus(splitter_focus_target);
+        SetFocus(right_zone_splitter);
+        HDC splitter_dc = GetDC(right_zone_splitter);
+        const int sample_x = std::max(
+            0L, (splitter_client.right - splitter_client.left) / 2);
+        const int sample_y = std::max(
+            0L, (splitter_client.bottom - splitter_client.top) / 2);
+        if (splitter_dc != nullptr) {
+            focused_splitter_pixel = GetPixel(splitter_dc, sample_x, sample_y);
+            ReleaseDC(right_zone_splitter, splitter_dc);
+        }
+        SetFocus(splitter_focus_target);
+        splitter_dc = GetDC(right_zone_splitter);
+        if (splitter_dc != nullptr) {
+            unfocused_splitter_pixel = GetPixel(
+                splitter_dc, sample_x, sample_y);
+            ReleaseDC(right_zone_splitter, splitter_dc);
+        }
+    }
+    if (focused_splitter_pixel != GetSysColor(COLOR_HIGHLIGHT)
+        || unfocused_splitter_pixel != GetSysColor(COLOR_3DSHADOW)
+        || !has_no_pending_update(right_zone_splitter)) {
+        return 11178;
+    }
     bool layer_list_shrink_painted{};
     bool layer_list_grow_painted{};
     if (tool_counter_attached && color_counter_attached
@@ -3504,6 +3538,267 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         || state.Workspace().windows.workspace.right_tool_tabs.Selected()
             != layer_tool_tab) {
         return 11020;
+    }
+    const auto color_tab_at = [](HWND control, int index) noexcept {
+        TCITEMW item{};
+        item.mask = TCIF_PARAM;
+        return control != nullptr && index >= 0
+                && TabCtrl_GetItem(control, index, &item) != FALSE
+            ? static_cast<panes::ColorDockTabId>(item.lParam)
+            : panes::ColorDockTabId::Count;
+    };
+    const auto has_visible_style = [](HWND control) noexcept {
+        return control != nullptr
+            && (GetWindowLongPtrW(control, GWL_STYLE) & WS_VISIBLE) != 0;
+    };
+    const HWND reorder_color_tabs = GetDlgItem(
+        state.Workspace().windows.color_pane, IDC_COLOR_TABS);
+    const HWND color_picker_before = GetDlgItem(
+        state.Workspace().windows.color_pane, IDC_COLOR_PICKER);
+    const HWND palette_list_before = GetDlgItem(
+        state.Workspace().windows.color_pane, IDC_PALETTE_LIST);
+    const HWND chart_list_before = GetDlgItem(
+        state.Workspace().windows.color_pane, IDC_COLOR_CHART_LIST);
+    RECT color_source_bounds{};
+    RECT color_target_bounds{};
+    if (reorder_color_tabs == nullptr || color_picker_before == nullptr
+        || palette_list_before == nullptr || chart_list_before == nullptr
+        || TabCtrl_GetItemCount(reorder_color_tabs) != 3
+        || color_tab_at(reorder_color_tabs, 0) != panes::ColorDockTabId::Color
+        || color_tab_at(reorder_color_tabs, 1) != panes::ColorDockTabId::Palette
+        || color_tab_at(reorder_color_tabs, 2) != panes::ColorDockTabId::Chart
+        || TabCtrl_GetItemRect(reorder_color_tabs, 0, &color_source_bounds)
+            == FALSE
+        || TabCtrl_GetItemRect(reorder_color_tabs, 2, &color_target_bounds)
+            == FALSE) {
+        return 11170;
+    }
+    const POINT color_drag_start{
+        color_source_bounds.left
+            + std::max(
+                1L,
+                (color_source_bounds.right - color_source_bounds.left) / 4),
+        color_source_bounds.top
+            + (color_source_bounds.bottom - color_source_bounds.top) / 2};
+    const POINT color_drag_after{
+        color_target_bounds.right - 1,
+        color_target_bounds.top
+            + (color_target_bounds.bottom - color_target_bounds.top) / 2};
+    SendMessageW(
+        reorder_color_tabs,
+        WM_LBUTTONDOWN,
+        MK_LBUTTON,
+        MAKELPARAM(color_drag_start.x, color_drag_start.y));
+    SendMessageW(
+        reorder_color_tabs,
+        WM_MOUSEMOVE,
+        MK_LBUTTON,
+        MAKELPARAM(color_drag_after.x, color_drag_after.y));
+    SendMessageW(
+        reorder_color_tabs,
+        WM_LBUTTONUP,
+        0,
+        MAKELPARAM(color_drag_after.x, color_drag_after.y));
+    if (color_tab_at(reorder_color_tabs, 0) != panes::ColorDockTabId::Palette
+        || color_tab_at(reorder_color_tabs, 1) != panes::ColorDockTabId::Chart
+        || color_tab_at(reorder_color_tabs, 2) != panes::ColorDockTabId::Color
+        || TabCtrl_GetCurSel(reorder_color_tabs) != 2
+        || !has_visible_style(color_picker_before)
+        || has_visible_style(palette_list_before)
+        || has_visible_style(chart_list_before)
+        || GetDlgItem(state.Workspace().windows.color_pane, IDC_COLOR_PICKER)
+            != color_picker_before
+        || GetDlgItem(state.Workspace().windows.color_pane, IDC_PALETTE_LIST)
+            != palette_list_before
+        || GetDlgItem(state.Workspace().windows.color_pane, IDC_COLOR_CHART_LIST)
+            != chart_list_before) {
+        return 11171;
+    }
+    RECT unchanged_source{};
+    if (TabCtrl_GetItemRect(reorder_color_tabs, 0, &unchanged_source) == FALSE) {
+        return 11172;
+    }
+    const POINT unchanged_start{
+        unchanged_source.left + 1,
+        unchanged_source.top
+            + (unchanged_source.bottom - unchanged_source.top) / 2};
+    SendMessageW(
+        reorder_color_tabs,
+        WM_LBUTTONDOWN,
+        MK_LBUTTON,
+        MAKELPARAM(unchanged_start.x, unchanged_start.y));
+    SendMessageW(
+        reorder_color_tabs,
+        WM_MOUSEMOVE,
+        MK_LBUTTON,
+        MAKELPARAM(-32, -32));
+    SendMessageW(
+        reorder_color_tabs,
+        WM_LBUTTONUP,
+        0,
+        MAKELPARAM(-32, -32));
+    if (color_tab_at(reorder_color_tabs, 0) != panes::ColorDockTabId::Palette
+        || color_tab_at(reorder_color_tabs, 1) != panes::ColorDockTabId::Chart
+        || color_tab_at(reorder_color_tabs, 2) != panes::ColorDockTabId::Color
+        || TabCtrl_GetItemRect(reorder_color_tabs, 2, &color_source_bounds)
+            == FALSE
+        || TabCtrl_GetItemRect(reorder_color_tabs, 0, &color_target_bounds)
+            == FALSE) {
+        return 11172;
+    }
+    const POINT color_restore_start{
+        color_source_bounds.left + 1,
+        color_source_bounds.top
+            + (color_source_bounds.bottom - color_source_bounds.top) / 2};
+    const POINT color_restore_target{
+        color_target_bounds.left + 1,
+        color_target_bounds.top
+            + (color_target_bounds.bottom - color_target_bounds.top) / 2};
+    SendMessageW(
+        reorder_color_tabs,
+        WM_LBUTTONDOWN,
+        MK_LBUTTON,
+        MAKELPARAM(color_restore_start.x, color_restore_start.y));
+    SendMessageW(
+        reorder_color_tabs,
+        WM_MOUSEMOVE,
+        MK_LBUTTON,
+        MAKELPARAM(color_restore_target.x, color_restore_target.y));
+    SendMessageW(
+        reorder_color_tabs,
+        WM_LBUTTONUP,
+        0,
+        MAKELPARAM(color_restore_target.x, color_restore_target.y));
+    if (color_tab_at(reorder_color_tabs, 0) != panes::ColorDockTabId::Color
+        || color_tab_at(reorder_color_tabs, 1) != panes::ColorDockTabId::Palette
+        || color_tab_at(reorder_color_tabs, 2) != panes::ColorDockTabId::Chart
+        || TabCtrl_GetCurSel(reorder_color_tabs) != 0) {
+        return 11173;
+    }
+
+    const auto relayout_smoke_workspace = [&state]() noexcept {
+        RECT client{};
+        if (GetClientRect(state.Workspace().windows.window, &client) == FALSE) {
+            return false;
+        }
+        LayoutMainChrome(
+            state.Workspace().windows,
+            state.lifetime.smoke_test,
+            client.right - client.left,
+            client.bottom - client.top,
+            DockHostChangeKind::Structure);
+        return true;
+    };
+    auto& tool_tab_model =
+        state.Workspace().windows.workspace.right_tool_tabs;
+    const std::size_t original_tool_tab_count = tool_tab_model.Tabs().size();
+    if (state.Workspace().windows.dock_host.RestorePane(DockPaneType::Locator)
+            != DockResult::Ok
+        || tool_tab_model.MovePaneToNewTab(DockPaneType::Locator)
+            != ToolTabResult::Ok
+        || !relayout_smoke_workspace()) {
+        return 11174;
+    }
+    const ToolTabId locator_tool_tab = tool_tab_model.TabForPane(
+        DockPaneType::Locator);
+    const auto tool_tab_index = [right_tool_tabs](ToolTabId id) noexcept {
+        const int count = TabCtrl_GetItemCount(right_tool_tabs);
+        for (int index = 0; index < count; ++index) {
+            TCITEMW item{};
+            item.mask = TCIF_PARAM;
+            if (TabCtrl_GetItem(right_tool_tabs, index, &item) != FALSE
+                && static_cast<std::uint32_t>(item.lParam) == id.Value()) {
+                return index;
+            }
+        }
+        return -1;
+    };
+    int locator_tool_tab_index = tool_tab_index(locator_tool_tab);
+    const int target_index = locator_tool_tab_index == 0 ? 1 : 0;
+    RECT locator_tab_bounds{};
+    RECT target_tab_bounds{};
+    if (!locator_tool_tab
+        || tool_tab_model.Tabs().size() != original_tool_tab_count + 1U
+        || locator_tool_tab_index < 0 || target_index < 0
+        || TabCtrl_GetItemRect(
+               right_tool_tabs,
+               locator_tool_tab_index,
+               &locator_tab_bounds) == FALSE
+        || TabCtrl_GetItemRect(
+               right_tool_tabs, target_index, &target_tab_bounds) == FALSE) {
+        return 11175;
+    }
+    const POINT tool_drag_start{
+        locator_tab_bounds.left
+            + std::max(
+                1L,
+                (locator_tab_bounds.right - locator_tab_bounds.left) / 4),
+        locator_tab_bounds.top
+            + (locator_tab_bounds.bottom - locator_tab_bounds.top) / 2};
+    const POINT tool_drag_target{
+        target_tab_bounds.left + 1,
+        target_tab_bounds.top
+            + (target_tab_bounds.bottom - target_tab_bounds.top) / 2};
+    SendMessageW(
+        right_tool_tabs,
+        WM_LBUTTONDOWN,
+        MK_LBUTTON,
+        MAKELPARAM(tool_drag_start.x, tool_drag_start.y));
+    SendMessageW(
+        right_tool_tabs,
+        WM_MOUSEMOVE,
+        MK_LBUTTON,
+        MAKELPARAM(tool_drag_target.x, tool_drag_target.y));
+    SendMessageW(
+        right_tool_tabs,
+        WM_LBUTTONUP,
+        0,
+        MAKELPARAM(tool_drag_target.x, tool_drag_target.y));
+    locator_tool_tab_index = tool_tab_index(locator_tool_tab);
+    wchar_t locator_title[128]{};
+    wchar_t expected_locator_title[128]{};
+    TCITEMW locator_item{};
+    locator_item.mask = TCIF_TEXT;
+    locator_item.pszText = locator_title;
+    locator_item.cchTextMax = static_cast<int>(std::size(locator_title));
+    if (locator_tool_tab_index != target_index
+        || TabCtrl_GetItem(
+               right_tool_tabs,
+               locator_tool_tab_index,
+               &locator_item) == FALSE
+        || LoadLocalizedStringW(
+               state.lifetime.instance,
+               IDS_PANE_LOCATOR,
+               expected_locator_title,
+               static_cast<int>(std::size(expected_locator_title))) <= 0
+        || std::wcscmp(locator_title, expected_locator_title) != 0
+        || TabCtrl_GetItemRect(
+               right_tool_tabs,
+               locator_tool_tab_index,
+               &locator_tab_bounds) == FALSE) {
+        return 11176;
+    }
+    const POINT close_button_point{
+        locator_tab_bounds.right
+            - std::max(4L, locator_tab_bounds.bottom / 3),
+        locator_tab_bounds.top
+            + (locator_tab_bounds.bottom - locator_tab_bounds.top) / 2};
+    const HWND tool_tab_close = ChildWindowFromPointEx(
+        right_tool_tabs,
+        close_button_point,
+        CWP_SKIPDISABLED | CWP_SKIPINVISIBLE | CWP_SKIPTRANSPARENT);
+    if (tool_tab_close == nullptr
+        || GetDlgCtrlID(tool_tab_close) != IDC_RIGHT_TOOL_TAB_CLOSE
+        || SendMessageW(tool_tab_close, BM_CLICK, 0, 0) != 0
+        || tool_tab_model.Find(locator_tool_tab) != nullptr
+        || tool_tab_model.Tabs().size() != original_tool_tab_count
+        || state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Locator)) {
+        return 11177;
+    }
+    if (layer_tool_tab
+        && tool_tab_model.SetSelected(layer_tool_tab) == ToolTabResult::Ok) {
+        static_cast<void>(relayout_smoke_workspace());
     }
     if (state.Workspace().windows.dock_host.FloatPane(DockPaneType::Tool)
             != DockResult::ZoneNotAllowed

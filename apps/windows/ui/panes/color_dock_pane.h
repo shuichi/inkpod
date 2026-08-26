@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -9,6 +10,19 @@
 #include "inkpod/core_ffi.h"
 
 namespace inkpod::windows::ui::panes {
+
+enum class ColorDockTabId : std::uint8_t {
+    Color,
+    Palette,
+    Chart,
+    Count,
+};
+
+inline constexpr std::array<ColorDockTabId, 3U> kDefaultColorDockTabOrder{
+    ColorDockTabId::Color,
+    ColorDockTabId::Palette,
+    ColorDockTabId::Chart,
+};
 
 using ColorPaneCommandCallback = void (*)(void* context, UINT command) noexcept;
 using ColorPaneValueCallback = void (*)(
@@ -82,7 +96,11 @@ struct ColorDockPaneState {
     std::wstring target_text;
     bool target_available{};
     bool pinned{};
-    int active_tab{};
+    std::array<ColorDockTabId, 3U> tab_order{kDefaultColorDockTabOrder};
+    ColorDockTabId active_tab{ColorDockTabId::Color};
+    ColorDockTabId dragging_tab{ColorDockTabId::Count};
+    POINT tab_drag_origin{};
+    bool tab_drag_active{};
     double main_line_hue_degrees{};
     double drawing_hue_degrees{};
     int picker_drag_target{};

@@ -9,7 +9,10 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <cstdint>
+#include <cwchar>
+#include <span>
 
 #include "app/resource.h"
 #include "ui/localization.h"
@@ -22,6 +25,7 @@ constexpr UINT_PTR kPaneSubclass = 1U;
 constexpr UINT_PTR kSplitterSubclass = 1U;
 constexpr UINT_PTR kTabSubclass = 1U;
 constexpr UINT_PTR kToolTabSubclass = 1U;
+constexpr UINT_PTR kToolTabCloseButtonSubclass = 2U;
 constexpr int kTabHeightDip = 28;
 
 constexpr UINT kContextFloat = 1U;
@@ -138,6 +142,86 @@ const wchar_t* LoadPaneTitle(
     return descriptor.fallback_title;
 }
 
+const wchar_t* LoadToolTabTitle(
+    HINSTANCE instance,
+    const ToolTab& tab,
+    wchar_t (&buffer)[128]) noexcept {
+    if (tab.pane_count == 0U) {
+        buffer[0] = L'\0';
+        return buffer;
+    }
+    const PaneDescriptor* descriptor = FindPaneDescriptor(tab.panes[0]);
+    if (descriptor == nullptr) {
+        buffer[0] = L'\0';
+        return buffer;
+    }
+    return LoadPaneTitle(instance, *descriptor, buffer);
+}
+
+bool LoadToolTabDescription(
+    HINSTANCE instance,
+    const ToolTab& tab,
+    std::span<wchar_t> output) noexcept {
+    if (tab.pane_count == 0U || output.empty()) {
+        return false;
+    }
+    std::size_t written{};
+    for (std::size_t index = 0U; index < tab.pane_count; ++index) {
+        const PaneDescriptor* descriptor = FindPaneDescriptor(tab.panes[index]);
+        if (descriptor == nullptr) {
+            output[0] = L'\0';
+            return false;
+        }
+        wchar_t title_buffer[128]{};
+        const wchar_t* title = LoadPaneTitle(instance, *descriptor, title_buffer);
+        const std::size_t length = std::wcslen(title);
+        const std::size_t separator = index == 0U ? 0U : 2U;
+        if (length + separator >= output.size() - written) {
+            output[0] = L'\0';
+            return false;
+        }
+        if (separator != 0U) {
+            output[written++] = L',';
+            output[written++] = L' ';
+        }
+        std::copy_n(title, length, output.begin() + written);
+        written += length;
+    }
+    output[written] = L'\0';
+    return true;
+}
+
+ToolTabId ToolTabAt(HWND tabs, int index) noexcept {
+    if (tabs == nullptr || index < 0) {
+        return {};
+    }
+    TCITEMW item{};
+    item.mask = TCIF_PARAM;
+    return TabCtrl_GetItem(tabs, index, &item) == FALSE
+        ? ToolTabId{}
+        : ToolTabId{static_cast<std::uint32_t>(item.lParam)};
+}
+
+int HitToolTab(HWND tabs, POINT client) noexcept {
+    TCHITTESTINFO hit{};
+    hit.pt = client;
+    const int index = TabCtrl_HitTest(tabs, &hit);
+    return index >= 0 && (hit.flags & TCHT_NOWHERE) == 0U ? index : -1;
+}
+
+bool ExceedsDragThreshold(POINT origin, POINT current) noexcept {
+    return std::abs(current.x - origin.x) >= GetSystemMetrics(SM_CXDRAG)
+        || std::abs(current.y - origin.y) >= GetSystemMetrics(SM_CYDRAG);
+}
+
+void RedrawSplitterNow(HWND window) noexcept {
+    RedrawWindow(
+        window,
+        nullptr,
+        nullptr,
+        RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW);
+}
+
 const wchar_t* SplitterName(const DockSplitterGeometry& splitter) noexcept {
     if (splitter.kind == DockSplitterKind::StackBoundary) {
         switch (splitter.zone) {
@@ -189,7 +273,8 @@ bool SplitterHasHorizontalLine(
 void PaintSplitter(
     HWND window,
     const DockSplitterGeometry& geometry,
-    bool highlighted) noexcept {
+    bool highlighted,
+    bool focused) noexcept {
     PAINTSTRUCT paint{};
     HDC context = BeginPaint(window, &paint);
     if (context == nullptr) {
@@ -212,7 +297,7 @@ void PaintSplitter(
             context,
             &rule,
             GetSysColorBrush(highlighted ? COLOR_HIGHLIGHT : COLOR_3DSHADOW));
-        if (GetFocus() == window) {
+        if (focused) {
             DrawFocusRect(context, &client);
         }
     }
@@ -234,6 +319,9 @@ DockHost::DockHost() noexcept {
         tab_states_[index].zone = static_cast<DockZone>(index / kDockPaneCount);
         tab_states_[index].stack = static_cast<std::uint8_t>(
             index % kDockPaneCount);
+    }
+    for (ToolTabCloseButtonSlot& slot : tool_tab_close_buttons_) {
+        slot.host = this;
     }
 }
 
@@ -431,6 +519,7 @@ void DockHost::ApplyLayout(
             InvalidateRect(splitters_[index], nullptr, FALSE);
         } else {
             splitter_states_[index].hovered = false;
+            splitter_states_[index].focused = false;
             PlaceWindow(splitters_[index], {}, false);
         }
     }
@@ -1152,14 +1241,23 @@ void DockHost::ApplyToolTabLayout(bool synchronize_items) noexcept {
         return;
     }
     const int visible_count = static_cast<int>(right_tool_tabs_->Tabs().size());
+    const int horizontal_padding = std::max(1, ScaleDip(24, dpi_));
+    const int vertical_padding = std::max(1, ScaleDip(3, dpi_));
+    SendMessageW(
+        right_tool_tab_control_,
+        TCM_SETPADDING,
+        0,
+        MAKELPARAM(horizontal_padding, vertical_padding));
     if (synchronize_items) {
         TabCtrl_DeleteAllItems(right_tool_tab_control_);
         int selected = -1;
         int visible_index{};
         for (const ToolTab& tab : right_tool_tabs_->Tabs()) {
+            wchar_t title[128]{};
             TCITEMW item{};
             item.mask = TCIF_TEXT | TCIF_PARAM;
-            item.pszText = const_cast<wchar_t*>(ToolTabTitle(tab));
+            item.pszText = const_cast<wchar_t*>(
+                LoadToolTabTitle(instance_, tab, title));
             item.lParam = static_cast<LPARAM>(tab.id.Value());
             TabCtrl_InsertItem(right_tool_tab_control_, visible_index, &item);
             if (tab.id == right_tool_tabs_->Selected()) {
@@ -1170,16 +1268,226 @@ void DockHost::ApplyToolTabLayout(bool synchronize_items) noexcept {
         TabCtrl_SetCurSel(right_tool_tab_control_, selected);
         if (const ToolTab* active = right_tool_tabs_->SelectedTab(); active != nullptr) {
             std::array<wchar_t, kMaximumToolTabDescriptionLength> description{};
-            if (ToolTabDescription(*active, description)) {
+            if (LoadToolTabDescription(instance_, *active, description)) {
                 static_cast<void>(SetAccessibleName(
                     right_tool_tab_control_, description.data()));
             }
         }
+        static_cast<void>(SynchronizeToolTabCloseButtons());
     }
     PlaceWindow(
         right_tool_tab_control_,
         geometry_.right_tool_tabs,
         visible_count > 0);
+    LayoutToolTabCloseButtons();
+}
+
+DockHost::ToolTabCloseButtonSlot* DockHost::FindToolTabCloseButton(
+    ToolTabId tab) noexcept {
+    const auto found = std::find_if(
+        tool_tab_close_buttons_.begin(),
+        tool_tab_close_buttons_.end(),
+        [tab](const ToolTabCloseButtonSlot& slot) { return slot.tab == tab; });
+    return found == tool_tab_close_buttons_.end() ? nullptr : &*found;
+}
+
+DockHost::ToolTabCloseButtonSlot* DockHost::FindToolTabCloseButton(
+    HWND button) noexcept {
+    const auto found = std::find_if(
+        tool_tab_close_buttons_.begin(),
+        tool_tab_close_buttons_.end(),
+        [button](const ToolTabCloseButtonSlot& slot) {
+            return slot.button == button;
+        });
+    return found == tool_tab_close_buttons_.end() ? nullptr : &*found;
+}
+
+HWND DockHost::CreateToolTabCloseButton(
+    ToolTabCloseButtonSlot& slot) noexcept {
+    const HWND button = CreateWindowExW(
+        0,
+        WC_BUTTONW,
+        UiText(UiStringId::DockClose),
+        WS_CHILD | WS_TABSTOP | BS_OWNERDRAW | BS_FLAT,
+        0,
+        0,
+        0,
+        0,
+        right_tool_tab_control_,
+        reinterpret_cast<HMENU>(
+            static_cast<INT_PTR>(IDC_RIGHT_TOOL_TAB_CLOSE)),
+        instance_,
+        nullptr);
+    if (button == nullptr
+        || SetWindowSubclass(
+               button,
+               ToolTabCloseButtonSubclassProcedure,
+               kToolTabCloseButtonSubclass,
+               reinterpret_cast<DWORD_PTR>(&slot)) == FALSE) {
+        if (button != nullptr) {
+            DestroyWindow(button);
+        }
+        return nullptr;
+    }
+    return button;
+}
+
+void DockHost::DestroyToolTabCloseButton(
+    ToolTabCloseButtonSlot& slot) noexcept {
+    const HWND button = slot.button;
+    slot.tab = {};
+    slot.hovered = false;
+    if (button != nullptr && IsWindow(button) != FALSE) {
+        DestroyWindow(button);
+    }
+    slot.button = nullptr;
+}
+
+bool DockHost::SynchronizeToolTabCloseButtons() noexcept {
+    std::array<bool, kMaximumToolTabs> retained{};
+    bool complete = right_tool_tabs_ != nullptr
+        && right_tool_tabs_->Tabs().size() <= retained.size();
+    if (right_tool_tabs_ != nullptr) {
+        for (const ToolTab& tab : right_tool_tabs_->Tabs()) {
+            ToolTabCloseButtonSlot* slot = FindToolTabCloseButton(tab.id);
+            if (slot == nullptr) {
+                const auto available = std::find_if(
+                    tool_tab_close_buttons_.begin(),
+                    tool_tab_close_buttons_.end(),
+                    [](const ToolTabCloseButtonSlot& candidate) {
+                        return !candidate.tab && candidate.button == nullptr;
+                    });
+                if (available == tool_tab_close_buttons_.end()) {
+                    complete = false;
+                    continue;
+                }
+                slot = &*available;
+                slot->tab = tab.id;
+                slot->button = CreateToolTabCloseButton(*slot);
+                if (slot->button == nullptr) {
+                    slot->tab = {};
+                    complete = false;
+                    continue;
+                }
+            }
+            retained[static_cast<std::size_t>(
+                slot - tool_tab_close_buttons_.data())] = true;
+        }
+    }
+    for (std::size_t index = 0U; index < tool_tab_close_buttons_.size(); ++index) {
+        if (!retained[index] && tool_tab_close_buttons_[index].tab) {
+            DestroyToolTabCloseButton(tool_tab_close_buttons_[index]);
+        }
+    }
+    LayoutToolTabCloseButtons();
+    return complete;
+}
+
+void DockHost::LayoutToolTabCloseButtons() noexcept {
+    if (right_tool_tab_control_ == nullptr) {
+        return;
+    }
+    RECT client{};
+    if (GetClientRect(right_tool_tab_control_, &client) == FALSE) {
+        return;
+    }
+    const int button_size = std::max(1, ScaleDip(20, dpi_));
+    const int edge = std::max(1, ScaleDip(3, dpi_));
+    const int minimum_item_width = button_size + edge * 2;
+    for (ToolTabCloseButtonSlot& slot : tool_tab_close_buttons_) {
+        if (slot.button == nullptr || !slot.tab) {
+            continue;
+        }
+        int tab_index = -1;
+        const int count = std::max(0, TabCtrl_GetItemCount(right_tool_tab_control_));
+        for (int index = 0; index < count; ++index) {
+            if (ToolTabAt(right_tool_tab_control_, index) == slot.tab) {
+                tab_index = index;
+                break;
+            }
+        }
+        RECT item{};
+        const bool item_available = tab_index >= 0
+            && TabCtrl_GetItemRect(right_tool_tab_control_, tab_index, &item)
+                != FALSE;
+        const bool fully_visible = item_available
+            && item.left >= client.left && item.right <= client.right
+            && item.top >= client.top && item.bottom <= client.bottom
+            && item.right - item.left >= minimum_item_width;
+        if (!fully_visible) {
+            ShowWindow(slot.button, SW_HIDE);
+            continue;
+        }
+        const int item_height = item.bottom - item.top;
+        const int size = std::min(
+            button_size, std::max(1, item_height - edge * 2));
+        const int x = item.right - edge - size;
+        const int y = item.top + std::max(0, (item_height - size) / 2);
+        SetWindowPos(
+            slot.button,
+            HWND_TOP,
+            x,
+            y,
+            size,
+            size,
+            SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
+        InvalidateRect(slot.button, nullptr, TRUE);
+    }
+}
+
+bool DockHost::DrawToolTabCloseButton(
+    const DRAWITEMSTRUCT& draw) noexcept {
+    ToolTabCloseButtonSlot* slot = FindToolTabCloseButton(draw.hwndItem);
+    if (slot == nullptr) {
+        return false;
+    }
+    const bool disabled = (draw.itemState & ODS_DISABLED) != 0U;
+    const bool pressed = (draw.itemState & ODS_SELECTED) != 0U;
+    const int selected = TabCtrl_GetCurSel(right_tool_tab_control_);
+    const bool active = selected >= 0
+        && ToolTabAt(right_tool_tab_control_, selected) == slot->tab;
+    const int background = pressed
+        ? COLOR_3DSHADOW
+        : (slot->hovered ? COLOR_3DLIGHT
+                         : (active ? COLOR_WINDOW : COLOR_BTNFACE));
+    const int foreground = disabled ? COLOR_GRAYTEXT : COLOR_BTNTEXT;
+    FillRect(draw.hDC, &draw.rcItem, GetSysColorBrush(background));
+
+    const int inset = std::max(4, ScaleDip(6, dpi_));
+    const int offset = pressed ? std::max(1, ScaleDip(1, dpi_)) : 0;
+    const HPEN pen = CreatePen(
+        PS_SOLID, std::max(1, ScaleDip(1, dpi_)), GetSysColor(foreground));
+    if (pen != nullptr) {
+        const HGDIOBJ previous = SelectObject(draw.hDC, pen);
+        MoveToEx(
+            draw.hDC,
+            draw.rcItem.left + inset + offset,
+            draw.rcItem.top + inset + offset,
+            nullptr);
+        LineTo(
+            draw.hDC,
+            draw.rcItem.right - inset + offset,
+            draw.rcItem.bottom - inset + offset);
+        MoveToEx(
+            draw.hDC,
+            draw.rcItem.right - inset + offset,
+            draw.rcItem.top + inset + offset,
+            nullptr);
+        LineTo(
+            draw.hDC,
+            draw.rcItem.left + inset + offset,
+            draw.rcItem.bottom - inset + offset);
+        if (previous != nullptr) {
+            SelectObject(draw.hDC, previous);
+        }
+        DeleteObject(pen);
+    }
+    if ((draw.itemState & ODS_FOCUS) != 0U) {
+        RECT focus = draw.rcItem;
+        InflateRect(&focus, -2, -2);
+        DrawFocusRect(draw.hDC, &focus);
+    }
+    return true;
 }
 
 void DockHost::RepaintChangedStackBoundaries(
@@ -1312,7 +1620,12 @@ void DockHost::ShowContextMenu(
                 + static_cast<UINT>(destination_count);
             const UINT flags = MF_STRING
                 | (tab.id == current_tab ? MF_CHECKED | MF_GRAYED : 0U);
-            AppendMenuW(move_menu, flags, command, ToolTabTitle(tab));
+            wchar_t title[128]{};
+            AppendMenuW(
+                move_menu,
+                flags,
+                command,
+                LoadToolTabTitle(instance_, tab, title));
             destinations[destination_count++] = tab.id;
         }
     }
@@ -1411,6 +1724,35 @@ ToolTabResult DockHost::MovePaneToNewToolTab(
     }
     NotifyChanged();
     FocusPane(type);
+    return ToolTabResult::Ok;
+}
+
+ToolTabResult DockHost::CloseToolTab(ToolTabId tab) noexcept {
+    if (model_ == nullptr || right_tool_tabs_ == nullptr) {
+        return ToolTabResult::InvalidTab;
+    }
+    DockLayoutModel dock_candidate = *model_;
+    RightToolTabsModel tab_candidate = *right_tool_tabs_;
+    std::array<DockPaneType, kDockPaneCount> closed_panes{};
+    std::size_t closed_count{};
+    const ToolTabResult close_result = tab_candidate.CloseTab(
+        tab, closed_panes, closed_count);
+    if (close_result != ToolTabResult::Ok) {
+        return close_result;
+    }
+    for (std::size_t index = 0U; index < closed_count; ++index) {
+        if (dock_candidate.HidePane(closed_panes[index]) != DockResult::Ok) {
+            return ToolTabResult::InvalidPane;
+        }
+    }
+    *model_ = dock_candidate;
+    *right_tool_tabs_ = tab_candidate;
+    for (std::size_t index = 0U; index < closed_count; ++index) {
+        if (PaneHostState* pane = PaneState(closed_panes[index]); pane != nullptr) {
+            pane->auto_hide_expanded = false;
+        }
+    }
+    NotifyChanged();
     return ToolTabResult::Ok;
 }
 
@@ -1883,12 +2225,18 @@ LRESULT CALLBACK DockHost::SplitterSubclassProcedure(
             InvalidateRect(window, nullptr, FALSE);
             return 0;
         case WM_CAPTURECHANGED:
-        case WM_SETFOCUS:
-        case WM_KILLFOCUS:
         case WM_THEMECHANGED:
         case WM_SYSCOLORCHANGE:
         case WM_SETTINGCHANGE:
             InvalidateRect(window, nullptr, FALSE);
+            break;
+        case WM_SETFOCUS:
+            splitter->focused = true;
+            RedrawSplitterNow(window);
+            break;
+        case WM_KILLFOCUS:
+            splitter->focused = false;
+            RedrawSplitterNow(window);
             break;
         case WM_CANCELMODE:
             if (GetCapture() == window) {
@@ -1903,7 +2251,8 @@ LRESULT CALLBACK DockHost::SplitterSubclassProcedure(
                 window,
                 splitter->geometry,
                 splitter->hovered || GetCapture() == window
-                    || GetFocus() == window);
+                    || splitter->focused,
+                splitter->focused);
             return 0;
         case WM_GETDLGCODE:
             return DefSubclassProc(window, message, wparam, lparam)
@@ -2013,59 +2362,137 @@ LRESULT CALLBACK DockHost::ToolTabSubclassProcedure(
     if (host == nullptr) {
         return DefSubclassProc(window, message, wparam, lparam);
     }
+    if (message == WM_COMMAND
+        && LOWORD(wparam) == IDC_RIGHT_TOOL_TAB_CLOSE
+        && HIWORD(wparam) == BN_CLICKED) {
+        ToolTabCloseButtonSlot* slot = host->FindToolTabCloseButton(
+            reinterpret_cast<HWND>(lparam));
+        if (slot != nullptr && slot->tab) {
+            static_cast<void>(host->CloseToolTab(slot->tab));
+        }
+        return 0;
+    }
+    if (message == WM_DRAWITEM) {
+        const auto* draw = reinterpret_cast<const DRAWITEMSTRUCT*>(lparam);
+        if (draw != nullptr && host->DrawToolTabCloseButton(*draw)) {
+            return TRUE;
+        }
+    }
     if (message == WM_LBUTTONDOWN) {
-        TCHITTESTINFO hit{};
-        hit.pt = POINT{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
-        const int index = TabCtrl_HitTest(window, &hit);
-        TCITEMW item{};
-        item.mask = TCIF_PARAM;
-        if (index >= 0 && TabCtrl_GetItem(window, index, &item) != FALSE) {
-            host->dragging_tool_tab_ = ToolTabId{
-                static_cast<std::uint32_t>(item.lParam)};
+        const POINT client{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+        const int index = HitToolTab(window, client);
+        const ToolTabId tab = ToolTabAt(window, index);
+        if (tab) {
+            host->dragging_tool_tab_ = tab;
+            host->tool_tab_drag_origin_ = client;
+            host->tool_tab_drag_active_ = false;
             SetCapture(window);
         }
     }
 
     const LRESULT result = DefSubclassProc(window, message, wparam, lparam);
     if (message == WM_MOUSEMOVE && GetCapture() == window
-        && host->dragging_tool_tab_ && host->right_tool_tabs_ != nullptr) {
-        TCHITTESTINFO hit{};
-        hit.pt = POINT{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
-        const int index = TabCtrl_HitTest(window, &hit);
-        TCITEMW item{};
-        item.mask = TCIF_PARAM;
-        RECT bounds{};
-        if (index >= 0 && TabCtrl_GetItem(window, index, &item) != FALSE
-            && TabCtrl_GetItemRect(window, index, &bounds) != FALSE) {
-            const ToolTabId target{static_cast<std::uint32_t>(item.lParam)};
-            if (target != host->dragging_tool_tab_) {
-                const bool after = hit.pt.x >= bounds.left
-                    + (bounds.right - bounds.left) / 2;
-                if (host->right_tool_tabs_->Reorder(
-                        host->dragging_tool_tab_, target, after)
-                    == ToolTabResult::Ok) {
-                    host->NotifyChanged();
-                }
-            }
+        && host->dragging_tool_tab_) {
+        const POINT client{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+        if (!host->tool_tab_drag_active_
+            && ExceedsDragThreshold(host->tool_tab_drag_origin_, client)) {
+            host->tool_tab_drag_active_ = true;
         }
     }
     if (message == WM_LBUTTONUP) {
+        ToolTabResult reorder_result = ToolTabResult::NoOp;
+        if (host->tool_tab_drag_active_ && host->dragging_tool_tab_
+            && host->right_tool_tabs_ != nullptr) {
+            const POINT client{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+            const int index = HitToolTab(window, client);
+            const ToolTabId target = ToolTabAt(window, index);
+            RECT bounds{};
+            if (target && target != host->dragging_tool_tab_
+                && TabCtrl_GetItemRect(window, index, &bounds) != FALSE) {
+                const bool after = client.x
+                    >= bounds.left + (bounds.right - bounds.left) / 2;
+                reorder_result = host->right_tool_tabs_->Reorder(
+                    host->dragging_tool_tab_, target, after);
+            }
+        }
+        host->dragging_tool_tab_ = {};
+        host->tool_tab_drag_active_ = false;
         if (GetCapture() == window) {
             ReleaseCapture();
         }
-        host->dragging_tool_tab_ = {};
+        if (reorder_result == ToolTabResult::Ok) {
+            host->NotifyChanged();
+        }
         host->ActivateSelectedToolTab();
     } else if (message == WM_KEYUP) {
         host->ActivateSelectedToolTab();
+    } else if (message == WM_KEYDOWN && wparam == VK_ESCAPE
+               && host->dragging_tool_tab_) {
+        host->dragging_tool_tab_ = {};
+        host->tool_tab_drag_active_ = false;
+        if (GetCapture() == window) {
+            ReleaseCapture();
+        }
+        return 0;
     } else if (message == WM_CANCELMODE || message == WM_CAPTURECHANGED) {
         host->dragging_tool_tab_ = {};
+        host->tool_tab_drag_active_ = false;
     } else if (message == WM_NCDESTROY) {
         RemoveWindowSubclass(
             window, ToolTabSubclassProcedure, kToolTabSubclass);
         host->right_tool_tab_control_ = nullptr;
         host->dragging_tool_tab_ = {};
+        host->tool_tab_drag_active_ = false;
     }
     return result;
+}
+
+LRESULT CALLBACK DockHost::ToolTabCloseButtonSubclassProcedure(
+    HWND window,
+    UINT message,
+    WPARAM wparam,
+    LPARAM lparam,
+    UINT_PTR,
+    DWORD_PTR reference) noexcept {
+    auto* slot = reinterpret_cast<ToolTabCloseButtonSlot*>(reference);
+    switch (message) {
+        case WM_MOUSEMOVE:
+            if (slot != nullptr && !slot->hovered) {
+                TRACKMOUSEEVENT tracking{};
+                tracking.cbSize = sizeof(tracking);
+                tracking.dwFlags = TME_LEAVE;
+                tracking.hwndTrack = window;
+                if (TrackMouseEvent(&tracking) != FALSE) {
+                    slot->hovered = true;
+                    InvalidateRect(window, nullptr, TRUE);
+                }
+            }
+            break;
+        case WM_MOUSELEAVE:
+            if (slot != nullptr && slot->hovered) {
+                slot->hovered = false;
+                InvalidateRect(window, nullptr, TRUE);
+            }
+            return 0;
+        case WM_THEMECHANGED:
+        case WM_SYSCOLORCHANGE:
+        case WM_DPICHANGED_AFTERPARENT:
+            InvalidateRect(window, nullptr, TRUE);
+            break;
+        case WM_NCDESTROY:
+            RemoveWindowSubclass(
+                window,
+                ToolTabCloseButtonSubclassProcedure,
+                kToolTabCloseButtonSubclass);
+            if (slot != nullptr && slot->button == window) {
+                slot->button = nullptr;
+                slot->hovered = false;
+            }
+            break;
+        default:
+            break;
+    }
+    return DefSubclassProc(window, message, wparam, lparam);
 }
 
 }  // namespace inkpod::windows::ui

@@ -27,10 +27,8 @@ using inkpod::windows::ui::DockZone;
 using inkpod::windows::ui::PaneDescriptors;
 using inkpod::windows::ui::RightToolTabsModel;
 using inkpod::windows::ui::ToolTab;
-using inkpod::windows::ui::ToolTabDescription;
 using inkpod::windows::ui::ToolTabId;
 using inkpod::windows::ui::ToolTabResult;
-using inkpod::windows::ui::ToolTabTitle;
 using inkpod::windows::ui::ApplyWorkspacePreset;
 using inkpod::windows::ui::ClampWorkspaceFloatingPanes;
 using inkpod::windows::ui::ClampWorkspacePlacement;
@@ -337,21 +335,13 @@ int main() {
 
     RightToolTabsModel tool_tabs{};
     const ToolTabId initial_tab{1U};
-    std::array<wchar_t, 512U> tab_description{};
-    std::wstring initial_description = color_descriptor.fallback_title;
-    initial_description.append(L", ");
-    initial_description.append(layer_descriptor.fallback_title);
     if (tool_tabs.Tabs().size() != 1U
         || tool_tabs.Selected() != initial_tab
         || tool_tabs.Tabs()[0].pane_count != 2U
         || tool_tabs.Tabs()[0].panes[0] != DockPaneType::Color
         || tool_tabs.Tabs()[0].panes[1] != DockPaneType::Layer
         || tool_tabs.TabForPane(DockPaneType::Color) != initial_tab
-        || tool_tabs.TabForPane(DockPaneType::Locator)
-        || std::wstring(ToolTabTitle(tool_tabs.Tabs()[0]))
-            != color_descriptor.fallback_title
-        || !ToolTabDescription(tool_tabs.Tabs()[0], tab_description)
-        || std::wstring(tab_description.data()) != initial_description) {
+        || tool_tabs.TabForPane(DockPaneType::Locator)) {
         return 120;
     }
     if (tool_tabs.AddPaneToSelected(DockPaneType::Locator, 10'000, 96U, 6)
@@ -361,8 +351,6 @@ int main() {
                DockPaneType::Locator, DockPaneType::Color, false)
             != ToolTabResult::Ok
         || tool_tabs.Tabs()[0].panes[0] != DockPaneType::Locator
-        || std::wstring(ToolTabTitle(tool_tabs.Tabs()[0]))
-            != locator_descriptor.fallback_title
         || tool_tabs.MovePaneToNewTab(DockPaneType::Locator)
             != ToolTabResult::Ok
         || tool_tabs.Tabs().size() != 2U
@@ -386,9 +374,6 @@ int main() {
         || tool_tabs.ReorderPane(
                DockPaneType::Reference, DockPaneType::Locator, false)
             != ToolTabResult::Ok
-        || std::wstring(ToolTabTitle(*tool_tabs.Find(ToolTabId{2U})))
-            != PaneDescriptors()[static_cast<std::size_t>(
-                   DockPaneType::Reference)].fallback_title
         || tool_tabs.MovePane(DockPaneType::Color, ToolTabId{2U})
             != ToolTabResult::Ok
         || tool_tabs.MovePane(DockPaneType::Layer, ToolTabId{2U})
@@ -409,6 +394,41 @@ int main() {
         || tool_tabs.Selected() != stable_selected
         || tool_tabs.NextStableId() != stable_next_id) {
         return 123;
+    }
+
+    RightToolTabsModel close_tabs{};
+    if (close_tabs.AddPaneToSelected(
+            DockPaneType::Locator, 10'000, 96U, 6)
+            != ToolTabResult::Ok
+        || close_tabs.MovePaneToNewTab(DockPaneType::Locator)
+            != ToolTabResult::Ok) {
+        return 135;
+    }
+    const auto close_before = close_tabs;
+    std::array<DockPaneType, kDockPaneCount> closed_panes{};
+    std::size_t closed_count{};
+    std::array<DockPaneType, 1U> short_output{};
+    if (close_tabs.CloseTab(ToolTabId{99U}, closed_panes, closed_count)
+            != ToolTabResult::InvalidTab
+        || closed_count != 0U
+        || close_tabs.CloseTab(ToolTabId{1U}, short_output, closed_count)
+            != ToolTabResult::CapacityExceeded
+        || closed_count != 0U
+        || close_tabs.Tabs().size() != close_before.Tabs().size()
+        || close_tabs.Selected() != close_before.Selected()
+        || close_tabs.CloseTab(ToolTabId{2U}, closed_panes, closed_count)
+            != ToolTabResult::Ok
+        || closed_count != 1U
+        || closed_panes[0] != DockPaneType::Locator
+        || close_tabs.Selected() != ToolTabId{1U}
+        || close_tabs.CloseTab(ToolTabId{1U}, closed_panes, closed_count)
+            != ToolTabResult::Ok
+        || closed_count != 2U
+        || closed_panes[0] != DockPaneType::Color
+        || closed_panes[1] != DockPaneType::Layer
+        || close_tabs.HasVisibleTabs()
+        || close_tabs.Selected()) {
+        return 136;
     }
 
     RightToolTabsModel exclusive_batch_tabs{};

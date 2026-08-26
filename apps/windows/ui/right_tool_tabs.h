@@ -47,13 +47,6 @@ struct ToolTab final {
     std::size_t pane_count{};
 };
 
-// The label is always the localized title of the vertically first pane.
-[[nodiscard]] const wchar_t* ToolTabTitle(const ToolTab& tab) noexcept;
-// Tooltip/accessibility text lists every pane title in vertical order.
-[[nodiscard]] bool ToolTabDescription(
-    const ToolTab& tab,
-    std::span<wchar_t> output) noexcept;
-
 class RightToolTabsModel final {
 public:
     RightToolTabsModel() noexcept;
@@ -85,6 +78,13 @@ public:
     [[nodiscard]] ToolTabResult MovePane(
         DockPaneType type, ToolTabId destination) noexcept;
     [[nodiscard]] ToolTabResult MovePaneToNewTab(DockPaneType type) noexcept;
+    // Removes one complete tab and returns its pane membership in vertical
+    // order. The caller can stage the corresponding pane visibility changes
+    // before publishing both models together.
+    [[nodiscard]] ToolTabResult CloseTab(
+        ToolTabId id,
+        std::span<DockPaneType> closed_panes,
+        std::size_t& closed_count) noexcept;
     [[nodiscard]] ToolTabResult EnsurePaneAssigned(
         DockPaneType type) noexcept;
     [[nodiscard]] ToolTabResult ReorderPane(

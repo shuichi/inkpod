@@ -223,6 +223,17 @@ foreach(REQUIRED IN ITEMS
         "MovePaneToToolTab"
         "DockMovePaneToTab"
         "DockClose"
+        "IDC_RIGHT_TOOL_TAB_CLOSE"
+        "BS_OWNERDRAW"
+        "WM_DRAWITEM"
+        "BN_CLICKED"
+        "CloseToolTab"
+        "SynchronizeToolTabCloseButtons"
+        "LoadToolTabTitle"
+        "LoadToolTabDescription"
+        "ExceedsDragThreshold"
+        "RedrawSplitterNow"
+        "splitter->focused = false"
         "UpdateTabFont(GetDpiForWindow(owner_))"
         "UpdateTabFont(dpi_)"
         "WM_SETFONT"
@@ -243,10 +254,10 @@ foreach(REQUIRED IN ITEMS
         "kMaximumToolTabs"
         "pane_count"
         "ToolTabId Selected"
-        "ToolTabDescription"
         "ToolTabResult AddPaneToSelected"
         "ToolTabResult MovePane"
         "ToolTabResult MovePaneToNewTab"
+        "ToolTabResult CloseTab"
         "ToolTabResult ReorderPane"
         "ToolTabResult Reorder")
     string(FIND "${TOOL_TABS_MODEL}" "${REQUIRED}" OFFSET)
@@ -259,14 +270,18 @@ foreach(REQUIRED IN ITEMS
         "CreateTab"
         "RemoveTab"
         "selected_ = tabs_[index - 1U].id"
-        "ToolTabTitle"
-        "ToolTabDescription"
+        "RightToolTabsModel::CloseTab"
         "RightToolTabsModel candidate")
     string(FIND "${TOOL_TABS_IMPLEMENTATION}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
         message(FATAL_ERROR "Right tool-tab implementation is missing: ${REQUIRED}")
     endif()
 endforeach()
+if(TOOL_TABS_IMPLEMENTATION MATCHES "fallback_title"
+        OR TOOL_TABS_IMPLEMENTATION MATCHES "UiText")
+    message(FATAL_ERROR
+        "Right tool-tab model must remain independent of localized presentation")
+endif()
 foreach(FORBIDDEN IN ITEMS
         "kToolTabColoring"
         "kToolTabReference"
@@ -336,6 +351,12 @@ foreach(REQUIRED IN ITEMS
         "CaptureColorTabSurfacePixels"
         "state.swatch_paint_buffer"
         "state.picker_paint_buffer"
+        "ColorDockTabId"
+        "TCIF_TEXT | TCIF_PARAM"
+        "ColorTabSubclassProcedure"
+        "ReorderColorTab"
+        "GetSystemMetrics(SM_CXDRAG)"
+        "GetSystemMetrics(SM_CYDRAG)"
         "HWND_BOTTOM"
         "HWND_TOP"
         "UpdateWindow(child)")
