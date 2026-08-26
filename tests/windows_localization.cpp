@@ -1,5 +1,6 @@
 #include "app/resource.h"
 #include "ui/dialogs/layer_palette_badge_layout.h"
+#include "ui/dialogs/layer_palette_compact_layout.h"
 #include "ui/dialogs/layer_palette_status_layout.h"
 #include "ui/history_presentation.h"
 #include "ui/localization.h"
@@ -531,6 +532,64 @@ bool LayerPaletteOwnerDrawCompactCellContract(
     return passed;
 }
 
+bool LayerPaletteCompactDensityContract() {
+    using namespace inkpod::windows::ui;
+    constexpr int action_width = kLayerPaletteActionTargetWidthDip
+        + kLayerPaletteActionGapDip
+        + static_cast<int>(kLayerPaletteActionButtonCount)
+            * kLayerPaletteActionButtonSizeDip
+        + static_cast<int>(kLayerPaletteActionButtonCount - 1U)
+            * kLayerPaletteActionGapDip;
+    return kLayerPaletteMarginDip == 4
+        && kLayerPaletteLayerTileHeightDip == 56
+        && kLayerPalettePlaneTileHeightDip == 48
+        && kLayerPaletteThumbnailWidthDip == 48
+        && kLayerPaletteThumbnailHeightDip == 36
+        && kLayerPalettePlaneBadgeWidthDip == 32
+        && kLayerPalettePlaneBadgeHeightDip == 32
+        && kLayerPaletteActionButtonSizeDip == 24
+        && kLayerPaletteActionButtonCount == 6U
+        && kLayerPaletteLayerTileHeightDip
+            >= kLayerPaletteStatusButtonSizeDip + kLayerPaletteRowPaddingDip * 2
+        && kLayerPalettePlaneTileHeightDip
+            >= kLayerPaletteStatusButtonSizeDip + kLayerPaletteRowPaddingDip * 2
+        && kLayerPaletteLayerTileHeightDip
+                + kLayerPalettePlaneTileHeightDip * 2
+            == 152
+        && action_width + kLayerPaletteMarginDip * 2 <= 320;
+}
+
+bool LayerPaletteActionTextContract(UiLanguagePreference preference) {
+    const HINSTANCE instance = GetModuleHandleW(nullptr);
+    if (!InitializeUiLocalization(instance, preference)) {
+        return false;
+    }
+    const std::array layer_labels{
+        UiStringId::LayerActionNew,
+        UiStringId::LayerActionDuplicate,
+        UiStringId::LayerActionDelete,
+        UiStringId::LayerActionMoveUp,
+        UiStringId::LayerActionMoveDown,
+        UiStringId::LayerActionProperties};
+    const std::array plane_labels{
+        UiStringId::PlaneActionNew,
+        UiStringId::PlaneActionDuplicate,
+        UiStringId::PlaneActionDelete,
+        UiStringId::PlaneActionMoveUp,
+        UiStringId::PlaneActionMoveDown,
+        UiStringId::PlaneActionProperties};
+    const auto complete = [](const auto& labels, UiStringId target) {
+        return std::all_of(labels.cbegin(), labels.cend(), [target](UiStringId id) {
+            const std::wstring_view text = UiTextView(id);
+            return !text.empty() && text.find(UiTextView(target)) != std::wstring_view::npos;
+        });
+    };
+    const bool passed = complete(layer_labels, UiStringId::Layer)
+        && complete(plane_labels, UiStringId::Plane);
+    ShutdownUiLocalization();
+    return passed;
+}
+
 bool LayerPalettePlaneBadgeLayoutContract(
     UiLanguagePreference preference) {
     using inkpod::windows::ui::kLayerPalettePlaneBadgeHeightDip;
@@ -558,7 +617,7 @@ bool LayerPalettePlaneBadgeLayoutContract(
             break;
         }
         const HFONT font = CreateFontW(
-            -MulDiv(9, static_cast<int>(dpi), 72),
+            -MulDiv(8, static_cast<int>(dpi), 72),
             0,
             0,
             0,
@@ -637,5 +696,10 @@ int wmain() {
             UiLanguagePreference::English)) return 13;
     if (!LayerPalettePlaneBadgeLayoutContract(
             UiLanguagePreference::Japanese)) return 14;
+    if (!LayerPaletteCompactDensityContract()) return 15;
+    if (!LayerPaletteActionTextContract(
+            UiLanguagePreference::English)) return 16;
+    if (!LayerPaletteActionTextContract(
+            UiLanguagePreference::Japanese)) return 17;
     return 0;
 }

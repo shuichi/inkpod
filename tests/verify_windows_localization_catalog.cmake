@@ -440,6 +440,26 @@ foreach(REQUIRED_TOKEN IN ITEMS
             "layer/plane compact status-cell gate is incomplete: ${REQUIRED_TOKEN}")
     endif()
 endforeach()
+file(READ
+    "${INKPOD_SOURCE_DIR}/apps/windows/ui/dialogs/layer_palette_compact_layout.h"
+    LAYER_PALETTE_COMPACT_LAYOUT_SOURCE)
+foreach(REQUIRED_TOKEN IN ITEMS
+        "kLayerPaletteMarginDip"
+        "kLayerPaletteLayerTileHeightDip"
+        "kLayerPalettePlaneTileHeightDip"
+        "kLayerPaletteThumbnailWidthDip"
+        "kLayerPaletteThumbnailHeightDip"
+        "kLayerPaletteActionButtonSizeDip"
+        "kLayerPaletteActionButtonCount")
+    string(FIND
+        "${LAYER_PALETTE_COMPACT_LAYOUT_SOURCE}"
+        "${REQUIRED_TOKEN}"
+        TOKEN_POSITION)
+    if(TOKEN_POSITION LESS 0)
+        message(FATAL_ERROR
+            "layer/plane compact-density gate is incomplete: ${REQUIRED_TOKEN}")
+    endif()
+endforeach()
 foreach(REQUIRED_TOKEN IN ITEMS
         "LayerPaletteOwnerDrawCompactCellContract"
         "kLayerPaletteStatusButtonSizeDip"
@@ -449,6 +469,30 @@ foreach(REQUIRED_TOKEN IN ITEMS
     if(TOKEN_POSITION LESS 0)
         message(FATAL_ERROR
             "layer/plane compact status-cell test is incomplete: ${REQUIRED_TOKEN}")
+    endif()
+endforeach()
+foreach(REQUIRED_TOKEN IN ITEMS
+        "LayerPaletteCompactDensityContract"
+        "LayerPaletteActionTextContract"
+        "UiStringId::LayerActionNew"
+        "UiStringId::PlaneActionProperties")
+    string(FIND "${LOCALIZATION_TEST_SOURCE}" "${REQUIRED_TOKEN}" TOKEN_POSITION)
+    if(TOKEN_POSITION LESS 0)
+        message(FATAL_ERROR
+            "layer/plane compact action test is incomplete: ${REQUIRED_TOKEN}")
+    endif()
+endforeach()
+foreach(REQUIRED_TOKEN IN ITEMS
+        "SetPaneIconButton"
+        "TOOLTIPS_CLASSW"
+        "TTM_ADDTOOLW"
+        "TTM_UPDATETIPTEXTW"
+        "UiStringId::LayerActionNew"
+        "UiStringId::PlaneActionProperties")
+    string(FIND "${LAYER_PALETTE_SOURCE}" "${REQUIRED_TOKEN}" TOKEN_POSITION)
+    if(TOKEN_POSITION LESS 0)
+        message(FATAL_ERROR
+            "layer/plane compact action presentation is incomplete: ${REQUIRED_TOKEN}")
     endif()
 endforeach()
 foreach(REQUIRED_TOKEN IN ITEMS

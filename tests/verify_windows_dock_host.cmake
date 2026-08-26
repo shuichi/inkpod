@@ -301,6 +301,11 @@ endif()
 foreach(REQUIRED IN ITEMS
         "InvalidateRect(picker, nullptr, FALSE)"
         "PlacePaneDialogControl"
+        "CapturePaneTargetRowBounds"
+        "RepaintMovedPaneTargetRow"
+        "UnionRect"
+        "DCX_CLIPCHILDREN"
+        "WM_ERASEBKGND"
         "RepaintVisibleTabControls"
         "PaintTabSurfaceBackground"
         "CaptureColorTabSurfacePixels"
@@ -391,6 +396,8 @@ file(READ "${SMOKE_SOURCE}" SMOKE)
 foreach(REQUIRED IN ITEMS
         "right_zone_splitter"
         "TCM_DELETEALLITEMS"
+        "WindowMessageCounter erase_probe{WM_ERASEBKGND}"
+        "VerifyColorPinResizeRepaint"
         "color_list_rebuilds"
         "layer_list_rebuilds"
         "layer_list_shrink_painted"

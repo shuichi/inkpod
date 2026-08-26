@@ -413,6 +413,108 @@ void ShowTabControls(HWND pane, int tab) noexcept {
         GetDlgItem(pane, IDC_COLOR_CHART_LIST), tab == 2 ? SW_SHOW : SW_HIDE);
 }
 
+struct PaneTargetRowBounds {
+    RECT target{};
+    RECT pin{};
+    bool target_valid{};
+    bool pin_valid{};
+};
+
+bool ChildBoundsInPane(HWND pane, int control, RECT& bounds) noexcept {
+    const HWND child = GetDlgItem(pane, control);
+    if (child == nullptr || GetWindowRect(child, &bounds) == FALSE) {
+        return false;
+    }
+    MapWindowPoints(
+        HWND_DESKTOP, pane, reinterpret_cast<POINT*>(&bounds), 2U);
+    return IsRectEmpty(&bounds) == FALSE;
+}
+
+PaneTargetRowBounds CapturePaneTargetRowBounds(HWND pane) noexcept {
+    PaneTargetRowBounds bounds{};
+    bounds.target_valid = ChildBoundsInPane(
+        pane, IDC_COLOR_TARGET, bounds.target);
+    bounds.pin_valid = ChildBoundsInPane(
+        pane, IDC_COLOR_PIN, bounds.pin);
+    return bounds;
+}
+
+void RepaintMovedPaneTargetRow(
+    HWND pane,
+    const PaneTargetRowBounds& before,
+    const PaneTargetRowBounds& after) noexcept {
+    const bool target_changed = before.target_valid != after.target_valid
+        || (before.target_valid
+            && EqualRect(&before.target, &after.target) == FALSE);
+    const bool pin_changed = before.pin_valid != after.pin_valid
+        || (before.pin_valid && EqualRect(&before.pin, &after.pin) == FALSE);
+    if (!target_changed && !pin_changed) {
+        return;
+    }
+
+    RECT dirty{};
+    bool has_dirty{};
+    const auto include = [&dirty, &has_dirty](
+                             const RECT& bounds, bool valid) noexcept {
+        if (!valid) {
+            return;
+        }
+        if (!has_dirty) {
+            dirty = bounds;
+            has_dirty = true;
+            return;
+        }
+        RECT combined{};
+        if (UnionRect(&combined, &dirty, &bounds) != FALSE) {
+            dirty = combined;
+        }
+    };
+    include(before.target, before.target_valid);
+    include(before.pin, before.pin_valid);
+    include(after.target, after.target_valid);
+    include(after.pin, after.pin_valid);
+    if (!has_dirty) {
+        return;
+    }
+
+    HDC target = GetDCEx(
+        pane,
+        nullptr,
+        DCX_CACHE | DCX_CLIPCHILDREN | DCX_CLIPSIBLINGS);
+    if (target == nullptr) {
+        RedrawWindow(
+            pane,
+            &dirty,
+            nullptr,
+            RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_NOCHILDREN);
+        return;
+    }
+    const int saved = SaveDC(target);
+    bool erased{};
+    if (saved != 0
+        && IntersectClipRect(
+               target, dirty.left, dirty.top, dirty.right, dirty.bottom)
+            != ERROR) {
+        SendMessageW(
+            pane,
+            WM_ERASEBKGND,
+            reinterpret_cast<WPARAM>(target),
+            0);
+        erased = true;
+    }
+    if (saved != 0) {
+        RestoreDC(target, saved);
+    }
+    ReleaseDC(pane, target);
+    if (!erased) {
+        RedrawWindow(
+            pane,
+            &dirty,
+            nullptr,
+            RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_NOCHILDREN);
+    }
+}
+
 void RepaintVisibleTabControls(HWND pane, int tab) noexcept {
     const auto repaint = [pane](int control, bool erase) noexcept {
         const HWND child = GetDlgItem(pane, control);
@@ -476,6 +578,8 @@ void LayoutPane(HWND pane) noexcept {
     if (GetClientRect(pane, &client) == FALSE) {
         return;
     }
+    const PaneTargetRowBounds target_row_before =
+        CapturePaneTargetRowBounds(pane);
     const UINT dpi = GetDpiForWindow(pane);
     const int margin = ScaleForDpi(6, dpi);
     const int tabs_height = PaneReadableControlHeight(
@@ -678,6 +782,8 @@ void LayoutPane(HWND pane) noexcept {
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE
                 | SWP_NOOWNERZORDER | SWP_NOREDRAW);
     }
+    RepaintMovedPaneTargetRow(
+        pane, target_row_before, CapturePaneTargetRowBounds(pane));
     const ColorDockPaneState* state = PaneState(pane);
     const int active_tab = state == nullptr
         ? std::max(0, TabCtrl_GetCurSel(GetDlgItem(pane, IDC_COLOR_TABS)))
@@ -2087,6 +2193,15 @@ LRESULT CALLBACK PaneSubclassProcedure(
         case WM_SIZE:
             LayoutPane(pane);
             return 0;
+        case WM_ERASEBKGND: {
+            RECT client{};
+            HDC target = reinterpret_cast<HDC>(wparam);
+            if (target != nullptr && GetClientRect(pane, &client) != FALSE) {
+                FillRect(target, &client, GetSysColorBrush(COLOR_3DFACE));
+                return TRUE;
+            }
+            break;
+        }
         case WM_NOTIFY:
             if (state != nullptr) {
                 const auto* notification = reinterpret_cast<const NMHDR*>(lparam);

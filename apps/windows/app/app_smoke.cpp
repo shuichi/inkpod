@@ -44,6 +44,7 @@
 #include "ui/dialogs/effects_dialogs.h"
 #include "ui/dialogs/history_visualization_dialog.h"
 #include "ui/dialogs/layer_palette.h"
+#include "ui/dialogs/layer_palette_compact_layout.h"
 #include "ui/command_catalog.h"
 #include "ui/command_state.h"
 #include "ui/shortcut_controller.h"
@@ -377,7 +378,23 @@ BOOL CALLBACK VerifyButtonFit(HWND button, LPARAM parameter) noexcept {
     }
     MapWindowPoints(HWND_DESKTOP, parent, reinterpret_cast<POINT*>(&button_bounds), 2U);
     const int actual_width = button_bounds.right - button_bounds.left;
-    const int required_width = panes::PaneButtonIdealWidth(parent, control);
+    const std::array compact_layer_actions{
+        IDM_LAYER_NEW,
+        IDM_LAYER_DUPLICATE,
+        IDM_LAYER_DELETE,
+        IDM_LAYER_MOVE_UP,
+        IDM_LAYER_MOVE_DOWN,
+        IDM_LAYER_PROPERTIES};
+    const bool compact_layer_action = GetDlgItem(parent, IDC_LAYER_LIST) != nullptr
+        && GetDlgItem(parent, IDC_PLANE_LIST) != nullptr
+        && std::find(
+               compact_layer_actions.cbegin(),
+               compact_layer_actions.cend(),
+               control)
+            != compact_layer_actions.cend();
+    const int required_width = compact_layer_action
+        ? panes::ScalePaneDip(parent, kLayerPaletteActionButtonSizeDip)
+        : panes::PaneButtonIdealWidth(parent, control);
     if (button_bounds.left < parent_bounds.left
         || button_bounds.top < parent_bounds.top
         || button_bounds.right > parent_bounds.right
@@ -427,6 +444,27 @@ bool TooltipMatches(
         reinterpret_cast<LPARAM>(&tool));
     return std::wcscmp(text.data(), UiText(expected)) == 0
         && !HasJapaneseCharacters(text.data());
+}
+
+bool TooltipExactlyMatches(
+    HWND tooltip, HWND parent, int control, UiStringId expected) noexcept {
+    const HWND child = GetDlgItem(parent, control);
+    if (tooltip == nullptr || child == nullptr) {
+        return false;
+    }
+    std::array<wchar_t, 256U> text{};
+    TOOLINFOW tool{};
+    tool.cbSize = sizeof(tool);
+    tool.uFlags = TTF_IDISHWND;
+    tool.hwnd = parent;
+    tool.uId = reinterpret_cast<UINT_PTR>(child);
+    tool.lpszText = text.data();
+    SendMessageW(
+        tooltip,
+        TTM_GETTEXTW,
+        static_cast<WPARAM>(text.size()),
+        reinterpret_cast<LPARAM>(&tool));
+    return std::wcscmp(text.data(), UiText(expected)) == 0;
 }
 
 bool ExerciseOwnerDraw(
@@ -555,6 +593,97 @@ COLORREF RenderWindowClientPixel(HWND window, POINT sample) noexcept {
                 reinterpret_cast<WPARAM>(target),
                 PRF_CLIENT | PRF_ERASEBKGND);
         });
+}
+
+int VerifyColorPinResizeRepaint(HWND pane) noexcept {
+    const HWND pin = GetDlgItem(pane, IDC_COLOR_PIN);
+    const HWND target = GetDlgItem(pane, IDC_COLOR_TARGET);
+    RECT pane_before{};
+    RECT pin_before{};
+    if (pin == nullptr || target == nullptr
+        || GetWindowRect(pane, &pane_before) == FALSE
+        || GetWindowRect(pin, &pin_before) == FALSE) {
+        return 11150;
+    }
+    MapWindowPoints(
+        HWND_DESKTOP,
+        pane,
+        reinterpret_cast<POINT*>(&pin_before),
+        2U);
+    const UINT window_dpi = GetDpiForWindow(pane);
+    const int target_gap = std::max(
+        2,
+        MulDiv(
+            5,
+            static_cast<int>(window_dpi == 0U ? 96U : window_dpi),
+            96));
+    const int resize_step = std::max(1, target_gap / 2);
+    const int pane_width = pane_before.right - pane_before.left;
+    const int pane_height = pane_before.bottom - pane_before.top;
+    constexpr UINT_PTR kBackgroundEraseProbeSubclass = 90U;
+    WindowMessageCounter erase_probe{WM_ERASEBKGND};
+    if (pane_width <= 0 || pane_height <= 0
+        || SetWindowSubclass(
+               pane,
+               WindowMessageCounterProcedure,
+               kBackgroundEraseProbeSubclass,
+               reinterpret_cast<DWORD_PTR>(&erase_probe)) == FALSE) {
+        return 11151;
+    }
+    const bool resized = SetWindowPos(
+        pane,
+        nullptr,
+        0,
+        0,
+        pane_width + resize_step,
+        pane_height,
+        SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER) != FALSE;
+    RemoveWindowSubclass(
+        pane, WindowMessageCounterProcedure, kBackgroundEraseProbeSubclass);
+    if (!resized) {
+        return 11151;
+    }
+
+    RECT pin_after{};
+    RECT target_after{};
+    int failure{};
+    if (GetWindowRect(pin, &pin_after) == FALSE
+        || GetWindowRect(target, &target_after) == FALSE) {
+        failure = 11152;
+    } else {
+        MapWindowPoints(
+            HWND_DESKTOP,
+            pane,
+            reinterpret_cast<POINT*>(&pin_after),
+            2U);
+        MapWindowPoints(
+            HWND_DESKTOP,
+            pane,
+            reinterpret_cast<POINT*>(&target_after),
+            2U);
+        const POINT former_pin_frame{
+            pin_before.left,
+            (pin_before.top + pin_before.bottom) / 2};
+        if (pin_after.left - pin_before.left != resize_step
+            || former_pin_frame.x < target_after.right
+            || former_pin_frame.x >= pin_after.left) {
+            failure = 11153;
+        } else if (erase_probe.count == 0U) {
+            failure = 11154;
+        }
+    }
+    if (SetWindowPos(
+            pane,
+            nullptr,
+            0,
+            0,
+            pane_width,
+            pane_height,
+            SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER)
+        == FALSE) {
+        return 11155;
+    }
+    return failure;
 }
 
 COLORREF RenderOwnerDrawPixel(
@@ -2355,12 +2484,88 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         state.Workspace().panes.layer_palette, IDC_LAYER_ACTION_TARGET);
     const HWND new_action =
         GetDlgItem(state.Workspace().panes.layer_palette, IDM_LAYER_NEW);
+    const std::array layer_action_controls{
+        IDM_LAYER_NEW,
+        IDM_LAYER_DUPLICATE,
+        IDM_LAYER_DELETE,
+        IDM_LAYER_MOVE_UP,
+        IDM_LAYER_MOVE_DOWN,
+        IDM_LAYER_PROPERTIES};
+    const std::array layer_action_labels{
+        UiStringId::LayerActionNew,
+        UiStringId::LayerActionDuplicate,
+        UiStringId::LayerActionDelete,
+        UiStringId::LayerActionMoveUp,
+        UiStringId::LayerActionMoveDown,
+        UiStringId::LayerActionProperties};
+    const std::array plane_action_labels{
+        UiStringId::PlaneActionNew,
+        UiStringId::PlaneActionDuplicate,
+        UiStringId::PlaneActionDelete,
+        UiStringId::PlaneActionMoveUp,
+        UiStringId::PlaneActionMoveDown,
+        UiStringId::PlaneActionProperties};
+    const HWND layer_action_tooltip =
+        state.Workspace().panes.layer_palette_dialog.action_tooltip;
+    const auto action_presentation_matches = [&](const auto& labels) {
+        RECT first_bounds{};
+        bool matched = layer_action_tooltip != nullptr;
+        for (std::size_t index = 0U; matched && index < layer_action_controls.size();
+             ++index) {
+            const HWND button = GetDlgItem(
+                state.Workspace().panes.layer_palette,
+                layer_action_controls[index]);
+            RECT bounds{};
+            std::array<wchar_t, 96U> text{};
+            matched = button != nullptr
+                && GetWindowRect(button, &bounds) != FALSE
+                && GetWindowTextW(
+                       button, text.data(), static_cast<int>(text.size())) > 0
+                && std::wcscmp(text.data(), UiText(labels[index])) == 0
+                && TooltipExactlyMatches(
+                    layer_action_tooltip,
+                    state.Workspace().panes.layer_palette,
+                    layer_action_controls[index],
+                    labels[index])
+                && AccessibleWindowNameContains(button, UiText(labels[index]))
+                && AutomationWindowNameContains(button, UiText(labels[index]));
+            if (!matched) {
+                break;
+            }
+            const int expected_size = MulDiv(
+                kLayerPaletteActionButtonSizeDip,
+                static_cast<int>(GetDpiForWindow(button)),
+                96);
+            matched = bounds.right - bounds.left == expected_size
+                && bounds.bottom - bounds.top == expected_size;
+            if (index == 0U) {
+                first_bounds = bounds;
+            } else {
+                matched = matched && bounds.top == first_bounds.top
+                    && bounds.bottom == first_bounds.bottom;
+            }
+        }
+        return matched;
+    };
     std::array<wchar_t, 64U> action_target_text{};
     std::wstring first_layer_name;
     std::wstring first_plane_name;
     const bool layer_action_name =
         AccessibleWindowNameContains(new_action, UiText(UiStringId::Layer))
         && AutomationWindowNameContains(new_action, UiText(UiStringId::Layer));
+    const UINT layer_palette_dpi = GetDpiForWindow(
+        state.Workspace().panes.layer_palette);
+    const bool compact_item_heights = SendMessageW(
+        layer_list, LB_GETITEMHEIGHT, 0, 0)
+            == MulDiv(
+                kLayerPaletteLayerTileHeightDip,
+                static_cast<int>(layer_palette_dpi),
+                96)
+        && SendMessageW(plane_list, LB_GETITEMHEIGHT, 0, 0)
+            == MulDiv(
+                kLayerPalettePlaneTileHeightDip,
+                static_cast<int>(layer_palette_dpi),
+                96);
     const bool layer_text = ReadListItemText(layer_list, 0, first_layer_name);
     const bool plane_text = ReadListItemText(plane_list, 0, first_plane_name);
     const bool layer_draw = ExerciseOwnerDraw(
@@ -2392,7 +2597,8 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
                static_cast<int>(action_target_text.size())) <= 0
         || std::wcsstr(
                action_target_text.data(), UiText(UiStringId::Layer)) == nullptr
-        || !layer_action_name) {
+        || !layer_action_name || !compact_item_heights
+        || !action_presentation_matches(layer_action_labels)) {
         std::fprintf(
             stderr,
             "layer localization smoke text=%d/%d draw=%d/%d msaa=%d/%d uia=%d/%d action=%d\n",
@@ -2417,7 +2623,8 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
                action_target_text.data(), UiText(UiStringId::Plane)) == nullptr
         || !AccessibleWindowNameContains(
             new_action, UiText(UiStringId::Plane))
-        || !AutomationWindowNameContains(new_action, UiText(UiStringId::Plane))) {
+        || !AutomationWindowNameContains(new_action, UiText(UiStringId::Plane))
+        || !action_presentation_matches(plane_action_labels)) {
         return 985;
     }
     SetFocus(layer_list);
@@ -13771,6 +13978,28 @@ int RunApplicationSmoke(app::ApplicationHost& state) noexcept {
     }
     if (exit_code == 0) {
         exit_code = runtime::RunHistoryVisualizationSmoke(state);
+    }
+    if (exit_code == 0) {
+        SetWindowPos(
+            state.Workspace().windows.window,
+            nullptr,
+            0,
+            0,
+            1'800,
+            1'000,
+            SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER | SWP_SHOWWINDOW);
+        RECT client{};
+        if (GetClientRect(state.Workspace().windows.window, &client) == FALSE) {
+            exit_code = 11151;
+        } else {
+            LayoutMainChrome(
+                state.Workspace().windows,
+                false,
+                client.right - client.left,
+                client.bottom - client.top);
+            exit_code = runtime::VerifyColorPinResizeRepaint(
+                state.Workspace().windows.color_pane);
+        }
     }
     if (exit_code != 0) {
         std::fprintf(stderr, "inkpod application smoke failed: %d\n", exit_code);

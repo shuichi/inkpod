@@ -22,7 +22,9 @@ set(EXPECTED_SEMANTIC_KEYS
     "Tool.Stamp" "Tool.DustRemoval" "Tool.AlphaGradient"
     "Pane.Visible" "Pane.Hidden" "Pane.Editable" "Pane.Protected"
     "Pane.PinDocument" "Pane.ReturnToFollowing" "Pane.Previous" "Pane.Next"
-    "Pane.Fit" "Pane.OneToOne" "Pane.OpenFiles" "Pane.OpenFolder")
+    "Pane.Fit" "Pane.OneToOne" "Pane.OpenFiles" "Pane.OpenFolder"
+    "Pane.Add" "Pane.Copy" "Pane.Delete" "Pane.MoveUp" "Pane.MoveDown"
+    "Pane.Properties")
 
 foreach(REQUIRED_FILE IN ITEMS
         "${MANIFEST}" "${ATLAS}" "${LICENSE_FILE}" "${APP_RESOURCE}"
@@ -82,8 +84,8 @@ foreach(ROW IN LISTS MANIFEST_ROWS)
     list(APPEND SOURCE_FILES "${SOURCE_FILE}")
     math(EXPR EXPECTED_INDEX "${EXPECTED_INDEX} + 1")
 endforeach()
-if(NOT EXPECTED_INDEX EQUAL 26)
-    message(FATAL_ERROR "Expected 26 selected Fluent icons, found ${EXPECTED_INDEX}")
+if(NOT EXPECTED_INDEX EQUAL 32)
+    message(FATAL_ERROR "Expected 32 selected Fluent icons, found ${EXPECTED_INDEX}")
 endif()
 if(NOT SEMANTIC_KEYS STREQUAL EXPECTED_SEMANTIC_KEYS)
     message(FATAL_ERROR
@@ -99,17 +101,17 @@ endif()
 
 file(SIZE "${ATLAS}" ATLAS_SIZE)
 file(SHA256 "${ATLAS}" ATLAS_SHA256)
-if(NOT ATLAS_SIZE EQUAL 59928)
+if(NOT ATLAS_SIZE EQUAL 73752)
     message(FATAL_ERROR "Fluent mask atlas has unexpected size: ${ATLAS_SIZE}")
 endif()
 if(NOT ATLAS_SHA256 STREQUAL
-        "bc7bbfecb25057cc7cfdbae88f8b1ac34a88e1f3b00ec5fa34f7825062cb42c4")
+        "baaee85cfe770a2bfb9fcdc8c48fa18e1d911c6cea890639751aca94e21e1ed7")
     message(FATAL_ERROR "Fluent mask atlas hash mismatch: ${ATLAS_SHA256}")
 endif()
 file(READ "${ATLAS}" ATLAS_HEADER LIMIT 20 HEX)
 string(TOLOWER "${ATLAS_HEADER}" ATLAS_HEADER)
 if(NOT ATLAS_HEADER STREQUAL
-        "494e4b504f4449410100300030001a0000ea0000")
+        "494e4b504f444941010030003000200000200100")
     message(FATAL_ERROR "Fluent mask atlas header is invalid: ${ATLAS_HEADER}")
 endif()
 
@@ -183,7 +185,9 @@ endforeach()
 file(READ "${LAYER_PALETTE}" LAYER_PALETTE_TEXT)
 foreach(LAYER_ICON_MARKER IN ITEMS
         "PaneIconId::Visible" "PaneIconId::Hidden" "PaneIconId::Editable"
-        "PaneIconId::Protected" "DrawPaneIcon")
+        "PaneIconId::Protected" "PaneIconId::Add" "PaneIconId::Copy"
+        "PaneIconId::Delete" "PaneIconId::MoveUp" "PaneIconId::MoveDown"
+        "PaneIconId::Properties" "DrawPaneIcon" "SetPaneIconButton")
     string(FIND "${LAYER_PALETTE_TEXT}" "${LAYER_ICON_MARKER}"
         LAYER_ICON_MARKER_OFFSET)
     if(LAYER_ICON_MARKER_OFFSET LESS 0)
@@ -319,4 +323,4 @@ foreach(NOTICE_MARKER IN ITEMS
 endforeach()
 
 message(STATUS
-    "Verified 26 Fluent semantic icons, fixed SVG/atlas hashes, resource embedding, and MIT notice")
+    "Verified 32 Fluent semantic icons, fixed SVG/atlas hashes, resource embedding, and MIT notice")

@@ -9,9 +9,9 @@
 
 namespace inkpod::windows::ui {
 
-constexpr int kLayerPalettePlaneBadgeWidthDip = 42;
-constexpr int kLayerPalettePlaneBadgeHeightDip = 42;
-constexpr int kLayerPalettePlaneBadgePaddingDip = 2;
+constexpr int kLayerPalettePlaneBadgeWidthDip = 32;
+constexpr int kLayerPalettePlaneBadgeHeightDip = 32;
+constexpr int kLayerPalettePlaneBadgePaddingDip = 1;
 constexpr UINT kLayerPalettePlaneBadgeTextFlags =
     DT_CENTER | DT_WORDBREAK | DT_NOPREFIX;
 

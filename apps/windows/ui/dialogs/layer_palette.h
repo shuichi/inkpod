@@ -78,7 +78,9 @@ struct LayerPaletteDialogState {
     bool split_hovered{};
     bool has_command_states{};
     bool updating{};
+    HWND action_tooltip{};
     HFONT font{};
+    HFONT badge_font{};
 };
 
 HWND CreateLayerPaletteDialog(

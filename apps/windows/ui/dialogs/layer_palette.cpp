@@ -2,6 +2,7 @@
 
 #include "layer_palette.h"
 #include "layer_palette_badge_layout.h"
+#include "layer_palette_compact_layout.h"
 #include "layer_palette_status_layout.h"
 
 #include <commctrl.h>
@@ -25,29 +26,46 @@ namespace inkpod::windows::ui {
 namespace {
 
 constexpr int kReferenceDpi = 96;
-constexpr int kMargin = 6;
-constexpr int kLayerTileHeight = 84;
-constexpr int kPlaneTileHeight = 62;
-constexpr int kThumbnailWidth = 72;
-constexpr int kThumbnailHeight = 54;
-constexpr int kButtonHeight = 24;
-constexpr int kButtonGap = 4;
 constexpr UINT_PTR kListSubclass = 1U;
 constexpr UINT_PTR kSplitSubclass = 2U;
-constexpr std::array<UINT, 6U> kLayerActionCommands{
+constexpr std::array<UINT, kLayerPaletteActionButtonCount> kLayerActionCommands{
     IDM_LAYER_NEW,
     IDM_LAYER_DUPLICATE,
     IDM_LAYER_DELETE,
     IDM_LAYER_MOVE_UP,
     IDM_LAYER_MOVE_DOWN,
     IDM_LAYER_PROPERTIES};
-constexpr std::array<UINT, 6U> kPlaneActionCommands{
+constexpr std::array<UINT, kLayerPaletteActionButtonCount> kPlaneActionCommands{
     IDM_PLANE_NEW,
     IDM_PLANE_DUPLICATE,
     IDM_PLANE_DELETE,
     IDM_PLANE_MOVE_UP,
     IDM_PLANE_MOVE_DOWN,
     IDM_PLANE_PROPERTIES};
+constexpr std::array<PaneIconId, kLayerPaletteActionButtonCount>
+    kLayerActionIcons{
+        PaneIconId::Add,
+        PaneIconId::Copy,
+        PaneIconId::Delete,
+        PaneIconId::MoveUp,
+        PaneIconId::MoveDown,
+        PaneIconId::Properties};
+constexpr std::array<UiStringId, kLayerPaletteActionButtonCount>
+    kLayerActionLabels{
+        UiStringId::LayerActionNew,
+        UiStringId::LayerActionDuplicate,
+        UiStringId::LayerActionDelete,
+        UiStringId::LayerActionMoveUp,
+        UiStringId::LayerActionMoveDown,
+        UiStringId::LayerActionProperties};
+constexpr std::array<UiStringId, kLayerPaletteActionButtonCount>
+    kPlaneActionLabels{
+        UiStringId::PlaneActionNew,
+        UiStringId::PlaneActionDuplicate,
+        UiStringId::PlaneActionDelete,
+        UiStringId::PlaneActionMoveUp,
+        UiStringId::PlaneActionMoveDown,
+        UiStringId::PlaneActionProperties};
 
 int ScaleForDpi(int value, UINT dpi) noexcept {
     return MulDiv(
@@ -123,32 +141,111 @@ void ApplyActionCommandState(
     }
 }
 
+bool AddActionTooltip(
+    HWND tooltip, HWND dialog, HWND button, const wchar_t* text) noexcept {
+    if (tooltip == nullptr || dialog == nullptr || button == nullptr
+        || text == nullptr) {
+        return false;
+    }
+    TOOLINFOW tool{};
+    tool.cbSize = sizeof(tool);
+    tool.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
+    tool.hwnd = dialog;
+    tool.uId = reinterpret_cast<UINT_PTR>(button);
+    tool.lpszText = const_cast<wchar_t*>(text);
+    return SendMessageW(
+               tooltip,
+               TTM_ADDTOOLW,
+               0,
+               reinterpret_cast<LPARAM>(&tool))
+        != FALSE;
+}
+
+void UpdateActionTooltip(
+    HWND tooltip, HWND dialog, HWND button, const wchar_t* text) noexcept {
+    if (tooltip == nullptr || dialog == nullptr || button == nullptr
+        || text == nullptr) {
+        return;
+    }
+    TOOLINFOW tool{};
+    tool.cbSize = sizeof(tool);
+    tool.uFlags = TTF_IDISHWND;
+    tool.hwnd = dialog;
+    tool.uId = reinterpret_cast<UINT_PTR>(button);
+    tool.lpszText = const_cast<wchar_t*>(text);
+    SendMessageW(
+        tooltip,
+        TTM_UPDATETIPTEXTW,
+        0,
+        reinterpret_cast<LPARAM>(&tool));
+}
+
 void UpdateActionTargetPresentation(
     HWND dialog, LayerPaletteDialogState& state) noexcept {
     const wchar_t* target = state.plane_active
         ? UiText(UiStringId::OperationTargetPlane)
         : UiText(UiStringId::OperationTargetLayer);
     SetDlgItemTextW(dialog, IDC_LAYER_ACTION_TARGET, target);
-    for (const UINT control : kLayerActionCommands) {
-        const HWND button = GetDlgItem(dialog, static_cast<int>(control));
+    const auto& labels = state.plane_active
+        ? kPlaneActionLabels
+        : kLayerActionLabels;
+    for (std::size_t index = 0U; index < kLayerActionCommands.size(); ++index) {
+        const HWND button = GetDlgItem(
+            dialog, static_cast<int>(kLayerActionCommands[index]));
         if (button == nullptr) {
             continue;
         }
-        wchar_t caption[48]{};
-        GetWindowTextW(button, caption, static_cast<int>(std::size(caption)));
-        wchar_t accessible[128]{};
-        _snwprintf_s(
-            accessible,
-            std::size(accessible),
-            _TRUNCATE,
-            L"%ls: %ls",
-            target,
-            caption);
-        static_cast<void>(SetAccessibleName(button, accessible));
+        const wchar_t* label = UiText(labels[index]);
+        SetWindowTextW(button, label);
+        static_cast<void>(SetAccessibleName(button, label));
+        UpdateActionTooltip(
+            state.action_tooltip, dialog, button, label);
     }
     if (state.has_command_states) {
         ApplyActionCommandState(dialog, state, state.command_states);
     }
+}
+
+bool InitializeActionControls(
+    HWND dialog,
+    LayerPaletteDialogState& state,
+    HINSTANCE instance) noexcept {
+    for (std::size_t index = 0U; index < kLayerActionCommands.size(); ++index) {
+        const HWND button = GetDlgItem(
+            dialog, static_cast<int>(kLayerActionCommands[index]));
+        if (button == nullptr) {
+            return false;
+        }
+        static_cast<void>(SetPaneIconButton(button, kLayerActionIcons[index]));
+    }
+    state.action_tooltip = CreateWindowExW(
+        WS_EX_TOPMOST,
+        TOOLTIPS_CLASSW,
+        nullptr,
+        WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX,
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        dialog,
+        nullptr,
+        instance,
+        nullptr);
+    if (state.action_tooltip == nullptr) {
+        return false;
+    }
+    for (std::size_t index = 0U; index < kLayerActionCommands.size(); ++index) {
+        if (!AddActionTooltip(
+                state.action_tooltip,
+                dialog,
+                GetDlgItem(dialog, static_cast<int>(kLayerActionCommands[index])),
+                UiText(kLayerActionLabels[index]))) {
+            DestroyWindow(state.action_tooltip);
+            state.action_tooltip = nullptr;
+            return false;
+        }
+    }
+    return true;
 }
 
 void SetActionTarget(
@@ -271,45 +368,60 @@ void LayoutControls(HWND dialog) noexcept {
         return;
     }
     const UINT dpi = GetDpiForWindow(dialog);
-    const int margin = ScaleForDpi(kMargin, dpi);
-    const int gap = ScaleForDpi(kButtonGap, dpi);
+    const int margin = ScaleForDpi(kLayerPaletteMarginDip, dpi);
+    const int gap = ScaleForDpi(kLayerPaletteActionGapDip, dpi);
     const int label_height = std::max(
         panes::PaneReadableControlHeight(
-            dialog, IDC_LAYER_SECTION, 18, 4),
+            dialog, IDC_LAYER_SECTION, 18, 2),
         panes::PaneReadableControlHeight(
-            dialog, IDC_PLANE_SECTION, 18, 4));
+            dialog, IDC_PLANE_SECTION, 18, 2));
     const int split_height = ScaleForDpi(4, dpi);
     const int action_target_height = panes::PaneReadableControlHeight(
-        dialog, IDC_LAYER_ACTION_TARGET, 18, 4);
-    const int button_height = panes::PaneReadableControlHeight(
-        dialog, IDM_LAYER_NEW, kButtonHeight, 8);
+        dialog, IDC_LAYER_ACTION_TARGET, 18, 2);
     const int width = std::max(
         0, static_cast<int>(client.right) - margin * 2);
-    std::array<int, kLayerActionCommands.size()> action_controls{};
-    for (std::size_t index = 0; index < kLayerActionCommands.size(); ++index) {
-        action_controls[index] = static_cast<int>(kLayerActionCommands[index]);
-    }
-    const std::size_t action_rows = panes::PaneButtonRowCount(
-        dialog, action_controls, width, gap);
-    const int action_buttons_height = static_cast<int>(action_rows) * button_height
-        + std::max(0, static_cast<int>(action_rows) - 1) * gap;
-    const int button_y = std::max(
+    const int button_size = std::min(
+        width, ScaleForDpi(kLayerPaletteActionButtonSizeDip, dpi));
+    const int action_group_width =
+        static_cast<int>(kLayerActionCommands.size()) * button_size
+        + static_cast<int>(kLayerActionCommands.size() - 1U) * gap;
+    const int target_width = std::min(
+        width, ScaleForDpi(kLayerPaletteActionTargetWidthDip, dpi));
+    const bool inline_target = width > 0
+        && width >= target_width + gap + action_group_width;
+    const int buttons_per_row = inline_target
+        ? static_cast<int>(kLayerActionCommands.size())
+        : std::max(
+              1,
+              std::min(
+                  static_cast<int>(kLayerActionCommands.size()),
+                  button_size + gap <= 0 ? 1 : (width + gap) / (button_size + gap)));
+    const int action_rows = static_cast<int>(
+        (kLayerActionCommands.size() + static_cast<std::size_t>(buttons_per_row) - 1U)
+        / static_cast<std::size_t>(buttons_per_row));
+    const int action_buttons_height = action_rows * button_size
+        + std::max(0, action_rows - 1) * gap;
+    const int action_footer_height = inline_target
+        ? std::max(action_target_height, button_size)
+        : action_target_height + gap + action_buttons_height;
+    const int action_footer_y = std::max(
         margin,
-        static_cast<int>(client.bottom) - margin - action_buttons_height);
-    const int action_target_y = std::max(
-        margin,
-        button_y - gap - action_target_height);
-    const int list_bottom = std::max(margin, action_target_y - gap);
+        static_cast<int>(client.bottom) - margin - action_footer_height);
+    const int list_bottom = std::max(margin, action_footer_y - gap);
     const int available_lists = std::max(
         0, list_bottom - margin - label_height * 2 - split_height);
     int layer_height = static_cast<int>(
         static_cast<std::int64_t>(available_lists)
         * std::clamp<std::uint32_t>(state->split_milli, 200U, 800U) / 1000);
-    if (available_lists >= ScaleForDpi(160, dpi)) {
+    const int minimum_layer_height = ScaleForDpi(
+        kLayerPaletteLayerTileHeightDip, dpi);
+    const int minimum_plane_height = ScaleForDpi(
+        kLayerPalettePlaneTileHeightDip, dpi);
+    if (available_lists >= minimum_layer_height + minimum_plane_height) {
         layer_height = std::clamp(
             layer_height,
-            ScaleForDpi(80, dpi),
-            available_lists - ScaleForDpi(80, dpi));
+            minimum_layer_height,
+            available_lists - minimum_plane_height);
     }
     int y = margin;
     panes::PlacePaneDialogControl(
@@ -364,13 +476,13 @@ void LayoutControls(HWND dialog) noexcept {
         IDC_LAYER_LIST,
         LB_SETITEMHEIGHT,
         0,
-        ScaleForDpi(kLayerTileHeight, dpi));
+        ScaleForDpi(kLayerPaletteLayerTileHeightDip, dpi));
     SendDlgItemMessageW(
         dialog,
         IDC_PLANE_LIST,
         LB_SETITEMHEIGHT,
         0,
-        ScaleForDpi(kPlaneTileHeight, dpi));
+        ScaleForDpi(kLayerPalettePlaneTileHeightDip, dpi));
     for (const auto [list, geometry_changed] : {
              std::pair{layer_list, layer_list_geometry_changed},
              std::pair{plane_list, plane_list_geometry_changed}}) {
@@ -391,18 +503,32 @@ void LayoutControls(HWND dialog) noexcept {
         dialog,
         IDC_LAYER_ACTION_TARGET,
         margin,
-        action_target_y,
-        width,
+        action_footer_y + (inline_target
+            ? std::max(0, action_footer_height - action_target_height) / 2
+            : 0),
+        inline_target ? target_width : width,
         action_target_height);
-
-    panes::PlacePaneButtonRows(
-        dialog,
-        action_controls,
-        margin,
-        button_y,
-        width,
-        button_height,
-        gap);
+    const int first_button_y = inline_target
+        ? action_footer_y + std::max(0, action_footer_height - button_size) / 2
+        : action_footer_y + action_target_height + gap;
+    for (std::size_t index = 0U; index < kLayerActionCommands.size(); ++index) {
+        const int row = static_cast<int>(index) / buttons_per_row;
+        const int column = static_cast<int>(index) % buttons_per_row;
+        const int first_in_row = row * buttons_per_row;
+        const int row_count = std::min(
+            buttons_per_row,
+            static_cast<int>(kLayerActionCommands.size()) - first_in_row);
+        const int row_width = row_count * button_size
+            + std::max(0, row_count - 1) * gap;
+        const int row_x = margin + std::max(0, width - row_width);
+        panes::PlacePaneDialogControl(
+            dialog,
+            static_cast<int>(kLayerActionCommands[index]),
+            row_x + column * (button_size + gap),
+            first_button_y + row * (button_size + gap),
+            button_size,
+            button_size);
+    }
 }
 
 bool UpdatePaletteFont(HWND dialog, LayerPaletteDialogState& state) noexcept {
@@ -422,7 +548,28 @@ bool UpdatePaletteFont(HWND dialog, LayerPaletteDialogState& state) noexcept {
         CLEARTYPE_QUALITY,
         DEFAULT_PITCH | FF_DONTCARE,
         L"Segoe UI");
-    if (replacement == nullptr) {
+    const HFONT badge_replacement = CreateFontW(
+        -MulDiv(8, static_cast<int>(dpi), 72),
+        0,
+        0,
+        0,
+        FW_NORMAL,
+        FALSE,
+        FALSE,
+        FALSE,
+        DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS,
+        CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY,
+        DEFAULT_PITCH | FF_DONTCARE,
+        L"Segoe UI");
+    if (replacement == nullptr || badge_replacement == nullptr) {
+        if (replacement != nullptr) {
+            DeleteObject(replacement);
+        }
+        if (badge_replacement != nullptr) {
+            DeleteObject(badge_replacement);
+        }
         return false;
     }
     for (const UINT control : kLayerActionCommands) {
@@ -441,7 +588,11 @@ bool UpdatePaletteFont(HWND dialog, LayerPaletteDialogState& state) noexcept {
     if (state.font != nullptr) {
         DeleteObject(state.font);
     }
+    if (state.badge_font != nullptr) {
+        DeleteObject(state.badge_font);
+    }
     state.font = replacement;
+    state.badge_font = badge_replacement;
     return true;
 }
 
@@ -491,10 +642,10 @@ void DrawThumbnail(
     bool plane) noexcept {
     const int requested_width = plane
         ? ScaleLayerPaletteBadgeDip(kLayerPalettePlaneBadgeWidthDip, dpi)
-        : ScaleForDpi(kThumbnailWidth, dpi);
+        : ScaleForDpi(kLayerPaletteThumbnailWidthDip, dpi);
     const int requested_height = plane
         ? ScaleLayerPaletteBadgeDip(kLayerPalettePlaneBadgeHeightDip, dpi)
-        : ScaleForDpi(kThumbnailHeight, dpi);
+        : ScaleForDpi(kLayerPaletteThumbnailHeightDip, dpi);
     RECT frame{
         bounds.left,
         bounds.top + std::max(
@@ -624,14 +775,17 @@ void DrawItem(
     }
     RECT inner = draw.rcItem;
     const UINT dpi = GetDpiForWindow(draw.hwndItem);
-    const int margin = ScaleForDpi(kMargin, dpi);
-    InflateRect(&inner, -margin, -ScaleForDpi(4, dpi));
+    const int margin = ScaleForDpi(kLayerPaletteMarginDip, dpi);
+    InflateRect(
+        &inner,
+        -margin,
+        -ScaleForDpi(kLayerPaletteRowPaddingDip, dpi));
     DrawThumbnail(
         draw.hDC,
         inner,
         item,
         state.thumbnail_cache,
-        state.font,
+        plane ? state.badge_font : state.font,
         dpi,
         plane);
 
@@ -639,7 +793,7 @@ void DrawItem(
         LayoutLayerPaletteStatusCells(inner, dpi);
     const int thumbnail_width = plane
         ? ScaleLayerPaletteBadgeDip(kLayerPalettePlaneBadgeWidthDip, dpi)
-        : ScaleForDpi(kThumbnailWidth, dpi);
+        : ScaleForDpi(kLayerPaletteThumbnailWidthDip, dpi);
     RECT text_bounds{
         inner.left + thumbnail_width + margin,
         inner.top,
@@ -653,15 +807,15 @@ void DrawItem(
         ? nullptr
         : SelectObject(draw.hDC, state.font);
     RECT line = text_bounds;
-    line.bottom = line.top + ScaleForDpi(22, dpi);
+    line.bottom = line.top + ScaleForDpi(18, dpi);
     DrawTextW(
         draw.hDC,
         item.name.c_str(),
         -1,
         &line,
         DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
-    line.top += ScaleForDpi(24, dpi);
-    line.bottom = line.top + ScaleForDpi(20, dpi);
+    line.top += ScaleForDpi(20, dpi);
+    line.bottom = line.top + ScaleForDpi(18, dpi);
     DrawTextW(
         draw.hDC,
         item.detail_text.c_str(),
@@ -746,8 +900,11 @@ LRESULT CALLBACK ListSubclassProcedure(
                 break;
             }
             const UINT dpi = GetDpiForWindow(list);
-            const int margin = ScaleForDpi(kMargin, dpi);
-            InflateRect(&item_bounds, -margin, -ScaleForDpi(4, dpi));
+            const int margin = ScaleForDpi(kLayerPaletteMarginDip, dpi);
+            InflateRect(
+                &item_bounds,
+                -margin,
+                -ScaleForDpi(kLayerPaletteRowPaddingDip, dpi));
             const LayerPaletteStatusCellLayout status_layout =
                 LayoutLayerPaletteStatusCells(item_bounds, dpi);
             if (PtInRect(&status_layout.editability, point) != FALSE) {
@@ -1053,7 +1210,8 @@ INT_PTR CALLBACK LayerPaletteDialogProcedure(
                 || SetWindowSubclass(
                        splitter, SplitSubclassProcedure, kSplitSubclass, 0)
                     == FALSE
-                || !UpdatePaletteFont(dialog, *state)) {
+                || !UpdatePaletteFont(dialog, *state)
+                || !InitializeActionControls(dialog, *state, instance)) {
                 return FALSE;
             }
             static_cast<void>(SetAccessibleName(
@@ -1126,9 +1284,20 @@ INT_PTR CALLBACK LayerPaletteDialogProcedure(
             }
             return TRUE;
         case WM_NCDESTROY:
-            if (state != nullptr && state->font != nullptr) {
-                DeleteObject(state->font);
-                state->font = nullptr;
+            if (state != nullptr) {
+                if (state->action_tooltip != nullptr
+                    && IsWindow(state->action_tooltip) != FALSE) {
+                    DestroyWindow(state->action_tooltip);
+                }
+                state->action_tooltip = nullptr;
+                if (state->font != nullptr) {
+                    DeleteObject(state->font);
+                    state->font = nullptr;
+                }
+                if (state->badge_font != nullptr) {
+                    DeleteObject(state->badge_font);
+                    state->badge_font = nullptr;
+                }
             }
             SetWindowLongPtrW(dialog, GWLP_USERDATA, 0);
             return TRUE;
@@ -1193,7 +1362,7 @@ std::vector<LayerPaletteItem> MakeItems(
                 detail.data(),
                 detail.size(),
                 _TRUNCATE,
-                L"%ls  |  %ls: %ls  |  %u.%u%%",
+                L"%ls  \u00b7  %ls: %ls  \u00b7  %u.%u%%",
                 item.kind_text.c_str(),
                 UiText(UiStringId::FormatLabel),
                 item.format_text.c_str(),
@@ -1204,7 +1373,7 @@ std::vector<LayerPaletteItem> MakeItems(
                 detail.data(),
                 detail.size(),
                 _TRUNCATE,
-                L"%ls  |  %u%ls  |  %u.%u%%",
+                L"%ls  \u00b7  %u%ls  \u00b7  %u.%u%%",
                 item.kind_text.c_str(),
                 item.plane_count,
                 UiText(UiStringId::PlaneCountSuffix),

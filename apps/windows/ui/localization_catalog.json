@@ -643,6 +643,90 @@
       "resource": true
     },
     {
+      "id": "LayerActionNew",
+      "kind": "text",
+      "ja": "新規レイヤー",
+      "en": "New Layer",
+      "resource": false
+    },
+    {
+      "id": "LayerActionDuplicate",
+      "kind": "text",
+      "ja": "レイヤーを複製",
+      "en": "Duplicate Layer",
+      "resource": false
+    },
+    {
+      "id": "LayerActionDelete",
+      "kind": "text",
+      "ja": "レイヤーを削除",
+      "en": "Delete Layer",
+      "resource": false
+    },
+    {
+      "id": "LayerActionMoveUp",
+      "kind": "text",
+      "ja": "レイヤーを上へ移動",
+      "en": "Move Layer Up",
+      "resource": false
+    },
+    {
+      "id": "LayerActionMoveDown",
+      "kind": "text",
+      "ja": "レイヤーを下へ移動",
+      "en": "Move Layer Down",
+      "resource": false
+    },
+    {
+      "id": "LayerActionProperties",
+      "kind": "text",
+      "ja": "レイヤーのプロパティ",
+      "en": "Layer Properties",
+      "resource": false
+    },
+    {
+      "id": "PlaneActionNew",
+      "kind": "text",
+      "ja": "新規プレーン",
+      "en": "New Plane",
+      "resource": false
+    },
+    {
+      "id": "PlaneActionDuplicate",
+      "kind": "text",
+      "ja": "プレーンを複製",
+      "en": "Duplicate Plane",
+      "resource": false
+    },
+    {
+      "id": "PlaneActionDelete",
+      "kind": "text",
+      "ja": "プレーンを削除",
+      "en": "Delete Plane",
+      "resource": false
+    },
+    {
+      "id": "PlaneActionMoveUp",
+      "kind": "text",
+      "ja": "プレーンを上へ移動",
+      "en": "Move Plane Up",
+      "resource": false
+    },
+    {
+      "id": "PlaneActionMoveDown",
+      "kind": "text",
+      "ja": "プレーンを下へ移動",
+      "en": "Move Plane Down",
+      "resource": false
+    },
+    {
+      "id": "PlaneActionProperties",
+      "kind": "text",
+      "ja": "プレーンのプロパティ",
+      "en": "Plane Properties",
+      "resource": false
+    },
+    {
       "id": "Opacity",
       "kind": "text",
       "ja": "不透明度",
@@ -870,7 +954,7 @@
       "id": "PlaneBadgeRaster",
       "kind": "text",
       "ja": "ラス\nター",
-      "en": "Raster",
+      "en": "Rast.",
       "resource": false
     },
     {
@@ -9446,6 +9530,34 @@
       "kind": "text",
       "ja": "なし",
       "en": "None",
+      "resource": false
+    },
+    {
+      "id": "ShortcutModifierCtrl",
+      "kind": "text",
+      "ja": "Ctrl",
+      "en": "Ctrl",
+      "resource": false
+    },
+    {
+      "id": "ShortcutModifierShift",
+      "kind": "text",
+      "ja": "Shift",
+      "en": "Shift",
+      "resource": false
+    },
+    {
+      "id": "ShortcutModifierAlt",
+      "kind": "text",
+      "ja": "Alt",
+      "en": "Alt",
+      "resource": false
+    },
+    {
+      "id": "ShortcutModifierWin",
+      "kind": "text",
+      "ja": "Win",
+      "en": "Win",
       "resource": false
     },
     {

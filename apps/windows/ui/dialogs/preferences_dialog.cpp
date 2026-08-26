@@ -981,8 +981,10 @@ void LayoutShortcutPage(DialogModel& model, const RECT& page) noexcept {
              IDC_SHORTCUT_MOD_SHIFT,
              IDC_SHORTCUT_MOD_ALT,
              IDC_SHORTCUT_MOD_WIN}) {
-        Place(GetDlgItem(model.dialog, id), mod_x, keyboard_top, dip(62), dip(27));
-        mod_x += dip(66);
+        HWND modifier = GetDlgItem(model.dialog, id);
+        const int modifier_width = ReadableWidth(model, modifier, 62, 28);
+        Place(modifier, mod_x, keyboard_top, modifier_width, dip(27));
+        mod_x += modifier_width + gap;
     }
     const int keyboard_layout_width = dip(150);
     const int keyboard_layout_x = page.right - gap - keyboard_layout_width;
@@ -1267,10 +1269,30 @@ void CreateShortcutPage(DialogModel& model) {
     AddButton(model, kShortcutPage, UiStringId::ShortcutResetCommand, IDC_SHORTCUT_RESET_COMMAND);
     AddLabel(model, kShortcutPage, UiStringId::ShortcutModifiers);
     AddButton(model, kShortcutPage, UiStringId::ShortcutNone, IDC_SHORTCUT_MOD_NONE, BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP);
-    AddButton(model, kShortcutPage, UiStringId::Text0653, IDC_SHORTCUT_MOD_CTRL, BS_AUTORADIOBUTTON | WS_TABSTOP);
-    AddButton(model, kShortcutPage, UiStringId::Text0589, IDC_SHORTCUT_MOD_SHIFT, BS_AUTORADIOBUTTON | WS_TABSTOP);
-    AddButton(model, kShortcutPage, UiStringId::Text0006, IDC_SHORTCUT_MOD_ALT, BS_AUTORADIOBUTTON | WS_TABSTOP);
-    AddControl(model, kShortcutPage, 0U, WC_BUTTONW, L"Win", BS_AUTORADIOBUTTON | WS_TABSTOP, IDC_SHORTCUT_MOD_WIN);
+    AddButton(
+        model,
+        kShortcutPage,
+        UiStringId::ShortcutModifierCtrl,
+        IDC_SHORTCUT_MOD_CTRL,
+        BS_AUTORADIOBUTTON | WS_TABSTOP);
+    AddButton(
+        model,
+        kShortcutPage,
+        UiStringId::ShortcutModifierShift,
+        IDC_SHORTCUT_MOD_SHIFT,
+        BS_AUTORADIOBUTTON | WS_TABSTOP);
+    AddButton(
+        model,
+        kShortcutPage,
+        UiStringId::ShortcutModifierAlt,
+        IDC_SHORTCUT_MOD_ALT,
+        BS_AUTORADIOBUTTON | WS_TABSTOP);
+    AddButton(
+        model,
+        kShortcutPage,
+        UiStringId::ShortcutModifierWin,
+        IDC_SHORTCUT_MOD_WIN,
+        BS_AUTORADIOBUTTON | WS_TABSTOP);
     AddLabel(model, kShortcutPage, UiStringId::ShortcutKeyboardLayout);
     HWND layout = AddCombo(model, kShortcutPage, IDC_SHORTCUT_KEYBOARD_LAYOUT);
     AddComboText(layout, UiStringId::ShortcutKeyboardAuto);
@@ -1957,6 +1979,26 @@ bool ControlHasReadableTextWidth(
             >= ControlTextWidth(model, control) + Scale(model.dialog, 4);
 }
 
+bool RadioHasReadableCaption(
+    const DialogModel& model,
+    HWND control,
+    const wchar_t* expected) noexcept {
+    if (control == nullptr || expected == nullptr) {
+        return false;
+    }
+    std::array<wchar_t, 32U> actual{};
+    RECT bounds{};
+    return GetWindowTextW(
+               control,
+               actual.data(),
+               static_cast<int>(actual.size()))
+            > 0
+        && std::wcscmp(actual.data(), expected) == 0
+        && GetClientRect(control, &bounds) != FALSE
+        && bounds.right - bounds.left
+            >= ControlTextWidth(model, control) + Scale(model.dialog, 24);
+}
+
 bool StaticUsesPageBackground(
     const DialogModel& model, HWND control) noexcept {
     const bool framed = control != nullptr
@@ -2148,6 +2190,20 @@ bool ValidateSmokeLayout(DialogModel& model) noexcept {
                      15U, 32U, 36U, 40U, 44U, 52U, 58U}) {
                 if (!ControlHasReadableTextWidth(
                         model, model.page_controls[label_index].window)) {
+                    model.selected_page = selected_page;
+                    ShowSelectedPage(model);
+                    return false;
+                }
+            }
+            const std::array<std::pair<int, UiStringId>, 5U> modifiers{{
+                {IDC_SHORTCUT_MOD_NONE, UiStringId::ShortcutNone},
+                {IDC_SHORTCUT_MOD_CTRL, UiStringId::ShortcutModifierCtrl},
+                {IDC_SHORTCUT_MOD_SHIFT, UiStringId::ShortcutModifierShift},
+                {IDC_SHORTCUT_MOD_ALT, UiStringId::ShortcutModifierAlt},
+                {IDC_SHORTCUT_MOD_WIN, UiStringId::ShortcutModifierWin}}};
+            for (const auto& [id, text] : modifiers) {
+                if (!RadioHasReadableCaption(
+                        model, GetDlgItem(model.dialog, id), UiText(text))) {
                     model.selected_page = selected_page;
                     ShowSelectedPage(model);
                     return false;

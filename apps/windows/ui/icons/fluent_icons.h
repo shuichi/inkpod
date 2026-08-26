@@ -41,6 +41,12 @@ enum class PaneIconId : std::uint16_t {
     OneToOne,
     OpenFiles,
     OpenFolder,
+    Add,
+    Copy,
+    Delete,
+    MoveUp,
+    MoveDown,
+    Properties,
     Count,
 };
 
@@ -79,6 +85,12 @@ inline constexpr std::array<PaneIconId, kPaneIconCount> kAllPaneIconIds{
     PaneIconId::OneToOne,
     PaneIconId::OpenFiles,
     PaneIconId::OpenFolder,
+    PaneIconId::Add,
+    PaneIconId::Copy,
+    PaneIconId::Delete,
+    PaneIconId::MoveUp,
+    PaneIconId::MoveDown,
+    PaneIconId::Properties,
 };
 
 [[nodiscard]] bool FluentIconResourceAvailable(HINSTANCE instance) noexcept;
