@@ -2186,32 +2186,36 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
                eyedropper_text.data(), std::wstring(UiText(UiStringId::ToolEyedropper)).c_str()) != 0) {
         return 783;
     }
-    const auto label_background_matches_tab = [color_page_tabs](
-                                                  HWND label,
-                                                  UINT control_id) noexcept {
-        RECT label_client{};
-        if (GetClientRect(label, &label_client) == FALSE
-            || IsRectEmpty(&label_client) != FALSE) {
+    const auto owner_draw_background_matches_tab = [color_page_tabs](
+                                                         HWND control,
+                                                         UINT control_id) noexcept {
+        RECT control_client{};
+        if (GetClientRect(control, &control_client) == FALSE
+            || IsRectEmpty(&control_client) != FALSE) {
             return false;
         }
-        const POINT label_sample{
-            std::max(0, static_cast<int>(label_client.right) - 2),
-            std::min(1, std::max(0, static_cast<int>(label_client.bottom) - 1))};
-        POINT tab_sample = label_sample;
-        MapWindowPoints(label, color_page_tabs, &tab_sample, 1U);
+        const POINT control_sample{
+            std::max(0, static_cast<int>(control_client.right) - 2),
+            std::min(1, std::max(0, static_cast<int>(control_client.bottom) - 1))};
+        POINT tab_sample = control_sample;
+        MapWindowPoints(control, color_page_tabs, &tab_sample, 1U);
         const COLORREF tab_background = RenderWindowClientPixel(
             color_page_tabs, tab_sample);
-        const COLORREF label_background = RenderOwnerDrawPixel(
-            label, control_id, label_sample);
+        const COLORREF control_background = RenderOwnerDrawPixel(
+            control, control_id, control_sample);
         return tab_background != CLR_INVALID
-            && label_background == tab_background;
+            && control_background == tab_background;
     };
-    const bool color_label_backgrounds_match =
-        label_background_matches_tab(
+    const bool color_owner_draw_backgrounds_match_tab =
+        owner_draw_background_matches_tab(
             main_line_label, IDC_COLOR_MAIN_LINE_LABEL)
-        && label_background_matches_tab(
-            drawing_label, IDC_COLOR_DRAWING_LABEL);
-    if (!color_label_backgrounds_match) {
+        && owner_draw_background_matches_tab(
+            drawing_label, IDC_COLOR_DRAWING_LABEL)
+        && owner_draw_background_matches_tab(
+            main_line_swatch, IDC_COLOR_MAIN_LINE_SWATCH)
+        && owner_draw_background_matches_tab(
+            color_picker, IDC_COLOR_PICKER);
+    if (!color_owner_draw_backgrounds_match_tab) {
         return 11140;
     }
     const auto is_opaque_black = [](const InkpodColorValue& color) noexcept {

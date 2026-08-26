@@ -95,6 +95,7 @@ struct ColorDockPaneState {
     std::vector<std::uint32_t> picker_triangle_pixels;
     std::vector<std::uint32_t> picker_frame_pixels;
     std::vector<std::uint32_t> picker_present_pixels;
+    std::vector<std::uint32_t> swatch_present_pixels;
     int picker_cache_width{};
     int picker_cache_height{};
     UINT picker_cache_dpi{};
@@ -107,6 +108,7 @@ struct ColorDockPaneState {
     bool picker_triangle_cache_valid{};
     bool picker_frame_cache_valid{};
     GdiPaintBuffer picker_paint_buffer;
+    GdiPaintBuffer swatch_paint_buffer;
     GdiPaintBuffer color_label_paint_buffer;
     bool updating{};
     HFONT font{};

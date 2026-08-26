@@ -840,6 +840,45 @@ void BlitDibPixels(
         DIB_RGB_COLORS);
 }
 
+void PaintColorTabSurface(
+    HWND overlay,
+    HDC target,
+    const RECT& client) noexcept {
+    const HWND pane = overlay == nullptr ? nullptr : GetParent(overlay);
+    const HWND tabs = pane == nullptr
+        ? nullptr
+        : GetDlgItem(pane, IDC_COLOR_TABS);
+    PaintTabSurfaceBackground(tabs, overlay, target, client);
+}
+
+bool CaptureColorTabSurfacePixels(
+    HWND overlay,
+    HDC reference,
+    GdiPaintBuffer& buffer,
+    std::vector<std::uint32_t>& pixels) noexcept {
+    RECT client{};
+    if (overlay == nullptr || GetClientRect(overlay, &client) == FALSE) {
+        return false;
+    }
+    const int width = static_cast<int>(client.right - client.left);
+    const int height = static_cast<int>(client.bottom - client.top);
+    if (width <= 0 || height <= 0 || !buffer.Prepare(reference, width, height)) {
+        return false;
+    }
+    PaintColorTabSurface(overlay, buffer.Dc(), client);
+    try {
+        pixels.resize(
+            static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+    std::memcpy(
+        pixels.data(),
+        buffer.Bits(),
+        pixels.size() * sizeof(std::uint32_t));
+    return true;
+}
+
 std::array<double, 3U> SystemRgb(int index) noexcept {
     const COLORREF color = GetSysColor(index);
     return {
@@ -922,22 +961,21 @@ SwatchTarget HitSwatchTarget(
 
 void DrawCombinedSwatches(
     const DRAWITEMSTRUCT& draw,
-    const ColorDockPaneState& state) noexcept {
+    ColorDockPaneState& state) noexcept {
     const int width = static_cast<int>(draw.rcItem.right - draw.rcItem.left);
     const int height = static_cast<int>(draw.rcItem.bottom - draw.rcItem.top);
     if (width <= 0 || height <= 0) {
         return;
     }
-    const auto background = SystemRgb(COLOR_3DFACE);
-    std::vector<std::uint32_t> pixels;
-    try {
-        pixels.assign(
-            static_cast<std::size_t>(width) * static_cast<std::size_t>(height),
-            DibPixel(background[0], background[1], background[2]));
-    } catch (const std::bad_alloc&) {
-        FillRect(draw.hDC, &draw.rcItem, GetSysColorBrush(COLOR_3DFACE));
+    if (!CaptureColorTabSurfacePixels(
+            draw.hwndItem,
+            draw.hDC,
+            state.swatch_paint_buffer,
+            state.swatch_present_pixels)) {
+        PaintColorTabSurface(draw.hwndItem, draw.hDC, draw.rcItem);
         return;
     }
+    auto& pixels = state.swatch_present_pixels;
     const double short_side = static_cast<double>(std::min(width, height));
     const SwatchGeometry geometry = MakeSwatchGeometry(width, height);
     const double outline = std::max(1.0, short_side * 0.035);
@@ -1050,7 +1088,13 @@ void DrawCombinedSwatches(
         draw_main_line(false);
         draw_drawing(true);
     }
-    BlitDibPixels(draw.hDC, width, height, pixels);
+    std::memcpy(
+        state.swatch_paint_buffer.Bits(),
+        pixels.data(),
+        pixels.size() * sizeof(std::uint32_t));
+    if (!state.swatch_paint_buffer.Present(draw.hDC)) {
+        BlitDibPixels(draw.hDC, width, height, pixels);
+    }
     if ((draw.itemState & ODS_FOCUS) != 0U || GetFocus() == draw.hwndItem) {
         RECT focus = draw.rcItem;
         InflateRect(&focus, -1, -1);
@@ -1078,7 +1122,9 @@ void InvalidatePickerCaches(ColorDockPaneState& state) noexcept {
 bool EnsureHueRingCache(
     ColorDockPaneState& state,
     const PickerGeometry& geometry,
-    UINT dpi) noexcept {
+    UINT dpi,
+    HWND picker,
+    HDC target) noexcept {
     const int width = static_cast<int>(geometry.client.right);
     const int height = static_cast<int>(geometry.client.bottom);
     const COLORREF face = GetSysColor(COLOR_3DFACE);
@@ -1090,12 +1136,11 @@ bool EnsureHueRingCache(
         && state.picker_cache_light == light) {
         return true;
     }
-    const auto background = SystemRgb(COLOR_3DFACE);
-    try {
-        state.picker_ring_pixels.assign(
-            static_cast<std::size_t>(width) * static_cast<std::size_t>(height),
-            DibPixel(background[0], background[1], background[2]));
-    } catch (const std::bad_alloc&) {
+    if (!CaptureColorTabSurfacePixels(
+            picker,
+            target,
+            state.picker_paint_buffer,
+            state.picker_ring_pixels)) {
         InvalidatePickerCaches(state);
         return false;
     }
@@ -1110,6 +1155,9 @@ bool EnsureHueRingCache(
         height, static_cast<int>(std::ceil(geometry.center_y + geometry.outer_radius + 1.0)));
     for (int y = top; y < bottom; ++y) {
         for (int x = left; x < right; ++x) {
+            const std::size_t index = static_cast<std::size_t>(y)
+                * static_cast<std::size_t>(width) + static_cast<std::size_t>(x);
+            const auto background = PixelRgb(state.picker_ring_pixels[index]);
             std::array<double, 3U> accumulated{
                 background[0] * 4.0,
                 background[1] * 4.0,
@@ -1135,12 +1183,10 @@ bool EnsureHueRingCache(
                     }
                 }
             }
-            state.picker_ring_pixels[static_cast<std::size_t>(y)
-                * static_cast<std::size_t>(width) + static_cast<std::size_t>(x)] =
-                DibPixel(
-                    accumulated[0] * 0.25,
-                    accumulated[1] * 0.25,
-                    accumulated[2] * 0.25);
+            state.picker_ring_pixels[index] = DibPixel(
+                accumulated[0] * 0.25,
+                accumulated[1] * 0.25,
+                accumulated[2] * 0.25);
         }
     }
     state.picker_cache_width = width;
@@ -1158,8 +1204,10 @@ bool EnsureHueRingCache(
 bool EnsureTriangleCache(
     ColorDockPaneState& state,
     const PickerGeometry& geometry,
-    UINT dpi) noexcept {
-    if (!EnsureHueRingCache(state, geometry, dpi)) {
+    UINT dpi,
+    HWND picker,
+    HDC target) noexcept {
+    if (!EnsureHueRingCache(state, geometry, dpi, picker, target)) {
         return false;
     }
     const double hue_degrees = ActivePickerHue(state);
@@ -1235,8 +1283,10 @@ bool EnsureTriangleCache(
 bool EnsurePickerFrame(
     ColorDockPaneState& state,
     const PickerGeometry& geometry,
-    UINT dpi) noexcept {
-    if (!EnsureTriangleCache(state, geometry, dpi)) {
+    UINT dpi,
+    HWND picker,
+    HDC target) noexcept {
+    if (!EnsureTriangleCache(state, geometry, dpi, picker, target)) {
         return false;
     }
     const InkpodColorValue& selected_color = ActivePickerColor(state);
@@ -1328,13 +1378,14 @@ void DrawPicker(
     const int width = static_cast<int>(geometry.client.right);
     const int height = static_cast<int>(geometry.client.bottom);
     if (!geometry.valid || width <= 0 || height <= 0) {
-        FillRect(draw.hDC, &draw.rcItem, GetSysColorBrush(COLOR_3DFACE));
+        PaintColorTabSurface(draw.hwndItem, draw.hDC, draw.rcItem);
         return;
     }
     const UINT dpi = GetDpiForWindow(draw.hwndItem);
-    if (!EnsurePickerFrame(state, geometry, dpi)
+    if (!EnsurePickerFrame(
+            state, geometry, dpi, draw.hwndItem, draw.hDC)
         || !CopyPixelBuffer(state.picker_present_pixels, state.picker_frame_pixels)) {
-        FillRect(draw.hDC, &draw.rcItem, GetSysColorBrush(COLOR_3DFACE));
+        PaintColorTabSurface(draw.hwndItem, draw.hDC, draw.rcItem);
         return;
     }
     const InkpodColorValue& selected_color = ActivePickerColor(state);
@@ -1501,11 +1552,7 @@ void DrawColorLabel(
         text.data(),
         static_cast<int>(text.size()));
     const auto paint = [&](HDC target) noexcept {
-        const HWND pane = GetParent(draw.hwndItem);
-        const HWND tabs = pane == nullptr
-            ? nullptr
-            : GetDlgItem(pane, IDC_COLOR_TABS);
-        PaintTabSurfaceBackground(tabs, draw.hwndItem, target, client);
+        PaintColorTabSurface(draw.hwndItem, target, client);
         const HGDIOBJ old_font = state.font == nullptr
             ? nullptr
             : SelectObject(target, state.font);
@@ -2047,6 +2094,9 @@ LRESULT CALLBACK PaneSubclassProcedure(
                     && notification->code == TCN_SELCHANGE) {
                     state->active_tab = std::max(
                         0, TabCtrl_GetCurSel(notification->hwndFrom));
+                    if (state->active_tab == 0) {
+                        InvalidatePickerCaches(*state);
+                    }
                     ShowTabControls(pane, state->active_tab);
                     return 0;
                 }
@@ -2173,6 +2223,7 @@ LRESULT CALLBACK PaneSubclassProcedure(
             const LRESULT result = DefSubclassProc(
                 pane, message, wparam, lparam);
             if (state != nullptr) {
+                InvalidatePickerCaches(*state);
                 RepaintVisibleTabControls(pane, state->active_tab);
             }
             return result;
@@ -2184,6 +2235,7 @@ LRESULT CALLBACK PaneSubclassProcedure(
             }
             if (state != nullptr) {
                 state->picker_paint_buffer.Reset();
+                state->swatch_paint_buffer.Reset();
                 state->color_label_paint_buffer.Reset();
             }
             SetWindowLongPtrW(pane, GWLP_USERDATA, 0);

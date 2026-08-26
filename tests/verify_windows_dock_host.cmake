@@ -303,6 +303,9 @@ foreach(REQUIRED IN ITEMS
         "PlacePaneDialogControl"
         "RepaintVisibleTabControls"
         "PaintTabSurfaceBackground"
+        "CaptureColorTabSurfacePixels"
+        "state.swatch_paint_buffer"
+        "state.picker_paint_buffer"
         "HWND_BOTTOM"
         "HWND_TOP"
         "UpdateWindow(child)")
@@ -392,7 +395,7 @@ foreach(REQUIRED IN ITEMS
         "layer_list_rebuilds"
         "layer_list_shrink_painted"
         "layer_list_grow_painted"
-        "color_label_backgrounds_match"
+        "color_owner_draw_backgrounds_match_tab"
         "color_resize_controls"
         "color_resize_paints"
         "minimum_color_content_height"
