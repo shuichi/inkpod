@@ -25,6 +25,10 @@ managed policy 等、Windows との統合に registry が必要な場合だけ�
 path だけは session-only の bounded binary record `Session\inkpod-session.bin`
 に分離する。
 
+`ヘルプ > 設定ファイルを開く` はこの固定 path を Windows shell の `open`
+動詞へ渡す。ファイルが未作成の場合だけ現在設定を通常の原子的保存経路で
+materialize し、既存の不正な JSON は上書きせず編集対象としてそのまま開く。
+
 ## `inkpod-settings.json`
 
 設定ファイルは UTF-8 JSON、2-space indent、末尾改行付きで書く。値には

@@ -104,7 +104,7 @@ bool ShortcutCatalogIsCompleteAndPrefixFree() {
         }
         return false;
     };
-    if (menu_commands.size() != 321U
+    if (menu_commands.size() != 322U
         || shortcuts.size() != kProductionCommandStateCount
         || shortcuts.size() != commands.size()
         || is_menu_command(IDM_COLOR_PIN)
@@ -217,6 +217,7 @@ int main() {
         || FindCommandState(states, IDM_HELP_FILE_FORMAT) == nullptr
         || FindCommandState(states, IDM_HELP_ACKNOWLEDGEMENTS) == nullptr
         || FindCommandState(states, IDM_HELP_WEB_PAGE) == nullptr
+        || FindCommandState(states, IDM_HELP_OPEN_SETTINGS_FILE) == nullptr
         || FindCommandState(states, IDM_HELP_ABOUT) == nullptr
         || IsCommandEnabled(states, IDM_FILE_SAVE)
         || IsCommandEnabled(states, IDM_VIEW_FIT)

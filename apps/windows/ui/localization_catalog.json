@@ -7696,7 +7696,7 @@
       "kind": "text",
       "ja": "設定(&G)",
       "en": "Settin&gs",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0918",
@@ -9636,6 +9636,20 @@
       "ja": "環境設定を保存または適用できませんでした。変更前の設定を保持します。",
       "en": "The preferences could not be saved or applied. The previous settings are retained.",
       "resource": false
+    },
+    {
+      "id": "SettingsFileOpenMenu",
+      "kind": "text",
+      "ja": "設定ファイルを開く(&S)",
+      "en": "Open &Settings File",
+      "resource": true
+    },
+    {
+      "id": "SettingsFileOpenFailed",
+      "kind": "text",
+      "ja": "設定ファイルを開けませんでした。保存先へのアクセスとJSONファイルの関連付けを確認してください。",
+      "en": "The settings file could not be opened. Check access to the destination and the JSON file association.",
+      "resource": true
     }
   ]
 }

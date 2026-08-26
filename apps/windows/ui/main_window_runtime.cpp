@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "app/application_host.h"
+#include "app/application_data_paths.h"
 #include "canvas.h"
 #include "app/clipboard_adapter.h"
 #include "app/core_host.h"
@@ -14110,6 +14111,43 @@ bool PersistApplicationSettings(ApplicationHost& state) noexcept {
     }
 }
 
+bool OpenApplicationSettingsFile(
+    ApplicationHost& state, HWND owner) noexcept {
+    if (state.lifetime.smoke_test) {
+        return true;
+    }
+
+    std::wstring path;
+    if (!inkpod::app::ResolveApplicationSettingsPath(path)) {
+        ShowEmbeddedHelpError(state, owner, IDS_SETTINGS_FILE_OPEN_FAILED);
+        return false;
+    }
+
+    DWORD attributes = GetFileAttributesW(path.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES) {
+        const DWORD error = GetLastError();
+        if ((error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND)
+            || !PersistApplicationSettings(state)) {
+            ShowEmbeddedHelpError(state, owner, IDS_SETTINGS_FILE_OPEN_FAILED);
+            return false;
+        }
+        attributes = GetFileAttributesW(path.c_str());
+    }
+    if (attributes == INVALID_FILE_ATTRIBUTES
+        || (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0U) {
+        ShowEmbeddedHelpError(state, owner, IDS_SETTINGS_FILE_OPEN_FAILED);
+        return false;
+    }
+
+    const HINSTANCE launched = ShellExecuteW(
+        owner, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    if (reinterpret_cast<INT_PTR>(launched) <= 32) {
+        ShowEmbeddedHelpError(state, owner, IDS_SETTINGS_FILE_OPEN_FAILED);
+        return false;
+    }
+    return true;
+}
+
 template <typename Mutation>
 bool SaveApplicationSettingsUpdate(
     ApplicationHost& state, Mutation&& mutation) noexcept {
@@ -19184,6 +19222,8 @@ std::optional<LRESULT> RouteApplicationCommand(
             }
             return 1;
         }
+        case IDM_HELP_OPEN_SETTINGS_FILE:
+            return OpenApplicationSettingsFile(*state, window) ? 1 : 0;
         case IDM_HELP_ABOUT:
             return ShowAboutDialog(
                        state->lifetime.instance,
