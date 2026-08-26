@@ -328,6 +328,55 @@ main -> Application -> MainWindow/controllers -> CoreHost -> C ABI
 - The renderer is reached only through Canvas and the snapshot sink; controllers
   never call renderer APIs.
 
+### Win32 multi-pane resize painting contract
+
+Splitter, docking, floating-window, DPI, and parent-size changes are geometry
+updates, not control-lifecycle events. A pane keeps its existing child `HWND`
+values, Common Controls contents, selection, focus, and scroll position. The
+layout owner computes the complete final geometry before it changes any child
+and skips children whose bounds are already correct. It then applies every
+changed position without intermediate painting, using deferred window placement
+or `SetWindowPos(..., SWP_NOREDRAW)` as appropriate. It must not alternate one
+child move with one child repaint because later moves can expose pixels that the
+earlier repaint treated as final.
+
+After all children reach their final bounds, the layout owner performs one
+bounded synchronous repaint. A pane parent that owns standard child controls
+uses `WS_CLIPCHILDREN`, or equivalent clipping, so parent background erasure
+does not overwrite the children at their current positions. Vacated old child
+bounds remain part of the parent dirty region and are erased before the final
+frame is presented. `RedrawWindow` normally combines `RDW_INVALIDATE` and
+`RDW_UPDATENOW`; add `RDW_ERASE` when a standard background or vacated frame
+must be cleared, and add `RDW_ALLCHILDREN` when the complete pane subtree must
+paint after batched placement. A fully covering owner-draw surface may omit
+erase, but only when its paint contract covers every invalidated pixel.
+
+The dirty region is selected by ownership and overlap:
+
+- for one boundary or a small independent control set, repaint the union of the
+  old and new bounds, including the vacated pixels;
+- when several child windows move and their old/new bounds can overlap, repaint
+  the complete pane subtree after placement;
+- never use a synchronous whole-workspace redraw to hide an incorrectly owned
+  dirty region.
+
+The DockHost may repaint its splitter or the narrow strip between the old and
+new stack boundary separately, but that does not replace the affected pane's
+responsibility for its child layout and vacated background. A geometry-only
+path does not rebuild tabs or lists, resend reset-content messages, recreate
+controls, or silently change selection and focus.
+
+Regression coverage combines source-contract and actual-window checks. Static
+checks lock the no-intermediate-redraw placement and the final repaint call.
+Native smoke resizes representative panes in both axes where applicable,
+verifies anchored children move by the complete size delta, and requires no
+pending parent or child update region after the synchronous repaint. A hidden
+smoke window is not required to receive `WM_PAINT`, because Windows may suppress
+paint delivery while hidden; it is checked through geometry and update regions.
+At least one visible product or pixel probe must additionally demonstrate that
+old frames and background pixels are removed. The same checks cover localized
+layouts and representative DPI values when label or row geometry can change.
+
 `ApplicationHost` is the process-lifetime composition root. It owns global
 shortcut and clipboard state, the frontend routing/token registries, job state,
 one `CoreHost`, one `RendererHost`, a bounded multi-entry workspace registry, and a

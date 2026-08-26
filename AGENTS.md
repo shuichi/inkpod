@@ -130,6 +130,9 @@ native extension は `.inkpod` とし、versioned manifest と圧縮可能な bl
 - pen/mouse/touch は可能な範囲で `WM_POINTER` を用い、pressure/tilt のない mouse fallback を持つ。
 - Canvas の座標は client device pixel に統一し、`device = document * zoom + pan` を Core snapshot と renderer で共有する。D2D Canvas は pixel unit/96-DPI target とし、Per-Monitor DPI を Canvas transform へ二重適用しない。
 - UI の DPI 変換は `device_px = MulDiv(reference_px, target_dpi, reference_dpi)` とする。96 DPI 論理値の `reference_dpi` は 96、スクリーンショット等の実 device pixel は撮影時 DPI とし、同じ値へ DPI scale を二重適用しない。
+- 複数の child `HWND` を持つ pane／dialog の `WM_SIZE` と splitter relayout は、最終 geometry を先に計算し、変更のない child を動かさず、変更対象を中間描画なしでまとめて配置してから、移動前に露出した領域を含む bounded な範囲を一度だけ同期再描画する。子ごとの配置と再描画を交互に行わない。
+- pane parent は必要に応じて `WS_CLIPCHILDREN` または同等の clipping を使い、現在の child 領域を親の背景消去から除外する。標準 control は背景消去を含む最終描画、全面を描く owner-draw surface は不要な erase を避ける。複数 child の旧領域が交差する場合は pane subtree 全体、単一境界や少数 control だけなら old/new bounds の union を dirty region とし、workspace 全体の同期再描画で代用しない。
+- geometry-only resize で control `HWND`、tab/list contents、selection、focus、scroll position を再生成または reset しない。実装上の `SWP_NOREDRAW`、deferred placement、`RedrawWindow` flags と検証方法は `docs/architecture.md` の Win32 multi-pane resize painting contract を正本とする。
 - RAII で COM/GPU resource を管理する。resize、occlusion、minimize、DPI change、device removed/reset から復旧する。
 - device lost 時は GPU resource だけを再構築し、Rust の document state を失わない。描画/Present の失敗を無視しない。
 - UI thread で大きな decode、filter、save を同期実行しない。非表示・最小化時は不要な描画を止める。
@@ -180,6 +183,7 @@ ctest --preset <windows-test-preset>
 - format: `.inkpod` current-version round-trip、非現行 version 拒否、malformed/cancel test
 - ABI: header の C11/C++20 include、ownership、NULL/短い structure/未知 enum/二重 release の negative test
 - Windows: MSVC `/W4 /permissive-`、create/render、resize/DPI/device lost smoke test
+- Windows multi-pane resize: 実 `HWND` の縦横 resize で anchor された child が最終差分だけ移動し、親子に deferred update region が残らず、geometry-only 経路が control／tab／list の再生成や内容 reset を起こさないことを確認する。非表示 smoke では `WM_PAINT` 件数を合否条件にせず、静的 contract と update-region／geometry 検査を組み合わせ、少なくとも一つの可視経路で旧 frame／背景 pixel が残らないことを検証する。
 - Windows hardening: queue saturation、close 中 input、active stroke、stale snapshot、save failure、allocation failure、shutdown race の fault injection、tab/window/layout/device reset の反復 soak、keyboard/UI Automation/high contrast/DPI/screen reader/IME の再現可能な確認
 - CI: Rust と Windows の configure/build/test。新規 warning を放置しない
 
