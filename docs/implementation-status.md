@@ -39,7 +39,7 @@ Only the following requirements are not yet `Verified` in
 | --- | --- | --- |
 | `ABI-001`, `ABI-002` | Exact-current ABI v23 manager/job lifecycle, path-only requests, bounded progress/result spans and owner-thread publication are implemented. All 60 Rust ABI tests, header/export collection and the ARM64 Debug/x64 Release ABI smokes pass. | Remaining Windows renderer/product-flow checks and unrerun configurations are tracked below; older callers must rebuild |
 | `IO-001`, `IO-003` | Native v29/META v2 companion metadata, six migrated Rust-manager routes, asynchronous polling, bounded shared cache, ordinary pair save and recovery are implemented. All 243 public Core contracts, including 21 IO contracts, pass. ARM64 Debug and x64 Release configure/build/static-CRT/packaging, all 41 non-GPU CTests and full English/Japanese product smokes pass. | ARM64 renderer repeatability and physical file-management flows remain open; no cross-file atomicity promise |
-| `PERF-001` | All nine unchanged Core quick scenarios retain their exact semantic gates. Independent batches and an isolated pre-change HEAD comparison were recorded without modifying the benchmark, envelopes or canonical cache expression. | ARM64 pan/zoom elapsed-time acceptance is unresolved because both current and pre-change code exceed the existing upper bound. Native v29 byte/checksum expectations in the separate Release-only InkScript quick test await explicit approval. |
+| `PERF-001` | All nine unchanged Core quick scenarios retain their exact semantic gates. Independent batches and an isolated pre-change HEAD comparison were recorded without modifying the benchmark, envelopes or canonical cache expression. The explicitly approved v29 byte/checksum expectation update passes the separate Release-only InkScript test in one warm-up and five measured runs. | ARM64 pan/zoom elapsed-time acceptance is unresolved because both current and pre-change code exceed the existing upper bound. The new InkScript ARM64 timings are diagnostic only and do not establish acceptance against its Ryzen/x64 envelope. |
 | `WIN-001` | Native Windows shell with explicit Common Controls registration and a system-dark title-bar opt-in, Japanese/English UI with persisted System/Japanese/English selection and non-Japanese English fallback, offline Help/About/Acknowledgements with locked BLAKE3/PNG/Fluent icon dependency attribution, typed Fluent icons for all 14 Tool commands and the applicable Layer/Plane/pin states with localized text fallback, owner-centered work-area-clamped modal dialogs, DPI-aware layout, keyboard routes, MSAA/UIA names, theme and accessibility hooks | Dark presentation is limited to the system title bar; physical high-contrast/200%-DPI, complete screen-reader, and Japanese IME validation/fixes remain; the embedded offline Help body is Japanese-only |
 | `WORKSPACE-001` | Persistent and auxiliary panes retain DockHost and Tool Options remains an owned flyout. The right side uses dynamic stable-ID tabs with nonempty unique membership, deterministic add/remove/move/reorder, accessible descriptions and current-only human-readable settings-JSON persistence without registry migration. Live Splitter geometry updates do not rebuild right-side tabs or Color/Layer list contents, while structural dock changes still refresh their presentation. Color retains a 300-DIP minimum including its Dock header; its active page is placed without interim redraw and receives one bounded synchronous repaint after final geometry and z-order are established. Its owner-drawn swatch, labels, and picker reuse the current themed tab surface at their actual coordinates and repaint after tab/theme/system-color changes. Right-tab mouse/keyboard splitters stop at each adjacent descriptor minimum without continuing to change weights. The transient Job Progress pane and transient narrow-width suppression are not persisted. | Reference Check AutoHide edge buttons are not reachable by F6/Tab/Shift+Tab |
 | `SUBPALETTE-001` | ABI v23 read-only catalog/view and path-only parallel manager jobs are connected; source/display leases, initial-display reservation and staged replacement preserve the previous catalog on failure. Focused Subpalette/IO contracts and ARM64 Debug/x64 Release English/Japanese product smokes pass. | Physical file/folder-dialog multi-image confirmation and unrerun platform/configuration checks remain |
@@ -104,7 +104,7 @@ open; `IO-003` remains `Experimental`.
 
 | Boundary | Completed checkpoint |
 | --- | --- |
-| Rust workspace | The final `cargo test --workspace --all-features --quiet` run passes 661 tests, including 243 public Core contracts (21 IO-003), 60 ABI tests and 28 shared-I/O tests; the existing Release-only InkScript quick test remains explicitly ignored by this routine run and its separate failure is recorded below. `cargo fmt --check`, warnings-denied workspace/all-target/all-feature Clippy, and warnings-denied Core/shared-I/O rustdoc pass. Sequence contracts cover prospective no-op/bind/replace classification, old save-token/path/pair-authority revocation, same-UUID/different-generation activation, native/raster byte preservation, and cancellation/stale/no-op authority retention. Pathless Light Table, encoded/decoded raster and staged-open replacements revoke the previous pair authority only after successful publication. The native corpus retains its malformed-length and current-version rejection assertions with v29 seeds. |
+| Rust workspace | The final `cargo test --workspace --all-features --quiet` run passes 661 tests, including 243 public Core contracts (21 IO-003), 60 ABI tests and 28 shared-I/O tests; the existing Release-only InkScript quick test remains explicitly ignored by this routine run and its explicit v29 verification is recorded below. `cargo fmt --check`, warnings-denied workspace/all-target/all-feature Clippy, and warnings-denied Core/shared-I/O rustdoc pass. Sequence contracts cover prospective no-op/bind/replace classification, old save-token/path/pair-authority revocation, same-UUID/different-generation activation, native/raster byte preservation, and cancellation/stale/no-op authority retention. Pathless Light Table, encoded/decoded raster and staged-open replacements revoke the previous pair authority only after successful publication. The native corpus retains its malformed-length and current-version rejection assertions with v29 seeds. |
 | Windows ARM64 Debug | Final configure, complete build, static-CRT verification and portable-ZIP/unsigned-MSIX packaging pass. 43 of 44 CTest entries pass: all 41 non-GPU tests in 71.68 s, including CoreHost (0.96 s), owner model (0.15 s) and ABI (41.53 s), plus complete English/Japanese product smokes in 262.66/262.58 s. The final renderer fixture passes once (4.70 s), but the subsequent repeat stops on its first run (25.12 s): 248 accepted Render requests produce only 117 Presents, despite a visible/exposed surface and an empty queue. This is an unresolved failed check, not a passed 44-test configuration. |
 | Windows x64 Release | Configure, complete build, static-CRT verification and portable-ZIP/unsigned-MSIX packaging pass. All 44 CTest entries pass on the current production code: 41 non-GPU CTests in 22.13 s, including CoreHost (0.44 s), owner model (0.19 s), ABI (3.07 s) and portable-ZIP payload/cleanup (2.39 s); full English/Japanese product smokes in 69.99/75.86 s; and five consecutive final renderer-fixture runs in 6.56, 6.74, 7.03, 5.52 and 7.80 s. The unchanged ZIP test passes after a preliminary temporary-file cleanup failure. The product smokes exercise real path-only raster open, Light Table swap authority, initial sequence bind, dirty no-op, replacement/recovery identity and old native/raster byte preservation. |
 | Current format and fuzz declarations | Native v29/replay 25/ABI v23, META section/record v2 with required field 21, settings JSON v2 and `.inkbatch` v4 are current. The declared native fuzz targets are `native_v29`, `native_core_v29` and `cut_v29`; `inkscript_lexer_v2`, `inkscript_parser_v2` and `tga_v2` remain. Coverage-guided fuzz execution has not been run for this change. |
@@ -179,16 +179,41 @@ recur in the independent recheck. Both final pan/zoom medians still exceed
 is not claimed. The final samples and their unchanged counters are also saved
 in `core-quick-final-observations.json` in the verification directory.
 
-The separately ignored Release-only InkScript quick contract was also invoked
-explicitly without changing its harness. It fails at the input native-size
+The separately ignored Release-only InkScript quick contract was initially invoked
+explicitly without changing its harness. It failed at the input native-size
 assertion (`script/performance.rs:604`): actual 6,072 bytes versus the retained
-6,192-byte expectation. An isolated, unchanged HEAD `2aae884` run also fails
+6,192-byte expectation. An isolated, unchanged HEAD `2aae884` run also failed
 there, producing 6,056 bytes. The old expectation predates existing GENS/EDIT
 schema changes; the current v29 META addition accounts for the measured
-16-byte increase from HEAD. These are failed explicit checks, not passed timing
-samples. The exact current byte/checksum expectations still require the
-requested user approval; no workload, counters or performance limits changed.
-Both failure logs are retained under `build/io-migration-verification/`.
+16-byte increase from HEAD. These initial failures remain recorded in
+`build/io-migration-verification/`; they are not passed timing samples.
+
+The user subsequently explicitly approved updating only the native-byte and
+checksum expectations to v29. The only executable changes are five numeric
+expectations in `script/performance.rs`: 6,072 bytes per input; 24,288 planned
+input bytes; 36,432 runner-read bytes; 91,104 installed-output bytes; checksum
+`b65373bdba27b215`. The intermediate discovery run passed all other assertions
+and stopped at the old checksum, which is retained in
+`inkscript-v29-expectation-discovery.log`. Workload, execution, timing interval,
+checksum calculation, all non-byte counters and performance limits are unchanged.
+
+The explicit Release-only command now passes in six independent processes:
+one discarded warm-up (360,199,042 ns), then five measured samples
+325,186,084; 331,263,375; 326,240,250; 237,307,875; 557,279,625 ns
+(median 326,240,250 ns). Every run preserves the expected source, asset,
+execution, failure/cancel, replay and byte counters and the v29 checksum.
+The environment is Windows 11 build 26200, a 4-vCPU/8-GiB Parallels ARM64 VM,
+Rust/Cargo 1.97.1, LLVM 22.1.6, static CRT, Release and the Parallels power scheme.
+These timings are diagnostic only because the approved InkScript 64–107 ms
+envelope applies to the Ryzen/x64 reference host. The current ARM64 Core
+pan/zoom and renderer failures above remain unresolved. Full logs are retained
+as `inkscript-v29-approved-{0..5}.log` (0 is warm-up), and current hard gates
+and all samples are recorded in `docs/core-benchmark-baseline.md`.
+
+For this numeric-expectation-only follow-up, `cargo fmt --check` and
+`cargo clippy --workspace --all-targets --all-features -- -D warnings` also
+pass. Production code, native schema, ABI and Windows adapters are unchanged;
+the full workspace test suite and Windows build/test matrix were not rerun.
 
 ### Earlier verification context
 

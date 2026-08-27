@@ -34,15 +34,15 @@ const ASSET_BYTES: u64 = 262_144;
 const EXPECTED_SOURCE_BYTES: usize = 371_176;
 const EXPECTED_TOKENS: usize = 7_965;
 const EXPECTED_CST_NODES: usize = 2_000;
-const EXPECTED_INPUT_NATIVE_BYTES: u64 = 24_768;
-const EXPECTED_RUNNER_NATIVE_READ_BYTES: u64 = 37_152;
+const EXPECTED_INPUT_NATIVE_BYTES: u64 = 24_288;
+const EXPECTED_RUNNER_NATIVE_READ_BYTES: u64 = 36_432;
 const EXPECTED_STATEMENTS: u64 = 774;
 const EXPECTED_INVOCATIONS: u64 = 768;
 const EXPECTED_COMMITS: u64 = 384;
 const EXPECTED_NO_OPS: u64 = 384;
-const EXPECTED_INSTALLED_OUTPUT_BYTES: u64 = 91_584;
+const EXPECTED_INSTALLED_OUTPUT_BYTES: u64 = 91_104;
 const EXPECTED_REPLAYED_COMMITS: u64 = 256;
-const EXPECTED_CHECKSUM: u64 = 0x4401_131d_804c_8eb7;
+const EXPECTED_CHECKSUM: u64 = 0xb653_73bd_ba27_b215;
 
 struct SourceFixture {
     source: InkScriptSource,
@@ -601,7 +601,7 @@ fn build_inputs() -> Vec<InputFixture> {
                 .build_procedure_file(Some(core.current_state), Some(editor))
                 .expect("quick input must encode");
             let bytes = encode_procedure_file(&file).expect("quick input bytes must encode");
-            assert_eq!(bytes.len(), 6_192);
+            assert_eq!(bytes.len(), 6_072);
             let label = format!("cell{number}.inkpod");
             let path = existing(&format!("root:/in/{label}"), object, 40);
             let fingerprint = NativeInputFingerprint::new(
