@@ -8,6 +8,7 @@
 #include "activation.h"
 #include "application_settings.h"
 #include "document_session.h"
+#include "file_io_controller.h"
 #include "recent_documents.h"
 #include "renderer/renderer_host.h"
 #include "tab_drag.h"
@@ -137,6 +138,7 @@ public:
     windows::ui::ShortcutUiState shortcuts{};
     FrontendRoutingState routing{};
     InkpodClipboard* clipboard{};
+    FileIoController file_io;
     std::unique_ptr<CoreHost> engine;
     std::unique_ptr<renderer::RendererHost> renderer;
     std::unique_ptr<ActivationService> activation;

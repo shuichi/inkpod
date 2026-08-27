@@ -558,7 +558,7 @@ bool ValidateNativeOutput(
         status = inkpod_core_get_persistence_info(core, &persistence);
     }
     const bool clean_open = status == INKPOD_STATUS_OK
-        && persistence.format_version == 28U
+        && persistence.format_version == 29U
         && persistence.open_strategy == INKPOD_NATIVE_OPEN_FULL_REPLAY
         && (opened.document.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U
         && (opened.editor.flags & INKPOD_EDITOR_STATE_DIRTY) == 0U

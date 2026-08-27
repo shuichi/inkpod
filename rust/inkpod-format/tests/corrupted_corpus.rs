@@ -63,11 +63,11 @@ impl Drop for TemporaryDirectory {
 fn native_seed() -> Vec<u8> {
     let section = |fourcc| NativeSection {
         fourcc,
-        schema_version: 1,
+        schema_version: if fourcc == *b"META" { 2 } else { 1 },
         flags: SECTION_CRITICAL,
         records: vec![NativeRecord {
             kind: 1,
-            schema_version: 1,
+            schema_version: if fourcc == *b"META" { 2 } else { 1 },
             flags: 0,
             payload: fourcc.to_vec(),
         }],

@@ -52,7 +52,7 @@ bool HandleApplicationActivation(
             break;
         }
         const InkpodStatus status = OpenDocumentFromPath(state, path);
-        if (status != INKPOD_STATUS_OK) {
+        if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_PENDING) {
             ShowCoreError(state, target->windows.window, L"application activation");
             success = false;
         }

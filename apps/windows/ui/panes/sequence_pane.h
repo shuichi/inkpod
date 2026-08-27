@@ -36,6 +36,7 @@ struct SequencePaneView final {
     bool target_available{};
     bool pinned{};
     bool cut_editable{};
+    bool auto_sequence_truncated{};
 };
 
 struct SequencePaneDialogState final {

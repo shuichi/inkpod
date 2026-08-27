@@ -48,16 +48,46 @@ endforeach()
 
 file(READ "${RECOVERY}" RECOVERY_TEXT)
 foreach(REQUIRED IN ITEMS
-        "kMetadataVersion"
-        "kMaximumRecoveryCandidates"
-        "EnumerateRecoveryCandidatesInDirectory"
-        "DiscardRecoveryArtifact"
+        "inkpod_recovery_metadata_encode"
+        "inkpod_recovery_metadata_decode"
+        "RecoveryMetadataToAbi"
+        "RecoveryMetadataFromAbi"
+        "ResolveApplicationDataDirectory"
         "ResolveApplicationSessionPath"
         "kSessionPathsVersion"
         "WriteFileAtomic")
     string(FIND "${RECOVERY_TEXT}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
         message(FATAL_ERROR "G12 recovery boundary is missing: ${REQUIRED}")
+    endif()
+endforeach()
+
+foreach(FORBIDDEN IN ITEMS
+        "kMetadataVersion"
+        "bool WriteRecoveryMetadata("
+        "bool ReadRecoveryMetadata("
+        "bool EnumerateRecoveryCandidatesInDirectory("
+        "bool DiscardRecoveryArtifact("
+        "FindFirstFileW("
+        "GetSystemTimeAsFileTime(")
+    string(FIND "${RECOVERY_TEXT}" "${FORBIDDEN}" OFFSET)
+    if(NOT OFFSET LESS 0)
+        message(FATAL_ERROR "Recovery must not duplicate Rust file I/O or codec: ${FORBIDDEN}")
+    endif()
+endforeach()
+
+file(READ "${INKPOD_SOURCE_DIR}/rust/inkpod-io/src/recovery.rs" RUST_RECOVERY_TEXT)
+foreach(REQUIRED IN ITEMS
+        "pub fn write_recovery("
+        "pub fn list_recovery_candidates("
+        "pub fn discard_recovery("
+        "pub fn recovery_is_newer("
+        "MAX_CANDIDATES"
+        "MAX_RETAINED_METADATA"
+        "metadata_error")
+    string(FIND "${RUST_RECOVERY_TEXT}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR "Rust recovery boundary is missing: ${REQUIRED}")
     endif()
 endforeach()
 

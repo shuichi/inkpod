@@ -4,6 +4,7 @@ members = [
     "rust/inkpod-ffi",
     "rust/inkpod-format",
     "rust/inkpod-image",
+    "rust/inkpod-io",
 ]
 exclude = ["rust/inkpod-format/fuzz"]
 resolver = "3"

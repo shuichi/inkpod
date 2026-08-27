@@ -11,6 +11,7 @@ crate-type = ["rlib", "staticlib"]
 [dependencies]
 inkpod-core = { path = "../inkpod-core" }
 inkpod-format = { path = "../inkpod-format" }
+inkpod-io = { path = "../inkpod-io" }
 
 [lints]
 workspace = true

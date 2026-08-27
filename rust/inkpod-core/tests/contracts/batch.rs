@@ -243,6 +243,145 @@ fn file_and_folder_inputs_cover_supported_formats_natural_order_ranges_and_error
 }
 
 #[test]
+fn batch_file_io_reuses_shared_cache_rejects_aliases_and_keeps_native_output_single() {
+    let directory = batch_temp_directory("shared-io");
+    fs::create_dir_all(&directory).unwrap();
+    let source = directory.join("source2.tiff");
+    let alias = directory.join("alias2.tiff");
+    let output = directory.join("not-created").join("nested-output");
+    let raster = CommonRaster::new(
+        1,
+        1,
+        PixelFormat::StraightRgba8,
+        None,
+        None,
+        vec![11, 22, 33, 255],
+    )
+    .unwrap();
+    fs::write(
+        &source,
+        encode_common_raster(CommonRasterFormat::Tiff, &raster, false).unwrap(),
+    )
+    .unwrap();
+    fs::hard_link(&source, &alias).unwrap();
+    let manager = inkpod_io::IoManager::new(inkpod_io::IoConfig {
+        worker_count: 1,
+        ..inkpod_io::IoConfig::default()
+    })
+    .unwrap();
+    let mut core = Core::new();
+    core.bind_file_io(manager.clone()).unwrap();
+    core.new_cell(1, 1, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    let before = core.document_info().unwrap();
+    let graph = graph_with(
+        vec![BatchInputSelector::file(source.to_string_lossy())],
+        BatchOutputSettings {
+            folder: output.to_string_lossy().into_owned(),
+            ..BatchOutputSettings::default()
+        },
+    );
+    for _ in 0..2 {
+        let preview = core.batch_preview(&graph, BatchRunScope::All).unwrap();
+        assert!(preview.items[0].warnings.is_empty());
+    }
+    assert!(!output.exists());
+    assert_eq!(manager.cache_stats().physical_reads, 1);
+    assert_eq!(manager.cache_stats().decodes, 1);
+    let duplicate = BatchGraph {
+        inputs: vec![
+            BatchInputSelector::file(source.to_string_lossy()),
+            BatchInputSelector::file(alias.to_string_lossy()),
+        ],
+        ..graph.clone()
+    };
+    assert!(core.batch_preview(&duplicate, BatchRunScope::All).is_err());
+    let preview = core
+        .batch_contact_sheet_preview(&graph, |_, _| true)
+        .unwrap();
+    assert_eq!(preview.failure_count(), 0);
+    assert_eq!(preview.staged_results.len(), 1);
+    let after_cleanup = manager.cache_stats();
+    core.batch_preview(&graph, BatchRunScope::All).unwrap();
+    assert_eq!(
+        manager.cache_stats().physical_reads,
+        after_cleanup.physical_reads
+    );
+    assert_eq!(manager.cache_stats().decodes, after_cleanup.decodes);
+    let report = core
+        .batch_execute(
+            &graph,
+            BatchRunOptions {
+                scope: BatchRunScope::All,
+                dry_run: false,
+                preview_confirmed: true,
+            },
+            |_, _| true,
+        )
+        .unwrap();
+    assert_eq!(report.items[0].outcome, BatchItemOutcome::Succeeded);
+    assert_eq!(fs::read_dir(&output).unwrap().count(), 1);
+    let mut reopened = Core::new();
+    reopened.open(&output.join("source2_batch.inkpod")).unwrap();
+    assert_eq!(
+        reopened.raster_file_format().unwrap(),
+        CommonRasterFormat::Tiff
+    );
+    assert_eq!(core.document_info().unwrap(), before);
+
+    let upper_source = directory.join("SOURCE2.bmp");
+    fs::write(
+        &upper_source,
+        encode_common_raster(CommonRasterFormat::Bmp, &raster, false).unwrap(),
+    )
+    .unwrap();
+    let folded_output = directory.join("case-folded-output");
+    let lower_identity = manager
+        .resolve_identity(&folded_output.join("source2.inkpod"))
+        .unwrap()
+        .0;
+    let upper_identity = manager
+        .resolve_identity(&folded_output.join("SOURCE2.inkpod"))
+        .unwrap()
+        .0;
+    let folded = graph_with(
+        vec![
+            BatchInputSelector::file(source.to_string_lossy()),
+            BatchInputSelector::file(upper_source.to_string_lossy()),
+        ],
+        BatchOutputSettings {
+            folder: folded_output.to_string_lossy().into_owned(),
+            naming_template: "{stem}".to_owned(),
+            ..BatchOutputSettings::default()
+        },
+    );
+    let folded_preview = core.batch_preview(&folded, BatchRunScope::All).unwrap();
+    assert_eq!(
+        folded_preview.items[1]
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("same output path")),
+        lower_identity == upper_identity
+    );
+    if lower_identity == upper_identity {
+        assert!(
+            core.batch_execute(
+                &folded,
+                BatchRunOptions {
+                    scope: BatchRunScope::All,
+                    dry_run: false,
+                    preview_confirmed: true,
+                },
+                |_, _| true,
+            )
+            .is_err()
+        );
+    }
+    assert!(!folded_output.exists());
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn folder_outputs_cover_every_public_format_and_preflight_collisions() {
     let directory = batch_temp_directory("outputs");
     let mut core = Core::new();

@@ -618,6 +618,7 @@ pub(super) enum BatchSourceContent {
     Document {
         document: Box<CellDocument>,
         assets: asset::AssetStore,
+        raster_file_format: CommonRasterFormat,
     },
 }
 

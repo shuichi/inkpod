@@ -86,6 +86,11 @@ public:
     using CoreOperation = std::function<InkpodStatus(InkpodCore*)>;
     using SubpaletteOperation =
         std::function<InkpodStatus(InkpodSubpalette*)>;
+    // Runs one nonblocking Rust I/O submit/poll/apply step on the owner thread.
+    // PENDING retains the operation. Installing fences ordinary document work
+    // until this same operation finalizes, including during shutdown.
+    using FileIoOperation =
+        std::function<InkpodStatus(InkpodCore*, bool, bool&)>;
     // The application supports up to eight workspace windows with two visible
     // editor groups in each. Only visible editor-group canvases are registered.
     static constexpr std::size_t kMaximumSnapshotSinks = 16U;
@@ -97,8 +102,12 @@ public:
     CoreHost(const CoreHost&) = delete;
     CoreHost& operator=(const CoreHost&) = delete;
 
-    InkpodStatus Start(renderer::CanvasSnapshotSink* canvas, HWND owner) noexcept;
+    InkpodStatus Start(
+        renderer::CanvasSnapshotSink* canvas,
+        HWND owner,
+        InkpodIoManager* io_manager = nullptr) noexcept;
     void Stop() noexcept;
+    [[nodiscard]] InkpodIoManager* IoManager() const noexcept;
 
     InkpodStatus CreateSession(
         DocumentSessionId session,
@@ -177,6 +186,13 @@ public:
         bool refresh_document_info,
         bool defer_during_active_stroke,
         std::function<void(InkpodStatus)> completion = {}) noexcept;
+    bool EnqueueFileIo(
+        const CommandContext& context,
+        bool requires_core,
+        FileIoOperation operation,
+        bool publish_snapshot,
+        bool refresh_document_info,
+        std::function<void(InkpodStatus)> completion) noexcept;
     // Captures one private InkScript request without synchronously waiting for
     // parse/compile/plan/run. PlanReady and terminal results are delivered as
     // pointer-free kCoreInkScriptNotification values.

@@ -76,6 +76,7 @@ bool WaitFor(
                     static_cast<std::uint64_t>(message.wParam),
                     Generation(static_cast<std::uint64_t>(message.lParam)),
                     notification)) {
+                std::fprintf(stderr, "private InkScript notification token was not found\n");
                 return false;
             }
             if (notification.kind != CoreNotificationKind::InkScript
@@ -89,11 +90,16 @@ bool WaitFor(
             if (notification.inkscript.kind
                     != InkScriptEngineNotificationKind::Progress
                 || kind != InkScriptEngineNotificationKind::Completed) {
+                std::fprintf(stderr, "private InkScript unexpected notification: expected=%u actual=%u status=%u\n",
+                    static_cast<unsigned>(kind), static_cast<unsigned>(notification.inkscript.kind),
+                    static_cast<unsigned>(notification.status));
                 return false;
             }
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     } while (std::chrono::steady_clock::now() < deadline);
+    std::fprintf(stderr, "private InkScript notification timed out: kind=%u\n",
+        static_cast<unsigned>(kind));
     return false;
 }
 
@@ -212,20 +218,24 @@ execution { failure = stop; wait_ms = 0; preview_before_save = false; }
         }
     }
     CoreNotification plan{};
-    if (result == 0
-        && (!WaitFor(
+    if (result == 0) {
+        const bool received = WaitFor(
                 owner,
                 host,
                 UINT64_C(27001),
                 InkScriptEngineNotificationKind::PlanReady,
-                plan)
-            || plan.status != INKPOD_STATUS_OK
-            || plan.inkscript.total_items != 1U
-            || !host.ConfirmInkScript(
+                plan);
+        const bool confirmed = received && plan.status == INKPOD_STATUS_OK
+            && plan.inkscript.total_items == 1U && host.ConfirmInkScript(
                 UINT64_C(27001),
                 context,
-                INKPOD_INKSCRIPT_SCOPE_CURRENT_DOCUMENT))) {
-        result = 6;
+                INKPOD_INKSCRIPT_SCOPE_CURRENT_DOCUMENT);
+        if (!confirmed) {
+            std::fprintf(stderr, "private InkScript plan: received=%d status=%u items=%llu\n",
+                received ? 1 : 0, static_cast<unsigned>(plan.status),
+                static_cast<unsigned long long>(plan.inkscript.total_items));
+            result = 6;
+        }
     }
     CoreNotification completed{};
     if (result == 0

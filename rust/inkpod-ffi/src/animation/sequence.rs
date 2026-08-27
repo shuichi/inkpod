@@ -869,7 +869,7 @@ fn parse_sequence_switch_policy(policy: u32) -> Result<SequenceSwitchPolicy, u32
     }
 }
 
-fn parse_sequence_switch_request(
+pub(crate) fn parse_sequence_switch_request(
     input: &InkpodSequenceSwitchRequest,
 ) -> Result<SequenceSwitchRequest, u32> {
     if input.feature_flags != INKPOD_FEATURE_NONE

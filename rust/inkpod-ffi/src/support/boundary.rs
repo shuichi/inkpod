@@ -229,6 +229,7 @@ pub(crate) fn map_core_error(error: CoreError) -> u32 {
         CoreError::FillOverflow { .. } => INKPOD_STATUS_FILL_OVERFLOW,
         CoreError::Cancelled => INKPOD_STATUS_CANCELLED,
         CoreError::UnsavedChanges => INKPOD_STATUS_UNSAVED_CHANGES,
+        CoreError::FileConflict => INKPOD_STATUS_FILE_CONFLICT,
         CoreError::InvalidState(_) => INKPOD_STATUS_INVALID_STATE,
         CoreError::Format(_) => INKPOD_STATUS_IO_ERROR,
     };

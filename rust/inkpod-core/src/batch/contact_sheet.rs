@@ -2,18 +2,12 @@ use super::model::{BatchSource, BatchSourceContent};
 use super::operations::{save_batch_output_with_format, working_core};
 use super::*;
 use crate::Thumbnail;
-use std::fs::{self, File, OpenOptions};
-use std::io::{ErrorKind, Read, Write};
-use std::sync::atomic::{AtomicU64, Ordering};
+use inkpod_io::{IoManager, JobContext};
 
 const PREVIEW_TEMPORARY_BYTE_LIMIT: u64 = 4 * 1_024 * 1_024 * 1_024;
 const PREVIEW_THUMBNAIL_MAXIMUM_DIMENSION: u32 = 160;
 const PREVIEW_CELL_PADDING: u32 = 8;
-const PREVIEW_COPY_BUFFER_BYTES: usize = 64 * 1_024;
-const PREVIEW_DIRECTORY_ATTEMPTS: u64 = 1_024;
 const PREVIEW_DIRECTORY_NAME: &str = "inkpod-batch-preview";
-
-static PREVIEW_DIRECTORY_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone)]
 enum ContactSheetSlot {
@@ -31,73 +25,6 @@ struct ContactSheetLayout {
     thumbnail_maximum_dimension: u32,
 }
 
-struct PreviewTemporaryDirectory {
-    base: PathBuf,
-    root: PathBuf,
-    active: bool,
-}
-
-impl PreviewTemporaryDirectory {
-    fn create() -> Result<Self, CoreError> {
-        let base = std::env::temp_dir().join(PREVIEW_DIRECTORY_NAME);
-        fs::create_dir_all(&base).map_err(io_error)?;
-        for _ in 0..PREVIEW_DIRECTORY_ATTEMPTS {
-            let sequence = PREVIEW_DIRECTORY_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-            let root = base.join(format!("{}-{sequence}", std::process::id()));
-            match fs::create_dir(&root) {
-                Ok(()) => {
-                    return Ok(Self {
-                        base,
-                        root,
-                        active: true,
-                    });
-                }
-                Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
-                Err(error) => return Err(io_error(error)),
-            }
-        }
-        Err(CoreError::InvalidState(
-            "batch preview temporary directory could not be reserved",
-        ))
-    }
-
-    fn inputs(&self) -> PathBuf {
-        self.root.join("inputs")
-    }
-
-    fn outputs(&self) -> PathBuf {
-        self.root.join("outputs")
-    }
-
-    fn cleanup(mut self) -> Result<(), CoreError> {
-        self.validate_cleanup_target()?;
-        fs::remove_dir_all(&self.root).map_err(io_error)?;
-        self.active = false;
-        let _ = fs::remove_dir(&self.base);
-        Ok(())
-    }
-
-    fn validate_cleanup_target(&self) -> Result<(), CoreError> {
-        if self.root.parent() != Some(self.base.as_path())
-            || self.base.file_name().and_then(|name| name.to_str()) != Some(PREVIEW_DIRECTORY_NAME)
-        {
-            return Err(CoreError::InvalidState(
-                "batch preview cleanup target escaped its dedicated temporary root",
-            ));
-        }
-        Ok(())
-    }
-}
-
-impl Drop for PreviewTemporaryDirectory {
-    fn drop(&mut self) {
-        if self.active && self.validate_cleanup_target().is_ok() {
-            let _ = fs::remove_dir_all(&self.root);
-            let _ = fs::remove_dir(&self.base);
-        }
-    }
-}
-
 impl Core {
     /// Runs every expanded Batch v4 input in isolated temporary storage and returns one
     /// clean, pathless contact-sheet document as a staged result.
@@ -110,10 +37,22 @@ impl Core {
     pub fn batch_contact_sheet_preview(
         &self,
         graph: &BatchGraph,
+        progress: impl FnMut(u64, u64) -> bool,
+    ) -> Result<BatchRunReport, CoreError> {
+        self.batch_contact_sheet_preview_with_context(graph, &JobContext::new(), progress)
+    }
+
+    pub(crate) fn batch_contact_sheet_preview_with_context(
+        &self,
+        graph: &BatchGraph,
+        context: &JobContext,
         mut progress: impl FnMut(u64, u64) -> bool,
     ) -> Result<BatchRunReport, CoreError> {
         graph.validate()?;
-        let sources = self.resolve_batch_sources(graph, BatchRunScope::All)?;
+        let mut progress = |completed, total| !context.is_cancelled() && progress(completed, total);
+        let manager = self.file_io_manager()?;
+        let processing_context = context.child();
+        let sources = self.resolve_batch_sources(graph, BatchRunScope::All, &manager, context)?;
         let total = (sources.len() as u64)
             .checked_mul(3)
             .and_then(|value| value.checked_add(1))
@@ -124,12 +63,12 @@ impl Core {
             return Err(CoreError::Cancelled);
         }
 
-        let temporary = PreviewTemporaryDirectory::create()?;
+        let temporary = manager.create_temporary_directory(PREVIEW_DIRECTORY_NAME, context)?;
         let result = (|| {
-            let input_directory = temporary.inputs();
-            let output_directory = temporary.outputs();
-            fs::create_dir(&input_directory).map_err(io_error)?;
-            fs::create_dir(&output_directory).map_err(io_error)?;
+            let input_directory = temporary.path().join("inputs");
+            let output_directory = temporary.path().join("outputs");
+            manager.create_dir(&input_directory, context)?;
+            manager.create_dir(&output_directory, context)?;
 
             let mut completed = 0_u64;
             let mut temporary_bytes = 0_u64;
@@ -146,22 +85,29 @@ impl Core {
                             ),
                         )?;
                         let destination = input_directory.join(format!("{index:05}.{extension}"));
-                        copy_file_bounded(path, &destination, &mut temporary_bytes, || {
-                            !progress(completed, total)
-                        })?;
+                        copy_file_bounded(
+                            &manager,
+                            context,
+                            path,
+                            &destination,
+                            &mut temporary_bytes,
+                            || !progress(completed, total),
+                        )?;
                         destination
                     }
                     BatchSourceContent::Document { .. } => {
                         let destination = input_directory.join(format!("{index:05}.inkpod"));
-                        let working = working_core(source)?;
-                        save_batch_output_with_format(
+                        let working = working_core(source, &manager, &processing_context)?;
+                        let length = save_batch_output_with_format(
                             &working,
                             BatchOutputFormat::Inkpod,
                             source,
                             &destination,
+                            PREVIEW_TEMPORARY_BYTE_LIMIT - temporary_bytes,
+                            &processing_context,
                             || !progress(completed, total),
                         )?;
-                        add_file_to_budget(&destination, &mut temporary_bytes)?;
+                        temporary_bytes += length;
                         destination
                     }
                 };
@@ -194,7 +140,11 @@ impl Core {
                 }
                 let item_start_completed = completed;
                 let item_result = (|| {
-                    let mut working = working_core(source)?;
+                    let mut working = working_core(source, &manager, &processing_context)?;
+                    // Count each successfully decoded input once. Temporary
+                    // output readback and the copy's extra decode are internal
+                    // work, not additional source images in the public total.
+                    context.record_loaded();
                     working.apply_batch_operations(&graph.operations, || {
                         !progress(completed, total)
                     })?;
@@ -202,14 +152,16 @@ impl Core {
                         "{index:05}.{}",
                         batch_output_extension(output_format)
                     ));
-                    save_batch_output_with_format(
+                    let length = save_batch_output_with_format(
                         &working,
                         output_format,
                         source,
                         &output_path,
+                        PREVIEW_TEMPORARY_BYTE_LIMIT - temporary_bytes,
+                        &processing_context,
                         || !progress(completed, total),
                     )?;
-                    add_file_to_budget(&output_path, &mut temporary_bytes)?;
+                    temporary_bytes += length;
                     completed += 1;
                     if !progress(completed, total) {
                         return Err(CoreError::Cancelled);
@@ -220,7 +172,7 @@ impl Core {
                         input_path: Some(output_path.clone()),
                         content: BatchSourceContent::Path(output_path),
                     };
-                    let reopened = working_core(&output_source)?;
+                    let reopened = working_core(&output_source, &manager, &processing_context)?;
                     let thumbnail =
                         reopened.document_thumbnail_with_max(layout.thumbnail_maximum_dimension)?;
                     Ok::<Thumbnail, CoreError>(thumbnail)
@@ -259,6 +211,7 @@ impl Core {
 
             let (pixels, document_uuid) = compose_contact_sheet(&layout, &slots)?;
             let mut staged = Core::new();
+            staged.bind_file_io(manager.clone())?;
             staged.new_cell_from_raster_asset(
                 RasterAssetInput {
                     width: layout.width,
@@ -284,7 +237,7 @@ impl Core {
             Ok(report)
         })();
 
-        let cleanup = temporary.cleanup();
+        let cleanup = temporary.cleanup().map_err(CoreError::from);
         match (result, cleanup) {
             (Ok(report), Ok(())) => Ok(report),
             (_, Err(error)) => Err(error),
@@ -304,56 +257,34 @@ const fn batch_output_extension(format: BatchOutputFormat) -> &'static str {
 }
 
 fn copy_file_bounded(
+    manager: &IoManager,
+    context: &JobContext,
     source: &Path,
     destination: &Path,
     temporary_bytes: &mut u64,
-    mut is_cancelled: impl FnMut() -> bool,
+    is_cancelled: impl FnMut() -> bool,
 ) -> Result<(), CoreError> {
-    let mut input = File::open(source).map_err(io_error)?;
-    let mut output = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(destination)
-        .map_err(io_error)?;
-    let mut buffer = [0_u8; PREVIEW_COPY_BUFFER_BYTES];
-    loop {
-        if is_cancelled() {
-            return Err(CoreError::Cancelled);
-        }
-        let read = input.read(&mut buffer).map_err(io_error)?;
-        if read == 0 {
-            break;
-        }
-        let next = temporary_bytes
-            .checked_add(read as u64)
-            .ok_or(CoreError::InvalidState(
-                "batch preview temporary byte count overflows",
-            ))?;
-        if next > PREVIEW_TEMPORARY_BYTE_LIMIT {
-            return Err(CoreError::InvalidState(
-                "batch preview temporary storage exceeds the 4 GiB limit",
-            ));
-        }
-        output.write_all(&buffer[..read]).map_err(io_error)?;
-        *temporary_bytes = next;
-    }
-    output.sync_all().map_err(io_error)?;
-    Ok(())
-}
-
-fn add_file_to_budget(path: &Path, temporary_bytes: &mut u64) -> Result<(), CoreError> {
-    let length = fs::metadata(path).map_err(io_error)?.len();
-    let next = temporary_bytes
-        .checked_add(length)
+    let per_file_limit = if source
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("inkpod"))
+    {
+        1024 * 1024 * 1024
+    } else {
+        512 * 1024 * 1024
+    };
+    let remaining = PREVIEW_TEMPORARY_BYTE_LIMIT
+        .checked_sub(*temporary_bytes)
         .ok_or(CoreError::InvalidState(
-            "batch preview temporary byte count overflows",
-        ))?;
-    if next > PREVIEW_TEMPORARY_BYTE_LIMIT {
-        return Err(CoreError::InvalidState(
             "batch preview temporary storage exceeds the 4 GiB limit",
-        ));
-    }
-    *temporary_bytes = next;
+        ))?;
+    let length = manager.copy_file_with_cancel(
+        source,
+        destination,
+        remaining.min(per_file_limit),
+        context,
+        is_cancelled,
+    )?;
+    *temporary_bytes += length;
     Ok(())
 }
 
@@ -528,28 +459,35 @@ fn set_opaque_pixel(pixels: &mut [u8], width: u32, x: u32, y: u32, rgb: [u8; 3])
     pixels[index + 3] = u8::MAX;
 }
 
-fn io_error(error: std::io::Error) -> CoreError {
-    CoreError::Format(error.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     #[test]
     fn dedicated_preview_directory_is_removed_by_explicit_and_drop_cleanup() {
-        let temporary = PreviewTemporaryDirectory::create().unwrap();
-        let explicit_root = temporary.root.clone();
+        let manager = IoManager::new(inkpod_io::IoConfig::default()).unwrap();
+        let context = JobContext::new();
+        let temporary = manager
+            .create_temporary_directory(PREVIEW_DIRECTORY_NAME, &context)
+            .unwrap();
+        let explicit_root = temporary.path().to_path_buf();
         fs::write(explicit_root.join("owned.tmp"), b"preview").unwrap();
         temporary.cleanup().unwrap();
         assert!(!explicit_root.exists());
 
         let dropped_root = {
-            let temporary = PreviewTemporaryDirectory::create().unwrap();
-            let root = temporary.root.clone();
+            let temporary = manager
+                .create_temporary_directory(PREVIEW_DIRECTORY_NAME, &context)
+                .unwrap();
+            let root = temporary.path().to_path_buf();
             fs::write(root.join("owned.tmp"), b"preview").unwrap();
             root
         };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while dropped_root.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
         assert!(!dropped_root.exists());
     }
 }

@@ -1,9 +1,8 @@
 use crate::animation::{MAX_SEQUENCE_CELLS, natural_cmp, parse_cell_number};
 use crate::document::validate_node_name;
-use crate::{
-    CommonRasterFormat, Core, CoreError, DEFAULT_DPI_MILLI, PixelValue, RenderSnapshot,
-    SequenceCellSource, ViewCommand, ViewState,
-};
+use crate::identity::RenderRevision;
+use crate::reference_view::{ReferenceImage, ReferenceView};
+use crate::{CommonRasterFormat, CoreError, PixelValue, RenderSnapshot, ViewCommand, ViewState};
 use inkpod_format::decode_common_raster;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
@@ -13,8 +12,8 @@ pub const MAX_SUBPALETTE_ITEMS: usize = MAX_SEQUENCE_CELLS;
 
 /// Maximum aggregate decoded pixel payload retained by one subpalette cache.
 ///
-/// The limit is checked before each decoded image is converted to tiled Core
-/// storage. Encoded caller buffers are borrowed and are not retained.
+/// The limit bounds decoded reference pixels; no editable document or full tiled
+/// copy is created. Managed image leases also retain their manager budget charge.
 pub const MAX_SUBPALETTE_CACHE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 
 /// Stable nonzero identity of one entry within a [`SubpaletteCatalog`].
@@ -96,14 +95,15 @@ pub struct SubpaletteCatalogInfo {
 
 /// Workspace-scoped, read-only external-image catalog used by the subpalette.
 ///
-/// The catalog owns no OS path and never changes a user document, history,
+/// The catalog retains immutable memory images or I/O-manager image leases and never changes a user document, history,
 /// dirty state, savepoint, or replay state. Source replacement and image decode
 /// publish atomically. Zoom, pan, and viewport changes affect only the private
 /// view. The type is single-writer and must be externally thread-affined by its
 /// frontend or ABI owner.
 pub struct SubpaletteCatalog {
-    core: Core,
-    view_id: u64,
+    view: ReferenceView,
+    images: BTreeMap<SubpaletteItemId, ReferenceImage>,
+    next_image_revision: RenderRevision,
     items: Vec<SubpaletteItem>,
     next_item_id: u64,
     catalog_revision: u64,
@@ -114,30 +114,15 @@ pub struct SubpaletteCatalog {
 }
 
 impl SubpaletteCatalog {
-    fn empty_core(viewport_width: f64, viewport_height: f64) -> Result<(Core, u64), CoreError> {
-        let mut core = Core::new();
-        core.new_cell(1, 1, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)?;
-        let view_id = core.create_view()?;
-        core.apply_view_for(
-            view_id,
-            ViewCommand::ViewportResized {
-                viewport_width,
-                viewport_height,
-            },
-        )?;
-        Ok((core, view_id))
-    }
-
     /// Creates an empty catalog with one private read-only view.
     ///
-    /// The internal one-pixel document is an implementation detail used only to
-    /// host the existing view machinery; it is never exposed or mutated by
-    /// subpalette operations.
+    /// No editable Core, Genesis, document identity, history, or savepoint is
+    /// created for this reference-only view.
     pub fn new() -> Result<Self, CoreError> {
-        let (core, view_id) = Self::empty_core(1.0, 1.0)?;
         Ok(Self {
-            core,
-            view_id,
+            view: ReferenceView::new(1.0, 1.0)?,
+            images: BTreeMap::new(),
+            next_image_revision: RenderRevision::from_raw(1),
             items: Vec::new(),
             next_item_id: 1,
             catalog_revision: 0,
@@ -206,11 +191,11 @@ impl SubpaletteCatalog {
             (None, Some(_)) => Ordering::Greater,
             (None, None) => natural_cmp(&left.name, &right.name),
         });
-        let (core, view_id) = Self::empty_core(self.viewport_width, self.viewport_height)?;
+        let view = ReferenceView::new(self.viewport_width, self.viewport_height)?;
 
         self.items = items;
-        self.core = core;
-        self.view_id = view_id;
+        self.view = view;
+        self.images.clear();
         self.next_item_id = next_item_id;
         self.catalog_revision = next_revision;
         self.active_index = None;
@@ -229,13 +214,13 @@ impl SubpaletteCatalog {
             .ok_or(CoreError::InvalidState(
                 "subpalette catalog revision overflow",
             ))?;
-        let (core, view_id) = Self::empty_core(self.viewport_width, self.viewport_height)?;
+        let view = ReferenceView::new(self.viewport_width, self.viewport_height)?;
         self.catalog_revision = next_revision;
         self.items.clear();
         self.active_index = None;
         self.cache_complete = false;
-        self.core = core;
-        self.view_id = view_id;
+        self.view = view;
+        self.images.clear();
         Ok(self.info())
     }
 
@@ -299,35 +284,27 @@ impl SubpaletteCatalog {
                 "subpalette item ID does not exist",
             ))?;
 
-        let mut staged_core = Core::new();
-        staged_core.new_cell(1, 1, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)?;
-        let staged_view_id = staged_core.create_view()?;
-        let synthetic_name = format!("subpalette-{}.png", item_id.get());
-        staged_core.import_sequence(format, vec![(synthetic_name, bytes)])?;
-        staged_core.set_subpalette_cell(0)?;
-        staged_core.apply_subpalette_view_for(
-            staged_view_id,
-            ViewCommand::ViewportResized {
-                viewport_width: self.viewport_width,
-                viewport_height: self.viewport_height,
-            },
+        let next_revision =
+            self.next_image_revision
+                .get()
+                .checked_add(1)
+                .ok_or(CoreError::InvalidState(
+                    "reference image revision overflows",
+                ))?;
+        let image = ReferenceImage::memory(
+            decode_common_raster(format, &bytes)?,
+            self.next_image_revision.get(),
         )?;
-        staged_core.apply_subpalette_view_for(
-            staged_view_id,
-            ViewCommand::Fit {
-                viewport_width: self.viewport_width,
-                viewport_height: self.viewport_height,
-            },
-        )?;
-
-        self.core = staged_core;
-        self.view_id = staged_view_id;
+        let view = ReferenceView::fitted(image.size(), self.viewport_width, self.viewport_height)?;
+        self.images = BTreeMap::from([(item_id, image)]);
+        self.view = view;
+        self.next_image_revision = RenderRevision::from_raw(next_revision);
         self.active_index = Some(index);
         self.cache_complete = false;
         Ok(self.info())
     }
 
-    /// Decodes every catalog image into one memory-resident sequence and selects
+    /// Decodes every catalog image into immutable reference storage and selects
     /// `active_item_id` atomically.
     ///
     /// Input order is irrelevant; stable item IDs restore natural catalog order.
@@ -363,9 +340,16 @@ impl SubpaletteCatalog {
             }
         }
 
-        let mut cells = Vec::with_capacity(self.items.len());
+        let next_revision =
+            self.next_image_revision
+                .get()
+                .checked_add(1)
+                .ok_or(CoreError::InvalidState(
+                    "reference image revision overflows",
+                ))?;
+        let mut images = BTreeMap::new();
         let mut decoded_bytes = 0_u64;
-        for (index, item) in self.items.iter().enumerate() {
+        for item in &self.items {
             let input = by_id.remove(&item.id).ok_or(CoreError::InvalidArgument(
                 "subpalette cache input omits a catalog item",
             ))?;
@@ -376,12 +360,10 @@ impl SubpaletteCatalog {
                 .ok_or(CoreError::InvalidArgument(
                     "subpalette decoded cache exceeds its aggregate byte bound",
                 ))?;
-            let uuid = (u128::from(0x494e_4b50_5355_4250_u64) << 64) | u128::from(item.id.get());
-            cells.push(SequenceCellSource::from_common_raster(
-                format!("subpalette{}", index + 1),
-                uuid,
-                &raster,
-            )?);
+            images.insert(
+                item.id,
+                ReferenceImage::memory(raster, self.next_image_revision.get())?,
+            );
         }
         if !by_id.is_empty() {
             return Err(CoreError::InvalidArgument(
@@ -389,37 +371,116 @@ impl SubpaletteCatalog {
             ));
         }
 
-        let mut staged_core = Core::new();
-        staged_core.new_cell(1, 1, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)?;
-        let staged_view_id = staged_core.create_view()?;
-        staged_core.set_sequence(cells)?;
-        staged_core.set_subpalette_cell(active_index)?;
-        staged_core.apply_subpalette_view_for(
-            staged_view_id,
-            ViewCommand::ViewportResized {
-                viewport_width: self.viewport_width,
-                viewport_height: self.viewport_height,
-            },
-        )?;
-        staged_core.apply_subpalette_view_for(
-            staged_view_id,
-            ViewCommand::Fit {
-                viewport_width: self.viewport_width,
-                viewport_height: self.viewport_height,
-            },
-        )?;
-
-        self.core = staged_core;
-        self.view_id = staged_view_id;
+        let active = images.get(&active_item_id).ok_or(CoreError::InvalidState(
+            "subpalette active image is missing",
+        ))?;
+        let view = ReferenceView::fitted(active.size(), self.viewport_width, self.viewport_height)?;
+        self.images = images;
+        self.view = view;
+        self.next_image_revision = RenderRevision::from_raw(next_revision);
         self.active_index = Some(active_index);
         self.cache_complete = true;
         Ok(self.info())
     }
 
+    /// Atomically installs a complete set of manager-owned decoded image leases.
+    ///
+    /// All names, identities, pixel layouts, and aggregate decoded bytes are
+    /// validated before replacing the old catalog. The first fitted view also
+    /// reserves and builds its display pixels before publication, so an old
+    /// catalog and retained snapshots remain valid when that budget is exhausted.
+    /// No encoded input is copied,
+    /// no image is decoded again, and no editable Core/Genesis is created. The
+    /// leases remain charged to their shared I/O manager for this catalog's
+    /// lifetime. The first naturally ordered image is selected and fitted.
+    pub fn replace_loaded_images(
+        &mut self,
+        images: Vec<inkpod_io::LoadedImage>,
+    ) -> Result<SubpaletteCatalogInfo, CoreError> {
+        if images.is_empty() || images.len() > MAX_SUBPALETTE_ITEMS {
+            return Err(CoreError::InvalidArgument(
+                "subpalette source count is outside bounds",
+            ));
+        }
+        let mut identities = BTreeSet::new();
+        let mut decoded_bytes = 0_u64;
+        let mut sources = Vec::with_capacity(images.len());
+        for (index, image) in images.iter().enumerate() {
+            if !identities.insert(image.identity()) {
+                return Err(CoreError::InvalidArgument(
+                    "subpalette source identity is duplicated",
+                ));
+            }
+            image.raster().validate()?;
+            decoded_bytes = decoded_bytes
+                .checked_add(image.raster().pixels.len() as u64)
+                .filter(|bytes| *bytes <= MAX_SUBPALETTE_CACHE_BYTES)
+                .ok_or(CoreError::InvalidArgument(
+                    "subpalette decoded cache exceeds its aggregate byte bound",
+                ))?;
+            sources.push(SubpaletteSource {
+                source_token: index as u64 + 1,
+                name: image.name().to_owned(),
+            });
+        }
+        let mut staged = Self::new()?;
+        staged.next_item_id = self.next_item_id;
+        staged.catalog_revision = self.catalog_revision;
+        staged.next_image_revision = self.next_image_revision;
+        staged.viewport_width = self.viewport_width;
+        staged.viewport_height = self.viewport_height;
+        staged.replace_sources(sources)?;
+        let next_revision =
+            staged
+                .next_image_revision
+                .get()
+                .checked_add(1)
+                .ok_or(CoreError::InvalidState(
+                    "reference image revision overflows",
+                ))?;
+        let ids_by_token: BTreeMap<_, _> = staged
+            .items
+            .iter()
+            .map(|item| (item.source_token, item.id))
+            .collect();
+        for (index, image) in images.into_iter().enumerate() {
+            let id =
+                ids_by_token
+                    .get(&(index as u64 + 1))
+                    .copied()
+                    .ok_or(CoreError::InvalidState(
+                        "subpalette staged source disappeared",
+                    ))?;
+            staged.images.insert(
+                id,
+                ReferenceImage::managed(image, staged.next_image_revision.get())?,
+            );
+        }
+        let first = staged
+            .images
+            .get(&staged.items[0].id)
+            .ok_or(CoreError::InvalidState(
+                "subpalette staged first image disappeared",
+            ))?;
+        staged.view =
+            ReferenceView::fitted(first.size(), staged.viewport_width, staged.viewport_height)?;
+        // A source-only reservation is insufficient: the old renderer snapshot
+        // can retain its display pixels while the new catalog is being staged.
+        // Keep the prepared tiles in the staged view and publish only when its
+        // first snapshot can be built inside the same global pixel budget.
+        staged.view.snapshot(0, first)?;
+        staged.active_index = Some(0);
+        staged.cache_complete = true;
+        staged.next_image_revision = RenderRevision::from_raw(next_revision);
+        *self = staged;
+        Ok(self.info())
+    }
+
     /// Selects one already-decoded cache item without reading or decoding bytes.
     ///
-    /// Selection fits the private view to the newly active image. Invalid IDs or
-    /// an incomplete cache preserve the previous active item and view.
+    /// Selection fits the private view to the newly active image and prepares
+    /// its first snapshot before publishing. Invalid IDs, an incomplete cache,
+    /// or insufficient display-pixel budget preserve the previous item and view.
     pub fn select_cached_image(
         &mut self,
         item_id: SubpaletteItemId,
@@ -440,20 +501,13 @@ impl SubpaletteCatalog {
             return Ok(self.info());
         }
 
-        let previous_index = self.active_index;
-        self.core.set_subpalette_cell(index)?;
-        if let Err(error) = self.core.apply_subpalette_view_for(
-            self.view_id,
-            ViewCommand::Fit {
-                viewport_width: self.viewport_width,
-                viewport_height: self.viewport_height,
-            },
-        ) {
-            if let Some(previous) = previous_index {
-                let _ = self.core.set_subpalette_cell(previous);
-            }
-            return Err(error);
-        }
+        let image = self.images.get(&item_id).ok_or(CoreError::InvalidState(
+            "subpalette cached image is missing",
+        ))?;
+        let view =
+            self.view
+                .prepare_selection(index, image, self.viewport_width, self.viewport_height)?;
+        self.view = view;
         self.active_index = Some(index);
         Ok(self.info())
     }
@@ -463,7 +517,9 @@ impl SubpaletteCatalog {
         if self.active_index.is_none() {
             return Err(CoreError::InvalidState("subpalette has no decoded image"));
         }
-        let view = self.core.apply_subpalette_view_for(self.view_id, command)?;
+        let image = self.active_image()?;
+        let size = image.size();
+        let view = self.view.apply(command, size)?;
         match command {
             ViewCommand::Fit {
                 viewport_width,
@@ -490,23 +546,47 @@ impl SubpaletteCatalog {
         if self.active_index.is_none() {
             return Err(CoreError::InvalidState("subpalette has no decoded image"));
         }
-        self.core
-            .subpalette_view_sample(self.view_id, device_x, device_y)
+        self.view.sample(self.active_image()?, device_x, device_y)
     }
 
     /// Builds an immutable read-only snapshot of the loaded image.
+    ///
+    /// For manager-loaded images, converted tile pixels are reserved against the
+    /// shared decoded budget before allocation. Snapshot and individual tile
+    /// clones retain that charge after cache/catalog release. A full budget
+    /// returns an error without publishing a partial snapshot.
     pub fn build_snapshot(&mut self) -> Result<RenderSnapshot, CoreError> {
         if self.active_index.is_none() {
             return Err(CoreError::InvalidState("subpalette has no decoded image"));
         }
-        self.core.build_subpalette_snapshot_for(self.view_id)
+        let index = self
+            .active_index
+            .ok_or(CoreError::InvalidState("subpalette has no decoded image"))?;
+        let image = self
+            .images
+            .get(&self.items[index].id)
+            .ok_or(CoreError::InvalidState(
+                "subpalette active image disappeared",
+            ))?;
+        self.view.snapshot(index, image)
+    }
+
+    fn active_image(&self) -> Result<&ReferenceImage, CoreError> {
+        let index = self
+            .active_index
+            .ok_or(CoreError::InvalidState("subpalette has no decoded image"))?;
+        self.images
+            .get(&self.items[index].id)
+            .ok_or(CoreError::InvalidState(
+                "subpalette active image disappeared",
+            ))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{PixelFormat, SequenceDirection};
+    use crate::{DEFAULT_DPI_MILLI, PixelFormat, SequenceDirection};
     use inkpod_format::{CommonRaster, encode_common_raster};
 
     fn png(pixel: [u8; 4]) -> Vec<u8> {
@@ -621,6 +701,162 @@ mod tests {
             PixelValue::Rgba([10, 20, 30, 255])
         );
         assert_eq!(catalog.build_snapshot().unwrap().document_width(), 1);
+    }
+
+    #[test]
+    fn exact_depth_reference_sampling_and_visible_tiles_follow_the_shared_view_transform() {
+        let pixels: Vec<_> = (0_u16..130)
+            .flat_map(|x| [x + 1, x * 257, 65_534, 65_535])
+            .flat_map(u16::to_le_bytes)
+            .collect();
+        let raster =
+            CommonRaster::new(130, 1, PixelFormat::StraightRgba16, None, None, pixels).unwrap();
+        let encoded = encode_common_raster(CommonRasterFormat::Png, &raster, false).unwrap();
+        let mut catalog = SubpaletteCatalog::new().unwrap();
+        catalog
+            .replace_sources(vec![SubpaletteSource {
+                source_token: 1,
+                name: "reference16.png".into(),
+            }])
+            .unwrap();
+        let item = catalog.item(0).unwrap().id;
+        catalog
+            .load_image(item, CommonRasterFormat::Png, encoded)
+            .unwrap();
+        catalog
+            .apply_view(ViewCommand::OneToOne {
+                viewport_width: 2.0,
+                viewport_height: 1.0,
+            })
+            .unwrap();
+        assert_eq!(
+            catalog.sample(0.5, 0.5).unwrap(),
+            PixelValue::Rgba16([65, 64 * 257, 65_534, 65_535])
+        );
+        let middle = catalog.build_snapshot().unwrap();
+        assert_eq!(middle.tiles().len(), 1);
+        assert_eq!(middle.tiles()[0].origin_x(), 64);
+        catalog
+            .apply_view(ViewCommand::PanBy {
+                device_dx: 64.0,
+                device_dy: 0.0,
+            })
+            .unwrap();
+        assert_eq!(
+            catalog.sample(0.5, 0.5).unwrap(),
+            PixelValue::Rgba16([1, 0, 65_534, 65_535])
+        );
+        assert!(catalog.sample(130.0, 0.5).is_err());
+        assert!(catalog.sample(f64::NAN, 0.5).is_err());
+        catalog
+            .apply_view(ViewCommand::Flip {
+                axis: crate::MirrorAxis::Horizontal,
+            })
+            .unwrap();
+        assert_eq!(
+            catalog.sample(0.5, 0.5).unwrap(),
+            PixelValue::Rgba16([130, 129 * 257, 65_534, 65_535])
+        );
+        let flipped = catalog.build_snapshot().unwrap();
+        assert_eq!(flipped.tiles().len(), 1);
+        assert_eq!(flipped.tiles()[0].origin_x(), 128);
+        assert_eq!(flipped.tiles()[0].width(), 2);
+        assert_eq!(middle.tiles()[0].origin_x(), 64);
+        let before = flipped.view();
+        assert!(
+            catalog
+                .apply_view(ViewCommand::ZoomAt {
+                    factor: f64::NAN,
+                    device_x: 0.5,
+                    device_y: 0.5,
+                })
+                .is_err()
+        );
+        assert_eq!(catalog.build_snapshot().unwrap().view(), before);
+    }
+
+    #[test]
+    fn managed_reference_replacement_is_atomic_and_keeps_cache_leases_charged() {
+        let manager = inkpod_io::IoManager::new(inkpod_io::IoConfig {
+            max_images: 2,
+            // Two source pixels, old/new visible pixels, and the transient Arc copy.
+            max_decoded_bytes: 20,
+            worker_count: 1,
+            ..inkpod_io::IoConfig::default()
+        })
+        .unwrap();
+        let context = inkpod_io::JobContext::new();
+        let temporary = manager
+            .create_temporary_directory("subpalette-leases", &context)
+            .unwrap();
+        let later_path = temporary.path().join("cell10.png");
+        let earlier_path = temporary.path().join("cell2.png");
+        manager
+            .write_bytes_atomic(&later_path, &png([10, 20, 30, 255]), &context)
+            .unwrap();
+        manager
+            .write_bytes_atomic(&earlier_path, &png([40, 50, 60, 255]), &context)
+            .unwrap();
+        let later = manager.read_image(&later_path, &context).unwrap();
+        let earlier = manager.read_image(&earlier_path, &context).unwrap();
+        let duplicate = later.clone();
+        let pressure = later.reserve_derived(4).unwrap();
+        let mut catalog = SubpaletteCatalog::new().unwrap();
+        catalog.replace_loaded_images(vec![later, earlier]).unwrap();
+        assert_eq!(catalog.item(0).unwrap().source_token, 2);
+        assert_eq!(catalog.item(1).unwrap().source_token, 1);
+        let before = catalog.info();
+        assert!(
+            catalog
+                .replace_loaded_images(vec![duplicate.clone(), duplicate])
+                .is_err()
+        );
+        assert_eq!(catalog.info(), before);
+        assert_eq!(
+            catalog.sample(0.5, 0.5).unwrap(),
+            PixelValue::Rgba([40, 50, 60, 255])
+        );
+        catalog
+            .apply_view(ViewCommand::Flip {
+                axis: crate::MirrorAxis::Horizontal,
+            })
+            .unwrap();
+        let snapshot = catalog.build_snapshot().unwrap();
+        manager.clear_cache();
+        let pinned = manager.cache_stats();
+        assert_eq!(pinned.cached_images, 0);
+        assert_eq!(pinned.images, 2);
+        assert_eq!(pinned.decoded_bytes, 16);
+        let selected = catalog.info();
+        let next_id = catalog.item(1).unwrap().id;
+        assert!(matches!(
+            catalog.select_cached_image(next_id),
+            Err(CoreError::InvalidState(_))
+        ));
+        assert_eq!(catalog.info(), selected);
+        assert_eq!(catalog.build_snapshot().unwrap(), snapshot);
+        assert_eq!(
+            catalog.sample(0.5, 0.5).unwrap(),
+            PixelValue::Rgba([40, 50, 60, 255])
+        );
+        assert_eq!(manager.cache_stats().decoded_bytes, 16);
+        drop(pressure);
+        catalog.select_cached_image(next_id).unwrap();
+        assert_eq!(catalog.info().active_index, Some(1));
+        assert!(catalog.build_snapshot().unwrap().view().flip_horizontal);
+        assert_eq!(manager.cache_stats().physical_reads, pinned.physical_reads);
+        assert_eq!(
+            catalog.sample(0.5, 0.5).unwrap(),
+            PixelValue::Rgba([10, 20, 30, 255])
+        );
+        catalog.clear().unwrap();
+        assert_eq!(manager.cache_stats().images, 1);
+        assert_eq!(manager.cache_stats().decoded_bytes, 4);
+        assert_eq!(snapshot.tiles()[0].pixels(), &[60, 50, 40, 255]);
+        drop(snapshot);
+        assert_eq!(manager.cache_stats().images, 0);
+        assert_eq!(manager.cache_stats().decoded_bytes, 0);
+        temporary.cleanup().unwrap();
     }
 
     #[test]

@@ -41,6 +41,11 @@ impl Core {
         expected_revision: EditorRevision,
         update: EditorStateUpdate,
     ) -> Result<EditorStateInfo, CoreError> {
+        if self.io_install_pending {
+            return Err(CoreError::InvalidState(
+                "document file installation is pending",
+            ));
+        }
         let current = self.editor_session.as_ref().ok_or(CoreError::NoDocument)?;
         if current.revision != expected_revision {
             return Err(CoreError::InvalidState(
@@ -89,6 +94,11 @@ impl Core {
         frame: &[u8],
         disposition: EditorFrameDisposition,
     ) -> Result<EditorStateInfo, CoreError> {
+        if self.io_install_pending {
+            return Err(CoreError::InvalidState(
+                "document file installation is pending",
+            ));
+        }
         if self.document.is_none() {
             return Err(CoreError::NoDocument);
         }
@@ -137,6 +147,11 @@ impl Core {
         &mut self,
         token: EditorSavepointToken,
     ) -> Result<EditorStateInfo, CoreError> {
+        if self.io_install_pending {
+            return Err(CoreError::InvalidState(
+                "document file installation is pending",
+            ));
+        }
         let session = self.editor_session.as_mut().ok_or(CoreError::NoDocument)?;
         if token.revision != session.revision || token.digest != session.digest {
             return Err(CoreError::InvalidState("editor savepoint token is stale"));

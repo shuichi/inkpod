@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <cwchar>
+#include <new>
 #include <utility>
 
 #include <commctrl.h>
@@ -442,8 +443,16 @@ void UpdateSequencePaneDialog(HWND dialog, SequencePaneView view) noexcept {
     if (state == nullptr) {
         return;
     }
+    std::wstring target_text;
+    try {
+        target_text = view.auto_sequence_truncated
+            ? std::wstring(UiText(UiStringId::AutoSequenceTruncated)) + L" — " + view.target_text
+            : view.target_text;
+    } catch (const std::bad_alloc&) {
+        return;
+    }
     state->view = std::move(view);
-    SetDlgItemTextW(dialog, IDC_SEQUENCE_TARGET, state->view.target_text.c_str());
+    SetDlgItemTextW(dialog, IDC_SEQUENCE_TARGET, target_text.c_str());
     SetDlgItemTextW(
         dialog,
         IDC_SEQUENCE_PIN,

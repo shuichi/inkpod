@@ -36,6 +36,7 @@ ApplicationSettings Sample() {
     ApplicationSettings result{};
     result.ui_language = inkpod::windows::ui::UiLanguagePreference::Japanese;
     result.restore_previous_documents = true;
+    result.default_raster_format = inkpod::app::RasterFileFormatSetting::Tiff;
     result.sequence_switch_policy =
         inkpod::app::SequenceCellSwitchPolicy::AutosaveBeforeSwitch;
     result.sequence_endpoint_policy = inkpod::app::SequenceEndpointPolicy::Wrap;
@@ -82,7 +83,8 @@ int wmain() {
         return 1;
     }
     if (!Contains(json, "\"format\": \"inkpod-settings\"")
-        || !Contains(json, "\"formatVersion\": 1")
+        || !Contains(json, "\"formatVersion\": 2")
+        || !Contains(json, "\"defaultRasterFormat\": \"tiff\"")
         || !Contains(json, "\"command\": \"file.save\"")
         || !Contains(json, "\"logicalKey\": \"S\"")
         || !Contains(json, "\"physicalKey\": \"KeyS\"")
@@ -96,6 +98,7 @@ int wmain() {
         || decoded.ui_language != sample.ui_language
         || decoded.restore_previous_documents
             != sample.restore_previous_documents
+        || decoded.default_raster_format != sample.default_raster_format
         || decoded.sequence_switch_policy != sample.sequence_switch_policy
         || decoded.sequence_endpoint_policy != sample.sequence_endpoint_policy
         || decoded.shortcuts.profiles.size() != 2U
@@ -110,17 +113,46 @@ int wmain() {
     }
 
     const std::string wrong_version =
-        "{\"format\":\"inkpod-settings\",\"formatVersion\":2} ";
+        "{\"format\":\"inkpod-settings\",\"formatVersion\":1} ";
     const std::string duplicate =
         "{\"format\":\"inkpod-settings\",\"format\":\"inkpod-settings\","
-        "\"formatVersion\":1}";
+        "\"formatVersion\":2}";
     const std::string unknown =
-        "{\"format\":\"inkpod-settings\",\"formatVersion\":1,"
+        "{\"format\":\"inkpod-settings\",\"formatVersion\":2,"
         "\"mystery\":true}";
     if (DecodeApplicationSettingsJson(wrong_version, defaults, decoded)
         || DecodeApplicationSettingsJson(duplicate, defaults, decoded)
         || DecodeApplicationSettingsJson(unknown, defaults, decoded)) {
         return 4;
+    }
+
+    const std::string invalid_raster_format =
+        "{\"format\":\"inkpod-settings\",\"formatVersion\":2,"
+        "\"saveAndRecovery\":{\"restorePreviousDocuments\":false,"
+        "\"defaultRasterFormat\":\"jpeg\"}}";
+    if (DecodeApplicationSettingsJson(invalid_raster_format, defaults, decoded)) {
+        return 13;
+    }
+    for (const auto format : {
+             inkpod::app::RasterFileFormatSetting::Png,
+             inkpod::app::RasterFileFormatSetting::Tiff,
+             inkpod::app::RasterFileFormatSetting::Tga,
+             inkpod::app::RasterFileFormatSetting::Bmp}) {
+        ApplicationSettings candidate = sample;
+        candidate.default_raster_format = format;
+        std::string encoded;
+        if (!EncodeApplicationSettingsJson(candidate, encoded)
+            || !DecodeApplicationSettingsJson(encoded, defaults, decoded)
+            || decoded.default_raster_format != format) {
+            return 14;
+        }
+    }
+    if (!DecodeApplicationSettingsJson(
+            "{\"format\":\"inkpod-settings\",\"formatVersion\":2}",
+            defaults,
+            decoded)
+        || decoded.default_raster_format != inkpod::app::RasterFileFormatSetting::Png) {
+        return 15;
     }
 
     std::wstring settings_path;
@@ -192,6 +224,7 @@ int wmain() {
         || loaded.ui_language
             != inkpod::windows::ui::UiLanguagePreference::System
         || loaded.restore_previous_documents
+        || loaded.default_raster_format != inkpod::app::RasterFileFormatSetting::Png
         || loaded.sequence_switch_policy
             != inkpod::app::SequenceCellSwitchPolicy::Prompt
         || loaded.sequence_endpoint_policy

@@ -72,25 +72,6 @@ struct SubpaletteSourceCache final {
     std::wstring name;
 };
 
-struct SubpaletteEncodedImage final {
-    std::uint64_t item_id{};
-    InkpodCommonRasterFormat format{};
-    std::vector<std::uint8_t> bytes;
-};
-
-struct SubpaletteLoadJob final {
-    HWND owner{};
-    WorkspaceWindowId workspace{};
-    Generation workspace_generation{};
-    std::uint64_t load_generation{};
-    InkpodSubpalette* candidate_subpalette{};
-    std::vector<SubpaletteSourceCache> candidate_sources;
-    std::vector<SubpaletteEncodedImage> encoded_images;
-    InkpodSubpaletteInfo decoded_info{};
-    bool decode_queued{};
-    std::atomic<InkpodStatus> status{INKPOD_STATUS_INVALID_STATE};
-};
-
 struct WorkspaceWindow final {
     ApplicationHost* application{};
     WorkspaceWindowId id{};
@@ -133,7 +114,8 @@ struct WorkspaceWindow final {
     std::uint32_t subpalette_navigation_index{};
     std::uint64_t subpalette_snapshot_revision{};
     std::uint64_t subpalette_load_generation{};
-    std::shared_ptr<SubpaletteLoadJob> subpalette_load;
+    std::uint64_t subpalette_io_request{};
+    InkpodSubpalette* subpalette_candidate{};
     bool subpalette_loading{};
     bool subpalette_sample_available{};
     InkpodColorValue subpalette_sample{};

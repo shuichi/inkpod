@@ -67,6 +67,14 @@ route|rust|os-application-adapter|rust-core|InkScriptExportLimits::with_asset_by
 route|rust|asset-data-plane|rust-core|SubpaletteCatalog::clear SubpaletteCatalog::load_cached_images SubpaletteCatalog::load_image SubpaletteCatalog::replace_sources
 route|rust|view-only-command|rust-core|SubpaletteCatalog::apply_view SubpaletteCatalog::select_cached_image
 route|rust|query-snapshot|rust-core|SubpaletteCatalog::build_snapshot
+route|rust|document-primitive|rust-core|Core::import_decoded_common_raster
+route|rust|query-snapshot|rust-core|Core::capture_compacted_copy Core::capture_document_open Core::capture_document_save Core::capture_sequence_switch Core::file_io_manager Core::raster_file_format Core::validate_document_save Core::validate_prepared_sequence_switch FileIoJob::poll FileIoJob::take_batch_preview FileIoJob::take_batch_report
+route|rust|asset-data-plane|rust-core|Core::adopt_opened_document Core::commit_document_save Core::from_native_file FileIoJob::apply_reference PreparedSequenceSwitch::take_source_recovery SubpaletteCatalog::replace_loaded_images
+route|rust|editor-state-command|rust-core|Core::commit_prepared_sequence_switch
+route|rust|query-snapshot|rust-core|Core::resolve_sequence_activation
+route|rust|editor-state-command|rust-core|Core::commit_sequence_activation
+route|rust|os-application-adapter|rust-core|Core::bind_file_io Core::set_new_cell_raster_format FileIoJob::apply FileIoJob::cancel
+route|rust|asset-data-plane|rust-format|inkpod_format::read_procedure_from_reader inkpod_format::write_procedure_to_writer
 
 ## C ABI surface
 
@@ -107,6 +115,12 @@ route|ffi|asset-data-plane|rust-ffi-adapter|inkpod_subpalette_clear inkpod_subpa
 route|ffi|view-only-command|rust-ffi-adapter|inkpod_subpalette_select_cached_raster inkpod_subpalette_view_apply
 route|ffi|query-snapshot|rust-ffi-adapter|inkpod_subpalette_adjacent_item inkpod_subpalette_build_snapshot inkpod_subpalette_get_info inkpod_subpalette_item_get inkpod_subpalette_item_name_copy inkpod_subpalette_sample
 route|ffi|os-application-adapter|rust-ffi-adapter|inkpod_subpalette_create inkpod_subpalette_release
+route|ffi|os-application-adapter|rust-ffi-adapter|inkpod_core_bind_io_manager inkpod_core_io_autosave_submit inkpod_core_io_batch_submit inkpod_core_io_compacted_copy_submit inkpod_core_io_sequence_switch_submit inkpod_core_io_submit inkpod_core_set_new_cell_raster_format inkpod_io_job_cancel inkpod_io_job_release inkpod_io_manager_create inkpod_io_manager_release
+route|ffi|os-application-adapter|rust-core|inkpod_core_io_job_apply
+route|ffi|query-snapshot|rust-ffi-adapter|inkpod_core_get_raster_file_format inkpod_io_job_copy_error inkpod_io_job_get_item inkpod_io_job_get_recovery_metadata inkpod_io_job_poll inkpod_io_job_take_batch_preview inkpod_io_job_take_batch_report inkpod_io_manager_get_cache_info inkpod_io_resolve_identity
+route|ffi|asset-data-plane|rust-ffi-adapter|inkpod_recovery_metadata_decode inkpod_recovery_metadata_encode inkpod_subpalette_io_job_apply
+route|ffi|query-snapshot|rust-ffi-adapter|inkpod_core_sequence_activation_resolve
+route|ffi|editor-state-command|rust-ffi-adapter|inkpod_core_sequence_activation_commit
 
 ## Windows production command surface
 
@@ -122,6 +136,7 @@ route|windows|document-primitive|rust-core|IDM_CUT_PROPERTIES IDM_CUT_SEQUENCE_A
 route|windows|history-control-event|rust-core|IDM_CUT_REDO IDM_CUT_UNDO
 route|windows|asset-data-plane|windows-adapter|IDM_CUT_SAVE
 route|windows|os-application-adapter|windows-adapter|IDM_FILE_NEW_CUT
+route|windows|os-application-adapter|windows-adapter|IDM_HELP_OPEN_SETTINGS_FILE
 route|windows|document-primitive|rust-core|IDM_CELL_SHOOTING_FRAME_DELETE IDM_CELL_SHOOTING_FRAME_PROPERTIES
 route|windows|editor-state-command|rust-core|IDM_CELL_SHOOTING_FRAME_EDIT_HANDLES
 route|windows|asset-data-plane|windows-adapter|IDM_FILE_EXPORT_INSTRUCTION_RASTER
@@ -156,9 +171,20 @@ route|windows|document-primitive|rust-core|IDM_SELECTION_OUTPUT_COLOR_GUARD
   it exactly once; there is no queued arbitrary-callable work variant.
 - Palette and color-chart codecs are owned by `inkpod-format`; Windows supplies
   paths and presentation names but does not encode their native bytes.
-- Production `.inkpod` is exact-current v28. Its authoritative journal retains
+- Production `.inkpod` is exact-current v29. Its authoritative journal retains
   Genesis/assets/procedures/EditorState; optional CKPT is verified acceleration
   only, and explicit compaction writes a separate new-Genesis file.
+- Path-based `FileIoJob` routes coordinate bounded Rust-owned workers and
+  publish results on the owner thread. Their document effects still use the
+  existing canonical primitive or staged Genesis replacement; file preparation,
+  cache access, polling, and cancellation do not create journal entries.
+  Normal pair-save advances its captured savepoint only after both destinations
+  are installed. Reference publication has no editable Core or journal.
+- Prospective sequence activation is a query followed by an editor-state
+  navigation command. Commit revalidates the captured identities, generations,
+  and revisions. No-op and initial binding preserve edits and file authority;
+  only document replacement publishes a staged Genesis and revokes the previous
+  document's save authority. None of these routes adds an Undo item.
 - Floating paste dialog, Canvas handles, renderer preview, ABI v18 record, Core
   commit, Undo/Redo, and replay all use one half-open five-point absolute-anchor
   contract. Preview retries remain transient and Windows does not own a second

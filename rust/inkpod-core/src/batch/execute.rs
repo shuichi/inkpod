@@ -3,6 +3,7 @@ use super::operations::*;
 use super::validation::{path_label, within_range};
 use super::*;
 use crate::animation::natural_cmp;
+use inkpod_io::{IoError, IoManager, JobContext};
 use std::collections::BTreeSet;
 use std::time::Duration;
 
@@ -16,8 +17,18 @@ impl Core {
         graph: &BatchGraph,
         scope: BatchRunScope,
     ) -> Result<BatchPreview, CoreError> {
+        self.batch_preview_with_context(graph, scope, &JobContext::new())
+    }
+
+    pub(crate) fn batch_preview_with_context(
+        &self,
+        graph: &BatchGraph,
+        scope: BatchRunScope,
+        context: &JobContext,
+    ) -> Result<BatchPreview, CoreError> {
         graph.validate()?;
-        let sources = self.resolve_batch_sources(graph, scope)?;
+        let manager = self.file_io_manager()?;
+        let sources = self.resolve_batch_sources(graph, scope, &manager, context)?;
         let mut paths = BTreeSet::new();
         let mut items = Vec::with_capacity(sources.len());
         for (index, source) in sources.iter().enumerate() {
@@ -28,22 +39,23 @@ impl Core {
             };
             let mut warnings = Vec::new();
             if let Some(path) = &output_path {
-                if !paths.insert(path.clone()) {
+                if !paths.insert(manager.resolve_identity(path)?.0) {
                     warnings.push("multiple inputs resolve to the same output path".to_owned());
                 }
-                if path.exists() {
+                if manager.exists(path, context)? {
                     warnings.push("output path already exists".to_owned());
                 }
                 if source.input_path.as_deref() == Some(path) {
                     warnings.push("output path resolves to the input path".to_owned());
                 }
             }
-            match working_core(source).and_then(|mut working| {
+            match working_core(source, &manager, context).and_then(|mut working| {
                 working
-                    .apply_batch_operations(&graph.operations, || false)
+                    .apply_batch_operations(&graph.operations, || context.is_cancelled())
                     .map(|_| ())
             }) {
                 Ok(()) => {}
+                Err(CoreError::Cancelled) => return Err(CoreError::Cancelled),
                 Err(error) => warnings.push(error.to_string()),
             }
             items.push(BatchPreviewItem {
@@ -71,15 +83,34 @@ impl Core {
         graph: &BatchGraph,
         options: BatchRunOptions,
         new_tab_capacity: usize,
+        progress: impl FnMut(u64, u64) -> bool,
+    ) -> Result<BatchRunReport, CoreError> {
+        self.batch_execute_with_context(
+            graph,
+            options,
+            new_tab_capacity,
+            &JobContext::new(),
+            progress,
+        )
+    }
+
+    pub(crate) fn batch_execute_with_context(
+        &mut self,
+        graph: &BatchGraph,
+        options: BatchRunOptions,
+        new_tab_capacity: usize,
+        context: &JobContext,
         mut progress: impl FnMut(u64, u64) -> bool,
     ) -> Result<BatchRunReport, CoreError> {
         graph.validate()?;
+        let mut progress = |completed, total| !context.is_cancelled() && progress(completed, total);
         if graph.output.preview_before_save && !options.dry_run && !options.preview_confirmed {
             return Err(CoreError::InvalidState(
                 "batch output requires preview confirmation before execution",
             ));
         }
-        let sources = self.resolve_batch_sources(graph, options.scope)?;
+        let manager = self.file_io_manager()?;
+        let sources = self.resolve_batch_sources(graph, options.scope, &manager, context)?;
         if graph.output.destination == BatchOutputDestination::NewTabs
             && sources.len() > new_tab_capacity
         {
@@ -87,7 +118,7 @@ impl Core {
                 "batch new-tab output exceeds the application session capacity",
             ));
         }
-        let output_paths = preflight_output_paths(graph, &sources)?;
+        let output_paths = preflight_output_paths(graph, &sources, &manager, context)?;
         let total = sources.len().max(1) as u64;
         let mut report = BatchRunReport {
             items: Vec::with_capacity(sources.len()),
@@ -111,8 +142,8 @@ impl Core {
                 ));
             }
             if options.dry_run {
-                let mut working = working_core(&sources[0])?;
-                working.apply_batch_operations(&graph.operations, || false)?;
+                let mut working = working_core(&sources[0], &manager, context)?;
+                working.apply_batch_operations(&graph.operations, || context.is_cancelled())?;
                 report.items.push(BatchItemResult {
                     input_name: sources[0].label.clone(),
                     output_path: None,
@@ -147,7 +178,7 @@ impl Core {
                 break;
             }
             let result = (|| {
-                let mut working = working_core(source)?;
+                let mut working = working_core(source, &manager, context)?;
                 working
                     .apply_batch_operations(&graph.operations, || !progress(index as u64, total))?;
                 if options.dry_run {
@@ -158,7 +189,7 @@ impl Core {
                         let path = output_path.as_deref().ok_or(CoreError::InvalidState(
                             "batch folder output path is unavailable",
                         ))?;
-                        save_batch_output(&working, graph, source, path, || {
+                        save_batch_output(&working, graph, source, path, context, || {
                             !progress(index as u64, total)
                         })?;
                         Ok((BatchItemOutcome::Succeeded, None))
@@ -227,44 +258,46 @@ impl Core {
         &self,
         graph: &BatchGraph,
         scope: BatchRunScope,
+        manager: &IoManager,
+        context: &JobContext,
     ) -> Result<Vec<BatchSource>, CoreError> {
         let mut sources = Vec::new();
         let mut seen_paths = BTreeSet::new();
         for input in &graph.inputs {
+            context.check_cancelled()?;
             match input.kind {
                 BatchInputKind::File => {
                     let path = PathBuf::from(&input.path);
                     validate_supported_input_path(&path)?;
-                    if !path.is_file() {
-                        return Err(CoreError::InvalidArgument("batch file input is missing"));
-                    }
+                    let identity = match manager.metadata(&path, context) {
+                        Ok(metadata) => metadata.identity,
+                        Err(IoError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+                            return Err(CoreError::InvalidArgument("batch file input is missing"));
+                        }
+                        Err(error) => return Err(error.into()),
+                    };
                     if within_range(path_label(&path), input) {
-                        if !seen_paths.insert(path.clone()) {
+                        if !seen_paths.insert(identity) {
                             return Err(CoreError::InvalidArgument(
                                 "batch input contains a duplicate file",
                             ));
                         }
                         sources.push(path_source(path));
+                        check_source_count(sources.len())?;
                     }
                 }
                 BatchInputKind::Folder => {
                     let mut paths = Vec::new();
-                    for entry in fs::read_dir(&input.path)
-                        .map_err(|error| CoreError::Format(error.to_string()))?
-                    {
-                        let path = entry
-                            .map_err(|error| CoreError::Format(error.to_string()))?
-                            .path();
-                        if path.is_file()
-                            && is_supported_input_path(&path)
-                            && within_range(path_label(&path), input)
+                    for path in manager.list_files(Path::new(&input.path), 1_000_000, context)? {
+                        if is_supported_input_path(&path) && within_range(path_label(&path), input)
                         {
                             paths.push(path);
+                            check_source_count(sources.len() + paths.len())?;
                         }
                     }
                     paths.sort_by(|left, right| natural_cmp(path_label(left), path_label(right)));
                     for path in paths {
-                        if !seen_paths.insert(path.clone()) {
+                        if !seen_paths.insert(manager.metadata(&path, context)?.identity) {
                             return Err(CoreError::InvalidArgument(
                                 "batch input contains a duplicate file",
                             ));
@@ -284,8 +317,10 @@ impl Core {
                         content: BatchSourceContent::Document {
                             document: Box::new(document),
                             assets: self.assets.clone(),
+                            raster_file_format: self.raster_file_format,
                         },
                     });
+                    check_source_count(sources.len())?;
                 }
             }
         }
@@ -299,6 +334,45 @@ impl Core {
         }
         Ok(sources)
     }
+
+    pub(crate) fn batch_freeze_inputs(
+        &self,
+        graph: &mut BatchGraph,
+        scope: BatchRunScope,
+        manager: &IoManager,
+        context: &JobContext,
+    ) -> Result<Vec<PathBuf>, CoreError> {
+        graph.validate()?;
+        let sources = self.resolve_batch_sources(graph, scope, manager, context)?;
+        let mut inputs = Vec::with_capacity(sources.len());
+        let mut paths = Vec::new();
+        for source in sources {
+            match source.content {
+                BatchSourceContent::Path(path) => {
+                    let path_text = path.to_str().ok_or(CoreError::InvalidArgument(
+                        "batch input path is not valid UTF-8",
+                    ))?;
+                    inputs.push(BatchInputSelector::file(path_text));
+                    paths.push(path);
+                }
+                BatchSourceContent::Document { .. } => {
+                    inputs.push(BatchInputSelector::active_document());
+                }
+            }
+        }
+        context.check_cancelled()?;
+        graph.inputs = inputs;
+        Ok(paths)
+    }
+}
+
+fn check_source_count(count: usize) -> Result<(), CoreError> {
+    if count > MAX_BATCH_INPUTS {
+        return Err(CoreError::InvalidArgument(
+            "batch resolved input count exceeds its bounded limit",
+        ));
+    }
+    Ok(())
 }
 
 fn path_source(path: PathBuf) -> BatchSource {
@@ -331,6 +405,8 @@ fn validate_supported_input_path(path: &Path) -> Result<(), CoreError> {
 fn preflight_output_paths(
     graph: &BatchGraph,
     sources: &[BatchSource],
+    manager: &IoManager,
+    context: &JobContext,
 ) -> Result<Vec<Option<PathBuf>>, CoreError> {
     if graph.output.destination != BatchOutputDestination::Folder {
         return Ok(vec![None; sources.len()]);
@@ -339,7 +415,7 @@ fn preflight_output_paths(
     let mut paths = Vec::with_capacity(sources.len());
     for (index, source) in sources.iter().enumerate() {
         let path = output_path_for(graph, source, index)?;
-        if !seen.insert(path.clone()) {
+        if !seen.insert(manager.resolve_identity(&path)?.0) {
             return Err(CoreError::InvalidArgument(
                 "batch output naming produces a duplicate path",
             ));
@@ -349,7 +425,7 @@ fn preflight_output_paths(
                 "batch output naming resolves to an input path",
             ));
         }
-        if path.exists() {
+        if manager.exists(&path, context)? {
             return Err(CoreError::InvalidState("batch output path already exists"));
         }
         paths.push(Some(path));
@@ -378,6 +454,9 @@ fn stage_new_tab_result(working: Core, index: usize) -> Result<BatchStagedResult
     }
     document.uuid = uuid;
     let mut core = core_from_document(document, working.assets.clone())?;
+    core.raster_file_format = working.raster_file_format;
+    core.new_cell_raster_format = working.new_cell_raster_format;
+    core.io_manager = working.io_manager.clone();
     core.current_path = None;
     core.savepoint = None;
     Ok(BatchStagedResult {

@@ -8,6 +8,7 @@
 
 namespace inkpod::app {
 class CoreHost;
+class FileIoController;
 struct AppLifetimeState;
 struct BatchUiState;
 struct MainWindowHandles;
@@ -24,7 +25,8 @@ public:
         JobProgressPaneState& progress_state,
         HWND& palette,
         app::BatchUiState& batch,
-        app::CoreHost& engine) noexcept;
+        app::CoreHost& engine,
+        app::FileIoController& file_io) noexcept;
 
     InkpodStatus StartContactSheetPreview(
         const app::CommandContext& context,
@@ -52,9 +54,12 @@ public:
 
 private:
     InkpodStatus BuildGraph() noexcept;
-    InkpodStatus PlanPreview(
+    InkpodStatus StartIo(
         const app::CommandContext& context,
-        InkpodBatchRunScope scope) noexcept;
+        InkpodBatchRunScope scope,
+        bool dry_run,
+        bool contact_sheet,
+        UINT completion_message) noexcept;
 
     app::AppLifetimeState& lifetime_;
     app::MainWindowHandles& windows_;
@@ -63,6 +68,7 @@ private:
     HWND& palette_;
     app::BatchUiState& batch_;
     app::CoreHost& engine_;
+    app::FileIoController& file_io_;
 };
 
 } // namespace inkpod::windows::ui

@@ -2,7 +2,15 @@
 
 #include <stdint.h>
 
-_Static_assert(INKPOD_ABI_VERSION == 22U, "unexpected ABI version");
+_Static_assert(INKPOD_ABI_VERSION == 23U, "unexpected ABI version");
+_Static_assert(sizeof(InkpodIoConfig) == 48U, "I/O config layout drift");
+_Static_assert(sizeof(InkpodIoPath) == 24U, "I/O path layout drift");
+_Static_assert(sizeof(InkpodIoRequest) == 72U, "I/O request layout drift");
+_Static_assert(sizeof(InkpodIoJobInfo) == 104U, "I/O job info layout drift");
+_Static_assert(sizeof(InkpodIoFileIdentity) == 32U, "I/O identity layout drift");
+_Static_assert(sizeof(InkpodIoItemInfo) == 80U, "I/O item layout drift");
+_Static_assert(sizeof(InkpodIoCacheInfo) == 56U, "I/O cache info layout drift");
+_Static_assert(sizeof(InkpodIoRecoveryMetadata) == 160U, "I/O recovery metadata layout drift");
 _Static_assert(sizeof(InkpodSubpaletteSourceInput) == 32U, "subpalette source layout drift");
 _Static_assert(sizeof(InkpodSubpaletteRasterInput) == 32U, "subpalette raster layout drift");
 _Static_assert(sizeof(InkpodSubpaletteInfo) == 32U, "subpalette info layout drift");

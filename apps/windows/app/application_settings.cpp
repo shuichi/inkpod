@@ -649,6 +649,12 @@ constexpr std::array kLanguageNames{
     std::pair{UiLanguagePreference::Japanese, std::string_view{"ja-JP"}},
     std::pair{UiLanguagePreference::English, std::string_view{"en-US"}},
 };
+constexpr std::array kRasterFormatNames{
+    std::pair{RasterFileFormatSetting::Png, std::string_view{"png"}},
+    std::pair{RasterFileFormatSetting::Tiff, std::string_view{"tiff"}},
+    std::pair{RasterFileFormatSetting::Tga, std::string_view{"tga"}},
+    std::pair{RasterFileFormatSetting::Bmp, std::string_view{"bmp"}},
+};
 constexpr std::array kSequenceSwitchNames{
     std::pair{SequenceCellSwitchPolicy::Prompt, std::string_view{"prompt"}},
     std::pair{
@@ -1749,13 +1755,15 @@ bool BuildSettingsJson(const ApplicationSettings& settings, JsonValue& output) {
         NumberValue(kApplicationSettingsFormatVersion));
 
     const std::string_view language = EnumName(settings.ui_language, kLanguageNames);
+    const std::string_view raster_format =
+        EnumName(settings.default_raster_format, kRasterFormatNames);
     const std::string_view switch_policy =
         EnumName(settings.sequence_switch_policy, kSequenceSwitchNames);
     const std::string_view endpoint_policy =
         EnumName(settings.sequence_endpoint_policy, kSequenceEndpointNames);
     const std::string_view output_profile =
         EnumName(settings.output_color_guard_profile, kOutputProfileNames);
-    if (language.empty() || switch_policy.empty() || endpoint_policy.empty()
+    if (language.empty() || raster_format.empty() || switch_policy.empty() || endpoint_policy.empty()
         || output_profile.empty()) {
         return false;
     }
@@ -1769,6 +1777,10 @@ bool BuildSettingsJson(const ApplicationSettings& settings, JsonValue& output) {
         save_and_recovery,
         "restorePreviousDocuments",
         BooleanValue(settings.restore_previous_documents));
+    Add(
+        save_and_recovery,
+        "defaultRasterFormat",
+        StringValue(std::string(raster_format)));
     Add(output, "saveAndRecovery", std::move(save_and_recovery));
 
     JsonValue animation = ObjectValue();
@@ -1862,11 +1874,14 @@ bool ParseSettingsJson(
         }
     }
     if (const JsonValue* recovery = Member(root, "saveAndRecovery")) {
-        if (!HasOnlyMembers(*recovery, {"restorePreviousDocuments"})
+        std::string_view raster_format;
+        if (!HasOnlyMembers(*recovery, {"restorePreviousDocuments", "defaultRasterFormat"})
             || !BoolMember(
                 *recovery,
                 "restorePreviousDocuments",
-                candidate.restore_previous_documents)) {
+                candidate.restore_previous_documents)
+            || !StringMember(*recovery, "defaultRasterFormat", raster_format)
+            || !ParseEnum(raster_format, kRasterFormatNames, candidate.default_raster_format)) {
             return false;
         }
     }

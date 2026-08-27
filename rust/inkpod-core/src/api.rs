@@ -1091,6 +1091,28 @@ pub struct CompactionPlan {
     pub journal_digest: [u8; 32],
 }
 
+impl CompactionPlan {
+    /// Reconstructs an untrusted fixed-width confirmation token received from
+    /// an application boundary. This does not authorize compaction: capture and
+    /// worker preparation compare every field with the current document state.
+    #[must_use]
+    pub const fn from_confirmation(
+        history_event_count: u64,
+        history_procedure_count: u64,
+        document_digest: [u8; 32],
+        editor_digest: [u8; 32],
+        journal_digest: [u8; 32],
+    ) -> Self {
+        Self {
+            history_event_count,
+            history_procedure_count,
+            document_digest: DocumentStateDigest::from_bytes(document_digest),
+            editor_digest: EditorStateDigest(editor_digest),
+            journal_digest,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 /// Read-only logical resource usage for one Core document session.
 ///

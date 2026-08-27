@@ -66,7 +66,7 @@
 extern "C" {
 #endif
 
-#define INKPOD_ABI_VERSION UINT32_C(22)
+#define INKPOD_ABI_VERSION UINT32_C(23)
 #define INKPOD_FEATURE_NONE UINT64_C(0)
 
 /** @brief InkScript ABI record の exact-current version。 */
@@ -172,6 +172,8 @@ typedef uint32_t InkpodStatus;
 #define INKPOD_STATUS_FILL_OVERFLOW UINT32_C(11)
 #define INKPOD_STATUS_UNSAVED_CHANGES UINT32_C(12)
 #define INKPOD_STATUS_QUEUE_FULL UINT32_C(13)
+#define INKPOD_STATUS_PENDING UINT32_C(14)
+#define INKPOD_STATUS_FILE_CONFLICT UINT32_C(15)
 
 /** @brief ABI-v3 Rust-owned object の閉じた type namespace。 */
 typedef uint32_t InkpodObjectType;
@@ -637,6 +639,10 @@ typedef uint32_t InkpodSequenceStepResult;
 #define INKPOD_SEQUENCE_SWITCH_PROMPT UINT32_C(1)
 #define INKPOD_SEQUENCE_SWITCH_AUTOSAVE UINT32_C(2)
 #define INKPOD_SEQUENCE_SWITCH_REQUIRED (UINT32_C(1) << 0)
+typedef uint32_t InkpodSequenceActivationKind;
+#define INKPOD_SEQUENCE_ACTIVATION_NOOP UINT32_C(1)
+#define INKPOD_SEQUENCE_ACTIVATION_BIND UINT32_C(2)
+#define INKPOD_SEQUENCE_ACTIVATION_REPLACE UINT32_C(3)
 #define INKPOD_MOTION_FLAG_LOOP (UINT64_C(1) << 0)
 #define INKPOD_MOTION_FLAG_INCLUDE_SELECTION (UINT64_C(1) << 1)
 #define INKPOD_MOTION_FLAG_INCLUDE_LIGHT_TABLE (UINT64_C(1) << 2)
@@ -3426,6 +3432,34 @@ typedef struct InkpodSequenceSwitchRequest {
     uint32_t flags;
 } InkpodSequenceSwitchRequest;
 
+/**
+ * @brief Pointer-free resolution of an explicit sequence selection.
+ *
+ * NOOP retains every state. BIND associates an unbound source with the current
+ * Genesis without replacing edits, paths, history, savepoints or revisions.
+ * Only REPLACE discards normal file authority after a successful activation.
+ * source_index is INKPOD_SEQUENCE_INDEX_NONE and source_generation is zero
+ * exactly when the current document is unbound. The target identity is the
+ * immutable source before binding; BIND keeps source_document_uuid instead.
+ * feature_flags must be zero. All fields are revalidated when committing.
+ */
+typedef struct InkpodSequenceActivationPlan {
+    uint32_t struct_size;
+    InkpodSequenceActivationKind result_class;
+    uint64_t feature_flags;
+    uint64_t sequence_revision;
+    uint64_t source_document_uuid_high;
+    uint64_t source_document_uuid_low;
+    uint64_t source_generation;
+    uint64_t source_document_revision;
+    uint64_t source_editor_revision;
+    uint64_t target_document_uuid_high;
+    uint64_t target_document_uuid_low;
+    uint64_t target_source_generation;
+    uint32_t source_index;
+    uint32_t target_index;
+} InkpodSequenceActivationPlan;
+
 /** @brief Pointer-free issue-time resolution of one normal previous/next command. */
 typedef struct InkpodSequenceStepPlan {
     uint32_t struct_size;
@@ -5171,16 +5205,43 @@ InkpodStatus inkpod_core_sequence_thumbnail_get(
     uint32_t index,
     InkpodSequenceThumbnailBuffer* output);
 /**
- * @brief clean な current document を sequence の index 指定 cell へ切り替える。
+ * @brief sequence の index 指定 cell を選択する。
  * @par 契約
- * Core owner thread。`core`/完全サイズの `out_info` は非 NULL。dirty なら `UNSAVED_CHANGES` で文書/revision/出力を変えない。
- * 成功時文書を置換し info を書くが Undo item は作らない。stroke/preview/floating 中は不可。
+ * Core owner thread。`core`/完全サイズの `out_info` は非 NULL。
+ * 同じ entry と初回 Genesis binding は dirty な文書と保存権限を保つ。
+ * 実文書置換だけが document-dirty を `UNSAVED_CHANGES` で拒否する。
+ * 成功時 info を書くが Undo item は作らない。stroke/preview/floating 中は不可。
  * @par 主なステータス
  * `OK`、`UNSAVED_CHANGES`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_sequence_activate(
     InkpodCore* core,
     uint32_t index,
+    InkpodDocumentInfo* out_info);
+/**
+ * @brief Resolves NOOP, initial BIND, or REPLACE without changing any state.
+ *
+ * Core owner thread; core/output are complete, non-NULL, nonoverlapping records.
+ * Dirty documents may be queried. Missing document/catalog, invalid index, active
+ * preview or file installation returns an error and leaves output unchanged.
+ * The caller owns the fixed-size plan; no borrowed storage is retained.
+ */
+InkpodStatus inkpod_core_sequence_activation_resolve(
+    InkpodCore* core,
+    uint32_t target_index,
+    InkpodSequenceActivationPlan* out_plan);
+/**
+ * @brief Revalidates every captured field and commits one explicit selection.
+ *
+ * Core owner thread; all records are complete, non-NULL and nonoverlapping.
+ * NOOP/BIND retain dirty state and file authority. REPLACE requires a clean
+ * document savepoint; editor-only dirty has ordinary sequence-navigation rules.
+ * Stale, invalid, unsaved, preview or installation failure changes no Core state
+ * or output. Input is borrowed only during the call. No filesystem I/O occurs.
+ */
+InkpodStatus inkpod_core_sequence_activation_commit(
+    InkpodCore* core,
+    const InkpodSequenceActivationPlan* plan,
     InkpodDocumentInfo* out_info);
 /**
  * @brief Captures a side-effect-free sequence switch token at command issue time.
@@ -6828,6 +6889,194 @@ InkpodStatus inkpod_error_message_copy(
     uint8_t* buffer,
     uint64_t buffer_capacity,
     uint64_t* out_written_bytes);
+
+/** @brief Application-owned shared filesystem runtime; contains no active document. */
+typedef struct InkpodIoManager InkpodIoManager;
+/** @brief Rust-owned asynchronous result. Poll/cancel are thread-safe; release is externally synchronized. */
+typedef struct InkpodIoJob InkpodIoJob;
+
+#define INKPOD_IO_OPEN_NATIVE UINT32_C(1)
+#define INKPOD_IO_OPEN_RECOVERY UINT32_C(2)
+#define INKPOD_IO_OPEN_RASTER UINT32_C(3)
+#define INKPOD_IO_SEQUENCE_AUTO UINT32_C(4)
+#define INKPOD_IO_SEQUENCE_FILES UINT32_C(5)
+#define INKPOD_IO_REFERENCE_FILES UINT32_C(6)
+#define INKPOD_IO_REFERENCE_FOLDER UINT32_C(7)
+#define INKPOD_IO_LIGHT_TABLE_ADD UINT32_C(8)
+#define INKPOD_IO_LIGHT_TABLE_RELOAD UINT32_C(9)
+#define INKPOD_IO_SAVE_PAIR UINT32_C(10)
+#define INKPOD_IO_AUTOSAVE UINT32_C(11)
+#define INKPOD_IO_EXPORT_RASTER UINT32_C(12)
+#define INKPOD_IO_BATCH_PLAN UINT32_C(13)
+#define INKPOD_IO_BATCH_RUN UINT32_C(14)
+#define INKPOD_IO_BATCH_PREVIEW UINT32_C(15)
+#define INKPOD_IO_RECOVERY_LIST UINT32_C(16)
+#define INKPOD_IO_RECOVERY_DISCARD UINT32_C(17)
+#define INKPOD_IO_RECOVERY_PROBE UINT32_C(18)
+#define INKPOD_IO_EXPORT_SEQUENCE UINT32_C(19)
+#define INKPOD_IO_SEQUENCE_SWITCH UINT32_C(20)
+#define INKPOD_IO_COMPACTED_COPY UINT32_C(21)
+#define INKPOD_IO_QUEUED UINT32_C(0)
+#define INKPOD_IO_RUNNING UINT32_C(1)
+#define INKPOD_IO_READY UINT32_C(2)
+#define INKPOD_IO_COMPLETE UINT32_C(3)
+#define INKPOD_IO_FAILED UINT32_C(4)
+#define INKPOD_IO_CANCELLED UINT32_C(5)
+#define INKPOD_IO_FORCE_RELOAD (UINT64_C(1) << 0)
+#define INKPOD_IO_COMPOSITE_WHITE (UINT64_C(1) << 1)
+#define INKPOD_IO_OVERWRITE_CONFIRMED (UINT64_C(1) << 2)
+#define INKPOD_IO_INSTRUCTIONS (UINT64_C(1) << 3)
+#define INKPOD_IO_RESULT_TRUNCATED (UINT64_C(1) << 0)
+#define INKPOD_IO_RESULT_INSTALLING (UINT64_C(1) << 1)
+#define INKPOD_IO_RESULT_CUT_DESCRIPTOR (UINT64_C(1) << 2)
+
+typedef struct InkpodIoConfig {
+    uint32_t struct_size;
+    uint32_t worker_count;
+    uint32_t queue_capacity;
+    uint32_t max_images;
+    uint64_t max_file_bytes;
+    uint64_t max_encoded_bytes;
+    uint64_t max_decoded_bytes;
+    uint64_t reserved;
+} InkpodIoConfig;
+
+typedef struct InkpodIoPath {
+    uint32_t struct_size;
+    uint32_t reserved;
+    const uint8_t* path;
+    uint64_t path_bytes;
+} InkpodIoPath;
+
+/* Input text is copied during submit. Query text borrows the caller buffer.
+ * flags: 1=metadata present, 2=metadata diagnostic; identity kinds:
+ * 0=none, 1=physical, 2=normalized path, 3=untitled UUID. */
+typedef struct InkpodIoRecoveryMetadata {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t session_id;
+    uint64_t generation;
+    uint64_t document_uuid_high;
+    uint64_t document_uuid_low;
+    uint64_t written_time_100ns;
+    uint64_t modified_time_100ns;
+    uint32_t identity_kind;
+    uint32_t reserved;
+    uint64_t identity_volume;
+    uint64_t identity_object_high;
+    uint64_t identity_object_low;
+    InkpodIoPath original_path;
+    InkpodIoPath source_path;
+    InkpodIoPath identity_path;
+} InkpodIoRecoveryMetadata;
+
+/** All paths/spans are copied during submit. No file bytes cross this boundary. */
+typedef struct InkpodIoRequest {
+    uint32_t struct_size;
+    uint32_t kind;
+    uint64_t flags;
+    const InkpodIoPath* paths;
+    uint64_t path_count;
+    uint64_t path_stride_bytes;
+    uint64_t object_id;
+    uint64_t document_uuid_high;
+    uint64_t document_uuid_low;
+    uint32_t raster_format;
+    uint32_t reserved;
+} InkpodIoRequest;
+
+typedef struct InkpodIoJobInfo {
+    uint32_t struct_size;
+    uint32_t state;
+    uint32_t kind;
+    uint32_t status;
+    uint64_t job_id;
+    uint64_t discovered_count;
+    uint64_t total_count;
+    uint64_t read_count;
+    uint64_t loaded_count;
+    uint64_t failed_count;
+    uint64_t cancelled_count;
+    uint64_t completed_work;
+    uint64_t total_work;
+    uint64_t result_count;
+    uint64_t flags;
+} InkpodIoJobInfo;
+
+/** Opaque file-object identity, or a hash of the normalized destination when absent. */
+typedef struct InkpodIoFileIdentity {
+    uint32_t struct_size;
+    uint32_t kind;
+    uint64_t volume;
+    uint64_t object_high;
+    uint64_t object_low;
+} InkpodIoFileIdentity;
+
+typedef struct InkpodIoItemInfo {
+    uint32_t struct_size;
+    uint32_t raster_format;
+    uint64_t source_generation;
+    uint64_t document_uuid_high;
+    uint64_t document_uuid_low;
+    uint64_t path_bytes;
+    uint64_t name_bytes;
+    InkpodIoFileIdentity identity;
+} InkpodIoItemInfo;
+
+typedef struct InkpodIoCacheInfo {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t image_count;
+    uint64_t encoded_bytes;
+    uint64_t decoded_bytes;
+    uint64_t physical_reads;
+    uint64_t decodes;
+    uint64_t cache_hits;
+} InkpodIoCacheInfo;
+
+/** Null config uses available parallelism clamped to 1..8 workers, 10,000 images,
+ * 512 MiB/file, and 8 GiB per encoded/decoded cache. Custom limits cannot exceed these cache caps. */
+InkpodStatus inkpod_io_manager_create(const InkpodIoConfig* config, InkpodIoManager** out_manager);
+/** Cancels queued work and drains accepted workers; call after all frontend jobs have resolved. */
+InkpodStatus inkpod_io_manager_release(InkpodIoManager** manager);
+InkpodStatus inkpod_io_manager_get_cache_info(const InkpodIoManager* manager, InkpodIoCacheInfo* out_info);
+InkpodStatus inkpod_io_resolve_identity(const InkpodIoManager* manager, const uint8_t* path, uint64_t path_bytes, InkpodIoFileIdentity* out_identity);
+/** Binds the application runtime without changing document/history/savepoints. Owner thread only. */
+InkpodStatus inkpod_core_bind_io_manager(InkpodCore* core, InkpodIoManager* manager);
+/** Core is required except for reference and recovery list/probe/discard jobs.
+ * Capturing a Core requires its owner thread. All input paths are copied before return. */
+InkpodStatus inkpod_core_io_submit(InkpodCore* core, InkpodIoManager* manager, const InkpodIoRequest* request, InkpodIoJob** out_job);
+InkpodStatus inkpod_core_io_autosave_submit(InkpodCore* core, InkpodIoManager* manager, const uint8_t* path, uint64_t path_bytes, const InkpodIoRecoveryMetadata* metadata, InkpodIoJob** out_job);
+InkpodStatus inkpod_core_io_sequence_switch_submit(InkpodCore* core, InkpodIoManager* manager, const InkpodSequenceSwitchRequest* request, const InkpodIoPath* source_recovery, const InkpodIoPath* target_recovery, const InkpodIoRecoveryMetadata* metadata, InkpodIoJob** out_job);
+InkpodStatus inkpod_core_io_compacted_copy_submit(InkpodCore* core, InkpodIoManager* manager, const uint8_t* path, uint64_t path_bytes, const InkpodCompactionPlan* plan, InkpodIoJob** out_job);
+/* Two-pass packed UTF-8 query, excluding NUL. Output path spans borrow buffer. */
+InkpodStatus inkpod_io_job_get_recovery_metadata(const InkpodIoJob* job, uint64_t index, InkpodIoRecoveryMetadata* out_metadata, uint8_t* buffer, uint64_t capacity, uint64_t* out_required_bytes);
+/* Bounded pure codec adapters, also used by fixture tests; no filesystem I/O. */
+InkpodStatus inkpod_recovery_metadata_encode(const InkpodIoRecoveryMetadata* metadata, uint8_t* buffer, uint64_t capacity, uint64_t* out_required_bytes);
+InkpodStatus inkpod_recovery_metadata_decode(const uint8_t* bytes, uint64_t length, InkpodIoRecoveryMetadata* out_metadata, uint8_t* text_buffer, uint64_t text_capacity, uint64_t* out_required_text_bytes);
+/* Captures the immutable graph and issue-time Core; no UI filesystem preflight.
+ * kind is BATCH_PLAN / BATCH_RUN / BATCH_PREVIEW, flags use INKPOD_BATCH_RUN_*.
+ * Apply on the Core owner before taking one result on the same owner thread. */
+InkpodStatus inkpod_core_io_batch_submit(InkpodCore* core, InkpodIoManager* manager, const InkpodBatchGraph* graph, uint32_t kind, uint32_t run_scope, uint64_t flags, uint64_t new_tab_capacity, InkpodIoJob** out_job);
+InkpodStatus inkpod_io_job_take_batch_preview(InkpodIoJob* job, InkpodBatchPreview** out_preview);
+InkpodStatus inkpod_io_job_take_batch_report(InkpodIoJob* job, InkpodBatchReport** out_report);
+/** No filesystem I/O, decode, or live-Core access; loaded_count includes cache hits. */
+InkpodStatus inkpod_io_job_poll(const InkpodIoJob* job, InkpodIoJobInfo* out_info);
+InkpodStatus inkpod_io_job_cancel(InkpodIoJob* job);
+/** Any externally synchronized thread may release; accepted workers retain their own state.
+ * Installing jobs reject release until final apply (also required after install failure/cancel). */
+InkpodStatus inkpod_io_job_release(InkpodIoJob** job);
+/** Queries immutable item metadata. UTF-8 path/name use caller-owned two-pass buffers, excluding NUL. */
+InkpodStatus inkpod_io_job_get_item(const InkpodIoJob* job, uint64_t index, InkpodIoItemInfo* out_info, uint8_t* path, uint64_t path_capacity, uint8_t* name, uint64_t name_capacity);
+InkpodStatus inkpod_io_job_copy_error(const InkpodIoJob* job, uint8_t* buffer, uint64_t capacity, uint64_t* out_required_bytes);
+/** Core owner thread only. Save-pair/sequence-switch/compacted-copy may return PENDING
+ * while installing; poll then apply again, including failed/cancelled installation. */
+InkpodStatus inkpod_core_io_job_apply(InkpodCore* core, InkpodIoJob* job, InkpodDocumentInfo* out_document, uint64_t* out_object_id);
+/** Atomically replaces a reference catalog only when all input images are ready. */
+InkpodStatus inkpod_subpalette_io_job_apply(InkpodSubpalette* subpalette, InkpodIoJob* job, InkpodSubpaletteInfo* out_info);
+/** Changes only the default used by subsequent blank-document creation; no document mutation. */
+InkpodStatus inkpod_core_set_new_cell_raster_format(InkpodCore* core, uint32_t format);
+InkpodStatus inkpod_core_get_raster_file_format(InkpodCore* core, uint32_t* out_format);
 
 #ifdef __cplusplus
 } /* extern "C" */

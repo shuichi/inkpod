@@ -3170,6 +3170,59 @@ fn ffi_contract_light_table_sequence_and_owned_buffers() {
             byte_count: png.len() as u64,
         },
     ];
+    let (mut binding_core, _) = create_core(1, 1, 5);
+    // SAFETY: Every handle, record and nested encoded/name span is live on the owner thread.
+    unsafe {
+        let mut imported = document_info();
+        assert_eq!(
+            inkpod_core_import_common_raster(
+                binding_core,
+                INKPOD_COMMON_RASTER_PNG,
+                png.as_ptr(),
+                png.len() as u64,
+                0x494e_4b50_4f44_494d,
+                5,
+                &mut imported,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_sequence_import_encoded(
+                binding_core,
+                INKPOD_COMMON_RASTER_PNG,
+                files.as_ptr(),
+                files.len() as u64,
+                size_of::<InkpodNamedBytesInput>() as u64,
+            ),
+            INKPOD_STATUS_OK
+        );
+        let before_binding = document_observation(&queried_document_info(binding_core));
+        let mut binding_plan = InkpodSequenceActivationPlan {
+            struct_size: size_of::<InkpodSequenceActivationPlan>() as u32,
+            ..InkpodSequenceActivationPlan::default()
+        };
+        assert_eq!(
+            inkpod_core_sequence_activation_resolve(binding_core, 0, &mut binding_plan),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(binding_plan.result_class, INKPOD_SEQUENCE_ACTIVATION_BIND);
+        assert_eq!(binding_plan.source_index, INKPOD_SEQUENCE_INDEX_NONE);
+        assert_eq!(binding_plan.source_generation, 0);
+        assert_eq!(
+            inkpod_core_sequence_activation_commit(binding_core, &binding_plan, &mut imported),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(document_observation(&imported), before_binding);
+        assert_eq!(
+            inkpod_core_sequence_activation_commit(binding_core, &binding_plan, &mut imported),
+            INKPOD_STATUS_INVALID_STATE
+        );
+        assert_eq!(
+            document_observation(&queried_document_info(binding_core)),
+            before_binding
+        );
+        assert_eq!(inkpod_core_destroy(&mut binding_core), INKPOD_STATUS_OK);
+    }
     // SAFETY: The strided records and all nested spans remain live for each owner-thread call.
     unsafe {
         files[1].struct_size = size_of::<u32>() as u32;
@@ -3355,7 +3408,98 @@ fn ffi_contract_light_table_sequence_and_owned_buffers() {
             INKPOD_STATUS_OK
         );
 
+        let before_activation = queried_document_info(sequence_core);
+        let mut activation = InkpodSequenceActivationPlan {
+            struct_size: size_of::<u32>() as u32,
+            ..InkpodSequenceActivationPlan::default()
+        };
+        assert_eq!(
+            inkpod_core_sequence_activation_resolve(sequence_core, 0, ptr::null_mut()),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            inkpod_core_sequence_activation_resolve(sequence_core, 0, &mut activation),
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+        activation.struct_size = size_of::<InkpodSequenceActivationPlan>() as u32;
+        assert_eq!(
+            inkpod_core_sequence_activation_resolve(ptr::null_mut(), 0, &mut activation),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            inkpod_core_sequence_activation_resolve(sequence_core, u32::MAX, &mut activation),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            inkpod_core_sequence_activation_resolve(sequence_core, 0, &mut activation),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(activation.result_class, INKPOD_SEQUENCE_ACTIVATION_REPLACE);
+        assert_eq!(activation.source_index, INKPOD_SEQUENCE_INDEX_NONE);
+        assert_eq!(activation.source_generation, 0);
         let mut active = document_info();
+        assert_eq!(
+            inkpod_core_sequence_activation_commit(sequence_core, ptr::null(), &mut active),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            inkpod_core_sequence_activation_commit(sequence_core, &activation, ptr::null_mut()),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        let mut malformed_activation = activation;
+        malformed_activation.struct_size = size_of::<u32>() as u32;
+        assert_eq!(
+            inkpod_core_sequence_activation_commit(
+                sequence_core,
+                &malformed_activation,
+                &mut active,
+            ),
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+        malformed_activation = activation;
+        malformed_activation.feature_flags = 1;
+        assert_eq!(
+            inkpod_core_sequence_activation_commit(
+                sequence_core,
+                &malformed_activation,
+                &mut active,
+            ),
+            INKPOD_STATUS_UNSUPPORTED
+        );
+        malformed_activation = activation;
+        malformed_activation.result_class = u32::MAX;
+        assert_eq!(
+            inkpod_core_sequence_activation_commit(
+                sequence_core,
+                &malformed_activation,
+                &mut active,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        malformed_activation = activation;
+        malformed_activation.source_generation = 1;
+        assert_eq!(
+            inkpod_core_sequence_activation_commit(
+                sequence_core,
+                &malformed_activation,
+                &mut active,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        let mut stale_activation = activation;
+        stale_activation.sequence_revision += 1;
+        assert_eq!(
+            inkpod_core_sequence_activation_commit(sequence_core, &stale_activation, &mut active),
+            INKPOD_STATUS_INVALID_STATE
+        );
+        assert_eq!(
+            document_observation(&queried_document_info(sequence_core)),
+            document_observation(&before_activation)
+        );
+        assert_eq!(
+            inkpod_core_sequence_activation_commit(sequence_core, &activation, &mut active),
+            INKPOD_STATUS_OK
+        );
         assert_eq!(
             inkpod_core_sequence_activate(sequence_core, 0, &mut active),
             INKPOD_STATUS_OK
@@ -3369,6 +3513,34 @@ fn ffi_contract_light_table_sequence_and_owned_buffers() {
         assert_ne!(active_editor.flags & INKPOD_EDITOR_STATE_DIRTY, 0);
         assert_eq!(active_editor.active_layer_id, active.layer_id);
         assert_eq!(active_editor.active_plane_id, active.main_plane_id);
+        assert_eq!(
+            inkpod_core_sequence_activation_resolve(sequence_core, 0, &mut activation),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(activation.result_class, INKPOD_SEQUENCE_ACTIVATION_NOOP);
+        assert_eq!(activation.source_index, 0);
+        let before_no_op = document_observation(&active);
+        for source_generation in [true, false] {
+            stale_activation = activation;
+            if source_generation {
+                stale_activation.source_generation += 1;
+            } else {
+                stale_activation.target_source_generation += 1;
+            }
+            assert_eq!(
+                inkpod_core_sequence_activation_commit(
+                    sequence_core,
+                    &stale_activation,
+                    &mut active,
+                ),
+                INKPOD_STATUS_INVALID_STATE
+            );
+        }
+        assert_eq!(
+            inkpod_core_sequence_activation_commit(sequence_core, &activation, &mut active),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(document_observation(&active), before_no_op);
 
         let before_stopped_step = queried_document_info(sequence_core);
         let mut step_plan = InkpodSequenceStepPlan {
@@ -4143,7 +4315,7 @@ fn replay_contract_and_snapshot_digest_are_bounded_side_effect_free_queries() {
             INKPOD_STATUS_OK
         );
         assert_eq!(contract.replay_epoch, 25);
-        assert_eq!(contract.procedure_format_version, 28);
+        assert_eq!(contract.procedure_format_version, 29);
         assert_eq!(contract.canonical_numeric_version, 1);
         assert!(contract.primitive_count > 0);
         assert_ne!(contract.primitive_catalog_digest, [0; 32]);
@@ -5002,6 +5174,7 @@ fn ffi_contract_public_surface_matches_header_and_every_function_has_a_test_refe
     let ffi_tests = read(&repository.join("rust/inkpod-ffi/tests/unit/ffi.rs"));
     let v3_tests = read(&repository.join("rust/inkpod-ffi/tests/unit/v3.rs"));
     let batch_tests = read(&repository.join("rust/inkpod-ffi/tests/unit/batch.rs"));
+    let file_io_tests = read(&repository.join("rust/inkpod-ffi/tests/unit/file_io.rs"));
     let cut_tests = read(&repository.join("rust/inkpod-ffi/tests/unit/cut.rs"));
     let inkscript_tests = read(&repository.join("rust/inkpod-ffi/tests/unit/inkscript.rs"));
     let cpp_tests = read(&repository.join("tests/abi_smoke.cpp"));
@@ -5019,6 +5192,7 @@ fn ffi_contract_public_surface_matches_header_and_every_function_has_a_test_refe
     let mut referenced = names_followed_by_parenthesis(&ffi_tests);
     referenced.extend(names_followed_by_parenthesis(&v3_tests));
     referenced.extend(names_followed_by_parenthesis(&batch_tests));
+    referenced.extend(names_followed_by_parenthesis(&file_io_tests));
     referenced.extend(names_followed_by_parenthesis(&cut_tests));
     referenced.extend(names_followed_by_parenthesis(&inkscript_tests));
     referenced.extend(names_followed_by_parenthesis(&contract_tests));

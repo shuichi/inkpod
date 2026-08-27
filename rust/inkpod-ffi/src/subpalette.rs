@@ -1,6 +1,9 @@
 use super::*;
 
-fn write_subpalette_info(output: &mut InkpodSubpaletteInfo, info: SubpaletteCatalogInfo) {
+pub(crate) fn write_subpalette_info(
+    output: &mut InkpodSubpaletteInfo,
+    info: SubpaletteCatalogInfo,
+) {
     output.item_count = info.item_count;
     output.catalog_revision = info.catalog_revision;
     output.active_index = info.active_index.unwrap_or(INKPOD_SUBPALETTE_INDEX_NONE);

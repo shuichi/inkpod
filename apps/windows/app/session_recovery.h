@@ -9,6 +9,7 @@
 
 #include "document_identity.h"
 #include "identity.h"
+#include "inkpod/core_ffi.h"
 
 namespace inkpod::app {
 
@@ -72,19 +73,14 @@ enum class OutputColorGuardProfileSetting : std::uint32_t {
     const std::uint8_t* bytes,
     std::size_t length,
     RecoveryMetadata& output) noexcept;
-[[nodiscard]] bool WriteRecoveryMetadata(
-    const std::wstring& recovery_path,
-    const RecoveryMetadata& metadata) noexcept;
-[[nodiscard]] bool ReadRecoveryMetadata(
-    const std::wstring& recovery_path,
-    RecoveryMetadata& metadata) noexcept;
-[[nodiscard]] bool EnumerateRecoveryCandidates(
-    std::vector<RecoveryCandidate>& output) noexcept;
-[[nodiscard]] bool EnumerateRecoveryCandidatesInDirectory(
-    const std::wstring& directory,
-    std::vector<RecoveryCandidate>& output) noexcept;
-[[nodiscard]] bool DiscardRecoveryArtifact(
-    const std::wstring& recovery_path) noexcept;
+// Pure ABI adapters: output text spans borrow `text` until it is mutated.
+[[nodiscard]] bool RecoveryMetadataToAbi(
+    const RecoveryMetadata& metadata,
+    InkpodIoRecoveryMetadata& output,
+    std::vector<std::uint8_t>& text) noexcept;
+[[nodiscard]] bool RecoveryMetadataFromAbi(
+    const InkpodIoRecoveryMetadata& input,
+    RecoveryMetadata& output) noexcept;
 
 [[nodiscard]] bool LoadPreviousDocumentPaths(
     std::vector<std::wstring>& paths) noexcept;

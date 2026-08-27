@@ -166,6 +166,57 @@ bool TestApplicationWideThumbnailLru() {
 }
 
 bool TestDocumentIdentityAndIndex() {
+    struct PathPair final {
+        const wchar_t* ordinary;
+        const wchar_t* extended;
+        bool equivalent;
+    };
+    constexpr std::array path_pairs{
+        PathPair{L"C:\\inkpod\\cell.inkpod", L"\\\\?\\C:\\Inkpod\\CELL.inkpod", true},
+        PathPair{L"C:\\inkpod\\a\\..\\cell.png", L"\\\\?\\C:\\inkpod\\cell.png", true},
+        PathPair{L"C:\\", L"\\\\?\\c:\\", true},
+        PathPair{L"\\\\server\\share\\cell.tif", L"\\\\?\\UNC\\SERVER\\Share\\cell.tif", true},
+        PathPair{L"\\\\server\\share\\", L"\\\\?\\unc\\server\\share\\", true},
+        PathPair{L"C:\\inkpod\\cell.inkpod", L"\\\\?\\C:\\inkpod\\cell.inkpod.", false},
+        PathPair{L"C:\\inkpod\\cell.inkpod", L"\\\\?\\C:\\inkpod\\cell.inkpod ", false},
+        PathPair{L"C:\\inkpod\\folder\\cell.png", L"\\\\?\\C:\\inkpod\\folder.\\cell.png", false},
+        PathPair{L"C:\\inkpod\\folder\\cell.png", L"\\\\?\\C:\\inkpod\\folder \\cell.png", false},
+        PathPair{L"C:\\inkpod\\cell.png", L"\\\\?\\C:\\inkpod\\.\\cell.png", false},
+        PathPair{L"C:\\inkpod\\cell.png", L"\\\\?\\C:\\inkpod\\a\\..\\cell.png", false},
+        PathPair{L"C:\\inkpod\\cell.png", L"\\\\?\\C:\\inkpod/cell.png", false},
+        PathPair{L"C:\\inkpod\\NUL.png", L"\\\\?\\C:\\inkpod\\NUL.png", false},
+        PathPair{L"C:\\inkpod\\COM1.png", L"\\\\?\\C:\\inkpod\\COM1.png", false},
+        PathPair{L"C:\\inkpod\\LPT\u00b2.png", L"\\\\?\\C:\\inkpod\\LPT\u00b2.png", false},
+        PathPair{L"\\\\server\\share\\cell.png", L"\\\\?\\UNC\\server\\share\\cell.png.", false},
+    };
+    for (const auto& pair : path_pairs) {
+        std::wstring ordinary;
+        std::wstring extended;
+        if (!inkpod::app::NormalizeDocumentFilePath(pair.ordinary, ordinary)
+            || !inkpod::app::NormalizeDocumentFilePath(pair.extended, extended)
+            || (ordinary == extended) != pair.equivalent) {
+            return false;
+        }
+    }
+    const std::wstring long_path = L"C:\\inkpod\\" + std::wstring(240U, L'a')
+        + L"\\cell.inkpod";
+    std::wstring ordinary_long;
+    std::wstring extended_long;
+    if (!inkpod::app::NormalizeDocumentFilePath(long_path, ordinary_long)
+        || !inkpod::app::NormalizeDocumentFilePath(L"\\\\?\\" + long_path, extended_long)
+        || ordinary_long != extended_long) {
+        return false;
+    }
+
+    struct FixtureIo final {
+        InkpodIoManager* manager{};
+        ~FixtureIo() {
+            static_cast<void>(inkpod_io_manager_release(&manager));
+        }
+    } io;
+    if (inkpod_io_manager_create(nullptr, &io.manager) != INKPOD_STATUS_OK) {
+        return false;
+    }
     std::array<wchar_t, MAX_PATH> directory{};
     std::array<wchar_t, MAX_PATH> file{};
     if (GetTempPathW(
@@ -182,8 +233,8 @@ bool TestDocumentIdentityAndIndex() {
     }
     DocumentIdentity direct{};
     DocumentIdentity alias{};
-    if (!inkpod::app::ResolveDocumentFileIdentity(path, direct)
-        || !inkpod::app::ResolveDocumentFileIdentity(hard_link, alias)
+    if (!inkpod::app::ResolveDocumentFileIdentity(io.manager, path, direct)
+        || !inkpod::app::ResolveDocumentFileIdentity(io.manager, hard_link, alias)
         || !(direct == alias)) {
         DeleteFileW(hard_link.c_str());
         DeleteFileW(path.c_str());
@@ -202,7 +253,7 @@ bool TestDocumentIdentityAndIndex() {
         && relative_name != nullptr
         && SetCurrentDirectoryW(directory.data()) != FALSE) {
         relative_equal = inkpod::app::ResolveDocumentFileIdentity(
-                             relative_name + 1, relative)
+                             io.manager, relative_name + 1, relative)
             && relative == direct;
         SetCurrentDirectoryW(original_directory.data());
     }
@@ -220,9 +271,9 @@ bool TestDocumentIdentityAndIndex() {
     DocumentIdentity normalized{};
     DocumentIdentity normalized_case{};
     const bool normalized_equal =
-        inkpod::app::ResolveDocumentFileIdentity(missing, normalized)
+        inkpod::app::ResolveDocumentFileIdentity(io.manager, missing, normalized)
         && inkpod::app::ResolveDocumentFileIdentity(
-            case_variant, normalized_case)
+            io.manager, case_variant, normalized_case)
         && normalized == normalized_case;
 
     DocumentRegistry registry;
@@ -248,10 +299,51 @@ bool TestDocumentIdentityAndIndex() {
         && registry.FindByView(DocumentViewId{19U}) != nullptr
         && registry.FindByView(DocumentViewId{19U})->id
             == DocumentSessionId{13U};
+    bool reservations = indexed;
+    if (reservations) {
+        const auto owner = DocumentSessionId{13U};
+        const DocumentIdentity prior = registry.Find(owner)->identity;
+        g_allocations_before_failure = 0;
+        const bool failed_prepare = !registry.ReserveIdentity(owner, normalized, missing);
+        g_allocations_before_failure = -1;
+        reservations = failed_prepare && registry.Find(owner)->identity == prior
+            && !registry.HasIdentityReservation(normalized)
+            && registry.ReserveIdentity(owner, normalized, missing)
+            && registry.Find(owner)->identity == prior
+            && registry.FindByIdentity(normalized) == nullptr
+            && registry.HasIdentityReservation(normalized)
+            && registry.HasIdentityReservation(direct, normalized_case.normalized_path)
+            && !registry.AssignIdentity(DocumentSessionId{11U}, normalized_case)
+            && !registry.ReserveIdentity(DocumentSessionId{11U}, normalized_case)
+            && !registry.ReserveIdentity(owner, prior);
+        if (reservations) {
+            g_allocations_before_failure = 0;
+            const bool published = registry.PublishReservedIdentity(owner);
+            const bool no_allocation = g_allocations_before_failure == 0;
+            g_allocations_before_failure = -1;
+            reservations = published && no_allocation
+                && registry.Find(owner)->identity == normalized
+                && !registry.HasIdentityReservation(normalized);
+        }
+        const DocumentIdentity next = inkpod::app::UntitledDocumentIdentity(71U, 91U);
+        if (reservations) {
+            reservations = registry.ReserveIdentity(owner, next, case_variant);
+            registry.CancelIdentityReservation(owner);
+            reservations = reservations && registry.Find(owner)->identity == normalized
+                && !registry.HasIdentityReservation(next, normalized.normalized_path)
+                && registry.ReserveIdentity(owner, next, missing)
+                && registry.Remove(owner)
+                && !registry.HasIdentityReservation(next, normalized.normalized_path)
+                && registry.ReserveIdentity(DocumentSessionId{11U}, next)
+                && registry.Replace(DocumentSessionId{17U}, Generation{5U},
+                    DocumentViewId{23U}, core)
+                && !registry.HasIdentityReservation(next);
+        }
+    }
     registry.Clear();
     DeleteFileW(hard_link.c_str());
     DeleteFileW(path.c_str());
-    return normalized_equal && indexed;
+    return normalized_equal && indexed && reservations;
 }
 
 bool TestRecentDocumentList() {

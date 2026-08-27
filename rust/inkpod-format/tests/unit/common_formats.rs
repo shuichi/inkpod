@@ -52,6 +52,19 @@ fn common_formats_round_trip_depth_alpha_dimensions_and_dpi() {
         let source = rgba8();
         let encoded = encode_common_raster(format, &source, false).unwrap();
         let decoded = decode_common_raster(format, &encoded).unwrap();
+        assert_eq!(
+            common_raster_decoded_byte_limit(format, &encoded).unwrap(),
+            decoded.pixels.len() as u64
+        );
+        assert_eq!(
+            common_raster_decode_allocation_limit(format, &encoded).unwrap(),
+            decoded.pixels.len() as u64
+                * if matches!(format, CommonRasterFormat::Png | CommonRasterFormat::Tga) {
+                    2
+                } else {
+                    1
+                }
+        );
         assert_eq!(decoded.info.width, source.info.width, "{format:?}");
         assert_eq!(decoded.info.height, source.info.height, "{format:?}");
         assert_eq!(
@@ -71,6 +84,10 @@ fn common_formats_round_trip_depth_alpha_dimensions_and_dpi() {
         let source = rgba16();
         let encoded = encode_common_raster(format, &source, false).unwrap();
         let decoded = decode_common_raster(format, &encoded).unwrap();
+        assert_eq!(
+            common_raster_decoded_byte_limit(format, &encoded).unwrap(),
+            decoded.pixels.len() as u64
+        );
         assert_eq!(decoded.info.width, source.info.width, "{format:?}");
         assert_eq!(decoded.info.height, source.info.height, "{format:?}");
         assert_eq!(
@@ -157,6 +174,10 @@ fn png_expands_indexed_palette_and_transparency() {
     }
 
     let decoded = decode_common_raster(CommonRasterFormat::Png, &encoded).unwrap();
+    assert_eq!(
+        common_raster_decoded_byte_limit(CommonRasterFormat::Png, &encoded).unwrap(),
+        8
+    );
     assert_eq!(decoded.info.pixel_format, PixelFormat::StraightRgba8);
     assert_eq!(decoded.pixels, [10, 20, 30, 0, 40, 50, 60, 128]);
 }

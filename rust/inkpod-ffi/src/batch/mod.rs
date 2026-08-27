@@ -59,12 +59,15 @@ const MAX_BATCH_PAIRS: usize = 4_096;
 const MAX_BATCH_TEXT_BYTES: u64 = 32_768;
 
 mod exports;
+mod io;
 mod parse;
 mod query;
 mod records;
 
 #[cfg(test)]
 pub(super) use exports::*;
+#[cfg(test)]
+pub(super) use io::*;
 use parse::*;
 #[cfg(test)]
 pub(super) use query::*;

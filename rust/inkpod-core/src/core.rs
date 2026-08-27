@@ -84,6 +84,12 @@ impl Core {
             branch_tails: Vec::with_capacity(1),
             next_id: StableIdCursor::first(),
             current_path: None,
+            raster_file_format: CommonRasterFormat::Png,
+            new_cell_raster_format: CommonRasterFormat::Png,
+            persistence_state: persistence_task::PersistenceState::new(),
+            io_manager: None,
+            io_pair_authority: None,
+            io_install_pending: false,
             recovered: false,
             active_stroke: None,
             shooting_frame_preview: None,
@@ -216,6 +222,11 @@ impl Core {
         color_format: PixelFormat,
         frames: Option<FrameMetadata>,
     ) -> Result<DocumentInfo, CoreError> {
+        if self.io_install_pending {
+            return Err(CoreError::InvalidState(
+                "document file installation is pending",
+            ));
+        }
         // Construct the complete replacement and its advanced cursor privately
         // so invalid paper/UUID input cannot consume stable IDs or disturb the
         // current live document. The established public surface keeps object
@@ -288,6 +299,7 @@ impl Core {
             }
         }
         let revision = self.next_document_revision()?;
+        let persistence_state = self.persistence_state.next()?;
 
         self.cancel_stroke();
         self.shooting_frame_preview = None;
@@ -307,6 +319,9 @@ impl Core {
         self.reset_history(true);
         self.reset_view();
         self.current_path = None;
+        self.raster_file_format = self.new_cell_raster_format;
+        self.io_pair_authority = None;
+        self.persistence_state = persistence_state;
         self.recovered = false;
         self.native_opaque_sections.clear();
         self.last_open_strategy = NativeOpenStrategy::NotOpened;
@@ -322,7 +337,12 @@ impl Core {
 }
 
 /// Single-writer application core. Document and view revisions are independent.
-#[derive(Clone, Debug)]
+///
+/// Cloning shares immutable COW payloads but creates an independent runtime file
+/// owner. A clone cannot publish the source's asynchronous file results and does
+/// not inherit a pending file-installation fence. Document/editor state, history,
+/// savepoints, paths, views, and application-owned I/O services are retained.
+#[derive(Debug)]
 pub struct Core {
     pub(super) assets: asset::AssetStore,
     pub(super) document: Option<CellDocument>,
@@ -346,6 +366,12 @@ pub struct Core {
     pub(super) branch_tails: Vec<StateId>,
     pub(super) next_id: StableIdCursor,
     pub(super) current_path: Option<PathBuf>,
+    pub(super) raster_file_format: CommonRasterFormat,
+    pub(super) new_cell_raster_format: CommonRasterFormat,
+    pub(super) persistence_state: persistence_task::PersistenceState,
+    pub(super) io_manager: Option<inkpod_io::IoManager>,
+    pub(super) io_pair_authority: Option<file_io::SavedPair>,
+    pub(super) io_install_pending: bool,
     pub(super) recovered: bool,
     pub(super) active_stroke: Option<StrokeSession>,
     pub(super) shooting_frame_preview: Option<shooting_frame::ShootingFramePreviewSession>,
@@ -369,6 +395,76 @@ pub struct Core {
     pub(super) native_opaque_sections: Vec<NativeSection>,
     pub(super) last_open_strategy: NativeOpenStrategy,
     pub(super) canonical_invocation_active: bool,
+}
+
+impl Clone for Core {
+    fn clone(&self) -> Self {
+        let mut cloned = self.clone_for_staging();
+        cloned.persistence_state = persistence_task::PersistenceState::new();
+        cloned.io_install_pending = false;
+        cloned.canonical_invocation_active = false;
+        cloned
+    }
+}
+
+impl Core {
+    /// Clones a COW candidate within this owner's transaction or file snapshot.
+    /// The candidate may replace this owner, so runtime authority is retained.
+    /// Independent public Core copies must use `Clone` instead.
+    pub(super) fn clone_for_staging(&self) -> Self {
+        Self {
+            assets: self.assets.clone(),
+            document: self.document.clone(),
+            document_revision: self.document_revision,
+            view: self.view,
+            history: self.history.clone(),
+            history_cursor: self.history_cursor,
+            staged_history: self.staged_history.clone(),
+            current_state: self.current_state,
+            next_state: self.next_state,
+            next_procedure: self.next_procedure,
+            savepoint: self.savepoint,
+            genesis: self.genesis.clone(),
+            journal: self.journal.clone(),
+            canonical_state_cache: self.canonical_state_cache.clone(),
+            selection_bounds_cache: self.selection_bounds_cache.clone(),
+            active_branch: self.active_branch,
+            next_journal_event: self.next_journal_event,
+            next_branch: self.next_branch,
+            branch_tails: self.branch_tails.clone(),
+            next_id: self.next_id,
+            current_path: self.current_path.clone(),
+            raster_file_format: self.raster_file_format,
+            new_cell_raster_format: self.new_cell_raster_format,
+            persistence_state: self.persistence_state.clone(),
+            io_manager: self.io_manager.clone(),
+            io_pair_authority: self.io_pair_authority.clone(),
+            io_install_pending: self.io_install_pending,
+            recovered: self.recovered,
+            active_stroke: self.active_stroke.clone(),
+            shooting_frame_preview: self.shooting_frame_preview.clone(),
+            vanishing_point_preview: self.vanishing_point_preview.clone(),
+            filter_preview: self.filter_preview.clone(),
+            last_filter: self.last_filter.clone(),
+            render_cache: self.render_cache.clone(),
+            next_render_tile_revision: self.next_render_tile_revision,
+            next_preview_revision: self.next_preview_revision,
+            color_check: self.color_check,
+            secondary_views: self.secondary_views.clone(),
+            next_view_id: self.next_view_id,
+            floating: self.floating.clone(),
+            shortcut_defaults: self.shortcut_defaults.clone(),
+            shortcuts: self.shortcuts.clone(),
+            sequence: self.sequence.clone(),
+            motion_check: self.motion_check.clone(),
+            subpalette_index: self.subpalette_index,
+            editor_defaults: self.editor_defaults.clone(),
+            editor_session: self.editor_session.clone(),
+            native_opaque_sections: self.native_opaque_sections.clone(),
+            last_open_strategy: self.last_open_strategy,
+            canonical_invocation_active: self.canonical_invocation_active,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -398,6 +494,11 @@ pub(super) struct DocumentEdit {
 
 impl DocumentEdit {
     fn begin(core: &Core) -> Result<Self, CoreError> {
+        if core.io_install_pending {
+            return Err(CoreError::InvalidState(
+                "document file installation is pending",
+            ));
+        }
         let before = core.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
         Ok(Self {
             working: before.clone(),
@@ -547,6 +648,11 @@ impl Core {
     }
 
     pub(super) fn ensure_no_active_stroke(&self) -> Result<(), CoreError> {
+        if self.io_install_pending {
+            return Err(CoreError::InvalidState(
+                "document file installation is pending",
+            ));
+        }
         if self.active_stroke.is_some()
             || self.shooting_frame_preview.is_some()
             || self.vanishing_point_preview.is_some()
@@ -561,6 +667,11 @@ impl Core {
     }
 
     pub(super) fn ensure_no_active_raster_stroke(&self) -> Result<(), CoreError> {
+        if self.io_install_pending {
+            return Err(CoreError::InvalidState(
+                "document file installation is pending",
+            ));
+        }
         if self.active_stroke.is_some() {
             Err(CoreError::InvalidState(
                 "operation is not allowed during an active stroke transaction",

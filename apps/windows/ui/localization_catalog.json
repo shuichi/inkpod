@@ -6,6 +6,27 @@
   ],
   "entries": [
     {
+      "id": "FileIoOverwriteSequence",
+      "kind": "text",
+      "ja": "書き出し先に同名の連番画像が存在します。既存の画像を上書きしますか？",
+      "en": "Sequence images already exist in the export folder. Overwrite the existing images?",
+      "resource": false
+    },
+    {
+      "id": "FileIoOverwritePair",
+      "kind": "text",
+      "ja": "保存先の inkpod ファイルまたは同名のラスタ画像が既に存在するか、前回の保存後に変更されています。両方のファイルを上書きしますか？",
+      "en": "The destination inkpod file or matching raster image already exists or has changed since the last save. Overwrite both files?",
+      "resource": false
+    },
+    {
+      "id": "FileIoOperation",
+      "kind": "text",
+      "ja": "画像ファイルの読み書き",
+      "en": "Image file operation",
+      "resource": false
+    },
+    {
       "id": "BatchSetName",
       "kind": "text",
       "ja": "バッチセット名",
@@ -1228,6 +1249,13 @@
       "kind": "text",
       "ja": "シーケンスのサムネイル一覧",
       "en": "Sequence Thumbnails",
+      "resource": false
+    },
+    {
+      "id": "AutoSequenceTruncated",
+      "kind": "text",
+      "ja": "連番の一部（上限1,000件）",
+      "en": "Partial sequence (1,000 limit)",
       "resource": false
     },
     {
@@ -9152,6 +9180,41 @@
       "kind": "text",
       "ja": "前回開いていた文書を起動時に復元する",
       "en": "Restore previously open documents at startup",
+      "resource": false
+    },
+    {
+      "id": "PreferencesRasterFormat",
+      "kind": "text",
+      "ja": "新規文書のラスタ保存形式",
+      "en": "Raster format for new documents",
+      "resource": false
+    },
+    {
+      "id": "RasterFormatPng",
+      "kind": "text",
+      "ja": "PNG",
+      "en": "PNG",
+      "resource": false
+    },
+    {
+      "id": "RasterFormatTiff",
+      "kind": "text",
+      "ja": "TIFF",
+      "en": "TIFF",
+      "resource": false
+    },
+    {
+      "id": "RasterFormatTga",
+      "kind": "text",
+      "ja": "TGA",
+      "en": "TGA",
+      "resource": false
+    },
+    {
+      "id": "RasterFormatBmp",
+      "kind": "text",
+      "ja": "BMP",
+      "en": "BMP",
       "resource": false
     },
     {

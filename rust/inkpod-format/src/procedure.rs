@@ -1,4 +1,4 @@
-//! Current-only procedure-authoritative `.inkpod` v28 container codec.
+//! Current-only procedure-authoritative `.inkpod` v29 container codec.
 //!
 //! This module owns byte layout, directory validation, digest verification,
 //! resource limits, and atomic file replacement. Section payload meaning stays
@@ -20,7 +20,7 @@ const EDIT: [u8; 4] = *b"EDIT";
 const CKPT: [u8; 4] = *b"CKPT";
 const EXTM: [u8; 4] = *b"EXTM";
 /// Exact current native file version. Earlier and later versions are rejected.
-pub const FORMAT_VERSION: u32 = 28;
+pub const FORMAT_VERSION: u32 = 29;
 const REPLAY_EPOCH: u32 = 9;
 const HEADER_BYTES: usize = 128;
 const DIRECTORY_ENTRY_BYTES: usize = 128;
@@ -70,6 +70,39 @@ pub struct NativeFile {
     pub sections: Vec<NativeSection>,
 }
 
+/// Validates a current native DTO's descriptors and bounded encoded layout.
+///
+/// This checks section/record schemas and resource limits without copying or
+/// hashing payloads. It is the boundary for trusted stream decoders handing a
+/// DTO to Core; section payload meaning remains Core's responsibility.
+pub fn validate_procedure_file(file: &NativeFile) -> Result<(), FormatError> {
+    validate_section_set(&file.sections)?;
+    let mut total_logical = 0_u64;
+    let mut next_offset = HEADER_BYTES as u64;
+    let mut ordered = file.sections.iter().collect::<Vec<_>>();
+    ordered.sort_by_key(|section| (section.fourcc, section.schema_version));
+    for section in ordered {
+        let length = encoded_records_length(&section.records)?;
+        if length > MAX_SECTION_BYTES {
+            return Err(FormatError::Invalid("native section exceeds byte limit"));
+        }
+        total_logical = total_logical
+            .checked_add(length)
+            .ok_or(FormatError::Invalid("native logical byte total overflows"))?;
+        next_offset = align_eight(next_offset)?
+            .checked_add(length)
+            .ok_or(FormatError::Invalid("native file length overflows"))?;
+    }
+    let directory_length = (file.sections.len() as u64) * DIRECTORY_ENTRY_BYTES as u64;
+    let total_length = align_eight(next_offset)?
+        .checked_add(directory_length)
+        .ok_or(FormatError::Invalid("native file length overflows"))?;
+    if total_logical > MAX_TOTAL_LOGICAL_BYTES || total_length > MAX_FILE_BYTES {
+        return Err(FormatError::Invalid("native file exceeds byte limit"));
+    }
+    Ok(())
+}
+
 #[derive(Clone)]
 struct EncodedSection {
     section: NativeSection,
@@ -103,7 +136,10 @@ struct DirectoryEntry {
     logical_digest: [u8; 32],
 }
 
-fn prepare_sections(file: &NativeFile) -> Result<Vec<PreparedSection<'_>>, FormatError> {
+fn prepare_sections<'a>(
+    file: &'a NativeFile,
+    cancelled: &mut impl FnMut() -> bool,
+) -> Result<Vec<PreparedSection<'a>>, FormatError> {
     let mut sections = file.sections.iter().collect::<Vec<_>>();
     sections.sort_by_key(|section| (section.fourcc, section.schema_version));
     let mut next_offset = HEADER_BYTES as u64;
@@ -112,6 +148,9 @@ fn prepare_sections(file: &NativeFile) -> Result<Vec<PreparedSection<'_>>, Forma
         .try_reserve_exact(sections.len())
         .map_err(|_| FormatError::Invalid("native section allocation failed"))?;
     for section in sections {
+        if cancelled() {
+            return Err(FormatError::Cancelled);
+        }
         let logical_length = encoded_records_length(&section.records)?;
         next_offset = align_eight(next_offset)?;
         let offset = next_offset;
@@ -127,13 +166,15 @@ fn prepare_sections(file: &NativeFile) -> Result<Vec<PreparedSection<'_>>, Forma
                 section,
                 Some(0),
                 logical_length,
-            ),
+                cancelled,
+            )?,
             logical_digest: section_records_digest(
                 SECTION_LOGICAL_CONTEXT,
                 section,
                 None,
                 logical_length,
-            ),
+                cancelled,
+            )?,
         });
     }
     Ok(prepared)
@@ -469,8 +510,9 @@ fn validate_entry_resource_totals(
 }
 
 fn read_records_streaming(
-    file: &mut fs::File,
+    file: &mut impl Read,
     entry: &DirectoryEntry,
+    cancelled: &mut impl FnMut() -> bool,
 ) -> Result<Vec<NativeRecord>, FormatError> {
     if entry.record_count > MAX_RECORD_COUNT
         || entry
@@ -502,6 +544,9 @@ fn read_records_streaming(
     );
     let mut consumed = 0_u64;
     for _ in 0..count {
+        if cancelled() {
+            return Err(FormatError::Cancelled);
+        }
         let mut header = [0_u8; RECORD_HEADER_BYTES];
         file.read_exact(&mut header)?;
         consumed = consumed
@@ -521,11 +566,16 @@ fn read_records_streaming(
             .try_reserve_exact(payload_length)
             .map_err(|_| FormatError::Invalid("native record allocation failed"))?;
         payload.resize(payload_length, 0);
-        file.read_exact(&mut payload)?;
         stored_hasher.update(&header);
-        stored_hasher.update(&payload);
         logical_hasher.update(&header);
-        logical_hasher.update(&payload);
+        for chunk in payload.chunks_mut(ATOMIC_WRITE_CHUNK_BYTES) {
+            if cancelled() {
+                return Err(FormatError::Cancelled);
+            }
+            file.read_exact(chunk)?;
+            stored_hasher.update(chunk);
+            logical_hasher.update(chunk);
+        }
         records.push(NativeRecord {
             kind: u16::from_le_bytes(header[0..2].try_into().unwrap()),
             schema_version: u16::from_le_bytes(header[2..4].try_into().unwrap()),
@@ -548,7 +598,25 @@ fn read_records_streaming(
 /// Reads one current native container from disk.
 pub fn read_procedure_file(path: &Path) -> Result<NativeFile, FormatError> {
     let mut file = fs::File::open(path)?;
-    let length = file.metadata()?.len();
+    read_procedure_from_reader(&mut file, || false)
+}
+
+/// Reads one complete current container from an already opened seekable stream.
+///
+/// The stream is read from byte zero regardless of its initial position. Length,
+/// directory, records, checksums, and the same 1 GiB native limit as disk reads
+/// are validated before a DTO is returned. Cancellation is checked between
+/// sections, records, and at most 1 MiB payload chunks. This codec owns no path,
+/// file lock, or stream lifetime; the caller keeps the source stable throughout.
+pub fn read_procedure_from_reader(
+    file: &mut (impl Read + Seek),
+    mut cancelled: impl FnMut() -> bool,
+) -> Result<NativeFile, FormatError> {
+    if cancelled() {
+        return Err(FormatError::Cancelled);
+    }
+    let length = file.seek(SeekFrom::End(0))?;
+    file.seek(SeekFrom::Start(0))?;
     if length > MAX_FILE_BYTES {
         return Err(FormatError::Invalid("native file exceeds byte limit"));
     }
@@ -577,7 +645,7 @@ pub fn read_procedure_file(path: &Path) -> Result<NativeFile, FormatError> {
         return Err(FormatError::ChecksumMismatch);
     }
     let entries = decode_directory(&directory)?;
-    validate_file_directory_ranges(&mut file, directory_offset, &entries)?;
+    validate_file_directory_ranges(file, directory_offset, &entries, &mut cancelled)?;
 
     let mut sections = Vec::new();
     sections
@@ -586,9 +654,12 @@ pub fn read_procedure_file(path: &Path) -> Result<NativeFile, FormatError> {
     let mut total_logical = 0_u64;
     let mut opaque_bytes = 0_u64;
     for entry in entries {
+        if cancelled() {
+            return Err(FormatError::Cancelled);
+        }
         validate_entry_resource_totals(&entry, &mut total_logical, &mut opaque_bytes)?;
         file.seek(SeekFrom::Start(entry.offset))?;
-        let records = read_records_streaming(&mut file, &entry)?;
+        let records = read_records_streaming(file, &entry, &mut cancelled)?;
         sections.push(NativeSection {
             fourcc: entry.fourcc,
             schema_version: entry.schema_version,
@@ -597,6 +668,9 @@ pub fn read_procedure_file(path: &Path) -> Result<NativeFile, FormatError> {
         });
     }
     validate_section_set(&sections)?;
+    if cancelled() {
+        return Err(FormatError::Cancelled);
+    }
     Ok(NativeFile {
         primitive_catalog_digest: catalog_digest,
         sections,
@@ -614,8 +688,26 @@ pub fn save_procedure_file_atomic_with_cancel(
     file: &NativeFile,
     mut cancelled: impl FnMut() -> bool,
 ) -> Result<(), FormatError> {
+    atomic_replace_streaming(path, file, &mut cancelled)
+}
+
+/// Writes a current container to a caller-owned stream without allocating an
+/// encoded copy of the entire file.
+///
+/// The caller must supply an empty stream positioned at byte zero. The return
+/// value is the complete encoded length in bytes. On cancellation or an I/O
+/// error the stream may contain a partial file; the caller must discard it.
+/// The caller alone owns flush, durability, closing, and destination replacement.
+pub fn write_procedure_to_writer(
+    output: &mut impl Write,
+    file: &NativeFile,
+    mut cancelled: impl FnMut() -> bool,
+) -> Result<u64, FormatError> {
+    if cancelled() {
+        return Err(FormatError::Cancelled);
+    }
     validate_section_set(&file.sections)?;
-    let prepared = prepare_sections(file)?;
+    let prepared = prepare_sections(file, &mut cancelled)?;
     let entries = directory_entries(&prepared);
     let directory = encode_directory(&entries);
     let total_length = entries.last().map_or(HEADER_BYTES as u64, |entry| {
@@ -640,14 +732,32 @@ pub fn save_procedure_file_atomic_with_cancel(
     if cancelled() {
         return Err(FormatError::Cancelled);
     }
-    atomic_replace_streaming(
-        path,
-        &header,
-        &prepared,
-        directory_offset,
-        &directory,
-        &mut cancelled,
-    )
+    output.write_all(&header)?;
+    let mut position = header.len() as u64;
+    for section in &prepared {
+        write_zero_padding_streaming(output, &mut position, section.offset, &mut cancelled)?;
+        for record in &section.section.records {
+            if cancelled() {
+                return Err(FormatError::Cancelled);
+            }
+            let header = record_header(record);
+            output.write_all(&header)?;
+            position += header.len() as u64;
+            for chunk in record.payload.chunks(ATOMIC_WRITE_CHUNK_BYTES) {
+                if cancelled() {
+                    return Err(FormatError::Cancelled);
+                }
+                output.write_all(chunk)?;
+                position += chunk.len() as u64;
+            }
+        }
+    }
+    write_zero_padding_streaming(output, &mut position, directory_offset, &mut cancelled)?;
+    if cancelled() {
+        return Err(FormatError::Cancelled);
+    }
+    output.write_all(&directory)?;
+    Ok(total_length)
 }
 
 /// Recovery save uses the identical durable same-directory replacement protocol.
@@ -674,7 +784,8 @@ fn validate_section_set(sections: &[NativeSection]) -> Result<(), FormatError> {
         }
         match section.fourcc {
             META | GENS | ASST | PROC | EDIT => {
-                if section.schema_version != 1 || section.flags != SECTION_CRITICAL {
+                let expected_schema = if section.fourcc == META { 2 } else { 1 };
+                if section.schema_version != expected_schema || section.flags != SECTION_CRITICAL {
                     return Err(FormatError::Invalid(
                         "required native section descriptor is invalid",
                     ));
@@ -715,7 +826,7 @@ fn validate_section_set(sections: &[NativeSection]) -> Result<(), FormatError> {
         }
         if section.flags & OPAQUE_PRESERVE != 0 {
             opaque_total = opaque_total
-                .checked_add(encode_records(&section.records)?.len() as u64)
+                .checked_add(encoded_records_length(&section.records)?)
                 .ok_or(FormatError::Invalid("native opaque byte total overflows"))?;
         }
     }
@@ -740,7 +851,8 @@ fn validate_known_records(section: &NativeSection) -> Result<(), FormatError> {
         ));
     }
     for record in &section.records {
-        if record.flags != 0 || record.schema_version != 1 {
+        let expected_schema = if section.fourcc == META { 2 } else { 1 };
+        if record.flags != 0 || record.schema_version != expected_schema {
             return Err(FormatError::Invalid(
                 "native known record descriptor is invalid",
             ));
@@ -963,9 +1075,10 @@ fn validate_directory_ranges(
 }
 
 fn validate_file_directory_ranges(
-    file: &mut fs::File,
+    file: &mut (impl Read + Seek),
     directory_offset: u64,
     entries: &[DirectoryEntry],
+    cancelled: &mut impl FnMut() -> bool,
 ) -> Result<(), FormatError> {
     let mut ranges = Vec::new();
     ranges
@@ -987,13 +1100,18 @@ fn validate_file_directory_ranges(
         if start < cursor {
             return Err(FormatError::Invalid("native section ranges overlap"));
         }
-        validate_zero_file_range(file, cursor, start)?;
+        validate_zero_file_range(file, cursor, start, cancelled)?;
         cursor = end;
     }
-    validate_zero_file_range(file, cursor, directory_offset)
+    validate_zero_file_range(file, cursor, directory_offset, cancelled)
 }
 
-fn validate_zero_file_range(file: &mut fs::File, start: u64, end: u64) -> Result<(), FormatError> {
+fn validate_zero_file_range(
+    file: &mut (impl Read + Seek),
+    start: u64,
+    end: u64,
+    cancelled: &mut impl FnMut() -> bool,
+) -> Result<(), FormatError> {
     if end < start {
         return Err(FormatError::Invalid("native padding range regresses"));
     }
@@ -1001,6 +1119,9 @@ fn validate_zero_file_range(file: &mut fs::File, start: u64, end: u64) -> Result
     let mut remaining = end - start;
     let mut buffer = [0_u8; 4096];
     while remaining != 0 {
+        if cancelled() {
+            return Err(FormatError::Cancelled);
+        }
         let length = usize::try_from(remaining.min(buffer.len() as u64)).unwrap();
         file.read_exact(&mut buffer[..length])?;
         if buffer[..length].iter().any(|byte| *byte != 0) {
@@ -1038,7 +1159,8 @@ fn section_records_digest(
     section: &NativeSection,
     compression: Option<u32>,
     logical_length: u64,
-) -> [u8; 32] {
+    cancelled: &mut impl FnMut() -> bool,
+) -> Result<[u8; 32], FormatError> {
     let mut hasher = section_payload_hasher(
         context,
         section.fourcc,
@@ -1047,11 +1169,19 @@ fn section_records_digest(
         logical_length,
     );
     for record in &section.records {
+        if cancelled() {
+            return Err(FormatError::Cancelled);
+        }
         let header = record_header(record);
         hasher.update(&header);
-        hasher.update(&record.payload);
+        for chunk in record.payload.chunks(ATOMIC_WRITE_CHUNK_BYTES) {
+            if cancelled() {
+                return Err(FormatError::Cancelled);
+            }
+            hasher.update(chunk);
+        }
     }
-    *hasher.finalize().as_bytes()
+    Ok(*hasher.finalize().as_bytes())
 }
 
 fn section_payload_hasher(
@@ -1153,10 +1283,7 @@ fn read_u64(bytes: &[u8], offset: usize) -> Result<u64, FormatError> {
 
 fn atomic_replace_streaming(
     path: &Path,
-    header: &[u8],
-    sections: &[PreparedSection<'_>],
-    directory_offset: u64,
-    directory: &[u8],
+    file: &NativeFile,
     cancelled: &mut impl FnMut() -> bool,
 ) -> Result<(), FormatError> {
     let parent = path.parent().ok_or(FormatError::Invalid(
@@ -1183,38 +1310,7 @@ fn atomic_replace_streaming(
         "native temporary file name space is exhausted",
     ))?;
     let result = (|| {
-        temporary_file.write_all(header)?;
-        let mut position = header.len() as u64;
-        for section in sections {
-            write_zero_padding_streaming(
-                &mut temporary_file,
-                &mut position,
-                section.offset,
-                cancelled,
-            )?;
-            for record in &section.section.records {
-                if cancelled() {
-                    return Err(FormatError::Cancelled);
-                }
-                let header = record_header(record);
-                temporary_file.write_all(&header)?;
-                position += header.len() as u64;
-                for chunk in record.payload.chunks(ATOMIC_WRITE_CHUNK_BYTES) {
-                    if cancelled() {
-                        return Err(FormatError::Cancelled);
-                    }
-                    temporary_file.write_all(chunk)?;
-                    position += chunk.len() as u64;
-                }
-            }
-        }
-        write_zero_padding_streaming(
-            &mut temporary_file,
-            &mut position,
-            directory_offset,
-            cancelled,
-        )?;
-        temporary_file.write_all(directory)?;
+        write_procedure_to_writer(&mut temporary_file, file, &mut *cancelled)?;
         temporary_file.flush()?;
         temporary_file.sync_all()?;
         drop(temporary_file);
@@ -1231,7 +1327,7 @@ fn atomic_replace_streaming(
 }
 
 fn write_zero_padding_streaming(
-    output: &mut fs::File,
+    output: &mut impl Write,
     position: &mut u64,
     target: u64,
     cancelled: &mut impl FnMut() -> bool,

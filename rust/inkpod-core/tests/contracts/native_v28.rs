@@ -1,4 +1,4 @@
-//! Native v28 and replay epoch 25 public persistence contracts.
+//! Current native container and replay epoch 25 public persistence contracts.
 
 use super::*;
 use inkpod_format::{
@@ -46,6 +46,237 @@ fn frame_field(payload: &[u8], wanted: u32) -> std::ops::Range<usize> {
         }
         cursor = end;
     }
+}
+
+#[test]
+fn io_001_native_raster_format_is_persisted_without_changing_pixel_asset_identity() {
+    let mut core = Core::new();
+    core.new_cell(2, 1, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    assert_eq!(core.raster_file_format().unwrap(), CommonRasterFormat::Png);
+    let before = core.document_info().unwrap();
+    core.set_new_cell_raster_format(CommonRasterFormat::Tiff);
+    assert_eq!(core.document_info().unwrap(), before);
+    assert_eq!(core.raster_file_format().unwrap(), CommonRasterFormat::Png);
+    core.new_cell(2, 1, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    assert_eq!(core.raster_file_format().unwrap(), CommonRasterFormat::Tiff);
+
+    let raster = inkpod_format::CommonRaster::new(
+        2,
+        1,
+        PixelFormat::StraightRgba8,
+        Some(DEFAULT_DPI_MILLI),
+        Some(DEFAULT_DPI_MILLI),
+        vec![21, 42, 63, 255, 17, 29, 47, 127],
+    )
+    .unwrap();
+    let mut first_asset = None;
+    for format in [
+        CommonRasterFormat::Png,
+        CommonRasterFormat::Tiff,
+        CommonRasterFormat::Tga,
+        CommonRasterFormat::Bmp,
+    ] {
+        let encoded = inkpod_format::encode_common_raster(format, &raster, false).unwrap();
+        core.import_common_raster(format, &encoded, 0x2901).unwrap();
+        let asset = core.genesis_info().unwrap().base_surface;
+        if let Some(expected) = first_asset {
+            assert_eq!(asset, expected);
+        } else {
+            first_asset = Some(asset);
+        }
+        let state = core.document_info().unwrap();
+        let prepared = core
+            .capture_document_save()
+            .unwrap()
+            .prepare_normal_save(|| false)
+            .unwrap();
+        assert_eq!(core.document_info().unwrap(), state);
+        for instructions in [false, true] {
+            let exported = core
+                .capture_document_save()
+                .unwrap()
+                .prepare_raster_export(format, true, instructions, || false)
+                .unwrap();
+            let expected = if instructions {
+                core.export_instruction_common_raster(format, true).unwrap()
+            } else {
+                core.export_common_raster(format, true).unwrap()
+            };
+            assert_eq!(exported, expected);
+        }
+        assert_eq!(core.document_info().unwrap(), state);
+        let (native, output_format, output, token) = prepared.into_parts();
+        assert_eq!(output_format, format);
+        assert_eq!(
+            inkpod_format::decode_common_raster(format, &output)
+                .unwrap()
+                .pixels,
+            raster.pixels
+        );
+        core.validate_document_save(&token).unwrap();
+        let reopened = Core::from_native_file(native.clone(), false).unwrap();
+        assert_eq!(reopened.raster_file_format().unwrap(), format);
+        assert_eq!(reopened.genesis_info().unwrap().base_surface, asset);
+        let recovered = Core::from_native_file(native.clone(), true).unwrap();
+        assert_eq!(recovered.raster_file_format().unwrap(), format);
+        assert!(recovered.document_info().unwrap().dirty);
+        assert!(recovered.document_info().unwrap().recovered);
+
+        let mut invalid = native;
+        let payload = &mut invalid
+            .sections
+            .iter_mut()
+            .find(|section| section.fourcc == *b"META")
+            .unwrap()
+            .records[0]
+            .payload;
+        let field = frame_field(payload, 21);
+        payload[field].copy_from_slice(&99_u32.to_le_bytes());
+        assert!(Core::from_native_file(invalid, false).is_err());
+    }
+}
+
+#[test]
+fn io_001_detached_file_tokens_reject_stale_cross_core_and_duplicate_publication() {
+    let mut core = Core::new();
+    core.new_cell_with_uuid(4, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI, 0x2902)
+        .unwrap();
+    let snapshot = core.capture_document_save().unwrap();
+    let (native, token) = snapshot.prepare_native_save(false, || false).unwrap();
+    let mut other = Core::new();
+    other
+        .new_cell_with_uuid(4, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI, 0x2902)
+        .unwrap();
+    assert!(other.validate_document_save(&token).is_err());
+    let unchanged = core.document_info().unwrap();
+    let destination = native_path("prepared-save");
+    core.commit_document_save(token.clone(), &destination)
+        .unwrap();
+    assert_eq!(
+        core.document_info().unwrap().document_revision,
+        unchanged.document_revision
+    );
+    assert!(!core.document_info().unwrap().dirty);
+    assert!(core.commit_document_save(token, &destination).is_err());
+
+    let open_token = core.capture_document_open().unwrap();
+    let pending_save = core
+        .capture_document_save()
+        .unwrap()
+        .prepare_native_save(false, || false)
+        .unwrap()
+        .1;
+    core.adopt_opened_document(
+        open_token,
+        Core::from_native_file(native.clone(), false).unwrap(),
+        Some(&destination),
+    )
+    .unwrap();
+    assert!(core.validate_document_save(&pending_save).is_err());
+    let stale_open = core.capture_document_open().unwrap();
+    core.set_main_line_color(PixelValue::Rgba([8, 9, 10, 255]))
+        .unwrap();
+    let edited = core.document_info().unwrap();
+    assert!(
+        core.adopt_opened_document(
+            stale_open,
+            Core::from_native_file(native, false).unwrap(),
+            Some(&destination)
+        )
+        .is_err()
+    );
+    assert_eq!(core.document_info().unwrap(), edited);
+    assert!(matches!(
+        core.capture_document_save()
+            .unwrap()
+            .prepare_normal_save(|| true),
+        Err(CoreError::Cancelled)
+    ));
+    assert_eq!(core.document_info().unwrap(), edited);
+}
+
+#[test]
+fn io_001_normal_raster_save_rejects_precision_loss_and_preserves_creation_defaults_on_open() {
+    let exact_pixels: Vec<_> = [1_u16, 1_001, 32_767, 65_535, 257, 258, 65_534, 50_000]
+        .into_iter()
+        .flat_map(u16::to_le_bytes)
+        .collect();
+    let exact_raster = inkpod_format::CommonRaster::new(
+        2,
+        1,
+        PixelFormat::StraightRgba16,
+        None,
+        None,
+        exact_pixels.clone(),
+    )
+    .unwrap();
+    for format in [CommonRasterFormat::Png, CommonRasterFormat::Tiff] {
+        let encoded = inkpod_format::encode_common_raster(format, &exact_raster, false).unwrap();
+        let mut core = Core::new();
+        core.import_common_raster(format, &encoded, 0x2904).unwrap();
+        let (native, output_format, output, _) = core
+            .capture_document_save()
+            .unwrap()
+            .prepare_normal_save(|| false)
+            .unwrap()
+            .into_parts();
+        assert_eq!(output_format, format);
+        let output = inkpod_format::decode_common_raster(format, &output).unwrap();
+        assert_eq!(output.info.pixel_format, PixelFormat::StraightRgba16);
+        assert_eq!(output.pixels, exact_pixels);
+        let reopened = Core::from_native_file(native, false).unwrap();
+        assert_eq!(reopened.raster_file_format().unwrap(), format);
+    }
+    for format in [CommonRasterFormat::Tga, CommonRasterFormat::Bmp] {
+        let mut core = Core::new();
+        core.set_new_cell_raster_format(format);
+        core.new_cell_from_raster_asset(
+            RasterAssetInput {
+                width: 1,
+                height: 1,
+                pixel_format: PixelFormat::StraightRgba16,
+                color_space: Some(AssetColorSpace::Srgb),
+                alpha_semantics: AssetAlphaSemantics::Straight,
+                canonical_stride: 8,
+                pixels: [1001_u16, 2002, 3003, 65535]
+                    .into_iter()
+                    .flat_map(u16::to_le_bytes)
+                    .collect(),
+                expected_id: None,
+            },
+            DEFAULT_DPI_MILLI,
+            DEFAULT_DPI_MILLI,
+            0x2903,
+        )
+        .unwrap();
+        let before = core.document_info().unwrap();
+        assert!(
+            core.capture_document_save()
+                .unwrap()
+                .prepare_normal_save(|| false)
+                .is_err()
+        );
+        assert_eq!(core.document_info().unwrap(), before);
+        let native = core
+            .capture_document_save()
+            .unwrap()
+            .prepare_native_save(false, || false)
+            .unwrap()
+            .0;
+        let token = core.capture_document_open().unwrap();
+        core.set_new_cell_raster_format(CommonRasterFormat::Tiff);
+        core.adopt_opened_document(token, Core::from_native_file(native, true).unwrap(), None)
+            .unwrap();
+        assert_eq!(core.raster_file_format().unwrap(), format);
+        core.new_cell(2, 2, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+            .unwrap();
+        assert_eq!(core.raster_file_format().unwrap(), CommonRasterFormat::Tiff);
+    }
+    fn require_send<T: Send>() {}
+    require_send::<inkpod_core::DocumentSaveSnapshot>();
+    require_send::<inkpod_core::PreparedDocumentSave>();
 }
 
 #[test]
@@ -480,6 +711,19 @@ fn io_001_compaction_requires_an_exact_confirmation_token_and_never_mutates_live
     let expected_journal = core.journal_entries().to_vec();
     let plan = core.compaction_plan().unwrap();
     assert_eq!(plan.history_procedure_count, 1);
+    assert!(matches!(
+        core.capture_compacted_copy(plan)
+            .unwrap()
+            .prepare_compacted_copy(plan, || true),
+        Err(CoreError::Cancelled)
+    ));
+    let captured = core.capture_compacted_copy(plan).unwrap();
+    let (detached_file, token) =
+        std::thread::spawn(move || captured.prepare_compacted_copy(plan, || false))
+            .join()
+            .unwrap()
+            .unwrap();
+    core.validate_document_save(&token).unwrap();
     core.write_compacted_copy(&compact_path, plan).unwrap();
     assert_eq!(core.document_info().unwrap(), expected_info);
     assert_eq!(core.document_state_digest().unwrap(), expected_digest);
@@ -487,6 +731,10 @@ fn io_001_compaction_requires_an_exact_confirmation_token_and_never_mutates_live
     assert_eq!(core.journal_entries(), expected_journal);
 
     let compact_file = read_procedure_file(&compact_path).unwrap();
+    assert_eq!(
+        inkpod_format::encode_procedure_file(&detached_file).unwrap(),
+        inkpod_format::encode_procedure_file(&compact_file).unwrap()
+    );
     assert!(
         !compact_file
             .sections
@@ -506,6 +754,22 @@ fn io_001_compaction_requires_an_exact_confirmation_token_and_never_mutates_live
     assert_eq!(compacted.editor_state_frame().unwrap(), expected_editor);
     assert!(compacted.undo().is_err());
     assert!(!compacted.document_info().unwrap().dirty);
+
+    let mut invalid_plan = plan;
+    invalid_plan.journal_digest[0] ^= 1;
+    assert!(matches!(
+        core.capture_compacted_copy(invalid_plan)
+            .unwrap()
+            .prepare_compacted_copy(invalid_plan, || false),
+        Err(CoreError::InvalidState("compaction plan is stale"))
+    ));
+    core.set_main_line_color(PixelValue::Rgba([4, 5, 6, u8::MAX]))
+        .unwrap();
+    assert!(core.validate_document_save(&token).is_err());
+    assert!(matches!(
+        core.capture_compacted_copy(plan),
+        Err(CoreError::InvalidState("compaction plan is stale"))
+    ));
 
     fs::remove_file(normal_path).unwrap();
     fs::remove_file(compact_path).unwrap();

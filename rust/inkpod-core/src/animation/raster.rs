@@ -178,6 +178,26 @@ pub(crate) fn flatten_document_with_instructions(
 pub(crate) fn visit_visible_document_composite_rgba16(
     document: &CellDocument,
     assets: &asset::AssetStore,
+    visit: impl FnMut(u32, u32, [u16; 4]) -> Result<(), CoreError>,
+) -> Result<(), CoreError> {
+    visit_document_composite_rgba16(document, assets, false, visit)
+}
+
+/// Visits the normal-save composite with the immutable paper underlay present.
+/// This shares exact-depth compositing with visible-color inspection while
+/// keeping that inspection's transparent-underlay contract unchanged.
+pub(super) fn visit_native_save_composite_rgba16(
+    document: &CellDocument,
+    assets: &asset::AssetStore,
+    visit: impl FnMut(u32, u32, [u16; 4]) -> Result<(), CoreError>,
+) -> Result<(), CoreError> {
+    visit_document_composite_rgba16(document, assets, true, visit)
+}
+
+fn visit_document_composite_rgba16(
+    document: &CellDocument,
+    assets: &asset::AssetStore,
+    include_paper: bool,
     mut visit: impl FnMut(u32, u32, [u16; 4]) -> Result<(), CoreError>,
 ) -> Result<(), CoreError> {
     bounded_document_pixels(document.width, document.height)?;
@@ -201,7 +221,7 @@ pub(crate) fn visit_visible_document_composite_rgba16(
     for y in 0..document.height {
         for x in 0..document.width {
             let mut composite = match &base_asset {
-                None => [0_u16; 4],
+                None => [if include_paper { u16::MAX } else { 0 }; 4],
                 Some(record) => base_raster_pixel_rgba16(
                     record.raster().ok_or(CoreError::InvalidState(
                         "Genesis base asset stopped being a raster",

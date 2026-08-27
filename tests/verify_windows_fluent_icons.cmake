@@ -239,8 +239,8 @@ file(READ "${INKPOD_SOURCE_DIR}/apps/windows/ui/main_window_runtime.cpp"
     MAIN_WINDOW_RUNTIME_TEXT)
 foreach(SUBPALETTE_RUNTIME_MARKER IN ITEMS
         "RebindSubpaletteImageRoute" "SelectColorDockPaneDrawingColor"
-        "QueueSubpaletteDecode" "EnqueueSubpalette"
-        "inkpod_subpalette_load_cached_rasters"
+        "INKPOD_IO_REFERENCE_FILES" "INKPOD_IO_REFERENCE_FOLDER"
+        "QueueFileIoWork"
         "inkpod_subpalette_select_cached_raster")
     string(FIND "${MAIN_WINDOW_RUNTIME_TEXT}" "${SUBPALETTE_RUNTIME_MARKER}"
         SUBPALETTE_RUNTIME_OFFSET)
@@ -250,7 +250,8 @@ foreach(SUBPALETTE_RUNTIME_MARKER IN ITEMS
     endif()
 endforeach()
 foreach(SUBPALETTE_LEGACY_LOAD_MARKER IN ITEMS
-        "QueueSubpaletteLoad(" "inkpod_subpalette_load_common_raster(")
+        "QueueSubpaletteLoad(" "inkpod_subpalette_load_common_raster("
+        "ReadSubpaletteFileCallback" "EnumerateSubpaletteFolder")
     string(FIND "${MAIN_WINDOW_RUNTIME_TEXT}" "${SUBPALETTE_LEGACY_LOAD_MARKER}"
         SUBPALETTE_LEGACY_LOAD_OFFSET)
     if(SUBPALETTE_LEGACY_LOAD_OFFSET GREATER_EQUAL 0)

@@ -20,6 +20,7 @@ mod light_table_operations;
 mod ordering;
 mod raster;
 mod sequence;
+mod sequence_activation;
 mod sequence_operations;
 
 pub(crate) use light_table::LightTableState;
@@ -44,3 +45,4 @@ pub use sequence::{
     SequenceSwitchRequest, Thumbnail,
 };
 pub(crate) use sequence::{MotionCheckState, SequenceState};
+pub use sequence_activation::{SequenceActivationKind, SequenceActivationPlan};

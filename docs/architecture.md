@@ -8,13 +8,16 @@ summarized in [`legacy.md`](legacy.md).
 
 ## Dependency direction
 
-Inkpod has one platform-independent document-state owner. Dependencies and data
-flow are one-way:
+Inkpod has one platform-independent document-state owner. Crate dependencies are
+one-way; owned work and immutable results cross the runtime queues:
 
 ```text
 CMake -> Cargo -> inkpod-ffi -> inkpod-core -> inkpod-format -> inkpod-image
-                                      |                 ^
-                                      +-----------------+
+inkpod-ffi  -> inkpod-io
+inkpod-core -> inkpod-io -> inkpod-format
+
+Core engine thread <-> bounded inkpod-io workers
+  submit/poll/apply       filesystem/codec/staged Core work
 
 UI/Input thread -> bounded command/sample queue -> Core engine thread
                                                     | versioned C ABI
@@ -25,19 +28,24 @@ UI/Input thread -> bounded command/sample queue -> Core engine thread
                                               Renderer thread -> DXGI Present
 ```
 
-`inkpod-ffi` is the only Rust `staticlib`. Rust domain crates do not depend on
-Win32, COM, Direct2D, Direct3D, DXGI, WIC, Windows DPI types, or frontend thread
-types. C++ does not implement a second document, image-processing, history, or
-native-format model.
+`inkpod-ffi` is the only Rust `staticlib`. `inkpod-core`, `inkpod-format`, and
+`inkpod-image` do not depend on Win32, COM, Direct2D, Direct3D, DXGI, WIC, Windows
+DPI types, or frontend thread types. The sole OS-specific filesystem backend is
+private to `inkpod-io`, for physical identity, file coordination, and atomic
+replacement. No OS type escapes that backend through a public Rust API or the
+C ABI. C++ does not implement a second document, image-processing, history, or
+native-format model. `inkpod-io` depends on codecs, never on application state;
+Core supplies owned detached work to its generic executor.
 
 ## Rust responsibilities
 
 | Crate           | Responsibility                                                                                                                                                                     |
 | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `inkpod-image`  | Typed pixel formats, 64 x 64 sparse tiles, `Arc` copy-on-write storage, selection, fill/sampling/palette logic, and deterministic raster/filter/effect operations |
-| `inkpod-format` | Bounded procedure-authoritative `.inkpod` v28 Cell/Cut containers and `.inkbatch` v3 models, streaming encode/decode/validation, atomic file I/O, and PNG/TIFF/TGA/BMP codecs |
+| `inkpod-format` | Bounded procedure-authoritative `.inkpod` v29 Cell/Cut containers and `.inkbatch` v4 models, stream/byte encode/decode/validation, and PNG/TIFF/TGA/BMP codecs; existing synchronous path wrappers remain for Rust callers outside the migrated application routes |
+| `inkpod-io`     | Application-owned bounded workers, filesystem paths/identity/locks, encoded and decoded LRU leases, streaming file access, temporary-file publication/cleanup, recoverable native/raster pair installation, recovery artifacts, and polling progress |
 | `inkpod-core`   | Stable-ID document/layer/plane state, immutable Genesis/base surfaces, a content-addressed canonical asset registry, StateId savepoints, views, raster clipboard, previews, animation, effects/Batch commands, persistence mapping, immutable render snapshots, and canonical primitive execution plus append-only journal/cache-free replay and semantic document digests for the migrated Core slice |
-| `inkpod-ffi`    | ABI v22 fixed records and generation-tagged runtime IDs, Batch v4 multi-target graph/staged-result handles, InkScript source/compiler/fragment plus authority/plan/run/report handles and fixed DTO host callbacks, persistence/compaction diagnostics, validation/conversion, panic containment, ownership functions, and feature-specific exports |
+| `inkpod-ffi`    | ABI v23 fixed records and generation-tagged runtime IDs, opaque I/O manager/job handles and path submission/poll/apply/release, Batch v4 graph/staged-result handles, InkScript source/compiler/fragment plus authority/plan/run/report handles and fixed DTO host callbacks, persistence/compaction diagnostics, validation/conversion, panic containment, and ownership functions |
 
 Binary, grayscale, RGBA8/16, straight-alpha, premultiplied display data, and
 selection masks remain distinct types. Win32 may provide a
@@ -54,8 +62,98 @@ fine-grained tests of private invariants in `#[cfg(test)]` modules beside that
 implementation, while public Core workflows run as a separate multi-module
 integration-test target below `tests`. Architecture tests enforce small roots,
 the responsibility split, `cfg(test)` gating, recursive CMake tracking, ABI
-header/export parity, direct contract-test references, and the absence of
-Windows dependencies throughout the Rust workspace.
+header/export parity, direct contract-test references, and the confinement of
+OS filesystem code to the approved private `inkpod-io` backend.
+
+## Shared filesystem service (IO-003)
+
+`ApplicationHost` owns one `FileIoController` and opaque Rust `InkpodIoManager`
+shared by every workspace and document. `CoreHost` binds that manager to each
+production Core and owns submit, poll, apply, and release on the Core engine
+thread. Windows passes owned paths and typed purpose/target metadata; it does
+not enumerate, read, decode, write, identify, or replace image files on these
+routes. The worker pool owns those filesystem operations and the detached Rust
+codec/replay work. Workers hold no live Core handle and call no C++ callback.
+
+The shared boundary covers editable native/recovery and raster open, automatic
+and explicit sequences, Subpalette/Reference catalogs, Light Table add/reload,
+and Batch file/folder/preview inputs and outputs. Icons, palette/chart files,
+shortcuts/settings, clipboard memory images, test fixtures, and Cut member
+validation are outside this migration. Raster input is PNG, TIFF, TGA, or BMP;
+reference-only loading never creates an editable document or native file.
+
+| Image-cache limit | Bound |
+|---|---|
+| Resident images | 10,000 |
+| Encoded bytes per raster file | 512 MiB |
+| Encoded total | 8 GiB |
+| Decoded pixel total | 8 GiB |
+
+Reservations precede reads and pixel allocation. Encoded and decoded LRU
+accounting includes queued results, consumer-held leases, old/new replacement
+candidates, coexisting decode pixel buffers, and reference-view render pixels.
+Reference snapshot and individually cloned tile owners retain their derived
+pixel charge; Vec-to-Arc conversion reserves both coexisting allocations.
+Removing a map entry does not uncharge a live lease. Only unpinned entries may
+be evicted; an operation that
+cannot reserve its bounded working set fails without discarding the current
+document/catalog. Document/history assets are separate authoritative data and
+are never evicted by this cache. Native/recovery files use uncached bounded
+streaming with the existing 1 GiB limit.
+
+Read/write coordination uses normalized path and physical volume/file identity
+keys, including aliases, with a fixed acquisition order for multiple files.
+Replacement invalidates affected cache entries. External writes are not locked
+by the application: stamp/content validation detects changes and rejects stale
+reads or unauthorized overwrite instead of trusting a filename or timestamp
+alone.
+
+Automatic sequence loading is a separate job after primary raster open succeeds.
+A Rust worker synchronously enumerates the directory, matches the last ASCII
+digit run and case-insensitive surrounding stem, accepts every supported raster
+extension, and selects a natural-order neighborhood containing the seed, capped
+at 1,000 images. Digit width is not fixed. Truncation is explicit; this cap does
+not replace the independent explicit-sequence, reference, or Batch limits.
+Late attachment validates sequence/owner identity without reopening Genesis or
+discarding edits made after the primary open. Discovery/decode failure leaves
+that successful primary open intact.
+
+Jobs expose nonblocking discovery, read, loaded, failure, work, result, and
+installation counters through ABI v23. Loaded images include cache hits;
+internal Batch output rereads do not count as additional input images. Queued
+drop/cancel cannot publish a live candidate. A result is applied only on its
+captured owner after generation/revision validation. Normal save, sequence
+autosave-switch, and compaction installation return a pending state after
+owner authorization and fence document mutation until final apply. Closing or
+shutdown cancels/drains this continuation before destroying its Core; releasing
+an installation early is not a substitute for finalization.
+
+A sequence activation plan classifies an existing binding as `NOOP`, an identical
+initial raster as `BIND`, and a document replacement as `REPLACE`. Core validates
+the captured source/target identity, source generation, and revisions again at
+commit. `NOOP` and `BIND` preserve the old save authority, including dirty state;
+the initial binding does not use the bound-source-only autosave request. Only
+`REPLACE` prepares the next recovery path and reserves its document identity
+before applying the switch. A bound autosave switch also uses the request's
+`REQUIRED` flag, including a changed source generation under the same document
+UUID. An unbound replacement follows the ordinary save confirmation first.
+One bounded reservation per registered session
+covers the identity and normalized original/source paths, so another open or
+write cannot claim them while recovery is pending. The old session identity
+and paths remain active until success. Publication only moves prepared values,
+clears the previous normal save destination, and assigns the new UUID's
+Untitled identity or the restored recovery identity. Restoring an original
+identity supports duplicate detection; it does not grant normal save authority.
+Failure, cancellation, queue rejection, and session close release the reservation.
+True no-ops preserve the old authority, and a snapshot/presentation failure
+cannot undo authority publication after Core has committed the switch.
+
+Light Table's explicit swap follows the same save-authority rule. Windows captures
+the selected stable item, its source UUID/revision, and the current document/editor
+revisions through existing metadata queries, then revalidates them on the owner
+before swapping. It reserves the new Untitled identity and prepares its recovery
+path before commit. Only a successful swap clears the previous native/source paths;
+ordinary save must obtain a destination for the newly editable reference.
 
 ## Primitive, route, and journal target contract
 
@@ -116,15 +214,16 @@ typed frontend request
 
 The control plane contains only fixed-width values and Rust-owned object/asset
 IDs. A borrowed C record is call-by-value in meaning and is not retained after
-return. Variable samples, encoded images, and clipboard payloads enter
-through bounded data-plane APIs. Every ABI-v2 ingestion route synchronously
-validates and copies borrowed data before returning. Raster open/import,
-clipboard, and Light Table sources are interned in the canonical asset registry;
+return. Variable samples and clipboard memory images enter through bounded
+data-plane APIs that synchronously validate and copy borrowed memory. Migrated
+filesystem routes pass paths only and let the I/O worker own decoding. Raster
+open/import, clipboard, and Light Table sources are interned in the canonical asset registry;
 stroke samples become an owned inline payload up to 4 MiB and one immutable
 sample asset above that cutoff. Sequence sources remain bounded Rust-owned raster
-copies. Neither Core nor a
-committed procedure retains the caller's record, buffer, file name, or path. A
-committed procedure contains bounded inline canonical bytes or immutable
+copies. Neither Core nor a committed procedure retains the caller's borrowed
+record or buffer. Owned filesystem paths remain runtime I/O authority and never
+enter a committed procedure. A committed procedure contains bounded inline
+canonical bytes or immutable
 content-addressed `AssetId` values, never a raw pointer, path, native enum layout,
 callback, STL object, temporary object ID, OS DPI, or frontend command ID.
 
@@ -183,13 +282,13 @@ cache release, and later history movement reconstructs the cache on demand.
 
 This is deliberately not a generic snapshot- or diff-procedure bridge. Every
 production history entry references its route-specific canonical procedure,
-and there is no supported incomplete-journal state. The v28 writer serializes
+and there is no supported incomplete-journal state. The v29 writer serializes
 Genesis, retained assets, the complete journal/control-event sequence, editor
 state, savepoints, cursor, branch graph, and ID authorities. Open validates and
 either fully replays that graph or uses a prefix/state/policy-verified optional
 checkpoint in a staged Core before one replacement of the live generation.
 Checkpoint mismatch selects full replay; malformed/hash/bound failure rejects.
-The journal remains authoritative and every non-v28 Cell version is rejected.
+The journal remains authoritative and every non-v29 Cell version is rejected.
 
 History visualization is a read-only derived view of that journal. Core replays
 the complete retained graph through the canonical executor, visits only `Commit`
@@ -225,7 +324,7 @@ validation. Removed members are not physically deleted and remain addressable by
 stable `(CellId, document UUID)` while retained Cut history can restore them. The
 optional angled shooting frame and stable-ID vanishing points are independent document
 objects. Their canonical edits, previews, transform rules, snapshot overlays, output
-inclusion policies, and Core-owned radial snapping are persisted by v28; flat normal
+inclusion policies, and Core-owned radial snapping are persisted by v29; flat normal
 output excludes both overlay families, while explicit instruction export may include
 the shooting-frame outline. Epoch 19/version 22 added the independent
 current-only Cut descriptor and Cut metadata/
@@ -272,10 +371,10 @@ Cache-free verification first builds a detached asset archive from every semanti
 retention root, deep-copies each logical payload, and re-ingests it into an empty
 registry with the expected `AssetId`. Fresh Genesis/journal replay uses only that
 detached registry, so passing verification cannot be an artifact of shared
-`AssetRecord`, payload, or `TileRaster` ownership. Production v28 persists the
+`AssetRecord`, payload, or `TileRaster` ownership. Production v29 persists the
 same rooted graph in GENS/ASST.
 
-The present ABI is v18. `InkpodObjectId` separates Core, snapshot, task, color,
+The present ABI is v23. `InkpodObjectId` separates Core, snapshot, task, color,
 sample, raster, thumbnail, and export runtime objects by type and Core generation;
 IDs are monotonic within one Core and are never accepted across generation or
 after release. Variable input is synchronously copied into bounded Rust-owned
@@ -294,7 +393,9 @@ closed value/ID-only primitive lane. Other operations use a fixed `AdapterWork`
 record containing issue-time session/generation/context, flags, sequence, and a
 bounded input token; callables, optional view updates, and completions stay in a
 CoreHost registry and are removed exactly once on the owner thread. No queued
-work variant contains a callable, pointer, path, or STL container. V14 normal
+work variant contains a callable, pointer, path, or STL container. File I/O jobs
+have separate manager/job handles and owned bounded path requests; their worker
+results return through the engine's polling continuation. Current native normal
 save, autosave/recovery, and Batch output all serialize asset-backed Genesis and
 every retained asset through the same Core-owned GENS/ASST mapping. Flat common-
 raster export remains a separate operation.
@@ -493,14 +594,15 @@ connectivity; selection clipping and the reached round or square footprint are
 independent gates. These values are persisted in `ApplyRasterStroke` schema 3,
 so live commit, Undo/Redo, reopen, and replay share one executor.
 
-`DocumentRegistry` also owns the canonical identity index. An existing Windows
-file is keyed by `FILE_ID_INFO` volume and file ID when available, otherwise by
-its normalized absolute case-insensitive path; an untitled session is keyed by
-a generated UUID. Display names and tab positions are never identities. Open
-resolves this index before creating a Core entry and selects an existing view on
-a duplicate. Save As stages the destination identity, rejects a conflict with a
-different live session before writing, and publishes the new shell path,
-identity index, title, bounded recent-file entry, and recovery metadata only
+`DocumentRegistry` also owns the canonical identity index. For migrated image
+routes, Rust returns physical volume/file identity or normalized missing-path
+identity; the C++ registry performs no filesystem identity query. On Windows,
+case-insensitive path coordination and `FILE_ID_INFO` are backend details.
+An untitled session is keyed by a generated UUID. Display names and tab positions
+are never identities. Open uses the returned identity to detect an existing
+session before publication. Save As stages the destination identity, rejects a
+conflict with a different live session before installation, and publishes the
+new shell path, identity index, title, bounded recent-file entry, and recovery metadata only
 after save succeeds. A failed save leaves the old identity and presentation
 intact.
 
@@ -694,29 +796,38 @@ The Windows adapter uses the Core-provided target for both prompt and autosave
 routes; it does not derive endpoint behavior from pane indices.
 
 Sequence navigation also has one application-level, versioned `Prompt` or
-`Autosave-before-switch` dirty-cell policy. The autosave route first asks Core for an
-immutable value request containing the exact source/target UUIDs, sequence-source
-generations, and source document/editor revisions. `DocumentSession` owns a
+`Autosave-before-switch` dirty-cell policy. The activation plan first distinguishes
+no-op, initial binding, and replacement. A bound replacement's autosave route asks
+Core for an immutable value request containing the exact source/target UUIDs,
+sequence-source generations, and source document/editor revisions. An unbound
+replacement uses normal save confirmation before activation. `DocumentSession` owns a
 bounded registry keyed by source UUID plus generation; each published entry owns
 one private native recovery path, sidecar metadata, and a monotonic artifact
-generation. The UI pre-reserves registry capacity, then the CoreHost owner lane
-writes and durably replaces the source artifact before it commits the requested
-activation. A target with an existing association is decoded, validated, and
-replayed in a staged Core, then swaps the live Core only after its UUID matches.
+generation. The UI pre-reserves registry capacity, then Core captures a COW
+`SequenceSwitchSnapshot` with the complete sequence revision and source file
+authority. Workers prepare the source native recovery and fully validate/replay
+an associated target recovery, requiring its UUID to match. After owner
+revalidation, the engine fences mutation while the worker installs the source
+artifact and metadata; final owner apply swaps the target exactly once. Error,
+cancel, or stale preparation keeps the source active. Same-cell requests do no
+I/O and advance no document or savepoint state. Current secondary-view IDs,
+reference selection, application defaults, and I/O ownership survive the switch.
 The flattened `SequenceCellSource` remains a thumbnail/fresh-cell source and is
 never used to reconstruct saved layer topology, history, selection, or editor
 state.
 
 Only one sequence switch token may be pending application-wide. While it is
 pending, previous/next/goto are disabled, progress is visible in the status bar,
-and another request is rejected rather than retargeted. Completion carries only
-token and frontend generation through `PostMessage`; the UI publishes the
-pre-reserved association, active cell, pathless recovery shell state, panes, and
-menu state only for the captured live session. Save, metadata, queue, or stale
+and another request is rejected rather than retargeted. The file-I/O controller's
+UI-thread continuation first publishes the prepared association, identity, and
+pathless recovery shell for the captured live session, even if the originating
+view has closed. A token/generation-only window message then refreshes surviving
+pane/menu UI; it never carries object pointers. Save, metadata, queue, or stale
 failure leaves the source cell active and never advances the normal path or
-savepoint; close or shutdown invalidates and discards that session without
-retargeting completion to another document. Both policy values are fields of the
-single versioned settings JSON and are not part of the `.inkpod` schema.
+savepoint; close or shutdown cancels and finalizes accepted installation before
+destroying that session, without retargeting completion to another document.
+Both policy values are fields of the single versioned settings JSON and are
+not part of the `.inkpod` schema.
 
 The Light Table palette also uses the pane-target registry. Its set/item
 selection is valid only with the captured session/generation namespace, and
@@ -724,22 +835,41 @@ every mutation dispatches to that exact Core handle. Canvas movement retains
 the issue-time `CommandContext` until commit or cancel; a focus change, close,
 or stale generation cannot redirect it. The UI caches only bounded set/item
 metadata, while raster storage, snapshots, history, and persistence remain
-Core-owned. Modeless pane state is attached on the UI thread after dialog
+Core-owned. Add/reload submits only the source path to the shared manager;
+decode completes off-thread before one owner-thread Light Table primitive.
+Reload retains display/transform properties and stable item/plane IDs and is
+one Undo unit; failed, cancelled, or stale reload retains the previous source.
+Explicit edit-image swap revalidates its captured source/target metadata before
+commit and publishes its prepared pathless shell only after Core succeeds.
+Modeless pane state is attached on the UI thread after dialog
 creation; window messages do not carry C++ object or Rust-owned pointers.
 
 The subpalette/reference palette completes the read-only auxiliary-display
 path. It owns one UI-thread Canvas child and one auxiliary `CanvasId`; the
 RendererHost still owns that Canvas surface and presents it on the renderer
-thread. Its captured document session owns one Core-local secondary view for
-independent zoom, pan, flip, and viewport state. Core builds a Rust-owned
-immutable snapshot directly from the registered sequence raster without
-installing it as the editable document or changing document revision, dirty
-state, history, or savepoint. The Canvas consumes pointer strokes and converts
-only view gestures and sample coordinates; it never enqueues edit input. A
-target rebind or shutdown first unbinds the snapshot sink, closes the secondary
-view on the captured Core owner thread, destroys the palette, and unregisters
-the auxiliary Canvas ID. Queue rejection retains a single snapshot-release
-owner.
+thread. Its standalone Rust `SubpaletteCatalog` owns independent `ViewState`
+and immutable decoded image leases, not a hidden Core, Genesis, or editable
+document. Shared pure view-command and coordinate code supplies zoom, pan,
+flip, fit, and exact native-depth RGBA8/16 sampling. The catalog retains all
+accepted source images so navigation needs no I/O/decode, while converted
+64-pixel render tiles are cached only for the visible viewport. Conversion
+reserves the shared decoded budget before allocating; an exhausted budget
+returns no partial snapshot. Leaving the viewport releases only the cache's
+ownership, not charges retained by an immutable snapshot or cloned render tile.
+
+All replacement sources and the first fitted display snapshot validate before a
+single catalog publication; a failed candidate leaves the old selection and
+resident images available. Cached navigation also prepares the candidate's
+first display snapshot before publishing its selection and fitted view; a
+budget failure retains the previous selection, view, and display. The frontend
+rebinds the auxiliary snapshot namespace when swapping catalog owners, so
+catalog-local tile IDs cannot reuse a previous GPU image. Released catalogs do
+not invalidate already-owned immutable snapshots. The Canvas consumes pointer
+strokes and converts only view gestures/sample coordinates, never edit input.
+A target rebind or shutdown unbinds the snapshot sink and releases the catalog
+on its owner before unregistering the Canvas. Legacy memory/sequence sampling
+APIs remain available without being the production reference-file loader.
+Queue rejection retains a single snapshot-release owner.
 
 Color and Batch panes use the same target registry. Color registration, clear,
 load, save, and main-line changes capture the pane's exact session/generation;
@@ -761,7 +891,7 @@ index.
 Selection changes only the inline scrollable `batch_parameter_editor`; they do
 not mutate Core or an immutable graph. Add/duplicate/remove/move change only the
 four-kind draft operation list. Preview, run, and save each validate the draft
-and construct one Rust-owned immutable v3 graph. Load performs the inverse query
+and construct one Rust-owned immutable v4 graph. Load performs the inverse query
 through `inkpod_batch_graph_get_info`, `get_input`, and operation row queries,
 so a loaded set is editable rather than a count-only opaque object.
 
@@ -784,17 +914,35 @@ directory, rejects traversal, reserved-device and ambiguous trailing names, and
 maps one validated name to one `.inkbatch` path. Core and the file-format crate
 continue to receive only the resulting UTF-8 path and own the current v4 codec.
 
-Batch execution resolves File/Folder/ActiveDocument inputs in Core and reuses
-the general native/common-raster decoders and atomic writers. All enabled
-operations for one item lower to the private typed `ApplyBatchOperations`
+Batch submission captures the graph and COW active document without filesystem
+access on the issuing engine thread. Rust workers resolve File/Folder selectors
+through the shared manager, apply natural order/range/scope once, and freeze the
+result as explicit paths before parallel raster prefetch. The processing phase
+does not enumerate the folder again; native inputs remain bounded streaming
+reads and every temporary/read/write/identity operation uses `inkpod-io`.
+All enabled operations for one item lower to the private typed `ApplyBatchOperations`
 canonical primitive and share its one transaction, Undo unit, and replay
 executor. The dedicated sparse fill-protection mask is document state, not UI
 state or a selection-mask alias; all fill routes consume it as a hard boundary.
-ActiveDocument output commits only to the captured session/generation. NewTabs
+ActiveDocument output commits only to the captured session/generation, retaining
+independent current view identities and application defaults. NewTabs
 returns Rust-owned staged Core handles; `CoreHost::AdoptBatchResult` consumes
 them on the engine thread, `ApplicationHost` prepares/publishes sessions only
 after capacity checks, and rollback destroys any unpublished session. Window
 messages carry completion status and generation values, never staged pointers.
+Batch retains per-item Stop/Continue and preflights output collisions using
+filesystem identity. Native Batch output is one `.inkpod`, never an implicit
+normal-save pair; raster output keeps its explicitly chosen export semantics.
+
+Contact-sheet preview first copies every file input or materializes the captured
+active input into a private temporary job directory. No processing starts until
+all input copies are complete. Streaming copies and output writes reserve the
+remaining 4 GiB aggregate temporary allowance before publication, with the
+native/raster per-file limits. Each processed output is reopened for its
+thumbnail. A child progress context shares cancellation but keeps those internal
+rereads separate from input-loaded counts. Cleanup must succeed before the
+single clean, pathless preview Core is returned; cancellation, stale target,
+or cleanup failure never publishes a preview tab or writes the real output folder.
 
 The canonical workspace is represented by an HWND-free, fixed-capacity
 `DockLayoutModel`. Its `PaneDescriptor` records give every surface a stable type
@@ -1187,49 +1335,89 @@ candidate without changing committed document, history, revision, or cache.
 
 ## Persistence and background work
 
-Native save encodes and validates before atomically replacing a destination.
-Autosave/recovery, normal save, and export retain separate savepoint semantics.
-Timer autosave is enqueued without blocking the UI and is deferred behind a live
-stroke. Long-running tasks expose progress and cancellation; cancellation,
-failure, or stale revision does not partially commit. Format limits and recovery
-details are specified in [`file-format.md`](file-format.md).
+Normal application Save captures a COW `DocumentSaveSnapshot` and owner token
+without filesystem access, replay, or encoding on the engine thread. Rust
+workers verify cache-free replay and prepare the native file plus its same-stem
+raster companion. The explicit synchronous Rust `Core::save` primitive remains
+native-only for its existing callers; Batch native output, temporary files,
+autosave/recovery, and explicit export do not implicitly become paired saves.
+Timer autosave is queued without blocking the UI and is deferred behind a live
+stroke. Long-running tasks expose progress and cancellation. Format limits and
+recovery details are specified in [`file-format.md`](file-format.md).
 
-The current `.inkpod` v28 Cell container requires `META`, `GENS`, `ASST`, `PROC`, and
-`EDIT`. Save first verifies cache-free journal replay, encodes prospective
-document/editor savepoints, and streams the complete validated container to an
-exclusive same-directory temporary file. Header, records, asset chunks,
-procedure payloads, and directory are streamed without a second complete file
-allocation. Only successful flush, sync, close,
-and replacement publish the path and both live savepoints. Open validates all
-container/section/record digests, assets, typed invocation bytes, references,
-branch/cursor relationships, high-watermarks, and final document/editor
-digests in a staged Core, then swaps once and rebases `DocumentRevision` to 1.
-Normal-save output therefore reopens clean with Undo/Redo and inactive branches
-intact. Autosave retains the existing normal path/savepoints; recovery open
-clears both savepoints and path authority and marks the restored session dirty.
-Partial selection revert reconstructs the saved document through this same v28
-reader and commits the selected delta as one new canonical undo unit.
+The current `.inkpod` v29 Cell container requires `META`, `GENS`, `ASST`, `PROC`,
+and `EDIT`. META section/record schema 2 requires the closed raster-format value:
+PNG, TIFF, TGA, or BMP. Raster import records its actual codec; a new cell uses
+PNG unless the application supplies a different creation default. Changing that
+default does not mutate an existing document, history, or dirty state. Native
+reopen, recovery, compaction, and sequence activation preserve the stored format.
+This metadata change leaves replay epoch 25 and pixel asset/document digests
+unchanged. Normal PNG/TIFF companions retain native 16-bit precision; a 16-bit
+document cannot silently become an 8-bit TGA/BMP companion. Explicit display
+export retains its separate existing conversion contract.
+
+The codec streams headers, records, asset chunks, procedure payloads, and the
+directory without a second complete encoded-file allocation. The I/O manager
+owns exclusive same-directory temporary files, flush, sync, close, and
+replacement; it never first truncates either destination. Normal native output
+contains prospective document/editor savepoints. Both native/raster stages,
+verified old-file backups, and a bounded recovery journal are durable before
+the owner authorizes installation. The worker revalidates destination proofs
+under ordered file locks; owner authorization fences document mutation until
+final apply. Only successful installation of both files advances the live path
+and both savepoints. Existing or externally changed destinations require the
+appropriate overwrite authority; a missing companion can be regenerated by a
+normal save without an edit.
+
+Two independent file replacements are not a filesystem-atomic transaction.
+Failure recovery uses the recorded proofs to restore the prior pair or recognize
+an already completed pair. Uncertain recovery retains its journal and evidence
+instead of deleting unverified files or reporting a clean save. Cancellation or
+stale owner validation before installation publishes neither destination.
+
+Open validates all container/section/record digests, assets, typed invocation
+bytes, references, branch/cursor relationships, high-watermarks, and final
+document/editor digests in a staged Core, then swaps once and rebases
+`DocumentRevision` to 1. Normal-save output reopens clean with Undo/Redo and
+inactive branches intact. Autosave retains the existing normal path/savepoints;
+recovery open clears both savepoints and path authority and marks the restored
+session dirty. Partial selection revert reconstructs the saved document through
+this same current-version reader and commits the selected delta as one new
+canonical undo unit.
+
+Pathless document replacement, including raster import, Light Table swap,
+pathless Core adoption, and real sequence replacement, also clears the previous
+native/raster pair proof and advances its runtime persistence generation at the
+same commit. Old prepared save tokens can no longer authorize a write for the new
+document. Failed replacement retains the existing path and proofs; these runtime
+authorities are not part of the native schema or replay digest.
 
 Checkpoint policy is deterministic over procedure count, replay work, and dirty
 bytes. A materialized checkpoint is an optimization only: inactive branches and
 all retained assets remain rooted by the journal. Explicit compaction first
 returns the history-event/procedure counts and document/editor/journal digests
-as a confirmation token, then writes a separate new-Genesis file only if that
-token is still exact. It never auto-squashes or mutates/adopts the live session.
+as a confirmation token. Worker preparation builds a detached new-Genesis DTO;
+owner validation and an installation fence require that confirmation and the
+captured session to remain exact. The worker writes a separate new file without
+overwriting an existing destination. Finalization releases the fence without
+mutating/adopting the live document, history, path, or savepoints. Compaction
+never auto-squashes.
 The Windows File menu obtains that token through `CoreHost`, displays both loss
 counts before showing the save dialog, rejects a path belonging to any open
 session, and reports success without changing current path, dirty state, or
 history.
 
-Each successful autosave is paired with an atomically replaced, current-version,
-bounded metadata sidecar containing `DocumentSessionId`, generation, document UUID,
-original file identity/path, source path, and write time. Startup enumerates every
-bounded recovery artifact instead of selecting one newest file; missing or malformed
-metadata never causes silent deletion, and restore/discard/defer is per candidate.
-Opening recovery preserves its original identity namespace and retains the artifact
-until a normal save explicitly removes the recovery and sidecar. Autosave does not
-advance the normal savepoint. Workspace layout never contains document paths. A
-separate bounded current-version binary path record at
+Each successful application autosave is accompanied by a bounded version-2
+metadata sidecar containing `DocumentSessionId`, generation, document UUID,
+original file identity/path, source path, and write time. Rust owns artifact and
+metadata filesystem operations, startup enumeration, and explicit removal.
+Startup offers every bounded recovery candidate instead of selecting one newest
+file; missing or malformed metadata never causes silent deletion, and
+restore/discard/defer is per candidate. Original identity metadata describes the
+source association but never grants normal-save path authority. The artifact is
+retained until explicit discard or successful normal save removes it and its
+sidecar. Autosave does not advance the normal savepoint. Workspace layout never
+contains document paths. A separate bounded current-version binary path record at
 `%LOCALAPPDATA%\inkpod\Session\inkpod-session.bin` is read and written only when
 the default-off `起動時に前回の文書を復元` setting is enabled; crash recovery remains
 independent of that privacy choice.
@@ -1250,10 +1438,14 @@ implementation. Structural tests guard bootstrap boundaries, command route/state
 ownership, source lists, and the absence of a toolbar.
 
 The Rust portability guard scans sources, tests, benches, examples, build scripts,
-manifests, and the lockfile for Windows-only dependencies or configuration. A
-sandboxed future frontend still needs byte/stream I/O, platform UUID/file
-authority, font/GPU resource resolution, clipboard, and picker adapters; those
-are frontend extensions, not reasons to add Windows dependencies to Core.
+manifests, and the lockfile. Its narrow file/token allowlist permits filesystem
+identity, coordination, and replacement only in the private `inkpod-io` backend;
+Core, image, format, and FFI domain code remain OS-independent. Windows-specific
+crate dependencies, GUI/COM/renderer access, and OS types in public I/O APIs
+remain forbidden. A future frontend uses the same owned path/stream contracts
+with an appropriate private filesystem backend; platform UUID creation,
+font/GPU resource resolution, clipboard, and picker adapters remain frontend
+responsibilities.
 
 The `large_document` image benchmark exercises maximum-dimension sparse
 allocation, distributed writes, copy-on-write isolation, and a bounded dense

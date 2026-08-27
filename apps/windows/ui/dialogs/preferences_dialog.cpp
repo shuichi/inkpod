@@ -57,6 +57,7 @@ struct GeneralPageControls final {
     std::array<HWND, 5U> section_headings{};
     HWND language_label{};
     HWND language_restart{};
+    HWND raster_format_label{};
     HWND workspace_preset_label{};
     HWND workspace_density_label{};
     HWND sequence_switch_label{};
@@ -803,6 +804,7 @@ void LayoutGeneralPage(DialogModel& model, const RECT& page) noexcept {
     int y = page.top + dip(14);
     const int label_width = std::max({
         ReadableWidth(model, model.general.language_label, 210, 12),
+        ReadableWidth(model, model.general.raster_format_label, 210, 12),
         ReadableWidth(model, model.general.workspace_preset_label, 210, 12),
         ReadableWidth(model, model.general.workspace_density_label, 210, 12),
         ReadableWidth(model, model.general.sequence_switch_label, 210, 12),
@@ -849,7 +851,12 @@ void LayoutGeneralPage(DialogModel& model, const RECT& page) noexcept {
         y,
         content_right - field_x,
         checkbox_height);
-    y += row_height + section_gap;
+    y += row_height + row_gap;
+    place_field(
+        model.general.raster_format_label,
+        IDC_PREFERENCES_RASTER_FORMAT,
+        160);
+    y += section_gap - row_gap;
 
     place_heading(model.general.section_headings[2]);
     place_field(
@@ -1144,6 +1151,13 @@ void CreateGeneralPage(DialogModel& model) {
         UiStringId::PreferencesRestoreDocuments,
         IDC_PREFERENCES_RESTORE_DOCUMENTS,
         BS_AUTOCHECKBOX | WS_TABSTOP);
+    model.general.raster_format_label = AddLabel(
+        model, kGeneralPage, UiStringId::PreferencesRasterFormat);
+    HWND raster_format = AddCombo(model, kGeneralPage, IDC_PREFERENCES_RASTER_FORMAT);
+    AddComboText(raster_format, UiStringId::RasterFormatPng);
+    AddComboText(raster_format, UiStringId::RasterFormatTiff);
+    AddComboText(raster_format, UiStringId::RasterFormatTga);
+    AddComboText(raster_format, UiStringId::RasterFormatBmp);
 
     model.general.section_headings[2] = AddSectionHeading(
         model, UiStringId::PreferencesTabWorkspace);
@@ -1425,6 +1439,12 @@ void LoadControls(DialogModel& model) noexcept {
         model.working.restore_previous_documents ? BST_CHECKED : BST_UNCHECKED);
     SendDlgItemMessageW(
         model.dialog,
+        IDC_PREFERENCES_RASTER_FORMAT,
+        CB_SETCURSEL,
+        static_cast<WPARAM>(model.working.default_raster_format) - 1U,
+        0U);
+    SendDlgItemMessageW(
+        model.dialog,
         IDC_PREFERENCES_WORKSPACE_PRESET,
         CB_SETCURSEL,
         static_cast<WPARAM>(model.working.workspace_preset),
@@ -1467,6 +1487,12 @@ void ReadControls(DialogModel& model) noexcept {
     }
     model.working.restore_previous_documents = Button_GetCheck(
         GetDlgItem(model.dialog, IDC_PREFERENCES_RESTORE_DOCUMENTS)) == BST_CHECKED;
+    const LRESULT raster_format = SendDlgItemMessageW(
+        model.dialog, IDC_PREFERENCES_RASTER_FORMAT, CB_GETCURSEL, 0U, 0U);
+    if (raster_format >= 0 && raster_format < 4) {
+        model.working.default_raster_format =
+            static_cast<app::RasterFileFormatSetting>(raster_format + 1);
+    }
     const LRESULT preset = SendDlgItemMessageW(
         model.dialog, IDC_PREFERENCES_WORKSPACE_PRESET, CB_GETCURSEL, 0U, 0U);
     if (preset >= 0) {
@@ -2302,12 +2328,13 @@ bool ValidateSmokeLayout(DialogModel& model) noexcept {
             }
         }
         if (page == kGeneralPage) {
-            const std::array<HWND, 14U> vertical_order{{
+            const std::array<HWND, 15U> vertical_order{{
                 model.general.section_headings[0],
                 GetDlgItem(model.dialog, IDC_PREFERENCES_LANGUAGE),
                 model.general.language_restart,
                 model.general.section_headings[1],
                 GetDlgItem(model.dialog, IDC_PREFERENCES_RESTORE_DOCUMENTS),
+                GetDlgItem(model.dialog, IDC_PREFERENCES_RASTER_FORMAT),
                 model.general.section_headings[2],
                 GetDlgItem(model.dialog, IDC_PREFERENCES_WORKSPACE_PRESET),
                 GetDlgItem(model.dialog, IDC_PREFERENCES_WORKSPACE_MIRROR),

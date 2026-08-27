@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include "app/session_recovery.h"
+#include "app/application_settings.h"
 #include "ui/localization.h"
 #include "ui/shortcut_profile.h"
 #include "ui/workspace_layout.h"
@@ -12,6 +13,7 @@ namespace inkpod::windows::ui {
 struct PreferencesValues final {
     UiLanguagePreference language{UiLanguagePreference::System};
     bool restore_previous_documents{};
+    app::RasterFileFormatSetting default_raster_format{app::RasterFileFormatSetting::Png};
     app::SequenceCellSwitchPolicy sequence_switch_policy{
         app::SequenceCellSwitchPolicy::Prompt};
     app::SequenceEndpointPolicy sequence_endpoint_policy{

@@ -32,6 +32,7 @@ Windows frontend の所有権は process 単位の `ApplicationHost`、top-level
 - `rust/inkpod-core`: 文書、状態遷移、履歴、snapshot
 - `rust/inkpod-image`: raster/vector、selection、fill、filter
 - `rust/inkpod-format`: `.inkpod` と import/export
+- `rust/inkpod-io`: application 所有の共有ファイル I/O、bounded worker、ファイル排他、encoded/decoded cache
 - `rust/inkpod-ffi`: C ABI と `staticlib` のみ
 - `include/inkpod/core_ffi.h`: C/C++ 公開 header
 - `apps/windows/app`: Win32 application と OS adapter
@@ -41,6 +42,8 @@ Windows frontend の所有権は process 単位の `ApplicationHost`、top-level
 - `docs`: architecture、FFI、file format、compatibility、status
 
 循環依存を避け、`inkpod-ffi` は公開 API の薄い変換だけにする。形式 crate から application state へ逆依存せず、必要なら serialization DTO を境界に置く。Core の公開 Rust API は C ABI から独立させ、FFI の pointer validation や `#[repr(C)]` 型を domain model へ浸透させない。
+
+ファイル identity、排他、原子的な置換に必要な OS 固有処理は `inkpod-io` の非公開 platform backend にだけ隔離する。この限定例外は 2026-08-27 のファイル I/O 統合計画で承認された。`inkpod-core`、`inkpod-image`、`inkpod-format`、公開 Rust 型および C ABI へ OS 型を露出しない。architecture test は新 crate も走査し、backend 以外の OS API 依存を禁止する。
 
 - Rust は stable、edition 2024。nightly 固有機能へ依存しない。
 - Windows は MSVC C++20 と Unicode API を使い、Visual Studio 2022 または 2026 x64 を検証基準とする。

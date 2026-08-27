@@ -3,15 +3,18 @@
 use super::*;
 
 impl Core {
-    /// Atomically writes the active document to a normal-save path.
+    /// Atomically writes the active document as a native-only file.
     ///
     /// Success records the exact current document and editor states as savepoints,
     /// clears recovered status, and leaves document revision/history unchanged.
     /// The prospective savepoints are encoded before I/O but become live only
     /// after durable same-directory replacement succeeds. Failure leaves the
     /// previous file, path, and both Core savepoints unchanged.
+    /// Application normal saves use detached paired preparation instead; this
+    /// explicit primitive never creates a raster companion.
     pub fn save(&mut self, path: &Path) -> Result<DocumentInfo, CoreError> {
         self.ensure_no_active_stroke()?;
+        let next_authority = self.persistence_state.next()?;
         self.document.as_ref().ok_or(CoreError::NoDocument)?;
         let editor = self.editor_session.as_ref().ok_or(CoreError::NoDocument)?;
         let document_savepoint = self.current_state;
@@ -24,6 +27,7 @@ impl Core {
             .ok_or(CoreError::NoDocument)?
             .savepoint = Some(editor_savepoint);
         self.current_path = Some(path.to_path_buf());
+        self.persistence_state = next_authority;
         self.recovered = false;
         self.document_info()
     }
@@ -53,13 +57,10 @@ impl Core {
     /// runtime document revision. Read or validation failure retains the previous
     /// live Core unchanged.
     pub fn open(&mut self, path: &Path) -> Result<DocumentInfo, CoreError> {
-        self.ensure_no_active_stroke()?;
+        let token = self.capture_document_open()?;
         let file = inkpod_format::read_procedure_file(path)?;
-        let mut staged = Self::from_procedure_file(file)?;
-        staged.current_path = Some(path.to_path_buf());
-        staged.recovered = false;
-        *self = staged;
-        self.document_info()
+        let staged = Self::from_native_file(file, false)?;
+        self.adopt_opened_document(token, staged, Some(path))
     }
 
     /// Opens validated recovery data as a dirty recovered document.
@@ -68,19 +69,10 @@ impl Core {
     /// unchanged; success restores history and EditorState while marking both
     /// document and editor state dirty in a pathless recovered session.
     pub fn open_recovery(&mut self, path: &Path) -> Result<DocumentInfo, CoreError> {
-        self.ensure_no_active_stroke()?;
+        let token = self.capture_document_open()?;
         let file = inkpod_format::read_procedure_file(path)?;
-        let mut staged = Self::from_procedure_file(file)?;
-        staged.current_path = None;
-        staged.recovered = true;
-        staged.savepoint = None;
-        staged
-            .editor_session
-            .as_mut()
-            .ok_or(CoreError::NoDocument)?
-            .savepoint = None;
-        *self = staged;
-        self.document_info()
+        let staged = Self::from_native_file(file, true)?;
+        self.adopt_opened_document(token, staged, None)
     }
 
     /// Compares recovery and normal-save timestamps using format-layer policy.
@@ -172,6 +164,15 @@ impl Core {
     /// Success never changes the live Core or adopts `path` as its save target.
     /// The compacted file intentionally has no prior Undo/Redo or inactive branch.
     pub fn write_compacted_copy(&self, path: &Path, plan: CompactionPlan) -> Result<(), CoreError> {
+        let file = self.build_compacted_native_file(plan)?;
+        inkpod_format::save_procedure_file_atomic(path, &file)?;
+        Ok(())
+    }
+
+    pub(super) fn build_compacted_native_file(
+        &self,
+        plan: CompactionPlan,
+    ) -> Result<inkpod_format::NativeFile, CoreError> {
         self.ensure_no_active_stroke()?;
         if self.compaction_plan()? != plan {
             return Err(CoreError::InvalidState("compaction plan is stale"));
@@ -183,6 +184,7 @@ impl Core {
             .ok_or(CoreError::NoDocument)?
             .clone();
         let mut compacted = Core::new();
+        compacted.raster_file_format = self.raster_file_format;
         compacted.document = Some(document.clone());
         compacted.genesis = Some(genesis::Genesis::new(document));
         compacted.document_revision = DocumentRevision::from_raw(1);
@@ -196,9 +198,7 @@ impl Core {
         });
         compacted.assets = self.assets_for_current_document()?;
         compacted.reset_view();
-        let file = compacted.build_procedure_file(Some(StateId::GENESIS), Some(editor.digest))?;
-        inkpod_format::save_procedure_file_atomic(path, &file)?;
-        Ok(())
+        compacted.build_procedure_file(Some(StateId::GENESIS), Some(editor.digest))
     }
 }
 
@@ -248,6 +248,7 @@ struct PersistentMeta {
     document_digest: DocumentStateDigest,
     editor_digest: EditorStateDigest,
     journal_digest: [u8; 32],
+    raster_file_format: CommonRasterFormat,
 }
 
 struct DecodedCheckpoint {
@@ -361,9 +362,12 @@ impl Core {
             document_digest,
             editor_digest: editor.digest,
             journal_digest,
+            raster_file_format: self.raster_file_format,
         };
+        let mut meta_record = record(1, encode_meta(meta));
+        meta_record.schema_version = 2;
         let mut sections = vec![
-            critical_section(*b"META", vec![record(1, encode_meta(meta))]),
+            critical_section(*b"META", vec![meta_record]),
             critical_section(
                 *b"GENS",
                 vec![record(
@@ -394,6 +398,7 @@ impl Core {
     }
 
     pub(crate) fn from_procedure_file(file: inkpod_format::NativeFile) -> Result<Self, CoreError> {
+        inkpod_format::validate_procedure_file(&file)?;
         let contract = replay_contract();
         if file.primitive_catalog_digest != *contract.primitive_catalog_digest() {
             return Err(format_error(
@@ -451,6 +456,7 @@ impl Core {
             .transpose()?;
 
         let mut staged = Core::new();
+        staged.raster_file_format = meta.raster_file_format;
         staged.assets = assets;
         staged.document = Some(genesis_document.clone());
         staged.genesis = Some(genesis::Genesis::new(genesis_document));
@@ -563,7 +569,7 @@ fn critical_section(
 ) -> inkpod_format::NativeSection {
     inkpod_format::NativeSection {
         fourcc,
-        schema_version: 1,
+        schema_version: if fourcc == *b"META" { 2 } else { 1 },
         flags: inkpod_format::SECTION_CRITICAL,
         records,
     }
@@ -622,11 +628,16 @@ fn encode_meta(meta: PersistentMeta) -> Vec<u8> {
         Some(meta.document_digest.as_bytes().to_vec()),
         Some(meta.editor_digest.as_bytes().to_vec()),
         Some(meta.journal_digest.to_vec()),
+        Some(
+            raster_format_code(meta.raster_file_format)
+                .to_le_bytes()
+                .to_vec(),
+        ),
     ])
 }
 
 fn decode_meta(bytes: &[u8]) -> Result<PersistentMeta, CoreError> {
-    let fields = decode_frame(bytes, 20)?;
+    let fields = decode_frame(bytes, 21)?;
     let document_uuid = fixed::<16>(required(fields[0])?, "META document UUID")?;
     if read_u32(required(fields[1])?)? != ReplayEpoch::CURRENT.get()
         || fixed::<32>(required(fields[2])?, "META catalog digest")?
@@ -663,7 +674,27 @@ fn decode_meta(bytes: &[u8]) -> Result<PersistentMeta, CoreError> {
         )?),
         editor_digest: EditorStateDigest(fixed::<32>(required(fields[18])?, "META editor digest")?),
         journal_digest: fixed::<32>(required(fields[19])?, "META journal digest")?,
+        raster_file_format: raster_format_from_code(read_u32(required(fields[20])?)?)?,
     })
+}
+
+fn raster_format_code(format: CommonRasterFormat) -> u32 {
+    match format {
+        CommonRasterFormat::Png => 1,
+        CommonRasterFormat::Tiff => 2,
+        CommonRasterFormat::Tga => 3,
+        CommonRasterFormat::Bmp => 4,
+    }
+}
+
+fn raster_format_from_code(code: u32) -> Result<CommonRasterFormat, CoreError> {
+    match code {
+        1 => Ok(CommonRasterFormat::Png),
+        2 => Ok(CommonRasterFormat::Tiff),
+        3 => Ok(CommonRasterFormat::Tga),
+        4 => Ok(CommonRasterFormat::Bmp),
+        _ => Err(format_error("META raster file format is unknown")),
+    }
 }
 
 fn encode_genesis(

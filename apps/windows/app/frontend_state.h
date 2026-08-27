@@ -31,6 +31,8 @@
 
 namespace inkpod::app {
 
+class FileIoController;
+
 struct GradientStopValue {
     std::uint32_t position_milli{};
     std::uint32_t rgba{};
@@ -103,9 +105,9 @@ struct SequenceSwitchAsyncResult {
     std::wstring source_recovery_path;
     RecoveryMetadata source_metadata{};
     std::wstring target_recovery_path;
+    std::wstring next_recovery_path;
     RecoveryMetadata target_metadata{};
     bool source_autosaved{};
-    bool target_restored{};
 };
 
 struct AdjustmentLayerUiState {
@@ -147,6 +149,7 @@ struct AppLifetimeState {
     int smoke_dirty_prompt_choice{IDNO};
     std::uint32_t smoke_dirty_prompt_count{};
     std::wstring smoke_raster_path;
+    std::wstring smoke_native_save_path;
     std::vector<std::wstring> smoke_sequence_paths;
     bool restore_previous_documents{};
     SequenceCellSwitchPolicy sequence_switch_policy{
@@ -432,6 +435,9 @@ struct BatchUiState {
     InkpodBatchPreview* preview{};
     InkpodBatchReport* report{};
     InkpodBatchTask* task{};
+    FileIoController* io_owner{};
+    std::uint64_t io_request{};
+    InkpodStatus io_completion_status{INKPOD_STATUS_OK};
     windows::ui::ProgressDialogState progress_dialog{};
     std::optional<JobSessionId> job_id;
     BatchJobKind job_kind{BatchJobKind::None};

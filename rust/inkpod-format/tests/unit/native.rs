@@ -234,11 +234,11 @@ fn non_current_container_versions_are_rejected_before_format_freeze() {
 fn procedure_file_fixture() -> NativeFile {
     let singleton = |fourcc| NativeSection {
         fourcc,
-        schema_version: 1,
+        schema_version: if fourcc == *b"META" { 2 } else { 1 },
         flags: SECTION_CRITICAL,
         records: vec![NativeRecord {
             kind: 1,
-            schema_version: 1,
+            schema_version: if fourcc == *b"META" { 2 } else { 1 },
             flags: 0,
             payload: fourcc.to_vec(),
         }],
@@ -421,6 +421,42 @@ fn io_001_v28_atomic_save_replaces_an_existing_container() {
     assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
     fs::remove_file(path).unwrap();
     fs::remove_dir(directory).unwrap();
+}
+
+#[test]
+fn io_001_native_stream_adapters_match_bytes_and_check_cancellation_and_meta_schema() {
+    let file = procedure_file_fixture();
+    let expected = encode_procedure_file(&file).unwrap();
+    let mut streamed = Vec::new();
+    let length = write_procedure_to_writer(&mut streamed, &file, || false).unwrap();
+    assert_eq!(length, expected.len() as u64);
+    assert_eq!(streamed, expected);
+    let mut reader = std::io::Cursor::new(streamed);
+    reader.set_position(13);
+    assert_eq!(
+        read_procedure_from_reader(&mut reader, || false).unwrap(),
+        decode_procedure_file(&expected).unwrap()
+    );
+    assert!(matches!(
+        read_procedure_from_reader(&mut reader, || true),
+        Err(FormatError::Cancelled)
+    ));
+    let mut untouched = Vec::new();
+    assert!(matches!(
+        write_procedure_to_writer(&mut untouched, &file, || true),
+        Err(FormatError::Cancelled)
+    ));
+    assert!(untouched.is_empty());
+    let mut old_meta = file;
+    let meta = old_meta
+        .sections
+        .iter_mut()
+        .find(|section| section.fourcc == *b"META")
+        .unwrap();
+    meta.schema_version = 1;
+    meta.records[0].schema_version = 1;
+    assert!(validate_procedure_file(&old_meta).is_err());
+    assert!(encode_procedure_file(&old_meta).is_err());
 }
 
 #[test]

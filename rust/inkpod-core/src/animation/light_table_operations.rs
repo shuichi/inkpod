@@ -773,6 +773,7 @@ impl Core {
 
         let revision = self.next_document_revision()?;
         let editor = self.stage_reconciled_editor_target(&next, None, None)?;
+        let persistence_state = self.persistence_state.next()?;
         self.document = Some(next);
         self.document_revision = revision;
         self.next_id = next_id;
@@ -781,6 +782,8 @@ impl Core {
         self.reset_history(true);
         self.reset_view();
         self.current_path = None;
+        self.io_pair_authority = None;
+        self.persistence_state = persistence_state;
         self.recovered = false;
         self.floating = None;
         self.motion_check = None;

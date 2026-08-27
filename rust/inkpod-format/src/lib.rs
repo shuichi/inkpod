@@ -26,8 +26,10 @@ pub use common_formats::{
     CommonRaster, CommonRasterFormat, CommonRasterInfo, MAX_COMMON_RASTER_BYTES, TgaAlphaLoss,
     TgaAlphaType, TgaColorMap, TgaCompression, TgaDeveloperField, TgaDocument, TgaDuration,
     TgaEncodeOptions, TgaExtension, TgaGrayscaleConversion, TgaImageFormat, TgaMetadata, TgaOrigin,
-    TgaRatio, TgaTimestamp, decode_common_raster, decode_tga_document, encode_common_raster,
-    encode_tga_document, encode_tga_with_options, save_common_raster_bytes_atomic_with_cancel,
+    TgaRatio, TgaTimestamp, common_raster_decode_allocation_limit,
+    common_raster_decoded_byte_limit, decode_common_raster, decode_tga_document,
+    encode_common_raster, encode_tga_document, encode_tga_with_options,
+    save_common_raster_bytes_atomic_with_cancel,
 };
 pub use cut::{
     CUT_DESCRIPTOR_REPLAY_EPOCH, FileCutDefaults, FileCutDescriptor, FileCutHistoryEntry,
@@ -102,8 +104,9 @@ use native::{decode_document_archive as decode, encode_document_archive as encod
 pub use native::{decode_document_archive, encode_document_archive};
 pub use procedure::{
     FORMAT_VERSION, NativeFile, NativeRecord, NativeSection, OPAQUE_PRESERVE, SECTION_CRITICAL,
-    decode_procedure_file, encode_procedure_file, read_procedure_file, save_procedure_file_atomic,
-    save_procedure_file_atomic_with_cancel, save_recovery_procedure_file_atomic,
+    decode_procedure_file, encode_procedure_file, read_procedure_file, read_procedure_from_reader,
+    save_procedure_file_atomic, save_procedure_file_atomic_with_cancel,
+    save_recovery_procedure_file_atomic, validate_procedure_file, write_procedure_to_writer,
 };
 #[cfg(test)]
 use std::fs;

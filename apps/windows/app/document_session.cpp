@@ -326,8 +326,10 @@ bool DocumentRegistry::Replace(
     }
     current->id = id;
     current->generation = generation;
+    CancelIdentityReservation(id);
     current->BindCore(core);
     current->ClearSequenceAutosaves();
+    current->auto_sequence_truncated = false;
     current->ResetViews(initial_view, generation);
     return true;
 }
@@ -446,7 +448,8 @@ bool DocumentRegistry::AssignIdentity(
     DocumentSession* session = Find(id);
     const DocumentSession* conflict = FindByIdentity(identity);
     if (session == nullptr || !identity
-        || (conflict != nullptr && conflict != session)) {
+        || (conflict != nullptr && conflict != session)
+        || HasIdentityReservation(identity, {}, id)) {
         return false;
     }
     try {
@@ -455,6 +458,98 @@ bool DocumentRegistry::AssignIdentity(
         return true;
     } catch (const std::bad_alloc&) {
         return false;
+    }
+}
+
+bool DocumentRegistry::ReserveIdentity(
+    DocumentSessionId id,
+    const DocumentIdentity& identity,
+    const std::wstring& original_path,
+    const std::wstring& source_path) noexcept {
+    DocumentSession* session = Find(id);
+    const DocumentSession* conflict = FindByIdentity(identity);
+    if (session == nullptr || !identity || session->reserved_identity_
+        || (conflict != nullptr && conflict != session)
+        || HasIdentityReservation(identity, {}, id)) {
+        return false;
+    }
+    try {
+        DocumentIdentity candidate = identity;
+        std::array<std::wstring, 2U> paths;
+        const std::array<const std::wstring*, 2U> inputs{&original_path, &source_path};
+        for (std::size_t index = 0U; index < paths.size(); ++index) {
+            if (!inputs[index]->empty()
+                && !NormalizeDocumentFilePath(*inputs[index], paths[index])) {
+                return false;
+            }
+            if (paths[index].empty()) {
+                continue;
+            }
+            if (HasIdentityReservation(identity, paths[index], id)) {
+                return false;
+            }
+            for (const auto& other : sessions_) {
+                if (other == nullptr || other.get() == session) {
+                    continue;
+                }
+                for (const auto* path : {&other->shell.current_path,
+                         &other->shell.source_path, &other->shell.recovery_original_path}) {
+                    if (path->empty()) {
+                        continue;
+                    }
+                    std::wstring normalized;
+                    if (!NormalizeDocumentFilePath(*path, normalized)
+                        || normalized == paths[index]) {
+                        return false;
+                    }
+                }
+            }
+        }
+        session->reserved_identity_ = std::move(candidate);
+        session->reserved_identity_paths_ = std::move(paths);
+        return true;
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+}
+
+bool DocumentRegistry::HasIdentityReservation(
+    const DocumentIdentity& identity,
+    const std::wstring& normalized_path,
+    DocumentSessionId except) const noexcept {
+    for (const auto& session : sessions_) {
+        if (session == nullptr || session->id == except || !session->reserved_identity_) {
+            continue;
+        }
+        if (identity && session->reserved_identity_ == identity) {
+            return true;
+        }
+        if (!normalized_path.empty()
+            && std::find(session->reserved_identity_paths_.begin(),
+                   session->reserved_identity_paths_.end(), normalized_path)
+                != session->reserved_identity_paths_.end()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool DocumentRegistry::PublishReservedIdentity(DocumentSessionId id) noexcept {
+    DocumentSession* session = Find(id);
+    if (session == nullptr || !session->reserved_identity_) {
+        return false;
+    }
+    session->identity = std::move(session->reserved_identity_);
+    CancelIdentityReservation(id);
+    return true;
+}
+
+void DocumentRegistry::CancelIdentityReservation(DocumentSessionId id) noexcept {
+    if (DocumentSession* session = Find(id); session != nullptr) {
+        session->reserved_identity_ = {};
+        for (auto& path : session->reserved_identity_paths_) {
+            path.clear();
+        }
     }
 }
 

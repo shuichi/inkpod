@@ -9,6 +9,7 @@ license.workspace = true
 blake3 = { version = "=1.8.5", default-features = false, features = ["std"] }
 inkpod-format = { path = "../inkpod-format" }
 inkpod-image = { path = "../inkpod-image" }
+inkpod-io = { path = "../inkpod-io" }
 
 [dev-dependencies]
 proptest = { version = "1.11.0", default-features = false, features = ["std"] }

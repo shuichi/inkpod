@@ -2018,7 +2018,7 @@ impl Core {
             .checked_next()
             .ok_or(CoreError::InvalidState("procedure ID overflow"))?;
 
-        let mut staged = self.clone();
+        let mut staged = self.clone_for_staging();
         staged.canonical_invocation_active = true;
         let result = match apply {
             Some(apply) => apply(&mut staged)?,

@@ -328,6 +328,7 @@ impl ScriptSessionSnapshot {
         }
         let mut snapshot_core = core.clone();
         snapshot_core.current_path = None;
+        snapshot_core.io_pair_authority = None;
         Ok(Self {
             session_id,
             session_generation,

@@ -181,6 +181,17 @@ static_assert(sizeof(InkpodSubpaletteSourceInput) == 32U);
 static_assert(sizeof(InkpodSubpaletteRasterInput) == 32U);
 static_assert(sizeof(InkpodSubpaletteInfo) == 32U);
 static_assert(sizeof(InkpodSubpaletteItemInfo) == 40U);
+static_assert(std::is_standard_layout_v<InkpodIoRequest>);
+static_assert(std::is_standard_layout_v<InkpodIoJobInfo>);
+static_assert(std::is_standard_layout_v<InkpodIoRecoveryMetadata>);
+static_assert(sizeof(InkpodIoConfig) == 48U);
+static_assert(sizeof(InkpodIoPath) == 24U);
+static_assert(sizeof(InkpodIoRequest) == 72U);
+static_assert(sizeof(InkpodIoJobInfo) == 104U);
+static_assert(sizeof(InkpodIoFileIdentity) == 32U);
+static_assert(sizeof(InkpodIoItemInfo) == 80U);
+static_assert(sizeof(InkpodIoCacheInfo) == 56U);
+static_assert(sizeof(InkpodIoRecoveryMetadata) == 160U);
 
 extern "C" int inkpod_header_c11_smoke(void);
 
@@ -356,7 +367,7 @@ execution { failure = stop; wait_ms = 0; preview_before_save = false; }
     replay_contract.struct_size = sizeof(replay_contract);
     if (inkpod_core_get_replay_contract(core, &replay_contract) != INKPOD_STATUS_OK
         || replay_contract.replay_epoch != 25U
-        || replay_contract.procedure_format_version != 28U
+        || replay_contract.procedure_format_version != 29U
         || replay_contract.canonical_numeric_version != 1U
         || replay_contract.primitive_count == 0U
         || replay_contract.feature_flags != INKPOD_FEATURE_NONE) {
@@ -510,7 +521,7 @@ execution { failure = stop; wait_ms = 0; preview_before_save = false; }
     InkpodCompactionPlan compaction{};
     compaction.struct_size = sizeof(compaction);
     if (inkpod_core_get_persistence_info(core, &persistence) != INKPOD_STATUS_OK
-        || persistence.format_version != 28U
+        || persistence.format_version != 29U
         || persistence.open_strategy != INKPOD_NATIVE_OPEN_NOT_OPENED
         || persistence.flags != 0U
         || persistence.feature_flags != INKPOD_FEATURE_NONE

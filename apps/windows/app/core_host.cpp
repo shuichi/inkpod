@@ -1,6 +1,7 @@
 #include "core_host.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -27,6 +28,8 @@ constexpr std::size_t kMaximumQueuedWork = 4096U;
 constexpr std::size_t kReservedStrokeControlWork = 64U;
 constexpr std::size_t kMaximumNotifications = 256U;
 constexpr std::size_t kMaximumInkScriptJobs = 64U;
+constexpr std::size_t kMaximumFileIoJobs = 128U;
+constexpr auto kFileIoPollInterval = std::chrono::milliseconds(10);
 constexpr std::size_t kMaximumStrokeSamples = 1048576U;
 constexpr auto kPreviewFrameInterval = std::chrono::milliseconds(8);
 
@@ -166,6 +169,24 @@ enum class ControlKind : std::uint8_t {
     Close,
 };
 
+struct FileIoWork {
+    std::uint64_t token{};
+};
+
+struct FileIoInput {
+    std::uint64_t token{};
+    SessionBinding binding;
+    CommandContext context;
+    std::uint64_t sequence{};
+    CoreHost::FileIoOperation operation;
+    std::function<void(InkpodStatus)> completion;
+    bool publish_snapshot{};
+    bool refresh_document_info{};
+    bool active{};
+    bool installing{};
+    std::chrono::steady_clock::time_point next_poll{};
+};
+
 struct ControlWork {
     ControlKind kind{ControlKind::Create};
     SessionBinding binding;
@@ -184,6 +205,7 @@ using WorkItem = std::variant<
     AdapterWork,
     PrimitiveWork,
     StrokeWork,
+    FileIoWork,
     InkScriptWork,
     ControlWork,
     OwnerThreadWork>;
@@ -217,6 +239,7 @@ struct CoreEntry {
     std::uint64_t active_sample_count{};
     bool preview_dirty{};
     bool stroke_active{};
+    std::uint64_t io_install_fence{};
     std::chrono::steady_clock::time_point next_preview_frame{};
 };
 
@@ -229,8 +252,11 @@ struct FrontendViewBinding {
 }  // namespace
 
 struct CoreHost::Impl final {
-    explicit Impl(renderer::CanvasSnapshotSink* canvas_window, HWND owner_window) noexcept
-        : initial_canvas(canvas_window), owner(owner_window) {}
+    explicit Impl(
+        renderer::CanvasSnapshotSink* canvas_window,
+        HWND owner_window,
+        InkpodIoManager* manager) noexcept
+        : initial_canvas(canvas_window), owner(owner_window), io_manager(manager) {}
 
     InkpodStatus Start() noexcept {
         try {
@@ -245,6 +271,7 @@ struct CoreHost::Impl final {
             entries.reserve(kMaximumSessions);
             adapter_inputs.reserve(kMaximumQueuedWork + kReservedStrokeControlWork);
             inkscript_inputs.reserve(kMaximumInkScriptJobs);
+            file_io_inputs.reserve(kMaximumFileIoJobs);
             auto ready = std::make_shared<std::promise<InkpodStatus>>();
             auto future = ready->get_future();
             worker = std::thread([this, ready] { Run(ready); });
@@ -762,6 +789,79 @@ struct CoreHost::Impl final {
                 std::nullopt,
                 nullptr,
                 std::move(completion)});
+    }
+
+    bool EnqueueFileIo(
+        const CommandContext& context,
+        bool requires_core,
+        FileIoOperation operation,
+        bool publish_snapshot,
+        bool refresh_document_info,
+        std::function<void(InkpodStatus)> completion) noexcept {
+        if (!operation || (requires_core
+                && (!context.document_session.has_value() || !context.generation.has_value()))) {
+            return false;
+        }
+        std::unique_ptr<FileIoInput> input;
+        try {
+            input = std::make_unique<FileIoInput>();
+            input->context = context;
+            if (requires_core) {
+                input->binding = {
+                    context.document_session.value(), context.generation.value()};
+            }
+            input->operation = std::move(operation);
+            input->completion = std::move(completion);
+            input->publish_snapshot = publish_snapshot;
+            input->refresh_document_info = refresh_document_info;
+        } catch (const std::bad_alloc&) {
+            return false;
+        }
+        const SessionBinding binding = input->binding;
+        std::lock_guard acceptance_lock(acceptance_mutex);
+        if (binding) {
+            std::lock_guard state_lock(state_mutex);
+            const auto session = FindPublishedLocked(binding);
+            if (session == published.end() || !session->state.accepting_work) {
+                return false;
+            }
+            input->sequence = ++session->state.last_accepted_sequence;
+            ++session->state.pending_operations;
+        }
+        const std::uint64_t sequence = input->sequence;
+        bool queued{};
+        std::uint64_t registered_token{};
+        try {
+            std::lock_guard lock(mutex);
+            if (!stopping && file_io_inputs.size() < kMaximumFileIoJobs
+                && work.size() < kMaximumQueuedWork && next_file_io_token != 0U) {
+                registered_token = next_file_io_token;
+                input->token = registered_token;
+                file_io_inputs.push_back(std::move(input));
+                try {
+                    work.emplace_back(FileIoWork{registered_token});
+                    ++next_file_io_token;
+                    queued = true;
+                } catch (...) {
+                    file_io_inputs.pop_back();
+                    throw;
+                }
+            }
+        } catch (const std::bad_alloc&) {
+            queued = false;
+        }
+        if (!queued) {
+            if (binding) {
+                RollbackPending(binding, sequence);
+                RecordRejected(binding);
+            }
+            return false;
+        }
+        if (binding) {
+            RecordAccepted(binding);
+        }
+        wake.notify_one();
+        return true;
     }
 
     bool EnqueueInkScript(InkScriptEngineRequest request) noexcept {
@@ -1760,6 +1860,9 @@ struct CoreHost::Impl final {
                 const InkpodCoreConfig config{
                     sizeof(InkpodCoreConfig), INKPOD_ABI_VERSION, INKPOD_FEATURE_NONE};
                 status = inkpod_core_create(&config, &core);
+                if (status == INKPOD_STATUS_OK && io_manager != nullptr) {
+                    status = inkpod_core_bind_io_manager(core, io_manager);
+                }
                 if (status != INKPOD_STATUS_OK) {
                     try {
                         StoreHostFailure(ReadCoreErrorOnCurrentThread());
@@ -1823,8 +1926,13 @@ struct CoreHost::Impl final {
                     item.batch_result_index,
                     &staged_generation,
                     &entry->core);
+                if (status == INKPOD_STATUS_OK && io_manager != nullptr) {
+                    status = inkpod_core_bind_io_manager(entry->core, io_manager);
+                }
                 if (status == INKPOD_STATUS_OK) {
                     entries.push_back(std::move(entry));
+                } else if (entry->core != nullptr) {
+                    (void)inkpod_core_destroy(&entry->core);
                 }
                 break;
             }
@@ -1924,20 +2032,148 @@ struct CoreHost::Impl final {
         return std::nullopt;
     }
 
+    auto FindFileIoInput(std::uint64_t token) noexcept {
+        return std::find_if(file_io_inputs.begin(), file_io_inputs.end(),
+            [token](const auto& input) { return input->token == token; });
+    }
+
+    auto FindFileIoInput(std::uint64_t token) const noexcept {
+        return std::find_if(file_io_inputs.cbegin(), file_io_inputs.cend(),
+            [token](const auto& input) { return input->token == token; });
+    }
+
+    bool HasFileIoInputLocked(SessionBinding binding) const noexcept {
+        return std::any_of(file_io_inputs.cbegin(), file_io_inputs.cend(),
+            [binding](const auto& input) { return input->binding == binding; });
+    }
+
+    void ProcessFileIo(std::uint64_t token) noexcept {
+        FileIoInput* input{};
+        bool cancelled{};
+        {
+            std::lock_guard lock(mutex);
+            const auto found = FindFileIoInput(token);
+            if (found == file_io_inputs.end()) {
+                return;
+            }
+            input = found->get();
+            input->active = true;
+            input->next_poll = std::chrono::steady_clock::now() + kFileIoPollInterval;
+            cancelled = stopping || (input->binding && HasTransitionControlLocked(input->binding));
+        }
+        CoreEntry* entry = input->binding ? FindEntry(input->binding) : nullptr;
+        if (cancelled && entry != nullptr && entry->stroke_active) {
+            CancelActiveStroke(input->binding);
+        }
+        if (entry != nullptr && (entry->stroke_active
+                || (entry->io_install_fence != 0U && entry->io_install_fence != token))) {
+            return;
+        }
+        cancelled = cancelled || (input->binding && entry == nullptr);
+        InkpodStatus status = INKPOD_STATUS_INVALID_STATE;
+        try {
+            status = input->operation(
+                entry == nullptr ? nullptr : entry->core, cancelled, input->installing);
+        } catch (...) {
+            status = INKPOD_STATUS_INVALID_STATE;
+        }
+        if (entry != nullptr && input->installing) {
+            entry->io_install_fence = token;
+        }
+        if (status == INKPOD_STATUS_PENDING) {
+            return;
+        }
+        if (entry != nullptr && entry->io_install_fence == token) {
+            entry->io_install_fence = 0U;
+        }
+        // The Rust apply result is authoritative. Presentation failure after a
+        // durable save or staged open must not undo the UI path transition or
+        // cause the successfully adopted document to be discarded.
+        const InkpodStatus operation_status = status;
+        if (entry != nullptr && status == INKPOD_STATUS_OK && input->refresh_document_info) {
+            status = RefreshDocumentInfo(*entry, input->context);
+        }
+        if (entry != nullptr && status == INKPOD_STATUS_OK && input->publish_snapshot) {
+            status = PublishSnapshot(*entry, false);
+        }
+        if (entry != nullptr) {
+            CaptureFailure(*entry, status, false, input->context);
+        }
+        if (input->binding) {
+            CompletePending(input->binding, input->sequence, 1U,
+                entry != nullptr && entry->stroke_active);
+        }
+        if (input->completion) {
+            try {
+                input->completion(operation_status);
+            } catch (...) {
+            }
+        }
+        {
+            std::lock_guard lock(mutex);
+            const auto found = FindFileIoInput(token);
+            if (found != file_io_inputs.end()) {
+                file_io_inputs.erase(found);
+            }
+        }
+        wake.notify_one();
+    }
+
+    std::chrono::steady_clock::time_point NextFileIoDeadline() const noexcept {
+        auto result = std::chrono::steady_clock::time_point::max();
+        for (const auto& input : file_io_inputs) {
+            if (input->active) {
+                result = std::min(result, input->next_poll);
+            }
+        }
+        return result;
+    }
+
+    void AdvanceDueFileIo() noexcept {
+        std::array<std::uint64_t, kMaximumFileIoJobs> due{};
+        std::size_t count{};
+        {
+            std::lock_guard lock(mutex);
+            const auto now = std::chrono::steady_clock::now();
+            for (const auto& input : file_io_inputs) {
+                if (input->active && now >= input->next_poll) {
+                    due[count++] = input->token;
+                }
+            }
+        }
+        for (std::size_t index = 0U; index < count; ++index) {
+            ProcessFileIo(due[index]);
+        }
+    }
+
     bool CanProcess(const WorkItem& item) const noexcept {
         if (const auto* sync = std::get_if<AdapterWork>(&item)) {
             const CoreEntry* entry = FindEntry(sync->binding);
-            return entry == nullptr || !entry->stroke_active
-                || !sync->defer_during_active_stroke;
+            return entry == nullptr || (entry->io_install_fence == 0U
+                && (!entry->stroke_active || !sync->defer_during_active_stroke));
         }
         if (const auto* primitive = std::get_if<PrimitiveWork>(&item)) {
             const CoreEntry* entry = FindEntry(primitive->binding);
-            return entry == nullptr || !entry->stroke_active
-                || !primitive->defer_during_active_stroke;
+            return entry == nullptr || (entry->io_install_fence == 0U
+                && (!entry->stroke_active || !primitive->defer_during_active_stroke));
+        }
+        if (const auto* stroke = std::get_if<StrokeWork>(&item)) {
+            const CoreEntry* entry = FindEntry(stroke->binding);
+            return entry == nullptr || entry->io_install_fence == 0U;
+        }
+        if (const auto* io = std::get_if<FileIoWork>(&item)) {
+            const auto input = FindFileIoInput(io->token);
+            if (input == file_io_inputs.cend()) {
+                return true;
+            }
+            const CoreEntry* entry = (*input)->binding ? FindEntry((*input)->binding) : nullptr;
+            return entry == nullptr || (entry->io_install_fence == 0U
+                && (stopping || HasTransitionControlLocked((*input)->binding)
+                    || !entry->stroke_active));
         }
         if (const auto* script = std::get_if<InkScriptWork>(&item)) {
             const CoreEntry* entry = FindEntry(script->binding);
-            if (entry != nullptr && entry->stroke_active) {
+            if (entry != nullptr && (entry->stroke_active || entry->io_install_fence != 0U)) {
                 return false;
             }
             const auto input = FindInkScriptInput(script->job_id);
@@ -1952,8 +2188,13 @@ struct CoreHost::Impl final {
                 return true;
             }
             const CoreEntry* entry = FindEntry(control->binding);
-            return (entry == nullptr || !entry->stroke_active)
-                && !HasInkScriptInputLocked(control->binding);
+            return (entry == nullptr || (!entry->stroke_active && entry->io_install_fence == 0U))
+                && !HasInkScriptInputLocked(control->binding)
+                && !HasFileIoInputLocked(control->binding);
+        }
+        if (std::holds_alternative<OwnerThreadWork>(item)) {
+            return std::none_of(entries.cbegin(), entries.cend(),
+                [](const auto& entry) { return entry->io_install_fence != 0U; });
         }
         return true;
     }
@@ -2053,12 +2294,13 @@ struct CoreHost::Impl final {
             std::optional<InkScriptWork> cancel_inkscript;
             {
                 std::unique_lock lock(mutex);
-                const auto deadline = std::min(
-                    NextPreviewDeadline(), NextInkScriptDeadline());
+                const auto deadline = std::min({
+                    NextPreviewDeadline(), NextInkScriptDeadline(), NextFileIoDeadline()});
                 wake.wait_until(lock, deadline, [this] {
-                    return stopping
+                    return (stopping && file_io_inputs.empty())
                         || TransitioningActiveStroke().has_value()
                         || ActionableCancellationWorkLocked().has_value()
+                        || std::chrono::steady_clock::now() >= NextFileIoDeadline()
                         || std::any_of(work.cbegin(), work.cend(), [this](const WorkItem& candidate) {
                                return CanProcess(candidate);
                            });
@@ -2081,7 +2323,7 @@ struct CoreHost::Impl final {
                         entries.cbegin(), entries.cend(), [](const auto& entry) {
                             return entry->stroke_active;
                         });
-                    if (!cancel_for_shutdown && work.empty()) {
+                    if (!cancel_for_shutdown && work.empty() && file_io_inputs.empty()) {
                         break;
                     }
                 }
@@ -2106,6 +2348,8 @@ struct CoreHost::Impl final {
                     ProcessPrimitive(std::move(*primitive));
                 } else if (auto* stroke = std::get_if<StrokeWork>(&item)) {
                     ProcessStroke(std::move(*stroke));
+                } else if (auto* io = std::get_if<FileIoWork>(&item)) {
+                    ProcessFileIo(io->token);
                 } else if (auto* script = std::get_if<InkScriptWork>(&item)) {
                     ProcessInkScript(std::move(*script));
                 } else if (auto* owner_work =
@@ -2115,6 +2359,7 @@ struct CoreHost::Impl final {
                     ProcessControl(std::move(std::get<ControlWork>(item)));
                 }
             }
+            AdvanceDueFileIo();
             PublishDuePreviews();
         }
 
@@ -2516,6 +2761,7 @@ struct CoreHost::Impl final {
     renderer::CanvasSnapshotSink* initial_canvas{};
     mutable std::mutex notification_owner_mutex;
     HWND owner{};
+    InkpodIoManager* io_manager{};
 
     mutable std::mutex acceptance_mutex;
     mutable std::mutex mutex;
@@ -2523,6 +2769,8 @@ struct CoreHost::Impl final {
     std::deque<WorkItem> work;
     std::vector<AdapterInput> adapter_inputs;
     std::vector<std::unique_ptr<InkScriptInput>> inkscript_inputs;
+    std::vector<std::unique_ptr<FileIoInput>> file_io_inputs;
+    std::uint64_t next_file_io_token{1U};
     AdapterInputToken next_adapter_input_token{1U};
     bool stopping{};
     std::thread worker;
@@ -2580,12 +2828,13 @@ CoreHost::~CoreHost() {
 
 InkpodStatus CoreHost::Start(
     renderer::CanvasSnapshotSink* canvas,
-    HWND owner) noexcept {
+    HWND owner,
+    InkpodIoManager* io_manager) noexcept {
     if (impl_ != nullptr || canvas == nullptr || owner == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     try {
-        impl_ = std::make_unique<Impl>(canvas, owner);
+        impl_ = std::make_unique<Impl>(canvas, owner, io_manager);
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
     }
@@ -2610,6 +2859,10 @@ InkpodStatus CoreHost::CreateSession(
     return impl_ == nullptr
         ? INKPOD_STATUS_INVALID_STATE
         : impl_->CreateSession(SessionBinding{session, generation});
+}
+
+InkpodIoManager* CoreHost::IoManager() const noexcept {
+    return impl_ == nullptr ? nullptr : impl_->io_manager;
 }
 
 InkpodStatus CoreHost::AdoptBatchResult(
@@ -2822,6 +3075,18 @@ bool CoreHost::Enqueue(
 
 bool CoreHost::EnqueueInkScript(InkScriptEngineRequest request) noexcept {
     return impl_ != nullptr && impl_->EnqueueInkScript(std::move(request));
+}
+
+bool CoreHost::EnqueueFileIo(
+    const CommandContext& context,
+    bool requires_core,
+    FileIoOperation operation,
+    bool publish_snapshot,
+    bool refresh_document_info,
+    std::function<void(InkpodStatus)> completion) noexcept {
+    return impl_ != nullptr && impl_->EnqueueFileIo(
+        context, requires_core, std::move(operation), publish_snapshot,
+        refresh_document_info, std::move(completion));
 }
 
 bool CoreHost::ConfirmInkScript(

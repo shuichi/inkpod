@@ -402,13 +402,20 @@ fn route_inventory_covers_public_core_ffi_and_windows_surfaces() {
         .flat_map(|routes| routes.iter().copied().map(str::to_owned))
         .collect::<BTreeSet<_>>();
 
-    assert_eq!(
-        actual_rust, expected_rust,
-        "public Core route inventory drifted"
-    );
-    assert_eq!(actual_ffi, expected_ffi, "C ABI route inventory drifted");
-    assert_eq!(
-        actual_windows, expected_windows,
-        "Windows production command route inventory drifted"
-    );
+    for (surface, actual, expected) in [
+        ("public Core", actual_rust, expected_rust),
+        ("C ABI", actual_ffi, expected_ffi),
+        (
+            "Windows production command",
+            actual_windows,
+            expected_windows,
+        ),
+    ] {
+        assert!(
+            actual == expected,
+            "{surface} route inventory drifted: missing {:?}; stale {:?}",
+            expected.difference(&actual).collect::<Vec<_>>(),
+            actual.difference(&expected).collect::<Vec<_>>(),
+        );
+    }
 }

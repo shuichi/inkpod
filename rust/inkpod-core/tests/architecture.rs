@@ -1,6 +1,14 @@
 use std::fs;
 use std::path::Path;
 
+const RUST_CRATES: [&str; 5] = [
+    "inkpod-core",
+    "inkpod-image",
+    "inkpod-format",
+    "inkpod-io",
+    "inkpod-ffi",
+];
+
 fn collect_rust_sources(directory: &Path, output: &mut Vec<std::path::PathBuf>) {
     let mut entries = fs::read_dir(directory)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", directory.display()))
@@ -185,7 +193,7 @@ fn rust_crate_roots_remain_small_indices_and_cmake_tracks_sources() {
     let rust_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("core crate must be below the Rust workspace directory");
-    for crate_name in ["inkpod-core", "inkpod-image", "inkpod-format", "inkpod-ffi"] {
+    for crate_name in RUST_CRATES {
         let crate_root = rust_root.join(crate_name);
         let source_root = crate_root.join("src");
         let library_path = source_root.join("lib.rs");
@@ -194,6 +202,15 @@ fn rust_crate_roots_remain_small_indices_and_cmake_tracks_sources() {
         assert!(
             library.lines().count() <= 200,
             "{} must remain a small module/re-export index",
+            library_path.display()
+        );
+        let syntax = syn::parse_file(&library).expect("crate root must parse as Rust");
+        assert!(
+            !syntax
+                .items
+                .iter()
+                .any(|item| matches!(item, syn::Item::Fn(_) | syn::Item::Impl(_))),
+            "{} must declare modules and exports, not production logic",
             library_path.display()
         );
     }
@@ -209,7 +226,7 @@ fn rust_crate_roots_remain_small_indices_and_cmake_tracks_sources() {
         "{} must recursively track Rust production sources",
         cmake_path.display()
     );
-    for crate_name in ["inkpod-core", "inkpod-image", "inkpod-format", "inkpod-ffi"] {
+    for crate_name in RUST_CRATES {
         let expected = format!("rust/{crate_name}/src/*.rs");
         assert!(
             cmake.contains(&expected),
@@ -277,7 +294,7 @@ fn inline_test_modules_are_cfg_test_gated() {
     let rust_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("core crate must be below the Rust workspace directory");
-    for crate_name in ["inkpod-core", "inkpod-image", "inkpod-format", "inkpod-ffi"] {
+    for crate_name in RUST_CRATES {
         let source_root = rust_root.join(crate_name).join("src");
         let mut production_sources = Vec::new();
         collect_rust_sources(&source_root, &mut production_sources);
@@ -348,7 +365,7 @@ fn production_and_test_identifiers_are_semantic() {
 }
 
 #[test]
-fn acceptance_rust_workspace_has_zero_windows_imports() {
+fn acceptance_rust_windows_imports_are_confined_to_private_file_backend() {
     let rust_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("core crate must be below the Rust workspace directory");
@@ -371,7 +388,7 @@ fn acceptance_rust_workspace_has_zero_windows_imports() {
         "name = \"winapi\"",
     ];
 
-    for crate_name in ["inkpod-core", "inkpod-image", "inkpod-format", "inkpod-ffi"] {
+    for crate_name in RUST_CRATES {
         let crate_root = rust_root.join(crate_name);
         for source in collect_crate_rust_sources(&crate_root) {
             if source.ends_with(Path::new("tests/architecture.rs")) {
@@ -384,7 +401,32 @@ fn acceptance_rust_workspace_has_zero_windows_imports() {
                 .chars()
                 .filter(|character| !character.is_whitespace())
                 .collect::<String>();
+            let relative = source
+                .strip_prefix(&crate_root)
+                .expect("source must remain in its crate");
+            let private_file_backend = crate_name == "inkpod-io"
+                && [
+                    Path::new("src/backend.rs"),
+                    Path::new("src/backend/windows.rs"),
+                ]
+                .contains(&relative);
+            let case_identity_test =
+                crate_name == "inkpod-io" && relative == Path::new("tests/manager.rs");
             for token in forbidden_source_imports {
+                // The approved OS exception is private filesystem identity and
+                // publication only. No GUI, COM, renderer, or crate dependency
+                // exception is granted by these exact file/token allowlists.
+                if private_file_backend
+                    && matches!(
+                        token,
+                        "windows::" | "std::os::windows" | "cfg(windows)" | "cfg!(windows)"
+                    )
+                {
+                    continue;
+                }
+                if case_identity_test && token == "cfg(windows)" {
+                    continue;
+                }
                 assert!(
                     !compact.contains(token),
                     "{} contains Windows-only Rust import/configuration {token}",
@@ -472,4 +514,72 @@ fn acceptance_rust_workspace_has_zero_windows_imports() {
             lock_path.display()
         );
     }
+}
+
+#[test]
+fn io_backend_remains_private_and_cannot_import_domain_or_frontend_state() {
+    let rust_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let io_root = rust_root.join("inkpod-io");
+    let source_root = io_root.join("src");
+    let mut sources = Vec::new();
+    collect_rust_sources(&source_root, &mut sources);
+    for source in sources {
+        let contents = fs::read_to_string(&source).unwrap();
+        for token in [
+            "HWND",
+            "HINSTANCE",
+            "WPARAM",
+            "LPARAM",
+            "IUnknown",
+            "WinRT",
+            "Direct2D",
+            "Direct3D",
+            "DirectWrite",
+            "D3D11",
+            "DXGI",
+            "WIC",
+            "Common Controls",
+            "inkpod_core",
+            "core_ffi",
+            "DocumentSession",
+            "WorkspaceWindow",
+        ] {
+            assert!(
+                !contents.contains(token),
+                "{} contains forbidden IO backend token {token}",
+                source.display()
+            );
+        }
+        if source != source_root.join("backend/windows.rs") {
+            for token in ["unsafe {", "unsafe fn ", "unsafe extern "] {
+                assert!(
+                    !contents.contains(token),
+                    "{} contains unsafe outside the private filesystem ABI",
+                    source.display()
+                );
+            }
+        }
+        if source
+            .file_name()
+            .is_some_and(|name| name == "lib.rs" || name == "mod.rs")
+        {
+            let syntax = syn::parse_file(&contents).unwrap();
+            assert!(
+                syntax
+                    .items
+                    .iter()
+                    .all(|item| matches!(item, syn::Item::Use(_) | syn::Item::Mod(_))),
+                "{} must remain a module/re-export index",
+                source.display()
+            );
+        }
+    }
+    let manifest = fs::read_to_string(io_root.join("Cargo.toml")).unwrap();
+    assert!(
+        !manifest.contains("inkpod-core") && !manifest.contains("inkpod-ffi"),
+        "filesystem ownership must not depend on a document or ABI crate"
+    );
+    let library = fs::read_to_string(source_root.join("lib.rs")).unwrap();
+    assert!(library.lines().any(|line| line == "mod backend;"));
+    assert!(!library.contains("pub mod backend") && !library.contains("pub use backend::*"));
 }

@@ -13,7 +13,6 @@ use inkpod_format::{
     FileBatchOutput, FileBatchTarget, read_batch_graph, save_batch_graph_atomic,
 };
 use std::collections::BTreeSet;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Version required in every [`BatchOperation`] payload.

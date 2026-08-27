@@ -45,6 +45,8 @@ public:
     InkpodEditorStateInfo editor_presentation{sizeof(InkpodEditorStateInfo)};
     bool has_editor_presentation{};
     HWND history_visualization_dialog{};
+    // Nonpersistent result of the latest automatic sequence discovery.
+    bool auto_sequence_truncated{};
 
     void BindCore(CoreHost* host) noexcept;
     [[nodiscard]] CoreHost* Core() const noexcept;
@@ -89,12 +91,16 @@ public:
     void ClearSequenceAutosaves() noexcept;
 
 private:
+    friend class DocumentRegistry;
+
     CoreHost* core_{};
     std::array<DocumentView, kMaximumViews> views_{};
     std::array<bool, kMaximumViews> view_used_{};
     std::size_t view_count_{};
     DocumentViewId active_view_{};
     std::vector<SequenceAutosaveBinding> sequence_autosaves_;
+    DocumentIdentity reserved_identity_{};
+    std::array<std::wstring, 2U> reserved_identity_paths_{};
 };
 
 class DocumentRegistry final {
@@ -126,6 +132,20 @@ public:
     [[nodiscard]] bool AssignIdentity(
         DocumentSessionId id,
         const DocumentIdentity& identity) noexcept;
+    // Reserve a prepared replacement without changing the active identity.
+    // Paths cover a physical file whose identity changes after atomic replace.
+    [[nodiscard]] bool ReserveIdentity(
+        DocumentSessionId id,
+        const DocumentIdentity& identity,
+        const std::wstring& original_path = {},
+        const std::wstring& source_path = {}) noexcept;
+    [[nodiscard]] bool HasIdentityReservation(
+        const DocumentIdentity& identity,
+        const std::wstring& normalized_path = {},
+        DocumentSessionId except = {}) const noexcept;
+    // Publication only moves previously allocated values; no allocation.
+    [[nodiscard]] bool PublishReservedIdentity(DocumentSessionId id) noexcept;
+    void CancelIdentityReservation(DocumentSessionId id) noexcept;
     void ClearCoreBindings() noexcept;
     void Clear() noexcept;
     [[nodiscard]] DocumentSession* Current() noexcept;

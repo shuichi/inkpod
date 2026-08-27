@@ -1,12 +1,14 @@
 mod bmp;
 #[path = "png.rs"]
 mod png_codec;
+mod preflight;
 mod tga;
 mod tiff;
 
 use super::FormatError;
 use bmp::{decode_bmp, encode_bmp};
 use inkpod_image::{MAX_RASTER_DIMENSION, PixelFormat};
+pub use preflight::{common_raster_decode_allocation_limit, common_raster_decoded_byte_limit};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::Path;

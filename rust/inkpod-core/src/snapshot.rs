@@ -32,6 +32,9 @@ pub struct RenderTile {
     size: DocumentSizeU32,
     stride_bytes: u32,
     pixels: Arc<[u8]>,
+    // Reference-only derived pixels remain charged while any tile clone lives.
+    // This runtime ownership does not participate in equality, digests, or IDs.
+    _reference_lease: Option<inkpod_io::DecodedLease>,
     source_revision: RenderRevision,
     tile_revision: RenderRevision,
 }
@@ -48,6 +51,37 @@ impl PartialEq for RenderTile {
 }
 
 impl RenderTile {
+    pub(super) fn reference(
+        tile_id: u64,
+        revision: RenderRevision,
+        origin: DocumentPointI32,
+        size: DocumentSizeU32,
+        pixels: Vec<u8>,
+        lease: Option<inkpod_io::DecodedLease>,
+    ) -> Result<Self, CoreError> {
+        let stride_bytes = size.width.checked_mul(4).ok_or(CoreError::InvalidArgument(
+            "reference tile stride overflows",
+        ))?;
+        if tile_id == 0
+            || revision.get() == 0
+            || u64::from(stride_bytes) * u64::from(size.height) != pixels.len() as u64
+        {
+            return Err(CoreError::InvalidArgument(
+                "reference tile layout is invalid",
+            ));
+        }
+        Ok(Self {
+            tile_id,
+            origin,
+            size,
+            stride_bytes,
+            pixels: Arc::from(pixels),
+            _reference_lease: lease,
+            source_revision: revision,
+            tile_revision: revision,
+        })
+    }
+
     /// Returns the deterministic tile identifier derived from document tile coordinates.
     #[must_use]
     pub const fn tile_id(&self) -> u64 {
@@ -201,6 +235,36 @@ pub struct RenderSnapshot {
 }
 
 impl RenderSnapshot {
+    pub(super) fn reference(
+        view: ViewState,
+        document_size: DocumentSizeU32,
+        revision: RenderRevision,
+        tiles: Vec<RenderTile>,
+    ) -> Self {
+        let tile_count = tiles.len() as u64;
+        Self {
+            revision,
+            feature_flags: 0,
+            view,
+            document_size,
+            guides: Vec::new(),
+            grid: GridConfig::default(),
+            tiles,
+            render_passes: vec![RenderPass {
+                kind: RenderPassKind::RasterTiles,
+                layer_id: 0,
+                plane_id: 0,
+                opacity_milli: 1_000,
+                first_item: 0,
+                item_count: tile_count,
+            }],
+            adjustment_luts: Vec::new(),
+            shooting_frames: Vec::new(),
+            vanishing_points: Vec::new(),
+            radial_guides: Vec::new(),
+        }
+    }
+
     /// Returns the document or transient-preview revision represented by the snapshot.
     #[must_use]
     pub const fn revision(&self) -> u64 {
@@ -1328,6 +1392,7 @@ fn render_tile_from_straight_rgba(
         size: DocumentSizeU32::new(width, height),
         stride_bytes: width.checked_mul(4)?,
         pixels: Arc::from(pixels),
+        _reference_lease: None,
         source_revision,
         tile_revision,
     })
@@ -1477,6 +1542,7 @@ pub(super) fn compose_tile(
         size: DocumentSizeU32::new(width, height),
         stride_bytes: stride,
         pixels: Arc::from(pixels),
+        _reference_lease: None,
         source_revision,
         tile_revision,
     })
@@ -1525,6 +1591,7 @@ fn compose_reference_tile(
         size: DocumentSizeU32::new(width, height),
         stride_bytes: stride,
         pixels: Arc::from(pixels),
+        _reference_lease: None,
         source_revision,
         tile_revision,
     })

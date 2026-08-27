@@ -20,6 +20,37 @@ impl Core {
             ));
         }
         let raster = decode_common_raster(format, bytes)?;
+        self.import_owned_common_raster(format, raster, document_uuid)
+    }
+
+    /// Opens an already decoded raster as an editable native document.
+    ///
+    /// The decoded cache entry remains caller-owned. Core validates and owns
+    /// immutable canonical pixels before publication, records only the closed
+    /// raster format as native file metadata, and never retains the external
+    /// source path. Failure leaves the live document and its format unchanged.
+    pub fn import_decoded_common_raster(
+        &mut self,
+        format: CommonRasterFormat,
+        raster: &inkpod_format::CommonRaster,
+        document_uuid: u128,
+    ) -> Result<DocumentInfo, CoreError> {
+        self.ensure_no_active_stroke()?;
+        raster.validate()?;
+        if document_uuid == 0 {
+            return Err(CoreError::InvalidArgument(
+                "common-raster document UUID must be nonzero",
+            ));
+        }
+        self.import_owned_common_raster(format, raster.clone(), document_uuid)
+    }
+
+    fn import_owned_common_raster(
+        &mut self,
+        format: CommonRasterFormat,
+        raster: inkpod_format::CommonRaster,
+        document_uuid: u128,
+    ) -> Result<DocumentInfo, CoreError> {
         let dpi_x_milli = raster.info.dpi_x_milli.unwrap_or(DEFAULT_DPI_MILLI);
         let dpi_y_milli = raster.info.dpi_y_milli.unwrap_or(DEFAULT_DPI_MILLI);
         let input = RasterAssetInput {
@@ -36,7 +67,10 @@ impl Core {
             pixels: raster.pixels,
             expected_id: None,
         };
-        self.new_cell_from_raster_asset(input, dpi_x_milli, dpi_y_milli, document_uuid)
+        let info =
+            self.new_cell_from_raster_asset(input, dpi_x_milli, dpi_y_milli, document_uuid)?;
+        self.raster_file_format = format;
+        Ok(info)
     }
 
     /// Opens canonical raster bytes as the immutable Genesis base of a clean cell.
@@ -87,6 +121,7 @@ impl Core {
         document.base_surface = BaseSurface::Asset(record.id());
         assets = self.prepare_asset_store_for_session_reset(assets, &document)?;
         let revision = self.next_document_revision()?;
+        let persistence_state = self.persistence_state.next()?;
         self.cancel_stroke();
         self.shooting_frame_preview = None;
         self.vanishing_point_preview = None;
@@ -100,6 +135,9 @@ impl Core {
         self.reset_history(true);
         self.reset_view();
         self.current_path = None;
+        self.raster_file_format = self.new_cell_raster_format;
+        self.io_pair_authority = None;
+        self.persistence_state = persistence_state;
         self.recovered = false;
         self.color_check = None;
         self.secondary_views.clear();
@@ -128,6 +166,80 @@ impl Core {
             Some(document.dpi_y_milli),
         )?;
         Ok(encode_common_raster(format, &raster, composite_white)?)
+    }
+
+    /// Normal-save companion encoding retains native component depth. Legacy
+    /// explicit display exports keep their existing RGBA8 contract separately.
+    pub(crate) fn export_native_save_raster(
+        &self,
+        format: CommonRasterFormat,
+    ) -> Result<Vec<u8>, CoreError> {
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let requires_16_bit = |format| {
+            matches!(
+                format,
+                PixelFormat::Grayscale16 | PixelFormat::StraightRgba16
+            )
+        };
+        let base_is_16_bit = match document.base_surface {
+            BaseSurface::SolidWhite => false,
+            BaseSurface::Asset(id) => requires_16_bit(
+                self.assets
+                    .get(id)
+                    .ok_or(CoreError::InvalidState("Genesis base asset is missing"))?
+                    .raster()
+                    .ok_or(CoreError::InvalidState(
+                        "Genesis base asset is not a raster",
+                    ))?
+                    .format(),
+            ),
+        };
+        let visible_is_16_bit = document.layers.iter().any(|layer| {
+            layer.visible
+                && layer.planes.iter().any(|plane| {
+                    plane.visible
+                        && plane.kind != PlaneType::Selection
+                        && requires_16_bit(plane.raster.format())
+                })
+        });
+        if !base_is_16_bit
+            && !visible_is_16_bit
+            && !matches!(document.main_line_color, PixelValue::Rgba16(_))
+        {
+            return self.export_common_raster(format, false);
+        }
+        if matches!(format, CommonRasterFormat::Tga | CommonRasterFormat::Bmp) {
+            return Err(CoreError::InvalidArgument(
+                "normal-save raster format cannot retain 16-bit components",
+            ));
+        }
+        bounded_document_pixels(document.width, document.height)?;
+        let byte_count = u64::from(document.width)
+            .checked_mul(u64::from(document.height))
+            .and_then(|count| count.checked_mul(8))
+            .and_then(|count| usize::try_from(count).ok())
+            .ok_or(CoreError::InvalidArgument(
+                "normal-save raster size overflows",
+            ))?;
+        let mut pixels = Vec::new();
+        pixels
+            .try_reserve_exact(byte_count)
+            .map_err(|_| CoreError::InvalidState("normal-save raster allocation failed"))?;
+        visit_native_save_composite_rgba16(document, &self.assets, |_, _, rgba| {
+            for channel in rgba {
+                pixels.extend_from_slice(&channel.to_le_bytes());
+            }
+            Ok(())
+        })?;
+        let raster = inkpod_format::CommonRaster::new(
+            document.width,
+            document.height,
+            PixelFormat::StraightRgba16,
+            Some(document.dpi_x_milli),
+            Some(document.dpi_y_milli),
+            pixels,
+        )?;
+        Ok(encode_common_raster(format, &raster, false)?)
     }
 
     /// Flattens the document with instruction overlays and the optional

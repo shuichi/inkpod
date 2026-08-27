@@ -8,6 +8,9 @@ impl Core {
     /// This changes sequence-only state, clears motion/subpalette state, and does
     /// not change the active document, revision, history, dirty state, or savepoint.
     pub fn set_sequence(&mut self, mut cells: Vec<SequenceCellSource>) -> Result<(), CoreError> {
+        if self.io_install_pending {
+            return Err(CoreError::InvalidState("file installation is pending"));
+        }
         if cells.is_empty() || cells.len() > MAX_SEQUENCE_CELLS {
             return Err(CoreError::InvalidArgument(
                 "sequence cell count is outside bounds",
@@ -93,7 +96,9 @@ impl Core {
             let uuid = (u128::from(0x494e_4b50_4f44_5334_u64) << 64)
                 | u128::try_from(index + 1)
                     .map_err(|_| CoreError::InvalidState("sequence UUID index overflows"))?;
-            cells.push(SequenceCellSource::from_common_raster(name, uuid, &raster)?);
+            let mut source = SequenceCellSource::from_common_raster(name, uuid, &raster)?;
+            source.raster_file_format = format;
+            cells.push(source);
         }
         self.set_sequence(cells)
     }
@@ -272,23 +277,6 @@ impl Core {
         self.commit_sequence_step(plan)
     }
 
-    /// Activates a sequence cell by zero-based natural-order index.
-    ///
-    /// The current index is a no-op. Unsaved document changes and invalid switches do
-    /// not replace the active document. Editor-only dirty does not block a switch;
-    /// success establishes a clean document savepoint with reset history/view while
-    /// preserving non-target EditorState and reconciling only its stable target.
-    pub fn sequence_activate(&mut self, target: usize) -> Result<DocumentInfo, CoreError> {
-        self.ensure_no_active_stroke()?;
-        if self.document.is_none() {
-            return Err(CoreError::NoDocument);
-        }
-        if self.savepoint != Some(self.current_state) {
-            return Err(CoreError::UnsavedChanges);
-        }
-        self.sequence_activate_impl(target)
-    }
-
     /// Captures the exact source, target, policy, and document revision for an
     /// asynchronous sequence switch.
     ///
@@ -376,7 +364,16 @@ impl Core {
             return self.document_info();
         }
         let file = inkpod_format::read_procedure_file(path)?;
-        let mut staged = Self::from_procedure_file(file)?;
+        let staged = Self::from_native_file(file, true)?;
+        self.sequence_restore_prepared_target(request, staged)
+    }
+
+    pub(crate) fn sequence_restore_prepared_target(
+        &mut self,
+        request: SequenceSwitchRequest,
+        mut staged: Core,
+    ) -> Result<DocumentInfo, CoreError> {
+        self.validate_autosaved_sequence_switch_request(request)?;
         let restored_uuid = staged.document.as_ref().ok_or(CoreError::NoDocument)?.uuid;
         if restored_uuid != request.target_document_uuid {
             return Err(CoreError::InvalidArgument(
@@ -399,6 +396,7 @@ impl Core {
         staged.sequence = Some(sequence);
         staged.motion_check = None;
         staged.subpalette_index = self.subpalette_index;
+        staged.inherit_file_runtime(self)?;
         *self = staged;
         self.document_info()
     }
@@ -408,6 +406,13 @@ impl Core {
         request: SequenceSwitchRequest,
     ) -> Result<(), CoreError> {
         self.ensure_no_active_stroke()?;
+        self.validate_autosaved_sequence_switch_identity(request)
+    }
+
+    pub(crate) fn validate_autosaved_sequence_switch_identity(
+        &self,
+        request: SequenceSwitchRequest,
+    ) -> Result<(), CoreError> {
         if request.policy != SequenceSwitchPolicy::AutosaveBeforeSwitch {
             return Err(CoreError::InvalidArgument(
                 "sequence switch request does not use autosave policy",
@@ -443,57 +448,6 @@ impl Core {
             return Err(CoreError::InvalidState("sequence switch request is stale"));
         }
         Ok(())
-    }
-
-    fn sequence_activate_impl(&mut self, target: usize) -> Result<DocumentInfo, CoreError> {
-        let (source, has_active_cell) = {
-            let sequence = self
-                .sequence
-                .as_ref()
-                .ok_or(CoreError::InvalidState("no sequence is configured"))?;
-            if target >= sequence.cells.len() {
-                return Err(CoreError::InvalidArgument(
-                    "sequence target index is outside bounds",
-                ));
-            }
-            if sequence.active_index == Some(target) {
-                return self.document_info();
-            }
-            (
-                sequence.cells[target].clone(),
-                sequence.active_index.is_some(),
-            )
-        };
-        if !has_active_cell && self.sequence_source_matches_current_asset(&source)? {
-            let current_uuid = self.document.as_ref().ok_or(CoreError::NoDocument)?.uuid;
-            let sequence = self
-                .sequence
-                .as_mut()
-                .ok_or(CoreError::InvalidState("sequence disappeared"))?;
-            sequence.cells[target].document_uuid = current_uuid;
-            sequence.active_index = Some(target);
-            return self.document_info();
-        }
-        let revision = self.next_document_revision()?;
-        let mut next_id = self.next_id;
-        let document = Self::document_from_sequence_source(&source, revision, &mut next_id)?;
-        let editor = self.stage_reconciled_editor_target(&document, None, None)?;
-        self.sequence
-            .as_mut()
-            .ok_or(CoreError::InvalidState("sequence disappeared"))?
-            .active_index = Some(target);
-        self.document = Some(document);
-        self.document_revision = revision;
-        self.next_id = next_id;
-        self.assets = asset::AssetStore::default();
-        self.render_cache.clear();
-        self.reset_history(true);
-        self.reset_view();
-        self.current_path = None;
-        self.recovered = false;
-        self.floating = None;
-        self.publish_editor_session(editor);
-        self.document_info()
     }
 
     /// Encodes every installed sequence source without mutating Core state.
@@ -651,7 +605,7 @@ impl Core {
         })
     }
 
-    fn document_from_sequence_source(
+    pub(super) fn document_from_sequence_source(
         source: &SequenceCellSource,
         _revision: DocumentRevision,
         next_id: &mut crate::identity::StableIdCursor,
@@ -679,23 +633,5 @@ impl Core {
         document.frames = source.frames;
         document.plane_for_role_mut(ActivePlane::Color)?.raster = source.raster.clone();
         Ok(document)
-    }
-
-    fn sequence_source_matches_current_asset(
-        &self,
-        source: &SequenceCellSource,
-    ) -> Result<bool, CoreError> {
-        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
-        let BaseSurface::Asset(base_id) = document.base_surface else {
-            return Ok(false);
-        };
-        if document.dpi_x_milli != source.dpi_x_milli
-            || document.dpi_y_milli != source.dpi_y_milli
-            || document.frames != source.frames
-        {
-            return Ok(false);
-        }
-        let mut candidate = asset::AssetStore::default();
-        Ok(candidate.ingest_tile_raster(&source.raster, None)?.id() == base_id)
     }
 }

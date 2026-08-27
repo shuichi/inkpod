@@ -29,6 +29,8 @@ pub enum CoreError {
     Cancelled,
     /// A sequence switch was refused because the current document is dirty.
     UnsavedChanges,
+    /// Existing or externally changed output files require explicit overwrite confirmation.
+    FileConflict,
     /// Native-format validation, decode, or encode failed.
     Format(String),
 }
@@ -47,6 +49,9 @@ impl fmt::Display for CoreError {
             Self::Cancelled => formatter.write_str("operation was cancelled before commit"),
             Self::UnsavedChanges => formatter
                 .write_str("the active cell has unsaved changes and cannot be switched silently"),
+            Self::FileConflict => {
+                formatter.write_str("output files require renewed overwrite confirmation")
+            }
             Self::Format(message) => formatter.write_str(message),
         }
     }
@@ -80,6 +85,19 @@ impl From<FormatError> for CoreError {
             Self::Cancelled
         } else {
             Self::Format(error.to_string())
+        }
+    }
+}
+
+impl From<inkpod_io::IoError> for CoreError {
+    fn from(error: inkpod_io::IoError) -> Self {
+        match error {
+            inkpod_io::IoError::ConfirmationRequired => Self::FileConflict,
+            inkpod_io::IoError::Cancelled => Self::Cancelled,
+            inkpod_io::IoError::InvalidInput(reason)
+            | inkpod_io::IoError::LimitExceeded(reason) => Self::InvalidArgument(reason),
+            inkpod_io::IoError::ResourceBusy(reason) => Self::InvalidState(reason),
+            other => Self::Format(other.to_string()),
         }
     }
 }

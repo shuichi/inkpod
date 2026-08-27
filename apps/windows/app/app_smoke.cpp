@@ -38,6 +38,7 @@
 #include "inkpod/core_ffi.h"
 #include "app/resource.h"
 #include "app/session_recovery.h"
+#include "app/recovery_fixture_io.h"
 #include "ui/dialogs/about_dialog.h"
 #include "ui/dialogs/basic_dialogs.h"
 #include "ui/dialogs/batch_dialog.h"
@@ -73,12 +74,12 @@ namespace inkpod::windows::ui::runtime {
 using inkpod::app::ApplicationHost;
 using inkpod::app::ActivationRequest;
 using inkpod::app::ActivationTargetPreference;
-using inkpod::app::DiscardRecoveryArtifact;
-using inkpod::app::EnumerateRecoveryCandidates;
+using inkpod::app::fixture::DiscardRecoveryArtifact;
+using inkpod::app::fixture::EnumerateRecoveryCandidates;
 using inkpod::app::InkpodClipboardFormat;
 using inkpod::app::PublishStandardClipboard;
 using inkpod::app::ReadBoundedFile;
-using inkpod::app::ReadRecoveryMetadata;
+using inkpod::app::fixture::ReadRecoveryMetadata;
 using inkpod::app::RecoveryCandidate;
 using inkpod::app::RecoveryMetadata;
 using inkpod::app::RecoveryMetadataPath;
@@ -109,6 +110,25 @@ void RecordSubpaletteSample(void* context, double x, double y) noexcept {
 }
 
 bool CommandSurfacesMatchComputedState(const ApplicationHost& state) noexcept;
+
+void DeleteSavedPairFixture(const std::wstring& path) noexcept {
+    DeleteFileW(path.c_str());
+    constexpr std::wstring_view native_extension = L".inkpod";
+    if (path.size() < native_extension.size()
+        || path.compare(path.size() - native_extension.size(),
+               native_extension.size(), native_extension) != 0) {
+        return;
+    }
+    try {
+        const std::wstring stem = path.substr(0U, path.size() - native_extension.size());
+        for (const wchar_t* extension : {L".png", L".tif", L".tga", L".bmp"}) {
+            const std::wstring companion = stem + extension;
+            DeleteFileW(companion.c_str());
+        }
+    } catch (const std::bad_alloc&) {
+        // Fixture cleanup must not mask the original assertion result.
+    }
+}
 
 template <typename Mutator>
 bool UpdateEditorFillOptionsForSmoke(
@@ -1463,6 +1483,28 @@ int RunSequencePaneSmoke(ApplicationHost& state) noexcept {
         || SendMessageW(cells, LB_GETCOUNT, 0, 0) != 0) {
         return 869;
     }
+    // Public pane input carries the discovery flag without opening a modal
+    // prompt. A subsequent complete view clears the nonpersistent notice.
+    try {
+        auto limited = state.Workspace().sequence_dialog.view;
+        limited.auto_sequence_truncated = true;
+        inkpod::windows::ui::panes::UpdateSequencePaneDialog(pane, std::move(limited));
+    } catch (const std::bad_alloc&) {
+        return 8691;
+    }
+    if (GetDlgItemTextW(pane, IDC_SEQUENCE_TARGET, target_text.data(),
+            static_cast<int>(target_text.size())) <= 0
+        || std::wcsstr(target_text.data(), UiText(UiStringId::AutoSequenceTruncated))
+            != target_text.data()
+        || HasJapaneseCharacters(target_text.data())) {
+        return 8692;
+    }
+    if (!RefreshSequencePane(state)
+        || GetDlgItemTextW(pane, IDC_SEQUENCE_TARGET, target_text.data(),
+            static_cast<int>(target_text.size())) <= 0
+        || std::wcsstr(target_text.data(), UiText(UiStringId::AutoSequenceTruncated)) != nullptr) {
+        return 8693;
+    }
     if (SendMessageW(
             state.Workspace().windows.window,
             WM_COMMAND,
@@ -1552,6 +1594,9 @@ int RunLightTablePaneSmoke(ApplicationHost& state) noexcept {
         || GetDlgItem(pane, IDC_LIGHT_TABLE_NEXT) == nullptr
         || GetDlgItem(pane, IDCANCEL) != nullptr
         || !PaneButtonsFit(pane)) {
+        std::fprintf(stderr, "Light Table pane setup failed: window=%d buttons_fit=%d menu=%u\n",
+            IsWindow(pane) != FALSE, PaneButtonsFit(pane),
+            GetMenuState(menu, IDM_WINDOW_LIGHT_TABLE, MF_BYCOMMAND));
         return 875;
     }
     if (const int resize_failure = VerifyPaneHeightResizeRepaint(
@@ -1629,6 +1674,167 @@ int RunLightTablePaneSmoke(ApplicationHost& state) noexcept {
     return 0;
 }
 
+bool WaitForFileIo(ApplicationHost& state) noexcept {
+    const ULONGLONG deadline = GetTickCount64() + 30'000U;
+    while (state.file_io.HasPending() && GetTickCount64() < deadline) {
+        state.file_io.Poll();
+        PumpPendingWindowMessages();
+        if (state.file_io.HasPending()) {
+            (void)MsgWaitForMultipleObjectsEx(0U, nullptr, 10U, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+        }
+    }
+    return !state.file_io.HasPending();
+}
+
+bool FileIoReadyCancellationAndWriteReservation(
+    ApplicationHost& state, const std::wstring& source_path) {
+    const auto prepared = state.PrepareDocumentSession();
+    if (!prepared.has_value()) {
+        return false;
+    }
+    const auto target = prepared.value();
+    auto context = state.routing.targets.Capture();
+    context.document_session = target.session;
+    context.document_view = target.view;
+    context.generation = target.generation;
+    const std::wstring destination = source_path + L".io-contract.inkpod";
+    const std::wstring companion = source_path + L".io-contract.png";
+    DeleteFileW(destination.c_str());
+    DeleteFileW(companion.c_str());
+    struct Observation final {
+        std::uint32_t completions{};
+        std::uint32_t preflights{};
+        InkpodStatus status{INKPOD_STATUS_PENDING};
+        InkpodIoJobInfo progress{};
+        inkpod::app::FileIoItem item;
+        std::atomic<bool> blocker_entered{};
+        std::atomic<bool> release_blocker{};
+    };
+    auto observed = std::make_shared<Observation>();
+    const auto cleanup = [&] {
+        observed->release_blocker.store(true, std::memory_order_release);
+        state.file_io.CancelSession(target.session, target.generation);
+        (void)WaitForFileIo(state);
+        (void)state.DiscardPreparedDocumentSession(target);
+        DeleteFileW(destination.c_str());
+        DeleteFileW(companion.c_str());
+    };
+    const auto wait_ready = [&](std::uint64_t id) {
+        const ULONGLONG deadline = GetTickCount64() + 10'000U;
+        InkpodIoJobInfo info{};
+        while (GetTickCount64() < deadline) {
+            if (!state.file_io.Progress(id, info)) {
+                return false;
+            }
+            if (info.state == INKPOD_IO_READY) {
+                return true;
+            }
+            if (info.state == INKPOD_IO_FAILED || info.state == INKPOD_IO_CANCELLED) {
+                return false;
+            }
+            Sleep(1U);
+        }
+        return false;
+    };
+    const auto completion = [observed](inkpod::app::FileIoResult&& result) {
+        ++observed->completions;
+        observed->status = result.status;
+        observed->progress = result.progress;
+        if (!result.items.empty()) {
+            observed->item = std::move(result.items.front());
+        }
+    };
+    for (bool cancel : {true, false}) {
+        observed->completions = 0U;
+        observed->preflights = 0U;
+        inkpod::app::FileIoRequest request{};
+        request.context = context;
+        request.kind = INKPOD_IO_OPEN_RASTER;
+        request.paths = {source_path};
+        std::uint64_t id{};
+        if (!state.file_io.Queue(*state.engine, std::move(request), completion, &id,
+                [observed](const inkpod::app::FileIoResult&) {
+                    ++observed->preflights;
+                    return INKPOD_STATUS_OK;
+                }) || observed->completions != 0U || !wait_ready(id)) {
+            cleanup();
+            return false;
+        }
+        // A ready detached candidate does not block queries on the current document.
+        InkpodDocumentInfo current = EmptyDocumentInfo();
+        if (!QueryDocument(state, current)) {
+            cleanup();
+            return false;
+        }
+        if (cancel) {
+            state.file_io.Cancel(id);
+        }
+        if (!WaitForFileIo(state) || observed->completions != 1U
+            || observed->status != (cancel ? INKPOD_STATUS_CANCELLED : INKPOD_STATUS_OK)
+            || observed->preflights != (cancel ? 0U : 1U)) {
+            cleanup();
+            return false;
+        }
+        InkpodDocumentInfo loaded = EmptyDocumentInfo();
+        if (state.engine->GetDocumentInfo(target.session, target.generation, loaded) == cancel
+            || (!cancel && (observed->progress.loaded_count != 1U
+                || observed->progress.result_count != 1U
+                || observed->item.info.raster_format != INKPOD_COMMON_RASTER_PNG))) {
+            cleanup();
+            return false;
+        }
+    }
+    observed->completions = 0U;
+    inkpod::app::FileIoRequest save{};
+    save.context = context;
+    save.kind = INKPOD_IO_SAVE_PAIR;
+    save.paths = {destination};
+    std::uint64_t save_id{};
+    if (!state.file_io.Queue(*state.engine, std::move(save), completion, &save_id,
+            [&state, context, observed](const inkpod::app::FileIoResult& result) {
+                if (result.items.size() != 2U) {
+                    return INKPOD_STATUS_INVALID_STATE;
+                }
+                observed->item = result.items.front();
+                const bool queued = state.engine->Enqueue(context,
+                    [observed](InkpodCore*) {
+                        observed->blocker_entered.store(true, std::memory_order_release);
+                        const ULONGLONG deadline = GetTickCount64() + 10'000U;
+                        while (!observed->release_blocker.load(std::memory_order_acquire)
+                            && GetTickCount64() < deadline) {
+                            Sleep(1U);
+                        }
+                        return INKPOD_STATUS_OK;
+                    }, false, false, false);
+                const ULONGLONG deadline = GetTickCount64() + 5'000U;
+                while (queued && !observed->blocker_entered.load(std::memory_order_acquire)
+                    && GetTickCount64() < deadline) {
+                    Sleep(1U);
+                }
+                return queued && observed->blocker_entered.load(std::memory_order_acquire)
+                    ? INKPOD_STATUS_OK : INKPOD_STATUS_INVALID_STATE;
+            }) || !wait_ready(save_id)) {
+        cleanup();
+        return false;
+    }
+    const ULONGLONG preflight_deadline = GetTickCount64() + 5'000U;
+    while (!observed->blocker_entered.load(std::memory_order_acquire)
+        && GetTickCount64() < preflight_deadline) {
+        state.file_io.Poll();
+        Sleep(1U);
+    }
+    const bool reserved = state.file_io.ConflictsWithPendingWrite(observed->item)
+        && !state.file_io.ConflictsWithPendingWrite(observed->item, save_id);
+    state.file_io.Cancel(save_id);
+    observed->release_blocker.store(true, std::memory_order_release);
+    const bool cancelled = WaitForFileIo(state) && observed->completions == 1U
+        && observed->status == INKPOD_STATUS_CANCELLED
+        && !state.file_io.ConflictsWithPendingWrite(observed->item)
+        && GetFileAttributesW(destination.c_str()) == INVALID_FILE_ATTRIBUTES
+        && GetFileAttributesW(companion.c_str()) == INVALID_FILE_ATTRIBUTES;
+    cleanup();
+    return reserved && cancelled;
+}
 int RunSubpalettePaneSmoke(ApplicationHost& state) noexcept {
     const HWND pane = state.Workspace().subpalette_palette;
     const HWND canvas = state.Workspace().subpalette_dialog.canvas;
@@ -3925,6 +4131,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         || GetWindowRect(state.Workspace().windows.color_pane, &color_bounds) == FALSE
         || color_bounds.right > workspace_canvas_bounds.left
         || workspace_canvas_bounds.right > tool_bounds.left) {
+        std::fwprintf(stderr, L"smoke 738: mirrored workspace bounds\n");
         return 738;
     }
     if (LayerPaletteItemCount(state.Workspace().panes.layer_palette)
@@ -4054,7 +4261,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
             state, state.routing.targets.Capture(), initial_recovery_path)) {
         return 731;
     }
-    if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+    if (state.engine->WaitIdle() != INKPOD_STATUS_OK || !WaitForFileIo(state)) {
         return 732;
     }
     if (GetFileAttributesW(initial_recovery_path.c_str())
@@ -4078,19 +4285,25 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     if (!EnumerateRecoveryCandidates(recovery_candidates)) {
         return 737;
     }
-    if (std::none_of(
+    inkpod::app::DocumentIdentity initial_recovery_identity;
+    if (!inkpod::app::ResolveDocumentFileIdentity(
+            state.file_io.Manager(), initial_recovery_path, initial_recovery_identity)
+        || std::none_of(
             recovery_candidates.begin(),
             recovery_candidates.end(),
-            [&initial_recovery_path](const RecoveryCandidate& candidate) {
-                return _wcsicmp(
-                    candidate.recovery_path.c_str(),
-                    initial_recovery_path.c_str()) == 0;
+            [&state, &initial_recovery_identity](const RecoveryCandidate& candidate) {
+                inkpod::app::DocumentIdentity identity;
+                return inkpod::app::ResolveDocumentFileIdentity(
+                    state.file_io.Manager(), candidate.recovery_path, identity)
+                    && identity == initial_recovery_identity;
             })) {
+        std::fwprintf(stderr, L"smoke 738: current recovery missing from %zu candidates\n",
+            recovery_candidates.size());
         return 738;
     }
     std::wstring active_stroke_recovery_path;
     try {
-        active_stroke_recovery_path = initial_recovery_path + L".active-stroke-test";
+        active_stroke_recovery_path = initial_recovery_path + L".active-stroke-test.inkpod";
     } catch (const std::bad_alloc&) {
         return 217;
     }
@@ -4242,7 +4455,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
             MAKELPARAM(line_end_x, line_end_y)) != 1) {
         return 36;
     }
-    if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+    if (state.engine->WaitIdle() != INKPOD_STATUS_OK || !WaitForFileIo(state)) {
         return 37;
     }
     if (GetFileAttributesW(active_stroke_recovery_path.c_str())
@@ -4382,7 +4595,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         failing_destination.data(),
         failing_destination.size(),
         _TRUNCATE,
-        L"%lsinkpod-save-failure-%lu-%llu",
+        L"%lsinkpod-save-failure-%lu-%llu.inkpod",
         temporary_directory.data(),
         GetCurrentProcessId(),
         static_cast<unsigned long long>(GetTickCount64()));
@@ -4436,12 +4649,12 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         : path.substr(path_separator + 1U);
     if (!ReadDocumentTabLabel(state.Workspace().windows.document_tabs, 0, tab_label)
         || tab_label != expected_saved_tab) {
-        DeleteFileW(path.c_str());
+        DeleteSavedPairFixture(path);
         return 717;
     }
     if (GetFileAttributesW(initial_recovery_path.c_str()) != INVALID_FILE_ATTRIBUTES
         || GetLastError() != ERROR_FILE_NOT_FOUND) {
-        DeleteFileW(path.c_str());
+        DeleteSavedPairFixture(path);
         return 216;
     }
     std::wstring initial_metadata_path;
@@ -4449,7 +4662,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         || GetFileAttributesW(initial_metadata_path.c_str())
             != INVALID_FILE_ATTRIBUTES
         || GetLastError() != ERROR_FILE_NOT_FOUND) {
-        DeleteFileW(path.c_str());
+        DeleteSavedPairFixture(path);
         return 222;
     }
     InkpodDocumentInfo saved{};
@@ -4469,27 +4682,27 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
                editor_after_save.editor_digest,
                editor_before_save.editor_digest,
                sizeof(editor_after_save.editor_digest)) != 0) {
-        DeleteFileW(path.c_str());
+        DeleteSavedPairFixture(path);
         return 49;
     }
     const inkpod::app::DocumentSessionId saved_session = state.Document().id;
     if (CreateDefaultCell(state) != INKPOD_STATUS_OK
         || !state.CloseDocumentSession(saved_session)
         || OpenDocumentFromPath(state, path) != INKPOD_STATUS_OK) {
-        DeleteFileW(path.c_str());
+        DeleteSavedPairFixture(path);
         return 50;
     }
     InkpodDocumentInfo reopened{};
     if (!QueryDocument(state, reopened)) {
-        DeleteFileW(path.c_str());
+        DeleteSavedPairFixture(path);
         return 51;
     }
     if (!SamePersistentMetadata(saved, reopened)) {
-        DeleteFileW(path.c_str());
+        DeleteSavedPairFixture(path);
         return 151;
     }
     if ((reopened.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U) {
-        DeleteFileW(path.c_str());
+        DeleteSavedPairFixture(path);
         return 251;
     }
     InkpodEditorStateInfo editor_after_reopen{};
@@ -4506,7 +4719,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
                editor_after_reopen.editor_digest,
                editor_before_save.editor_digest,
                sizeof(editor_after_reopen.editor_digest)) != 0) {
-        DeleteFileW(path.c_str());
+        DeleteSavedPairFixture(path);
         return 252;
     }
     const InkpodStrokeSample history_sample{
@@ -4552,14 +4765,14 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
             },
             true,
             true) != INKPOD_STATUS_OK) {
-        DeleteFileW(path.c_str());
+        DeleteSavedPairFixture(path);
         return 217;
     }
     SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_FILE_REVERT_PARTIAL, 0);
     InkpodDocumentInfo partially_reverted{};
     if (!QueryDocument(state, partially_reverted)
         || partially_reverted.color_plane_checksum != reopened.color_plane_checksum) {
-        DeleteFileW(path.c_str());
+        DeleteSavedPairFixture(path);
         return 241;
     }
     SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
@@ -4573,7 +4786,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
             false,
             false) != INKPOD_STATUS_OK
         || smoke_history.cursor != 0U || smoke_history.item_count < 3U) {
-        DeleteFileW(path.c_str());
+        DeleteSavedPairFixture(path);
         return 219;
     }
     SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_HISTORY_FORWARD, 0);
@@ -4584,16 +4797,16 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
             false,
             false) != INKPOD_STATUS_OK
         || smoke_history.cursor != smoke_history.item_count) {
-        DeleteFileW(path.c_str());
+        DeleteSavedPairFixture(path);
         return 220;
     }
     if (SetEditorActiveTarget(
             state, reopened.layer_id, reopened.main_plane_id)
         != INKPOD_STATUS_OK) {
-        DeleteFileW(path.c_str());
+        DeleteSavedPairFixture(path);
         return 220;
     }
-    DeleteFileW(path.c_str());
+    DeleteSavedPairFixture(path);
 
     inkpod::renderer::CanvasDocumentBounds before_dpi_bounds{};
     inkpod::renderer::CanvasDocumentBounds after_dpi_bounds{};
@@ -5296,24 +5509,24 @@ int RunPaintingRecoverySmoke(ApplicationHost& state) noexcept {
             true) != INKPOD_STATUS_OK
         || !QueueAutosave(
                state, state.routing.targets.Capture(), recovery_path)
-        || state.engine->WaitIdle() != INKPOD_STATUS_OK
+        || state.engine->WaitIdle() != INKPOD_STATUS_OK || !WaitForFileIo(state)
         || GetFileAttributesW(normal_path.c_str()) == INVALID_FILE_ATTRIBUTES
         || GetFileAttributesW(recovery_path.c_str()) == INVALID_FILE_ATTRIBUTES) {
-        DeleteFileW(normal_path.c_str());
+        DeleteSavedPairFixture(normal_path);
         (void)DiscardRecoveryArtifact(recovery_path);
         return 211;
     }
     InkpodDocumentInfo autosaved{};
     if (!QueryDocument(state, autosaved)
         || (autosaved.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U) {
-        DeleteFileW(normal_path.c_str());
+        DeleteSavedPairFixture(normal_path);
         (void)DiscardRecoveryArtifact(recovery_path);
         return 212;
     }
     if (!state.CloseDocumentSession(normal_session)
         || CreateDefaultCell(state) != INKPOD_STATUS_OK
         || OpenRecoveryFromPath(state, recovery_path) != INKPOD_STATUS_OK) {
-        DeleteFileW(normal_path.c_str());
+        DeleteSavedPairFixture(normal_path);
         (void)DiscardRecoveryArtifact(recovery_path);
         return 213;
     }
@@ -5337,7 +5550,7 @@ int RunPaintingRecoverySmoke(ApplicationHost& state) noexcept {
     const bool normal_matches = QueryDocument(state, reopened_normal)
         && reopened_normal.color_plane_checksum == normally_saved.color_plane_checksum
         && reopened_normal.color_plane_checksum != recovered.color_plane_checksum;
-    DeleteFileW(normal_path.c_str());
+    DeleteSavedPairFixture(normal_path);
     (void)DiscardRecoveryArtifact(recovery_path);
     return recovery_state && revert_status == INKPOD_STATUS_INVALID_STATE && normal_unchanged
             && normal_matches
@@ -5516,7 +5729,7 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
     const std::wstring path(file_buffer.data());
     if (SaveToPath(state, path) != INKPOD_STATUS_OK
         || OpenFromPath(state, path) != INKPOD_STATUS_OK) {
-        DeleteFileW(path.c_str());
+        DeleteSavedPairFixture(path);
         return 311;
     }
     top_layer = {};
@@ -5532,7 +5745,7 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
                                    false,
                                    false) == INKPOD_STATUS_OK
         && top_layer.id == duplicate_id;
-    DeleteFileW(path.c_str());
+    DeleteSavedPairFixture(path);
     if (!reopened_tree) {
         return 312;
     }
@@ -7661,6 +7874,9 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         state.lifetime.smoke_raster_path.clear();
         return 407;
     }
+    if (!FileIoReadyCancellationAndWriteReservation(state, state.lifetime.smoke_raster_path)) {
+        return 1101;
+    }
     InkpodDocumentInfo imported_without_source = EmptyDocumentInfo();
     if (DeleteFileW(state.lifetime.smoke_raster_path.c_str()) == FALSE
         || GetFileAttributesW(state.lifetime.smoke_raster_path.c_str()) != INVALID_FILE_ATTRIBUTES
@@ -7692,8 +7908,9 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         return 489;
     }
     const std::wstring asset_base_save = L"inkpod-asset-base-smoke.inkpod";
+    const std::wstring asset_base_companion = L"inkpod-asset-base-smoke.png";
     const std::wstring asset_base_recovery = asset_base_save + L".recovery.inkpod";
-    DeleteFileW(asset_base_save.c_str());
+    DeleteSavedPairFixture(asset_base_save);
     DeleteFileW(asset_base_recovery.c_str());
     const std::size_t recent_before_asset_base_save =
         state.RecentDocumentCount();
@@ -7701,14 +7918,15 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     const InkpodStatus asset_base_save_status =
         SaveToPath(state, asset_base_save);
     if (asset_base_save_status != INKPOD_STATUS_OK) {
-        DeleteFileW(asset_base_save.c_str());
+        DeleteSavedPairFixture(asset_base_save);
         DeleteFileW(asset_base_recovery.c_str());
         state.lifetime.smoke_raster_path.clear();
         return 1487;
     }
     if (GetFileAttributesW(asset_base_save.c_str()) == INVALID_FILE_ATTRIBUTES
+        || GetFileAttributesW(asset_base_companion.c_str()) == INVALID_FILE_ATTRIBUTES
         || GetFileAttributesW(asset_base_recovery.c_str()) != INVALID_FILE_ATTRIBUTES) {
-        DeleteFileW(asset_base_save.c_str());
+        DeleteSavedPairFixture(asset_base_save);
         DeleteFileW(asset_base_recovery.c_str());
         state.lifetime.smoke_raster_path.clear();
         return 1488;
@@ -7734,11 +7952,11 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         state.lifetime.smoke_raster_path.clear();
         return 1491;
     }
-    DeleteFileW(asset_base_save.c_str());
+    DeleteSavedPairFixture(asset_base_save);
     if (CreateCell(state, 12U, 10U, 96000U) != INKPOD_STATUS_OK
         || !RefreshLightTablePane(state)
         || !WriteFileAtomically(state.lifetime.smoke_raster_path, smoke_raster_source)) {
-        DeleteFileW(asset_base_save.c_str());
+        DeleteSavedPairFixture(asset_base_save);
         DeleteFileW(asset_base_recovery.c_str());
         state.lifetime.smoke_raster_path.clear();
         return 488;
@@ -7969,7 +8187,9 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         return 471;
     }
     const std::wstring swap_save = L"inkpod-lt-smoke.inkpod";
-    DeleteFileW(swap_save.c_str());
+    DeleteSavedPairFixture(swap_save);
+    const auto before_cancelled_swap_identity = state.Document().identity;
+    const auto before_cancelled_swap_shell = state.Document().shell;
     InkpodDocumentInfo before_cancelled_swap = EmptyDocumentInfo();
     InkpodDocumentInfo after_cancelled_swap = EmptyDocumentInfo();
     if (!QueryDocument(state, before_cancelled_swap)
@@ -7981,14 +8201,19 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
                0) != 0
         || !QueryDocument(state, after_cancelled_swap)
         || after_cancelled_swap.document_revision
-            != before_cancelled_swap.document_revision) {
-        DeleteFileW(swap_save.c_str());
+            != before_cancelled_swap.document_revision
+        || state.Document().identity != before_cancelled_swap_identity
+        || state.Document().shell.current_path != before_cancelled_swap_shell.current_path
+        || state.Document().shell.source_path != before_cancelled_swap_shell.source_path
+        || state.Document().shell.recovery_path != before_cancelled_swap_shell.recovery_path
+        || state.Document().shell.recovery_original_path != before_cancelled_swap_shell.recovery_original_path) {
+        DeleteSavedPairFixture(swap_save);
         DeleteFileW(state.lifetime.smoke_raster_path.c_str());
         state.lifetime.smoke_raster_path.clear();
         return 885;
     }
     if (SaveToPath(state, swap_save) != INKPOD_STATUS_OK) {
-        DeleteFileW(swap_save.c_str());
+        DeleteSavedPairFixture(swap_save);
         DeleteFileW((swap_save + L".recovery.inkpod").c_str());
         DeleteFileW(state.lifetime.smoke_raster_path.c_str());
         state.lifetime.smoke_raster_path.clear();
@@ -7997,11 +8222,46 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     InkpodDocumentInfo after_swap_save = EmptyDocumentInfo();
     if (!QueryDocument(state, after_swap_save)
         || (after_swap_save.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U) {
-        DeleteFileW(swap_save.c_str());
+        DeleteSavedPairFixture(swap_save);
         DeleteFileW((swap_save + L".recovery.inkpod").c_str());
         DeleteFileW(state.lifetime.smoke_raster_path.c_str());
         state.lifetime.smoke_raster_path.clear();
         return 4092;
+    }
+    const auto before_swap_identity = state.Document().identity;
+    const auto before_swap_shell = state.Document().shell;
+    std::vector<std::uint8_t> before_swap_native;
+    std::vector<std::uint8_t> before_swap_raster;
+    if (!ReadBoundedFile(swap_save, before_swap_native)
+        || !ReadBoundedFile(L"inkpod-lt-smoke.png", before_swap_raster)) {
+        return 4098;
+    }
+    const auto old_swap_pair_unchanged = [&]() {
+        std::vector<std::uint8_t> native;
+        std::vector<std::uint8_t> raster;
+        return ReadBoundedFile(swap_save, native)
+            && ReadBoundedFile(L"inkpod-lt-smoke.png", raster)
+            && native == before_swap_native && raster == before_swap_raster;
+    };
+    InkpodLightTableItemInfo swap_target{};
+    if (!QueryLightTableItem(state, state.Workspace().panes.active_light_table_item_index, swap_target)) {
+        return 4099;
+    }
+    const auto selected_swap_item = state.Workspace().panes.active_light_table_item_id;
+    state.Workspace().panes.active_light_table_item_id = UINT64_MAX;
+    const LRESULT rejected_swap = SendMessageW(
+        state.Workspace().windows.window, WM_COMMAND, IDM_LT_ITEM_SWAP, 0);
+    state.Workspace().panes.active_light_table_item_id = selected_swap_item;
+    InkpodDocumentInfo after_rejected_swap = EmptyDocumentInfo();
+    if (rejected_swap != 0 || !QueryDocument(state, after_rejected_swap)
+        || after_rejected_swap.document_revision != after_swap_save.document_revision
+        || state.Document().identity != before_swap_identity
+        || state.Document().shell.current_path != before_swap_shell.current_path
+        || state.Document().shell.source_path != before_swap_shell.source_path
+        || state.Document().shell.recovery_path != before_swap_shell.recovery_path
+        || state.Document().shell.recovery_original_path != before_swap_shell.recovery_original_path
+        || !old_swap_pair_unchanged()) {
+        return 4100;
     }
     const std::uint32_t swap_prompt_count =
         state.lifetime.smoke_dirty_prompt_count;
@@ -8013,18 +8273,45 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         0);
     state.lifetime.smoke_dirty_prompt_choice = IDNO;
     if (confirmed_swap != 1) {
-        DeleteFileW(swap_save.c_str());
+        DeleteSavedPairFixture(swap_save);
         DeleteFileW((swap_save + L".recovery.inkpod").c_str());
         DeleteFileW(state.lifetime.smoke_raster_path.c_str());
         state.lifetime.smoke_raster_path.clear();
         return 4093;
     }
     if (state.lifetime.smoke_dirty_prompt_count != swap_prompt_count) {
-        DeleteFileW(swap_save.c_str());
+        DeleteSavedPairFixture(swap_save);
         DeleteFileW((swap_save + L".recovery.inkpod").c_str());
         DeleteFileW(state.lifetime.smoke_raster_path.c_str());
         state.lifetime.smoke_raster_path.clear();
         return 4094;
+    }
+    InkpodDocumentInfo swapped_document = EmptyDocumentInfo();
+    if (!QueryDocument(state, swapped_document)
+        || swapped_document.document_uuid_high != swap_target.source_document_uuid_high
+        || swapped_document.document_uuid_low != swap_target.source_document_uuid_low
+        || !state.Document().shell.current_path.empty()
+        || !state.Document().shell.source_path.empty()
+        || !state.Document().shell.recovery_original_path.empty()
+        || state.Document().shell.recovery_path.empty()
+        || state.Document().identity != inkpod::app::UntitledDocumentIdentity(
+            swapped_document.document_uuid_high, swapped_document.document_uuid_low)
+        || state.Document().identity == before_swap_identity
+        || !old_swap_pair_unchanged()) {
+        return 4108;
+    }
+    // A swap has no normal destination. Cancelling its next Save must not
+    // rewrite either member of the previously edited document's saved pair.
+    auto previous_save_choice = std::move(state.lifetime.smoke_native_save_path);
+    state.lifetime.smoke_native_save_path.clear();
+    const LRESULT cancelled_swap_save = SendMessageW(
+        state.Workspace().windows.window, WM_COMMAND, IDM_FILE_SAVE, 0);
+    state.lifetime.smoke_native_save_path = std::move(previous_save_choice);
+    if (cancelled_swap_save != 0 || !state.Document().shell.current_path.empty()
+        || state.Document().identity != inkpod::app::UntitledDocumentIdentity(
+            swapped_document.document_uuid_high, swapped_document.document_uuid_low)
+        || !old_swap_pair_unchanged()) {
+        return 4109;
     }
     if (SendMessageW(
             state.Workspace().windows.window,
@@ -8035,7 +8322,7 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
             DockPaneType::LightTable)) {
         return 883;
     }
-    DeleteFileW(swap_save.c_str());
+    DeleteSavedPairFixture(swap_save);
     DeleteFileW((swap_save + L".recovery.inkpod").c_str());
     std::vector<std::uint8_t> sequence_source;
     if (!ReadBoundedFile(state.lifetime.smoke_raster_path, sequence_source)) {
@@ -8051,10 +8338,27 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         return 410;
     }
     for (const auto& path : state.lifetime.smoke_sequence_paths) {
-        DeleteFileW(path.c_str());
+        DeleteSavedPairFixture(path);
         if (!WriteFileAtomically(path, sequence_source)) {
             return 410;
         }
+    }
+    // The completed Light Table swap uses a solid base with raster layer pixels.
+    // Initial binding requires the immutable raster Genesis from a real open.
+    const auto completed_light_table_session = state.Document().id;
+    const auto sequence_document_count = state.Documents().Count();
+    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_DOCUMENT_CLOSE, 0) != 1
+        || state.Documents().Find(completed_light_table_session) != nullptr
+        || ImportCommonRasterFromPath(state, state.lifetime.smoke_raster_path) != INKPOD_STATUS_OK
+        || state.Documents().Count() != sequence_document_count
+        || state.Document().id == completed_light_table_session
+        || !state.Document().shell.current_path.empty()
+        || state.Document().shell.source_path != state.lifetime.smoke_raster_path) {
+        return 1518;
+    }
+    const InkpodStatus sequence_save_status = SaveToPath(state, swap_save);
+    if (sequence_save_status != INKPOD_STATUS_OK) {
+        return 1511;
     }
     if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SEQ_IMPORT, 0) != 1) {
         return 411;
@@ -8104,17 +8408,58 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     if (sequence_resources.cached_item_count != 3U) {
         return 1510;
     }
-    const InkpodStatus sequence_save_status = SaveToPath(state, swap_save);
-    if (sequence_save_status != INKPOD_STATUS_OK) {
-        return 1511;
-    }
     InkpodDocumentInfo sequence_saved = EmptyDocumentInfo();
     if (!QueryDocument(state, sequence_saved)
         || (sequence_saved.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U) {
         return 1507;
     }
+    const auto saved_sequence_identity = state.Document().identity;
+    const auto saved_sequence_shell = state.Document().shell;
+    std::vector<std::uint8_t> saved_sequence_native;
+    std::vector<std::uint8_t> saved_sequence_raster;
+    if (!ReadBoundedFile(swap_save, saved_sequence_native)
+        || !ReadBoundedFile(L"inkpod-lt-smoke.png", saved_sequence_raster)) {
+        return 1512;
+    }
+    const auto saved_sequence_pair_unchanged = [&]() {
+        std::vector<std::uint8_t> native;
+        std::vector<std::uint8_t> raster;
+        return ReadBoundedFile(swap_save, native)
+            && ReadBoundedFile(L"inkpod-lt-smoke.png", raster)
+            && native == saved_sequence_native && raster == saved_sequence_raster;
+    };
+    const auto authority_unchanged = [&state](const auto& identity, const auto& shell) {
+        return state.Document().identity == identity
+            && state.Document().shell.current_path == shell.current_path
+            && state.Document().shell.source_path == shell.source_path
+            && state.Document().shell.recovery_path == shell.recovery_path
+            && state.Document().shell.recovery_original_path == shell.recovery_original_path;
+    };
+    struct SequenceSaveChoiceFixture final {
+        ApplicationHost& state;
+        std::wstring previous;
+        ~SequenceSaveChoiceFixture() {
+            DeleteSavedPairFixture(state.lifetime.smoke_native_save_path);
+            state.lifetime.smoke_native_save_path = std::move(previous);
+        }
+    } sequence_save_choice{state, std::move(state.lifetime.smoke_native_save_path)};
+    state.lifetime.smoke_native_save_path = L"inkpod-sequence-switch-save.inkpod";
+    DeleteSavedPairFixture(state.lifetime.smoke_native_save_path);
     const std::uint32_t sequence_prompt_count =
         state.lifetime.smoke_dirty_prompt_count;
+    InkpodSequenceActivationPlan first_activation{};
+    first_activation.struct_size = sizeof(first_activation);
+    const InkpodStatus first_activation_status = state.engine->Invoke([&first_activation](InkpodCore* core) {
+            return inkpod_core_sequence_activation_resolve(core, 2U, &first_activation);
+        }, false, false);
+    if (first_activation_status != INKPOD_STATUS_OK
+        || first_activation.result_class != INKPOD_SEQUENCE_ACTIVATION_BIND
+        || first_activation.source_index != INKPOD_SEQUENCE_INDEX_NONE) {
+        std::fprintf(stderr, "Sequence binding fixture failed: status=%d class=%u source=%u\n",
+            static_cast<int>(first_activation_status), first_activation.result_class,
+            first_activation.source_index);
+        return 1514;
+    }
     state.lifetime.smoke_dirty_prompt_choice = IDOK;
     SendMessageW(sequence_cells, LB_SETCURSEL, 2U, 0);
     SendMessageW(
@@ -8127,8 +8472,41 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     if (!QueryDocument(state, selected_ten)
         || state.Workspace().sequence_dialog.view.active_index != 2U
         || state.lifetime.smoke_dirty_prompt_count
-            != sequence_prompt_count) {
+            != sequence_prompt_count
+        || selected_ten.document_uuid_high != sequence_saved.document_uuid_high
+        || selected_ten.document_uuid_low != sequence_saved.document_uuid_low
+        || selected_ten.document_revision != sequence_saved.document_revision
+        || !authority_unchanged(saved_sequence_identity, saved_sequence_shell)
+        || !saved_sequence_pair_unchanged()) {
+        InkpodSequenceActivationPlan diagnostic{};
+        diagnostic.struct_size = sizeof(diagnostic);
+        const InkpodStatus request_status = state.engine->Invoke(
+            [&diagnostic](InkpodCore* core) {
+                return inkpod_core_sequence_activation_resolve(core, 2U, &diagnostic);
+            }, false, false);
+        std::fprintf(stderr,
+            "Sequence initial binding failed: active=%u query=%d current_empty=%d source_empty=%d "
+            "original_empty=%d identity_kind=%u same_identity=%d recovery_empty=%d same_recovery=%d pair_unchanged=%d\n",
+            state.Workspace().sequence_dialog.view.active_index, static_cast<int>(request_status),
+            state.Document().shell.current_path.empty(), state.Document().shell.source_path.empty(),
+            state.Document().shell.recovery_original_path.empty(),
+            static_cast<unsigned int>(state.Document().identity.kind),
+            state.Document().identity == saved_sequence_identity, state.Document().shell.recovery_path.empty(),
+            state.Document().shell.recovery_path == saved_sequence_shell.recovery_path,
+            saved_sequence_pair_unchanged());
         return 875;
+    }
+    const auto selected_ten_identity = state.Document().identity;
+    const auto selected_ten_shell = state.Document().shell;
+    // Binding the identical initial raster and selecting that bound source
+    // retain the original document and its existing save authority.
+    const std::uint32_t same_cell_prompt_count = state.lifetime.smoke_dirty_prompt_count;
+    SendMessageW(state.Workspace().sequence_palette, WM_COMMAND,
+        MAKEWPARAM(IDC_SEQUENCE_CELLS, LBN_SELCHANGE),
+        reinterpret_cast<LPARAM>(sequence_cells));
+    if (!authority_unchanged(selected_ten_identity, selected_ten_shell)
+        || state.lifetime.smoke_dirty_prompt_count != same_cell_prompt_count) {
+        return 1513;
     }
     SendMessageW(
         state.Workspace().windows.window,
@@ -8139,6 +8517,25 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     if (!QueryDocument(state, dirty_ten)
         || (dirty_ten.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U) {
         return 877;
+    }
+    InkpodSequenceActivationPlan same_activation{};
+    same_activation.struct_size = sizeof(same_activation);
+    if (state.engine->Invoke([&same_activation](InkpodCore* core) {
+            return inkpod_core_sequence_activation_resolve(core, 2U, &same_activation);
+        }, false, false) != INKPOD_STATUS_OK
+        || same_activation.result_class != INKPOD_SEQUENCE_ACTIVATION_NOOP) {
+        return 1515;
+    }
+    SendMessageW(state.Workspace().sequence_palette, WM_COMMAND,
+        MAKEWPARAM(IDC_SEQUENCE_CELLS, LBN_SELCHANGE),
+        reinterpret_cast<LPARAM>(sequence_cells));
+    InkpodDocumentInfo after_dirty_noop = EmptyDocumentInfo();
+    if (!QueryDocument(state, after_dirty_noop)
+        || after_dirty_noop.document_revision != dirty_ten.document_revision
+        || after_dirty_noop.flags != dirty_ten.flags
+        || !authority_unchanged(selected_ten_identity, selected_ten_shell)
+        || state.lifetime.smoke_dirty_prompt_count != same_cell_prompt_count) {
+        return 1516;
     }
     SendMessageW(sequence_cells, LB_SETCURSEL, 0U, 0);
     SendMessageW(
@@ -8151,7 +8548,9 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         || after_cancelled_switch.document_uuid_high
             != dirty_ten.document_uuid_high
         || after_cancelled_switch.document_uuid_low != dirty_ten.document_uuid_low
-        || state.Workspace().sequence_dialog.view.active_index != 2U) {
+        || state.Workspace().sequence_dialog.view.active_index != 2U
+        || !authority_unchanged(selected_ten_identity, selected_ten_shell)
+        || !saved_sequence_pair_unchanged()) {
         return 878;
     }
     if (state.engine->Invoke(
@@ -8163,6 +8562,15 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
             true,
             true) != INKPOD_STATUS_OK) {
         return 879;
+    }
+    InkpodSequenceActivationPlan replacement_activation{};
+    replacement_activation.struct_size = sizeof(replacement_activation);
+    if (state.engine->Invoke([&replacement_activation](InkpodCore* core) {
+            return inkpod_core_sequence_activation_resolve(core, 0U, &replacement_activation);
+        }, false, false) != INKPOD_STATUS_OK
+        || replacement_activation.result_class != INKPOD_SEQUENCE_ACTIVATION_REPLACE
+        || replacement_activation.source_index != 2U) {
+        return 1517;
     }
     state.lifetime.smoke_dirty_prompt_choice = IDOK;
     SendMessageW(sequence_cells, LB_SETCURSEL, 0U, 0);
@@ -8176,7 +8584,16 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     if (!QueryDocument(state, selected_one)
         || selected_one.document_uuid_high == selected_ten.document_uuid_high
             && selected_one.document_uuid_low == selected_ten.document_uuid_low
-        || state.Workspace().sequence_dialog.view.active_index != 0U) {
+        || state.Workspace().sequence_dialog.view.active_index != 0U
+        || !state.Document().shell.current_path.empty()
+        || !state.Document().shell.source_path.empty()
+        || !state.Document().shell.recovery_original_path.empty()
+        || state.Document().identity != inkpod::app::UntitledDocumentIdentity(
+            selected_one.document_uuid_high, selected_one.document_uuid_low)
+        || state.Document().identity == saved_sequence_identity
+        || state.Document().shell.recovery_path.empty()
+        || state.Document().shell.recovery_path == saved_sequence_shell.recovery_path
+        || !saved_sequence_pair_unchanged()) {
         return 880;
     }
     if (!RefreshLightTablePane(state)) {
@@ -8287,6 +8704,8 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     endpoint_history_after.struct_size = sizeof(endpoint_history_after);
     const std::uint32_t endpoint_prompt_count =
         state.lifetime.smoke_dirty_prompt_count;
+    const auto endpoint_identity = state.Document().identity;
+    const auto endpoint_shell = state.Document().shell;
     if (!QueryDocument(state, endpoint_before)
         || state.engine->Invoke(
                [&endpoint_history_before](InkpodCore* core) {
@@ -8312,7 +8731,9 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         || endpoint_after.color_plane_checksum != endpoint_before.color_plane_checksum
         || endpoint_history_after.cursor != endpoint_history_before.cursor
         || endpoint_history_after.item_count != endpoint_history_before.item_count
-        || state.lifetime.smoke_dirty_prompt_count != endpoint_prompt_count) {
+        || state.lifetime.smoke_dirty_prompt_count != endpoint_prompt_count
+        || !authority_unchanged(endpoint_identity, endpoint_shell)
+        || !saved_sequence_pair_unchanged()) {
         restore_endpoint_policy();
         return 4110;
     }
@@ -8348,7 +8769,8 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     state.lifetime.smoke_dirty_prompt_choice = IDNO;
     if (!navigation_ok
         || state.lifetime.smoke_dirty_prompt_count
-            != navigation_prompt_count + 5U) {
+            != navigation_prompt_count + 5U
+        || !saved_sequence_pair_unchanged()) {
         return 412;
     }
     if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_MOTION_START, 0) != 1
@@ -8375,6 +8797,19 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         || active_cell_tab != L"cell3.png *") {
         return 718;
     }
+    const std::wstring autosave_saved_path = L"inkpod-sequence-autosave-source.inkpod";
+    DeleteSavedPairFixture(autosave_saved_path);
+    if (SaveToPath(state, autosave_saved_path) != INKPOD_STATUS_OK) {
+        return 1514;
+    }
+    const auto autosave_source_identity = state.Document().identity;
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_ALL, 0);
+    if (!UpdateEditorFillOptionsForSmoke(state, [](InkpodEditorFillOptions& fill) {
+            fill.tolerance = fill.tolerance == 0U ? 1U : 0U;
+        })) {
+        return 1515;
+    }
+    const auto autosave_source_shell = state.Document().shell;
     InkpodDocumentInfo autosave_source = EmptyDocumentInfo();
     InkpodEditorStateInfo autosave_source_editor{};
     autosave_source_editor.struct_size = sizeof(autosave_source_editor);
@@ -8419,6 +8854,9 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
             IDM_SEQ_NEXT,
             0) != 1
         || !state.Workspace().animation.sequence_switch_pending
+        || !authority_unchanged(autosave_source_identity, autosave_source_shell)
+        || !state.Documents().HasIdentityReservation(inkpod::app::UntitledDocumentIdentity(
+            autosave_request.target_document_uuid_high, autosave_request.target_document_uuid_low))
         || SendMessageW(
                state.Workspace().windows.window,
                WM_COMMAND,
@@ -8427,6 +8865,10 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         || state.engine->Invoke(
                [](InkpodCore*) { return INKPOD_STATUS_OK; }, false, false)
             != INKPOD_STATUS_OK) {
+        restore_sequence_policy();
+        return 4096;
+    }
+    if (!WaitForFileIo(state)) {
         restore_sequence_policy();
         return 4096;
     }
@@ -8457,20 +8899,59 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
             source_binding->recovery_path, source_metadata_path)
         || GetFileAttributesW(source_metadata_path.c_str())
             == INVALID_FILE_ATTRIBUTES
-        || !state.Document().shell.current_path.empty()) {
+        || !state.Document().shell.current_path.empty()
+        || state.Document().identity != inkpod::app::UntitledDocumentIdentity(
+            autosave_target.document_uuid_high, autosave_target.document_uuid_low)
+        || source_binding->metadata.original_identity != autosave_source_identity
+        || source_binding->metadata.original_path != autosave_saved_path
+        || !saved_sequence_pair_unchanged()) {
         restore_sequence_policy();
         return 4097;
     }
     const std::wstring source_recovery_path = source_binding->recovery_path;
+    const auto autosave_target_identity = state.Document().identity;
+    const auto autosave_target_shell = state.Document().shell;
+    const auto switching_session = state.Document().id;
+    const auto switching_view = state.Document().ActiveView()->id;
+    // The saved source is now a distinct open document. Restoring its recovery
+    // must reject that identity before Core commits or writes the dirty source.
+    if (OpenFromPath(state, autosave_saved_path) != INKPOD_STATUS_OK
+        || state.Document().id == switching_session
+        || state.Document().identity != autosave_source_identity) {
+        restore_sequence_policy();
+        return 1516;
+    }
+    const auto duplicate_view = state.Document().ActiveView()->id;
+    if (!ActivateDocumentTab(state, switching_view)
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SEQ_PREVIOUS, 0) != 0
+        || state.Workspace().animation.sequence_switch_pending
+        || !authority_unchanged(autosave_target_identity, autosave_target_shell)
+        || state.Documents().HasIdentityReservation(autosave_source_identity)
+        || !QueryDocument(state, autosave_target)
+        || autosave_target.document_uuid_high != autosave_request.target_document_uuid_high
+        || autosave_target.document_uuid_low != autosave_request.target_document_uuid_low
+        || !saved_sequence_pair_unchanged()
+        || !ActivateDocumentTab(state, duplicate_view)
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_DOCUMENT_CLOSE, 0) != 1
+        || !ActivateDocumentTab(state, switching_view)) {
+        restore_sequence_policy();
+        return 1517;
+    }
     if (SendMessageW(
             state.Workspace().windows.window,
             WM_COMMAND,
             IDM_SEQ_PREVIOUS,
             0) != 1
         || !state.Workspace().animation.sequence_switch_pending
+        || !authority_unchanged(autosave_target_identity, autosave_target_shell)
+        || !state.Documents().HasIdentityReservation(autosave_source_identity)
         || state.engine->Invoke(
                [](InkpodCore*) { return INKPOD_STATUS_OK; }, false, false)
             != INKPOD_STATUS_OK) {
+        restore_sequence_policy();
+        return 4098;
+    }
+    if (!WaitForFileIo(state)) {
         restore_sequence_policy();
         return 4098;
     }
@@ -8510,7 +8991,11 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         || (autosave_restored_editor.flags & INKPOD_EDITOR_STATE_DIRTY) == 0U
         || state.Workspace().sequence_dialog.view.active_index != 1U
         || state.Document().shell.current_path.empty() == false
-        || state.Document().shell.recovery_path != source_recovery_path) {
+        || state.Document().shell.recovery_path != source_recovery_path
+        || state.Document().shell.recovery_original_path != autosave_saved_path
+        || state.Document().identity != autosave_source_identity
+        || state.Documents().HasIdentityReservation(autosave_source_identity)
+        || !saved_sequence_pair_unchanged()) {
         restore_sequence_policy();
         return 4099;
     }
@@ -8580,9 +9065,10 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         return 413;
     }
     for (const auto& path : state.lifetime.smoke_sequence_paths) {
-        DeleteFileW(path.c_str());
+        DeleteSavedPairFixture(path);
     }
-    DeleteFileW(swap_save.c_str());
+    DeleteSavedPairFixture(swap_save);
+    DeleteSavedPairFixture(autosave_saved_path);
     DeleteFileW((swap_save + L".recovery.inkpod").c_str());
     state.lifetime.smoke_sequence_paths.clear();
     DeleteFileW(L"inkpod-sequence-export-cell1.png");
@@ -10060,11 +10546,11 @@ int RunMultiDocumentTabSmoke(ApplicationHost& state) noexcept {
         suffix);
     const std::wstring first_path(first_buffer.data());
     const std::wstring second_path(second_buffer.data());
-    DeleteFileW(first_path.c_str());
-    DeleteFileW(second_path.c_str());
+    DeleteSavedPairFixture(first_path);
+    DeleteSavedPairFixture(second_path);
     const auto cleanup = [&first_path, &second_path]() noexcept {
-        DeleteFileW(first_path.c_str());
-        DeleteFileW(second_path.c_str());
+        DeleteSavedPairFixture(first_path);
+        DeleteSavedPairFixture(second_path);
     };
 
     const std::size_t baseline_count = state.Documents().Count();
@@ -10364,10 +10850,10 @@ int RunMultiDocumentTabSmoke(ApplicationHost& state) noexcept {
     }
     const std::size_t recent_count_before_missing =
         state.RecentDocumentCount();
-    const std::wstring missing_recent_path = first_path + L".missing";
+    const std::wstring missing_recent_path = first_path + L".missing.inkpod";
     inkpod::app::DocumentIdentity missing_recent_identity{};
     if (!inkpod::app::ResolveDocumentFileIdentity(
-            missing_recent_path, missing_recent_identity)
+            state.file_io.Manager(), missing_recent_path, missing_recent_identity)
         || !state.RecordRecentDocument(
             missing_recent_path, std::move(missing_recent_identity))) {
         cleanup();
@@ -10542,7 +11028,7 @@ int RunMultiDocumentTabSmoke(ApplicationHost& state) noexcept {
             state,
             state.routing.targets.Capture(),
             second_document->shell.recovery_path)
-        || state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+        || state.engine->WaitIdle() != INKPOD_STATUS_OK || !WaitForFileIo(state)) {
         cleanup();
         return 952;
     }
@@ -12861,7 +13347,7 @@ int RunMultiWorkspaceWindowSmoke(ApplicationHost& state) noexcept {
         static_cast<unsigned long long>(GetTickCount64()));
     const std::wstring isolated_path(temporary_file.data());
     const auto cleanup_isolated_file = [&isolated_path]() noexcept {
-        DeleteFileW(isolated_path.c_str());
+        DeleteSavedPairFixture(isolated_path);
         DeleteFileW((isolated_path + L".recovery.inkpod").c_str());
     };
     InkpodDocumentInfo isolated_saved{};
@@ -13323,7 +13809,7 @@ int RunCutWorkflowSmoke(ApplicationHost& state) noexcept {
         L"inkpod-cut-smoke-0004.inkpod",
         L"inkpod-cut-smoke-0005.inkpod"};
     for (const wchar_t* path : kFiles) {
-        DeleteFileW(path);
+        DeleteSavedPairFixture(path);
     }
 
     const std::size_t baseline_count = state.Documents().Count();
@@ -13448,12 +13934,32 @@ int RunCutWorkflowSmoke(ApplicationHost& state) noexcept {
                 L"restore previous document view");
         }
         for (const wchar_t* path : kFiles) {
-            DeleteFileW(path);
+            DeleteSavedPairFixture(path);
         }
         return clean;
     };
     const auto finish = [&](int code) noexcept {
         return cleanup() ? code : 10490;
+    };
+    const auto collect_created = [&]() noexcept {
+        created.clear();
+        try {
+            for (std::size_t index = 0U; index < state.Documents().Count(); ++index) {
+                const auto* document = state.Documents().SessionAt(index);
+                if (document == nullptr) {
+                    return false;
+                }
+                const bool existed = std::find(baseline.cbegin(),
+                    baseline.cbegin() + baseline_count, document->id)
+                    != baseline.cbegin() + baseline_count;
+                if (!existed) {
+                    created.push_back(document->id);
+                }
+            }
+            return true;
+        } catch (const std::bad_alloc&) {
+            return false;
+        }
     };
     InkpodStatus query_info_status = INKPOD_STATUS_INVALID_STATE;
     DocumentSessionId query_info_session{};
@@ -13486,6 +13992,73 @@ int RunCutWorkflowSmoke(ApplicationHost& state) noexcept {
     };
 
     const bool had_cut = state.Workspace().cut.handle != nullptr;
+    if (state.engine == nullptr || had_cut) {
+        return finish(1031);
+    }
+
+    // New Cut must never reuse an existing member, even in the product smoke
+    // route. Fixture bytes are intentionally not valid native/raster input:
+    // overwrite rejection must happen without replacing or decoding them.
+    const std::vector<std::uint8_t> existing_bytes{
+        'e', 'x', 'i', 's', 't', 'i', 'n', 'g', '-', 'c', 'u', 't'};
+    std::vector<std::uint8_t> retained_bytes;
+    const std::size_t recent_before_collision = state.RecentDocumentCount();
+    if (!WriteFileAtomically(kFiles[1], existing_bytes)) {
+        return finish(10311);
+    }
+    const LRESULT native_collision = SendMessageW(main_window,
+        WM_COMMAND, IDM_FILE_NEW_CUT, 0);
+    if (!collect_created() || native_collision != 0 || !created.empty()
+        || state.Documents().Count() != baseline_count
+        || state.engine->SessionCount() != engine_baseline
+        || state.RecentDocumentCount() != recent_before_collision
+        || state.routing.targets.ActiveDocumentView() != previous_view
+        || state.Workspace().cut.handle != nullptr
+        || GetFileAttributesW(kFiles[0]) != INVALID_FILE_ATTRIBUTES
+        || !ReadBoundedFile(kFiles[1], retained_bytes)
+        || retained_bytes != existing_bytes) {
+        return finish(10312);
+    }
+    DeleteSavedPairFixture(kFiles[1]);
+
+    constexpr std::array<const wchar_t*, 4U> companion_paths{
+        L"inkpod-cut-smoke-0001.png", L"inkpod-cut-smoke-0001.tif",
+        L"inkpod-cut-smoke-0001.tga", L"inkpod-cut-smoke-0001.bmp"};
+    for (const wchar_t* path : companion_paths) {
+        if (!WriteFileAtomically(path, existing_bytes)) {
+            return finish(10313);
+        }
+    }
+    const LRESULT companion_collision = SendMessageW(main_window,
+        WM_COMMAND, IDM_FILE_NEW_CUT, 0);
+    if (!collect_created() || companion_collision != 0 || created.size() != 5U
+        || state.Workspace().cut.handle != nullptr
+        || state.RecentDocumentCount() != recent_before_collision) {
+        return finish(10314);
+    }
+    for (const wchar_t* path : kFiles) {
+        if (GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES) {
+            return finish(10315);
+        }
+    }
+    for (const wchar_t* path : companion_paths) {
+        if (!ReadBoundedFile(path, retained_bytes) || retained_bytes != existing_bytes) {
+            return finish(10316);
+        }
+    }
+    while (!created.empty()) {
+        if (!state.CloseDocumentSession(created.back())) {
+            return finish(10317);
+        }
+        created.pop_back();
+    }
+    if ((previous_view && !state.ActivateDocumentView(previous_view))
+        || state.Documents().Count() != baseline_count
+        || state.engine->SessionCount() != engine_baseline) {
+        return finish(10318);
+    }
+    DeleteSavedPairFixture(kFiles[1]);
+
     const LRESULT create_result = state.engine == nullptr || had_cut
         ? 0
         : SendMessageW(
@@ -13506,17 +14079,8 @@ int RunCutWorkflowSmoke(ApplicationHost& state) noexcept {
             detail.c_str());
         return finish(1031);
     }
-    for (std::size_t index = 0U; index < state.Documents().Count(); ++index) {
-        const auto* document = state.Documents().SessionAt(index);
-        if (document == nullptr) {
-            return finish(1032);
-        }
-        const bool existed = std::find(
-            baseline.cbegin(), baseline.cbegin() + baseline_count, document->id)
-            != baseline.cbegin() + baseline_count;
-        if (!existed) {
-            created.push_back(document->id);
-        }
+    if (!collect_created()) {
+        return finish(1032);
     }
     InkpodCutInfo created_cut{};
     if (created.size() != 5U || !query_info(created_cut)

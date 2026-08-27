@@ -16,6 +16,7 @@ mod determinism;
 mod document_selection;
 mod editor_state;
 mod effects;
+mod file_io;
 mod floating_transform_anchor;
 mod foundation;
 mod geometry;

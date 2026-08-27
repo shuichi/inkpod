@@ -56,6 +56,10 @@ HRESULT StartRenderer(ApplicationHost& state) noexcept {
 }
 
 InkpodStatus StartCore(ApplicationHost& state) noexcept {
+    const InkpodStatus io_status = state.file_io.Initialize();
+    if (io_status != INKPOD_STATUS_OK) {
+        return io_status;
+    }
     try {
         state.engine = std::make_unique<CoreHost>();
     } catch (const std::bad_alloc&) {
@@ -63,9 +67,14 @@ InkpodStatus StartCore(ApplicationHost& state) noexcept {
     }
     const InkpodStatus status = state.engine->Start(
         renderer::GetCanvasSnapshotSink(state.Workspace().windows.canvas),
-        state.Workspace().windows.window);
+        state.Workspace().windows.window,
+        state.file_io.Manager());
     if (status != INKPOD_STATUS_OK) {
         return status;
+    }
+    if (SetTimer(state.Workspace().windows.window, kFileIoPollTimer,
+            kFileIoPollMilliseconds, nullptr) == 0U) {
+        return INKPOD_STATUS_INVALID_STATE;
     }
     const DocumentSessionId session = state.routing.targets.ReplaceDocument();
     if (!state.ReplaceDocumentSession(
@@ -79,6 +88,7 @@ InkpodStatus StartCore(ApplicationHost& state) noexcept {
 }
 
 InkpodStatus StopCore(ApplicationHost& state) noexcept {
+    state.file_io.CancelAll();
     windows::ui::CloseAllHistoryVisualizationDialogs(state);
     const InkpodStatus clipboard_status = inkpod_clipboard_release(&state.clipboard);
     if (state.effects.task != nullptr) {
@@ -106,12 +116,12 @@ InkpodStatus StopCore(ApplicationHost& state) noexcept {
                 workspace->subpalette_dialog.canvas);
         }
         ++workspace->subpalette_load_generation;
-        if (state.engine != nullptr && workspace->subpalette_load != nullptr
-            && workspace->subpalette_load->candidate_subpalette != nullptr) {
+        state.file_io.Cancel(workspace->subpalette_io_request);
+        workspace->subpalette_io_request = 0U;
+        if (state.engine != nullptr && workspace->subpalette_candidate != nullptr) {
             (void)state.engine->ReleaseSubpalette(
-                &workspace->subpalette_load->candidate_subpalette);
+                &workspace->subpalette_candidate);
         }
-        workspace->subpalette_load.reset();
         workspace->subpalette_loading = false;
         if (state.engine != nullptr && workspace->subpalette != nullptr) {
             (void)state.engine->ReleaseSubpalette(&workspace->subpalette);
@@ -136,6 +146,7 @@ InkpodStatus StopCore(ApplicationHost& state) noexcept {
         state.DetachCoreSessions();
         state.engine->Stop();
         state.engine.reset();
+        state.file_io.ClearCompleted();
     }
     if (state.renderer != nullptr) {
         state.renderer->Stop();
@@ -219,16 +230,13 @@ std::wstring RecoveryDisplayPath(const RecoveryCandidate& candidate) {
 std::wstring RecoveryPromptText(
     const RecoveryCandidate& candidate,
     std::size_t index,
-    std::size_t count) {
+    std::size_t count,
+    bool newer) {
     FILETIME local_time{};
     SYSTEMTIME system_time{};
     (void)FileTimeToLocalFileTime(&candidate.modified, &local_time);
     (void)FileTimeToSystemTime(&local_time, &system_time);
     const std::wstring original = RecoveryDisplayPath(candidate);
-    const bool newer = candidate.has_metadata
-        && !candidate.metadata.original_path.empty()
-        && RecoveryIsNewer(
-            candidate.metadata.original_path, candidate.recovery_path);
     std::array<wchar_t, 1024U> text{};
     _snwprintf_s(
         text.data(),
@@ -254,52 +262,185 @@ std::wstring RecoveryPromptText(
     return text.data();
 }
 
+void EnsureStartupDocument(ApplicationHost& state, CommandContext initial) noexcept {
+    try {
+        (void)state.file_io.WhenIdle({}, [&state, initial] {
+            if (state.engine == nullptr || !initial.document_session.has_value()
+                || !initial.generation.has_value() || !initial.document_view.has_value()
+                || !initial.workspace.has_value()) {
+                return;
+            }
+            const auto* workspace = state.FindWorkspace(initial.workspace.value());
+            const auto* document = state.Documents().Find(initial.document_session.value());
+            if (workspace == nullptr || !IsWindowVisible(workspace->windows.window)
+                || document == nullptr || document->generation != initial.generation.value()) {
+                return;
+            }
+            InkpodDocumentInfo info{};
+            info.struct_size = sizeof(info);
+            if (state.engine->GetDocumentInfo(document->id, document->generation, info)) {
+                return;
+            }
+            const auto previous_view = state.routing.targets.ActiveDocumentView();
+            if (state.ActivateDocumentView(initial.document_view.value())) {
+                const InkpodStatus status = windows::ui::runtime::CreateDefaultCell(state);
+                if (status != INKPOD_STATUS_OK) {
+                    windows::ui::runtime::ShowCoreError(
+                        state, workspace->windows.window, UiText(UiStringId::Text0225));
+                }
+            }
+            if (previous_view && previous_view != initial.document_view.value()) {
+                (void)state.ActivateDocumentView(previous_view);
+            }
+            windows::ui::runtime::UpdateMenuState(state);
+        });
+    } catch (const std::bad_alloc&) {
+        state.engine->SetLocalFailure(UiText(UiStringId::Text0225));
+    }
+}
+
+struct RecoveryReview final : std::enable_shared_from_this<RecoveryReview> {
+    ApplicationHost* state{};
+    CommandContext initial;
+    Generation workspace_generation{};
+    HWND owner{};
+    std::vector<RecoveryCandidate> candidates;
+    std::size_t index{};
+
+    bool Valid() const noexcept {
+        const auto* workspace = initial.workspace.has_value()
+            ? state->FindWorkspace(initial.workspace.value()) : nullptr;
+        return state->engine != nullptr && workspace != nullptr
+            && workspace->generation == workspace_generation
+            && workspace->windows.window == owner && IsWindow(owner);
+    }
+
+    void Finish(bool cancelled = false) {
+        if (!cancelled && Valid()) {
+            EnsureStartupDocument(*state, initial);
+        }
+    }
+
+    void Continue() {
+        const auto self = shared_from_this();
+        if (!state->file_io.WhenIdle({}, [self] { self->Next(); })) {
+            Finish();
+        }
+    }
+
+    void Prompt(bool newer) {
+        if (!Valid() || index >= candidates.size()) {
+            Finish();
+            return;
+        }
+        const auto& candidate = candidates[index];
+        const std::wstring prompt = RecoveryPromptText(candidate, index, candidates.size(), newer);
+        const int choice = MessageBoxW(owner, prompt.c_str(), L"inkpod Recovery",
+            MB_YESNOCANCEL | MB_ICONQUESTION);
+        if (!Valid()) {
+            return;
+        }
+        if (choice == IDYES) {
+            const auto previous_view = state->routing.targets.ActiveDocumentView();
+            (void)state->ActivateWorkspaceWindow(initial.workspace.value(), false);
+            const InkpodStatus status = windows::ui::runtime::OpenRecoveryCandidate(*state, candidate);
+            if (previous_view) {
+                (void)state->ActivateDocumentView(previous_view);
+            }
+            if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_PENDING) {
+                windows::ui::runtime::ShowCoreError(*state, owner, UiText(UiStringId::Text0080));
+            }
+        } else if (choice == IDNO) {
+            FileIoRequest request{};
+            request.context = initial;
+            request.kind = INKPOD_IO_RECOVERY_DISCARD;
+            request.paths = {candidate.recovery_path};
+            const auto self = shared_from_this();
+            if (!state->file_io.Queue(*state->engine, std::move(request),
+                    [self](FileIoResult&& result) {
+                        if (result.status != INKPOD_STATUS_OK && self->Valid()) {
+                            MessageBoxW(self->owner, UiText(UiStringId::Text0079),
+                                L"inkpod Recovery", MB_OK | MB_ICONWARNING);
+                        }
+                    })) {
+                MessageBoxW(owner, UiText(UiStringId::Text0079),
+                    L"inkpod Recovery", MB_OK | MB_ICONWARNING);
+            }
+        }
+        ++index;
+        Continue();
+    }
+
+    void Next() {
+        if (!Valid() || index >= candidates.size()) {
+            Finish();
+            return;
+        }
+        const auto& candidate = candidates[index];
+        if (!candidate.has_metadata || candidate.metadata.original_path.empty()) {
+            Prompt(false);
+            return;
+        }
+        FileIoRequest request{};
+        request.context = initial;
+        request.kind = INKPOD_IO_RECOVERY_PROBE;
+        request.paths = {candidate.metadata.original_path, candidate.recovery_path};
+        const auto self = shared_from_this();
+        if (!state->file_io.Queue(*state->engine, std::move(request),
+                [self](FileIoResult&& result) {
+                    if (result.status == INKPOD_STATUS_CANCELLED) {
+                        self->Finish(true);
+                        return;
+                    }
+                    self->Prompt(result.status == INKPOD_STATUS_OK && !result.items.empty());
+                })) {
+            Finish();
+        }
+    }
+};
+
 bool ReviewRecoveryCandidates(
     ApplicationHost& state,
     HWND owner,
     bool& document_initialized) noexcept {
-    std::vector<RecoveryCandidate> candidates;
-    if (!EnumerateRecoveryCandidates(candidates)) {
-        MessageBoxW(
-            owner,
-            UiText(UiStringId::RecoveryEnumerationFailure),
-            L"inkpod Recovery",
-            MB_OK | MB_ICONWARNING);
-        return false;
-    }
-    for (std::size_t index = 0U; index < candidates.size(); ++index) {
-        std::wstring prompt;
-        try {
-            prompt = RecoveryPromptText(candidates[index], index, candidates.size());
-        } catch (const std::bad_alloc&) {
+    try {
+        std::wstring directory;
+        if (!RecoveryRootDirectory(directory)) {
             return false;
         }
-        const int choice = MessageBoxW(
-            owner,
-            prompt.c_str(),
-            L"inkpod Recovery",
-            MB_YESNOCANCEL | MB_ICONQUESTION);
-        if (choice == IDYES) {
-            const InkpodStatus status = windows::ui::runtime::OpenRecoveryCandidate(
-                state, candidates[index]);
-            if (status == INKPOD_STATUS_OK) {
-                document_initialized = true;
-            } else {
-                windows::ui::runtime::ShowCoreError(
-                    state, owner, UiText(UiStringId::Text0080));
-            }
-        } else if (choice == IDNO
-            && !DiscardRecoveryArtifact(candidates[index].recovery_path)) {
-            MessageBoxW(
-                owner,
-                UiText(UiStringId::Text0079),
-                L"inkpod Recovery",
-                MB_OK | MB_ICONWARNING);
+        auto review = std::make_shared<RecoveryReview>();
+        review->state = &state;
+        review->initial = state.routing.targets.Capture();
+        review->workspace_generation = state.Workspace().generation;
+        review->owner = owner;
+        FileIoRequest request{};
+        request.context = review->initial;
+        request.kind = INKPOD_IO_RECOVERY_LIST;
+        request.paths = {std::move(directory)};
+        if (!state.file_io.Queue(*state.engine, std::move(request),
+                [review](FileIoResult&& result) {
+                    if (!review->Valid()) {
+                        return;
+                    }
+                    if (result.status != INKPOD_STATUS_OK) {
+                        if (result.status != INKPOD_STATUS_CANCELLED) {
+                            MessageBoxW(review->owner, UiText(UiStringId::RecoveryEnumerationFailure),
+                                L"inkpod Recovery", MB_OK | MB_ICONWARNING);
+                        }
+                        review->Finish(result.status == INKPOD_STATUS_CANCELLED);
+                        return;
+                    }
+                    review->candidates = std::move(result.recovery_candidates);
+                    review->Continue();
+                })) {
+            return false;
         }
+        document_initialized = true;
+        return true;
+    } catch (const std::bad_alloc&) {
+        return false;
     }
-    return true;
 }
-
 bool OpenDocumentPaths(
     ApplicationHost& state,
     HWND owner,
@@ -309,7 +450,7 @@ bool OpenDocumentPaths(
     for (const auto& path : paths) {
         const InkpodStatus status = windows::ui::runtime::OpenDocumentFromPath(
             state, path);
-        if (status == INKPOD_STATUS_OK) {
+        if (status == INKPOD_STATUS_OK || status == INKPOD_STATUS_PENDING) {
             document_initialized = true;
         } else {
             windows::ui::runtime::ShowCoreError(
@@ -618,14 +759,19 @@ int Application::Run() {
         return 15;
     }
 
+    const CommandContext initial_document = state.routing.targets.Capture();
     bool document_initialized{};
     if (!launch_.document_paths.empty()) {
         (void)OpenDocumentPaths(
             state, window, launch_.document_paths, document_initialized);
     }
     if (!launch_.smoke_test) {
-        (void)ReviewRecoveryCandidates(state, window, document_initialized);
+        const bool reviewing_recovery =
+            ReviewRecoveryCandidates(state, window, document_initialized);
         RestorePreviousDocuments(state, window, document_initialized);
+        if (!reviewing_recovery && document_initialized) {
+            EnsureStartupDocument(state, initial_document);
+        }
     }
     if (core_status == INKPOD_STATUS_OK && !document_initialized) {
         core_status = windows::ui::runtime::CreateDefaultCell(state);

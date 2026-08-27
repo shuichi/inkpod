@@ -14,7 +14,7 @@ pub struct Thumbnail {
     pub checksum: u64,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 /// Validated immutable flattened source for one sequence cell.
 pub struct SequenceCellSource {
     /// User-visible name containing a parseable trailing cell number.
@@ -31,10 +31,75 @@ pub struct SequenceCellSource {
     pub dpi_y_milli: u32,
     /// Paper/frame alignment metadata in source document pixels.
     pub frames: FrameMetadata,
+    /// Raster companion format retained when this source becomes editable.
+    pub raster_file_format: CommonRasterFormat,
+    // Runtime-only charge for the tiled image; never part of replay identity.
+    decoded_lease: Option<inkpod_io::DecodedLease>,
     pub(crate) raster: TileRaster,
 }
 
+impl PartialEq for SequenceCellSource {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+            && self.cell_number == other.cell_number
+            && self.document_uuid == other.document_uuid
+            && self.source_generation == other.source_generation
+            && self.dpi_x_milli == other.dpi_x_milli
+            && self.dpi_y_milli == other.dpi_y_milli
+            && self.frames == other.frames
+            && self.raster_file_format == other.raster_file_format
+            && self.raster == other.raster
+    }
+}
+
+impl Eq for SequenceCellSource {}
+
 impl SequenceCellSource {
+    pub(crate) fn encode_raster(
+        &self,
+        format: CommonRasterFormat,
+        composite_white: bool,
+    ) -> Result<Vec<u8>, CoreError> {
+        let raster = super::raster::tile_to_common(
+            &self.raster,
+            Some(self.dpi_x_milli),
+            Some(self.dpi_y_milli),
+        )?;
+        Ok(encode_common_raster(format, &raster, composite_white)?)
+    }
+    /// Copies a managed source into the sequence's immutable tiled representation.
+    /// Reserves its full tile payload before allocation and retains that charge
+    /// across clones, replacement, and cache invalidation.
+    pub fn from_loaded_image(
+        manager: &inkpod_io::IoManager,
+        image: &inkpod_io::LoadedImage,
+        document_uuid: u128,
+    ) -> Result<Self, CoreError> {
+        let info = image.raster().info;
+        let tile = u64::from(inkpod_image::TILE_SIZE);
+        let bytes_per_pixel = match info.pixel_format {
+            PixelFormat::StraightRgba8 => 4_u64,
+            PixelFormat::StraightRgba16 => 8_u64,
+            _ => return Err(CoreError::InvalidArgument("sequence requires RGBA pixels")),
+        };
+        let bytes = u64::from(info.width)
+            .div_ceil(tile)
+            .checked_mul(u64::from(info.height).div_ceil(tile))
+            .and_then(|count| count.checked_mul(tile * tile * bytes_per_pixel))
+            .ok_or(CoreError::InvalidArgument(
+                "sequence tile allocation overflows",
+            ))?;
+        let lease = manager.reserve_derived_image(image, bytes)?;
+        let mut source = Self::from_common_raster_with_generation(
+            image.name(),
+            document_uuid,
+            image.generation(),
+            image.raster(),
+        )?;
+        source.raster_file_format = image.format();
+        source.decoded_lease = Some(lease);
+        Ok(source)
+    }
     /// Validates and converts owned tightly packed raster bytes into a sequence cell.
     pub fn from_rgba_bytes(
         name: impl Into<String>,
@@ -101,6 +166,8 @@ impl SequenceCellSource {
             cell_number,
             document_uuid,
             source_generation,
+            raster_file_format: CommonRasterFormat::Png,
+            decoded_lease: None,
             dpi_x_milli: raster.info.dpi_x_milli.unwrap_or(DEFAULT_DPI_MILLI),
             dpi_y_milli: raster.info.dpi_y_milli.unwrap_or(DEFAULT_DPI_MILLI),
             frames: FrameMetadata {
@@ -145,7 +212,7 @@ pub struct SequenceCellInfo {
 pub(crate) struct SequenceState {
     pub(crate) cells: Vec<SequenceCellSource>,
     pub(super) active_index: Option<usize>,
-    pub(super) revision: u64,
+    pub(crate) revision: u64,
 }
 
 impl SequenceState {

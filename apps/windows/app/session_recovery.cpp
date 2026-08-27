@@ -14,9 +14,6 @@
 namespace inkpod::app {
 namespace {
 
-constexpr std::uint32_t kMetadataMagic = UINT32_C(0x4d524b49);
-constexpr std::uint16_t kMetadataVersion = 1U;
-constexpr std::uint16_t kMetadataHeaderBytes = 100U;
 constexpr std::size_t kMaximumMetadataBytes = 512U * 1024U;
 constexpr std::uint32_t kSessionPathsMagic = UINT32_C(0x53524b49);
 constexpr std::uint16_t kSessionPathsVersion = 1U;
@@ -30,12 +27,6 @@ void AppendU16(std::vector<std::uint8_t>& bytes, std::uint16_t value) {
 
 void AppendU32(std::vector<std::uint8_t>& bytes, std::uint32_t value) {
     for (std::uint32_t shift = 0U; shift < 32U; shift += 8U) {
-        bytes.push_back(static_cast<std::uint8_t>((value >> shift) & 0xffU));
-    }
-}
-
-void AppendU64(std::vector<std::uint8_t>& bytes, std::uint64_t value) {
-    for (std::uint32_t shift = 0U; shift < 64U; shift += 8U) {
         bytes.push_back(static_cast<std::uint8_t>((value >> shift) & 0xffU));
     }
 }
@@ -65,21 +56,6 @@ bool ReadU32(
     value = 0U;
     for (std::uint32_t shift = 0U; shift < 32U; shift += 8U) {
         value |= static_cast<std::uint32_t>(bytes[cursor++]) << shift;
-    }
-    return true;
-}
-
-bool ReadU64(
-    const std::uint8_t* bytes,
-    std::size_t length,
-    std::size_t& cursor,
-    std::uint64_t& value) noexcept {
-    if (bytes == nullptr || cursor > length || length - cursor < 8U) {
-        return false;
-    }
-    value = 0U;
-    for (std::uint32_t shift = 0U; shift < 64U; shift += 8U) {
-        value |= static_cast<std::uint64_t>(bytes[cursor++]) << shift;
     }
     return true;
 }
@@ -266,13 +242,6 @@ bool DeleteIfPresent(const std::wstring& path) noexcept {
     return DeleteFileW(path.c_str()) != FALSE || GetLastError() == ERROR_FILE_NOT_FOUND;
 }
 
-bool ValidIdentityKind(DocumentIdentityKind kind) noexcept {
-    return kind == DocumentIdentityKind::None
-        || kind == DocumentIdentityKind::WindowsFile
-        || kind == DocumentIdentityKind::NormalizedPath
-        || kind == DocumentIdentityKind::Untitled;
-}
-
 bool ValidIdentity(const DocumentIdentity& identity) noexcept {
     const bool has_file_id = identity.volume_serial != 0U
         || std::any_of(
@@ -295,7 +264,7 @@ bool ValidIdentity(const DocumentIdentity& identity) noexcept {
 }  // namespace
 
 bool RecoveryRootDirectory(std::wstring& output) noexcept {
-    return EnsureApplicationDataDirectory(
+    return ResolveApplicationDataDirectory(
         ApplicationDataDirectory::Recovery, output);
 }
 
@@ -326,15 +295,13 @@ bool BuildRecoveryMetadata(
         || (document_uuid_high == 0U && document_uuid_low == 0U)) {
         return false;
     }
-    FILETIME now{};
-    GetSystemTimeAsFileTime(&now);
     RecoveryMetadata metadata{};
     metadata.session = session;
     metadata.generation = generation;
     metadata.document_uuid_high = document_uuid_high;
     metadata.document_uuid_low = document_uuid_low;
-    metadata.written_file_time = static_cast<std::uint64_t>(now.dwLowDateTime)
-        | (static_cast<std::uint64_t>(now.dwHighDateTime) << 32U);
+    // The Rust recovery writer supplies the durable metadata timestamp.
+    metadata.written_file_time = 0U;
     try {
         metadata.original_identity = identity;
         metadata.original_path = current_path;
@@ -346,57 +313,128 @@ bool BuildRecoveryMetadata(
     return true;
 }
 
-bool EncodeRecoveryMetadata(
+bool RecoveryMetadataToAbi(
     const RecoveryMetadata& metadata,
-    std::vector<std::uint8_t>& output) noexcept {
-    if (!metadata.session || !metadata.generation
-        || !ValidIdentity(metadata.original_identity)
-        || (metadata.document_uuid_high == 0U
-            && metadata.document_uuid_low == 0U)) {
+    InkpodIoRecoveryMetadata& output,
+    std::vector<std::uint8_t>& text) noexcept {
+    if (!ValidIdentity(metadata.original_identity)) {
         return false;
     }
     try {
-        std::vector<std::uint8_t> original_path;
-        std::vector<std::uint8_t> normalized_path;
-        std::vector<std::uint8_t> source_path;
-        if (!WideToUtf8(metadata.original_path, original_path)
-            || !WideToUtf8(
-                metadata.original_identity.normalized_path, normalized_path)
-            || !WideToUtf8(metadata.source_path, source_path)) {
+        std::array<std::vector<std::uint8_t>, 3U> strings;
+        if (!WideToUtf8(metadata.original_path, strings[0])
+            || !WideToUtf8(metadata.source_path, strings[1])
+            || !WideToUtf8(metadata.original_identity.normalized_path, strings[2])) {
             return false;
         }
-        const std::size_t total = kMetadataHeaderBytes + 12U
-            + original_path.size() + normalized_path.size() + source_path.size();
-        if (total > kMaximumMetadataBytes || total > UINT32_MAX) {
+        const std::size_t total = strings[0].size() + strings[1].size() + strings[2].size();
+        if (total > kMaximumMetadataBytes) {
             return false;
         }
-        output.clear();
-        output.reserve(total);
-        AppendU32(output, kMetadataMagic);
-        AppendU16(output, kMetadataVersion);
-        AppendU16(output, kMetadataHeaderBytes);
-        AppendU32(output, static_cast<std::uint32_t>(total));
-        AppendU64(output, metadata.session.Value());
-        AppendU64(output, metadata.generation.Value());
-        AppendU64(output, metadata.document_uuid_high);
-        AppendU64(output, metadata.document_uuid_low);
-        AppendU32(
-            output, static_cast<std::uint32_t>(metadata.original_identity.kind));
-        AppendU32(output, 0U);
-        AppendU64(output, metadata.original_identity.volume_serial);
-        output.insert(
-            output.end(),
-            metadata.original_identity.file_id.begin(),
-            metadata.original_identity.file_id.end());
-        AppendU64(output, metadata.original_identity.uuid_high);
-        AppendU64(output, metadata.original_identity.uuid_low);
-        AppendU64(output, metadata.written_file_time);
-        AppendString(output, original_path);
-        AppendString(output, normalized_path);
-        AppendString(output, source_path);
-        return output.size() == total;
+        text.clear();
+        text.reserve(total);
+        for (const auto& string : strings) {
+            text.insert(text.end(), string.begin(), string.end());
+        }
+        InkpodIoRecoveryMetadata result{};
+        result.struct_size = static_cast<std::uint32_t>(sizeof(result));
+        result.flags = 1U;
+        result.session_id = metadata.session.Value();
+        result.generation = metadata.generation.Value();
+        result.document_uuid_high = metadata.document_uuid_high;
+        result.document_uuid_low = metadata.document_uuid_low;
+        result.written_time_100ns = metadata.written_file_time;
+        result.identity_kind = static_cast<std::uint32_t>(metadata.original_identity.kind);
+        result.identity_volume = metadata.original_identity.volume_serial;
+        if (metadata.original_identity.kind == DocumentIdentityKind::Untitled) {
+            result.identity_object_high = metadata.original_identity.uuid_high;
+            result.identity_object_low = metadata.original_identity.uuid_low;
+        } else if (metadata.original_identity.kind == DocumentIdentityKind::WindowsFile) {
+            std::memcpy(&result.identity_object_low, metadata.original_identity.file_id.data(), 8U);
+            std::memcpy(&result.identity_object_high, metadata.original_identity.file_id.data() + 8U, 8U);
+        }
+        std::array<InkpodIoPath*, 3U> spans{
+            &result.original_path, &result.source_path, &result.identity_path};
+        std::size_t offset{};
+        for (std::size_t index = 0U; index < spans.size(); ++index) {
+            auto& span = *spans[index];
+            span.struct_size = static_cast<std::uint32_t>(sizeof(span));
+            span.path = strings[index].empty() ? nullptr : text.data() + offset;
+            span.path_bytes = strings[index].size();
+            offset += strings[index].size();
+        }
+        output = result;
+        return true;
     } catch (const std::bad_alloc&) {
-        output.clear();
+        return false;
+    }
+}
+
+bool RecoveryMetadataFromAbi(
+    const InkpodIoRecoveryMetadata& input,
+    RecoveryMetadata& output) noexcept {
+    if (input.struct_size < sizeof(input) || (input.flags & 1U) == 0U
+        || input.reserved != 0U || input.identity_kind > 3U) {
+        return false;
+    }
+    try {
+        RecoveryMetadata result{};
+        result.session = DocumentSessionId(input.session_id);
+        result.generation = Generation(input.generation);
+        result.document_uuid_high = input.document_uuid_high;
+        result.document_uuid_low = input.document_uuid_low;
+        result.written_file_time = input.written_time_100ns;
+        result.original_identity.kind = static_cast<DocumentIdentityKind>(input.identity_kind);
+        result.original_identity.volume_serial = input.identity_volume;
+        if (result.original_identity.kind == DocumentIdentityKind::Untitled) {
+            result.original_identity.uuid_high = input.identity_object_high;
+            result.original_identity.uuid_low = input.identity_object_low;
+        } else if (result.original_identity.kind == DocumentIdentityKind::WindowsFile) {
+            std::memcpy(result.original_identity.file_id.data(), &input.identity_object_low, 8U);
+            std::memcpy(result.original_identity.file_id.data() + 8U, &input.identity_object_high, 8U);
+        }
+        const std::array<const InkpodIoPath*, 3U> spans{
+            &input.original_path, &input.source_path, &input.identity_path};
+        const std::array<std::wstring*, 3U> strings{
+            &result.original_path, &result.source_path, &result.original_identity.normalized_path};
+        for (std::size_t index = 0U; index < spans.size(); ++index) {
+            const auto& span = *spans[index];
+            if (span.struct_size < sizeof(span) || span.reserved != 0U
+                || span.path_bytes > kMaximumMetadataBytes
+                || !Utf8ToWide(span.path, static_cast<std::size_t>(span.path_bytes), *strings[index])) {
+                return false;
+            }
+        }
+        if (!ValidIdentity(result.original_identity)) {
+            return false;
+        }
+        output = std::move(result);
+        return true;
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+}
+
+bool EncodeRecoveryMetadata(
+    const RecoveryMetadata& metadata,
+    std::vector<std::uint8_t>& output) noexcept {
+    try {
+        InkpodIoRecoveryMetadata record{};
+        std::vector<std::uint8_t> text;
+        std::uint64_t required{};
+        if (!RecoveryMetadataToAbi(metadata, record, text)
+            || inkpod_recovery_metadata_encode(&record, nullptr, 0U, &required) != INKPOD_STATUS_OK
+            || required > kMaximumMetadataBytes) {
+            return false;
+        }
+        std::vector<std::uint8_t> encoded(static_cast<std::size_t>(required));
+        if (inkpod_recovery_metadata_encode(&record, encoded.data(), encoded.size(), &required)
+            != INKPOD_STATUS_OK) {
+            return false;
+        }
+        output = std::move(encoded);
+        return true;
+    } catch (const std::bad_alloc&) {
         return false;
     }
 }
@@ -405,179 +443,24 @@ bool DecodeRecoveryMetadata(
     const std::uint8_t* bytes,
     std::size_t length,
     RecoveryMetadata& output) noexcept {
-    if (bytes == nullptr || length < kMetadataHeaderBytes
-        || length > kMaximumMetadataBytes) {
-        return false;
-    }
-    std::size_t cursor{};
-    std::uint32_t magic{};
-    std::uint16_t version{};
-    std::uint16_t header_bytes{};
-    std::uint32_t total_bytes{};
-    std::uint64_t session{};
-    std::uint64_t generation{};
-    std::uint64_t uuid_high{};
-    std::uint64_t uuid_low{};
-    std::uint32_t identity_kind{};
-    std::uint32_t reserved{};
-    std::uint64_t volume_serial{};
-    std::uint64_t identity_uuid_high{};
-    std::uint64_t identity_uuid_low{};
-    std::uint64_t written{};
-    if (!ReadU32(bytes, length, cursor, magic)
-        || !ReadU16(bytes, length, cursor, version)
-        || !ReadU16(bytes, length, cursor, header_bytes)
-        || !ReadU32(bytes, length, cursor, total_bytes)
-        || !ReadU64(bytes, length, cursor, session)
-        || !ReadU64(bytes, length, cursor, generation)
-        || !ReadU64(bytes, length, cursor, uuid_high)
-        || !ReadU64(bytes, length, cursor, uuid_low)
-        || !ReadU32(bytes, length, cursor, identity_kind)
-        || !ReadU32(bytes, length, cursor, reserved)
-        || !ReadU64(bytes, length, cursor, volume_serial)
-        || cursor > length || length - cursor < 16U) {
-        return false;
-    }
-    RecoveryMetadata metadata{};
-    std::copy_n(bytes + cursor, 16U, metadata.original_identity.file_id.begin());
-    cursor += 16U;
-    if (!ReadU64(bytes, length, cursor, identity_uuid_high)
-        || !ReadU64(bytes, length, cursor, identity_uuid_low)
-        || !ReadU64(bytes, length, cursor, written)
-        || magic != kMetadataMagic || version != kMetadataVersion
-        || header_bytes != kMetadataHeaderBytes || total_bytes != length
-        || session == 0U || generation == 0U || reserved != 0U
-        || (uuid_high == 0U && uuid_low == 0U)
-        || !ValidIdentityKind(
-            static_cast<DocumentIdentityKind>(identity_kind))) {
-        return false;
-    }
-    metadata.session = DocumentSessionId(session);
-    metadata.generation = Generation(generation);
-    metadata.document_uuid_high = uuid_high;
-    metadata.document_uuid_low = uuid_low;
-    metadata.original_identity.kind =
-        static_cast<DocumentIdentityKind>(identity_kind);
-    metadata.original_identity.volume_serial = volume_serial;
-    metadata.original_identity.uuid_high = identity_uuid_high;
-    metadata.original_identity.uuid_low = identity_uuid_low;
-    metadata.written_file_time = written;
     try {
-        if (!ReadString(bytes, length, cursor, metadata.original_path)
-            || !ReadString(
-                bytes,
-                length,
-                cursor,
-                metadata.original_identity.normalized_path)
-            || !ReadString(bytes, length, cursor, metadata.source_path)
-            || cursor != length || written == 0U
-            || !ValidIdentity(metadata.original_identity)) {
+        InkpodIoRecoveryMetadata record{};
+        record.struct_size = static_cast<std::uint32_t>(sizeof(record));
+        std::uint64_t required{};
+        if (inkpod_recovery_metadata_decode(bytes, length, &record, nullptr, 0U, &required)
+                != INKPOD_STATUS_OK
+            || required > kMaximumMetadataBytes) {
             return false;
         }
+        std::vector<std::uint8_t> text(static_cast<std::size_t>(required));
+        if (inkpod_recovery_metadata_decode(
+                bytes, length, &record, text.data(), text.size(), &required) != INKPOD_STATUS_OK) {
+            return false;
+        }
+        return RecoveryMetadataFromAbi(record, output);
     } catch (const std::bad_alloc&) {
         return false;
     }
-    output = std::move(metadata);
-    return true;
-}
-
-bool WriteRecoveryMetadata(
-    const std::wstring& recovery_path,
-    const RecoveryMetadata& metadata) noexcept {
-    std::wstring metadata_path;
-    std::vector<std::uint8_t> bytes;
-    return RecoveryMetadataPath(recovery_path, metadata_path)
-        && EncodeRecoveryMetadata(metadata, bytes)
-        && WriteFileAtomic(metadata_path, bytes);
-}
-
-bool ReadRecoveryMetadata(
-    const std::wstring& recovery_path,
-    RecoveryMetadata& metadata) noexcept {
-    std::wstring metadata_path;
-    std::vector<std::uint8_t> bytes;
-    return RecoveryMetadataPath(recovery_path, metadata_path)
-        && ReadFileBounded(metadata_path, kMaximumMetadataBytes, bytes)
-        && DecodeRecoveryMetadata(bytes.data(), bytes.size(), metadata);
-}
-
-bool EnumerateRecoveryCandidates(
-    std::vector<RecoveryCandidate>& output) noexcept {
-    std::wstring directory;
-    return RecoveryRootDirectory(directory)
-        && EnumerateRecoveryCandidatesInDirectory(directory, output);
-}
-
-bool EnumerateRecoveryCandidatesInDirectory(
-    const std::wstring& directory,
-    std::vector<RecoveryCandidate>& output) noexcept {
-    std::wstring pattern;
-    try {
-        pattern = directory + L"\\*.inkpod";
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-    WIN32_FIND_DATAW entry{};
-    HANDLE search = FindFirstFileW(pattern.c_str(), &entry);
-    if (search == INVALID_HANDLE_VALUE) {
-        if (GetLastError() == ERROR_FILE_NOT_FOUND) {
-            output.clear();
-            return true;
-        }
-        return false;
-    }
-    std::vector<RecoveryCandidate> candidates;
-    bool valid = true;
-    do {
-        if ((entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0U) {
-            continue;
-        }
-        if (candidates.size() >= kMaximumRecoveryCandidates) {
-            valid = false;
-            break;
-        }
-        try {
-            RecoveryCandidate candidate{};
-            candidate.recovery_path = directory + L"\\" + entry.cFileName;
-            candidate.modified = entry.ftLastWriteTime;
-            candidate.has_metadata = ReadRecoveryMetadata(
-                candidate.recovery_path, candidate.metadata);
-            (void)RecoveryMetadataPath(
-                candidate.recovery_path, candidate.metadata_path);
-            candidates.push_back(std::move(candidate));
-        } catch (const std::bad_alloc&) {
-            valid = false;
-            break;
-        }
-    } while (FindNextFileW(search, &entry) != FALSE);
-    if (valid && GetLastError() != ERROR_NO_MORE_FILES) {
-        valid = false;
-    }
-    FindClose(search);
-    if (!valid) {
-        return false;
-    }
-    std::sort(
-        candidates.begin(),
-        candidates.end(),
-        [](const RecoveryCandidate& left, const RecoveryCandidate& right) {
-            const LONG compared = CompareFileTime(&left.modified, &right.modified);
-            if (compared != 0) {
-                return compared > 0;
-            }
-            return left.recovery_path < right.recovery_path;
-        });
-    output = std::move(candidates);
-    return true;
-}
-
-bool DiscardRecoveryArtifact(const std::wstring& recovery_path) noexcept {
-    if (recovery_path.empty()) {
-        return false;
-    }
-    std::wstring metadata_path;
-    return RecoveryMetadataPath(recovery_path, metadata_path)
-        && DeleteIfPresent(recovery_path) && DeleteIfPresent(metadata_path);
 }
 
 bool SequenceRecoveryPath(

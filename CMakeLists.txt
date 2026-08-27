@@ -158,6 +158,7 @@ file(GLOB_RECURSE INKPOD_RUST_SOURCE_INPUTS CONFIGURE_DEPENDS
     "${CMAKE_SOURCE_DIR}/rust/inkpod-core/src/*.rs"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-ffi/src/*.rs"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-format/src/*.rs"
+    "${CMAKE_SOURCE_DIR}/rust/inkpod-io/src/*.rs"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-image/src/*.rs")
 
 set(INKPOD_RUST_INPUTS
@@ -167,6 +168,7 @@ set(INKPOD_RUST_INPUTS
     "${CMAKE_SOURCE_DIR}/rust/inkpod-core/Cargo.toml"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-ffi/Cargo.toml"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-format/Cargo.toml"
+    "${CMAKE_SOURCE_DIR}/rust/inkpod-io/Cargo.toml"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-image/Cargo.toml"
     ${INKPOD_RUST_SOURCE_INPUTS})
 
@@ -421,10 +423,12 @@ if(WIN32)
         apps/windows/app/session_recovery.h
         tests/windows_session_recovery.cpp)
     target_include_directories(inkpod_windows_session_recovery_tests PRIVATE
-        "${CMAKE_SOURCE_DIR}/apps/windows")
+        "${CMAKE_SOURCE_DIR}/apps/windows"
+        "${CMAKE_SOURCE_DIR}/include")
     target_compile_definitions(inkpod_windows_session_recovery_tests PRIVATE
         UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
     target_link_libraries(inkpod_windows_session_recovery_tests PRIVATE
+        inkpod_ffi_static
         advapi32
         ole32
         shell32)
@@ -709,6 +713,7 @@ if(WIN32)
     target_compile_definitions(inkpod_windows_owner_model_tests PRIVATE
         UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
     target_link_libraries(inkpod_windows_owner_model_tests PRIVATE
+        inkpod_ffi_static
         comctl32
         advapi32
         ole32
@@ -873,6 +878,8 @@ if(WIN32)
         apps/windows/app/inkscript_engine_smoke.cpp
         apps/windows/app/inkscript_engine_smoke.h
         apps/windows/app/document_shell.cpp
+        apps/windows/app/file_io_controller.cpp
+        apps/windows/app/file_io_controller.h
         apps/windows/app/launch_options.cpp
         apps/windows/app/launch_options.h
         apps/windows/app/blake3_digest.cpp

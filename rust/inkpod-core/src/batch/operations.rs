@@ -5,6 +5,8 @@ use super::validation::{
 };
 use super::*;
 use crate::primitive::{CanonicalInvocation, InvocationResult};
+use inkpod_io::{IoError, IoManager, JobContext};
+use std::io::Write;
 
 impl Core {
     /// Applies an ordered Batch v4 operation list as one canonical procedure and Undo unit.
@@ -657,38 +659,51 @@ pub(crate) fn apply_separation(
     core.commit_deferred_document_edit(before, after, base_revision, revision)
 }
 
-pub(super) fn working_core(source: &BatchSource) -> Result<Core, CoreError> {
-    match &source.content {
+pub(super) fn working_core(
+    source: &BatchSource,
+    manager: &IoManager,
+    context: &JobContext,
+) -> Result<Core, CoreError> {
+    context.check_cancelled()?;
+    let mut core = match &source.content {
         BatchSourceContent::Path(path) => {
-            let mut core = Core::new();
             if path
                 .extension()
                 .is_some_and(|extension| extension.eq_ignore_ascii_case("inkpod"))
             {
-                core.open(path)?;
+                let native = manager.with_reader(path, 1024 * 1024 * 1024, context, |reader| {
+                    inkpod_format::read_procedure_from_reader(reader, || context.is_cancelled())
+                        .map_err(IoError::from)
+                })?;
+                let mut core = Core::from_native_file(native, false)?;
+                context.check_cancelled()?;
+                context.record_loaded();
+                core.current_path = Some(path.clone());
+                core
             } else {
-                let extension = path.extension().and_then(|value| value.to_str()).ok_or(
-                    CoreError::InvalidArgument("batch input extension is unsupported"),
-                )?;
-                let format = CommonRasterFormat::from_extension(extension).ok_or(
-                    CoreError::InvalidArgument("batch input extension is unsupported"),
-                )?;
-                let bytes = fs::read(path).map_err(|error| CoreError::Format(error.to_string()))?;
-                let digest = blake3::hash(&bytes);
+                let image = manager.read_image(path, context)?;
+                let digest = blake3::hash(image.source().bytes());
                 let mut uuid_bytes = [0_u8; 16];
                 uuid_bytes.copy_from_slice(&digest.as_bytes()[..16]);
-                let mut uuid = u128::from_le_bytes(uuid_bytes);
-                if uuid == 0 {
-                    uuid = 1;
-                }
-                core.import_common_raster(format, &bytes, uuid)?;
+                let uuid = u128::from_le_bytes(uuid_bytes).max(1);
+                let mut core = Core::new();
+                core.import_decoded_common_raster(image.format(), image.raster(), uuid)?;
+                core
             }
-            Ok(core)
         }
-        BatchSourceContent::Document { document, assets } => {
-            core_from_document(document.as_ref().clone(), assets.clone())
+        BatchSourceContent::Document {
+            document,
+            assets,
+            raster_file_format,
+        } => {
+            let mut core = core_from_document(document.as_ref().clone(), assets.clone())?;
+            core.raster_file_format = *raster_file_format;
+            core
         }
-    }
+    };
+    context.check_cancelled()?;
+    core.bind_file_io(manager.clone())?;
+    Ok(core)
 }
 
 pub(super) fn core_from_document(
@@ -785,9 +800,19 @@ pub(super) fn save_batch_output(
     graph: &BatchGraph,
     source: &BatchSource,
     path: &Path,
+    context: &JobContext,
     is_cancelled: impl FnMut() -> bool,
 ) -> Result<(), CoreError> {
-    save_batch_output_with_format(working, graph.output.format, source, path, is_cancelled)
+    save_batch_output_with_format(
+        working,
+        graph.output.format,
+        source,
+        path,
+        u64::MAX,
+        context,
+        is_cancelled,
+    )
+    .map(|_| ())
 }
 
 pub(super) fn save_batch_output_with_format(
@@ -795,15 +820,18 @@ pub(super) fn save_batch_output_with_format(
     format: BatchOutputFormat,
     source: &BatchSource,
     path: &Path,
+    maximum_bytes: u64,
+    context: &JobContext,
     mut is_cancelled: impl FnMut() -> bool,
-) -> Result<(), CoreError> {
+) -> Result<u64, CoreError> {
     working.document.as_ref().ok_or(CoreError::NoDocument)?;
+    let manager = working.file_io_manager()?;
     if source.input_path.as_deref() == Some(path) {
         return Err(CoreError::InvalidState(
             "batch output resolves to the input path",
         ));
     }
-    if path.exists() {
+    if manager.exists(path, context)? {
         return Err(CoreError::InvalidState("batch output already exists"));
     }
     if is_cancelled() {
@@ -813,8 +841,13 @@ pub(super) fn save_batch_output_with_format(
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty());
     if let Some(parent) = parent {
-        fs::create_dir_all(parent).map_err(|error| CoreError::Format(error.to_string()))?;
+        manager.create_dir_all(parent, context)?;
     }
+    let maximum_bytes = maximum_bytes.min(match format {
+        BatchOutputFormat::Inkpod => 1024 * 1024 * 1024,
+        _ => 512 * 1024 * 1024,
+    });
+    let mut written = 0;
     match format {
         BatchOutputFormat::Inkpod => {
             let editor_savepoint = working
@@ -824,7 +857,16 @@ pub(super) fn save_batch_output_with_format(
                 .digest;
             let file = working
                 .build_procedure_file(Some(working.current_state), Some(editor_savepoint))?;
-            inkpod_format::save_procedure_file_atomic_with_cancel(path, &file, &mut is_cancelled)?;
+            manager.write_new_atomic(path, context, |output| {
+                let mut output = BoundedBatchWriter {
+                    output,
+                    remaining: maximum_bytes,
+                };
+                written = inkpod_format::write_procedure_to_writer(&mut output, &file, || {
+                    context.is_cancelled() || is_cancelled()
+                })?;
+                Ok(())
+            })?;
         }
         format => {
             let common = match format {
@@ -835,14 +877,52 @@ pub(super) fn save_batch_output_with_format(
                 BatchOutputFormat::Inkpod => unreachable!(),
             };
             let bytes = working.export_common_raster(common, false)?;
-            inkpod_format::save_common_raster_bytes_atomic_with_cancel(
-                path,
-                &bytes,
-                &mut is_cancelled,
-            )?;
+            if bytes.len() as u64 > maximum_bytes {
+                return Err(CoreError::InvalidState(
+                    "batch output exceeds its file or temporary storage byte limit",
+                ));
+            }
+            manager.write_new_atomic(path, context, |output| {
+                for chunk in bytes.chunks(64 * 1024) {
+                    context.check_cancelled()?;
+                    if is_cancelled() {
+                        return Err(IoError::Cancelled);
+                    }
+                    output.write_all(chunk)?;
+                }
+                if is_cancelled() {
+                    return Err(IoError::Cancelled);
+                }
+                Ok(())
+            })?;
+            written = bytes.len() as u64;
         }
     }
-    Ok(())
+    Ok(written)
+}
+
+/// Bounds temporary native serialization before any write can exceed the
+/// caller's remaining disk allowance. Publication remains the I/O manager's job.
+struct BoundedBatchWriter<'a, W> {
+    output: &'a mut W,
+    remaining: u64,
+}
+
+impl<W: Write> Write for BoundedBatchWriter<'_, W> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if bytes.len() as u64 > self.remaining {
+            return Err(std::io::Error::other(
+                "batch output exceeds its file or temporary storage byte limit",
+            ));
+        }
+        let written = self.output.write(bytes)?;
+        self.remaining -= written as u64;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.output.flush()
+    }
 }
 
 pub(super) fn cancelled_item(

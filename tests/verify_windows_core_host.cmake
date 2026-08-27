@@ -5,6 +5,7 @@ endif()
 set(APP_DIR "${INKPOD_SOURCE_DIR}/apps/windows/app")
 set(CORE_HEADER "${APP_DIR}/core_host.h")
 set(CORE_SOURCE "${APP_DIR}/core_host.cpp")
+set(FILE_IO_SOURCE "${APP_DIR}/file_io_controller.cpp")
 set(DOCUMENT_HEADER "${APP_DIR}/document_session.h")
 set(DOCUMENT_SOURCE "${APP_DIR}/document_session.cpp")
 set(APPLICATION_SOURCE "${APP_DIR}/application.cpp")
@@ -17,6 +18,7 @@ set(CMAKE_SOURCE "${INKPOD_SOURCE_DIR}/CMakeLists.txt")
 foreach(FILE IN ITEMS
         "${CORE_HEADER}"
         "${CORE_SOURCE}"
+        "${FILE_IO_SOURCE}"
         "${DOCUMENT_HEADER}"
         "${DOCUMENT_SOURCE}"
         "${APPLICATION_SOURCE}"
@@ -46,6 +48,8 @@ foreach(REQUIRED IN ITEMS
         "InvokeAll("
         "InvokePrimitive("
         "EnqueuePrimitive("
+        "EnqueueFileIo("
+        "FileIoOperation"
         "RegisterColorArray("
         "ReleaseObject("
         "SetSessionInitializer("
@@ -68,6 +72,11 @@ foreach(REQUIRED IN ITEMS
         "struct StrokeWork"
         "struct ControlWork"
         "struct CoreEntry"
+        "struct FileIoWork"
+        "ProcessFileIo("
+        "io_install_fence"
+        "NextFileIoDeadline()"
+        "inkpod_core_bind_io_manager"
         "std::vector<std::unique_ptr<CoreEntry>> entries"
         "inkpod_core_create"
         "inkpod_core_destroy"
@@ -86,6 +95,42 @@ foreach(REQUIRED IN ITEMS
     string(FIND "${SOURCE}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
         message(FATAL_ERROR "CoreHost implementation is missing: ${REQUIRED}")
+    endif()
+endforeach()
+string(FIND "${SOURCE}" "struct FileIoWork" IO_TOKEN_START)
+string(FIND "${SOURCE}" "struct FileIoInput" IO_TOKEN_END)
+if(IO_TOKEN_START LESS 0 OR IO_TOKEN_END LESS IO_TOKEN_START)
+    message(FATAL_ERROR "Cannot isolate the file I/O queue token record")
+endif()
+math(EXPR IO_TOKEN_LENGTH "${IO_TOKEN_END} - ${IO_TOKEN_START}")
+string(SUBSTRING "${SOURCE}" ${IO_TOKEN_START} ${IO_TOKEN_LENGTH} IO_TOKEN)
+foreach(FORBIDDEN IN ITEMS "std::function" "std::string" "std::vector" "InkpodCore*" "path")
+    string(FIND "${IO_TOKEN}" "${FORBIDDEN}" OFFSET)
+    if(NOT OFFSET LESS 0)
+        message(FATAL_ERROR "File I/O queue token carries mutable/borrowed state: ${FORBIDDEN}")
+    endif()
+endforeach()
+
+file(READ "${FILE_IO_SOURCE}" FILE_IO)
+foreach(FORBIDDEN IN ITEMS
+        "ReadBoundedFile(" "WriteFileAtomically(" "CreateFileW(" "ReadFile("
+        "WriteFile(" "FindFirstFile" "std::ifstream" "std::ofstream"
+        "std::thread" "Sleep(" "WaitForSingleObject(")
+    string(FIND "${FILE_IO}" "${FORBIDDEN}" OFFSET)
+    if(NOT OFFSET LESS 0)
+        message(FATAL_ERROR "Windows I/O controller performs file work or blocks: ${FORBIDDEN}")
+    endif()
+endforeach()
+foreach(REQUIRED IN ITEMS
+        "inkpod_core_io_submit(" "inkpod_io_job_poll(" "inkpod_core_io_job_apply("
+        "inkpod_io_job_cancel(" "inkpod_io_job_release("
+        "preflight_complete.load(std::memory_order_acquire)"
+        "ConflictsWithPendingWrite("
+        "inkpod_core_io_batch_submit(" "inkpod_io_job_take_batch_report("
+        "inkpod_core_io_sequence_switch_submit(" "inkpod_core_io_compacted_copy_submit(")
+    string(FIND "${FILE_IO}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR "Polled file I/O boundary is missing: ${REQUIRED}")
     endif()
 endforeach()
 string(FIND "${SOURCE}" "LegacyInvokeWork" LEGACY_INVOKE)
@@ -160,6 +205,23 @@ endforeach()
 
 file(READ "${RUNTIME_SOURCE}" RUNTIME)
 foreach(REQUIRED IN ITEMS
+        "pane.auto_sequence_truncated = document->auto_sequence_truncated"
+        "(result.progress.flags & INKPOD_IO_RESULT_TRUNCATED) != 0U"
+        "NativeSaveOverwritePolicy::Reject"
+        "inkpod_core_sequence_activation_resolve(core, activation_target, &activation_plan)"
+        "activation_plan.result_class == INKPOD_SEQUENCE_ACTIVATION_REPLACE"
+        "activation_plan.result_class == INKPOD_SEQUENCE_ACTIVATION_NOOP"
+        "inkpod_core_sequence_activation_commit(core, &prepared_plan, &after)"
+        "!SameLightTableSwapTarget(target, current)"
+        "mutation_status = inkpod_core_light_table_swap(core, target.item_id, &info)"
+        "CompleteSequenceSwitchAuthority(state, *result)"
+        "HasIdentityReservation(item.identity, item.normalized_path)")
+    string(FIND "${RUNTIME}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR "Windows file I/O result handling is missing: ${REQUIRED}")
+    endif()
+endforeach()
+foreach(REQUIRED IN ITEMS
         "TakeNotification("
         "RetargetCoreNotificationsBeforeWorkspaceClose("
         "UnregisterSnapshotSinks("
@@ -198,6 +260,8 @@ foreach(REQUIRED IN ITEMS
         "queued_colors[0].red = 240U"
         "PrimitiveQueueSaturationIsExactlyOnce("
         "PrimitiveShutdownCompletesExactlyOnce("
+        "FileIoPollingAndInstallFence("
+        "FileIoCloseCancellationAndShutdownFinalization("
         "host.EnqueuePrimitive("
         "host.ReleaseObject(first, generation, palette_id)"
         "stale_primitive_rejected"

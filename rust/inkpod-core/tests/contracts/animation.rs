@@ -820,6 +820,196 @@ fn acceptance_autosave_sequence_switch_restores_exact_dirty_native_state() {
 }
 
 #[test]
+fn detached_sequence_switch_preserves_recovery_history_formats_and_view_owners() {
+    let mut core = Core::new();
+    core.set_new_cell_raster_format(CommonRasterFormat::Tiff);
+    let current = core
+        .new_cell(3, 2, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    let mut second = source("cell2.bmp", 0x7474, 2, 3, [4, 5, 6, 255]);
+    second.raster_file_format = CommonRasterFormat::Bmp;
+    core.set_sequence(vec![
+        source("cell1.tiff", current.document_uuid, 3, 2, [1, 2, 3, 255]),
+        second,
+    ])
+    .unwrap();
+    core.apply_stroke(&line_stroke(vec![StrokeSample {
+        x: 1.0,
+        y: 0.0,
+        pressure: 1.0,
+    }]))
+    .unwrap();
+    let source_info = core.document_info().unwrap();
+    let source_digest = core.document_state_digest().unwrap();
+    let source_history = core.history_entries().to_vec();
+    let source_journal = core.journal_entries().to_vec();
+    let source_editor = core.editor_state().unwrap();
+    let request = core
+        .sequence_switch_request(1, SequenceSwitchPolicy::AutosaveBeforeSwitch)
+        .unwrap();
+    let captured = core.capture_sequence_switch(request).unwrap();
+    let mut prepared = std::thread::spawn(move || captured.prepare(None, || false))
+        .join()
+        .unwrap()
+        .unwrap();
+    let recovery = prepared.take_source_recovery().unwrap();
+    assert!(prepared.take_source_recovery().is_none());
+    assert_eq!(core.document_info().unwrap(), source_info);
+    let recovered_source = Core::from_native_file(recovery.clone(), true).unwrap();
+    assert_eq!(
+        recovered_source.document_state_digest().unwrap(),
+        source_digest
+    );
+    assert_eq!(recovered_source.history_entries(), source_history);
+    assert_eq!(
+        recovered_source.raster_file_format().unwrap(),
+        CommonRasterFormat::Tiff
+    );
+
+    // Independent view creation and reference selection after capture are kept.
+    let view = core.create_view().unwrap();
+    let view_state = core
+        .apply_view_for(
+            view,
+            ViewCommand::ZoomAt {
+                factor: 2.0,
+                device_x: 0.0,
+                device_y: 0.0,
+            },
+        )
+        .unwrap();
+    core.set_subpalette_cell(1).unwrap();
+    let reference_pixel = core.subpalette_sample(0, 0).unwrap();
+    core.validate_prepared_sequence_switch(&prepared).unwrap();
+    let switched = core.commit_prepared_sequence_switch(prepared).unwrap();
+    assert_eq!(switched.document_uuid, 0x7474);
+    assert_eq!(core.raster_file_format().unwrap(), CommonRasterFormat::Bmp);
+    assert_eq!(core.build_snapshot_for(view).unwrap().view(), view_state);
+    assert_eq!(core.subpalette_sample(0, 0).unwrap(), reference_pixel);
+
+    let request = core
+        .sequence_switch_request(0, SequenceSwitchPolicy::AutosaveBeforeSwitch)
+        .unwrap();
+    let before_invalid = core.document_info().unwrap();
+    let wrong_recovery = core
+        .capture_document_save()
+        .unwrap()
+        .prepare_native_save(true, || false)
+        .unwrap()
+        .0;
+    assert!(matches!(
+        core.capture_sequence_switch(request)
+            .unwrap()
+            .prepare(Some(wrong_recovery), || false),
+        Err(CoreError::InvalidArgument(
+            "recovery artifact does not match the sequence target"
+        ))
+    ));
+    assert_eq!(core.document_info().unwrap(), before_invalid);
+    let mut prepared = core
+        .capture_sequence_switch(request)
+        .unwrap()
+        .prepare(Some(recovery), || false)
+        .unwrap();
+    prepared.take_source_recovery().unwrap();
+    let restored = core.commit_prepared_sequence_switch(prepared).unwrap();
+    assert!(restored.recovered && restored.dirty);
+    assert_eq!(restored.document_uuid, current.document_uuid);
+    assert_eq!(core.raster_file_format().unwrap(), CommonRasterFormat::Tiff);
+    assert_eq!(core.document_state_digest().unwrap(), source_digest);
+    assert_eq!(core.history_entries(), source_history);
+    assert_eq!(core.journal_entries(), source_journal);
+    assert_eq!(core.editor_state().unwrap().state, source_editor.state);
+    core.undo().unwrap();
+    core.redo().unwrap();
+    assert_eq!(core.document_state_digest().unwrap(), source_digest);
+    assert_eq!(core.sequence_cells().unwrap().len(), 2);
+    assert!(core.build_snapshot_for(view).is_ok());
+}
+
+#[test]
+fn detached_sequence_switch_rejects_cancel_stale_owner_and_replaced_sequence() {
+    let mut core = Core::new();
+    let current = core
+        .new_cell(2, 2, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    let cells = vec![
+        source("cell1.png", current.document_uuid, 2, 2, [1, 2, 3, 255]),
+        source("cell2.png", 0x7575, 2, 2, [4, 5, 6, 255]),
+    ];
+    core.set_sequence(cells.clone()).unwrap();
+    let same = core
+        .sequence_switch_request(0, SequenceSwitchPolicy::AutosaveBeforeSwitch)
+        .unwrap();
+    let save = core.capture_document_save().unwrap();
+    let (_, authority) = save.prepare_native_save(true, || false).unwrap();
+    let before = core.document_info().unwrap();
+    let mut noop = core
+        .capture_sequence_switch(same)
+        .unwrap()
+        .prepare(None, || false)
+        .unwrap();
+    assert!(noop.take_source_recovery().is_none());
+    assert_eq!(core.commit_prepared_sequence_switch(noop).unwrap(), before);
+    core.validate_document_save(&authority).unwrap();
+
+    let request = core
+        .sequence_switch_request(1, SequenceSwitchPolicy::AutosaveBeforeSwitch)
+        .unwrap();
+    for cancel_at in [1, 2, 3] {
+        let mut calls = 0;
+        assert!(matches!(
+            core.capture_sequence_switch(request)
+                .unwrap()
+                .prepare(None, || {
+                    calls += 1;
+                    calls == cancel_at
+                }),
+            Err(CoreError::Cancelled)
+        ));
+        assert_eq!(core.document_info().unwrap(), before);
+        core.validate_document_save(&authority).unwrap();
+    }
+    let prepared = core
+        .capture_sequence_switch(request)
+        .unwrap()
+        .prepare(None, || false)
+        .unwrap();
+    let mut unrelated = Core::new();
+    unrelated
+        .new_cell(2, 2, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    assert!(
+        unrelated
+            .validate_prepared_sequence_switch(&prepared)
+            .is_err()
+    );
+    core.set_sequence(cells).unwrap();
+    assert!(matches!(
+        core.commit_prepared_sequence_switch(prepared),
+        Err(CoreError::InvalidState("sequence switch request is stale"))
+    ));
+    assert_eq!(core.document_info().unwrap(), before);
+
+    let prepared = core
+        .capture_sequence_switch(request)
+        .unwrap()
+        .prepare(None, || false)
+        .unwrap();
+    core.apply_stroke(&line_stroke(vec![StrokeSample {
+        x: 0.0,
+        y: 0.0,
+        pressure: 1.0,
+    }]))
+    .unwrap();
+    let edited = core.document_info().unwrap();
+    let journal = core.journal_entries().to_vec();
+    assert!(core.commit_prepared_sequence_switch(prepared).is_err());
+    assert_eq!(core.document_info().unwrap(), edited);
+    assert_eq!(core.journal_entries(), journal);
+}
+
+#[test]
 fn autosave_sequence_switch_request_is_noop_or_stale_without_partial_change() {
     let mut core = Core::new();
     let current = core
@@ -869,6 +1059,71 @@ fn autosave_sequence_switch_request_is_noop_or_stale_without_partial_change() {
     assert_eq!(core.history_entries(), history_before);
     assert_eq!(core.journal_entries(), journal_before);
     assert_eq!(core.build_snapshot(), snapshot_before);
+}
+
+#[test]
+fn sequence_activation_plan_revalidates_unbound_and_bound_source_identities() {
+    let mut core = Core::new();
+    let initial = core
+        .new_cell_with_uuid(2, 2, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI, 0x8171)
+        .unwrap();
+    core.set_sequence(vec![
+        source("cell1.png", 0x8172, 2, 2, [1, 2, 3, 255]),
+        source("cell2.png", 0x8173, 2, 2, [1, 2, 3, 255]),
+    ])
+    .unwrap();
+    let plan = core.resolve_sequence_activation(0).unwrap();
+    assert_eq!(plan.kind, SequenceActivationKind::Replace);
+    assert_eq!(plan.source_index, None);
+    assert_eq!(plan.source_generation, None);
+    assert_eq!(plan.source_document_uuid, initial.document_uuid);
+    assert_eq!(plan.target_document_uuid, 0x8172);
+    let mut forged = plan;
+    forged.kind = SequenceActivationKind::Bind;
+    assert_eq!(
+        core.commit_sequence_activation(forged),
+        Err(CoreError::InvalidState("sequence activation plan is stale"))
+    );
+    assert_eq!(core.document_info().unwrap(), initial);
+    let first = core.commit_sequence_activation(plan).unwrap();
+    assert_eq!(first.document_uuid, 0x8172);
+    assert!(first.document_revision > initial.document_revision);
+
+    let (_, guide) = core.add_guide(GuideAxis::Vertical, 1).unwrap();
+    let dirty = core.document_info().unwrap();
+    let no_op = core.resolve_sequence_activation(0).unwrap();
+    assert_eq!(no_op.kind, SequenceActivationKind::NoOp);
+    assert_eq!(core.commit_sequence_activation(no_op).unwrap(), dirty);
+    assert_eq!(core.sequence_activate(0).unwrap(), dirty);
+    let replacement = core.resolve_sequence_activation(1).unwrap();
+    assert_eq!(replacement.kind, SequenceActivationKind::Replace);
+    assert_eq!(replacement.source_generation, Some(1));
+    assert_eq!(
+        core.commit_sequence_activation(replacement),
+        Err(CoreError::UnsavedChanges)
+    );
+    for source_generation in [true, false] {
+        let mut forged = replacement;
+        if source_generation {
+            forged.source_generation = Some(2);
+        } else {
+            forged.target_source_generation = 2;
+        }
+        assert_eq!(
+            core.commit_sequence_activation(forged),
+            Err(CoreError::InvalidState("sequence activation plan is stale"))
+        );
+    }
+    assert!(matches!(
+        core.resolve_sequence_activation(usize::MAX),
+        Err(CoreError::InvalidArgument(_))
+    ));
+    assert_eq!(core.document_info().unwrap(), dirty);
+    core.delete_guide(guide).unwrap();
+    assert_eq!(
+        core.commit_sequence_activation(replacement),
+        Err(CoreError::InvalidState("sequence activation plan is stale"))
+    );
 }
 
 #[test]

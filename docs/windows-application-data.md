@@ -40,12 +40,13 @@ virtual-key、scan-code、modifier bit mask、Base64、binary blob を JSON へ�
 ```json
 {
   "format": "inkpod-settings",
-  "formatVersion": 1,
+  "formatVersion": 2,
   "general": {
     "uiLanguage": "ja-JP"
   },
   "saveAndRecovery": {
-    "restorePreviousDocuments": true
+    "restorePreviousDocuments": true,
+    "defaultRasterFormat": "png"
   },
   "animation": {
     "sequenceCellSwitch": "autosave-before-switch",
@@ -93,6 +94,18 @@ virtual-key、scan-code、modifier bit mask、Base64、binary blob を JSON へ�
 作成した profile と active profile だけを JSON に保存する。workspace の pane、
 zone、tab、preset も `layer-plane`、`right`、`right-tab-1`、`coloring` のような
 stable かつ人間が理解できる key で表す。
+
+現行の設定 schema は `formatVersion: 2` だけを受理する。
+`saveAndRecovery.defaultRasterFormat` は新規セルのラスタ保存形式で、
+`png`（既定値）、`tiff`、`tga`、`bmp` を指定できる。環境設定の一般ページからも
+同じ値を変更できる。この設定は既存文書の保存形式を変更しない。読み込んだ
+ラスタ画像の形式、または新規作成時の既定形式は `.inkpod` の文書 metadata に
+保持し、通常保存では同名の native とラスタ画像を Rust の保存ジョブで書き出す。
+
+`Recovery` の画像、付随 metadata、候補列挙、通常保存との新旧比較、破棄は
+application 共通の Rust I/O manager が処理する。Windows は path と typed metadata を
+渡し、候補確認ダイアログや保存後の画面遷移をジョブ完了後に進める。
+Recovery metadata の現行形式は checksummed binary version 2 で、旧形式を移行しない。
 
 ## Decode and save rules
 

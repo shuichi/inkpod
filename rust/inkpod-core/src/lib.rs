@@ -29,6 +29,7 @@ mod document;
 mod editor;
 mod effects;
 mod error;
+mod file_io;
 mod genesis;
 mod geometry;
 mod history;
@@ -39,7 +40,9 @@ mod journal;
 mod output_color_guard;
 mod paint;
 mod persistence;
+mod persistence_task;
 mod primitive;
+mod reference_view;
 mod resource;
 mod script;
 mod selection;
@@ -56,9 +59,10 @@ pub use animation::{
     LightTableBulkRegistrationPreview, LightTableBulkRegistrationRequest,
     LightTableBulkRegistrationSummary, LightTableDisplayMode, LightTableItemInfo,
     LightTableItemInput, LightTableItemProperties, LightTableSetInfo, LightTableSource,
-    MotionCheckConfig, MotionFrame, RgbaRasterBytes, SequenceCellInfo, SequenceCellSource,
-    SequenceDirection, SequenceEndpointPolicy, SequenceStepPlan, SequenceStepResult,
-    SequenceSwitchPolicy, SequenceSwitchRequest, Thumbnail,
+    MotionCheckConfig, MotionFrame, RgbaRasterBytes, SequenceActivationKind,
+    SequenceActivationPlan, SequenceCellInfo, SequenceCellSource, SequenceDirection,
+    SequenceEndpointPolicy, SequenceStepPlan, SequenceStepResult, SequenceSwitchPolicy,
+    SequenceSwitchRequest, Thumbnail,
 };
 pub use api::*;
 pub use asset::{
@@ -94,6 +98,9 @@ pub use editor::{
 };
 pub use effects::FilterPreviewInfo;
 pub use error::CoreError;
+pub use file_io::{
+    FileIoApply, FileIoItem, FileIoJob, FileIoKind, FileIoProgress, FileIoRequest, FileIoState,
+};
 pub use genesis::{BaseSurface, GenesisInfo};
 pub use geometry::{
     GeometryCommit, GeometryCrossSection, GeometryOptions, GeometryPointResolution,
@@ -123,6 +130,9 @@ pub use journal::{
     JournalReplayInfo, JournalState,
 };
 use persistence::{file_plane_to_raster, raster_to_file_plane};
+pub use persistence_task::{
+    DocumentOpenToken, DocumentSaveSnapshot, DocumentSaveToken, PreparedDocumentSave,
+};
 pub use primitive::{
     CANONICAL_NUMERIC_VERSION, CanonicalProcedure, DocumentStateDigest, PROCEDURE_FORMAT_VERSION,
     PrimitiveId, PrimitiveOutcome, PrimitiveRequest, ProcedureId, ReplayContract, ReplayEpoch,
@@ -145,39 +155,10 @@ pub use subpalette::{
 };
 pub use vanishing_point::*;
 use view::default_shortcuts;
-/// Feature bits supported by this version of the Rust Core API.
-pub const CORE_FEATURES: u64 = 1;
-/// Snapshot feature bit indicating legacy-white color-check rendering.
-pub const SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE: u64 = 1 << 0;
-/// Snapshot feature bit indicating native-alpha color-check rendering.
-pub const SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA: u64 = 1 << 1;
-/// Snapshot feature bit identifying an allocation-free SolidWhite Genesis base.
-pub const SNAPSHOT_FEATURE_SOLID_WHITE_BASE: u64 = 1 << 2;
-/// Default horizontal and vertical resolution in thousandths of a DPI.
-pub const DEFAULT_DPI_MILLI: u32 = 96_000;
-/// Maximum number of layers accepted in one document.
-pub const MAX_LAYERS: usize = 4_096;
-/// Maximum number of planes accepted in one layer.
-pub const MAX_PLANES_PER_LAYER: usize = 4_096;
-/// Maximum number of document guides.
-pub const MAX_GUIDES: usize = 4_096;
-/// Maximum number of configured shortcut commands.
-pub const MAX_SHORTCUTS: usize = 1_024;
-/// Maximum number of key strokes in one shortcut sequence.
-pub const MAX_SHORTCUT_STROKES: usize = 4;
-/// Shortcut modifier bit for the Control key.
-pub const SHORTCUT_MODIFIER_CONTROL: u32 = 1 << 0;
-/// Shortcut modifier bit for the Shift key.
-pub const SHORTCUT_MODIFIER_SHIFT: u32 = 1 << 1;
-/// Shortcut modifier bit for the Alt key.
-pub const SHORTCUT_MODIFIER_ALT: u32 = 1 << 2;
-/// Shortcut modifier bit distinguishing extended virtual keys.
-pub const SHORTCUT_MODIFIER_EXTENDED: u32 = 1 << 3;
-/// Mask containing every supported shortcut modifier bit.
-pub const SHORTCUT_MODIFIER_MASK: u32 = SHORTCUT_MODIFIER_CONTROL
-    | SHORTCUT_MODIFIER_SHIFT
-    | SHORTCUT_MODIFIER_ALT
-    | SHORTCUT_MODIFIER_EXTENDED;
+mod limits;
+pub use limits::*;
+mod sequence_io;
+pub use sequence_io::{PreparedSequenceSwitch, SequenceSwitchSnapshot};
 const MAX_STROKE_SAMPLES: usize = 1_048_576;
 const MAX_BRUSH_DIAMETER: f32 = 256.0;
 const MAX_STROKE_COORDINATE: f32 = 16_777_216.0;

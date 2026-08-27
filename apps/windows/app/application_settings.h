@@ -12,7 +12,7 @@
 
 namespace inkpod::app {
 
-inline constexpr std::uint32_t kApplicationSettingsFormatVersion = 1U;
+inline constexpr std::uint32_t kApplicationSettingsFormatVersion = 2U;
 inline constexpr std::size_t kMaximumApplicationSettingsBytes =
     16U * 1024U * 1024U;
 
@@ -21,10 +21,18 @@ struct PersistedWorkspace final {
     windows::ui::WorkspaceLayoutState layout{};
 };
 
+enum class RasterFileFormatSetting : std::uint32_t {
+    Png = 1U,
+    Tiff = 2U,
+    Tga = 3U,
+    Bmp = 4U,
+};
+
 struct ApplicationSettings final {
     windows::ui::UiLanguagePreference ui_language{
         windows::ui::UiLanguagePreference::System};
     bool restore_previous_documents{};
+    RasterFileFormatSetting default_raster_format{RasterFileFormatSetting::Png};
     SequenceCellSwitchPolicy sequence_switch_policy{
         SequenceCellSwitchPolicy::Prompt};
     SequenceEndpointPolicy sequence_endpoint_policy{

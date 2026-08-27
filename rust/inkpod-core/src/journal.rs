@@ -810,6 +810,7 @@ impl Core {
         prefix.document_revision = DocumentRevision::from_raw(1);
         prefix.savepoint = None;
         prefix.current_path = None;
+        prefix.io_pair_authority = None;
         *prefix.canonical_state_cache.get_mut() = None;
         Ok(prefix)
     }

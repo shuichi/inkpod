@@ -101,7 +101,7 @@ file(READ "${SETTINGS_HEADER}" SETTINGS_HEADER_TEXT)
 file(READ "${SETTINGS_SOURCE}" SETTINGS_SOURCE_TEXT)
 file(READ "${DATA_PATH_SOURCE}" DATA_PATH_SOURCE_TEXT)
 foreach(REQUIRED IN ITEMS
-        "kApplicationSettingsFormatVersion = 1U"
+        "kApplicationSettingsFormatVersion = 2U"
         "ApplicationSettingsStore"
         "PersistedWorkspace"
         "inkpod-settings.json"

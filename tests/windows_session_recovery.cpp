@@ -1,4 +1,5 @@
 #include "app/session_recovery.h"
+#include "app/recovery_fixture_io.h"
 
 #include <windows.h>
 
@@ -11,18 +12,17 @@ namespace {
 
 using inkpod::app::DecodePreviousDocumentPaths;
 using inkpod::app::DecodeRecoveryMetadata;
-using inkpod::app::DiscardRecoveryArtifact;
+using inkpod::app::fixture::DiscardRecoveryArtifact;
 using inkpod::app::DocumentIdentity;
 using inkpod::app::DocumentIdentityKind;
 using inkpod::app::DocumentSessionId;
 using inkpod::app::EncodePreviousDocumentPaths;
 using inkpod::app::EncodeRecoveryMetadata;
-using inkpod::app::EnumerateRecoveryCandidatesInDirectory;
+using inkpod::app::fixture::EnumerateRecoveryCandidatesInDirectory;
 using inkpod::app::Generation;
-using inkpod::app::ReadRecoveryMetadata;
+using inkpod::app::fixture::ReadRecoveryMetadata;
 using inkpod::app::RecoveryMetadata;
 using inkpod::app::SequenceRecoveryPath;
-using inkpod::app::WriteRecoveryMetadata;
 
 bool WriteDummy(const std::wstring& path) {
     HANDLE file = CreateFileW(
@@ -65,6 +65,25 @@ RecoveryMetadata ExampleMetadata(std::uint64_t session) {
     return metadata;
 }
 
+// Fixture construction is intentionally outside the product I/O boundary. The
+// recovery file is consumed through the same Rust job ABI as production.
+bool WriteRecoveryMetadata(const std::wstring& path, const RecoveryMetadata& metadata) {
+    std::wstring sidecar;
+    std::vector<std::uint8_t> bytes;
+    if (!inkpod::app::RecoveryMetadataPath(path, sidecar)
+        || !EncodeRecoveryMetadata(metadata, bytes)) {
+        return false;
+    }
+    HANDLE file = CreateFileW(sidecar.c_str(), GENERIC_WRITE, 0U, nullptr,
+        CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) { return false; }
+    DWORD written{};
+    const bool success = WriteFile(file, bytes.data(), static_cast<DWORD>(bytes.size()),
+        &written, nullptr) != FALSE && written == bytes.size();
+    CloseHandle(file);
+    return success;
+}
+
 int TestMetadataCodec() {
     const RecoveryMetadata metadata = ExampleMetadata(7U);
     std::vector<std::uint8_t> bytes;
@@ -88,7 +107,7 @@ int TestMetadataCodec() {
         return 2;
     }
     std::vector<std::uint8_t> wrong_version = bytes;
-    wrong_version[4] = 2U;
+    wrong_version[8] = 1U;
     if (DecodeRecoveryMetadata(
             wrong_version.data(), wrong_version.size(), decoded)) {
         return 3;

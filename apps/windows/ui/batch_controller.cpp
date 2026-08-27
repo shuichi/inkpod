@@ -14,6 +14,7 @@
 #include "app/frontend_state.h"
 #include "ui/main_window.h"
 #include "app/core_host.h"
+#include "app/file_io_controller.h"
 #include "batch_input_picker.h"
 #include "batch_set_store.h"
 #include "dialogs/batch_dialog.h"
@@ -271,14 +272,16 @@ BatchController::BatchController(
     JobProgressPaneState& progress_state,
     HWND& palette,
     app::BatchUiState& batch,
-    app::CoreHost& engine) noexcept
+    app::CoreHost& engine,
+    app::FileIoController& file_io) noexcept
     : lifetime_(lifetime),
       windows_(windows),
       progress_(progress),
       progress_state_(progress_state),
       palette_(palette),
       batch_(batch),
-      engine_(engine) {}
+      engine_(engine),
+      file_io_(file_io) {}
 
 InkpodStatus BatchController::BuildGraph() noexcept {
     if (batch_.inputs.empty() || batch_.operations.empty()) {
@@ -360,54 +363,197 @@ InkpodStatus BatchController::BuildGraph() noexcept {
     }
 }
 
-InkpodStatus BatchController::PlanPreview(
+namespace {
+
+struct BatchIoRun final : std::enable_shared_from_this<BatchIoRun> {
+    app::BatchUiState* batch{};
+    app::AppLifetimeState* lifetime{};
+    app::CoreHost* engine{};
+    app::FileIoController* file_io{};
+    app::CommandContext context;
+    HWND owner{};
+    HWND palette{};
+    UINT completion_message{};
+    InkpodBatchRunScope scope{};
+    bool dry_run{};
+    bool contact_sheet{};
+    bool preview_confirmed{};
+    bool output_new_tabs{};
+
+    void Finish(InkpodStatus status) noexcept {
+        batch->io_completion_status = status;
+        batch->io_request = 0U;
+        if (batch->report != nullptr) {
+            try {
+                batch->last_result = BatchController::ReportSummary(batch->report);
+            } catch (const std::bad_alloc&) {
+                batch->io_completion_status = INKPOD_STATUS_INVALID_STATE;
+            }
+        }
+        BatchController::RefreshPalette(*batch, palette);
+        if (!lifetime->smoke_test) {
+            // FileIoController runs this continuation on the UI thread. Finish
+            // the captured job before allowing another command to reuse batch.
+            SendMessageW(owner, completion_message, batch->io_completion_status,
+                static_cast<LPARAM>(context.generation->Value()));
+        }
+    }
+
+    bool Queue(std::uint32_t kind) noexcept {
+        try {
+            app::FileIoRequest request{};
+            request.context = context;
+            request.kind = kind;
+            request.batch_graph = batch->graph;
+            request.batch_scope = scope;
+            request.flags = (dry_run ? INKPOD_BATCH_RUN_DRY : 0U)
+                | (preview_confirmed ? INKPOD_BATCH_RUN_PREVIEW_CONFIRMED : 0U);
+            const auto sessions = engine->SessionCount();
+            request.new_tab_capacity = sessions >= app::CoreHost::kMaximumDocumentSessions
+                ? 0U : app::CoreHost::kMaximumDocumentSessions - sessions;
+            auto self = shared_from_this();
+            return file_io->Queue(*engine, std::move(request),
+                [self, kind](app::FileIoResult&& result) {
+                    if (!result.error.empty()) {
+                        self->engine->SetLocalFailure(result.error);
+                    }
+                    if (result.status != INKPOD_STATUS_OK) {
+                        self->Finish(result.status);
+                        return;
+                    }
+                    if (kind != INKPOD_IO_BATCH_PLAN) {
+                        (void)inkpod_batch_report_release(&self->batch->report);
+                        self->batch->report = std::exchange(result.batch_report, nullptr);
+                        self->Finish(self->batch->report == nullptr
+                            ? INKPOD_STATUS_INVALID_STATE : INKPOD_STATUS_OK);
+                        return;
+                    }
+                    (void)inkpod_batch_preview_release(&self->batch->preview);
+                    self->batch->preview = std::exchange(result.batch_preview, nullptr);
+                    std::uint64_t count{};
+                    std::uint64_t warnings{};
+                    InkpodStatus status = inkpod_batch_preview_count(self->batch->preview, &count);
+                    for (std::uint64_t index = 0U; status == INKPOD_STATUS_OK && index < count; ++index) {
+                        InkpodBatchPreviewItem item{};
+                        item.struct_size = sizeof(item);
+                        status = inkpod_batch_preview_get(self->batch->preview, index, &item);
+                        warnings += status == INKPOD_STATUS_OK
+                            && (item.flags & INKPOD_BATCH_PREVIEW_HAS_WARNING) != 0U ? 1U : 0U;
+                    }
+                    const std::size_t sessions = self->engine->SessionCount();
+                    if (status == INKPOD_STATUS_OK && !self->dry_run && self->output_new_tabs
+                        && (sessions > app::CoreHost::kMaximumDocumentSessions
+                            || count > app::CoreHost::kMaximumDocumentSessions - sessions)) {
+                        status = INKPOD_STATUS_INVALID_STATE;
+                    }
+                    if (status != INKPOD_STATUS_OK) {
+                        self->Finish(status);
+                        return;
+                    }
+                    try {
+                        self->batch->last_result = UiText(UiStringId::Text0313) + std::to_wstring(count)
+                            + UiText(UiStringId::Text0455) + std::to_wstring(warnings);
+                    } catch (const std::bad_alloc&) {
+                        self->Finish(INKPOD_STATUS_INVALID_STATE);
+                        return;
+                    }
+                    BatchController::RefreshPalette(*self->batch, self->palette);
+                    if (!self->preview_confirmed) {
+                        self->preview_confirmed = self->lifetime->smoke_test
+                            || MessageBoxW(self->owner, UiText(UiStringId::Text0883),
+                                UiText(UiStringId::Text0260), MB_OKCANCEL | MB_ICONQUESTION) == IDOK;
+                        if (!self->preview_confirmed) {
+                            self->Finish(INKPOD_STATUS_CANCELLED);
+                            return;
+                        }
+                    }
+                    if (!self->Queue(INKPOD_IO_BATCH_RUN)) {
+                        self->Finish(INKPOD_STATUS_INVALID_STATE);
+                    }
+                }, &batch->io_request);
+        } catch (const std::bad_alloc&) {
+            return false;
+        }
+    }
+};
+
+}  // namespace
+
+InkpodStatus BatchController::StartIo(
     const app::CommandContext& context,
-    InkpodBatchRunScope scope) noexcept {
-    if (!context.document_session.has_value()
-        || !context.generation.has_value()) {
+    InkpodBatchRunScope scope,
+    bool dry_run,
+    bool contact_sheet,
+    UINT completion_message) noexcept {
+    if (batch_.task != nullptr || batch_.io_request != 0U
+        || !context.document_session.has_value() || !context.generation.has_value()) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     const InkpodStatus graph_status = BuildGraph();
     if (graph_status != INKPOD_STATUS_OK) {
         return graph_status;
     }
-    inkpod_batch_preview_release(&batch_.preview);
-    app::BatchUiState* const batch = &batch_;
-    InkpodStatus status = engine_.Invoke(
-        *context.document_session,
-        *context.generation,
-        [batch, scope](InkpodCore* core) {
-            return inkpod_core_batch_preview(
-                core, batch->graph, scope, &batch->preview);
-        },
-        false,
-        false);
-    if (status == INKPOD_STATUS_OK) {
-        std::uint64_t count{};
-        std::uint64_t warnings{};
-        status = inkpod_batch_preview_count(batch_.preview, &count);
-        for (std::uint64_t index = 0U;
-             status == INKPOD_STATUS_OK && index < count;
-             ++index) {
-            InkpodBatchPreviewItem item{};
-            item.struct_size = sizeof(item);
-            status = inkpod_batch_preview_get(batch_.preview, index, &item);
-            if (status == INKPOD_STATUS_OK
-                && (item.flags & INKPOD_BATCH_PREVIEW_HAS_WARNING) != 0U) {
-                ++warnings;
-            }
-        }
-        if (status == INKPOD_STATUS_OK) {
-            try {
-                batch_.last_result = UiText(UiStringId::Text0313) + std::to_wstring(count)
-                    + UiText(UiStringId::Text0455) + std::to_wstring(warnings);
-            } catch (const std::bad_alloc&) {
-                status = INKPOD_STATUS_INVALID_STATE;
-            }
-        }
+    if (contact_sheet && engine_.SessionCount() >= app::CoreHost::kMaximumDocumentSessions) {
+        return INKPOD_STATUS_INVALID_STATE;
     }
-    RefreshPalette(batch_, palette_);
-    return status;
+    try {
+        auto run = std::make_shared<BatchIoRun>();
+        run->batch = &batch_;
+        run->lifetime = &lifetime_;
+        run->engine = &engine_;
+        run->file_io = &file_io_;
+        run->context = context;
+        run->owner = windows_.window;
+        run->palette = palette_;
+        run->completion_message = completion_message;
+        run->scope = scope;
+        run->dry_run = dry_run;
+        run->contact_sheet = contact_sheet;
+        run->preview_confirmed = dry_run || !batch_.preview_before_save;
+        run->output_new_tabs = batch_.output_destination == INKPOD_BATCH_OUTPUT_NEW_TABS;
+        (void)inkpod_batch_report_release(&batch_.report);
+        batch_.completion_context = context;
+        batch_.io_owner = &file_io_;
+        batch_.io_completion_status = INKPOD_STATUS_PENDING;
+        batch_.progress_dialog = {&batch_, QueryProgress, CancelProgress,
+            UiText(contact_sheet ? UiStringId::Text0259 : UiStringId::Text0267),
+            UiText(UiStringId::Text0263), UiText(UiStringId::Cancelling)};
+        if (!lifetime_.smoke_test && !BindJobProgress(progress_, progress_state_,
+                JobProgressSlot::Batch, batch_.progress_dialog)) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        if (!run->Queue(contact_sheet ? INKPOD_IO_BATCH_PREVIEW : INKPOD_IO_BATCH_PLAN)) {
+            ClearJobProgress(progress_, progress_state_, JobProgressSlot::Batch);
+            batch_.completion_context = {};
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        if (!lifetime_.smoke_test) {
+            static_cast<void>(windows_.dock_host.RestorePane(DockPaneType::JobProgress));
+            static_cast<void>(windows_.dock_host.ActivatePane(DockPaneType::JobProgress));
+            return INKPOD_STATUS_PENDING;
+        }
+        // Private smoke consumes exactly the production async queue while
+        // pumping notifications; production never takes this waiting path.
+        const ULONGLONG deadline = GetTickCount64() + 120'000U;
+        while (batch_.io_request != 0U && GetTickCount64() < deadline) {
+            file_io_.Poll();
+            if (batch_.io_request != 0U) {
+                (void)MsgWaitForMultipleObjectsEx(0U, nullptr, 10U, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+                MSG message{};
+                while (PeekMessageW(&message, nullptr, 0U, 0U, PM_REMOVE) != FALSE) {
+                    TranslateMessage(&message);
+                    DispatchMessageW(&message);
+                }
+            }
+        }
+        if (batch_.io_request != 0U) {
+            file_io_.Cancel(batch_.io_request);
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        return batch_.io_completion_status;
+    } catch (const std::bad_alloc&) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
 }
 
 InkpodStatus BatchController::Start(
@@ -415,251 +561,14 @@ InkpodStatus BatchController::Start(
     InkpodBatchRunScope scope,
     bool dry_run,
     UINT completion_message) noexcept {
-    if (batch_.task != nullptr) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    const InkpodStatus graph_status = BuildGraph();
-    if (graph_status != INKPOD_STATUS_OK) {
-        return graph_status;
-    }
-    if (!dry_run
-        && batch_.output_destination == INKPOD_BATCH_OUTPUT_NEW_TABS) {
-        if (!context.document_session.has_value()
-            || !context.generation.has_value()) {
-            return INKPOD_STATUS_INVALID_STATE;
-        }
-        InkpodBatchPreview* capacity_preview{};
-        InkpodStatus capacity_status = engine_.Invoke(
-            *context.document_session,
-            *context.generation,
-            [this, scope, &capacity_preview](InkpodCore* core) {
-                return inkpod_core_batch_preview(
-                    core, batch_.graph, scope, &capacity_preview);
-            },
-            false,
-            false);
-        std::uint64_t result_count{};
-        if (capacity_status == INKPOD_STATUS_OK) {
-            capacity_status = inkpod_batch_preview_count(
-                capacity_preview, &result_count);
-        }
-        inkpod_batch_preview_release(&capacity_preview);
-        if (capacity_status != INKPOD_STATUS_OK) {
-            return capacity_status;
-        }
-        const std::size_t existing = engine_.SessionCount();
-        if (existing > app::CoreHost::kMaximumDocumentSessions
-            || result_count
-                > app::CoreHost::kMaximumDocumentSessions - existing) {
-            return INKPOD_STATUS_INVALID_STATE;
-        }
-    }
-    bool preview_confirmed = !batch_.preview_before_save || dry_run;
-    if (!preview_confirmed) {
-        const InkpodStatus preview_status = PlanPreview(context, scope);
-        if (preview_status != INKPOD_STATUS_OK) {
-            return preview_status;
-        }
-        preview_confirmed = lifetime_.smoke_test
-            || MessageBoxW(
-                   windows_.window,
-                   UiText(UiStringId::Text0883),
-                   UiText(UiStringId::Text0260),
-                   MB_OKCANCEL | MB_ICONQUESTION) == IDOK;
-        if (!preview_confirmed) {
-            return INKPOD_STATUS_CANCELLED;
-        }
-    }
-
-    inkpod_batch_report_release(&batch_.report);
-    InkpodStatus status = inkpod_batch_task_create(&batch_.task);
-    if (status != INKPOD_STATUS_OK) {
-        return status;
-    }
-    const std::uint64_t flags = (dry_run ? INKPOD_BATCH_RUN_DRY : 0U)
-        | (preview_confirmed ? INKPOD_BATCH_RUN_PREVIEW_CONFIRMED : 0U);
-    app::BatchUiState* const batch = &batch_;
-    if (lifetime_.smoke_test) {
-        if (!context.document_session.has_value()
-            || !context.generation.has_value()) {
-            inkpod_batch_task_release(&batch_.task);
-            return INKPOD_STATUS_INVALID_STATE;
-        }
-        status = engine_.Invoke(
-            *context.document_session,
-            *context.generation,
-            [batch, scope, flags](InkpodCore* core) {
-                return inkpod_core_batch_execute(
-                    core,
-                    batch->graph,
-                    scope,
-                    flags,
-                    batch->task,
-                    &batch->report);
-            },
-            true,
-            true);
-        if (batch_.report != nullptr) {
-            try {
-                batch_.last_result = ReportSummary(batch_.report);
-            } catch (const std::bad_alloc&) {
-                status = INKPOD_STATUS_INVALID_STATE;
-            }
-        }
-        inkpod_batch_task_release(&batch_.task);
-        RefreshPalette(batch_, palette_);
-        return status;
-    }
-
-    batch_.progress_dialog = {
-        &batch_,
-        QueryProgress,
-        CancelProgress,
-        UiText(UiStringId::Text0267),
-        UiText(UiStringId::Text0263),
-        UiText(UiStringId::Cancelling)};
-    if (!BindJobProgress(
-            progress_,
-            progress_state_,
-            JobProgressSlot::Batch,
-            batch_.progress_dialog)) {
-        inkpod_batch_task_release(&batch_.task);
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    static_cast<void>(windows_.dock_host.RestorePane(DockPaneType::JobProgress));
-    static_cast<void>(windows_.dock_host.ActivatePane(DockPaneType::JobProgress));
-    batch_.completion_context = context;
-    const HWND window = windows_.window;
-    if (!engine_.Enqueue(
-            context,
-            [batch, scope, flags](InkpodCore* core) {
-                return inkpod_core_batch_execute(
-                    core,
-                    batch->graph,
-                    scope,
-                    flags,
-                    batch->task,
-                    &batch->report);
-            },
-            true,
-            true,
-            true,
-            [window, completion_message, context](InkpodStatus completion_status) {
-                const LPARAM generation = context.generation.has_value()
-                    ? static_cast<LPARAM>(context.generation->Value())
-                    : 0;
-                PostMessageW(
-                    window, completion_message, completion_status, generation);
-            })) {
-        ClearJobProgress(progress_, progress_state_, JobProgressSlot::Batch);
-        if (!HasActiveJobProgress(progress_state_)) {
-            static_cast<void>(windows_.dock_host.HidePane(
-                DockPaneType::JobProgress));
-        }
-        inkpod_batch_task_release(&batch_.task);
-        batch_.completion_context = {};
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    return INKPOD_STATUS_OK;
+    return StartIo(context, scope, dry_run, false, completion_message);
 }
 
 InkpodStatus BatchController::StartContactSheetPreview(
     const app::CommandContext& context,
     UINT completion_message) noexcept {
-    if (batch_.task != nullptr
-        || !context.document_session.has_value()
-        || !context.generation.has_value()) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    const InkpodStatus graph_status = BuildGraph();
-    if (graph_status != INKPOD_STATUS_OK) {
-        return graph_status;
-    }
-    if (engine_.SessionCount() >= app::CoreHost::kMaximumDocumentSessions) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-
-    inkpod_batch_report_release(&batch_.report);
-    InkpodStatus status = inkpod_batch_task_create(&batch_.task);
-    if (status != INKPOD_STATUS_OK) {
-        return status;
-    }
-    app::BatchUiState* const batch = &batch_;
-    if (lifetime_.smoke_test) {
-        status = engine_.Invoke(
-            *context.document_session,
-            *context.generation,
-            [batch](InkpodCore* core) {
-                return inkpod_core_batch_contact_sheet_preview(
-                    core,
-                    batch->graph,
-                    batch->task,
-                    &batch->report);
-            },
-            false,
-            false);
-        if (batch_.report != nullptr) {
-            try {
-                batch_.last_result = ReportSummary(batch_.report);
-            } catch (const std::bad_alloc&) {
-                status = INKPOD_STATUS_INVALID_STATE;
-            }
-        }
-        inkpod_batch_task_release(&batch_.task);
-        RefreshPalette(batch_, palette_);
-        return status;
-    }
-
-    batch_.progress_dialog = {
-        &batch_,
-        QueryProgress,
-        CancelProgress,
-        UiText(UiStringId::Text0259),
-        UiText(UiStringId::Text0263),
-        UiText(UiStringId::Cancelling)};
-    if (!BindJobProgress(
-            progress_,
-            progress_state_,
-            JobProgressSlot::Batch,
-            batch_.progress_dialog)) {
-        inkpod_batch_task_release(&batch_.task);
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    static_cast<void>(windows_.dock_host.RestorePane(DockPaneType::JobProgress));
-    static_cast<void>(windows_.dock_host.ActivatePane(DockPaneType::JobProgress));
-    batch_.completion_context = context;
-    const HWND window = windows_.window;
-    if (!engine_.Enqueue(
-            context,
-            [batch](InkpodCore* core) {
-                return inkpod_core_batch_contact_sheet_preview(
-                    core,
-                    batch->graph,
-                    batch->task,
-                    &batch->report);
-            },
-            false,
-            false,
-            true,
-            [window, completion_message, context](InkpodStatus completion_status) {
-                const LPARAM generation = context.generation.has_value()
-                    ? static_cast<LPARAM>(context.generation->Value())
-                    : 0;
-                PostMessageW(
-                    window, completion_message, completion_status, generation);
-            })) {
-        ClearJobProgress(progress_, progress_state_, JobProgressSlot::Batch);
-        if (!HasActiveJobProgress(progress_state_)) {
-            static_cast<void>(windows_.dock_host.HidePane(
-                DockPaneType::JobProgress));
-        }
-        inkpod_batch_task_release(&batch_.task);
-        batch_.completion_context = {};
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    return INKPOD_STATUS_OK;
+    return StartIo(context, INKPOD_BATCH_SCOPE_ALL, false, true, completion_message);
 }
-
 InkpodStatus BatchController::SaveGraph(
     const std::uint8_t* path_utf8, std::size_t path_bytes) noexcept {
     const InkpodStatus graph_status = BuildGraph();
@@ -804,7 +713,20 @@ InkpodStatus BatchController::LoadStoredGraph() noexcept {
 bool BatchController::QueryProgress(
     void* context, ProgressDialogInfo& output) noexcept {
     auto* batch = static_cast<app::BatchUiState*>(context);
-    if (batch == nullptr || batch->task == nullptr) {
+    if (batch == nullptr) {
+        return false;
+    }
+    if (batch->io_owner != nullptr && batch->io_request != 0U) {
+        InkpodIoJobInfo info{};
+        info.struct_size = sizeof(info);
+        if (!batch->io_owner->Progress(batch->io_request, info)) {
+            return false;
+        }
+        output.completed_work = info.completed_work;
+        output.total_work = info.total_work;
+        return true;
+    }
+    if (batch->task == nullptr) {
         return false;
     }
     InkpodTaskInfo info{};
@@ -819,6 +741,9 @@ bool BatchController::QueryProgress(
 
 void BatchController::CancelProgress(void* context) noexcept {
     auto* batch = static_cast<app::BatchUiState*>(context);
+    if (batch != nullptr && batch->io_owner != nullptr && batch->io_request != 0U) {
+        batch->io_owner->Cancel(batch->io_request);
+    }
     if (batch != nullptr && batch->task != nullptr) {
         inkpod_batch_task_cancel(batch->task);
     }
@@ -834,7 +759,7 @@ void BatchController::RefreshPalette(
         view.job_text = batch.job_text;
         view.set_name = batch.set_name;
         view.set_names = batch.available_set_names;
-        if (batch.task != nullptr && batch.job_id.has_value()) {
+        if ((batch.task != nullptr || batch.io_request != 0U) && batch.job_id.has_value()) {
             ProgressDialogInfo progress{};
             if (QueryProgress(&batch, progress)) {
                 view.job_text = L"Job "
@@ -901,7 +826,7 @@ void BatchController::RefreshPalette(
             }
             view.validation_text += batch.last_result;
         }
-        view.idle = batch.task == nullptr;
+        view.idle = batch.task == nullptr && batch.io_request == 0U;
         view.runnable = view.idle && valid;
     } catch (const std::bad_alloc&) {
         return;

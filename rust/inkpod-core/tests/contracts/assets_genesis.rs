@@ -423,9 +423,13 @@ fn sequence_attachment_recognizes_the_opened_genesis_without_replacing_it() {
         0x4410,
     )
     .unwrap();
+    core.add_guide(GuideAxis::Vertical, 1).unwrap();
     let before = core.document_info().unwrap();
+    assert!(before.dirty);
     let before_genesis = core.genesis_info().unwrap();
     let before_usage = core.asset_store_usage();
+    let before_history = core.history_entries().to_vec();
+    let before_journal = core.journal_entries().to_vec();
     let source = SequenceCellSource::from_common_raster(
         "cell2.png",
         0x4411,
@@ -434,11 +438,31 @@ fn sequence_attachment_recognizes_the_opened_genesis_without_replacing_it() {
     .unwrap();
     core.set_sequence(vec![source]).unwrap();
 
-    let activated = core.sequence_activate(0).unwrap();
+    let plan = core.resolve_sequence_activation(0).unwrap();
+    assert_eq!(plan.kind, SequenceActivationKind::Bind);
+    assert_eq!(plan.source_index, None);
+    assert_eq!(plan.source_generation, None);
+    assert_eq!(plan.source_document_uuid, 0x4410);
+    assert_eq!(plan.target_document_uuid, 0x4411);
+    assert_eq!(core.document_info().unwrap(), before);
+    assert_eq!(core.sequence_cell(0).unwrap().document_uuid, 0x4411);
+    let activated = core.commit_sequence_activation(plan).unwrap();
     assert_eq!(activated, before);
     assert_eq!(core.genesis_info().unwrap(), before_genesis);
     assert_eq!(core.asset_store_usage(), before_usage);
+    assert_eq!(core.history_entries(), before_history);
+    assert_eq!(core.journal_entries(), before_journal);
     assert_eq!(core.sequence_cells().unwrap()[0].document_uuid, 0x4410);
+    let no_op = core.resolve_sequence_activation(0).unwrap();
+    assert_eq!(no_op.kind, SequenceActivationKind::NoOp);
+    assert_eq!(no_op.source_index, Some(0));
+    assert_eq!(no_op.source_generation, Some(1));
+    assert_eq!(core.commit_sequence_activation(no_op).unwrap(), before);
+    assert_eq!(core.sequence_activate(0).unwrap(), before);
+    assert_eq!(
+        core.commit_sequence_activation(plan),
+        Err(CoreError::InvalidState("sequence activation plan is stale"))
+    );
     assert_eq!(decoded_png(&core).pixels, expected);
 }
 

@@ -195,6 +195,7 @@ UI 表示文字列は、日本語と英語を言語非依存の型付き ID で�
 - 開いたセルと同じ sequence/folder にある画像は file preview に自然順で表示する。thumbnail click、前/次 command、番号指定で切り替える。
 - active cell が dirty の状態で別セルへ移る場合は、versioned application setting で `Prompt` または `Autosave-before-switch` を選ぶ。Prompt の cancel、自動保存の失敗、発行後 stale、queue rejection では現在セルと未保存編集を保ち、durable な native recovery artifact と metadata の publication 成功後だけ対象セルへ切り替える。
 - 自動保存済みセルは sequence entry の document UUID と source generation に関連付け、戻る際は exact native state を staged Core で検証・replayしてから active Core を交換する。flattened preview source から history、layer/plane tree、selection、editor state を再構成しない。
+- 別の `(document UUID, source generation)` へ実際に切り替えたときは、旧セルの通常保存先、source path、recovery association、file identity を新セルへ流用しない。同じ UUID でも source generation が異なれば実切替とする。Core は no-op、現在の画像への初回の連番関連付け、実際の文書置換を判別し、初回の関連付けだけなら文書と保存 authority を維持する。復元した recovery metadata の元 identity は重複 open の防止にだけ使い、通常保存先への authority は復元しない。切替候補と identity の予約は commit 前に準備し、取消、失敗、stale、真の no-op は元の関連付けを維持する。
 - `前のセル` と `次のセル` は、自然順に存在する entry だけを対象として欠番を飛ばす。closed な端点 policy は `Stop` と `Wrap` の二つとし、`Stop` は先頭から前／末尾から次を完全な no-op、`Wrap` は先頭と末尾を相互に切り替える。空 sequence と一件だけの sequence も別の明示 no-op result とする。
 - 端点 policy は application-wide な `inkpod-settings.json` の `animation.sequenceEndpoint` とし、`stop` または `wrap` の読みやすい文字列で保存する。既定は `Stop`、missing setting は `Stop`、不正または非現行の設定 file は全体を拒否して `Stop` を含む既定値へ戻す。同一 process の全 workspace window は同じ値を使い、`連番・サブパレット > 端点で循環` の menu checked state、設定 command、configurable shortcut、status／accessibility 表示を一つの setting へ接続する。この値は document／EditorState／canonical procedure ではなく、document revision、history、journal、dirty、savepoint、`.inkpod` format を変えない。
 - 通常の前後セル command は発行時の direction、端点 policy、sequence revision、source／target の document UUID、source generation、自然順 index、cell number を固定する。commit 前に Core が同じ target を再解決し、発行後の sequence／source／target 変更は stale として原子的に拒否する。通常 navigation の端点 policy と motion check 自身の loop setting は独立とする。
@@ -207,6 +208,17 @@ UI 表示文字列は、日本語と英語を言語非依存の型付き ID で�
 - `window を閉じる` は、その window から消える view のうち他 window に view が残らない dirty session だけを確認する。他 window に残る session、Canvas、job を破棄しない。
 - `application を終了する` は dirty な `DocumentSession` ごとに一度だけ保存判断を求める。同じ document の view 数だけ dialog を出さず、cancel または save failure では shutdown を開始しない。
 - shutdown は新規 command/input を停止し、active stroke/modal preview と dirty 判断を解決し、layout を保存し、Canvas unbind と snapshot drain、Core work cancel/drain と owner-thread destroy、renderer resource の owner-thread 破棄、最後の `HWND` 破棄の順に行う。
+
+#### 4.1 共有ファイル I/O と編集・参照の分離
+
+- `IO-003`: application 所有の一つの Rust `inkpod-io` manager が、編集 native/recovery、編集 PNG/TIFF/TGA/BMP、自動・明示連番、サブパレット/Reference、Light Table 追加/更新、Batch file/folder/preview の filesystem 操作を共有する。Windows はパスと型付き操作・対象だけを渡し、画像 byte read/write、列挙、file identity、temporary/replace/cleanup は Rust が行う。GUI icon、palette/chart、shortcut/settings、clipboard の memory image、test fixture、Cut 内 Cell 検証の移行は対象外とする。
+- ラスタ編集 open は codec を閉じた PNG/TIFF/TGA/BMP 値として保持する native 編集文書をメモリ上に作る。新規 Cell の既定は PNG とし、環境設定の `saveAndRecovery.defaultRasterFormat` (`png`/`tiff`/`tga`/`bmp`) は以後の新規 Cell にだけ適用する。参照 open は読み取り専用の immutable decoded image と view を作り、対応する編集用 Genesis、history、native file を作らない。
+- 通常の編集 Save/Save As は同じ immutable state から `.inkpod` と同一 stem のラスタを同一 directory に保存する。TIFF の出力 suffix は `.tif`、入力は `.tif`/`.tiff` を受理する。通常 raster composite は Light Table、guide、selection overlay を含まない。TGA/BMP の RGBA16 等、出力形式が保持できない precision は事前エラーとし、silent quantization をしない。
+- 二つの独立 file の filesystem-level atomic replace を約束しない。両 temporary の完成/flush/close、両 destination の identity/overwrite 再検査、ordered lock と bounded recovery record/backup を用い、両 output の install 成功後だけ通常 path と document/editor savepoint を公開する。部分失敗は復元を試み、未解決の crash/external conflict を成功表示せず復旧対象として保持する。native が clean でも companion 欠落は再生成し、外部変更は確認する。autosave/recovery、明示 export、Batch 指定形式出力、preview temporary は native 一 file 等の独立した既存目的を維持し、通常ペア保存を暗黙適用しない。
+- IO は bounded worker/queue で非同期・並列に実行し、同じ物理 file と replacement destination の read/write は排他する。file alias と置換後の file identity 変更を扱う。live Core は owner thread に保持し、staged decode/replay/encode 結果だけを受け取る。stale/cancel/failure は別 active target へ fallback せず、文書と既存表示を保持する。
+- shared LRU の上限は application 全体で 10,000 image、encoded 一 file 512 MiB、encoded 合計 8 GiB、decoded pixel 合計 8 GiB とする。native/recovery は画像 cache に入れず、既存の 1 GiB bounded streaming 上限を維持する。read/allocation 前に容量を予約し、利用中 lease、旧表示と置換候補、結果待ちを計上する。cache map から外しただけで live payload を解放済みと数えない。subpalette の全件常駐と I/O/decode-free navigation を保持し、旧/新が同時に収まらない場合は新 candidate を失敗させ旧表示を保つ。文書/history の Asset は eviction 対象にしない。
+- 自動連番は単体 open 成功後の独立 job とする。Rust worker 内で directory 直下を同期列挙し、stem の最後の ASCII 数字列とその前後が一致する PNG/TIFF/TGA/BMP を自然順で集める。数字幅は一致不要、拡張子は pattern の一部にしない。開いた source を必ず含む自然順近傍最大 1,000 件を選び、超過は truncated と表示する。この上限を一般 sequence/subpalette/Batch 件数へ流用しない。late completion は既存 Genesis を再 open/activate せず、その後の編集を保持する。
+- polling ABI は状態、列挙数、対象数、read 完了数、`loaded_count`、失敗/取消数を別々に返す。`loaded_count` は decode/検証が完了し使用可能な画像数で、cache hit を含む。poll/cancel は live Core を借用せず任意 thread で行え、反映は発行時 target/generation を owner thread で再検証する。job の結果と handle は Rust-owned とし、release と参照は明示同期する。
 
 ### 5. 彩色文書の種類と合成
 
@@ -543,7 +555,7 @@ UI／ABIを production contract とする。M23で批准済みcatalogを使うRu
 
 ### 20. 形式、白透過、一般画像入出力
 
-- exact-current 契約は `.inkpod` top-level format v28、runtime replay epoch 25、C ABI v22、`.inkbatch` v4、InkScript registry schema／language／file v2、production catalog／owner manifest v4 とする。native v27／epoch 24、ABI v21以前、`.inkbatch` v3以前、catalog／owner manifest v3、および削除済み Batch authoring operation は migration や shim を設けず拒否する。今回の更新は native format freeze 宣言ではない。
+- exact-current 契約は `.inkpod` top-level format v29、runtime replay epoch 25、C ABI v23、`.inkbatch` v4、InkScript registry schema／language／file v2、production catalog／owner manifest v4 とする。native v28以前、epoch 24以前、ABI v22以前、`.inkbatch` v3以前、catalog／owner manifest v3、および削除済み Batch authoring operation は migration や shim を設けず拒否する。今回の更新は native format freeze 宣言ではない。
 - native `.inkpod` は、保存時点の可変 raster snapshot を意味上の正本にしない。正本は immutable な `Genesis`、content-addressed な `Assets`、Core が検証・正規化して実変更を確定した `Procedures` と history control event、history の現在位置と high-watermark を持つ `META`、文書単位の `EditorState` とする。materialized document、inverse delta、COW snapshot、render/checkpoint cache は派生物であり、これらだけで文書を成立させない。
 - frontend request は target/revision/ID と上限を検証し、座標、色、option、可変長入力、transaction 内の output ID を正規化してから一つの `CanonicalProcedure` として確定する。procedure は monotonic ID、primitive ID/schema、replay epoch、base/committed `StateId`、固定幅引数、stable input/output ID、immutable `AssetId` または bounded inline payload、pre/post document-state digest を持ち、raw pointer、外部 path、native enum layout、frontend command ID、一時 object ID を含めない。
 - `Genesis` は document UUID、paper、DPI、sRGB、frame、margin、初期 stable-ID topology、immutable base surface を完全記述する。白紙の base surface は全面 tile を割り当てない opaque white の `SolidWhite` underlay とし、flat canonical composite/export には参加するが、個別 layer/plane export や selection mask へ暗黙に混入させない。
@@ -613,6 +625,7 @@ UI／ABIを production contract とする。M23で批准済みcatalogを使うRu
 - `ABI-002`: immutable batched render snapshot
 - `IO-001`: versioned `.inkpod`、atomic save、round-trip、recovery
 - `IO-002`: PNG/TIFF/TGA/BMP import/export と alpha/white background option
+- `IO-003`: path-only Rust filesystem boundary、shared bounded parallel I/O、file identity/locks、encoded/decoded LRU、polling、通常 native/raster pair 保存
 - `WIN-001`: Windows shell、Help/About、DPI/theme/keyboard behavior
 - `WIN-002`: 同一 process/UI thread 上の複数 `WorkspaceWindow`、window-local focus/menu/status、application activation、最後の window による shutdown
 - `WORKSPACE-001`: 制約付き dock、最大二つの `EditorGroup`、named workspace、versioned layout persistence と monitor/DPI recovery

@@ -108,6 +108,176 @@ fn active_document_input() -> InkpodBatchInput {
 }
 
 #[test]
+fn io_003_async_batch_plan_run_and_contact_sheet_transfer_owned_results() {
+    let colors = [rgba8([0, 0, 0, 0])];
+    let operations = [operation(INKPOD_BATCH_OPERATION_ERASE, &colors, &[])];
+    let inputs = [active_document_input()];
+    let graph_input = graph_input(&inputs, &operations, INKPOD_BATCH_OUTPUT_NEW_TABS);
+    let config = InkpodCoreConfig {
+        struct_size: size_of::<InkpodCoreConfig>() as u32,
+        abi_version: INKPOD_ABI_VERSION,
+        feature_flags: 0,
+    };
+    let options = InkpodCellCreateOptions {
+        struct_size: size_of::<InkpodCellCreateOptions>() as u32,
+        reserved: 0,
+        feature_flags: 0,
+        document_uuid_high: 0,
+        document_uuid_low: 100,
+        width: 2,
+        height: 2,
+        dpi_x_milli: 96_000,
+        dpi_y_milli: 96_000,
+    };
+    let mut document = InkpodDocumentInfo {
+        struct_size: size_of::<InkpodDocumentInfo>() as u32,
+        ..Default::default()
+    };
+    let (mut core, mut manager, mut graph, mut job) = (
+        ptr::null_mut(),
+        ptr::null_mut(),
+        ptr::null_mut(),
+        ptr::null_mut(),
+    );
+    // SAFETY: Every handle has unique owner storage on this thread. Complete
+    // input records and spans stay alive until the synchronous copy returns.
+    unsafe {
+        assert_eq!(inkpod_core_create(&config, &mut core), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_core_new_cell(core, &options, &mut document),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_io_manager_create(ptr::null(), &mut manager),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(inkpod_core_bind_io_manager(core, manager), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_batch_graph_create(&graph_input, &mut graph),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_io_batch_submit(
+                core,
+                manager,
+                graph,
+                u32::MAX,
+                INKPOD_BATCH_SCOPE_ALL,
+                0,
+                1,
+                &mut job
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert!(job.is_null());
+        for kind in [
+            INKPOD_IO_BATCH_PLAN,
+            INKPOD_IO_BATCH_RUN,
+            INKPOD_IO_BATCH_PREVIEW,
+        ] {
+            assert_eq!(
+                inkpod_core_io_batch_submit(
+                    core,
+                    manager,
+                    graph,
+                    kind,
+                    INKPOD_BATCH_SCOPE_ALL,
+                    INKPOD_BATCH_RUN_PREVIEW_CONFIRMED,
+                    1,
+                    &mut job
+                ),
+                INKPOD_STATUS_OK
+            );
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+            loop {
+                let mut progress = InkpodIoJobInfo {
+                    struct_size: size_of::<InkpodIoJobInfo>() as u32,
+                    ..Default::default()
+                };
+                assert_eq!(inkpod_io_job_poll(job, &mut progress), INKPOD_STATUS_OK);
+                assert!(
+                    !matches!(progress.state, INKPOD_IO_FAILED | INKPOD_IO_CANCELLED),
+                    "Batch job failed: {}",
+                    progress.status
+                );
+                if progress.state == INKPOD_IO_READY {
+                    break;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "Batch I/O job stalled"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            assert_eq!(
+                inkpod_core_io_job_apply(core, job, &mut document, ptr::null_mut()),
+                INKPOD_STATUS_OK
+            );
+            if kind == INKPOD_IO_BATCH_PLAN {
+                let mut preview = ptr::null_mut();
+                assert_eq!(
+                    inkpod_io_job_take_batch_preview(job, &mut preview),
+                    INKPOD_STATUS_OK
+                );
+                let mut count = 0;
+                assert_eq!(
+                    inkpod_batch_preview_count(preview, &mut count),
+                    INKPOD_STATUS_OK
+                );
+                assert_eq!(count, 1);
+                assert_eq!(inkpod_batch_preview_release(&mut preview), INKPOD_STATUS_OK);
+                assert_eq!(
+                    inkpod_io_job_take_batch_preview(job, &mut preview),
+                    INKPOD_STATUS_INVALID_STATE
+                );
+            } else {
+                let mut report = ptr::null_mut();
+                assert_eq!(
+                    inkpod_io_job_take_batch_report(job, &mut report),
+                    INKPOD_STATUS_OK
+                );
+                let mut info = InkpodBatchReportInfo {
+                    struct_size: size_of::<InkpodBatchReportInfo>() as u32,
+                    cancelled: 0,
+                    item_count: 0,
+                    failure_count: 0,
+                    staged_result_count: 0,
+                };
+                assert_eq!(
+                    inkpod_batch_report_get_info(report, &mut info),
+                    INKPOD_STATUS_OK
+                );
+                assert_eq!(
+                    (
+                        info.item_count,
+                        info.failure_count,
+                        info.staged_result_count
+                    ),
+                    (1, 0, 1)
+                );
+                let mut staged = ptr::null_mut();
+                let mut generation = 0;
+                assert_eq!(
+                    inkpod_batch_report_take_staged_result(report, 0, &mut generation, &mut staged),
+                    INKPOD_STATUS_OK
+                );
+                assert_ne!(generation, 0);
+                assert_eq!(inkpod_core_destroy(&mut staged), INKPOD_STATUS_OK);
+                assert_eq!(inkpod_batch_report_release(&mut report), INKPOD_STATUS_OK);
+                assert_eq!(
+                    inkpod_io_job_take_batch_report(job, &mut report),
+                    INKPOD_STATUS_INVALID_STATE
+                );
+            }
+            assert_eq!(inkpod_io_job_release(&mut job), INKPOD_STATUS_OK);
+        }
+        assert_eq!(inkpod_batch_graph_release(&mut graph), INKPOD_STATUS_OK);
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+        assert_eq!(inkpod_io_manager_release(&mut manager), INKPOD_STATUS_OK);
+    }
+}
+
+#[test]
 fn current_abi_graph_exposes_only_the_four_batch_v4_operation_shapes() {
     let colors = [rgba8([1, 2, 3, 4])];
     let pairs = [InkpodBatchColorPairInput {

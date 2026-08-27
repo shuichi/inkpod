@@ -1,7 +1,7 @@
 # Native file format
 
-`.inkpod` v28 is the bounded, procedure-authoritative, little-endian native
-container. Version 28 is the only accepted top-level contract. Cell files require
+`.inkpod` v29 is the bounded, procedure-authoritative, little-endian native
+container. Version 29 is the only accepted top-level contract. Cell files require
 runtime replay epoch 25; Cut descriptors retain their independent replay epoch 24.
 The current document model is raster-only: retired vector and Text/Annotation
 records, primitive IDs, layer codes, object kinds, and payload sections are not
@@ -30,7 +30,7 @@ The Cut header is exactly 64 bytes:
 | Offset | Size | Field |
 |---:|---:|---|
 | 0 | 8 | magic `INKCUT\0\0` |
-| 8 | 4 | top-level file-format version = 28 |
+| 8 | 4 | top-level file-format version = 29 |
 | 12 | 4 | Cut replay epoch = 24 |
 | 16 | 8 | total descriptor length |
 | 24 | 8 | payload length |
@@ -70,7 +70,7 @@ canonical procedure contains an external path. Active plus inactive history is b
 4096 records, each text field to 4096 UTF-8 bytes, and the complete descriptor to
 16 MiB. Counts, cursor, ID high-watermarks, canonical history chaining, current
 state, trailing bytes, UTF-8, enum values, lengths, and digest are validated before
-publication. Version 28, Cut replay epoch 24, and payload schema 2 are the only
+publication. Version 29, Cut replay epoch 24, and payload schema 2 are the only
 accepted values; there is no older-version reader or migration.
 
 Normal Cut save writes and flushes a same-directory temporary descriptor before
@@ -96,7 +96,7 @@ success.
 ## Current procedure-authoritative contract
 
 This section defines the implemented procedure-authoritative container at
-top-level format version 28 and runtime replay epoch 25. It uses a hierarchical document
+top-level format version 29 and runtime replay epoch 25. It uses a hierarchical document
 commitment, an exact-depth target-explicit `ApplyRasterStroke/v3` schema, a
 bounded resolved `ApplyGeometry/canonical-v2` schema,
 distinct stable Cell ID, and an explicit immutable Genesis base surface:
@@ -104,14 +104,14 @@ metadata, raster, and raster-tile commitments are domain-separated so a raster
 edit hashes only changed tile payloads instead of every allocated document
 pixel. This semantic digest is independent of the renderer's canonical
 revision-max cache identity. Asset and procedure-payload digest contracts are
-version 1. Every version other than 28 is rejected before Core state replacement;
+version 1. Every version other than 29 is rejected before Core state replacement;
 there is no migration or compatibility reader. Any schema or replay-semantics change
 after this contract increments the top-level version before that change is
 merged. A replay-result change also increments the replay epoch.
 
 The authoritative sections are `META`, `GENS`, `ASST`, `PROC`, and `EDIT`.
 `EXTM`, `CKPT`, and unknown opaque-preserve sections are optional. `CKPT` is a
-schema-1 acceleration record in v28. There is no `HIST` section: history moves and
+schema-1 acceleration record in v29. There is no `HIST` section: history moves and
 branch cuts are records in `PROC`, while cursor, active branch, savepoints, and
 ID high-watermarks are fields in `META`. A materialized document or checkpoint
 is never sufficient without Genesis, retained assets, and the procedure/control
@@ -381,7 +381,7 @@ the common 16-byte record header defined below, then these exact payload bytes:
 - An asset-reference record is `argument ordinal u32`, zero `u32`, then the
   32-byte `AssetId`. Input/output-ID records are `role ordinal u32`, reserved
   zero `u32`, and stable ID `u64`; the typed canonical invocation is the object-
-  kind authority in v28. Each sequence is strictly increasing
+  kind authority in v29. Each sequence is strictly increasing
   by ordinal with no duplicate role. The primitive schema fixes whether each
   input/output role is required; transient object IDs are forbidden.
 - When payload length is zero, `ProcedurePayloadDigest` is 32 zero bytes and no
@@ -550,7 +550,7 @@ grid, renderer resources, and OS
 DPI are excluded. `RenderSnapshot::canonical_composite_digest` and
 `inkpod_snapshot_get_canonical_digest` expose this result without a test-only
 state accessor. This derived snapshot digest is not serialized in `.inkpod` and
-does not independently change native format v28 or runtime replay epoch 25.
+does not independently change native format v29 or runtime replay epoch 25.
 
 A sequence field is `element-count u64`, then for every element `element-length
 u64` and exact element bytes. A schema-declared ordered sequence retains its
@@ -588,7 +588,7 @@ digest, 5 semantics revision `u32`, 6 work-formula ID `u32`, and 7 replay-policy
 argument-schema digest is BLAKE3 `derive_key` over the exact canonical ASCII
 label `<canonical-name>/canonical-v<schema-version>` using the primitive-
 argument-schema context above. This label identifies the closed typed schema;
-the v28 reader selects its decoder through the same catalog entry and accepts
+the v29 reader selects its decoder through the same catalog entry and accepts
 only a byte-exact canonical re-encoding.
 
 An argument descriptor is a schema-1 frame with fields 1 ordinal `u32`; 2
@@ -760,7 +760,7 @@ follows:
   milli-pixel X/Y, interval and normalized phase in milli-degrees, exact tagged
   RGBA8/16 color, normalized opacity, and visibility. This document-state frame
   is schema 11/domain 8. The current build contract is runtime replay epoch 25
-  and top-level version 28; optional
+  and top-level version 29; optional
   checkpoint/streaming records do not change the state-digest schema.
   Collections whose UI order is not semantic are ID-sorted.
 - An adjustment frame orders kind, channel, interpolation, six signed `i32`
@@ -871,7 +871,7 @@ owners. The current materialized document and checkpoints are not sufficient
 roots by themselves. Assets referenced only by an inactive branch remain
 available for cache-free replay, and the owning Core session releases its
 registry only after transient work has drained. These runtime rules establish
-  the exact graph serialized by v28 `GENS` and `ASST`.
+  the exact graph serialized by v29 `GENS` and `ASST`.
 
 Cache-free save/reopen-equivalent verification is detached from that live
 registry: it walks the same roots, deep-copies every unique payload in
@@ -879,7 +879,7 @@ registry: it walks the same roots, deep-copies every unique payload in
 then rebinds Genesis and retained procedures before fresh replay. Descriptor,
 payload, identity, and duplicate-root reference counts must match, while the
 source and rebuilt `AssetRecord`, payload, and raster allocations must not share
-ownership. That detached archive remains test infrastructure; v28 provides
+ownership. That detached archive remains test infrastructure; v29 provides
 the production encoder and staged reader.
 
 Self-referential digest fields are present as thirty-two zero bytes during
@@ -897,19 +897,19 @@ change digest output. The Core production dependency computes the
 hierarchical schema-11 `DocumentStateDigest` for canonical execution and
 fresh-Core replay. Its runtime commitment cache is separate from render
 caching: snapshot validation uses only the documented revision-max scalar and
-never these digests. The same pinned implementation computes the v28 section,
+never these digests. The same pinned implementation computes the v29 section,
 root, asset-chunk, journal, document, editor, and procedure-payload commitments.
 
 ### Header, directory, and record bytes
 
-The v28 header is exactly 128 bytes. Its outer container-layout epoch is 9;
+The v29 header is exactly 128 bytes. Its outer container-layout epoch is 9;
 the authoritative `META` and procedure records independently require runtime
 replay epoch 25 before staged Core publication:
 
 | Offset | Size | Field |
 |---:|---:|---|
 | 0 | 8 | magic bytes `49 4E 4B 50 4F 44 00 00` |
-| 8 | 4 | top-level format version = 28 |
+| 8 | 4 | top-level format version = 29 |
 | 12 | 4 | outer container-layout epoch = 9 |
 | 16 | 4 | header size = 128 |
 | 20 | 4 | required flags = 0 |
@@ -959,7 +959,7 @@ Required-section identity is closed and exact:
 
 | FourCC | Section version | Directory flags | Cardinality / record kinds |
 |---|---:|---:|---|
-| `META` | 1 | critical | exactly one kind-1/v1 record |
+| `META` | 2 | critical | exactly one kind-1/v2 record |
 | `GENS` | 1 | critical | exactly one kind-1/v1 record |
 | `ASST` | 1 | critical | one section; zero or more kind-1 descriptor plus kind-2 chunk records |
 | `PROC` | 1 | critical | one section; zero or more kind-1 Commit, kind-2 HistoryMove, kind-3 BranchCut records |
@@ -995,6 +995,15 @@ directory descriptor, except that physical offset is reassigned on save.
 18. expected current `DocumentStateDigest`
 19. expected `EditorStateDigest`
 20. expected full `JournalPrefixDigest`
+21. raster companion format (`u32`: 1 PNG, 2 TIFF, 3 TGA, 4 BMP)
+
+The format field is mandatory and rejects every unknown code. Raster import records
+the decoded source format; a new blank Cell uses the application default (PNG unless
+changed in Preferences). Native open, recovery, sequence switching, and explicit
+compaction preserve this field. Changing the application default affects only later
+blank Cells. This file metadata does not put a filesystem path into a procedure or
+change replay epoch 25. The outer META section and record are version 2; the generic
+length-framed field envelope remains schema 1.
 
 The cursor counts visible states after Genesis on the active branch and must
 resolve to current StateId; the two redundant values are validated. Counts,
@@ -1008,7 +1017,7 @@ SolidWhite, 2 Asset followed by its 32-byte `AssetId`), then nested payload
 length `u64` and the exact current schema-6 `DocumentArchive` payload. That nested
 payload is not a standalone `.inkpod` container and is not accepted through
 the native-file entrypoint; it is the bounded Genesis document DTO owned by the
-v28 GENS schema. Its fixed manifest is 200 bytes before palette, Color chart
+v29 GENS schema. Its fixed manifest is 200 bytes before palette, Color chart
 entries/lock, optional metadata, plane descriptors, shooting-frame descriptor,
 vanishing-point descriptors, and blob descriptors:
 stable Document ID, distinct
@@ -1038,7 +1047,7 @@ index `u32`; ordinal 13 is the
 ordered multi-edit-target sequence. The cursor is absent for an empty chart and
 is validated/reconciled against document entries during staged open.
 
-The v28 writer emits this bounded canonical EDIT payload and the staged reader
+The v29 writer emits this bounded canonical EDIT payload and the staged reader
 verifies its digest, target IDs, revision, and META savepoint before replacing
 the live Core. The decoder rejects an EDIT frame larger than 4 MiB.
 
@@ -1234,7 +1243,7 @@ graph before any item runs. Each source is loaded into a separate working Core,
 enabled operations execute in order, and cancellation/failure cannot publish a
 partial item. Dry-run creates no output or temporary file.
 
-Folder results use the ordinary v28 native writer or the common-raster codecs;
+Folder results use the ordinary v29 native writer or the common-raster codecs;
 each encoded item is completed, flushed, synchronized, and closed through a
 same-directory temporary file before atomic installation. A graph containing
 Masking rejects PNG/TIFF/TGA/BMP output because those formats cannot retain the
@@ -1291,12 +1300,43 @@ leaves an existing destination unchanged. Tests cover cancellation before
 commit and replacement of an existing Windows destination.
 
 Only a successful normal save publishes the prospective document StateId and
-EditorStateDigest savepoints plus the normal-save path. New documents have no
-savepoint and are dirty. A file produced by normal save reopens clean with its
+EditorStateDigest savepoints plus the normal-save path. A pathless document requires
+an explicit destination. A file produced by normal save reopens clean with its
 cursor, branches, history, EditorState, and both savepoints restored; Undo/Redo
 compare persistent state identity rather than file timestamp. Any encode,
 write, flush, cancellation, or replacement failure advances neither savepoint
-or path and leaves an existing destination untouched.
+nor path.
+
+### Normal Cell save is a recoverable native/raster pair
+
+The Windows normal Save/Save As route uses `inkpod-io` to write both `name.inkpod`
+and the same-stem raster selected by META field 21: `.png`, `.tif`, `.tga`, or
+`.bmp`. TIFF input also accepts `.tiff`. Both outputs are prepared before either
+destination is replaced. The raster is the document's normal visible composite,
+without Light Table, guides, or selection overlays. PNG/TIFF preserve RGBA16;
+TGA/BMP reject a 16-bit companion instead of silently reducing depth. Existing
+explicit display/instruction exports retain their own established output contract.
+
+The manager acquires destination path/physical-file locks in one order, validates
+observed identities/lengths/timestamps, stages and flushes both files, and uses
+backups plus a checksummed bounded installation journal. Unknown existing targets
+and external changes require confirmation of both output paths. A clean normal
+save can repair a missing raster companion. The final owner-thread apply advances
+the path and both savepoints only after both replacements succeed.
+
+Two independent directory entries cannot be renamed as one atomic operation.
+An installation failure attempts rollback; if cleanup/rollback cannot finish,
+the journal and proven temporary/backup paths are retained for recovery on the
+next open/save. Recovery will not overwrite externally changed files merely to
+hide a partial installation. Cancellation before installation leaves original
+files unchanged; cancellation during installation is finalized before removing
+the live Core's save fence. The UI must not report partial installation as success.
+
+Autosave/recovery, explicit compaction, and Batch native output remain native-only.
+They do not create the normal raster companion or adopt normal path/savepoint
+authority. The low-level `Core::save`/format streaming APIs remain native-only
+primitives for these explicit callers and fixtures; the application normal Save
+route uses the paired file job.
 
 The format crate exposes a cancellation hook and tests no-partial-commit
 semantics. `save_recovery_atomic` uses the same same-directory temporary-file
@@ -1305,7 +1345,7 @@ path as a normal document path. `open_recovery` loads the container into a
 dirty, recovered, pathless Core document, so a later ordinary Save must choose
 a destination and cannot silently overwrite the pre-recovery normal file.
 
-Sequence-cell autosave-before-switch uses this same exact-current v28 recovery
+Sequence-cell autosave-before-switch uses this same exact-current v29 recovery
 container and sidecar metadata. The live frontend associates the artifact with
 the source document UUID and sequence-source generation; revisiting that entry
 opens, validates, and replays the full native artifact in a staged Core rather
@@ -1356,26 +1396,32 @@ InkScript catalog/owner manifest advances from v3 to v4 while retaining the
 same 75 public commands. Exact v27/epoch-24 Cell input, `.inkbatch` v2, and
 catalog/owner v3 are rejected without migration. Cut payload schema 2 and Cut
 replay epoch 24 are unchanged, though the shared top-level `.inkpod` version is
-28.
+28. Shared file I/O advances the top-level format to v29 for META section/record
+version 2 and the mandatory raster-format field; replay epoch 25, canonical
+procedure semantics, document/editor digests, and Cut payload schema 2 remain
+unchanged. v28 and all other noncurrent native versions are rejected.
 Autosave publication alone never advances the normal document/editor savepoint,
 adopts a normal path, clears dirty state, or overwrites the prior normal file.
 
-The Windows adapter assigns a per-document recovery path under the user's local
-application data directory before a never-saved cell is exposed. A successful
-normal save removes that private recovery and switches to an adjacent companion
-path. Timer and manual autosaves are queued to the Core engine without blocking
-the UI. At startup, the newest private recovery offers explicit open, discard,
-or defer choices; ordinary Open offers the same choices for a newer adjacent
-recovery. Only explicit discard or a successful normal save removes a recovery.
-The format layer also provides bounded modification-time comparison and
-idempotent discard helpers. Core, FFI, and Windows tests verify that recovery
-never changes the normal file bytes/checksum. Normal user-facing save/open
-progress and cancellation UI remain a known `IO-001` difference; recovery
-itself retains the contract above.
+Windows chooses a recovery path below the user's local application-data root
+and sends the path plus typed association metadata to Rust. Rust performs native
+and sidecar writes, modification-time checks, listing, decoding, and deletion.
+The sidecar is current-version 2, bounded to 512 KiB, with checked UTF-8 lengths
+and a digest. Document UUID, session/generation, timestamp, optional original/source
+paths, and original file/path/untitled identity are distinct fields; the untitled
+identity UUID need not equal the document UUID. Missing or malformed metadata
+does not hide an otherwise valid native recovery candidate.
+
+Timer/manual autosaves and startup review use the shared asynchronous file jobs.
+The startup catalog offers explicit open/discard/defer; normal Open can probe
+for a newer adjacent recovery. Only explicit discard or a successful normal save
+removes the associated artifacts. Recovery metadata is advisory and never grants
+authority to overwrite the former normal destination. The bounded pure metadata
+codec is also exposed through the C ABI for fixtures without performing I/O.
 
 Explicit compaction is a separate export. Core first returns a confirmation
 token containing omitted event/procedure counts and document/editor/journal
-digests. Only the exact current token can write a new v28 file whose current
+digests. Only the exact current token can write a new v29 file whose current
 document is Genesis and whose PROC history is empty. The operation never changes
 or adopts the live path, journal, savepoints, dirty state, or IDs. There is no
 automatic squash.
@@ -1395,7 +1441,7 @@ deterministic mutation harness truncates and bit-flips valid native, batch, and
 all four common-raster seeds across every decoder. These regression tests do not
 replace coverage-guided fuzzing, but keep the accepted corruption corpus and
 allocation-bound paths executable on every normal `cargo test` run. The
-`rust/inkpod-format/fuzz` package provides `native_v28` for the current
-container, directory, CKPT removal/re-encode path, `native_core_v28` for staged Core
-journal/checkpoint/full-replay, retention, and compaction-plan parsing, and `cut_v28`
+`rust/inkpod-format/fuzz` package provides `native_v29` for the current
+container, directory, CKPT removal/re-encode path, `native_core_v29` for staged Core
+journal/checkpoint/full-replay, retention, and compaction-plan parsing, and `cut_v29`
 for the bounded Cut descriptor codec; all call public production entrypoints.

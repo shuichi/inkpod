@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdint>
 #include <future>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -213,6 +214,153 @@ bool WaitForPendingOperations(
     return false;
 }
 
+struct FileIoPhaseProbe final {
+    std::atomic<std::uint32_t> phase{};
+    std::atomic<DWORD> owner{};
+    std::atomic<std::uint64_t> polls{};
+    std::atomic<std::uint32_t> completions{};
+    std::atomic<bool> read_started{};
+    std::atomic<bool> install_started{};
+    std::atomic<bool> cancellation_seen{};
+    std::promise<void> reading;
+    std::promise<void> installing;
+    std::promise<void> cancelled;
+    std::promise<InkpodStatus> completed;
+
+    InkpodStatus Step(bool cancel, bool& fence) {
+        owner.store(GetCurrentThreadId(), std::memory_order_release);
+        polls.fetch_add(1U, std::memory_order_relaxed);
+        if (cancel && !cancellation_seen.exchange(true)) {
+            cancelled.set_value();
+        }
+        const auto current = phase.load(std::memory_order_acquire);
+        if (current == 0U) {
+            fence = false;
+            if (!read_started.exchange(true)) {
+                reading.set_value();
+            }
+            return cancel ? INKPOD_STATUS_CANCELLED : INKPOD_STATUS_PENDING;
+        }
+        if (current == 1U) {
+            fence = true;
+            if (!install_started.exchange(true)) {
+                installing.set_value();
+            }
+            return INKPOD_STATUS_PENDING;
+        }
+        fence = false;
+        return INKPOD_STATUS_OK;
+    }
+};
+
+bool FileIoPollingAndInstallFence(HWND owner) {
+    auto probe = std::make_shared<FileIoPhaseProbe>();
+    auto reading = probe->reading.get_future();
+    auto installing = probe->installing.get_future();
+    auto completed = probe->completed.get_future();
+    SnapshotSink sink;
+    CoreHost host;
+    constexpr DocumentSessionId first{41U};
+    constexpr DocumentSessionId second{42U};
+    constexpr Generation generation{1U};
+    bool passed = host.Start(&sink, owner) == INKPOD_STATUS_OK
+        && host.CreateSession(first, generation) == INKPOD_STATUS_OK
+        && host.CreateSession(second, generation) == INKPOD_STATUS_OK;
+    if (passed) {
+        passed = host.EnqueueFileIo(Context(first, generation), true,
+            [probe](InkpodCore*, bool cancel, bool& fence) { return probe->Step(cancel, fence); },
+            false, false, [probe](InkpodStatus status) {
+                probe->completions.fetch_add(1U);
+                probe->completed.set_value(status);
+            });
+    }
+    if (passed) {
+        passed = reading.wait_for(std::chrono::seconds(5)) == std::future_status::ready
+            && host.Invoke(first, generation, [](InkpodCore*) { return INKPOD_STATUS_OK; },
+                false, false) == INKPOD_STATUS_OK;
+    }
+    if (passed) {
+        probe->phase.store(1U, std::memory_order_release);
+        passed = installing.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+    }
+    std::promise<InkpodStatus> delayed;
+    auto delayed_result = delayed.get_future();
+    if (passed) {
+        passed = host.Enqueue(Context(first, generation),
+            [](InkpodCore*) { return INKPOD_STATUS_OK; }, false, false, false,
+            [&delayed](InkpodStatus status) { delayed.set_value(status); })
+            && host.Invoke(second, generation, [](InkpodCore*) { return INKPOD_STATUS_OK; },
+                false, false) == INKPOD_STATUS_OK
+            && delayed_result.wait_for(std::chrono::milliseconds(0)) == std::future_status::timeout;
+    }
+    probe->phase.store(2U, std::memory_order_release);
+    if (passed) {
+        passed = completed.wait_for(std::chrono::seconds(5)) == std::future_status::ready
+            && completed.get() == INKPOD_STATUS_OK
+            && delayed_result.wait_for(std::chrono::seconds(5)) == std::future_status::ready
+            && delayed_result.get() == INKPOD_STATUS_OK
+            && probe->completions.load() == 1U && probe->polls.load() >= 3U
+            && probe->owner.load() == host.ThreadId();
+    }
+    host.Stop();
+    return passed;
+}
+
+bool FileIoCloseCancellationAndShutdownFinalization(HWND owner) {
+    auto read = std::make_shared<FileIoPhaseProbe>();
+    auto reading = read->reading.get_future();
+    auto completed_read = read->completed.get_future();
+    auto install = std::make_shared<FileIoPhaseProbe>();
+    install->phase.store(1U);
+    auto installing = install->installing.get_future();
+    auto cancelled_install = install->cancelled.get_future();
+    auto completed_install = install->completed.get_future();
+    SnapshotSink sink;
+    CoreHost host;
+    constexpr DocumentSessionId first{51U};
+    constexpr DocumentSessionId second{52U};
+    constexpr Generation generation{1U};
+    bool passed = host.Start(&sink, owner) == INKPOD_STATUS_OK
+        && host.CreateSession(first, generation) == INKPOD_STATUS_OK
+        && host.CreateSession(second, generation) == INKPOD_STATUS_OK
+        && host.EnqueueFileIo(Context(first, generation), true,
+            [read](InkpodCore*, bool cancel, bool& fence) { return read->Step(cancel, fence); },
+            false, false, [read](InkpodStatus status) {
+                read->completions.fetch_add(1U);
+                read->completed.set_value(status);
+            });
+    if (passed) {
+        passed = reading.wait_for(std::chrono::seconds(5)) == std::future_status::ready
+            && host.CloseSession(first, generation) == INKPOD_STATUS_OK
+            && completed_read.wait_for(std::chrono::seconds(5)) == std::future_status::ready
+            && completed_read.get() == INKPOD_STATUS_CANCELLED && read->completions.load() == 1U
+            && host.CreateSession(first, Generation{2U}) == INKPOD_STATUS_OK
+            && !host.EnqueueFileIo(Context(first, generation), true,
+                [](InkpodCore*, bool, bool&) { return INKPOD_STATUS_OK; }, false, false, {});
+    }
+    if (passed) {
+        passed = host.EnqueueFileIo(Context(second, generation), true,
+            [install](InkpodCore*, bool cancel, bool& fence) { return install->Step(cancel, fence); },
+            false, false, [install](InkpodStatus status) {
+                install->completions.fetch_add(1U);
+                install->completed.set_value(status);
+            }) && installing.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+    }
+    if (!passed) {
+        install->phase.store(2U);
+        host.Stop();
+        return false;
+    }
+    auto stopped = std::async(std::launch::async, [&host] { host.Stop(); });
+    passed = cancelled_install.wait_for(std::chrono::seconds(5)) == std::future_status::ready
+        && stopped.wait_for(std::chrono::milliseconds(0)) == std::future_status::timeout;
+    install->phase.store(2U, std::memory_order_release);
+    const bool finished = stopped.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+    stopped.get();
+    return passed && finished
+        && completed_install.wait_for(std::chrono::seconds(0)) == std::future_status::ready
+        && completed_install.get() == INKPOD_STATUS_OK && install->completions.load() == 1U;
+}
 bool PrimitiveQueueSaturationIsExactlyOnce(
     CoreHost& host,
     DocumentSessionId session,
@@ -567,6 +715,11 @@ int wmain() {
         return 1;
     }
 
+    if (!FileIoPollingAndInstallFence(owner)
+        || !FileIoCloseCancellationAndShutdownFinalization(owner)) {
+        DestroyWindow(owner);
+        return 40;
+    }
     CoreHost host;
     if (host.Start(&sink, owner) != INKPOD_STATUS_OK || host.ThreadId() == 0U
         || host.SnapshotSinkCount() != 1U) {
@@ -592,7 +745,7 @@ int wmain() {
     InkpodReplayContract replay_contract{};
     if (host.GetReplayContract(first, generation, replay_contract) != INKPOD_STATUS_OK
         || replay_contract.replay_epoch != 25U
-        || replay_contract.procedure_format_version != 28U
+        || replay_contract.procedure_format_version != 29U
         || replay_contract.canonical_numeric_version != 1U
         || replay_contract.primitive_count == 0U) {
         host.Stop();
@@ -1068,7 +1221,7 @@ int wmain() {
         host.GetPersistenceInfo(second, generation, persistence);
     second_info = EmptyDocumentInfo();
     if (persistence_status != INKPOD_STATUS_OK
-        || persistence.format_version != 28U
+        || persistence.format_version != 29U
         || persistence.open_strategy != INKPOD_NATIVE_OPEN_NOT_OPENED
         || persistence.feature_flags != INKPOD_FEATURE_NONE
         || !host.GetDocumentInfo(second, generation, second_info)
