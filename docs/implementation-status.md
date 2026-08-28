@@ -94,6 +94,35 @@ its compact historical record is retained in [`legacy.md`](legacy.md).
 
 ## Latest representative verification
 
+### Right-pane smoke setup (`WORKSPACE-001`, 2026-08-28)
+
+The Locator setup behind smoke failure `11174` no longer requires a new-tab
+mutation when height-aware restoration has already created a singleton tab.
+Only `MovePaneToNewTab` accepts `Ok` or `NoOp`; restoration and relayout still
+must succeed, and both paths require one additional tab, Locator-only membership,
+matching model/control selection and visible dock state. The existing real-tab
+drag, localized label and close assertions are unchanged. Failure diagnostics
+identify the stage/result, DPI, initial right-zone height and bounded tab contents.
+No product placement rule, Rust primitive, file/replay version or ABI changes.
+
+The existing workspace-layout test now exercises 16 deterministic combinations:
+96/120/144/192 DPI, combined/split initial Color/Layer tabs, and exact-fit versus
+one-pixel-short heights. It checks both explicit-move and already-singleton paths,
+then verifies that another singleton move preserves IDs, the ID high-water mark,
+selection, tab order and contents.
+
+Both no-profile x64 Release and Debug configure/builds pass under MSVC
+`/W4 /WX /permissive-`, including static CRT and regenerated ZIP/MSIX packages.
+Release passes all 46 CTests in 163.25 s, with English/Japanese product smokes
+in 60.53/66.21 s. Debug passes all 46 in 892.39 s, with English/Japanese product
+smokes in 382.02/373.73 s. Full logs are retained as
+`build/windows-x64-release/ci-11174-ctest.log` and
+`build/windows-x64-debug/ci-11174-ctest.log`. `cargo fmt --check` and
+`git diff --check` pass. ARM64, Rust Clippy/tests/rustdoc and the Core benchmark
+were not rerun for this smoke-only change. The original CI runner's individual
+failing return value was not logged, and that runner has not been rerun here;
+the new diagnostics retain that distinction if another setup failure occurs.
+
 ### Sequence-switch response work (`SEQ-001`, `PERF-001`, `IO-003`, 2026-08-28)
 
 This user-approved slice advances the exact-current C ABI to v24. Native v29,

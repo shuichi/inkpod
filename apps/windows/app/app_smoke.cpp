@@ -4778,11 +4778,53 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     auto& tool_tab_model =
         state.Workspace().windows.workspace.right_tool_tabs;
     const std::size_t original_tool_tab_count = tool_tab_model.Tabs().size();
-    if (state.Workspace().windows.dock_host.RestorePane(DockPaneType::Locator)
-            != DockResult::Ok
-        || tool_tab_model.MovePaneToNewTab(DockPaneType::Locator)
-            != ToolTabResult::Ok
-        || !relayout_smoke_workspace()) {
+    const auto& locator_setup_windows = state.Workspace().windows;
+    const UINT locator_setup_dpi = GetDpiForWindow(locator_setup_windows.window);
+    const auto locator_setup_layout = ComputeWorkspaceLayout(
+        locator_setup_windows.workspace.last_client_width,
+        locator_setup_windows.workspace.last_client_height,
+        0, locator_setup_dpi, locator_setup_windows.workspace);
+    const auto report_locator_setup_failure = [&](
+                                                  const char* stage,
+                                                  int result) noexcept {
+        std::fprintf(stderr,
+            "right tool-tab locator setup failed: stage=%s result=%d dpi=%u "
+            "client=%dx%d initial_right_height=%d initial_tabs=%zu "
+            "tabs=%zu selected=%u\n",
+            stage, result, locator_setup_dpi,
+            locator_setup_windows.workspace.last_client_width,
+            locator_setup_windows.workspace.last_client_height,
+            locator_setup_layout.dock.zones[
+                static_cast<std::size_t>(DockZone::Right)].height,
+            original_tool_tab_count, tool_tab_model.Tabs().size(),
+            tool_tab_model.Selected().Value());
+        for (const auto& tab : tool_tab_model.Tabs()) {
+            std::fprintf(stderr, "  tab=%u panes=", tab.id.Value());
+            for (std::size_t index = 0U; index < tab.pane_count; ++index) {
+                std::fprintf(stderr, "%s%u", index == 0U ? "" : ",",
+                    static_cast<unsigned int>(tab.panes[index]));
+            }
+            std::fputc('\n', stderr);
+        }
+    };
+    const DockResult locator_restore_result =
+        state.Workspace().windows.dock_host.RestorePane(DockPaneType::Locator);
+    if (locator_restore_result != DockResult::Ok) {
+        report_locator_setup_failure(
+            "RestorePane", static_cast<int>(locator_restore_result));
+        return 11174;
+    }
+    // Restore already creates a singleton when the selected tab has no room.
+    const ToolTabResult locator_move_result =
+        tool_tab_model.MovePaneToNewTab(DockPaneType::Locator);
+    if (locator_move_result != ToolTabResult::Ok
+        && locator_move_result != ToolTabResult::NoOp) {
+        report_locator_setup_failure(
+            "MovePaneToNewTab", static_cast<int>(locator_move_result));
+        return 11174;
+    }
+    if (!relayout_smoke_workspace()) {
+        report_locator_setup_failure("relayout/GetClientRect", 0);
         return 11174;
     }
     const ToolTabId locator_tool_tab = tool_tab_model.TabForPane(
@@ -4803,15 +4845,24 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     const int target_index = locator_tool_tab_index == 0 ? 1 : 0;
     RECT locator_tab_bounds{};
     RECT target_tab_bounds{};
+    const auto* locator_tab = tool_tab_model.Find(locator_tool_tab);
     if (!locator_tool_tab
+        || locator_tab == nullptr || locator_tab->pane_count != 1U
+        || locator_tab->panes[0] != DockPaneType::Locator
         || tool_tab_model.Tabs().size() != original_tool_tab_count + 1U
+        || tool_tab_model.Selected() != locator_tool_tab
+        || !state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Locator)
         || locator_tool_tab_index < 0 || target_index < 0
+        || TabCtrl_GetCurSel(right_tool_tabs) != locator_tool_tab_index
         || TabCtrl_GetItemRect(
                right_tool_tabs,
                locator_tool_tab_index,
                &locator_tab_bounds) == FALSE
         || TabCtrl_GetItemRect(
                right_tool_tabs, target_index, &target_tab_bounds) == FALSE) {
+        report_locator_setup_failure(
+            "postconditions", static_cast<int>(locator_move_result));
         return 11175;
     }
     const POINT tool_drag_start{

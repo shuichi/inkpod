@@ -100,6 +100,16 @@ the workspace-layout executable, localization/catalog checks, and English and
 Japanese ARM64 product smokes cover these paths. The Color inner-tab order is
 session-local and is intentionally absent from the workspace settings JSON and `.inkpod`.
 
+The Locator setup for that drag/close smoke accepts either an explicit move to
+a new tab or `NoOp` when height-aware restoration already created its singleton.
+Both paths still require exactly one additional tab, Locator-only membership,
+matching model/control selection and visible dock state before drag/close.
+The workspace-layout regression covers exact-fit and one-pixel-short heights
+at 96/120/144/192 DPI from both combined and split Color/Layer tabs, including
+stable IDs, selection and complete tab contents across a repeated singleton
+move. Setup failures report the stage/result, DPI, initial right-zone height
+and bounded tab membership; product placement rules are unchanged.
+
 The current product catalog contains 321 localized menu command IDs and 329
 state-owned command IDs. Job Progress has no pane or Window-menu command;
 language and shortcut reset are owned by Preferences. Batch has no pane-header
