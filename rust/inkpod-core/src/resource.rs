@@ -53,9 +53,27 @@ impl Core {
         let history_bytes = self.history.iter().fold(0_u64, |bytes, entry| {
             bytes.saturating_add(entry.change.as_ref().map_or(0, history_change_bytes))
         });
-        let render_cache_bytes = self.render_cache.values().fold(0_u64, |bytes, tile| {
-            bytes.saturating_add(tile.pixels().len() as u64)
-        });
+        let (
+            sequence_render_cache_bytes,
+            sequence_render_cache_source_count,
+            sequence_render_cache_tile_count,
+        ) = self.sequence_render_cache.resource_usage();
+        let (render_cache_bytes, render_cache_tile_count) = self
+            .render_cache
+            .values()
+            .filter(|tile| !tile.has_sequence_reservation())
+            .fold(
+                (
+                    sequence_render_cache_bytes,
+                    sequence_render_cache_tile_count,
+                ),
+                |(bytes, count), tile| {
+                    (
+                        bytes.saturating_add(tile.pixels().len() as u64),
+                        count.saturating_add(1),
+                    )
+                },
+            );
 
         let mut cpu_staging_bytes = 0_u64;
         if let Some(stroke) = &self.active_stroke {
@@ -83,13 +101,19 @@ impl Core {
             history_bytes,
             history_entry_count: self.history.len() as u64,
             render_cache_bytes,
-            render_cache_tile_count: self.render_cache.len() as u64,
+            render_cache_tile_count,
             cpu_staging_bytes,
             reference_light_table_bytes,
             reference_light_table_tile_count,
             sequence_source_bytes,
             sequence_source_tile_count,
-            thumbnail_cache_bytes: 0,
+            thumbnail_cache_bytes: self
+                .sequence
+                .as_ref()
+                .map_or(0, animation::SequenceState::thumbnail_cache_bytes),
+            sequence_render_cache_bytes,
+            sequence_render_cache_source_count,
+            sequence_render_cache_tile_count,
         }
     }
 }

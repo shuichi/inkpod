@@ -113,6 +113,295 @@ fn shared_cache_hits_keep_pinned_bytes_and_derived_pixels_charged() {
 }
 
 #[test]
+fn sequence_render_leases_share_one_charge_and_keep_only_their_own_pixels() {
+    let directory = Directory::new();
+    let path = directory.path("A001.png");
+    png(&path, 30);
+    let manager = IoManager::new(config()).unwrap();
+    let image = manager.read_image(&path, &JobContext::new()).unwrap();
+    let source = image.reserve_derived(16).unwrap();
+    let render = source.reserve_sequence_render(64).unwrap();
+    assert_eq!(render.bytes(), 64);
+    let charged = manager.cache_stats();
+    assert_eq!(charged.decoded_bytes, 84);
+    assert_eq!(charged.sequence_render_allocations, 1);
+    assert_eq!(charged.sequence_render_bytes, 64);
+    assert_eq!(charged.images, 1);
+    let snapshot = render.clone();
+    assert_eq!(manager.cache_stats(), charged);
+
+    manager.clear_cache();
+    drop((image, source));
+    let retained = manager.cache_stats();
+    assert_eq!(retained.encoded_bytes, 0);
+    assert_eq!(retained.decoded_bytes, 64);
+    assert_eq!(retained.images, 1);
+    assert_eq!(retained.cached_images, 0);
+    drop(render);
+    assert_eq!(manager.cache_stats(), retained);
+
+    // A reservation derived from a render lease is another allocation, not a
+    // reference to its parent's pixel charge.
+    let replacement = snapshot.reserve_sequence_render(32).unwrap();
+    assert_eq!(manager.cache_stats().sequence_render_allocations, 2);
+    drop(snapshot);
+    assert_eq!(manager.cache_stats().decoded_bytes, 32);
+    assert_eq!(manager.cache_stats().sequence_render_allocations, 1);
+    drop(replacement);
+    let released = manager.cache_stats();
+    assert_eq!(released.decoded_bytes, 0);
+    assert_eq!(released.sequence_render_allocations, 0);
+    assert_eq!(released.sequence_render_bytes, 0);
+    assert_eq!(released.images, 0);
+}
+
+#[test]
+fn concurrent_sequence_render_reservations_share_the_manager_count_limit() {
+    let directory = Directory::new();
+    let first_path = directory.path("A001.png");
+    let second_path = directory.path("B001.png");
+    png(&first_path, 30);
+    png(&second_path, 60);
+    let manager = IoManager::new(config()).unwrap();
+    let other_session = manager.clone();
+    let first = manager.read_image(&first_path, &JobContext::new()).unwrap();
+    let second = other_session
+        .read_image(&second_path, &JobContext::new())
+        .unwrap();
+    let sources = [
+        first.reserve_derived(1).unwrap(),
+        second.reserve_derived(1).unwrap(),
+    ];
+    let attempts = std::thread::scope(|scope| {
+        let threads: Vec<_> = (0..16)
+            .map(|index| {
+                let source = &sources[index % sources.len()];
+                scope.spawn(move || source.reserve_sequence_render(1))
+            })
+            .collect();
+        threads
+            .into_iter()
+            .map(|thread| thread.join().unwrap())
+            .collect::<Vec<_>>()
+    });
+    let mut renders: Vec<_> = attempts
+        .into_iter()
+        .filter_map(|result| match result {
+            Ok(lease) => Some(lease),
+            Err(IoError::ResourceBusy(_)) => None,
+            Err(error) => panic!("unexpected reservation failure: {error}"),
+        })
+        .collect();
+    assert_eq!(renders.len(), 8);
+    let full = manager.cache_stats();
+    assert_eq!(full.sequence_render_allocations, 8);
+    assert_eq!(full.sequence_render_bytes, 8);
+    assert_eq!(full.images, 2);
+    assert_eq!(full, other_session.cache_stats());
+
+    let render = renders.pop().unwrap();
+    let snapshot = render.clone();
+    drop(render);
+    assert!(matches!(
+        sources[0].reserve_sequence_render(1),
+        Err(IoError::ResourceBusy(_))
+    ));
+    assert_eq!(manager.cache_stats(), full);
+    drop(snapshot);
+    renders.push(sources[1].reserve_sequence_render(1).unwrap());
+    assert_eq!(manager.cache_stats(), full);
+    drop(renders);
+    assert_eq!(manager.cache_stats().sequence_render_allocations, 0);
+    assert_eq!(manager.cache_stats().sequence_render_bytes, 0);
+}
+
+#[test]
+fn sequence_render_byte_limit_rejects_invalid_and_aggregate_oversize_atomically() {
+    let directory = Directory::new();
+    let path = directory.path("A001.png");
+    png(&path, 30);
+    let limit = 128 * 1024 * 1024;
+    let manager = IoManager::new(IoConfig {
+        max_decoded_bytes: limit + 64,
+        ..config()
+    })
+    .unwrap();
+    let image = manager.read_image(&path, &JobContext::new()).unwrap();
+    let source = image.reserve_derived(16).unwrap();
+    // These are reservations only; the test does not allocate a large payload.
+    let full = source.reserve_sequence_render(limit).unwrap();
+    let charged = manager.cache_stats();
+    assert_eq!(charged.sequence_render_allocations, 1);
+    assert_eq!(charged.sequence_render_bytes, limit);
+    assert_eq!(charged.decoded_bytes, limit + 20);
+    assert!(matches!(
+        source.reserve_sequence_render(0),
+        Err(IoError::InvalidInput(_))
+    ));
+    for bytes in [limit + 1, u64::MAX] {
+        assert!(matches!(
+            source.reserve_sequence_render(bytes),
+            Err(IoError::LimitExceeded(_))
+        ));
+    }
+    assert!(matches!(
+        source.reserve_sequence_render(1),
+        Err(IoError::ResourceBusy(_))
+    ));
+    assert_eq!(manager.cache_stats(), charged);
+    drop(full);
+    let first = source.reserve_sequence_render(limit / 2).unwrap();
+    let second = source.reserve_sequence_render(limit / 2).unwrap();
+    let charged = manager.cache_stats();
+    assert_eq!(charged.sequence_render_allocations, 2);
+    assert_eq!(charged.sequence_render_bytes, limit);
+    assert!(matches!(
+        source.reserve_sequence_render(1),
+        Err(IoError::ResourceBusy(_))
+    ));
+    assert_eq!(manager.cache_stats(), charged);
+    drop((first, second));
+    assert_eq!(manager.cache_stats().sequence_render_bytes, 0);
+    assert_eq!(manager.cache_stats().decoded_bytes, 20);
+}
+
+#[test]
+fn sequence_render_reservations_are_also_charged_to_the_decoded_limit() {
+    let directory = Directory::new();
+    let path = directory.path("A001.png");
+    png(&path, 30);
+    let manager = IoManager::new(IoConfig {
+        max_decoded_bytes: 64,
+        ..config()
+    })
+    .unwrap();
+    let image = manager.read_image(&path, &JobContext::new()).unwrap();
+    let source = image.reserve_derived(16).unwrap();
+    let render = source.reserve_sequence_render(44).unwrap();
+    let full = manager.cache_stats();
+    assert_eq!(full.decoded_bytes, 64);
+    assert_eq!(full.sequence_render_bytes, 44);
+    assert!(matches!(
+        source.reserve_sequence_render(1),
+        Err(IoError::ResourceBusy(_))
+    ));
+    assert!(matches!(
+        image.reserve_derived(1),
+        Err(IoError::ResourceBusy(_))
+    ));
+    assert!(matches!(
+        source.reserve_sequence_render(65),
+        Err(IoError::LimitExceeded(_))
+    ));
+    assert_eq!(manager.cache_stats(), full);
+    drop(source);
+    let second = render.reserve_sequence_render(16).unwrap();
+    assert_eq!(manager.cache_stats().decoded_bytes, 64);
+    assert_eq!(manager.cache_stats().sequence_render_bytes, 60);
+    drop((render, second));
+    assert_eq!(manager.cache_stats().decoded_bytes, 4);
+    assert_eq!(manager.cache_stats().sequence_render_bytes, 0);
+}
+
+#[test]
+fn sequence_render_admission_preflights_eviction_then_reclaims_the_lru() {
+    let directory = Directory::new();
+    let paths: Vec<_> = (0..3)
+        .map(|index| directory.path(&format!("A{index}.bmp")))
+        .collect();
+    for (index, path) in paths.iter().enumerate() {
+        encoded(path, index as u8, CommonRasterFormat::Bmp);
+    }
+    let manager = IoManager::new(IoConfig {
+        max_decoded_bytes: 32,
+        ..config()
+    })
+    .unwrap();
+    let image = manager.read_image(&paths[0], &JobContext::new()).unwrap();
+    let source = image.reserve_derived(16).unwrap();
+    drop(manager.read_image(&paths[1], &JobContext::new()).unwrap());
+    drop(manager.read_image(&paths[2], &JobContext::new()).unwrap());
+    let before = manager.cache_stats();
+    assert_eq!(before.decoded_bytes, 28);
+    assert_eq!(before.cached_images, 3);
+    // Only eight bytes can be evicted. A failed request must not evict either
+    // image and then discover that the pinned source still prevents admission.
+    assert!(matches!(
+        source.reserve_sequence_render(13),
+        Err(IoError::ResourceBusy(_))
+    ));
+    assert_eq!(manager.cache_stats(), before);
+    let render = source.reserve_sequence_render(8).unwrap();
+    let admitted = manager.cache_stats();
+    assert_eq!(admitted.decoded_bytes, 32);
+    assert_eq!(admitted.cached_images, 2);
+    assert_eq!(admitted.evictions, before.evictions + 1);
+    assert_eq!(admitted.sequence_render_allocations, 1);
+    assert_eq!(admitted.sequence_render_bytes, 8);
+    drop(render);
+    drop(manager.read_image(&paths[2], &JobContext::new()).unwrap());
+    assert_eq!(manager.cache_stats().physical_reads, 3);
+    drop(manager.read_image(&paths[1], &JobContext::new()).unwrap());
+    assert_eq!(manager.cache_stats().physical_reads, 4);
+}
+
+#[test]
+fn sequence_render_budgets_belong_to_independent_managers() {
+    let directory = Directory::new();
+    let path = directory.path("A001.png");
+    png(&path, 30);
+    let first_manager = IoManager::new(config()).unwrap();
+    let second_manager = IoManager::new(config()).unwrap();
+    let first_image = first_manager.read_image(&path, &JobContext::new()).unwrap();
+    let second_image = second_manager
+        .read_image(&path, &JobContext::new())
+        .unwrap();
+    let first_source = first_image.reserve_derived(1).unwrap();
+    let second_source = second_image.reserve_derived(1).unwrap();
+    let first: Vec<_> = (0..8)
+        .map(|_| first_source.reserve_sequence_render(1).unwrap())
+        .collect();
+    let second: Vec<_> = (0..8)
+        .map(|_| second_source.reserve_sequence_render(1).unwrap())
+        .collect();
+    assert!(matches!(
+        first_source.reserve_sequence_render(1),
+        Err(IoError::ResourceBusy(_))
+    ));
+    assert!(matches!(
+        second_source.reserve_sequence_render(1),
+        Err(IoError::ResourceBusy(_))
+    ));
+    drop(first);
+    assert_eq!(first_manager.cache_stats().sequence_render_allocations, 0);
+    assert_eq!(second_manager.cache_stats().sequence_render_allocations, 8);
+    drop(second);
+    assert_eq!(second_manager.cache_stats().sequence_render_allocations, 0);
+}
+
+#[test]
+fn sequence_render_leases_remain_memory_only_after_shutdown_and_owner_release() {
+    let directory = Directory::new();
+    let path = directory.path("A001.png");
+    png(&path, 30);
+    let manager = IoManager::new(config()).unwrap();
+    let image = manager.read_image(&path, &JobContext::new()).unwrap();
+    let source = image.reserve_derived(16).unwrap();
+    manager.clear_cache();
+    drop(image);
+    manager.shutdown_and_wait();
+    assert!(matches!(manager.submit(|_| Ok(())), Err(IoError::Shutdown)));
+    let render = source.reserve_sequence_render(32).unwrap();
+    assert_eq!(manager.cache_stats().decoded_bytes, 48);
+    assert_eq!(manager.cache_stats().sequence_render_allocations, 1);
+    drop(manager);
+    let replacement = source.reserve_sequence_render(64).unwrap();
+    assert_eq!(replacement.bytes(), 64);
+    drop((source, render));
+    assert_eq!(replacement.reserve_sequence_render(16).unwrap().bytes(), 16);
+}
+
+#[test]
 fn lru_and_pinned_admission_obey_small_injected_budgets() {
     let directory = Directory::new();
     let paths: Vec<_> = (1..=3)

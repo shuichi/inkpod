@@ -3,11 +3,14 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <cstdint>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "app/core_host.h"
@@ -29,6 +32,13 @@ using inkpod::app::StrokeEventKind;
 
 class SnapshotSink final : public inkpod::renderer::CanvasSnapshotSink {
 public:
+    void BlockNextSubmission(
+        std::promise<void>& started, std::shared_future<void> release) {
+        std::lock_guard lock(submission_mutex_);
+        submission_started_ = &started;
+        submission_release_ = std::move(release);
+    }
+
     void Bind(
         DocumentSessionId session,
         Generation generation,
@@ -51,7 +61,8 @@ public:
     }
 
     bool Submit(inkpod::renderer::SnapshotEnvelope envelope) noexcept override {
-        if (envelope.snapshot == nullptr || envelope.route != route_) {
+        if (envelope.snapshot == nullptr || envelope.route != route_
+            || reject_next_submission.exchange(false)) {
             if (envelope.snapshot != nullptr) {
                 inkpod_snapshot_release(&envelope.snapshot);
             }
@@ -72,7 +83,22 @@ public:
             inkpod_snapshot_release(&envelope.snapshot);
             return false;
         }
+        std::promise<void>* started{};
+        std::shared_future<void> release;
+        {
+            std::lock_guard lock(submission_mutex_);
+            started = submission_started_;
+            submission_started_ = nullptr;
+            release = std::move(submission_release_);
+        }
+        if (started != nullptr) {
+            started->set_value();
+            release.wait();
+        }
         last_revision.store(view.revision, std::memory_order_release);
+        last_committed_document_revision.store(
+            envelope.committed_document_revision, std::memory_order_release);
+        last_presentation_epoch.store(envelope.presentation_epoch, std::memory_order_release);
         last_pan_x.store(transform.pan_x, std::memory_order_release);
         last_digest_byte.store(digest.bytes[0], std::memory_order_release);
         ++submitted;
@@ -80,11 +106,17 @@ public:
     }
 
     std::atomic<std::uint64_t> submitted{};
+    std::atomic<bool> reject_next_submission{};
     std::atomic<std::uint64_t> last_revision{};
+    std::atomic<std::uint64_t> last_committed_document_revision{};
+    std::atomic<std::uint64_t> last_presentation_epoch{};
     std::atomic<double> last_pan_x{};
     std::atomic<std::uint8_t> last_digest_byte{};
 
 private:
+    std::mutex submission_mutex_;
+    std::promise<void>* submission_started_{};
+    std::shared_future<void> submission_release_;
     inkpod::renderer::SnapshotRoute route_{};
 };
 
@@ -214,11 +246,153 @@ bool WaitForPendingOperations(
     return false;
 }
 
+bool SnapshotPublicationKeepsInputResponsive(
+    CoreHost& host,
+    SnapshotSink& sink,
+    DocumentSessionId session,
+    Generation generation,
+    std::uint64_t other_view) {
+    const auto before = sink.submitted.load(std::memory_order_acquire);
+    if (host.SetActiveView(0U) != INKPOD_STATUS_OK
+        || sink.submitted.load(std::memory_order_acquire) != before) {
+        return false;
+    }
+    std::promise<void> submitting;
+    std::promise<void> release_submission;
+    std::promise<InkpodStatus> publication_completed;
+    std::promise<InkpodStatus> input_completed;
+    sink.BlockNextSubmission(submitting, release_submission.get_future().share());
+    if (!host.Enqueue(
+            Context(session, generation),
+            [](InkpodCore*) { return INKPOD_STATUS_OK; }, true, false, false,
+            [&publication_completed](InkpodStatus status) {
+                publication_completed.set_value(status);
+            })) {
+        release_submission.set_value();
+        return false;
+    }
+    submitting.get_future().wait();
+    // The sink pins the publication in flight. Published-state reads, input
+    // acceptance, and a repeated activation of the current view must progress.
+    auto ui = std::async(std::launch::async, [&] {
+        InkpodDocumentInfo info = EmptyDocumentInfo();
+        return host.GetDocumentInfo(session, generation, info)
+            && host.SetActiveView(0U) == INKPOD_STATUS_OK
+            && host.Enqueue(
+                Context(session, generation),
+                [](InkpodCore*) { return INKPOD_STATUS_OK; }, false, false, false,
+                [&input_completed](InkpodStatus status) {
+                    input_completed.set_value(status);
+                });
+    });
+    const bool responsive = ui.wait_for(std::chrono::seconds(2))
+        == std::future_status::ready;
+    // Unregistration is the distinct lifetime barrier and must still wait for
+    // the pinned sink to finish before its caller could destroy the Canvas.
+    auto unregister = std::async(std::launch::async, [&] {
+        return host.UnregisterSnapshotSink(&sink);
+    });
+    const bool lifetime_pinned = unregister.wait_for(std::chrono::milliseconds(25))
+        == std::future_status::timeout;
+    release_submission.set_value();
+    const auto publication_status = publication_completed.get_future().get();
+    const bool input_accepted = ui.get();
+    const bool unregistered = unregister.get();
+    const auto input_status = input_accepted
+        ? input_completed.get_future().get() : INKPOD_STATUS_INVALID_STATE;
+    const bool registered = unregistered && host.RegisterSnapshotSink(&sink);
+    if (!responsive || !lifetime_pinned || !registered || !input_accepted
+        || publication_status != INKPOD_STATUS_OK || input_status != INKPOD_STATUS_OK
+        || sink.submitted.load(std::memory_order_acquire) != before + 1U) {
+        return false;
+    }
+
+    // Re-registering a destination requires one publication, then the repeated
+    // view is again a no-op. Ordinary submissions have their own metric, without
+    // changing the existing stroke-preview counter.
+    const EngineMetrics registered_metrics = host.Metrics();
+    if (host.SetActiveView(0U) != INKPOD_STATUS_OK
+        || host.SetActiveView(0U) != INKPOD_STATUS_OK
+        || sink.submitted.load(std::memory_order_acquire) != before + 2U
+        || host.Metrics().submitted_snapshots != registered_metrics.submitted_snapshots + 2U
+        || host.Metrics().preview_snapshots != registered_metrics.preview_snapshots
+        || host.InvalidateViewPublication(session, Generation{generation.Value() + 1U})) {
+        return false;
+    }
+
+    std::promise<void> old_submission_started;
+    std::promise<void> release_old_submission;
+    std::promise<InkpodStatus> old_publication_completed;
+    sink.BlockNextSubmission(
+        old_submission_started, release_old_submission.get_future().share());
+    if (!host.Enqueue(
+            Context(session, generation),
+            [](InkpodCore*) { return INKPOD_STATUS_OK; }, true, false, false,
+            [&old_publication_completed](InkpodStatus status) {
+                old_publication_completed.set_value(status);
+            })) {
+        release_old_submission.set_value();
+        return false;
+    }
+    old_submission_started.get_future().wait();
+    auto invalidation = std::async(std::launch::async, [&] {
+        return host.InvalidateViewPublication(session, generation);
+    });
+    const bool invalidation_responsive = invalidation.wait_for(std::chrono::seconds(2))
+        == std::future_status::ready;
+    release_old_submission.set_value();
+    const bool invalidated = invalidation.get();
+    const auto old_publication_status = old_publication_completed.get_future().get();
+    // The older in-flight pass cannot acknowledge this new Canvas route. A
+    // same-view request must still publish, then return to the cheap no-op path.
+    if (!invalidation_responsive || !invalidated
+        || old_publication_status != INKPOD_STATUS_OK
+        || sink.submitted.load(std::memory_order_acquire) != before + 3U
+        || host.SetActiveView(0U) != INKPOD_STATUS_OK
+        || host.SetActiveView(0U) != INKPOD_STATUS_OK
+        || sink.submitted.load(std::memory_order_acquire) != before + 4U) {
+        return false;
+    }
+
+    // A queued switch to a different view prevents the apparent-current-view
+    // fast path: requesting view zero must be ordered after that queued switch.
+    std::promise<void> blocking;
+    std::promise<void> release_blocker;
+    std::promise<InkpodStatus> blocker_completed;
+    const auto release = release_blocker.get_future().share();
+    if (!host.Enqueue(
+            Context(session, generation),
+            [&blocking, release](InkpodCore*) {
+                blocking.set_value();
+                release.wait();
+                return INKPOD_STATUS_OK;
+            }, false, false, false,
+            [&blocker_completed](InkpodStatus status) { blocker_completed.set_value(status); })) {
+        return false;
+    }
+    blocking.get_future().wait();
+    auto next = std::async(std::launch::async, [&] { return host.SetActiveView(other_view); });
+    const bool next_queued = WaitForPendingOperations(host, session, generation, 2U);
+    auto previous = std::async(std::launch::async, [&] { return host.SetActiveView(0U); });
+    const bool previous_queued = WaitForPendingOperations(host, session, generation, 3U);
+    release_blocker.set_value();
+    const auto blocker_status = blocker_completed.get_future().get();
+    const auto next_status = next.get();
+    const auto previous_status = previous.get();
+    InkpodSnapshotTransform transform{};
+    transform.struct_size = sizeof(transform);
+    return next_queued && previous_queued && blocker_status == INKPOD_STATUS_OK
+        && next_status == INKPOD_STATUS_OK && previous_status == INKPOD_STATUS_OK
+        && host.GetSnapshotTransform(session, generation, 0U, transform)
+        && !host.GetSnapshotTransform(session, generation, other_view, transform);
+}
+
 struct FileIoPhaseProbe final {
     std::atomic<std::uint32_t> phase{};
     std::atomic<DWORD> owner{};
     std::atomic<std::uint64_t> polls{};
     std::atomic<std::uint32_t> completions{};
+    std::atomic<InkpodStatus> presentation_status{INKPOD_STATUS_INVALID_STATE};
     std::atomic<bool> read_started{};
     std::atomic<bool> install_started{};
     std::atomic<bool> cancellation_seen{};
@@ -269,8 +443,9 @@ bool FileIoPollingAndInstallFence(HWND owner) {
     if (passed) {
         passed = host.EnqueueFileIo(Context(first, generation), true,
             [probe](InkpodCore*, bool cancel, bool& fence) { return probe->Step(cancel, fence); },
-            false, false, [probe](InkpodStatus status) {
+            false, false, [probe](InkpodStatus status, InkpodStatus presentation_status) {
                 probe->completions.fetch_add(1U);
+                probe->presentation_status.store(presentation_status);
                 probe->completed.set_value(status);
             });
     }
@@ -300,7 +475,67 @@ bool FileIoPollingAndInstallFence(HWND owner) {
             && delayed_result.wait_for(std::chrono::seconds(5)) == std::future_status::ready
             && delayed_result.get() == INKPOD_STATUS_OK
             && probe->completions.load() == 1U && probe->polls.load() >= 3U
+            && probe->presentation_status.load() == INKPOD_STATUS_OK
             && probe->owner.load() == host.ThreadId();
+    }
+    std::promise<std::pair<InkpodStatus, InkpodStatus>> outcomes;
+    auto outcomes_ready = outcomes.get_future();
+    std::atomic<std::uint32_t> apply_count{};
+    std::atomic<std::uint32_t> completion_count{};
+    if (passed) {
+        sink.Bind(first, generation);
+        passed = host.RegisterDocumentView(first, generation,
+            inkpod::app::DocumentViewId{21U}, 0U);
+    }
+    if (passed) {
+        sink.reject_next_submission.store(true);
+        passed = host.EnqueueFileIo(Context(first, generation), true,
+            [&host, &apply_count, first, generation](InkpodCore* core, bool cancelled, bool&) {
+                if (cancelled) {
+                    return INKPOD_STATUS_CANCELLED;
+                }
+                ++apply_count;
+                const InkpodStatus status = NewCell(core, 71U, 17U, 19U);
+                return status == INKPOD_STATUS_OK
+                    && !host.SetPresentationEpoch(first, generation, 401U)
+                    ? INKPOD_STATUS_INVALID_STATE : status;
+            }, true, true,
+            [&outcomes, &completion_count](InkpodStatus applied, InkpodStatus presented) {
+                ++completion_count;
+                outcomes.set_value({applied, presented});
+            });
+    }
+    if (passed) {
+        passed = outcomes_ready.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+        if (passed) {
+            const auto [applied, presented] = outcomes_ready.get();
+            InkpodDocumentInfo adopted = EmptyDocumentInfo();
+            InkpodDocumentInfo after_retry = EmptyDocumentInfo();
+            EngineMetrics metrics{};
+            passed = applied == INKPOD_STATUS_OK && presented == INKPOD_STATUS_INVALID_STATE
+                && host.GetDocumentInfo(first, generation, adopted)
+                && adopted.width == 17U && adopted.height == 19U
+                && sink.submitted.load() == 0U
+                && host.GetMetrics(first, generation, metrics)
+                && metrics.submitted_snapshots == 0U
+                // Presentation retry must never repeat the completed I/O apply.
+                && host.Invoke(first, generation,
+                    [](InkpodCore*) { return INKPOD_STATUS_OK; }, true, false) == INKPOD_STATUS_OK
+                && host.GetDocumentInfo(first, generation, after_retry)
+                && after_retry.document_revision == adopted.document_revision
+                && apply_count.load() == 1U && completion_count.load() == 1U
+                && sink.submitted.load() == 1U
+                && sink.last_committed_document_revision.load() == adopted.document_revision
+                && sink.last_presentation_epoch.load() == 401U;
+        }
+    }
+    MSG message{};
+    while (PeekMessageW(&message, owner, inkpod::app::kCoreStateChanged,
+               inkpod::app::kCoreAsyncFailed, PM_REMOVE) != FALSE) {
+        CoreNotification notification{};
+        passed = host.TakeNotification(static_cast<std::uint64_t>(message.wParam),
+                     Generation(static_cast<std::uint64_t>(message.lParam)), notification)
+            && passed;
     }
     host.Stop();
     return passed;
@@ -325,8 +560,9 @@ bool FileIoCloseCancellationAndShutdownFinalization(HWND owner) {
         && host.CreateSession(second, generation) == INKPOD_STATUS_OK
         && host.EnqueueFileIo(Context(first, generation), true,
             [read](InkpodCore*, bool cancel, bool& fence) { return read->Step(cancel, fence); },
-            false, false, [read](InkpodStatus status) {
+            false, false, [read](InkpodStatus status, InkpodStatus presentation_status) {
                 read->completions.fetch_add(1U);
+                read->presentation_status.store(presentation_status);
                 read->completed.set_value(status);
             });
     if (passed) {
@@ -334,6 +570,7 @@ bool FileIoCloseCancellationAndShutdownFinalization(HWND owner) {
             && host.CloseSession(first, generation) == INKPOD_STATUS_OK
             && completed_read.wait_for(std::chrono::seconds(5)) == std::future_status::ready
             && completed_read.get() == INKPOD_STATUS_CANCELLED && read->completions.load() == 1U
+            && read->presentation_status.load() == INKPOD_STATUS_CANCELLED
             && host.CreateSession(first, Generation{2U}) == INKPOD_STATUS_OK
             && !host.EnqueueFileIo(Context(first, generation), true,
                 [](InkpodCore*, bool, bool&) { return INKPOD_STATUS_OK; }, false, false, {});
@@ -341,8 +578,9 @@ bool FileIoCloseCancellationAndShutdownFinalization(HWND owner) {
     if (passed) {
         passed = host.EnqueueFileIo(Context(second, generation), true,
             [install](InkpodCore*, bool cancel, bool& fence) { return install->Step(cancel, fence); },
-            false, false, [install](InkpodStatus status) {
+            false, false, [install](InkpodStatus status, InkpodStatus presentation_status) {
                 install->completions.fetch_add(1U);
+                install->presentation_status.store(presentation_status);
                 install->completed.set_value(status);
             }) && installing.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
     }
@@ -359,7 +597,8 @@ bool FileIoCloseCancellationAndShutdownFinalization(HWND owner) {
     stopped.get();
     return passed && finished
         && completed_install.wait_for(std::chrono::seconds(0)) == std::future_status::ready
-        && completed_install.get() == INKPOD_STATUS_OK && install->completions.load() == 1U;
+        && completed_install.get() == INKPOD_STATUS_OK && install->completions.load() == 1U
+        && install->presentation_status.load() == INKPOD_STATUS_OK;
 }
 bool PrimitiveQueueSaturationIsExactlyOnce(
     CoreHost& host,
@@ -541,12 +780,22 @@ bool EditorCachePublicationIsOrdered(
     const InkpodStatus blocker_status = blocker_completed.get_future().get();
     InkpodEditorStateInfo after{};
     after.struct_size = sizeof(after);
-    return blocker_status == INKPOD_STATUS_OK
+    const bool valid = blocker_status == INKPOD_STATUS_OK
         && refresh_status.load(std::memory_order_acquire) == INKPOD_STATUS_OK
         && update_status.load(std::memory_order_acquire) == INKPOD_STATUS_OK
         && host.GetEditorState(session, generation, after)
         && after.editor_revision == before.editor_revision + 1U
         && after.active_tool == update.tool;
+    if (!valid) {
+        std::fprintf(stderr,
+            "editor publication order: blocker=%u refresh=%u update=%u before=%llu after=%llu tool=%u expected=%u\n",
+            static_cast<unsigned>(blocker_status), static_cast<unsigned>(refresh_status.load()),
+            static_cast<unsigned>(update_status.load()),
+            static_cast<unsigned long long>(before.editor_revision),
+            static_cast<unsigned long long>(after.editor_revision),
+            after.active_tool, update.tool);
+    }
+    return valid;
 }
 
 bool EditorUpdatePublishesDocumentInfo(
@@ -559,6 +808,7 @@ bool EditorUpdatePublishesDocumentInfo(
     if (!host.GetEditorState(session, generation, editor_before)
         || !host.GetDocumentInfo(session, generation, document_before)
         || editor_before.active_layer_id != document_before.layer_id) {
+        std::fprintf(stderr, "editor document publication: missing state or target mismatch\n");
         return false;
     }
     const bool select_color =
@@ -573,12 +823,13 @@ bool EditorUpdatePublishesDocumentInfo(
         : document_before.main_plane_id;
     if (host.UpdateEditorState(session, generation, update)
         != INKPOD_STATUS_OK) {
+        std::fprintf(stderr, "editor document publication: target update failed\n");
         return false;
     }
     InkpodEditorStateInfo editor_after{};
     editor_after.struct_size = sizeof(editor_after);
     InkpodDocumentInfo document_after = EmptyDocumentInfo();
-    return host.GetEditorState(session, generation, editor_after)
+    const bool valid = host.GetEditorState(session, generation, editor_after)
         && host.GetDocumentInfo(session, generation, document_after)
         && editor_after.editor_revision == editor_before.editor_revision + 1U
         && editor_after.active_layer_id == update.active_layer_id
@@ -587,6 +838,18 @@ bool EditorUpdatePublishesDocumentInfo(
         && document_after.active_plane
             == (select_color ? INKPOD_PLANE_COLOR : INKPOD_PLANE_MAIN_LINE)
         && (document_after.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U;
+    if (!valid) {
+        std::fprintf(stderr,
+            "editor document publication: editor=%llu/%llu document=%llu/%llu target=%llu/%llu plane=%u color=%u flags=%u\n",
+            static_cast<unsigned long long>(editor_before.editor_revision),
+            static_cast<unsigned long long>(editor_after.editor_revision),
+            static_cast<unsigned long long>(document_before.document_revision),
+            static_cast<unsigned long long>(document_after.document_revision),
+            static_cast<unsigned long long>(editor_after.active_plane_id),
+            static_cast<unsigned long long>(update.active_plane_id),
+            document_after.active_plane, static_cast<unsigned>(select_color), document_after.flags);
+    }
+    return valid;
 }
 
 bool DrainNotifications(
@@ -871,6 +1134,43 @@ int wmain() {
         return 22;
     }
 
+    if (!SnapshotPublicationKeepsInputResponsive(
+            host, sink, first, generation, second_core_view)) {
+        host.Stop();
+        DestroyWindow(owner);
+        return 87;
+    }
+
+    if (host.SetPresentationEpoch(first, generation, 91U)
+        || host.Invoke(first, generation,
+               [&host, first, generation](InkpodCore*) {
+                   if (host.SetPresentationEpoch(first,
+                           Generation{generation.Value() + 1U}, 91U)) {
+                       return INKPOD_STATUS_INVALID_STATE;
+                   }
+                   return host.SetPresentationEpoch(first, generation, 91U)
+                       ? INKPOD_STATUS_OK : INKPOD_STATUS_INVALID_STATE;
+               }, true, false) != INKPOD_STATUS_OK
+        || sink.last_presentation_epoch.load(std::memory_order_acquire) != 91U
+        || second_sink.last_presentation_epoch.load(std::memory_order_acquire) != 91U) {
+        host.Stop();
+        DestroyWindow(owner);
+        return 89;
+    }
+
+    if (host.SetPresentationEpoch(first, generation, 0U)
+        || host.Invoke(first, generation,
+               [&host, first, generation](InkpodCore*) {
+                   return host.SetPresentationEpoch(first, generation, 0U)
+                       ? INKPOD_STATUS_OK : INKPOD_STATUS_INVALID_STATE;
+               }, true, false) != INKPOD_STATUS_OK
+        || sink.last_presentation_epoch.load(std::memory_order_acquire) != 0U
+        || second_sink.last_presentation_epoch.load(std::memory_order_acquire) != 0U) {
+        host.Stop();
+        DestroyWindow(owner);
+        return 92;
+    }
+
     InkpodDocumentInfo first_info = EmptyDocumentInfo();
     InkpodDocumentInfo second_info = EmptyDocumentInfo();
     if (!host.GetDocumentInfo(first, generation, first_info)
@@ -1075,6 +1375,20 @@ int wmain() {
     }
     DestroyWindow(owner);
     owner = replacement_owner;
+    constexpr UINT completion_message = WM_APP + 0x310U;
+    MSG completion_notification{};
+    if (host.PostCompletionNotification(WM_CLOSE, 77U, generation)
+        || host.PostCompletionNotification(completion_message, 0U, generation)
+        || !host.PostCompletionNotification(completion_message, 77U, generation)
+        || PeekMessageW(&completion_notification, owner,
+               completion_message, completion_message, PM_REMOVE) == FALSE
+        || completion_notification.hwnd != replacement_owner
+        || completion_notification.wParam != 77U
+        || completion_notification.lParam != static_cast<LPARAM>(generation.Value())) {
+        host.Stop();
+        DestroyWindow(owner);
+        return 88;
+    }
     if (!DrainNotifications(owner, host, first, second)
         || host.Invoke(
             first,
@@ -1299,6 +1613,10 @@ int wmain() {
         143U,
         255U};
     if (!stroke_became_active
+        || host.FlushPreview() != INKPOD_STATUS_OK
+        || sink.last_revision.load(std::memory_order_acquire) <= first_info.document_revision
+        || sink.last_committed_document_revision.load(std::memory_order_acquire)
+            != first_info.document_revision
         || !host.EnqueuePrimitive(
             Context(first, generation),
             deferred_request,

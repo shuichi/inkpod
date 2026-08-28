@@ -418,6 +418,41 @@ InkpodStatus ColorPanesController::ReplacePalette(
     return status == INKPOD_STATUS_OK ? release : status;
 }
 
+InkpodStatus ColorPanesController::RegisterPaletteColor(
+    app::DocumentSessionId session,
+    app::Generation generation,
+    const InkpodColorValue& color,
+    std::uint32_t& selected_index) noexcept {
+    std::vector<InkpodColorValue> colors;
+    InkpodStatus status = LoadPalette(session, generation, colors);
+    if (status != INKPOD_STATUS_OK) {
+        return status;
+    }
+    const auto existing = std::find_if(
+        colors.begin(), colors.end(), [&color](const InkpodColorValue& entry) {
+            return entry.depth == color.depth && entry.red == color.red
+                && entry.green == color.green && entry.blue == color.blue
+                && entry.alpha == color.alpha;
+        });
+    const auto index = static_cast<std::uint32_t>(existing - colors.begin());
+    if (existing == colors.end()) {
+        if (colors.size() >= 4096U) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        try {
+            colors.push_back(color);
+        } catch (const std::bad_alloc&) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        status = ReplacePalette(session, generation, colors);
+        if (status != INKPOD_STATUS_OK) {
+            return status;
+        }
+    }
+    selected_index = index;
+    return INKPOD_STATUS_OK;
+}
+
 InkpodStatus ColorPanesController::SetMainLineColor(
     const InkpodColorValue& color) noexcept {
     InkpodDocumentInfo document{};

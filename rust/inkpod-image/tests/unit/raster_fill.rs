@@ -53,9 +53,13 @@ fn sparse_tiles_are_copy_on_write_and_edge_tiles_are_compact() {
     raster
         .set_pixel(64, 64, PixelValue::Rgba([1, 2, 3, 255]), 7)
         .unwrap();
+    let original_checksum = raster.checksum();
     let mut copy = raster.clone();
+    assert_eq!(copy.checksum(), original_checksum);
     copy.set_pixel(64, 64, PixelValue::Rgba([4, 5, 6, 255]), 8)
         .unwrap();
+    assert_eq!(raster.checksum(), original_checksum);
+    assert_ne!(copy.checksum(), original_checksum);
 
     assert_eq!(
         raster.pixel(64, 64).unwrap(),
@@ -98,12 +102,151 @@ fn borrowed_tile_view_exposes_full_stride_and_logical_edge_extent() {
 #[test]
 fn transparent_write_does_not_allocate_and_empty_tile_can_be_removed() {
     let mut raster = TileRaster::new(128, 128, PixelFormat::BinaryMask8).unwrap();
+    let empty_checksum = raster.checksum();
     raster.set_pixel(2, 3, PixelValue::Binary(0), 1).unwrap();
     assert_eq!(raster.allocated_tile_count(), 0);
+    assert_eq!(raster.checksum(), empty_checksum);
     raster.set_pixel(2, 3, PixelValue::Binary(255), 2).unwrap();
+    let filled_checksum = raster.checksum();
+    assert_ne!(filled_checksum, empty_checksum);
     raster.set_pixel(2, 3, PixelValue::Binary(0), 3).unwrap();
+    let allocated_zero_checksum = raster.checksum();
+    assert_ne!(allocated_zero_checksum, filled_checksum);
+    // The exact checksum includes allocated coordinates and their zero padding.
+    assert_ne!(allocated_zero_checksum, empty_checksum);
     raster.remove_tile_if_empty(TileCoord { x: 0, y: 0 });
     assert_eq!(raster.allocated_tile_count(), 0);
+    assert_eq!(raster.checksum(), empty_checksum);
+}
+
+#[test]
+fn raster_checksum_preserves_exact_format_order_and_edge_padding() {
+    let cases = [
+        (
+            PixelFormat::BinaryMask8,
+            PixelValue::Binary(255),
+            0x5b43_025d_7edd_b0dc,
+        ),
+        (
+            PixelFormat::Grayscale8,
+            PixelValue::Grayscale8(123),
+            0x297a_003e_2115_5fc7,
+        ),
+        (
+            PixelFormat::Grayscale16,
+            PixelValue::Grayscale16(0x4567),
+            0xb79a_e1c5_ee11_7da8,
+        ),
+        (
+            PixelFormat::StraightRgba8,
+            PixelValue::Rgba([12, 34, 56, 0]),
+            0x09a1_14fd_3efb_c30b,
+        ),
+        (
+            PixelFormat::StraightRgba16,
+            PixelValue::Rgba16([0x1234, 0x5678, 0x9abc, 0]),
+            0xe1c9_244f_65c8_84f2,
+        ),
+        (
+            PixelFormat::PremultipliedBgra8,
+            PixelValue::Rgba([2, 3, 4, 5]),
+            0x2dfd_c0e3_ea50_f965,
+        ),
+    ];
+    for (format, value, expected) in cases {
+        let make_raster = || {
+            let mut raster = TileRaster::new(65, 66, format).unwrap();
+            // Insert in the opposite order to TileCoord's canonical ordering.
+            raster.set_pixel(64, 2, value, 7).unwrap();
+            raster.set_pixel(1, 65, value, 8).unwrap();
+            raster
+        };
+        let raster = make_raster();
+        let cold_copy = raster.clone();
+        assert_eq!(raster.checksum(), expected, "format={format:?}");
+        assert_eq!(cold_copy.checksum(), expected);
+        let independent = make_raster();
+        // Cache population must never participate in semantic equality.
+        assert_eq!(raster, independent);
+        assert_eq!(independent.checksum(), expected);
+        let mut reconstructed = TileRaster::new(65, 66, format).unwrap();
+        for coord in raster.allocated_coords() {
+            reconstructed
+                .insert_tile(raster.tile_data(coord).unwrap())
+                .unwrap();
+        }
+        assert_eq!(reconstructed, raster);
+        assert_eq!(reconstructed.checksum(), expected);
+    }
+}
+
+#[test]
+fn raster_checksum_tracks_inserted_pixels_but_not_tile_revisions() {
+    let coord = TileCoord { x: 1, y: 1 };
+    let mut raster = color8(65, 65);
+    let empty_checksum = raster.checksum();
+    let data = TileData {
+        coord,
+        width: 1,
+        height: 1,
+        bytes: vec![12, 34, 56, 78],
+        revision: 1,
+    };
+    raster.insert_tile(data.clone()).unwrap();
+    let original = raster.clone();
+    let checksum = raster.checksum();
+    assert_ne!(checksum, empty_checksum);
+    let mut same_pixels = data.clone();
+    same_pixels.revision = 2;
+    raster.insert_tile(same_pixels).unwrap();
+    assert_eq!(raster.tile_revision(coord), 2);
+    assert_ne!(raster, original);
+    assert_eq!(raster.checksum(), checksum);
+
+    let before_zero_insert = raster.clone();
+    let mut zero = data.clone();
+    zero.bytes.fill(0);
+    raster.insert_tile(zero).unwrap();
+    // insert_tile historically ignores all-zero input, even over a live tile.
+    assert_eq!(raster, before_zero_insert);
+    assert_eq!(raster.checksum(), checksum);
+
+    let mut replacement = data;
+    replacement.bytes[0] = 90;
+    replacement.revision = 3;
+    raster.insert_tile(replacement).unwrap();
+    assert_ne!(raster.checksum(), checksum);
+    assert_eq!(original.checksum(), checksum);
+    assert_eq!(original.tile_revision(coord), 1);
+}
+
+#[test]
+fn raster_checksum_and_tiles_survive_invalid_writes() {
+    let mut raster = color8(65, 66);
+    raster
+        .set_pixel(64, 65, PixelValue::Rgba([1, 2, 3, 4]), 1)
+        .unwrap();
+    let checksum = raster.checksum();
+    let original = raster.clone();
+    assert_eq!(
+        raster.set_pixel(65, 0, PixelValue::Rgba([1; 4]), 2),
+        Err(RasterError::PixelOutOfBounds)
+    );
+    assert_eq!(
+        raster.set_pixel(0, 0, PixelValue::Grayscale8(1), 2),
+        Err(RasterError::PixelFormatMismatch)
+    );
+    let tile = raster.tile_data(TileCoord { x: 1, y: 1 }).unwrap();
+    let mut invalid: [TileData; 4] = std::array::from_fn(|_| tile.clone());
+    invalid[0].coord.x = u32::MAX;
+    invalid[1].width += 1;
+    invalid[2].height += 1;
+    invalid[3].bytes.pop();
+    for data in invalid {
+        assert_eq!(raster.insert_tile(data), Err(RasterError::InvalidTile));
+        assert_eq!(raster, original);
+        assert_eq!(raster.checksum(), checksum);
+    }
 }
 
 #[test]
@@ -118,6 +261,9 @@ fn straight_alpha_preserves_rgb_when_alpha_is_zero() {
 #[test]
 fn binary_mask_rejects_intermediate_values() {
     let mut raster = TileRaster::new(64, 64, PixelFormat::BinaryMask8).unwrap();
+    raster.set_pixel(1, 1, PixelValue::Binary(255), 7).unwrap();
+    let before = raster.clone();
+    let checksum = raster.checksum();
     assert_eq!(
         raster.set_pixel(0, 0, PixelValue::Binary(1), 1),
         Err(RasterError::PixelFormatMismatch)
@@ -132,6 +278,8 @@ fn binary_mask_rejects_intermediate_values() {
         }),
         Err(RasterError::PixelFormatMismatch)
     );
+    assert_eq!(raster, before);
+    assert_eq!(raster.checksum(), checksum);
 }
 
 #[test]

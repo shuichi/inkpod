@@ -16,7 +16,7 @@ mod temporary;
 mod transaction;
 
 pub use backend::{FileIdentity, FileStamp};
-pub use cache::CacheStats;
+pub use cache::{CacheStats, MAX_SEQUENCE_RENDER_ALLOCATIONS, MAX_SEQUENCE_RENDER_BYTES};
 pub use config::IoConfig;
 pub use error::{IoError, IoResult};
 pub use image::{DecodedLease, LoadedBytes, LoadedImage};

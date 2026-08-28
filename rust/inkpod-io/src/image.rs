@@ -1,4 +1,4 @@
-use crate::cache::{BudgetKind, Reservation};
+use crate::cache::{BudgetKind, Reservation, SequenceRenderReservation};
 use crate::manager::ManagerInner;
 use crate::{FileIdentity, FileStamp, IoResult};
 use inkpod_format::{CommonRaster, CommonRasterFormat};
@@ -49,6 +49,10 @@ impl ImageLease {
         &self.0.value
     }
 
+    pub(crate) fn reserved_bytes(&self) -> u64 {
+        self.0._bytes.amount()
+    }
+
     pub(crate) fn unpinned(&self) -> bool {
         Arc::strong_count(&self.0) == 1
     }
@@ -62,19 +66,57 @@ pub struct DecodedLease(Arc<DerivedCharge>);
 
 struct DerivedCharge {
     bytes: u64,
+    // Field order releases the subset before the enclosing decoded charge.
+    _sequence_render: Option<SequenceRenderReservation>,
     _reservation: Reservation,
     _slot: Arc<Reservation>,
+    // Cache entries never own derived leases, so retaining this owner is acyclic.
+    cache_owner: Arc<ManagerInner>,
 }
 
 impl DecodedLease {
     pub(crate) fn new(source: &LoadedImage, bytes: u64, reservation: Reservation) -> Self {
         Self(Arc::new(DerivedCharge {
             bytes,
+            _sequence_render: None,
             _reservation: reservation,
             _slot: Arc::clone(&source.source.lease.0.slot),
+            cache_owner: Arc::clone(&source.cache_owner),
         }))
     }
 
+    /// Reserves one additional immutable sequence display payload from the
+    /// original source's manager. `bytes` is the total pixel allocation capacity
+    /// in bytes and must be nonzero. Call this before allocating the payload and
+    /// retain the returned lease with every owner, including snapshots.
+    ///
+    /// Each successful call consumes one of
+    /// [`crate::MAX_SEQUENCE_RENDER_ALLOCATIONS`] allocations and contributes to
+    /// both [`crate::MAX_SEQUENCE_RENDER_BYTES`] and the manager's decoded budget.
+    /// Clones share one charge; the last clone releases both reservations. The
+    /// new lease shares the source's image slot but does not retain this lease's
+    /// pixel charge. All manager clones and their consumers share the limits.
+    ///
+    /// Zero returns [`crate::IoError::InvalidInput`]; an allocation exceeding
+    /// either byte limit returns [`crate::IoError::LimitExceeded`]. Insufficient
+    /// remaining capacity returns [`crate::IoError::ResourceBusy`] without
+    /// changing existing reservations or cache entries. Successful admission may
+    /// evict unpinned image-cache entries. This does no I/O or pixel allocation
+    /// and, like [`LoadedImage::reserve_derived`], remains available after worker
+    /// shutdown or release of the public manager handle.
+    pub fn reserve_sequence_render(&self, bytes: u64) -> IoResult<Self> {
+        let (reservation, sequence_render) =
+            self.0.cache_owner.cache.reserve_sequence_render(bytes)?;
+        Ok(Self(Arc::new(DerivedCharge {
+            bytes,
+            _sequence_render: Some(sequence_render),
+            _reservation: reservation,
+            _slot: Arc::clone(&self.0._slot),
+            cache_owner: Arc::clone(&self.0.cache_owner),
+        })))
+    }
+
+    /// Pixel bytes reserved for this allocation; clones do not add another charge.
     #[must_use]
     pub fn bytes(&self) -> u64 {
         self.0.bytes

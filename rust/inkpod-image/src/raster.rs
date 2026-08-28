@@ -1,7 +1,7 @@
 use crate::{PixelFormat, PixelValue};
 use std::collections::BTreeMap;
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 pub const TILE_SIZE: u32 = 64;
 pub const MAX_RASTER_DIMENSION: u32 = 1_048_576;
@@ -106,13 +106,39 @@ impl<'a> TileView<'a> {
 }
 
 /// Sparse raster whose allocated tiles are shared until the next write.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone)]
 pub struct TileRaster {
     width: u32,
     height: u32,
     format: PixelFormat,
     tiles: BTreeMap<TileCoord, Arc<Tile>>,
+    // Clones of one immutable raster share both cold and populated cache state.
+    // A checksum-input mutation detaches this value before publishing pixels.
+    checksum_cache: Arc<OnceLock<u64>>,
 }
+
+impl fmt::Debug for TileRaster {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TileRaster")
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .field("format", &self.format)
+            .field("tiles", &self.tiles)
+            .finish()
+    }
+}
+
+impl PartialEq for TileRaster {
+    fn eq(&self, other: &Self) -> bool {
+        self.width == other.width
+            && self.height == other.height
+            && self.format == other.format
+            && self.tiles == other.tiles
+    }
+}
+
+impl Eq for TileRaster {}
 
 impl TileRaster {
     pub fn new(width: u32, height: u32, format: PixelFormat) -> Result<Self, RasterError> {
@@ -128,6 +154,7 @@ impl TileRaster {
             height,
             format,
             tiles: BTreeMap::new(),
+            checksum_cache: Arc::new(OnceLock::new()),
         })
     }
 
@@ -238,6 +265,7 @@ impl TileRaster {
             .checked_mul(TILE_SIZE as usize)
             .and_then(|pixels| pixels.checked_mul(bytes_per_pixel))
             .ok_or(RasterError::InvalidTile)?;
+        self.invalidate_checksum();
         let tile = self.tiles.entry(coord).or_insert_with(|| {
             Arc::new(Tile {
                 bytes: vec![0; tile_bytes],
@@ -270,6 +298,7 @@ impl TileRaster {
             .get(&coord)
             .is_some_and(|tile| tile.bytes.iter().all(|byte| *byte == 0))
         {
+            self.invalidate_checksum();
             self.tiles.remove(&coord);
         }
     }
@@ -323,6 +352,16 @@ impl TileRaster {
                 .copy_from_slice(&data.bytes[source..source + compact_row]);
         }
         if bytes.iter().any(|byte| *byte != 0) {
+            // Tile revisions are deliberately excluded from the exact checksum.
+            // Replacing identical pixels may update that revision without
+            // invalidating the immutable raster's cached pixel checksum.
+            if self
+                .tiles
+                .get(&data.coord)
+                .is_none_or(|tile| tile.bytes != bytes)
+            {
+                self.invalidate_checksum();
+            }
             self.tiles.insert(
                 data.coord,
                 Arc::new(Tile {
@@ -334,18 +373,40 @@ impl TileRaster {
         Ok(())
     }
 
+    /// Returns the exact FNV checksum of dimensions, format, and allocated tiles.
+    ///
+    /// The tile-coordinate order and complete backing bytes, including edge
+    /// padding and retained all-zero tiles, are significant; tile revisions are
+    /// not. The result is computed once for an immutable raster and shared with
+    /// its COW clones, even when they were cloned before the first query. Pixel
+    /// or allocation changes invalidate only the changed raster's cache. Querying
+    /// does not change pixels, revisions, equality, or serialized tile data.
     #[must_use]
     pub fn checksum(&self) -> u64 {
-        let mut checksum = FNV_OFFSET;
-        checksum = fnv_bytes(checksum, &self.width.to_le_bytes());
-        checksum = fnv_bytes(checksum, &self.height.to_le_bytes());
-        checksum = fnv_bytes(checksum, &[self.format as u8]);
-        for (coord, tile) in &self.tiles {
-            checksum = fnv_bytes(checksum, &coord.x.to_le_bytes());
-            checksum = fnv_bytes(checksum, &coord.y.to_le_bytes());
-            checksum = fnv_bytes(checksum, &tile.bytes);
+        *self.checksum_cache.get_or_init(|| {
+            #[cfg(test)]
+            checksum_cache_tests::record_computation();
+            let mut checksum = FNV_OFFSET;
+            checksum = fnv_bytes(checksum, &self.width.to_le_bytes());
+            checksum = fnv_bytes(checksum, &self.height.to_le_bytes());
+            checksum = fnv_bytes(checksum, &[self.format as u8]);
+            for (coord, tile) in &self.tiles {
+                checksum = fnv_bytes(checksum, &coord.x.to_le_bytes());
+                checksum = fnv_bytes(checksum, &coord.y.to_le_bytes());
+                #[cfg(test)]
+                checksum_cache_tests::record_payload_bytes(tile.bytes.len() as u64);
+                checksum = fnv_bytes(checksum, &tile.bytes);
+            }
+            checksum
+        })
+    }
+
+    fn invalidate_checksum(&mut self) {
+        if let Some(cache) = Arc::get_mut(&mut self.checksum_cache) {
+            cache.take();
+        } else {
+            self.checksum_cache = Arc::new(OnceLock::new());
         }
-        checksum
     }
 
     fn validate_pixel(&self, x: u32, y: u32) -> Result<(), RasterError> {
@@ -430,4 +491,157 @@ pub fn fnv_bytes(mut checksum: u64, bytes: &[u8]) -> u64 {
         checksum = checksum.wrapping_mul(FNV_PRIME);
     }
     checksum
+}
+
+#[cfg(test)]
+mod checksum_cache_tests {
+    use super::*;
+    use std::cell::Cell;
+    use std::sync::Barrier;
+
+    thread_local! {
+        static CHECKSUM_WORK: Cell<(u64, u64)> = const { Cell::new((0, 0)) };
+    }
+
+    pub(super) fn record_computation() {
+        CHECKSUM_WORK.with(|work| {
+            let (computations, bytes) = work.get();
+            work.set((computations + 1, bytes));
+        });
+    }
+
+    pub(super) fn record_payload_bytes(additional: u64) {
+        CHECKSUM_WORK.with(|work| {
+            let (computations, bytes) = work.get();
+            work.set((computations, bytes + additional));
+        });
+    }
+
+    fn reset_work() {
+        CHECKSUM_WORK.with(|work| work.set((0, 0)));
+    }
+
+    fn work() -> (u64, u64) {
+        CHECKSUM_WORK.with(Cell::get)
+    }
+
+    fn raster() -> TileRaster {
+        let mut raster = TileRaster::new(65, 66, PixelFormat::StraightRgba8).unwrap();
+        raster
+            .set_pixel(64, 2, PixelValue::Rgba([1, 2, 3, 255]), 1)
+            .unwrap();
+        raster
+            .set_pixel(1, 65, PixelValue::Rgba([4, 5, 6, 255]), 1)
+            .unwrap();
+        raster
+    }
+
+    #[test]
+    fn immutable_clones_share_checksum_work_before_and_after_initialization() {
+        let raster = raster();
+        let cold_clone = raster.clone();
+        reset_work();
+        let checksum = cold_clone.checksum();
+        let expected_work = (1, raster.allocated_tile_bytes());
+        assert_eq!(work(), expected_work);
+        for _ in 0..8 {
+            assert_eq!(raster.checksum(), checksum);
+            assert_eq!(raster.clone().checksum(), checksum);
+        }
+        assert_eq!(work(), expected_work);
+    }
+
+    #[test]
+    fn modifying_a_cold_clone_separates_its_future_checksum() {
+        let original = raster();
+        let mut changed = original.clone();
+        changed
+            .set_pixel(64, 2, PixelValue::Rgba([7, 8, 9, 255]), 2)
+            .unwrap();
+        reset_work();
+        let changed_checksum = changed.checksum();
+        let original_checksum = original.checksum();
+        assert_ne!(changed_checksum, original_checksum);
+        let expected_work = (2, original.allocated_tile_bytes() * 2);
+        assert_eq!(work(), expected_work);
+        assert_eq!(changed.clone().checksum(), changed_checksum);
+        assert_eq!(original.clone().checksum(), original_checksum);
+        assert_eq!(work(), expected_work);
+    }
+
+    #[test]
+    fn unchanged_or_invalid_writes_keep_checksum_warm_and_cow_edits_detach() {
+        let original = raster();
+        reset_work();
+        let checksum = original.checksum();
+        let original_work = work();
+        let mut changed = original.clone();
+        let value = changed.pixel(64, 2).unwrap();
+        assert_eq!(changed.set_pixel(64, 2, value, 2), Ok(value));
+        assert_eq!(
+            changed.set_pixel(65, 2, value, 2),
+            Err(RasterError::PixelOutOfBounds)
+        );
+        assert_eq!(
+            changed.set_pixel(64, 2, PixelValue::Binary(255), 2),
+            Err(RasterError::PixelFormatMismatch)
+        );
+        changed.remove_tile_if_empty(TileCoord { x: 0, y: 0 });
+        changed.remove_tile_if_empty(TileCoord { x: 1, y: 0 });
+        let mut unchanged_pixels = changed.tile_data(TileCoord { x: 1, y: 0 }).unwrap();
+        unchanged_pixels.revision = 2;
+        changed.insert_tile(unchanged_pixels.clone()).unwrap();
+        unchanged_pixels.bytes.fill(0);
+        changed.insert_tile(unchanged_pixels.clone()).unwrap();
+        unchanged_pixels.bytes.pop();
+        assert_eq!(
+            changed.insert_tile(unchanged_pixels),
+            Err(RasterError::InvalidTile)
+        );
+        assert_eq!(changed.checksum(), checksum);
+        assert_eq!(work(), original_work);
+        assert_eq!(changed.tile_revision(TileCoord { x: 1, y: 0 }), 2);
+        assert_eq!(original.tile_revision(TileCoord { x: 1, y: 0 }), 1);
+
+        changed
+            .set_pixel(64, 2, PixelValue::Rgba([7, 8, 9, 255]), 3)
+            .unwrap();
+        assert_eq!(original.checksum(), checksum);
+        assert_eq!(work(), original_work);
+        assert_ne!(changed.checksum(), checksum);
+        assert_eq!(work(), (2, original.allocated_tile_bytes() * 2));
+    }
+
+    #[test]
+    fn concurrent_cold_clones_initialize_the_shared_checksum_once() {
+        let original = raster();
+        let barrier = Barrier::new(4);
+        let results = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..4)
+                .map(|_| {
+                    let raster = original.clone();
+                    let barrier = &barrier;
+                    scope.spawn(move || {
+                        reset_work();
+                        barrier.wait();
+                        (raster.checksum(), work())
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        reset_work();
+        let checksum = original.checksum();
+        assert_eq!(work(), (0, 0));
+        assert!(results.iter().all(|(value, _)| *value == checksum));
+        let total = results
+            .into_iter()
+            .fold((0, 0), |(count, bytes), (_, work)| {
+                (count + work.0, bytes + work.1)
+            });
+        assert_eq!(total, (1, original.allocated_tile_bytes()));
+    }
 }

@@ -7,12 +7,21 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+/// Maximum number of simultaneously reserved sequence display payloads per manager.
+pub const MAX_SEQUENCE_RENDER_ALLOCATIONS: u64 = 8;
+/// Maximum sequence display pixel bytes per manager, within its decoded budget.
+pub const MAX_SEQUENCE_RENDER_BYTES: u64 = 128 * 1024 * 1024;
+
 /// Resident counters include consumer-pinned values and in-flight reservations.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct CacheStats {
     pub images: u64,
     pub encoded_bytes: u64,
     pub decoded_bytes: u64,
+    /// Distinct sequence display allocations, including retained snapshots.
+    pub sequence_render_allocations: u64,
+    /// Sequence display pixel bytes, already included in `decoded_bytes`.
+    pub sequence_render_bytes: u64,
     pub cached_images: u64,
     pub physical_reads: u64,
     pub decodes: u64,
@@ -25,6 +34,8 @@ pub(crate) struct Counters {
     pub(crate) images: AtomicU64,
     pub(crate) encoded: AtomicU64,
     pub(crate) decoded: AtomicU64,
+    sequence_render_allocations: AtomicU64,
+    sequence_render_bytes: AtomicU64,
     pub(crate) reads: AtomicU64,
     pub(crate) decodes: AtomicU64,
     pub(crate) hits: AtomicU64,
@@ -45,6 +56,10 @@ pub(crate) struct Reservation {
 }
 
 impl Reservation {
+    pub(crate) fn amount(&self) -> u64 {
+        self.amount
+    }
+
     pub(crate) fn reduce_to(&mut self, amount: u64) {
         if amount < self.amount {
             self.counter()
@@ -65,6 +80,22 @@ impl Reservation {
 impl Drop for Reservation {
     fn drop(&mut self) {
         self.counter().fetch_sub(self.amount, Ordering::AcqRel);
+    }
+}
+
+pub(crate) struct SequenceRenderReservation {
+    counters: Arc<Counters>,
+    bytes: u64,
+}
+
+impl Drop for SequenceRenderReservation {
+    fn drop(&mut self) {
+        self.counters
+            .sequence_render_bytes
+            .fetch_sub(self.bytes, Ordering::AcqRel);
+        self.counters
+            .sequence_render_allocations
+            .fetch_sub(1, Ordering::AcqRel);
     }
 }
 
@@ -177,6 +208,98 @@ impl ImageCache {
         })
     }
 
+    pub(crate) fn reserve_sequence_render(
+        &self,
+        amount: u64,
+    ) -> IoResult<(Reservation, SequenceRenderReservation)> {
+        if amount == 0 {
+            return Err(IoError::InvalidInput(
+                "sequence display reservation must contain pixel bytes",
+            ));
+        }
+        if amount > MAX_SEQUENCE_RENDER_BYTES || amount > self.config.max_decoded_bytes {
+            return Err(IoError::LimitExceeded(
+                "sequence display allocation exceeds its cache budget",
+            ));
+        }
+        let mut state = lock_unpoisoned(&self.state);
+        if self
+            .counters
+            .sequence_render_allocations
+            .load(Ordering::Acquire)
+            >= MAX_SEQUENCE_RENDER_ALLOCATIONS
+            || self.counters.sequence_render_bytes.load(Ordering::Acquire)
+                > MAX_SEQUENCE_RENDER_BYTES - amount
+        {
+            return Err(IoError::ResourceBusy(
+                "sequence display reservations fill their shared budget",
+            ));
+        }
+
+        let remaining = self.config.max_decoded_bytes - amount;
+        let needed = self
+            .counters
+            .decoded
+            .load(Ordering::Acquire)
+            .saturating_sub(remaining);
+        if needed != 0 {
+            // Admission holds the same lock as all other budget reservations and
+            // cache lookups. Unpinned entries cannot gain an external owner while
+            // this lock is held; concurrent lease drops can only free more space.
+            // Collect the bounded LRU set before removing anything so even an
+            // insufficient decoded budget leaves the old cache untouched.
+            let mut victims = Vec::new();
+            victims
+                .try_reserve_exact(state.entries.len())
+                .map_err(|_| {
+                    IoError::ResourceBusy("cannot reserve image cache eviction metadata")
+                })?;
+            let mut reclaimable = 0_u64;
+            for (identity, entry) in &state.entries {
+                let Some((_, image)) = &entry.decoded else {
+                    continue;
+                };
+                let bytes = image.reserved_bytes();
+                if bytes != 0 && entry.bytes.unpinned() && image.unpinned() {
+                    reclaimable = reclaimable.saturating_add(bytes);
+                    victims.push((entry.access, *identity));
+                }
+            }
+            if reclaimable < needed {
+                return Err(IoError::ResourceBusy(
+                    "image cache is pinned or its decoded reservation budget is full",
+                ));
+            }
+            victims.sort_unstable();
+            for (_, identity) in victims {
+                if self.counters.decoded.load(Ordering::Acquire) <= remaining {
+                    break;
+                }
+                state.entries.remove(&identity);
+                self.counters.evictions.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        self.counters.decoded.fetch_add(amount, Ordering::AcqRel);
+        self.counters
+            .sequence_render_allocations
+            .fetch_add(1, Ordering::AcqRel);
+        self.counters
+            .sequence_render_bytes
+            .fetch_add(amount, Ordering::AcqRel);
+        Ok((
+            Reservation {
+                counters: Arc::clone(&self.counters),
+                kind: BudgetKind::Decoded,
+                amount,
+            },
+            SequenceRenderReservation {
+                counters: Arc::clone(&self.counters),
+                bytes: amount,
+            },
+        ))
+    }
+
     pub(crate) fn insert_bytes(
         &self,
         path: PathBuf,
@@ -236,11 +359,19 @@ impl ImageCache {
     }
 
     pub(crate) fn stats(&self) -> CacheStats {
+        // Admission publishes the decoded and scoped counters under this lock.
+        // Leases release the scoped charge before its enclosing decoded charge.
+        let state = lock_unpoisoned(&self.state);
         CacheStats {
             images: self.counters.images.load(Ordering::Acquire),
             encoded_bytes: self.counters.encoded.load(Ordering::Acquire),
             decoded_bytes: self.counters.decoded.load(Ordering::Acquire),
-            cached_images: lock_unpoisoned(&self.state).entries.len() as u64,
+            sequence_render_allocations: self
+                .counters
+                .sequence_render_allocations
+                .load(Ordering::Acquire),
+            sequence_render_bytes: self.counters.sequence_render_bytes.load(Ordering::Acquire),
+            cached_images: state.entries.len() as u64,
             physical_reads: self.counters.reads.load(Ordering::Acquire),
             decodes: self.counters.decodes.load(Ordering::Acquire),
             cache_hits: self.counters.hits.load(Ordering::Acquire),

@@ -1,5 +1,6 @@
-use super::raster::{common_to_tile_raster, thumbnail_for_raster};
+use super::raster::{common_to_tile_raster, thumbnail_allocation_bytes, thumbnail_for_raster};
 use super::*;
+use std::sync::Arc;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// Small owned straight-alpha RGBA8 preview of a sequence cell.
@@ -33,8 +34,9 @@ pub struct SequenceCellSource {
     pub frames: FrameMetadata,
     /// Raster companion format retained when this source becomes editable.
     pub raster_file_format: CommonRasterFormat,
-    // Runtime-only charge for the tiled image; never part of replay identity.
+    // Runtime-only charge for the tiled image and thumbnail; not replay identity.
     decoded_lease: Option<inkpod_io::DecodedLease>,
+    pub(super) thumbnail: Arc<Thumbnail>,
     pub(crate) raster: TileRaster,
 }
 
@@ -68,7 +70,7 @@ impl SequenceCellSource {
         Ok(encode_common_raster(format, &raster, composite_white)?)
     }
     /// Copies a managed source into the sequence's immutable tiled representation.
-    /// Reserves its full tile payload before allocation and retains that charge
+    /// Reserves its full tile and thumbnail payloads before allocation and retains that charge
     /// across clones, replacement, and cache invalidation.
     pub fn from_loaded_image(
         manager: &inkpod_io::IoManager,
@@ -86,6 +88,9 @@ impl SequenceCellSource {
             .div_ceil(tile)
             .checked_mul(u64::from(info.height).div_ceil(tile))
             .and_then(|count| count.checked_mul(tile * tile * bytes_per_pixel))
+            .and_then(|bytes| {
+                bytes.checked_add(thumbnail_allocation_bytes(info.width, info.height))
+            })
             .ok_or(CoreError::InvalidArgument(
                 "sequence tile allocation overflows",
             ))?;
@@ -149,6 +154,8 @@ impl SequenceCellSource {
         }
         let width = raster.info.width;
         let height = raster.info.height;
+        let dpi_x_milli = raster.info.dpi_x_milli.unwrap_or(DEFAULT_DPI_MILLI);
+        let dpi_y_milli = raster.info.dpi_y_milli.unwrap_or(DEFAULT_DPI_MILLI);
         let reference_frame = RectI32 {
             x: (width / 2) as i32,
             y: (height / 2) as i32,
@@ -161,6 +168,8 @@ impl SequenceCellSource {
             width: width as i32,
             height: height as i32,
         };
+        let raster = common_to_tile_raster(raster, 1)?;
+        let thumbnail = Arc::new(thumbnail_for_raster(&raster)?);
         Ok(Self {
             name,
             cell_number,
@@ -168,8 +177,9 @@ impl SequenceCellSource {
             source_generation,
             raster_file_format: CommonRasterFormat::Png,
             decoded_lease: None,
-            dpi_x_milli: raster.info.dpi_x_milli.unwrap_or(DEFAULT_DPI_MILLI),
-            dpi_y_milli: raster.info.dpi_y_milli.unwrap_or(DEFAULT_DPI_MILLI),
+            thumbnail,
+            dpi_x_milli,
+            dpi_y_milli,
             frames: FrameMetadata {
                 hundred_frame: full,
                 reference_frame,
@@ -179,14 +189,64 @@ impl SequenceCellSource {
                 maximum_close_frame: full,
                 margins: Margins::default(),
             },
-            raster: common_to_tile_raster(raster, 1)?,
+            raster,
         })
     }
 
-    /// Generates a bounded aspect-preserving thumbnail without mutating the source.
+    /// Copies the bounded aspect-preserving thumbnail prepared with this source.
+    /// Cloned sources share the cached pixels; querying never resamples the raster.
     pub fn thumbnail(&self) -> Result<Thumbnail, CoreError> {
-        thumbnail_for_raster(&self.raster)
+        Ok(self.thumbnail.as_ref().clone())
     }
+
+    pub(crate) fn reserve_render_payload(
+        &self,
+        bytes: u64,
+    ) -> Result<Option<inkpod_io::DecodedLease>, CoreError> {
+        self.decoded_lease
+            .as_ref()
+            .map(|lease| lease.reserve_sequence_render(bytes))
+            .transpose()
+            .map_err(CoreError::from)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Lightweight runtime catalog state for sequence-pane invalidation.
+/// Runtime owner generation is not serialized and has no replay meaning.
+pub struct SequenceCatalogInfo {
+    /// Sequence-only revision, or zero when no catalog is installed.
+    pub revision: u64,
+    /// Nonzero runtime namespace; zero disables retained frontend cache reuse.
+    pub owner_generation: u64,
+    /// Number of validated, naturally ordered sources, at most 10,000.
+    pub cell_count: u32,
+    /// Bound active source index, absent for an unbound or missing catalog.
+    pub active_index: Option<u32>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Borrowed sequence metadata. No raster or thumbnail pixel copy is performed.
+/// The name is valid while the source catalog is immutably borrowed.
+pub struct SequenceCellMetadata<'a> {
+    /// User-visible source name in natural sequence order.
+    pub name: &'a str,
+    /// Parsed cell number.
+    pub cell_number: u32,
+    /// Persistent nonzero source document UUID.
+    pub document_uuid: u128,
+    /// Immutable source payload generation.
+    pub source_generation: u64,
+    /// Full-resolution source width in document pixels.
+    pub width: u32,
+    /// Full-resolution source height in document pixels.
+    pub height: u32,
+    /// Cached preview width in pixels, at most 64.
+    pub thumbnail_width: u32,
+    /// Cached preview height in pixels, at most 64.
+    pub thumbnail_height: u32,
+    /// Unchanged checksum of the cached preview bytes.
+    pub thumbnail_checksum: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -216,6 +276,12 @@ pub(crate) struct SequenceState {
 }
 
 impl SequenceState {
+    pub(crate) fn thumbnail_cache_bytes(&self) -> u64 {
+        self.cells.iter().fold(0_u64, |bytes, cell| {
+            bytes.saturating_add(cell.thumbnail.rgba8.len() as u64)
+        })
+    }
+
     pub(crate) fn logical_raster_usage(&self) -> (u64, u64) {
         self.cells
             .iter()

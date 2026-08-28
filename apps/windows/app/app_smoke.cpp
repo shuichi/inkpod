@@ -991,10 +991,12 @@ bool RefreshColorPanes(ApplicationHost& state) noexcept;
 bool RefreshLightTablePane(ApplicationHost& state) noexcept;
 bool RefreshSequencePane(ApplicationHost& state) noexcept;
 bool RefreshTreePane(ApplicationHost& state) noexcept;
-void ResetUiForNewActiveDocument(ApplicationHost& state) noexcept;
+void ResetUiForNewActiveDocument(
+    ApplicationHost& state, bool preserve_sequence_view = false) noexcept;
 bool ResolveConfiguredShortcut(ApplicationHost& state, std::uint32_t virtual_key, std::uint32_t modifiers, UINT& menu_command) noexcept;
 bool SamePersistentMetadata(const InkpodDocumentInfo& left, const InkpodDocumentInfo& right) noexcept;
 InkpodStatus SaveToPath(ApplicationHost& state, const std::wstring& path) noexcept;
+void SetDrawingColor(ApplicationHost& state, InkpodColorValue color) noexcept;
 InkpodStatus SetEditorActiveTool(
     ApplicationHost& state, std::uint32_t tool) noexcept;
 InkpodStatus SetEditorActiveTarget(
@@ -1426,8 +1428,10 @@ int RunLocatorPaneSmoke(ApplicationHost& state) noexcept {
 
 bool VerifyHorizontalSequenceLayout(ApplicationHost& state) noexcept try {
     using inkpod::windows::ui::panes::SequencePaneCellView;
+    using inkpod::windows::ui::panes::SequencePaneSelection;
     using inkpod::windows::ui::panes::SequencePaneView;
     using inkpod::windows::ui::panes::UpdateSequencePaneDialog;
+    using inkpod::windows::ui::panes::UpdateSequencePaneSelection;
     const HWND pane = state.Workspace().sequence_palette;
     const HWND list = GetDlgItem(pane, IDC_SEQUENCE_CELLS);
     RECT original_bounds{};
@@ -1435,15 +1439,31 @@ bool VerifyHorizontalSequenceLayout(ApplicationHost& state) noexcept try {
         return false;
     }
     constexpr UINT_PTR kSequenceResizeProbe = 11220U;
+    constexpr UINT_PTR kSequenceSelectionGeometryProbe = 11221U;
+    constexpr UINT_PTR kSequenceSelectionColumnProbe = 11222U;
+    constexpr UINT_PTR kSequenceSelectionTargetProbe = 11223U;
     WindowMessageCounter sequence_list_rebuilds{LB_RESETCONTENT};
+    WindowMessageCounter sequence_list_moves{WM_WINDOWPOSCHANGING};
+    WindowMessageCounter sequence_column_updates{LB_SETCOLUMNWIDTH};
+    WindowMessageCounter sequence_target_updates{WM_SETTEXT};
+    inkpod::windows::ui::ThumbnailCache thumbnails;
     struct RestoreSequencePane final {
         HWND pane{};
         HWND list{};
         HWND focus{};
         RECT bounds{};
         SequencePaneView view;
+        inkpod::windows::ui::panes::SequencePaneDialogState* state{};
+        inkpod::windows::ui::ThumbnailCache* thumbnails{};
         ~RestoreSequencePane() noexcept {
             RemoveWindowSubclass(list, WindowMessageCounterProcedure, kSequenceResizeProbe);
+            RemoveWindowSubclass(list, WindowMessageCounterProcedure,
+                kSequenceSelectionGeometryProbe);
+            RemoveWindowSubclass(list, WindowMessageCounterProcedure,
+                kSequenceSelectionColumnProbe);
+            RemoveWindowSubclass(GetDlgItem(pane, IDC_SEQUENCE_TARGET),
+                WindowMessageCounterProcedure, kSequenceSelectionTargetProbe);
+            state->thumbnail_cache = thumbnails;
             UpdateSequencePaneDialog(pane, std::move(view));
             SetWindowPos(pane, nullptr, 0, 0,
                 bounds.right - bounds.left, bounds.bottom - bounds.top,
@@ -1453,11 +1473,15 @@ bool VerifyHorizontalSequenceLayout(ApplicationHost& state) noexcept try {
             }
         }
     } restore{pane, list, GetFocus(), original_bounds,
-        state.Workspace().sequence_dialog.view};
+        state.Workspace().sequence_dialog.view,
+        &state.Workspace().sequence_dialog,
+        state.Workspace().sequence_dialog.thumbnail_cache};
+    state.Workspace().sequence_dialog.thumbnail_cache = &thumbnails;
     SequencePaneView sample = restore.view;
     sample.target_available = true;
     sample.cut_editable = false;
     sample.active_index = 5U;
+    sample.catalog = {state.Document().id, state.Document().generation, 1U, 1U, 32U};
     sample.cells.clear();
     for (std::uint32_t index = 0U; index < 32U; ++index) {
         SequencePaneCellView cell{};
@@ -1468,8 +1492,23 @@ bool VerifyHorizontalSequenceLayout(ApplicationHost& state) noexcept try {
         cell.name = L"Frame " + std::to_wstring(cell.cell_number);
         cell.document_uuid_high = 1U;
         cell.document_uuid_low = index + 1U;
+        cell.thumbnail_width = 1U;
+        cell.thumbnail_height = 1U;
+        cell.thumbnail_stride_bytes = 4U;
+        cell.thumbnail_key = {
+            state.Workspace().pane_ids.sequence,
+            state.Document().id, state.Document().generation,
+            static_cast<std::uint64_t>(index) + 1U, 1U,
+            inkpod::windows::ui::ThumbnailKind::Sequence};
+        if (!thumbnails.Put(cell.thumbnail_key, 1U, 1U, 4U,
+                inkpod::windows::ui::ThumbnailPixelLayout::Rgba8,
+                std::vector<std::uint8_t>{static_cast<std::uint8_t>(index), 40U, 80U, 255U})) {
+            return false;
+        }
         sample.cells.push_back(std::move(cell));
     }
+    sample.thumbnail_generation = thumbnails.InvalidationGeneration(
+        inkpod::windows::ui::ThumbnailKind::Sequence);
     UpdateSequencePaneDialog(pane, sample);
     std::wstring first_label;
     if (!ReadListItemText(list, 0, first_label)
@@ -1545,6 +1584,111 @@ bool VerifyHorizontalSequenceLayout(ApplicationHost& state) noexcept try {
         std::fprintf(stderr, "sequence unchanged presentation rebuilt/scrolled the list\n");
         return false;
     }
+    if (SetWindowSubclass(list, WindowMessageCounterProcedure,
+            kSequenceSelectionGeometryProbe,
+            reinterpret_cast<DWORD_PTR>(&sequence_list_moves)) == FALSE
+        || SetWindowSubclass(list, WindowMessageCounterProcedure,
+            kSequenceSelectionColumnProbe,
+            reinterpret_cast<DWORD_PTR>(&sequence_column_updates)) == FALSE
+        || SetWindowSubclass(GetDlgItem(pane, IDC_SEQUENCE_TARGET),
+            WindowMessageCounterProcedure, kSequenceSelectionTargetProbe,
+            reinterpret_cast<DWORD_PTR>(&sequence_target_updates)) == FALSE) {
+        return false;
+    }
+    const auto* retained_cells = state.Workspace().sequence_dialog.view.cells.data();
+    const auto* retained_labels = state.Workspace().sequence_dialog.item_labels.data();
+    const auto select = [&](std::uint32_t index) {
+        return UpdateSequencePaneSelection(pane, SequencePaneSelection{
+            sample.catalog, index, sample.target_text,
+            sample.pinned, sample.auto_sequence_truncated, sample.wrap_navigation});
+    };
+    for (std::uint32_t repeat = 0U; repeat < 8U; ++repeat) {
+        if (!select(5U) || SendMessageW(list, LB_GETTOPINDEX, 0, 0) != 8
+            || SendMessageW(list, LB_GETCURSEL, 0, 0) != 5
+            || GetFocus() != focused
+            || state.Workspace().sequence_dialog.view.cells.data() != retained_cells
+            || state.Workspace().sequence_dialog.item_labels.data() != retained_labels) {
+            std::fputs("sequence selection-only update replaced metadata or viewport\n", stderr);
+            return false;
+        }
+    }
+    if (!select(9U) || SendMessageW(list, LB_GETTOPINDEX, 0, 0) != 8
+        || SendMessageW(list, LB_GETCURSEL, 0, 0) != 9 || !select(31U)) {
+        return false;
+    }
+    RECT selected_bounds{};
+    RECT sequence_client{};
+    if (SendMessageW(list, LB_GETITEMRECT, 31U,
+            reinterpret_cast<LPARAM>(&selected_bounds)) == LB_ERR
+        || GetClientRect(list, &sequence_client) == FALSE
+        || selected_bounds.left < sequence_client.left
+        || selected_bounds.right > sequence_client.right
+        || sequence_list_rebuilds.count != 0U || sequence_list_moves.count != 0U
+        || sequence_column_updates.count != 0U || sequence_target_updates.count != 0U
+        || GetFocus() != focused || !select(5U)) {
+        std::fputs("sequence selection-only update changed geometry or failed to reveal frame\n",
+            stderr);
+        return false;
+    }
+    std::array stale_catalogs{
+        sample.catalog, sample.catalog, sample.catalog, sample.catalog, sample.catalog};
+    ++stale_catalogs[0].owner_generation;
+    ++stale_catalogs[1].revision;
+    ++stale_catalogs[2].cell_count;
+    stale_catalogs[3].session = inkpod::app::DocumentSessionId{UINT64_MAX};
+    stale_catalogs[4].generation = inkpod::app::Generation{UINT64_MAX};
+    for (const auto& stale_catalog : stale_catalogs) {
+        if (UpdateSequencePaneSelection(pane, SequencePaneSelection{
+                stale_catalog, 12U, sample.target_text,
+                sample.pinned, sample.auto_sequence_truncated, sample.wrap_navigation})
+            || state.Workspace().sequence_dialog.view.active_index != 5U) {
+            return false;
+        }
+    }
+    const SequencePaneSelection changed_header{
+        sample.catalog, 5U, sample.target_text + L" selection fixture",
+        !sample.pinned, !sample.auto_sequence_truncated, !sample.wrap_navigation};
+    if (!UpdateSequencePaneSelection(pane, changed_header)
+        || state.Workspace().sequence_dialog.view.pinned != changed_header.pinned
+        || state.Workspace().sequence_dialog.view.auto_sequence_truncated
+            != changed_header.auto_sequence_truncated
+        || state.Workspace().sequence_dialog.view.wrap_navigation
+            != changed_header.wrap_navigation
+        || sequence_target_updates.count != 1U
+        || !UpdateSequencePaneSelection(pane, changed_header)
+        || sequence_target_updates.count != 1U || !select(5U)
+        || sequence_target_updates.count != 2U
+        || sequence_list_rebuilds.count != 0U || sequence_list_moves.count != 0U
+        || sequence_column_updates.count != 0U || GetFocus() != focused) {
+        return false;
+    }
+    // Another pane's removal changes the global generation, but does not remove
+    // this pane's keys or force metadata/thumbnail regeneration here.
+    auto unrelated_key = sample.cells.front().thumbnail_key;
+    unrelated_key.pane = inkpod::app::PaneInstanceId{UINT64_MAX};
+    if (!thumbnails.Put(unrelated_key, 1U, 1U, 4U,
+            inkpod::windows::ui::ThumbnailPixelLayout::Rgba8,
+            std::vector<std::uint8_t>{1U, 2U, 3U, 255U})) {
+        return false;
+    }
+    thumbnails.RemovePane(unrelated_key.pane);
+    if (!select(5U)
+        || state.Workspace().sequence_dialog.view.thumbnail_generation
+            != thumbnails.InvalidationGeneration(
+                inkpod::windows::ui::ThumbnailKind::Sequence)
+        || state.Workspace().sequence_dialog.view.cells.data() != retained_cells
+        || state.Workspace().sequence_dialog.item_labels.data() != retained_labels) {
+        return false;
+    }
+    // A genuine shared-budget eviction must refuse reuse without changing the
+    // committed selection. The caller will rebuild through the full path.
+    if (!thumbnails.SetBudgetBytes(4U) || select(12U)
+        || state.Workspace().sequence_dialog.view.active_index != 5U
+        || state.Workspace().sequence_dialog.view.cells.data() != retained_cells
+        || state.Workspace().sequence_dialog.item_labels.data() != retained_labels) {
+        return false;
+    }
+    SendMessageW(list, LB_SETTOPINDEX, 8U, 0);
     SendMessageW(list, WM_MOUSEHWHEEL, MAKEWPARAM(0U, WHEEL_DELTA), 0);
     const LRESULT scrolled = SendMessageW(list, LB_GETTOPINDEX, 0, 0);
     if (scrolled <= 8 || SendMessageW(list, LB_GETCURSEL, 0, 0) != 5) {
@@ -1861,6 +2005,188 @@ bool WaitForFileIo(ApplicationHost& state) noexcept {
         }
     }
     return !state.file_io.HasPending();
+}
+
+bool WaitForSequencePresentation(
+    ApplicationHost& state, bool require_active_view_revision = false,
+    std::optional<std::uint64_t> active_view_frames_before = std::nullopt) noexcept {
+    if (state.engine == nullptr || state.renderer == nullptr) {
+        return false;
+    }
+    const auto workspace_id = state.Workspace().id;
+    const auto session_id = state.Document().id;
+    const auto generation = state.Document().generation;
+    const auto active_view_id = state.ActiveView().id;
+    renderer::SnapshotRoute frame_route{};
+    if (active_view_frames_before.has_value()) {
+        const auto* sink = renderer::GetCanvasSnapshotSink(state.Workspace().windows.canvas);
+        if (sink == nullptr) {
+            return false;
+        }
+        frame_route = sink->Route();
+        if (frame_route.owner_kind != renderer::SnapshotOwnerKind::Document
+            || frame_route.document_session != session_id
+            || frame_route.document_generation != generation
+            || frame_route.document_view != active_view_id) {
+            return false;
+        }
+    }
+    const auto completion_before =
+        state.Workspace().animation.smoke_sequence_switch_completed;
+    const bool was_pending =
+        state.routing.sequence_switch_pending_token.load(std::memory_order_acquire) != 0U
+        || state.routing.sequence_navigation_pending
+        || state.Workspace().animation.sequence_switch_pending;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    std::uint64_t required_revision{};
+    std::uint64_t presented_revision{};
+    std::uint64_t required_epoch{};
+    std::uint64_t presented_epoch{};
+    std::uint64_t required_view_revision{};
+    std::uint64_t presented_view_revision{};
+    std::uint64_t presented_frames{};
+    renderer::RendererSurfaceResourceUsage active_surface{};
+    do {
+        // Core completion and its path/identity publication are distinct from
+        // queue acceptance. Exercise the real UI completion messages, including
+        // the file-I/O phase of autosave/recovery navigation.
+        state.file_io.Poll();
+        PumpPendingWindowMessages();
+        const auto* workspace = state.FindWorkspace(workspace_id);
+        const auto* document = state.Documents().Find(session_id);
+        if (workspace == nullptr || document == nullptr
+            || document->generation != generation) {
+            return false;
+        }
+        const bool pending =
+            state.routing.sequence_switch_pending_token.load(std::memory_order_acquire) != 0U
+            || state.routing.sequence_navigation_pending
+            || !state.routing.sequence_navigation_queue.empty()
+            || workspace->animation.sequence_switch_pending
+            || document->sequence_activation_pending;
+        if (!pending) {
+            if ((was_pending
+                    || workspace->animation.smoke_sequence_switch_completed != completion_before)
+                && workspace->animation.smoke_sequence_switch_status != INKPOD_STATUS_OK) {
+                std::fprintf(stderr, "sequence completion failed: status=%u\n",
+                    workspace->animation.smoke_sequence_switch_status);
+                return false;
+            }
+            InkpodDocumentInfo info = EmptyDocumentInfo();
+            if (!state.engine->GetDocumentInfo(session_id, generation, info)) {
+                return false;
+            }
+            required_revision = info.document_revision;
+            required_epoch = document->sequence_required_present_epoch;
+            if ((was_pending
+                    || workspace->animation.smoke_sequence_switch_completed != completion_before)
+                && required_epoch == 0U) {
+                std::fputs("sequence completion lost its presentation epoch\n", stderr);
+                return false;
+            }
+            bool has_visible_canvas{};
+            bool all_presented = true;
+            bool active_frame_presented = !active_view_frames_before.has_value();
+            for (std::size_t index = 0U; index < state.Workspaces().Count(); ++index) {
+                const auto* visible_workspace = state.Workspaces().At(index);
+                if (visible_workspace == nullptr) {
+                    return false;
+                }
+                for (std::size_t group_index = 0U;
+                     group_index < visible_workspace->editors.GroupCount(); ++group_index) {
+                    const auto* group = visible_workspace->editors.GroupAt(group_index);
+                    if (group == nullptr || document->FindView(group->ActiveView()) == nullptr
+                        || IsWindowVisible(group->canvas) == FALSE) {
+                        continue;
+                    }
+                    has_visible_canvas = true;
+                    renderer::RendererSurfaceResourceUsage surface{};
+                    if (!state.renderer->GetSurfaceResourceUsage(
+                            group->canvas_id, group->generation, surface)) {
+                        all_presented = false;
+                        continue;
+                    }
+                    presented_revision = surface.last_presented_document_revision;
+                    presented_epoch = surface.last_presented_presentation_epoch;
+                    if (active_view_frames_before.has_value()
+                        && group->ActiveView() == active_view_id) {
+                        active_surface = surface;
+                        presented_frames = state.renderer->PresentedFrameCount(
+                            group->canvas_id, group->generation);
+                        active_frame_presented = surface.route == frame_route
+                            && presented_frames > *active_view_frames_before;
+                    }
+                    if (require_active_view_revision && group->ActiveView() == active_view_id) {
+                        const auto* view = document->FindView(active_view_id);
+                        InkpodSnapshotTransform expected{};
+                        expected.struct_size = sizeof(expected);
+                        const bool has_transform = view != nullptr
+                            && state.engine->GetSnapshotTransform(
+                                session_id, generation, view->core_view_id, expected);
+                        required_view_revision = expected.view_revision;
+                        presented_view_revision = surface.last_presented_view_revision;
+                        all_presented = all_presented && has_transform
+                            && presented_view_revision == required_view_revision;
+                    }
+                    // Recovery may restore an equal or lower document revision.
+                    // Only this activation's epoch identifies its actual frame.
+                    all_presented = all_presented && surface.visible && !surface.occluded
+                        && surface.route.owner_kind == renderer::SnapshotOwnerKind::Document
+                        && surface.route.document_session == session_id
+                        && surface.route.document_generation == generation
+                        && surface.route.document_view == group->ActiveView()
+                        && surface.route.canvas == group->canvas_id
+                        && surface.route.surface_generation == group->generation
+                        && presented_revision == required_revision
+                        && presented_epoch == required_epoch;
+                }
+            }
+            // A hidden/suppressed surface is not evidence of presentation.
+            // The sequence fixture makes its workspace visible for this check.
+            if (has_visible_canvas && all_presented && active_frame_presented) {
+                return true;
+            }
+        }
+        (void)MsgWaitForMultipleObjectsEx(
+            0U, nullptr, 10U, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+    } while (std::chrono::steady_clock::now() < deadline);
+    std::fprintf(stderr,
+        "sequence presentation timed out: session=%llu pending=%llu "
+        "required=%llu presented=%llu required_epoch=%llu presented_epoch=%llu "
+        "required_view=%llu presented_view=%llu\n",
+        static_cast<unsigned long long>(session_id.Value()),
+        static_cast<unsigned long long>(
+            state.routing.sequence_switch_pending_token.load(std::memory_order_acquire)),
+        static_cast<unsigned long long>(required_revision),
+        static_cast<unsigned long long>(presented_revision),
+        static_cast<unsigned long long>(required_epoch),
+        static_cast<unsigned long long>(presented_epoch),
+        static_cast<unsigned long long>(required_view_revision),
+        static_cast<unsigned long long>(presented_view_revision));
+    if (active_view_frames_before.has_value()) {
+        const auto resources = state.renderer->ResourceUsage();
+        std::fprintf(stderr,
+            "active Canvas presentation: frames_before=%llu frames_after=%llu "
+            "visible=%d occluded=%d result=0x%08lx latency_timeouts=%llu queued=%llu "
+            "route=%llu/%llu/%llu/%llu/%llu expected=%llu/%llu/%llu/%llu/%llu\n",
+            static_cast<unsigned long long>(*active_view_frames_before),
+            static_cast<unsigned long long>(presented_frames),
+            active_surface.visible, active_surface.occluded,
+            static_cast<unsigned long>(active_surface.last_render_result),
+            static_cast<unsigned long long>(active_surface.frame_latency_timeout_count),
+            static_cast<unsigned long long>(resources.queued_work_count),
+            static_cast<unsigned long long>(active_surface.route.document_session.Value()),
+            static_cast<unsigned long long>(active_surface.route.document_generation.Value()),
+            static_cast<unsigned long long>(active_surface.route.document_view.Value()),
+            static_cast<unsigned long long>(active_surface.route.canvas.Value()),
+            static_cast<unsigned long long>(active_surface.route.surface_generation.Value()),
+            static_cast<unsigned long long>(frame_route.document_session.Value()),
+            static_cast<unsigned long long>(frame_route.document_generation.Value()),
+            static_cast<unsigned long long>(frame_route.document_view.Value()),
+            static_cast<unsigned long long>(frame_route.canvas.Value()),
+            static_cast<unsigned long long>(frame_route.surface_generation.Value()));
+    }
+    return false;
 }
 
 bool ShowFileJobInStatus(
@@ -2201,6 +2527,164 @@ bool FileIoReadyCancellationAndWriteReservation(
     }
     return reserved && cancelled;
 }
+
+bool RunPaletteRegistrationSmoke(ApplicationHost& state) {
+    auto& workspace = state.Workspace();
+    const auto original_colors = workspace.panes.palette_colors;
+    const auto original_drawing = workspace.tools.drawing_color;
+    const auto original_group = workspace.panes.palette_group;
+    const auto original_index = workspace.panes.selected_palette_index;
+    const auto original_sample = workspace.subpalette_sample;
+    const bool original_sample_available = workspace.subpalette_sample_available;
+    const char* phase = "setup";
+    panes::ColorPanesController controller(*state.engine);
+    const auto same_color = [](
+                                const InkpodColorValue& left,
+                                const InkpodColorValue& right) noexcept {
+        return left.depth == right.depth && left.red == right.red
+            && left.green == right.green && left.blue == right.blue
+            && left.alpha == right.alpha;
+    };
+    std::vector<InkpodColorValue> colors;
+    for (std::uint16_t index = 0U; index < 12U; ++index) {
+        colors.push_back({
+            sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8,
+            index, 18U, 104U, 255U});
+    }
+    colors.back().red = 96U;
+    const auto restore = [&] {
+        SetDrawingColor(state, original_drawing);
+        workspace.panes.palette_group = original_group;
+        workspace.panes.selected_palette_index = original_index;
+        workspace.subpalette_sample = original_sample;
+        workspace.subpalette_sample_available = original_sample_available;
+        return controller.ReplacePalette(
+                   state.Document().id, state.Document().generation, original_colors)
+                == INKPOD_STATUS_OK
+            && RefreshColorPanes(state);
+    };
+    const auto exercise = [&]() -> bool {
+        if (controller.ReplacePalette(
+                state.Document().id, state.Document().generation, colors)
+                != INKPOD_STATUS_OK
+            || !RefreshColorPanes(state)) {
+            return false;
+        }
+        SetDrawingColor(state, colors.back());
+        workspace.subpalette_sample = colors.back();
+        workspace.subpalette_sample_available = true;
+        InkpodDocumentInfo before = EmptyDocumentInfo();
+        InkpodDocumentInfo after = EmptyDocumentInfo();
+        InkpodHistoryInfo history_before{sizeof(InkpodHistoryInfo)};
+        InkpodHistoryInfo history_after{sizeof(InkpodHistoryInfo)};
+        const auto query_history = [&](InkpodHistoryInfo& info) {
+            return state.engine->Invoke(
+                [&info](InkpodCore* core) {
+                    return inkpod_core_history_info(core, &info);
+                }, false, false) == INKPOD_STATUS_OK;
+        };
+        if (!QueryDocument(state, before) || !query_history(history_before)) {
+            return false;
+        }
+        for (int repeat = 0; repeat < 5; ++repeat) {
+            phase = "duplicate registration";
+            workspace.panes.palette_group = 0U;
+            workspace.panes.selected_palette_index = 0U;
+            SendMessageW(workspace.windows.color_pane, WM_COMMAND,
+                MAKEWPARAM(IDC_PALETTE_REGISTER_BUTTON, BN_CLICKED), 0);
+            SendMessageW(workspace.subpalette_palette, WM_COMMAND,
+                MAKEWPARAM(IDC_SUBPALETTE_REGISTER, BN_CLICKED), 0);
+            if (workspace.panes.palette_colors.size() != colors.size()
+                || workspace.panes.selected_palette_index != 11U
+                || workspace.panes.palette_group != 1U
+                || SendMessageW(GetDlgItem(workspace.windows.color_pane,
+                        IDC_PALETTE_LIST), LB_GETCURSEL, 0, 0) != 1) {
+                std::fprintf(stderr, "palette duplicate: count=%zu index=%u group=%u row=%lld\n",
+                    workspace.panes.palette_colors.size(), workspace.panes.selected_palette_index,
+                    workspace.panes.palette_group, static_cast<long long>(SendMessageW(
+                        GetDlgItem(workspace.windows.color_pane, IDC_PALETTE_LIST), LB_GETCURSEL, 0, 0)));
+                return false;
+            }
+        }
+        phase = "duplicate history";
+        if (!QueryDocument(state, after) || !query_history(history_after)
+            || before.document_revision != after.document_revision
+            || before.flags != after.flags
+            || history_before.cursor != history_after.cursor
+            || history_before.item_count != history_after.item_count) {
+            return false;
+        }
+        const std::array<InkpodColorValue, 3U> distinct{{
+            {sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 96U, 18U, 104U, 128U},
+            {sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_16, 24672U, 4626U, 26728U, 65535U},
+            {sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_16, 24673U, 4626U, 26728U, 65535U}}};
+        for (const auto& color : distinct) {
+            phase = "distinct registration";
+            SetDrawingColor(state, color);
+            colors.push_back(color);
+            for (int repeat = 0; repeat < 2; ++repeat) {
+                if (SendMessageW(workspace.windows.window, WM_COMMAND,
+                        IDM_PALETTE_REGISTER, 0) != 1
+                    || workspace.panes.palette_colors.size() != colors.size()
+                    || !same_color(workspace.panes.palette_colors.back(), color)) {
+                    std::fprintf(stderr, "palette distinct: repeat=%d count=%zu expected=%zu\n",
+                        repeat, workspace.panes.palette_colors.size(), colors.size());
+                    return false;
+                }
+            }
+        }
+        phase = "undo redo";
+        SendMessageW(workspace.windows.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
+        if (!RefreshColorPanes(state)
+            || workspace.panes.palette_colors.size() != colors.size() - 1U) {
+            return false;
+        }
+        SendMessageW(workspace.windows.window, WM_COMMAND, IDM_EDIT_REDO, 0);
+        if (!RefreshColorPanes(state)
+            || workspace.panes.palette_colors.size() != colors.size()
+            || !std::equal(colors.begin(), colors.end(),
+                workspace.panes.palette_colors.begin(), same_color)) {
+            return false;
+        }
+        colors.clear();
+        phase = "full palette";
+        for (std::uint16_t index = 0U; index < 4096U; ++index) {
+            colors.push_back({sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_16,
+                index, 18U, 104U, 65535U});
+        }
+        if (controller.ReplacePalette(
+                state.Document().id, state.Document().generation, colors)
+                != INKPOD_STATUS_OK
+            || !QueryDocument(state, before) || !query_history(history_before)) {
+            return false;
+        }
+        std::uint32_t selected_index{};
+        if (controller.RegisterPaletteColor(state.Document().id,
+                state.Document().generation, colors.back(), selected_index)
+                != INKPOD_STATUS_OK
+            || selected_index != 4095U) {
+            return false;
+        }
+        auto new_color = colors.back();
+        new_color.red = 60000U;
+        return controller.RegisterPaletteColor(state.Document().id,
+                   state.Document().generation, new_color, selected_index)
+                == INKPOD_STATUS_INVALID_STATE
+            && selected_index == 4095U
+            && QueryDocument(state, after) && query_history(history_after)
+            && before.document_revision == after.document_revision
+            && before.flags == after.flags
+            && history_before.cursor == history_after.cursor
+            && history_before.item_count == history_after.item_count;
+    };
+    const bool passed = exercise();
+    const bool restored = restore();
+    if (!passed) {
+        std::fprintf(stderr, "palette registration contract failed: %s\n", phase);
+    }
+    return passed && restored;
+}
+
 int RunSubpalettePaneSmoke(ApplicationHost& state) noexcept {
     const HWND pane = state.Workspace().subpalette_palette;
     const HWND canvas = state.Workspace().subpalette_dialog.canvas;
@@ -4596,7 +5080,10 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         return 947;
     }
     SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_WORKSPACE_RESET, 0);
-    ShowWindow(state.Workspace().windows.window, SW_HIDE);
+    // FIT and the drawing/recovery scenarios below inspect the actual renderer.
+    // Hidden surfaces intentionally do not receive new Core snapshots, so keep
+    // the existing workspace visible instead of relying on a stale hidden frame.
+    ShowWindow(state.Workspace().windows.window, SW_SHOWNOACTIVATE);
 
     if (state.engine == nullptr
         || MoveWindow(state.Workspace().windows.canvas, 0, 0, 640, 480, FALSE) == FALSE
@@ -4709,10 +5196,16 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     }
     inkpod::renderer::CanvasDocumentBounds document_bounds{};
     RECT canvas_client{};
-    if (!inkpod::renderer::GetCanvasDocumentBounds(
+    if (!WaitForSequencePresentation(state)
+        || !inkpod::renderer::GetCanvasDocumentBounds(
             state.Workspace().windows.canvas, document_bounds)
         || GetClientRect(state.Workspace().windows.canvas, &canvas_client) == FALSE
         || initial_recovery_info.width == 0U || initial_recovery_info.height == 0U) {
+        std::fprintf(stderr,
+            "smoke FIT query failed: canvas_visible=%d client=%ldx%ld document=%ux%u\n",
+            IsWindowVisible(state.Workspace().windows.canvas) != FALSE,
+            canvas_client.right, canvas_client.bottom,
+            initial_recovery_info.width, initial_recovery_info.height);
         return 53;
     }
     const double client_width = static_cast<double>(canvas_client.right);
@@ -4732,6 +5225,12 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         || std::abs(document_bounds.top - expected_top) > 0.01
         || std::abs(document_bounds.right - (expected_left + expected_width)) > 0.01
         || std::abs(document_bounds.bottom - (expected_top + expected_height)) > 0.01) {
+        std::fprintf(stderr,
+            "smoke FIT bounds mismatch: actual=%.4f,%.4f,%.4f,%.4f "
+            "expected=%.4f,%.4f,%.4f,%.4f canvas_visible=%d\n",
+            document_bounds.left, document_bounds.top, document_bounds.right, document_bounds.bottom,
+            expected_left, expected_top, expected_left + expected_width, expected_top + expected_height,
+            IsWindowVisible(state.Workspace().windows.canvas) != FALSE);
         return 53;
     }
 
@@ -4768,6 +5267,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         + (document_bounds.bottom - document_bounds.top) * 0.40));
     const auto frames_before = static_cast<std::uint64_t>(SendMessageW(
         state.Workspace().windows.canvas, inkpod::renderer::kCanvasGetPresentedFrameCount, 0, 0));
+    const auto preview_metrics_before = state.engine->Metrics();
     const LRESULT line_begin_result = SendMessageW(
         state.Workspace().windows.canvas,
         WM_LBUTTONDOWN,
@@ -4814,12 +5314,22 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         return 219;
     }
     PumpPendingWindowMessages();
+    const auto frames_before_preview_render = static_cast<std::uint64_t>(SendMessageW(
+        state.Workspace().windows.canvas, inkpod::renderer::kCanvasGetPresentedFrameCount, 0, 0));
     if (SendMessageW(state.Workspace().windows.canvas, inkpod::renderer::kCanvasRenderOnce, 0, 0) != 1) {
         return 34;
     }
+    const auto frames_on_acceptance = static_cast<std::uint64_t>(SendMessageW(
+        state.Workspace().windows.canvas, inkpod::renderer::kCanvasGetPresentedFrameCount, 0, 0));
+    // Acceptance can precede S_OK Present while DXGI readiness is pending.
+    // Submit exactly one render request, then only pump/observe its completion.
+    // The committed revision alone cannot distinguish this active preview.
+    const bool preview_presented = WaitForSequencePresentation(
+        state, true, frames_before_preview_render);
     InkpodDocumentInfo during_line{};
     const auto frames_during = static_cast<std::uint64_t>(SendMessageW(
         state.Workspace().windows.canvas, inkpod::renderer::kCanvasGetPresentedFrameCount, 0, 0));
+    const auto preview_metrics_after = state.engine->Metrics();
     if (!QueryDocument(state, during_line)) {
         return 130;
     }
@@ -4833,8 +5343,33 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         != (before_line.flags & INKPOD_DOCUMENT_FLAG_DIRTY)) {
         return 133;
     }
-    if (frames_during <= frames_before) {
+    if (!preview_presented || frames_during <= frames_before
+        || preview_metrics_after.preview_snapshots <= preview_metrics_before.preview_snapshots) {
+        RECT preview_client{};
+        (void)GetClientRect(state.Workspace().windows.canvas, &preview_client);
+        std::fprintf(stderr,
+            "smoke preview presentation failed: presented=%d frames=%llu/%llu/%llu/%llu "
+            "preview_snapshots=%llu/%llu capture=%d visible=%d client=%ldx%ld\n",
+            preview_presented,
+            static_cast<unsigned long long>(frames_before),
+            static_cast<unsigned long long>(frames_before_preview_render),
+            static_cast<unsigned long long>(frames_on_acceptance),
+            static_cast<unsigned long long>(frames_during),
+            static_cast<unsigned long long>(preview_metrics_before.preview_snapshots),
+            static_cast<unsigned long long>(preview_metrics_after.preview_snapshots),
+            GetCapture() == state.Workspace().windows.canvas,
+            IsWindowVisible(state.Workspace().windows.canvas) != FALSE,
+            preview_client.right, preview_client.bottom);
         return 134;
+    }
+    if (frames_on_acceptance <= frames_before_preview_render) {
+        std::fprintf(stdout,
+            "smoke deferred preview Present: accepted_frames=%llu presented_frames=%llu "
+            "preview_snapshots=%llu\n",
+            static_cast<unsigned long long>(frames_on_acceptance),
+            static_cast<unsigned long long>(frames_during),
+            static_cast<unsigned long long>(preview_metrics_after.preview_snapshots
+                - preview_metrics_before.preview_snapshots));
     }
     if (SendMessageW(
             state.Workspace().windows.canvas,
@@ -6936,6 +7471,29 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
                UiText(UiStringId::Text0088)) == std::wstring::npos) {
         return 324;
     }
+    const auto* new_view_group = state.Workspace().editors.Active();
+    const auto* new_view_sink = renderer::GetCanvasSnapshotSink(
+        state.Workspace().windows.canvas);
+    const auto new_view_route = new_view_sink == nullptr
+        ? renderer::SnapshotRoute{} : new_view_sink->Route();
+    InkpodSnapshotTransform new_view_transform{};
+    if (new_view_group == nullptr
+        || new_view_route.owner_kind != renderer::SnapshotOwnerKind::Document
+        || new_view_route.document_session != state.Document().id
+        || new_view_route.document_generation != state.Document().generation
+        || new_view_route.document_view != state.ActiveView().id
+        || new_view_route.canvas != new_view_group->canvas_id
+        || new_view_route.surface_generation != new_view_group->generation
+        || !QuerySnapshotTransform(state, new_view_transform)
+        || !WaitForSequencePresentation(state, true)) {
+        std::fprintf(stderr,
+            "smoke new view was not bound/presented: expected_view=%llu "
+            "bound_view=%llu core_view=%llu\n",
+            static_cast<unsigned long long>(state.ActiveView().id.Value()),
+            static_cast<unsigned long long>(new_view_route.document_view.Value()),
+            static_cast<unsigned long long>(state.ActiveView().core_view_id));
+        return 324;
+    }
     const InkpodViewInput secondary_pan{
         sizeof(InkpodViewInput),
         INKPOD_VIEW_PAN_BY,
@@ -7146,7 +7704,8 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
     SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_ZOOM_PERCENT, 0);
     SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_BOX_ZOOM, 0);
     inkpod::renderer::CanvasDocumentBounds box_bounds{};
-    if (!inkpod::renderer::GetCanvasDocumentBounds(
+    if (!WaitForSequencePresentation(state, true)
+        || !inkpod::renderer::GetCanvasDocumentBounds(
             state.Workspace().windows.canvas, box_bounds)) {
         return 329;
     }
@@ -7184,7 +7743,8 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
         return 329;
     }
     inkpod::renderer::CanvasDocumentBounds guide_bounds{};
-    if (!inkpod::renderer::GetCanvasDocumentBounds(
+    if (!WaitForSequencePresentation(state, true)
+        || !inkpod::renderer::GetCanvasDocumentBounds(
             state.Workspace().windows.canvas, guide_bounds)) {
         return 329;
     }
@@ -7231,6 +7791,15 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
         return 329;
     }
     if (query_guide_count() != 1U) {
+        RECT guide_client{};
+        GetClientRect(state.Workspace().windows.canvas, &guide_client);
+        std::fprintf(stderr,
+            "smoke guide delete failed: count=%llu points=%.4f,%.4f,%.4f "
+            "bounds=%.4f,%.4f,%.4f,%.4f client=%ldx%ld\n",
+            static_cast<unsigned long long>(query_guide_count()),
+            static_cast<double>(guide_x1), static_cast<double>(guide_x3),
+            static_cast<double>(guide_y), guide_bounds.left, guide_bounds.top,
+            guide_bounds.right, guide_bounds.bottom, guide_client.right, guide_client.bottom);
         return 344;
     }
     if (SendMessageW(
@@ -8379,6 +8948,9 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     }
     const auto palette_before_generation =
         state.Workspace().panes.palette_colors;
+    if (!RunPaletteRegistrationSmoke(state)) {
+        return 1442;
+    }
     if (SendMessageW(
             state.Workspace().windows.window,
             WM_COMMAND,
@@ -8805,6 +9377,58 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     if (sequence_resources.cached_item_count != 3U) {
         return 1510;
     }
+    if (state.engine->WaitIdle() != INKPOD_STATUS_OK || !sequence_view.catalog
+        || sequence_view.thumbnail_generation == 0U) {
+        return 15101;
+    }
+    const auto* sequence_cells_before_refresh = sequence_view.cells.data();
+    const auto* sequence_labels_before_refresh =
+        state.Workspace().sequence_dialog.item_labels.data();
+    const auto sequence_refresh_work_before = state.engine->Metrics().accepted_work_items;
+    const auto sequence_refresh_thumbnails_before = state.Thumbnails().Usage();
+    const auto sequence_refresh_generation = state.Thumbnails().InvalidationGeneration(
+        inkpod::windows::ui::ThumbnailKind::Sequence);
+    for (std::uint32_t repeat = 0U; repeat < 8U; ++repeat) {
+        if (!RefreshSequencePane(state)
+            || sequence_view.cells.data() != sequence_cells_before_refresh
+            || state.Workspace().sequence_dialog.item_labels.data()
+                != sequence_labels_before_refresh) {
+            return 15102;
+        }
+    }
+    const auto sequence_refresh_thumbnails_after = state.Thumbnails().Usage();
+    if (state.engine->Metrics().accepted_work_items != sequence_refresh_work_before
+        || state.Thumbnails().InvalidationGeneration(
+            inkpod::windows::ui::ThumbnailKind::Sequence) != sequence_refresh_generation
+        || sequence_refresh_thumbnails_after.entry_count
+            != sequence_refresh_thumbnails_before.entry_count
+        || sequence_refresh_thumbnails_after.resident_bytes
+            != sequence_refresh_thumbnails_before.resident_bytes
+        || sequence_refresh_thumbnails_after.hit_count
+            != sequence_refresh_thumbnails_before.hit_count
+        || sequence_refresh_thumbnails_after.miss_count
+            != sequence_refresh_thumbnails_before.miss_count
+        || sequence_refresh_thumbnails_after.eviction_count
+            != sequence_refresh_thumbnails_before.eviction_count) {
+        std::fputs("unchanged sequence pane queued Core getters or touched thumbnail payloads\n",
+            stderr);
+        return 15103;
+    }
+    state.Thumbnails().RemoveDocument(state.Document().id, state.Document().generation,
+        inkpod::windows::ui::ThumbnailKind::Sequence);
+    if (!RefreshSequencePane(state)
+        || state.engine->Metrics().accepted_work_items <= sequence_refresh_work_before
+        || !inkpod::windows::ui::panes::SequencePaneItemHasThumbnail(
+            state.Workspace().sequence_palette, 0U)
+        || !inkpod::windows::ui::panes::SequencePaneItemHasThumbnail(
+            state.Workspace().sequence_palette, 1U)
+        || !inkpod::windows::ui::panes::SequencePaneItemHasThumbnail(
+            state.Workspace().sequence_palette, 2U)
+        || sequence_view.thumbnail_generation != state.Thumbnails().InvalidationGeneration(
+            inkpod::windows::ui::ThumbnailKind::Sequence)) {
+        std::fputs("sequence pane did not rebuild invalidated thumbnail keys\n", stderr);
+        return 15104;
+    }
     InkpodDocumentInfo sequence_saved = EmptyDocumentInfo();
     if (!QueryDocument(state, sequence_saved)
         || (sequence_saved.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U) {
@@ -8857,6 +9481,23 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
             first_activation.source_index);
         return 1514;
     }
+    // A completed Core operation is not a displayed frame. Keep this existing
+    // workspace visible while checking the real asynchronous sequence route.
+    struct SequencePresentationWindow final {
+        HWND window;
+        bool was_visible;
+        ~SequencePresentationWindow() {
+            if (!was_visible && IsWindow(window) != FALSE) {
+                ShowWindow(window, SW_HIDE);
+            }
+        }
+    } sequence_presentation_window{
+        state.Workspace().windows.window,
+        IsWindowVisible(state.Workspace().windows.window) != FALSE};
+    if (!sequence_presentation_window.was_visible) {
+        ShowWindow(sequence_presentation_window.window, SW_SHOWNOACTIVATE);
+    }
+    PumpPendingWindowMessages();
     state.lifetime.smoke_dirty_prompt_choice = IDOK;
     SendMessageW(sequence_cells, LB_SETCURSEL, 2U, 0);
     SendMessageW(
@@ -8866,7 +9507,8 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         reinterpret_cast<LPARAM>(sequence_cells));
     state.lifetime.smoke_dirty_prompt_choice = IDNO;
     InkpodDocumentInfo selected_ten = EmptyDocumentInfo();
-    if (!QueryDocument(state, selected_ten)
+    if (!WaitForSequencePresentation(state)
+        || !QueryDocument(state, selected_ten)
         || state.Workspace().sequence_dialog.view.active_index != 2U
         || state.lifetime.smoke_dirty_prompt_count
             != sequence_prompt_count
@@ -8978,7 +9620,8 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         reinterpret_cast<LPARAM>(sequence_cells));
     state.lifetime.smoke_dirty_prompt_choice = IDNO;
     InkpodDocumentInfo selected_one = EmptyDocumentInfo();
-    if (!QueryDocument(state, selected_one)
+    if (!WaitForSequencePresentation(state)
+        || !QueryDocument(state, selected_one)
         || selected_one.document_uuid_high == selected_ten.document_uuid_high
             && selected_one.document_uuid_low == selected_ten.document_uuid_low
         || state.Workspace().sequence_dialog.view.active_index != 0U
@@ -9074,7 +9717,8 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         InkpodDocumentInfo document = EmptyDocumentInfo();
         InkpodEditorStateInfo editor{};
         editor.struct_size = sizeof(editor);
-        return QueryDocument(state, document)
+        return WaitForSequencePresentation(state)
+            && QueryDocument(state, document)
             && (document.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U
             && state.engine->GetEditorState(state.Document().id,
                 state.Document().generation, editor)
@@ -9154,11 +9798,11 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     if (!IsCommandChecked(
             state.Workspace().command_states, IDM_SEQ_WRAP_ENDPOINTS)
         || SendMessageW(sequence_cells, WM_KEYDOWN, VK_LEFT, 0) != 0
-        || state.Workspace().sequence_dialog.view.active_index != 2U
         || !sequence_is_clean()
+        || state.Workspace().sequence_dialog.view.active_index != 2U
         || SendMessageW(sequence_cells, WM_KEYDOWN, VK_RIGHT, 0) != 0
-        || state.Workspace().sequence_dialog.view.active_index != 0U
-        || !sequence_is_clean()) {
+        || !sequence_is_clean()
+        || state.Workspace().sequence_dialog.view.active_index != 0U) {
         restore_endpoint_policy();
         return 4111;
     }
@@ -9202,12 +9846,12 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         return 412;
     }
     std::wstring active_cell_tab;
-    if (!ReadDocumentTabLabel(
+    if (!sequence_is_clean()
+        || !ReadDocumentTabLabel(
             state.Workspace().windows.document_tabs,
             TabCtrl_GetCurSel(state.Workspace().windows.document_tabs),
             active_cell_tab)
-        || active_cell_tab != L"cell3.png"
-        || !sequence_is_clean()) {
+        || active_cell_tab != L"cell3.png") {
         return 718;
     }
     const std::wstring active_sequence_caption = UiTextWithUserText(
@@ -9258,6 +9902,101 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         || (autosave_request.flags & INKPOD_SEQUENCE_SWITCH_REQUIRED) == 0U) {
         return 4095;
     }
+    {
+        // A has completed a sequence replacement and is already fully selected.
+        // Pin its Color pane, reuse the same Canvas for B, then issue the existing
+        // Selection All command through that pane. It must still reach A as a
+        // no-op; the previous Canvas binding must not strand a valid pinned target.
+        const auto first_context = state.routing.targets.Capture(state.routing.color_pane);
+        const HWND color_pane = state.Workspace().windows.color_pane;
+        const HWND color_pin = GetDlgItem(color_pane, IDC_COLOR_PIN);
+        const auto* color_binding = state.routing.pane_targets.Find(state.routing.color_pane);
+        if (!WaitForSequencePresentation(state) || color_pin == nullptr
+            || color_binding == nullptr
+            || color_binding->policy != inkpod::app::PaneTargetPolicy::FollowActiveView) {
+            return 40951;
+        }
+        SendMessageW(color_pin, BM_CLICK, 0, 0);
+        if (state.routing.pane_targets.Find(state.routing.color_pane)->policy
+                != inkpod::app::PaneTargetPolicy::PinnedDocument
+            || CreateCell(state, 12U, 10U, 96'000U) != INKPOD_STATUS_OK) {
+            return 40951;
+        }
+        const auto second_context = state.routing.targets.Capture();
+        InkpodDocumentInfo second_before = EmptyDocumentInfo();
+        InkpodDocumentInfo second_after = EmptyDocumentInfo();
+        InkpodDocumentInfo first_after = EmptyDocumentInfo();
+        inkpod::app::EngineMetrics first_work_before{};
+        inkpod::app::EngineMetrics first_work_after{};
+        const auto* first_document = state.Documents().Find(first_context.document_session.value());
+        if (second_context.document_session == first_context.document_session
+            || first_document == nullptr
+            || !first_document->HasSequencePresentationAcknowledgement()
+            || !state.SequenceEditReady(first_context)
+            || !QueryDocument(state, second_before)
+            || !state.engine->GetMetrics(first_context.document_session.value(),
+                first_context.generation.value(), first_work_before)) {
+            std::fprintf(stderr,
+                "hidden pinned pane is not ready: first=%llu second=%llu ack=%d ready=%d "
+                "pending=%d epoch=%llu\n",
+                static_cast<unsigned long long>(first_context.document_session->Value()),
+                static_cast<unsigned long long>(second_context.document_session->Value()),
+                first_document != nullptr && first_document->HasSequencePresentationAcknowledgement(),
+                state.SequenceEditReady(first_context),
+                first_document != nullptr && first_document->sequence_activation_pending,
+                static_cast<unsigned long long>(first_document == nullptr
+                    ? 0U : first_document->sequence_required_present_epoch));
+            return 40951;
+        }
+        const LRESULT pinned_selection_result = SendMessageW(
+            state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_ALL,
+            reinterpret_cast<LPARAM>(color_pane));
+        // Selection All follows the WM_COMMAND convention of returning zero,
+        // including success. Verify Core acceptance and its semantic result.
+        if (pinned_selection_result != 0
+            || state.routing.targets.ActiveDocumentView() != first_context.document_view
+            || !state.engine->GetMetrics(first_context.document_session.value(),
+                first_context.generation.value(), first_work_after)
+            || first_work_after.accepted_work_items <= first_work_before.accepted_work_items
+            || first_work_after.rejected_work_items != first_work_before.rejected_work_items
+            || !QueryDocument(state, first_after)
+            || first_after.document_revision != autosave_source.document_revision) {
+            std::fprintf(stderr,
+                "hidden pinned pane command mismatch: result=%lld expected_view=%llu "
+                "active_view=%llu expected_revision=%llu actual_revision=%llu\n",
+                static_cast<long long>(pinned_selection_result),
+                static_cast<unsigned long long>(first_context.document_view->Value()),
+                static_cast<unsigned long long>(state.routing.targets.ActiveDocumentView().Value()),
+                static_cast<unsigned long long>(autosave_source.document_revision),
+                static_cast<unsigned long long>(first_after.document_revision));
+            return 40951;
+        }
+        if (!state.engine->GetDocumentInfo(second_context.document_session.value(),
+                   second_context.generation.value(), second_after)
+            || second_after.document_revision != second_before.document_revision
+            || second_after.main_plane_checksum != second_before.main_plane_checksum
+            || second_after.color_plane_checksum != second_before.color_plane_checksum) {
+            std::fputs("hidden pinned pane command changed the other document\n", stderr);
+            return 40951;
+        }
+        SendMessageW(color_pin, BM_CLICK, 0, 0);
+        if (state.routing.pane_targets.Find(state.routing.color_pane)->policy
+                != inkpod::app::PaneTargetPolicy::FollowActiveView
+            || !ActivateDocumentTab(state, second_context.document_view.value())) {
+            return 40951;
+        }
+        const auto previous_dirty_choice = state.lifetime.smoke_dirty_prompt_choice;
+        state.lifetime.smoke_dirty_prompt_choice = IDNO;
+        const LRESULT second_closed = SendMessageW(
+            state.Workspace().windows.window, WM_COMMAND, IDM_DOCUMENT_CLOSE, 0);
+        state.lifetime.smoke_dirty_prompt_choice = previous_dirty_choice;
+        if (second_closed != 1
+            || state.Documents().Find(second_context.document_session.value()) != nullptr
+            || !ActivateDocumentTab(state, first_context.document_view.value())
+            || !WaitForSequencePresentation(state)) {
+            return 40951;
+        }
+    }
     const SequenceCellSwitchPolicy previous_sequence_policy =
         state.lifetime.sequence_switch_policy;
     const auto restore_sequence_policy = [&state, previous_sequence_policy]() {
@@ -9271,6 +10010,59 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         state.lifetime.smoke_dirty_prompt_count;
     const std::uint32_t autosave_completion_count =
         state.Workspace().animation.smoke_sequence_switch_completed;
+    const std::uint64_t before_autosave_epoch =
+        state.Document().sequence_required_present_epoch;
+    const auto sequence_edit_callbacks_are_fenced = [&state]() noexcept {
+        const CommandContext target = state.routing.targets.Capture();
+        auto& workspace = state.Workspace();
+        auto& color_pane = workspace.panes.color_pane;
+        auto& options = workspace.tools.options_pane;
+        inkpod::app::EngineMetrics before{};
+        if (state.SequenceEditReady(target)
+            || color_pane.change_main_line_color == nullptr
+            || color_pane.change_color == nullptr
+            || options.change_diameter == nullptr
+            || !state.engine->GetMetrics(state.Document().id,
+                state.Document().generation, before)) {
+            return false;
+        }
+        const InkpodColorValue drawing_before = workspace.tools.drawing_color;
+        const InkpodColorValue main_line_before = workspace.panes.main_line_color;
+        const float diameter_before = workspace.tools.diameter;
+        const std::uint32_t chart_index_before = workspace.panes.selected_color_chart_index;
+        const InkpodColorValue proposed{
+            sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 17U, 35U, 199U, 255U};
+        color_pane.change_main_line_color(color_pane.context, proposed);
+        color_pane.change_color(color_pane.context, proposed);
+        options.change_diameter(options.context, diameter_before == 3.0F ? 4.0F : 3.0F);
+        if (color_pane.select_color != nullptr && !workspace.panes.color_chart_colors.empty()) {
+            color_pane.select_color(color_pane.context, 0U, true);
+        }
+        InkpodEditorStateUpdate update{};
+        update.struct_size = sizeof(update);
+        update.kind = INKPOD_EDITOR_UPDATE_TOOL_COLOR;
+        update.expected_editor_revision = workspace.tools.editor.editor_revision;
+        update.tool = workspace.tools.active_tool;
+        update.color = proposed;
+        const InkpodStatus updated = state.UpdateEditorState(update);
+        const auto colors_match = [](const InkpodColorValue& left,
+                                    const InkpodColorValue& right) noexcept {
+            return left.depth == right.depth && left.red == right.red
+                && left.green == right.green && left.blue == right.blue
+                && left.alpha == right.alpha;
+        };
+        inkpod::app::EngineMetrics after{};
+        return updated == INKPOD_STATUS_CANCELLED
+            && state.routing.targets.Capture() == target
+            && colors_match(workspace.tools.drawing_color, drawing_before)
+            && colors_match(workspace.panes.main_line_color, main_line_before)
+            && workspace.tools.diameter == diameter_before
+            && workspace.panes.selected_color_chart_index == chart_index_before
+            && state.engine->GetMetrics(state.Document().id,
+                state.Document().generation, after)
+            && after.accepted_work_items == before.accepted_work_items
+            && after.rejected_work_items == before.rejected_work_items;
+    };
     if (SendMessageW(
             state.Workspace().windows.window,
             WM_COMMAND,
@@ -9291,11 +10083,23 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         restore_sequence_policy();
         return 4096;
     }
-    if (!WaitForFileIo(state)) {
+    const std::uint64_t autosave_epoch =
+        state.routing.sequence_switch_pending_token.load(std::memory_order_acquire);
+    if (autosave_epoch == 0U || autosave_epoch == before_autosave_epoch
+        || !sequence_edit_callbacks_are_fenced()) {
+        std::fputs("pending sequence accepted a direct pane/editor callback\n", stderr);
+        restore_sequence_policy();
+        return 4096;
+    }
+    if (!WaitForFileIo(state) || !WaitForSequencePresentation(state)) {
         restore_sequence_policy();
         return 4096;
     }
     PumpPendingWindowMessages();
+    if (!state.SequenceEditReady(state.routing.targets.Capture())) {
+        restore_sequence_policy();
+        return 4096;
+    }
     InkpodDocumentInfo autosave_target = EmptyDocumentInfo();
     const auto* source_binding = state.Document().FindSequenceAutosave(
         autosave_request.source_document_uuid_high,
@@ -9303,6 +10107,7 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         autosave_request.source_generation);
     std::wstring source_metadata_path;
     if (state.Workspace().animation.sequence_switch_pending
+        || state.Document().sequence_required_present_epoch != autosave_epoch
         || state.Workspace().animation.smoke_sequence_switch_completed
             != autosave_completion_count + 1U
         || state.Workspace().animation.smoke_sequence_switch_status
@@ -9357,7 +10162,9 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         || !saved_sequence_pair_unchanged()
         || !ActivateDocumentTab(state, duplicate_view)
         || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_DOCUMENT_CLOSE, 0) != 1
-        || !ActivateDocumentTab(state, switching_view)) {
+        || !ActivateDocumentTab(state, switching_view)
+        || !WaitForSequencePresentation(state)
+        || state.Document().sequence_required_present_epoch != autosave_epoch) {
         restore_sequence_policy();
         return 1517;
     }
@@ -9375,7 +10182,19 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         restore_sequence_policy();
         return 4098;
     }
-    if (!WaitForFileIo(state)) {
+    // The outgoing target is already presented. The saved source replays to a
+    // revision no greater than that target, so revision-only fencing would let
+    // its stale frame satisfy recovery. Capture the accepted I/O token before
+    // pumping completion and require that exact epoch to reach Present.
+    const std::uint64_t recovery_epoch =
+        state.routing.sequence_switch_pending_token.load(std::memory_order_acquire);
+    if (recovery_epoch == 0U || recovery_epoch == autosave_epoch
+        || !sequence_edit_callbacks_are_fenced()) {
+        std::fputs("pending sequence recovery accepted a direct pane/editor callback\n", stderr);
+        restore_sequence_policy();
+        return 4098;
+    }
+    if (!WaitForFileIo(state) || !WaitForSequencePresentation(state)) {
         restore_sequence_policy();
         return 4098;
     }
@@ -9384,12 +10203,14 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     InkpodEditorStateInfo autosave_restored_editor{};
     autosave_restored_editor.struct_size = sizeof(autosave_restored_editor);
     if (state.Workspace().animation.sequence_switch_pending
+        || state.Document().sequence_required_present_epoch != recovery_epoch
         || state.Workspace().animation.smoke_sequence_switch_completed
             != autosave_completion_count + 2U
         || state.Workspace().animation.smoke_sequence_switch_status
             != INKPOD_STATUS_OK
         || state.lifetime.smoke_dirty_prompt_count != autosave_prompt_count
         || !QueryDocument(state, autosave_restored)
+        || autosave_restored.document_revision > autosave_target.document_revision
         || state.engine->GetEditorState(
                state.Document().id,
                state.Document().generation,
@@ -9423,7 +10244,8 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         std::fprintf(stderr,
             "sequence recovery mismatch: pending=%d completed=%u/%u status=%u prompts=%u/%u "
             "uuid=%d checksums=%d flags=%u editor_revision=%llu/%llu editor_digest=%d editor_flags=%u "
-            "index=%u pathless=%d recovery=%d original=%d identity=%d reserved=%d pair=%d\n",
+            "index=%u pathless=%d recovery=%d original=%d identity=%d reserved=%d pair=%d "
+            "revision=%llu/%llu epoch=%llu/%llu\n",
             state.Workspace().animation.sequence_switch_pending,
             state.Workspace().animation.smoke_sequence_switch_completed, autosave_completion_count + 2U,
             state.Workspace().animation.smoke_sequence_switch_status,
@@ -9443,7 +10265,11 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
             state.Document().shell.recovery_original_path == autosave_saved_path,
             state.Document().identity == autosave_source_identity,
             state.Documents().HasIdentityReservation(autosave_source_identity),
-            saved_sequence_pair_unchanged());
+            saved_sequence_pair_unchanged(),
+            static_cast<unsigned long long>(autosave_restored.document_revision),
+            static_cast<unsigned long long>(autosave_target.document_revision),
+            static_cast<unsigned long long>(state.Document().sequence_required_present_epoch),
+            static_cast<unsigned long long>(recovery_epoch));
         restore_sequence_policy();
         return 4099;
     }
@@ -9482,18 +10308,6 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     if (state.Document().id != sequence_session) {
         return 887;
     }
-    while (state.RecentDocumentCount() != 0U) {
-        if (!state.RemoveRecentDocument(0U)) {
-            return 899;
-        }
-    }
-    for (auto entry = recent_before_sequence_navigation.rbegin();
-         entry != recent_before_sequence_navigation.rend();
-         ++entry) {
-        if (!state.RecordRecentDocument(entry->path, entry->identity)) {
-            return 899;
-        }
-    }
     if (!RefreshSequencePane(state)) {
         return 888;
     }
@@ -9511,6 +10325,125 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         || GetFileAttributesW(L"inkpod-sequence-export-cell10.png")
             == INVALID_FILE_ATTRIBUTES) {
         return 413;
+    }
+    {
+        // Ordinary Revert must retire A's sequence epoch even when its I/O
+        // completion arrives with B active. The source is unchanged: save the
+        // already selected A once, reopen it, and repeat Selection All as a no-op.
+        const std::wstring revert_path = L"inkpod-sequence-hidden-revert.inkpod";
+        struct RevertFixture final {
+            const std::wstring& path;
+            ~RevertFixture() { DeleteSavedPairFixture(path); }
+        } revert_fixture{revert_path};
+        DeleteSavedPairFixture(revert_path);
+        const auto first_context = state.routing.targets.Capture();
+        InkpodDocumentInfo saved_first = EmptyDocumentInfo();
+        std::vector<std::uint8_t> saved_bytes;
+        if (state.Document().sequence_required_present_epoch == 0U
+            || SaveToPath(state, revert_path) != INKPOD_STATUS_OK
+            || !WaitForSequencePresentation(state)
+            || !QueryDocument(state, saved_first)
+            || (saved_first.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
+            || !ReadBoundedFile(revert_path, saved_bytes)
+            || CreateCell(state, 12U, 10U, 96'000U) != INKPOD_STATUS_OK) {
+            return 40952;
+        }
+        const auto second_context = state.routing.targets.Capture();
+        InkpodDocumentInfo second_before = EmptyDocumentInfo();
+        const auto* first_document = state.Documents().Find(first_context.document_session.value());
+        if (second_context.document_session == first_context.document_session
+            || first_document == nullptr
+            || !first_document->HasSequencePresentationAcknowledgement()
+            || !QueryDocument(state, second_before)
+            || !ActivateDocumentTab(state, first_context.document_view.value())
+            || !WaitForSequencePresentation(state)) {
+            return 40952;
+        }
+        // Use the production asynchronous command path, then change tabs before
+        // any UI Poll can apply the completion. Do not change the worker result.
+        const bool previous_smoke = state.lifetime.smoke_test;
+        state.lifetime.smoke_test = false;
+        const LRESULT accepted = SendMessageW(
+            state.Workspace().windows.window, WM_COMMAND, IDM_FILE_REVERT, 0);
+        state.lifetime.smoke_test = previous_smoke;
+        if (accepted != 1
+            || !state.file_io.HasPending(first_context.document_session.value(),
+                first_context.generation.value())
+            || !ActivateDocumentTab(state, second_context.document_view.value())
+            || !WaitForFileIo(state)) {
+            return 40952;
+        }
+        first_document = state.Documents().Find(first_context.document_session.value());
+        InkpodDocumentInfo reverted_first = EmptyDocumentInfo();
+        InkpodDocumentInfo second_after = EmptyDocumentInfo();
+        std::vector<std::uint8_t> reverted_bytes;
+        if (state.routing.targets.ActiveDocumentView() != second_context.document_view
+            || first_document == nullptr
+            || first_document->generation != first_context.generation.value()
+            || first_document->sequence_activation_pending
+            || first_document->sequence_required_present_revision != 0U
+            || first_document->sequence_required_present_epoch != 0U
+            || first_document->HasSequencePresentationAcknowledgement()
+            || !state.SequenceEditReady(first_context)
+            || !state.engine->GetDocumentInfo(first_context.document_session.value(),
+                first_context.generation.value(), reverted_first)
+            || reverted_first.document_uuid_high != saved_first.document_uuid_high
+            || reverted_first.document_uuid_low != saved_first.document_uuid_low
+            || reverted_first.main_plane_checksum != saved_first.main_plane_checksum
+            || reverted_first.color_plane_checksum != saved_first.color_plane_checksum
+            || (reverted_first.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
+            || !QueryDocument(state, second_after)
+            || second_after.document_revision != second_before.document_revision
+            || second_after.main_plane_checksum != second_before.main_plane_checksum
+            || second_after.color_plane_checksum != second_before.color_plane_checksum
+            || !ReadBoundedFile(revert_path, reverted_bytes)
+            || reverted_bytes != saved_bytes) {
+            std::fputs("hidden Revert retained a sequence fence or changed the active document\n",
+                stderr);
+            return 40952;
+        }
+        InkpodDocumentInfo first_after_noop = EmptyDocumentInfo();
+        inkpod::app::EngineMetrics first_work_before{};
+        inkpod::app::EngineMetrics first_work_after{};
+        if (!ActivateDocumentTab(state, first_context.document_view.value())
+            || !WaitForSequencePresentation(state)
+            || !state.engine->GetMetrics(first_context.document_session.value(),
+                first_context.generation.value(), first_work_before)
+            || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_ALL, 0) != 0
+            || !state.engine->GetMetrics(first_context.document_session.value(),
+                first_context.generation.value(), first_work_after)
+            || first_work_after.accepted_work_items <= first_work_before.accepted_work_items
+            || first_work_after.rejected_work_items != first_work_before.rejected_work_items
+            || !QueryDocument(state, first_after_noop)
+            || first_after_noop.document_revision != reverted_first.document_revision
+            || !ActivateDocumentTab(state, second_context.document_view.value())) {
+            std::fputs("reverted sequence document did not present epoch zero and resume editing\n",
+                stderr);
+            return 40952;
+        }
+        const auto previous_dirty_choice = state.lifetime.smoke_dirty_prompt_choice;
+        state.lifetime.smoke_dirty_prompt_choice = IDNO;
+        const LRESULT second_closed = SendMessageW(
+            state.Workspace().windows.window, WM_COMMAND, IDM_DOCUMENT_CLOSE, 0);
+        state.lifetime.smoke_dirty_prompt_choice = previous_dirty_choice;
+        if (second_closed != 1
+            || state.Documents().Find(second_context.document_session.value()) != nullptr
+            || !ActivateDocumentTab(state, first_context.document_view.value())
+            || !WaitForSequencePresentation(state)) {
+            return 40952;
+        }
+    }
+    while (state.RecentDocumentCount() != 0U) {
+        if (!state.RemoveRecentDocument(0U)) {
+            return 899;
+        }
+    }
+    for (auto entry = recent_before_sequence_navigation.rbegin();
+         entry != recent_before_sequence_navigation.rend();
+         ++entry) {
+        if (!state.RecordRecentDocument(entry->path, entry->identity)) {
+            return 899;
+        }
     }
     for (const auto& path : state.lifetime.smoke_sequence_paths) {
         DeleteSavedPairFixture(path);
@@ -14182,6 +15115,14 @@ int RunEditorStateOwnershipSmoke(ApplicationHost& state) noexcept {
             != externally_updated_editor.editor_revision
         || state.Workspace().tools.active_tool
             != externally_updated_editor.active_tool) {
+        std::fprintf(stderr,
+            "stale editor command did not reconcile: expected_revision=%llu "
+            "cached_revision=%llu ui_revision=%llu expected_tool=%u cached_tool=%u ui_tool=%u\n",
+            static_cast<unsigned long long>(externally_updated_editor.editor_revision),
+            static_cast<unsigned long long>(editor_after_failed_tool_update.editor_revision),
+            static_cast<unsigned long long>(state.Workspace().tools.editor.editor_revision),
+            externally_updated_editor.active_tool, editor_after_failed_tool_update.active_tool,
+            state.Workspace().tools.active_tool);
         return 1012;
     }
     return 0;

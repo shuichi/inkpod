@@ -2846,6 +2846,7 @@ void UpdateColorDockPane(
     const std::vector<InkpodColorValue>& chart_colors,
     const std::vector<std::wstring>& names,
     std::uint32_t palette_group,
+    std::uint32_t selected_palette_index,
     std::uint32_t chart_page,
     bool chart_locked) noexcept {
     ColorDockPaneState* state = pane == nullptr ? nullptr : PaneState(pane);
@@ -2865,6 +2866,11 @@ void UpdateColorDockPane(
     UpdateColorDockPaneMainLineColor(pane, main_line_color);
     UpdateColorDockPaneDrawingColor(pane, drawing_color);
     PopulateLists(pane, *state);
+    if (selected_palette_index < palette_colors.size()
+        && selected_palette_index / 10U == palette_group) {
+        SendMessageW(GetDlgItem(pane, IDC_PALETTE_LIST), LB_SETCURSEL,
+            selected_palette_index % 10U, 0);
+    }
     InvalidateRect(GetDlgItem(pane, IDC_COLOR_MAIN_LINE_SWATCH), nullptr, TRUE);
 }
 

@@ -97,6 +97,7 @@ impl Core {
             filter_preview: None,
             last_filter: None,
             render_cache: BTreeMap::new(),
+            sequence_render_cache: animation::SequenceRenderCache::new(),
             next_render_tile_revision: RenderRevision::from_raw(1),
             next_preview_revision: PreviewRevision::from_raw(1_u64 << 63),
             color_check: None,
@@ -329,6 +330,7 @@ impl Core {
         self.secondary_views.clear();
         self.floating = None;
         self.sequence = None;
+        self.sequence_render_catalog_changed();
         self.motion_check = None;
         self.subpalette_index = None;
         self.reset_editor_state(true);
@@ -379,6 +381,7 @@ pub struct Core {
     pub(super) filter_preview: Option<effects::FilterPreview>,
     pub(super) last_filter: Option<Filter>,
     pub(super) render_cache: BTreeMap<(u64, TileCoord), RenderTile>,
+    pub(super) sequence_render_cache: animation::SequenceRenderCache,
     pub(super) next_render_tile_revision: RenderRevision,
     pub(super) next_preview_revision: PreviewRevision,
     pub(super) color_check: Option<ColorCheckMode>,
@@ -401,6 +404,7 @@ impl Clone for Core {
     fn clone(&self) -> Self {
         let mut cloned = self.clone_for_staging();
         cloned.persistence_state = persistence_task::PersistenceState::new();
+        cloned.sequence_render_cache.fork_owner();
         cloned.io_install_pending = false;
         cloned.canonical_invocation_active = false;
         cloned
@@ -447,6 +451,7 @@ impl Core {
             filter_preview: self.filter_preview.clone(),
             last_filter: self.last_filter.clone(),
             render_cache: self.render_cache.clone(),
+            sequence_render_cache: self.sequence_render_cache.clone(),
             next_render_tile_revision: self.next_render_tile_revision,
             next_preview_revision: self.next_preview_revision,
             color_check: self.color_check,
@@ -693,6 +698,7 @@ impl Core {
     }
 
     pub(super) fn reset_history(&mut self, saved: bool) {
+        self.sequence_render_cache.invalidate_document();
         self.history.clear();
         self.history_cursor = 0;
         self.staged_history = None;

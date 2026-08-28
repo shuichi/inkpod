@@ -447,6 +447,22 @@ pub(super) fn thumbnail_for_raster(raster: &TileRaster) -> Result<Thumbnail, Cor
     thumbnail_for_raster_with_max(raster, THUMBNAIL_MAX_DIMENSION)
 }
 
+pub(super) fn thumbnail_allocation_bytes(width: u32, height: u32) -> u64 {
+    let (width, height, _) = thumbnail_geometry(width, height, THUMBNAIL_MAX_DIMENSION);
+    u64::from(width) * u64::from(height) * 4
+}
+
+fn thumbnail_geometry(width: u32, height: u32, maximum_dimension: u32) -> (u32, u32, f64) {
+    let scale = (f64::from(width) / f64::from(maximum_dimension))
+        .max(f64::from(height) / f64::from(maximum_dimension))
+        .max(1.0);
+    (
+        (f64::from(width) / scale).round().max(1.0) as u32,
+        (f64::from(height) / scale).round().max(1.0) as u32,
+        scale,
+    )
+}
+
 pub(crate) fn thumbnail_for_raster_with_max(
     raster: &TileRaster,
     maximum_dimension: u32,
@@ -456,11 +472,8 @@ pub(crate) fn thumbnail_for_raster_with_max(
             "thumbnail maximum dimension must be positive",
         ));
     }
-    let scale = (f64::from(raster.width()) / f64::from(maximum_dimension))
-        .max(f64::from(raster.height()) / f64::from(maximum_dimension))
-        .max(1.0);
-    let width = (f64::from(raster.width()) / scale).round().max(1.0) as u32;
-    let height = (f64::from(raster.height()) / scale).round().max(1.0) as u32;
+    let (width, height, scale) =
+        thumbnail_geometry(raster.width(), raster.height(), maximum_dimension);
     let mut rgba8 = Vec::with_capacity(width as usize * height as usize * 4);
     for y in 0..height {
         for x in 0..width {

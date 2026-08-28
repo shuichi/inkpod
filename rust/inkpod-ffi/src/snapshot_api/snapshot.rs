@@ -89,6 +89,47 @@ pub unsafe extern "C" fn inkpod_snapshot_get_transform(
     })
 }
 
+/// Copies the runtime source namespace fixed when this snapshot was built.
+///
+/// This query does not scan pixels or infer provenance from the current Core.
+/// Non-pristine snapshots return zero flags and zero identity fields.
+///
+/// # Safety
+/// `snapshot` must remain live and may not be released concurrently. `output`
+/// must be a complete, aligned, writable record not overlapping the snapshot.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_snapshot_get_source_identity(
+    snapshot: *const InkpodSnapshot,
+    output: *mut InkpodSnapshotSourceIdentity,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if snapshot.is_null() || !is_aligned(snapshot) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "snapshot is null or misaligned",
+            );
+        }
+        // SAFETY: Validate the readable size prefix before accessing the record.
+        if let Err(status) =
+            unsafe { validate_struct(output.cast_const(), "InkpodSnapshotSourceIdentity") }
+        {
+            return status;
+        }
+        // SAFETY: Both objects satisfy the live/non-overlapping caller contract;
+        // the complete output size and alignment were validated above.
+        let snapshot = unsafe { &*snapshot };
+        let output = unsafe { &mut *output };
+        let source = snapshot.snapshot.sequence_render_source();
+        output.flags = source.map_or(0, |_| INKPOD_SNAPSHOT_SOURCE_SEQUENCE_PRISTINE);
+        output.document_uuid_high = source.map_or(0, |source| (source.document_uuid >> 64) as u64);
+        output.document_uuid_low = source.map_or(0, |source| source.document_uuid as u64);
+        output.source_generation = source.map_or(0, |source| source.source_generation);
+        output.owner_generation = source.map_or(0, |source| source.owner_generation);
+        INKPOD_STATUS_OK
+    })
+}
+
 /// Copies immutable ruler, guide, grid, snap, and transparent-view overlay data.
 ///
 /// # Safety

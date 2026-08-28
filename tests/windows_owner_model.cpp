@@ -99,10 +99,18 @@ bool TestApplicationWideThumbnailLru() {
     const std::vector<std::uint8_t> first_pixels(16U, 1U);
     const std::vector<std::uint8_t> second_pixels(16U, 2U);
     const std::vector<std::uint8_t> third_pixels(16U, 3U);
+    const auto initial_sequence_generation =
+        cache.InvalidationGeneration(ThumbnailKind::Sequence);
+    const auto initial_layer_generation =
+        cache.InvalidationGeneration(ThumbnailKind::Layer);
     if (!cache.Put(
             first, 2U, 2U, 8U, ThumbnailPixelLayout::Bgra8, first_pixels)
         || !cache.Put(
-            second, 2U, 2U, 8U, ThumbnailPixelLayout::Rgba8, second_pixels)) {
+            second, 2U, 2U, 8U, ThumbnailPixelLayout::Rgba8, second_pixels)
+        || cache.InvalidationGeneration(ThumbnailKind::Sequence)
+            != initial_sequence_generation
+        || cache.InvalidationGeneration(ThumbnailKind::Layer)
+            != initial_layer_generation) {
         return false;
     }
     ThumbnailImageView image{};
@@ -121,9 +129,15 @@ bool TestApplicationWideThumbnailLru() {
         || after_eviction.resident_bytes != 32U
         || after_eviction.entry_count != 2U
         || after_eviction.hit_count != 1U
-        || after_eviction.eviction_count != 1U) {
+        || after_eviction.eviction_count != 1U
+        || cache.InvalidationGeneration(ThumbnailKind::Sequence)
+            == initial_sequence_generation
+        || cache.InvalidationGeneration(ThumbnailKind::Layer)
+            != initial_layer_generation) {
         return false;
     }
+    const auto evicted_sequence_generation =
+        cache.InvalidationGeneration(ThumbnailKind::Sequence);
 
     // Re-inserting identical content is a touch/no-op and must not create a
     // duplicate or consume additional budget.
@@ -154,15 +168,51 @@ bool TestApplicationWideThumbnailLru() {
         return false;
     }
     cache.RemoveDocument(first.document, first.document_generation);
-    if (cache.Peek(first, image) || cache.Usage().resident_bytes != 16U) {
+    if (cache.Peek(first, image) || cache.Usage().resident_bytes != 16U
+        || cache.InvalidationGeneration(ThumbnailKind::Layer)
+            == initial_layer_generation
+        || cache.InvalidationGeneration(ThumbnailKind::Sequence)
+            != evicted_sequence_generation) {
         return false;
     }
     cache.RemovePane(third.pane);
     if (cache.Usage().resident_bytes != 0U || cache.Usage().entry_count != 0U) {
         return false;
     }
+    if (!cache.Put(
+            second, 2U, 2U, 8U, ThumbnailPixelLayout::Rgba8, second_pixels)) {
+        return false;
+    }
+    cache.RemoveDocument(second.document, second.document_generation,
+        ThumbnailKind::Layer);
+    if (!cache.Peek(second, image)
+        || cache.InvalidationGeneration(ThumbnailKind::Sequence)
+            != evicted_sequence_generation
+        || !cache.Put(
+            second, 2U, 2U, 8U, ThumbnailPixelLayout::Rgba8, second_pixels)
+        || cache.InvalidationGeneration(ThumbnailKind::Sequence)
+            != evicted_sequence_generation
+        || !cache.Put(
+            second, 2U, 2U, 8U, ThumbnailPixelLayout::Rgba8, third_pixels)
+        || cache.InvalidationGeneration(ThumbnailKind::Sequence)
+            == evicted_sequence_generation) {
+        return false;
+    }
+    const auto replaced_generation =
+        cache.InvalidationGeneration(ThumbnailKind::Sequence);
+    cache.RemoveDocument(second.document, second.document_generation,
+        ThumbnailKind::Sequence);
+    if (cache.Peek(second, image)
+        || cache.InvalidationGeneration(ThumbnailKind::Sequence)
+            == replaced_generation
+        || !cache.Put(
+            second, 2U, 2U, 8U, ThumbnailPixelLayout::Rgba8, second_pixels)) {
+        return false;
+    }
+    const auto before_clear = cache.InvalidationGeneration(ThumbnailKind::Sequence);
     cache.Clear();
-    return cache.Usage().resident_bytes == 0U;
+    return cache.Usage().resident_bytes == 0U
+        && cache.InvalidationGeneration(ThumbnailKind::Sequence) != before_clear;
 }
 
 bool TestDocumentIdentityAndIndex() {
@@ -444,6 +494,90 @@ bool TestOwnerGraphFailureUnwind() {
         }
     }
     return true;
+}
+
+bool TestSequencePresentationAcknowledgement() {
+    DocumentRegistry registry;
+    auto* core = reinterpret_cast<CoreHost*>(static_cast<std::uintptr_t>(1U));
+    const DocumentSessionId first_id{11U};
+    const DocumentSessionId second_id{13U};
+    const Generation generation{7U};
+    const DocumentViewId first_view{17U};
+    const DocumentViewId second_view{19U};
+    if (!registry.InitializePlaceholder(generation)
+        || !registry.Replace(first_id, generation, first_view, core)) {
+        return false;
+    }
+    auto* first = registry.Current();
+    first->sequence_required_present_revision = 41U;
+    first->sequence_required_present_epoch = 101U;
+    if (first->HasSequencePresentationAcknowledgement()
+        || first->AcknowledgeSequencePresentation(second_id, generation, first_view, 41U, 101U)
+        || first->AcknowledgeSequencePresentation(first_id, Generation{8U}, first_view, 41U, 101U)
+        || first->AcknowledgeSequencePresentation(first_id, generation, second_view, 41U, 101U)
+        || first->AcknowledgeSequencePresentation(first_id, generation, first_view, 40U, 101U)
+        || first->AcknowledgeSequencePresentation(first_id, generation, first_view, 41U, 100U)
+        || first->HasSequencePresentationAcknowledgement()) {
+        return false;
+    }
+    first->sequence_activation_pending = true;
+    if (first->AcknowledgeSequencePresentation(first_id, generation, first_view, 41U, 101U)) {
+        return false;
+    }
+    first->sequence_activation_pending = false;
+    if (!first->AcknowledgeSequencePresentation(first_id, generation, first_view, 41U, 101U)
+        || !first->HasSequencePresentationAcknowledgement()) {
+        return false;
+    }
+
+    // A pane retains A's target while B becomes the active tab. A's verified
+    // one-shot acknowledgement belongs to its session, not to the reused Canvas.
+    inkpod::app::CommandContext pinned{};
+    pinned.document_session = first_id;
+    pinned.document_view = first_view;
+    pinned.generation = generation;
+    if (!registry.Add(second_id, generation, second_view, core)
+        || registry.Current()->id != second_id
+        || !registry.Find(pinned.document_session.value())->HasSequencePresentationAcknowledgement()
+        || registry.Current()->HasSequencePresentationAcknowledgement()) {
+        return false;
+    }
+    first->sequence_activation_pending = true;
+    if (first->HasSequencePresentationAcknowledgement()
+        || first->AcknowledgeSequencePresentation(first_id, generation, first_view, 41U, 101U)) {
+        return false;
+    }
+    // A failed switch restores the previous fence; a new committed epoch does
+    // not inherit that acknowledgement, even if recovery lowers the revision.
+    first->sequence_activation_pending = false;
+    if (!first->HasSequencePresentationAcknowledgement()) {
+        return false;
+    }
+    first->sequence_required_present_revision = 2U;
+    first->sequence_required_present_epoch = 102U;
+    if (first->HasSequencePresentationAcknowledgement()
+        || first->AcknowledgeSequencePresentation(first_id, generation, first_view, 41U, 101U)
+        || !first->AcknowledgeSequencePresentation(first_id, generation, first_view, 2U, 102U)
+        || !first->HasSequencePresentationAcknowledgement()) {
+        return false;
+    }
+
+    // DocumentRegistry can replace the current owner in place. Neither a new
+    // generation nor another session may inherit its old successful Present.
+    if (!registry.Activate(first_id)
+        || !registry.Replace(first_id, Generation{8U}, first_view, core)
+        || first->HasSequencePresentationAcknowledgement()
+        || first->AcknowledgeSequencePresentation(first_id, generation, first_view, 2U, 102U)
+        || !first->AcknowledgeSequencePresentation(first_id, Generation{8U}, first_view, 2U, 102U)
+        || !registry.Replace(DocumentSessionId{23U}, Generation{8U}, first_view, core)
+        || first->HasSequencePresentationAcknowledgement()) {
+        return false;
+    }
+    first->sequence_required_present_revision = 0U;
+    first->sequence_required_present_epoch = 0U;
+    return !first->HasSequencePresentationAcknowledgement()
+        && !first->AcknowledgeSequencePresentation(
+            first->id, first->generation, first_view, 2U, 0U);
 }
 
 bool TestDocumentAndViewLifetime() {
@@ -758,6 +892,10 @@ bool TestEditorAreaLifetimeAndSplit() {
 }  // namespace
 
 int main() {
+    if (!TestSequencePresentationAcknowledgement()) {
+        std::cerr << "sequence presentation acknowledgement test failed\n";
+        return 9;
+    }
     if (!TestApplicationWideThumbnailLru()) {
         std::cerr << "application-wide thumbnail LRU test failed\n";
         return 8;

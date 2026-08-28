@@ -5212,3 +5212,189 @@ fn ffi_contract_public_surface_matches_header_and_every_function_has_a_test_refe
         "public FFI functions without a direct contract-test reference: {missing:?}"
     );
 }
+
+#[test]
+fn sequence_catalog_and_snapshot_source_abi_preserve_immutable_provenance() {
+    let (mut core, _) = create_core(1, 1, 0x9100);
+    let names = [b"cell1.tga".as_slice(), b"cell2.tga".as_slice()];
+    let pixels = [[1_u8, 2, 3, 255], [7_u8, 8, 9, 255]];
+    let cells = std::array::from_fn::<_, 2, _>(|index| InkpodSequenceCellInput {
+        struct_size: size_of::<InkpodSequenceCellInput>() as u32,
+        reserved: 0,
+        name_utf8: names[index].as_ptr(),
+        name_bytes: names[index].len() as u64,
+        source: InkpodRasterSourceInput {
+            struct_size: size_of::<InkpodRasterSourceInput>() as u32,
+            pixel_format: INKPOD_STORAGE_RGBA8,
+            flags: 0,
+            document_uuid_high: 0,
+            document_uuid_low: 0x9101 + index as u64,
+            source_revision: 3 + index as u64,
+            width: 1,
+            height: 1,
+            dpi_x_milli: 96_000,
+            dpi_y_milli: 96_000,
+            reference_frame: InkpodFrameRect {
+                x: 0,
+                y: 0,
+                width: 1,
+                height: 1,
+            },
+            pixels: pixels[index].as_ptr(),
+            pixel_bytes: 4,
+            row_stride_bytes: 4,
+        },
+    });
+    let sequence = InkpodSequenceInput {
+        struct_size: size_of::<InkpodSequenceInput>() as u32,
+        reserved: 0,
+        feature_flags: 0,
+        cells: cells.as_ptr(),
+        cell_count: cells.len() as u64,
+        cell_stride_bytes: size_of::<InkpodSequenceCellInput>() as u64,
+    };
+    let options = InkpodSnapshotOptions {
+        struct_size: size_of::<InkpodSnapshotOptions>() as u32,
+        reserved: 0,
+        feature_flags: 0,
+    };
+    let mut catalog = InkpodSequenceCatalogInfo {
+        struct_size: size_of::<InkpodSequenceCatalogInfo>() as u32,
+        ..InkpodSequenceCatalogInfo::default()
+    };
+    let mut identity = InkpodSnapshotSourceIdentity {
+        struct_size: size_of::<InkpodSnapshotSourceIdentity>() as u32,
+        flags: u32::MAX,
+        ..InkpodSnapshotSourceIdentity::default()
+    };
+    let mut info = document_info();
+    let mut ordinary = ptr::null_mut();
+    let mut first = ptr::null_mut();
+    // SAFETY: All size-prefixed objects and nested spans are complete, live,
+    // aligned and non-overlapping. Core operations stay on its owner thread.
+    unsafe {
+        assert_eq!(
+            inkpod_core_sequence_catalog_get(ptr::null_mut(), &mut catalog),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        let mut short = InkpodSequenceCatalogInfo {
+            struct_size: 4,
+            ..catalog
+        };
+        assert_eq!(
+            inkpod_core_sequence_catalog_get(core, &mut short),
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+        assert_eq!(
+            inkpod_core_sequence_catalog_get(core, &mut catalog),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            (
+                catalog.sequence_revision,
+                catalog.owner_generation,
+                catalog.cell_count
+            ),
+            (0, 0, 0)
+        );
+        assert_eq!(catalog.active_index, INKPOD_SEQUENCE_INDEX_NONE);
+        assert_eq!(
+            inkpod_core_build_snapshot(core, &options, &mut ordinary),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_snapshot_get_source_identity(ordinary, &mut identity),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            (
+                identity.flags,
+                identity.document_uuid_high,
+                identity.document_uuid_low,
+                identity.source_generation,
+                identity.owner_generation
+            ),
+            (0, 0, 0, 0, 0)
+        );
+        assert_eq!(
+            inkpod_snapshot_get_source_identity(ptr::null(), &mut identity),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            inkpod_snapshot_get_source_identity(ordinary, ptr::null_mut()),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        let mut short_identity = InkpodSnapshotSourceIdentity {
+            struct_size: 4,
+            ..identity
+        };
+        assert_eq!(
+            inkpod_snapshot_get_source_identity(ordinary, &mut short_identity),
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+        assert_eq!(inkpod_core_sequence_set(core, &sequence), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_core_sequence_activate(core, 0, &mut info),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_sequence_catalog_get(core, &mut catalog),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!((catalog.cell_count, catalog.active_index), (2, 0));
+        assert_ne!(catalog.owner_generation, 0);
+        assert_eq!(
+            inkpod_core_build_snapshot(core, &options, &mut first),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_snapshot_get_source_identity(first, &mut identity),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(identity.flags, INKPOD_SNAPSHOT_SOURCE_SEQUENCE_PRISTINE);
+        assert_eq!(
+            (
+                identity.document_uuid_high,
+                identity.document_uuid_low,
+                identity.source_generation
+            ),
+            (0, 0x9101, 3)
+        );
+        assert_eq!(identity.owner_generation, catalog.owner_generation);
+        assert_eq!(
+            inkpod_core_sequence_activate(core, 1, &mut info),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+    }
+    // A renderer thread may still query the old snapshot after Core switches or
+    // is destroyed; its provenance must never follow the active UI selection.
+    let address = first as usize;
+    let observed = std::thread::spawn(move || {
+        let mut output = InkpodSnapshotSourceIdentity {
+            struct_size: size_of::<InkpodSnapshotSourceIdentity>() as u32,
+            ..InkpodSnapshotSourceIdentity::default()
+        };
+        // SAFETY: Main thread retains the live immutable snapshot until join.
+        assert_eq!(
+            unsafe {
+                inkpod_snapshot_get_source_identity(address as *const InkpodSnapshot, &mut output)
+            },
+            INKPOD_STATUS_OK
+        );
+        (
+            output.document_uuid_low,
+            output.source_generation,
+            output.owner_generation,
+        )
+    })
+    .join()
+    .unwrap();
+    assert_eq!(observed, (0x9101, 3, catalog.owner_generation));
+    // SAFETY: Both owner variables still contain their live uniquely released handles.
+    unsafe {
+        assert_eq!(inkpod_snapshot_release(&mut first), INKPOD_STATUS_OK);
+        assert_eq!(inkpod_snapshot_release(&mut first), INKPOD_STATUS_OK);
+        assert_eq!(inkpod_snapshot_release(&mut ordinary), INKPOD_STATUS_OK);
+    }
+}

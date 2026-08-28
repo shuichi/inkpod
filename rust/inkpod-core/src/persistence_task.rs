@@ -392,6 +392,7 @@ impl Core {
         frozen.secondary_views.clear();
         if !retain_sequence {
             frozen.sequence = None;
+            frozen.sequence_render_cache.clear_retained();
         }
         frozen.motion_check = None;
         frozen.subpalette_index = None;

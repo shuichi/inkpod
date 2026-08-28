@@ -51,6 +51,11 @@ bool DocumentlessKind(std::uint32_t kind) noexcept {
         || kind == INKPOD_IO_RECOVERY_DISCARD;
 }
 
+bool ReplacesDocument(std::uint32_t kind) noexcept {
+    return kind == INKPOD_IO_OPEN_NATIVE || kind == INKPOD_IO_OPEN_RECOVERY
+        || kind == INKPOD_IO_OPEN_RASTER || kind == INKPOD_IO_SEQUENCE_SWITCH;
+}
+
 bool BatchKind(std::uint32_t kind) noexcept {
     return kind == INKPOD_IO_BATCH_PLAN || kind == INKPOD_IO_BATCH_RUN
         || kind == INKPOD_IO_BATCH_PREVIEW;
@@ -370,6 +375,8 @@ struct PendingFileIo final {
                 fence = installing;
                 return status;
             }
+            result.document_applied = !ReferenceKind(request.kind)
+                && status == INKPOD_STATUS_OK;
             installing = false;
             fence = false;
             if (status == INKPOD_STATUS_OK) {
@@ -385,6 +392,7 @@ struct PendingFileIo final {
                 fence = true;
                 return status;
             }
+            result.document_applied = status == INKPOD_STATUS_OK;
             installing = false;
             fence = false;
         } else if (info.state == INKPOD_IO_COMPLETE) {
@@ -480,10 +488,23 @@ bool FileIoController::Queue(CoreHost& engine, FileIoRequest request,
             && pending->request.kind != INKPOD_IO_EXPORT_RASTER
             && pending->request.kind != INKPOD_IO_AUTOSAVE;
         CoreHost::FileIoOperation operation =
-            [pending](InkpodCore* core, bool cancelled, bool& installing) {
-                return pending->Step(core, cancelled, installing);
+            [pending, &engine](InkpodCore* core, bool cancelled, bool& installing) {
+                const InkpodStatus status = pending->Step(core, cancelled, installing);
+                if (pending->result.document_applied
+                    && (pending->request.presentation_epoch != 0U
+                        || ReplacesDocument(pending->request.kind))
+                    && (!pending->request.context.document_session.has_value()
+                        || !pending->request.context.generation.has_value()
+                        || !engine.SetPresentationEpoch(
+                            pending->request.context.document_session.value(),
+                            pending->request.context.generation.value(),
+                            pending->request.presentation_epoch))) {
+                    return INKPOD_STATUS_INVALID_STATE;
+                }
+                return status;
             };
-        std::function<void(InkpodStatus)> completed = [pending](InkpodStatus status) {
+        CoreHost::FileIoCompletion completed = [pending](
+            InkpodStatus status, InkpodStatus presentation_status) {
             // Drop staged Core/image leases on the engine thread before the
             // UI sees completion. The immutable copied result remains valid.
             const InkpodStatus released = inkpod_io_job_release(&pending->job);
@@ -491,6 +512,7 @@ bool FileIoController::Queue(CoreHost& engine, FileIoRequest request,
                 status = released;
             }
             pending->result.status = status;
+            pending->result.presentation_status = presentation_status;
             pending->finished.store(true, std::memory_order_release);
         };
         impl_->entries.push_back(Impl::Entry{pending, std::move(completion), std::move(preflight)});

@@ -81,10 +81,22 @@ struct SnapshotRoute {
 // host shutdown.
 struct SnapshotEnvelope {
     SnapshotRoute route;
+    // Renderer snapshot revision: previews may advance this independently of
+    // the committed document. It continues to validate the immutable payload.
     std::uint64_t document_revision{};
     std::uint64_t view_revision{};
     InkpodSnapshot* snapshot{};
     std::uint64_t estimated_payload_bytes{};
+    // Captured on the Core owner thread with the snapshot. Auxiliary sources
+    // have no document and use zero. This revision and presentation_epoch,
+    // never a preview revision, validate edit fences together.
+    std::uint64_t committed_document_revision{};
+    // Assigned by RendererHost when accepting the envelope into its queue.
+    std::uint64_t submission_qpc{};
+    // Windows-only navigation token fixed on the Core owner thread. This
+    // distinguishes replacements with equal/lower document revisions without
+    // becoming part of source identity or any CPU/GPU cache key.
+    std::uint64_t presentation_epoch{};
 };
 
 // Process-wide renderer resource telemetry. Byte counts describe payloads and
@@ -107,6 +119,13 @@ struct RendererResourceUsage {
     std::uint64_t stale_snapshot_count{};
     std::uint64_t resource_limit_count{};
     std::uint64_t device_reset_count{};
+    // Source-cache allocations are a subset of gpu_tile_bytes, including the
+    // active pristine source. Upload counters are cumulative for live surfaces.
+    std::uint64_t sequence_cache_source_count{};
+    std::uint64_t sequence_cache_bytes{};
+    std::uint64_t sequence_cache_eviction_count{};
+    std::uint64_t uploaded_tile_count{};
+    std::uint64_t uploaded_tile_bytes{};
 };
 
 // One CanvasSurface contribution to RendererResourceUsage. The route keeps the
@@ -121,6 +140,33 @@ struct RendererSurfaceResourceUsage {
     std::uint64_t active_tile_count{};
     bool visible{};
     bool occluded{};
+    std::uint64_t sequence_cache_source_count{};
+    std::uint64_t sequence_cache_bytes{};
+    std::uint64_t sequence_cache_eviction_count{};
+    std::uint64_t uploaded_tile_count{};
+    std::uint64_t uploaded_tile_bytes{};
+    // These identify the last Present that returned S_OK. Snapshot submission,
+    // upload, frame-latency timeout, and occlusion never advance them. Binding
+    // another route or losing the device invalidates the old presentation.
+    std::uint64_t last_presented_document_revision{};
+    std::uint64_t last_presented_view_revision{};
+    InkpodSnapshotSourceIdentity last_presented_source{};
+    // QPC ticks (divide by QueryPerformanceFrequency). Zero means unavailable.
+    // Re-presenting the same committed revision and epoch keeps its first time.
+    std::uint64_t last_snapshot_submission_qpc{};
+    std::uint64_t first_presented_revision_qpc{};
+    std::uint64_t last_presented_presentation_epoch{};
+    // Cumulative waits that expired and the raw result of the latest render
+    // attempt, before occlusion/device recovery normalization. Neither is a
+    // successful Present acknowledgement.
+    std::uint64_t frame_latency_timeout_count{};
+    HRESULT last_render_result{S_OK};
+    // Absolute QPC stages of the same first successful committed revision /
+    // epoch as first_presented_revision_qpc. Ready follows frame admission and
+    // precedes D2D preparation; present-begin immediately precedes Present.
+    // Repeated presentations leave all three stages unchanged.
+    std::uint64_t first_frame_ready_qpc{};
+    std::uint64_t first_present_begin_qpc{};
 };
 
 // Process-owned facade for one renderer thread. Every GPU call and every

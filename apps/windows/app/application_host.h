@@ -105,7 +105,15 @@ public:
     [[nodiscard]] bool ActivateEmptyEditorGroup(EditorGroupId group) noexcept;
     [[nodiscard]] bool RefreshEditorPresentation(
         DocumentSessionId session,
-        Generation generation) noexcept;
+        Generation generation,
+        bool refresh_core = true) noexcept;
+    // UI-thread observation before a Canvas route is rebound or destroyed.
+    // Copies published telemetry only; never waits for Core or Present.
+    void ObserveCanvasSequencePresentation(HWND canvas) noexcept;
+    // Side-effect-free UI query. A captured session must have presented its
+    // current navigation epoch once, or this exact view must be presenting it.
+    // Canvas stroke Begin separately requires the current bound route's frame.
+    [[nodiscard]] bool SequenceEditReady(const CommandContext& context) const noexcept;
     [[nodiscard]] InkpodStatus UpdateEditorState(
         const InkpodEditorStateUpdate& update) noexcept;
     [[nodiscard]] bool CloseDocumentView(DocumentViewId view) noexcept;
@@ -145,6 +153,9 @@ public:
     std::unique_ptr<ActivationService> activation;
 
 private:
+    [[nodiscard]] bool BindDocumentCanvas(
+        HWND canvas, const DocumentSession& document, DocumentViewId view) noexcept;
+    [[nodiscard]] bool UnbindDocumentCanvas(HWND canvas) noexcept;
     [[nodiscard]] bool RegisterWorkspacePanes(
         WorkspaceWindow& workspace) noexcept;
     void UnregisterWorkspacePanes(WorkspaceWindow& workspace) noexcept;

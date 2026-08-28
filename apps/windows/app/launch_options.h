@@ -9,6 +9,7 @@ enum class LaunchMode {
     Application,
     ApplicationSmoke,
     PerformanceSmoke,
+    SequencePerformanceSmoke,
     AbiSmoke,
     PortableSmoke,
 };

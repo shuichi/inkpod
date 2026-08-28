@@ -47,6 +47,7 @@ struct EngineMetrics {
     std::uint64_t completed_strokes{};
     std::uint64_t completed_samples{};
     std::uint64_t preview_snapshots{};
+    std::uint64_t submitted_snapshots{};
     std::uint64_t accepted_work_items{};
     std::uint64_t rejected_work_items{};
     std::uint64_t queue_wait_samples{};
@@ -91,6 +92,10 @@ public:
     // until this same operation finalizes, including during shutdown.
     using FileIoOperation =
         std::function<InkpodStatus(InkpodCore*, bool, bool&)>;
+    // First status is the durable apply result. The second includes subsequent
+    // published-state/snapshot failure, so callers can retry presentation without
+    // repeating a successful save/open/install. Both run on the owner thread.
+    using FileIoCompletion = std::function<void(InkpodStatus, InkpodStatus)>;
     // The application supports up to eight workspace windows with two visible
     // editor groups in each. Only visible editor-group canvases are registered.
     static constexpr std::size_t kMaximumSnapshotSinks = 16U;
@@ -196,7 +201,7 @@ public:
         FileIoOperation operation,
         bool publish_snapshot,
         bool refresh_document_info,
-        std::function<void(InkpodStatus)> completion) noexcept;
+        FileIoCompletion completion) noexcept;
     // Captures one private InkScript request without synchronously waiting for
     // parse/compile/plan/run. PlanReady and terminal results are delivered as
     // pointer-free kCoreInkScriptNotification values.
@@ -214,10 +219,30 @@ public:
         DocumentSessionId session,
         Generation generation) noexcept;
     InkpodStatus FlushPreview() noexcept;
+    // Repeating the applied view avoids queueing and snapshot publication even
+    // while unrelated document work is pending. Queued view changes retain order.
     InkpodStatus SetActiveView(std::uint64_t view_id) noexcept;
+    // A new Canvas route needs a fresh publication even for the same Core view.
+    // This short metadata update never waits for an in-flight snapshot build;
+    // an older publication cannot acknowledge a newer invalidation.
+    bool InvalidateViewPublication(
+        DocumentSessionId session, Generation generation) noexcept;
+    // Core-owner-thread only: call after installing the navigation result and
+    // before publishing its snapshot. The nonzero UI token is not a Core,
+    // render-cache, or persistent revision. Zero clears continuity after an
+    // unrelated document replacement. Wrong thread or binding fails.
+    bool SetPresentationEpoch(
+        DocumentSessionId session, Generation generation, std::uint64_t epoch) noexcept;
     bool RetargetNotificationOwner(
         HWND expected_owner,
         HWND replacement_owner) noexcept;
+    // Posts a value-only private WM_APP notification to the current owner,
+    // including after a workspace handoff. Failure leaves caller-owned result
+    // storage untouched so the UI can poll or clean it up later.
+    bool PostCompletionNotification(
+        UINT message, std::uint64_t token, Generation generation) noexcept;
+    // Borrowed until Unregister returns. Unregistration waits for in-flight
+    // publication; ordinary state queries and input acceptance do not wait for it.
     bool RegisterSnapshotSink(renderer::CanvasSnapshotSink* canvas) noexcept;
     bool UnregisterSnapshotSink(renderer::CanvasSnapshotSink* canvas) noexcept;
     bool UnregisterSnapshotSinks(
@@ -244,6 +269,10 @@ public:
         DocumentSessionId session,
         Generation generation,
         std::wstring& name) const noexcept;
+    bool GetSequenceCatalog(
+        DocumentSessionId session,
+        Generation generation,
+        InkpodSequenceCatalogInfo& info) const noexcept;
     // Rust defaults remain available after the last document session closes.
     InkpodStatus GetApplicationEditorDefaults(
         InkpodEditorDefaults& defaults) const noexcept;

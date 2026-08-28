@@ -68,13 +68,16 @@ int APIENTRY wWinMain(
     }
     const bool performance_smoke =
         options.mode == inkpod::app::LaunchMode::PerformanceSmoke;
+    const bool sequence_performance_smoke =
+        options.mode == inkpod::app::LaunchMode::SequencePerformanceSmoke;
     inkpod::app::ApplicationLaunch launch{
         instance,
         show_command,
         options.mode == inkpod::app::LaunchMode::ApplicationSmoke
-            || performance_smoke,
+            || performance_smoke || sequence_performance_smoke,
         performance_smoke,
         options.open_in_new_workspace,
-        std::move(options.document_paths)};
+        std::move(options.document_paths),
+        sequence_performance_smoke};
     return inkpod::app::Application(std::move(launch)).Run();
 }

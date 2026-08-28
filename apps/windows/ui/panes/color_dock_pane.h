@@ -145,6 +145,7 @@ void UpdateColorDockPane(
     const std::vector<InkpodColorValue>& chart_colors,
     const std::vector<std::wstring>& names,
     std::uint32_t palette_group,
+    std::uint32_t selected_palette_index,
     std::uint32_t chart_page,
     bool chart_locked) noexcept;
 

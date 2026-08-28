@@ -144,6 +144,7 @@ impl Core {
         self.floating = None;
         self.motion_check = None;
         self.sequence = None;
+        self.sequence_render_catalog_changed();
         self.subpalette_index = None;
         self.reset_editor_state(true);
         self.document_info()

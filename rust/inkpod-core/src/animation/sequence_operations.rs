@@ -56,6 +56,7 @@ impl Core {
             active_index,
             revision,
         });
+        self.sequence_render_catalog_changed();
         self.motion_check = None;
         self.subpalette_index = None;
         Ok(())
@@ -103,17 +104,72 @@ impl Core {
         self.set_sequence(cells)
     }
 
-    /// Returns owned metadata and a thumbnail for one natural-order cell.
-    pub fn sequence_cell(&self, index: usize) -> Result<SequenceCellInfo, CoreError> {
-        let cell = self
-            .sequence
+    fn sequence_source_at(&self, index: usize) -> Result<&SequenceCellSource, CoreError> {
+        self.sequence
             .as_ref()
             .ok_or(CoreError::InvalidState("no sequence is configured"))?
             .cells
             .get(index)
             .ok_or(CoreError::InvalidArgument(
                 "sequence target index is outside bounds",
-            ))?;
+            ))
+    }
+
+    /// Returns catalog invalidation metadata without allocating or reading pixels.
+    /// Missing catalogs return zero count/revision/owner and no active index.
+    /// This query has no document, editor, history, revision, or savepoint effects.
+    #[must_use]
+    pub fn sequence_catalog_info(&self) -> SequenceCatalogInfo {
+        self.sequence.as_ref().map_or(
+            SequenceCatalogInfo {
+                revision: 0,
+                owner_generation: 0,
+                cell_count: 0,
+                active_index: None,
+            },
+            |sequence| SequenceCatalogInfo {
+                revision: sequence.revision,
+                owner_generation: self.sequence_render_cache.owner_generation(),
+                cell_count: sequence.cells.len() as u32,
+                active_index: sequence.active_index.map(|index| index as u32),
+            },
+        )
+    }
+
+    /// Borrows metadata for one natural-order cell without inspecting pixel payloads.
+    ///
+    /// An absent catalog or out-of-range index is an error. This query does not
+    /// generate a thumbnail, allocate, or change revision/history/savepoints.
+    pub fn sequence_cell_metadata(
+        &self,
+        index: usize,
+    ) -> Result<SequenceCellMetadata<'_>, CoreError> {
+        let cell = self.sequence_source_at(index)?;
+        Ok(SequenceCellMetadata {
+            name: &cell.name,
+            cell_number: cell.cell_number,
+            document_uuid: cell.document_uuid,
+            source_generation: cell.source_generation,
+            width: cell.raster.width(),
+            height: cell.raster.height(),
+            thumbnail_width: cell.thumbnail.width,
+            thumbnail_height: cell.thumbnail.height,
+            thumbnail_checksum: cell.thumbnail.checksum,
+        })
+    }
+
+    /// Borrows the cached preview for one natural-order cell without resampling.
+    ///
+    /// The returned bytes are immutable and valid for the lifetime of the catalog
+    /// borrow. Missing catalogs and out-of-range indices are errors; this query
+    /// changes no document, editor, history, revision, or savepoint state.
+    pub fn sequence_thumbnail(&self, index: usize) -> Result<&Thumbnail, CoreError> {
+        Ok(self.sequence_source_at(index)?.thumbnail.as_ref())
+    }
+
+    /// Returns owned metadata and a copy of the cached thumbnail for one cell.
+    pub fn sequence_cell(&self, index: usize) -> Result<SequenceCellInfo, CoreError> {
+        let cell = self.sequence_source_at(index)?;
         Ok(SequenceCellInfo {
             name: cell.name.clone(),
             cell_number: cell.cell_number,
@@ -395,6 +451,14 @@ impl Core {
             .ok_or(CoreError::InvalidState("no sequence is configured"))?;
         sequence.active_index = Some(request.target_index as usize);
         staged.sequence = Some(sequence);
+        staged.sequence_render_cache = self.sequence_render_cache.clone();
+        staged.sequence_render_cache.invalidate_document();
+        let document = staged.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let (view, secondary_views) =
+            self.stage_sequence_views(DocumentSizeU32::new(document.width, document.height))?;
+        staged.view = view;
+        staged.secondary_views = secondary_views;
+        staged.next_view_id = self.next_view_id;
         staged.motion_check = None;
         staged.subpalette_index = self.subpalette_index;
         staged.inherit_file_runtime(self)?;

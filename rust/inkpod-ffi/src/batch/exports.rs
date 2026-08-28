@@ -21,7 +21,7 @@ pub unsafe extern "C" fn inkpod_core_sequence_source_identity(
         if status != INKPOD_STATUS_OK {
             return status;
         }
-        let cell = match core.core.sequence_cell(sequence_index as usize) {
+        let cell = match core.core.sequence_cell_metadata(sequence_index as usize) {
             Ok(cell) => cell,
             Err(error) => return map_core_error(error),
         };

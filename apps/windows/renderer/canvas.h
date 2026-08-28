@@ -79,6 +79,17 @@ bool BindAuxiliaryCanvasSnapshotSink(
     app::Generation generation) noexcept;
 bool UnbindCanvasSnapshotSink(HWND canvas) noexcept;
 void CancelCanvasStroke(HWND canvas) noexcept;
+/* UI-thread gate for sequence activation. Only a new stroke Begin is refused;
+ * Append/End/Cancel already accepted by the input path continue unchanged.
+ * Starting activation fails without changing the fence while a stroke or an
+ * unconsumed stroke event is active. Clear pending after activation and require
+ * the target document revision and exact nonzero navigation epoch to have
+ * reached a successful Present before accepting another Begin. */
+bool SetCanvasSequenceFence(
+    HWND canvas,
+    bool activation_pending,
+    std::uint64_t required_presented_revision,
+    std::uint64_t required_presentation_epoch) noexcept;
 /* Custom HWND notifications carry only token + generation values. The receiver
  * takes the owned payload from the Canvas that issued the notification. */
 bool TakeCanvasStrokeEvent(

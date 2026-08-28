@@ -47,6 +47,24 @@ public:
     HWND history_visualization_dialog{};
     // Nonpersistent result of the latest automatic sequence discovery.
     bool auto_sequence_truncated{};
+    // Runtime input fence shared by every view of this session. No new editing
+    // command may target a replacement before its correct image is presented.
+    bool sequence_activation_pending{};
+    std::uint64_t sequence_required_present_revision{};
+    // Runtime activation token: recovered documents may reuse an older revision.
+    std::uint64_t sequence_required_present_epoch{};
+
+    // UI owner only. The caller first validates the complete Canvas route and
+    // supplies only the renderer's last successful-Present telemetry. This
+    // one-shot acknowledgement survives hiding/rebinding that Canvas, while
+    // pending activation, another epoch, or another session/generation closes it.
+    [[nodiscard]] bool AcknowledgeSequencePresentation(
+        DocumentSessionId presented_session,
+        Generation presented_generation,
+        DocumentViewId presented_view,
+        std::uint64_t presented_document_revision,
+        std::uint64_t presented_epoch) noexcept;
+    [[nodiscard]] bool HasSequencePresentationAcknowledgement() const noexcept;
 
     void BindCore(CoreHost* host) noexcept;
     [[nodiscard]] CoreHost* Core() const noexcept;
@@ -94,6 +112,10 @@ private:
     friend class DocumentRegistry;
 
     CoreHost* core_{};
+    DocumentSessionId sequence_presented_session_{};
+    Generation sequence_presented_generation_{};
+    std::uint64_t sequence_presented_revision_{};
+    std::uint64_t sequence_presented_epoch_{};
     std::array<DocumentView, kMaximumViews> views_{};
     std::array<bool, kMaximumViews> view_used_{};
     std::size_t view_count_{};

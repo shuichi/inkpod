@@ -507,65 +507,56 @@ int RunMessageLoop(ApplicationHost& state) noexcept {
     MSG message{};
     BOOL result{};
     while ((result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
-        if (message.hwnd == nullptr
-            && message.message == kApplicationActivationMessage) {
-            const std::uint64_t token =
-                static_cast<std::uint64_t>(message.wParam & UINT32_MAX)
-                | (static_cast<std::uint64_t>(
-                       static_cast<std::uint32_t>(message.lParam))
-                   << 32U);
-            ActivationRequest request{};
-            if (state.activation != nullptr
-                && state.activation->Take(token, request)) {
-                (void)windows::ui::runtime::HandleApplicationActivation(
-                    state, request);
-            }
-            continue;
-        }
-        bool dialog_message{};
-        for (std::size_t workspace_index = 0U;
-             workspace_index < state.Workspaces().Count() && !dialog_message;
-             ++workspace_index) {
-            const WorkspaceWindow* workspace =
-                state.Workspaces().At(workspace_index);
-            if (workspace == nullptr) {
-                continue;
-            }
-            const std::array<HWND, 8U> palettes{
-                workspace->tools.palette,
-                workspace->windows.tool_options_flyout,
-                workspace->panes.layer_palette,
-                workspace->batch_palette,
-                workspace->locator_palette,
-                workspace->sequence_palette,
-                workspace->light_table_palette,
-                workspace->subpalette_palette};
-            for (const HWND palette : palettes) {
-                if (palette != nullptr && IsWindowVisible(palette) != FALSE
-                    && IsDialogMessageW(palette, &message) != FALSE) {
-                    dialog_message = true;
-                    break;
-                }
-            }
-        }
-        if (!dialog_message) {
-            dialog_message =
-                windows::ui::TranslateHistoryVisualizationDialogMessage(
-                    state, message);
-        }
-        if (dialog_message) {
-            continue;
-        }
-        if (windows::ui::runtime::PreTranslateKeyboardMessage(state, message)) {
-            continue;
-        }
-        TranslateMessage(&message);
-        DispatchMessageW(&message);
+        DispatchApplicationMessage(state, message);
     }
     return result == -1 ? 17 : static_cast<int>(message.wParam);
 }
 
 }  // namespace
+
+void DispatchApplicationMessage(ApplicationHost& state, MSG& message) noexcept {
+    if (message.hwnd == nullptr
+        && message.message == kApplicationActivationMessage) {
+        const std::uint64_t token =
+            static_cast<std::uint64_t>(message.wParam & UINT32_MAX)
+            | (static_cast<std::uint64_t>(
+                   static_cast<std::uint32_t>(message.lParam))
+               << 32U);
+        ActivationRequest request{};
+        if (state.activation != nullptr && state.activation->Take(token, request)) {
+            (void)windows::ui::runtime::HandleApplicationActivation(state, request);
+        }
+        return;
+    }
+    for (std::size_t workspace_index = 0U;
+         workspace_index < state.Workspaces().Count(); ++workspace_index) {
+        const WorkspaceWindow* workspace = state.Workspaces().At(workspace_index);
+        if (workspace == nullptr) {
+            continue;
+        }
+        const std::array<HWND, 8U> palettes{
+            workspace->tools.palette,
+            workspace->windows.tool_options_flyout,
+            workspace->panes.layer_palette,
+            workspace->batch_palette,
+            workspace->locator_palette,
+            workspace->sequence_palette,
+            workspace->light_table_palette,
+            workspace->subpalette_palette};
+        for (const HWND palette : palettes) {
+            if (palette != nullptr && IsWindowVisible(palette) != FALSE
+                && IsDialogMessageW(palette, &message) != FALSE) {
+                return;
+            }
+        }
+    }
+    if (windows::ui::TranslateHistoryVisualizationDialogMessage(state, message)
+        || windows::ui::runtime::PreTranslateKeyboardMessage(state, message)) {
+        return;
+    }
+    TranslateMessage(&message);
+    DispatchMessageW(&message);
+}
 
 Application::Application(ApplicationLaunch launch) noexcept
     : launch_(std::move(launch)) {}
@@ -805,7 +796,9 @@ int Application::Run() {
 
     int exit_code{};
     if (launch_.smoke_test) {
-        exit_code = launch_.performance_smoke_test
+        exit_code = launch_.sequence_performance_smoke_test
+            ? windows::ui::RunSequencePerformanceSmoke(state)
+            : launch_.performance_smoke_test
             ? windows::ui::RunPerformanceSmoke(state)
             : windows::ui::RunApplicationSmoke(state);
     } else {

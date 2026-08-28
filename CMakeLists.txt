@@ -882,6 +882,7 @@ if(WIN32)
         apps/windows/app/workspace_window.cpp
         apps/windows/app/workspace_window.h
         apps/windows/app/app_smoke.cpp
+        apps/windows/app/sequence_performance_smoke.cpp
         apps/windows/app/app_smoke.h
         apps/windows/app/application.cpp
         apps/windows/app/application.h
@@ -1037,6 +1038,12 @@ if(WIN32)
     endif()
 
     add_test(NAME inkpod_abi_smoke COMMAND inkpod --abi-smoke-test)
+    add_test(
+        NAME inkpod_windows_sequence_performance
+        COMMAND inkpod --sequence-performance-smoke-test)
+    set_tests_properties(inkpod_windows_sequence_performance PROPERTIES
+        RUN_SERIAL TRUE
+        TIMEOUT 180)
     add_test(
         NAME inkpod_windows_smoke
         COMMAND inkpod --smoke-test --smoke-test-language=en-US)

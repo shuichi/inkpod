@@ -176,8 +176,9 @@ impl Core {
     /// The caller must fence mutation between validation and recovery install.
     /// This method performs no I/O. Stale/error leaves every live field unchanged;
     /// success replaces the document once, preserving current application I/O,
-    /// creation defaults, view identities, and reference selection. Primary view
-    /// resets as for a synchronous switch. A same-cell request advances nothing;
+    /// creation defaults, view identities, and reference selection. Same-size
+    /// views are retained; different sizes use the current view resize policy
+    /// before publication. A same-cell request advances nothing;
     /// an explicitly omitted clean source needs no recovery installation.
     pub fn commit_prepared_sequence_switch(
         &mut self,
@@ -188,9 +189,12 @@ impl Core {
             self.io_install_pending = false;
             return self.document_info();
         };
+        let document = staged.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let (next_view, next_secondary_views) = self
+            .stage_sequence_views(crate::DocumentSizeU32::new(document.width, document.height))?;
         staged.inherit_file_runtime(self)?;
         staged.io_pair_authority = None;
-        staged.secondary_views = self.secondary_views.clone();
+        staged.secondary_views = next_secondary_views;
         staged.next_view_id = self.next_view_id;
         staged.color_check = self.color_check;
         staged.next_render_tile_revision = self.next_render_tile_revision;
@@ -200,8 +204,7 @@ impl Core {
         staged.shortcut_defaults = self.shortcut_defaults.clone();
         staged.subpalette_index = self.subpalette_index;
         staged.motion_check = None;
-        staged.view = self.view;
-        staged.reset_view();
+        staged.view = next_view;
         staged.render_cache.clear();
         *self = *staged;
         self.document_info()

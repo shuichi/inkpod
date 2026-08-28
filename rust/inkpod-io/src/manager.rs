@@ -26,8 +26,9 @@ pub(crate) struct ManagerInner {
 }
 
 /// One application-owned service shared by all sessions and reference viewers.
-/// Cloning shares workers, per-file coordination, and both byte budgets. There is
-/// no process singleton and no dependency on document or GUI ownership.
+/// Cloning shares workers, per-file coordination, encoded/decoded budgets, and
+/// the sequence display subset. There is no process singleton and no dependency
+/// on document or GUI ownership.
 #[derive(Clone)]
 pub struct IoManager {
     pub(crate) inner: Arc<ManagerInner>,
@@ -51,6 +52,7 @@ impl IoManager {
 
     /// Rejects new work and cooperatively cancels submitted jobs. Owners retain
     /// job results/leases until released. No live Core is accessed by shutdown.
+    /// Existing image leases can still reserve memory without submitting I/O.
     pub fn shutdown(&self) {
         self.executor.shutdown();
     }

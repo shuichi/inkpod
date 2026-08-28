@@ -1884,6 +1884,41 @@ fn io_003_reference_snapshot_and_tile_clones_keep_derived_pixels_charged_until_r
 }
 
 #[test]
+fn sequence_render_snapshot_and_tile_clones_keep_managed_reservations_after_core_drop() {
+    let files = Files::new();
+    let path = files.image("cell1.png", CommonRasterFormat::Png);
+    let manager = manager();
+    let image = manager
+        .read_image(&path, &inkpod_io::JobContext::new())
+        .unwrap();
+    let source = SequenceCellSource::from_loaded_image(&manager, &image, 0x7f01).unwrap();
+    drop(image);
+    let mut core = Core::new();
+    core.new_cell_with_uuid(2, 2, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI, 0x7f00)
+        .unwrap();
+    core.set_sequence(vec![source]).unwrap();
+    core.sequence_activate(0).unwrap();
+    let snapshot = core.build_snapshot();
+    let snapshot_clone = snapshot.clone();
+    let tile = snapshot.tiles()[0].clone();
+    assert_eq!(manager.cache_stats().sequence_render_allocations, 1);
+    assert_eq!(manager.cache_stats().sequence_render_bytes, 16);
+    drop(core);
+    manager.clear_cache();
+    assert_eq!(manager.cache_stats().decoded_bytes, 16);
+    assert_eq!(manager.cache_stats().sequence_render_bytes, 16);
+    drop(snapshot);
+    drop(snapshot_clone);
+    assert_eq!(manager.cache_stats().sequence_render_allocations, 1);
+    assert_eq!(tile.pixels(), [30, 20, 10, 255].repeat(4));
+    drop(tile);
+    assert_eq!(manager.cache_stats().sequence_render_bytes, 0);
+    assert_eq!(manager.cache_stats().sequence_render_allocations, 0);
+    assert_eq!(manager.cache_stats().decoded_bytes, 0);
+    manager.shutdown_and_wait();
+}
+
+#[test]
 fn io_003_reference_replacement_reserves_initial_display_before_publishing_catalog() {
     let files = Files::new();
     let old_path = files.image("old.png", CommonRasterFormat::Png);

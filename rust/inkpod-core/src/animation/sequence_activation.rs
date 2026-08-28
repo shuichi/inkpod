@@ -118,9 +118,11 @@ impl Core {
     ///
     /// No-op and initial binding retain dirty state, normal path authority,
     /// history, editor state, and all document/view revisions. Replacement
-    /// requires a clean document savepoint, resets the document/history/view,
+    /// requires a clean document savepoint and resets the document/history,
     /// and adopts reconciled editor choices as the new cell's clean initial
-    /// state. The previous native/raster save authority is revoked. Stale,
+    /// state. Same-size views retain zoom/pan/flip; different sizes use each
+    /// view's existing automatic or manual resize policy before publication.
+    /// The previous native/raster save authority is revoked. Stale,
     /// invalid, unsaved, or failed activation changes nothing. This method
     /// performs no filesystem I/O.
     pub fn commit_sequence_activation(
@@ -193,6 +195,8 @@ impl Core {
         let revision = self.next_document_revision()?;
         let mut next_id = self.next_id;
         let document = Self::document_from_sequence_source(&source, revision, &mut next_id)?;
+        let (next_view, next_secondary_views) =
+            self.stage_sequence_views(DocumentSizeU32::new(document.width, document.height))?;
         let mut editor = self
             .stage_reconciled_editor_target(&document, None, None)?
             .or_else(|| self.editor_session.clone())
@@ -215,12 +219,42 @@ impl Core {
         self.assets = asset::AssetStore::default();
         self.render_cache.clear();
         self.reset_history(true);
-        self.reset_view();
+        self.view = next_view;
+        self.secondary_views = next_secondary_views;
         self.current_path = None;
         self.recovered = false;
         self.floating = None;
         self.publish_editor_session(Some(editor));
+        self.register_pristine_sequence_source(&source);
         self.document_info()
+    }
+
+    pub(crate) fn stage_sequence_views(
+        &self,
+        document_size: DocumentSizeU32,
+    ) -> Result<(ViewState, BTreeMap<ViewId, ViewState>), CoreError> {
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        if document_size == DocumentSizeU32::new(document.width, document.height) {
+            return Ok((self.view, self.secondary_views.clone()));
+        }
+        let resize = |state: ViewState| {
+            view::apply_view_state(
+                state,
+                ViewCommand::ViewportResized {
+                    viewport_width: state.viewport.width,
+                    viewport_height: state.viewport.height,
+                },
+                document_size,
+            )
+            .map(|(state, _)| state)
+        };
+        let primary = resize(self.view)?;
+        let secondary = self
+            .secondary_views
+            .iter()
+            .map(|(id, state)| resize(*state).map(|state| (*id, state)))
+            .collect::<Result<_, _>>()?;
+        Ok((primary, secondary))
     }
 
     fn sequence_source_matches_current_asset(

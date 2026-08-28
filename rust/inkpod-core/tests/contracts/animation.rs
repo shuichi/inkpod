@@ -30,6 +30,567 @@ fn source(name: &str, uuid: u128, width: u32, height: u32, pixel: [u8; 4]) -> Se
     SequenceCellSource::from_common_raster(name, uuid, &rgba8(width, height, pixels)).unwrap()
 }
 
+fn sequence_render_core(cells: Vec<SequenceCellSource>) -> Core {
+    let mut core = Core::new();
+    core.new_cell_with_uuid(4, 2, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI, 0x7000)
+        .unwrap();
+    core.set_sequence(cells).unwrap();
+    core.sequence_activate(0).unwrap();
+    core
+}
+
+#[test]
+fn sequence_render_revisit_reuses_exact_payload_and_tile_revision() {
+    let mut core = sequence_render_core(vec![
+        source("cell1.png", 0x7001, 4, 2, [12, 34, 56, 255]),
+        source("cell2.png", 0x7002, 4, 2, [78, 90, 12, 255]),
+    ]);
+    let first = core.build_snapshot();
+    let identity = first.sequence_render_source().unwrap();
+    assert_eq!(
+        (identity.document_uuid, identity.source_generation),
+        (0x7001, 1)
+    );
+    assert_ne!(identity.owner_generation, 0);
+    core.sequence_activate(1).unwrap();
+    let second = core.build_snapshot();
+    assert_ne!(second.sequence_render_source(), Some(identity));
+    assert_ne!(first.tiles()[0].pixels(), second.tiles()[0].pixels());
+    core.sequence_activate(0).unwrap();
+    let before = core.document_info().unwrap();
+    let revisited = core.build_snapshot();
+    assert_eq!(revisited.sequence_render_source(), Some(identity));
+    assert_eq!(
+        revisited.tiles()[0].pixels().as_ptr(),
+        first.tiles()[0].pixels().as_ptr()
+    );
+    assert_eq!(
+        revisited.tiles()[0].tile_revision(),
+        first.tiles()[0].tile_revision()
+    );
+    assert_eq!(core.document_info().unwrap(), before);
+    let usage = core.resource_usage();
+    assert_eq!(usage.sequence_render_cache_source_count, 2);
+    assert_eq!(usage.sequence_render_cache_bytes, 4 * 2 * 4 * 2);
+    assert_eq!(usage.sequence_render_cache_tile_count, 2);
+    assert_eq!(usage.render_cache_bytes, usage.sequence_render_cache_bytes);
+}
+
+#[test]
+fn sequence_render_first_edit_preserves_unchanged_tiles_and_pristine_bank() {
+    let raster = rgba8(128, 1, [12, 34, 56, 255].repeat(128));
+    for preview in [false, true] {
+        let mut core = sequence_render_core(vec![
+            SequenceCellSource::from_common_raster("cell1.png", 0x7081, &raster).unwrap(),
+            source("cell2.png", 0x7082, 128, 1, [78, 90, 12, 255]),
+        ]);
+        let original = core.build_snapshot();
+        assert_eq!(original.tiles().len(), 2);
+        let stroke = line_stroke(vec![StrokeSample {
+            x: 1.0,
+            y: 0.0,
+            pressure: 1.0,
+        }]);
+        if preview {
+            core.begin_stroke(&stroke).unwrap();
+            let previewed = core.build_snapshot();
+            assert_eq!(previewed.sequence_render_source(), None);
+            assert_eq!(
+                previewed.tiles()[1].pixels().as_ptr(),
+                original.tiles()[1].pixels().as_ptr(),
+                "a first stroke preview must preserve the untouched tile"
+            );
+            assert_ne!(previewed.tiles()[0].pixels(), original.tiles()[0].pixels());
+            core.cancel_stroke();
+            let cancelled = core.build_snapshot();
+            assert_eq!(
+                cancelled.sequence_render_source(),
+                original.sequence_render_source()
+            );
+            assert_eq!(
+                cancelled.tiles()[0].pixels().as_ptr(),
+                original.tiles()[0].pixels().as_ptr()
+            );
+            core.begin_stroke(&stroke).unwrap();
+            let _ = core.build_snapshot();
+            core.end_stroke().unwrap();
+        } else {
+            core.apply_stroke(&stroke).unwrap();
+        }
+        let edited = core.build_snapshot();
+        assert_eq!(edited.sequence_render_source(), None);
+        assert_ne!(edited.tiles()[0].pixels(), original.tiles()[0].pixels());
+        assert_eq!(
+            edited.tiles()[1].pixels().as_ptr(),
+            original.tiles()[1].pixels().as_ptr(),
+            "a first edit must preserve the untouched tile (preview={preview})"
+        );
+        assert_eq!(
+            edited.tiles()[1].tile_revision(),
+            original.tiles()[1].tile_revision()
+        );
+        core.undo().unwrap();
+        core.sequence_activate(1).unwrap();
+        core.sequence_activate(0).unwrap();
+        let revisited = core.build_snapshot();
+        for (tile, expected) in revisited.tiles().iter().zip(original.tiles()) {
+            assert_eq!(tile.pixels().as_ptr(), expected.pixels().as_ptr());
+            assert_eq!(tile.tile_revision(), expected.tile_revision());
+        }
+    }
+}
+
+#[test]
+fn sequence_render_color_edit_after_preview_cancel_and_lru_revisit_updates_pixels() {
+    let cells = (0..10)
+        .map(|index| {
+            let raster = rgba8(64, 32, [32 + index * 16, 64, 96, 255].repeat(64 * 32));
+            let mut source = SequenceCellSource::from_common_raster(
+                format!("source{}.tga", index + 1),
+                (0x736f_7572_6365_6361_u128 << 64) | u128::from(index + 1),
+                &raster,
+            )
+            .unwrap();
+            source.frames.reference_frame = RectI32 {
+                x: 0,
+                y: 0,
+                width: 64,
+                height: 32,
+            };
+            source
+        })
+        .collect();
+    let mut core = sequence_render_core(cells);
+    let show = |core: &mut Core, index: usize| {
+        core.sequence_activate(index).unwrap();
+        let snapshot = core.build_snapshot();
+        assert_eq!(
+            &snapshot.tiles()[0].pixels()[..4],
+            &[96, 64, 32 + index as u8 * 16, 255]
+        );
+        snapshot
+    };
+    for index in [0, 1, 0, 1] {
+        let _ = show(&mut core, index);
+    }
+    let mut stroke = color_stroke(
+        PaintTool::Pencil,
+        256.0,
+        StrokeSample {
+            x: 32.0,
+            y: 16.0,
+            pressure: 1.0,
+        },
+    );
+    stroke.color = [0, 0, 255, 255];
+    core.begin_stroke(&stroke).unwrap();
+    let preview = core.build_snapshot();
+    let center = 16 * preview.tiles()[0].stride_bytes() as usize + 32 * 4;
+    assert_eq!(
+        &preview.tiles()[0].pixels()[center..center + 4],
+        &[255, 0, 0, 255]
+    );
+    drop(preview);
+    core.cancel_stroke();
+    for index in [0, 1, 0].into_iter().chain(2..10).chain([0, 1, 0]) {
+        let _ = show(&mut core, index);
+    }
+    core.apply_stroke(&stroke).unwrap();
+    assert_eq!(
+        core.plane_pixel(ActivePlane::Color, 32, 16).unwrap(),
+        PixelValue::Rgba([0, 0, 255, 255])
+    );
+    // Pencil is one pixel even with diameter 256; the old renderer fixture
+    // incorrectly expected the off-center point to have been painted too.
+    assert_eq!(
+        core.plane_pixel(ActivePlane::Color, 16, 12).unwrap(),
+        PixelValue::Rgba([32, 64, 96, 255])
+    );
+    let edited = core.build_snapshot();
+    assert_eq!(edited.sequence_render_source(), None);
+    assert_eq!(
+        &edited.tiles()[0].pixels()[center..center + 4],
+        &[255, 0, 0, 255]
+    );
+    let untouched = 12 * edited.tiles()[0].stride_bytes() as usize + 16 * 4;
+    assert_eq!(
+        &edited.tiles()[0].pixels()[untouched..untouched + 4],
+        &[96, 64, 32, 255]
+    );
+    core.undo().unwrap();
+    let undone = core.build_snapshot();
+    assert_eq!(
+        &undone.tiles()[0].pixels()[center..center + 4],
+        &[96, 64, 32, 255]
+    );
+    let _ = show(&mut core, 1);
+    let _ = show(&mut core, 0);
+}
+
+#[test]
+fn sequence_render_pristine_identity_excludes_modes_previews_and_saved_edits() {
+    let mut core = sequence_render_core(vec![
+        source("cell1.png", 0x7101, 4, 2, [12, 34, 56, 255]),
+        source("cell2.png", 0x7102, 4, 2, [78, 90, 12, 255]),
+    ]);
+    let normal = core.build_snapshot();
+    let identity = normal.sequence_render_source().unwrap();
+    core.apply_view(ViewCommand::SetAlphaView(true)).unwrap();
+    assert_eq!(core.build_snapshot().sequence_render_source(), None);
+    core.apply_view(ViewCommand::SetAlphaView(false)).unwrap();
+    assert_eq!(
+        core.build_snapshot().tiles()[0].pixels().as_ptr(),
+        normal.tiles()[0].pixels().as_ptr()
+    );
+    let alpha_view = core.create_view().unwrap();
+    core.apply_view_for(alpha_view, ViewCommand::SetAlphaView(true))
+        .unwrap();
+    let _ = core.build_snapshot();
+    let alpha = core.build_snapshot_for(alpha_view).unwrap();
+    assert_eq!(alpha.sequence_render_source(), None);
+    assert_eq!(&alpha.tiles()[0].pixels()[..4], &[255, 255, 255, 255]);
+    assert_eq!(
+        core.build_snapshot().tiles()[0].pixels().as_ptr(),
+        normal.tiles()[0].pixels().as_ptr()
+    );
+    core.set_color_check(Some(ColorCheckMode::NativeAlpha))
+        .unwrap();
+    let checked = core.build_snapshot();
+    assert_eq!(checked.sequence_render_source(), None);
+    assert_eq!(&checked.tiles()[0].pixels()[..4], &[0, 0, 0, 255]);
+    core.set_color_check(None).unwrap();
+    let color_plane = core.document_info().unwrap().color_plane_id;
+    core.begin_filter_preview(
+        color_plane,
+        Filter::Invert {
+            channel: Channel::Rgb,
+        },
+    )
+    .unwrap();
+    let preview = core.build_snapshot();
+    assert_eq!(preview.sequence_render_source(), None);
+    assert_eq!(&preview.tiles()[0].pixels()[..4], &[199, 221, 243, 255]);
+    core.cancel_filter_preview().unwrap();
+    assert_eq!(
+        core.build_snapshot().sequence_render_source(),
+        Some(identity)
+    );
+    core.apply_stroke(&line_stroke(vec![StrokeSample {
+        x: 1.0,
+        y: 0.0,
+        pressure: 1.0,
+    }]))
+    .unwrap();
+    assert_eq!(core.build_snapshot().sequence_render_source(), None);
+    let (_, token) = core
+        .capture_document_save()
+        .unwrap()
+        .prepare_native_save(false, || false)
+        .unwrap();
+    core.commit_document_save(token, std::path::Path::new("sequence-render-saved.inkpod"))
+        .unwrap();
+    assert!(!core.document_info().unwrap().dirty);
+    assert_eq!(core.build_snapshot().sequence_render_source(), None);
+    core.sequence_activate(1).unwrap();
+    core.sequence_activate(0).unwrap();
+    let fresh = core.build_snapshot();
+    assert_eq!(fresh.sequence_render_source(), Some(identity));
+    assert_eq!(
+        fresh.tiles()[0].pixels().as_ptr(),
+        normal.tiles()[0].pixels().as_ptr()
+    );
+    assert_eq!(
+        fresh.canonical_composite_digest(),
+        normal.canonical_composite_digest()
+    );
+}
+
+#[test]
+fn sequence_render_pristine_exit_keeps_metadata_and_light_table_invalidation() {
+    let mut core = sequence_render_core(vec![
+        source("cell1.png", 0x7181, 4, 2, [12, 34, 56, 255]),
+        source("cell2.png", 0x7182, 4, 2, [78, 90, 12, 255]),
+    ]);
+    let original = core.build_snapshot();
+    let layer = core.layers().unwrap().remove(0);
+    core.set_layer_properties(layer.id, true, true, 500, &layer.name)
+        .unwrap();
+    let translucent = core.build_snapshot();
+    assert_eq!(translucent.sequence_render_source(), None);
+    assert_eq!(&translucent.tiles()[0].pixels()[..4], &[28, 17, 6, 128]);
+    core.undo().unwrap();
+    core.sequence_activate(1).unwrap();
+    core.sequence_activate(0).unwrap();
+    assert_eq!(
+        core.build_snapshot().tiles()[0].pixels().as_ptr(),
+        original.tiles()[0].pixels().as_ptr()
+    );
+    let light_table = LightTableSource::from_common_raster(
+        0x7183,
+        1,
+        RectI32 {
+            x: 2,
+            y: 1,
+            width: 4,
+            height: 2,
+        },
+        &rgba8(4, 2, [200, 100, 50, 255].repeat(8)),
+    )
+    .unwrap();
+    core.light_table_add_item(LightTableItemInput::new("reference", light_table))
+        .unwrap();
+    let with_reference = core.build_snapshot();
+    assert_eq!(with_reference.sequence_render_source(), None);
+    assert_eq!(
+        &with_reference.tiles()[0].pixels()[4..8],
+        &[50, 100, 200, 255]
+    );
+}
+
+#[test]
+fn sequence_render_catalog_replacement_and_independent_clone_use_new_owner() {
+    let mut core = sequence_render_core(vec![
+        source("cell1.png", 0x7201, 4, 2, [12, 34, 56, 255]),
+        source("cell2.png", 0x7202, 4, 2, [78, 90, 12, 255]),
+    ]);
+    let original = core.build_snapshot();
+    let mut independent = core.clone();
+    let cloned = independent.build_snapshot();
+    assert_ne!(
+        cloned.sequence_render_source().unwrap().owner_generation,
+        original.sequence_render_source().unwrap().owner_generation
+    );
+    assert_eq!(
+        cloned, original,
+        "runtime cache identity is not semantic snapshot equality"
+    );
+    core.sequence_activate(1).unwrap();
+    core.set_sequence(vec![
+        source("cell1.png", 0x7201, 4, 2, [200, 100, 50, 255]),
+        source("cell2.png", 0x7202, 4, 2, [78, 90, 12, 255]),
+    ])
+    .unwrap();
+    core.sequence_activate(0).unwrap();
+    let replaced = core.build_snapshot();
+    assert_ne!(
+        replaced.sequence_render_source().unwrap().owner_generation,
+        original.sequence_render_source().unwrap().owner_generation
+    );
+    assert_ne!(replaced.tiles()[0].pixels(), original.tiles()[0].pixels());
+}
+
+#[test]
+fn sequence_render_live_snapshots_keep_the_eight_source_budget_charged() {
+    let cells = (1..=10)
+        .map(|index| {
+            source(
+                &format!("cell{index}.png"),
+                0x7300 + index,
+                4,
+                2,
+                [index as u8, 34, 56, 255],
+            )
+        })
+        .collect();
+    let mut core = sequence_render_core(cells);
+    let mut snapshots = Vec::new();
+    for index in 0..8 {
+        core.sequence_activate(index).unwrap();
+        snapshots.push(core.build_snapshot());
+    }
+    let charged = core.resource_usage();
+    assert_eq!(charged.sequence_render_cache_source_count, 8);
+    core.sequence_activate(8).unwrap();
+    let fallback = core.build_snapshot();
+    assert_eq!(&fallback.tiles()[0].pixels()[..4], &[56, 34, 9, 255]);
+    assert_eq!(
+        core.resource_usage().sequence_render_cache_bytes,
+        charged.sequence_render_cache_bytes
+    );
+    assert_eq!(core.resource_usage().sequence_render_cache_source_count, 8);
+    drop(snapshots.remove(0));
+    core.sequence_activate(9).unwrap();
+    let admitted = core.build_snapshot();
+    assert_eq!(&admitted.tiles()[0].pixels()[..4], &[56, 34, 10, 255]);
+    assert_eq!(core.resource_usage().sequence_render_cache_source_count, 8);
+    core.sequence_activate(9).unwrap();
+    assert_eq!(
+        core.build_snapshot().tiles()[0].pixels().as_ptr(),
+        admitted.tiles()[0].pixels().as_ptr()
+    );
+}
+
+#[test]
+fn sequence_switch_preserves_same_size_views_and_applies_existing_resize_modes() {
+    for command in [
+        ViewCommand::Fit {
+            viewport_width: 40.0,
+            viewport_height: 30.0,
+        },
+        ViewCommand::OneToOne {
+            viewport_width: 40.0,
+            viewport_height: 30.0,
+        },
+        ViewCommand::ZoomAt {
+            factor: 2.0,
+            device_x: 3.0,
+            device_y: 4.0,
+        },
+    ] {
+        let mut core = sequence_render_core(vec![
+            source("cell1.png", 0x7401, 4, 2, [12, 34, 56, 255]),
+            source("cell2.png", 0x7402, 4, 2, [78, 90, 12, 255]),
+            source("cell3.png", 0x7403, 2, 4, [98, 76, 54, 255]),
+        ]);
+        core.apply_view(command).unwrap();
+        core.apply_view(ViewCommand::Flip {
+            axis: MirrorAxis::Horizontal,
+        })
+        .unwrap();
+        let secondary = core.create_view().unwrap();
+        let before = core.view_state();
+        let secondary_before = core.build_snapshot_for(secondary).unwrap().view();
+        core.sequence_activate(1).unwrap();
+        assert_eq!(core.build_snapshot().view(), before);
+        assert_eq!(
+            core.build_snapshot_for(secondary).unwrap().view(),
+            secondary_before
+        );
+        core.sequence_activate(2).unwrap();
+        let resized = core.build_snapshot().view();
+        assert_eq!(resized.mode(), before.mode());
+        assert_eq!(resized.flip_horizontal(), before.flip_horizontal());
+        match before.mode() {
+            ViewMode::Fit => {
+                assert_eq!(resized.zoom(), 7.125);
+                assert_eq!((resized.pan_x(), resized.pan_y()), (12.875, 0.75));
+            }
+            ViewMode::OneToOne => {
+                assert_eq!(resized.zoom(), 1.0);
+                assert_eq!((resized.pan_x(), resized.pan_y()), (19.0, 13.0));
+            }
+            ViewMode::Manual => assert_eq!(resized, before),
+        }
+    }
+}
+
+#[test]
+fn sequence_render_prefetch_uses_two_neighbors_and_never_waits_for_a_busy_worker() {
+    let manager = inkpod_io::IoManager::new(inkpod_io::IoConfig {
+        worker_count: 1,
+        queue_capacity: 8,
+        ..inkpod_io::IoConfig::default()
+    })
+    .unwrap();
+    let (release, receiver) = std::sync::mpsc::sync_channel::<()>(1);
+    let blocker = manager
+        .submit(move |_| {
+            receiver
+                .recv_timeout(std::time::Duration::from_secs(20))
+                .map_err(|_| inkpod_io::IoError::ResourceBusy("test worker was not released"))
+        })
+        .unwrap();
+    let mut core = sequence_render_core(vec![
+        source("cell1.png", 0x7501, 4, 2, [12, 34, 56, 255]),
+        source("cell2.png", 0x7502, 4, 2, [78, 90, 12, 255]),
+        source("cell3.png", 0x7503, 4, 2, [98, 76, 54, 255]),
+    ]);
+    core.sequence_activate(1).unwrap();
+    core.bind_file_io(manager.clone()).unwrap();
+    let center = core.build_snapshot();
+    assert_eq!(core.resource_usage().sequence_render_cache_source_count, 3);
+    assert_eq!(core.resource_usage().sequence_render_cache_tile_count, 1);
+    core.sequence_activate(2).unwrap();
+    let foreground = core.build_snapshot();
+    assert_eq!(&foreground.tiles()[0].pixels()[..4], &[54, 76, 98, 255]);
+    assert_ne!(
+        foreground.sequence_render_source(),
+        center.sequence_render_source()
+    );
+    assert!(
+        blocker.try_take().is_none(),
+        "foreground waited for the blocked worker"
+    );
+    release.send(()).unwrap();
+
+    // Poll while a new neighbor can finish, then use a FIFO barrier instead of
+    // a timing threshold to prove that its result must be ready or adopted.
+    core.sequence_activate(1).unwrap();
+    for _ in 0..32 {
+        let _ = core.build_snapshot();
+    }
+    let barrier = manager.submit(|_| Ok(())).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        if let Some(result) = barrier.try_take() {
+            result.unwrap();
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "sequence preparation stalled"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    let _ = core.build_snapshot();
+    let prepared = core.resource_usage();
+    assert_eq!(prepared.sequence_render_cache_source_count, 3);
+    assert_eq!(prepared.sequence_render_cache_tile_count, 3);
+    core.sequence_activate(0).unwrap();
+    let neighbor = core.build_snapshot();
+    assert_eq!(&neighbor.tiles()[0].pixels()[..4], &[56, 34, 12, 255]);
+    assert_eq!(
+        core.resource_usage().sequence_render_cache_source_count,
+        prepared.sequence_render_cache_source_count
+    );
+    manager.shutdown_and_wait();
+    assert_eq!(core.resource_usage().sequence_render_cache_source_count, 3);
+}
+
+#[test]
+fn sequence_render_prefetch_completed_for_old_catalog_cannot_replace_new_pixels() {
+    let manager = inkpod_io::IoManager::new(inkpod_io::IoConfig {
+        worker_count: 1,
+        ..inkpod_io::IoConfig::default()
+    })
+    .unwrap();
+    let mut core = sequence_render_core(vec![
+        source("cell1.png", 0x7601, 4, 2, [12, 34, 56, 255]),
+        source("cell2.png", 0x7602, 4, 2, [78, 90, 12, 255]),
+    ]);
+    core.bind_file_io(manager.clone()).unwrap();
+    let original = core.build_snapshot();
+    let barrier = manager.submit(|_| Ok(())).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        if let Some(result) = barrier.try_take() {
+            result.unwrap();
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "sequence preparation stalled"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    core.set_sequence(vec![
+        source("cell1.png", 0x7601, 4, 2, [12, 34, 56, 255]),
+        source("cell2.png", 0x7602, 4, 2, [200, 100, 50, 255]),
+    ])
+    .unwrap();
+    core.sequence_activate(1).unwrap();
+    let new_catalog = core.build_snapshot();
+    assert_ne!(
+        new_catalog
+            .sequence_render_source()
+            .unwrap()
+            .owner_generation,
+        original.sequence_render_source().unwrap().owner_generation
+    );
+    assert_eq!(&new_catalog.tiles()[0].pixels()[..4], &[50, 100, 200, 255]);
+    manager.shutdown_and_wait();
+}
+
 #[test]
 fn acceptance_reference_frame_aligns_different_cell_sizes_and_reopens() {
     let mut core = Core::new();
@@ -2057,4 +2618,62 @@ fn rejects_a_mutated_common_raster_before_indexing_its_pixels() {
         core.sequence_cells(),
         Err(CoreError::InvalidState(_))
     ));
+}
+
+#[test]
+fn sequence_metadata_and_thumbnail_borrow_the_prepared_immutable_source() {
+    let mut core = Core::new();
+    core.new_cell_with_uuid(4, 2, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI, 0x9190)
+        .unwrap();
+    let original = core.document_info().unwrap();
+    let missing = core.sequence_catalog_info();
+    assert_eq!(
+        (
+            missing.revision,
+            missing.cell_count,
+            missing.owner_generation
+        ),
+        (0, 0, 0)
+    );
+    assert_eq!(missing.active_index, None);
+    let first = source("cell1.tga", 0x9191, 4, 2, [1, 2, 3, 255]);
+    let second = source("cell2.tga", 0x9192, 4, 2, [5, 6, 7, 255]);
+    core.set_sequence(vec![second.clone(), first.clone()])
+        .unwrap();
+    let catalog = core.sequence_catalog_info();
+    assert_eq!(catalog.cell_count, 2);
+    assert_ne!(catalog.owner_generation, 0);
+    let usage = core.resource_usage();
+    assert_eq!(usage.thumbnail_cache_bytes, 2 * 4 * 2 * 4);
+    let borrowed_pixels = core.sequence_thumbnail(0).unwrap().rgba8.as_ptr();
+    for _ in 0..16 {
+        let metadata = core.sequence_cell_metadata(0).unwrap();
+        assert_eq!(
+            (metadata.name, metadata.document_uuid),
+            ("cell1.tga", 0x9191)
+        );
+        assert_eq!((metadata.width, metadata.height), (4, 2));
+        let preview = core.sequence_thumbnail(0).unwrap();
+        assert_eq!(preview.rgba8.as_ptr(), borrowed_pixels);
+        assert_eq!(metadata.thumbnail_checksum, preview.checksum);
+        assert_eq!(&preview.rgba8[..4], &[1, 2, 3, 255]);
+    }
+    let mut owned = core.sequence_cell(0).unwrap();
+    owned.thumbnail.rgba8[0] = 99;
+    assert_eq!(core.sequence_thumbnail(0).unwrap().rgba8[0], 1);
+    assert_eq!(core.sequence_catalog_info(), catalog);
+    assert_eq!(core.document_info().unwrap(), original);
+    assert_eq!(
+        core.resource_usage().thumbnail_cache_bytes,
+        usage.thumbnail_cache_bytes
+    );
+    assert!(core.sequence_cell_metadata(2).is_err());
+    assert!(core.sequence_thumbnail(2).is_err());
+    assert!(core.set_sequence(vec![first.clone(), first]).is_err());
+    assert_eq!(core.sequence_catalog_info(), catalog);
+    core.set_sequence(vec![second]).unwrap();
+    let replaced = core.sequence_catalog_info();
+    assert!(replaced.revision > catalog.revision);
+    assert_ne!(replaced.owner_generation, catalog.owner_generation);
+    assert_eq!(core.sequence_thumbnail(0).unwrap().rgba8[0], 5);
 }

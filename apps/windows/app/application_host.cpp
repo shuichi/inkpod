@@ -462,6 +462,8 @@ WorkspaceWindow* ApplicationHost::AddWorkspaceWindow() noexcept {
 
 bool ApplicationHost::ActivateWorkspaceWindow(
     WorkspaceWindowId id, bool record_focus) noexcept {
+    const bool already_current = routing.targets.Workspace() == id;
+    const auto previous_active_view = routing.targets.ActiveDocumentView();
     WorkspaceWindow* workspace = workspaces_.Find(id);
     if (workspace == nullptr
         || !routing.targets.ActivateWorkspace(id)
@@ -492,7 +494,8 @@ bool ApplicationHost::ActivateWorkspaceWindow(
             != INKPOD_STATUS_OK) {
         return false;
     }
-    return RefreshEditorPresentation(document->id, document->generation);
+    return (already_current && previous_active_view == view)
+        || RefreshEditorPresentation(document->id, document->generation);
 }
 
 bool ApplicationHost::RemoveWorkspaceWindow(WorkspaceWindowId id) noexcept {
@@ -591,12 +594,8 @@ bool ApplicationHost::MoveDocumentView(
         }
         const DocumentSession* active = documents_.FindByView(group->ActiveView());
         return active == nullptr
-            ? renderer::UnbindCanvasSnapshotSink(group->canvas)
-            : renderer::BindCanvasSnapshotSink(
-                group->canvas,
-                active->id,
-                group->ActiveView(),
-                active->generation);
+            ? UnbindDocumentCanvas(group->canvas)
+            : BindDocumentCanvas(group->canvas, *active, group->ActiveView());
     };
     if (bind_group(*source, source_group_id)
         && bind_group(*target, destination_group)
@@ -688,11 +687,7 @@ bool ApplicationHost::ReplaceDocumentSession(
         return false;
     }
     return Workspace().windows.canvas == nullptr
-        || renderer::BindCanvasSnapshotSink(
-            Workspace().windows.canvas,
-            id,
-            initial_view,
-            generation);
+        || BindDocumentCanvas(Workspace().windows.canvas, Document(), initial_view);
 }
 
 DocumentRegistry& ApplicationHost::Documents() noexcept {
@@ -890,6 +885,24 @@ bool ApplicationHost::ActivateDocumentView(DocumentViewId view) noexcept {
         || engine == nullptr) {
         return false;
     }
+    const auto* target_sink = target_group->canvas == nullptr
+        ? nullptr : renderer::GetCanvasSnapshotSink(target_group->canvas);
+    const renderer::SnapshotRoute target_route{
+        document->id,
+        target->id,
+        target_group->canvas_id,
+        document->generation,
+        target_group->generation};
+    // Inserting a new view updates model selection before its Canvas binding.
+    // Only the actual matching destination can take the repeated-view path.
+    if (routing.targets.ActiveDocumentView() == view
+        && routing.targets.Workspace() == target_workspace->id
+        && documents_.Current() == document
+        && target_group->ActiveView() == view
+        && target_sink != nullptr && target_sink->Route() == target_route) {
+        return engine->SetActiveSession(document->id, document->generation)
+            && engine->SetActiveView(target->core_view_id) == INKPOD_STATUS_OK;
+    }
     WorkspaceWindow* previous_workspace = workspaces_.Current();
     DocumentSession* previous_document = documents_.Current();
     DocumentView* previous_view = previous_document == nullptr
@@ -902,21 +915,14 @@ bool ApplicationHost::ActivateDocumentView(DocumentViewId view) noexcept {
         previous_group == nullptr ? nullptr : previous_group->canvas);
     if (!engine->SetActiveSession(document->id, document->generation)
         || (target_group->canvas != nullptr
-            && !renderer::BindCanvasSnapshotSink(
-                target_group->canvas,
-                document->id,
-                target->id,
-                document->generation))
+            && !BindDocumentCanvas(target_group->canvas, *document, target->id))
         || engine->SetActiveView(target->core_view_id) != INKPOD_STATUS_OK) {
         if (previous_document != nullptr && previous_view != nullptr) {
             (void)engine->SetActiveSession(
                 previous_document->id, previous_document->generation);
             if (previous_group != nullptr && previous_group->canvas != nullptr) {
-                (void)renderer::BindCanvasSnapshotSink(
-                    previous_group->canvas,
-                    previous_document->id,
-                    previous_view->id,
-                    previous_document->generation);
+                (void)BindDocumentCanvas(
+                    previous_group->canvas, *previous_document, previous_view->id);
             }
             (void)engine->SetActiveView(previous_view->core_view_id);
         }
@@ -963,14 +969,14 @@ bool ApplicationHost::ActivateEmptyEditorGroup(EditorGroupId group_id) noexcept 
 }
 
 bool ApplicationHost::RefreshEditorPresentation(
-    DocumentSessionId session, Generation generation) noexcept {
+    DocumentSessionId session, Generation generation, bool refresh_core) noexcept {
     DocumentSession* document = documents_.Find(session);
     if (engine == nullptr || document == nullptr
         || document->generation != generation) {
         return false;
     }
-    const InkpodStatus refresh_status =
-        engine->RefreshEditorState(session, generation);
+    const InkpodStatus refresh_status = refresh_core
+        ? engine->RefreshEditorState(session, generation) : INKPOD_STATUS_OK;
     if (refresh_status == INKPOD_STATUS_NO_DOCUMENT) {
         document->editor_presentation = {};
         document->editor_presentation.struct_size =
@@ -1018,8 +1024,99 @@ bool ApplicationHost::RefreshEditorPresentation(
     return projected;
 }
 
+void ApplicationHost::ObserveCanvasSequencePresentation(HWND canvas) noexcept {
+    if (renderer == nullptr) {
+        return;
+    }
+    const auto* sink = renderer::GetCanvasSnapshotSink(canvas);
+    const auto route = sink == nullptr ? renderer::SnapshotRoute{} : sink->Route();
+    if (!route || route.owner_kind != renderer::SnapshotOwnerKind::Document) {
+        return;
+    }
+    auto* document = documents_.Find(route.document_session);
+    if (document == nullptr || document->generation != route.document_generation
+        || document->sequence_activation_pending
+        || document->sequence_required_present_epoch == 0U
+        || document->HasSequencePresentationAcknowledgement()) {
+        return;
+    }
+    renderer::RendererSurfaceResourceUsage presented{};
+    if (renderer->GetSurfaceResourceUsage(route.canvas, route.surface_generation, presented)
+        && presented.route == route) {
+        (void)document->AcknowledgeSequencePresentation(
+            route.document_session, route.document_generation, route.document_view,
+            presented.last_presented_document_revision,
+            presented.last_presented_presentation_epoch);
+    }
+}
+
+bool ApplicationHost::BindDocumentCanvas(
+    HWND canvas, const DocumentSession& document, DocumentViewId view) noexcept {
+    const auto* sink = renderer::GetCanvasSnapshotSink(canvas);
+    const auto previous = sink == nullptr ? renderer::SnapshotRoute{} : sink->Route();
+    const bool changed = previous.document_session != document.id
+        || previous.document_generation != document.generation
+        || previous.document_view != view;
+    if (changed) {
+        ObserveCanvasSequencePresentation(canvas);
+    }
+    return renderer::BindCanvasSnapshotSink(
+               canvas, document.id, view, document.generation)
+        && renderer::SetCanvasSequenceFence(canvas,
+            document.sequence_activation_pending,
+            document.sequence_required_present_revision,
+            document.sequence_required_present_epoch)
+        && (!changed || document.Core() == nullptr
+            || document.Core()->InvalidateViewPublication(document.id, document.generation));
+}
+
+bool ApplicationHost::UnbindDocumentCanvas(HWND canvas) noexcept {
+    ObserveCanvasSequencePresentation(canvas);
+    return renderer::UnbindCanvasSnapshotSink(canvas);
+}
+
+bool ApplicationHost::SequenceEditReady(const CommandContext& context) const noexcept {
+    if (!context.document_session.has_value()) {
+        return true;
+    }
+    if (routing.targets.Resolve(context, CommandTargetScope::DocumentSession)
+        != CommandResolveStatus::Ok) {
+        return false;
+    }
+    const DocumentSession* document = documents_.Find(context.document_session.value());
+    if (document == nullptr || document->generation != context.generation
+        || document->sequence_activation_pending) {
+        return false;
+    }
+    if ((document->sequence_required_present_revision == 0U
+            && document->sequence_required_present_epoch == 0U)
+        || document->HasSequencePresentationAcknowledgement()) {
+        return true;
+    }
+    if (!context.document_view.has_value() || renderer == nullptr) {
+        return false;
+    }
+    const WorkspaceWindow* workspace = WorkspaceForView(context.document_view.value());
+    const EditorGroup* group = workspace == nullptr ? nullptr
+        : workspace->editors.FindByView(context.document_view.value());
+    renderer::RendererSurfaceResourceUsage presented{};
+    return group != nullptr && group->ActiveView() == context.document_view.value()
+        && renderer->GetSurfaceResourceUsage(group->canvas_id, group->generation, presented)
+        && presented.route.document_session == document->id
+        && presented.route.document_generation == document->generation
+        && presented.route.document_view == context.document_view.value()
+        && presented.last_presented_document_revision
+            >= document->sequence_required_present_revision
+        && (document->sequence_required_present_epoch == 0U
+            || presented.last_presented_presentation_epoch
+                == document->sequence_required_present_epoch);
+}
+
 InkpodStatus ApplicationHost::UpdateEditorState(
     const InkpodEditorStateUpdate& update) noexcept {
+    if (!SequenceEditReady(routing.targets.Capture())) {
+        return INKPOD_STATUS_CANCELLED;
+    }
     DocumentSession* document = documents_.Current();
     WorkspaceWindow* workspace = workspaces_.Current();
     if (engine == nullptr || document == nullptr || workspace == nullptr
@@ -1030,12 +1127,17 @@ InkpodStatus ApplicationHost::UpdateEditorState(
             != update.expected_editor_revision) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    const InkpodStatus status = engine->UpdateEditorState(
-        document->id, document->generation, update);
+    const DocumentSessionId session = document->id;
+    const Generation generation = document->generation;
+    const InkpodStatus status = engine->UpdateEditorState(session, generation, update);
     if (status != INKPOD_STATUS_OK) {
+        // A rejected stale edit must leave the request rejected, but expose
+        // the authoritative editor state to the same session's UI. Repeated
+        // activation no longer supplies that refresh as an incidental effect.
+        (void)RefreshEditorPresentation(session, generation);
         return status;
     }
-    return RefreshEditorPresentation(document->id, document->generation)
+    return RefreshEditorPresentation(session, generation)
         ? INKPOD_STATUS_OK
         : INKPOD_STATUS_INVALID_STATE;
 }
@@ -1053,6 +1155,9 @@ bool ApplicationHost::CloseDocumentView(DocumentViewId view) noexcept {
         return false;
     }
     const bool was_visible = closing_group->ActiveView() == view;
+    if (was_visible) {
+        ObserveCanvasSequencePresentation(closing_group->canvas);
+    }
     const InkpodStatus status = engine->Invoke(
         document->id,
         document->generation,
@@ -1071,9 +1176,9 @@ bool ApplicationHost::CloseDocumentView(DocumentViewId view) noexcept {
     if (was_visible && closing_group->canvas != nullptr) {
         const auto* remaining = documents_.FindByView(closing_group->ActiveView());
         const bool rebound = remaining == nullptr
-            ? renderer::UnbindCanvasSnapshotSink(closing_group->canvas)
-            : renderer::BindCanvasSnapshotSink(closing_group->canvas,
-                remaining->id, closing_group->ActiveView(), remaining->generation);
+            ? UnbindDocumentCanvas(closing_group->canvas)
+            : BindDocumentCanvas(
+                closing_group->canvas, *remaining, closing_group->ActiveView());
         if (!rebound) {
             return false;
         }
@@ -1133,9 +1238,8 @@ bool ApplicationHost::CloseDocumentSession(DocumentSessionId session) noexcept {
         const DocumentSession* remaining = documents_.FindByView(group->ActiveView());
         if (group->canvas != nullptr) {
             const bool rebound = remaining == nullptr
-                ? renderer::UnbindCanvasSnapshotSink(group->canvas)
-                : renderer::BindCanvasSnapshotSink(group->canvas,
-                    remaining->id, group->ActiveView(), remaining->generation);
+                ? UnbindDocumentCanvas(group->canvas)
+                : BindDocumentCanvas(group->canvas, *remaining, group->ActiveView());
             if (!rebound) {
                 return false;
             }

@@ -30,6 +30,22 @@ struct SequencePaneCellView final {
     std::uint64_t document_uuid_low{};
 };
 
+// Captured from one published Core catalog. An independent session, recreated
+// Core owner, or catalog revision cannot reuse the previous pane's metadata.
+struct SequencePaneCatalogKey final {
+    app::DocumentSessionId session{};
+    app::Generation generation{};
+    std::uint64_t owner_generation{};
+    std::uint64_t revision{};
+    std::uint64_t cell_count{};
+
+    [[nodiscard]] explicit constexpr operator bool() const noexcept {
+        return static_cast<bool>(session) && static_cast<bool>(generation)
+            && owner_generation != 0U && revision != 0U;
+    }
+    constexpr bool operator==(const SequencePaneCatalogKey&) const noexcept = default;
+};
+
 struct SequencePaneView final {
     std::wstring target_text;
     std::wstring empty_text;
@@ -38,6 +54,18 @@ struct SequencePaneView final {
     bool target_available{};
     bool pinned{};
     bool cut_editable{};
+    bool auto_sequence_truncated{};
+    bool wrap_navigation{};
+    SequencePaneCatalogKey catalog{};
+    // Nonzero only after every referenced thumbnail was present at this generation.
+    std::uint64_t thumbnail_generation{};
+};
+
+struct SequencePaneSelection final {
+    SequencePaneCatalogKey catalog{};
+    std::uint32_t active_index{UINT32_MAX};
+    std::wstring target_text;
+    bool pinned{};
     bool auto_sequence_truncated{};
     bool wrap_navigation{};
 };
@@ -58,6 +86,15 @@ HWND CreateSequencePaneDialog(
     HINSTANCE instance, HWND owner, SequencePaneDialogState& state) noexcept;
 
 void UpdateSequencePaneDialog(HWND dialog, SequencePaneView view) noexcept;
+
+// Selection/header-only update; preserves cells, labels, geometry, focus, and
+// the current viewport unless a changed active cell needs to be revealed.
+// Returns false without changing state if the captured catalog or thumbnail
+// generation is no longer reusable, so the caller can perform a full refresh.
+// A changed global thumbnail generation revalidates this pane's existing keys;
+// unrelated pane invalidation must not force every pane to recreate its cache.
+[[nodiscard]] bool UpdateSequencePaneSelection(
+    HWND dialog, SequencePaneSelection selection) noexcept;
 
 bool SequencePaneItemHasThumbnail(HWND dialog, std::size_t index) noexcept;
 

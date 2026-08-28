@@ -36,6 +36,14 @@ public:
         app::DocumentSessionId session,
         app::Generation generation,
         const std::vector<InkpodColorValue>& colors) noexcept;
+    // Reuses the first exact-depth RGBA match across all groups without editing
+    // the document. A new color uses the existing replacement primitive;
+    // selected_index is published only after success.
+    InkpodStatus RegisterPaletteColor(
+        app::DocumentSessionId session,
+        app::Generation generation,
+        const InkpodColorValue& color,
+        std::uint32_t& selected_index) noexcept;
     InkpodStatus SetMainLineColor(const InkpodColorValue& color) noexcept;
 
 private:

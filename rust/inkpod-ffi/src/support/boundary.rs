@@ -310,6 +310,9 @@ pub(crate) fn write_resource_usage(output: &mut InkpodResourceUsage, usage: Reso
     output.sequence_source_bytes = usage.sequence_source_bytes;
     output.sequence_source_tile_count = usage.sequence_source_tile_count;
     output.thumbnail_cache_bytes = usage.thumbnail_cache_bytes;
+    output.sequence_render_cache_bytes = usage.sequence_render_cache_bytes;
+    output.sequence_render_cache_source_count = usage.sequence_render_cache_source_count;
+    output.sequence_render_cache_tile_count = usage.sequence_render_cache_tile_count;
 }
 
 pub(crate) fn write_dispatch_result(

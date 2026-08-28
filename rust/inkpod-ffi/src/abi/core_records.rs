@@ -147,6 +147,9 @@ pub struct InkpodResourceUsage {
     pub sequence_source_bytes: u64,
     pub sequence_source_tile_count: u64,
     pub thumbnail_cache_bytes: u64,
+    pub sequence_render_cache_bytes: u64,
+    pub sequence_render_cache_source_count: u64,
+    pub sequence_render_cache_tile_count: u64,
 }
 
 #[repr(C)]
@@ -456,6 +459,17 @@ pub struct InkpodSnapshotTransform {
     pub pan_y: f64,
     pub document_width: u32,
     pub document_height: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodSnapshotSourceIdentity {
+    pub struct_size: u32,
+    pub flags: u32,
+    pub document_uuid_high: u64,
+    pub document_uuid_low: u64,
+    pub source_generation: u64,
+    pub owner_generation: u64,
 }
 
 #[repr(C)]

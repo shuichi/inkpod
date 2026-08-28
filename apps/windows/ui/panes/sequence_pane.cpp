@@ -704,6 +704,81 @@ void UpdateSequencePaneDialog(HWND dialog, SequencePaneView view) noexcept {
     CompletePaneDialogResize(dialog);
 }
 
+bool UpdateSequencePaneSelection(
+    HWND dialog, SequencePaneSelection selection) noexcept {
+    auto* state = reinterpret_cast<SequencePaneDialogState*>(
+        dialog == nullptr ? 0 : GetWindowLongPtrW(dialog, GWLP_USERDATA));
+    if (state == nullptr || state->view.cut_editable || !state->view.target_available
+        || !selection.catalog || state->view.catalog != selection.catalog
+        || state->view.cells.size() != selection.catalog.cell_count
+        || (selection.active_index != UINT32_MAX
+            && selection.active_index >= state->view.cells.size())
+        || state->thumbnail_cache == nullptr || state->view.thumbnail_generation == 0U) {
+        return false;
+    }
+    const std::uint64_t thumbnail_generation =
+        state->thumbnail_cache->InvalidationGeneration(ThumbnailKind::Sequence);
+    if (thumbnail_generation == 0U) {
+        return false;
+    }
+    if (thumbnail_generation != state->view.thumbnail_generation
+        && !std::all_of(state->view.cells.begin(), state->view.cells.end(),
+            [state](const auto& cell) {
+                ThumbnailImageView image{};
+                return state->thumbnail_cache->Peek(cell.thumbnail_key, image)
+                    && image.layout == ThumbnailPixelLayout::Rgba8
+                    && image.width == cell.thumbnail_width
+                    && image.height == cell.thumbnail_height
+                    && image.stride_bytes == cell.thumbnail_stride_bytes;
+            })) {
+        return false;
+    }
+    const HWND list = GetDlgItem(dialog, IDC_SEQUENCE_CELLS);
+    if (list == nullptr
+        || SendMessageW(list, LB_GETCOUNT, 0, 0)
+            != static_cast<LRESULT>(state->view.cells.size())) {
+        return false;
+    }
+    const bool target_changed = state->view.target_text != selection.target_text
+        || state->view.auto_sequence_truncated != selection.auto_sequence_truncated;
+    const bool pin_changed = state->view.pinned != selection.pinned;
+    const bool selection_changed = state->view.active_index != selection.active_index;
+    std::wstring target_text;
+    if (target_changed) {
+        try {
+            target_text = selection.auto_sequence_truncated
+                ? std::wstring(UiText(UiStringId::AutoSequenceTruncated)) + L" — "
+                    + selection.target_text
+                : selection.target_text;
+        } catch (const std::bad_alloc&) {
+            return false;
+        }
+    }
+    state->view.target_text = std::move(selection.target_text);
+    state->view.active_index = selection.active_index;
+    state->view.pinned = selection.pinned;
+    state->view.auto_sequence_truncated = selection.auto_sequence_truncated;
+    state->view.wrap_navigation = selection.wrap_navigation;
+    state->view.thumbnail_generation = thumbnail_generation;
+    if (target_changed) {
+        SetDlgItemTextW(dialog, IDC_SEQUENCE_TARGET, target_text.c_str());
+    }
+    if (pin_changed) {
+        SetDlgItemTextW(dialog, IDC_SEQUENCE_PIN,
+            state->view.pinned ? UiText(UiStringId::ReturnToFollowing)
+                               : UiText(UiStringId::PinDocument));
+        static_cast<void>(SetPaneIconButton(GetDlgItem(dialog, IDC_SEQUENCE_PIN),
+            state->view.pinned ? PaneIconId::ReturnToFollowing : PaneIconId::PinDocument));
+    }
+    const LRESULT desired = selection.active_index == UINT32_MAX
+        ? LB_ERR : static_cast<LRESULT>(selection.active_index);
+    if (selection_changed || SendMessageW(list, LB_GETCURSEL, 0, 0) != desired) {
+        SelectCommittedCell(list, selection.active_index,
+            SendMessageW(list, LB_GETTOPINDEX, 0, 0), selection_changed);
+    }
+    return true;
+}
+
 bool SequencePaneItemHasThumbnail(HWND dialog, std::size_t index) noexcept {
     auto* state = reinterpret_cast<SequencePaneDialogState*>(
         dialog == nullptr ? 0 : GetWindowLongPtrW(dialog, GWLP_USERDATA));

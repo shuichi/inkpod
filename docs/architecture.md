@@ -45,7 +45,7 @@ Core supplies owned detached work to its generic executor.
 | `inkpod-format` | Bounded procedure-authoritative `.inkpod` v29 Cell/Cut containers and `.inkbatch` v4 models, stream/byte encode/decode/validation, and PNG/TIFF/TGA/BMP codecs; existing synchronous path wrappers remain for Rust callers outside the migrated application routes |
 | `inkpod-io`     | Application-owned bounded workers, filesystem paths/identity/locks, encoded and decoded LRU leases, streaming file access, temporary-file publication/cleanup, recoverable native/raster pair installation, recovery artifacts, and polling progress |
 | `inkpod-core`   | Stable-ID document/layer/plane state, immutable Genesis/base surfaces, a content-addressed canonical asset registry, StateId savepoints, views, raster clipboard, previews, animation, effects/Batch commands, persistence mapping, immutable render snapshots, and canonical primitive execution plus append-only journal/cache-free replay and semantic document digests for the migrated Core slice |
-| `inkpod-ffi`    | ABI v23 fixed records and generation-tagged runtime IDs, opaque I/O manager/job handles and path submission/poll/apply/release, Batch v4 graph/staged-result handles, InkScript source/compiler/fragment plus authority/plan/run/report handles and fixed DTO host callbacks, persistence/compaction diagnostics, validation/conversion, panic containment, and ownership functions |
+| `inkpod-ffi`    | ABI v24 fixed records and generation-tagged runtime IDs, opaque I/O manager/job handles and path submission/poll/apply/release, Batch v4 graph/staged-result handles, InkScript source/compiler/fragment plus authority/plan/run/report handles and fixed DTO host callbacks, persistence/compaction diagnostics, validation/conversion, panic containment, and ownership functions |
 
 Binary, grayscale, RGBA8/16, straight-alpha, premultiplied display data, and
 selection masks remain distinct types. Win32 may provide a
@@ -93,13 +93,23 @@ Reservations precede reads and pixel allocation. Encoded and decoded LRU
 accounting includes queued results, consumer-held leases, old/new replacement
 candidates, coexisting decode pixel buffers, and reference-view render pixels.
 Reference snapshot and individually cloned tile owners retain their derived
-pixel charge; Vec-to-Arc conversion reserves both coexisting allocations.
+pixel charge. Render tiles expose immutable slices over private shared pixel
+storage; moving a completed `Vec` into that storage does not copy its pixels.
 Removing a map entry does not uncharge a live lease. Only unpinned entries may
 be evicted; an operation that
 cannot reserve its bounded working set fails without discarding the current
 document/catalog. Document/history assets are separate authoritative data and
 are never evicted by this cache. Native/recovery files use uncached bounded
 streaming with the existing 1 GiB limit.
+
+The same manager also enforces the CPU sequence composition cache's separate
+8-source / 128-MiB ceiling inside the decoded total. `DecodedLease` reservations
+count pending preparation, retained compositions, and live snapshot/tile owners
+after cache eviction or Core destruction. Manager clones share one budget;
+`InkpodIoCacheInfo::sequence_render_allocations` and `sequence_render_bytes`
+report that subset without adding it again to `decoded_bytes`. An unsuccessful
+cache admission falls back to ordinary foreground composition. It is not a
+failure to open or switch the document.
 
 Read/write coordination uses normalized path and physical volume/file identity
 keys, including aliases, with a fixed acquisition order for multiple files.
@@ -119,7 +129,7 @@ discarding edits made after the primary open. Discovery/decode failure leaves
 that successful primary open intact.
 
 Jobs expose nonblocking discovery, read, loaded, failure, work, result, and
-installation counters through ABI v23. Loaded images include cache hits;
+installation counters through ABI v24. Loaded images include cache hits;
 internal Batch output rereads do not count as additional input images. Queued
 drop/cancel cannot publish a live candidate. A result is applied only on its
 captured owner after generation/revision validation. Normal save, sequence
@@ -127,6 +137,15 @@ autosave-switch, and compaction installation return a pending state after
 owner authorization and fence document mutation until final apply. Closing or
 shutdown cancels/drains this continuation before destroying its Core; releasing
 an installation early is not a substitute for finalization.
+
+The Windows-only `CoreHost::FileIoCompletion` runs on the Core owner and returns
+the I/O operation/apply status separately from the status after published-state
+refresh and snapshot submission. Neither status acknowledges a Renderer Present.
+`FileIoController` attempts Rust job release on that owner before exposing its
+copied `FileIoResult` to the UI-thread continuation. `document_applied` records a
+successful non-reference Core apply, even if later identity refresh, snapshot
+publication, or job release fails. The UI reconciles that applied result; a
+presentation error must not repeat a successful save, open, or installation.
 
 A sequence activation plan classifies an existing binding as `NOOP`, an identical
 initial raster as `BIND`, and a document replacement as `REPLACE`. Core validates
@@ -374,7 +393,7 @@ detached registry, so passing verification cannot be an artifact of shared
 `AssetRecord`, payload, or `TileRaster` ownership. Production v29 persists the
 same rooted graph in GENS/ASST.
 
-The present ABI is v23. `InkpodObjectId` separates Core, snapshot, task, color,
+The present ABI is v24. `InkpodObjectId` separates Core, snapshot, task, color,
 sample, raster, thumbnail, and export runtime objects by type and Core generation;
 IDs are monotonic within one Core and are never accepted across generation or
 after release. Variable input is synchronously copied into bounded Rust-owned
@@ -635,7 +654,15 @@ and maximum queue wait measured from enqueue to owner-thread dispatch. A
 session/generation value must be supplied when reading them; the UI never
 re-resolves the active document. The read-only C ABI resource query reports
 logical document tile/history, render-cache, CPU-staging, light-table/reference,
-sequence-source, and thumbnail-cache categories without building a snapshot.
+sequence-source, thumbnail-cache, and reserved sequence-composition categories
+without building a snapshot. ABI v24 adds the latter's byte/source/tile counts;
+the aggregate render-cache byte/tile counts already include the same charged
+payloads. Shared COW Core clones may report overlapping logical usage; the I/O
+manager's shared reservation counters enforce the application-wide CPU ceiling.
+Unchanged `TileRaster` clones share a lazy cached value of the existing checksum.
+Mutation detaches/invalidates that derived value, so repeated document-info
+queries need not rescan the same raster bytes. Neither the checksum algorithm
+nor the canonical render-cache formula is changed.
 `ApplicationHost` owns one UI-thread-only layer/sequence `ThumbnailCache` for
 all workspaces. Its 64 MiB default and 256 MiB maximum application budget use a
 cross-workspace LRU. Keys contain pane instance, document session/generation,
@@ -650,6 +677,18 @@ sessions. The cross-session delay and fault scenarios retain every
 accepted input without partial commit, so current measurements do not justify
 relaxing the single-writer owner-thread contract.
 
+The frontend's repeated-view shortcut also requires the Canvas sink's actual
+session, document generation, frontend view, Canvas and surface generation to
+match the requested route. Model selection alone is insufficient: creating a
+view updates the model's active entries before activation binds the Canvas.
+A new or stale route must pass through the normal binding/publication path.
+The UI may query the selected view's published transform only after its own
+snapshot has been submitted; another view's transform is never substituted.
+An editor command rejected by Core refreshes the authoritative editor state
+for its captured session/generation before returning the original failure.
+It never retries the rejected edit or relies on repeated activation to repair
+stale UI state. Successful navigation adds no refresh for this recovery case.
+
 `ApplicationHost` owns one `RendererHost` and starts it before any Canvas or
 Core. Its single renderer thread owns a shared D3D11 device/immediate context,
 DXGI factory, Direct2D factory/device, device generation, and upload-cache
@@ -661,15 +700,30 @@ paint, and preview work is queued by strong `CanvasId` plus surface generation.
 There is no per-Canvas renderer thread or per-Canvas D3D/D2D device.
 
 CoreHost publishes through a `SnapshotEnvelope` containing document session,
-frontend view, Canvas, document generation, surface generation, document
-revision, and view revision. Snapshot fan-out registers every visible
-editor-group Canvas, including the primary group of each newly created
+frontend view, Canvas, document generation, surface generation, snapshot
+revision, view revision, a separately captured committed document revision, and
+the Windows-only `presentation_epoch` of the installed navigation result.
+The snapshot revision can include a preview and must not stand in for the
+committed revision when releasing an editing fence. Recovery can install an
+equal or lower document revision, so the epoch must also match. This epoch is
+fixed on the Core owner thread after successful installation and before snapshot
+publication; it is not a Rust Core revision, C ABI field, or CPU/GPU cache key.
+Successful ordinary native, recovery, or raster open explicitly sets the epoch
+to zero instead of inheriting a previous sequence token. Core session-generation
+rebind also clears it; failed apply does not install the requested epoch.
+For these ordinary opens, the UI completion checks `document_applied` and the
+issuing session/generation, then clears that session's pending/required
+revision/epoch fence and synchronizes its Canvases to zero. This applies even
+when the document is no longer active, or later snapshot publication failed;
+neither case undoes the successful Core apply or restores an old sequence fence.
+Snapshot fan-out registers
+every visible editor-group Canvas, including the primary group of each newly created
 workspace, up to 16 sinks matching eight workspaces with two groups each;
 inactive tabs and auxiliary panes do not consume that bound. RendererHost accepts a
 snapshot only when the complete
 route equals the current surface binding and the snapshot accessors confirm both
-revisions. Rebind clears the old retained snapshot before accepting the new
-route. Stale, hidden, occluded, queue-full, replaced, closed, and shutdown paths
+snapshot/view revisions. Rebind clears the old retained snapshot before accepting
+the new route. Stale, hidden, occluded, queue-full, replaced, closed, and shutdown paths
 all consume the Rust snapshot owner exactly once. Device loss first discards all
 surface GPU resources, recreates the shared device, then reconstructs every
 surface cache from its retained immutable snapshot; Core document state is not
@@ -678,7 +732,15 @@ retained/pending immutable snapshots, active/cached GPU tiles, swap-chain
 payloads, surfaces, queue rejection/replacement, stale frames, resource-limit
 rejection, and device reset. A per-surface value copy retains the bound document/
 view/Canvas/generation route and byte/count values but no snapshot or GPU
-pointer. GPU tile payloads share a 512 MiB application-wide
+pointer. It also records the last successfully presented committed document/view
+revision, presentation epoch, and source identity, per-surface upload bytes/counts, and sequence-cache
+bytes/source/eviction counts. Submit, upload, frame-latency timeout, and occlusion
+do not advance the successful-Present fields; rebind and device loss invalidate
+them. The submission QPC and first successful Present QPC for a committed
+revision/epoch pair are observations, not a substitute for checking its route,
+committed revision, and epoch. Re-presenting that same pair retains its first
+successful-Present time.
+GPU tile payloads share a 512 MiB application-wide
 budget; active tiles are admitted only when the aggregate fits, while inactive
 tiles are retained for reuse and evicted in application-wide least-recently-used
 order. The frontend retains one Canvas surface per visible editor group, up to two,
@@ -769,6 +831,16 @@ numeric run match, then selects the opened cell in Core natural order. Dirty-cel
 cancel, stale target, decode failure, and endpoint no-op leave the current cell
 unchanged.
 
+Each immutable source retains one bounded thumbnail generated during ingestion.
+The cell metadata and thumbnail-size queries reuse it without resizing or
+cloning its pixel vector; only an explicit thumbnail copy transfers bytes to the
+caller. `CoreHost` publishes `InkpodSequenceCatalogInfo` per session/generation:
+catalog owner generation, sequence revision, count, and active index. With the
+same catalog and thumbnail invalidation generation, the UI keeps the list,
+labels, and thumbnail keys and updates only selection/header state. Catalog or
+pane-target replacement and thumbnail eviction/invalidation take the ordinary
+bounded reload path. A zero catalog owner disables reuse.
+
 The native owner-drawn multicolumn ListBox is constrained to one row and scrolls
 horizontally. Its native item text retains the complete accessible frame name.
 Left/Right navigation is local to list focus, and Cut member activation uses its
@@ -786,6 +858,14 @@ save path or source-file overwrite authority. The no-op/bind path, delayed
 automatic discovery, and exact-native recovery retain their existing editor
 state, history, dirty state, and savepoints; only actual fresh replacement uses
 the new baseline.
+
+Replacement stages the final transform for every existing view before commit.
+Equal image dimensions preserve zoom, logical pan, flip, viewport, mode, and
+view revision. Different dimensions use the existing resize policy: Manual
+retains its transform, Fit recomputes fitting, and 1:1 recenters. The Windows
+adapter does not issue a second Fit or publish an intermediate reset transform.
+This view preparation also applies to the staged autosave/recovery switch;
+it does not replace recovered history or editor state with a flattened source.
 
 For a Cut descriptor, the pane keeps a derived thumbnail cache keyed by the
 member's stable `(CellId, document UUID)` pair rather than its order or display
@@ -835,16 +915,72 @@ The flattened `SequenceCellSource` remains a thumbnail/fresh-cell source and is
 never used to reconstruct saved layer topology, history, selection, or editor
 state.
 
-Only one sequence switch token may be pending application-wide. While it is
-pending, previous/next/goto are disabled, progress is visible in the status bar,
-and another request is rejected rather than retargeted. The file-I/O controller's
-UI-thread continuation first publishes the prepared association, identity, and
-pathless recovery shell for the captured live session, even if the originating
-view has closed. A token/generation-only window message then refreshes surviving
-pane/menu UI; it never carries object pointers. Save, metadata, queue, or stale
-failure leaves the source cell active and never advances the normal path or
-savepoint; close or shutdown cancels and finalizes accepted installation before
-destroying that session, without retargeting completion to another document.
+Only one sequence switch token may be pending application-wide. Fresh
+replacement resolves scalar plan metadata on the Core owner, then queues commit
+and the final snapshot without waiting for composition or Present on the UI
+thread. During this interactive activation, a UI-owned queue accepts at most
+256 further navigation intentions. Each captures its `CommandContext`, catalog
+owner/revision, explicit target or direction, and endpoint policy. After each
+commit, the next intention is revalidated against that same owner and a relative
+step is resolved from the newly committed cell. A stale/closed target is never
+redirected to the currently active document; saturation rejects new intentions.
+Accepted navigation intentions are not frame-coalesced, although the renderer
+may replace their older undrawn snapshots. Autosave/recovery installation keeps
+its existing exclusive behavior and rejects additional switching requests.
+
+The file-I/O controller's UI-thread continuation publishes the prepared
+association, identity, and pathless recovery shell for the captured live session,
+even if the originating view has closed. A token/generation-only window message
+refreshes surviving pane/menu UI; it never carries object pointers. The clean
+interactive path uses the same owned completion mailbox and publishes authority
+only after Core commit. Core commit success is distinct from snapshot or
+presentation success: a rendering failure cannot revert an already published
+document. If the originating window is gone, the owned mailbox survives for a
+retargeted notification or the existing file-I/O poll fallback. A committed
+replacement whose snapshot publication failed is reconciled to the new document
+in the UI and its snapshot is retried once; its editing fence remains until
+successful Present. Save, metadata, queue, or stale failure before commit leaves the source
+active and advances no normal path/savepoint. Close or shutdown cancels and
+finalizes accepted installation before destroying that session, without
+retargeting completion to another document.
+
+For every sequence replacement, including autosave and native recovery,
+`DocumentSession` holds a pending-activation fence, the required committed
+document revision, and the accepted switch token as a nonzero presentation
+epoch. Every Canvas bind reapplies that session fence. The Core owner fixes the
+epoch only after the exact requested replacement commits, before publishing its
+snapshot; a failed installation retains the previously required revision/epoch.
+Editing is initially blocked until a matching session/generation/Canvas route
+reports a successful Present with at least that actual committed revision and
+the exact required epoch. An old cell's equal or higher document revision cannot
+release a recovery fence. A preview revision, queue acceptance, upload
+completion, latency timeout, or occluded frame cannot release it.
+
+`ApplicationHost::SequenceEditReady` is a side-effect-free UI query for the
+captured `CommandContext`; it rejects stale targets and pending activation
+before considering readiness. The command router, direct pane color/tool/layer
+callbacks, and user `UpdateEditorState` entries use this gate before changing
+local editor state or dispatching Core work. Automatic presentation refresh and
+editor reconciliation are not user edits and do not use that gate.
+
+Before a Canvas route is rebound/unbound or its view is removed, the UI compares
+the current sink route with the renderer's complete published route and can
+record a successful sequence Present in `DocumentSession`. This acknowledgement
+requires the owning session/generation, a still-owned view, the exact nonzero
+required epoch, and a sufficient actual document revision. It lets an already
+shown document remain editable through a pinned pane after its Canvas becomes
+hidden. The query itself does not record an acknowledgement. A new generation
+or epoch makes the old record inapplicable, and pending activation always
+blocks; if a failed navigation restores the old required fence, its previous
+acknowledgement remains usable.
+
+The acknowledgement does not clear the required revision/epoch or the Canvas
+fence. New stroke Begin still checks that Canvas's current route and successful
+Present, including after rebind. Existing accepted stroke Append/End/Cancel
+packets retain their ownership and ordering. This Windows input/presentation
+token is separate from the pristine source-cache identity and is absent from
+the C ABI, native format, document digest, replay, and both cache keys.
+
 Both policy values are fields of the single versioned settings JSON and are
 not part of the `.inkpod` schema.
 
@@ -1172,6 +1308,49 @@ is retained for device recovery. Render frames may be dropped, but input samples
 and stroke begin/end/cancel events may not. Queue failure cancels capture and the
 Core stroke so partial work cannot commit.
 
+Renderer preview setters validate their input before reporting an unchanged
+state. Repeating an empty geometry/floating preview returns `S_FALSE`; geometry
+also returns it when all rendered fields are unchanged. `ProcessControl` renders
+these controls only for a state change reported as `S_OK`, so an empty clear
+does not wait for a frame or present the old cell again. On the UI thread, the
+selection, fill, color-replace, and raster-geometry cancel paths send a shared
+Canvas clear only when their own gesture/preview exists or a prior clear is
+pending. Cancellation still resets the local gesture immediately. A missing
+Canvas or rejected clear preserves `geometry_preview_clear_pending` across tool
+document resets, allowing a later cancel to retry; a successful clear removes
+the marker. This UI marker is not a Core preview or persisted document state.
+
+`CanvasSurface` acquires its frame-latency permit only after surface resources
+and the complete snapshot are ready. The Renderer thread retains an acquired
+permit across a failed adjustment, draw, or readback and consumes it only when
+`Present` returns `S_OK`. Resizing buffers on the same swap chain preserves the
+permit; discarding/recreating the swap chain invalidates it. A wait timeout is
+not a successful Present and cannot advance revision/epoch telemetry or release
+an input fence.
+
+Asynchronous snapshot, resize, and preview work probes frame readiness without
+waiting. If the frame cannot be presented yet, `SurfaceRecord` retains one
+`presentation_pending` flag for its latest snapshot. An applied preview setter
+can therefore return `S_OK` while its frame is still pending. The Renderer owner
+processes newly queued work first, then `WaitForReadySurface` probes pending
+surfaces and waits on their DXGI handles together with the queue/stop wake event.
+Zero-time probes do not count as latency timeouts. A wait includes at most 63
+surface handles and is bounded to 100 ms; larger sets are probed in full and use
+rotating 1-ms wait batches. New work or stop interrupts the wait. Deferred retry
+does not make the UI wait for frame readiness or make the Renderer busy-spin.
+
+Explicit render requests retain separate `pending_render_requests` credits,
+consuming one only for each successful Present. New snapshots may replace the
+pending image without dropping those credits. Deferred work remains included
+in the existing 256-entry admission budget (248 noncritical entries),
+`queued_work_count`, and queue-idle completion; removing an item from the work
+deque alone does not finish it. Hidden, rebound, unbound, unregistered, occluded,
+or terminally failed surfaces discard their pending work. Successful device
+recovery retains it for retry. Shutdown signals the wake event, stops and joins
+the Renderer owner, then closes that event; deferred work owns no extra raw
+snapshot pointer outside the surface's existing retained owner. Rendering
+failures continue through the existing Canvas failure notification.
+
 ## Coordinate, DPI, and rendering contract
 
 Canvas input and rendering use client device pixels:
@@ -1232,6 +1411,84 @@ in a new command list while retaining document-scale raster quality. Device-loss
 recovery rebuilds the same plan from the retained snapshot. Thumbnail and flat
 export use the same bottom-to-top Core semantics. Raster documents retain the
 existing precomposed tile path and its revision-max cache.
+
+### Bounded sequence source render caches
+
+The CPU and GPU caches retain compositions of pristine immutable sequence
+sources under independent application-wide limits:
+
+| Cache | Retained source limit | Pixel limit | Budget owner |
+|---|---|---|---|
+| CPU composed tiles | 8 source reservations | 128 MiB, within the decoded 8 GiB total | Shared `IoManager` plus the Core's reservation ledger |
+| GPU source bitmaps | 8 source allocations across Canvas surfaces | 128 MiB, within the GPU tile 512 MiB total | Process-owned `RendererHost` |
+
+The key is `(document UUID, source generation, owner generation)`.
+`owner_generation` is a checked, nonzero, process-local namespace for an
+independent Core/catalog lifetime. Successful catalog replacement renews it;
+staging preserves it, while an independent Core clone gets a new namespace.
+Exhaustion disables source-cache reuse instead of wrapping. The identity is
+neither persisted nor included in semantic snapshot equality, document digests,
+replay, or revision-max. ABI v24's immutable snapshot accessor copies this
+provenance without payload reads and without giving the caller a source owner.
+
+Pristine eligibility is established by fresh source activation and checked
+against the exact document/cell identity, document revision, history state, and
+source generation. It is not inferred from `dirty == false`, a savepoint, or
+initial `NOOP`/`BIND`. Edits, native recovery, stroke/filter/floating previews,
+and alpha/color-check output cannot enter the pristine bank. Leaving pristine
+state for an edit revokes bank admission without clearing unaffected current
+tiles; their existing revision-max checks and metadata invalidation still apply.
+Normal-view reentry can select the original pristine source only when all of
+its eligibility checks hold. An identity flag describes provenance, not a
+guarantee that either cache currently retains the source.
+
+The CPU LRU shares immutable tile pixels and renderer-facing tile revisions
+with the current snapshot. A retained-source hit restores those same tiles,
+then runs the existing scalar validation; it does not recompose their pixels.
+Output byte reservations precede composition and bound allocated tile capacity.
+A shared reservation is attached to every exported tile before snapshot clones
+are published. Pending preparation and outstanding snapshot/tile clones keep
+their source count and byte reservation charged, including after catalog/Core
+destruction. The last owner releases the charge; removing an LRU entry alone
+does not. Foreground admission may evict unreferenced LRU entries, but reservation
+failure or a source exceeding the cache cap uses the ordinary active snapshot
+path without retention. Standalone unmanaged Rust sources keep the same local
+8-source / 128-MiB limit; production file sources additionally use the shared
+manager limit. No editable Core is kept for every sequence cell.
+
+After a snapshot, at most the immediately preceding and following sources are
+prepared on the existing bounded Rust I/O worker pool. Preparation reserves
+spare cache capacity first, never evicts a foreground entry to speculate, and
+uses an immutable source with detached temporary topology. The worker consumes
+no persistent IDs and mutates no live Core. Only the Core owner can adopt a
+completed result after checking catalog owner, source UUID/generation, captured
+index, and its current neighborhood. Catalog/source replacement or a departed
+neighborhood cancels/discards old work. An unfinished job for a newly selected
+target is canceled without waiting; foreground composition remains the fallback.
+Attempts are bounded to one adjacent pair per activation, not all-file
+precomposition or repeated speculative work on every view-only frame.
+
+Each Canvas banks GPU tile maps by the full source key and still checks tile ID,
+tile revision, and dimensions before reusing a bitmap. Identical UUIDs and
+source generations in different Core owners cannot alias. `RendererHost` sums
+source allocations/bytes across surfaces, evicts inactive LRU entries first,
+and can stop retaining an active source if all remaining candidates are active.
+An unretained active image remains subject to the ordinary GPU tile budget;
+cache pressure does not change its pixels or view. Rebind, owner changes, device
+loss, and teardown discard the affected GPU entries. The CPU cache remains
+independent, and a miss or device rebuild follows the normal upload path.
+When an edit or preview leaves a pristine source within the same nonzero Windows
+presentation epoch, the current GPU tile map can become the ordinary map and
+retain unchanged tiles. It no longer counts as a pristine source allocation;
+retained source-bank entries remain immutable. A different presentation epoch
+invalidates an ordinary map before reuse, including recovery with equal tile
+IDs/revisions. The epoch is an invalidation condition, not part of the source
+bank's lookup key.
+
+These are derived display caches only. Native v29, document replay epoch 25,
+the canonical revision-max formula below, its payload-access gates, and existing
+benchmark workloads/envelopes are unchanged. Source-hit and upload counters
+describe which work was reused; they do not replace end-to-end Present checks.
 
 ### Canonical revision-max render-cache identity
 

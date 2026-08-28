@@ -10,6 +10,10 @@ namespace inkpod::app {
 
 class ApplicationHost;
 
+// One message through the production dialog/shortcut/DispatchMessage order.
+// Kept separate from GetMessage so native input regressions use the same path.
+void DispatchApplicationMessage(ApplicationHost& state, MSG& message) noexcept;
+
 struct ApplicationLaunch {
     HINSTANCE instance{};
     int show_command{};
@@ -17,6 +21,7 @@ struct ApplicationLaunch {
     bool performance_smoke_test{};
     bool open_in_new_workspace{};
     std::vector<std::wstring> document_paths;
+    bool sequence_performance_smoke_test{};
 };
 
 class Application final {

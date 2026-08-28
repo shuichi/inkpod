@@ -1128,9 +1128,9 @@ pub struct ResourceUsage {
     pub history_bytes: u64,
     /// Number of Undo/Redo entries.
     pub history_entry_count: u64,
-    /// CPU compositing cache payload retained by Core.
+    /// CPU compositing payload, including live sequence-cache reservations.
     pub render_cache_bytes: u64,
-    /// Number of cached composited raster tiles.
+    /// Number of cached composited raster tiles, including live sequence payloads.
     pub render_cache_tile_count: u64,
     /// Transient preview, stroke, and floating-selection staging payload.
     pub cpu_staging_bytes: u64,
@@ -1143,7 +1143,16 @@ pub struct ResourceUsage {
     /// Number of imported sequence source tiles.
     pub sequence_source_tile_count: u64,
     /// Persistent thumbnail cache payload owned by Core.
-    ///
-    /// Core currently generates bounded thumbnails on demand, so this is zero.
     pub thumbnail_cache_bytes: u64,
+    /// Reserved sequence-composition bytes, included in `render_cache_bytes`.
+    ///
+    /// Reservations cover clipped output-tile upper bounds and remain charged
+    /// while cached tiles or exported snapshot/tile clones exist. At most 128 MiB
+    /// is retained per cache lineage and application-wide for managed sources.
+    pub sequence_render_cache_bytes: u64,
+    /// Number of live sequence-composition reservations, at most eight.
+    pub sequence_render_cache_source_count: u64,
+    /// Composited tile count covered by live sequence reservations.
+    /// A whole source remains charged until the last tile clone is released.
+    pub sequence_render_cache_tile_count: u64,
 }

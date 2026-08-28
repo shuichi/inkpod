@@ -25,6 +25,17 @@ void ApplyCurrentColor(
     tools.color_rgba = ColorToRgba8(color);
 }
 
+void ClearGeometryPreviewIfNeeded(
+    app::ToolUiState& tools, HWND canvas, bool had_preview) noexcept {
+    if (!had_preview && !tools.geometry_preview_clear_pending) {
+        return;
+    }
+    // Cancel still resets the gesture immediately. A rejected Renderer control
+    // must not make an old overlay unreachable once its samples are gone.
+    tools.geometry_preview_clear_pending = canvas == nullptr
+        || SendMessageW(canvas, renderer::kCanvasClearGeometryPreview, 0, 0) != 1;
+}
+
 } // namespace
 
 bool IsGeometryCanvasTool(std::uint32_t tool) noexcept {
@@ -40,46 +51,40 @@ bool IsGeometryCanvasPlane(std::uint32_t kind) noexcept {
 
 void CancelRasterGeometryPreview(
     app::ToolUiState& tools, HWND canvas) noexcept {
+    const bool had_preview = tools.geometry_preview_active
+        || !tools.geometry_gesture_samples.empty();
     tools.geometry_gesture_samples.clear();
     tools.geometry_base_revision = 0U;
     tools.geometry_view_revision = 0U;
     tools.geometry_preview_active = false;
     tools.geometry_snap_bypass = false;
     tools.procedure.valid = false;
-    if (canvas != nullptr) {
-        SendMessageW(canvas, renderer::kCanvasClearGeometryPreview, 0, 0);
-    }
+    ClearGeometryPreviewIfNeeded(tools, canvas, had_preview);
 }
 
 void CancelSelectionGeometryPreview(
     app::ToolUiState& tools, HWND canvas) noexcept {
+    const bool had_preview = !tools.selection_gesture_samples.empty();
     tools.selection_gesture_samples.clear();
     tools.procedure.valid = false;
-    if (canvas == nullptr) {
-        return;
-    }
-    SendMessageW(canvas, renderer::kCanvasClearGeometryPreview, 0, 0);
+    ClearGeometryPreviewIfNeeded(tools, canvas, had_preview);
 }
 
 void CancelColorReplaceGeometryPreview(
     app::ToolUiState& tools, HWND canvas) noexcept {
+    const bool had_preview = !tools.color_replace_gesture_samples.empty();
     tools.color_replace_gesture_samples.clear();
     tools.color_replace_base_revision = 0U;
     tools.procedure.valid = false;
-    if (canvas == nullptr) {
-        return;
-    }
-    SendMessageW(canvas, renderer::kCanvasClearGeometryPreview, 0, 0);
+    ClearGeometryPreviewIfNeeded(tools, canvas, had_preview);
 }
 
 void CancelFillGeometryPreview(
     app::ToolUiState& tools, HWND canvas) noexcept {
+    const bool had_preview = !tools.fill_gesture_samples.empty();
     tools.fill_gesture_samples.clear();
     tools.procedure.valid = false;
-    if (canvas == nullptr) {
-        return;
-    }
-    SendMessageW(canvas, renderer::kCanvasClearGeometryPreview, 0, 0);
+    ClearGeometryPreviewIfNeeded(tools, canvas, had_preview);
 }
 
 void TransitionActiveTool(

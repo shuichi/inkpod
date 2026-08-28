@@ -4,6 +4,7 @@
 
 #include "app/frontend_state.h"
 #include "app/resource.h"
+#include "canvas.h"
 #include "ui/command_catalog.h"
 #include "ui/command_state.h"
 #include "ui/tools/tool_state.h"
@@ -32,8 +33,132 @@ using inkpod::windows::ui::tools::kInteractionFill;
 using inkpod::windows::ui::tools::kInteractionSelection;
 using inkpod::windows::ui::tools::kInteractionColorReplace;
 using inkpod::windows::ui::tools::kInteractionGeometryRectangle;
+using inkpod::windows::ui::tools::CancelColorReplaceGeometryPreview;
+using inkpod::windows::ui::tools::CancelFillGeometryPreview;
+using inkpod::windows::ui::tools::CancelRasterGeometryPreview;
+using inkpod::windows::ui::tools::CancelSelectionGeometryPreview;
 
 constexpr UINT kRetiredJobProgressCommand = 41958U;
+
+struct PreviewClearProbe final {
+    std::uint32_t calls{};
+    bool accept{true};
+};
+
+LRESULT CALLBACK PreviewClearWindowProcedure(
+    HWND window, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
+    if (message == WM_NCCREATE) {
+        const auto* create = reinterpret_cast<const CREATESTRUCTW*>(lparam);
+        SetWindowLongPtrW(window, GWLP_USERDATA,
+            reinterpret_cast<LONG_PTR>(create->lpCreateParams));
+    }
+    auto* probe = reinterpret_cast<PreviewClearProbe*>(
+        GetWindowLongPtrW(window, GWLP_USERDATA));
+    if (probe != nullptr && message == inkpod::renderer::kCanvasClearGeometryPreview) {
+        ++probe->calls;
+        return probe->accept ? 1 : 0;
+    }
+    return DefWindowProcW(window, message, wparam, lparam);
+}
+
+bool GeometryPreviewCancellationIsBounded() {
+    constexpr wchar_t class_name[] = L"InkpodCommandStatePreviewClearProbe";
+    const HINSTANCE instance = GetModuleHandleW(nullptr);
+    WNDCLASSW window_class{};
+    window_class.hInstance = instance;
+    window_class.lpfnWndProc = PreviewClearWindowProcedure;
+    window_class.lpszClassName = class_name;
+    if (RegisterClassW(&window_class) == 0U) {
+        return false;
+    }
+    PreviewClearProbe probe{};
+    struct ProbeWindow final {
+        HWND window;
+        HINSTANCE instance;
+        const wchar_t* class_name;
+        ~ProbeWindow() {
+            if (window != nullptr) {
+                DestroyWindow(window);
+            }
+            UnregisterClassW(class_name, instance);
+        }
+    } owned{CreateWindowExW(0U, class_name, L"", 0U, 0, 0, 0, 0,
+                HWND_MESSAGE, nullptr, instance, &probe), instance, class_name};
+    if (owned.window == nullptr) {
+        return false;
+    }
+    ToolUiState empty{};
+    empty.procedure.valid = true;
+    // ResetUiForNewActiveDocument performs these three cancellations in order.
+    CancelFillGeometryPreview(empty, owned.window);
+    CancelSelectionGeometryPreview(empty, owned.window);
+    CancelColorReplaceGeometryPreview(empty, owned.window);
+    CancelRasterGeometryPreview(empty, owned.window);
+    if (probe.calls != 0U || empty.procedure.valid) {
+        return false;
+    }
+    struct CancellationCase final {
+        void (*cancel)(ToolUiState&, HWND) noexcept;
+        std::vector<InkpodStrokeSample> ToolUiState::* samples;
+    };
+    const std::array<CancellationCase, 4U> cases{{
+        {CancelFillGeometryPreview, &ToolUiState::fill_gesture_samples},
+        {CancelSelectionGeometryPreview, &ToolUiState::selection_gesture_samples},
+        {CancelColorReplaceGeometryPreview, &ToolUiState::color_replace_gesture_samples},
+        {CancelRasterGeometryPreview, &ToolUiState::geometry_gesture_samples}}};
+    for (const auto& candidate : cases) {
+        ToolUiState active{};
+        (active.*candidate.samples).push_back(InkpodStrokeSample{});
+        active.procedure.valid = true;
+        const std::uint32_t before = probe.calls;
+        candidate.cancel(active, owned.window);
+        if (probe.calls != before + 1U || !(active.*candidate.samples).empty()
+            || active.procedure.valid) {
+            return false;
+        }
+        candidate.cancel(active, owned.window);
+        if (probe.calls != before + 1U) {
+            return false;
+        }
+    }
+    ToolUiState retry{};
+    retry.selection_gesture_samples.push_back(InkpodStrokeSample{});
+    const std::uint32_t before_retry = probe.calls;
+    probe.accept = false;
+    CancelSelectionGeometryPreview(retry, owned.window);
+    if (probe.calls != before_retry + 1U || !retry.selection_gesture_samples.empty()) {
+        return false;
+    }
+    probe.accept = true;
+    // A failed shared-overlay clear survives even when the next owner is empty.
+    CancelFillGeometryPreview(retry, owned.window);
+    CancelSelectionGeometryPreview(retry, owned.window);
+    if (probe.calls != before_retry + 2U) {
+        return false;
+    }
+    retry.color_replace_gesture_samples.push_back(InkpodStrokeSample{});
+    retry.color_replace_base_revision = 9U;
+    CancelColorReplaceGeometryPreview(retry, nullptr);
+    CancelRasterGeometryPreview(retry, owned.window);
+    if (probe.calls != before_retry + 3U || !retry.color_replace_gesture_samples.empty()
+        || retry.color_replace_base_revision != 0U) {
+        return false;
+    }
+    retry.geometry_preview_active = true;
+    retry.geometry_base_revision = 11U;
+    retry.geometry_view_revision = 12U;
+    retry.geometry_snap_bypass = true;
+    CancelRasterGeometryPreview(retry, owned.window);
+    CancelRasterGeometryPreview(retry, owned.window);
+    if (probe.calls != before_retry + 4U || retry.geometry_preview_active
+        || retry.geometry_base_revision != 0U || retry.geometry_view_revision != 0U
+        || retry.geometry_snap_bypass) {
+        return false;
+    }
+    retry.selection_gesture_samples.push_back(InkpodStrokeSample{});
+    CancelFillGeometryPreview(retry, owned.window);
+    return probe.calls == before_retry + 4U && retry.selection_gesture_samples.size() == 1U;
+}
 
 bool SameStates(const CommandStateSet& left, const CommandStateSet& right) noexcept {
     for (std::size_t index = 0; index < left.size(); ++index) {
@@ -213,6 +338,10 @@ bool ShortcutCatalogIsCompleteAndPrefixFree() {
 } // namespace
 
 int main() {
+    if (!GeometryPreviewCancellationIsBounded()) {
+        std::fputs("geometry preview cancellation message/retry contract failed\n", stderr);
+        return 26;
+    }
     CommandStateInputs inputs{};
     CommandStateSet states = ComputeCommandStates(inputs);
     if (!CatalogHasExactlyOneOwner(states)) {

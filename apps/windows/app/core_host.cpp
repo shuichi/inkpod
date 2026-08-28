@@ -179,7 +179,7 @@ struct FileIoInput {
     CommandContext context;
     std::uint64_t sequence{};
     CoreHost::FileIoOperation operation;
-    std::function<void(InkpodStatus)> completion;
+    CoreHost::FileIoCompletion completion;
     bool publish_snapshot{};
     bool refresh_document_info{};
     bool active{};
@@ -215,6 +215,7 @@ struct PublishedSession {
     InkpodDocumentInfo document_info{};
     bool has_document_info{};
     std::array<wchar_t, 1024U> sequence_cell_name{};
+    InkpodSequenceCatalogInfo sequence_catalog{};
     InkpodEditorStateInfo editor_state{};
     bool has_editor_state{};
     InkpodHistoryInfo history_info{};
@@ -228,6 +229,10 @@ struct PublishedSession {
     InkpodSnapshotTransform snapshot_transform{};
     std::uint64_t snapshot_view_id{};
     bool has_snapshot_transform{};
+    std::uint64_t active_view_id{};
+    std::uint64_t pending_view_updates{};
+    std::uint64_t view_publication_epoch{};
+    bool has_active_view{};
     std::wstring last_error;
     EngineMetrics metrics{};
     CoreSessionState state{};
@@ -237,6 +242,7 @@ struct CoreEntry {
     SessionBinding binding;
     InkpodCore* core{};
     std::uint64_t active_view_id{};
+    std::uint64_t presentation_epoch{};
     std::uint64_t active_sample_count{};
     bool preview_dirty{};
     bool stroke_active{};
@@ -265,9 +271,12 @@ struct CoreHost::Impl final {
                 std::lock_guard lock(state_mutex);
                 published.reserve(kMaximumSessions);
                 frontend_views.reserve(kMaximumFrontendViews);
+                notifications.clear();
+            }
+            {
+                std::lock_guard lock(snapshot_sinks_mutex);
                 snapshot_sinks.reserve(CoreHost::kMaximumSnapshotSinks);
                 snapshot_sinks.push_back(initial_canvas);
-                notifications.clear();
             }
             entries.reserve(kMaximumSessions);
             adapter_inputs.reserve(kMaximumQueuedWork + kReservedStrokeControlWork);
@@ -305,9 +314,12 @@ struct CoreHost::Impl final {
             std::lock_guard lock(state_mutex);
             published.clear();
             frontend_views.clear();
-            snapshot_sinks.clear();
             notifications.clear();
             active = {};
+        }
+        {
+            std::lock_guard lock(snapshot_sinks_mutex);
+            snapshot_sinks.clear();
         }
     }
 
@@ -457,6 +469,9 @@ struct CoreHost::Impl final {
         old->has_document_info = false;
         old->editor_state = {};
         old->has_editor_state = false;
+        old->has_active_view = false;
+        old->pending_view_updates = 0U;
+        old->view_publication_epoch = 0U;
         std::erase_if(frontend_views, [old_binding](const FrontendViewBinding& view) {
             return view.session == old_binding;
         });
@@ -507,7 +522,43 @@ struct CoreHost::Impl final {
         if (found == published.end() || !found->state.accepting_work) {
             return false;
         }
+        if (active != binding) {
+            // A hidden session may have changed without publishing a snapshot.
+            // Its first activation must refresh the destination Canvas.
+            InvalidateViewPublicationLocked(*found);
+        }
         active = binding;
+        return true;
+    }
+
+    static void InvalidateViewPublicationLocked(PublishedSession& session) noexcept {
+        session.has_active_view = false;
+        // Saturation permanently disables acknowledgement for this binding,
+        // rather than reusing an epoch still held by an in-flight publisher.
+        if (session.view_publication_epoch != std::numeric_limits<std::uint64_t>::max()) {
+            ++session.view_publication_epoch;
+        }
+    }
+
+    bool InvalidateViewPublication(SessionBinding binding) noexcept {
+        std::lock_guard lock(state_mutex);
+        const auto found = FindPublishedLocked(binding);
+        if (found == published.end() || !found->state.accepting_work) {
+            return false;
+        }
+        InvalidateViewPublicationLocked(*found);
+        return true;
+    }
+
+    bool SetPresentationEpoch(SessionBinding binding, std::uint64_t epoch) noexcept {
+        if (GetCurrentThreadId() != thread_id.load(std::memory_order_acquire)) {
+            return false;
+        }
+        CoreEntry* entry = FindEntry(binding);
+        if (entry == nullptr) {
+            return false;
+        }
+        entry->presentation_epoch = epoch;
         return true;
     }
 
@@ -543,7 +594,7 @@ struct CoreHost::Impl final {
         if (sink == nullptr) {
             return false;
         }
-        std::lock_guard lock(state_mutex);
+        std::lock_guard lock(snapshot_sinks_mutex);
         if (std::find(snapshot_sinks.cbegin(), snapshot_sinks.cend(), sink)
                 != snapshot_sinks.cend()
             || snapshot_sinks.size() >= CoreHost::kMaximumSnapshotSinks) {
@@ -551,6 +602,15 @@ struct CoreHost::Impl final {
         }
         try {
             snapshot_sinks.push_back(sink);
+            const renderer::SnapshotRoute route = sink->Route();
+            if (route) {
+                std::lock_guard state_lock(state_mutex);
+                const auto found = FindPublishedLocked(
+                    SessionBinding{route.document_session, route.document_generation});
+                if (found != published.end()) {
+                    InvalidateViewPublicationLocked(*found);
+                }
+            }
             return true;
         } catch (const std::bad_alloc&) {
             return false;
@@ -564,7 +624,7 @@ struct CoreHost::Impl final {
             || count > CoreHost::kMaximumSnapshotSinks) {
             return false;
         }
-        std::lock_guard lock(state_mutex);
+        std::lock_guard lock(snapshot_sinks_mutex);
         for (std::size_t index = 0U; index < count; ++index) {
             if (sinks[index] == nullptr
                 || std::find(sinks, sinks + index, sinks[index]) != sinks + index
@@ -584,7 +644,7 @@ struct CoreHost::Impl final {
     }
 
     std::size_t SnapshotSinkCount() const noexcept {
-        std::lock_guard lock(state_mutex);
+        std::lock_guard lock(snapshot_sinks_mutex);
         return snapshot_sinks.size();
     }
 
@@ -798,7 +858,7 @@ struct CoreHost::Impl final {
         FileIoOperation operation,
         bool publish_snapshot,
         bool refresh_document_info,
-        std::function<void(InkpodStatus)> completion) noexcept {
+        FileIoCompletion completion) noexcept {
         if (!operation || (requires_core
                 && (!context.document_session.has_value() || !context.generation.has_value()))) {
             return false;
@@ -1061,6 +1121,7 @@ struct CoreHost::Impl final {
     bool PushAdapter(AdapterWork item, AdapterInput input) noexcept {
         std::lock_guard acceptance_lock(acceptance_mutex);
         const SessionBinding binding = item.binding;
+        const bool updates_active_view = input.active_view_update.has_value();
         {
             std::lock_guard state_lock(state_mutex);
             const auto session = FindPublishedLocked(binding);
@@ -1072,6 +1133,9 @@ struct CoreHost::Impl final {
             }
             item.sequence = ++session->state.last_accepted_sequence;
             ++session->state.pending_operations;
+            if (updates_active_view) {
+                ++session->pending_view_updates;
+            }
         }
         const std::uint64_t sequence = item.sequence;
         AdapterInputToken registered_token{};
@@ -1097,7 +1161,7 @@ struct CoreHost::Impl final {
             queued = false;
         }
         if (!queued) {
-            RollbackPending(binding, sequence);
+            RollbackPending(binding, sequence, updates_active_view);
             RecordRejected(binding);
             return false;
         }
@@ -1206,11 +1270,17 @@ struct CoreHost::Impl final {
         return true;
     }
 
-    void RollbackPending(SessionBinding binding, std::uint64_t sequence) noexcept {
+    void RollbackPending(
+        SessionBinding binding,
+        std::uint64_t sequence,
+        bool active_view_update = false) noexcept {
         std::lock_guard lock(state_mutex);
         const auto found = FindPublishedLocked(binding);
         if (found != published.end() && found->state.pending_operations != 0U) {
             --found->state.pending_operations;
+            if (active_view_update && found->pending_view_updates != 0U) {
+                --found->pending_view_updates;
+            }
             if (found->state.last_accepted_sequence == sequence) {
                 --found->state.last_accepted_sequence;
             }
@@ -1264,7 +1334,8 @@ struct CoreHost::Impl final {
         SessionBinding binding,
         std::uint64_t sequence,
         std::uint64_t units,
-        bool stroke_is_active) noexcept {
+        bool stroke_is_active,
+        bool active_view_update = false) noexcept {
         std::lock_guard lock(state_mutex);
         const auto found = FindPublishedLocked(binding);
         if (found == published.end()) {
@@ -1276,6 +1347,9 @@ struct CoreHost::Impl final {
         found->state.last_completed_sequence = std::max(
             found->state.last_completed_sequence, sequence);
         found->state.stroke_active = stroke_is_active;
+        if (active_view_update && found->pending_view_updates != 0U) {
+            --found->pending_view_updates;
+        }
     }
 
     void SetSessionInitializer(CoreOperation next) noexcept {
@@ -1331,6 +1405,10 @@ struct CoreHost::Impl final {
 
     void RefreshPublishedPresentation(
         SessionBinding binding, InkpodCore* core) noexcept {
+        InkpodSequenceCatalogInfo catalog{};
+        catalog.struct_size = sizeof(catalog);
+        const bool has_catalog =
+            inkpod_core_sequence_catalog_get(core, &catalog) == INKPOD_STATUS_OK;
         std::array<wchar_t, 1024U> sequence_name{};
         InkpodSequenceStepPlan sequence{};
         sequence.struct_size = sizeof(sequence);
@@ -1417,6 +1495,7 @@ struct CoreHost::Impl final {
             found->edit_target_count = has_edit_target_presentation
                 ? edit_target_count : 0U;
             found->sequence_cell_name = sequence_name;
+            found->sequence_catalog = has_catalog ? catalog : InkpodSequenceCatalogInfo{};
         }
     }
 
@@ -1452,11 +1531,29 @@ struct CoreHost::Impl final {
     }
 
     InkpodStatus PublishSnapshot(CoreEntry& entry, bool preview) noexcept {
-        std::lock_guard lock(state_mutex);
+        // This separate guard pins each borrowed CanvasSnapshotSink until the
+        // publication finishes. Expensive snapshot work must not hold the mutex
+        // used by UI state reads and input acceptance.
+        std::lock_guard sinks_lock(snapshot_sinks_mutex);
+        std::uint64_t publication_epoch{};
+        {
+            std::lock_guard lock(state_mutex);
+            const auto found = FindPublishedLocked(entry.binding);
+            if (found == published.end()) {
+                return INKPOD_STATUS_OK;
+            }
+            publication_epoch = found->view_publication_epoch;
+        }
         const InkpodSnapshotOptions options{
             sizeof(InkpodSnapshotOptions), 0U, INKPOD_FEATURE_NONE};
         InkpodStatus result = INKPOD_STATUS_OK;
         std::uint64_t published_count{};
+        bool published_active_view{};
+        InkpodSnapshotTransform active_view_transform{};
+        InkpodDocumentInfo committed_document{};
+        committed_document.struct_size = sizeof(committed_document);
+        bool document_info_queried{};
+        InkpodStatus document_info_status = INKPOD_STATUS_INVALID_STATE;
         for (renderer::CanvasSnapshotSink* sink : snapshot_sinks) {
             if (sink == nullptr) {
                 continue;
@@ -1467,17 +1564,25 @@ struct CoreHost::Impl final {
                 || !sink->AcceptsSnapshots()) {
                 continue;
             }
-            const auto mapped = std::find_if(
-                frontend_views.cbegin(),
-                frontend_views.cend(),
-                [&entry, &route](const FrontendViewBinding& view) {
-                    return view.session == entry.binding
-                        && view.frontend_view == route.document_view;
-                });
-            if (mapped == frontend_views.cend()) {
-                continue;
+            std::uint64_t core_view_id{};
+            {
+                std::lock_guard lock(state_mutex);
+                const auto published_session = FindPublishedLocked(entry.binding);
+                if (published_session == published.end()) {
+                    continue;
+                }
+                const auto mapped = std::find_if(
+                    frontend_views.cbegin(),
+                    frontend_views.cend(),
+                    [&entry, &route](const FrontendViewBinding& view) {
+                        return view.session == entry.binding
+                            && view.frontend_view == route.document_view;
+                    });
+                if (mapped == frontend_views.cend()) {
+                    continue;
+                }
+                core_view_id = mapped->core_view_id;
             }
-            const std::uint64_t core_view_id = mapped->core_view_id;
             InkpodSnapshot* snapshot{};
             const InkpodStatus status = core_view_id == 0U
                 ? inkpod_core_build_snapshot(entry.core, &options, &snapshot)
@@ -1496,29 +1601,64 @@ struct CoreHost::Impl final {
                 inkpod_snapshot_release(&snapshot);
                 return INKPOD_STATUS_INVALID_STATE;
             }
-            if (core_view_id == entry.active_view_id) {
-                const auto published_session = FindPublishedLocked(entry.binding);
-                if (published_session != published.end()) {
-                    published_session->snapshot_transform = transform;
-                    published_session->snapshot_view_id = core_view_id;
-                    published_session->has_snapshot_transform = true;
-                }
+            if (!document_info_queried) {
+                // Snapshot building changes only derived caches. Capture the
+                // real document revision on this same single-writer turn, not
+                // from a preview revision or an asynchronously published copy.
+                document_info_status = transform.document_width == 0U
+                        && transform.document_height == 0U
+                    ? INKPOD_STATUS_OK
+                    : inkpod_core_get_document_info(entry.core, &committed_document);
+                document_info_queried = true;
+            }
+            if (document_info_status != INKPOD_STATUS_OK) {
+                inkpod_snapshot_release(&snapshot);
+                return document_info_status;
             }
             renderer::SnapshotEnvelope envelope{
                 route,
                 snapshot_view.revision,
                 transform.view_revision,
-                snapshot};
+                snapshot,
+                0U,
+                document_info_status == INKPOD_STATUS_OK
+                    ? committed_document.document_revision : 0U,
+                0U,
+                entry.presentation_epoch};
             if (!sink->Submit(envelope)) {
                 result = INKPOD_STATUS_INVALID_STATE;
             } else {
                 ++published_count;
+                if (core_view_id == entry.active_view_id) {
+                    published_active_view = true;
+                    active_view_transform = transform;
+                }
+                std::lock_guard lock(state_mutex);
+                const auto found = FindPublishedLocked(entry.binding);
+                if (found != published.end()) {
+                    ++found->metrics.submitted_snapshots;
+                }
             }
         }
-        if (preview && published_count != 0U) {
+        if (published_count != 0U) {
+            std::lock_guard lock(state_mutex);
             const auto found = FindPublishedLocked(entry.binding);
             if (found != published.end()) {
-                found->metrics.preview_snapshots += published_count;
+                if (preview) {
+                    found->metrics.preview_snapshots += published_count;
+                }
+                // A Canvas can be rebound while this pass is building or
+                // submitting another view. Only the complete, current pass
+                // may enable the repeated-view fast path for its destinations.
+                if (result == INKPOD_STATUS_OK && published_active_view
+                    && publication_epoch == found->view_publication_epoch
+                    && publication_epoch != std::numeric_limits<std::uint64_t>::max()) {
+                    found->snapshot_transform = active_view_transform;
+                    found->snapshot_view_id = entry.active_view_id;
+                    found->has_snapshot_transform = true;
+                    found->active_view_id = entry.active_view_id;
+                    found->has_active_view = true;
+                }
             }
         }
         return result;
@@ -1664,6 +1804,12 @@ struct CoreHost::Impl final {
         if (entry != nullptr && input.has_value()) {
             if (input->active_view_update.has_value()) {
                 entry->active_view_id = input->active_view_update.value();
+                std::lock_guard lock(state_mutex);
+                const auto published_session = FindPublishedLocked(item.binding);
+                if (published_session != published.end()) {
+                    published_session->active_view_id = entry->active_view_id;
+                    published_session->has_active_view = false;
+                }
             }
             try {
                 status = input->operation(entry->core);
@@ -1681,7 +1827,9 @@ struct CoreHost::Impl final {
         if (entry != nullptr) {
             CaptureFailure(*entry, status, asynchronous, item.context);
         }
-        CompletePending(item.binding, item.sequence, 1U, entry != nullptr && entry->stroke_active);
+        CompletePending(item.binding, item.sequence, 1U,
+            entry != nullptr && entry->stroke_active,
+            input.has_value() && input->active_view_update.has_value());
         if (input.has_value() && input->completion != nullptr) {
             try {
                 input->completion->set_value(status);
@@ -1984,6 +2132,7 @@ struct CoreHost::Impl final {
                     break;
                 }
                 entry->binding = item.replacement;
+                entry->presentation_epoch = 0U;
                 break;
             }
             case ControlKind::Close: {
@@ -2144,7 +2293,7 @@ struct CoreHost::Impl final {
         }
         if (input->completion) {
             try {
-                input->completion(operation_status);
+                input->completion(operation_status, status);
             } catch (...) {
             }
         }
@@ -2821,6 +2970,9 @@ struct CoreHost::Impl final {
     std::vector<PublishedSession> published;
     InkpodEditorDefaults application_editor_defaults{};
     std::vector<FrontendViewBinding> frontend_views;
+    // Never acquire this mutex while holding state_mutex. Unregistration is
+    // the lifetime barrier for producer access to Canvas-owned sink pointers.
+    mutable std::mutex snapshot_sinks_mutex;
     std::vector<renderer::CanvasSnapshotSink*> snapshot_sinks;
     SessionBinding active{};
     std::wstring host_error{L"CoreHost is not running"};
@@ -2831,6 +2983,21 @@ struct CoreHost::Impl final {
     CoreOperation initializer;
 
     InkpodStatus SetActiveView(SessionBinding binding, std::uint64_t view_id) noexcept {
+        {
+            // Linearize the fast path with queue acceptance. Unrelated pending
+            // document work may continue; an earlier queued view switch may not
+            // be skipped by a request for the currently published view.
+            std::lock_guard acceptance_lock(acceptance_mutex);
+            std::lock_guard lock(state_mutex);
+            const auto session = FindPublishedLocked(binding);
+            if (session == published.end() || !session->state.accepting_work) {
+                return INKPOD_STATUS_INVALID_STATE;
+            }
+            if (session->has_active_view && session->active_view_id == view_id
+                && session->pending_view_updates == 0U) {
+                return INKPOD_STATUS_OK;
+            }
+        }
         try {
             auto completion = std::make_shared<std::promise<InkpodStatus>>();
             auto future = completion->get_future();
@@ -3135,7 +3302,7 @@ bool CoreHost::EnqueueFileIo(
     FileIoOperation operation,
     bool publish_snapshot,
     bool refresh_document_info,
-    std::function<void(InkpodStatus)> completion) noexcept {
+    FileIoCompletion completion) noexcept {
     return impl_ != nullptr && impl_->EnqueueFileIo(
         context, requires_core, std::move(operation), publish_snapshot,
         refresh_document_info, std::move(completion));
@@ -3188,6 +3355,18 @@ InkpodStatus CoreHost::SetActiveView(std::uint64_t view_id) noexcept {
         return INKPOD_STATUS_INVALID_STATE;
     }
     return impl_->SetActiveView(binding.value(), view_id);
+}
+
+bool CoreHost::InvalidateViewPublication(
+    DocumentSessionId session, Generation generation) noexcept {
+    return impl_ != nullptr
+        && impl_->InvalidateViewPublication(SessionBinding{session, generation});
+}
+
+bool CoreHost::SetPresentationEpoch(
+    DocumentSessionId session, Generation generation, std::uint64_t epoch) noexcept {
+    return impl_ != nullptr
+        && impl_->SetPresentationEpoch(SessionBinding{session, generation}, epoch);
 }
 
 bool CoreHost::RetargetNotificationOwner(
@@ -3254,6 +3433,18 @@ bool CoreHost::GetDocumentInfo(
         && impl_->CopyDocumentInfo(SessionBinding{session, generation}, info);
 }
 
+bool CoreHost::PostCompletionNotification(
+    UINT message, std::uint64_t token, Generation generation) noexcept {
+    if (impl_ == nullptr || message < WM_APP || message >= 0xC000U
+        || token == 0U || !generation) {
+        return false;
+    }
+    std::lock_guard lock(impl_->notification_owner_mutex);
+    return PostMessageW(
+        impl_->owner, message, static_cast<WPARAM>(token),
+        static_cast<LPARAM>(generation.Value())) != FALSE;
+}
+
 bool CoreHost::GetSequenceCellName(
     DocumentSessionId session, Generation generation, std::wstring& name) const noexcept {
     name.clear();
@@ -3271,6 +3462,22 @@ bool CoreHost::GetSequenceCellName(
     } catch (const std::bad_alloc&) {
         return false;
     }
+}
+
+bool CoreHost::GetSequenceCatalog(
+    DocumentSessionId session, Generation generation,
+    InkpodSequenceCatalogInfo& info) const noexcept {
+    if (impl_ == nullptr) {
+        return false;
+    }
+    std::lock_guard lock(impl_->state_mutex);
+    const auto found = impl_->FindPublishedLocked(SessionBinding{session, generation});
+    if (found == impl_->published.end()
+        || found->sequence_catalog.struct_size != sizeof(info)) {
+        return false;
+    }
+    info = found->sequence_catalog;
+    return true;
 }
 
 InkpodStatus CoreHost::GetApplicationEditorDefaults(

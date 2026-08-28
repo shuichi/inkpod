@@ -3,6 +3,7 @@
 #include <compare>
 #include <cstdint>
 #include <list>
+#include <optional>
 #include <span>
 #include <unordered_map>
 #include <vector>
@@ -94,10 +95,15 @@ public:
     void RemovePane(app::PaneInstanceId pane) noexcept;
     void RemoveDocument(
         app::DocumentSessionId document,
-        app::Generation generation) noexcept;
+        app::Generation generation,
+        std::optional<ThumbnailKind> kind = std::nullopt) noexcept;
     void Clear() noexcept;
 
     [[nodiscard]] ThumbnailCacheUsage Usage() const noexcept;
+    // Changes only when existing keys of this kind can have disappeared or
+    // changed. Reads, touches, and insertion without eviction preserve it.
+    // Zero is sticky on overflow and disables generation-based reuse.
+    [[nodiscard]] std::uint64_t InvalidationGeneration(ThumbnailKind kind) const noexcept;
     [[nodiscard]] bool GetPaneUsage(
         app::PaneInstanceId pane,
         ThumbnailPaneUsage& usage) const noexcept;
@@ -126,6 +132,7 @@ private:
         KeyHash>;
 
     void Erase(EntryIterator entry, bool eviction) noexcept;
+    void AdvanceInvalidationGeneration(ThumbnailKind kind) noexcept;
     void EvictToBudget() noexcept;
     [[nodiscard]] static bool ValidImage(
         const ThumbnailCacheKey& key,
@@ -142,6 +149,8 @@ private:
     std::uint64_t miss_count_{};
     std::uint64_t eviction_count_{};
     std::uint64_t rejection_count_{};
+    std::uint64_t layer_invalidation_generation_{1U};
+    std::uint64_t sequence_invalidation_generation_{1U};
 };
 
 }  // namespace inkpod::windows::ui

@@ -548,6 +548,45 @@ pub unsafe extern "C" fn inkpod_encoded_sequence_release(
     })
 }
 
+/// Copies lightweight sequence catalog metadata without scanning any payload.
+/// Missing catalogs return a zero count and `INKPOD_SEQUENCE_INDEX_NONE`.
+///
+/// # Safety
+/// Core and output must be complete, aligned, live non-overlapping owner-thread
+/// records. `output` must be writable for its advertised size.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_sequence_catalog_get(
+    core: *mut InkpodCore,
+    output: *mut InkpodSequenceCatalogInfo,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        // SAFETY: Check the advertised prefix before writing the complete record.
+        if let Err(status) =
+            unsafe { validate_struct(output.cast_const(), "InkpodSequenceCatalogInfo") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live records and their non-overlap are the caller's contract.
+        let core = unsafe { &mut *core };
+        let status = validate_core_thread(core);
+        if status != INKPOD_STATUS_OK {
+            return status;
+        }
+        let catalog = core.core.sequence_catalog_info();
+        // SAFETY: Output range and alignment were validated above.
+        let output = unsafe { &mut *output };
+        output.sequence_revision = catalog.revision;
+        output.owner_generation = catalog.owner_generation;
+        output.cell_count = u64::from(catalog.cell_count);
+        output.active_index = catalog.active_index.unwrap_or(INKPOD_SEQUENCE_INDEX_NONE);
+        INKPOD_STATUS_OK
+    })
+}
+
 /// Returns one naturally ordered sequence cell and deterministic thumbnail metadata.
 ///
 /// # Safety
@@ -576,7 +615,7 @@ pub unsafe extern "C" fn inkpod_core_sequence_cell_get(
         if thread_status != INKPOD_STATUS_OK {
             return thread_status;
         }
-        let cell = match core.core.sequence_cell(index as usize) {
+        let cell = match core.core.sequence_cell_metadata(index as usize) {
             Ok(cell) => cell,
             Err(error) => return map_core_error(error),
         };
@@ -587,10 +626,10 @@ pub unsafe extern "C" fn inkpod_core_sequence_cell_get(
         output.cell_number = cell.cell_number;
         output.width = cell.width;
         output.height = cell.height;
-        output.thumbnail_width = cell.thumbnail.width;
-        output.thumbnail_height = cell.thumbnail.height;
+        output.thumbnail_width = cell.thumbnail_width;
+        output.thumbnail_height = cell.thumbnail_height;
         output.reserved = 0;
-        output.thumbnail_checksum = cell.thumbnail.checksum;
+        output.thumbnail_checksum = cell.thumbnail_checksum;
         output.name_bytes = cell.name.len() as u64;
         if output.name_capacity == 0 {
             return if output.name_utf8.is_null() {
@@ -648,8 +687,8 @@ pub unsafe extern "C" fn inkpod_core_sequence_thumbnail_get(
                 "sequence thumbnail flags are invalid",
             );
         }
-        let thumbnail = match core.core.sequence_cell(index as usize) {
-            Ok(cell) => cell.thumbnail,
+        let thumbnail = match core.core.sequence_thumbnail(index as usize) {
+            Ok(thumbnail) => thumbnail,
             Err(error) => return map_core_error(error),
         };
         let required = thumbnail.rgba8.len() as u64;

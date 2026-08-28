@@ -45,6 +45,8 @@ constexpr std::size_t kMaximumPointerHistory = 256U;
 constexpr std::size_t kMaximumPendingCanvasInput = 64U;
 constexpr std::uint64_t kMaximumStrokeSamples = UINT64_C(1048576);
 constexpr std::uint64_t kApplicationGpuTileBudgetBytes = UINT64_C(512) * 1024U * 1024U;
+constexpr std::size_t kMaximumSequenceCacheSources = 8U;
+constexpr std::uint64_t kSequenceGpuCacheBudgetBytes = UINT64_C(128) * 1024U * 1024U;
 std::atomic<std::uint64_t> gApplicationTileUseSequence{};
 
 struct CachedTile {
@@ -59,12 +61,49 @@ struct CachedTile {
     ComPtr<ID2D1Bitmap1> bitmap;
 };
 
+using TileCache = std::unordered_map<std::uint64_t, CachedTile>;
+
+// A source key comes from the immutable Rust snapshot, never the UI selection.
+// The owner generation separates catalog/Core replacement from warm navigation.
+struct SequenceSourceKey {
+    std::uint64_t document_uuid_high{};
+    std::uint64_t document_uuid_low{};
+    std::uint64_t source_generation{};
+    std::uint64_t owner_generation{};
+
+    [[nodiscard]] explicit operator bool() const noexcept {
+        return owner_generation != 0U;
+    }
+
+    bool operator==(const SequenceSourceKey&) const noexcept = default;
+};
+
+struct CachedSequenceSource {
+    SequenceSourceKey key;
+    TileCache tiles;
+    std::uint64_t bytes{};
+    std::uint64_t last_used{};
+};
+
 std::uint64_t SaturatingAdd(std::uint64_t left, std::uint64_t right) noexcept {
     return left > UINT64_MAX - right ? UINT64_MAX : left + right;
 }
 
 std::uint64_t SaturatingProduct(std::uint64_t left, std::uint64_t right) noexcept {
     return left != 0U && right > UINT64_MAX / left ? UINT64_MAX : left * right;
+}
+
+std::uint64_t PerformanceCounterTicks() noexcept {
+    LARGE_INTEGER counter{};
+    return QueryPerformanceCounter(&counter) != FALSE && counter.QuadPart > 0
+        ? static_cast<std::uint64_t>(counter.QuadPart) : 0U;
+}
+
+bool CanvasAncestorsVisible(HWND window) noexcept {
+    const HWND parent = GetParent(window);
+    const HWND root = GetAncestor(window, GA_ROOT);
+    return (parent == nullptr || IsWindowVisible(parent) != FALSE)
+        && (root == nullptr || IsIconic(root) == FALSE);
 }
 
 std::uint64_t EstimateSnapshotPayloadBytes(InkpodSnapshot* snapshot) noexcept {
@@ -270,7 +309,7 @@ public:
     CanvasSurface(
         HWND window,
         HWND owner_window,
-        SharedRendererDevice& shared) noexcept
+        SharedRendererDevice& shared)
         : window_(window), owner_window_(owner_window), shared_(shared) {}
 
     ~CanvasSurface() {
@@ -286,10 +325,13 @@ public:
 
     HRESULT Resize(UINT width, UINT height) noexcept {
         if (width == 0U || height == 0U) {
-            return S_OK;
+            return S_FALSE;
         }
         if (!swap_chain_) {
             return CreateSurfaceResources();
+        }
+        if (target_bitmap_ && width == surface_width_ && height == surface_height_) {
+            return S_FALSE;
         }
 
         d2d_context_->SetTarget(nullptr);
@@ -314,16 +356,9 @@ public:
     HRESULT Render(
         CanvasPixelRgba8* sampled_pixel = nullptr,
         UINT sample_x = 0U,
-        UINT sample_y = 0U) noexcept {
-        if (frame_latency_waitable_ != nullptr) {
-            const DWORD wait = WaitForSingleObjectEx(frame_latency_waitable_, 100U, FALSE);
-            if (wait == WAIT_TIMEOUT) {
-                return S_FALSE;
-            }
-            if (wait == WAIT_FAILED) {
-                return HRESULT_FROM_WIN32(GetLastError());
-            }
-        }
+        UINT sample_y = 0U,
+        DWORD wait_milliseconds = 100U,
+        HANDLE interrupt_event = nullptr) noexcept {
         if (!d2d_context_ || !target_bitmap_) {
             const HRESULT create_result = CreateSurfaceResources();
             if (FAILED(create_result)) {
@@ -334,6 +369,27 @@ public:
                 return cache_result;
             }
         }
+        if (!snapshot_ready_) {
+            // A failed upload may leave reusable bitmaps, but must never
+            // acknowledge a partially prepared target as successfully shown.
+            return E_UNEXPECTED;
+        }
+
+        // The waitable object grants capacity for a frame, not for a draw
+        // attempt. A failed adjustment/draw/readback must retain that permit
+        // until Present succeeds; waiting twice can consume the next signal
+        // without ever having submitted the preceding frame.
+        const HRESULT readiness = AcquireFrameLatencyPermit(wait_milliseconds, interrupt_event);
+        if (readiness != S_OK) {
+            return readiness;
+        }
+
+        const bool record_first_present = snapshot_ != nullptr
+            && (!has_presented_snapshot_
+                || last_presented_document_revision_ != snapshot_document_revision_
+                || last_presented_presentation_epoch_ != snapshot_presentation_epoch_);
+        const std::uint64_t frame_ready_qpc = record_first_present
+            ? PerformanceCounterTicks() : 0U;
 
         ComPtr<ID2D1Image> adjusted_content;
         if (HasAdjustmentPass()) {
@@ -467,15 +523,39 @@ public:
             }
         }
 
+        const std::uint64_t present_begin_qpc = record_first_present
+            ? PerformanceCounterTicks() : 0U;
         result = swap_chain_->Present(1U, 0U);
-        if (result == DXGI_STATUS_OCCLUDED) {
-            return result;
+        const std::uint64_t present_end_qpc = record_first_present
+            ? PerformanceCounterTicks() : 0U;
+        if (result == S_OK) {
+            frame_latency_permit_ = false;
+            if (record_first_present) {
+                first_frame_ready_qpc_ = frame_ready_qpc;
+                first_present_begin_qpc_ = present_begin_qpc;
+                first_presented_revision_qpc_ = present_end_qpc;
+            }
+            has_presented_snapshot_ = snapshot_ != nullptr;
+            last_presented_document_revision_ = snapshot_document_revision_;
+            last_presented_presentation_epoch_ = snapshot_presentation_epoch_;
+            last_presented_view_revision_ = transform_.view_revision;
+            last_presented_source_ = InkpodSnapshotSourceIdentity{
+                sizeof(InkpodSnapshotSourceIdentity),
+                active_source_ ? INKPOD_SNAPSHOT_SOURCE_SEQUENCE_PRISTINE : 0U,
+                active_source_.document_uuid_high,
+                active_source_.document_uuid_low,
+                active_source_.source_generation,
+                active_source_.owner_generation};
         }
         return result;
     }
 
     // Consumes the Rust snapshot handle even when validation or upload fails.
-    HRESULT SetSnapshot(InkpodSnapshot* snapshot) noexcept {
+    HRESULT SetSnapshot(
+        InkpodSnapshot* snapshot,
+        std::uint64_t committed_document_revision,
+        std::uint64_t submission_qpc,
+        std::uint64_t presentation_epoch) noexcept {
         if (snapshot == nullptr) {
             return E_INVALIDARG;
         }
@@ -491,6 +571,8 @@ public:
         vanishing_points.struct_size = sizeof(vanishing_points);
         InkpodSnapshotRenderPlan render_plan{};
         render_plan.struct_size = sizeof(render_plan);
+        InkpodSnapshotSourceIdentity source_identity{};
+        source_identity.struct_size = sizeof(source_identity);
         const InkpodStatus view_status = inkpod_snapshot_get_view(snapshot, &view);
         const InkpodStatus transform_status = view_status == INKPOD_STATUS_OK
             ? inkpod_snapshot_get_transform(snapshot, &transform)
@@ -507,11 +589,16 @@ public:
         const InkpodStatus render_plan_status = vanishing_point_status == INKPOD_STATUS_OK
             ? inkpod_snapshot_get_render_plan(snapshot, &render_plan)
             : vanishing_point_status;
+        const InkpodStatus source_identity_status = render_plan_status == INKPOD_STATUS_OK
+            ? inkpod_snapshot_get_source_identity(snapshot, &source_identity)
+            : render_plan_status;
         if (view_status != INKPOD_STATUS_OK || transform_status != INKPOD_STATUS_OK
             || overlay_status != INKPOD_STATUS_OK
             || shooting_frame_status != INKPOD_STATUS_OK
             || vanishing_point_status != INKPOD_STATUS_OK
             || render_plan_status != INKPOD_STATUS_OK
+            || source_identity_status != INKPOD_STATUS_OK
+            || !ValidateSourceIdentity(source_identity)
             || !ValidateOverlay(overlay)
             || !ValidateShootingFrames(shooting_frames)
             || !ValidateVanishingPoints(vanishing_points)
@@ -519,10 +606,26 @@ public:
             inkpod_snapshot_release(&snapshot);
             return E_INVALIDARG;
         }
+        const SequenceSourceKey next_source{
+            source_identity.document_uuid_high, source_identity.document_uuid_low,
+            source_identity.source_generation, source_identity.owner_generation};
+        const bool same_presentation = snapshot_presentation_epoch_ == presentation_epoch;
+        if (!active_source_ && !next_source && !same_presentation) {
+            // A document replacement ends any ordinary-cache continuation of
+            // a previously pristine source, including untouched tile IDs that
+            // an unrelated Core may reuse. Normal same-document edits keep it.
+            tile_cache_.clear();
+            gpu_tile_bytes_ = 0U;
+        }
+        SelectSourceCache(next_source, same_presentation && presentation_epoch != 0U);
         if (snapshot_ != nullptr) {
             inkpod_snapshot_release(&snapshot_);
         }
         snapshot_ = snapshot;
+        snapshot_document_revision_ = committed_document_revision;
+        snapshot_presentation_epoch_ = presentation_epoch;
+        last_snapshot_submission_qpc_ = submission_qpc;
+        snapshot_ready_ = false;
         snapshot_view_ = view;
         transform_ = transform;
         overlay_ = overlay;
@@ -530,7 +633,13 @@ public:
         vanishing_points_ = vanishing_points;
         render_plan_ = render_plan;
         retained_snapshot_bytes_ = EstimateSnapshotPayloadBytes(snapshot);
-        return RebuildTileCache();
+        return PrepareTileCache();
+    }
+
+    // RendererHost reserves application-wide capacity after metadata preparation
+    // and before any CreateBitmap call. Matched current tiles stay protected.
+    HRESULT UploadPreparedSnapshot() noexcept {
+        return UploadPreparedTiles();
     }
 
     HRESULT DpiChanged() noexcept {
@@ -556,8 +665,9 @@ public:
             || !std::isfinite(preview.transform.rotation_degrees)) {
             return E_INVALIDARG;
         }
+        const bool unchanged = preview.active == 0U && floating_preview_.active == 0U;
         floating_preview_ = preview;
-        return S_OK;
+        return unchanged ? S_FALSE : S_OK;
     }
 
     HRESULT SetGeometryPreview(const CanvasGeometryPreview& preview) noexcept {
@@ -574,8 +684,20 @@ public:
                 return E_INVALIDARG;
             }
         }
+        // Repeated cancellation is common when switching cells. It must not
+        // consume a frame-latency signal or present the previous cell again.
+        const bool unchanged = (preview.active == 0U && geometry_preview_.active == 0U)
+            || (preview.active == geometry_preview_.active
+                && preview.point_count == geometry_preview_.point_count
+                && preview.closed == geometry_preview_.closed
+                && preview.stroke_width == geometry_preview_.stroke_width
+                && std::equal(preview.points, preview.points + preview.point_count,
+                    geometry_preview_.points,
+                    [](const CanvasGeometryPoint& first, const CanvasGeometryPoint& second) {
+                        return first.x == second.x && first.y == second.y;
+                    }));
         geometry_preview_ = preview;
-        return S_OK;
+        return unchanged ? S_FALSE : S_OK;
     }
 
     HRESULT GetGeometryPreviewForSmokeTest(
@@ -603,6 +725,9 @@ public:
             inkpod_snapshot_release(&snapshot_);
         }
         snapshot_view_ = {};
+        snapshot_document_revision_ = 0U;
+        snapshot_presentation_epoch_ = 0U;
+        snapshot_ready_ = true;
         transform_ = {};
         overlay_ = {};
         shooting_frames_ = {};
@@ -611,7 +736,21 @@ public:
         geometry_preview_ = {};
         render_plan_ = {};
         tile_cache_.clear();
+        ClearRetainedSources();
+        active_source_ = {};
+        source_retention_enabled_ = false;
+        pending_upload_bytes_ = 0U;
+        candidate_active_bytes_ = 0U;
+        last_presented_document_revision_ = 0U;
+        last_presented_presentation_epoch_ = 0U;
+        last_presented_view_revision_ = 0U;
+        last_presented_source_ = {};
         retained_snapshot_bytes_ = 0U;
+        last_snapshot_submission_qpc_ = 0U;
+        first_presented_revision_qpc_ = 0U;
+        first_frame_ready_qpc_ = 0U;
+        first_present_begin_qpc_ = 0U;
+        has_presented_snapshot_ = false;
         gpu_tile_bytes_ = 0U;
     }
 
@@ -625,7 +764,158 @@ public:
     }
 
     [[nodiscard]] std::uint64_t GpuTileBytes() const noexcept {
-        return gpu_tile_bytes_;
+        std::uint64_t bytes = gpu_tile_bytes_;
+        for (const auto& source : retained_sources_) {
+            bytes = SaturatingAdd(bytes, source.bytes);
+        }
+        return bytes;
+    }
+
+    [[nodiscard]] std::uint64_t PendingUploadBytes() const noexcept {
+        return pending_upload_bytes_;
+    }
+
+    [[nodiscard]] std::uint64_t SequenceCacheSourceCount() const noexcept {
+        std::uint64_t count = source_retention_enabled_ && candidate_active_bytes_ != 0U ? 1U : 0U;
+        for (const auto& source : retained_sources_) {
+            count += source.key ? 1U : 0U;
+        }
+        return count;
+    }
+
+    [[nodiscard]] std::uint64_t SequenceCacheBytes() const noexcept {
+        std::uint64_t bytes = source_retention_enabled_
+            ? SaturatingAdd(gpu_tile_bytes_, pending_upload_bytes_) : 0U;
+        for (const auto& source : retained_sources_) {
+            bytes = SaturatingAdd(bytes, source.bytes);
+        }
+        return bytes;
+    }
+
+    [[nodiscard]] std::uint64_t SequenceCacheEvictionCount() const noexcept {
+        return sequence_cache_eviction_count_;
+    }
+
+    [[nodiscard]] std::uint64_t UploadedTileCount() const noexcept {
+        return uploaded_tile_count_;
+    }
+
+    [[nodiscard]] std::uint64_t UploadedTileBytes() const noexcept {
+        return uploaded_tile_bytes_;
+    }
+
+    [[nodiscard]] std::uint64_t LastPresentedDocumentRevision() const noexcept {
+        return last_presented_document_revision_;
+    }
+
+    [[nodiscard]] std::uint64_t LastPresentedPresentationEpoch() const noexcept {
+        return last_presented_presentation_epoch_;
+    }
+
+    [[nodiscard]] std::uint64_t LastPresentedViewRevision() const noexcept {
+        return last_presented_view_revision_;
+    }
+
+    [[nodiscard]] InkpodSnapshotSourceIdentity LastPresentedSource() const noexcept {
+        return last_presented_source_;
+    }
+
+    [[nodiscard]] std::uint64_t LastSnapshotSubmissionQpc() const noexcept {
+        return last_snapshot_submission_qpc_;
+    }
+
+    [[nodiscard]] std::uint64_t FirstPresentedRevisionQpc() const noexcept {
+        return first_presented_revision_qpc_;
+    }
+
+    [[nodiscard]] std::uint64_t FirstFrameReadyQpc() const noexcept {
+        return first_frame_ready_qpc_;
+    }
+
+    [[nodiscard]] std::uint64_t FirstPresentBeginQpc() const noexcept {
+        return first_present_begin_qpc_;
+    }
+
+    [[nodiscard]] std::uint64_t FrameLatencyTimeoutCount() const noexcept {
+        return frame_latency_timeout_count_;
+    }
+
+    [[nodiscard]] HANDLE FrameLatencyHandle() const noexcept {
+        return frame_latency_waitable_;
+    }
+
+    HRESULT AcquireFrameLatencyPermit(DWORD milliseconds, HANDLE interrupt_event = nullptr) noexcept {
+        if (frame_latency_permit_ || frame_latency_waitable_ == nullptr) {
+            return S_OK;
+        }
+        const HANDLE events[]{interrupt_event, frame_latency_waitable_};
+        const DWORD wait = interrupt_event == nullptr
+            ? WaitForSingleObjectEx(frame_latency_waitable_, milliseconds, FALSE)
+            : WaitForMultipleObjectsEx(2U, events, FALSE, milliseconds, FALSE);
+        if (wait == WAIT_TIMEOUT) {
+            if (milliseconds != 0U) {
+                RecordFrameLatencyTimeout();
+            }
+            return S_FALSE;
+        }
+        if (wait == WAIT_FAILED) {
+            return HRESULT_FROM_WIN32(GetLastError());
+        }
+        if (interrupt_event != nullptr && wait == WAIT_OBJECT_0) {
+            return S_FALSE;
+        }
+        frame_latency_permit_ = true;
+        return S_OK;
+    }
+
+    void AcceptFrameLatencySignal() noexcept {
+        // RendererHost has just consumed this exact handle in its multi-surface
+        // wait. No second wait may consume the same frame's readiness.
+        frame_latency_permit_ = true;
+    }
+
+    void RecordFrameLatencyTimeout() noexcept {
+        frame_latency_timeout_count_ = SaturatingAdd(frame_latency_timeout_count_, 1U);
+    }
+
+    [[nodiscard]] std::optional<std::uint64_t> OldestRetainedSourceUse() const noexcept {
+        std::optional<std::uint64_t> oldest;
+        for (const auto& source : retained_sources_) {
+            if (source.key && (!oldest.has_value() || source.last_used < oldest.value())) {
+                oldest = source.last_used;
+            }
+        }
+        return oldest;
+    }
+
+    [[nodiscard]] std::optional<std::uint64_t> ActiveCachedSourceUse() const noexcept {
+        return source_retention_enabled_ && candidate_active_bytes_ != 0U
+            ? std::optional(active_source_last_used_) : std::nullopt;
+    }
+
+    void DisableSourceRetention() noexcept {
+        // Keep every active bitmap. Only its eligibility for reuse after leaving
+        // this source is removed when active sources exceed the smaller cache cap.
+        source_retention_enabled_ = false;
+    }
+
+    bool EvictOldestRetainedSource() noexcept {
+        auto victim = retained_sources_.end();
+        for (auto iterator = retained_sources_.begin(); iterator != retained_sources_.end(); ++iterator) {
+            if (iterator->key
+                && (victim == retained_sources_.end() || iterator->last_used < victim->last_used)) {
+                victim = iterator;
+            }
+        }
+        if (victim == retained_sources_.end()) {
+            return false;
+        }
+        victim->tiles.clear();
+        victim->key = {};
+        victim->bytes = 0U;
+        victim->last_used = 0U;
+        sequence_cache_eviction_count_ = SaturatingAdd(sequence_cache_eviction_count_, 1U);
+        return true;
     }
 
     [[nodiscard]] std::uint64_t SwapChainBytes() const noexcept {
@@ -633,7 +923,11 @@ public:
     }
 
     [[nodiscard]] std::uint64_t CachedTileCount() const noexcept {
-        return static_cast<std::uint64_t>(tile_cache_.size());
+        std::uint64_t count = static_cast<std::uint64_t>(tile_cache_.size());
+        for (const auto& source : retained_sources_) {
+            count = SaturatingAdd(count, static_cast<std::uint64_t>(source.tiles.size()));
+        }
+        return count;
     }
 
     [[nodiscard]] std::uint64_t ActiveTileCount() const noexcept {
@@ -650,11 +944,13 @@ public:
                 bytes = SaturatingAdd(bytes, entry.second.byte_count);
             }
         }
-        return bytes;
+        // A failed preparation/upload still reserves its complete candidate
+        // for recovery. Do not allocate another view into that reservation.
+        return std::max(bytes, candidate_active_bytes_);
     }
 
     [[nodiscard]] std::optional<std::uint64_t> OldestInactiveUse() const noexcept {
-        std::optional<std::uint64_t> oldest;
+        std::optional<std::uint64_t> oldest = OldestRetainedSourceUse();
         for (const auto& entry : tile_cache_) {
             if (!entry.second.active
                 && (!oldest.has_value() || entry.second.last_used < oldest.value())) {
@@ -675,6 +971,11 @@ public:
                 victim = iterator;
             }
         }
+        const auto source_use = OldestRetainedSourceUse();
+        if (source_use.has_value()
+            && (victim == tile_cache_.end() || source_use.value() <= victim->second.last_used)) {
+            return EvictOldestRetainedSource();
+        }
         if (victim == tile_cache_.end()) {
             return false;
         }
@@ -687,8 +988,9 @@ public:
     HRESULT RenderAndReadPixelForSmokeTest(
         UINT x,
         UINT y,
-        CanvasPixelRgba8& pixel) noexcept {
-        return Render(&pixel, x, y);
+        CanvasPixelRgba8& pixel,
+        HANDLE interrupt_event) noexcept {
+        return Render(&pixel, x, y, 100U, interrupt_event);
     }
 
     HRESULT CopyBackBufferPixel(
@@ -740,6 +1042,95 @@ public:
     }
 
 private:
+    static bool ValidateSourceIdentity(const InkpodSnapshotSourceIdentity& source) noexcept {
+        const bool has_uuid = source.document_uuid_high != 0U || source.document_uuid_low != 0U;
+        if (source.flags == 0U) {
+            return !has_uuid && source.source_generation == 0U && source.owner_generation == 0U;
+        }
+        return source.flags == INKPOD_SNAPSHOT_SOURCE_SEQUENCE_PRISTINE
+            && has_uuid && source.source_generation != 0U && source.owner_generation != 0U;
+    }
+
+    void ClearRetainedSources() noexcept {
+        for (auto& source : retained_sources_) {
+            source.tiles.clear();
+            source.key = {};
+            source.bytes = 0U;
+            source.last_used = 0U;
+        }
+    }
+
+    void SelectSourceCache(SequenceSourceKey next, bool continue_active_document) noexcept {
+        const std::uint64_t next_use =
+            gApplicationTileUseSequence.fetch_add(1U, std::memory_order_relaxed) + 1U;
+        if (active_source_ == next) {
+            active_source_last_used_ = next_use;
+            return;
+        }
+        if (active_source_ && !next && continue_active_document) {
+            // The first edit/preview retires this pristine bank but keeps its
+            // current bitmap map as the ordinary cache. Existing tile revision
+            // checks then upload only changed tiles, without duplicating GPU
+            // ownership or modifying any retained pristine source bank.
+            active_source_ = {};
+            active_source_last_used_ = next_use;
+            source_retention_enabled_ = false;
+            return;
+        }
+        if (next) {
+            // Replacement catalogs cannot keep old identities alive in this
+            // Canvas, including after an intervening non-pristine edit.
+            for (auto& source : retained_sources_) {
+                if (source.key && source.key.owner_generation != next.owner_generation) {
+                    source.tiles.clear();
+                    source.key = {};
+                    source.bytes = 0U;
+                    source.last_used = 0U;
+                }
+            }
+            if (active_source_ && active_source_.owner_generation != next.owner_generation) {
+                source_retention_enabled_ = false;
+            }
+        }
+        const bool retain_previous = source_retention_enabled_ && active_source_
+            && gpu_tile_bytes_ != 0U;
+        const auto target = std::find_if(retained_sources_.begin(), retained_sources_.end(),
+            [next](const CachedSequenceSource& source) { return next && source.key == next; });
+        if (target != retained_sources_.end()) {
+            tile_cache_.swap(target->tiles);
+            std::swap(gpu_tile_bytes_, target->bytes);
+            if (retain_previous) {
+                target->key = active_source_;
+                target->last_used = active_source_last_used_;
+            } else {
+                target->tiles.clear();
+                target->key = {};
+                target->bytes = 0U;
+                target->last_used = 0U;
+            }
+        } else if (retain_previous) {
+            auto slot = std::find_if(retained_sources_.begin(), retained_sources_.end(),
+                [](const CachedSequenceSource& source) { return !source.key; });
+            if (slot == retained_sources_.end()) {
+                (void)EvictOldestRetainedSource();
+                slot = std::find_if(retained_sources_.begin(), retained_sources_.end(),
+                    [](const CachedSequenceSource& source) { return !source.key; });
+            }
+            if (slot != retained_sources_.end()) {
+                slot->tiles.swap(tile_cache_);
+                slot->key = active_source_;
+                slot->bytes = std::exchange(gpu_tile_bytes_, 0U);
+                slot->last_used = active_source_last_used_;
+            }
+        } else {
+            tile_cache_.clear();
+            gpu_tile_bytes_ = 0U;
+        }
+        active_source_ = next;
+        active_source_last_used_ = next_use;
+        source_retention_enabled_ = false;
+    }
+
     D2D1_MATRIX_3X2_F DocumentTransform() const noexcept {
         const float scale = static_cast<float>(transform_.zoom);
         const bool flip_horizontal = (transform_.flags
@@ -1569,31 +1960,23 @@ private:
     }
 
     void TrimTileCache() noexcept {
-        while (gpu_tile_bytes_ > tile_budget_bytes_) {
-            auto victim = tile_cache_.end();
-            for (auto iterator = tile_cache_.begin(); iterator != tile_cache_.end(); ++iterator) {
-                if (iterator->second.active) {
-                    continue;
-                }
-                if (victim == tile_cache_.end()
-                    || iterator->second.last_used < victim->second.last_used) {
-                    victim = iterator;
-                }
-            }
-            if (victim == tile_cache_.end()) {
+        while (GpuTileBytes() > tile_budget_bytes_) {
+            if (!EvictOldestInactive()) {
                 break;
             }
-            gpu_tile_bytes_ -= victim->second.byte_count;
-            tile_cache_.erase(victim);
         }
     }
 
-    HRESULT RebuildTileCache() noexcept {
+    HRESULT PrepareTileCache() noexcept {
+        pending_upload_bytes_ = 0U;
+        candidate_active_bytes_ = 0U;
+        source_retention_enabled_ = false;
         if (!d2d_context_) {
             return E_UNEXPECTED;
         }
         if (snapshot_ == nullptr) {
             tile_cache_.clear();
+            ClearRetainedSources();
             gpu_tile_bytes_ = 0U;
             return S_OK;
         }
@@ -1642,10 +2025,12 @@ private:
                 }
                 active_bytes += tile->pixel_bytes;
             }
+            candidate_active_bytes_ = active_bytes;
+            source_retention_enabled_ = active_source_ && active_bytes != 0U
+                && active_bytes <= kSequenceGpuCacheBudgetBytes;
             for (auto& entry : tile_cache_) {
                 entry.second.active = false;
             }
-            std::uint64_t upload_bytes{};
             for (std::uint64_t index = 0; index < snapshot_view_.tile_count; ++index) {
                 const auto* tile = reinterpret_cast<const InkpodSnapshotTile*>(
                     base + static_cast<std::size_t>(index) * stride);
@@ -1660,18 +2045,34 @@ private:
                     existing->second.last_used =
                         gApplicationTileUseSequence.fetch_add(1U, std::memory_order_relaxed) + 1U;
                 } else {
-                    upload_bytes = SaturatingAdd(upload_bytes, tile->pixel_bytes);
+                    pending_upload_bytes_ = SaturatingAdd(
+                        pending_upload_bytes_, tile->pixel_bytes);
                 }
             }
-            while (upload_bytes <= tile_budget_bytes_
-                && gpu_tile_bytes_ > tile_budget_bytes_ - upload_bytes) {
-                if (!EvictOldestInactive()) {
-                    return E_OUTOFMEMORY;
-                }
-            }
-            if (upload_bytes > tile_budget_bytes_) {
+            return S_OK;
+        } catch (const std::bad_alloc&) {
+            return E_OUTOFMEMORY;
+        }
+    }
+
+    HRESULT UploadPreparedTiles() noexcept {
+        if (!d2d_context_) {
+            return E_UNEXPECTED;
+        }
+        if (pending_upload_bytes_ > tile_budget_bytes_) {
+            return E_OUTOFMEMORY;
+        }
+        // Normal snapshot submission reserves capacity across all surfaces
+        // before reaching here. Recovery also applies the local hard bound.
+        while (GpuTileBytes() > tile_budget_bytes_ - pending_upload_bytes_) {
+            if (!EvictOldestInactive()) {
                 return E_OUTOFMEMORY;
             }
+        }
+        try {
+            const auto* base = reinterpret_cast<const std::uint8_t*>(snapshot_view_.tiles);
+            const std::size_t stride = static_cast<std::size_t>(
+                snapshot_view_.tile_stride_bytes);
             for (std::uint64_t index = 0; index < snapshot_view_.tile_count; ++index) {
                 const auto* tile = reinterpret_cast<const InkpodSnapshotTile*>(
                     base + static_cast<std::size_t>(index) * stride);
@@ -1697,6 +2098,8 @@ private:
                 if (FAILED(create_result)) {
                     return create_result;
                 }
+                uploaded_tile_count_ = SaturatingAdd(uploaded_tile_count_, 1U);
+                uploaded_tile_bytes_ = SaturatingAdd(uploaded_tile_bytes_, tile->pixel_bytes);
                 CachedTile cache_entry{};
                 cache_entry.revision = tile->tile_revision;
                 cache_entry.last_used =
@@ -1713,12 +2116,19 @@ private:
                 }
                 tile_cache_[tile->tile_id] = std::move(cache_entry);
                 gpu_tile_bytes_ += tile->pixel_bytes;
+                pending_upload_bytes_ -= tile->pixel_bytes;
             }
             TrimTileCache();
+            snapshot_ready_ = true;
             return S_OK;
         } catch (const std::bad_alloc&) {
             return E_OUTOFMEMORY;
         }
+    }
+
+    HRESULT RebuildTileCache() noexcept {
+        const HRESULT prepared = PrepareTileCache();
+        return SUCCEEDED(prepared) ? UploadPreparedTiles() : prepared;
     }
 
     HRESULT CreateSurfaceResources() noexcept {
@@ -1799,12 +2209,27 @@ private:
     }
 
     void DiscardSurfaceResources() noexcept {
+        frame_latency_permit_ = false;
         if (frame_latency_waitable_ != nullptr) {
             CloseHandle(frame_latency_waitable_);
             frame_latency_waitable_ = nullptr;
         }
         tile_cache_.clear();
+        ClearRetainedSources();
+        snapshot_ready_ = snapshot_ == nullptr;
+        source_retention_enabled_ = false;
+        pending_upload_bytes_ = 0U;
+        candidate_active_bytes_ = 0U;
+        last_presented_document_revision_ = 0U;
+        last_presented_presentation_epoch_ = 0U;
+        last_presented_view_revision_ = 0U;
+        last_presented_source_ = {};
         gpu_tile_bytes_ = 0U;
+        last_snapshot_submission_qpc_ = 0U;
+        first_presented_revision_qpc_ = 0U;
+        first_frame_ready_qpc_ = 0U;
+        first_present_begin_qpc_ = 0U;
+        has_presented_snapshot_ = false;
         if (d2d_context_) {
             d2d_context_->SetTarget(nullptr);
         }
@@ -1819,6 +2244,9 @@ private:
     HWND owner_window_{};
     SharedRendererDevice& shared_;
     InkpodSnapshot* snapshot_{};
+    std::uint64_t snapshot_document_revision_{};
+    std::uint64_t snapshot_presentation_epoch_{};
+    bool snapshot_ready_{true};
     InkpodSnapshotView snapshot_view_{};
     InkpodSnapshotTransform transform_{};
     InkpodSnapshotOverlay overlay_{};
@@ -1827,11 +2255,33 @@ private:
     InkpodSnapshotRenderPlan render_plan_{};
     CanvasFloatingPreview floating_preview_{};
     CanvasGeometryPreview geometry_preview_{};
-    std::unordered_map<std::uint64_t, CachedTile> tile_cache_;
+    TileCache tile_cache_;
+    std::array<CachedSequenceSource, kMaximumSequenceCacheSources> retained_sources_;
+    SequenceSourceKey active_source_;
+    bool source_retention_enabled_{};
+    std::uint64_t active_source_last_used_{};
+    std::uint64_t candidate_active_bytes_{};
+    std::uint64_t pending_upload_bytes_{};
+    std::uint64_t sequence_cache_eviction_count_{};
+    std::uint64_t uploaded_tile_count_{};
+    std::uint64_t uploaded_tile_bytes_{};
+    std::uint64_t last_presented_document_revision_{};
+    std::uint64_t last_presented_presentation_epoch_{};
+    std::uint64_t last_presented_view_revision_{};
+    InkpodSnapshotSourceIdentity last_presented_source_{};
+    std::uint64_t last_snapshot_submission_qpc_{};
+    std::uint64_t first_presented_revision_qpc_{};
+    std::uint64_t first_frame_ready_qpc_{};
+    std::uint64_t first_present_begin_qpc_{};
+    std::uint64_t frame_latency_timeout_count_{};
+    bool has_presented_snapshot_{};
     ComPtr<IDXGISwapChain1> swap_chain_;
     ComPtr<ID2D1DeviceContext> d2d_context_;
     ComPtr<ID2D1Bitmap1> target_bitmap_;
     HANDLE frame_latency_waitable_{};
+    // Bound to the swap chain, so ResizeBuffers (same waitable object) keeps
+    // an acquired permit. Recreating or discarding the chain invalidates it.
+    bool frame_latency_permit_{};
     std::uint64_t tile_budget_bytes_{kApplicationGpuTileBudgetBytes};
     std::uint64_t retained_snapshot_bytes_{};
     std::uint64_t gpu_tile_bytes_{};
@@ -1888,6 +2338,9 @@ struct SurfaceRecord {
     bool occluded{};
     std::uint64_t presented_frames{};
     std::unique_ptr<CanvasSurface> surface;
+    HRESULT last_render_result{S_OK};
+    std::size_t pending_render_requests{};
+    bool presentation_pending{};
 };
 
 struct PublishedSurface {
@@ -1902,6 +2355,22 @@ struct PublishedSurface {
     std::uint64_t swap_chain_bytes{};
     std::uint64_t cached_tile_count{};
     std::uint64_t active_tile_count{};
+    std::uint64_t sequence_cache_source_count{};
+    std::uint64_t sequence_cache_bytes{};
+    std::uint64_t sequence_cache_eviction_count{};
+    std::uint64_t uploaded_tile_count{};
+    std::uint64_t uploaded_tile_bytes{};
+    std::uint64_t last_presented_document_revision{};
+    std::uint64_t last_presented_view_revision{};
+    InkpodSnapshotSourceIdentity last_presented_source{};
+    std::uint64_t last_snapshot_submission_qpc{};
+    std::uint64_t first_presented_revision_qpc{};
+    std::uint64_t last_presented_presentation_epoch{};
+    std::uint64_t frame_latency_timeout_count{};
+    HRESULT last_render_result{S_OK};
+    bool visibility_pending{};
+    std::uint64_t first_frame_ready_qpc{};
+    std::uint64_t first_present_begin_qpc{};
 };
 
 class RendererHostState final {
@@ -1919,21 +2388,31 @@ public:
                 if (worker_.joinable()) {
                     return E_UNEXPECTED;
                 }
+                work_event_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+                if (work_event_ == nullptr) {
+                    return HRESULT_FROM_WIN32(GetLastError());
+                }
                 stopping_ = false;
                 running_ = true;
                 in_flight_work_ = 0U;
+                pending_presentation_work_ = 0U;
             }
             worker_ = std::thread([this, ready] { Run(ready); });
             const HRESULT result = future.get();
             if (FAILED(result) && worker_.joinable()) {
                 worker_.join();
+                std::lock_guard lock(mutex_);
+                CloseHandle(std::exchange(work_event_, nullptr));
             }
             return result;
         } catch (const std::system_error&) {
+            Stop();
             return E_FAIL;
         } catch (const std::future_error&) {
+            Stop();
             return E_FAIL;
         } catch (const std::bad_alloc&) {
+            Stop();
             return E_OUTOFMEMORY;
         }
     }
@@ -1944,15 +2423,24 @@ public:
             if (!worker_.joinable()) {
                 running_ = false;
                 stopping_ = true;
+                if (work_event_ != nullptr) {
+                    CloseHandle(std::exchange(work_event_, nullptr));
+                }
                 return;
             }
             stopping_ = true;
+            SignalWorkLocked();
         }
         wake_.notify_one();
+        queue_idle_.notify_all();
         worker_.join();
         std::lock_guard lock(mutex_);
         running_ = false;
         published_.clear();
+        pending_presentation_work_ = 0U;
+        if (work_event_ != nullptr) {
+            CloseHandle(std::exchange(work_event_, nullptr));
+        }
     }
 
     HRESULT Invoke(HostControl control) noexcept {
@@ -1963,7 +2451,7 @@ public:
             control.completion = completion;
             {
                 std::lock_guard lock(mutex_);
-                if (!running_ || stopping_ || work_.size() >= kMaximumHostWork) {
+                if (!running_ || stopping_ || OutstandingWorkLocked() >= kMaximumHostWork) {
                     return E_UNEXPECTED;
                 }
                 const bool supersedes_surface =
@@ -1988,6 +2476,7 @@ public:
                 } else {
                     work_.emplace_back(std::move(control));
                 }
+                SignalWorkLocked();
             }
             ReleaseEnvelope(discarded);
             wake_.notify_one();
@@ -2002,21 +2491,39 @@ public:
     }
 
     void Post(HostControl control) noexcept {
+        if (control.kind == HostControlKind::Visibility) {
+            {
+                std::lock_guard lock(mutex_);
+                const auto published = FindPublishedLocked(control.canvas, control.surface_generation);
+                if (!running_ || stopping_ || published == published_.end()) {
+                    return;
+                }
+                if (published->visible == control.visible
+                    && (!control.visible || !published->occluded)) {
+                    return;
+                }
+                // This bounded per-surface mailbox cannot be displaced by a
+                // saturated render queue. The latest requested visibility wins.
+                if (control.visible) {
+                    published->visible = true;
+                } else {
+                    published->visible = false;
+                }
+                published->visibility_pending = true;
+                SignalWorkLocked();
+            }
+            wake_.notify_one();
+            return;
+        }
         try {
             {
                 std::lock_guard lock(mutex_);
-                if (control.kind == HostControlKind::Visibility && !control.visible) {
-                    const auto published = FindPublishedLocked(
-                        control.canvas, control.surface_generation);
-                    if (published != published_.end()) {
-                        published->visible = false;
-                    }
-                }
                 if (!running_ || stopping_
-                    || work_.size() >= kMaximumNoncriticalHostWork) {
+                    || OutstandingWorkLocked() >= kMaximumNoncriticalHostWork) {
                     return;
                 }
                 work_.emplace_back(std::move(control));
+                SignalWorkLocked();
             }
             wake_.notify_one();
         } catch (const std::bad_alloc&) {
@@ -2048,6 +2555,7 @@ public:
                     || status->occluded) {
                     accepted = false;
                 } else {
+                    envelope.submission_qpc = PerformanceCounterTicks();
                     const auto pending = std::find_if(
                         work_.begin(), work_.end(), [&envelope](HostWork& item) {
                             const auto* snapshot = std::get_if<SnapshotEnvelope>(&item);
@@ -2062,11 +2570,14 @@ public:
                         queue_replacement_count_.fetch_add(
                             1U, std::memory_order_relaxed);
                         accepted = true;
-                    } else if (work_.size() < kMaximumNoncriticalHostWork) {
+                    } else if (OutstandingWorkLocked() < kMaximumNoncriticalHostWork) {
                         work_.emplace_back(envelope);
                         envelope.snapshot = nullptr;
                         accepted = true;
                     }
+                }
+                if (accepted) {
+                    SignalWorkLocked();
                 }
             }
         } catch (const std::bad_alloc&) {
@@ -2120,7 +2631,7 @@ public:
         usage.gpu_tile_budget_bytes = kApplicationGpuTileBudgetBytes;
         std::lock_guard lock(mutex_);
         usage.surface_count = static_cast<std::uint64_t>(published_.size());
-        usage.queued_work_count = static_cast<std::uint64_t>(work_.size());
+        usage.queued_work_count = static_cast<std::uint64_t>(OutstandingWorkLocked());
         for (const PublishedSurface& surface : published_) {
             usage.retained_snapshot_bytes = SaturatingAdd(
                 usage.retained_snapshot_bytes, surface.retained_snapshot_bytes);
@@ -2132,6 +2643,16 @@ public:
                 usage.cached_tile_count, surface.cached_tile_count);
             usage.active_tile_count = SaturatingAdd(
                 usage.active_tile_count, surface.active_tile_count);
+            usage.sequence_cache_source_count = SaturatingAdd(
+                usage.sequence_cache_source_count, surface.sequence_cache_source_count);
+            usage.sequence_cache_bytes = SaturatingAdd(
+                usage.sequence_cache_bytes, surface.sequence_cache_bytes);
+            usage.sequence_cache_eviction_count = SaturatingAdd(
+                usage.sequence_cache_eviction_count, surface.sequence_cache_eviction_count);
+            usage.uploaded_tile_count = SaturatingAdd(
+                usage.uploaded_tile_count, surface.uploaded_tile_count);
+            usage.uploaded_tile_bytes = SaturatingAdd(
+                usage.uploaded_tile_bytes, surface.uploaded_tile_bytes);
             usage.visible_surface_count += surface.visible && !surface.occluded ? 1U : 0U;
         }
         for (const HostWork& item : work_) {
@@ -2171,7 +2692,22 @@ public:
             found->cached_tile_count,
             found->active_tile_count,
             found->visible,
-            found->occluded};
+            found->occluded,
+            found->sequence_cache_source_count,
+            found->sequence_cache_bytes,
+            found->sequence_cache_eviction_count,
+            found->uploaded_tile_count,
+            found->uploaded_tile_bytes,
+            found->last_presented_document_revision,
+            found->last_presented_view_revision,
+            found->last_presented_source,
+            found->last_snapshot_submission_qpc,
+            found->first_presented_revision_qpc,
+            found->last_presented_presentation_epoch,
+            found->frame_latency_timeout_count,
+            found->last_render_result,
+            found->first_frame_ready_qpc,
+            found->first_present_begin_qpc};
         return true;
     }
 
@@ -2179,6 +2715,7 @@ public:
         {
             std::lock_guard lock(mutex_);
             queue_paused_for_smoke_test_ = paused;
+            SignalWorkLocked();
         }
         wake_.notify_one();
     }
@@ -2189,7 +2726,8 @@ public:
             return false;
         }
         queue_idle_.wait(lock, [this] {
-            return stopping_ || (work_.empty() && in_flight_work_ == 0U);
+            return stopping_ || (work_.empty() && in_flight_work_ == 0U
+                && pending_presentation_work_ == 0U && !HasPendingVisibilityLocked());
         });
         return !stopping_;
     }
@@ -2199,6 +2737,67 @@ private:
     static constexpr std::size_t kReservedHostControlWork = 8U;
     static constexpr std::size_t kMaximumNoncriticalHostWork =
         kMaximumHostWork - kReservedHostControlWork;
+
+    [[nodiscard]] std::size_t OutstandingWorkLocked() const noexcept {
+        return work_.size() + pending_presentation_work_ + (in_flight_queue_reservation_ ? 1U : 0U);
+    }
+
+    void SignalWorkLocked() const noexcept {
+        if (work_event_ != nullptr) {
+            SetEvent(work_event_);
+        }
+    }
+
+    void SetPresentationWork(
+        SurfaceRecord& surface, std::size_t requests, bool pending) noexcept {
+        std::lock_guard lock(mutex_);
+        SetPresentationWorkLocked(surface, requests, pending);
+    }
+
+    void SetPresentationWorkLocked(
+        SurfaceRecord& surface, std::size_t requests, bool pending) noexcept {
+        const auto previous = std::max<std::size_t>(
+            surface.pending_render_requests, surface.presentation_pending ? 1U : 0U);
+        const auto next = std::max<std::size_t>(requests, pending ? 1U : 0U);
+        if (next > previous && in_flight_queue_reservation_) {
+            // Move the accepted item's slot to its deferred presentation. A
+            // producer cannot claim the slot between queue pop and this move.
+            in_flight_queue_reservation_ = false;
+        }
+        pending_presentation_work_ -= previous;
+        surface.pending_render_requests = requests;
+        surface.presentation_pending = pending;
+        pending_presentation_work_ += next;
+    }
+
+    bool HasPendingVisibilityLocked() const noexcept {
+        return std::any_of(published_.begin(), published_.end(),
+            [](const PublishedSurface& surface) { return surface.visibility_pending; });
+    }
+
+    void ApplyPendingVisibilityLocked() noexcept {
+        for (auto& surface : surfaces_) {
+            const auto state = FindPublishedLocked(surface.canvas, surface.generation);
+            if (state == published_.end() || !state->visibility_pending) {
+                continue;
+            }
+            surface.visible = state->visible;
+            if (!surface.visible) {
+                SetPresentationWorkLocked(surface, 0U, false);
+            } else {
+                surface.occluded = false;
+                state->occluded = false;
+                if (!surface.presentation_pending && surface.pending_render_requests == 0U
+                    && OutstandingWorkLocked() >= kMaximumHostWork) {
+                    // Visibility is already correct. Keep the show mailbox
+                    // until a presentation slot becomes available.
+                    continue;
+                }
+                SetPresentationWorkLocked(surface, surface.pending_render_requests, true);
+            }
+            state->visibility_pending = false;
+        }
+    }
 
     static void ReleaseEnvelope(SnapshotEnvelope& envelope) noexcept {
         if (envelope.snapshot != nullptr) {
@@ -2243,14 +2842,30 @@ private:
             surface.canvas,
             surface.generation,
             surface.route,
-            surface.visible,
+            found != published_.end() && found->visibility_pending ? found->visible : surface.visible,
             surface.occluded,
             surface.presented_frames,
             surface.surface->RetainedSnapshotBytes(),
             surface.surface->GpuTileBytes(),
             surface.surface->SwapChainBytes(),
             surface.surface->CachedTileCount(),
-            surface.surface->ActiveTileCount()};
+            surface.surface->ActiveTileCount(),
+            surface.surface->SequenceCacheSourceCount(),
+            surface.surface->SequenceCacheBytes(),
+            surface.surface->SequenceCacheEvictionCount(),
+            surface.surface->UploadedTileCount(),
+            surface.surface->UploadedTileBytes(),
+            surface.surface->LastPresentedDocumentRevision(),
+            surface.surface->LastPresentedViewRevision(),
+            surface.surface->LastPresentedSource(),
+            surface.surface->LastSnapshotSubmissionQpc(),
+            surface.surface->FirstPresentedRevisionQpc(),
+            surface.surface->LastPresentedPresentationEpoch(),
+            surface.surface->FrameLatencyTimeoutCount(),
+            surface.last_render_result,
+            found != published_.end() && found->visibility_pending,
+            surface.surface->FirstFrameReadyQpc(),
+            surface.surface->FirstPresentBeginQpc()};
         if (found == published_.end()) {
             try {
                 published_.push_back(value);
@@ -2269,18 +2884,61 @@ private:
         }
     }
 
-    void UpdateTileBudgets() noexcept {
-        for (auto& surface : surfaces_) {
-            surface.surface->SetTileBudgetBytes(kApplicationGpuTileBudgetBytes);
+    void UpdateSequenceCacheBudgets() noexcept {
+        for (;;) {
+            std::uint64_t source_count{};
+            std::uint64_t source_bytes{};
+            for (const auto& surface : surfaces_) {
+                source_count = SaturatingAdd(
+                    source_count, surface.surface->SequenceCacheSourceCount());
+                source_bytes = SaturatingAdd(
+                    source_bytes, surface.surface->SequenceCacheBytes());
+            }
+            if (source_count <= kMaximumSequenceCacheSources
+                && source_bytes <= kSequenceGpuCacheBudgetBytes) {
+                return;
+            }
+            auto victim = surfaces_.end();
+            std::uint64_t oldest = UINT64_MAX;
+            for (auto iterator = surfaces_.begin(); iterator != surfaces_.end(); ++iterator) {
+                const auto candidate = iterator->surface->OldestRetainedSourceUse();
+                if (candidate.has_value() && candidate.value() < oldest) {
+                    oldest = candidate.value();
+                    victim = iterator;
+                }
+            }
+            if (victim != surfaces_.end()) {
+                (void)victim->surface->EvictOldestRetainedSource();
+                continue;
+            }
+            // All remaining candidates are displayed by active views. Leave
+            // their pixels resident under the normal GPU cap, but stop retaining
+            // the least recently used source when its view next switches away.
+            for (auto iterator = surfaces_.begin(); iterator != surfaces_.end(); ++iterator) {
+                const auto candidate = iterator->surface->ActiveCachedSourceUse();
+                if (candidate.has_value() && candidate.value() < oldest) {
+                    oldest = candidate.value();
+                    victim = iterator;
+                }
+            }
+            if (victim == surfaces_.end()) {
+                return;
+            }
+            victim->surface->DisableSourceRetention();
         }
+    }
+
+    bool ReserveGpuTileCapacity() noexcept {
         for (;;) {
             std::uint64_t total_bytes{};
             for (const auto& surface : surfaces_) {
                 total_bytes = SaturatingAdd(
                     total_bytes, surface.surface->GpuTileBytes());
+                total_bytes = SaturatingAdd(
+                    total_bytes, surface.surface->PendingUploadBytes());
             }
             if (total_bytes <= kApplicationGpuTileBudgetBytes) {
-                return;
+                return true;
             }
             auto victim = surfaces_.end();
             std::uint64_t oldest = UINT64_MAX;
@@ -2292,9 +2950,17 @@ private:
                 }
             }
             if (victim == surfaces_.end() || !victim->surface->EvictOldestInactive()) {
-                return;
+                return false;
             }
         }
+    }
+
+    void UpdateTileBudgets() noexcept {
+        for (auto& surface : surfaces_) {
+            surface.surface->SetTileBudgetBytes(kApplicationGpuTileBudgetBytes);
+        }
+        UpdateSequenceCacheBudgets();
+        (void)ReserveGpuTileCapacity();
     }
 
     HRESULT RecoverDevice() noexcept {
@@ -2337,15 +3003,109 @@ private:
         return result;
     }
 
-    HRESULT RenderAndCount(SurfaceRecord& surface) noexcept {
-        HRESULT result = surface.surface->Render();
+    HRESULT RenderAndCount(SurfaceRecord& surface, DWORD wait_milliseconds = 0U) noexcept {
+        HRESULT result = surface.surface->Render(
+            nullptr, 0U, 0U, wait_milliseconds,
+            wait_milliseconds == 0U ? nullptr : work_event_);
+        surface.last_render_result = result;
         const bool presented = result == S_OK;
+        const bool device_lost = IsDeviceLoss(result);
         result = NormalizeResult(surface, result);
         if (SUCCEEDED(result) && presented) {
             ++surface.presented_frames;
-            PublishSurface(surface);
+            SetPresentationWork(surface,
+                surface.pending_render_requests == 0U ? 0U : surface.pending_render_requests - 1U,
+                false);
+        } else if (result == S_FALSE || (device_lost && SUCCEEDED(result))) {
+            SetPresentationWork(surface, surface.pending_render_requests, true);
+        } else {
+            // Hidden/occluded surfaces and terminal failures do not keep the
+            // owner thread spinning. A later show/recovery requests a frame.
+            SetPresentationWork(surface, 0U, false);
         }
+        PublishSurface(surface);
         return result;
+    }
+
+    SurfaceRecord* WaitForReadySurface() noexcept {
+        std::array<HANDLE, MAXIMUM_WAIT_OBJECTS> handles{};
+        std::array<std::size_t, MAXIMUM_WAIT_OBJECTS> indices{};
+        handles[0] = work_event_;
+        DWORD count = 1U;
+        bool overflow{};
+        if (surfaces_.empty() || WaitForSingleObject(work_event_, 0U) == WAIT_OBJECT_0) {
+            return nullptr;
+        }
+        const auto start = next_retry_surface_ % surfaces_.size();
+        for (std::size_t offset = 0U; offset < surfaces_.size(); ++offset) {
+            const auto index = (start + offset) % surfaces_.size();
+            auto& surface = surfaces_[index];
+            if (!surface.visible || surface.occluded) {
+                if (surface.presentation_pending || surface.pending_render_requests != 0U) {
+                    SetPresentationWork(surface, 0U, false);
+                    PublishSurface(surface);
+                }
+                continue;
+            }
+            if (!surface.presentation_pending && surface.pending_render_requests == 0U) {
+                continue;
+            }
+            const HRESULT ready = surface.surface->AcquireFrameLatencyPermit(0U);
+            if (ready == S_OK) {
+                next_retry_surface_ = index + 1U;
+                return WaitForSingleObject(work_event_, 0U) == WAIT_OBJECT_0 ? nullptr : &surface;
+            }
+            if (FAILED(ready)) {
+                surface.last_render_result = ready;
+                SetPresentationWork(surface, 0U, false);
+                PublishSurface(surface);
+                ReportFailure(surface, ready);
+                return nullptr;
+            }
+            if (count < MAXIMUM_WAIT_OBJECTS) {
+                handles[count] = surface.surface->FrameLatencyHandle();
+                indices[count] = index;
+                ++count;
+            } else {
+                overflow = true;
+            }
+        }
+        if (count == 1U) {
+            return nullptr;
+        }
+        // All normal visible surfaces fit one OS wait. For larger registries,
+        // every handle is still probed above and bounded 1ms batch waits rotate;
+        // one blocked swap chain cannot hold other surfaces for 100ms.
+        const DWORD milliseconds = overflow ? 1U : 100U;
+        const DWORD wait = WaitForMultipleObjectsEx(count, handles.data(), FALSE, milliseconds, FALSE);
+        if (wait >= WAIT_OBJECT_0 + 1U && wait < WAIT_OBJECT_0 + count) {
+            const auto index = indices[wait - WAIT_OBJECT_0];
+            auto& surface = surfaces_[index];
+            surface.surface->AcceptFrameLatencySignal();
+            next_retry_surface_ = index + 1U;
+            return &surface;
+        }
+        if (wait == WAIT_TIMEOUT) {
+            next_retry_surface_ = indices[count - 1U] + 1U;
+            if (!overflow) {
+                for (DWORD index = 1U; index < count; ++index) {
+                    auto& surface = surfaces_[indices[index]];
+                    surface.surface->RecordFrameLatencyTimeout();
+                    surface.last_render_result = S_FALSE;
+                    PublishSurface(surface);
+                }
+            }
+        } else if (wait == WAIT_FAILED) {
+            const HRESULT failure = HRESULT_FROM_WIN32(GetLastError());
+            for (DWORD index = 1U; index < count; ++index) {
+                auto& surface = surfaces_[indices[index]];
+                surface.last_render_result = failure;
+                SetPresentationWork(surface, 0U, false);
+                PublishSurface(surface);
+                ReportFailure(surface, failure);
+            }
+        }
+        return nullptr;
     }
 
     void ReportFailure(const SurfaceRecord& surface, HRESULT result) const noexcept {
@@ -2410,14 +3170,22 @@ private:
         }
         found->surface->SetTileBudgetBytes(
             kApplicationGpuTileBudgetBytes - other_active_bytes);
-        HRESULT result = found->surface->SetSnapshot(envelope.snapshot);
+        HRESULT result = found->surface->SetSnapshot(
+            envelope.snapshot, envelope.committed_document_revision, envelope.submission_qpc,
+            envelope.presentation_epoch);
         envelope.snapshot = nullptr;
-        result = NormalizeResult(*found, result);
         if (SUCCEEDED(result)) {
-            UpdateTileBudgets();
-            for (const auto& surface : surfaces_) {
-                PublishSurface(surface);
+            UpdateSequenceCacheBudgets();
+            result = ReserveGpuTileCapacity()
+                ? found->surface->UploadPreparedSnapshot() : E_OUTOFMEMORY;
+            if (result == E_OUTOFMEMORY) {
+                resource_limit_count_.fetch_add(1U, std::memory_order_relaxed);
             }
+        }
+        result = NormalizeResult(*found, result);
+        UpdateTileBudgets();
+        for (const auto& surface : surfaces_) {
+            PublishSurface(surface);
         }
         if (SUCCEEDED(result) && found->visible) {
             result = RenderAndCount(*found);
@@ -2459,6 +3227,7 @@ private:
             return E_INVALIDARG;
         }
         if (control.kind == HostControlKind::Unregister) {
+            SetPresentationWork(*found, 0U, false);
             RemovePublished(found->canvas, found->generation);
             surfaces_.erase(found);
             UpdateTileBudgets();
@@ -2476,12 +3245,14 @@ private:
                     || control.route.surface_generation != surface.generation) {
                     return E_INVALIDARG;
                 }
+                SetPresentationWork(surface, 0U, false);
                 surface.surface->ClearSnapshot();
                 surface.route = control.route;
                 surface.occluded = false;
                 PublishSurface(surface);
                 break;
             case HostControlKind::Unbind:
+                SetPresentationWork(surface, 0U, false);
                 surface.surface->ClearSnapshot();
                 surface.route = {};
                 surface.occluded = false;
@@ -2490,18 +3261,23 @@ private:
                 break;
             case HostControlKind::Resize:
                 result = surface.surface->Resize(control.width, control.height);
-                render = surface.visible;
+                render = result == S_OK && surface.visible;
                 break;
             case HostControlKind::Visibility:
                 surface.visible = control.visible;
                 if (surface.visible) {
                     surface.occluded = false;
                     render = true;
+                } else {
+                    SetPresentationWork(surface, 0U, false);
                 }
                 PublishSurface(surface);
                 break;
             case HostControlKind::Render:
                 render = surface.visible;
+                if (render) {
+                    SetPresentationWork(surface, surface.pending_render_requests + 1U, true);
+                }
                 break;
             case HostControlKind::DpiChanged:
                 result = surface.surface->DpiChanged();
@@ -2516,10 +3292,13 @@ private:
                     result = E_POINTER;
                 } else {
                     result = surface.surface->RenderAndReadPixelForSmokeTest(
-                        control.pixel_x, control.pixel_y, *control.out_pixel);
-                    if (SUCCEEDED(result)) {
+                        control.pixel_x, control.pixel_y, *control.out_pixel, work_event_);
+                    surface.last_render_result = result;
+                    if (result == S_OK) {
                         ++surface.presented_frames;
+                        SetPresentationWork(surface, surface.pending_render_requests, false);
                     }
+                    PublishSurface(surface);
                 }
                 break;
             case HostControlKind::GetDocumentBounds:
@@ -2539,11 +3318,11 @@ private:
                 break;
             case HostControlKind::SetFloatingPreview:
                 result = surface.surface->SetFloatingPreview(control.floating_preview);
-                render = surface.visible;
+                render = result == S_OK && surface.visible;
                 break;
             case HostControlKind::SetGeometryPreview:
                 result = surface.surface->SetGeometryPreview(control.geometry_preview);
-                render = surface.visible;
+                render = result == S_OK && surface.visible;
                 break;
             case HostControlKind::Register:
             case HostControlKind::Unregister:
@@ -2551,7 +3330,14 @@ private:
         }
         result = NormalizeResult(surface, result);
         if (SUCCEEDED(result) && render) {
-            result = RenderAndCount(surface);
+            result = RenderAndCount(surface,
+                control.kind == HostControlKind::Render && control.completion != nullptr ? 100U : 0U);
+            if (result == S_FALSE && (control.kind == HostControlKind::SetGeometryPreview
+                    || control.kind == HostControlKind::SetFloatingPreview)) {
+                // State is applied; the renderer owns the pending frame. UI
+                // pointer delivery does not synchronously wait for Present.
+                result = S_OK;
+            }
         }
         return result;
     }
@@ -2582,11 +3368,14 @@ private:
         }
         for (;;) {
             HostWork item;
+            bool retry_present{};
             {
                 std::unique_lock lock(mutex_);
                 wake_.wait(lock, [this] {
                     return stopping_
-                        || (!queue_paused_for_smoke_test_ && !work_.empty());
+                        || (!queue_paused_for_smoke_test_
+                            && (!work_.empty() || pending_presentation_work_ != 0U
+                                || HasPendingVisibilityLocked()));
                 });
                 if (stopping_) {
                     std::deque<HostWork> abandoned;
@@ -2595,13 +3384,31 @@ private:
                     AbortWork(abandoned);
                     break;
                 }
-                item = std::move(work_.front());
-                work_.pop_front();
+                ApplyPendingVisibilityLocked();
+                if (work_.empty() && pending_presentation_work_ == 0U) {
+                    queue_idle_.notify_all();
+                    ResetEvent(work_event_);
+                    continue;
+                }
+                retry_present = work_.empty();
+                in_flight_queue_reservation_ = !retry_present;
+                if (!retry_present) {
+                    item = std::move(work_.front());
+                    work_.pop_front();
+                }
+                if (work_.empty()) {
+                    ResetEvent(work_event_);
+                } else {
+                    SignalWorkLocked();
+                }
                 ++in_flight_work_;
             }
             HRESULT result{};
             SurfaceRecord* failure_surface{};
-            if (auto* envelope = std::get_if<SnapshotEnvelope>(&item)) {
+            if (retry_present) {
+                failure_surface = WaitForReadySurface();
+                result = failure_surface == nullptr ? S_FALSE : RenderAndCount(*failure_surface);
+            } else if (auto* envelope = std::get_if<SnapshotEnvelope>(&item)) {
                 const auto found = FindSurface(
                     envelope->route.canvas, envelope->route.surface_generation);
                 failure_surface = found == surfaces_.end() ? nullptr : &*found;
@@ -2620,8 +3427,10 @@ private:
             }
             {
                 std::lock_guard lock(mutex_);
+                in_flight_queue_reservation_ = false;
                 --in_flight_work_;
-                if (work_.empty() && in_flight_work_ == 0U) {
+                if (work_.empty() && in_flight_work_ == 0U && pending_presentation_work_ == 0U
+                    && !HasPendingVisibilityLocked()) {
                     queue_idle_.notify_all();
                 }
             }
@@ -2636,10 +3445,14 @@ private:
     std::condition_variable wake_;
     std::condition_variable queue_idle_;
     std::thread worker_;
+    HANDLE work_event_{};
     bool stopping_{true};
     bool running_{};
     bool queue_paused_for_smoke_test_{};
     std::size_t in_flight_work_{};
+    std::size_t pending_presentation_work_{};
+    bool in_flight_queue_reservation_{};
+    std::size_t next_retry_surface_{};
     std::deque<HostWork> work_;
     std::vector<PublishedSurface> published_;
     std::vector<SurfaceRecord> surfaces_;
@@ -2691,6 +3504,9 @@ public:
         }
         std::lock_guard lock(route_mutex_);
         route_ = route;
+        sequence_activation_pending_ = false;
+        required_presented_revision_ = 0U;
+        required_presentation_epoch_ = 0U;
         return true;
     }
 
@@ -2710,6 +3526,9 @@ public:
         }
         std::lock_guard lock(route_mutex_);
         route_ = route;
+        sequence_activation_pending_ = false;
+        required_presented_revision_ = 0U;
+        required_presentation_epoch_ = 0U;
         return true;
     }
 
@@ -2719,6 +3538,9 @@ public:
         }
         std::lock_guard lock(route_mutex_);
         route_ = {};
+        sequence_activation_pending_ = false;
+        required_presented_revision_ = 0U;
+        required_presentation_epoch_ = 0U;
         return true;
     }
 
@@ -2743,10 +3565,46 @@ public:
         return renderer_.Submit(envelope);
     }
 
+    void SynchronizeVisibility(bool visible, bool notify_viewport) noexcept {
+        RendererSurfaceResourceUsage usage{};
+        const bool reappeared = visible && notify_viewport
+            && renderer_.GetSurfaceResourceUsage(canvas_, surface_generation_, usage)
+            && (!usage.visible || usage.occluded);
+        renderer_.SetVisible(canvas_, surface_generation_, visible);
+        if (reappeared) {
+            // Showing a parent does not guarantee a WM_SHOWWINDOW for a child.
+            // A hidden view may have skipped snapshot publication altogether;
+            // request its current final viewport once when it becomes visible.
+            RECT client{};
+            if (GetClientRect(window_, &client) != FALSE) {
+                PostMessageW(GetParent(window_), kCanvasViewportChanged,
+                    static_cast<WPARAM>(canvas_.Value()),
+                    MAKELPARAM(client.right - client.left, client.bottom - client.top));
+            }
+        }
+    }
+
     bool SendStroke(
         CanvasStrokeEventKind kind,
         const InkpodStrokeSample* samples,
         std::uint64_t sample_count) noexcept {
+        if (kind == CanvasStrokeEventKind::Begin) {
+            if (sequence_activation_pending_) {
+                return false;
+            }
+            if (required_presented_revision_ != 0U || required_presentation_epoch_ != 0U) {
+                RendererSurfaceResourceUsage usage{};
+                if (!renderer_.GetSurfaceResourceUsage(canvas_, surface_generation_, usage)
+                    || usage.route != Route()
+                    || usage.last_presented_document_revision < required_presented_revision_
+                    || (required_presentation_epoch_ != 0U
+                        && usage.last_presented_presentation_epoch != required_presentation_epoch_)) {
+                    return false;
+                }
+                required_presented_revision_ = 0U;
+                required_presentation_epoch_ = 0U;
+            }
+        }
         if (sample_count > kMaximumStrokeSamples
             || (sample_count != 0U && samples == nullptr)) {
             return false;
@@ -2772,6 +3630,22 @@ public:
             static_cast<LPARAM>(surface_generation_.Value()));
         DiscardStroke(token);
         return result == 1;
+    }
+
+    bool SetSequenceFence(
+        bool activation_pending,
+        std::uint64_t required_presented_revision,
+        std::uint64_t required_presentation_epoch) noexcept {
+        if (activation_pending) {
+            std::lock_guard lock(input_mutex_);
+            if (stroke_active_ || !pending_strokes_.empty()) {
+                return false;
+            }
+        }
+        sequence_activation_pending_ = activation_pending;
+        required_presented_revision_ = required_presented_revision;
+        required_presentation_epoch_ = required_presentation_epoch;
+        return true;
     }
 
     bool SendGesture(const CanvasViewGesture& gesture) noexcept {
@@ -3020,6 +3894,9 @@ private:
     std::deque<PendingStroke> pending_strokes_;
     std::deque<PendingGesture> pending_gestures_;
     std::uint64_t next_input_token_{};
+    bool sequence_activation_pending_{};
+    std::uint64_t required_presented_revision_{};
+    std::uint64_t required_presentation_epoch_{};
     bool stroke_active_{};
     bool pointer_stroke_{};
     UINT32 active_pointer_id_{};
@@ -3125,8 +4002,10 @@ LRESULT CALLBACK CanvasWindowProcedure(
         case WM_SIZE:
             if (host != nullptr) {
                 host->CancelStroke();
-                host->Renderer().SetVisible(
-                    host->Canvas(), host->SurfaceGeneration(), wparam != SIZE_MINIMIZED);
+                const bool visible = wparam != SIZE_MINIMIZED
+                    && IsWindowVisible(window) != FALSE
+                    && CanvasAncestorsVisible(window);
+                host->SynchronizeVisibility(visible, false);
                 if (wparam != SIZE_MINIMIZED) {
                     const UINT width = LOWORD(lparam);
                     const UINT height = HIWORD(lparam);
@@ -3142,8 +4021,8 @@ LRESULT CALLBACK CanvasWindowProcedure(
             return 0;
         case WM_SHOWWINDOW:
             if (host != nullptr) {
-                host->Renderer().SetVisible(
-                    host->Canvas(), host->SurfaceGeneration(), wparam != FALSE);
+                host->SynchronizeVisibility(
+                    wparam != FALSE && CanvasAncestorsVisible(window), true);
             }
             break;
         case WM_PAINT: {
@@ -3151,6 +4030,8 @@ LRESULT CALLBACK CanvasWindowProcedure(
             BeginPaint(window, &paint);
             EndPaint(window, &paint);
             if (host != nullptr) {
+                host->SynchronizeVisibility(
+                    IsWindowVisible(window) != FALSE && CanvasAncestorsVisible(window), true);
                 host->Renderer().RequestRender(
                     host->Canvas(), host->SurfaceGeneration());
             }
@@ -3721,6 +4602,20 @@ void CancelCanvasStroke(HWND canvas) noexcept {
     if (host != nullptr) {
         host->CancelStroke();
     }
+}
+
+bool SetCanvasSequenceFence(
+    HWND canvas,
+    bool activation_pending,
+    std::uint64_t required_presented_revision,
+    std::uint64_t required_presentation_epoch) noexcept {
+    auto* host = reinterpret_cast<CanvasHost*>(
+        GetWindowLongPtrW(canvas, GWLP_USERDATA));
+    if (host == nullptr) {
+        return false;
+    }
+    return host->SetSequenceFence(
+        activation_pending, required_presented_revision, required_presentation_epoch);
 }
 
 bool TakeCanvasStrokeEvent(

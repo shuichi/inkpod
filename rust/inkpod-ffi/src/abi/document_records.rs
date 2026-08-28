@@ -628,6 +628,16 @@ pub struct InkpodSequenceActivationPlan {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
+pub struct InkpodSequenceCatalogInfo {
+    pub struct_size: u32,
+    pub active_index: u32,
+    pub sequence_revision: u64,
+    pub owner_generation: u64,
+    pub cell_count: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
 pub struct InkpodSequenceStepPlan {
     pub struct_size: u32,
     pub direction: u32,

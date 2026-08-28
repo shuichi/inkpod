@@ -2,14 +2,14 @@
 
 #include <stdint.h>
 
-_Static_assert(INKPOD_ABI_VERSION == 23U, "unexpected ABI version");
+_Static_assert(INKPOD_ABI_VERSION == 24U, "unexpected ABI version");
 _Static_assert(sizeof(InkpodIoConfig) == 48U, "I/O config layout drift");
 _Static_assert(sizeof(InkpodIoPath) == 24U, "I/O path layout drift");
 _Static_assert(sizeof(InkpodIoRequest) == 72U, "I/O request layout drift");
 _Static_assert(sizeof(InkpodIoJobInfo) == 104U, "I/O job info layout drift");
 _Static_assert(sizeof(InkpodIoFileIdentity) == 32U, "I/O identity layout drift");
 _Static_assert(sizeof(InkpodIoItemInfo) == 80U, "I/O item layout drift");
-_Static_assert(sizeof(InkpodIoCacheInfo) == 56U, "I/O cache info layout drift");
+_Static_assert(sizeof(InkpodIoCacheInfo) == 72U, "I/O cache info layout drift");
 _Static_assert(sizeof(InkpodIoRecoveryMetadata) == 160U, "I/O recovery metadata layout drift");
 _Static_assert(sizeof(InkpodSubpaletteSourceInput) == 32U, "subpalette source layout drift");
 _Static_assert(sizeof(InkpodSubpaletteRasterInput) == 32U, "subpalette raster layout drift");
@@ -40,7 +40,9 @@ _Static_assert(sizeof(InkpodCutSequenceEditOperation) == 104U, "Cut sequence ope
 _Static_assert(sizeof(InkpodCutSequenceEditRequest) == 48U, "Cut sequence request layout drift");
 _Static_assert(sizeof(InkpodCutSequenceEditResult) == 40U, "Cut sequence result layout drift");
 _Static_assert(sizeof(InkpodDocumentThumbnailBuffer) == 56U, "document thumbnail layout drift");
-_Static_assert(sizeof(InkpodResourceUsage) == 112U, "resource usage layout drift");
+_Static_assert(sizeof(InkpodResourceUsage) == 136U, "resource usage layout drift");
+_Static_assert(sizeof(InkpodSnapshotSourceIdentity) == 40U, "snapshot source identity layout drift");
+_Static_assert(sizeof(InkpodSequenceCatalogInfo) == 32U, "sequence catalog layout drift");
 _Static_assert(sizeof(InkpodHistoryItem) == 24U, "history item layout drift");
 _Static_assert(sizeof(InkpodStrokeSample) == 24U, "stroke sample layout drift");
 _Static_assert(sizeof(InkpodStrokeInput) == 72U, "stroke input layout drift");

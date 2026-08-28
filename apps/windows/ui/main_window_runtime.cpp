@@ -259,6 +259,9 @@ bool FileIoAccepted(InkpodStatus status) noexcept {
     return status == INKPOD_STATUS_OK || status == INKPOD_STATUS_PENDING;
 }
 
+bool FenceSequenceCanvases(ApplicationHost& state, DocumentSession& document,
+    bool pending, std::uint64_t required_revision, std::uint64_t required_epoch) noexcept;
+
 InkpodStatus QueueFileIoWork(
     ApplicationHost& state,
     inkpod::app::FileIoRequest request,
@@ -281,6 +284,23 @@ InkpodStatus QueueFileIoWork(
                 [&state, workspace, completion = std::move(completion), smoke](
                     inkpod::app::FileIoResult&& result) {
                     const InkpodStatus job_status = result.status;
+                    if (result.document_applied
+                        && (result.kind == INKPOD_IO_OPEN_NATIVE
+                            || result.kind == INKPOD_IO_OPEN_RECOVERY
+                            || result.kind == INKPOD_IO_OPEN_RASTER)
+                        && result.context.document_session.has_value()
+                        && result.context.generation.has_value()) {
+                        auto* document = state.Documents().Find(
+                            result.context.document_session.value());
+                        if (document != nullptr
+                            && document->generation == result.context.generation.value()) {
+                            // Core has started an ordinary document incarnation
+                            // with epoch zero. Reconcile its session even when
+                            // Revert finishes after the user selected another tab,
+                            // or a later snapshot publication failed.
+                            (void)FenceSequenceCanvases(state, *document, false, 0U, 0U);
+                        }
+                    }
                     if (!result.error.empty() && state.engine != nullptr) {
                         state.engine->SetLocalFailure(result.error);
                     }
@@ -338,6 +358,11 @@ InkpodStatus ReplacePalette(
     ApplicationHost& state,
     const CommandContext& context,
     const std::vector<InkpodColorValue>& colors) noexcept;
+
+InkpodStatus RegisterPaletteColor(
+    ApplicationHost& state,
+    const CommandContext& context,
+    const InkpodColorValue& color) noexcept;
 
 InkpodStatus QueueRecoveryDiscard(ApplicationHost& state, const CommandContext& context,
     const std::wstring& path, SaveContinuation continuation = {}) noexcept {
@@ -642,6 +667,33 @@ ApplicationHost* ActivateWorkspaceContext(void* context) noexcept {
     return workspace->application;
 }
 
+CommandContext CaptureWorkspaceDocumentContext(
+    const ApplicationHost& state, const inkpod::app::WorkspaceWindow& workspace) noexcept {
+    CommandContext context{};
+    context.workspace = workspace.id;
+    context.generation = state.routing.targets.CurrentGeneration();
+    const auto* group = workspace.editors.Active();
+    if (group != nullptr) {
+        context.editor_group = group->id;
+        const auto* document = state.Documents().FindByView(group->ActiveView());
+        if (document != nullptr) {
+            context.document_session = document->id;
+            context.document_view = group->ActiveView();
+        }
+    }
+    return context;
+}
+
+ApplicationHost* ActivateWorkspaceEditContext(void* context) noexcept {
+    auto* workspace = static_cast<inkpod::app::WorkspaceWindow*>(context);
+    if (workspace == nullptr || workspace->application == nullptr
+        || !workspace->application->SequenceEditReady(
+            CaptureWorkspaceDocumentContext(*workspace->application, *workspace))) {
+        return nullptr;
+    }
+    return ActivateWorkspaceContext(context);
+}
+
 bool DispatchEnabledCommand(
     ApplicationHost& state,
     HWND window,
@@ -814,7 +866,7 @@ void RequestToolPaletteOptions(
 }
 
 void ChangeToolOptionsDiameter(void* context, float diameter) noexcept {
-    auto* state = ActivateWorkspaceContext(context);
+    auto* state = ActivateWorkspaceEditContext(context);
     if (state == nullptr || !std::isfinite(diameter)
         || diameter < inkpod::windows::ui::panes::kMinimumToolDiameter
         || diameter > inkpod::windows::ui::panes::kMaximumToolDiameter) {
@@ -833,7 +885,7 @@ void ChangeToolOptionsDiameter(void* context, float diameter) noexcept {
 
 void ChangeToolOptionsBrush(
     void* context, const InkpodEditorBrushOptions& options) noexcept {
-    auto* state = ActivateWorkspaceContext(context);
+    auto* state = ActivateWorkspaceEditContext(context);
     if (state == nullptr) {
         return;
     }
@@ -850,7 +902,7 @@ void ChangeToolOptionsBrush(
 
 void ChangeDockDrawingColor(
     void* context, const InkpodColorValue& color) noexcept {
-    auto* state = ActivateWorkspaceContext(context);
+    auto* state = ActivateWorkspaceEditContext(context);
     if (state == nullptr) {
         return;
     }
@@ -861,14 +913,20 @@ void ChangeDockDrawingColor(
 
 void ChangeDockMainLineColor(
     void* context, const InkpodColorValue& color) noexcept {
-    auto* state = ActivateWorkspaceContext(context);
+    auto* workspace = static_cast<inkpod::app::WorkspaceWindow*>(context);
+    auto* state = workspace == nullptr ? nullptr : workspace->application;
     if (state == nullptr || state->engine == nullptr) {
         return;
     }
     const PaneActionTarget target = state->routing.pane_targets.CaptureAction(
-        state->routing.color_pane,
-        state->routing.targets.Capture(),
+        workspace->pane_ids.color,
+        CaptureWorkspaceDocumentContext(*state, *workspace),
         state->routing.targets);
+    if (target.status != PaneTargetStatus::Ok
+        || !state->SequenceEditReady(target.context)
+        || !state->ActivateWorkspaceWindow(workspace->id, true)) {
+        return;
+    }
     InkpodStatus status = INKPOD_STATUS_INVALID_STATE;
     if (target.status == PaneTargetStatus::Ok
         && target.context.document_session.has_value()
@@ -905,7 +963,7 @@ void ChangeDockMainLineColor(
 
 void SelectDockColor(
     void* context, std::uint32_t index, bool chart) noexcept {
-    auto* state = ActivateWorkspaceContext(context);
+    auto* state = ActivateWorkspaceEditContext(context);
     if (state == nullptr) {
         return;
     }
@@ -931,7 +989,7 @@ void SelectDockColor(
 }
 
 void ChangeDockPaletteGroup(void* context, int delta) noexcept {
-    auto* state = ActivateWorkspaceContext(context);
+    auto* state = ActivateWorkspaceEditContext(context);
     if (state == nullptr) {
         return;
     }
@@ -977,7 +1035,7 @@ void DispatchLayerPaletteCommand(void* context, UINT command) noexcept {
 }
 
 void SelectLayerPaletteLayer(void* context, std::uint64_t layer_id) noexcept {
-    auto* state = ActivateWorkspaceContext(context);
+    auto* state = ActivateWorkspaceEditContext(context);
     if (state == nullptr || state->engine == nullptr || layer_id == 0U) {
         return;
     }
@@ -1005,7 +1063,7 @@ void SelectLayerPaletteLayer(void* context, std::uint64_t layer_id) noexcept {
 }
 
 void SelectLayerPalettePlane(void* context, std::uint64_t plane_id) noexcept {
-    auto* state = ActivateWorkspaceContext(context);
+    auto* state = ActivateWorkspaceEditContext(context);
     if (state == nullptr || state->engine == nullptr || plane_id == 0U
         || !state->RefreshEditorPresentation(
             state->Document().id, state->Document().generation)) {
@@ -1032,7 +1090,7 @@ void ToggleLayerPaletteTarget(
     std::uint64_t id,
     bool plane,
     bool range) noexcept {
-    auto* state = ActivateWorkspaceContext(context);
+    auto* state = ActivateWorkspaceEditContext(context);
     if (state == nullptr || state->engine == nullptr || id == 0U
         || !state->RefreshEditorPresentation(
             state->Document().id, state->Document().generation)) {
@@ -1178,7 +1236,7 @@ void ReorderLayerPaletteLayer(
     void* context,
     std::uint64_t layer_id,
     std::uint32_t destination_index) noexcept {
-    auto* state = ActivateWorkspaceContext(context);
+    auto* state = ActivateWorkspaceEditContext(context);
     if (state == nullptr || layer_id == 0U) {
         return;
     }
@@ -1201,7 +1259,7 @@ void ReorderLayerPalettePlane(
     void* context,
     std::uint64_t plane_id,
     std::uint32_t destination_index) noexcept {
-    auto* state = ActivateWorkspaceContext(context);
+    auto* state = ActivateWorkspaceEditContext(context);
     if (state == nullptr || plane_id == 0U) {
         return;
     }
@@ -1254,17 +1312,23 @@ std::optional<DocumentViewId> FrontendViewForCoreView(
     return view == nullptr ? std::nullopt : std::optional{view->id};
 }
 
-void ResetUiForNewActiveDocument(ApplicationHost& state) noexcept {
+void ResetUiForNewActiveDocument(
+    ApplicationHost& state, bool preserve_sequence_view = false) noexcept {
     CancelFillGeometryPreview(state.Workspace().tools, state.Workspace().windows.canvas);
     CancelSelectionGeometryPreview(state.Workspace().tools, state.Workspace().windows.canvas);
     CancelColorReplaceGeometryPreview(
         state.Workspace().tools, state.Workspace().windows.canvas);
     state.Thumbnails().RemoveDocument(
-        state.Document().id, state.Document().generation);
+        state.Document().id, state.Document().generation,
+        preserve_sequence_view
+            ? std::optional{inkpod::windows::ui::ThumbnailKind::Layer} : std::nullopt);
     ResetDocumentShellTransientState(state.Document().shell);
     ResetPaneDocumentState(state.Workspace().panes);
     ResetToolDocumentState(state.Workspace().tools);
-    ResetViewDocumentState(state.ActiveView().presentation);
+    if (!preserve_sequence_view) {
+        ResetViewDocumentState(state.ActiveView().presentation);
+        (void)FenceSequenceCanvases(state, state.Document(), false, 0U, 0U);
+    }
     ResetAnimationDocumentState(state.Workspace().animation);
     ResetEffectsDocumentState(state.effects);
     if (state.Workspace().windows.window != nullptr) {
@@ -1552,6 +1616,7 @@ bool SplitEditorArea(
             failed_group->canvas = nullptr;
             failed_group->document_tabs = nullptr;
             if (canvas != nullptr) {
+                state.ObserveCanvasSequencePresentation(canvas);
                 DestroyWindow(canvas);
             }
             if (tabs != nullptr) {
@@ -1752,6 +1817,7 @@ bool CloseActiveEditorGroup(ApplicationHost& state) noexcept {
     const HWND closing_canvas = closing->canvas;
     const HWND closing_tabs = closing->document_tabs;
     renderer::CanvasSnapshotSink* sink = renderer::GetCanvasSnapshotSink(closing_canvas);
+    state.ObserveCanvasSequencePresentation(closing_canvas);
     renderer::CancelCanvasStroke(closing_canvas);
     if (sink == nullptr || !state.engine->UnregisterSnapshotSink(sink)) {
         return false;
@@ -2168,10 +2234,12 @@ bool LoadCutMemberThumbnail(
 }
 
 bool RefreshSequencePane(ApplicationHost& state) noexcept {
+    using inkpod::windows::ui::panes::SequencePaneCatalogKey;
     using inkpod::windows::ui::panes::SequencePaneCellView;
+    using inkpod::windows::ui::panes::SequencePaneSelection;
     using inkpod::windows::ui::panes::SequencePaneView;
     using inkpod::windows::ui::panes::UpdateSequencePaneDialog;
-    state.Thumbnails().RemovePane(state.Workspace().pane_ids.sequence);
+    using inkpod::windows::ui::panes::UpdateSequencePaneSelection;
     SequencePaneView pane{};
     pane.empty_text = UiText(UiStringId::SequenceNoCells);
     pane.wrap_navigation = state.lifetime.sequence_endpoint_policy
@@ -2181,6 +2249,7 @@ bool RefreshSequencePane(ApplicationHost& state) noexcept {
     pane.pinned = binding != nullptr
         && binding->policy == PaneTargetPolicy::PinnedDocument;
     if (state.Workspace().cut.handle != nullptr) {
+        state.Thumbnails().RemovePane(state.Workspace().pane_ids.sequence);
         pane.target_available = true;
         pane.cut_editable = true;
         const auto* display_document = state.Documents().Find(
@@ -2322,6 +2391,7 @@ bool RefreshSequencePane(ApplicationHost& state) noexcept {
     }
     if (state.engine == nullptr || target.status != PaneTargetStatus::Ok
         || document == nullptr || !target.context.generation.has_value()) {
+        state.Thumbnails().RemovePane(state.Workspace().pane_ids.sequence);
         pane.target_text = UiText(notice == PaneTargetNotice::PinnedDocumentClosed
             ? UiStringId::PinnedClosedFollowingNoTarget
             : UiStringId::FollowingNoTarget);
@@ -2331,12 +2401,15 @@ bool RefreshSequencePane(ApplicationHost& state) noexcept {
         return false;
     }
 
-    std::vector<SequencePaneCell> cells;
-    DocumentPanesController controller(*state.engine);
-    const InkpodStatus status = controller.LoadSequence(
-        document->id, document->generation, cells);
     pane.target_available = true;
     pane.auto_sequence_truncated = document->auto_sequence_truncated;
+    InkpodSequenceCatalogInfo catalog{};
+    catalog.struct_size = sizeof(catalog);
+    const bool has_catalog = state.engine->GetSequenceCatalog(
+        document->id, document->generation, catalog);
+    const SequencePaneCatalogKey catalog_key{
+        document->id, document->generation,
+        catalog.owner_generation, catalog.sequence_revision, catalog.cell_count};
     try {
         const std::wstring name = LocatorDocumentName(*document);
         pane.target_text = UiTextWithUserText(
@@ -2346,6 +2419,39 @@ bool RefreshSequencePane(ApplicationHost& state) noexcept {
             pane.target_text = UiTextWithUserText(
                 UiStringId::PinnedClosedFollowingPrefix, name);
         }
+        const auto& current = state.Workspace().sequence_dialog.view;
+        if (has_catalog && catalog_key && current.catalog == catalog_key
+            && current.cells.size() == catalog.cell_count
+            && (catalog.active_index == UINT32_MAX
+                || catalog.active_index < current.cells.size())) {
+            std::wstring active_name = catalog.active_index == UINT32_MAX
+                ? std::wstring{} : current.cells[catalog.active_index].name;
+            SequencePaneSelection selection{
+                catalog_key, catalog.active_index,
+                pane.target_text + L" — " + std::to_wstring(catalog.cell_count)
+                    + UiText(UiStringId::CellsSuffix),
+                pane.pinned, pane.auto_sequence_truncated, pane.wrap_navigation};
+            if (UpdateSequencePaneSelection(
+                    state.Workspace().sequence_palette, std::move(selection))) {
+                if (document->id == state.routing.targets.DocumentSession()) {
+                    state.Workspace().panes.sequence_count =
+                        static_cast<std::uint32_t>(catalog.cell_count);
+                    state.Workspace().animation.active_sequence_index =
+                        catalog.active_index == UINT32_MAX ? 0U : catalog.active_index;
+                    state.Workspace().animation.active_sequence_name = std::move(active_name);
+                }
+                return true;
+            }
+        }
+
+        // Catalog changes or discarded thumbnail keys require a full refresh.
+        // The ordinary selection path above never reads source metadata/pixels,
+        // removes thumbnails, rebuilds labels, or changes pane geometry.
+        state.Thumbnails().RemovePane(state.Workspace().pane_ids.sequence);
+        std::vector<SequencePaneCell> cells;
+        DocumentPanesController controller(*state.engine);
+        const InkpodStatus status = controller.LoadSequence(
+            document->id, document->generation, cells);
         if (status != INKPOD_STATUS_OK) {
             pane.empty_text = UiText(UiStringId::SequenceLoadFailed);
             UpdateSequencePaneDialog(
@@ -2428,6 +2534,35 @@ bool RefreshSequencePane(ApplicationHost& state) noexcept {
                 cell.thumbnail_key,
                 cell.info.document_uuid_high,
                 cell.info.document_uuid_low});
+        }
+        InkpodSequenceCatalogInfo after_catalog{};
+        after_catalog.struct_size = sizeof(after_catalog);
+        if (has_catalog && catalog_key
+            && state.engine->GetSequenceCatalog(
+                document->id, document->generation, after_catalog)
+            && after_catalog.owner_generation == catalog.owner_generation
+            && after_catalog.sequence_revision == catalog.sequence_revision
+            && after_catalog.cell_count == pane.cells.size()
+            && after_catalog.cell_count == catalog.cell_count
+            && (after_catalog.active_index == UINT32_MAX
+                || after_catalog.active_index < pane.cells.size())) {
+            pane.catalog = catalog_key;
+            pane.active_index = after_catalog.active_index;
+            // A later Put may evict an earlier item in this same batch. Verify
+            // the whole batch once before enabling constant-work selection.
+            const bool all_thumbnails_present = std::all_of(
+                pane.cells.begin(), pane.cells.end(), [&state](const auto& cell) {
+                    inkpod::windows::ui::ThumbnailImageView image{};
+                    return state.Thumbnails().Peek(cell.thumbnail_key, image)
+                        && image.layout == ThumbnailPixelLayout::Rgba8
+                        && image.width == cell.thumbnail_width
+                        && image.height == cell.thumbnail_height
+                        && image.stride_bytes == cell.thumbnail_stride_bytes;
+                });
+            if (all_thumbnails_present) {
+                pane.thumbnail_generation =
+                    state.Thumbnails().InvalidationGeneration(ThumbnailKind::Sequence);
+            }
         }
         if (document->id == state.routing.targets.DocumentSession()) {
             state.Workspace().panes.sequence_count =
@@ -2602,7 +2737,7 @@ bool PublishSubpaletteSnapshot(
     }
     ++workspace.subpalette_snapshot_revision;
     return sink->Submit(renderer::SnapshotEnvelope{
-        sink->Route(), snapshot_view.revision, transform.view_revision, snapshot});
+        sink->Route(), snapshot_view.revision, transform.view_revision, snapshot, 0U, 0U});
 }
 
 bool RebindSubpaletteImageRoute(WorkspaceWindow& workspace) noexcept {
@@ -2775,7 +2910,7 @@ bool InstallSubpaletteSources(
                 bool accepted{};
                 if (sink != nullptr) {
                     accepted = sink->Submit(renderer::SnapshotEnvelope{sink->Route(),
-                        snapshot_view.revision, transform.view_revision, snapshot});
+                        snapshot_view.revision, transform.view_revision, snapshot, 0U, 0U});
                     snapshot = nullptr; // Submit consumes ownership even on rejection.
                 }
                 if (!accepted) {
@@ -2852,24 +2987,8 @@ void RegisterSubpaletteSample(ApplicationHost& state) noexcept {
     if (!workspace.subpalette_sample_available) {
         return;
     }
-    std::vector<InkpodColorValue> colors;
-    try {
-        colors = workspace.panes.palette_colors;
-        if (colors.size() >= 4096U) {
-            return;
-        }
-        colors.push_back(workspace.subpalette_sample);
-    } catch (const std::bad_alloc&) {
-        return;
-    }
     const CommandContext target = state.routing.targets.Capture();
-    if (ReplacePalette(state, target, colors) == INKPOD_STATUS_OK) {
-        workspace.panes.selected_palette_index =
-            static_cast<std::uint32_t>(colors.size() - 1U);
-        workspace.panes.palette_group =
-            workspace.panes.selected_palette_index / 10U;
-        (void)RefreshColorPanes(state);
-    }
+    (void)RegisterPaletteColor(state, target, workspace.subpalette_sample);
 }
 
 void PerformSubpalettePaneAction(
@@ -3540,6 +3659,7 @@ void RefreshDockPaneViews(ApplicationHost& state) noexcept {
         state.Workspace().panes.color_chart_colors,
         state.Workspace().panes.color_chart_names,
         state.Workspace().panes.palette_group,
+        state.Workspace().panes.selected_palette_index,
         state.Workspace().panes.color_chart_page,
         state.Workspace().panes.color_chart_locked);
 }
@@ -3557,6 +3677,27 @@ InkpodStatus ReplacePalette(
         context.document_session.value(),
         context.generation.value(),
         colors);
+}
+
+InkpodStatus RegisterPaletteColor(
+    ApplicationHost& state,
+    const CommandContext& context,
+    const InkpodColorValue& color) noexcept {
+    if (state.engine == nullptr || !context.document_session.has_value()
+        || !context.generation.has_value()) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    ColorPanesController controller(*state.engine);
+    std::uint32_t index{};
+    const InkpodStatus status = controller.RegisterPaletteColor(
+        context.document_session.value(), context.generation.value(), color, index);
+    if (status == INKPOD_STATUS_OK) {
+        state.Workspace().panes.selected_palette_index = index;
+        state.Workspace().panes.palette_group = index / 10U;
+        (void)RefreshColorPanes(state);
+        RefreshDockPaneViews(state);
+    }
+    return status;
 }
 
 void UpdateMotionState(
@@ -4977,7 +5118,8 @@ bool InitializeEditorUpdate(
     ApplicationHost& state,
     InkpodEditorUpdateKind kind,
     InkpodEditorStateUpdate& update) noexcept {
-    if (state.engine == nullptr) {
+    if (state.engine == nullptr
+        || !state.SequenceEditReady(state.routing.targets.Capture())) {
         return false;
     }
     const DocumentSessionId session = state.Document().id;
@@ -8975,7 +9117,7 @@ bool ChangeToolOptionsDetail(
     UINT command,
     const inkpod::windows::ui::panes::ToolOptionsDetailModel& value,
     bool execute) noexcept {
-    auto* state = ActivateWorkspaceContext(context);
+    auto* state = ActivateWorkspaceEditContext(context);
     if (state == nullptr) return false;
     using DetailKind =
         inkpod::windows::ui::panes::ToolOptionsDetailKind;
@@ -12105,11 +12247,34 @@ void CompleteSequenceSwitchAuthority(ApplicationHost& state,
     }
 }
 
+bool FenceSequenceCanvases(ApplicationHost& state, DocumentSession& document,
+    bool pending, std::uint64_t required_revision, std::uint64_t required_epoch) noexcept {
+    document.sequence_activation_pending = pending;
+    document.sequence_required_present_revision = required_revision;
+    document.sequence_required_present_epoch = required_epoch;
+    for (std::size_t index = 0U; index < document.ViewCount(); ++index) {
+        const auto* view = document.ViewAt(index);
+        auto* workspace = view == nullptr ? nullptr : state.WorkspaceForView(view->id);
+        auto* group = workspace == nullptr ? nullptr : workspace->editors.FindByView(view->id);
+        if (group != nullptr && group->ActiveView() == view->id) {
+            if (!renderer::SetCanvasSequenceFence(
+                    group->canvas, pending, required_revision, required_epoch)
+                && pending) {
+                (void)FenceSequenceCanvases(state, document, false,
+                    required_revision, required_epoch);
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 InkpodStatus SwitchSequenceTarget(
     ApplicationHost& state,
     const CommandContext& context,
     std::optional<std::uint32_t> index,
-    InkpodSequenceDirection direction = 0U) noexcept try {
+    InkpodSequenceDirection direction = 0U,
+    InkpodSequenceEndpointPolicy captured_endpoint_policy = 0U) noexcept try {
     if (state.engine == nullptr || !context.document_session.has_value()
         || !context.generation.has_value()) {
         return INKPOD_STATUS_INVALID_STATE;
@@ -12121,7 +12286,26 @@ InkpodStatus SwitchSequenceTarget(
     }
     if (state.routing.sequence_switch_pending_token.load(
             std::memory_order_acquire) != 0U) {
-        return INKPOD_STATUS_INVALID_STATE;
+        if (!state.routing.sequence_navigation_pending
+            || state.routing.sequence_navigation_queue.size() >= 256U) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        InkpodSequenceCatalogInfo catalog{};
+        if (!state.engine->GetSequenceCatalog(document->id, document->generation, catalog)) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        const auto policy = captured_endpoint_policy != 0U ? captured_endpoint_policy
+            : state.lifetime.sequence_endpoint_policy == SequenceEndpointPolicy::Wrap
+            ? INKPOD_SEQUENCE_ENDPOINT_WRAP : INKPOD_SEQUENCE_ENDPOINT_STOP;
+        try {
+            state.routing.sequence_navigation_queue.push_back(inkpod::app::SequenceNavigationIntent{
+                context, index, direction, policy, catalog.sequence_revision, catalog.owner_generation});
+        } catch (const std::bad_alloc&) {
+            // A rejected new intent must not cancel the identity reservation
+            // owned by the activation that is already in flight.
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        return INKPOD_STATUS_PENDING;
     }
     const DocumentViewId previous_view =
         state.routing.targets.ActiveDocumentView();
@@ -12142,7 +12326,8 @@ InkpodStatus SwitchSequenceTarget(
         }
         step_plan.struct_size = sizeof(step_plan);
         const InkpodSequenceEndpointPolicy endpoint_policy =
-            state.lifetime.sequence_endpoint_policy
+            captured_endpoint_policy != 0U ? captured_endpoint_policy
+            : state.lifetime.sequence_endpoint_policy
                 == SequenceEndpointPolicy::Wrap
             ? INKPOD_SEQUENCE_ENDPOINT_WRAP
             : INKPOD_SEQUENCE_ENDPOINT_STOP;
@@ -12317,6 +12502,14 @@ InkpodStatus SwitchSequenceTarget(
             }
             result->token = state.routing.tokens.IssueNotification(
                 state.routing.targets.CurrentGeneration());
+            result->replace_document = true;
+            io_request.presentation_epoch = result->token.value;
+            if (!FenceSequenceCanvases(state, *document, true,
+                    document->sequence_required_present_revision,
+                    document->sequence_required_present_epoch)) {
+                state.Documents().CancelIdentityReservation(document->id);
+                return INKPOD_STATUS_CANCELLED;
+            }
             const HWND completion_window = state.Workspace().windows.window;
             state.routing.sequence_switch_pending_token.store(
                 result->token.value, std::memory_order_release);
@@ -12333,9 +12526,26 @@ InkpodStatus SwitchSequenceTarget(
                 queued = QueueFileIoWork(state, std::move(io_request),
                     [&state, result, source_dirty, completion_window, routing = &state.routing](
                         inkpod::app::FileIoResult&& completed) {
-                        result->status = completed.status;
-                        result->source_autosaved = source_dirty && completed.status == INKPOD_STATUS_OK;
-                        CompleteSequenceSwitchAuthority(state, *result);
+                        result->status = completed.status == INKPOD_STATUS_OK
+                            ? completed.presentation_status : completed.status;
+                        result->source_autosaved = source_dirty && completed.document_applied;
+                        // UUID/revision equality cannot prove a replacement: a
+                        // recovery or another source generation may reuse both.
+                        if (completed.document_applied) {
+                            result->mutation_status = INKPOD_STATUS_OK;
+                            result->activated_document = completed.document;
+                            const InkpodStatus publication_status = result->status;
+                            result->status = INKPOD_STATUS_OK;
+                            CompleteSequenceSwitchAuthority(state, *result);
+                            if (result->status == INKPOD_STATUS_OK) {
+                                result->status = publication_status;
+                            }
+                        } else {
+                            if (result->status == INKPOD_STATUS_OK) {
+                                result->status = INKPOD_STATUS_INVALID_STATE;
+                            }
+                            CompleteSequenceSwitchAuthority(state, *result);
+                        }
                         {
                             std::lock_guard lock(routing->sequence_switch_results_mutex);
                             routing->sequence_switch_result = result;
@@ -12347,11 +12557,11 @@ InkpodStatus SwitchSequenceTarget(
                                 static_cast<WPARAM>(result->token.value),
                                 static_cast<LPARAM>(result->token.generation.Value()));
                         } else {
-                            std::lock_guard lock(routing->sequence_switch_results_mutex);
-                            routing->sequence_switch_result.reset();
-                            std::uint64_t expected = result->token.value;
-                            (void)routing->sequence_switch_pending_token.compare_exchange_strong(
-                                expected, 0U, std::memory_order_acq_rel);
+                            // Keep the owned result for a surviving workspace's
+                            // notification or bounded mailbox poll.
+                            (void)state.engine->PostCompletionNotification(
+                                kSequenceSwitchCompleted, result->token.value,
+                                result->token.generation);
                         }
                         return result->status;
                     }, nullptr, {}, false);
@@ -12360,6 +12570,9 @@ InkpodStatus SwitchSequenceTarget(
             }
             if (!FileIoAccepted(queued)) {
                 state.Documents().CancelIdentityReservation(document->id);
+                (void)FenceSequenceCanvases(state, *document, false,
+                    document->sequence_required_present_revision,
+                    document->sequence_required_present_epoch);
                 std::uint64_t expected = result->token.value;
                 (void)state.routing.sequence_switch_pending_token
                     .compare_exchange_strong(
@@ -12463,6 +12676,72 @@ InkpodStatus SwitchSequenceTarget(
             || !state.Documents().ReserveIdentity(document->id, next_identity))) {
         return INKPOD_STATUS_INVALID_STATE;
     }
+    if (replace_document) {
+        auto result = std::make_shared<SequenceSwitchAsyncResult>();
+        result->context = context;
+        result->interactive_activation = true;
+        result->replace_document = true;
+        result->next_recovery_path = std::move(next_recovery_path);
+        result->request.target_document_uuid_high = prepared_plan.target_document_uuid_high;
+        result->request.target_document_uuid_low = prepared_plan.target_document_uuid_low;
+        result->request.target_source_generation = prepared_plan.target_source_generation;
+        result->request.source_document_uuid_high = prepared_plan.source_document_uuid_high;
+        result->request.source_document_uuid_low = prepared_plan.source_document_uuid_low;
+        result->request.source_generation = prepared_plan.source_generation;
+        result->token = state.routing.tokens.IssueNotification(context.generation.value());
+        state.routing.sequence_switch_pending_token.store(
+            result->token.value, std::memory_order_release);
+        state.routing.sequence_navigation_pending = true;
+        if (!FenceSequenceCanvases(state, *document, true,
+                document->sequence_required_present_revision,
+                document->sequence_required_present_epoch)) {
+            state.Documents().CancelIdentityReservation(document->id);
+            state.routing.sequence_navigation_pending = false;
+            state.routing.sequence_switch_pending_token.store(0U, std::memory_order_release);
+            return INKPOD_STATUS_CANCELLED;
+        }
+        auto* host = state.engine.get();
+        bool queued{};
+        try {
+            queued = host->Enqueue(
+            context,
+            [host, prepared_plan, result](InkpodCore* core) {
+                result->mutation_status = inkpod_core_sequence_activation_commit(
+                    core, &prepared_plan, &result->activated_document);
+                if (result->mutation_status == INKPOD_STATUS_OK
+                    && !host->SetPresentationEpoch(
+                        result->context.document_session.value(),
+                        result->context.generation.value(), result->token.value)) {
+                    return INKPOD_STATUS_INVALID_STATE;
+                }
+                return result->mutation_status;
+            },
+            true,
+            true,
+            false,
+            [host, result, routing = &state.routing](InkpodStatus completed) {
+                result->status = completed;
+                {
+                    std::lock_guard lock(routing->sequence_switch_results_mutex);
+                    routing->sequence_switch_result = result;
+                }
+                (void)host->PostCompletionNotification(
+                    kSequenceSwitchCompleted, result->token.value, result->token.generation);
+            });
+        } catch (const std::bad_alloc&) {
+            queued = false;
+        }
+        if (!queued) {
+            state.Documents().CancelIdentityReservation(document->id);
+            state.routing.sequence_navigation_pending = false;
+            state.routing.sequence_switch_pending_token.store(0U, std::memory_order_release);
+            FenceSequenceCanvases(state, *document, false,
+                document->sequence_required_present_revision,
+                document->sequence_required_present_epoch);
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        return INKPOD_STATUS_PENDING;
+    }
     InkpodDocumentInfo after{};
     after.struct_size = sizeof(after);
     InkpodStatus mutation_status = INKPOD_STATUS_INVALID_STATE;
@@ -12513,7 +12792,6 @@ InkpodStatus SwitchSequenceTarget(
                 document->id, document->generation)) {
             return INKPOD_STATUS_INVALID_STATE;
         }
-        (void)FitCanvas(state, INKPOD_VIEW_FIT);
     }
     RefreshSequencePane(state);
     (void)RefreshSubpalettePane(state);
@@ -12529,6 +12807,39 @@ InkpodStatus SwitchSequenceTarget(
         state.Documents().CancelIdentityReservation(document->id);
     }
     return INKPOD_STATUS_INVALID_STATE;
+}
+
+void DrainSequenceNavigationQueue(ApplicationHost& state) noexcept {
+    while (state.routing.sequence_switch_pending_token.load(std::memory_order_acquire) == 0U
+        && !state.routing.sequence_navigation_queue.empty()) {
+        auto intent = std::move(state.routing.sequence_navigation_queue.front());
+        state.routing.sequence_navigation_queue.pop_front();
+        InkpodSequenceCatalogInfo catalog{};
+        if (state.engine == nullptr || !intent.context.document_session.has_value()
+            || !intent.context.generation.has_value()
+            || state.routing.targets.Resolve(intent.context, inkpod::app::kDocumentViewCommandScope)
+                != CommandResolveStatus::Ok
+            || !state.engine->GetSequenceCatalog(intent.context.document_session.value(),
+                intent.context.generation.value(), catalog)
+            || catalog.sequence_revision != intent.catalog_revision
+            || catalog.owner_generation != intent.catalog_owner_generation) {
+            continue;
+        }
+        const auto previous_workspace = state.routing.targets.Workspace();
+        if (intent.context.workspace.has_value()
+            && !state.ActivateWorkspaceWindow(intent.context.workspace.value(), false)) {
+            continue;
+        }
+        const InkpodStatus status = SwitchSequenceTarget(
+            state, intent.context, intent.index, intent.direction, intent.endpoint_policy);
+        if (previous_workspace && previous_workspace != state.routing.targets.Workspace()) {
+            (void)state.ActivateWorkspaceWindow(previous_workspace, false);
+        }
+        if (!FileIoAccepted(status) && status != INKPOD_STATUS_CANCELLED) {
+            state.routing.sequence_navigation_queue.clear();
+            return;
+        }
+    }
 }
 
 void DispatchSequencePaneCommand(void* context, UINT command) noexcept {
@@ -13640,6 +13951,7 @@ bool UnregisterWorkspaceSnapshotSinks(
     }
     for (std::size_t index = 0U; index < group_count; ++index) {
         const EditorGroup* group = workspace.editors.GroupAt(index);
+        state.ObserveCanvasSequencePresentation(group->canvas);
         renderer::CancelCanvasStroke(group->canvas);
     }
     return state.engine->UnregisterSnapshotSinks(sinks.data(), group_count);
@@ -18673,22 +18985,20 @@ std::optional<LRESULT> RouteColorCommand(
                                     : INKPOD_EYEDROPPER_COMPOSITE));
             UpdateMenuState(*state);
             return 1;
-        case IDM_PALETTE_REGISTER:
+        case IDM_PALETTE_REGISTER: {
+            const InkpodStatus status = RegisterPaletteColor(
+                *state, context, state->Workspace().tools.drawing_color);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, UiText(UiStringId::Text0164));
+            }
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
         case IDM_PALETTE_DELETE:
         case IDM_PALETTE_CLEAR: {
             std::vector<InkpodColorValue> colors;
             try {
                 colors = state->Workspace().panes.palette_colors;
-                if (LOWORD(wparam) == IDM_PALETTE_REGISTER) {
-                    if (colors.size() >= 4096U) {
-                        return 0;
-                    }
-                    colors.push_back(state->Workspace().tools.drawing_color);
-                    state->Workspace().panes.selected_palette_index =
-                        static_cast<std::uint32_t>(colors.size() - 1U);
-                    state->Workspace().panes.palette_group =
-                        state->Workspace().panes.selected_palette_index / 10U;
-                } else if (LOWORD(wparam) == IDM_PALETTE_DELETE) {
+                if (LOWORD(wparam) == IDM_PALETTE_DELETE) {
                     const std::size_t index = state->Workspace().panes.selected_palette_index;
                     if (index >= colors.size()) {
                         return 0;
@@ -20751,6 +21061,36 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
             if (state == nullptr || result == nullptr) {
                 return 0;
             }
+            auto* committed_document = result->context.document_session.has_value()
+                ? state->Documents().Find(result->context.document_session.value()) : nullptr;
+            if (committed_document != nullptr
+                && committed_document->generation != result->context.generation) {
+                committed_document = nullptr;
+            }
+            if (result->interactive_activation) {
+                state->routing.sequence_navigation_pending = false;
+                if (result->mutation_status == INKPOD_STATUS_OK) {
+                    // A renderer failure cannot undo an already committed Core.
+                    // Publish the reserved path authority even in that case.
+                    const InkpodStatus publication_status = result->status;
+                    result->status = INKPOD_STATUS_OK;
+                    CompleteSequenceSwitchAuthority(*state, *result);
+                    if (result->status == INKPOD_STATUS_OK) {
+                        result->status = publication_status;
+                    }
+                } else if (committed_document != nullptr) {
+                    state->Documents().CancelIdentityReservation(committed_document->id);
+                }
+            }
+            if (result->replace_document && committed_document != nullptr) {
+                (void)FenceSequenceCanvases(*state, *committed_document, false,
+                    result->mutation_status == INKPOD_STATUS_OK
+                        ? result->activated_document.document_revision
+                        : committed_document->sequence_required_present_revision,
+                    result->mutation_status == INKPOD_STATUS_OK
+                        ? result->token.value
+                        : committed_document->sequence_required_present_epoch);
+            }
             const auto previous_view = state->routing.targets.ActiveDocumentView();
             const auto previous_workspace = state->routing.targets.Workspace();
             std::uint64_t expected = result->token.value;
@@ -20776,19 +21116,39 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                 ? state->Documents().Find(
                     result->context.document_session.value())
                 : nullptr;
-            if (result->status == INKPOD_STATUS_OK && document != nullptr) {
+            const bool core_replaced = result->replace_document
+                && result->mutation_status == INKPOD_STATUS_OK;
+            if ((result->status == INKPOD_STATUS_OK || core_replaced) && document != nullptr) {
                 if (completion_workspace != nullptr) {
                     (void)state->ActivateWorkspaceWindow(
                         completion_workspace->id, false);
                 }
-                if (result->context.document_view.has_value()) {
+                if (result->context.document_view.has_value()
+                    && result->context.document_view.value()
+                        != state->routing.targets.ActiveDocumentView()) {
                     (void)ActivateDocumentTab(
                         *state, result->context.document_view.value());
                 }
-                ResetUiForNewActiveDocument(*state);
+                ResetUiForNewActiveDocument(*state, true);
                 (void)state->RefreshEditorPresentation(
-                    document->id, document->generation);
-                (void)FitCanvas(*state, INKPOD_VIEW_FIT);
+                    document->id, document->generation, !result->interactive_activation);
+                if (core_replaced && result->status != INKPOD_STATUS_OK) {
+                    // Publication failure cannot leave tools targeting the old
+                    // document. Reconcile from the committed metadata and retry
+                    // its frame once; the input fence waits for actual Present.
+                    try {
+                        (void)state->engine->Enqueue(result->context,
+                            [host = state->engine.get(), context = result->context,
+                                epoch = result->token.value](InkpodCore*) {
+                                return host->SetPresentationEpoch(
+                                    context.document_session.value(),
+                                    context.generation.value(), epoch)
+                                    ? INKPOD_STATUS_OK : INKPOD_STATUS_INVALID_STATE;
+                            }, true, true, false);
+                    } catch (const std::bad_alloc&) {
+                        // Keep the input fence until a later successful frame.
+                    }
+                }
             }
             if (completion_workspace != nullptr) {
                 completion_workspace->animation.smoke_sequence_switch_status =
@@ -20797,17 +21157,20 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                     completion_workspace->id, false);
             }
             RefreshSequencePane(*state);
-            (void)RefreshSubpalettePane(*state);
-            RefreshTreePane(*state);
-            RefreshLightTablePane(*state);
-            RefreshColorPanes(*state);
-            UpdateMenuState(*state);
+            if (state->routing.sequence_navigation_queue.empty()) {
+                (void)RefreshSubpalettePane(*state);
+                RefreshTreePane(*state);
+                RefreshLightTablePane(*state);
+                RefreshColorPanes(*state);
+                UpdateMenuState(*state);
+            }
             if (previous_view && previous_view != state->routing.targets.ActiveDocumentView()) {
                 (void)state->ActivateDocumentView(previous_view);
             } else if (previous_workspace
                 && previous_workspace != state->routing.targets.Workspace()) {
                 (void)state->ActivateWorkspaceWindow(previous_workspace, false);
             }
+            DrainSequenceNavigationQueue(*state);
             return 0;
         }
         case inkpod::app::kCoreStateChanged:
@@ -20821,6 +21184,14 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                     && notification.kind
                         == inkpod::app::CoreNotificationKind::StateChanged
                     && targets_open_document(notification.context);
+                const auto* pending_document = target_valid
+                        && notification.context.document_session.has_value()
+                    ? state->Documents().Find(notification.context.document_session.value()) : nullptr;
+                if (pending_document != nullptr && pending_document->sequence_activation_pending) {
+                    // Completion publishes authority and refreshes this target once.
+                    // Do not synchronously query Core while its snapshot is building.
+                    return 0;
+                }
                 if (target_valid && notification.context.workspace.has_value()) {
                     (void)state->ActivateWorkspaceWindow(
                         notification.context.workspace.value(), false);
@@ -21289,6 +21660,31 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
 }
 
 
+namespace {
+
+void DrainSequenceSwitchCompletion(ApplicationHost& state, HWND window) noexcept {
+    // Completion owns its result in a mailbox before posting a wake-up.
+    // If PostMessage fails or that HWND closes, another live workspace's
+    // bounded poll still completes authority and releases the input fence.
+    std::uint64_t completion_token{};
+    std::uint64_t completion_generation{};
+    {
+        std::lock_guard lock(state.routing.sequence_switch_results_mutex);
+        const auto& result = state.routing.sequence_switch_result;
+        if (result != nullptr) {
+            completion_token = result->token.value;
+            completion_generation = result->token.generation.Value();
+        }
+    }
+    if (completion_token != 0U) {
+        (void)RouteCoreNotificationMessage(&state, window, kSequenceSwitchCompleted,
+            static_cast<WPARAM>(completion_token),
+            static_cast<LPARAM>(completion_generation));
+    }
+}
+
+}  // namespace
+
 std::optional<LRESULT> RouteCachedProgressTimerMessage(
     ApplicationHost* state,
     HWND window,
@@ -21312,6 +21708,7 @@ std::optional<LRESULT> RouteCachedProgressTimerMessage(
         // Poll only dispatches ready UI callbacks; an unfinished Core future
         // is never waited here. A callback may close or switch workspaces.
         state->file_io.Poll();
+        DrainSequenceSwitchCompletion(*state, window);
         owner = state->FindWorkspace(workspace_id);
         if (owner != nullptr && owner->windows.window == window) {
             RefreshFileJobProgress(state->file_io, workspace_id,

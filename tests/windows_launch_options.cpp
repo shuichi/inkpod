@@ -91,6 +91,20 @@ int main() {
         return 14;
     }
 
+    const wchar_t* sequence_performance[]{
+        L"inkpod.exe", L"--sequence-performance-smoke-test"};
+    if (Parse(sequence_performance, 2, options) != LaunchParseStatus::Ok
+        || options.mode != LaunchMode::SequencePerformanceSmoke
+        || !options.document_paths.empty()) {
+        return 21;
+    }
+    const wchar_t* conflicting_sequence_performance[]{
+        L"inkpod.exe", L"--sequence-performance-smoke-test", L"--smoke-test"};
+    if (Parse(conflicting_sequence_performance, 3, options)
+        != LaunchParseStatus::InvalidArguments) {
+        return 22;
+    }
+
     const wchar_t* option_like_name[]{
         L"inkpod.exe", L"C:\\cells\\--smoke-test drawing.inkpod"};
     if (Parse(option_like_name, 2, options) != LaunchParseStatus::Ok

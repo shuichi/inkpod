@@ -58,6 +58,34 @@ CoreHost* DocumentSession::Core() const noexcept {
     return core_;
 }
 
+bool DocumentSession::AcknowledgeSequencePresentation(
+    DocumentSessionId presented_session,
+    Generation presented_generation,
+    DocumentViewId presented_view,
+    std::uint64_t presented_document_revision,
+    std::uint64_t presented_epoch) noexcept {
+    if (!id || !generation || sequence_activation_pending
+        || presented_session != id || presented_generation != generation
+        || FindView(presented_view) == nullptr || presented_epoch == 0U
+        || presented_epoch != sequence_required_present_epoch
+        || presented_document_revision < sequence_required_present_revision) {
+        return false;
+    }
+    sequence_presented_session_ = presented_session;
+    sequence_presented_generation_ = presented_generation;
+    sequence_presented_revision_ = presented_document_revision;
+    sequence_presented_epoch_ = presented_epoch;
+    return true;
+}
+
+bool DocumentSession::HasSequencePresentationAcknowledgement() const noexcept {
+    return !sequence_activation_pending && sequence_required_present_epoch != 0U
+        && sequence_presented_session_ == id
+        && sequence_presented_generation_ == generation
+        && sequence_presented_epoch_ == sequence_required_present_epoch
+        && sequence_presented_revision_ >= sequence_required_present_revision;
+}
+
 void DocumentSession::ResetViews(
     DocumentViewId initial_view,
     Generation view_generation,

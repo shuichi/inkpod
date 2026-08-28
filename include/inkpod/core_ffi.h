@@ -66,7 +66,8 @@
 extern "C" {
 #endif
 
-#define INKPOD_ABI_VERSION UINT32_C(23)
+#define INKPOD_ABI_VERSION UINT32_C(24)
+#define INKPOD_SNAPSHOT_SOURCE_SEQUENCE_PRISTINE UINT32_C(1)
 #define INKPOD_FEATURE_NONE UINT64_C(0)
 
 /** @brief InkScript ABI record の exact-current version。 */
@@ -1650,6 +1651,9 @@ typedef struct InkpodResourceUsage {
     uint64_t sequence_source_bytes;
     uint64_t sequence_source_tile_count;
     uint64_t thumbnail_cache_bytes;
+    uint64_t sequence_render_cache_bytes;
+    uint64_t sequence_render_cache_source_count;
+    uint64_t sequence_render_cache_tile_count;
 } InkpodResourceUsage;
 
 /** @brief 100F/基準/作画/安全/撮影/最大クローズ frame と margin を更新する borrowed 入力。 */
@@ -2283,6 +2287,19 @@ typedef struct InkpodSnapshotTransform {
     uint32_t document_width;
     uint32_t document_height;
 } InkpodSnapshotTransform;
+
+/* Runtime-only source namespace captured by this immutable snapshot. A zero
+ * flags value has all identity fields zero. SEQUENCE_PRISTINE identifies the
+ * unedited immutable sequence source, not merely a clean/savepoint document.
+ * owner_generation is process-local and must never be persisted or replayed. */
+typedef struct InkpodSnapshotSourceIdentity {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t document_uuid_high;
+    uint64_t document_uuid_low;
+    uint64_t source_generation;
+    uint64_t owner_generation;
+} InkpodSnapshotSourceIdentity;
 
 /** @brief snapshot 内 guide の immutable borrowed record。 */
 typedef struct InkpodSnapshotGuide {
@@ -3350,6 +3367,21 @@ typedef struct InkpodSequenceCellInfo {
     uint64_t name_capacity;
     uint64_t name_bytes;
 } InkpodSequenceCellInfo;
+
+/* Read-only catalog state. No catalog returns zero revision/owner/count and
+ * INDEX_NONE. owner_generation is runtime-only; zero disables cache reuse. */
+typedef struct InkpodSequenceCatalogInfo {
+    uint32_t struct_size;
+    uint32_t active_index;
+    uint64_t sequence_revision;
+    uint64_t owner_generation;
+    uint64_t cell_count;
+} InkpodSequenceCatalogInfo;
+
+/* Core owner thread only; no allocation, pixel access or mutation. */
+InkpodStatus inkpod_core_sequence_catalog_get(
+    InkpodCore* core,
+    InkpodSequenceCatalogInfo* output);
 
 /** @brief sequence thumbnail を受け取る caller-owned size-query 対応 buffer。 */
 typedef struct InkpodSequenceThumbnailBuffer {
@@ -6351,6 +6383,14 @@ InkpodStatus inkpod_snapshot_get_transform(
     const InkpodSnapshot* snapshot,
     InkpodSnapshotTransform* out_transform);
 
+/* Copies source provenance without reading pixel payloads. May run on the
+ * renderer thread while snapshot remains live and is not concurrently released.
+ * output must be aligned, writable, non-overlapping and advertise its full size.
+ * No caller ownership of identity or source buffers is created. */
+InkpodStatus inkpod_snapshot_get_source_identity(
+    const InkpodSnapshot* snapshot,
+    InkpodSnapshotSourceIdentity* output);
+
 /**
  * @brief snapshot の overlay/grid と borrowed guide span を取得する。
  * @par 契約
@@ -7032,6 +7072,8 @@ typedef struct InkpodIoCacheInfo {
     uint64_t physical_reads;
     uint64_t decodes;
     uint64_t cache_hits;
+    uint64_t sequence_render_allocations;
+    uint64_t sequence_render_bytes;
 } InkpodIoCacheInfo;
 
 /** Null config uses available parallelism clamped to 1..8 workers, 10,000 images,

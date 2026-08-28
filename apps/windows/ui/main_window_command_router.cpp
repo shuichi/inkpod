@@ -4,6 +4,7 @@
 
 #include "app/application_host.h"
 #include "dialogs/history_visualization_dialog.h"
+#include "app/resource.h"
 
 namespace inkpod::windows::ui::runtime {
 
@@ -136,6 +137,13 @@ std::optional<LRESULT> IssueCommand(
         || state->routing.targets.Resolve(
                app::CommandRequest{command, context}, required)
             != app::CommandResolveStatus::Ok) {
+        return LRESULT{0};
+    }
+    const bool navigation = command == IDM_SEQ_PREVIOUS || command == IDM_SEQ_NEXT
+        || command == IDM_SEQ_GOTO;
+    if (!navigation && command_state->owner != CommandStateOwner::Workspace
+        && command_state->owner != CommandStateOwner::Application
+        && !state->SequenceEditReady(context)) {
         return LRESULT{0};
     }
     if (context.document_view.has_value()

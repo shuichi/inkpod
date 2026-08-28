@@ -582,7 +582,9 @@ foreach(REQUIRED IN ITEMS
         "timer_id == inkpod::app::kFileIoPollTimer"
         "auto* owner = state->WorkspaceForWindow(window);"
         "const WorkspaceWindowId workspace_id = owner->id;"
-        "state->file_io.Poll(); owner = state->FindWorkspace(workspace_id); if (owner != nullptr && owner->windows.window == window) { RefreshFileJobProgress(state->file_io, workspace_id, owner->windows.status_bar, owner->job_progress_state); }"
+        "state->file_io.Poll(); DrainSequenceSwitchCompletion(*state, window); owner = state->FindWorkspace(workspace_id); if (owner != nullptr && owner->windows.window == window) { RefreshFileJobProgress(state->file_io, workspace_id, owner->windows.status_bar, owner->job_progress_state); }"
+        "std::lock_guard lock(state.routing.sequence_switch_results_mutex); const auto& result = state.routing.sequence_switch_result;"
+        "if (completion_token != 0U) { (void)RouteCoreNotificationMessage(&state, window, kSequenceSwitchCompleted, static_cast<WPARAM>(completion_token), static_cast<LPARAM>(completion_generation)); }"
         "token->context.workspace == workspace_id && ResolveCommandTimer(*state, window, timer_id).has_value()"
         "RefreshJobProgress(owner->windows.status_bar, owner->job_progress_state)")
     string(FIND "${RUNTIME_COMPACT}" "${REQUIRED}" OFFSET)

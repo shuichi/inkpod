@@ -31,10 +31,13 @@ pub struct RenderTile {
     origin: DocumentPointI32,
     size: DocumentSizeU32,
     stride_bytes: u32,
-    pixels: Arc<[u8]>,
+    // Keeping the Vec allocation avoids a second full tile allocation/copy
+    // when publishing immutable ownership. Only shared slices are exposed.
+    pixels: Arc<Vec<u8>>,
     // Reference-only derived pixels remain charged while any tile clone lives.
     // This runtime ownership does not participate in equality, digests, or IDs.
     _reference_lease: Option<inkpod_io::DecodedLease>,
+    sequence_render_reservation: Option<Arc<animation::SequenceRenderReservation>>,
     source_revision: RenderRevision,
     tile_revision: RenderRevision,
 }
@@ -75,8 +78,9 @@ impl RenderTile {
             origin,
             size,
             stride_bytes,
-            pixels: Arc::from(pixels),
+            pixels: Arc::new(pixels),
             _reference_lease: lease,
+            sequence_render_reservation: None,
             source_revision: revision,
             tile_revision: revision,
         })
@@ -128,6 +132,25 @@ impl RenderTile {
     #[must_use]
     pub const fn tile_revision(&self) -> u64 {
         self.tile_revision.get()
+    }
+
+    pub(crate) fn retain_sequence_reservation(
+        &mut self,
+        reservation: Arc<animation::SequenceRenderReservation>,
+    ) {
+        self.sequence_render_reservation = Some(reservation);
+    }
+
+    pub(crate) fn has_sequence_reservation(&self) -> bool {
+        self.sequence_render_reservation.is_some()
+    }
+
+    pub(crate) fn sequence_payload_is_exclusive(&self) -> bool {
+        Arc::strong_count(&self.pixels) == 1
+    }
+
+    pub(crate) fn assign_sequence_tile_revision(&mut self, revision: RenderRevision) {
+        self.tile_revision = revision;
     }
 }
 
@@ -218,7 +241,7 @@ impl RenderAdjustmentLut {
 /// document coordinates. `view()` is the only document-to-device transform and
 /// follows `device = flipped_document * zoom + pan`; pan and viewport use client
 /// device pixels. Core does not apply OS DPI to that Canvas transform.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct RenderSnapshot {
     revision: RenderRevision,
     feature_flags: u64,
@@ -232,6 +255,24 @@ pub struct RenderSnapshot {
     shooting_frames: Vec<ShootingFrameInfo>,
     vanishing_points: Vec<VanishingPointInfo>,
     radial_guides: Vec<RenderRadialGuide>,
+    sequence_render_source: Option<SequenceRenderSourceIdentity>,
+}
+
+impl PartialEq for RenderSnapshot {
+    fn eq(&self, other: &Self) -> bool {
+        self.revision == other.revision
+            && self.feature_flags == other.feature_flags
+            && self.view == other.view
+            && self.document_size == other.document_size
+            && self.guides == other.guides
+            && self.grid == other.grid
+            && self.tiles == other.tiles
+            && self.render_passes == other.render_passes
+            && self.adjustment_luts == other.adjustment_luts
+            && self.shooting_frames == other.shooting_frames
+            && self.vanishing_points == other.vanishing_points
+            && self.radial_guides == other.radial_guides
+    }
 }
 
 impl RenderSnapshot {
@@ -262,6 +303,7 @@ impl RenderSnapshot {
             shooting_frames: Vec::new(),
             vanishing_points: Vec::new(),
             radial_guides: Vec::new(),
+            sequence_render_source: None,
         }
     }
 
@@ -275,6 +317,17 @@ impl RenderSnapshot {
     #[must_use]
     pub const fn feature_flags(&self) -> u64 {
         self.feature_flags
+    }
+
+    /// Identifies the pristine immutable sequence source used by this snapshot.
+    ///
+    /// Edited, restored, preview, alpha, and color-check snapshots return `None`.
+    /// A normal-save savepoint alone never proves source provenance. This
+    /// process-local cache identity does not participate in snapshot equality,
+    /// canonical digests, document revisions, or persistent state.
+    #[must_use]
+    pub const fn sequence_render_source(&self) -> Option<SequenceRenderSourceIdentity> {
+        self.sequence_render_source
     }
 
     /// Returns the immutable view transform captured with the snapshot.
@@ -452,6 +505,8 @@ impl Core {
     /// render-cache revisions but not document/view revisions, history, or dirty state.
     #[must_use]
     pub fn build_snapshot(&mut self) -> RenderSnapshot {
+        let (sequence_render_source, sequence_reservation) =
+            self.prepare_sequence_render_snapshot();
         let mut cache = std::mem::take(&mut self.render_cache);
         let Some(document) = self
             .active_stroke
@@ -489,6 +544,7 @@ impl Core {
                 shooting_frames: Vec::new(),
                 vanishing_points: Vec::new(),
                 radial_guides: Vec::new(),
+                sequence_render_source: None,
             };
         };
         let snapshot_revision = self
@@ -566,7 +622,6 @@ impl Core {
         }
         coords.sort_unstable();
         coords.dedup();
-        let mut tiles = Vec::with_capacity(coords.len());
         for coord in &coords {
             let source_revision = revision_max_tile_source_revision(document, *coord);
             let cache_key = (0, *coord);
@@ -591,11 +646,11 @@ impl Core {
                     cache.remove(&cache_key);
                 }
             }
-            if let Some(tile) = cache.get(&cache_key) {
-                tiles.push(tile.clone());
-            }
         }
         cache.retain(|(band, coord), _| *band == 0 && coords.binary_search(coord).is_ok());
+        self.sequence_render_cache
+            .finish(sequence_render_source, sequence_reservation, &mut cache);
+        let tiles: Vec<_> = cache.values().cloned().collect();
         let document_size = DocumentSizeU32::new(document.width, document.height);
         self.render_cache = cache;
         let render_passes = (!tiles.is_empty())
@@ -609,7 +664,7 @@ impl Core {
             })
             .into_iter()
             .collect();
-        RenderSnapshot {
+        let snapshot = RenderSnapshot {
             revision: snapshot_revision,
             feature_flags,
             view: self.view,
@@ -626,7 +681,10 @@ impl Core {
                 .unwrap_or_default(),
             vanishing_points: visible_vanishing_point_infos(document),
             radial_guides: build_radial_guides(document, self.view),
-        }
+            sequence_render_source,
+        };
+        self.schedule_sequence_render_neighbors();
+        snapshot
     }
 
     /// Builds an immutable read-only snapshot of the registered subpalette cell.
@@ -705,6 +763,7 @@ impl Core {
             shooting_frames: Vec::new(),
             vanishing_points: Vec::new(),
             radial_guides: Vec::new(),
+            sequence_render_source: None,
         })
     }
 }
@@ -714,7 +773,10 @@ impl Core {
 /// This deliberately preserves the original performance contract: only scalar
 /// revisions of visible plane tiles, the selection tile, and the Light Table
 /// source are inspected while validating a cached composition.
-fn revision_max_tile_source_revision(document: &CellDocument, coord: TileCoord) -> RenderRevision {
+pub(super) fn revision_max_tile_source_revision(
+    document: &CellDocument,
+    coord: TileCoord,
+) -> RenderRevision {
     let source_revision = document
         .layers
         .iter()
@@ -1391,8 +1453,9 @@ fn render_tile_from_straight_rgba(
         },
         size: DocumentSizeU32::new(width, height),
         stride_bytes: width.checked_mul(4)?,
-        pixels: Arc::from(pixels),
+        pixels: Arc::new(pixels),
         _reference_lease: None,
+        sequence_render_reservation: None,
         source_revision,
         tile_revision,
     })
@@ -1541,8 +1604,9 @@ pub(super) fn compose_tile(
         },
         size: DocumentSizeU32::new(width, height),
         stride_bytes: stride,
-        pixels: Arc::from(pixels),
+        pixels: Arc::new(pixels),
         _reference_lease: None,
+        sequence_render_reservation: None,
         source_revision,
         tile_revision,
     })
@@ -1590,8 +1654,9 @@ fn compose_reference_tile(
         },
         size: DocumentSizeU32::new(width, height),
         stride_bytes: stride,
-        pixels: Arc::from(pixels),
+        pixels: Arc::new(pixels),
         _reference_lease: None,
+        sequence_render_reservation: None,
         source_revision,
         tile_revision,
     })
@@ -1965,11 +2030,20 @@ mod tests {
         }
         let validation_call_graph =
             format!("{build_snapshot_body}\n{helper_body}").replace("\r\n", "\n");
+        // Audited 2026-08-28 for the approved immutable sequence cache:
+        // 6ff0bb8ba0871c57d848f28b79984086121ff3d6299b7a1ba8a3481becce88f8
+        // -> 8cd12f127681abaef04b370e8b0a7f54df520b840c502b636573a908b555f2cb.
+        // prepare/finish inspect provenance and tile geometry, restore/clone Arc
+        // metadata, and attach pre-reserved lifetime charges. Neighbor scheduling
+        // submits at most two immutable preparations; only those cold workers
+        // compose payloads. revision-max and the existing workloads/envelopes
+        // are unchanged. Warm revisit and prepared-neighbor tests additionally
+        // require zero foreground payload accesses, alongside the view-only gate.
         assert_eq!(
             blake3::hash(validation_call_graph.as_bytes())
                 .to_hex()
                 .to_string(),
-            "6ff0bb8ba0871c57d848f28b79984086121ff3d6299b7a1ba8a3481becce88f8",
+            "8cd12f127681abaef04b370e8b0a7f54df520b840c502b636573a908b555f2cb",
             "primary snapshot validation call graph changed; audit payload/hash access before updating this lock"
         );
     }
@@ -2100,6 +2174,97 @@ mod tests {
         }
         assert_eq!(core.next_render_tile_revision, next_render_revision);
         assert_eq!(snapshot_payload_access_count(), 0);
+    }
+
+    fn sequence_snapshot_core() -> Core {
+        let mut core = Core::new();
+        core.new_cell_with_uuid(128, 64, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI, 0x6b00)
+            .unwrap();
+        let cells = (1..=3)
+            .map(|index| {
+                let raster = inkpod_format::CommonRaster::new(
+                    128,
+                    64,
+                    PixelFormat::StraightRgba8,
+                    Some(DEFAULT_DPI_MILLI),
+                    Some(DEFAULT_DPI_MILLI),
+                    [index as u8, 20, 30, 255].repeat(128 * 64),
+                )
+                .unwrap();
+                SequenceCellSource::from_common_raster(
+                    format!("cell{index}.png"),
+                    0x6b00 + index,
+                    &raster,
+                )
+                .unwrap()
+            })
+            .collect();
+        core.set_sequence(cells).unwrap();
+        core.sequence_activate(0).unwrap();
+        core
+    }
+
+    #[test]
+    fn sequence_revisit_cache_hits_do_not_read_payloads() {
+        let mut core = sequence_snapshot_core();
+        reset_snapshot_payload_access_count();
+        let first = core.build_snapshot();
+        assert!(snapshot_payload_access_count() > 0);
+        core.sequence_activate(1).unwrap();
+        let second = core.build_snapshot();
+        let next_render_revision = core.next_render_tile_revision;
+        reset_snapshot_payload_access_count();
+        for index in 0..128 {
+            core.sequence_activate(index % 2).unwrap();
+            let snapshot = core.build_snapshot();
+            let original = if index % 2 == 0 { &first } else { &second };
+            for (tile, expected) in snapshot.tiles().iter().zip(original.tiles()) {
+                assert_eq!(tile.pixels().as_ptr(), expected.pixels().as_ptr());
+                assert_eq!(tile.tile_revision(), expected.tile_revision());
+            }
+        }
+        assert_eq!(core.next_render_tile_revision, next_render_revision);
+        assert_eq!(snapshot_payload_access_count(), 0);
+    }
+
+    #[test]
+    fn prepared_sequence_neighbor_first_visit_does_not_read_foreground_payloads() {
+        let manager = inkpod_io::IoManager::new(inkpod_io::IoConfig {
+            worker_count: 1,
+            ..inkpod_io::IoConfig::default()
+        })
+        .unwrap();
+        let mut core = sequence_snapshot_core();
+        core.sequence_activate(1).unwrap();
+        core.bind_file_io(manager.clone()).unwrap();
+        let center = core.build_snapshot();
+        assert_eq!(
+            center.sequence_render_source().unwrap().document_uuid,
+            0x6b02
+        );
+        // A sentinel on this one-worker FIFO proves both earlier preparations
+        // completed. No timing threshold substitutes for completion.
+        let barrier = manager.submit(|_| Ok(())).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        loop {
+            if let Some(result) = barrier.try_take() {
+                result.unwrap();
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "sequence preparation stalled"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        reset_snapshot_payload_access_count();
+        core.sequence_activate(2).unwrap();
+        let next = core.build_snapshot();
+        assert_eq!(next.sequence_render_source().unwrap().document_uuid, 0x6b03);
+        assert_eq!(&next.tiles()[0].pixels()[..4], &[30, 20, 3, 255]);
+        assert_eq!(snapshot_payload_access_count(), 0);
+        assert_eq!(core.resource_usage().sequence_render_cache_source_count, 2);
+        manager.shutdown_and_wait();
     }
 
     #[test]

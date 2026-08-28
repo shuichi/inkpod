@@ -32,6 +32,8 @@ pub unsafe extern "C" fn inkpod_io_manager_get_cache_info(
             physical_reads: stats.physical_reads,
             decodes: stats.decodes,
             cache_hits: stats.cache_hits,
+            sequence_render_allocations: stats.sequence_render_allocations,
+            sequence_render_bytes: stats.sequence_render_bytes,
         };
         // SAFETY: Complete writable output validated above.
         unsafe { out_info.write(info) };

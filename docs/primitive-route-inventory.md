@@ -55,6 +55,8 @@ route|rust|asset-data-plane|rust-format|inkpod_format::read_cut_descriptor inkpo
 route|rust|document-primitive|rust-core|Core::apply_shooting_frame_preview Core::edit_shooting_frame
 route|rust|transient-preview-stroke|rust-core|Core::begin_shooting_frame_preview Core::cancel_shooting_frame_preview Core::update_shooting_frame_preview
 route|rust|query-snapshot|rust-core|Core::shooting_frame
+route|rust|query-snapshot|rust-core|Core::sequence_catalog_info Core::sequence_cell_metadata Core::sequence_thumbnail
+route|ffi|query-snapshot|rust-ffi-adapter|inkpod_core_sequence_catalog_get inkpod_snapshot_get_source_identity
 route|rust|asset-data-plane|rust-core|Core::export_instruction_common_raster
 route|rust|document-primitive|rust-core|Core::apply_vanishing_point_preview Core::delete_all_vanishing_points Core::edit_vanishing_points
 route|rust|transient-preview-stroke|rust-core|Core::begin_vanishing_point_preview Core::cancel_vanishing_point_preview Core::update_vanishing_point_preview

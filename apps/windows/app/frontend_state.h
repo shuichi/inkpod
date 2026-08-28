@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -108,6 +109,19 @@ struct SequenceSwitchAsyncResult {
     std::wstring next_recovery_path;
     RecoveryMetadata target_metadata{};
     bool source_autosaved{};
+    bool interactive_activation{};
+    bool replace_document{};
+    InkpodStatus mutation_status{INKPOD_STATUS_INVALID_STATE};
+    InkpodDocumentInfo activated_document{sizeof(InkpodDocumentInfo)};
+};
+
+struct SequenceNavigationIntent {
+    CommandContext context;
+    std::optional<std::uint32_t> index;
+    InkpodSequenceDirection direction{};
+    InkpodSequenceEndpointPolicy endpoint_policy{};
+    std::uint64_t catalog_revision{};
+    std::uint64_t catalog_owner_generation{};
 };
 
 struct AdjustmentLayerUiState {
@@ -237,6 +251,8 @@ struct ToolUiState {
     std::uint64_t geometry_view_revision{};
     bool geometry_preview_active{};
     bool geometry_snap_bypass{};
+    // Keep a failed shared Canvas overlay clear retryable after gesture reset.
+    bool geometry_preview_clear_pending{};
     InkpodColorValue color_replace_target{sizeof(InkpodColorValue)};
     InkpodSelectionShape color_replace_shape{INKPOD_SELECTION_TRACE};
     InkpodScopedColorReplaceMode color_replace_mode{INKPOD_COLOR_REPLACE_RASTER_COLOR};
@@ -455,6 +471,9 @@ struct FrontendRoutingState {
     std::atomic_uint64_t sequence_switch_pending_token{};
     std::mutex sequence_switch_results_mutex;
     std::shared_ptr<SequenceSwitchAsyncResult> sequence_switch_result;
+    // UI-owned, bounded input intentions. The worker never reads this queue.
+    std::deque<SequenceNavigationIntent> sequence_navigation_queue;
+    bool sequence_navigation_pending{};
     CommandContext command_state_context;
     PaneInstanceId tool_pane{};
     PaneInstanceId tool_options_pane{};

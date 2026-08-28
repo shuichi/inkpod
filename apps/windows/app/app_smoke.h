@@ -14,4 +14,8 @@ int RunApplicationSmoke(app::ApplicationHost& state) noexcept;
 // same-host revision-max comparisons. Timings are emitted to standard error.
 int RunPerformanceSmoke(app::ApplicationHost& state) noexcept;
 
+// Exercises loaded TGA sequence navigation through the real keyboard, Core,
+// and renderer paths. Existing revision-max workloads remain independent.
+int RunSequencePerformanceSmoke(app::ApplicationHost& state) noexcept;
+
 }  // namespace inkpod::windows::ui

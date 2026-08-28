@@ -155,6 +155,7 @@ void ThumbnailCache::Erase(EntryIterator entry, bool eviction) noexcept {
         return;
     }
     const std::uint64_t bytes = entry->pixels.size();
+    AdvanceInvalidationGeneration(entry->key.kind);
     index_.erase(entry->key);
     entries_.erase(entry);
     resident_bytes_ = bytes > resident_bytes_ ? 0U : resident_bytes_ - bytes;
@@ -185,13 +186,15 @@ void ThumbnailCache::RemovePane(app::PaneInstanceId pane) noexcept {
 
 void ThumbnailCache::RemoveDocument(
     app::DocumentSessionId document,
-    app::Generation generation) noexcept {
+    app::Generation generation,
+    std::optional<ThumbnailKind> kind) noexcept {
     if (!document || !generation) {
         return;
     }
     for (auto entry = entries_.begin(); entry != entries_.end();) {
         if (entry->key.document == document
-            && entry->key.document_generation == generation) {
+            && entry->key.document_generation == generation
+            && (!kind.has_value() || entry->key.kind == kind.value())) {
             const auto removing = entry++;
             Erase(removing, false);
         } else {
@@ -201,6 +204,10 @@ void ThumbnailCache::RemoveDocument(
 }
 
 void ThumbnailCache::Clear() noexcept {
+    if (!entries_.empty()) {
+        AdvanceInvalidationGeneration(ThumbnailKind::Layer);
+        AdvanceInvalidationGeneration(ThumbnailKind::Sequence);
+    }
     entries_.clear();
     index_.clear();
     resident_bytes_ = 0U;
@@ -215,6 +222,32 @@ ThumbnailCacheUsage ThumbnailCache::Usage() const noexcept {
         miss_count_,
         eviction_count_,
         rejection_count_};
+}
+
+std::uint64_t ThumbnailCache::InvalidationGeneration(ThumbnailKind kind) const noexcept {
+    switch (kind) {
+        case ThumbnailKind::Layer:
+            return layer_invalidation_generation_;
+        case ThumbnailKind::Sequence:
+            return sequence_invalidation_generation_;
+    }
+    return 0U;
+}
+
+void ThumbnailCache::AdvanceInvalidationGeneration(ThumbnailKind kind) noexcept {
+    std::uint64_t* generation{};
+    switch (kind) {
+        case ThumbnailKind::Layer:
+            generation = &layer_invalidation_generation_;
+            break;
+        case ThumbnailKind::Sequence:
+            generation = &sequence_invalidation_generation_;
+            break;
+    }
+    if (generation != nullptr && *generation != 0U) {
+        // Unsigned wrap reaches the permanently disabled zero value.
+        ++*generation;
+    }
 }
 
 bool ThumbnailCache::GetPaneUsage(

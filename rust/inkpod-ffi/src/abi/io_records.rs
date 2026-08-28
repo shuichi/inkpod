@@ -148,4 +148,6 @@ pub struct InkpodIoCacheInfo {
     pub physical_reads: u64,
     pub decodes: u64,
     pub cache_hits: u64,
+    pub sequence_render_allocations: u64,
+    pub sequence_render_bytes: u64,
 }

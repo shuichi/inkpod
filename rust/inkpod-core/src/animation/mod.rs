@@ -22,6 +22,7 @@ mod raster;
 mod sequence;
 mod sequence_activation;
 mod sequence_operations;
+mod sequence_render_cache;
 
 pub(crate) use light_table::LightTableState;
 pub use light_table::{
@@ -40,9 +41,11 @@ pub(crate) use raster::{
     flatten_document, thumbnail_for_document, visit_visible_document_composite_rgba16,
 };
 pub use sequence::{
-    MotionCheckConfig, MotionFrame, SequenceCellInfo, SequenceCellSource, SequenceDirection,
-    SequenceEndpointPolicy, SequenceStepPlan, SequenceStepResult, SequenceSwitchPolicy,
-    SequenceSwitchRequest, Thumbnail,
+    MotionCheckConfig, MotionFrame, SequenceCatalogInfo, SequenceCellInfo, SequenceCellMetadata,
+    SequenceCellSource, SequenceDirection, SequenceEndpointPolicy, SequenceStepPlan,
+    SequenceStepResult, SequenceSwitchPolicy, SequenceSwitchRequest, Thumbnail,
 };
 pub(crate) use sequence::{MotionCheckState, SequenceState};
 pub use sequence_activation::{SequenceActivationKind, SequenceActivationPlan};
+pub use sequence_render_cache::SequenceRenderSourceIdentity;
+pub(crate) use sequence_render_cache::{SequenceRenderCache, SequenceRenderReservation};

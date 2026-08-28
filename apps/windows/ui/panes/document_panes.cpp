@@ -244,27 +244,26 @@ InkpodStatus DocumentPanesController::LoadSequence(
                     cell.info.name_capacity = 0U;
                     InkpodSequenceThumbnailBuffer thumbnail{};
                     thumbnail.struct_size = sizeof(thumbnail);
-                    InkpodStatus thumbnail_status =
-                        inkpod_core_sequence_thumbnail_get(core, index, &thumbnail);
-                    if (thumbnail_status != INKPOD_STATUS_OK
-                        || thumbnail.required_bytes == 0U
-                        || thumbnail.required_bytes > 64U * 64U * 4U
-                        || thumbnail.stride_bytes != thumbnail.width * 4U
-                        || thumbnail.required_bytes
-                            != static_cast<std::uint64_t>(thumbnail.stride_bytes)
-                                * thumbnail.height) {
-                        return thumbnail_status == INKPOD_STATUS_OK
-                            ? INKPOD_STATUS_INVALID_STATE
-                            : thumbnail_status;
+                    if (cell.info.thumbnail_width == 0U || cell.info.thumbnail_width > 64U
+                        || cell.info.thumbnail_height == 0U || cell.info.thumbnail_height > 64U) {
+                        return INKPOD_STATUS_INVALID_STATE;
                     }
                     cell.thumbnail_rgba.resize(
-                        static_cast<std::size_t>(thumbnail.required_bytes));
+                        static_cast<std::size_t>(cell.info.thumbnail_width)
+                            * cell.info.thumbnail_height * 4U);
                     thumbnail.pixels_rgba8 = cell.thumbnail_rgba.data();
                     thumbnail.pixel_capacity = cell.thumbnail_rgba.size();
-                    thumbnail_status =
+                    const InkpodStatus thumbnail_status =
                         inkpod_core_sequence_thumbnail_get(core, index, &thumbnail);
                     if (thumbnail_status != INKPOD_STATUS_OK) {
                         return thumbnail_status;
+                    }
+                    if (thumbnail.width != cell.info.thumbnail_width
+                        || thumbnail.height != cell.info.thumbnail_height
+                        || thumbnail.checksum != cell.info.thumbnail_checksum
+                        || thumbnail.stride_bytes != thumbnail.width * 4U
+                        || thumbnail.required_bytes != cell.thumbnail_rgba.size()) {
+                        return INKPOD_STATUS_INVALID_STATE;
                     }
                     cell.thumbnail_stride_bytes = thumbnail.stride_bytes;
                     cells.push_back(std::move(cell));

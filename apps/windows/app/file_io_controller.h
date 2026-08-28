@@ -37,6 +37,8 @@ struct FileIoRequest final {
     std::uint32_t batch_scope{INKPOD_BATCH_SCOPE_ALL};
     std::uint64_t new_tab_capacity{};
     bool publish_snapshot{};
+    // Windows-only activation token, published after Core apply and before its frame.
+    std::uint64_t presentation_epoch{};
     std::optional<RecoveryMetadata> recovery_metadata;
     std::optional<InkpodSequenceSwitchRequest> sequence_switch;
     std::optional<InkpodCompactionPlan> compaction_plan;
@@ -55,8 +57,12 @@ struct FileIoResult final {
     CommandContext context;
     std::uint32_t kind{};
     InkpodStatus status{INKPOD_STATUS_INVALID_STATE};
+    // Separate from durable apply: failed presentation does not undo saved data.
+    InkpodStatus presentation_status{INKPOD_STATUS_INVALID_STATE};
     InkpodIoJobInfo progress{};
     InkpodDocumentInfo document{};
+    // Exact apply outcome, retained even if later snapshot publication/release fails.
+    bool document_applied{};
     InkpodSubpaletteInfo subpalette{};
     std::uint64_t object_id{};
     std::vector<FileIoItem> items;

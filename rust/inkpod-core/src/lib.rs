@@ -60,9 +60,9 @@ pub use animation::{
     LightTableBulkRegistrationSummary, LightTableDisplayMode, LightTableItemInfo,
     LightTableItemInput, LightTableItemProperties, LightTableSetInfo, LightTableSource,
     MotionCheckConfig, MotionFrame, RgbaRasterBytes, SequenceActivationKind,
-    SequenceActivationPlan, SequenceCellInfo, SequenceCellSource, SequenceDirection,
-    SequenceEndpointPolicy, SequenceStepPlan, SequenceStepResult, SequenceSwitchPolicy,
-    SequenceSwitchRequest, Thumbnail,
+    SequenceActivationPlan, SequenceCatalogInfo, SequenceCellInfo, SequenceCellMetadata,
+    SequenceCellSource, SequenceDirection, SequenceEndpointPolicy, SequenceRenderSourceIdentity,
+    SequenceStepPlan, SequenceStepResult, SequenceSwitchPolicy, SequenceSwitchRequest, Thumbnail,
 };
 pub use api::*;
 pub use asset::{
