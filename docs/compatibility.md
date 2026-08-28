@@ -99,6 +99,18 @@ synchronously repaints the exposed parent area before repainting the children. A
 focused smoke contract moves Pin by less than the target-to-Pin gap and requires
 that parent-background erase, preventing the old themed button frame from remaining.
 
+The `PAINT-001`/`PAINT-003` Canvas stroke smoke derives cancellation and color
+samples from the current presented paper bounds in client device pixels. Its
+fixed viewport/zoom/pan fixture keeps the whole paper visible beyond the former
+x=80..270 inputs, so those old margin-only inputs reproduce failure `42` without
+relying on the runner's desktop size or DPI. Cancellation must first produce a
+real captured preview and then preserve both plane checksums, revision and flags;
+the color stroke must commit exactly one revision, change color and protect the
+main line. The two-stroke metric, Undo/Redo and save/reopen checks remain intact.
+Color-stroke failures include input/paper/client coordinates, DPI, tool/plane,
+revision and both checksums. Product input, coordinate conversion and stroke
+semantics are unchanged.
+
 The current `WORKSPACE-001` right-pane evidence additionally covers thresholded
 same-strip drag reordering of stable-ID top-level tabs, a DPI-scaled owner-drawn
 close icon that atomically hides every member pane and removes the addressed tab,

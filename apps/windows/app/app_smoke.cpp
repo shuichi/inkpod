@@ -5605,8 +5605,61 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     }
     const std::uint64_t line_checksum = after_line.main_plane_checksum;
 
-    SendMessageW(state.Workspace().windows.canvas, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(80, 150));
-    SendMessageW(state.Workspace().windows.canvas, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(180, 150));
+    // Keep the whole paper visible while placing it beyond the old fixed
+    // x=80..270 stroke coordinates. Exercise the same margin case on every DPI
+    // and monitor instead of depending on the host's workspace geometry.
+    InkpodSnapshotTransform stroke_transform{};
+    inkpod::renderer::CanvasDocumentBounds stroke_bounds{};
+    RECT stroke_client{};
+    if (MoveWindow(state.Workspace().windows.canvas, 0, 0, 640, 480, FALSE) == FALSE
+        || FitCanvas(state, INKPOD_VIEW_FIT) != INKPOD_STATUS_OK
+        || ApplyView(state, INKPOD_VIEW_ZOOM_AT, 0.5, 0.0, 0.0)
+            != INKPOD_STATUS_OK
+        || !QuerySnapshotTransform(state, stroke_transform)
+        || ApplyView(state, INKPOD_VIEW_PAN_BY,
+               320.0 - stroke_transform.pan_x, 120.0 - stroke_transform.pan_y)
+            != INKPOD_STATUS_OK
+        || !WaitForSequencePresentation(state, true)
+        || !inkpod::renderer::GetCanvasDocumentBounds(
+            state.Workspace().windows.canvas, stroke_bounds)
+        || GetClientRect(state.Workspace().windows.canvas, &stroke_client) == FALSE
+        || !std::isfinite(stroke_bounds.left) || !std::isfinite(stroke_bounds.top)
+        || !std::isfinite(stroke_bounds.right) || !std::isfinite(stroke_bounds.bottom)
+        || stroke_bounds.left <= 270.0 || stroke_bounds.top < 0.0
+        || stroke_bounds.right <= stroke_bounds.left
+        || stroke_bounds.bottom <= stroke_bounds.top
+        || stroke_bounds.right >= static_cast<double>(stroke_client.right)
+        || stroke_bounds.bottom >= static_cast<double>(stroke_client.bottom)) {
+        std::fprintf(stderr,
+            "smoke stroke viewport setup failed: paper=%.4f,%.4f,%.4f,%.4f "
+            "client=%ldx%ld dpi=%u\n",
+            stroke_bounds.left, stroke_bounds.top, stroke_bounds.right,
+            stroke_bounds.bottom, stroke_client.right, stroke_client.bottom,
+            GetDpiForWindow(state.Workspace().windows.canvas));
+        return 42;
+    }
+    const auto stroke_point = [&stroke_bounds](double x_fraction, double y_fraction) {
+        return POINT{
+            std::lround(stroke_bounds.left
+                + (stroke_bounds.right - stroke_bounds.left) * x_fraction),
+            std::lround(stroke_bounds.top
+                + (stroke_bounds.bottom - stroke_bounds.top) * y_fraction)};
+    };
+
+    const POINT cancel_begin = stroke_point(0.20, 0.70);
+    const POINT cancel_end = stroke_point(0.65, 0.70);
+    const auto cancel_metrics_before = state.engine->Metrics();
+    if (SendMessageW(state.Workspace().windows.canvas, WM_LBUTTONDOWN, MK_LBUTTON,
+            MAKELPARAM(cancel_begin.x, cancel_begin.y)) != 1
+        || GetCapture() != state.Workspace().windows.canvas
+        || SendMessageW(state.Workspace().windows.canvas, WM_MOUSEMOVE, MK_LBUTTON,
+               MAKELPARAM(cancel_end.x, cancel_end.y)) != 1
+        || state.engine->FlushPreview() != INKPOD_STATUS_OK
+        || state.engine->Metrics().preview_snapshots
+            <= cancel_metrics_before.preview_snapshots) {
+        std::fputs("smoke cancelled stroke did not produce an in-paper preview\n", stderr);
+        return 54;
+    }
     SendMessageW(state.Workspace().windows.canvas, WM_CAPTURECHANGED, 0, 0);
     if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
         return 54;
@@ -5614,7 +5667,9 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     InkpodDocumentInfo after_cancel{};
     if (!QueryDocument(state, after_cancel)
         || after_cancel.document_revision != after_line.document_revision
-        || after_cancel.main_plane_checksum != after_line.main_plane_checksum) {
+        || after_cancel.main_plane_checksum != after_line.main_plane_checksum
+        || after_cancel.color_plane_checksum != after_line.color_plane_checksum
+        || after_cancel.flags != after_line.flags) {
         return 55;
     }
 
@@ -5623,11 +5678,19 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         != INKPOD_STATUS_OK) {
         return 39;
     }
-    SendMessageW(state.Workspace().windows.canvas, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(100, 180));
-    for (int x = 115; x <= 260; x += 15) {
-        SendMessageW(state.Workspace().windows.canvas, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(x, 190));
+    const POINT color_begin = stroke_point(0.20, 0.55);
+    const POINT color_end = stroke_point(0.75, 0.60);
+    const LRESULT color_begin_result = SendMessageW(
+        state.Workspace().windows.canvas, WM_LBUTTONDOWN, MK_LBUTTON,
+        MAKELPARAM(color_begin.x, color_begin.y));
+    for (int step = 1; step <= 10; ++step) {
+        const LONG x = color_begin.x + (color_end.x - color_begin.x) * step / 11;
+        const LONG y = color_begin.y + (color_end.y - color_begin.y) * step / 11;
+        SendMessageW(state.Workspace().windows.canvas, WM_MOUSEMOVE, MK_LBUTTON,
+            MAKELPARAM(x, y));
     }
-    if (SendMessageW(state.Workspace().windows.canvas, WM_LBUTTONUP, 0, MAKELPARAM(270, 190)) != 1) {
+    if (SendMessageW(state.Workspace().windows.canvas, WM_LBUTTONUP, 0,
+            MAKELPARAM(color_end.x, color_end.y)) != 1) {
         return 40;
     }
     if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
@@ -5635,9 +5698,28 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     }
     PumpPendingWindowMessages();
     InkpodDocumentInfo after_color{};
-    if (!QueryDocument(state, after_color)
+    const bool queried_color = QueryDocument(state, after_color);
+    if (color_begin_result != 1 || !queried_color
+        || after_color.document_revision != after_line.document_revision + 1U
         || after_color.main_plane_checksum != line_checksum
         || after_color.color_plane_checksum == after_line.color_plane_checksum) {
+        std::fprintf(stderr,
+            "smoke color stroke mismatch: query=%d begin=%lld tool=%u plane=%u "
+            "input=%ld,%ld..%ld,%ld "
+            "revision=%llu/%llu main=%llu/%llu color=%llu/%llu "
+            "paper=%.4f,%.4f,%.4f,%.4f client=%ldx%ld dpi=%u\n",
+            queried_color, static_cast<long long>(color_begin_result),
+            state.Workspace().tools.active_tool, state.Workspace().tools.active_plane,
+            color_begin.x, color_begin.y, color_end.x, color_end.y,
+            static_cast<unsigned long long>(after_line.document_revision),
+            static_cast<unsigned long long>(after_color.document_revision),
+            static_cast<unsigned long long>(line_checksum),
+            static_cast<unsigned long long>(after_color.main_plane_checksum),
+            static_cast<unsigned long long>(after_line.color_plane_checksum),
+            static_cast<unsigned long long>(after_color.color_plane_checksum),
+            stroke_bounds.left, stroke_bounds.top, stroke_bounds.right,
+            stroke_bounds.bottom, stroke_client.right, stroke_client.bottom,
+            GetDpiForWindow(state.Workspace().windows.canvas));
         return 42;
     }
     const inkpod::app::EngineMetrics metrics = state.engine->Metrics();

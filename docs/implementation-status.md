@@ -95,6 +95,49 @@ its compact historical record is retained in [`legacy.md`](legacy.md).
 
 ## Latest representative verification
 
+### Canvas stroke smoke coordinates (`PAINT-001`, `PAINT-003`, 2026-08-28)
+
+The follow-up CI failure `42` checks color-plane mutation with main-line
+protection. The color and cancellation samples still used fixed client pixels,
+unlike the preceding main-line stroke. A regression fixture now uses the real
+Canvas/Core view commands to fit and shrink the paper, then place it wholly
+inside a 640-by-480 device-pixel Canvas beyond x=270. It waits for the actual
+active-view revision to be presented before querying the paper bounds.
+
+With that fixture and the old input intact, x64 Release reproduced `42` in
+6.63 s at 192 DPI: paper bounds were `(320,120)-(624,291)`, pointer-down returned
+1, and revision stayed 2 while both plane checksums stayed unchanged. The old
+color samples at x=100..270 were entirely in the margin. This failed regression
+is retained in `build/windows-x64-release/ci-42-before-ctest.log`.
+
+The fixed samples are chosen inside the presented paper bounds in device pixels,
+without applying UI DPI again. Cancellation must first capture input and produce
+a preview, then leave both plane checksums, revision and flags unchanged. Color
+must commit one revision and change only the color plane. The exact two completed
+strokes, Undo/Redo, save/reopen and the existing `11174` tab checks remain in place.
+Failure diagnostics include query/input results, tool/plane, input and paper
+coordinates, client dimensions, DPI, revision and both checksums. Production
+input, Rust, ABI, persistence and replay semantics are unchanged.
+
+No-profile x64 Release configure/build, static CRT and ZIP/MSIX generation pass.
+The same regression fixture remains in both complete English/Japanese smokes,
+which pass in 62.65/73.49 s (136.48 s together); the other 44 CTests pass in
+49.81 s against the same executable. Logs are `ci-42-fixed-smokes.log` and
+`ci-42-other-ctest.log` under `build/windows-x64-release/`. `cargo fmt --check`
+and `git diff --check` pass.
+
+x64 Debug configure/build, static CRT and ZIP/MSIX generation also pass. Its
+first full CTest run passes 45/46 in 753.08 s: Japanese smoke passes in 417.85 s,
+but English passes the changed stroke checks and fails later at multi-workspace
+reopen check `816` in 196.08 s. This failure is retained in
+`build/windows-x64-debug/ci-42-ctest.log`; the original composite check does not
+identify whether opening or active-document validation failed. An isolated
+English rerun against the unchanged binary passes in 389.71 s, retained in
+`build/windows-x64-debug/ci-42-english-rerun.log`. No assertion or timeout was
+relaxed, but the first `816` failure remains unexplained and is not considered
+resolved by the passing rerun. The original CI runner and ARM64, Rust
+clippy/test/benchmark/rustdoc have not been rerun for this smoke-only change.
+
 ### Shared tab-close painting (`WORKSPACE-001`, `VIEW-004`, `SEQ-001`, 2026-08-28)
 
 The existing Sequence and document-tab product smokes now compare their real

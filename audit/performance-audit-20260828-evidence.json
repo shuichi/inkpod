@@ -1,0 +1,636 @@
+{
+  "audit_date": "2026-08-28",
+  "repository_head": "ecb2d30b46b6584ae6ad9eb07bfec1c6b40da305",
+  "scope": "Read-only source performance audit; only audit report/evidence files authored by this task.",
+  "environment": {
+    "os": "Microsoft Windows 11 Pro 10.0.26200",
+    "machine": "Parallels ARM Virtual Machine",
+    "logical_processors": 4,
+    "reported_total_physical_memory_bytes": 8583315456,
+    "active_power_scheme": "Parallels",
+    "rustc": "1.97.1 (8bab26f4f 2026-07-14)",
+    "cargo": "1.97.1 (c980f4866 2026-06-30)",
+    "llvm": "22.1.6",
+    "host_target": "aarch64-pc-windows-msvc",
+    "profile": "Cargo bench/release, opt-level 3, static CRT from .cargo/config.toml",
+    "executable": "target/release/deps/core_workflows-c9aeeeab1b9c0e36.exe",
+    "executable_sha256": "49DA4BC7B4D1F8477385CB473B0EEECAE9D85F31F4E639A38BB2ACA23A053598",
+    "freshness": "cargo bench --locked --offline --package inkpod-core --bench core_workflows --no-run --message-format=json: executable and inkpod_core library fresh=true, build-finished success=true, exit 0",
+    "limitations": [
+      "Physical host model, thermal state and unrelated system activity were not continuously controlled.",
+      "No other audit build/test ran during the benchmark series; audit subagents were asked to stop shell work.",
+      "Windows UI, GPU transfer, Present, and physical scanout were not measured by these Core-only runs.",
+      "Rustup emitted 'could not canonicalize path C:\\Users\\shuichi' during Cargo commands, which nevertheless exited 0."
+    ]
+  },
+  "benchmark_command": "& '.\\target\\release\\deps\\core_workflows-c9aeeeab1b9c0e36.exe' --quick",
+  "shell": "PowerShell via exec_command(login:false)",
+  "policy": "Unmodified existing workload, checksum assertions and counters. Each independent batch has one separate warm-up process (index 0) and five measured processes. All measured samples retained. Second batch performed after first pan/zoom median exceeded upper edge.",
+  "batches": [
+    [
+      {
+        "index": 0,
+        "kind": "warmup",
+        "started_at": "2026-08-28T09:53:27.316Z",
+        "ended_at": "2026-08-28T09:53:29.792Z",
+        "exit_code": 0,
+        "output": "inkpod-core-workflows profile=quick scenario=sparse_snapshot iterations=1 input_items=8 output_items=8 reused_items=0 document_revision=9 history_entries=8 successes=1 failures=0 checksum=517ed7ae78bf0487 elapsed_ns=543000\ninkpod-core-workflows profile=quick scenario=dirty_tile_rebuild iterations=32 input_items=256 output_items=32 reused_items=224 document_revision=41 history_entries=40 successes=32 failures=0 checksum=9e13576def6f539b elapsed_ns=2018708\ninkpod-core-workflows profile=quick scenario=pan_zoom_snapshot iterations=4096 input_items=8 output_items=8 reused_items=8 document_revision=9 history_entries=8 successes=4096 failures=0 checksum=517ed7ae78bf0487 elapsed_ns=1001042\ninkpod-core-workflows profile=quick scenario=undo_redo iterations=36 input_items=12 output_items=12 reused_items=0 document_revision=37 history_entries=12 successes=36 failures=0 checksum=3f1053b9fde37d35 elapsed_ns=2865083\ninkpod-core-workflows profile=quick scenario=light_table_composite iterations=1 input_items=3 output_items=4 reused_items=0 document_revision=4 history_entries=3 successes=1 failures=0 checksum=255ab9bad114dfdd elapsed_ns=2648208\ninkpod-core-workflows profile=quick scenario=batch_preview iterations=2 input_items=4 output_items=8 reused_items=0 document_revision=0 history_entries=0 successes=4 failures=1 checksum=9ae6835726a36053 elapsed_ns=22551375\ninkpod-core-workflows profile=quick scenario=canonical_replay iterations=5 input_items=6 output_items=1 reused_items=0 document_revision=6 history_entries=5 successes=5 failures=0 checksum=70d3465b6732887e elapsed_ns=1247791\ninkpod-core-workflows profile=quick scenario=checkpoint_open iterations=1 input_items=175256 output_items=256 reused_items=1 document_revision=3 history_entries=256 successes=1 failures=0 checksum=a90e56558c9eaaab elapsed_ns=32737500\ninkpod-core-workflows profile=quick scenario=output_color_guard iterations=1024 input_items=1048576 output_items=524288 reused_items=65536 document_revision=2 history_entries=1 successes=1 failures=0 checksum=f169350a6a43e727 elapsed_ns=229864625\n"
+      },
+      {
+        "index": 1,
+        "kind": "measured",
+        "started_at": "2026-08-28T09:53:29.793Z",
+        "ended_at": "2026-08-28T09:53:32.429Z",
+        "exit_code": 0,
+        "output": "inkpod-core-workflows profile=quick scenario=sparse_snapshot iterations=1 input_items=8 output_items=8 reused_items=0 document_revision=9 history_entries=8 successes=1 failures=0 checksum=517ed7ae78bf0487 elapsed_ns=1136500\ninkpod-core-workflows profile=quick scenario=dirty_tile_rebuild iterations=32 input_items=256 output_items=32 reused_items=224 document_revision=41 history_entries=40 successes=32 failures=0 checksum=9e13576def6f539b elapsed_ns=3337583\ninkpod-core-workflows profile=quick scenario=pan_zoom_snapshot iterations=4096 input_items=8 output_items=8 reused_items=8 document_revision=9 history_entries=8 successes=4096 failures=0 checksum=517ed7ae78bf0487 elapsed_ns=1200958\ninkpod-core-workflows profile=quick scenario=undo_redo iterations=36 input_items=12 output_items=12 reused_items=0 document_revision=37 history_entries=12 successes=36 failures=0 checksum=3f1053b9fde37d35 elapsed_ns=6664209\ninkpod-core-workflows profile=quick scenario=light_table_composite iterations=1 input_items=3 output_items=4 reused_items=0 document_revision=4 history_entries=3 successes=1 failures=0 checksum=255ab9bad114dfdd elapsed_ns=5454167\ninkpod-core-workflows profile=quick scenario=batch_preview iterations=2 input_items=4 output_items=8 reused_items=0 document_revision=0 history_entries=0 successes=4 failures=1 checksum=9ae6835726a36053 elapsed_ns=19086458\ninkpod-core-workflows profile=quick scenario=canonical_replay iterations=5 input_items=6 output_items=1 reused_items=0 document_revision=6 history_entries=5 successes=5 failures=0 checksum=70d3465b6732887e elapsed_ns=1589417\ninkpod-core-workflows profile=quick scenario=checkpoint_open iterations=1 input_items=175256 output_items=256 reused_items=1 document_revision=3 history_entries=256 successes=1 failures=0 checksum=a90e56558c9eaaab elapsed_ns=30093209\ninkpod-core-workflows profile=quick scenario=output_color_guard iterations=1024 input_items=1048576 output_items=524288 reused_items=65536 document_revision=2 history_entries=1 successes=1 failures=0 checksum=f169350a6a43e727 elapsed_ns=164638375\n"
+      },
+      {
+        "index": 2,
+        "kind": "measured",
+        "started_at": "2026-08-28T09:53:32.429Z",
+        "ended_at": "2026-08-28T09:53:34.690Z",
+        "exit_code": 0,
+        "output": "inkpod-core-workflows profile=quick scenario=sparse_snapshot iterations=1 input_items=8 output_items=8 reused_items=0 document_revision=9 history_entries=8 successes=1 failures=0 checksum=517ed7ae78bf0487 elapsed_ns=383625\ninkpod-core-workflows profile=quick scenario=dirty_tile_rebuild iterations=32 input_items=256 output_items=32 reused_items=224 document_revision=41 history_entries=40 successes=32 failures=0 checksum=9e13576def6f539b elapsed_ns=2124041\ninkpod-core-workflows profile=quick scenario=pan_zoom_snapshot iterations=4096 input_items=8 output_items=8 reused_items=8 document_revision=9 history_entries=8 successes=4096 failures=0 checksum=517ed7ae78bf0487 elapsed_ns=1588292\ninkpod-core-workflows profile=quick scenario=undo_redo iterations=36 input_items=12 output_items=12 reused_items=0 document_revision=37 history_entries=12 successes=36 failures=0 checksum=3f1053b9fde37d35 elapsed_ns=2091542\ninkpod-core-workflows profile=quick scenario=light_table_composite iterations=1 input_items=3 output_items=4 reused_items=0 document_revision=4 history_entries=3 successes=1 failures=0 checksum=255ab9bad114dfdd elapsed_ns=2929291\ninkpod-core-workflows profile=quick scenario=batch_preview iterations=2 input_items=4 output_items=8 reused_items=0 document_revision=0 history_entries=0 successes=4 failures=1 checksum=9ae6835726a36053 elapsed_ns=9488125\ninkpod-core-workflows profile=quick scenario=canonical_replay iterations=5 input_items=6 output_items=1 reused_items=0 document_revision=6 history_entries=5 successes=5 failures=0 checksum=70d3465b6732887e elapsed_ns=1378750\ninkpod-core-workflows profile=quick scenario=checkpoint_open iterations=1 input_items=175256 output_items=256 reused_items=1 document_revision=3 history_entries=256 successes=1 failures=0 checksum=a90e56558c9eaaab elapsed_ns=30189125\ninkpod-core-workflows profile=quick scenario=output_color_guard iterations=1024 input_items=1048576 output_items=524288 reused_items=65536 document_revision=2 history_entries=1 successes=1 failures=0 checksum=f169350a6a43e727 elapsed_ns=141977375\n"
+      },
+      {
+        "index": 3,
+        "kind": "measured",
+        "started_at": "2026-08-28T09:53:34.690Z",
+        "ended_at": "2026-08-28T09:53:37.324Z",
+        "exit_code": 0,
+        "output": "inkpod-core-workflows profile=quick scenario=sparse_snapshot iterations=1 input_items=8 output_items=8 reused_items=0 document_revision=9 history_entries=8 successes=1 failures=0 checksum=517ed7ae78bf0487 elapsed_ns=381500\ninkpod-core-workflows profile=quick scenario=dirty_tile_rebuild iterations=32 input_items=256 output_items=32 reused_items=224 document_revision=41 history_entries=40 successes=32 failures=0 checksum=9e13576def6f539b elapsed_ns=1847083\ninkpod-core-workflows profile=quick scenario=pan_zoom_snapshot iterations=4096 input_items=8 output_items=8 reused_items=8 document_revision=9 history_entries=8 successes=4096 failures=0 checksum=517ed7ae78bf0487 elapsed_ns=1181541\ninkpod-core-workflows profile=quick scenario=undo_redo iterations=36 input_items=12 output_items=12 reused_items=0 document_revision=37 history_entries=12 successes=36 failures=0 checksum=3f1053b9fde37d35 elapsed_ns=1940834\ninkpod-core-workflows profile=quick scenario=light_table_composite iterations=1 input_items=3 output_items=4 reused_items=0 document_revision=4 history_entries=3 successes=1 failures=0 checksum=255ab9bad114dfdd elapsed_ns=2891833\ninkpod-core-workflows profile=quick scenario=batch_preview iterations=2 input_items=4 output_items=8 reused_items=0 document_revision=0 history_entries=0 successes=4 failures=1 checksum=9ae6835726a36053 elapsed_ns=11903667\ninkpod-core-workflows profile=quick scenario=canonical_replay iterations=5 input_items=6 output_items=1 reused_items=0 document_revision=6 history_entries=5 successes=5 failures=0 checksum=70d3465b6732887e elapsed_ns=1371833\ninkpod-core-workflows profile=quick scenario=checkpoint_open iterations=1 input_items=175256 output_items=256 reused_items=1 document_revision=3 history_entries=256 successes=1 failures=0 checksum=a90e56558c9eaaab elapsed_ns=32872250\ninkpod-core-workflows profile=quick scenario=output_color_guard iterations=1024 input_items=1048576 output_items=524288 reused_items=65536 document_revision=2 history_entries=1 successes=1 failures=0 checksum=f169350a6a43e727 elapsed_ns=273521583\n"
+      },
+      {
+        "index": 4,
+        "kind": "measured",
+        "started_at": "2026-08-28T09:53:37.324Z",
+        "ended_at": "2026-08-28T09:53:40.201Z",
+        "exit_code": 0,
+        "output": "inkpod-core-workflows profile=quick scenario=sparse_snapshot iterations=1 input_items=8 output_items=8 reused_items=0 document_revision=9 history_entries=8 successes=1 failures=0 checksum=517ed7ae78bf0487 elapsed_ns=381708\ninkpod-core-workflows profile=quick scenario=dirty_tile_rebuild iterations=32 input_items=256 output_items=32 reused_items=224 document_revision=41 history_entries=40 successes=32 failures=0 checksum=9e13576def6f539b elapsed_ns=1908292\ninkpod-core-workflows profile=quick scenario=pan_zoom_snapshot iterations=4096 input_items=8 output_items=8 reused_items=8 document_revision=9 history_entries=8 successes=4096 failures=0 checksum=517ed7ae78bf0487 elapsed_ns=1824542\ninkpod-core-workflows profile=quick scenario=undo_redo iterations=36 input_items=12 output_items=12 reused_items=0 document_revision=37 history_entries=12 successes=36 failures=0 checksum=3f1053b9fde37d35 elapsed_ns=2175750\ninkpod-core-workflows profile=quick scenario=light_table_composite iterations=1 input_items=3 output_items=4 reused_items=0 document_revision=4 history_entries=3 successes=1 failures=0 checksum=255ab9bad114dfdd elapsed_ns=3489958\ninkpod-core-workflows profile=quick scenario=batch_preview iterations=2 input_items=4 output_items=8 reused_items=0 document_revision=0 history_entries=0 successes=4 failures=1 checksum=9ae6835726a36053 elapsed_ns=16887792\ninkpod-core-workflows profile=quick scenario=canonical_replay iterations=5 input_items=6 output_items=1 reused_items=0 document_revision=6 history_entries=5 successes=5 failures=0 checksum=70d3465b6732887e elapsed_ns=1266541\ninkpod-core-workflows profile=quick scenario=checkpoint_open iterations=1 input_items=175256 output_items=256 reused_items=1 document_revision=3 history_entries=256 successes=1 failures=0 checksum=a90e56558c9eaaab elapsed_ns=32800834\ninkpod-core-workflows profile=quick scenario=output_color_guard iterations=1024 input_items=1048576 output_items=524288 reused_items=65536 document_revision=2 history_entries=1 successes=1 failures=0 checksum=f169350a6a43e727 elapsed_ns=137268375\n"
+      },
+      {
+        "index": 5,
+        "kind": "measured",
+        "started_at": "2026-08-28T09:53:40.201Z",
+        "ended_at": "2026-08-28T09:53:42.561Z",
+        "exit_code": 0,
+        "output": "inkpod-core-workflows profile=quick scenario=sparse_snapshot iterations=1 input_items=8 output_items=8 reused_items=0 document_revision=9 history_entries=8 successes=1 failures=0 checksum=517ed7ae78bf0487 elapsed_ns=472584\ninkpod-core-workflows profile=quick scenario=dirty_tile_rebuild iterations=32 input_items=256 output_items=32 reused_items=224 document_revision=41 history_entries=40 successes=32 failures=0 checksum=9e13576def6f539b elapsed_ns=2920834\ninkpod-core-workflows profile=quick scenario=pan_zoom_snapshot iterations=4096 input_items=8 output_items=8 reused_items=8 document_revision=9 history_entries=8 successes=4096 failures=0 checksum=517ed7ae78bf0487 elapsed_ns=981583\ninkpod-core-workflows profile=quick scenario=undo_redo iterations=36 input_items=12 output_items=12 reused_items=0 document_revision=37 history_entries=12 successes=36 failures=0 checksum=3f1053b9fde37d35 elapsed_ns=2238500\ninkpod-core-workflows profile=quick scenario=light_table_composite iterations=1 input_items=3 output_items=4 reused_items=0 document_revision=4 history_entries=3 successes=1 failures=0 checksum=255ab9bad114dfdd elapsed_ns=2744500\ninkpod-core-workflows profile=quick scenario=batch_preview iterations=2 input_items=4 output_items=8 reused_items=0 document_revision=0 history_entries=0 successes=4 failures=1 checksum=9ae6835726a36053 elapsed_ns=16225542\ninkpod-core-workflows profile=quick scenario=canonical_replay iterations=5 input_items=6 output_items=1 reused_items=0 document_revision=6 history_entries=5 successes=5 failures=0 checksum=70d3465b6732887e elapsed_ns=2459583\ninkpod-core-workflows profile=quick scenario=checkpoint_open iterations=1 input_items=175256 output_items=256 reused_items=1 document_revision=3 history_entries=256 successes=1 failures=0 checksum=a90e56558c9eaaab elapsed_ns=32942708\ninkpod-core-workflows profile=quick scenario=output_color_guard iterations=1024 input_items=1048576 output_items=524288 reused_items=65536 document_revision=2 history_entries=1 successes=1 failures=0 checksum=f169350a6a43e727 elapsed_ns=145157000\n"
+      }
+    ],
+    [
+      {
+        "index": 0,
+        "kind": "warmup",
+        "started_at": "2026-08-28T09:54:03.651Z",
+        "ended_at": "2026-08-28T09:54:05.655Z",
+        "exit_code": 0,
+        "output": "inkpod-core-workflows profile=quick scenario=sparse_snapshot iterations=1 input_items=8 output_items=8 reused_items=0 document_revision=9 history_entries=8 successes=1 failures=0 checksum=517ed7ae78bf0487 elapsed_ns=385583\ninkpod-core-workflows profile=quick scenario=dirty_tile_rebuild iterations=32 input_items=256 output_items=32 reused_items=224 document_revision=41 history_entries=40 successes=32 failures=0 checksum=9e13576def6f539b elapsed_ns=1877917\ninkpod-core-workflows profile=quick scenario=pan_zoom_snapshot iterations=4096 input_items=8 output_items=8 reused_items=8 document_revision=9 history_entries=8 successes=4096 failures=0 checksum=517ed7ae78bf0487 elapsed_ns=948709\ninkpod-core-workflows profile=quick scenario=undo_redo iterations=36 input_items=12 output_items=12 reused_items=0 document_revision=37 history_entries=12 successes=36 failures=0 checksum=3f1053b9fde37d35 elapsed_ns=1977000\ninkpod-core-workflows profile=quick scenario=light_table_composite iterations=1 input_items=3 output_items=4 reused_items=0 document_revision=4 history_entries=3 successes=1 failures=0 checksum=255ab9bad114dfdd elapsed_ns=2904625\ninkpod-core-workflows profile=quick scenario=batch_preview iterations=2 input_items=4 output_items=8 reused_items=0 document_revision=0 history_entries=0 successes=4 failures=1 checksum=9ae6835726a36053 elapsed_ns=7908042\ninkpod-core-workflows profile=quick scenario=canonical_replay iterations=5 input_items=6 output_items=1 reused_items=0 document_revision=6 history_entries=5 successes=5 failures=0 checksum=70d3465b6732887e elapsed_ns=1252375\ninkpod-core-workflows profile=quick scenario=checkpoint_open iterations=1 input_items=175256 output_items=256 reused_items=1 document_revision=3 history_entries=256 successes=1 failures=0 checksum=a90e56558c9eaaab elapsed_ns=33755292\ninkpod-core-workflows profile=quick scenario=output_color_guard iterations=1024 input_items=1048576 output_items=524288 reused_items=65536 document_revision=2 history_entries=1 successes=1 failures=0 checksum=f169350a6a43e727 elapsed_ns=125951833\n"
+      },
+      {
+        "index": 1,
+        "kind": "measured",
+        "started_at": "2026-08-28T09:54:05.656Z",
+        "ended_at": "2026-08-28T09:54:07.639Z",
+        "exit_code": 0,
+        "output": "inkpod-core-workflows profile=quick scenario=sparse_snapshot iterations=1 input_items=8 output_items=8 reused_items=0 document_revision=9 history_entries=8 successes=1 failures=0 checksum=517ed7ae78bf0487 elapsed_ns=396083\ninkpod-core-workflows profile=quick scenario=dirty_tile_rebuild iterations=32 input_items=256 output_items=32 reused_items=224 document_revision=41 history_entries=40 successes=32 failures=0 checksum=9e13576def6f539b elapsed_ns=2026042\ninkpod-core-workflows profile=quick scenario=pan_zoom_snapshot iterations=4096 input_items=8 output_items=8 reused_items=8 document_revision=9 history_entries=8 successes=4096 failures=0 checksum=517ed7ae78bf0487 elapsed_ns=1668000\ninkpod-core-workflows profile=quick scenario=undo_redo iterations=36 input_items=12 output_items=12 reused_items=0 document_revision=37 history_entries=12 successes=36 failures=0 checksum=3f1053b9fde37d35 elapsed_ns=2196500\ninkpod-core-workflows profile=quick scenario=light_table_composite iterations=1 input_items=3 output_items=4 reused_items=0 document_revision=4 history_entries=3 successes=1 failures=0 checksum=255ab9bad114dfdd elapsed_ns=2718250\ninkpod-core-workflows profile=quick scenario=batch_preview iterations=2 input_items=4 output_items=8 reused_items=0 document_revision=0 history_entries=0 successes=4 failures=1 checksum=9ae6835726a36053 elapsed_ns=7791667\ninkpod-core-workflows profile=quick scenario=canonical_replay iterations=5 input_items=6 output_items=1 reused_items=0 document_revision=6 history_entries=5 successes=5 failures=0 checksum=70d3465b6732887e elapsed_ns=1372167\ninkpod-core-workflows profile=quick scenario=checkpoint_open iterations=1 input_items=175256 output_items=256 reused_items=1 document_revision=3 history_entries=256 successes=1 failures=0 checksum=a90e56558c9eaaab elapsed_ns=30133417\ninkpod-core-workflows profile=quick scenario=output_color_guard iterations=1024 input_items=1048576 output_items=524288 reused_items=65536 document_revision=2 history_entries=1 successes=1 failures=0 checksum=f169350a6a43e727 elapsed_ns=124588000\n"
+      },
+      {
+        "index": 2,
+        "kind": "measured",
+        "started_at": "2026-08-28T09:54:07.639Z",
+        "ended_at": "2026-08-28T09:54:09.551Z",
+        "exit_code": 0,
+        "output": "inkpod-core-workflows profile=quick scenario=sparse_snapshot iterations=1 input_items=8 output_items=8 reused_items=0 document_revision=9 history_entries=8 successes=1 failures=0 checksum=517ed7ae78bf0487 elapsed_ns=563042\ninkpod-core-workflows profile=quick scenario=dirty_tile_rebuild iterations=32 input_items=256 output_items=32 reused_items=224 document_revision=41 history_entries=40 successes=32 failures=0 checksum=9e13576def6f539b elapsed_ns=1886459\ninkpod-core-workflows profile=quick scenario=pan_zoom_snapshot iterations=4096 input_items=8 output_items=8 reused_items=8 document_revision=9 history_entries=8 successes=4096 failures=0 checksum=517ed7ae78bf0487 elapsed_ns=1081291\ninkpod-core-workflows profile=quick scenario=undo_redo iterations=36 input_items=12 output_items=12 reused_items=0 document_revision=37 history_entries=12 successes=36 failures=0 checksum=3f1053b9fde37d35 elapsed_ns=2383041\ninkpod-core-workflows profile=quick scenario=light_table_composite iterations=1 input_items=3 output_items=4 reused_items=0 document_revision=4 history_entries=3 successes=1 failures=0 checksum=255ab9bad114dfdd elapsed_ns=2674125\ninkpod-core-workflows profile=quick scenario=batch_preview iterations=2 input_items=4 output_items=8 reused_items=0 document_revision=0 history_entries=0 successes=4 failures=1 checksum=9ae6835726a36053 elapsed_ns=7202458\ninkpod-core-workflows profile=quick scenario=canonical_replay iterations=5 input_items=6 output_items=1 reused_items=0 document_revision=6 history_entries=5 successes=5 failures=0 checksum=70d3465b6732887e elapsed_ns=1370250\ninkpod-core-workflows profile=quick scenario=checkpoint_open iterations=1 input_items=175256 output_items=256 reused_items=1 document_revision=3 history_entries=256 successes=1 failures=0 checksum=a90e56558c9eaaab elapsed_ns=28395416\ninkpod-core-workflows profile=quick scenario=output_color_guard iterations=1024 input_items=1048576 output_items=524288 reused_items=65536 document_revision=2 history_entries=1 successes=1 failures=0 checksum=f169350a6a43e727 elapsed_ns=125543083\n"
+      },
+      {
+        "index": 3,
+        "kind": "measured",
+        "started_at": "2026-08-28T09:54:09.551Z",
+        "ended_at": "2026-08-28T09:54:11.537Z",
+        "exit_code": 0,
+        "output": "inkpod-core-workflows profile=quick scenario=sparse_snapshot iterations=1 input_items=8 output_items=8 reused_items=0 document_revision=9 history_entries=8 successes=1 failures=0 checksum=517ed7ae78bf0487 elapsed_ns=535500\ninkpod-core-workflows profile=quick scenario=dirty_tile_rebuild iterations=32 input_items=256 output_items=32 reused_items=224 document_revision=41 history_entries=40 successes=32 failures=0 checksum=9e13576def6f539b elapsed_ns=2858625\ninkpod-core-workflows profile=quick scenario=pan_zoom_snapshot iterations=4096 input_items=8 output_items=8 reused_items=8 document_revision=9 history_entries=8 successes=4096 failures=0 checksum=517ed7ae78bf0487 elapsed_ns=1072292\ninkpod-core-workflows profile=quick scenario=undo_redo iterations=36 input_items=12 output_items=12 reused_items=0 document_revision=37 history_entries=12 successes=36 failures=0 checksum=3f1053b9fde37d35 elapsed_ns=2372541\ninkpod-core-workflows profile=quick scenario=light_table_composite iterations=1 input_items=3 output_items=4 reused_items=0 document_revision=4 history_entries=3 successes=1 failures=0 checksum=255ab9bad114dfdd elapsed_ns=2616250\ninkpod-core-workflows profile=quick scenario=batch_preview iterations=2 input_items=4 output_items=8 reused_items=0 document_revision=0 history_entries=0 successes=4 failures=1 checksum=9ae6835726a36053 elapsed_ns=8993709\ninkpod-core-workflows profile=quick scenario=canonical_replay iterations=5 input_items=6 output_items=1 reused_items=0 document_revision=6 history_entries=5 successes=5 failures=0 checksum=70d3465b6732887e elapsed_ns=1364875\ninkpod-core-workflows profile=quick scenario=checkpoint_open iterations=1 input_items=175256 output_items=256 reused_items=1 document_revision=3 history_entries=256 successes=1 failures=0 checksum=a90e56558c9eaaab elapsed_ns=29309250\ninkpod-core-workflows profile=quick scenario=output_color_guard iterations=1024 input_items=1048576 output_items=524288 reused_items=65536 document_revision=2 history_entries=1 successes=1 failures=0 checksum=f169350a6a43e727 elapsed_ns=125483375\n"
+      },
+      {
+        "index": 4,
+        "kind": "measured",
+        "started_at": "2026-08-28T09:54:11.537Z",
+        "ended_at": "2026-08-28T09:54:13.476Z",
+        "exit_code": 0,
+        "output": "inkpod-core-workflows profile=quick scenario=sparse_snapshot iterations=1 input_items=8 output_items=8 reused_items=0 document_revision=9 history_entries=8 successes=1 failures=0 checksum=517ed7ae78bf0487 elapsed_ns=375292\ninkpod-core-workflows profile=quick scenario=dirty_tile_rebuild iterations=32 input_items=256 output_items=32 reused_items=224 document_revision=41 history_entries=40 successes=32 failures=0 checksum=9e13576def6f539b elapsed_ns=2120708\ninkpod-core-workflows profile=quick scenario=pan_zoom_snapshot iterations=4096 input_items=8 output_items=8 reused_items=8 document_revision=9 history_entries=8 successes=4096 failures=0 checksum=517ed7ae78bf0487 elapsed_ns=1056667\ninkpod-core-workflows profile=quick scenario=undo_redo iterations=36 input_items=12 output_items=12 reused_items=0 document_revision=37 history_entries=12 successes=36 failures=0 checksum=3f1053b9fde37d35 elapsed_ns=2137708\ninkpod-core-workflows profile=quick scenario=light_table_composite iterations=1 input_items=3 output_items=4 reused_items=0 document_revision=4 history_entries=3 successes=1 failures=0 checksum=255ab9bad114dfdd elapsed_ns=2584500\ninkpod-core-workflows profile=quick scenario=batch_preview iterations=2 input_items=4 output_items=8 reused_items=0 document_revision=0 history_entries=0 successes=4 failures=1 checksum=9ae6835726a36053 elapsed_ns=9461125\ninkpod-core-workflows profile=quick scenario=canonical_replay iterations=5 input_items=6 output_items=1 reused_items=0 document_revision=6 history_entries=5 successes=5 failures=0 checksum=70d3465b6732887e elapsed_ns=1287459\ninkpod-core-workflows profile=quick scenario=checkpoint_open iterations=1 input_items=175256 output_items=256 reused_items=1 document_revision=3 history_entries=256 successes=1 failures=0 checksum=a90e56558c9eaaab elapsed_ns=28038417\ninkpod-core-workflows profile=quick scenario=output_color_guard iterations=1024 input_items=1048576 output_items=524288 reused_items=65536 document_revision=2 history_entries=1 successes=1 failures=0 checksum=f169350a6a43e727 elapsed_ns=122777833\n"
+      },
+      {
+        "index": 5,
+        "kind": "measured",
+        "started_at": "2026-08-28T09:54:13.476Z",
+        "ended_at": "2026-08-28T09:54:15.371Z",
+        "exit_code": 0,
+        "output": "inkpod-core-workflows profile=quick scenario=sparse_snapshot iterations=1 input_items=8 output_items=8 reused_items=0 document_revision=9 history_entries=8 successes=1 failures=0 checksum=517ed7ae78bf0487 elapsed_ns=432083\ninkpod-core-workflows profile=quick scenario=dirty_tile_rebuild iterations=32 input_items=256 output_items=32 reused_items=224 document_revision=41 history_entries=40 successes=32 failures=0 checksum=9e13576def6f539b elapsed_ns=1915791\ninkpod-core-workflows profile=quick scenario=pan_zoom_snapshot iterations=4096 input_items=8 output_items=8 reused_items=8 document_revision=9 history_entries=8 successes=4096 failures=0 checksum=517ed7ae78bf0487 elapsed_ns=969250\ninkpod-core-workflows profile=quick scenario=undo_redo iterations=36 input_items=12 output_items=12 reused_items=0 document_revision=37 history_entries=12 successes=36 failures=0 checksum=3f1053b9fde37d35 elapsed_ns=2205625\ninkpod-core-workflows profile=quick scenario=light_table_composite iterations=1 input_items=3 output_items=4 reused_items=0 document_revision=4 history_entries=3 successes=1 failures=0 checksum=255ab9bad114dfdd elapsed_ns=2911209\ninkpod-core-workflows profile=quick scenario=batch_preview iterations=2 input_items=4 output_items=8 reused_items=0 document_revision=0 history_entries=0 successes=4 failures=1 checksum=9ae6835726a36053 elapsed_ns=7830042\ninkpod-core-workflows profile=quick scenario=canonical_replay iterations=5 input_items=6 output_items=1 reused_items=0 document_revision=6 history_entries=5 successes=5 failures=0 checksum=70d3465b6732887e elapsed_ns=1282833\ninkpod-core-workflows profile=quick scenario=checkpoint_open iterations=1 input_items=175256 output_items=256 reused_items=1 document_revision=3 history_entries=256 successes=1 failures=0 checksum=a90e56558c9eaaab elapsed_ns=29897042\ninkpod-core-workflows profile=quick scenario=output_color_guard iterations=1024 input_items=1048576 output_items=524288 reused_items=65536 document_revision=2 history_entries=1 successes=1 failures=0 checksum=f169350a6a43e727 elapsed_ns=123050708\n"
+      }
+    ]
+  ],
+  "summaries": [
+    {
+      "batch": 1,
+      "all_exit_zero": true,
+      "all_nine_scenarios": true,
+      "results": [
+        {
+          "scenario": "sparse_snapshot",
+          "samples_ns": [
+            1136500,
+            383625,
+            381500,
+            381708,
+            472584
+          ],
+          "median_ns": 383625,
+          "semantic_fields": {
+            "profile": "quick",
+            "scenario": "sparse_snapshot",
+            "iterations": "1",
+            "input_items": "8",
+            "output_items": "8",
+            "reused_items": "0",
+            "document_revision": "9",
+            "history_entries": "8",
+            "successes": "1",
+            "failures": "0",
+            "checksum": "517ed7ae78bf0487"
+          },
+          "stable": true
+        },
+        {
+          "scenario": "dirty_tile_rebuild",
+          "samples_ns": [
+            3337583,
+            2124041,
+            1847083,
+            1908292,
+            2920834
+          ],
+          "median_ns": 2124041,
+          "semantic_fields": {
+            "profile": "quick",
+            "scenario": "dirty_tile_rebuild",
+            "iterations": "32",
+            "input_items": "256",
+            "output_items": "32",
+            "reused_items": "224",
+            "document_revision": "41",
+            "history_entries": "40",
+            "successes": "32",
+            "failures": "0",
+            "checksum": "9e13576def6f539b"
+          },
+          "stable": true
+        },
+        {
+          "scenario": "pan_zoom_snapshot",
+          "samples_ns": [
+            1200958,
+            1588292,
+            1181541,
+            1824542,
+            981583
+          ],
+          "median_ns": 1200958,
+          "semantic_fields": {
+            "profile": "quick",
+            "scenario": "pan_zoom_snapshot",
+            "iterations": "4096",
+            "input_items": "8",
+            "output_items": "8",
+            "reused_items": "8",
+            "document_revision": "9",
+            "history_entries": "8",
+            "successes": "4096",
+            "failures": "0",
+            "checksum": "517ed7ae78bf0487"
+          },
+          "stable": true
+        },
+        {
+          "scenario": "undo_redo",
+          "samples_ns": [
+            6664209,
+            2091542,
+            1940834,
+            2175750,
+            2238500
+          ],
+          "median_ns": 2175750,
+          "semantic_fields": {
+            "profile": "quick",
+            "scenario": "undo_redo",
+            "iterations": "36",
+            "input_items": "12",
+            "output_items": "12",
+            "reused_items": "0",
+            "document_revision": "37",
+            "history_entries": "12",
+            "successes": "36",
+            "failures": "0",
+            "checksum": "3f1053b9fde37d35"
+          },
+          "stable": true
+        },
+        {
+          "scenario": "light_table_composite",
+          "samples_ns": [
+            5454167,
+            2929291,
+            2891833,
+            3489958,
+            2744500
+          ],
+          "median_ns": 2929291,
+          "semantic_fields": {
+            "profile": "quick",
+            "scenario": "light_table_composite",
+            "iterations": "1",
+            "input_items": "3",
+            "output_items": "4",
+            "reused_items": "0",
+            "document_revision": "4",
+            "history_entries": "3",
+            "successes": "1",
+            "failures": "0",
+            "checksum": "255ab9bad114dfdd"
+          },
+          "stable": true
+        },
+        {
+          "scenario": "batch_preview",
+          "samples_ns": [
+            19086458,
+            9488125,
+            11903667,
+            16887792,
+            16225542
+          ],
+          "median_ns": 16225542,
+          "semantic_fields": {
+            "profile": "quick",
+            "scenario": "batch_preview",
+            "iterations": "2",
+            "input_items": "4",
+            "output_items": "8",
+            "reused_items": "0",
+            "document_revision": "0",
+            "history_entries": "0",
+            "successes": "4",
+            "failures": "1",
+            "checksum": "9ae6835726a36053"
+          },
+          "stable": true
+        },
+        {
+          "scenario": "canonical_replay",
+          "samples_ns": [
+            1589417,
+            1378750,
+            1371833,
+            1266541,
+            2459583
+          ],
+          "median_ns": 1378750,
+          "semantic_fields": {
+            "profile": "quick",
+            "scenario": "canonical_replay",
+            "iterations": "5",
+            "input_items": "6",
+            "output_items": "1",
+            "reused_items": "0",
+            "document_revision": "6",
+            "history_entries": "5",
+            "successes": "5",
+            "failures": "0",
+            "checksum": "70d3465b6732887e"
+          },
+          "stable": true
+        },
+        {
+          "scenario": "checkpoint_open",
+          "samples_ns": [
+            30093209,
+            30189125,
+            32872250,
+            32800834,
+            32942708
+          ],
+          "median_ns": 32800834,
+          "semantic_fields": {
+            "profile": "quick",
+            "scenario": "checkpoint_open",
+            "iterations": "1",
+            "input_items": "175256",
+            "output_items": "256",
+            "reused_items": "1",
+            "document_revision": "3",
+            "history_entries": "256",
+            "successes": "1",
+            "failures": "0",
+            "checksum": "a90e56558c9eaaab"
+          },
+          "stable": true
+        },
+        {
+          "scenario": "output_color_guard",
+          "samples_ns": [
+            164638375,
+            141977375,
+            273521583,
+            137268375,
+            145157000
+          ],
+          "median_ns": 145157000,
+          "semantic_fields": {
+            "profile": "quick",
+            "scenario": "output_color_guard",
+            "iterations": "1024",
+            "input_items": "1048576",
+            "output_items": "524288",
+            "reused_items": "65536",
+            "document_revision": "2",
+            "history_entries": "1",
+            "successes": "1",
+            "failures": "0",
+            "checksum": "f169350a6a43e727"
+          },
+          "stable": true
+        }
+      ]
+    },
+    {
+      "batch": 2,
+      "all_exit_zero": true,
+      "all_nine_scenarios": true,
+      "results": [
+        {
+          "scenario": "sparse_snapshot",
+          "samples_ns": [
+            396083,
+            563042,
+            535500,
+            375292,
+            432083
+          ],
+          "median_ns": 432083,
+          "semantic_fields": {
+            "profile": "quick",
+            "scenario": "sparse_snapshot",
+            "iterations": "1",
+            "input_items": "8",
+            "output_items": "8",
+            "reused_items": "0",
+            "document_revision": "9",
+            "history_entries": "8",
+            "successes": "1",
+            "failures": "0",
+            "checksum": "517ed7ae78bf0487"
+          },
+          "stable": true
+        },
+        {
+          "scenario": "dirty_tile_rebuild",
+          "samples_ns": [
+            2026042,
+            1886459,
+            2858625,
+            2120708,
+            1915791
+          ],
+          "median_ns": 2026042,
+          "semantic_fields": {
+            "profile": "quick",
+            "scenario": "dirty_tile_rebuild",
+            "iterations": "32",
+            "input_items": "256",
+            "output_items": "32",
+            "reused_items": "224",
+            "document_revision": "41",
+            "history_entries": "40",
+            "successes": "32",
+            "failures": "0",
+            "checksum": "9e13576def6f539b"
+          },
+          "stable": true
+        },
+        {
+          "scenario": "pan_zoom_snapshot",
+          "samples_ns": [
+            1668000,
+            1081291,
+            1072292,
+            1056667,
+            969250
+          ],
+          "median_ns": 1072292,
+          "semantic_fields": {
+            "profile": "quick",
+            "scenario": "pan_zoom_snapshot",
+            "iterations": "4096",
+            "input_items": "8",
+            "output_items": "8",
+            "reused_items": "8",
+            "document_revision": "9",
+            "history_entries": "8",
+            "successes": "4096",
+            "failures": "0",
+            "checksum": "517ed7ae78bf0487"
+          },
+          "stable": true
+        },
+        {
+          "scenario": "undo_redo",
+          "samples_ns": [
+            2196500,
+            2383041,
+            2372541,
+            2137708,
+            2205625
+          ],
+          "median_ns": 2205625,
+          "semantic_fields": {
+            "profile": "quick",
+            "scenario": "undo_redo",
+            "iterations": "36",
+            "input_items": "12",
+            "output_items": "12",
+            "reused_items": "0",
+            "document_revision": "37",
+            "history_entries": "12",
+            "successes": "36",
+            "failures": "0",
+            "checksum": "3f1053b9fde37d35"
+          },
+          "stable": true
+        },
+        {
+          "scenario": "light_table_composite",
+          "samples_ns": [
+            2718250,
+            2674125,
+            2616250,
+            2584500,
+            2911209
+          ],
+          "median_ns": 2674125,
+          "semantic_fields": {
+            "profile": "quick",
+            "scenario": "light_table_composite",
+            "iterations": "1",
+            "input_items": "3",
+            "output_items": "4",
+            "reused_items": "0",
+            "document_revision": "4",
+            "history_entries": "3",
+            "successes": "1",
+            "failures": "0",
+            "checksum": "255ab9bad114dfdd"
+          },
+          "stable": true
+        },
+        {
+          "scenario": "batch_preview",
+          "samples_ns": [
+            7791667,
+            7202458,
+            8993709,
+            9461125,
+            7830042
+          ],
+          "median_ns": 7830042,
+          "semantic_fields": {
+            "profile": "quick",
+            "scenario": "batch_preview",
+            "iterations": "2",
+            "input_items": "4",
+            "output_items": "8",
+            "reused_items": "0",
+            "document_revision": "0",
+            "history_entries": "0",
+            "successes": "4",
+            "failures": "1",
+            "checksum": "9ae6835726a36053"
+          },
+          "stable": true
+        },
+        {
+          "scenario": "canonical_replay",
+          "samples_ns": [
+            1372167,
+            1370250,
+            1364875,
+            1287459,
+            1282833
+          ],
+          "median_ns": 1364875,
+          "semantic_fields": {
+            "profile": "quick",
+            "scenario": "canonical_replay",
+            "iterations": "5",
+            "input_items": "6",
+            "output_items": "1",
+            "reused_items": "0",
+            "document_revision": "6",
+            "history_entries": "5",
+            "successes": "5",
+            "failures": "0",
+            "checksum": "70d3465b6732887e"
+          },
+          "stable": true
+        },
+        {
+          "scenario": "checkpoint_open",
+          "samples_ns": [
+            30133417,
+            28395416,
+            29309250,
+            28038417,
+            29897042
+          ],
+          "median_ns": 29309250,
+          "semantic_fields": {
+            "profile": "quick",
+            "scenario": "checkpoint_open",
+            "iterations": "1",
+            "input_items": "175256",
+            "output_items": "256",
+            "reused_items": "1",
+            "document_revision": "3",
+            "history_entries": "256",
+            "successes": "1",
+            "failures": "0",
+            "checksum": "a90e56558c9eaaab"
+          },
+          "stable": true
+        },
+        {
+          "scenario": "output_color_guard",
+          "samples_ns": [
+            124588000,
+            125543083,
+            125483375,
+            122777833,
+            123050708
+          ],
+          "median_ns": 124588000,
+          "semantic_fields": {
+            "profile": "quick",
+            "scenario": "output_color_guard",
+            "iterations": "1024",
+            "input_items": "1048576",
+            "output_items": "524288",
+            "reused_items": "65536",
+            "document_revision": "2",
+            "history_entries": "1",
+            "successes": "1",
+            "failures": "0",
+            "checksum": "f169350a6a43e727"
+          },
+          "stable": true
+        }
+      ]
+    }
+  ],
+  "tests": [
+    {
+      "command": "cargo test --release --locked --offline --package inkpod-core --lib snapshot::tests -- --test-threads=1",
+      "passed": 11,
+      "failed": 0,
+      "output": "warn: could not canonicalize path C:\\Users\\shuichi\n    Finished `release` profile [optimized] target(s) in 0.17s\n     Running unittests src\\lib.rs (target\\release\\deps\\inkpod_core-ff13bf791feec15f.exe)\n\nrunning 11 tests\ntest snapshot::tests::blend_fast_paths_are_bit_exact_with_the_original_formula ... ok\ntest snapshot::tests::dirty_tile_rebuild_reuses_untouched_revisions_and_separates_view_overlay ... ok\ntest snapshot::tests::prepared_asset_base_tiles_match_canonical_pixel_display_semantics ... ok\ntest snapshot::tests::prepared_sequence_neighbor_first_visit_does_not_read_foreground_payloads ... ok\ntest snapshot::tests::prepared_tile_composition_matches_pixel_reader_for_formats_edges_and_modes ... ok\ntest snapshot::tests::repeated_wheel_zoom_snapshots_do_not_recompose_cached_tiles ... ok\ntest snapshot::tests::revision_max_cache_validation_reads_only_scalar_revisions ... ok\ntest snapshot::tests::revision_max_identity_matches_the_canonical_scalar_formula ... ok\ntest snapshot::tests::sequence_revisit_cache_hits_do_not_read_payloads ... ok\ntest snapshot::tests::sparse_asset_base_cache_hits_do_not_read_payloads_across_view_changes ... ok\ntest snapshot::tests::tile_coord_collection_deduplicates_and_preserves_order ... ok\n\ntest result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 161 filtered out; finished in 0.09s\n\n"
+    },
+    {
+      "command": "cargo test --release --locked --offline --package inkpod-core --test contracts file_io:: -- --test-threads=1",
+      "passed": 25,
+      "failed": 0,
+      "output": "    Finished `release` profile [optimized] target(s) in 1m 53s\n     Running tests\\contracts\\main.rs (target\\release\\deps\\contracts-a6b45863e715e9c2.exe)\n\nrunning 25 tests\ntest file_io::io_003_batch_active_result_is_one_undo_unit_and_keeps_owner_view_identity ... ok\ntest file_io::io_003_batch_file_folder_newtabs_preview_and_native_only_output_share_image_counts ... ok\ntest file_io::io_003_batch_worker_preflight_cancel_and_drop_do_not_touch_output_or_owner ... ok\ntest file_io::io_003_clean_sequence_source_omission_keeps_cancel_failure_and_stale_atomic ... ok\ntest file_io::io_003_compacted_output_cancel_drop_stale_and_install_failure_preserve_live_state ... ok\ntest file_io::io_003_compacted_output_fences_install_without_adopting_path_or_savepoint ... ok\ntest file_io::io_003_core_cloned_during_install_cannot_finalize_or_inherit_original_fence ... ok\ntest file_io::io_003_external_pair_change_requires_explicit_renewed_confirmation ... ok\ntest file_io::io_003_failed_automatic_neighbor_keeps_primary_and_current_state ... ok\ntest file_io::io_003_light_table_reload_retains_properties_is_undoable_and_rejects_failed_or_cancelled_pixels ... ok\ntest file_io::io_003_noop_edit_and_batch_staging_preserve_original_file_authority ... ok\ntest file_io::io_003_pair_install_is_fenced_and_clean_save_repairs_missing_companion ... ok\ntest file_io::io_003_parallel_sequence_attaches_without_reopening_or_losing_later_edits ... ok\ntest file_io::io_003_pathless_replacements_revoke_previous_native_pair_authority ... ok\ntest file_io::io_003_public_core_clone_has_independent_file_authority ... ok\ntest file_io::io_003_raster_sequence_navigation_keeps_unedited_cells_clean ... ok\ntest file_io::io_003_reference_catalog_keeps_resident_cache_and_rejects_failed_replacement ... ok\ntest file_io::io_003_reference_replacement_reserves_initial_display_before_publishing_catalog ... ok\ntest file_io::io_003_reference_snapshot_and_tile_clones_keep_derived_pixels_charged_until_release ... ok\ntest file_io::io_003_sequence_activation_and_step_revoke_old_native_save_authority ... ok\ntest file_io::io_003_sequence_switch_drop_cancel_and_stale_do_not_write_recovery ... ok\ntest file_io::io_003_sequence_switch_installs_recovery_before_one_owner_commit_and_restores_exactly ... ok\ntest file_io::io_003_sequence_switch_requires_recovery_for_document_or_editor_edits ... ok\ntest file_io::io_003_stale_and_cross_core_open_results_never_publish ... ok\ntest file_io::sequence_render_snapshot_and_tile_clones_keep_managed_reservations_after_core_drop ... ok\n\ntest result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 233 filtered out; finished in 0.96s\n\n"
+    },
+    {
+      "command": "cargo test --release --locked --offline --package inkpod-io --test manager -- --test-threads=1",
+      "passed": 16,
+      "failed": 0,
+      "output": "warn: could not canonicalize path C:\\Users\\shuichi\n   Compiling inkpod-io v0.2.8 (C:\\Users\\shuichi\\GitHub\\inkpod\\rust\\inkpod-io)\n    Finished `release` profile [optimized] target(s) in 2.73s\n     Running tests\\manager.rs (target\\release\\deps\\manager-d568e7784fc7cc4a.exe)\n\nrunning 16 tests\ntest bounded_jobs_cancel_without_running_and_batches_publish_monotonic_counts ... ok\ntest byte_and_pixel_limits_are_checked_before_allocation ... ok\ntest concurrent_sequence_render_reservations_share_the_manager_count_limit ... ok\ntest hardlinks_share_identity_cache_and_per_file_lock_but_distinct_files_run_concurrently ... ok\ntest image_batch_yields_between_files_when_executor_queue_is_full ... ok\ntest lru_and_pinned_admission_obey_small_injected_budgets ... ok\ntest missing_nested_path_identity_and_owned_temporary_copy_are_bounded ... ok\ntest sequence_discovery_ignores_digit_width_and_retains_seed_with_bounded_selection ... ok\ntest sequence_render_admission_preflights_eviction_then_reclaims_the_lru ... ok\ntest sequence_render_budgets_belong_to_independent_managers ... ok\ntest sequence_render_byte_limit_rejects_invalid_and_aggregate_oversize_atomically ... ok\ntest sequence_render_leases_remain_memory_only_after_shutdown_and_owner_release ... ok\ntest sequence_render_leases_share_one_charge_and_keep_only_their_own_pixels ... ok\ntest sequence_render_reservations_are_also_charged_to_the_decoded_limit ... ok\ntest shared_cache_hits_keep_pinned_bytes_and_derived_pixels_charged ... ok\ntest writes_cancel_before_publication_invalidate_cache_and_leave_no_partial_file ... ok\n\ntest result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.49s\n\n"
+    },
+    {
+      "command": "cargo test --release --locked --offline --package inkpod-core --test contracts effects:: -- --test-threads=1",
+      "passed": 9,
+      "failed": 0,
+      "output": "warn: could not canonicalize path C:\\Users\\shuichi\n    Finished `release` profile [optimized] target(s) in 0.08s\n     Running tests\\contracts\\main.rs (target\\release\\deps\\contracts-a6b45863e715e9c2.exe)\n\nrunning 9 tests\ntest effects::acceptance_adjustment_order_changes_composite_without_changing_source_plane ... ok\ntest effects::acceptance_apply_is_exactly_one_undo_unit_and_last_filter_reuses_it ... ok\ntest effects::acceptance_boundary_airbrush_preserves_uniform_regions ... ok\ntest effects::acceptance_cancel_restores_the_original_tile_checksum ... ok\ntest effects::filter_preview_001_parameter_updates_recompute_from_the_original_base ... ok\ntest effects::full_effect_gestures_dust_and_alpha_are_atomic ... ok\ntest effects::generic_adjustment_tree_edits_remain_saveable_and_reject_ambiguous_merge ... ok\ntest effects::noop_invalid_and_adjustment_update_history_are_transactional ... ok\ntest effects::worker_cancel_and_dust_never_commit_partial_results ... ok\n\ntest result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 249 filtered out; finished in 0.21s\n\n"
+    },
+    {
+      "command": "ctest --preset windows-x64-release -R '^inkpod_windows_(core_host|renderer_host|filter_preview)_boundaries$' --output-on-failure",
+      "passed": 3,
+      "failed": 0,
+      "kind": "Static source-contract checks, not native runtime tests.",
+      "output": "Test project C:/Users/shuichi/GitHub/inkpod/build/windows-x64-release\n    Start 10: inkpod_windows_filter_preview_boundaries\n1/3 Test #10: inkpod_windows_filter_preview_boundaries ...   Passed    0.10 sec\n    Start 13: inkpod_windows_core_host_boundaries\n2/3 Test #13: inkpod_windows_core_host_boundaries ........   Passed    0.17 sec\n    Start 14: inkpod_windows_renderer_host_boundaries\n3/3 Test #14: inkpod_windows_renderer_host_boundaries ....   Passed    0.06 sec\n\n100% tests passed out of 3\n\nTotal Test time (real) =   0.34 sec\n"
+    }
+  ],
+  "historical_evidence": "docs/sequence-switch-performance.md and docs/sequence-switch-performance-20260828.json are prior measurements, not newly measured by this audit.",
+  "observed_external_worktree_changes": [
+    "apps/windows/app/app_smoke.cpp",
+    "docs/compatibility.md",
+    "docs/implementation-status.md"
+  ]
+}
