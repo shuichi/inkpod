@@ -619,6 +619,131 @@ COLORREF RenderWindowClientPixel(HWND window, POINT sample) noexcept {
         });
 }
 
+HWND TabCloseButtonAt(HWND tabs, int index, int control_id) noexcept {
+    RECT item{};
+    if (tabs == nullptr || index < 0
+        || TabCtrl_GetItemRect(tabs, index, &item) == FALSE) {
+        return nullptr;
+    }
+    for (HWND child = GetWindow(tabs, GW_CHILD);
+         child != nullptr;
+         child = GetWindow(child, GW_HWNDNEXT)) {
+        RECT bounds{};
+        if (GetDlgCtrlID(child) != control_id
+            || GetWindowRect(child, &bounds) == FALSE) {
+            continue;
+        }
+        MapWindowPoints(HWND_DESKTOP, tabs, reinterpret_cast<POINT*>(&bounds), 2U);
+        const POINT center{
+            (bounds.left + bounds.right) / 2,
+            (bounds.top + bounds.bottom) / 2};
+        if (PtInRect(&item, center) != FALSE) {
+            return child;
+        }
+    }
+    return nullptr;
+}
+
+bool CaptureTabCloseButton(
+    HWND button, UINT item_state, int size, std::span<COLORREF> pixels) noexcept {
+    if (button == nullptr || size <= 0
+        || pixels.size() != static_cast<std::size_t>(size) * size) {
+        return false;
+    }
+    const HWND parent = GetParent(button);
+    HDC window_dc = GetDC(button);
+    HDC target = window_dc == nullptr ? nullptr : CreateCompatibleDC(window_dc);
+    HBITMAP bitmap = target == nullptr
+        ? nullptr : CreateCompatibleBitmap(window_dc, size, size);
+    const HGDIOBJ previous = bitmap == nullptr ? nullptr : SelectObject(target, bitmap);
+    bool complete = previous != nullptr && previous != HGDI_ERROR;
+    if (complete) {
+        DRAWITEMSTRUCT draw{};
+        draw.CtlType = ODT_BUTTON;
+        draw.CtlID = static_cast<UINT>(GetDlgCtrlID(button));
+        draw.itemAction = ODA_DRAWENTIRE;
+        draw.itemState = item_state;
+        draw.hwndItem = button;
+        draw.hDC = target;
+        draw.rcItem = {0, 0, size, size};
+        FillRect(target, &draw.rcItem, GetSysColorBrush(COLOR_HIGHLIGHT));
+        complete = SendMessageW(parent, WM_DRAWITEM, draw.CtlID,
+            reinterpret_cast<LPARAM>(&draw)) != FALSE;
+        for (int y = 0; y < size && complete; ++y) {
+            for (int x = 0; x < size; ++x) {
+                const COLORREF pixel = GetPixel(target, x, y);
+                pixels[static_cast<std::size_t>(y) * size + x] = pixel;
+                complete = complete && pixel != CLR_INVALID;
+            }
+        }
+        SelectObject(target, previous);
+    }
+    if (bitmap != nullptr) {
+        DeleteObject(bitmap);
+    }
+    if (target != nullptr) {
+        DeleteDC(target);
+    }
+    if (window_dc != nullptr) {
+        ReleaseDC(button, window_dc);
+    }
+    return complete;
+}
+
+bool VerifyTabCloseButtonPainting(std::span<const HWND> buttons) noexcept {
+    // Compare the real document, right-group and Sequence WM_DRAWITEM routes
+    // at the same device-pixel bounds; their layout and close targets stay intact.
+    const UINT dpi = GetDpiForWindow(buttons.front());
+    const int size = MulDiv(20, static_cast<int>(dpi), 96);
+    if (size <= 0 || size > 128) {
+        std::fprintf(stderr, "tab close painting setup: dpi=%u first=%p\n",
+            dpi, static_cast<void*>(buttons.front()));
+        return false;
+    }
+    std::array<COLORREF, 128U * 128U> expected_storage{};
+    std::array<COLORREF, 128U * 128U> actual_storage{};
+    const auto count = static_cast<std::size_t>(size) * size;
+    const std::span<COLORREF> expected{expected_storage.data(), count};
+    const std::span<COLORREF> actual{actual_storage.data(), count};
+    for (const bool hovered : {false, true}) {
+        for (const UINT state : {0U, UINT{ODS_SELECTED}, UINT{ODS_DISABLED},
+                 UINT{ODS_FOCUS}, UINT{ODS_SELECTED | ODS_FOCUS}}) {
+            for (std::size_t index = 0U; index < buttons.size(); ++index) {
+                const HWND button = buttons[index];
+                if (button == nullptr || GetDpiForWindow(button) != dpi) {
+                    std::fprintf(stderr, "tab close painting target: kind=%zu hwnd=%p dpi=%u expected=%u\n",
+                        index, static_cast<void*>(button), GetDpiForWindow(button), dpi);
+                    return false;
+                }
+                SendMessageW(button, WM_MOUSELEAVE, 0, 0);
+                if (hovered) {
+                    SendMessageW(button, WM_MOUSEMOVE, 0, MAKELPARAM(1, 1));
+                }
+                const bool captured = CaptureTabCloseButton(button, state, size, actual);
+                SendMessageW(button, WM_MOUSELEAVE, 0, 0);
+                const int background = (state & ODS_SELECTED) != 0U ? COLOR_3DSHADOW
+                    : (hovered ? COLOR_3DLIGHT : COLOR_WINDOW);
+                const int foreground = (state & ODS_DISABLED) != 0U
+                    ? COLOR_GRAYTEXT : COLOR_BTNTEXT;
+                if (!captured || actual.front() != GetSysColor(background)
+                    || std::find(actual.begin(), actual.end(), GetSysColor(foreground))
+                        == actual.end()
+                    || (index != 0U
+                        && !std::equal(expected.begin(), expected.end(), actual.begin()))) {
+                    std::fprintf(stderr,
+                        "tab close painting mismatch: kind=%zu dpi=%u state=%u hover=%d\n",
+                        index, dpi, state, hovered ? 1 : 0);
+                    return false;
+                }
+                if (index == 0U) {
+                    std::copy(actual.begin(), actual.end(), expected.begin());
+                }
+            }
+        }
+    }
+    return true;
+}
+
 int VerifyColorPinResizeRepaint(HWND pane) noexcept {
     const HWND pin = GetDlgItem(pane, IDC_COLOR_PIN);
     const HWND target = GetDlgItem(pane, IDC_COLOR_TARGET);
@@ -1856,6 +1981,13 @@ int RunSequencePaneSmoke(ApplicationHost& state) noexcept {
     const auto document_before_close = state.routing.targets.DocumentSession();
     if (sequence_close == nullptr || !WindowHasAccessibleName(sequence_close)) {
         return 8721;
+    }
+    const HWND tool_tabs = state.Workspace().windows.dock_host.ToolTabWindow();
+    const std::array close_buttons{
+        TabCloseButtonAt(tool_tabs, TabCtrl_GetCurSel(tool_tabs), IDC_RIGHT_TOOL_TAB_CLOSE),
+        sequence_close};
+    if (!VerifyTabCloseButtonPainting(close_buttons)) {
+        return 8722;
     }
     SendMessageW(sequence_close, BM_CLICK, 0, 0);
     // A queued second close refers to the same now-hidden pane, not the tab
@@ -13456,34 +13588,7 @@ int RunTabDragSmoke(ApplicationHost& state) noexcept {
     };
 
     const auto close_button_for_tab = [](HWND tabs, int index) noexcept {
-        RECT item{};
-        if (tabs == nullptr || index < 0
-            || TabCtrl_GetItemRect(tabs, index, &item) == FALSE) {
-            return HWND{};
-        }
-        for (HWND child = GetWindow(tabs, GW_CHILD);
-             child != nullptr;
-             child = GetWindow(child, GW_HWNDNEXT)) {
-            if (GetDlgCtrlID(child) != IDC_DOCUMENT_TAB_CLOSE) {
-                continue;
-            }
-            RECT bounds{};
-            if (GetWindowRect(child, &bounds) == FALSE) {
-                continue;
-            }
-            MapWindowPoints(
-                HWND_DESKTOP,
-                tabs,
-                reinterpret_cast<POINT*>(&bounds),
-                2U);
-            const POINT center{
-                (bounds.left + bounds.right) / 2,
-                (bounds.top + bounds.bottom) / 2};
-            if (PtInRect(&item, center) != FALSE) {
-                return child;
-            }
-        }
-        return HWND{};
+        return TabCloseButtonAt(tabs, index, IDC_DOCUMENT_TAB_CLOSE);
     };
 
     const DocumentViewId close_retained = group->ViewAt(0U);
@@ -13570,6 +13675,13 @@ int RunTabDragSmoke(ApplicationHost& state) noexcept {
             }
         }
         return 11181;
+    }
+    const HWND tool_tabs = state.Workspace().windows.dock_host.ToolTabWindow();
+    const std::array close_buttons{
+        TabCloseButtonAt(tool_tabs, TabCtrl_GetCurSel(tool_tabs), IDC_RIGHT_TOOL_TAB_CLOSE),
+        close_button_for_tab(group->document_tabs, 0)};
+    if (!VerifyTabCloseButtonPainting(close_buttons)) {
+        return 8722;
     }
     SendMessageW(close_button, BM_CLICK, 0, 0);
     PumpPendingWindowMessages();

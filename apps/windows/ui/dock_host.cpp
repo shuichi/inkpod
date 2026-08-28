@@ -16,6 +16,7 @@
 
 #include "app/resource.h"
 #include "ui/localization.h"
+#include "ui/tab_close_button.h"
 
 namespace inkpod::windows::ui {
 namespace {
@@ -1339,21 +1340,7 @@ bool DockHost::DrawPaneTabCloseButton(const DRAWITEMSTRUCT& draw) noexcept {
     }
     const DockPanePlacement* placement = model_ == nullptr ? nullptr : model_->Pane(pane->type);
     const bool active = placement != nullptr && placement->active_tab;
-    const bool pressed = (draw.itemState & ODS_SELECTED) != 0U;
-    FillRect(draw.hDC, &draw.rcItem, GetSysColorBrush(pressed ? COLOR_3DSHADOW
-        : (pane->close_hovered ? COLOR_3DLIGHT : (active ? COLOR_WINDOW : COLOR_BTNFACE))));
-    RECT icon = draw.rcItem;
-    const int inset = std::max(1, ScaleDip(3, dpi_));
-    InflateRect(&icon, -inset, -inset);
-    DrawFrameControl(draw.hDC, &icon, DFC_CAPTION,
-        DFCS_CAPTIONCLOSE | DFCS_FLAT | DFCS_TRANSPARENT
-            | (pressed ? DFCS_PUSHED : 0U)
-            | ((draw.itemState & ODS_DISABLED) != 0U ? DFCS_INACTIVE : 0U));
-    if ((draw.itemState & ODS_FOCUS) != 0U) {
-        RECT focus = draw.rcItem;
-        InflateRect(&focus, -1, -1);
-        DrawFocusRect(draw.hDC, &focus);
-    }
+    PaintTabCloseButton(draw, active, pane->close_hovered);
     return true;
 }
 
@@ -1562,52 +1549,10 @@ bool DockHost::DrawToolTabCloseButton(
     if (slot == nullptr) {
         return false;
     }
-    const bool disabled = (draw.itemState & ODS_DISABLED) != 0U;
-    const bool pressed = (draw.itemState & ODS_SELECTED) != 0U;
     const int selected = TabCtrl_GetCurSel(right_tool_tab_control_);
     const bool active = selected >= 0
         && ToolTabAt(right_tool_tab_control_, selected) == slot->tab;
-    const int background = pressed
-        ? COLOR_3DSHADOW
-        : (slot->hovered ? COLOR_3DLIGHT
-                         : (active ? COLOR_WINDOW : COLOR_BTNFACE));
-    const int foreground = disabled ? COLOR_GRAYTEXT : COLOR_BTNTEXT;
-    FillRect(draw.hDC, &draw.rcItem, GetSysColorBrush(background));
-
-    const int inset = std::max(4, ScaleDip(6, dpi_));
-    const int offset = pressed ? std::max(1, ScaleDip(1, dpi_)) : 0;
-    const HPEN pen = CreatePen(
-        PS_SOLID, std::max(1, ScaleDip(1, dpi_)), GetSysColor(foreground));
-    if (pen != nullptr) {
-        const HGDIOBJ previous = SelectObject(draw.hDC, pen);
-        MoveToEx(
-            draw.hDC,
-            draw.rcItem.left + inset + offset,
-            draw.rcItem.top + inset + offset,
-            nullptr);
-        LineTo(
-            draw.hDC,
-            draw.rcItem.right - inset + offset,
-            draw.rcItem.bottom - inset + offset);
-        MoveToEx(
-            draw.hDC,
-            draw.rcItem.right - inset + offset,
-            draw.rcItem.top + inset + offset,
-            nullptr);
-        LineTo(
-            draw.hDC,
-            draw.rcItem.left + inset + offset,
-            draw.rcItem.bottom - inset + offset);
-        if (previous != nullptr) {
-            SelectObject(draw.hDC, previous);
-        }
-        DeleteObject(pen);
-    }
-    if ((draw.itemState & ODS_FOCUS) != 0U) {
-        RECT focus = draw.rcItem;
-        InflateRect(&focus, -2, -2);
-        DrawFocusRect(draw.hDC, &focus);
-    }
+    PaintTabCloseButton(draw, active, slot->hovered);
     return true;
 }
 

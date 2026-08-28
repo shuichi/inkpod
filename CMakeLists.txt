@@ -713,6 +713,8 @@ if(WIN32)
         apps/windows/ui/dock_layout.h
         apps/windows/ui/dock_host.cpp
         apps/windows/ui/dock_host.h
+        apps/windows/ui/tab_close_button.cpp
+        apps/windows/ui/tab_close_button.h
         apps/windows/ui/right_tool_tabs.cpp
         apps/windows/ui/right_tool_tabs.h
         apps/windows/ui/localization.cpp
@@ -994,6 +996,8 @@ if(WIN32)
         apps/windows/ui/thumbnail_cache.h
         apps/windows/ui/tab_drag.cpp
         apps/windows/ui/tab_drag.h
+        apps/windows/ui/tab_close_button.cpp
+        apps/windows/ui/tab_close_button.h
         apps/windows/ui/workspace_layout.cpp
         apps/windows/ui/workspace_layout.h
         tests/abi_smoke.cpp

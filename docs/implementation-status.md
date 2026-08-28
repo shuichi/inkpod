@@ -11,6 +11,7 @@ past acceptance records are summarized in [`legacy.md`](legacy.md).
 
 | Area | Current state |
 | --- | --- |
+| Tab close icons | Document tabs, right-side group tabs and pane tabs including Sequence share `PaintTabCloseButton`. The borderless two-line glyph, DPI scaling, system colors and active/hover/pressed/disabled/focus presentation have one owner. Existing Common Controls buttons, accessible names, hit bounds, lifetime and stable-target close routes are unchanged. |
 | Rust Core | All production document mutations enter one typed canonical primitive and use the same executor for live commit, Undo/Redo, and replay. Batch v4 resolves every selected Color Replace layer selector to all matching stable plane IDs, deduplicates overlaps, and lowers the result together with the other enabled operations to one private `ApplyBatchOperations` procedure and one Undo unit. Missing/invalid/hidden/non-editable/cancelled targets publish nothing. Batch lowering still emits the existing single-target canonical operation records; the current native container is v29 and replay epoch remains 25. Contact-sheet preview and sparse fill-protection semantics remain unchanged. |
 | Persistence | Native Cell/Cut `.inkpod` is exact-current v29; Cell replay epoch remains 25 and Cut descriptor schema 2/epoch 24 remains separate. `META` section/record v2 adds mandatory field 21 for the PNG/TIFF/TGA/BMP companion format; document/archive/editor digests and canonical replay payloads are unchanged. Raster import retains its decoded format and a new Cell defaults to PNG unless Preferences selects another format. Ordinary Save/Save As prepares and flushes native plus same-stem raster outputs, rechecks both destinations under ordered locks, and publishes path/document/editor savepoints only after installation. Partial failures use bounded backup/journal recovery; two-file filesystem atomicity is not promised. Autosave/recovery, explicit export, Batch output and preview retain their separate savepoint/output rules. `.inkbatch` remains exact-current v4 and rejects v1-v3 without migration. |
 | Shared file I/O (`IO-003`) | One application-owned `inkpod-io` manager owns the filesystem boundary for editable native/recovery, editable PNG/TIFF/TGA/BMP, sequences, Subpalette/Reference, Light Table add/reload, and Batch file/folder/preview. Windows submits paths and typed targets through ABI v24, polls progress and takes staged results; Rust owns enumeration, identity, reads/decode, encode/write, temporary files and cleanup. Bounded workers run file operations in parallel with per-file physical/path coordination. The shared size-based LRU caps 10,000 images, 512 MiB encoded per file, 8 GiB encoded and 8 GiB decoded, including preallocation reservations, pinned payloads and derived display leases. Sequence-display reservations add a shared-manager cap of eight source allocations/128 MiB, including the active source, within the existing decoded cap; prepared results, snapshots and tile clones remain charged until their final lease is released. Native/recovery keeps its separate 1 GiB streaming bound. Automatic sequence discovery is a separate job after single-image open; failure does not undo the successful open or later edits. Fresh raster-cell activation establishes clean document and editor baselines without writing an `.inkpod` file or granting ordinary-save path authority. Actual editing becomes dirty; no-op/bind, delayed sequence discovery and recovery retain their existing history, dirty state and authority. Whole-sequence editable-document residency is not implemented. See [SPEC.md](../SPEC.md) sections 4 and 4.1 (`SEQ-001`, `IO-003`). |
@@ -93,6 +94,34 @@ its compact historical record is retained in [`legacy.md`](legacy.md).
   OS file APIs confined to the private `inkpod-io` backend.
 
 ## Latest representative verification
+
+### Shared tab-close painting (`WORKSPACE-001`, `VIEW-004`, `SEQ-001`, 2026-08-28)
+
+The existing Sequence and document-tab product smokes now compare their real
+`WM_DRAWITEM` output with the right-group close button at identical device-pixel
+bounds. The comparison requires exact pixel equality, the expected system-color
+background and a nonempty foreground glyph for normal, pressed, disabled, focused
+and pressed/focused states, each with and without hover. At 192 DPI, the regression
+first failed on the old Sequence caption-frame drawing, then passed with the
+shared painter. The static tab-boundary contract also requires all three callers
+to use that painter; existing close/drag/cancel/stale-target checks remain intact.
+
+Both x64 Release and ARM64 Debug configure/build, static-CRT verification,
+portable ZIP and unsigned MSIX generation pass. All 46 x64 Release CTests pass
+in 159.27 seconds, including complete English/Japanese product smokes in
+58.42/66.55 seconds. ARM64 Debug's four targeted tab/dock-boundary, owner-model
+and Japanese product-smoke tests pass in 266.60 seconds; the complete Japanese
+product smoke takes 266.20 seconds. The full ARM64 CTest suite was not repeated.
+A normal Japanese ARM64 Debug window was also inspected at
+200% display scaling: all three tab-close glyphs are borderless, their accessible
+button names remain present, and clicking Sequence close hides only that pane
+while leaving the clean document open. The verification window was restored to
+its original size with Sequence hidden and closed without editing a document.
+
+`cargo fmt --check` and `git diff --check` pass. Rust sources, ABI, persistence and
+replay are unchanged; Rust clippy/test/benchmark/rustdoc were not rerun for this
+Windows-only drawing change. Physical 100%/150% scaling, high contrast and full
+screen-reader checks were not repeated.
 
 ### Right-pane smoke setup (`WORKSPACE-001`, 2026-08-28)
 

@@ -16,6 +16,7 @@
 #include "localization.h"
 #include "main_window_runtime.h"
 #include "main_window_runtime_internal.h"
+#include "tab_close_button.h"
 
 namespace inkpod::windows::ui {
 namespace {
@@ -301,52 +302,9 @@ bool DrawDocumentTabCloseButton(
     if (slot == nullptr) {
         return false;
     }
-    const bool disabled = (draw.itemState & ODS_DISABLED) != 0U;
-    const bool pressed = (draw.itemState & ODS_SELECTED) != 0U;
     const int selected = TabCtrl_GetCurSel(tabs);
     const bool active = selected >= 0 && TabViewAt(tabs, selected) == slot->view;
-    const int background = pressed
-        ? COLOR_3DSHADOW
-        : (slot->hovered ? COLOR_3DLIGHT : (active ? COLOR_WINDOW : COLOR_BTNFACE));
-    const int foreground = disabled ? COLOR_GRAYTEXT : COLOR_BTNTEXT;
-    FillRect(draw.hDC, &draw.rcItem, GetSysColorBrush(background));
-
-    const int inset = std::max(4, ScaleForTabDpi(draw.hwndItem, 6));
-    const int offset = pressed ? std::max(1, ScaleForTabDpi(draw.hwndItem, 1)) : 0;
-    const HPEN pen = CreatePen(
-        PS_SOLID,
-        std::max(1, ScaleForTabDpi(draw.hwndItem, 1)),
-        GetSysColor(foreground));
-    if (pen != nullptr) {
-        const HGDIOBJ previous = SelectObject(draw.hDC, pen);
-        MoveToEx(
-            draw.hDC,
-            draw.rcItem.left + inset + offset,
-            draw.rcItem.top + inset + offset,
-            nullptr);
-        LineTo(
-            draw.hDC,
-            draw.rcItem.right - inset + offset,
-            draw.rcItem.bottom - inset + offset);
-        MoveToEx(
-            draw.hDC,
-            draw.rcItem.right - inset + offset,
-            draw.rcItem.top + inset + offset,
-            nullptr);
-        LineTo(
-            draw.hDC,
-            draw.rcItem.left + inset + offset,
-            draw.rcItem.bottom - inset + offset);
-        if (previous != nullptr) {
-            SelectObject(draw.hDC, previous);
-        }
-        DeleteObject(pen);
-    }
-    if ((draw.itemState & ODS_FOCUS) != 0U) {
-        RECT focus = draw.rcItem;
-        InflateRect(&focus, -2, -2);
-        DrawFocusRect(draw.hDC, &focus);
-    }
+    PaintTabCloseButton(draw, active, slot->hovered);
     return true;
 }
 

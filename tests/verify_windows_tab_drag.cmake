@@ -19,6 +19,7 @@ file(READ "${APP_DIR}/application_host.h" HOST_HEADER)
 file(READ "${APP_DIR}/application_host.cpp" HOST_SOURCE)
 file(READ "${APP_DIR}/tab_drag.h" MODEL_HEADER)
 file(READ "${UI_DIR}/tab_drag.cpp" UI_SOURCE)
+file(READ "${UI_DIR}/dock_host.cpp" DOCK_SOURCE)
 file(READ "${UI_DIR}/tab_drag.h" UI_HEADER)
 file(READ "${UI_DIR}/main_window.cpp" MAIN_SOURCE)
 file(READ "${UI_DIR}/main_window_runtime.cpp" RUNTIME_SOURCE)
@@ -96,6 +97,14 @@ if(NOT RUNTIME_SOURCE MATCHES "SyncDocumentTabCloseButtons"
         "document-tab close buttons must synchronize and route by value identity")
 endif()
 
+string(REGEX MATCHALL "PaintTabCloseButton\\(" DOCUMENT_CLOSE_PAINTS "${UI_SOURCE}")
+string(REGEX MATCHALL "PaintTabCloseButton\\(" DOCK_CLOSE_PAINTS "${DOCK_SOURCE}")
+list(LENGTH DOCUMENT_CLOSE_PAINTS DOCUMENT_CLOSE_PAINT_COUNT)
+list(LENGTH DOCK_CLOSE_PAINTS DOCK_CLOSE_PAINT_COUNT)
+if(NOT DOCUMENT_CLOSE_PAINT_COUNT EQUAL 1 OR NOT DOCK_CLOSE_PAINT_COUNT EQUAL 2)
+    message(FATAL_ERROR "Document, right-group and pane tabs must share the close-button painter")
+endif()
+
 foreach(command IN ITEMS
         IDM_TAB_MOVE_LEFT
         IDM_TAB_MOVE_RIGHT
@@ -117,6 +126,7 @@ foreach(required IN ITEMS
         "IDM_WORKSPACE_NEW_WINDOW"
         "before_copy_views"
         "IDC_DOCUMENT_TAB_CLOSE"
+        "VerifyTabCloseButtonPainting"
         "BM_CLICK"
         "smoke_dirty_prompt_choice")
     if(NOT SMOKE_SOURCE MATCHES "${required}")

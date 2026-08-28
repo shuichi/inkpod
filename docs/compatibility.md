@@ -81,6 +81,18 @@ verified at their natural build, ABI, Core, format, or renderer boundary.
 | `SCRIPT-004` | In progress | M05B provides typed closed-fragment dependency rules. User-confirmed M24 exports one/linear active-or-inactive journal selections from canonical authority with exact parent assertions, typed result references, strict selectors, portability metadata, resource/cancel atomicity and cache-free replay. User-confirmed M25 exposes that exporter through a bounded event span and generation-bound opaque fragment with two-stage canonical UTF-8 copy; M26 changes no exporter semantics; visualization summaries/thumbnails remain excluded | Destination rebind/paste transaction, Batch/History clipboard and source-preserving structured editor remain pending |
 | `SCRIPT-005` | In progress | Batch v4 supersedes v3 for multi-target authoring while lowering to the unchanged private canonical primitive and leaving the 75-command InkScript surface unchanged. M13's quick fixture, non-byte counters, sample policy and 64–107 ms x64 envelope remain unchanged. The explicitly approved v29 byte/checksum expectation update passes the Release-only quick contract in one warm-up and five measured ARM64 runs without changing execution or the timing interval | The full M36 InkScript gate and product route remain pending; `.inkbatch` v4 is the independent product Batch contract |
 
+For `WORKSPACE-001`, `VIEW-004` and `SEQ-001`, document, right-group and pane-tab
+close icons now use one Windows painter while retaining their standard buttons,
+accessible names, hit bounds and distinct stable-target close routes. The existing
+Sequence and document-tab product smokes compare exact pixels against the
+right-group button for normal/pressed/disabled/focused/pressed-focused states,
+with and without hover, at the same device-pixel bounds. The 192-DPI regression
+fails with the former Sequence caption frame and passes with the shared borderless
+glyph. All 46 x64 Release CTests, including English/Japanese product smokes, pass;
+ARM64 Debug's four targeted tab/dock-boundary, owner-model and Japanese
+product-smoke tests also pass. A normal Japanese ARM64 window confirms consistent icons and pane-only
+Sequence close. The full physical DPI/high-contrast/screen-reader gaps remain.
+
 The current `WORKSPACE-001` Color-resize evidence additionally captures the old and
 new target-field/Pin-button bounds, clips out their current child windows, and
 synchronously repaints the exposed parent area before repainting the children. A
