@@ -18,8 +18,9 @@ pub struct SequenceSwitchSnapshot {
 
 /// Validated target and source recovery data awaiting owner-thread publication.
 ///
-/// The I/O owner must durably install the source recovery and its association
-/// before committing this value. Taking the DTO is not proof of durability.
+/// When source recovery is present, the I/O owner must durably install it and
+/// its association before committing this value. Taking the DTO is not proof
+/// of durability. File I/O may explicitly omit recovery for a clean source.
 #[derive(Debug)]
 pub struct PreparedSequenceSwitch {
     source_recovery: Option<NativeFile>,
@@ -40,6 +41,26 @@ impl SequenceSwitchSnapshot {
     pub fn prepare(
         self,
         target_recovery: Option<NativeFile>,
+        cancelled: impl FnMut() -> bool,
+    ) -> Result<PreparedSequenceSwitch, CoreError> {
+        self.prepare_impl(target_recovery, true, cancelled)
+    }
+
+    /// Omits recovery encoding only for a clean source or a same-cell no-op.
+    /// The owner still validates the captured document/editor save token before
+    /// publishing the prepared target; no normal savepoint is advanced.
+    pub(crate) fn prepare_without_source_recovery(
+        self,
+        target_recovery: Option<NativeFile>,
+        cancelled: impl FnMut() -> bool,
+    ) -> Result<PreparedSequenceSwitch, CoreError> {
+        self.prepare_impl(target_recovery, false, cancelled)
+    }
+
+    fn prepare_impl(
+        self,
+        target_recovery: Option<NativeFile>,
+        include_source_recovery: bool,
         mut cancelled: impl FnMut() -> bool,
     ) -> Result<PreparedSequenceSwitch, CoreError> {
         if cancelled() {
@@ -55,12 +76,21 @@ impl SequenceSwitchSnapshot {
                 token,
             });
         }
-        let editor_savepoint = core
-            .editor_session
-            .as_ref()
-            .ok_or(CoreError::NoDocument)?
-            .savepoint;
-        let source_recovery = core.build_procedure_file(core.savepoint, editor_savepoint)?;
+        let source_recovery = if include_source_recovery {
+            let editor_savepoint = core
+                .editor_session
+                .as_ref()
+                .ok_or(CoreError::NoDocument)?
+                .savepoint;
+            Some(core.build_procedure_file(core.savepoint, editor_savepoint)?)
+        } else {
+            if core.savepoint != Some(core.current_state) || core.editor_dirty() {
+                return Err(CoreError::InvalidArgument(
+                    "dirty sequence source requires a recovery destination",
+                ));
+            }
+            None
+        };
         if cancelled() {
             return Err(CoreError::Cancelled);
         }
@@ -74,7 +104,7 @@ impl SequenceSwitchSnapshot {
             return Err(CoreError::Cancelled);
         }
         Ok(PreparedSequenceSwitch {
-            source_recovery: Some(source_recovery),
+            source_recovery,
             target: Some(core),
             request: self.request,
             sequence_revision: self.sequence_revision,
@@ -85,7 +115,8 @@ impl SequenceSwitchSnapshot {
 
 impl PreparedSequenceSwitch {
     /// Transfers the native-only source recovery for durable external storage.
-    /// Returns `None` for a same-cell no-op or after the DTO was already taken.
+    /// Returns `None` for a same-cell no-op, an explicitly omitted clean source,
+    /// or after the DTO was already taken.
     pub fn take_source_recovery(&mut self) -> Option<NativeFile> {
         self.source_recovery.take()
     }
@@ -140,13 +171,14 @@ impl Core {
         Ok(())
     }
 
-    /// Publishes a prepared target after the source recovery is durable.
+    /// Publishes a prepared target after any source recovery is durable.
     ///
     /// The caller must fence mutation between validation and recovery install.
     /// This method performs no I/O. Stale/error leaves every live field unchanged;
     /// success replaces the document once, preserving current application I/O,
     /// creation defaults, view identities, and reference selection. Primary view
-    /// resets as for a synchronous switch. A same-cell request advances nothing.
+    /// resets as for a synchronous switch. A same-cell request advances nothing;
+    /// an explicitly omitted clean source needs no recovery installation.
     pub fn commit_prepared_sequence_switch(
         &mut self,
         prepared: PreparedSequenceSwitch,

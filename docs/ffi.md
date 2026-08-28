@@ -111,6 +111,13 @@ wrong owner、stale document/editor revision、失敗、cancel は live 文書�
 文書の `REPLACE` を判定し、`activation_commit` で source/target identity・generation・revision を再検証する。
 `NOOP` と `BIND` は dirty 状態と保存の関連付けを保持する。結び付け済み source の非同期切り替えだけは
 `InkpodSequenceSwitchRequest.flags` の `REQUIRED` も使い、UUID が同じでも generation が違えば実切り替えとする。
+`inkpod_core_io_sequence_switch_submit` の recovery path は NULL または `path_bytes == 0` で省略できる。
+ただし実切り替え元の document または EditorState が dirty なら `source_recovery` は必須で、省略は
+`INVALID_ARGUMENT` とする。両方が clean の場合に限り、source path 省略で source recovery の生成・保存を
+省き、target recovery の検証後に owner 上の revision／authority 再検証と一回の commit を行う。
+source path を明示した従来経路は clean でも保存する。`REQUIRED` は dirty 判定ではなく、同一セルへの
+no-op は recovery を読み書きしない。復元された editor revision／digest は保存時の値を保持し、通常保存先と
+document／editor savepoint は採用せず dirty／recovered とする。公開 ABI layout と native schema は変わらない。
 未結び付けの source を置換する際は、Auto 設定でも通常の保存確認を先に行う。
 Windows の `DocumentRegistry` は `REPLACE` の反映前に切り替え先 identity と normalized original/source path を予約し、
 その間の別 open/save による重複採用を拒否する。成功後だけ準備済み値を move して旧保存先を解除し、
@@ -142,6 +149,12 @@ cache 統計は `inkpod_io_manager_get_cache_info` から取得する。同期 `
 job の poll/cancel/release は外部同期の下で任意 thread から利用できる。apply は対象 Core/catalog の owner thread、
 Batch result の take は job の作成 thread で行う。installing job の release は最終 apply まで拒否する。
 Rust は C++ callback を呼ばない。Windows は CoreHost の polling continuation と UI completion queue で連携する。
+Windows の status bar はこの既存 ABI の進捗を再利用する。UI は発行時 workspace／generation と
+controller request ID を持つ bounded な cached summary だけを読み、実 job handle の poll/apply/release は
+既存 owner が続ける。数値表示は `completed_work/total_work` だけを使い、総量不明・READY・INSTALLING・
+owner 反映待ちは不定表示にする。Cancel は選択した同一 request にだけ送り、完了後や ID 再利用をまたいで
+別 job に転送しない。task 型の処理は既存 `inkpod_task_query` と cancel ABI を使う。表示移行に伴う
+公開 structure layout、ABI version、thread／ownership 規則の変更はない。
 close は非同期に cancel/drain し、保存の最終 apply 前に Core を destroy しない。すべての job と Core の drain 後に
 manager を release する。manager release は worker の終了を待つため、通常の UI 操作経路で呼ばない。
 

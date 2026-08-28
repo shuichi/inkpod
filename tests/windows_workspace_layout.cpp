@@ -48,6 +48,8 @@ using inkpod::windows::ui::kDockedZoneCount;
 using inkpod::windows::ui::kDockPaneCount;
 using inkpod::windows::ui::kMaximumWorkspaceLayoutRecordBytes;
 
+constexpr std::uint32_t kRetiredJobProgressPaneId = UINT32_C(0x424f4a50);
+
 int Width(const RECT& value) noexcept {
     return value.right - value.left;
 }
@@ -236,6 +238,57 @@ bool ExtractVersion8Workspace(
     return true;
 }
 
+bool RetiredJobProgressPaneIsAbsent() noexcept {
+    for (const auto& descriptor : PaneDescriptors()) {
+        if (descriptor.stable_type_id == kRetiredJobProgressPaneId) {
+            return false;
+        }
+    }
+    WorkspaceLayoutState state{};
+    std::array<std::byte, kMaximumWorkspaceLayoutRecordBytes> bytes{};
+    std::size_t written{};
+    if (!EncodeWorkspaceLayout(state, bytes, written)
+        || written != sizeof(PersistedWorkspaceV9ForMigration)) {
+        return false;
+    }
+    PersistedWorkspaceV9ForMigration retired_job_progress{};
+    std::memcpy(&retired_job_progress, bytes.data(), written);
+    auto& record = retired_job_progress.workspace;
+    if (record.pane_count >= record.panes.size()) {
+        return false;
+    }
+    // A retired pane ID must not recreate a docked job pane.
+    record.panes[record.pane_count++] = {
+        kRetiredJobProgressPaneId,
+        static_cast<std::uint32_t>(DockZone::Bottom),
+        static_cast<std::uint32_t>(DockZone::Bottom),
+        UINT32_C(0x81000000), 1000U, 0, 0, 720, 112};
+    record.zones[static_cast<std::size_t>(DockZone::Bottom)] = {
+        static_cast<std::uint32_t>(DockStackMode::Split),
+        kRetiredJobProgressPaneId, 112};
+    std::memcpy(bytes.data(), &retired_job_progress, written);
+    if (DecodeWorkspaceLayout(state, std::span<const std::byte>(bytes.data(), written))
+            != WorkspaceLayoutDecodeResult::Current
+        || state.dock.PaneCount(DockZone::Bottom) != 0U
+        || ComputeDockLayout(state.dock, 1'200, 800, 96U)
+               .zones[static_cast<std::size_t>(DockZone::Bottom)].height != 0
+        || !EncodeWorkspaceLayout(state, bytes, written)) {
+        return false;
+    }
+    std::memcpy(&retired_job_progress, bytes.data(), written);
+    for (const auto& pane : record.panes) {
+        if (pane.stable_type_id == kRetiredJobProgressPaneId) {
+            return false;
+        }
+    }
+    for (const auto& zone : record.zones) {
+        if (zone.active_tab == kRetiredJobProgressPaneId) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool ValidDynamicRightTabs(const WorkspaceLayoutState& state) noexcept {
     std::array<bool, kDockPaneCount> seen_panes{};
     std::array<std::uint32_t, kDockPaneCount> seen_ids{};
@@ -273,7 +326,6 @@ bool ValidDynamicRightTabs(const WorkspaceLayoutState& state) noexcept {
         const auto* placement = state.dock.Pane(descriptor.type);
         if (descriptor.type != DockPaneType::Tool
             && descriptor.type != DockPaneType::ToolOptions
-            && descriptor.type != DockPaneType::JobProgress
             && (descriptor.allowed_zones
                 & inkpod::windows::ui::DockZoneBit(DockZone::Right)) != 0U
             && placement != nullptr && placement->present
@@ -297,8 +349,6 @@ int main() {
         static_cast<std::size_t>(DockPaneType::Color)];
     const auto& layer_descriptor = descriptors[
         static_cast<std::size_t>(DockPaneType::Layer)];
-    const auto& job_descriptor = descriptors[
-        static_cast<std::size_t>(DockPaneType::JobProgress)];
     if (descriptors.size() != kDockPaneCount
         || PaneDescriptors()[0].stable_type_id == 0U
         || PaneDescriptors()[0].title_resource_id == 0U
@@ -321,13 +371,11 @@ int main() {
         || !locator_descriptor.persist_layout
         || !locator_descriptor.can_float
         || !locator_descriptor.can_auto_hide
-        || !locator_descriptor.show_header_when_singleton
-        || job_descriptor.default_visible
-        || job_descriptor.persist_layout
-        || job_descriptor.can_float
-        || job_descriptor.can_auto_hide
-        || !job_descriptor.show_header_when_singleton) {
+        || !locator_descriptor.show_header_when_singleton) {
         return 1;
+    }
+    if (!RetiredJobProgressPaneIsAbsent()) {
+        return 44;
     }
 
     RightToolTabsModel tool_tabs{};
@@ -673,6 +721,34 @@ int main() {
         return 144;
     }
 
+    DockLayoutModel sequence_model{};
+    const auto& sequence_descriptor = PaneDescriptors()[
+        static_cast<std::size_t>(DockPaneType::Sequence)];
+    if (sequence_descriptor.minimum_height_dip != 168
+        || sequence_descriptor.preferred_height_dip != 184
+        || sequence_model.Zone(DockZone::Bottom)->extent_dip != 184
+        || sequence_model.RestorePane(DockPaneType::Sequence) != DockResult::Ok
+        || sequence_model.SetZoneExtentDip(DockZone::Bottom, 1) != DockResult::Ok
+        || sequence_model.Zone(DockZone::Bottom)->extent_dip != 168
+        || sequence_model.SetZoneExtentDip(DockZone::Bottom, 1) != DockResult::NoOp) {
+        return 145;
+    }
+    const auto sequence_minimum = ComputeDockLayout(sequence_model, 1'200, 720, 96U);
+    const auto sequence_minimum_high_dpi = ComputeDockLayout(sequence_model, 2'400, 1'440, 192U);
+    if (sequence_minimum.panes[static_cast<std::size_t>(DockPaneType::Sequence)].bounds.height != 168
+        || sequence_minimum_high_dpi.panes[
+            static_cast<std::size_t>(DockPaneType::Sequence)].bounds.height != 336
+        || sequence_model.HidePane(DockPaneType::Sequence) != DockResult::Ok
+        || sequence_model.HidePane(DockPaneType::Sequence) != DockResult::NoOp
+        || sequence_model.RestorePane(DockPaneType::Sequence) != DockResult::Ok
+        // Restoring the only pane in a zone retains the existing preferred-size
+        // contract; the compact minimum must remain available after reopening.
+        || sequence_model.Zone(DockZone::Bottom)->extent_dip != 184
+        || sequence_model.SetZoneExtentDip(DockZone::Bottom, 1) != DockResult::Ok
+        || sequence_model.Zone(DockZone::Bottom)->extent_dip != 168) {
+        return 146;
+    }
+
     DockLayoutModel auxiliary_model{};
     if (auxiliary_model.IsPaneVisible(DockPaneType::Locator)
         || auxiliary_model.SetPaneAutoHide(DockPaneType::Locator, true)
@@ -685,12 +761,7 @@ int main() {
             != DockResult::Ok
         || auxiliary_model.Pane(DockPaneType::Locator)->zone
             != DockZone::Right
-        || auxiliary_model.SetPaneAutoHide(DockPaneType::JobProgress, true)
-            != DockResult::ZoneNotAllowed
-        || auxiliary_model.FloatPane(
-               DockPaneType::JobProgress,
-               DockFloatingPlacement{0, 0, 720, 112})
-            != DockResult::ZoneNotAllowed) {
+        || auxiliary_model.PaneCount(DockZone::Bottom) != 0U) {
         return 43;
     }
 
@@ -1064,11 +1135,6 @@ int main() {
     WorkspaceLayoutState serialized = preset;
     serialized.split_orientation = WorkspaceSplitOrientation::Horizontal;
     serialized.split_ratio_milli = 650U;
-    if (serialized.dock.RestorePane(DockPaneType::JobProgress)
-            != DockResult::Ok
-        || serialized.dock.Zone(DockZone::Bottom)->extent_dip != 112) {
-        return 44;
-    }
     if (!SetWorkspaceCustomName(serialized, L"仕上げ確認")) {
         return 25;
     }
@@ -1088,7 +1154,6 @@ int main() {
         || decoded.dock.Pane(DockPaneType::Locator)->zone
             != DockZone::AutoHide
         || !decoded.dock.IsPaneVisible(DockPaneType::Reference)
-        || decoded.dock.IsPaneVisible(DockPaneType::JobProgress)
         || !decoded.window.valid || decoded.window.show_command != SW_SHOWMAXIMIZED) {
         return 27;
     }
@@ -1464,8 +1529,7 @@ int main() {
             != WorkspaceLayoutDecodeResult::Migrated
         || migrated_v5.dock.Pane(DockPaneType::Locator)->zone
             != DockZone::AutoHide
-        || !migrated_v5.dock.IsPaneVisible(DockPaneType::Reference)
-        || migrated_v5.dock.IsPaneVisible(DockPaneType::JobProgress)) {
+        || !migrated_v5.dock.IsPaneVisible(DockPaneType::Reference)) {
         return 46;
     }
     WorkspaceLayoutState rejected = decoded;

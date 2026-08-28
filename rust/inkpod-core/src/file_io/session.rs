@@ -34,6 +34,9 @@ impl FileIoJob {
     /// Prepares a sequence switch without blocking the owner. The source recovery
     /// is installed only after owner validation/fencing; then final apply switches
     /// once. Target recovery is optional and never changes the source's savepoint.
+    /// An omitted source path skips source encoding and installation only when
+    /// both document and EditorState are clean, or for a same-cell no-op. Supplying
+    /// a source path retains recovery installation even when the source is clean.
     pub fn start_sequence_switch(
         core: &Core,
         manager: IoManager,
@@ -42,12 +45,16 @@ impl FileIoJob {
         target_recovery: Option<PathBuf>,
         metadata: Option<RecoveryMetadata>,
     ) -> Result<Self, CoreError> {
-        if request.requires_switch() && source_recovery.is_none() {
+        if request.requires_switch()
+            && source_recovery.is_none()
+            && (core.savepoint != Some(core.current_state) || core.editor_dirty())
+        {
             return Err(CoreError::InvalidArgument(
-                "sequence switch requires a source recovery destination",
+                "dirty sequence source requires a recovery destination",
             ));
         }
         let requires_switch = request.requires_switch();
+        let include_source_recovery = source_recovery.is_some();
         if let Some(metadata) = &metadata {
             let document = core.document.as_ref().ok_or(CoreError::NoDocument)?;
             if metadata.document_uuid != document.uuid {
@@ -85,7 +92,12 @@ impl FileIoJob {
                     } else {
                         None
                     };
-                    let target = snapshot.prepare(native, || context.is_cancelled())?;
+                    let target = if include_source_recovery {
+                        snapshot.prepare(native, || context.is_cancelled())?
+                    } else {
+                        snapshot
+                            .prepare_without_source_recovery(native, || context.is_cancelled())?
+                    };
                     Ok((Prepared::SequenceSwitch(Box::new(target)), Vec::new()))
                 })();
                 Ok(result)

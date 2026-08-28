@@ -1,4 +1,5 @@
 #include "main_window_status_presenter.h"
+#include "job_progress.h"
 
 #include <commctrl.h>
 
@@ -7,6 +8,10 @@ namespace inkpod::windows::ui::runtime {
 void PresentStatusBarPart(
     HWND status_bar, std::size_t part, const wchar_t* text) noexcept {
     if (status_bar == nullptr || part >= 6U || text == nullptr) {
+        return;
+    }
+    if (part == 5U) {
+        SetJobProgressIdleText(status_bar, text);
         return;
     }
     SendMessageW(

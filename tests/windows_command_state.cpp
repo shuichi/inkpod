@@ -33,6 +33,8 @@ using inkpod::windows::ui::tools::kInteractionSelection;
 using inkpod::windows::ui::tools::kInteractionColorReplace;
 using inkpod::windows::ui::tools::kInteractionGeometryRectangle;
 
+constexpr UINT kRetiredJobProgressCommand = 41958U;
+
 bool SameStates(const CommandStateSet& left, const CommandStateSet& right) noexcept {
     for (std::size_t index = 0; index < left.size(); ++index) {
         if (left[index].command != right[index].command
@@ -67,7 +69,9 @@ bool CatalogHasExactlyOneOwner(const CommandStateSet& states) noexcept {
             return false;
         }
     }
-    return states.size() == kProductionCommandStateCount;
+    return states.size() == kProductionCommandStateCount
+        && kProductionCommandStateCount == 329U
+        && FindCommandState(states, kRetiredJobProgressCommand) == nullptr;
 }
 
 bool SameColor(
@@ -104,12 +108,16 @@ bool ShortcutCatalogIsCompleteAndPrefixFree() {
         }
         return false;
     };
-    if (menu_commands.size() != 322U
+    if (menu_commands.size() != 321U
         || shortcuts.size() != kProductionCommandStateCount
         || shortcuts.size() != commands.size()
         || is_menu_command(IDM_COLOR_PIN)
         || is_menu_command(IDM_BATCH_PIN)
-        || !is_menu_command(IDM_WINDOW_BATCH)) {
+        || !is_menu_command(IDM_WINDOW_BATCH)
+        || is_menu_command(kRetiredJobProgressCommand)
+        || FindShortcutSequence(shortcuts, kRetiredJobProgressCommand) != nullptr
+        || !inkpod::windows::ui::CommandStableKey(kRetiredJobProgressCommand).empty()
+        || inkpod::windows::ui::CommandFromStableKey("window.job.progress") != 0U) {
         std::fprintf(
             stderr,
             "catalog count mismatch: menu=%zu shortcuts=%zu states=%zu\n",
@@ -241,8 +249,6 @@ int main() {
         || IsCommandEnabled(states, IDM_SEQUENCE_PIN)
         || !IsCommandEnabled(states, IDM_WINDOW_LIGHT_TABLE)
         || IsCommandChecked(states, IDM_WINDOW_LIGHT_TABLE)
-        || !IsCommandEnabled(states, IDM_WINDOW_JOB_PROGRESS)
-        || IsCommandChecked(states, IDM_WINDOW_JOB_PROGRESS)
         || IsCommandEnabled(states, IDM_LIGHT_TABLE_PIN)
         || !IsCommandEnabled(states, IDM_WINDOW_SUBPALETTE)
         || IsCommandChecked(states, IDM_WINDOW_SUBPALETTE)
@@ -278,7 +284,14 @@ int main() {
         || IsCommandChecked(states, IDM_FILE_SEQUENCE_AUTOSAVE)
         || !IsCommandEnabled(states, IDM_SEQ_WRAP_ENDPOINTS)
         || IsCommandChecked(states, IDM_SEQ_WRAP_ENDPOINTS)
-        || !IsCommandEnabled(states, IDM_FILE_NEW)) {
+        || !IsCommandEnabled(states, IDM_FILE_NEW)
+        || !IsCommandEnabled(states, IDM_FILE_OPEN)
+        || !IsCommandEnabled(states, IDM_FILE_IMPORT_RASTER)
+        || !IsCommandEnabled(states, IDM_FILE_OPEN_RECOVERY)
+        || FindCommandState(states, IDM_FILE_NEW)->owner != CommandStateOwner::Application
+        || FindCommandState(states, IDM_FILE_OPEN)->owner != CommandStateOwner::Application
+        || FindCommandState(states, IDM_FILE_IMPORT_RASTER)->owner != CommandStateOwner::Application
+        || FindCommandState(states, IDM_FILE_OPEN_RECOVERY)->owner != CommandStateOwner::Application) {
         return 1;
     }
 
@@ -326,7 +339,6 @@ int main() {
     inputs.workspace.color_pinned = true;
     inputs.workspace.batch_target_available = true;
     inputs.workspace.batch_pinned = true;
-    inputs.workspace.job_progress_visible = true;
     states = ComputeCommandStates(inputs);
     CommandStateInputs dirty_inputs = inputs;
     dirty_inputs.document.dirty = true;
@@ -356,7 +368,6 @@ int main() {
         || !IsCommandEnabled(states, IDM_SEQUENCE_PIN)
         || !IsCommandChecked(states, IDM_SEQUENCE_PIN)
         || !IsCommandChecked(states, IDM_WINDOW_LIGHT_TABLE)
-        || !IsCommandChecked(states, IDM_WINDOW_JOB_PROGRESS)
         || !IsCommandEnabled(states, IDM_LIGHT_TABLE_PIN)
         || !IsCommandChecked(states, IDM_LIGHT_TABLE_PIN)
         || !IsCommandChecked(states, IDM_WINDOW_SUBPALETTE)

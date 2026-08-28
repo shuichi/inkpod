@@ -83,7 +83,7 @@ int wmain() {
         return 1;
     }
     if (!Contains(json, "\"format\": \"inkpod-settings\"")
-        || !Contains(json, "\"formatVersion\": 2")
+        || !Contains(json, "\"formatVersion\": 3")
         || !Contains(json, "\"defaultRasterFormat\": \"tiff\"")
         || !Contains(json, "\"command\": \"file.save\"")
         || !Contains(json, "\"logicalKey\": \"S\"")
@@ -113,12 +113,12 @@ int wmain() {
     }
 
     const std::string wrong_version =
-        "{\"format\":\"inkpod-settings\",\"formatVersion\":1} ";
+        "{\"format\":\"inkpod-settings\",\"formatVersion\":2} ";
     const std::string duplicate =
         "{\"format\":\"inkpod-settings\",\"format\":\"inkpod-settings\","
-        "\"formatVersion\":2}";
+        "\"formatVersion\":3}";
     const std::string unknown =
-        "{\"format\":\"inkpod-settings\",\"formatVersion\":2,"
+        "{\"format\":\"inkpod-settings\",\"formatVersion\":3,"
         "\"mystery\":true}";
     if (DecodeApplicationSettingsJson(wrong_version, defaults, decoded)
         || DecodeApplicationSettingsJson(duplicate, defaults, decoded)
@@ -127,7 +127,7 @@ int wmain() {
     }
 
     const std::string invalid_raster_format =
-        "{\"format\":\"inkpod-settings\",\"formatVersion\":2,"
+        "{\"format\":\"inkpod-settings\",\"formatVersion\":3,"
         "\"saveAndRecovery\":{\"restorePreviousDocuments\":false,"
         "\"defaultRasterFormat\":\"jpeg\"}}";
     if (DecodeApplicationSettingsJson(invalid_raster_format, defaults, decoded)) {
@@ -148,7 +148,7 @@ int wmain() {
         }
     }
     if (!DecodeApplicationSettingsJson(
-            "{\"format\":\"inkpod-settings\",\"formatVersion\":2}",
+            "{\"format\":\"inkpod-settings\",\"formatVersion\":3}",
             defaults,
             decoded)
         || decoded.default_raster_format != inkpod::app::RasterFileFormatSetting::Png) {

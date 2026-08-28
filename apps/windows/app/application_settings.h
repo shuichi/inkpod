@@ -12,7 +12,7 @@
 
 namespace inkpod::app {
 
-inline constexpr std::uint32_t kApplicationSettingsFormatVersion = 2U;
+inline constexpr std::uint32_t kApplicationSettingsFormatVersion = 3U;
 inline constexpr std::size_t kMaximumApplicationSettingsBytes =
     16U * 1024U * 1024U;
 

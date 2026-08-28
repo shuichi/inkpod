@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ui/localization.h"
+#include "ui/job_progress.h"
 
 #include <windows.h>
 
@@ -10,11 +11,6 @@
 #include <string>
 
 namespace inkpod::windows::ui {
-
-struct ProgressDialogInfo {
-    std::uint64_t completed_work{};
-    std::uint64_t total_work{};
-};
 
 struct EffectEditorState;
 using EffectEditorChangeCallback = bool (*)(
@@ -62,54 +58,5 @@ INT_PTR ShowEffectEditor(
     bool close_immediately,
     EffectEditorState& state) noexcept;
 void SetEffectEditorPreviewStatus(HWND dialog, const wchar_t* text) noexcept;
-
-using ProgressQueryCallback = bool (*)(
-    void* context, ProgressDialogInfo& output) noexcept;
-using ProgressCancelCallback = void (*)(void* context) noexcept;
-
-struct ProgressDialogState {
-    void* context{};
-    ProgressQueryCallback query{};
-    ProgressCancelCallback cancel{};
-    const wchar_t* title{};
-    const wchar_t* progress_prefix{UiText(UiStringId::Text0512)};
-    const wchar_t* cancelling_text{UiText(UiStringId::Cancelling)};
-};
-
-enum class JobProgressSlot : std::uint8_t {
-    Effect,
-    Batch,
-    ColorChart,
-    HistoryVisualization,
-    Count,
-};
-
-struct JobProgressEntry {
-    ProgressDialogState progress{};
-    bool active{};
-    bool cancelling{};
-};
-
-struct JobProgressPaneState {
-    std::array<JobProgressEntry, static_cast<std::size_t>(JobProgressSlot::Count)>
-        entries{};
-};
-
-HWND CreateJobProgressPane(
-    HINSTANCE instance, HWND parent, JobProgressPaneState& state) noexcept;
-[[nodiscard]] bool BindJobProgress(
-    HWND pane,
-    JobProgressPaneState& state,
-    JobProgressSlot slot,
-    const ProgressDialogState& progress) noexcept;
-void ClearJobProgress(
-    HWND pane, JobProgressPaneState& state, JobProgressSlot slot) noexcept;
-void ClearJobProgressIfContext(
-    HWND pane,
-    JobProgressPaneState& state,
-    JobProgressSlot slot,
-    const void* context) noexcept;
-[[nodiscard]] bool HasActiveJobProgress(
-    const JobProgressPaneState& state) noexcept;
 
 }  // namespace inkpod::windows::ui

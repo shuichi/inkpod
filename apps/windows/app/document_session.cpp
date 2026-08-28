@@ -384,6 +384,10 @@ bool DocumentRegistry::Remove(DocumentSessionId id) noexcept {
     return false;
 }
 
+void DocumentRegistry::ClearActive() noexcept {
+    current_index_ = kMaximumSessions;
+}
+
 bool DocumentRegistry::Activate(DocumentSessionId id) noexcept {
     for (std::size_t index = 0U; index < sessions_.size(); ++index) {
         if (sessions_[index] != nullptr && sessions_[index]->id == id) {

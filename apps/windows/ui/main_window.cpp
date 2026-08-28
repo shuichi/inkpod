@@ -3,6 +3,7 @@
 #include "ui/localization.h"
 
 #include "main_window.h"
+#include "job_progress.h"
 
 #include <commctrl.h>
 
@@ -280,11 +281,12 @@ void PlaceEditorGroup(
     const RECT& bounds,
     int tab_height,
     bool show_tabs) noexcept {
+    const bool visible_tabs = show_tabs && group.ViewCount() != 0U;
     RECT tabs = bounds;
-    tabs.bottom = std::min(bounds.bottom, bounds.top + tab_height);
+    tabs.bottom = std::min(bounds.bottom, bounds.top + (visible_tabs ? tab_height : 0));
     RECT canvas = bounds;
     canvas.top = tabs.bottom;
-    PlaceChild(group.document_tabs, tabs, show_tabs);
+    PlaceChild(group.document_tabs, tabs, visible_tabs);
     PlaceChild(group.canvas, canvas, true);
 }
 
@@ -481,18 +483,7 @@ void LayoutMainChrome(
         if (GetWindowRect(windows.status_bar, &bounds) != FALSE) {
             status_height = bounds.bottom - bounds.top;
         }
-        const std::array<int, 6U> parts{
-            width * 20 / 100,
-            width * 33 / 100,
-            width * 47 / 100,
-            width * 64 / 100,
-            width * 81 / 100,
-            -1};
-        SendMessageW(
-            windows.status_bar,
-            SB_SETPARTS,
-            static_cast<WPARAM>(parts.size()),
-            reinterpret_cast<LPARAM>(parts.data()));
+        LayoutJobProgress(windows.status_bar);
     }
     const UINT dpi = windows.window == nullptr ? 96U : GetDpiForWindow(windows.window);
     const WorkspaceLayoutRects layout = ComputeWorkspaceLayout(

@@ -638,8 +638,6 @@ void ProvideWorkspaceCommandStates(
     SetEnabled(states, IDM_SUBPALETTE_PIN, input.subpalette_target_available);
     SetChecked(states, IDM_BATCH_PIN, input.batch_pinned);
     SetEnabled(states, IDM_BATCH_PIN, input.batch_target_available);
-    SetChecked(
-        states, IDM_WINDOW_JOB_PROGRESS, input.job_progress_visible);
     SetChecked(states, IDM_WORKSPACE_MIRROR, input.mirrored);
     SetChecked(
         states, IDM_WORKSPACE_PRESET_COLORING,

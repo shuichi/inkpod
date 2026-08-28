@@ -268,16 +268,12 @@ bool ReadOperation(
 BatchController::BatchController(
     app::AppLifetimeState& lifetime,
     app::MainWindowHandles& windows,
-    HWND progress,
-    JobProgressPaneState& progress_state,
     HWND& palette,
     app::BatchUiState& batch,
     app::CoreHost& engine,
     app::FileIoController& file_io) noexcept
     : lifetime_(lifetime),
       windows_(windows),
-      progress_(progress),
-      progress_state_(progress_state),
       palette_(palette),
       batch_(batch),
       engine_(engine),
@@ -515,21 +511,11 @@ InkpodStatus BatchController::StartIo(
         batch_.completion_context = context;
         batch_.io_owner = &file_io_;
         batch_.io_completion_status = INKPOD_STATUS_PENDING;
-        batch_.progress_dialog = {&batch_, QueryProgress, CancelProgress,
-            UiText(contact_sheet ? UiStringId::Text0259 : UiStringId::Text0267),
-            UiText(UiStringId::Text0263), UiText(UiStringId::Cancelling)};
-        if (!lifetime_.smoke_test && !BindJobProgress(progress_, progress_state_,
-                JobProgressSlot::Batch, batch_.progress_dialog)) {
-            return INKPOD_STATUS_INVALID_STATE;
-        }
         if (!run->Queue(contact_sheet ? INKPOD_IO_BATCH_PREVIEW : INKPOD_IO_BATCH_PLAN)) {
-            ClearJobProgress(progress_, progress_state_, JobProgressSlot::Batch);
             batch_.completion_context = {};
             return INKPOD_STATUS_INVALID_STATE;
         }
         if (!lifetime_.smoke_test) {
-            static_cast<void>(windows_.dock_host.RestorePane(DockPaneType::JobProgress));
-            static_cast<void>(windows_.dock_host.ActivatePane(DockPaneType::JobProgress));
             return INKPOD_STATUS_PENDING;
         }
         // Private smoke consumes exactly the production async queue while

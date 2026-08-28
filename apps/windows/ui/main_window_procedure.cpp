@@ -8,6 +8,13 @@ namespace inkpod::windows::ui::runtime {
 
 LRESULT CALLBACK MainWindowProcedure(
     HWND window, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
+    if (message == WM_KILLFOCUS || message == WM_IME_SETCONTEXT
+        || message == WM_IME_NOTIFY) {
+        // Native focus/IME bookkeeping is synchronous and has no document
+        // command here. Let Windows handle it without waiting for Core before
+        // the user can reach a background job's cancel button.
+        return DefWindowProcW(window, message, wparam, lparam);
+    }
     auto* workspace = reinterpret_cast<app::WorkspaceWindow*>(
         GetWindowLongPtrW(window, GWLP_USERDATA));
 
@@ -24,6 +31,12 @@ LRESULT CALLBACK MainWindowProcedure(
 
     app::ApplicationHost* application =
         workspace == nullptr ? nullptr : workspace->application;
+    if (message == WM_TIMER) {
+        if (const auto result = RouteCachedProgressTimerMessage(
+                application, window, wparam)) {
+            return *result;
+        }
+    }
     app::WorkspaceWindowId previous_workspace{};
     bool restore_workspace{};
     if (application != nullptr && workspace != nullptr) {

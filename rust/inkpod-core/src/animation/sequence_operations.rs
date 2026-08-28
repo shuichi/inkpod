@@ -255,7 +255,8 @@ impl Core {
     /// Unsaved document changes and active strokes are rejected. Editor-only dirty
     /// does not block a switch. Endpoint no-op keeps the current document; a switch
     /// installs a clean document, resets history/view, preserves non-target
-    /// EditorState, and deterministically reconciles its stable target.
+    /// EditorState, and deterministically reconciles its stable target as the
+    /// new cell's clean editor baseline without adopting a normal-save path.
     pub fn sequence_step(
         &mut self,
         direction: SequenceDirection,

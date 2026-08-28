@@ -1679,6 +1679,32 @@ int wmain() {
         return 20;
     }
 
+    InkpodEditorDefaults defaults{};
+    const DWORD empty_thread = host.ThreadId();
+    DWORD empty_owner_thread{};
+    if (empty_thread == 0U || host.GetApplicationEditorDefaults(defaults) != INKPOD_STATUS_OK
+        || host.InvokeOwnerThread([&empty_owner_thread] {
+               empty_owner_thread = GetCurrentThreadId();
+               return INKPOD_STATUS_OK;
+           }) != INKPOD_STATUS_OK
+        || empty_owner_thread != empty_thread
+        || defaults.width == 0U || defaults.height == 0U
+        || host.CreateSession(third, Generation{9U}) != INKPOD_STATUS_OK) {
+        host.Stop();
+        DestroyWindow(owner);
+        return 34;
+    }
+    host.ClearActiveSession();
+    if (host.Invoke([](InkpodCore*) { return INKPOD_STATUS_OK; }, false, false)
+            != INKPOD_STATUS_INVALID_STATE
+        || !host.HasSession(third, Generation{9U})
+        || !host.SetActiveSession(third, Generation{9U})
+        || host.CloseSession(third, Generation{9U}) != INKPOD_STATUS_OK
+        || host.ThreadId() != empty_thread) {
+        host.Stop();
+        DestroyWindow(owner);
+        return 35;
+    }
     host.Stop();
     const bool shutdown_completed_once =
         PrimitiveShutdownCompletesExactlyOnce(owner);

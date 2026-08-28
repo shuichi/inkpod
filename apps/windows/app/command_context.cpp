@@ -377,8 +377,17 @@ bool CommandTargetRegistry::ActivateEditorGroup(EditorGroupId group_id) noexcept
         if (mutable_document != nullptr) {
             mutable_document->active_view = group->active_view;
         }
+    } else {
+        active_document_ = {};
     }
     return true;
+}
+
+void CommandTargetRegistry::ClearActiveDocument() noexcept {
+    active_document_ = {};
+    if (auto* group = FindEditorGroup(active_editor_group_); group != nullptr) {
+        group->active_view = {};
+    }
 }
 
 bool CommandTargetRegistry::MoveDocumentView(

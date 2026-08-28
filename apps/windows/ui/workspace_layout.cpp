@@ -761,7 +761,7 @@ PersistedWorkspaceLayoutV4 EncodeCurrent(
 bool EligibleRightTabPane(DockPaneType type) noexcept {
     const PaneDescriptor* descriptor = FindPaneDescriptor(type);
     return type != DockPaneType::Tool && type != DockPaneType::ToolOptions
-        && type != DockPaneType::JobProgress && descriptor != nullptr
+        && descriptor != nullptr
         && (descriptor->allowed_zones & DockZoneBit(DockZone::Right)) != 0U;
 }
 

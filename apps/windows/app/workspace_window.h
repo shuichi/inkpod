@@ -85,8 +85,7 @@ struct WorkspaceWindow final {
     PaneUiState panes{};
     AnimationUiState animation{};
     windows::ui::CommandStateSet command_states{};
-    HWND job_progress{};
-    windows::ui::JobProgressPaneState job_progress_state{};
+    windows::ui::JobProgressState job_progress_state{};
     HWND batch_palette{};
     windows::ui::BatchPaletteDialogState batch_dialog{};
     bool workspace_presentation_pending{};

@@ -566,6 +566,8 @@ int Run() {
     const inkpod::renderer::SnapshotRoute before_unbind = first_sink->Route();
     inkpod::renderer::SnapshotEnvelope unbound_stale{};
     inkpod::renderer::CanvasDocumentBounds unbound_bounds{};
+    inkpod::renderer::RendererSurfaceResourceUsage unbound_usage{};
+    inkpod::renderer::CanvasPixelRgba8 empty_pixel{};
     if (!rebound_core.Build(before_unbind, unbound_stale)
         || !inkpod::renderer::UnbindCanvasSnapshotSink(
             first_canvas_window.window_)
@@ -574,6 +576,14 @@ int Run() {
         || FAILED(host.GetDocumentBounds(
             first_canvas, first_surface_generation, unbound_bounds))
         || unbound_bounds.right != 0.0 || unbound_bounds.bottom != 0.0
+        || !host.GetSurfaceResourceUsage(first_canvas, first_surface_generation, unbound_usage)
+        || unbound_usage.route || unbound_usage.retained_snapshot_bytes != 0U
+        || unbound_usage.gpu_tile_bytes != 0U || unbound_usage.active_tile_count != 0U
+        || ReadPresentedPixel(host, first_canvas, first_surface_generation, 8U, 8U, empty_pixel) != S_OK
+        || empty_pixel.red < 30U || empty_pixel.red > 31U
+        || empty_pixel.green < 33U || empty_pixel.green > 34U
+        || empty_pixel.blue < 38U || empty_pixel.blue > 39U
+        || !HasBounds(host, second_canvas, second_surface_generation, 48.0, 16.0)
         || !inkpod::renderer::BindCanvasSnapshotSink(
             first_canvas_window.window_,
             DocumentSessionId(203U),

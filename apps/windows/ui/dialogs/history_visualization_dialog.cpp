@@ -187,10 +187,12 @@ class HistoryVisualizationController final {
 public:
     HistoryVisualizationController(
         app::ApplicationHost& application,
+        app::WorkspaceWindowId workspace,
         app::DocumentSessionId session,
         app::Generation generation,
         std::wstring display_name) noexcept
         : application_(&application),
+          workspace_(workspace),
           session_(session),
           generation_(generation),
           display_name_(std::move(display_name)) {}
@@ -236,8 +238,7 @@ public:
             SetLoadFailure(INKPOD_STATUS_INVALID_STATE);
             return;
         }
-        BindProgress();
-        if (!QueueNextStep()) {
+        if (!BindProgress() || !QueueNextStep()) {
             load_->Cancel();
             ClearProgress();
             load_.reset();
@@ -440,11 +441,11 @@ public:
     }
 
 private:
-    void BindProgress() noexcept {
-        if (!load_) {
-            return;
+    bool BindProgress() noexcept {
+        auto* workspace = application_->FindWorkspace(workspace_);
+        if (!load_ || workspace == nullptr) {
+            return false;
         }
-        auto& workspace = application_->Workspace();
         const ProgressDialogState progress{
             load_.get(),
             QueryVisualizationProgress,
@@ -453,34 +454,28 @@ private:
             UiText(UiStringId::HistoryRebuilding),
             UiText(UiStringId::Cancelling)};
         if (!BindJobProgress(
-                workspace.job_progress,
-                workspace.job_progress_state,
+                workspace->windows.status_bar,
+                workspace->job_progress_state,
                 JobProgressSlot::HistoryVisualization,
                 progress)) {
-            return;
+            return false;
         }
         load_->progress_bound = true;
-        static_cast<void>(workspace.windows.dock_host.RestorePane(
-            DockPaneType::JobProgress));
-        static_cast<void>(workspace.windows.dock_host.ActivatePane(
-            DockPaneType::JobProgress));
+        return true;
     }
 
     void ClearProgress() noexcept {
         if (!load_ || !load_->progress_bound) {
             return;
         }
-        auto& workspace = application_->Workspace();
-        ClearJobProgressIfContext(
-            workspace.job_progress,
-            workspace.job_progress_state,
-            JobProgressSlot::HistoryVisualization,
-            load_.get());
-        load_->progress_bound = false;
-        if (!HasActiveJobProgress(workspace.job_progress_state)) {
-            static_cast<void>(workspace.windows.dock_host.HidePane(
-                DockPaneType::JobProgress));
+        if (auto* workspace = application_->FindWorkspace(workspace_); workspace != nullptr) {
+            ClearJobProgressIfContext(
+                workspace->windows.status_bar,
+                workspace->job_progress_state,
+                JobProgressSlot::HistoryVisualization,
+                load_.get());
         }
+        load_->progress_bound = false;
     }
 
     bool QueueNextStep() noexcept {
@@ -707,6 +702,7 @@ private:
     }
 
     app::ApplicationHost* application_{};
+    app::WorkspaceWindowId workspace_{};
     app::DocumentSessionId session_{};
     app::Generation generation_{};
     std::wstring display_name_;
@@ -897,7 +893,7 @@ LRESULT IssueHistoryVisualizationCommand(
     HistoryVisualizationController* controller{};
     try {
         controller = new HistoryVisualizationController(
-            application, document->id, document->generation,
+            application, workspace.id, document->id, document->generation,
             LeafName(document->shell.current_path));
     } catch (const std::bad_alloc&) {
         return 0;

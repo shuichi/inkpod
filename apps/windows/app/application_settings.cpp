@@ -1194,7 +1194,6 @@ constexpr std::array kDockPaneNames{
     std::pair{DockPaneType::LightTable, std::string_view{"light-table"}},
     std::pair{DockPaneType::Reference, std::string_view{"reference"}},
     std::pair{DockPaneType::Batch, std::string_view{"batch"}},
-    std::pair{DockPaneType::JobProgress, std::string_view{"job-progress"}},
 };
 constexpr std::array kDockZoneNames{
     std::pair{DockZone::TopContext, std::string_view{"top-context"}},
@@ -2142,7 +2141,7 @@ ShortcutPresetJsonResult EncodeShortcutPresetJson(
         }
         JsonValue root = ObjectValue();
         Add(root, "format", StringValue("inkpod-shortcuts"));
-        Add(root, "formatVersion", NumberValue(2U));
+        Add(root, "formatVersion", NumberValue(3U));
         Add(root, "name", StringValue(std::move(name)));
         JsonValue bindings = ArrayValue();
         for (const ShortcutProfileBinding& binding : profile.bindings) {
@@ -2189,7 +2188,7 @@ ShortcutPresetJsonResult DecodeShortcutPresetJson(
         const JsonValue* version = Member(root, "formatVersion");
         if (!StringMember(root, "format", format) || version == nullptr
             || version->kind != JsonKind::Number || format != "inkpod-shortcuts"
-            || version->number != 2) {
+            || version->number != 3) {
             return ShortcutPresetJsonResult::UnsupportedVersion;
         }
         std::string_view name;

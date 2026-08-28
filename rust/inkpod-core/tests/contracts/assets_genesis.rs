@@ -423,9 +423,19 @@ fn sequence_attachment_recognizes_the_opened_genesis_without_replacing_it() {
         0x4410,
     )
     .unwrap();
+    core.update_editor_state(
+        core.editor_state().unwrap().revision,
+        EditorStateUpdate::SetToolDiameter {
+            tool: EditorTool::Brush,
+            diameter_q16: 37_i64 << 16,
+        },
+    )
+    .unwrap();
     core.add_guide(GuideAxis::Vertical, 1).unwrap();
     let before = core.document_info().unwrap();
+    let before_editor = core.editor_state().unwrap();
     assert!(before.dirty);
+    assert!(before_editor.dirty);
     let before_genesis = core.genesis_info().unwrap();
     let before_usage = core.asset_store_usage();
     let before_history = core.history_entries().to_vec();
@@ -448,6 +458,7 @@ fn sequence_attachment_recognizes_the_opened_genesis_without_replacing_it() {
     assert_eq!(core.sequence_cell(0).unwrap().document_uuid, 0x4411);
     let activated = core.commit_sequence_activation(plan).unwrap();
     assert_eq!(activated, before);
+    assert_eq!(core.editor_state().unwrap(), before_editor);
     assert_eq!(core.genesis_info().unwrap(), before_genesis);
     assert_eq!(core.asset_store_usage(), before_usage);
     assert_eq!(core.history_entries(), before_history);
@@ -459,6 +470,7 @@ fn sequence_attachment_recognizes_the_opened_genesis_without_replacing_it() {
     assert_eq!(no_op.source_generation, Some(1));
     assert_eq!(core.commit_sequence_activation(no_op).unwrap(), before);
     assert_eq!(core.sequence_activate(0).unwrap(), before);
+    assert_eq!(core.editor_state().unwrap(), before_editor);
     assert_eq!(
         core.commit_sequence_activation(plan),
         Err(CoreError::InvalidState("sequence activation plan is stale"))

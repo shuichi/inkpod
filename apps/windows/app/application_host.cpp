@@ -478,7 +478,8 @@ bool ApplicationHost::ActivateWorkspaceWindow(
         ? nullptr
         : document->FindView(view);
     if (document == nullptr || document_view == nullptr) {
-        return document == nullptr && document_view == nullptr;
+        return document == nullptr && document_view == nullptr
+            && group != nullptr && ActivateEmptyEditorGroup(group->id);
     }
     if (!documents_.Activate(document->id) || !document->ActivateView(view)) {
         return false;
@@ -791,6 +792,10 @@ ApplicationHost::PrepareDocumentSession() noexcept {
         (void)DiscardPreparedDocumentSession(binding);
         return std::nullopt;
     }
+    if (!previous.document_view.has_value()) {
+        routing.targets.ClearActiveDocument();
+        engine->ClearActiveSession();
+    }
     return binding;
 }
 
@@ -832,6 +837,10 @@ ApplicationHost::PrepareBatchResultSession(
             previous.document_session.value(), previous.document_view.value())) {
         (void)DiscardPreparedDocumentSession(binding);
         return std::nullopt;
+    }
+    if (!previous.document_view.has_value()) {
+        routing.targets.ClearActiveDocument();
+        engine->ClearActiveSession();
     }
     return binding;
 }
@@ -930,6 +939,29 @@ bool ApplicationHost::ActivateDocumentView(DocumentViewId view) noexcept {
     return RefreshEditorPresentation(document->id, document->generation);
 }
 
+bool ApplicationHost::ActivateEmptyEditorGroup(EditorGroupId group_id) noexcept {
+    WorkspaceWindow* workspace = workspaces_.Find(
+        routing.targets.WorkspaceForGroup(group_id));
+    EditorGroup* group = workspace == nullptr ? nullptr : workspace->editors.Find(group_id);
+    if (group == nullptr || group->ActiveView()
+        || !workspaces_.Activate(workspace->id, false)
+        || !workspace->editors.Activate(group_id)
+        || !routing.targets.ActivateEditorGroup(group_id)) {
+        return false;
+    }
+    routing.targets.ClearActiveDocument();
+    documents_.ClearActive();
+    if (engine != nullptr) {
+        engine->ClearActiveSession();
+    }
+    BindWorkspacePaneAliases(*workspace);
+    workspace->windows.canvas = group->canvas;
+    workspace->windows.document_tabs = group->document_tabs;
+    workspace->tools.editor = {};
+    workspace->tools.procedure = {};
+    return true;
+}
+
 bool ApplicationHost::RefreshEditorPresentation(
     DocumentSessionId session, Generation generation) noexcept {
     DocumentSession* document = documents_.Find(session);
@@ -1015,17 +1047,12 @@ bool ApplicationHost::CloseDocumentView(DocumentViewId view) noexcept {
     }
     const DocumentView* closing = document->FindView(view);
     WorkspaceWindow* source_workspace = WorkspaceForView(view);
-    if (closing == nullptr || source_workspace == nullptr) {
+    EditorGroup* closing_group = source_workspace == nullptr
+        ? nullptr : source_workspace->editors.FindByView(view);
+    if (closing == nullptr || closing_group == nullptr) {
         return false;
     }
-    DocumentViewId replacement{};
-    for (std::size_t index = 0U; index < document->ViewCount(); ++index) {
-        const DocumentView* candidate = document->ViewAt(index);
-        if (candidate != nullptr && candidate->id != view) {
-            replacement = candidate->id;
-            break;
-        }
-    }
+    const bool was_visible = closing_group->ActiveView() == view;
     const InkpodStatus status = engine->Invoke(
         document->id,
         document->generation,
@@ -1035,24 +1062,33 @@ bool ApplicationHost::CloseDocumentView(DocumentViewId view) noexcept {
         false,
         false);
     if (status != INKPOD_STATUS_OK
-        || !engine->UnregisterDocumentView(
-            document->id, document->generation, view)
+        || !engine->UnregisterDocumentView(document->id, document->generation, view)
         || !source_workspace->editors.RemoveView(view)
         || !document->RemoveView(view)
         || !routing.targets.RemoveDocumentView(view)) {
         return false;
     }
+    if (was_visible && closing_group->canvas != nullptr) {
+        const auto* remaining = documents_.FindByView(closing_group->ActiveView());
+        const bool rebound = remaining == nullptr
+            ? renderer::UnbindCanvasSnapshotSink(closing_group->canvas)
+            : renderer::BindCanvasSnapshotSink(closing_group->canvas,
+                remaining->id, closing_group->ActiveView(), remaining->generation);
+        if (!rebound) {
+            return false;
+        }
+    }
     EditorGroup* active_group = source_workspace->editors.Active();
-    if (active_group != nullptr && active_group->ActiveView()) {
-        replacement = active_group->ActiveView();
-    } else if (source_workspace->editors.GroupCount() == 2U
-        && active_group != nullptr) {
+    DocumentViewId replacement = active_group == nullptr
+        ? DocumentViewId{} : active_group->ActiveView();
+    if (!replacement && active_group != nullptr) {
         const EditorGroup* other = source_workspace->editors.Other(active_group->id);
         if (other != nullptr) {
             replacement = other->ActiveView();
         }
     }
-    return !replacement || ActivateDocumentView(replacement);
+    return replacement ? ActivateDocumentView(replacement)
+        : active_group != nullptr && ActivateEmptyEditorGroup(active_group->id);
 }
 
 bool ApplicationHost::CloseDocumentSession(DocumentSessionId session) noexcept {
@@ -1062,23 +1098,18 @@ bool ApplicationHost::CloseDocumentSession(DocumentSessionId session) noexcept {
     }
     const Generation generation = document->generation;
     windows::ui::CloseHistoryVisualizationDialog(*document);
+    std::array<EditorGroup*,
+        WorkspaceWindowRegistry::kMaximumWindows * EditorArea::kMaximumGroups> affected{};
+    std::size_t affected_count{};
     for (std::size_t index = 0U; index < workspaces_.Count(); ++index) {
         WorkspaceWindow* workspace = workspaces_.At(index);
-        if (workspace == nullptr) {
-            continue;
-        }
         for (std::size_t group_index = 0U;
-             group_index < workspace->editors.GroupCount(); ++group_index) {
+             workspace != nullptr && group_index < workspace->editors.GroupCount();
+             ++group_index) {
             EditorGroup* group = workspace->editors.GroupAt(group_index);
-            if (group != nullptr) {
-                for (std::size_t view_index = 0U;
-                     view_index < group->ViewCount(); ++view_index) {
-                    const DocumentViewId candidate = group->ViewAt(view_index);
-                    if (document->FindView(candidate) != nullptr) {
-                        renderer::CancelCanvasStroke(group->canvas);
-                        break;
-                    }
-                }
+            if (group != nullptr && document->FindView(group->ActiveView()) != nullptr) {
+                renderer::CancelCanvasStroke(group->canvas);
+                affected[affected_count++] = group;
             }
         }
     }
@@ -1087,71 +1118,44 @@ bool ApplicationHost::CloseDocumentSession(DocumentSessionId session) noexcept {
     }
     thumbnails_.RemoveDocument(session, generation);
     routing.pane_targets.DocumentClosed(session);
-    for (std::size_t view_index = document->ViewCount();
-         view_index > 0U; --view_index) {
+    for (std::size_t view_index = document->ViewCount(); view_index > 0U; --view_index) {
         const DocumentView* view = document->ViewAt(view_index - 1U);
-        WorkspaceWindow* workspace = view == nullptr
-            ? nullptr
-            : WorkspaceForView(view->id);
+        WorkspaceWindow* workspace = view == nullptr ? nullptr : WorkspaceForView(view->id);
         if (view != nullptr && workspace != nullptr) {
             (void)workspace->editors.RemoveView(view->id);
         }
     }
-    if (!documents_.Remove(session)
-        || !routing.targets.RemoveDocument(session)) {
+    if (!documents_.Remove(session) || !routing.targets.RemoveDocument(session)) {
         return false;
     }
-    for (std::size_t workspace_index = 0U;
-         workspace_index < workspaces_.Count(); ++workspace_index) {
-        WorkspaceWindow* workspace = workspaces_.At(workspace_index);
-        if (workspace == nullptr) {
-            continue;
-        }
-        for (std::size_t group_index = 0U;
-             group_index < workspace->editors.GroupCount(); ++group_index) {
-            EditorGroup* group = workspace->editors.GroupAt(group_index);
-            const DocumentSession* remaining = group == nullptr
-                ? nullptr
-                : documents_.FindByView(group->ActiveView());
-            if (group == nullptr || group->canvas == nullptr) {
-                continue;
-            }
-            if (remaining == nullptr) {
-                (void)renderer::UnbindCanvasSnapshotSink(group->canvas);
-            } else {
-                (void)renderer::BindCanvasSnapshotSink(
-                    group->canvas,
-                    remaining->id,
-                    group->ActiveView(),
-                    remaining->generation);
+    for (std::size_t index = 0U; index < affected_count; ++index) {
+        EditorGroup* group = affected[index];
+        const DocumentSession* remaining = documents_.FindByView(group->ActiveView());
+        if (group->canvas != nullptr) {
+            const bool rebound = remaining == nullptr
+                ? renderer::UnbindCanvasSnapshotSink(group->canvas)
+                : renderer::BindCanvasSnapshotSink(group->canvas,
+                    remaining->id, group->ActiveView(), remaining->generation);
+            if (!rebound) {
+                return false;
             }
         }
     }
-    WorkspaceWindow* current_workspace = workspaces_.Current();
-    EditorGroup* active_group = current_workspace == nullptr
-        ? nullptr
-        : current_workspace->editors.Active();
+    WorkspaceWindow* workspace = workspaces_.Current();
+    EditorGroup* active_group = workspace == nullptr ? nullptr : workspace->editors.Active();
     DocumentViewId replacement = active_group == nullptr
-        ? DocumentViewId{}
-        : active_group->ActiveView();
-    if (!replacement) {
-        for (std::size_t workspace_index = 0U;
-             workspace_index < workspaces_.Count() && !replacement;
-             ++workspace_index) {
-            const WorkspaceWindow* workspace = workspaces_.At(workspace_index);
-            for (std::size_t group_index = 0U;
-                 workspace != nullptr
-                     && group_index < workspace->editors.GroupCount();
-                 ++group_index) {
-                const EditorGroup* group = workspace->editors.GroupAt(group_index);
-                if (group != nullptr && group->ActiveView()) {
-                    replacement = group->ActiveView();
-                    break;
-                }
+        ? DocumentViewId{} : active_group->ActiveView();
+    if (!replacement && workspace != nullptr) {
+        for (std::size_t index = 0U; index < workspace->editors.GroupCount(); ++index) {
+            const EditorGroup* group = workspace->editors.GroupAt(index);
+            if (group != nullptr && group->ActiveView()) {
+                replacement = group->ActiveView();
+                break;
             }
         }
     }
-    return !replacement || ActivateDocumentView(replacement);
+    return replacement ? ActivateDocumentView(replacement)
+        : active_group != nullptr && ActivateEmptyEditorGroup(active_group->id);
 }
 
 std::uint32_t ApplicationHost::IssueUntitledNumber() noexcept {
@@ -1196,12 +1200,10 @@ bool ApplicationHost::DestroyCutSession(WorkspaceWindow& workspace) noexcept {
     if (engine == nullptr) {
         return false;
     }
-    const InkpodStatus status = engine->Invoke(
-        [&workspace](InkpodCore*) {
+    const InkpodStatus status = engine->InvokeOwnerThread(
+        [&workspace]() {
             return inkpod_cut_destroy(&workspace.cut.handle);
-        },
-        false,
-        false);
+        });
     if (status != INKPOD_STATUS_OK) {
         return false;
     }

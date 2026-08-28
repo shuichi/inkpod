@@ -102,6 +102,7 @@ public:
     [[nodiscard]] bool DiscardPreparedDocumentSession(
         const DocumentBinding& binding) noexcept;
     [[nodiscard]] bool ActivateDocumentView(DocumentViewId view) noexcept;
+    [[nodiscard]] bool ActivateEmptyEditorGroup(EditorGroupId group) noexcept;
     [[nodiscard]] bool RefreshEditorPresentation(
         DocumentSessionId session,
         Generation generation) noexcept;

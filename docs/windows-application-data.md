@@ -40,7 +40,7 @@ virtual-key、scan-code、modifier bit mask、Base64、binary blob を JSON へ�
 ```json
 {
   "format": "inkpod-settings",
-  "formatVersion": 2,
+  "formatVersion": 3,
   "general": {
     "uiLanguage": "ja-JP"
   },
@@ -95,7 +95,11 @@ virtual-key、scan-code、modifier bit mask、Base64、binary blob を JSON へ�
 zone、tab、preset も `layer-plane`、`right`、`right-tab-1`、`coloring` のような
 stable かつ人間が理解できる key で表す。
 
-現行の設定 schema は `formatVersion: 2` だけを受理する。
+現行の設定 schema は `formatVersion: 3` だけを受理する。
+処理進捗 pane と `window.job.progress` command の廃止に伴い、設定と
+`.inkshortcuts` preset の top-level version をともに 3 へ更新した。旧 version は
+移行せず拒否し、既存の不正・非現行設定は通常終了時に上書きしない。文書の
+`.inkpod` version、replay epoch、公開 C ABI はこの表示変更では変わらない。
 `saveAndRecovery.defaultRasterFormat` は新規セルのラスタ保存形式で、
 `png`（既定値）、`tiff`、`tga`、`bmp` を指定できる。環境設定の一般ページからも
 同じ値を変更できる。この設定は既存文書の保存形式を変更しない。読み込んだ

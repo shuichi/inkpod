@@ -214,6 +214,7 @@ struct PublishedSession {
     SessionBinding binding;
     InkpodDocumentInfo document_info{};
     bool has_document_info{};
+    std::array<wchar_t, 1024U> sequence_cell_name{};
     InkpodEditorStateInfo editor_state{};
     bool has_editor_state{};
     InkpodHistoryInfo history_info{};
@@ -1330,6 +1331,33 @@ struct CoreHost::Impl final {
 
     void RefreshPublishedPresentation(
         SessionBinding binding, InkpodCore* core) noexcept {
+        std::array<wchar_t, 1024U> sequence_name{};
+        InkpodSequenceStepPlan sequence{};
+        sequence.struct_size = sizeof(sequence);
+        if (inkpod_core_sequence_step_resolve(
+                core, INKPOD_SEQUENCE_NEXT, INKPOD_SEQUENCE_ENDPOINT_STOP, &sequence)
+                == INKPOD_STATUS_OK
+            && sequence.source_index != INKPOD_SEQUENCE_INDEX_NONE) {
+            std::array<std::uint8_t, 1024U> utf8{};
+            InkpodSequenceCellInfo cell{};
+            cell.struct_size = sizeof(cell);
+            cell.name_utf8 = utf8.data();
+            cell.name_capacity = utf8.size();
+            if (inkpod_core_sequence_cell_get(core, sequence.source_index, &cell)
+                    == INKPOD_STATUS_OK
+                && cell.document_uuid_high == sequence.source_document_uuid_high
+                && cell.document_uuid_low == sequence.source_document_uuid_low
+                && cell.name_bytes != 0U && cell.name_bytes <= utf8.size()) {
+                const int written = MultiByteToWideChar(
+                    CP_UTF8, MB_ERR_INVALID_CHARS,
+                    reinterpret_cast<const char*>(utf8.data()),
+                    static_cast<int>(cell.name_bytes), sequence_name.data(),
+                    static_cast<int>(sequence_name.size() - 1U));
+                if (written <= 0) {
+                    sequence_name.fill(L'\0');
+                }
+            }
+        }
         InkpodHistoryInfo history{};
         history.struct_size = sizeof(history);
         InkpodHistoryEntryKind undo_kind{};
@@ -1388,6 +1416,7 @@ struct CoreHost::Impl final {
             found->has_edit_target_capabilities = has_capabilities;
             found->edit_target_count = has_edit_target_presentation
                 ? edit_target_count : 0U;
+            found->sequence_cell_name = sequence_name;
         }
     }
 
@@ -1885,6 +1914,16 @@ struct CoreHost::Impl final {
                             status = INKPOD_STATUS_INVALID_STATE;
                             StoreHostFailure(L"Core initializer threw an exception");
                         }
+                    }
+                }
+                if (status == INKPOD_STATUS_OK) {
+                    InkpodEditorDefaults defaults{};
+                    defaults.struct_size = sizeof(defaults);
+                    defaults.state.struct_size = sizeof(defaults.state);
+                    status = inkpod_core_get_editor_defaults(core, &defaults);
+                    if (status == INKPOD_STATUS_OK) {
+                        std::lock_guard lock(state_mutex);
+                        application_editor_defaults = defaults;
                     }
                 }
                 if (status == INKPOD_STATUS_OK) {
@@ -2780,6 +2819,7 @@ struct CoreHost::Impl final {
 
     mutable std::mutex state_mutex;
     std::vector<PublishedSession> published;
+    InkpodEditorDefaults application_editor_defaults{};
     std::vector<FrontendViewBinding> frontend_views;
     std::vector<renderer::CanvasSnapshotSink*> snapshot_sinks;
     SessionBinding active{};
@@ -2896,6 +2936,13 @@ InkpodStatus CoreHost::CloseSession(
         : impl_->CloseSession(SessionBinding{session, generation});
 }
 
+void CoreHost::ClearActiveSession() noexcept {
+    if (impl_ != nullptr) {
+        std::lock_guard lock(impl_->state_mutex);
+        impl_->active = {};
+    }
+}
+
 bool CoreHost::SetActiveSession(
     DocumentSessionId session,
     Generation generation) noexcept {
@@ -2943,6 +2990,11 @@ InkpodStatus CoreHost::Invoke(
               std::move(operation),
               publish_snapshot,
               refresh_document_info);
+}
+
+InkpodStatus CoreHost::InvokeOwnerThread(std::function<InkpodStatus()> operation) noexcept {
+    return impl_ == nullptr ? INKPOD_STATUS_INVALID_STATE
+        : impl_->InvokeOwnerThread(std::move(operation));
 }
 
 InkpodStatus CoreHost::InvokeAll(
@@ -3200,6 +3252,38 @@ bool CoreHost::GetDocumentInfo(
     InkpodDocumentInfo& info) const noexcept {
     return impl_ != nullptr
         && impl_->CopyDocumentInfo(SessionBinding{session, generation}, info);
+}
+
+bool CoreHost::GetSequenceCellName(
+    DocumentSessionId session, Generation generation, std::wstring& name) const noexcept {
+    name.clear();
+    if (impl_ == nullptr) {
+        return false;
+    }
+    try {
+        std::lock_guard lock(impl_->state_mutex);
+        const auto found = impl_->FindPublishedLocked(SessionBinding{session, generation});
+        if (found == impl_->published.end() || !found->has_document_info) {
+            return false;
+        }
+        name.assign(found->sequence_cell_name.data());
+        return true;
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+}
+
+InkpodStatus CoreHost::GetApplicationEditorDefaults(
+    InkpodEditorDefaults& defaults) const noexcept {
+    if (impl_ == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    std::lock_guard lock(impl_->state_mutex);
+    if (impl_->application_editor_defaults.struct_size != sizeof(defaults)) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    defaults = impl_->application_editor_defaults;
+    return INKPOD_STATUS_OK;
 }
 
 bool CoreHost::GetHistoryPresentation(

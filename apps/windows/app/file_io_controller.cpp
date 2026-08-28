@@ -701,4 +701,31 @@ bool FileIoController::Progress(WorkspaceWindowId workspace, InkpodIoJobInfo& ou
     return false;
 }
 
+std::size_t FileIoController::CopyProgress(
+    WorkspaceWindowId workspace, std::span<FileIoProgressEntry> output) const noexcept {
+    if (impl_ == nullptr || !workspace || output.empty()) {
+        return 0U;
+    }
+    std::size_t copied{};
+    for (const auto& entry : impl_->entries) {
+        if (copied == output.size()) {
+            break;
+        }
+        const auto& pending = *entry.pending;
+        if (pending.request.context.workspace != workspace) {
+            continue;
+        }
+        auto& value = output[copied];
+        value.request_id = pending.result.request_id;
+        value.context = pending.request.context;
+        {
+            std::lock_guard lock(pending.progress_mutex);
+            value.progress = pending.progress;
+        }
+        value.cancelling = pending.cancelled.load(std::memory_order_acquire);
+        ++copied;
+    }
+    return copied;
+}
+
 }  // namespace inkpod::app

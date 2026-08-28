@@ -167,7 +167,7 @@ int main() {
         return 10;
     }
     std::vector<std::uint8_t> noncurrent = encoded;
-    const std::string version_token = "\"formatVersion\": 2";
+    const std::string version_token = "\"formatVersion\": 3";
     const auto version = std::search(
         noncurrent.begin(),
         noncurrent.end(),
@@ -176,7 +176,7 @@ int main() {
     if (version == noncurrent.end()) {
         return 11;
     }
-    version[version_token.size() - 1U] = static_cast<std::uint8_t>('3');
+    version[version_token.size() - 1U] = static_cast<std::uint8_t>('2');
     if (inkpod::windows::ui::DecodeShortcutPreset(noncurrent, decoded)
         != ShortcutPresetStatus::UnsupportedVersion) {
         return 11;

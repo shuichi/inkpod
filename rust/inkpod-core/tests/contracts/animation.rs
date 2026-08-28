@@ -702,7 +702,8 @@ fn sequence_activate_and_step_reject_document_dirty_without_discarding_it() {
     let switched = core.sequence_step(SequenceDirection::Next, false).unwrap();
     assert_eq!(switched.document_uuid, 0x4444);
     assert_eq!((switched.width, switched.height), (3, 2));
-    assert!(switched.dirty);
+    assert!(!switched.dirty);
+    assert!(!core.editor_state().unwrap().dirty);
     std::fs::remove_file(path).unwrap();
 }
 
@@ -737,6 +738,14 @@ fn acceptance_autosave_sequence_switch_restores_exact_dirty_native_state() {
     }
     core.save(&normal_path).unwrap();
     let normal_bytes = std::fs::read(&normal_path).unwrap();
+    core.update_editor_state(
+        core.editor_state().unwrap().revision,
+        EditorStateUpdate::SetToolDiameter {
+            tool: EditorTool::Brush,
+            diameter_q16: 13_i64 << 16,
+        },
+    )
+    .unwrap();
     core.apply_stroke(&line_stroke(vec![StrokeSample {
         x: 1.0,
         y: 0.0,
@@ -748,6 +757,7 @@ fn acceptance_autosave_sequence_switch_restores_exact_dirty_native_state() {
     let source_history = core.history_entries().to_vec();
     let source_journal = core.journal_entries().to_vec();
     let source_editor = core.editor_state().unwrap();
+    assert!(source_editor.dirty);
     let source_request = core
         .sequence_switch_request(1, SequenceSwitchPolicy::AutosaveBeforeSwitch)
         .unwrap();
@@ -762,6 +772,13 @@ fn acceptance_autosave_sequence_switch_restores_exact_dirty_native_state() {
         .sequence_commit_autosaved_switch(source_request)
         .unwrap();
     assert_eq!(switched.document_uuid, 0x4545);
+    assert!(!switched.dirty);
+    let target_editor = core.editor_state().unwrap();
+    assert!(!target_editor.dirty);
+    assert_eq!(
+        target_editor.state.without_target(),
+        source_editor.state.without_target()
+    );
 
     core.apply_stroke(&line_stroke(vec![StrokeSample {
         x: 0.0,
@@ -806,6 +823,7 @@ fn acceptance_autosave_sequence_switch_restores_exact_dirty_native_state() {
     assert_eq!(core.history_entries(), source_history);
     assert_eq!(core.journal_entries(), source_journal);
     assert_eq!(core.editor_state().unwrap().state, source_editor.state);
+    assert!(core.editor_state().unwrap().dirty);
     assert_eq!(core.sequence_cells().unwrap().len(), 2);
     let restored_digest = core.document_state_digest().unwrap();
     core.undo().unwrap();
@@ -883,6 +901,8 @@ fn detached_sequence_switch_preserves_recovery_history_formats_and_view_owners()
     core.validate_prepared_sequence_switch(&prepared).unwrap();
     let switched = core.commit_prepared_sequence_switch(prepared).unwrap();
     assert_eq!(switched.document_uuid, 0x7474);
+    assert!(!switched.dirty);
+    assert!(!core.editor_state().unwrap().dirty);
     assert_eq!(core.raster_file_format().unwrap(), CommonRasterFormat::Bmp);
     assert_eq!(core.build_snapshot_for(view).unwrap().view(), view_state);
     assert_eq!(core.subpalette_sample(0, 0).unwrap(), reference_pixel);
@@ -1127,7 +1147,7 @@ fn sequence_activation_plan_revalidates_unbound_and_bound_source_identities() {
 }
 
 #[test]
-fn sequence_activate_and_step_accept_after_editor_state_save() {
+fn sequence_activate_and_step_start_clean_with_inherited_editor_settings() {
     let mut core = Core::new();
     let current = core
         .new_cell(2, 2, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
@@ -1181,8 +1201,8 @@ fn sequence_activate_and_step_accept_after_editor_state_save() {
             plane_id: activated.main_plane_id,
         })
     );
-    assert!(after_activate.dirty);
-    assert!(activated.dirty);
+    assert!(!after_activate.dirty);
+    assert!(!activated.dirty);
 
     let stepped = core.sequence_step(SequenceDirection::Next, false).unwrap();
     assert_eq!(stepped.document_uuid, 0x6666);
@@ -1200,16 +1220,11 @@ fn sequence_activate_and_step_accept_after_editor_state_save() {
             plane_id: stepped.main_plane_id,
         })
     );
-    assert!(after_step.dirty);
-    assert!(stepped.dirty);
-
-    let token = core.editor_savepoint_token().unwrap();
-    let editor_clean = core.commit_editor_savepoint(token).unwrap();
-    assert!(!editor_clean.dirty);
-    assert!(
-        !core.document_info().unwrap().dirty,
-        "each sequence switch establishes a clean document savepoint"
-    );
+    assert!(!after_step.dirty);
+    assert!(!stepped.dirty);
+    assert!(!stepped.can_undo && !stepped.can_redo);
+    assert!(core.history_entries().is_empty());
+    assert!(core.journal_entries().is_empty());
     std::fs::remove_file(path).unwrap();
 }
 

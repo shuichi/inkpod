@@ -451,6 +451,16 @@ fn io_003_sequence_switch_and_compacted_copy_require_owner_finalization() {
             assert_eq!(inkpod_io_job_release(&mut job), INKPOD_STATUS_OK);
         }
         let original_uuid = (document.document_uuid_high, document.document_uuid_low);
+        let mut original_editor = InkpodEditorStateInfo {
+            struct_size: size_of::<InkpodEditorStateInfo>() as u32,
+            ..Default::default()
+        };
+        assert_eq!(
+            inkpod_core_get_editor_state(core, &mut original_editor),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(document.flags & INKPOD_DOCUMENT_FLAG_DIRTY, 0);
+        assert_eq!(original_editor.flags & INKPOD_EDITOR_STATE_DIRTY, 0);
         let mut switch = InkpodSequenceSwitchRequest {
             struct_size: size_of::<InkpodSequenceSwitchRequest>() as u32,
             ..Default::default()
@@ -576,6 +586,97 @@ fn io_003_sequence_switch_and_compacted_copy_require_owner_finalization() {
         assert!(directory.join("export-cell2.png").exists());
         assert!(!selected.exists());
         assert_eq!(inkpod_io_job_release(&mut job), INKPOD_STATUS_OK);
+        let recovery_bytes = std::fs::read(&source_recovery).unwrap();
+        let file_count = std::fs::read_dir(&directory).unwrap().count();
+        let empty_source = path_input("");
+        for omitted_source in [ptr::null(), &empty_source as *const InkpodIoPath] {
+            assert_eq!(document.flags & INKPOD_DOCUMENT_FLAG_DIRTY, 0);
+            assert_eq!(
+                inkpod_core_sequence_switch_request(
+                    core,
+                    0,
+                    INKPOD_SEQUENCE_SWITCH_AUTOSAVE,
+                    &mut switch,
+                ),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(switch.flags, INKPOD_SEQUENCE_SWITCH_REQUIRED);
+            assert_eq!(
+                inkpod_core_io_sequence_switch_submit(
+                    core,
+                    manager,
+                    &switch,
+                    omitted_source,
+                    &recovery,
+                    ptr::null(),
+                    &mut job,
+                ),
+                INKPOD_STATUS_OK
+            );
+            let ready = wait_ready(job);
+            assert_eq!(ready.state, INKPOD_IO_READY);
+            assert_eq!(ready.flags & INKPOD_IO_RESULT_INSTALLING, 0);
+            assert_eq!(
+                inkpod_core_io_job_apply(core, job, &mut document, ptr::null_mut()),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(wait_ready(job).state, INKPOD_IO_COMPLETE);
+            assert_eq!(
+                (document.document_uuid_high, document.document_uuid_low),
+                original_uuid
+            );
+            assert_eq!(
+                document.flags & (INKPOD_DOCUMENT_FLAG_DIRTY | INKPOD_DOCUMENT_FLAG_RECOVERED),
+                INKPOD_DOCUMENT_FLAG_DIRTY | INKPOD_DOCUMENT_FLAG_RECOVERED
+            );
+            let mut restored_editor = InkpodEditorStateInfo {
+                struct_size: size_of::<InkpodEditorStateInfo>() as u32,
+                ..Default::default()
+            };
+            assert_eq!(
+                inkpod_core_get_editor_state(core, &mut restored_editor),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(
+                restored_editor.editor_revision,
+                original_editor.editor_revision
+            );
+            assert_eq!(restored_editor.editor_digest, original_editor.editor_digest);
+            assert_ne!(restored_editor.flags & INKPOD_EDITOR_STATE_DIRTY, 0);
+            assert_eq!(std::fs::read(&source_recovery).unwrap(), recovery_bytes);
+            assert_eq!(std::fs::read_dir(&directory).unwrap().count(), file_count);
+            assert_eq!(inkpod_io_job_release(&mut job), INKPOD_STATUS_OK);
+
+            assert_eq!(
+                inkpod_core_sequence_switch_request(
+                    core,
+                    1,
+                    INKPOD_SEQUENCE_SWITCH_AUTOSAVE,
+                    &mut switch,
+                ),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(switch.flags, INKPOD_SEQUENCE_SWITCH_REQUIRED);
+            assert_eq!(
+                inkpod_core_io_sequence_switch_submit(
+                    core,
+                    manager,
+                    &switch,
+                    omitted_source,
+                    ptr::null(),
+                    ptr::null(),
+                    &mut job,
+                ),
+                INKPOD_STATUS_INVALID_ARGUMENT
+            );
+            assert!(job.is_null());
+            // This unchanged source already has the durable recovery above.
+            // The direct commit contract still activates a fresh clean target.
+            assert_eq!(
+                inkpod_core_sequence_commit_autosaved_switch(core, &switch, &mut document),
+                INKPOD_STATUS_OK
+            );
+        }
         assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
         assert_eq!(inkpod_io_manager_release(&mut manager), INKPOD_STATUS_OK);
     }

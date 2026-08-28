@@ -5,6 +5,21 @@
     "en-US"
   ],
   "entries": [
+    { "id": "SequenceMoveEarlier", "kind": "text", "ja": "左へ移動", "en": "Move left", "resource": false },
+    { "id": "SequenceMoveLater", "kind": "text", "ja": "右へ移動", "en": "Move right", "resource": false },
+    { "id": "JobStatusQueued", "kind": "text", "ja": "待機中", "en": "Queued", "resource": false },
+    { "id": "JobStatusApplying", "kind": "text", "ja": "確定中", "en": "Finishing", "resource": false },
+    { "id": "JobStatusMoreFormat", "kind": "format", "ja": "%ls（ほか %zu 件）", "en": "%ls (+%zu)", "resource": false },
+    { "id": "JobStatusCancel", "kind": "text", "ja": "キャンセル", "en": "Cancel", "resource": false },
+    { "id": "JobStatusRead", "kind": "text", "ja": "画像読み込み", "en": "Open image", "resource": false },
+    { "id": "JobStatusSave", "kind": "text", "ja": "ファイル保存", "en": "Save files", "resource": false },
+    { "id": "JobStatusSequence", "kind": "text", "ja": "連番読み込み", "en": "Load sequence", "resource": false },
+    { "id": "JobStatusExport", "kind": "text", "ja": "書き出し", "en": "Export", "resource": false },
+    { "id": "JobStatusReference", "kind": "text", "ja": "参照画像読み込み", "en": "Load reference images", "resource": false },
+    { "id": "JobStatusLightTable", "kind": "text", "ja": "ライトテーブル画像読み込み", "en": "Load Light Table image", "resource": false },
+    { "id": "JobStatusBatch", "kind": "text", "ja": "バッチ処理", "en": "Batch", "resource": false },
+    { "id": "JobStatusRecovery", "kind": "text", "ja": "復旧ファイル処理", "en": "Recovery files", "resource": false },
+    { "id": "JobStatusCompaction", "kind": "text", "ja": "履歴圧縮コピー", "en": "Compacted copy", "resource": false },
     {
       "id": "FileIoOverwriteSequence",
       "kind": "text",

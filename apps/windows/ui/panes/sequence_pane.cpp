@@ -10,6 +10,7 @@
 #include <utility>
 
 #include <commctrl.h>
+#include <windowsx.h>
 
 #include "app/resource.h"
 #include "pane_dialog_layout.h"
@@ -25,20 +26,26 @@ void Dispatch(SequencePaneDialogState& state, UINT command) noexcept {
     }
 }
 
-void LayoutSequencePane(HWND dialog) noexcept {
+constexpr int kMaximumSequenceRowPixels = 255;
+constexpr int kSequenceColumnDip = 112;
+
+void LayoutSequencePane(HWND dialog, bool redraw = true) noexcept {
     RECT client{};
     if (GetClientRect(dialog, &client) == FALSE) {
         return;
     }
-    const int margin = ScalePaneDip(dialog, 8);
-    const int gap = ScalePaneDip(dialog, 6);
+    const int margin = ScalePaneDip(dialog, 6);
+    const int gap = ScalePaneDip(dialog, 4);
     const int header_height = ScalePaneDip(dialog, 24);
-    const int line_height = ScalePaneDip(dialog, 18);
-    const int button_height = ScalePaneDip(dialog, 26);
-    const int nav_width = ScalePaneDip(dialog, 58);
-    const int import_width = ScalePaneDip(dialog, 112);
+    const int line_height = std::max(ScalePaneDip(dialog, 18),
+        PaneControlTextHeight(GetDlgItem(dialog, IDC_SEQUENCE_TARGET)));
+    const int button_height = PaneReadableControlHeight(
+        dialog, IDC_SEQUENCE_IMPORT, 24, 4);
     const int width = static_cast<int>(client.right - client.left);
     const int height = static_cast<int>(client.bottom - client.top);
+    const int content_width = std::max(0, width - margin * 2);
+    const int import_width = std::min(content_width,
+        PaneButtonIdealWidth(dialog, IDC_SEQUENCE_IMPORT));
 
     PlacePaneTargetRow(
         dialog,
@@ -46,72 +53,173 @@ void LayoutSequencePane(HWND dialog) noexcept {
         IDC_SEQUENCE_PIN,
         margin,
         margin,
-        std::max(0, width - margin * 2),
+        std::max(0, content_width - import_width - gap),
         ScalePaneDip(dialog, 4),
         line_height,
         header_height,
-        gap);
+        gap,
+        false);
+    PlacePaneDialogControl(
+        dialog, IDC_SEQUENCE_IMPORT,
+        std::max(margin, width - margin - import_width), margin,
+        import_width, button_height, false);
     const std::array<int, 4U> edit_controls{
         IDC_SEQUENCE_REMOVE,
         IDC_SEQUENCE_MOVE_UP,
         IDC_SEQUENCE_MOVE_DOWN,
         IDC_SEQUENCE_RENUMBER};
-    const int content_width = std::max(0, width - margin * 2);
-    const std::size_t edit_rows = PaneButtonRowCount(
-        dialog, edit_controls, content_width, gap);
+    const auto* state = reinterpret_cast<const SequencePaneDialogState*>(
+        GetWindowLongPtrW(dialog, GWLP_USERDATA));
+    const bool cut_editable = state != nullptr && state->view.cut_editable;
+    const std::size_t edit_rows = cut_editable
+        ? PaneButtonRowCount(dialog, edit_controls, content_width, gap)
+        : 0U;
     const int edit_buttons_height = static_cast<int>(edit_rows) * button_height
         + std::max(0, static_cast<int>(edit_rows) - 1) * gap;
     const int edit_buttons_top = std::max(
         margin + header_height + gap,
         height - margin - edit_buttons_height);
-    const int buttons_top = std::max(
-        margin + header_height + gap,
-        edit_buttons_top - gap - button_height);
-    const int list_top = margin + header_height + gap;
-    const int list_height = std::max(0, buttons_top - gap - list_top);
+    const int list_top = margin + std::max(header_height, button_height) + gap;
+    const int list_bottom = cut_editable ? edit_buttons_top - gap : height - margin;
+    const UINT dpi = GetDpiForWindow(dialog);
+    const int list_frame = GetSystemMetricsForDpi(SM_CYHSCROLL, dpi)
+        + 2 * GetSystemMetricsForDpi(SM_CYBORDER, dpi);
+    // A Win32 ListBox item is at most 255 device pixels high. Bound the actual
+    // ListBox as well as the row so a tall/high-DPI pane never wraps into rows.
+    const int list_height = std::clamp(
+        list_bottom - list_top, 0, kMaximumSequenceRowPixels + list_frame);
+    const HWND list = GetDlgItem(dialog, IDC_SEQUENCE_CELLS);
+    const LRESULT first_visible = SendMessageW(list, LB_GETTOPINDEX, 0, 0);
+    const bool geometry_changed = !PaneWindowHasBounds(
+        list, margin, list_top, content_width, list_height);
+    if (geometry_changed) {
+        SendMessageW(list, WM_SETREDRAW, FALSE, 0);
+    }
     PlacePaneDialogControl(
         dialog,
         IDC_SEQUENCE_CELLS,
         margin,
         list_top,
-        std::max(0, width - margin * 2),
-        list_height);
+        content_width,
+        list_height,
+        false);
+    RECT list_client{};
+    if (GetClientRect(list, &list_client) != FALSE) {
+        const int row_height = std::clamp(
+            static_cast<int>(list_client.bottom - list_client.top),
+            1, kMaximumSequenceRowPixels);
+        if (SendMessageW(list, LB_GETITEMHEIGHT, 0, 0) != row_height) {
+            SendMessageW(list, LB_SETITEMHEIGHT, 0, row_height);
+        }
+    }
+    SendMessageW(list, LB_SETCOLUMNWIDTH,
+        static_cast<WPARAM>(ScalePaneDip(dialog, kSequenceColumnDip)), 0);
+    if (first_visible >= 0
+        && first_visible < SendMessageW(list, LB_GETCOUNT, 0, 0)) {
+        SendMessageW(list, LB_SETTOPINDEX, first_visible, 0);
+    }
+    if (geometry_changed) {
+        SendMessageW(list, WM_SETREDRAW, TRUE, 0);
+    }
     PlacePaneDialogControl(
         dialog,
         IDC_SEQUENCE_EMPTY,
         margin + gap,
         list_top + std::max(0, (list_height - line_height) / 2),
         std::max(0, width - margin * 2 - gap * 2),
-        line_height);
-    PlacePaneDialogControl(
-        dialog,
-        IDC_SEQUENCE_PREVIOUS,
-        margin,
-        buttons_top,
-        nav_width,
-        button_height);
-    PlacePaneDialogControl(
-        dialog,
-        IDC_SEQUENCE_NEXT,
-        margin + nav_width + gap,
-        buttons_top,
-        nav_width,
-        button_height);
-    PlacePaneDialogControl(
-        dialog,
-        IDC_SEQUENCE_IMPORT,
-        std::max(margin, width - margin - import_width),
-        buttons_top,
-        import_width,
-        button_height);
-    PlacePaneButtonRows(
-        dialog,
-        edit_controls,
-        margin,
-        edit_buttons_top,
-        content_width,
-        button_height,
-        gap);
+        line_height,
+        false);
+    if (cut_editable) {
+        int action_width = gap * (static_cast<int>(edit_controls.size()) - 1);
+        for (const int control : edit_controls) {
+            action_width += PaneButtonIdealWidth(dialog, control);
+        }
+        PlacePaneButtonRows(
+            dialog, edit_controls, margin, edit_buttons_top,
+            std::min(content_width, action_width), button_height, gap, 0U, false);
+    }
+    if (redraw) {
+        CompletePaneDialogResize(dialog);
+    }
+}
+
+void StepSequenceCell(SequencePaneDialogState& state, bool next) noexcept {
+    if (!state.view.target_available || state.view.cells.empty()) {
+        return;
+    }
+    if (!state.view.cut_editable) {
+        Dispatch(state, next ? IDM_SEQ_NEXT : IDM_SEQ_PREVIOUS);
+        return;
+    }
+    // Cut membership is an explicitly ordered list of independent Cell files,
+    // not the active Cell Core's naturally ordered raster sequence.
+    const auto count = static_cast<std::uint32_t>(state.view.cells.size());
+    std::uint32_t target = state.view.active_index;
+    if (target >= count) {
+        target = next ? 0U : count - 1U;
+    } else if (next && target + 1U < count) {
+        ++target;
+    } else if (!next && target > 0U) {
+        --target;
+    } else if (state.view.wrap_navigation && count > 1U) {
+        target = next ? 0U : count - 1U;
+    } else {
+        return;
+    }
+    state.activate_cell(state.context, state.view.cells[target].sequence_index);
+}
+
+bool SameSequenceCell(
+    const SequencePaneCellView& left, const SequencePaneCellView& right) noexcept {
+    return left.document_uuid_high == right.document_uuid_high
+        && left.document_uuid_low == right.document_uuid_low;
+}
+
+bool ReplaceSequenceItems(
+    HWND list, const std::vector<std::wstring>& labels) noexcept {
+    SendMessageW(list, LB_RESETCONTENT, 0, 0);
+    for (const auto& label : labels) {
+        const LRESULT item = SendMessageW(
+            list, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
+        if (item == LB_ERR || item == LB_ERRSPACE) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void SelectCommittedCell(
+    HWND list, std::uint32_t selected, LRESULT first_visible,
+    bool ensure_visible) noexcept {
+    const LRESULT desired = selected == UINT32_MAX
+        ? LB_ERR : static_cast<LRESULT>(selected);
+    if (SendMessageW(list, LB_GETCURSEL, 0, 0) != desired) {
+        SendMessageW(list, LB_SETCURSEL, static_cast<WPARAM>(desired), 0);
+    }
+    const LRESULT count = SendMessageW(list, LB_GETCOUNT, 0, 0);
+    if (count > 0) {
+        SendMessageW(list, LB_SETTOPINDEX,
+            static_cast<WPARAM>(std::clamp(first_visible, LRESULT{0}, count - 1)), 0);
+    }
+    if (!ensure_visible || desired < 0 || desired >= count) {
+        return;
+    }
+    RECT item{};
+    RECT client{};
+    if (SendMessageW(list, LB_GETITEMRECT, selected,
+            reinterpret_cast<LPARAM>(&item)) == LB_ERR
+        || GetClientRect(list, &client) == FALSE) {
+        return;
+    }
+    if (item.left < client.left) {
+        SendMessageW(list, LB_SETTOPINDEX, selected, 0);
+    } else if (item.right > client.right) {
+        const int columns = std::max(1,
+            static_cast<int>(client.right - client.left)
+                / std::max(1, static_cast<int>(item.right - item.left)));
+        const LRESULT first = std::max(LRESULT{0}, desired - columns + 1);
+        SendMessageW(list, LB_SETTOPINDEX, static_cast<WPARAM>(first), 0);
+    }
 }
 
 LRESULT CALLBACK SequenceListSubclass(
@@ -125,9 +233,38 @@ LRESULT CALLBACK SequenceListSubclass(
     if (state == nullptr) {
         return DefSubclassProc(list, message, wparam, lparam);
     }
-    if (message == WM_KEYDOWN && state->view.cut_editable) {
+    if (message == WM_GETDLGCODE) {
+        return DefSubclassProc(list, message, wparam, lparam) | DLGC_WANTARROWS;
+    }
+    if (message == WM_MOUSEHWHEEL || message == WM_MOUSEWHEEL) {
+        const int delta = GET_WHEEL_DELTA_WPARAM(wparam);
+        state->wheel_remainder += message == WM_MOUSEHWHEEL ? delta : -delta;
+        while (state->wheel_remainder >= WHEEL_DELTA) {
+            SendMessageW(list, WM_HSCROLL, SB_LINERIGHT, 0);
+            state->wheel_remainder -= WHEEL_DELTA;
+        }
+        while (state->wheel_remainder <= -WHEEL_DELTA) {
+            SendMessageW(list, WM_HSCROLL, SB_LINELEFT, 0);
+            state->wheel_remainder += WHEEL_DELTA;
+        }
+        return 0;
+    }
+    if (message == WM_KEYDOWN) {
         const bool control = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
         const bool alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
+        const bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+        if (!control && !alt && !shift
+            && (wparam == VK_LEFT || wparam == VK_RIGHT)) {
+            const bool retain_focus = GetFocus() == list;
+            StepSequenceCell(*state, wparam == VK_RIGHT);
+            if (retain_focus && IsWindow(list) != FALSE && IsWindowVisible(list) != FALSE) {
+                SetFocus(list);
+            }
+            return 0;
+        }
+        if (!state->view.cut_editable) {
+            return DefSubclassProc(list, message, wparam, lparam);
+        }
         if (wparam == VK_INSERT) {
             Dispatch(*state, IDM_CUT_SEQUENCE_ADD);
             return 0;
@@ -136,11 +273,11 @@ LRESULT CALLBACK SequenceListSubclass(
             Dispatch(*state, IDM_CUT_SEQUENCE_REMOVE);
             return 0;
         }
-        if (alt && wparam == VK_UP) {
+        if (alt && (wparam == VK_LEFT || wparam == VK_UP)) {
             Dispatch(*state, IDM_CUT_SEQUENCE_MOVE_UP);
             return 0;
         }
-        if (alt && wparam == VK_DOWN) {
+        if (alt && (wparam == VK_RIGHT || wparam == VK_DOWN)) {
             Dispatch(*state, IDM_CUT_SEQUENCE_MOVE_DOWN);
             return 0;
         }
@@ -156,6 +293,9 @@ LRESULT CALLBACK SequenceListSubclass(
             Dispatch(*state, IDM_CUT_REDO);
             return 0;
         }
+    }
+    if (message == WM_CANCELMODE || message == WM_CAPTURECHANGED) {
+        state->drag_index = UINT32_MAX;
     }
     if (state->view.cut_editable && message == WM_LBUTTONDOWN) {
         const DWORD item = static_cast<DWORD>(SendMessageW(
@@ -269,39 +409,43 @@ void DrawCell(
         item.hDC,
         GetSysColor(selected ? COLOR_HIGHLIGHTTEXT : COLOR_WINDOWTEXT));
 
-    const int padding = 6;
-    const int available_height = item.rcItem.bottom - item.rcItem.top - padding * 2;
-    const int thumbnail_width = std::max(
-        1,
-        static_cast<int>(cell.thumbnail_width) * available_height
-            / std::max(1, static_cast<int>(cell.thumbnail_height)));
+    const int padding = ScalePaneDip(item.hwndItem, 4);
+    const int text_height = std::max(ScalePaneDip(item.hwndItem, 16),
+        PaneControlTextHeight(item.hwndItem));
+    const int available_width = std::max(1,
+        static_cast<int>(item.rcItem.right - item.rcItem.left) - padding * 2);
+    const int available_height = std::max(1,
+        static_cast<int>(item.rcItem.bottom - item.rcItem.top)
+            - padding * 3 - text_height);
+    const int side = std::max(1, std::min({available_width, available_height,
+        ScalePaneDip(item.hwndItem, 64)}));
+    const int source_width = std::max(1, static_cast<int>(cell.thumbnail_width));
+    const int source_height = std::max(1, static_cast<int>(cell.thumbnail_height));
+    const int thumbnail_width = std::max(1,
+        source_width >= source_height ? side : side * source_width / source_height);
+    const int thumbnail_height = std::max(1,
+        source_height >= source_width ? side : side * source_height / source_width);
+    const int thumbnail_left = item.rcItem.left
+        + (item.rcItem.right - item.rcItem.left - thumbnail_width) / 2;
     RECT thumbnail{
-        item.rcItem.left + padding,
+        thumbnail_left,
         item.rcItem.top + padding,
-        item.rcItem.left + padding + std::min(available_height, thumbnail_width),
-        item.rcItem.bottom - padding};
+        thumbnail_left + thumbnail_width,
+        item.rcItem.top + padding + thumbnail_height};
     DrawThumbnail(item.hDC, thumbnail, cell, state.thumbnail_cache);
 
     RECT text{
-        thumbnail.right + 8,
-        item.rcItem.top + padding,
+        item.rcItem.left + padding,
+        item.rcItem.bottom - padding - text_height,
         item.rcItem.right - padding,
         item.rcItem.bottom - padding};
-    std::array<wchar_t, 384U> label{};
-    (void)swprintf_s(
-        label.data(),
-        label.size(),
-        L"%u  %ls\n%u x %u",
-        cell.cell_number,
-        cell.name.c_str(),
-        cell.width,
-        cell.height);
     DrawTextW(
         item.hDC,
-        label.data(),
+        item.itemID < state.item_labels.size()
+            ? state.item_labels[item.itemID].c_str() : cell.name.c_str(),
         -1,
         &text,
-        DT_LEFT | DT_VCENTER | DT_WORDBREAK | DT_END_ELLIPSIS | DT_NOPREFIX);
+        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
     if ((item.itemState & ODS_FOCUS) != 0U) {
         DrawFocusRect(item.hDC, &item.rcItem);
     }
@@ -315,13 +459,17 @@ INT_PTR CALLBACK SequencePaneProcedure(
         case WM_INITDIALOG:
             return TRUE;
         case WM_SIZE:
-            LayoutSequencePane(dialog);
+        case WM_DPICHANGED_AFTERPARENT:
+            LayoutSequencePane(dialog, false);
+            CompletePaneDialogResize(dialog);
             return TRUE;
         case WM_MEASUREITEM:
             if (wparam == static_cast<WPARAM>(IDC_SEQUENCE_CELLS)) {
                 auto* measure = reinterpret_cast<MEASUREITEMSTRUCT*>(lparam);
                 measure->itemHeight = static_cast<UINT>(
-                    MulDiv(76, static_cast<int>(GetDpiForWindow(dialog)), 96));
+                    std::min(kMaximumSequenceRowPixels, ScalePaneDip(dialog, 72)));
+                measure->itemWidth = static_cast<UINT>(
+                    ScalePaneDip(dialog, kSequenceColumnDip));
                 return TRUE;
             }
             break;
@@ -359,12 +507,6 @@ INT_PTR CALLBACK SequencePaneProcedure(
                 case IDC_SEQUENCE_RENUMBER:
                     Dispatch(*state, IDM_CUT_SEQUENCE_RENUMBER);
                     return TRUE;
-                case IDC_SEQUENCE_PREVIOUS:
-                    Dispatch(*state, IDM_SEQ_PREVIOUS);
-                    return TRUE;
-                case IDC_SEQUENCE_NEXT:
-                    Dispatch(*state, IDM_SEQ_NEXT);
-                    return TRUE;
                 case IDC_SEQUENCE_CELLS:
                     if (HIWORD(wparam) == LBN_SELCHANGE) {
                         const LRESULT selected = SendDlgItemMessageW(
@@ -372,10 +514,18 @@ INT_PTR CALLBACK SequencePaneProcedure(
                         if (selected != LB_ERR
                             && static_cast<std::size_t>(selected)
                                 < state->view.cells.size()) {
+                            const std::uint32_t target = state->view.cells[
+                                static_cast<std::size_t>(selected)].sequence_index;
+                            const HWND list = GetDlgItem(dialog, IDC_SEQUENCE_CELLS);
+                            const bool retain_focus = GetFocus() == list;
+                            SelectCommittedCell(list, state->view.active_index,
+                                SendMessageW(list, LB_GETTOPINDEX, 0, 0), false);
                             state->activate_cell(
-                                state->context,
-                                state->view.cells[static_cast<std::size_t>(selected)]
-                                    .sequence_index);
+                                state->context, target);
+                            if (retain_focus && IsWindow(list) != FALSE
+                                && IsWindowVisible(list) != FALSE) {
+                                SetFocus(list);
+                            }
                         }
                     }
                     return TRUE;
@@ -427,6 +577,17 @@ HWND CreateSequencePaneDialog(
         SequenceListSubclass,
         1U,
         reinterpret_cast<DWORD_PTR>(&state));
+    EnablePaneDialogResizePainting(dialog);
+    static_cast<void>(SetPaneIconButton(
+        GetDlgItem(dialog, IDC_SEQUENCE_REMOVE), PaneIconId::Delete));
+    SetDlgItemTextW(dialog, IDC_SEQUENCE_MOVE_UP,
+        UiText(UiStringId::SequenceMoveEarlier));
+    SetDlgItemTextW(dialog, IDC_SEQUENCE_MOVE_DOWN,
+        UiText(UiStringId::SequenceMoveLater));
+    static_cast<void>(SetPaneIconButton(
+        GetDlgItem(dialog, IDC_SEQUENCE_MOVE_UP), PaneIconId::Previous));
+    static_cast<void>(SetPaneIconButton(
+        GetDlgItem(dialog, IDC_SEQUENCE_MOVE_DOWN), PaneIconId::Next));
     LayoutSequencePane(dialog);
     SetWindowTextW(
         GetDlgItem(dialog, IDC_SEQUENCE_CELLS),
@@ -444,14 +605,54 @@ void UpdateSequencePaneDialog(HWND dialog, SequencePaneView view) noexcept {
         return;
     }
     std::wstring target_text;
+    std::vector<std::wstring> item_labels;
     try {
         target_text = view.auto_sequence_truncated
             ? std::wstring(UiText(UiStringId::AutoSequenceTruncated)) + L" — " + view.target_text
             : view.target_text;
+        item_labels.reserve(view.cells.size());
+        for (const auto& cell : view.cells) {
+            item_labels.push_back(std::to_wstring(cell.cell_number) + L"  "
+                + cell.name + L" — " + std::to_wstring(cell.width) + L" x "
+                + std::to_wstring(cell.height));
+        }
     } catch (const std::bad_alloc&) {
         return;
     }
+    const HWND list = GetDlgItem(dialog, IDC_SEQUENCE_CELLS);
+    const LRESULT old_first = SendMessageW(list, LB_GETTOPINDEX, 0, 0);
+    LRESULT first_visible = old_first;
+    if (old_first >= 0
+        && static_cast<std::size_t>(old_first) < state->view.cells.size()) {
+        const auto& old_cell = state->view.cells[static_cast<std::size_t>(old_first)];
+        const auto first = std::find_if(view.cells.begin(), view.cells.end(),
+            [&old_cell](const SequencePaneCellView& cell) {
+                return SameSequenceCell(old_cell, cell);
+            });
+        if (first != view.cells.end()) {
+            first_visible = static_cast<LRESULT>(first - view.cells.begin());
+        }
+    }
+    const bool selection_changed = state->view.active_index != view.active_index
+        || (view.active_index < view.cells.size()
+            && state->view.active_index < state->view.cells.size()
+            && !SameSequenceCell(view.cells[view.active_index],
+                state->view.cells[state->view.active_index]));
+    // Native item text is also the MSAA/UIA item name. Selection, thumbnail,
+    // pin, and geometry updates do not rebuild an unchanged string list.
+    const bool items_changed = item_labels != state->item_labels;
+    if (items_changed) {
+        SendMessageW(list, WM_SETREDRAW, FALSE, 0);
+        if (!ReplaceSequenceItems(list, item_labels)) {
+            static_cast<void>(ReplaceSequenceItems(list, state->item_labels));
+            SelectCommittedCell(list, state->view.active_index, old_first, false);
+            SendMessageW(list, WM_SETREDRAW, TRUE, 0);
+            CompletePaneDialogResize(dialog);
+            return;
+        }
+    }
     state->view = std::move(view);
+    state->item_labels = std::move(item_labels);
     SetDlgItemTextW(dialog, IDC_SEQUENCE_TARGET, target_text.c_str());
     SetDlgItemTextW(
         dialog,
@@ -462,33 +663,16 @@ void UpdateSequencePaneDialog(HWND dialog, SequencePaneView view) noexcept {
         GetDlgItem(dialog, IDC_SEQUENCE_PIN),
         state->view.pinned ? PaneIconId::ReturnToFollowing
                            : PaneIconId::PinDocument));
-    const HWND list = GetDlgItem(dialog, IDC_SEQUENCE_CELLS);
-    SendMessageW(list, WM_SETREDRAW, FALSE, 0);
-    SendMessageW(list, LB_RESETCONTENT, 0, 0);
-    for (std::size_t index = 0U; index < state->view.cells.size(); ++index) {
-        const LRESULT item = SendMessageW(list, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L""));
-        if (item != LB_ERR && item != LB_ERRSPACE) {
-            SendMessageW(list, LB_SETITEMDATA, static_cast<WPARAM>(item), index);
-        }
+    SelectCommittedCell(list, state->view.active_index, first_visible, selection_changed);
+    if (items_changed) {
+        SendMessageW(list, WM_SETREDRAW, TRUE, 0);
     }
-    if (state->view.active_index != UINT32_MAX
-        && state->view.active_index < state->view.cells.size()) {
-        SendMessageW(list, LB_SETCURSEL, state->view.active_index, 0);
-    }
-    SendMessageW(list, WM_SETREDRAW, TRUE, 0);
-    InvalidateRect(list, nullptr, TRUE);
     const bool has_sequence = state->view.target_available
         && !state->view.cells.empty();
     EnableWindow(list, has_sequence ? TRUE : FALSE);
     EnableWindow(
         GetDlgItem(dialog, IDC_SEQUENCE_PIN),
         state->view.target_available ? TRUE : FALSE);
-    EnableWindow(
-        GetDlgItem(dialog, IDC_SEQUENCE_PREVIOUS),
-        has_sequence ? TRUE : FALSE);
-    EnableWindow(
-        GetDlgItem(dialog, IDC_SEQUENCE_NEXT),
-        has_sequence ? TRUE : FALSE);
     EnableWindow(
         GetDlgItem(dialog, IDC_SEQUENCE_IMPORT),
         state->view.target_available ? TRUE : FALSE);
@@ -512,7 +696,12 @@ void UpdateSequencePaneDialog(HWND dialog, SequencePaneView view) noexcept {
         dialog,
         IDC_SEQUENCE_EMPTY,
         has_sequence ? L"" : state->view.empty_text.c_str());
-    LayoutSequencePane(dialog);
+    ShowWindow(GetDlgItem(dialog, IDC_SEQUENCE_EMPTY), has_sequence ? SW_HIDE : SW_SHOW);
+    LayoutSequencePane(dialog, false);
+    // The layout keeps the preceding viewport; only a committed active-cell
+    // change may subsequently scroll just enough to reveal its frame.
+    SelectCommittedCell(list, state->view.active_index, first_visible, selection_changed);
+    CompletePaneDialogResize(dialog);
 }
 
 bool SequencePaneItemHasThumbnail(HWND dialog, std::size_t index) noexcept {

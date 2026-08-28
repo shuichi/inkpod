@@ -73,6 +73,8 @@ private:
         DockPaneType type{DockPaneType::Count};
         HWND content{};
         HWND floating_window{};
+        HWND tab_close_button{};
+        bool close_hovered{};
         DockZone auto_hide_edge{DockZone::Right};
         bool auto_hide_expanded{};
     };
@@ -137,6 +139,13 @@ private:
         LPARAM lparam,
         UINT_PTR subclass_id,
         DWORD_PTR reference) noexcept;
+    static LRESULT CALLBACK PaneTabCloseButtonSubclassProcedure(
+        HWND window,
+        UINT message,
+        WPARAM wparam,
+        LPARAM lparam,
+        UINT_PTR subclass_id,
+        DWORD_PTR reference) noexcept;
 
     [[nodiscard]] static std::size_t PaneIndex(DockPaneType type) noexcept;
     [[nodiscard]] PaneHostState* PaneState(DockPaneType type) noexcept;
@@ -156,6 +165,9 @@ private:
     [[nodiscard]] bool UpdateTabFont(UINT dpi) noexcept;
     void ApplyPaneLayout(PaneHostState& pane) noexcept;
     void ApplyTabLayout(TabHostState& tabs, bool synchronize_items) noexcept;
+    void LayoutPaneTabCloseButtons(TabHostState& tabs) noexcept;
+    [[nodiscard]] bool DrawPaneTabCloseButton(
+        const DRAWITEMSTRUCT& draw) noexcept;
     void ApplyToolTabLayout(bool synchronize_items) noexcept;
     [[nodiscard]] ToolTabCloseButtonSlot* FindToolTabCloseButton(
         ToolTabId tab) noexcept;

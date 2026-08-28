@@ -605,6 +605,10 @@ public:
         snapshot_view_ = {};
         transform_ = {};
         overlay_ = {};
+        shooting_frames_ = {};
+        vanishing_points_ = {};
+        floating_preview_ = {};
+        geometry_preview_ = {};
         render_plan_ = {};
         tile_cache_.clear();
         retained_snapshot_bytes_ = 0U;
@@ -2482,6 +2486,7 @@ private:
                 surface.route = {};
                 surface.occluded = false;
                 PublishSurface(surface);
+                render = surface.visible;
                 break;
             case HostControlKind::Resize:
                 result = surface.surface->Resize(control.width, control.height);

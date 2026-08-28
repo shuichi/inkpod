@@ -120,6 +120,7 @@ public:
         CoreHost* core) noexcept;
     [[nodiscard]] bool Remove(DocumentSessionId id) noexcept;
     [[nodiscard]] bool Activate(DocumentSessionId id) noexcept;
+    void ClearActive() noexcept;
     [[nodiscard]] DocumentSession* Find(DocumentSessionId id) noexcept;
     [[nodiscard]] const DocumentSession* Find(DocumentSessionId id) const noexcept;
     [[nodiscard]] DocumentSession* FindByView(DocumentViewId view) noexcept;

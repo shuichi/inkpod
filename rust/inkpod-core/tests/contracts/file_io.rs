@@ -467,6 +467,8 @@ fn io_003_sequence_activation_and_step_revoke_old_native_save_authority() {
         };
         assert_eq!(after.document_uuid, target_uuid);
         assert!(after.document_revision > before.document_revision);
+        assert!(!after.dirty);
+        assert!(!core.editor_state().unwrap().dirty);
         assert_normal_file_authority_revoked(&mut core, &manager, &normal, &old_save);
         assert_eq!(std::fs::read(&normal).unwrap(), native_before);
         assert_eq!(
@@ -616,9 +618,19 @@ fn io_003_sequence_switch_installs_recovery_before_one_owner_commit_and_restores
     let raster_bytes = std::fs::read(normal.with_extension("tif")).unwrap();
     core.set_main_line_color(PixelValue::Rgba([10, 11, 12, 255]))
         .unwrap();
+    core.update_editor_state(
+        core.editor_state().unwrap().revision,
+        EditorStateUpdate::SetToolDiameter {
+            tool: EditorTool::Brush,
+            diameter_q16: 13_i64 << 16,
+        },
+    )
+    .unwrap();
     let before = core.document_info().unwrap();
     let digest = core.document_state_digest().unwrap();
     let history = core.history_entries().to_vec();
+    let editor = core.editor_state().unwrap();
+    assert!(editor.dirty);
     let metadata = inkpod_io::RecoveryMetadata {
         session_id: 1,
         generation: 2,
@@ -664,6 +676,8 @@ fn io_003_sequence_switch_installs_recovery_before_one_owner_commit_and_restores
         core.document_info().unwrap().document_uuid,
         request.target_document_uuid
     );
+    assert!(!core.document_info().unwrap().dirty);
+    assert!(!core.editor_state().unwrap().dirty);
     assert_eq!(core.raster_file_format().unwrap(), CommonRasterFormat::Bmp);
     assert_normal_file_authority_revoked(&mut core, &manager, &normal, &old_save);
     let stored = manager
@@ -672,6 +686,10 @@ fn io_003_sequence_switch_installs_recovery_before_one_owner_commit_and_restores
     assert_eq!(stored, metadata);
     assert_eq!(std::fs::read(&normal).unwrap(), normal_bytes);
     assert!(!recovery.with_extension("tif").exists());
+    let recovery_bytes = std::fs::read(&recovery).unwrap();
+    let recovery_file_count = std::fs::read_dir(recovery.parent().unwrap())
+        .unwrap()
+        .count();
 
     let request = core
         .sequence_switch_request(0, SequenceSwitchPolicy::AutosaveBeforeSwitch)
@@ -680,8 +698,8 @@ fn io_003_sequence_switch_installs_recovery_before_one_owner_commit_and_restores
         &core,
         manager.clone(),
         request,
-        Some(target_recovery),
-        Some(recovery),
+        None,
+        Some(recovery.clone()),
         None,
     )
     .unwrap();
@@ -693,12 +711,21 @@ fn io_003_sequence_switch_installs_recovery_before_one_owner_commit_and_restores
     );
     assert!(matches!(
         restored.apply(&mut core).unwrap(),
-        FileIoApply::Pending
+        FileIoApply::Complete { .. }
     ));
-    assert_eq!(ready(&mut restored).state, FileIoState::Ready);
-    restored.apply(&mut core).unwrap();
+    assert_eq!(restored.poll().state, FileIoState::Complete);
+    assert!(!restored.requires_finalization());
+    assert!(!target_recovery.exists());
+    assert_eq!(std::fs::read(&recovery).unwrap(), recovery_bytes);
+    assert_eq!(
+        std::fs::read_dir(recovery.parent().unwrap())
+            .unwrap()
+            .count(),
+        recovery_file_count
+    );
     assert_eq!(core.document_state_digest().unwrap(), digest);
     assert_eq!(core.history_entries(), history);
+    assert_eq!(core.editor_state().unwrap(), editor);
     assert!(core.document_info().unwrap().recovered);
     assert!(core.document_info().unwrap().dirty);
     assert_eq!(core.raster_file_format().unwrap(), CommonRasterFormat::Tiff);
@@ -708,6 +735,193 @@ fn io_003_sequence_switch_installs_recovery_before_one_owner_commit_and_restores
         raster_bytes
     );
     assert_eq!(std::fs::read(normal).unwrap(), normal_bytes);
+    manager.shutdown_and_wait();
+}
+
+#[test]
+fn io_003_sequence_switch_requires_recovery_for_document_or_editor_edits() {
+    let files = Files::new();
+    let manager = serial_manager();
+    for editor_only in [false, true] {
+        let mut core = sequence_core();
+        assert!(!core.sequence_activate(1).unwrap().dirty);
+        let clean = core.document_info().unwrap();
+        if editor_only {
+            core.update_editor_state(
+                core.editor_state().unwrap().revision,
+                EditorStateUpdate::SetToolDiameter {
+                    tool: EditorTool::Brush,
+                    diameter_q16: 19_i64 << 16,
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                core.document_info().unwrap().document_revision,
+                clean.document_revision
+            );
+        } else {
+            core.set_main_line_color(PixelValue::Rgba([10, 11, 12, 255]))
+                .unwrap();
+        }
+        let before = core.document_info().unwrap();
+        let editor = core.editor_state().unwrap();
+        let history = core.history_entries().to_vec();
+        let journal = core.journal_entries().to_vec();
+        assert!(before.dirty);
+        assert_eq!(editor.dirty, editor_only);
+        let request = core
+            .sequence_switch_request(0, SequenceSwitchPolicy::AutosaveBeforeSwitch)
+            .unwrap();
+        assert!(request.requires_switch());
+        assert!(matches!(
+            FileIoJob::start_sequence_switch(
+                &core,
+                manager.clone(),
+                request,
+                None,
+                Some(files.0.join("unread-target.inkpod")),
+                None,
+            ),
+            Err(CoreError::InvalidArgument(
+                "dirty sequence source requires a recovery destination"
+            ))
+        ));
+        assert_eq!(core.document_info().unwrap(), before);
+        assert_eq!(core.editor_state().unwrap(), editor);
+        assert_eq!(core.history_entries(), history);
+        assert_eq!(core.journal_entries(), journal);
+        assert_eq!(std::fs::read_dir(&files.0).unwrap().count(), 0);
+    }
+    manager.shutdown_and_wait();
+}
+
+#[test]
+fn io_003_clean_sequence_source_omission_keeps_cancel_failure_and_stale_atomic() {
+    let files = Files::new();
+    let manager = serial_manager();
+    let recovery = files.0.join("source.inkpod");
+    let wrong = files.0.join("wrong.inkpod");
+    let malformed = files.0.join("malformed.inkpod");
+    let mut core = sequence_core();
+    core.autosave(&recovery).unwrap();
+    assert!(!core.sequence_activate(1).unwrap().dirty);
+    core.autosave(&wrong).unwrap();
+    std::fs::write(&malformed, b"not a native recovery file").unwrap();
+    let bytes: Vec<_> = [&recovery, &wrong, &malformed]
+        .map(|path| (path.clone(), std::fs::read(path).unwrap()))
+        .into_iter()
+        .collect();
+    let before = core.document_info().unwrap();
+    let editor = core.editor_state().unwrap();
+    let history = core.history_entries().to_vec();
+    let journal = core.journal_entries().to_vec();
+    let (_, save_token) = core
+        .capture_document_save()
+        .unwrap()
+        .prepare_native_save(false, || false)
+        .unwrap();
+    let assert_unchanged = |core: &Core| {
+        assert_eq!(core.document_info().unwrap(), before);
+        assert_eq!(core.editor_state().unwrap(), editor);
+        assert_eq!(core.history_entries(), history);
+        assert_eq!(core.journal_entries(), journal);
+        core.validate_document_save(&save_token).unwrap();
+    };
+    let request = core
+        .sequence_switch_request(0, SequenceSwitchPolicy::AutosaveBeforeSwitch)
+        .unwrap();
+    assert!(request.requires_switch());
+    let gate = WorkerGate::new(&manager);
+    let dropped = FileIoJob::start_sequence_switch(
+        &core,
+        manager.clone(),
+        request,
+        None,
+        Some(recovery.clone()),
+        None,
+    )
+    .unwrap();
+    drop(dropped);
+    let mut cancelled = FileIoJob::start_sequence_switch(
+        &core,
+        manager.clone(),
+        request,
+        None,
+        Some(recovery.clone()),
+        None,
+    )
+    .unwrap();
+    cancelled.cancel();
+    gate.release();
+    assert_eq!(ready(&mut cancelled).state, FileIoState::Cancelled);
+    assert!(cancelled.apply(&mut core).is_err());
+    assert!(!cancelled.requires_finalization());
+    assert_unchanged(&core);
+
+    let mut cancelled = FileIoJob::start_sequence_switch(
+        &core,
+        manager.clone(),
+        request,
+        None,
+        Some(recovery.clone()),
+        None,
+    )
+    .unwrap();
+    assert_eq!(ready(&mut cancelled).state, FileIoState::Ready);
+    cancelled.cancel();
+    assert_eq!(
+        cancelled.apply(&mut core).unwrap_err(),
+        CoreError::Cancelled
+    );
+    assert!(!cancelled.requires_finalization());
+    assert_unchanged(&core);
+
+    for invalid in [&wrong, &malformed] {
+        let mut failed = FileIoJob::start_sequence_switch(
+            &core,
+            manager.clone(),
+            request,
+            None,
+            Some(invalid.clone()),
+            None,
+        )
+        .unwrap();
+        assert_eq!(ready(&mut failed).state, FileIoState::Failed);
+        assert!(failed.apply(&mut core).is_err());
+        assert!(!failed.requires_finalization());
+        assert_unchanged(&core);
+    }
+
+    let mut stale = FileIoJob::start_sequence_switch(
+        &core,
+        manager.clone(),
+        request,
+        None,
+        Some(recovery),
+        None,
+    )
+    .unwrap();
+    assert_eq!(ready(&mut stale).state, FileIoState::Ready);
+    core.update_editor_state(
+        core.editor_state().unwrap().revision,
+        EditorStateUpdate::SetToolDiameter {
+            tool: EditorTool::Brush,
+            diameter_q16: 23_i64 << 16,
+        },
+    )
+    .unwrap();
+    let edited = core.document_info().unwrap();
+    let edited_editor = core.editor_state().unwrap();
+    assert!(stale.apply(&mut core).is_err());
+    assert!(!stale.requires_finalization());
+    assert_eq!(core.document_info().unwrap(), edited);
+    assert_eq!(core.editor_state().unwrap(), edited_editor);
+    assert_eq!(core.history_entries(), history);
+    assert_eq!(core.journal_entries(), journal);
+    assert_eq!(std::fs::read_dir(&files.0).unwrap().count(), bytes.len());
+    for (path, original) in bytes {
+        assert_eq!(std::fs::read(path).unwrap(), original);
+    }
     manager.shutdown_and_wait();
 }
 
@@ -1247,6 +1461,94 @@ fn io_003_light_table_reload_retains_properties_is_undoable_and_rejects_failed_o
 }
 
 #[test]
+fn io_003_raster_sequence_navigation_keeps_unedited_cells_clean() {
+    let files = Files::new();
+    let formats = [
+        CommonRasterFormat::Png,
+        CommonRasterFormat::Tga,
+        CommonRasterFormat::Tiff,
+        CommonRasterFormat::Bmp,
+    ];
+    let paths: Vec<_> = ["a1.png", "a2.tga", "a3.tif", "a4.bmp"]
+        .into_iter()
+        .zip(formats)
+        .map(|(name, format)| files.image(name, format))
+        .collect();
+    let original_bytes: Vec<_> = paths
+        .iter()
+        .map(|path| std::fs::read(path).unwrap())
+        .collect();
+    let manager = manager();
+    let mut core = Core::new();
+    open(&mut core, &manager, &paths[0]);
+    let opened = core.document_info().unwrap();
+    let opened_editor = core.editor_state().unwrap();
+    assert!(!opened.dirty);
+    assert!(!opened_editor.dirty);
+    let mut job = FileIoJob::start(
+        Some(&core),
+        manager.clone(),
+        FileIoRequest::new(FileIoKind::SequenceAuto, vec![paths[0].clone()]),
+    )
+    .unwrap();
+    assert_eq!(ready(&mut job).state, FileIoState::Ready);
+    job.apply(&mut core).unwrap();
+    assert_eq!(core.document_info().unwrap(), opened);
+    assert_eq!(core.editor_state().unwrap(), opened_editor);
+    assert_eq!(core.sequence_cells().unwrap().len(), formats.len());
+
+    for index in [0, 1, 2, 3, 2, 1, 0, 1] {
+        let plan = core.resolve_sequence_activation(index).unwrap();
+        let active = core.commit_sequence_activation(plan).unwrap();
+        assert!(!active.dirty, "sequence index {index}");
+        assert!(!core.editor_state().unwrap().dirty);
+        assert_eq!(core.raster_file_format().unwrap(), formats[index]);
+        assert!(!active.can_undo && !active.can_redo);
+        assert!(core.history_entries().is_empty());
+        assert!(core.journal_entries().is_empty());
+        assert_eq!(
+            core.revert(),
+            Err(CoreError::InvalidState("document has no normal-save path"))
+        );
+        assert_eq!(core.document_info().unwrap(), active);
+    }
+    assert_eq!(std::fs::read_dir(&files.0).unwrap().count(), paths.len());
+    for (path, bytes) in paths.iter().zip(&original_bytes) {
+        assert_eq!(&std::fs::read(path).unwrap(), bytes);
+    }
+
+    core.apply_stroke(&super::line_stroke(vec![StrokeSample {
+        x: 0.0,
+        y: 0.0,
+        pressure: 1.0,
+    }]))
+    .unwrap();
+    let edited_digest = core.document_state_digest().unwrap();
+    assert!(core.document_info().unwrap().dirty);
+    assert!(!core.editor_state().unwrap().dirty);
+    core.undo().unwrap();
+    assert!(!core.document_info().unwrap().dirty);
+    core.redo().unwrap();
+    assert!(core.document_info().unwrap().dirty);
+    assert_eq!(core.document_state_digest().unwrap(), edited_digest);
+
+    let native_path = files.0.join("edited.inkpod");
+    save(&mut core, &manager, &native_path);
+    assert!(!core.document_info().unwrap().dirty);
+    assert!(!core.editor_state().unwrap().dirty);
+    assert!(native_path.with_extension("tga").is_file());
+    let mut reopened = Core::new();
+    assert!(!reopened.open(&native_path).unwrap().dirty);
+    assert!(!reopened.editor_state().unwrap().dirty);
+    assert_eq!(reopened.document_state_digest().unwrap(), edited_digest);
+    assert_eq!(reopened.history_entries(), core.history_entries());
+    for (path, bytes) in paths.iter().zip(&original_bytes) {
+        assert_eq!(&std::fs::read(path).unwrap(), bytes);
+    }
+    manager.shutdown_and_wait();
+}
+
+#[test]
 fn io_003_parallel_sequence_attaches_without_reopening_or_losing_later_edits() {
     let files = Files::new();
     let seed = files.image("a001_tail.png", CommonRasterFormat::Png);
@@ -1263,12 +1565,23 @@ fn io_003_parallel_sequence_attaches_without_reopening_or_losing_later_edits() {
     .unwrap();
     core.set_main_line_color(PixelValue::Rgba([11, 22, 33, 255]))
         .unwrap();
+    core.update_editor_state(
+        core.editor_state().unwrap().revision,
+        EditorStateUpdate::SetToolDiameter {
+            tool: EditorTool::Brush,
+            diameter_q16: 37_i64 << 16,
+        },
+    )
+    .unwrap();
     let edited = core.document_info().unwrap();
+    let edited_editor = core.editor_state().unwrap();
+    assert!(edited_editor.dirty);
     let progress = ready(&mut job);
     assert_eq!(progress.loaded_count, 3);
     assert_eq!(progress.state, FileIoState::Ready, "{:?}", job.error());
     job.apply(&mut core).unwrap();
     assert_eq!(core.document_info().unwrap(), edited);
+    assert_eq!(core.editor_state().unwrap(), edited_editor);
     assert_eq!(
         core.sequence_cell(0).unwrap().document_uuid,
         edited.document_uuid

@@ -3504,13 +3504,13 @@ fn ffi_contract_light_table_sequence_and_owned_buffers() {
             inkpod_core_sequence_activate(sequence_core, 0, &mut active),
             INKPOD_STATUS_OK
         );
-        assert_ne!(active.flags & INKPOD_DOCUMENT_FLAG_DIRTY, 0);
+        assert_eq!(active.flags & INKPOD_DOCUMENT_FLAG_DIRTY, 0);
         let mut active_editor = editor_state_info();
         assert_eq!(
             inkpod_core_get_editor_state(sequence_core, &mut active_editor),
             INKPOD_STATUS_OK
         );
-        assert_ne!(active_editor.flags & INKPOD_EDITOR_STATE_DIRTY, 0);
+        assert_eq!(active_editor.flags & INKPOD_EDITOR_STATE_DIRTY, 0);
         assert_eq!(active_editor.active_layer_id, active.layer_id);
         assert_eq!(active_editor.active_plane_id, active.main_plane_id);
         assert_eq!(
@@ -3717,6 +3717,12 @@ fn ffi_contract_light_table_sequence_and_owned_buffers() {
             active.document_uuid_low,
             switch_request.target_document_uuid_low
         );
+        assert_eq!(active.flags & INKPOD_DOCUMENT_FLAG_DIRTY, 0);
+        assert_eq!(
+            inkpod_core_get_editor_state(sequence_core, &mut active_editor),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(active_editor.flags & INKPOD_EDITOR_STATE_DIRTY, 0);
 
         let mut return_request = InkpodSequenceSwitchRequest {
             struct_size: size_of::<InkpodSequenceSwitchRequest>() as u32,

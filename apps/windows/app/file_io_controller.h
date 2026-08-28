@@ -2,10 +2,12 @@
 
 #include <windows.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -66,6 +68,14 @@ struct FileIoResult final {
     InkpodBatchReport* batch_report{};
 };
 
+// Caller-owned progress only; contains no borrowed job handle or user path.
+struct FileIoProgressEntry final {
+    std::uint64_t request_id{};
+    CommandContext context;
+    InkpodIoJobInfo progress{};
+    bool cancelling{};
+};
+
 // One application owner, shared by every workspace/session. File bytes and
 // decoded pixels never enter this adapter. CoreHost polls accepted Rust jobs;
 // Poll dispatches their already-complete UI continuations without waiting.
@@ -105,6 +115,13 @@ public:
         const FileIoItem& item, std::uint64_t except_request_id = 0U) const noexcept;
     [[nodiscard]] bool Progress(std::uint64_t request_id, InkpodIoJobInfo& output) const noexcept;
     [[nodiscard]] bool Progress(WorkspaceWindowId workspace, InkpodIoJobInfo& output) const noexcept;
+    // UI-thread query of the CoreHost-published cache, with no Rust polling or
+    // file I/O. Copies matching issued workspaces in request order, up to the
+    // caller's capacity (the controller accepts at most 128 jobs). The return
+    // value is the copied count; remaining elements are unchanged. Entries
+    // remain present until Poll dispatches their UI continuation.
+    [[nodiscard]] std::size_t CopyProgress(
+        WorkspaceWindowId workspace, std::span<FileIoProgressEntry> output) const noexcept;
 
 private:
     struct Impl;

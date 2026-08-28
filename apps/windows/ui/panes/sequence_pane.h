@@ -26,6 +26,8 @@ struct SequencePaneCellView final {
     std::uint64_t thumbnail_checksum{};
     std::wstring name;
     ThumbnailCacheKey thumbnail_key{};
+    std::uint64_t document_uuid_high{};
+    std::uint64_t document_uuid_low{};
 };
 
 struct SequencePaneView final {
@@ -37,6 +39,7 @@ struct SequencePaneView final {
     bool pinned{};
     bool cut_editable{};
     bool auto_sequence_truncated{};
+    bool wrap_navigation{};
 };
 
 struct SequencePaneDialogState final {
@@ -46,7 +49,9 @@ struct SequencePaneDialogState final {
     SequencePaneActivateCallback activate_cell{};
     SequencePaneReorderCallback reorder_cell{};
     SequencePaneView view;
+    std::vector<std::wstring> item_labels;
     std::uint32_t drag_index{UINT32_MAX};
+    int wheel_remainder{};
 };
 
 HWND CreateSequencePaneDialog(

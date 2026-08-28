@@ -13,7 +13,7 @@ EffectsController::EffectsController(
     app::AppLifetimeState& lifetime,
     app::MainWindowHandles& windows,
     HWND progress,
-    JobProgressPaneState& progress_state,
+    JobProgressState& progress_state,
     app::EffectsUiState& effects,
     app::CoreHost& engine) noexcept
     : lifetime_(lifetime),
@@ -75,8 +75,6 @@ InkpodStatus EffectsController::StartTask(
         inkpod_task_release(&effects_.task);
         return INKPOD_STATUS_INVALID_STATE;
     }
-    static_cast<void>(windows_.dock_host.RestorePane(DockPaneType::JobProgress));
-    static_cast<void>(windows_.dock_host.ActivatePane(DockPaneType::JobProgress));
     const HWND window = windows_.window;
     if (!engine_.Enqueue(
             context,
@@ -93,12 +91,8 @@ InkpodStatus EffectsController::StartTask(
                 PostMessageW(
                     window, completion_message, completion_status, generation);
             })) {
-        ClearJobProgress(
-            progress_, progress_state_, JobProgressSlot::Effect);
-        if (!HasActiveJobProgress(progress_state_)) {
-            static_cast<void>(windows_.dock_host.HidePane(
-                DockPaneType::JobProgress));
-        }
+        ClearJobProgressIfContext(
+            progress_, progress_state_, JobProgressSlot::Effect, &effects_);
         inkpod_task_release(&effects_.task);
         effects_.preview_prompt = false;
         effects_.completion_context = {};

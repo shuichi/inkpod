@@ -118,10 +118,11 @@ impl Core {
     ///
     /// No-op and initial binding retain dirty state, normal path authority,
     /// history, editor state, and all document/view revisions. Replacement
-    /// requires a clean document savepoint (editor-only dirty is retained as for
-    /// ordinary navigation), resets the document/history/view, and revokes the
-    /// previous native/raster save authority. Stale, invalid, unsaved, or failed
-    /// activation changes nothing. This method performs no filesystem I/O.
+    /// requires a clean document savepoint, resets the document/history/view,
+    /// and adopts reconciled editor choices as the new cell's clean initial
+    /// state. The previous native/raster save authority is revoked. Stale,
+    /// invalid, unsaved, or failed activation changes nothing. This method
+    /// performs no filesystem I/O.
     pub fn commit_sequence_activation(
         &mut self,
         plan: SequenceActivationPlan,
@@ -137,7 +138,9 @@ impl Core {
     ///
     /// The current entry and an initial binding preserve dirty edits and file
     /// authority. Replacing the document requires a clean document savepoint;
-    /// editor-only dirty does not block it. Failure publishes no partial state.
+    /// editor-only dirty does not block it because inherited editor choices
+    /// become the new cell's clean initial state. No normal-save path is adopted.
+    /// Failure publishes no partial state.
     pub fn sequence_activate(&mut self, target: usize) -> Result<DocumentInfo, CoreError> {
         let plan = self.resolve_sequence_activation(target)?;
         self.activate_normal_sequence_plan(plan)
@@ -190,7 +193,14 @@ impl Core {
         let revision = self.next_document_revision()?;
         let mut next_id = self.next_id;
         let document = Self::document_from_sequence_source(&source, revision, &mut next_id)?;
-        let editor = self.stage_reconciled_editor_target(&document, None, None)?;
+        let mut editor = self
+            .stage_reconciled_editor_target(&document, None, None)?
+            .or_else(|| self.editor_session.clone())
+            .ok_or(CoreError::NoDocument)?;
+        // Rebinding inherited choices to a fresh cell's stable IDs is loading,
+        // not an editor change. Establish only this staged cell's initial
+        // baseline; do not mark the outgoing cell saved or grant file authority.
+        editor.savepoint = Some(editor.digest);
         let next_file_authority = self.persistence_state.next()?;
         self.sequence
             .as_mut()
@@ -209,7 +219,7 @@ impl Core {
         self.current_path = None;
         self.recovered = false;
         self.floating = None;
-        self.publish_editor_session(editor);
+        self.publish_editor_session(Some(editor));
         self.document_info()
     }
 

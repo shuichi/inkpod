@@ -104,7 +104,6 @@ ToolTabResult RightToolTabsModel::SetSelected(ToolTabId id) noexcept {
 
 bool RightToolTabsModel::EligiblePane(DockPaneType type) noexcept {
     if (type == DockPaneType::Tool || type == DockPaneType::ToolOptions
-        || type == DockPaneType::JobProgress
         || PaneIndex(type) >= kDockPaneCount) {
         return false;
     }

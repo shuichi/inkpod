@@ -12,6 +12,7 @@ set(TOOL_TABS_SOURCE "${UI_DIR}/right_tool_tabs.cpp")
 set(MAIN_HEADER "${UI_DIR}/main_window.h")
 set(MAIN_SOURCE "${UI_DIR}/main_window.cpp")
 set(RUNTIME_SOURCE "${UI_DIR}/main_window_runtime.cpp")
+set(PROCEDURE_SOURCE "${UI_DIR}/main_window_procedure.cpp")
 set(TEST_SOURCE "${INKPOD_SOURCE_DIR}/tests/windows_workspace_layout.cpp")
 set(RESOURCE_HEADER "${INKPOD_SOURCE_DIR}/apps/windows/app/resource.h")
 set(RESOURCE_SOURCE "${INKPOD_SOURCE_DIR}/apps/windows/app/app_ui_ja.generated.rc")
@@ -25,8 +26,13 @@ set(COLOR_PANE_SOURCE "${UI_DIR}/panes/color_dock_pane.cpp")
 set(PANE_DIALOG_LAYOUT_HEADER "${UI_DIR}/panes/pane_dialog_layout.h")
 set(TAB_SURFACE_HEADER "${UI_DIR}/tab_surface_background.h")
 set(PREFERENCES_SOURCE "${UI_DIR}/dialogs/preferences_dialog.cpp")
-set(PROGRESS_SOURCE "${UI_DIR}/dialogs/effects_dialogs.cpp")
-set(PROGRESS_HEADER "${UI_DIR}/dialogs/effects_dialogs.h")
+set(PROGRESS_SOURCE "${UI_DIR}/job_progress.cpp")
+set(PROGRESS_HEADER "${UI_DIR}/job_progress.h")
+set(FILE_PROGRESS_SOURCE "${UI_DIR}/file_job_progress.cpp")
+set(FILE_IO_SOURCE "${INKPOD_SOURCE_DIR}/apps/windows/app/file_io_controller.cpp")
+set(WORKSPACE_HEADER "${INKPOD_SOURCE_DIR}/apps/windows/app/workspace_window.h")
+set(STATUS_SOURCE "${UI_DIR}/main_window_status_presenter.cpp")
+set(PROGRESS_TEST "${INKPOD_SOURCE_DIR}/tests/windows_job_progress.cpp")
 set(SMOKE_SOURCE "${INKPOD_SOURCE_DIR}/apps/windows/app/app_smoke.cpp")
 
 foreach(FILE IN ITEMS
@@ -54,6 +60,11 @@ foreach(FILE IN ITEMS
         "${PREFERENCES_SOURCE}"
         "${PROGRESS_SOURCE}"
         "${PROGRESS_HEADER}"
+        "${FILE_PROGRESS_SOURCE}"
+        "${FILE_IO_SOURCE}"
+        "${WORKSPACE_HEADER}"
+        "${STATUS_SOURCE}"
+        "${PROGRESS_TEST}"
         "${SMOKE_SOURCE}")
     if(NOT EXISTS "${FILE}")
         message(FATAL_ERROR "Missing G7 source: ${FILE}")
@@ -66,9 +77,7 @@ foreach(FILE IN ITEMS
         "${SEQUENCE_SOURCE}"
         "${LIGHT_TABLE_SOURCE}"
         "${REFERENCE_SOURCE}"
-        "${BATCH_SOURCE}"
-        "${PROGRESS_SOURCE}"
-        "${PROGRESS_HEADER}")
+        "${BATCH_SOURCE}")
     file(READ "${FILE}" PANE_SOURCE_TEXT)
     string(APPEND PANE_IMPLEMENTATION "${PANE_SOURCE_TEXT}")
 endforeach()
@@ -77,17 +86,127 @@ foreach(REQUIRED IN ITEMS
         "LayoutSequencePane"
         "LayoutLightTablePane"
         "LayoutSubpalettePaneDialog"
-        "LayoutBatchPane"
-        "CreateJobProgressPane"
-        "enum class JobProgressSlot"
-        "JobProgressSlot::Count")
+        "LayoutBatchPane")
     string(FIND "${PANE_IMPLEMENTATION}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
         message(FATAL_ERROR "Docked modeless pane implementation is missing: ${REQUIRED}")
     endif()
 endforeach()
 
+file(READ "${PROGRESS_HEADER}" PROGRESS_INTERFACE)
+file(READ "${PROGRESS_SOURCE}" PROGRESS_IMPLEMENTATION)
+file(READ "${FILE_PROGRESS_SOURCE}" FILE_PROGRESS_IMPLEMENTATION)
+file(READ "${FILE_IO_SOURCE}" FILE_IO_IMPLEMENTATION)
+file(READ "${WORKSPACE_HEADER}" WORKSPACE_INTERFACE)
+file(READ "${STATUS_SOURCE}" STATUS_IMPLEMENTATION)
+file(READ "${PROGRESS_TEST}" PROGRESS_TEST_TEXT)
+foreach(REQUIRED IN ITEMS
+        "enum class JobProgressSlot"
+        "kMaximumFileJobProgress = 128U"
+        "JobProgressIdentity selected"
+        "JobProgressState"
+        "PROGRESS_CLASSW"
+        "PBM_SETMARQUEE"
+        "PBM_SETPOS"
+        "SetWindowSubclass(status, StatusProgressProcedure"
+        "SelectJobProgress"
+        "CancelJobProgress"
+        "SetJobProgressIdleText")
+    string(FIND "${PROGRESS_INTERFACE}${PROGRESS_IMPLEMENTATION}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR "Bounded statusbar job progress contract is missing: ${REQUIRED}")
+    endif()
+endforeach()
+foreach(REQUIRED IN ITEMS
+        "controller.CopyProgress(workspace, progress)"
+        "JobProgressSource::FileIo, entry.request_id"
+        "entry.context.generation.value_or(app::Generation{}).Value()"
+        "entry.progress.completed_work"
+        "entry.progress.total_work"
+        "INKPOD_IO_RESULT_INSTALLING"
+        "JobProgressPhase::Applying"
+        "JobProgressPhase::Cancelling"
+        "SetFileJobProgress(status_bar, state")
+    string(FIND "${FILE_PROGRESS_IMPLEMENTATION}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR "Cached file-job statusbar adapter contract is missing: ${REQUIRED}")
+    endif()
+endforeach()
+string(REPLACE "\r\n" "\n" FILE_IO_IMPLEMENTATION "${FILE_IO_IMPLEMENTATION}")
+string(FIND "${FILE_IO_IMPLEMENTATION}" "std::size_t FileIoController::CopyProgress(" COPY_BEGIN)
+if(COPY_BEGIN LESS 0 OR NOT FILE_IO_IMPLEMENTATION MATCHES "kMaximumJobs = 128U")
+    message(FATAL_ERROR "Bounded FileIoController progress cache is missing")
+endif()
+string(SUBSTRING "${FILE_IO_IMPLEMENTATION}" ${COPY_BEGIN} -1 COPY_TAIL)
+string(FIND "${COPY_TAIL}" "\n}\n" COPY_END)
+if(COPY_END LESS 0)
+    message(FATAL_ERROR "FileIoController progress cache method boundary is missing")
+endif()
+string(SUBSTRING "${COPY_TAIL}" 0 ${COPY_END} COPY_IMPLEMENTATION)
+foreach(REQUIRED IN ITEMS
+        "std::span<FileIoProgressEntry> output"
+        "copied == output.size()"
+        "pending.request.context.workspace != workspace"
+        "value.progress = pending.progress"
+        "pending.cancelled.load")
+    string(FIND "${COPY_IMPLEMENTATION}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR "Workspace-scoped cached progress copy is missing: ${REQUIRED}")
+    endif()
+endforeach()
+foreach(FORBIDDEN IN ITEMS "inkpod_io_" "Invoke(" "CreateFile" "ReadFile" "WriteFile")
+    string(FIND "${COPY_IMPLEMENTATION}${PROGRESS_IMPLEMENTATION}${FILE_PROGRESS_IMPLEMENTATION}"
+        "${FORBIDDEN}" OFFSET)
+    if(NOT OFFSET LESS 0)
+        message(FATAL_ERROR "Statusbar progress must not poll Rust or perform file I/O on UI: ${FORBIDDEN}")
+    endif()
+endforeach()
+foreach(FORBIDDEN IN ITEMS "read_count" "loaded_count" ".Poll(")
+    string(FIND "${FILE_PROGRESS_IMPLEMENTATION}" "${FORBIDDEN}" OFFSET)
+    if(NOT OFFSET LESS 0)
+        message(FATAL_ERROR "Statusbar file progress must copy work units from cache: ${FORBIDDEN}")
+    endif()
+endforeach()
+if(NOT WORKSPACE_INTERFACE MATCHES "JobProgressState job_progress_state"
+        OR NOT STATUS_IMPLEMENTATION MATCHES "SetJobProgressIdleText\\(status_bar, text\\)")
+    message(FATAL_ERROR "Workspace-owned job progress / normal statusbar text connection is missing")
+endif()
+foreach(REQUIRED IN ITEMS
+        "InitializeJobProgress"
+        "BindJobProgress"
+        "SetFileJobProgress"
+        "PBM_GETPOS"
+        "old_task"
+        "state.marquee"
+        "CancelJobProgress"
+        "state.visible"
+        "SB_GETTEXTW")
+    string(FIND "${PROGRESS_TEST_TEXT}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR "Real HWND statusbar job-progress regression evidence is missing: ${REQUIRED}")
+    endif()
+endforeach()
+
 file(READ "${LOCATOR_SOURCE}" LOCATOR_IMPLEMENTATION)
+file(READ "${SEQUENCE_SOURCE}" SEQUENCE_IMPLEMENTATION)
+foreach(REQUIRED IN ITEMS
+        "kMaximumSequenceRowPixels = 255"
+        "LB_SETCOLUMNWIDTH"
+        "LB_SETITEMHEIGHT"
+        "LB_GETTOPINDEX"
+        "SameSequenceCell"
+        "SelectCommittedCell"
+        "item_labels != state->item_labels"
+        "WM_MOUSEHWHEEL"
+        "VK_LEFT"
+        "VK_RIGHT"
+        "LayoutSequencePane(dialog, false)"
+        "CompletePaneDialogResize(dialog)")
+    string(FIND "${SEQUENCE_IMPLEMENTATION}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR "Horizontal sequence pane contract is missing: ${REQUIRED}")
+    endif()
+endforeach()
 foreach(REQUIRED IN ITEMS
         "std::wstring_view(presented) == next"
         "replacement.size() < presented.size()"
@@ -131,6 +250,22 @@ endif()
 
 file(READ "${RESOURCE_HEADER}" RESOURCE_IDS)
 file(READ "${RESOURCE_SOURCE}" RESOURCE_TEXT)
+string(FIND "${RESOURCE_TEXT}" "IDD_SEQUENCE_PALETTE DIALOGEX" SEQUENCE_BEGIN)
+string(FIND "${RESOURCE_TEXT}" "IDD_LIGHT_TABLE_PALETTE DIALOGEX" SEQUENCE_END)
+if(SEQUENCE_BEGIN LESS 0 OR SEQUENCE_END LESS_EQUAL SEQUENCE_BEGIN)
+    message(FATAL_ERROR "Sequence pane resource boundaries are missing")
+endif()
+math(EXPR SEQUENCE_LENGTH "${SEQUENCE_END} - ${SEQUENCE_BEGIN}")
+string(SUBSTRING "${RESOURCE_TEXT}" ${SEQUENCE_BEGIN} ${SEQUENCE_LENGTH} SEQUENCE_RESOURCE)
+foreach(REQUIRED IN ITEMS "LBS_MULTICOLUMN" "LBS_HASSTRINGS" "LBS_DISABLENOSCROLL" "WS_HSCROLL")
+    string(FIND "${SEQUENCE_RESOURCE}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR "Horizontal sequence list style is missing: ${REQUIRED}")
+    endif()
+endforeach()
+if(SEQUENCE_RESOURCE MATCHES "IDC_SEQUENCE_PREVIOUS|IDC_SEQUENCE_NEXT|WS_VSCROLL")
+    message(FATAL_ERROR "Sequence pane retains vertical scrolling or navigation buttons")
+endif()
 foreach(REQUIRED IN ITEMS
         "IDS_DOCK_PANE_TOOL"
         "IDS_DOCK_PANE_TOOL_OPTIONS"
@@ -229,6 +364,9 @@ foreach(REQUIRED IN ITEMS
         "BN_CLICKED"
         "CloseToolTab"
         "SynchronizeToolTabCloseButtons"
+        "LayoutPaneTabCloseButtons"
+        "PaneTabCloseButtonSubclassProcedure"
+        "host.HidePane(pane.type)"
         "LoadToolTabTitle"
         "LoadToolTabDescription"
         "ExceedsDragThreshold"
@@ -426,7 +564,6 @@ foreach(REQUIRED IN ITEMS
         "DockPaneType::LightTable, state.Workspace().light_table_palette"
         "DockPaneType::Reference, state.Workspace().subpalette_palette"
         "DockPaneType::Batch, state.Workspace().batch_palette"
-        "DockPaneType::JobProgress, state.Workspace().job_progress"
         "WM_SYSCOLORCHANGE"
         "RDW_ALLCHILDREN"
         "if (kind == DockHostChangeKind::Structure)"
@@ -438,12 +575,53 @@ foreach(REQUIRED IN ITEMS
     endif()
 endforeach()
 
+string(REGEX REPLACE "[ \t\r\n]+" " " RUNTIME_COMPACT "${RUNTIME}")
+foreach(REQUIRED IN ITEMS
+        "InitializeJobProgress( state.Workspace().windows.status_bar, state.Workspace().job_progress_state,"
+        "static_cast<inkpod::app::FileIoController*>(context)->Cancel(request_id)"
+        "timer_id == inkpod::app::kFileIoPollTimer"
+        "auto* owner = state->WorkspaceForWindow(window);"
+        "const WorkspaceWindowId workspace_id = owner->id;"
+        "state->file_io.Poll(); owner = state->FindWorkspace(workspace_id); if (owner != nullptr && owner->windows.window == window) { RefreshFileJobProgress(state->file_io, workspace_id, owner->windows.status_bar, owner->job_progress_state); }"
+        "token->context.workspace == workspace_id && ResolveCommandTimer(*state, window, timer_id).has_value()"
+        "RefreshJobProgress(owner->windows.status_bar, owner->job_progress_state)")
+    string(FIND "${RUNTIME_COMPACT}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR "Window-scoped statusbar progress polling/cancel integration is missing: ${REQUIRED}")
+    endif()
+endforeach()
+file(READ "${PROCEDURE_SOURCE}" PROCEDURE)
+string(REGEX REPLACE "[ \t\r\n]+" " " PROCEDURE_COMPACT "${PROCEDURE}")
+string(FIND "${PROCEDURE_COMPACT}"
+    "if (message == WM_TIMER) { if (const auto result = RouteCachedProgressTimerMessage( application, window, wparam)) { return *result; } }"
+    CACHED_TIMER_OFFSET)
+string(FIND "${PROCEDURE_COMPACT}" "application->ActivateWorkspaceWindow(" ACTIVATION_OFFSET)
+if(CACHED_TIMER_OFFSET LESS 0 OR ACTIVATION_OFFSET LESS 0
+        OR NOT CACHED_TIMER_OFFSET LESS ACTIVATION_OFFSET)
+    message(FATAL_ERROR "Cached progress timers must run before workspace/Core activation")
+endif()
+foreach(FORBIDDEN IN ITEMS
+        "DockPaneType::JobProgress"
+        "IDM_WINDOW_JOB_PROGRESS"
+        "IDS_PANE_JOB_PROGRESS"
+        "IDC_JOB_PROGRESS_EMPTY"
+        "IDD_EFFECT_PROGRESS"
+        "CreateJobProgressPane")
+    string(FIND "${MODEL}${RESOURCE_IDS}${RESOURCE_TEXT}${RUNTIME}${WORKSPACE_INTERFACE}${PANE_IMPLEMENTATION}"
+        "${FORBIDDEN}" OFFSET)
+    if(NOT OFFSET LESS 0)
+        message(FATAL_ERROR "Retired job progress pane must not remain in production UI: ${FORBIDDEN}")
+    endif()
+endforeach()
+
 file(READ "${SMOKE_SOURCE}" SMOKE)
 foreach(REQUIRED IN ITEMS
         "right_zone_splitter"
         "TCM_DELETEALLITEMS"
         "WindowMessageCounter erase_probe{WM_ERASEBKGND}"
         "VerifyColorPinResizeRepaint"
+        "VerifyHorizontalSequenceLayout"
+        "sequence_list_rebuilds"
         "color_list_rebuilds"
         "layer_list_rebuilds"
         "layer_list_shrink_painted"
@@ -480,7 +658,7 @@ foreach(REQUIRED IN ITEMS
         "model.FloatPane"
         "model.HidePane"
         "SetPaneAutoHide"
-        "DockPaneType::JobProgress"
+        "RetiredJobProgressPaneIsAbsent"
         "show_header_when_singleton"
         "model.RestorePane"
         "model.ResetPane"
@@ -496,5 +674,5 @@ endforeach()
 
 message(STATUS
     "Verified pure bounded DockLayoutModel, WorkspaceWindow-owned DockHost, "
-    "primary/auxiliary/job-pane docking integration, auto-hide, and removal "
-    "of fixed geometry")
+    "primary/auxiliary docking integration, workspace-scoped cached statusbar progress, "
+    "auto-hide, and removal of fixed geometry and the job progress pane")

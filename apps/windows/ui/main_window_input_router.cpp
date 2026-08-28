@@ -37,6 +37,41 @@ bool PreTranslateKeyboardMessage(
         }
     }
     app::WorkspaceWindow* owner = state.WorkspaceForWindow(message.hwnd);
+    const HWND status = owner == nullptr ? nullptr : owner->windows.status_bar;
+    if (key_down && !control && (GetKeyState(VK_MENU) & 0x8000) == 0
+        && status != nullptr && focus != nullptr
+        && (focus == status || IsChild(status, focus) != FALSE)) {
+        // Status controls use native tab order and button activation without
+        // IsDialogMessage: DM_SETDEFID overlaps the status bar's SB_SETTEXTA.
+        // Keep these UI-only keys ahead of workspace activation/Core queries.
+        if (message.wParam == VK_TAB) {
+            if (focus != status) {
+                const HWND next = GetNextDlgTabItem(
+                    status, focus, (GetKeyState(VK_SHIFT) & 0x8000) != 0);
+                if (next != nullptr) {
+                    // Update this subtree directly. WM_CHANGEUISTATE climbs
+                    // to the main frame and would synchronize its Core target.
+                    SendMessageW(status, WM_UPDATEUISTATE,
+                        MAKEWPARAM(UIS_CLEAR, UISF_HIDEFOCUS), 0);
+                    SetFocus(next);
+                }
+            }
+            return true;
+        }
+        if (message.wParam == VK_RETURN) {
+            if (focus != status && IsWindowEnabled(focus) != FALSE
+                && (GetWindowLongPtrW(focus, GWL_STYLE) & WS_VISIBLE) != 0
+                && (SendMessageW(focus, WM_GETDLGCODE, 0, 0) & DLGC_BUTTON) != 0) {
+                SendMessageW(focus, BM_CLICK, 0, 0);
+            }
+            return true;
+        }
+        if (message.wParam == VK_SPACE) {
+            // The ordinary TranslateMessage/DispatchMessage path delivers
+            // Space down/up to BUTTON; do not resolve Canvas hold shortcuts.
+            return false;
+        }
+    }
     if (owner == nullptr
         || !state.ActivateWorkspaceWindow(owner->id, true)) {
         return false;

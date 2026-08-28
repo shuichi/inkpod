@@ -128,6 +128,7 @@ public:
     bool SetActiveSession(
         DocumentSessionId session,
         Generation generation) noexcept;
+    void ClearActiveSession() noexcept;
     [[nodiscard]] bool HasSession(
         DocumentSessionId session,
         Generation generation) const noexcept;
@@ -143,6 +144,9 @@ public:
         CoreOperation operation,
         bool publish_snapshot,
         bool refresh_document_info) noexcept;
+    // Dispatch a session-independent operation (for example a workspace Cut)
+    // on the Core owner thread, including while no document session exists.
+    InkpodStatus InvokeOwnerThread(std::function<InkpodStatus()> operation) noexcept;
     InkpodStatus InvokeAll(
         CoreOperation operation,
         bool publish_snapshot,
@@ -235,6 +239,14 @@ public:
         DocumentSessionId session,
         Generation generation,
         InkpodDocumentInfo& info) const noexcept;
+    // Cached owner-thread metadata; independent of the active/pinned UI pane.
+    bool GetSequenceCellName(
+        DocumentSessionId session,
+        Generation generation,
+        std::wstring& name) const noexcept;
+    // Rust defaults remain available after the last document session closes.
+    InkpodStatus GetApplicationEditorDefaults(
+        InkpodEditorDefaults& defaults) const noexcept;
     bool GetHistoryPresentation(
         DocumentSessionId session,
         Generation generation,

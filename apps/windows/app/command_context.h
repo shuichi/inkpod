@@ -101,6 +101,8 @@ public:
     bool RemoveDocumentView(DocumentViewId view) noexcept;
     [[nodiscard]] std::optional<EditorGroupBinding> AddEditorGroup() noexcept;
     bool ActivateEditorGroup(EditorGroupId group) noexcept;
+    // An empty visible group may still contain unpublished staging targets.
+    void ClearActiveDocument() noexcept;
     bool MoveDocumentView(
         DocumentViewId view, EditorGroupId destination) noexcept;
     bool RemoveEditorGroup(EditorGroupId group) noexcept;

@@ -26,6 +26,7 @@ constexpr UINT_PTR kSplitterSubclass = 1U;
 constexpr UINT_PTR kTabSubclass = 1U;
 constexpr UINT_PTR kToolTabSubclass = 1U;
 constexpr UINT_PTR kToolTabCloseButtonSubclass = 2U;
+constexpr UINT_PTR kPaneTabCloseButtonSubclass = 3U;
 constexpr int kTabHeightDip = 28;
 
 constexpr UINT kContextFloat = 1U;
@@ -409,7 +410,7 @@ bool DockHost::Initialize(
             0,
             WC_TABCONTROLW,
             nullptr,
-            WS_CHILD | WS_CLIPSIBLINGS | WS_TABSTOP,
+            WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_TABSTOP,
             0,
             0,
             0,
@@ -1045,6 +1046,11 @@ bool DockHost::UpdateTabFont(UINT dpi) noexcept {
                 WM_SETFONT,
                 reinterpret_cast<WPARAM>(replacement),
                 TRUE);
+            if (tabs.zone != DockZone::Right) {
+                SendMessageW(tabs.control, TCM_SETPADDING, 0,
+                    MAKELPARAM(ScaleDip(24, normalized_dpi),
+                        ScaleDip(3, normalized_dpi)));
+            }
         }
     }
     if (right_tool_tab_control_ != nullptr) {
@@ -1183,6 +1189,7 @@ void DockHost::ApplyTabLayout(
         && HasArea(geometry_.zones[static_cast<std::size_t>(tabs.zone)]);
     if (!show) {
         PlaceWindow(tabs.control, {}, false);
+        LayoutPaneTabCloseButtons(tabs);
         return;
     }
     struct OrderedPane {
@@ -1234,6 +1241,120 @@ void DockHost::ApplyTabLayout(
     }
     bounds.height = std::min(bounds.height, ScaleDip(kTabHeightDip, dpi_));
     PlaceWindow(tabs.control, bounds, true);
+    LayoutPaneTabCloseButtons(tabs);
+}
+
+void DockHost::LayoutPaneTabCloseButtons(TabHostState& tabs) noexcept {
+    if (tabs.control == nullptr || model_ == nullptr || tabs.zone == DockZone::Right) {
+        return;
+    }
+    RECT client{};
+    if (GetClientRect(tabs.control, &client) == FALSE) {
+        return;
+    }
+    const int button_size = std::max(1, ScaleDip(20, dpi_));
+    const int edge = std::max(1, ScaleDip(3, dpi_));
+    bool geometry_changed{};
+    for (PaneHostState& pane : panes_) {
+        const DockPanePlacement* placement = model_->Pane(pane.type);
+        const bool belongs = placement != nullptr && placement->present
+            && placement->zone == tabs.zone && placement->stack == tabs.stack;
+        if (!belongs
+            && (pane.tab_close_button == nullptr
+                || GetParent(pane.tab_close_button) != tabs.control)) {
+            continue;
+        }
+        RECT item{};
+        bool item_found{};
+        if (belongs) {
+            const int count = std::max(0, TabCtrl_GetItemCount(tabs.control));
+            for (int index = 0; index < count; ++index) {
+                TCITEMW candidate{};
+                candidate.mask = TCIF_PARAM;
+                if (TabCtrl_GetItem(tabs.control, index, &candidate) != FALSE
+                    && static_cast<DockPaneType>(candidate.lParam) == pane.type) {
+                    item_found = TabCtrl_GetItemRect(tabs.control, index, &item) != FALSE;
+                    break;
+                }
+            }
+        }
+        const bool show = item_found
+            && (GetWindowLongPtrW(tabs.control, GWL_STYLE) & WS_VISIBLE) != 0
+            && item.left >= client.left && item.right <= client.right
+            && item.top >= client.top && item.bottom <= client.bottom
+            && item.right - item.left >= button_size + edge * 2;
+        if (!show) {
+            pane.close_hovered = false;
+        }
+        if (item_found && pane.tab_close_button == nullptr) {
+            const HWND button = CreateWindowExW(
+                0, WC_BUTTONW, UiText(UiStringId::DockClose),
+                WS_CHILD | WS_TABSTOP | BS_OWNERDRAW | BS_FLAT,
+                0, 0, 0, 0, tabs.control,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_RIGHT_TOOL_TAB_CLOSE)),
+                instance_, nullptr);
+            if (button == nullptr) {
+                continue;
+            }
+            if (SetWindowSubclass(button, PaneTabCloseButtonSubclassProcedure,
+                    kPaneTabCloseButtonSubclass,
+                    reinterpret_cast<DWORD_PTR>(&pane)) == FALSE) {
+                DestroyWindow(button);
+                continue;
+            }
+            pane.tab_close_button = button;
+        }
+        if (pane.tab_close_button == nullptr) {
+            continue;
+        }
+        if (item_found && GetParent(pane.tab_close_button) != tabs.control) {
+            SetParent(pane.tab_close_button, tabs.control);
+        }
+        const int size = std::min(button_size,
+            std::max(1, static_cast<int>(item.bottom - item.top) - edge * 2));
+        const DockRect bounds{item.right - edge - size,
+            item.top + std::max(0, static_cast<int>(item.bottom - item.top) - size) / 2,
+            size, size};
+        if (!WindowMatchesPlacement(pane.tab_close_button, bounds, show)) {
+            SetWindowPos(pane.tab_close_button, HWND_TOP,
+                bounds.x, bounds.y, bounds.width, bounds.height,
+                SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOREDRAW
+                    | (show ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
+            geometry_changed = true;
+        }
+    }
+    if (geometry_changed) {
+        RedrawWindow(tabs.control, nullptr, nullptr,
+            RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+    }
+}
+
+bool DockHost::DrawPaneTabCloseButton(const DRAWITEMSTRUCT& draw) noexcept {
+    const auto pane = std::find_if(panes_.begin(), panes_.end(),
+        [&draw](const PaneHostState& candidate) {
+            return candidate.tab_close_button == draw.hwndItem;
+        });
+    if (pane == panes_.end()) {
+        return false;
+    }
+    const DockPanePlacement* placement = model_ == nullptr ? nullptr : model_->Pane(pane->type);
+    const bool active = placement != nullptr && placement->active_tab;
+    const bool pressed = (draw.itemState & ODS_SELECTED) != 0U;
+    FillRect(draw.hDC, &draw.rcItem, GetSysColorBrush(pressed ? COLOR_3DSHADOW
+        : (pane->close_hovered ? COLOR_3DLIGHT : (active ? COLOR_WINDOW : COLOR_BTNFACE))));
+    RECT icon = draw.rcItem;
+    const int inset = std::max(1, ScaleDip(3, dpi_));
+    InflateRect(&icon, -inset, -inset);
+    DrawFrameControl(draw.hDC, &icon, DFC_CAPTION,
+        DFCS_CAPTIONCLOSE | DFCS_FLAT | DFCS_TRANSPARENT
+            | (pressed ? DFCS_PUSHED : 0U)
+            | ((draw.itemState & ODS_DISABLED) != 0U ? DFCS_INACTIVE : 0U));
+    if ((draw.itemState & ODS_FOCUS) != 0U) {
+        RECT focus = draw.rcItem;
+        InflateRect(&focus, -1, -1);
+        DrawFocusRect(draw.hDC, &focus);
+    }
+    return true;
 }
 
 void DockHost::ApplyToolTabLayout(bool synchronize_items) noexcept {
@@ -2325,6 +2446,37 @@ LRESULT CALLBACK DockHost::TabSubclassProcedure(
     UINT_PTR,
     DWORD_PTR reference) noexcept {
     auto* tabs = reinterpret_cast<TabHostState*>(reference);
+    if (tabs != nullptr && tabs->host != nullptr) {
+        DockHost& host = *tabs->host;
+        if (message == WM_COMMAND && LOWORD(wparam) == IDC_RIGHT_TOOL_TAB_CLOSE
+            && HIWORD(wparam) == BN_CLICKED) {
+            const HWND button = reinterpret_cast<HWND>(lparam);
+            for (const PaneHostState& pane : host.panes_) {
+                const DockPanePlacement* placement = host.model_ == nullptr
+                    ? nullptr : host.model_->Pane(pane.type);
+                if (pane.tab_close_button == button && GetParent(button) == window
+                    && placement != nullptr && placement->present
+                    && placement->zone == tabs->zone && placement->stack == tabs->stack) {
+                    const HWND focus = GetFocus();
+                    const bool return_focus = focus == button || focus == pane.content
+                        || (pane.content != nullptr && IsChild(pane.content, focus) != FALSE);
+                    // The button owns a stable pane identity, never the selected
+                    // tab index. A stale click cannot toggle a hidden pane open.
+                    if (host.HidePane(pane.type) == DockResult::Ok && return_focus) {
+                        SetFocus(host.owner_);
+                    }
+                    break;
+                }
+            }
+            return 0;
+        }
+        if (message == WM_DRAWITEM) {
+            const auto* draw = reinterpret_cast<const DRAWITEMSTRUCT*>(lparam);
+            if (draw != nullptr && host.DrawPaneTabCloseButton(*draw)) {
+                return TRUE;
+            }
+        }
+    }
     if (tabs != nullptr && tabs->host != nullptr
         && message == WM_CONTEXTMENU) {
         const int selected = TabCtrl_GetCurSel(window);
@@ -2341,6 +2493,7 @@ LRESULT CALLBACK DockHost::TabSubclassProcedure(
     if (tabs != nullptr && tabs->host != nullptr
         && (message == WM_LBUTTONUP || message == WM_KEYUP)) {
         tabs->host->ActivateSelectedTab(*tabs);
+        tabs->host->LayoutPaneTabCloseButtons(*tabs);
     }
     if (message == WM_NCDESTROY) {
         RemoveWindowSubclass(window, TabSubclassProcedure, kTabSubclass);
@@ -2349,6 +2502,45 @@ LRESULT CALLBACK DockHost::TabSubclassProcedure(
         }
     }
     return result;
+}
+
+LRESULT CALLBACK DockHost::PaneTabCloseButtonSubclassProcedure(
+    HWND window, UINT message, WPARAM wparam, LPARAM lparam,
+    UINT_PTR, DWORD_PTR reference) noexcept {
+    auto* pane = reinterpret_cast<PaneHostState*>(reference);
+    if (pane != nullptr) {
+        switch (message) {
+            case WM_MOUSEMOVE:
+                if (!pane->close_hovered) {
+                    TRACKMOUSEEVENT tracking{sizeof(TRACKMOUSEEVENT), TME_LEAVE, window, 0U};
+                    if (TrackMouseEvent(&tracking) != FALSE) {
+                        pane->close_hovered = true;
+                        InvalidateRect(window, nullptr, TRUE);
+                    }
+                }
+                break;
+            case WM_MOUSELEAVE:
+                pane->close_hovered = false;
+                InvalidateRect(window, nullptr, TRUE);
+                return 0;
+            case WM_THEMECHANGED:
+            case WM_SYSCOLORCHANGE:
+            case WM_DPICHANGED_AFTERPARENT:
+                InvalidateRect(window, nullptr, TRUE);
+                break;
+            case WM_NCDESTROY:
+                RemoveWindowSubclass(window, PaneTabCloseButtonSubclassProcedure,
+                    kPaneTabCloseButtonSubclass);
+                if (pane->tab_close_button == window) {
+                    pane->tab_close_button = nullptr;
+                    pane->close_hovered = false;
+                }
+                break;
+            default:
+                break;
+        }
+    }
+    return DefSubclassProc(window, message, wparam, lparam);
 }
 
 LRESULT CALLBACK DockHost::ToolTabSubclassProcedure(

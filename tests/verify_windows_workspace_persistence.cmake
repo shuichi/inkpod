@@ -6,6 +6,7 @@ set(LAYOUT_HEADER "${INKPOD_SOURCE_DIR}/apps/windows/ui/workspace_layout.h")
 set(LAYOUT_SOURCE "${INKPOD_SOURCE_DIR}/apps/windows/ui/workspace_layout.cpp")
 set(SETTINGS_HEADER "${INKPOD_SOURCE_DIR}/apps/windows/app/application_settings.h")
 set(SETTINGS_SOURCE "${INKPOD_SOURCE_DIR}/apps/windows/app/application_settings.cpp")
+set(WORKSPACE_HEADER "${INKPOD_SOURCE_DIR}/apps/windows/app/workspace_window.h")
 set(DATA_PATH_SOURCE "${INKPOD_SOURCE_DIR}/apps/windows/app/application_data_paths.cpp")
 set(MAIN_SOURCE "${INKPOD_SOURCE_DIR}/apps/windows/ui/main_window.cpp")
 set(RUNTIME_SOURCE "${INKPOD_SOURCE_DIR}/apps/windows/ui/main_window_runtime.cpp")
@@ -20,6 +21,7 @@ foreach(FILE IN ITEMS
         "${LAYOUT_SOURCE}"
         "${SETTINGS_HEADER}"
         "${SETTINGS_SOURCE}"
+        "${WORKSPACE_HEADER}"
         "${DATA_PATH_SOURCE}"
         "${MAIN_SOURCE}"
         "${RUNTIME_SOURCE}"
@@ -99,9 +101,10 @@ endforeach()
 
 file(READ "${SETTINGS_HEADER}" SETTINGS_HEADER_TEXT)
 file(READ "${SETTINGS_SOURCE}" SETTINGS_SOURCE_TEXT)
+file(READ "${WORKSPACE_HEADER}" WORKSPACE_HEADER_TEXT)
 file(READ "${DATA_PATH_SOURCE}" DATA_PATH_SOURCE_TEXT)
 foreach(REQUIRED IN ITEMS
-        "kApplicationSettingsFormatVersion = 2U"
+        "kApplicationSettingsFormatVersion = 3U"
         "ApplicationSettingsStore"
         "PersistedWorkspace"
         "inkpod-settings.json"
@@ -115,6 +118,29 @@ foreach(REQUIRED IN ITEMS
     string(FIND "${SETTINGS_HEADER_TEXT}${SETTINGS_SOURCE_TEXT}${DATA_PATH_SOURCE_TEXT}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
         message(FATAL_ERROR "Readable application-settings contract is missing: ${REQUIRED}")
+    endif()
+endforeach()
+foreach(FORBIDDEN IN ITEMS
+        "DockPaneType::JobProgress"
+        "JobProgressState"
+        "job_progress_state"
+        "\"job-progress\"")
+    string(FIND "${LAYOUT_HEADER_TEXT}${LAYOUT_SOURCE_TEXT}${SETTINGS_SOURCE_TEXT}" "${FORBIDDEN}" OFFSET)
+    if(NOT OFFSET LESS 0)
+        message(FATAL_ERROR "Transient statusbar job progress must not be persisted as workspace layout: ${FORBIDDEN}")
+    endif()
+endforeach()
+string(REGEX REPLACE "[ \t\r\n]+" " " RUNTIME_COMPACT "${RUNTIME_TEXT}")
+if(NOT WORKSPACE_HEADER_TEXT MATCHES "JobProgressState job_progress_state")
+    message(FATAL_ERROR "Transient job progress must be owned by each WorkspaceWindow")
+endif()
+foreach(REQUIRED IN ITEMS
+        "state.Workspace().job_progress_state = {}"
+        "InitializeJobProgress( state.Workspace().windows.status_bar, state.Workspace().job_progress_state,"
+        "owner->windows.status_bar, owner->job_progress_state")
+    string(FIND "${RUNTIME_COMPACT}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR "Transient job progress must bind to its workspace statusbar: ${REQUIRED}")
     endif()
 endforeach()
 foreach(FORBIDDEN IN ITEMS
@@ -158,7 +184,8 @@ foreach(REQUIRED IN ITEMS
         "replacement_tabs"
         "capacity_model"
         "mixed_serialized"
-        "DockPaneType::JobProgress"
+        "RetiredJobProgressPaneIsAbsent"
+        "retired_job_progress"
         "unknown_pane"
         "missing_monitor"
         "added_monitor"
@@ -188,4 +215,5 @@ endforeach()
 
 message(STATUS
     "Verified bounded human-readable settings JSON, dynamic-tab and saved-layout persistence, "
-    "monitor recovery, accessible auxiliary-pane auto-hide integration, and bounded workspace count")
+    "transient statusbar progress isolation, monitor recovery, accessible auxiliary-pane auto-hide "
+    "integration, and bounded workspace count")

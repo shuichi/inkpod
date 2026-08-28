@@ -7047,6 +7047,12 @@ InkpodStatus inkpod_core_bind_io_manager(InkpodCore* core, InkpodIoManager* mana
  * Capturing a Core requires its owner thread. All input paths are copied before return. */
 InkpodStatus inkpod_core_io_submit(InkpodCore* core, InkpodIoManager* manager, const InkpodIoRequest* request, InkpodIoJob** out_job);
 InkpodStatus inkpod_core_io_autosave_submit(InkpodCore* core, InkpodIoManager* manager, const uint8_t* path, uint64_t path_bytes, const InkpodIoRecoveryMetadata* metadata, InkpodIoJob** out_job);
+/** Optional recovery paths may be NULL or have zero path_bytes. A real switch
+ * requires source_recovery when either document or EditorState is dirty.
+ * For a clean source, omitting source_recovery skips its encoding/installation;
+ * the target is prepared off-thread and committed once after owner validation.
+ * An explicit source path retains installation even for a clean source.
+ * REQUIRED describes a cell switch, not dirty state. Same-cell no-ops do no I/O. */
 InkpodStatus inkpod_core_io_sequence_switch_submit(InkpodCore* core, InkpodIoManager* manager, const InkpodSequenceSwitchRequest* request, const InkpodIoPath* source_recovery, const InkpodIoPath* target_recovery, const InkpodIoRecoveryMetadata* metadata, InkpodIoJob** out_job);
 InkpodStatus inkpod_core_io_compacted_copy_submit(InkpodCore* core, InkpodIoManager* manager, const uint8_t* path, uint64_t path_bytes, const InkpodCompactionPlan* plan, InkpodIoJob** out_job);
 /* Two-pass packed UTF-8 query, excluding NUL. Output path spans borrow buffer. */

@@ -33,6 +33,13 @@ std::optional<LRESULT> RouteMainWindowMessage(
     WPARAM wparam,
     LPARAM lparam) noexcept;
 
+// Cached progress is addressed to a workspace HWND, not its active Core view.
+// Handle these timers before the main frame synchronizes the Core target.
+std::optional<LRESULT> RouteCachedProgressTimerMessage(
+    app::ApplicationHost* state,
+    HWND window,
+    WPARAM timer_id) noexcept;
+
 std::optional<LRESULT> RouteKeyboardMessage(
     app::ApplicationHost* state,
     HWND window,

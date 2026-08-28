@@ -438,7 +438,6 @@ struct BatchUiState {
     FileIoController* io_owner{};
     std::uint64_t io_request{};
     InkpodStatus io_completion_status{INKPOD_STATUS_OK};
-    windows::ui::ProgressDialogState progress_dialog{};
     std::optional<JobSessionId> job_id;
     BatchJobKind job_kind{BatchJobKind::None};
     CommandContext completion_context;

@@ -18,7 +18,6 @@ enum class DockPaneType : std::uint8_t {
     LightTable,
     Reference,
     Batch,
-    JobProgress,
     Count,
 };
 

@@ -419,6 +419,35 @@ bool PanePoliciesCaptureAndRejectStaleTargets() {
             == PaneTargetNotice::None;
 }
 
+bool EmptyEditorGroupDoesNotRetargetAnotherDocument() {
+    CommandTargetRegistry targets;
+    targets.Initialize();
+    const auto document = targets.ReplaceDocument();
+    const auto first = targets.Capture();
+    const auto empty_group = targets.AddEditorGroup();
+    if (!empty_group.has_value() || !targets.ActivateEditorGroup(empty_group->group)) {
+        return false;
+    }
+    const auto empty = targets.Capture();
+    if (empty.document_session.has_value() || empty.document_view.has_value()
+        || targets.DocumentSession() || targets.ActiveDocumentView()
+        || targets.Resolve(empty, inkpod::app::kWorkspaceCommandScope) != CommandResolveStatus::Ok
+        || targets.Resolve(empty, inkpod::app::kDocumentViewCommandScope) == CommandResolveStatus::Ok
+        || targets.Resolve(first, inkpod::app::kDocumentViewCommandScope) != CommandResolveStatus::Ok) {
+        return false;
+    }
+    const auto staged = targets.AddDocument();
+    if (!staged.has_value()) {
+        return false;
+    }
+    const auto staged_context = targets.Capture();
+    targets.ClearActiveDocument();
+    return !targets.Capture().document_session.has_value()
+        && targets.Resolve(staged_context, inkpod::app::kDocumentViewCommandScope) == CommandResolveStatus::Ok
+        && targets.RemoveDocument(staged.value())
+        && targets.ActivateDocument(document, first.document_view.value());
+}
+
 bool TabDragTokensStayValueOnlyAndTransactional() {
     CommandTargetRegistry targets;
     targets.Initialize();
@@ -490,6 +519,7 @@ int main() {
             && EditorGroupsRouteCapturedViewsWithoutRetargeting()
             && WorkspacesRouteCapturedViewsWithoutFocusRetargeting()
             && PanePoliciesCaptureAndRejectStaleTargets()
+            && EmptyEditorGroupDoesNotRetargetAnotherDocument()
             && TabDragTokensStayValueOnlyAndTransactional()
         ? EXIT_SUCCESS
         : EXIT_FAILURE;

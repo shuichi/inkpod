@@ -157,8 +157,7 @@ InkpodStatus StopCore(ApplicationHost& state) noexcept {
             continue;
         }
         (void)state.ActivateWorkspaceWindow(workspace->id, false);
-        const std::array<HWND*, 8U> owned{
-            &workspace->job_progress,
+        const std::array<HWND*, 7U> owned{
             &workspace->tools.palette,
             &workspace->windows.tool_options_flyout,
             &workspace->windows.color_pane,

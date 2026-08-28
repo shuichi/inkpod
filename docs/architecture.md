@@ -740,7 +740,7 @@ Inactive-session notifications validate their captured session/generation and
 update only tab dirty/processing presentation; they do not retarget the active
 view or request continuous snapshots.
 
-The fixed command-state catalog assigns all 381 production commands exactly one
+The fixed command-state catalog assigns all 329 production commands exactly one
 state owner. Pure providers compute enabled/checked state without calling Core or
 Win32 or mutating tools, previews, or documents. Menus, shortcuts, and palette
 entry points consume the same cached result. The main frame deliberately has no
@@ -759,14 +759,33 @@ the token and generation.
 
 The sequence/file-preview palette uses the same pane-target registry. Its header
 shows follow/pinned state, and every import or cell activation captures one exact
-session/generation before dispatch. Mixed PNG/TIFF/TGA/BMP inputs are copied and
-decoded atomically on the Core owner thread; C++ neither decodes pixels nor owns a
+session/generation before dispatch. Mixed PNG/TIFF/TGA/BMP inputs are decoded by
+the shared Rust I/O service and published atomically on the Core owner thread;
+C++ neither decodes pixels nor owns a
 second sequence model. The modeless owner-drawn list obtains bounded straight
 RGBA8 thumbnails through caller-owned query/copy buffers. Opening a numbered
 raster discovers only sibling files whose prefix and suffix around the final
 numeric run match, then selects the opened cell in Core natural order. Dirty-cell
 cancel, stale target, decode failure, and endpoint no-op leave the current cell
 unchanged.
+
+The native owner-drawn multicolumn ListBox is constrained to one row and scrolls
+horizontally. Its native item text retains the complete accessible frame name.
+Left/Right navigation is local to list focus, and Cut member activation uses its
+stable member identity rather than the ordinary-sequence command. Selection and
+thumbnail updates retain the viewport; geometry-only resize does not repopulate
+the list. Cut-only controls occupy a compact row only when visible. The pane
+descriptor has a 168-DIP minimum and a 184-DIP preferred height. Closing its dock
+tab hides the pane through a captured pane identity without closing a document
+or deleting the sequence/Cut.
+
+Fresh sequence-cell replacement initializes both the document and editor-state
+clean baselines after selecting the imported plane. Merely constructing this
+in-memory native representation does not count as an edit and grants no native
+save path or source-file overwrite authority. The no-op/bind path, delayed
+automatic discovery, and exact-native recovery retain their existing editor
+state, history, dirty state, and savepoints; only actual fresh replacement uses
+the new baseline.
 
 For a Cut descriptor, the pane keeps a derived thumbnail cache keyed by the
 member's stable `(CellId, document UUID)` pair rather than its order or display
@@ -1076,9 +1095,46 @@ generation as values after interaction end, so a layout switch cannot cancel or
 retarget an active stroke.
 
 The six-part status bar reports tool/plane, zoom/view flags, coordinates,
-RGBA/selection, paper/DPI, and task/shortcut/dirty state. Document tabs use the
-sequence-cell name, saved filename, recovery/untitled fallback, dirty marker,
-and logical view number. Locator sampling is asynchronous and discards stale
+RGBA/selection, paper/DPI, and shortcut/dirty state. While background work is
+active, its last part hosts a native job-selector button, progress bar, and
+Cancel button; the other part boundaries adapt in the same layout operation.
+There is no Job Progress pane, window command, or persisted layout member.
+The workspace-owned presentation accepts bounded task registrations and copies
+up to 128 cached file-job summaries from `FileIoController::CopyProgress`.
+The existing 50-ms file-I/O timer polls completions and refreshes that workspace;
+the status component refreshes atomic task progress every 100 ms while active.
+Main-frame progress timers are handled before workspace/Core activation, using
+the addressed HWND's workspace ID and resolving it again after completion
+callbacks. Neither progress query path waits for Core execution or copies image
+data. Native status-button focus, Tab/Enter/Space input and cancellation do not
+issue a document command; the product smoke exercises both progress timers and
+native keyboard cancellation while Core installation is deliberately held.
+Task identities include a registration generation, file identities use the
+controller request ID and captured generation, and multiple controllers of the
+same task kind have separate registrations. Selection and cancellation never
+retarget after completion, tab changes, or a nested job-selector menu loop.
+Unknown totals, queued work, cancellation, and owner-thread publication use an
+indeterminate bar; read count, loaded count, and work units are never mixed.
+Completed jobs are removed only through their owner completion, and the normal
+status text is restored when none remain. Controllers clear their exact context
+before releasing task storage; history dialogs retain their initiating workspace.
+
+Document tabs use the session/generation-specific published sequence-cell name,
+saved filename, recovery/untitled fallback, dirty marker, and logical view number.
+Pane visibility, pinning, and the current workspace's sequence view are not label
+sources. Pane target captions use the same published name for their resolved
+session, including pinned panes and pathless raster sequence cells.
+Closing the final view leaves an empty editor area and preserves its
+workspace HWND and Core/renderer threads. No replacement document is allocated;
+New/Open/Recent routes use workspace context and Rust-provided editor defaults.
+The renderer releases the old snapshot/preview and paints its empty background,
+and stale Canvas input is rejected while no active document/view exists.
+Split creation captures its source workspace/session/view/generation before
+creating child HWNDs. Reentrant activation of the new empty group cannot change
+that source. Failure releases the partial tabs, Canvas and registered sink, then
+restores the captured source only if its context still resolves; it never picks
+another active document as a substitute.
+Locator sampling is asynchronous and discards stale
 generations. Each accepted raster-stroke packet advances the pointer generation
 after that stroke work enters the Core queue; pending requests are coalesced,
 while End and Cancel always invalidate and resample the final state. Core reads

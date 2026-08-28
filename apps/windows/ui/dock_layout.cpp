@@ -152,9 +152,9 @@ const std::array<PaneDescriptor, kDockPaneCount> kPaneDescriptors{{
      true,
      true,
      260,
-     200,
-     360,
-     420,
+     168,
+     560,
+     184,
      40U},
     {DockPaneType::LightTable,
      UINT32_C(0x544c474c),
@@ -213,24 +213,6 @@ const std::array<PaneDescriptor, kDockPaneCount> kPaneDescriptors{{
      420,
      560,
      25U},
-    {DockPaneType::JobProgress,
-     UINT32_C(0x424f4a50),
-     IDS_PANE_JOB_PROGRESS,
-     UiText(UiStringId::Text0513),
-     DockZone::Bottom,
-     DockedAndTransientZones({DockZone::Bottom}),
-     PaneTargetScope::Job,
-     1U,
-     false,
-     false,
-     false,
-     false,
-     true,
-     320,
-     84,
-     720,
-     112,
-     10U},
 }};
 
 DockFloatingPlacement DefaultFloatingPlacement(DockPaneType type) noexcept {
@@ -619,7 +601,7 @@ void DockLayoutModel::Reset() noexcept {
     zones_[ZoneIndex(DockZone::Right)] =
         DockZoneState{DockStackMode::Split, DockPaneType::Color, 320};
     zones_[ZoneIndex(DockZone::Bottom)] =
-        DockZoneState{DockStackMode::Split, DockPaneType::Count, 220};
+        DockZoneState{DockStackMode::Split, DockPaneType::Count, 184};
 }
 
 DockResult DockLayoutModel::AddPane(DockPaneType type) noexcept {

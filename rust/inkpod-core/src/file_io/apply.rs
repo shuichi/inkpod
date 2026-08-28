@@ -188,10 +188,9 @@ impl FileIoJob {
                     core.io_install_pending = true;
                     return Ok(FileIoApply::Pending);
                 }
-                let prepared = self
-                    .sequence_install
-                    .take()
-                    .ok_or(CoreError::InvalidState("sequence no-op is missing"))?;
+                let prepared = self.sequence_install.take().ok_or(CoreError::InvalidState(
+                    "prepared sequence target is missing",
+                ))?;
                 core.commit_prepared_sequence_switch(*prepared)?;
             }
             Prepared::Output => {}
