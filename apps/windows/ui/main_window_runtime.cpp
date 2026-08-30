@@ -695,7 +695,8 @@ void DispatchBatchPaletteCommand(void* context, UINT command) noexcept {
     }
 }
 
-void UpdateMenuState(ApplicationHost& state) noexcept;
+void UpdateMenuState(
+    ApplicationHost& state, bool refresh_pane_content) noexcept;
 
 void SelectBatchPaletteOperation(
     void* context, std::uint32_t selected_index) noexcept {
@@ -7431,7 +7432,8 @@ void UpdateMainWindowStatus(
     UpdateLocatorStatus(state);
 }
 
-void UpdateMenuState(ApplicationHost& state) noexcept {
+void UpdateMenuState(
+    ApplicationHost& state, bool refresh_pane_content) noexcept {
     const HMENU menu = GetMenu(state.Workspace().windows.window);
     if (menu == nullptr) {
         return;
@@ -7566,8 +7568,10 @@ void UpdateMenuState(ApplicationHost& state) noexcept {
     UpdateLayerPaletteCommandState(
         state.Workspace().panes.layer_palette,
         state.Workspace().command_states);
-    RefreshDockPaneViews(state);
-    RefreshLocatorPane(state);
+    if (refresh_pane_content) {
+        RefreshDockPaneViews(state);
+        RefreshLocatorPane(state);
+    }
     ApplyShortcutLabelsToMenu(menu, state.shortcuts.bindings);
     UpdateMainWindowStatus(state, info, has_document);
     DrawMenuBar(state.Workspace().windows.window);
@@ -14392,7 +14396,13 @@ void CollapseAutoHiddenPanes(ApplicationHost& state) noexcept {
     }
 }
 
-bool ToggleAuxiliaryPaneVisibility(
+enum class AuxiliaryPaneVisibilityChange : std::uint8_t {
+    Failed,
+    Hidden,
+    Shown,
+};
+
+AuxiliaryPaneVisibilityChange ToggleAuxiliaryPaneVisibility(
     ApplicationHost& state, WorkspaceAuxiliaryPane type) noexcept {
     WorkspaceLayoutState& layout = state.Workspace().windows.workspace;
     const auto* auxiliary = inkpod::windows::ui::FindWorkspaceAuxiliaryPane(
@@ -14402,37 +14412,34 @@ bool ToggleAuxiliaryPaneVisibility(
     const DockPanePlacement* pane = layout.dock.Pane(dock_type);
     if (auxiliary == nullptr || pane == nullptr
         || AuxiliaryPaneWindow(state, type) == nullptr) {
-        return false;
+        return AuxiliaryPaneVisibilityChange::Failed;
     }
-    bool show{};
-    bool layout_changed{};
     if (pane->zone == DockZone::AutoHide) {
-        show = !state.Workspace().windows.dock_host.AutoHiddenPaneVisible(
-            dock_type);
-        if (show) {
-            show = state.Workspace().windows.dock_host.ShowAutoHiddenPane(
-                dock_type,
-                inkpod::windows::ui::DockZoneForAutoHideEdge(auxiliary->edge));
-        } else {
+        if (state.Workspace().windows.dock_host.AutoHiddenPaneVisible(dock_type)) {
             state.Workspace().windows.dock_host.HideAutoHiddenPane(dock_type);
+            return AuxiliaryPaneVisibilityChange::Hidden;
         }
-    } else {
-        show = !layout.dock.IsPaneVisible(dock_type);
-        const DockResult result = state.Workspace().windows.dock_host.TogglePane(
-            dock_type);
-        if (result != DockResult::Ok) {
-            return false;
+        if (!state.Workspace().windows.dock_host.ShowAutoHiddenPane(
+                dock_type,
+                inkpod::windows::ui::DockZoneForAutoHideEdge(auxiliary->edge))) {
+            return AuxiliaryPaneVisibilityChange::Failed;
         }
-        layout_changed = true;
-        if (show) {
-            static_cast<void>(
-                state.Workspace().windows.dock_host.ActivatePane(dock_type));
-        }
+        return AuxiliaryPaneVisibilityChange::Shown;
     }
-    if (layout_changed) {
-        layout.selected_preset = WorkspacePreset::Custom;
+
+    const bool show = !layout.dock.IsPaneVisible(dock_type);
+    const DockResult result =
+        state.Workspace().windows.dock_host.TogglePane(dock_type);
+    if (result != DockResult::Ok) {
+        return AuxiliaryPaneVisibilityChange::Failed;
     }
-    return show;
+    layout.selected_preset = WorkspacePreset::Custom;
+    if (show) {
+        static_cast<void>(
+            state.Workspace().windows.dock_host.ActivatePane(dock_type));
+    }
+    return show ? AuxiliaryPaneVisibilityChange::Shown
+                : AuxiliaryPaneVisibilityChange::Hidden;
 }
 
 void FocusPaneWindow(HWND pane, int control) noexcept {
@@ -14456,18 +14463,19 @@ void ClampWorkspaceOwnedWindows(ApplicationHost& state) noexcept {
         state.Workspace().windows.window, layout));
 }
 
-void RelayoutWorkspace(
+bool RelayoutWorkspace(
     ApplicationHost& state,
     DockHostChangeKind dock_change = DockHostChangeKind::Structure) noexcept {
     RECT client{};
-    if (GetClientRect(state.Workspace().windows.window, &client) != FALSE) {
-        inkpod::windows::ui::LayoutMainChrome(
-            state.Workspace().windows,
-            state.lifetime.smoke_test,
-            client.right - client.left,
-            client.bottom - client.top,
-            dock_change);
+    if (GetClientRect(state.Workspace().windows.window, &client) == FALSE) {
+        return false;
     }
+    return inkpod::windows::ui::LayoutMainChrome(
+        state.Workspace().windows,
+        state.lifetime.smoke_test,
+        client.right - client.left,
+        client.bottom - client.top,
+        dock_change);
 }
 
 bool WorkspaceCanvasOwnsCapture(const ApplicationHost& state) noexcept {
@@ -14715,28 +14723,27 @@ void ClearWorkspacePresetSelection(ApplicationHost& state) noexcept {
     }
 }
 
-void NotifyDockHostChanged(
+bool NotifyDockHostChanged(
     void* context, DockHostChangeKind kind) noexcept {
     auto* state = ActivateWorkspaceContext(context);
     if (state == nullptr) {
-        return;
+        return false;
     }
     const bool preset_changed =
         state->Workspace().windows.workspace.selected_preset
         != WorkspacePreset::Custom;
-    state->Workspace().windows.workspace.selected_preset =
-        WorkspacePreset::Custom;
-    RelayoutWorkspace(*state, kind);
-    if (kind == DockHostChangeKind::Structure) {
-        RefreshColorPanes(*state);
-        RefreshDockPaneViews(*state);
-        RefreshTreePane(*state);
+    if (!RelayoutWorkspace(*state, kind)) {
+        return false;
     }
+    state->Workspace().windows.workspace.selected_preset = WorkspacePreset::Custom;
     if (kind == DockHostChangeKind::Structure) {
-        UpdateMenuState(*state);
+        // A structure-only resize updates command surfaces, but must not
+        // rebuild pane data or disturb list selection/scroll state.
+        UpdateMenuState(*state, false);
     } else if (preset_changed) {
         ClearWorkspacePresetSelection(*state);
     }
+    return true;
 }
 
 bool InitializeMainChrome(ApplicationHost& state) noexcept {
@@ -15165,16 +15172,20 @@ std::optional<LRESULT> RouteBatchCommand(
     switch (LOWORD(wparam)) {
         case IDM_WINDOW_BATCH:
             if (state->Workspace().batch_palette != nullptr) {
-                const bool shown = ToggleAuxiliaryPaneVisibility(
-                    *state, WorkspaceAuxiliaryPane::Batch);
-                if (shown) {
+                const AuxiliaryPaneVisibilityChange change =
+                    ToggleAuxiliaryPaneVisibility(
+                        *state, WorkspaceAuxiliaryPane::Batch);
+                if (change == AuxiliaryPaneVisibilityChange::Failed) {
+                    return 0;
+                }
+                if (change == AuxiliaryPaneVisibilityChange::Shown) {
                     UpdateBatchTarget(*state);
                     RefreshBatchPalette(state->batch, state->Workspace().batch_palette);
                     FocusPaneWindow(
                         state->Workspace().batch_palette,
                         IDC_BATCH_OPERATIONS);
                 }
-                UpdateMenuState(*state);
+                UpdateMenuState(*state, false);
                 return 1;
             }
             return 0;
@@ -19099,16 +19110,20 @@ std::optional<LRESULT> RouteApplicationCommand(
         }
         case IDM_WINDOW_LOCATOR:
             if (state->Workspace().locator_palette != nullptr) {
-                const bool shown = ToggleAuxiliaryPaneVisibility(
-                    *state, WorkspaceAuxiliaryPane::Locator);
-                if (shown) {
+                const AuxiliaryPaneVisibilityChange change =
+                    ToggleAuxiliaryPaneVisibility(
+                        *state, WorkspaceAuxiliaryPane::Locator);
+                if (change == AuxiliaryPaneVisibilityChange::Failed) {
+                    return 0;
+                }
+                if (change == AuxiliaryPaneVisibilityChange::Shown) {
                     RefreshLocatorPane(*state);
                     QueueLocatorSample(*state);
                     FocusPaneWindow(
                         state->Workspace().locator_palette,
                         IDC_LOCATOR_PIN);
                 }
-                UpdateMenuState(*state);
+                UpdateMenuState(*state, false);
                 return 1;
             }
             return 0;
@@ -19146,15 +19161,19 @@ std::optional<LRESULT> RouteApplicationCommand(
             return 1;
         case IDM_WINDOW_SEQUENCE:
             if (state->Workspace().sequence_palette != nullptr) {
-                const bool shown = ToggleAuxiliaryPaneVisibility(
-                    *state, WorkspaceAuxiliaryPane::Sequence);
-                if (shown) {
+                const AuxiliaryPaneVisibilityChange change =
+                    ToggleAuxiliaryPaneVisibility(
+                        *state, WorkspaceAuxiliaryPane::Sequence);
+                if (change == AuxiliaryPaneVisibilityChange::Failed) {
+                    return 0;
+                }
+                if (change == AuxiliaryPaneVisibilityChange::Shown) {
                     RefreshSequencePane(*state);
                     FocusPaneWindow(
                         state->Workspace().sequence_palette,
                         IDC_SEQUENCE_CELLS);
                 }
-                UpdateMenuState(*state);
+                UpdateMenuState(*state, false);
                 return 1;
             }
             return 0;
@@ -19179,9 +19198,13 @@ std::optional<LRESULT> RouteApplicationCommand(
         }
         case IDM_WINDOW_LIGHT_TABLE:
             if (state->Workspace().light_table_palette != nullptr) {
-                const bool shown = ToggleAuxiliaryPaneVisibility(
-                    *state, WorkspaceAuxiliaryPane::LightTable);
-                if (shown) {
+                const AuxiliaryPaneVisibilityChange change =
+                    ToggleAuxiliaryPaneVisibility(
+                        *state, WorkspaceAuxiliaryPane::LightTable);
+                if (change == AuxiliaryPaneVisibilityChange::Failed) {
+                    return 0;
+                }
+                if (change == AuxiliaryPaneVisibilityChange::Shown) {
                     RefreshLightTablePane(*state);
                     FocusPaneWindow(
                         state->Workspace().light_table_palette,
@@ -19189,7 +19212,7 @@ std::optional<LRESULT> RouteApplicationCommand(
                             ? IDC_LIGHT_TABLE_ITEMS
                             : IDC_LIGHT_TABLE_SETS);
                 }
-                UpdateMenuState(*state);
+                UpdateMenuState(*state, false);
                 return 1;
             }
             return 0;
@@ -19214,9 +19237,13 @@ std::optional<LRESULT> RouteApplicationCommand(
         }
         case IDM_WINDOW_SUBPALETTE:
             if (state->Workspace().subpalette_palette != nullptr) {
-                const bool shown = ToggleAuxiliaryPaneVisibility(
-                    *state, WorkspaceAuxiliaryPane::Reference);
-                if (shown) {
+                const AuxiliaryPaneVisibilityChange change =
+                    ToggleAuxiliaryPaneVisibility(
+                        *state, WorkspaceAuxiliaryPane::Reference);
+                if (change == AuxiliaryPaneVisibilityChange::Failed) {
+                    return 0;
+                }
+                if (change == AuxiliaryPaneVisibilityChange::Shown) {
                     (void)RefreshSubpalettePane(*state);
                     FocusPaneWindow(state->Workspace().subpalette_palette, 0);
                     SetFocus(
@@ -19226,7 +19253,7 @@ std::optional<LRESULT> RouteApplicationCommand(
                               state->Workspace().subpalette_palette,
                               IDC_SUBPALETTE_PIN));
                 }
-                UpdateMenuState(*state);
+                UpdateMenuState(*state, false);
                 return 1;
             }
             return 0;

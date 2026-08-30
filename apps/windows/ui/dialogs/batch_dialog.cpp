@@ -34,12 +34,26 @@ void DispatchCommand(BatchPaletteDialogState& state, UINT command) noexcept {
     }
 }
 
+int PlannedClientWidth(HWND window, int planned_window_width) noexcept {
+    RECT window_bounds{};
+    RECT client{};
+    if (window == nullptr || GetWindowRect(window, &window_bounds) == FALSE
+        || GetClientRect(window, &client) == FALSE) {
+        return std::max(0, planned_window_width);
+    }
+    const int current_window_width = static_cast<int>(std::max(
+        0L, window_bounds.right - window_bounds.left));
+    const int current_client_width = static_cast<int>(std::max(
+        0L, client.right - client.left));
+    return std::max(
+        0, planned_window_width - (current_window_width - current_client_width));
+}
+
 void LayoutBatchPane(HWND dialog, BatchPaletteDialogState* state) noexcept {
     RECT client{};
     if (GetClientRect(dialog, &client) == FALSE) {
         return;
     }
-    using panes::PlacePaneDialogControl;
     const auto scale = [dialog](int value) {
         return panes::ScalePaneDip(dialog, value);
     };
@@ -50,40 +64,38 @@ void LayoutBatchPane(HWND dialog, BatchPaletteDialogState* state) noexcept {
     const int width = static_cast<int>(client.right - client.left);
     const int height = static_cast<int>(client.bottom - client.top);
     const int content = std::max(0, width - margin * 2);
+    panes::PaneDialogLayoutPlan plan(dialog);
 
     int top = margin;
-    PlacePaneDialogControl(dialog, IDC_BATCH_JOB, margin, top, content, line);
+    static_cast<void>(plan.PlaceControl(
+        IDC_BATCH_JOB, margin, top, content, line));
     top += line + gap;
-    PlacePaneDialogControl(
-        dialog, IDC_BATCH_INPUT_LABEL, margin, top, content, line);
+    static_cast<void>(plan.PlaceControl(
+        IDC_BATCH_INPUT_LABEL, margin, top, content, line));
     top += line;
-    PlacePaneDialogControl(dialog, IDC_BATCH_INPUTS, margin, top, content, row);
+    static_cast<void>(plan.PlaceControl(
+        IDC_BATCH_INPUTS, margin, top, content, row));
     top += row + gap;
-    PlacePaneDialogControl(
-        dialog, IDC_BATCH_OPERATIONS_LABEL, margin, top, content, line);
+    static_cast<void>(plan.PlaceControl(
+        IDC_BATCH_OPERATIONS_LABEL, margin, top, content, line));
     top += line;
     const int stage_height = std::max(scale(92), height / 5);
-    PlacePaneDialogControl(
-        dialog, IDC_BATCH_OPERATIONS, margin, top, content, stage_height);
+    static_cast<void>(plan.PlaceControl(
+        IDC_BATCH_OPERATIONS, margin, top, content, stage_height));
     const HWND stages = GetDlgItem(dialog, IDC_BATCH_OPERATIONS);
-    RECT stage_client{};
-    if (stages != nullptr && GetClientRect(stages, &stage_client) != FALSE) {
-        ListView_SetColumnWidth(stages, 0, stage_client.right - stage_client.left);
-    }
     top += stage_height + gap;
 
-    PlacePaneDialogControl(
-        dialog,
+    static_cast<void>(plan.PlaceControl(
         IDC_BATCH_ADD,
         margin,
         top,
         content,
-        row);
+        row));
     top += row + gap;
     const std::array<int, 4U> edit_controls{
         IDC_BATCH_EDIT, IDC_BATCH_REMOVE, IDC_BATCH_UP, IDC_BATCH_DOWN};
     panes::PlacePaneButtonRows(
-        dialog, edit_controls, margin, top, content, row, gap);
+        plan, edit_controls, margin, top, content, row, gap);
     const std::size_t edit_rows = panes::PaneButtonRowCount(
         dialog, edit_controls, content, gap);
     top += static_cast<int>(edit_rows) * row
@@ -97,7 +109,7 @@ void LayoutBatchPane(HWND dialog, BatchPaletteDialogState* state) noexcept {
         + std::max(0, static_cast<int>(bottom_rows) - 1) * gap;
     const int bottom_top = std::max(top, height - margin - bottom_height);
     panes::PlacePaneButtonRows(
-        dialog, bottom_controls, margin, bottom_top, content, row, gap);
+        plan, bottom_controls, margin, bottom_top, content, row, gap);
 
     const std::array<int, 3U> run_controls{
         IDC_BATCH_PREVIEW,
@@ -109,35 +121,40 @@ void LayoutBatchPane(HWND dialog, BatchPaletteDialogState* state) noexcept {
         + std::max(0, static_cast<int>(run_rows) - 1) * gap;
     const int run_top = std::max(top, bottom_top - gap - run_height);
     panes::PlacePaneButtonRows(
-        dialog, run_controls, margin, run_top, content, row, gap);
+        plan, run_controls, margin, run_top, content, row, gap);
 
     const int validation_height = std::clamp(
         height / 5, scale(72), scale(120));
     const int validation_top = std::max(top, run_top - gap - validation_height);
-    PlacePaneDialogControl(
-        dialog,
+    static_cast<void>(plan.PlaceControl(
         IDC_BATCH_OUTPUT,
         margin,
         validation_top,
         content,
-        validation_height);
+        validation_height));
     const int validation_label_top = std::max(top, validation_top - line);
-    PlacePaneDialogControl(
-        dialog,
+    static_cast<void>(plan.PlaceControl(
         IDC_BATCH_OUTPUT_LABEL,
         margin,
         validation_label_top,
         content,
-        line);
+        line));
     if (state != nullptr && state->parameter_host != nullptr) {
-        MoveWindow(
+        static_cast<void>(plan.PlaceWindow(
             state->parameter_host,
             margin,
             top,
             content,
-            std::max(0, validation_label_top - gap - top),
-            TRUE);
+            std::max(0, validation_label_top - gap - top)));
     }
+    if (!plan.Commit(panes::PaneDialogRepaint::None)) {
+        return;
+    }
+    if (stages != nullptr) {
+        panes::ScopedPaneControlRedrawSuspension stages_redraw(stages);
+        ListView_SetColumnWidth(stages, 0, PlannedClientWidth(stages, content));
+    }
+    panes::CompletePaneDialogResize(dialog);
 }
 
 void InitializeStageList(HWND list) noexcept {
@@ -253,18 +270,30 @@ INT_PTR CALLBACK BatchPaletteDialogProcedure(
             }
             SetWindowLongPtrW(
                 dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
+            panes::EnablePaneDialogResizePainting(dialog);
             const HWND stages = GetDlgItem(dialog, IDC_BATCH_OPERATIONS);
+            if (stages == nullptr) {
+                DestroyWindow(dialog);
+                return TRUE;
+            }
             InitializeStageList(stages);
-            SetWindowSubclass(
-                stages,
-                StageListProcedure,
-                1U,
-                reinterpret_cast<DWORD_PTR>(state));
+            if (SetWindowSubclass(
+                    stages,
+                    StageListProcedure,
+                    1U,
+                    reinterpret_cast<DWORD_PTR>(state)) == FALSE) {
+                DestroyWindow(dialog);
+                return TRUE;
+            }
             state->parameter_host = CreateBatchParameterEditor(
                 reinterpret_cast<HINSTANCE>(
                     GetWindowLongPtrW(dialog, GWLP_HINSTANCE)),
                 dialog,
                 state->parameter_editor);
+            if (state->parameter_host == nullptr) {
+                DestroyWindow(dialog);
+                return TRUE;
+            }
             SetWindowTextW(
                 GetDlgItem(dialog, IDC_BATCH_INPUT_LABEL),
                 UiText(UiStringId::BatchSetName));
@@ -428,12 +457,17 @@ const wchar_t* BatchPaletteEntryLabel(
 
 HWND CreateBatchPaletteDialog(
     HINSTANCE instance, HWND owner, BatchPaletteDialogState& state) noexcept {
-    return CreateLocalizedDialogParamW(
+    const HWND dialog = CreateLocalizedDialogParamW(
         instance,
         MAKEINTRESOURCEW(IDD_BATCH_PALETTE),
         owner,
         BatchPaletteDialogProcedure,
         reinterpret_cast<LPARAM>(&state));
+    if (dialog == nullptr || IsWindow(dialog) == FALSE) {
+        return nullptr;
+    }
+    panes::EnablePaneDialogResizePainting(dialog);
+    return dialog;
 }
 
 void UpdateBatchPaletteDialog(

@@ -408,91 +408,52 @@ void LayoutControls(HWND dialog) noexcept {
             minimum_layer_height,
             available_lists - minimum_plane_height);
     }
+    panes::PaneDialogLayoutPlan plan(dialog);
     int y = margin;
-    panes::PlacePaneDialogControl(
-        dialog,
+    static_cast<void>(plan.PlaceControl(
         IDC_LAYER_SECTION,
         margin,
         y,
         width,
-        label_height);
+        label_height));
     y += label_height;
-    const HWND layer_list = GetDlgItem(dialog, IDC_LAYER_LIST);
-    const bool layer_list_geometry_changed = !panes::PaneWindowHasBounds(
-        layer_list, margin, y, width, layer_height);
-    panes::PlacePaneDialogControl(
-        dialog,
+    static_cast<void>(plan.PlaceControl(
         IDC_LAYER_LIST,
         margin,
         y,
         width,
-        layer_height);
+        layer_height));
     y += layer_height;
-    panes::PlacePaneDialogControl(
-        dialog,
+    static_cast<void>(plan.PlaceControl(
         IDC_LAYER_PLANE_SPLITTER,
         margin,
         y,
         width,
-        split_height);
+        split_height));
     y += split_height;
-    panes::PlacePaneDialogControl(
-        dialog,
+    static_cast<void>(plan.PlaceControl(
         IDC_PLANE_SECTION,
         margin,
         y,
         width,
-        label_height);
+        label_height));
     y += label_height;
     const int plane_height = std::max(
         0, list_bottom - y);
-    const HWND plane_list = GetDlgItem(dialog, IDC_PLANE_LIST);
-    const bool plane_list_geometry_changed = !panes::PaneWindowHasBounds(
-        plane_list, margin, y, width, plane_height);
-    panes::PlacePaneDialogControl(
-        dialog,
+    static_cast<void>(plan.PlaceControl(
         IDC_PLANE_LIST,
         margin,
         y,
         width,
-        plane_height);
-    SendDlgItemMessageW(
-        dialog,
-        IDC_LAYER_LIST,
-        LB_SETITEMHEIGHT,
-        0,
-        ScaleForDpi(kLayerPaletteLayerTileHeightDip, dpi));
-    SendDlgItemMessageW(
-        dialog,
-        IDC_PLANE_LIST,
-        LB_SETITEMHEIGHT,
-        0,
-        ScaleForDpi(kLayerPalettePlaneTileHeightDip, dpi));
-    for (const auto [list, geometry_changed] : {
-             std::pair{layer_list, layer_list_geometry_changed},
-             std::pair{plane_list, plane_list_geometry_changed}}) {
-        if (geometry_changed && list != nullptr
-            && IsWindowVisible(list) != FALSE) {
-            // Owner-draw status cells depend on the full row width. Paint the
-            // new layout before the next splitter sample so their old right-
-            // aligned positions cannot remain visible during a live resize.
-            RedrawWindow(
-                list,
-                nullptr,
-                nullptr,
-                RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
-        }
-    }
-
-    panes::PlacePaneDialogControl(
-        dialog,
+        plane_height));
+    static_cast<void>(plan.PlaceControl(
         IDC_LAYER_ACTION_TARGET,
         margin,
         action_footer_y + (inline_target
             ? std::max(0, action_footer_height - action_target_height) / 2
             : 0),
         inline_target ? target_width : width,
-        action_target_height);
+        action_target_height));
     const int first_button_y = inline_target
         ? action_footer_y + std::max(0, action_footer_height - button_size) / 2
         : action_footer_y + action_target_height + gap;
@@ -506,14 +467,35 @@ void LayoutControls(HWND dialog) noexcept {
         const int row_width = row_count * button_size
             + std::max(0, row_count - 1) * gap;
         const int row_x = margin + std::max(0, width - row_width);
-        panes::PlacePaneDialogControl(
-            dialog,
+        static_cast<void>(plan.PlaceControl(
             static_cast<int>(kLayerActionCommands[index]),
             row_x + column * (button_size + gap),
             first_button_y + row * (button_size + gap),
             button_size,
-            button_size);
+            button_size));
     }
+    if (!plan.Commit(panes::PaneDialogRepaint::None)) {
+        return;
+    }
+    {
+        panes::ScopedPaneControlRedrawSuspension layer_redraw(
+            GetDlgItem(dialog, IDC_LAYER_LIST));
+        panes::ScopedPaneControlRedrawSuspension plane_redraw(
+            GetDlgItem(dialog, IDC_PLANE_LIST));
+        SendDlgItemMessageW(
+            dialog,
+            IDC_LAYER_LIST,
+            LB_SETITEMHEIGHT,
+            0,
+            ScaleForDpi(kLayerPaletteLayerTileHeightDip, dpi));
+        SendDlgItemMessageW(
+            dialog,
+            IDC_PLANE_LIST,
+            LB_SETITEMHEIGHT,
+            0,
+            ScaleForDpi(kLayerPalettePlaneTileHeightDip, dpi));
+    }
+    panes::CompletePaneDialogResize(dialog);
 }
 
 bool UpdatePaletteFont(HWND dialog, LayerPaletteDialogState& state) noexcept {
@@ -1167,6 +1149,7 @@ INT_PTR CALLBACK LayerPaletteDialogProcedure(
             }
             SetWindowLongPtrW(
                 dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
+            panes::EnablePaneDialogResizePainting(dialog);
             const HINSTANCE instance = reinterpret_cast<HINSTANCE>(
                 GetWindowLongPtrW(dialog, GWLP_HINSTANCE));
             const HWND splitter = CreateWindowExW(
@@ -1429,8 +1412,7 @@ HWND CreateLayerPaletteDialog(
         LayerPaletteDialogProcedure,
         reinterpret_cast<LPARAM>(&state));
     if (dialog != nullptr) {
-        const LONG_PTR style = GetWindowLongPtrW(dialog, GWL_STYLE);
-        SetWindowLongPtrW(dialog, GWL_STYLE, style | WS_CLIPCHILDREN);
+        panes::EnablePaneDialogResizePainting(dialog);
     }
     return dialog;
 }

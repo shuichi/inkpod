@@ -29,7 +29,9 @@ void Dispatch(SequencePaneDialogState& state, UINT command) noexcept {
 constexpr int kMaximumSequenceRowPixels = 255;
 constexpr int kSequenceColumnDip = 112;
 
-void LayoutSequencePane(HWND dialog, bool redraw = true) noexcept {
+void LayoutSequencePane(
+    HWND dialog,
+    PaneDialogRepaint repaint = PaneDialogRepaint::Complete) noexcept {
     RECT client{};
     if (GetClientRect(dialog, &client) == FALSE) {
         return;
@@ -46,23 +48,28 @@ void LayoutSequencePane(HWND dialog, bool redraw = true) noexcept {
     const int content_width = std::max(0, width - margin * 2);
     const int import_width = std::min(content_width,
         PaneButtonIdealWidth(dialog, IDC_SEQUENCE_IMPORT));
+    PaneDialogLayoutPlan plan(dialog);
 
-    PlacePaneTargetRow(
-        dialog,
-        IDC_SEQUENCE_TARGET,
+    const int target_row_width = std::max(
+        0, content_width - import_width - gap);
+    const int pin_width = std::min(
+        target_row_width, PaneButtonIdealWidth(dialog, IDC_SEQUENCE_PIN));
+    static_cast<void>(plan.PlaceControl(
         IDC_SEQUENCE_PIN,
+        margin + std::max(0, target_row_width - pin_width),
         margin,
+        pin_width,
+        header_height));
+    static_cast<void>(plan.PlaceControl(
+        IDC_SEQUENCE_TARGET,
         margin,
-        std::max(0, content_width - import_width - gap),
-        ScalePaneDip(dialog, 4),
-        line_height,
-        header_height,
-        gap,
-        false);
-    PlacePaneDialogControl(
-        dialog, IDC_SEQUENCE_IMPORT,
+        margin + ScalePaneDip(dialog, 4),
+        std::max(0, target_row_width - pin_width - gap),
+        line_height));
+    static_cast<void>(plan.PlaceControl(
+        IDC_SEQUENCE_IMPORT,
         std::max(margin, width - margin - import_width), margin,
-        import_width, button_height, false);
+        import_width, button_height));
     const std::array<int, 4U> edit_controls{
         IDC_SEQUENCE_REMOVE,
         IDC_SEQUENCE_MOVE_UP,
@@ -90,55 +97,57 @@ void LayoutSequencePane(HWND dialog, bool redraw = true) noexcept {
         list_bottom - list_top, 0, kMaximumSequenceRowPixels + list_frame);
     const HWND list = GetDlgItem(dialog, IDC_SEQUENCE_CELLS);
     const LRESULT first_visible = SendMessageW(list, LB_GETTOPINDEX, 0, 0);
-    const bool geometry_changed = !PaneWindowHasBounds(
-        list, margin, list_top, content_width, list_height);
-    if (geometry_changed) {
-        SendMessageW(list, WM_SETREDRAW, FALSE, 0);
-    }
-    PlacePaneDialogControl(
-        dialog,
+    static_cast<void>(plan.PlaceControl(
         IDC_SEQUENCE_CELLS,
         margin,
         list_top,
         content_width,
-        list_height,
-        false);
-    RECT list_client{};
-    if (GetClientRect(list, &list_client) != FALSE) {
-        const int row_height = std::clamp(
-            static_cast<int>(list_client.bottom - list_client.top),
-            1, kMaximumSequenceRowPixels);
-        if (SendMessageW(list, LB_GETITEMHEIGHT, 0, 0) != row_height) {
-            SendMessageW(list, LB_SETITEMHEIGHT, 0, row_height);
-        }
-    }
-    SendMessageW(list, LB_SETCOLUMNWIDTH,
-        static_cast<WPARAM>(ScalePaneDip(dialog, kSequenceColumnDip)), 0);
-    if (first_visible >= 0
-        && first_visible < SendMessageW(list, LB_GETCOUNT, 0, 0)) {
-        SendMessageW(list, LB_SETTOPINDEX, first_visible, 0);
-    }
-    if (geometry_changed) {
-        SendMessageW(list, WM_SETREDRAW, TRUE, 0);
-    }
-    PlacePaneDialogControl(
-        dialog,
+        list_height));
+    static_cast<void>(plan.PlaceControl(
         IDC_SEQUENCE_EMPTY,
         margin + gap,
         list_top + std::max(0, (list_height - line_height) / 2),
         std::max(0, width - margin * 2 - gap * 2),
-        line_height,
-        false);
+        line_height));
     if (cut_editable) {
         int action_width = gap * (static_cast<int>(edit_controls.size()) - 1);
         for (const int control : edit_controls) {
             action_width += PaneButtonIdealWidth(dialog, control);
         }
         PlacePaneButtonRows(
-            dialog, edit_controls, margin, edit_buttons_top,
-            std::min(content_width, action_width), button_height, gap, 0U, false);
+            plan,
+            edit_controls,
+            margin,
+            edit_buttons_top,
+            std::min(content_width, action_width),
+            button_height,
+            gap);
     }
-    if (redraw) {
+    // Publish every HWND geometry first. ListBox metric messages can draw or
+    // change the top item, and must not run if this placement transaction
+    // fails and rolls back.
+    if (!plan.Commit(PaneDialogRepaint::None)) {
+        return;
+    }
+    {
+        ScopedPaneControlRedrawSuspension metric_redraw(list);
+        RECT list_client{};
+        const int actual_client_height = GetClientRect(list, &list_client) != FALSE
+            ? static_cast<int>(std::max(0L, list_client.bottom - list_client.top))
+            : 0;
+        const int row_height = std::clamp(
+            actual_client_height, 1, kMaximumSequenceRowPixels);
+        if (SendMessageW(list, LB_GETITEMHEIGHT, 0, 0) != row_height) {
+            SendMessageW(list, LB_SETITEMHEIGHT, 0, row_height);
+        }
+        SendMessageW(list, LB_SETCOLUMNWIDTH,
+            static_cast<WPARAM>(ScalePaneDip(dialog, kSequenceColumnDip)), 0);
+        if (first_visible >= 0
+            && first_visible < SendMessageW(list, LB_GETCOUNT, 0, 0)) {
+            SendMessageW(list, LB_SETTOPINDEX, first_visible, 0);
+        }
+    }
+    if (repaint == PaneDialogRepaint::Complete) {
         CompletePaneDialogResize(dialog);
     }
 }
@@ -460,8 +469,7 @@ INT_PTR CALLBACK SequencePaneProcedure(
             return TRUE;
         case WM_SIZE:
         case WM_DPICHANGED_AFTERPARENT:
-            LayoutSequencePane(dialog, false);
-            CompletePaneDialogResize(dialog);
+            LayoutSequencePane(dialog);
             return TRUE;
         case WM_MEASUREITEM:
             if (wparam == static_cast<WPARAM>(IDC_SEQUENCE_CELLS)) {
@@ -697,7 +705,7 @@ void UpdateSequencePaneDialog(HWND dialog, SequencePaneView view) noexcept {
         IDC_SEQUENCE_EMPTY,
         has_sequence ? L"" : state->view.empty_text.c_str());
     ShowWindow(GetDlgItem(dialog, IDC_SEQUENCE_EMPTY), has_sequence ? SW_HIDE : SW_SHOW);
-    LayoutSequencePane(dialog, false);
+    LayoutSequencePane(dialog, PaneDialogRepaint::None);
     // The layout keeps the preceding viewport; only a committed active-cell
     // change may subsequently scroll just enough to reveal its frame.
     SelectCommittedCell(list, state->view.active_index, first_visible, selection_changed);

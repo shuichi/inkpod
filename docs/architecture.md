@@ -454,13 +454,23 @@ main -> Application -> MainWindow/controllers -> CoreHost -> C ABI
 
 Splitter, docking, floating-window, DPI, and parent-size changes are geometry
 updates, not control-lifecycle events. A pane keeps its existing child `HWND`
-values, Common Controls contents, selection, focus, and scroll position. The
-layout owner computes the complete final geometry before it changes any child
-and skips children whose bounds are already correct. It then applies every
+values, pane-owned Common Controls contents, selection, focus, and a scroll
+position that remains inside the resized viewport's valid range. Resize or
+reflow may clamp a scroll position only when it falls outside the new limit. DockHost
+chrome tab items are a projection of the layout model and may
+be resynchronized under redraw suppression for a Structure change. The layout
+owner computes the complete final geometry before it changes any child and
+skips children whose bounds are already correct, except when a redraw-suspended
+control must re-publish its final local visibility. It then applies every
 changed position without intermediate painting, using deferred window placement
 or `SetWindowPos(..., SWP_NOREDRAW)` as appropriate. It must not alternate one
 child move with one child repaint because later moves can expose pixels that the
-earlier repaint treated as final.
+earlier repaint treated as final. The batch preflights each old bound and local
+visibility, verifies the complete final set, and restores the old set if either
+the deferred placement or its sequential fallback publishes only a prefix. A
+rollback verification failure remains a transaction failure: the candidate
+logical model and hit-test state are not committed, and the owner reprojects its
+captured model instead of reporting the partial placement as successful.
 
 After all children reach their final bounds, the layout owner performs one
 bounded synchronous repaint. A pane parent that owns standard child controls
@@ -470,7 +480,13 @@ bounds remain part of the parent dirty region and are erased before the final
 frame is presented. `RedrawWindow` normally combines `RDW_INVALIDATE` and
 `RDW_UPDATENOW`; add `RDW_ERASE` when a standard background or vacated frame
 must be cleared, and add `RDW_ALLCHILDREN` when the complete pane subtree must
-paint after batched placement. A fully covering owner-draw surface may omit
+paint after batched placement. `RDW_FRAME` joins non-client metrics such as a
+scrollbar with that final frame. Common Control metric messages that may draw
+synchronously (`WM_SETFONT`, column width, item height) disable their own redraw
+or run under a local-visibility-preserving `WM_SETREDRAW` guard. The guard wraps
+the metric mutation, is restored before visibility-dependent placement is
+verified, and leaves any required invalidation to the final bounded redraw. A
+fully covering owner-draw surface may omit
 erase, but only when its paint contract covers every invalidated pixel.
 
 The dirty region is selected by ownership and overlap:
@@ -479,6 +495,8 @@ The dirty region is selected by ownership and overlap:
   old and new bounds, including the vacated pixels;
 - when several child windows move and their old/new bounds can overlap, repaint
   the complete pane subtree after placement;
+- for a DockHost Structure change, also include the old and new right-zone and
+  right-tool-tab bounds;
 - never use a synchronous whole-workspace redraw to hide an incorrectly owned
   dirty region.
 
@@ -488,6 +506,44 @@ responsibility for its child layout and vacated background. A geometry-only
 path does not rebuild tabs or lists, resend reset-content messages, recreate
 controls, or silently change selection and focus.
 
+DockHost and pane-child layout form one nested presentation transaction for
+affected pane roots that remain children of DockHost, including a root becoming
+Hidden. Before DockHost moves those roots, their tabs, or their splitters, it
+starts a sticky inner-layout status and defers synchronous pane completion.
+Pane `WM_SIZE` handlers may compute and apply final child geometry during that
+interval, but they do not present it. Each inner plan reports placement or
+rollback failure to its transaction root. After every sibling and inner plan
+reaches its verified final state, DockHost removes the deferral and synchronously
+repaints the bounded dirty union. This path covers zone/stack splitters and
+same-parent right-pane add/remove and tab Structure changes. Floating, expanded
+AutoHide, and other reparenting transitions complete under the destination
+parent and are not mixed into this same-parent transaction.
+
+A synchronous DockHost mutation captures the DockLayout model, right-tool-tab
+model, pane host flags, physical bounds, and local visibility before mutation.
+If outer placement or any inner plan fails, it restores the captured logical
+models, attempts and verifies rollback of the registered physical set,
+reprojects the old DockHost chrome, and reports failure to the command before
+focus or successful command-surface follow-up runs. An OS-level rollback or
+reprojection failure is still reported as failure and never commits the candidate
+logical model. Ordinary parent
+resize has no logical model mutation; its batch still restores and verifies the
+registered physical set on failure. DPI-driven tab font and padding changes join
+the same final repaint instead of drawing at old tab bounds. A Structure
+notification may rebuild DockHost chrome tab items, but is not a pane-data
+notification: surviving pane-owned tabs, lists, selections, focus, and valid
+scroll state are not refreshed or reconstructed merely because bounds changed;
+only a newly out-of-range scroll offset may be clamped to the resized viewport.
+
+Common Controls tab pages are sibling `HWND`s, not children of the tab itself.
+After geometry commit and before repaint, the tab is placed at `HWND_BOTTOM` and
+visible pages are raised without redraw while preserving their existing sibling
+and keyboard order. The complete z-order is verified; failure attempts and
+verifies restoration of the original sibling order and remains an inner-
+transaction failure even if restoration cannot be verified. Platform-normalized
+dimensions, such as the closed height of `CBS_DROPDOWNLIST`, use the same
+normalized comparison for unchanged detection and final verification.
+
 Regression coverage combines source-contract and actual-window checks. Static
 checks lock the no-intermediate-redraw placement and the final repaint call.
 Native smoke resizes representative panes in both axes where applicable,
@@ -496,8 +552,16 @@ pending parent or child update region after the synchronous repaint. A hidden
 smoke window is not required to receive `WM_PAINT`, because Windows may suppress
 paint delivery while hidden; it is checked through geometry and update regions.
 At least one visible product or pixel probe must additionally demonstrate that
-old frames and background pixels are removed. The same checks cover localized
-layouts and representative DPI values when label or row geometry can change.
+old frames and background pixels are removed. The English/Japanese visible runs
+exercise the environment DPI; model/layout tests cover 96/120/144/192 DPI.
+Physical high-DPI repaint remains a separate platform check.
+The visible right-pane matrix also adds and removes a pane from a selected tab
+with sufficient height, so all three final geometries and the surviving shrink /
+grow round trip are checked together with pane/control identity, no list reset,
+list count/selection/top index, valid scroll state, parent/child update regions, and old-frame
+sentinel erasure. Layout itself does not redirect focus; the explicit show-pane
+command must select its destination and move focus to the newly shown pane's
+natural first target after a successful transaction, as required by SPEC 88.
 
 `ApplicationHost` is the process-lifetime composition root. It owns global
 shortcut and clipboard state, the frontend routing/token registries, job state,

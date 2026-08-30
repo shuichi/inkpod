@@ -14,6 +14,7 @@
 #include "ui/batch_color_editor_model.h"
 #include "ui/batch_input_picker.h"
 #include "ui/localization.h"
+#include "ui/panes/pane_dialog_layout.h"
 
 namespace inkpod::windows::ui {
 namespace {
@@ -297,12 +298,23 @@ void PopulateOperationRows(EditorState& state, app::BatchOperationUi& operation)
     }
 }
 
-void ResizeRowColumns(EditorState& state) noexcept {
+int PlannedClientWidth(HWND window, int planned_window_width) noexcept {
+    RECT window_bounds{};
     RECT client{};
-    if (GetClientRect(state.rows, &client) == FALSE) {
-        return;
+    if (window == nullptr || GetWindowRect(window, &window_bounds) == FALSE
+        || GetClientRect(window, &client) == FALSE) {
+        return std::max(0, planned_window_width);
     }
-    const int width = std::max(0, static_cast<int>(client.right - client.left));
+    const int current_window_width = static_cast<int>(std::max(
+        0L, window_bounds.right - window_bounds.left));
+    const int current_client_width = static_cast<int>(std::max(
+        0L, client.right - client.left));
+    return std::max(
+        0, planned_window_width - (current_window_width - current_client_width));
+}
+
+void ResizeRowColumns(EditorState& state, int planned_window_width) noexcept {
+    const int width = PlannedClientWidth(state.rows, planned_window_width);
     const std::size_t operation_count = state.binding == nullptr
             || state.binding->draft == nullptr
         ? 0U
@@ -345,9 +357,28 @@ void Layout(EditorState& state, HWND window) noexcept {
     const int row = Scale(window, 25);
     const int width = std::max(
         0, static_cast<int>(client.right - client.left) - margin * 2);
-    int y = margin - state.scroll_y;
+    struct PlannedControl {
+        HWND control{};
+        int x{};
+        int top{};
+        int width{};
+        int height{};
+    };
+    std::array<PlannedControl, 32U> placements{};
+    std::size_t placement_count{};
+    bool placement_valid{true};
+    int y = margin;
     const auto place = [&](HWND control, int x, int top, int cx, int cy) {
-        MoveWindow(control, x, top, std::max(0, cx), std::max(0, cy), TRUE);
+        if (control == nullptr || placement_count >= placements.size()) {
+            placement_valid = false;
+            return;
+        }
+        placements[placement_count++] = PlannedControl{
+            control, x, top, std::max(0, cx), std::max(0, cy)};
+    };
+    const auto locally_visible = [](HWND control) noexcept {
+        return control != nullptr
+            && (GetWindowLongPtrW(control, GWL_STYLE) & WS_VISIBLE) != 0;
     };
     place(state.title, margin, y, width, row);
     y += row + gap;
@@ -389,7 +420,7 @@ void Layout(EditorState& state, HWND window) noexcept {
         place(state.primary, margin, y, half, row);
         place(state.secondary, margin + half + gap, y, half, row);
         y += row + gap;
-        if (IsWindowVisible(state.path_label) != FALSE) {
+        if (locally_visible(state.path_label)) {
             place(state.path_label, margin, y, width, row);
             y += row;
             const int browse_width = std::min(Scale(window, 92), width / 3);
@@ -407,19 +438,19 @@ void Layout(EditorState& state, HWND window) noexcept {
         place(state.naming_template, margin, y, width, row);
         y += row;
     } else {
-        if (IsWindowVisible(state.target) != FALSE) {
+        if (locally_visible(state.target)) {
             place(state.target_label, margin, y, width, row);
             y += row;
             place(state.target, margin, y, width, row);
             y += row + gap;
             place(state.target_color, margin, y, width, row);
             y += row + gap;
-            if (IsWindowVisible(state.target_fixed) != FALSE) {
+            if (locally_visible(state.target_fixed)) {
                 place(state.target_fixed, margin, y, width, row);
                 y += row + gap;
             }
         }
-        if (IsWindowVisible(state.first_label) != FALSE) {
+        if (locally_visible(state.first_label)) {
             place(state.first_label, margin, y, half, row);
             place(state.last_label, margin + half + gap, y, half, row);
             y += row;
@@ -465,10 +496,33 @@ void Layout(EditorState& state, HWND window) noexcept {
         }
         y += row;
     }
-    ResizeRowColumns(state);
+    if (!placement_valid) {
+        return;
+    }
+    const int viewport = std::max(
+        0, static_cast<int>(client.bottom - client.top));
+    const int content = std::max(0, y + margin);
+    const int maximum_scroll = std::max(0, content - viewport);
+    state.scroll_y = std::clamp(state.scroll_y, 0, maximum_scroll);
 
-    const int viewport = client.bottom - client.top;
-    const int content = std::max(0, y + state.scroll_y + margin);
+    panes::PaneDialogLayoutPlan plan(window);
+    for (std::size_t index = 0U; index < placement_count; ++index) {
+        const PlannedControl& placement = placements[index];
+        static_cast<void>(plan.PlaceWindow(
+            placement.control,
+            placement.x,
+            placement.top - state.scroll_y,
+            placement.width,
+            placement.height));
+    }
+    if (!plan.Commit(panes::PaneDialogRepaint::None)) {
+        return;
+    }
+
+    {
+        panes::ScopedPaneControlRedrawSuspension rows_redraw(state.rows);
+        ResizeRowColumns(state, width);
+    }
     SCROLLINFO scroll{};
     scroll.cbSize = sizeof(scroll);
     scroll.fMask = SIF_PAGE | SIF_RANGE | SIF_POS;
@@ -476,7 +530,8 @@ void Layout(EditorState& state, HWND window) noexcept {
     scroll.nMax = std::max(0, content - 1);
     scroll.nPage = static_cast<UINT>(std::max(0, viewport));
     scroll.nPos = state.scroll_y;
-    SetScrollInfo(window, SB_VERT, &scroll, TRUE);
+    SetScrollInfo(window, SB_VERT, &scroll, FALSE);
+    panes::CompletePaneDialogResize(window);
 }
 
 app::BatchOperationUi* SelectedOperation(EditorState& state) noexcept {
@@ -1391,7 +1446,7 @@ LRESULT CALLBACK EditorProcedure(
         return DefWindowProcW(window, message, wparam, lparam);
     }
     switch (message) {
-        case WM_CREATE:
+        case WM_CREATE: {
             state->title = Child(window, 0, WC_STATICW, L"", SS_LEFT, kTitle);
             state->primary = Child(
                 window, 0, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP,
@@ -1463,11 +1518,46 @@ LRESULT CALLBACK EditorProcedure(
                 window, 0, WC_BUTTONW, L"",
                 BS_AUTOCHECKBOX,
                 IDC_BATCH_PARAMETER_TARGET_FIXED);
+            const std::array<HWND, 27U> controls{
+                state->title,
+                state->primary,
+                state->secondary,
+                state->path_label,
+                state->path,
+                state->template_label,
+                state->naming_template,
+                state->browse,
+                state->first_label,
+                state->first,
+                state->last_label,
+                state->last,
+                state->rows,
+                state->add,
+                state->remove,
+                state->swap,
+                state->current,
+                state->old_swatch,
+                state->new_swatch,
+                state->primary_alpha_label,
+                state->primary_alpha,
+                state->secondary_alpha_label,
+                state->secondary_alpha,
+                state->target_label,
+                state->target,
+                state->target_color,
+                state->target_fixed,
+            };
+            if (std::any_of(
+                    controls.begin(), controls.end(),
+                    [](HWND control) noexcept { return control == nullptr; })) {
+                return -1;
+            }
             SendMessageW(state->primary_alpha, EM_SETLIMITTEXT, 5U, 0);
             SendMessageW(state->secondary_alpha, EM_SETLIMITTEXT, 5U, 0);
             ApplyEditorFont(*state, window);
             Refresh(*state, window);
             return 0;
+        }
         case WM_SIZE:
             Layout(*state, window);
             return 0;
@@ -1693,7 +1783,7 @@ HWND CreateBatchParameterEditor(
         WS_EX_CONTROLPARENT,
         kEditorClassName,
         UiText(UiStringId::BatchParameters),
-        WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_TABSTOP,
+        WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_TABSTOP | WS_CLIPCHILDREN,
         0,
         0,
         0,

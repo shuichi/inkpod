@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <cstdint>
 #include <string>
 
 #include "inkpod/core_ffi.h"
@@ -11,6 +12,10 @@ struct ActivationRequest;
 class ApplicationHost;
 struct RecoveryCandidate;
 struct WorkspaceWindow;
+}
+
+namespace inkpod::windows::ui {
+enum class DockHostChangeKind : std::uint8_t;
 }
 
 namespace inkpod::windows::ui::runtime {
@@ -32,9 +37,13 @@ InkpodStatus OpenRecoveryCandidate(
 bool HandleApplicationActivation(
     app::ApplicationHost& state,
     const app::ActivationRequest& request) noexcept;
-void UpdateMenuState(app::ApplicationHost& state) noexcept;
+void UpdateMenuState(
+    app::ApplicationHost& state,
+    bool refresh_pane_content = true) noexcept;
 void ShowInitialPalettes(app::ApplicationHost& state) noexcept;
 void CaptureWorkspacePresentation(app::ApplicationHost& state) noexcept;
+bool NotifyDockHostChanged(
+    void* context, DockHostChangeKind kind) noexcept;
 [[nodiscard]] bool PersistApplicationSettings(
     app::ApplicationHost& state) noexcept;
 void ShowCoreError(

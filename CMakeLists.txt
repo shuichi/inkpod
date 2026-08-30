@@ -663,6 +663,24 @@ if(WIN32)
         NAME inkpod_windows_workspace_layout
         COMMAND inkpod_windows_workspace_layout_tests)
 
+    add_executable(inkpod_windows_pane_dialog_layout_tests
+        apps/windows/ui/panes/pane_dialog_layout.h
+        tests/windows_pane_dialog_layout.cpp)
+    target_include_directories(inkpod_windows_pane_dialog_layout_tests PRIVATE
+        "${CMAKE_SOURCE_DIR}/apps/windows")
+    target_compile_definitions(inkpod_windows_pane_dialog_layout_tests PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(inkpod_windows_pane_dialog_layout_tests PRIVATE
+        gdi32
+        user32)
+    if(MSVC)
+        inkpod_enable_strict_warnings(inkpod_windows_pane_dialog_layout_tests)
+        target_compile_options(inkpod_windows_pane_dialog_layout_tests PRIVATE /EHsc)
+    endif()
+    add_test(
+        NAME inkpod_windows_pane_dialog_layout
+        COMMAND inkpod_windows_pane_dialog_layout_tests)
+
     add_executable(inkpod_windows_job_progress_tests
         apps/windows/ui/job_progress.cpp
         apps/windows/ui/job_progress.h

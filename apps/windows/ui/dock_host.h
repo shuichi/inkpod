@@ -17,7 +17,7 @@ enum class DockHostChangeKind : std::uint8_t {
     Structure,
 };
 
-using DockHostChangedCallback = void (*)(
+using DockHostChangedCallback = bool (*)(
     void* context, DockHostChangeKind kind) noexcept;
 
 class DockHost final {
@@ -35,7 +35,7 @@ public:
     void SetChangedCallback(
         DockHostChangedCallback callback, void* context) noexcept;
     [[nodiscard]] bool AttachPane(DockPaneType type, HWND content) noexcept;
-    void ApplyLayout(
+    [[nodiscard]] bool ApplyLayout(
         const DockLayoutGeometry& geometry,
         UINT dpi,
         DockHostChangeKind kind = DockHostChangeKind::Structure) noexcept;
@@ -68,6 +68,8 @@ public:
     void HideAutoHiddenPane(DockPaneType type) noexcept;
 
 private:
+    class PlacementBatch;
+
     struct PaneHostState {
         DockHost* host{};
         DockPaneType type{DockPaneType::Count};
@@ -163,12 +165,17 @@ private:
     void RemovePaneFromToolTabs(DockPaneType type) noexcept;
     void FocusPane(DockPaneType type) noexcept;
     [[nodiscard]] bool UpdateTabFont(UINT dpi) noexcept;
-    void ApplyPaneLayout(PaneHostState& pane) noexcept;
-    void ApplyTabLayout(TabHostState& tabs, bool synchronize_items) noexcept;
+    void ApplyPaneLayout(
+        PaneHostState& pane, PlacementBatch* placements = nullptr) noexcept;
+    void ApplyTabLayout(
+        TabHostState& tabs,
+        bool synchronize_items,
+        PlacementBatch& placements) noexcept;
     void LayoutPaneTabCloseButtons(TabHostState& tabs) noexcept;
     [[nodiscard]] bool DrawPaneTabCloseButton(
         const DRAWITEMSTRUCT& draw) noexcept;
-    void ApplyToolTabLayout(bool synchronize_items) noexcept;
+    void ApplyToolTabLayout(
+        bool synchronize_items, PlacementBatch& placements) noexcept;
     [[nodiscard]] ToolTabCloseButtonSlot* FindToolTabCloseButton(
         ToolTabId tab) noexcept;
     [[nodiscard]] ToolTabCloseButtonSlot* FindToolTabCloseButton(
@@ -180,9 +187,11 @@ private:
     void LayoutToolTabCloseButtons() noexcept;
     [[nodiscard]] bool DrawToolTabCloseButton(
         const DRAWITEMSTRUCT& draw) noexcept;
-    void RepaintChangedStackBoundaries(
-        const DockLayoutGeometry& previous) noexcept;
-    void NotifyChanged(
+    [[nodiscard]] bool BeginLayoutMutation() noexcept;
+    void CancelLayoutMutation() noexcept;
+    void RestoreLayoutMutation() noexcept;
+    void CommitLayoutState() noexcept;
+    [[nodiscard]] bool NotifyChanged(
         DockHostChangeKind kind = DockHostChangeKind::Structure) noexcept;
     void ShowContextMenu(DockPaneType type, POINT screen) noexcept;
     [[nodiscard]] DockZone PreviewZoneAt(
@@ -213,6 +222,10 @@ private:
     HINSTANCE instance_{};
     DockLayoutModel* model_{};
     RightToolTabsModel* right_tool_tabs_{};
+    DockLayoutModel committed_model_{};
+    RightToolTabsModel committed_right_tool_tabs_{};
+    std::array<bool, kDockPaneCount> committed_auto_hide_expanded_{};
+    std::array<DockZone, kDockPaneCount> committed_auto_hide_edges_{};
     DockHostChangedCallback changed_{};
     void* changed_context_{};
     UINT dpi_{96U};
@@ -233,6 +246,9 @@ private:
     DockZone preview_zone_{DockZone::Count};
     bool initialized_{};
     bool applying_{};
+    bool rolling_back_layout_{};
+    bool committed_layout_state_valid_{};
+    bool layout_mutation_pending_{};
 };
 
 }  // namespace inkpod::windows::ui

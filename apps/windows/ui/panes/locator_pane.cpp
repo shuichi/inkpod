@@ -59,7 +59,7 @@ void SetControlTextIfChanged(
     }
 }
 
-void LayoutLocatorPane(HWND dialog, bool redraw = true) noexcept {
+void LayoutLocatorPane(HWND dialog) noexcept {
     RECT client{};
     if (GetClientRect(dialog, &client) == FALSE) {
         return;
@@ -73,19 +73,23 @@ void LayoutLocatorPane(HWND dialog, bool redraw = true) noexcept {
         0, static_cast<int>(client.right - client.left));
     const int height = std::max(
         0, static_cast<int>(client.bottom - client.top));
+    PaneDialogLayoutPlan plan(dialog);
 
-    PlacePaneTargetRow(
-        dialog,
-        IDC_LOCATOR_TARGET,
+    const int target_row_width = std::max(0, width - margin * 2);
+    const int pin_width = std::min(
+        target_row_width, PaneButtonIdealWidth(dialog, IDC_LOCATOR_PIN));
+    static_cast<void>(plan.PlaceControl(
         IDC_LOCATOR_PIN,
+        margin + std::max(0, target_row_width - pin_width),
         margin,
+        pin_width,
+        header_height));
+    static_cast<void>(plan.PlaceControl(
+        IDC_LOCATOR_TARGET,
         margin,
-        std::max(0, width - margin * 2),
-        ScalePaneDip(dialog, 4),
-        line_height,
-        header_height,
-        gap,
-        redraw);
+        margin + ScalePaneDip(dialog, 4),
+        std::max(0, target_row_width - pin_width - gap),
+        line_height));
 
     const int options_top = std::max(
         margin + header_height + gap,
@@ -100,55 +104,44 @@ void LayoutLocatorPane(HWND dialog, bool redraw = true) noexcept {
         margin + header_height + gap,
         selection_top - line_height);
     const int neighborhood_top = margin + header_height + gap;
-    PlacePaneDialogControl(
-        dialog,
+    static_cast<void>(plan.PlaceControl(
         IDC_LOCATOR_NEIGHBORHOOD,
         margin,
         neighborhood_top,
         std::max(0, width - margin * 2),
-        std::max(0, coordinate_top - gap - neighborhood_top),
-        redraw);
-    PlacePaneDialogControl(
-        dialog,
+        std::max(0, coordinate_top - gap - neighborhood_top)));
+    static_cast<void>(plan.PlaceControl(
         IDC_LOCATOR_COORDINATE,
         margin,
         coordinate_top,
         std::max(0, width - margin * 2),
-        line_height,
-        redraw);
-    PlacePaneDialogControl(
-        dialog,
+        line_height));
+    static_cast<void>(plan.PlaceControl(
         IDC_LOCATOR_SELECTION,
         margin,
         selection_top,
         std::max(0, width - margin * 2),
-        line_height,
-        redraw);
-    PlacePaneDialogControl(
-        dialog,
+        line_height));
+    static_cast<void>(plan.PlaceControl(
         IDC_LOCATOR_COLOR,
         margin,
         color_top,
         std::max(0, width - margin * 2),
-        line_height,
-        redraw);
+        line_height));
     const int option_width = std::max(0, (width - margin * 2 - gap) / 2);
-    PlacePaneDialogControl(
-        dialog,
+    static_cast<void>(plan.PlaceControl(
         IDC_LOCATOR_FIXED,
         margin,
         options_top,
         option_width,
-        option_height,
-        redraw);
-    PlacePaneDialogControl(
-        dialog,
+        option_height));
+    static_cast<void>(plan.PlaceControl(
         IDC_LOCATOR_AUTOSCROLL,
         margin + option_width + gap,
         options_top,
         std::max(0, width - margin * 2 - gap - option_width),
-        option_height,
-        redraw);
+        option_height));
+    static_cast<void>(plan.Commit(PaneDialogRepaint::Complete));
 }
 
 void DrawNeighborhood(
@@ -267,8 +260,7 @@ INT_PTR CALLBACK LocatorPaneProcedure(
         case WM_INITDIALOG:
             return TRUE;
         case WM_SIZE:
-            LayoutLocatorPane(dialog, false);
-            CompletePaneDialogResize(dialog);
+            LayoutLocatorPane(dialog);
             return TRUE;
         case WM_DRAWITEM:
             if (state != nullptr

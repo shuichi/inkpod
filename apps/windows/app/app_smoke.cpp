@@ -4190,14 +4190,45 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     if (!capture_loss_committed) {
         return 1006;
     }
-    SetWindowPos(
-        state.Workspace().windows.window,
-        nullptr,
-        0,
-        0,
-        1'800,
-        1'000,
-        SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER | SWP_SHOWWINDOW);
+    // This part of the smoke test observes real WM_PAINT delivery. Keep the
+    // complete workspace inside the nearest monitor's work area: Windows may
+    // validate an invalidated child without sending WM_PAINT when its visible
+    // region is fully clipped by the screen edge or another top-level window.
+    // That would test desktop placement rather than the pane resize contract.
+    constexpr int kSmokeWorkspaceWidth = 1'800;
+    constexpr int kSmokeWorkspaceHeight = 1'000;
+    MONITORINFO monitor_info{sizeof(monitor_info)};
+    const HMONITOR monitor = MonitorFromWindow(
+        state.Workspace().windows.window, MONITOR_DEFAULTTONEAREST);
+    const bool have_work_area = monitor != nullptr
+        && GetMonitorInfoW(monitor, &monitor_info) != FALSE;
+    const int work_width = have_work_area
+        ? monitor_info.rcWork.right - monitor_info.rcWork.left
+        : kSmokeWorkspaceWidth;
+    const int work_height = have_work_area
+        ? monitor_info.rcWork.bottom - monitor_info.rcWork.top
+        : kSmokeWorkspaceHeight;
+    const int smoke_width = std::max(
+        1, std::min(kSmokeWorkspaceWidth, work_width));
+    const int smoke_height = std::max(
+        1, std::min(kSmokeWorkspaceHeight, work_height));
+    const int smoke_x = have_work_area
+        ? monitor_info.rcWork.left + std::max(0, (work_width - smoke_width) / 2)
+        : 0;
+    const int smoke_y = have_work_area
+        ? monitor_info.rcWork.top + std::max(0, (work_height - smoke_height) / 2)
+        : 0;
+    if (SetWindowPos(
+            state.Workspace().windows.window,
+            HWND_TOP,
+            smoke_x,
+            smoke_y,
+            smoke_width,
+            smoke_height,
+            SWP_NOACTIVATE | SWP_SHOWWINDOW)
+        == FALSE) {
+        return 11018;
+    }
     RECT client{};
     if (GetClientRect(state.Workspace().windows.window, &client) == FALSE) {
         return 730;
@@ -4265,12 +4296,20 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         }
         return 11017;
     }
+    // The pane is docked: its width belongs to DockHost. This local probe uses
+    // a small, contained shrink (never an expansion past the host) so it
+    // reliably produces WM_SIZE without turning the real-paint assertion into
+    // an empty-visible-region assertion.
     const int color_resize_width = std::max(
-        color_pane_width,
-        MulDiv(
-            420,
-            static_cast<int>(color_resize_dpi == 0U ? 96U : color_resize_dpi),
-            96));
+        1,
+        color_pane_width
+            - std::max(
+                  1,
+                  MulDiv(
+                      8,
+                      static_cast<int>(
+                          color_resize_dpi == 0U ? 96U : color_resize_dpi),
+                      96)));
     if (SetWindowPos(
             state.Workspace().windows.color_pane,
             nullptr,
@@ -4299,7 +4338,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
                 || IsRectEmpty(&control_client) != FALSE)) {
             color_resize_failure = 11130 + static_cast<int>(index);
         } else if (color_resize_failure == 0
-            && color_resize_paints[index].count == 0U) {
+                   && color_resize_paints[index].count == 0U) {
             color_resize_failure = 11110 + static_cast<int>(index);
         } else if (color_resize_failure == 0
                    && GetUpdateRect(
@@ -4406,9 +4445,11 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     WindowMessageCounter tool_tab_rebuilds{TCM_DELETEALLITEMS};
     WindowMessageCounter color_list_rebuilds{LB_RESETCONTENT};
     WindowMessageCounter layer_list_rebuilds{LB_RESETCONTENT};
+    WindowMessageCounter layer_list_resize_paints{WM_PAINT};
     constexpr UINT_PTR kToolTabRebuildCounterSubclass = 21U;
     constexpr UINT_PTR kColorListRebuildCounterSubclass = 22U;
     constexpr UINT_PTR kLayerListRebuildCounterSubclass = 23U;
+    constexpr UINT_PTR kLayerListPaintCounterSubclass = 25U;
     const bool tool_counter_attached = resize_right_tool_tabs != nullptr
         && SetWindowSubclass(
                resize_right_tool_tabs,
@@ -4427,6 +4468,12 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
                WindowMessageCounterProcedure,
                kLayerListRebuildCounterSubclass,
                reinterpret_cast<DWORD_PTR>(&layer_list_rebuilds)) != FALSE;
+    const bool layer_paint_counter_attached = resize_layer_list != nullptr
+        && SetWindowSubclass(
+               resize_layer_list,
+               WindowMessageCounterProcedure,
+               kLayerListPaintCounterSubclass,
+               reinterpret_cast<DWORD_PTR>(&layer_list_resize_paints)) != FALSE;
     const DockZoneState* right_zone =
         state.Workspace().windows.workspace.dock.Zone(DockZone::Right);
     const int right_extent_before =
@@ -4470,15 +4517,19 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     bool layer_list_shrink_painted{};
     bool layer_list_grow_painted{};
     if (tool_counter_attached && color_counter_attached
-        && layer_counter_attached && right_zone != nullptr) {
+        && layer_counter_attached && layer_paint_counter_attached
+        && right_zone != nullptr) {
         SetFocus(right_zone_splitter);
+        layer_list_resize_paints.count = 0U;
         ValidateRect(resize_layer_list, nullptr);
         SendMessageW(right_zone_splitter, WM_KEYDOWN, VK_LEFT, 0);
-        layer_list_shrink_painted =
-            has_no_pending_update(resize_layer_list);
+        layer_list_shrink_painted = layer_list_resize_paints.count != 0U
+            && has_no_pending_update(resize_layer_list);
+        layer_list_resize_paints.count = 0U;
         ValidateRect(resize_layer_list, nullptr);
         SendMessageW(right_zone_splitter, WM_KEYDOWN, VK_RIGHT, 0);
-        layer_list_grow_painted = has_no_pending_update(resize_layer_list);
+        layer_list_grow_painted = layer_list_resize_paints.count != 0U
+            && has_no_pending_update(resize_layer_list);
     }
     if (tool_counter_attached) {
         RemoveWindowSubclass(
@@ -4498,9 +4549,16 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
             WindowMessageCounterProcedure,
             kLayerListRebuildCounterSubclass);
     }
+    if (layer_paint_counter_attached) {
+        RemoveWindowSubclass(
+            resize_layer_list,
+            WindowMessageCounterProcedure,
+            kLayerListPaintCounterSubclass);
+    }
     right_zone = state.Workspace().windows.workspace.dock.Zone(DockZone::Right);
     if (!tool_counter_attached || !color_counter_attached
-        || !layer_counter_attached || right_zone == nullptr) {
+        || !layer_counter_attached || !layer_paint_counter_attached
+        || right_zone == nullptr) {
         return 11006;
     }
     if (right_zone->extent_dip != right_extent_before) {
@@ -4616,6 +4674,466 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         || GetWindowRect(right_stack_splitter, &stack_bounds_after) == FALSE
         || EqualRect(&stack_bounds_before, &stack_bounds_after) == FALSE) {
         return 11016;
+    }
+
+    // Adding a pane to an already selected right-side tab is a structure
+    // resize: the surviving panes shrink together, then grow together when the
+    // pane is removed. Exercise the real command route while the workspace is
+    // visible so stale pixels and deferred paints cannot hide behind a model-
+    // only geometry check. Give the selected tab the monitor's available
+    // height first; at high DPI a 1000-pixel workspace legitimately creates a
+    // separate tab because the three panes cannot satisfy their minimums.
+    const int structure_workspace_height = have_work_area
+        ? std::max(smoke_height, work_height)
+        : smoke_height;
+    const int structure_workspace_y = have_work_area
+        ? monitor_info.rcWork.top
+        : smoke_y;
+    if (SetWindowPos(
+            state.Workspace().windows.window,
+            HWND_TOP,
+            smoke_x,
+            structure_workspace_y,
+            smoke_width,
+            structure_workspace_height,
+            SWP_NOACTIVATE | SWP_SHOWWINDOW)
+        == FALSE
+        || GetClientRect(state.Workspace().windows.window, &client) == FALSE) {
+        return 11204;
+    }
+    LayoutMainChrome(
+        state.Workspace().windows,
+        state.lifetime.smoke_test,
+        client.right - client.left,
+        client.bottom - client.top);
+    // Updating localized menu labels can change the wrapped menu-bar height
+    // at this DPI and width. Settle that non-client geometry before capturing
+    // the add/remove baseline so the test compares only the pane transaction.
+    UpdateMenuState(state, false);
+    if (GetClientRect(state.Workspace().windows.window, &client) == FALSE) {
+        return 11204;
+    }
+    LayoutMainChrome(
+        state.Workspace().windows,
+        state.lifetime.smoke_test,
+        client.right - client.left,
+        client.bottom - client.top);
+    auto& structure_tabs =
+        state.Workspace().windows.workspace.right_tool_tabs;
+    const ToolTabId structure_tab_id = structure_tabs.Selected();
+    const ToolTab* structure_tab_before = structure_tabs.SelectedTab();
+    const HWND structure_color = state.Workspace().windows.color_pane;
+    const HWND structure_layer = state.Workspace().panes.layer_palette;
+    const HWND structure_reference = state.Workspace().subpalette_palette;
+    const HWND structure_color_list = GetDlgItem(
+        structure_color, IDC_PALETTE_LIST);
+    const HWND structure_layer_list = GetDlgItem(
+        structure_layer, IDC_LAYER_LIST);
+    const HWND structure_color_resize_control = GetDlgItem(
+        structure_color, IDC_COLOR_APPLY);
+    RECT structure_color_before{};
+    RECT structure_layer_before{};
+    const int color_selection_before = static_cast<int>(SendMessageW(
+        structure_color_list, LB_GETCURSEL, 0, 0));
+    const int color_top_before = static_cast<int>(SendMessageW(
+        structure_color_list, LB_GETTOPINDEX, 0, 0));
+    const int color_count_before = static_cast<int>(SendMessageW(
+        structure_color_list, LB_GETCOUNT, 0, 0));
+    const int layer_selection_before = static_cast<int>(SendMessageW(
+        structure_layer_list, LB_GETCURSEL, 0, 0));
+    const int layer_top_before = static_cast<int>(SendMessageW(
+        structure_layer_list, LB_GETTOPINDEX, 0, 0));
+    const int layer_count_before = static_cast<int>(SendMessageW(
+        structure_layer_list, LB_GETCOUNT, 0, 0));
+    const bool structure_setup = structure_tab_id && structure_tab_before != nullptr
+        && structure_tab_before->pane_count == 2U
+        && structure_color != nullptr && structure_layer != nullptr
+        && structure_reference != nullptr && structure_color_list != nullptr
+        && structure_layer_list != nullptr
+        && structure_color_resize_control != nullptr
+        && GetWindowRect(structure_color, &structure_color_before) != FALSE
+        && GetWindowRect(structure_layer, &structure_layer_before) != FALSE
+        && IsWindowVisible(structure_reference) == FALSE;
+    if (!structure_setup) {
+        return 11200;
+    }
+
+    const std::array<HWND, 3U> structure_panes{
+        structure_color, structure_layer, structure_reference};
+    std::array<WindowMessageCounter, structure_panes.size()>
+        structure_paints{};
+    std::size_t structure_paint_attached{};
+    for (; structure_paint_attached < structure_panes.size();
+         ++structure_paint_attached) {
+        structure_paints[structure_paint_attached].message = WM_PAINT;
+        if (SetWindowSubclass(
+                structure_panes[structure_paint_attached],
+                WindowMessageCounterProcedure,
+                100U + structure_paint_attached,
+                reinterpret_cast<DWORD_PTR>(
+                    &structure_paints[structure_paint_attached])) == FALSE) {
+            break;
+        }
+    }
+    WindowMessageCounter structure_color_resets{LB_RESETCONTENT};
+    WindowMessageCounter structure_layer_resets{LB_RESETCONTENT};
+    WindowMessageCounter structure_color_child_paints{WM_PAINT};
+    WindowMessageCounter structure_layer_list_paints{WM_PAINT};
+    const bool structure_color_reset_attached = SetWindowSubclass(
+        structure_color_list,
+        WindowMessageCounterProcedure,
+        103U,
+        reinterpret_cast<DWORD_PTR>(&structure_color_resets)) != FALSE;
+    const bool structure_layer_reset_attached = SetWindowSubclass(
+        structure_layer_list,
+        WindowMessageCounterProcedure,
+        104U,
+        reinterpret_cast<DWORD_PTR>(&structure_layer_resets)) != FALSE;
+    const bool structure_color_child_paint_attached = SetWindowSubclass(
+        structure_color_resize_control,
+        WindowMessageCounterProcedure,
+        105U,
+        reinterpret_cast<DWORD_PTR>(&structure_color_child_paints)) != FALSE;
+    const bool structure_layer_list_paint_attached = SetWindowSubclass(
+        structure_layer_list,
+        WindowMessageCounterProcedure,
+        106U,
+        reinterpret_cast<DWORD_PTR>(&structure_layer_list_paints)) != FALSE;
+    const auto detach_structure_probes = [&]() noexcept {
+        for (std::size_t index = 0U; index < structure_paint_attached; ++index) {
+            RemoveWindowSubclass(
+                structure_panes[index], WindowMessageCounterProcedure, 100U + index);
+        }
+        if (structure_color_reset_attached) {
+            RemoveWindowSubclass(
+                structure_color_list, WindowMessageCounterProcedure, 103U);
+        }
+        if (structure_layer_reset_attached) {
+            RemoveWindowSubclass(
+                structure_layer_list, WindowMessageCounterProcedure, 104U);
+        }
+        if (structure_color_child_paint_attached) {
+            RemoveWindowSubclass(
+                structure_color_resize_control,
+                WindowMessageCounterProcedure,
+                105U);
+        }
+        if (structure_layer_list_paint_attached) {
+            RemoveWindowSubclass(
+                structure_layer_list, WindowMessageCounterProcedure, 106U);
+        }
+    };
+    if (structure_paint_attached != structure_panes.size()
+        || !structure_color_reset_attached || !structure_layer_reset_attached
+        || !structure_color_child_paint_attached
+        || !structure_layer_list_paint_attached) {
+        detach_structure_probes();
+        return 11201;
+    }
+
+    constexpr COLORREF kResizeSentinel = RGB(255, 0, 255);
+    const auto place_resize_sentinel = [&](HWND window, POINT& screen) noexcept {
+        RECT client{};
+        if (window == nullptr || GetClientRect(window, &client) == FALSE
+            || client.right - client.left < 4 || client.bottom - client.top < 4) {
+            return false;
+        }
+        POINT point{
+            client.left + (client.right - client.left) / 2,
+            client.bottom - 2};
+        HDC target = GetDC(window);
+        const bool written = target != nullptr
+            && SetPixel(target, point.x, point.y, kResizeSentinel) != CLR_INVALID;
+        if (target != nullptr) {
+            ReleaseDC(window, target);
+        }
+        screen = point;
+        return written && ClientToScreen(window, &screen) != FALSE;
+    };
+    const auto resize_sentinel_cleared = [&](POINT screen) noexcept {
+        // Resolve ownership strictly inside this workspace. WindowFromPoint
+        // would make the result depend on an unrelated window overlapping the
+        // smoke-test window.
+        HWND owner = state.Workspace().windows.window;
+        for (std::size_t depth = 0U; depth < 32U; ++depth) {
+            POINT owner_point = screen;
+            RECT owner_client{};
+            if (ScreenToClient(owner, &owner_point) == FALSE
+                || GetClientRect(owner, &owner_client) == FALSE
+                || owner_point.x < owner_client.left
+                || owner_point.x >= owner_client.right
+                || owner_point.y < owner_client.top
+                || owner_point.y >= owner_client.bottom) {
+                return false;
+            }
+            const HWND child = ChildWindowFromPointEx(
+                owner,
+                owner_point,
+                CWP_SKIPDISABLED | CWP_SKIPINVISIBLE | CWP_SKIPTRANSPARENT);
+            if (child == nullptr || child == owner) {
+                break;
+            }
+            owner = child;
+        }
+        POINT client_point = screen;
+        if (ScreenToClient(owner, &client_point) == FALSE) {
+            return false;
+        }
+        HDC target = GetDC(owner);
+        const COLORREF pixel = target == nullptr
+            ? CLR_INVALID
+            : GetPixel(target, client_point.x, client_point.y);
+        if (target != nullptr) {
+            ReleaseDC(owner, target);
+        }
+        return pixel != CLR_INVALID && pixel != kResizeSentinel;
+    };
+
+    POINT add_sentinel{};
+    const bool add_sentinel_written = place_resize_sentinel(
+        structure_layer, add_sentinel);
+    const LRESULT reference_show_result = SendMessageW(
+        state.Workspace().windows.window,
+        WM_COMMAND,
+        IDM_WINDOW_SUBPALETTE,
+        0);
+    const HWND structure_reference_natural_focus = GetNextDlgTabItem(
+        structure_reference, nullptr, FALSE);
+    const HWND structure_focus_after_add = GetFocus();
+    // DockHost structure commits and their final repaint are synchronous.
+    // Do not mix older queued Core notifications into the no-data-rebuild
+    // assertion for this geometry-only command.
+    const ToolTab* structure_tab_after_add = structure_tabs.Find(structure_tab_id);
+    RECT structure_color_after_add{};
+    RECT structure_layer_after_add{};
+    RECT structure_reference_after_add{};
+    const auto structure_contains = [](const ToolTab& tab, DockPaneType type) noexcept {
+        return std::find(
+                   tab.panes.begin(),
+                   tab.panes.begin()
+                       + static_cast<std::ptrdiff_t>(tab.pane_count),
+                   type)
+            != tab.panes.begin()
+                + static_cast<std::ptrdiff_t>(tab.pane_count);
+    };
+    bool structure_add_ok = reference_show_result == 1
+        && structure_tab_after_add != nullptr
+        && structure_tab_after_add->pane_count == 3U
+        && structure_contains(*structure_tab_after_add, DockPaneType::Reference)
+        && structure_tabs.Selected() == structure_tab_id
+        && state.Workspace().windows.dock_host.ContentWindow(
+               DockPaneType::Color) == structure_color
+        && state.Workspace().windows.dock_host.ContentWindow(
+               DockPaneType::Layer) == structure_layer
+        && state.Workspace().windows.dock_host.ContentWindow(
+               DockPaneType::Reference) == structure_reference
+        && IsWindowVisible(structure_reference) != FALSE
+        && GetWindowRect(structure_color, &structure_color_after_add) != FALSE
+        && GetWindowRect(structure_layer, &structure_layer_after_add) != FALSE
+        && GetWindowRect(structure_reference, &structure_reference_after_add) != FALSE
+        && structure_color_after_add.bottom - structure_color_after_add.top
+            < structure_color_before.bottom - structure_color_before.top
+        && structure_layer_after_add.bottom - structure_layer_after_add.top
+            < structure_layer_before.bottom - structure_layer_before.top
+        && structure_color_after_add.left == structure_layer_after_add.left
+        && structure_color_after_add.right == structure_layer_after_add.right
+        && structure_layer_after_add.left == structure_reference_after_add.left
+        && structure_layer_after_add.right == structure_reference_after_add.right
+        && structure_color_after_add.bottom <= structure_layer_after_add.top
+        && structure_layer_after_add.bottom <= structure_reference_after_add.top
+        && structure_reference_after_add.bottom > structure_reference_after_add.top
+        && structure_focus_after_add
+            == (structure_reference_natural_focus == nullptr
+                    ? structure_reference
+                    : structure_reference_natural_focus)
+        && structure_paints[0].count != 0U
+        && structure_paints[1].count != 0U
+        && structure_paints[2].count != 0U
+        && structure_color_child_paints.count != 0U
+        && structure_layer_list_paints.count != 0U
+        && structure_color_resets.count == 0U
+        && structure_layer_resets.count == 0U
+        && static_cast<int>(SendMessageW(
+               structure_color_list, LB_GETCOUNT, 0, 0)) == color_count_before
+        && static_cast<int>(SendMessageW(
+               structure_color_list, LB_GETCURSEL, 0, 0)) == color_selection_before
+        && static_cast<int>(SendMessageW(
+               structure_color_list, LB_GETTOPINDEX, 0, 0)) == color_top_before
+        && static_cast<int>(SendMessageW(
+               structure_layer_list, LB_GETCOUNT, 0, 0)) == layer_count_before
+        && static_cast<int>(SendMessageW(
+               structure_layer_list, LB_GETCURSEL, 0, 0)) == layer_selection_before
+        && static_cast<int>(SendMessageW(
+               structure_layer_list, LB_GETTOPINDEX, 0, 0)) == layer_top_before
+        && has_no_pending_update(structure_color)
+        && has_no_pending_update(structure_layer)
+        && has_no_pending_update(structure_reference)
+        && has_no_pending_update(structure_color_list)
+        && has_no_pending_update(structure_layer_list)
+        && has_no_pending_update(structure_color_resize_control)
+        && has_no_pending_update(resize_right_tool_tabs)
+        && has_no_pending_update(state.Workspace().windows.window)
+        && add_sentinel_written && resize_sentinel_cleared(add_sentinel);
+    POINT remove_sentinel{};
+    const bool remove_sentinel_written = structure_add_ok
+        && place_resize_sentinel(structure_reference, remove_sentinel);
+    for (auto& counter : structure_paints) {
+        counter.count = 0U;
+    }
+    structure_color_child_paints.count = 0U;
+    structure_layer_list_paints.count = 0U;
+    if (structure_add_ok && splitter_focus_target != nullptr) {
+        SetFocus(splitter_focus_target);
+    }
+    const HWND focus_before_remove = GetFocus();
+    const LRESULT reference_hide_result = SendMessageW(
+        state.Workspace().windows.window,
+        WM_COMMAND,
+        IDM_WINDOW_SUBPALETTE,
+        0);
+    const ToolTab* structure_tab_after_remove = structure_tabs.Find(structure_tab_id);
+    RECT structure_color_after_remove{};
+    RECT structure_layer_after_remove{};
+    const bool structure_remove_ok = reference_hide_result == 1
+        && structure_tab_after_remove != nullptr
+        && structure_tab_after_remove->pane_count == 2U
+        && !structure_contains(*structure_tab_after_remove, DockPaneType::Reference)
+        && state.Workspace().windows.dock_host.ContentWindow(
+               DockPaneType::Color) == structure_color
+        && state.Workspace().windows.dock_host.ContentWindow(
+               DockPaneType::Layer) == structure_layer
+        && state.Workspace().windows.dock_host.ContentWindow(
+               DockPaneType::Reference) == structure_reference
+        && IsWindowVisible(structure_reference) == FALSE
+        && GetFocus() == focus_before_remove
+        && GetWindowRect(structure_color, &structure_color_after_remove) != FALSE
+        && GetWindowRect(structure_layer, &structure_layer_after_remove) != FALSE
+        && EqualRect(&structure_color_after_remove, &structure_color_before) != FALSE
+        && EqualRect(&structure_layer_after_remove, &structure_layer_before) != FALSE
+        && structure_paints[0].count != 0U
+        && structure_paints[1].count != 0U
+        && structure_color_child_paints.count != 0U
+        && structure_layer_list_paints.count != 0U
+        && structure_color_resets.count == 0U
+        && structure_layer_resets.count == 0U
+        && static_cast<int>(SendMessageW(
+               structure_color_list, LB_GETCOUNT, 0, 0)) == color_count_before
+        && static_cast<int>(SendMessageW(
+               structure_color_list, LB_GETCURSEL, 0, 0)) == color_selection_before
+        && static_cast<int>(SendMessageW(
+               structure_color_list, LB_GETTOPINDEX, 0, 0)) == color_top_before
+        && static_cast<int>(SendMessageW(
+               structure_layer_list, LB_GETCOUNT, 0, 0)) == layer_count_before
+        && static_cast<int>(SendMessageW(
+               structure_layer_list, LB_GETCURSEL, 0, 0)) == layer_selection_before
+        && static_cast<int>(SendMessageW(
+               structure_layer_list, LB_GETTOPINDEX, 0, 0)) == layer_top_before
+        && has_no_pending_update(structure_color)
+        && has_no_pending_update(structure_layer)
+        && has_no_pending_update(structure_color_list)
+        && has_no_pending_update(structure_layer_list)
+        && has_no_pending_update(structure_color_resize_control)
+        && has_no_pending_update(structure_reference)
+        && has_no_pending_update(resize_right_tool_tabs)
+        && has_no_pending_update(state.Workspace().windows.window)
+        && remove_sentinel_written && resize_sentinel_cleared(remove_sentinel);
+    const auto same_pane_placement = [](
+                                         const DockPanePlacement& left,
+                                         const DockPanePlacement& right) noexcept {
+        return left.type == right.type && left.zone == right.zone
+            && left.restore_zone == right.restore_zone && left.order == right.order
+            && left.stack == right.stack && left.tab_order == right.tab_order
+            && left.split_weight == right.split_weight
+            && left.floating.x_dip == right.floating.x_dip
+            && left.floating.y_dip == right.floating.y_dip
+            && left.floating.width_dip == right.floating.width_dip
+            && left.floating.height_dip == right.floating.height_dip
+            && left.present == right.present
+            && left.active_tab == right.active_tab;
+    };
+    const auto same_tool_tabs = [](const RightToolTabsModel& left,
+                                    const RightToolTabsModel& right) noexcept {
+        const auto left_tabs = left.Tabs();
+        const auto right_tabs = right.Tabs();
+        if (left.Selected() != right.Selected()
+            || left.NextStableId() != right.NextStableId()
+            || left_tabs.size() != right_tabs.size()) {
+            return false;
+        }
+        for (std::size_t index = 0U; index < left_tabs.size(); ++index) {
+            if (left_tabs[index].id != right_tabs[index].id
+                || left_tabs[index].pane_count != right_tabs[index].pane_count) {
+                return false;
+            }
+            for (std::size_t pane_index = 0U;
+                 pane_index < left_tabs[index].pane_count;
+                 ++pane_index) {
+                if (left_tabs[index].panes[pane_index]
+                    != right_tabs[index].panes[pane_index]) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    };
+    bool structure_rejection_rollback_ok{};
+    if (structure_remove_ok) {
+        const DockPanePlacement* reference_before_rejection =
+            state.Workspace().windows.workspace.dock.Pane(DockPaneType::Reference);
+        const DockPanePlacement reference_snapshot = reference_before_rejection == nullptr
+            ? DockPanePlacement{}
+            : *reference_before_rejection;
+        const RightToolTabsModel tool_tabs_snapshot = structure_tabs;
+        const HWND focus_before_rejection = GetFocus();
+        state.Workspace().windows.dock_host.SetChangedCallback(
+            [](void*, DockHostChangeKind) noexcept { return false; }, nullptr);
+        const LRESULT rejected_command = SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            MAKEWPARAM(IDM_WINDOW_SUBPALETTE, 0),
+            0);
+        state.Workspace().windows.dock_host.SetChangedCallback(
+            NotifyDockHostChanged, &state.Workspace());
+        const DockPanePlacement* reference_after_rejection =
+            state.Workspace().windows.workspace.dock.Pane(DockPaneType::Reference);
+        structure_rejection_rollback_ok =
+            reference_before_rejection != nullptr
+            && reference_after_rejection != nullptr
+            && rejected_command == 0
+            && same_pane_placement(reference_snapshot, *reference_after_rejection)
+            && same_tool_tabs(tool_tabs_snapshot, structure_tabs)
+            && GetFocus() == focus_before_rejection
+            && IsWindowVisible(structure_reference) == FALSE
+            && has_no_pending_update(structure_reference);
+    }
+    detach_structure_probes();
+    const bool structure_workspace_restored = SetWindowPos(
+            state.Workspace().windows.window,
+            HWND_TOP,
+            smoke_x,
+            smoke_y,
+            smoke_width,
+            smoke_height,
+            SWP_NOACTIVATE | SWP_SHOWWINDOW)
+            != FALSE
+        && GetClientRect(state.Workspace().windows.window, &client) != FALSE;
+    if (structure_workspace_restored) {
+        LayoutMainChrome(
+            state.Workspace().windows,
+            state.lifetime.smoke_test,
+            client.right - client.left,
+            client.bottom - client.top);
+    } else {
+        return 11204;
+    }
+    if (!structure_add_ok) {
+        return 11202;
+    }
+    if (!structure_remove_ok) {
+        return 11203;
+    }
+    if (!structure_rejection_rollback_ok) {
+        return 11205;
     }
     const HWND fill_expand = GetDlgItem(
         state.Workspace().tools.palette,

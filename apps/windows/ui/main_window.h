@@ -49,7 +49,7 @@ bool CreateEditorGroupTabs(
 
 void SyncActiveEditorHandles(app::MainWindowHandles& windows) noexcept;
 
-void LayoutMainChrome(
+bool LayoutMainChrome(
     app::MainWindowHandles& windows,
     bool smoke_test,
     int width,

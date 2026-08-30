@@ -21,9 +21,11 @@ set(SEQUENCE_SOURCE "${UI_DIR}/panes/sequence_pane.cpp")
 set(LIGHT_TABLE_SOURCE "${UI_DIR}/panes/light_table_pane.cpp")
 set(REFERENCE_SOURCE "${UI_DIR}/panes/subpalette_pane.cpp")
 set(BATCH_SOURCE "${UI_DIR}/dialogs/batch_dialog.cpp")
+set(BATCH_PARAMETER_SOURCE "${UI_DIR}/batch_parameter_editor.cpp")
 set(LAYER_PALETTE_SOURCE "${UI_DIR}/dialogs/layer_palette.cpp")
 set(COLOR_PANE_SOURCE "${UI_DIR}/panes/color_dock_pane.cpp")
 set(PANE_DIALOG_LAYOUT_HEADER "${UI_DIR}/panes/pane_dialog_layout.h")
+set(PANE_DIALOG_LAYOUT_TEST "${INKPOD_SOURCE_DIR}/tests/windows_pane_dialog_layout.cpp")
 set(TAB_SURFACE_HEADER "${UI_DIR}/tab_surface_background.h")
 set(PREFERENCES_SOURCE "${UI_DIR}/dialogs/preferences_dialog.cpp")
 set(PROGRESS_SOURCE "${UI_DIR}/job_progress.cpp")
@@ -53,9 +55,11 @@ foreach(FILE IN ITEMS
         "${LIGHT_TABLE_SOURCE}"
         "${REFERENCE_SOURCE}"
         "${BATCH_SOURCE}"
+        "${BATCH_PARAMETER_SOURCE}"
         "${LAYER_PALETTE_SOURCE}"
         "${COLOR_PANE_SOURCE}"
         "${PANE_DIALOG_LAYOUT_HEADER}"
+        "${PANE_DIALOG_LAYOUT_TEST}"
         "${TAB_SURFACE_HEADER}"
         "${PREFERENCES_SOURCE}"
         "${PROGRESS_SOURCE}"
@@ -77,7 +81,8 @@ foreach(FILE IN ITEMS
         "${SEQUENCE_SOURCE}"
         "${LIGHT_TABLE_SOURCE}"
         "${REFERENCE_SOURCE}"
-        "${BATCH_SOURCE}")
+        "${BATCH_SOURCE}"
+        "${BATCH_PARAMETER_SOURCE}")
     file(READ "${FILE}" PANE_SOURCE_TEXT)
     string(APPEND PANE_IMPLEMENTATION "${PANE_SOURCE_TEXT}")
 endforeach()
@@ -200,7 +205,8 @@ foreach(REQUIRED IN ITEMS
         "WM_MOUSEHWHEEL"
         "VK_LEFT"
         "VK_RIGHT"
-        "LayoutSequencePane(dialog, false)"
+        "PaneDialogLayoutPlan plan(dialog)"
+        "PaneDialogRepaint::None"
         "CompletePaneDialogResize(dialog)")
     string(FIND "${SEQUENCE_IMPLEMENTATION}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
@@ -210,10 +216,8 @@ endforeach()
 foreach(REQUIRED IN ITEMS
         "std::wstring_view(presented) == next"
         "replacement.size() < presented.size()"
-        "EnablePaneDialogResizePainting(dialog)"
-        "LayoutLocatorPane(dialog, false)"
-        "CompletePaneDialogResize(dialog)"
-        "RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW")
+        "PaneDialogLayoutPlan plan(dialog)"
+        "plan.Commit(PaneDialogRepaint::Complete)")
     string(FIND "${LOCATOR_IMPLEMENTATION}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
         message(FATAL_ERROR
@@ -322,9 +326,8 @@ foreach(REQUIRED IN ITEMS
 endforeach()
 
 foreach(REQUIRED IN ITEMS
-        "EnablePaneDialogResizePainting(dialog)"
-        "LayoutLightTablePane(dialog, false)"
-        "CompletePaneDialogResize(dialog)")
+        "PaneDialogLayoutPlan plan(dialog)"
+        "plan.Commit(PaneDialogRepaint::Complete)")
     string(FIND "${LIGHT_TABLE_IMPLEMENTATION}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
         message(FATAL_ERROR
@@ -351,8 +354,36 @@ foreach(REQUIRED IN ITEMS
         "ShowDockPreview"
         "PreviewZoneAt"
         "DockSplitterKind::StackBoundary"
-        "RepaintChangedStackBoundaries"
-        "RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN"
+        "class DockHost::PlacementBatch final"
+        "ScopedWindowRedrawSuspension"
+        "ScopedPaneDialogResizeDeferral"
+        "GetParent(pane.content) == owner_"
+        "placement->zone != DockZone::Floating"
+        "placement->zone == DockZone::AutoHide"
+        "pane.auto_hide_expanded"
+        "BeginPaneDialogLayoutTransaction"
+        "PaneDialogLayoutFailed"
+        "LayoutsSucceeded"
+        "const bool synchronize_tab_metrics"
+        "synchronize_items || synchronize_tab_metrics"
+        "PrepareRedrawSuspension"
+        "BeginDeferWindowPos"
+        "DeferWindowPos"
+        "EndDeferWindowPos"
+        "SWP_NOREDRAW | SWP_NOCOPYBITS"
+        "CapturePreviousState"
+        "HasFinalState"
+        "RestorePreviousState"
+        "placement.previous_show"
+        "placements.IncludeDirty(previous_geometry.right_tool_tabs)"
+        "pane_resize_deferral.Restore()"
+        "pane_resize_deferred = pane_resize_deferral.Defer(pane.content)"
+        "placements.Redraw()"
+        "overflowed_ = true"
+        "bool geometry_committed = placements.Commit()"
+        "geometry_ = previous_geometry"
+        "dpi_ = previous_dpi"
+        "RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_UPDATENOW"
         "ApplyToolTabLayout"
         "ToolTabSubclassProcedure"
         "MovePaneToToolTab"
@@ -382,6 +413,14 @@ foreach(REQUIRED IN ITEMS
         message(FATAL_ERROR "DockHost implementation is missing: ${REQUIRED}")
     endif()
 endforeach()
+string(REGEX MATCH
+    "void DockHost::CancelLayoutMutation\\(\\) noexcept \\{[^}]*RestoreLayoutMutation\\(\\);[^}]*\\}"
+    CANCEL_RESTORES_MUTATION
+    "${HOST}")
+if(CANCEL_RESTORES_MUTATION STREQUAL "")
+    message(FATAL_ERROR
+        "DockHost cancellation must restore the complete model/tab snapshot")
+endif()
 
 file(READ "${TOOL_TABS_HEADER}" TOOL_TABS_MODEL)
 file(READ "${TOOL_TABS_SOURCE}" TOOL_TABS_IMPLEMENTATION)
@@ -446,9 +485,9 @@ foreach(REQUIRED IN ITEMS
         "WM_PAINT"
         "WM_MOUSELEAVE"
         "WM_GETDLGCODE"
-        "WS_CLIPCHILDREN"
-        "layer_list_geometry_changed"
-        "RDW_UPDATENOW | RDW_NOERASE"
+        "PaneDialogLayoutPlan plan(dialog)"
+        "plan.Commit(panes::PaneDialogRepaint::None)"
+        "CompletePaneDialogResize(dialog)"
         "IDS_LAYER_PLANE_SPLITTER")
     string(FIND "${LAYER_PALETTE}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
@@ -459,53 +498,155 @@ endforeach()
 
 file(READ "${COLOR_PANE_SOURCE}" COLOR_PANE)
 file(READ "${PANE_DIALOG_LAYOUT_HEADER}" PANE_DIALOG_LAYOUT)
+file(READ "${PANE_DIALOG_LAYOUT_TEST}" PANE_DIALOG_LAYOUT_TEST_TEXT)
 file(READ "${TAB_SURFACE_HEADER}" TAB_SURFACE)
 foreach(REQUIRED IN ITEMS
         "EnablePaneDialogResizePainting"
         "WS_CLIPCHILDREN"
+        "class PaneDialogLayoutPlan final"
+        "kPaneDialogLayoutCapacity = 64U"
+        "PaneWindowHasBounds"
+        "FinalizePaneTabPageZOrder"
+        "keyboard traversal order"
+        "HWND_BOTTOM"
+        "BeginDeferWindowPos"
+        "DeferWindowPos"
+        "EndDeferWindowPos"
+        "SWP_NOREDRAW"
+        "SWP_NOCOPYBITS"
+        "SetPaneDialogResizeDeferred"
+        "IsPaneDialogResizeDeferred"
+        "overflowed_"
         "CompletePaneDialogResize"
-        "RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN")
+        "EnumChildWindows"
+        "RDW_INVALIDATE | RDW_ERASE | RDW_NOCHILDREN"
+        "RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_UPDATENOW"
+        "RDW_ALLCHILDREN"
+        "class ScopedPaneControlRedrawSuspension final"
+        "WM_SETREDRAW")
     string(FIND "${PANE_DIALOG_LAYOUT}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
         message(FATAL_ERROR
             "Pane dialog resize repaint helper is missing: ${REQUIRED}")
     endif()
 endforeach()
+foreach(REQUIRED IN ITEMS
+        "changed placement or unchanged skip"
+        "intermediate painting"
+        "single final subtree repaint"
+        "outer defer allowed an intermediate repaint"
+        "deferred final repaint left an update region"
+        "plan helper overloads"
+        "tab page final z-order"
+        "hidden-parent tab page final z-order"
+        "fixture unexpectedly clips children before layout"
+        "invalid plan published partial geometry"
+        "overflow plan published partial geometry"
+        "control metric redraw guard"
+        "system-normalized combo height")
+    string(FIND "${PANE_DIALOG_LAYOUT_TEST_TEXT}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR
+            "Real-HWND pane resize transaction evidence is missing: ${REQUIRED}")
+    endif()
+endforeach()
+foreach(FILE IN ITEMS
+        "${LOCATOR_SOURCE}"
+        "${SEQUENCE_SOURCE}"
+        "${LIGHT_TABLE_SOURCE}"
+        "${REFERENCE_SOURCE}"
+        "${BATCH_SOURCE}"
+        "${BATCH_PARAMETER_SOURCE}"
+        "${LAYER_PALETTE_SOURCE}")
+    file(READ "${FILE}" ATOMIC_PANE_IMPLEMENTATION)
+    foreach(REQUIRED IN ITEMS "PaneDialogLayoutPlan")
+        string(FIND "${ATOMIC_PANE_IMPLEMENTATION}" "${REQUIRED}" OFFSET)
+        if(OFFSET LESS 0)
+            message(FATAL_ERROR
+                "Right-pane layout is outside the shared resize transaction (${FILE}): ${REQUIRED}")
+        endif()
+    endforeach()
+    string(FIND "${ATOMIC_PANE_IMPLEMENTATION}"
+        "PaneDialogRepaint::Complete" COMPLETE_ENUM_OFFSET)
+    string(FIND "${ATOMIC_PANE_IMPLEMENTATION}"
+        "CompletePaneDialogResize" COMPLETE_HELPER_OFFSET)
+    if(COMPLETE_ENUM_OFFSET LESS 0 AND COMPLETE_HELPER_OFFSET LESS 0)
+        message(FATAL_ERROR
+            "Right-pane layout has no final repaint completion (${FILE})")
+    endif()
+endforeach()
+file(READ "${BATCH_PARAMETER_SOURCE}" BATCH_PARAMETER_IMPLEMENTATION)
+foreach(REQUIRED IN ITEMS
+        "GetWindowLongPtrW(control, GWL_STYLE) & WS_VISIBLE"
+        "const int maximum_scroll = std::max(0, content - viewport)"
+        "std::clamp(state.scroll_y, 0, maximum_scroll)"
+        "SetScrollInfo(window, SB_VERT, &scroll, FALSE)"
+        "const std::array<HWND, 27U> controls"
+        "return -1;")
+    string(FIND "${BATCH_PARAMETER_IMPLEMENTATION}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR
+            "Batch parameter resize/create contract is missing: ${REQUIRED}")
+    endif()
+endforeach()
+file(READ "${BATCH_SOURCE}" BATCH_IMPLEMENTATION)
+foreach(REQUIRED IN ITEMS
+        "state->parameter_host == nullptr"
+        "IsWindow(dialog) == FALSE"
+        "SetWindowSubclass(")
+    string(FIND "${BATCH_IMPLEMENTATION}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR
+            "Batch pane creation failure contract is missing: ${REQUIRED}")
+    endif()
+endforeach()
 file(READ "${PREFERENCES_SOURCE}" PREFERENCES)
-if(COLOR_PANE MATCHES "RDW_ALLCHILDREN")
-    message(FATAL_ERROR
-        "Color pane resize still forces an erase/redraw of every child")
-endif()
 foreach(REQUIRED IN ITEMS
         "InvalidateRect(picker, nullptr, FALSE)"
-        "PlacePaneDialogControl"
-        "CapturePaneTargetRowBounds"
-        "RepaintMovedPaneTargetRow"
-        "UnionRect"
-        "DCX_CLIPCHILDREN"
+        "PaneDialogLayoutPlan plan(pane)"
+        "PlacePaneTargetRow"
+        "PlacePaneButtonRows"
+        "plan.Commit(PaneDialogRepaint::None)"
+        "FinalizePaneTabPageZOrder"
+        "CompletePaneDialogResize(pane)"
         "WM_ERASEBKGND"
-        "RepaintVisibleTabControls"
         "PaintTabSurfaceBackground"
         "CaptureColorTabSurfacePixels"
         "state.swatch_paint_buffer"
         "state.picker_paint_buffer"
         "ColorDockTabId"
+        "palette_redraw_suspended"
+        "chart_redraw_suspended"
         "TCIF_TEXT | TCIF_PARAM"
         "ColorTabSubclassProcedure"
         "ReorderColorTab"
         "GetSystemMetrics(SM_CXDRAG)"
-        "GetSystemMetrics(SM_CYDRAG)"
-        "HWND_BOTTOM"
-        "HWND_TOP"
-        "UpdateWindow(child)")
+        "GetSystemMetrics(SM_CYDRAG)")
     string(FIND "${COLOR_PANE}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
         message(FATAL_ERROR "Color pane bounded resize repaint is missing: ${REQUIRED}")
     endif()
 endforeach()
-if(NOT PANE_DIALOG_LAYOUT MATCHES "SWP_NOREDRAW")
+foreach(FORBIDDEN IN ITEMS
+        "CapturePaneTargetRowBounds"
+        "RepaintMovedPaneTargetRow"
+        "RepaintVisibleTabControls"
+        "UpdateWindow(child)")
+    string(FIND "${COLOR_PANE}" "${FORBIDDEN}" OFFSET)
+    if(NOT OFFSET LESS 0)
+        message(FATAL_ERROR
+            "Color pane retains an ad-hoc resize repaint path: ${FORBIDDEN}")
+    endif()
+endforeach()
+string(REGEX REPLACE "[ \t\r\n]+" " " HOST_COMPACT "${HOST}")
+string(FIND "${HOST_COMPACT}"
+    "tab_redraw_suspension.Restore();" TAB_RESTORE_OFFSET)
+string(FIND "${HOST_COMPACT}"
+    "bool geometry_committed = placements.Commit();" PLACEMENT_COMMIT_OFFSET)
+if(TAB_RESTORE_OFFSET LESS 0 OR PLACEMENT_COMMIT_OFFSET LESS 0
+        OR NOT TAB_RESTORE_OFFSET LESS PLACEMENT_COMMIT_OFFSET)
     message(FATAL_ERROR
-        "Color pane layout cannot defer child redraw until placement completes")
+        "DockHost must restore WM_SETREDRAW before final show/hide placement")
 endif()
 foreach(REQUIRED IN ITEMS
         "PaintTabSurfaceBackground"
@@ -574,6 +715,23 @@ foreach(REQUIRED IN ITEMS
         message(FATAL_ERROR "Primary pane DockHost integration is missing: ${REQUIRED}")
     endif()
 endforeach()
+string(FIND "${RUNTIME}" "bool NotifyDockHostChanged(" DOCK_NOTIFY_BEGIN)
+string(FIND "${RUNTIME}" "bool InitializeMainChrome(" DOCK_NOTIFY_END)
+if(DOCK_NOTIFY_BEGIN LESS 0 OR DOCK_NOTIFY_END LESS_EQUAL DOCK_NOTIFY_BEGIN)
+    message(FATAL_ERROR "DockHost notification boundary is missing")
+endif()
+math(EXPR DOCK_NOTIFY_LENGTH "${DOCK_NOTIFY_END} - ${DOCK_NOTIFY_BEGIN}")
+string(SUBSTRING "${RUNTIME}" ${DOCK_NOTIFY_BEGIN} ${DOCK_NOTIFY_LENGTH} DOCK_NOTIFY)
+foreach(FORBIDDEN IN ITEMS
+        "RefreshColorPanes"
+        "RefreshDockPaneViews"
+        "RefreshTreePane")
+    string(FIND "${DOCK_NOTIFY}" "${FORBIDDEN}" OFFSET)
+    if(NOT OFFSET LESS 0)
+        message(FATAL_ERROR
+            "Geometry/structure notification must not rebuild surviving pane contents: ${FORBIDDEN}")
+    endif()
+endforeach()
 
 string(REGEX REPLACE "[ \t\r\n]+" " " RUNTIME_COMPACT "${RUNTIME}")
 foreach(REQUIRED IN ITEMS
@@ -626,6 +784,7 @@ foreach(REQUIRED IN ITEMS
         "sequence_list_rebuilds"
         "color_list_rebuilds"
         "layer_list_rebuilds"
+        "layer_list_resize_paints.count != 0U"
         "layer_list_shrink_painted"
         "layer_list_grow_painted"
         "color_owner_draw_backgrounds_match_tab"
@@ -634,11 +793,32 @@ foreach(REQUIRED IN ITEMS
         "minimum_color_content_height"
         "right_stack_splitter"
         "stack_grow_completed"
-        "stack_restore_completed")
+        "stack_restore_completed"
+        "structure_add_ok"
+        "structure_remove_ok"
+        "structure_color_resets"
+        "structure_layer_resets"
+        "structure_color_child_paints.count != 0U"
+        "structure_layer_list_paints.count != 0U"
+        "resize_sentinel_cleared"
+        "rejected_command == 0"
+        "ChildWindowFromPointEx("
+        "CWP_SKIPDISABLED | CWP_SKIPINVISIBLE | CWP_SKIPTRANSPARENT"
+        "IDM_WINDOW_SUBPALETTE")
     string(FIND "${SMOKE}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
         message(FATAL_ERROR
             "Right splitter continuous-resize regression evidence is missing: ${REQUIRED}")
+    endif()
+endforeach()
+foreach(REQUIRED IN ITEMS
+        "enum class AuxiliaryPaneVisibilityChange"
+        "AuxiliaryPaneVisibilityChange::Failed"
+        "change == AuxiliaryPaneVisibilityChange::Failed")
+    string(FIND "${RUNTIME}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR
+            "Auxiliary-pane command failure propagation is missing: ${REQUIRED}")
     endif()
 endforeach()
 foreach(REQUIRED IN ITEMS
@@ -677,4 +857,5 @@ endforeach()
 message(STATUS
     "Verified pure bounded DockLayoutModel, WorkspaceWindow-owned DockHost, "
     "primary/auxiliary docking integration, workspace-scoped cached statusbar progress, "
-    "auto-hide, and removal of fixed geometry and the job progress pane")
+    "nested right-pane resize transactions, auto-hide, and removal of fixed geometry "
+    "and the job progress pane")

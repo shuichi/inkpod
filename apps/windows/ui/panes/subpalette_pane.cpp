@@ -41,6 +41,7 @@ bool AddSubpaletteTooltip(
 }
 
 std::size_t PlaceCompactSubpaletteButtonRows(
+    PaneDialogLayoutPlan& plan,
     HWND dialog,
     std::span<const int> controls,
     int x,
@@ -64,13 +65,12 @@ std::size_t PlaceCompactSubpaletteButtonRows(
             used = 0;
         }
         const int offset = used == 0 ? 0 : gap;
-        PlacePaneDialogControl(
-            dialog,
+        static_cast<void>(plan.PlaceControl(
             control,
             x + used + offset,
             y + static_cast<int>(row) * (row_height + gap),
             control_width,
-            row_height);
+            row_height));
         used += offset + control_width;
     }
     return row + 1U;
@@ -425,6 +425,7 @@ HWND CreateSubpalettePaneDialog(
     if (dialog == nullptr) {
         return nullptr;
     }
+    EnablePaneDialogResizePainting(dialog);
     const HWND placeholder = GetDlgItem(dialog, IDC_SUBPALETTE_CANVAS);
     RECT bounds{};
     if (placeholder == nullptr || GetWindowRect(placeholder, &bounds) == FALSE) {
@@ -562,6 +563,7 @@ void LayoutSubpalettePaneDialog(HWND dialog) noexcept {
     const int width = static_cast<int>(client.right - client.left);
     const int height = static_cast<int>(client.bottom - client.top);
     const int content_width = std::max(0, width - margin * 2);
+    PaneDialogLayoutPlan plan(dialog);
 
     const std::array<int, 7U> toolbar_actions{
         IDC_SUBPALETTE_TARGET,
@@ -572,6 +574,7 @@ void LayoutSubpalettePaneDialog(HWND dialog) noexcept {
         IDC_SUBPALETTE_ONE_TO_ONE,
         IDC_SUBPALETTE_REGISTER};
     const std::size_t toolbar_rows = PlaceCompactSubpaletteButtonRows(
+        plan,
         dialog,
         toolbar_actions,
         margin,
@@ -582,41 +585,37 @@ void LayoutSubpalettePaneDialog(HWND dialog) noexcept {
     const int source_top = margin
         + static_cast<int>(toolbar_rows) * row_height
         + std::max(0, static_cast<int>(toolbar_rows) - 1) * gap + gap;
-    PlacePaneDialogControl(
-        dialog,
+    static_cast<void>(plan.PlaceControl(
         IDC_SUBPALETTE_SOURCE,
         margin,
         source_top,
         content_width,
-        line_height);
+        line_height));
 
     const int hint_top = std::max(
         source_top + line_height + gap,
         height - margin - line_height);
-    PlacePaneDialogControl(
-        dialog,
+    static_cast<void>(plan.PlaceControl(
         IDC_SUBPALETTE_HINT,
         margin,
         hint_top,
         content_width,
-        line_height);
+        line_height));
     const int canvas_top = source_top + line_height + gap;
     const int canvas_height = std::max(0, hint_top - gap - canvas_top);
-    SetWindowPos(
+    static_cast<void>(plan.PlaceWindow(
         state->canvas,
-        nullptr,
         margin,
         canvas_top,
         std::max(1, content_width),
-        std::max(1, canvas_height),
-        SWP_NOACTIVATE | SWP_NOZORDER);
-    PlacePaneDialogControl(
-        dialog,
+        std::max(1, canvas_height)));
+    static_cast<void>(plan.PlaceControl(
         IDC_SUBPALETTE_EMPTY,
         margin + gap,
         canvas_top + std::max(0, (canvas_height - line_height) / 2),
         std::max(0, content_width - gap * 2),
-        line_height);
+        line_height));
+    static_cast<void>(plan.Commit(PaneDialogRepaint::Complete));
 }
 
 void UpdateSubpalettePaneDialog(HWND dialog, SubpalettePaneView view) noexcept {

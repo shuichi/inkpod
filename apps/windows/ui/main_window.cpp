@@ -470,7 +470,7 @@ void SyncActiveEditorHandles(app::MainWindowHandles& windows) noexcept {
     windows.canvas = active == nullptr ? nullptr : active->canvas;
 }
 
-void LayoutMainChrome(
+bool LayoutMainChrome(
     app::MainWindowHandles& windows,
     bool smoke_test,
     int width,
@@ -492,9 +492,11 @@ void LayoutMainChrome(
         smoke_test ? 0 : status_height,
         dpi,
         windows.workspace);
+    if (!windows.dock_host.ApplyLayout(layout.dock, dpi, dock_change)) {
+        return false;
+    }
     windows.workspace.last_client_width = width;
     windows.workspace.last_client_height = height;
-    windows.dock_host.ApplyLayout(layout.dock, dpi, dock_change);
     for (std::size_t index = 0U; index < windows.auto_hide_buttons.size(); ++index) {
         const auto* pane = FindWorkspaceAuxiliaryPane(
             windows.workspace, static_cast<WorkspaceAuxiliaryPane>(index));
@@ -508,6 +510,7 @@ void LayoutMainChrome(
             placement != nullptr && placement->zone == DockZone::AutoHide);
     }
     LayoutEditorArea(windows, layout, smoke_test, dpi);
+    return true;
 }
 
 bool RegisterMainWindowClass(

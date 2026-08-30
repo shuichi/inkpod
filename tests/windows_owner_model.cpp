@@ -7,6 +7,12 @@
 #include <new>
 #include <string>
 
+#include <windows.h>
+
+#include "ui/dock_layout.h"
+#include "ui/dock_host.h"
+#include "ui/right_tool_tabs.h"
+
 #include "app/application_owner_graph.h"
 #include "app/document_session.h"
 #include "app/recent_documents.h"
@@ -62,12 +68,53 @@ using inkpod::app::Generation;
 using inkpod::app::RecentDocumentList;
 using inkpod::app::WorkspaceWindowId;
 using inkpod::app::WorkspaceWindowRegistry;
+using inkpod::windows::ui::DockHost;
+using inkpod::windows::ui::DockLayoutModel;
+using inkpod::windows::ui::DockLayoutRecord;
+using inkpod::windows::ui::DockPanePlacement;
+using inkpod::windows::ui::DockPaneType;
+using inkpod::windows::ui::DockResult;
+using inkpod::windows::ui::DockZoneState;
+using inkpod::windows::ui::RightToolTabsModel;
 using inkpod::windows::ui::ThumbnailCache;
 using inkpod::windows::ui::ThumbnailCacheKey;
 using inkpod::windows::ui::ThumbnailImageView;
 using inkpod::windows::ui::ThumbnailKind;
 using inkpod::windows::ui::ThumbnailPaneUsage;
 using inkpod::windows::ui::ThumbnailPixelLayout;
+using inkpod::windows::ui::ToolTabId;
+using inkpod::windows::ui::ToolTabResult;
+
+// Explicit-instantiation access keeps this implementation-local regression on
+// the real private command boundary without adding a production test accessor.
+template <typename Tag, typename Tag::type Member>
+struct DockHostPrivateAccess final {
+    friend typename Tag::type AccessDockHostMember(Tag) noexcept {
+        return Member;
+    }
+};
+
+struct DockHostModelTag final {
+    using type = DockLayoutModel* DockHost::*;
+    friend type AccessDockHostMember(DockHostModelTag) noexcept;
+};
+
+struct DockHostRightToolTabsTag final {
+    using type = RightToolTabsModel* DockHost::*;
+    friend type AccessDockHostMember(DockHostRightToolTabsTag) noexcept;
+};
+
+struct DockHostMovePaneToToolTabTag final {
+    using type = ToolTabResult (DockHost::*)(
+        DockPaneType, ToolTabId) noexcept;
+    friend type AccessDockHostMember(DockHostMovePaneToToolTabTag) noexcept;
+};
+
+template struct DockHostPrivateAccess<DockHostModelTag, &DockHost::model_>;
+template struct DockHostPrivateAccess<
+    DockHostRightToolTabsTag, &DockHost::right_tool_tabs_>;
+template struct DockHostPrivateAccess<
+    DockHostMovePaneToToolTabTag, &DockHost::MovePaneToToolTab>;
 
 bool TestApplicationWideThumbnailLru() {
     g_allocations_before_failure = -1;
@@ -889,6 +936,96 @@ bool TestEditorAreaLifetimeAndSplit() {
     return editors.GroupCount() == 0U && editors.Active() == nullptr;
 }
 
+bool SameDockPanePlacement(
+    const DockPanePlacement& left, const DockPanePlacement& right) noexcept {
+    return left.type == right.type && left.zone == right.zone
+        && left.restore_zone == right.restore_zone && left.order == right.order
+        && left.stack == right.stack && left.tab_order == right.tab_order
+        && left.split_weight == right.split_weight
+        && left.floating.x_dip == right.floating.x_dip
+        && left.floating.y_dip == right.floating.y_dip
+        && left.floating.width_dip == right.floating.width_dip
+        && left.floating.height_dip == right.floating.height_dip
+        && left.present == right.present && left.active_tab == right.active_tab;
+}
+
+bool SameDockZoneState(
+    const DockZoneState& left, const DockZoneState& right) noexcept {
+    return left.mode == right.mode && left.active_tab == right.active_tab
+        && left.extent_dip == right.extent_dip;
+}
+
+bool SameDockLayoutRecord(
+    const DockLayoutRecord& left, const DockLayoutRecord& right) noexcept {
+    if (left.version != right.version || left.pane_count != right.pane_count
+        || left.mirrored != right.mirrored) {
+        return false;
+    }
+    for (std::size_t index = 0U; index < left.panes.size(); ++index) {
+        if (!SameDockPanePlacement(left.panes[index], right.panes[index])) {
+            return false;
+        }
+    }
+    for (std::size_t index = 0U; index < left.zones.size(); ++index) {
+        if (!SameDockZoneState(left.zones[index], right.zones[index])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool SameRightToolTabs(
+    const RightToolTabsModel& left, const RightToolTabsModel& right) noexcept {
+    const auto left_tabs = left.Tabs();
+    const auto right_tabs = right.Tabs();
+    if (left_tabs.size() != right_tabs.size()
+        || left.Selected() != right.Selected()
+        || left.NextStableId() != right.NextStableId()) {
+        return false;
+    }
+    for (std::size_t tab_index = 0U; tab_index < left_tabs.size(); ++tab_index) {
+        const auto& left_tab = left_tabs[tab_index];
+        const auto& right_tab = right_tabs[tab_index];
+        if (left_tab.id != right_tab.id
+            || left_tab.pane_count != right_tab.pane_count) {
+            return false;
+        }
+        for (std::size_t pane_index = 0U;
+             pane_index < left_tab.pane_count;
+             ++pane_index) {
+            if (left_tab.panes[pane_index] != right_tab.panes[pane_index]) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool TestDockHostCompoundMutationRollback() {
+    DockLayoutModel model;
+    RightToolTabsModel right_tool_tabs;
+    constexpr DockPaneType pane = DockPaneType::Reference;
+    constexpr ToolTabId destination{1U};
+    if (model.RemovePane(pane) != DockResult::Ok
+        || right_tool_tabs.Find(destination) == nullptr
+        || right_tool_tabs.TabForPane(pane)) {
+        return false;
+    }
+    const DockLayoutRecord before_model = model.ToRecord();
+    const RightToolTabsModel before_tabs = right_tool_tabs;
+
+    DockHost host;
+    host.*AccessDockHostMember(DockHostModelTag{}) = &model;
+    host.*AccessDockHostMember(DockHostRightToolTabsTag{}) = &right_tool_tabs;
+    const ToolTabResult result =
+        (host.*AccessDockHostMember(DockHostMovePaneToToolTabTag{}))(
+            pane, destination);
+
+    return result == ToolTabResult::InvalidPane
+        && SameDockLayoutRecord(model.ToRecord(), before_model)
+        && SameRightToolTabs(right_tool_tabs, before_tabs);
+}
+
 }  // namespace
 
 int main() {
@@ -927,6 +1064,10 @@ int main() {
     if (!TestEditorAreaLifetimeAndSplit()) {
         std::cerr << "editor area split ownership test failed\n";
         return 6;
+    }
+    if (!TestDockHostCompoundMutationRollback()) {
+        std::cerr << "DockHost compound mutation rollback test failed\n";
+        return 10;
     }
     return 0;
 }

@@ -16,6 +16,7 @@
 
 #include "app/resource.h"
 #include "ui/localization.h"
+#include "ui/panes/pane_dialog_layout.h"
 #include "ui/tab_close_button.h"
 
 namespace inkpod::windows::ui {
@@ -74,11 +75,6 @@ RECT ToRect(const DockRect& value) noexcept {
 
 bool HasArea(const DockRect& value) noexcept {
     return value.width > 0 && value.height > 0;
-}
-
-bool SameBounds(const DockRect& left, const DockRect& right) noexcept {
-    return left.x == right.x && left.y == right.y
-        && left.width == right.width && left.height == right.height;
 }
 
 bool WindowMatchesPlacement(
@@ -306,7 +302,377 @@ void PaintSplitter(
     EndPaint(window, &paint);
 }
 
+template <std::size_t Capacity>
+class ScopedWindowRedrawSuspension final {
+public:
+    ScopedWindowRedrawSuspension() noexcept = default;
+    ~ScopedWindowRedrawSuspension() noexcept { Restore(); }
+    ScopedWindowRedrawSuspension(const ScopedWindowRedrawSuspension&) = delete;
+    ScopedWindowRedrawSuspension& operator=(
+        const ScopedWindowRedrawSuspension&) = delete;
+
+    [[nodiscard]] bool Suspend(HWND window) noexcept {
+        if (window == nullptr || count_ >= windows_.size()
+            || (GetWindowLongPtrW(window, GWL_STYLE) & WS_VISIBLE) == 0) {
+            return false;
+        }
+        SendMessageW(window, WM_SETREDRAW, FALSE, 0);
+        windows_[count_++] = window;
+        return true;
+    }
+
+    void Restore() noexcept {
+        while (count_ > 0U) {
+            const HWND window = windows_[--count_];
+            if (IsWindow(window) != FALSE) {
+                SendMessageW(window, WM_SETREDRAW, TRUE, 0);
+            }
+        }
+    }
+
+private:
+    std::array<HWND, Capacity> windows_{};
+    std::size_t count_{};
+};
+
+template <std::size_t Capacity>
+class ScopedPaneDialogResizeDeferral final {
+public:
+    ScopedPaneDialogResizeDeferral() noexcept = default;
+    ~ScopedPaneDialogResizeDeferral() noexcept { Restore(); }
+    ScopedPaneDialogResizeDeferral(const ScopedPaneDialogResizeDeferral&) = delete;
+    ScopedPaneDialogResizeDeferral& operator=(
+        const ScopedPaneDialogResizeDeferral&) = delete;
+
+    [[nodiscard]] bool Defer(HWND pane_root) noexcept {
+        if (pane_root == nullptr
+            || GetPropW(
+                   pane_root, panes::kPaneDialogResizeDeferredProperty)
+                != nullptr) {
+            return true;
+        }
+        if (count_ >= pane_roots_.size()) {
+            return false;
+        }
+        if (!panes::BeginPaneDialogLayoutTransaction(pane_root)) {
+            return false;
+        }
+        if (panes::SetPaneDialogResizeDeferred(pane_root, true)) {
+            pane_roots_[count_++] = pane_root;
+            return true;
+        }
+        panes::EndPaneDialogLayoutTransaction(pane_root);
+        return false;
+    }
+
+    [[nodiscard]] bool LayoutsSucceeded() const noexcept {
+        for (std::size_t index = 0U; index < count_; ++index) {
+            if (panes::PaneDialogLayoutFailed(pane_roots_[index])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    void Restore() noexcept {
+        while (count_ > 0U) {
+            const HWND pane_root = pane_roots_[--count_];
+            if (IsWindow(pane_root) != FALSE) {
+                static_cast<void>(
+                    panes::SetPaneDialogResizeDeferred(pane_root, false));
+                panes::EndPaneDialogLayoutTransaction(pane_root);
+            }
+        }
+    }
+
+private:
+    std::array<HWND, Capacity> pane_roots_{};
+    std::size_t count_{};
+};
+
 }  // namespace
+
+class DockHost::PlacementBatch final {
+public:
+    explicit PlacementBatch(HWND owner) noexcept : owner_(owner) {}
+
+    [[nodiscard]] bool Place(
+        HWND window, const DockRect& bounds, bool visible) noexcept {
+        if (window == nullptr) {
+            return true;
+        }
+        if (owner_ == nullptr || overflowed_) {
+            return false;
+        }
+        const bool show = visible && HasArea(bounds);
+        const bool redraw_suspended = WasRedrawSuspended(window);
+        if (!redraw_suspended
+            && WindowMatchesPlacement(window, bounds, visible)) {
+            return true;
+        }
+        const bool was_visible =
+            (GetWindowLongPtrW(window, GWL_STYLE) & WS_VISIBLE) != 0;
+        RECT previous{};
+        if (was_visible && WindowBoundsInOwner(window, previous)) {
+            IncludeDirty(previous);
+        }
+        if (show) {
+            IncludeDirty(ToRect(bounds));
+        }
+        for (std::size_t index = 0U; index < count_; ++index) {
+            if (placements_[index].window == window) {
+                placements_[index].bounds = bounds;
+                placements_[index].show = show;
+                return true;
+            }
+        }
+        if (count_ >= placements_.size()) {
+            overflowed_ = true;
+            return false;
+        }
+        placements_[count_++] = PendingPlacement{window, bounds, show};
+        return true;
+    }
+
+    [[nodiscard]] bool PrepareRedrawSuspension(HWND window) noexcept {
+        if (window == nullptr
+            || redraw_suspended_count_ >= redraw_suspended_tabs_.size()
+            || (GetWindowLongPtrW(window, GWL_STYLE) & WS_VISIBLE) == 0) {
+            return false;
+        }
+        IncludeWindow(window);
+        redraw_suspended_tabs_[redraw_suspended_count_++] = window;
+        return true;
+    }
+
+    void IncludeWindow(HWND window) noexcept {
+        RECT bounds{};
+        if (window != nullptr
+            && (GetWindowLongPtrW(window, GWL_STYLE) & WS_VISIBLE) != 0
+            && WindowBoundsInOwner(window, bounds)) {
+            IncludeDirty(bounds);
+        }
+    }
+
+    void IncludeDirty(const DockRect& bounds) noexcept {
+        IncludeDirty(ToRect(bounds));
+    }
+
+    [[nodiscard]] bool Commit() noexcept {
+        if (overflowed_) {
+            return false;
+        }
+        if (count_ == 0U) {
+            return true;
+        }
+        for (std::size_t index = 0U; index < count_; ++index) {
+            if (!CapturePreviousState(placements_[index])) {
+                return false;
+            }
+        }
+        HDWP deferred = BeginDeferWindowPos(static_cast<int>(count_));
+        bool complete = deferred != nullptr;
+        if (complete) {
+            for (std::size_t index = 0U; index < count_; ++index) {
+                const PendingPlacement& placement = placements_[index];
+                deferred = DeferWindowPos(
+                    deferred,
+                    placement.window,
+                    nullptr,
+                    placement.bounds.x,
+                    placement.bounds.y,
+                    std::max(0, placement.bounds.width),
+                    std::max(0, placement.bounds.height),
+                    PlacementFlags(placement.show));
+                if (deferred == nullptr) {
+                    complete = false;
+                    break;
+                }
+            }
+        }
+        if (complete && EndDeferWindowPos(deferred) != FALSE
+            && HasFinalState()) {
+            return true;
+        }
+        complete = true;
+        for (std::size_t index = 0U; index < count_; ++index) {
+            const PendingPlacement& placement = placements_[index];
+            const bool positioned = SetWindowPos(
+                                        placement.window,
+                                        nullptr,
+                                        placement.bounds.x,
+                                        placement.bounds.y,
+                                        std::max(0, placement.bounds.width),
+                                        std::max(0, placement.bounds.height),
+                                        PlacementFlags(placement.show))
+                != FALSE;
+            complete = positioned && complete;
+        }
+        complete = HasFinalState() && complete;
+        if (!complete) {
+            // Direct placement can fail after publishing an earlier prefix.
+            // Restore every registered window to the owner-relative bounds and
+            // local visibility captured before either placement path ran.
+            static_cast<void>(RestorePreviousState());
+        }
+        return complete;
+    }
+
+    [[nodiscard]] bool Rollback() const noexcept {
+        return RestorePreviousState();
+    }
+
+    void Redraw() const noexcept {
+        RECT client{};
+        RECT clipped{};
+        if (!has_dirty_ || GetClientRect(owner_, &client) == FALSE
+            || IntersectRect(&clipped, &dirty_, &client) == FALSE) {
+            return;
+        }
+        RedrawWindow(
+            owner_,
+            &clipped,
+            nullptr,
+            RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_UPDATENOW
+                | RDW_ALLCHILDREN);
+    }
+
+private:
+    struct PendingPlacement {
+        HWND window{};
+        DockRect bounds{};
+        bool show{};
+        DockRect previous_bounds{};
+        bool previous_show{};
+    };
+
+    static constexpr std::size_t kMaximumPlacementCount =
+        1U + kMaximumDockTabStacks + kDockPaneCount + kMaximumDockSplitters;
+
+    static UINT PlacementFlags(bool show) noexcept {
+        return SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER
+            | SWP_NOREDRAW | SWP_NOCOPYBITS
+            | (show ? SWP_SHOWWINDOW : SWP_HIDEWINDOW);
+    }
+
+    [[nodiscard]] bool CapturePreviousState(
+        PendingPlacement& placement) const noexcept {
+        RECT bounds{};
+        if (placement.window == nullptr || GetParent(placement.window) != owner_
+            || !WindowBoundsInOwner(placement.window, bounds)) {
+            return false;
+        }
+        placement.previous_bounds = DockRect{
+            bounds.left,
+            bounds.top,
+            bounds.right - bounds.left,
+            bounds.bottom - bounds.top};
+        placement.previous_show =
+            (GetWindowLongPtrW(placement.window, GWL_STYLE) & WS_VISIBLE) != 0;
+        return true;
+    }
+
+    [[nodiscard]] bool WindowMatchesState(
+        const PendingPlacement& placement,
+        const DockRect& bounds,
+        bool show) const noexcept {
+        if (placement.window == nullptr || GetParent(placement.window) != owner_
+            || ((GetWindowLongPtrW(placement.window, GWL_STYLE) & WS_VISIBLE) != 0)
+                != show) {
+            return false;
+        }
+        RECT current{};
+        return WindowBoundsInOwner(placement.window, current)
+            && current.left == bounds.x && current.top == bounds.y
+            && current.right - current.left == std::max(0, bounds.width)
+            && current.bottom - current.top == std::max(0, bounds.height);
+    }
+
+    [[nodiscard]] bool HasFinalState() const noexcept {
+        for (std::size_t index = 0U; index < count_; ++index) {
+            const PendingPlacement& placement = placements_[index];
+            if (!WindowMatchesState(
+                    placement, placement.bounds, placement.show)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    [[nodiscard]] bool RestorePreviousState() const noexcept {
+        bool restored = true;
+        for (std::size_t index = 0U; index < count_; ++index) {
+            const PendingPlacement& placement = placements_[index];
+            const bool positioned = SetWindowPos(
+                                        placement.window,
+                                        nullptr,
+                                        placement.previous_bounds.x,
+                                        placement.previous_bounds.y,
+                                        std::max(0, placement.previous_bounds.width),
+                                        std::max(0, placement.previous_bounds.height),
+                                        PlacementFlags(placement.previous_show))
+                != FALSE;
+            restored = positioned && restored;
+        }
+        for (std::size_t index = 0U; index < count_; ++index) {
+            const PendingPlacement& placement = placements_[index];
+            restored = WindowMatchesState(
+                           placement,
+                           placement.previous_bounds,
+                           placement.previous_show)
+                && restored;
+        }
+        return restored;
+    }
+
+    [[nodiscard]] bool WasRedrawSuspended(HWND window) const noexcept {
+        return std::find(
+                   redraw_suspended_tabs_.begin(),
+                   redraw_suspended_tabs_.begin()
+                       + static_cast<std::ptrdiff_t>(redraw_suspended_count_),
+                   window)
+            != redraw_suspended_tabs_.begin()
+                + static_cast<std::ptrdiff_t>(redraw_suspended_count_);
+    }
+
+    bool WindowBoundsInOwner(HWND window, RECT& bounds) const noexcept {
+        if (GetWindowRect(window, &bounds) == FALSE) {
+            return false;
+        }
+        POINT top_left{bounds.left, bounds.top};
+        POINT bottom_right{bounds.right, bounds.bottom};
+        if (ScreenToClient(owner_, &top_left) == FALSE
+            || ScreenToClient(owner_, &bottom_right) == FALSE) {
+            return false;
+        }
+        bounds = RECT{top_left.x, top_left.y, bottom_right.x, bottom_right.y};
+        return true;
+    }
+
+    void IncludeDirty(const RECT& bounds) noexcept {
+        if (bounds.right <= bounds.left || bounds.bottom <= bounds.top) {
+            return;
+        }
+        if (!has_dirty_) {
+            dirty_ = bounds;
+            has_dirty_ = true;
+            return;
+        }
+        RECT combined{};
+        if (UnionRect(&combined, &dirty_, &bounds) != FALSE) {
+            dirty_ = combined;
+        }
+    }
+
+    HWND owner_{};
+    std::array<PendingPlacement, kMaximumPlacementCount> placements_{};
+    std::array<HWND, kMaximumDockTabStacks + 1U> redraw_suspended_tabs_{};
+    std::size_t count_{};
+    std::size_t redraw_suspended_count_{};
+    RECT dirty_{};
+    bool has_dirty_{};
+    bool overflowed_{};
+};
 
 DockHost::DockHost() noexcept {
     for (std::size_t index = 0U; index < panes_.size(); ++index) {
@@ -365,6 +731,13 @@ bool DockHost::Initialize(
     instance_ = instance;
     model_ = &model;
     right_tool_tabs_ = &right_tool_tabs;
+    committed_model_ = model;
+    committed_right_tool_tabs_ = right_tool_tabs;
+    for (std::size_t index = 0U; index < panes_.size(); ++index) {
+        committed_auto_hide_expanded_[index] = panes_[index].auto_hide_expanded;
+        committed_auto_hide_edges_[index] = panes_[index].auto_hide_edge;
+    }
+    committed_layout_state_valid_ = true;
     preview_ = CreateWindowExW(
         WS_EX_TRANSPARENT | WS_EX_NOACTIVATE,
         L"STATIC",
@@ -486,29 +859,122 @@ bool DockHost::AttachPane(DockPaneType type, HWND content) noexcept {
     return true;
 }
 
-void DockHost::ApplyLayout(
+bool DockHost::ApplyLayout(
     const DockLayoutGeometry& geometry,
     UINT dpi,
     DockHostChangeKind kind) noexcept {
     if (!initialized_ || model_ == nullptr) {
-        return;
+        return false;
     }
-    applying_ = true;
     const DockLayoutGeometry previous_geometry = geometry_;
+    const UINT previous_dpi = dpi_;
+    const auto finish_failed_layout = [this,
+                                        &previous_geometry,
+                                        previous_dpi]() noexcept {
+        applying_ = false;
+        const bool retry_committed_layout = layout_mutation_pending_
+            && committed_layout_state_valid_;
+        if (retry_committed_layout) {
+            RestoreLayoutMutation();
+        }
+        if (retry_committed_layout && !rolling_back_layout_) {
+            rolling_back_layout_ = true;
+            static_cast<void>(ApplyLayout(
+                previous_geometry,
+                previous_dpi,
+                DockHostChangeKind::Structure));
+            rolling_back_layout_ = false;
+        }
+        return false;
+    };
+    applying_ = true;
     geometry_ = geometry;
     dpi_ = dpi == 0U ? 96U : dpi;
-    static_cast<void>(UpdateTabFont(dpi_));
     const bool synchronize_items = kind == DockHostChangeKind::Structure;
-    ApplyToolTabLayout(synchronize_items);
+    const bool synchronize_tab_metrics =
+        tab_font_ == nullptr || tab_font_dpi_ != dpi_;
+
+    PlacementBatch placements(owner_);
+    if (kind == DockHostChangeKind::Structure) {
+        const std::size_t right = static_cast<std::size_t>(DockZone::Right);
+        placements.IncludeDirty(previous_geometry.right_tool_tabs);
+        placements.IncludeDirty(previous_geometry.zones[right]);
+        placements.IncludeDirty(geometry_.right_tool_tabs);
+        placements.IncludeDirty(geometry_.zones[right]);
+    }
+    ScopedPaneDialogResizeDeferral<kDockPaneCount> pane_resize_deferral;
+    bool pane_resize_deferred = true;
+    for (const PaneHostState& pane : panes_) {
+        const DockPanePlacement* placement = model_->Pane(pane.type);
+        // Only pane roots whose final parent is this DockHost participate in
+        // the owner's bounded final repaint. Floating and expanded AutoHide
+        // roots must complete under their own parent instead of being deferred
+        // into an unrelated owner subtree.
+        if (pane.content != nullptr && GetParent(pane.content) == owner_
+            && placement != nullptr && placement->zone != DockZone::Floating
+            && !(placement->zone == DockZone::AutoHide
+                && pane.auto_hide_expanded)) {
+            pane_resize_deferred = pane_resize_deferral.Defer(pane.content)
+                && pane_resize_deferred;
+        }
+    }
+    if (!pane_resize_deferred) {
+        geometry_ = previous_geometry;
+        dpi_ = previous_dpi;
+        pane_resize_deferral.Restore();
+        // A pending DockHost mutation is reprojected from its captured model by
+        // finish_failed_layout. Do not expose the rejected tab projection first.
+        return finish_failed_layout();
+    }
+    ScopedWindowRedrawSuspension<kMaximumDockTabStacks + 1U>
+        tab_redraw_suspension;
+    if (synchronize_items || synchronize_tab_metrics) {
+        if (placements.PrepareRedrawSuspension(right_tool_tab_control_)) {
+            static_cast<void>(
+                tab_redraw_suspension.Suspend(right_tool_tab_control_));
+        }
+        for (const TabHostState& tabs : tab_states_) {
+            if (placements.PrepareRedrawSuspension(tabs.control)) {
+                static_cast<void>(tab_redraw_suspension.Suspend(tabs.control));
+            }
+        }
+    }
+    static_cast<void>(UpdateTabFont(dpi_));
+
+    ApplyToolTabLayout(synchronize_items, placements);
     for (TabHostState& tabs : tab_states_) {
-        ApplyTabLayout(tabs, synchronize_items);
+        ApplyTabLayout(tabs, synchronize_items, placements);
     }
     for (PaneHostState& pane : panes_) {
-        ApplyPaneLayout(pane);
+        ApplyPaneLayout(pane, &placements);
     }
     for (std::size_t index = 0U; index < splitters_.size(); ++index) {
         if (index < geometry_.splitter_count) {
-            SplitterHostState& state = splitter_states_[index];
+            static_cast<void>(placements.Place(
+                splitters_[index], geometry_.splitters[index].bounds, true));
+        } else {
+            static_cast<void>(placements.Place(splitters_[index], {}, false));
+        }
+    }
+    tab_redraw_suspension.Restore();
+    bool geometry_committed = placements.Commit();
+    if (geometry_committed && !pane_resize_deferral.LayoutsSucceeded()) {
+        static_cast<void>(placements.Rollback());
+        geometry_committed = false;
+    }
+    if (!geometry_committed) {
+        geometry_ = previous_geometry;
+        dpi_ = previous_dpi;
+        static_cast<void>(UpdateTabFont(previous_dpi));
+        pane_resize_deferral.Restore();
+        if (!layout_mutation_pending_) {
+            placements.Redraw();
+        }
+        return finish_failed_layout();
+    }
+    for (std::size_t index = 0U; index < splitter_states_.size(); ++index) {
+        SplitterHostState& state = splitter_states_[index];
+        if (index < geometry_.splitter_count) {
             const DockSplitterGeometry& next = geometry_.splitters[index];
             if (!state.accessible_name_set
                 || state.geometry.zone != next.zone
@@ -517,13 +983,14 @@ void DockHost::ApplyLayout(
                     SetAccessibleName(splitters_[index], SplitterName(next));
             }
             state.geometry = next;
-            PlaceWindow(splitters_[index], geometry_.splitters[index].bounds, true);
-            InvalidateRect(splitters_[index], nullptr, FALSE);
         } else {
-            splitter_states_[index].hovered = false;
-            splitter_states_[index].focused = false;
-            PlaceWindow(splitters_[index], {}, false);
+            state.hovered = false;
+            state.focused = false;
         }
+    }
+    LayoutToolTabCloseButtons();
+    for (TabHostState& tabs : tab_states_) {
+        LayoutPaneTabCloseButtons(tabs);
     }
     if (preview_ != nullptr) {
         SetWindowPos(
@@ -535,10 +1002,11 @@ void DockHost::ApplyLayout(
             0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
-    if (kind == DockHostChangeKind::StackBoundary) {
-        RepaintChangedStackBoundaries(previous_geometry);
-    }
+    pane_resize_deferral.Restore();
+    placements.Redraw();
     applying_ = false;
+    CommitLayoutState();
+    return true;
 }
 
 DockResult DockHost::TogglePane(DockPaneType type) noexcept {
@@ -549,7 +1017,7 @@ DockResult DockHost::TogglePane(DockPaneType type) noexcept {
 }
 
 DockResult DockHost::DockPane(DockPaneType type, DockZone zone) noexcept {
-    if (model_ == nullptr) {
+    if (model_ == nullptr || !BeginLayoutMutation()) {
         return DockResult::InvalidState;
     }
     const DockResult result = model_->MovePane(type, zone);
@@ -559,42 +1027,55 @@ DockResult DockHost::DockPane(DockPaneType type, DockZone zone) noexcept {
         } else {
             RemovePaneFromToolTabs(type);
         }
-        NotifyChanged();
+        if (!NotifyChanged()) {
+            return DockResult::InvalidState;
+        }
+    } else {
+        CancelLayoutMutation();
     }
     return result;
 }
 
 DockResult DockHost::FloatPane(DockPaneType type) noexcept {
-    if (model_ == nullptr) {
+    if (model_ == nullptr || !BeginLayoutMutation()) {
         return DockResult::InvalidState;
     }
     const DockPanePlacement* pane = model_->Pane(type);
     if (pane == nullptr) {
+        CancelLayoutMutation();
         return DockResult::InvalidPane;
     }
     const DockResult result = model_->FloatPane(type, pane->floating);
     if (result == DockResult::Ok) {
         RemovePaneFromToolTabs(type);
-        NotifyChanged();
+        if (!NotifyChanged()) {
+            return DockResult::InvalidState;
+        }
+    } else {
+        CancelLayoutMutation();
     }
     return result;
 }
 
 DockResult DockHost::HidePane(DockPaneType type) noexcept {
-    if (model_ == nullptr) {
+    if (model_ == nullptr || !BeginLayoutMutation()) {
         return DockResult::InvalidState;
     }
     const DockResult result = model_->HidePane(type);
     if (result == DockResult::Ok) {
         RemovePaneFromToolTabs(type);
-        NotifyChanged();
+        if (!NotifyChanged()) {
+            return DockResult::InvalidState;
+        }
+    } else {
+        CancelLayoutMutation();
     }
     return result;
 }
 
 DockResult DockHost::SetPaneAutoHide(
     DockPaneType type, bool auto_hide) noexcept {
-    if (model_ == nullptr) {
+    if (model_ == nullptr || !BeginLayoutMutation()) {
         return DockResult::InvalidState;
     }
     const DockResult result = model_->SetPaneAutoHide(type, auto_hide);
@@ -608,13 +1089,17 @@ DockResult DockHost::SetPaneAutoHide(
         if (PaneHostState* pane = PaneState(type); pane != nullptr) {
             pane->auto_hide_expanded = false;
         }
-        NotifyChanged();
+        if (!NotifyChanged()) {
+            return DockResult::InvalidState;
+        }
+    } else {
+        CancelLayoutMutation();
     }
     return result;
 }
 
 DockResult DockHost::RestorePane(DockPaneType type) noexcept {
-    if (model_ == nullptr) {
+    if (model_ == nullptr || !BeginLayoutMutation()) {
         return DockResult::InvalidState;
     }
     const DockResult result = model_->RestorePane(type);
@@ -624,14 +1109,18 @@ DockResult DockHost::RestorePane(DockPaneType type) noexcept {
             && right_tool_tabs_ != nullptr) {
             SelectVisibleToolTabForPane(type);
         }
-        NotifyChanged();
+        if (!NotifyChanged()) {
+            return DockResult::InvalidState;
+        }
         FocusPane(type);
+    } else {
+        CancelLayoutMutation();
     }
     return result;
 }
 
 DockResult DockHost::ResetPane(DockPaneType type) noexcept {
-    if (model_ == nullptr) {
+    if (model_ == nullptr || !BeginLayoutMutation()) {
         return DockResult::InvalidState;
     }
     const DockResult result = model_->ResetPane(type);
@@ -641,19 +1130,27 @@ DockResult DockHost::ResetPane(DockPaneType type) noexcept {
             && right_tool_tabs_ != nullptr) {
             SelectVisibleToolTabForPane(type);
         }
-        NotifyChanged();
+        if (!NotifyChanged()) {
+            return DockResult::InvalidState;
+        }
+    } else {
+        CancelLayoutMutation();
     }
     return result;
 }
 
 DockResult DockHost::SetZoneMode(
     DockZone zone, DockStackMode mode) noexcept {
-    if (model_ == nullptr) {
+    if (model_ == nullptr || !BeginLayoutMutation()) {
         return DockResult::InvalidState;
     }
     const DockResult result = model_->SetZoneMode(zone, mode);
     if (result == DockResult::Ok) {
-        NotifyChanged();
+        if (!NotifyChanged()) {
+            return DockResult::InvalidState;
+        }
+    } else {
+        CancelLayoutMutation();
     }
     return result;
 }
@@ -664,6 +1161,9 @@ DockResult DockHost::ActivatePane(DockPaneType type) noexcept {
     }
     const DockPanePlacement* pane = model_->Pane(type);
     if (pane == nullptr || !pane->present || !IsDockedZone(pane->zone)) {
+        return DockResult::InvalidState;
+    }
+    if (!BeginLayoutMutation()) {
         return DockResult::InvalidState;
     }
     const DockZone zone = pane->zone;
@@ -677,14 +1177,18 @@ DockResult DockHost::ActivatePane(DockPaneType type) noexcept {
     }
     if (model_->StackPaneCount(zone, pane->stack) < 2U) {
         if (tool_tab_changed) {
-            NotifyChanged();
-            return DockResult::Ok;
+            return NotifyChanged() ? DockResult::Ok : DockResult::InvalidState;
         }
+        CancelLayoutMutation();
         return DockResult::NoOp;
     }
     const DockResult active_result = model_->SetActiveTab(zone, type);
     if (active_result == DockResult::Ok || tool_tab_changed) {
-        NotifyChanged();
+        if (!NotifyChanged()) {
+            return DockResult::InvalidState;
+        }
+    } else {
+        CancelLayoutMutation();
     }
     return tool_tab_changed && active_result == DockResult::NoOp
         ? DockResult::Ok
@@ -1046,7 +1550,7 @@ bool DockHost::UpdateTabFont(UINT dpi) noexcept {
                 tabs.control,
                 WM_SETFONT,
                 reinterpret_cast<WPARAM>(replacement),
-                TRUE);
+                FALSE);
             if (tabs.zone != DockZone::Right) {
                 SendMessageW(tabs.control, TCM_SETPADDING, 0,
                     MAKELPARAM(ScaleDip(24, normalized_dpi),
@@ -1059,7 +1563,7 @@ bool DockHost::UpdateTabFont(UINT dpi) noexcept {
             right_tool_tab_control_,
             WM_SETFONT,
             reinterpret_cast<WPARAM>(replacement),
-            TRUE);
+            FALSE);
     }
     if (tab_font_ != nullptr) {
         DeleteObject(tab_font_);
@@ -1069,22 +1573,33 @@ bool DockHost::UpdateTabFont(UINT dpi) noexcept {
     return true;
 }
 
-void DockHost::ApplyPaneLayout(PaneHostState& pane) noexcept {
+void DockHost::ApplyPaneLayout(
+    PaneHostState& pane, PlacementBatch* placements) noexcept {
     if (model_ == nullptr || pane.content == nullptr) {
         return;
     }
+    const auto hide_content = [&pane, placements, this]() noexcept {
+        if (placements != nullptr && GetParent(pane.content) == owner_) {
+            static_cast<void>(placements->Place(pane.content, {}, false));
+        } else {
+            ShowWindow(pane.content, SW_HIDE);
+        }
+    };
     const DockPanePlacement* placement = model_->Pane(pane.type);
     if (placement == nullptr || !placement->present) {
-        ShowWindow(pane.content, SW_HIDE);
+        hide_content();
         return;
     }
     if (placement->zone == DockZone::Floating) {
         pane.auto_hide_expanded = false;
         if (!EnsureFloatingWindow(pane)) {
-            ShowWindow(pane.content, SW_HIDE);
+            hide_content();
             return;
         }
         if (GetParent(pane.content) != pane.floating_window) {
+            if (placements != nullptr && GetParent(pane.content) == owner_) {
+                placements->IncludeWindow(pane.content);
+            }
             SetParent(pane.content, pane.floating_window);
         }
         if (IsWindowVisible(pane.floating_window) == FALSE) {
@@ -1115,14 +1630,17 @@ void DockHost::ApplyPaneLayout(PaneHostState& pane) noexcept {
             if (pane.floating_window != nullptr) {
                 ShowWindow(pane.floating_window, SW_HIDE);
             }
-            ShowWindow(pane.content, SW_HIDE);
+            hide_content();
             return;
         }
         if (!EnsureFloatingWindow(pane)) {
-            ShowWindow(pane.content, SW_HIDE);
+            hide_content();
             return;
         }
         if (GetParent(pane.content) != pane.floating_window) {
+            if (placements != nullptr && GetParent(pane.content) == owner_) {
+                placements->IncludeWindow(pane.content);
+            }
             SetParent(pane.content, pane.floating_window);
         }
         LayoutAutoHiddenContent(pane);
@@ -1133,7 +1651,7 @@ void DockHost::ApplyPaneLayout(PaneHostState& pane) noexcept {
         ShowWindow(pane.floating_window, SW_HIDE);
     }
     if (placement->zone == DockZone::Hidden) {
-        ShowWindow(pane.content, SW_HIDE);
+        hide_content();
         return;
     }
     if (GetParent(pane.content) != owner_) {
@@ -1146,14 +1664,23 @@ void DockHost::ApplyPaneLayout(PaneHostState& pane) noexcept {
         geometry.bounds.y += tab_height;
         geometry.bounds.height -= tab_height;
     }
-    PlaceWindow(
-        pane.content,
-        geometry.bounds,
-        geometry.shown && !geometry.temporarily_auto_hidden);
+    if (placements != nullptr) {
+        static_cast<void>(placements->Place(
+            pane.content,
+            geometry.bounds,
+            geometry.shown && !geometry.temporarily_auto_hidden));
+    } else {
+        PlaceWindow(
+            pane.content,
+            geometry.bounds,
+            geometry.shown && !geometry.temporarily_auto_hidden);
+    }
 }
 
 void DockHost::ApplyTabLayout(
-    TabHostState& tabs, bool synchronize_items) noexcept {
+    TabHostState& tabs,
+    bool synchronize_items,
+    PlacementBatch& placements) noexcept {
     if (model_ == nullptr || !IsDockedZone(tabs.zone)) {
         return;
     }
@@ -1167,7 +1694,7 @@ void DockHost::ApplyTabLayout(
             && !pane_geometry.temporarily_auto_hidden
             && PaneInSelectedToolTab(type) && descriptor != nullptr;
         if (!show) {
-            PlaceWindow(tabs.control, {}, false);
+            static_cast<void>(placements.Place(tabs.control, {}, false));
             return;
         }
         if (synchronize_items) {
@@ -1183,14 +1710,13 @@ void DockHost::ApplyTabLayout(
         }
         DockRect bounds = pane_geometry.bounds;
         bounds.height = std::min(bounds.height, ScaleDip(kTabHeightDip, dpi_));
-        PlaceWindow(tabs.control, bounds, true);
+        static_cast<void>(placements.Place(tabs.control, bounds, true));
         return;
     }
     const bool show = ShouldShowStackHeader(tabs.zone, tabs.stack)
         && HasArea(geometry_.zones[static_cast<std::size_t>(tabs.zone)]);
     if (!show) {
-        PlaceWindow(tabs.control, {}, false);
-        LayoutPaneTabCloseButtons(tabs);
+        static_cast<void>(placements.Place(tabs.control, {}, false));
         return;
     }
     struct OrderedPane {
@@ -1241,8 +1767,7 @@ void DockHost::ApplyTabLayout(
         bounds = geometry_.panes[PaneIndex(ordered[0].type)].bounds;
     }
     bounds.height = std::min(bounds.height, ScaleDip(kTabHeightDip, dpi_));
-    PlaceWindow(tabs.control, bounds, true);
-    LayoutPaneTabCloseButtons(tabs);
+    static_cast<void>(placements.Place(tabs.control, bounds, true));
 }
 
 void DockHost::LayoutPaneTabCloseButtons(TabHostState& tabs) noexcept {
@@ -1320,11 +1845,12 @@ void DockHost::LayoutPaneTabCloseButtons(TabHostState& tabs) noexcept {
             SetWindowPos(pane.tab_close_button, HWND_TOP,
                 bounds.x, bounds.y, bounds.width, bounds.height,
                 SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOREDRAW
+                    | SWP_NOCOPYBITS
                     | (show ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
             geometry_changed = true;
         }
     }
-    if (geometry_changed) {
+    if (geometry_changed && !applying_) {
         RedrawWindow(tabs.control, nullptr, nullptr,
             RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN);
     }
@@ -1344,7 +1870,8 @@ bool DockHost::DrawPaneTabCloseButton(const DRAWITEMSTRUCT& draw) noexcept {
     return true;
 }
 
-void DockHost::ApplyToolTabLayout(bool synchronize_items) noexcept {
+void DockHost::ApplyToolTabLayout(
+    bool synchronize_items, PlacementBatch& placements) noexcept {
     if (right_tool_tab_control_ == nullptr || right_tool_tabs_ == nullptr) {
         return;
     }
@@ -1383,11 +1910,10 @@ void DockHost::ApplyToolTabLayout(bool synchronize_items) noexcept {
         }
         static_cast<void>(SynchronizeToolTabCloseButtons());
     }
-    PlaceWindow(
+    static_cast<void>(placements.Place(
         right_tool_tab_control_,
         geometry_.right_tool_tabs,
-        visible_count > 0);
-    LayoutToolTabCloseButtons();
+        visible_count > 0));
 }
 
 DockHost::ToolTabCloseButtonSlot* DockHost::FindToolTabCloseButton(
@@ -1487,7 +2013,6 @@ bool DockHost::SynchronizeToolTabCloseButtons() noexcept {
             DestroyToolTabCloseButton(tool_tab_close_buttons_[index]);
         }
     }
-    LayoutToolTabCloseButtons();
     return complete;
 }
 
@@ -1502,6 +2027,7 @@ void DockHost::LayoutToolTabCloseButtons() noexcept {
     const int button_size = std::max(1, ScaleDip(20, dpi_));
     const int edge = std::max(1, ScaleDip(3, dpi_));
     const int minimum_item_width = button_size + edge * 2;
+    bool geometry_changed{};
     for (ToolTabCloseButtonSlot& slot : tool_tab_close_buttons_) {
         if (slot.button == nullptr || !slot.tab) {
             continue;
@@ -1523,7 +2049,18 @@ void DockHost::LayoutToolTabCloseButtons() noexcept {
             && item.top >= client.top && item.bottom <= client.bottom
             && item.right - item.left >= minimum_item_width;
         if (!fully_visible) {
-            ShowWindow(slot.button, SW_HIDE);
+            if (!WindowMatchesPlacement(slot.button, {}, false)) {
+                SetWindowPos(
+                    slot.button,
+                    nullptr,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER
+                        | SWP_NOREDRAW | SWP_NOCOPYBITS | SWP_HIDEWINDOW);
+                geometry_changed = true;
+            }
             continue;
         }
         const int item_height = item.bottom - item.top;
@@ -1531,15 +2068,26 @@ void DockHost::LayoutToolTabCloseButtons() noexcept {
             button_size, std::max(1, item_height - edge * 2));
         const int x = item.right - edge - size;
         const int y = item.top + std::max(0, (item_height - size) / 2);
-        SetWindowPos(
-            slot.button,
-            HWND_TOP,
-            x,
-            y,
-            size,
-            size,
-            SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
-        InvalidateRect(slot.button, nullptr, TRUE);
+        const DockRect bounds{x, y, size, size};
+        if (!WindowMatchesPlacement(slot.button, bounds, true)) {
+            SetWindowPos(
+                slot.button,
+                HWND_TOP,
+                x,
+                y,
+                size,
+                size,
+                SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOREDRAW
+                    | SWP_NOCOPYBITS | SWP_SHOWWINDOW);
+            geometry_changed = true;
+        }
+    }
+    if (geometry_changed && !applying_) {
+        RedrawWindow(
+            right_tool_tab_control_,
+            nullptr,
+            nullptr,
+            RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN);
     }
 }
 
@@ -1556,75 +2104,71 @@ bool DockHost::DrawToolTabCloseButton(
     return true;
 }
 
-void DockHost::RepaintChangedStackBoundaries(
-    const DockLayoutGeometry& previous) noexcept {
-    if (owner_ == nullptr) {
-        return;
+bool DockHost::BeginLayoutMutation() noexcept {
+    if (layout_mutation_pending_ || model_ == nullptr
+        || right_tool_tabs_ == nullptr) {
+        return false;
     }
-    RECT dirty{};
-    bool has_dirty{};
-    const int header_padding = ScaleDip(kTabHeightDip, dpi_);
-    for (std::size_t index = 0U; index < geometry_.splitter_count; ++index) {
-        const DockSplitterGeometry& next = geometry_.splitters[index];
-        if (next.kind != DockSplitterKind::StackBoundary) {
-            continue;
-        }
-        const DockSplitterGeometry* prior{};
-        for (std::size_t previous_index = 0U;
-             previous_index < previous.splitter_count;
-             ++previous_index) {
-            const DockSplitterGeometry& candidate =
-                previous.splitters[previous_index];
-            if (candidate.kind == DockSplitterKind::StackBoundary
-                && candidate.zone == next.zone
-                && candidate.boundary == next.boundary) {
-                prior = &candidate;
-                break;
-            }
-        }
-        if (prior == nullptr || SameBounds(prior->bounds, next.bounds)) {
-            continue;
-        }
-        RECT old_bounds = ToRect(prior->bounds);
-        RECT new_bounds = ToRect(next.bounds);
-        RECT moved_bounds{};
-        if (UnionRect(&moved_bounds, &old_bounds, &new_bounds) == FALSE) {
-            continue;
-        }
-        if (SplitterHasHorizontalLine(next)) {
-            moved_bounds.top -= header_padding;
-            moved_bounds.bottom += header_padding;
-        } else {
-            moved_bounds.left -= header_padding;
-            moved_bounds.right += header_padding;
-        }
-        if (has_dirty) {
-            RECT combined{};
-            if (UnionRect(&combined, &dirty, &moved_bounds) != FALSE) {
-                dirty = combined;
-            }
-        } else {
-            dirty = moved_bounds;
-            has_dirty = true;
-        }
-    }
-    RECT client{};
-    RECT clipped{};
-    if (!has_dirty || GetClientRect(owner_, &client) == FALSE
-        || IntersectRect(&clipped, &dirty, &client) == FALSE) {
-        return;
-    }
-    RedrawWindow(
-        owner_,
-        &clipped,
-        nullptr,
-        RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+    CommitLayoutState();
+    layout_mutation_pending_ = true;
+    return true;
 }
 
-void DockHost::NotifyChanged(DockHostChangeKind kind) noexcept {
-    if (!applying_ && changed_ != nullptr) {
-        changed_(changed_context_, kind);
+void DockHost::CancelLayoutMutation() noexcept {
+    // A compound DockHost command can mutate the right-tab projection before
+    // a later DockLayout primitive rejects the same command. Cancellation must
+    // therefore restore the complete snapshot; merely dropping the pending bit
+    // would publish the successful prefix of a failed mutation.
+    RestoreLayoutMutation();
+}
+
+void DockHost::RestoreLayoutMutation() noexcept {
+    if (!layout_mutation_pending_ || !committed_layout_state_valid_
+        || model_ == nullptr || right_tool_tabs_ == nullptr) {
+        layout_mutation_pending_ = false;
+        return;
     }
+    *model_ = committed_model_;
+    *right_tool_tabs_ = committed_right_tool_tabs_;
+    for (std::size_t index = 0U; index < panes_.size(); ++index) {
+        panes_[index].auto_hide_expanded = committed_auto_hide_expanded_[index];
+        panes_[index].auto_hide_edge = committed_auto_hide_edges_[index];
+    }
+    layout_mutation_pending_ = false;
+}
+
+void DockHost::CommitLayoutState() noexcept {
+    if (model_ == nullptr || right_tool_tabs_ == nullptr) {
+        layout_mutation_pending_ = false;
+        return;
+    }
+    committed_model_ = *model_;
+    committed_right_tool_tabs_ = *right_tool_tabs_;
+    for (std::size_t index = 0U; index < panes_.size(); ++index) {
+        committed_auto_hide_expanded_[index] = panes_[index].auto_hide_expanded;
+        committed_auto_hide_edges_[index] = panes_[index].auto_hide_edge;
+    }
+    committed_layout_state_valid_ = true;
+    layout_mutation_pending_ = false;
+}
+
+bool DockHost::NotifyChanged(DockHostChangeKind kind) noexcept {
+    if (applying_) {
+        return false;
+    }
+    if (changed_ == nullptr) {
+        CommitLayoutState();
+        return true;
+    }
+    const bool committed = changed_(changed_context_, kind);
+    if (!committed && layout_mutation_pending_) {
+        RestoreLayoutMutation();
+    } else if (committed && layout_mutation_pending_) {
+        // A non-visual test callback may accept the mutation without calling
+        // ApplyLayout. Treat that synchronous acknowledgement as the commit.
+        CommitLayoutState();
+    }
+    return committed;
 }
 
 void DockHost::ShowContextMenu(
@@ -1747,10 +2291,14 @@ ToolTabResult DockHost::MovePaneToToolTab(
         || !model_->IsZoneAllowed(type, DockZone::Right)) {
         return ToolTabResult::InvalidTab;
     }
+    if (!BeginLayoutMutation()) {
+        return ToolTabResult::InvalidPane;
+    }
     const ToolTabId previous = right_tool_tabs_->TabForPane(type);
     const ToolTabResult move_result = right_tool_tabs_->MovePane(
         type, destination);
     if (move_result != ToolTabResult::Ok) {
+        CancelLayoutMutation();
         return move_result;
     }
     const DockPanePlacement* pane = model_->Pane(type);
@@ -1760,11 +2308,14 @@ ToolTabResult DockHost::MovePaneToToolTab(
             if (previous) {
                 static_cast<void>(right_tool_tabs_->MovePane(type, previous));
             }
+            CancelLayoutMutation();
             return ToolTabResult::InvalidPane;
         }
     }
     static_cast<void>(right_tool_tabs_->SetSelected(destination));
-    NotifyChanged();
+    if (!NotifyChanged()) {
+        return ToolTabResult::InvalidPane;
+    }
     FocusPane(type);
     return ToolTabResult::Ok;
 }
@@ -1775,9 +2326,13 @@ ToolTabResult DockHost::MovePaneToNewToolTab(
         || !model_->IsZoneAllowed(type, DockZone::Right)) {
         return ToolTabResult::InvalidPane;
     }
+    if (!BeginLayoutMutation()) {
+        return ToolTabResult::InvalidPane;
+    }
     RightToolTabsModel original = *right_tool_tabs_;
     const ToolTabResult result = right_tool_tabs_->MovePaneToNewTab(type);
     if (result != ToolTabResult::Ok) {
+        CancelLayoutMutation();
         return result;
     }
     const DockPanePlacement* pane = model_->Pane(type);
@@ -1785,10 +2340,13 @@ ToolTabResult DockHost::MovePaneToNewToolTab(
         const DockResult dock_result = model_->MovePane(type, DockZone::Right);
         if (dock_result != DockResult::Ok && dock_result != DockResult::NoOp) {
             *right_tool_tabs_ = original;
+            CancelLayoutMutation();
             return ToolTabResult::InvalidPane;
         }
     }
-    NotifyChanged();
+    if (!NotifyChanged()) {
+        return ToolTabResult::InvalidPane;
+    }
     FocusPane(type);
     return ToolTabResult::Ok;
 }
@@ -1811,6 +2369,9 @@ ToolTabResult DockHost::CloseToolTab(ToolTabId tab) noexcept {
             return ToolTabResult::InvalidPane;
         }
     }
+    if (!BeginLayoutMutation()) {
+        return ToolTabResult::InvalidPane;
+    }
     *model_ = dock_candidate;
     *right_tool_tabs_ = tab_candidate;
     for (std::size_t index = 0U; index < closed_count; ++index) {
@@ -1818,8 +2379,7 @@ ToolTabResult DockHost::CloseToolTab(ToolTabId tab) noexcept {
             pane->auto_hide_expanded = false;
         }
     }
-    NotifyChanged();
-    return ToolTabResult::Ok;
+    return NotifyChanged() ? ToolTabResult::Ok : ToolTabResult::InvalidPane;
 }
 
 std::array<DockPaneType, kDockPaneCount>
@@ -1935,12 +2495,17 @@ void DockHost::FinishFloatingMove(PaneHostState& pane) noexcept {
     const DockZone target = preview_zone_;
     HideDockPreview();
     if (target != DockZone::Count) {
+        if (!BeginLayoutMutation()) {
+            return;
+        }
         const DockResult result = model_->MovePane(pane.type, target);
         if (result == DockResult::Ok) {
             if (target == DockZone::Right && right_tool_tabs_ != nullptr) {
                 SelectVisibleToolTabForPane(pane.type);
             }
-            NotifyChanged();
+            static_cast<void>(NotifyChanged());
+        } else {
+            CancelLayoutMutation();
         }
         return;
     }
@@ -1958,12 +2523,15 @@ void DockHost::CaptureFloatingPlacement(PaneHostState& pane) noexcept {
         || GetWindowRect(pane.floating_window, &bounds) == FALSE) {
         return;
     }
+    if (!BeginLayoutMutation()) {
+        return;
+    }
     placement->floating = DockFloatingPlacement{
         PixelsToDip(bounds.left, dpi),
         PixelsToDip(bounds.top, dpi),
         PixelsToDip(bounds.right - bounds.left, dpi),
         PixelsToDip(bounds.bottom - bounds.top, dpi)};
-    NotifyChanged(DockHostChangeKind::Geometry);
+    static_cast<void>(NotifyChanged(DockHostChangeKind::Geometry));
 }
 
 void DockHost::UpdateZoneExtentFromPoint(
@@ -1986,10 +2554,15 @@ void DockHost::UpdateZoneExtentFromPoint(
     } else {
         extent = zone.y == 0 ? client_point.y : client.bottom - client_point.y;
     }
+    if (!BeginLayoutMutation()) {
+        return;
+    }
     const DockResult result = model_->SetZoneExtentDip(
         splitter.geometry.zone, PixelsToDip(std::max(1, extent), dpi_));
     if (result == DockResult::Ok) {
-        NotifyChanged(DockHostChangeKind::Geometry);
+        static_cast<void>(NotifyChanged(DockHostChangeKind::Geometry));
+    } else {
+        CancelLayoutMutation();
     }
 }
 
@@ -2028,6 +2601,9 @@ void DockHost::UpdateStackBoundaryFromPoint(
                 panes[boundary], panes[boundary + 1U], delta_milli);
         }
     } else {
+        if (!BeginLayoutMutation()) {
+            return;
+        }
         const DockRect zone = geometry_.zones[static_cast<std::size_t>(
             splitter.geometry.zone)];
         const int extent = std::max(1, horizontal ? zone.width : zone.height);
@@ -2038,7 +2614,9 @@ void DockHost::UpdateStackBoundaryFromPoint(
             delta_milli);
     }
     if (result == DockResult::Ok) {
-        NotifyChanged(DockHostChangeKind::StackBoundary);
+        static_cast<void>(NotifyChanged(DockHostChangeKind::StackBoundary));
+    } else if (layout_mutation_pending_) {
+        CancelLayoutMutation();
     }
 }
 
@@ -2069,11 +2647,18 @@ DockResult DockHost::AdjustRightPaneBoundary(
     if (available_extent_pixels <= 0) {
         return DockResult::InvalidState;
     }
-    return model_->AdjustPaneBoundary(
+    if (!BeginLayoutMutation()) {
+        return DockResult::InvalidState;
+    }
+    const DockResult result = model_->AdjustPaneBoundary(
         first,
         second,
         delta_milli,
         PixelsToDip(available_extent_pixels, dpi_));
+    if (result != DockResult::Ok) {
+        CancelLayoutMutation();
+    }
+    return result;
 }
 
 void DockHost::ActivateSelectedTab(TabHostState& tabs) noexcept {
@@ -2089,10 +2674,15 @@ void DockHost::ActivateSelectedTab(TabHostState& tabs) noexcept {
     if (TabCtrl_GetItem(tabs.control, selected, &item) == FALSE) {
         return;
     }
+    if (!BeginLayoutMutation()) {
+        return;
+    }
     const DockResult result = model_->SetActiveTab(
         tabs.zone, static_cast<DockPaneType>(item.lParam));
     if (result == DockResult::Ok) {
-        NotifyChanged();
+        static_cast<void>(NotifyChanged());
+    } else {
+        CancelLayoutMutation();
     }
 }
 
@@ -2110,10 +2700,15 @@ void DockHost::ActivateSelectedToolTab() noexcept {
     if (TabCtrl_GetItem(right_tool_tab_control_, selected, &item) == FALSE) {
         return;
     }
+    if (!BeginLayoutMutation()) {
+        return;
+    }
     const ToolTabResult result = right_tool_tabs_->SetSelected(
         ToolTabId{static_cast<std::uint32_t>(item.lParam)});
     if (result == ToolTabResult::Ok) {
-        NotifyChanged();
+        static_cast<void>(NotifyChanged());
+    } else {
+        CancelLayoutMutation();
     }
 }
 
@@ -2345,6 +2940,9 @@ LRESULT CALLBACK DockHost::SplitterSubclassProcedure(
                             direction * 20);
                     }
                 } else {
+                    if (!splitter->host->BeginLayoutMutation()) {
+                        return 0;
+                    }
                     result = splitter->host->model_->AdjustSplitBoundary(
                         splitter->geometry.zone,
                         splitter->geometry.boundary,
@@ -2354,16 +2952,21 @@ LRESULT CALLBACK DockHost::SplitterSubclassProcedure(
                 const DockZoneState* zone = splitter->host->model_->Zone(
                     splitter->geometry.zone);
                 if (zone != nullptr) {
+                    if (!splitter->host->BeginLayoutMutation()) {
+                        return 0;
+                    }
                     result = splitter->host->model_->SetZoneExtentDip(
                         splitter->geometry.zone,
                         zone->extent_dip + direction * 4);
                 }
             }
             if (result == DockResult::Ok) {
-                splitter->host->NotifyChanged(
+                static_cast<void>(splitter->host->NotifyChanged(
                     splitter->geometry.kind == DockSplitterKind::StackBoundary
                         ? DockHostChangeKind::StackBoundary
-                        : DockHostChangeKind::Geometry);
+                        : DockHostChangeKind::Geometry));
+            } else if (splitter->host->layout_mutation_pending_) {
+                splitter->host->CancelLayoutMutation();
             }
             return 0;
         }
@@ -2548,8 +3151,10 @@ LRESULT CALLBACK DockHost::ToolTabSubclassProcedure(
                 && TabCtrl_GetItemRect(window, index, &bounds) != FALSE) {
                 const bool after = client.x
                     >= bounds.left + (bounds.right - bounds.left) / 2;
-                reorder_result = host->right_tool_tabs_->Reorder(
-                    host->dragging_tool_tab_, target, after);
+                if (host->BeginLayoutMutation()) {
+                    reorder_result = host->right_tool_tabs_->Reorder(
+                        host->dragging_tool_tab_, target, after);
+                }
             }
         }
         host->dragging_tool_tab_ = {};
@@ -2558,7 +3163,9 @@ LRESULT CALLBACK DockHost::ToolTabSubclassProcedure(
             ReleaseCapture();
         }
         if (reorder_result == ToolTabResult::Ok) {
-            host->NotifyChanged();
+            static_cast<void>(host->NotifyChanged());
+        } else if (host->layout_mutation_pending_) {
+            host->CancelLayoutMutation();
         }
         host->ActivateSelectedToolTab();
     } else if (message == WM_KEYUP) {

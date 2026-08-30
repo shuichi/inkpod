@@ -472,173 +472,34 @@ void ShowTabControls(HWND pane, ColorDockTabId tab) noexcept {
         tab == ColorDockTabId::Chart ? SW_SHOW : SW_HIDE);
 }
 
-struct PaneTargetRowBounds {
-    RECT target{};
-    RECT pin{};
-    bool target_valid{};
-    bool pin_valid{};
-};
-
-bool ChildBoundsInPane(HWND pane, int control, RECT& bounds) noexcept {
-    const HWND child = GetDlgItem(pane, control);
-    if (child == nullptr || GetWindowRect(child, &bounds) == FALSE) {
-        return false;
-    }
-    MapWindowPoints(
-        HWND_DESKTOP, pane, reinterpret_cast<POINT*>(&bounds), 2U);
-    return IsRectEmpty(&bounds) == FALSE;
-}
-
-PaneTargetRowBounds CapturePaneTargetRowBounds(HWND pane) noexcept {
-    PaneTargetRowBounds bounds{};
-    bounds.target_valid = ChildBoundsInPane(
-        pane, IDC_COLOR_TARGET, bounds.target);
-    bounds.pin_valid = ChildBoundsInPane(
-        pane, IDC_COLOR_PIN, bounds.pin);
-    return bounds;
-}
-
-void RepaintMovedPaneTargetRow(
-    HWND pane,
-    const PaneTargetRowBounds& before,
-    const PaneTargetRowBounds& after) noexcept {
-    const bool target_changed = before.target_valid != after.target_valid
-        || (before.target_valid
-            && EqualRect(&before.target, &after.target) == FALSE);
-    const bool pin_changed = before.pin_valid != after.pin_valid
-        || (before.pin_valid && EqualRect(&before.pin, &after.pin) == FALSE);
-    if (!target_changed && !pin_changed) {
-        return;
-    }
-
-    RECT dirty{};
-    bool has_dirty{};
-    const auto include = [&dirty, &has_dirty](
-                             const RECT& bounds, bool valid) noexcept {
-        if (!valid) {
-            return;
-        }
-        if (!has_dirty) {
-            dirty = bounds;
-            has_dirty = true;
-            return;
-        }
-        RECT combined{};
-        if (UnionRect(&combined, &dirty, &bounds) != FALSE) {
-            dirty = combined;
-        }
-    };
-    include(before.target, before.target_valid);
-    include(before.pin, before.pin_valid);
-    include(after.target, after.target_valid);
-    include(after.pin, after.pin_valid);
-    if (!has_dirty) {
-        return;
-    }
-
-    HDC target = GetDCEx(
-        pane,
-        nullptr,
-        DCX_CACHE | DCX_CLIPCHILDREN | DCX_CLIPSIBLINGS);
-    if (target == nullptr) {
-        RedrawWindow(
-            pane,
-            &dirty,
-            nullptr,
-            RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_NOCHILDREN);
-        return;
-    }
-    const int saved = SaveDC(target);
-    bool erased{};
-    if (saved != 0
-        && IntersectClipRect(
-               target, dirty.left, dirty.top, dirty.right, dirty.bottom)
-            != ERROR) {
-        SendMessageW(
-            pane,
-            WM_ERASEBKGND,
-            reinterpret_cast<WPARAM>(target),
-            0);
-        erased = true;
-    }
-    if (saved != 0) {
-        RestoreDC(target, saved);
-    }
-    ReleaseDC(pane, target);
-    if (!erased) {
-        RedrawWindow(
-            pane,
-            &dirty,
-            nullptr,
-            RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_NOCHILDREN);
-    }
-}
-
-void RepaintVisibleTabControls(HWND pane, ColorDockTabId tab) noexcept {
-    const auto repaint = [pane](int control, bool erase) noexcept {
-        const HWND child = GetDlgItem(pane, control);
-        if (child == nullptr || IsWindowVisible(child) == FALSE) {
-            return;
-        }
-        if (control != IDC_COLOR_TABS) {
-            SetWindowPos(
-                child,
-                HWND_TOP,
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE
-                    | SWP_NOOWNERZORDER | SWP_NOREDRAW);
-        }
-        InvalidateRect(child, nullptr, erase ? TRUE : FALSE);
-        UpdateWindow(child);
-    };
-    repaint(IDC_COLOR_TABS, true);
-    repaint(IDC_COLOR_TARGET, true);
-    repaint(IDC_COLOR_PIN, true);
-    if (tab == ColorDockTabId::Color) {
-        for (const int control : {
-                 IDC_COLOR_MAIN_LINE_LABEL,
-                 IDC_COLOR_MAIN_LINE_SWATCH,
-                 IDC_COLOR_DRAWING_LABEL,
-                 IDC_COLOR_PICKER,
-                 IDC_COLOR_EYEDROPPER,
-                 IDC_COLOR_RED,
-                 IDC_COLOR_GREEN,
-                 IDC_COLOR_BLUE,
-                 IDC_COLOR_ALPHA,
-                 IDC_COLOR_APPLY}) {
-            const bool standard_control = control == IDC_COLOR_EYEDROPPER
-                || control == IDC_COLOR_RED || control == IDC_COLOR_GREEN
-                || control == IDC_COLOR_BLUE || control == IDC_COLOR_ALPHA
-                || control == IDC_COLOR_APPLY;
-            repaint(control, standard_control);
-        }
-    } else if (tab == ColorDockTabId::Palette) {
-        for (const int control : {
-                 IDC_PALETTE_LIST,
-                 IDC_PALETTE_PREVIOUS,
-                 IDC_PALETTE_NEXT,
-                 IDC_PALETTE_REGISTER_BUTTON,
-                 IDC_PALETTE_DELETE_BUTTON,
-                 IDC_PALETTE_CLEAR_BUTTON,
-                 IDC_PALETTE_LOAD_BUTTON,
-                 IDC_PALETTE_SAVE_BUTTON}) {
-            repaint(control, true);
-        }
-    } else if (tab == ColorDockTabId::Chart) {
-        repaint(IDC_COLOR_CHART_LIST, true);
-    }
-}
+constexpr std::array<int, 21U> kColorTabPageControls{
+    IDC_COLOR_TARGET,
+    IDC_COLOR_PIN,
+    IDC_COLOR_MAIN_LINE_LABEL,
+    IDC_COLOR_MAIN_LINE_SWATCH,
+    IDC_COLOR_DRAWING_LABEL,
+    IDC_COLOR_PICKER,
+    IDC_COLOR_EYEDROPPER,
+    IDC_COLOR_RED,
+    IDC_COLOR_GREEN,
+    IDC_COLOR_BLUE,
+    IDC_COLOR_ALPHA,
+    IDC_COLOR_APPLY,
+    IDC_PALETTE_LIST,
+    IDC_PALETTE_PREVIOUS,
+    IDC_PALETTE_NEXT,
+    IDC_PALETTE_REGISTER_BUTTON,
+    IDC_PALETTE_DELETE_BUTTON,
+    IDC_PALETTE_CLEAR_BUTTON,
+    IDC_PALETTE_LOAD_BUTTON,
+    IDC_PALETTE_SAVE_BUTTON,
+    IDC_COLOR_CHART_LIST};
 
 void LayoutPane(HWND pane) noexcept {
     RECT client{};
     if (GetClientRect(pane, &client) == FALSE) {
         return;
     }
-    const PaneTargetRowBounds target_row_before =
-        CapturePaneTargetRowBounds(pane);
     const UINT dpi = GetDpiForWindow(pane);
     const int margin = ScaleForDpi(6, dpi);
     const int tabs_height = PaneReadableControlHeight(
@@ -648,18 +509,17 @@ void LayoutPane(HWND pane) noexcept {
     const int row = PaneReadableControlHeight(
         pane, IDC_COLOR_RED, 24, 8);
     const int gap = ScaleForDpi(5, dpi);
-    PlacePaneDialogControl(
-        pane,
+    PaneDialogLayoutPlan plan(pane);
+    static_cast<void>(plan.PlaceControl(
         IDC_COLOR_TABS,
         margin,
         margin + target_height,
         std::max(0, static_cast<int>(client.right) - margin * 2),
         std::max(
             0,
-            static_cast<int>(client.bottom) - margin * 2 - target_height),
-        false);
+            static_cast<int>(client.bottom) - margin * 2 - target_height)));
     PlacePaneTargetRow(
-        pane,
+        plan,
         IDC_COLOR_TARGET,
         IDC_COLOR_PIN,
         margin,
@@ -668,8 +528,7 @@ void LayoutPane(HWND pane) noexcept {
         0,
         target_height,
         target_height,
-        gap,
-        false);
+        gap);
     RECT content{margin * 2, margin + target_height + tabs_height,
                  client.right - margin * 2,
                  client.bottom - margin * 2};
@@ -690,58 +549,46 @@ void LayoutPane(HWND pane) noexcept {
     const int label_width = std::max(
         0,
         static_cast<int>(content.right) - eyedropper_width - gap - label_left);
-    PlacePaneDialogControl(
-        pane,
+    static_cast<void>(plan.PlaceControl(
         IDC_COLOR_MAIN_LINE_LABEL,
         label_left,
         content.top,
         label_width,
-        label_line_height,
-        false);
-    PlacePaneDialogControl(
-        pane,
+        label_line_height));
+    static_cast<void>(plan.PlaceControl(
         IDC_COLOR_MAIN_LINE_SWATCH,
         swatch_left,
         content.top,
         swatch_width,
-        top_row,
-        false);
-    PlacePaneDialogControl(
-        pane,
+        top_row));
+    static_cast<void>(plan.PlaceControl(
         IDC_COLOR_DRAWING_LABEL,
         label_left,
         content.top + label_line_height,
         label_width,
-        label_line_height,
-        false);
-    PlacePaneDialogControl(
-        pane,
+        label_line_height));
+    static_cast<void>(plan.PlaceControl(
         IDC_COLOR_SWATCH,
         0,
         0,
         0,
-        0,
-        false);
-    PlacePaneDialogControl(
-        pane,
+        0));
+    static_cast<void>(plan.PlaceControl(
         IDC_COLOR_EYEDROPPER,
         content.right - eyedropper_width,
         content.top + (top_row - eyedropper_height) / 2,
         eyedropper_width,
-        eyedropper_height,
-        false);
+        eyedropper_height));
     const int fields_top = std::max(
         static_cast<int>(content.top) + top_row + gap,
         static_cast<int>(content.bottom) - row);
     const int picker_top = content.top + top_row + gap;
-    PlacePaneDialogControl(
-        pane,
+    static_cast<void>(plan.PlaceControl(
         IDC_COLOR_PICKER,
         content.left,
         picker_top,
         std::max(0, static_cast<int>(content.right - content.left)),
-        std::max(0, fields_top - gap - picker_top),
-        false);
+        std::max(0, fields_top - gap - picker_top)));
     const int apply_width = std::min(
         std::max(0, static_cast<int>(content.right - content.left)),
         PaneButtonIdealWidth(pane, IDC_COLOR_APPLY));
@@ -753,41 +600,33 @@ void LayoutPane(HWND pane) noexcept {
     int x = content.left;
     for (const int control : {
              IDC_COLOR_RED, IDC_COLOR_GREEN, IDC_COLOR_BLUE, IDC_COLOR_ALPHA}) {
-        PlacePaneDialogControl(
-            pane,
+        static_cast<void>(plan.PlaceControl(
             control,
             x,
             fields_top,
             field_width,
-            row,
-            false);
+            row));
         x += field_width + gap;
     }
-    PlacePaneDialogControl(
-        pane,
+    static_cast<void>(plan.PlaceControl(
         IDC_COLOR_APPLY,
         content.right - apply_width,
         fields_top,
         apply_width,
-        row,
-        false);
+        row));
     const int button_width = ScaleForDpi(32, dpi);
-    PlacePaneDialogControl(
-        pane,
+    static_cast<void>(plan.PlaceControl(
         IDC_PALETTE_PREVIOUS,
         content.left,
         content.top,
         button_width,
-        row,
-        false);
-    PlacePaneDialogControl(
-        pane,
+        row));
+    static_cast<void>(plan.PlaceControl(
         IDC_PALETTE_NEXT,
         content.right - button_width,
         content.top,
         button_width,
-        row,
-        false);
+        row));
     const std::array<int, 5U> palette_action_controls{
         IDC_PALETTE_REGISTER_BUTTON,
         IDC_PALETTE_DELETE_BUTTON,
@@ -802,17 +641,15 @@ void LayoutPane(HWND pane) noexcept {
         + std::max(0, static_cast<int>(palette_action_rows) - 1) * gap;
     const int palette_action_top = content.top + row + gap;
     PlacePaneButtonRows(
-        pane,
+        plan,
         palette_action_controls,
         content.left,
         palette_action_top,
         palette_content_width,
         row,
         gap,
-        0U,
-        false);
-    PlacePaneDialogControl(
-        pane,
+        0U);
+    static_cast<void>(plan.PlaceControl(
         IDC_PALETTE_LIST,
         content.left,
         palette_action_top + palette_action_height + gap,
@@ -820,35 +657,19 @@ void LayoutPane(HWND pane) noexcept {
         std::max(
             0,
             static_cast<int>(content.bottom)
-                - palette_action_top - palette_action_height - gap),
-        false);
-    PlacePaneDialogControl(
-        pane,
+                - palette_action_top - palette_action_height - gap)));
+    static_cast<void>(plan.PlaceControl(
         IDC_COLOR_CHART_LIST,
         content.left,
         content.top,
         std::max(0, static_cast<int>(content.right - content.left)),
-        std::max(0, static_cast<int>(content.bottom - content.top)),
-        false);
-    if (const HWND tabs = GetDlgItem(pane, IDC_COLOR_TABS); tabs != nullptr) {
-        SetWindowPos(
-            tabs,
-            HWND_BOTTOM,
-            0,
-            0,
-            0,
-            0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE
-                | SWP_NOOWNERZORDER | SWP_NOREDRAW);
+        std::max(0, static_cast<int>(content.bottom - content.top))));
+    if (!plan.Commit(PaneDialogRepaint::None)
+        || !FinalizePaneTabPageZOrder(
+            pane, IDC_COLOR_TABS, kColorTabPageControls)) {
+        return;
     }
-    RepaintMovedPaneTargetRow(
-        pane, target_row_before, CapturePaneTargetRowBounds(pane));
-    const ColorDockPaneState* state = PaneState(pane);
-    const HWND tabs = GetDlgItem(pane, IDC_COLOR_TABS);
-    const ColorDockTabId active_tab = state == nullptr
-        ? ColorTabAt(tabs, TabCtrl_GetCurSel(tabs))
-        : state->active_tab;
-    RepaintVisibleTabControls(pane, active_tab);
+    CompletePaneDialogResize(pane);
 }
 
 void UpdateFont(HWND pane, ColorDockPaneState& state) noexcept {
@@ -893,7 +714,7 @@ void UpdateFont(HWND pane, ColorDockPaneState& state) noexcept {
              IDC_PALETTE_SAVE_BUTTON,
              IDC_COLOR_CHART_LIST}) {
         SendDlgItemMessageW(
-            pane, control, WM_SETFONT, reinterpret_cast<WPARAM>(replacement), TRUE);
+            pane, control, WM_SETFONT, reinterpret_cast<WPARAM>(replacement), FALSE);
     }
     if (state.font != nullptr) {
         DeleteObject(state.font);
@@ -2541,7 +2362,7 @@ LRESULT CALLBACK PaneSubclassProcedure(
                 pane, message, wparam, lparam);
             if (state != nullptr) {
                 InvalidatePickerCaches(*state);
-                RepaintVisibleTabControls(pane, state->active_tab);
+                CompletePaneDialogResize(pane);
             }
             return result;
         }
@@ -2589,8 +2410,16 @@ HWND CreateControl(
 void PopulateLists(HWND pane, ColorDockPaneState& state) noexcept {
     const HWND palette = GetDlgItem(pane, IDC_PALETTE_LIST);
     const HWND chart = GetDlgItem(pane, IDC_COLOR_CHART_LIST);
-    SendMessageW(palette, WM_SETREDRAW, FALSE, 0);
-    SendMessageW(chart, WM_SETREDRAW, FALSE, 0);
+    const bool palette_redraw_suspended = palette != nullptr
+        && (GetWindowLongPtrW(palette, GWL_STYLE) & WS_VISIBLE) != 0;
+    const bool chart_redraw_suspended = chart != nullptr
+        && (GetWindowLongPtrW(chart, GWL_STYLE) & WS_VISIBLE) != 0;
+    if (palette_redraw_suspended) {
+        SendMessageW(palette, WM_SETREDRAW, FALSE, 0);
+    }
+    if (chart_redraw_suspended) {
+        SendMessageW(chart, WM_SETREDRAW, FALSE, 0);
+    }
     SendMessageW(palette, LB_RESETCONTENT, 0, 0);
     SendMessageW(chart, LB_RESETCONTENT, 0, 0);
     const std::size_t palette_begin = static_cast<std::size_t>(state.palette_group) * 10U;
@@ -2614,10 +2443,18 @@ void PopulateLists(HWND pane, ColorDockPaneState& state) noexcept {
         }
     }
     EnableWindow(chart, state.chart_locked ? FALSE : TRUE);
-    SendMessageW(palette, WM_SETREDRAW, TRUE, 0);
-    SendMessageW(chart, WM_SETREDRAW, TRUE, 0);
-    InvalidateRect(palette, nullptr, TRUE);
-    InvalidateRect(chart, nullptr, TRUE);
+    if (palette_redraw_suspended) {
+        SendMessageW(palette, WM_SETREDRAW, TRUE, 0);
+        if (IsWindowVisible(palette) != FALSE) {
+            InvalidateRect(palette, nullptr, TRUE);
+        }
+    }
+    if (chart_redraw_suspended) {
+        SendMessageW(chart, WM_SETREDRAW, TRUE, 0);
+        if (IsWindowVisible(chart) != FALSE) {
+            InvalidateRect(chart, nullptr, TRUE);
+        }
+    }
 }
 
 }  // namespace
