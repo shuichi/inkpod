@@ -355,7 +355,6 @@ impl Core {
             && self.active_stroke.is_none()
             && self.filter_preview.is_none()
             && self.shooting_frame_preview.is_none()
-            && self.vanishing_point_preview.is_none()
             && self.floating.is_none()
             && self.color_check.is_none()
             && !self.view.alpha_view)

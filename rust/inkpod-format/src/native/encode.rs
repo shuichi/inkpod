@@ -1,6 +1,5 @@
 use super::model::*;
 use super::validate::{validate_document, validate_document_metadata};
-use crate::adjustment::encode_adjustment_metadata;
 use crate::light_table::encode_light_table_metadata;
 use inkpod_image::{PixelFormat, PixelValue};
 pub fn encode_document_archive(document: &DocumentArchive) -> Result<Vec<u8>, FormatError> {
@@ -14,11 +13,6 @@ pub fn encode_document_archive(document: &DocumentArchive) -> Result<Vec<u8>, Fo
         .light_table_metadata
         .as_ref()
         .map(encode_light_table_metadata)
-        .transpose()?;
-    let adjustment_metadata = document
-        .adjustment_metadata
-        .as_ref()
-        .map(encode_adjustment_metadata)
         .transpose()?;
     let blob_count = document.planes.iter().try_fold(0_usize, |count, plane| {
         count
@@ -49,13 +43,6 @@ pub fn encode_document_archive(document: &DocumentArchive) -> Result<Vec<u8>, Fo
         .and_then(|value| {
             value.checked_add(
                 light_table_metadata
-                    .as_ref()
-                    .map_or(0, |bytes| bytes.len().saturating_add(8)),
-            )
-        })
-        .and_then(|value| {
-            value.checked_add(
-                adjustment_metadata
                     .as_ref()
                     .map_or(0, |bytes| bytes.len().saturating_add(8)),
             )
@@ -116,11 +103,6 @@ pub fn encode_document_archive(document: &DocumentArchive) -> Result<Vec<u8>, Fo
             }
             | if light_table_metadata.is_some() {
                 CONTAINER_FLAG_LIGHT_TABLE_METADATA
-            } else {
-                0
-            }
-            | if adjustment_metadata.is_some() {
-                CONTAINER_FLAG_ADJUSTMENT_METADATA
             } else {
                 0
             },
@@ -186,17 +168,6 @@ pub fn encode_document_archive(document: &DocumentArchive) -> Result<Vec<u8>, Fo
         push_u32(&mut output, 0);
         output.extend_from_slice(metadata);
     }
-    if let Some(metadata) = &adjustment_metadata {
-        push_u32(
-            &mut output,
-            metadata.len().try_into().map_err(|_| {
-                FormatError::Invalid("adjustment metadata length is not representable")
-            })?,
-        );
-        push_u32(&mut output, 0);
-        output.extend_from_slice(metadata);
-    }
-
     let mut first_blob = 0_u32;
     for plane in &document.planes {
         push_u64(&mut output, plane.id);
@@ -231,7 +202,7 @@ fn encode_document_metadata(metadata: &FileDocumentMetadata) -> Result<Vec<u8>, 
     let color_chart = crate::encode_color_chart(&metadata.color_chart)?;
     let mut output = Vec::new();
     output.extend_from_slice(&DOCUMENT_METADATA_MAGIC);
-    push_u32(&mut output, 7);
+    push_u32(&mut output, DOCUMENT_METADATA_VERSION);
     push_u64(&mut output, metadata.active_layer_id);
     push_u64(&mut output, metadata.active_plane_id);
     push_u64(&mut output, metadata.selection_plane_id);
@@ -239,7 +210,7 @@ fn encode_document_metadata(metadata: &FileDocumentMetadata) -> Result<Vec<u8>, 
     push_u32(&mut output, metadata.layers.len() as u32);
     push_u32(&mut output, metadata.guides.len() as u32);
     push_u32(&mut output, u32::from(metadata.shooting_frame.is_some()));
-    push_u32(&mut output, metadata.vanishing_points.len() as u32);
+    push_u32(&mut output, metadata.saved_selections.len() as u32);
     push_i32(&mut output, metadata.grid.origin_x);
     push_i32(&mut output, metadata.grid.origin_y);
     push_u32(&mut output, metadata.grid.spacing_x);
@@ -249,7 +220,6 @@ fn encode_document_metadata(metadata: &FileDocumentMetadata) -> Result<Vec<u8>, 
     push_u32(&mut output, u32::from(metadata.color_chart_locked));
     for layer in &metadata.layers {
         push_u64(&mut output, layer.id);
-        push_u32(&mut output, layer.kind.code());
         push_u32(
             &mut output,
             u32::from(layer.visible) | (u32::from(layer.editable) << 1),
@@ -305,17 +275,11 @@ fn encode_document_metadata(metadata: &FileDocumentMetadata) -> Result<Vec<u8>, 
         );
         push_u32(&mut output, 0);
     }
-    for point in &metadata.vanishing_points {
-        push_u64(&mut output, point.id);
-        push_u64(&mut output, point.layer_id);
-        push_i64(&mut output, point.x_milli);
-        push_i64(&mut output, point.y_milli);
-        push_u32(&mut output, point.interval_milli_degrees);
-        push_u32(&mut output, point.angle_milli_degrees);
-        push_u32(&mut output, point.opacity_milli);
-        push_u32(&mut output, u32::from(point.visible));
+    for saved_selection in &metadata.saved_selections {
+        push_u64(&mut output, saved_selection.id);
+        push_u32(&mut output, saved_selection.name.len() as u32);
         push_u32(&mut output, 0);
-        push_color_value(&mut output, point.color)?;
+        output.extend_from_slice(saved_selection.name.as_bytes());
     }
     output.extend_from_slice(&color_chart);
     if output.len() > MAX_MANIFEST_BYTES as usize {

@@ -1,52 +1,10 @@
 use super::*;
 
-pub(crate) fn parse_layer_kind(value: u32) -> Result<LayerKind, u32> {
-    match value {
-        INKPOD_LAYER_BINARY_COLORING => Ok(LayerKind::BinaryColoring),
-        INKPOD_LAYER_GRAYSCALE_COLORING => Ok(LayerKind::GrayscaleColoring),
-        INKPOD_LAYER_RASTER => Ok(LayerKind::Raster),
-        INKPOD_LAYER_SELECTION => Ok(LayerKind::Selection),
-        INKPOD_LAYER_FRAME => Ok(LayerKind::Frame),
-        INKPOD_LAYER_VANISHING_POINT => Ok(LayerKind::VanishingPoint),
-        INKPOD_LAYER_ADJUSTMENT => Ok(LayerKind::Adjustment),
-        _ => Err(fail(
-            INKPOD_STATUS_INVALID_ARGUMENT,
-            "layer kind is not defined",
-        )),
-    }
-}
-
-pub(crate) fn layer_kind_code(value: LayerKind) -> u32 {
-    match value {
-        LayerKind::BinaryColoring => INKPOD_LAYER_BINARY_COLORING,
-        LayerKind::GrayscaleColoring => INKPOD_LAYER_GRAYSCALE_COLORING,
-        LayerKind::Raster => INKPOD_LAYER_RASTER,
-        LayerKind::Selection => INKPOD_LAYER_SELECTION,
-        LayerKind::Frame => INKPOD_LAYER_FRAME,
-        LayerKind::VanishingPoint => INKPOD_LAYER_VANISHING_POINT,
-        LayerKind::Adjustment => INKPOD_LAYER_ADJUSTMENT,
-    }
-}
-
-pub(crate) fn parse_plane_type(value: u32) -> Result<PlaneType, u32> {
-    match value {
-        INKPOD_TYPED_PLANE_MAIN_LINE => Ok(PlaneType::MainLine),
-        INKPOD_TYPED_PLANE_COLOR => Ok(PlaneType::Color),
-        INKPOD_TYPED_PLANE_RASTER => Ok(PlaneType::Raster),
-        INKPOD_TYPED_PLANE_SELECTION => Ok(PlaneType::Selection),
-        _ => Err(fail(
-            INKPOD_STATUS_INVALID_ARGUMENT,
-            "typed plane kind is not defined",
-        )),
-    }
-}
-
 pub(crate) fn plane_type_code(value: PlaneType) -> u32 {
     match value {
         PlaneType::MainLine => INKPOD_TYPED_PLANE_MAIN_LINE,
         PlaneType::Color => INKPOD_TYPED_PLANE_COLOR,
         PlaneType::Raster => INKPOD_TYPED_PLANE_RASTER,
-        PlaneType::Selection => INKPOD_TYPED_PLANE_SELECTION,
     }
 }
 

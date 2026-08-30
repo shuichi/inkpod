@@ -1,10 +1,10 @@
 use inkpod_format::{
-    BATCH_GRAPH_VERSION, CommonRaster, CommonRasterFormat, FileBatchGraph, FileBatchInput,
-    FileBatchOperation, FileBatchOutput, FileBatchTarget, FileCutDefaults, FileCutDescriptor,
-    FileCutMetadata, NativeFile, NativeRecord, NativeSection, SECTION_CRITICAL, decode_batch_graph,
-    decode_common_raster, decode_cut_descriptor, decode_procedure_file, encode_batch_graph,
-    encode_common_raster, encode_cut_descriptor, encode_procedure_file, read_batch_graph,
-    read_cut_descriptor, read_procedure_file,
+    BATCH_GRAPH_VERSION, BATCH_OPERATION_VERSION, CommonRaster, CommonRasterFormat, FileBatchGraph,
+    FileBatchInput, FileBatchOperation, FileBatchOutput, FileBatchTarget, FileCutDefaults,
+    FileCutDescriptor, FileCutMetadata, NativeFile, NativeRecord, NativeSection, SECTION_CRITICAL,
+    decode_batch_graph, decode_common_raster, decode_cut_descriptor, decode_procedure_file,
+    encode_batch_graph, encode_common_raster, encode_cut_descriptor, encode_procedure_file,
+    read_batch_graph, read_cut_descriptor, read_procedure_file,
 };
 use inkpod_image::PixelFormat;
 use std::fs;
@@ -93,10 +93,15 @@ fn batch_seed() -> Vec<u8> {
             last_cell: 1,
         }],
         operations: vec![FileBatchOperation {
-            version: 1,
+            version: BATCH_OPERATION_VERSION,
             kind: 1,
             flags: 1,
-            targets: vec![FileBatchTarget::default()],
+            targets: vec![FileBatchTarget {
+                layer_id: 0,
+                plane_id: 0,
+                plane_kind: 2,
+                missing_policy: 1,
+            }],
             payload: vec![1, 2, 3, 4],
         }],
         output: FileBatchOutput {
@@ -131,7 +136,6 @@ fn cut_seed() -> Vec<u8> {
         safe_frame_ratio_milli: 900,
         maximum_close_ratio_milli: 500,
         anchor: 3,
-        initial_layer_kind: 1,
         pixel_format: 5,
     };
     encode_cut_descriptor(&FileCutDescriptor {

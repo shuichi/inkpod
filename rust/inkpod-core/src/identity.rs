@@ -36,6 +36,37 @@ numeric_token!(DocumentId, "A document stable ID. Zero is invalid.");
 numeric_token!(CellId, "A cell stable ID. Zero is invalid.");
 numeric_token!(LayerId, "A layer stable ID. Zero is invalid.");
 numeric_token!(PlaneId, "A plane stable ID. Zero is invalid.");
+
+/// A document-owned saved-selection-mask stable ID.
+///
+/// The ID belongs to one [`crate::Core`] instance, remains valid until the
+/// saved mask is deleted, and is never zero.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[repr(transparent)]
+pub struct SavedSelectionId(u64);
+
+impl SavedSelectionId {
+    /// Constructs an ID from its fixed-width boundary representation.
+    ///
+    /// Zero is reserved as an invalid/null sentinel and returns `None`.
+    #[must_use]
+    pub const fn from_raw(value: u64) -> Option<Self> {
+        if value == 0 { None } else { Some(Self(value)) }
+    }
+
+    /// Returns the fixed-width boundary representation of this ID.
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
+impl fmt::Display for SavedSelectionId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
 numeric_token!(GuideId, "A guide stable ID. Zero is invalid.");
 numeric_token!(
     LightTableSetId,
@@ -48,10 +79,6 @@ numeric_token!(
 numeric_token!(
     ShootingFrameId,
     "An angled shooting-frame stable ID. Zero is invalid."
-);
-numeric_token!(
-    VanishingPointId,
-    "A vanishing-point stable ID. Zero is invalid."
 );
 numeric_token!(ViewId, "A secondary-view stable ID. Zero is invalid.");
 numeric_token!(
@@ -149,6 +176,10 @@ impl StableIdCursor {
         PlaneId::from_raw(self.take_raw())
     }
 
+    pub(crate) fn take_saved_selection(&mut self) -> SavedSelectionId {
+        SavedSelectionId(self.take_raw())
+    }
+
     pub(crate) fn take_guide(&mut self) -> GuideId {
         GuideId::from_raw(self.take_raw())
     }
@@ -164,10 +195,6 @@ impl StableIdCursor {
     pub(crate) fn take_shooting_frame(&mut self) -> ShootingFrameId {
         ShootingFrameId::from_raw(self.take_raw())
     }
-
-    pub(crate) fn take_vanishing_point(&mut self) -> VanishingPointId {
-        VanishingPointId::from_raw(self.take_raw())
-    }
 }
 
 #[cfg(test)]
@@ -180,13 +207,15 @@ mod tests {
         let document = cursor.take_document();
         let layer = cursor.take_layer();
         let plane = cursor.take_plane();
+        let saved_selection = cursor.take_saved_selection();
         let cell = cursor.take_cell();
 
         assert_eq!(document.get(), 1);
         assert_eq!(layer.get(), 2);
         assert_eq!(plane.get(), 3);
-        assert_eq!(cell.get(), 4);
-        assert_eq!(cursor.next_raw(), 5);
+        assert_eq!(saved_selection.get(), 4);
+        assert_eq!(cell.get(), 5);
+        assert_eq!(cursor.next_raw(), 6);
     }
 
     #[test]
@@ -204,5 +233,11 @@ mod tests {
             ViewRevision::from_raw(u64::MAX).saturating_next().get(),
             u64::MAX
         );
+    }
+
+    #[test]
+    fn saved_selection_boundary_id_rejects_zero() {
+        assert_eq!(SavedSelectionId::from_raw(0), None);
+        assert_eq!(SavedSelectionId::from_raw(9).unwrap().get(), 9);
     }
 }

@@ -21,7 +21,6 @@ inline constexpr std::uint32_t kInteractionFloatingTransform = 1006U;
 inline constexpr std::uint32_t kInteractionLightTableMove = 1007U;
 inline constexpr std::uint32_t kInteractionColorReplace = 1008U;
 inline constexpr std::uint32_t kInteractionShootingFrame = 1009U;
-inline constexpr std::uint32_t kInteractionVanishingPoint = 1010U;
 inline constexpr std::uint32_t kInteractionEffectGradient = 1101U;
 inline constexpr std::uint32_t kInteractionEffectAirbrush = 1102U;
 inline constexpr std::uint32_t kInteractionEffectBlur = 1103U;

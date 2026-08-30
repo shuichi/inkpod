@@ -3,7 +3,7 @@
 use super::*;
 use inkpod_image::{source_over_rgba8, source_over_rgba16};
 
-const COMPOSITE_DIGEST_CONTEXT: &str = "org.inkpod.digest.canonical-composite.v4";
+const COMPOSITE_DIGEST_CONTEXT: &str = "org.inkpod.digest.canonical-composite.v5";
 
 /// Architecture-independent digest of one snapshot's document result.
 ///
@@ -165,8 +165,6 @@ pub enum RenderPassKind {
     LayerBegin,
     /// Draws a contiguous span of premultiplied raster tiles.
     RasterTiles,
-    /// Applies one Core-resolved RGB lookup table to the accumulated result.
-    Adjustment,
     /// Ends the current logical layer group.
     LayerEnd,
 }
@@ -195,7 +193,7 @@ impl RenderPass {
         self.layer_id
     }
 
-    /// Returns the stable source plane ID, or zero for group/adjustment passes.
+    /// Returns the stable source plane ID, or zero for group passes.
     #[must_use]
     pub const fn plane_id(&self) -> u64 {
         self.plane_id
@@ -220,21 +218,6 @@ impl RenderPass {
     }
 }
 
-/// Three exact 8-bit display lookup tables resolved by the Core for one
-/// adjustment pass. Alpha is preserved by adjustment rendering.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RenderAdjustmentLut {
-    channels: [[u8; 256]; 3],
-}
-
-impl RenderAdjustmentLut {
-    /// Borrows red, green, and blue lookup tables in that order.
-    #[must_use]
-    pub const fn channels(&self) -> &[[u8; 256]; 3] {
-        &self.channels
-    }
-}
-
 /// Immutable document render data with a separate device-pixel view transform.
 ///
 /// Raster tile origins, guides, and grid values are all
@@ -251,10 +234,7 @@ pub struct RenderSnapshot {
     grid: GridConfig,
     tiles: Vec<RenderTile>,
     render_passes: Vec<RenderPass>,
-    adjustment_luts: Vec<RenderAdjustmentLut>,
     shooting_frames: Vec<ShootingFrameInfo>,
-    vanishing_points: Vec<VanishingPointInfo>,
-    radial_guides: Vec<RenderRadialGuide>,
     sequence_render_source: Option<SequenceRenderSourceIdentity>,
 }
 
@@ -268,10 +248,7 @@ impl PartialEq for RenderSnapshot {
             && self.grid == other.grid
             && self.tiles == other.tiles
             && self.render_passes == other.render_passes
-            && self.adjustment_luts == other.adjustment_luts
             && self.shooting_frames == other.shooting_frames
-            && self.vanishing_points == other.vanishing_points
-            && self.radial_guides == other.radial_guides
     }
 }
 
@@ -299,10 +276,7 @@ impl RenderSnapshot {
                 first_item: 0,
                 item_count: tile_count,
             }],
-            adjustment_luts: Vec::new(),
             shooting_frames: Vec::new(),
-            vanishing_points: Vec::new(),
-            radial_guides: Vec::new(),
             sequence_render_source: None,
         }
     }
@@ -378,28 +352,10 @@ impl RenderSnapshot {
         &self.render_passes
     }
 
-    /// Borrows Core-resolved adjustment lookup tables referenced by passes.
-    #[must_use]
-    pub fn adjustment_luts(&self) -> &[RenderAdjustmentLut] {
-        &self.adjustment_luts
-    }
-
     /// Borrows the optional visible angled shooting-frame instruction overlay.
     #[must_use]
     pub fn shooting_frames(&self) -> &[ShootingFrameInfo] {
         &self.shooting_frames
-    }
-
-    /// Borrows visible vanishing-point handles captured by this snapshot.
-    #[must_use]
-    pub fn vanishing_points(&self) -> &[VanishingPointInfo] {
-        &self.vanishing_points
-    }
-
-    /// Borrows viewport-clipped radial guide segments captured by this snapshot.
-    #[must_use]
-    pub fn radial_guides(&self) -> &[RenderRadialGuide] {
-        &self.radial_guides
     }
 
     /// Computes the canonical document-result digest for this immutable snapshot.
@@ -409,7 +365,7 @@ impl RenderSnapshot {
     /// error only if internally produced snapshot state is invalid.
     pub fn canonical_composite_digest(&self) -> Result<CanonicalCompositeDigest, CoreError> {
         let mut hasher = blake3::Hasher::new_derive_key(COMPOSITE_DIGEST_CONTEXT);
-        hasher.update(&4_u32.to_le_bytes());
+        hasher.update(&5_u32.to_le_bytes());
         hasher.update(&self.feature_flags.to_le_bytes());
         hasher.update(&self.document_size.width.to_le_bytes());
         hasher.update(&self.document_size.height.to_le_bytes());
@@ -429,7 +385,6 @@ impl RenderSnapshot {
             let kind = match pass.kind {
                 RenderPassKind::LayerBegin => 1_u32,
                 RenderPassKind::RasterTiles => 2,
-                RenderPassKind::Adjustment => 3,
                 RenderPassKind::LayerEnd => 4,
             };
             hasher.update(&kind.to_le_bytes());
@@ -438,12 +393,6 @@ impl RenderSnapshot {
             hasher.update(&pass.opacity_milli.to_le_bytes());
             hasher.update(&pass.first_item.to_le_bytes());
             hasher.update(&pass.item_count.to_le_bytes());
-        }
-        hasher.update(&(self.adjustment_luts.len() as u64).to_le_bytes());
-        for lut in &self.adjustment_luts {
-            for channel in &lut.channels {
-                hasher.update(channel);
-            }
         }
         Ok(CanonicalCompositeDigest(*hasher.finalize().as_bytes()))
     }
@@ -518,11 +467,6 @@ impl Core {
                     .map(|session| &session.preview_document)
             })
             .or_else(|| {
-                self.vanishing_point_preview
-                    .as_ref()
-                    .map(|session| &session.preview_document)
-            })
-            .or_else(|| {
                 self.filter_preview
                     .as_ref()
                     .map(|session| &session.preview_document)
@@ -540,10 +484,7 @@ impl Core {
                 grid: GridConfig::default(),
                 tiles: Vec::new(),
                 render_passes: Vec::new(),
-                adjustment_luts: Vec::new(),
                 shooting_frames: Vec::new(),
-                vanishing_points: Vec::new(),
-                radial_guides: Vec::new(),
                 sequence_render_source: None,
             };
         };
@@ -553,11 +494,6 @@ impl Core {
             .map(|session| RenderRevision::from_raw(session.preview_revision.get()))
             .or_else(|| {
                 self.shooting_frame_preview
-                    .as_ref()
-                    .map(|session| RenderRevision::from_raw(session.preview_revision.get()))
-            })
-            .or_else(|| {
-                self.vanishing_point_preview
                     .as_ref()
                     .map(|session| RenderRevision::from_raw(session.preview_revision.get()))
             })
@@ -578,7 +514,7 @@ impl Core {
             feature_flags |= SNAPSHOT_FEATURE_SOLID_WHITE_BASE;
         }
         let base_asset = match document.base_surface {
-            BaseSurface::SolidWhite => None,
+            BaseSurface::SolidWhite | BaseSurface::Transparent => None,
             BaseSurface::Asset(id) => self.assets.get(id),
         };
         let base_raster = base_asset.as_ref().and_then(|asset| asset.raster());
@@ -673,14 +609,11 @@ impl Core {
             grid: document.grid,
             tiles,
             render_passes,
-            adjustment_luts: Vec::new(),
             shooting_frames: document
                 .shooting_frame
                 .filter(|frame| frame.input.visible)
                 .map(|frame| vec![frame.info()])
                 .unwrap_or_default(),
-            vanishing_points: visible_vanishing_point_infos(document),
-            radial_guides: build_radial_guides(document, self.view),
             sequence_render_source,
         };
         self.schedule_sequence_render_neighbors();
@@ -759,10 +692,7 @@ impl Core {
                 first_item: 0,
                 item_count: tile_count,
             }],
-            adjustment_luts: Vec::new(),
             shooting_frames: Vec::new(),
-            vanishing_points: Vec::new(),
-            radial_guides: Vec::new(),
             sequence_render_source: None,
         })
     }
@@ -791,12 +721,9 @@ pub(super) fn revision_max_tile_source_revision(
     RenderRevision::from_raw(source_revision)
 }
 
-type OrderedContent = (Vec<RenderTile>, Vec<RenderPass>, Vec<RenderAdjustmentLut>);
+type OrderedContent = (Vec<RenderTile>, Vec<RenderPass>);
 
-#[allow(
-    dead_code,
-    reason = "retained for ordered raster adjustment validation"
-)]
+#[allow(dead_code, reason = "retained for ordered raster pass validation")]
 fn build_ordered_content(
     document: &CellDocument,
     base_raster: Option<&TileRaster>,
@@ -807,7 +734,6 @@ fn build_ordered_content(
     const SELECTION_CACHE_KEY: u64 = u64::MAX - 1;
     let mut tiles = Vec::new();
     let mut passes = Vec::new();
-    let mut adjustment_luts = Vec::new();
     let mut active_cache_keys = BTreeSet::new();
     let mut raster_pass_index = 0_u32;
 
@@ -879,19 +805,6 @@ fn build_ordered_content(
     }
 
     for layer in document.layers.iter().rev().filter(|layer| layer.visible) {
-        if let Some(adjustment) = document.adjustments.get(&layer.id) {
-            let index = adjustment_luts.len() as u64;
-            adjustment_luts.push(resolve_adjustment_lut(adjustment, layer.opacity_milli));
-            passes.push(RenderPass {
-                kind: RenderPassKind::Adjustment,
-                layer_id: layer.id.get(),
-                plane_id: 0,
-                opacity_milli: 1_000,
-                first_item: index,
-                item_count: 1,
-            });
-            continue;
-        }
         passes.push(RenderPass {
             kind: RenderPassKind::LayerBegin,
             layer_id: layer.id.get(),
@@ -902,10 +815,7 @@ fn build_ordered_content(
         });
         for plane in layer.planes.iter().rev() {
             match plane.kind {
-                PlaneType::MainLine
-                | PlaneType::Color
-                | PlaneType::Raster
-                | PlaneType::Selection => {
+                PlaneType::MainLine | PlaneType::Color | PlaneType::Raster => {
                     if !plane.visible || plane.opacity_milli == 0 {
                         continue;
                     }
@@ -1006,32 +916,11 @@ fn build_ordered_content(
         }
     }
     cache.retain(|key, _| active_cache_keys.contains(key));
-    (tiles, passes, adjustment_luts)
+    (tiles, passes)
 }
 
 fn ordered_tile_id(pass_index: u32, coord: TileCoord) -> u64 {
     (1_u64 << 63) | (u64::from(pass_index) << 28) | (u64::from(coord.y) << 14) | u64::from(coord.x)
-}
-
-fn resolve_adjustment_lut(adjustment: &Adjustment, opacity_milli: u32) -> RenderAdjustmentLut {
-    let mut channels = [[0_u8; 256]; 3];
-    for channel in 0..3 {
-        for value in 0_u16..=255 {
-            let mut input = [0_u8; 4];
-            input[channel] = value as u8;
-            input[3] = u8::MAX;
-            let adjusted = inkpod_image::apply_adjustment(PixelValue::Rgba(input), adjustment)
-                .ok()
-                .and_then(PixelValue::rgba16)
-                .map(|rgba| ((u32::from(rgba[channel]) + 128) / 257) as u8)
-                .unwrap_or(value as u8);
-            channels[channel][value as usize] = ((u32::from(value) * (1_000 - opacity_milli)
-                + u32::from(adjusted) * opacity_milli
-                + 500)
-                / 1_000) as u8;
-        }
-    }
-    RenderAdjustmentLut { channels }
 }
 
 // Shared implementation helpers for this responsibility.
@@ -1065,7 +954,6 @@ enum PreparedPlaneKind {
     MainLine16([u8; 4]),
     Color8,
     Color16,
-    Selection8,
 }
 
 #[derive(Clone, Copy)]
@@ -1109,17 +997,12 @@ impl PreparedPlaneTile<'_> {
                     ((u32::from(value) + 128) / 257) as u8
                 })
             }
-            PreparedPlaneKind::Selection8 => {
-                let coverage = bytes[row + local_x as usize];
-                [0, 160, 255, coverage / 3]
-            }
         }
     }
 }
 
 struct PreparedLayer<'a> {
     opacity_milli: u32,
-    adjustment: Option<&'a Adjustment>,
     planes: Vec<PreparedPlaneTile<'a>>,
 }
 
@@ -1203,27 +1086,8 @@ fn prepare_layers_for_tile<'a>(
     // bottom-to-top order so the pixel loop performs neither map lookups nor
     // document-to-tile division.
     for layer in document.layers.iter().rev().filter(|layer| layer.visible) {
-        if let Some(adjustment) = document.adjustments.get(&layer.id) {
-            layers.push(PreparedLayer {
-                opacity_milli: layer.opacity_milli,
-                adjustment: Some(adjustment),
-                planes: Vec::new(),
-            });
-            continue;
-        }
-
         let mut planes = Vec::with_capacity(layer.planes.len());
-        for plane in layer
-            .planes
-            .iter()
-            .filter(|plane| plane.visible && plane.kind != PlaneType::MainLine)
-            .chain(
-                layer
-                    .planes
-                    .iter()
-                    .filter(|plane| plane.visible && plane.kind == PlaneType::MainLine),
-            )
-        {
+        for plane in layer.planes.iter().rev().filter(|plane| plane.visible) {
             if !raster_covers_tile_rect(&plane.raster, origin_x, origin_y, width, height) {
                 return None;
             }
@@ -1237,15 +1101,13 @@ fn prepare_layers_for_tile<'a>(
                     PreparedPlaneKind::MainLine16(rgba8_for_display(document.main_line_color)?),
                 ),
                 (
-                    PlaneType::Color | PlaneType::Raster,
+                    PlaneType::MainLine | PlaneType::Color | PlaneType::Raster,
                     PixelFormat::StraightRgba8 | PixelFormat::PremultipliedBgra8,
                 ) => Some(PreparedPlaneKind::Color8),
-                (PlaneType::Color | PlaneType::Raster, PixelFormat::StraightRgba16) => {
-                    Some(PreparedPlaneKind::Color16)
-                }
-                (PlaneType::Selection, PixelFormat::BinaryMask8) => {
-                    Some(PreparedPlaneKind::Selection8)
-                }
+                (
+                    PlaneType::MainLine | PlaneType::Color | PlaneType::Raster,
+                    PixelFormat::StraightRgba16,
+                ) => Some(PreparedPlaneKind::Color16),
                 _ => return None,
             };
             let (Some(kind), Some(tile)) = (kind, tile) else {
@@ -1261,7 +1123,6 @@ fn prepare_layers_for_tile<'a>(
         }
         layers.push(PreparedLayer {
             opacity_milli: layer.opacity_milli,
-            adjustment: None,
             planes,
         });
     }
@@ -1296,13 +1157,13 @@ fn compose_raster_plane_tile(
             PreparedPlaneKind::MainLine16(rgba8_for_display(document.main_line_color)?)
         }
         (
-            PlaneType::Color | PlaneType::Raster,
+            PlaneType::MainLine | PlaneType::Color | PlaneType::Raster,
             PixelFormat::StraightRgba8 | PixelFormat::PremultipliedBgra8,
         ) => PreparedPlaneKind::Color8,
-        (PlaneType::Color | PlaneType::Raster, PixelFormat::StraightRgba16) => {
-            PreparedPlaneKind::Color16
-        }
-        (PlaneType::Selection, PixelFormat::BinaryMask8) => PreparedPlaneKind::Selection8,
+        (
+            PlaneType::MainLine | PlaneType::Color | PlaneType::Raster,
+            PixelFormat::StraightRgba16,
+        ) => PreparedPlaneKind::Color16,
         _ => return None,
     };
     let prepared = PreparedPlaneTile {
@@ -1534,20 +1395,6 @@ pub(super) fn compose_tile(
                 composite = blend_rgba_over(composite, reference);
             }
             for layer in &layers {
-                if let Some(adjustment) = layer.adjustment {
-                    let adjusted =
-                        inkpod_image::apply_adjustment(PixelValue::Rgba(composite), adjustment)
-                            .ok()?
-                            .rgba16()?
-                            .map(|channel| ((u32::from(channel) + 128) / 257) as u8);
-                    composite = std::array::from_fn(|channel| {
-                        ((u32::from(composite[channel]) * (1_000 - layer.opacity_milli)
-                            + u32::from(adjusted[channel]) * layer.opacity_milli
-                            + 500)
-                            / 1_000) as u8
-                    });
-                    continue;
-                }
                 let mut layer_pixel = [0_u8; 4];
                 for plane in &layer.planes {
                     let mut rgba = plane.rgba(x, y);
@@ -1718,7 +1565,7 @@ mod tests {
     ) -> [u8; 4] {
         let value = plane.raster.pixel(x, y).unwrap();
         let mut rgba = match plane.kind {
-            PlaneType::MainLine => {
+            PlaneType::MainLine if value.rgba16().is_none() => {
                 let coverage = match value {
                     PixelValue::Binary(value) | PixelValue::Grayscale8(value) => value,
                     PixelValue::Grayscale16(value) => ((u32::from(value) + 128) / 257) as u8,
@@ -1728,12 +1575,8 @@ mod tests {
                 line[3] = ((u32::from(line[3]) * u32::from(coverage) + 127) / 255) as u8;
                 line
             }
-            PlaneType::Color | PlaneType::Raster => rgba8_for_display(value).unwrap(),
-            PlaneType::Selection => {
-                let PixelValue::Binary(coverage) = value else {
-                    panic!("test fixture uses an invalid selection format");
-                };
-                [0, 160, 255, coverage / 3]
+            PlaneType::MainLine | PlaneType::Color | PlaneType::Raster => {
+                rgba8_for_display(value).unwrap()
             }
         };
         rgba[3] = ((u32::from(rgba[3]) * plane.opacity_milli + 500) / 1_000) as u8;
@@ -1820,11 +1663,6 @@ mod tests {
                 PlaneType::Color,
                 PixelFormat::StraightRgba16,
                 PixelValue::Rgba16([1_000, 20_000, 50_000, 40_000]),
-            ),
-            (
-                PlaneType::Selection,
-                PixelFormat::BinaryMask8,
-                PixelValue::Binary(255),
             ),
         ];
         let modes = [
@@ -2043,7 +1881,11 @@ mod tests {
             blake3::hash(validation_call_graph.as_bytes())
                 .to_hex()
                 .to_string(),
-            "8cd12f127681abaef04b370e8b0a7f54df520b840c502b636573a908b555f2cb",
+            // Audit 2026-08-30: the formatted standard-layer snapshot body removes
+            // the retired radial-guide preview and its empty fields. The forbidden
+            // payload/hash scan above, the revision-max formula, and the runtime
+            // payload-access counters remain unchanged.
+            "a43e3d5639c2d81aebd2f39cbe78a25f8ccc9ade81e4e4cfe444354744448ce6",
             "primary snapshot validation call graph changed; audit payload/hash access before updating this lock"
         );
     }

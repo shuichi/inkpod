@@ -62,7 +62,7 @@ consteval auto BuildMenuCommandIds() {
 }
 
 constexpr auto kMenuCommandIds = BuildMenuCommandIds();
-static_assert(kMenuCommandIds.size() == 321U);
+static_assert(kMenuCommandIds.size() == 313U);
 
 constexpr InkpodShortcutStroke Stroke(UINT key, std::uint32_t modifiers = 0U) noexcept {
     return {key, modifiers};
@@ -114,11 +114,10 @@ const wchar_t* GroupName(UINT command) noexcept {
         case 405: return UiText(UiStringId::Text0865);
         case 406: return UiText(UiStringId::Text0332);
         case 407: return UiText(UiStringId::Layer);
-        case 408: return UiText(UiStringId::LayerSelection);
+        case 408: return UiText(UiStringId::ToolSelection);
         case 409: return UiText(UiStringId::Text0916);
         case 410: return UiText(UiStringId::Text0285);
         case 411: return UiText(UiStringId::Text0781);
-        case 412: return UiText(UiStringId::Text0926);
         case 413: return UiText(UiStringId::Text0219);
         case 414: return UiText(UiStringId::Layer);
         case 415: return UiText(UiStringId::Plane);

@@ -1039,11 +1039,6 @@ fn validate_geometry_target(
             }
         }
         PlaneType::Color | PlaneType::Raster => {}
-        _ => {
-            return Err(CoreError::InvalidArgument(
-                "geometry target plane is not drawable",
-            ));
-        }
     }
     Ok(())
 }

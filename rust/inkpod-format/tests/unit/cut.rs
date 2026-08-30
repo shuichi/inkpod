@@ -22,7 +22,6 @@ fn defaults() -> FileCutDefaults {
         safe_frame_ratio_milli: 900,
         maximum_close_ratio_milli: 500,
         anchor: 3,
-        initial_layer_kind: 1,
         pixel_format: 5,
     }
 }

@@ -15,7 +15,7 @@ pub use brush::{
 #[cfg(test)]
 use common::from_rgba16;
 pub use dust::apply_dust_removal;
-pub use filter::{apply_adjustment, apply_filter, apply_filter_with_progress};
+pub use filter::{apply_filter, apply_filter_with_progress};
 pub use gradient::apply_gradient;
 pub const MAX_FILTER_RADIUS: u32 = 64;
 pub const MAX_CURVE_POINTS: usize = 64;
@@ -102,20 +102,6 @@ pub enum Filter {
     Levels(Levels),
     Hsv(HsvAdjustment),
     ColorBalance(ColorBalance),
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Adjustment {
-    BrightnessContrast {
-        brightness_milli: i32,
-        contrast_milli: i32,
-    },
-    ToneCurve {
-        channel: Channel,
-        interpolation: CurveInterpolation,
-        points: Vec<CurvePoint>,
-    },
-    Levels(Levels),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -370,7 +370,7 @@ impl Core {
         let base_revision = self.document_revision;
         let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
         let revision = self.next_document_revision()?;
-        let plane = editable_color_plane(&before, plane_id)?;
+        let plane = editable_rgba_plane(&before, plane_id)?;
         let mut operation_mask = match shape {
             Some(shape) => Some(selection_mask_for_shape(
                 &before,
@@ -460,7 +460,7 @@ impl Core {
                 self.effect_region_for_view(view_id, coordinate_space, kind, samples, diameter)
             })
             .transpose()?;
-        let plane = editable_color_plane(&base_document, plane_id)?;
+        let plane = editable_rgba_plane(&base_document, plane_id)?;
         let mut operation_mask = shape
             .as_ref()
             .map(|shape| {

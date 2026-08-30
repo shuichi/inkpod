@@ -16,8 +16,8 @@ use crate::primitive::{
     SelectionFloatingScriptAction, StrokeGeometryImportAction, StrokeGeometryImportAdapterError,
 };
 use crate::{
-    Core, CoreError, DocumentStateDigest, LayerKind, MAX_PERSISTENT_NUMERIC_ID, PixelFormat,
-    PlaneType, PrimitiveRequest,
+    Core, CoreError, DocumentStateDigest, MAX_PERSISTENT_NUMERIC_ID, PixelFormat, PlaneType,
+    PrimitiveRequest,
 };
 use inkpod_format::{
     InkScriptInputDeclarationKind, InkScriptResultAvailability, InkScriptResultCardinality,
@@ -520,7 +520,6 @@ fn is_simple(command: &str) -> bool {
         "set_layer_properties"
             | "set_plane_properties"
             | "convert_plane"
-            | "convert_layer"
             | "mirror_document"
             | "rotate_document"
             | "resize_document"
@@ -739,10 +738,6 @@ pub(super) fn initial_snapshot(core: &Core) -> Result<InkScriptInitialDocumentSn
         };
         let mut properties = BTreeMap::new();
         properties.insert(
-            "layer_kind".to_owned(),
-            InkScriptComparableValue::Enum(layer_kind(layer.kind).to_owned()),
-        );
-        properties.insert(
             "name".to_owned(),
             InkScriptComparableValue::String(layer.name),
         );
@@ -834,17 +829,19 @@ pub(super) fn initial_snapshot(core: &Core) -> Result<InkScriptInitialDocumentSn
             properties: BTreeMap::new(),
         });
     }
-    for point in core.vanishing_points()? {
+    for mask in core.saved_selection_masks()? {
+        let mut properties = BTreeMap::new();
+        properties.insert(
+            "name".to_owned(),
+            InkScriptComparableValue::String(mask.name),
+        );
         entities.push(InkScriptEntitySnapshot {
             reference: InkScriptEntityReference {
-                entity: "vanishing_point".to_owned(),
-                persistent_id: point.id,
+                entity: "saved_selection_mask".to_owned(),
+                persistent_id: mask.id.get(),
             },
-            owner: Some(InkScriptEntityReference {
-                entity: "layer".to_owned(),
-                persistent_id: point.layer_id,
-            }),
-            properties: BTreeMap::new(),
+            owner: None,
+            properties,
         });
     }
     for set in core.light_table_sets()? {
@@ -936,24 +933,11 @@ fn hex(bytes: &[u8]) -> String {
     text
 }
 
-fn layer_kind(value: LayerKind) -> &'static str {
-    match value {
-        LayerKind::BinaryColoring => "binary_coloring",
-        LayerKind::GrayscaleColoring => "grayscale_coloring",
-        LayerKind::Raster => "raster",
-        LayerKind::Selection => "selection",
-        LayerKind::Frame => "frame",
-        LayerKind::VanishingPoint => "vanishing_point",
-        LayerKind::Adjustment => "adjustment",
-    }
-}
-
 fn plane_kind(value: PlaneType) -> &'static str {
     match value {
         PlaneType::MainLine => "main_line",
         PlaneType::Color => "color",
         PlaneType::Raster => "raster",
-        PlaneType::Selection => "selection",
     }
 }
 
@@ -996,7 +980,7 @@ fn materialize_results(
                     "planes" => InkScriptEntityKind::Plane,
                     "guides" => InkScriptEntityKind::Guide,
                     "shooting_frames" => InkScriptEntityKind::ShootingFrame,
-                    "vanishing_points" => InkScriptEntityKind::VanishingPoint,
+                    "saved_selection_masks" => InkScriptEntityKind::SavedSelectionMask,
                     "set" => InkScriptEntityKind::LightTableSet,
                     "item" | "items" => InkScriptEntityKind::LightTableItem,
                     _ => return Err(ScriptRunError::InvalidStep),

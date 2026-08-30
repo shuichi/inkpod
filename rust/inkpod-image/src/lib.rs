@@ -11,13 +11,12 @@ mod sampling;
 mod selection;
 
 pub use edit::{
-    Adjustment, AirbrushGesture, AirbrushStroke, BoundaryAirbrush, Channel, ColorBalance,
-    CurveInterpolation, CurvePoint, DustMode, DustRemoval, EffectSample, Filter, Gradient,
-    GradientKind, GradientMode, GradientStop, HsvAdjustment, Levels, MAX_CURVE_POINTS,
-    MAX_FILTER_RADIUS, MAX_GRADIENT_STOPS, MAX_IMAGE_EDIT_PIXELS, Stamp, StampGesture, StampShape,
-    apply_adjustment, apply_airbrush, apply_airbrush_gesture, apply_alpha_gradient,
-    apply_boundary_airbrush, apply_dust_removal, apply_filter, apply_filter_with_progress,
-    apply_gradient, apply_stamp, apply_stamp_gesture, edit_alpha,
+    AirbrushGesture, AirbrushStroke, BoundaryAirbrush, Channel, ColorBalance, CurveInterpolation,
+    CurvePoint, DustMode, DustRemoval, EffectSample, Filter, Gradient, GradientKind, GradientMode,
+    GradientStop, HsvAdjustment, Levels, MAX_CURVE_POINTS, MAX_FILTER_RADIUS, MAX_GRADIENT_STOPS,
+    MAX_IMAGE_EDIT_PIXELS, Stamp, StampGesture, StampShape, apply_airbrush, apply_airbrush_gesture,
+    apply_alpha_gradient, apply_boundary_airbrush, apply_dust_removal, apply_filter,
+    apply_filter_with_progress, apply_gradient, apply_stamp, apply_stamp_gesture, edit_alpha,
 };
 pub use fill::{
     FillError, FillOptions, FillPlan, InclusionMode, MAX_FILL_PIXELS, MAX_GAP_CLOSE,

@@ -131,7 +131,6 @@ pub struct InkpodEditTargetCommand {
     pub struct_size: u32,
     pub operation: u32,
     pub flags: u64,
-    pub kind: u32,
     pub pixel_format: u32,
     pub reserved: u64,
 }
@@ -146,6 +145,5 @@ pub struct InkpodEditTargetCapabilities {
     pub can_set_editability: u32,
     pub can_merge: u32,
     pub can_convert_planes: u32,
-    pub can_convert_layers: u32,
     pub reserved: u32,
 }

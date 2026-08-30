@@ -90,33 +90,6 @@ pub fn apply_filter_with_progress(
     }
 }
 
-pub fn apply_adjustment(
-    value: PixelValue,
-    adjustment: &Adjustment,
-) -> Result<PixelValue, RasterError> {
-    validate_adjustment(adjustment)?;
-    let filter = match adjustment {
-        Adjustment::BrightnessContrast {
-            brightness_milli,
-            contrast_milli,
-        } => Filter::BrightnessContrast {
-            brightness_milli: *brightness_milli,
-            contrast_milli: *contrast_milli,
-        },
-        Adjustment::ToneCurve {
-            channel,
-            interpolation,
-            points,
-        } => Filter::ToneCurve {
-            channel: *channel,
-            interpolation: *interpolation,
-            points: points.clone(),
-        },
-        Adjustment::Levels(levels) => Filter::Levels(levels.clone()),
-    };
-    transform_pixel(value, &filter)
-}
-
 fn validate_filter(filter: &Filter) -> Result<(), RasterError> {
     match filter {
         Filter::GaussianBlur {
@@ -157,20 +130,6 @@ fn validate_filter(filter: &Filter) -> Result<(), RasterError> {
             Err(RasterError::InvalidDimensions)
         }
         _ => Ok(()),
-    }
-}
-
-fn validate_adjustment(adjustment: &Adjustment) -> Result<(), RasterError> {
-    match adjustment {
-        Adjustment::BrightnessContrast {
-            brightness_milli,
-            contrast_milli,
-        } => validate_filter(&Filter::BrightnessContrast {
-            brightness_milli: *brightness_milli,
-            contrast_milli: *contrast_milli,
-        }),
-        Adjustment::ToneCurve { points, .. } => validate_curve(points),
-        Adjustment::Levels(levels) => validate_levels(levels),
     }
 }
 

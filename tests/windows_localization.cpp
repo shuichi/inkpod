@@ -571,11 +571,10 @@ bool LayerPalettePlaneBadgeLayoutContract(
     }
     HDC device = GetDC(nullptr);
     bool passed = device != nullptr;
-    const std::array<UiStringId, 5U> labels{
+    const std::array<UiStringId, 4U> labels{
         UiStringId::PlaneBadgeMainLine,
         UiStringId::PlaneBadgeColoring,
         UiStringId::PlaneBadgeRaster,
-        UiStringId::PlaneBadgeSelection,
         UiStringId::PlaneBadgeUnknown};
     const std::array<UINT, 4U> dpis{96U, 120U, 144U, 192U};
     for (const UINT dpi : dpis) {

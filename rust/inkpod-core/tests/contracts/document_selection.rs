@@ -16,8 +16,8 @@ fn bulk_layer_and_guide_deletes_are_single_replayable_primitives() {
     let mut core = Core::new();
     core.new_cell(8, 8, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
         .unwrap();
-    let (_, hidden_one) = core.create_layer(LayerKind::Raster, "Hidden One").unwrap();
-    let (_, hidden_two) = core.create_layer(LayerKind::Raster, "Hidden Two").unwrap();
+    let (_, hidden_one) = core.create_layer("Hidden One").unwrap();
+    let (_, hidden_two) = core.create_layer("Hidden Two").unwrap();
     core.set_layer_properties(hidden_one, false, true, 1_000, "Hidden One")
         .unwrap();
     core.set_layer_properties(hidden_two, false, true, 1_000, "Hidden Two")
@@ -111,15 +111,10 @@ fn selected_raster_layer_receives_stroke_preview_commit_and_history() {
     core.new_cell(8, 8, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
         .unwrap();
     let original_color_checksum = core.document_info().unwrap().color_plane_checksum;
-    let (_, raster_layer_id) = core.create_layer(LayerKind::Raster, "Raster").unwrap();
-    let raster_plane_id = core
-        .layers()
-        .unwrap()
-        .iter()
-        .find(|layer| layer.id == raster_layer_id)
-        .unwrap()
-        .planes[0]
-        .id;
+    let (_, raster_layer_id) = core.create_layer("Raster").unwrap();
+    let (_, raster_plane_id) = core
+        .create_plane(raster_layer_id, PixelFormat::StraightRgba8, "Raster Paint")
+        .unwrap();
     core.set_active_node(raster_layer_id, raster_plane_id)
         .unwrap();
 
@@ -166,15 +161,10 @@ fn selected_raster_layer_receives_fill_without_changing_coloring_plane() {
     core.new_cell(4, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
         .unwrap();
     let original_color_checksum = core.document_info().unwrap().color_plane_checksum;
-    let (_, raster_layer_id) = core.create_layer(LayerKind::Raster, "Raster").unwrap();
-    let raster_plane_id = core
-        .layers()
-        .unwrap()
-        .iter()
-        .find(|layer| layer.id == raster_layer_id)
-        .unwrap()
-        .planes[0]
-        .id;
+    let (_, raster_layer_id) = core.create_layer("Raster").unwrap();
+    let (_, raster_plane_id) = core
+        .create_plane(raster_layer_id, PixelFormat::StraightRgba8, "Raster Paint")
+        .unwrap();
     core.set_active_node(raster_layer_id, raster_plane_id)
         .unwrap();
 
@@ -210,9 +200,7 @@ fn second_coloring_layer_fill_uses_its_own_main_line_boundary() {
     ))
     .unwrap();
 
-    let (_, second_layer_id) = core
-        .create_layer(LayerKind::BinaryColoring, "Second")
-        .unwrap();
+    let (_, second_layer_id) = core.create_layer("Second").unwrap();
     let second_color_id = core
         .layers()
         .unwrap()
@@ -247,9 +235,7 @@ fn selected_plane_eyedropper_follows_second_coloring_target() {
     core.apply_stroke(&color_stroke(PaintTool::Pencil, 1.0, sample))
         .unwrap();
 
-    let (_, second_layer_id) = core
-        .create_layer(LayerKind::BinaryColoring, "Second")
-        .unwrap();
+    let (_, second_layer_id) = core.create_layer("Second").unwrap();
     let second_color_id = core
         .layers()
         .unwrap()
@@ -516,12 +502,7 @@ fn acceptance_layer_tree_undo_redo_save_reopen_and_validation() {
 
     let revision = reopened.document_info().unwrap().document_revision;
     assert!(matches!(
-        reopened.create_plane(
-            base_layer,
-            PlaneType::Selection,
-            PixelFormat::BinaryMask8,
-            "Invalid Selection"
-        ),
+        reopened.create_plane(base_layer, PixelFormat::BinaryMask8, "Invalid Raster"),
         Err(CoreError::InvalidArgument(_))
     ));
     assert_eq!(
@@ -687,9 +668,9 @@ fn acceptance_selection_authoring_tools() {
     core.resize_selection(1).unwrap();
     core.resize_selection(-1).unwrap();
     let saved_bounds = core.selection_bounds().unwrap();
-    let (_, selection_layer) = core.selection_to_layer("Saved Selection").unwrap();
+    let (_, saved_selection) = core.save_selection_mask("Saved Selection").unwrap();
     core.invert_selection().unwrap();
-    core.selection_from_layer(selection_layer, SelectionLayerOperation::Replace)
+    core.apply_saved_selection_mask(saved_selection, SavedSelectionOperation::Replace)
         .unwrap();
     assert_eq!(core.selection_bounds().unwrap(), saved_bounds);
 }
@@ -1538,15 +1519,10 @@ fn tree_order_merge_names_and_active_ids_remain_consistent() {
         core.plane_pixel(ActivePlane::Color, 0, 0).unwrap(),
         PixelValue::Rgba([6, 17, 156, 255])
     );
-    let (_, raster_layer) = core.create_layer(LayerKind::Raster, "Raster").unwrap();
-    let raster_plane = core
-        .layers()
-        .unwrap()
-        .iter()
-        .find(|layer| layer.id == raster_layer)
-        .unwrap()
-        .planes[0]
-        .id;
+    let (_, raster_layer) = core.create_layer("Raster").unwrap();
+    let (_, raster_plane) = core
+        .create_plane(raster_layer, PixelFormat::StraightRgba8, "Raster")
+        .unwrap();
     core.duplicate_plane(raster_plane).unwrap();
     core.duplicate_plane(raster_plane).unwrap();
     let raster_names: BTreeSet<_> = core
@@ -1557,12 +1533,13 @@ fn tree_order_merge_names_and_active_ids_remain_consistent() {
         .unwrap()
         .planes
         .iter()
+        .filter(|plane| plane.kind == PlaneType::Raster)
         .map(|plane| plane.name.clone())
         .collect();
     assert_eq!(raster_names.len(), 3);
 
     let (_, duplicate_coloring) = core.duplicate_layer(created.layer_id).unwrap();
-    core.create_layer(LayerKind::Frame, "Frame").unwrap();
+    core.create_layer("Additional").unwrap();
     core.delete_layer(duplicate_coloring).unwrap();
     assert!(core.document_info().is_ok());
 }

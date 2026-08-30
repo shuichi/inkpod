@@ -8,7 +8,6 @@ use super::*;
 pub unsafe extern "C" fn inkpod_core_validate_plane_creation(
     core: *mut InkpodCore,
     layer_id: u64,
-    kind: u32,
     pixel_format: u32,
 ) -> u32 {
     ffi_boundary(|| {
@@ -25,15 +24,11 @@ pub unsafe extern "C" fn inkpod_core_validate_plane_creation(
         if thread_status != INKPOD_STATUS_OK {
             return thread_status;
         }
-        let kind = match parse_plane_type(kind) {
-            Ok(kind) => kind,
-            Err(status) => return status,
-        };
         let format = match parse_storage_format(pixel_format) {
             Ok(format) => format,
             Err(status) => return status,
         };
-        match core.core.validate_plane_creation(layer_id, kind, format) {
+        match core.core.validate_plane_creation(layer_id, format) {
             Ok(()) => INKPOD_STATUS_OK,
             Err(error) => map_core_error(error),
         }
@@ -91,6 +86,17 @@ pub unsafe extern "C" fn inkpod_core_tree_edit(
                 "tree edit contains unsupported flags",
             );
         }
+        if input.operation == INKPOD_TREE_CREATE_PLANE
+            && (input.object_id != 0
+                || input.destination_index != 0
+                || input.flags != (INKPOD_NODE_VISIBLE | INKPOD_NODE_EDITABLE)
+                || input.opacity_milli != 1000)
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "create-plane tree edit contains noncanonical properties",
+            );
+        }
         let name = if matches!(
             input.operation,
             INKPOD_TREE_CREATE_LAYER
@@ -106,101 +112,84 @@ pub unsafe extern "C" fn inkpod_core_tree_edit(
         } else {
             None
         };
-        let operation: Result<(inkpod_core::DispatchOutcome, u64), CoreError> = match input
-            .operation
-        {
-            INKPOD_TREE_CREATE_LAYER => match parse_layer_kind(input.kind) {
-                Ok(kind) => core.core.create_layer(kind, name.expect("name parsed")),
-                Err(status) => return status,
-            },
-            INKPOD_TREE_DUPLICATE_LAYER => core.core.duplicate_layer(input.object_id),
-            INKPOD_TREE_DELETE_LAYER => core
-                .core
-                .delete_layer(input.object_id)
-                .map(|outcome| (outcome, 0)),
-            INKPOD_TREE_REORDER_LAYER => core
-                .core
-                .reorder_layer(input.object_id, input.destination_index as usize)
-                .map(|outcome| (outcome, 0)),
-            INKPOD_TREE_SET_LAYER_PROPERTIES => core
-                .core
-                .set_layer_properties(
-                    input.object_id,
-                    input.flags & INKPOD_NODE_VISIBLE != 0,
-                    input.flags & INKPOD_NODE_EDITABLE != 0,
-                    input.opacity_milli,
-                    name.expect("name parsed"),
-                )
-                .map(|outcome| (outcome, 0)),
-            INKPOD_TREE_CREATE_PLANE => {
-                let kind = match parse_plane_type(input.kind) {
-                    Ok(kind) => kind,
-                    Err(status) => return status,
-                };
-                let format = match parse_storage_format(input.pixel_format) {
-                    Ok(format) => format,
-                    Err(status) => return status,
-                };
-                core.core
-                    .create_plane(input.parent_id, kind, format, name.expect("name parsed"))
-            }
-            INKPOD_TREE_DUPLICATE_PLANE => core.core.duplicate_plane(input.object_id),
-            INKPOD_TREE_DELETE_PLANE => core
-                .core
-                .delete_plane(input.object_id)
-                .map(|outcome| (outcome, 0)),
-            INKPOD_TREE_REORDER_PLANE => core
-                .core
-                .reorder_plane(input.object_id, input.destination_index as usize)
-                .map(|outcome| (outcome, 0)),
-            INKPOD_TREE_SET_PLANE_PROPERTIES => core
-                .core
-                .set_plane_properties(
-                    input.object_id,
-                    input.flags & INKPOD_NODE_VISIBLE != 0,
-                    input.flags & INKPOD_NODE_EDITABLE != 0,
-                    input.opacity_milli,
-                    name.expect("name parsed"),
-                )
-                .map(|outcome| (outcome, 0)),
-            INKPOD_TREE_CONVERT_LAYER => match parse_layer_kind(input.kind) {
-                Ok(kind) => core
+        let operation: Result<(inkpod_core::DispatchOutcome, u64), CoreError> =
+            match input.operation {
+                INKPOD_TREE_CREATE_LAYER if input.pixel_format == 0 => {
+                    core.core.create_layer(name.expect("name parsed"))
+                }
+                INKPOD_TREE_DUPLICATE_LAYER => core.core.duplicate_layer(input.object_id),
+                INKPOD_TREE_DELETE_LAYER => core
                     .core
-                    .convert_layer(input.object_id, kind)
+                    .delete_layer(input.object_id)
                     .map(|outcome| (outcome, 0)),
-                Err(status) => return status,
-            },
-            INKPOD_TREE_MERGE_LAYER => core
-                .core
-                .merge_layer_into_below(input.object_id)
-                .map(|outcome| (outcome, 0)),
-            INKPOD_TREE_DELETE_HIDDEN_LAYERS => {
-                core.core.delete_hidden_layers().map(|outcome| (outcome, 0))
-            }
-            INKPOD_TREE_CONVERT_PLANE => {
-                let kind = match parse_plane_type(input.kind) {
-                    Ok(kind) => kind,
-                    Err(status) => return status,
-                };
-                let format = match parse_storage_format(input.pixel_format) {
-                    Ok(format) => format,
-                    Err(status) => return status,
-                };
-                core.core
-                    .convert_plane(input.object_id, kind, format)
-                    .map(|outcome| (outcome, 0))
-            }
-            INKPOD_TREE_MERGE_PLANE => core
-                .core
-                .merge_plane_into_below(input.object_id)
-                .map(|outcome| (outcome, 0)),
-            _ => {
-                return fail(
-                    INKPOD_STATUS_INVALID_ARGUMENT,
-                    "tree edit operation is not defined",
-                );
-            }
-        };
+                INKPOD_TREE_REORDER_LAYER => core
+                    .core
+                    .reorder_layer(input.object_id, input.destination_index as usize)
+                    .map(|outcome| (outcome, 0)),
+                INKPOD_TREE_SET_LAYER_PROPERTIES => core
+                    .core
+                    .set_layer_properties(
+                        input.object_id,
+                        input.flags & INKPOD_NODE_VISIBLE != 0,
+                        input.flags & INKPOD_NODE_EDITABLE != 0,
+                        input.opacity_milli,
+                        name.expect("name parsed"),
+                    )
+                    .map(|outcome| (outcome, 0)),
+                INKPOD_TREE_CREATE_PLANE => {
+                    let format = match parse_storage_format(input.pixel_format) {
+                        Ok(format) => format,
+                        Err(status) => return status,
+                    };
+                    core.core
+                        .create_plane(input.parent_id, format, name.expect("name parsed"))
+                }
+                INKPOD_TREE_DUPLICATE_PLANE => core.core.duplicate_plane(input.object_id),
+                INKPOD_TREE_DELETE_PLANE => core
+                    .core
+                    .delete_plane(input.object_id)
+                    .map(|outcome| (outcome, 0)),
+                INKPOD_TREE_REORDER_PLANE => core
+                    .core
+                    .reorder_plane(input.object_id, input.destination_index as usize)
+                    .map(|outcome| (outcome, 0)),
+                INKPOD_TREE_SET_PLANE_PROPERTIES => core
+                    .core
+                    .set_plane_properties(
+                        input.object_id,
+                        input.flags & INKPOD_NODE_VISIBLE != 0,
+                        input.flags & INKPOD_NODE_EDITABLE != 0,
+                        input.opacity_milli,
+                        name.expect("name parsed"),
+                    )
+                    .map(|outcome| (outcome, 0)),
+                INKPOD_TREE_MERGE_LAYER => core
+                    .core
+                    .merge_layer_into_below(input.object_id)
+                    .map(|outcome| (outcome, 0)),
+                INKPOD_TREE_DELETE_HIDDEN_LAYERS => {
+                    core.core.delete_hidden_layers().map(|outcome| (outcome, 0))
+                }
+                INKPOD_TREE_CONVERT_PLANE => {
+                    let format = match parse_storage_format(input.pixel_format) {
+                        Ok(format) => format,
+                        Err(status) => return status,
+                    };
+                    core.core
+                        .convert_plane(input.object_id, format)
+                        .map(|outcome| (outcome, 0))
+                }
+                INKPOD_TREE_MERGE_PLANE => core
+                    .core
+                    .merge_plane_into_below(input.object_id)
+                    .map(|outcome| (outcome, 0)),
+                _ => {
+                    return fail(
+                        INKPOD_STATUS_INVALID_ARGUMENT,
+                        "tree edit operation is not defined",
+                    );
+                }
+            };
         match operation {
             Ok((outcome, object_id)) => {
                 write_dispatch_result(result, outcome);
@@ -259,7 +248,7 @@ pub unsafe extern "C" fn inkpod_core_node_get(
                 (
                     layer.id,
                     0,
-                    layer_kind_code(layer.kind),
+                    0,
                     0,
                     layer.opacity_milli,
                     u32::from(layer.visible) | (u32::from(layer.editable) << 1),

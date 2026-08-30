@@ -51,7 +51,6 @@ pub struct InkpodCutDefaultsInput {
     pub safe_frame_ratio_milli: u32,
     pub maximum_close_ratio_milli: u32,
     pub anchor: u32,
-    pub initial_layer_kind: u32,
     pub pixel_format: u32,
     pub reserved: u32,
 }
@@ -120,7 +119,6 @@ pub struct InkpodCutInfo {
     pub safe_frame_ratio_milli: u32,
     pub maximum_close_ratio_milli: u32,
     pub anchor: u32,
-    pub initial_layer_kind: u32,
     pub pixel_format: u32,
 }
 

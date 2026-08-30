@@ -238,13 +238,6 @@ pub unsafe extern "C" fn inkpod_snapshot_get_render_plan(
         };
         output.pass_count = snapshot.render_passes.len() as u64;
         output.pass_stride_bytes = size_of::<InkpodSnapshotRenderPass>() as u64;
-        output.adjustment_luts_rgb8 = if snapshot.adjustment_luts_rgb8.is_empty() {
-            ptr::null()
-        } else {
-            snapshot.adjustment_luts_rgb8.as_ptr()
-        };
-        output.adjustment_lut_count = (snapshot.adjustment_luts_rgb8.len() / (3 * 256)) as u64;
-        output.adjustment_lut_stride_bytes = (3 * 256) as u64;
         INKPOD_STATUS_OK
     })
 }

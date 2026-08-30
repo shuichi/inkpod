@@ -78,8 +78,7 @@ void ProvideDocumentCommandStates(
          IDM_FILE_AUTOSAVE_NOW,
          IDM_FILE_EXPORT_RASTER,
          IDM_FILE_EXPORT_INSTRUCTION_RASTER,
-         IDM_CELL_SHOOTING_FRAME_PROPERTIES,
-         IDM_CELL_VANISHING_POINT_PROPERTIES},
+         IDM_CELL_SHOOTING_FRAME_PROPERTIES},
         input.has_document);
     SetEnabled(
         states,
@@ -91,16 +90,6 @@ void ProvideDocumentCommandStates(
         IDM_CELL_SHOOTING_FRAME_EDIT_HANDLES,
         input.has_document && input.shooting_frame_present
             && input.shooting_frame_handle_edit);
-    SetEnabled(
-        states,
-        {IDM_CELL_VANISHING_POINT_EDIT_HANDLES,
-         IDM_CELL_VANISHING_POINT_DELETE_ALL},
-        input.has_document && input.vanishing_point_present);
-    SetChecked(
-        states,
-        IDM_CELL_VANISHING_POINT_EDIT_HANDLES,
-        input.has_document && input.vanishing_point_present
-            && input.vanishing_point_handle_edit);
     SetEnabled(
         states,
         {IDM_FILE_REVERT, IDM_FILE_REVERT_PARTIAL},
@@ -171,16 +160,6 @@ void ProvideEffectsCommandStates(
          IDM_FILTER_COLOR_BALANCE,
          IDM_FILTER_UNSHARP},
         raster_effect_available);
-    SetEnabled(states, IDM_ADJUSTMENT_CREATE, raster_effect_available);
-    SetEnabled(
-        states,
-        {IDM_ADJUSTMENT_EDIT, IDM_ADJUSTMENT_TOGGLE, IDM_ADJUSTMENT_MOVE_TOP},
-        input.document.has_document && input.effects.adjustment_available);
-    SetEnabled(
-        states,
-        {IDM_ADJUSTMENT_PREVIOUS, IDM_ADJUSTMENT_NEXT},
-        input.document.has_document && input.effects.multiple_adjustments);
-    SetChecked(states, IDM_ADJUSTMENT_TOGGLE, input.effects.adjustment_visible);
 }
 
 void ProvideDocumentPaneCommandStates(
@@ -247,7 +226,7 @@ void ProvideSelectionViewCommandStates(
          IDM_SELECTION_COLOR_DIFFERENT,
          IDM_SELECTION_COLOR_ADD,
          IDM_SELECTION_OUTPUT_COLOR_GUARD,
-         IDM_SELECTION_TO_LAYER,
+         IDM_SELECTION_SAVE_MASK,
          IDM_SELECTION_INVERT,
          IDM_SELECTION_EXPAND,
          IDM_SELECTION_SHRINK,
@@ -313,9 +292,10 @@ void ProvideSelectionViewCommandStates(
             && input.selection_view.editor_group_count == 2U);
     SetEnabled(
         states,
-        {IDM_SELECTION_FROM_LAYER, IDM_SELECTION_LAYER_ADD,
-         IDM_SELECTION_LAYER_SUBTRACT},
-        input.document.has_document && input.selection_view.selection_layer_available);
+        {IDM_SELECTION_APPLY_SAVED_MASK, IDM_SELECTION_ADD_SAVED_MASK,
+         IDM_SELECTION_SUBTRACT_SAVED_MASK, IDM_SELECTION_RENAME_SAVED_MASK,
+         IDM_SELECTION_DELETE_SAVED_MASK},
+        input.document.has_document && input.selection_view.saved_selection_available);
 
     SetChecked(states, IDM_VIEW_FLIP_HORIZONTAL, input.selection_view.flip_horizontal);
     SetChecked(states, IDM_VIEW_FLIP_VERTICAL, input.selection_view.flip_vertical);

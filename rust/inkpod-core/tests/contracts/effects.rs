@@ -1,5 +1,5 @@
 use super::*;
-use crate::{Channel, CurveInterpolation, CurvePoint, DustMode, EffectSample, PointF32};
+use crate::{Channel, DustMode, EffectSample, PointF32};
 
 fn seeded_core() -> (Core, u64) {
     let mut core = Core::new();
@@ -193,80 +193,6 @@ fn filter_preview_001_parameter_updates_recompute_from_the_original_base() {
 }
 
 #[test]
-fn acceptance_adjustment_order_changes_composite_without_changing_source_plane() {
-    let (mut core, _) = seeded_core();
-    let unadjusted = core.build_snapshot().tiles()[0].pixels()[..4].to_vec();
-    let original = core.document_info().unwrap().color_plane_checksum;
-    let (_, brightness) = core
-        .create_adjustment_layer(
-            "Brightness",
-            Adjustment::BrightnessContrast {
-                brightness_milli: 200,
-                contrast_milli: 0,
-            },
-        )
-        .unwrap();
-    let (_, curve) = core
-        .create_adjustment_layer(
-            "Curve",
-            Adjustment::ToneCurve {
-                channel: Channel::Rgb,
-                interpolation: CurveInterpolation::Bezier,
-                points: vec![
-                    CurvePoint {
-                        input: 0,
-                        output: 0,
-                    },
-                    CurvePoint {
-                        input: 32_768,
-                        output: 8_000,
-                    },
-                    CurvePoint {
-                        input: 65_535,
-                        output: 65_535,
-                    },
-                ],
-            },
-        )
-        .unwrap();
-    let first = core.build_snapshot().tiles()[0].pixels()[..4].to_vec();
-    core.reorder_layer(brightness, 0).unwrap();
-    let second = core.build_snapshot().tiles()[0].pixels()[..4].to_vec();
-    assert_ne!(first, second);
-    assert_eq!(core.document_info().unwrap().color_plane_checksum, original);
-    assert!(core.adjustment(curve).is_ok());
-
-    core.set_layer_properties(brightness, true, true, 0, "Brightness")
-        .unwrap();
-    core.set_layer_properties(curve, false, true, 1_000, "Curve")
-        .unwrap();
-    assert_eq!(core.build_snapshot().tiles()[0].pixels()[..4], unadjusted);
-    core.set_layer_properties(brightness, true, true, 1_000, "Brightness")
-        .unwrap();
-    core.set_layer_properties(curve, true, true, 1_000, "Curve")
-        .unwrap();
-    let second = core.build_snapshot().tiles()[0].pixels()[..4].to_vec();
-
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let path = std::env::temp_dir().join(format!(
-        "inkpod-test-adjustment-{}-{nonce}.inkpod",
-        std::process::id()
-    ));
-    core.save(&path).unwrap();
-    let mut reopened = Core::new();
-    reopened.open(&path).unwrap();
-    assert_eq!(
-        reopened.adjustment(curve).unwrap(),
-        core.adjustment(curve).unwrap()
-    );
-    assert_eq!(reopened.build_snapshot().tiles()[0].pixels()[..4], second);
-    std::fs::remove_file(path).unwrap();
-}
-
-#[test]
 fn acceptance_boundary_airbrush_preserves_uniform_regions() {
     let mut core = Core::new();
     let created = core.new_cell(7, 1, 96_000, 96_000).unwrap();
@@ -316,29 +242,7 @@ fn acceptance_boundary_airbrush_preserves_uniform_regions() {
 }
 
 #[test]
-fn generic_adjustment_tree_edits_remain_saveable_and_reject_ambiguous_merge() {
-    let (mut core, _) = seeded_core();
-    let (_, first) = core
-        .create_layer(LayerKind::Adjustment, "Generic Adjustment")
-        .unwrap();
-    let (_, second) = core.duplicate_layer(first).unwrap();
-    assert!(core.adjustment(first).is_ok());
-    assert!(core.adjustment(second).is_ok());
-    let path = std::env::temp_dir().join(format!(
-        "inkpod-core-generic-adjustment-{}-{}.inkpod",
-        std::process::id(),
-        core.document_info().unwrap().document_revision
-    ));
-    core.save(&path).unwrap();
-    std::fs::remove_file(path).unwrap();
-    assert!(matches!(
-        core.merge_layer_into_below(second),
-        Err(CoreError::InvalidArgument(_))
-    ));
-}
-
-#[test]
-fn noop_invalid_and_adjustment_update_history_are_transactional() {
+fn noop_and_invalid_filter_updates_are_transactional() {
     let (mut core, plane_id) = seeded_core();
     let history = core.history_entries().len();
     core.begin_filter_preview(
@@ -367,49 +271,6 @@ fn noop_invalid_and_adjustment_update_history_are_transactional() {
         Err(CoreError::Raster(_))
     ));
     assert_eq!(core.history_entries().len(), history);
-
-    let (_, adjustment_id) = core
-        .create_adjustment_layer(
-            "Editable",
-            Adjustment::BrightnessContrast {
-                brightness_milli: 100,
-                contrast_milli: 0,
-            },
-        )
-        .unwrap();
-    let before_update = core.history_entries().len();
-    core.update_adjustment_layer(
-        adjustment_id,
-        Adjustment::BrightnessContrast {
-            brightness_milli: 200,
-            contrast_milli: -100,
-        },
-    )
-    .unwrap();
-    assert_eq!(core.history_entries().len(), before_update + 1);
-    core.undo().unwrap();
-    assert_eq!(
-        core.adjustment(adjustment_id).unwrap(),
-        &Adjustment::BrightnessContrast {
-            brightness_milli: 100,
-            contrast_milli: 0,
-        }
-    );
-    core.redo().unwrap();
-    let updated = Adjustment::BrightnessContrast {
-        brightness_milli: 200,
-        contrast_milli: -100,
-    };
-    assert_eq!(core.adjustment(adjustment_id).unwrap(), &updated);
-    let after_redo = core.history_entries().len();
-    let outcome = core
-        .update_adjustment_layer(adjustment_id, updated)
-        .unwrap();
-    assert_eq!(
-        outcome.revision(),
-        core.document_info().unwrap().document_revision
-    );
-    assert_eq!(core.history_entries().len(), after_redo);
 }
 
 #[test]

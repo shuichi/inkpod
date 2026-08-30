@@ -2407,7 +2407,7 @@ fn types_compatible(actual: &str, expected: &str) -> bool {
                     | "plane_ref"
                     | "guide_ref"
                     | "shooting_frame_ref"
-                    | "vanishing_point_ref"
+                    | "saved_selection_mask_ref"
                     | "light_table_set_ref"
                     | "light_table_item_ref"
             ))

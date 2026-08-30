@@ -27,22 +27,21 @@ mod inkscript_ffi_tests;
 
 use inkpod_core::history_visualization::HistoryVisualizationRow;
 use inkpod_core::{
-    ActivePlane, Adjustment, AirbrushGesture, AirbrushStroke, ApplicationColor,
-    AssetAlphaSemantics, AssetColorSpace, BoundaryAirbrush, BrushShape, CellCreationOptions,
-    CellCreationPlan, CellSizing, Channel, ClipboardPayload, ClipboardPixel, ClipboardPlane,
-    ColorBalance, ColorChartEntry, ColorChartPreview, ColorCheckMode, CommonRasterFormat,
-    CoordinateSpace, Core, CoreError, CurveInterpolation, CurvePoint, CutCore, CutCreateRequest,
-    CutDefaults, CutMember, CutMetadata, CutMutationOutcome, CutUpdateRequest, DocumentInfo,
-    DocumentResize, DustMode, DustRemoval, EditTarget, EditTargetCommand, EditorBrushOptions,
-    EditorDefaults, EditorFillOptions, EditorSelectionOptions, EditorSelectionShape, EditorState,
-    EditorStateInfo, EditorStateUpdate, EditorStrokeInput, EditorTarget, EditorTool,
-    EffectRegionKind, EyedropperSource, FileColorChart, FileColorChartEntry, FilePalette,
-    FillOperation, FillRequest, Filter, FloatingTransform, FloatingTransformAnchor, FrameAnchor,
-    FrameMetadata, GeometryCommit, GeometryCrossSection, GeometryOptions, GeometryPreviewInfo,
-    GeometryPrimitive, GeometryRequest, GeometrySnapMode, Gradient, GradientKind, GradientMode,
-    GradientStop, GridConfig, GuideAxis,
+    ActivePlane, AirbrushGesture, AirbrushStroke, ApplicationColor, AssetAlphaSemantics,
+    AssetColorSpace, BoundaryAirbrush, BrushShape, CellCreationOptions, CellCreationPlan,
+    CellSizing, Channel, ClipboardPayload, ClipboardPixel, ClipboardPlane, ColorBalance,
+    ColorChartEntry, ColorChartPreview, ColorCheckMode, CommonRasterFormat, CoordinateSpace, Core,
+    CoreError, CurveInterpolation, CurvePoint, CutCore, CutCreateRequest, CutDefaults, CutMember,
+    CutMetadata, CutMutationOutcome, CutUpdateRequest, DocumentInfo, DocumentResize, DustMode,
+    DustRemoval, EditTarget, EditTargetCommand, EditorBrushOptions, EditorDefaults,
+    EditorFillOptions, EditorSelectionOptions, EditorSelectionShape, EditorState, EditorStateInfo,
+    EditorStateUpdate, EditorStrokeInput, EditorTarget, EditorTool, EffectRegionKind,
+    EyedropperSource, FileColorChart, FileColorChartEntry, FilePalette, FillOperation, FillRequest,
+    Filter, FloatingTransform, FloatingTransformAnchor, FrameAnchor, FrameMetadata, GeometryCommit,
+    GeometryCrossSection, GeometryOptions, GeometryPreviewInfo, GeometryPrimitive, GeometryRequest,
+    GeometrySnapMode, Gradient, GradientKind, GradientMode, GradientStop, GridConfig, GuideAxis,
     HistoryVisualizationBuilder as CoreHistoryVisualizationBuilder, HistoryVisualizationProgress,
-    HsvAdjustment, InclusionMode, LayerKind, Levels, LightTableBulkDirection,
+    HsvAdjustment, InclusionMode, Levels, LightTableBulkDirection,
     LightTableBulkRegistrationAction, LightTableBulkRegistrationRequest, LightTableDisplayMode,
     LightTableItemInput, LightTableItemProperties, LightTableSource, MAX_CELL_CREATION_COUNT,
     MAX_COLOR_CHART_NAME_BYTES, MAX_COMMON_RASTER_BYTES, MAX_GRADIENT_STOPS, MAX_IMAGE_EDIT_PIXELS,
@@ -51,9 +50,9 @@ use inkpod_core::{
     PixelValue, PlaneType, PointF32, PrimitiveOutcome, PrimitiveRequest, RangeInterpretation,
     RasterAssetInput, RectI32, RenderPassKind, RenderSnapshot, ResizeAnchor, ResourceUsage,
     RgbaRasterBytes, RotateDirection, SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE,
-    SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA, SNAPSHOT_FEATURE_SOLID_WHITE_BASE,
-    ScopedColorReplaceMode, ScopedColorReplacePreview, ScopedColorReplaceRequest,
-    SelectionConstructionOptions, SelectionLayerOperation, SelectionOperation, SelectionSample,
+    SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA, SNAPSHOT_FEATURE_SOLID_WHITE_BASE, SavedSelectionId,
+    SavedSelectionOperation, ScopedColorReplaceMode, ScopedColorReplacePreview,
+    ScopedColorReplaceRequest, SelectionConstructionOptions, SelectionOperation, SelectionSample,
     SelectionShape, SequenceCellSource, SequenceDirection, SequenceEditOperation,
     SequenceEditRequest, SequenceEndpointPolicy, SequenceMemberId, SequenceStepPlan,
     SequenceStepResult, SequenceSwitchPolicy, SequenceSwitchRequest, ShootingFrameAnchor,
@@ -61,8 +60,7 @@ use inkpod_core::{
     ShortcutBinding, ShortcutSequenceBinding, ShortcutStroke, Stamp, StampGesture, StampShape,
     StartColorPredicate, Stroke, StrokeSample, SubpaletteCatalog, SubpaletteCatalogInfo,
     SubpaletteImageInput, SubpaletteItemId, SubpaletteSource, TileRaster, TraceBrushOptions,
-    TraceBrushShape, VanishingPointEdit, VanishingPointInfo, VanishingPointInput,
-    VanishingPointPreviewTarget, ViewCommand, plan_cell_creation, read_color_chart, read_palette,
+    TraceBrushShape, ViewCommand, plan_cell_creation, read_color_chart, read_palette,
     save_color_chart_atomic, save_palette_atomic,
 };
 use std::cell::RefCell;
@@ -91,7 +89,6 @@ mod snapshot_api;
 mod subpalette;
 mod support;
 mod v3;
-mod vanishing_point;
 
 pub use abi::*;
 pub(crate) use abi::{
@@ -118,4 +115,3 @@ pub use snapshot_api::*;
 pub use subpalette::*;
 pub(crate) use support::*;
 pub use v3::*;
-pub use vanishing_point::*;

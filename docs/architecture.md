@@ -42,10 +42,10 @@ Core supplies owned detached work to its generic executor.
 | Crate           | Responsibility                                                                                                                                                                     |
 | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `inkpod-image`  | Typed pixel formats, 64 x 64 sparse tiles, `Arc` copy-on-write storage, selection, fill/sampling/palette logic, and deterministic raster/filter/effect operations |
-| `inkpod-format` | Bounded procedure-authoritative `.inkpod` v29 Cell/Cut containers and `.inkbatch` v4 models, stream/byte encode/decode/validation, and PNG/TIFF/TGA/BMP codecs; existing synchronous path wrappers remain for Rust callers outside the migrated application routes |
+| `inkpod-format` | Bounded procedure-authoritative `.inkpod` v31 Cell/Cut containers and `.inkbatch` v5 models, stream/byte encode/decode/validation, and PNG/TIFF/TGA/BMP codecs; existing synchronous path wrappers remain for Rust callers outside the migrated application routes |
 | `inkpod-io`     | Application-owned bounded workers, filesystem paths/identity/locks, encoded and decoded LRU leases, streaming file access, temporary-file publication/cleanup, recoverable native/raster pair installation, recovery artifacts, and polling progress |
 | `inkpod-core`   | Stable-ID document/layer/plane state, immutable Genesis/base surfaces, a content-addressed canonical asset registry, StateId savepoints, views, raster clipboard, previews, animation, effects/Batch commands, persistence mapping, immutable render snapshots, and canonical primitive execution plus append-only journal/cache-free replay and semantic document digests for the migrated Core slice |
-| `inkpod-ffi`    | ABI v24 fixed records and generation-tagged runtime IDs, opaque I/O manager/job handles and path submission/poll/apply/release, Batch v4 graph/staged-result handles, InkScript source/compiler/fragment plus authority/plan/run/report handles and fixed DTO host callbacks, persistence/compaction diagnostics, validation/conversion, panic containment, and ownership functions |
+| `inkpod-ffi`    | ABI v25 fixed records and generation-tagged runtime IDs, opaque I/O manager/job handles and path submission/poll/apply/release, Batch v5 graph/staged-result handles, InkScript source/compiler/fragment plus authority/plan/run/report handles and fixed DTO host callbacks, persistence/compaction diagnostics, validation/conversion, panic containment, and ownership functions |
 
 Binary, grayscale, RGBA8/16, straight-alpha, premultiplied display data, and
 selection masks remain distinct types. Win32 may provide a
@@ -54,7 +54,7 @@ dependency.
 
 Each crate root is limited to module declarations and stable public re-exports.
 Responsibility-specific modules contain implementation. `inkpod-core` keeps
-thumbnail work, Batch v4 model/codec/input-output execution/typed operations, destructive transform orchestration/raster/
+thumbnail work, Batch v5 model/codec/input-output execution/typed operations, destructive transform orchestration/raster/
 frame/numeric helpers, and view commands/coordinates/guides/secondary views/
 shortcuts in separate modules; their `mod.rs` files remain declarative indices.
 `inkpod-core` keeps
@@ -129,7 +129,7 @@ discarding edits made after the primary open. Discovery/decode failure leaves
 that successful primary open intact.
 
 Jobs expose nonblocking discovery, read, loaded, failure, work, result, and
-installation counters through ABI v24. Loaded images include cache hits;
+installation counters through ABI v25. Loaded images include cache hits;
 internal Batch output rereads do not count as additional input images. Queued
 drop/cancel cannot publish a live candidate. A result is applied only on its
 captured owner after generation/revision validation. Normal save, sequence
@@ -301,13 +301,13 @@ cache release, and later history movement reconstructs the cache on demand.
 
 This is deliberately not a generic snapshot- or diff-procedure bridge. Every
 production history entry references its route-specific canonical procedure,
-and there is no supported incomplete-journal state. The v29 writer serializes
+and there is no supported incomplete-journal state. The v31 writer serializes
 Genesis, retained assets, the complete journal/control-event sequence, editor
 state, savepoints, cursor, branch graph, and ID authorities. Open validates and
 either fully replays that graph or uses a prefix/state/policy-verified optional
 checkpoint in a staged Core before one replacement of the live generation.
 Checkpoint mismatch selects full replay; malformed/hash/bound failure rejects.
-The journal remains authoritative and every non-v29 Cell version is rejected.
+The journal remains authoritative and every non-v31 Cell version is rejected.
 
 History visualization is a read-only derived view of that journal. Core replays
 the complete retained graph through the canonical executor, visits only `Commit`
@@ -332,20 +332,22 @@ selection mask. `BaseSurface::Asset` instead names one immutable canonical raste
 asset whose dimensions and pixel semantics match the document paper. Replacing
 the earlier temporary Document-ID-as-Cell bridge and persisting the shooting and
 maximum-close frames change canonical document-state bytes. The current document-state
-commitment is schema 11/domain 8, the replay contract is epoch 25, and the native
-format is version 28. The commitment includes the dedicated sparse fill-protection
-mask and only its wall-bearing tiles allocate. VectorColoring, Text, and Annotation layers and their object
-namespaces are absent from the exact-current model. Cut payload schema 2 separates immutable member assets from
+commitment is schema 12/domain 10, the replay contract is epoch 27, and the native
+format is version 31. Every image layer has one standard topology: exactly one
+MainLine plane, exactly one Color plane, and zero or more Raster planes. Layer kinds
+do not exist. Current selection, ordered named saved-selection masks, and the sparse
+fill-protection mask are document-owned rasters outside the image tree; only their
+materialized tiles allocate. Cut payload schema 3 separates immutable member assets from
 ordered membership and records membership before/after states in Cut history, while
 retaining Cell-document primitive semantics. Sequence edits stage bounded ordered
 insert/remove/move/renumber operations and publish one Cut revision only after final
 validation. Removed members are not physically deleted and remain addressable by
 stable `(CellId, document UUID)` while retained Cut history can restore them. The
-optional angled shooting frame and stable-ID vanishing points are independent document
-objects. Their canonical edits, previews, transform rules, snapshot overlays, output
-inclusion policies, and Core-owned radial snapping are persisted by v29; flat normal
-output excludes both overlay families, while explicit instruction export may include
-the shooting-frame outline. Epoch 19/version 22 added the independent
+optional angled shooting frame is an independent document object; its canonical edits,
+preview, transform rules, snapshot overlay, and output policy are persisted by v31.
+Flat normal output excludes the overlay, while explicit instruction export may include
+the shooting-frame outline. Vanishing-point and adjustment-layer document objects are
+absent from the current model and format. Epoch 19/version 22 added the independent
 current-only Cut descriptor and Cut metadata/
 default history. Epoch
 18/version 21 added the canonical floating-transform v3 procedure with
@@ -369,7 +371,7 @@ the asset digest or replay input.
 
 Registry retention is semantic rather than a cache of the current materialized
 document. Roots include Genesis, every retained journal branch and redo tail,
-known persistent editor/optional-metadata references, and live transient owners.
+known persistent editor/document-metadata references, and live transient owners.
 An asset referenced only by an inactive branch therefore remains available for
 cache-free replay. Reference accounting and resource bounds are checked before
 publication; failure does not partly install an asset, procedure, document, or
@@ -390,10 +392,10 @@ Cache-free verification first builds a detached asset archive from every semanti
 retention root, deep-copies each logical payload, and re-ingests it into an empty
 registry with the expected `AssetId`. Fresh Genesis/journal replay uses only that
 detached registry, so passing verification cannot be an artifact of shared
-`AssetRecord`, payload, or `TileRaster` ownership. Production v29 persists the
+`AssetRecord`, payload, or `TileRaster` ownership. Production v31 persists the
 same rooted graph in GENS/ASST.
 
-The present ABI is v24. `InkpodObjectId` separates Core, snapshot, task, color,
+The present ABI is v25. `InkpodObjectId` separates Core, snapshot, task, color,
 sample, raster, thumbnail, and export runtime objects by type and Core generation;
 IDs are monotonic within one Core and are never accepted across generation or
 after release. Variable input is synchronously copied into bounded Rust-owned
@@ -655,7 +657,7 @@ session/generation value must be supplied when reading them; the UI never
 re-resolves the active document. The read-only C ABI resource query reports
 logical document tile/history, render-cache, CPU-staging, light-table/reference,
 sequence-source, thumbnail-cache, and reserved sequence-composition categories
-without building a snapshot. ABI v24 adds the latter's byte/source/tile counts;
+without building a snapshot. ABI v25 retains the latter's byte/source/tile counts;
 the aggregate render-cache byte/tile counts already include the same charged
 payloads. Shared COW Core clones may report overlapping logical usage; the I/O
 manager's shared reservation counters enforce the application-wide CPU ceiling.
@@ -802,7 +804,7 @@ Inactive-session notifications validate their captured session/generation and
 update only tab dirty/processing presentation; they do not retarget the active
 view or request continuous snapshots.
 
-The fixed command-state catalog assigns all 329 production commands exactly one
+The fixed command-state catalog assigns all 321 production commands exactly one
 state owner. Pure providers compute enabled/checked state without calling Core or
 Win32 or mutating tools, previews, or documents. Menus, shortcuts, and palette
 entry points consume the same cached result. The main frame deliberately has no
@@ -1067,7 +1069,7 @@ The editable set-name combo enumerates extension-free `.inkbatch` filenames in
 `%LOCALAPPDATA%\inkpod\batch-sets`. The Windows-only `batch_set_store` creates that
 directory, rejects traversal, reserved-device and ambiguous trailing names, and
 maps one validated name to one `.inkbatch` path. Core and the file-format crate
-continue to receive only the resulting UTF-8 path and own the current v4 codec.
+continue to receive only the resulting UTF-8 path and own the current v5/operation-schema-4 codec.
 
 Batch submission captures the graph and COW active document without filesystem
 access on the issuing engine thread. Rust workers resolve File/Folder selectors
@@ -1391,24 +1393,21 @@ quantization uses the same half-open pixel-cell rule as locator sampling and
 nearest-neighbor rendering, including magnified lower/right clicks, final edges,
 and flipped views.
 
-Immutable snapshots own raster tiles plus bounded frame, guide, grid,
-vanishing-point, selection, and preview overlays. Borrowed spans remain valid
+Immutable snapshots own raster tiles plus bounded frame, guide, grid, selection,
+and preview overlays. Borrowed spans remain valid
 only for the FFI snapshot lifetime. The renderer validates counts, strides,
 item order, and group structure, and reconstructs GPU resources from the
 retained snapshot after device loss. Core geometry remains in document
 coordinates; zoom, pan, and flip are render transforms only.
 
 Snapshots also own a bottom-to-top render plan. Layer/plane index 0 is the
-palette top, so Core walks each tree in reverse and emits closed layer groups,
-raster-tile spans and adjustment LUT
-references in one semantic order. Layer opacity is applied once by the group;
-plane opacity is already resolved into its raster records. The C ABI
+palette top, so Core walks each tree in reverse and emits closed layer groups and
+raster-tile spans in one semantic order. Layer opacity is applied once by the
+group; plane opacity is already resolved into its raster records. The C ABI
 publishes only borrowed bounded spans, and the renderer rejects malformed group
 structure, kinds, or item ranges before retaining the snapshot. Direct2D draws
-the plan sequentially. An adjustment boundary closes the current command list,
-applies the Core-resolved RGB lookup tables through TableTransfer, and continues
-in a new command list while retaining document-scale raster quality. Device-loss
-recovery rebuilds the same plan from the retained snapshot. Thumbnail and flat
+the plan sequentially. Device-loss recovery rebuilds the same plan from the
+retained snapshot. Thumbnail and flat
 export use the same bottom-to-top Core semantics. Raster documents retain the
 existing precomposed tile path and its revision-max cache.
 
@@ -1428,7 +1427,7 @@ independent Core/catalog lifetime. Successful catalog replacement renews it;
 staging preserves it, while an independent Core clone gets a new namespace.
 Exhaustion disables source-cache reuse instead of wrapping. The identity is
 neither persisted nor included in semantic snapshot equality, document digests,
-replay, or revision-max. ABI v24's immutable snapshot accessor copies this
+replay, or revision-max. ABI v25's immutable snapshot accessor copies this
 provenance without payload reads and without giving the caller a source owner.
 
 Pristine eligibility is established by fresh source activation and checked
@@ -1485,7 +1484,7 @@ invalidates an ordinary map before reuse, including recovery with equal tile
 IDs/revisions. The epoch is an invalidation condition, not part of the source
 bank's lookup key.
 
-These are derived display caches only. Native v29, document replay epoch 25,
+These are derived display caches only. Native v31, document replay epoch 27,
 the canonical revision-max formula below, its payload-access gates, and existing
 benchmark workloads/envelopes are unchanged. Source-hit and upload counters
 describe which work was reused; they do not replace end-to-end Present checks.
@@ -1658,14 +1657,17 @@ Timer autosave is queued without blocking the UI and is deferred behind a live
 stroke. Long-running tasks expose progress and cancellation. Format limits and
 recovery details are specified in [`file-format.md`](file-format.md).
 
-The current `.inkpod` v29 Cell container requires `META`, `GENS`, `ASST`, `PROC`,
+The current `.inkpod` v31 Cell container requires `META`, `GENS`, `ASST`, `PROC`,
 and `EDIT`. META section/record schema 2 requires the closed raster-format value:
 PNG, TIFF, TGA, or BMP. Raster import records its actual codec; a new cell uses
 PNG unless the application supplies a different creation default. Changing that
 default does not mutate an existing document, history, or dirty state. Native
 reopen, recovery, compaction, and sequence activation preserve the stored format.
-This metadata change leaves replay epoch 25 and pixel asset/document digests
-unchanged. Normal PNG/TIFF companions retain native 16-bit precision; a 16-bit
+The v31 tree simplification advances replay epoch to 27, document archive schema
+to 7, mandatory nested `DOCM` document metadata to schema 8, the document-state
+digest to schema 12/domain 10, and canonical snapshot-composite schema to 5.
+Batch v5 uses operation schema 4, while the InkScript catalog/owner manifest v5
+exposes 73 commands. Normal PNG/TIFF companions retain native 16-bit precision; a 16-bit
 document cannot silently become an 8-bit TGA/BMP companion. Explicit display
 export retains its separate existing conversion contract.
 

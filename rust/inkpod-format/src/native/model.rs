@@ -1,4 +1,4 @@
-use crate::{FileAdjustmentMetadata, FileColorChart, FileLightTableMetadata};
+use crate::{FileColorChart, FileLightTableMetadata};
 use inkpod_image::{FNV_OFFSET, PixelFormat, PixelValue, TileCoord, fnv_bytes};
 use std::fmt;
 #[cfg(test)]
@@ -6,8 +6,9 @@ use std::sync::atomic::AtomicU64;
 pub(super) const MAGIC: [u8; 8] = *b"INKPOD\0\0";
 /// Current development format. Increment for every serialized schema change
 /// until the user declares a format freeze; older versions are not migrated.
-pub const DOCUMENT_ARCHIVE_VERSION: u32 = 6;
+pub const DOCUMENT_ARCHIVE_VERSION: u32 = 7;
 pub(super) const DOCUMENT_METADATA_MAGIC: [u8; 4] = *b"DOCM";
+pub(super) const DOCUMENT_METADATA_VERSION: u32 = 8;
 pub(super) const HEADER_BYTES: usize = 32;
 pub(super) const FIXED_MANIFEST_BYTES: usize = 200;
 pub(super) const COLOR_METADATA_FIXED_BYTES: usize = 24;
@@ -17,15 +18,14 @@ pub(super) const BLOB_DESCRIPTOR_BYTES: usize = 48;
 pub(super) const CONTAINER_FLAG_COLOR_METADATA: u32 = 1 << 0;
 pub(super) const CONTAINER_FLAG_DOCUMENT_METADATA: u32 = 1 << 1;
 pub(super) const CONTAINER_FLAG_LIGHT_TABLE_METADATA: u32 = 1 << 2;
-pub(super) const CONTAINER_FLAG_ADJUSTMENT_METADATA: u32 = 1 << 4;
 pub(super) const MAX_FILE_BYTES: u64 = 1 << 30;
 pub(crate) const MAX_MANIFEST_BYTES: u64 = 16 << 20;
 pub(crate) const MAX_PLANES: usize = 4_096;
 pub(super) const MAX_BLOBS: usize = 262_144;
 pub(super) const MAX_LAYERS: usize = 4_096;
 pub(super) const MAX_GUIDES: usize = 4_096;
+pub(super) const MAX_SAVED_SELECTION_MASKS: usize = 4_096;
 pub(crate) const MAX_NODE_NAME_BYTES: usize = 1_024;
-pub(crate) const MAX_VANISHING_POINTS: usize = 64;
 #[cfg(test)]
 pub(crate) static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
@@ -34,9 +34,10 @@ pub enum PlaneKind {
     MainLine,
     Color,
     Raster,
-    Selection,
+    CurrentSelection,
     LightTable,
     FillProtection,
+    SavedSelection,
 }
 
 impl PlaneKind {
@@ -45,9 +46,10 @@ impl PlaneKind {
             Self::MainLine => 1,
             Self::Color => 2,
             Self::Raster => 3,
-            Self::Selection => 4,
+            Self::CurrentSelection => 4,
             Self::LightTable => 5,
             Self::FillProtection => 6,
+            Self::SavedSelection => 7,
         }
     }
 
@@ -56,48 +58,11 @@ impl PlaneKind {
             1 => Ok(Self::MainLine),
             2 => Ok(Self::Color),
             3 => Ok(Self::Raster),
-            4 => Ok(Self::Selection),
+            4 => Ok(Self::CurrentSelection),
             5 => Ok(Self::LightTable),
             6 => Ok(Self::FillProtection),
+            7 => Ok(Self::SavedSelection),
             _ => Err(FormatError::Unsupported("unknown required plane kind")),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum LayerKind {
-    BinaryColoring,
-    GrayscaleColoring,
-    Raster,
-    Selection,
-    Frame,
-    VanishingPoint,
-    Adjustment,
-}
-
-impl LayerKind {
-    pub(super) const fn code(self) -> u32 {
-        match self {
-            Self::BinaryColoring => 1,
-            Self::GrayscaleColoring => 2,
-            Self::Raster => 3,
-            Self::Selection => 4,
-            Self::Frame => 5,
-            Self::VanishingPoint => 6,
-            Self::Adjustment => 7,
-        }
-    }
-
-    pub(super) fn from_code(value: u32) -> Result<Self, FormatError> {
-        match value {
-            1 => Ok(Self::BinaryColoring),
-            2 => Ok(Self::GrayscaleColoring),
-            3 => Ok(Self::Raster),
-            4 => Ok(Self::Selection),
-            5 => Ok(Self::Frame),
-            6 => Ok(Self::VanishingPoint),
-            7 => Ok(Self::Adjustment),
-            _ => Err(FormatError::Unsupported("unknown required layer kind")),
         }
     }
 }
@@ -120,7 +85,6 @@ pub struct FilePlaneProperties {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FileLayer {
     pub id: u64,
-    pub kind: LayerKind,
     pub name: String,
     pub visible: bool,
     pub editable: bool,
@@ -159,21 +123,14 @@ pub struct FileDocumentMetadata {
     pub color_chart_locked: bool,
     /// Optional independent angled shooting-frame instruction overlay.
     pub shooting_frame: Option<FileShootingFrame>,
-    /// Ordered persistent vanishing-point objects keyed by stable ID.
-    pub vanishing_points: Vec<FileVanishingPoint>,
+    /// Named document-owned selection masks keyed by stable ID.
+    pub saved_selections: Vec<FileSavedSelection>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct FileVanishingPoint {
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FileSavedSelection {
     pub id: u64,
-    pub layer_id: u64,
-    pub x_milli: i64,
-    pub y_milli: i64,
-    pub interval_milli_degrees: u32,
-    pub angle_milli_degrees: u32,
-    pub color: PixelValue,
-    pub opacity_milli: u32,
-    pub visible: bool,
+    pub name: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -259,15 +216,13 @@ pub struct DocumentArchive {
     pub main_line_color: PixelValue,
     pub palette: Vec<PixelValue>,
     pub planes: Vec<FilePlane>,
-    /// Optional typed document metadata. `None` is valid only for the base two-plane
-    /// document representation.
+    /// Decoded document metadata slot. The exact-current v31 contract requires
+    /// `Some`; `None` exists only so malformed/missing DOCM input can be rejected
+    /// at the validation boundary without synthesizing a compatibility tree.
     pub document_metadata: Option<FileDocumentMetadata>,
     /// Additive light-table/workflow metadata. Source rasters are blob-backed
     /// planes referenced by this section and remain outside the editable tree.
     pub light_table_metadata: Option<FileLightTableMetadata>,
-    /// Optional non-destructive adjustment parameters. Adjustment layers remain
-    /// in the document layer tree and never own a raster payload.
-    pub adjustment_metadata: Option<FileAdjustmentMetadata>,
 }
 
 #[derive(Debug)]

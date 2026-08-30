@@ -9,7 +9,7 @@ use inkpod_io::{IoError, IoManager, JobContext};
 use std::io::Write;
 
 impl Core {
-    /// Applies an ordered Batch v4 operation list as one canonical procedure and Undo unit.
+    /// Applies an ordered Batch v5 operation list as one canonical procedure and Undo unit.
     ///
     /// Disabled operations are ignored. Invalid targets, cancellation, stale revision,
     /// overflow, and allocation failure publish no partial document state.
@@ -160,18 +160,19 @@ fn resolve_targets_in_document(
     all_matches: bool,
 ) -> Result<Vec<BatchTargetSelector>, CoreError> {
     let mut matches = Vec::new();
-    for layer in document.layers.iter().filter(|layer| {
-        selector.layer_id.is_none_or(|id| layer.id.get() == id)
-            && selector.layer_kind.is_none_or(|kind| layer.kind == kind)
-    }) {
+    for layer in document
+        .layers
+        .iter()
+        .filter(|layer| selector.layer_id.is_none_or(|id| layer.id.get() == id))
+    {
         for plane in layer.planes.iter().filter(|plane| {
-            selector.plane_id.is_none_or(|id| plane.id.get() == id)
+            matches!(plane.kind, PlaneType::Color | PlaneType::Raster)
+                && selector.plane_id.is_none_or(|id| plane.id.get() == id)
                 && selector.plane_kind.is_none_or(|kind| plane.kind == kind)
         }) {
             matches.push(BatchTargetSelector {
                 layer_id: Some(layer.id.get()),
                 plane_id: Some(plane.id.get()),
-                layer_kind: Some(layer.kind),
                 plane_kind: Some(plane.kind),
                 missing_policy: BatchMissingTargetPolicy::Error,
             });
@@ -192,10 +193,10 @@ fn resolve_target_in_document(
     document: &CellDocument,
     selector: &BatchTargetSelector,
 ) -> Result<Option<(LayerId, u64)>, CoreError> {
-    let layer = document.layers.iter().find(|layer| {
-        selector.layer_id.is_none_or(|id| layer.id.get() == id)
-            && selector.layer_kind.is_none_or(|kind| layer.kind == kind)
-    });
+    let layer = document
+        .layers
+        .iter()
+        .find(|layer| selector.layer_id.is_none_or(|id| layer.id.get() == id));
     let Some(layer) = layer else {
         return match selector.missing_policy {
             BatchMissingTargetPolicy::Skip => Ok(None),
@@ -205,7 +206,8 @@ fn resolve_target_in_document(
         };
     };
     let plane = layer.planes.iter().find(|plane| {
-        selector.plane_id.is_none_or(|id| plane.id.get() == id)
+        matches!(plane.kind, PlaneType::Color | PlaneType::Raster)
+            && selector.plane_id.is_none_or(|id| plane.id.get() == id)
             && selector.plane_kind.is_none_or(|kind| plane.kind == kind)
     });
     let Some(plane) = plane else {
@@ -235,6 +237,11 @@ fn validate_editable_source(document: &CellDocument, plane_id: PlaneId) -> Resul
     if !layer.visible || !layer.editable || !plane.visible || !plane.editable {
         return Err(CoreError::InvalidArgument(
             "batch target is hidden or non-editable",
+        ));
+    }
+    if !matches!(plane.kind, PlaneType::Color | PlaneType::Raster) {
+        return Err(CoreError::InvalidArgument(
+            "batch target plane must be Color or Raster",
         ));
     }
     Ok(())

@@ -1,6 +1,5 @@
 #![forbid(unsafe_code)]
 
-mod adjustment;
 mod application_data;
 mod batch;
 mod common_formats;
@@ -10,7 +9,6 @@ mod light_table;
 mod native;
 mod procedure;
 
-pub use adjustment::{FileAdjustmentLayer, FileAdjustmentMetadata, MAX_ADJUSTMENT_LAYERS};
 pub use application_data::{
     ApplicationColor, COLOR_CHART_FORMAT_VERSION, FileColorChart, FileColorChartEntry, FilePalette,
     MAX_APPLICATION_COLORS, MAX_COLOR_CHART_NAME_BYTES, PALETTE_FORMAT_VERSION, decode_color_chart,
@@ -18,9 +16,9 @@ pub use application_data::{
     save_color_chart_atomic, save_palette_atomic,
 };
 pub use batch::{
-    BATCH_GRAPH_VERSION, FileBatchGraph, FileBatchInput, FileBatchOperation, FileBatchOutput,
-    FileBatchTarget, decode_batch_graph, encode_batch_graph, read_batch_graph,
-    save_batch_graph_atomic, save_batch_graph_atomic_with_cancel,
+    BATCH_GRAPH_VERSION, BATCH_OPERATION_VERSION, FileBatchGraph, FileBatchInput,
+    FileBatchOperation, FileBatchOutput, FileBatchTarget, decode_batch_graph, encode_batch_graph,
+    read_batch_graph, save_batch_graph_atomic, save_batch_graph_atomic_with_cancel,
 };
 pub use common_formats::{
     CommonRaster, CommonRasterFormat, CommonRasterInfo, MAX_COMMON_RASTER_BYTES, TgaAlphaLoss,
@@ -89,9 +87,9 @@ pub use light_table::{
 };
 pub use native::{
     DocumentArchive, FileDocumentMetadata, FileGrid, FileGuide, FileLayer, FilePlane,
-    FilePlaneProperties, FileShootingFrame, FileShootingFrameAnchor, FileTile, FileVanishingPoint,
-    FormatError, FrameMetadata, GuideAxis, LayerKind, Margins, PlaneKind, RectI32, checksum,
-    discard_recovery, recovery_is_newer,
+    FilePlaneProperties, FileSavedSelection, FileShootingFrame, FileShootingFrameAnchor, FileTile,
+    FormatError, FrameMetadata, GuideAxis, Margins, PlaneKind, RectI32, checksum, discard_recovery,
+    recovery_is_newer,
 };
 use native::{
     MAX_MANIFEST_BYTES, MAX_NODE_NAME_BYTES, MAX_PLANES, Reader, push_color_value, push_i32,

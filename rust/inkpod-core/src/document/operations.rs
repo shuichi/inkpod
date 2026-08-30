@@ -86,15 +86,10 @@ impl Core {
     /// Creates and activates a layer with the required default plane topology.
     ///
     /// Success is one undoable document edit and returns the new stable layer ID.
-    /// Invalid kind/name/limits fail atomically; the name may be made unique.
-    pub fn create_layer(
-        &mut self,
-        kind: LayerKind,
-        name: &str,
-    ) -> Result<(DispatchOutcome, u64), CoreError> {
+    /// Invalid names or limits fail atomically; the name may be made unique.
+    pub fn create_layer(&mut self, name: &str) -> Result<(DispatchOutcome, u64), CoreError> {
         if !self.canonical_invocation_is_active() {
             let result = self.execute_canonical_invocation(CanonicalInvocation::CreateLayer {
-                kind,
                 name: name.to_owned(),
             })?;
             let id = *result.output_ids.first().ok_or(CoreError::InvalidState(
@@ -104,30 +99,51 @@ impl Core {
         }
         self.ensure_no_active_stroke()?;
         validate_node_name(name)?;
-        let (width, height) = {
+        let (width, height, main_line_format, color_format) = {
             let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
             if document.layers.len() >= MAX_LAYERS {
                 return Err(CoreError::InvalidState("layer limit reached"));
             }
-            (document.width, document.height)
+            let primary = document.primary_layer();
+            let main_line_format = primary
+                .planes
+                .iter()
+                .find(|plane| plane.kind == PlaneType::MainLine)
+                .ok_or(CoreError::InvalidState(
+                    "primary main-line plane is missing",
+                ))?
+                .raster
+                .format();
+            let color_format = primary
+                .planes
+                .iter()
+                .find(|plane| plane.kind == PlaneType::Color)
+                .ok_or(CoreError::InvalidState("primary color plane is missing"))?
+                .raster
+                .format();
+            (
+                document.width,
+                document.height,
+                main_line_format,
+                color_format,
+            )
         };
         let mut next_id = self.next_id;
         let layer_id = next_id.take_layer();
-        let layer = build_layer_node(kind, name, layer_id, width, height, &mut next_id)?;
+        let layer = build_layer_node(
+            name,
+            layer_id,
+            width,
+            height,
+            main_line_format,
+            color_format,
+            &mut next_id,
+        )?;
         let mut edit = self.begin_document_edit()?;
         let after = edit.working_mut();
         let mut layer = layer;
         layer.name = unique_layer_name(&after.layers, name);
         after.layers.push(layer);
-        if kind == LayerKind::Adjustment {
-            after.adjustments.insert(
-                layer_id,
-                Adjustment::BrightnessContrast {
-                    brightness_milli: 0,
-                    contrast_milli: 0,
-                },
-            );
-        }
         if let Some(plane_id) = after
             .layers
             .last()
@@ -179,32 +195,6 @@ impl Core {
         }
         let duplicate_id = duplicate.id;
         let active_plane_id = duplicate.planes.first().map(|plane| plane.id);
-        if let Some(adjustment) = before.adjustments.get(&layer_id).cloned() {
-            after.adjustments.insert(duplicate_id, adjustment);
-        }
-        let vanishing_point_count = before
-            .vanishing_points
-            .iter()
-            .filter(|object| object.input.layer_id == layer_id.get())
-            .count();
-        if after
-            .vanishing_points
-            .len()
-            .saturating_add(vanishing_point_count)
-            > MAX_VANISHING_POINTS
-        {
-            return Err(CoreError::InvalidState("vanishing-point limit reached"));
-        }
-        for object in before
-            .vanishing_points
-            .iter()
-            .filter(|object| object.input.layer_id == layer_id.get())
-        {
-            let mut object = *object;
-            object.id = next_id.take_vanishing_point();
-            object.input.layer_id = duplicate_id.get();
-            after.vanishing_points.push(object);
-        }
         after.layers.insert(index + 1, duplicate);
         if let Some(id) = active_plane_id {
             edit.prefer_editor_target(EditorTarget {
@@ -219,7 +209,7 @@ impl Core {
 
     /// Deletes a layer while preserving a valid active target and document topology.
     ///
-    /// The last coloring layer cannot be deleted. Success is one undoable edit;
+    /// The last layer cannot be deleted. Success is one undoable edit;
     /// invalid or forbidden deletion leaves revision and history unchanged.
     pub fn delete_layer(&mut self, layer_id: u64) -> Result<DispatchOutcome, CoreError> {
         if !self.canonical_invocation_is_active() {
@@ -240,22 +230,9 @@ impl Core {
             .iter()
             .position(|layer| layer.id == layer_id)
             .ok_or(CoreError::InvalidArgument("layer ID does not exist"))?;
-        if is_coloring_layer(before.layers[index].kind)
-            && before
-                .layers
-                .iter()
-                .filter(|layer| is_coloring_layer(layer.kind))
-                .count()
-                == 1
-        {
-            return Err(CoreError::InvalidState(
-                "the final coloring layer cannot be deleted",
-            ));
+        if before.layers.len() == 1 {
+            return Err(CoreError::InvalidState("the final layer cannot be deleted"));
         }
-        after.adjustments.remove(&layer_id);
-        after
-            .vanishing_points
-            .retain(|object| object.input.layer_id != layer_id.get());
         after.layers.remove(index);
         if active_target.is_some_and(|target| target.layer_id == layer_id.get()) {
             let replacement = after
@@ -277,7 +254,7 @@ impl Core {
 
     /// Deletes every hidden layer as one atomic, undoable topology edit.
     ///
-    /// A document that would lose its final coloring layer is rejected before
+    /// A document that would lose its final layer is rejected before
     /// publication. With no hidden layers this is a semantic no-op.
     pub fn delete_hidden_layers(&mut self) -> Result<DispatchOutcome, CoreError> {
         if !self.canonical_invocation_is_active() {
@@ -300,14 +277,9 @@ impl Core {
         if hidden_ids.is_empty() {
             return Ok(self.noop_outcome());
         }
-        let remaining_coloring = document
-            .layers
-            .iter()
-            .filter(|layer| layer.visible && is_coloring_layer(layer.kind))
-            .count();
-        if remaining_coloring == 0 {
+        if hidden_ids.len() == document.layers.len() {
             return Err(CoreError::InvalidState(
-                "deleting hidden layers would remove the final coloring layer",
+                "deleting hidden layers would remove the final layer",
             ));
         }
 
@@ -318,14 +290,6 @@ impl Core {
         });
         let mut edit = self.begin_document_edit()?;
         let (_, after) = edit.documents();
-        for layer_id in &hidden_ids {
-            after.adjustments.remove(layer_id);
-        }
-        after.vanishing_points.retain(|object| {
-            !hidden_ids
-                .iter()
-                .any(|layer_id| layer_id.get() == object.input.layer_id)
-        });
         after.layers.retain(|layer| layer.visible);
         if active_removed {
             let replacement = after
@@ -435,9 +399,9 @@ impl Core {
     pub fn validate_plane_creation(
         &self,
         layer_id: u64,
-        kind: PlaneType,
         format: PixelFormat,
     ) -> Result<(), CoreError> {
+        validate_plane_format(PlaneType::Raster, format)?;
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
         let layer_id = LayerId::from_raw(layer_id);
         let layer = document
@@ -448,24 +412,22 @@ impl Core {
         if layer.planes.len() >= MAX_PLANES_PER_LAYER {
             return Err(CoreError::InvalidState("plane limit reached"));
         }
-        validate_layer_kind_with_candidate(layer.kind, &layer.planes, kind, format)
+        validate_layer(&layer.planes)
     }
 
     /// Appends and activates a plane in the identified layer.
     ///
-    /// Kind/format must be allowed by the layer topology. Success is one undoable
-    /// edit and returns a stable plane ID; all failures are atomic.
+    /// The format must be valid for a general raster plane. Success is one
+    /// undoable edit and returns a stable plane ID; all failures are atomic.
     pub fn create_plane(
         &mut self,
         layer_id: u64,
-        kind: PlaneType,
         format: PixelFormat,
         name: &str,
     ) -> Result<(DispatchOutcome, u64), CoreError> {
         if !self.canonical_invocation_is_active() {
             let result = self.execute_canonical_invocation(CanonicalInvocation::CreatePlane {
                 layer_id,
-                kind,
                 format,
                 name: name.to_owned(),
             })?;
@@ -477,7 +439,7 @@ impl Core {
         self.ensure_no_active_stroke()?;
         let layer_id = LayerId::from_raw(layer_id);
         validate_node_name(name)?;
-        validate_plane_format(kind, format)?;
+        validate_plane_format(PlaneType::Raster, format)?;
         let (layer_index, width, height) = {
             let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
             let layer_index = document
@@ -497,17 +459,14 @@ impl Core {
         let after = edit.working_mut();
         after.layers[layer_index].planes.push(PlaneNode {
             id: plane_id,
-            kind,
+            kind: PlaneType::Raster,
             name: name.to_owned(),
             visible: true,
             editable: true,
             opacity_milli: 1_000,
             raster,
         });
-        validate_layer_kind(
-            after.layers[layer_index].kind,
-            &after.layers[layer_index].planes,
-        )?;
+        validate_layer(&after.layers[layer_index].planes)?;
         edit.prefer_editor_target(EditorTarget {
             layer_id: layer_id.get(),
             plane_id: plane_id.get(),
@@ -587,10 +546,7 @@ impl Core {
         let (before, after) = edit.documents();
         let (layer_index, plane_index) = find_plane_indices(before, plane_id)?;
         after.layers[layer_index].planes.remove(plane_index);
-        validate_layer_kind(
-            after.layers[layer_index].kind,
-            &after.layers[layer_index].planes,
-        )?;
+        validate_layer(&after.layers[layer_index].planes)?;
         if active_target.is_some_and(|target| target.plane_id == plane_id.get()) {
             let replacement = after.layers[layer_index]
                 .planes
@@ -696,43 +652,37 @@ impl Core {
         edit.commit(self)
     }
 
-    /// Converts a raster plane to a compatible semantic kind and pixel format.
+    /// Converts a plane to a compatible pixel format without changing its role.
     ///
     /// An identical destination is a no-op. Success is one undoable, atomic document edit.
     pub fn convert_plane(
         &mut self,
         plane_id: u64,
-        destination_kind: PlaneType,
         destination_format: PixelFormat,
     ) -> Result<DispatchOutcome, CoreError> {
         if !self.canonical_invocation_is_active() {
             return self
                 .execute_canonical_invocation(CanonicalInvocation::ConvertPlane {
                     plane_id,
-                    destination_kind,
                     destination_format,
                 })
                 .map(|result| result.dispatch);
         }
         self.ensure_no_active_stroke()?;
         let plane_id = PlaneId::from_raw(plane_id);
-        validate_plane_format(destination_kind, destination_format)?;
         let mut edit = self.begin_document_edit()?;
         let revision = edit.revision();
         let (before, after) = edit.documents();
         let (layer_index, plane_index) = find_plane_indices(before, plane_id)?;
         let source = &before.layers[layer_index].planes[plane_index];
-        if source.kind == destination_kind && source.raster.format() == destination_format {
+        validate_plane_format(source.kind, destination_format)?;
+        if source.raster.format() == destination_format {
             return Ok(self.noop_outcome());
         }
         let converted = convert_plane_raster(&source.raster, destination_format, revision.get())?;
         let plane = &mut after.layers[layer_index].planes[plane_index];
-        plane.kind = destination_kind;
         plane.raster = converted;
-        validate_layer_kind(
-            after.layers[layer_index].kind,
-            &after.layers[layer_index].planes,
-        )?;
+        validate_layer(&after.layers[layer_index].planes)?;
         edit.commit(self)
     }
 
@@ -776,72 +726,14 @@ impl Core {
             layer_id: after.layers[layer_index].id.get(),
             plane_id: destination_id.get(),
         };
-        validate_layer_kind(
-            after.layers[layer_index].kind,
-            &after.layers[layer_index].planes,
-        )?;
+        validate_layer(&after.layers[layer_index].planes)?;
         edit.prefer_editor_target(preferred_target);
-        edit.commit(self)
-    }
-
-    /// Converts between binary and grayscale coloring layer representations.
-    ///
-    /// An identical kind is a no-op. Unsupported semantic conversions fail
-    /// atomically; success is one undoable document edit.
-    pub fn convert_layer(
-        &mut self,
-        layer_id: u64,
-        destination: LayerKind,
-    ) -> Result<DispatchOutcome, CoreError> {
-        if !self.canonical_invocation_is_active() {
-            return self
-                .execute_canonical_invocation(CanonicalInvocation::ConvertLayer {
-                    layer_id,
-                    destination,
-                })
-                .map(|result| result.dispatch);
-        }
-        self.ensure_no_active_stroke()?;
-        let layer_id = LayerId::from_raw(layer_id);
-        let mut edit = self.begin_document_edit()?;
-        let revision = edit.revision();
-        let (before, after) = edit.documents();
-        let index = before
-            .layers
-            .iter()
-            .position(|layer| layer.id == layer_id)
-            .ok_or(CoreError::InvalidArgument("layer ID does not exist"))?;
-        let source = before.layers[index].kind;
-        if source == destination {
-            return Ok(self.noop_outcome());
-        }
-        if !matches!(
-            (source, destination),
-            (LayerKind::BinaryColoring, LayerKind::GrayscaleColoring)
-                | (LayerKind::GrayscaleColoring, LayerKind::BinaryColoring)
-        ) {
-            return Err(CoreError::InvalidArgument(
-                "requested layer conversion would lose unsupported semantics",
-            ));
-        }
-        let main = after.layers[index]
-            .planes
-            .iter_mut()
-            .find(|plane| plane.kind == PlaneType::MainLine)
-            .ok_or(CoreError::InvalidState("coloring layer has no main plane"))?;
-        main.raster = convert_main_line_raster(
-            &main.raster,
-            destination == LayerKind::GrayscaleColoring,
-            revision.get(),
-        )?;
-        after.layers[index].kind = destination;
-        validate_layer_kind(destination, &after.layers[index].planes)?;
         edit.commit(self)
     }
 
     /// Composites a layer into its next lower compatible sibling and removes it.
     ///
-    /// Both layers must have compatible kind and plane topology. Success is one
+    /// Both layers must have compatible plane topology. Success is one
     /// undoable edit; any validation or raster failure publishes no partial merge.
     pub fn merge_layer_into_below(&mut self, layer_id: u64) -> Result<DispatchOutcome, CoreError> {
         if !self.canonical_invocation_is_active() {
@@ -863,13 +755,7 @@ impl Core {
             return Err(CoreError::InvalidArgument("layer has no lower sibling"));
         }
         let lower = upper + 1;
-        if before.layers[upper].kind == LayerKind::Adjustment {
-            return Err(CoreError::InvalidArgument(
-                "adjustment layers cannot merge without an explicit parameter composition",
-            ));
-        }
-        if before.layers[upper].kind != before.layers[lower].kind
-            || before.layers[upper].planes.len() != before.layers[lower].planes.len()
+        if before.layers[upper].planes.len() != before.layers[lower].planes.len()
             || before.layers[upper]
                 .planes
                 .iter()
@@ -879,7 +765,7 @@ impl Core {
                 })
         {
             return Err(CoreError::InvalidArgument(
-                "only layers with compatible type and plane topology can merge",
+                "only layers with compatible plane topology can merge",
             ));
         }
         let source_planes = after.layers[upper].planes.clone();
@@ -890,13 +776,6 @@ impl Core {
             .map_or(after.primary_ids().1, |plane| plane.id);
         for (destination, source) in after.layers[lower].planes.iter_mut().zip(&source_planes) {
             merge_raster(&mut destination.raster, &source.raster, revision.get())?;
-        }
-        if before.layers[upper].kind == LayerKind::VanishingPoint {
-            for object in &mut after.vanishing_points {
-                if object.input.layer_id == layer_id.get() {
-                    object.input.layer_id = lower_id.get();
-                }
-            }
         }
         after.layers.remove(upper);
         edit.prefer_editor_target(EditorTarget {
@@ -918,100 +797,40 @@ pub(crate) fn validate_node_name(name: &str) -> Result<(), CoreError> {
 }
 
 pub(crate) fn build_layer_node(
-    kind: LayerKind,
     name: &str,
     layer_id: LayerId,
     width: u32,
     height: u32,
-    next_id: &mut StableIdCursor,
-) -> Result<LayerNode, CoreError> {
-    build_layer_node_with_format(
-        kind,
-        name,
-        layer_id,
-        width,
-        height,
-        PixelFormat::StraightRgba8,
-        next_id,
-    )
-}
-
-pub(crate) fn build_layer_node_with_format(
-    kind: LayerKind,
-    name: &str,
-    layer_id: LayerId,
-    width: u32,
-    height: u32,
+    main_line_format: PixelFormat,
     color_format: PixelFormat,
     next_id: &mut StableIdCursor,
 ) -> Result<LayerNode, CoreError> {
     validate_node_name(name)?;
-    if !matches!(
-        color_format,
-        PixelFormat::StraightRgba8 | PixelFormat::StraightRgba16
-    ) {
-        return Err(CoreError::InvalidArgument(
-            "initial layer color format is unsupported",
-        ));
-    }
-    let mut planes = Vec::new();
-    match kind {
-        LayerKind::BinaryColoring | LayerKind::GrayscaleColoring => {
-            planes.push(PlaneNode {
-                id: next_id.take_plane(),
-                kind: PlaneType::MainLine,
-                name: "Main Line".to_owned(),
-                visible: true,
-                editable: true,
-                opacity_milli: 1_000,
-                raster: TileRaster::new(
-                    width,
-                    height,
-                    if kind == LayerKind::BinaryColoring {
-                        PixelFormat::BinaryMask8
-                    } else {
-                        if color_format == PixelFormat::StraightRgba16 {
-                            PixelFormat::Grayscale16
-                        } else {
-                            PixelFormat::Grayscale8
-                        }
-                    },
-                )?,
-            });
-            planes.push(PlaneNode {
-                id: next_id.take_plane(),
-                kind: PlaneType::Color,
-                name: "Color".to_owned(),
-                visible: true,
-                editable: true,
-                opacity_milli: 1_000,
-                raster: TileRaster::new(width, height, color_format)?,
-            });
-        }
-        LayerKind::Raster => planes.push(PlaneNode {
+    validate_plane_format(PlaneType::MainLine, main_line_format)?;
+    validate_plane_format(PlaneType::Color, color_format)?;
+    let planes = vec![
+        PlaneNode {
             id: next_id.take_plane(),
-            kind: PlaneType::Raster,
-            name: "Raster".to_owned(),
+            kind: PlaneType::MainLine,
+            name: "Main Line".to_owned(),
+            visible: true,
+            editable: true,
+            opacity_milli: 1_000,
+            raster: TileRaster::new(width, height, main_line_format)?,
+        },
+        PlaneNode {
+            id: next_id.take_plane(),
+            kind: PlaneType::Color,
+            name: "Color".to_owned(),
             visible: true,
             editable: true,
             opacity_milli: 1_000,
             raster: TileRaster::new(width, height, color_format)?,
-        }),
-        LayerKind::Selection => planes.push(PlaneNode {
-            id: next_id.take_plane(),
-            kind: PlaneType::Selection,
-            name: "Selection".to_owned(),
-            visible: true,
-            editable: true,
-            opacity_milli: 1_000,
-            raster: TileRaster::new(width, height, PixelFormat::BinaryMask8)?,
-        }),
-        LayerKind::Frame | LayerKind::VanishingPoint | LayerKind::Adjustment => {}
-    }
-    validate_layer_kind(kind, &planes)?;
+        },
+    ];
+    validate_layer(&planes)?;
     Ok(LayerNode {
         id: layer_id,
-        kind,
         name: name.to_owned(),
         visible: true,
         editable: true,
@@ -1029,7 +848,7 @@ mod tests {
         let mut core = Core::new();
         let created = core.new_cell(1, 1, 96_000, 96_000).unwrap();
         let (_, duplicate) = core.duplicate_layer(created.layer_id).unwrap();
-        core.create_layer(LayerKind::Frame, "Frame").unwrap();
+        core.create_layer("Additional Layer").unwrap();
         core.delete_layer(duplicate).unwrap();
 
         let target = core.editor_state().unwrap().state.target.unwrap();
@@ -1050,59 +869,57 @@ mod tests {
         let before_next_id = core.next_id;
 
         assert!(
-            core.validate_plane_creation(
-                created.layer_id,
-                PlaneType::Raster,
-                PixelFormat::StraightRgba8,
-            )
-            .is_ok()
+            core.validate_plane_creation(created.layer_id, PixelFormat::StraightRgba8)
+                .is_ok()
         );
         assert!(
-            core.validate_plane_creation(
-                created.layer_id,
-                PlaneType::Raster,
-                PixelFormat::BinaryMask8,
-            )
-            .is_err()
-        );
-        assert!(
-            core.validate_plane_creation(
-                created.layer_id,
-                PlaneType::Selection,
-                PixelFormat::BinaryMask8,
-            )
-            .is_err()
-        );
-        assert!(
-            core.validate_plane_creation(
-                created.layer_id,
-                PlaneType::MainLine,
-                PixelFormat::BinaryMask8,
-            )
-            .is_err()
+            core.validate_plane_creation(created.layer_id, PixelFormat::BinaryMask8)
+                .is_err()
         );
         assert_eq!(core.document, before);
         assert_eq!(core.document_revision, before_revision);
         assert_eq!(core.next_id, before_next_id);
 
-        let (_, raster_layer_id) = core
-            .create_layer(LayerKind::Raster, "Additional Raster")
-            .unwrap();
+        let (_, raster_layer_id) = core.create_layer("Additional Raster").unwrap();
         assert!(
-            core.validate_plane_creation(
-                raster_layer_id,
-                PlaneType::Raster,
-                PixelFormat::StraightRgba16,
-            )
-            .is_ok()
+            core.validate_plane_creation(raster_layer_id, PixelFormat::StraightRgba16)
+                .is_ok()
         );
-        assert!(
-            core.validate_plane_creation(
-                raster_layer_id,
-                PlaneType::Color,
-                PixelFormat::StraightRgba8,
-            )
-            .is_err()
+    }
+
+    #[test]
+    fn new_layer_inherits_primary_plane_depths() {
+        let mut core = Core::new();
+        let created = core.new_cell(4, 4, 96_000, 96_000).unwrap();
+        core.convert_plane(created.main_plane_id, PixelFormat::Grayscale16)
+            .unwrap();
+        core.convert_plane(created.color_plane_id, PixelFormat::StraightRgba16)
+            .unwrap();
+
+        let (_, layer_id) = core.create_layer("16-bit Layer").unwrap();
+        let layer = core
+            .layers()
+            .unwrap()
+            .into_iter()
+            .find(|layer| layer.id == layer_id)
+            .unwrap();
+        assert_eq!(
+            layer
+                .planes
+                .iter()
+                .find(|plane| plane.kind == PlaneType::MainLine)
+                .unwrap()
+                .pixel_format,
+            PixelFormat::Grayscale16
+        );
+        assert_eq!(
+            layer
+                .planes
+                .iter()
+                .find(|plane| plane.kind == PlaneType::Color)
+                .unwrap()
+                .pixel_format,
+            PixelFormat::StraightRgba16
         );
     }
 }

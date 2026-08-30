@@ -5,8 +5,8 @@ use super::inkscript_reference::{
     InkScriptEntityKind, InkScriptReferenceError, InkScriptRuntimeReferences,
 };
 use crate::{
-    EditTarget, EditTargetCommand, EditorTarget, FrameMetadata, LayerKind, MAX_EDIT_TARGETS,
-    Margins, PixelFormat, PlaneType, PrimitiveId, RectI32,
+    EditTarget, EditTargetCommand, EditorTarget, FrameMetadata, MAX_EDIT_TARGETS, Margins,
+    PixelFormat, PrimitiveId, RectI32,
 };
 use inkpod_format::{
     InkScriptCommandResultSchema, InkScriptCommandSchema, InkScriptConstructorArgumentSchema,
@@ -66,17 +66,12 @@ const BOOLEAN_COMMAND_ARGUMENTS: &[InkScriptConstructorArgumentSchema] =
         "bool",
         &[],
     )];
-const CONVERT_PLANE_COMMAND_ARGUMENTS: &[InkScriptConstructorArgumentSchema] = &[
-    InkScriptConstructorArgumentSchema::new("kind", "plane_kind", &[]),
-    InkScriptConstructorArgumentSchema::new("format", "pixel_format", &[]),
-];
-const CONVERT_LAYER_COMMAND_ARGUMENTS: &[InkScriptConstructorArgumentSchema] =
+const CONVERT_PLANE_COMMAND_ARGUMENTS: &[InkScriptConstructorArgumentSchema] =
     &[InkScriptConstructorArgumentSchema::new(
-        "kind",
-        "layer_kind",
+        "format",
+        "pixel_format",
         &[],
     )];
-
 pub(crate) const DOCUMENT_TREE_CONSTRUCTORS: &[InkScriptConstructorSchema] = &[
     InkScriptConstructorSchema::new("layer_target", "edit_target", LAYER_TARGET_ARGUMENTS),
     InkScriptConstructorSchema::new("plane_target", "edit_target", PLANE_TARGET_ARGUMENTS),
@@ -97,20 +92,13 @@ pub(crate) const DOCUMENT_TREE_CONSTRUCTORS: &[InkScriptConstructorSchema] = &[
         "edit_target_command",
         CONVERT_PLANE_COMMAND_ARGUMENTS,
     ),
-    InkScriptConstructorSchema::new(
-        "convert_target_layers",
-        "edit_target_command",
-        CONVERT_LAYER_COMMAND_ARGUMENTS,
-    ),
     InkScriptConstructorSchema::new("merge_targets", "edit_target_command", &[]),
 ];
 
 const UPDATE_PAPER_FRAMES_FIELDS: &[InkScriptFieldSchema] =
     &[InkScriptFieldSchema::required("frames", "paper_frames", 0)];
-const CREATE_LAYER_FIELDS: &[InkScriptFieldSchema] = &[
-    InkScriptFieldSchema::required("kind", "layer_kind", 0),
-    InkScriptFieldSchema::required("name", "string", 1),
-];
+const CREATE_LAYER_FIELDS: &[InkScriptFieldSchema] =
+    &[InkScriptFieldSchema::required("name", "string", 0)];
 const LAYER_ID_FIELDS: &[InkScriptFieldSchema] =
     &[InkScriptFieldSchema::required("layer_id", "layer_ref", 0)];
 const REORDER_LAYER_FIELDS: &[InkScriptFieldSchema] = &[
@@ -119,9 +107,8 @@ const REORDER_LAYER_FIELDS: &[InkScriptFieldSchema] = &[
 ];
 const CREATE_PLANE_FIELDS: &[InkScriptFieldSchema] = &[
     InkScriptFieldSchema::required("layer_id", "layer_ref", 0),
-    InkScriptFieldSchema::required("kind", "plane_kind", 1),
-    InkScriptFieldSchema::required("format", "pixel_format", 2),
-    InkScriptFieldSchema::required("name", "string", 3),
+    InkScriptFieldSchema::required("format", "pixel_format", 1),
+    InkScriptFieldSchema::required("name", "string", 2),
 ];
 const PLANE_ID_FIELDS: &[InkScriptFieldSchema] =
     &[InkScriptFieldSchema::required("plane_id", "plane_ref", 0)];
@@ -190,57 +177,106 @@ pub(crate) const DOCUMENT_TREE_CATALOG: &[DocumentTreeCatalogEntry] = &[
         "update_paper_frames",
         PrimitiveId::UPDATE_PAPER_FRAMES,
         2,
+        2,
         "INKS-EQ-0001",
     ),
-    entry("create_layer", PrimitiveId::CREATE_LAYER, 2, "INKS-EQ-0002"),
+    entry(
+        "create_layer",
+        PrimitiveId::CREATE_LAYER,
+        3,
+        3,
+        "INKS-EQ-0002",
+    ),
     entry(
         "duplicate_layer",
         PrimitiveId::DUPLICATE_LAYER,
         2,
+        2,
         "INKS-EQ-0003",
     ),
-    entry("delete_layer", PrimitiveId::DELETE_LAYER, 2, "INKS-EQ-0004"),
+    entry(
+        "delete_layer",
+        PrimitiveId::DELETE_LAYER,
+        2,
+        2,
+        "INKS-EQ-0004",
+    ),
     entry(
         "reorder_layer",
         PrimitiveId::REORDER_LAYER,
         2,
+        2,
         "INKS-EQ-0005",
     ),
-    entry("create_plane", PrimitiveId::CREATE_PLANE, 2, "INKS-EQ-0007"),
+    entry(
+        "create_plane",
+        PrimitiveId::CREATE_PLANE,
+        3,
+        3,
+        "INKS-EQ-0007",
+    ),
     entry(
         "duplicate_plane",
         PrimitiveId::DUPLICATE_PLANE,
         2,
+        2,
         "INKS-EQ-0008",
     ),
-    entry("delete_plane", PrimitiveId::DELETE_PLANE, 2, "INKS-EQ-0009"),
+    entry(
+        "delete_plane",
+        PrimitiveId::DELETE_PLANE,
+        2,
+        2,
+        "INKS-EQ-0009",
+    ),
     entry(
         "reorder_plane",
         PrimitiveId::REORDER_PLANE,
         2,
+        2,
         "INKS-EQ-0010",
     ),
-    entry("merge_plane", PrimitiveId::MERGE_PLANE, 2, "INKS-EQ-0013"),
-    entry("merge_layer", PrimitiveId::MERGE_LAYER, 2, "INKS-EQ-0015"),
+    entry(
+        "merge_plane",
+        PrimitiveId::MERGE_PLANE,
+        2,
+        2,
+        "INKS-EQ-0013",
+    ),
+    entry(
+        "merge_layer",
+        PrimitiveId::MERGE_LAYER,
+        2,
+        2,
+        "INKS-EQ-0015",
+    ),
     entry(
         "delete_hidden_layers",
         PrimitiveId::DELETE_HIDDEN_LAYERS,
         2,
+        2,
         "INKS-EQ-0016",
     ),
-    entry("edit_targets", PrimitiveId::EDIT_TARGETS, 1, "INKS-EQ-0017"),
+    entry(
+        "edit_targets",
+        PrimitiveId::EDIT_TARGETS,
+        3,
+        2,
+        "INKS-EQ-0017",
+    ),
 ];
 
 const fn entry(
     command: &'static str,
     primitive_id: PrimitiveId,
+    primitive_schema_version: u16,
     semantics_revision: u16,
     equivalence_test: &'static str,
 ) -> DocumentTreeCatalogEntry {
     DocumentTreeCatalogEntry {
         command,
         primitive_id,
-        primitive_schema_version: 2,
+        primitive_schema_version,
         semantics_revision,
         equivalence_test,
     }
@@ -271,7 +307,7 @@ impl DocumentTreeScriptStep {
         invocation: &CanonicalInvocation,
     ) -> Result<Self, DocumentTreeAdapterError> {
         let mut source = String::from(
-            "inkscript_fragment 2;\nrequires { procedure_catalog = 4; replay_epoch = 25; }\n",
+            "inkscript_fragment 2;\nrequires { procedure_catalog = 5; replay_epoch = 27; }\n",
         );
         let mut references = InkScriptRuntimeReferences::default();
         let (command, arguments, has_result) =
@@ -331,7 +367,6 @@ impl DocumentTreeScriptStep {
                 frames: paper_frames(field(arguments, "frames")?)?,
             }),
             "create_layer" => Ok(CanonicalInvocation::CreateLayer {
-                kind: layer_kind(field(arguments, "kind")?)?,
                 name: node_name(field(arguments, "name")?)?,
             }),
             "duplicate_layer" => Ok(CanonicalInvocation::DuplicateLayer {
@@ -362,7 +397,6 @@ impl DocumentTreeScriptStep {
                     &self.references,
                     InkScriptEntityKind::Layer,
                 )?,
-                kind: plane_kind(field(arguments, "kind")?)?,
                 format: pixel_format(field(arguments, "format")?)?,
                 name: node_name(field(arguments, "name")?)?,
             }),
@@ -442,15 +476,11 @@ pub(crate) fn lift_arguments(
             format!("frames = {};", paper_frames_literal(*frames)),
             false,
         ),
-        CanonicalInvocation::CreateLayer { kind, name } => {
+        CanonicalInvocation::CreateLayer { name } => {
             validate_node_name(name)?;
             (
                 "create_layer",
-                format!(
-                    "kind = {}; name = {};",
-                    layer_kind_name(*kind),
-                    string_literal(name)
-                ),
+                format!("name = {};", string_literal(name)),
                 true,
             )
         }
@@ -493,7 +523,6 @@ pub(crate) fn lift_arguments(
         }
         CanonicalInvocation::CreatePlane {
             layer_id,
-            kind,
             format,
             name,
         } => {
@@ -508,8 +537,7 @@ pub(crate) fn lift_arguments(
             (
                 "create_plane",
                 format!(
-                    "layer_id = $owner; kind = {}; format = {}; name = {};",
-                    plane_kind_name(*kind),
+                    "layer_id = $owner; format = {}; name = {};",
                     pixel_format_name(*format)?,
                     string_literal(name)
                 ),
@@ -657,7 +685,7 @@ fn bind_declaration(
         InkScriptEntityKind::Plane => "plane",
         InkScriptEntityKind::Guide
         | InkScriptEntityKind::ShootingFrame
-        | InkScriptEntityKind::VanishingPoint
+        | InkScriptEntityKind::SavedSelectionMask
         | InkScriptEntityKind::LightTableSet
         | InkScriptEntityKind::LightTableItem => {
             return Err(DocumentTreeAdapterError::TargetMismatch);
@@ -713,12 +741,8 @@ fn edit_target_command(
         ("set_target_editability", [value]) => {
             Ok(EditTargetCommand::SetEditability(boolean(value)?))
         }
-        ("convert_target_planes", [kind, format]) => Ok(EditTargetCommand::ConvertPlanes {
-            kind: plane_kind(kind)?,
+        ("convert_target_planes", [format]) => Ok(EditTargetCommand::ConvertPlanes {
             format: pixel_format(format)?,
-        }),
-        ("convert_target_layers", [kind]) => Ok(EditTargetCommand::ConvertLayers {
-            kind: layer_kind(kind)?,
         }),
         ("merge_targets", []) => Ok(EditTargetCommand::Merge),
         _ => Err(DocumentTreeAdapterError::InvalidTypedStep),
@@ -858,29 +882,6 @@ fn validate_node_name(name: &str) -> Result<(), DocumentTreeAdapterError> {
     }
 }
 
-fn layer_kind(value: &InkScriptTypedValue) -> Result<LayerKind, DocumentTreeAdapterError> {
-    match enum_name(value)? {
-        "binary_coloring" => Ok(LayerKind::BinaryColoring),
-        "grayscale_coloring" => Ok(LayerKind::GrayscaleColoring),
-        "raster" => Ok(LayerKind::Raster),
-        "selection" => Ok(LayerKind::Selection),
-        "frame" => Ok(LayerKind::Frame),
-        "vanishing_point" => Ok(LayerKind::VanishingPoint),
-        "adjustment" => Ok(LayerKind::Adjustment),
-        _ => Err(DocumentTreeAdapterError::InvalidValue),
-    }
-}
-
-fn plane_kind(value: &InkScriptTypedValue) -> Result<PlaneType, DocumentTreeAdapterError> {
-    match enum_name(value)? {
-        "main_line" => Ok(PlaneType::MainLine),
-        "color" => Ok(PlaneType::Color),
-        "raster" => Ok(PlaneType::Raster),
-        "selection" => Ok(PlaneType::Selection),
-        _ => Err(DocumentTreeAdapterError::InvalidValue),
-    }
-}
-
 fn pixel_format(value: &InkScriptTypedValue) -> Result<PixelFormat, DocumentTreeAdapterError> {
     match enum_name(value)? {
         "mask8" => Ok(PixelFormat::BinaryMask8),
@@ -937,13 +938,8 @@ fn edit_target_command_literal(
         EditTargetCommand::Delete => "delete_targets()".to_owned(),
         EditTargetCommand::SetVisibility(value) => format!("set_target_visibility({value})"),
         EditTargetCommand::SetEditability(value) => format!("set_target_editability({value})"),
-        EditTargetCommand::ConvertPlanes { kind, format } => format!(
-            "convert_target_planes({}, {})",
-            plane_kind_name(kind),
-            pixel_format_name(format)?
-        ),
-        EditTargetCommand::ConvertLayers { kind } => {
-            format!("convert_target_layers({})", layer_kind_name(kind))
+        EditTargetCommand::ConvertPlanes { format } => {
+            format!("convert_target_planes({})", pixel_format_name(format)?)
         }
         EditTargetCommand::Merge => "merge_targets()".to_owned(),
     })
@@ -961,27 +957,6 @@ fn string_literal(value: &str) -> String {
     }
     result.push('"');
     result
-}
-
-const fn layer_kind_name(value: LayerKind) -> &'static str {
-    match value {
-        LayerKind::BinaryColoring => "binary_coloring",
-        LayerKind::GrayscaleColoring => "grayscale_coloring",
-        LayerKind::Raster => "raster",
-        LayerKind::Selection => "selection",
-        LayerKind::Frame => "frame",
-        LayerKind::VanishingPoint => "vanishing_point",
-        LayerKind::Adjustment => "adjustment",
-    }
-}
-
-const fn plane_kind_name(value: PlaneType) -> &'static str {
-    match value {
-        PlaneType::MainLine => "main_line",
-        PlaneType::Color => "color",
-        PlaneType::Raster => "raster",
-        PlaneType::Selection => "selection",
-    }
 }
 
 fn pixel_format_name(value: PixelFormat) -> Result<&'static str, DocumentTreeAdapterError> {
@@ -1018,7 +993,6 @@ mod tests {
         execute_output(
             core,
             CanonicalInvocation::CreateLayer {
-                kind: LayerKind::Raster,
                 name: name.to_owned(),
             },
         )
@@ -1026,14 +1000,14 @@ mod tests {
 
     fn create_raster_layer_and_plane(core: &mut Core, name: &str) -> (u64, u64) {
         let layer_id = create_raster_layer(core, name);
-        let plane_id = core
-            .layers()
-            .unwrap()
-            .into_iter()
-            .find(|layer| layer.id == layer_id)
-            .unwrap()
-            .planes[0]
-            .id;
+        let plane_id = execute_output(
+            core,
+            CanonicalInvocation::CreatePlane {
+                layer_id,
+                format: PixelFormat::StraightRgba8,
+                name: format!("{name} raster"),
+            },
+        );
         (layer_id, plane_id)
     }
 
@@ -1047,7 +1021,6 @@ mod tests {
                 CanonicalInvocation::UpdatePaperFrames { frames }
             }
             1 => CanonicalInvocation::CreateLayer {
-                kind: LayerKind::Raster,
                 name: "Created".to_owned(),
             },
             2 => CanonicalInvocation::DuplicateLayer {
@@ -1064,7 +1037,6 @@ mod tests {
                 let layer_id = create_raster_layer(&mut core, "Plane owner");
                 CanonicalInvocation::CreatePlane {
                     layer_id,
-                    kind: PlaneType::Raster,
                     format: PixelFormat::StraightRgba8,
                     name: "Created plane".to_owned(),
                 }
@@ -1146,11 +1118,21 @@ mod tests {
             assert_eq!(lowered, invocation, "codec fixture {index}");
             assert_eq!(metadata.command, step.typed.command());
             assert_eq!(metadata.primitive_id, invocation.primitive_id());
-            assert_eq!(metadata.primitive_schema_version, 2);
+            assert_eq!(
+                metadata.primitive_schema_version,
+                if matches!(
+                    metadata.command,
+                    "create_layer" | "create_plane" | "edit_targets"
+                ) {
+                    3
+                } else {
+                    2
+                }
+            );
             assert_eq!(
                 metadata.semantics_revision,
-                if metadata.command == "edit_targets" {
-                    1
+                if matches!(metadata.command, "create_layer" | "create_plane") {
+                    3
                 } else {
                     2
                 }
@@ -1213,7 +1195,6 @@ mod tests {
 
         assert_eq!(
             DocumentTreeScriptStep::from_canonical(&CanonicalInvocation::CreateLayer {
-                kind: LayerKind::Raster,
                 name: String::new(),
             })
             .unwrap_err(),

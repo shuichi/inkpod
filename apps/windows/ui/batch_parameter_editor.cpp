@@ -44,18 +44,13 @@ constexpr int kSecondaryAlphaLabel = 22;
 constexpr int kSecondaryAlpha = 23;
 
 struct ColorReplaceTargetOption {
-    InkpodLayerKind layer_kind;
     InkpodTypedPlaneKind plane_kind;
     UiStringId label;
 };
 
-constexpr std::array<ColorReplaceTargetOption, 3U> kColorReplaceTargets{{
-    {INKPOD_LAYER_RASTER, INKPOD_TYPED_PLANE_RASTER,
-     UiStringId::LayerRasterGeneral},
-    {INKPOD_LAYER_BINARY_COLORING, INKPOD_TYPED_PLANE_COLOR,
-     UiStringId::LayerBinaryColoring},
-    {INKPOD_LAYER_GRAYSCALE_COLORING, INKPOD_TYPED_PLANE_COLOR,
-     UiStringId::LayerGrayscaleColoring},
+constexpr std::array<ColorReplaceTargetOption, 2U> kColorReplaceTargets{{
+    {INKPOD_TYPED_PLANE_RASTER, UiStringId::PlaneRaster},
+    {INKPOD_TYPED_PLANE_COLOR, UiStringId::Coloring},
 }};
 
 struct EditorState {
@@ -91,8 +86,7 @@ struct EditorState {
     HWND secondary_alpha{};
     HWND target_label{};
     HWND target{};
-    HWND target_binary{};
-    HWND target_grayscale{};
+    HWND target_color{};
     HWND target_fixed{};
 };
 
@@ -418,9 +412,7 @@ void Layout(EditorState& state, HWND window) noexcept {
             y += row;
             place(state.target, margin, y, width, row);
             y += row + gap;
-            place(state.target_binary, margin, y, width, row);
-            y += row + gap;
-            place(state.target_grayscale, margin, y, width, row);
+            place(state.target_color, margin, y, width, row);
             y += row + gap;
             if (IsWindowVisible(state.target_fixed) != FALSE) {
                 place(state.target_fixed, margin, y, width, row);
@@ -500,11 +492,10 @@ app::BatchOperationUi* SelectedOperation(EditorState& state) noexcept {
 bool MatchesTarget(
     std::uint64_t layer_id,
     std::uint64_t plane_id,
-    InkpodLayerKind layer_kind,
     InkpodTypedPlaneKind plane_kind,
     const ColorReplaceTargetOption& option) noexcept {
     return layer_id == 0U && plane_id == 0U
-        && layer_kind == option.layer_kind && plane_kind == option.plane_kind;
+        && plane_kind == option.plane_kind;
 }
 
 bool HasColorReplaceTarget(
@@ -513,7 +504,6 @@ bool HasColorReplaceTarget(
     if (MatchesTarget(
             operation.layer_id,
             operation.plane_id,
-            operation.layer_kind,
             operation.plane_kind,
             option)) {
         return true;
@@ -525,7 +515,6 @@ bool HasColorReplaceTarget(
             return MatchesTarget(
                 target.layer_id,
                 target.plane_id,
-                target.layer_kind,
                 target.plane_kind,
                 option);
         });
@@ -535,20 +524,18 @@ bool HasFixedColorReplaceTarget(const app::BatchOperationUi& operation) noexcept
     const auto known = [](
                            std::uint64_t layer_id,
                            std::uint64_t plane_id,
-                           InkpodLayerKind layer_kind,
                            InkpodTypedPlaneKind plane_kind) {
         return std::any_of(
             kColorReplaceTargets.begin(),
             kColorReplaceTargets.end(),
             [&](const ColorReplaceTargetOption& option) {
                 return MatchesTarget(
-                    layer_id, plane_id, layer_kind, plane_kind, option);
+                    layer_id, plane_id, plane_kind, option);
             });
     };
     if (!known(
             operation.layer_id,
             operation.plane_id,
-            operation.layer_kind,
             operation.plane_kind)) {
         return true;
     }
@@ -559,7 +546,6 @@ bool HasFixedColorReplaceTarget(const app::BatchOperationUi& operation) noexcept
             return !known(
                 target.layer_id,
                 target.plane_id,
-                target.layer_kind,
                 target.plane_kind);
         });
 }
@@ -569,7 +555,6 @@ InkpodBatchTargetInput TargetRecord(
     InkpodBatchMissingPolicy missing_policy) noexcept {
     InkpodBatchTargetInput target{};
     target.struct_size = sizeof(target);
-    target.layer_kind = option.layer_kind;
     target.plane_kind = option.plane_kind;
     target.missing_policy = missing_policy;
     return target;
@@ -611,7 +596,6 @@ bool SetColorReplaceTargetChecked(
     }
     operation.layer_id = primary_target.layer_id;
     operation.plane_id = primary_target.plane_id;
-    operation.layer_kind = primary_target.layer_kind;
     operation.plane_kind = primary_target.plane_kind;
     operation.additional_targets = std::move(additional_targets);
     return true;
@@ -735,8 +719,7 @@ void Refresh(EditorState& state, HWND window) noexcept {
     Show(state.secondary_alpha, color_replace);
     Show(state.target_label, color_replace);
     Show(state.target, color_replace);
-    Show(state.target_binary, color_replace);
-    Show(state.target_grayscale, color_replace);
+    Show(state.target_color, color_replace);
     const bool fixed_color_target = color_replace
         && HasFixedColorReplaceTarget(*selected_operation);
     Show(state.target_fixed, fixed_color_target);
@@ -808,8 +791,8 @@ void Refresh(EditorState& state, HWND window) noexcept {
         SetWindowTextW(
             state.target_label, UiText(UiStringId::OperationTargetLayer));
         if (color_replace) {
-            const std::array<HWND, 3U> controls{
-                state.target, state.target_binary, state.target_grayscale};
+            const std::array<HWND, kColorReplaceTargets.size()> controls{
+                state.target, state.target_color};
             for (std::size_t index = 0U; index < controls.size(); ++index) {
                 SetWindowTextW(
                     controls[index], UiText(kColorReplaceTargets[index].label));
@@ -846,8 +829,7 @@ void Refresh(EditorState& state, HWND window) noexcept {
                          state.last, state.rows, state.add, state.remove, state.swap,
                          state.current, state.old_swatch, state.new_swatch,
                          state.primary_alpha, state.secondary_alpha,
-                         state.target, state.target_binary,
-                         state.target_grayscale}) {
+                         state.target, state.target_color}) {
         EnableWindow(control, state.enabled ? TRUE : FALSE);
     }
     EnableWindow(state.target_fixed, FALSE);
@@ -1384,8 +1366,7 @@ void ApplyEditorFont(EditorState& state, HWND window) noexcept {
              state.secondary_alpha,
              state.target_label,
              state.target,
-             state.target_binary,
-             state.target_grayscale,
+             state.target_color,
              state.target_fixed}) {
         SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), FALSE);
     }
@@ -1474,14 +1455,10 @@ LRESULT CALLBACK EditorProcedure(
                 window, 0, WC_BUTTONW, L"",
                 BS_AUTOCHECKBOX | WS_TABSTOP,
                 IDC_BATCH_PARAMETER_TARGET);
-            state->target_binary = Child(
+            state->target_color = Child(
                 window, 0, WC_BUTTONW, L"",
                 BS_AUTOCHECKBOX | WS_TABSTOP,
-                IDC_BATCH_PARAMETER_TARGET_BINARY);
-            state->target_grayscale = Child(
-                window, 0, WC_BUTTONW, L"",
-                BS_AUTOCHECKBOX | WS_TABSTOP,
-                IDC_BATCH_PARAMETER_TARGET_GRAYSCALE);
+                IDC_BATCH_PARAMETER_TARGET_COLOR);
             state->target_fixed = Child(
                 window, 0, WC_BUTTONW, L"",
                 BS_AUTOCHECKBOX,
@@ -1558,21 +1535,16 @@ LRESULT CALLBACK EditorProcedure(
                     }
                     return 0;
                 case IDC_BATCH_PARAMETER_TARGET:
-                case IDC_BATCH_PARAMETER_TARGET_BINARY:
-                case IDC_BATCH_PARAMETER_TARGET_GRAYSCALE:
+                case IDC_BATCH_PARAMETER_TARGET_COLOR:
                     if (HIWORD(wparam) == BN_CLICKED) {
                         auto* operation = SelectedOperation(*state);
                         const std::size_t selected = LOWORD(wparam)
                                 == IDC_BATCH_PARAMETER_TARGET
                             ? 0U
-                            : (LOWORD(wparam)
-                                       == IDC_BATCH_PARAMETER_TARGET_BINARY
-                                   ? 1U
-                                   : 2U);
-                        const std::array<HWND, 3U> controls{
+                            : 1U;
+                        const std::array<HWND, kColorReplaceTargets.size()> controls{
                             state->target,
-                            state->target_binary,
-                            state->target_grayscale};
+                            state->target_color};
                         const bool checked = SendMessageW(
                                                  controls[selected],
                                                  BM_GETCHECK,

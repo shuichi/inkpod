@@ -57,7 +57,6 @@ pub struct InkpodCellCreationOptions {
     pub safe_frame_ratio_milli: u32,
     pub maximum_close_ratio_milli: u32,
     pub anchor: u32,
-    pub initial_layer_kind: u32,
     pub pixel_format: u32,
     pub count: u32,
     pub reserved: u32,
@@ -81,7 +80,6 @@ pub struct InkpodCellCreationPlanItem {
     pub height: u32,
     pub dpi_x_milli: u32,
     pub dpi_y_milli: u32,
-    pub initial_layer_kind: u32,
     pub pixel_format: u32,
     pub hundred_frame: InkpodFrameRect,
     pub reference_frame: InkpodFrameRect,
@@ -443,9 +441,6 @@ pub struct InkpodSnapshotRenderPlan {
     pub passes: *const InkpodSnapshotRenderPass,
     pub pass_count: u64,
     pub pass_stride_bytes: u64,
-    pub adjustment_luts_rgb8: *const u8,
-    pub adjustment_lut_count: u64,
-    pub adjustment_lut_stride_bytes: u64,
 }
 
 #[repr(C)]

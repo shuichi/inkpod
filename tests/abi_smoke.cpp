@@ -28,7 +28,7 @@ static_assert(sizeof(InkpodSnapshotView) == 48U);
 static_assert(std::is_standard_layout_v<InkpodSnapshotRenderPass>);
 static_assert(std::is_standard_layout_v<InkpodSnapshotRenderPlan>);
 static_assert(sizeof(InkpodSnapshotRenderPass) == 48U);
-static_assert(sizeof(InkpodSnapshotRenderPlan) == 64U);
+static_assert(sizeof(InkpodSnapshotRenderPlan) == 40U);
 static_assert(sizeof(InkpodCellCreateOptions) == 48U);
 static_assert(sizeof(InkpodDocumentInfo) == 232U);
 static_assert(sizeof(InkpodResourceUsage) == 136U);
@@ -49,14 +49,8 @@ static_assert(sizeof(InkpodShootingFrameInput) == 64U);
 static_assert(sizeof(InkpodShootingFramePoint) == 16U);
 static_assert(sizeof(InkpodShootingFrameInfo) == 136U);
 static_assert(sizeof(InkpodSnapshotShootingFrameView) == 40U);
-static_assert(std::is_standard_layout_v<InkpodVanishingPointInput>);
-static_assert(std::is_standard_layout_v<InkpodVanishingPointInfo>);
-static_assert(std::is_standard_layout_v<InkpodSnapshotRadialGuide>);
-static_assert(std::is_standard_layout_v<InkpodSnapshotVanishingPointView>);
-static_assert(sizeof(InkpodVanishingPointInput) == 72U);
-static_assert(sizeof(InkpodVanishingPointInfo) == 80U);
-static_assert(sizeof(InkpodSnapshotRadialGuide) == 80U);
-static_assert(sizeof(InkpodSnapshotVanishingPointView) == 64U);
+static_assert(std::is_standard_layout_v<InkpodSavedSelectionInfo>);
+static_assert(sizeof(InkpodSavedSelectionInfo) == 40U);
 static_assert(sizeof(InkpodColorValue) == 16U);
 static_assert(std::is_standard_layout_v<InkpodObjectId>);
 static_assert(std::is_standard_layout_v<InkpodPrimitiveRequestV3>);
@@ -288,7 +282,7 @@ int InkpodRunAbiSmoke() {
         return 2;
     }
     constexpr char script_text[] = R"(inkscript 2;
-requires { procedure_catalog = 4; replay_epoch = 25; }
+requires { procedure_catalog = 5; replay_epoch = 27; }
 inputs { current_document; }
 program {
     step "Set grid" {
@@ -370,8 +364,8 @@ execution { failure = stop; wait_ms = 0; preview_before_save = false; }
     InkpodReplayContract replay_contract{};
     replay_contract.struct_size = sizeof(replay_contract);
     if (inkpod_core_get_replay_contract(core, &replay_contract) != INKPOD_STATUS_OK
-        || replay_contract.replay_epoch != 25U
-        || replay_contract.procedure_format_version != 29U
+        || replay_contract.replay_epoch != 27U
+        || replay_contract.procedure_format_version != 31U
         || replay_contract.canonical_numeric_version != 1U
         || replay_contract.primitive_count == 0U
         || replay_contract.feature_flags != INKPOD_FEATURE_NONE) {
@@ -525,7 +519,7 @@ execution { failure = stop; wait_ms = 0; preview_before_save = false; }
     InkpodCompactionPlan compaction{};
     compaction.struct_size = sizeof(compaction);
     if (inkpod_core_get_persistence_info(core, &persistence) != INKPOD_STATUS_OK
-        || persistence.format_version != 29U
+        || persistence.format_version != 31U
         || persistence.open_strategy != INKPOD_NATIVE_OPEN_NOT_OPENED
         || persistence.flags != 0U
         || persistence.feature_flags != INKPOD_FEATURE_NONE
@@ -865,28 +859,24 @@ execution { failure = stop; wait_ms = 0; preview_before_save = false; }
     invalid_plane.struct_size = sizeof(invalid_plane);
     invalid_plane.operation = INKPOD_TREE_CREATE_PLANE;
     invalid_plane.parent_id = document.layer_id;
-    invalid_plane.kind = INKPOD_TYPED_PLANE_SELECTION;
-    invalid_plane.pixel_format = INKPOD_STORAGE_BINARY8;
+    invalid_plane.pixel_format = UINT32_MAX;
     invalid_plane.name_utf8 = invalid_plane_name.data();
     invalid_plane.name_bytes = invalid_plane_name.size();
     if (inkpod_core_get_document_info(core, &before_invalid_tree) != INKPOD_STATUS_OK
         || inkpod_core_validate_plane_creation(
                nullptr,
                document.layer_id,
-               INKPOD_TYPED_PLANE_RASTER,
                INKPOD_STORAGE_RGBA8)
             != INKPOD_STATUS_INVALID_ARGUMENT
         || inkpod_core_validate_plane_creation(
                core,
                document.layer_id,
-               INKPOD_TYPED_PLANE_RASTER,
                INKPOD_STORAGE_RGBA8)
             != INKPOD_STATUS_OK
         || inkpod_core_validate_plane_creation(
                core,
                document.layer_id,
-               INKPOD_TYPED_PLANE_SELECTION,
-               INKPOD_STORAGE_BINARY8)
+               UINT32_MAX)
             != INKPOD_STATUS_INVALID_ARGUMENT
         || inkpod_core_get_document_info(core, &after_plane_validation)
             != INKPOD_STATUS_OK
@@ -922,9 +912,7 @@ execution { failure = stop; wait_ms = 0; preview_before_save = false; }
         || inkpod_snapshot_get_render_plan(snapshot, &render_plan) != INKPOD_STATUS_OK
         || render_plan.abi_version != INKPOD_ABI_VERSION
         || render_plan.pass_stride_bytes != sizeof(InkpodSnapshotRenderPass)
-        || render_plan.pass_count == 0U || render_plan.passes == nullptr
-        || render_plan.adjustment_lut_count != 0U
-        || render_plan.adjustment_luts_rgb8 != nullptr) {
+        || render_plan.pass_count == 0U || render_plan.passes == nullptr) {
         return 107;
     }
     bool has_raster_pass{};
@@ -1351,32 +1339,6 @@ execution { failure = stop; wait_ms = 0; preview_before_save = false; }
         || inkpod_core_get_document_info(core, &document) != INKPOD_STATUS_OK) {
         return 62;
     }
-    filter.kind = INKPOD_FILTER_BRIGHTNESS_CONTRAST;
-    filter.parameter_0 = 100;
-    filter.parameter_1 = 200;
-    constexpr std::array<std::uint8_t, 10> adjustment_name{
-        'M', '6', ' ', 'A', 'd', 'j', 'u', 's', 't', '1'};
-    std::uint64_t adjustment_layer_id{};
-    const std::uint64_t source_checksum = document.color_plane_checksum;
-    if (inkpod_core_adjustment_create(
-            core,
-            &filter,
-            adjustment_name.data(),
-            adjustment_name.size(),
-            &dispatch,
-            &adjustment_layer_id) != INKPOD_STATUS_OK
-        || adjustment_layer_id == 0U
-        || inkpod_core_get_document_info(core, &document) != INKPOD_STATUS_OK
-        || document.color_plane_checksum != source_checksum) {
-        return 63;
-    }
-    filter.parameter_0 = 200;
-    filter.parameter_1 = -100;
-    if (inkpod_core_adjustment_update(
-            core, adjustment_layer_id, &filter, &dispatch) != INKPOD_STATUS_OK) {
-        return 64;
-    }
-
     const auto color16 = [](std::uint16_t red,
                             std::uint16_t green,
                             std::uint16_t blue,
@@ -1632,7 +1594,6 @@ execution { failure = stop; wait_ms = 0; preview_before_save = false; }
     batch_operation.version = INKPOD_BATCH_OPERATION_VERSION;
     batch_operation.kind = INKPOD_BATCH_OPERATION_COLOR_REPLACE;
     batch_operation.flags = INKPOD_BATCH_OPERATION_ENABLED;
-    batch_operation.layer_kind = INKPOD_LAYER_BINARY_COLORING;
     batch_operation.plane_kind = INKPOD_TYPED_PLANE_COLOR;
     batch_operation.missing_policy = INKPOD_BATCH_MISSING_ERROR;
     batch_operation.colors.struct_size = sizeof(batch_operation.colors);

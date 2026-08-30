@@ -8,7 +8,7 @@ use inkpod_core::{
     BatchItemOutcome, BatchMissingTargetPolicy, BatchOperation, BatchOperationKind,
     BatchOutputDestination, BatchOutputFormat, BatchOutputSettings, BatchPairExtraction,
     BatchRunOptions, BatchRunReport, BatchRunScope, BatchStagedResult, BatchTargetSelector,
-    CoreError, LayerKind, PlaneType, SequenceSourceIdentity,
+    CoreError, PlaneType, SequenceSourceIdentity,
 };
 use std::path::PathBuf;
 
@@ -49,7 +49,7 @@ pub const INKPOD_BATCH_ITEM_CANCELLED: u32 = 4;
 pub const INKPOD_BATCH_ITEM_DRY_RUN: u32 = 5;
 pub const INKPOD_BATCH_PREVIEW_HAS_WARNING: u32 = 1;
 #[cfg(test)]
-pub const INKPOD_BATCH_GRAPH_VERSION: u32 = 4;
+pub const INKPOD_BATCH_GRAPH_VERSION: u32 = 5;
 pub const INKPOD_BATCH_PAIR_CANDIDATE_AMBIGUOUS: u32 = 1;
 
 const MAX_BATCH_INPUTS: usize = 16_384;

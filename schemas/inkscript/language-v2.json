@@ -2,8 +2,8 @@
   "kind": "inkpod.inkscript.language",
   "registry_schema_version": 2,
   "file_version": 2,
-  "procedure_catalog_version": 4,
-  "required_replay_epoch": 25,
+  "procedure_catalog_version": 5,
+  "required_replay_epoch": 27,
   "canonicalization": {
     "encoding": "utf-8",
     "bom": false,
@@ -61,444 +61,2634 @@
       "list",
       "nullable"
     ],
-    "escapes": ["\\\"", "\\\\", "\\n", "\\r", "\\t", "\\u{1..6 hex}"],
+    "escapes": [
+      "\\\"",
+      "\\\\",
+      "\\n",
+      "\\r",
+      "\\t",
+      "\\u{1..6 hex}"
+    ],
     "rules": [
-      { "name": "trivia", "ebnf": "(space | tab | newline | line_comment)*", "references": ["space", "tab", "newline", "line_comment"] },
-      { "name": "newline", "ebnf": "LF | CR LF", "references": [] },
-      { "name": "line_comment", "ebnf": "\"//\" comment_scalar*", "references": ["comment_scalar"] },
-      { "name": "comment_scalar", "ebnf": "any Unicode scalar except NUL, CR, LF", "references": [] },
-      { "name": "space", "ebnf": "U+0020", "references": [] },
-      { "name": "tab", "ebnf": "U+0009", "references": [] },
-      { "name": "word", "ebnf": "lower (lower | digit | \"_\")*", "references": ["lower", "digit"] },
-      { "name": "identifier", "ebnf": "word", "references": ["word"] },
-      { "name": "field_name", "ebnf": "word", "references": ["word"] },
-      { "name": "lower", "ebnf": "\"a\" | ... | \"z\"", "references": [] },
-      { "name": "upper", "ebnf": "\"A\" | ... | \"Z\"", "references": [] },
-      { "name": "digit", "ebnf": "\"0\" | ... | \"9\"", "references": [] },
-      { "name": "nonzero_digit", "ebnf": "\"1\" | ... | \"9\"", "references": [] },
-      { "name": "hex_digit", "ebnf": "digit | \"a\" | ... | \"f\" | \"A\" | ... | \"F\"", "references": ["digit"] },
-      { "name": "unsigned_integer", "ebnf": "\"0\" | nonzero_digit digit*", "references": ["nonzero_digit", "digit"] },
-      { "name": "integer", "ebnf": "\"-\"? unsigned_integer", "references": ["unsigned_integer"] },
-      { "name": "decimal", "ebnf": "\"-\"? unsigned_integer \".\" digit+", "references": ["unsigned_integer", "digit"] },
-      { "name": "string", "ebnf": "'\"' string_item* '\"'", "references": ["string_item"] },
-      { "name": "string_item", "ebnf": "unescaped_scalar | escape", "references": ["unescaped_scalar", "escape"] },
-      { "name": "escape", "ebnf": "backslash ('\"' | backslash | 'n' | 'r' | 't') | backslash 'u' '{' hex_digit{1,6} '}'", "references": ["backslash", "hex_digit"] },
-      { "name": "backslash", "ebnf": "U+005C", "references": [] },
-      { "name": "unescaped_scalar", "ebnf": "Unicode scalar except quote, backslash, NUL, CR, LF, U+0000..U+001F", "references": [] },
-      { "name": "uuid_literal", "ebnf": "\"uuid\" string", "references": ["string"] },
-      { "name": "digest_literal", "ebnf": "\"blake3\" string", "references": ["string"] },
-      { "name": "base64_literal", "ebnf": "\"base64\" '\"\"\"' base64_body '\"\"\"'", "references": ["base64_body"] },
-      { "name": "base64_body", "ebnf": "base64_item*", "references": ["base64_item"] },
-      { "name": "base64_item", "ebnf": "upper | lower | digit | '+' | '/' | '=' | space | tab | newline", "references": ["upper", "lower", "digit", "space", "tab", "newline"] },
-      { "name": "file", "ebnf": "file_header file_section* EOF", "references": ["file_header", "file_section"] },
-      { "name": "fragment", "ebnf": "fragment_header fragment_section* EOF", "references": ["fragment_header", "fragment_section"] },
-      { "name": "file_header", "ebnf": "\"inkscript\" unsigned_integer \";\"", "references": ["unsigned_integer"] },
-      { "name": "fragment_header", "ebnf": "\"inkscript_fragment\" unsigned_integer \";\"", "references": ["unsigned_integer"] },
-      { "name": "file_section", "ebnf": "requires | meta | inputs | parameters | bindings | program | output | execution | assets", "references": ["requires", "meta", "inputs", "parameters", "bindings", "program", "output", "execution", "assets"] },
-      { "name": "fragment_section", "ebnf": "requires | parameters | bindings | program | assets", "references": ["requires", "parameters", "bindings", "program", "assets"] },
-      { "name": "requires", "ebnf": "\"requires\" record", "references": ["record"] },
-      { "name": "meta", "ebnf": "\"meta\" record", "references": ["record"] },
-      { "name": "output", "ebnf": "\"output\" record", "references": ["record"] },
-      { "name": "execution", "ebnf": "\"execution\" record", "references": ["record"] },
-      { "name": "inputs", "ebnf": "\"inputs\" \"{\" input_decl* \"}\"", "references": ["input_decl"] },
-      { "name": "input_decl", "ebnf": "\"file\" string record? \";\" | \"folder\" string record? \";\" | \"current_document\" record? \";\" | \"current_sequence\" record? \";\"", "references": ["string", "record"] },
-      { "name": "parameters", "ebnf": "\"parameters\" \"{\" parameter_decl* \"}\"", "references": ["parameter_decl"] },
-      { "name": "parameter_decl", "ebnf": "\"param\" identifier \":\" type_ref \"=\" value record? \";\"", "references": ["identifier", "type_ref", "value", "record"] },
-      { "name": "bindings", "ebnf": "\"bindings\" \"{\" binding_decl* \"}\"", "references": ["binding_decl"] },
-      { "name": "binding_decl", "ebnf": "\"let\" identifier \"=\" \"select\" identifier record \";\"", "references": ["identifier", "record"] },
-      { "name": "program", "ebnf": "\"program\" \"{\" program_stmt* \"}\"", "references": ["program_stmt"] },
-      { "name": "program_stmt", "ebnf": "assert_stmt | step_stmt", "references": ["assert_stmt", "step_stmt"] },
-      { "name": "assert_stmt", "ebnf": "\"assert\" identifier record \";\"", "references": ["identifier", "record"] },
-      { "name": "step_stmt", "ebnf": "\"step\" string (\"as\" identifier)? \"{\" step_member* \"}\"", "references": ["string", "identifier", "step_member"] },
-      { "name": "step_member", "ebnf": "\"enabled\" \"=\" boolean \";\" | \"editor_group\" \"=\" string \";\" | \"invoke\" identifier record \";\"", "references": ["boolean", "string", "identifier", "record"] },
-      { "name": "assets", "ebnf": "\"assets\" \"{\" asset_decl* \"}\"", "references": ["asset_decl"] },
-      { "name": "asset_decl", "ebnf": "\"asset\" identifier record \";\"", "references": ["identifier", "record"] },
-      { "name": "record", "ebnf": "\"{\" field* \"}\"", "references": ["field"] },
-      { "name": "field", "ebnf": "field_name \"=\" value \";\"", "references": ["field_name", "value"] },
-      { "name": "value", "ebnf": "boolean | integer | decimal | string | uuid_literal | digest_literal | base64_literal | none | reference | asset_reference | constructor | enum_literal | list | inline_record", "references": ["boolean", "integer", "decimal", "string", "uuid_literal", "digest_literal", "base64_literal", "none", "reference", "asset_reference", "constructor", "enum_literal", "list", "inline_record"] },
-      { "name": "boolean", "ebnf": "\"true\" | \"false\"", "references": [] },
-      { "name": "none", "ebnf": "\"none\"", "references": [] },
-      { "name": "enum_literal", "ebnf": "identifier", "references": ["identifier"] },
-      { "name": "constructor", "ebnf": "identifier \"(\" argument_list? \")\"", "references": ["identifier", "argument_list"] },
-      { "name": "argument_list", "ebnf": "value (\",\" value)* \",\"?", "references": ["value"] },
-      { "name": "asset_reference", "ebnf": "\"asset\" \"(\" identifier \")\"", "references": ["identifier"] },
-      { "name": "reference", "ebnf": "\"$\" identifier reference_segment*", "references": ["identifier", "reference_segment"] },
-      { "name": "reference_segment", "ebnf": "\".\" field_name | \"[\" unsigned_integer \"]\"", "references": ["field_name", "unsigned_integer"] },
-      { "name": "list", "ebnf": "\"[\" (value (\",\" value)* \",\"?)? \"]\"", "references": ["value"] },
-      { "name": "inline_record", "ebnf": "record", "references": ["record"] },
-      { "name": "type_ref", "ebnf": "identifier | \"list\" \"<\" type_ref \">\" | \"nullable\" \"<\" type_ref \">\"", "references": ["identifier", "type_ref"] }
+      {
+        "name": "trivia",
+        "ebnf": "(space | tab | newline | line_comment)*",
+        "references": [
+          "space",
+          "tab",
+          "newline",
+          "line_comment"
+        ]
+      },
+      {
+        "name": "newline",
+        "ebnf": "LF | CR LF",
+        "references": []
+      },
+      {
+        "name": "line_comment",
+        "ebnf": "\"//\" comment_scalar*",
+        "references": [
+          "comment_scalar"
+        ]
+      },
+      {
+        "name": "comment_scalar",
+        "ebnf": "any Unicode scalar except NUL, CR, LF",
+        "references": []
+      },
+      {
+        "name": "space",
+        "ebnf": "U+0020",
+        "references": []
+      },
+      {
+        "name": "tab",
+        "ebnf": "U+0009",
+        "references": []
+      },
+      {
+        "name": "word",
+        "ebnf": "lower (lower | digit | \"_\")*",
+        "references": [
+          "lower",
+          "digit"
+        ]
+      },
+      {
+        "name": "identifier",
+        "ebnf": "word",
+        "references": [
+          "word"
+        ]
+      },
+      {
+        "name": "field_name",
+        "ebnf": "word",
+        "references": [
+          "word"
+        ]
+      },
+      {
+        "name": "lower",
+        "ebnf": "\"a\" | ... | \"z\"",
+        "references": []
+      },
+      {
+        "name": "upper",
+        "ebnf": "\"A\" | ... | \"Z\"",
+        "references": []
+      },
+      {
+        "name": "digit",
+        "ebnf": "\"0\" | ... | \"9\"",
+        "references": []
+      },
+      {
+        "name": "nonzero_digit",
+        "ebnf": "\"1\" | ... | \"9\"",
+        "references": []
+      },
+      {
+        "name": "hex_digit",
+        "ebnf": "digit | \"a\" | ... | \"f\" | \"A\" | ... | \"F\"",
+        "references": [
+          "digit"
+        ]
+      },
+      {
+        "name": "unsigned_integer",
+        "ebnf": "\"0\" | nonzero_digit digit*",
+        "references": [
+          "nonzero_digit",
+          "digit"
+        ]
+      },
+      {
+        "name": "integer",
+        "ebnf": "\"-\"? unsigned_integer",
+        "references": [
+          "unsigned_integer"
+        ]
+      },
+      {
+        "name": "decimal",
+        "ebnf": "\"-\"? unsigned_integer \".\" digit+",
+        "references": [
+          "unsigned_integer",
+          "digit"
+        ]
+      },
+      {
+        "name": "string",
+        "ebnf": "'\"' string_item* '\"'",
+        "references": [
+          "string_item"
+        ]
+      },
+      {
+        "name": "string_item",
+        "ebnf": "unescaped_scalar | escape",
+        "references": [
+          "unescaped_scalar",
+          "escape"
+        ]
+      },
+      {
+        "name": "escape",
+        "ebnf": "backslash ('\"' | backslash | 'n' | 'r' | 't') | backslash 'u' '{' hex_digit{1,6} '}'",
+        "references": [
+          "backslash",
+          "hex_digit"
+        ]
+      },
+      {
+        "name": "backslash",
+        "ebnf": "U+005C",
+        "references": []
+      },
+      {
+        "name": "unescaped_scalar",
+        "ebnf": "Unicode scalar except quote, backslash, NUL, CR, LF, U+0000..U+001F",
+        "references": []
+      },
+      {
+        "name": "uuid_literal",
+        "ebnf": "\"uuid\" string",
+        "references": [
+          "string"
+        ]
+      },
+      {
+        "name": "digest_literal",
+        "ebnf": "\"blake3\" string",
+        "references": [
+          "string"
+        ]
+      },
+      {
+        "name": "base64_literal",
+        "ebnf": "\"base64\" '\"\"\"' base64_body '\"\"\"'",
+        "references": [
+          "base64_body"
+        ]
+      },
+      {
+        "name": "base64_body",
+        "ebnf": "base64_item*",
+        "references": [
+          "base64_item"
+        ]
+      },
+      {
+        "name": "base64_item",
+        "ebnf": "upper | lower | digit | '+' | '/' | '=' | space | tab | newline",
+        "references": [
+          "upper",
+          "lower",
+          "digit",
+          "space",
+          "tab",
+          "newline"
+        ]
+      },
+      {
+        "name": "file",
+        "ebnf": "file_header file_section* EOF",
+        "references": [
+          "file_header",
+          "file_section"
+        ]
+      },
+      {
+        "name": "fragment",
+        "ebnf": "fragment_header fragment_section* EOF",
+        "references": [
+          "fragment_header",
+          "fragment_section"
+        ]
+      },
+      {
+        "name": "file_header",
+        "ebnf": "\"inkscript\" unsigned_integer \";\"",
+        "references": [
+          "unsigned_integer"
+        ]
+      },
+      {
+        "name": "fragment_header",
+        "ebnf": "\"inkscript_fragment\" unsigned_integer \";\"",
+        "references": [
+          "unsigned_integer"
+        ]
+      },
+      {
+        "name": "file_section",
+        "ebnf": "requires | meta | inputs | parameters | bindings | program | output | execution | assets",
+        "references": [
+          "requires",
+          "meta",
+          "inputs",
+          "parameters",
+          "bindings",
+          "program",
+          "output",
+          "execution",
+          "assets"
+        ]
+      },
+      {
+        "name": "fragment_section",
+        "ebnf": "requires | parameters | bindings | program | assets",
+        "references": [
+          "requires",
+          "parameters",
+          "bindings",
+          "program",
+          "assets"
+        ]
+      },
+      {
+        "name": "requires",
+        "ebnf": "\"requires\" record",
+        "references": [
+          "record"
+        ]
+      },
+      {
+        "name": "meta",
+        "ebnf": "\"meta\" record",
+        "references": [
+          "record"
+        ]
+      },
+      {
+        "name": "output",
+        "ebnf": "\"output\" record",
+        "references": [
+          "record"
+        ]
+      },
+      {
+        "name": "execution",
+        "ebnf": "\"execution\" record",
+        "references": [
+          "record"
+        ]
+      },
+      {
+        "name": "inputs",
+        "ebnf": "\"inputs\" \"{\" input_decl* \"}\"",
+        "references": [
+          "input_decl"
+        ]
+      },
+      {
+        "name": "input_decl",
+        "ebnf": "\"file\" string record? \";\" | \"folder\" string record? \";\" | \"current_document\" record? \";\" | \"current_sequence\" record? \";\"",
+        "references": [
+          "string",
+          "record"
+        ]
+      },
+      {
+        "name": "parameters",
+        "ebnf": "\"parameters\" \"{\" parameter_decl* \"}\"",
+        "references": [
+          "parameter_decl"
+        ]
+      },
+      {
+        "name": "parameter_decl",
+        "ebnf": "\"param\" identifier \":\" type_ref \"=\" value record? \";\"",
+        "references": [
+          "identifier",
+          "type_ref",
+          "value",
+          "record"
+        ]
+      },
+      {
+        "name": "bindings",
+        "ebnf": "\"bindings\" \"{\" binding_decl* \"}\"",
+        "references": [
+          "binding_decl"
+        ]
+      },
+      {
+        "name": "binding_decl",
+        "ebnf": "\"let\" identifier \"=\" \"select\" identifier record \";\"",
+        "references": [
+          "identifier",
+          "record"
+        ]
+      },
+      {
+        "name": "program",
+        "ebnf": "\"program\" \"{\" program_stmt* \"}\"",
+        "references": [
+          "program_stmt"
+        ]
+      },
+      {
+        "name": "program_stmt",
+        "ebnf": "assert_stmt | step_stmt",
+        "references": [
+          "assert_stmt",
+          "step_stmt"
+        ]
+      },
+      {
+        "name": "assert_stmt",
+        "ebnf": "\"assert\" identifier record \";\"",
+        "references": [
+          "identifier",
+          "record"
+        ]
+      },
+      {
+        "name": "step_stmt",
+        "ebnf": "\"step\" string (\"as\" identifier)? \"{\" step_member* \"}\"",
+        "references": [
+          "string",
+          "identifier",
+          "step_member"
+        ]
+      },
+      {
+        "name": "step_member",
+        "ebnf": "\"enabled\" \"=\" boolean \";\" | \"editor_group\" \"=\" string \";\" | \"invoke\" identifier record \";\"",
+        "references": [
+          "boolean",
+          "string",
+          "identifier",
+          "record"
+        ]
+      },
+      {
+        "name": "assets",
+        "ebnf": "\"assets\" \"{\" asset_decl* \"}\"",
+        "references": [
+          "asset_decl"
+        ]
+      },
+      {
+        "name": "asset_decl",
+        "ebnf": "\"asset\" identifier record \";\"",
+        "references": [
+          "identifier",
+          "record"
+        ]
+      },
+      {
+        "name": "record",
+        "ebnf": "\"{\" field* \"}\"",
+        "references": [
+          "field"
+        ]
+      },
+      {
+        "name": "field",
+        "ebnf": "field_name \"=\" value \";\"",
+        "references": [
+          "field_name",
+          "value"
+        ]
+      },
+      {
+        "name": "value",
+        "ebnf": "boolean | integer | decimal | string | uuid_literal | digest_literal | base64_literal | none | reference | asset_reference | constructor | enum_literal | list | inline_record",
+        "references": [
+          "boolean",
+          "integer",
+          "decimal",
+          "string",
+          "uuid_literal",
+          "digest_literal",
+          "base64_literal",
+          "none",
+          "reference",
+          "asset_reference",
+          "constructor",
+          "enum_literal",
+          "list",
+          "inline_record"
+        ]
+      },
+      {
+        "name": "boolean",
+        "ebnf": "\"true\" | \"false\"",
+        "references": []
+      },
+      {
+        "name": "none",
+        "ebnf": "\"none\"",
+        "references": []
+      },
+      {
+        "name": "enum_literal",
+        "ebnf": "identifier",
+        "references": [
+          "identifier"
+        ]
+      },
+      {
+        "name": "constructor",
+        "ebnf": "identifier \"(\" argument_list? \")\"",
+        "references": [
+          "identifier",
+          "argument_list"
+        ]
+      },
+      {
+        "name": "argument_list",
+        "ebnf": "value (\",\" value)* \",\"?",
+        "references": [
+          "value"
+        ]
+      },
+      {
+        "name": "asset_reference",
+        "ebnf": "\"asset\" \"(\" identifier \")\"",
+        "references": [
+          "identifier"
+        ]
+      },
+      {
+        "name": "reference",
+        "ebnf": "\"$\" identifier reference_segment*",
+        "references": [
+          "identifier",
+          "reference_segment"
+        ]
+      },
+      {
+        "name": "reference_segment",
+        "ebnf": "\".\" field_name | \"[\" unsigned_integer \"]\"",
+        "references": [
+          "field_name",
+          "unsigned_integer"
+        ]
+      },
+      {
+        "name": "list",
+        "ebnf": "\"[\" (value (\",\" value)* \",\"?)? \"]\"",
+        "references": [
+          "value"
+        ]
+      },
+      {
+        "name": "inline_record",
+        "ebnf": "record",
+        "references": [
+          "record"
+        ]
+      },
+      {
+        "name": "type_ref",
+        "ebnf": "identifier | \"list\" \"<\" type_ref \">\" | \"nullable\" \"<\" type_ref \">\"",
+        "references": [
+          "identifier",
+          "type_ref"
+        ]
+      }
     ]
   },
   "types": [
-    { "name": "bool", "kind": "bool", "constraints": [] },
-    { "name": "u32", "kind": "unsigned_integer", "constraints": ["0..4294967295"] },
-    { "name": "i32", "kind": "signed_integer", "constraints": ["-2147483648..2147483647"] },
-    { "name": "u64", "kind": "unsigned_integer", "constraints": ["0..18446744073709551615"] },
-    { "name": "i64", "kind": "signed_integer", "constraints": ["-9223372036854775808..9223372036854775807"] },
-    { "name": "q16", "kind": "q16", "constraints": ["checked-i64-raw", "decimal-ties-to-even"] },
-    { "name": "string", "kind": "string", "constraints": ["valid-unicode-scalars", "max-32768-utf8-bytes"] },
-    { "name": "uuid", "kind": "uuid", "constraints": ["lowercase-hyphenated"] },
-    { "name": "digest", "kind": "digest", "constraints": ["lowercase-blake3-64-hex"] },
-    { "name": "base64", "kind": "base64", "constraints": ["rfc4648-canonical-padding-and-unused-bits"] },
-    { "name": "mask8", "kind": "reference", "constraints": ["exact-8-bit-binary-value"] },
-    { "name": "gray8", "kind": "reference", "constraints": ["exact-8-bit-gray-value"] },
-    { "name": "gray16", "kind": "reference", "constraints": ["exact-16-bit-gray-value"] },
-    { "name": "rgba8", "kind": "reference", "constraints": ["exact-straight-rgba8-value"] },
-    { "name": "rgba16", "kind": "reference", "constraints": ["exact-straight-rgba16-value"] },
-    { "name": "pixel_value", "kind": "reference", "constraints": ["closed-sum:mask8,gray8,gray16,rgba8,rgba16", "no-implicit-depth-conversion"] },
-    { "name": "point", "kind": "reference", "constraints": ["continuous-document-pixel-coordinate"] },
-    { "name": "pixel_rect", "kind": "reference", "constraints": ["half-open-document-pixel-rectangle"] },
-    { "name": "entity_ref", "kind": "reference", "constraints": ["typed-selector-or-result-reference"] },
-    { "name": "layer_ref", "kind": "reference", "constraints": ["document-stable-id-role:layer"] },
-    { "name": "plane_ref", "kind": "reference", "constraints": ["document-stable-id-role:plane"] },
-    { "name": "guide_ref", "kind": "reference", "constraints": ["document-stable-id-role:guide"] },
-    { "name": "shooting_frame_ref", "kind": "reference", "constraints": ["document-stable-id-role:shooting_frame"] },
-    { "name": "vanishing_point_ref", "kind": "reference", "constraints": ["document-stable-id-role:vanishing_point"] },
-    { "name": "light_table_set_ref", "kind": "reference", "constraints": ["document-stable-id-role:light_table_set"] },
-    { "name": "light_table_item_ref", "kind": "reference", "constraints": ["document-stable-id-role:light_table_item"] },
-    { "name": "asset_ref", "kind": "reference", "constraints": ["separate-asset-namespace"] },
-    { "name": "input_declaration", "kind": "reference", "constraints": ["closed-input-kind-union"] },
-    { "name": "parameter_declaration", "kind": "reference", "constraints": ["immutable-typed-default"] },
-    { "name": "binding_declaration", "kind": "reference", "constraints": ["initial-document-selector"] },
-    { "name": "program_statement", "kind": "reference", "constraints": ["assert-or-single-invocation-step"] },
-    { "name": "asset_declaration", "kind": "reference", "constraints": ["closed-asset-kind-union"] },
-    { "name": "output_record", "kind": "reference", "constraints": ["closed-policy-union:duplicate,new_save,explicit_overwrite"] },
-    { "name": "identifier_value", "kind": "string", "constraints": ["ascii-lowercase-digit-underscore", "starts-with-lowercase", "not-reserved-keyword", "max-128-bytes"] },
-    { "name": "type_reference", "kind": "reference", "constraints": ["exact-schema-view-resolution", "list-and-nullable-only-generics"] },
-    { "name": "literal_value", "kind": "reference", "constraints": ["closed-literal", "no-reference", "no-asset-reference"] },
-    { "name": "selector_record", "kind": "reference", "constraints": ["closed-by-selector-entity"] },
-    { "name": "assert_record", "kind": "reference", "constraints": ["closed-by-assert-kind"] },
-    { "name": "invocation_record", "kind": "reference", "constraints": ["closed-by-command-entry"] }
+    {
+      "name": "bool",
+      "kind": "bool",
+      "constraints": []
+    },
+    {
+      "name": "u32",
+      "kind": "unsigned_integer",
+      "constraints": [
+        "0..4294967295"
+      ]
+    },
+    {
+      "name": "i32",
+      "kind": "signed_integer",
+      "constraints": [
+        "-2147483648..2147483647"
+      ]
+    },
+    {
+      "name": "u64",
+      "kind": "unsigned_integer",
+      "constraints": [
+        "0..18446744073709551615"
+      ]
+    },
+    {
+      "name": "i64",
+      "kind": "signed_integer",
+      "constraints": [
+        "-9223372036854775808..9223372036854775807"
+      ]
+    },
+    {
+      "name": "q16",
+      "kind": "q16",
+      "constraints": [
+        "checked-i64-raw",
+        "decimal-ties-to-even"
+      ]
+    },
+    {
+      "name": "string",
+      "kind": "string",
+      "constraints": [
+        "valid-unicode-scalars",
+        "max-32768-utf8-bytes"
+      ]
+    },
+    {
+      "name": "uuid",
+      "kind": "uuid",
+      "constraints": [
+        "lowercase-hyphenated"
+      ]
+    },
+    {
+      "name": "digest",
+      "kind": "digest",
+      "constraints": [
+        "lowercase-blake3-64-hex"
+      ]
+    },
+    {
+      "name": "base64",
+      "kind": "base64",
+      "constraints": [
+        "rfc4648-canonical-padding-and-unused-bits"
+      ]
+    },
+    {
+      "name": "mask8",
+      "kind": "reference",
+      "constraints": [
+        "exact-8-bit-binary-value"
+      ]
+    },
+    {
+      "name": "gray8",
+      "kind": "reference",
+      "constraints": [
+        "exact-8-bit-gray-value"
+      ]
+    },
+    {
+      "name": "gray16",
+      "kind": "reference",
+      "constraints": [
+        "exact-16-bit-gray-value"
+      ]
+    },
+    {
+      "name": "rgba8",
+      "kind": "reference",
+      "constraints": [
+        "exact-straight-rgba8-value"
+      ]
+    },
+    {
+      "name": "rgba16",
+      "kind": "reference",
+      "constraints": [
+        "exact-straight-rgba16-value"
+      ]
+    },
+    {
+      "name": "pixel_value",
+      "kind": "reference",
+      "constraints": [
+        "closed-sum:mask8,gray8,gray16,rgba8,rgba16",
+        "no-implicit-depth-conversion"
+      ]
+    },
+    {
+      "name": "point",
+      "kind": "reference",
+      "constraints": [
+        "continuous-document-pixel-coordinate"
+      ]
+    },
+    {
+      "name": "pixel_rect",
+      "kind": "reference",
+      "constraints": [
+        "half-open-document-pixel-rectangle"
+      ]
+    },
+    {
+      "name": "entity_ref",
+      "kind": "reference",
+      "constraints": [
+        "typed-selector-or-result-reference"
+      ]
+    },
+    {
+      "name": "layer_ref",
+      "kind": "reference",
+      "constraints": [
+        "document-stable-id-role:layer"
+      ]
+    },
+    {
+      "name": "plane_ref",
+      "kind": "reference",
+      "constraints": [
+        "document-stable-id-role:plane"
+      ]
+    },
+    {
+      "name": "guide_ref",
+      "kind": "reference",
+      "constraints": [
+        "document-stable-id-role:guide"
+      ]
+    },
+    {
+      "name": "shooting_frame_ref",
+      "kind": "reference",
+      "constraints": [
+        "document-stable-id-role:shooting_frame"
+      ]
+    },
+    {
+      "name": "saved_selection_mask_ref",
+      "kind": "reference",
+      "constraints": [
+        "document-stable-id-role:saved_selection_mask"
+      ]
+    },
+    {
+      "name": "light_table_set_ref",
+      "kind": "reference",
+      "constraints": [
+        "document-stable-id-role:light_table_set"
+      ]
+    },
+    {
+      "name": "light_table_item_ref",
+      "kind": "reference",
+      "constraints": [
+        "document-stable-id-role:light_table_item"
+      ]
+    },
+    {
+      "name": "asset_ref",
+      "kind": "reference",
+      "constraints": [
+        "separate-asset-namespace"
+      ]
+    },
+    {
+      "name": "input_declaration",
+      "kind": "reference",
+      "constraints": [
+        "closed-input-kind-union"
+      ]
+    },
+    {
+      "name": "parameter_declaration",
+      "kind": "reference",
+      "constraints": [
+        "immutable-typed-default"
+      ]
+    },
+    {
+      "name": "binding_declaration",
+      "kind": "reference",
+      "constraints": [
+        "initial-document-selector"
+      ]
+    },
+    {
+      "name": "program_statement",
+      "kind": "reference",
+      "constraints": [
+        "assert-or-single-invocation-step"
+      ]
+    },
+    {
+      "name": "asset_declaration",
+      "kind": "reference",
+      "constraints": [
+        "closed-asset-kind-union"
+      ]
+    },
+    {
+      "name": "output_record",
+      "kind": "reference",
+      "constraints": [
+        "closed-policy-union:duplicate,new_save,explicit_overwrite"
+      ]
+    },
+    {
+      "name": "identifier_value",
+      "kind": "string",
+      "constraints": [
+        "ascii-lowercase-digit-underscore",
+        "starts-with-lowercase",
+        "not-reserved-keyword",
+        "max-128-bytes"
+      ]
+    },
+    {
+      "name": "type_reference",
+      "kind": "reference",
+      "constraints": [
+        "exact-schema-view-resolution",
+        "list-and-nullable-only-generics"
+      ]
+    },
+    {
+      "name": "literal_value",
+      "kind": "reference",
+      "constraints": [
+        "closed-literal",
+        "no-reference",
+        "no-asset-reference"
+      ]
+    },
+    {
+      "name": "selector_record",
+      "kind": "reference",
+      "constraints": [
+        "closed-by-selector-entity"
+      ]
+    },
+    {
+      "name": "assert_record",
+      "kind": "reference",
+      "constraints": [
+        "closed-by-assert-kind"
+      ]
+    },
+    {
+      "name": "invocation_record",
+      "kind": "reference",
+      "constraints": [
+        "closed-by-command-entry"
+      ]
+    }
   ],
   "enums": [
-    { "name": "ask_policy", "members": ["never", "each_run"] },
-    { "name": "cardinality", "members": ["one", "first", "all"] },
-    { "name": "missing_policy", "members": ["error", "skip_dependents"] },
-    { "name": "cells_spec", "members": ["all"] },
-    { "name": "output_policy", "members": ["duplicate", "new_save", "explicit_overwrite"] },
-    { "name": "output_format", "members": ["inkpod"] },
-    { "name": "number_direction", "members": ["ascending", "descending"] },
-    { "name": "failure_policy", "members": ["continue", "stop"] },
-    { "name": "pixel_format", "members": ["mask8", "gray8", "gray16", "rgba8", "rgba16"] },
-    { "name": "color_space", "members": ["srgb"] },
-    { "name": "alpha_mode", "members": ["straight"] },
-    { "name": "layer_kind", "members": ["binary_coloring", "grayscale_coloring", "raster", "selection", "frame", "vanishing_point", "adjustment"] },
-    { "name": "plane_kind", "members": ["main_line", "color", "raster", "selection", "light_table"] },
-    { "name": "guide_axis", "members": ["horizontal", "vertical"] }
+    {
+      "name": "ask_policy",
+      "members": [
+        "never",
+        "each_run"
+      ]
+    },
+    {
+      "name": "cardinality",
+      "members": [
+        "one",
+        "first",
+        "all"
+      ]
+    },
+    {
+      "name": "missing_policy",
+      "members": [
+        "error",
+        "skip_dependents"
+      ]
+    },
+    {
+      "name": "cells_spec",
+      "members": [
+        "all"
+      ]
+    },
+    {
+      "name": "output_policy",
+      "members": [
+        "duplicate",
+        "new_save",
+        "explicit_overwrite"
+      ]
+    },
+    {
+      "name": "output_format",
+      "members": [
+        "inkpod"
+      ]
+    },
+    {
+      "name": "number_direction",
+      "members": [
+        "ascending",
+        "descending"
+      ]
+    },
+    {
+      "name": "failure_policy",
+      "members": [
+        "continue",
+        "stop"
+      ]
+    },
+    {
+      "name": "pixel_format",
+      "members": [
+        "mask8",
+        "gray8",
+        "gray16",
+        "rgba8",
+        "rgba16"
+      ]
+    },
+    {
+      "name": "color_space",
+      "members": [
+        "srgb"
+      ]
+    },
+    {
+      "name": "alpha_mode",
+      "members": [
+        "straight"
+      ]
+    },
+    {
+      "name": "plane_kind",
+      "members": [
+        "main_line",
+        "color",
+        "raster"
+      ]
+    },
+    {
+      "name": "guide_axis",
+      "members": [
+        "horizontal",
+        "vertical"
+      ]
+    }
   ],
   "constructors": [
-    { "name": "q16", "result": "q16", "arguments": [{ "name": "raw", "type": "i64", "constraints": [] }], "conversion": "exact" },
-    { "name": "mask8", "result": "mask8", "arguments": [{ "name": "value", "type": "u32", "constraints": ["0..255"] }], "conversion": "exact" },
-    { "name": "gray8", "result": "gray8", "arguments": [{ "name": "value", "type": "u32", "constraints": ["0..255"] }], "conversion": "exact" },
-    { "name": "gray16", "result": "gray16", "arguments": [{ "name": "value", "type": "u32", "constraints": ["0..65535"] }], "conversion": "exact" },
-    { "name": "rgba8", "result": "rgba8", "arguments": [{ "name": "red", "type": "u32", "constraints": ["0..255"] }, { "name": "green", "type": "u32", "constraints": ["0..255"] }, { "name": "blue", "type": "u32", "constraints": ["0..255"] }, { "name": "alpha", "type": "u32", "constraints": ["0..255"] }], "conversion": "exact" },
-    { "name": "rgba16", "result": "rgba16", "arguments": [{ "name": "red", "type": "u32", "constraints": ["0..65535"] }, { "name": "green", "type": "u32", "constraints": ["0..65535"] }, { "name": "blue", "type": "u32", "constraints": ["0..65535"] }, { "name": "alpha", "type": "u32", "constraints": ["0..65535"] }], "conversion": "exact" },
-    { "name": "point", "result": "point", "arguments": [{ "name": "x", "type": "q16", "constraints": [] }, { "name": "y", "type": "q16", "constraints": [] }], "conversion": "exact" },
-    { "name": "rect", "result": "pixel_rect", "arguments": [{ "name": "x", "type": "i32", "constraints": [] }, { "name": "y", "type": "i32", "constraints": [] }, { "name": "width", "type": "u32", "constraints": [] }, { "name": "height", "type": "u32", "constraints": [] }], "conversion": "exact" },
-    { "name": "range", "result": "cells_spec", "arguments": [{ "name": "first", "type": "u32", "constraints": ["nonzero"] }, { "name": "last", "type": "u32", "constraints": ["greater-than-or-equal:first"] }], "conversion": "exact" }
+    {
+      "name": "q16",
+      "result": "q16",
+      "arguments": [
+        {
+          "name": "raw",
+          "type": "i64",
+          "constraints": []
+        }
+      ],
+      "conversion": "exact"
+    },
+    {
+      "name": "mask8",
+      "result": "mask8",
+      "arguments": [
+        {
+          "name": "value",
+          "type": "u32",
+          "constraints": [
+            "0..255"
+          ]
+        }
+      ],
+      "conversion": "exact"
+    },
+    {
+      "name": "gray8",
+      "result": "gray8",
+      "arguments": [
+        {
+          "name": "value",
+          "type": "u32",
+          "constraints": [
+            "0..255"
+          ]
+        }
+      ],
+      "conversion": "exact"
+    },
+    {
+      "name": "gray16",
+      "result": "gray16",
+      "arguments": [
+        {
+          "name": "value",
+          "type": "u32",
+          "constraints": [
+            "0..65535"
+          ]
+        }
+      ],
+      "conversion": "exact"
+    },
+    {
+      "name": "rgba8",
+      "result": "rgba8",
+      "arguments": [
+        {
+          "name": "red",
+          "type": "u32",
+          "constraints": [
+            "0..255"
+          ]
+        },
+        {
+          "name": "green",
+          "type": "u32",
+          "constraints": [
+            "0..255"
+          ]
+        },
+        {
+          "name": "blue",
+          "type": "u32",
+          "constraints": [
+            "0..255"
+          ]
+        },
+        {
+          "name": "alpha",
+          "type": "u32",
+          "constraints": [
+            "0..255"
+          ]
+        }
+      ],
+      "conversion": "exact"
+    },
+    {
+      "name": "rgba16",
+      "result": "rgba16",
+      "arguments": [
+        {
+          "name": "red",
+          "type": "u32",
+          "constraints": [
+            "0..65535"
+          ]
+        },
+        {
+          "name": "green",
+          "type": "u32",
+          "constraints": [
+            "0..65535"
+          ]
+        },
+        {
+          "name": "blue",
+          "type": "u32",
+          "constraints": [
+            "0..65535"
+          ]
+        },
+        {
+          "name": "alpha",
+          "type": "u32",
+          "constraints": [
+            "0..65535"
+          ]
+        }
+      ],
+      "conversion": "exact"
+    },
+    {
+      "name": "point",
+      "result": "point",
+      "arguments": [
+        {
+          "name": "x",
+          "type": "q16",
+          "constraints": []
+        },
+        {
+          "name": "y",
+          "type": "q16",
+          "constraints": []
+        }
+      ],
+      "conversion": "exact"
+    },
+    {
+      "name": "rect",
+      "result": "pixel_rect",
+      "arguments": [
+        {
+          "name": "x",
+          "type": "i32",
+          "constraints": []
+        },
+        {
+          "name": "y",
+          "type": "i32",
+          "constraints": []
+        },
+        {
+          "name": "width",
+          "type": "u32",
+          "constraints": []
+        },
+        {
+          "name": "height",
+          "type": "u32",
+          "constraints": []
+        }
+      ],
+      "conversion": "exact"
+    },
+    {
+      "name": "range",
+      "result": "cells_spec",
+      "arguments": [
+        {
+          "name": "first",
+          "type": "u32",
+          "constraints": [
+            "nonzero"
+          ]
+        },
+        {
+          "name": "last",
+          "type": "u32",
+          "constraints": [
+            "greater-than-or-equal:first"
+          ]
+        }
+      ],
+      "conversion": "exact"
+    }
   ],
   "records": [
     {
       "name": "requires_record",
       "fields": [
-        { "name": "procedure_catalog", "type": "u32", "required": true, "default": null, "canonical_order": 0, "constraints": ["nonzero", "exact-current"] },
-        { "name": "replay_epoch", "type": "u32", "required": true, "default": null, "canonical_order": 1, "constraints": ["nonzero", "exact-current"] }
+        {
+          "name": "procedure_catalog",
+          "type": "u32",
+          "required": true,
+          "default": null,
+          "canonical_order": 0,
+          "constraints": [
+            "nonzero",
+            "exact-current"
+          ]
+        },
+        {
+          "name": "replay_epoch",
+          "type": "u32",
+          "required": true,
+          "default": null,
+          "canonical_order": 1,
+          "constraints": [
+            "nonzero",
+            "exact-current"
+          ]
+        }
       ]
     },
     {
       "name": "meta_extension",
       "fields": [
-        { "name": "key", "type": "string", "required": true, "default": null, "canonical_order": 0, "constraints": ["reverse-dns-ascii", "unique-within-extensions"] },
-        { "name": "value", "type": "string", "required": true, "default": null, "canonical_order": 1, "constraints": ["non-semantic"] }
+        {
+          "name": "key",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "canonical_order": 0,
+          "constraints": [
+            "reverse-dns-ascii",
+            "unique-within-extensions"
+          ]
+        },
+        {
+          "name": "value",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "canonical_order": 1,
+          "constraints": [
+            "non-semantic"
+          ]
+        }
       ]
     },
     {
       "name": "meta_record",
       "fields": [
-        { "name": "name", "type": "string", "required": false, "default": null, "canonical_order": 0, "constraints": ["non-semantic"] },
-        { "name": "description", "type": "string", "required": false, "default": null, "canonical_order": 1, "constraints": ["non-semantic"] },
-        { "name": "extensions", "type": "list<meta_extension>", "required": false, "default": [], "canonical_order": 2, "constraints": ["unique-key", "non-semantic"] }
+        {
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "default": null,
+          "canonical_order": 0,
+          "constraints": [
+            "non-semantic"
+          ]
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "required": false,
+          "default": null,
+          "canonical_order": 1,
+          "constraints": [
+            "non-semantic"
+          ]
+        },
+        {
+          "name": "extensions",
+          "type": "list<meta_extension>",
+          "required": false,
+          "default": [],
+          "canonical_order": 2,
+          "constraints": [
+            "unique-key",
+            "non-semantic"
+          ]
+        }
       ]
     },
     {
       "name": "file_input_options",
       "fields": [
-        { "name": "cells", "type": "cells_spec", "required": false, "default": "all", "canonical_order": 0, "constraints": ["inclusive-display-number-range"] }
+        {
+          "name": "cells",
+          "type": "cells_spec",
+          "required": false,
+          "default": "all",
+          "canonical_order": 0,
+          "constraints": [
+            "inclusive-display-number-range"
+          ]
+        }
       ]
     },
     {
       "name": "folder_input_options",
       "fields": [
-        { "name": "cells", "type": "cells_spec", "required": false, "default": "all", "canonical_order": 0, "constraints": ["inclusive-display-number-range"] },
-        { "name": "recursive", "type": "bool", "required": false, "default": false, "canonical_order": 1, "constraints": ["must-be-false-in-v2"] }
+        {
+          "name": "cells",
+          "type": "cells_spec",
+          "required": false,
+          "default": "all",
+          "canonical_order": 0,
+          "constraints": [
+            "inclusive-display-number-range"
+          ]
+        },
+        {
+          "name": "recursive",
+          "type": "bool",
+          "required": false,
+          "default": false,
+          "canonical_order": 1,
+          "constraints": [
+            "must-be-false-in-v2"
+          ]
+        }
       ]
     },
     {
       "name": "current_document_input_options",
       "fields": [
-        { "name": "cells", "type": "cells_spec", "required": false, "default": "all", "canonical_order": 0, "constraints": ["captured-document-only"] }
+        {
+          "name": "cells",
+          "type": "cells_spec",
+          "required": false,
+          "default": "all",
+          "canonical_order": 0,
+          "constraints": [
+            "captured-document-only"
+          ]
+        }
       ]
     },
     {
       "name": "current_sequence_input_options",
       "fields": [
-        { "name": "cells", "type": "cells_spec", "required": false, "default": "all", "canonical_order": 0, "constraints": ["inclusive-display-number-range"] }
+        {
+          "name": "cells",
+          "type": "cells_spec",
+          "required": false,
+          "default": "all",
+          "canonical_order": 0,
+          "constraints": [
+            "inclusive-display-number-range"
+          ]
+        }
       ]
     },
     {
       "name": "parameter_metadata",
       "fields": [
-        { "name": "label", "type": "string", "required": false, "default": null, "canonical_order": 0, "constraints": ["non-semantic"] },
-        { "name": "ask", "type": "ask_policy", "required": false, "default": "never", "canonical_order": 1, "constraints": ["each_run-requires-explicit-resolution"] }
+        {
+          "name": "label",
+          "type": "string",
+          "required": false,
+          "default": null,
+          "canonical_order": 0,
+          "constraints": [
+            "non-semantic"
+          ]
+        },
+        {
+          "name": "ask",
+          "type": "ask_policy",
+          "required": false,
+          "default": "never",
+          "canonical_order": 1,
+          "constraints": [
+            "each_run-requires-explicit-resolution"
+          ]
+        }
       ]
     },
     {
       "name": "file_input_declaration",
       "fields": [
-        { "name": "path", "type": "string", "required": true, "default": null, "canonical_order": 0, "constraints": ["native-cell-path-intent"] },
-        { "name": "options", "type": "file_input_options", "required": false, "default": {}, "canonical_order": 1, "constraints": [] }
+        {
+          "name": "path",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "canonical_order": 0,
+          "constraints": [
+            "native-cell-path-intent"
+          ]
+        },
+        {
+          "name": "options",
+          "type": "file_input_options",
+          "required": false,
+          "default": {},
+          "canonical_order": 1,
+          "constraints": []
+        }
       ]
     },
     {
       "name": "folder_input_declaration",
       "fields": [
-        { "name": "path", "type": "string", "required": true, "default": null, "canonical_order": 0, "constraints": ["folder-path-intent"] },
-        { "name": "options", "type": "folder_input_options", "required": false, "default": {}, "canonical_order": 1, "constraints": [] }
+        {
+          "name": "path",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "canonical_order": 0,
+          "constraints": [
+            "folder-path-intent"
+          ]
+        },
+        {
+          "name": "options",
+          "type": "folder_input_options",
+          "required": false,
+          "default": {},
+          "canonical_order": 1,
+          "constraints": []
+        }
       ]
     },
-    { "name": "current_document_input_declaration", "fields": [{ "name": "options", "type": "current_document_input_options", "required": false, "default": {}, "canonical_order": 0, "constraints": ["issue-time-command-context"] }] },
-    { "name": "current_sequence_input_declaration", "fields": [{ "name": "options", "type": "current_sequence_input_options", "required": false, "default": {}, "canonical_order": 0, "constraints": ["issue-time-command-context"] }] },
+    {
+      "name": "current_document_input_declaration",
+      "fields": [
+        {
+          "name": "options",
+          "type": "current_document_input_options",
+          "required": false,
+          "default": {},
+          "canonical_order": 0,
+          "constraints": [
+            "issue-time-command-context"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "current_sequence_input_declaration",
+      "fields": [
+        {
+          "name": "options",
+          "type": "current_sequence_input_options",
+          "required": false,
+          "default": {},
+          "canonical_order": 0,
+          "constraints": [
+            "issue-time-command-context"
+          ]
+        }
+      ]
+    },
     {
       "name": "parameter_declaration_record",
       "fields": [
-        { "name": "name", "type": "identifier_value", "required": true, "default": null, "canonical_order": 0, "constraints": ["shared-value-namespace"] },
-        { "name": "declared_type", "type": "type_reference", "required": true, "default": null, "canonical_order": 1, "constraints": ["exact-current-schema-view"] },
-        { "name": "default_value", "type": "literal_value", "required": true, "default": null, "canonical_order": 2, "constraints": ["exact-declared-type"] },
-        { "name": "metadata", "type": "parameter_metadata", "required": false, "default": {}, "canonical_order": 3, "constraints": [] }
+        {
+          "name": "name",
+          "type": "identifier_value",
+          "required": true,
+          "default": null,
+          "canonical_order": 0,
+          "constraints": [
+            "shared-value-namespace"
+          ]
+        },
+        {
+          "name": "declared_type",
+          "type": "type_reference",
+          "required": true,
+          "default": null,
+          "canonical_order": 1,
+          "constraints": [
+            "exact-current-schema-view"
+          ]
+        },
+        {
+          "name": "default_value",
+          "type": "literal_value",
+          "required": true,
+          "default": null,
+          "canonical_order": 2,
+          "constraints": [
+            "exact-declared-type"
+          ]
+        },
+        {
+          "name": "metadata",
+          "type": "parameter_metadata",
+          "required": false,
+          "default": {},
+          "canonical_order": 3,
+          "constraints": []
+        }
       ]
     },
     {
       "name": "binding_declaration_record",
       "fields": [
-        { "name": "name", "type": "identifier_value", "required": true, "default": null, "canonical_order": 0, "constraints": ["shared-value-namespace"] },
-        { "name": "entity", "type": "identifier_value", "required": true, "default": null, "canonical_order": 1, "constraints": ["must-name-selector-entity"] },
-        { "name": "selector", "type": "selector_record", "required": true, "default": null, "canonical_order": 2, "constraints": ["closed-by-entity", "initial-document-only"] }
+        {
+          "name": "name",
+          "type": "identifier_value",
+          "required": true,
+          "default": null,
+          "canonical_order": 0,
+          "constraints": [
+            "shared-value-namespace"
+          ]
+        },
+        {
+          "name": "entity",
+          "type": "identifier_value",
+          "required": true,
+          "default": null,
+          "canonical_order": 1,
+          "constraints": [
+            "must-name-selector-entity"
+          ]
+        },
+        {
+          "name": "selector",
+          "type": "selector_record",
+          "required": true,
+          "default": null,
+          "canonical_order": 2,
+          "constraints": [
+            "closed-by-entity",
+            "initial-document-only"
+          ]
+        }
       ]
     },
     {
       "name": "assert_statement_record",
       "fields": [
-        { "name": "kind", "type": "identifier_value", "required": true, "default": null, "canonical_order": 0, "constraints": ["must-name-assert-kind"] },
-        { "name": "arguments", "type": "assert_record", "required": true, "default": null, "canonical_order": 1, "constraints": ["closed-by-kind", "non-mutating"] }
+        {
+          "name": "kind",
+          "type": "identifier_value",
+          "required": true,
+          "default": null,
+          "canonical_order": 0,
+          "constraints": [
+            "must-name-assert-kind"
+          ]
+        },
+        {
+          "name": "arguments",
+          "type": "assert_record",
+          "required": true,
+          "default": null,
+          "canonical_order": 1,
+          "constraints": [
+            "closed-by-kind",
+            "non-mutating"
+          ]
+        }
       ]
     },
     {
       "name": "step_statement_record",
       "fields": [
-        { "name": "label", "type": "string", "required": true, "default": null, "canonical_order": 0, "constraints": ["not-a-namespace"] },
-        { "name": "result_alias", "type": "nullable<identifier_value>", "required": false, "default": null, "canonical_order": 1, "constraints": ["shared-value-namespace"] },
-        { "name": "enabled", "type": "bool", "required": true, "default": null, "canonical_order": 2, "constraints": ["exactly-once"] },
-        { "name": "editor_group", "type": "nullable<string>", "required": false, "default": null, "canonical_order": 3, "constraints": ["nonempty", "contiguous-members", "non-semantic"] },
-        { "name": "command", "type": "identifier_value", "required": true, "default": null, "canonical_order": 4, "constraints": ["exactly-one-invocation", "must-name-catalog-entry"] },
-        { "name": "arguments", "type": "invocation_record", "required": true, "default": null, "canonical_order": 5, "constraints": ["closed-by-command-entry"] }
+        {
+          "name": "label",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "canonical_order": 0,
+          "constraints": [
+            "not-a-namespace"
+          ]
+        },
+        {
+          "name": "result_alias",
+          "type": "nullable<identifier_value>",
+          "required": false,
+          "default": null,
+          "canonical_order": 1,
+          "constraints": [
+            "shared-value-namespace"
+          ]
+        },
+        {
+          "name": "enabled",
+          "type": "bool",
+          "required": true,
+          "default": null,
+          "canonical_order": 2,
+          "constraints": [
+            "exactly-once"
+          ]
+        },
+        {
+          "name": "editor_group",
+          "type": "nullable<string>",
+          "required": false,
+          "default": null,
+          "canonical_order": 3,
+          "constraints": [
+            "nonempty",
+            "contiguous-members",
+            "non-semantic"
+          ]
+        },
+        {
+          "name": "command",
+          "type": "identifier_value",
+          "required": true,
+          "default": null,
+          "canonical_order": 4,
+          "constraints": [
+            "exactly-one-invocation",
+            "must-name-catalog-entry"
+          ]
+        },
+        {
+          "name": "arguments",
+          "type": "invocation_record",
+          "required": true,
+          "default": null,
+          "canonical_order": 5,
+          "constraints": [
+            "closed-by-command-entry"
+          ]
+        }
       ]
     },
-    { "name": "inputs_section", "fields": [{ "name": "declarations", "type": "list<input_declaration>", "required": true, "default": [], "canonical_order": 0, "constraints": ["global-natural-order-after-expansion"] }] },
-    { "name": "parameters_section", "fields": [{ "name": "declarations", "type": "list<parameter_declaration>", "required": true, "default": [], "canonical_order": 0, "constraints": ["source-order", "shared-value-namespace"] }] },
-    { "name": "bindings_section", "fields": [{ "name": "declarations", "type": "list<binding_declaration>", "required": true, "default": [], "canonical_order": 0, "constraints": ["source-order", "initial-document-resolution"] }] },
-    { "name": "program_section", "fields": [{ "name": "statements", "type": "list<program_statement>", "required": true, "default": [], "canonical_order": 0, "constraints": ["source-order", "no-reordering"] }] },
-    { "name": "assets_section", "fields": [{ "name": "declarations", "type": "list<asset_declaration>", "required": true, "default": [], "canonical_order": 0, "constraints": ["unordered-semantically", "unique-asset-namespace"] }] },
+    {
+      "name": "inputs_section",
+      "fields": [
+        {
+          "name": "declarations",
+          "type": "list<input_declaration>",
+          "required": true,
+          "default": [],
+          "canonical_order": 0,
+          "constraints": [
+            "global-natural-order-after-expansion"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "parameters_section",
+      "fields": [
+        {
+          "name": "declarations",
+          "type": "list<parameter_declaration>",
+          "required": true,
+          "default": [],
+          "canonical_order": 0,
+          "constraints": [
+            "source-order",
+            "shared-value-namespace"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "bindings_section",
+      "fields": [
+        {
+          "name": "declarations",
+          "type": "list<binding_declaration>",
+          "required": true,
+          "default": [],
+          "canonical_order": 0,
+          "constraints": [
+            "source-order",
+            "initial-document-resolution"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "program_section",
+      "fields": [
+        {
+          "name": "statements",
+          "type": "list<program_statement>",
+          "required": true,
+          "default": [],
+          "canonical_order": 0,
+          "constraints": [
+            "source-order",
+            "no-reordering"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "assets_section",
+      "fields": [
+        {
+          "name": "declarations",
+          "type": "list<asset_declaration>",
+          "required": true,
+          "default": [],
+          "canonical_order": 0,
+          "constraints": [
+            "unordered-semantically",
+            "unique-asset-namespace"
+          ]
+        }
+      ]
+    },
     {
       "name": "output_duplicate",
       "fields": [
-        { "name": "policy", "type": "output_policy", "required": true, "default": "duplicate", "canonical_order": 0, "constraints": ["must-equal:duplicate"] },
-        { "name": "format", "type": "output_format", "required": true, "default": "inkpod", "canonical_order": 1, "constraints": [] },
-        { "name": "folder", "type": "string", "required": true, "default": null, "canonical_order": 2, "constraints": ["empty-means-input-parent"] },
-        { "name": "cell_folder", "type": "bool", "required": true, "default": null, "canonical_order": 3, "constraints": [] },
-        { "name": "basename", "type": "string", "required": true, "default": null, "canonical_order": 4, "constraints": ["empty-uses-source-stem-batch"] },
-        { "name": "start_number", "type": "u32", "required": true, "default": null, "canonical_order": 5, "constraints": [] },
-        { "name": "direction", "type": "number_direction", "required": true, "default": null, "canonical_order": 6, "constraints": [] }
+        {
+          "name": "policy",
+          "type": "output_policy",
+          "required": true,
+          "default": "duplicate",
+          "canonical_order": 0,
+          "constraints": [
+            "must-equal:duplicate"
+          ]
+        },
+        {
+          "name": "format",
+          "type": "output_format",
+          "required": true,
+          "default": "inkpod",
+          "canonical_order": 1,
+          "constraints": []
+        },
+        {
+          "name": "folder",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "canonical_order": 2,
+          "constraints": [
+            "empty-means-input-parent"
+          ]
+        },
+        {
+          "name": "cell_folder",
+          "type": "bool",
+          "required": true,
+          "default": null,
+          "canonical_order": 3,
+          "constraints": []
+        },
+        {
+          "name": "basename",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "canonical_order": 4,
+          "constraints": [
+            "empty-uses-source-stem-batch"
+          ]
+        },
+        {
+          "name": "start_number",
+          "type": "u32",
+          "required": true,
+          "default": null,
+          "canonical_order": 5,
+          "constraints": []
+        },
+        {
+          "name": "direction",
+          "type": "number_direction",
+          "required": true,
+          "default": null,
+          "canonical_order": 6,
+          "constraints": []
+        }
       ]
     },
     {
       "name": "output_new_save",
       "fields": [
-        { "name": "policy", "type": "output_policy", "required": true, "default": "new_save", "canonical_order": 0, "constraints": ["must-equal:new_save"] },
-        { "name": "format", "type": "output_format", "required": true, "default": "inkpod", "canonical_order": 1, "constraints": [] },
-        { "name": "folder", "type": "string", "required": true, "default": null, "canonical_order": 2, "constraints": ["empty-means-input-parent"] },
-        { "name": "cell_folder", "type": "bool", "required": true, "default": null, "canonical_order": 3, "constraints": [] },
-        { "name": "basename", "type": "string", "required": true, "default": null, "canonical_order": 4, "constraints": ["empty-uses-cell-number"] },
-        { "name": "start_number", "type": "u32", "required": true, "default": null, "canonical_order": 5, "constraints": [] },
-        { "name": "direction", "type": "number_direction", "required": true, "default": null, "canonical_order": 6, "constraints": [] }
+        {
+          "name": "policy",
+          "type": "output_policy",
+          "required": true,
+          "default": "new_save",
+          "canonical_order": 0,
+          "constraints": [
+            "must-equal:new_save"
+          ]
+        },
+        {
+          "name": "format",
+          "type": "output_format",
+          "required": true,
+          "default": "inkpod",
+          "canonical_order": 1,
+          "constraints": []
+        },
+        {
+          "name": "folder",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "canonical_order": 2,
+          "constraints": [
+            "empty-means-input-parent"
+          ]
+        },
+        {
+          "name": "cell_folder",
+          "type": "bool",
+          "required": true,
+          "default": null,
+          "canonical_order": 3,
+          "constraints": []
+        },
+        {
+          "name": "basename",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "canonical_order": 4,
+          "constraints": [
+            "empty-uses-cell-number"
+          ]
+        },
+        {
+          "name": "start_number",
+          "type": "u32",
+          "required": true,
+          "default": null,
+          "canonical_order": 5,
+          "constraints": []
+        },
+        {
+          "name": "direction",
+          "type": "number_direction",
+          "required": true,
+          "default": null,
+          "canonical_order": 6,
+          "constraints": []
+        }
       ]
     },
     {
       "name": "output_explicit_overwrite",
       "fields": [
-        { "name": "policy", "type": "output_policy", "required": true, "default": "explicit_overwrite", "canonical_order": 0, "constraints": ["must-equal:explicit_overwrite", "file-backed-closed-input-only", "confirmation-token-required"] },
-        { "name": "format", "type": "output_format", "required": true, "default": "inkpod", "canonical_order": 1, "constraints": [] }
+        {
+          "name": "policy",
+          "type": "output_policy",
+          "required": true,
+          "default": "explicit_overwrite",
+          "canonical_order": 0,
+          "constraints": [
+            "must-equal:explicit_overwrite",
+            "file-backed-closed-input-only",
+            "confirmation-token-required"
+          ]
+        },
+        {
+          "name": "format",
+          "type": "output_format",
+          "required": true,
+          "default": "inkpod",
+          "canonical_order": 1,
+          "constraints": []
+        }
       ]
     },
     {
       "name": "execution_record",
       "fields": [
-        { "name": "failure", "type": "failure_policy", "required": true, "default": null, "canonical_order": 0, "constraints": [] },
-        { "name": "wait_ms", "type": "u32", "required": true, "default": null, "canonical_order": 1, "constraints": ["0..3600000"] },
-        { "name": "preview_before_save", "type": "bool", "required": true, "default": null, "canonical_order": 2, "constraints": [] }
+        {
+          "name": "failure",
+          "type": "failure_policy",
+          "required": true,
+          "default": null,
+          "canonical_order": 0,
+          "constraints": []
+        },
+        {
+          "name": "wait_ms",
+          "type": "u32",
+          "required": true,
+          "default": null,
+          "canonical_order": 1,
+          "constraints": [
+            "0..3600000"
+          ]
+        },
+        {
+          "name": "preview_before_save",
+          "type": "bool",
+          "required": true,
+          "default": null,
+          "canonical_order": 2,
+          "constraints": []
+        }
       ]
     },
     {
       "name": "canonical_raster_descriptor",
       "fields": [
-        { "name": "pixel_format", "type": "pixel_format", "required": true, "default": null, "canonical_order": 0, "constraints": ["no-premultiplied-format"] },
-        { "name": "color_space", "type": "color_space", "required": true, "default": "srgb", "canonical_order": 1, "constraints": [] },
-        { "name": "alpha", "type": "alpha_mode", "required": true, "default": "straight", "canonical_order": 2, "constraints": [] },
-        { "name": "width", "type": "u32", "required": true, "default": null, "canonical_order": 3, "constraints": ["nonzero", "native-decoder-bound"] },
-        { "name": "height", "type": "u32", "required": true, "default": null, "canonical_order": 4, "constraints": ["nonzero", "native-decoder-bound"] },
-        { "name": "stride", "type": "u32", "required": true, "default": null, "canonical_order": 5, "constraints": ["exact-width-times-bytes-per-pixel", "checked"] },
-        { "name": "element_count", "type": "u64", "required": true, "default": null, "canonical_order": 6, "constraints": ["exact-width-times-height", "checked"] }
+        {
+          "name": "pixel_format",
+          "type": "pixel_format",
+          "required": true,
+          "default": null,
+          "canonical_order": 0,
+          "constraints": [
+            "no-premultiplied-format"
+          ]
+        },
+        {
+          "name": "color_space",
+          "type": "color_space",
+          "required": true,
+          "default": "srgb",
+          "canonical_order": 1,
+          "constraints": []
+        },
+        {
+          "name": "alpha",
+          "type": "alpha_mode",
+          "required": true,
+          "default": "straight",
+          "canonical_order": 2,
+          "constraints": []
+        },
+        {
+          "name": "width",
+          "type": "u32",
+          "required": true,
+          "default": null,
+          "canonical_order": 3,
+          "constraints": [
+            "nonzero",
+            "native-decoder-bound"
+          ]
+        },
+        {
+          "name": "height",
+          "type": "u32",
+          "required": true,
+          "default": null,
+          "canonical_order": 4,
+          "constraints": [
+            "nonzero",
+            "native-decoder-bound"
+          ]
+        },
+        {
+          "name": "stride",
+          "type": "u32",
+          "required": true,
+          "default": null,
+          "canonical_order": 5,
+          "constraints": [
+            "exact-width-times-bytes-per-pixel",
+            "checked"
+          ]
+        },
+        {
+          "name": "element_count",
+          "type": "u64",
+          "required": true,
+          "default": null,
+          "canonical_order": 6,
+          "constraints": [
+            "exact-width-times-height",
+            "checked"
+          ]
+        }
       ]
     },
     {
       "name": "canonical_raster_asset",
       "fields": [
-        { "name": "asset_id", "type": "digest", "required": true, "default": null, "canonical_order": 0, "constraints": ["descriptor-and-logical-payload-digest"] },
-        { "name": "kind", "type": "string", "required": true, "default": "canonical_raster", "canonical_order": 1, "constraints": ["must-equal:canonical_raster"] },
-        { "name": "descriptor", "type": "canonical_raster_descriptor", "required": true, "default": null, "canonical_order": 2, "constraints": [] },
-        { "name": "data", "type": "nullable<base64>", "required": false, "default": null, "canonical_order": 3, "constraints": ["exactly-one-of:data,data_file"] },
-        { "name": "data_file", "type": "nullable<string>", "required": false, "default": null, "canonical_order": 4, "constraints": ["exactly-one-of:data,data_file", "raw-canonical-payload-only"] }
+        {
+          "name": "asset_id",
+          "type": "digest",
+          "required": true,
+          "default": null,
+          "canonical_order": 0,
+          "constraints": [
+            "descriptor-and-logical-payload-digest"
+          ]
+        },
+        {
+          "name": "kind",
+          "type": "string",
+          "required": true,
+          "default": "canonical_raster",
+          "canonical_order": 1,
+          "constraints": [
+            "must-equal:canonical_raster"
+          ]
+        },
+        {
+          "name": "descriptor",
+          "type": "canonical_raster_descriptor",
+          "required": true,
+          "default": null,
+          "canonical_order": 2,
+          "constraints": []
+        },
+        {
+          "name": "data",
+          "type": "nullable<base64>",
+          "required": false,
+          "default": null,
+          "canonical_order": 3,
+          "constraints": [
+            "exactly-one-of:data,data_file"
+          ]
+        },
+        {
+          "name": "data_file",
+          "type": "nullable<string>",
+          "required": false,
+          "default": null,
+          "canonical_order": 4,
+          "constraints": [
+            "exactly-one-of:data,data_file",
+            "raw-canonical-payload-only"
+          ]
+        }
       ]
     }
   ],
   "sections": [
-    { "name": "requires", "body_type": "requires_record", "allowed_in": ["file", "fragment"], "required_in": ["file", "fragment"], "declaration_order_semantic": false },
-    { "name": "meta", "body_type": "meta_record", "allowed_in": ["file"], "required_in": [], "declaration_order_semantic": false },
-    { "name": "inputs", "body_type": "inputs_section", "allowed_in": ["file"], "required_in": ["file"], "declaration_order_semantic": true },
-    { "name": "parameters", "body_type": "parameters_section", "allowed_in": ["file", "fragment"], "required_in": [], "declaration_order_semantic": true },
-    { "name": "bindings", "body_type": "bindings_section", "allowed_in": ["file", "fragment"], "required_in": [], "declaration_order_semantic": true },
-    { "name": "program", "body_type": "program_section", "allowed_in": ["file", "fragment"], "required_in": ["file", "fragment"], "declaration_order_semantic": true },
-    { "name": "output", "body_type": "output_record", "allowed_in": ["file"], "required_in": ["file"], "declaration_order_semantic": false },
-    { "name": "execution", "body_type": "execution_record", "allowed_in": ["file"], "required_in": ["file"], "declaration_order_semantic": false },
-    { "name": "assets", "body_type": "assets_section", "allowed_in": ["file", "fragment"], "required_in": [], "declaration_order_semantic": false }
+    {
+      "name": "requires",
+      "body_type": "requires_record",
+      "allowed_in": [
+        "file",
+        "fragment"
+      ],
+      "required_in": [
+        "file",
+        "fragment"
+      ],
+      "declaration_order_semantic": false
+    },
+    {
+      "name": "meta",
+      "body_type": "meta_record",
+      "allowed_in": [
+        "file"
+      ],
+      "required_in": [],
+      "declaration_order_semantic": false
+    },
+    {
+      "name": "inputs",
+      "body_type": "inputs_section",
+      "allowed_in": [
+        "file"
+      ],
+      "required_in": [
+        "file"
+      ],
+      "declaration_order_semantic": true
+    },
+    {
+      "name": "parameters",
+      "body_type": "parameters_section",
+      "allowed_in": [
+        "file",
+        "fragment"
+      ],
+      "required_in": [],
+      "declaration_order_semantic": true
+    },
+    {
+      "name": "bindings",
+      "body_type": "bindings_section",
+      "allowed_in": [
+        "file",
+        "fragment"
+      ],
+      "required_in": [],
+      "declaration_order_semantic": true
+    },
+    {
+      "name": "program",
+      "body_type": "program_section",
+      "allowed_in": [
+        "file",
+        "fragment"
+      ],
+      "required_in": [
+        "file",
+        "fragment"
+      ],
+      "declaration_order_semantic": true
+    },
+    {
+      "name": "output",
+      "body_type": "output_record",
+      "allowed_in": [
+        "file"
+      ],
+      "required_in": [
+        "file"
+      ],
+      "declaration_order_semantic": false
+    },
+    {
+      "name": "execution",
+      "body_type": "execution_record",
+      "allowed_in": [
+        "file"
+      ],
+      "required_in": [
+        "file"
+      ],
+      "declaration_order_semantic": false
+    },
+    {
+      "name": "assets",
+      "body_type": "assets_section",
+      "allowed_in": [
+        "file",
+        "fragment"
+      ],
+      "required_in": [],
+      "declaration_order_semantic": false
+    }
   ],
   "input_kinds": [
-    { "name": "file", "path": "required", "options_type": "file_input_options", "expansion": "single_file" },
-    { "name": "folder", "path": "required", "options_type": "folder_input_options", "expansion": "folder_children" },
-    { "name": "current_document", "path": "forbidden", "options_type": "current_document_input_options", "expansion": "captured_document" },
-    { "name": "current_sequence", "path": "forbidden", "options_type": "current_sequence_input_options", "expansion": "captured_sequence" }
+    {
+      "name": "file",
+      "path": "required",
+      "options_type": "file_input_options",
+      "expansion": "single_file"
+    },
+    {
+      "name": "folder",
+      "path": "required",
+      "options_type": "folder_input_options",
+      "expansion": "folder_children"
+    },
+    {
+      "name": "current_document",
+      "path": "forbidden",
+      "options_type": "current_document_input_options",
+      "expansion": "captured_document"
+    },
+    {
+      "name": "current_sequence",
+      "path": "forbidden",
+      "options_type": "current_sequence_input_options",
+      "expansion": "captured_sequence"
+    }
   ],
   "selector_entities": [
     {
-      "name": "layer", "reference_type": "layer_ref", "owner": "document", "initial_order": "document_tree",
+      "name": "layer",
+      "reference_type": "layer_ref",
+      "owner": "document",
+      "initial_order": "document_tree",
       "filters": [
-        { "name": "source_document_uuid", "type": "nullable<uuid>", "required": false, "default": null, "canonical_order": 0, "constraints": ["required-with:persistent_id"] },
-        { "name": "persistent_id", "type": "nullable<u64>", "required": false, "default": null, "canonical_order": 1, "constraints": ["nonzero", "requires:source_document_uuid"] },
-        { "name": "kind", "type": "nullable<layer_kind>", "required": false, "default": null, "canonical_order": 2, "constraints": [] },
-        { "name": "name", "type": "nullable<string>", "required": false, "default": null, "canonical_order": 3, "constraints": [] },
-        { "name": "visible", "type": "nullable<bool>", "required": false, "default": null, "canonical_order": 4, "constraints": [] },
-        { "name": "editable", "type": "nullable<bool>", "required": false, "default": null, "canonical_order": 5, "constraints": [] },
-        { "name": "cardinality", "type": "cardinality", "required": false, "default": "one", "canonical_order": 6, "constraints": [] },
-        { "name": "missing", "type": "missing_policy", "required": false, "default": "error", "canonical_order": 7, "constraints": [] }
+        {
+          "name": "source_document_uuid",
+          "type": "nullable<uuid>",
+          "required": false,
+          "default": null,
+          "canonical_order": 0,
+          "constraints": [
+            "required-with:persistent_id"
+          ]
+        },
+        {
+          "name": "persistent_id",
+          "type": "nullable<u64>",
+          "required": false,
+          "default": null,
+          "canonical_order": 1,
+          "constraints": [
+            "nonzero",
+            "requires:source_document_uuid"
+          ]
+        },
+        {
+          "name": "name",
+          "type": "nullable<string>",
+          "required": false,
+          "default": null,
+          "canonical_order": 2,
+          "constraints": []
+        },
+        {
+          "name": "visible",
+          "type": "nullable<bool>",
+          "required": false,
+          "default": null,
+          "canonical_order": 3,
+          "constraints": []
+        },
+        {
+          "name": "editable",
+          "type": "nullable<bool>",
+          "required": false,
+          "default": null,
+          "canonical_order": 4,
+          "constraints": []
+        },
+        {
+          "name": "cardinality",
+          "type": "cardinality",
+          "required": false,
+          "default": "one",
+          "canonical_order": 5,
+          "constraints": []
+        },
+        {
+          "name": "missing",
+          "type": "missing_policy",
+          "required": false,
+          "default": "error",
+          "canonical_order": 6,
+          "constraints": []
+        }
       ]
     },
     {
-      "name": "plane", "reference_type": "plane_ref", "owner": "layer", "initial_order": "document_tree",
+      "name": "plane",
+      "reference_type": "plane_ref",
+      "owner": "layer",
+      "initial_order": "document_tree",
       "filters": [
-        { "name": "layer", "type": "nullable<layer_ref>", "required": false, "default": null, "canonical_order": 0, "constraints": ["owner-filter"] },
-        { "name": "source_document_uuid", "type": "nullable<uuid>", "required": false, "default": null, "canonical_order": 1, "constraints": ["required-with:persistent_id"] },
-        { "name": "persistent_id", "type": "nullable<u64>", "required": false, "default": null, "canonical_order": 2, "constraints": ["nonzero", "requires:source_document_uuid"] },
-        { "name": "layer_kind", "type": "nullable<layer_kind>", "required": false, "default": null, "canonical_order": 3, "constraints": [] },
-        { "name": "plane_kind", "type": "nullable<plane_kind>", "required": false, "default": null, "canonical_order": 4, "constraints": [] },
-        { "name": "pixel_format", "type": "nullable<pixel_format>", "required": false, "default": null, "canonical_order": 5, "constraints": [] },
-        { "name": "name", "type": "nullable<string>", "required": false, "default": null, "canonical_order": 6, "constraints": [] },
-        { "name": "visible", "type": "nullable<bool>", "required": false, "default": null, "canonical_order": 7, "constraints": [] },
-        { "name": "editable", "type": "nullable<bool>", "required": false, "default": null, "canonical_order": 8, "constraints": [] },
-        { "name": "cardinality", "type": "cardinality", "required": false, "default": "one", "canonical_order": 9, "constraints": [] },
-        { "name": "missing", "type": "missing_policy", "required": false, "default": "error", "canonical_order": 10, "constraints": [] }
+        {
+          "name": "layer",
+          "type": "nullable<layer_ref>",
+          "required": false,
+          "default": null,
+          "canonical_order": 0,
+          "constraints": [
+            "owner-filter"
+          ]
+        },
+        {
+          "name": "source_document_uuid",
+          "type": "nullable<uuid>",
+          "required": false,
+          "default": null,
+          "canonical_order": 1,
+          "constraints": [
+            "required-with:persistent_id"
+          ]
+        },
+        {
+          "name": "persistent_id",
+          "type": "nullable<u64>",
+          "required": false,
+          "default": null,
+          "canonical_order": 2,
+          "constraints": [
+            "nonzero",
+            "requires:source_document_uuid"
+          ]
+        },
+        {
+          "name": "plane_kind",
+          "type": "nullable<plane_kind>",
+          "required": false,
+          "default": null,
+          "canonical_order": 3,
+          "constraints": []
+        },
+        {
+          "name": "pixel_format",
+          "type": "nullable<pixel_format>",
+          "required": false,
+          "default": null,
+          "canonical_order": 4,
+          "constraints": []
+        },
+        {
+          "name": "name",
+          "type": "nullable<string>",
+          "required": false,
+          "default": null,
+          "canonical_order": 5,
+          "constraints": []
+        },
+        {
+          "name": "visible",
+          "type": "nullable<bool>",
+          "required": false,
+          "default": null,
+          "canonical_order": 6,
+          "constraints": []
+        },
+        {
+          "name": "editable",
+          "type": "nullable<bool>",
+          "required": false,
+          "default": null,
+          "canonical_order": 7,
+          "constraints": []
+        },
+        {
+          "name": "cardinality",
+          "type": "cardinality",
+          "required": false,
+          "default": "one",
+          "canonical_order": 8,
+          "constraints": []
+        },
+        {
+          "name": "missing",
+          "type": "missing_policy",
+          "required": false,
+          "default": "error",
+          "canonical_order": 9,
+          "constraints": []
+        }
       ]
     },
     {
-      "name": "guide", "reference_type": "guide_ref", "owner": "document", "initial_order": "guide_order",
+      "name": "guide",
+      "reference_type": "guide_ref",
+      "owner": "document",
+      "initial_order": "guide_order",
       "filters": [
-        { "name": "source_document_uuid", "type": "nullable<uuid>", "required": false, "default": null, "canonical_order": 0, "constraints": ["required-with:persistent_id"] },
-        { "name": "persistent_id", "type": "nullable<u64>", "required": false, "default": null, "canonical_order": 1, "constraints": ["nonzero", "requires:source_document_uuid"] },
-        { "name": "axis", "type": "nullable<guide_axis>", "required": false, "default": null, "canonical_order": 2, "constraints": [] },
-        { "name": "position", "type": "nullable<i32>", "required": false, "default": null, "canonical_order": 3, "constraints": ["document-pixel"] },
-        { "name": "cardinality", "type": "cardinality", "required": false, "default": "one", "canonical_order": 4, "constraints": [] },
-        { "name": "missing", "type": "missing_policy", "required": false, "default": "error", "canonical_order": 5, "constraints": [] }
+        {
+          "name": "source_document_uuid",
+          "type": "nullable<uuid>",
+          "required": false,
+          "default": null,
+          "canonical_order": 0,
+          "constraints": [
+            "required-with:persistent_id"
+          ]
+        },
+        {
+          "name": "persistent_id",
+          "type": "nullable<u64>",
+          "required": false,
+          "default": null,
+          "canonical_order": 1,
+          "constraints": [
+            "nonzero",
+            "requires:source_document_uuid"
+          ]
+        },
+        {
+          "name": "axis",
+          "type": "nullable<guide_axis>",
+          "required": false,
+          "default": null,
+          "canonical_order": 2,
+          "constraints": []
+        },
+        {
+          "name": "position",
+          "type": "nullable<i32>",
+          "required": false,
+          "default": null,
+          "canonical_order": 3,
+          "constraints": [
+            "document-pixel"
+          ]
+        },
+        {
+          "name": "cardinality",
+          "type": "cardinality",
+          "required": false,
+          "default": "one",
+          "canonical_order": 4,
+          "constraints": []
+        },
+        {
+          "name": "missing",
+          "type": "missing_policy",
+          "required": false,
+          "default": "error",
+          "canonical_order": 5,
+          "constraints": []
+        }
       ]
     },
     {
-      "name": "shooting_frame", "reference_type": "shooting_frame_ref", "owner": "document", "initial_order": "singleton",
+      "name": "shooting_frame",
+      "reference_type": "shooting_frame_ref",
+      "owner": "document",
+      "initial_order": "singleton",
       "filters": [
-        { "name": "source_document_uuid", "type": "nullable<uuid>", "required": false, "default": null, "canonical_order": 0, "constraints": ["required-with:persistent_id"] },
-        { "name": "persistent_id", "type": "nullable<u64>", "required": false, "default": null, "canonical_order": 1, "constraints": ["nonzero", "requires:source_document_uuid"] },
-        { "name": "cardinality", "type": "cardinality", "required": false, "default": "one", "canonical_order": 2, "constraints": ["all-forbidden"] },
-        { "name": "missing", "type": "missing_policy", "required": false, "default": "error", "canonical_order": 3, "constraints": [] }
+        {
+          "name": "source_document_uuid",
+          "type": "nullable<uuid>",
+          "required": false,
+          "default": null,
+          "canonical_order": 0,
+          "constraints": [
+            "required-with:persistent_id"
+          ]
+        },
+        {
+          "name": "persistent_id",
+          "type": "nullable<u64>",
+          "required": false,
+          "default": null,
+          "canonical_order": 1,
+          "constraints": [
+            "nonzero",
+            "requires:source_document_uuid"
+          ]
+        },
+        {
+          "name": "cardinality",
+          "type": "cardinality",
+          "required": false,
+          "default": "one",
+          "canonical_order": 2,
+          "constraints": [
+            "all-forbidden"
+          ]
+        },
+        {
+          "name": "missing",
+          "type": "missing_policy",
+          "required": false,
+          "default": "error",
+          "canonical_order": 3,
+          "constraints": []
+        }
       ]
     },
     {
-      "name": "vanishing_point", "reference_type": "vanishing_point_ref", "owner": "layer", "initial_order": "document_tree",
+      "name": "saved_selection_mask",
+      "reference_type": "saved_selection_mask_ref",
+      "owner": "document",
+      "initial_order": "saved_selection_order",
       "filters": [
-        { "name": "layer", "type": "nullable<layer_ref>", "required": false, "default": null, "canonical_order": 0, "constraints": ["owner-filter"] },
-        { "name": "source_document_uuid", "type": "nullable<uuid>", "required": false, "default": null, "canonical_order": 1, "constraints": ["required-with:persistent_id"] },
-        { "name": "persistent_id", "type": "nullable<u64>", "required": false, "default": null, "canonical_order": 2, "constraints": ["nonzero", "requires:source_document_uuid"] },
-        { "name": "cardinality", "type": "cardinality", "required": false, "default": "one", "canonical_order": 3, "constraints": [] },
-        { "name": "missing", "type": "missing_policy", "required": false, "default": "error", "canonical_order": 4, "constraints": [] }
+        {
+          "name": "source_document_uuid",
+          "type": "nullable<uuid>",
+          "required": false,
+          "default": null,
+          "canonical_order": 0,
+          "constraints": [
+            "required-with:persistent_id"
+          ]
+        },
+        {
+          "name": "persistent_id",
+          "type": "nullable<u64>",
+          "required": false,
+          "default": null,
+          "canonical_order": 1,
+          "constraints": [
+            "nonzero",
+            "requires:source_document_uuid"
+          ]
+        },
+        {
+          "name": "name",
+          "type": "nullable<string>",
+          "required": false,
+          "default": null,
+          "canonical_order": 2,
+          "constraints": []
+        },
+        {
+          "name": "cardinality",
+          "type": "cardinality",
+          "required": false,
+          "default": "one",
+          "canonical_order": 3,
+          "constraints": []
+        },
+        {
+          "name": "missing",
+          "type": "missing_policy",
+          "required": false,
+          "default": "error",
+          "canonical_order": 4,
+          "constraints": []
+        }
       ]
     },
     {
-      "name": "light_table_set", "reference_type": "light_table_set_ref", "owner": "document", "initial_order": "light_table_order",
+      "name": "light_table_set",
+      "reference_type": "light_table_set_ref",
+      "owner": "document",
+      "initial_order": "light_table_order",
       "filters": [
-        { "name": "source_document_uuid", "type": "nullable<uuid>", "required": false, "default": null, "canonical_order": 0, "constraints": ["required-with:persistent_id"] },
-        { "name": "persistent_id", "type": "nullable<u64>", "required": false, "default": null, "canonical_order": 1, "constraints": ["nonzero", "requires:source_document_uuid"] },
-        { "name": "name", "type": "nullable<string>", "required": false, "default": null, "canonical_order": 2, "constraints": [] },
-        { "name": "cardinality", "type": "cardinality", "required": false, "default": "one", "canonical_order": 3, "constraints": [] },
-        { "name": "missing", "type": "missing_policy", "required": false, "default": "error", "canonical_order": 4, "constraints": [] }
+        {
+          "name": "source_document_uuid",
+          "type": "nullable<uuid>",
+          "required": false,
+          "default": null,
+          "canonical_order": 0,
+          "constraints": [
+            "required-with:persistent_id"
+          ]
+        },
+        {
+          "name": "persistent_id",
+          "type": "nullable<u64>",
+          "required": false,
+          "default": null,
+          "canonical_order": 1,
+          "constraints": [
+            "nonzero",
+            "requires:source_document_uuid"
+          ]
+        },
+        {
+          "name": "name",
+          "type": "nullable<string>",
+          "required": false,
+          "default": null,
+          "canonical_order": 2,
+          "constraints": []
+        },
+        {
+          "name": "cardinality",
+          "type": "cardinality",
+          "required": false,
+          "default": "one",
+          "canonical_order": 3,
+          "constraints": []
+        },
+        {
+          "name": "missing",
+          "type": "missing_policy",
+          "required": false,
+          "default": "error",
+          "canonical_order": 4,
+          "constraints": []
+        }
       ]
     },
     {
-      "name": "light_table_item", "reference_type": "light_table_item_ref", "owner": "light_table_set", "initial_order": "light_table_order",
+      "name": "light_table_item",
+      "reference_type": "light_table_item_ref",
+      "owner": "light_table_set",
+      "initial_order": "light_table_order",
       "filters": [
-        { "name": "set", "type": "nullable<light_table_set_ref>", "required": false, "default": null, "canonical_order": 0, "constraints": ["owner-filter"] },
-        { "name": "source_document_uuid", "type": "nullable<uuid>", "required": false, "default": null, "canonical_order": 1, "constraints": ["required-with:persistent_id"] },
-        { "name": "persistent_id", "type": "nullable<u64>", "required": false, "default": null, "canonical_order": 2, "constraints": ["nonzero", "requires:source_document_uuid"] },
-        { "name": "cardinality", "type": "cardinality", "required": false, "default": "one", "canonical_order": 3, "constraints": [] },
-        { "name": "missing", "type": "missing_policy", "required": false, "default": "error", "canonical_order": 4, "constraints": [] }
+        {
+          "name": "set",
+          "type": "nullable<light_table_set_ref>",
+          "required": false,
+          "default": null,
+          "canonical_order": 0,
+          "constraints": [
+            "owner-filter"
+          ]
+        },
+        {
+          "name": "source_document_uuid",
+          "type": "nullable<uuid>",
+          "required": false,
+          "default": null,
+          "canonical_order": 1,
+          "constraints": [
+            "required-with:persistent_id"
+          ]
+        },
+        {
+          "name": "persistent_id",
+          "type": "nullable<u64>",
+          "required": false,
+          "default": null,
+          "canonical_order": 2,
+          "constraints": [
+            "nonzero",
+            "requires:source_document_uuid"
+          ]
+        },
+        {
+          "name": "cardinality",
+          "type": "cardinality",
+          "required": false,
+          "default": "one",
+          "canonical_order": 3,
+          "constraints": []
+        },
+        {
+          "name": "missing",
+          "type": "missing_policy",
+          "required": false,
+          "default": "error",
+          "canonical_order": 4,
+          "constraints": []
+        }
       ]
     }
   ],
   "assert_kinds": [
     {
-      "name": "document", "comparison": "exact_typed_field_equality", "failure": "item_failure_without_mutation",
+      "name": "document",
+      "comparison": "exact_typed_field_equality",
+      "failure": "item_failure_without_mutation",
       "fields": [
-        { "name": "source_document_uuid", "type": "nullable<uuid>", "required": false, "default": null, "canonical_order": 0, "constraints": ["strict-source-precondition"] },
-        { "name": "state_digest", "type": "nullable<digest>", "required": false, "default": null, "canonical_order": 1, "constraints": ["canonical-document-state-digest"] },
-        { "name": "id_allocation_digest", "type": "nullable<digest>", "required": false, "default": null, "canonical_order": 2, "constraints": ["inkpod.inkscript.id-allocation-digest.v1"] },
-        { "name": "width", "type": "nullable<u32>", "required": false, "default": null, "canonical_order": 3, "constraints": ["nonzero"] },
-        { "name": "height", "type": "nullable<u32>", "required": false, "default": null, "canonical_order": 4, "constraints": ["nonzero"] },
-        { "name": "dpi_x", "type": "nullable<q16>", "required": false, "default": null, "canonical_order": 5, "constraints": ["positive"] },
-        { "name": "dpi_y", "type": "nullable<q16>", "required": false, "default": null, "canonical_order": 6, "constraints": ["positive"] },
-        { "name": "color_space", "type": "nullable<color_space>", "required": false, "default": null, "canonical_order": 7, "constraints": [] }
+        {
+          "name": "source_document_uuid",
+          "type": "nullable<uuid>",
+          "required": false,
+          "default": null,
+          "canonical_order": 0,
+          "constraints": [
+            "strict-source-precondition"
+          ]
+        },
+        {
+          "name": "state_digest",
+          "type": "nullable<digest>",
+          "required": false,
+          "default": null,
+          "canonical_order": 1,
+          "constraints": [
+            "canonical-document-state-digest"
+          ]
+        },
+        {
+          "name": "id_allocation_digest",
+          "type": "nullable<digest>",
+          "required": false,
+          "default": null,
+          "canonical_order": 2,
+          "constraints": [
+            "inkpod.inkscript.id-allocation-digest.v1"
+          ]
+        },
+        {
+          "name": "width",
+          "type": "nullable<u32>",
+          "required": false,
+          "default": null,
+          "canonical_order": 3,
+          "constraints": [
+            "nonzero"
+          ]
+        },
+        {
+          "name": "height",
+          "type": "nullable<u32>",
+          "required": false,
+          "default": null,
+          "canonical_order": 4,
+          "constraints": [
+            "nonzero"
+          ]
+        },
+        {
+          "name": "dpi_x",
+          "type": "nullable<q16>",
+          "required": false,
+          "default": null,
+          "canonical_order": 5,
+          "constraints": [
+            "positive"
+          ]
+        },
+        {
+          "name": "dpi_y",
+          "type": "nullable<q16>",
+          "required": false,
+          "default": null,
+          "canonical_order": 6,
+          "constraints": [
+            "positive"
+          ]
+        },
+        {
+          "name": "color_space",
+          "type": "nullable<color_space>",
+          "required": false,
+          "default": null,
+          "canonical_order": 7,
+          "constraints": []
+        }
       ]
     },
     {
-      "name": "object", "comparison": "exact_object_property_equality", "failure": "item_failure_without_mutation",
+      "name": "object",
+      "comparison": "exact_object_property_equality",
+      "failure": "item_failure_without_mutation",
       "fields": [
-        { "name": "target", "type": "entity_ref", "required": true, "default": null, "canonical_order": 0, "constraints": ["binding-or-prior-result"] },
-        { "name": "name", "type": "nullable<string>", "required": false, "default": null, "canonical_order": 1, "constraints": [] },
-        { "name": "visible", "type": "nullable<bool>", "required": false, "default": null, "canonical_order": 2, "constraints": [] },
-        { "name": "editable", "type": "nullable<bool>", "required": false, "default": null, "canonical_order": 3, "constraints": [] },
-        { "name": "layer_kind", "type": "nullable<layer_kind>", "required": false, "default": null, "canonical_order": 4, "constraints": ["layer-only"] },
-        { "name": "plane_kind", "type": "nullable<plane_kind>", "required": false, "default": null, "canonical_order": 5, "constraints": ["plane-only"] },
-        { "name": "pixel_format", "type": "nullable<pixel_format>", "required": false, "default": null, "canonical_order": 6, "constraints": ["plane-only"] }
+        {
+          "name": "target",
+          "type": "entity_ref",
+          "required": true,
+          "default": null,
+          "canonical_order": 0,
+          "constraints": [
+            "binding-or-prior-result"
+          ]
+        },
+        {
+          "name": "name",
+          "type": "nullable<string>",
+          "required": false,
+          "default": null,
+          "canonical_order": 1,
+          "constraints": []
+        },
+        {
+          "name": "visible",
+          "type": "nullable<bool>",
+          "required": false,
+          "default": null,
+          "canonical_order": 2,
+          "constraints": []
+        },
+        {
+          "name": "editable",
+          "type": "nullable<bool>",
+          "required": false,
+          "default": null,
+          "canonical_order": 3,
+          "constraints": []
+        },
+        {
+          "name": "plane_kind",
+          "type": "nullable<plane_kind>",
+          "required": false,
+          "default": null,
+          "canonical_order": 4,
+          "constraints": [
+            "plane-only"
+          ]
+        },
+        {
+          "name": "pixel_format",
+          "type": "nullable<pixel_format>",
+          "required": false,
+          "default": null,
+          "canonical_order": 5,
+          "constraints": [
+            "plane-only"
+          ]
+        }
       ]
     },
     {
-      "name": "selection", "comparison": "exact_selection_state_equality", "failure": "item_failure_without_mutation",
+      "name": "selection",
+      "comparison": "exact_selection_state_equality",
+      "failure": "item_failure_without_mutation",
       "fields": [
-        { "name": "empty", "type": "nullable<bool>", "required": false, "default": null, "canonical_order": 0, "constraints": [] },
-        { "name": "bounds", "type": "nullable<pixel_rect>", "required": false, "default": null, "canonical_order": 1, "constraints": ["half-open", "none-when-empty"] }
+        {
+          "name": "empty",
+          "type": "nullable<bool>",
+          "required": false,
+          "default": null,
+          "canonical_order": 0,
+          "constraints": []
+        },
+        {
+          "name": "bounds",
+          "type": "nullable<pixel_rect>",
+          "required": false,
+          "default": null,
+          "canonical_order": 1,
+          "constraints": [
+            "half-open",
+            "none-when-empty"
+          ]
+        }
       ]
     }
   ],
@@ -509,52 +2699,241 @@
       "logical_layout": "row-major exact native pixels; stride bytes per row; no encoded image container; straight alpha for RGBA",
       "length_formula": {
         "op": "checked_multiply",
-        "left": { "op": "field", "path": ["descriptor", "stride"], "type": "u32" },
-        "right": { "op": "field", "path": ["descriptor", "height"], "type": "u32" }
+        "left": {
+          "op": "field",
+          "path": [
+            "descriptor",
+            "stride"
+          ],
+          "type": "u32"
+        },
+        "right": {
+          "op": "field",
+          "path": [
+            "descriptor",
+            "height"
+          ],
+          "type": "u32"
+        }
       },
       "inline": true,
       "external": true
     }
   ],
   "persistent_id_namespaces": [
-    { "tag": "document_stable", "order": 0 },
-    { "tag": "procedure", "order": 1 },
-    { "tag": "state", "order": 2 },
-    { "tag": "journal_event", "order": 3 },
-    { "tag": "branch", "order": 4 }
+    {
+      "tag": "document_stable",
+      "order": 0
+    },
+    {
+      "tag": "procedure",
+      "order": 1
+    },
+    {
+      "tag": "state",
+      "order": 2
+    },
+    {
+      "tag": "journal_event",
+      "order": 3
+    },
+    {
+      "tag": "branch",
+      "order": 4
+    }
   ],
   "resource_limits": [
-    { "name": "source_text_bytes", "maximum": 134217728, "unit": "bytes", "environment_cap": null },
-    { "name": "identifier_token_bytes", "maximum": 128, "unit": "bytes", "environment_cap": null },
-    { "name": "numeric_literal_bytes", "maximum": 128, "unit": "bytes", "environment_cap": null },
-    { "name": "tokens", "maximum": 4194304, "unit": "items", "environment_cap": null },
-    { "name": "syntax_nodes", "maximum": 2097152, "unit": "items", "environment_cap": null },
-    { "name": "sections", "maximum": 9, "unit": "items", "environment_cap": null },
-    { "name": "input_declarations", "maximum": 16384, "unit": "items", "environment_cap": null },
-    { "name": "expanded_input_items", "maximum": 16384, "unit": "items", "environment_cap": null },
-    { "name": "directory_entries", "maximum": 1048576, "unit": "items", "environment_cap": null },
-    { "name": "directory_entry_name_bytes", "maximum": 268435456, "unit": "bytes", "environment_cap": null },
-    { "name": "folder_work_units", "maximum": 1048576, "unit": "work_units", "environment_cap": null },
-    { "name": "folder_depth", "maximum": 64, "unit": "depth", "environment_cap": "minimum-with-os-adapter-limit" },
-    { "name": "native_input_file_bytes", "maximum": 1073741824, "unit": "bytes", "environment_cap": "minimum-with-exact-current-native-decoder-limit" },
-    { "name": "native_input_total_bytes", "maximum": 68719476736, "unit": "bytes", "environment_cap": "minimum-with-application-setting" },
-    { "name": "parameters", "maximum": 4096, "unit": "items", "environment_cap": null },
-    { "name": "bindings", "maximum": 65536, "unit": "items", "environment_cap": null },
-    { "name": "program_statements", "maximum": 65536, "unit": "items", "environment_cap": null },
-    { "name": "nesting_depth", "maximum": 64, "unit": "depth", "environment_cap": null },
-    { "name": "container_items", "maximum": 65536, "unit": "items", "environment_cap": null },
-    { "name": "list_elements", "maximum": 4194304, "unit": "items", "environment_cap": null },
-    { "name": "reference_segments", "maximum": 64, "unit": "items", "environment_cap": null },
-    { "name": "dependency_edges", "maximum": 4194304, "unit": "items", "environment_cap": null },
-    { "name": "planned_invocations", "maximum": 1048576, "unit": "items", "environment_cap": null },
-    { "name": "string_bytes", "maximum": 32768, "unit": "bytes", "environment_cap": null },
-    { "name": "inline_asset_bytes", "maximum": 33554432, "unit": "bytes", "environment_cap": null },
-    { "name": "inline_asset_total_bytes", "maximum": 67108864, "unit": "bytes", "environment_cap": null },
-    { "name": "external_asset_bytes", "maximum": 536870912, "unit": "bytes", "environment_cap": null },
-    { "name": "asset_total_bytes", "maximum": 805306368, "unit": "bytes", "environment_cap": null },
-    { "name": "planned_output_bytes", "maximum": 68719476736, "unit": "bytes", "environment_cap": "minimum-with-application-setting" },
-    { "name": "diagnostics", "maximum": 256, "unit": "items", "environment_cap": null },
-    { "name": "wait_ms", "maximum": 3600000, "unit": "milliseconds", "environment_cap": null },
-    { "name": "aggregate_wait_ms", "maximum": 3600000, "unit": "milliseconds", "environment_cap": "checked-wait-ms-times-item-count-minus-one" }
+    {
+      "name": "source_text_bytes",
+      "maximum": 134217728,
+      "unit": "bytes",
+      "environment_cap": null
+    },
+    {
+      "name": "identifier_token_bytes",
+      "maximum": 128,
+      "unit": "bytes",
+      "environment_cap": null
+    },
+    {
+      "name": "numeric_literal_bytes",
+      "maximum": 128,
+      "unit": "bytes",
+      "environment_cap": null
+    },
+    {
+      "name": "tokens",
+      "maximum": 4194304,
+      "unit": "items",
+      "environment_cap": null
+    },
+    {
+      "name": "syntax_nodes",
+      "maximum": 2097152,
+      "unit": "items",
+      "environment_cap": null
+    },
+    {
+      "name": "sections",
+      "maximum": 9,
+      "unit": "items",
+      "environment_cap": null
+    },
+    {
+      "name": "input_declarations",
+      "maximum": 16384,
+      "unit": "items",
+      "environment_cap": null
+    },
+    {
+      "name": "expanded_input_items",
+      "maximum": 16384,
+      "unit": "items",
+      "environment_cap": null
+    },
+    {
+      "name": "directory_entries",
+      "maximum": 1048576,
+      "unit": "items",
+      "environment_cap": null
+    },
+    {
+      "name": "directory_entry_name_bytes",
+      "maximum": 268435456,
+      "unit": "bytes",
+      "environment_cap": null
+    },
+    {
+      "name": "folder_work_units",
+      "maximum": 1048576,
+      "unit": "work_units",
+      "environment_cap": null
+    },
+    {
+      "name": "folder_depth",
+      "maximum": 64,
+      "unit": "depth",
+      "environment_cap": "minimum-with-os-adapter-limit"
+    },
+    {
+      "name": "native_input_file_bytes",
+      "maximum": 1073741824,
+      "unit": "bytes",
+      "environment_cap": "minimum-with-exact-current-native-decoder-limit"
+    },
+    {
+      "name": "native_input_total_bytes",
+      "maximum": 68719476736,
+      "unit": "bytes",
+      "environment_cap": "minimum-with-application-setting"
+    },
+    {
+      "name": "parameters",
+      "maximum": 4096,
+      "unit": "items",
+      "environment_cap": null
+    },
+    {
+      "name": "bindings",
+      "maximum": 65536,
+      "unit": "items",
+      "environment_cap": null
+    },
+    {
+      "name": "program_statements",
+      "maximum": 65536,
+      "unit": "items",
+      "environment_cap": null
+    },
+    {
+      "name": "nesting_depth",
+      "maximum": 64,
+      "unit": "depth",
+      "environment_cap": null
+    },
+    {
+      "name": "container_items",
+      "maximum": 65536,
+      "unit": "items",
+      "environment_cap": null
+    },
+    {
+      "name": "list_elements",
+      "maximum": 4194304,
+      "unit": "items",
+      "environment_cap": null
+    },
+    {
+      "name": "reference_segments",
+      "maximum": 64,
+      "unit": "items",
+      "environment_cap": null
+    },
+    {
+      "name": "dependency_edges",
+      "maximum": 4194304,
+      "unit": "items",
+      "environment_cap": null
+    },
+    {
+      "name": "planned_invocations",
+      "maximum": 1048576,
+      "unit": "items",
+      "environment_cap": null
+    },
+    {
+      "name": "string_bytes",
+      "maximum": 32768,
+      "unit": "bytes",
+      "environment_cap": null
+    },
+    {
+      "name": "inline_asset_bytes",
+      "maximum": 33554432,
+      "unit": "bytes",
+      "environment_cap": null
+    },
+    {
+      "name": "inline_asset_total_bytes",
+      "maximum": 67108864,
+      "unit": "bytes",
+      "environment_cap": null
+    },
+    {
+      "name": "external_asset_bytes",
+      "maximum": 536870912,
+      "unit": "bytes",
+      "environment_cap": null
+    },
+    {
+      "name": "asset_total_bytes",
+      "maximum": 805306368,
+      "unit": "bytes",
+      "environment_cap": null
+    },
+    {
+      "name": "planned_output_bytes",
+      "maximum": 68719476736,
+      "unit": "bytes",
+      "environment_cap": "minimum-with-application-setting"
+    },
+    {
+      "name": "diagnostics",
+      "maximum": 256,
+      "unit": "items",
+      "environment_cap": null
+    },
+    {
+      "name": "wait_ms",
+      "maximum": 3600000,
+      "unit": "milliseconds",
+      "environment_cap": null
+    },
+    {
+      "name": "aggregate_wait_ms",
+      "maximum": 3600000,
+      "unit": "milliseconds",
+      "environment_cap": "checked-wait-ms-times-item-count-minus-one"
+    }
   ]
 }

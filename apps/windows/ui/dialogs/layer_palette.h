@@ -21,7 +21,7 @@ struct LayerPaletteItem {
     std::uint32_t plane_count{};
     std::uint32_t flags{};
     bool edit_target{};
-    UiStringId kind_label_id{UiStringId::LayerUnknown};
+    UiStringId kind_label_id{UiStringId::NameUnavailable};
     UiStringId badge_label_id{UiStringId::PlaneBadgeUnknown};
     UiStringId format_label_id{UiStringId::NameUnavailable};
     UiStringId visibility_label_id{UiStringId::Hidden};

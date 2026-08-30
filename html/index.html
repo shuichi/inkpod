@@ -582,7 +582,7 @@ footer{border-top:1px solid var(--border);padding:44px 0 56px;margin-top:40px}
         <div class="card reveal" data-d="90">
           <div class="ico c-cyan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg></div>
           <h3 data-i18n="bigf.2.t">レイヤー &amp; プレーン</h3>
-          <p data-i18n="bigf.2.d">2値・階調・RGBA の彩色データを、主線・彩色・色トレース・塗りのプレーンに分離して保持。レイヤーは合成の単位、プレーンは編集の単位です。</p>
+          <p data-i18n="bigf.2.d">各標準レイヤーに主線と彩色を1枚ずつ保持し、背景・特効・レタッチ用ラスターを必要なだけ追加。レイヤーは合成の単位、プレーンは編集の単位です。</p>
         </div>
         <div class="card reveal" data-d="180">
           <div class="ico c-pink"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg></div>
@@ -614,8 +614,8 @@ footer{border-top:1px solid var(--border);padding:44px 0 56px;margin-top:40px}
         </div>
         <div class="card reveal">
           <div class="ico c-cyan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="9" cy="6" r="2" fill="var(--bg-2)"/><circle cx="15" cy="12" r="2" fill="var(--bg-2)"/><circle cx="7" cy="18" r="2" fill="var(--bg-2)"/></svg></div>
-          <h3 data-i18n="grid.5.t">フィルター &amp; 調整レイヤー</h3>
-          <p data-i18n="grid.5.d">色調カーブ、レベル補正、色相・彩度、カラーバランス。調整レイヤーで非破壊に適用。</p>
+          <h3 data-i18n="grid.5.t">フィルター</h3>
+          <p data-i18n="grid.5.d">色調カーブ、レベル補正、色相・彩度、カラーバランス。プレビュー後に一回のUndo単位として適用。</p>
         </div>
         <div class="card reveal" data-d="60">
           <div class="ico c-red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></div>
@@ -638,9 +638,9 @@ footer{border-top:1px solid var(--border);padding:44px 0 56px;margin-top:40px}
           <p data-i18n="grid.9.d">中心・寸法・角度を持つ撮影フレームを非破壊で保持。Canvas 上のハンドルと数値入力で編集できます。</p>
         </div>
         <div class="card reveal" data-d="60">
-          <div class="ico c-blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="2"/><path d="M7 12h14M6.5 10.5l12-6M6.5 13.5l12 6"/></svg></div>
-          <h3 data-i18n="grid.10.t">消失点ガイド</h3>
-          <p data-i18n="grid.10.d">Canvas外も含む複数の消失点を設定し、間隔・位相・色・不透明度を調整。放射ガイドへ作図ツールを吸着できます。</p>
+          <div class="ico c-blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="14" height="14" rx="2" stroke-dasharray="3 2"/><path d="M14 9h7v11l-3.5-2-3.5 2z"/></svg></div>
+          <h3 data-i18n="grid.10.t">保存選択マスク</h3>
+          <p data-i18n="grid.10.d">現在の選択を名前付きで文書に保存。複数マスクの置換・加算・減算、改名、削除、Undo／Redoに対応。</p>
         </div>
       </div>
     </div>
@@ -653,13 +653,13 @@ footer{border-top:1px solid var(--border);padding:44px 0 56px;margin-top:40px}
         <div class="concept-copy reveal">
           <span class="eyebrow" data-i18n="concept.eyebrow">コンセプト</span>
           <h2 data-i18n="concept.title">レイヤーの中に、プレーンがある。</h2>
-          <p data-i18n="concept.lead">inkpod の文書は「セル → レイヤー → プレーン」の階層で構成されます。レイヤーはセル画を重ねる合成の単位。プレーンは主線・彩色・色トレース・塗りを分離して保持する、最小の編集単位です。</p>
+          <p data-i18n="concept.lead">inkpod の文書は「セル → 標準レイヤー → プレーン」の階層で構成されます。各レイヤーは主線と彩色を1枚ずつ必須とし、ラスターを必要なだけ追加できます。現在の選択と名前付き保存マスクはレイヤー外で文書が所有します。</p>
           <div class="callout">
             <h3>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
               <span data-i18n="concept.callout.t">主線保護は、構造で保証。</span>
             </h3>
-            <p data-i18n="concept.callout.d">2値彩色レイヤーでは、主線プレーンをフィル境界として表示しながら、塗りつぶしとブラシは彩色プレーンだけに書き込みます。線画を壊す事故は、運用ではなく構造で防ぎます。</p>
+            <p data-i18n="concept.callout.d">すべての標準レイヤーで、主線プレーンをフィル境界として表示しながら、塗りつぶしと彩色ブラシは彩色プレーンへ書き込みます。線画を壊す事故は、運用ではなく構造で防ぎます。</p>
           </div>
         </div>
 
@@ -671,7 +671,7 @@ footer{border-top:1px solid var(--border);padding:44px 0 56px;margin-top:40px}
           <div class="doc-layer active">
             <div class="doc-layer-head">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-              <span data-i18n="concept.layer1">2値彩色レイヤー</span>
+              <span data-i18n="concept.layer1">標準レイヤー</span>
             </div>
             <div class="doc-planes">
               <div class="doc-plane">
@@ -695,13 +695,13 @@ footer{border-top:1px solid var(--border);padding:44px 0 56px;margin-top:40px}
           <div class="doc-layer dim">
             <div class="doc-layer-head">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-              <span data-i18n="concept.layer2">階調彩色レイヤー</span>
+              <span data-i18n="concept.layer2">別の標準レイヤー</span>
             </div>
           </div>
           <div class="doc-layer dim">
             <div class="doc-layer-head">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-              <span data-i18n="concept.layer3">ラスター汎用レイヤー</span>
+              <span data-i18n="concept.layer3">選択マスク（文書所有・レイヤー外）</span>
             </div>
           </div>
         </div>
@@ -814,7 +814,7 @@ footer{border-top:1px solid var(--border);padding:44px 0 56px;margin-top:40px}
       <div class="formats reveal">
         <div class="fl" data-i18n="formats.label">対応フォーマット</div>
         <div class="fmt-row">
-          <span class="fmt native">.inkpod v27</span>
+          <span class="fmt native">.inkpod v31</span>
           <span class="fmt">PNG</span>
           <span class="fmt">TIFF</span>
           <span class="fmt">TGA</span>
@@ -919,7 +919,7 @@ const I18N = {
     "bigf.1.t": "主線保護",
     "bigf.1.d": "塗りつぶしもブラシも、主線プレーンには決して触れません。線画をフィル境界として表示したまま、色は彩色プレーンだけに置かれます。",
     "bigf.2.t": "レイヤー &amp; プレーン",
-    "bigf.2.d": "2値・階調・RGBA の彩色データを、主線・彩色・色トレース・塗りのプレーンに分離して保持。レイヤーは合成の単位、プレーンは編集の単位です。",
+    "bigf.2.d": "各標準レイヤーに主線と彩色を1枚ずつ保持し、背景・特効・レタッチ用ラスターを必要なだけ追加。レイヤーは合成の単位、プレーンは編集の単位です。",
     "bigf.3.t": "賢いフィル",
     "bigf.3.d": "隙間閉じ、含み塗り、閉領域フィル、塗りあふれ検出。小さな線切れや色トレースがあっても、高速かつ安全に塗れます。",
     "grid.1.t": "描画ツール",
@@ -930,8 +930,8 @@ const I18N = {
     "grid.3.d": "前後のセルを基準フレームで整列し、半透明で重ねて参照。距離に応じた不透明度ステップにも対応。",
     "grid.4.t": "カット・連番 &amp; モーションチェック",
     "grid.4.d": "カット単位でセル系列を追加・並べ替え・採番し、30 / 24 / 12 fps などでループ再生。各セルは独立して安全に保存します。",
-    "grid.5.t": "フィルター &amp; 調整レイヤー",
-    "grid.5.d": "色調カーブ、レベル補正、色相・彩度、カラーバランス。調整レイヤーで非破壊に適用。",
+    "grid.5.t": "フィルター",
+    "grid.5.d": "色調カーブ、レベル補正、色相・彩度、カラーバランス。プレビュー後に一回のUndo単位として適用。",
     "grid.6.t": "バッチ処理",
     "grid.6.d": "色置換、連続フィル、フィルターなどを多量の連番セルへ一括適用。dry-run と原子的な出力で安全に。",
     "grid.7.t": "履歴 &amp; 復元",
@@ -940,22 +940,22 @@ const I18N = {
     "grid.8.d": "色と名前を表で管理し、ページ・検索・ロックに対応。セルから一意色を抽出して自動生成も。",
     "grid.9.t": "撮影フレーム",
     "grid.9.d": "中心・寸法・角度を持つ撮影フレームを非破壊で保持。Canvas 上のハンドルと数値入力で編集できます。",
-    "grid.10.t": "消失点ガイド",
-    "grid.10.d": "Canvas外も含む複数の消失点を設定し、間隔・位相・色・不透明度を調整。放射ガイドへ作図ツールを吸着できます。",
+    "grid.10.t": "保存選択マスク",
+    "grid.10.d": "現在の選択を名前付きで文書に保存。複数マスクの置換・加算・減算、改名、削除、Undo／Redoに対応。",
     "concept.eyebrow": "コンセプト",
     "concept.title": "レイヤーの中に、プレーンがある。",
-    "concept.lead": "inkpod の文書は「セル → レイヤー → プレーン」の階層で構成されます。レイヤーはセル画を重ねる合成の単位。プレーンは主線・彩色・色トレース・塗りを分離して保持する、最小の編集単位です。",
+    "concept.lead": "inkpod の文書は「セル → 標準レイヤー → プレーン」の階層で構成されます。各レイヤーは主線と彩色を1枚ずつ必須とし、ラスターを必要なだけ追加できます。現在の選択と名前付き保存マスクはレイヤー外で文書が所有します。",
     "concept.cell": "セル（1 枚の文書）",
-    "concept.layer1": "2値彩色レイヤー",
-    "concept.layer2": "階調彩色レイヤー",
-    "concept.layer3": "ラスター汎用レイヤー",
+    "concept.layer1": "標準レイヤー",
+    "concept.layer2": "別の標準レイヤー",
+    "concept.layer3": "選択マスク（文書所有・レイヤー外）",
     "concept.plane1": "主線プレーン",
     "concept.plane2": "彩色プレーン",
     "concept.plane3": "ラスタープレーン",
     "concept.tag.protected": "保護",
     "concept.tag.editing": "編集中",
     "concept.callout.t": "主線保護は、構造で保証。",
-    "concept.callout.d": "2値彩色レイヤーでは、主線プレーンをフィル境界として表示しながら、塗りつぶしとブラシは彩色プレーンだけに書き込みます。線画を壊す事故は、運用ではなく構造で防ぎます。",
+    "concept.callout.d": "すべての標準レイヤーで、主線プレーンをフィル境界として表示しながら、塗りつぶしと彩色ブラシは彩色プレーンへ書き込みます。線画を壊す事故は、運用ではなく構造で防ぎます。",
     "workflow.eyebrow": "ワークフロー",
     "workflow.title": "アニメーターの手順に、そのまま。",
     "workflow.sub": "ライトテーブルからモーションチェックまで、一続きに。",
@@ -1022,7 +1022,7 @@ const I18N = {
     "bigf.1.t": "Line protection",
     "bigf.1.d": "Fills and brushes never touch the line-art plane. The drawing stays visible as a fill boundary while color lands only on the paint plane.",
     "bigf.2.t": "Layers &amp; planes",
-    "bigf.2.d": "Binary, grayscale and RGBA coloring data, split into line, paint, color-trace and fill planes. Layers composite; planes are what you edit.",
+    "bigf.2.d": "Every standard layer has exactly one line-art plane and one paint plane, with optional raster planes for backgrounds, effects and retouching. Layers composite; planes are what you edit.",
     "bigf.3.t": "Smart fills",
     "bigf.3.d": "Gap closing, inclusion fill, closed-region fill and overflow detection. Paint fast and safely — even over broken lines and color traces.",
     "grid.1.t": "Drawing tools",
@@ -1033,8 +1033,8 @@ const I18N = {
     "grid.3.d": "Align neighboring cells on the registration frame and overlay them translucently — with distance-based opacity steps.",
     "grid.4.t": "Cuts, sequences &amp; motion check",
     "grid.4.d": "Add, reorder and renumber cells inside a cut, then loop-play at 30 / 24 / 12 fps. Every cell remains independently and safely saved.",
-    "grid.5.t": "Filters &amp; adjustment layers",
-    "grid.5.d": "Tone curves, levels, hue/saturation and color balance — applied non-destructively as adjustment layers.",
+    "grid.5.t": "Filters",
+    "grid.5.d": "Tone curves, levels, hue/saturation and color balance, previewed first and committed as one undoable edit.",
     "grid.6.t": "Batch processing",
     "grid.6.d": "Apply color replacement, continuous fill, filters and more across whole sequences — with dry-runs and atomic output.",
     "grid.7.t": "History &amp; recovery",
@@ -1043,22 +1043,22 @@ const I18N = {
     "grid.8.d": "Manage colors and names in searchable, lockable pages — or auto-generate a chart from a painted cell.",
     "grid.9.t": "Shooting frame",
     "grid.9.d": "Keep a centered, sized and angled shooting frame non-destructively, and edit it with Canvas handles or numeric fields.",
-    "grid.10.t": "Vanishing-point guides",
-    "grid.10.d": "Place multiple vanishing points, even outside the canvas; tune spacing, phase, color and opacity, then snap drawing tools to their radial guides.",
+    "grid.10.t": "Saved selection masks",
+    "grid.10.d": "Store the current selection by name in the document, then replace, add, subtract, rename or delete masks with full undo/redo.",
     "concept.eyebrow": "Concept",
     "concept.title": "Planes live inside layers.",
-    "concept.lead": "An inkpod document is structured as cell → layer → plane. Layers are the units you composite; planes are the smallest units you edit — line art, paint, color trace and fill are kept apart.",
+    "concept.lead": "An inkpod document is structured as cell → standard layer → plane. Every layer requires exactly one line-art plane and one paint plane, with as many optional raster planes as needed. Current and named saved selections belong to the document outside the layer tree.",
     "concept.cell": "Cell (one document)",
-    "concept.layer1": "Binary coloring layer",
-    "concept.layer2": "Grayscale coloring layer",
-    "concept.layer3": "General raster layer",
+    "concept.layer1": "Standard layer",
+    "concept.layer2": "Another standard layer",
+    "concept.layer3": "Selection masks (document-owned, outside layers)",
     "concept.plane1": "Line-art plane",
     "concept.plane2": "Paint plane",
     "concept.plane3": "Raster plane",
     "concept.tag.protected": "PROTECTED",
     "concept.tag.editing": "EDITING",
     "concept.callout.t": "Line protection, guaranteed by structure.",
-    "concept.callout.d": "In a binary coloring layer, the line-art plane is displayed as a fill boundary while fills and brushes write only to the paint plane. Breaking the drawing isn't a mistake you can make — the structure forbids it.",
+    "concept.callout.d": "In every standard layer, the line-art plane remains visible as a fill boundary while fills and coloring brushes write to the paint plane. Breaking the drawing isn't a mistake you can make — the structure forbids it.",
     "workflow.eyebrow": "Workflow",
     "workflow.title": "Made for how animators actually work.",
     "workflow.sub": "From light table to motion check, in one flow.",

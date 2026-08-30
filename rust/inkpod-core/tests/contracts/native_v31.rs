@@ -1,4 +1,4 @@
-//! Current native container and replay epoch 25 public persistence contracts.
+//! Current native container v31 and replay epoch 27 public persistence contracts.
 
 use super::*;
 use inkpod_format::{
@@ -46,6 +46,67 @@ fn frame_field(payload: &[u8], wanted: u32) -> std::ops::Range<usize> {
         }
         cursor = end;
     }
+}
+
+#[test]
+fn io_001_imported_genesis_source_rejects_wrong_asset_plane_and_underlay() {
+    let raster =
+        CommonRaster::new(2, 2, PixelFormat::StraightRgba8, None, None, vec![255; 16]).unwrap();
+    let mut core = Core::new();
+    let info = core
+        .import_decoded_common_raster(CommonRasterFormat::Tga, &raster, 0x3001)
+        .unwrap();
+    let (native, _) = core
+        .capture_document_save()
+        .unwrap()
+        .prepare_native_save(false, || false)
+        .unwrap();
+    for mutation in 0..4 {
+        let mut invalid = native.clone();
+        let payload = &mut invalid
+            .sections
+            .iter_mut()
+            .find(|section| section.fourcc == *b"GENS")
+            .unwrap()
+            .records[0]
+            .payload;
+        let source = frame_field(payload, 6);
+        assert_eq!(source.len(), 40);
+        match mutation {
+            0 => payload[source.start..source.start + 8].copy_from_slice(&0_u64.to_le_bytes()),
+            1 => payload[source.start..source.start + 8]
+                .copy_from_slice(&info.color_plane_id.to_le_bytes()),
+            2 => payload[source.start + 8..source.end].fill(0),
+            3 => {
+                let archive = frame_field(payload, 4);
+                payload[archive.start] = 1; // SolidWhite cannot carry an imported plane source.
+            }
+            _ => unreachable!(),
+        }
+        assert!(
+            Core::from_native_file(invalid, false).is_err(),
+            "mutation {mutation}"
+        );
+    }
+    let mut without_source = native.clone();
+    let payload = &mut without_source
+        .sections
+        .iter_mut()
+        .find(|section| section.fourcc == *b"GENS")
+        .unwrap()
+        .records[0]
+        .payload;
+    let source = frame_field(payload, 6);
+    payload[source.start - 12] = 0;
+    payload[source.start - 8..source.start].fill(0);
+    payload.drain(source);
+    assert!(Core::from_native_file(without_source, false).is_err());
+    assert_eq!(core.document_info().unwrap(), info);
+    let encoded = inkpod_format::encode_procedure_file(&native).unwrap();
+    assert_eq!(u32::from_le_bytes(encoded[8..12].try_into().unwrap()), 31);
+    let mut previous = encoded;
+    previous[8..12].copy_from_slice(&30_u32.to_le_bytes());
+    assert!(inkpod_format::decode_procedure_file(&previous).is_err());
 }
 
 #[test]
@@ -339,14 +400,8 @@ fn io_001_save_reopen_restores_full_journal_editor_and_all_next_id_authorities()
     expected.redo().unwrap();
     expected.undo().unwrap();
     reopened.undo().unwrap();
-    let expected_layer = expected
-        .create_layer(LayerKind::Raster, "post-reopen authority")
-        .unwrap()
-        .1;
-    let reopened_layer = reopened
-        .create_layer(LayerKind::Raster, "post-reopen authority")
-        .unwrap()
-        .1;
+    let expected_layer = expected.create_layer("post-reopen authority").unwrap().1;
+    let reopened_layer = reopened.create_layer("post-reopen authority").unwrap().1;
     assert_eq!(reopened_layer, expected_layer);
     assert_eq!(reopened.journal_entries(), expected.journal_entries());
     assert_eq!(
@@ -357,8 +412,8 @@ fn io_001_save_reopen_restores_full_journal_editor_and_all_next_id_authorities()
 }
 
 #[test]
-fn io_001_v28_rejects_v27_and_corrupt_open_is_atomic_for_the_live_core() {
-    let path = native_path("v25-rejected");
+fn io_001_v31_rejects_v30_and_corrupt_open_is_atomic_for_the_live_core() {
+    let path = native_path("v30-rejected");
     let mut legacy = vec![0_u8; 128];
     legacy[0..8].copy_from_slice(b"INKPOD\0\0");
     legacy[8..12].copy_from_slice(&(inkpod_format::FORMAT_VERSION - 1).to_le_bytes());

@@ -370,10 +370,7 @@ impl Core {
             critical_section(*b"META", vec![meta_record]),
             critical_section(
                 *b"GENS",
-                vec![record(
-                    1,
-                    encode_genesis(&genesis.document, genesis_digest)?,
-                )],
+                vec![record(1, encode_genesis(genesis, genesis_digest)?)],
             ),
             critical_section(*b"ASST", asset_records),
             critical_section(*b"PROC", proc_records),
@@ -408,8 +405,8 @@ impl Core {
         let meta_record = singleton_payload(&file.sections, *b"META")?;
         let meta = decode_meta(meta_record)?;
         let genesis_record = singleton_payload(&file.sections, *b"GENS")?;
-        let (mut genesis_document, genesis_digest) = decode_genesis(genesis_record)?;
-        if genesis_document.uuid.to_le_bytes() != meta.document_uuid {
+        let (mut genesis, genesis_digest) = decode_genesis(genesis_record)?;
+        if genesis.document.uuid.to_le_bytes() != meta.document_uuid {
             return Err(format_error("META and GENS document UUIDs differ"));
         }
 
@@ -418,13 +415,14 @@ impl Core {
         if assets.usage().asset_count != meta.asset_count {
             return Err(format_error("META asset count does not match ASST"));
         }
-        if let BaseSurface::Asset(id) = genesis_document.base_surface
+        if let BaseSurface::Asset(id) = genesis.document.base_surface
             && assets.get(id).is_none()
         {
             return Err(format_error("Genesis base asset is missing"));
         }
-        genesis_document.light_table.intern_into(&mut assets)?;
-        let actual_genesis_digest = primitive::canonical_document_state(&genesis_document)?.1;
+        genesis.materialize_raster_source(&assets)?;
+        genesis.document.light_table.intern_into(&mut assets)?;
+        let actual_genesis_digest = primitive::canonical_document_state(&genesis.document)?.1;
         if actual_genesis_digest != genesis_digest {
             return Err(format_error("GENS document-state digest does not match"));
         }
@@ -458,8 +456,8 @@ impl Core {
         let mut staged = Core::new();
         staged.raster_file_format = meta.raster_file_format;
         staged.assets = assets;
-        staged.document = Some(genesis_document.clone());
-        staged.genesis = Some(genesis::Genesis::new(genesis_document));
+        staged.document = Some(genesis.document.clone());
+        staged.genesis = Some(genesis);
         staged.document_revision = DocumentRevision::from_raw(1);
         staged.journal = journal;
         staged.current_state = meta.current_state;
@@ -698,16 +696,22 @@ fn raster_format_from_code(code: u32) -> Result<CommonRasterFormat, CoreError> {
 }
 
 fn encode_genesis(
-    document: &CellDocument,
+    genesis: &genesis::Genesis,
     digest: DocumentStateDigest,
 ) -> Result<Vec<u8>, CoreError> {
-    let archive = encode_document_archive(document)?;
+    let archive = encode_document_archive(&genesis.archive_document()?)?;
+    let source = genesis.raster_source.map(|source| {
+        let mut bytes = source.plane_id.get().to_le_bytes().to_vec();
+        bytes.extend_from_slice(source.asset_id.as_bytes());
+        bytes
+    });
     Ok(encode_frame(&[
-        Some(document.uuid.to_le_bytes().to_vec()),
+        Some(genesis.document.uuid.to_le_bytes().to_vec()),
         Some(StateId::GENESIS.get().to_le_bytes().to_vec()),
         Some(BranchId::ROOT.get().to_le_bytes().to_vec()),
         Some(archive),
         Some(digest.as_bytes().to_vec()),
+        source,
     ]))
 }
 
@@ -719,6 +723,7 @@ fn encode_document_archive(document: &CellDocument) -> Result<Vec<u8>, CoreError
             archive.push(2);
             archive.extend_from_slice(id.as_bytes());
         }
+        BaseSurface::Transparent => archive.push(3),
     }
     let cell_bytes = inkpod_format::encode_document_archive(&document.to_archive())?;
     archive.extend_from_slice(&(cell_bytes.len() as u64).to_le_bytes());
@@ -726,8 +731,8 @@ fn encode_document_archive(document: &CellDocument) -> Result<Vec<u8>, CoreError
     Ok(archive)
 }
 
-fn decode_genesis(bytes: &[u8]) -> Result<(CellDocument, DocumentStateDigest), CoreError> {
-    let fields = decode_frame(bytes, 5)?;
+fn decode_genesis(bytes: &[u8]) -> Result<(genesis::Genesis, DocumentStateDigest), CoreError> {
+    let fields = decode_frame(bytes, 6)?;
     let uuid = fixed::<16>(required(fields[0])?, "GENS UUID")?;
     if read_u64(required(fields[1])?)? != StateId::GENESIS.get()
         || read_u64(required(fields[2])?)? != BranchId::ROOT.get()
@@ -740,7 +745,38 @@ fn decode_genesis(bytes: &[u8]) -> Result<(CellDocument, DocumentStateDigest), C
     }
     let digest =
         DocumentStateDigest::from_bytes(fixed::<32>(required(fields[4])?, "GENS document digest")?);
-    Ok((document, digest))
+    let raster_source = fields[5]
+        .map(|bytes| {
+            let bytes = fixed::<40>(bytes, "GENS raster source")?;
+            let plane_id = PlaneId::from_raw(read_u64(&bytes[..8])?);
+            let plane = document
+                .plane_by_id(plane_id)
+                .ok_or(format_error("GENS source plane is missing"))?;
+            if document.base_surface != BaseSurface::Transparent
+                || plane.kind != PlaneType::MainLine
+                || plane.raster.allocated_tile_count() != 0
+                || !matches!(
+                    plane.raster.format(),
+                    PixelFormat::StraightRgba8 | PixelFormat::StraightRgba16
+                )
+            {
+                return Err(format_error(
+                    "GENS raster source requires an empty RGBA main-line plane and transparent underlay",
+                ));
+            }
+            Ok(genesis::GenesisRasterSource {
+                plane_id,
+                asset_id: AssetId::from_bytes(fixed::<32>(&bytes[8..], "GENS source asset")?),
+            })
+        })
+        .transpose()?;
+    Ok((
+        genesis::Genesis {
+            document,
+            raster_source,
+        },
+        digest,
+    ))
 }
 
 fn decode_document_archive(archive: &[u8]) -> Result<CellDocument, CoreError> {
@@ -748,6 +784,7 @@ fn decode_document_archive(archive: &[u8]) -> Result<CellDocument, CoreError> {
     let base_surface = match reader.u8()? {
         1 => BaseSurface::SolidWhite,
         2 => BaseSurface::Asset(AssetId::from_bytes(reader.fixed::<32>()?)),
+        3 => BaseSurface::Transparent,
         _ => return Err(format_error("GENS base-surface code is invalid")),
     };
     let length = reader.length()?;

@@ -1,13 +1,12 @@
-//! Image effects, adjustment previews, and editing gestures.
+//! Image effects, filter previews, and editing gestures.
 
 use super::{
-    Adjustment, AirbrushGesture, AirbrushStroke, BoundaryAirbrush, CellDocument, CoordinateSpace,
-    Core, CoreError, DispatchOutcome, DustRemoval, EffectRegionKind, EffectSample, Filter,
-    Gradient, LayerKind, LayerNode, MAX_LAYERS, PixelFormat, PixelValue, PlaneNode, PlaneType,
-    PointF32, RangeInterpretation, RectI32, SelectionConstructionOptions, SelectionOperation,
-    SelectionShape, Stamp, StampGesture, StrokeSample,
+    AirbrushGesture, AirbrushStroke, BoundaryAirbrush, CellDocument, CoordinateSpace, Core,
+    CoreError, DispatchOutcome, DustRemoval, EffectRegionKind, EffectSample, Filter, Gradient,
+    PixelFormat, PixelValue, PlaneNode, PlaneType, PointF32, RangeInterpretation, RectI32,
+    SelectionConstructionOptions, SelectionOperation, SelectionShape, Stamp, StampGesture,
+    StrokeSample,
 };
-use crate::document::{unique_layer_name, validate_node_name};
 use crate::identity::*;
 use crate::selection::{combine_selection_masks, selection_mask_for_shape};
 use crate::stroke::{DocumentStrokeSample, document_samples_for_view};

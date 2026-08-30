@@ -258,32 +258,6 @@ pub(crate) unsafe fn parse_filter_input(input: &InkpodFilterInput) -> Result<Fil
     }
 }
 
-pub(crate) fn filter_to_adjustment(filter: Filter) -> Result<Adjustment, u32> {
-    match filter {
-        Filter::BrightnessContrast {
-            brightness_milli,
-            contrast_milli,
-        } => Ok(Adjustment::BrightnessContrast {
-            brightness_milli,
-            contrast_milli,
-        }),
-        Filter::ToneCurve {
-            channel,
-            interpolation,
-            points,
-        } => Ok(Adjustment::ToneCurve {
-            channel,
-            interpolation,
-            points,
-        }),
-        Filter::Levels(levels) => Ok(Adjustment::Levels(levels)),
-        _ => Err(fail(
-            INKPOD_STATUS_INVALID_ARGUMENT,
-            "adjustment layers accept brightness/contrast, tone curve, or levels",
-        )),
-    }
-}
-
 pub(crate) fn write_filter_preview_info(
     output: &mut InkpodFilterPreviewInfo,
     info: inkpod_core::FilterPreviewInfo,

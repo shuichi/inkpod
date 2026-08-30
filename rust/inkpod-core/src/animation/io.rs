@@ -2,11 +2,20 @@ use super::raster::*;
 use super::*;
 use crate::primitive::CanonicalInvocation;
 
+#[derive(Clone, Copy)]
+enum InitialRasterPlacement {
+    Base,
+    MainLinePlane,
+}
+
 impl Core {
-    /// Decodes a common raster into an immutable Genesis asset and opens a clean cell.
+    /// Decodes a common raster into the initial editable main-line plane of a clean cell.
     ///
     /// UUID must be nonzero. Success resets history, savepoint, view, sequence, and
     /// transient sessions; decode/validation failure leaves the current document intact.
+    /// Exact RGBA8/16 pixels and alpha are preserved without automatic line separation.
+    /// The main-line plane is selected, the underlay is transparent, and the immutable
+    /// source asset belongs to Genesis rather than participating in composition.
     pub fn import_common_raster(
         &mut self,
         format: CommonRasterFormat,
@@ -67,8 +76,13 @@ impl Core {
             pixels: raster.pixels,
             expected_id: None,
         };
-        let info =
-            self.new_cell_from_raster_asset(input, dpi_x_milli, dpi_y_milli, document_uuid)?;
+        let info = self.new_cell_from_raster_asset_with_placement(
+            input,
+            dpi_x_milli,
+            dpi_y_milli,
+            document_uuid,
+            InitialRasterPlacement::MainLinePlane,
+        )?;
         self.raster_file_format = format;
         Ok(info)
     }
@@ -86,6 +100,23 @@ impl Core {
         dpi_x_milli: u32,
         dpi_y_milli: u32,
         document_uuid: u128,
+    ) -> Result<DocumentInfo, CoreError> {
+        self.new_cell_from_raster_asset_with_placement(
+            raster,
+            dpi_x_milli,
+            dpi_y_milli,
+            document_uuid,
+            InitialRasterPlacement::Base,
+        )
+    }
+
+    fn new_cell_from_raster_asset_with_placement(
+        &mut self,
+        raster: RasterAssetInput,
+        dpi_x_milli: u32,
+        dpi_y_milli: u32,
+        document_uuid: u128,
+        placement: InitialRasterPlacement,
     ) -> Result<DocumentInfo, CoreError> {
         self.ensure_no_active_stroke()?;
         if document_uuid == 0 {
@@ -118,13 +149,42 @@ impl Core {
                 dpi_y_milli,
             },
         )?;
-        document.base_surface = BaseSurface::Asset(record.id());
-        assets = self.prepare_asset_store_for_session_reset(assets, &document)?;
+        let (raster_source, active_plane) = match placement {
+            InitialRasterPlacement::Base => {
+                document.base_surface = BaseSurface::Asset(record.id());
+                assets = self.prepare_asset_store_for_session_reset(assets, &document)?;
+                (None, ids.main_plane)
+            }
+            InitialRasterPlacement::MainLinePlane => {
+                let source = record
+                    .raster()
+                    .ok_or(CoreError::InvalidState("import source is not a raster"))?;
+                initialize_imported_main_line(&mut document, source.as_ref().clone())?;
+                assets.garbage_collect([record.id()])?;
+                (
+                    Some(genesis::GenesisRasterSource {
+                        plane_id: ids.main_plane,
+                        asset_id: record.id(),
+                    }),
+                    ids.main_plane,
+                )
+            }
+        };
+        let genesis = genesis::Genesis {
+            document: document.clone(),
+            raster_source,
+        };
+        let editor = self.initial_editor_session(
+            Some(EditorTarget {
+                layer_id: ids.layer.get(),
+                plane_id: active_plane.get(),
+            }),
+            true,
+        );
         let revision = self.next_document_revision()?;
         let persistence_state = self.persistence_state.next()?;
         self.cancel_stroke();
         self.shooting_frame_preview = None;
-        self.vanishing_point_preview = None;
         self.filter_preview = None;
         self.last_filter = None;
         self.next_id = next_id;
@@ -133,6 +193,7 @@ impl Core {
         self.document_revision = revision;
         self.render_cache.clear();
         self.reset_history(true);
+        self.genesis = Some(genesis);
         self.reset_view();
         self.current_path = None;
         self.raster_file_format = self.new_cell_raster_format;
@@ -146,7 +207,7 @@ impl Core {
         self.sequence = None;
         self.sequence_render_catalog_changed();
         self.subpalette_index = None;
-        self.reset_editor_state(true);
+        self.publish_editor_session(Some(editor));
         self.document_info()
     }
 
@@ -183,7 +244,7 @@ impl Core {
             )
         };
         let base_is_16_bit = match document.base_surface {
-            BaseSurface::SolidWhite => false,
+            BaseSurface::SolidWhite | BaseSurface::Transparent => false,
             BaseSurface::Asset(id) => requires_16_bit(
                 self.assets
                     .get(id)
@@ -197,11 +258,10 @@ impl Core {
         };
         let visible_is_16_bit = document.layers.iter().any(|layer| {
             layer.visible
-                && layer.planes.iter().any(|plane| {
-                    plane.visible
-                        && plane.kind != PlaneType::Selection
-                        && requires_16_bit(plane.raster.format())
-                })
+                && layer
+                    .planes
+                    .iter()
+                    .any(|plane| plane.visible && requires_16_bit(plane.raster.format()))
         });
         if !base_is_16_bit
             && !visible_is_16_bit

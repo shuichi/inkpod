@@ -49,6 +49,218 @@ fn decoded_png(core: &Core) -> CommonRaster {
 }
 
 #[test]
+fn common_raster_open_places_pixels_in_main_line_and_fills_color_plane() {
+    let mut pixels = vec![255_u8; 12 * 12 * 4];
+    for y in 2..=9 {
+        for x in 2..=9 {
+            if x == 2 || x == 9 || y == 2 || y == 9 {
+                pixels[(y * 12 + x) * 4..(y * 12 + x) * 4 + 3].copy_from_slice(if x == 9 {
+                    &[255, 0, 0]
+                } else {
+                    &[0, 0, 0]
+                });
+            }
+        }
+    }
+    let raster = rgba8_common(12, 12, pixels);
+    for format in [
+        CommonRasterFormat::Png,
+        CommonRasterFormat::Tiff,
+        CommonRasterFormat::Tga,
+        CommonRasterFormat::Bmp,
+    ] {
+        let encoded = encode_common_raster(format, &raster, false).unwrap();
+        let mut core = Core::new();
+        let initial = core.import_common_raster(format, &encoded, 0x4305).unwrap();
+        assert_eq!(
+            core.plane_pixel(ActivePlane::MainLine, 2, 5).unwrap(),
+            PixelValue::Rgba([0, 0, 0, 255]),
+            "{format:?} line must be editable, not only a visible underlay"
+        );
+        assert_eq!(initial.active_plane, ActivePlane::MainLine);
+        assert_eq!(
+            core.plane_pixel(ActivePlane::Color, 2, 5).unwrap(),
+            PixelValue::Rgba([0; 4])
+        );
+        let initial_main = initial.main_plane_checksum;
+        assert!(!initial.dirty);
+        assert!(core.history_entries().is_empty());
+        assert_eq!(decoded_png(&core).pixels, raster.pixels);
+        let source_id = core.asset_infos()[0].id;
+        let initial_digest = core.document_state_digest().unwrap();
+        let mut request = fill_request(5, 5, [12, 34, 56, 255]);
+        request.overflow_abort = true;
+        let outcome = core.apply_fill(&request).unwrap();
+        assert_eq!(outcome.changed_pixels, 36, "{format:?}");
+        assert_eq!(core.history_entries().len(), 1);
+        assert!(core.document_info().unwrap().dirty);
+        assert_eq!(
+            core.plane_pixel(ActivePlane::MainLine, 2, 5).unwrap(),
+            PixelValue::Rgba([0, 0, 0, 255])
+        );
+        assert_eq!(
+            core.document_info().unwrap().main_plane_checksum,
+            initial_main
+        );
+        assert_eq!(
+            core.plane_pixel(ActivePlane::Color, 5, 5).unwrap(),
+            PixelValue::Rgba([12, 34, 56, 255])
+        );
+        assert_eq!(
+            &decoded_png(&core).pixels[(5 * 12 + 5) * 4..(5 * 12 + 5) * 4 + 4],
+            &[12, 34, 56, 255]
+        );
+        assert_eq!(
+            &decoded_png(&core).pixels[(5 * 12 + 9) * 4..(5 * 12 + 9) * 4 + 4],
+            &[255, 0, 0, 255]
+        );
+        let filled_digest = core.document_state_digest().unwrap();
+        let filled_info = core.document_info().unwrap();
+        assert_eq!(core.apply_fill(&request).unwrap().changed_pixels, 0);
+        assert_eq!(core.document_info().unwrap(), filled_info);
+        assert!(
+            core.apply_fill(&fill_request(12, 5, [12, 34, 56, 255]))
+                .is_err()
+        );
+        assert_eq!(core.document_state_digest().unwrap(), filled_digest);
+        core.undo().unwrap();
+        assert_eq!(core.document_state_digest().unwrap(), initial_digest);
+        // Fill selects Color; editor selection is persisted independently of Undo.
+        core.set_active_plane(ActivePlane::MainLine).unwrap();
+        assert!(!core.document_info().unwrap().dirty);
+        assert!(matches!(
+            core.apply_fill_with_cancel(&request, || true),
+            Err(CoreError::Cancelled)
+        ));
+        assert_eq!(core.document_state_digest().unwrap(), initial_digest);
+        let mut outside = request.clone();
+        outside.seed_x = 0;
+        outside.seed_y = 0;
+        assert!(matches!(
+            core.apply_fill(&outside),
+            Err(CoreError::FillOverflow { .. })
+        ));
+        assert_eq!(core.document_state_digest().unwrap(), initial_digest);
+        core.redo().unwrap();
+        assert_eq!(core.document_state_digest().unwrap(), filled_digest);
+        core.collect_unreferenced_assets().unwrap();
+        assert!(core.asset_info(source_id).is_some());
+        core.release_history_cache().unwrap();
+        assert_eq!(
+            core.verify_journal_replay()
+                .unwrap()
+                .document_state_digest(),
+            filled_digest
+        );
+        let (mut native, _) = core
+            .capture_document_save()
+            .unwrap()
+            .prepare_native_save(false, || false)
+            .unwrap();
+        native.sections.retain(|section| section.fourcc != *b"CKPT");
+        let mut reopened = Core::from_native_file(native, false).unwrap();
+        assert_eq!(reopened.document_state_digest().unwrap(), filled_digest);
+        assert_eq!(reopened.raster_file_format().unwrap(), format);
+        assert!(reopened.asset_info(source_id).is_some());
+        reopened.undo().unwrap();
+        assert_eq!(decoded_png(&reopened).pixels, raster.pixels);
+        reopened.redo().unwrap();
+        assert_eq!(reopened.document_state_digest().unwrap(), filled_digest);
+
+        let document = reopened.document_info().unwrap();
+        reopened
+            .execute_primitive(PrimitiveRequest::ImportRasterAsset {
+                expected_revision: document.document_revision,
+                target_plane_id: document.color_plane_id,
+                raster: raster_asset(12, 12, PixelFormat::StraightRgba8, vec![0; 12 * 12 * 4]),
+            })
+            .unwrap();
+        assert_eq!(decoded_png(&reopened).pixels, raster.pixels);
+        reopened
+            .execute_primitive(PrimitiveRequest::ImportRasterAsset {
+                expected_revision: reopened.document_info().unwrap().document_revision,
+                target_plane_id: document.main_plane_id,
+                raster: raster_asset(12, 12, PixelFormat::StraightRgba8, vec![0; 12 * 12 * 4]),
+            })
+            .unwrap();
+        assert_eq!(
+            decoded_png(&reopened).pixels,
+            vec![0; 12 * 12 * 4],
+            "clearing the editable plane must not reveal an imported underlay"
+        );
+    }
+}
+
+#[test]
+fn imported_editable_pixels_preserve_native_depth_alpha_and_sequence_revisit() {
+    for pixel_format in [PixelFormat::StraightRgba8, PixelFormat::StraightRgba16] {
+        let values = [[11_u16, 22, 33, 0], [21, 42, 63, 127], [10, 20, 30, 255]];
+        let pixels: Vec<u8> = values
+            .into_iter()
+            .flatten()
+            .flat_map(|value| {
+                if pixel_format == PixelFormat::StraightRgba8 {
+                    vec![value as u8]
+                } else {
+                    (value * 257).to_le_bytes().to_vec()
+                }
+            })
+            .collect();
+        let raster = CommonRaster::new(
+            3,
+            1,
+            pixel_format,
+            Some(DEFAULT_DPI_MILLI),
+            Some(DEFAULT_DPI_MILLI),
+            pixels,
+        )
+        .unwrap();
+        let mut core = Core::new();
+        core.import_decoded_common_raster(CommonRasterFormat::Png, &raster, 0x4306)
+            .unwrap();
+        let check = |core: &Core| {
+            for (x, rgba) in values.into_iter().enumerate() {
+                let expected = if pixel_format == PixelFormat::StraightRgba8 {
+                    PixelValue::Rgba(rgba.map(|channel| channel as u8))
+                } else {
+                    PixelValue::Rgba16(rgba.map(|channel| channel * 257))
+                };
+                assert_eq!(
+                    core.plane_pixel(ActivePlane::MainLine, x as u32, 0)
+                        .unwrap(),
+                    expected
+                );
+            }
+            assert_eq!(
+                core.genesis_info().unwrap().base_surface,
+                BaseSurface::Transparent
+            );
+        };
+        check(&core);
+        let original_export = decoded_png(&core).pixels;
+        let (native, _) = core
+            .capture_document_save()
+            .unwrap()
+            .prepare_native_save(false, || false)
+            .unwrap();
+        let reopened = Core::from_native_file(native, false).unwrap();
+        check(&reopened);
+        let same = SequenceCellSource::from_common_raster("a001.png", 0x4311, &raster).unwrap();
+        let other = SequenceCellSource::from_common_raster("a002.png", 0x4312, &raster).unwrap();
+        core.set_sequence(vec![same, other]).unwrap();
+        let bound = core.resolve_sequence_activation(0).unwrap();
+        assert_eq!(bound.kind, SequenceActivationKind::Bind);
+        core.commit_sequence_activation(bound).unwrap();
+        for index in [1, 0] {
+            assert!(!core.sequence_activate(index).unwrap().dirty);
+            check(&core);
+            assert_eq!(decoded_png(&core).pixels, original_export);
+            core.verify_journal_replay().unwrap();
+        }
+    }
+}
+
+#[test]
 fn solid_white_is_only_the_immutable_flattened_underlay() {
     let mut core = Core::new();
     let document = core
@@ -194,16 +406,20 @@ fn codec_path_and_external_file_lifetime_do_not_change_asset_identity() {
     png_core
         .import_common_raster(CommonRasterFormat::Png, &png, 0x4301)
         .unwrap();
-    let BaseSurface::Asset(png_id) = png_core.genesis_info().unwrap().base_surface else {
-        panic!("PNG must open as an asset base");
-    };
+    let png_id = png_core.asset_infos()[0].id;
+    assert_eq!(
+        png_core.genesis_info().unwrap().base_surface,
+        BaseSurface::Transparent
+    );
     let mut bmp_core = Core::new();
     bmp_core
         .import_common_raster(CommonRasterFormat::Bmp, &bmp, 0x4302)
         .unwrap();
-    let BaseSurface::Asset(bmp_id) = bmp_core.genesis_info().unwrap().base_surface else {
-        panic!("BMP must open as an asset base");
-    };
+    let bmp_id = bmp_core.asset_infos()[0].id;
+    assert_eq!(
+        bmp_core.genesis_info().unwrap().base_surface,
+        BaseSurface::Transparent
+    );
     assert_eq!(png_id, bmp_id);
     assert_eq!(decoded_png(&png_core).pixels, common.pixels);
     assert_eq!(decoded_png(&bmp_core).pixels, common.pixels);
@@ -233,8 +449,9 @@ fn codec_path_and_external_file_lifetime_do_not_change_asset_identity() {
     );
     assert_eq!(
         file_core.genesis_info().unwrap().base_surface,
-        BaseSurface::Asset(png_id)
+        BaseSurface::Transparent
     );
+    assert_eq!(file_core.asset_infos()[0].id, png_id);
 
     let normal_path = std::env::temp_dir().join(format!(
         "inkpod-asset-base-save-{}-{sequence}.inkpod",
@@ -269,8 +486,9 @@ fn codec_path_and_external_file_lifetime_do_not_change_asset_identity() {
     reopened.open(&normal_path).unwrap();
     assert_eq!(
         reopened.genesis_info().unwrap().base_surface,
-        BaseSurface::Asset(png_id)
+        BaseSurface::Transparent
     );
+    assert_eq!(reopened.asset_infos()[0].id, png_id);
     assert_eq!(
         reopened
             .export_common_raster(CommonRasterFormat::Png, false)
@@ -304,10 +522,10 @@ fn color_mapped_rle_tga_enters_the_shared_canonical_genesis_path() {
         decoded_png(&core).pixels,
         [10, 20, 30, 128, 10, 20, 30, 128]
     );
-    assert!(matches!(
+    assert_eq!(
         core.genesis_info().unwrap().base_surface,
-        BaseSurface::Asset(_)
-    ));
+        BaseSurface::Transparent
+    );
 }
 
 #[test]
@@ -736,10 +954,10 @@ fn batch_copies_asset_backed_sources_and_writes_current_native_output() {
     assert!(output_path.exists());
     let mut reopened = Core::new();
     reopened.open(output_path).unwrap();
-    assert!(matches!(
+    assert_eq!(
         reopened.genesis_info().unwrap().base_surface,
-        BaseSurface::Asset(_)
-    ));
+        BaseSurface::Transparent
+    );
     assert_eq!(core.document_info().unwrap(), before_info);
     assert_eq!(core.document_state_digest().unwrap(), before_digest);
     assert_eq!(core.asset_store_usage(), before_usage);

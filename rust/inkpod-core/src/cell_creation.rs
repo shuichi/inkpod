@@ -61,9 +61,7 @@ pub struct CellCreationOptions {
     pub maximum_close_ratio_milli: u32,
     /// Reference and maximum-close alignment anchor.
     pub anchor: FrameAnchor,
-    /// Requested initial layer kind.
-    pub initial_layer_kind: LayerKind,
-    /// Color storage depth for the initial coloring topology.
+    /// Color storage depth for the initial standard image layer.
     pub pixel_format: PixelFormat,
     /// Number of independent cells to stage.
     pub count: u32,
@@ -77,7 +75,6 @@ pub struct CellCreationPlanItem {
     dpi_x_milli: u32,
     dpi_y_milli: u32,
     frames: FrameMetadata,
-    initial_layer_kind: LayerKind,
     pixel_format: PixelFormat,
 }
 
@@ -106,11 +103,6 @@ impl CellCreationPlanItem {
     #[must_use]
     pub const fn frames(self) -> FrameMetadata {
         self.frames
-    }
-    /// Returns the initial layer kind.
-    #[must_use]
-    pub const fn initial_layer_kind(self) -> LayerKind {
-        self.initial_layer_kind
     }
     /// Returns the selected color storage format.
     #[must_use]
@@ -268,7 +260,6 @@ pub fn plan_cell_creation(options: &CellCreationOptions) -> Result<CellCreationP
             maximum_close_frame,
             margins,
         },
-        initial_layer_kind: options.initial_layer_kind,
         pixel_format: options.pixel_format,
     };
     Ok(CellCreationPlan {

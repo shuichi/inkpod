@@ -99,14 +99,14 @@ pub(crate) fn validate_operation(operation: &BatchOperation) -> Result<(), CoreE
         .chain(operation.additional_targets.iter())
         .enumerate()
     {
-        if target.layer_id.is_none() && target.layer_kind.is_none() {
-            return Err(CoreError::InvalidArgument(
-                "batch target layer selector is empty",
-            ));
-        }
         if target.plane_id.is_none() && target.plane_kind.is_none() {
             return Err(CoreError::InvalidArgument(
                 "batch target plane selector is empty",
+            ));
+        }
+        if target.plane_kind == Some(PlaneType::MainLine) {
+            return Err(CoreError::InvalidArgument(
+                "batch target plane kind must be Color or Raster",
             ));
         }
         if std::iter::once(&operation.target)
@@ -218,7 +218,6 @@ mod tests {
             target: BatchTargetSelector {
                 layer_id: None,
                 plane_id: None,
-                layer_kind: None,
                 plane_kind: None,
                 missing_policy: BatchMissingTargetPolicy::Skip,
             },
@@ -232,7 +231,29 @@ mod tests {
         assert_eq!(
             validate_operation(&operation),
             Err(CoreError::InvalidArgument(
-                "batch target layer selector is empty"
+                "batch target plane selector is empty"
+            ))
+        );
+    }
+
+    #[test]
+    fn rejects_main_line_target_role() {
+        let operation = BatchOperation {
+            version: BATCH_OPERATION_VERSION,
+            enabled: true,
+            target: BatchTargetSelector {
+                layer_id: None,
+                plane_id: None,
+                plane_kind: Some(PlaneType::MainLine),
+                missing_policy: BatchMissingTargetPolicy::Error,
+            },
+            additional_targets: Vec::new(),
+            kind: BatchOperationKind::Erase(vec![PixelValue::Binary(0)]),
+        };
+        assert_eq!(
+            validate_operation(&operation),
+            Err(CoreError::InvalidArgument(
+                "batch target plane kind must be Color or Raster"
             ))
         );
     }

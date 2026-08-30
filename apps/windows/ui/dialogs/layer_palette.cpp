@@ -278,26 +278,12 @@ void PaintLayerPlaneSplitter(HWND splitter, bool highlighted) noexcept {
     EndPaint(splitter, &paint);
 }
 
-UiStringId LayerKindLabelId(std::uint32_t kind) noexcept {
-    switch (kind) {
-        case INKPOD_LAYER_BINARY_COLORING: return UiStringId::LayerBinaryColoring;
-        case INKPOD_LAYER_GRAYSCALE_COLORING: return UiStringId::LayerGrayscaleColoring;
-        case INKPOD_LAYER_RASTER: return UiStringId::LayerRasterGeneral;
-        case INKPOD_LAYER_SELECTION: return UiStringId::LayerSelection;
-        case INKPOD_LAYER_FRAME: return UiStringId::LayerFrame;
-        case INKPOD_LAYER_VANISHING_POINT: return UiStringId::LayerVanishingPoint;
-        case INKPOD_LAYER_ADJUSTMENT: return UiStringId::LayerAdjustment;
-        default: return UiStringId::LayerUnknown;
-    }
-}
-
 UiStringId PlaneKindLabelId(std::uint32_t kind) noexcept {
     switch (kind) {
         case INKPOD_TYPED_PLANE_MAIN_LINE: return UiStringId::MainLine;
         case INKPOD_TYPED_PLANE_COLOR: return UiStringId::Coloring;
         case INKPOD_TYPED_PLANE_RASTER: return UiStringId::PlaneRaster;
-        case INKPOD_TYPED_PLANE_SELECTION: return UiStringId::PlaneSelection;
-        default: return UiStringId::LayerUnknown;
+        default: return UiStringId::NameUnavailable;
     }
 }
 
@@ -306,7 +292,6 @@ UiStringId PlaneKindBadgeLabelId(std::uint32_t kind) noexcept {
         case INKPOD_TYPED_PLANE_MAIN_LINE: return UiStringId::PlaneBadgeMainLine;
         case INKPOD_TYPED_PLANE_COLOR: return UiStringId::PlaneBadgeColoring;
         case INKPOD_TYPED_PLANE_RASTER: return UiStringId::PlaneBadgeRaster;
-        case INKPOD_TYPED_PLANE_SELECTION: return UiStringId::PlaneBadgeSelection;
         default: return UiStringId::PlaneBadgeUnknown;
     }
 }
@@ -1339,7 +1324,7 @@ std::vector<LayerPaletteItem> MakeItems(
         item.edit_target = target;
         item.kind_label_id = plane
             ? PlaneKindLabelId(node.kind)
-            : LayerKindLabelId(node.kind);
+            : UiStringId::Layer;
         item.badge_label_id = plane
             ? PlaneKindBadgeLabelId(node.kind)
             : UiStringId::PlaneBadgeUnknown;

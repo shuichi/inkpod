@@ -15,7 +15,7 @@ impl Core {
         let mut edit = self.begin_document_edit()?;
         let revision = edit.revision();
         let (before, after) = edit.documents();
-        let plane = editable_color_plane(before, plane_id)?;
+        let plane = editable_rgba_plane(before, plane_id)?;
         let mut mask = selection_mask_for_shape(
             before,
             plane_id,
@@ -56,7 +56,7 @@ impl Core {
         let mut edit = self.begin_document_edit()?;
         let revision = edit.revision();
         let (before, after) = edit.documents();
-        let plane = editable_color_plane(before, plane_id)?;
+        let plane = editable_rgba_plane(before, plane_id)?;
         let selection = (before.selection.allocated_tile_count() != 0).then_some(&before.selection);
         let raster = operation(&plane.raster, selection, revision.get())?;
         after
@@ -85,7 +85,7 @@ impl Core {
                 "blur pressure mask does not match the document",
             ));
         }
-        let plane = editable_color_plane(before, plane_id)?;
+        let plane = editable_rgba_plane(before, plane_id)?;
         if before.selection.allocated_tile_count() != 0 {
             mask = combine_selection_masks(
                 &before.selection,

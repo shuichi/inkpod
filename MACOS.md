@@ -11,8 +11,8 @@
 - SwiftUI `Canvas`、Core Graphics/Core Animation、`MTKView` は補助用途に限定する。
 - UI/Input、Core、Renderer を三つの実行領域に分離する。
 - `InkpodCore` の create／全操作／destroy は一つの長寿命 `Foundation.Thread` に固定する。Swift actor や serial `DispatchQueue` はこの thread owner の代替にしない。
-- Rust Core、`.inkpod` v27、replay epoch 24、canonical procedure semantics は変更しない。
-- 既存 ABI v14 で移植を開始する。ただし `SHORT-001` 完了には Windows VK/Ctrl 固有の shortcut record を置換する ABI v15 が必要で、M3 の独立変更として扱う。
+- Rust Core、`.inkpod` v31、replay epoch 27、canonical procedure semantics は変更しない。
+- 現行 ABI v25 で移植を開始する。`SHORT-001` の Windows VK/Ctrl 固有 record を platform-neutral に置換する必要が実証された場合だけ、次の exact ABI version へ進める M3 の独立変更として扱う。
 - CMake を公式 umbrella entry として維持し、checked-in Xcode project を CMake から呼ぶ macOS sub-build とする。
 - Release は arm64／x86_64 Universal 2 を既定とする。Intel Tahoe 実機 runner がなければ x86_64 runtime は未検証と明記する。
 - App Sandbox を既定とし、Developer ID 署名、Hardened Runtime、notarization を最初の配布経路とする。
@@ -82,10 +82,10 @@ tests/macos/
 | 現在のfrontendは C++/Win32、CanvasはD3D11/D2D/DXGI                                              | [SPEC.md:9–16](/Users/shuichi/GitHub/inkpod/SPEC.md:9)                                                                                                                                                                                                  | C++ frontendを再利用せず、意味上のownerとrouteだけ写像する |
 | CMakeが唯一のbuild入口                                                                          | [AGENTS.md:19](/Users/shuichi/GitHub/inkpod/AGENTS.md:19)、[SPEC.md:14](/Users/shuichi/GitHub/inkpod/SPEC.md:14)                                                                                                                                        | Xcodeを並列のroot builderにしない                          |
 | Rust CoreはOS非依存、`inkpod-ffi`だけがstaticlib                                                | [Cargo.toml:1](/Users/shuichi/GitHub/inkpod/Cargo.toml:1)、[rust/inkpod-ffi/Cargo.toml:8](/Users/shuichi/GitHub/inkpod/rust/inkpod-ffi/Cargo.toml:8)                                                                                                    | 4 crateと意味処理をそのまま再利用できる                    |
-| ABIは純C・current version 14                                                                    | [core_ffi.h:4–69](/Users/shuichi/GitHub/inkpod/include/inkpod/core_ffi.h:4)、[docs/ffi.md:54](/Users/shuichi/GitHub/inkpod/docs/ffi.md:54)                                                                                                              | Clang moduleからSwiftへimport可能                          |
+| ABIは純C・current version 25                                                                    | [core_ffi.h:4–69](/Users/shuichi/GitHub/inkpod/include/inkpod/core_ffi.h:4)、[docs/ffi.md:54](/Users/shuichi/GitHub/inkpod/docs/ffi.md:54)                                                                                                              | Clang moduleからSwiftへimport可能                          |
 | Coreはcreate threadと同じOS threadで全操作/destroyが必要                                        | [core_ffi.h:3242](/Users/shuichi/GitHub/inkpod/include/inkpod/core_ffi.h:3242)                                                                                                                                                                          | dedicated `Thread` が必須                                  |
 | snapshotはimmutableでCoreから独立し、renderer threadでrelease可能                               | [core_ffi.h:6007](/Users/shuichi/GitHub/inkpod/include/inkpod/core_ffi.h:6007)、[core_ffi.h:6176](/Users/shuichi/GitHub/inkpod/include/inkpod/core_ffi.h:6176)                                                                                          | Metal queueへownership transferできる                      |
-| native形式はv27／epoch 24のみ                                                                   | [docs/file-format.md:1–11](/Users/shuichi/GitHub/inkpod/docs/file-format.md:1)、[docs/determinism.md:3](/Users/shuichi/GitHub/inkpod/docs/determinism.md:3)                                                                                             | GUI移植ではversionを上げない                               |
+| native形式はv31／epoch 27のみ                                                                   | [docs/file-format.md:1–18](/Users/shuichi/GitHub/inkpod/docs/file-format.md:1)、[docs/determinism.md:3](/Users/shuichi/GitHub/inkpod/docs/determinism.md:3)                                                                                             | GUI移植だけではversionを上げない                           |
 | 保存はsame-directory temporary→flush→replace、成功後だけsavepoint更新                           | [docs/file-format.md:1270](/Users/shuichi/GitHub/inkpod/docs/file-format.md:1270)                                                                                                                                                                       | Sandbox下でもこのatomicityを維持する必要がある             |
 | Windows owner/thread/snapshot設計は既に分離済み                                                 | [docs/architecture.md:334](/Users/shuichi/GitHub/inkpod/docs/architecture.md:334)、[docs/architecture.md:479](/Users/shuichi/GitHub/inkpod/docs/architecture.md:479)、[docs/architecture.md:505](/Users/shuichi/GitHub/inkpod/docs/architecture.md:505) | Mac側の設計雛形として利用できる                            |
 | `apps/macos`、Xcode project、Swift/module mapは存在しない                                       | 読み取り専用tree確認                                                                                                                                                                                                                                    | macOS frontend基盤は未着手                                 |
@@ -97,18 +97,18 @@ tests/macos/
 
 | 集合                                             |  数 |
 | ------------------------------------------------ | --: |
-| `resource.h` に存在する生の `IDM_*` symbol       | 387 |
-| dynamic history range marker 2個を除くstatic候補 | 385 |
-| production static command ID                     | 384 |
-| 1言語あたりのmenu/control occurrence             | 391 |
+| `resource.h` に存在する生の `IDM_*` symbol       | 323 |
+| production state-owned command ID                 | 321 |
+| production menu command ID                        | 313 |
+| 1言語あたりのactionable menu/control occurrence   | 320 |
 
-production外は、履歴可視化rangeのfirst/last marker 2個と、予約aggregate `IDM_BATCH_OPERATION_ADD` 1個である。[resource.h:49](/Users/shuichi/GitHub/inkpod/apps/windows/app/resource.h:49)、[resource.h:120](/Users/shuichi/GitHub/inkpod/apps/windows/app/resource.h:120)、[resource.h:392](/Users/shuichi/GitHub/inkpod/apps/windows/app/resource.h:392)
+production state catalog外は、履歴可視化rangeのfirst/last marker 2個である。production menuに現れない残り8 commandはpane-local actionである。[docs/windows-command-inventory.md:7](/Users/shuichi/GitHub/inkpod/docs/windows-command-inventory.md:7)
 
-391 occurrence は、384 unique command、Filter/Toolに重複する Dust 1件、Layer paneの代替control 6件で構成される。[app_ui_ja.generated.rc:51](/Users/shuichi/GitHub/inkpod/apps/windows/app/app_ui_ja.generated.rc:51)、[app_ui_ja.generated.rc:296](/Users/shuichi/GitHub/inkpod/apps/windows/app/app_ui_ja.generated.rc:296)、[app_ui_ja.generated.rc:877](/Users/shuichi/GitHub/inkpod/apps/windows/app/app_ui_ja.generated.rc:877)
+320 occurrence は、313 unique menu command、Filter/Toolに重複する Dust 1件、Layer paneの代替control 6件で構成される。[docs/windows-command-inventory.md:9](/Users/shuichi/GitHub/inkpod/docs/windows-command-inventory.md:9)
 
-[docs/windows-command-inventory.md:9](/Users/shuichi/GitHub/inkpod/docs/windows-command-inventory.md:9) はこの区別を概ね記録している。一方、[docs/primitive-route-inventory.md:174](/Users/shuichi/GitHub/inkpod/docs/primitive-route-inventory.md:174) の「381 Windows commands」は古いproseで、同文書のmachine-readable節とsource-derived testは384を扱っている。[route_inventory.rs:368](/Users/shuichi/GitHub/inkpod/rust/inkpod-core/tests/route_inventory.rs:368)
+[docs/windows-command-inventory.md:9](/Users/shuichi/GitHub/inkpod/docs/windows-command-inventory.md:9) がこの区別の現行要約であり、source-derived tests が323 raw／321 state-owned／313 menuのset equalityを固定する。
 
-macOS parityの分母は384とし、391を再現対象のUI数にしない。
+macOS parityの分母は321 state-owned commandとし、320 occurrenceを別commandとして重複計上しない。menu surfaceは313 commandの部分集合として照合する。
 
 ### ローカルtoolchain
 
@@ -269,7 +269,7 @@ Shortcut routerはfirst responderがtext editor／`NSTextInputClient`、また�
 - View: zoom/pan/flip、guide/grid、sidebar/inspector、EditorGroup、fullscreen
 - Cell: Cell、paper/frame、Layer/Plane、annotation
 - Selection: 全selection command
-- Image: WindowsのFilter/Effect/Adjustmentを意味上の一群へ統合
+- Image: WindowsのFilter／Effect／destructive tone adjustmentを意味上の一群へ統合
 - Tools: raster/tool mode
 - Color: Color/Palette/Chart
 - Animation: WindowsのProductionをCut/Sequence/Light Table/Subpalette/Motionとして改称
@@ -347,19 +347,19 @@ SPMは将来のpure Swift moduleまたは外部依存だけに限定し、初期
 | Window/session/view lifecycle                  | `SESSION-001`,`VIEW-004/005`,`WORKSPACE-002`                    | WindowGroup、document tabs、Close View/Window     | SwiftUI scenes、FocusedValue、AppKit window delegate                      | Cmd-Wの対象を明示し、view/document/window closeを混同しない | issue-time CommandContext→session registry          |  1–5 | same-session multi-view、dirty prompt一回、stale close        |
 | Workspace／EditorGroup／pane                   | `WORKSPACE-001/002`,`WIN-002`の意味部分                         | sidebar、inspector、bottom timeline、Batch window | `NavigationSplitView`, `.inspector`, `HSplitView/VSplitView`, WindowGroup | Win32 dockを模写せず最大2 groupとscopeを維持                | WorkspaceModel→EditorGroup/PaneModel                |    5 | layout round-trip、monitor recovery、focus、follow/pin        |
 | Canvas/view/input                              | `RENDER-001`,`VIEW-001..005`,`SNAP-001`,`PERF-001`              | Metal Canvas                                      | NSViewRepresentable、NSView、CAMetalLayer、Metal、NSEvent                 | Retina/input/cache/thread性能のため                         | MainActor input→Core queue→snapshot→Renderer        |    2 | coordinates、pressure/tilt、hidden draw=0、device recovery    |
-| Command/state/shortcut                         | `SHORT-001`,`WORKSPACE-002`                                     | menu、toolbar、context menu、chord router         | SwiftUI Commands、FocusedValue、NSEvent monitor                           | Command中心、text/IME guard、標準shortcut優先               | descriptor→pure state owner→issue-time router       |    3 | 384 disposition、one owner/state/surface、prefix-free         |
-| Cell／Layer／Plane                             | `DOC-001/002/003`,`CELL-001`                                    | New Cell sheet、Layer/Plane inspector             | SwiftUI Form/List/OutlineGroup、sheet                                     | Common Controls配置を捨てnative inspectorへ                 | typed dialog result→Core primitive→projection       |    5 | all layer kinds、no-op/invalid/cancel、save/reopen            |
+| Command/state/shortcut                         | `SHORT-001`,`WORKSPACE-002`                                     | menu、toolbar、context menu、chord router         | SwiftUI Commands、FocusedValue、NSEvent monitor                           | Command中心、text/IME guard、標準shortcut優先               | descriptor→pure state owner→issue-time router       |    3 | 321 disposition、one owner/state/surface、prefix-free         |
+| Cell／Layer／Plane                             | `DOC-001/002/003`,`CELL-001`                                    | New Cell sheet、Layer/Plane inspector             | SwiftUI Form/List/OutlineGroup、sheet                                     | Common Controls配置を捨てnative inspectorへ                 | typed dialog result→Core primitive→projection       |    5 | MainLine1＋Color1＋Raster0..N、document masks、no-op/invalid/cancel、save/reopen |
 | Raster paint／fill／tool options               | `PAINT-001..004`,`FILL-001..003`,`COLOR-REPLACE-001`            | Tool sidebar、contextual options、Canvas          | SwiftUI controls＋AppKit input＋Core ABI                                  | algorithmはCoreのみ                                         | tool state→input batch→canonical primitive          |    6 | stroke unit、overflow atomicity、main-line protection、Undo   |
 | Color／Palette／Chart／Locator                 | `COLOR-001/002`,`COLOR-CHART-PREVIEW-001`,`COLOR-OUTPUT-QA-001` | trailing inspector、popover                       | ColorPicker、Grid/List、Metal/SwiftUI preview                             | glassを色判定領域に適用しない                               | pane target→Core query/asset API                    |    6 | RGBA8/16、preview cancel、target pin/stale                    |
 | Selection／clipboard／transform                | `SEL-001..004`,`CLIP-001`,`XFORM-001..003`                      | Selection menu、Canvas handles、sheets            | NSPasteboard、UTType、Canvas overlay                                      | private typed＋standard imageを同時提供                     | pasteboard adapter→Rust payload→transaction         |  4,7 | coordinate preservation、paste outside、floating cancel       |
 | History／preview                               | `HIST-001/002`,`FILTER-PREVIEW-001`                             | Edit menu、History inspector、sheet preview       | Undo menu integration、List、async update                                 | AppKit UndoManagerをauthorityにしない                       | standard command→Core history route                 |  7,8 | branch、Redo truncation、dynamic rows、latest-wins            |
-| Filter／Effect／Adjustment／Raster Geometry    | `FILTER-*`,`EFFECT-001`,`ADJUST-001`,`PAINT-002/003`            | Image/Tools menu、sheets、inspector               | SwiftUI sheet/form、Metal overlay                                         | Win menu分類をImage/Toolsへ整理                             | typed values→preview token→one commit               |    8 | nonaccumulative preview、Cancel、stale、raster goldens        |
-| shooting frame／vanishing point                | `SHOOTING-FRAME-001`,`VANISHING-POINT-001`                      | Cell menu、inspector、Canvas overlay              | SwiftUI form/list、Metal overlay                                          | geometryと意味はCore                                       | inspector→Core request→snapshot overlay             |    8 | point/frame bounds、export、save/reopen                       |
+| Filter／Effect／tone adjustment／Raster Geometry | `FILTER-*`,`EFFECT-001`,`PAINT-002/003`                       | Image/Tools menu、sheets、inspector               | SwiftUI sheet/form、Metal overlay                                         | Win menu分類をImage/Toolsへ整理                             | typed values→preview token→one commit               |    8 | nonaccumulative preview、Cancel、stale、raster goldens        |
+| shooting frame                                 | `SHOOTING-FRAME-001`                                            | Cell menu、inspector、Canvas overlay              | SwiftUI form/list、Metal overlay                                          | geometryと意味はCore                                       | inspector→Core request→snapshot overlay             |    8 | frame bounds、export、save/reopen                             |
 | Cut／Sequence／Light Table／Subpalette／Motion | `CUT-001`,`SEQ-*`,`LT-*`,`COLOR-002`                            | Animation menu、bottom timeline、inspector tabs   | SwiftUI timeline/list、Metal thumbnails                                   | WindowsのProductionを意味の明確なAnimationへ改称            | CutSession／pane target→Core task/snapshot          |    9 | endpoint、membership Undo、pin/stale、motion cancel           |
 | Batch／long jobs                               | `BATCH-001..004`,`SAFE-001`,`PERF-001`                          | dedicated Batch window、job progress              | WindowGroup、ProgressView、security-scoped folder panel                   | 複雑な長時間workflowをinspectorへ押し込まない               | immutable graph→task→job token→report               |   10 | dry-run、partial failure禁止、cancel、folder scope            |
 | Import/export／drag/drop                       | `IO-002`,`CLIP-001`,`BATCH-*`                                   | Finder drop、pasteboard、Export sheet             | NSDraggingDestination、Transferable/NSPasteboard、UTType                  | OS adapterだけSwift、codecはRust                            | URL/data representation→Core bytes API              | 4,10 | supported形式のみ、unknown拒否、alpha/DPI                     |
 
-### 384 command のreconciliation
+### 321 command のreconciliation
 
 M0でmachine-readable `macos-command-parity.json` を作る。各Windows production IDに以下を一つだけ割り当てる。
 
@@ -381,15 +381,15 @@ M0でmachine-readable `macos-command-parity.json` を作る。各Windows product
 
 検証規則:
 
-1. ja/en RCのproduction setが一致し384であること。
-2. 生387 symbolを `384 production + reserved aggregate 1 + range marker 2` に完全partitionすること。
-3. parity manifestがproduction 384とset-equalityで、missing/duplicate/extraがゼロであること。
+1. ja/en RCのproduction menu setが一致し313であること。
+2. 生323 symbolを `321 state-owned production + range marker 2` に完全partitionすること。
+3. parity manifestがstate-owned production 321とset-equalityで、missing/duplicate/extraがゼロであること。
 4. many-to-oneは`mergedIntoSemanticCommand`だけ許可する。
 5. `notApplicable`にはSPEC根拠と代替surface有無を必須にする。
 6. active semantic commandごとにrouter、state providerが一つずつ存在すること。
 7. active commandに到達可能surfaceが一つ以上存在すること。
-8. 391 occurrenceをmacOSで再現しない。
-9. dynamic history rowsは384とは別inventoryとしてsession/generation/staleを検査する。
+8. 320 occurrenceをmacOSで別commandとして再現しない。
+9. dynamic history rowsは321とは別inventoryとしてsession/generation/staleを検査する。
 10. `SPEC.md`側からの逆向きcoverageも行い、static ID外のgesture、drop、dialog、lifecycleを落とさない。
 
 ## 5. Owner／thread／data flow
@@ -441,18 +441,18 @@ Raw Core pointerはCORE内だけ、raw snapshot pointerは`OwnedSnapshot`内だ�
 
 | ID  | 名称                                       | 主な完了物                                                            |
 | --- | ------------------------------------------ | --------------------------------------------------------------------- |
-| M0  | Contract・build・ABI import基盤            | CMake→Cargo→Swift ABI smoke、Universal方針、384 parity ledger         |
+| M0  | Contract・build・ABI import基盤            | CMake→Cargo→Swift ABI smoke、Universal方針、321 parity ledger         |
 | M1  | 固定Core threadとsession lifecycle         | Core registry、bounded queue、create/close/shutdown headless vertical |
 | M2  | SwiftUI product shellとMetal Canvas        | WindowGroup、実Canvas、default stroke、pan/zoom、snapshot renderer    |
-| M3  | Command・menu・shortcut・localization      | Commands、FocusedValue、ABI v15 shortcut、Settings、ja/en             |
+| M3  | Command・menu・shortcut・localization      | Commands、FocusedValue、必要時のplatform-neutral shortcut ABI、Settings、ja/en |
 | M4  | File lifecycle・Sandbox・clipboard/drop    | Open/Save/Recent/Revert/Recovery、UTType、security scope              |
 | M5  | Document/Layer/Plane・multi-view workspace | Cell workflow、Layer/Plane、最大2 group、named workspace              |
 | M6  | Paint・Fill・Color                         | Tool/Options、raster tools、fill、Color/Palette/Chart/Locator         |
 | M7  | Selection・Transform・History              | selection、floating、transform、Undo/Redo、history visualization      |
-| M8  | Filter・Effect・Raster Geometry・Frame/VP  | preview sheets、adjustment、raster geometry、frame/VP                  |
+| M8  | Filter・Effect・Raster Geometry・Shooting Frame | preview sheets、tone adjustment、raster geometry、shooting frame |
 | M9  | Cut・Sequence・Light Table                 | animation workflow、subpalette/reference、motion                      |
 | M10 | Batchとlong-running jobs                   | Batch window、folder authority、dry-run/cancel/report                 |
-| M11 | Parity freeze・hardening・distribution     | 384 zero-pending、a11y/perf/soak、Universal signed/notarized artifact |
+| M11 | Parity freeze・hardening・distribution     | 321 zero-pending、a11y/perf/soak、Universal signed/notarized artifact |
 
 ```mermaid
 flowchart LR
@@ -479,14 +479,14 @@ flowchart LR
 
 ### M0 — Contract・build・ABI import基盤
 
-- **完了状態:** CMake入口からarm64 Rust staticlib、Clang module、Swift ABI smokeをbuild/runできる。smokeは専用test thread上でCore create→query→snapshot build/release→destroyを行う。384 command parity manifestがsourceと一致する。
+- **完了状態:** CMake入口からarm64 Rust staticlib、Clang module、Swift ABI smokeをbuild/runできる。smokeは専用test thread上でCore create→query→snapshot build/release→destroyを行う。321-command parity manifestがsourceと一致する。
 - **要件:** `ARCH-001/002`,`ABI-001/002`,`PORT-001`,`SAFE-001`。先行なし。
 - **scope/file:** `apps/macos/Inkpod.xcodeproj`、`Config/*.xcconfig`、`CoreBridge/C/include/{InkpodCoreC.h,module.modulemap}`、最小Swift bridge、`cmake/macos/*`、macOS CMake preset、`tests/macos/command-parity.json`と検証script。
-- **data flow:** Swift smoke→Clang module→ABI v14→Rust staticlib。Universal releaseはarm64/x86_64 thin `.a`を別target-dirで構築して`lipo`する。
+- **data flow:** Swift smoke→Clang module→ABI v25→Rust staticlib。Universal releaseはarm64/x86_64 thin `.a`を別target-dirで構築して`lipo`する。
 - **状態:** success、ABI mismatch、short struct、NULL、wrong-thread、unknown status、double release、link failure。
-- **test:** C11/C++20 include/layout、Swift import/link、opaque pointer NULL化、TLS diagnostic同thread copy、snapshot cross-thread release、raw387の完全partition。
+- **test:** C11/C++20 include/layout、Swift import/link、opaque pointer NULL化、TLS diagnostic同thread copy、snapshot cross-thread release、raw323の完全partition。
 - **検証:** V-Rust、V-MacUnit、V-Universal-build。Xcode 26/Tahoe SDK。x86 target/runnerがなければruntime未検証。
-- **完了判定:** CMake以外をrootにせず全smokeが通り、manifestの分母が384、unclassified raw symbolがゼロ。
+- **完了判定:** CMake以外をrootにせず全smokeが通り、manifestの分母が321、unclassified raw symbolがゼロ。
 - **risk/mitigation:** anonymous C unionのSwift importはcompile testで判定し、必要時だけprivate inline helperを置く。header複製はしない。
 - **後続:** product UI、Core registry、renderer、file accessは作らない。
 
@@ -521,12 +521,12 @@ flowchart LR
 - **完了状態:** 実装済みsemantic commandが標準menu、toolbar、context menuから同じrouter/stateへ到達し、ja/en、Settings、shortcut編集、IME guardが動く。
 - **要件:** `SHORT-001`,`WORKSPACE-002`,`HIST-001`、新規`MAC-SHELL-001`案。依存M2。
 - **scope/file:** Commands descriptor/router/state provider、`Localizable.xcstrings`、Settings scene、Help/About/Acknowledgements、shortcut editor。
-- **ABI v15:** `InkpodShortcutStrokeV2`を追加し、platform-neutral key kind（Unicode scalar／named key）、`PRIMARY/SHIFT/ALTERNATE/CONTROL` modifierを定義する。PRIMARYはWindows Ctrl、macOS Commandへmapし、物理Controlを区別する。header/docs/tests/Windows adapterを同時更新する。native file/replay versionは変更しない。
+- **ABI decision:** 現行 ABI v25 の `InkpodShortcutStroke` で要件を満たせないことをcontract testで示した場合だけ、次の exact ABI versionにplatform-neutral key kind（Unicode scalar／named key）と`PRIMARY/SHIFT/ALTERNATE/CONTROL` modifierを追加する。PRIMARYはWindows Ctrl、macOS Commandへmapし、物理Controlを区別する。header/docs/tests/Windows adapterを同時更新し、GUI移植だけではnative file/replay versionを変更しない。
 - **data flow:** SwiftUI `Commands`／NSEvent→normalized sequence→pure resolver→issue-time `CommandContext`→owner route。
 - **状態:** success、state no-op、invalid/conflicting sequence、Cancel、stale context、timeout、IME marked text、persistence failure。
 - **test:** 1–4 stroke、prefix-free、conflict replacement、reset、standard shortcut非上書き、text/IME guard、menu enabled/checked、one-owner/state/surface。
 - **検証:** V-Rust＋V-MacUnit＋V-MacUI＋Windows CIの既存debug/release presets。
-- **完了判定:** ABI v15 driftなし、Windows regressionなし、UI未実装commandのplaceholder surfaceなし。
+- **完了判定:** ABI v25または承認された後継exact ABIにdriftがなく、Windows regressionとUI未実装commandのplaceholder surfaceがない。
 - **risk/mitigation:** ABI riskをshortcut変更だけに限定し、M3内でもCore/FFI test→Windows adapter→Mac UIの順で縦切りする。
 - **後続:** parity manifestの未実装行は残せるが、UIには出さない。
 
@@ -537,7 +537,7 @@ flowchart LR
 - **scope/file:** `FileAccessBroker`、security-scope lease/bookmark store、NSOpen/SavePanel adapter、NSFileCoordinator adapter、UTType/Info.plist、NSPasteboard/drag destination。
 - **data flow:** authorized URL/bytesはfrontendが所有し、Coreへborrowed UTF-8 pathまたはcopied bytesだけ渡す。bookmark/NSURLはCore/journalへ入れない。
 - **状態:** success、same-target no-op、invalid type、panel Cancel、stale bookmark/revision、permission denial、write/flush/replace failure、duplicate file identity。
-- **ABI decision gate:** まず現行 ABI v17 の path API を active security scope＋`NSFileCoordinator`下で検証する。same-directory atomic replace、Cut member、autosave、Batch folderで成立しないことが実証された場合だけ additive ABI bump として native staged decode/prepare-save/commit-save または bounded file-authority APIを追加する。header/docs/testを同時更新し、v27/epoch24は維持する。
+- **ABI decision gate:** まず現行 ABI v25 の path/job API を active security scope＋`NSFileCoordinator`下で検証する。same-directory atomic replace、Cut member、autosave、Batch folderで成立しないことが実証された場合だけ、次の exact ABI versionへ進めてnative staged decode/prepare-save/commit-saveまたはbounded file-authority APIを追加する。header/docs/testを同時更新し、GUI移植だけではv31/epoch27を変更しない。
 - **test:** savepoint only-after-replace、Save As conflict、cancel/failure atomicity、reopen、private+standard pasteboard representation、unsupported format rejection、bookmark stale regeneration。
 - **検証:** V-Rust＋V-MacUnit＋V-MacUI。Sandbox-enabled Tahoe実行が必須。
 - **完了判定:** path authorityをCoreへ永続化せず、既存file bytes/checksumとWindows reopen結果が一致する。
@@ -551,7 +551,7 @@ flowchart LR
 - **scope/file:** New Cell/Properties sheet、LayerPlane inspector、EditorGroup split/tab、pane target model、workspace record/presets。
 - **data flow:** sheetはtyped initial/resultだけ。all-or-none Cell plan→Core thread→成功後だけsession/view/tabを公開。
 - **状態:** success、no-op property update、invalid/overflow、Cancel、stale pane/session、allocation/publication failure、layout corruption。
-- **test:** layer/plane type rules、main/color plane switching、three-cell all-or-none、same-session view revision分離、duplicate view、cross-window move/copy、layout round-trip/monitor clamp。
+- **test:** standard layer topology／plane role・format rules、MainLine／Color plane switching、three-cell all-or-none、same-session view revision分離、duplicate view、cross-window move/copy、layout round-trip/monitor clamp。
 - **検証:** V-Rust＋V-MacUnit＋V-MacUI。複数displayもmanual/automated coverage。
 - **完了判定:** document stateをviewごとに複製せず、二分割が再帰しない。pane follow/pin targetがstale時に安全に無効化される。
 - **risk/mitigation:** SwiftUI List性能が不足した場合だけLayer/Plane listをAppKit collection/outline viewへ置換する。判断はprofile evidenceに基づく。
@@ -581,16 +581,16 @@ flowchart LR
 - **検証:** V-Rust＋V-MacUnit＋V-MacUI＋V-Metal。
 - **完了判定:** standard Cmd-Z/Shift-Cmd-ZがCore historyを唯一のauthorityとして操作し、UndoManagerに別履歴を作らない。
 - **risk/mitigation:** custom Canvas handleにはmenu/keyboard/accessibility actionを必ず併設する。
-- **後続:** filter/adjustment previewはM8。
+- **後続:** filter／destructive tone-adjustment previewはM8。
 
-### M8 — Filter・Effect・Raster Geometry・Frame/VP
+### M8 — Filter・Effect・Raster Geometry・Shooting Frame
 
-- **完了状態:** Filter、tone adjustment、effects、adjustment layer、Raster Geometry、shooting frame、vanishing pointがnative sheet/inspector/Canvasで動く。
-- **要件:** `FILTER-001/002`,`FILTER-PREVIEW-001`,`EFFECT-001`,`ADJUST-001`,`SHOOTING-FRAME-001`,`VANISHING-POINT-001`,`PAINT-002/003`。依存M7。
-- **scope/file:** Image/Tools commands、parameter sheets、preview coordinator、frame/VP inspector、Metal overlay pipeline。
+- **完了状態:** Filter、destructive tone adjustment、effects、Raster Geometry、shooting frameがnative sheet/inspector/Canvasで動く。Adjustment layerとVanishingPointは移植対象に含めない。
+- **要件:** `FILTER-001/002`,`FILTER-PREVIEW-001`,`EFFECT-001`,`SHOOTING-FRAME-001`,`PAINT-002/003`。依存M7。
+- **scope/file:** Image/Tools commands、parameter sheets、preview coordinator、shooting-frame inspector、Metal overlay pipeline。
 - **data flow:** typed initial values→bounded preview request→latest-wins result→snapshot overlay／OK commit。
 - **状態:** success、parameter no-op、invalid/nonfinite、Cancel、stale revision/target、task failure、renderer resource failure。
-- **test:** preview update ordering、Cancel/OK Undo、raster geometry goldens、frame/VP save/reopen、instruction export。
+- **test:** preview update ordering、Cancel/OK Undo、raster geometry goldens、shooting-frame save/reopen、instruction export。
 - **検証:** V-Rust＋V-MacUnit＋V-MacUI＋V-Metal＋quick benchmark。
 - **完了判定:** GPU resourceだけMac側、geometry/procedure/export semanticsはCore側。
 - **risk/mitigation:** preview UIをMainActorで計算せず、Core taskとrenderer snapshotで処理する。
@@ -631,7 +631,7 @@ flowchart LR
 - **状態:** 全milestoneのsuccess/no-op/invalid/cancel/stale/failureに加え、sleep/wake、memory pressure、GPU/display switch、sign/notary failure。
 - **test:** queue saturation、close中input、active stroke、stale snapshot、save failure、shutdown race、repeated window/tab/layout、VoiceOver、keyboard、IME、appearance、Retina/multidisplay、clean-machine launch。
 - **検証:** 全verification profile、Universal archive、codesign/spctl/notary/stapler。Windows/Linux/Rust regressionを含む。
-- **完了判定:** 384 command全行が許可されたdispositionに分類され、active semantic commandのroute/state/surface/testが完全。未接続UI、常時成功stub、未検証をVerified扱いする項目がゼロ。
+- **完了判定:** 321 command全行が許可されたdispositionに分類され、active semantic commandのroute/state/surface/testが完全。未接続UI、常時成功stub、未検証をVerified扱いする項目がゼロ。
 - **risk/mitigation:** Tahoe runnerやIntel hardware不足は隠さず、該当項目をExperimental/未検証のままrelease gateで判断する。
 - **後続:** なし。欠落機能はM11で雑に実装せず、所有milestoneを再度開く。
 
@@ -814,7 +814,7 @@ Windows固有IDとは別にMac IDを追加する必要がある。追加しな�
 ### その他
 
 - `docs/architecture.md`: macOS owner/thread/render/build章。古い381 command proseもsource-derived値へ修正
-- `docs/ffi.md`: Swift import、OwnedSnapshot、Core thread、ABI v15 shortcut
+- `docs/ffi.md`: Swift import、OwnedSnapshot、Core thread、現行ABI v25と必要時のplatform-neutral shortcut後継ABI
 - `docs/compatibility.md`: Mac requirement行とevidence
 - `docs/implementation-status.md`: 各milestoneの現状と未検証事項
 - `docs/macos-command-inventory.md`: generated parity summary
@@ -854,9 +854,9 @@ M0 build/ABI
 | -------------------------------------------------- | ------ | ----------------------------------------------------------------------------- |
 | Swift actorをCore ownerにしてwrong-threadになる    | High   | Foundation Thread固定、pthread ID smoke、raw pointer非Sendable                |
 | snapshot use-after-free／double release            | High   | `OwnedSnapshot` one-shot state、reject/replace/shutdown全path test            |
-| Sandboxでsame-directory atomic replaceが成立しない | High   | M4実機gate。失敗時だけABI v16 staged file-authority                           |
-| ABI v15 shortcutがWindowsを壊す                    | High   | additive change、header/export/layout test、Windows全preset同時検証           |
-| command数を381/391と誤認する                       | High   | source-derived384 manifest、raw387 partition、prose drift修正                 |
+| Sandboxでsame-directory atomic replaceが成立しない | High   | M4実機gate。失敗時だけ次のexact ABIへstaged file-authorityを追加              |
+| shortcut後継ABIがWindowsを壊す                     | High   | 必要性を先に実証し、additive change、header/export/layout test、Windows全preset同時検証 |
+| command数を旧381/384/391と誤認する                 | High   | source-derived321 manifest、raw323 partition、prose drift修正                 |
 | Core semanticsをSwiftで再実装する                  | High   | route inventory、document/history route owner structural test                 |
 | Liquid GlassがCanvas/color判断を損なう             | High   | Canvas/content領域non-glass、system controlsのみ                              |
 | RendererでRGBA16やalphaを量子化する                | High   | tile format別texture、premultiplicationをshader境界に限定、exportはCore       |
@@ -875,11 +875,11 @@ M0 build/ABI
 | 論点                         | 推奨default                                     | 代替                                  | 影響                                                  | 期限                      |
 | ---------------------------- | ----------------------------------------------- | ------------------------------------- | ----------------------------------------------------- | ------------------------- |
 | CPU配布                      | Universal 2 arm64+x86_64                        | arm64-only                            | size/CI対coverage。Intel runtime runner不足時は未検証 | M0、最終M11               |
-| Native fileとSandbox         | 現行path ABI＋security scope＋NSFileCoordinator | ABI v16 staged bytes/file authority   | ABI追加量、Cut/Batch access、atomicity                | M4前半                    |
+| Native fileとSandbox         | 現行ABI v25 path/job＋security scope＋NSFileCoordinator | 必要時に次のexact ABIでstaged bytes/file authority | ABI追加量、Cut/Batch access、atomicity | M4前半 |
 | App Sandbox                  | Developer ID版でも有効                          | Hardened Runtimeのみ                  | batch/folder usability対security/将来App Store        | M4                        |
 | Document scene               | WindowGroup＋独自coordinator                    | DocumentGroup spike                   | save/session ownershipが大きく変わる                  | M1。defaultを覆すならM2前 |
 | Canvas                       | custom NSView＋CAMetalLayer                     | MTKView                               | renderer ownership/thread/surface制御                 | M0 spike、M2開始前        |
-| Shortcut ABI                 | ABI v15 neutral V2                              | Macだけ独自resolver                   | Core input interpretationの重複、Windows VK混入       | M3                        |
+| Shortcut ABI                 | 現行ABI v25で検証し、必要時だけ次のexact ABIへneutral recordを追加 | Macだけ独自resolver | Core input interpretationの重複、Windows VK混入 | M3 |
 | Pane detachment              | sidebar/inspector＋Batch専用window              | 多数のUtilityWindow                   | target/focus/keyboard複雑性                           | M5                        |
 | Workspace persistence        | versioned Codable property-list record          | Application Support DB                | lightweight state対拡張性                             | M5                        |
 | x86_64 Verified条件          | Intel Tahoe実行を要求                           | Rosetta/cross-buildのみでExperimental | 配布表示とsupport範囲                                 | M11                       |

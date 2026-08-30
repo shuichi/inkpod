@@ -28,16 +28,15 @@ impl Core {
             plane.raster = mirror_raster(&plane.raster, axis, revision.get())?;
         }
         after.selection = mirror_raster(&after.selection, axis, revision.get())?;
+        for saved_selection in &mut after.saved_selection_masks {
+            saved_selection.raster = mirror_raster(&saved_selection.raster, axis, revision.get())?;
+        }
+        after.fill_protection = mirror_raster(&after.fill_protection, axis, revision.get())?;
         let document_size = DocumentSizeU32::new(after.width, after.height);
         mirror_frame_metadata(&mut after.frames, document_size, axis)?;
         if let Some(frame) = &mut after.shooting_frame {
             crate::shooting_frame::mirror_shooting_frame(frame, document_size, axis)?;
         }
-        crate::vanishing_point::mirror_vanishing_points(
-            &mut after.vanishing_points,
-            document_size,
-            axis,
-        )?;
         for guide in &mut after.guides {
             match (axis, guide.axis) {
                 (MirrorAxis::Horizontal, GuideAxis::Vertical) => {
@@ -81,16 +80,16 @@ impl Core {
             plane.raster = rotate_raster(&plane.raster, direction, revision.get())?;
         }
         after.selection = rotate_raster(&after.selection, direction, revision.get())?;
+        for saved_selection in &mut after.saved_selection_masks {
+            saved_selection.raster =
+                rotate_raster(&saved_selection.raster, direction, revision.get())?;
+        }
+        after.fill_protection = rotate_raster(&after.fill_protection, direction, revision.get())?;
         let before_size = DocumentSizeU32::new(before.width, before.height);
         rotate_frame_metadata(&mut after.frames, before_size, direction)?;
         if let Some(frame) = &mut after.shooting_frame {
             crate::shooting_frame::rotate_shooting_frame(frame, before_size, direction)?;
         }
-        crate::vanishing_point::rotate_vanishing_points(
-            &mut after.vanishing_points,
-            before_size,
-            direction,
-        )?;
         rotate_guides(&mut after.guides, before_size, direction)?;
         let old_grid = after.grid;
         after.grid.origin_x = match direction {
@@ -167,11 +166,6 @@ impl Core {
             if let Some(frame) = &mut after.shooting_frame {
                 crate::shooting_frame::resample_shooting_frame(frame, before_size, after_size)?;
             }
-            crate::vanishing_point::resample_vanishing_points(
-                &mut after.vanishing_points,
-                before_size,
-                after_size,
-            )?;
             for plane in after
                 .layers
                 .iter_mut()
@@ -186,6 +180,20 @@ impl Core {
             }
             after.selection = resample_raster_nearest(
                 &after.selection,
+                resize.width,
+                resize.height,
+                revision.get(),
+            )?;
+            for saved_selection in &mut after.saved_selection_masks {
+                saved_selection.raster = resample_raster_nearest(
+                    &saved_selection.raster,
+                    resize.width,
+                    resize.height,
+                    revision.get(),
+                )?;
+            }
+            after.fill_protection = resample_raster_nearest(
+                &after.fill_protection,
                 resize.width,
                 resize.height,
                 revision.get(),
@@ -211,10 +219,6 @@ impl Core {
             if let Some(frame) = &mut after.shooting_frame {
                 crate::shooting_frame::translate_shooting_frame(frame, offset)?;
             }
-            crate::vanishing_point::translate_vanishing_points(
-                &mut after.vanishing_points,
-                offset,
-            )?;
             for plane in after
                 .layers
                 .iter_mut()
@@ -223,6 +227,12 @@ impl Core {
                 plane.raster = place_raster(&plane.raster, after_size, offset, revision.get())?;
             }
             after.selection = place_raster(&after.selection, after_size, offset, revision.get())?;
+            for saved_selection in &mut after.saved_selection_masks {
+                saved_selection.raster =
+                    place_raster(&saved_selection.raster, after_size, offset, revision.get())?;
+            }
+            after.fill_protection =
+                place_raster(&after.fill_protection, after_size, offset, revision.get())?;
             translate_frame_metadata(&mut after.frames, offset)?;
             for guide in &mut after.guides {
                 guide.position = guide

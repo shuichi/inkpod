@@ -195,7 +195,7 @@ bool CatalogHasExactlyOneOwner(const CommandStateSet& states) noexcept {
         }
     }
     return states.size() == kProductionCommandStateCount
-        && kProductionCommandStateCount == 329U
+        && kProductionCommandStateCount == 321U
         && FindCommandState(states, kRetiredJobProgressCommand) == nullptr;
 }
 
@@ -233,7 +233,7 @@ bool ShortcutCatalogIsCompleteAndPrefixFree() {
         }
         return false;
     };
-    if (menu_commands.size() != 321U
+    if (menu_commands.size() != 313U
         || shortcuts.size() != kProductionCommandStateCount
         || shortcuts.size() != commands.size()
         || is_menu_command(IDM_COLOR_PIN)
@@ -469,6 +469,24 @@ int main() {
     inputs.workspace.batch_target_available = true;
     inputs.workspace.batch_pinned = true;
     states = ComputeCommandStates(inputs);
+    if (IsCommandEnabled(states, IDM_SELECTION_APPLY_SAVED_MASK)
+        || IsCommandEnabled(states, IDM_SELECTION_ADD_SAVED_MASK)
+        || IsCommandEnabled(states, IDM_SELECTION_SUBTRACT_SAVED_MASK)
+        || IsCommandEnabled(states, IDM_SELECTION_RENAME_SAVED_MASK)
+        || IsCommandEnabled(states, IDM_SELECTION_DELETE_SAVED_MASK)) {
+        return 27;
+    }
+    inputs.selection_view.saved_selection_available = true;
+    states = ComputeCommandStates(inputs);
+    if (!IsCommandEnabled(states, IDM_SELECTION_APPLY_SAVED_MASK)
+        || !IsCommandEnabled(states, IDM_SELECTION_ADD_SAVED_MASK)
+        || !IsCommandEnabled(states, IDM_SELECTION_SUBTRACT_SAVED_MASK)
+        || !IsCommandEnabled(states, IDM_SELECTION_RENAME_SAVED_MASK)
+        || !IsCommandEnabled(states, IDM_SELECTION_DELETE_SAVED_MASK)) {
+        return 28;
+    }
+    inputs.selection_view.saved_selection_available = false;
+    states = ComputeCommandStates(inputs);
     CommandStateInputs dirty_inputs = inputs;
     dirty_inputs.document.dirty = true;
     const CommandStateSet dirty_states = ComputeCommandStates(dirty_inputs);
@@ -686,7 +704,7 @@ int main() {
     tools.geometry_view_revision = 12U;
     tools.geometry_preview_active = true;
     tools.geometry_snap_bypass = true;
-    HandleActivePlaneTransition(tools, nullptr, INKPOD_TYPED_PLANE_SELECTION);
+    HandleActivePlaneTransition(tools, nullptr, UINT32_MAX);
     if (tools.active_tool != INKPOD_TOOL_PENCIL
         || !tools.geometry_gesture_samples.empty()
         || tools.geometry_base_revision != 0U

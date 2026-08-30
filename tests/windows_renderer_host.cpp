@@ -92,28 +92,6 @@ public:
         return inkpod_core_stroke_cancel(core_) == INKPOD_STATUS_OK;
     }
 
-    bool CreateAdjustmentTop() noexcept {
-        InkpodFilterInput filter{};
-        filter.struct_size = sizeof(filter);
-        filter.kind = INKPOD_FILTER_BRIGHTNESS_CONTRAST;
-        filter.parameter_0 = 100;
-        filter.parameter_1 = 0;
-        constexpr std::array<std::uint8_t, 18U> name{
-            'O', 'r', 'd', 'e', 'r', 'e', 'd', ' ', 'B', 'r', 'i', 'g', 'h', 't', 'n', 'e', 's', 's'};
-        InkpodDispatchResult dispatch{};
-        dispatch.struct_size = sizeof(dispatch);
-        std::uint64_t adjustment_layer{};
-        return inkpod_core_adjustment_create(
-                   core_,
-                   &filter,
-                   name.data(),
-                   name.size(),
-                   &dispatch,
-                   &adjustment_layer)
-                == INKPOD_STATUS_OK
-            && adjustment_layer != 0U;
-    }
-
     bool ConfigureSequence(std::uint8_t first_red = 32U, std::uint32_t width = 64U) {
         constexpr std::size_t count = 10U;
         constexpr std::uint32_t height = 32U;
@@ -1417,33 +1395,6 @@ int Run() {
         PrintSurfaceState("initial readback", host, first_canvas,
             first_surface_generation, first_canvas_window.window_);
         return 35;
-    }
-    inkpod::renderer::SnapshotEnvelope adjusted_envelope{};
-    const bool adjustment_created = first_core.CreateAdjustmentTop();
-    const bool adjustment_built = adjustment_created
-        && first_core.Build(first_sink->Route(), adjusted_envelope);
-    const bool adjustment_submitted = adjustment_built
-        && first_sink->Submit(adjusted_envelope);
-    const HRESULT adjustment_pixel_result = adjustment_submitted
-        ? ReadPresentedPixel(
-            host, first_canvas, first_surface_generation, 16U, 12U, ordered_pixel)
-        : E_UNEXPECTED;
-    if (!adjustment_submitted || adjustment_pixel_result != S_OK
-        || ordered_pixel.red < 24U || ordered_pixel.red > 27U
-        || ordered_pixel.green < 24U || ordered_pixel.green > 27U
-        || ordered_pixel.blue != 255U) {
-        std::fprintf(stderr,
-            "adjustment snapshot: created=%u built=%u submitted=%u result=%08lx rgb=%u,%u,%u\n",
-            static_cast<unsigned>(adjustment_created),
-            static_cast<unsigned>(adjustment_built),
-            static_cast<unsigned>(adjustment_submitted),
-            static_cast<unsigned long>(adjustment_pixel_result),
-            static_cast<unsigned>(ordered_pixel.red),
-            static_cast<unsigned>(ordered_pixel.green),
-            static_cast<unsigned>(ordered_pixel.blue));
-        PrintSurfaceState("adjustment readback", host, first_canvas,
-            first_surface_generation, first_canvas_window.window_);
-        return 37;
     }
     const inkpod::renderer::RendererResourceUsage initial_usage = host.ResourceUsage();
     inkpod::renderer::RendererSurfaceResourceUsage first_surface_usage{};

@@ -42,7 +42,6 @@ fn operation_info(
     let target = operation.target;
     output.layer_id = target.layer_id.unwrap_or(0);
     output.plane_id = target.plane_id.unwrap_or(0);
-    output.layer_kind = target.layer_kind.map_or(0, layer_kind_code);
     output.plane_kind = target.plane_kind.map_or(0, plane_type_code);
     output.missing_policy = match target.missing_policy {
         BatchMissingTargetPolicy::Skip => INKPOD_BATCH_MISSING_SKIP,
@@ -179,7 +178,6 @@ pub unsafe extern "C" fn inkpod_batch_graph_get_operation_target(
             feature_flags: INKPOD_FEATURE_NONE,
             layer_id: target.layer_id.unwrap_or(0),
             plane_id: target.plane_id.unwrap_or(0),
-            layer_kind: target.layer_kind.map_or(0, layer_kind_code),
             plane_kind: target.plane_kind.map_or(0, plane_type_code),
             missing_policy: match target.missing_policy {
                 BatchMissingTargetPolicy::Skip => INKPOD_BATCH_MISSING_SKIP,

@@ -8,17 +8,17 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 const MAGIC: [u8; 8] = *b"INKCUT\0\0";
 const HEADER_BYTES: usize = 64;
-const SCHEMA_VERSION: u32 = 2;
+const SCHEMA_VERSION: u32 = 3;
 const MAX_FILE_BYTES: usize = 16 * 1_024 * 1_024;
 const MAX_MEMBERS: usize = 64;
 const MAX_HISTORY: usize = 4096;
 const MAX_TEXT_BYTES: usize = 4096;
 const MAX_PATH_BYTES: usize = 255;
-const DIGEST_CONTEXT: &str = "org.inkpod.cut-descriptor.v2";
+const DIGEST_CONTEXT: &str = "org.inkpod.cut-descriptor.v3";
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 /// Runtime replay epoch for the current Cut canonical procedure semantics.
-pub const CUT_DESCRIPTOR_REPLAY_EPOCH: u32 = 24;
+pub const CUT_DESCRIPTOR_REPLAY_EPOCH: u32 = 25;
 
 /// Persisted Cut metadata.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -43,7 +43,6 @@ pub struct FileCutDefaults {
     pub safe_frame_ratio_milli: u32,
     pub maximum_close_ratio_milli: u32,
     pub anchor: u32,
-    pub initial_layer_kind: u32,
     pub pixel_format: u32,
 }
 
@@ -438,7 +437,6 @@ fn encode_defaults(output: &mut Vec<u8>, value: FileCutDefaults) {
         value.safe_frame_ratio_milli,
         value.maximum_close_ratio_milli,
         value.anchor,
-        value.initial_layer_kind,
         value.pixel_format,
     ] {
         push_u32(output, field);
@@ -456,7 +454,6 @@ fn decode_defaults(reader: &mut Reader<'_>) -> Result<FileCutDefaults, FormatErr
         safe_frame_ratio_milli: reader.u32()?,
         maximum_close_ratio_milli: reader.u32()?,
         anchor: reader.u32()?,
-        initial_layer_kind: reader.u32()?,
         pixel_format: reader.u32()?,
     })
 }

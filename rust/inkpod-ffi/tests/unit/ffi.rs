@@ -131,7 +131,6 @@ fn complete_cell_creation_plan_is_bounded_owned_and_atomic() {
         safe_frame_ratio_milli: 900,
         maximum_close_ratio_milli: 500,
         anchor: INKPOD_FRAME_ANCHOR_CENTER,
-        initial_layer_kind: INKPOD_LAYER_GRAYSCALE_COLORING,
         pixel_format: INKPOD_STORAGE_RGBA16,
         count: 3,
         reserved: 0,
@@ -328,7 +327,7 @@ fn persistence_checkpoint_and_compaction_abi_are_bounded_confirmed_and_atomic() 
             inkpod_core_get_persistence_info(core, &mut persistence),
             INKPOD_STATUS_OK
         );
-        assert_eq!(persistence.format_version, 29);
+        assert_eq!(persistence.format_version, 31);
         assert_eq!(persistence.open_strategy, INKPOD_NATIVE_OPEN_NOT_OPENED);
         assert_eq!(persistence.flags, 0);
 
@@ -1925,7 +1924,6 @@ fn typed_tree_selection_clipboard_view_and_multiview_abi_are_connected() {
             object_id: base_layer,
             parent_id: 0,
             destination_index: 0,
-            kind: 0,
             pixel_format: 0,
             opacity_milli: 0,
             name_utf8: ptr::null(),
@@ -1960,30 +1958,15 @@ fn typed_tree_selection_clipboard_view_and_multiview_abi_are_connected() {
         );
         let revision_before_plane_validation = info.document_revision;
         assert_eq!(
-            inkpod_core_validate_plane_creation(
-                ptr::null_mut(),
-                base_layer,
-                INKPOD_TYPED_PLANE_RASTER,
-                INKPOD_STORAGE_RGBA8,
-            ),
+            inkpod_core_validate_plane_creation(ptr::null_mut(), base_layer, INKPOD_STORAGE_RGBA8,),
             INKPOD_STATUS_INVALID_ARGUMENT
         );
         assert_eq!(
-            inkpod_core_validate_plane_creation(
-                core,
-                base_layer,
-                INKPOD_TYPED_PLANE_RASTER,
-                INKPOD_STORAGE_RGBA8,
-            ),
+            inkpod_core_validate_plane_creation(core, base_layer, INKPOD_STORAGE_RGBA8,),
             INKPOD_STATUS_OK
         );
         assert_eq!(
-            inkpod_core_validate_plane_creation(
-                core,
-                base_layer,
-                INKPOD_TYPED_PLANE_SELECTION,
-                INKPOD_STORAGE_BINARY8,
-            ),
+            inkpod_core_validate_plane_creation(core, base_layer, u32::MAX,),
             INKPOD_STATUS_INVALID_ARGUMENT
         );
         assert_eq!(
@@ -1995,9 +1978,12 @@ fn typed_tree_selection_clipboard_view_and_multiview_abi_are_connected() {
         let invalid_name = b"Invalid selection";
         let invalid_plane = InkpodTreeEdit {
             operation: INKPOD_TREE_CREATE_PLANE,
+            flags: INKPOD_NODE_VISIBLE | INKPOD_NODE_EDITABLE,
+            object_id: 0,
             parent_id: base_layer,
-            kind: INKPOD_TYPED_PLANE_SELECTION,
-            pixel_format: INKPOD_STORAGE_BINARY8,
+            destination_index: 0,
+            pixel_format: u32::MAX,
+            opacity_milli: 1000,
             name_utf8: invalid_name.as_ptr(),
             name_bytes: invalid_name.len() as u64,
             ..edit
@@ -2007,6 +1993,33 @@ fn typed_tree_selection_clipboard_view_and_multiview_abi_are_connected() {
             INKPOD_STATUS_INVALID_ARGUMENT
         );
         assert_eq!(result.revision, revision_before_invalid_tree);
+        let raster_name = b"Raster";
+        let canonical_plane = InkpodTreeEdit {
+            operation: INKPOD_TREE_CREATE_PLANE,
+            flags: INKPOD_NODE_VISIBLE | INKPOD_NODE_EDITABLE,
+            object_id: 0,
+            parent_id: base_layer,
+            destination_index: 0,
+            pixel_format: INKPOD_STORAGE_RGBA8,
+            opacity_milli: 1000,
+            name_utf8: raster_name.as_ptr(),
+            name_bytes: raster_name.len() as u64,
+            ..edit
+        };
+        let noncanonical_plane = InkpodTreeEdit {
+            opacity_milli: 900,
+            ..canonical_plane
+        };
+        assert_eq!(
+            inkpod_core_tree_edit(core, &noncanonical_plane, &mut result, &mut object_id),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(result.revision, revision_before_invalid_tree);
+        assert_eq!(
+            inkpod_core_tree_edit(core, &canonical_plane, &mut result, &mut object_id),
+            INKPOD_STATUS_OK
+        );
+        assert_ne!(object_id, 0);
         edit.operation = INKPOD_TREE_DELETE_LAYER;
         assert_eq!(
             inkpod_core_tree_edit(core, &edit, &mut result, &mut object_id),
@@ -2758,35 +2771,6 @@ fn filter_effect_adjustment_and_alpha_records_are_copied_and_atomic() {
         );
         assert_eq!(
             inkpod_core_filter_preview_cancel(core, &mut preview),
-            INKPOD_STATUS_OK
-        );
-
-        filter.kind = INKPOD_FILTER_BRIGHTNESS_CONTRAST;
-        filter.interpolation = 0;
-        filter.parameter_0 = 100;
-        filter.parameter_1 = 200;
-        filter.points = ptr::null();
-        filter.point_count = 0;
-        filter.point_stride_bytes = 0;
-        let name = b"Adjustment";
-        let mut layer_id = 0;
-        assert_eq!(
-            inkpod_core_adjustment_create(
-                core,
-                &filter,
-                name.as_ptr(),
-                name.len() as u64,
-                &mut dispatch,
-                &mut layer_id,
-            ),
-            INKPOD_STATUS_OK
-        );
-        assert_ne!(layer_id, 0);
-
-        filter.parameter_0 = 200;
-        filter.parameter_1 = -100;
-        assert_eq!(
-            inkpod_core_adjustment_update(core, layer_id, &filter, &mut dispatch),
             INKPOD_STATUS_OK
         );
 

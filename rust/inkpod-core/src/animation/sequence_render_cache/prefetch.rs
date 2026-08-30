@@ -149,7 +149,6 @@ impl Core {
             || self.active_stroke.is_some()
             || self.filter_preview.is_some()
             || self.shooting_frame_preview.is_some()
-            || self.vanishing_point_preview.is_some()
             || self.floating.is_some()
         {
             return;

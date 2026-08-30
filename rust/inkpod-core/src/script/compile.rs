@@ -431,7 +431,6 @@ pub(super) fn catalog(
             "set_layer_properties" => tuple(1, true, Some("layer_property")),
             "set_plane_properties" => tuple(1, true, Some("plane_property")),
             "convert_plane" => tuple(16_777_216, true, Some("plane_conversion")),
-            "convert_layer" => tuple(16_777_216, true, None),
             "mirror_document" => portable(16_777_216, Some("mirror")),
             "rotate_document" => portable(16_777_216, Some("rotate_90")),
             "resize_document" => (
@@ -488,37 +487,37 @@ pub(super) fn catalog(
                 Vec::new(),
                 "fill_gradient",
             ),
-            "apply_blur" => gesture_adjustment_bound(
+            "apply_blur" => gesture_alpha_bound(
                 literal_work_with_growth(1_100_000_000, 0),
                 &raster_effect_preconditions(),
                 Vec::new(),
             ),
-            "apply_airbrush" => gesture_adjustment_bound(
+            "apply_airbrush" => gesture_alpha_bound(
                 fixed_payload_work(52, 67_108_864, 0),
                 &raster_effect_preconditions(),
                 Vec::new(),
             ),
-            "apply_airbrush_gesture" => gesture_adjustment_bound(
+            "apply_airbrush_gesture" => gesture_alpha_bound(
                 list_payload_work(vec!["gesture", "samples"], 52, 20, 1_048_576, 1_048_576, 0),
                 &raster_effect_preconditions(),
                 Vec::new(),
             ),
-            "apply_stamp" => gesture_adjustment_bound(
+            "apply_stamp" => gesture_alpha_bound(
                 fixed_payload_work(32, 67_108_864, 0),
                 &raster_effect_preconditions(),
                 Vec::new(),
             ),
-            "apply_stamp_gesture" => gesture_adjustment_bound(
+            "apply_stamp_gesture" => gesture_alpha_bound(
                 list_payload_work(vec!["gesture", "samples"], 48, 20, 1_048_576, 1_048_576, 0),
                 &raster_effect_preconditions(),
                 Vec::new(),
             ),
-            "apply_blur_tool" => gesture_adjustment_bound(
+            "apply_blur_tool" => gesture_alpha_bound(
                 selection_payload_work(vec!["shape"], 1_100_000_000, 0),
                 &raster_effect_preconditions(),
                 Vec::new(),
             ),
-            "edit_plane_alpha" => gesture_adjustment_bound(
+            "edit_plane_alpha" => gesture_alpha_bound(
                 CatalogWorkFormula {
                     max_invocations: CatalogNumericExpression::Literal(1),
                     max_output_ids: CatalogNumericExpression::Literal(0),
@@ -535,21 +534,12 @@ pub(super) fn catalog(
                 &raster_effect_preconditions(),
                 Vec::new(),
             ),
-            "apply_alpha_gradient" => gesture_adjustment_bound(
+            "apply_alpha_gradient" => gesture_alpha_bound(
                 gradient_payload_work("gradient", 0),
                 &raster_effect_preconditions(),
                 Vec::new(),
             ),
-            "create_adjustment_layer" => gesture_adjustment_portable(
-                adjustment_payload_work("adjustment", 1, 1),
-                entity_result("layer"),
-            ),
-            "update_adjustment_layer" => gesture_adjustment_bound(
-                adjustment_payload_work("adjustment", 0, 0),
-                &["semantic_target", "state_coupled_adjustment"],
-                Vec::new(),
-            ),
-            "scoped_color_replace" => gesture_adjustment_bound(
+            "scoped_color_replace" => gesture_alpha_bound(
                 fixed_payload_work(37_748_800, 67_108_864, 0),
                 &[
                     "semantic_target",
@@ -599,22 +589,25 @@ pub(super) fn catalog(
                 ],
                 Vec::new(),
             ),
-            "selection_to_layer" => selection_bound(
+            "save_selection_mask" => selection_bound(
                 CatalogWorkFormula {
                     max_invocations: CatalogNumericExpression::Literal(1),
-                    max_output_ids: CatalogNumericExpression::Literal(2),
+                    max_output_ids: CatalogNumericExpression::Literal(1),
                     max_asset_bytes: CatalogNumericExpression::Literal(0),
                     max_work_units: CatalogNumericExpression::Literal(67_108_864),
                     max_output_growth: CatalogNumericExpression::Literal(1),
                 },
                 &["state_coupled_selection"],
-                entity_result("layer"),
+                entity_result_with_role("saved_selection_mask", "saved_selection_mask"),
             ),
-            "selection_from_layer" => selection_bound(
+            "apply_saved_selection_mask" => selection_bound(
                 literal_work(67_108_864),
                 &["semantic_target", "state_coupled_selection"],
                 Vec::new(),
             ),
+            "rename_saved_selection_mask" | "delete_saved_selection_mask" => {
+                selection_bound(literal_work(1), &["semantic_target"], Vec::new())
+            }
             "clear_selected_content" => selection_bound(
                 literal_work(67_108_864),
                 &[
@@ -643,11 +636,6 @@ pub(super) fn catalog(
                 shooting_frame_work(),
                 &["semantic_target"],
                 ordered_entity_result("shooting_frames", "shooting_frame", 0),
-            ),
-            "edit_vanishing_points" => frame_bound(
-                vanishing_point_work(),
-                &["semantic_target"],
-                ordered_entity_result("vanishing_points", "vanishing_point", 0),
             ),
             "light_table_set_global_opacity" => {
                 light_table_strict(literal_work(1), &["active_light_table_set"], Vec::new())
@@ -1101,7 +1089,7 @@ fn raster_effect_preconditions() -> [&'static str; 3] {
     ]
 }
 
-fn gesture_adjustment_bound(
+fn gesture_alpha_bound(
     work: CatalogWorkFormula,
     preconditions: &[&'static str],
     results: Vec<CatalogResultMetadata>,
@@ -1113,22 +1101,7 @@ fn gesture_adjustment_bound(
         None,
         false,
         results,
-        "gesture_alpha_adjustment",
-    )
-}
-
-fn gesture_adjustment_portable(
-    work: CatalogWorkFormula,
-    results: Vec<CatalogResultMetadata>,
-) -> EntryTuple {
-    (
-        InkScriptPortabilityClass::Portable,
-        Vec::new(),
-        work,
-        None,
-        false,
-        results,
-        "gesture_alpha_adjustment",
+        "gesture_alpha",
     )
 }
 
@@ -1176,7 +1149,7 @@ fn frame_bound(
         None,
         false,
         results,
-        "frame_vanishing",
+        "shooting_frame",
     )
 }
 
@@ -1277,25 +1250,6 @@ fn shooting_frame_work() -> CatalogWorkFormula {
     }
 }
 
-fn vanishing_point_work() -> CatalogWorkFormula {
-    CatalogWorkFormula {
-        max_invocations: CatalogNumericExpression::Literal(1),
-        max_output_ids: operation_count(&["edits"], 1_024, &[1, 2]),
-        max_asset_bytes: CatalogNumericExpression::CheckedMultiply(
-            Box::new(CatalogNumericExpression::ListLength {
-                path: vec!["edits"],
-                maximum: 1_024,
-            }),
-            Box::new(CatalogNumericExpression::Literal(48)),
-        ),
-        max_work_units: CatalogNumericExpression::ListLength {
-            path: vec!["edits"],
-            maximum: 1_024,
-        },
-        max_output_growth: operation_count(&["edits"], 1_024, &[1]),
-    }
-}
-
 fn frame_portability_rules(command: &str) -> Vec<(CatalogBooleanExpression, InkScriptPortability)> {
     match command {
         "edit_shooting_frame" => vec![(
@@ -1305,39 +1259,7 @@ fn frame_portability_rules(command: &str) -> Vec<(CatalogBooleanExpression, InkS
                 required_preconditions: vec!["shooting_frame_absent"],
             },
         )],
-        "edit_vanishing_points" => vec![(
-            greater_than_zero(operation_count(&["edits"], 1_024, &[4])),
-            InkScriptPortability {
-                class: InkScriptPortabilityClass::StrictSourceOnly,
-                required_preconditions: vec![
-                    "exact_document_revision",
-                    "state_coupled_vanishing_points",
-                ],
-            },
-        )],
         _ => Vec::new(),
-    }
-}
-
-fn operation_count(
-    list_path: &[&'static str],
-    maximum_items: u64,
-    operations: &[u64],
-) -> CatalogNumericExpression {
-    let mut operations = operations.iter().copied();
-    let first = operations.next().expect("operation set must be non-empty");
-    let mut condition = operation_condition(&["operation"], first);
-    for operation in operations {
-        condition = or_conditions(condition, operation_condition(&["operation"], operation));
-    }
-    CatalogNumericExpression::BoundedSum {
-        path: list_path.to_vec(),
-        maximum_items,
-        body: Box::new(CatalogNumericExpression::Conditional {
-            condition: Box::new(condition),
-            when_true: Box::new(CatalogNumericExpression::Literal(1)),
-            when_false: Box::new(CatalogNumericExpression::Literal(0)),
-        }),
     }
 }
 
@@ -1346,21 +1268,6 @@ fn operation_condition(path: &[&'static str], operation: u64) -> CatalogBooleanE
         comparison: CatalogComparison::Equal,
         left: CatalogNumericExpression::Field(path.to_vec()),
         right: CatalogNumericExpression::Literal(operation),
-    }
-}
-
-fn or_conditions(
-    left: CatalogBooleanExpression,
-    right: CatalogBooleanExpression,
-) -> CatalogBooleanExpression {
-    CatalogBooleanExpression::Or(Box::new(left), Box::new(right))
-}
-
-fn greater_than_zero(value: CatalogNumericExpression) -> CatalogBooleanExpression {
-    CatalogBooleanExpression::Compare {
-        comparison: CatalogComparison::Greater,
-        left: value,
-        right: CatalogNumericExpression::Literal(0),
     }
 }
 
@@ -1474,25 +1381,6 @@ fn gradient_payload_work(path: &'static str, growth: u64) -> CatalogWorkFormula 
             )),
         ),
         max_work_units: CatalogNumericExpression::Literal(67_108_864),
-        max_output_growth: CatalogNumericExpression::Literal(growth),
-    }
-}
-
-fn adjustment_payload_work(path: &'static str, output_ids: u64, growth: u64) -> CatalogWorkFormula {
-    CatalogWorkFormula {
-        max_invocations: CatalogNumericExpression::Literal(1),
-        max_output_ids: CatalogNumericExpression::Literal(output_ids),
-        max_asset_bytes: CatalogNumericExpression::CheckedAdd(
-            Box::new(CatalogNumericExpression::Literal(40)),
-            Box::new(CatalogNumericExpression::CheckedMultiply(
-                Box::new(CatalogNumericExpression::ListLength {
-                    path: vec![path, "points"],
-                    maximum: 64,
-                }),
-                Box::new(CatalogNumericExpression::Literal(8)),
-            )),
-        ),
-        max_work_units: CatalogNumericExpression::Literal(1),
         max_output_growth: CatalogNumericExpression::Literal(growth),
     }
 }

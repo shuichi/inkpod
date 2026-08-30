@@ -7,7 +7,7 @@ fn base_fixture() -> DocumentArchive {
             0xdc, 0xfe,
         ],
         document_id: 1,
-        cell_id: 5,
+        cell_id: 10,
         layer_id: 2,
         main_plane_id: 3,
         color_plane_id: 4,
@@ -86,79 +86,82 @@ fn base_fixture() -> DocumentArchive {
                     bytes: vec![1, 2, 3, 255],
                 }],
             },
+            FilePlane {
+                id: 5,
+                kind: PlaneKind::CurrentSelection,
+                pixel_format: PixelFormat::BinaryMask8,
+                width: 65,
+                height: 65,
+                tiles: Vec::new(),
+            },
+            FilePlane {
+                id: 11,
+                kind: PlaneKind::FillProtection,
+                pixel_format: PixelFormat::BinaryMask8,
+                width: 65,
+                height: 65,
+                tiles: Vec::new(),
+            },
         ],
-        document_metadata: None,
+        document_metadata: Some(FileDocumentMetadata {
+            active_layer_id: 2,
+            active_plane_id: 3,
+            selection_plane_id: 5,
+            fill_protection_plane_id: 11,
+            layers: vec![FileLayer {
+                id: 2,
+                name: "Coloring".to_owned(),
+                visible: true,
+                editable: true,
+                opacity_milli: 1_000,
+                planes: vec![
+                    FilePlaneProperties {
+                        id: 3,
+                        name: "Main".to_owned(),
+                        visible: true,
+                        editable: true,
+                        opacity_milli: 1_000,
+                    },
+                    FilePlaneProperties {
+                        id: 4,
+                        name: "Color".to_owned(),
+                        visible: true,
+                        editable: true,
+                        opacity_milli: 1_000,
+                    },
+                ],
+            }],
+            guides: Vec::new(),
+            grid: FileGrid {
+                origin_x: 0,
+                origin_y: 0,
+                spacing_x: 16,
+                spacing_y: 16,
+                subdivisions: 2,
+            },
+            color_chart: FileColorChart {
+                entries: Vec::new(),
+            },
+            color_chart_locked: false,
+            shooting_frame: None,
+            saved_selections: Vec::new(),
+        }),
         light_table_metadata: None,
-        adjustment_metadata: None,
     }
 }
 
 fn document_tree_fixture() -> DocumentArchive {
     let mut document = base_fixture();
-    document.planes.push(FilePlane {
-        id: 5,
-        kind: PlaneKind::Selection,
-        pixel_format: PixelFormat::BinaryMask8,
-        width: document.width,
-        height: document.height,
-        tiles: Vec::new(),
-    });
-    document.planes.push(FilePlane {
-        id: 11,
-        kind: PlaneKind::FillProtection,
-        pixel_format: PixelFormat::BinaryMask8,
-        width: document.width,
-        height: document.height,
-        tiles: Vec::new(),
-    });
-    document.document_metadata = Some(FileDocumentMetadata {
-        active_layer_id: 2,
-        active_plane_id: 3,
-        selection_plane_id: 5,
-        fill_protection_plane_id: 11,
-        layers: vec![FileLayer {
-            id: 2,
-            kind: LayerKind::BinaryColoring,
-            name: "Coloring".to_owned(),
-            visible: true,
-            editable: true,
-            opacity_milli: 1_000,
-            planes: vec![
-                FilePlaneProperties {
-                    id: 3,
-                    name: "Main".to_owned(),
-                    visible: true,
-                    editable: true,
-                    opacity_milli: 1_000,
-                },
-                FilePlaneProperties {
-                    id: 4,
-                    name: "Color".to_owned(),
-                    visible: true,
-                    editable: true,
-                    opacity_milli: 1_000,
-                },
-            ],
-        }],
-        guides: vec![FileGuide {
+    document
+        .document_metadata
+        .as_mut()
+        .unwrap()
+        .guides
+        .push(FileGuide {
             id: 6,
             axis: GuideAxis::Vertical,
             position: 32,
-        }],
-        grid: FileGrid {
-            origin_x: 0,
-            origin_y: 0,
-            spacing_x: 16,
-            spacing_y: 16,
-            subdivisions: 2,
-        },
-        color_chart: FileColorChart {
-            entries: Vec::new(),
-        },
-        color_chart_locked: false,
-        shooting_frame: None,
-        vanishing_points: Vec::new(),
-    });
+        });
     document
 }
 
@@ -221,7 +224,7 @@ fn io_001_manifest_and_blobs_round_trip() {
 
 #[test]
 fn non_current_container_versions_are_rejected_before_format_freeze() {
-    for version in [1_u32, 2_u32, 3_u32, FORMAT_VERSION - 1] {
+    for version in [1_u32, 2_u32, 3_u32, 6_u32, FORMAT_VERSION - 1] {
         let mut encoded = encode(&base_fixture()).unwrap();
         encoded[8..12].copy_from_slice(&version.to_le_bytes());
         assert!(matches!(
@@ -229,6 +232,19 @@ fn non_current_container_versions_are_rejected_before_format_freeze() {
             Err(FormatError::Unsupported("format version is not supported"))
         ));
     }
+
+    let mut encoded = encode(&document_tree_fixture()).unwrap();
+    let metadata_offset = encoded
+        .windows(4)
+        .position(|bytes| bytes == b"DOCM")
+        .unwrap();
+    encoded[metadata_offset + 4..metadata_offset + 8].copy_from_slice(&7_u32.to_le_bytes());
+    assert!(matches!(
+        decode(&encoded),
+        Err(FormatError::Unsupported(
+            "document metadata version is not supported"
+        ))
+    ));
 }
 
 fn procedure_file_fixture() -> NativeFile {
@@ -272,7 +288,7 @@ fn procedure_file_fixture() -> NativeFile {
 }
 
 #[test]
-fn io_001_v28_directory_digest_and_opaque_sections_round_trip() {
+fn io_001_v31_directory_digest_and_opaque_sections_round_trip() {
     let file = procedure_file_fixture();
     let bytes = encode_procedure_file(&file).unwrap();
     assert_eq!(&bytes[0..8], b"INKPOD\0\0");
@@ -302,7 +318,7 @@ fn io_001_v28_directory_digest_and_opaque_sections_round_trip() {
 }
 
 #[test]
-fn io_001_v28_accepts_checkpoint_and_rejects_noncurrent_missing_duplicate_overlap_and_bad_digest() {
+fn io_001_v31_accepts_checkpoint_and_rejects_noncurrent_missing_duplicate_overlap_and_bad_digest() {
     let file = procedure_file_fixture();
     let encoded = encode_procedure_file(&file).unwrap();
 
@@ -365,9 +381,9 @@ fn io_001_v28_accepts_checkpoint_and_rejects_noncurrent_missing_duplicate_overla
 }
 
 #[test]
-fn io_001_v28_streaming_cancel_keeps_existing_destination_and_removes_temp() {
+fn io_001_v31_streaming_cancel_keeps_existing_destination_and_removes_temp() {
     let directory = std::env::temp_dir().join(format!(
-        "inkpod-v28-cancel-test-{}-{}",
+        "inkpod-v31-cancel-test-{}-{}",
         std::process::id(),
         TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
     ));
@@ -394,9 +410,9 @@ fn io_001_v28_streaming_cancel_keeps_existing_destination_and_removes_temp() {
 }
 
 #[test]
-fn io_001_v28_atomic_save_replaces_an_existing_container() {
+fn io_001_v31_atomic_save_replaces_an_existing_container() {
     let directory = std::env::temp_dir().join(format!(
-        "inkpod-v28-replace-test-{}-{}",
+        "inkpod-v31-replace-test-{}-{}",
         std::process::id(),
         TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
     ));
@@ -518,56 +534,83 @@ fn shooting_frame_metadata_round_trips_and_rejects_invalid_geometry_and_ids() {
 }
 
 #[test]
-fn vanishing_point_metadata_round_trips_exact_depth_and_rejects_malformed_fields() {
+fn saved_selection_metadata_round_trips_and_rejects_malformed_relationships() {
     let mut document = document_tree_fixture();
-    let metadata = document.document_metadata.as_mut().unwrap();
-    metadata.layers.push(FileLayer {
-        id: 7,
-        kind: LayerKind::VanishingPoint,
-        name: "Perspective".to_owned(),
-        visible: true,
-        editable: true,
-        opacity_milli: 1_000,
-        planes: Vec::new(),
+    document.planes.push(FilePlane {
+        id: 12,
+        kind: PlaneKind::SavedSelection,
+        pixel_format: PixelFormat::BinaryMask8,
+        width: document.width,
+        height: document.height,
+        tiles: Vec::new(),
     });
-    metadata.vanishing_points.push(FileVanishingPoint {
-        id: 8,
-        layer_id: 7,
-        x_milli: -20_000,
-        y_milli: 96_000,
-        interval_milli_degrees: 1_000,
-        angle_milli_degrees: 179_999,
-        color: PixelValue::Rgba16([257, 2_000, 40_000, 65_535]),
-        opacity_milli: 1_000,
-        visible: true,
-    });
-    assert_eq!(decode(&encode(&document).unwrap()).unwrap(), document);
-
-    let mut invalid_angle = document.clone();
-    invalid_angle
+    document
         .document_metadata
         .as_mut()
         .unwrap()
-        .vanishing_points[0]
-        .angle_milli_degrees = 180_000;
+        .saved_selections
+        .push(FileSavedSelection {
+            id: 12,
+            name: "Character".to_owned(),
+        });
+    assert_eq!(decode(&encode(&document).unwrap()).unwrap(), document);
+
+    let mut colliding_id = document.clone();
+    let cell_id = colliding_id.cell_id;
+    colliding_id
+        .planes
+        .iter_mut()
+        .find(|plane| plane.id == 12)
+        .unwrap()
+        .id = cell_id;
+    colliding_id
+        .document_metadata
+        .as_mut()
+        .unwrap()
+        .saved_selections[0]
+        .id = cell_id;
     assert!(matches!(
-        encode(&invalid_angle),
+        encode(&colliding_id),
         Err(FormatError::Invalid(
-            "vanishing-point properties are invalid"
+            "document stable object IDs are not globally unique"
         ))
     ));
 
-    let mut wrong_layer = document;
-    wrong_layer
+    let mut missing_payload = document.clone();
+    missing_payload.planes.retain(|plane| plane.id != 12);
+    assert!(matches!(
+        encode(&missing_payload),
+        Err(FormatError::Invalid(
+            "document layer tree and plane payload IDs differ"
+        ))
+    ));
+
+    let mut wrong_format = document.clone();
+    wrong_format
+        .planes
+        .iter_mut()
+        .find(|plane| plane.id == 12)
+        .unwrap()
+        .pixel_format = PixelFormat::StraightRgba8;
+    assert!(matches!(
+        encode(&wrong_format),
+        Err(FormatError::Invalid("plane manifest is inconsistent"))
+    ));
+
+    let mut duplicate_name = document;
+    duplicate_name
         .document_metadata
         .as_mut()
         .unwrap()
-        .vanishing_points[0]
-        .layer_id = 2;
+        .saved_selections
+        .push(FileSavedSelection {
+            id: 13,
+            name: "Character".to_owned(),
+        });
     assert!(matches!(
-        encode(&wrong_layer),
+        encode(&duplicate_name),
         Err(FormatError::Invalid(
-            "vanishing-point properties are invalid"
+            "saved-selection properties are invalid"
         ))
     ));
 }
@@ -673,7 +716,12 @@ fn light_table_metadata_round_trips_and_rejects_malformed_source_relationships()
 
     let mut no_tree = light_table_fixture();
     no_tree.document_metadata = None;
-    assert!(matches!(encode(&no_tree), Err(FormatError::Invalid(_))));
+    assert!(matches!(
+        encode(&no_tree),
+        Err(FormatError::Invalid(
+            "current document metadata is required"
+        ))
+    ));
 }
 
 #[test]
@@ -689,79 +737,45 @@ fn io_001_rejects_truncation_and_checksum_mismatch() {
 }
 
 #[test]
-fn adjustment_metadata_round_trips_and_rejects_malformed_relationships() {
-    let mut document = document_tree_fixture();
-    document.document_metadata.as_mut().unwrap().layers.insert(
-        0,
-        FileLayer {
-            id: 100,
-            kind: LayerKind::Adjustment,
-            name: "Adjustment".to_owned(),
+fn every_layer_requires_exactly_one_main_line_and_color_plane() {
+    let document = document_tree_fixture();
+
+    let mut missing_color = document.clone();
+    missing_color.document_metadata.as_mut().unwrap().layers[0]
+        .planes
+        .retain(|plane| plane.id != 4);
+    assert!(matches!(
+        encode(&missing_color),
+        Err(FormatError::Invalid(_))
+    ));
+
+    let mut system_plane_in_layer = document;
+    system_plane_in_layer.planes.push(FilePlane {
+        id: 12,
+        kind: PlaneKind::CurrentSelection,
+        pixel_format: PixelFormat::BinaryMask8,
+        width: system_plane_in_layer.width,
+        height: system_plane_in_layer.height,
+        tiles: Vec::new(),
+    });
+    system_plane_in_layer
+        .document_metadata
+        .as_mut()
+        .unwrap()
+        .layers[0]
+        .planes
+        .push(FilePlaneProperties {
+            id: 12,
+            name: "Current selection".to_owned(),
             visible: true,
             editable: true,
             opacity_milli: 1_000,
-            planes: Vec::new(),
-        },
-    );
-    document.adjustment_metadata = Some(FileAdjustmentMetadata {
-        adjustments: vec![FileAdjustmentLayer {
-            layer_id: 100,
-            adjustment: inkpod_image::Adjustment::BrightnessContrast {
-                brightness_milli: 125,
-                contrast_milli: -250,
-            },
-        }],
-    });
-    assert_eq!(decode(&encode(&document).unwrap()).unwrap(), document);
-
-    let mut missing = document.clone();
-    missing.adjustment_metadata = None;
+        });
     assert!(matches!(
-        encode(&missing),
+        encode(&system_plane_in_layer),
         Err(FormatError::Invalid(
-            "adjustment layers require adjustment metadata"
+            "document layer contains a non-image plane"
         ))
-    ));
-
-    let mut duplicate = document.clone();
-    let duplicate_adjustment =
-        duplicate.adjustment_metadata.as_ref().unwrap().adjustments[0].clone();
-    duplicate
-        .adjustment_metadata
-        .as_mut()
-        .unwrap()
-        .adjustments
-        .push(duplicate_adjustment);
-    assert!(matches!(
-        encode(&duplicate),
-        Err(FormatError::Invalid("adjustment properties are invalid"))
-    ));
-
-    let mut wrong_layer = document.clone();
-    wrong_layer
-        .adjustment_metadata
-        .as_mut()
-        .unwrap()
-        .adjustments[0]
-        .layer_id = 101;
-    assert!(matches!(
-        encode(&wrong_layer),
-        Err(FormatError::Invalid("adjustment properties are invalid"))
-    ));
-
-    let mut invalid_parameter = document;
-    invalid_parameter
-        .adjustment_metadata
-        .as_mut()
-        .unwrap()
-        .adjustments[0]
-        .adjustment = inkpod_image::Adjustment::BrightnessContrast {
-        brightness_milli: 1_001,
-        contrast_milli: 0,
-    };
-    assert!(matches!(
-        encode(&invalid_parameter),
-        Err(FormatError::Invalid("adjustment properties are invalid"))
     ));
 }
 

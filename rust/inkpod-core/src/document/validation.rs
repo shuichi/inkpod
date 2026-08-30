@@ -1,23 +1,21 @@
 use super::*;
 
-pub(crate) const fn is_coloring_layer(kind: LayerKind) -> bool {
-    matches!(
-        kind,
-        LayerKind::BinaryColoring | LayerKind::GrayscaleColoring
-    )
-}
+pub(crate) const MAX_SAVED_SELECTION_MASKS: usize = 4_096;
 
 pub(crate) fn validate_plane_format(kind: PlaneType, format: PixelFormat) -> Result<(), CoreError> {
     let valid = match kind {
         PlaneType::MainLine => matches!(
             format,
-            PixelFormat::BinaryMask8 | PixelFormat::Grayscale8 | PixelFormat::Grayscale16
+            PixelFormat::BinaryMask8
+                | PixelFormat::Grayscale8
+                | PixelFormat::Grayscale16
+                | PixelFormat::StraightRgba8
+                | PixelFormat::StraightRgba16
         ),
         PlaneType::Color | PlaneType::Raster => matches!(
             format,
             PixelFormat::StraightRgba8 | PixelFormat::StraightRgba16
         ),
-        PlaneType::Selection => format == PixelFormat::BinaryMask8,
     };
     if valid {
         Ok(())
@@ -33,80 +31,66 @@ fn plane_type_index(kind: PlaneType) -> usize {
         PlaneType::MainLine => 0,
         PlaneType::Color => 1,
         PlaneType::Raster => 2,
-        PlaneType::Selection => 3,
     }
 }
 
 fn validate_layer_entries(
-    kind: LayerKind,
     entries: impl IntoIterator<Item = (PlaneType, PixelFormat)>,
 ) -> Result<(), CoreError> {
-    let mut counts = [0_usize; 4];
-    let mut plane_count = 0_usize;
-    let mut main_line_format = None;
-    let mut all_raster = true;
-    let mut all_selection = true;
+    let mut counts = [0_usize; 3];
     for (plane_kind, format) in entries {
         validate_plane_format(plane_kind, format)?;
         counts[plane_type_index(plane_kind)] += 1;
-        plane_count += 1;
-        if plane_kind == PlaneType::MainLine {
-            main_line_format = Some(format);
-        }
-        all_raster &= plane_kind == PlaneType::Raster;
-        all_selection &= plane_kind == PlaneType::Selection;
     }
     let count = |plane_kind| counts[plane_type_index(plane_kind)];
-    let valid = match kind {
-        LayerKind::BinaryColoring => {
-            count(PlaneType::MainLine) == 1
-                && count(PlaneType::Color) == 1
-                && count(PlaneType::Selection) == 0
-                && main_line_format == Some(PixelFormat::BinaryMask8)
-        }
-        LayerKind::GrayscaleColoring => {
-            count(PlaneType::MainLine) == 1
-                && count(PlaneType::Color) == 1
-                && count(PlaneType::Selection) == 0
-                && main_line_format.is_some_and(|format| {
-                    matches!(format, PixelFormat::Grayscale8 | PixelFormat::Grayscale16)
-                })
-        }
-        LayerKind::Raster => plane_count != 0 && all_raster,
-        LayerKind::Selection => plane_count != 0 && all_selection,
-        LayerKind::Frame | LayerKind::VanishingPoint | LayerKind::Adjustment => plane_count == 0,
-    };
+    let valid = count(PlaneType::MainLine) == 1 && count(PlaneType::Color) == 1;
     if valid {
         Ok(())
     } else {
         Err(CoreError::InvalidArgument(
-            "layer and plane types form a disallowed combination",
+            "a layer must contain exactly one main-line and one color plane",
         ))
     }
 }
 
-pub(crate) fn validate_layer_kind(kind: LayerKind, planes: &[PlaneNode]) -> Result<(), CoreError> {
+pub(crate) fn validate_layer(planes: &[PlaneNode]) -> Result<(), CoreError> {
     validate_layer_entries(
-        kind,
         planes
             .iter()
             .map(|plane| (plane.kind, plane.raster.format())),
     )
 }
 
-pub(crate) fn validate_layer_kind_with_candidate(
-    layer_kind: LayerKind,
-    planes: &[PlaneNode],
-    candidate_kind: PlaneType,
-    candidate_format: PixelFormat,
-) -> Result<(), CoreError> {
-    validate_layer_entries(
-        layer_kind,
-        planes
+pub(crate) fn unique_saved_selection_name(
+    saved_selections: &[SavedSelectionMask],
+    requested: &str,
+) -> String {
+    if !saved_selections
+        .iter()
+        .any(|selection| selection.name == requested)
+    {
+        return requested.to_owned();
+    }
+    for suffix in 2..=MAX_SAVED_SELECTION_MASKS {
+        let candidate = suffixed_node_name(requested, suffix);
+        if !saved_selections
             .iter()
-            .map(|plane| (plane.kind, plane.raster.format()))
-            .chain(std::iter::once((candidate_kind, candidate_format))),
-    )
+            .any(|selection| selection.name == candidate)
+        {
+            return candidate;
+        }
+    }
+    suffixed_node_name(requested, saved_selections.len() + 1)
+}
+
+fn suffixed_node_name(requested: &str, suffix: usize) -> String {
+    let suffix = format!(" {suffix}");
+    let maximum_base_bytes = 1_024_usize.saturating_sub(suffix.len());
+    let mut end = requested.len().min(maximum_base_bytes);
+    while !requested.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}{suffix}", &requested[..end])
 }
 
 pub(crate) fn unique_layer_name(layers: &[LayerNode], requested: &str) -> String {
@@ -202,12 +186,16 @@ mod tests {
     fn layer_topology_rejects_missing_duplicate_and_incompatible_required_planes() {
         let main = plane(1, PlaneType::MainLine, PixelFormat::BinaryMask8);
         let color = plane(2, PlaneType::Color, PixelFormat::StraightRgba8);
-        assert!(validate_layer_kind(LayerKind::BinaryColoring, &[main.clone(), color]).is_ok());
+        assert!(validate_layer(&[main.clone(), color]).is_ok());
+        assert!(validate_layer(std::slice::from_ref(&main)).is_err());
+        assert!(validate_layer(&[main.clone(), main]).is_err());
+        assert!(validate_plane_format(PlaneType::MainLine, PixelFormat::StraightRgba8).is_ok());
+        let rgba_main = plane(3, PlaneType::MainLine, PixelFormat::StraightRgba16);
+        let rgba_color = plane(4, PlaneType::Color, PixelFormat::StraightRgba16);
+        assert!(validate_layer(&[rgba_main, rgba_color]).is_ok());
         assert!(
-            validate_layer_kind(LayerKind::BinaryColoring, std::slice::from_ref(&main)).is_err()
+            validate_plane_format(PlaneType::MainLine, PixelFormat::PremultipliedBgra8).is_err()
         );
-        assert!(validate_layer_kind(LayerKind::BinaryColoring, &[main.clone(), main]).is_err());
-        assert!(validate_plane_format(PlaneType::MainLine, PixelFormat::StraightRgba8).is_err());
     }
 
     #[test]

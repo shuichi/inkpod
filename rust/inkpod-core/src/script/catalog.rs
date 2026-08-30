@@ -527,7 +527,7 @@ mod tests {
 
     fn arguments(count: u32) -> InkScriptTypedValue {
         let source = format!(
-            "inkscript_fragment 2; requires {{ procedure_catalog = 4; replay_epoch = 25; }} program {{ step \"test\" {{ enabled = true; invoke catalog_test {{ count = {count}; values = [2, 3]; }}; }} }}"
+            "inkscript_fragment 2; requires {{ procedure_catalog = 5; replay_epoch = 27; }} program {{ step \"test\" {{ enabled = true; invoke catalog_test {{ count = {count}; values = [2, 3]; }}; }} }}"
         );
         let source = InkScriptSource::new(InkScriptSourceId::new(208), source.as_bytes()).unwrap();
         let parsed = parse_inkscript(&source);

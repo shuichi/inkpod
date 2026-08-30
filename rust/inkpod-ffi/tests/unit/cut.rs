@@ -50,7 +50,6 @@ fn defaults() -> InkpodCutDefaultsInput {
         safe_frame_ratio_milli: 900,
         maximum_close_ratio_milli: 500,
         anchor: INKPOD_FRAME_ANCHOR_CENTER,
-        initial_layer_kind: INKPOD_LAYER_BINARY_COLORING,
         pixel_format: INKPOD_STORAGE_RGBA8,
         reserved: 0,
     }

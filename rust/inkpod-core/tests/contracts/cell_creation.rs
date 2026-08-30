@@ -1,6 +1,6 @@
 use super::*;
 
-fn image_options(kind: LayerKind, pixel_format: PixelFormat) -> CellCreationOptions {
+fn image_options(pixel_format: PixelFormat) -> CellCreationOptions {
     CellCreationOptions {
         sizing: CellSizing::ImagePixels {
             width: 1_920,
@@ -12,7 +12,6 @@ fn image_options(kind: LayerKind, pixel_format: PixelFormat) -> CellCreationOpti
         safe_frame_ratio_milli: 900,
         maximum_close_ratio_milli: 500,
         anchor: FrameAnchor::Center,
-        initial_layer_kind: kind,
         pixel_format,
         count: 3,
     }
@@ -20,11 +19,7 @@ fn image_options(kind: LayerKind, pixel_format: PixelFormat) -> CellCreationOpti
 
 #[test]
 fn cell_creation_image_and_frame_modes_have_one_canonical_geometry() {
-    let image = plan_cell_creation(&image_options(
-        LayerKind::GrayscaleColoring,
-        PixelFormat::StraightRgba16,
-    ))
-    .unwrap();
+    let image = plan_cell_creation(&image_options(PixelFormat::StraightRgba16)).unwrap();
     assert_eq!(image.len(), 3);
     let item = image.item(0).unwrap();
     assert_eq!((item.width(), item.height()), (1_920, 1_080));
@@ -88,7 +83,6 @@ fn cell_creation_image_and_frame_modes_have_one_canonical_geometry() {
         safe_frame_ratio_milli: 900,
         maximum_close_ratio_milli: 500,
         anchor: FrameAnchor::BottomRight,
-        initial_layer_kind: LayerKind::BinaryColoring,
         pixel_format: PixelFormat::StraightRgba8,
         count: 1,
     })
@@ -135,7 +129,6 @@ fn cell_creation_image_and_frame_modes_have_one_canonical_geometry() {
             safe_frame_ratio_milli: 900,
             maximum_close_ratio_milli: 500,
             anchor,
-            initial_layer_kind: LayerKind::BinaryColoring,
             pixel_format: PixelFormat::StraightRgba8,
             count: 1,
         })
@@ -167,83 +160,58 @@ fn cell_creation_image_and_frame_modes_have_one_canonical_geometry() {
 }
 
 #[test]
-fn every_initial_layer_and_depth_is_created_and_reopens_without_loss() {
-    let kinds = [
-        LayerKind::BinaryColoring,
-        LayerKind::GrayscaleColoring,
-        LayerKind::Raster,
-        LayerKind::Selection,
-        LayerKind::Frame,
-        LayerKind::VanishingPoint,
-        LayerKind::Adjustment,
-    ];
+fn standard_initial_layer_at_each_depth_is_created_and_reopens_without_loss() {
     let formats = [PixelFormat::StraightRgba8, PixelFormat::StraightRgba16];
-    for (kind_index, kind) in kinds.into_iter().enumerate() {
-        for (format_index, format) in formats.into_iter().enumerate() {
-            let mut options = image_options(kind, format);
-            options.sizing = CellSizing::ImagePixels {
-                width: 16,
-                height: 8,
-            };
-            options.count = 1;
-            let plan = plan_cell_creation(&options).unwrap();
-            let item = plan.item(0).unwrap();
-            let mut core = Core::new();
-            let uuid = 0x2000_u128 + (kind_index * 2 + format_index) as u128;
-            let created = core.new_cell_from_creation_plan(item, uuid).unwrap();
-            assert!(!created.dirty);
-            assert!(!created.can_undo);
-            assert_eq!(created.frames, item.frames());
-            let layers = core.layers().unwrap();
-            assert_eq!(layers[0].kind, kind);
-            let primary = layers
+    for (format_index, format) in formats.into_iter().enumerate() {
+        let mut options = image_options(format);
+        options.sizing = CellSizing::ImagePixels {
+            width: 16,
+            height: 8,
+        };
+        options.count = 1;
+        let plan = plan_cell_creation(&options).unwrap();
+        let item = plan.item(0).unwrap();
+        let mut core = Core::new();
+        let uuid = 0x2000_u128 + format_index as u128;
+        let created = core.new_cell_from_creation_plan(item, uuid).unwrap();
+        assert!(!created.dirty);
+        assert!(!created.can_undo);
+        assert_eq!(created.frames, item.frames());
+        let layers = core.layers().unwrap();
+        assert_eq!(layers.len(), 1);
+        assert_eq!(layers[0].planes.len(), 2);
+        assert_eq!(
+            layers[0]
+                .planes
                 .iter()
-                .find(|layer| {
-                    layer
-                        .planes
-                        .iter()
-                        .any(|plane| plane.kind == PlaneType::Color)
-                })
-                .unwrap();
-            assert_eq!(
-                primary
-                    .planes
-                    .iter()
-                    .find(|plane| plane.kind == PlaneType::Color)
-                    .unwrap()
-                    .pixel_format,
-                format
-            );
-            if kind == LayerKind::GrayscaleColoring {
-                assert_eq!(
-                    layers[0]
-                        .planes
-                        .iter()
-                        .find(|plane| plane.kind == PlaneType::MainLine)
-                        .unwrap()
-                        .pixel_format,
-                    if format == PixelFormat::StraightRgba16 {
-                        PixelFormat::Grayscale16
-                    } else {
-                        PixelFormat::Grayscale8
-                    }
-                );
-            }
+                .find(|plane| plane.kind == PlaneType::MainLine)
+                .unwrap()
+                .pixel_format,
+            PixelFormat::BinaryMask8
+        );
+        assert_eq!(
+            layers[0]
+                .planes
+                .iter()
+                .find(|plane| plane.kind == PlaneType::Color)
+                .unwrap()
+                .pixel_format,
+            format
+        );
 
-            let path = std::env::temp_dir().join(format!(
-                "inkpod-cell-creation-{}-{kind_index}-{format_index}.inkpod",
-                std::process::id()
-            ));
-            core.save(&path)
-                .unwrap_or_else(|error| panic!("save failed for {kind:?}/{format:?}: {error}"));
-            let mut reopened = Core::new();
-            let info = reopened
-                .open(&path)
-                .unwrap_or_else(|error| panic!("reopen failed for {kind:?}/{format:?}: {error}"));
-            assert_eq!(info.frames, created.frames);
-            assert_eq!(reopened.layers().unwrap(), layers);
-            std::fs::remove_file(path).unwrap();
-        }
+        let path = std::env::temp_dir().join(format!(
+            "inkpod-cell-creation-{}-{format_index}.inkpod",
+            std::process::id()
+        ));
+        core.save(&path)
+            .unwrap_or_else(|error| panic!("save failed for {format:?}: {error}"));
+        let mut reopened = Core::new();
+        let info = reopened
+            .open(&path)
+            .unwrap_or_else(|error| panic!("reopen failed for {format:?}: {error}"));
+        assert_eq!(info.frames, created.frames);
+        assert_eq!(reopened.layers().unwrap(), layers);
+        std::fs::remove_file(path).unwrap();
     }
 }
 
@@ -252,11 +220,11 @@ fn invalid_overflow_and_failed_uuid_do_not_publish_or_consume_ids() {
     let invalid = [
         CellCreationOptions {
             count: 0,
-            ..image_options(LayerKind::BinaryColoring, PixelFormat::StraightRgba8)
+            ..image_options(PixelFormat::StraightRgba8)
         },
         CellCreationOptions {
             count: MAX_CELL_CREATION_COUNT + 1,
-            ..image_options(LayerKind::BinaryColoring, PixelFormat::StraightRgba8)
+            ..image_options(PixelFormat::StraightRgba8)
         },
         CellCreationOptions {
             sizing: CellSizing::FrameMicrometres {
@@ -266,11 +234,11 @@ fn invalid_overflow_and_failed_uuid_do_not_publish_or_consume_ids() {
             dpi_x_milli: MAX_CELL_CREATION_DPI_MILLI,
             dpi_y_milli: MAX_CELL_CREATION_DPI_MILLI,
             margin_milli: 1_000,
-            ..image_options(LayerKind::BinaryColoring, PixelFormat::StraightRgba8)
+            ..image_options(PixelFormat::StraightRgba8)
         },
         CellCreationOptions {
             pixel_format: PixelFormat::BinaryMask8,
-            ..image_options(LayerKind::BinaryColoring, PixelFormat::StraightRgba8)
+            ..image_options(PixelFormat::StraightRgba8)
         },
     ];
     for options in invalid {
@@ -278,12 +246,12 @@ fn invalid_overflow_and_failed_uuid_do_not_publish_or_consume_ids() {
     }
     let maximum = plan_cell_creation(&CellCreationOptions {
         count: MAX_CELL_CREATION_COUNT,
-        ..image_options(LayerKind::BinaryColoring, PixelFormat::StraightRgba8)
+        ..image_options(PixelFormat::StraightRgba8)
     })
     .unwrap();
     assert_eq!(maximum.len(), MAX_CELL_CREATION_COUNT as usize);
 
-    let options = image_options(LayerKind::Raster, PixelFormat::StraightRgba16);
+    let options = image_options(PixelFormat::StraightRgba16);
     let plan = plan_cell_creation(&CellCreationOptions {
         count: 1,
         ..options

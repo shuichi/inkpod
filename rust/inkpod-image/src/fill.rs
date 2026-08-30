@@ -554,7 +554,11 @@ fn validate_fill_inputs(
     }
     if !matches!(
         main_line.format(),
-        PixelFormat::BinaryMask8 | PixelFormat::Grayscale8 | PixelFormat::Grayscale16
+        PixelFormat::BinaryMask8
+            | PixelFormat::Grayscale8
+            | PixelFormat::Grayscale16
+            | PixelFormat::StraightRgba8
+            | PixelFormat::StraightRgba16
     ) || !matches!(
         color_plane.format(),
         PixelFormat::StraightRgba8 | PixelFormat::StraightRgba16
@@ -709,7 +713,15 @@ fn hard_boundary(
     }
     // Binary main lines participate in legacy topology. Grayscale coverage is
     // display-only; a broken color-plane trace must still leak by specification.
-    if matches!(main_line.pixel(x, y)?, PixelValue::Binary(255)) {
+    // Imported RGBA main lines retain white and alpha exactly. Only nonwhite,
+    // nontransparent source pixels are protected line boundaries; unlike color
+    // traces they cannot be consumed by inclusion filling.
+    let line = main_line.pixel(x, y)?;
+    if matches!(line, PixelValue::Binary(255))
+        || line
+            .rgba16()
+            .is_some_and(|rgba| rgba[3] != 0 && rgba[..3] != [u16::MAX; 3])
+    {
         return Ok(true);
     }
     let value = color_plane.pixel(x, y)?;

@@ -114,7 +114,6 @@ fn parse_defaults(input: &InkpodCutDefaultsInput) -> Result<CutDefaults, u32> {
         safe_frame_ratio_milli: input.safe_frame_ratio_milli,
         maximum_close_ratio_milli: input.maximum_close_ratio_milli,
         anchor,
-        initial_layer_kind: parse_layer_kind(input.initial_layer_kind)?,
         pixel_format: parse_storage_format(input.pixel_format)?,
     })
 }
@@ -220,7 +219,6 @@ fn write_cut_info(output: &mut InkpodCutInfo, info: inkpod_core::CutInfo) {
     output.safe_frame_ratio_milli = info.defaults.safe_frame_ratio_milli;
     output.maximum_close_ratio_milli = info.defaults.maximum_close_ratio_milli;
     output.anchor = anchor_code(info.defaults.anchor);
-    output.initial_layer_kind = layer_kind_code(info.defaults.initial_layer_kind);
     output.pixel_format = storage_format_code(info.defaults.pixel_format);
 }
 

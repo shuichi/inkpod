@@ -63,8 +63,6 @@ pub struct CutDefaults {
     pub maximum_close_ratio_milli: u32,
     /// Reference and maximum-close alignment anchor.
     pub anchor: FrameAnchor,
-    /// Initial layer kind copied to a new Cell.
-    pub initial_layer_kind: LayerKind,
     /// Initial exact-depth color storage format.
     pub pixel_format: PixelFormat,
 }
@@ -80,7 +78,6 @@ impl CutDefaults {
             safe_frame_ratio_milli: self.safe_frame_ratio_milli,
             maximum_close_ratio_milli: self.maximum_close_ratio_milli,
             anchor: self.anchor,
-            initial_layer_kind: self.initial_layer_kind,
             pixel_format: self.pixel_format,
             count,
         };
@@ -1089,7 +1086,6 @@ fn defaults_to_file(value: CutDefaults) -> FileCutDefaults {
         safe_frame_ratio_milli: value.safe_frame_ratio_milli,
         maximum_close_ratio_milli: value.maximum_close_ratio_milli,
         anchor: frame_anchor_code(value.anchor),
-        initial_layer_kind: layer_kind_code(value.initial_layer_kind),
         pixel_format: pixel_format_code(value.pixel_format),
     }
 }
@@ -1114,7 +1110,6 @@ fn defaults_from_file(value: FileCutDefaults) -> Result<CutDefaults, CoreError> 
         safe_frame_ratio_milli: value.safe_frame_ratio_milli,
         maximum_close_ratio_milli: value.maximum_close_ratio_milli,
         anchor: frame_anchor_from_code(value.anchor)?,
-        initial_layer_kind: layer_kind_from_code(value.initial_layer_kind)?,
         pixel_format: pixel_format_from_code(value.pixel_format)?,
     };
     defaults.cell_creation_options(1)?;
@@ -1228,31 +1223,6 @@ fn frame_anchor_from_code(value: u32) -> Result<FrameAnchor, CoreError> {
     }
 }
 
-const fn layer_kind_code(value: LayerKind) -> u32 {
-    match value {
-        LayerKind::BinaryColoring => 1,
-        LayerKind::GrayscaleColoring => 2,
-        LayerKind::Raster => 3,
-        LayerKind::Selection => 4,
-        LayerKind::Frame => 5,
-        LayerKind::VanishingPoint => 6,
-        LayerKind::Adjustment => 7,
-    }
-}
-
-fn layer_kind_from_code(value: u32) -> Result<LayerKind, CoreError> {
-    match value {
-        1 => Ok(LayerKind::BinaryColoring),
-        2 => Ok(LayerKind::GrayscaleColoring),
-        3 => Ok(LayerKind::Raster),
-        4 => Ok(LayerKind::Selection),
-        5 => Ok(LayerKind::Frame),
-        6 => Ok(LayerKind::VanishingPoint),
-        7 => Ok(LayerKind::Adjustment),
-        _ => Err(CoreError::Format("Cut layer kind is unknown".to_owned())),
-    }
-}
-
 const fn pixel_format_code(value: PixelFormat) -> u32 {
     match value {
         PixelFormat::BinaryMask8 => 1,
@@ -1303,7 +1273,6 @@ mod tests {
             safe_frame_ratio_milli: 900,
             maximum_close_ratio_milli: 500,
             anchor: FrameAnchor::Center,
-            initial_layer_kind: LayerKind::BinaryColoring,
             pixel_format: PixelFormat::StraightRgba8,
         }
     }

@@ -11,10 +11,7 @@ pub struct InkpodSnapshot {
     pub(crate) tiles: Box<[InkpodSnapshotTile]>,
     pub(crate) guides: Box<[InkpodSnapshotGuide]>,
     pub(crate) render_passes: Box<[InkpodSnapshotRenderPass]>,
-    pub(crate) adjustment_luts_rgb8: Box<[u8]>,
     pub(crate) shooting_frames: Box<[InkpodShootingFrameInfo]>,
-    pub(crate) vanishing_points: Box<[InkpodVanishingPointInfo]>,
-    pub(crate) radial_guides: Box<[InkpodSnapshotRadialGuide]>,
 }
 
 pub struct InkpodSubpalette {

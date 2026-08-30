@@ -34,15 +34,15 @@ const ASSET_BYTES: u64 = 262_144;
 const EXPECTED_SOURCE_BYTES: usize = 371_176;
 const EXPECTED_TOKENS: usize = 7_965;
 const EXPECTED_CST_NODES: usize = 2_000;
-const EXPECTED_INPUT_NATIVE_BYTES: u64 = 24_288;
-const EXPECTED_RUNNER_NATIVE_READ_BYTES: u64 = 36_432;
+const EXPECTED_INPUT_NATIVE_BYTES: u64 = 23_872;
+const EXPECTED_RUNNER_NATIVE_READ_BYTES: u64 = 35_808;
 const EXPECTED_STATEMENTS: u64 = 774;
 const EXPECTED_INVOCATIONS: u64 = 768;
 const EXPECTED_COMMITS: u64 = 384;
 const EXPECTED_NO_OPS: u64 = 384;
-const EXPECTED_INSTALLED_OUTPUT_BYTES: u64 = 91_104;
+const EXPECTED_INSTALLED_OUTPUT_BYTES: u64 = 90_688;
 const EXPECTED_REPLAYED_COMMITS: u64 = 256;
-const EXPECTED_CHECKSUM: u64 = 0xb653_73bd_ba27_b215;
+const EXPECTED_CHECKSUM: u64 = 0xae0d_0468_1b2f_5a63;
 
 struct SourceFixture {
     source: InkScriptSource,
@@ -523,7 +523,7 @@ fn build_source_fixture() -> SourceFixture {
     let asset_id = raster_asset_id(payload.clone());
     let encoded = base64(&payload);
     let mut text = String::from(
-        "inkscript 2;\nrequires { procedure_catalog = 4; replay_epoch = 25; }\ninputs { folder \"in\"; }\nparameters {}\nbindings { let paint = select plane { plane_kind = color; cardinality = one; missing = error; }; }\nprogram {\nassert selection { empty = true; };\n",
+        "inkscript 2;\nrequires { procedure_catalog = 5; replay_epoch = 27; }\ninputs { folder \"in\"; }\nparameters {}\nbindings { let paint = select plane { plane_kind = color; cardinality = one; missing = error; }; }\nprogram {\nassert selection { empty = true; };\n",
     );
     for index in 0..STEP_COUNT {
         let name = probe_name(index / 2);
@@ -601,7 +601,7 @@ fn build_inputs() -> Vec<InputFixture> {
                 .build_procedure_file(Some(core.current_state), Some(editor))
                 .expect("quick input must encode");
             let bytes = encode_procedure_file(&file).expect("quick input bytes must encode");
-            assert_eq!(bytes.len(), 6_072);
+            assert_eq!(bytes.len(), 5_968);
             let label = format!("cell{number}.inkpod");
             let path = existing(&format!("root:/in/{label}"), object, 40);
             let fingerprint = NativeInputFingerprint::new(

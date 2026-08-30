@@ -47,13 +47,13 @@ impl PrimitiveId {
     }
     /// Primitive ID for paper/frame metadata replacement.
     pub const UPDATE_PAPER_FRAMES: Self = Self(0x0001_0001);
-    /// Primitive ID for creating one typed layer.
+    /// Primitive ID for creating one paint layer.
     pub const CREATE_LAYER: Self = Self(0x0002_0001);
-    /// Primitive ID for duplicating one typed layer.
+    /// Primitive ID for duplicating one paint layer.
     pub const DUPLICATE_LAYER: Self = Self(0x0002_0002);
-    /// Primitive ID for deleting one typed layer.
+    /// Primitive ID for deleting one paint layer.
     pub const DELETE_LAYER: Self = Self(0x0002_0003);
-    /// Primitive ID for reordering one typed layer.
+    /// Primitive ID for reordering one paint layer.
     pub const REORDER_LAYER: Self = Self(0x0002_0004);
     /// Primitive ID for replacing one layer's properties.
     pub const SET_LAYER_PROPERTIES: Self = Self(0x0002_0005);
@@ -71,8 +71,6 @@ impl PrimitiveId {
     pub const CONVERT_PLANE: Self = Self(0x0002_0016);
     /// Primitive ID for merging one raster plane into its lower sibling.
     pub const MERGE_PLANE: Self = Self(0x0002_0017);
-    /// Primitive ID for converting one coloring layer.
-    pub const CONVERT_LAYER: Self = Self(0x0002_0021);
     /// Primitive ID for merging one layer into its lower sibling.
     pub const MERGE_LAYER: Self = Self(0x0002_0022);
     /// Primitive ID for deleting every hidden layer as one atomic topology edit.
@@ -81,8 +79,6 @@ impl PrimitiveId {
     pub const EDIT_TARGETS: Self = Self(0x0002_0030);
     /// Primitive ID for one typed angled shooting-frame object edit.
     pub const EDIT_SHOOTING_FRAME: Self = Self(0x0002_0050);
-    /// Primitive ID for one atomic bounded vanishing-point edit batch.
-    pub const EDIT_VANISHING_POINTS: Self = Self(0x0002_0060);
     /// Primitive ID for main-line display color replacement.
     pub const SET_MAIN_LINE_COLOR: Self = Self(0x0003_0001);
     /// Primitive ID for ordered palette replacement.
@@ -119,10 +115,6 @@ impl PrimitiveId {
     pub const APPLY_ALPHA_GRADIENT: Self = Self(0x0005_001a);
     /// Primitive ID for committing a filter operation.
     pub const APPLY_FILTER: Self = Self(0x0005_0020);
-    /// Primitive ID for creating an adjustment layer.
-    pub const CREATE_ADJUSTMENT_LAYER: Self = Self(0x0005_0030);
-    /// Primitive ID for replacing an adjustment layer's parameters.
-    pub const UPDATE_ADJUSTMENT_LAYER: Self = Self(0x0005_0031);
     /// Primitive ID for exact bounded raster color replacement.
     pub const REPLACE_RASTER_COLORS: Self = Self(0x0005_0040);
     /// Primitive ID for separating bounded raster colors.
@@ -131,7 +123,7 @@ impl PrimitiveId {
     pub const RESTORE_SELECTED_PIXELS: Self = Self(0x0005_0042);
     /// Primitive ID for exact region-scoped raster color replacement.
     pub const SCOPED_COLOR_REPLACE: Self = Self(0x0005_0043);
-    /// Primitive ID for one ordered atomic Batch v4 operation list.
+    /// Primitive ID for one ordered atomic Batch v5 operation list.
     pub const APPLY_BATCH_OPERATIONS: Self = Self(0x0005_0044);
     /// Primitive ID for replacing one existing raster plane from an immutable asset.
     pub const IMPORT_RASTER_ASSET: Self = Self(0x0009_0001);
@@ -157,10 +149,14 @@ impl PrimitiveId {
     pub const SELECT_COLOR: Self = Self(0x0006_0005);
     /// Primitive ID for selecting visible composite pixels outside an output-color guard.
     pub const SELECT_OUTPUT_COLOR_GUARD: Self = Self(0x0006_0006);
-    /// Primitive ID for converting the selection mask into a layer.
-    pub const SELECTION_TO_LAYER: Self = Self(0x0006_0010);
-    /// Primitive ID for combining a selection layer into the active mask.
-    pub const SELECTION_FROM_LAYER: Self = Self(0x0006_0011);
+    /// Primitive ID for saving the active selection mask in the document mask collection.
+    pub const SAVE_SELECTION_MASK: Self = Self(0x0006_0012);
+    /// Primitive ID for combining one saved selection mask into the active mask.
+    pub const APPLY_SAVED_SELECTION_MASK: Self = Self(0x0006_0013);
+    /// Primitive ID for renaming one saved selection mask.
+    pub const RENAME_SAVED_SELECTION_MASK: Self = Self(0x0006_0014);
+    /// Primitive ID for deleting one saved selection mask.
+    pub const DELETE_SAVED_SELECTION_MASK: Self = Self(0x0006_0015);
     /// Primitive ID for clearing selected content on a captured target.
     pub const CLEAR_SELECTED_CONTENT: Self = Self(0x0006_0020);
     /// Primitive ID for committing one typed floating selection.
@@ -238,14 +234,14 @@ impl StateId {
 
 impl ReplayEpoch {
     /// Replay epoch used by every built-in primitive in this Core version.
-    pub const CURRENT: Self = Self(25);
+    pub const CURRENT: Self = Self(27);
 }
 
 /// Exact current top-level procedure-authoritative native format version.
 ///
 /// The build, reader, writer, and replay contract all use this value. Earlier
 /// and later top-level versions are rejected without migration.
-pub const PROCEDURE_FORMAT_VERSION: u32 = 29;
+pub const PROCEDURE_FORMAT_VERSION: u32 = 31;
 
 /// Version of the canonical scalar, rounding, alpha, and geometry contract.
 pub const CANONICAL_NUMERIC_VERSION: u32 = 1;
@@ -297,10 +293,10 @@ impl ReplayContract {
     }
 }
 
-/// A BLAKE3-256 digest of canonical semantic document-state schema-10 bytes.
+/// A BLAKE3-256 digest of canonical semantic document-state schema-12 bytes.
 ///
-/// The compact root and semantic metadata frames use schema version 10 in the
-/// `org.inkpod.digest.document-state.v8` derive-key domain. Raster payloads
+/// The compact root and semantic metadata frames use schema version 12 in the
+/// `org.inkpod.digest.document-state.v10` derive-key domain. Raster payloads
 /// enter that root through separately domain-separated, content-addressed tile
 /// and raster commitments, so the digest is independent of edit order and
 /// allocation history without requiring unchanged tile bytes to be rehashed

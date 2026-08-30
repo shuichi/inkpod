@@ -387,7 +387,6 @@ foreach(REQUIRED_TOKEN IN ITEMS
         "UiStringId::PlaneBadgeMainLine"
         "UiStringId::PlaneBadgeColoring"
         "UiStringId::PlaneBadgeRaster"
-        "UiStringId::PlaneBadgeSelection"
         "UiStringId::PlaneBadgeUnknown"
         "kLayerPalettePlaneBadgeTextFlags")
     string(FIND "${LAYER_PALETTE_SOURCE}" "${REQUIRED_TOKEN}" TOKEN_POSITION)

@@ -23,6 +23,10 @@ exact field、型、default、上限を固定する。command entryはowner mani
 M23で全単射、実装、equivalence evidenceを検証して当時の
 `schemas/inkscript/catalog-v2.json`へfreezeした。M27B後の描画モデル再ベースラインでは削除対象9 commandを除いた
 75 commandを`schemas/inkscript/catalog-v3.json`とowner manifest v3へfreezeし、v2を現行readerから外した。
+その後のBatch契約更新でcatalog／owner manifest v4へ進み、現行のlayer／plane再ベースラインでは
+`convert_layer`、adjustment-layer 2 command、selection-layer 2 command、vanishing-point commandを退役させ、
+document-owned saved-selection-mask 4 commandを追加した73 commandを
+`schemas/inkscript/catalog-v5.json`とowner manifest v5へfreezeした。退役primitive IDはtombstoneとして再利用しない。
 pre-ratification draftは残さない。production Rust APIはexact-currentのclosed catalogだけを受理し、C ABI、Windows、
 product file routeは後続milestoneまで公開しない。
 `docs/inkscript-command-reference.md`はlanguage/catalog registryから生成する派生物であり、手編集しない。
@@ -35,11 +39,11 @@ product file routeは後続milestoneまで公開しない。
 | 項目                                |                                       初期値 |
 | ----------------------------------- | -------------------------------------------: |
 | InkScript file format version       |                                            2 |
-| InkScript procedure catalog version | 3（M27B後再ベースライン、75 command） |
-| required replay epoch               |                                           24 |
+| InkScript procedure catalog version | 5（layer／plane再ベースライン、73 command） |
+| required replay epoch               |                                           27 |
 | native output                       |                      exact-current `.inkpod` |
-| native top-level format             |                                           27 |
-| C ABI                               |                                           17 |
+| native top-level format             |                                           31 |
+| C ABI                               |                                           25 |
 
 フォーマットフリーズ前のため、reader、writer、clipboard fragment は常に
 exact-current version だけを受理する。grammar、serialized field、selector の
@@ -56,7 +60,7 @@ exact-current version だけを受理する。grammar、serialized field、selec
 catalog versionは「そのbuildで実装済みのcommand集合」ではなく、批准済みの完全なclosed command
 contractを識別する。実装coverageは非永続の内部状態であり、file、clipboard、公開ABIへserializeしない。
 catalog v2 draftはM23までproduction catalog contractではなく、owner milestone内で変更できたがproductから受理
-しなかった。M23で批准した`catalog-v2.json`も履歴としてin-place変更せず、現行は`catalog-v3.json`だけを受理する。
+しなかった。M23で批准した`catalog-v2.json`も履歴としてin-place変更せず、現行は`catalog-v5.json`だけを受理する。
 新entryやsignature変更ではcatalog versionを更新し、旧version拒否test、example、registry、生成referenceを同時更新する。
 
 ## 2. 目的と非目的
@@ -520,8 +524,8 @@ assetの全reference edgeを含む。fragment closure、`skip_dependents`、diag
 
 ```inkscript
 requires {
-    procedure_catalog = 2;
-    replay_epoch = 23;
+    procedure_catalog = 5;
+    replay_epoch = 27;
 }
 ```
 
@@ -654,7 +658,6 @@ loweringするUI convenienceとし、stepに別の実行flagを持たせない�
 ```inkscript
 bindings {
     let paint = select plane {
-        layer_kind = binary_coloring;
         plane_kind = color;
         name = "Paint";
         cardinality = one;
@@ -672,11 +675,11 @@ required/default、owner relation、initial-order規則はschema registryと生�
 
 | entity                                 | 主な filter                                                                   |
 | -------------------------------------- | ----------------------------------------------------------------------------- |
-| `layer`                                | kind、name、initial document order、persistent ID                             |
-| `plane`                                | owning layer binding/filter、kind、format、name、initial order、persistent ID |
+| `layer`                                | name、initial document order、persistent ID                                   |
+| `plane`                                | owning layer binding/filter、plane kind、format、name、initial order、persistent ID |
 | `guide`                                | axis、position、persistent ID                                                 |
 | `shooting_frame`                       | document-owned singleton                                                      |
-| `vanishing_point`                      | owning layer、persistent ID                                                   |
+| `saved_selection_mask`                 | document-owned、name、persistent ID                                           |
 | `light_table_set` / `light_table_item` | owner、name/order、persistent ID                                              |
 
 共通 field は次のとおりとする。
@@ -744,7 +747,6 @@ enabled seedがN件ならoperation全体で0..N Commitを生成する。UI上の
 step "Create paint layer" as created_paint {
     enabled = true;
     invoke create_layer {
-        kind = binary_coloring;
         name = "Paint";
     };
 }
@@ -752,7 +754,7 @@ step "Create paint layer" as created_paint {
 step "Rename created layer" {
     enabled = true;
     invoke set_layer_properties {
-        layer = $created_paint.layer;
+        layer_id = $created_paint.layer;
         visible = true;
         editable = true;
         opacity_milli = 1000;
@@ -760,6 +762,33 @@ step "Rename created layer" {
     };
 }
 ```
+
+`create_layer`はlayer kindを受け取らず、MainLine 1枚とColor 1枚を必須とする標準layerを作る。
+追加の`create_plane { layer_id; format; name; }`は常にRaster roleを作成する。
+`convert_plane { plane_id; destination_format; }`は既存のMainLine／Color／Raster roleを変えず、
+pixel formatだけを変換する。layer変換commandとplane role変換commandは存在しない。
+
+current selectionはdocumentの一時maskであり、再利用するmaskはdocument-owned collectionへ保存する。
+
+```inkscript
+step "Save approved region" as saved {
+    enabled = true;
+    invoke save_selection_mask {
+        name = "Approved region";
+    };
+}
+
+step "Add approved region" {
+    enabled = true;
+    invoke apply_saved_selection_mask {
+        saved_selection_id = $saved.saved_selection_mask;
+        operation = add;
+    };
+}
+```
+
+保存maskの再命名と削除は`rename_saved_selection_mask`、`delete_saved_selection_mask`を使う。
+`apply_saved_selection_mask`のoperationは`replace | add | subtract`の閉じた集合である。
 
 result fieldと型はschema registryが定義し、scalar、list、roleを失わない。例えば
 `$created_paths.paths[0]`のようなconstant indexを許可する。IDはcommit成功時だけ消費する。
@@ -797,7 +826,9 @@ file/catalog versionと`language-v2.json`をexact-currentへ更新した。
 合成`SchemaView`はlanguage-core定義と全catalog entry定義を結合し、type/constructor名の重複を拒否する。
 M23で全entry、実装、owner、equivalence evidenceの全単射を検証し、private draftを削除して当時の
 `catalog-v2.json`へfreezeした。M27B後の再ベースラインでvector 8 commandとannotation 1 commandを削除し、残る
-75 entryを`catalog-v3.json`へfreezeした。catalog v3はRust compile／bind／staged-run contractとしてproduction公開するが、
+75 entryを`catalog-v3.json`へfreezeした。Batch契約更新のv4を経て、現行layer／plane再ベースラインでは
+6 commandを退役、saved-selection-mask 4 commandを追加し、73 entryを`catalog-v5.json`へfreezeした。
+catalog v5はRust compile／bind／staged-run contractとしてproduction公開するが、
 file、clipboard、FFI、Windows product commandからの到達は各後続owner milestoneまで許可しない。
 
 registryは最低限、次を定義する。
@@ -1200,8 +1231,8 @@ fragmentは完全fileとは別のheaderを持つ。
 inkscript_fragment 2;
 
 requires {
-    procedure_catalog = 2;
-    replay_epoch = 23;
+    procedure_catalog = 5;
+    replay_epoch = 27;
 }
 
 program {
@@ -1359,8 +1390,8 @@ queue saturation、shutdown raceをfault injectionで検証する。
 inkscript 2;
 
 requires {
-    procedure_catalog = 2;
-    replay_epoch = 23;
+    procedure_catalog = 5;
+    replay_epoch = 27;
 }
 
 meta {
@@ -1384,7 +1415,6 @@ parameters {
 
 bindings {
     let paint = select plane {
-        layer_kind = binary_coloring;
         plane_kind = color;
         cardinality = one;
         missing = error;

@@ -262,7 +262,16 @@ impl Core {
         source: &SequenceCellSource,
     ) -> Result<bool, CoreError> {
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
-        let BaseSurface::Asset(base_id) = document.base_surface else {
+        let source_id = self
+            .genesis
+            .as_ref()
+            .and_then(|genesis| genesis.raster_source)
+            .map(|source| source.asset_id)
+            .or(match document.base_surface {
+                BaseSurface::Asset(id) => Some(id),
+                BaseSurface::SolidWhite | BaseSurface::Transparent => None,
+            });
+        let Some(source_id) = source_id else {
             return Ok(false);
         };
         if document.dpi_x_milli != source.dpi_x_milli
@@ -272,6 +281,6 @@ impl Core {
             return Ok(false);
         }
         let mut candidate = asset::AssetStore::default();
-        Ok(candidate.ingest_tile_raster(&source.raster, None)?.id() == base_id)
+        Ok(candidate.ingest_tile_raster(&source.raster, None)?.id() == source_id)
     }
 }

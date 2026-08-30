@@ -124,19 +124,11 @@ struct SequenceNavigationIntent {
     std::uint64_t catalog_owner_generation{};
 };
 
-struct AdjustmentLayerUiState {
-    std::uint64_t id{};
-    bool visible{true};
-    FilterJob job;
-    std::string name;
-};
-
 struct BatchOperationUi {
     std::uint32_t kind{INKPOD_BATCH_OPERATION_COLOR_REPLACE};
     std::uint64_t flags{INKPOD_BATCH_OPERATION_ENABLED};
     std::uint64_t layer_id{};
     std::uint64_t plane_id{};
-    InkpodLayerKind layer_kind{INKPOD_LAYER_BINARY_COLORING};
     InkpodTypedPlaneKind plane_kind{INKPOD_TYPED_PLANE_COLOR};
     InkpodBatchMissingPolicy missing_policy{INKPOD_BATCH_MISSING_ERROR};
     std::vector<InkpodBatchTargetInput> additional_targets;
@@ -182,7 +174,6 @@ struct DocumentShellState {
     std::wstring recovery_path;
     std::wstring recovery_original_path;
     std::uint64_t smoke_layer_id{};
-    std::uint64_t selection_layer_id{};
 };
 
 // A workspace only retains a copied presentation of the Core-owned editor
@@ -264,12 +255,6 @@ struct ToolUiState {
     std::vector<InkpodStrokeSample> shooting_frame_gesture_samples;
     std::uint32_t shooting_frame_drag_handle{};
     bool shooting_frame_preview_active{};
-    InkpodVanishingPointInput vanishing_point_drag_value{
-        sizeof(InkpodVanishingPointInput)};
-    std::vector<InkpodStrokeSample> vanishing_point_gesture_samples;
-    std::uint64_t vanishing_point_drag_id{};
-    bool vanishing_point_preview_active{};
-
     HWND palette{};
     windows::ui::ToolPaletteDialogState palette_dialog{};
     windows::ui::panes::ToolOptionsPaneState options_pane{};
@@ -358,6 +343,7 @@ struct PaneUiState {
     std::uint32_t active_tree_plane_index{};
     std::uint32_t tree_layer_count{};
     std::uint32_t tree_plane_count{};
+    bool saved_selection_available{};
     std::uint64_t active_light_table_set_id{};
     std::uint64_t active_light_table_item_id{};
     std::uint32_t active_light_table_set_index{};
@@ -387,9 +373,6 @@ struct AnimationUiState {
 };
 
 struct EffectsUiState {
-    std::uint64_t adjustment_id{};
-    bool adjustment_visible{true};
-    std::vector<AdjustmentLayerUiState> adjustments;
     InkpodTask* task{};
     windows::ui::ProgressDialogState progress_dialog{};
     bool preview_prompt{};

@@ -16,7 +16,6 @@ fn editor_tool(code: u32) -> Result<EditorTool, u32> {
         1_007 => EditorTool::LightTableMove,
         1_008 => EditorTool::ColorReplace,
         1_009 => EditorTool::ShootingFrame,
-        1_010 => EditorTool::VanishingPoint,
         1_011 => EditorTool::GeometryLine,
         1_012 => EditorTool::GeometryCurve,
         1_013 => EditorTool::GeometryRectangle,
@@ -825,7 +824,6 @@ pub unsafe extern "C" fn inkpod_core_get_edit_target_capabilities(
                 can_set_editability: u32::from(capabilities.editability),
                 can_merge: u32::from(capabilities.merge),
                 can_convert_planes: u32::from(capabilities.convert_planes),
-                can_convert_layers: u32::from(capabilities.convert_layers),
                 reserved: 0,
             })
         };
@@ -941,22 +939,11 @@ pub unsafe extern "C" fn inkpod_core_apply_edit_target_command(
                 EditTargetCommand::SetEditability(input.flags != 0)
             }
             INKPOD_EDIT_TARGET_CONVERT_PLANES if input.flags == 0 => {
-                let kind = match parse_plane_type(input.kind) {
-                    Ok(kind) => kind,
-                    Err(status) => return status,
-                };
                 let format = match parse_storage_format(input.pixel_format) {
                     Ok(format) => format,
                     Err(status) => return status,
                 };
-                EditTargetCommand::ConvertPlanes { kind, format }
-            }
-            INKPOD_EDIT_TARGET_CONVERT_LAYERS if input.flags == 0 => {
-                let kind = match parse_layer_kind(input.kind) {
-                    Ok(kind) => kind,
-                    Err(status) => return status,
-                };
-                EditTargetCommand::ConvertLayers { kind }
+                EditTargetCommand::ConvertPlanes { format }
             }
             INKPOD_EDIT_TARGET_MERGE if input.flags == 0 => EditTargetCommand::Merge,
             _ => {

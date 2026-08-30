@@ -59,7 +59,7 @@ macro_rules! entry {
 // independently versioned layouts.
 const PRIMITIVE_CATALOG: &[PrimitiveCatalogEntry] = &[
     entry!(UPDATE_PAPER_FRAMES, 2, "UpdatePaperFrames", 2, 0x0001_0001),
-    entry!(CREATE_LAYER, 2, "CreateLayer", 2, 0x0002_0001),
+    entry!(CREATE_LAYER, 3, "CreateLayer", 3, 0x0002_0001),
     entry!(DUPLICATE_LAYER, 2, "DuplicateLayer", 2, 0x0002_0002),
     entry!(DELETE_LAYER, 2, "DeleteLayer", 2, 0x0002_0003),
     entry!(REORDER_LAYER, 2, "ReorderLayer", 2, 0x0002_0004),
@@ -70,7 +70,7 @@ const PRIMITIVE_CATALOG: &[PrimitiveCatalogEntry] = &[
         2,
         0x0002_0005
     ),
-    entry!(CREATE_PLANE, 2, "CreatePlane", 2, 0x0002_0011),
+    entry!(CREATE_PLANE, 3, "CreatePlane", 3, 0x0002_0011),
     entry!(DUPLICATE_PLANE, 2, "DuplicatePlane", 2, 0x0002_0012),
     entry!(DELETE_PLANE, 2, "DeletePlane", 2, 0x0002_0013),
     entry!(REORDER_PLANE, 2, "ReorderPlane", 2, 0x0002_0014),
@@ -81,9 +81,8 @@ const PRIMITIVE_CATALOG: &[PrimitiveCatalogEntry] = &[
         2,
         0x0002_0015
     ),
-    entry!(CONVERT_PLANE, 2, "ConvertPlane", 2, 0x0002_0016),
+    entry!(CONVERT_PLANE, 3, "ConvertPlane", 3, 0x0002_0016),
     entry!(MERGE_PLANE, 2, "MergePlane", 2, 0x0002_0017),
-    entry!(CONVERT_LAYER, 2, "ConvertLayer", 2, 0x0002_0021),
     entry!(MERGE_LAYER, 2, "MergeLayer", 2, 0x0002_0022),
     entry!(
         DELETE_HIDDEN_LAYERS,
@@ -92,15 +91,8 @@ const PRIMITIVE_CATALOG: &[PrimitiveCatalogEntry] = &[
         2,
         0x0002_0023
     ),
-    entry!(EDIT_TARGETS, 2, "EditTargets", 1, 0x0002_0030),
+    entry!(EDIT_TARGETS, 3, "EditTargets", 2, 0x0002_0030),
     entry!(EDIT_SHOOTING_FRAME, 2, "EditShootingFrame", 1, 0x0002_0050),
-    entry!(
-        EDIT_VANISHING_POINTS,
-        2,
-        "EditVanishingPoints",
-        1,
-        0x0002_0060
-    ),
     entry!(SET_MAIN_LINE_COLOR, 1, "SetMainLineColor", 3, 1),
     entry!(REPLACE_PALETTE, 1, "ReplacePalette", 3, 2),
     entry!(REPLACE_COLOR_CHART, 1, "ReplaceColorChart", 1, 5),
@@ -143,20 +135,6 @@ const PRIMITIVE_CATALOG: &[PrimitiveCatalogEntry] = &[
     ),
     entry!(APPLY_FILTER, 2, "ApplyFilter", 2, 0x0005_0020),
     entry!(
-        CREATE_ADJUSTMENT_LAYER,
-        2,
-        "CreateAdjustmentLayer",
-        2,
-        0x0005_0030
-    ),
-    entry!(
-        UPDATE_ADJUSTMENT_LAYER,
-        2,
-        "UpdateAdjustmentLayer",
-        2,
-        0x0005_0031
-    ),
-    entry!(
         REPLACE_RASTER_COLORS,
         2,
         "ReplaceRasterColors",
@@ -186,9 +164,9 @@ const PRIMITIVE_CATALOG: &[PrimitiveCatalogEntry] = &[
     ),
     entry!(
         APPLY_BATCH_OPERATIONS,
-        2,
+        3,
         "ApplyBatchOperations",
-        1,
+        2,
         0x0005_0044,
         private
     ),
@@ -204,13 +182,27 @@ const PRIMITIVE_CATALOG: &[PrimitiveCatalogEntry] = &[
         1,
         0x0006_0006
     ),
-    entry!(SELECTION_TO_LAYER, 2, "SelectionToLayer", 2, 0x0006_0010),
+    entry!(SAVE_SELECTION_MASK, 2, "SaveSelectionMask", 1, 0x0006_0012),
     entry!(
-        SELECTION_FROM_LAYER,
+        APPLY_SAVED_SELECTION_MASK,
         2,
-        "SelectionFromLayer",
+        "ApplySavedSelectionMask",
+        1,
+        0x0006_0013
+    ),
+    entry!(
+        RENAME_SAVED_SELECTION_MASK,
         2,
-        0x0006_0011
+        "RenameSavedSelectionMask",
+        1,
+        0x0006_0014
+    ),
+    entry!(
+        DELETE_SAVED_SELECTION_MASK,
+        2,
+        "DeleteSavedSelectionMask",
+        1,
+        0x0006_0015
     ),
     entry!(
         CLEAR_SELECTED_CONTENT,
@@ -369,7 +361,7 @@ mod tests {
 
     #[test]
     fn catalog_is_sorted_unique_bounded_and_matches_replay_schema_lookup() {
-        assert_eq!(PRIMITIVE_CATALOG.len(), 77);
+        assert_eq!(PRIMITIVE_CATALOG.len(), 75);
         for pair in PRIMITIVE_CATALOG.windows(2) {
             assert!(pair[0].id < pair[1].id);
         }

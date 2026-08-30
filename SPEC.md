@@ -43,8 +43,9 @@ inkpod は次の構成を維持する。
 
 - `カット`: 一つのショットに属するセル連番、背景、基準 frame、既定用紙、metadata をまとめた制作単位。
 - `セル`: 一枚の作画・彩色文書。用紙、frame、複数 layer、選択、補助情報を持つ。
-- `レイヤー`: セル画を重ねる単位。種類ごとの役割と許可 plane を持つ。
-- `プレーン`: layer 内の最小編集単位。主線、彩色、色トレース、塗り、alpha 等を別々に保持する。
+- `レイヤー`: セル画を重ねる単一種類の画像単位。主線 plane 一枚と彩色 plane 一枚を必ず持ち、任意個の raster plane を追加できる。
+- `プレーン`: layer 内の最小画像編集単位。意味上の役割は主線、彩色、raster の三種類とし、格納表現は独立した `PixelFormat` で表す。
+- `選択状態`: layer/plane 木とは独立した文書所有の現在選択 mask、保存選択 mask 群、および fill protection mask。通常の画像合成へ参加しない。
 - `主線保護`: 彩色 mode では主線を合成表示するが、fill や brush が主線 plane を変更しない性質。
 - `基準フレーム`: 紙のタップ穴に相当する位置合わせ基準。異寸法セルや light table を重ねるときは画像左上ではなくこの基準で揃える。
 - `100フレーム`: 制作上の基準となる作画 frame サイズ。物理寸法、DPI、pixel 寸法を組にして保持し、50/200 frame 等はこの基準に対する比率で表す。
@@ -113,8 +114,8 @@ UI 表示文字列は、日本語と英語を言語非依存の型付き ID で�
 
 #### ファイル
 
-- `新規 > セル`: 用紙、pixel 寸法、DPI、100 frame、frame 配置、layer 種類、色深度、作成枚数を指定してセルを作る。
-- `新規 > カット`: 作品/話/scene/cut 名、既定用紙、初期 layer、色深度、尺、作成枚数を設定し、descriptor と同じ directory に個別 Cell `.inkpod` を作る。
+- `新規 > セル`: 用紙、pixel 寸法、DPI、100 frame、frame 配置、色深度、作成枚数を指定し、標準画像 layer を持つセルを作る。
+- `新規 > カット`: 作品/話/scene/cut 名、既定用紙、色深度、尺、作成枚数を設定し、descriptor と同じ directory に標準画像 layer を持つ個別 Cell `.inkpod` を作る。
 - `開く`: `.inkpod` または対応 raster/sequence を開く。
 - `最近使ったファイル`: 存在確認し、消失 path は履歴から整理できる。
 - `保存`: 同一 path へ atomic save。変更がない場合は no-op。
@@ -130,7 +131,7 @@ UI 表示文字列は、日本語と英語を言語非依存の型付き ID で�
 
 - `元に戻す`、`やり直し`: command 名を表示し、履歴がないとき disable する。
 - `複数段階戻る`、`複数段階進む`: 履歴一覧から位置を選択する。
-- `カット`、`コピー`、`ペースト`、`選択プレーンにペースト`、`変換してペースト`、`クリアー`。
+- `カット`、`コピー`、`ペースト`、`選択範囲にペースト`、`変換してペースト`、`クリアー`。
 - `変形 > 左右反転/上下反転/拡大・縮小/回転/移動`: selection 内の実データを変更する。
 - `線修正 > 線つなぎ/線幅修正`: selection または tool で指定した範囲へ適用する。
 - `スナップ > ガイド/グリッド`: checked state を表示する。
@@ -146,8 +147,8 @@ UI 表示文字列は、日本語と英語を言語非依存の型付き ID で�
 - `画像解像度`: 物理寸法、DPI、pixel 数、再 sample の有無を指定する。再 sample off は pixel 数を変えない。
 - `鏡像 > 水平方向/垂直方向`: 全文書の実データを反転する。
 - `回転 > 左90度/右90度`: 全文書の実データと frame 座標を回転する。
-- `レイヤー > 新規/複製/削除/非表示を削除/変換/同種を統合/プロパティ`。
-- `プレーン > 新規/複製/削除/変換/同種を統合/アルファ編集/プロパティ/設定`。
+- `レイヤー > 新規/複製/削除/非表示を削除/統合/プロパティ`。layer 種類の選択・変換 command は設けない。
+- `プレーン > 新規ラスタープレーン/複製/削除/形式変換/統合/アルファ編集/プロパティ/設定`。必須の主線／彩色 plane は複製・削除できない。
 - `前のセル`、`次のセル`、`セル番号で移動`、`連続表示`。
 
 #### 選択範囲
@@ -155,7 +156,7 @@ UI 表示文字列は、日本語と英語を言語非依存の型付き ID で�
 - `すべてを選択`、`選択解除`、`選択反転`。
 - `描画色を選択`、`描画色以外を選択`、`描画色を選択範囲に追加`。
 - `拡張`、`縮小`: pixel 幅を指定する。
-- `変換 > 選択範囲をレイヤーへ/レイヤーを選択範囲へ/レイヤーを追加/レイヤーを削除`。
+- `保存選択 > 現在選択を保存/保存選択を選択/保存選択で置換/保存選択を追加/保存選択を減算/保存選択名を変更/保存選択を削除`。保存選択は layer ではなく stable ID と名前を持つ zero-or-more の文書 mask とし、save/reopen 後も一覧から対象を選べる。
 - `色領域外を選択`: 選択した放送規格の安全範囲外の色を mask 化する。
 
 #### フィルタ
@@ -198,7 +199,7 @@ UI 表示文字列は、日本語と英語を言語非依存の型付き ID で�
 - file identity は Windows の volume/file ID を取得できる場合はそれを使い、取得できない場合は正規化した絶対 path を使う。表示名や tab index を identity に使わず、untitled document には frontend が UUID を発行する。
 - 開いたセルと同じ sequence/folder にある画像は file preview に自然順で表示する。thumbnail click、前/次 command、番号指定で切り替える。
 - Sequence pane は thumbnail と番号／名前を左から右へ一段に並べ、縦に折り返さず横 scroll する。選択 frame が見切れる場合だけ必要量 scroll し、選択・thumbnail 更新・geometry-only resize で一覧、focus、scroll を reset しない。一覧に focus があるときの `←`／`→` で前後へ移動し、pane 内の前／次 button は置かない。Cut member は表示順の stable identity を既存 member-open 経路へ渡し、通常 sequence の前後 command と対象を混同しない。pane の最小／既定高は一段の frame と可視操作だけから算出し、非表示の Cut 操作に高さを予約しない。pane tab の close は Sequence pane だけを非表示にし、document／sequence／Cut／history は破棄せず、Window menu から再表示できる。
-- PNG/TIFF/TGA/BMP の未編集セルを sequence から新たに読み込むときは、document と EditorState の双方に読み込み直後の clean な初期基準を置く。新 layer／plane target への自動 reconciliation は利用者の編集として数えず、移動だけでは dirty、保存確認、不要な autosave を発生させない。これは通常保存の成功や path authority を意味しない。既存セルへの `NOOP`／初回 `BIND`、自動連番の遅い追加は既存の編集・savepoint を保持し、recovery 復元は引き続き pathless／dirty として exact history と EditorState を保持する。全 sequence の編集用 Core 常駐化はこの仕様に含めない。
+- PNG/TIFF/TGA/BMP は decoded RGBA 8/16 bit の色と alpha を変換せず初期の主線プレーンへ置き、同じ深度の空の彩色プレーンをその上に作る。opaque な完全白は主線に保持するが fill 境界にはせず、alpha が正の非白 pixel を主線境界とする。自動的な二値化、主線色への置換、主線／彩色の色分離は行わない。読み込み直後は主線プレーンを選択する。未編集セルを sequence から新たに読み込むときは、document と EditorState の双方に読み込み直後の clean な初期基準を置く。新 layer／plane target への自動 reconciliation は利用者の編集として数えず、移動だけでは dirty、保存確認、不要な autosave を発生させない。これは通常保存の成功や path authority を意味しない。既存セルへの `NOOP`／初回 `BIND`、自動連番の遅い追加は既存の編集・savepoint を保持し、recovery 復元は引き続き pathless／dirty として exact history と EditorState を保持する。全 sequence の編集用 Core 常駐化はこの仕様に含めない。
 - 同寸法の通常 sequence セル切替は各 view の zoom、pan、反転を保持し、初期変換と FIT 後の中間 frame を別々に公開しない。異寸法では現在の表示 mode に従う最終変換を一度だけ決定する。初回 open と明示 FIT は引き続き全体表示を行う。
 - 未編集 source の再訪では、その初期状態の合成済み tile と GPU bitmap を再利用する。`dirty == false` だけでは初期状態と判定せず、保存済み編集、recovery、preview、Light Table、alpha／color-check 表示と混同しない。source の document UUID／generation と runtime owner を分離し、独立 Core、更新 catalog、別表示 mode 間で cache を誤共有しない。
 - source cache は active を含め CPU／GPU 各最大8枚・128 MiBとし、application-wide な decoded 8 GiB／GPU 512 MiB予算の内数とする。確保前に予約し、snapshot／tile 等の最後の lease が解放されるまで計上する。準備する隣接 source は左右最大2件に限定し、bounded worker の未完了処理を foreground が待たない。予約できない場合は通常表示へ戻し、画質を落とさない。
@@ -230,32 +231,21 @@ UI 表示文字列は、日本語と英語を言語非依存の型付き ID で�
 - 自動連番は単体 open 成功後の独立 job とする。Rust worker 内で directory 直下を同期列挙し、stem の最後の ASCII 数字列とその前後が一致する PNG/TIFF/TGA/BMP を自然順で集める。数字幅は一致不要、拡張子は pattern の一部にしない。開いた source を必ず含む自然順近傍最大 1,000 件を選び、超過は truncated と表示する。この上限を一般 sequence/subpalette/Batch 件数へ流用しない。late completion は既存 Genesis を再 open/activate せず、その後の編集を保持する。
 - polling ABI は状態、列挙数、対象数、read 完了数、`loaded_count`、失敗/取消数を別々に返す。`loaded_count` は decode/検証が完了し使用可能な画像数で、cache hit を含む。poll/cancel は live Core を借用せず任意 thread で行え、反映は発行時 target/generation を owner thread で再検証する。job の結果と handle は Rust-owned とし、release と参照は明示同期する。
 
-### 5. 彩色文書の種類と合成
+### 5. 標準画像レイヤーと合成
 
-#### 2値彩色レイヤー
+Inkpod の画像 layer は一種類だけとし、`LayerKind` や初期 layer 種類を永続化・公開 API・UI に持たせません。各 layer は stable ID、名前、visibility、editability、opacity と、次の plane topology を持ちます。
 
-- `主線プレーン`: 二値の主線。彩色中は表示されるが保護される。
-- `彩色プレーン`: 色トレース線と塗り色を保持する。
-- 任意の `ラスタープレーン`: airbrush、gradient、retouch 等を分離して置ける。
-- 軽量な legacy workflow を意図し、境界判定では主線と彩色 plane の線を利用できる。
+- `主線プレーン`: exactly one。`BinaryMask8`、`Grayscale8/16`、または straight-alpha `RGBA8/16` を保持する。格納形式は layer 種類ではなく `PixelFormat` で表し、彩色 command から保護する一方、明示的な線修正 command はこの plane を対象にできる。
+- `彩色プレーン`: exactly one。straight-alpha `RGBA8/16` で色トレース線と塗り色を保持する。新規作成・画像読み込み時は主線に対応する depth で初期化し、その後の明示的な形式変換は plane ごとに扱う。
+- `ラスタープレーン`: zero or more。背景、特効、airbrush、gradient、retouch 等を任意に分離する straight-alpha `RGBA8/16` plane とする。
 
-#### 階調彩色レイヤー
+必須の主線／彩色 plane は削除・複製できず、失敗時に自動再作成するのではなく topology validation で原子的に拒否します。追加 layer の主線／彩色形式は文書の primary layer から継承します。二値／階調／RGBA の変換は layer 変換ではなく対象 plane の role を変えない明示的な形式変換とし、損失内容を事前表示します。
 
-- `主線プレーン`: grayscale coverage と基本線色を保持する。表示時に coverage と基本色を合成する。
-- `彩色プレーン`: 色トレース、塗り色、および彩色用の細い境界情報を保持する。
-- 主線の灰色 coverage 自体を fill 境界とみなさず、彩色 plane の境界が切れた場合に漏れる。
-- eyedropper で階調主線を拾うと、中間表示色ではなく基本線色を返す。
+現在選択、保存選択、fill protection は layer/plane 木へ入れません。現在選択と fill protection はそれぞれ一つの文書 mask、保存選択は stable ID と名前を持つ zero or more の文書 mask とし、いずれも通常 composite、thumbnail、raster export へ参加しません。
 
-#### その他のレイヤー
+Frame は `FrameMetadata` と独立した角度付き撮影 frame object だけで表し、画像 layer として表しません。消失点と adjustment layer は文書状態、native format、replay、公開 API、UI のいずれにも含めません。
 
-- `ラスター汎用`: 背景・特効用 RGBA 8/16 bit。alpha channel を持てる。
-- `フレーム`: 基準 frame、作画 frame、安全 frame、撮影 frame。
-- `消失点`: 一つ以上の消失点と補助線設定。
-- `選択範囲`: selection mask の保存と編集。
-- `調整`: 明るさ/contrast、levels、tone curve を非破壊で保持する。
-
-composite は layer/plane 順、visibility、opacity、alpha、adjustment を決定的に適用してください。プレーンは所属 layer を越えて並べ替えず、layer 同士と同一 layer 内 plane 同士を別に並べ替えます。
-layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最上段、すなわち合成結果の最上位とする。Canvas、layer thumbnail、flatten export は、raster と adjustment が混在しても同じ木順序を下から上へ合成し、adjustment は置かれた位置までの合成結果へ適用する。
+composite は layer/plane 順、visibility、opacity、alpha を決定的に適用します。プレーンは所属 layer を越えて並べ替えず、layer 同士と同一 layer 内 plane 同士を別に並べ替えます。layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最上段、すなわち合成結果の最上位とします。主線／彩色の役割から合成順を暗黙固定せず、opaque white を保持する読み込み主線の上へ彩色結果を表示できる明示順序を保持します。
 
 #### 角度付き撮影 frame の確定 contract
 
@@ -269,20 +259,20 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 
 - 上段に layer、下段に active layer の plane を表示する split pane とする。
 - layer/plane 間の splitter は pointer と keyboard の双方で高さを変更でき、可視かつ accessible にする。共通の下部操作 button には、現在の操作対象が layer と plane のどちらかを視覚表示と accessible name の双方で明示する。
-- 各行に visibility、editable/target、name、種類に応じた color/thumbnail を表示する。
+- 各行に visibility、editable/target、name、plane 役割と形式に応じた color/thumbnail を表示する。layer 種類は表示・選択しない。
 - visibility と editable の状態 button は、16 DIP の icon を維持した 32×32 DIP の正方形を 4 DIP 間隔で行中央に配置する。描画と hit test は同じ矩形を使い、完全な状態名は行の accessible text に保持する。
 - active selection と複数 edit target を区別する。描画 command は active plane と明示 target 規則を検証する。
 - drag and drop で同階層の順序を変える。
 - opacity は数値と slider で変更する。
 - 新規、複製、削除、property、alpha edit は必ず menu から操作でき、modeless palette を追加する場合も同じ command ID へ委譲する。
 - 複製名は一意にする。削除は Undo 可能とし、必須 plane を最後の一枚まで削除できないよう validation する。
-- 同種統合は同じ種類だけを対象にし、plane color 等の互換条件が異なるものを黙って統合しない。
-- property dialog では name、type、opacity、plane color 等を編集し、type conversion は損失内容を事前表示する。
-- 新規プレーンでは種類と形式を番号入力にせず、列挙値に対応する文字列を標準コンボボックスから選ぶ。全候補は選択可能とし、OK 時に選択中レイヤーの topology 制約を Core で再検証する。使用できない組み合わせはエラーを表示してダイアログを閉じない。
+- 統合は topology、plane role、format、順序の互換条件を Core で検証し、異なるものを黙って変換しない。
+- layer property dialog では name と opacity、plane property dialog では name、opacity、形式固有属性を編集する。layer type field は設けず、形式変換は損失内容を事前表示する。
+- 新規 plane command は raster plane だけを作成する。形式は番号入力にせず `RGBA8`／`RGBA16` の標準コンボボックスから選び、OK 時に選択中 layer の topology 制約を Core で再検証する。
 
 ### 7. 用紙とフレーム
 
-- 新規 Cell は一つの条件入力で `frame size` または `image size`、DPI、各辺余白、初期 layer 種類、8/16 bit 色深度、五点 anchor、作成枚数を指定する。作成枚数は 1 以上 64 以下とし、複数作成は全件成功時だけ focused workspace の active EditorGroup へ独立した untitled document として公開する。Cancel、invalid、overflow、UUID/割当/途中 staging failure では Core、session、tab、recent file、stable ID を一件も進めない。
+- 新規 Cell は一つの条件入力で `frame size` または `image size`、DPI、各辺余白、8/16 bit 色深度、五点 anchor、作成枚数を指定する。各 Cell は標準画像 layer 一枚で開始する。作成枚数は 1 以上 64 以下とし、複数作成は全件成功時だけ focused workspace の active EditorGroup へ独立した untitled document として公開する。Cancel、invalid、overflow、UUID/割当/途中 staging failure では Core、session、tab、recent file、stable ID を一件も進めない。
 - `image size` の入力幅・高さは最終 raster の正確な pixel 数である。各辺余白率を `m/1000` とすると、100% frame の幅・高さはそれぞれ `round_ties_even(image * 1000 / (1000 + 2m))` とし、残差は左/上へ切り捨て半分、右/下へ残りを置く。
 - `frame size` の入力幅・高さは 100% frame の物理寸法 μm である。各軸の frame pixel 数は `round_ties_even(μm * dpi_milli / 25,400,000)`、各辺余白 pixel 数は `round_ties_even(frame * m / 1000)` とし、最終 raster は frame と両辺余白の和とする。全換算は整数の ties-to-even、checked arithmetic、現在の raster 寸法上限を用い、OS DPI を適用しない。
 - 作画 frame と撮影 frame は新規作成時の 100% frame と一致する。安全 frame は 100% frame の指定比率を中央 anchor で縮尺し、最大寄り frame は指定比率を左上/右上/中央/左下/右下の選択 anchor で縮尺する。基準 frame の X/Y は同じ五点 anchor における 100% frame 上の基準座標とし、frame 寸法自体は 100% frame 寸法を保持する。preview と commit は同じ immutable な Core creation plan を使う。
@@ -360,13 +350,6 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - 適用範囲は pen/rectangle/polyline/lasso。
 - `指定幅だけ太く`、`指定幅だけ細く` を別 mode にし、raster morphology として処理する。
 
-#### 消失点
-
-- `VANISHING-POINT-001`: `LayerKind::VanishingPoint` は stable ID を持つ一つ以上の消失点 object を所有し、各 object は Canvas 内外の signed document milli-pixel 座標、1/5/10/15/30度 preset または 1〜180度の fixed-point custom 間隔、180度周期で正規化する開始角、exact sRGB RGBA8/16、0〜1000 の不透明度、表示状態を保持する。一文書64個、snapshot内の導出放射線16384本を上限とする。
-- 表示中の消失点だけから、現在 viewport と交差する有限な放射 segment を immutable snapshot へ導出する。通常 raster／thumbnail／instruction export には焼き込まず、Canvas overlay として描く。文書の回転・反転・Canvas移動・等方resampleでは幾何を追従させ、等角放射線を保存できない非等方resampleは全体を変更せず拒否する。
-- dialog と Canvas handle から追加・移動・更新・削除・全削除できる。preview は同じ immutable base から再計算し、Cancel は無変更、OK は一 transaction／一 Undo 単位とし、新規 ID は commit 時だけ消費する。独立 native preset はこの要件に含めず、設定は native document にだけ保存する。
-- snap master と guide snap が有効な場合、元入力から4 document pixel以内の最寄り放射線へ拘束する。explicit H/V guide は該当軸で radial guide より優先し、radial guide は grid より優先する。放射線候補は距離、`VanishingPointId`、正規化角の昇順で最後の候補を選び、snap master offまたはguide snap offでは放射線を入力へ適用しない。
-
 ### 10. 色、パレット、チャート、参照画像
 
 - Color pane 内の `カラー`、`パレット`、`チャート` は semantic ID と表示順を分離した三つの tab とする。label drag は drag threshold を越えた同じ内部 tab control 内だけで順序を変更し、pane からの undock、Right zone の top-level tab への移動、個別 loading／unloading は行わない。active page と既存 child `HWND` を維持し、control 外 drop、`Esc`、capture cancellation は順序を変更しない。この内部順序は workspace record や `.inkpod` へ保存しない session-local presentation state とする。
@@ -437,7 +420,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 
 - `彩色チェック表示` は legacy white-transparency mode で完全な白 RGB(255,255,255) を未彩色/透明候補として残し、それ以外を黒等の高 contrast で表示する。native alpha mode では透明 alpha も別 category で示す。
 - `出力色安全ガード`は正式な放送規格適合判定ではなく、BT.709のY′CbCr係数とnominal code相当の閾値を使うinkpod独自の保守的QAとする。closed profileの初期値は`BT.709 conservative Y′CbCr guard`だけとし、旧NTSC固定式、EBU R103適合表示、自動legalizeを行わない。
-- sourceは確定済みのvisible layer compositeとGenesis assetであり、solid-white paper、Light Table、guide、grid、selection overlay、color-check overlay、previewを含めない。raster／adjustment、visibility、opacity、layer／plane順を通常のdocument compositeと共有する。8 bit channelは`value * 257`で16 bitへ正確に昇格し、RGBA16 straight alphaで合成する。alphaが0のpixelは検査せず、alphaが正のpixelはpremultiplied表示値ではなく合成後のstraight RGBを検査する。
+- sourceは確定済みのvisible layer compositeとGenesis assetであり、solid-white paper、Light Table、guide、grid、selection overlay、color-check overlay、previewを含めない。raster、visibility、opacity、layer／plane順を通常のdocument compositeと共有する。8 bit channelは`value * 257`で16 bitへ正確に昇格し、RGBA16 straight alphaで合成する。alphaが0のpixelは検査せず、alphaが正のpixelはpremultiplied表示値ではなく合成後のstraight RGBを検査する。
 - 16 bit compositeの`R,G,B`を0以上65535以下とし、`Y_num = 2126*R + 7152*G + 722*B`、`Y′ = round_half_up(Y_num / 10000)`とする。`Cb = round_half_up((65535*18556 + 2*(10000*B - Y_num)) / (2*18556))`、`Cr = round_half_up((65535*15748 + 2*(10000*R - Y_num)) / (2*15748))`とし、検査付き整数演算だけを使う。Y′の安全域は8 bit code相当`16..=235`、Cb／Crは`16..=240`、16 bitでは各境界を257倍した値とする。境界値は安全で、一成分でも範囲外ならそのpixelを規格外候補にする。spatial filterと画像全体1% thresholdは適用せず、pixel単位の候補選択と件数／検査数／透明skip数を返す。
 - ガード結果は元pixelを変更せず、`新規`、`追加`、`削除`、`交差`で既存selectionへ一transaction、一canonical procedure、一Undo単位として合成する。`新規`が非空selectionを空maskへ置換する場合は変更、既に同じ空maskの場合だけno-opとする。他operationの同一結果もno-opとし、Cancel、invalid profile、stale base revision、overflow、allocation／composition failureではselection、revision、history、journal、dirty、IDを進めない。
 - 大画像scanはrow単位のprogressとcooperative cancellationを持ち、発行時document UUID／base revision／profile／selection operationへ固定する。profile semanticsはcanonical procedureへ保存するが、profileのUI既定値はapplication settingでありdocumentへ永続化しない。
@@ -476,19 +459,19 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - rectangle／ellipse の aspect は入力範囲を縮めず不足軸を拡張し、中心指定時は開始点を中心とする。回転値は一周を `u32` 全域で表し、45 度 constraint は最寄りの 1/8 周へ丸める。trace の screen-size 固定は gesture 開始時の view zoom で document 径へ正規化し、pressure は各 sample の径へ適用する。
 - geometry preview と commit は同じ正規化済み option と mask generator を使う。Cancel、invalid、stale、overflow は mask、revision、履歴、journal を変えない。`新規` が非空 mask を空へ置換する場合は一変更、既に同じ空 mask なら no-op とする。
 - 描画色と同じ/異なる領域の全選択、追加、mask expand/shrink を提供する。
-- selection layer との相互変換、現在 mask への追加/削除、selection layer 自体を通常描画 tool で編集する操作を round-trip 可能にする。
+- 現在 mask を stable-ID保存選択として複製し、保存選択から現在 mask への置換／追加／削除、rename、delete を Undo／Redo、replay、save／reopen で round-trip 可能にする。保存選択を通常画像 tool の active plane にしない。
 
 ### 15. カット、コピー、ペースト
 
-- clipboard payload は source document ID、layer/plane type、document origin に対する bounds、pixel/selection、色深度を持つ。
+- clipboard payload は source document ID、source scope（layer または plane）、plane role、document origin に対する bounds、pixel/selection、色深度を持つ。
 - `コピー` は対象として選択された layer/plane だけを格納する。主線と彩色の両方を target にした場合は両方の typed payload を保持する。
 - 通常 `ペースト` は payload と同じ属性の destination plane を優先する。現在別種類の plane が選ばれていても、互換 destination が存在すれば元属性へ貼る。
-- `選択プレーンにペースト` は明示的に現在 plane へ変換・合成する。損失がある型変換は preview/確認する。
-- `変換してペースト` は新規 layer または plane の種類、色深度、名前を選んで貼る。
+- `選択範囲にペースト` は clipboard selection を明示的に現在選択 mask へ変換・合成する。損失がある型変換は preview/確認する。
+- `変換してペースト` は新規標準 layer または raster plane、色深度、名前を選んで貼る。
 - アプリ内 paste は source の文書座標を維持する。destination 用紙が小さくても clip せず保持可能範囲と見えない範囲を正しく扱う。
 - paste 直後は floating selection とし、drag 移動、transform、commit、cancel を可能にする。
 - 階調主線同士の互換 paste は重なった pixel の暗い方を採用する `比較(暗)` semantics を持つ。
-- 外部アプリ向けには標準 Windows image clipboard を併記するが、標準形式では失われる layer type/座標をアプリ内 private format で補う。
+- 外部アプリ向けには標準 Windows image clipboard を併記するが、標準形式では失われる source scope／plane role／座標をアプリ内 private format で補う。
 
 ### 16. 画像全体と選択部分の変形
 
@@ -519,7 +502,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
   計算中parameter、progress、failureを表示し、UI threadはCore workやPresentを待たない。
 - `復帰` は最後の通常保存を staged Core で再構成して置換する。`部分復帰` は保存済み journal state から対象を再構成し、成功時だけ一件の新しい Undo 可能な canonical procedure として commit する。
 
-### 18. フィルタ、特効、レタッチ、調整レイヤー
+### 18. フィルタ、特効、レタッチ
 
 - filter は selection があればその内側、なければ active plane 全体へ適用する。
 - sharpen強/弱、blur強/弱は固定 preset。unsharp mask は radius、amount、threshold。Gaussian blur は radius/strength を持つ。
@@ -532,17 +515,17 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - airbrush effect は指定した二色以上の境界部分だけに設定幅のgradientを作る。通常 blur のように均一領域全体をぼかさない。
 - blur tool は pen/rectangle/polyline/lasso 範囲、太さ、screen-size固定、blur size、pressure を持つ。
 - stamp は Alt+click 等で source point を決め、destination drag と同じ offset で複製する。shape、size、hardness、spacing、pressure->size/opacity を持つ。
-- adjustment layer は元 pixel を変更せず、brightness/contrast、levels、tone curve の parameter plane を保持する。複数作成、順序変更、再編集、visibility toggle ができる。
 - alpha edit は raster plane の alpha channel だけを grayscale view で編集し、gradient 等も使える。通常 color plane を誤って変更しない。
 
 ### 19. バッチ処理
 
 - 一つの batch set は削除・無効化・並べ替え不能な一つの `入力`、一個以上の順序付き処理、削除・無効化・並べ替え不能な一つの `出力` から成る。入力と出力は `BatchOperationKind` に混在させず、全処理が無効な graph は実行不能とする。処理は enabled、複製、削除、上下移動を持つ。
-- 公開 authoring catalog、`.inkbatch`、C ABI、Windows UI が扱う処理は `色置換`、`彩色プレーンへ送る`、`マスキング`、`消去` の四種類だけとする。既存 filter、continuous fill、visibility、resize 等の基礎 Core 機能は削除しないが、Batch v4 から到達可能にしない。
+- 公開 authoring catalog、`.inkbatch`、C ABI、Windows UI が扱う処理は `色置換`、`彩色プレーンへ送る`、`マスキング`、`消去` の四種類だけとする。既存 filter、continuous fill、visibility、resize 等の基礎 Core 機能は削除しないが、Batch v5 から到達可能にしない。
 - 入力 node は、複数 file、非再帰 folder、job 発行時 active document の三種類の入力元を複数内包できる。file/folder は `.inkpod`、PNG、TIFF、TGA、BMP だけを受理し、folder は対応 file だけを自然順に列挙する。重複、missing、未対応形式、range、解決件数を preview する。active document は発行時の `DocumentSession` ID と generation に固定し、実行時に別の active document へ再解決しない。
 - 出力 node は folder、発行時に固定した active document、新規 tab を選べる。folder format は `.inkpod`、PNG、TIFF、TGA、BMP とし、一件ごとに同一 volume の temporary file を完成してから atomic replace する。active document への適用は結果全体を一つの Undo 単位として dirty にし、path authority と savepoint を進めない。stale generation では何も適用しない。新規 tab は各結果に Rust が新しい document identity を割り当て、pathless/dirty な `DocumentSession` とする。session/tab 上限超過は job 開始前に拒否する。
 - folder の命名は bounded template とし、初期 token は `{stem}` と `{index:N}` だけを許可する。拡張子は output format から決め、absolute path、separator、`..`、拡張子 token を拒否する。Core の dry-run は全出力 path、graph 内重複、既存 file 衝突を返し、一切書き込まないが、Windows product UI には独立した dry-run command を置かない。
-- native 色一致は対象 plane の格納 depth で判定する。RGBA は straight alpha を含む全成分の完全一致、Binary/Grayscale は格納 scalar の完全一致とし、表示変換、premultiply 後の値、tolerance、連結性、暗黙 depth/format 変換を使わない。不一致は item 単位の preview validation error とする。
+- native 色一致は対象 Color/Raster plane の格納 depth で判定する。RGBA は straight alpha を含む全成分の完全一致とし、表示変換、premultiply 後の値、tolerance、連結性、暗黙 depth/format 変換を使わない。不一致は item 単位の preview validation error とする。
+- Batch v5 の semantic target role は `Color` と `Raster` だけに閉じ、`MainLine` は role code でも fixed-ID 解決後でも拒否する。これにより Batch 経路から主線保護を迂回できない。旧 MainLine role code は tombstone とし、reader、C ABI、Windows UI のいずれも受理しない。
 - color replace は `旧色 -> 新色` の bounded 複数行、行ごとの enable、追加、削除、全行反転を持つ。同じ旧色を持つ enabled 行の重複を拒否し、一致 pixel がなければ revision、history、journal、dirty を進めない。既存の exact color pair 抽出機能は維持する。一つの color replace operation は bounded かつ非空の target selector 集合を持ち、各semantic selectorに一致する全layerの対象planeをstable IDへ決定的に展開し、重複planeを一回だけ処理する。全targetは一つの `ApplyBatchOperations` canonical primitive、一回のtransaction、一つのUndo単位として適用し、missing/error、形式不一致、hidden、non-editable、cancel、overflowではどのtargetもcommitしない。
 - 二枚の同位置セルから color pair を抽出する場合は、Core が所有する非zero document UUIDと非zero source generationの組で各immutable raster sourceを固定する。両sourceは同じ幅、高さ、native pixel formatを必要とし、異なる寸法、形式、stale／missing identityを変換、resample、現在activeな別cellへの再解決なしに拒否する。比較は同じdocument X/Yの格納値をnative depthで行い、RGBA 8/16 bitではstraight alphaを含む全成分、Binary／Grayscale 8/16 bitでは格納scalarの完全一致を使う。表示変換、premultiply後の値、toleranceを使わない。
 - 同じ格納値のpixelは置換pairへ出さず、unchanged件数としてpreviewする。RGBが同じでもalphaが異なれば差分候補とする。各`旧色 -> 新色`候補はpixel件数と、その候補が現れたhalf-open document boundsを持つ。旧色groupは最初の差分pixelのscanline順、同じ旧色内の候補はpixel件数の降順、同数なら新色のnative値順で決定的に並べる。
@@ -551,22 +534,22 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - `マスキング` は selection を流用せず、document 専用の sparse `fill protection mask` を置換する。指定色と一致する座標だけを `255 = 塗りの壁` として保持し、source raster は変更しない。壁 tile だけを割り当てる。mask は全 Core fill 経路の hard boundary、Undo/Redo、branch、replay、save/reopen、snapshot revision、cache invalidation の一部とする。追加/削除合成は初期 scope 外とする。
 - `消去` は指定色と一致する source pixel だけを native empty 値へする。RGBA は transparent black、Binary/Grayscale は 0 とし、非対象 pixel は保持する。一致なしは no-op とする。
 - マスキングを含む graph は情報を保持できない PNG/TIFF/TGA/BMP folder 出力を拒否し、`.inkpod`、active document、新規 tab だけを許可する。
-- Batch pane は `%LOCALAPPDATA%\inkpod\batch-sets` の `.inkbatch` file 名を列挙する編集可能な set 名 dropdown と保存/読込、Input/処理/Output を一列に置く headerless 工程 List-View、追加/複製/削除/上下移動、選択項目別の scrollable parameter host、validation、最下段に `プレビュー`、`全実行`、`中止` の三 button だけを持つ。入力行は `入力 (N件)` と表示し、処理の enable は工程 List-View 内の標準 checkbox で編集して固定 Input/Output には checkbox を表示しない。処理行の checkbox はその領域のclickまたは選択行のSpaceで切り替え、行選択だけでは切り替えない。読込時の decoder は current v4 だけを受理する。set 名は前後の空白を正規化し、path separator、Windows 予約名、末尾 dot を拒否し、dropdown には拡張子を除いた名前を表示する。Batch pane 自体には document follow/pin 表示や pin 操作を置かず、job 発行時 target 固定は command context で行う。`＋処理` は上記四候補だけの localizable popup とし、parameter は標準 Common Controls で inline 編集する。色置換parameterは汎用raster、2値彩色、階調彩色のtarget layer種別を標準checkboxで一つ以上複数選択でき、読込済みfixed-ID selectorは利用者がsemantic checkboxへ切り替えるまで保持する。入力 file/folder と folder 出力は parameter host 内の参照 button から Windows file/folder picker へ接続し、file picker は対応形式だけを列挙して複数選択を取り込む。parameter page は非表示 control の空間を残さない page 別の自然高さで配置し、動的 control も pane と同じ GUI font を使う。色 table は常に client 幅を使い切り、単一の選択行だけを選択表示し、alpha を反映した swatch と depth/RGBA 数値を重ならない領域へ表示する。選択行では旧色と新色のalphaをnative depthの範囲（8 bitは0–255、16 bitは0–65535）で数値編集できる。`描画色から取得` は色置換では旧色／新色の選択menuを開き、その他の処理ではその処理色へ適用し、適用後の値をpane内で常時確認可能にする。validation／実行結果欄は選択・コピー・縦scroll可能な read-only multiline control とし、実行失敗時は総件数だけでなく入力名と item 固有の理由を表示する。既知の対象欠落、hidden／non-editable、pixel format 不一致は日本語／英語へlocalizeし、未知のCore診断はboundedな技術詳細として表示する。一度に表示する失敗は先頭8件までとし、残件数を示す。
+- Batch pane は `%LOCALAPPDATA%\inkpod\batch-sets` の `.inkbatch` file 名を列挙する編集可能な set 名 dropdown と保存/読込、Input/処理/Output を一列に置く headerless 工程 List-View、追加/複製/削除/上下移動、選択項目別の scrollable parameter host、validation、最下段に `プレビュー`、`全実行`、`中止` の三 button だけを持つ。入力行は `入力 (N件)` と表示し、処理の enable は工程 List-View 内の標準 checkbox で編集して固定 Input/Output には checkbox を表示しない。処理行の checkbox はその領域のclickまたは選択行のSpaceで切り替え、行選択だけでは切り替えない。読込時の decoder は current v5 だけを受理する。set 名は前後の空白を正規化し、path separator、Windows 予約名、末尾 dot を拒否し、dropdown には拡張子を除いた名前を表示する。Batch pane 自体には document follow/pin 表示や pin 操作を置かず、job 発行時 target 固定は command context で行う。`＋処理` は上記四候補だけの localizable popup とし、parameter は標準 Common Controls で inline 編集する。色置換parameterは `Raster` と `Color` の target plane role を標準checkboxで一つ以上複数選択でき、読込済みfixed-ID selectorは利用者がsemantic checkboxへ切り替えるまで保持する。layer kind selector は設けない。入力 file/folder と folder 出力は parameter host 内の参照 button から Windows file/folder picker へ接続し、file picker は対応形式だけを列挙して複数選択を取り込む。parameter page は非表示 control の空間を残さない page 別の自然高さで配置し、動的 control も pane と同じ GUI font を使う。色 table は常に client 幅を使い切り、単一の選択行だけを選択表示し、alpha を反映した swatch と depth/RGBA 数値を重ならない領域へ表示する。選択行では旧色と新色のalphaをnative depthの範囲（8 bitは0–255、16 bitは0–65535）で数値編集できる。`描画色から取得` は色置換では旧色／新色の選択menuを開き、その他の処理ではその処理色へ適用し、適用後の値をpane内で常時確認可能にする。validation／実行結果欄は選択・コピー・縦scroll可能な read-only multiline control とし、実行失敗時は総件数だけでなく入力名と item 固有の理由を表示する。既知の対象欠落、hidden／non-editable、pixel format 不一致は日本語／英語へlocalizeし、未知のCore診断はboundedな技術詳細として表示する。一度に表示する失敗は先頭8件までとし、残件数を示す。
 - `プレビュー` は Core engine thread 上の非同期 job とし、4 GiB 以下の専用 temporary job directory を作る。file/folder input は encoded file を chunk copy し、active document input は issue-time の immutable document/assets を temporary `.inkpod` へ materialize する。全 input の copy/materialize が完了するまで最初の処理を開始せず、copy 後の原 file の変更を処理入力へ反映しない。各 copy に全 enabled 処理を順に適用し、folder output 設定では同じ output format、それ以外では temporary `.inkpod` へ保存して再読込する。設定された実 output folder、active document、新規 tab へは書き込まない。
 - preview 結果は input 順の決定的なほぼ正方格子へ並べた一枚の straight-alpha RGBA8 contact sheet とする。thumbnail の長辺上限は 160 pixel、padding は8 pixelを基準とし、全 contact sheet が16,777,216 pixel以下になるよう縮小する。透明部分には checkerboard、item failure には赤系 placeholder、Stop 後の未処理 item には灰色 placeholder を表示する。成功時は一つの clean/pathless Rust-owned staged Core として新しい Canvas tabへ `バッチプレビュー`／`Batch Preview` の名前で公開し、専用 temporary job directory は tab 公開前に削除する。この tab は表示専用の Batch preview とし、active document input の source として再解決しない。preview tab が active のまま後続の `プレビュー` または `全実行` を発行した場合は、その preview が保持する元の issue-time document/view context を target とし、元 target が stale なら active preview へ fallback せず拒否する。cancel、stale target、cleanup failure では tabを公開せず、元 document、実 output、revision、history、dirty、savepointを変更しない。
 - Batch pane は右側 tool tab を開くたびに Batch 専用 tab へ配置する。この tab は Batch pane 一つだけを持ち、Batch を既存 tab へ追加することも、他 pane を Batch tab へ追加することも、drag／復元／workspace decode を含む全経路で許可しない。
-- UI は選択変更で document/immutable graph を変更せず draft view model を編集し、preview/run/save 時だけ検証済み immutable graph を一回構築する。読込済み `.inkbatch` v4 は input/operation/outputと全target selectorを draft へ完全復元して編集可能にする。狭い pane は縦 scroll と responsive button wrap を使い、日本語/英語、96/120/144/192 DPI、high contrast、Tab/F6、screen reader name を扱う。
+- UI は選択変更で document/immutable graph を変更せず draft view model を編集し、preview/run/save 時だけ検証済み immutable graph を一回構築する。読込済み `.inkbatch` v5 は input/operation/outputと全target selectorを draft へ完全復元して編集可能にする。狭い pane は縦 scroll と responsive button wrap を使い、日本語/英語、96/120/144/192 DPI、high contrast、Tab/F6、screen reader name を扱う。
 - 一件ごとに temporary output から atomic commit し、cancel/失敗した item に部分 output を残さない。dry-run は一切書かない。
 
 将来のBatch authoring／execution形式であるInkScriptのlanguage core、schema registry、exact-source／rebound
-等価性、実装gateは[`INKSCRIPT.md`](INKSCRIPT.md)を規範とする。exact-current `.inkbatch` v4 と Batch v4
+等価性、実装gateは[`INKSCRIPT.md`](INKSCRIPT.md)を規範とする。exact-current `.inkbatch` v5 と Batch v5
 UI／ABIを production contract とする。M23で批准済みcatalogを使うRust compile／bind／staged-run APIはproductから独立して
 公開してよいが、`.inkscript` file filter、clipboard、C ABI、Windows command／UI、Batch production executorからは
 各owner milestoneとM34 cutoverまで到達可能にしない。
 
 ### 20. 形式、白透過、一般画像入出力
 
-- exact-current 契約は `.inkpod` top-level format v29、runtime replay epoch 25、C ABI v23、`.inkbatch` v4、InkScript registry schema／language／file v2、production catalog／owner manifest v4 とする。native v28以前、epoch 24以前、ABI v22以前、`.inkbatch` v3以前、catalog／owner manifest v3、および削除済み Batch authoring operation は migration や shim を設けず拒否する。今回の更新は native format freeze 宣言ではない。
+- exact-current 契約は `.inkpod` top-level format v31、runtime replay epoch 27、C ABI v25、`DocumentArchive` schema 7、必須 `DOCM` schema 8、`DocumentStateDigest` schema 12/domain 10、snapshot-composite schema 5、Cut payload schema 3／Cut replay epoch 25、`.inkbatch` v5／operation schema 4、InkScript registry schema／language／file v2、73-command production catalog／owner manifest v5 とする。native v30以前、epoch 26以前、ABI v24以前、Cut payload schema 2以前、`.inkbatch` v4以前、catalog／owner manifest v4以前、および削除済み layer-kind／Selection-plane／VanishingPoint／Adjustment-layer contract は migration や shim を設けず拒否する。今回の更新は native format freeze 宣言ではない。
 - native `.inkpod` は、保存時点の可変 raster snapshot を意味上の正本にしない。正本は immutable な `Genesis`、content-addressed な `Assets`、Core が検証・正規化して実変更を確定した `Procedures` と history control event、history の現在位置と high-watermark を持つ `META`、文書単位の `EditorState` とする。materialized document、inverse delta、COW snapshot、render/checkpoint cache は派生物であり、これらだけで文書を成立させない。
 - frontend request は target/revision/ID と上限を検証し、座標、色、option、可変長入力、transaction 内の output ID を正規化してから一つの `CanonicalProcedure` として確定する。procedure は monotonic ID、primitive ID/schema、replay epoch、base/committed `StateId`、固定幅引数、stable input/output ID、immutable `AssetId` または bounded inline payload、pre/post document-state digest を持ち、raw pointer、外部 path、native enum layout、frontend command ID、一時 object ID を含めない。
 - `Genesis` は document UUID、paper、DPI、sRGB、frame、margin、初期 stable-ID topology、immutable base surface を完全記述する。白紙の base surface は全面 tile を割り当てない opaque white の `SolidWhite` underlay とし、flat canonical composite/export には参加するが、個別 layer/plane export や selection mask へ暗黙に混入させない。
@@ -651,12 +634,11 @@ UI／ABIを production contract とする。M23で批准済みcatalogを使うRu
 ### Document and view
 
 - `DOC-001`: CellDocument、用紙、DPI、100 frame、基準/作画/安全 frame、余白
-- `CELL-001`: image/frame size、DPI、六種 frame、五点 anchor、初期 layer、8/16 bit、bounded 複数枚を同一 plan から all-or-none で作る新規 Cell workflow
-- `DOC-002`: stable ID を持つ typed layer/plane tree
-- `DOC-003`: create/duplicate/delete/reorder/show/edit/opacity/convert/merge
-- `RENDER-001`: raster／adjustment の layer/plane 木順序、visibility、opacity、alpha を共有する Canvas/thumbnail/flatten 合成
+- `CELL-001`: image/frame size、DPI、六種 frame、五点 anchor、標準画像 layer、8/16 bit、bounded 複数枚を同一 plan から all-or-none で作る新規 Cell workflow
+- `DOC-002`: 種類 field を持たない stable-ID画像 layer と、MainLine exactly one／Color exactly one／Raster zero-or-more の typed plane tree
+- `DOC-003`: layer/plane の create/duplicate/delete/reorder/show/edit/opacity/format-convert/compatible-merge と必須 topology 保護
+- `RENDER-001`: 画像 layer/plane 木順序、visibility、opacity、alpha を共有する Canvas/thumbnail/flatten 合成
 - `SHOOTING-FRAME-001`: stable ID、center／size／binary-turn rotation／五点 anchor／表示・指示 export policy を持つ独立した角度付き撮影 frame object、preview/transaction、document transform、Canvas／指示 export／save／reopen contract
-- `VANISHING-POINT-001`: Canvas内外の複数stable-ID消失点、bounded fixed-point放射線、exact color／opacity／visibility、preview／transaction、radial snap、document transform、Canvas overlay、save／reopen contract
 - `VIEW-001`: zoom、box zoom、fit、1:1、pan、horizontal/vertical flip
 - `VIEW-002`: ruler、guide/grid、snap、transparent view
 - `SNAP-001`: view-targeted device/document座標変換、guide/grid優先順位、Ctrl一時解除を共有するproduction図形入力snap
@@ -686,7 +668,7 @@ UI／ABIを production contract とする。M23で批准済みcatalogを使うRu
 
 - `SEL-001`: rect/ellipse/lasso/polyline/trace/wand selection
 - `SEL-002`: new/add/subtract/intersect/invert/expand/shrink/color selection
-- `SEL-003`: selection layer conversion
+- `SEL-003`: 文書所有のstable-ID保存選択 mask、現在選択とのreplace/add/subtract、rename/delete、layer compositeからの分離
 - `SEL-004`: raster range interpretation と rectangle／ellipse／trace construction options
 - `CLIP-001`: typed clipboard、standard clipboard、document coordinate preservation
 - `XFORM-001`: destructive mirror/rotate/size/resolution と非破壊 view transform の分離
@@ -712,8 +694,8 @@ UI／ABIを production contract とする。M23で批准済みcatalogを使うRu
 - `FILTER-002`: brightness/contrast、curve、levels、HSV、color balance
 - `FILTER-PREVIEW-001`: filter／色調補正dialogの非累積live preview、bounded latest-wins更新、発行時target固定、OK一commit／Cancel完全復元
 - `EFFECT-001`: gradient、airbrush、airbrush boundary effect、blur tool、stamp
-- `ADJUST-001`: non-destructive adjustment layer と alpha edit
-- `BATCH-001`: fixed Input -> one-or-more ordered Operations -> fixed Output graph、draft編集、複数target color replace、`.inkbatch` v4
+- `ALPHA-001`: raster plane のalpha-only編集と通常color channelからの分離
+- `BATCH-001`: fixed Input -> one-or-more ordered Operations -> fixed Output graph、draft編集、複数target color replace、`.inkbatch` v5
 - `BATCH-002`: 公開四処理（exact color replace、move-to-color-plane、fill-protection masking、erase）とnative-depth一致
 - `BATCH-003`: file/folder/issue-time-active input、folder/issue-time-active/new-tab output、bounded naming dry-run、progress/cancel、per-output atomicity
 - `BATCH-004`: exact native-depth二セルpair抽出、複数行色置換、mask-aware output validation、staged result ownership、inline parameter hostとloaded-set編集

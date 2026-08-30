@@ -1,5 +1,4 @@
 use super::model::*;
-use crate::adjustment::validate_adjustment_metadata;
 use crate::light_table::validate_light_table_metadata;
 use inkpod_image::{MAX_PALETTE_COLORS, PixelFormat, TileCoord};
 use std::collections::BTreeSet;
@@ -11,7 +10,7 @@ pub(super) fn validate_document_metadata(
     if metadata.layers.is_empty()
         || metadata.layers.len() > MAX_LAYERS
         || metadata.guides.len() > MAX_GUIDES
-        || metadata.vanishing_points.len() > MAX_VANISHING_POINTS
+        || metadata.saved_selections.len() > MAX_SAVED_SELECTION_MASKS
         || metadata.grid.spacing_x == 0
         || metadata.grid.spacing_y == 0
         || metadata.grid.spacing_x > 1_048_576
@@ -29,7 +28,12 @@ pub(super) fn validate_document_metadata(
     let mut referenced_planes = BTreeSet::new();
     for layer in &metadata.layers {
         validate_name(&layer.name)?;
-        if layer.id == 0 || !ids.insert(layer.id) || layer.opacity_milli > 1_000 {
+        if layer.id == 0
+            || !ids.insert(layer.id)
+            || layer.opacity_milli > 1_000
+            || layer.planes.len() < 2
+            || layer.planes.len() > MAX_PLANES
+        {
             return Err(FormatError::Invalid(
                 "document layer properties are invalid",
             ));
@@ -70,27 +74,16 @@ pub(super) fn validate_document_metadata(
             ));
         }
     }
-    for point in &metadata.vanishing_points {
-        let layer = metadata
-            .layers
-            .iter()
-            .find(|layer| layer.id == point.layer_id)
-            .ok_or(FormatError::Invalid(
-                "vanishing-point owner layer does not exist",
-            ))?;
-        const LIMIT: u64 = 67_108_864_000;
-        if point.id == 0
-            || !ids.insert(point.id)
-            || layer.kind != LayerKind::VanishingPoint
-            || point.x_milli.unsigned_abs() > LIMIT
-            || point.y_milli.unsigned_abs() > LIMIT
-            || !(1_000..=180_000).contains(&point.interval_milli_degrees)
-            || point.angle_milli_degrees >= 180_000
-            || point.opacity_milli > 1_000
-            || point.color.rgba16().is_none()
+    let mut saved_selection_names = BTreeSet::new();
+    for saved_selection in &metadata.saved_selections {
+        validate_name(&saved_selection.name)?;
+        if saved_selection.id == 0
+            || !ids.insert(saved_selection.id)
+            || !referenced_planes.insert(saved_selection.id)
+            || !saved_selection_names.insert(saved_selection.name.as_str())
         {
             return Err(FormatError::Invalid(
-                "vanishing-point properties are invalid",
+                "saved-selection properties are invalid",
             ));
         }
     }
@@ -106,6 +99,34 @@ pub(super) fn validate_document_metadata(
         ));
     }
     if let Some(planes) = file_planes {
+        for layer in &metadata.layers {
+            let mut main_line_count = 0_usize;
+            let mut color_count = 0_usize;
+            for properties in &layer.planes {
+                let plane = planes
+                    .iter()
+                    .find(|plane| plane.id == properties.id)
+                    .ok_or(FormatError::Invalid("document plane payload is missing"))?;
+                match plane.kind {
+                    PlaneKind::MainLine => main_line_count += 1,
+                    PlaneKind::Color => color_count += 1,
+                    PlaneKind::Raster => {}
+                    PlaneKind::CurrentSelection
+                    | PlaneKind::SavedSelection
+                    | PlaneKind::FillProtection
+                    | PlaneKind::LightTable => {
+                        return Err(FormatError::Invalid(
+                            "document layer contains a non-image plane",
+                        ));
+                    }
+                }
+            }
+            if main_line_count != 1 || color_count != 1 {
+                return Err(FormatError::Invalid(
+                    "document layer must contain one main-line and one color plane",
+                ));
+            }
+        }
         let plane_ids: BTreeSet<_> = planes
             .iter()
             .filter(|plane| plane.kind != PlaneKind::LightTable)
@@ -192,12 +213,12 @@ pub(super) fn validate_document(document: &DocumentArchive) -> Result<(), Format
     let main = document
         .planes
         .iter()
-        .find(|plane| plane.kind == PlaneKind::MainLine)
+        .find(|plane| plane.id == document.main_plane_id)
         .ok_or(FormatError::Invalid("main line plane is missing"))?;
     let color = document
         .planes
         .iter()
-        .find(|plane| plane.kind == PlaneKind::Color)
+        .find(|plane| plane.id == document.color_plane_id)
         .ok_or(FormatError::Invalid("color plane is missing"))?;
     if document.main_line_color.rgba16().is_none() {
         return Err(FormatError::Invalid("main-line base color must be RGBA"));
@@ -212,12 +233,16 @@ pub(super) fn validate_document(document: &DocumentArchive) -> Result<(), Format
             "palette count or color type is invalid",
         ));
     }
-    if main.id != document.main_plane_id
+    if main.kind != PlaneKind::MainLine
         || !matches!(
             main.pixel_format,
-            PixelFormat::BinaryMask8 | PixelFormat::Grayscale8 | PixelFormat::Grayscale16
+            PixelFormat::BinaryMask8
+                | PixelFormat::Grayscale8
+                | PixelFormat::Grayscale16
+                | PixelFormat::StraightRgba8
+                | PixelFormat::StraightRgba16
         )
-        || color.id != document.color_plane_id
+        || color.kind != PlaneKind::Color
         || !matches!(
             color.pixel_format,
             PixelFormat::StraightRgba8 | PixelFormat::StraightRgba16
@@ -229,6 +254,23 @@ pub(super) fn validate_document(document: &DocumentArchive) -> Result<(), Format
     }
     let mut plane_ids = BTreeSet::new();
     for plane in &document.planes {
+        let format_is_valid = match plane.kind {
+            PlaneKind::MainLine => matches!(
+                plane.pixel_format,
+                PixelFormat::BinaryMask8
+                    | PixelFormat::Grayscale8
+                    | PixelFormat::Grayscale16
+                    | PixelFormat::StraightRgba8
+                    | PixelFormat::StraightRgba16
+            ),
+            PlaneKind::Color | PlaneKind::Raster | PlaneKind::LightTable => matches!(
+                plane.pixel_format,
+                PixelFormat::StraightRgba8 | PixelFormat::StraightRgba16
+            ),
+            PlaneKind::CurrentSelection | PlaneKind::SavedSelection | PlaneKind::FillProtection => {
+                plane.pixel_format == PixelFormat::BinaryMask8
+            }
+        };
         if plane.id == 0
             || !plane_ids.insert(plane.id)
             || plane.width == 0
@@ -237,11 +279,7 @@ pub(super) fn validate_document(document: &DocumentArchive) -> Result<(), Format
             || plane.height > inkpod_image::MAX_RASTER_DIMENSION
             || (plane.kind != PlaneKind::LightTable
                 && (plane.width != document.width || plane.height != document.height))
-            || (plane.kind == PlaneKind::LightTable
-                && !matches!(
-                    plane.pixel_format,
-                    PixelFormat::StraightRgba8 | PixelFormat::StraightRgba16
-                ))
+            || !format_is_valid
         {
             return Err(FormatError::Invalid("plane manifest is inconsistent"));
         }
@@ -268,8 +306,49 @@ pub(super) fn validate_document(document: &DocumentArchive) -> Result<(), Format
             }
         }
     }
-    if let Some(metadata) = &document.document_metadata {
+    let document_metadata = document
+        .document_metadata
+        .as_ref()
+        .ok_or(FormatError::Invalid(
+            "current document metadata is required",
+        ))?;
+    {
+        let metadata = document_metadata;
         validate_document_metadata(metadata, Some(&document.planes))?;
+        let mut object_ids = BTreeSet::from([document.document_id, document.cell_id]);
+        for id in document
+            .planes
+            .iter()
+            .filter(|plane| plane.kind != PlaneKind::LightTable)
+            .map(|plane| plane.id)
+            .chain(metadata.layers.iter().map(|layer| layer.id))
+            .chain(metadata.guides.iter().map(|guide| guide.id))
+            .chain(metadata.shooting_frame.iter().map(|frame| frame.id))
+        {
+            if !object_ids.insert(id) {
+                return Err(FormatError::Invalid(
+                    "document stable object IDs are not globally unique",
+                ));
+            }
+        }
+        let primary_layer = metadata
+            .layers
+            .iter()
+            .find(|layer| layer.id == document.layer_id)
+            .ok_or(FormatError::Invalid("primary layer is missing"))?;
+        if !primary_layer
+            .planes
+            .iter()
+            .any(|plane| plane.id == document.main_plane_id)
+            || !primary_layer
+                .planes
+                .iter()
+                .any(|plane| plane.id == document.color_plane_id)
+        {
+            return Err(FormatError::Invalid(
+                "primary layer does not own the primary planes",
+            ));
+        }
         let width = i32::try_from(document.width)
             .map_err(|_| FormatError::Invalid("document width exceeds guide range"))?;
         let height = i32::try_from(document.height)
@@ -287,7 +366,7 @@ pub(super) fn validate_document(document: &DocumentArchive) -> Result<(), Format
             .iter()
             .find(|plane| plane.id == metadata.selection_plane_id)
             .ok_or(FormatError::Invalid("selection plane is missing"))?;
-        if selection.kind != PlaneKind::Selection
+        if selection.kind != PlaneKind::CurrentSelection
             || selection.pixel_format != PixelFormat::BinaryMask8
         {
             return Err(FormatError::Invalid(
@@ -306,13 +385,22 @@ pub(super) fn validate_document(document: &DocumentArchive) -> Result<(), Format
                 "fill-protection plane kind or format is invalid",
             ));
         }
+        for saved_selection in &metadata.saved_selections {
+            let plane = document
+                .planes
+                .iter()
+                .find(|plane| plane.id == saved_selection.id)
+                .ok_or(FormatError::Invalid("saved-selection plane is missing"))?;
+            if plane.kind != PlaneKind::SavedSelection
+                || plane.pixel_format != PixelFormat::BinaryMask8
+            {
+                return Err(FormatError::Invalid(
+                    "saved-selection plane kind or format is invalid",
+                ));
+            }
+        }
     }
     if let Some(metadata) = &document.light_table_metadata {
-        if document.document_metadata.is_none() {
-            return Err(FormatError::Invalid(
-                "light-table metadata requires the document layer tree",
-            ));
-        }
         let source_plane_ids: BTreeSet<_> = document
             .planes
             .iter()
@@ -320,36 +408,46 @@ pub(super) fn validate_document(document: &DocumentArchive) -> Result<(), Format
             .map(|plane| plane.id)
             .collect();
         validate_light_table_metadata(metadata, Some(&source_plane_ids))?;
-        let mut occupied_ids = BTreeSet::from([document.document_id]);
-        if let Some(document_metadata) = &document.document_metadata {
-            for layer in &document_metadata.layers {
-                if !occupied_ids.insert(layer.id) {
+        let mut occupied_ids = BTreeSet::from([document.document_id, document.cell_id]);
+        for layer in &document_metadata.layers {
+            if !occupied_ids.insert(layer.id) {
+                return Err(FormatError::Invalid(
+                    "light-table state collides with an existing stable ID",
+                ));
+            }
+            for plane in &layer.planes {
+                if !occupied_ids.insert(plane.id) {
                     return Err(FormatError::Invalid(
                         "light-table state collides with an existing stable ID",
                     ));
-                }
-                for plane in &layer.planes {
-                    if !occupied_ids.insert(plane.id) {
-                        return Err(FormatError::Invalid(
-                            "light-table state collides with an existing stable ID",
-                        ));
-                    }
                 }
             }
-            for id in document_metadata
-                .guides
-                .iter()
-                .map(|guide| guide.id)
-                .chain([
-                    document_metadata.selection_plane_id,
-                    document_metadata.fill_protection_plane_id,
-                ])
-            {
-                if !occupied_ids.insert(id) {
-                    return Err(FormatError::Invalid(
-                        "light-table state collides with an existing stable ID",
-                    ));
-                }
+        }
+        for id in document_metadata
+            .guides
+            .iter()
+            .map(|guide| guide.id)
+            .chain([
+                document_metadata.selection_plane_id,
+                document_metadata.fill_protection_plane_id,
+            ])
+            .chain(
+                document_metadata
+                    .saved_selections
+                    .iter()
+                    .map(|selection| selection.id),
+            )
+            .chain(
+                document_metadata
+                    .shooting_frame
+                    .iter()
+                    .map(|frame| frame.id),
+            )
+        {
+            if !occupied_ids.insert(id) {
+                return Err(FormatError::Invalid(
+                    "light-table state collides with an existing stable ID",
+                ));
             }
         }
         for source_plane_id in &source_plane_ids {
@@ -390,26 +488,6 @@ pub(super) fn validate_document(document: &DocumentArchive) -> Result<(), Format
     {
         return Err(FormatError::Invalid(
             "light-table planes require light-table metadata",
-        ));
-    }
-
-    let adjustment_layer_ids: BTreeSet<_> = document
-        .document_metadata
-        .iter()
-        .flat_map(|metadata| metadata.layers.iter())
-        .filter(|layer| layer.kind == LayerKind::Adjustment)
-        .map(|layer| layer.id)
-        .collect();
-    if let Some(metadata) = &document.adjustment_metadata {
-        if document.document_metadata.is_none() || adjustment_layer_ids.is_empty() {
-            return Err(FormatError::Invalid(
-                "adjustment metadata requires an adjustment layer in the document tree",
-            ));
-        }
-        validate_adjustment_metadata(metadata, Some(&adjustment_layer_ids))?;
-    } else if !adjustment_layer_ids.is_empty() {
-        return Err(FormatError::Invalid(
-            "adjustment layers require adjustment metadata",
         ));
     }
 

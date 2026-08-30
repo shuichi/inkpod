@@ -760,7 +760,7 @@ fn io_003_sequence_switch_requires_recovery_for_document_or_editor_edits() {
                 clean.document_revision
             );
         } else {
-            core.set_main_line_color(PixelValue::Rgba([10, 11, 12, 255]))
+            core.replace_palette(&[PixelValue::Rgba([10, 11, 12, 255])])
                 .unwrap();
         }
         let before = core.document_info().unwrap();
@@ -1563,7 +1563,7 @@ fn io_003_parallel_sequence_attaches_without_reopening_or_losing_later_edits() {
         FileIoRequest::new(FileIoKind::SequenceAuto, vec![seed]),
     )
     .unwrap();
-    core.set_main_line_color(PixelValue::Rgba([11, 22, 33, 255]))
+    core.replace_palette(&[PixelValue::Rgba([11, 22, 33, 255])])
         .unwrap();
     core.update_editor_state(
         core.editor_state().unwrap().revision,

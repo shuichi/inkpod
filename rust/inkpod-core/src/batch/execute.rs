@@ -67,7 +67,7 @@ impl Core {
         Ok(BatchPreview { items })
     }
 
-    /// Executes a validated Batch v4 graph.
+    /// Executes a validated Batch v5 graph.
     pub fn batch_execute(
         &mut self,
         graph: &BatchGraph,

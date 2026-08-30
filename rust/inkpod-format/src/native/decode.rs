@@ -1,6 +1,5 @@
 use super::model::*;
 use super::validate::{validate_document, validate_document_metadata, validate_tile_shape};
-use crate::adjustment::decode_adjustment_metadata;
 use crate::light_table::decode_light_table_metadata;
 use inkpod_image::{MAX_PALETTE_COLORS, PixelFormat, PixelValue, TileCoord};
 use std::collections::BTreeSet;
@@ -19,8 +18,7 @@ pub fn decode_document_archive(bytes: &[u8]) -> Result<DocumentArchive, FormatEr
     if container_flags
         & !(CONTAINER_FLAG_COLOR_METADATA
             | CONTAINER_FLAG_DOCUMENT_METADATA
-            | CONTAINER_FLAG_LIGHT_TABLE_METADATA
-            | CONTAINER_FLAG_ADJUSTMENT_METADATA)
+            | CONTAINER_FLAG_LIGHT_TABLE_METADATA)
         != 0
     {
         return Err(FormatError::Unsupported(
@@ -145,29 +143,10 @@ pub fn decode_document_archive(bytes: &[u8]) -> Result<DocumentArchive, FormatEr
         } else {
             (None, 0)
         };
-    let (adjustment_metadata, adjustment_metadata_len) =
-        if container_flags & CONTAINER_FLAG_ADJUSTMENT_METADATA != 0 {
-            let byte_count = reader.u32()? as usize;
-            if reader.u32()? != 0 {
-                return Err(FormatError::Unsupported(
-                    "adjustment metadata reserved field is not zero",
-                ));
-            }
-            if byte_count > MAX_MANIFEST_BYTES as usize {
-                return Err(FormatError::Invalid(
-                    "adjustment metadata exceeds its bound",
-                ));
-            }
-            let metadata = decode_adjustment_metadata(reader.take(byte_count)?)?;
-            (Some(metadata), byte_count.saturating_add(8))
-        } else {
-            (None, 0)
-        };
     let expected_manifest_len = FIXED_MANIFEST_BYTES
         .checked_add(color_metadata_len)
         .and_then(|value| value.checked_add(document_metadata_len))
         .and_then(|value| value.checked_add(light_table_metadata_len))
-        .and_then(|value| value.checked_add(adjustment_metadata_len))
         .and_then(|value| value.checked_add(plane_count.checked_mul(PLANE_DESCRIPTOR_BYTES)?))
         .and_then(|value| {
             value.checked_add(manifest_blob_count.checked_mul(BLOB_DESCRIPTOR_BYTES)?)
@@ -365,7 +344,6 @@ pub fn decode_document_archive(bytes: &[u8]) -> Result<DocumentArchive, FormatEr
         planes,
         document_metadata,
         light_table_metadata,
-        adjustment_metadata,
     };
     validate_document(&document)?;
     Ok(document)
@@ -373,7 +351,7 @@ pub fn decode_document_archive(bytes: &[u8]) -> Result<DocumentArchive, FormatEr
 
 fn decode_document_metadata(bytes: &[u8]) -> Result<FileDocumentMetadata, FormatError> {
     let mut reader = Reader::new(bytes);
-    if reader.take(4)? != DOCUMENT_METADATA_MAGIC || reader.u32()? != 7 {
+    if reader.take(4)? != DOCUMENT_METADATA_MAGIC || reader.u32()? != DOCUMENT_METADATA_VERSION {
         return Err(FormatError::Unsupported(
             "document metadata version is not supported",
         ));
@@ -393,11 +371,11 @@ fn decode_document_metadata(bytes: &[u8]) -> Result<FileDocumentMetadata, Format
             ));
         }
     };
-    let vanishing_point_count = reader.u32()? as usize;
+    let saved_selection_count = reader.u32()? as usize;
     if layer_count == 0
         || layer_count > MAX_LAYERS
         || guide_count > MAX_GUIDES
-        || vanishing_point_count > MAX_VANISHING_POINTS
+        || saved_selection_count > MAX_SAVED_SELECTION_MASKS
     {
         return Err(FormatError::Invalid(
             "document layer or guide count is outside bounds",
@@ -428,7 +406,6 @@ fn decode_document_metadata(bytes: &[u8]) -> Result<FileDocumentMetadata, Format
     let mut layers = Vec::with_capacity(layer_count);
     for _ in 0..layer_count {
         let id = reader.u64()?;
-        let kind = LayerKind::from_code(reader.u32()?)?;
         let flags = reader.u32()?;
         if flags & !3 != 0 {
             return Err(FormatError::Unsupported("unknown document layer flags"));
@@ -464,7 +441,6 @@ fn decode_document_metadata(bytes: &[u8]) -> Result<FileDocumentMetadata, Format
         }
         layers.push(FileLayer {
             id,
-            kind,
             name,
             visible: flags_bit(flags, 0),
             editable: flags_bit(flags, 1),
@@ -519,39 +495,18 @@ fn decode_document_metadata(bytes: &[u8]) -> Result<FileDocumentMetadata, Format
     } else {
         None
     };
-    let mut vanishing_points = Vec::with_capacity(vanishing_point_count);
-    for _ in 0..vanishing_point_count {
+    let mut saved_selections = Vec::with_capacity(saved_selection_count);
+    for _ in 0..saved_selection_count {
         let id = reader.u64()?;
-        let layer_id = reader.u64()?;
-        let x_milli = reader.i64()?;
-        let y_milli = reader.i64()?;
-        let interval_milli_degrees = reader.u32()?;
-        let angle_milli_degrees = reader.u32()?;
-        let opacity_milli = reader.u32()?;
-        let visible = match reader.u32()? {
-            0 => false,
-            1 => true,
-            _ => {
-                return Err(FormatError::Unsupported(
-                    "vanishing-point visibility is invalid",
-                ));
-            }
-        };
+        let name_len = reader.u32()? as usize;
         if reader.u32()? != 0 {
             return Err(FormatError::Unsupported(
-                "vanishing-point reserved field is not zero",
+                "saved-selection reserved field is not zero",
             ));
         }
-        vanishing_points.push(FileVanishingPoint {
+        saved_selections.push(FileSavedSelection {
             id,
-            layer_id,
-            x_milli,
-            y_milli,
-            interval_milli_degrees,
-            angle_milli_degrees,
-            color: reader.color_value()?,
-            opacity_milli,
-            visible,
+            name: read_name(&mut reader, name_len)?,
         });
     }
     let color_chart = crate::decode_color_chart(reader.take(color_chart_length)?)?;
@@ -569,7 +524,7 @@ fn decode_document_metadata(bytes: &[u8]) -> Result<FileDocumentMetadata, Format
         color_chart,
         color_chart_locked,
         shooting_frame,
-        vanishing_points,
+        saved_selections,
     };
     validate_document_metadata(&metadata, None)?;
     Ok(metadata)

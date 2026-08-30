@@ -176,7 +176,6 @@ void FillOperationInput(
     destination.flags = source.flags;
     destination.layer_id = source.layer_id;
     destination.plane_id = source.plane_id;
-    destination.layer_kind = source.layer_kind;
     destination.plane_kind = source.plane_kind;
     destination.missing_policy = source.missing_policy;
     destination.colors.struct_size = sizeof(destination.colors);
@@ -217,7 +216,6 @@ bool ReadOperation(
         operation.flags = info.flags;
         operation.layer_id = info.layer_id;
         operation.plane_id = info.plane_id;
-        operation.layer_kind = info.layer_kind;
         operation.plane_kind = info.plane_kind;
         operation.missing_policy = info.missing_policy;
         operation.additional_targets.resize(

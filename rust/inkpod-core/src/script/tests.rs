@@ -5,18 +5,18 @@ use super::*;
 use crate::asset::{AssetStore, RasterAssetInput};
 use crate::primitive::CanonicalInvocation;
 use crate::{
-    ActivePlane, Adjustment, AirbrushGesture, AirbrushStroke, AssetAlphaSemantics, AssetColorSpace,
+    ActivePlane, AirbrushGesture, AirbrushStroke, AssetAlphaSemantics, AssetColorSpace,
     BatchColorPair, BrushShape, CellCreationOptions, CellSizing, CoordinateSpace, Core,
     DEFAULT_DPI_MILLI, EditorTarget, EffectSample, FillOperation, FillRequest, FrameAnchor,
     GeometryCrossSection, GeometryOptions, GeometryPrimitive, GeometryRequest, Gradient,
-    GradientKind, GradientMode, GradientStop, GridConfig, GuideAxis, InclusionMode, LayerKind,
+    GradientKind, GradientMode, GradientStop, GridConfig, GuideAxis, InclusionMode,
     LightTableDisplayMode, LightTableItemInput, LightTableItemProperties, LightTableSource,
     MAX_PERSISTENT_NUMERIC_ID, NativeOpenStrategy, OutputColorGuardProfile, PaintTool, PixelFormat,
     PixelValue, PointF32, PrimitiveId, PrimitiveRequest, ProcedureId, RangeInterpretation, RectI32,
-    RgbaRasterBytes, ScopedColorReplaceMode, SelectionConstructionOptions, SelectionLayerOperation,
-    SelectionOperation, SelectionShape, ShootingFrameAnchor, ShootingFrameEdit, ShootingFrameInput,
-    Stamp, StampGesture, StampShape, StartColorPredicate, StateId, Stroke, StrokeSample,
-    VanishingPointInput, plan_cell_creation,
+    RgbaRasterBytes, SavedSelectionId, SavedSelectionOperation, ScopedColorReplaceMode,
+    SelectionConstructionOptions, SelectionOperation, SelectionShape, ShootingFrameAnchor,
+    ShootingFrameEdit, ShootingFrameInput, Stamp, StampGesture, StampShape, StartColorPredicate,
+    StateId, Stroke, StrokeSample, plan_cell_creation,
 };
 use inkpod_format::{
     InkScriptRunParameterChoice, InkScriptRunParameterDecision, InkScriptSource, InkScriptSourceId,
@@ -138,7 +138,7 @@ fn assert_export_round_trip(base: &Core, scripted: &Core) {
 fn complete_source(parameters: &str, bindings: &str, program: &str) -> InkScriptSource {
     source(format!(
         r#"inkscript 2;
-requires {{ procedure_catalog = 4; replay_epoch = 25; }}
+requires {{ procedure_catalog = 5; replay_epoch = 27; }}
 inputs {{ current_document; }}
 parameters {{ {parameters} }}
 bindings {{ {bindings} }}
@@ -152,7 +152,7 @@ execution {{ failure = stop; wait_ms = 0; preview_before_save = false; }}
 fn complete_source_with_assets(bindings: &str, program: &str, assets: &str) -> InkScriptSource {
     source(format!(
         r#"inkscript 2;
-requires {{ procedure_catalog = 4; replay_epoch = 25; }}
+requires {{ procedure_catalog = 5; replay_epoch = 27; }}
 inputs {{ current_document; }}
 parameters {{}}
 bindings {{ {bindings} }}
@@ -348,7 +348,7 @@ fn compiler_freezes_parameters_and_checks_cancel_invalid_and_aggregate_resources
     assert_eq!(limited, Err(ScriptCompileError::ResourceLimit));
 
     let invalid =
-        source("inkscript 2; requires { procedure_catalog = 4; replay_epoch = 25; }".to_owned());
+        source("inkscript 2; requires { procedure_catalog = 5; replay_epoch = 27; }".to_owned());
     assert!(matches!(
         compile_inkscript(&invalid, InkScriptRunParameterDecision::Resolve(Vec::new())),
         Err(ScriptCompileError::Syntax) | Err(ScriptCompileError::Semantic(_))
@@ -458,13 +458,12 @@ fn document_tree_create_results_feed_later_steps_and_round_trip_history() {
         r#"
 step "Create layer" as created_layer {
     enabled = true;
-    invoke create_layer { kind = raster; name = "Script layer"; };
+    invoke create_layer { name = "Script layer"; };
 }
 step "Create plane" as created_plane {
     enabled = true;
     invoke create_plane {
         layer_id = $created_layer.layer;
-        kind = raster;
         format = rgba8;
         name = "Script plane";
     };
@@ -1081,7 +1080,6 @@ fn fill_gradient_fixture() -> (Core, StaticScriptProgram, u64) {
         safe_frame_ratio_milli: 900,
         maximum_close_ratio_milli: 500,
         anchor: FrameAnchor::Center,
-        initial_layer_kind: LayerKind::BinaryColoring,
         pixel_format: PixelFormat::StraightRgba16,
         count: 1,
     })
@@ -1509,7 +1507,7 @@ fn fill_gradient_cancel_invalid_stale_and_resource_failures_are_atomic() {
     );
 }
 
-fn gesture_alpha_adjustment_fixture() -> (Core, StaticScriptProgram, FrozenScriptAssets, u64) {
+fn gesture_alpha_fixture() -> (Core, StaticScriptProgram, FrozenScriptAssets, u64) {
     let mut base = Core::new();
     let plan = plan_cell_creation(&CellCreationOptions {
         sizing: CellSizing::ImagePixels {
@@ -1522,7 +1520,6 @@ fn gesture_alpha_adjustment_fixture() -> (Core, StaticScriptProgram, FrozenScrip
         safe_frame_ratio_milli: 900,
         maximum_close_ratio_milli: 500,
         anchor: FrameAnchor::Center,
-        initial_layer_kind: LayerKind::BinaryColoring,
         pixel_format: PixelFormat::StraightRgba16,
         count: 1,
     })
@@ -1616,18 +1613,6 @@ step "Alpha gradient" { enabled = true; invoke apply_alpha_gradient {
         ];
     };
 }; }
-step "Create adjustment" as created { enabled = true; invoke create_adjustment_layer {
-    name = "InkScript adjustment";
-    adjustment = { kind = brightness_contrast; brightness_milli = 100; contrast_milli = -200; channel = none; interpolation = none; points = []; levels = none; };
-}; }
-step "Update adjustment" { enabled = true; invoke update_adjustment_layer {
-    layer_id = $created.layer;
-    adjustment = { kind = levels; brightness_milli = none; contrast_milli = none; channel = none; interpolation = none; points = []; levels = { channel = rgb; input_shadow = 1000; input_gamma_milli = 1000; input_highlight = 64000; output_shadow = 500; output_highlight = 65000; }; };
-}; }
-step "Update adjustment no-op" { enabled = true; invoke update_adjustment_layer {
-    layer_id = $created.layer;
-    adjustment = { kind = levels; brightness_milli = none; contrast_milli = none; channel = none; interpolation = none; points = []; levels = { channel = rgb; input_shadow = 1000; input_gamma_milli = 1000; input_highlight = 64000; output_shadow = 500; output_highlight = 65000; }; };
-}; }
 "#,
         &format!(
             r#"asset alpha_asset {{
@@ -1678,33 +1663,15 @@ fn gesture_alpha_gradient() -> Gradient {
     }
 }
 
-fn created_adjustment() -> Adjustment {
-    Adjustment::BrightnessContrast {
-        brightness_milli: 100,
-        contrast_milli: -200,
-    }
-}
-
-fn updated_adjustment() -> Adjustment {
-    Adjustment::Levels(crate::Levels {
-        channel: crate::Channel::Rgb,
-        input_shadow: 1_000,
-        input_gamma_milli: 1_000,
-        input_highlight: 64_000,
-        output_shadow: 500,
-        output_highlight: 65_000,
-    })
-}
-
 #[test]
-fn gesture_alpha_adjustment_lowering_preserves_order_shape_depth_and_result_reference() {
-    let (_, program, _, plane_id) = gesture_alpha_adjustment_fixture();
-    assert_eq!(program.model.steps().len(), 12);
-    assert_eq!(program.budget.max_invocations, 12);
-    assert_eq!(program.budget.max_output_ids, 1);
-    assert_eq!(program.budget.max_output_growth, 1);
-    assert_eq!(program.budget.max_asset_bytes, 37_749_360);
-    assert_eq!(program.budget.max_work_units, 2_472_629_795);
+fn gesture_alpha_lowering_preserves_order_shape_and_depth() {
+    let (_, program, _, plane_id) = gesture_alpha_fixture();
+    assert_eq!(program.model.steps().len(), 9);
+    assert_eq!(program.budget.max_invocations, 9);
+    assert_eq!(program.budget.max_output_ids, 0);
+    assert_eq!(program.budget.max_output_growth, 0);
+    assert_eq!(program.budget.max_asset_bytes, 37_749_240);
+    assert_eq!(program.budget.max_work_units, 2_472_629_792);
 
     let samples = vec![
         EffectSample {
@@ -1742,13 +1709,6 @@ fn gesture_alpha_adjustment_lowering_preserves_order_shape_depth_and_result_refe
             "paint",
             crate::primitive::InkScriptEntityKind::Plane,
             plane_id,
-        )
-        .unwrap();
-    references
-        .insert(
-            "created.layer",
-            crate::primitive::InkScriptEntityKind::Layer,
-            999,
         )
         .unwrap();
     let expected = vec![
@@ -1852,24 +1812,6 @@ fn gesture_alpha_adjustment_lowering_preserves_order_shape_depth_and_result_refe
                 gradient: gesture_alpha_gradient(),
             },
         ),
-        crate::primitive::GestureAdjustmentScriptAction::Canonical(
-            CanonicalInvocation::CreateAdjustmentLayer {
-                name: "InkScript adjustment".to_owned(),
-                adjustment: created_adjustment(),
-            },
-        ),
-        crate::primitive::GestureAdjustmentScriptAction::Canonical(
-            CanonicalInvocation::UpdateAdjustmentLayer {
-                layer_id: 999,
-                adjustment: updated_adjustment(),
-            },
-        ),
-        crate::primitive::GestureAdjustmentScriptAction::Canonical(
-            CanonicalInvocation::UpdateAdjustmentLayer {
-                layer_id: 999,
-                adjustment: updated_adjustment(),
-            },
-        ),
     ];
     let actual = program
         .model
@@ -1889,8 +1831,8 @@ fn gesture_alpha_adjustment_lowering_preserves_order_shape_depth_and_result_refe
 }
 
 #[test]
-fn gesture_alpha_adjustment_execute_matches_direct_and_round_trips_native_history() {
-    let (base, program, assets, plane_id) = gesture_alpha_adjustment_fixture();
+fn gesture_alpha_execute_matches_direct_and_round_trips_native_history() {
+    let (base, program, assets, plane_id) = gesture_alpha_fixture();
     assert_eq!(assets.usage().logical_payload_bytes, 32);
     assert_eq!(
         assets.raster("alpha_asset").unwrap().format(),
@@ -1899,7 +1841,6 @@ fn gesture_alpha_adjustment_execute_matches_direct_and_round_trips_native_histor
     assert_eq!(assets.raster("alpha_asset").unwrap().width(), 8);
     assert_eq!(assets.raster("alpha_asset").unwrap().height(), 4);
     let base_digest = base.document_state_digest().unwrap();
-    let base_next_id = base.next_id;
     let outside_left = base.plane_pixel(ActivePlane::Color, 0, 1).unwrap();
     let outside_right = base.plane_pixel(ActivePlane::Color, 7, 1).unwrap();
     let mut never_cancel = || false;
@@ -1907,17 +1848,8 @@ fn gesture_alpha_adjustment_execute_matches_direct_and_round_trips_native_histor
         run_inkscript_on_staged_core(&program, base.clone(), Some(&assets), &mut never_cancel)
             .unwrap();
     assert_export_round_trip(&base, &scripted.staged);
-    assert_eq!(scripted.report.statements.len(), 12);
-    assert_eq!(
-        scripted.report.statements.last(),
-        Some(&crate::script::report::ScriptStatementOutcome::NoOp)
-    );
-    assert_eq!(scripted.report.results.len(), 1);
-    assert_eq!(scripted.report.results[0].alias, "created");
-    assert_eq!(scripted.report.results[0].field, "layer");
-    let adjustment_layer_id = scripted.report.results[0].persistent_id;
-    assert!(adjustment_layer_id >= base_next_id.next_raw());
-    assert!(adjustment_layer_id < scripted.staged.next_id.next_raw());
+    assert_eq!(scripted.report.statements.len(), 9);
+    assert!(scripted.report.results.is_empty());
     assert_eq!(
         scripted
             .staged
@@ -2055,17 +1987,6 @@ fn gesture_alpha_adjustment_execute_matches_direct_and_round_trips_native_histor
     direct
         .apply_alpha_gradient_to_plane(plane_id, &gesture_alpha_gradient())
         .unwrap();
-    let (_, direct_adjustment_layer) = direct
-        .create_adjustment_layer("InkScript adjustment", created_adjustment())
-        .unwrap();
-    direct
-        .update_adjustment_layer(direct_adjustment_layer, updated_adjustment())
-        .unwrap();
-    let before_no_op = direct.document_info().unwrap().document_revision;
-    let no_op = direct
-        .update_adjustment_layer(direct_adjustment_layer, updated_adjustment())
-        .unwrap();
-    assert_eq!(no_op.revision(), before_no_op);
     let PixelValue::Rgba16(after_alpha) = direct.plane_pixel(ActivePlane::Color, 1, 1).unwrap()
     else {
         panic!("native RGBA16 plane changed format after alpha edits");
@@ -2077,7 +1998,7 @@ fn gesture_alpha_adjustment_execute_matches_direct_and_round_trips_native_histor
 
     let after = scripted.staged.document_state_digest().unwrap();
     let commit_count = scripted.report.commit_count;
-    assert_eq!(commit_count, 11);
+    assert_eq!(commit_count, 9);
     for _ in 0..commit_count {
         scripted.staged.undo().unwrap();
     }
@@ -2119,8 +2040,8 @@ fn gesture_alpha_adjustment_execute_matches_direct_and_round_trips_native_histor
 }
 
 #[test]
-fn gesture_alpha_adjustment_cancel_invalid_stale_resource_and_overflow_are_atomic() {
-    let (base, program, assets, plane_id) = gesture_alpha_adjustment_fixture();
+fn gesture_alpha_cancel_invalid_stale_and_procedure_overflow_are_atomic() {
+    let (base, program, assets, plane_id) = gesture_alpha_fixture();
     let before = (
         base.document_state_digest().unwrap(),
         base.document_info().unwrap(),
@@ -2186,62 +2107,6 @@ fn gesture_alpha_adjustment_cancel_invalid_stale_resource_and_overflow_are_atomi
         run_inkscript_on_staged_core(&invalid, base.clone(), None, &mut never_cancel),
         Err(ScriptRunError::Core(_))
     ));
-
-    let points = (0..65)
-        .map(|index| format!("{{ input = {index}; output = {index}; }}"))
-        .collect::<Vec<_>>()
-        .join(",");
-    let resource = complete_source(
-        "",
-        "",
-        &format!(
-            r#"step "Too many curve points" {{ enabled = true; invoke create_adjustment_layer {{
-                name = "oversized";
-                adjustment = {{ kind = tone_curve; brightness_milli = none; contrast_milli = none; channel = rgb; interpolation = bezier; points = [{points}]; levels = none; }};
-            }}; }}"#
-        ),
-    );
-    assert_eq!(
-        compile_inkscript(
-            &resource,
-            InkScriptRunParameterDecision::Resolve(Vec::new()),
-        ),
-        Err(ScriptCompileError::Catalog(
-            crate::script::catalog::CatalogError::ResourceLimit
-        ))
-    );
-
-    let mut id_overflow = base.clone();
-    id_overflow.next_id = crate::identity::StableIdCursor::from_next_raw(MAX_PERSISTENT_NUMERIC_ID);
-    let id_before = (
-        id_overflow.document_state_digest().unwrap(),
-        id_overflow.document_info().unwrap(),
-        id_overflow.history_entries(),
-        id_overflow.next_id,
-        id_overflow.next_procedure,
-        id_overflow.next_state,
-    );
-    let mut never_cancel = || false;
-    assert!(matches!(
-        run_inkscript_on_staged_core(
-            &program,
-            id_overflow.clone(),
-            Some(&assets),
-            &mut never_cancel,
-        ),
-        Err(ScriptRunError::Core(_)) | Err(ScriptRunError::ResourceLimit)
-    ));
-    assert_eq!(
-        (
-            id_overflow.document_state_digest().unwrap(),
-            id_overflow.document_info().unwrap(),
-            id_overflow.history_entries(),
-            id_overflow.next_id,
-            id_overflow.next_procedure,
-            id_overflow.next_state,
-        ),
-        id_before
-    );
 
     let mut procedure_overflow = base.clone();
     procedure_overflow.next_procedure = ProcedureId::from_raw(MAX_PERSISTENT_NUMERIC_ID);
@@ -2345,10 +2210,10 @@ step "Select green" {{ enabled = true; invoke select_color {{
     color = rgba8(0, 255, 0, 255); tolerance = 0; different = false; operation = new;
     target_layer_id = $paint_layer; target_plane_id = $paint;
 }}; }}
-step "Selection layer" as stored {{ enabled = true; invoke selection_to_layer {{ name = "Stored selection"; }}; }}
+step "Save selection mask" as stored {{ enabled = true; invoke save_selection_mask {{ name = "Stored selection"; }}; }}
 step "Clear before restore" {{ enabled = true; invoke clear_selection {{}}; }}
-step "Selection from layer" {{ enabled = true; invoke selection_from_layer {{ layer_id = $stored.layer; operation = replace; }}; }}
-step "Selection from layer no-op" {{ enabled = true; invoke selection_from_layer {{ layer_id = $stored.layer; operation = replace; }}; }}
+step "Apply saved selection mask" {{ enabled = true; invoke apply_saved_selection_mask {{ saved_selection_id = $stored.saved_selection_mask; operation = replace; }}; }}
+step "Apply saved selection mask no-op" {{ enabled = true; invoke apply_saved_selection_mask {{ saved_selection_id = $stored.saved_selection_mask; operation = replace; }}; }}
 step "Clear selected content" {{ enabled = true; invoke clear_selected_content {{ target_layer_id = $paint_layer; target_plane_id = $paint; }}; }}
 step "Clear restored selection" {{ enabled = true; invoke clear_selection {{}}; }}
 "#
@@ -2393,7 +2258,7 @@ fn selection_family_bounds_results_direct_equivalence_and_native_reopen() {
 
     let program = selection_program(&base, layer_id, plane_id);
     assert_eq!(program.budget.max_invocations, 13);
-    assert_eq!(program.budget.max_output_ids, 2);
+    assert_eq!(program.budget.max_output_ids, 1);
     let base_digest = base.document_state_digest().unwrap();
     let base_next_id = base.next_id.next_raw();
     let mut never_cancel = || false;
@@ -2402,7 +2267,7 @@ fn selection_family_bounds_results_direct_equivalence_and_native_reopen() {
     assert_export_round_trip(&base, &scripted.staged);
     assert_eq!(scripted.report.commit_count, 11);
     assert_eq!(scripted.report.results.len(), 1);
-    assert_eq!(scripted.report.results[0].field, "layer");
+    assert_eq!(scripted.report.results[0].field, "saved_selection_mask");
     assert_eq!(scripted.report.results[0].output_id_ordinal, 0);
     assert!(scripted.report.results[0].persistent_id >= base_next_id);
     assert_eq!(
@@ -2464,25 +2329,26 @@ fn selection_family_bounds_results_direct_equivalence_and_native_reopen() {
         })
         .unwrap();
     let stored = direct
-        .execute_canonical_invocation(CanonicalInvocation::SelectionToLayer {
+        .execute_canonical_invocation(CanonicalInvocation::SaveSelectionMask {
             name: "Stored selection".to_owned(),
         })
         .unwrap()
         .output_ids[0];
+    let stored = SavedSelectionId::from_raw(stored).unwrap();
     direct
         .execute_canonical_invocation(CanonicalInvocation::ClearSelection)
         .unwrap();
     direct
-        .execute_canonical_invocation(CanonicalInvocation::SelectionFromLayer {
-            layer_id: stored,
-            operation: SelectionLayerOperation::Replace,
+        .execute_canonical_invocation(CanonicalInvocation::ApplySavedSelectionMask {
+            saved_selection_id: stored,
+            operation: SavedSelectionOperation::Replace,
         })
         .unwrap();
     let before_noop_revision = direct.document_info().unwrap().document_revision;
     let no_op = direct
-        .execute_canonical_invocation(CanonicalInvocation::SelectionFromLayer {
-            layer_id: stored,
-            operation: SelectionLayerOperation::Replace,
+        .execute_canonical_invocation(CanonicalInvocation::ApplySavedSelectionMask {
+            saved_selection_id: stored,
+            operation: SavedSelectionOperation::Replace,
         })
         .unwrap();
     assert_eq!(no_op.dispatch.revision, before_noop_revision);
@@ -2881,17 +2747,14 @@ fn selection_floating_cancel_invalid_stale_overflow_resource_and_asset_failures_
     );
 }
 
-fn frame_script_base_with_uuid(uuid: u128) -> (Core, u64) {
+fn frame_script_base_with_uuid(uuid: u128) -> Core {
     let mut base = Core::new();
     base.new_cell_with_uuid(16, 16, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI, uuid)
         .unwrap();
-    let (_, vanishing_layer) = base
-        .create_layer(LayerKind::VanishingPoint, "Script Vanishing")
-        .unwrap();
-    (base, vanishing_layer)
+    base
 }
 
-fn frame_script_base() -> (Core, u64) {
+fn frame_script_base() -> Core {
     frame_script_base_with_uuid(0x4d32_3141_4652_414d)
 }
 
@@ -2908,19 +2771,6 @@ fn shooting_input() -> ShootingFrameInput {
     }
 }
 
-fn vanishing_input(layer_id: u64, x_milli: i64) -> VanishingPointInput {
-    VanishingPointInput {
-        layer_id,
-        x_milli,
-        y_milli: 7_000,
-        interval_milli_degrees: 30_000,
-        angle_milli_degrees: 15_000,
-        color: PixelValue::Rgba16([4_000, 5_000, 6_000, 65_535]),
-        opacity_milli: 750,
-        visible: true,
-    }
-}
-
 #[test]
 fn shooting_frame_document_owner_supports_exact_source_and_semantic_rebound() {
     fn add_frame(core: &mut Core) -> u64 {
@@ -2931,7 +2781,7 @@ fn shooting_frame_document_owner_supports_exact_source_and_semantic_rebound() {
         .output_ids[0]
     }
 
-    let (mut source_core, _) = frame_script_base();
+    let mut source_core = frame_script_base();
     let frame_id = add_frame(&mut source_core);
     let info = source_core.document_info().unwrap();
     let update = r#"step "Update frame" { enabled = true; invoke edit_shooting_frame { edit = { operation = 2; frame_id = $frame; input = { center_x_milli = 9000; center_y_milli = 8000; width_milli = 10000; height_milli = 6000; rotation_turns = 268435456; anchor = center; visible = true; include_in_instruction_export = true; }; }; }; }"#;
@@ -2965,7 +2815,7 @@ fn shooting_frame_document_owner_supports_exact_source_and_semantic_rebound() {
         9_000
     );
 
-    let (mut rebound_core, _) = frame_script_base_with_uuid(info.document_uuid + 1);
+    let mut rebound_core = frame_script_base_with_uuid(info.document_uuid + 1);
     add_frame(&mut rebound_core);
     let before = rebound_core.document_state_digest().unwrap();
     let mut never_cancel = || false;
@@ -3005,7 +2855,7 @@ fn shooting_frame_document_owner_supports_exact_source_and_semantic_rebound() {
 
     let invalid_owner_source = complete_source(
         "",
-        r#"let layer = select layer { name = "Script Vanishing"; }; let frame = select shooting_frame { layer = $layer; };"#,
+        r#"let layer = select layer {}; let frame = select shooting_frame { layer = $layer; };"#,
         update,
     );
     assert!(
@@ -3014,32 +2864,6 @@ fn shooting_frame_document_owner_supports_exact_source_and_semantic_rebound() {
             InkScriptRunParameterDecision::Resolve(Vec::new())
         )
         .is_err()
-    );
-}
-
-#[test]
-fn vanishing_point_script_keeps_layer_ownership_and_typed_result() {
-    let (base, vanishing_layer) = frame_script_base();
-    let info = base.document_info().unwrap();
-    let source = complete_source(
-        "",
-        &format!(
-            r#"let layer = select layer {{ source_document_uuid = uuid"{}"; persistent_id = {vanishing_layer}; }};"#,
-            document_uuid(info.document_uuid)
-        ),
-        r#"step "Create point" as created { enabled = true; invoke edit_vanishing_points { edits = [{ operation = 1; point_id = none; input = { layer_id = $layer; x_milli = 3000; y_milli = 7000; interval_milli_degrees = 30000; angle_milli_degrees = 15000; color = rgba16(4000, 5000, 6000, 65535); opacity_milli = 750; visible = true; }; }]; }; }"#,
-    );
-    let program =
-        compile_inkscript(&source, InkScriptRunParameterDecision::Resolve(Vec::new())).unwrap();
-    let mut never_cancel = || false;
-    let result = run_inkscript_on_staged_core(&program, base, None, &mut never_cancel).unwrap();
-    assert_eq!(result.report.commit_count, 1);
-    assert_eq!(result.report.results.len(), 1);
-    assert_eq!(result.report.results[0].field, "vanishing_points");
-    assert_eq!(result.staged.vanishing_points().unwrap().len(), 1);
-    assert_eq!(
-        result.staged.vanishing_points().unwrap()[0].input(),
-        vanishing_input(vanishing_layer, 3_000)
     );
 }
 
@@ -3284,21 +3108,12 @@ step "Use absent list item" {
 #[test]
 fn document_tree_mixed_edit_target_results_remain_typed_and_ordered() {
     let mut base = core();
-    let (_, raster_layer_id) = base
-        .create_layer(LayerKind::Raster, "Raster owner")
-        .unwrap();
-    let (_, target_layer_id) = base
-        .create_layer(LayerKind::Raster, "Layer target")
+    let (_, raster_layer_id) = base.create_layer("Raster owner").unwrap();
+    let (_, target_layer_id) = base.create_layer("Layer target").unwrap();
+    let (_, raster_plane_id) = base
+        .create_plane(raster_layer_id, PixelFormat::StraightRgba8, "Raster")
         .unwrap();
     let info = base.document_info().unwrap();
-    let raster_plane_id = base
-        .layers()
-        .unwrap()
-        .into_iter()
-        .find(|layer| layer.id == raster_layer_id)
-        .unwrap()
-        .planes[0]
-        .id;
     let uuid = document_uuid(info.document_uuid);
     let bindings = format!(
         r#"
@@ -3427,7 +3242,7 @@ fn binding_skip_cancel_stale_and_overflow_fail_atomically_without_id_consumption
 
     let ambiguous_core = {
         let mut value = base.clone();
-        value.create_layer(LayerKind::Raster, "Second").unwrap();
+        value.create_layer("Second").unwrap();
         value
     };
     let ambiguous = complete_source(

@@ -2,8 +2,8 @@
 
 use super::{
     AssetAlphaSemantics, AssetColorSpace, CellDocument, Core, CoreError, DEFAULT_DPI_MILLI,
-    DispatchOutcome, LayerKind, MAX_IMAGE_EDIT_PIXELS, PixelFormat, PixelValue, PlaneType,
-    RasterAssetInput, RectI32, TILE_SIZE, TileCoord,
+    DispatchOutcome, MAX_IMAGE_EDIT_PIXELS, PixelFormat, PixelValue, PlaneType, RasterAssetInput,
+    RectI32, TILE_SIZE, TileCoord,
 };
 use crate::animation::parse_cell_number;
 use crate::asset;
@@ -16,7 +16,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 /// Version required in every [`BatchOperation`] payload.
-pub const BATCH_OPERATION_VERSION: u32 = 3;
+pub use inkpod_format::BATCH_OPERATION_VERSION;
 pub(crate) const MAX_BATCH_TARGETS: usize = 64;
 const MAX_BATCH_COLOR_PAIRS: usize = 4_096;
 const MAX_BATCH_COLORS: usize = 4_096;

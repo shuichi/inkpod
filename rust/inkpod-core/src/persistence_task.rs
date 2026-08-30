@@ -77,7 +77,6 @@ impl PersistenceStamp {
         }
         if core.active_stroke.is_some()
             || core.shooting_frame_preview.is_some()
-            || core.vanishing_point_preview.is_some()
             || core.filter_preview.is_some()
             || core.floating.is_some()
         {

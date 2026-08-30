@@ -1172,12 +1172,13 @@ impl Core {
         }
         let mut genesis = self
             .genesis
-            .as_ref()
-            .map(|genesis| genesis.document.clone())
+            .clone()
             .ok_or(CoreError::InvalidState("journal Genesis is missing"))?;
         let mut detached_assets = self
             .assets
             .detached_archive_round_trip(self.asset_retention_roots())?;
+        genesis.materialize_raster_source(&detached_assets)?;
+        let mut genesis = genesis.document;
         genesis.light_table.intern_into(&mut detached_assets)?;
         let mut genesis_next_id = StableIdCursor::first();
         genesis_next_id.advance_past_raw(genesis.max_stable_id());

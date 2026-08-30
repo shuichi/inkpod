@@ -1,6 +1,7 @@
 //! Stable public command, input, result, and view data types.
 
 use super::*;
+pub use crate::identity::SavedSelectionId;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// Result metadata shared by synchronous Core operations.
@@ -39,15 +40,8 @@ pub enum EditTargetCommand {
     SetEditability(bool),
     /// Converts every selected raster plane to one typed representation.
     ConvertPlanes {
-        /// Destination semantic plane kind.
-        kind: PlaneType,
         /// Destination exact-depth pixel format.
         format: PixelFormat,
-    },
-    /// Converts every selected coloring layer to one representation.
-    ConvertLayers {
-        /// Destination layer kind.
-        kind: LayerKind,
     },
     /// Merges one selected upper node into its immediately lower selected sibling.
     Merge,
@@ -77,8 +71,6 @@ pub struct EditTargetCapabilities {
     pub merge: bool,
     /// Every target is a raster plane eligible for explicit conversion.
     pub convert_planes: bool,
-    /// Every target is a coloring layer eligible for explicit conversion.
-    pub convert_layers: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -99,8 +91,6 @@ pub enum PlaneType {
     Color,
     /// General-purpose raster artwork.
     Raster,
-    /// Document selection mask.
-    Selection,
 }
 
 impl PlaneType {
@@ -109,18 +99,18 @@ impl PlaneType {
             Self::MainLine => FilePlaneKind::MainLine,
             Self::Color => FilePlaneKind::Color,
             Self::Raster => FilePlaneKind::Raster,
-            Self::Selection => FilePlaneKind::Selection,
         }
     }
 
-    pub(super) const fn from_file(kind: FilePlaneKind) -> Self {
+    pub(super) const fn from_file(kind: FilePlaneKind) -> Option<Self> {
         match kind {
-            FilePlaneKind::MainLine => Self::MainLine,
-            FilePlaneKind::Color => Self::Color,
-            FilePlaneKind::Raster => Self::Raster,
-            FilePlaneKind::Selection => Self::Selection,
-            FilePlaneKind::LightTable => Self::Raster,
-            FilePlaneKind::FillProtection => Self::Selection,
+            FilePlaneKind::MainLine => Some(Self::MainLine),
+            FilePlaneKind::Color => Some(Self::Color),
+            FilePlaneKind::Raster => Some(Self::Raster),
+            FilePlaneKind::CurrentSelection
+            | FilePlaneKind::SavedSelection
+            | FilePlaneKind::LightTable
+            | FilePlaneKind::FillProtection => None,
         }
     }
 }
@@ -149,8 +139,6 @@ pub struct PlaneInfo {
 pub struct LayerInfo {
     /// Stable layer ID, valid until the layer is deleted.
     pub id: u64,
-    /// Semantic layer kind.
-    pub kind: LayerKind,
     /// User-visible layer name.
     pub name: String,
     /// Whether the layer contributes to normal rendering.
@@ -352,9 +340,18 @@ pub enum SelectionShape {
     },
 }
 
+/// Public metadata for one document-owned saved selection mask.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SavedSelectionInfo {
+    /// Stable ID, valid until the saved mask is deleted.
+    pub id: SavedSelectionId,
+    /// User-visible saved-mask name.
+    pub name: String,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-/// Boolean operation used when merging a source selection layer.
-pub enum SelectionLayerOperation {
+/// Boolean operation used when applying a saved mask to the current selection.
+pub enum SavedSelectionOperation {
     /// Replaces the destination selection.
     Replace,
     /// Adds source coverage to the destination.

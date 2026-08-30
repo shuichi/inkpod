@@ -93,7 +93,6 @@ impl Core {
             recovered: false,
             active_stroke: None,
             shooting_frame_preview: None,
-            vanishing_point_preview: None,
             filter_preview: None,
             last_filter: None,
             render_cache: BTreeMap::new(),
@@ -131,13 +130,14 @@ impl Core {
     ) -> Result<DocumentInfo, CoreError> {
         let uuid = (u128::from(0x494e_4b50_4f44_4d31_u64) << 64)
             | u128::from(self.next_document_revision()?.get());
-        self.new_cell_with_uuid_and_layer(
+        self.new_cell_with_creation_spec(
             width,
             height,
             dpi_x_milli,
             dpi_y_milli,
             uuid,
-            LayerKind::BinaryColoring,
+            PixelFormat::StraightRgba8,
+            None,
         )
     }
 
@@ -153,37 +153,12 @@ impl Core {
         dpi_y_milli: u32,
         document_uuid: u128,
     ) -> Result<DocumentInfo, CoreError> {
-        self.new_cell_with_uuid_and_layer(
-            width,
-            height,
-            dpi_x_milli,
-            dpi_y_milli,
-            document_uuid,
-            LayerKind::BinaryColoring,
-        )
-    }
-
-    /// Replaces the current document with a blank cell and typed initial layer.
-    ///
-    /// The complete Genesis topology is validated and allocated before live
-    /// state is published. This session-replacement operation resets history;
-    /// it never creates an intermediate default-layer document or a procedure.
-    pub fn new_cell_with_uuid_and_layer(
-        &mut self,
-        width: u32,
-        height: u32,
-        dpi_x_milli: u32,
-        dpi_y_milli: u32,
-        document_uuid: u128,
-        initial_layer_kind: LayerKind,
-    ) -> Result<DocumentInfo, CoreError> {
         self.new_cell_with_creation_spec(
             width,
             height,
             dpi_x_milli,
             dpi_y_milli,
             document_uuid,
-            initial_layer_kind,
             PixelFormat::StraightRgba8,
             None,
         )
@@ -205,7 +180,6 @@ impl Core {
             item.dpi_x_milli(),
             item.dpi_y_milli(),
             document_uuid,
-            item.initial_layer_kind(),
             item.pixel_format(),
             Some(item.frames()),
         )
@@ -219,7 +193,6 @@ impl Core {
         dpi_x_milli: u32,
         dpi_y_milli: u32,
         document_uuid: u128,
-        initial_layer_kind: LayerKind,
         color_format: PixelFormat,
         frames: Option<FrameMetadata>,
     ) -> Result<DocumentInfo, CoreError> {
@@ -243,7 +216,6 @@ impl Core {
             light_table_set: next_id.take_light_table_set(),
             cell: next_id.take_cell(),
         };
-        let mut initial_layer_id = ids.layer;
         let mut document = CellDocument::new(
             ids,
             document_uuid,
@@ -265,46 +237,11 @@ impl Core {
                 "blank coloring base has no color plane",
             ))?;
         base_color.raster = TileRaster::new(width, height, color_format)?;
-        if initial_layer_kind == LayerKind::GrayscaleColoring {
-            document.layers[0] = document::build_layer_node_with_format(
-                initial_layer_kind,
-                "Layer 1",
-                initial_layer_id,
-                width,
-                height,
-                color_format,
-                &mut next_id,
-            )?;
-        } else if initial_layer_kind != LayerKind::BinaryColoring {
-            initial_layer_id = next_id.take_layer();
-            let requested = document::build_layer_node_with_format(
-                initial_layer_kind,
-                "Layer 1",
-                initial_layer_id,
-                width,
-                height,
-                color_format,
-                &mut next_id,
-            )?;
-            // Non-coloring layers cannot replace the required coloring base.
-            // Put the requested layer first so reset_editor_state selects it.
-            document.layers.insert(0, requested);
-            if initial_layer_kind == LayerKind::Adjustment {
-                document.adjustments.insert(
-                    initial_layer_id,
-                    Adjustment::BrightnessContrast {
-                        brightness_milli: 0,
-                        contrast_milli: 0,
-                    },
-                );
-            }
-        }
         let revision = self.next_document_revision()?;
         let persistence_state = self.persistence_state.next()?;
 
         self.cancel_stroke();
         self.shooting_frame_preview = None;
-        self.vanishing_point_preview = None;
         self.filter_preview = None;
         self.last_filter = None;
         self.render_cache.clear();
@@ -377,7 +314,6 @@ pub struct Core {
     pub(super) recovered: bool,
     pub(super) active_stroke: Option<StrokeSession>,
     pub(super) shooting_frame_preview: Option<shooting_frame::ShootingFramePreviewSession>,
-    pub(super) vanishing_point_preview: Option<vanishing_point::VanishingPointPreviewSession>,
     pub(super) filter_preview: Option<effects::FilterPreview>,
     pub(super) last_filter: Option<Filter>,
     pub(super) render_cache: BTreeMap<(u64, TileCoord), RenderTile>,
@@ -447,7 +383,6 @@ impl Core {
             recovered: self.recovered,
             active_stroke: self.active_stroke.clone(),
             shooting_frame_preview: self.shooting_frame_preview.clone(),
-            vanishing_point_preview: self.vanishing_point_preview.clone(),
             filter_preview: self.filter_preview.clone(),
             last_filter: self.last_filter.clone(),
             render_cache: self.render_cache.clone(),
@@ -660,7 +595,6 @@ impl Core {
         }
         if self.active_stroke.is_some()
             || self.shooting_frame_preview.is_some()
-            || self.vanishing_point_preview.is_some()
             || self.filter_preview.is_some()
         {
             Err(CoreError::InvalidState(

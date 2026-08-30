@@ -207,7 +207,6 @@ fn paint_004_start_color_compares_rgba16_native_channels_without_quantization() 
         safe_frame_ratio_milli: 900,
         maximum_close_ratio_milli: 500,
         anchor: FrameAnchor::Center,
-        initial_layer_kind: LayerKind::Raster,
         pixel_format: PixelFormat::StraightRgba16,
         count: 1,
     })

@@ -89,6 +89,7 @@ impl Core {
         let mut roots = Vec::new();
         if let Some(genesis) = &self.genesis {
             append_document_asset_roots(&genesis.document, &mut roots);
+            roots.extend(genesis.raster_source.map(|source| source.asset_id));
         }
         if let Some(document) = &self.document {
             append_document_asset_roots(document, &mut roots);

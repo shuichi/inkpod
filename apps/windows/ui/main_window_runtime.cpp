@@ -101,7 +101,6 @@ using inkpod::windows::ui::PreferencesValues;
 using inkpod::windows::ui::TextInputDialogState;
 using inkpod::windows::ui::ViewOptionsDialogState;
 using inkpod::windows::ui::ShootingFrameDialogState;
-using inkpod::windows::ui::VanishingPointDialogState;
 using inkpod::windows::ui::ShowAboutDialog;
 using inkpod::windows::ui::ShowCellCreationOptions;
 using inkpod::windows::ui::ShowCutProperties;
@@ -114,7 +113,6 @@ using inkpod::windows::ui::ShowPreferencesDialog;
 using inkpod::windows::ui::ShowTextInput;
 using inkpod::windows::ui::ShowViewOptions;
 using inkpod::windows::ui::ShowShootingFrameOptions;
-using inkpod::windows::ui::ShowVanishingPointOptions;
 using inkpod::app::AnimationUiState;
 using inkpod::app::SequenceAutosaveBinding;
 using inkpod::app::SequenceCellSwitchPolicy;
@@ -131,7 +129,6 @@ using inkpod::app::DocumentShellState;
 using inkpod::app::DocumentIdentity;
 using inkpod::app::EffectsUiState;
 using inkpod::app::Generation;
-using inkpod::app::AdjustmentLayerUiState;
 using inkpod::app::FilterJob;
 using inkpod::app::GradientStopValue;
 using inkpod::app::CanvasEffectOptions;
@@ -217,7 +214,6 @@ using inkpod::windows::ui::tools::kInteractionEffectStamp;
 using inkpod::windows::ui::tools::kInteractionSelection;
 using inkpod::windows::ui::tools::kInteractionColorReplace;
 using inkpod::windows::ui::tools::kInteractionShootingFrame;
-using inkpod::windows::ui::tools::kInteractionVanishingPoint;
 using inkpod::windows::ui::tools::kInteractionGeometryLine;
 using inkpod::windows::ui::tools::kInteractionGeometryCurve;
 using inkpod::windows::ui::tools::kInteractionGeometryRectangle;
@@ -437,23 +433,8 @@ std::optional<inkpod::app::CommandTimerToken> ResolveCommandTimer(
     (void)state.routing.timers.Disarm(token->kind);
     return std::nullopt;
 }
-const std::array<ViewOptionsDialogState::Choice, 7U>& LayerKindChoices() {
-    static const std::array<ViewOptionsDialogState::Choice, 7U> choices{{
-        {UiText(UiStringId::LayerBinaryColoring), INKPOD_LAYER_BINARY_COLORING},
-        {UiText(UiStringId::LayerGrayscaleColoring), INKPOD_LAYER_GRAYSCALE_COLORING},
-        {UiText(UiStringId::LayerRasterGeneral), INKPOD_LAYER_RASTER},
-        {UiText(UiStringId::LayerSelection), INKPOD_LAYER_SELECTION},
-        {UiText(UiStringId::LayerFrame), INKPOD_LAYER_FRAME},
-        {UiText(UiStringId::ToolVanishingPoint), INKPOD_LAYER_VANISHING_POINT},
-        {UiText(UiStringId::LayerAdjustment), INKPOD_LAYER_ADJUSTMENT},
-    }};
-    return choices;
-}
-
 struct PlaneDialogChoiceStorage {
-    std::array<std::wstring, 4U> kind_labels;
     std::array<std::wstring, 5U> format_labels;
-    std::array<ViewOptionsDialogState::Choice, 4U> kind_choices;
     std::array<ViewOptionsDialogState::Choice, 5U> format_choices;
     std::wstring validation_error;
 };
@@ -487,12 +468,6 @@ bool LoadViewOptionChoices(
 
 bool LoadPlaneDialogChoices(
     HINSTANCE instance, PlaneDialogChoiceStorage& storage) noexcept {
-    static constexpr std::array<std::pair<UINT, std::int32_t>, 4U> kind_specs{{
-        {IDS_PLANE_KIND_MAIN_LINE, INKPOD_TYPED_PLANE_MAIN_LINE},
-        {IDS_PLANE_KIND_COLOR, INKPOD_TYPED_PLANE_COLOR},
-        {IDS_PLANE_KIND_RASTER, INKPOD_TYPED_PLANE_RASTER},
-        {IDS_PLANE_KIND_SELECTION, INKPOD_TYPED_PLANE_SELECTION},
-    }};
     static constexpr std::array<std::pair<UINT, std::int32_t>, 5U> format_specs{{
         {IDS_STORAGE_BINARY8, INKPOD_STORAGE_BINARY8},
         {IDS_STORAGE_GRAYSCALE8, INKPOD_STORAGE_GRAYSCALE8},
@@ -507,8 +482,6 @@ bool LoadPlaneDialogChoices(
         error.data(),
         static_cast<int>(error.size()));
     if (error_length <= 0
-        || !LoadViewOptionChoices(
-            instance, kind_specs, storage.kind_labels, storage.kind_choices)
         || !LoadViewOptionChoices(
             instance, format_specs, storage.format_labels, storage.format_choices)) {
         return false;
@@ -535,14 +508,13 @@ const wchar_t* ValidatePlaneCreationOptions(
     const auto* validation = static_cast<const PlaneCreationValidationContext*>(context);
     if (validation == nullptr || validation->engine == nullptr
         || validation->layer_id == 0U || validation->error_message == nullptr
-        || value_count < 2U) {
+        || value_count < 1U) {
         return UiText(UiStringId::Text0324);
     }
     const InkpodStatus status = validation->engine->Invoke(
         [layer_id = validation->layer_id,
-         kind = static_cast<InkpodTypedPlaneKind>(values[0]),
-         format = static_cast<InkpodStoragePixelFormat>(values[1])](InkpodCore* core) {
-            return inkpod_core_validate_plane_creation(core, layer_id, kind, format);
+         format = static_cast<InkpodStoragePixelFormat>(values[0])](InkpodCore* core) {
+            return inkpod_core_validate_plane_creation(core, layer_id, format);
         },
         false,
         false);
@@ -752,7 +724,6 @@ void BatchDraftChanged(void* context) noexcept {
 
 void ResetDocumentShellTransientState(DocumentShellState& document) noexcept {
     document.smoke_layer_id = 0U;
-    document.selection_layer_id = 0U;
 }
 
 void ResetPaneDocumentState(PaneUiState& panes) noexcept {
@@ -1201,7 +1172,6 @@ InkpodStatus ApplyGroupedEditTargetCommand(
     ApplicationHost& state,
     std::uint32_t operation,
     std::uint64_t flags,
-    std::uint32_t kind,
     std::uint32_t pixel_format,
     bool& applied) noexcept {
     applied = false;
@@ -1219,7 +1189,6 @@ InkpodStatus ApplyGroupedEditTargetCommand(
         sizeof(InkpodEditTargetCommand),
         operation,
         flags,
-        kind,
         pixel_format,
         0U};
     InkpodDispatchResult result{};
@@ -1295,9 +1264,6 @@ void NotifyLayerPaletteVisibilityChanged(void* context) noexcept {
 }
 
 void ResetEffectsDocumentState(EffectsUiState& effects) noexcept {
-    effects.adjustment_id = 0U;
-    effects.adjustment_visible = true;
-    effects.adjustments.clear();
     effects.alpha_view = false;
     effects.stamp_source_valid = false;
     effects.samples.clear();
@@ -1840,7 +1806,36 @@ bool CloseActiveEditorGroup(ApplicationHost& state) noexcept {
     return activated;
 }
 
+bool RefreshSavedSelectionAvailability(ApplicationHost& state) noexcept {
+    bool available = false;
+    const InkpodStatus status = state.engine == nullptr
+        ? INKPOD_STATUS_INVALID_STATE
+        : state.engine->Invoke(
+              [&available](InkpodCore* core) {
+                  InkpodSavedSelectionInfo info{};
+                  info.struct_size = sizeof(info);
+                  const InkpodStatus inner =
+                      inkpod_core_saved_selection_get(core, 0U, &info);
+                  if (inner == INKPOD_STATUS_INVALID_ARGUMENT) {
+                      return INKPOD_STATUS_OK;
+                  }
+                  if (inner != INKPOD_STATUS_OK || info.id == 0U) {
+                      return inner == INKPOD_STATUS_OK
+                          ? INKPOD_STATUS_INVALID_STATE
+                          : inner;
+                  }
+                  available = true;
+                  return INKPOD_STATUS_OK;
+              },
+              false,
+              false);
+    state.Workspace().panes.saved_selection_available =
+        status == INKPOD_STATUS_OK && available;
+    return status == INKPOD_STATUS_OK;
+}
+
 bool RefreshTreePane(ApplicationHost& state) noexcept {
+    (void)RefreshSavedSelectionAvailability(state);
     InkpodDocumentInfo document_info{};
     if (state.engine == nullptr || !QueryDocument(state, document_info)) {
         return false;
@@ -2907,14 +2902,41 @@ bool InstallSubpaletteSources(
                     return fail(INKPOD_STATUS_INVALID_STATE);
                 }
                 auto* sink = renderer::GetCanvasSnapshotSink(owner->subpalette_dialog.canvas);
-                bool accepted{};
-                if (sink != nullptr) {
-                    accepted = sink->Submit(renderer::SnapshotEnvelope{sink->Route(),
+                // Hiding a parent need not send WM_SHOWWINDOW to its Canvas.
+                // Publish that hidden state before deciding whether to submit;
+                // the next visible WM_PAINT will request the current viewport.
+                if (state.renderer != nullptr && sink != nullptr
+                    && (IsWindowVisible(owner->subpalette_dialog.canvas) == FALSE
+                        || IsIconic(GetAncestor(owner->subpalette_dialog.canvas, GA_ROOT)) != FALSE)) {
+                    state.renderer->SetVisible(sink->Route().canvas, sink->Route().surface_generation, false);
+                }
+                const auto presentation_deferred = [&state, sink]() {
+                    if (state.renderer == nullptr || sink == nullptr) {
+                        return false;
+                    }
+                    const auto route = sink->Route();
+                    renderer::RendererSurfaceResourceUsage usage{};
+                    return state.renderer->GetSurfaceResourceUsage(
+                            route.canvas, route.surface_generation, usage)
+                        && usage.route == route && (!usage.visible || usage.occluded);
+                };
+                // An empty pane hides its Canvas until this catalog is adopted.
+                // A pane hidden during I/O has the same publication dependency.
+                // Keep the prepared Core cache; the Canvas visibility/viewport
+                // notification will submit it when the surface can render.
+                bool deferred = presentation_deferred();
+                bool submitted{};
+                if (sink != nullptr && !deferred) {
+                    submitted = sink->Submit(renderer::SnapshotEnvelope{sink->Route(),
                         snapshot_view.revision, transform.view_revision, snapshot, 0U, 0U});
                     snapshot = nullptr; // Submit consumes ownership even on rejection.
+                    // Occlusion can change on the renderer thread during Submit.
+                    if (!submitted) {
+                        deferred = presentation_deferred();
+                    }
                 }
-                if (!accepted) {
-                    (void)inkpod_snapshot_release(&snapshot);
+                (void)inkpod_snapshot_release(&snapshot);
+                if (!submitted && !deferred) {
                     owner->subpalette_source_id = previous_source;
                     (void)renderer::BindAuxiliaryCanvasSnapshotSink(owner->subpalette_dialog.canvas,
                         previous_source, owner->generation);
@@ -2932,6 +2954,9 @@ bool InstallSubpaletteSources(
                 ++owner->subpalette_snapshot_revision;
                 (void)state.engine->ReleaseSubpalette(&previous);
                 PresentSubpalettePane(*owner);
+                if (deferred) {
+                    InvalidateRect(owner->subpalette_dialog.canvas, nullptr, FALSE);
+                }
                 return INKPOD_STATUS_OK;
             }, &request_id);
         if (!FileIoAccepted(queued)) {
@@ -3732,6 +3757,123 @@ std::wstring Utf8UserText(const std::string& text) {
     return output;
 }
 
+struct SavedSelectionChoice final {
+    std::uint64_t id{};
+    std::wstring name;
+};
+
+InkpodStatus QuerySavedSelectionChoices(
+    ApplicationHost& state,
+    std::vector<SavedSelectionChoice>& choices) noexcept {
+    if (state.engine == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    std::vector<std::pair<std::uint64_t, std::string>> encoded;
+    const InkpodStatus status = state.engine->Invoke(
+        [&encoded](InkpodCore* core) {
+            try {
+                constexpr std::uint32_t kMaximumSavedSelections = 65536U;
+                constexpr std::uint64_t kMaximumSavedSelectionNameBytes = UINT64_C(1048576);
+                for (std::uint32_t index = 0U; index < kMaximumSavedSelections; ++index) {
+                    InkpodSavedSelectionInfo info{};
+                    info.struct_size = sizeof(info);
+                    InkpodStatus inner = inkpod_core_saved_selection_get(core, index, &info);
+                    if (inner == INKPOD_STATUS_INVALID_ARGUMENT) {
+                        return INKPOD_STATUS_OK;
+                    }
+                    if (inner != INKPOD_STATUS_OK
+                        || info.id == 0U
+                        || info.name_bytes == 0U
+                        || info.name_bytes > kMaximumSavedSelectionNameBytes) {
+                        return inner == INKPOD_STATUS_OK
+                            ? INKPOD_STATUS_INVALID_STATE
+                            : inner;
+                    }
+                    std::string name(static_cast<std::size_t>(info.name_bytes), '\0');
+                    info = {};
+                    info.struct_size = sizeof(info);
+                    info.name_utf8 = reinterpret_cast<std::uint8_t*>(name.data());
+                    info.name_capacity = name.size();
+                    inner = inkpod_core_saved_selection_get(core, index, &info);
+                    if (inner != INKPOD_STATUS_OK || info.id == 0U
+                        || info.name_bytes != name.size()) {
+                        return inner == INKPOD_STATUS_OK
+                            ? INKPOD_STATUS_INVALID_STATE
+                            : inner;
+                    }
+                    encoded.emplace_back(info.id, std::move(name));
+                }
+            } catch (const std::bad_alloc&) {
+                return INKPOD_STATUS_INVALID_STATE;
+            }
+            return INKPOD_STATUS_INVALID_STATE;
+        },
+        false,
+        false);
+    if (status != INKPOD_STATUS_OK) {
+        return status;
+    }
+    try {
+        choices.clear();
+        choices.reserve(encoded.size());
+        for (auto& [id, name] : encoded) {
+            std::wstring display_name = Utf8UserText(name);
+            if (display_name.empty()) {
+                return INKPOD_STATUS_INVALID_STATE;
+            }
+            choices.push_back({id, std::move(display_name)});
+        }
+    } catch (const std::bad_alloc&) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    return INKPOD_STATUS_OK;
+}
+
+InkpodStatus ChooseSavedSelection(
+    ApplicationHost& state,
+    HWND owner,
+    std::vector<SavedSelectionChoice>& choices,
+    std::size_t& selected_index) noexcept {
+    InkpodStatus status = QuerySavedSelectionChoices(state, choices);
+    if (status != INKPOD_STATUS_OK || choices.empty()) {
+        return status == INKPOD_STATUS_OK ? INKPOD_STATUS_INVALID_STATE : status;
+    }
+    try {
+        std::vector<ViewOptionsDialogState::Choice> entries;
+        entries.reserve(choices.size());
+        for (std::size_t index = 0; index < choices.size(); ++index) {
+            if (index > static_cast<std::size_t>(INT32_MAX)) {
+                return INKPOD_STATUS_INVALID_STATE;
+            }
+            entries.push_back({
+                choices[index].name.c_str(), static_cast<std::int32_t>(index)});
+        }
+        ViewOptionsDialogState dialog{};
+        dialog.title = UiText(UiStringId::SavedSelectionChooseTitle);
+        dialog.labels[0] = UiText(UiStringId::SavedSelectionChooseLabel);
+        dialog.values[0] = 0;
+        dialog.choices[0] = entries.data();
+        dialog.choice_counts[0] = static_cast<std::uint32_t>(entries.size());
+        dialog.value_count = 1U;
+        if (ShowViewOptions(
+                state.lifetime.instance,
+                owner,
+                state.lifetime.smoke_test,
+                dialog)
+            != IDOK) {
+            return INKPOD_STATUS_CANCELLED;
+        }
+        if (dialog.values[0] < 0
+            || static_cast<std::size_t>(dialog.values[0]) >= choices.size()) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        selected_index = static_cast<std::size_t>(dialog.values[0]);
+        return INKPOD_STATUS_OK;
+    } catch (const std::bad_alloc&) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+}
+
 bool ConfigureHistoryDialog(
     ApplicationHost& app, bool forward, HistoryDialogState& dialog) noexcept {
     if (app.engine == nullptr) {
@@ -4479,202 +4621,6 @@ InkpodStatus UpdateFloatingHandleDrag(
     return SetFloatingTransform(state, transform);
 }
 
-bool QueryVanishingPoints(
-    ApplicationHost& state,
-    std::vector<InkpodVanishingPointInfo>& points) noexcept {
-    if (state.engine == nullptr) {
-        return false;
-    }
-    try {
-        points.assign(64U, InkpodVanishingPointInfo{});
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-    std::uint64_t count{};
-    const InkpodStatus status = state.engine->Invoke(
-        [&points, &count](InkpodCore* core) {
-            return inkpod_core_vanishing_points_copy(
-                core,
-                points.data(),
-                static_cast<std::uint64_t>(points.size()),
-                sizeof(InkpodVanishingPointInfo),
-                &count);
-        },
-        false,
-        false);
-    if (status != INKPOD_STATUS_OK || count > points.size()) {
-        points.clear();
-        return false;
-    }
-    points.resize(static_cast<std::size_t>(count));
-    return true;
-}
-
-InkpodVanishingPointInput VanishingPointInputFromInfo(
-    const InkpodVanishingPointInfo& point) noexcept {
-    return InkpodVanishingPointInput{
-        sizeof(InkpodVanishingPointInput),
-        point.visible,
-        0U,
-        point.layer_id,
-        point.x_milli,
-        point.y_milli,
-        point.interval_milli_degrees,
-        point.angle_milli_degrees,
-        point.opacity_milli,
-        0U,
-        point.color};
-}
-
-InkpodStatus HandleVanishingPointCanvasEvent(
-    ApplicationHost& state,
-    const inkpod::renderer::CanvasStrokeEvent& event) noexcept {
-    auto& tools = state.Workspace().tools;
-    if (state.engine == nullptr) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    if (event.kind == inkpod::renderer::CanvasStrokeEventKind::Cancel) {
-        tools.vanishing_point_gesture_samples.clear();
-        tools.vanishing_point_drag_id = 0U;
-        if (!tools.vanishing_point_preview_active) {
-            return INKPOD_STATUS_OK;
-        }
-        tools.vanishing_point_preview_active = false;
-        return state.engine->Invoke(
-            [](InkpodCore* core) {
-                return inkpod_core_vanishing_point_preview_cancel(core);
-            },
-            true,
-            false);
-    }
-    if (event.sample_count == 0U || event.samples == nullptr) {
-        return INKPOD_STATUS_INVALID_ARGUMENT;
-    }
-    InkpodDocumentInfo document{};
-    inkpod::renderer::CanvasDocumentBounds canvas{};
-    std::vector<InkpodVanishingPointInfo> points;
-    if (!QueryDocument(state, document)
-        || !QueryVanishingPoints(state, points)
-        || !inkpod::renderer::GetCanvasDocumentBounds(
-            state.Workspace().windows.canvas, canvas)
-        || document.width == 0U) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    const double zoom = (canvas.right - canvas.left)
-        / static_cast<double>(document.width);
-    if (!std::isfinite(zoom) || zoom <= 0.0) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    const auto to_document = [&](const InkpodStrokeSample& sample) {
-        double x = (static_cast<double>(sample.x) - canvas.left) / zoom;
-        double y = (static_cast<double>(sample.y) - canvas.top) / zoom;
-        if (state.ActiveView().presentation.flip_horizontal) {
-            x = static_cast<double>(document.width) - x;
-        }
-        if (state.ActiveView().presentation.flip_vertical) {
-            y = static_cast<double>(document.height) - y;
-        }
-        return std::pair{x, y};
-    };
-    const auto to_device = [&](double x, double y) {
-        if (state.ActiveView().presentation.flip_horizontal) {
-            x = static_cast<double>(document.width) - x;
-        }
-        if (state.ActiveView().presentation.flip_vertical) {
-            y = static_cast<double>(document.height) - y;
-        }
-        return std::pair{canvas.left + x * zoom, canvas.top + y * zoom};
-    };
-    const InkpodStrokeSample current =
-        event.samples[static_cast<std::size_t>(event.sample_count - 1U)];
-    if (event.kind == inkpod::renderer::CanvasStrokeEventKind::Begin) {
-        tools.vanishing_point_preview_active = false;
-        tools.vanishing_point_drag_id = 0U;
-        tools.vanishing_point_gesture_samples.clear();
-        const InkpodVanishingPointInfo* selected{};
-        double best = 14.0;
-        for (const auto& point : points) {
-            const auto device = to_device(
-                static_cast<double>(point.x_milli) / 1000.0,
-                static_cast<double>(point.y_milli) / 1000.0);
-            const double distance = std::hypot(
-                device.first - static_cast<double>(current.x),
-                device.second - static_cast<double>(current.y));
-            if (distance <= best) {
-                best = distance;
-                selected = &point;
-            }
-        }
-        if (selected == nullptr) {
-            return INKPOD_STATUS_OK;
-        }
-        try {
-            tools.vanishing_point_gesture_samples.push_back(current);
-        } catch (const std::bad_alloc&) {
-            return INKPOD_STATUS_INVALID_STATE;
-        }
-        tools.vanishing_point_drag_id = selected->point_id;
-        tools.vanishing_point_drag_value = VanishingPointInputFromInfo(*selected);
-        const InkpodStatus status = state.engine->Invoke(
-            [base_revision = document.document_revision,
-             point_id = selected->point_id,
-             input = tools.vanishing_point_drag_value](InkpodCore* core) {
-                return inkpod_core_vanishing_point_preview_begin(
-                    core,
-                    base_revision,
-                    INKPOD_VANISHING_POINT_EDIT_UPDATE,
-                    point_id,
-                    &input);
-            },
-            true,
-            false);
-        tools.vanishing_point_preview_active = status == INKPOD_STATUS_OK;
-        return status;
-    }
-    if (!tools.vanishing_point_preview_active
-        || tools.vanishing_point_gesture_samples.empty()) {
-        return INKPOD_STATUS_OK;
-    }
-    const auto start = to_document(tools.vanishing_point_gesture_samples.front());
-    const auto position = to_document(current);
-    InkpodVanishingPointInput value = tools.vanishing_point_drag_value;
-    value.x_milli += static_cast<std::int64_t>(
-        std::nearbyint((position.first - start.first) * 1000.0));
-    value.y_milli += static_cast<std::int64_t>(
-        std::nearbyint((position.second - start.second) * 1000.0));
-    InkpodStatus status = state.engine->Invoke(
-        [value](InkpodCore* core) {
-            return inkpod_core_vanishing_point_preview_update(core, &value);
-        },
-        true,
-        false);
-    if (status != INKPOD_STATUS_OK) {
-        tools.vanishing_point_preview_active = false;
-        tools.vanishing_point_gesture_samples.clear();
-        (void)state.engine->Invoke(
-            [](InkpodCore* core) {
-                return inkpod_core_vanishing_point_preview_cancel(core);
-            },
-            true,
-            false);
-        return status;
-    }
-    if (event.kind == inkpod::renderer::CanvasStrokeEventKind::End) {
-        status = state.engine->Invoke(
-            [](InkpodCore* core) {
-                std::uint64_t revision{};
-                std::uint64_t point_id{};
-                return inkpod_core_vanishing_point_preview_apply(
-                    core, &revision, &point_id);
-            },
-            true,
-            true);
-        tools.vanishing_point_preview_active = false;
-        tools.vanishing_point_gesture_samples.clear();
-    }
-    return status;
-}
-
 InkpodStatus HandleShootingFrameCanvasEvent(
     ApplicationHost& state,
     const inkpod::renderer::CanvasStrokeEvent& event) noexcept {
@@ -5349,20 +5295,6 @@ InkpodStatus SetEditorActiveTool(
         tools.shooting_frame_drag_handle = 0U;
         tools.shooting_frame_gesture_samples.clear();
     }
-    if (previous != tool && previous == kInteractionVanishingPoint) {
-        auto& tools = state.Workspace().tools;
-        if (tools.vanishing_point_preview_active && state.engine != nullptr) {
-            (void)state.engine->Invoke(
-                [](InkpodCore* core) {
-                    return inkpod_core_vanishing_point_preview_cancel(core);
-                },
-                true,
-                false);
-        }
-        tools.vanishing_point_preview_active = false;
-        tools.vanishing_point_drag_id = 0U;
-        tools.vanishing_point_gesture_samples.clear();
-    }
     update.tool = tool;
     return state.UpdateEditorState(update);
 }
@@ -5642,16 +5574,6 @@ InkpodFilterInput FilterInputFor(const FilterJob& job) noexcept {
         input.point_stride_bytes = sizeof(InkpodCurvePoint);
     }
     return input;
-}
-
-AdjustmentLayerUiState* CurrentAdjustment(EffectsUiState& effects) noexcept {
-    const auto found = std::find_if(
-        effects.adjustments.begin(),
-        effects.adjustments.end(),
-        [&effects](const AdjustmentLayerUiState& adjustment) {
-            return adjustment.id == effects.adjustment_id;
-        });
-    return found == effects.adjustments.end() ? nullptr : &*found;
 }
 
 bool FormatCurvePoints(
@@ -6329,191 +6251,6 @@ void CompleteInteractiveFilterWork(
     }
 }
 
-bool ConfigureAdjustmentEditor(
-    ApplicationHost& state, FilterJob& job, bool update) noexcept {
-    EffectEditorState editor{};
-    editor.title = UiText(UiStringId::Text0933);
-    editor.parameter_labels = {
-        UiText(UiStringId::Text0067),
-        UiText(UiStringId::AdjustmentContrastGamma),
-        UiText(UiStringId::AdjustmentHighlight),
-        UiText(UiStringId::AdjustmentOutputShadow),
-        UiText(UiStringId::AdjustmentOutputHighlight)};
-    editor.channel_labels = {
-        UiText(UiStringId::Text0725), UiText(UiStringId::Text0251), UiText(UiStringId::Text0407), nullptr, nullptr};
-    editor.channel_values = {
-        INKPOD_FILTER_BRIGHTNESS_CONTRAST,
-        INKPOD_FILTER_TONE_CURVE,
-        INKPOD_FILTER_LEVELS,
-        0U,
-        0U};
-    editor.channel_count = 3U;
-    editor.channel = INKPOD_FILTER_BRIGHTNESS_CONTRAST;
-    editor.mode_labels = {
-        UiText(UiStringId::CurveBezier),
-        UiText(UiStringId::CurveBSpline),
-        nullptr,
-        nullptr};
-    editor.mode_values = {INKPOD_CURVE_BEZIER, INKPOD_CURVE_BSPLINE, 0U, 0U};
-    editor.mode_count = 2U;
-    editor.mode = INKPOD_CURVE_BEZIER;
-    editor.points = L"0:0;32768:32768;65535:65535";
-    editor.option1 = false;
-    editor.option2 = false;
-    editor.option1_enabled = false;
-    editor.option2_enabled = false;
-    if (update) {
-        const AdjustmentLayerUiState* current = CurrentAdjustment(state.effects);
-        if (current == nullptr) {
-            return false;
-        }
-        try {
-            job = current->job;
-        } catch (const std::bad_alloc&) {
-            return false;
-        }
-        editor.channel = job.kind;
-        editor.mode = job.interpolation;
-        editor.parameters = job.parameters;
-        if (job.kind == INKPOD_FILTER_TONE_CURVE
-            && !FormatCurvePoints(job.points, editor.points)) {
-            return false;
-        }
-    }
-    if (ShowEffectEditor(state.lifetime.instance, state.Workspace().windows.window, state.lifetime.smoke_test, editor) != IDOK) {
-        return false;
-    }
-    job.kind = editor.channel;
-    job.channel = INKPOD_FILTER_CHANNEL_RGB;
-    job.interpolation = editor.mode;
-    job.parameters = editor.parameters;
-    if (job.kind == INKPOD_FILTER_TONE_CURVE
-        && !ParseCurvePoints(editor.points, job.points)) {
-        if (!state.lifetime.smoke_test) {
-            MessageBoxW(
-                state.Workspace().windows.window,
-                UiText(UiStringId::Text0253),
-                L"inkpod",
-                MB_OK | MB_ICONWARNING);
-        }
-        return false;
-    }
-    return true;
-}
-
-InkpodStatus CreateOrUpdateAdjustment(
-    ApplicationHost& state, FilterJob job, bool update) noexcept {
-    if (state.engine == nullptr || (update && state.effects.adjustment_id == 0U)) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    const std::uint64_t layer_id = state.effects.adjustment_id;
-    std::shared_ptr<AdjustmentLayerUiState> pending;
-    try {
-        std::string name;
-        if (update) {
-            const AdjustmentLayerUiState* current = CurrentAdjustment(state.effects);
-            if (current == nullptr) {
-                return INKPOD_STATUS_INVALID_STATE;
-            }
-            name = current->name;
-        } else {
-            name = "Adjustment " + std::to_string(state.effects.adjustments.size() + 1U);
-            state.effects.adjustments.reserve(state.effects.adjustments.size() + 1U);
-        }
-        pending = std::make_shared<AdjustmentLayerUiState>(
-            AdjustmentLayerUiState{layer_id, true, std::move(job), std::move(name)});
-    } catch (const std::bad_alloc&) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    std::uint64_t created_id{};
-    const InkpodStatus status = state.engine->Invoke(
-        [pending, update, layer_id, &created_id](InkpodCore* core) {
-            const InkpodFilterInput input = FilterInputFor(pending->job);
-            InkpodDispatchResult result{};
-            result.struct_size = sizeof(result);
-            if (update) {
-                return inkpod_core_adjustment_update(core, layer_id, &input, &result);
-            }
-            return inkpod_core_adjustment_create(
-                core,
-                &input,
-                reinterpret_cast<const std::uint8_t*>(pending->name.data()),
-                pending->name.size(),
-                &result,
-                &created_id);
-        },
-        true,
-        true);
-    if (status == INKPOD_STATUS_OK && !update) {
-        pending->id = created_id;
-        state.effects.adjustment_id = created_id;
-        state.effects.adjustment_visible = true;
-        state.effects.adjustments.push_back(std::move(*pending));
-    } else if (status == INKPOD_STATUS_OK) {
-        AdjustmentLayerUiState* current = CurrentAdjustment(state.effects);
-        if (current != nullptr) {
-            current->job = std::move(pending->job);
-        }
-    }
-    return status;
-}
-
-InkpodStatus SetAdjustmentVisibility(ApplicationHost& state, bool visible) noexcept {
-    if (state.engine == nullptr || state.effects.adjustment_id == 0U) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    const std::uint64_t layer_id = state.effects.adjustment_id;
-    AdjustmentLayerUiState* current = CurrentAdjustment(state.effects);
-    if (current == nullptr) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    const InkpodStatus status = state.engine->Invoke(
-        [layer_id, visible, current](InkpodCore* core) {
-            InkpodTreeEdit edit{};
-            edit.struct_size = sizeof(edit);
-            edit.operation = INKPOD_TREE_SET_LAYER_PROPERTIES;
-            edit.flags = INKPOD_NODE_EDITABLE | (visible ? INKPOD_NODE_VISIBLE : 0U);
-            edit.object_id = layer_id;
-            edit.opacity_milli = 1000U;
-            edit.name_utf8 = reinterpret_cast<const std::uint8_t*>(current->name.data());
-            edit.name_bytes = current->name.size();
-            InkpodDispatchResult result{};
-            result.struct_size = sizeof(result);
-            std::uint64_t ignored{};
-            return inkpod_core_tree_edit(core, &edit, &result, &ignored);
-        },
-        true,
-        true);
-    if (status == INKPOD_STATUS_OK) {
-        current->visible = visible;
-    }
-    return status;
-}
-
-bool SelectAdjustment(ApplicationHost& state, bool next) noexcept {
-    if (state.effects.adjustments.empty()) {
-        return false;
-    }
-    const auto current = std::find_if(
-        state.effects.adjustments.begin(),
-        state.effects.adjustments.end(),
-        [&state](const AdjustmentLayerUiState& adjustment) {
-            return adjustment.id == state.effects.adjustment_id;
-        });
-    std::size_t index = current == state.effects.adjustments.end()
-        ? 0U
-        : static_cast<std::size_t>(current - state.effects.adjustments.begin());
-    if (next) {
-        index = (index + 1U) % state.effects.adjustments.size();
-    } else {
-        index = (index + state.effects.adjustments.size() - 1U)
-            % state.effects.adjustments.size();
-    }
-    state.effects.adjustment_id = state.effects.adjustments[index].id;
-    state.effects.adjustment_visible = state.effects.adjustments[index].visible;
-    return true;
-}
-
 std::vector<InkpodGradientStop> GradientStops(const std::vector<GradientStopValue>& values) {
     std::vector<InkpodGradientStop> stops;
     stops.reserve(values.size());
@@ -7096,12 +6833,6 @@ CommandStateInputs BuildCommandStateInputs(
         && shooting_frame_present;
     inputs.document.shooting_frame_handle_edit =
         state.Workspace().tools.active_tool == kInteractionShootingFrame;
-    std::vector<InkpodVanishingPointInfo> vanishing_points;
-    inputs.document.vanishing_point_present = has_document
-        && QueryVanishingPoints(state, vanishing_points)
-        && !vanishing_points.empty();
-    inputs.document.vanishing_point_handle_edit =
-        state.Workspace().tools.active_tool == kInteractionVanishingPoint;
     inputs.document.recent_document_count = state.RecentDocumentCount();
     inputs.application.restore_previous_documents =
         state.lifetime.restore_previous_documents;
@@ -7128,9 +6859,6 @@ CommandStateInputs BuildCommandStateInputs(
 
     inputs.effects.color_plane_active =
         state.Workspace().tools.active_plane == INKPOD_PLANE_COLOR;
-    inputs.effects.adjustment_available = state.effects.adjustment_id != 0U;
-    inputs.effects.multiple_adjustments = state.effects.adjustments.size() > 1U;
-    inputs.effects.adjustment_visible = state.effects.adjustment_visible;
     inputs.effects.alpha_view = state.effects.alpha_view;
 
     inputs.document_pane.removable_layer_available =
@@ -7162,8 +6890,8 @@ CommandStateInputs BuildCommandStateInputs(
         && active_view->presentation.snap_grid;
     inputs.selection_view.transparent_visible = active_view != nullptr
         && active_view->presentation.transparent_visible;
-    inputs.selection_view.selection_layer_available =
-        document != nullptr && document->shell.selection_layer_id != 0U;
+    inputs.selection_view.saved_selection_available =
+        state.Workspace().panes.saved_selection_available;
     inputs.selection_view.document_count = state.Documents().Count();
     inputs.selection_view.view_count = document == nullptr ? 0U : document->ViewCount();
     inputs.selection_view.editor_group_count =
@@ -7565,7 +7293,6 @@ void UpdateMainWindowStatus(
             case kInteractionFloatingTransform: return UiText(UiStringId::ToolFloatingTransform);
             case kInteractionLightTableMove: return UiText(UiStringId::ToolLightTableMove);
             case kInteractionShootingFrame: return UiText(UiStringId::ToolShootingFrame);
-            case kInteractionVanishingPoint: return UiText(UiStringId::ToolVanishingPoint);
             case kInteractionEffectGradient: return UiText(UiStringId::ToolGradient);
             case kInteractionEffectAirbrush: return UiText(UiStringId::ToolAirbrush);
             case kInteractionEffectBlur: return UiText(UiStringId::ToolBlur);
@@ -7756,9 +7483,6 @@ void UpdateMenuState(ApplicationHost& state) noexcept {
                     case IDM_LAYER_MERGE:
                     case IDM_PLANE_MERGE:
                         capable = capabilities.can_merge != 0U;
-                        break;
-                    case IDM_LAYER_CONVERT:
-                        capable = capabilities.can_convert_layers != 0U;
                         break;
                     case IDM_PLANE_CONVERT:
                         capable = capabilities.can_convert_planes != 0U;
@@ -9811,7 +9535,6 @@ bool CutSnapshotToDialog(
         snapshot.info.safe_frame_ratio_milli,
         snapshot.info.maximum_close_ratio_milli,
         snapshot.info.anchor,
-        snapshot.info.initial_layer_kind,
         snapshot.info.pixel_format,
         1U,
         0U};
@@ -9872,7 +9595,6 @@ InkpodCutDefaultsInput CutDefaultsInput(
         source.safe_frame_ratio_milli,
         source.maximum_close_ratio_milli,
         source.anchor,
-        source.initial_layer_kind,
         source.pixel_format,
         0U};
 }
@@ -10211,13 +9933,9 @@ InkpodStatus CreateNewCut(ApplicationHost& state, HWND owner) noexcept {
         900U,
         500U,
         INKPOD_FRAME_ANCHOR_CENTER,
-        INKPOD_LAYER_BINARY_COLORING,
         INKPOD_STORAGE_RGBA8,
         state.lifetime.smoke_test ? 5U : 1U,
         0U};
-    cells.layer_choices = LayerKindChoices().data();
-    cells.layer_choice_count =
-        static_cast<std::uint32_t>(LayerKindChoices().size());
     cells.build_preview = BuildCellCreationDialogPreview;
     if (ShowCellCreationOptions(
             state.lifetime.instance, owner, state.lifetime.smoke_test, cells)
@@ -10316,9 +10034,6 @@ InkpodStatus EditCutProperties(ApplicationHost& state, HWND owner) noexcept {
     }
     CellCreationDialogState cell_defaults{};
     cell_defaults.options = defaults;
-    cell_defaults.layer_choices = LayerKindChoices().data();
-    cell_defaults.layer_choice_count =
-        static_cast<std::uint32_t>(LayerKindChoices().size());
     cell_defaults.build_preview = BuildCellCreationDialogPreview;
     if (ShowCellCreationOptions(
             state.lifetime.instance,
@@ -10634,12 +10349,11 @@ bool BuildCellCreationDialogPreview(
         && release_status == INKPOD_STATUS_OK && written == 1U;
 }
 
-InkpodStatus CreateCellWithLayer(
+InkpodStatus CreateCell(
     ApplicationHost& state,
     std::uint32_t width,
     std::uint32_t height,
-    std::uint32_t dpi_milli,
-    std::uint32_t initial_layer_kind) noexcept {
+    std::uint32_t dpi_milli) noexcept {
     const InkpodCellCreationOptions options{
         sizeof(InkpodCellCreationOptions),
         INKPOD_CELL_SIZING_IMAGE_PIXELS,
@@ -10652,24 +10366,10 @@ InkpodStatus CreateCellWithLayer(
         900U,
         500U,
         INKPOD_FRAME_ANCHOR_CENTER,
-        initial_layer_kind,
         INKPOD_STORAGE_RGBA8,
         1U,
         0U};
     return CreateCellsFromOptions(state, options);
-}
-
-InkpodStatus CreateCell(
-    ApplicationHost& state,
-    std::uint32_t width,
-    std::uint32_t height,
-    std::uint32_t dpi_milli) noexcept {
-    return CreateCellWithLayer(
-        state,
-        width,
-        height,
-        dpi_milli,
-        INKPOD_LAYER_BINARY_COLORING);
 }
 
 InkpodStatus CreateDefaultCellImpl(ApplicationHost& state) noexcept {
@@ -14172,7 +13872,6 @@ const wchar_t* BatchOperationLabel(UINT command) noexcept {
 bool AddBatchOperation(ApplicationHost& state, UINT command) noexcept {
     BatchOperationUi operation{};
     operation.label = BatchOperationLabel(command);
-    operation.layer_kind = INKPOD_LAYER_BINARY_COLORING;
     operation.plane_kind = INKPOD_TYPED_PLANE_COLOR;
     try {
         switch (command) {
@@ -14188,7 +13887,7 @@ bool AddBatchOperation(ApplicationHost& state, UINT command) noexcept {
             }
             case IDM_BATCH_ADD_MOVE_TO_COLOR_PLANE:
                 operation.kind = INKPOD_BATCH_OPERATION_MOVE_TO_COLOR_PLANE;
-                operation.plane_kind = INKPOD_TYPED_PLANE_MAIN_LINE;
+                operation.plane_kind = INKPOD_TYPED_PLANE_RASTER;
                 operation.colors.push_back(state.Workspace().tools.drawing_color);
                 break;
             case IDM_BATCH_ADD_MASKING:
@@ -15787,13 +15486,9 @@ std::optional<LRESULT> RouteDocumentCommand(
                     900U,
                     500U,
                     INKPOD_FRAME_ANCHOR_CENTER,
-                    INKPOD_LAYER_BINARY_COLORING,
                     INKPOD_STORAGE_RGBA8,
                     state->lifetime.smoke_test ? 3U : 1U,
                     0U};
-                dialog.layer_choices = LayerKindChoices().data();
-                dialog.layer_choice_count =
-                    static_cast<std::uint32_t>(LayerKindChoices().size());
                 dialog.build_preview = BuildCellCreationDialogPreview;
                 if (ShowCellCreationOptions(
                         state->lifetime.instance,
@@ -16170,9 +15865,9 @@ std::optional<LRESULT> RouteEditCommand(
         case IDM_EDIT_PASTE_CONVERTED: {
             ViewOptionsDialogState dialog{};
             dialog.title = UiText(UiStringId::Text0609);
-            dialog.labels = {UiText(UiStringId::Text0329), UiText(UiStringId::Text0873), UiText(UiStringId::Text0433), UiText(UiStringId::Text0714)};
-            dialog.values = {INKPOD_TYPED_PLANE_RASTER, INKPOD_STORAGE_RGBA8, 100, 1};
-            dialog.value_count = 4U;
+            dialog.labels = {UiText(UiStringId::Text0873), UiText(UiStringId::Text0433), nullptr, nullptr};
+            dialog.values = {INKPOD_STORAGE_RGBA8, 100, 0, 0};
+            dialog.value_count = 2U;
             if (ShowViewOptions(
                     state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
                 return 0;
@@ -16194,10 +15889,9 @@ std::optional<LRESULT> RouteEditCommand(
             edit.operation = INKPOD_TREE_CREATE_PLANE;
             edit.flags = INKPOD_NODE_VISIBLE | INKPOD_NODE_EDITABLE;
             edit.parent_id = state->Workspace().panes.active_tree_layer_id;
-            edit.kind = static_cast<std::uint32_t>(dialog.values[0]);
-            edit.pixel_format = static_cast<std::uint32_t>(dialog.values[1]);
+            edit.pixel_format = static_cast<std::uint32_t>(dialog.values[0]);
             edit.opacity_milli = static_cast<std::uint32_t>(
-                std::clamp(dialog.values[2], 0, 100)) * 10U;
+                std::clamp(dialog.values[1], 0, 100)) * 10U;
             InkpodStatus status = INKPOD_STATUS_INVALID_STATE;
             try {
                 const std::string plane_name(
@@ -16315,52 +16009,6 @@ std::optional<LRESULT> RouteEffectsCommand(
                 *state, context, command, editor->active_plane_id);
             if (status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, UiText(UiStringId::Text0285));
-            }
-            UpdateMenuState(*state);
-            return 0;
-        }
-        case IDM_ADJUSTMENT_CREATE:
-        case IDM_ADJUSTMENT_EDIT: {
-            const bool update = LOWORD(wparam) == IDM_ADJUSTMENT_EDIT;
-            FilterJob job{};
-            if (!ConfigureAdjustmentEditor(*state, job, update)) {
-                return 0;
-            }
-            const InkpodStatus status = CreateOrUpdateAdjustment(
-                *state, std::move(job), update);
-            if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, UiText(UiStringId::Text0926));
-            }
-            UpdateMenuState(*state);
-            return 0;
-        }
-        case IDM_ADJUSTMENT_PREVIOUS:
-        case IDM_ADJUSTMENT_NEXT:
-            SelectAdjustment(
-                *state, LOWORD(wparam) == IDM_ADJUSTMENT_NEXT);
-            UpdateMenuState(*state);
-            return 0;
-        case IDM_ADJUSTMENT_TOGGLE: {
-            const bool visible = !state->effects.adjustment_visible;
-            const InkpodStatus status = SetAdjustmentVisibility(*state, visible);
-            if (status == INKPOD_STATUS_OK) {
-                state->effects.adjustment_visible = visible;
-            } else {
-                ShowCoreError(*state, window, UiText(UiStringId::Text0932));
-            }
-            UpdateMenuState(*state);
-            return 0;
-        }
-        case IDM_ADJUSTMENT_MOVE_TOP: {
-            std::uint64_t ignored{};
-            const InkpodStatus status = ApplyTreeEdit(
-                *state,
-                INKPOD_TREE_REORDER_LAYER,
-                state->effects.adjustment_id,
-                0U,
-                ignored);
-            if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, UiText(UiStringId::Text0931));
             }
             UpdateMenuState(*state);
             return 0;
@@ -16509,162 +16157,6 @@ InkpodStatus DeleteShootingFrame(ApplicationHost& state) noexcept {
     return status;
 }
 
-InkpodStatus EnsureVanishingPointLayer(
-    ApplicationHost& state, std::uint64_t& layer_id) noexcept {
-    TreePaneNode selected{};
-    if (QueryTreeNode(state, false, selected)
-        && selected.kind == INKPOD_LAYER_VANISHING_POINT) {
-        layer_id = selected.id;
-        return INKPOD_STATUS_OK;
-    }
-    InkpodTreeEdit edit{};
-    edit.struct_size = sizeof(edit);
-    edit.operation = INKPOD_TREE_CREATE_LAYER;
-    edit.flags = INKPOD_NODE_VISIBLE | INKPOD_NODE_EDITABLE;
-    edit.kind = INKPOD_LAYER_VANISHING_POINT;
-    edit.opacity_milli = 1000U;
-    const InkpodStatus status = ApplyTreeEditRecord(
-        state, edit, "Perspective", layer_id);
-    if (status == INKPOD_STATUS_OK) {
-        state.Document().shell.smoke_layer_id = layer_id;
-        RefreshTreePane(state);
-    }
-    return status;
-}
-
-InkpodStatus EditVanishingPointFromDialog(ApplicationHost& state) noexcept {
-    if (state.engine == nullptr) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    std::vector<InkpodVanishingPointInfo> points;
-    if (!QueryVanishingPoints(state, points)) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    auto& tools = state.Workspace().tools;
-    const auto selected = std::find_if(
-        points.begin(), points.end(), [&tools](const InkpodVanishingPointInfo& point) {
-            return point.point_id == tools.vanishing_point_drag_id;
-        });
-    const bool updating = selected != points.end();
-    std::uint64_t layer_id = updating ? selected->layer_id : 0U;
-    InkpodStatus status = updating
-        ? INKPOD_STATUS_OK : EnsureVanishingPointLayer(state, layer_id);
-    if (status != INKPOD_STATUS_OK) {
-        return status;
-    }
-    InkpodDocumentInfo document{};
-    if (!QueryDocument(state, document)) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    VanishingPointDialogState dialog{};
-    dialog.value = updating
-        ? VanishingPointInputFromInfo(*selected)
-        : InkpodVanishingPointInput{
-              sizeof(InkpodVanishingPointInput),
-              1U,
-              0U,
-              layer_id,
-              static_cast<std::int64_t>(document.width) * 500,
-              static_cast<std::int64_t>(document.height) * 500,
-              15000U,
-              0U,
-              750U,
-              0U,
-              InkpodColorValue{
-                  sizeof(InkpodColorValue),
-                  INKPOD_COLOR_DEPTH_8,
-                  48U,
-                  128U,
-                  240U,
-                  255U}};
-    if (state.lifetime.smoke_test && !updating) {
-        dialog.value.x_milli = -20000;
-    }
-    dialog.close_immediately = state.lifetime.smoke_test;
-    const InkpodVanishingPointEditKind kind = updating
-        ? INKPOD_VANISHING_POINT_EDIT_UPDATE
-        : INKPOD_VANISHING_POINT_EDIT_CREATE;
-    const std::uint64_t point_id = updating ? selected->point_id : 0U;
-    status = state.engine->Invoke(
-        [base_revision = document.document_revision, kind, point_id,
-         input = dialog.value](InkpodCore* core) {
-            return inkpod_core_vanishing_point_preview_begin(
-                core, base_revision, kind, point_id, &input);
-        },
-        true,
-        false);
-    if (status != INKPOD_STATUS_OK) {
-        return status;
-    }
-    if (ShowVanishingPointOptions(
-            state.lifetime.instance, state.Workspace().windows.window, dialog)
-        != IDOK) {
-        (void)state.engine->Invoke(
-            [](InkpodCore* core) {
-                return inkpod_core_vanishing_point_preview_cancel(core);
-            },
-            true,
-            false);
-        return INKPOD_STATUS_CANCELLED;
-    }
-    status = state.engine->Invoke(
-        [input = dialog.value](InkpodCore* core) {
-            return inkpod_core_vanishing_point_preview_update(core, &input);
-        },
-        true,
-        false);
-    if (status != INKPOD_STATUS_OK) {
-        (void)state.engine->Invoke(
-            [](InkpodCore* core) {
-                return inkpod_core_vanishing_point_preview_cancel(core);
-            },
-            true,
-            false);
-        return status;
-    }
-    std::uint64_t committed_id{};
-    status = state.engine->Invoke(
-        [&committed_id](InkpodCore* core) {
-            std::uint64_t revision{};
-            return inkpod_core_vanishing_point_preview_apply(
-                core, &revision, &committed_id);
-        },
-        true,
-        true);
-    if (status == INKPOD_STATUS_OK) {
-        tools.vanishing_point_drag_id = committed_id;
-        status = SetEditorActiveTool(state, kInteractionVanishingPoint);
-    }
-    return status;
-}
-
-InkpodStatus DeleteAllVanishingPoints(ApplicationHost& state) noexcept {
-    InkpodDocumentInfo document{};
-    if (!QueryDocument(state, document) || state.engine == nullptr) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    const InkpodStatus status = state.engine->Invoke(
-        [expected_revision = document.document_revision](InkpodCore* core) {
-            std::uint64_t revision{};
-            std::uint64_t ignored{};
-            return inkpod_core_vanishing_point_edit(
-                core,
-                expected_revision,
-                INKPOD_VANISHING_POINT_EDIT_DELETE_ALL,
-                0U,
-                nullptr,
-                &revision,
-                &ignored);
-        },
-        true,
-        true);
-    if (status == INKPOD_STATUS_OK) {
-        state.Workspace().tools.vanishing_point_drag_id = 0U;
-    }
-    return status;
-}
-
-
 std::optional<LRESULT> RouteDocumentPaneCommand(
     ApplicationHost* state,
     HWND window,
@@ -16691,27 +16183,11 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
             }
             return 0;
         case IDM_LAYER_NEW: {
-            ViewOptionsDialogState dialog{};
-            dialog.title = UiText(UiStringId::Text0715);
-            dialog.labels = {UiText(UiStringId::Text0828), UiText(UiStringId::Text0433), nullptr, nullptr};
-            dialog.values = {INKPOD_LAYER_RASTER, 100, 0, 0};
-            dialog.choices[0] = LayerKindChoices().data();
-            dialog.choice_counts[0] =
-                static_cast<std::uint32_t>(LayerKindChoices().size());
-            dialog.value_count = 2U;
-            if (ShowViewOptions(
-                    state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
-                || dialog.values[0] < INKPOD_LAYER_BINARY_COLORING
-                || dialog.values[0] > INKPOD_LAYER_ADJUSTMENT
-                || dialog.values[1] < 0 || dialog.values[1] > 100) {
-                return 0;
-            }
             InkpodTreeEdit edit{};
             edit.struct_size = sizeof(edit);
             edit.operation = INKPOD_TREE_CREATE_LAYER;
             edit.flags = INKPOD_NODE_VISIBLE | INKPOD_NODE_EDITABLE;
-            edit.kind = static_cast<std::uint32_t>(dialog.values[0]);
-            edit.opacity_milli = static_cast<std::uint32_t>(dialog.values[1]) * 10U;
+            edit.opacity_milli = 1000U;
             std::uint64_t layer_id{};
             InkpodStatus status = ApplyTreeEditRecord(
                 *state, edit, "Layer", layer_id);
@@ -16764,39 +16240,6 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
             UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
-        case IDM_CELL_VANISHING_POINT_PROPERTIES: {
-            const InkpodStatus status = EditVanishingPointFromDialog(*state);
-            if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
-                ShowCoreError(*state, window, UiText(UiStringId::Text0772));
-            }
-            UpdateMenuState(*state);
-            return status == INKPOD_STATUS_OK ? 1 : 0;
-        }
-        case IDM_CELL_VANISHING_POINT_EDIT_HANDLES: {
-            std::vector<InkpodVanishingPointInfo> points;
-            const InkpodStatus status = !QueryVanishingPoints(*state, points)
-                    || points.empty()
-                ? INKPOD_STATUS_INVALID_STATE
-                : SetEditorActiveTool(
-                      *state,
-                      state->Workspace().tools.active_tool
-                              == kInteractionVanishingPoint
-                          ? INKPOD_TOOL_PENCIL
-                          : kInteractionVanishingPoint);
-            if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, UiText(UiStringId::Text0769));
-            }
-            UpdateMenuState(*state);
-            return status == INKPOD_STATUS_OK ? 1 : 0;
-        }
-        case IDM_CELL_VANISHING_POINT_DELETE_ALL: {
-            const InkpodStatus status = DeleteAllVanishingPoints(*state);
-            if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, UiText(UiStringId::Text0770));
-            }
-            UpdateMenuState(*state);
-            return status == INKPOD_STATUS_OK ? 1 : 0;
-        }
         case IDM_LAYER_DUPLICATE: {
             InkpodDocumentInfo info{};
             std::uint64_t duplicate_id{};
@@ -16805,7 +16248,7 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                 : (QueryDocument(*state, info) ? info.layer_id : 0U);
             bool grouped{};
             InkpodStatus status = ApplyGroupedEditTargetCommand(
-                *state, INKPOD_EDIT_TARGET_DUPLICATE, 0U, 0U, 0U, grouped);
+                *state, INKPOD_EDIT_TARGET_DUPLICATE, 0U, 0U, grouped);
             if (status == INKPOD_STATUS_OK && !grouped) {
                 status = source_id != 0U
                     ? ApplyTreeEdit(
@@ -16838,7 +16281,7 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                 : state->Document().shell.smoke_layer_id;
             bool grouped{};
             InkpodStatus status = ApplyGroupedEditTargetCommand(
-                *state, INKPOD_EDIT_TARGET_DELETE, 0U, 0U, 0U, grouped);
+                *state, INKPOD_EDIT_TARGET_DELETE, 0U, 0U, grouped);
             if (status == INKPOD_STATUS_OK && !grouped) {
                 status = target == 0U
                     ? INKPOD_STATUS_INVALID_STATE
@@ -16928,7 +16371,6 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                                 : INKPOD_EDIT_TARGET_SET_EDITABILITY,
                         value ? 1U : 0U,
                         0U,
-                        0U,
                         grouped);
                 }
             }
@@ -16950,46 +16392,6 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
             RefreshTreePane(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
-        case IDM_LAYER_CONVERT: {
-            ViewOptionsDialogState dialog{};
-            dialog.title = UiText(UiStringId::Text0405);
-            dialog.labels[0] = UiText(UiStringId::Text0613);
-            dialog.values[0] = INKPOD_LAYER_RASTER;
-            dialog.choices[0] = LayerKindChoices().data();
-            dialog.choice_counts[0] =
-                static_cast<std::uint32_t>(LayerKindChoices().size());
-            if (ShowViewOptions(
-                    state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
-                return 0;
-            }
-            InkpodTreeEdit edit{};
-            edit.struct_size = sizeof(edit);
-            edit.operation = INKPOD_TREE_CONVERT_LAYER;
-            edit.object_id = state->Workspace().panes.active_tree_layer_id;
-            edit.kind = static_cast<std::uint32_t>(dialog.values[0]);
-            std::uint64_t ignored{};
-            bool grouped{};
-            InkpodStatus status = ApplyGroupedEditTargetCommand(
-                *state,
-                INKPOD_EDIT_TARGET_CONVERT_LAYERS,
-                0U,
-                edit.kind,
-                0U,
-                grouped);
-            if (status == INKPOD_STATUS_OK && !grouped) {
-                status = ApplyTreeEditRecord(*state, edit, {}, ignored);
-            }
-            if (status == INKPOD_STATUS_OK
-                && !state->RefreshEditorPresentation(
-                    state->Document().id, state->Document().generation)) {
-                status = INKPOD_STATUS_INVALID_STATE;
-            }
-            if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, UiText(UiStringId::Text0405));
-            }
-            RefreshTreePane(*state);
-            return 0;
-        }
         case IDM_LAYER_MERGE: {
             InkpodTreeEdit edit{};
             edit.struct_size = sizeof(edit);
@@ -16998,7 +16400,7 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
             std::uint64_t ignored{};
             bool grouped{};
             InkpodStatus status = ApplyGroupedEditTargetCommand(
-                *state, INKPOD_EDIT_TARGET_MERGE, 0U, 0U, 0U, grouped);
+                *state, INKPOD_EDIT_TARGET_MERGE, 0U, 0U, grouped);
             if (status == INKPOD_STATUS_OK && !grouped) {
                 status = ApplyTreeEditRecord(*state, edit, {}, ignored);
             }
@@ -17057,17 +16459,15 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                 choice_storage.validation_error.c_str()};
             ViewOptionsDialogState dialog{};
             dialog.title = UiText(UiStringId::Text0713);
-            dialog.labels = {UiText(UiStringId::Text0828), UiText(UiStringId::FormatLabel), UiText(UiStringId::Text0433), nullptr};
-            dialog.values = {INKPOD_TYPED_PLANE_RASTER, INKPOD_STORAGE_RGBA8, 100, 0};
-            dialog.choices[0] = choice_storage.kind_choices.data();
-            dialog.choice_counts[0] =
-                static_cast<std::uint32_t>(choice_storage.kind_choices.size());
-            dialog.choices[1] = choice_storage.format_choices.data();
-            dialog.choice_counts[1] =
-                static_cast<std::uint32_t>(choice_storage.format_choices.size());
+            dialog.labels = {UiText(UiStringId::FormatLabel), nullptr, nullptr, nullptr};
+            dialog.values = {INKPOD_STORAGE_RGBA8, 0, 0, 0};
+            // User-created planes are always Raster and therefore expose only
+            // the two RGBA storage formats accepted by that role.
+            dialog.choices[0] = choice_storage.format_choices.data() + 3U;
+            dialog.choice_counts[0] = 2U;
             dialog.validation_context = &validation;
             dialog.validate = ValidatePlaneCreationOptions;
-            dialog.value_count = 3U;
+            dialog.value_count = 1U;
             if (ShowViewOptions(
                     state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
                 return 0;
@@ -17077,10 +16477,8 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
             edit.operation = INKPOD_TREE_CREATE_PLANE;
             edit.flags = INKPOD_NODE_VISIBLE | INKPOD_NODE_EDITABLE;
             edit.parent_id = state->Workspace().panes.active_tree_layer_id;
-            edit.kind = static_cast<std::uint32_t>(dialog.values[0]);
-            edit.pixel_format = static_cast<std::uint32_t>(dialog.values[1]);
-            edit.opacity_milli = static_cast<std::uint32_t>(
-                std::clamp(dialog.values[2], 0, 100)) * 10U;
+            edit.pixel_format = static_cast<std::uint32_t>(dialog.values[0]);
+            edit.opacity_milli = 1000U;
             std::uint64_t plane_id{};
             InkpodStatus status = ApplyTreeEditRecord(
                 *state, edit, "Plane", plane_id);
@@ -17121,7 +16519,6 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                     command == IDM_PLANE_DUPLICATE
                         ? INKPOD_EDIT_TARGET_DUPLICATE
                         : INKPOD_EDIT_TARGET_DELETE,
-                    0U,
                     0U,
                     0U,
                     grouped);
@@ -17165,7 +16562,6 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                                 : INKPOD_EDIT_TARGET_SET_EDITABILITY,
                         value ? 1U : 0U,
                         0U,
-                        0U,
                         grouped);
                 }
             }
@@ -17192,37 +16588,43 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
             if (!QueryTreeNode(*state, true, node)) {
                 return 0;
             }
+            PlaneDialogChoiceStorage choice_storage{};
+            if (!LoadPlaneDialogChoices(state->lifetime.instance, choice_storage)) {
+                return 0;
+            }
             ViewOptionsDialogState dialog{};
             dialog.title = UiText(UiStringId::Text0327);
-            dialog.labels = {UiText(UiStringId::Text0614), UiText(UiStringId::Text0612), UiText(UiStringId::Text0683), nullptr};
+            dialog.labels = {UiText(UiStringId::Text0612), nullptr, nullptr, nullptr};
             dialog.values = {
-                static_cast<std::int32_t>(node.kind),
                 static_cast<std::int32_t>(node.pixel_format),
-                1,
+                0,
+                0,
                 0};
-            dialog.value_count = 3U;
+            const bool main_line = node.kind == INKPOD_TYPED_PLANE_MAIN_LINE;
+            dialog.choices[0] = choice_storage.format_choices.data()
+                + (main_line ? 0U : 3U);
+            dialog.choice_counts[0] = main_line
+                ? static_cast<std::uint32_t>(choice_storage.format_choices.size())
+                : 2U;
+            dialog.value_count = 1U;
             if (state->lifetime.smoke_test) {
-                dialog.values[0] = INKPOD_TYPED_PLANE_RASTER;
-                dialog.values[1] = INKPOD_STORAGE_RGBA8;
+                dialog.values[0] = INKPOD_STORAGE_RGBA8;
             }
             if (ShowViewOptions(
-                    state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
-                || dialog.values[2] == 0) {
+                    state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
                 return 0;
             }
             InkpodTreeEdit edit{};
             edit.struct_size = sizeof(edit);
             edit.operation = INKPOD_TREE_CONVERT_PLANE;
             edit.object_id = node.id;
-            edit.kind = static_cast<std::uint32_t>(dialog.values[0]);
-            edit.pixel_format = static_cast<std::uint32_t>(dialog.values[1]);
+            edit.pixel_format = static_cast<std::uint32_t>(dialog.values[0]);
             std::uint64_t ignored{};
             bool grouped{};
             InkpodStatus status = ApplyGroupedEditTargetCommand(
                 *state,
                 INKPOD_EDIT_TARGET_CONVERT_PLANES,
                 0U,
-                edit.kind,
                 edit.pixel_format,
                 grouped);
             if (status == INKPOD_STATUS_OK && !grouped) {
@@ -17242,7 +16644,7 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
             std::uint64_t ignored{};
             bool grouped{};
             InkpodStatus status = ApplyGroupedEditTargetCommand(
-                *state, INKPOD_EDIT_TARGET_MERGE, 0U, 0U, 0U, grouped);
+                *state, INKPOD_EDIT_TARGET_MERGE, 0U, 0U, grouped);
             if (status == INKPOD_STATUS_OK && !grouped) {
                 status = ApplyTreeEditRecord(*state, edit, {}, ignored);
             }
@@ -18225,59 +17627,168 @@ std::optional<LRESULT> RouteSelectionViewCommand(
             }
             return 0;
         }
-        case IDM_SELECTION_TO_LAYER: {
-            // This becomes document data, so keep it language-neutral rather
-            // than deriving it from the process UI language.
-            static constexpr std::array<std::uint8_t, 11U> name{
-                'S', 'e', 'l', 'e', 'c', 't', 'i', 'o', 'n', ' ', '1'};
-            std::uint64_t layer_id{};
+        case IDM_SELECTION_SAVE_MASK: {
+            TextInputDialogState name_dialog{};
+            name_dialog.title = UiText(UiStringId::Text0994);
+            name_dialog.label = UiText(UiStringId::Text0567);
+            name_dialog.value = state->lifetime.smoke_test
+                ? L"Smoke Selection"
+                : L"Selection";
+            if (ShowTextInput(
+                    state->lifetime.instance,
+                    window,
+                    state->lifetime.smoke_test,
+                    name_dialog)
+                != IDOK) {
+                return 0;
+            }
+            std::vector<std::uint8_t> name;
+            if (!WidePathToUtf8(name_dialog.value, name) || name.empty()) {
+                ShowCoreError(*state, window, UiText(UiStringId::Text0994));
+                return 0;
+            }
+            std::uint64_t saved_selection_id{};
             const InkpodStatus status = state->engine == nullptr
                 ? INKPOD_STATUS_INVALID_STATE
                 : state->engine->Invoke(
-                      [&layer_id](InkpodCore* core) {
+                      [&name, &saved_selection_id](InkpodCore* core) {
                           InkpodDispatchResult result{};
                           result.struct_size = sizeof(result);
-                          return inkpod_core_selection_to_layer(
+                          return inkpod_core_saved_selection_create(
                               core,
                               name.data(),
                               name.size(),
                               &result,
-                              &layer_id);
+                              &saved_selection_id);
                       },
                       true,
                       true);
             if (status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, UiText(UiStringId::Text0994));
             } else {
-                state->Document().shell.selection_layer_id = layer_id;
-                state->Document().shell.smoke_layer_id = layer_id;
+                (void)RefreshSavedSelectionAvailability(*state);
             }
             UpdateMenuState(*state);
             return 0;
         }
-        case IDM_SELECTION_FROM_LAYER:
-        case IDM_SELECTION_LAYER_ADD:
-        case IDM_SELECTION_LAYER_SUBTRACT: {
+        case IDM_SELECTION_APPLY_SAVED_MASK:
+        case IDM_SELECTION_ADD_SAVED_MASK:
+        case IDM_SELECTION_SUBTRACT_SAVED_MASK: {
             const UINT command = LOWORD(wparam);
-            const std::uint32_t operation = command == IDM_SELECTION_LAYER_ADD
-                ? INKPOD_SELECTION_LAYER_ADD
-                : (command == IDM_SELECTION_LAYER_SUBTRACT
-                          ? INKPOD_SELECTION_LAYER_SUBTRACT
-                          : INKPOD_SELECTION_LAYER_REPLACE);
-            const std::uint64_t layer_id = state->Document().shell.selection_layer_id;
-            const InkpodStatus status = state->engine == nullptr || layer_id == 0U
-                ? INKPOD_STATUS_INVALID_STATE
-                : state->engine->Invoke(
-                      [layer_id, operation](InkpodCore* core) {
-                          InkpodDispatchResult result{};
-                          result.struct_size = sizeof(result);
-                          return inkpod_core_selection_from_layer(
-                              core, layer_id, operation, &result);
-                      },
-                      true,
-                      true);
+            const std::uint32_t operation = command == IDM_SELECTION_ADD_SAVED_MASK
+                ? INKPOD_SAVED_SELECTION_ADD
+                : (command == IDM_SELECTION_SUBTRACT_SAVED_MASK
+                          ? INKPOD_SAVED_SELECTION_SUBTRACT
+                          : INKPOD_SAVED_SELECTION_REPLACE);
+            std::vector<SavedSelectionChoice> choices;
+            std::size_t selected_index{};
+            InkpodStatus status = ChooseSavedSelection(
+                *state, window, choices, selected_index);
+            if (status == INKPOD_STATUS_CANCELLED) {
+                return 0;
+            }
+            if (status == INKPOD_STATUS_OK) {
+                const std::uint64_t saved_selection_id = choices[selected_index].id;
+                status = state->engine->Invoke(
+                    [saved_selection_id, operation](InkpodCore* core) {
+                        InkpodDispatchResult result{};
+                        result.struct_size = sizeof(result);
+                        return inkpod_core_saved_selection_apply(
+                            core, saved_selection_id, operation, &result);
+                    },
+                    true,
+                    true);
+            }
             if (status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, UiText(UiStringId::Text0983));
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        case IDM_SELECTION_RENAME_SAVED_MASK: {
+            std::vector<SavedSelectionChoice> choices;
+            std::size_t selected_index{};
+            InkpodStatus status = ChooseSavedSelection(
+                *state, window, choices, selected_index);
+            if (status == INKPOD_STATUS_CANCELLED) {
+                return 0;
+            }
+            if (status == INKPOD_STATUS_OK) {
+                TextInputDialogState name_dialog{};
+                name_dialog.title = UiText(UiStringId::SavedSelectionRename);
+                name_dialog.label = UiText(UiStringId::Text0567);
+                name_dialog.value = choices[selected_index].name;
+                if (state->lifetime.smoke_test) {
+                    name_dialog.value = L"Renamed Smoke Selection";
+                }
+                if (ShowTextInput(
+                        state->lifetime.instance,
+                        window,
+                        state->lifetime.smoke_test,
+                        name_dialog)
+                    != IDOK) {
+                    return 0;
+                }
+                std::vector<std::uint8_t> name;
+                if (!WidePathToUtf8(name_dialog.value, name) || name.empty()) {
+                    status = INKPOD_STATUS_INVALID_ARGUMENT;
+                } else {
+                    const std::uint64_t saved_selection_id = choices[selected_index].id;
+                    status = state->engine->Invoke(
+                        [saved_selection_id, &name](InkpodCore* core) {
+                            InkpodDispatchResult result{};
+                            result.struct_size = sizeof(result);
+                            return inkpod_core_saved_selection_rename(
+                                core,
+                                saved_selection_id,
+                                name.data(),
+                                name.size(),
+                                &result);
+                        },
+                        true,
+                        true);
+                }
+            }
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, UiText(UiStringId::Text0983));
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        case IDM_SELECTION_DELETE_SAVED_MASK: {
+            std::vector<SavedSelectionChoice> choices;
+            std::size_t selected_index{};
+            InkpodStatus status = ChooseSavedSelection(
+                *state, window, choices, selected_index);
+            if (status == INKPOD_STATUS_CANCELLED) {
+                return 0;
+            }
+            if (status == INKPOD_STATUS_OK
+                && !state->lifetime.smoke_test
+                && MessageBoxW(
+                       window,
+                       UiText(UiStringId::SavedSelectionDeleteConfirm),
+                       UiText(UiStringId::SavedSelectionDelete),
+                       MB_OKCANCEL | MB_ICONWARNING)
+                    != IDOK) {
+                return 0;
+            }
+            if (status == INKPOD_STATUS_OK) {
+                const std::uint64_t saved_selection_id = choices[selected_index].id;
+                status = state->engine->Invoke(
+                    [saved_selection_id](InkpodCore* core) {
+                        InkpodDispatchResult result{};
+                        result.struct_size = sizeof(result);
+                        return inkpod_core_saved_selection_delete(
+                            core, saved_selection_id, &result);
+                    },
+                    true,
+                    true);
+            }
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, UiText(UiStringId::Text0983));
+            } else {
+                (void)RefreshSavedSelectionAvailability(*state);
             }
             UpdateMenuState(*state);
             return 0;
@@ -20250,20 +19761,6 @@ std::optional<LRESULT> RouteCanvasMessage(
                     }
                     return status == INKPOD_STATUS_OK ? 1 : 0;
                 }
-                if (state->Workspace().tools.active_tool
-                    == kInteractionVanishingPoint) {
-                    const InkpodStatus status = HandleVanishingPointCanvasEvent(
-                        *state, *input);
-                    if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
-                        ShowCoreError(*state, window, UiText(UiStringId::Text0769));
-                    }
-                    if (input->kind == inkpod::renderer::CanvasStrokeEventKind::End
-                        || input->kind
-                            == inkpod::renderer::CanvasStrokeEventKind::Cancel) {
-                        UpdateMenuState(*state);
-                    }
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
                 if (state->ActiveView().presentation.guide_drag_active) {
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Cancel) {
                         state->ActiveView().presentation.guide_drag_active = false;
@@ -20610,7 +20107,7 @@ std::optional<LRESULT> RouteCanvasMessage(
                         CancelSelectionGeometryPreview(
                             state->Workspace().tools, state->Workspace().windows.canvas);
                         if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
-                            ShowCoreError(*state, window, UiText(UiStringId::LayerSelection));
+                            ShowCoreError(*state, window, UiText(UiStringId::ToolSelection));
                         }
                         UpdateMenuState(*state);
                     }

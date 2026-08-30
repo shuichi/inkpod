@@ -17,7 +17,7 @@ from typing import Any
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 LANGUAGE_PATH = ROOT / "schemas" / "inkscript" / "language-v2.json"
-CATALOG_PATH = ROOT / "schemas" / "inkscript" / "catalog-v4.json"
+CATALOG_PATH = ROOT / "schemas" / "inkscript" / "catalog-v5.json"
 REFERENCE_PATH = ROOT / "docs" / "inkscript-command-reference.md"
 
 
@@ -87,7 +87,7 @@ def render() -> str:
         language["file_version"] != catalog["file_version"]
         or language["procedure_catalog_version"] != catalog["catalog_version"]
         or language["required_replay_epoch"] != catalog["required_replay_epoch"]
-        or len(catalog["entries"]) != 75
+        or len(catalog["entries"]) != 73
     ):
         raise RuntimeError("language/catalog exact-current versions disagree")
 

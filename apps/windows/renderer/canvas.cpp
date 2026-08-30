@@ -1,7 +1,6 @@
 #include "canvas.h"
 
 #include <d2d1_1.h>
-#include <d2d1effects.h>
 #include <d3d11.h>
 #include <dwrite.h>
 #include <dxgi1_3.h>
@@ -39,7 +38,6 @@ constexpr wchar_t kCanvasClassName[] = L"InkpodCanvasWindow";
 constexpr std::uint64_t kMaximumSnapshotTiles = 262144U;
 constexpr std::uint64_t kMaximumSnapshotGuides = 4096U;
 constexpr std::uint64_t kMaximumRenderPasses = 1048576U;
-constexpr std::uint64_t kMaximumAdjustmentLuts = 4096U;
 constexpr std::uint64_t kMaximumOverlayLines = 8192U;
 constexpr std::size_t kMaximumPointerHistory = 256U;
 constexpr std::size_t kMaximumPendingCanvasInput = 64U;
@@ -116,21 +114,17 @@ std::uint64_t EstimateSnapshotPayloadBytes(InkpodSnapshot* snapshot) noexcept {
     overlay.struct_size = sizeof(overlay);
     InkpodSnapshotShootingFrameView shooting_frames{};
     shooting_frames.struct_size = sizeof(shooting_frames);
-    InkpodSnapshotVanishingPointView vanishing_points{};
-    vanishing_points.struct_size = sizeof(vanishing_points);
     InkpodSnapshotRenderPlan plan{};
     plan.struct_size = sizeof(plan);
     if (inkpod_snapshot_get_view(snapshot, &view) != INKPOD_STATUS_OK
         || inkpod_snapshot_get_overlay(snapshot, &overlay) != INKPOD_STATUS_OK
         || inkpod_snapshot_get_shooting_frames(snapshot, &shooting_frames) != INKPOD_STATUS_OK
-        || inkpod_snapshot_get_vanishing_points(snapshot, &vanishing_points) != INKPOD_STATUS_OK
         || inkpod_snapshot_get_render_plan(snapshot, &plan) != INKPOD_STATUS_OK) {
         return 0U;
     }
     std::uint64_t bytes = sizeof(InkpodSnapshotView) + sizeof(InkpodSnapshotTransform)
         + sizeof(InkpodSnapshotOverlay)
         + sizeof(InkpodSnapshotShootingFrameView)
-        + sizeof(InkpodSnapshotVanishingPointView)
         + sizeof(InkpodSnapshotRenderPlan);
     bytes = SaturatingAdd(bytes, SaturatingProduct(
         view.tile_count, view.tile_stride_bytes));
@@ -152,14 +146,7 @@ std::uint64_t EstimateSnapshotPayloadBytes(InkpodSnapshot* snapshot) noexcept {
     bytes = SaturatingAdd(bytes, SaturatingProduct(
         shooting_frames.frame_count, shooting_frames.frame_stride_bytes));
     bytes = SaturatingAdd(bytes, SaturatingProduct(
-        vanishing_points.point_count, vanishing_points.point_stride_bytes));
-    bytes = SaturatingAdd(bytes, SaturatingProduct(
-        vanishing_points.radial_guide_count,
-        vanishing_points.radial_guide_stride_bytes));
-    bytes = SaturatingAdd(bytes, SaturatingProduct(
         plan.pass_count, plan.pass_stride_bytes));
-    bytes = SaturatingAdd(bytes, SaturatingProduct(
-        plan.adjustment_lut_count, plan.adjustment_lut_stride_bytes));
     return bytes;
 }
 
@@ -376,7 +363,7 @@ public:
         }
 
         // The waitable object grants capacity for a frame, not for a draw
-        // attempt. A failed adjustment/draw/readback must retain that permit
+        // attempt. A failed draw/readback must retain that permit
         // until Present succeeds; waiting twice can consume the next signal
         // without ever having submitted the preceding frame.
         const HRESULT readiness = AcquireFrameLatencyPermit(wait_milliseconds, interrupt_event);
@@ -390,14 +377,6 @@ public:
                 || last_presented_presentation_epoch_ != snapshot_presentation_epoch_);
         const std::uint64_t frame_ready_qpc = record_first_present
             ? PerformanceCounterTicks() : 0U;
-
-        ComPtr<ID2D1Image> adjusted_content;
-        if (HasAdjustmentPass()) {
-            const HRESULT adjusted_result = BuildAdjustedContent(adjusted_content);
-            if (FAILED(adjusted_result)) {
-                return adjusted_result;
-            }
-        }
 
         d2d_context_->BeginDraw();
         d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
@@ -462,12 +441,7 @@ public:
                     }
                 }
             }
-            if (adjusted_content) {
-                d2d_context_->DrawImage(adjusted_content.Get());
-                result = S_OK;
-            } else {
-                result = DrawOrderedContent();
-            }
+            result = DrawOrderedContent();
             if (FAILED(result)) {
                 d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
                 d2d_context_->EndDraw();
@@ -480,12 +454,6 @@ public:
                 return result;
             }
             result = DrawShootingFrame();
-            if (FAILED(result)) {
-                d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
-                d2d_context_->EndDraw();
-                return result;
-            }
-            result = DrawVanishingPoints();
             if (FAILED(result)) {
                 d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
                 d2d_context_->EndDraw();
@@ -567,8 +535,6 @@ public:
         overlay.struct_size = sizeof(overlay);
         InkpodSnapshotShootingFrameView shooting_frames{};
         shooting_frames.struct_size = sizeof(shooting_frames);
-        InkpodSnapshotVanishingPointView vanishing_points{};
-        vanishing_points.struct_size = sizeof(vanishing_points);
         InkpodSnapshotRenderPlan render_plan{};
         render_plan.struct_size = sizeof(render_plan);
         InkpodSnapshotSourceIdentity source_identity{};
@@ -583,25 +549,20 @@ public:
         const InkpodStatus shooting_frame_status = overlay_status == INKPOD_STATUS_OK
             ? inkpod_snapshot_get_shooting_frames(snapshot, &shooting_frames)
             : overlay_status;
-        const InkpodStatus vanishing_point_status = shooting_frame_status == INKPOD_STATUS_OK
-            ? inkpod_snapshot_get_vanishing_points(snapshot, &vanishing_points)
-            : shooting_frame_status;
-        const InkpodStatus render_plan_status = vanishing_point_status == INKPOD_STATUS_OK
+        const InkpodStatus render_plan_status = shooting_frame_status == INKPOD_STATUS_OK
             ? inkpod_snapshot_get_render_plan(snapshot, &render_plan)
-            : vanishing_point_status;
+            : shooting_frame_status;
         const InkpodStatus source_identity_status = render_plan_status == INKPOD_STATUS_OK
             ? inkpod_snapshot_get_source_identity(snapshot, &source_identity)
             : render_plan_status;
         if (view_status != INKPOD_STATUS_OK || transform_status != INKPOD_STATUS_OK
             || overlay_status != INKPOD_STATUS_OK
             || shooting_frame_status != INKPOD_STATUS_OK
-            || vanishing_point_status != INKPOD_STATUS_OK
             || render_plan_status != INKPOD_STATUS_OK
             || source_identity_status != INKPOD_STATUS_OK
             || !ValidateSourceIdentity(source_identity)
             || !ValidateOverlay(overlay)
             || !ValidateShootingFrames(shooting_frames)
-            || !ValidateVanishingPoints(vanishing_points)
             || !ValidateRenderPlan(render_plan, view)) {
             inkpod_snapshot_release(&snapshot);
             return E_INVALIDARG;
@@ -630,7 +591,6 @@ public:
         transform_ = transform;
         overlay_ = overlay;
         shooting_frames_ = shooting_frames;
-        vanishing_points_ = vanishing_points;
         render_plan_ = render_plan;
         retained_snapshot_bytes_ = EstimateSnapshotPayloadBytes(snapshot);
         return PrepareTileCache();
@@ -731,7 +691,6 @@ public:
         transform_ = {};
         overlay_ = {};
         shooting_frames_ = {};
-        vanishing_points_ = {};
         floating_preview_ = {};
         geometry_preview_ = {};
         render_plan_ = {};
@@ -1216,61 +1175,14 @@ private:
             && frame.anchor <= INKPOD_SHOOTING_FRAME_ANCHOR_BOTTOM_RIGHT;
     }
 
-    static bool ValidateVanishingPoints(
-        const InkpodSnapshotVanishingPointView& view) noexcept {
-        if (view.abi_version != INKPOD_ABI_VERSION || view.feature_flags != 0U
-            || view.point_count > 64U || view.radial_guide_count > 16384U
-            || view.point_stride_bytes < sizeof(InkpodVanishingPointInfo)
-            || view.point_stride_bytes % alignof(InkpodVanishingPointInfo) != 0U
-            || view.radial_guide_stride_bytes < sizeof(InkpodSnapshotRadialGuide)
-            || view.radial_guide_stride_bytes % alignof(InkpodSnapshotRadialGuide) != 0U
-            || (view.point_count != 0U && view.points == nullptr)
-            || (view.radial_guide_count != 0U && view.radial_guides == nullptr)) {
-            return false;
-        }
-        const auto* point_bytes = reinterpret_cast<const std::byte*>(view.points);
-        for (std::uint64_t index = 0U; index < view.point_count; ++index) {
-            const auto* point = reinterpret_cast<const InkpodVanishingPointInfo*>(
-                point_bytes + static_cast<std::size_t>(index * view.point_stride_bytes));
-            if (point->struct_size < sizeof(InkpodVanishingPointInfo)
-                || point->struct_size > view.point_stride_bytes
-                || point->feature_flags != 0U || point->layer_id == 0U
-                || point->interval_milli_degrees < 1000U
-                || point->interval_milli_degrees > 180000U
-                || point->angle_milli_degrees >= 180000U
-                || point->opacity_milli > 1000U || point->visible > 1U
-                || point->reserved != 0U) {
-                return false;
-            }
-        }
-        const auto* guide_bytes = reinterpret_cast<const std::byte*>(view.radial_guides);
-        for (std::uint64_t index = 0U; index < view.radial_guide_count; ++index) {
-            const auto* guide = reinterpret_cast<const InkpodSnapshotRadialGuide*>(
-                guide_bytes + static_cast<std::size_t>(
-                    index * view.radial_guide_stride_bytes));
-            if (guide->struct_size < sizeof(InkpodSnapshotRadialGuide)
-                || guide->struct_size > view.radial_guide_stride_bytes
-                || guide->feature_flags != 0U
-                || guide->angle_milli_degrees >= 180000U
-                || guide->opacity_milli > 1000U || guide->reserved != 0U) {
-                return false;
-            }
-        }
-        return true;
-    }
-
     static bool ValidateRenderPlan(
         const InkpodSnapshotRenderPlan& plan,
         const InkpodSnapshotView& view) noexcept {
-        constexpr std::uint64_t adjustment_lut_bytes = 3U * 256U;
         if (plan.abi_version != INKPOD_ABI_VERSION || plan.feature_flags != 0U
             || plan.pass_count > kMaximumRenderPasses
-            || plan.adjustment_lut_count > kMaximumAdjustmentLuts
             || plan.pass_stride_bytes < sizeof(InkpodSnapshotRenderPass)
             || plan.pass_stride_bytes % alignof(InkpodSnapshotRenderPass) != 0U
-            || plan.adjustment_lut_stride_bytes != adjustment_lut_bytes
             || (plan.pass_count != 0U && plan.passes == nullptr)
-            || (plan.adjustment_lut_count != 0U && plan.adjustment_luts_rgb8 == nullptr)
             || (plan.passes != nullptr
                 && reinterpret_cast<std::uintptr_t>(plan.passes)
                     % alignof(InkpodSnapshotRenderPass) != 0U)
@@ -1318,13 +1230,6 @@ private:
                             pass->first_item, pass->item_count, view.tile_count)
                         || (active_layer != 0U && pass->layer_id != active_layer)
                         || (active_layer == 0U && pass->layer_id != 0U)) {
-                        return false;
-                    }
-                    break;
-                case INKPOD_RENDER_PASS_ADJUSTMENT:
-                    if (active_layer != 0U || pass->layer_id == 0U || pass->plane_id != 0U
-                        || pass->opacity_milli != 1000U || pass->item_count != 1U
-                        || !range_is_valid(pass->first_item, 1U, plan.adjustment_lut_count)) {
                         return false;
                     }
                     break;
@@ -1409,63 +1314,6 @@ private:
         return S_OK;
     }
 
-    HRESULT DrawVanishingPoints() noexcept {
-        if (vanishing_points_.point_count == 0U
-            && vanishing_points_.radial_guide_count == 0U) {
-            return S_OK;
-        }
-        ComPtr<ID2D1SolidColorBrush> brush;
-        HRESULT result = d2d_context_->CreateSolidColorBrush(
-            D2D1::ColorF(1.0F, 1.0F, 1.0F, 1.0F), &brush);
-        if (FAILED(result)) {
-            return result;
-        }
-        const float width = static_cast<float>(std::max(1.0, 1.0 / transform_.zoom));
-        const auto* guide_bytes = reinterpret_cast<const std::byte*>(
-            vanishing_points_.radial_guides);
-        for (std::uint64_t index = 0U;
-             index < vanishing_points_.radial_guide_count; ++index) {
-            const auto* guide = reinterpret_cast<const InkpodSnapshotRadialGuide*>(
-                guide_bytes + static_cast<std::size_t>(
-                    index * vanishing_points_.radial_guide_stride_bytes));
-            D2D1_COLOR_F color = CanvasColor(guide->color);
-            color.a *= static_cast<float>(guide->opacity_milli) / 1000.0F;
-            brush->SetColor(color);
-            d2d_context_->DrawLine(
-                D2D1::Point2F(
-                    static_cast<float>(guide->start_x_milli) / 1000.0F,
-                    static_cast<float>(guide->start_y_milli) / 1000.0F),
-                D2D1::Point2F(
-                    static_cast<float>(guide->end_x_milli) / 1000.0F,
-                    static_cast<float>(guide->end_y_milli) / 1000.0F),
-                brush.Get(), width);
-        }
-        const auto* point_bytes = reinterpret_cast<const std::byte*>(
-            vanishing_points_.points);
-        const float radius = static_cast<float>(std::max(3.0, 5.0 / transform_.zoom));
-        for (std::uint64_t index = 0U; index < vanishing_points_.point_count; ++index) {
-            const auto* point = reinterpret_cast<const InkpodVanishingPointInfo*>(
-                point_bytes + static_cast<std::size_t>(
-                    index * vanishing_points_.point_stride_bytes));
-            D2D1_COLOR_F color = CanvasColor(point->color);
-            color.a *= static_cast<float>(point->opacity_milli) / 1000.0F;
-            brush->SetColor(color);
-            const D2D1_POINT_2F center = D2D1::Point2F(
-                static_cast<float>(point->x_milli) / 1000.0F,
-                static_cast<float>(point->y_milli) / 1000.0F);
-            d2d_context_->DrawLine(
-                D2D1::Point2F(center.x - radius, center.y),
-                D2D1::Point2F(center.x + radius, center.y), brush.Get(), width);
-            d2d_context_->DrawLine(
-                D2D1::Point2F(center.x, center.y - radius),
-                D2D1::Point2F(center.x, center.y + radius), brush.Get(), width);
-            d2d_context_->DrawEllipse(
-                D2D1::Ellipse(center, radius, radius), brush.Get(), width);
-        }
-        return S_OK;
-    }
-
-
     HRESULT DrawRenderPass(
         const InkpodSnapshotRenderPass& pass,
         bool& layer_active) noexcept {
@@ -1515,23 +1363,9 @@ private:
                 }
                 return S_OK;
             }
-            case INKPOD_RENDER_PASS_ADJUSTMENT:
-                return E_UNEXPECTED;
             default:
                 return E_INVALIDARG;
         }
-    }
-
-    [[nodiscard]] bool HasAdjustmentPass() const noexcept {
-        const auto* pass_bytes = reinterpret_cast<const std::byte*>(render_plan_.passes);
-        for (std::uint64_t index = 0; index < render_plan_.pass_count; ++index) {
-            const auto* pass = reinterpret_cast<const InkpodSnapshotRenderPass*>(
-                pass_bytes + static_cast<std::size_t>(index * render_plan_.pass_stride_bytes));
-            if (pass->kind == INKPOD_RENDER_PASS_ADJUSTMENT) {
-                return true;
-            }
-        }
-        return false;
     }
 
     HRESULT DrawOrderedContent() noexcept {
@@ -1551,150 +1385,6 @@ private:
         }
         return layer_active ? E_INVALIDARG : S_OK;
     }
-
-    HRESULT SetAdjustmentEffectTables(
-        ID2D1Effect& effect,
-        const InkpodSnapshotRenderPass& pass) const noexcept {
-        const auto* lut = render_plan_.adjustment_luts_rgb8
-            + static_cast<std::size_t>(
-                pass.first_item * render_plan_.adjustment_lut_stride_bytes);
-        std::array<std::array<float, 256>, 3> tables{};
-        for (std::size_t channel = 0; channel < tables.size(); ++channel) {
-            for (std::size_t value = 0; value < tables[channel].size(); ++value) {
-                tables[channel][value] = static_cast<float>(lut[channel * 256U + value]) / 255.0F;
-            }
-        }
-        constexpr std::array<D2D1_TABLETRANSFER_PROP, 3> properties{
-            D2D1_TABLETRANSFER_PROP_RED_TABLE,
-            D2D1_TABLETRANSFER_PROP_GREEN_TABLE,
-            D2D1_TABLETRANSFER_PROP_BLUE_TABLE};
-        for (std::size_t channel = 0; channel < tables.size(); ++channel) {
-            const HRESULT result = effect.SetValue(
-                properties[channel],
-                D2D1_PROPERTY_TYPE_BLOB,
-                reinterpret_cast<const BYTE*>(tables[channel].data()),
-                static_cast<UINT32>(sizeof(tables[channel])));
-            if (FAILED(result)) {
-                return result;
-            }
-        }
-        HRESULT result = effect.SetValue(D2D1_TABLETRANSFER_PROP_RED_DISABLE, FALSE);
-        if (SUCCEEDED(result)) {
-            result = effect.SetValue(D2D1_TABLETRANSFER_PROP_GREEN_DISABLE, FALSE);
-        }
-        if (SUCCEEDED(result)) {
-            result = effect.SetValue(D2D1_TABLETRANSFER_PROP_BLUE_DISABLE, FALSE);
-        }
-        if (SUCCEEDED(result)) {
-            result = effect.SetValue(D2D1_TABLETRANSFER_PROP_ALPHA_DISABLE, TRUE);
-        }
-        if (SUCCEEDED(result)) {
-            result = effect.SetValue(D2D1_TABLETRANSFER_PROP_CLAMP_OUTPUT, TRUE);
-        }
-        return result;
-    }
-
-    HRESULT BuildAdjustedContent(ComPtr<ID2D1Image>& output) noexcept {
-        output.Reset();
-        ComPtr<ID2D1Image> original_target;
-        d2d_context_->GetTarget(&original_target);
-        ComPtr<ID2D1SolidColorBrush> brush;
-        HRESULT result = d2d_context_->CreateSolidColorBrush(
-            D2D1::ColorF(D2D1::ColorF::Black), &brush);
-        if (FAILED(result)) {
-            return result;
-        }
-        ComPtr<ID2D1CommandList> current;
-        result = d2d_context_->CreateCommandList(&current);
-        if (FAILED(result)) {
-            return result;
-        }
-        d2d_context_->SetTarget(current.Get());
-        d2d_context_->BeginDraw();
-        bool recording = true;
-        d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
-        if ((snapshot_view_.feature_flags & INKPOD_SNAPSHOT_FEATURE_SOLID_WHITE_BASE) != 0U) {
-            brush->SetColor(D2D1::ColorF(D2D1::ColorF::White));
-            d2d_context_->FillRectangle(
-                D2D1::RectF(
-                    0.0F,
-                    0.0F,
-                    static_cast<float>(transform_.document_width),
-                    static_cast<float>(transform_.document_height)),
-                brush.Get());
-        }
-        bool layer_active{};
-        const auto* pass_bytes = reinterpret_cast<const std::byte*>(render_plan_.passes);
-        for (std::uint64_t index = 0; index < render_plan_.pass_count; ++index) {
-            const auto* pass = reinterpret_cast<const InkpodSnapshotRenderPass*>(
-                pass_bytes + static_cast<std::size_t>(index * render_plan_.pass_stride_bytes));
-            if (pass->kind != INKPOD_RENDER_PASS_ADJUSTMENT) {
-                result = DrawRenderPass(*pass, layer_active);
-                if (FAILED(result)) {
-                    break;
-                }
-                continue;
-            }
-            if (layer_active) {
-                result = E_INVALIDARG;
-                break;
-            }
-            result = d2d_context_->EndDraw();
-            recording = false;
-            if (SUCCEEDED(result)) {
-                result = current->Close();
-            }
-            ComPtr<ID2D1Effect> effect;
-            if (SUCCEEDED(result)) {
-                result = d2d_context_->CreateEffect(CLSID_D2D1TableTransfer, &effect);
-            }
-            if (SUCCEEDED(result)) {
-                effect->SetInput(0U, current.Get());
-                result = SetAdjustmentEffectTables(*effect.Get(), *pass);
-            }
-            ComPtr<ID2D1CommandList> next;
-            if (SUCCEEDED(result)) {
-                result = d2d_context_->CreateCommandList(&next);
-            }
-            if (FAILED(result)) {
-                break;
-            }
-            d2d_context_->SetTarget(next.Get());
-            d2d_context_->BeginDraw();
-            recording = true;
-            d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
-            d2d_context_->DrawImage(effect.Get());
-            current = next;
-        }
-        if (SUCCEEDED(result)) {
-            if (layer_active) {
-                d2d_context_->PopLayer();
-                result = E_INVALIDARG;
-            }
-            const HRESULT end_result = recording ? d2d_context_->EndDraw() : S_OK;
-            recording = false;
-            if (SUCCEEDED(result)) {
-                result = end_result;
-            }
-            if (SUCCEEDED(result)) {
-                result = current->Close();
-            }
-        } else {
-            if (layer_active && recording) {
-                d2d_context_->PopLayer();
-            }
-            if (recording) {
-                d2d_context_->EndDraw();
-            }
-        }
-        d2d_context_->SetTarget(original_target.Get());
-        d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
-        if (SUCCEEDED(result)) {
-            output = current;
-        }
-        return result;
-    }
-
 
     HRESULT DrawOverlays() noexcept {
         ComPtr<ID2D1SolidColorBrush> brush;
@@ -2251,7 +1941,6 @@ private:
     InkpodSnapshotTransform transform_{};
     InkpodSnapshotOverlay overlay_{};
     InkpodSnapshotShootingFrameView shooting_frames_{};
-    InkpodSnapshotVanishingPointView vanishing_points_{};
     InkpodSnapshotRenderPlan render_plan_{};
     CanvasFloatingPreview floating_preview_{};
     CanvasGeometryPreview geometry_preview_{};

@@ -31,7 +31,7 @@ struct CommandState {
     bool checked{};
 };
 
-inline constexpr std::size_t kProductionCommandStateCount = 329U;
+inline constexpr std::size_t kProductionCommandStateCount = 321U;
 using CommandStateSet = std::array<CommandState, kProductionCommandStateCount>;
 
 struct DocumentCommandStateInput {
@@ -40,8 +40,6 @@ struct DocumentCommandStateInput {
     bool dirty{};
     bool shooting_frame_present{};
     bool shooting_frame_handle_edit{};
-    bool vanishing_point_present{};
-    bool vanishing_point_handle_edit{};
     std::size_t recent_document_count{};
 };
 
@@ -56,9 +54,6 @@ struct EditCommandStateInput {
 
 struct EffectsCommandStateInput {
     bool color_plane_active{};
-    bool adjustment_available{};
-    bool multiple_adjustments{};
-    bool adjustment_visible{true};
     bool alpha_view{};
 };
 
@@ -84,7 +79,7 @@ struct SelectionViewCommandStateInput {
     bool snap_guides{};
     bool snap_grid{};
     bool transparent_visible{true};
-    bool selection_layer_available{};
+    bool saved_selection_available{};
     std::size_t document_count{};
     std::size_t view_count{};
     std::size_t editor_group_count{1U};

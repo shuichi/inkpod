@@ -9,7 +9,7 @@ pub(crate) enum InkScriptEntityKind {
     Plane,
     Guide,
     ShootingFrame,
-    VanishingPoint,
+    SavedSelectionMask,
     LightTableSet,
     LightTableItem,
 }
@@ -21,7 +21,7 @@ impl InkScriptEntityKind {
             Self::Plane => "plane",
             Self::Guide => "guide",
             Self::ShootingFrame => "shooting_frame",
-            Self::VanishingPoint => "vanishing_point",
+            Self::SavedSelectionMask => "saved_selection_mask",
             Self::LightTableSet => "light_table_set",
             Self::LightTableItem => "light_table_item",
         }
@@ -33,7 +33,7 @@ impl InkScriptEntityKind {
             "plane" | "plane_ref" => Some(Self::Plane),
             "guide" | "guide_ref" => Some(Self::Guide),
             "shooting_frame" | "shooting_frame_ref" => Some(Self::ShootingFrame),
-            "vanishing_point" | "vanishing_point_ref" => Some(Self::VanishingPoint),
+            "saved_selection_mask" | "saved_selection_mask_ref" => Some(Self::SavedSelectionMask),
             "light_table_set" | "light_table_set_ref" => Some(Self::LightTableSet),
             "light_table_item" | "light_table_item_ref" => Some(Self::LightTableItem),
             _ => None,

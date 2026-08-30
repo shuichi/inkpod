@@ -23,7 +23,6 @@ fn cut_defaults() -> CutDefaults {
         safe_frame_ratio_milli: 900,
         maximum_close_ratio_milli: 500,
         anchor: FrameAnchor::Center,
-        initial_layer_kind: LayerKind::BinaryColoring,
         pixel_format: PixelFormat::StraightRgba8,
     }
 }

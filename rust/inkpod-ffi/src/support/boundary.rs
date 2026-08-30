@@ -41,7 +41,6 @@ pub(crate) fn snapshot_handle(snapshot: RenderSnapshot) -> Box<InkpodSnapshot> {
             kind: match pass.kind() {
                 RenderPassKind::LayerBegin => INKPOD_RENDER_PASS_LAYER_BEGIN,
                 RenderPassKind::RasterTiles => INKPOD_RENDER_PASS_RASTER_TILES,
-                RenderPassKind::Adjustment => INKPOD_RENDER_PASS_ADJUSTMENT,
                 RenderPassKind::LayerEnd => INKPOD_RENDER_PASS_LAYER_END,
             },
             layer_id: pass.layer_id(),
@@ -52,49 +51,17 @@ pub(crate) fn snapshot_handle(snapshot: RenderSnapshot) -> Box<InkpodSnapshot> {
             item_count: pass.item_count(),
         })
         .collect();
-    let adjustment_luts_rgb8 = snapshot
-        .adjustment_luts()
-        .iter()
-        .flat_map(|lut| lut.channels().iter().flatten().copied())
-        .collect();
     let shooting_frames = snapshot
         .shooting_frames()
         .iter()
         .filter_map(|frame| shooting_frame_info_record(*frame).ok())
-        .collect();
-    let vanishing_points = snapshot
-        .vanishing_points()
-        .iter()
-        .copied()
-        .map(vanishing_point_info_record)
-        .collect();
-    let radial_guides = snapshot
-        .radial_guides()
-        .iter()
-        .map(|guide| InkpodSnapshotRadialGuide {
-            struct_size: size_of::<InkpodSnapshotRadialGuide>() as u32,
-            angle_milli_degrees: guide.angle_milli_degrees,
-            feature_flags: INKPOD_FEATURE_NONE,
-            point_id: guide.point_id,
-            start_x_milli: guide.start_x_milli,
-            start_y_milli: guide.start_y_milli,
-            end_x_milli: guide.end_x_milli,
-            end_y_milli: guide.end_y_milli,
-            opacity_milli: guide.opacity_milli,
-            reserved: 0,
-            color: color_value_record(guide.color)
-                .expect("validated radial-guide color must be RGBA"),
-        })
         .collect();
     Box::new(InkpodSnapshot {
         snapshot,
         tiles,
         guides,
         render_passes,
-        adjustment_luts_rgb8,
         shooting_frames,
-        vanishing_points,
-        radial_guides,
     })
 }
 

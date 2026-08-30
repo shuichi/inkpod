@@ -5,8 +5,8 @@ use super::inkscript_reference::{
     InkScriptEntityKind, InkScriptReferenceError, InkScriptRuntimeReferences,
 };
 use crate::{
-    DocumentResize, LayerKind, MAX_FILL_PIXELS, MirrorAxis, PixelFormat, PlaneType, PrimitiveId,
-    ResizeAnchor, RotateDirection,
+    DocumentResize, MAX_FILL_PIXELS, MirrorAxis, PixelFormat, PrimitiveId, ResizeAnchor,
+    RotateDirection,
 };
 use inkpod_format::{
     InkScriptCommandSchema, InkScriptEnumSchema, InkScriptFieldSchema, InkScriptRecordSchema,
@@ -63,12 +63,7 @@ const SET_PLANE_PROPERTIES_FIELDS: &[InkScriptFieldSchema] = &[
 ];
 const CONVERT_PLANE_FIELDS: &[InkScriptFieldSchema] = &[
     InkScriptFieldSchema::required("plane_id", "plane_ref", 0),
-    InkScriptFieldSchema::required("destination_kind", "plane_kind", 1),
-    InkScriptFieldSchema::required("destination_format", "pixel_format", 2),
-];
-const CONVERT_LAYER_FIELDS: &[InkScriptFieldSchema] = &[
-    InkScriptFieldSchema::required("layer_id", "layer_ref", 0),
-    InkScriptFieldSchema::required("destination", "layer_kind", 1),
+    InkScriptFieldSchema::required("destination_format", "pixel_format", 1),
 ];
 const MIRROR_DOCUMENT_FIELDS: &[InkScriptFieldSchema] =
     &[InkScriptFieldSchema::required("axis", "mirror_axis", 0)];
@@ -87,7 +82,6 @@ pub(crate) const LEGACY_SIMPLE_COMMANDS: &[InkScriptCommandSchema] = &[
     InkScriptCommandSchema::new("set_layer_properties", SET_LAYER_PROPERTIES_FIELDS),
     InkScriptCommandSchema::new("set_plane_properties", SET_PLANE_PROPERTIES_FIELDS),
     InkScriptCommandSchema::new("convert_plane", CONVERT_PLANE_FIELDS),
-    InkScriptCommandSchema::new("convert_layer", CONVERT_LAYER_FIELDS),
     InkScriptCommandSchema::new("mirror_document", MIRROR_DOCUMENT_FIELDS),
     InkScriptCommandSchema::new("rotate_document", ROTATE_DOCUMENT_FIELDS),
     InkScriptCommandSchema::new("resize_document", RESIZE_DOCUMENT_FIELDS),
@@ -153,22 +147,18 @@ const LEGACY_SIMPLE_CATALOG: &[LegacySimpleCatalogEntry] = &[
         Some("plane_property"),
         true
     ),
-    legacy_simple_entry!(
-        "convert_plane",
-        PrimitiveId::CONVERT_PLANE,
-        RequiresBinding,
-        LegacySimpleWorkFormula::Constant(MAX_FILL_PIXELS),
-        Some("plane_conversion"),
-        true
-    ),
-    legacy_simple_entry!(
-        "convert_layer",
-        PrimitiveId::CONVERT_LAYER,
-        RequiresBinding,
-        LegacySimpleWorkFormula::Constant(MAX_FILL_PIXELS),
-        None,
-        true
-    ),
+    LegacySimpleCatalogEntry {
+        command: "convert_plane",
+        primitive_id: PrimitiveId::CONVERT_PLANE,
+        primitive_schema_version: 3,
+        semantics_revision: 3,
+        portability: LegacySimplePortability::RequiresBinding,
+        work: LegacySimpleWorkFormula::Constant(MAX_FILL_PIXELS),
+        legacy_projection: Some("plane_conversion"),
+        allow_skip_dependents: true,
+        result_count: 0,
+        asset_count: 0,
+    },
     legacy_simple_entry!(
         "mirror_document",
         PrimitiveId::MIRROR_DOCUMENT,
@@ -233,7 +223,7 @@ impl LegacySimpleScriptStep {
     ) -> Result<Self, LegacySimpleAdapterError> {
         let (command, binding, arguments) = lift_arguments(invocation)?;
         let mut source = String::from(
-            "inkscript_fragment 2;\nrequires { procedure_catalog = 4; replay_epoch = 25; }\n",
+            "inkscript_fragment 2;\nrequires { procedure_catalog = 5; replay_epoch = 27; }\n",
         );
         let mut bindings = InkScriptRuntimeReferences::default();
         if let Some((entity, persistent_id)) = binding {
@@ -247,7 +237,7 @@ impl LegacySimpleScriptStep {
                     return Err(LegacySimpleAdapterError::UnsupportedPrimitive);
                 }
                 InkScriptEntityKind::ShootingFrame
-                | InkScriptEntityKind::VanishingPoint
+                | InkScriptEntityKind::SavedSelectionMask
                 | InkScriptEntityKind::LightTableSet
                 | InkScriptEntityKind::LightTableItem => {
                     return Err(LegacySimpleAdapterError::UnsupportedPrimitive);
@@ -332,16 +322,7 @@ impl LegacySimpleScriptStep {
                     &self.bindings,
                     InkScriptEntityKind::Plane,
                 )?,
-                destination_kind: plane_kind(field(arguments, "destination_kind")?)?,
                 destination_format: pixel_format(field(arguments, "destination_format")?)?,
-            }),
-            "convert_layer" => Ok(CanonicalInvocation::ConvertLayer {
-                layer_id: binding_id(
-                    field(arguments, "layer_id")?,
-                    &self.bindings,
-                    InkScriptEntityKind::Layer,
-                )?,
-                destination: layer_kind(field(arguments, "destination")?)?,
             }),
             "mirror_document" => Ok(CanonicalInvocation::MirrorDocument {
                 axis: mirror_axis(field(arguments, "axis")?)?,
@@ -439,26 +420,13 @@ pub(crate) fn lift_arguments(
         }
         CanonicalInvocation::ConvertPlane {
             plane_id,
-            destination_kind,
             destination_format,
         } => (
             "convert_plane",
             Some((InkScriptEntityKind::Plane, *plane_id)),
             format!(
-                "plane_id = $target; destination_kind = {}; destination_format = {};",
-                plane_kind_name(*destination_kind),
+                "plane_id = $target; destination_format = {};",
                 pixel_format_name(*destination_format)?
-            ),
-        ),
-        CanonicalInvocation::ConvertLayer {
-            layer_id,
-            destination,
-        } => (
-            "convert_layer",
-            Some((InkScriptEntityKind::Layer, *layer_id)),
-            format!(
-                "layer_id = $target; destination = {};",
-                layer_kind_name(*destination)
             ),
         ),
         CanonicalInvocation::MirrorDocument { axis } => (
@@ -596,16 +564,6 @@ fn resize_anchor(value: &InkScriptTypedValue) -> Result<ResizeAnchor, LegacySimp
     }
 }
 
-fn plane_kind(value: &InkScriptTypedValue) -> Result<PlaneType, LegacySimpleAdapterError> {
-    match enum_name(value, "plane_kind")? {
-        "main_line" => Ok(PlaneType::MainLine),
-        "color" => Ok(PlaneType::Color),
-        "raster" => Ok(PlaneType::Raster),
-        "selection" => Ok(PlaneType::Selection),
-        _ => Err(LegacySimpleAdapterError::InvalidValue),
-    }
-}
-
 fn pixel_format(value: &InkScriptTypedValue) -> Result<PixelFormat, LegacySimpleAdapterError> {
     match enum_name(value, "pixel_format")? {
         "mask8" => Ok(PixelFormat::BinaryMask8),
@@ -613,19 +571,6 @@ fn pixel_format(value: &InkScriptTypedValue) -> Result<PixelFormat, LegacySimple
         "gray16" => Ok(PixelFormat::Grayscale16),
         "rgba8" => Ok(PixelFormat::StraightRgba8),
         "rgba16" => Ok(PixelFormat::StraightRgba16),
-        _ => Err(LegacySimpleAdapterError::InvalidValue),
-    }
-}
-
-fn layer_kind(value: &InkScriptTypedValue) -> Result<LayerKind, LegacySimpleAdapterError> {
-    match enum_name(value, "layer_kind")? {
-        "binary_coloring" => Ok(LayerKind::BinaryColoring),
-        "grayscale_coloring" => Ok(LayerKind::GrayscaleColoring),
-        "raster" => Ok(LayerKind::Raster),
-        "selection" => Ok(LayerKind::Selection),
-        "frame" => Ok(LayerKind::Frame),
-        "vanishing_point" => Ok(LayerKind::VanishingPoint),
-        "adjustment" => Ok(LayerKind::Adjustment),
         _ => Err(LegacySimpleAdapterError::InvalidValue),
     }
 }
@@ -713,15 +658,6 @@ const fn resize_anchor_name(value: ResizeAnchor) -> &'static str {
     }
 }
 
-const fn plane_kind_name(value: PlaneType) -> &'static str {
-    match value {
-        PlaneType::MainLine => "main_line",
-        PlaneType::Color => "color",
-        PlaneType::Raster => "raster",
-        PlaneType::Selection => "selection",
-    }
-}
-
 fn pixel_format_name(value: PixelFormat) -> Result<&'static str, LegacySimpleAdapterError> {
     match value {
         PixelFormat::BinaryMask8 => Ok("mask8"),
@@ -733,23 +669,11 @@ fn pixel_format_name(value: PixelFormat) -> Result<&'static str, LegacySimpleAda
     }
 }
 
-const fn layer_kind_name(value: LayerKind) -> &'static str {
-    match value {
-        LayerKind::BinaryColoring => "binary_coloring",
-        LayerKind::GrayscaleColoring => "grayscale_coloring",
-        LayerKind::Raster => "raster",
-        LayerKind::Selection => "selection",
-        LayerKind::Frame => "frame",
-        LayerKind::VanishingPoint => "vanishing_point",
-        LayerKind::Adjustment => "adjustment",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::primitive::canonical_document_state;
-    use crate::{Core, CoreError, DEFAULT_DPI_MILLI};
+    use crate::{Core, CoreError, DEFAULT_DPI_MILLI, PlaneType};
 
     fn core() -> Core {
         let mut core = Core::new();
@@ -783,12 +707,7 @@ mod tests {
             },
             CanonicalInvocation::ConvertPlane {
                 plane_id: color_plane.id,
-                destination_kind: PlaneType::Color,
                 destination_format: PixelFormat::StraightRgba16,
-            },
-            CanonicalInvocation::ConvertLayer {
-                layer_id: layer.id,
-                destination: LayerKind::GrayscaleColoring,
             },
             CanonicalInvocation::MirrorDocument {
                 axis: MirrorAxis::Horizontal,
@@ -819,14 +738,28 @@ mod tests {
     fn exact_catalog_metadata_and_codec_cover_all_legacy_simple_primitives() {
         let core = core();
         let invocations = fixture_invocations(&core);
-        assert_eq!(LEGACY_SIMPLE_CATALOG.len(), 7);
+        assert_eq!(LEGACY_SIMPLE_CATALOG.len(), 6);
         for (invocation, metadata) in invocations.iter().zip(LEGACY_SIMPLE_CATALOG) {
             let step = LegacySimpleScriptStep::from_canonical(invocation).unwrap();
             assert_eq!(step.to_canonical().unwrap(), *invocation);
             assert_eq!(step.metadata().unwrap(), metadata);
             assert_eq!(metadata.primitive_id, invocation.primitive_id());
-            assert_eq!(metadata.primitive_schema_version, 2);
-            assert_eq!(metadata.semantics_revision, 2);
+            assert_eq!(
+                metadata.primitive_schema_version,
+                if metadata.command == "convert_plane" {
+                    3
+                } else {
+                    2
+                }
+            );
+            assert_eq!(
+                metadata.semantics_revision,
+                if metadata.command == "convert_plane" {
+                    3
+                } else {
+                    2
+                }
+            );
             assert_eq!(metadata.result_count, 0);
             assert_eq!(metadata.asset_count, 0);
             let work = step.work().unwrap();
@@ -847,7 +780,7 @@ mod tests {
 
     #[test]
     fn script_lowering_and_direct_execution_have_identical_state() {
-        for index in 0..7 {
+        for index in 0..6 {
             let mut direct = core();
             let mut scripted = core();
             let invocation = fixture_invocations(&direct).remove(index);
@@ -947,7 +880,7 @@ mod tests {
 
     #[test]
     fn unknown_field_type_enum_and_format_mismatch_are_rejected() {
-        let prefix = "inkscript_fragment 2; requires { procedure_catalog = 4; replay_epoch = 25; }";
+        let prefix = "inkscript_fragment 2; requires { procedure_catalog = 5; replay_epoch = 27; }";
         let unknown_field = format!(
             "{prefix} program {{ step \"Bad\" {{ enabled = true; invoke mirror_document {{ axis = horizontal; extra = true; }}; }} }}"
         );
@@ -993,8 +926,7 @@ mod tests {
             .id;
         let mismatch = CanonicalInvocation::ConvertPlane {
             plane_id,
-            destination_kind: PlaneType::MainLine,
-            destination_format: PixelFormat::StraightRgba8,
+            destination_format: PixelFormat::Grayscale8,
         };
         let step = LegacySimpleScriptStep::from_canonical(&mismatch).unwrap();
         let mut target = core();

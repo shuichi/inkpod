@@ -10,17 +10,22 @@ pub(in crate::batch) fn operation_to_file(
     let (kind, payload) = encode_operation_kind(&operation.kind)?;
     let targets = std::iter::once(&operation.target)
         .chain(operation.additional_targets.iter())
-        .map(|target| FileBatchTarget {
-            layer_id: target.layer_id.unwrap_or(0),
-            plane_id: target.plane_id.unwrap_or(0),
-            layer_kind: target.layer_kind.map_or(0, layer_kind_code),
-            plane_kind: target.plane_kind.map_or(0, plane_kind_code),
-            missing_policy: match target.missing_policy {
-                BatchMissingTargetPolicy::Skip => MISSING_SKIP,
-                BatchMissingTargetPolicy::Error => MISSING_ERROR,
-            },
+        .map(|target| {
+            Ok(FileBatchTarget {
+                layer_id: target.layer_id.unwrap_or(0),
+                plane_id: target.plane_id.unwrap_or(0),
+                plane_kind: target
+                    .plane_kind
+                    .map(plane_kind_code)
+                    .transpose()?
+                    .unwrap_or(0),
+                missing_policy: match target.missing_policy {
+                    BatchMissingTargetPolicy::Skip => MISSING_SKIP,
+                    BatchMissingTargetPolicy::Error => MISSING_ERROR,
+                },
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, CoreError>>()?;
     Ok(FileBatchOperation {
         version: operation.version,
         kind,
@@ -50,9 +55,6 @@ pub(in crate::batch) fn operation_from_file(
             Ok(BatchTargetSelector {
                 layer_id: (target.layer_id != 0).then_some(target.layer_id),
                 plane_id: (target.plane_id != 0).then_some(target.plane_id),
-                layer_kind: (target.layer_kind != 0)
-                    .then(|| parse_layer_kind(target.layer_kind))
-                    .transpose()?,
                 plane_kind: (target.plane_kind != 0)
                     .then(|| parse_plane_kind(target.plane_kind))
                     .transpose()?,

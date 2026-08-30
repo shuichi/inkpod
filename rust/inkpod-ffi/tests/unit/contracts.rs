@@ -173,170 +173,6 @@ fn shooting_frame_abi_validates_numeric_input_and_borrows_snapshot_records() {
     }
 }
 
-#[test]
-fn vanishing_point_abi_owns_query_records_and_borrows_snapshot_spans() {
-    let (mut core, initial) = create_core(64, 48, 0x5f21);
-    unsafe {
-        let (_, layer_id) = (*core)
-            .core
-            .create_layer(LayerKind::VanishingPoint, "Perspective")
-            .unwrap();
-        (*core)
-            .core
-            .apply_view(ViewCommand::ViewportResized {
-                viewport_width: 64.0,
-                viewport_height: 48.0,
-            })
-            .unwrap();
-        let base = queried_document_info(core);
-        assert!(base.document_revision > initial.document_revision);
-        let color = InkpodColorValue {
-            struct_size: size_of::<InkpodColorValue>() as u32,
-            depth: INKPOD_COLOR_DEPTH_16,
-            red: 1_000,
-            green: 20_000,
-            blue: 50_000,
-            alpha: u16::MAX,
-        };
-        let mut input = InkpodVanishingPointInput {
-            struct_size: size_of::<InkpodVanishingPointInput>() as u32,
-            visible: 1,
-            feature_flags: INKPOD_FEATURE_NONE,
-            layer_id,
-            x_milli: -20_000,
-            y_milli: 24_000,
-            interval_milli_degrees: 15_000,
-            angle_milli_degrees: 195_000,
-            opacity_milli: 750,
-            reserved: 0,
-            color,
-        };
-        let mut revision = 0;
-        let mut point_id = 0;
-        assert_eq!(
-            inkpod_core_vanishing_point_edit(
-                core,
-                base.document_revision,
-                INKPOD_VANISHING_POINT_EDIT_CREATE,
-                0,
-                &input,
-                &mut revision,
-                &mut point_id,
-            ),
-            INKPOD_STATUS_OK
-        );
-        assert_ne!(point_id, 0);
-
-        let mut count = 0;
-        assert_eq!(
-            inkpod_core_vanishing_points_copy(core, ptr::null_mut(), 0, 0, &mut count),
-            INKPOD_STATUS_BUFFER_TOO_SMALL
-        );
-        assert_eq!(count, 1);
-        let mut point = InkpodVanishingPointInfo::default();
-        assert_eq!(
-            inkpod_core_vanishing_points_copy(
-                core,
-                &mut point,
-                1,
-                size_of::<InkpodVanishingPointInfo>() as u64,
-                &mut count,
-            ),
-            INKPOD_STATUS_OK
-        );
-        assert_eq!(point.point_id, point_id);
-        assert_eq!(point.color.depth, INKPOD_COLOR_DEPTH_16);
-        assert_eq!(point.angle_milli_degrees, 15_000);
-
-        let stable = queried_document_info(core);
-        input.struct_size -= 1;
-        assert_eq!(
-            inkpod_core_vanishing_point_edit(
-                core,
-                stable.document_revision,
-                INKPOD_VANISHING_POINT_EDIT_UPDATE,
-                point_id,
-                &input,
-                &mut revision,
-                &mut point_id,
-            ),
-            INKPOD_STATUS_INCOMPATIBLE_ABI
-        );
-        input.struct_size = size_of::<InkpodVanishingPointInput>() as u32;
-        assert_eq!(
-            queried_document_info(core).document_revision,
-            stable.document_revision
-        );
-
-        input.x_milli = 96_000;
-        assert_eq!(
-            inkpod_core_vanishing_point_preview_begin(
-                core,
-                stable.document_revision,
-                INKPOD_VANISHING_POINT_EDIT_UPDATE,
-                point_id,
-                &input,
-            ),
-            INKPOD_STATUS_OK
-        );
-        input.y_milli = 30_000;
-        assert_eq!(
-            inkpod_core_vanishing_point_preview_update(core, &input),
-            INKPOD_STATUS_OK
-        );
-        let options = InkpodSnapshotOptions {
-            struct_size: size_of::<InkpodSnapshotOptions>() as u32,
-            reserved: 0,
-            feature_flags: INKPOD_FEATURE_NONE,
-        };
-        let mut snapshot = ptr::null_mut();
-        assert_eq!(
-            inkpod_core_build_snapshot(core, &options, &mut snapshot),
-            INKPOD_STATUS_OK
-        );
-        let mut view = InkpodSnapshotVanishingPointView {
-            struct_size: size_of::<InkpodSnapshotVanishingPointView>() as u32,
-            ..InkpodSnapshotVanishingPointView::default()
-        };
-        assert_eq!(
-            inkpod_snapshot_get_vanishing_points(snapshot, &mut view),
-            INKPOD_STATUS_OK
-        );
-        assert_eq!(view.point_count, 1);
-        assert!(view.radial_guide_count > 0);
-        assert!(!view.points.is_null());
-        assert!(!view.radial_guides.is_null());
-        assert_eq!(inkpod_snapshot_release(&mut snapshot), INKPOD_STATUS_OK);
-        assert_eq!(
-            inkpod_core_vanishing_point_preview_cancel(core),
-            INKPOD_STATUS_OK
-        );
-        assert_eq!(
-            queried_document_info(core).document_revision,
-            stable.document_revision
-        );
-        assert_eq!(
-            inkpod_core_vanishing_point_preview_begin(
-                core,
-                stable.document_revision,
-                INKPOD_VANISHING_POINT_EDIT_UPDATE,
-                point_id,
-                &input,
-            ),
-            INKPOD_STATUS_OK
-        );
-        let mut applied_revision = 0;
-        let mut applied_id = 0;
-        assert_eq!(
-            inkpod_core_vanishing_point_preview_apply(core, &mut applied_revision, &mut applied_id,),
-            INKPOD_STATUS_OK
-        );
-        assert!(applied_revision > stable.document_revision);
-        assert_eq!(applied_id, point_id);
-        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
-    }
-}
-
 fn config() -> InkpodCoreConfig {
     InkpodCoreConfig {
         struct_size: size_of::<InkpodCoreConfig>() as u32,
@@ -732,12 +568,12 @@ fn application_palette_and_chart_codecs_are_bounded_current_version_ffi_contract
 }
 
 #[test]
-fn cell_creation_carries_the_typed_initial_layer_in_genesis() {
+fn cell_creation_uses_the_standard_layer_in_genesis() {
     let mut core = ptr::null_mut();
     let options = InkpodCellCreateOptions {
         struct_size: size_of::<InkpodCellCreateOptions>() as u32,
-        reserved: INKPOD_LAYER_RASTER,
-        feature_flags: INKPOD_CELL_CREATE_INITIAL_LAYER_KIND,
+        reserved: 0,
+        feature_flags: INKPOD_FEATURE_NONE,
         document_uuid_high: 0x4d36_4745_4e45_5349,
         document_uuid_low: TEST_SEQUENCE.fetch_add(1, Ordering::Relaxed),
         width: 8,
@@ -760,7 +596,7 @@ fn cell_creation_carries_the_typed_initial_layer_in_genesis() {
             inkpod_core_node_get(core, 0, u32::MAX, &mut node),
             INKPOD_STATUS_OK
         );
-        assert_eq!(node.kind, INKPOD_LAYER_RASTER);
+        assert_eq!(node.kind, 0);
         assert_eq!(queried_history_info(core).item_count, 0);
         assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
     }
@@ -1500,7 +1336,6 @@ fn grouped_edit_target_ffi_owns_normalized_spans_and_rejects_stale_or_short_reco
             struct_size: size_of::<InkpodEditTargetCommand>() as u32,
             operation: INKPOD_EDIT_TARGET_DUPLICATE,
             flags: 0,
-            kind: 0,
             pixel_format: 0,
             reserved: 0,
         };
@@ -2089,32 +1924,12 @@ fn ffi_contract_document_history_selection_clipboard_and_raster_round_trip() {
         margin_right: 1,
         margin_bottom: 1,
     };
-    let convert = InkpodTreeEdit {
-        struct_size: size_of::<InkpodTreeEdit>() as u32,
-        operation: INKPOD_TREE_CONVERT_LAYER,
-        flags: 0,
-        object_id: base_layer_id,
-        parent_id: 0,
-        destination_index: 0,
-        kind: INKPOD_LAYER_GRAYSCALE_COLORING,
-        pixel_format: 0,
-        opacity_milli: 0,
-        name_utf8: ptr::null(),
-        name_bytes: 0,
-    };
-    let mut converted_layer_id = 0;
-
     // SAFETY: Every pointer refers to a complete live record and the core stays on its owner thread.
     unsafe {
         assert_eq!(
             inkpod_core_update_paper_frames(core, &frames, &mut result),
             INKPOD_STATUS_OK
         );
-        assert_eq!(
-            inkpod_core_tree_edit(core, &convert, &mut result, &mut converted_layer_id),
-            INKPOD_STATUS_OK
-        );
-        assert_eq!(converted_layer_id, 0);
         assert_eq!(
             inkpod_core_set_active_node(core, base_layer_id, base_main_plane_id),
             INKPOD_STATUS_OK
@@ -2205,7 +2020,7 @@ fn ffi_contract_document_history_selection_clipboard_and_raster_round_trip() {
         },
     );
     let selection_name = b"Contract selection";
-    let mut selection_layer_id = 0;
+    let mut saved_selection_id = 0;
     // SAFETY: The name span and all output records remain live and non-overlapping.
     unsafe {
         assert_eq!(
@@ -2213,28 +2028,71 @@ fn ffi_contract_document_history_selection_clipboard_and_raster_round_trip() {
             INKPOD_STATUS_OK
         );
         assert_eq!(
-            inkpod_core_selection_to_layer(
+            inkpod_core_saved_selection_create(
                 core,
                 selection_name.as_ptr(),
                 selection_name.len() as u64,
                 &mut result,
-                &mut selection_layer_id,
+                &mut saved_selection_id,
             ),
             INKPOD_STATUS_OK
         );
-        assert_ne!(selection_layer_id, 0);
+        assert_ne!(saved_selection_id, 0);
+        let mut saved = InkpodSavedSelectionInfo {
+            struct_size: size_of::<InkpodSavedSelectionInfo>() as u32,
+            ..InkpodSavedSelectionInfo::default()
+        };
+        assert_eq!(
+            inkpod_core_saved_selection_get(core, 0, &mut saved),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(saved.id, saved_selection_id);
+        assert_eq!(saved.name_bytes, selection_name.len() as u64);
         assert_eq!(
             inkpod_core_selection_clear(core, &mut result),
             INKPOD_STATUS_OK
         );
         assert_eq!(
-            inkpod_core_selection_from_layer(
+            inkpod_core_saved_selection_apply(
                 core,
-                selection_layer_id,
-                INKPOD_SELECTION_LAYER_REPLACE,
+                saved_selection_id,
+                INKPOD_SAVED_SELECTION_REPLACE,
                 &mut result,
             ),
             INKPOD_STATUS_OK
+        );
+        let temporary_name = b"Temporary selection";
+        let renamed_temporary_name = b"Renamed temporary selection";
+        let mut temporary_id = 0;
+        assert_eq!(
+            inkpod_core_saved_selection_create(
+                core,
+                temporary_name.as_ptr(),
+                temporary_name.len() as u64,
+                &mut result,
+                &mut temporary_id,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_ne!(temporary_id, 0);
+        assert_ne!(temporary_id, saved_selection_id);
+        assert_eq!(
+            inkpod_core_saved_selection_rename(
+                core,
+                temporary_id,
+                renamed_temporary_name.as_ptr(),
+                renamed_temporary_name.len() as u64,
+                &mut result,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_saved_selection_delete(core, temporary_id, &mut result),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_saved_selection_get(core, 1, &mut saved),
+            INKPOD_STATUS_INVALID_ARGUMENT
         );
         assert_eq!(
             inkpod_core_set_active_node(core, base_layer_id, base_color_plane_id),
@@ -2307,7 +2165,6 @@ fn ffi_contract_document_history_selection_clipboard_and_raster_round_trip() {
             object_id: 0,
             parent_id: base_layer_id,
             destination_index: 0,
-            kind: INKPOD_TYPED_PLANE_RASTER,
             pixel_format: INKPOD_STORAGE_RGBA8,
             opacity_milli: 900,
             name_utf8: new_plane_name.as_ptr(),
@@ -3512,7 +3369,7 @@ fn ffi_contract_light_table_sequence_and_owned_buffers() {
         );
         assert_eq!(active_editor.flags & INKPOD_EDITOR_STATE_DIRTY, 0);
         assert_eq!(active_editor.active_layer_id, active.layer_id);
-        assert_eq!(active_editor.active_plane_id, active.main_plane_id);
+        assert_eq!(active_editor.active_plane_id, active.color_plane_id);
         assert_eq!(
             inkpod_core_sequence_activation_resolve(sequence_core, 0, &mut activation),
             INKPOD_STATUS_OK
@@ -4310,9 +4167,6 @@ fn replay_contract_and_snapshot_digest_are_bounded_side_effect_free_queries() {
         passes: ptr::null(),
         pass_count: u64::MAX,
         pass_stride_bytes: 0,
-        adjustment_luts_rgb8: ptr::null(),
-        adjustment_lut_count: u64::MAX,
-        adjustment_lut_stride_bytes: 0,
     };
     // SAFETY: All handles and complete non-overlapping outputs are live for the calls.
     unsafe {
@@ -4320,8 +4174,8 @@ fn replay_contract_and_snapshot_digest_are_bounded_side_effect_free_queries() {
             inkpod_core_get_replay_contract(core, &mut contract),
             INKPOD_STATUS_OK
         );
-        assert_eq!(contract.replay_epoch, 25);
-        assert_eq!(contract.procedure_format_version, 29);
+        assert_eq!(contract.replay_epoch, 27);
+        assert_eq!(contract.procedure_format_version, 31);
         assert_eq!(contract.canonical_numeric_version, 1);
         assert!(contract.primitive_count > 0);
         assert_ne!(contract.primitive_catalog_digest, [0; 32]);
@@ -4355,11 +4209,8 @@ fn replay_contract_and_snapshot_digest_are_bounded_side_effect_free_queries() {
             render_plan.pass_stride_bytes,
             size_of::<InkpodSnapshotRenderPass>() as u64
         );
-        assert_eq!(render_plan.adjustment_lut_stride_bytes, 3 * 256);
         assert_eq!(render_plan.pass_count, 0);
         assert!(render_plan.passes.is_null());
-        assert_eq!(render_plan.adjustment_lut_count, 0);
-        assert!(render_plan.adjustment_luts_rgb8.is_null());
         let after = queried_document_info(core);
         assert_eq!(after.document_revision, before.document_revision);
         assert_eq!(after.view_revision, before.view_revision);

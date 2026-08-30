@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-_Static_assert(INKPOD_ABI_VERSION == 24U, "unexpected ABI version");
+_Static_assert(INKPOD_ABI_VERSION == 25U, "unexpected ABI version");
 _Static_assert(sizeof(InkpodIoConfig) == 48U, "I/O config layout drift");
 _Static_assert(sizeof(InkpodIoPath) == 24U, "I/O path layout drift");
 _Static_assert(sizeof(InkpodIoRequest) == 72U, "I/O request layout drift");
@@ -21,16 +21,16 @@ _Static_assert(sizeof(InkpodPersistenceInfo) == 72U, "persistence info layout dr
 _Static_assert(sizeof(InkpodCompactionPlan) == 128U, "compaction plan layout drift");
 _Static_assert(sizeof(InkpodSnapshotView) == 48U, "snapshot view layout drift");
 _Static_assert(sizeof(InkpodSnapshotRenderPass) == 48U, "render pass layout drift");
-_Static_assert(sizeof(InkpodSnapshotRenderPlan) == 64U, "render plan layout drift");
+_Static_assert(sizeof(InkpodSnapshotRenderPlan) == 40U, "render plan layout drift");
 _Static_assert(sizeof(InkpodCellCreateOptions) == 48U, "cell options layout drift");
 _Static_assert(sizeof(InkpodCellCreationOptions) == 64U, "cell creation options layout drift");
-_Static_assert(sizeof(InkpodCellCreationPlanItem) == 144U, "cell creation plan item layout drift");
+_Static_assert(sizeof(InkpodCellCreationPlanItem) == 140U, "cell creation plan item layout drift");
 _Static_assert(sizeof(InkpodDocumentInfo) == 232U, "document info layout drift");
 _Static_assert(sizeof(InkpodUtf8Span) == 16U, "UTF-8 span layout drift");
 _Static_assert(sizeof(InkpodUtf8Buffer) == 24U, "UTF-8 buffer layout drift");
 _Static_assert(sizeof(InkpodCutMetadataInput) == 88U, "Cut metadata input layout drift");
 _Static_assert(sizeof(InkpodCutMetadataBuffer) == 128U, "Cut metadata buffer layout drift");
-_Static_assert(sizeof(InkpodCutDefaultsInput) == 64U, "Cut defaults layout drift");
+_Static_assert(sizeof(InkpodCutDefaultsInput) == 56U, "Cut defaults layout drift");
 _Static_assert(sizeof(InkpodCutMemberInput) == 48U, "Cut member input layout drift");
 _Static_assert(sizeof(InkpodCutCreateRequest) == 72U, "Cut create request layout drift");
 _Static_assert(sizeof(InkpodCutUpdateRequest) == 40U, "Cut update request layout drift");
@@ -61,10 +61,7 @@ _Static_assert(sizeof(InkpodShootingFrameInput) == 64U, "shooting frame input la
 _Static_assert(sizeof(InkpodShootingFramePoint) == 16U, "shooting frame point layout drift");
 _Static_assert(sizeof(InkpodShootingFrameInfo) == 136U, "shooting frame info layout drift");
 _Static_assert(sizeof(InkpodSnapshotShootingFrameView) == 40U, "shooting frame view layout drift");
-_Static_assert(sizeof(InkpodVanishingPointInput) == 72U, "vanishing point input layout drift");
-_Static_assert(sizeof(InkpodVanishingPointInfo) == 80U, "vanishing point info layout drift");
-_Static_assert(sizeof(InkpodSnapshotRadialGuide) == 80U, "radial guide layout drift");
-_Static_assert(sizeof(InkpodSnapshotVanishingPointView) == 64U, "vanishing point view layout drift");
+_Static_assert(sizeof(InkpodSavedSelectionInfo) == 40U, "saved selection info layout drift");
 _Static_assert(sizeof(InkpodObjectId) == 32U, "object id layout drift");
 _Static_assert(sizeof(InkpodPrimitiveRequestV3) == 120U, "primitive request layout drift");
 _Static_assert(sizeof(InkpodPrimitiveResultV3) == 48U, "primitive result layout drift");

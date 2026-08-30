@@ -391,7 +391,6 @@ pub(super) fn parse_target(record: &InkpodBatchOperationInput) -> Result<BatchTa
     parse_target_fields(
         record.layer_id,
         record.plane_id,
-        record.layer_kind,
         record.plane_kind,
         record.missing_policy,
     )
@@ -407,7 +406,6 @@ fn parse_target_record(record: &InkpodBatchTargetInput) -> Result<BatchTargetSel
     parse_target_fields(
         record.layer_id,
         record.plane_id,
-        record.layer_kind,
         record.plane_kind,
         record.missing_policy,
     )
@@ -416,16 +414,12 @@ fn parse_target_record(record: &InkpodBatchTargetInput) -> Result<BatchTargetSel
 fn parse_target_fields(
     layer_id: u64,
     plane_id: u64,
-    layer_kind: u32,
     plane_kind: u32,
     missing_policy: u32,
 ) -> Result<BatchTargetSelector, u32> {
     Ok(BatchTargetSelector {
         layer_id: (layer_id != 0).then_some(layer_id),
         plane_id: (plane_id != 0).then_some(plane_id),
-        layer_kind: (layer_kind != 0)
-            .then(|| parse_layer_kind(layer_kind))
-            .transpose()?,
         plane_kind: (plane_kind != 0)
             .then(|| parse_plane_kind(i64::from(plane_kind)))
             .transpose()?,
@@ -458,31 +452,13 @@ pub(super) fn checked_count(value: u64, maximum: usize, field: &str) -> Result<u
     Ok(count)
 }
 
-pub(super) fn parse_layer_kind(value: u32) -> Result<LayerKind, u32> {
-    match value {
-        INKPOD_LAYER_BINARY_COLORING => Ok(LayerKind::BinaryColoring),
-        INKPOD_LAYER_GRAYSCALE_COLORING => Ok(LayerKind::GrayscaleColoring),
-        INKPOD_LAYER_RASTER => Ok(LayerKind::Raster),
-        INKPOD_LAYER_SELECTION => Ok(LayerKind::Selection),
-        INKPOD_LAYER_FRAME => Ok(LayerKind::Frame),
-        INKPOD_LAYER_VANISHING_POINT => Ok(LayerKind::VanishingPoint),
-        INKPOD_LAYER_ADJUSTMENT => Ok(LayerKind::Adjustment),
-        _ => Err(fail(
-            INKPOD_STATUS_INVALID_ARGUMENT,
-            "batch layer kind is unknown",
-        )),
-    }
-}
-
 pub(super) fn parse_plane_kind(value: i64) -> Result<PlaneType, u32> {
     match u32::try_from(value).ok() {
-        Some(INKPOD_TYPED_PLANE_MAIN_LINE) => Ok(PlaneType::MainLine),
         Some(INKPOD_TYPED_PLANE_COLOR) => Ok(PlaneType::Color),
         Some(INKPOD_TYPED_PLANE_RASTER) => Ok(PlaneType::Raster),
-        Some(INKPOD_TYPED_PLANE_SELECTION) => Ok(PlaneType::Selection),
         _ => Err(fail(
             INKPOD_STATUS_INVALID_ARGUMENT,
-            "batch plane kind is unknown",
+            "batch plane kind is unknown or unsupported",
         )),
     }
 }

@@ -2,39 +2,6 @@ use crate::document::bounded_document_pixels;
 use crate::selection::paste_value;
 use crate::*;
 
-pub(crate) fn convert_main_line_raster(
-    source: &TileRaster,
-    grayscale: bool,
-    revision: u64,
-) -> Result<TileRaster, CoreError> {
-    bounded_document_pixels(source.width(), source.height())?;
-    let mut destination = TileRaster::new(
-        source.width(),
-        source.height(),
-        if grayscale {
-            PixelFormat::Grayscale8
-        } else {
-            PixelFormat::BinaryMask8
-        },
-    )?;
-    for y in 0..source.height() {
-        for x in 0..source.width() {
-            let value = match source.pixel(x, y)? {
-                PixelValue::Binary(value) | PixelValue::Grayscale8(value) => value,
-                PixelValue::Grayscale16(value) => ((u32::from(value) + 128) / 257) as u8,
-                _ => return Err(CoreError::InvalidState("main-line plane format is invalid")),
-            };
-            let value = if grayscale {
-                PixelValue::Grayscale8(value)
-            } else {
-                PixelValue::Binary(if value >= 128 { 255 } else { 0 })
-            };
-            destination.set_pixel(x, y, value, revision)?;
-        }
-    }
-    Ok(destination)
-}
-
 pub(crate) fn merge_raster(
     destination: &mut TileRaster,
     source: &TileRaster,

@@ -66,7 +66,7 @@
 extern "C" {
 #endif
 
-#define INKPOD_ABI_VERSION UINT32_C(24)
+#define INKPOD_ABI_VERSION UINT32_C(25)
 #define INKPOD_SNAPSHOT_SOURCE_SEQUENCE_PRISTINE UINT32_C(1)
 #define INKPOD_FEATURE_NONE UINT64_C(0)
 
@@ -239,7 +239,7 @@ typedef uint32_t InkpodEditorTool;
 #define INKPOD_EDITOR_TOOL_SELECTION UINT32_C(1005)
 #define INKPOD_EDITOR_TOOL_COLOR_REPLACE UINT32_C(1008)
 #define INKPOD_EDITOR_TOOL_SHOOTING_FRAME UINT32_C(1009)
-#define INKPOD_EDITOR_TOOL_VANISHING_POINT UINT32_C(1010)
+/* Editor-tool code 1010 is retired and remains unassigned. */
 #define INKPOD_EDITOR_TOOL_GEOMETRY_LINE UINT32_C(1011)
 #define INKPOD_EDITOR_TOOL_GEOMETRY_CURVE UINT32_C(1012)
 #define INKPOD_EDITOR_TOOL_GEOMETRY_RECTANGLE UINT32_C(1013)
@@ -397,24 +397,16 @@ typedef uint32_t InkpodColorCheckMode;
 #define INKPOD_COLOR_CHECK_LEGACY_WHITE UINT32_C(1)
 #define INKPOD_COLOR_CHECK_NATIVE_ALPHA UINT32_C(2)
 
-/** @brief 永続化される typed layer の種類。 */
-typedef uint32_t InkpodLayerKind;
-#define INKPOD_LAYER_BINARY_COLORING UINT32_C(1)
-#define INKPOD_LAYER_GRAYSCALE_COLORING UINT32_C(2)
-#define INKPOD_LAYER_RASTER UINT32_C(3)
-#define INKPOD_LAYER_SELECTION UINT32_C(4)
-#define INKPOD_LAYER_FRAME UINT32_C(5)
-#define INKPOD_LAYER_VANISHING_POINT UINT32_C(6)
-#define INKPOD_LAYER_ADJUSTMENT UINT32_C(7)
-/* Layer-kind codes 8..10 are retired and remain unassigned. */
+/* Layer-kind codes 1..10 are retired and remain unassigned. Every layer uses
+ * the standard MainLine + Color + optional Raster topology. */
 
 /** @brief layer 内の typed plane の種類。 */
 typedef uint32_t InkpodTypedPlaneKind;
 #define INKPOD_TYPED_PLANE_MAIN_LINE UINT32_C(1)
 #define INKPOD_TYPED_PLANE_COLOR UINT32_C(2)
 #define INKPOD_TYPED_PLANE_RASTER UINT32_C(3)
-#define INKPOD_TYPED_PLANE_SELECTION UINT32_C(4)
-/* Typed-plane codes 5..7 are retired and remain unassigned. */
+/* Typed-plane codes 4..7 are retired and remain unassigned. Selection masks
+ * are document state rather than image planes. */
 #define INKPOD_EDIT_TARGET_LAYER UINT32_C(1)
 #define INKPOD_EDIT_TARGET_PLANE UINT32_C(2)
 #define INKPOD_EDIT_TARGET_DUPLICATE UINT32_C(1)
@@ -422,7 +414,7 @@ typedef uint32_t InkpodTypedPlaneKind;
 #define INKPOD_EDIT_TARGET_SET_VISIBILITY UINT32_C(3)
 #define INKPOD_EDIT_TARGET_SET_EDITABILITY UINT32_C(4)
 #define INKPOD_EDIT_TARGET_CONVERT_PLANES UINT32_C(5)
-#define INKPOD_EDIT_TARGET_CONVERT_LAYERS UINT32_C(6)
+/* Edit-target command code 6 is retired and remains unassigned. */
 #define INKPOD_EDIT_TARGET_MERGE UINT32_C(7)
 #define INKPOD_MAX_EDIT_TARGETS UINT32_C(4096)
 
@@ -450,7 +442,7 @@ typedef uint32_t InkpodGeometryPrimitive;
 typedef uint32_t InkpodRenderPassKind;
 #define INKPOD_RENDER_PASS_LAYER_BEGIN UINT32_C(1)
 #define INKPOD_RENDER_PASS_RASTER_TILES UINT32_C(2)
-#define INKPOD_RENDER_PASS_ADJUSTMENT UINT32_C(5)
+/* Render pass code 5 is retired and remains unassigned. */
 #define INKPOD_RENDER_PASS_LAYER_END UINT32_C(7)
 /* Render pass codes 3, 4, and 6 are retired and remain unassigned. */
 
@@ -467,12 +459,6 @@ typedef uint32_t InkpodShootingFrameEditKind;
 #define INKPOD_SHOOTING_FRAME_EDIT_CREATE UINT32_C(1)
 #define INKPOD_SHOOTING_FRAME_EDIT_UPDATE UINT32_C(2)
 #define INKPOD_SHOOTING_FRAME_EDIT_DELETE UINT32_C(3)
-
-typedef uint32_t InkpodVanishingPointEditKind;
-#define INKPOD_VANISHING_POINT_EDIT_CREATE UINT32_C(1)
-#define INKPOD_VANISHING_POINT_EDIT_UPDATE UINT32_C(2)
-#define INKPOD_VANISHING_POINT_EDIT_DELETE UINT32_C(3)
-#define INKPOD_VANISHING_POINT_EDIT_DELETE_ALL UINT32_C(4)
 
 /** @brief filter catalog の処理識別子型。 */
 typedef uint32_t InkpodFilterKind;
@@ -535,8 +521,8 @@ typedef uint32_t InkpodTaskState;
 #define INKPOD_TASK_CANCELLED UINT32_C(3)
 #define INKPOD_TASK_FAILED UINT32_C(4)
 
-#define INKPOD_BATCH_GRAPH_VERSION UINT32_C(4)
-#define INKPOD_BATCH_OPERATION_VERSION UINT32_C(3)
+#define INKPOD_BATCH_GRAPH_VERSION UINT32_C(5)
+#define INKPOD_BATCH_OPERATION_VERSION UINT32_C(4)
 /** @brief batch graph の入力 selector 種類。 */
 typedef uint32_t InkpodBatchInputKind;
 #define INKPOD_BATCH_INPUT_FILE UINT32_C(1)
@@ -663,7 +649,7 @@ typedef uint32_t InkpodTreeOperation;
 #define INKPOD_TREE_DELETE_PLANE UINT32_C(8)
 #define INKPOD_TREE_REORDER_PLANE UINT32_C(9)
 #define INKPOD_TREE_SET_PLANE_PROPERTIES UINT32_C(10)
-#define INKPOD_TREE_CONVERT_LAYER UINT32_C(11)
+/* Tree operation code 11 is retired and remains unassigned. */
 #define INKPOD_TREE_MERGE_LAYER UINT32_C(12)
 #define INKPOD_TREE_CONVERT_PLANE UINT32_C(13)
 #define INKPOD_TREE_MERGE_PLANE UINT32_C(14)
@@ -716,9 +702,10 @@ typedef uint32_t InkpodOutputColorGuardProfile;
 #define INKPOD_SELECTION_ADJUST_INVERT UINT32_C(1)
 #define INKPOD_SELECTION_ADJUST_EXPAND UINT32_C(2)
 #define INKPOD_SELECTION_ADJUST_SHRINK UINT32_C(3)
-#define INKPOD_SELECTION_LAYER_REPLACE UINT32_C(1)
-#define INKPOD_SELECTION_LAYER_ADD UINT32_C(2)
-#define INKPOD_SELECTION_LAYER_SUBTRACT UINT32_C(3)
+typedef uint32_t InkpodSavedSelectionOperation;
+#define INKPOD_SAVED_SELECTION_REPLACE UINT32_C(1)
+#define INKPOD_SAVED_SELECTION_ADD UINT32_C(2)
+#define INKPOD_SAVED_SELECTION_SUBTRACT UINT32_C(3)
 
 #define INKPOD_GUIDE_HORIZONTAL UINT32_C(1)
 #define INKPOD_GUIDE_VERTICAL UINT32_C(2)
@@ -1353,7 +1340,7 @@ typedef struct InkpodCompactionPlan {
 /** @brief 新規 Cell の UUID、寸法、DPI を指定する borrowed 入力。 */
 typedef struct InkpodCellCreateOptions {
     uint32_t struct_size;
-    /** `INKPOD_CELL_CREATE_INITIAL_LAYER_KIND`時だけtyped layer kind、それ以外は0。 */
+    /** Reserved. Must be zero. */
     uint32_t reserved;
     uint64_t feature_flags;
     uint64_t document_uuid_high;
@@ -1363,7 +1350,6 @@ typedef struct InkpodCellCreateOptions {
     uint32_t dpi_x_milli;
     uint32_t dpi_y_milli;
 } InkpodCellCreateOptions;
-#define INKPOD_CELL_CREATE_INITIAL_LAYER_KIND (UINT64_C(1) << 0)
 
 #define INKPOD_CELL_SIZING_IMAGE_PIXELS UINT32_C(1)
 #define INKPOD_CELL_SIZING_FRAME_MICROMETRES UINT32_C(2)
@@ -1387,7 +1373,6 @@ typedef struct InkpodCellCreationOptions {
     uint32_t safe_frame_ratio_milli;
     uint32_t maximum_close_ratio_milli;
     uint32_t anchor;
-    InkpodLayerKind initial_layer_kind;
     uint32_t pixel_format;
     uint32_t count;
     uint32_t reserved;
@@ -1409,7 +1394,6 @@ typedef struct InkpodCellCreationPlanItem {
     uint32_t height;
     uint32_t dpi_x_milli;
     uint32_t dpi_y_milli;
-    InkpodLayerKind initial_layer_kind;
     uint32_t pixel_format;
     InkpodFrameRect hundred_frame;
     InkpodFrameRect reference_frame;
@@ -1502,7 +1486,6 @@ typedef struct InkpodCutDefaultsInput {
     uint32_t safe_frame_ratio_milli;
     uint32_t maximum_close_ratio_milli;
     uint32_t anchor;
-    InkpodLayerKind initial_layer_kind;
     uint32_t pixel_format;
     uint32_t reserved;
 } InkpodCutDefaultsInput;
@@ -1575,7 +1558,6 @@ typedef struct InkpodCutInfo {
     uint32_t safe_frame_ratio_milli;
     uint32_t maximum_close_ratio_milli;
     uint32_t anchor;
-    InkpodLayerKind initial_layer_kind;
     uint32_t pixel_format;
 } InkpodCutInfo;
 
@@ -1836,35 +1818,6 @@ typedef struct InkpodShootingFrameInfo {
     uint32_t reserved;
     InkpodShootingFramePoint corners[4];
 } InkpodShootingFrameInfo;
-
-typedef struct InkpodVanishingPointInput {
-    uint32_t struct_size;
-    uint32_t visible;
-    uint64_t feature_flags;
-    uint64_t layer_id;
-    int64_t x_milli;
-    int64_t y_milli;
-    uint32_t interval_milli_degrees;
-    uint32_t angle_milli_degrees;
-    uint32_t opacity_milli;
-    uint32_t reserved;
-    InkpodColorValue color;
-} InkpodVanishingPointInput;
-
-typedef struct InkpodVanishingPointInfo {
-    uint32_t struct_size;
-    uint32_t visible;
-    uint64_t feature_flags;
-    uint64_t point_id;
-    uint64_t layer_id;
-    int64_t x_milli;
-    int64_t y_milli;
-    uint32_t interval_milli_degrees;
-    uint32_t angle_milli_degrees;
-    uint32_t opacity_milli;
-    uint32_t reserved;
-    InkpodColorValue color;
-} InkpodVanishingPointInfo;
 
 /**
  * @brief 一つの Core generation に属する Rust-owned object の value identity。
@@ -2186,7 +2139,6 @@ typedef struct InkpodEditTargetCommand {
     uint32_t struct_size;
     uint32_t operation;
     uint64_t flags;
-    uint32_t kind;
     uint32_t pixel_format;
     uint64_t reserved;
 } InkpodEditTargetCommand;
@@ -2200,7 +2152,6 @@ typedef struct InkpodEditTargetCapabilities {
     uint32_t can_set_editability;
     uint32_t can_merge;
     uint32_t can_convert_planes;
-    uint32_t can_convert_layers;
     uint32_t reserved;
 } InkpodEditTargetCapabilities;
 
@@ -2610,7 +2561,7 @@ typedef struct InkpodBatchColorPairInput {
 } InkpodBatchColorPairInput;
 
 /**
- * @brief 一つのBatch対象plane selector。
+ * @brief 一つのBatch対象plane selector。`plane_kind` は Color または Raster だけを受理する。
  */
 typedef struct InkpodBatchTargetInput {
     uint32_t struct_size;
@@ -2618,14 +2569,13 @@ typedef struct InkpodBatchTargetInput {
     uint64_t feature_flags;
     uint64_t layer_id;
     uint64_t plane_id;
-    InkpodLayerKind layer_kind;
     InkpodTypedPlaneKind plane_kind;
     InkpodBatchMissingPolicy missing_policy;
     uint32_t reserved_2;
 } InkpodBatchTargetInput;
 
 /**
- * @brief exact color rows を持つ Batch v4 operation 入力。
+ * @brief exact color rows を持つ Batch v5 operation 入力。
  * `colors` は移動、マスキング、消去、`color_pairs` は色置換だけで使う。全 nested pointer は
  * graph 作成中だけ borrowed で、成功時に graph が値をコピーする。先頭targetはscalar fields、
  * 色置換の二件目以降は `additional_targets` で渡す。
@@ -2638,7 +2588,6 @@ typedef struct InkpodBatchOperationInput {
     uint64_t flags;
     uint64_t layer_id;
     uint64_t plane_id;
-    InkpodLayerKind layer_kind;
     InkpodTypedPlaneKind plane_kind;
     InkpodBatchMissingPolicy missing_policy;
     uint32_t reserved_2;
@@ -2713,7 +2662,6 @@ typedef struct InkpodBatchOperationInfo {
     uint64_t flags;
     uint64_t layer_id;
     uint64_t plane_id;
-    InkpodLayerKind layer_kind;
     InkpodTypedPlaneKind plane_kind;
     InkpodBatchMissingPolicy missing_policy;
     uint32_t reserved_2;
@@ -2812,32 +2760,6 @@ typedef struct InkpodSnapshotShootingFrameView {
     uint64_t frame_stride_bytes;
 } InkpodSnapshotShootingFrameView;
 
-typedef struct InkpodSnapshotRadialGuide {
-    uint32_t struct_size;
-    uint32_t angle_milli_degrees;
-    uint64_t feature_flags;
-    uint64_t point_id;
-    int64_t start_x_milli;
-    int64_t start_y_milli;
-    int64_t end_x_milli;
-    int64_t end_y_milli;
-    uint32_t opacity_milli;
-    uint32_t reserved;
-    InkpodColorValue color;
-} InkpodSnapshotRadialGuide;
-
-typedef struct InkpodSnapshotVanishingPointView {
-    uint32_t struct_size;
-    uint32_t abi_version;
-    uint64_t feature_flags;
-    const InkpodVanishingPointInfo* points;
-    uint64_t point_count;
-    uint64_t point_stride_bytes;
-    const InkpodSnapshotRadialGuide* radial_guides;
-    uint64_t radial_guide_count;
-    uint64_t radial_guide_stride_bytes;
-} InkpodSnapshotVanishingPointView;
-
 /** @brief One bottom-to-top operation in a snapshot-owned render plan. */
 typedef struct InkpodSnapshotRenderPass {
     uint32_t struct_size;
@@ -2851,11 +2773,9 @@ typedef struct InkpodSnapshotRenderPass {
 } InkpodSnapshotRenderPass;
 
 /**
- * @brief Borrowed ordered render passes and RGB8 adjustment lookup tables.
+ * @brief Borrowed ordered render passes.
  *
- * `passes` and `adjustment_luts_rgb8` remain valid until the parent snapshot is
- * released. Each LUT stores red, green, and blue tables consecutively, with
- * 256 bytes per channel.
+ * `passes` remains valid until the parent snapshot is released.
  */
 typedef struct InkpodSnapshotRenderPlan {
     uint32_t struct_size;
@@ -2864,9 +2784,6 @@ typedef struct InkpodSnapshotRenderPlan {
     const InkpodSnapshotRenderPass* passes;
     uint64_t pass_count;
     uint64_t pass_stride_bytes;
-    const uint8_t* adjustment_luts_rgb8;
-    uint64_t adjustment_lut_count;
-    uint64_t adjustment_lut_stride_bytes;
 } InkpodSnapshotRenderPlan;
 
 /** @brief tree operation、stable ID、properties、UTF-8 名を渡す borrowed 入力。 */
@@ -2877,7 +2794,6 @@ typedef struct InkpodTreeEdit {
     uint64_t object_id;
     uint64_t parent_id;
     uint32_t destination_index;
-    uint32_t kind;
     InkpodStoragePixelFormat pixel_format;
     uint32_t opacity_milli;
     const uint8_t* name_utf8;
@@ -2900,6 +2816,16 @@ typedef struct InkpodNodeInfo {
     uint64_t name_capacity;
     uint64_t name_bytes;
 } InkpodNodeInfo;
+
+/** @brief Saved document-selection metadata with caller-owned UTF-8 storage. */
+typedef struct InkpodSavedSelectionInfo {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t id;
+    uint8_t* name_utf8;
+    uint64_t name_capacity;
+    uint64_t name_bytes;
+} InkpodSavedSelectionInfo;
 
 /**
  * @brief 1 layer の縦横比維持 straight RGBA8 thumbnail を受け取る caller-owned buffer。
@@ -4267,7 +4193,7 @@ InkpodStatus inkpod_core_apply_view(
     InkpodDocumentInfo* out_info);
 
 /**
- * @brief layer へ plane kind/storage format を追加できるか読み取り専用で検証する。
+ * @brief layer へ Raster plane の storage format を追加できるか読み取り専用で検証する。
  * @par 契約
  * Core owner thread。`core` は非 NULL。成功・失敗とも document、stable ID、revision、dirty、history は不変。
  * @par 主なステータス
@@ -4276,13 +4202,13 @@ InkpodStatus inkpod_core_apply_view(
 InkpodStatus inkpod_core_validate_plane_creation(
     InkpodCore* core,
     uint64_t layer_id,
-    InkpodTypedPlaneKind kind,
     InkpodStoragePixelFormat pixel_format);
 /**
  * @brief typed layer/plane tree を作成・複製・削除・並替・変換・統合する。
  * @par 契約
  * Core owner thread。`core`/`input`/`result`/`out_object_id` は非 NULL・非重複。
  * input と UTF-8 名は呼び出し中だけ borrowed。成功時 result と stable ID を書き、実変更を 1 revision/dirty/Undo 単位で commit。
+ * `INKPOD_TREE_CREATE_PLANE` は Raster 専用で、`object_id=0`、`destination_index=0`、visible+editable、`opacity_milli=1000` を要求する。
  * 失敗時 document/history/両出力は不変。stroke/preview/floating 中は `INVALID_STATE`。
  * @par 主なステータス
  * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`UNSUPPORTED`、`WRONG_THREAD`、`PANIC`。
@@ -4437,31 +4363,51 @@ InkpodStatus inkpod_core_selection_clear(
     InkpodCore* core,
     InkpodDispatchResult* result);
 /**
- * @brief selection mask から新しい selection layer を作る。
+ * @brief document selection mask を stable ID 付きで保存する。
  * @par 契約
- * Core owner thread。`core`/非空 UTF-8 name/`result`/`out_layer_id` は非 NULL・非重複。name は呼び出し中だけ borrowed。
+ * Core owner thread。`core`/非空 UTF-8 name/`result`/`out_saved_selection_id` は非 NULL・非重複。name は呼び出し中だけ borrowed。
  * 成功時 stable ID と result を書き 1 revision/dirty/Undo 単位。失敗時出力/文書不変。stroke/preview/floating 中は不可。
  * @par 主なステータス
  * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
-InkpodStatus inkpod_core_selection_to_layer(
+InkpodStatus inkpod_core_saved_selection_create(
     InkpodCore* core,
     const uint8_t* name_utf8,
     uint64_t name_bytes,
     InkpodDispatchResult* result,
-    uint64_t* out_layer_id);
+    uint64_t* out_saved_selection_id);
 /**
- * @brief selection layer を document selection へ replace/add/subtract する。
+ * @brief saved selection mask を document selection へ replace/add/subtract する。
  * @par 契約
- * Core owner thread。`core`/`result` は非 NULL、layer ID と operation は有効値。
+ * Core owner thread。`core`/`result` は非 NULL、saved-selection ID と operation は有効値。
  * 成功時実変更を 1 revision/dirty/Undo 単位で commit。失敗時不変。stroke/preview/floating 中は不可。
  * @par 主なステータス
  * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
-InkpodStatus inkpod_core_selection_from_layer(
+InkpodStatus inkpod_core_saved_selection_apply(
     InkpodCore* core,
-    uint64_t layer_id,
-    uint32_t operation,
+    uint64_t saved_selection_id,
+    InkpodSavedSelectionOperation operation,
+    InkpodDispatchResult* result);
+
+/** @brief document order の saved selection metadata を caller-owned buffer へコピーする。 */
+InkpodStatus inkpod_core_saved_selection_get(
+    InkpodCore* core,
+    uint32_t index,
+    InkpodSavedSelectionInfo* out_info);
+
+/** @brief saved selection mask を stable ID で改名する。 */
+InkpodStatus inkpod_core_saved_selection_rename(
+    InkpodCore* core,
+    uint64_t saved_selection_id,
+    const uint8_t* name_utf8,
+    uint64_t name_bytes,
+    InkpodDispatchResult* result);
+
+/** @brief saved selection mask を stable ID で削除する。 */
+InkpodStatus inkpod_core_saved_selection_delete(
+    InkpodCore* core,
+    uint64_t saved_selection_id,
     InkpodDispatchResult* result);
 
 /**
@@ -4511,7 +4457,7 @@ InkpodStatus inkpod_core_paste_begin_mode(
     uint32_t mode);
 /**
  * @brief create-plane targetを保持し、floating commit時だけplane作成とpasteを一括commitする。
- * @par 契約 `target`は`INKPOD_TREE_CREATE_PLANE`、visible+editable、完全なtyped/name入力。
+ * @par 契約 `target`は`INKPOD_TREE_CREATE_PLANE`、visible+editable、完全なformat/name入力。
  * begin/cancelはdocument不変、commit成功はplane作成とpixel適用を一つのUndo単位にする。
  */
 InkpodStatus inkpod_core_paste_begin_new_plane(
@@ -5639,57 +5585,6 @@ InkpodStatus inkpod_core_shooting_frame_preview_apply(
     uint64_t* out_frame_id);
 
 /**
- * @brief Copy persistent vanishing points into a caller-owned strided buffer.
- *
- * A NULL output with zero capacity is a count query. Records and nested color
- * values are copied during the call and are never retained. Core owner thread
- * only; this query changes no document, history, dirty, revision, or ID state.
- */
-InkpodStatus inkpod_core_vanishing_points_copy(
-    InkpodCore* core,
-    InkpodVanishingPointInfo* output,
-    uint64_t capacity,
-    uint64_t stride_bytes,
-    uint64_t* out_count);
-
-/**
- * @brief Apply create/update/delete/delete-all as one canonical transaction.
- *
- * `input` is borrowed only for the call and is required only for create/update.
- * Success is at most one Undo unit; no-op and all failures consume no ID.
- */
-InkpodStatus inkpod_core_vanishing_point_edit(
-    InkpodCore* core,
-    uint64_t expected_revision,
-    InkpodVanishingPointEditKind kind,
-    uint64_t point_id,
-    const InkpodVanishingPointInput* input,
-    uint64_t* out_revision,
-    uint64_t* out_point_id);
-
-/** @brief Begin create/update preview at an exact document revision. */
-InkpodStatus inkpod_core_vanishing_point_preview_begin(
-    InkpodCore* core,
-    uint64_t expected_revision,
-    InkpodVanishingPointEditKind kind,
-    uint64_t point_id,
-    const InkpodVanishingPointInput* input);
-
-/** @brief Rebuild the active preview from its immutable base document. */
-InkpodStatus inkpod_core_vanishing_point_preview_update(
-    InkpodCore* core,
-    const InkpodVanishingPointInput* input);
-
-/** @brief Cancel preview without changing committed state or consuming an ID. */
-InkpodStatus inkpod_core_vanishing_point_preview_cancel(InkpodCore* core);
-
-/** @brief Commit preview as at most one Undo unit; create assigns its ID here. */
-InkpodStatus inkpod_core_vanishing_point_preview_apply(
-    InkpodCore* core,
-    uint64_t* out_revision,
-    uint64_t* out_point_id);
-
-/**
  * @brief Apply one bounded Core-owned geometry request as one history unit.
  *
  * `base_revision` must be zero. The point span is copied during the call and is
@@ -5815,35 +5710,6 @@ InkpodStatus inkpod_core_filter_apply_last_task(
     InkpodCore* core,
     uint64_t plane_id,
     InkpodTask* task,
-    InkpodDispatchResult* result);
-/**
- * @brief supported filter parameter から非破壊 adjustment layer を作成する。
- * @par 契約
- * Core owner thread。`core`/`input`/非空 UTF-8 name/`result`/`out_layer_id` は非 NULL・非重複。
- * input curve/name は一時 borrowed でコピー。成功時 stable ID/result を書き 1 revision/dirty/Undo 単位。
- * source raster は変更しない。失敗時不変。stroke/preview/floating 中は不可。
- * @par 主なステータス
- * `OK`、`INVALID_ARGUMENT`、`UNSUPPORTED`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
- */
-InkpodStatus inkpod_core_adjustment_create(
-    InkpodCore* core,
-    const InkpodFilterInput* input,
-    const uint8_t* name_utf8,
-    uint64_t name_length,
-    InkpodDispatchResult* result,
-    uint64_t* out_layer_id);
-/**
- * @brief 既存 adjustment layer の copied filter parameter を置換する。
- * @par 契約
- * Core owner thread。`core`/`input`/`result` は非 NULL、layer ID は adjustment layer。input span は一時 borrowed。
- * 成功時 1 revision/dirty/Undo 単位。失敗時 parameter/document 不変。stroke/preview/floating 中は不可。
- * @par 主なステータス
- * `OK`、`INVALID_ARGUMENT`、`UNSUPPORTED`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
- */
-InkpodStatus inkpod_core_adjustment_update(
-    InkpodCore* core,
-    uint64_t layer_id,
-    const InkpodFilterInput* input,
     InkpodDispatchResult* result);
 /**
  * @brief linear/radial gradient を target plane へ適用する。
@@ -6409,22 +6275,11 @@ InkpodStatus inkpod_snapshot_get_shooting_frames(
     InkpodSnapshotShootingFrameView* out_frames);
 
 /**
- * @brief Borrow snapshot-owned vanishing-point and clipped radial-guide spans.
- *
- * Both spans remain valid only until snapshot release. Access and release of
- * the same snapshot require caller synchronization; no separate release exists.
- */
-InkpodStatus inkpod_snapshot_get_vanishing_points(
-    const InkpodSnapshot* snapshot,
-    InkpodSnapshotVanishingPointView* out_view);
-
-/**
  * @brief Copies the bottom-to-top render plan for a live immutable snapshot.
  * @par Contract
  * `snapshot` and exact-size `out_plan` are non-NULL and externally synchronized.
  * Returned spans are snapshot-owned and valid until release. Pass item ranges
- * index the tile or adjustment-LUT span selected
- * by `kind`. Unknown kinds are not emitted. Failure does not partially write
+ * index the tile span selected by `kind`. Unknown kinds are not emitted. Failure does not partially write
  * document state or transfer ownership.
  */
 InkpodStatus inkpod_snapshot_get_render_plan(

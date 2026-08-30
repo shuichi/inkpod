@@ -11,9 +11,6 @@ impl Core {
         let plane_only = targets
             .iter()
             .all(|target| matches!(target, EditTarget::Plane(_)));
-        let layer_only = targets
-            .iter()
-            .all(|target| matches!(target, EditTarget::Layer(_)));
         let duplicate = targets.iter().all(|target| match target {
             EditTarget::Layer(_) => document.layers.len() < MAX_LAYERS,
             EditTarget::Plane(target) => document
@@ -40,17 +37,6 @@ impl Core {
             editability: !targets.is_empty(),
             merge: grouped_merge_pair(document, &targets).is_some(),
             convert_planes: plane_only,
-            convert_layers: layer_only
-                && targets.iter().all(|target| match target {
-                    EditTarget::Layer(id) => document.layers.iter().any(|layer| {
-                        layer.id.get() == *id
-                            && matches!(
-                                layer.kind,
-                                LayerKind::BinaryColoring | LayerKind::GrayscaleColoring
-                            )
-                    }),
-                    EditTarget::Plane(_) => false,
-                }),
         })
     }
 
@@ -116,11 +102,8 @@ impl Core {
             EditTargetCommand::SetEditability(editable) => {
                 self.set_edit_target_flag(targets, editable, false)
             }
-            EditTargetCommand::ConvertPlanes { kind, format } => {
-                self.convert_edit_target_planes(targets, kind, format)
-            }
-            EditTargetCommand::ConvertLayers { kind } => {
-                self.convert_edit_target_layers(targets, kind)
+            EditTargetCommand::ConvertPlanes { format } => {
+                self.convert_edit_target_planes(targets, format)
             }
             EditTargetCommand::Merge => self.merge_edit_targets(targets),
         }
@@ -159,16 +142,12 @@ impl Core {
             next_layers.push(source_layer.clone());
             if selected.contains(&EditTarget::Layer(source_layer.id.get())) {
                 let mut duplicate = source_layer.clone();
-                let source_layer_id = duplicate.id;
                 duplicate.id = next_id.take_layer();
                 duplicate.name =
                     unique_layer_name(&next_layers, &format!("{} Copy", duplicate.name));
                 for plane in &mut duplicate.planes {
                     plane.id = next_id.take_plane();
                     plane.name = format!("{} Copy", plane.name);
-                }
-                if let Some(adjustment) = before.adjustments.get(&source_layer_id).cloned() {
-                    after.adjustments.insert(duplicate.id, adjustment);
                 }
                 output_targets.push(EditTarget::Layer(duplicate.id.get()));
                 next_layers.push(duplicate);
@@ -229,15 +208,6 @@ impl Core {
             ));
         }
         let selected = targets.iter().copied().collect::<BTreeSet<_>>();
-        for target in &targets {
-            match target {
-                EditTarget::Layer(layer_id) => {
-                    let id = LayerId::from_raw(*layer_id);
-                    after.adjustments.remove(&id);
-                }
-                EditTarget::Plane(_) => {}
-            }
-        }
         after
             .layers
             .retain(|layer| !selected.contains(&EditTarget::Layer(layer.id.get())));
@@ -248,7 +218,7 @@ impl Core {
                     plane_id: plane.id.get(),
                 }))
             });
-            validate_layer_kind(layer.kind, &layer.planes)?;
+            validate_layer(&layer.planes)?;
         }
         edit.prefer_edit_targets(Vec::new());
         let dispatch = edit.commit(self)?;
@@ -302,10 +272,8 @@ impl Core {
     fn convert_edit_target_planes(
         &mut self,
         targets: Vec<EditTarget>,
-        kind: PlaneType,
         format: PixelFormat,
     ) -> Result<EditTargetCommandResult, CoreError> {
-        validate_plane_format(kind, format)?;
         let mut edit = self.begin_document_edit()?;
         let revision = edit.revision().get();
         let (before, after) = edit.documents();
@@ -318,66 +286,18 @@ impl Core {
             let source = before
                 .plane_by_id(PlaneId::from_raw(target.plane_id))
                 .ok_or(CoreError::InvalidArgument("plane ID does not exist"))?;
+            validate_plane_format(source.kind, format)?;
+            if source.raster.format() == format {
+                continue;
+            }
             let converted = convert_plane_raster(&source.raster, format, revision)?;
             let destination = after
                 .plane_by_id_mut(source.id)
                 .ok_or(CoreError::InvalidState("conversion destination is missing"))?;
-            destination.kind = kind;
             destination.raster = converted;
         }
         for layer in &after.layers {
-            validate_layer_kind(layer.kind, &layer.planes)?;
-        }
-        let dispatch = edit.commit(self)?;
-        Ok(EditTargetCommandResult {
-            dispatch,
-            output_targets: Vec::new(),
-        })
-    }
-
-    fn convert_edit_target_layers(
-        &mut self,
-        targets: Vec<EditTarget>,
-        kind: LayerKind,
-    ) -> Result<EditTargetCommandResult, CoreError> {
-        let mut edit = self.begin_document_edit()?;
-        let revision = edit.revision().get();
-        let after = edit.working_mut();
-        for target in &targets {
-            let EditTarget::Layer(layer_id) = target else {
-                return Err(CoreError::InvalidArgument(
-                    "layer conversion requires only layer targets",
-                ));
-            };
-            let layer = after
-                .layers
-                .iter_mut()
-                .find(|layer| layer.id.get() == *layer_id)
-                .ok_or(CoreError::InvalidArgument("layer ID does not exist"))?;
-            if layer.kind == kind {
-                continue;
-            }
-            if !matches!(
-                (layer.kind, kind),
-                (LayerKind::BinaryColoring, LayerKind::GrayscaleColoring)
-                    | (LayerKind::GrayscaleColoring, LayerKind::BinaryColoring)
-            ) {
-                return Err(CoreError::InvalidArgument(
-                    "requested layer conversion would lose unsupported semantics",
-                ));
-            }
-            let main = layer
-                .planes
-                .iter_mut()
-                .find(|plane| plane.kind == PlaneType::MainLine)
-                .ok_or(CoreError::InvalidState("coloring layer has no main plane"))?;
-            main.raster = convert_main_line_raster(
-                &main.raster,
-                kind == LayerKind::GrayscaleColoring,
-                revision,
-            )?;
-            layer.kind = kind;
-            validate_layer_kind(layer.kind, &layer.planes)?;
+            validate_layer(&layer.planes)?;
         }
         let dispatch = edit.commit(self)?;
         Ok(EditTargetCommandResult {
@@ -398,9 +318,7 @@ impl Core {
         ))?;
         let output = match pair {
             MergePair::Layers { upper, lower } => {
-                if before.layers[upper].kind == LayerKind::Adjustment
-                    || before.layers[upper].kind != before.layers[lower].kind
-                    || before.layers[upper].planes.len() != before.layers[lower].planes.len()
+                if before.layers[upper].planes.len() != before.layers[lower].planes.len()
                     || before.layers[upper]
                         .planes
                         .iter()
@@ -436,7 +354,7 @@ impl Core {
                     revision,
                 )?;
                 after.layers[layer].planes.remove(upper);
-                validate_layer_kind(after.layers[layer].kind, &after.layers[layer].planes)?;
+                validate_layer(&after.layers[layer].planes)?;
                 EditTarget::Plane(EditorTarget {
                     layer_id: after.layers[layer].id.get(),
                     plane_id: destination_id.get(),
@@ -477,14 +395,12 @@ fn preferred_active_target(
 
 fn grouped_delete_is_valid(document: &CellDocument, targets: &[EditTarget]) -> bool {
     let selected = targets.iter().copied().collect::<BTreeSet<_>>();
-    let remaining_coloring = document
+    let remaining_layers = document
         .layers
         .iter()
-        .filter(|layer| {
-            is_coloring_layer(layer.kind) && !selected.contains(&EditTarget::Layer(layer.id.get()))
-        })
+        .filter(|layer| !selected.contains(&EditTarget::Layer(layer.id.get())))
         .count();
-    if remaining_coloring == 0 {
+    if remaining_layers == 0 {
         return false;
     }
     document.layers.iter().all(|layer| {
@@ -502,7 +418,7 @@ fn grouped_delete_is_valid(document: &CellDocument, targets: &[EditTarget]) -> b
             })
             .cloned()
             .collect::<Vec<_>>();
-        validate_layer_kind(layer.kind, &planes).is_ok()
+        validate_layer(&planes).is_ok()
     })
 }
 

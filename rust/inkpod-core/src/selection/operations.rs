@@ -266,17 +266,26 @@ impl Core {
         Ok(bounds)
     }
 
-    /// Copies the current selection mask into a new selection layer.
+    /// Saves a copy of the current selection as a named document-owned mask.
     ///
-    /// Success is one undoable edit and returns the stable ID of the new layer.
-    pub fn selection_to_layer(&mut self, name: &str) -> Result<(DispatchOutcome, u64), CoreError> {
+    /// Success is one undoable edit and returns a stable ID. An empty current
+    /// selection, invalid name, or the bounded collection limit fails atomically.
+    pub fn save_selection_mask(
+        &mut self,
+        name: &str,
+    ) -> Result<(DispatchOutcome, SavedSelectionId), CoreError> {
         if !self.canonical_invocation_is_active() {
             let result =
-                self.execute_canonical_invocation(CanonicalInvocation::SelectionToLayer {
+                self.execute_canonical_invocation(CanonicalInvocation::SaveSelectionMask {
                     name: name.to_owned(),
                 })?;
-            let id = *result.output_ids.first().ok_or(CoreError::InvalidState(
-                "selection-to-layer primitive did not return its output ID",
+            let id = SavedSelectionId::from_raw(*result.output_ids.first().ok_or(
+                CoreError::InvalidState(
+                    "save-selection-mask primitive did not return its output ID",
+                ),
+            )?)
+            .ok_or(CoreError::InvalidState(
+                "save-selection-mask primitive returned an invalid output ID",
             ))?;
             return Ok((result.dispatch, id));
         }
@@ -284,8 +293,10 @@ impl Core {
         validate_node_name(name)?;
         let selection = {
             let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
-            if document.layers.len() >= MAX_LAYERS {
-                return Err(CoreError::InvalidState("layer limit reached"));
+            if document.saved_selection_masks.len() >= MAX_SAVED_SELECTION_MASKS {
+                return Err(CoreError::InvalidState(
+                    "saved-selection mask limit reached",
+                ));
             }
             if mask_bounds(&document.selection)?.is_none() {
                 return Err(CoreError::InvalidState("selection is empty"));
@@ -293,76 +304,53 @@ impl Core {
             document.selection.clone()
         };
         let mut next_id = self.next_id;
-        let layer_id = next_id.take_layer();
-        let plane_id = next_id.take_plane();
+        let saved_selection_id = next_id.take_saved_selection();
         let mut edit = self.begin_document_edit()?;
         {
             let after = edit.working_mut();
-            after.layers.push(LayerNode {
-                id: layer_id,
-                kind: LayerKind::Selection,
-                name: unique_layer_name(&after.layers, name),
-                visible: true,
-                editable: true,
-                opacity_milli: 1_000,
-                planes: vec![PlaneNode {
-                    id: plane_id,
-                    kind: PlaneType::Selection,
-                    name: "Selection".to_owned(),
-                    visible: true,
-                    editable: true,
-                    opacity_milli: 1_000,
-                    raster: selection,
-                }],
+            after.saved_selection_masks.push(SavedSelectionMask {
+                id: saved_selection_id,
+                name: unique_saved_selection_name(&after.saved_selection_masks, name),
+                raster: selection,
             });
         }
-        edit.prefer_editor_target(EditorTarget {
-            layer_id: layer_id.get(),
-            plane_id: plane_id.get(),
-        });
         let outcome = edit.commit(self)?;
         self.next_id = next_id;
-        Ok((outcome, layer_id.get()))
+        Ok((outcome, saved_selection_id))
     }
 
-    /// Combines a selection layer's mask with the current selection.
+    /// Combines a saved mask with the current selection.
     ///
-    /// The source layer remains unchanged. Success is one undoable edit and an
+    /// The saved source remains unchanged. Success is one undoable edit and an
     /// unchanged result is a no-op.
-    pub fn selection_from_layer(
+    pub fn apply_saved_selection_mask(
         &mut self,
-        layer_id: u64,
-        operation: SelectionLayerOperation,
+        saved_selection_id: SavedSelectionId,
+        operation: SavedSelectionOperation,
     ) -> Result<DispatchOutcome, CoreError> {
         if !self.canonical_invocation_is_active() {
             return self
-                .execute_canonical_invocation(CanonicalInvocation::SelectionFromLayer {
-                    layer_id,
+                .execute_canonical_invocation(CanonicalInvocation::ApplySavedSelectionMask {
+                    saved_selection_id,
                     operation,
                 })
                 .map(|result| result.dispatch);
         }
         self.ensure_no_active_stroke()?;
-        let layer_id = LayerId::from_raw(layer_id);
         let mut edit = self.begin_document_edit()?;
         let revision = edit.revision();
         let (before, after) = edit.documents();
-        let layer = before
-            .layers
+        let mask = before
+            .saved_selection_masks
             .iter()
-            .find(|layer| layer.id == layer_id)
-            .ok_or(CoreError::InvalidArgument("layer ID does not exist"))?;
-        let mask = layer
-            .planes
-            .iter()
-            .find(|plane| plane.kind == PlaneType::Selection)
+            .find(|mask| mask.id == saved_selection_id)
             .ok_or(CoreError::InvalidArgument(
-                "layer does not contain a selection plane",
+                "saved-selection ID does not exist",
             ))?;
         let selection_operation = match operation {
-            SelectionLayerOperation::Replace => SelectionOperation::New,
-            SelectionLayerOperation::Add => SelectionOperation::Add,
-            SelectionLayerOperation::Subtract => SelectionOperation::Subtract,
+            SavedSelectionOperation::Replace => SelectionOperation::New,
+            SavedSelectionOperation::Add => SelectionOperation::Add,
+            SavedSelectionOperation::Subtract => SelectionOperation::Subtract,
         };
         let combined = combine_selection_masks(
             &before.selection,
@@ -376,6 +364,87 @@ impl Core {
         }
         after.selection = combined;
         edit.commit(self)
+    }
+
+    /// Renames a saved selection mask as one undoable edit.
+    ///
+    /// An identical name is a no-op. A colliding valid name receives the same
+    /// deterministic numeric suffix policy used by other document nodes.
+    pub fn rename_saved_selection_mask(
+        &mut self,
+        saved_selection_id: SavedSelectionId,
+        name: &str,
+    ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::RenameSavedSelectionMask {
+                    saved_selection_id,
+                    name: name.to_owned(),
+                })
+                .map(|result| result.dispatch);
+        }
+        self.ensure_no_active_stroke()?;
+        validate_node_name(name)?;
+        let mut edit = self.begin_document_edit()?;
+        let (before, after) = edit.documents();
+        let index = before
+            .saved_selection_masks
+            .iter()
+            .position(|mask| mask.id == saved_selection_id)
+            .ok_or(CoreError::InvalidArgument(
+                "saved-selection ID does not exist",
+            ))?;
+        if before.saved_selection_masks[index].name == name {
+            drop(edit);
+            return Ok(self.noop_outcome());
+        }
+        after.saved_selection_masks[index].name =
+            unique_saved_selection_name(&before.saved_selection_masks, name);
+        edit.commit(self)
+    }
+
+    /// Deletes a saved selection mask as one undoable edit.
+    pub fn delete_saved_selection_mask(
+        &mut self,
+        saved_selection_id: SavedSelectionId,
+    ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::DeleteSavedSelectionMask {
+                    saved_selection_id,
+                })
+                .map(|result| result.dispatch);
+        }
+        self.ensure_no_active_stroke()?;
+        let mut edit = self.begin_document_edit()?;
+        let after = edit.working_mut();
+        let index = after
+            .saved_selection_masks
+            .iter()
+            .position(|mask| mask.id == saved_selection_id)
+            .ok_or(CoreError::InvalidArgument(
+                "saved-selection ID does not exist",
+            ))?;
+        after.saved_selection_masks.remove(index);
+        edit.commit(self)
+    }
+
+    /// Returns document-owned saved masks in persistent order.
+    ///
+    /// The query returns owned metadata and does not change revision, history,
+    /// dirty state, or the current selection.
+    pub fn saved_selection_masks(&self) -> Result<Vec<SavedSelectionInfo>, CoreError> {
+        Ok(self
+            .document
+            .as_ref()
+            .ok_or(CoreError::NoDocument)?
+            .saved_selection_masks
+            .iter()
+            .map(|mask| SavedSelectionInfo {
+                id: mask.id,
+                name: mask.name.clone(),
+            })
+            .collect())
     }
 
     /// Copies selected pixels from the active raster plane into an owned payload.
@@ -409,14 +478,6 @@ impl Core {
         for plane in document.layers.iter().flat_map(|layer| &layer.planes) {
             if !selected_planes.contains(&plane.id) {
                 continue;
-            }
-            if !matches!(
-                plane.kind,
-                PlaneType::MainLine | PlaneType::Color | PlaneType::Raster | PlaneType::Selection
-            ) {
-                return Err(CoreError::InvalidState(
-                    "an edit target is not copyable as raster content",
-                ));
             }
             let mut pixels = Vec::new();
             for y in bounds.y..bounds.y + bounds.height {
@@ -622,7 +683,12 @@ impl Core {
                 "paste destination opacity exceeds 1000 milli",
             ));
         }
-        self.validate_plane_creation(layer_id, kind, format)?;
+        if kind != PlaneType::Raster {
+            return Err(CoreError::InvalidArgument(
+                "a new floating-paste plane must be a raster plane",
+            ));
+        }
+        self.validate_plane_creation(layer_id, format)?;
         let source = payload
             .planes
             .first()
@@ -775,7 +841,12 @@ impl Core {
             ..
         } = &floating.destination
         {
-            self.validate_plane_creation(layer_id.get(), *kind, *format)?;
+            if *kind != PlaneType::Raster {
+                return Err(CoreError::InvalidArgument(
+                    "a new floating-paste plane must be a raster plane",
+                ));
+            }
+            self.validate_plane_creation(layer_id.get(), *format)?;
         }
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
         let source_planes = match &floating.destination {
@@ -1064,7 +1135,7 @@ impl Core {
                     opacity_milli,
                     raster,
                 });
-                validate_layer_kind(layer.kind, &layer.planes)?;
+                validate_layer(&layer.planes)?;
                 edit.prefer_editor_target(EditorTarget {
                     layer_id: layer_id.get(),
                     plane_id: plane_id.get(),
@@ -1140,4 +1211,185 @@ fn stage_clipboard_assets(
     roots.extend(asset_ids.iter().copied());
     staged.garbage_collect(roots)?;
     Ok((staged, asset_ids))
+}
+
+#[cfg(test)]
+mod saved_selection_tests {
+    use super::*;
+
+    #[test]
+    fn saved_masks_are_document_owned_stable_and_undoable() {
+        let mut core = Core::new();
+        core.new_cell(8, 8, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+            .unwrap();
+        core.apply_selection(
+            &SelectionShape::Rectangle(RectI32 {
+                x: 1,
+                y: 2,
+                width: 3,
+                height: 4,
+            }),
+            SelectionOperation::New,
+        )
+        .unwrap();
+
+        let (_, id) = core.save_selection_mask("Mask").unwrap();
+        assert_ne!(id.get(), 0);
+        let saved = vec![SavedSelectionInfo {
+            id,
+            name: "Mask".to_owned(),
+        }];
+        assert_eq!(core.saved_selection_masks().unwrap(), saved);
+        core.undo().unwrap();
+        assert!(core.saved_selection_masks().unwrap().is_empty());
+        core.redo().unwrap();
+        assert_eq!(core.saved_selection_masks().unwrap(), saved);
+
+        core.clear_selection().unwrap();
+        assert_eq!(core.selection_bounds().unwrap(), None);
+        core.apply_saved_selection_mask(id, SavedSelectionOperation::Replace)
+            .unwrap();
+        assert_eq!(
+            core.selection_bounds().unwrap(),
+            Some(RectI32 {
+                x: 1,
+                y: 2,
+                width: 3,
+                height: 4,
+            })
+        );
+
+        core.rename_saved_selection_mask(id, "Renamed").unwrap();
+        assert_eq!(core.saved_selection_masks().unwrap()[0].name, "Renamed");
+        core.undo().unwrap();
+        assert_eq!(core.saved_selection_masks().unwrap()[0].name, "Mask");
+        core.redo().unwrap();
+        assert_eq!(core.saved_selection_masks().unwrap()[0].name, "Renamed");
+        core.delete_saved_selection_mask(id).unwrap();
+        assert!(core.saved_selection_masks().unwrap().is_empty());
+        core.undo().unwrap();
+        assert_eq!(core.saved_selection_masks().unwrap()[0].id, id);
+        core.redo().unwrap();
+        assert!(core.saved_selection_masks().unwrap().is_empty());
+    }
+
+    #[test]
+    fn saved_masks_and_fill_protection_follow_document_geometry() {
+        let mut core = Core::new();
+        core.new_cell(3, 2, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+            .unwrap();
+        core.apply_selection(
+            &SelectionShape::Rectangle(RectI32 {
+                x: 0,
+                y: 0,
+                width: 1,
+                height: 1,
+            }),
+            SelectionOperation::New,
+        )
+        .unwrap();
+        let (_, id) = core.save_selection_mask("Geometry").unwrap();
+        let revision = core.document_revision.get();
+        core.document
+            .as_mut()
+            .unwrap()
+            .fill_protection
+            .set_pixel(0, 1, PixelValue::Binary(u8::MAX), revision)
+            .unwrap();
+
+        core.mirror_document(MirrorAxis::Horizontal).unwrap();
+        core.clear_selection().unwrap();
+        core.apply_saved_selection_mask(id, SavedSelectionOperation::Replace)
+            .unwrap();
+        assert_eq!(
+            core.selection_bounds().unwrap(),
+            Some(RectI32 {
+                x: 2,
+                y: 0,
+                width: 1,
+                height: 1,
+            })
+        );
+        assert_eq!(
+            core.document.as_ref().unwrap().fill_protection.pixel(2, 1),
+            Ok(PixelValue::Binary(u8::MAX))
+        );
+
+        core.rotate_document(RotateDirection::Right90).unwrap();
+        core.clear_selection().unwrap();
+        core.apply_saved_selection_mask(id, SavedSelectionOperation::Replace)
+            .unwrap();
+        assert_eq!(
+            core.selection_bounds().unwrap(),
+            Some(RectI32 {
+                x: 1,
+                y: 2,
+                width: 1,
+                height: 1,
+            })
+        );
+        assert_eq!(
+            core.document.as_ref().unwrap().fill_protection.pixel(0, 2),
+            Ok(PixelValue::Binary(u8::MAX))
+        );
+
+        core.resize_document(DocumentResize {
+            width: 4,
+            height: 6,
+            dpi_x_milli: DEFAULT_DPI_MILLI,
+            dpi_y_milli: DEFAULT_DPI_MILLI,
+            resample: true,
+            anchor: ResizeAnchor::TopLeft,
+        })
+        .unwrap();
+        core.clear_selection().unwrap();
+        core.apply_saved_selection_mask(id, SavedSelectionOperation::Replace)
+            .unwrap();
+        assert_eq!(
+            core.selection_bounds().unwrap(),
+            Some(RectI32 {
+                x: 2,
+                y: 4,
+                width: 2,
+                height: 2,
+            })
+        );
+        assert_eq!(
+            core.fill_protection_mask_info().unwrap().wall_pixel_count,
+            4
+        );
+    }
+
+    #[test]
+    fn saved_mask_id_name_and_raster_round_trip_current_native_format() {
+        let mut core = Core::new();
+        core.new_cell(8, 8, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+            .unwrap();
+        let bounds = RectI32 {
+            x: 2,
+            y: 3,
+            width: 4,
+            height: 2,
+        };
+        core.apply_selection(&SelectionShape::Rectangle(bounds), SelectionOperation::New)
+            .unwrap();
+        let (_, id) = core.save_selection_mask("Persistent mask").unwrap();
+        let expected = core.saved_selection_masks().unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "inkpod-saved-selection-{}.inkpod",
+            std::process::id()
+        ));
+        core.save(&path).unwrap();
+
+        let mut reopened = Core::new();
+        reopened.open(&path).unwrap();
+        assert_eq!(reopened.saved_selection_masks().unwrap(), expected);
+        reopened.clear_selection().unwrap();
+        reopened
+            .apply_saved_selection_mask(id, SavedSelectionOperation::Replace)
+            .unwrap();
+        assert_eq!(reopened.selection_bounds().unwrap(), Some(bounds));
+
+        std::fs::remove_file(path).unwrap();
+    }
 }

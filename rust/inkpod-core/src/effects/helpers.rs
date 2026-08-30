@@ -66,7 +66,7 @@ pub(super) fn effect_samples(
         .collect()
 }
 
-pub(super) fn editable_color_plane(
+pub(super) fn editable_rgba_plane(
     document: &CellDocument,
     plane_id: PlaneId,
 ) -> Result<&super::PlaneNode, CoreError> {
@@ -83,12 +83,13 @@ pub(super) fn editable_color_plane(
     if !layer.editable || !plane.editable {
         return Err(CoreError::InvalidState("target plane is locked"));
     }
-    if !matches!(plane.kind, PlaneType::Color | PlaneType::Raster)
-        || !matches!(
-            plane.raster.format(),
-            PixelFormat::StraightRgba8 | PixelFormat::StraightRgba16
-        )
-    {
+    if !matches!(
+        plane.kind,
+        PlaneType::MainLine | PlaneType::Color | PlaneType::Raster
+    ) || !matches!(
+        plane.raster.format(),
+        PixelFormat::StraightRgba8 | PixelFormat::StraightRgba16
+    ) {
         return Err(CoreError::InvalidArgument(
             "target is not an editable RGBA raster plane",
         ));
@@ -103,7 +104,7 @@ pub(super) fn filter_document_with_progress(
     revision: RenderRevision,
     progress: &mut (impl FnMut(u64, u64) -> bool + ?Sized),
 ) -> Result<CellDocument, CoreError> {
-    let plane = editable_color_plane(base, plane_id)?;
+    let plane = editable_rgba_plane(base, plane_id)?;
     let selection = (base.selection.allocated_tile_count() != 0).then_some(&base.selection);
     let raster =
         apply_filter_with_progress(&plane.raster, selection, filter, revision.get(), progress)?;

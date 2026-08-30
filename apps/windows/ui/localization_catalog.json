@@ -525,6 +525,41 @@
       "resource": true
     },
     {
+      "id": "SavedSelectionChooseTitle",
+      "kind": "text",
+      "ja": "保存マスクを選択",
+      "en": "Choose Saved Mask",
+      "resource": false
+    },
+    {
+      "id": "SavedSelectionChooseLabel",
+      "kind": "text",
+      "ja": "保存マスク",
+      "en": "Saved mask",
+      "resource": false
+    },
+    {
+      "id": "SavedSelectionRename",
+      "kind": "text",
+      "ja": "保存マスクの名前を変更...",
+      "en": "Rename Saved Mask...",
+      "resource": true
+    },
+    {
+      "id": "SavedSelectionDelete",
+      "kind": "text",
+      "ja": "保存マスクを削除",
+      "en": "Delete Saved Mask",
+      "resource": true
+    },
+    {
+      "id": "SavedSelectionDeleteConfirm",
+      "kind": "text",
+      "ja": "選択した保存マスクを削除しますか？",
+      "en": "Delete the selected saved mask?",
+      "resource": false
+    },
+    {
       "id": "ToolColorReplacement",
       "kind": "text",
       "ja": "色置換",
@@ -550,13 +585,6 @@
       "kind": "text",
       "ja": "撮影フレーム",
       "en": "Shooting Frame",
-      "resource": false
-    },
-    {
-      "id": "ToolVanishingPoint",
-      "kind": "text",
-      "ja": "消失点",
-      "en": "Vanishing Point",
       "resource": false
     },
     {
@@ -896,55 +924,6 @@
       "resource": true
     },
     {
-      "id": "LayerBinaryColoring",
-      "kind": "text",
-      "ja": "2値彩色",
-      "en": "Binary Coloring",
-      "resource": false
-    },
-    {
-      "id": "LayerGrayscaleColoring",
-      "kind": "text",
-      "ja": "階調彩色",
-      "en": "Grayscale Coloring",
-      "resource": false
-    },
-    {
-      "id": "LayerRasterGeneral",
-      "kind": "text",
-      "ja": "ラスター汎用",
-      "en": "General Raster",
-      "resource": false
-    },
-    {
-      "id": "LayerSelection",
-      "kind": "text",
-      "ja": "選択範囲",
-      "en": "Selection",
-      "resource": false
-    },
-    {
-      "id": "LayerFrame",
-      "kind": "text",
-      "ja": "フレーム",
-      "en": "Frame",
-      "resource": false
-    },
-    {
-      "id": "LayerVanishingPoint",
-      "kind": "text",
-      "ja": "消失点",
-      "en": "Vanishing Point",
-      "resource": false
-    },
-    {
-      "id": "LayerAdjustment",
-      "kind": "text",
-      "ja": "調整",
-      "en": "Adjustment",
-      "resource": false
-    },
-    {
       "id": "Instruction",
       "kind": "text",
       "ja": "指示",
@@ -952,25 +931,11 @@
       "resource": true
     },
     {
-      "id": "LayerUnknown",
-      "kind": "text",
-      "ja": "不明",
-      "en": "Unknown",
-      "resource": false
-    },
-    {
       "id": "PlaneRaster",
       "kind": "text",
       "ja": "ラスター",
       "en": "Raster",
       "resource": true
-    },
-    {
-      "id": "PlaneSelection",
-      "kind": "text",
-      "ja": "選択",
-      "en": "Selection",
-      "resource": false
     },
     {
       "id": "PlaneBadgeMainLine",
@@ -991,13 +956,6 @@
       "kind": "text",
       "ja": "ラス\nター",
       "en": "Rast.",
-      "resource": false
-    },
-    {
-      "id": "PlaneBadgeSelection",
-      "kind": "text",
-      "ja": "選択",
-      "en": "Select",
       "resource": false
     },
     {
@@ -2265,13 +2223,6 @@
       "kind": "text",
       "ja": "inkpod/対応画像 (*.inkpod;*.png;*.tif;*.tiff;*.tga;*.bmp)\u0000",
       "en": "inkpod / Supported Images (*.inkpod;*.png;*.tif;*.tiff;*.tga;*.bmp)\u0000",
-      "resource": false
-    },
-    {
-      "id": "Text0097",
-      "kind": "text",
-      "ja": "layer kind (0=IDのみ)",
-      "en": "layer kind (0=ID only)",
       "resource": false
     },
     {
@@ -4251,22 +4202,22 @@
     {
       "id": "Text0400",
       "kind": "text",
-      "ja": "レイヤーを削除",
-      "en": "Subtract Layer",
+      "ja": "保存マスクを減算",
+      "en": "Subtract Saved Mask",
       "resource": true
     },
     {
       "id": "Text0401",
       "kind": "text",
-      "ja": "レイヤーを追加",
-      "en": "Add Layer",
+      "ja": "保存マスクを加算",
+      "en": "Add Saved Mask",
       "resource": true
     },
     {
       "id": "Text0402",
       "kind": "text",
-      "ja": "レイヤーを選択範囲へ",
-      "en": "Layer to Selection",
+      "ja": "保存マスクを選択範囲へ適用",
+      "en": "Apply Saved Mask",
       "resource": true
     },
     {
@@ -5135,13 +5086,6 @@
       "kind": "text",
       "ja": "前のフレーム",
       "en": "Previous Frame",
-      "resource": true
-    },
-    {
-      "id": "Text0532",
-      "kind": "text",
-      "ja": "前の調整レイヤーを選択",
-      "en": "Select Previous Adjustment Layer",
       "resource": true
     },
     {
@@ -6699,13 +6643,6 @@
       "resource": true
     },
     {
-      "id": "Text0761",
-      "kind": "text",
-      "ja": "次の調整レイヤーを選択",
-      "en": "Select Next Adjustment Layer",
-      "resource": true
-    },
-    {
       "id": "Text0762",
       "kind": "text",
       "ja": "次へ",
@@ -6745,41 +6682,6 @@
       "kind": "text",
       "ja": "消しゴム(&E)",
       "en": "&Eraser",
-      "resource": true
-    },
-    {
-      "id": "Text0769",
-      "kind": "text",
-      "ja": "消失点のハンドル編集",
-      "en": "Edit Vanishing Point Handles",
-      "resource": false
-    },
-    {
-      "id": "Text0770",
-      "kind": "text",
-      "ja": "消失点をすべて削除",
-      "en": "Delete All Vanishing Points",
-      "resource": true
-    },
-    {
-      "id": "Text0771",
-      "kind": "text",
-      "ja": "消失点をハンドル編集",
-      "en": "Edit Vanishing Point Handles",
-      "resource": true
-    },
-    {
-      "id": "Text0772",
-      "kind": "text",
-      "ja": "消失点設定",
-      "en": "Vanishing Point Settings",
-      "resource": true
-    },
-    {
-      "id": "Text0773",
-      "kind": "text",
-      "ja": "消失点設定...",
-      "en": "Vanishing Point Settings...",
       "resource": true
     },
     {
@@ -7616,13 +7518,6 @@
       "resource": true
     },
     {
-      "id": "Text0899",
-      "kind": "text",
-      "ja": "複数作成は消失点レイヤーへ追加します。",
-      "en": "Multiple items are added to the vanishing-point layer.",
-      "resource": true
-    },
-    {
       "id": "Text0900",
       "kind": "text",
       "ja": "複数段階の履歴移動",
@@ -7795,62 +7690,6 @@
       "kind": "text",
       "ja": "読み込み済み操作",
       "en": "Loaded Operation",
-      "resource": false
-    },
-    {
-      "id": "Text0926",
-      "kind": "text",
-      "ja": "調整レイヤー",
-      "en": "Adjustment Layer",
-      "resource": false
-    },
-    {
-      "id": "Text0927",
-      "kind": "text",
-      "ja": "調整レイヤーの表示切替",
-      "en": "Toggle Adjustment Layer Visibility",
-      "resource": true
-    },
-    {
-      "id": "Text0928",
-      "kind": "text",
-      "ja": "調整レイヤーを作成...",
-      "en": "Create Adjustment Layer...",
-      "resource": true
-    },
-    {
-      "id": "Text0929",
-      "kind": "text",
-      "ja": "調整レイヤーを再編集...",
-      "en": "Edit Adjustment Layer...",
-      "resource": true
-    },
-    {
-      "id": "Text0930",
-      "kind": "text",
-      "ja": "調整レイヤーを最前面へ",
-      "en": "Move Adjustment Layer to Top",
-      "resource": true
-    },
-    {
-      "id": "Text0931",
-      "kind": "text",
-      "ja": "調整レイヤー移動",
-      "en": "Adjustment LayerMove",
-      "resource": false
-    },
-    {
-      "id": "Text0932",
-      "kind": "text",
-      "ja": "調整レイヤー表示",
-      "en": "Adjustment LayerDisplay",
-      "resource": false
-    },
-    {
-      "id": "Text0933",
-      "kind": "text",
-      "ja": "調整レイヤー（作成後も同じ項目から再編集可能）",
-      "en": "Adjustment Layer (can be re-edited from the same item after creation)",
       "resource": false
     },
     {
@@ -8185,15 +8024,15 @@
     {
       "id": "Text0982",
       "kind": "text",
-      "ja": "選択プレーンにペースト",
+      "ja": "選択中のプレーンにペースト",
       "en": "Paste into Selected Plane",
       "resource": true
     },
     {
       "id": "Text0983",
       "kind": "text",
-      "ja": "選択レイヤー変換",
-      "en": "SelectLayerTransform",
+      "ja": "保存マスクの操作に失敗しました",
+      "en": "Saved mask operation failed",
       "resource": false
     },
     {
@@ -8227,15 +8066,15 @@
     {
       "id": "Text0993",
       "kind": "text",
-      "ja": "選択範囲をレイヤーへ",
-      "en": "Selection to Layer",
+      "ja": "選択範囲をマスクとして保存",
+      "en": "Save Selection Mask",
       "resource": true
     },
     {
       "id": "Text0994",
       "kind": "text",
-      "ja": "選択範囲をレイヤーへ変換",
-      "en": "Convert Selection to Layer",
+      "ja": "選択範囲マスクを保存",
+      "en": "Save Selection Mask",
       "resource": false
     },
     {

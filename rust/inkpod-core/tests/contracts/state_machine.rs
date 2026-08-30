@@ -375,9 +375,7 @@ impl ConcreteAction {
 
     fn execute(&self, core: &mut Core) -> ExecutionResult {
         match self {
-            Self::CreateRasterLayer(name) => {
-                ExecutionResult::created(core.create_layer(LayerKind::Raster, name))
-            }
+            Self::CreateRasterLayer(name) => ExecutionResult::created(core.create_layer(name)),
             Self::DuplicateLayer(id) => ExecutionResult::created(core.duplicate_layer(*id)),
             Self::ReorderLayer(id, destination) => {
                 ExecutionResult::dispatch(core.reorder_layer(*id, *destination))
@@ -391,7 +389,6 @@ impl ConcreteAction {
             Self::DeleteLayer(id) => ExecutionResult::dispatch(core.delete_layer(*id)),
             Self::CreateRasterPlane(layer, name) => ExecutionResult::created(core.create_plane(
                 *layer,
-                PlaneType::Raster,
                 PixelFormat::StraightRgba8,
                 name,
             )),
@@ -744,10 +741,7 @@ fn resolve_action(
     spec: ActionSpec,
 ) -> Result<ConcreteAction, CoreError> {
     let layers = core.layers()?;
-    let raster_layers: Vec<_> = layers
-        .iter()
-        .filter(|layer| layer.kind == LayerKind::Raster)
-        .collect();
+    let standard_layers: Vec<_> = layers.iter().collect();
     let choose = |length: usize| usize::from(spec.a) % length.max(1);
     match spec.domain {
         0 => match spec.opcode % 13 {
@@ -755,7 +749,7 @@ fn resolve_action(
                 "Raster {}",
                 spec.a
             ))),
-            1 => Ok(raster_layers.first().map_or(
+            1 => Ok(standard_layers.first().map_or(
                 ConcreteAction::CreateRasterLayer(format!("Raster {}", spec.a)),
                 |layer| ConcreteAction::DuplicateLayer(layer.id),
             )),
@@ -794,27 +788,43 @@ fn resolve_action(
                     ResultClass::NoOp,
                 ))
             }
-            5 if raster_layers.len() > 1 => Ok(ConcreteAction::DeleteLayer(
-                raster_layers.last().unwrap().id,
+            5 if standard_layers.len() > 1 => Ok(ConcreteAction::DeleteLayer(
+                standard_layers.last().unwrap().id,
             )),
             5 => Ok(ConcreteAction::InvalidDeleteLayer),
-            6 => Ok(raster_layers.first().map_or(
+            6 => Ok(standard_layers.first().map_or(
                 ConcreteAction::CreateRasterLayer(format!("Raster {}", spec.a)),
                 |layer| ConcreteAction::CreateRasterPlane(layer.id, format!("Plane {}", spec.a)),
             )),
-            7 => Ok(raster_layers
-                .first()
-                .and_then(|layer| layer.planes.first())
-                .map_or(ConcreteAction::InvalidDeleteLayer, |plane| {
-                    ConcreteAction::DuplicatePlane(plane.id)
-                })),
-            8 => Ok(raster_layers
+            7 => Ok(standard_layers
+                .iter()
+                .find_map(|layer| {
+                    layer
+                        .planes
+                        .iter()
+                        .find(|plane| plane.kind == PlaneType::Raster)
+                })
+                .map_or_else(
+                    || {
+                        standard_layers.first().map_or(
+                            ConcreteAction::InvalidDeleteLayer,
+                            |layer| {
+                                ConcreteAction::CreateRasterPlane(
+                                    layer.id,
+                                    format!("Plane {}", spec.a),
+                                )
+                            },
+                        )
+                    },
+                    |plane| ConcreteAction::DuplicatePlane(plane.id),
+                )),
+            8 => Ok(standard_layers
                 .iter()
                 .find(|layer| layer.planes.len() > 1)
                 .map_or(ConcreteAction::InvalidDeleteLayer, |layer| {
                     ConcreteAction::ReorderPlane(layer.planes[0].id, 1)
                 })),
-            9 => Ok(raster_layers
+            9 => Ok(standard_layers
                 .first()
                 .and_then(|layer| layer.planes.first())
                 .map_or(ConcreteAction::InvalidDeleteLayer, |plane| {
@@ -827,7 +837,7 @@ fn resolve_action(
                         ResultClass::Success,
                     )
                 })),
-            10 => Ok(raster_layers
+            10 => Ok(standard_layers
                 .first()
                 .and_then(|layer| layer.planes.first())
                 .map_or(ConcreteAction::InvalidDeleteLayer, |plane| {
@@ -840,11 +850,17 @@ fn resolve_action(
                         ResultClass::NoOp,
                     )
                 })),
-            11 => Ok(raster_layers
+            11 => Ok(standard_layers
                 .iter()
-                .find(|layer| layer.planes.len() > 1)
-                .map_or(ConcreteAction::InvalidDeleteLayer, |layer| {
-                    ConcreteAction::DeletePlane(layer.planes.last().unwrap().id)
+                .find_map(|layer| {
+                    layer
+                        .planes
+                        .iter()
+                        .rev()
+                        .find(|plane| plane.kind == PlaneType::Raster)
+                })
+                .map_or(ConcreteAction::InvalidDeleteLayer, |plane| {
+                    ConcreteAction::DeletePlane(plane.id)
                 })),
             _ => Ok(ConcreteAction::InvalidDeleteLayer),
         },
@@ -1505,21 +1521,12 @@ fn redo_branch_savepoint_and_failed_target_creation_remain_observable_contracts(
     let primary = core.document_info().unwrap().layer_id;
     let failed_before = CoreObservation::capture(&mut core).unwrap();
     assert!(
-        core.create_plane(
-            primary,
-            PlaneType::Selection,
-            PixelFormat::BinaryMask8,
-            "Invalid",
-        )
-        .is_err()
+        core.create_plane(primary, PixelFormat::BinaryMask8, "Invalid")
+            .is_err()
     );
     assert_eq!(CoreObservation::capture(&mut core).unwrap(), failed_before);
-    let (_, after_failed_id) = core
-        .create_layer(LayerKind::Raster, "After failed ID")
-        .unwrap();
-    let (_, control_id) = control
-        .create_layer(LayerKind::Raster, "Control ID")
-        .unwrap();
+    let (_, after_failed_id) = core.create_layer("After failed ID").unwrap();
+    let (_, control_id) = control.create_layer("Control ID").unwrap();
     assert_eq!(
         after_failed_id, control_id,
         "target-changing topology must stage stable IDs until commit"

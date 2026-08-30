@@ -13,10 +13,25 @@ use inkpod_image::{
 use std::sync::Arc;
 
 const INVOCATION_SCHEMA_VERSION: u16 = 2;
+const CREATE_LAYER_INVOCATION_SCHEMA_VERSION: u16 = 3;
+const CREATE_PLANE_INVOCATION_SCHEMA_VERSION: u16 = 3;
+const CONVERT_PLANE_INVOCATION_SCHEMA_VERSION: u16 = 3;
+const EDIT_TARGETS_INVOCATION_SCHEMA_VERSION: u16 = 3;
+const APPLY_BATCH_OPERATIONS_INVOCATION_SCHEMA_VERSION: u16 = 3;
 const COMMIT_FLOATING_INVOCATION_SCHEMA_VERSION: u16 = 3;
 
 const fn invocation_schema_version(primitive_id: PrimitiveId) -> u16 {
-    if primitive_id.get() == PrimitiveId::COMMIT_FLOATING.get() {
+    if primitive_id.get() == PrimitiveId::CREATE_LAYER.get() {
+        CREATE_LAYER_INVOCATION_SCHEMA_VERSION
+    } else if primitive_id.get() == PrimitiveId::CREATE_PLANE.get() {
+        CREATE_PLANE_INVOCATION_SCHEMA_VERSION
+    } else if primitive_id.get() == PrimitiveId::CONVERT_PLANE.get() {
+        CONVERT_PLANE_INVOCATION_SCHEMA_VERSION
+    } else if primitive_id.get() == PrimitiveId::EDIT_TARGETS.get() {
+        EDIT_TARGETS_INVOCATION_SCHEMA_VERSION
+    } else if primitive_id.get() == PrimitiveId::APPLY_BATCH_OPERATIONS.get() {
+        APPLY_BATCH_OPERATIONS_INVOCATION_SCHEMA_VERSION
+    } else if primitive_id.get() == PrimitiveId::COMMIT_FLOATING.get() {
         COMMIT_FLOATING_INVOCATION_SCHEMA_VERSION
     } else {
         INVOCATION_SCHEMA_VERSION
@@ -31,7 +46,6 @@ pub(crate) enum CanonicalInvocation {
         frames: FrameMetadata,
     },
     CreateLayer {
-        kind: LayerKind,
         name: String,
     },
     DuplicateLayer {
@@ -53,7 +67,6 @@ pub(crate) enum CanonicalInvocation {
     },
     CreatePlane {
         layer_id: u64,
-        kind: PlaneType,
         format: PixelFormat,
         name: String,
     },
@@ -76,15 +89,10 @@ pub(crate) enum CanonicalInvocation {
     },
     ConvertPlane {
         plane_id: u64,
-        destination_kind: PlaneType,
         destination_format: PixelFormat,
     },
     MergePlane {
         plane_id: u64,
-    },
-    ConvertLayer {
-        layer_id: u64,
-        destination: LayerKind,
     },
     MergeLayer {
         layer_id: u64,
@@ -96,9 +104,6 @@ pub(crate) enum CanonicalInvocation {
     },
     EditShootingFrame {
         edit: ShootingFrameEdit,
-    },
-    EditVanishingPoints {
-        edits: Vec<VanishingPointEdit>,
     },
     AddGuide {
         axis: GuideAxis,
@@ -183,14 +188,6 @@ pub(crate) enum CanonicalInvocation {
         plane_id: u64,
         filter: Filter,
     },
-    CreateAdjustmentLayer {
-        name: String,
-        adjustment: Adjustment,
-    },
-    UpdateAdjustmentLayer {
-        layer_id: u64,
-        adjustment: Adjustment,
-    },
     ReplaceRasterColors {
         plane_id: u64,
         pairs: Vec<BatchColorPair>,
@@ -237,12 +234,19 @@ pub(crate) enum CanonicalInvocation {
         operation: SelectionOperation,
         base_revision: u64,
     },
-    SelectionToLayer {
+    SaveSelectionMask {
         name: String,
     },
-    SelectionFromLayer {
-        layer_id: u64,
-        operation: SelectionLayerOperation,
+    ApplySavedSelectionMask {
+        saved_selection_id: SavedSelectionId,
+        operation: SavedSelectionOperation,
+    },
+    RenameSavedSelectionMask {
+        saved_selection_id: SavedSelectionId,
+        name: String,
+    },
+    DeleteSavedSelectionMask {
+        saved_selection_id: SavedSelectionId,
     },
     ClearSelectedContent {
         target: EditorTarget,
@@ -490,7 +494,6 @@ fn decode_persistent_invocation(
         }
     } else if primitive_id == PrimitiveId::CREATE_LAYER {
         CanonicalInvocation::CreateLayer {
-            kind: reader.layer_kind()?,
             name: reader.string()?,
         }
     } else if primitive_id == PrimitiveId::DUPLICATE_LAYER {
@@ -517,7 +520,6 @@ fn decode_persistent_invocation(
     } else if primitive_id == PrimitiveId::CREATE_PLANE {
         CanonicalInvocation::CreatePlane {
             layer_id: reader.u64()?,
-            kind: reader.plane_type()?,
             format: reader.pixel_format()?,
             name: reader.string()?,
         }
@@ -545,17 +547,11 @@ fn decode_persistent_invocation(
     } else if primitive_id == PrimitiveId::CONVERT_PLANE {
         CanonicalInvocation::ConvertPlane {
             plane_id: reader.u64()?,
-            destination_kind: reader.plane_type()?,
             destination_format: reader.pixel_format()?,
         }
     } else if primitive_id == PrimitiveId::MERGE_PLANE {
         CanonicalInvocation::MergePlane {
             plane_id: reader.u64()?,
-        }
-    } else if primitive_id == PrimitiveId::CONVERT_LAYER {
-        CanonicalInvocation::ConvertLayer {
-            layer_id: reader.u64()?,
-            destination: reader.layer_kind()?,
         }
     } else if primitive_id == PrimitiveId::MERGE_LAYER {
         CanonicalInvocation::MergeLayer {
@@ -593,10 +589,6 @@ fn decode_persistent_invocation(
     } else if primitive_id == PrimitiveId::EDIT_SHOOTING_FRAME {
         CanonicalInvocation::EditShootingFrame {
             edit: reader.shooting_frame_edit()?,
-        }
-    } else if primitive_id == PrimitiveId::EDIT_VANISHING_POINTS {
-        CanonicalInvocation::EditVanishingPoints {
-            edits: reader.vanishing_point_edits()?,
         }
     } else if primitive_id == PrimitiveId::ADD_GUIDE {
         CanonicalInvocation::AddGuide {
@@ -706,16 +698,6 @@ fn decode_persistent_invocation(
             plane_id: reader.u64()?,
             filter: reader.filter()?,
         }
-    } else if primitive_id == PrimitiveId::CREATE_ADJUSTMENT_LAYER {
-        CanonicalInvocation::CreateAdjustmentLayer {
-            name: reader.string()?,
-            adjustment: reader.adjustment()?,
-        }
-    } else if primitive_id == PrimitiveId::UPDATE_ADJUSTMENT_LAYER {
-        CanonicalInvocation::UpdateAdjustmentLayer {
-            layer_id: reader.u64()?,
-            adjustment: reader.adjustment()?,
-        }
     } else if primitive_id == PrimitiveId::REPLACE_RASTER_COLORS {
         CanonicalInvocation::ReplaceRasterColors {
             plane_id: reader.u64()?,
@@ -776,14 +758,23 @@ fn decode_persistent_invocation(
             operation: reader.selection_operation()?,
             base_revision: reader.u64()?,
         }
-    } else if primitive_id == PrimitiveId::SELECTION_TO_LAYER {
-        CanonicalInvocation::SelectionToLayer {
+    } else if primitive_id == PrimitiveId::SAVE_SELECTION_MASK {
+        CanonicalInvocation::SaveSelectionMask {
             name: reader.string()?,
         }
-    } else if primitive_id == PrimitiveId::SELECTION_FROM_LAYER {
-        CanonicalInvocation::SelectionFromLayer {
-            layer_id: reader.u64()?,
-            operation: reader.selection_layer_operation()?,
+    } else if primitive_id == PrimitiveId::APPLY_SAVED_SELECTION_MASK {
+        CanonicalInvocation::ApplySavedSelectionMask {
+            saved_selection_id: reader.saved_selection_id()?,
+            operation: reader.saved_selection_operation()?,
+        }
+    } else if primitive_id == PrimitiveId::RENAME_SAVED_SELECTION_MASK {
+        CanonicalInvocation::RenameSavedSelectionMask {
+            saved_selection_id: reader.saved_selection_id()?,
+            name: reader.string()?,
+        }
+    } else if primitive_id == PrimitiveId::DELETE_SAVED_SELECTION_MASK {
+        CanonicalInvocation::DeleteSavedSelectionMask {
+            saved_selection_id: reader.saved_selection_id()?,
         }
     } else if primitive_id == PrimitiveId::CLEAR_SELECTED_CONTENT {
         CanonicalInvocation::ClearSelectedContent {
@@ -1020,12 +1011,10 @@ impl CanonicalInvocation {
             Self::SetPlaneProperties { .. } => PrimitiveId::SET_PLANE_PROPERTIES,
             Self::ConvertPlane { .. } => PrimitiveId::CONVERT_PLANE,
             Self::MergePlane { .. } => PrimitiveId::MERGE_PLANE,
-            Self::ConvertLayer { .. } => PrimitiveId::CONVERT_LAYER,
             Self::MergeLayer { .. } => PrimitiveId::MERGE_LAYER,
             Self::DeleteHiddenLayers => PrimitiveId::DELETE_HIDDEN_LAYERS,
             Self::EditTargets { .. } => PrimitiveId::EDIT_TARGETS,
             Self::EditShootingFrame { .. } => PrimitiveId::EDIT_SHOOTING_FRAME,
-            Self::EditVanishingPoints { .. } => PrimitiveId::EDIT_VANISHING_POINTS,
             Self::AddGuide { .. } => PrimitiveId::ADD_GUIDE,
             Self::MoveGuide { .. } => PrimitiveId::MOVE_GUIDE,
             Self::DeleteGuide { .. } => PrimitiveId::DELETE_GUIDE,
@@ -1047,8 +1036,6 @@ impl CanonicalInvocation {
             Self::EditPlaneAlpha { .. } => PrimitiveId::EDIT_PLANE_ALPHA,
             Self::ApplyAlphaGradient { .. } => PrimitiveId::APPLY_ALPHA_GRADIENT,
             Self::ApplyFilter { .. } => PrimitiveId::APPLY_FILTER,
-            Self::CreateAdjustmentLayer { .. } => PrimitiveId::CREATE_ADJUSTMENT_LAYER,
-            Self::UpdateAdjustmentLayer { .. } => PrimitiveId::UPDATE_ADJUSTMENT_LAYER,
             Self::ReplaceRasterColors { .. } => PrimitiveId::REPLACE_RASTER_COLORS,
             Self::ScopedColorReplace { .. } => PrimitiveId::SCOPED_COLOR_REPLACE,
             Self::SeparateRasterColors { .. } => PrimitiveId::SEPARATE_RASTER_COLORS,
@@ -1060,8 +1047,10 @@ impl CanonicalInvocation {
             Self::ResizeSelection { .. } => PrimitiveId::RESIZE_SELECTION,
             Self::SelectColor { .. } => PrimitiveId::SELECT_COLOR,
             Self::SelectOutputColorGuard { .. } => PrimitiveId::SELECT_OUTPUT_COLOR_GUARD,
-            Self::SelectionToLayer { .. } => PrimitiveId::SELECTION_TO_LAYER,
-            Self::SelectionFromLayer { .. } => PrimitiveId::SELECTION_FROM_LAYER,
+            Self::SaveSelectionMask { .. } => PrimitiveId::SAVE_SELECTION_MASK,
+            Self::ApplySavedSelectionMask { .. } => PrimitiveId::APPLY_SAVED_SELECTION_MASK,
+            Self::RenameSavedSelectionMask { .. } => PrimitiveId::RENAME_SAVED_SELECTION_MASK,
+            Self::DeleteSavedSelectionMask { .. } => PrimitiveId::DELETE_SAVED_SELECTION_MASK,
             Self::ClearSelectedContent { .. } => PrimitiveId::CLEAR_SELECTED_CONTENT,
             Self::CommitFloating { .. } => PrimitiveId::COMMIT_FLOATING,
             Self::MirrorDocument { .. } => PrimitiveId::MIRROR_DOCUMENT,
@@ -1091,7 +1080,6 @@ impl CanonicalInvocation {
             | Self::DeleteLayer { layer_id }
             | Self::ReorderLayer { layer_id, .. }
             | Self::SetLayerProperties { layer_id, .. }
-            | Self::ConvertLayer { layer_id, .. }
             | Self::MergeLayer { layer_id } => vec![*layer_id],
             Self::EditTargets { targets, .. } => targets
                 .iter()
@@ -1105,17 +1093,6 @@ impl CanonicalInvocation {
                 ShootingFrameEdit::Update { frame_id, .. }
                 | ShootingFrameEdit::Delete { frame_id } => vec![*frame_id],
             },
-            Self::EditVanishingPoints { edits } => edits
-                .iter()
-                .flat_map(|edit| match edit {
-                    VanishingPointEdit::Create(input) => vec![input.layer_id],
-                    VanishingPointEdit::Update { point_id, input } => {
-                        vec![*point_id, input.layer_id]
-                    }
-                    VanishingPointEdit::Delete { point_id } => vec![*point_id],
-                    VanishingPointEdit::DeleteAll => Vec::new(),
-                })
-                .collect(),
             Self::CreatePlane { layer_id, .. } => vec![*layer_id],
             Self::DuplicatePlane { plane_id }
             | Self::DeletePlane { plane_id }
@@ -1156,8 +1133,15 @@ impl CanonicalInvocation {
                         .flat_map(|target| target.layer_id.into_iter().chain(target.plane_id))
                 })
                 .collect(),
-            Self::UpdateAdjustmentLayer { layer_id, .. } => vec![*layer_id],
-            Self::SelectionFromLayer { layer_id, .. } => vec![*layer_id],
+            Self::ApplySavedSelectionMask {
+                saved_selection_id, ..
+            }
+            | Self::RenameSavedSelectionMask {
+                saved_selection_id, ..
+            }
+            | Self::DeleteSavedSelectionMask { saved_selection_id } => {
+                vec![saved_selection_id.get()]
+            }
             Self::CommitFloating { floating } => match &floating.destination {
                 FloatingDestination::ExistingPlanes(plane_ids) => {
                     plane_ids.iter().map(|plane_id| plane_id.get()).collect()
@@ -1187,14 +1171,13 @@ impl CanonicalInvocation {
             | Self::ClearSelection
             | Self::ResizeSelection { .. }
             | Self::SelectOutputColorGuard { .. }
-            | Self::SelectionToLayer { .. }
+            | Self::SaveSelectionMask { .. }
             | Self::MirrorDocument { .. }
             | Self::RotateDocument { .. }
             | Self::ResizeDocument { .. } => Vec::new(),
             Self::LightTableSetGlobalOpacity { .. }
             | Self::LightTableCreateSet { .. }
-            | Self::LightTableAddItem { .. }
-            | Self::CreateAdjustmentLayer { .. } => Vec::new(),
+            | Self::LightTableAddItem { .. } => Vec::new(),
         }
     }
 
@@ -1221,8 +1204,8 @@ impl CanonicalInvocation {
             Self::UpdatePaperFrames { frames } => core
                 .update_paper_frames(*frames)
                 .map(InvocationResult::dispatch),
-            Self::CreateLayer { kind, name } => core
-                .create_layer(*kind, name)
+            Self::CreateLayer { name } => core
+                .create_layer(name)
                 .map(|(dispatch, id)| InvocationResult::output(dispatch, id)),
             Self::DuplicateLayer { layer_id } => core
                 .duplicate_layer(*layer_id)
@@ -1252,11 +1235,10 @@ impl CanonicalInvocation {
                 .map(InvocationResult::dispatch),
             Self::CreatePlane {
                 layer_id,
-                kind,
                 format,
                 name,
             } => core
-                .create_plane(*layer_id, *kind, *format, name)
+                .create_plane(*layer_id, *format, name)
                 .map(|(dispatch, id)| InvocationResult::output(dispatch, id)),
             Self::DuplicatePlane { plane_id } => core
                 .duplicate_plane(*plane_id)
@@ -1286,19 +1268,12 @@ impl CanonicalInvocation {
                 .map(InvocationResult::dispatch),
             Self::ConvertPlane {
                 plane_id,
-                destination_kind,
                 destination_format,
             } => core
-                .convert_plane(*plane_id, *destination_kind, *destination_format)
+                .convert_plane(*plane_id, *destination_format)
                 .map(InvocationResult::dispatch),
             Self::MergePlane { plane_id } => core
                 .merge_plane_into_below(*plane_id)
-                .map(InvocationResult::dispatch),
-            Self::ConvertLayer {
-                layer_id,
-                destination,
-            } => core
-                .convert_layer(*layer_id, *destination)
                 .map(InvocationResult::dispatch),
             Self::MergeLayer { layer_id } => core
                 .merge_layer_into_below(*layer_id)
@@ -1327,17 +1302,6 @@ impl CanonicalInvocation {
                             accepted_commands: 1,
                         },
                         outcome.frame_id().into_iter().collect(),
-                    )
-                })
-            }
-            Self::EditVanishingPoints { edits } => {
-                core.apply_vanishing_point_edits(edits).map(|outcome| {
-                    InvocationResult::outputs(
-                        DispatchOutcome {
-                            revision: outcome.revision(),
-                            accepted_commands: 1,
-                        },
-                        outcome.point_ids().to_vec(),
                     )
                 })
             }
@@ -1446,15 +1410,6 @@ impl CanonicalInvocation {
                 core.begin_filter_preview(*plane_id, filter.clone())?;
                 core.apply_filter_preview().map(InvocationResult::dispatch)
             }
-            Self::CreateAdjustmentLayer { name, adjustment } => core
-                .create_adjustment_layer(name, adjustment.clone())
-                .map(|(dispatch, id)| InvocationResult::output(dispatch, id)),
-            Self::UpdateAdjustmentLayer {
-                layer_id,
-                adjustment,
-            } => core
-                .update_adjustment_layer(*layer_id, adjustment.clone())
-                .map(InvocationResult::dispatch),
             Self::ReplaceRasterColors { plane_id, pairs } => {
                 crate::batch::apply_color_replacement(core, *plane_id, pairs, &mut |_, _| true)
                     .map(InvocationResult::dispatch)
@@ -1521,14 +1476,23 @@ impl CanonicalInvocation {
             } => core
                 .select_output_color_guard(*profile, *operation, *base_revision)
                 .map(|result| InvocationResult::dispatch(result.dispatch)),
-            Self::SelectionToLayer { name } => core
-                .selection_to_layer(name)
-                .map(|(dispatch, id)| InvocationResult::output(dispatch, id)),
-            Self::SelectionFromLayer {
-                layer_id,
+            Self::SaveSelectionMask { name } => core
+                .save_selection_mask(name)
+                .map(|(dispatch, id)| InvocationResult::output(dispatch, id.get())),
+            Self::ApplySavedSelectionMask {
+                saved_selection_id,
                 operation,
             } => core
-                .selection_from_layer(*layer_id, *operation)
+                .apply_saved_selection_mask(*saved_selection_id, *operation)
+                .map(InvocationResult::dispatch),
+            Self::RenameSavedSelectionMask {
+                saved_selection_id,
+                name,
+            } => core
+                .rename_saved_selection_mask(*saved_selection_id, name)
+                .map(InvocationResult::dispatch),
+            Self::DeleteSavedSelectionMask { saved_selection_id } => core
+                .delete_saved_selection_mask(*saved_selection_id)
                 .map(InvocationResult::dispatch),
             Self::ClearSelectedContent { target } => core
                 .clear_selected_content_for_editor_target(*target)
@@ -1614,10 +1578,7 @@ impl CanonicalInvocation {
         let mut writer = CanonicalWriter::new(self.primitive_id());
         match self {
             Self::UpdatePaperFrames { frames } => writer.frames(*frames),
-            Self::CreateLayer { kind, name } => {
-                writer.u32(layer_kind_code(*kind));
-                writer.string(name)?;
-            }
+            Self::CreateLayer { name } => writer.string(name)?,
             Self::DuplicateLayer { layer_id }
             | Self::DeleteLayer { layer_id }
             | Self::MergeLayer { layer_id } => writer.u64(*layer_id),
@@ -1642,7 +1603,6 @@ impl CanonicalInvocation {
                 write_edit_target_command(&mut writer, *command);
             }
             Self::EditShootingFrame { edit } => writer.shooting_frame_edit(*edit),
-            Self::EditVanishingPoints { edits } => writer.vanishing_point_edits(edits)?,
             Self::ReorderLayer {
                 layer_id,
                 destination_index,
@@ -1665,12 +1625,10 @@ impl CanonicalInvocation {
             }
             Self::CreatePlane {
                 layer_id,
-                kind,
                 format,
                 name,
             } => {
                 writer.u64(*layer_id);
-                writer.u32(plane_type_code(*kind));
                 writer.u32(pixel_format_code(*format));
                 writer.string(name)?;
             }
@@ -1699,19 +1657,10 @@ impl CanonicalInvocation {
             }
             Self::ConvertPlane {
                 plane_id,
-                destination_kind,
                 destination_format,
             } => {
                 writer.u64(*plane_id);
-                writer.u32(plane_type_code(*destination_kind));
                 writer.u32(pixel_format_code(*destination_format));
-            }
-            Self::ConvertLayer {
-                layer_id,
-                destination,
-            } => {
-                writer.u64(*layer_id);
-                writer.u32(layer_kind_code(*destination));
             }
             Self::AddGuide { axis, position } => {
                 writer.u32(guide_axis_code(*axis));
@@ -1819,17 +1768,6 @@ impl CanonicalInvocation {
                 writer.u64(*plane_id);
                 writer.filter(filter)?;
             }
-            Self::CreateAdjustmentLayer { name, adjustment } => {
-                writer.string(name)?;
-                writer.adjustment(adjustment)?;
-            }
-            Self::UpdateAdjustmentLayer {
-                layer_id,
-                adjustment,
-            } => {
-                writer.u64(*layer_id);
-                writer.adjustment(adjustment)?;
-            }
             Self::ReplaceRasterColors { plane_id, pairs } => {
                 writer.u64(*plane_id);
                 writer.batch_color_pairs(pairs)?;
@@ -1898,13 +1836,23 @@ impl CanonicalInvocation {
                 writer.u32(selection_operation_code(*operation));
                 writer.u64(*base_revision);
             }
-            Self::SelectionToLayer { name } => writer.string(name)?,
-            Self::SelectionFromLayer {
-                layer_id,
+            Self::SaveSelectionMask { name } => writer.string(name)?,
+            Self::ApplySavedSelectionMask {
+                saved_selection_id,
                 operation,
             } => {
-                writer.u64(*layer_id);
-                writer.u32(selection_layer_operation_code(*operation));
+                writer.u64(saved_selection_id.get());
+                writer.u32(saved_selection_operation_code(*operation));
+            }
+            Self::RenameSavedSelectionMask {
+                saved_selection_id,
+                name,
+            } => {
+                writer.u64(saved_selection_id.get());
+                writer.string(name)?;
+            }
+            Self::DeleteSavedSelectionMask { saved_selection_id } => {
+                writer.u64(saved_selection_id.get());
             }
             Self::ClearSelectedContent { target } => writer.editor_target(*target),
             Self::CommitFloating { floating } => writer.floating(floating)?,
@@ -2145,12 +2093,10 @@ pub(super) const fn schema_version(primitive_id: PrimitiveId) -> Option<u16> {
         || value == PrimitiveId::SET_PLANE_PROPERTIES.get()
         || value == PrimitiveId::CONVERT_PLANE.get()
         || value == PrimitiveId::MERGE_PLANE.get()
-        || value == PrimitiveId::CONVERT_LAYER.get()
         || value == PrimitiveId::MERGE_LAYER.get()
         || value == PrimitiveId::DELETE_HIDDEN_LAYERS.get()
         || value == PrimitiveId::EDIT_TARGETS.get()
         || value == PrimitiveId::EDIT_SHOOTING_FRAME.get()
-        || value == PrimitiveId::EDIT_VANISHING_POINTS.get()
         || value == PrimitiveId::ADD_GUIDE.get()
         || value == PrimitiveId::MOVE_GUIDE.get()
         || value == PrimitiveId::DELETE_GUIDE.get()
@@ -2170,8 +2116,6 @@ pub(super) const fn schema_version(primitive_id: PrimitiveId) -> Option<u16> {
         || value == PrimitiveId::EDIT_PLANE_ALPHA.get()
         || value == PrimitiveId::APPLY_ALPHA_GRADIENT.get()
         || value == PrimitiveId::APPLY_FILTER.get()
-        || value == PrimitiveId::CREATE_ADJUSTMENT_LAYER.get()
-        || value == PrimitiveId::UPDATE_ADJUSTMENT_LAYER.get()
         || value == PrimitiveId::REPLACE_RASTER_COLORS.get()
         || value == PrimitiveId::SCOPED_COLOR_REPLACE.get()
         || value == PrimitiveId::SEPARATE_RASTER_COLORS.get()
@@ -2183,8 +2127,10 @@ pub(super) const fn schema_version(primitive_id: PrimitiveId) -> Option<u16> {
         || value == PrimitiveId::RESIZE_SELECTION.get()
         || value == PrimitiveId::SELECT_COLOR.get()
         || value == PrimitiveId::SELECT_OUTPUT_COLOR_GUARD.get()
-        || value == PrimitiveId::SELECTION_TO_LAYER.get()
-        || value == PrimitiveId::SELECTION_FROM_LAYER.get()
+        || value == PrimitiveId::SAVE_SELECTION_MASK.get()
+        || value == PrimitiveId::APPLY_SAVED_SELECTION_MASK.get()
+        || value == PrimitiveId::RENAME_SAVED_SELECTION_MASK.get()
+        || value == PrimitiveId::DELETE_SAVED_SELECTION_MASK.get()
         || value == PrimitiveId::CLEAR_SELECTED_CONTENT.get()
         || value == PrimitiveId::COMMIT_FLOATING.get()
         || value == PrimitiveId::MIRROR_DOCUMENT.get()
@@ -2271,6 +2217,11 @@ impl<'a> CanonicalReader<'a> {
         Ok(u64::from_le_bytes(self.array()?))
     }
 
+    fn saved_selection_id(&mut self) -> Result<SavedSelectionId, CoreError> {
+        SavedSelectionId::from_raw(self.u64()?)
+            .ok_or_else(|| self.invalid("canonical saved-selection ID is zero"))
+    }
+
     fn i64(&mut self) -> Result<i64, CoreError> {
         Ok(i64::from_le_bytes(self.array()?))
     }
@@ -2306,21 +2257,6 @@ impl<'a> CanonicalReader<'a> {
         std::str::from_utf8(bytes)
             .map(str::to_owned)
             .map_err(|_| self.invalid("canonical string is not valid UTF-8"))
-    }
-
-    fn rgba_color(&mut self) -> Result<PixelValue, CoreError> {
-        let depth = self.u32()?;
-        let channels = [self.u16()?, self.u16()?, self.u16()?, self.u16()?];
-        match depth {
-            8 if channels
-                .iter()
-                .all(|channel| *channel <= u16::from(u8::MAX)) =>
-            {
-                Ok(PixelValue::Rgba(channels.map(|channel| channel as u8)))
-            }
-            16 => Ok(PixelValue::Rgba16(channels)),
-            _ => Err(self.invalid("canonical RGBA color depth is invalid")),
-        }
     }
 
     fn shooting_frame_edit(&mut self) -> Result<ShootingFrameEdit, CoreError> {
@@ -2360,42 +2296,6 @@ impl<'a> CanonicalReader<'a> {
             anchor,
             visible: self.boolean()?,
             include_in_instruction_export: self.boolean()?,
-        })
-    }
-
-    fn vanishing_point_edits(&mut self) -> Result<Vec<VanishingPointEdit>, CoreError> {
-        let count = self.count(1)?;
-        if count == 0 || count > MAX_VANISHING_POINT_EDITS {
-            return Err(self.invalid("canonical vanishing-point edit count is outside bounds"));
-        }
-        let mut edits = Vec::with_capacity(count);
-        for _ in 0..count {
-            edits.push(match self.u32()? {
-                1 => VanishingPointEdit::Create(self.vanishing_point_input()?),
-                2 => VanishingPointEdit::Update {
-                    point_id: self.u64()?,
-                    input: self.vanishing_point_input()?,
-                },
-                3 => VanishingPointEdit::Delete {
-                    point_id: self.u64()?,
-                },
-                4 => VanishingPointEdit::DeleteAll,
-                _ => return Err(self.invalid("canonical vanishing-point edit kind is unknown")),
-            });
-        }
-        Ok(edits)
-    }
-
-    fn vanishing_point_input(&mut self) -> Result<VanishingPointInput, CoreError> {
-        Ok(VanishingPointInput {
-            layer_id: self.u64()?,
-            x_milli: self.i64()?,
-            y_milli: self.i64()?,
-            interval_milli_degrees: self.u32()?,
-            angle_milli_degrees: self.u32()?,
-            color: self.rgba_color()?,
-            opacity_milli: self.u32()?,
-            visible: self.boolean()?,
         })
     }
 
@@ -2447,25 +2347,11 @@ impl<'a> CanonicalReader<'a> {
         })
     }
 
-    fn layer_kind(&mut self) -> Result<LayerKind, CoreError> {
-        match self.u32()? {
-            1 => Ok(LayerKind::BinaryColoring),
-            2 => Ok(LayerKind::GrayscaleColoring),
-            3 => Ok(LayerKind::Raster),
-            4 => Ok(LayerKind::Selection),
-            5 => Ok(LayerKind::Frame),
-            6 => Ok(LayerKind::VanishingPoint),
-            7 => Ok(LayerKind::Adjustment),
-            _ => Err(self.invalid("canonical layer kind is invalid")),
-        }
-    }
-
     fn plane_type(&mut self) -> Result<PlaneType, CoreError> {
         match self.u32()? {
             1 => Ok(PlaneType::MainLine),
             2 => Ok(PlaneType::Color),
             3 => Ok(PlaneType::Raster),
-            4 => Ok(PlaneType::Selection),
             _ => Err(self.invalid("canonical plane kind is invalid")),
         }
     }
@@ -2507,12 +2393,12 @@ impl<'a> CanonicalReader<'a> {
         }
     }
 
-    fn selection_layer_operation(&mut self) -> Result<SelectionLayerOperation, CoreError> {
+    fn saved_selection_operation(&mut self) -> Result<SavedSelectionOperation, CoreError> {
         match self.u32()? {
-            1 => Ok(SelectionLayerOperation::Replace),
-            2 => Ok(SelectionLayerOperation::Add),
-            3 => Ok(SelectionLayerOperation::Subtract),
-            _ => Err(self.invalid("canonical selection-layer operation is invalid")),
+            1 => Ok(SavedSelectionOperation::Replace),
+            2 => Ok(SavedSelectionOperation::Add),
+            3 => Ok(SavedSelectionOperation::Subtract),
+            _ => Err(self.invalid("canonical saved-selection operation is invalid")),
         }
     }
 
@@ -2847,22 +2733,6 @@ impl<'a> CanonicalReader<'a> {
         })
     }
 
-    fn adjustment(&mut self) -> Result<Adjustment, CoreError> {
-        Ok(match self.u32()? {
-            1 => Adjustment::BrightnessContrast {
-                brightness_milli: self.i32()?,
-                contrast_milli: self.i32()?,
-            },
-            2 => Adjustment::ToneCurve {
-                channel: self.channel()?,
-                interpolation: self.interpolation()?,
-                points: self.curve_points()?,
-            },
-            3 => Adjustment::Levels(self.levels()?),
-            _ => return Err(self.invalid("canonical adjustment kind is invalid")),
-        })
-    }
-
     fn batch_color_pairs(&mut self) -> Result<Vec<BatchColorPair>, CoreError> {
         let count = self.count(11)?;
         let mut result = Vec::with_capacity(count);
@@ -2910,7 +2780,6 @@ impl<'a> CanonicalReader<'a> {
             let enabled = self.boolean()?;
             let layer_id = self.boolean()?.then(|| self.u64()).transpose()?;
             let plane_id = self.boolean()?.then(|| self.u64()).transpose()?;
-            let layer_kind = self.boolean()?.then(|| self.layer_kind()).transpose()?;
             let plane_kind = self.boolean()?.then(|| self.plane_type()).transpose()?;
             let missing_policy = match self.u32()? {
                 1 => BatchMissingTargetPolicy::Skip,
@@ -2943,7 +2812,6 @@ impl<'a> CanonicalReader<'a> {
                 target: BatchTargetSelector {
                     layer_id,
                     plane_id,
-                    layer_kind,
                     plane_kind,
                     missing_policy,
                 },
@@ -3420,27 +3288,6 @@ impl CanonicalWriter {
         Ok(())
     }
 
-    fn rgba_color(&mut self, color: PixelValue) -> Result<(), CoreError> {
-        match color {
-            PixelValue::Rgba(channels) => {
-                self.u32(8);
-                for channel in channels {
-                    self.u16(u16::from(channel));
-                }
-            }
-            PixelValue::Rgba16(channels) => {
-                self.u32(16);
-                for channel in channels {
-                    self.u16(channel);
-                }
-            }
-            _ => {
-                return Err(CoreError::InvalidArgument("color must be straight RGBA"));
-            }
-        }
-        Ok(())
-    }
-
     fn shooting_frame_edit(&mut self, edit: ShootingFrameEdit) {
         match edit {
             ShootingFrameEdit::Create(input) => {
@@ -3474,43 +3321,6 @@ impl CanonicalWriter {
         });
         self.boolean(input.visible);
         self.boolean(input.include_in_instruction_export);
-    }
-
-    fn vanishing_point_edits(&mut self, edits: &[VanishingPointEdit]) -> Result<(), CoreError> {
-        self.u32(u32::try_from(edits.len()).map_err(|_| {
-            CoreError::InvalidArgument("vanishing-point edit count is not representable")
-        })?);
-        for edit in edits {
-            match *edit {
-                VanishingPointEdit::Create(input) => {
-                    self.u32(1);
-                    self.vanishing_point_input(input)?;
-                }
-                VanishingPointEdit::Update { point_id, input } => {
-                    self.u32(2);
-                    self.u64(point_id);
-                    self.vanishing_point_input(input)?;
-                }
-                VanishingPointEdit::Delete { point_id } => {
-                    self.u32(3);
-                    self.u64(point_id);
-                }
-                VanishingPointEdit::DeleteAll => self.u32(4),
-            }
-        }
-        Ok(())
-    }
-
-    fn vanishing_point_input(&mut self, input: VanishingPointInput) -> Result<(), CoreError> {
-        self.u64(input.layer_id);
-        self.i64(input.x_milli);
-        self.i64(input.y_milli);
-        self.u32(input.interval_milli_degrees);
-        self.u32(input.angle_milli_degrees);
-        self.rgba_color(input.color)?;
-        self.u32(input.opacity_milli);
-        self.boolean(input.visible);
-        Ok(())
     }
 
     fn rect(&mut self, rect: RectI32) {
@@ -3837,34 +3647,6 @@ impl CanonicalWriter {
         Ok(())
     }
 
-    fn adjustment(&mut self, adjustment: &Adjustment) -> Result<(), CoreError> {
-        match adjustment {
-            Adjustment::BrightnessContrast {
-                brightness_milli,
-                contrast_milli,
-            } => {
-                self.u32(1);
-                self.i32(*brightness_milli);
-                self.i32(*contrast_milli);
-            }
-            Adjustment::ToneCurve {
-                channel,
-                interpolation,
-                points,
-            } => {
-                self.u32(2);
-                self.channel(*channel);
-                self.interpolation(*interpolation);
-                self.curve_points(points)?;
-            }
-            Adjustment::Levels(levels) => {
-                self.u32(3);
-                self.levels(levels);
-            }
-        }
-        Ok(())
-    }
-
     fn batch_color_pairs(&mut self, pairs: &[BatchColorPair]) -> Result<(), CoreError> {
         let count = u32::try_from(pairs.len())
             .map_err(|_| CoreError::InvalidArgument("too many canonical color pairs"))?;
@@ -3921,10 +3703,6 @@ impl CanonicalWriter {
             self.boolean(operation.target.plane_id.is_some());
             if let Some(plane_id) = operation.target.plane_id {
                 self.u64(plane_id);
-            }
-            self.boolean(operation.target.layer_kind.is_some());
-            if let Some(layer_kind) = operation.target.layer_kind {
-                self.u32(layer_kind_code(layer_kind));
             }
             self.boolean(operation.target.plane_kind.is_some());
             if let Some(plane_kind) = operation.target.plane_kind {
@@ -4269,14 +4047,9 @@ fn write_edit_target_command(writer: &mut CanonicalWriter, command: EditTargetCo
             writer.u32(4);
             writer.boolean(value);
         }
-        EditTargetCommand::ConvertPlanes { kind, format } => {
+        EditTargetCommand::ConvertPlanes { format } => {
             writer.u32(5);
-            writer.u32(plane_type_code(kind));
             writer.u32(pixel_format_code(format));
-        }
-        EditTargetCommand::ConvertLayers { kind } => {
-            writer.u32(6);
-            writer.u32(layer_kind_code(kind));
         }
         EditTargetCommand::Merge => writer.u32(7),
     }
@@ -4291,11 +4064,7 @@ fn read_edit_target_command(
         3 => Ok(EditTargetCommand::SetVisibility(reader.boolean()?)),
         4 => Ok(EditTargetCommand::SetEditability(reader.boolean()?)),
         5 => Ok(EditTargetCommand::ConvertPlanes {
-            kind: reader.plane_type()?,
             format: reader.pixel_format()?,
-        }),
-        6 => Ok(EditTargetCommand::ConvertLayers {
-            kind: reader.layer_kind()?,
         }),
         7 => Ok(EditTargetCommand::Merge),
         _ => Err(CoreError::Format(
@@ -4304,24 +4073,11 @@ fn read_edit_target_command(
     }
 }
 
-const fn layer_kind_code(value: LayerKind) -> u32 {
-    match value {
-        LayerKind::BinaryColoring => 1,
-        LayerKind::GrayscaleColoring => 2,
-        LayerKind::Raster => 3,
-        LayerKind::Selection => 4,
-        LayerKind::Frame => 5,
-        LayerKind::VanishingPoint => 6,
-        LayerKind::Adjustment => 7,
-    }
-}
-
 const fn plane_type_code(value: PlaneType) -> u32 {
     match value {
         PlaneType::MainLine => 1,
         PlaneType::Color => 2,
         PlaneType::Raster => 3,
-        PlaneType::Selection => 4,
     }
 }
 
@@ -4385,11 +4141,11 @@ fn scoped_color_replace_mode(code: u32) -> Result<ScopedColorReplaceMode, CoreEr
     }
 }
 
-const fn selection_layer_operation_code(value: SelectionLayerOperation) -> u32 {
+const fn saved_selection_operation_code(value: SavedSelectionOperation) -> u32 {
     match value {
-        SelectionLayerOperation::Replace => 1,
-        SelectionLayerOperation::Add => 2,
-        SelectionLayerOperation::Subtract => 3,
+        SavedSelectionOperation::Replace => 1,
+        SavedSelectionOperation::Add => 2,
+        SavedSelectionOperation::Subtract => 3,
     }
 }
 

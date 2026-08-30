@@ -15,7 +15,7 @@ pub(crate) use io::{read, save_atomic, save_atomic_with_cancel};
 pub(crate) use model::TEMP_SEQUENCE;
 pub use model::{
     DocumentArchive, FileDocumentMetadata, FileGrid, FileGuide, FileLayer, FilePlane,
-    FilePlaneProperties, FileShootingFrame, FileShootingFrameAnchor, FileTile, FileVanishingPoint,
-    FormatError, FrameMetadata, GuideAxis, LayerKind, Margins, PlaneKind, RectI32, checksum,
+    FilePlaneProperties, FileSavedSelection, FileShootingFrame, FileShootingFrameAnchor, FileTile,
+    FormatError, FrameMetadata, GuideAxis, Margins, PlaneKind, RectI32, checksum,
 };
 pub(crate) use model::{MAX_MANIFEST_BYTES, MAX_NODE_NAME_BYTES, MAX_PLANES};

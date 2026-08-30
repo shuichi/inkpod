@@ -1,6 +1,29 @@
 use super::sequence::*;
 use super::*;
 
+/// Initializes a fresh coloring document without converting or splitting source pixels.
+pub(super) fn initialize_imported_main_line(
+    document: &mut CellDocument,
+    source: TileRaster,
+) -> Result<(), CoreError> {
+    if !matches!(
+        source.format(),
+        PixelFormat::StraightRgba8 | PixelFormat::StraightRgba16
+    ) {
+        return Err(CoreError::InvalidArgument(
+            "editable raster import requires straight RGBA",
+        ));
+    }
+    document.base_surface = BaseSurface::Transparent;
+    document.plane_for_role_mut(ActivePlane::Color)?.raster =
+        TileRaster::new(source.width(), source.height(), source.format())?;
+    document.plane_for_role_mut(ActivePlane::MainLine)?.raster = source;
+    // Keep opaque white as actual source pixels. Color is composed above this
+    // image so filling its white regions is visible without changing the main line.
+    document.layers[0].planes.reverse();
+    Ok(())
+}
+
 pub(super) fn validate_reference_frame(frame: RectI32) -> Result<(), CoreError> {
     if frame.width <= 0 || frame.height <= 0 {
         Err(CoreError::InvalidArgument(
@@ -34,7 +57,7 @@ pub(crate) fn flatten_document(
     bounded_document_pixels(document.width, document.height)?;
     let mut raster = TileRaster::new(document.width, document.height, PixelFormat::StraightRgba8)?;
     let base_asset = match document.base_surface {
-        BaseSurface::SolidWhite => None,
+        BaseSurface::SolidWhite | BaseSurface::Transparent => None,
         BaseSurface::Asset(id) => {
             let record = assets
                 .get(id)
@@ -73,7 +96,13 @@ struct CompositeDocumentSource<'a> {
 impl CompositeDocumentSource<'_> {
     fn pixel(&self, x: u32, y: u32) -> Result<[u8; 4], CoreError> {
         let mut composite = match self.base_asset {
-            None => [u8::MAX; 4],
+            None => {
+                [if self.document.base_surface == BaseSurface::SolidWhite {
+                    u8::MAX
+                } else {
+                    0
+                }; 4]
+            }
             Some(record) => base_raster_pixel(
                 record.raster().ok_or(CoreError::InvalidState(
                     "Genesis base asset stopped being a raster",
@@ -89,34 +118,11 @@ impl CompositeDocumentSource<'_> {
             .rev()
             .filter(|layer| layer.visible)
         {
-            if layer.kind == LayerKind::Adjustment {
-                let adjustment =
-                    self.document
-                        .adjustments
-                        .get(&layer.id)
-                        .ok_or(CoreError::InvalidState(
-                            "adjustment layer metadata is missing",
-                        ))?;
-                let adjusted =
-                    inkpod_image::apply_adjustment(PixelValue::Rgba(composite), adjustment)?
-                        .rgba16()
-                        .ok_or(CoreError::InvalidState(
-                            "adjustment output is not displayable",
-                        ))?
-                        .map(|channel| ((u32::from(channel) + 128) / 257) as u8);
-                composite = std::array::from_fn(|channel| {
-                    ((u32::from(composite[channel]) * (1_000 - layer.opacity_milli)
-                        + u32::from(adjusted[channel]) * layer.opacity_milli
-                        + 500)
-                        / 1_000) as u8
-                });
-                continue;
-            }
             let mut layer_pixel = [0_u8; 4];
             for plane in layer.planes.iter().rev().filter(|plane| plane.visible) {
                 let value = plane.raster.pixel(x, y)?;
                 let mut rgba = match plane.kind {
-                    PlaneType::MainLine => {
+                    PlaneType::MainLine if value.rgba16().is_none() => {
                         let coverage = match value {
                             PixelValue::Binary(value) | PixelValue::Grayscale8(value) => value,
                             PixelValue::Grayscale16(value) => {
@@ -131,9 +137,10 @@ impl CompositeDocumentSource<'_> {
                         line[3] = ((u32::from(line[3]) * u32::from(coverage) + 127) / 255) as u8;
                         line
                     }
-                    PlaneType::Color | PlaneType::Raster => rgba8_for_display(value)
-                        .ok_or(CoreError::InvalidState("flatten source is not RGBA"))?,
-                    PlaneType::Selection => continue,
+                    PlaneType::MainLine | PlaneType::Color | PlaneType::Raster => {
+                        rgba8_for_display(value)
+                            .ok_or(CoreError::InvalidState("flatten source is not RGBA"))?
+                    }
                 };
                 rgba[3] = ((u32::from(rgba[3]) * plane.opacity_milli + 500) / 1_000) as u8;
                 layer_pixel = blend_rgba_over(layer_pixel, rgba);
@@ -202,7 +209,7 @@ fn visit_document_composite_rgba16(
 ) -> Result<(), CoreError> {
     bounded_document_pixels(document.width, document.height)?;
     let base_asset = match document.base_surface {
-        BaseSurface::SolidWhite => None,
+        BaseSurface::SolidWhite | BaseSurface::Transparent => None,
         BaseSurface::Asset(id) => {
             let record = assets
                 .get(id)
@@ -221,7 +228,13 @@ fn visit_document_composite_rgba16(
     for y in 0..document.height {
         for x in 0..document.width {
             let mut composite = match &base_asset {
-                None => [if include_paper { u16::MAX } else { 0 }; 4],
+                None => {
+                    [if include_paper && document.base_surface == BaseSurface::SolidWhite {
+                        u16::MAX
+                    } else {
+                        0
+                    }; 4]
+                }
                 Some(record) => base_raster_pixel_rgba16(
                     record.raster().ok_or(CoreError::InvalidState(
                         "Genesis base asset stopped being a raster",
@@ -231,33 +244,11 @@ fn visit_document_composite_rgba16(
                 )?,
             };
             for layer in document.layers.iter().rev().filter(|layer| layer.visible) {
-                if layer.kind == LayerKind::Adjustment {
-                    let adjustment =
-                        document
-                            .adjustments
-                            .get(&layer.id)
-                            .ok_or(CoreError::InvalidState(
-                                "adjustment layer metadata is missing",
-                            ))?;
-                    let adjusted =
-                        inkpod_image::apply_adjustment(PixelValue::Rgba16(composite), adjustment)?
-                            .rgba16()
-                            .ok_or(CoreError::InvalidState(
-                                "adjustment output is not displayable",
-                            ))?;
-                    composite = std::array::from_fn(|channel| {
-                        ((u64::from(composite[channel]) * u64::from(1_000 - layer.opacity_milli)
-                            + u64::from(adjusted[channel]) * u64::from(layer.opacity_milli)
-                            + 500)
-                            / 1_000) as u16
-                    });
-                    continue;
-                }
                 let mut layer_pixel = [0_u16; 4];
                 for plane in layer.planes.iter().rev().filter(|plane| plane.visible) {
                     let value = plane.raster.pixel(x, y)?;
                     let mut rgba = match plane.kind {
-                        PlaneType::MainLine => {
+                        PlaneType::MainLine if value.rgba16().is_none() => {
                             let coverage = match value {
                                 PixelValue::Binary(value) | PixelValue::Grayscale8(value) => {
                                     u16::from(value) * 257
@@ -277,10 +268,11 @@ fn visit_document_composite_rgba16(
                                 as u16;
                             line
                         }
-                        PlaneType::Color | PlaneType::Raster => value.rgba16().ok_or(
-                            CoreError::InvalidState("visible composite source is not RGBA"),
-                        )?,
-                        PlaneType::Selection => continue,
+                        PlaneType::MainLine | PlaneType::Color | PlaneType::Raster => {
+                            value.rgba16().ok_or(CoreError::InvalidState(
+                                "visible composite source is not RGBA",
+                            ))?
+                        }
                     };
                     rgba[3] = ((u64::from(rgba[3]) * u64::from(plane.opacity_milli) + 500) / 1_000)
                         as u16;
@@ -504,7 +496,7 @@ pub(crate) fn thumbnail_for_document(
 ) -> Result<Thumbnail, CoreError> {
     bounded_document_pixels(document.width, document.height)?;
     let base_asset = match document.base_surface {
-        BaseSurface::SolidWhite => None,
+        BaseSurface::SolidWhite | BaseSurface::Transparent => None,
         BaseSurface::Asset(id) => {
             let record = assets
                 .get(id)

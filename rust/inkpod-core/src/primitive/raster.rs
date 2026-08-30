@@ -890,13 +890,17 @@ fn target_values(
             PixelValue::Grayscale16(u16::MAX),
             PixelValue::Grayscale16(0),
         )),
-        (PlaneType::Color | PlaneType::Raster, PixelFormat::StraightRgba8) => Ok((
+        (
+            PlaneType::MainLine | PlaneType::Color | PlaneType::Raster,
+            PixelFormat::StraightRgba8,
+        ) => Ok((
             PixelValue::Rgba(rgba16.map(|channel| ((u32::from(channel) + 128) / 257) as u8)),
             PixelValue::Rgba([0; 4]),
         )),
-        (PlaneType::Color | PlaneType::Raster, PixelFormat::StraightRgba16) => {
-            Ok((PixelValue::Rgba16(rgba16), PixelValue::Rgba16([0; 4])))
-        }
+        (
+            PlaneType::MainLine | PlaneType::Color | PlaneType::Raster,
+            PixelFormat::StraightRgba16,
+        ) => Ok((PixelValue::Rgba16(rgba16), PixelValue::Rgba16([0; 4]))),
         _ => Err(CoreError::InvalidState(
             "stroke target plane does not support raster painting",
         )),

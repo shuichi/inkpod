@@ -5,12 +5,12 @@ use crate::*;
 use blake3::hazmat::HasherExt;
 use std::sync::LazyLock;
 
-const DOCUMENT_STATE_CONTEXT: &str = "org.inkpod.digest.document-state.v9";
-const DOCUMENT_METADATA_CONTEXT: &str = "org.inkpod.digest.document-metadata.v6";
+const DOCUMENT_STATE_CONTEXT: &str = "org.inkpod.digest.document-state.v10";
+const DOCUMENT_METADATA_CONTEXT: &str = "org.inkpod.digest.document-metadata.v7";
 const DOCUMENT_RASTER_CONTEXT: &str = "org.inkpod.digest.document-raster.v1";
 const DOCUMENT_TILE_CONTEXT: &str = "org.inkpod.digest.document-raster-tile.v1";
 const PROCEDURE_PAYLOAD_CONTEXT: &str = "org.inkpod.digest.procedure-payload.v1";
-const DOCUMENT_STATE_SCHEMA_VERSION: u32 = 11;
+const DOCUMENT_STATE_SCHEMA_VERSION: u32 = 12;
 const DOCUMENT_TILE_SCHEMA_VERSION: u32 = 1;
 const PROCEDURE_PAYLOAD_SCHEMA_VERSION: u32 = 1;
 
@@ -245,6 +245,7 @@ fn canonical_document_metadata_bytes(
     let base_surface = match document.base_surface {
         BaseSurface::SolidWhite => frame(&[present(1_u32.to_le_bytes())])?,
         BaseSurface::Asset(id) => frame(&[present(2_u32.to_le_bytes()), present(id.into_bytes())])?,
+        BaseSurface::Transparent => frame(&[present(3_u32.to_le_bytes())])?,
     };
     let layer_tree = canonical_layer_tree(document, &tree.rasters)?;
     let selection =
@@ -257,6 +258,25 @@ fn canonical_document_metadata_bytes(
                 )?,
             )?),
         ])?;
+    let saved_selection_masks = document
+        .saved_selection_masks
+        .iter()
+        .map(|mask| {
+            frame(&[
+                present(mask.id.get().to_le_bytes()),
+                present(mask.name.as_bytes().to_vec()),
+                present(canonical_raster(
+                    &mask.raster,
+                    tree.rasters
+                        .get(&mask.id.get())
+                        .ok_or(CoreError::InvalidState(
+                            "canonical saved-selection raster cache is missing",
+                        ))?,
+                )?),
+            ])
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let saved_selection_masks = sequence(saved_selection_masks.iter().map(Vec::as_slice))?;
     let fill_protection = frame(&[
         present(document.fill_protection_plane_id.get().to_le_bytes()),
         present(canonical_raster(
@@ -360,6 +380,7 @@ fn canonical_document_metadata_bytes(
         present(base_surface),
         present(layer_tree),
         present(selection),
+        present(saved_selection_masks),
         present(fill_protection),
         present(palette),
         present(color_chart),
@@ -412,6 +433,18 @@ fn canonical_document_state_tree(
             "canonical selection plane ID is duplicated",
         ));
     }
+    for saved_selection in &document.saved_selection_masks {
+        let (raster, reads) = canonical_raster_commitment(&saved_selection.raster)?;
+        tile_payload_reads += reads;
+        if rasters
+            .insert(saved_selection.id.get(), Arc::new(raster))
+            .is_some()
+        {
+            return Err(CoreError::InvalidState(
+                "canonical saved-selection mask ID is duplicated",
+            ));
+        }
+    }
     let (fill_protection, reads) = canonical_raster_commitment(&document.fill_protection)?;
     tile_payload_reads += reads;
     if rasters
@@ -453,13 +486,12 @@ fn canonical_layer_tree(
     let layers = document
         .layers
         .iter()
-        .map(|layer| canonical_layer(document, layer, rasters))
+        .map(|layer| canonical_layer(layer, rasters))
         .collect::<Result<Vec<_>, _>>()?;
     sequence(layers.iter().map(Vec::as_slice))
 }
 
 fn canonical_layer(
-    document: &CellDocument,
     layer: &LayerNode,
     rasters: &BTreeMap<u64, Arc<CanonicalRasterCommitment>>,
 ) -> Result<Vec<u8>, CoreError> {
@@ -468,42 +500,13 @@ fn canonical_layer(
         .iter()
         .map(|plane| canonical_plane(plane, rasters))
         .collect::<Result<Vec<_>, _>>()?;
-    let adjustment = document
-        .adjustments
-        .get(&layer.id)
-        .map(canonical_adjustment)
-        .transpose()?;
-    let vanishing_points = document
-        .vanishing_points
-        .iter()
-        .filter(|object| object.input.layer_id == layer.id.get())
-        .map(canonical_vanishing_point)
-        .collect::<Result<Vec<_>, _>>()?;
     frame(&[
         present(layer.id.get().to_le_bytes()),
-        present(layer_kind_code(layer.kind).to_le_bytes()),
         present(layer.name.as_bytes().to_vec()),
         present(boolean_bytes(layer.visible)),
         present(boolean_bytes(layer.editable)),
         present(normalized_opacity(layer.opacity_milli)?.to_le_bytes()),
         present(sequence(planes.iter().map(Vec::as_slice))?),
-        adjustment,
-        present(sequence(vanishing_points.iter().map(Vec::as_slice))?),
-    ])
-}
-
-fn canonical_vanishing_point(object: &VanishingPointObject) -> Result<Vec<u8>, CoreError> {
-    let input = object.input;
-    frame(&[
-        present(object.id.get().to_le_bytes()),
-        present(input.layer_id.to_le_bytes()),
-        present(input.x_milli.to_le_bytes()),
-        present(input.y_milli.to_le_bytes()),
-        present(input.interval_milli_degrees.to_le_bytes()),
-        present(input.angle_milli_degrees.to_le_bytes()),
-        present(color_bytes(input.color)?),
-        present(normalized_opacity(input.opacity_milli)?.to_le_bytes()),
-        present(boolean_bytes(input.visible)),
     ])
 }
 
@@ -526,68 +529,6 @@ fn canonical_plane(
         present(boolean_bytes(plane.editable)),
         present(normalized_opacity(plane.opacity_milli)?.to_le_bytes()),
         present(raster),
-    ])
-}
-
-fn canonical_adjustment(adjustment: &Adjustment) -> Result<Vec<u8>, CoreError> {
-    let (kind, channel, interpolation, parameters, points) = match adjustment {
-        Adjustment::BrightnessContrast {
-            brightness_milli,
-            contrast_milli,
-        } => (
-            1_u32,
-            0_u32,
-            0_u32,
-            [*brightness_milli, *contrast_milli, 0, 0, 0, 0],
-            Vec::new(),
-        ),
-        Adjustment::ToneCurve {
-            channel,
-            interpolation,
-            points,
-        } => (
-            2_u32,
-            channel_code(*channel),
-            interpolation_code(*interpolation),
-            [0; 6],
-            points
-                .iter()
-                .map(|point| {
-                    let mut bytes = Vec::with_capacity(4);
-                    bytes.extend_from_slice(&point.input.to_le_bytes());
-                    bytes.extend_from_slice(&point.output.to_le_bytes());
-                    bytes
-                })
-                .collect(),
-        ),
-        Adjustment::Levels(levels) => (
-            3_u32,
-            channel_code(levels.channel),
-            0_u32,
-            [
-                i32::from(levels.input_shadow),
-                i32::try_from(levels.input_gamma_milli).map_err(|_| {
-                    CoreError::InvalidState("level gamma is not representable as i32")
-                })?,
-                i32::from(levels.input_highlight),
-                i32::from(levels.output_shadow),
-                i32::from(levels.output_highlight),
-                0,
-            ],
-            Vec::new(),
-        ),
-    };
-    frame(&[
-        present(kind.to_le_bytes()),
-        present(channel.to_le_bytes()),
-        present(interpolation.to_le_bytes()),
-        present(parameters[0].to_le_bytes()),
-        present(parameters[1].to_le_bytes()),
-        present(parameters[2].to_le_bytes()),
-        present(parameters[3].to_le_bytes()),
-        present(parameters[4].to_le_bytes()),
-        present(parameters[5].to_le_bytes()),
-        present(sequence(points.iter().map(Vec::as_slice))?),
     ])
 }
 
@@ -664,24 +605,11 @@ fn canonical_light_table(
     ])
 }
 
-const fn layer_kind_code(kind: LayerKind) -> u32 {
-    match kind {
-        LayerKind::BinaryColoring => 1,
-        LayerKind::GrayscaleColoring => 2,
-        LayerKind::Raster => 3,
-        LayerKind::Selection => 4,
-        LayerKind::Frame => 5,
-        LayerKind::VanishingPoint => 6,
-        LayerKind::Adjustment => 7,
-    }
-}
-
 const fn plane_kind_code(kind: PlaneType) -> u32 {
     match kind {
         PlaneType::MainLine => 1,
         PlaneType::Color => 2,
         PlaneType::Raster => 3,
-        PlaneType::Selection => 4,
     }
 }
 
@@ -695,22 +623,6 @@ fn pixel_format_code(format: PixelFormat) -> Result<u32, CoreError> {
         PixelFormat::PremultipliedBgra8 => Err(CoreError::InvalidState(
             "display-only pixel format cannot enter document-state digest",
         )),
-    }
-}
-
-const fn channel_code(channel: Channel) -> u32 {
-    match channel {
-        Channel::Rgb => 1,
-        Channel::Red => 2,
-        Channel::Green => 3,
-        Channel::Blue => 4,
-    }
-}
-
-const fn interpolation_code(interpolation: CurveInterpolation) -> u32 {
-    match interpolation {
-        CurveInterpolation::Bezier => 1,
-        CurveInterpolation::BSpline => 2,
     }
 }
 
@@ -790,7 +702,7 @@ fn round_ties_even(
 fn plane_has_semantic_raster(kind: PlaneType) -> bool {
     matches!(
         kind,
-        PlaneType::MainLine | PlaneType::Color | PlaneType::Raster | PlaneType::Selection
+        PlaneType::MainLine | PlaneType::Color | PlaneType::Raster
     )
 }
 
@@ -1293,7 +1205,7 @@ mod tests {
         let metadata = canonical_document_metadata_bytes(&document, &tree).unwrap();
         let fields = parsed_fields(&metadata);
 
-        assert_eq!(fields.len(), 17);
+        assert_eq!(fields.len(), 18);
         assert_eq!(fields[0].unwrap(), &document.uuid.to_be_bytes());
         assert_eq!(fields[1].unwrap(), &document.id.get().to_le_bytes());
         assert_eq!(
@@ -1311,7 +1223,9 @@ mod tests {
         );
         assert_eq!(parsed_fields(selection[1].unwrap()).len(), 5);
 
-        let fill_protection = parsed_fields(fields[7].unwrap());
+        assert!(parsed_sequence(fields[7].unwrap()).is_empty());
+
+        let fill_protection = parsed_fields(fields[8].unwrap());
         assert_eq!(fill_protection.len(), 2);
         assert_eq!(
             fill_protection[0].unwrap(),
@@ -1322,10 +1236,10 @@ mod tests {
         assert_eq!(
             digest.as_bytes(),
             &[
-                5, 123, 229, 235, 248, 18, 115, 116, 109, 86, 59, 149, 137, 213, 123, 107, 82, 34,
-                218, 239, 195, 92, 169, 84, 56, 187, 25, 108, 177, 47, 0, 8,
+                203, 191, 214, 136, 15, 167, 240, 11, 217, 13, 9, 87, 136, 228, 137, 226, 233, 22,
+                92, 214, 78, 114, 51, 58, 147, 183, 169, 231, 235, 199, 166, 238,
             ],
-            "schema-11 digest changes require an explicit golden update"
+            "schema-12 digest changes require an explicit golden update"
         );
     }
 
@@ -1391,7 +1305,7 @@ mod tests {
         let (tree, _) = canonical_document_state_tree(document).unwrap();
         let metadata = canonical_document_metadata_bytes(document, &tree).unwrap();
         let document_fields = parsed_fields(&metadata);
-        let light_table_fields = parsed_fields(document_fields[13].unwrap());
+        let light_table_fields = parsed_fields(document_fields[14].unwrap());
         let sets = parsed_sequence(light_table_fields[1].unwrap());
         let set_fields = parsed_fields(sets[0]);
         let items = parsed_sequence(set_fields[3].unwrap());

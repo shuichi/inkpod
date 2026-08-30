@@ -204,7 +204,7 @@ fn sequence_render_color_edit_after_preview_cancel_and_lru_revisit_updates_pixel
     // incorrectly expected the off-center point to have been painted too.
     assert_eq!(
         core.plane_pixel(ActivePlane::Color, 16, 12).unwrap(),
-        PixelValue::Rgba([32, 64, 96, 255])
+        PixelValue::Rgba([0, 0, 0, 0])
     );
     let edited = core.build_snapshot();
     assert_eq!(edited.sequence_render_source(), None);
@@ -259,9 +259,9 @@ fn sequence_render_pristine_identity_excludes_modes_previews_and_saved_edits() {
     assert_eq!(checked.sequence_render_source(), None);
     assert_eq!(&checked.tiles()[0].pixels()[..4], &[0, 0, 0, 255]);
     core.set_color_check(None).unwrap();
-    let color_plane = core.document_info().unwrap().color_plane_id;
+    let main_plane = core.document_info().unwrap().main_plane_id;
     core.begin_filter_preview(
-        color_plane,
+        main_plane,
         Filter::Invert {
             channel: Channel::Rgb,
         },
@@ -1759,7 +1759,7 @@ fn sequence_activate_and_step_start_clean_with_inherited_editor_settings() {
         after_activate.state.target,
         Some(EditorTarget {
             layer_id: activated.layer_id,
-            plane_id: activated.main_plane_id,
+            plane_id: activated.color_plane_id,
         })
     );
     assert!(!after_activate.dirty);
@@ -1778,7 +1778,7 @@ fn sequence_activate_and_step_start_clean_with_inherited_editor_settings() {
         after_step.state.target,
         Some(EditorTarget {
             layer_id: stepped.layer_id,
-            plane_id: stepped.main_plane_id,
+            plane_id: stepped.color_plane_id,
         })
     );
     assert!(!after_step.dirty);

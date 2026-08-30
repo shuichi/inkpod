@@ -309,8 +309,7 @@ fn hist_001_document_families_keep_the_journal_complete_and_replayable() {
     core.verify_journal_replay().unwrap();
     core.add_guide(GuideAxis::Vertical, 7).unwrap();
     core.verify_journal_replay().unwrap();
-    core.create_layer(LayerKind::Raster, "Replay raster")
-        .unwrap();
+    core.create_layer("Replay layer").unwrap();
     core.verify_journal_replay().unwrap();
     core.apply_selection(
         &SelectionShape::Rectangle(RectI32 {

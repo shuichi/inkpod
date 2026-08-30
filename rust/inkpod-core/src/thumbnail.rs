@@ -2,7 +2,7 @@
 
 use crate::document::{CellDocument, LayerNode};
 use crate::identity::LayerId;
-use crate::{Core, CoreError, LayerThumbnail, PixelValue, PlaneType};
+use crate::{Core, CoreError, LayerThumbnail, PixelFormat, PixelValue, PlaneType};
 use inkpod_image::source_over_rgba8;
 
 impl Core {
@@ -143,6 +143,14 @@ fn sample_layer_raster(
     let mut composite = [0_u8; 4];
     for plane in layer.planes.iter().rev().filter(|plane| plane.visible) {
         let mut rgba = match plane.kind {
+            PlaneType::MainLine
+                if matches!(
+                    plane.raster.format(),
+                    PixelFormat::StraightRgba8 | PixelFormat::StraightRgba16
+                ) =>
+            {
+                rgba8(plane.raster.pixel(x, y)?)
+            }
             PlaneType::MainLine => {
                 let coverage = match plane.raster.pixel(x, y)? {
                     PixelValue::Binary(value) | PixelValue::Grayscale8(value) => value,
@@ -158,14 +166,6 @@ fn sample_layer_raster(
                 line
             }
             PlaneType::Color | PlaneType::Raster => rgba8(plane.raster.pixel(x, y)?),
-            PlaneType::Selection => {
-                let PixelValue::Binary(coverage) = plane.raster.pixel(x, y)? else {
-                    return Err(CoreError::InvalidState(
-                        "selection thumbnail source is not binary",
-                    ));
-                };
-                [0, 160, 255, coverage / 3]
-            }
         };
         rgba[3] = ((u32::from(rgba[3]) * plane.opacity_milli + 500) / 1_000) as u8;
         composite = source_over_rgba8(composite, rgba);

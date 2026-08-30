@@ -162,16 +162,24 @@ impl Core {
 
     pub(crate) fn reset_editor_state(&mut self, saved: bool) {
         let target = self.document.as_ref().and_then(Self::first_editor_target);
+        self.editor_session = Some(self.initial_editor_session(target, saved));
+    }
+
+    pub(crate) fn initial_editor_session(
+        &self,
+        target: Option<EditorTarget>,
+        saved: bool,
+    ) -> EditorSessionState {
         let mut state = self.editor_defaults.state.clone();
         state.target = target;
         state.edit_targets.clear();
         let digest = state_digest(&state);
-        self.editor_session = Some(EditorSessionState {
+        EditorSessionState {
             state,
             revision: EditorRevision::INITIAL,
             digest,
             savepoint: saved.then_some(digest),
-        });
+        }
     }
 
     pub(crate) fn editor_dirty(&self) -> bool {

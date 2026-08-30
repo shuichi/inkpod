@@ -266,7 +266,7 @@ pub fn export_inkscript_fragment_with_limits(
     let strict_owners = augment_light_table_owner_bindings(&snapshot, &mut strict)?;
 
     let mut source = String::from(
-        "inkscript_fragment 2;\nrequires { procedure_catalog = 4; replay_epoch = 25; }\n",
+        "inkscript_fragment 2;\nrequires { procedure_catalog = 5; replay_epoch = 27; }\n",
     );
     if !strict.is_empty() {
         source.push_str("bindings {\n");
@@ -865,7 +865,6 @@ const fn plane_kind_name(value: crate::PlaneType) -> &'static str {
         crate::PlaneType::MainLine => "main_line",
         crate::PlaneType::Color => "color",
         crate::PlaneType::Raster => "raster",
-        crate::PlaneType::Selection => "selection",
     }
 }
 
@@ -930,13 +929,11 @@ fn output_entity_kinds(
     }
     let kinds = match invocation {
         CanonicalInvocation::AddGuide { .. } => vec![InkScriptEntityKind::Guide],
-        CanonicalInvocation::SelectionToLayer { .. }
-        | CanonicalInvocation::CreateAdjustmentLayer { .. } => vec![InkScriptEntityKind::Layer],
+        CanonicalInvocation::SaveSelectionMask { .. } => {
+            vec![InkScriptEntityKind::SavedSelectionMask]
+        }
         CanonicalInvocation::EditShootingFrame { .. } => {
             vec![InkScriptEntityKind::ShootingFrame; output_count]
-        }
-        CanonicalInvocation::EditVanishingPoints { .. } => {
-            vec![InkScriptEntityKind::VanishingPoint; output_count]
         }
         CanonicalInvocation::LightTableCreateSet { .. }
         | CanonicalInvocation::LightTableDuplicateSet { .. } => {
@@ -1110,25 +1107,6 @@ fn lift_invocation(
                 gradient_literal(gradient)
             ),
         },
-        CanonicalInvocation::CreateAdjustmentLayer { name, adjustment } => LiftedInvocation {
-            command: "create_adjustment_layer",
-            arguments: format!(
-                "name = {}; adjustment = {};",
-                string_literal(name),
-                adjustment_literal(adjustment)
-            ),
-        },
-        CanonicalInvocation::UpdateAdjustmentLayer {
-            layer_id,
-            adjustment,
-        } => LiftedInvocation {
-            command: "update_adjustment_layer",
-            arguments: format!(
-                "layer_id = {}; adjustment = {};",
-                resolve_reference("layer", *layer_id, produced, strict),
-                adjustment_literal(adjustment)
-            ),
-        },
         CanonicalInvocation::ScopedColorReplace {
             plane_id,
             mode,
@@ -1213,19 +1191,52 @@ fn lift_invocation(
                 resolve_reference("plane", target.plane_id, produced, strict)
             ),
         },
-        CanonicalInvocation::SelectionToLayer { name } => LiftedInvocation {
-            command: "selection_to_layer",
+        CanonicalInvocation::SaveSelectionMask { name } => LiftedInvocation {
+            command: "save_selection_mask",
             arguments: format!("name = {};", string_literal(name)),
         },
-        CanonicalInvocation::SelectionFromLayer {
-            layer_id,
+        CanonicalInvocation::ApplySavedSelectionMask {
+            saved_selection_id,
             operation,
         } => LiftedInvocation {
-            command: "selection_from_layer",
+            command: "apply_saved_selection_mask",
             arguments: format!(
-                "layer_id = {}; operation = {};",
-                resolve_reference("layer", *layer_id, produced, strict),
-                selection_layer_operation_name(*operation)
+                "saved_selection_id = {}; operation = {};",
+                resolve_reference(
+                    "saved_selection_mask",
+                    saved_selection_id.get(),
+                    produced,
+                    strict
+                ),
+                saved_selection_operation_name(*operation)
+            ),
+        },
+        CanonicalInvocation::RenameSavedSelectionMask {
+            saved_selection_id,
+            name,
+        } => LiftedInvocation {
+            command: "rename_saved_selection_mask",
+            arguments: format!(
+                "saved_selection_id = {}; name = {};",
+                resolve_reference(
+                    "saved_selection_mask",
+                    saved_selection_id.get(),
+                    produced,
+                    strict
+                ),
+                string_literal(name)
+            ),
+        },
+        CanonicalInvocation::DeleteSavedSelectionMask { saved_selection_id } => LiftedInvocation {
+            command: "delete_saved_selection_mask",
+            arguments: format!(
+                "saved_selection_id = {};",
+                resolve_reference(
+                    "saved_selection_mask",
+                    saved_selection_id.get(),
+                    produced,
+                    strict
+                )
             ),
         },
         CanonicalInvocation::ClearSelectedContent { target } => LiftedInvocation {
@@ -1241,17 +1252,6 @@ fn lift_invocation(
             arguments: format!(
                 "edit = {};",
                 shooting_frame_edit_literal(*edit, produced, strict)
-            ),
-        },
-        CanonicalInvocation::EditVanishingPoints { edits } => LiftedInvocation {
-            command: "edit_vanishing_points",
-            arguments: format!(
-                "edits = [{}];",
-                edits
-                    .iter()
-                    .map(|edit| vanishing_point_edit_literal(*edit, produced, strict))
-                    .collect::<Vec<_>>()
-                    .join(", ")
             ),
         },
         CanonicalInvocation::LightTableSetGlobalOpacity { opacity_milli } => LiftedInvocation {
@@ -1342,7 +1342,6 @@ fn lift_invocation(
         | CanonicalInvocation::SetPlaneProperties { .. }
         | CanonicalInvocation::ConvertPlane { .. }
         | CanonicalInvocation::MergePlane { .. }
-        | CanonicalInvocation::ConvertLayer { .. }
         | CanonicalInvocation::MergeLayer { .. }
         | CanonicalInvocation::DeleteHiddenLayers
         | CanonicalInvocation::EditTargets { .. }
@@ -1474,49 +1473,6 @@ const fn shooting_frame_anchor_name(value: crate::ShootingFrameAnchor) -> &'stat
     }
 }
 
-fn vanishing_point_edit_literal(
-    edit: crate::VanishingPointEdit,
-    produced: &BTreeMap<u64, String>,
-    strict: &mut StrictBindings,
-) -> String {
-    match edit {
-        crate::VanishingPointEdit::Create(input) => format!(
-            "{{ operation = 1; point_id = none; input = {}; }}",
-            vanishing_point_input_literal(input, produced, strict)
-        ),
-        crate::VanishingPointEdit::Update { point_id, input } => format!(
-            "{{ operation = 2; point_id = {}; input = {}; }}",
-            resolve_reference("vanishing_point", point_id, produced, strict),
-            vanishing_point_input_literal(input, produced, strict)
-        ),
-        crate::VanishingPointEdit::Delete { point_id } => format!(
-            "{{ operation = 3; point_id = {}; input = none; }}",
-            resolve_reference("vanishing_point", point_id, produced, strict)
-        ),
-        crate::VanishingPointEdit::DeleteAll => {
-            "{ operation = 4; point_id = none; input = none; }".to_owned()
-        }
-    }
-}
-
-fn vanishing_point_input_literal(
-    input: crate::VanishingPointInput,
-    produced: &BTreeMap<u64, String>,
-    strict: &mut StrictBindings,
-) -> String {
-    format!(
-        "{{ layer_id = {}; x_milli = {}; y_milli = {}; interval_milli_degrees = {}; angle_milli_degrees = {}; color = {}; opacity_milli = {}; visible = {}; }}",
-        resolve_reference("layer", input.layer_id, produced, strict),
-        input.x_milli,
-        input.y_milli,
-        input.interval_milli_degrees,
-        input.angle_milli_degrees,
-        pixel_literal(input.color),
-        input.opacity_milli,
-        input.visible
-    )
-}
-
 fn fixed_q16_literal(value: i64) -> String {
     let negative = value < 0;
     let magnitude = value.unsigned_abs();
@@ -1560,11 +1516,11 @@ const fn range_interpretation_name(value: crate::RangeInterpretation) -> &'stati
     }
 }
 
-const fn selection_layer_operation_name(value: crate::SelectionLayerOperation) -> &'static str {
+const fn saved_selection_operation_name(value: crate::SavedSelectionOperation) -> &'static str {
     match value {
-        crate::SelectionLayerOperation::Replace => "replace",
-        crate::SelectionLayerOperation::Add => "add",
-        crate::SelectionLayerOperation::Subtract => "subtract",
+        crate::SavedSelectionOperation::Replace => "replace",
+        crate::SavedSelectionOperation::Add => "add",
+        crate::SavedSelectionOperation::Subtract => "subtract",
     }
 }
 
@@ -1659,83 +1615,6 @@ fn stamp_gesture_literal(gesture: &crate::StampGesture) -> String {
         gesture.pressure_size,
         gesture.pressure_opacity
     )
-}
-
-fn adjustment_literal(adjustment: &crate::Adjustment) -> String {
-    let (kind, brightness, contrast, channel, interpolation, points, levels) = match adjustment {
-        crate::Adjustment::BrightnessContrast {
-            brightness_milli,
-            contrast_milli,
-        } => (
-            "brightness_contrast",
-            brightness_milli.to_string(),
-            contrast_milli.to_string(),
-            "none".to_owned(),
-            "none".to_owned(),
-            "[]".to_owned(),
-            "none".to_owned(),
-        ),
-        crate::Adjustment::ToneCurve {
-            channel,
-            interpolation,
-            points,
-        } => (
-            "tone_curve",
-            "none".to_owned(),
-            "none".to_owned(),
-            channel_name(*channel).to_owned(),
-            interpolation_name(*interpolation).to_owned(),
-            format!(
-                "[{}]",
-                points
-                    .iter()
-                    .map(|point| format!(
-                        "{{ input = {}; output = {}; }}",
-                        point.input, point.output
-                    ))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            "none".to_owned(),
-        ),
-        crate::Adjustment::Levels(value) => (
-            "levels",
-            "none".to_owned(),
-            "none".to_owned(),
-            "none".to_owned(),
-            "none".to_owned(),
-            "[]".to_owned(),
-            format!(
-                "{{ channel = {}; input_shadow = {}; input_gamma_milli = {}; input_highlight = {}; output_shadow = {}; output_highlight = {}; }}",
-                channel_name(value.channel),
-                value.input_shadow,
-                value.input_gamma_milli,
-                value.input_highlight,
-                value.output_shadow,
-                value.output_highlight
-            ),
-        ),
-    };
-    format!(
-        "{{ kind = {kind}; brightness_milli = {}; contrast_milli = {}; channel = {}; interpolation = {}; points = {points}; levels = {levels}; }}",
-        brightness, contrast, channel, interpolation,
-    )
-}
-
-const fn channel_name(channel: crate::Channel) -> &'static str {
-    match channel {
-        crate::Channel::Rgb => "rgb",
-        crate::Channel::Red => "red",
-        crate::Channel::Green => "green",
-        crate::Channel::Blue => "blue",
-    }
-}
-
-const fn interpolation_name(interpolation: crate::CurveInterpolation) -> &'static str {
-    match interpolation {
-        crate::CurveInterpolation::Bezier => "bezier",
-        crate::CurveInterpolation::BSpline => "b_spline",
-    }
 }
 
 const fn scoped_color_mode_name(mode: crate::ScopedColorReplaceMode) -> &'static str {

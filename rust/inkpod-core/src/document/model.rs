@@ -28,7 +28,6 @@ impl PlaneNode {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct LayerNode {
     pub(crate) id: LayerId,
-    pub(crate) kind: LayerKind,
     pub(crate) name: String,
     pub(crate) visible: bool,
     pub(crate) editable: bool,
@@ -40,7 +39,6 @@ impl LayerNode {
     pub(crate) fn info(&self) -> LayerInfo {
         LayerInfo {
             id: self.id.get(),
-            kind: self.kind,
             name: self.name.clone(),
             visible: self.visible,
             editable: self.editable,
@@ -48,6 +46,13 @@ impl LayerNode {
             planes: self.planes.iter().map(PlaneNode::info).collect(),
         }
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct SavedSelectionMask {
+    pub(crate) id: SavedSelectionId,
+    pub(crate) name: String,
+    pub(crate) raster: TileRaster,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -67,14 +72,13 @@ pub(crate) struct CellDocument {
     pub(crate) layers: Vec<LayerNode>,
     pub(crate) selection_plane_id: PlaneId,
     pub(crate) selection: TileRaster,
+    pub(crate) saved_selection_masks: Vec<SavedSelectionMask>,
     pub(crate) fill_protection_plane_id: PlaneId,
     pub(crate) fill_protection: TileRaster,
     pub(crate) guides: Vec<Guide>,
     pub(crate) grid: GridConfig,
     pub(crate) light_table: animation::LightTableState,
-    pub(crate) adjustments: BTreeMap<LayerId, Adjustment>,
     pub(crate) shooting_frame: Option<ShootingFrameObject>,
-    pub(crate) vanishing_points: Vec<VanishingPointObject>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -108,6 +112,11 @@ impl CellDocument {
         for plane in self.layers.iter().flat_map(|layer| &layer.planes) {
             tile_count = tile_count.saturating_add(plane.raster.allocated_tile_count() as u64);
             tile_bytes = tile_bytes.saturating_add(plane.raster.allocated_tile_bytes());
+        }
+        for saved_selection in &self.saved_selection_masks {
+            tile_count =
+                tile_count.saturating_add(saved_selection.raster.allocated_tile_count() as u64);
+            tile_bytes = tile_bytes.saturating_add(saved_selection.raster.allocated_tile_bytes());
         }
         (tile_count, tile_bytes)
     }
@@ -185,7 +194,6 @@ impl CellDocument {
             color_chart: ColorChart::default(),
             layers: vec![LayerNode {
                 id: ids.layer,
-                kind: LayerKind::BinaryColoring,
                 name: "Coloring Layer".to_owned(),
                 visible: true,
                 editable: true,
@@ -194,14 +202,13 @@ impl CellDocument {
             }],
             selection_plane_id: ids.selection_plane,
             selection: TileRaster::new(paper.width, paper.height, PixelFormat::BinaryMask8)?,
+            saved_selection_masks: Vec::new(),
             fill_protection_plane_id: ids.fill_protection_plane,
             fill_protection: TileRaster::new(paper.width, paper.height, PixelFormat::BinaryMask8)?,
             guides: Vec::new(),
             grid: GridConfig::default(),
             light_table: animation::LightTableState::new(ids.light_table_set),
-            adjustments: BTreeMap::new(),
             shooting_frame: None,
-            vanishing_points: Vec::new(),
         })
     }
 
@@ -217,9 +224,16 @@ impl CellDocument {
             .collect();
         planes.push(raster_to_file_plane(
             self.selection_plane_id.get(),
-            FilePlaneKind::Selection,
+            FilePlaneKind::CurrentSelection,
             &self.selection,
         ));
+        planes.extend(self.saved_selection_masks.iter().map(|saved_selection| {
+            raster_to_file_plane(
+                saved_selection.id.get(),
+                FilePlaneKind::SavedSelection,
+                &saved_selection.raster,
+            )
+        }));
         planes.push(raster_to_file_plane(
             self.fill_protection_plane_id.get(),
             FilePlaneKind::FillProtection,
@@ -254,7 +268,6 @@ impl CellDocument {
                     .iter()
                     .map(|layer| FileLayer {
                         id: layer.id.get(),
-                        kind: layer.kind,
                         name: layer.name.clone(),
                         visible: layer.visible,
                         editable: layer.editable,
@@ -317,33 +330,16 @@ impl CellDocument {
                     visible: frame.input.visible,
                     include_in_instruction_export: frame.input.include_in_instruction_export,
                 }),
-                vanishing_points: self
-                    .vanishing_points
+                saved_selections: self
+                    .saved_selection_masks
                     .iter()
-                    .map(|point| FileVanishingPoint {
-                        id: point.id.get(),
-                        layer_id: point.input.layer_id,
-                        x_milli: point.input.x_milli,
-                        y_milli: point.input.y_milli,
-                        interval_milli_degrees: point.input.interval_milli_degrees,
-                        angle_milli_degrees: point.input.angle_milli_degrees,
-                        color: point.input.color,
-                        opacity_milli: point.input.opacity_milli,
-                        visible: point.input.visible,
+                    .map(|saved_selection| inkpod_format::FileSavedSelection {
+                        id: saved_selection.id.get(),
+                        name: saved_selection.name.clone(),
                     })
                     .collect(),
             }),
             light_table_metadata: Some(self.light_table.to_file()),
-            adjustment_metadata: (!self.adjustments.is_empty()).then(|| FileAdjustmentMetadata {
-                adjustments: self
-                    .adjustments
-                    .iter()
-                    .map(|(layer_id, adjustment)| FileAdjustmentLayer {
-                        layer_id: layer_id.get(),
-                        adjustment: adjustment.clone(),
-                    })
-                    .collect(),
-            }),
         }
     }
 
@@ -351,48 +347,38 @@ impl CellDocument {
         file: DocumentArchive,
         revision: DocumentRevision,
     ) -> Result<Self, CoreError> {
-        let main_file = file
-            .planes
-            .iter()
-            .find(|plane| plane.kind == FilePlaneKind::MainLine)
-            .ok_or(CoreError::InvalidState("main line plane is missing"))?;
-        let color_file = file
-            .planes
-            .iter()
-            .find(|plane| plane.kind == FilePlaneKind::Color)
-            .ok_or(CoreError::InvalidState("color plane is missing"))?;
+        let metadata = file
+            .document_metadata
+            .as_ref()
+            .ok_or(CoreError::InvalidState(
+                "current document metadata is missing",
+            ))?;
         let mut palette = Palette::default();
         for color in &file.palette {
             palette.push(*color)?;
         }
-        let color_chart = file
-            .document_metadata
-            .as_ref()
-            .map(|metadata| {
-                ColorChart::validated(
-                    metadata
-                        .color_chart
-                        .entries
-                        .iter()
-                        .map(|entry| ColorChartEntry {
-                            color: pixel_value(entry.color),
-                            name: entry.name.clone(),
-                        })
-                        .collect(),
-                    metadata.color_chart_locked,
-                )
-            })
-            .transpose()?
-            .unwrap_or_default();
+        let color_chart = ColorChart::validated(
+            metadata
+                .color_chart
+                .entries
+                .iter()
+                .map(|entry| ColorChartEntry {
+                    color: pixel_value(entry.color),
+                    name: entry.name.clone(),
+                })
+                .collect(),
+            metadata.color_chart_locked,
+        )?;
         let (
             layers,
             selection_plane_id,
             selection,
+            saved_selection_masks,
             fill_protection_plane_id,
             fill_protection,
             guides,
             grid,
-        ) = if let Some(metadata) = &file.document_metadata {
+        ) = {
             let mut layers = Vec::with_capacity(metadata.layers.len());
             for layer in &metadata.layers {
                 let mut planes = Vec::with_capacity(layer.planes.len());
@@ -404,7 +390,8 @@ impl CellDocument {
                         .ok_or(CoreError::InvalidState("layer plane payload is missing"))?;
                     planes.push(PlaneNode {
                         id: PlaneId::from_raw(properties.id),
-                        kind: PlaneType::from_file(payload.kind),
+                        kind: PlaneType::from_file(payload.kind)
+                            .ok_or(CoreError::InvalidState("layer contains a non-image plane"))?,
                         name: properties.name.clone(),
                         visible: properties.visible,
                         editable: properties.editable,
@@ -412,10 +399,9 @@ impl CellDocument {
                         raster: file_plane_to_raster(payload, revision.get())?,
                     });
                 }
-                validate_layer_kind(layer.kind, &planes)?;
+                validate_layer(&planes)?;
                 layers.push(LayerNode {
                     id: LayerId::from_raw(layer.id),
-                    kind: layer.kind,
                     name: layer.name.clone(),
                     visible: layer.visible,
                     editable: layer.editable,
@@ -435,10 +421,30 @@ impl CellDocument {
                 .ok_or(CoreError::InvalidState(
                     "fill-protection payload is missing",
                 ))?;
+            let saved_selection_masks = metadata
+                .saved_selections
+                .iter()
+                .map(|saved_selection| {
+                    let payload = file
+                        .planes
+                        .iter()
+                        .find(|plane| plane.id == saved_selection.id)
+                        .ok_or(CoreError::InvalidState(
+                            "saved-selection payload is missing",
+                        ))?;
+                    Ok(SavedSelectionMask {
+                        id: SavedSelectionId::from_raw(saved_selection.id)
+                            .ok_or(CoreError::InvalidState("saved-selection ID is invalid"))?,
+                        name: saved_selection.name.clone(),
+                        raster: file_plane_to_raster(payload, revision.get())?,
+                    })
+                })
+                .collect::<Result<Vec<_>, CoreError>>()?;
             (
                 layers,
                 PlaneId::from_raw(metadata.selection_plane_id),
                 file_plane_to_raster(selection_file, revision.get())?,
+                saved_selection_masks,
                 PlaneId::from_raw(metadata.fill_protection_plane_id),
                 file_plane_to_raster(fill_protection_file, revision.get())?,
                 metadata
@@ -458,63 +464,6 @@ impl CellDocument {
                     subdivisions: metadata.grid.subdivisions,
                 },
             )
-        } else {
-            let selection_plane_id = file
-                .planes
-                .iter()
-                .map(|plane| plane.id)
-                .chain([file.document_id, file.layer_id])
-                .max()
-                .unwrap_or(0)
-                .checked_add(1)
-                .ok_or(CoreError::InvalidState("selection ID overflow"))?;
-            let fill_protection_plane_id = selection_plane_id
-                .checked_add(1)
-                .ok_or(CoreError::InvalidState("fill-protection ID overflow"))?;
-            let layer_kind = if matches!(
-                main_file.pixel_format,
-                PixelFormat::Grayscale8 | PixelFormat::Grayscale16
-            ) {
-                LayerKind::GrayscaleColoring
-            } else {
-                LayerKind::BinaryColoring
-            };
-            (
-                vec![LayerNode {
-                    id: LayerId::from_raw(file.layer_id),
-                    kind: layer_kind,
-                    name: "Coloring Layer".to_owned(),
-                    visible: true,
-                    editable: true,
-                    opacity_milli: 1_000,
-                    planes: vec![
-                        PlaneNode {
-                            id: PlaneId::from_raw(file.main_plane_id),
-                            kind: PlaneType::MainLine,
-                            name: "Main Line".to_owned(),
-                            visible: true,
-                            editable: true,
-                            opacity_milli: 1_000,
-                            raster: file_plane_to_raster(main_file, revision.get())?,
-                        },
-                        PlaneNode {
-                            id: PlaneId::from_raw(file.color_plane_id),
-                            kind: PlaneType::Color,
-                            name: "Color".to_owned(),
-                            visible: true,
-                            editable: true,
-                            opacity_milli: 1_000,
-                            raster: file_plane_to_raster(color_file, revision.get())?,
-                        },
-                    ],
-                }],
-                PlaneId::from_raw(selection_plane_id),
-                TileRaster::new(file.width, file.height, PixelFormat::BinaryMask8)?,
-                PlaneId::from_raw(fill_protection_plane_id),
-                TileRaster::new(file.width, file.height, PixelFormat::BinaryMask8)?,
-                Vec::new(),
-                GridConfig::default(),
-            )
         };
         let legacy_light_table_set_id = file
             .planes
@@ -526,9 +475,17 @@ impl CellDocument {
                     .iter()
                     .map(|layer| layer.id)
                     .chain(metadata.guides.iter().map(|guide| guide.id))
+                    .chain(
+                        metadata
+                            .saved_selections
+                            .iter()
+                            .map(|selection| selection.id),
+                    )
+                    .chain(metadata.shooting_frame.iter().map(|frame| frame.id))
             }))
             .chain([
                 file.document_id,
+                file.cell_id,
                 selection_plane_id.get(),
                 fill_protection_plane_id.get(),
             ])
@@ -542,17 +499,6 @@ impl CellDocument {
             revision,
             LightTableSetId::from_raw(legacy_light_table_set_id),
         )?;
-        let adjustments = file
-            .adjustment_metadata
-            .as_ref()
-            .map(|metadata| {
-                metadata
-                    .adjustments
-                    .iter()
-                    .map(|layer| (LayerId::from_raw(layer.layer_id), layer.adjustment.clone()))
-                    .collect()
-            })
-            .unwrap_or_default();
         let shooting_frame = file.document_metadata.as_ref().and_then(|metadata| {
             metadata.shooting_frame.map(|frame| ShootingFrameObject {
                 id: ShootingFrameId::from_raw(frame.id),
@@ -574,29 +520,6 @@ impl CellDocument {
                 },
             })
         });
-        let vanishing_points = file
-            .document_metadata
-            .as_ref()
-            .map(|metadata| {
-                metadata
-                    .vanishing_points
-                    .iter()
-                    .map(|point| VanishingPointObject {
-                        id: VanishingPointId::from_raw(point.id),
-                        input: VanishingPointInput {
-                            layer_id: point.layer_id,
-                            x_milli: point.x_milli,
-                            y_milli: point.y_milli,
-                            interval_milli_degrees: point.interval_milli_degrees,
-                            angle_milli_degrees: point.angle_milli_degrees,
-                            color: point.color,
-                            opacity_milli: point.opacity_milli,
-                            visible: point.visible,
-                        },
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
         let document = Self {
             uuid: u128::from_le_bytes(file.document_uuid),
             id: DocumentId::from_raw(file.document_id),
@@ -614,20 +537,16 @@ impl CellDocument {
             layers,
             selection_plane_id,
             selection,
+            saved_selection_masks,
             fill_protection_plane_id,
             fill_protection,
             guides,
             grid,
             light_table,
-            adjustments,
             shooting_frame,
-            vanishing_points,
         };
         if let Some(frame) = document.shooting_frame {
             crate::shooting_frame::validate_shooting_frame_input(frame.input)?;
-        }
-        for point in &document.vanishing_points {
-            crate::vanishing_point::validate_vanishing_point_input(&document, point.input)?;
         }
         Ok(document)
     }
@@ -773,7 +692,11 @@ impl CellDocument {
             .chain(self.guides.iter().map(|guide| guide.id))
             .chain([self.light_table.maximum_id()])
             .chain(self.shooting_frame.iter().map(|object| object.id.get()))
-            .chain(self.vanishing_points.iter().map(|object| object.id.get()))
+            .chain(
+                self.saved_selection_masks
+                    .iter()
+                    .map(|selection| selection.id.get()),
+            )
             .chain([
                 self.id.get(),
                 self.cell_id.get(),

@@ -4,34 +4,38 @@ This document is the M00 traceability authority connecting the product requireme
 [`SPEC.md`](../SPEC.md), the normative language contract in
 [`INKSCRIPT.md`](../INKSCRIPT.md), the machine-readable registries, milestones, and
 planned evidence. It is not a command reference. The exact-current command signatures are in
-[`catalog-v4.json`](../schemas/inkscript/catalog-v4.json); the derived presentation is
+[`catalog-v5.json`](../schemas/inkscript/catalog-v5.json); the derived presentation is
 [`inkscript-command-reference.md`](inkscript-command-reference.md).
 
 ## Ratified contract
 
 M00's starting contract was explicitly accepted before M01 implementation. M21's
-selector correction, the M27 drawing-model rebaseline, and the Batch v4 version
-rebaseline were separately approved before implementation:
+selector correction, the M27 drawing-model rebaseline, the Batch v5 version
+rebaseline, and the layer/plane contract rebaseline were separately approved before
+implementation:
 
 - InkScript registry schema/language/file version 2, procedure catalog and owner
-  manifest version 4, replay epoch 25, `.inkpod` top-level version 28, and C ABI
-  version 22 are the exact-current values. Catalog/owner v4 expose the same 75 public
+  manifest version 5, replay epoch 27, `.inkpod` top-level version 31, and C ABI
+  version 25 are the exact-current values. Catalog/owner v5 expose the same 73 public
   commands; the private `ApplyBatchOperations` canonical procedure is not an InkScript command.
 - M07's approved exact-current registry schema v2 supersedes registry schema v1 solely to add
   closed catalog-owned enum, record, and constructor definitions; schema v1 is not accepted.
 - M21's approved option A changed only the shooting-frame selector from a layer owner to the
   document-owned singleton required by SPEC/Core. Its file/catalog-v2 result is historical;
   M27 retains file/language/schema v2 while superseding catalog/owner v2 with v3.
-- `schemas/inkscript/language-v2.json` freezes the command-independent language core.
-  Later discovery of a missing grammar, section, type, selector, assert, asset, or
-  resource rule requires an explicit InkScript file-version decision; it is not a silent
-  M01+ fix.
+- `schemas/inkscript/language-v2.json` freezes the command-independent grammar and
+  section syntax. A grammar or section change requires an explicit InkScript file-version
+  decision. Closed semantic entities and references may change only with an explicit
+  procedure-catalog/replay rebaseline such as catalog v5; they are not silent fixes.
 - Catalog v2 was the 84-command production contract after M23. The M27
   drawing-model rebaseline retires nine commands, reserves their assignments as
   tombstones, and replaced it with catalog/owner v3 and a 75-way bijection. The Batch v3
-  rebaseline advanced the catalog/owner envelope to v4; Batch v4 retains that catalog while
-  advancing only the Batch authoring graph and C ABI to v22. It does not add a public command. Older catalog/owner
-  resources are rejected; generated reference and fingerprints are regenerated from v4.
+  rebaseline advanced the catalog/owner envelope to v4. The layer/plane rebaseline retires
+  `convert_layer`, both adjustment-layer commands, both selection-layer commands, and
+  `edit_vanishing_points`; those primitive IDs remain tombstones and cannot be reused.
+  It adds the four document-owned saved-selection-mask commands, producing catalog/owner
+  v5 and a 73-way bijection. Older catalog/owner resources are rejected; generated
+  reference and fingerprints are regenerated from v5.
 - Exact-source equivalence compares canonical state/pixel digests, ID high-watermarks,
   typed result roles and output ordinals, pre/post state digests, stable input/output/asset
   roles, and canonical invocations. Rebound execution guarantees deterministic execution
@@ -53,8 +57,8 @@ rebaseline were separately approved before implementation:
   checksums, samples, environment, and proposed envelope and stop at `[~]`. M14 may change
   the benchmark harness or envelope only after that explicit approval. Existing workload,
   counter, `revision-max`, and envelope contracts are unchanged by M00.
-- The Batch v4 product decision supersedes the earlier `.inkbatch` v2 shadow-parity
-  cutover plan. `.inkbatch` v4 is the independent product authority and is editable in
+- The Batch v5 product decision supersedes the earlier `.inkbatch` v2 shadow-parity
+  cutover plan. `.inkbatch` v5 is the independent product authority and is editable in
   the Batch pane. It lowers its closed four-operation graph directly to a private typed
   canonical procedure. One Color Replace operation may own a bounded set of semantic
   layer selectors, which is resolved to exact stable IDs before that single procedure is
@@ -68,39 +72,40 @@ passing tests in M00. M00's actual registry tests are listed in the next section
 
 | Existing requirement | InkScript requirements | Owning milestones | Required planned evidence |
 | --- | --- | --- | --- |
-| `BATCH-001` | `SCRIPT-001`, `SCRIPT-003`, `SCRIPT-005` | Batch v4 | `.inkbatch` v4 owns fixed Input/Output, ordered enabled operations, bounded Color Replace target sets, immutable preview/run/save construction and staged output ownership without exposing InkScript |
-| `BATCH-002` | `SCRIPT-002`, `SCRIPT-005` | Batch v4 | The public Batch catalog is exactly Color Replace, Move to Color Plane, Masking and Erase; retained legacy Core primitives are not authorable through Batch or InkScript |
-| `BATCH-003` | `SCRIPT-003`, `SCRIPT-005` | Batch v4 | File/folder/issue-time active input and folder/issue-time active/new-tab output reuse native/common-raster codecs, bounded path planning and owner-thread staged results |
-| `BATCH-004` | `SCRIPT-002`, `SCRIPT-003`, `SCRIPT-004`, `SCRIPT-005` | Batch v4 | Exact-depth colors, one-operation multi-layer Color Replace, atomic multi-plane movement and sparse fill-protection replacement use one private canonical procedure and one transaction |
+| `BATCH-001` | `SCRIPT-001`, `SCRIPT-003`, `SCRIPT-005` | Batch v5 | `.inkbatch` v5 owns fixed Input/Output, ordered enabled operations, bounded Color Replace target sets, immutable preview/run/save construction and staged output ownership without exposing InkScript |
+| `BATCH-002` | `SCRIPT-002`, `SCRIPT-005` | Batch v5 | The public Batch catalog is exactly Color Replace, Move to Color Plane, Masking and Erase; retained legacy Core primitives are not authorable through Batch or InkScript |
+| `BATCH-003` | `SCRIPT-003`, `SCRIPT-005` | Batch v5 | File/folder/issue-time active input and folder/issue-time active/new-tab output reuse native/common-raster codecs, bounded path planning and owner-thread staged results |
+| `BATCH-004` | `SCRIPT-002`, `SCRIPT-003`, `SCRIPT-004`, `SCRIPT-005` | Batch v5 | Exact-depth colors, one-operation multi-layer Color Replace, atomic multi-plane movement and sparse fill-protection replacement use one private canonical procedure and one transaction |
 
 Any future request to expose Batch primitives through InkScript must make a new explicit
 catalog/file-version decision and prove input/output authority, canonical procedure,
 state/composite digest, history, Undo/Redo, IDs, save/reopen, cache-free replay and failure
-atomicity parity. Batch v4 itself does not imply that product route.
+atomicity parity. Batch v5 itself does not imply that product route.
 
 ## Current machine-readable ownership
 
-[`owner-manifest-v4.json`](../schemas/inkscript/owner-manifest-v4.json) assigns all 75
+[`owner-manifest-v5.json`](../schemas/inkscript/owner-manifest-v5.json) assigns all 73
 current command owners exactly once. The allocation is deliberately
 reviewable before signatures are added:
 
 | Owner | Replayable primitives | Scope |
 | --- | ---: | --- |
-| M07 | 7 | legacy property/conversion and document transforms |
+| M07 | 6 | property, plane-format conversion and document transforms |
 | M08 | 6 | legacy fill, replacement, separation, filter, boundary-airbrush and dust adapters |
 | M15 | 13 | paper/frame and remaining document tree operations |
 | M16 | 8 | color metadata and guide/grid operations |
 | M17 | 3 | raster stroke, geometry and canonical raster import |
 | M18A | 1 | gradient |
-| M18B | 11 | gesture effects, alpha, adjustment and scoped color operations |
-| M19 | 11 | selection, selected-source restoration and floating selection |
-| M21 | 2 | shooting frame and vanishing point |
+| M18B | 9 | gesture effects, alpha and scoped color operations |
+| M19 | 13 | selection, saved masks, selected-source restoration and floating selection |
+| M21 | 1 | shooting frame |
 | M22 | 13 | replayable Light Table set/item operations |
 
-`LIGHT_TABLE_SWAP_WITH_ACTIVE` is the sole current catalog exclusion because it is
-session-only. Query, view, preview, export, save/open, history-control, and frontend
+`LIGHT_TABLE_SWAP_WITH_ACTIVE` is excluded because it is session-only, and the private
+`APPLY_BATCH_OPERATIONS` procedure is excluded because `.inkbatch` v5 owns that route.
+Query, view, preview, export, save/open, history-control, and frontend
 command IDs remain outside the manifest. M24's journal-fragment query therefore remains
-outside the 75-command catalog while exhaustively consuming its typed runtime variants.
+outside the 73-command catalog while exhaustively consuming its typed runtime variants.
 
 ## Registry and completeness evidence
 
@@ -119,8 +124,8 @@ The `inkscript_registry` integration target provides these current checks:
 PowerShell `Test-Json -SchemaFile` additionally validates the language, production catalog, and owner
 documents against the formal Draft 2020-12 meta-schema. The Rust tests validate the closed
 meta-schema and JSON syntax, duplicate/malformed/overflow rejection, language type/nonterminal
-references, unique field/order/type names, current version constants, the 75-entry
-primitive-owner bijection, the one explicit session-only exclusion, requirement/document
+references, unique field/order/type names, current version constants, the 73-entry
+primitive-owner bijection, the two explicit exclusions, requirement/document
 drift, immutable catalog fingerprint, generated-reference drift, public Rust ownership, absence of
 the removed draft, and absence of private typed catalog models or Windows InkScript routes.
 
@@ -153,7 +158,7 @@ Three `inkpod-ffi` execution contracts plus the C header/export drift, C11 inclu
 layout smoke, route inventory, and exact-old-version rejection cover the historical ABI-v16 PathIntent, copied
 authority grants, fixed DTO host callbacks, immutable plan/preview, one-shot confirmation,
 PlanTask/RunTask event flow, cancellation, atomic native install, and detached batched reports.
-Success evidence reopens the current-v27 output, verifies cache-free full replay, Undo/Redo,
+Success evidence reopens the current-v31 output, verifies cache-free full replay, Undo/Redo,
 document/editor savepoints, history, state digest, and ID high-watermark while proving the input
 Core is unchanged. Negative evidence covers v15 rejection, NULL, short/unknown records, queue
 saturation, cancellation, stale authority/confirmation and save failure. The ABI delegates to the

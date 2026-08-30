@@ -34,7 +34,6 @@ fn filled_raster_core(
         safe_frame_ratio_milli: 900,
         maximum_close_ratio_milli: 500,
         anchor: FrameAnchor::Center,
-        initial_layer_kind: LayerKind::BinaryColoring,
         pixel_format: format,
         count: 1,
     };

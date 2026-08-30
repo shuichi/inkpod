@@ -696,7 +696,7 @@ impl Core {
             },
         )?;
         document.frames = source.frames;
-        document.plane_for_role_mut(ActivePlane::Color)?.raster = source.raster.clone();
+        initialize_imported_main_line(&mut document, source.raster.clone())?;
         Ok(document)
     }
 }

@@ -1,0 +1,843 @@
+{
+  "kind": "inkpod.inkscript.owner-manifest",
+  "registry_schema_version": 2,
+  "replay_contract": {
+    "inkscript_file_version": 2,
+    "procedure_catalog_version": 5,
+    "replay_epoch": 27,
+    "inkpod_top_level_version": 31,
+    "c_abi_version": 25
+  },
+  "owners": [
+    {
+      "primitive_rust": "UPDATE_PAPER_FRAMES",
+      "primitive_id": "0x00010001",
+      "canonical_name": "UpdatePaperFrames",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "update_paper_frames",
+      "owner_milestone": "M15",
+      "planned_equivalence_test": "INKS-EQ-0001"
+    },
+    {
+      "primitive_rust": "CREATE_LAYER",
+      "primitive_id": "0x00020001",
+      "canonical_name": "CreateLayer",
+      "primitive_schema_version": 3,
+      "semantics_revision": 3,
+      "command_name": "create_layer",
+      "owner_milestone": "M15",
+      "planned_equivalence_test": "INKS-EQ-0002"
+    },
+    {
+      "primitive_rust": "DUPLICATE_LAYER",
+      "primitive_id": "0x00020002",
+      "canonical_name": "DuplicateLayer",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "duplicate_layer",
+      "owner_milestone": "M15",
+      "planned_equivalence_test": "INKS-EQ-0003"
+    },
+    {
+      "primitive_rust": "DELETE_LAYER",
+      "primitive_id": "0x00020003",
+      "canonical_name": "DeleteLayer",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "delete_layer",
+      "owner_milestone": "M15",
+      "planned_equivalence_test": "INKS-EQ-0004"
+    },
+    {
+      "primitive_rust": "REORDER_LAYER",
+      "primitive_id": "0x00020004",
+      "canonical_name": "ReorderLayer",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "reorder_layer",
+      "owner_milestone": "M15",
+      "planned_equivalence_test": "INKS-EQ-0005"
+    },
+    {
+      "primitive_rust": "SET_LAYER_PROPERTIES",
+      "primitive_id": "0x00020005",
+      "canonical_name": "SetLayerProperties",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "set_layer_properties",
+      "owner_milestone": "M07",
+      "planned_equivalence_test": "INKS-EQ-0006"
+    },
+    {
+      "primitive_rust": "CREATE_PLANE",
+      "primitive_id": "0x00020011",
+      "canonical_name": "CreatePlane",
+      "primitive_schema_version": 3,
+      "semantics_revision": 3,
+      "command_name": "create_plane",
+      "owner_milestone": "M15",
+      "planned_equivalence_test": "INKS-EQ-0007"
+    },
+    {
+      "primitive_rust": "DUPLICATE_PLANE",
+      "primitive_id": "0x00020012",
+      "canonical_name": "DuplicatePlane",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "duplicate_plane",
+      "owner_milestone": "M15",
+      "planned_equivalence_test": "INKS-EQ-0008"
+    },
+    {
+      "primitive_rust": "DELETE_PLANE",
+      "primitive_id": "0x00020013",
+      "canonical_name": "DeletePlane",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "delete_plane",
+      "owner_milestone": "M15",
+      "planned_equivalence_test": "INKS-EQ-0009"
+    },
+    {
+      "primitive_rust": "REORDER_PLANE",
+      "primitive_id": "0x00020014",
+      "canonical_name": "ReorderPlane",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "reorder_plane",
+      "owner_milestone": "M15",
+      "planned_equivalence_test": "INKS-EQ-0010"
+    },
+    {
+      "primitive_rust": "SET_PLANE_PROPERTIES",
+      "primitive_id": "0x00020015",
+      "canonical_name": "SetPlaneProperties",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "set_plane_properties",
+      "owner_milestone": "M07",
+      "planned_equivalence_test": "INKS-EQ-0011"
+    },
+    {
+      "primitive_rust": "CONVERT_PLANE",
+      "primitive_id": "0x00020016",
+      "canonical_name": "ConvertPlane",
+      "primitive_schema_version": 3,
+      "semantics_revision": 3,
+      "command_name": "convert_plane",
+      "owner_milestone": "M07",
+      "planned_equivalence_test": "INKS-EQ-0012"
+    },
+    {
+      "primitive_rust": "MERGE_PLANE",
+      "primitive_id": "0x00020017",
+      "canonical_name": "MergePlane",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "merge_plane",
+      "owner_milestone": "M15",
+      "planned_equivalence_test": "INKS-EQ-0013"
+    },
+    {
+      "primitive_rust": "MERGE_LAYER",
+      "primitive_id": "0x00020022",
+      "canonical_name": "MergeLayer",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "merge_layer",
+      "owner_milestone": "M15",
+      "planned_equivalence_test": "INKS-EQ-0015"
+    },
+    {
+      "primitive_rust": "DELETE_HIDDEN_LAYERS",
+      "primitive_id": "0x00020023",
+      "canonical_name": "DeleteHiddenLayers",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "delete_hidden_layers",
+      "owner_milestone": "M15",
+      "planned_equivalence_test": "INKS-EQ-0016"
+    },
+    {
+      "primitive_rust": "EDIT_TARGETS",
+      "primitive_id": "0x00020030",
+      "canonical_name": "EditTargets",
+      "primitive_schema_version": 3,
+      "semantics_revision": 2,
+      "command_name": "edit_targets",
+      "owner_milestone": "M15",
+      "planned_equivalence_test": "INKS-EQ-0017"
+    },
+    {
+      "primitive_rust": "EDIT_SHOOTING_FRAME",
+      "primitive_id": "0x00020050",
+      "canonical_name": "EditShootingFrame",
+      "primitive_schema_version": 2,
+      "semantics_revision": 1,
+      "command_name": "edit_shooting_frame",
+      "owner_milestone": "M21",
+      "planned_equivalence_test": "INKS-EQ-0019"
+    },
+    {
+      "primitive_rust": "SET_MAIN_LINE_COLOR",
+      "primitive_id": "0x00030001",
+      "canonical_name": "SetMainLineColor",
+      "primitive_schema_version": 1,
+      "semantics_revision": 3,
+      "command_name": "set_main_line_color",
+      "owner_milestone": "M16",
+      "planned_equivalence_test": "INKS-EQ-0021"
+    },
+    {
+      "primitive_rust": "REPLACE_PALETTE",
+      "primitive_id": "0x00030002",
+      "canonical_name": "ReplacePalette",
+      "primitive_schema_version": 1,
+      "semantics_revision": 3,
+      "command_name": "replace_palette",
+      "owner_milestone": "M16",
+      "planned_equivalence_test": "INKS-EQ-0022"
+    },
+    {
+      "primitive_rust": "REPLACE_COLOR_CHART",
+      "primitive_id": "0x00030003",
+      "canonical_name": "ReplaceColorChart",
+      "primitive_schema_version": 1,
+      "semantics_revision": 1,
+      "command_name": "replace_color_chart",
+      "owner_milestone": "M16",
+      "planned_equivalence_test": "INKS-EQ-0023"
+    },
+    {
+      "primitive_rust": "ADD_GUIDE",
+      "primitive_id": "0x00040001",
+      "canonical_name": "AddGuide",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "add_guide",
+      "owner_milestone": "M16",
+      "planned_equivalence_test": "INKS-EQ-0024"
+    },
+    {
+      "primitive_rust": "MOVE_GUIDE",
+      "primitive_id": "0x00040002",
+      "canonical_name": "MoveGuide",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "move_guide",
+      "owner_milestone": "M16",
+      "planned_equivalence_test": "INKS-EQ-0025"
+    },
+    {
+      "primitive_rust": "DELETE_GUIDE",
+      "primitive_id": "0x00040003",
+      "canonical_name": "DeleteGuide",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "delete_guide",
+      "owner_milestone": "M16",
+      "planned_equivalence_test": "INKS-EQ-0026"
+    },
+    {
+      "primitive_rust": "SET_GRID",
+      "primitive_id": "0x00040010",
+      "canonical_name": "SetGrid",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "set_grid",
+      "owner_milestone": "M16",
+      "planned_equivalence_test": "INKS-EQ-0027"
+    },
+    {
+      "primitive_rust": "DELETE_ALL_GUIDES",
+      "primitive_id": "0x00040011",
+      "canonical_name": "DeleteAllGuides",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "delete_all_guides",
+      "owner_milestone": "M16",
+      "planned_equivalence_test": "INKS-EQ-0028"
+    },
+    {
+      "primitive_rust": "APPLY_RASTER_STROKE",
+      "primitive_id": "0x00050001",
+      "canonical_name": "ApplyRasterStroke",
+      "primitive_schema_version": 3,
+      "semantics_revision": 5,
+      "command_name": "apply_raster_stroke",
+      "owner_milestone": "M17",
+      "planned_equivalence_test": "INKS-EQ-0029"
+    },
+    {
+      "primitive_rust": "APPLY_FILL",
+      "primitive_id": "0x00050002",
+      "canonical_name": "ApplyFill",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "apply_fill",
+      "owner_milestone": "M08",
+      "planned_equivalence_test": "INKS-EQ-0030"
+    },
+    {
+      "primitive_rust": "APPLY_GEOMETRY",
+      "primitive_id": "0x00050003",
+      "canonical_name": "ApplyGeometry",
+      "primitive_schema_version": 2,
+      "semantics_revision": 1,
+      "command_name": "apply_geometry",
+      "owner_milestone": "M17",
+      "planned_equivalence_test": "INKS-EQ-0031"
+    },
+    {
+      "primitive_rust": "APPLY_GRADIENT",
+      "primitive_id": "0x00050010",
+      "canonical_name": "ApplyGradient",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "apply_gradient",
+      "owner_milestone": "M18A",
+      "planned_equivalence_test": "INKS-EQ-0032"
+    },
+    {
+      "primitive_rust": "APPLY_BOUNDARY_AIRBRUSH",
+      "primitive_id": "0x00050011",
+      "canonical_name": "ApplyBoundaryAirbrush",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "apply_boundary_airbrush",
+      "owner_milestone": "M08",
+      "planned_equivalence_test": "INKS-EQ-0033"
+    },
+    {
+      "primitive_rust": "APPLY_BLUR",
+      "primitive_id": "0x00050012",
+      "canonical_name": "ApplyBlur",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "apply_blur",
+      "owner_milestone": "M18B",
+      "planned_equivalence_test": "INKS-EQ-0034"
+    },
+    {
+      "primitive_rust": "APPLY_AIRBRUSH",
+      "primitive_id": "0x00050013",
+      "canonical_name": "ApplyAirbrush",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "apply_airbrush",
+      "owner_milestone": "M18B",
+      "planned_equivalence_test": "INKS-EQ-0035"
+    },
+    {
+      "primitive_rust": "APPLY_AIRBRUSH_GESTURE",
+      "primitive_id": "0x00050014",
+      "canonical_name": "ApplyAirbrushGesture",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "apply_airbrush_gesture",
+      "owner_milestone": "M18B",
+      "planned_equivalence_test": "INKS-EQ-0036"
+    },
+    {
+      "primitive_rust": "APPLY_STAMP",
+      "primitive_id": "0x00050015",
+      "canonical_name": "ApplyStamp",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "apply_stamp",
+      "owner_milestone": "M18B",
+      "planned_equivalence_test": "INKS-EQ-0037"
+    },
+    {
+      "primitive_rust": "APPLY_STAMP_GESTURE",
+      "primitive_id": "0x00050016",
+      "canonical_name": "ApplyStampGesture",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "apply_stamp_gesture",
+      "owner_milestone": "M18B",
+      "planned_equivalence_test": "INKS-EQ-0038"
+    },
+    {
+      "primitive_rust": "APPLY_BLUR_TOOL",
+      "primitive_id": "0x00050017",
+      "canonical_name": "ApplyBlurTool",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "apply_blur_tool",
+      "owner_milestone": "M18B",
+      "planned_equivalence_test": "INKS-EQ-0039"
+    },
+    {
+      "primitive_rust": "APPLY_DUST_REMOVAL",
+      "primitive_id": "0x00050018",
+      "canonical_name": "ApplyDustRemoval",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "apply_dust_removal",
+      "owner_milestone": "M08",
+      "planned_equivalence_test": "INKS-EQ-0040"
+    },
+    {
+      "primitive_rust": "EDIT_PLANE_ALPHA",
+      "primitive_id": "0x00050019",
+      "canonical_name": "EditPlaneAlpha",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "edit_plane_alpha",
+      "owner_milestone": "M18B",
+      "planned_equivalence_test": "INKS-EQ-0041"
+    },
+    {
+      "primitive_rust": "APPLY_ALPHA_GRADIENT",
+      "primitive_id": "0x0005001a",
+      "canonical_name": "ApplyAlphaGradient",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "apply_alpha_gradient",
+      "owner_milestone": "M18B",
+      "planned_equivalence_test": "INKS-EQ-0042"
+    },
+    {
+      "primitive_rust": "APPLY_FILTER",
+      "primitive_id": "0x00050020",
+      "canonical_name": "ApplyFilter",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "apply_filter",
+      "owner_milestone": "M08",
+      "planned_equivalence_test": "INKS-EQ-0043"
+    },
+    {
+      "primitive_rust": "REPLACE_RASTER_COLORS",
+      "primitive_id": "0x00050040",
+      "canonical_name": "ReplaceRasterColors",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "replace_raster_colors",
+      "owner_milestone": "M08",
+      "planned_equivalence_test": "INKS-EQ-0046"
+    },
+    {
+      "primitive_rust": "SEPARATE_RASTER_COLORS",
+      "primitive_id": "0x00050041",
+      "canonical_name": "SeparateRasterColors",
+      "primitive_schema_version": 2,
+      "semantics_revision": 3,
+      "command_name": "separate_raster_colors",
+      "owner_milestone": "M08",
+      "planned_equivalence_test": "INKS-EQ-0047"
+    },
+    {
+      "primitive_rust": "RESTORE_SELECTED_PIXELS",
+      "primitive_id": "0x00050042",
+      "canonical_name": "RestoreSelectedPixels",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "restore_selected_pixels",
+      "owner_milestone": "M19",
+      "planned_equivalence_test": "INKS-EQ-0048"
+    },
+    {
+      "primitive_rust": "SCOPED_COLOR_REPLACE",
+      "primitive_id": "0x00050043",
+      "canonical_name": "ScopedColorReplace",
+      "primitive_schema_version": 2,
+      "semantics_revision": 1,
+      "command_name": "scoped_color_replace",
+      "owner_milestone": "M18B",
+      "planned_equivalence_test": "INKS-EQ-0049"
+    },
+    {
+      "primitive_rust": "APPLY_SELECTION",
+      "primitive_id": "0x00060001",
+      "canonical_name": "ApplySelection",
+      "primitive_schema_version": 2,
+      "semantics_revision": 3,
+      "command_name": "apply_selection",
+      "owner_milestone": "M19",
+      "planned_equivalence_test": "INKS-EQ-0050"
+    },
+    {
+      "primitive_rust": "INVERT_SELECTION",
+      "primitive_id": "0x00060002",
+      "canonical_name": "InvertSelection",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "invert_selection",
+      "owner_milestone": "M19",
+      "planned_equivalence_test": "INKS-EQ-0051"
+    },
+    {
+      "primitive_rust": "CLEAR_SELECTION",
+      "primitive_id": "0x00060003",
+      "canonical_name": "ClearSelection",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "clear_selection",
+      "owner_milestone": "M19",
+      "planned_equivalence_test": "INKS-EQ-0052"
+    },
+    {
+      "primitive_rust": "RESIZE_SELECTION",
+      "primitive_id": "0x00060004",
+      "canonical_name": "ResizeSelection",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "resize_selection",
+      "owner_milestone": "M19",
+      "planned_equivalence_test": "INKS-EQ-0053"
+    },
+    {
+      "primitive_rust": "SELECT_COLOR",
+      "primitive_id": "0x00060005",
+      "canonical_name": "SelectColor",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "select_color",
+      "owner_milestone": "M19",
+      "planned_equivalence_test": "INKS-EQ-0054"
+    },
+    {
+      "primitive_rust": "SELECT_OUTPUT_COLOR_GUARD",
+      "primitive_id": "0x00060006",
+      "canonical_name": "SelectOutputColorGuard",
+      "primitive_schema_version": 2,
+      "semantics_revision": 1,
+      "command_name": "select_output_color_guard",
+      "owner_milestone": "M19",
+      "planned_equivalence_test": "INKS-EQ-0055"
+    },
+    {
+      "primitive_rust": "SAVE_SELECTION_MASK",
+      "primitive_id": "0x00060012",
+      "canonical_name": "SaveSelectionMask",
+      "primitive_schema_version": 2,
+      "semantics_revision": 1,
+      "command_name": "save_selection_mask",
+      "owner_milestone": "M19",
+      "planned_equivalence_test": "INKS-EQ-0085"
+    },
+    {
+      "primitive_rust": "APPLY_SAVED_SELECTION_MASK",
+      "primitive_id": "0x00060013",
+      "canonical_name": "ApplySavedSelectionMask",
+      "primitive_schema_version": 2,
+      "semantics_revision": 1,
+      "command_name": "apply_saved_selection_mask",
+      "owner_milestone": "M19",
+      "planned_equivalence_test": "INKS-EQ-0086"
+    },
+    {
+      "primitive_rust": "RENAME_SAVED_SELECTION_MASK",
+      "primitive_id": "0x00060014",
+      "canonical_name": "RenameSavedSelectionMask",
+      "primitive_schema_version": 2,
+      "semantics_revision": 1,
+      "command_name": "rename_saved_selection_mask",
+      "owner_milestone": "M19",
+      "planned_equivalence_test": "INKS-EQ-0087"
+    },
+    {
+      "primitive_rust": "DELETE_SAVED_SELECTION_MASK",
+      "primitive_id": "0x00060015",
+      "canonical_name": "DeleteSavedSelectionMask",
+      "primitive_schema_version": 2,
+      "semantics_revision": 1,
+      "command_name": "delete_saved_selection_mask",
+      "owner_milestone": "M19",
+      "planned_equivalence_test": "INKS-EQ-0088"
+    },
+    {
+      "primitive_rust": "CLEAR_SELECTED_CONTENT",
+      "primitive_id": "0x00060020",
+      "canonical_name": "ClearSelectedContent",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "clear_selected_content",
+      "owner_milestone": "M19",
+      "planned_equivalence_test": "INKS-EQ-0058"
+    },
+    {
+      "primitive_rust": "COMMIT_FLOATING",
+      "primitive_id": "0x00060021",
+      "canonical_name": "CommitFloating",
+      "primitive_schema_version": 3,
+      "semantics_revision": 3,
+      "command_name": "commit_floating",
+      "owner_milestone": "M19",
+      "planned_equivalence_test": "INKS-EQ-0059"
+    },
+    {
+      "primitive_rust": "MIRROR_DOCUMENT",
+      "primitive_id": "0x00070001",
+      "canonical_name": "MirrorDocument",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "mirror_document",
+      "owner_milestone": "M07",
+      "planned_equivalence_test": "INKS-EQ-0060"
+    },
+    {
+      "primitive_rust": "ROTATE_DOCUMENT",
+      "primitive_id": "0x00070002",
+      "canonical_name": "RotateDocument",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "rotate_document",
+      "owner_milestone": "M07",
+      "planned_equivalence_test": "INKS-EQ-0061"
+    },
+    {
+      "primitive_rust": "RESIZE_DOCUMENT",
+      "primitive_id": "0x00070003",
+      "canonical_name": "ResizeDocument",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "resize_document",
+      "owner_milestone": "M07",
+      "planned_equivalence_test": "INKS-EQ-0062"
+    },
+    {
+      "primitive_rust": "IMPORT_RASTER_ASSET",
+      "primitive_id": "0x00090001",
+      "canonical_name": "ImportRasterAsset",
+      "primitive_schema_version": 1,
+      "semantics_revision": 1,
+      "command_name": "import_raster_asset",
+      "owner_milestone": "M17",
+      "planned_equivalence_test": "INKS-EQ-0071"
+    },
+    {
+      "primitive_rust": "LIGHT_TABLE_SET_GLOBAL_OPACITY",
+      "primitive_id": "0x000a0001",
+      "canonical_name": "LightTableSetGlobalOpacity",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "light_table_set_global_opacity",
+      "owner_milestone": "M22",
+      "planned_equivalence_test": "INKS-EQ-0072"
+    },
+    {
+      "primitive_rust": "LIGHT_TABLE_CREATE_SET",
+      "primitive_id": "0x000a0002",
+      "canonical_name": "LightTableCreateSet",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "light_table_create_set",
+      "owner_milestone": "M22",
+      "planned_equivalence_test": "INKS-EQ-0073"
+    },
+    {
+      "primitive_rust": "LIGHT_TABLE_DUPLICATE_SET",
+      "primitive_id": "0x000a0003",
+      "canonical_name": "LightTableDuplicateSet",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "light_table_duplicate_set",
+      "owner_milestone": "M22",
+      "planned_equivalence_test": "INKS-EQ-0074"
+    },
+    {
+      "primitive_rust": "LIGHT_TABLE_DELETE_SET",
+      "primitive_id": "0x000a0004",
+      "canonical_name": "LightTableDeleteSet",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "light_table_delete_set",
+      "owner_milestone": "M22",
+      "planned_equivalence_test": "INKS-EQ-0075"
+    },
+    {
+      "primitive_rust": "LIGHT_TABLE_RENAME_SET",
+      "primitive_id": "0x000a0005",
+      "canonical_name": "LightTableRenameSet",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "light_table_rename_set",
+      "owner_milestone": "M22",
+      "planned_equivalence_test": "INKS-EQ-0076"
+    },
+    {
+      "primitive_rust": "LIGHT_TABLE_REORDER_SET",
+      "primitive_id": "0x000a0006",
+      "canonical_name": "LightTableReorderSet",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "light_table_reorder_set",
+      "owner_milestone": "M22",
+      "planned_equivalence_test": "INKS-EQ-0077"
+    },
+    {
+      "primitive_rust": "LIGHT_TABLE_SET_ACTIVE",
+      "primitive_id": "0x000a0007",
+      "canonical_name": "LightTableSetActive",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "light_table_set_active",
+      "owner_milestone": "M22",
+      "planned_equivalence_test": "INKS-EQ-0078"
+    },
+    {
+      "primitive_rust": "LIGHT_TABLE_ADD_ITEM",
+      "primitive_id": "0x000a0010",
+      "canonical_name": "LightTableAddItem",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "light_table_add_item",
+      "owner_milestone": "M22",
+      "planned_equivalence_test": "INKS-EQ-0079"
+    },
+    {
+      "primitive_rust": "LIGHT_TABLE_UPDATE_ITEM_PROPERTIES",
+      "primitive_id": "0x000a0011",
+      "canonical_name": "LightTableUpdateItemProperties",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "light_table_update_item_properties",
+      "owner_milestone": "M22",
+      "planned_equivalence_test": "INKS-EQ-0080"
+    },
+    {
+      "primitive_rust": "LIGHT_TABLE_UPDATE_ITEM",
+      "primitive_id": "0x000a0012",
+      "canonical_name": "LightTableUpdateItem",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "light_table_update_item",
+      "owner_milestone": "M22",
+      "planned_equivalence_test": "INKS-EQ-0081"
+    },
+    {
+      "primitive_rust": "LIGHT_TABLE_REMOVE_ITEM",
+      "primitive_id": "0x000a0013",
+      "canonical_name": "LightTableRemoveItem",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "light_table_remove_item",
+      "owner_milestone": "M22",
+      "planned_equivalence_test": "INKS-EQ-0082"
+    },
+    {
+      "primitive_rust": "LIGHT_TABLE_REORDER_ITEM",
+      "primitive_id": "0x000a0014",
+      "canonical_name": "LightTableReorderItem",
+      "primitive_schema_version": 2,
+      "semantics_revision": 2,
+      "command_name": "light_table_reorder_item",
+      "owner_milestone": "M22",
+      "planned_equivalence_test": "INKS-EQ-0083"
+    },
+    {
+      "primitive_rust": "LIGHT_TABLE_BULK_REGISTER",
+      "primitive_id": "0x000a0016",
+      "canonical_name": "LightTableBulkRegister",
+      "primitive_schema_version": 2,
+      "semantics_revision": 1,
+      "command_name": "light_table_bulk_register",
+      "owner_milestone": "M22",
+      "planned_equivalence_test": "INKS-EQ-0084"
+    }
+  ],
+  "excluded_primitives": [
+    {
+      "primitive_rust": "LIGHT_TABLE_SWAP_WITH_ACTIVE",
+      "primitive_id": "0x000a0015",
+      "canonical_name": "LightTableSwapWithActive",
+      "reason": "session_only"
+    },
+    {
+      "primitive_rust": "APPLY_BATCH_OPERATIONS",
+      "primitive_id": "0x00050044",
+      "canonical_name": "ApplyBatchOperations",
+      "reason": "batch_v5_private"
+    }
+  ],
+  "batch_traceability": [
+    {
+      "batch_requirement": "BATCH-001",
+      "script_requirements": [
+        "SCRIPT-001",
+        "SCRIPT-002",
+        "SCRIPT-003",
+        "SCRIPT-005"
+      ],
+      "milestones": [
+        "M04",
+        "M05A",
+        "M05B",
+        "M11",
+        "M12",
+        "M28A",
+        "M28B",
+        "M29A",
+        "M29B",
+        "M29C"
+      ],
+      "evidence_tests": [
+        "INKS-TRACE-BATCH-001",
+        "INKS-PARITY-BATCH-001"
+      ]
+    },
+    {
+      "batch_requirement": "BATCH-002",
+      "script_requirements": [
+        "SCRIPT-002",
+        "SCRIPT-005"
+      ],
+      "milestones": [
+        "M07",
+        "M08",
+        "M09",
+        "M29C"
+      ],
+      "evidence_tests": [
+        "INKS-TRACE-BATCH-002",
+        "INKS-PARITY-BATCH-002"
+      ]
+    },
+    {
+      "batch_requirement": "BATCH-003",
+      "script_requirements": [
+        "SCRIPT-003",
+        "SCRIPT-005"
+      ],
+      "milestones": [
+        "M11",
+        "M12",
+        "M26",
+        "M27A",
+        "M27B",
+        "M29A",
+        "M29C"
+      ],
+      "evidence_tests": [
+        "INKS-TRACE-BATCH-003",
+        "INKS-PARITY-BATCH-003"
+      ]
+    },
+    {
+      "batch_requirement": "BATCH-004",
+      "script_requirements": [
+        "SCRIPT-002",
+        "SCRIPT-003",
+        "SCRIPT-004",
+        "SCRIPT-005"
+      ],
+      "milestones": [
+        "M05A",
+        "M05B",
+        "M08",
+        "M09",
+        "M28B",
+        "M29B",
+        "M29C"
+      ],
+      "evidence_tests": [
+        "INKS-TRACE-BATCH-004",
+        "INKS-PARITY-BATCH-004"
+      ]
+    }
+  ]
+}

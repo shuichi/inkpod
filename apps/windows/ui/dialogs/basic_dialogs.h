@@ -68,8 +68,6 @@ struct CellCreationDialogState {
         const InkpodCellCreationOptions& options,
         InkpodCellCreationPlanItem& preview) noexcept;
     InkpodCellCreationOptions options{};
-    const ViewOptionsDialogState::Choice* layer_choices{};
-    std::uint32_t layer_choice_count{};
     void* preview_context{};
     PreviewCallback build_preview{};
     InkpodCellCreationPlanItem preview{};
@@ -93,17 +91,6 @@ INT_PTR ShowShootingFrameOptions(
     HINSTANCE instance,
     HWND owner,
     ShootingFrameDialogState& state) noexcept;
-
-struct VanishingPointDialogState {
-    InkpodVanishingPointInput value{sizeof(InkpodVanishingPointInput)};
-    bool close_immediately{};
-    bool centered_on_owner{};
-};
-
-INT_PTR ShowVanishingPointOptions(
-    HINSTANCE instance,
-    HWND owner,
-    VanishingPointDialogState& state) noexcept;
 
 struct CutPropertiesDialogState {
     std::wstring work_title;

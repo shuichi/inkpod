@@ -103,8 +103,6 @@ pub enum EditorTool {
     ColorReplace = 1_008,
     /// Angled shooting-frame handle editor.
     ShootingFrame = 1_009,
-    /// Persistent vanishing-point handle editor.
-    VanishingPoint = 1_010,
     /// Raster line geometry tool.
     GeometryLine = 1_011,
     /// Raster curve geometry tool.
@@ -132,7 +130,7 @@ pub enum EditorTool {
 }
 
 impl EditorTool {
-    pub(crate) const ALL: [Self; 25] = [
+    pub(crate) const ALL: [Self; 24] = [
         Self::Pencil,
         Self::Brush,
         Self::Eraser,
@@ -145,7 +143,6 @@ impl EditorTool {
         Self::LightTableMove,
         Self::ColorReplace,
         Self::ShootingFrame,
-        Self::VanishingPoint,
         Self::GeometryLine,
         Self::GeometryCurve,
         Self::GeometryRectangle,

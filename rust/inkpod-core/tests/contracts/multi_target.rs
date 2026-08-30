@@ -18,15 +18,10 @@ fn plane_target(core: &Core, layer_index: usize, plane_index: usize) -> EditTarg
 #[test]
 fn edit_target_set_is_bounded_tree_ordered_editor_state_and_reopens() {
     let mut core = core_with_raster_layer(0x4d30_3300_0000_0000_0000_0000_0000_0001);
-    let (_, raster_layer) = core.create_layer(LayerKind::Raster, "Paint").unwrap();
-    let raster_plane = core
-        .layers()
-        .unwrap()
-        .iter()
-        .find(|layer| layer.id == raster_layer)
-        .unwrap()
-        .planes[0]
-        .id;
+    let (_, raster_layer) = core.create_layer("Paint").unwrap();
+    let (_, raster_plane) = core
+        .create_plane(raster_layer, PixelFormat::StraightRgba8, "Paint")
+        .unwrap();
     let main = plane_target(&core, 0, 0);
     let color = plane_target(&core, 0, 1);
     let raster = EditTarget::Plane(EditorTarget {
@@ -188,24 +183,12 @@ fn main_and_color_copy_paste_is_one_coordinate_preserving_undo_unit() {
 #[test]
 fn grouped_rgba16_clipboard_keeps_exact_depth_order_and_origin() {
     let mut source = core_with_raster_layer(0x4d30_3300_0000_0000_0000_0000_0000_0009);
-    let (_, layer_id) = source
-        .create_layer(LayerKind::Raster, "16-bit source")
-        .unwrap();
+    let (_, layer_id) = source.create_layer("16-bit source").unwrap();
     let (_, first) = source
-        .create_plane(
-            layer_id,
-            PlaneType::Raster,
-            PixelFormat::StraightRgba16,
-            "16 A",
-        )
+        .create_plane(layer_id, PixelFormat::StraightRgba16, "16 A")
         .unwrap();
     let (_, second) = source
-        .create_plane(
-            layer_id,
-            PlaneType::Raster,
-            PixelFormat::StraightRgba16,
-            "16 B",
-        )
+        .create_plane(layer_id, PixelFormat::StraightRgba16, "16 B")
         .unwrap();
     source
         .apply_selection(
@@ -270,24 +253,12 @@ fn grouped_rgba16_clipboard_keeps_exact_depth_order_and_origin() {
     );
 
     let mut destination = core_with_raster_layer(0x4d30_3300_0000_0000_0000_0000_0000_000a);
-    let (_, destination_layer) = destination
-        .create_layer(LayerKind::Raster, "16-bit destination")
-        .unwrap();
+    let (_, destination_layer) = destination.create_layer("16-bit destination").unwrap();
     let (_, destination_first) = destination
-        .create_plane(
-            destination_layer,
-            PlaneType::Raster,
-            PixelFormat::StraightRgba16,
-            "16 A",
-        )
+        .create_plane(destination_layer, PixelFormat::StraightRgba16, "16 A")
         .unwrap();
     let (_, destination_second) = destination
-        .create_plane(
-            destination_layer,
-            PlaneType::Raster,
-            PixelFormat::StraightRgba16,
-            "16 B",
-        )
+        .create_plane(destination_layer, PixelFormat::StraightRgba16, "16 B")
         .unwrap();
     destination
         .set_active_node(destination_layer, destination_first)
@@ -343,10 +314,10 @@ fn multi_target_property_and_duplicate_commands_are_atomic() {
     let mut core = core_with_raster_layer(0x4d30_3300_0000_0000_0000_0000_0000_0004);
     let layer_id = core.layers().unwrap()[0].id;
     let (_, first) = core
-        .create_plane(layer_id, PlaneType::Raster, PixelFormat::StraightRgba8, "A")
+        .create_plane(layer_id, PixelFormat::StraightRgba8, "A")
         .unwrap();
     let (_, second) = core
-        .create_plane(layer_id, PlaneType::Raster, PixelFormat::StraightRgba8, "B")
+        .create_plane(layer_id, PixelFormat::StraightRgba8, "B")
         .unwrap();
     let targets = vec![
         EditTarget::Plane(EditorTarget {
@@ -406,20 +377,10 @@ fn grouped_capabilities_noop_merge_delete_and_incompatible_failure_are_atomic() 
     let mut core = core_with_raster_layer(0x4d30_3300_0000_0000_0000_0000_0000_0008);
     let layer_id = core.layers().unwrap()[0].id;
     let (_, first) = core
-        .create_plane(
-            layer_id,
-            PlaneType::Raster,
-            PixelFormat::StraightRgba8,
-            "Merge A",
-        )
+        .create_plane(layer_id, PixelFormat::StraightRgba8, "Merge A")
         .unwrap();
     let (_, second) = core
-        .create_plane(
-            layer_id,
-            PlaneType::Raster,
-            PixelFormat::StraightRgba8,
-            "Merge B",
-        )
+        .create_plane(layer_id, PixelFormat::StraightRgba8, "Merge B")
         .unwrap();
     let set_targets = |core: &mut Core, targets: Vec<EditTarget>| {
         let editor = core.editor_state().unwrap();
@@ -444,7 +405,6 @@ fn grouped_capabilities_noop_merge_delete_and_incompatible_failure_are_atomic() 
     assert!(capabilities.editability);
     assert!(capabilities.merge);
     assert!(capabilities.convert_planes);
-    assert!(!capabilities.convert_layers);
 
     let before_noop = core.document_info().unwrap();
     let history_before_noop = core.history_entries().len();

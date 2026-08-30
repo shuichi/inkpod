@@ -102,30 +102,30 @@ pub unsafe extern "C" fn inkpod_core_selection_clear(
     })
 }
 
-/// Creates a typed selection layer from the persistent selection mask.
+/// Saves the persistent document selection under a stable mask ID.
 ///
 /// # Safety
 /// `core` must be live on its owner thread, the advertised UTF-8 name range must
-/// be readable, and `result` plus `out_layer_id` must be writable and
+/// be readable, and `result` plus `out_saved_selection_id` must be writable and
 /// non-overlapping.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inkpod_core_selection_to_layer(
+pub unsafe extern "C" fn inkpod_core_saved_selection_create(
     core: *mut InkpodCore,
     name_utf8: *const u8,
     name_bytes: u64,
     result: *mut InkpodDispatchResult,
-    out_layer_id: *mut u64,
+    out_saved_selection_id: *mut u64,
 ) -> u32 {
     ffi_boundary(|| {
         clear_last_error();
         if core.is_null()
             || !is_aligned(core)
-            || out_layer_id.is_null()
-            || !is_aligned(out_layer_id)
+            || out_saved_selection_id.is_null()
+            || !is_aligned(out_saved_selection_id)
         {
             return fail(
                 INKPOD_STATUS_INVALID_ARGUMENT,
-                "selection-layer pointer is invalid",
+                "saved-selection pointer is invalid",
             );
         }
         // SAFETY: Output prefix and name bytes follow the exported contract.
@@ -133,6 +133,9 @@ pub unsafe extern "C" fn inkpod_core_selection_to_layer(
         {
             return status;
         }
+        // SAFETY: The output pointer is writable by contract. A failed save must
+        // never leave a stale saved-selection ID observable to the caller.
+        unsafe { out_saved_selection_id.write(0) };
         let name = match unsafe { name_from_utf8(name_utf8, name_bytes) } {
             Ok(name) => name,
             Err(status) => return status,
@@ -144,11 +147,11 @@ pub unsafe extern "C" fn inkpod_core_selection_to_layer(
         if thread_status != INKPOD_STATUS_OK {
             return thread_status;
         }
-        match core.core.selection_to_layer(name) {
+        match core.core.save_selection_mask(name) {
             Ok((outcome, id)) => {
                 write_dispatch_result(result, outcome);
-                // SAFETY: out_layer_id is writable by contract.
-                unsafe { out_layer_id.write(id) };
+                // SAFETY: out_saved_selection_id is writable by contract.
+                unsafe { out_saved_selection_id.write(id.get()) };
                 INKPOD_STATUS_OK
             }
             Err(error) => map_core_error(error),
@@ -156,15 +159,15 @@ pub unsafe extern "C" fn inkpod_core_selection_to_layer(
     })
 }
 
-/// Combines a typed selection layer with the persistent selection mask.
+/// Combines a saved selection mask with the persistent document selection.
 ///
 /// # Safety
 /// `core` must be live on its owner thread and `result` must expose writable,
 /// non-overlapping storage for a complete dispatch record.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inkpod_core_selection_from_layer(
+pub unsafe extern "C" fn inkpod_core_saved_selection_apply(
     core: *mut InkpodCore,
-    layer_id: u64,
+    saved_selection_id: u64,
     operation: u32,
     result: *mut InkpodDispatchResult,
 ) -> u32 {
@@ -179,13 +182,13 @@ pub unsafe extern "C" fn inkpod_core_selection_from_layer(
             return status;
         }
         let operation = match operation {
-            INKPOD_SELECTION_LAYER_REPLACE => SelectionLayerOperation::Replace,
-            INKPOD_SELECTION_LAYER_ADD => SelectionLayerOperation::Add,
-            INKPOD_SELECTION_LAYER_SUBTRACT => SelectionLayerOperation::Subtract,
+            INKPOD_SAVED_SELECTION_REPLACE => SavedSelectionOperation::Replace,
+            INKPOD_SAVED_SELECTION_ADD => SavedSelectionOperation::Add,
+            INKPOD_SAVED_SELECTION_SUBTRACT => SavedSelectionOperation::Subtract,
             _ => {
                 return fail(
                     INKPOD_STATUS_INVALID_ARGUMENT,
-                    "selection-layer operation is not defined",
+                    "saved-selection operation is not defined",
                 );
             }
         };
@@ -196,7 +199,173 @@ pub unsafe extern "C" fn inkpod_core_selection_from_layer(
         if thread_status != INKPOD_STATUS_OK {
             return thread_status;
         }
-        match core.core.selection_from_layer(layer_id, operation) {
+        let Some(saved_selection_id) = SavedSelectionId::from_raw(saved_selection_id) else {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "saved-selection ID must be nonzero",
+            );
+        };
+        match core
+            .core
+            .apply_saved_selection_mask(saved_selection_id, operation)
+        {
+            Ok(outcome) => {
+                write_dispatch_result(result, outcome);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Copies one saved selection descriptor by document order.
+///
+/// A zero-capacity null name buffer is a successful size query. The returned
+/// ID belongs to the current document and remains stable until deletion.
+///
+/// # Safety
+/// `core` must be live on its owner thread. `out_info` and any advertised name
+/// storage must be complete, writable, and non-overlapping with Core state.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_saved_selection_get(
+    core: *mut InkpodCore,
+    index: u32,
+    out_info: *mut InkpodSavedSelectionInfo,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) =
+            unsafe { validate_struct(out_info.cast_const(), "InkpodSavedSelectionInfo") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects are required by contract.
+        let core = unsafe { &mut *core };
+        let output = unsafe { &mut *out_info };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        let masks = match core.core.saved_selection_masks() {
+            Ok(masks) => masks,
+            Err(error) => return map_core_error(error),
+        };
+        let Some(mask) = masks.get(index as usize) else {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "saved-selection index is outside the document",
+            );
+        };
+        output.reserved = 0;
+        output.id = mask.id.get();
+        output.name_bytes = mask.name.len() as u64;
+        if output.name_capacity == 0 {
+            if !output.name_utf8.is_null() {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "zero-capacity saved-selection name buffer must be null",
+                );
+            }
+            return INKPOD_STATUS_OK;
+        }
+        if output.name_utf8.is_null() || output.name_capacity < output.name_bytes {
+            return fail(
+                INKPOD_STATUS_BUFFER_TOO_SMALL,
+                "saved-selection name buffer is too small",
+            );
+        }
+        // SAFETY: Caller supplied the advertised writable name capacity.
+        unsafe { ptr::copy_nonoverlapping(mask.name.as_ptr(), output.name_utf8, mask.name.len()) };
+        INKPOD_STATUS_OK
+    })
+}
+
+/// Renames one saved selection mask as a single undoable edit.
+///
+/// # Safety
+/// `core` must be live on its owner thread, `result` must be writable, and the
+/// advertised UTF-8 name range must be readable and non-overlapping.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_saved_selection_rename(
+    core: *mut InkpodCore,
+    saved_selection_id: u64,
+    name_utf8: *const u8,
+    name_bytes: u64,
+    result: *mut InkpodDispatchResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        let Some(id) = SavedSelectionId::from_raw(saved_selection_id) else {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "saved-selection ID must be nonzero",
+            );
+        };
+        let name = match unsafe { name_from_utf8(name_utf8, name_bytes) } {
+            Ok(name) => name,
+            Err(status) => return status,
+        };
+        // SAFETY: Complete live objects are required by contract.
+        let core = unsafe { &mut *core };
+        let result = unsafe { &mut *result };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core.core.rename_saved_selection_mask(id, name) {
+            Ok(outcome) => {
+                write_dispatch_result(result, outcome);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Deletes one saved selection mask as a single undoable edit.
+///
+/// # Safety
+/// `core` must be live on its owner thread and `result` must be a complete,
+/// writable, non-overlapping record.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_saved_selection_delete(
+    core: *mut InkpodCore,
+    saved_selection_id: u64,
+    result: *mut InkpodDispatchResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        let Some(id) = SavedSelectionId::from_raw(saved_selection_id) else {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "saved-selection ID must be nonzero",
+            );
+        };
+        // SAFETY: Complete live objects are required by contract.
+        let core = unsafe { &mut *core };
+        let result = unsafe { &mut *result };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core.core.delete_saved_selection_mask(id) {
             Ok(outcome) => {
                 write_dispatch_result(result, outcome);
                 INKPOD_STATUS_OK

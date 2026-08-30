@@ -11,21 +11,19 @@ fn fixture() -> FileBatchGraph {
             last_cell: 12,
         }],
         operations: vec![FileBatchOperation {
-            version: 3,
+            version: BATCH_OPERATION_VERSION,
             kind: 2,
             flags: 1,
             targets: vec![
                 FileBatchTarget {
                     layer_id: 10,
                     plane_id: 12,
-                    layer_kind: 1,
                     plane_kind: 2,
                     missing_policy: 1,
                 },
                 FileBatchTarget {
                     layer_id: 20,
                     plane_id: 22,
-                    layer_kind: 2,
                     plane_kind: 2,
                     missing_policy: 2,
                 },
@@ -44,6 +42,49 @@ fn fixture() -> FileBatchGraph {
     }
 }
 
+fn first_operation_offset(graph: &FileBatchGraph) -> usize {
+    const HEADER_BYTES: usize = 28;
+    let inputs_bytes = graph
+        .inputs
+        .iter()
+        .map(|input| 16 + input.path.len())
+        .sum::<usize>();
+    HEADER_BYTES + 4 + graph.name.len() + 4 + inputs_bytes + 4
+}
+
+fn replace_u32_and_checksum(encoded: &mut [u8], offset: usize, value: u32) {
+    encoded[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    replace_checksum(encoded);
+}
+
+fn replace_first_target_and_checksum(
+    encoded: &mut [u8],
+    graph: &FileBatchGraph,
+    target: FileBatchTarget,
+) {
+    const OPERATION_HEADER_BYTES: usize = 20;
+    let offset = first_operation_offset(graph) + OPERATION_HEADER_BYTES;
+    encoded[offset..offset + 8].copy_from_slice(&target.layer_id.to_le_bytes());
+    encoded[offset + 8..offset + 16].copy_from_slice(&target.plane_id.to_le_bytes());
+    encoded[offset + 16..offset + 20].copy_from_slice(&target.plane_kind.to_le_bytes());
+    encoded[offset + 20..offset + 24].copy_from_slice(&target.missing_policy.to_le_bytes());
+    replace_checksum(encoded);
+}
+
+fn replace_checksum(encoded: &mut [u8]) {
+    const BODY_OFFSET: usize = 28;
+    const CHECKSUM_OFFSET: usize = 20;
+    let body_checksum = checksum(&encoded[BODY_OFFSET..]);
+    encoded[CHECKSUM_OFFSET..BODY_OFFSET].copy_from_slice(&body_checksum.to_le_bytes());
+}
+
+fn assert_invalid(result: Result<FileBatchGraph, FormatError>, expected: &'static str) {
+    assert!(
+        matches!(result, Err(FormatError::Invalid(message)) if message == expected),
+        "expected invalid format error: {expected}"
+    );
+}
+
 #[test]
 fn batch_graph_round_trip_and_checksum_validation() {
     let graph = fixture();
@@ -58,6 +99,115 @@ fn batch_graph_round_trip_and_checksum_validation() {
 }
 
 #[test]
+fn batch_operation_version_is_exact_current_on_encode_and_decode() {
+    for version in [0, 3, 5] {
+        let mut invalid = fixture();
+        invalid.operations[0].version = version;
+        assert!(matches!(
+            encode_batch_graph(&invalid),
+            Err(FormatError::Invalid(
+                "batch operation version is unsupported"
+            ))
+        ));
+
+        let graph = fixture();
+        let mut encoded = encode_batch_graph(&graph).unwrap();
+        replace_u32_and_checksum(&mut encoded, first_operation_offset(&graph), version);
+        assert_invalid(
+            decode_batch_graph(&encoded),
+            "batch operation version is unsupported",
+        );
+    }
+}
+
+#[test]
+fn batch_targets_are_closed_to_valid_plane_selectors_and_missing_policies() {
+    let cases = [
+        (
+            FileBatchTarget {
+                layer_id: 0,
+                plane_id: 0,
+                plane_kind: 0,
+                missing_policy: 1,
+            },
+            "batch target plane selector is empty",
+        ),
+        (
+            FileBatchTarget {
+                layer_id: 10,
+                plane_id: 0,
+                plane_kind: 0,
+                missing_policy: 1,
+            },
+            "batch target plane selector is empty",
+        ),
+        (
+            FileBatchTarget {
+                layer_id: 10,
+                plane_id: 12,
+                plane_kind: 1,
+                missing_policy: 1,
+            },
+            "batch target plane kind must be Color or Raster",
+        ),
+        (
+            FileBatchTarget {
+                layer_id: 10,
+                plane_id: 12,
+                plane_kind: 4,
+                missing_policy: 1,
+            },
+            "batch target plane kind must be Color or Raster",
+        ),
+        (
+            FileBatchTarget {
+                layer_id: 0,
+                plane_id: 0,
+                plane_kind: 2,
+                missing_policy: 0,
+            },
+            "batch missing-target policy is unknown",
+        ),
+        (
+            FileBatchTarget {
+                layer_id: 0,
+                plane_id: 0,
+                plane_kind: 3,
+                missing_policy: 3,
+            },
+            "batch missing-target policy is unknown",
+        ),
+    ];
+
+    for (target, expected) in cases {
+        let mut invalid = fixture();
+        invalid.operations[0].targets[0] = target;
+        assert!(
+            matches!(encode_batch_graph(&invalid), Err(FormatError::Invalid(message)) if message == expected),
+            "encode must reject: {expected}"
+        );
+
+        let graph = fixture();
+        let mut encoded = encode_batch_graph(&graph).unwrap();
+        replace_first_target_and_checksum(&mut encoded, &graph, target);
+        assert_invalid(decode_batch_graph(&encoded), expected);
+    }
+}
+
+#[test]
+fn batch_target_without_plane_kind_requires_and_accepts_a_fixed_plane_id() {
+    let mut graph = fixture();
+    graph.operations[0].targets = vec![FileBatchTarget {
+        layer_id: 10,
+        plane_id: 12,
+        plane_kind: 0,
+        missing_policy: 2,
+    }];
+    let encoded = encode_batch_graph(&graph).unwrap();
+    assert_eq!(decode_batch_graph(&encoded).unwrap(), graph);
+}
+
+#[test]
 fn batch_graph_rejects_unknown_container_version_and_cancel_cleans_temp() {
     let graph = fixture();
     let mut encoded = encode_batch_graph(&graph).unwrap();
@@ -66,7 +216,7 @@ fn batch_graph_rejects_unknown_container_version_and_cancel_cleans_temp() {
         decode_batch_graph(&encoded),
         Err(FormatError::Invalid("batch graph version is unsupported"))
     ));
-    for old_version in [1_u32, 2, 3] {
+    for old_version in [1_u32, 2, 3, 4] {
         let mut old = encode_batch_graph(&graph).unwrap();
         old[8..12].copy_from_slice(&old_version.to_le_bytes());
         assert!(matches!(

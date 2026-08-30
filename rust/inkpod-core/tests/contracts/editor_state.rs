@@ -459,7 +459,7 @@ fn editor_state_is_session_owned_shared_by_views_and_independent_between_documen
 fn active_target_uses_stable_ids_and_reconciles_topology_deterministically() {
     fn exercise() -> Vec<EditorTarget> {
         let mut core = editor_core();
-        let (_, layer_id) = core.create_layer(LayerKind::Raster, "Target").unwrap();
+        let (_, layer_id) = core.create_layer("Target").unwrap();
         let raster_plane_id = core
             .layers()
             .unwrap()
@@ -505,9 +505,7 @@ fn active_target_uses_stable_ids_and_reconciles_topology_deterministically() {
     assert_eq!(exercise(), exercise());
 
     let mut overflow = editor_core();
-    let (_, doomed_layer_id) = overflow
-        .create_layer(LayerKind::Raster, "Overflow target")
-        .unwrap();
+    let (_, doomed_layer_id) = overflow.create_layer("Overflow target").unwrap();
     let mut maximum_revision = overflow.editor_state_frame().unwrap();
     maximum_revision[44..52].copy_from_slice(&u64::MAX.to_le_bytes());
     overflow
@@ -541,7 +539,7 @@ fn target_changing_topology_editor_overflow_is_fully_atomic() {
     let layer_topology_before = layer_candidate.layers().unwrap();
     let layer_resources_before = layer_candidate.resource_usage();
     assert!(matches!(
-        layer_candidate.create_layer(LayerKind::Raster, "Rejected layer"),
+        layer_candidate.create_layer("Rejected layer"),
         Err(CoreError::InvalidState("editor revision overflow"))
     ));
     assert_eq!(
@@ -557,12 +555,8 @@ fn target_changing_topology_editor_overflow_is_fully_atomic() {
 
     let mut plane_candidate = editor_core();
     let mut plane_control = editor_core();
-    let (_, candidate_layer_id) = plane_candidate
-        .create_layer(LayerKind::Raster, "Plane target")
-        .unwrap();
-    let (_, control_layer_id) = plane_control
-        .create_layer(LayerKind::Raster, "Plane target")
-        .unwrap();
+    let (_, candidate_layer_id) = plane_candidate.create_layer("Plane target").unwrap();
+    let (_, control_layer_id) = plane_control.create_layer("Plane target").unwrap();
     assert_eq!(candidate_layer_id, control_layer_id);
     set_maximum_editor_revision(&mut plane_candidate);
     set_maximum_editor_revision(&mut plane_control);
@@ -573,7 +567,6 @@ fn target_changing_topology_editor_overflow_is_fully_atomic() {
     assert!(matches!(
         plane_candidate.create_plane(
             candidate_layer_id,
-            PlaneType::Raster,
             PixelFormat::StraightRgba8,
             "Rejected plane",
         ),
@@ -605,18 +598,15 @@ fn target_changing_topology_editor_overflow_is_fully_atomic() {
         .unwrap();
         set_maximum_editor_revision(core);
     }
-    let selection_document_before = observe_document(&mut selection_candidate);
     let selection_editor_before = selection_candidate.editor_state().unwrap();
     let selection_topology_before = selection_candidate.layers().unwrap();
-    let selection_resources_before = selection_candidate.resource_usage();
-    assert!(matches!(
-        selection_candidate.selection_to_layer("Rejected selection"),
-        Err(CoreError::InvalidState("editor revision overflow"))
-    ));
-    assert_eq!(
-        observe_document(&mut selection_candidate),
-        selection_document_before
-    );
+    let (_, candidate_saved_id) = selection_candidate
+        .save_selection_mask("Saved selection")
+        .unwrap();
+    let (_, control_saved_id) = selection_control
+        .save_selection_mask("Saved selection")
+        .unwrap();
+    assert_eq!(candidate_saved_id, control_saved_id);
     assert_eq!(
         selection_candidate.editor_state().unwrap(),
         selection_editor_before
@@ -626,8 +616,11 @@ fn target_changing_topology_editor_overflow_is_fully_atomic() {
         selection_topology_before
     );
     assert_eq!(
-        selection_candidate.resource_usage(),
-        selection_resources_before
+        selection_candidate.saved_selection_masks().unwrap(),
+        vec![SavedSelectionInfo {
+            id: candidate_saved_id,
+            name: "Saved selection".to_owned(),
+        }]
     );
     let (_, candidate_guide_id) = selection_candidate
         .add_guide(GuideAxis::Vertical, 2)
@@ -723,22 +716,25 @@ fn canonical_editor_frame_round_trips_and_failure_or_overflow_is_atomic() {
 }
 
 #[test]
-fn reopen_resolves_target_past_a_leading_layer_without_planes() {
+fn reopen_preserves_a_valid_target_in_the_standard_layer_topology() {
     let sequence = TEST_PATH_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let path = std::env::temp_dir().join(format!(
-        "inkpod-editor-empty-leading-layer-{sequence}.inkpod"
+        "inkpod-editor-standard-layer-target-{sequence}.inkpod"
     ));
     let mut source = editor_core();
-    source
-        .create_adjustment_layer(
-            "Leading adjustment",
-            Adjustment::BrightnessContrast {
-                brightness_milli: 0,
-                contrast_milli: 0,
-            },
-        )
-        .unwrap();
-    assert!(source.layers().unwrap()[0].planes.is_empty());
+    let (_, layer_id) = source.create_layer("Leading standard layer").unwrap();
+    let color_id = source
+        .layers()
+        .unwrap()
+        .into_iter()
+        .find(|layer| layer.id == layer_id)
+        .unwrap()
+        .planes
+        .into_iter()
+        .find(|plane| plane.kind == PlaneType::Color)
+        .unwrap()
+        .id;
+    source.set_active_node(layer_id, color_id).unwrap();
     source.save(&path).unwrap();
 
     let mut reopened = Core::new();
@@ -748,7 +744,14 @@ fn reopen_resolves_target_past_a_leading_layer_without_planes() {
         .unwrap()
         .state
         .target
-        .expect("the first nonempty layer must supply the deterministic target");
+        .expect("a standard layer must supply a deterministic target");
+    assert_eq!(
+        target,
+        EditorTarget {
+            layer_id,
+            plane_id: color_id
+        }
+    );
     assert!(reopened.layers().unwrap().iter().any(|layer| {
         layer.id == target.layer_id && layer.planes.iter().any(|plane| plane.id == target.plane_id)
     }));
@@ -834,28 +837,38 @@ fn editor_savepoint_and_edit_frame_round_trip_with_current_native_format() {
 #[test]
 fn captured_fill_selection_and_color_targets_do_not_follow_later_editor_state() {
     let mut core = editor_core();
-    let (_, first_layer_id) = core.create_layer(LayerKind::Raster, "Captured A").unwrap();
+    let (_, first_layer_id) = core.create_layer("Captured A").unwrap();
     let first_plane_id = core
         .layers()
         .unwrap()
         .iter()
         .find(|layer| layer.id == first_layer_id)
         .unwrap()
-        .planes[0]
+        .planes
+        .iter()
+        .find(|plane| plane.kind == PlaneType::Color)
+        .unwrap()
         .id;
+    core.set_active_node(first_layer_id, first_plane_id)
+        .unwrap();
     let captured = EditorTarget {
         layer_id: first_layer_id,
         plane_id: first_plane_id,
     };
-    let (_, second_layer_id) = core.create_layer(LayerKind::Raster, "Live B").unwrap();
+    let (_, second_layer_id) = core.create_layer("Live B").unwrap();
     let second_plane_id = core
         .layers()
         .unwrap()
         .iter()
         .find(|layer| layer.id == second_layer_id)
         .unwrap()
-        .planes[0]
+        .planes
+        .iter()
+        .find(|plane| plane.kind == PlaneType::Color)
+        .unwrap()
         .id;
+    core.set_active_node(second_layer_id, second_plane_id)
+        .unwrap();
     let live = EditorTarget {
         layer_id: second_layer_id,
         plane_id: second_plane_id,

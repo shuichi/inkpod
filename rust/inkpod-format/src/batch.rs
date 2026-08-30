@@ -6,7 +6,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Current development format. Increment for every serialized graph schema
 /// change until the user declares a format freeze; older versions are rejected.
-pub const BATCH_GRAPH_VERSION: u32 = 4;
+pub const BATCH_GRAPH_VERSION: u32 = 5;
+/// Version required in every operation payload stored by Batch graph v5.
+///
+/// The native format is exact-current during development: operation payloads
+/// from older or future schemas are rejected instead of migrated.
+pub const BATCH_OPERATION_VERSION: u32 = 4;
 const MAGIC: [u8; 8] = *b"INKBATCH";
 const MAX_BATCH_FILE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_BATCH_INPUTS: usize = 16_384;
@@ -15,6 +20,10 @@ const MAX_BATCH_TARGETS: usize = 64;
 const MAX_BATCH_STRING_BYTES: usize = 32_768;
 const MAX_OPERATION_PAYLOAD_BYTES: usize = 1_048_576;
 const ATOMIC_WRITE_CHUNK_BYTES: usize = 1_048_576;
+const TARGET_PLANE_KIND_COLOR: u32 = 2;
+const TARGET_PLANE_KIND_RASTER: u32 = 3;
+const TARGET_MISSING_SKIP: u32 = 1;
+const TARGET_MISSING_ERROR: u32 = 2;
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -29,7 +38,6 @@ pub struct FileBatchInput {
 pub struct FileBatchTarget {
     pub layer_id: u64,
     pub plane_id: u64,
-    pub layer_kind: u32,
     pub plane_kind: u32,
     pub missing_policy: u32,
 }
@@ -83,7 +91,6 @@ pub fn encode_batch_graph(graph: &FileBatchGraph) -> Result<Vec<u8>, FormatError
         for target in &operation.targets {
             push_u64(&mut body, target.layer_id);
             push_u64(&mut body, target.plane_id);
-            push_u32(&mut body, target.layer_kind);
             push_u32(&mut body, target.plane_kind);
             push_u32(&mut body, target.missing_policy);
         }
@@ -162,7 +169,6 @@ pub fn decode_batch_graph(bytes: &[u8]) -> Result<FileBatchGraph, FormatError> {
             targets.push(FileBatchTarget {
                 layer_id: body.u64()?,
                 plane_id: body.u64()?,
-                layer_kind: body.u32()?,
                 plane_kind: body.u32()?,
                 missing_policy: body.u32()?,
             });
@@ -279,8 +285,10 @@ fn validate_graph(graph: &FileBatchGraph) -> Result<(), FormatError> {
         }
     }
     for operation in &graph.operations {
-        if operation.version == 0 {
-            return Err(FormatError::Invalid("batch operation version is zero"));
+        if operation.version != BATCH_OPERATION_VERSION {
+            return Err(FormatError::Invalid(
+                "batch operation version is unsupported",
+            ));
         }
         if operation.payload.len() > MAX_OPERATION_PAYLOAD_BYTES {
             return Err(FormatError::Invalid(
@@ -289,6 +297,28 @@ fn validate_graph(graph: &FileBatchGraph) -> Result<(), FormatError> {
         }
         if operation.targets.is_empty() || operation.targets.len() > MAX_BATCH_TARGETS {
             return Err(FormatError::Invalid("batch target count is outside bounds"));
+        }
+        for target in &operation.targets {
+            if !matches!(
+                target.missing_policy,
+                TARGET_MISSING_SKIP | TARGET_MISSING_ERROR
+            ) {
+                return Err(FormatError::Invalid(
+                    "batch missing-target policy is unknown",
+                ));
+            }
+            match target.plane_kind {
+                TARGET_PLANE_KIND_COLOR | TARGET_PLANE_KIND_RASTER => {}
+                0 if target.plane_id != 0 => {}
+                0 => {
+                    return Err(FormatError::Invalid("batch target plane selector is empty"));
+                }
+                _ => {
+                    return Err(FormatError::Invalid(
+                        "batch target plane kind must be Color or Raster",
+                    ));
+                }
+            }
         }
     }
     validate_string(&graph.output.folder, "batch output folder")?;

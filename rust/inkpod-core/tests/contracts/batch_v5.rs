@@ -2,14 +2,13 @@ use super::*;
 use crate::{PaintTool, Stroke, StrokeSample};
 
 fn target(kind: PlaneType) -> BatchTargetSelector {
-    semantic_target(LayerKind::BinaryColoring, kind)
+    semantic_target(kind)
 }
 
-fn semantic_target(layer_kind: LayerKind, plane_kind: PlaneType) -> BatchTargetSelector {
+fn semantic_target(plane_kind: PlaneType) -> BatchTargetSelector {
     BatchTargetSelector {
         layer_id: None,
         plane_id: None,
-        layer_kind: Some(layer_kind),
         plane_kind: Some(plane_kind),
         missing_policy: BatchMissingTargetPolicy::Error,
     }
@@ -37,7 +36,6 @@ fn exact_operation(
         target: BatchTargetSelector {
             layer_id: Some(layer_id),
             plane_id: Some(plane_id),
-            layer_kind: None,
             plane_kind: Some(plane_kind),
             missing_policy: BatchMissingTargetPolicy::Error,
         },
@@ -52,26 +50,14 @@ fn native_plane(format: PixelFormat, uuid: u128) -> (Core, u64, u64, PlaneType, 
         .new_cell_with_uuid(2, 1, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI, uuid)
         .unwrap();
     let (plane_id, plane_kind) = match format {
-        PixelFormat::BinaryMask8 => (document.main_plane_id, PlaneType::MainLine),
-        PixelFormat::Grayscale8 | PixelFormat::Grayscale16 => {
-            core.convert_layer(document.layer_id, LayerKind::GrayscaleColoring)
-                .unwrap();
-            if format == PixelFormat::Grayscale16 {
-                core.convert_plane(document.main_plane_id, PlaneType::MainLine, format)
-                    .unwrap();
-            }
-            (document.main_plane_id, PlaneType::MainLine)
-        }
         PixelFormat::StraightRgba8 | PixelFormat::StraightRgba16 => {
             let (_, plane_id) = core
-                .create_plane(
-                    document.layer_id,
-                    PlaneType::Raster,
-                    format,
-                    "Batch native target",
-                )
+                .create_plane(document.layer_id, format, "Batch native target")
                 .unwrap();
             (plane_id, PlaneType::Raster)
+        }
+        PixelFormat::BinaryMask8 | PixelFormat::Grayscale8 | PixelFormat::Grayscale16 => {
+            panic!("Batch v5 targets only RGBA Color/Raster planes")
         }
         PixelFormat::PremultipliedBgra8 => panic!("display-only format is not canonical"),
     };
@@ -139,10 +125,10 @@ fn dot(core: &mut Core, color: [u8; 4], x: f32, y: f32) {
 }
 
 #[test]
-fn batch_v4_catalog_is_closed_and_disabled_only_graph_is_invalid() {
+fn batch_v5_catalog_is_closed_and_disabled_only_graph_is_invalid() {
     let graph = BatchGraph {
         version: BATCH_GRAPH_VERSION,
-        name: "v4".to_owned(),
+        name: "v5".to_owned(),
         inputs: vec![BatchInputSelector::active_document()],
         operations: vec![BatchOperation {
             enabled: false,
@@ -156,8 +142,8 @@ fn batch_v4_catalog_is_closed_and_disabled_only_graph_is_invalid() {
             ..BatchOutputSettings::default()
         },
     };
-    assert_eq!(BATCH_GRAPH_VERSION, 4);
-    assert_eq!(BATCH_OPERATION_VERSION, 3);
+    assert_eq!(BATCH_GRAPH_VERSION, 5);
+    assert_eq!(BATCH_OPERATION_VERSION, 4);
     assert!(graph.validate().is_err());
 
     let kinds = [
@@ -179,13 +165,12 @@ fn one_color_replace_operation_updates_all_selected_layers_as_one_undo_unit() {
     let document = core
         .new_cell_with_uuid(2, 1, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI, 0xb304)
         .unwrap();
-    let (_, second_binary) = core
-        .create_layer(LayerKind::BinaryColoring, "Binary 2")
+    let (_, second_binary) = core.create_layer("Binary 2").unwrap();
+    let (_, grayscale) = core.create_layer("Grayscale").unwrap();
+    let (_, raster_plane) = core
+        .create_plane(document.layer_id, PixelFormat::StraightRgba8, "Raster")
         .unwrap();
-    let (_, grayscale) = core
-        .create_layer(LayerKind::GrayscaleColoring, "Grayscale")
-        .unwrap();
-    let (_, raster) = core.create_layer(LayerKind::Raster, "Raster").unwrap();
+    let raster = document.layer_id;
     let plane = |core: &Core, layer_id: u64, kind: PlaneType| {
         core.layers()
             .unwrap()
@@ -210,7 +195,7 @@ fn one_color_replace_operation_updates_all_selected_layers_as_one_undo_unit() {
         },
         EditorTarget {
             layer_id: raster,
-            plane_id: plane(&core, raster, PlaneType::Raster),
+            plane_id: raster_plane,
         },
     ];
     let old = PixelValue::Rgba([10, 20, 30, 40]);
@@ -224,11 +209,8 @@ fn one_color_replace_operation_updates_all_selected_layers_as_one_undo_unit() {
     let operation = BatchOperation {
         version: BATCH_OPERATION_VERSION,
         enabled: true,
-        target: semantic_target(LayerKind::Raster, PlaneType::Raster),
-        additional_targets: vec![
-            semantic_target(LayerKind::BinaryColoring, PlaneType::Color),
-            semantic_target(LayerKind::GrayscaleColoring, PlaneType::Color),
-        ],
+        target: semantic_target(PlaneType::Raster),
+        additional_targets: vec![semantic_target(PlaneType::Color)],
         kind: BatchOperationKind::ColorReplace(vec![BatchColorPair {
             enabled: true,
             old,
@@ -261,7 +243,7 @@ fn one_color_replace_operation_updates_all_selected_layers_as_one_undo_unit() {
             &[exact_operation(
                 target.layer_id,
                 target.plane_id,
-                if target.layer_id == raster {
+                if target.plane_id == raster_plane {
                     PlaneType::Raster
                 } else {
                     PlaneType::Color
@@ -331,7 +313,7 @@ fn masking_is_sparse_persistent_undoable_and_a_hard_fill_boundary() {
         PixelValue::Rgba([0; 4])
     );
 
-    let path = temp_path("fill-protection-v28.inkpod");
+    let path = temp_path("fill-protection-v31.inkpod");
     core.save(&path).unwrap();
     let mut reopened = Core::new();
     reopened.open(&path).unwrap();
@@ -397,26 +379,8 @@ fn erase_and_replace_are_exact_alpha_aware_and_semantic_noops_are_stable() {
 }
 
 #[test]
-fn replace_mask_and_erase_use_each_native_pixel_format_without_conversion() {
+fn replace_mask_and_erase_preserve_supported_native_rgba_depths() {
     let cases = [
-        (
-            PixelFormat::BinaryMask8,
-            PixelValue::Binary(255),
-            PixelValue::Binary(0),
-            PixelValue::Binary(0),
-        ),
-        (
-            PixelFormat::Grayscale8,
-            PixelValue::Grayscale8(91),
-            PixelValue::Grayscale8(17),
-            PixelValue::Grayscale8(0),
-        ),
-        (
-            PixelFormat::Grayscale16,
-            PixelValue::Grayscale16(32_896),
-            PixelValue::Grayscale16(4_369),
-            PixelValue::Grayscale16(0),
-        ),
         (
             PixelFormat::StraightRgba8,
             PixelValue::Rgba([10, 20, 30, 40]),
@@ -629,7 +593,7 @@ fn ordered_operations_are_deterministic_and_commit_as_one_replayable_undo_unit()
 }
 
 #[test]
-fn cancellation_hidden_targets_and_protected_main_line_are_atomic() {
+fn cancellation_hidden_targets_and_excluded_main_line_are_atomic() {
     let mut core = Core::new();
     let document = core
         .new_cell_with_uuid(2, 1, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI, 0xb350)
@@ -658,15 +622,33 @@ fn cancellation_hidden_targets_and_protected_main_line_are_atomic() {
     assert_eq!(core.document_info().unwrap(), hidden);
     assert_eq!(core.document_state_digest().unwrap(), hidden_digest);
 
-    let protected = exact_operation(
+    let excluded = exact_operation(
         document.layer_id,
         document.main_plane_id,
         PlaneType::MainLine,
         BatchOperationKind::MoveToColorPlane(vec![PixelValue::Binary(0)]),
     );
-    let protected_before = core.document_info().unwrap();
-    assert!(core.apply_batch_operations(&[protected], || false).is_err());
-    assert_eq!(core.document_info().unwrap(), protected_before);
+    let excluded_before = core.document_info().unwrap();
+    assert!(core.apply_batch_operations(&[excluded], || false).is_err());
+    assert_eq!(core.document_info().unwrap(), excluded_before);
+
+    let fixed_id_without_role = BatchOperation {
+        version: BATCH_OPERATION_VERSION,
+        enabled: true,
+        target: BatchTargetSelector {
+            layer_id: Some(document.layer_id),
+            plane_id: Some(document.main_plane_id),
+            plane_kind: None,
+            missing_policy: BatchMissingTargetPolicy::Error,
+        },
+        additional_targets: Vec::new(),
+        kind: BatchOperationKind::Erase(vec![PixelValue::Binary(0)]),
+    };
+    assert!(
+        core.apply_batch_operations(&[fixed_id_without_role], || false)
+            .is_err()
+    );
+    assert_eq!(core.document_info().unwrap(), excluded_before);
 }
 
 #[test]
@@ -701,12 +683,8 @@ fn move_to_color_plane_moves_exact_pixels_and_preserves_other_destination_pixels
             .unwrap()
             .id;
         if format == PixelFormat::StraightRgba16 {
-            core.convert_plane(
-                destination_id,
-                PlaneType::Color,
-                PixelFormat::StraightRgba16,
-            )
-            .unwrap();
+            core.convert_plane(destination_id, PixelFormat::StraightRgba16)
+                .unwrap();
         }
         let destination_target = EditorTarget {
             layer_id,

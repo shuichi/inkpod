@@ -46,7 +46,6 @@ fn operation(
         flags: INKPOD_BATCH_OPERATION_ENABLED,
         layer_id: 0,
         plane_id: 0,
-        layer_kind: INKPOD_LAYER_BINARY_COLORING,
         plane_kind: INKPOD_TYPED_PLANE_COLOR,
         missing_policy: INKPOD_BATCH_MISSING_ERROR,
         reserved_2: 0,
@@ -67,7 +66,7 @@ fn graph_input(
     operations: &[InkpodBatchOperationInput],
     output_destination: u32,
 ) -> InkpodBatchGraphInput {
-    static NAME: &[u8] = b"batch-v4-ffi";
+    static NAME: &[u8] = b"batch-v5-ffi";
     static TEMPLATE: &[u8] = b"{stem}_{index:3}";
     InkpodBatchGraphInput {
         struct_size: size_of::<InkpodBatchGraphInput>() as u32,
@@ -278,7 +277,7 @@ fn io_003_async_batch_plan_run_and_contact_sheet_transfer_owned_results() {
 }
 
 #[test]
-fn current_abi_graph_exposes_only_the_four_batch_v4_operation_shapes() {
+fn current_abi_graph_exposes_only_the_four_batch_v5_operation_shapes() {
     let colors = [rgba8([1, 2, 3, 4])];
     let pairs = [InkpodBatchColorPairInput {
         struct_size: size_of::<InkpodBatchColorPairInput>() as u32,
@@ -287,22 +286,12 @@ fn current_abi_graph_exposes_only_the_four_batch_v4_operation_shapes() {
         old_color: rgba8([1, 2, 3, 4]),
         new_color: rgba8([5, 6, 7, 8]),
     }];
-    let additional_targets = [
-        InkpodBatchTargetInput {
-            struct_size: size_of::<InkpodBatchTargetInput>() as u32,
-            layer_kind: INKPOD_LAYER_RASTER,
-            plane_kind: INKPOD_TYPED_PLANE_RASTER,
-            missing_policy: INKPOD_BATCH_MISSING_ERROR,
-            ..Default::default()
-        },
-        InkpodBatchTargetInput {
-            struct_size: size_of::<InkpodBatchTargetInput>() as u32,
-            layer_kind: INKPOD_LAYER_GRAYSCALE_COLORING,
-            plane_kind: INKPOD_TYPED_PLANE_COLOR,
-            missing_policy: INKPOD_BATCH_MISSING_ERROR,
-            ..Default::default()
-        },
-    ];
+    let additional_targets = [InkpodBatchTargetInput {
+        struct_size: size_of::<InkpodBatchTargetInput>() as u32,
+        plane_kind: INKPOD_TYPED_PLANE_RASTER,
+        missing_policy: INKPOD_BATCH_MISSING_ERROR,
+        ..Default::default()
+    }];
     let mut replace = operation(INKPOD_BATCH_OPERATION_COLOR_REPLACE, &[], &pairs);
     replace.additional_targets = additional_targets.as_ptr();
     replace.additional_target_count = additional_targets.len() as u64;
@@ -328,13 +317,13 @@ fn current_abi_graph_exposes_only_the_four_batch_v4_operation_shapes() {
         unsafe { inkpod_batch_graph_get_info(graph, &mut graph_info) },
         INKPOD_STATUS_OK
     );
-    assert_eq!(graph_info.version, 4);
+    assert_eq!(graph_info.version, INKPOD_BATCH_GRAPH_VERSION);
     assert_eq!(graph_info.operation_count, 4);
     assert_eq!(graph_info.output_destination, INKPOD_BATCH_OUTPUT_NEW_TABS);
     assert_eq!(graph_info.output_format, INKPOD_BATCH_FORMAT_INKPOD);
     assert_eq!(
         unsafe { slice::from_raw_parts(graph_info.name_utf8, graph_info.name_bytes as usize) },
-        b"batch-v4-ffi"
+        b"batch-v5-ffi"
     );
     assert_eq!(
         unsafe {
@@ -373,7 +362,7 @@ fn current_abi_graph_exposes_only_the_four_batch_v4_operation_shapes() {
         assert_eq!(info.kind, expected);
         if index == 0 {
             assert_eq!((info.color_pair_count, info.color_count), (1, 0));
-            assert_eq!(info.target_count, 3);
+            assert_eq!(info.target_count, 2);
         } else {
             assert_eq!((info.color_pair_count, info.color_count), (0, 1));
             assert_eq!(info.target_count, 1);
@@ -385,10 +374,10 @@ fn current_abi_graph_exposes_only_the_four_batch_v4_operation_shapes() {
         ..Default::default()
     };
     assert_eq!(
-        unsafe { inkpod_batch_graph_get_operation_target(graph, 0, 2, &mut queried_target) },
+        unsafe { inkpod_batch_graph_get_operation_target(graph, 0, 1, &mut queried_target) },
         INKPOD_STATUS_OK
     );
-    assert_eq!(queried_target.layer_kind, INKPOD_LAYER_GRAYSCALE_COLORING);
+    assert_eq!(queried_target.plane_kind, INKPOD_TYPED_PLANE_RASTER);
 
     let mut pair = InkpodBatchColorPairInput {
         struct_size: size_of::<InkpodBatchColorPairInput>() as u32,
@@ -466,6 +455,30 @@ fn current_abi_rejects_short_unknown_and_invalid_stride_records() {
         ..operations[0]
     };
     input.operations = &unknown;
+    assert_eq!(
+        unsafe { inkpod_batch_graph_create(&input, &mut graph) },
+        INKPOD_STATUS_INVALID_ARGUMENT
+    );
+    assert!(graph.is_null());
+
+    let pairs = [InkpodBatchColorPairInput {
+        struct_size: size_of::<InkpodBatchColorPairInput>() as u32,
+        enabled: 1,
+        reserved: 0,
+        old_color: rgba8([1, 2, 3, 255]),
+        new_color: rgba8([4, 5, 6, 255]),
+    }];
+    let main_line_target = [InkpodBatchTargetInput {
+        struct_size: size_of::<InkpodBatchTargetInput>() as u32,
+        plane_kind: INKPOD_TYPED_PLANE_MAIN_LINE,
+        missing_policy: INKPOD_BATCH_MISSING_ERROR,
+        ..Default::default()
+    }];
+    let mut replace = operation(INKPOD_BATCH_OPERATION_COLOR_REPLACE, &[], &pairs);
+    replace.additional_targets = main_line_target.as_ptr();
+    replace.additional_target_count = main_line_target.len() as u64;
+    input.operations = &replace;
+    input.operation_count = 1;
     assert_eq!(
         unsafe { inkpod_batch_graph_create(&input, &mut graph) },
         INKPOD_STATUS_INVALID_ARGUMENT

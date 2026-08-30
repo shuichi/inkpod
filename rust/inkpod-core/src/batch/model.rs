@@ -67,28 +67,29 @@ pub enum BatchMissingTargetPolicy {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-/// Optional stable-ID and semantic filters used to select a batch target plane.
+/// Optional stable-ID and semantic-plane filters used to select a batch target plane.
 pub struct BatchTargetSelector {
     /// Exact stable layer ID, when known across all inputs.
     pub layer_id: Option<u64>,
     /// Exact stable plane ID, when known across all inputs.
     pub plane_id: Option<u64>,
-    /// Required semantic layer kind.
-    pub layer_kind: Option<LayerKind>,
-    /// Required semantic plane kind.
+    /// Optional semantic plane role, closed to [`PlaneType::Color`] and
+    /// [`PlaneType::Raster`] for Batch v5.
+    ///
+    /// A fixed-ID selector may omit this field, but resolution still rejects a
+    /// MainLine plane.
     pub plane_kind: Option<PlaneType>,
     /// Policy when no plane matches all supplied filters.
     pub missing_policy: BatchMissingTargetPolicy,
 }
 
 impl BatchTargetSelector {
-    /// Selects the color plane of a binary-coloring layer and errors if absent.
+    /// Selects a color plane and errors if absent.
     #[must_use]
     pub const fn color_plane() -> Self {
         Self {
             layer_id: None,
             plane_id: None,
-            layer_kind: Some(LayerKind::BinaryColoring),
             plane_kind: Some(PlaneType::Color),
             missing_policy: BatchMissingTargetPolicy::Error,
         }
@@ -109,7 +110,7 @@ pub struct BatchColorPair {
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// Legacy internal separation payload retained for the canonical primitive catalog.
 ///
-/// Batch v4 authoring does not serialize this type directly; its public operations
+/// Batch v5 authoring does not serialize this type directly; its public operations
 /// use the four closed [`BatchOperationKind`] variants instead.
 pub struct BatchSeparation {
     /// Source colors to match.

@@ -73,46 +73,20 @@ pub(in crate::batch) fn parse_failure_policy(value: u32) -> Result<BatchFailureP
         )),
     }
 }
-pub(super) fn layer_kind_code(kind: LayerKind) -> u32 {
+pub(super) fn plane_kind_code(kind: PlaneType) -> Result<u32, CoreError> {
     match kind {
-        LayerKind::BinaryColoring => 1,
-        LayerKind::GrayscaleColoring => 2,
-        LayerKind::Raster => 3,
-        LayerKind::Selection => 4,
-        LayerKind::Frame => 5,
-        LayerKind::VanishingPoint => 6,
-        LayerKind::Adjustment => 7,
-    }
-}
-
-pub(super) fn parse_layer_kind(value: u32) -> Result<LayerKind, CoreError> {
-    match value {
-        1 => Ok(LayerKind::BinaryColoring),
-        2 => Ok(LayerKind::GrayscaleColoring),
-        3 => Ok(LayerKind::Raster),
-        4 => Ok(LayerKind::Selection),
-        5 => Ok(LayerKind::Frame),
-        6 => Ok(LayerKind::VanishingPoint),
-        7 => Ok(LayerKind::Adjustment),
-        _ => Err(CoreError::InvalidArgument("batch layer kind is unknown")),
-    }
-}
-
-pub(super) fn plane_kind_code(kind: PlaneType) -> u32 {
-    match kind {
-        PlaneType::MainLine => 1,
-        PlaneType::Color => 2,
-        PlaneType::Raster => 3,
-        PlaneType::Selection => 4,
+        PlaneType::Color => Ok(2),
+        PlaneType::Raster => Ok(3),
+        PlaneType::MainLine => Err(CoreError::InvalidArgument(
+            "batch target plane kind must be Color or Raster",
+        )),
     }
 }
 
 pub(super) fn parse_plane_kind(value: u32) -> Result<PlaneType, CoreError> {
     match value {
-        1 => Ok(PlaneType::MainLine),
         2 => Ok(PlaneType::Color),
         3 => Ok(PlaneType::Raster),
-        4 => Ok(PlaneType::Selection),
         _ => Err(CoreError::InvalidArgument("batch plane kind is unknown")),
     }
 }
@@ -126,8 +100,9 @@ mod tests {
         assert!(parse_input_kind(u32::MAX).is_err());
         assert!(parse_output_policy(u32::MAX).is_err());
         assert!(parse_failure_policy(u32::MAX).is_err());
-        assert!(parse_layer_kind(u32::MAX).is_err());
+        assert!(parse_plane_kind(1).is_err());
         assert!(parse_plane_kind(u32::MAX).is_err());
+        assert!(plane_kind_code(PlaneType::MainLine).is_err());
         assert!(parse_output_format(u32::MAX).is_err());
     }
 }

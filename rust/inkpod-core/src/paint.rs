@@ -219,6 +219,8 @@ impl Core {
                             PixelFormat::BinaryMask8 => PixelValue::Binary(255),
                             PixelFormat::Grayscale8 => PixelValue::Grayscale8(255),
                             PixelFormat::Grayscale16 => PixelValue::Grayscale16(u16::MAX),
+                            PixelFormat::StraightRgba8 => PixelValue::Rgba([0, 0, 0, 255]),
+                            PixelFormat::StraightRgba16 => PixelValue::Rgba16([0, 0, 0, u16::MAX]),
                             _ => {
                                 return Err(CoreError::InvalidState(
                                     "main-line format cannot hold a light-table boundary",
@@ -426,7 +428,25 @@ impl Core {
             ActivePlane::MainLine => line,
             ActivePlane::Color => color,
         };
-        eyedropper(source, x, y, selected, &[line, color], &[])?.ok_or(CoreError::InvalidState(
+        let layer = document
+            .layers
+            .iter()
+            .find(|layer| layer.id == active_layer_id)
+            .ok_or(CoreError::InvalidState("eyedropper layer is missing"))?;
+        let line_first = layer
+            .planes
+            .iter()
+            .position(|plane| plane.kind == PlaneType::MainLine)
+            < layer
+                .planes
+                .iter()
+                .position(|plane| plane.kind == PlaneType::Color);
+        let planes = if line_first {
+            [line, color]
+        } else {
+            [color, line]
+        };
+        eyedropper(source, x, y, selected, &planes, &[])?.ok_or(CoreError::InvalidState(
             "eyedropper source is transparent or unavailable",
         ))
     }
@@ -527,7 +547,6 @@ mod tests {
             .unwrap();
         let (layer_id, plane_id) = {
             let document = core.document.as_mut().unwrap();
-            document.layers[0].kind = LayerKind::GrayscaleColoring;
             document.layers[0].planes[0].raster =
                 TileRaster::new(4, 4, PixelFormat::Grayscale8).unwrap();
             document.layers[0].planes[0]

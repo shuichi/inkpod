@@ -85,7 +85,7 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .clone();
     assert_eq!(main_line_procedure.primitive_id().get(), 0x0003_0001);
     assert_eq!(main_line_procedure.primitive_schema_version(), 1);
-    assert_eq!(main_line_procedure.replay_epoch().get(), 25);
+    assert_eq!(main_line_procedure.replay_epoch().get(), 27);
     assert_eq!(main_line_procedure.procedure_id().get(), 1);
     assert_eq!(main_line_procedure.base_state_id().get(), 1);
     assert_eq!(main_line_procedure.committed_state_id().get(), 2);
@@ -112,7 +112,7 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .clone();
     assert_eq!(palette_procedure.primitive_id().get(), 0x0003_0002);
     assert_eq!(palette_procedure.primitive_schema_version(), 1);
-    assert_eq!(palette_procedure.replay_epoch().get(), 25);
+    assert_eq!(palette_procedure.replay_epoch().get(), 27);
     assert_eq!(palette_procedure.procedure_id().get(), 2);
     assert_eq!(palette_procedure.base_state_id().get(), 2);
     assert_eq!(palette_procedure.committed_state_id().get(), 3);
@@ -160,7 +160,7 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .clone();
     assert_eq!(stroke_procedure.primitive_id().get(), 0x0005_0001);
     assert_eq!(stroke_procedure.primitive_schema_version(), 3);
-    assert_eq!(stroke_procedure.replay_epoch().get(), 25);
+    assert_eq!(stroke_procedure.replay_epoch().get(), 27);
     assert_eq!(stroke_procedure.procedure_id().get(), 3);
     assert_eq!(stroke_procedure.base_state_id().get(), 3);
     assert_eq!(stroke_procedure.committed_state_id().get(), 4);
@@ -176,43 +176,43 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .canonical_composite_digest()
         .unwrap()
         .as_bytes();
-    assert_eq!(contract.replay_epoch().get(), 25);
-    assert_eq!(contract.procedure_format_version(), 29);
+    assert_eq!(contract.replay_epoch().get(), 27);
+    assert_eq!(contract.procedure_format_version(), 31);
     assert_eq!(contract.canonical_numeric_version(), 1);
-    assert_eq!(contract.primitive_count(), 77);
+    assert_eq!(contract.primitive_count(), 75);
     assert_eq!(
         *contract.primitive_catalog_digest(),
         [
-            249, 87, 36, 23, 74, 116, 183, 210, 31, 127, 178, 186, 161, 125, 204, 1, 9, 224, 175,
-            29, 70, 118, 86, 195, 250, 93, 118, 74, 85, 155, 69, 65
+            130, 145, 163, 197, 70, 28, 54, 167, 160, 210, 233, 202, 151, 68, 75, 49, 97, 158, 14,
+            93, 86, 159, 204, 17, 246, 138, 28, 80, 221, 78, 103, 164
         ]
     );
     assert_eq!(
         boundary_digests,
         vec![
             [
-                54, 21, 55, 25, 217, 220, 129, 94, 164, 3, 124, 209, 181, 124, 167, 64, 125, 231,
-                191, 194, 70, 169, 149, 235, 210, 40, 111, 177, 212, 37, 10, 228
+                159, 171, 192, 173, 117, 118, 74, 198, 66, 209, 97, 10, 197, 214, 177, 208, 183,
+                63, 199, 48, 221, 35, 103, 213, 198, 124, 5, 98, 66, 67, 28, 127
             ],
             [
-                195, 125, 170, 219, 184, 251, 180, 187, 137, 80, 185, 96, 195, 57, 131, 12, 54,
-                231, 58, 204, 122, 163, 221, 31, 239, 250, 24, 235, 140, 186, 58, 206
+                94, 19, 64, 100, 150, 60, 82, 44, 111, 163, 234, 248, 86, 166, 55, 98, 61, 32, 40,
+                63, 121, 138, 153, 41, 252, 110, 27, 78, 144, 158, 241, 159
             ],
             [
-                129, 209, 239, 220, 100, 227, 255, 131, 223, 107, 132, 116, 69, 177, 186, 136, 129,
-                128, 26, 235, 102, 146, 113, 75, 100, 84, 212, 207, 134, 61, 43, 66
+                77, 178, 77, 204, 20, 199, 245, 252, 168, 79, 16, 3, 243, 244, 77, 8, 200, 35, 57,
+                110, 124, 102, 159, 222, 151, 160, 236, 67, 63, 30, 130, 75
             ],
             [
-                225, 112, 208, 157, 21, 102, 196, 136, 43, 232, 129, 168, 18, 143, 192, 243, 144,
-                107, 10, 123, 1, 201, 36, 105, 135, 139, 29, 139, 73, 219, 190, 131
+                39, 221, 166, 37, 82, 23, 125, 148, 204, 139, 31, 77, 254, 255, 215, 69, 170, 74,
+                157, 95, 134, 222, 111, 49, 226, 56, 54, 232, 27, 85, 124, 166
             ],
         ]
     );
     assert_eq!(
         composite,
         [
-            151, 208, 63, 210, 72, 132, 161, 14, 234, 104, 167, 165, 245, 91, 183, 176, 188, 190,
-            193, 84, 144, 22, 145, 225, 110, 83, 125, 78, 171, 75, 14, 240
+            234, 150, 58, 252, 79, 168, 254, 201, 87, 156, 128, 83, 128, 157, 117, 63, 19, 159, 63,
+            202, 23, 171, 163, 109, 134, 245, 250, 119, 173, 31, 245, 21
         ]
     );
 }
@@ -225,9 +225,7 @@ fn main_line_replay_does_not_depend_on_the_digest_excluded_active_target() {
 
     let mut alternate_main_plane_id = 0;
     for core in [&mut runtime, &mut replay] {
-        let (_, alternate_layer_id) = core
-            .create_layer(LayerKind::BinaryColoring, "Alternate Replay Target")
-            .unwrap();
+        let (_, alternate_layer_id) = core.create_layer("Alternate Replay Target").unwrap();
         let alternate_main = core
             .layers()
             .unwrap()
@@ -442,12 +440,10 @@ fn failed_document_replacement_preserves_live_state_and_all_id_cursors() {
     assert_eq!(next_procedure.base_state_id().get(), 2);
     assert_eq!(next_procedure.committed_state_id().get(), 3);
 
-    let (failed_layer_outcome, failed_layer_id) = failed
-        .create_layer(LayerKind::BinaryColoring, "Post-failure Layer")
-        .unwrap();
-    let (control_layer_outcome, control_layer_id) = control
-        .create_layer(LayerKind::BinaryColoring, "Post-failure Layer")
-        .unwrap();
+    let (failed_layer_outcome, failed_layer_id) =
+        failed.create_layer("Post-failure Layer").unwrap();
+    let (control_layer_outcome, control_layer_id) =
+        control.create_layer("Post-failure Layer").unwrap();
     assert_eq!(failed_layer_outcome, control_layer_outcome);
     assert_eq!(failed_layer_id, control_layer_id);
     assert_eq!(failed.layers().unwrap(), control.layers().unwrap());
@@ -841,9 +837,7 @@ fn document_digest_excludes_target_view_revision_history_and_render_cache_state(
     let mut core = primitive_core();
     execute_color_pencil(&mut core, 7.0, 9.0, [20, 40, 60, 255]);
     let primary = core.document_info().unwrap();
-    let (_, alternate_layer_id) = core
-        .create_layer(LayerKind::BinaryColoring, "Alternate Digest Target")
-        .unwrap();
+    let (_, alternate_layer_id) = core.create_layer("Alternate Digest Target").unwrap();
     let alternate_main_plane_id = core
         .layers()
         .unwrap()
@@ -964,8 +958,7 @@ fn document_digest_changes_for_representative_semantic_document_edits() {
     core.light_table_create_set("Digest Reference").unwrap();
     previous = assert_document_digest_changed(&core, previous, "light-table topology");
 
-    core.create_layer(LayerKind::Raster, "Digest Overlay")
-        .unwrap();
+    core.create_layer("Digest Overlay").unwrap();
     assert_document_digest_changed(&core, previous, "layer/plane topology");
 }
 

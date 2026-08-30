@@ -11,8 +11,9 @@ use crate::selection::{FloatingDestination, FloatingSelection};
 use crate::{
     ClipboardPayload, ClipboardPixel, ClipboardPlane, EditorTarget, FloatingTransform,
     FloatingTransformAnchor, MAX_FILL_PIXELS, OutputColorGuardProfile, PixelFormat, PlaneType,
-    RangeInterpretation, RectI32, SelectionConstructionOptions, SelectionLayerOperation,
-    SelectionOperation, TileRaster, TraceBrushOptions, TraceBrushShape,
+    RangeInterpretation, RectI32, SavedSelectionId, SavedSelectionOperation,
+    SelectionConstructionOptions, SelectionOperation, TileRaster, TraceBrushOptions,
+    TraceBrushShape,
 };
 use inkpod_format::{
     InkScriptCommandResultSchema, InkScriptCommandSchema, InkScriptEnumSchema,
@@ -39,7 +40,7 @@ pub(crate) const SELECTION_FLOATING_ENUMS: &[InkScriptEnumSchema] = &[
         ],
     ),
     InkScriptEnumSchema::new("trace_brush_shape", &["round", "square"]),
-    InkScriptEnumSchema::new("selection_layer_operation", &["replace", "add", "subtract"]),
+    InkScriptEnumSchema::new("saved_selection_operation", &["replace", "add", "subtract"]),
     InkScriptEnumSchema::new("output_color_guard_profile", &["bt709_conservative_ycbcr"]),
     InkScriptEnumSchema::new(
         "floating_destination_kind",
@@ -144,12 +145,22 @@ const SELECT_OUTPUT_COLOR_GUARD_FIELDS: &[InkScriptFieldSchema] = &[
     InkScriptFieldSchema::required("operation", "selection_operation", 1),
     InkScriptFieldSchema::required("base_revision", "u64", 2),
 ];
-const SELECTION_TO_LAYER_FIELDS: &[InkScriptFieldSchema] =
+const SAVE_SELECTION_MASK_FIELDS: &[InkScriptFieldSchema] =
     &[InkScriptFieldSchema::required("name", "string", 0)];
-const SELECTION_FROM_LAYER_FIELDS: &[InkScriptFieldSchema] = &[
-    InkScriptFieldSchema::required("layer_id", "layer_ref", 0),
-    InkScriptFieldSchema::required("operation", "selection_layer_operation", 1),
+const APPLY_SAVED_SELECTION_MASK_FIELDS: &[InkScriptFieldSchema] = &[
+    InkScriptFieldSchema::required("saved_selection_id", "saved_selection_mask_ref", 0),
+    InkScriptFieldSchema::required("operation", "saved_selection_operation", 1),
 ];
+const RENAME_SAVED_SELECTION_MASK_FIELDS: &[InkScriptFieldSchema] = &[
+    InkScriptFieldSchema::required("saved_selection_id", "saved_selection_mask_ref", 0),
+    InkScriptFieldSchema::required("name", "string", 1),
+];
+const DELETE_SAVED_SELECTION_MASK_FIELDS: &[InkScriptFieldSchema] =
+    &[InkScriptFieldSchema::required(
+        "saved_selection_id",
+        "saved_selection_mask_ref",
+        0,
+    )];
 const CLEAR_SELECTED_CONTENT_FIELDS: &[InkScriptFieldSchema] = &[
     InkScriptFieldSchema::required("target_layer_id", "layer_ref", 0),
     InkScriptFieldSchema::required("target_plane_id", "plane_ref", 1),
@@ -159,10 +170,10 @@ const COMMIT_FLOATING_FIELDS: &[InkScriptFieldSchema] = &[
     InkScriptFieldSchema::required("destination", "floating_destination", 1),
     InkScriptFieldSchema::required("transform", "floating_transform", 2),
 ];
-const SELECTION_TO_LAYER_RESULTS: &[InkScriptCommandResultSchema] =
+const SAVE_SELECTION_MASK_RESULTS: &[InkScriptCommandResultSchema] =
     &[InkScriptCommandResultSchema::scalar(
-        "layer",
-        "layer_ref",
+        "saved_selection_mask",
+        "saved_selection_mask_ref",
         InkScriptResultAvailability::AlwaysOnSuccess,
         0,
     )];
@@ -179,11 +190,22 @@ pub(crate) const SELECTION_FLOATING_COMMANDS: &[InkScriptCommandSchema] = &[
         SELECT_OUTPUT_COLOR_GUARD_FIELDS,
     ),
     InkScriptCommandSchema::with_results(
-        "selection_to_layer",
-        SELECTION_TO_LAYER_FIELDS,
-        SELECTION_TO_LAYER_RESULTS,
+        "save_selection_mask",
+        SAVE_SELECTION_MASK_FIELDS,
+        SAVE_SELECTION_MASK_RESULTS,
     ),
-    InkScriptCommandSchema::new("selection_from_layer", SELECTION_FROM_LAYER_FIELDS),
+    InkScriptCommandSchema::new(
+        "apply_saved_selection_mask",
+        APPLY_SAVED_SELECTION_MASK_FIELDS,
+    ),
+    InkScriptCommandSchema::new(
+        "rename_saved_selection_mask",
+        RENAME_SAVED_SELECTION_MASK_FIELDS,
+    ),
+    InkScriptCommandSchema::new(
+        "delete_saved_selection_mask",
+        DELETE_SAVED_SELECTION_MASK_FIELDS,
+    ),
     InkScriptCommandSchema::new("clear_selected_content", CLEAR_SELECTED_CONTENT_FIELDS),
     InkScriptCommandSchema::new("commit_floating", COMMIT_FLOATING_FIELDS),
 ];
@@ -285,16 +307,28 @@ impl SelectionFloatingScriptAction {
                 operation: selection_operation(field(fields, "operation")?)?,
                 base_revision: unsigned64(field(fields, "base_revision")?)?,
             },
-            "selection_to_layer" => CanonicalInvocation::SelectionToLayer {
+            "save_selection_mask" => CanonicalInvocation::SaveSelectionMask {
                 name: string(field(fields, "name")?)?.to_owned(),
             },
-            "selection_from_layer" => CanonicalInvocation::SelectionFromLayer {
-                layer_id: reference(
-                    field(fields, "layer_id")?,
+            "apply_saved_selection_mask" => CanonicalInvocation::ApplySavedSelectionMask {
+                saved_selection_id: saved_selection_id(
+                    field(fields, "saved_selection_id")?,
                     bindings,
-                    InkScriptEntityKind::Layer,
                 )?,
-                operation: selection_layer_operation(field(fields, "operation")?)?,
+                operation: saved_selection_operation(field(fields, "operation")?)?,
+            },
+            "rename_saved_selection_mask" => CanonicalInvocation::RenameSavedSelectionMask {
+                saved_selection_id: saved_selection_id(
+                    field(fields, "saved_selection_id")?,
+                    bindings,
+                )?,
+                name: string(field(fields, "name")?)?.to_owned(),
+            },
+            "delete_saved_selection_mask" => CanonicalInvocation::DeleteSavedSelectionMask {
+                saved_selection_id: saved_selection_id(
+                    field(fields, "saved_selection_id")?,
+                    bindings,
+                )?,
             },
             "clear_selected_content" => CanonicalInvocation::ClearSelectedContent {
                 target: target("target_layer_id", "target_plane_id")?,
@@ -339,10 +373,10 @@ impl SelectionFloatingScriptAction {
         output_count: usize,
     ) -> Result<Vec<InkScriptEntityKind>, SelectionFloatingAdapterError> {
         match self {
-            Self::Canonical(CanonicalInvocation::SelectionToLayer { .. }) if output_count == 1 => {
-                Ok(vec![InkScriptEntityKind::Layer])
+            Self::Canonical(CanonicalInvocation::SaveSelectionMask { .. }) if output_count == 1 => {
+                Ok(vec![InkScriptEntityKind::SavedSelectionMask])
             }
-            Self::Canonical(CanonicalInvocation::SelectionToLayer { .. }) => {
+            Self::Canonical(CanonicalInvocation::SaveSelectionMask { .. }) => {
                 Err(SelectionFloatingAdapterError::InvalidValue)
             }
             Self::Canonical(_) | Self::CommitFloating(_) if output_count == 0 => Ok(Vec::new()),
@@ -643,13 +677,13 @@ fn range_interpretation(
     }
 }
 
-fn selection_layer_operation(
+fn saved_selection_operation(
     value: &InkScriptTypedValue,
-) -> Result<SelectionLayerOperation, SelectionFloatingAdapterError> {
+) -> Result<SavedSelectionOperation, SelectionFloatingAdapterError> {
     match enum_value(value)? {
-        "replace" => Ok(SelectionLayerOperation::Replace),
-        "add" => Ok(SelectionLayerOperation::Add),
-        "subtract" => Ok(SelectionLayerOperation::Subtract),
+        "replace" => Ok(SavedSelectionOperation::Replace),
+        "add" => Ok(SavedSelectionOperation::Add),
+        "subtract" => Ok(SavedSelectionOperation::Subtract),
         _ => Err(SelectionFloatingAdapterError::InvalidValue),
     }
 }
@@ -668,7 +702,6 @@ fn plane_kind(value: &InkScriptTypedValue) -> Result<PlaneType, SelectionFloatin
         "main_line" => Ok(PlaneType::MainLine),
         "color" => Ok(PlaneType::Color),
         "raster" => Ok(PlaneType::Raster),
-        "selection" => Ok(PlaneType::Selection),
         _ => Err(SelectionFloatingAdapterError::InvalidValue),
     }
 }
@@ -713,6 +746,18 @@ fn reference(
     kind: InkScriptEntityKind,
 ) -> Result<u64, SelectionFloatingAdapterError> {
     bindings.resolve(value, kind).map_err(reference_error)
+}
+
+fn saved_selection_id(
+    value: &InkScriptTypedValue,
+    bindings: &InkScriptRuntimeReferences,
+) -> Result<SavedSelectionId, SelectionFloatingAdapterError> {
+    SavedSelectionId::from_raw(reference(
+        value,
+        bindings,
+        InkScriptEntityKind::SavedSelectionMask,
+    )?)
+    .ok_or(SelectionFloatingAdapterError::InvalidValue)
 }
 
 fn reference_error(error: InkScriptReferenceError) -> SelectionFloatingAdapterError {

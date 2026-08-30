@@ -384,7 +384,7 @@
             <li><a href="#color">9. カラー、パレット、カラーチャート</a></li>
             <li><a href="#layers">10. レイヤーとプレーン</a></li>
             <li><a href="#animation">11. ライトテーブル、連番、サブパレット、モーションチェック</a></li>
-            <li><a href="#filters">12. フィルターと調整レイヤー</a></li>
+            <li><a href="#filters">12. フィルター</a></li>
             <li><a href="#batch">13. バッチ処理</a></li>
             <li><a href="#files">14. 保存、読み込み、書き出し、Recovery</a></li>
             <li><a href="#keyboard">15. キーボード操作とショートカット</a></li>
@@ -414,7 +414,7 @@
           <li><a href="#color">9. カラー、パレット、カラーチャート</a></li>
           <li><a href="#layers">10. レイヤーとプレーン</a></li>
           <li><a href="#animation">11. ライトテーブル、連番、サブパレット、モーションチェック</a></li>
-          <li><a href="#filters">12. フィルターと調整レイヤー</a></li>
+          <li><a href="#filters">12. フィルター</a></li>
           <li><a href="#batch">13. バッチ処理</a></li>
           <li><a href="#files">14. 保存、読み込み、書き出し、Recovery</a></li>
           <li><a href="#keyboard">15. キーボード操作とショートカット</a></li>
@@ -534,25 +534,22 @@
             <div class="card search-unit" id="term-frame" data-search="frame 100 reference drawing safe margin フレーム">
               <h3>フレーム</h3><p>「100フレーム」は制作上の基準寸法、「基準フレーム」は位置合わせ、「作画フレーム」は描く範囲、「安全フレーム」は必ず見せたい範囲の目安です。余白は作画フレーム外でも文書内に残す領域です。</p>
             </div>
-            <div class="card search-unit" id="term-layer" data-search="layer レイヤー">
-              <h3>レイヤー</h3><p>セル画を重ねる単位です。種類によって、内部に作成できるプレーンと使えるツールが異なります。</p>
+            <div class="card search-unit" id="term-layer" data-search="layer standard MainLine Color Raster レイヤー 標準 主線 彩色 ラスター">
+              <h3>レイヤー</h3><p>セル画を重ねる標準構造です。すべてのレイヤーが主線プレーンと彩色プレーンを1枚ずつ持ち、必要に応じてラスタープレーンを追加できます。</p>
             </div>
-            <div class="card search-unit" id="term-plane" data-search="plane プレーン">
-              <h3>プレーン</h3><p>レイヤー内の最小編集単位です。主線、彩色、色トレース、塗り、ラスター、選択などを分けて保持します。</p>
+            <div class="card search-unit" id="term-plane" data-search="plane MainLine Color Raster プレーン 主線 彩色 ラスター">
+              <h3>プレーン</h3><p>レイヤー内の最小編集単位です。主線、彩色、任意の追加ラスターを分けて保持します。選択マスクはプレーンではなく、文書がレイヤー外で所有します。</p>
             </div>
-            <div class="card search-unit" id="term-selection" data-search="selection mask 選択範囲">
-              <h3>選択範囲</h3><p>処理を適用する範囲を示すマスクです。描画、フィルター、変形などを選択の内側へ限定できます。</p>
+            <div class="card search-unit" id="term-selection" data-search="selection mask saved selection 保存マスク 選択範囲">
+              <h3>選択範囲</h3><p>処理を適用する範囲を示す文書所有のマスクです。現在の選択に加え、名前付き保存マスクを複数保持し、置換・加算・減算できます。</p>
             </div>
             <div class="card search-unit" id="term-shooting-frame" data-search="shooting frame angled capture 撮影フレーム 角度">
               <h3>撮影フレーム</h3><p>中心、幅、高さ、角度を持つ任意の撮影範囲です。プロパティ入力とCanvas上の5ハンドルで編集できます。</p>
             </div>
-            <div class="card search-unit" id="term-vanishing-point" data-search="vanishing point radial snap 消失点 放射 スナップ">
-              <h3>消失点</h3><p>Canvas外も含む複数の位置へ置ける透視補助点です。放射ガイドの間隔、位相、色、不透明度、表示、スナップを点ごとに設定できます。</p>
-            </div>
           </div>
           <div class="search-unit" data-search="main line color plane active visibility editability">
             <h3 id="mainline-color">主線と彩色</h3>
-            <p>主線プレーンは線、彩色プレーンは色トレースや塗り色を保持します。彩色モードでは主線を見ながら彩色プレーンへ処理でき、主線を保護できます。ただし、「見えている」ことと「編集できる」ことは別です。さらに、選択中のレイヤーと選択中のプレーンも別です。操作前にレイヤー／プレーンの選択行、表示状態、編集可否、ステータスバーを確認してください。</p>
+            <p>各レイヤーの主線プレーンは線、彩色プレーンは色トレースや塗り色を保持します。彩色モードでは主線を見ながら彩色プレーンへ処理でき、主線を保護できます。追加のラスタープレーンは背景、特効、エアブラシ、レタッチ等に使えます。ただし、「見えている」ことと「編集できる」ことは別です。さらに、選択中のレイヤーと選択中のプレーンも別です。操作前にレイヤー／プレーンの選択行、表示状態、編集可否、ステータスバーを確認してください。</p>
           </div>
           <div class="search-unit" data-search="document view tab editor group session shared independent zoom pan flip">
             <h3 id="document-view-difference">文書、ビュー、タブ、エディターグループ</h3>
@@ -634,7 +631,7 @@
               <li class="search-unit"><div class="command-name">ファイル › レイヤーを部分的に復帰 <span class="tag undo">Undo可</span></div><div class="command-desc">最後の通常保存内容から、選択中レイヤー／プレーンの選択範囲だけを戻します。保存済み状態、編集対象、選択範囲が必要です。</div></li>
               <li class="search-unit"><div class="command-name">ファイル › ラスタ－を読み込み...</div><div class="command-desc">PNG、TIFF、TGA、BMPを文書として読み込みます。選択をキャンセルした場合や読み込み失敗時は既存文書を変更しません。</div></li>
               <li class="search-unit"><div class="command-name">ファイル › ラスタ－を書き出し...</div><div class="command-desc">現在の表示内容を対応ラスター形式へ書き出します。レイヤー／プレーン等の固有情報は画像形式では平坦化され得るため、編集用原本は `.inkpod` でも保存してください。</div></li>
-              <li class="search-unit"><div class="command-name">ファイル › 指示画像を書き出し...</div><div class="command-desc">テキスト／手描き指示と撮影フレームを含む確認用ラスターを書き出します。通常のラスター書き出しにはこれらの制作指示と消失点ガイドを含めません。</div></li>
+              <li class="search-unit"><div class="command-name">ファイル › 指示画像を書き出し...</div><div class="command-desc">出力対象に設定した撮影フレームを含む確認用ラスターを書き出します。通常のラスター書き出しには撮影フレームを含めません。</div></li>
               <li class="search-unit"><div class="command-name">ファイル › Recoveryを保存</div><div class="command-desc">障害復旧用の別保存を直ちに作ります。通常保存先、通常の保存基準、未保存表示は変えません。</div></li>
               <li class="search-unit"><div class="command-name">ファイル › Recoveryを開く...</div><div class="command-desc">列挙されたRecovery候補を選んで「復元セル」として開きます。元ファイルを無言で上書きしません。</div></li>
               <li class="search-unit"><div class="command-name">ファイル › 起動時に前回の文書を復元</div><div class="command-desc">通常終了時の文書一覧を次回起動時に戻す設定を切り替えます。既定はオフで、障害復旧用Recoveryとは別です。<span class="tag view">設定</span></div></li>
@@ -696,9 +693,6 @@
               <li class="search-unit"><div class="command-name">セル › 撮影フレーム設定...</div><div class="command-desc">中心座標、幅、高さ、角度を数値で作成・編集します。プレビューは開始状態から再計算し、OKで一回のUndo単位、キャンセルで完全復元です。</div></li>
               <li class="search-unit"><div class="command-name">セル › 撮影フレームをハンドル編集</div><div class="command-desc">Canvas上の中心、4辺中央の5ハンドルで移動、拡大縮小、角度調整を行います。確定まではプレビューです。</div></li>
               <li class="search-unit"><div class="command-name">セル › 撮影フレームを削除 <span class="tag undo">Undo可</span></div><div class="command-desc">現在の撮影フレームを文書から削除します。撮影フレームがないときは無効です。</div></li>
-              <li class="search-unit"><div class="command-name">セル › 消失点設定...</div><div class="command-desc">複数の消失点について位置、放射線の角度間隔／位相、色、不透明度、表示、スナップを設定します。Canvas外の座標も指定できます。</div></li>
-              <li class="search-unit"><div class="command-name">セル › 消失点をハンドル編集</div><div class="command-desc">Canvas上の点をドラッグして位置を調整します。見えている放射ガイドへのスナップは直線・曲線・図形・折れ線等で利用できます。</div></li>
-              <li class="search-unit"><div class="command-name">セル › 消失点をすべて削除 <span class="tag undo">Undo可</span></div><div class="command-desc">文書内の全消失点を一回の履歴単位で削除します。通常／指示ラスターのピクセルには影響しません。</div></li>
               <li class="search-unit"><div class="command-name">セル › 画像サイズ...</div><div class="command-desc">Canvasの幅・高さと既存画像の配置基準を変更します。見えなくなる領域が生じ得るためプレビューを確認します。</div></li>
               <li class="search-unit"><div class="command-name">セル › 画像解像度...</div><div class="command-desc">物理寸法、DPI、ピクセル数、再サンプルの有無を設定します。再サンプルなしではピクセル数を変えません。</div></li>
               <li class="search-unit"><div class="command-name">セル › 鏡像 › 水平方向 <span class="tag undo">Undo可</span></div><div class="command-desc">全文書の実データと関連座標を左右反転します。「表示を左右反転」と異なり保存結果も変わります。</div></li>
@@ -710,7 +704,7 @@
               <li class="search-unit"><div class="command-name">セル › フレーム設定 › 作画フレーム...</div><div class="command-desc">作画対象の目安となる範囲を設定します。画像へ線を焼き込みません。</div></li>
               <li class="search-unit"><div class="command-name">セル › フレーム設定 › 安全フレーム...</div><div class="command-desc">必ず画面内へ収めたい内容の目安を設定します。作画フレームとは別です。</div></li>
               <li class="search-unit"><div class="command-name">セル › フレーム設定 › 余白...</div><div class="command-desc">作画フレーム外でも文書内に保持する領域を設定します。</div></li>
-              <li class="search-unit"><div class="command-name">セル › レイヤー › 新規...</div><div class="command-desc">種類と名前を指定してレイヤーを追加します。作成可能な構成だけが確定されます。</div></li>
+              <li class="search-unit"><div class="command-name">セル › レイヤー › 新規...</div><div class="command-desc">名前を指定し、主線1枚と彩色1枚を持つ標準レイヤーを追加します。各必須プレーンの形式は現在の基準レイヤーから引き継ぎます。</div></li>
               <li class="search-unit"><div class="command-name">セル › レイヤー › 複製</div><div class="command-desc">選択中レイヤーと内容を新しい識別子で複製します。レイヤー選択が必要です。</div></li>
               <li class="search-unit"><div class="command-name">セル › レイヤー › 削除 <span class="tag caution">注意</span></div><div class="command-desc">選択中レイヤーを削除します。文書を成立させる最低構成は残す必要があり、削除不可のときは無効です。</div></li>
               <li class="search-unit"><div class="command-name">セル › レイヤー › 非表示を削除 <span class="tag caution">注意</span></div><div class="command-desc">非表示レイヤーをまとめて削除します。非表示は編集可否と別なので、対象を確認してから実行します。</div></li>
@@ -718,24 +712,23 @@
               <li class="search-unit"><div class="command-name">セル › レイヤー › 上へ</div><div class="command-desc">選択中レイヤーを一段上へ移します。プレーン順は変えません。</div></li>
               <li class="search-unit"><div class="command-name">セル › レイヤー › 下へ</div><div class="command-desc">選択中レイヤーを一段下へ移します。</div></li>
               <li class="search-unit"><div class="command-name">セル › レイヤー › 表示切替</div><div class="command-desc">合成表示への参加を切り替えます。非表示でも編集可否の状態は別に保持されます。</div></li>
-              <li class="search-unit"><div class="command-name">セル › レイヤー › 編集可否切替</div><div class="command-desc">選択レイヤーを編集可能／不可に切り替えます。表示は変えません。</div></li>
+              <li class="search-unit"><div class="command-name">セル › レイヤー › 編集可否切替</div><div class="command-desc">現在選択しているレイヤーを編集可能／不可に切り替えます。表示は変えません。</div></li>
               <li class="search-unit"><div class="command-name">セル › レイヤー › 不透明度...</div><div class="command-desc">レイヤー全体の合成不透明度を設定します。OKで一回の履歴として確定します。</div></li>
-              <li class="search-unit"><div class="command-name">セル › レイヤー › 変換...</div><div class="command-desc">選択レイヤーを別の対応種類へ変換します。表現できない情報がある場合は内容を確認してから確定します。</div></li>
-              <li class="search-unit"><div class="command-name">セル › レイヤー › 同種を統合 <span class="tag caution">注意</span></div><div class="command-desc">互換性のある同種レイヤーを順序に従って統合します。異種または統合できない構成では無効です。</div></li>
-              <li class="search-unit"><div class="command-name">セル › レイヤー › プロパティ...</div><div class="command-desc">選択レイヤーの名前、種類、状態など確認可能な属性を表示・編集します。</div></li>
+              <li class="search-unit"><div class="command-name">セル › レイヤー › 同種を統合 <span class="tag caution">注意</span></div><div class="command-desc">下の標準レイヤーと互換性がある場合に、順序を保って統合します。成立しない構成では無効です。</div></li>
+              <li class="search-unit"><div class="command-name">セル › レイヤー › プロパティ...</div><div class="command-desc">現在選択しているレイヤーの名前、表示、編集可否、不透明度を確認・編集します。</div></li>
               <li class="search-unit"><div class="command-name">セル › プレーン › 主線</div><div class="command-desc">選択中レイヤーの主線プレーンを編集対象にします。存在しない／編集不可なら無効です。</div></li>
               <li class="search-unit"><div class="command-name">セル › プレーン › 彩色</div><div class="command-desc">選択中レイヤーの彩色プレーンを編集対象にします。</div></li>
-              <li class="search-unit"><div class="command-name">セル › プレーン › 新規...</div><div class="command-desc">プレーン種類と形式（2値、グレースケール、RGBA等）を選んで追加します。レイヤーに使えない組み合わせは確定されず、画面を開いたままエラー表示します。</div></li>
-              <li class="search-unit"><div class="command-name">セル › プレーン › 複製</div><div class="command-desc">選択プレーンと内容を同じレイヤー内へ複製します。</div></li>
-              <li class="search-unit"><div class="command-name">セル › プレーン › 削除 <span class="tag caution">注意</span></div><div class="command-desc">選択プレーンを削除します。レイヤーの必須構成を壊す場合は実行できません。</div></li>
+              <li class="search-unit"><div class="command-name">セル › プレーン › 新規...</div><div class="command-desc">RGBA 8／16 bitのラスタープレーンを追加します。主線と彩色は各レイヤーに1枚ずつ固定され、新規追加の対象ではありません。</div></li>
+              <li class="search-unit"><div class="command-name">セル › プレーン › 複製</div><div class="command-desc">追加ラスタープレーンと内容を同じレイヤー内へ複製します。主線／彩色を重複させる操作は確定されません。</div></li>
+              <li class="search-unit"><div class="command-name">セル › プレーン › 削除 <span class="tag caution">注意</span></div><div class="command-desc">選択した追加ラスタープレーンを削除します。必須の主線／彩色プレーンは削除できません。</div></li>
               <li class="search-unit"><div class="command-name">セル › プレーン › 上へ</div><div class="command-desc">選択プレーンを同じレイヤー内で一段上へ移します。別レイヤーへは移しません。</div></li>
               <li class="search-unit"><div class="command-name">セル › プレーン › 下へ</div><div class="command-desc">選択プレーンを同じレイヤー内で一段下へ移します。</div></li>
               <li class="search-unit"><div class="command-name">セル › プレーン › 表示切替</div><div class="command-desc">選択プレーンの表示を切り替えます。編集可否とは別です。</div></li>
               <li class="search-unit"><div class="command-name">セル › プレーン › 編集可否切替</div><div class="command-desc">選択プレーンへの編集を許可／禁止します。選択中でも編集不可なら描画コマンドは無効です。</div></li>
               <li class="search-unit"><div class="command-name">セル › プレーン › 不透明度...</div><div class="command-desc">選択プレーンの合成不透明度を設定します。</div></li>
-              <li class="search-unit"><div class="command-name">セル › プレーン › 変換...</div><div class="command-desc">プレーン種類または保存形式を、対応する組み合わせへ変換します。</div></li>
-              <li class="search-unit"><div class="command-name">セル › プレーン › 同種を統合 <span class="tag caution">注意</span></div><div class="command-desc">同じレイヤー内の互換プレーンを順序どおりに統合します。</div></li>
-              <li class="search-unit"><div class="command-name">セル › プレーン › プロパティ...</div><div class="command-desc">名前、種類、形式、表示・編集状態など選択プレーンの詳細を確認・編集します。</div></li>
+              <li class="search-unit"><div class="command-name">セル › プレーン › 変換...</div><div class="command-desc">主線／彩色／ラスターという役割を保ったまま、役割に対応するピクセル形式へ変換します。</div></li>
+              <li class="search-unit"><div class="command-name">セル › プレーン › 同種を統合 <span class="tag caution">注意</span></div><div class="command-desc">同じレイヤー内の互換ラスタープレーンを順序どおりに統合します。</div></li>
+              <li class="search-unit"><div class="command-name">セル › プレーン › プロパティ...</div><div class="command-desc">名前、形式、表示、編集可否、不透明度など、選択プレーンの詳細を確認・編集します。プレーンの役割は変更しません。</div></li>
             </ul></div>
           </details>
 
@@ -760,14 +753,14 @@
               <li class="search-unit"><div class="command-name">選択 › 選択範囲を反転</div><div class="command-desc">文書範囲内で選択と非選択を入れ替えます。</div></li>
               <li class="search-unit"><div class="command-name">選択 › 選択範囲を拡張...</div><div class="command-desc">指定ピクセル幅だけ選択マスクを外側へ広げます。キャンセルでは変更しません。</div></li>
               <li class="search-unit"><div class="command-name">選択 › 選択範囲を縮小...</div><div class="command-desc">指定ピクセル幅だけ選択マスクを内側へ狭めます。</div></li>
-              <li class="search-unit"><div class="command-name">選択 › 変換 › 選択範囲をレイヤーへ</div><div class="command-desc">現在の選択マスクを選択レイヤーとして保持できる形へ変換します。</div></li>
-              <li class="search-unit"><div class="command-name">選択 › 変換 › レイヤーを選択範囲へ</div><div class="command-desc">選択レイヤーの内容から現在の選択マスクを作ります。</div></li>
-              <li class="search-unit"><div class="command-name">選択 › 変換 › レイヤーを追加</div><div class="command-desc">選択レイヤーのマスクを現在の選択へ加えます。</div></li>
-              <li class="search-unit"><div class="command-name">選択 › 変換 › レイヤーを削除</div><div class="command-desc">選択レイヤーのマスクを現在の選択から引きます。</div></li>
+              <li class="search-unit"><div class="command-name">選択 › 変換 › 選択範囲をマスクとして保存</div><div class="command-desc">現在の選択を、名前と安定IDを持つ文書所有の保存マスクとして追加します。画像レイヤーやプレーンは作りません。</div></li>
+              <li class="search-unit"><div class="command-name">選択 › 変換 › 保存マスクを選択範囲へ適用</div><div class="command-desc">名前付き保存マスクを選び、現在の選択を置き換えます。</div></li>
+              <li class="search-unit"><div class="command-name">選択 › 変換 › 保存マスクを加算／減算</div><div class="command-desc">選んだ保存マスクを現在の選択へ加えるか、現在の選択から引きます。</div></li>
+              <li class="search-unit"><div class="command-name">選択 › 変換 › 保存マスクの名前を変更...／保存マスクを削除</div><div class="command-desc">保存マスクの名前または存在を文書履歴の一回の編集として変更します。Undo／Redoと保存／再読込に対応します。</div></li>
             </ul></div>
           </details>
 
-          <details class="reference search-unit" id="menu-filter" open data-search="フィルタ filter sharpen blur gaussian invert contrast tone curve levels hsv color balance unsharp dust adjustment">
+          <details class="reference search-unit" id="menu-filter" open data-search="フィルタ filter sharpen blur gaussian invert contrast tone curve levels hsv color balance unsharp dust">
             <summary>フィルタ</summary>
             <div class="details-body"><ul class="command-list">
               <li class="search-unit"><div class="command-name">フィルタ › 直前のフィルタを再実行</div><div class="command-desc">最後に確定したフィルターとパラメーターを、現在の対象へもう一度適用します。履歴がないと無効です。</div></li>
@@ -785,12 +778,6 @@
               <li class="search-unit"><div class="command-name">フィルタ › カラーバランス...</div><div class="command-desc">色の偏りを調整します。確定まで元画像へ累積適用しません。</div></li>
               <li class="search-unit"><div class="command-name">フィルタ › アンシャープマスク...</div><div class="command-desc">半径、量、しきい値を指定して輪郭を強調します。</div></li>
               <li class="search-unit"><div class="command-name">フィルタ › ゴミ取り...</div><div class="command-desc">選択またはラスター全体の小点／小穴／異色小領域を一括処理します。必要な線を消す可能性があるためプレビューを確認します。</div></li>
-              <li class="search-unit"><div class="command-name">フィルタ › 調整レイヤーを作成...</div><div class="command-desc">元ピクセルを変えず、明るさ・コントラスト、レベル、トーンカーブ等の調整を持つレイヤーを作ります。</div></li>
-              <li class="search-unit"><div class="command-name">フィルタ › 前の調整レイヤーを選択</div><div class="command-desc">レイヤー順で前の調整レイヤーを選びます。候補がなければ無効です。</div></li>
-              <li class="search-unit"><div class="command-name">フィルタ › 次の調整レイヤーを選択</div><div class="command-desc">レイヤー順で次の調整レイヤーを選びます。</div></li>
-              <li class="search-unit"><div class="command-name">フィルタ › 調整レイヤーを再編集...</div><div class="command-desc">選択中の調整パラメーターを再び開き、プレビュー後に更新します。</div></li>
-              <li class="search-unit"><div class="command-name">フィルタ › 調整レイヤーの表示切替</div><div class="command-desc">選択中の調整効果を一時的に表示／非表示にします。</div></li>
-              <li class="search-unit"><div class="command-name">フィルタ › 調整レイヤーを最前面へ</div><div class="command-desc">選択中の調整レイヤーをレイヤー順の最上位へ移します。</div></li>
             </ul></div>
           </details>
 
@@ -1036,7 +1023,7 @@
             </div>
             <div class="card search-unit" id="pane-layer" data-search="レイヤー プレーン layer plane thumbnail visibility editability opacity drag reorder">
               <h3>レイヤー／プレーン</h3>
-              <p>上段にレイヤー、下段に選択レイヤー内のプレーンを縦順で表示します。タイルには選択、表示、編集可否、種類／不透明度情報、サムネイルが現れます。ドラッグで同じ階層内を並べ替え、下部ボタンで新規、複製、削除、上下移動、詳細を実行します。</p>
+              <p>上段に標準レイヤー、下段に現在選択しているレイヤー内のプレーンを縦順で表示します。レイヤー行には表示、編集可否、不透明度、サムネイル、プレーン行には主線／彩色／ラスターの役割と形式が現れます。ドラッグで同じ階層内を並べ替え、下部ボタンで新規、複製、削除、上下移動、詳細を実行します。</p>
               <p>複数対象コマンドでは操作対象のレイヤー／プレーンをマーカーと状態表示で確認できます。<span class="menu-path">ウィンドウ › レイヤー／プレーン</span></p>
             </div>
             <div class="card search-unit" id="pane-locator" data-search="ロケーター locator neighborhood X Y selection H V L RGBA fixed edit auto scroll">
@@ -1149,29 +1136,28 @@
             <h3>active layerとactive plane</h3>
             <p>active layerはプレーンを含む上位単位、active planeは実際の編集先です。レイヤーを選んだだけで意図したプレーンが編集対象とは限りません。プレーン行、表示アイコン、編集可否、ツールオプション、ステータスバーを合わせて確認してください。フィルがピクセルを変更した場合は、実際に塗った標準彩色または汎用ラスタープレーンが選択へ同期します。</p>
           </div>
-          <div class="table-scroll search-unit" data-search="layer types binary grayscale adjustment selection raster plane kinds storage">
+          <div class="table-scroll search-unit" data-search="standard layer MainLine Color Raster current saved selection shooting frame 標準レイヤー 主線 彩色 ラスター 保存マスク 撮影フレーム">
             <table class="compare">
-              <thead><tr><th>構成</th><th>主なプレーン</th><th>用途／注意</th></tr></thead>
+              <thead><tr><th>構成</th><th>所有／個数</th><th>用途／注意</th></tr></thead>
               <tbody>
-                <tr><td>2値彩色レイヤー</td><td>主線、彩色、任意ラスター</td><td>硬い主線と彩色を分離。彩色時に主線を保護</td></tr>
-                <tr><td>階調彩色レイヤー</td><td>グレースケール主線、彩色</td><td>主線のカバレッジと基本線色を合成</td></tr>
-                <tr><td>ラスター汎用レイヤー</td><td>任意ラスター</td><td>一般画像や中間結果を、対応する8／16 bit形式で保持</td></tr>
-                <tr><td>フレームレイヤー</td><td>なし</td><td>制作フレーム情報を保持する非描画レイヤー</td></tr>
-                <tr><td>消失点レイヤー</td><td>なし</td><td>複数の消失点と放射ガイド設定を安定ID付きで所有</td></tr>
-                <tr><td>調整レイヤー</td><td>調整パラメーター</td><td>元ピクセルを変えず明るさ等を適用</td></tr>
-                <tr><td>選択レイヤー</td><td>選択マスク</td><td>選択範囲の保存・編集・相互変換</td></tr>
+                <tr><td>標準レイヤー</td><td>主線1枚＋彩色1枚が必須、ラスター0枚以上</td><td>画像レイヤーはこの1種類だけ。線画、色トレース、塗り、背景、特効、レタッチを同じ構造で扱う</td></tr>
+                <tr><td>主線プレーン</td><td>各レイヤーにちょうど1枚</td><td>2値、グレースケール8／16 bit、RGBA 8／16 bitの線画を保持でき、彩色時は保護対象になる</td></tr>
+                <tr><td>彩色プレーン</td><td>各レイヤーにちょうど1枚</td><td>RGBA 8／16 bitの色トレースと塗り色を保持する</td></tr>
+                <tr><td>ラスタープレーン</td><td>各レイヤーに0枚以上</td><td>RGBA 8／16 bitの背景、特効、エアブラシ、レタッチ等を追加する</td></tr>
+                <tr><td>現在の選択／保存マスク</td><td>文書所有、レイヤー外</td><td>現在マスク1枚と、安定ID・名前付き保存マスク0件以上。保存マスクは置換・加算・減算、改名、削除が可能</td></tr>
+                <tr><td>撮影フレーム</td><td>任意の文書オブジェクト、レイヤー外</td><td>中心、寸法、角度、表示／指示出力設定を持ち、数値またはCanvasハンドルで編集する</td></tr>
               </tbody>
             </table>
           </div>
-          <div class="search-unit" data-search="visibility editability opacity order merge convert new plane validation">
+          <div class="search-unit" data-search="visibility editability opacity order merge pixel format new raster validation">
             <h3 id="layer-operations">表示、編集可否、順序</h3>
-            <p>表示切替は合成に含めるか、編集可否切替はコマンドが変更してよいかを決めます。非表示でも編集不可とは限らず、選択中でも編集不可なら描画できません。レイヤーとプレーンは別々の順序を持ち、プレーンを所属レイヤーの外へ移しません。新規プレーンでは種類と形式を文字列から選び、成立しない組み合わせは作成しません。</p>
-            <p>削除、変換、同種統合は内容や編集特性を変えます。Undoできますが、保存前に結果を確認してください。</p>
+            <p>表示切替は合成に含めるか、編集可否切替はコマンドが変更してよいかを決めます。非表示でも編集不可とは限らず、選択中でも編集不可なら描画できません。レイヤーとプレーンは別々の順序を持ち、プレーンを所属レイヤーの外へ移しません。新規プレーンは追加ラスターに固定され、RGBA 8／16 bit形式から選びます。</p>
+            <p>必須の主線／彩色は削除・複製できません。プレーン変換は役割を変えず、対応するピクセル形式だけを変更します。削除、形式変換、統合はUndoできますが、保存前に結果を確認してください。</p>
           </div>
-          <div class="search-unit" data-search="annotation shooting frame vanishing point overlays output policy 注釈 撮影フレーム 消失点">
-            <h3 id="production-overlays">制作指示と透視補助</h3>
-            <p>テキスト／手描き指示はテキスト／注釈レイヤー、消失点は消失点レイヤーが、それぞれ安定ID付きオブジェクトとして所有します。これらのレイヤーにプレーンはありません。撮影フレームはレイヤー外の任意文書オブジェクトです。いずれもUndo／Redo、保存／再読込、Canvas上の選択またはハンドル編集に対応し、画像プレーンのピクセルを直接変更しません。</p>
-            <p>通常のラスター書き出しは制作指示、撮影フレーム、消失点ガイドを除外します。「指示画像を書き出し...」では指示出力対象の注釈と撮影フレームを含めます。消失点と放射ガイドは編集補助なので、どちらの平坦出力にも焼き込みません。</p>
+          <div class="search-unit" data-search="shooting frame overlay output policy 撮影フレーム 指示画像">
+            <h3 id="production-overlays">撮影フレーム</h3>
+            <p>撮影フレームはレイヤー外の任意文書オブジェクトです。Undo／Redo、保存／再読込、数値入力、Canvasハンドル編集に対応し、画像プレーンのピクセルを直接変更しません。</p>
+            <p>通常のラスター書き出しは撮影フレームを除外します。「指示画像を書き出し...」では、撮影フレーム側で出力対象に設定した場合だけ確認用画像へ含めます。</p>
           </div>
         </section>
 
@@ -1213,10 +1199,10 @@
         </section>
 
         <section class="chapter" id="filters" aria-labelledby="filters-heading">
-          <h2 id="filters-heading">12. フィルターと調整レイヤー</h2>
+          <h2 id="filters-heading">12. フィルター</h2>
           <div class="search-unit" data-search="filter target selection active plane preview cancel apply undo last filter">
             <h3 id="filter-basics">適用範囲とプレビュー</h3>
-            <p>選択範囲があればその内側、なければ編集可能なactive plane全体へ適用します。ダイアログのプレビューは開始状態から毎回計算され、スライダー操作を重ねるたびに効果が累積することはありません。OKで一回のUndo単位、キャンセルで完全復元です。「直前のフィルタを再実行」は最後に確定した値を使います。</p>
+            <p>選択範囲があればその内側、なければ編集可能なactive plane全体へ適用します。ダイアログのプレビューは開始状態から毎回計算され、スライダー操作を重ねるたびに効果が累積することはありません。OKで対象プレーンのピクセルへ一回のUndo単位として確定し、キャンセルで完全復元します。「直前のフィルタを再実行」は最後に確定した値を使います。</p>
           </div>
           <div class="card-grid">
             <div class="card search-unit" data-search="sharpen weak strong unsharp blur gaussian dust">
@@ -1228,10 +1214,6 @@
             <div class="card search-unit" data-search="effect gradient airbrush boundary blur stamp alpha">
               <h3>効果ツール</h3><p>グラデーション、エアブラシ、境界色エアブラシ、ぼかし、スタンプ、アルファグラデーションはCanvasで範囲や方向を指定する局所処理です。</p>
             </div>
-          </div>
-          <div class="search-unit" data-search="adjustment layer non destructive create edit visibility order">
-            <h3 id="adjustment-layers">調整レイヤー</h3>
-            <p>元ピクセルを変えずに明るさ・コントラスト、レベル、トーンカーブ等を保持します。複数作成、前後選択、再編集、表示切替、最前面移動ができます。表示順によって下の合成結果への作用が変わるため、レイヤー順を確認してください。</p>
           </div>
         </section>
 
@@ -1278,7 +1260,7 @@
                 <tr><td>Recoveryを保存</td><td>障害復旧用の別データ</td><td>進めない。未保存表示も消さない</td><td>対象外</td></tr>
                 <tr><td>Recoveryを開く</td><td>復旧候補を「復元セル」として開く</td><td>元ファイルを上書きしない</td><td>新しく開いた文書で編集可能</td></tr>
                 <tr><td>ラスタ－を書き出し</td><td>他アプリ向けの平坦な画像</td><td>進めない</td><td>外部出力はUndoしない</td></tr>
-                <tr><td>指示画像を書き出し</td><td>注釈と撮影フレームを含む確認用画像</td><td>進めない</td><td>外部出力はUndoしない</td></tr>
+                <tr><td>指示画像を書き出し</td><td>出力対象の撮影フレームを含む確認用画像</td><td>進めない</td><td>外部出力はUndoしない</td></tr>
                 <tr><td>復帰</td><td>最後の通常保存へ戻す</td><td>保存基準そのものを使用</td><td>未保存編集と履歴を失う操作として確認</td></tr>
               </tbody>
             </table>
@@ -1291,13 +1273,13 @@
             <h3 id="savepoint-history">通常保存の基準とUndo／Redo</h3>
             <p>通常保存が成功した履歴位置が「保存済み」の基準です。そこから編集、Undo、Redoで別の状態へ移るとタブに未保存の「*」が付きます。履歴上で保存した状態へ正確に戻ると未保存表示も解消できます。Recovery保存や書き出しだけでは基準は動きません。</p>
           </div>
-          <div class="search-unit" data-search="supported formats inkpod v26 PNG TIFF TGA BMP 8 16 alpha DPI inkbatch cut cell">
+          <div class="search-unit" data-search="supported formats inkpod v31 PNG TIFF TGA BMP 8 16 alpha DPI inkbatch v5 cut cell">
             <h3 id="file-formats">対応形式</h3>
             <ul>
-              <li><strong>セル編集用:</strong> `.inkpod`（現在の形式バージョン26、リプレイエポック23）。レイヤー／プレーン、注釈、撮影フレーム、消失点、保存基準、履歴、パレット、ライトテーブル、選択、色深度を保持します。</li>
-              <li><strong>カット記述子:</strong> 同じ `.inkpod` 拡張子ですが、セルとは異なる識別子を持つ別形式です。カットの制作情報、既定値、安定ID付きセル系列、カット履歴を保存し、各セルファイルは埋め込みません。現在は形式バージョン26、カットリプレイエポック23、ペイロードスキーマ2です。</li>
+              <li><strong>セル編集用:</strong> `.inkpod`（現在の形式バージョン31、リプレイエポック27）。標準レイヤー／プレーン、撮影フレーム、現在の選択と名前付き保存マスク、保存基準、履歴、パレット、ライトテーブル、色深度を保持します。</li>
+              <li><strong>カット記述子:</strong> 同じ `.inkpod` 拡張子ですが、セルとは異なる識別子を持つ別形式です。カットの制作情報、既定値、安定ID付きセル系列、カット履歴を保存し、各セルファイルは埋め込みません。現在はトップレベル形式バージョン31、カットリプレイエポック25、ペイロードスキーマ3です。</li>
               <li><strong>一般ラスター:</strong> PNG、TIFF、TGA、BMP。各形式が表現できる8／16 bit、アルファ、寸法、DPIを扱います。形式で表せないレイヤー構造等は平坦化されます。</li>
-              <li><strong>バッチセット:</strong> `.inkbatch`（現在の形式バージョン2）。現行版だけを読み書きします。</li>
+              <li><strong>バッチセット:</strong> `.inkbatch`（現在の形式バージョン5）。現行版だけを読み書きします。</li>
             </ul>
             <p>JPEGなど、ここに記載のない拡張子は対応形式として扱わないでください。アプリ固有形式は正式な形式凍結前のため、古い形式バージョンは移行せず明示的に拒否します。</p>
           </div>
@@ -1358,9 +1340,9 @@
               <h3>別種類のプレーンへ貼る</h3>
               <ol><li>選択してコピー。</li><li>「変換してペースト...」を選ぶ。</li><li>種類、形式、名前を指定。</li><li>浮動内容を配置し「確定」。</li></ol><p>途中で「キャンセル」すれば元に戻ります。</p>
             </div>
-            <div class="card search-unit" data-search="recipe filter preview non destructive adjustment">
-              <h3>元画像を残して明るさを変える</h3>
-              <ol><li>「調整レイヤーを作成...」。</li><li>明るさ・コントラストを選ぶ。</li><li>プレビューで確認してOK。</li><li>必要なら表示切替または再編集。</li></ol>
+            <div class="card search-unit" data-search="recipe filter preview brightness undo">
+              <h3>プレビューして明るさを変える</h3>
+              <ol><li>変更するプレーンと、必要なら選択範囲を決める。</li><li>「フィルタ › 明るさ・コントラスト...」を選ぶ。</li><li>プレビューで確認してOK。</li><li>元へ戻す場合はUndoする。</li></ol>
             </div>
             <div class="card search-unit" data-search="recipe safe batch dry run duplicate save">
               <h3>複数セルを安全に一括処理する</h3>
@@ -1370,13 +1352,9 @@
               <h3>カットのセル系列を組む</h3>
               <ol><li>新規カットを作成。</li><li>既存セルを系列へ追加。</li><li>上下移動で順序を整える。</li><li>表示番号を付け直し、カットを保存。</li></ol><p>セル文書は必要に応じて別途保存します。</p>
             </div>
-            <div class="card search-unit" data-search="recipe annotation shooting frame instruction raster export">
+            <div class="card search-unit" data-search="recipe shooting frame instruction raster export">
               <h3>撮影指示入りの確認画像を作る</h3>
-              <ol><li>テキストまたは手描き指示を追加。</li><li>撮影フレームを数値またはハンドルで調整。</li><li>「指示画像を書き出し...」を実行。</li></ol><p>通常のラスター書き出しには制作指示を含めません。</p>
-            </div>
-            <div class="card search-unit" data-search="recipe vanishing point radial guide snap perspective">
-              <h3>消失点へ線を吸着させる</h3>
-              <ol><li>消失点設定で点と放射間隔を追加。</li><li>必要ならハンドルで点をCanvas外へ移動。</li><li>表示とスナップをオン。</li><li>直線、曲線、図形、折れ線を描く。</li></ol><p>ガイドは平坦画像へ焼き込まれません。</p>
+              <ol><li>撮影フレームを数値またはハンドルで調整。</li><li>撮影フレームの「指示画像に含める」をオン。</li><li>「指示画像を書き出し...」を実行。</li></ol><p>通常のラスター書き出しには撮影フレームを含めません。</p>
             </div>
           </div>
         </section>
@@ -1417,9 +1395,9 @@
             <h3>カットの操作が実行されない</h3>
             <p>カット操作は、メニューやボタンを押した時点のワークスペース、カット、セル、世代を対象にします。ダイアログ表示中などに別タブへ切り替えた場合、後からアクティブになった別セルへ操作を付け替えず拒否します。元のカット／セルを選び直して再実行してください。</p>
           </div>
-          <div class="search-unit" data-search="shooting frame vanishing point handles hidden overlay edit mode">
-            <h3>撮影フレーム／消失点のハンドルが見えない</h3>
-            <p>対象が文書に存在するか、対応する「ハンドル編集」コマンドを選んでいるか、消失点の表示がオンかを確認します。点がCanvas外にある場合も放射ガイドは見えますが、中心ハンドルは表示領域外になることがあります。</p>
+          <div class="search-unit" data-search="shooting frame handles hidden overlay edit mode">
+            <h3>撮影フレームのハンドルが見えない</h3>
+            <p>撮影フレームが文書に存在するか、「撮影フレームをハンドル編集」を選んでいるかを確認します。フレームがCanvas表示範囲外にある場合は全体表示に戻して位置を確認してください。</p>
           </div>
           <div class="search-unit" data-search="batch no output dry-run preview current inkpod overwrite">
             <h3>バッチが開始しない／期待した形式で出ない</h3>
@@ -1452,22 +1430,19 @@
                 <tr><td>カット</td><td>一つのショットに属する安定ID付きセル系列、制作設定、独立した履歴をまとめる単位。各セル文書は別保存です。</td></tr>
                 <tr><td>セル</td><td>一枚の作画・彩色文書。</td></tr>
                 <tr><td>シーケンス／連番</td><td>自然順に並べた複数セル／画像の列。</td></tr>
-                <tr><td>注釈</td><td>テキスト、手描き線、引出線、値などの制作指示を保持する非破壊オブジェクト。</td></tr>
                 <tr><td>撮影フレーム</td><td>中心、幅、高さ、角度を持つ任意の撮影範囲。指示画像へ明示的に出力できます。</td></tr>
-                <tr><td>消失点</td><td>透視作画のための位置と放射ガイド設定。複数作成でき、Canvas外の点と放射スナップにも対応します。</td></tr>
                 <tr><td>主線保護</td><td>主線を見せたまま、彩色操作が主線プレーンを変更しない性質。</td></tr>
-                <tr><td>選択マスク</td><td>処理を許可する範囲をピクセルごとに表す情報。</td></tr>
-                <tr><td>調整レイヤー</td><td>元ピクセルを変えず、表示合成時に明るさ等を調整するレイヤー。</td></tr>
+                <tr><td>選択マスク</td><td>処理を許可する範囲をピクセルごとに表す、レイヤー外の文書所有情報。現在の選択と名前付き保存マスクがあります。</td></tr>
                 <tr><td>ドック</td><td>ペインを作業ウィンドウの上・左・右・下へ固定配置すること。</td></tr>
                 <tr><td>フローティング選択</td><td>貼り付け／変形内容がまだ文書へ確定されず、移動・変形・取消できる状態。</td></tr>
                 <tr><td>フローティングペイン</td><td>ドックから外し、同じ作業ウィンドウに属する独立小窓として表示したペイン。</td></tr>
-                <tr><td>プレーン</td><td>レイヤー内の最小編集単位。主線、彩色、色トレース、塗りなど。</td></tr>
+                <tr><td>プレーン</td><td>レイヤー内の最小編集単位。主線、彩色、追加ラスターの三つの役割があります。</td></tr>
                 <tr><td>プレビュー</td><td>確定前の仮結果。OK／実行で確定し、キャンセルで開始前へ戻ります。</td></tr>
                 <tr><td>文書</td><td>画像、レイヤー、履歴、保存先、未保存状態を共有する保存対象。</td></tr>
                 <tr><td>ビュー</td><td>文書を見る一つの表示。倍率、パン、表示反転等はビューごとに独立。</td></tr>
                 <tr><td>エディターグループ</td><td>タブ列と一つの可視Canvasを持つ領域。最大2つ。</td></tr>
                 <tr><td>ライトテーブル</td><td>編集セルの背後へ別セルを半透明で重ねる読み取り専用参照。</td></tr>
-                <tr><td>レイヤー</td><td>セル画を重ねる単位。種類ごとに利用できるプレーンとツールが異なります。</td></tr>
+                <tr><td>レイヤー</td><td>セル画を重ねる標準構造。主線1枚と彩色1枚を必須とし、ラスタープレーンを任意数追加できます。</td></tr>
               </tbody>
             </table>
           </div>

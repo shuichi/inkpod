@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <meta name="description" content="現行 .inkpod v27 ファイルフォーマットの人間向け技術解説">
-  <title>.inkpod ファイルフォーマット — v27</title>
+  <meta name="description" content="現行 .inkpod v31 ファイルフォーマットの人間向け技術解説">
+  <title>.inkpod ファイルフォーマット — v31</title>
   <style>
     :root {
       --paper: #f4f0e8;
@@ -777,8 +777,10 @@
         <p>現行状態の可変ラスターだけを正本にせず、再構築に必要な意味データと履歴を保存します。通常保存・読込はともに、失敗やキャンセルで既存ファイルや使用中の文書を途中状態へ置き換えません。</p>
       </div>
       <dl class="spec-strip">
-        <div><dt>FORMAT</dt><dd>v27</dd></div>
-        <div><dt>REPLAY EPOCH</dt><dd>23</dd></div>
+        <div><dt>FORMAT</dt><dd>v31</dd></div>
+        <div><dt>REPLAY EPOCH</dt><dd>27</dd></div>
+        <div><dt>ARCHIVE / DOCM</dt><dd>7 / 8</dd></div>
+        <div><dt>CUT</dt><dd>schema 3 / epoch 25</dd></div>
         <div><dt>BYTE ORDER</dt><dd>little-endian</dd></div>
         <div><dt>MAX FILE</dt><dd>1 GiB</dd></div>
       </dl>
@@ -849,7 +851,7 @@
             <thead><tr><th>FourCC</th><th>要否</th><th>役割</th><th>レコード</th></tr></thead>
             <tbody>
               <tr><td><code>META</code></td><td>必須・critical</td><td>UUID、replay 契約、現在 State、履歴 cursor、active branch、文書／Editor savepoint、各 ID の次値、件数、期待 digest。</td><td>kind 1 を 1 件</td></tr>
-              <tr><td><code>GENS</code></td><td>必須・critical</td><td>Genesis の文書アーカイブ、初期 State/Branch、SolidWhite または Asset の不変ベース面。</td><td>kind 1 を 1 件</td></tr>
+              <tr><td><code>GENS</code></td><td>必須・critical</td><td>schema 7 の Genesis 文書アーカイブ、必須の <code>DOCM</code> schema 8、初期 State/Branch、SolidWhite または Asset の不変ベース面。</td><td>kind 1 を 1 件</td></tr>
               <tr><td><code>ASST</code></td><td>必須・critical</td><td>不変 asset の descriptor と、最大 4 MiB に分割した payload chunk。</td><td>kind 1 / 2 を 0 件以上</td></tr>
               <tr><td><code>PROC</code></td><td>必須・critical</td><td>Commit、Undo/Redo/Jump、branch cut をファイル順に保持する append-only journal。</td><td>kind 1 / 2 / 3 を 0 件以上</td></tr>
               <tr><td><code>EDIT</code></td><td>必須・critical</td><td>active tool、tool 別の色・径、fill/selection/geometry 設定、active layer/plane、palette cursor。</td><td>kind 1 を 1 件</td></tr>
@@ -863,7 +865,7 @@
 
         <div class="callout">
           <strong>Cell と Cut は同じ拡張子でも別コンテナです</strong>
-          <p>通常の Cell は <code>INKPOD\0\0</code>、Cut descriptor は <code>INKCUT\0\0</code> の magic を持ちます。Cut は制作 metadata、将来作る Cell の既定値、最大64件の順序付き membership、独立した履歴と savepoint を保持し、各 Cell の画素・レイヤー・履歴を埋め込みません。Cut も version 27／runtime replay epoch 24／payload schema 2 だけを受理し、保存は descriptor 一ファイルだけを原子的に置換します。</p>
+          <p>通常の Cell は <code>INKPOD\0\0</code>、Cut descriptor は <code>INKCUT\0\0</code> の magic を持ちます。Cut は制作 metadata、将来作る Cell の既定値、最大64件の順序付き membership、独立した履歴と savepoint を保持し、各 Cell の画素・レイヤー・履歴を埋め込みません。Cut は top-level version 31／独立した replay epoch 25／payload schema 3 だけを受理し、保存は descriptor 一ファイルだけを原子的に置換します。</p>
         </div>
       </section>
 
@@ -873,9 +875,9 @@
         <p class="intro">ファイルを開く処理は、使用中の文書を直接書き換えません。別の staged Core で構造・参照・digest・再生結果を確定し、成功した完成状態だけを置き換えます。</p>
 
         <div class="flow">
-          <div class="flow-step"><div><strong>ヘッダーと directory を検証</strong><p>magic、v27、container epoch 9、サイズ、整列、範囲重複、ゼロ予約領域、FileRootDigest を確認し、META と procedure の runtime replay epoch 24 も照合します。</p></div></div>
+          <div class="flow-step"><div><strong>ヘッダーと directory を検証</strong><p>magic、v31、container epoch 9、サイズ、整列、範囲重複、ゼロ予約領域、FileRootDigest を確認し、META と procedure の runtime replay epoch 27 も照合します。</p></div></div>
           <div class="flow-step"><div><strong>セクションを検証</strong><p>必須セクション、record schema、stored/logical digest、件数とリソース上限を確認します。</p></div></div>
-          <div class="flow-step"><div><strong>Genesis と Assets を構築</strong><p>asset descriptor・chunk・AssetId を照合し、初期状態と参照可能な不変データを staged Core に用意します。</p></div></div>
+          <div class="flow-step"><div><strong>Genesis と Assets を構築</strong><p>schema 7 の文書アーカイブと必須 <code>DOCM</code> schema 8、standard layer topology、文書所有mask、asset descriptor・chunk・AssetId を照合し、初期状態と参照可能な不変データを staged Core に用意します。</p></div></div>
           <div class="flow-step"><div><strong>Journal を再生</strong><p>有効な CKPT があれば接頭辞を厳密照合して利用し、不一致なら Genesis から全 PROC を再生します。</p></div></div>
           <div class="flow-step"><div><strong>META と EDIT を照合</strong><p>現在 State、branch、cursor、ID 次値、文書／Editor／journal digest、savepoint が再生結果と一致することを確認します。</p></div></div>
           <div class="flow-step"><div><strong>一度だけ公開</strong><p>すべて成功したときだけ staged Core を live Core と置き換えます。失敗時は使用中の文書を変更しません。</p></div></div>
@@ -924,13 +926,13 @@
 
         <div class="callout">
           <strong><code>PROC</code>のすべてがPrimitiveではありません</strong>
-          <p>kind 1の<code>Commit</code>だけがPrimitive実行です。kind 2の<code>HistoryMove</code>とkind 3の<code>BranchCut</code>は履歴制御eventです。query、view、transient preview、ingestion、export、application command IDはPrimitiveIdではありません。76件のcatalog entryのうち<code>LightTableSwapWithActive</code>はsession-levelのGenesis置換であり、<code>Commit</code>には出現しません。</p>
+          <p>kind 1の<code>Commit</code>だけがPrimitive実行です。kind 2の<code>HistoryMove</code>とkind 3の<code>BranchCut</code>は履歴制御eventです。query、view、transient preview、ingestion、export、application command IDはPrimitiveIdではありません。75件のcatalog entryのうち<code>LightTableSwapWithActive</code>はsession-levelのGenesis置換であり、<code>Commit</code>には出現しません。<code>ApplyBatchOperations</code>はBatch専用ですが、通常のreplayable <code>Commit</code>です。</p>
         </div>
 
         <div class="catalog-summary" aria-label="Primitive catalog概要">
-          <div class="catalog-stat"><span>CATALOG ENTRIES</span><strong>76</strong></div>
-          <div class="catalog-stat"><span>JOURNAL REPLAYABLE</span><strong>75</strong></div>
-          <div class="catalog-stat"><span>GENESIS REPLACE</span><strong>1</strong></div>
+          <div class="catalog-stat"><span>CATALOG ENTRIES</span><strong>75</strong></div>
+          <div class="catalog-stat"><span>JOURNAL REPLAYABLE</span><strong>74</strong></div>
+          <div class="catalog-stat"><span>INKSCRIPT PUBLIC</span><strong>73</strong></div>
           <div class="catalog-stat"><span>ID FAMILIES</span><strong>9</strong></div>
         </div>
 
@@ -940,7 +942,7 @@
             <thead><tr><th>列</th><th>意味</th></tr></thead>
             <tbody>
               <tr><td>ID</td><td>非ゼロのstable <code>u32</code>。再番号付け・再利用をせず、上位16 bitのfamilyで責務を分けます。</td></tr>
-              <tr><td>Schema</td><td>canonical引数layoutのversion。76件中69件がtyped invocation schema 2です。</td></tr>
+              <tr><td>Schema</td><td>canonical引数layoutのversion。75件中63件がtyped invocation schema 2です。</td></tr>
               <tr><td>Sem.</td><td>validation、pixel、ID、no-op、workなどreplay結果に関わる意味revision。</td></tr>
               <tr><td>Work</td><td>resource admissionに使う閉じたwork-formula ID。<code>同ID</code>はPrimitiveIdと同じ数値です。</td></tr>
               <tr><td>保存</td><td><code>Commit</code>はPROCで再生可能。<code>Genesis置換</code>はjournalへ積まず、sessionの起点を置き換えます。</td></tr>
@@ -950,7 +952,7 @@
 
         <div class="catalog-toolbar" role="search">
           <input id="primitive-search" type="search" placeholder="名前・ID・用途・familyで絞り込み" aria-label="Primitive一覧を絞り込む" autocomplete="off">
-          <span class="catalog-count" id="primitive-count" aria-live="polite">76 / 76</span>
+          <span class="catalog-count" id="primitive-count" aria-live="polite">75 / 75</span>
           <button class="catalog-clear" id="primitive-clear" type="button">解除</button>
         </div>
 
@@ -967,29 +969,27 @@
         </details>
 
         <details class="primitive-family" id="family-02" open>
-          <summary><span class="family-code">0x0002</span> Layer・Plane topology・production overlays <span class="family-count">18 primitives</span></summary>
+          <summary><span class="family-code">0x0002</span> Layer・Plane topology・production overlays <span class="family-count">16 primitives</span></summary>
           <div class="details-body table-wrap">
             <table class="primitive-table">
               <thead><tr><th>ID</th><th>Canonical name</th><th>用途</th><th>Schema</th><th>Sem.</th><th>Work</th><th>保存</th></tr></thead>
               <tbody>
-                <tr data-primitive-id="0x00020001" data-name="CreateLayer" data-schema="2" data-semantics="2" data-work="0x00020001" data-replay="commit" data-family="layer plane topology"><td class="primitive-id">0x0002_0001</td><td>CreateLayer</td><td>型付きlayerを1つ作成する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
-                <tr data-primitive-id="0x00020002" data-name="DuplicateLayer" data-schema="2" data-semantics="2" data-work="0x00020002" data-replay="commit" data-family="layer plane topology"><td class="primitive-id">0x0002_0002</td><td>DuplicateLayer</td><td>型付きlayerを複製する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00020001" data-name="CreateLayer" data-schema="3" data-semantics="3" data-work="0x00020001" data-replay="commit" data-family="standard layer plane topology"><td class="primitive-id">0x0002_0001</td><td>CreateLayer</td><td>主線1枚と彩色1枚を必須とするstandard layerを作成する。</td><td>3</td><td>3</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00020002" data-name="DuplicateLayer" data-schema="2" data-semantics="2" data-work="0x00020002" data-replay="commit" data-family="standard layer plane topology"><td class="primitive-id">0x0002_0002</td><td>DuplicateLayer</td><td>standard layerをplane構成ごと複製する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
                 <tr data-primitive-id="0x00020003" data-name="DeleteLayer" data-schema="2" data-semantics="2" data-work="0x00020003" data-replay="commit" data-family="layer plane topology"><td class="primitive-id">0x0002_0003</td><td>DeleteLayer</td><td>指定layerを削除する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
                 <tr data-primitive-id="0x00020004" data-name="ReorderLayer" data-schema="2" data-semantics="2" data-work="0x00020004" data-replay="commit" data-family="layer plane topology"><td class="primitive-id">0x0002_0004</td><td>ReorderLayer</td><td>layerのstack順を変更する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
                 <tr data-primitive-id="0x00020005" data-name="SetLayerProperties" data-schema="2" data-semantics="2" data-work="0x00020005" data-replay="commit" data-family="layer plane topology"><td class="primitive-id">0x0002_0005</td><td>SetLayerProperties</td><td>layerの名前、表示、編集可否、opacityを置換する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
-                <tr data-primitive-id="0x00020011" data-name="CreatePlane" data-schema="2" data-semantics="2" data-work="0x00020011" data-replay="commit" data-family="layer plane topology"><td class="primitive-id">0x0002_0011</td><td>CreatePlane</td><td>layer内に型・pixel format付きplaneを作成する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00020011" data-name="CreatePlane" data-schema="3" data-semantics="3" data-work="0x00020011" data-replay="commit" data-family="layer raster plane topology"><td class="primitive-id">0x0002_0011</td><td>CreatePlane</td><td>layer内に指定pixel formatのRaster planeを追加する。</td><td>3</td><td>3</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
                 <tr data-primitive-id="0x00020012" data-name="DuplicatePlane" data-schema="2" data-semantics="2" data-work="0x00020012" data-replay="commit" data-family="layer plane topology"><td class="primitive-id">0x0002_0012</td><td>DuplicatePlane</td><td>指定planeを複製する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
                 <tr data-primitive-id="0x00020013" data-name="DeletePlane" data-schema="2" data-semantics="2" data-work="0x00020013" data-replay="commit" data-family="layer plane topology"><td class="primitive-id">0x0002_0013</td><td>DeletePlane</td><td>指定planeを削除する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
                 <tr data-primitive-id="0x00020014" data-name="ReorderPlane" data-schema="2" data-semantics="2" data-work="0x00020014" data-replay="commit" data-family="layer plane topology"><td class="primitive-id">0x0002_0014</td><td>ReorderPlane</td><td>layer内のplane順を変更する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
                 <tr data-primitive-id="0x00020015" data-name="SetPlaneProperties" data-schema="2" data-semantics="2" data-work="0x00020015" data-replay="commit" data-family="layer plane topology"><td class="primitive-id">0x0002_0015</td><td>SetPlaneProperties</td><td>planeの名前、表示、編集可否、opacityを置換する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
-                <tr data-primitive-id="0x00020016" data-name="ConvertPlane" data-schema="2" data-semantics="2" data-work="0x00020016" data-replay="commit" data-family="layer plane topology"><td class="primitive-id">0x0002_0016</td><td>ConvertPlane</td><td>raster planeの型とpixel formatを変換する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00020016" data-name="ConvertPlane" data-schema="3" data-semantics="3" data-work="0x00020016" data-replay="commit" data-family="layer plane pixel format role preserving"><td class="primitive-id">0x0002_0016</td><td>ConvertPlane</td><td>MainLine・Color・Rasterのroleを保ったままpixel formatだけを変換する。</td><td>3</td><td>3</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
                 <tr data-primitive-id="0x00020017" data-name="MergePlane" data-schema="2" data-semantics="2" data-work="0x00020017" data-replay="commit" data-family="layer plane topology"><td class="primitive-id">0x0002_0017</td><td>MergePlane</td><td>raster planeを直下のsiblingへ統合する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
-                <tr data-primitive-id="0x00020021" data-name="ConvertLayer" data-schema="2" data-semantics="2" data-work="0x00020021" data-replay="commit" data-family="layer plane topology"><td class="primitive-id">0x0002_0021</td><td>ConvertLayer</td><td>coloring layerの型を変換する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
                 <tr data-primitive-id="0x00020022" data-name="MergeLayer" data-schema="2" data-semantics="2" data-work="0x00020022" data-replay="commit" data-family="layer plane topology"><td class="primitive-id">0x0002_0022</td><td>MergeLayer</td><td>layerを直下のsiblingへ統合する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
                 <tr data-primitive-id="0x00020023" data-name="DeleteHiddenLayers" data-schema="2" data-semantics="2" data-work="0x00020023" data-replay="commit" data-family="layer plane topology"><td class="primitive-id">0x0002_0023</td><td>DeleteHiddenLayers</td><td>すべての非表示layerを1回のatomic編集で削除する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
-                <tr data-primitive-id="0x00020030" data-name="EditTargets" data-schema="2" data-semantics="1" data-work="0x00020030" data-replay="commit" data-family="layer plane multi target 編集対象"><td class="primitive-id">0x0002_0030</td><td>EditTargets</td><td>複数のstable layer／planeを一つの編集対象集合として置換する。</td><td>2</td><td>1</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00020030" data-name="EditTargets" data-schema="3" data-semantics="2" data-work="0x00020030" data-replay="commit" data-family="layer plane multi target 編集対象"><td class="primitive-id">0x0002_0030</td><td>EditTargets</td><td>複数のstable layer／planeを一つの編集対象集合として置換する。</td><td>3</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
                 <tr data-primitive-id="0x00020050" data-name="EditShootingFrame" data-schema="2" data-semantics="1" data-work="0x00020050" data-replay="commit" data-family="shooting frame 撮影フレーム"><td class="primitive-id">0x0002_0050</td><td>EditShootingFrame</td><td>独立した角度付き撮影frameを作成・更新・削除する。</td><td>2</td><td>1</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
-                <tr data-primitive-id="0x00020060" data-name="EditVanishingPoints" data-schema="2" data-semantics="1" data-work="0x00020060" data-replay="commit" data-family="vanishing point radial guide 消失点"><td class="primitive-id">0x0002_0060</td><td>EditVanishingPoints</td><td>stable-ID消失点と放射補助線の設定を一括編集する。</td><td>2</td><td>1</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
               </tbody>
             </table>
           </div>
@@ -1026,7 +1026,7 @@
         </details>
 
         <details class="primitive-family" id="family-05" open>
-          <summary><span class="family-code">0x0005</span> Raster paint・Fill・Effect・Filter <span class="family-count">21 primitives</span></summary>
+          <summary><span class="family-code">0x0005</span> Raster paint・Fill・Effect・Filter <span class="family-count">20 primitives</span></summary>
           <div class="details-body table-wrap">
             <table class="primitive-table">
               <thead><tr><th>ID</th><th>Canonical name</th><th>用途</th><th>Schema</th><th>Sem.</th><th>Work</th><th>保存</th></tr></thead>
@@ -1046,19 +1046,18 @@
                 <tr data-primitive-id="0x00050019" data-name="EditPlaneAlpha" data-schema="2" data-semantics="2" data-work="0x00050019" data-replay="commit" data-family="raster alpha mask アルファ"><td class="primitive-id">0x0005_0019</td><td>EditPlaneAlpha</td><td>raster planeのalphaをmaskから置換する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
                 <tr data-primitive-id="0x0005001a" data-name="ApplyAlphaGradient" data-schema="2" data-semantics="2" data-work="0x0005001a" data-replay="commit" data-family="raster alpha gradient アルファ"><td class="primitive-id">0x0005_001A</td><td>ApplyAlphaGradient</td><td>raster alphaへgradientを適用する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
                 <tr data-primitive-id="0x00050020" data-name="ApplyFilter" data-schema="2" data-semantics="2" data-work="0x00050020" data-replay="commit" data-family="raster filter フィルター"><td class="primitive-id">0x0005_0020</td><td>ApplyFilter</td><td>filter操作を確定する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
-                <tr data-primitive-id="0x00050030" data-name="CreateAdjustmentLayer" data-schema="2" data-semantics="2" data-work="0x00050030" data-replay="commit" data-family="adjustment layer 調整"><td class="primitive-id">0x0005_0030</td><td>CreateAdjustmentLayer</td><td>parameter付きadjustment layerを作成する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
-                <tr data-primitive-id="0x00050031" data-name="UpdateAdjustmentLayer" data-schema="2" data-semantics="2" data-work="0x00050031" data-replay="commit" data-family="adjustment layer 調整"><td class="primitive-id">0x0005_0031</td><td>UpdateAdjustmentLayer</td><td>adjustment layerのparameterを置換する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
                 <tr data-primitive-id="0x00050040" data-name="ReplaceRasterColors" data-schema="2" data-semantics="2" data-work="0x00050040" data-replay="commit" data-family="raster color replace 色置換"><td class="primitive-id">0x0005_0040</td><td>ReplaceRasterColors</td><td>exact-depth color pairでbounded raster色を置換する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
                 <tr data-primitive-id="0x00050041" data-name="SeparateRasterColors" data-schema="2" data-semantics="3" data-work="0x00050041" data-replay="commit" data-family="raster color separation 色分解"><td class="primitive-id">0x0005_0041</td><td>SeparateRasterColors</td><td>bounded rasterの色分解を実行する。</td><td>2</td><td>3</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
                 <tr data-primitive-id="0x00050042" data-name="RestoreSelectedPixels" data-schema="2" data-semantics="2" data-work="0x00050042" data-replay="commit" data-family="raster selection restore 復元"><td class="primitive-id">0x0005_0042</td><td>RestoreSelectedPixels</td><td>ingest済みsourceから選択pixelを復元する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
                 <tr data-primitive-id="0x00050043" data-name="ScopedColorReplace" data-schema="2" data-semantics="1" data-work="0x00050043" data-replay="commit" data-family="scoped color replace 色置換"><td class="primitive-id">0x0005_0043</td><td>ScopedColorReplace</td><td>選択とgesture範囲へ限定したraster色置換を適用する。</td><td>2</td><td>1</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00050044" data-name="ApplyBatchOperations" data-schema="3" data-semantics="2" data-work="0x00050044" data-replay="commit" data-family="batch private color replace masking erase"><td class="primitive-id">0x0005_0044</td><td>ApplyBatchOperations</td><td><code>.inkbatch</code> v5の閉じたoperation列を一つのreplayable transaction／Undo単位として適用する。</td><td>3</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
               </tbody>
             </table>
           </div>
         </details>
 
         <details class="primitive-family" id="family-06" open>
-          <summary><span class="family-code">0x0006</span> Selection・Floating selection <span class="family-count">10 primitives</span></summary>
+          <summary><span class="family-code">0x0006</span> Selection・Saved masks・Floating selection <span class="family-count">12 primitives</span></summary>
           <div class="details-body table-wrap">
             <table class="primitive-table">
               <thead><tr><th>ID</th><th>Canonical name</th><th>用途</th><th>Schema</th><th>Sem.</th><th>Work</th><th>保存</th></tr></thead>
@@ -1069,8 +1068,10 @@
                 <tr data-primitive-id="0x00060004" data-name="ResizeSelection" data-schema="2" data-semantics="2" data-work="0x00060004" data-replay="commit" data-family="selection 選択 拡張 縮小"><td class="primitive-id">0x0006_0004</td><td>ResizeSelection</td><td>selection maskを指定pixel数だけ拡張・縮小する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
                 <tr data-primitive-id="0x00060005" data-name="SelectColor" data-schema="2" data-semantics="2" data-work="0x00060005" data-replay="commit" data-family="selection color 色選択"><td class="primitive-id">0x0006_0005</td><td>SelectColor</td><td>exact-depth colorとtoleranceからpixelを選択する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
                 <tr data-primitive-id="0x00060006" data-name="SelectOutputColorGuard" data-schema="2" data-semantics="1" data-work="0x00060006" data-replay="commit" data-family="selection output color guard 出力色域"><td class="primitive-id">0x0006_0006</td><td>SelectOutputColorGuard</td><td>保守的なBT.709出力色ガード外の可視色をselectionへ合成する。</td><td>2</td><td>1</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
-                <tr data-primitive-id="0x00060010" data-name="SelectionToLayer" data-schema="2" data-semantics="2" data-work="0x00060010" data-replay="commit" data-family="selection layer 選択"><td class="primitive-id">0x0006_0010</td><td>SelectionToLayer</td><td>selection maskをselection layerへ変換する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
-                <tr data-primitive-id="0x00060011" data-name="SelectionFromLayer" data-schema="2" data-semantics="2" data-work="0x00060011" data-replay="commit" data-family="selection layer 選択"><td class="primitive-id">0x0006_0011</td><td>SelectionFromLayer</td><td>selection layerをactive maskへ合成する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00060012" data-name="SaveSelectionMask" data-schema="2" data-semantics="1" data-work="0x00060012" data-replay="commit" data-family="selection saved mask 保存"><td class="primitive-id">0x0006_0012</td><td>SaveSelectionMask</td><td>active selectionを文書所有のsaved selection mask collectionへstable ID付きで保存する。</td><td>2</td><td>1</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00060013" data-name="ApplySavedSelectionMask" data-schema="2" data-semantics="1" data-work="0x00060013" data-replay="commit" data-family="selection saved mask replace add subtract 適用"><td class="primitive-id">0x0006_0013</td><td>ApplySavedSelectionMask</td><td>saved maskをReplace・Add・Subtractのいずれかでactive selectionへ合成する。</td><td>2</td><td>1</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00060014" data-name="RenameSavedSelectionMask" data-schema="2" data-semantics="1" data-work="0x00060014" data-replay="commit" data-family="selection saved mask rename 名前"><td class="primitive-id">0x0006_0014</td><td>RenameSavedSelectionMask</td><td>stable IDを保ったままsaved maskの名前を変更する。</td><td>2</td><td>1</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00060015" data-name="DeleteSavedSelectionMask" data-schema="2" data-semantics="1" data-work="0x00060015" data-replay="commit" data-family="selection saved mask delete 削除"><td class="primitive-id">0x0006_0015</td><td>DeleteSavedSelectionMask</td><td>stable IDで指定したsaved maskを文書のcollectionから削除する。</td><td>2</td><td>1</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
                 <tr data-primitive-id="0x00060020" data-name="ClearSelectedContent" data-schema="2" data-semantics="2" data-work="0x00060020" data-replay="commit" data-family="selection clear content 消去"><td class="primitive-id">0x0006_0020</td><td>ClearSelectedContent</td><td>captured targetの選択範囲内を消去する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
                 <tr data-primitive-id="0x00060021" data-name="CommitFloating" data-schema="3" data-semantics="3" data-work="0x00060021" data-replay="commit" data-family="floating selection commit フローティング"><td class="primitive-id">0x0006_0021</td><td>CommitFloating</td><td>五点absolute anchorを含む型付きfloating selectionを文書へ確定する。</td><td>3</td><td>3</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
               </tbody>
@@ -1255,7 +1256,7 @@
         </div>
 
         <details open>
-          <summary>v27 header — 128 bytes</summary>
+          <summary>v31 header — 128 bytes</summary>
           <div class="details-body">
             <figure class="layout-figure" aria-labelledby="header-map-title">
               <figcaption class="figure-head">
@@ -1265,8 +1266,8 @@
               <div class="byte-ruler-scroll">
                 <div class="byte-ruler units-4">
                   <div class="byte-block identity span-2" data-offset="0"><strong>MAGIC</strong><small>8 B</small></div>
-                  <div class="byte-block identity span-1" data-offset="8"><strong>FORMAT</strong><small>u32 = 10</small></div>
-                  <div class="byte-block identity span-1" data-offset="12"><strong>EPOCH</strong><small>u32 = 7</small></div>
+                  <div class="byte-block identity span-1" data-offset="8"><strong>FORMAT</strong><small>u32 = 31</small></div>
+                  <div class="byte-block identity span-1" data-offset="12"><strong>EPOCH</strong><small>u32 = 9</small></div>
                   <div class="byte-block span-1" data-offset="16"><strong>HEADER SIZE</strong><small>u32 = 128</small></div>
                   <div class="byte-block reserved span-1" data-offset="20"><strong>FLAGS</strong><small>u32 = 0</small></div>
                   <div class="byte-block location span-2" data-offset="24"><strong>TOTAL LENGTH</strong><small>u64</small></div>
@@ -1286,7 +1287,7 @@
                 <thead><tr><th>Offset</th><th>Size</th><th>型／bytes</th><th>Field</th><th>必須条件</th></tr></thead>
                 <tbody>
                   <tr><td>0</td><td>8</td><td><code>[u8; 8]</code></td><td>magic</td><td><code>49 4E 4B 50 4F 44 00 00</code></td></tr>
-                  <tr><td>8</td><td>4</td><td><code>u32</code></td><td>top-level format version</td><td><code>26</code></td></tr>
+                  <tr><td>8</td><td>4</td><td><code>u32</code></td><td>top-level format version</td><td><code>31</code></td></tr>
                   <tr><td>12</td><td>4</td><td><code>u32</code></td><td>container-layout epoch</td><td><code>9</code></td></tr>
                   <tr><td>16</td><td>4</td><td><code>u32</code></td><td>header size</td><td><code>128</code></td></tr>
                   <tr><td>20</td><td>4</td><td><code>u32</code></td><td>required flags</td><td><code>0</code></td></tr>
@@ -1489,9 +1490,9 @@
             <h3>正本として保存</h3>
             <ul class="clean-list">
               <li>UUID、paper、DPI、sRGB、frame、margin、base surface</li>
-              <li>layer/plane tree、stable IDs、可視性、編集可否、opacity</li>
-              <li>Text／Instruction annotation、角度付き撮影frame、消失点object</li>
-              <li>raster tile、selection mask、adjustment</li>
+              <li>各layerにMainLine／Color各1枚とRaster 0枚以上を持つstandard layer tree、stable IDs、可視性、編集可否、opacity</li>
+              <li>レイヤー外の独立した角度付き撮影frame</li>
+              <li>raster tile、文書所有の現在選択mask、順序付き名前付き保存mask、fill-protection mask</li>
               <li>palette、main-line color、guide、grid、Light Table</li>
               <li>project/cut/cell/frame/sequence identity と animation metadata</li>
               <li>journal、履歴分岐、cursor、Undo/Redo、ID high-watermark</li>
@@ -1542,9 +1543,9 @@
                 <tr><td>cells / frames</td><td>65,536 / 1 cellあたり100</td></tr>
                 <tr><td>layers / persisted planes / guides</td><td>各 4,096</td></tr>
                 <tr><td>Light Table sets / items</td><td>256 / 4,096</td></tr>
-                <tr><td>annotation objects / points per object / text bytes</td><td>16,384 / 65,536 / 65,536</td></tr>
-                <tr><td>angled shooting frame / vanishing points</td><td>0 or 1 / 64</td></tr>
-                <tr><td>palette entries</td><td>4,096</td></tr>
+                <tr><td>saved selection masks</td><td>4,096</td></tr>
+                <tr><td>angled shooting frame</td><td>0 or 1</td></tr>
+                <tr><td>palette entries / Color chart entries</td><td>4,096 / 4,096</td></tr>
                 <tr><td>raster width または height</td><td>1,048,576 px</td></tr>
                 <tr><td>1 image edit の visited pixels</td><td>67,108,864</td></tr>
                 <tr><td>1 raster / 全 retained raster の sparse tiles</td><td>262,144 / 1,048,576</td></tr>
@@ -1564,24 +1565,25 @@
       <section class="doc-section" id="compatibility">
         <span class="section-kicker">12 / COMPATIBILITY</span>
         <h2>Versionと互換方針</h2>
-        <p class="intro">現行 reader/writer が受理する native contract は、top-level version 27／runtime replay epoch 24／現在の primitive catalog の組み合わせだけです。</p>
+        <p class="intro">現行 reader/writer が受理する Cell native contract は、top-level version 31／runtime replay epoch 27／DocumentArchive schema 7／必須 <code>DOCM</code> schema 8／現在の primitive catalog の組み合わせだけです。Cut は同じtop-level version 31の下で、payload schema 3／独立 replay epoch 25を使います。</p>
 
         <div class="cards">
-          <article class="card"><span class="card-number">VERSION</span><h3>v27 only</h3><p>v27 以外は payload decode や live Core の置換前に拒否します。</p></article>
-          <article class="card"><span class="card-number">SEMANTICS</span><h3>epoch 24</h3><p>replay 結果を変える規則変更は epoch と top-level version を同時に更新します。</p></article>
+          <article class="card"><span class="card-number">VERSION</span><h3>v31 only</h3><p>v31 以外は payload decode や live Core の置換前に拒否します。</p></article>
+          <article class="card"><span class="card-number">SEMANTICS</span><h3>epoch 27</h3><p>Cellのreplay 結果を変える規則変更は epoch と top-level version を同時に更新します。</p></article>
+          <article class="card"><span class="card-number">DOCUMENT</span><h3>archive 7 / DOCM 8</h3><p><code>DOCM</code>欠落やstandard layer／mask topology不正は互換補完せず拒否します。</p></article>
           <article class="card"><span class="card-number">COMPRESSION</span><h3>None</h3><p>現在受理する compression code は 0 のみです。</p></article>
         </div>
 
         <div class="callout warning">
           <strong>後方互換性は未提供</strong>
-          <p>フォーマットフリーズが明示されるまでは current-only です。旧版 reader、migration、compatibility shim はありません。この制約は、同一 v27 ファイル内の意味データを非破壊に保持する設計とは別の軸です。</p>
+          <p>フォーマットフリーズが明示されるまでは current-only です。旧版 reader、migration、compatibility shim はありません。この制約は、同一 v31 ファイル内の意味データを非破壊に保持する設計とは別の軸です。</p>
         </div>
       </section>
 
       <section class="doc-section" id="verification">
         <span class="section-kicker">13 / VERIFICATION</span>
         <h2>非破壊性の検証契約</h2>
-        <p class="intro">現行実装におけるIO-001の状態は<code>Verified</code>です。非破壊性の検証対象は、単純な再openに加えて以下の契約を含みます。</p>
+        <p class="intro">現行実装ではnative round-tripとcurrent-version拒否を自動テストしています。非破壊性の検証対象は、単純な再openに加えて以下の契約を含み、未実施のplatform／manual確認は別途追跡します。</p>
 
         <div class="checklist">
           <div class="check-item"><span class="check-mark">✓</span><div><strong>意味状態の round-trip</strong><p>保存前後で DocumentStateDigest と canonical composite を比較し、RGBA16 を含む全 pixel format が無量子化で一致すること。</p></div></div>
@@ -1600,11 +1602,12 @@
             <ul class="source-list">
               <li><a href="../SPEC.md">SPEC.md</a> — native 永続化の要求</li>
               <li><a href="../docs/file-format.md">docs/file-format.md</a> — normative byte/schema contract</li>
-              <li><a href="../rust/inkpod-format/src/procedure.rs">rust/inkpod-format/src/procedure.rs</a> — current v27 container codec</li>
+              <li><a href="../rust/inkpod-format/src/native/mod.rs">rust/inkpod-format/src/native</a> — current schema-7 archive／schema-8 DOCM codec</li>
+              <li><a href="../rust/inkpod-format/src/procedure.rs">rust/inkpod-format/src/procedure.rs</a> — current v31 top-level procedure container codec</li>
               <li><a href="../rust/inkpod-core/src/persistence.rs">rust/inkpod-core/src/persistence.rs</a> — Core mapping、replay、checkpoint、compaction</li>
               <li><a href="../rust/inkpod-core/src/primitive/catalog.rs">rust/inkpod-core/src/primitive/catalog.rs</a> — closed Primitive catalogとreplay contract</li>
               <li><a href="../rust/inkpod-core/src/primitive/model.rs">rust/inkpod-core/src/primitive/model.rs</a> — stable PrimitiveId定義</li>
-              <li><a href="../rust/inkpod-core/tests/contracts/native_v27.rs">rust/inkpod-core/tests/contracts/native_v27.rs</a> — current v27 public Core contract tests</li>
+              <li><a href="../rust/inkpod-core/tests/contracts/native_v31.rs">rust/inkpod-core/tests/contracts/native_v31.rs</a> — current v31 public Core contract tests</li>
               <li><a href="../rust/inkpod-format/tests/unit/native.rs">rust/inkpod-format/tests/unit/native.rs</a> — byte layout、digest、atomic I/O tests</li>
             </ul>
           </div>
@@ -1614,7 +1617,7 @@
   </div>
 
   <footer>
-    <p>対象契約: <span class="mono">.inkpod v27 / runtime replay epoch 24</span> — 本文は現在の形式だけを説明します。</p>
+    <p>対象契約: <span class="mono">.inkpod v31 / runtime replay epoch 27 / archive 7 / DOCM 8</span> — 本文は現在の形式だけを説明します。</p>
   </footer>
 
   <script>

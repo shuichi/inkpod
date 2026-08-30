@@ -875,10 +875,6 @@ pub unsafe extern "C" fn inkpod_core_paste_begin_new_plane(
                 "new-plane paste target is not a canonical create-plane request",
             );
         }
-        let kind = match parse_plane_type(target.kind) {
-            Ok(kind) => kind,
-            Err(status) => return status,
-        };
         let format = match parse_storage_format(target.pixel_format) {
             Ok(format) => format,
             Err(status) => return status,
@@ -891,7 +887,7 @@ pub unsafe extern "C" fn inkpod_core_paste_begin_new_plane(
         match core.core.begin_paste_to_new_plane_converted(
             &clipboard.payload,
             target.parent_id,
-            kind,
+            PlaneType::Raster,
             format,
             name,
             target.opacity_milli,

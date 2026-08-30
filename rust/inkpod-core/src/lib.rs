@@ -52,7 +52,6 @@ mod stroke;
 mod subpalette;
 mod thumbnail;
 mod transform;
-mod vanishing_point;
 mod view;
 pub use animation::{
     LightTableBulkDirection, LightTableBulkRegistrationAction, LightTableBulkRegistrationEntry,
@@ -112,9 +111,8 @@ pub(crate) use identity::*;
 pub use inkpod_format::CommonRasterFormat;
 use inkpod_format::NativeSection;
 use inkpod_format::{
-    CommonRaster, DocumentArchive, FileAdjustmentLayer, FileAdjustmentMetadata,
-    FileDocumentMetadata, FileGrid, FileGuide, FileLayer, FilePlane, FilePlaneProperties,
-    FileShootingFrame, FileShootingFrameAnchor, FileTile, FileVanishingPoint, FormatError,
+    CommonRaster, DocumentArchive, FileDocumentMetadata, FileGrid, FileGuide, FileLayer, FilePlane,
+    FilePlaneProperties, FileShootingFrame, FileShootingFrameAnchor, FileTile, FormatError,
     PlaneKind as FilePlaneKind,
 };
 pub use inkpod_image::RasterRangeInterpretation as RangeInterpretation;
@@ -141,8 +139,7 @@ pub use primitive::{
 use selection::FloatingSelection;
 pub use shooting_frame::*;
 pub use snapshot::{
-    CanonicalCompositeDigest, RenderAdjustmentLut, RenderPass, RenderPassKind, RenderSnapshot,
-    RenderTile,
+    CanonicalCompositeDigest, RenderPass, RenderPassKind, RenderSnapshot, RenderTile,
 };
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
@@ -153,7 +150,6 @@ pub use subpalette::{
     MAX_SUBPALETTE_CACHE_BYTES, MAX_SUBPALETTE_ITEMS, SubpaletteCatalog, SubpaletteCatalogInfo,
     SubpaletteImageInput, SubpaletteItem, SubpaletteItemId, SubpaletteSource,
 };
-pub use vanishing_point::*;
 use view::default_shortcuts;
 mod limits;
 pub use limits::*;
@@ -168,13 +164,13 @@ const MIN_ZOOM: f64 = 0.01;
 const MAX_ZOOM: f64 = 64.0;
 pub use inkpod_format::{
     ApplicationColor, FileColorChart, FileColorChartEntry, FilePalette, FrameMetadata, GuideAxis,
-    LayerKind, MAX_APPLICATION_COLORS, MAX_COLOR_CHART_NAME_BYTES, MAX_COMMON_RASTER_BYTES,
-    Margins, RectI32, read_color_chart, read_palette, save_color_chart_atomic, save_palette_atomic,
+    MAX_APPLICATION_COLORS, MAX_COLOR_CHART_NAME_BYTES, MAX_COMMON_RASTER_BYTES, Margins, RectI32,
+    read_color_chart, read_palette, save_color_chart_atomic, save_palette_atomic,
 };
 pub use inkpod_image::{
-    Adjustment, AirbrushGesture, AirbrushStroke, BoundaryAirbrush, Channel, ColorBalance,
-    ColorCheckMode, CurveInterpolation, CurvePoint, DustMode, DustRemoval, EffectSample,
-    EyedropperSource, Filter, Gradient, GradientKind, GradientMode, GradientStop, HsvAdjustment,
-    InclusionMode, Levels, MAX_CURVE_POINTS, MAX_GRADIENT_STOPS, MAX_IMAGE_EDIT_PIXELS,
-    MAX_RASTER_DIMENSION, PixelFormat, PixelValue, Stamp, StampGesture, StampShape, TileRaster,
+    AirbrushGesture, AirbrushStroke, BoundaryAirbrush, Channel, ColorBalance, ColorCheckMode,
+    CurveInterpolation, CurvePoint, DustMode, DustRemoval, EffectSample, EyedropperSource, Filter,
+    Gradient, GradientKind, GradientMode, GradientStop, HsvAdjustment, InclusionMode, Levels,
+    MAX_CURVE_POINTS, MAX_GRADIENT_STOPS, MAX_IMAGE_EDIT_PIXELS, MAX_RASTER_DIMENSION, PixelFormat,
+    PixelValue, Stamp, StampGesture, StampShape, TileRaster,
 };
