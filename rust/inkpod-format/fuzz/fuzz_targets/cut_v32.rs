@@ -1,5 +1,7 @@
 #![no_main]
 
+// Exercises the exact-current v32 Cut descriptor codec.
+
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|bytes: &[u8]| {

@@ -752,7 +752,10 @@ fn decode_genesis(bytes: &[u8]) -> Result<(genesis::Genesis, DocumentStateDigest
             let plane = document
                 .plane_by_id(plane_id)
                 .ok_or(format_error("GENS source plane is missing"))?;
-            if document.base_surface != BaseSurface::Transparent
+            if !matches!(
+                document.base_surface,
+                BaseSurface::SolidWhite | BaseSurface::Transparent
+            )
                 || plane.kind != PlaneType::MainLine
                 || plane.raster.allocated_tile_count() != 0
                 || !matches!(
@@ -761,7 +764,7 @@ fn decode_genesis(bytes: &[u8]) -> Result<(genesis::Genesis, DocumentStateDigest
                 )
             {
                 return Err(format_error(
-                    "GENS raster source requires an empty RGBA main-line plane and transparent underlay",
+                    "GENS raster source requires an empty RGBA main-line plane and imported-raster underlay",
                 ));
             }
             Ok(genesis::GenesisRasterSource {

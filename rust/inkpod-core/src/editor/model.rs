@@ -523,6 +523,9 @@ pub struct EditorSavepointToken {
 }
 
 /// Input whose tool settings and stable target are captured when an editor stroke begins.
+///
+/// MainLine targets capture the document main-line color. Color/Raster targets
+/// capture the selected tool's independently retained paint color.
 #[derive(Clone, Debug, PartialEq)]
 pub struct EditorStrokeInput {
     /// Optional raster tool whose Core-owned style is captured; `None` uses the active tool.

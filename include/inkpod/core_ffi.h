@@ -2108,11 +2108,12 @@ typedef struct InkpodEditorStateUpdate {
 } InkpodEditorStateUpdate;
 
 /**
- * @brief Core-owned EditorStateからtool/color/diameter/target/brush optionsを開始時にcaptureするstroke入力。
+ * @brief Core-owned EditorState/documentからtool/color/diameter/target/brush optionsを開始時にcaptureするstroke入力。
  *
  * sample spanは呼出中だけborrowedでCoreが全値をcopyする。`tool == 0` はactive tool、
  * 非0は指定toolのCore-owned styleを選ぶ。callerはcolor/diameter/target/brush optionsを渡さず、
- * `inkpod_core_editor_stroke_begin`が対象sessionのexact-depth値を一度だけ確定する。
+ * `inkpod_core_editor_stroke_begin`が対象sessionのexact-depth値を一度だけ確定する。MainLine targetは
+ * 文書のmain-line color、Color/Raster targetは指定toolの独立したpaint colorをcaptureする。
  */
 typedef struct InkpodEditorStrokeInput {
     uint32_t struct_size;
@@ -3656,10 +3657,11 @@ InkpodStatus inkpod_core_apply_edit_target_command(
     uint64_t* out_output_count);
 
 /**
- * @brief Core-owned EditorStateのexact tool/color/diameter/stable targetでstrokeを開始する。
+ * @brief Core-owned EditorState/documentのexact tool/color/diameter/stable targetでstrokeを開始する。
  * @par 契約
  * Core owner thread。`input`とsample spanは呼出中だけborrowedで、Coreは全値をcopyする。成功時に
- * EditorStateを一度だけcaptureし、append/end中の後続EditorState変更はprocedure引数を変えない。
+ * MainLine targetは文書のmain-line color、Color/Raster targetはtool固有paint colorを一度だけcaptureし、
+ * append/end中の後続document/EditorState変更はprocedure引数を変えない。
  * 開始自体はdocument/editor revision、digest、dirty、history、render contentをcommitしない。
  * @par 主なステータス
  * `OK`、`INVALID_ARGUMENT`、`INCOMPATIBLE_ABI`、`UNSUPPORTED`、`WRONG_THREAD`、
@@ -3905,9 +3907,10 @@ InkpodStatus inkpod_color_chart_file_get(
 InkpodStatus inkpod_color_chart_file_release(InkpodColorChartFile** chart);
 
 /**
- * @brief binary/grayscale main-line の exact-depth base color を設定する。
+ * @brief document main-line の exact-depth display/drawing color を設定する。
  * @par 契約
  * Core owner thread。3 pointer は非 NULL・非重複、`color` は完全な `struct_size` で borrowed。
+ * binary/grayscaleでは表示と以後の描画、RGBAでは既存pixelを変えず以後の描画へ使う。
  * 成功時は 1 metadata/Undo transaction、失敗時不変。stroke/preview 中は不可。
  * @par 主なステータス
  * `OK`、`INVALID_ARGUMENT`、`UNSUPPORTED`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
@@ -3917,7 +3920,7 @@ InkpodStatus inkpod_core_set_main_line_color(
     const InkpodColorValue* color,
     InkpodDispatchResult* result);
 /**
- * @brief binary/grayscale main-line の base color をコピーする。
+ * @brief document main-line の display/drawing color をコピーする。
  * @par 契約
  * Core owner thread。`core` と完全サイズの `out_color` は非 NULL・非重複。成功時だけ出力を初期化し、
  * revision、dirty、Undo、stroke/preview を変えない。

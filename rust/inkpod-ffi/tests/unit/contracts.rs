@@ -4175,7 +4175,7 @@ fn replay_contract_and_snapshot_digest_are_bounded_side_effect_free_queries() {
             INKPOD_STATUS_OK
         );
         assert_eq!(contract.replay_epoch, 27);
-        assert_eq!(contract.procedure_format_version, 31);
+        assert_eq!(contract.procedure_format_version, 32);
         assert_eq!(contract.canonical_numeric_version, 1);
         assert!(contract.primitive_count > 0);
         assert_ne!(contract.primitive_catalog_digest, [0; 32]);

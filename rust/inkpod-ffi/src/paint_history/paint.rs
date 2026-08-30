@@ -355,7 +355,8 @@ pub unsafe extern "C" fn inkpod_core_palette_generate(
     })
 }
 
-/// Changes the base color used by a binary or grayscale main-line plane.
+/// Changes the exact-depth document color captured by future MainLine strokes.
+/// Existing binary, grayscale, or RGBA main-line pixels are not recolored.
 ///
 /// # Safety
 /// Core/color/result must be complete, live, aligned, and non-overlapping.
@@ -399,7 +400,7 @@ pub unsafe extern "C" fn inkpod_core_set_main_line_color(
     })
 }
 
-/// Copies the exact-depth binary or grayscale main-line base color.
+/// Copies the exact-depth document color captured by future MainLine strokes.
 ///
 /// # Safety
 /// Core/output must be complete, live, aligned, and non-overlapping.

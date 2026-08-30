@@ -365,7 +365,7 @@ execution { failure = stop; wait_ms = 0; preview_before_save = false; }
     replay_contract.struct_size = sizeof(replay_contract);
     if (inkpod_core_get_replay_contract(core, &replay_contract) != INKPOD_STATUS_OK
         || replay_contract.replay_epoch != 27U
-        || replay_contract.procedure_format_version != 31U
+        || replay_contract.procedure_format_version != 32U
         || replay_contract.canonical_numeric_version != 1U
         || replay_contract.primitive_count == 0U
         || replay_contract.feature_flags != INKPOD_FEATURE_NONE) {
@@ -519,7 +519,7 @@ execution { failure = stop; wait_ms = 0; preview_before_save = false; }
     InkpodCompactionPlan compaction{};
     compaction.struct_size = sizeof(compaction);
     if (inkpod_core_get_persistence_info(core, &persistence) != INKPOD_STATUS_OK
-        || persistence.format_version != 31U
+        || persistence.format_version != 32U
         || persistence.open_strategy != INKPOD_NATIVE_OPEN_NOT_OPENED
         || persistence.flags != 0U
         || persistence.feature_flags != INKPOD_FEATURE_NONE

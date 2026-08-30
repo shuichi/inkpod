@@ -13,11 +13,11 @@ past acceptance records are summarized in [`legacy.md`](legacy.md).
 | --- | --- |
 | Tab close icons | Document tabs, right-side group tabs and pane tabs including Sequence share `PaintTabCloseButton`. The borderless two-line glyph, DPI scaling, system colors and active/hover/pressed/disabled/focus presentation have one owner. Existing Common Controls buttons, accessible names, hit bounds, lifetime and stable-target close routes are unchanged. |
 | Rust Core | All production document mutations enter one typed canonical primitive and use the same executor for live commit, Undo/Redo and replay. There is one layer model: exactly one MainLine and Color plane plus zero or more Raster planes. Current selection, ordered stable-ID saved masks and fill protection are document-owned outside that tree. Layer kinds, Selection planes, vanishing-point objects and adjustment layers are absent. Batch v5 targets Color/Raster roles and lowers one private `ApplyBatchOperations/canonical-v3` transaction. |
-| Persistence | Native `.inkpod` is exact-current v31/replay epoch 27 with DocumentArchive schema 7, DOCM schema 8, document digest schema 12/domain 10 and snapshot-composite schema 5. DOCM is mandatory; no legacy two-plane synthesis or migration reader remains. Cut payload schema 3/replay epoch 25 is separate. `.inkbatch` is exact-current v5/operation v4. Normal pair save/recovery and current-only rejection retain their existing atomicity rules. |
-| Shared file I/O (`IO-003`) | One application-owned `inkpod-io` manager owns editable native/raster, sequence, reference, Light Table and Batch filesystem work. Windows submits typed paths through ABI v25; Rust owns bounded enumeration, identity, codecs, temporary files and cleanup. Existing cache caps, owner-thread staged publication, cancellation/stale atomicity and pair-save fencing are unchanged. |
+| Persistence | Native `.inkpod` is exact-current v32/replay epoch 27 with DocumentArchive schema 7, DOCM schema 8, document digest schema 12/domain 10 and snapshot-composite schema 5. Fully opaque common-raster imports retain exact editable RGBA MainLine pixels over a SolidWhite Genesis underlay; imports containing any non-opaque alpha retain a Transparent underlay. DOCM is mandatory; no legacy two-plane synthesis or migration reader remains. Cut payload schema 3/replay epoch 25 is separate. `.inkbatch` is exact-current v5/operation v4. Normal pair save/recovery and current-only rejection retain their existing atomicity rules. |
+| Shared file I/O (`IO-003`) | One application-owned `inkpod-io` manager owns editable native/raster, sequence, reference, Light Table and Batch filesystem work. Windows submits typed paths through ABI v25; Rust owns bounded enumeration, identity, codecs, temporary files and cleanup. A complete-stamp match publishes the first buffered raster pass. A same-identity/same-length mismatch in timestamp or read-only fields is only a retry signal: the manager publishes nothing unless a fresh second pass is byte-for-byte identical and its complete stamp remains stable. Cache, streaming, save and overwrite authority continue to require complete stamps; external writers retain the documented permissive sharing policy. Existing cache caps, owner-thread staged publication and cancellation/stale atomicity are unchanged. |
 | C ABI | Exact-current ABI v25 publishes MainLine/Color/Raster roles, role-preserving format conversion, Raster-only plane creation and document-owned saved-selection operations. Removed layer-kind, Selection-plane, vanishing-point and adjustment-layer layouts/routes are not retained. Existing manager/job, snapshot, editor, persistence, Batch v5 and InkScript handles keep their ownership/thread contracts. ABI v1-v24 callers must rebuild. |
 | Windows application data | Ordinary settings now have one source of truth at `%LOCALAPPDATA%\inkpod\Settings\inkpod-settings.json`. The fixed-name current-v3 UTF-8 JSON stores language, save/recovery policy including `saveAndRecovery.defaultRasterFormat` (`png`/`tiff`/`tga`/`bmp`), animation policy, output guard, custom shortcut profiles, open workspace layouts, and saved layouts with readable enum/command/key strings and no binary/Base64 payload. Session-only previous-document paths remain a current-version bounded binary record at `Session\inkpod-session.bin`; recovery, Batch sets, Help cache, derived cache, and logs remain below the same `%LOCALAPPDATA%\inkpod` root. Recovery artifact/metadata I/O now belongs to Rust, with checksummed current-only metadata v2; previous-document paths remain outside the image I/O migration. Settings and `.inkshortcuts` use exact-current v3 and reject older versions (v1/v2) without migration; the retired job-progress pane/command is absent from their supported names. Settings and workspace persistence no longer read or write HKCU, `%APPDATA%`, or old formats. Decode is staged and bounded; unknown/duplicate/malformed/noncurrent input uses current defaults without automatically overwriting the invalid file, and saves use same-directory flush/close/replace. `ヘルプ > 設定ファイルを開く` creates a missing file through that atomic save path, preserves an existing invalid file, and passes the exact fixed path to its Windows shell association. See [`windows-application-data.md`](windows-application-data.md). |
-| InkScript | Exact-current registry schema/language/file v2, catalog/owner manifest v5, replay epoch 27, native v31 and ABI v25 are aligned. The public catalog has 73 commands; removed document features are tombstones and private Batch v5 orchestration remains excluded. No `.inkscript` product route was added. |
+| InkScript | Exact-current registry schema/language/file v2, catalog/owner manifest v5, replay epoch 27, native v32 and ABI v25 are aligned. The public catalog has 73 commands; removed document features are tombstones and private Batch v5 orchestration remains excluded. No `.inkscript` product route was added. |
 | Windows frontend | Layer/Plane presents one standard layer with MainLine, Color and optional Raster rows; add-plane creates Raster only and conversion changes storage format without changing role. Selection Mask commands manage a document-owned named-mask list with save, replace/add/subtract, rename, delete and reopen. Vanishing-point and adjustment-layer commands, dialogs, resources and renderer routes are removed. Batch targets Color/Raster roles through `.inkbatch` v5/ABI v25. Existing localized job/status, pane layout, DPI/theme and staged-result behavior remains. |
 | Right-pane tab presentation | Right-zone top-level tabs use their stable layout IDs for thresholded same-strip drag reordering and for bounded owner-drawn close buttons. Closing atomically hides all member panes, removes the addressed tab, and applies the model's deterministic replacement selection. Labels, tooltips, move-menu entries, and accessible descriptions resolve pane descriptor resource IDs through the active Japanese/English catalog at the DockHost boundary. Color/Palette/Chart retain semantic IDs while their visual order can be changed only within the Color tab control; the active page and all child `HWND`s remain loaded, and the order is session-local. Splitter focus gain/loss now synchronously redraws its system-color rule, clearing focus emphasis as soon as another component receives focus. |
 | Preferences and shortcuts | `編集 > 環境設定` opens one resizable, owner-centered two-tab dialog for all persisted application/workspace preferences. Save and Recovery includes the default raster companion format for subsequently created Cells; changing it does not change an open document's recorded format. General opens by default and presents General, Save and Recovery, Workspace, Animation, and Color Management as ordered sections in one scroll-free vertical form; Keyboard Shortcuts remains a dedicated page. Its 920-by-680-DIP initial bounds replace the former oversized expansion. The dialog creates one current-DPI 9-point Segoe UI font for its resource and dynamic controls, recreates it after DPI changes, and derives readable rows from the selected font's measured text height plus DPI-scaled padding. Every unframed page `STATIC` reproduces the corresponding coordinates of the live themed tab surface with transparent text, while `WS_EX_CLIENTEDGE` value fields retain their independent system-window surface. Page switches, resizes, theme changes, and system-color changes invalidate the tab surface and visible controls so old frames cannot remain. General and Shortcut labels derive their widths from localized text measured with the selected font. The modifier radios use dedicated localized `None`/`Ctrl`/`Shift`/`Alt`/`Win` entries and individually measured caption widths instead of unrelated catalog text or a fixed-width slot. Its Keyboard Shortcut tab reserves four physical-key rows separately from status text and projects the 321-command catalog into grouped/filterable command and physical-key views, supports two slots, action/context/matching metadata, editable copies of the complete built-in preset, conflict repair, layout selection, and exact-current v3 `.inkshortcuts` import/export with rejection of older versions (v1/v2). Exact conflicts remain editable but disable Apply/OK; prefix conflicts are rejected. Runtime input resolves Global/Canvas/Timeline/Pane plus logical/physical strokes, restores temporary Hold tools on key-up/deactivation, suppresses Toggle key-repeat, and installs no global hook. The former language and shortcut-reset menu commands are no longer separate product routes. |
@@ -40,14 +40,14 @@ Only the following requirements are not yet `Verified` in
 | Requirement | Available now | Remaining work |
 | --- | --- | --- |
 | `ABI-001`, `ABI-002` | ABI v25 closes the public model to standard image roles and document-owned saved-selection masks while retaining manager/job/snapshot ownership and owner-thread publication. | Current Rust/header/Windows validation is reported below; older ABI callers must rebuild and unrun platform/manual checks remain. |
-| `IO-001`, `IO-003` | Native v31/epoch 27, required DOCM and v31-only rejection are covered together with shared Rust-manager routes, caches, pair save and recovery. | Physical file-management flows and unrun configurations remain; no cross-file atomicity promise. |
-| `PERF-001` | Core workflow workloads and `revision-max` are unchanged. The current v31/catalog-v5 InkScript quick semantic gate passes with all non-byte counters unchanged, checksum `ae0d04681b2f5a63` and 90.7331 ms inside the existing 64–107 ms envelope. | A full current multi-process timing series, initial/cache-miss and background latency remain outside this run; prior approved measurements remain historical evidence. |
+| `IO-001`, `IO-003` | Native v32/epoch 27, required DOCM and v32-only rejection are covered together with shared Rust-manager routes, caches, pair save and recovery. | Physical file-management flows and unrun configurations remain; no cross-file atomicity promise. |
+| `PERF-001` | Core workflow workloads and `revision-max` are unchanged. The current v32/catalog-v5 InkScript quick semantic gate passes with all non-byte counters unchanged, checksum `1e41e17e8bda22e3` and 88.9261 ms inside the existing 64–107 ms envelope. | A full current multi-process timing series, initial/cache-miss and background latency remain outside this run; prior approved measurements remain historical evidence. |
 | `WIN-001`, `PREF-001`, `SHORT-001`, `HIST-002`, `FILTER-001`, `FILTER-002`, `FILTER-PREVIEW-001` | Native Windows shell with explicit Common Controls registration and a system-dark title-bar opt-in, Japanese/English UI with persisted System/Japanese/English selection and non-Japanese English fallback, offline Help/About/Acknowledgements with locked BLAKE3/PNG/Fluent icon dependency attribution, typed Fluent icons for all 14 Tool commands and the applicable Layer/Plane/pin states with localized text fallback, owner-centered work-area-clamped modal dialogs, DPI-aware layout, keyboard routes, MSAA/UIA names, theme and accessibility hooks; 313 localized menu IDs and 321 command-state entries, exact-current v3 settings/shortcut presets and statusbar job selection/cancellation | Dark presentation is limited to the system title bar; physical high-contrast/200%-DPI, complete screen-reader, and Japanese IME validation/fixes remain; the embedded offline Help body is Japanese-only |
 | `WORKSPACE-001`, `VIEW-004`, `SEQ-001` | Persistent and auxiliary panes retain DockHost and Tool Options remains an owned flyout. The right side uses dynamic stable-ID tabs with nonempty unique membership, deterministic add/remove/move/reorder, accessible descriptions and current-only human-readable settings-JSON persistence without registry migration. Live Splitter geometry updates do not rebuild right-side tabs or Color/Layer list contents, while structural dock changes still refresh their presentation. Color retains a 300-DIP minimum including its Dock header; its active page is placed without interim redraw and receives one bounded synchronous repaint after final geometry and z-order are established. Its owner-drawn swatch, labels, and picker reuse the current themed tab surface at their actual coordinates and repaint after tab/theme/system-color changes. Right-tab mouse/keyboard splitters stop at each adjacent descriptor minimum without continuing to change weights. Canvas tab labels/order use stable view/session identity and the final tab closes to an empty workspace. The sequence is one horizontal row with Left/Right keys, a closeable pane tab and 168/184-DIP minimum/preferred heights. Job progress belongs to the statusbar, not DockHost or layout persistence; narrow-width suppression remains transient. | Reference Check AutoHide edge buttons are not reachable by F6/Tab/Shift+Tab. The tested foreground TGA revisit response gates and both complete Windows configurations pass; cold/background and whole-sequence editable-document residency are not covered by that timing result |
 | `SUBPALETTE-001` | ABI v25 retains the read-only catalog/view and parallel manager jobs; prior first-load correction evidence remains applicable. | Interactive file-dialog and unrun platform checks remain; see [correction record](subpalette-first-load-diagnosis.md). |
 | `BATCH-001`–`BATCH-004` | Batch v5 resolves Color/Raster role or fixed-ID selectors, deduplicates overlaps and commits one private primitive/Undo unit through ABI v25. | Physical accessibility and unrun platform/configuration checks remain. |
-| `SCRIPT-001`, `SCRIPT-002`, `SCRIPT-005` | Catalog/owner v5 with 73 public commands aligns to native31/replay27/ABI25; private Batch v5 orchestration is excluded. | Product `.inkscript` acceptance and the M36 full gate remain pending. |
-| `SCRIPT-003` | The private CoreHost route emits current v31/epoch27/ABI25 output through the existing staged authority model. | Product `.inkscript` file acceptance remains absent. |
+| `SCRIPT-001`, `SCRIPT-002`, `SCRIPT-005` | Catalog/owner v5 with 73 public commands aligns to native32/replay27/ABI25; private Batch v5 orchestration is excluded. | Product `.inkscript` acceptance and the M36 full gate remain pending. |
+| `SCRIPT-003` | The private CoreHost route emits current v32/epoch27/ABI25 output through the existing staged authority model. | Product `.inkscript` file acceptance remains absent. |
 | `SCRIPT-004` | M05B provides private typed dependency closure. User-confirmed M24 exports one Commit or a same-branch linear chain with exact parent assertions, strict selectors, typed result links, deduplicated assets and cache-free replay parity. User-confirmed M25 exposes the existing exporter through a bounded event span and immutable fragment summary/text/release ABI; M26 changes no fragment semantics | Destination rebind/paste transaction, Batch/History clipboard and source-preserving structured edit remain pending |
 
 M17／`PM-GAP-001` and M18／`PM-GAP-002` completed their x64 user-visible confirmations. The selected
@@ -64,7 +64,7 @@ its compact historical record is retained in [`legacy.md`](legacy.md).
 
 ## Known differences
 
-- Native Cell/Cut `.inkpod` is current-only v31; non-v31 files, including v30, are rejected without a
+- Native Cell/Cut `.inkpod` is current-only v32; non-v32 files, including v31, are rejected without a
   migration reader before format freeze.
 - Sessions retain one single-writer `CoreHost` lane for document mutation and
   result publication; file read/decode/encode/install runs asynchronously in the
@@ -90,7 +90,7 @@ its compact historical record is retained in [`legacy.md`](legacy.md).
 - InkScript remains reachable only by private ABI/application smoke hooks; no product command,
   `.inkscript` file filter, clipboard or pane reaches it. `.inkbatch` v5 is an independent closed
   Batch product contract and does not expose the private Batch procedure through InkScript.
-- V31 accepts compression code 0 only; measured checkpoint behavior has not
+- V32 accepts compression code 0 only; measured checkpoint behavior has not
   justified decompression complexity.
 - `revision-max` intentionally accepts scalar aliasing and transparent-result
   recomposition and relies on whole-cache invalidation for metadata outside its
@@ -103,31 +103,87 @@ its compact historical record is retained in [`legacy.md`](legacy.md).
 
 ## Latest representative verification
 
-### Main-line and Fill color separation (`PAINT-001`, `FILL-001`, `COLOR-001`, 2026-08-30)
+### Startup TGA file-stamp correction (`IO-002`, `IO-003`, `VIEW-004`, 2026-08-30)
 
-Core already retained one exact-depth color per raster command and implemented
-Pencil auto-erase by comparing the first target pixel with the Pencil draw
-value. The Windows plane route changed the active target after Fill but did not
-leave the Fill interaction when the user explicitly selected MainLine. The
-result was a yellow Fill color and Fill input still being presented as current;
-the auto-erase Pencil path was never entered.
+The reported error originates in the shared Rust reader before TGA decode,
+Core publication or Canvas binding, so Canvas initialization does not generate
+this failure. The reader rejected any complete pre/post Windows file-stamp
+mismatch. A `ChangeTime`/read-only transition can describe metadata, and Windows
+may finalize `LastWriteTime` only after a writer handle closes. Either can change
+the stamp without changing the data stream, so the report is consistent with a
+cold-file provider transition producing a false `ChangedDuringRead`. The
+reporter's exact provider transition was not available to observe directly.
 
-Plane refresh now distinguishes explicit user selection from automatic
-presentation refresh. Menu and Layer/Plane MainLine selection return an active
-Fill to Pencil, which makes the Core-owned Pencil color current;
-automatic refresh keeps Fill available for intentional MainLine-boundary fills.
-The command-state regression locks both branches and preview cancellation.
+When physical identity and byte length match but timestamp or read-only fields
+differ, the manager treats that mismatch only as a retry signal. It opens the
+path again and publishes nothing unless the
+second pass is byte-for-byte identical to the first and its complete stamp stays
+unchanged throughout that pass. Cache hits, streaming/native reads, save,
+overwrite, pair-install and recovery evidence retain complete-stamp comparison,
+and external writers keep the documented permissive sharing policy. Thus a
+metadata-only transition can recover without treating timestamps as proof of
+byte equality or blocking an already-open cloud/provider writer.
 
-The x64 Debug application and focused test rebuilt under MSVC
-`/W4 /WX /permissive-`. `inkpod_windows_command_state` passes, and the complete English
-product smoke passes in 123.44 seconds. Its common-raster fixture fills a closed
-12-by-12 TGA with opaque yellow, verifies Color selection, restores black Pencil
-through two explicit MainLine choices, then redraws an exact black straight-RGBA
-boundary pixel. Only the MainLine checksum changes; Color remains unchanged and
-Undo/Redo round trips both results. `cargo fmt --check`, warnings-denied
-workspace/all-target/all-feature Clippy, and the full workspace/all-feature Rust
-test suite also pass. Japanese, Release, ARM64 and physical accessibility checks
-were not rerun for this correction.
+The regressions change permissions or modification time after the first buffered
+pass and verify the stable retry stamp and exact bytes. Another overwrites a TGA
+with a same-length valid TGA, restores its modification time, and proves that
+cached pixels/generation are invalidated; the streaming control still rejects
+the same class of change.
+
+`cargo fmt --check`, warnings-denied workspace/all-target/all-feature Clippy,
+workspace/all-feature rustdoc, and all
+708 Rust tests across 22 nonempty suites pass. All nine quick Core benchmark
+checksum/counter gates pass unchanged. Final x64 Debug build 134 verifies static
+CRT and package generation, and all 44 non-GUI-smoke CTests pass against that
+build in 52.07 seconds, including ABI smoke and sequence performance. A current
+English product smoke passes in 127.87 seconds and reaches its synthetic
+empty-workspace TGA scenario. The immediately preceding run stopped at the
+existing pre-scenario magnified-preview presentation check `867` despite equal
+document revision/checksum; the rerun did not reproduce it. Japanese was not
+rerun after the final byte-for-byte retry refinement; the reporter's original
+file/provider, Release, ARM64 and physical accessibility were not directly rerun
+for this correction.
+
+### Main-line color routing and opaque-import erasure (`PAINT-001`, `FILL-001`, `COLOR-001`, `IO-001`, 2026-08-30)
+
+The previous Windows correction made an explicit MainLine choice leave Fill, but
+did not correct the Core stroke color. Stroke begin captured the selected tool's
+paint color before resolving its stable layer/plane target. An RGBA MainLine
+therefore received the green coloring paint, and Pencil auto-erase compared its
+first black source pixel with that same green value instead of the document's
+black MainLine color.
+
+Stroke begin now resolves the target first. MainLine Pencil/Brush strokes capture
+the document-owned MainLine color, while Color/Raster strokes capture the active
+tool's paint color; the resolved value remains immutable for that stroke.
+Changing the MainLine drawing color is valid for RGBA planes and affects future
+strokes without recoloring existing pixels. Explicit MainLine selection still
+returns Fill to Pencil, while an automatic pane refresh preserves an intentional
+Fill interaction.
+
+Eraser continues to clear plane pixels to transparent. The checkerboard appeared
+because common-raster imports previously always had a Transparent Genesis
+underlay, so clearing an opaque-white or black source pixel exposed transparency.
+Fully opaque RGBA8/16 imports now retain their exact editable MainLine pixels over
+a SolidWhite underlay; a source containing even one non-opaque pixel retains a
+Transparent underlay. Thus an opaque TGA erases to white paper, while a source
+that genuinely contains transparency still reveals transparency. This Genesis
+semantic change advances exact-current native/procedure format to v32; replay
+epoch 27 and ABI v25 are unchanged, and native v31 is rejected.
+
+The public Core regression keeps Pencil paint green while setting MainLine black,
+then proves MainLine black drawing, same-point auto-erase, Color-plane green
+drawing, no cross-plane change, and exact Undo/Redo. RGBA8/16 import contracts
+cover opaque-white and non-opaque underlays, composition, native round-trip and
+replay, while a sensitive malformed-Genesis unit test locks the alpha/underlay
+validator. No-profile format, warnings-denied Clippy, all 708 Rust tests, Core
+rustdoc, all nine quick workflow gates and the Release InkScript semantic gate
+pass. The x64 Debug CoreHost, renderer and ABI tests pass in 0.42, 6.65 and
+10.35 seconds. Its current English product smoke passes in 127.87 seconds with
+renderer-pixel checks for white to black to white, the explicit Eraser route,
+Undo/Redo, and erased-state native save/reopen. The Japanese product smoke,
+Windows Release/ARM64 builds and physical accessibility checks were not rerun for
+this correction.
 
 ### Standard layer/plane model (`DOC-002`, `DOC-003`, `IO-001`, `ABI-001`, `BATCH-004`, 2026-08-30)
 
@@ -136,7 +192,8 @@ one MainLine plane, exactly one Color plane, and zero or more Raster planes.
 Selection state, named saved-selection masks, and fill protection are
 document-owned outside that image tree. Vanishing-point objects and adjustment
 layers are absent from the current product, ABI, replay catalog, and native
-format. Native v31/replay epoch 27, ABI v25, Batch v5/operation schema 4, and
+format. At that rebaseline, native v31/replay epoch 27, ABI v25,
+Batch v5/operation schema 4, and
 the 73-command InkScript catalog/owner manifest v5 are aligned; older exact
 versions are rejected without migration.
 

@@ -483,9 +483,12 @@ impl Core {
             .main_line_color)
     }
 
-    /// Replaces the main-line display color as one undoable metadata edit.
+    /// Replaces the main-line display/drawing color as one undoable metadata edit.
     ///
-    /// Only RGBA values are accepted; identical color is a no-op.
+    /// Binary/grayscale MainLine planes use this value for display and future
+    /// strokes. RGBA MainLine planes retain all existing native pixels and use
+    /// this value only for future MainLine drawing. Only RGBA values are
+    /// accepted; identical color is a no-op.
     pub fn set_main_line_color(&mut self, color: PixelValue) -> Result<DispatchOutcome, CoreError> {
         let expected_revision = self.document_revision.get();
         self.execute_primitive(PrimitiveRequest::SetMainLineColor {

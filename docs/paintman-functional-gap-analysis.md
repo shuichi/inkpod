@@ -80,7 +80,7 @@ PDF は全 191 表示ページを確認した。PDF p2～p189 は原則として
 
 個別Cell参照方式のカット作成、セル系列の構造編集、再編集可能な指示／text object、角度付き撮影frame、端点loop policy、複数消失点／放射補助線は、いずれも縦切り実装、自動検証、x64 Releaseの利用者確認まで完了した。現行要件の状態と残る既知差分は`docs/compatibility.md`を正本とする。
 
-> **現行契約による上書き（2026-08-30）:** この文書は2026-08-12の比較調査と当時の実装証跡を履歴として保持する。その後の利用者判断により、現行の画像木は種類fieldを持たない標準layer（MainLine exactly one／Color exactly one／Raster zero-or-more）だけとなり、現在選択・保存選択・fill protectionは文書所有maskへ移った。Adjustment layerとVanishingPointのdata／API／UIは現行scopeから削除され、前者は破壊的tone adjustmentで合理的に代替し、後者は`Not required`とする。現行のversion tupleはnative v31／replay epoch 27／ABI v25／DocumentArchive 7＋必須DOCM 8／digest schema 12-domain 10／snapshot composite 5／Cut schema 3 epoch 25／`.inkbatch` graph 5 operation schema 4／InkScript catalog-owner 5（73 commands）である。以下の旧version番号は明示的に現行と書かれた箇所を除き、当時のverification evidenceを表す。
+> **現行契約による上書き（2026-08-30）:** この文書は2026-08-12の比較調査と当時の実装証跡を履歴として保持する。その後の利用者判断により、現行の画像木は種類fieldを持たない標準layer（MainLine exactly one／Color exactly one／Raster zero-or-more）だけとなり、現在選択・保存選択・fill protectionは文書所有maskへ移った。Adjustment layerとVanishingPointのdata／API／UIは現行scopeから削除され、前者は破壊的tone adjustmentで合理的に代替し、後者は`Not required`とする。現行のversion tupleはnative v32／replay epoch 27／ABI v25／DocumentArchive 7＋必須DOCM 8／digest schema 12-domain 10／snapshot composite 5／Cut schema 3 epoch 25／`.inkbatch` graph 5 operation schema 4／InkScript catalog-owner 5（73 commands）である。以下の旧version番号は明示的に現行と書かれた箇所を除き、当時のverification evidenceを表す。
 
 ### 2.2 件数
 
@@ -431,7 +431,7 @@ PaintMan の塗りあふれ中断が途中結果を残すか、フィルター�
 - **不足していた能力:** Canvas内外の複数消失点と、1/5/10/15/30度等の補助線間隔、色、不透明度を編集する。2026-08-12時点では縦切り実装と検証まで完了していた。
 - **PaintMan で可能な作業:** パース線に沿った修正線や背景要素を描く。
 - **現状で困る状況:** 利用者判断により現行data format、Core／ABI、Windows UIから機能ごと削除した。旧properties／Canvas handle／radial overlay／snapは現行surfaceではない。
-- **不足層／カバレッジ:** 旧`VANISHING-POINT-001`のstable-ID object、canonical CRUD／preview、snapshot、ABI v17、Windows routeの証跡は履歴として保持する。現行v31／epoch27／ABI25では旧codeをtombstoneとして拒否する。
+- **不足層／カバレッジ:** 旧`VANISHING-POINT-001`のstable-ID object、canonical CRUD／preview、snapshot、ABI v17、Windows routeの証跡は履歴として保持する。現行v32／epoch27／ABI25では旧codeをtombstoneとして拒否する。
 - **推奨優先度（仕上げ）:** 現行分類は **Not required**。主なセル彩色では頻度が低く、他の作図appや手動guideで代替できる。
 - **代替手段:** 外部作図、複数の手動線、参照画像。
 - **関連要件:** 現行要件なし。汎用`VIEW-002`の手動guideだけを利用できる。
@@ -457,7 +457,7 @@ PaintMan の塗りあふれ中断が途中結果を残すか、フィルター�
 | 複数 edit target の presentation | `DOC-002`, `DOC-003` | 実装・手動確認済み | tree-ordered Core/ABI、Layer pane marker、capability menu、status、smoke、x64 Release 確認。PM-GAP-006 |
 | 論理layer／plane順のraster合成 | `RENDER-001`, `DOC-002` | 実装・手動確認済み | standard image treeのordered render plan、ABI、renderer pixel smoke、thumbnail／flatten。Adjustment layerは廃止し、tone adjustmentは破壊的preview／commitで代替 |
 | 角度付き撮影frameの内容 | `SHOOTING-FRAME-001` | 実装・手動確認済み | stable ID、center/size/rotation/anchor、canonical preview、ABI v17、Canvas handles、通常/指示export分離、当時のv27 save/reopen、x64 Release確認。PM-GAP-008解消済み |
-| VanishingPoint の内容 | — | Not required | 旧stable-ID／preview／snapshot／snap／Windows routeのverificationは履歴。現行v31／epoch27／ABI25ではdata／API／UIから削除し、手動guideまたは外部作図で代替 |
+| VanishingPoint の内容 | — | Not required | 旧stable-ID／preview／snapshot／snap／Windows routeのverificationは履歴。現行v32／epoch27／ABI25ではdata／API／UIから削除し、手動guideまたは外部作図で代替 |
 | 二段階 curve、N角形、line／polyline options、raster 図形 | `PAINT-002` | 実装・手動確認済み | Core/canonical、ABI v17、Windows staged gestures、当時のv27/epoch-24、golden/smoke。snapはPM-GAP-013/M15 |
 | 通常 brush の shape／smoothing／開始色限定 | `PAINT-004` | 実装・手動確認済み | Core/image、canonical v3、ABI v8、Windows pane/Canvas、v13/epoch-10、golden/smoke、x64 Release確認。PM-GAP-012 解消済み |
 | guide／grid snap の実入力適用 | `SNAP-001`, `VIEW-002` | 実装・手動確認済み | view-targeted Core／ABI、全M09 Windows gesture共有route、checked state／geometry／digest／off／Ctrl bypass／Undo/Redo smoke、x64 Release利用者確認。PM-GAP-013解消済み |

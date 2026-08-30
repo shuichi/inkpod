@@ -313,7 +313,7 @@ fn masking_is_sparse_persistent_undoable_and_a_hard_fill_boundary() {
         PixelValue::Rgba([0; 4])
     );
 
-    let path = temp_path("fill-protection-v31.inkpod");
+    let path = temp_path("fill-protection-v32.inkpod");
     core.save(&path).unwrap();
     let mut reopened = Core::new();
     reopened.open(&path).unwrap();

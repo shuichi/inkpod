@@ -63,7 +63,7 @@ Core を作らず互換性エラーとして扱う。
 
 ABI v25 は standard layer／saved-selection mask 契約へ C API を閉じ直し、snapshot の実行時 source identity と sequence catalog の固定長照会を保持する。
 `InkpodResourceUsage` は 136 bytes、`InkpodIoCacheInfo` は 72 bytes の現行 layout を保持する。
-旧サイズの構造体を渡してはならない。native v31、document replay epoch 27 と ABI v25 は完全一致が必要である。
+旧サイズの構造体を渡してはならない。native v32、document replay epoch 27 と ABI v25 は完全一致が必要である。
 現行 native payload は `DocumentArchive` schema 7、必須 `DOCM` schema 8、document digest schema 12/domain 10、
 snapshot-composite schema 5、Cut payload schema 3/replay epoch 25であり、Batchはgraph v5/operation schema 4、
 InkScriptはcatalog/owner manifest v5の73 commandsである。canonical `revision-max` 式と既存 benchmark の
@@ -239,7 +239,7 @@ open-session set、scopeへ束縛されたone-shot tokenである。RunTask crea
 ある間のadvanceは`INKPOD_STATUS_QUEUE_FULL`を返す。query／cancelはreleaseと外部同期すれば任意threadからatomically呼べるが、
 advance／event take／owner transfer／releaseは作成Coreのowner threadとgenerationへ固定される。
 
-run itemはstaged Coreでdecode／cache-free replay／canonical execution／current-v31 encodeを完了し、temporary fileをwrite／
+run itemはstaged Coreでdecode／cache-free replay／canonical execution／current-v32 encodeを完了し、temporary fileをwrite／
 flush／closeしてidentityを再検証した後だけatomic installする。cancel、stale plan／confirmation／authority／session／input／
 destination、resource、encode、save、install failureは進行中itemをinstallせず、入力Coreのdocument/editor revision、history、
 dirty／savepoint、asset、ID high-watermarkを変更しない。既に完了した別itemはrun policyに従ってreportへ残る。
@@ -284,7 +284,7 @@ queryで、include flag付き撮影frameを合成したRust-owned
 現行 ABI は、所有権を移さない読み取り専用の固定レイアウト照会を二つ提供する。
 
 - `inkpod_core_get_replay_contract` は、呼び出し側が所有する `InkpodReplayContract` へ値を書き込む。
-  リプレイエポック 27、現行のプロシージャ／コンテナバージョン 31、正規数値バージョン 1、閉じた
+  リプレイエポック 27、現行のプロシージャ／コンテナバージョン 32、正規数値バージョン 1、閉じた
   プリミティブカタログの件数、BLAKE3-256 カタログダイジェストを返す。Core 所有スレッド専用であり、
   文書、リビジョン、履歴、未保存状態、レジストリ、スナップショットを変更しない。
 - `inkpod_snapshot_get_canonical_digest` は、不変スナップショットの `InkpodCanonicalDigest` を、
@@ -300,7 +300,7 @@ queryで、include flag付き撮影frameを合成したRust-owned
 コピーされる。NULL、短いレコード、パニックでは通常の ABI ステータス契約に従い、出力を部分更新しない。
 スレッド違反が成立するのは Core 所有スレッド専用のリプレイ契約照会だけであり、スナップショットの
 ダイジェスト照会は、外部同期された任意の読み取りスレッドから呼び出せる。これらは検証値を公開するだけで、
-製品の保存／オープン API は同じ v31 のリプレイ／カタログ契約を使い、現行でないネイティブ形式の
+製品の保存／オープン API は同じ v32 のリプレイ／カタログ契約を使い、現行でないネイティブ形式の
 バージョンをすべて拒否する。
 
 現行 ABI v25 は、Core 所有スレッド専用の永続化操作を三つ提供する。`inkpod_core_get_persistence_info` は、
@@ -312,7 +312,7 @@ queryで、include flag付き撮影frameを合成したRust-owned
 ジャーナルの正確なダイジェストを返す。UI は履歴件数を表示して確認を得た後、そのレコードを変更せずに
 `inkpod_core_write_compacted_copy` へ渡す。書き込み時に確認トークンが古ければ `INVALID_STATE`、
 トークンのフラグまたは予約領域が 0 でなければ `UNSUPPORTED` になる。成功時は、現在状態を新しい Genesis
-とする別の v31 ファイルを書き出すが、作業中のパス、リビジョン、未保存状態、保存点、ID、履歴は変更しない。
+とする別の v32 ファイルを書き出すが、作業中のパス、リビジョン、未保存状態、保存点、ID、履歴は変更しない。
 `CoreHost` は三つの操作すべてを Core エンジンキュー経由で実行する。自動的な履歴圧縮は行わず、`CKPT` は
 履歴やアセット保持の正本ではない。Windows では `ファイル > 履歴を破棄してコピー...` として公開し、
 最初に失われるイベント数とプロシージャ数を表示する。出力先には開いているセッションが所有しないパスだけを
@@ -415,7 +415,7 @@ membership、revision、ID、history、dirty、savepoint、Cell file を部分�
 document history へ暗黙に混ぜない。
 
 通常保存と autosave は Cut 記述子と同じディレクトリの各 member `.inkpod` を staged validation し、
-相対ファイル名、Cell ID、document UUID が一致するときだけ current v31 / Cut replay epoch 25 の
+相対ファイル名、Cell ID、document UUID が一致するときだけ current v32 / Cut replay epoch 25 の
 記述子を原子的に置換する。通常保存だけが Cut savepoint を進め、autosave と recovery open は通常の
 path authority/savepoint を採用しない。非current version、欠落、重複、自己参照、directory escape、
 symlink escape、identity mismatch は拒否する。
@@ -1137,10 +1137,12 @@ ABI v2 のライブラリや呼び出し側を受理するという意味では�
   閉じた集合である。
 - `inkpod_core_editor_stroke_begin` は、呼び出し側所有の `InkpodEditorStrokeInput` のサンプル列を
   呼び出し中だけ借用する。`tool` が 0 ならアクティブツール、0 でなければ指定ラスタツールについて、
-  Core 所有のスタイルを選び、RGBA8/RGBA16 の色深度を保つ色、Q16 直径、安定した対象、形状、平滑化、
-  始点色限定を、開始時に一度だけ
-  正規ストローク引数へコピーする。ツール指定はロケーター用の固定鉛筆などに使うが、呼び出し側は色、直径、
-  対象、ブラシ設定を渡さない。primary view を使う互換入口であり、追加／終了処理は、その後の EditorState を再参照しない。
+  Core 所有のスタイル、Q16 直径、安定した対象、形状、平滑化、始点色限定を開始時に一度だけ正規ストローク
+  引数へコピーする。MainLine 対象の Pencil/Brush は文書の RGBA8/RGBA16 主線色を、Color/Raster 対象は
+  指定ツールが独立して保持する同深度の彩色用描画色を捕捉する。一方の色更新で他方を上書きせず、auto erase
+  の始点比較にも同じ対象別の実描画色を使う。ツール指定はロケーター用の固定鉛筆などに使うが、呼び出し側は
+  色、直径、対象、ブラシ設定を渡さない。primary view を使う互換入口であり、追加／終了処理は、その後の
+  文書または EditorState を再参照しない。
 - `inkpod_core_editor_stroke_begin_for_view` は ABI v5 で追加した view-aware 入口である。`view_id == 0` は
   primary view、それ以外は同じ Core が所有する live secondary view を表す。device-pixel サンプルは開始時に
   指定 view の変換を捕捉して文書座標へ正規化し、後続の append/end でも同じ変換を使う。存在しない view ID は
@@ -1196,9 +1198,12 @@ Windows の `CoreHost` は、発行時の `DocumentSessionId + Generation` を�
 ## 正規 Genesis とアセット取り込み（現行 ABI v25）
 
 Core は、Genesis の安定した文書 ID、別個の Cell ID、不変の基底面を所有する。空の文書では
-割り当て不要の `SolidWhite`、ラスタを文書として開く場合は正規ラスタアセットが基底面となる。基底面は、
-編集可能なレイヤー／プレーン、選択マスク、借用スナップショットバッファではない。既存文書へのラスタ
-インポート、アプリ内クリップボード、ライトテーブル入力元は同じ正規レジストリを使う。
+割り当て不要の `SolidWhite`、読み取り専用ラスタを基底として明示作成する経路では正規ラスタアセットが
+基底面となる。一方、編集可能な common-raster open は正規アセットから exact RGBA8/16 pixel を MainLine に
+materialize し、全 alpha が最大値なら `SolidWhite`、一つでも最大値未満なら `Transparent` を基底面とする。
+この source asset 自体は合成基底ではない。基底面は、編集可能なレイヤー／プレーン、選択マスク、借用
+スナップショットバッファではない。既存文書へのラスタインポート、アプリ内クリップボード、ライトテーブル
+入力元は同じ正規レジストリを使う。
 `ImportRasterAsset` と 4 MiB 超の `ApplyRasterStroke` は、外部パスや呼び出し側バッファではなく、
 不変のアセット識別子をプロシージャへ固定する。小さいストロークは所有済みのプロシージャ内ペイロードにする。
 
@@ -1253,10 +1258,10 @@ Core はセッションを無効化するため、フロントエンドはスト
 | ストローク終了、プレビュー適用、浮動状態の確定                 | 実変更時に 1 回進む  | 未保存                            | 高々 1 単位                       |
 | 直接の文書編集                                                | 実変更時に 1 回進む  | 未保存                            | 原則 1 単位                       |
 | Undo／Redo／履歴位置の移動                                    | 結果状態へ進む       | 保存点との位置で再計算            | カーソルを移動し項目は増やさない  |
-| 現行 v31 の通常保存                                           | 不変                 | 置換成功時に文書／EditorState とも保存済み | 不変                    |
+| 現行 v32 の通常保存                                           | 不変                 | 置換成功時に文書／EditorState とも保存済み | 不変                    |
 | 自動保存                                                      | 不変                 | 不変                              | 不変                              |
 | 新規作成／インポート                                          | 新しい文書情報が正本 | 戻り情報が正本                    | 新しい Genesis／履歴              |
-| v31 のオープン／復旧                                          | 実行時リビジョンを付け直す | 戻り情報が正本               | ファイルの全ジャーナル／履歴を復元 |
+| v32 のオープン／復旧                                          | 実行時リビジョンを付け直す | 戻り情報が正本               | ファイルの全ジャーナル／履歴を復元 |
 
 意味上の変更がない場合の厳密な出力やリビジョンは、各関数の Doxygen 契約に従う。フロントエンドはファイル時刻ではなく、
 Core が返す文書フラグと保存点に基づいて未保存状態を表示する。
@@ -1406,7 +1411,7 @@ document、EditorState、canonical procedure、`.inkpod` section のいずれに
 
 ## 保存、自動保存、復旧
 
-通常保存では、v31 の必須セクション `META` / `GENS` / `ASST` / `PROC` / `EDIT`、保持対象の不透明な任意
+通常保存では、v32 の必須セクション `META` / `GENS` / `ASST` / `PROC` / `EDIT`、保持対象の不透明な任意
 セクション、チェックポイントの作成条件を満たす場合だけ任意の `CKPT` を構築する。保存後に設定予定の
 文書／EditorState 保存点を含むコンテナは、同じディレクトリの一時ファイルへ複数回に分けて書き込む。
 フラッシュ、同期、クローズを終えてから置換する。成功後だけ通常保存パスと両保存点を Core へ公開するため、
@@ -1415,7 +1420,7 @@ EditorState だけが
 どちらの保存点も変更しない。
 
 自動保存とエクスポートは、出力を原子的に書いても通常保存パス、文書／EditorState 保存点、未保存状態を
-変えない。通常の v31 オープンでは、Genesis、アセット、プロシージャジャーナル、カーソル／分岐、すべての
+変えない。通常の v32 オープンでは、Genesis、アセット、プロシージャジャーナル、カーソル／分岐、すべての
 ID 発行状態、EditorState、両保存点を、段階的に構築した Core で検証・復元してから、現在の Core 状態を
 一回だけ置換する。`InkpodCore` の `_v3` 付きオブジェクトレジストリの世代自体は、オープンで更新されない。
 

@@ -240,14 +240,6 @@ impl Core {
                 let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
                 let main_line = document.plane_for_role(ActivePlane::MainLine)?;
                 ensure_editable_plane(document, main_line.id)?;
-                if !matches!(
-                    main_line.raster.format(),
-                    PixelFormat::BinaryMask8 | PixelFormat::Grayscale8 | PixelFormat::Grayscale16
-                ) {
-                    return Err(CoreError::InvalidState(
-                        "main-line base color requires a binary or grayscale main plane",
-                    ));
-                }
                 Ok(CanonicalizedRequest {
                     primitive: CanonicalPrimitive::SetMainLineColor(color),
                     primitive_id: PrimitiveId::SET_MAIN_LINE_COLOR,

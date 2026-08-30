@@ -42,7 +42,7 @@ product file routeは後続milestoneまで公開しない。
 | InkScript procedure catalog version | 5（layer／plane再ベースライン、73 command） |
 | required replay epoch               |                                           27 |
 | native output                       |                      exact-current `.inkpod` |
-| native top-level format             |                                           31 |
+| native top-level format             |                                           32 |
 | C ABI                               |                                           25 |
 
 フォーマットフリーズ前のため、reader、writer、clipboard fragment は常に

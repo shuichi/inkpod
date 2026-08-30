@@ -17178,19 +17178,39 @@ int RunEmptyWorkspaceAndTabIdentitySmoke(ApplicationHost& state) noexcept {
                     && left.green == right.green && left.blue == right.blue
                     && left.alpha == right.alpha;
             };
-        const InkpodColorValue imported_pencil_color{
+        const InkpodColorValue imported_main_line_color{
             sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 0U, 0U, 0U, 255U};
+        const InkpodColorValue imported_pencil_color{
+            sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 0U, 140U, 75U, 255U};
         SendMessageW(window, WM_COMMAND, IDM_TOOL_PENCIL, 0);
+        const HWND imported_color_swatch = GetDlgItem(
+            state.Workspace().windows.color_pane, IDC_COLOR_MAIN_LINE_SWATCH);
+        RECT imported_swatch_client{};
+        if (imported_color_swatch == nullptr
+            || GetClientRect(imported_color_swatch, &imported_swatch_client) == FALSE) {
+            return 16060;
+        }
+        SendMessageW(
+            imported_color_swatch,
+            WM_LBUTTONDOWN,
+            MK_LBUTTON,
+            MAKELPARAM(
+                (imported_swatch_client.right - imported_swatch_client.left) * 64 / 100,
+                (imported_swatch_client.bottom - imported_swatch_client.top) * 62 / 100));
         state.Workspace().panes.color_pane.change_color(
             state.Workspace().panes.color_pane.context, imported_pencil_color);
         if (SetEditorDiameter(state, 1.0F) != INKPOD_STATUS_OK
+            || state.Workspace().panes.color_pane.picker_targets_main_line
             || !same_imported_color(
-                state.Workspace().panes.main_line_color,
+                state.Workspace().tools.drawing_color,
                 imported_pencil_color)
             || !same_imported_color(
+                state.Workspace().panes.main_line_color,
+                imported_main_line_color)
+            || !same_imported_color(
                 state.Workspace().panes.color_pane.main_line_color,
-                imported_pencil_color)) {
-            return 16032;
+                imported_main_line_color)) {
+            return 16061;
         }
         SendMessageW(window, WM_COMMAND, IDM_TOOL_FILL, 0);
         if (!UpdateEditorFillOptionsForSmoke(state, [](InkpodEditorFillOptions& fill) {
@@ -17232,15 +17252,16 @@ int RunEmptyWorkspaceAndTabIdentitySmoke(ApplicationHost& state) noexcept {
                 state.Workspace().tools.drawing_color, imported_fill_color)
             || !same_imported_color(
                 state.Workspace().panes.main_line_color,
-                imported_pencil_color)
+                imported_main_line_color)
             || !same_imported_color(
                 state.Workspace().panes.color_pane.main_line_color,
-                imported_pencil_color)) {
+                imported_main_line_color)) {
             return 16027;
         }
 
         // Fill owns its yellow command color. Explicitly returning to MainLine
-        // must restore Pencil and its black command color, including when the
+        // must restore Pencil and its deliberately green command color without
+        // replacing the document's black MainLine color, including when the
         // target is already MainLine after a repeated tool/plane switch.
         SendMessageW(window, WM_COMMAND, IDM_PLANE_MAIN_LINE, 0);
         InkpodDocumentInfo imported_main_line{};
@@ -17254,8 +17275,8 @@ int RunEmptyWorkspaceAndTabIdentitySmoke(ApplicationHost& state) noexcept {
                 imported_pencil_color)
             || !same_imported_color(
                 state.Workspace().panes.color_pane.main_line_color,
-                imported_pencil_color)) {
-            return 16033;
+                imported_main_line_color)) {
+            return 16062;
         }
         SendMessageW(window, WM_COMMAND, IDM_TOOL_FILL, 0);
         if (state.Workspace().tools.active_tool
@@ -17267,56 +17288,132 @@ int RunEmptyWorkspaceAndTabIdentitySmoke(ApplicationHost& state) noexcept {
         SendMessageW(window, WM_COMMAND, IDM_PLANE_MAIN_LINE, 0);
         if (state.Workspace().tools.active_tool != INKPOD_TOOL_PENCIL
             || !same_imported_color(
-                state.Workspace().tools.drawing_color, imported_pencil_color)) {
-            return 16033;
+                state.Workspace().tools.drawing_color, imported_pencil_color)
+            || !same_imported_color(
+                state.Workspace().panes.color_pane.main_line_color,
+                imported_main_line_color)) {
+            return 16063;
         }
 
-        // The imported black RGBA boundary exactly matches Pencil's color, so
-        // drawing it again exercises the product auto-erase path rather than a
-        // Binary-only Core fixture.
+        // Pencil deliberately retains a green command color while MainLine is
+        // black. The product stroke must use the document MainLine color, and
+        // drawing that exact black again must reveal the opaque imported-paper
+        // base.
         const int imported_line_x = static_cast<int>(
-            std::lround(imported_bounds.left + 2.5 * imported_zoom));
+            std::lround(imported_bounds.left + 1.5 * imported_zoom));
         const int imported_line_y = static_cast<int>(
             std::lround(imported_bounds.top + 5.5 * imported_zoom));
-        if (SendMessageW(state.Workspace().windows.canvas,
-                WM_LBUTTONDOWN,
-                MK_LBUTTON,
-                MAKELPARAM(imported_line_x, imported_line_y))
-                != 1
-            || SendMessageW(state.Workspace().windows.canvas,
-                   WM_LBUTTONUP,
-                   0,
-                   MAKELPARAM(imported_line_x, imported_line_y))
-                != 1) {
-            return 16035;
+        const auto read_imported_pixel =
+            [&state, imported_line_x, imported_line_y](
+                inkpod::renderer::CanvasPixelRgba8& pixel) {
+            if (state.renderer == nullptr || imported_line_x < 0 || imported_line_y < 0) {
+                return false;
+            }
+            const auto* sink = inkpod::renderer::GetCanvasSnapshotSink(
+                state.Workspace().windows.canvas);
+            const inkpod::renderer::SnapshotRoute route = sink == nullptr
+                ? inkpod::renderer::SnapshotRoute{}
+                : sink->Route();
+            PumpPendingWindowMessages();
+            if (!static_cast<bool>(route)
+                || !state.renderer->WaitQueueIdleForSmokeTest()) {
+                return false;
+            }
+            const auto deadline = std::chrono::steady_clock::now()
+                + std::chrono::seconds(2);
+            HRESULT status{};
+            do {
+                status = state.renderer->ReadPixelForSmokeTest(
+                    route.canvas,
+                    route.surface_generation,
+                    static_cast<UINT>(imported_line_x),
+                    static_cast<UINT>(imported_line_y),
+                    pixel);
+                if (status == S_FALSE) {
+                    PumpPendingWindowMessages();
+                }
+            } while (status == S_FALSE
+                && std::chrono::steady_clock::now() < deadline);
+            return status == S_OK;
+        };
+        const auto click_imported_pixel = [&state,
+                                           imported_line_x,
+                                           imported_line_y]() {
+            if (SendMessageW(state.Workspace().windows.canvas,
+                    WM_LBUTTONDOWN,
+                    MK_LBUTTON,
+                    MAKELPARAM(imported_line_x, imported_line_y))
+                    != 1
+                || SendMessageW(state.Workspace().windows.canvas,
+                       WM_LBUTTONUP,
+                       0,
+                       MAKELPARAM(imported_line_x, imported_line_y))
+                    != 1) {
+                return false;
+            }
+            PumpPendingWindowMessages();
+            if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+                return false;
+            }
+            PumpPendingWindowMessages();
+            if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+                return false;
+            }
+            PumpPendingWindowMessages();
+            return true;
+        };
+        const auto imported_pixel_matches =
+            [](const inkpod::renderer::CanvasPixelRgba8& pixel,
+                const InkpodColorValue& color) {
+            return color.depth == INKPOD_COLOR_DEPTH_8
+                && pixel.red == color.red && pixel.green == color.green
+                && pixel.blue == color.blue && pixel.alpha == color.alpha;
+        };
+        const InkpodColorValue imported_white{
+            sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 255U, 255U, 255U, 255U};
+        inkpod::renderer::CanvasPixelRgba8 imported_pixel{};
+        if (!read_imported_pixel(imported_pixel)
+            || !imported_pixel_matches(imported_pixel, imported_white)
+            || !click_imported_pixel()) {
+            return 16064;
         }
-        PumpPendingWindowMessages();
-        if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
-            return 16035;
+        InkpodDocumentInfo imported_drawn{};
+        if (!QueryDocument(state, imported_drawn)
+            || imported_drawn.document_revision
+                != imported_after.document_revision + 1U
+            || imported_drawn.main_plane_checksum
+                == imported_after.main_plane_checksum
+            || imported_drawn.color_plane_checksum
+                != imported_after.color_plane_checksum
+            || !read_imported_pixel(imported_pixel)
+            || !imported_pixel_matches(imported_pixel, imported_main_line_color)
+            || !click_imported_pixel()) {
+            return 16065;
         }
-        PumpPendingWindowMessages();
-        if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
-            return 16035;
-        }
-        PumpPendingWindowMessages();
         InkpodDocumentInfo imported_erased{};
         if (!QueryDocument(state, imported_erased)
             || imported_erased.document_revision
-                != imported_after.document_revision + 1U
+                != imported_drawn.document_revision + 1U
             || imported_erased.main_plane_checksum
                 == imported_after.main_plane_checksum
+            || imported_erased.main_plane_checksum
+                == imported_drawn.main_plane_checksum
             || imported_erased.color_plane_checksum
-                != imported_after.color_plane_checksum) {
-            return 16036;
+                != imported_after.color_plane_checksum
+            || !read_imported_pixel(imported_pixel)
+            || !imported_pixel_matches(imported_pixel, imported_white)) {
+            return 16066;
         }
         SendMessageW(window, WM_COMMAND, IDM_EDIT_UNDO, 0);
         InkpodDocumentInfo imported_erase_undo{};
         if (!QueryDocument(state, imported_erase_undo)
             || imported_erase_undo.main_plane_checksum
-                != imported_after.main_plane_checksum
+                != imported_drawn.main_plane_checksum
             || imported_erase_undo.color_plane_checksum
-                != imported_after.color_plane_checksum) {
-            return 16037;
+                != imported_after.color_plane_checksum
+            || !read_imported_pixel(imported_pixel)
+            || !imported_pixel_matches(imported_pixel, imported_main_line_color)) {
+            return 16067;
         }
         SendMessageW(window, WM_COMMAND, IDM_EDIT_REDO, 0);
         InkpodDocumentInfo imported_erase_redo{};
@@ -17324,27 +17421,103 @@ int RunEmptyWorkspaceAndTabIdentitySmoke(ApplicationHost& state) noexcept {
             || imported_erase_redo.main_plane_checksum
                 != imported_erased.main_plane_checksum
             || imported_erase_redo.color_plane_checksum
-                != imported_erased.color_plane_checksum) {
-            return 16038;
+                != imported_erased.color_plane_checksum
+            || !read_imported_pixel(imported_pixel)
+            || !imported_pixel_matches(imported_pixel, imported_white)) {
+            return 16068;
         }
+
+        // Exercise the explicit Eraser product route against the same opaque
+        // imported MainLine. Its transparent plane value must reveal white paper,
+        // and the result must remain exact across history and native reopen.
+        SendMessageW(window, WM_COMMAND, IDM_EDIT_UNDO, 0);
+        InkpodDocumentInfo imported_before_explicit_eraser{};
+        if (!QueryDocument(state, imported_before_explicit_eraser)
+            || imported_before_explicit_eraser.main_plane_checksum
+                != imported_drawn.main_plane_checksum
+            || imported_before_explicit_eraser.color_plane_checksum
+                != imported_after.color_plane_checksum
+            || !read_imported_pixel(imported_pixel)
+            || !imported_pixel_matches(imported_pixel, imported_main_line_color)) {
+            return 16069;
+        }
+        SendMessageW(window, WM_COMMAND, IDM_TOOL_ERASER, 0);
+        if (state.Workspace().tools.active_tool != INKPOD_TOOL_ERASER
+            || SetEditorDiameter(state, 1.0F) != INKPOD_STATUS_OK
+            || !QueryDocument(state, imported_before_explicit_eraser)
+            || imported_before_explicit_eraser.active_plane != INKPOD_PLANE_MAIN_LINE
+            || !click_imported_pixel()) {
+            return 16070;
+        }
+        InkpodDocumentInfo imported_explicit_erased{};
+        if (!QueryDocument(state, imported_explicit_erased)
+            || imported_explicit_erased.main_plane_checksum
+                != imported_erased.main_plane_checksum
+            || imported_explicit_erased.color_plane_checksum
+                != imported_after.color_plane_checksum
+            || !read_imported_pixel(imported_pixel)
+            || !imported_pixel_matches(imported_pixel, imported_white)) {
+            return 16071;
+        }
+        SendMessageW(window, WM_COMMAND, IDM_EDIT_UNDO, 0);
+        InkpodDocumentInfo imported_explicit_undo{};
+        if (!QueryDocument(state, imported_explicit_undo)
+            || imported_explicit_undo.main_plane_checksum
+                != imported_drawn.main_plane_checksum
+            || imported_explicit_undo.color_plane_checksum
+                != imported_after.color_plane_checksum
+            || !read_imported_pixel(imported_pixel)
+            || !imported_pixel_matches(imported_pixel, imported_main_line_color)) {
+            return 16072;
+        }
+        SendMessageW(window, WM_COMMAND, IDM_EDIT_REDO, 0);
+        InkpodDocumentInfo imported_explicit_redo{};
+        if (!QueryDocument(state, imported_explicit_redo)
+            || imported_explicit_redo.main_plane_checksum
+                != imported_explicit_erased.main_plane_checksum
+            || imported_explicit_redo.color_plane_checksum
+                != imported_explicit_erased.color_plane_checksum
+            || !read_imported_pixel(imported_pixel)
+            || !imported_pixel_matches(imported_pixel, imported_white)) {
+            return 16073;
+        }
+
+        SendMessageW(window, WM_COMMAND, IDM_EDIT_UNDO, 0);
         SendMessageW(window, WM_COMMAND, IDM_EDIT_UNDO, 0);
         SendMessageW(window, WM_COMMAND, IDM_EDIT_UNDO, 0);
         InkpodDocumentInfo imported_undo{};
         if (!QueryDocument(state, imported_undo)
+            || imported_undo.main_plane_checksum != imported_before.main_plane_checksum
             || imported_undo.color_plane_checksum != imported_before.color_plane_checksum) {
-            return 16028;
+            return 16074;
         }
         SendMessageW(window, WM_COMMAND, IDM_EDIT_REDO, 0);
+        SendMessageW(window, WM_COMMAND, IDM_EDIT_REDO, 0);
+        SendMessageW(window, WM_COMMAND, IDM_EDIT_REDO, 0);
+        InkpodDocumentInfo imported_redo{};
+        if (!QueryDocument(state, imported_redo)
+            || imported_redo.main_plane_checksum
+                != imported_explicit_erased.main_plane_checksum
+            || imported_redo.color_plane_checksum != imported_after.color_plane_checksum
+            || !read_imported_pixel(imported_pixel)
+            || !imported_pixel_matches(imported_pixel, imported_white)) {
+            return 16075;
+        }
         if (SaveToPath(state, files.native) != INKPOD_STATUS_OK
             || !close_all() || !empty()
             || OpenDocumentFromPath(state, files.native) != INKPOD_STATUS_OK) {
-            return 16018;
+            return 16076;
         }
+        SendMessageW(window, WM_COMMAND, IDM_VIEW_FIT, 0);
         InkpodDocumentInfo imported_reopened{};
         if (!QueryDocument(state, imported_reopened)
+            || imported_reopened.main_plane_checksum
+                != imported_explicit_erased.main_plane_checksum
             || imported_reopened.color_plane_checksum != imported_after.color_plane_checksum
+            || !read_imported_pixel(imported_pixel)
+            || !imported_pixel_matches(imported_pixel, imported_white)
             || !close_all() || !empty()) {
-            return 16029;
+            return 16077;
         }
         auto* other = CreateWorkspaceWindow(state, false);
         if (other == nullptr || CreateCell(state, 11U, 9U, 96000U) != INKPOD_STATUS_OK) {

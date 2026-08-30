@@ -23,6 +23,17 @@ pub struct FileStamp {
     pub readonly: bool,
 }
 
+impl FileStamp {
+    /// Classifies a complete-stamp mismatch that can be checked by rereading the
+    /// same byte extent. This is only a reason to retry; it does not prove byte
+    /// equality or a stable content revision.
+    pub(crate) const fn same_read_extent(self, other: Self) -> bool {
+        self.identity.volume == other.identity.volume
+            && self.identity.file == other.identity.file
+            && self.length == other.length
+    }
+}
+
 pub(crate) fn stamp(file: &File) -> IoResult<FileStamp> {
     #[cfg(windows)]
     {
@@ -170,5 +181,44 @@ pub(crate) fn replace(source: &Path, destination: &Path, overwrite: bool) -> IoR
             File::open(parent)?.sync_all()?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FileIdentity, FileStamp};
+
+    #[test]
+    fn retry_extent_classifier_does_not_claim_byte_equality() {
+        let stamp = FileStamp {
+            identity: FileIdentity {
+                volume: 7,
+                file: 11,
+            },
+            length: 13,
+            modified: 17,
+            changed: 19,
+            readonly: false,
+        };
+        assert!(stamp.same_read_extent(FileStamp {
+            changed: 23,
+            readonly: true,
+            ..stamp
+        }));
+        assert!(stamp.same_read_extent(FileStamp {
+            modified: 18,
+            ..stamp
+        }));
+        assert!(!stamp.same_read_extent(FileStamp {
+            identity: FileIdentity {
+                volume: 7,
+                file: 12,
+            },
+            ..stamp
+        }));
+        assert!(!stamp.same_read_extent(FileStamp {
+            length: 14,
+            ..stamp
+        }));
     }
 }

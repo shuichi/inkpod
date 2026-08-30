@@ -199,7 +199,7 @@ UI 表示文字列は、日本語と英語を言語非依存の型付き ID で�
 - file identity は Windows の volume/file ID を取得できる場合はそれを使い、取得できない場合は正規化した絶対 path を使う。表示名や tab index を identity に使わず、untitled document には frontend が UUID を発行する。
 - 開いたセルと同じ sequence/folder にある画像は file preview に自然順で表示する。thumbnail click、前/次 command、番号指定で切り替える。
 - Sequence pane は thumbnail と番号／名前を左から右へ一段に並べ、縦に折り返さず横 scroll する。選択 frame が見切れる場合だけ必要量 scroll し、選択・thumbnail 更新・geometry-only resize で一覧、focus、scroll を reset しない。一覧に focus があるときの `←`／`→` で前後へ移動し、pane 内の前／次 button は置かない。Cut member は表示順の stable identity を既存 member-open 経路へ渡し、通常 sequence の前後 command と対象を混同しない。pane の最小／既定高は一段の frame と可視操作だけから算出し、非表示の Cut 操作に高さを予約しない。pane tab の close は Sequence pane だけを非表示にし、document／sequence／Cut／history は破棄せず、Window menu から再表示できる。
-- PNG/TIFF/TGA/BMP は decoded RGBA 8/16 bit の色と alpha を変換せず初期の主線プレーンへ置き、同じ深度の空の彩色プレーンをその上に作る。opaque な完全白は主線に保持するが fill 境界にはせず、alpha が正の非白 pixel を主線境界とする。自動的な二値化、主線色への置換、主線／彩色の色分離は行わない。読み込み直後は主線プレーンを選択する。未編集セルを sequence から新たに読み込むときは、document と EditorState の双方に読み込み直後の clean な初期基準を置く。新 layer／plane target への自動 reconciliation は利用者の編集として数えず、移動だけでは dirty、保存確認、不要な autosave を発生させない。これは通常保存の成功や path authority を意味しない。既存セルへの `NOOP`／初回 `BIND`、自動連番の遅い追加は既存の編集・savepoint を保持し、recovery 復元は引き続き pathless／dirty として exact history と EditorState を保持する。全 sequence の編集用 Core 常駐化はこの仕様に含めない。
+- PNG/TIFF/TGA/BMP は decoded RGBA 8/16 bit の色と alpha を変換せず初期の主線プレーンへ置き、同じ深度の空の彩色プレーンをその上に作る。opaque な完全白は主線に保持するが fill 境界にはせず、alpha が正の非白 pixel を主線境界とする。全 pixel が opaque の source は SolidWhite の用紙、1 pixel でも非 opaque の source は Transparent の用紙を持ち、source pixel 自体はどちらも変更しない。自動的な二値化、主線色への置換、主線／彩色の色分離は行わない。読み込み直後は主線プレーンを選択する。未編集セルを sequence から新たに読み込むときは、document と EditorState の双方に読み込み直後の clean な初期基準を置く。新 layer／plane target への自動 reconciliation は利用者の編集として数えず、移動だけでは dirty、保存確認、不要な autosave を発生させない。これは通常保存の成功や path authority を意味しない。既存セルへの `NOOP`／初回 `BIND`、自動連番の遅い追加は既存の編集・savepoint を保持し、recovery 復元は引き続き pathless／dirty として exact history と EditorState を保持する。全 sequence の編集用 Core 常駐化はこの仕様に含めない。
 - 同寸法の通常 sequence セル切替は各 view の zoom、pan、反転を保持し、初期変換と FIT 後の中間 frame を別々に公開しない。異寸法では現在の表示 mode に従う最終変換を一度だけ決定する。初回 open と明示 FIT は引き続き全体表示を行う。
 - 未編集 source の再訪では、その初期状態の合成済み tile と GPU bitmap を再利用する。`dirty == false` だけでは初期状態と判定せず、保存済み編集、recovery、preview、Light Table、alpha／color-check 表示と混同しない。source の document UUID／generation と runtime owner を分離し、独立 Core、更新 catalog、別表示 mode 間で cache を誤共有しない。
 - source cache は active を含め CPU／GPU 各最大8枚・128 MiBとし、application-wide な decoded 8 GiB／GPU 512 MiB予算の内数とする。確保前に予約し、snapshot／tile 等の最後の lease が解放されるまで計上する。準備する隣接 source は左右最大2件に限定し、bounded worker の未完了処理を foreground が待たない。予約できない場合は通常表示へ戻し、画質を落とさない。
@@ -309,13 +309,14 @@ composite は layer/plane 順、visibility、opacity、alpha を決定的に適�
 
 - click で一点、drag で1 document pixelの線を描く。
 - 階調主線では1 pixel相当の antialias coverage を描く。
-- stroke 開始 pixel が描画色と同色なら stroke 全体を erase mode にする auto erase を持つ。`Shift` で auto erase を一時無効にする。
+- MainLine を対象にするときは文書の主線色、Color/Raster を対象にするときは鉛筆 command が保持する彩色用描画色を stroke 開始時に固定する。一方を変更しても他方を変更しない。
+- stroke 開始 pixel が対象に応じた上記描画色と同色なら stroke 全体を erase mode にする auto erase を持つ。`Shift` で auto erase を一時無効にする。
 
 #### 消しゴム
 
 - tool options の先頭に `消去対象: 主線 / 彩色` を常時明示し、選択中の layer/plane、menu の主線/彩色 command、status bar と双方向に同期する。消しゴム選択だけでは対象を自動変更しない。
 - shape、太さ、zoom に対して screen size を維持するか、pressure を太さへ反映するかを選ぶ。
-- raster は cursor footprint 内を透明/背景へ消す。
+- raster は cursor footprint 内を透明へ消し、表示上は文書の用紙を露出する。全 pixel の alpha が最大値の common-raster source は SolidWhite、1 pixel でも alpha が最大値未満の source は Transparent の用紙なので、前者の消去跡は白、後者は透過表示になる。Color/Raster plane の消去値は source の用紙にかかわらず透明とする。
 
 #### 直線・曲線・図形・折れ線
 
@@ -328,6 +329,7 @@ composite は layer/plane 順、visibility、opacity、alpha を決定的に適�
 #### ブラシ・エアブラシ
 
 - brush は丸/角、太さ、pressure、stroke smoothing、開始 pixel と同色領域だけへ描く mode を持つ。
+- brush の描画色も鉛筆と同じ対象別契約に従い、MainLine では文書の主線色、Color/Raster では brush command が保持する彩色用描画色を stroke 開始時に固定する。
 - 開始色限定 brush は stroke 開始時の変更前 raster を immutable base とし、開始 pixel の native-depth 値と完全一致する pixel だけを各 brush footprint 内で描く。Binary／Grayscale 8/16 bit は格納 scalar、RGBA 8/16 bit は straight alpha を含む全 RGBA 成分を比較し、tolerance、表示変換、premultiply 後の値を比較へ使わない。4 近傍の連結性は要求せず、stroke が到達した footprint 内なら非連結の同値 pixel も対象にする。stroke 中に描いた色で predicate を拡張せず、開始 pixel が用紙外なら invalid とする。
 - brush smoothing は off または 0〜1000 の整数強度 `s` とする。Core は document Q16.16 の各 x/y 座標について、最初の sample を変更せず、二点目以降を `round_ties_even((previous_normalized * s + raw * (1001 - s)) / 1001)` で因果的に正規化し、pressure は変更しない。中間積は符号付き固定幅の検査付き演算とし、同じ入力 sample 列は frontend の batch 分割、OS pointer history の通知単位、thread 数にかかわらず同じ canonical sample 列と pixel 結果を返す。
 - airbrush は太さ、硬さ、dab 間隔、fade、pressure->size、pressure->opacity、停止中も時間で濃くなる continuous spray を持つ。
@@ -354,7 +356,7 @@ composite は layer/plane 順、visibility、opacity、alpha を決定的に適�
 
 - Color pane 内の `カラー`、`パレット`、`チャート` は semantic ID と表示順を分離した三つの tab とする。label drag は drag threshold を越えた同じ内部 tab control 内だけで順序を変更し、pane からの undock、Right zone の top-level tab への移動、個別 loading／unloading は行わない。active page と既存 child `HWND` を維持し、control 外 drop、`Esc`、capture cancellation は順序を変更しない。この内部順序は workspace record や `.inkpod` へ保存しない session-local presentation state とする。
 - 描画色は sRGB RGBA 8/16 bit を保持し、RGB と HSV editor、alpha 数値/percent 表示を切り替える。
-- 色を使う active command は、鉛筆、ブラシ、フィル、選択、エアブラシ等の raster command ごとに独立した現在色を持つ。鉛筆の既定色は黒、その他の彩色用 command の既定色は彩色用の初期色とする。command 切替時はその command の現在色を復元し、color editor、swatch、数値欄へ即時反映する。color pane は文書の主線色と active command の彩色用描画色を別のラベルと swatch で常時区別する。スポイト等の色を持たない一時 tool は直前の色付き command を変更先として維持する。
+- 色を使う active command は、鉛筆、ブラシ、フィル、選択、エアブラシ等の raster command ごとに独立した彩色用の現在色を持つ。鉛筆の既定色は黒、その他の彩色用 command の既定色は彩色用の初期色とする。command 切替時はその command の現在色を復元し、color editor、swatch、数値欄へ即時反映する。color pane は文書の主線色と active command の彩色用描画色を別のラベルと swatch で常時区別し、MainLine への鉛筆/ブラシ stroke は前者、Color/Raster への stroke は後者を使う。RGBA MainLine の主線色変更は既存 pixel を再着色せず、以後の MainLine 描画へだけ適用する。スポイト等の色を持たない一時 tool は直前の色付き command を変更先として維持する。
 - color ring、HSV triangle、alpha track の pointer drag は pane-local preview を各入力 sample で即時描画し、button release 時だけ現在色を Core/editor state へ公開する。capture cancellation は drag 開始時の色と hue へ復元し、preview 中に palette/chart list や他 pane を全更新しない。
 - color palette は複数 page/group を持ち、cell click で描画色取得、modifier+click で現在色登録、clear/save/load ができる。
 - 現在色と subpalette 採取色の登録は、対象文書の全 page/group から native depth と straight RGBA が完全一致する最初の項目を再利用する。同色を再登録しても項目数、document revision、history、dirty は変えず、その項目の選択位置と group へ移る。登録上限に達していても既存色の再利用は可能とする。透明度または native depth／成分値が異なる色は別色として保持し、既存項目や読込 file の重複を自動削除しない。
@@ -549,7 +551,7 @@ UI／ABIを production contract とする。M23で批准済みcatalogを使うRu
 
 ### 20. 形式、白透過、一般画像入出力
 
-- exact-current 契約は `.inkpod` top-level format v31、runtime replay epoch 27、C ABI v25、`DocumentArchive` schema 7、必須 `DOCM` schema 8、`DocumentStateDigest` schema 12/domain 10、snapshot-composite schema 5、Cut payload schema 3／Cut replay epoch 25、`.inkbatch` v5／operation schema 4、InkScript registry schema／language／file v2、73-command production catalog／owner manifest v5 とする。native v30以前、epoch 26以前、ABI v24以前、Cut payload schema 2以前、`.inkbatch` v4以前、catalog／owner manifest v4以前、および削除済み layer-kind／Selection-plane／VanishingPoint／Adjustment-layer contract は migration や shim を設けず拒否する。今回の更新は native format freeze 宣言ではない。
+- exact-current 契約は `.inkpod` top-level format v32、runtime replay epoch 27、C ABI v25、`DocumentArchive` schema 7、必須 `DOCM` schema 8、`DocumentStateDigest` schema 12/domain 10、snapshot-composite schema 5、Cut payload schema 3／Cut replay epoch 25、`.inkbatch` v5／operation schema 4、InkScript registry schema／language／file v2、73-command production catalog／owner manifest v5 とする。native v31以前、epoch 26以前、ABI v24以前、Cut payload schema 2以前、`.inkbatch` v4以前、catalog／owner manifest v4以前、および削除済み layer-kind／Selection-plane／VanishingPoint／Adjustment-layer contract は migration や shim を設けず拒否する。今回の更新は native format freeze 宣言ではない。
 - native `.inkpod` は、保存時点の可変 raster snapshot を意味上の正本にしない。正本は immutable な `Genesis`、content-addressed な `Assets`、Core が検証・正規化して実変更を確定した `Procedures` と history control event、history の現在位置と high-watermark を持つ `META`、文書単位の `EditorState` とする。materialized document、inverse delta、COW snapshot、render/checkpoint cache は派生物であり、これらだけで文書を成立させない。
 - frontend request は target/revision/ID と上限を検証し、座標、色、option、可変長入力、transaction 内の output ID を正規化してから一つの `CanonicalProcedure` として確定する。procedure は monotonic ID、primitive ID/schema、replay epoch、base/committed `StateId`、固定幅引数、stable input/output ID、immutable `AssetId` または bounded inline payload、pre/post document-state digest を持ち、raw pointer、外部 path、native enum layout、frontend command ID、一時 object ID を含めない。
 - `Genesis` は document UUID、paper、DPI、sRGB、frame、margin、初期 stable-ID topology、immutable base surface を完全記述する。白紙の base surface は全面 tile を割り当てない opaque white の `SolidWhite` underlay とし、flat canonical composite/export には参加するが、個別 layer/plane export や selection mask へ暗黙に混入させない。

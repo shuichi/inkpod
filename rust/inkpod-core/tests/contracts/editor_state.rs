@@ -1067,6 +1067,129 @@ fn editor_stroke_captures_exact_values_and_stable_target_at_begin() {
 }
 
 #[test]
+fn main_line_editor_stroke_uses_document_line_color_not_pencil_paint_color() {
+    let mut core = Core::new();
+    let source = CommonRaster::new(
+        2,
+        1,
+        PixelFormat::StraightRgba8,
+        None,
+        None,
+        vec![255; 2 * 4],
+    )
+    .unwrap();
+    core.import_decoded_common_raster(
+        CommonRasterFormat::Tga,
+        &source,
+        0x4544_4954_4f52_434f_4c4f_525f_0001,
+    )
+    .unwrap();
+
+    let main_line_color = PixelValue::Rgba([17, 34, 51, 255]);
+    core.set_main_line_color(main_line_color).unwrap();
+    let pencil_paint_color = PixelValue::Rgba([0, 140, 75, 255]);
+    let state = core.editor_state().unwrap();
+    let state = core
+        .update_editor_state(
+            state.revision,
+            EditorStateUpdate::SetToolColor {
+                tool: EditorTool::Pencil,
+                color: pencil_paint_color,
+            },
+        )
+        .unwrap();
+    core.update_editor_state(
+        state.revision,
+        EditorStateUpdate::SetActiveTool(EditorTool::Pencil),
+    )
+    .unwrap();
+
+    core.begin_editor_stroke(&EditorStrokeInput {
+        tool: None,
+        coordinate_space: CoordinateSpace::Document,
+        auto_erase: false,
+        pressure_size: false,
+        samples: vec![StrokeSample {
+            x: 0.0,
+            y: 0.0,
+            pressure: 1.0,
+        }],
+    })
+    .unwrap();
+    core.end_stroke().unwrap();
+    assert_eq!(
+        core.plane_pixel(ActivePlane::MainLine, 0, 0).unwrap(),
+        main_line_color,
+        "an RGBA MainLine stroke must capture the document main-line color"
+    );
+    assert_eq!(
+        core.editor_state()
+            .unwrap()
+            .state
+            .tool_style(EditorTool::Pencil)
+            .unwrap()
+            .color,
+        Some(pencil_paint_color),
+        "drawing on MainLine must not overwrite Pencil's independently retained paint color"
+    );
+
+    core.begin_editor_stroke(&EditorStrokeInput {
+        tool: None,
+        coordinate_space: CoordinateSpace::Document,
+        auto_erase: true,
+        pressure_size: false,
+        samples: vec![StrokeSample {
+            x: 0.0,
+            y: 0.0,
+            pressure: 1.0,
+        }],
+    })
+    .unwrap();
+    core.end_stroke().unwrap();
+    assert_eq!(
+        core.plane_pixel(ActivePlane::MainLine, 0, 0).unwrap(),
+        PixelValue::Rgba([0; 4]),
+        "auto-erase must compare against the MainLine color instead of overwriting it with Pencil paint color"
+    );
+    core.undo().unwrap();
+    assert_eq!(
+        core.plane_pixel(ActivePlane::MainLine, 0, 0).unwrap(),
+        main_line_color
+    );
+    core.redo().unwrap();
+    assert_eq!(
+        core.plane_pixel(ActivePlane::MainLine, 0, 0).unwrap(),
+        PixelValue::Rgba([0; 4])
+    );
+
+    let color_target = target_for(&core, PlaneType::Color);
+    let state = core.editor_state().unwrap();
+    core.update_editor_state(
+        state.revision,
+        EditorStateUpdate::SetActiveTarget(color_target),
+    )
+    .unwrap();
+    core.begin_editor_stroke(&EditorStrokeInput {
+        tool: None,
+        coordinate_space: CoordinateSpace::Document,
+        auto_erase: false,
+        pressure_size: false,
+        samples: vec![StrokeSample {
+            x: 1.0,
+            y: 0.0,
+            pressure: 1.0,
+        }],
+    })
+    .unwrap();
+    core.end_stroke().unwrap();
+    assert_eq!(
+        core.plane_pixel(ActivePlane::Color, 1, 0).unwrap(),
+        pencil_paint_color,
+        "the same Pencil style must remain the paint color on a coloring target"
+    );
+}
+
+#[test]
 fn editor_stroke_uses_the_captured_secondary_view_for_device_samples() {
     let mut core = editor_core();
     let main_line_target = target_for(&core, PlaneType::MainLine);

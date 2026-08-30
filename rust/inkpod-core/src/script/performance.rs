@@ -42,7 +42,7 @@ const EXPECTED_COMMITS: u64 = 384;
 const EXPECTED_NO_OPS: u64 = 384;
 const EXPECTED_INSTALLED_OUTPUT_BYTES: u64 = 90_688;
 const EXPECTED_REPLAYED_COMMITS: u64 = 256;
-const EXPECTED_CHECKSUM: u64 = 0xae0d_0468_1b2f_5a63;
+const EXPECTED_CHECKSUM: u64 = 0x1e41_e17e_8bda_22e3;
 
 struct SourceFixture {
     source: InkScriptSource,

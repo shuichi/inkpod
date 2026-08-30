@@ -1,5 +1,7 @@
 #![no_main]
 
+// Exercises staged Core open against exact-current v32 native input.
+
 use libfuzzer_sys::fuzz_target;
 use std::sync::atomic::{AtomicU64, Ordering};
 

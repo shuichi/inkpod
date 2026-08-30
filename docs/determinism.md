@@ -1,12 +1,15 @@
 # Cross-architecture determinism contract
 
-The current runtime replay contract is procedure format 31, replay epoch 27,
+The current runtime replay contract is procedure format 32, replay epoch 27,
 canonical numeric version 1, and the digest of the closed 75-entry primitive
 catalog. The separate public InkScript catalog/owner manifest is v5 with 73
-commands. Production `.inkpod` is exact-current v31; an optional verified
+commands. Production `.inkpod` is exact-current v32; an optional verified
 checkpoint preserves this contract and never replaces the authoritative journal.
 
-Epoch 27 and format 31 close the standard image-tree model. Every layer has
+Epoch 27 and format 31 closed the standard image-tree model. Format 32 changes
+only the native Genesis validity rule: a fully opaque imported RGBA MainLine may
+use a SolidWhite underlay, while an import with any non-opaque alpha remains Transparent.
+The primitive catalog and replay results are unchanged. Every layer has
 exactly one MainLine plane, exactly one Color plane, and zero or more Raster
 planes; plane conversion preserves that role and changes only pixel format.
 Current selection, ordered named saved-selection masks, and sparse fill
@@ -67,8 +70,8 @@ The primitive catalog digest covers entries in ascending stable-ID order:
 primitive ID, schema version, length-framed canonical name, BLAKE3 argument-
 schema digest, semantics revision, work-formula ID, and replay-policy byte.
 Tests lock its digest
-together with format version 31 and replay epoch 27. A semantic change that updates
-the catalog or any golden without advancing both version and epoch therefore
+together with format version 32 and replay epoch 27. A replay-semantic change that updates
+the catalog or any replay golden without advancing both version and epoch therefore
 fails the public contract review rather than silently accepting a new result.
 
 `RenderSnapshot::canonical_composite_digest` and the C ABI snapshot digest query

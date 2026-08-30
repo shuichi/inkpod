@@ -1000,7 +1000,10 @@ pub unsafe extern "C" fn inkpod_core_apply_edit_target_command(
     })
 }
 
-/// Starts a transient raster stroke from exact values captured from Core-owned EditorState.
+/// Starts a transient raster stroke from exact values captured from Core-owned document/editor state.
+///
+/// MainLine targets use the document main-line color; Color/Raster targets use
+/// the selected tool's independently retained paint color.
 ///
 /// # Safety
 /// `core` and `input` must be live owner-thread objects. The strided sample span

@@ -1,4 +1,4 @@
-//! Current native container v31 and replay epoch 27 public persistence contracts.
+//! Current native container v32 and replay epoch 27 public persistence contracts.
 
 use super::*;
 use inkpod_format::{
@@ -50,8 +50,10 @@ fn frame_field(payload: &[u8], wanted: u32) -> std::ops::Range<usize> {
 
 #[test]
 fn io_001_imported_genesis_source_rejects_wrong_asset_plane_and_underlay() {
+    let mut alpha_pixels = vec![255; 16];
+    alpha_pixels[3] = 254;
     let raster =
-        CommonRaster::new(2, 2, PixelFormat::StraightRgba8, None, None, vec![255; 16]).unwrap();
+        CommonRaster::new(2, 2, PixelFormat::StraightRgba8, None, None, alpha_pixels).unwrap();
     let mut core = Core::new();
     let info = core
         .import_decoded_common_raster(CommonRasterFormat::Tga, &raster, 0x3001)
@@ -79,7 +81,7 @@ fn io_001_imported_genesis_source_rejects_wrong_asset_plane_and_underlay() {
             2 => payload[source.start + 8..source.end].fill(0),
             3 => {
                 let archive = frame_field(payload, 4);
-                payload[archive.start] = 1; // SolidWhite cannot carry an imported plane source.
+                payload[archive.start] = 1; // Any non-opaque source alpha requires transparency.
             }
             _ => unreachable!(),
         }
@@ -102,10 +104,37 @@ fn io_001_imported_genesis_source_rejects_wrong_asset_plane_and_underlay() {
     payload.drain(source);
     assert!(Core::from_native_file(without_source, false).is_err());
     assert_eq!(core.document_info().unwrap(), info);
+
+    let opaque_raster =
+        CommonRaster::new(2, 2, PixelFormat::StraightRgba8, None, None, vec![255; 16]).unwrap();
+    let mut opaque_core = Core::new();
+    opaque_core
+        .import_decoded_common_raster(CommonRasterFormat::Tga, &opaque_raster, 0x3002)
+        .unwrap();
+    assert_eq!(
+        opaque_core.genesis_info().unwrap().base_surface,
+        BaseSurface::SolidWhite
+    );
+    let (mut wrong_opaque_underlay, _) = opaque_core
+        .capture_document_save()
+        .unwrap()
+        .prepare_native_save(false, || false)
+        .unwrap();
+    let payload = &mut wrong_opaque_underlay
+        .sections
+        .iter_mut()
+        .find(|section| section.fourcc == *b"GENS")
+        .unwrap()
+        .records[0]
+        .payload;
+    let archive = frame_field(payload, 4);
+    payload[archive.start] = 3; // Fully opaque source requires a solid-white underlay.
+    assert!(Core::from_native_file(wrong_opaque_underlay, false).is_err());
+
     let encoded = inkpod_format::encode_procedure_file(&native).unwrap();
-    assert_eq!(u32::from_le_bytes(encoded[8..12].try_into().unwrap()), 31);
+    assert_eq!(u32::from_le_bytes(encoded[8..12].try_into().unwrap()), 32);
     let mut previous = encoded;
-    previous[8..12].copy_from_slice(&30_u32.to_le_bytes());
+    previous[8..12].copy_from_slice(&31_u32.to_le_bytes());
     assert!(inkpod_format::decode_procedure_file(&previous).is_err());
 }
 
@@ -412,8 +441,8 @@ fn io_001_save_reopen_restores_full_journal_editor_and_all_next_id_authorities()
 }
 
 #[test]
-fn io_001_v31_rejects_v30_and_corrupt_open_is_atomic_for_the_live_core() {
-    let path = native_path("v30-rejected");
+fn io_001_v32_rejects_v31_and_corrupt_open_is_atomic_for_the_live_core() {
+    let path = native_path("v31-rejected");
     let mut legacy = vec![0_u8; 128];
     legacy[0..8].copy_from_slice(b"INKPOD\0\0");
     legacy[8..12].copy_from_slice(&(inkpod_format::FORMAT_VERSION - 1).to_le_bytes());

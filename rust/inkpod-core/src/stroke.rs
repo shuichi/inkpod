@@ -64,11 +64,13 @@ impl Core {
     /// Begins a raster stroke using exact Core-owned EditorState values.
     ///
     /// The selected raster tool (or active tool when none is specified), its
-    /// exact-depth Core-owned color/Q16.16 diameter, and stable target IDs are
-    /// copied before the preview begins. Appends and commit use only that
-    /// captured style, so later EditorState updates cannot change an already-
-    /// started procedure. A tool selector chooses another Core-owned style; it
-    /// never supplies color or diameter from the caller.
+    /// exact-depth Core-owned Q16.16 diameter, and stable target IDs are copied
+    /// before the preview begins. A MainLine target captures the document's
+    /// main-line color; Color/Raster targets capture the selected tool's
+    /// independently retained paint color. Appends and commit use only that
+    /// captured style, so later document or EditorState updates cannot change an
+    /// already-started procedure. A tool selector never supplies color or
+    /// diameter from the caller.
     pub fn begin_editor_stroke(&mut self, input: &EditorStrokeInput) -> Result<(), CoreError> {
         self.begin_editor_stroke_for_view(0, input)
     }
@@ -94,36 +96,33 @@ impl Core {
                 .get(&ViewId::from_raw(view_id))
                 .ok_or(CoreError::InvalidArgument("view ID does not exist"))?
         };
-        let (tool, color, diameter_q16, brush, layer_id, target_plane_id) =
-            {
-                let state = &self
-                    .editor_session
-                    .as_ref()
-                    .ok_or(CoreError::NoDocument)?
-                    .state;
-                let editor_tool = input.tool.unwrap_or(state.active_tool);
-                let tool = raster_tool_from_editor(editor_tool)?;
-                let style = state
-                    .tool_style(editor_tool)
-                    .ok_or(CoreError::InvalidState(
-                        "editor raster tool style is missing",
-                    ))?;
-                let color = style.color.or_else(|| state.current_color()).ok_or(
-                    CoreError::InvalidState("editor raster tool has no captured color"),
-                )?;
-                let diameter_q16 = style.diameter_q16;
-                let target = state
-                    .target
-                    .ok_or(CoreError::InvalidState("editor state has no active target"))?;
-                (
-                    tool,
-                    color,
-                    diameter_q16,
-                    state.brush,
-                    LayerId::from_raw(target.layer_id),
-                    PlaneId::from_raw(target.plane_id),
-                )
-            };
+        let (tool, tool_color, diameter_q16, brush, layer_id, target_plane_id) = {
+            let state = &self
+                .editor_session
+                .as_ref()
+                .ok_or(CoreError::NoDocument)?
+                .state;
+            let editor_tool = input.tool.unwrap_or(state.active_tool);
+            let tool = raster_tool_from_editor(editor_tool)?;
+            let style = state
+                .tool_style(editor_tool)
+                .ok_or(CoreError::InvalidState(
+                    "editor raster tool style is missing",
+                ))?;
+            let color = style.color.or_else(|| state.current_color());
+            let diameter_q16 = style.diameter_q16;
+            let target = state
+                .target
+                .ok_or(CoreError::InvalidState("editor state has no active target"))?;
+            (
+                tool,
+                color,
+                diameter_q16,
+                state.brush,
+                LayerId::from_raw(target.layer_id),
+                PlaneId::from_raw(target.plane_id),
+            )
+        };
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
         let target = document
             .layers
@@ -138,6 +137,13 @@ impl Core {
             .ok_or(CoreError::InvalidState(
                 "editor stroke target no longer exists",
             ))?;
+        let color = if target.kind == PlaneType::MainLine {
+            document.main_line_color
+        } else {
+            tool_color.ok_or(CoreError::InvalidState(
+                "editor raster tool has no captured paint color",
+            ))?
+        };
         let plane = if target.kind == PlaneType::MainLine {
             ActivePlane::MainLine
         } else {

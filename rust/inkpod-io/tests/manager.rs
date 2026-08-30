@@ -1,6 +1,6 @@
 use inkpod_format::{CommonRaster, CommonRasterFormat, decode_common_raster, encode_common_raster};
 use inkpod_io::{IoConfig, IoError, IoManager, JobContext, JobState};
-use std::fs;
+use std::fs::{self, File, FileTimes};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -79,6 +79,64 @@ fn wait<T>(job: &inkpod_io::IoJob<T>) -> inkpod_io::IoResult<T> {
         );
         std::thread::yield_now();
     }
+}
+
+#[test]
+fn same_size_timestamp_preserved_tga_rewrite_invalidates_cache() {
+    let directory = Directory::new();
+    let path = directory.path("rewritten.tga");
+    let original = encoded(&path, 42, CommonRasterFormat::Tga);
+    let manager = IoManager::new(config()).unwrap();
+    let first = manager.read_image(&path, &JobContext::new()).unwrap();
+    let first_stamp = first.source().stamp();
+    let original_modified = fs::metadata(&path).unwrap().modified().unwrap();
+    let replacement = encoded(&path, 84, CommonRasterFormat::Tga);
+    assert_eq!(replacement.len(), original.len());
+    File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_times(FileTimes::new().set_modified(original_modified))
+        .unwrap();
+    let rewritten_stamp = manager.metadata(&path, &JobContext::new()).unwrap();
+    assert_eq!(rewritten_stamp.identity, first_stamp.identity);
+    assert_eq!(rewritten_stamp.length, first_stamp.length);
+    assert_eq!(rewritten_stamp.modified, first_stamp.modified);
+    assert_ne!(rewritten_stamp, first_stamp);
+    let second = manager.read_image(&path, &JobContext::new()).unwrap();
+    assert_ne!(first.generation(), second.generation());
+    assert_eq!(second.raster().pixels, [84, 84, 84, 255]);
+    assert_eq!(manager.cache_stats().physical_reads, 2);
+    assert_eq!(manager.cache_stats().decodes, 2);
+}
+
+#[test]
+fn same_size_timestamp_preserved_change_during_stream_read_is_rejected() {
+    let directory = Directory::new();
+    let path = directory.path("changing.tga");
+    let original = encoded(&path, 42, CommonRasterFormat::Tga);
+    let original_modified = fs::metadata(&path).unwrap().modified().unwrap();
+    let original_permissions = fs::metadata(&path).unwrap().permissions();
+    let changed_permissions = {
+        let mut permissions = original_permissions.clone();
+        permissions.set_readonly(!permissions.readonly());
+        permissions
+    };
+    let manager = IoManager::new(config()).unwrap();
+    let result = manager.with_reader(&path, 4096, &JobContext::new(), |file| {
+        let mut header = [0_u8; 18];
+        file.read_exact(&mut header)?;
+        let replacement = encoded(&path, 84, CommonRasterFormat::Tga);
+        assert_eq!(replacement.len(), original.len());
+        File::options()
+            .write(true)
+            .open(&path)?
+            .set_times(FileTimes::new().set_modified(original_modified))?;
+        fs::set_permissions(&path, changed_permissions.clone())?;
+        Ok(())
+    });
+    fs::set_permissions(&path, original_permissions).unwrap();
+    assert!(matches!(result, Err(IoError::ChangedDuringRead)));
 }
 
 #[test]

@@ -241,7 +241,7 @@ impl ReplayEpoch {
 ///
 /// The build, reader, writer, and replay contract all use this value. Earlier
 /// and later top-level versions are rejected without migration.
-pub const PROCEDURE_FORMAT_VERSION: u32 = 31;
+pub const PROCEDURE_FORMAT_VERSION: u32 = 32;
 
 /// Version of the canonical scalar, rounding, alpha, and geometry contract.
 pub const CANONICAL_NUMERIC_VERSION: u32 = 1;
@@ -324,7 +324,7 @@ impl DocumentStateDigest {
 /// the pre-state digest instead.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PrimitiveRequest {
-    /// Replaces the document's exact-depth main-line display color.
+    /// Replaces the document's exact-depth main-line display/drawing color.
     SetMainLineColor {
         /// Document revision observed by the request producer.
         expected_revision: u64,

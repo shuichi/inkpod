@@ -13,7 +13,7 @@ and explicit user approval. Replace current values instead of appending dated
 acceptance logs. Historical calibration and milestone results are summarized in
 [`legacy.md`](legacy.md).
 
-Batch v5 uses native v31/replay epoch 27 and retains the approved
+Batch v5 uses native v32/replay epoch 27 and retains the approved
 `batch_preview` workload described below. The benchmark has no sequence input,
 Filter operation, or legacy layer-kind selector. Its native files, exact Color
 Replace rows, semantic counters, checksums, and complete samples are locked
@@ -79,7 +79,7 @@ scenario assertions are:
 | `undo_redo` | every edit is one history entry, Undo reaches the clean savepoint, and Redo restores the exact checksum |
 | `light_table_composite` | every reference contributes to the expected tile grid and checksum |
 | `batch_preview` | one invalid graph is rejected; every unique native input opens, replays, and applies its exact native-depth Color Replace row in preview and dry-run; no output is generated |
-| `canonical_replay` | six boundaries replay bit-exactly; final digest and runtime epoch 27 / native v31 / numeric v1 contract match |
+| `canonical_replay` | six boundaries replay bit-exactly; final digest and runtime epoch 27 / native v32 / numeric v1 contract match |
 | `checkpoint_open` | policy emits CKPT; verified open restores the journal/document digest and exact Undo/Redo; full crosses one million replay-work units |
 | `output_color_guard` | exact scanned/selected/transparent counts, one canonical commit, revision 2/history 1, exact sparse selection bounds/tile bytes, zero CPU staging bytes, and result digest match |
 
@@ -219,7 +219,7 @@ scheme. A materially different host, target, toolchain, or power mode needs a
 separately approved range.
 
 The fixed quick fixture uses InkScript source ID 913, exact-current file v2/catalog v5 and replay
-epoch 27, 128 `set_plane_properties` steps, four successful 4-by-4 current-v31
+epoch 27, 128 `set_plane_properties` steps, four successful 4-by-4 current-v32
 inputs, one 256 KiB inline straight-sRGB RGBA8 asset, one Save failure and one
 pre-linearization cancellation. Every successful output is reopened through
 full Genesis/asset/procedure replay without a checkpoint cache. The runner is
@@ -237,7 +237,7 @@ asset bytes, zero authorized reads, 23,872 planned input bytes, 35,808 runner
 native-read bytes, six attempted items/binding resolutions, 774 statements, 768
 invocations, 384 Commit and 384 no-op outcomes, installed/failed/cancelled
 4/1/1, 90,688 installed bytes, four cache-free reopens, 256 replayed Commits,
-and checksum `ae0d04681b2f5a63`. The failure reason must be exactly Save; neither
+and checksum `1e41e17e8bda22e3`. The failure reason must be exactly Save; neither
 negative probe may publish an output.
 
 M21's explicitly approved file/catalog v1-to-v2 update changes the static compile
@@ -264,6 +264,13 @@ installed outputs are 90,688 bytes. Encoded-output hashes and those byte counter
 change the semantic checksum to `ae0d04681b2f5a63`. A current Release run on
 2026-08-30 reproduced every counter and completed the protected interval in
 94,735,100 ns, within the unchanged envelope.
+
+The opaque-import paper contract advances only the exact-current native and
+procedure format to v32; replay epoch 27, the fixture, semantic counters, timed
+interval, sample policy, and 64–107 ms envelope remain unchanged. The versioned
+encoded-output hashes change the checksum to `1e41e17e8bda22e3`; input, runner-read,
+and installed bytes remain 23,872, 35,808, and 90,688. A current x64 Release run
+on 2026-08-30 completed the protected interval in 88,926,100 ns.
 
 Verification used Windows 11 build 26200, a 4-vCPU/8-GiB Parallels ARM64 VM,
 `aarch64-pc-windows-msvc`, Rust/Cargo 1.97.1, LLVM 22.1.6, static CRT,

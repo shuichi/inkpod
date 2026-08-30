@@ -14,12 +14,14 @@ pub(super) fn initialize_imported_main_line(
             "editable raster import requires straight RGBA",
         ));
     }
-    document.base_surface = BaseSurface::Transparent;
+    document.base_surface = genesis::imported_main_line_base_surface(&source)?;
     document.plane_for_role_mut(ActivePlane::Color)?.raster =
         TileRaster::new(source.width(), source.height(), source.format())?;
     document.plane_for_role_mut(ActivePlane::MainLine)?.raster = source;
     // Keep opaque white as actual source pixels. Color is composed above this
     // image so filling its white regions is visible without changing the main line.
+    // An opaque source also gets a white underlay so alpha erasure reveals paper;
+    // any source that actually carries alpha retains a transparent underlay.
     document.layers[0].planes.reverse();
     Ok(())
 }

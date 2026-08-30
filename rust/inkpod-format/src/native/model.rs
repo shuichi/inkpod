@@ -216,7 +216,7 @@ pub struct DocumentArchive {
     pub main_line_color: PixelValue,
     pub palette: Vec<PixelValue>,
     pub planes: Vec<FilePlane>,
-    /// Decoded document metadata slot. The exact-current v31 contract requires
+    /// Decoded document metadata slot. The exact-current v32 contract requires
     /// `Some`; `None` exists only so malformed/missing DOCM input can be rejected
     /// at the validation boundary without synthesizing a compatibility tree.
     pub document_metadata: Option<FileDocumentMetadata>,

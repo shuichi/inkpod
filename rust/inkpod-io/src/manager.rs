@@ -298,6 +298,7 @@ impl IoManager {
                 self.inner.config.max_file_bytes,
                 context,
             )?;
+            let stamp = source.stamp();
             if let Some(raster) = self.inner.cache.decoded(stamp, format) {
                 context.check_cancelled()?;
                 return Ok(LoadedImage {
@@ -401,9 +402,7 @@ impl IoManager {
                     progress.completed_bytes.saturating_add(chunk.len() as u64)
             });
         }
-        if backend::stamp(file)? != stamp {
-            return Err(IoError::ChangedDuringRead);
-        }
+        let final_stamp = validate_or_retry_buffered_read(file, &path, stamp, &bytes, context)?;
         context.check_cancelled()?;
         self.inner
             .cache
@@ -414,15 +413,56 @@ impl IoManager {
         let generation = self
             .inner
             .cache
-            .insert_bytes(path.clone(), stamp, lease.clone())?;
+            .insert_bytes(path.clone(), final_stamp, lease.clone())?;
         context.record_read_completed();
         Ok(LoadedBytes {
             path,
-            stamp,
+            stamp: final_stamp,
             generation,
             lease,
         })
     }
+}
+
+fn validate_or_retry_buffered_read(
+    first_file: &File,
+    path: &Path,
+    initial_stamp: FileStamp,
+    bytes: &[u8],
+    context: &JobContext,
+) -> IoResult<FileStamp> {
+    let first_final_stamp = backend::stamp(first_file)?;
+    if first_final_stamp == initial_stamp {
+        return Ok(first_final_stamp);
+    }
+    if !initial_stamp.same_read_extent(first_final_stamp) {
+        return Err(IoError::ChangedDuringRead);
+    }
+
+    // A same-file, same-length timestamp/attribute transition does not prove
+    // that the bytes changed, but it cannot be ignored either. Trust the first
+    // pass only after a fresh pass matches every byte and keeps one full stamp.
+    context.check_cancelled()?;
+    let mut retry = File::open(path)?;
+    let retry_start = backend::stamp(&retry)?;
+    if !initial_stamp.same_read_extent(retry_start) {
+        return Err(IoError::ChangedDuringRead);
+    }
+    let mut verification = [0_u8; 64 * 1024];
+    for expected in bytes.chunks(verification.len()) {
+        context.check_cancelled()?;
+        let actual = &mut verification[..expected.len()];
+        retry.read_exact(actual)?;
+        if actual != expected {
+            return Err(IoError::ChangedDuringRead);
+        }
+    }
+    let retry_final = backend::stamp(&retry)?;
+    if retry_start != retry_final {
+        return Err(IoError::ChangedDuringRead);
+    }
+    context.check_cancelled()?;
+    Ok(retry_final)
 }
 
 impl std::fmt::Debug for IoManager {
@@ -432,5 +472,142 @@ impl std::fmt::Debug for IoManager {
             .field("config", &self.inner.config)
             .field("cache", &self.cache_stats())
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_or_retry_buffered_read;
+    use crate::{IoError, JobContext, backend};
+    use std::fs::{self, File, FileTimes};
+    use std::io::Read;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::Duration;
+
+    static PATH_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+
+    #[test]
+    fn metadata_only_transition_retries_buffered_read_and_returns_stable_stamp() {
+        let number = PATH_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "inkpod-buffered-read-retry-{}-{number}.tga",
+            std::process::id()
+        ));
+        let expected = b"bounded encoded TGA fixture";
+        fs::write(&path, expected).unwrap();
+
+        let mut first = File::open(&path).unwrap();
+        let initial_stamp = backend::stamp(&first).unwrap();
+        let mut bytes = Vec::new();
+        first.read_to_end(&mut bytes).unwrap();
+        let original_permissions = fs::metadata(&path).unwrap().permissions();
+        let mut changed_permissions = original_permissions.clone();
+        changed_permissions.set_readonly(!original_permissions.readonly());
+        fs::set_permissions(&path, changed_permissions.clone()).unwrap();
+
+        let result = validate_or_retry_buffered_read(
+            &first,
+            &path,
+            initial_stamp,
+            &bytes,
+            &JobContext::new(),
+        );
+        fs::set_permissions(&path, original_permissions).unwrap();
+        drop(first);
+        fs::remove_file(&path).unwrap();
+
+        let stable_stamp = result.unwrap();
+        assert_eq!(bytes, expected);
+        assert_ne!(stable_stamp, initial_stamp);
+        assert!(
+            stable_stamp.same_read_extent(initial_stamp),
+            "metadata-only retry changed identity or byte length"
+        );
+        assert_eq!(stable_stamp.readonly, changed_permissions.readonly());
+    }
+
+    #[test]
+    fn modification_time_transition_retries_identical_buffered_bytes() {
+        let number = PATH_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "inkpod-buffered-read-modified-{}-{number}.tga",
+            std::process::id()
+        ));
+        let expected = b"unchanged encoded TGA bytes";
+        fs::write(&path, expected).unwrap();
+
+        let mut first = File::open(&path).unwrap();
+        let initial_stamp = backend::stamp(&first).unwrap();
+        let mut bytes = Vec::new();
+        first.read_to_end(&mut bytes).unwrap();
+        let shifted_modified =
+            fs::metadata(&path).unwrap().modified().unwrap() + Duration::from_secs(3);
+        File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(FileTimes::new().set_modified(shifted_modified))
+            .unwrap();
+
+        let result = validate_or_retry_buffered_read(
+            &first,
+            &path,
+            initial_stamp,
+            &bytes,
+            &JobContext::new(),
+        );
+        drop(first);
+        fs::remove_file(&path).unwrap();
+
+        let stable_stamp = result.unwrap();
+        assert_eq!(bytes, expected);
+        assert_ne!(stable_stamp.modified, initial_stamp.modified);
+        assert!(stable_stamp.same_read_extent(initial_stamp));
+    }
+
+    #[test]
+    fn buffered_retry_rejects_same_size_timestamp_preserved_rewrite() {
+        let number = PATH_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "inkpod-buffered-read-rewrite-{}-{number}.tga",
+            std::process::id()
+        ));
+        let original = [0x11_u8; 64];
+        let replacement = [0x22_u8; 64];
+        fs::write(&path, original).unwrap();
+        let original_modified = fs::metadata(&path).unwrap().modified().unwrap();
+        let original_permissions = fs::metadata(&path).unwrap().permissions();
+
+        let mut first = File::open(&path).unwrap();
+        let initial_stamp = backend::stamp(&first).unwrap();
+        let mut bytes = Vec::new();
+        first.read_to_end(&mut bytes).unwrap();
+        fs::write(&path, replacement).unwrap();
+        File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(FileTimes::new().set_modified(original_modified))
+            .unwrap();
+        let mut changed_permissions = original_permissions.clone();
+        changed_permissions.set_readonly(!original_permissions.readonly());
+        fs::set_permissions(&path, changed_permissions).unwrap();
+        let rewritten_stamp = backend::stamp(&first).unwrap();
+        assert_ne!(rewritten_stamp, initial_stamp);
+        assert!(rewritten_stamp.same_read_extent(initial_stamp));
+
+        let result = validate_or_retry_buffered_read(
+            &first,
+            &path,
+            initial_stamp,
+            &bytes,
+            &JobContext::new(),
+        );
+        fs::set_permissions(&path, original_permissions).unwrap();
+        drop(first);
+        fs::remove_file(&path).unwrap();
+
+        assert!(matches!(result, Err(IoError::ChangedDuringRead)));
+        assert_eq!(bytes, original);
     }
 }

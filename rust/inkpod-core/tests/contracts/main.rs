@@ -23,7 +23,7 @@ mod geometry;
 mod history_stroke;
 mod history_visualization;
 mod multi_target;
-mod native_v31;
+mod native_v32;
 mod output_color_guard;
 mod primitive_kernel;
 mod procedure_journal;

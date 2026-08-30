@@ -15,7 +15,7 @@ rebaseline, and the layer/plane contract rebaseline were separately approved bef
 implementation:
 
 - InkScript registry schema/language/file version 2, procedure catalog and owner
-  manifest version 5, replay epoch 27, `.inkpod` top-level version 31, and C ABI
+  manifest version 5, replay epoch 27, `.inkpod` top-level version 32, and C ABI
   version 25 are the exact-current values. Catalog/owner v5 expose the same 73 public
   commands; the private `ApplyBatchOperations` canonical procedure is not an InkScript command.
 - M07's approved exact-current registry schema v2 supersedes registry schema v1 solely to add
@@ -158,7 +158,7 @@ Three `inkpod-ffi` execution contracts plus the C header/export drift, C11 inclu
 layout smoke, route inventory, and exact-old-version rejection cover the historical ABI-v16 PathIntent, copied
 authority grants, fixed DTO host callbacks, immutable plan/preview, one-shot confirmation,
 PlanTask/RunTask event flow, cancellation, atomic native install, and detached batched reports.
-Success evidence reopens the current-v31 output, verifies cache-free full replay, Undo/Redo,
+Success evidence reopens the current-v32 output, verifies cache-free full replay, Undo/Redo,
 document/editor savepoints, history, state digest, and ID high-watermark while proving the input
 Core is unchanged. Negative evidence covers v15 rejection, NULL, short/unknown records, queue
 saturation, cancellation, stale authority/confirmation and save failure. The ABI delegates to the
