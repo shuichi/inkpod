@@ -1834,12 +1834,28 @@ bool RefreshSavedSelectionAvailability(ApplicationHost& state) noexcept {
     return status == INKPOD_STATUS_OK;
 }
 
-bool RefreshTreePane(ApplicationHost& state) noexcept {
-    (void)RefreshSavedSelectionAvailability(state);
-    InkpodDocumentInfo document_info{};
-    if (state.engine == nullptr || !QueryDocument(state, document_info)) {
+bool HasPublishedDocument(
+    const ApplicationHost& state, const DocumentSession& document) noexcept {
+    if (state.engine == nullptr) {
         return false;
     }
+    InkpodDocumentInfo info{};
+    info.struct_size = sizeof(info);
+    return state.engine->GetDocumentInfo(
+        document.id, document.generation, info);
+}
+
+bool RefreshTreePane(ApplicationHost& state) noexcept {
+    // Startup and async document replacement can expose a live Core session
+    // before it owns a cell document. Do not probe document-owned selections
+    // until the published document presentation is available: a NO_DOCUMENT
+    // probe would overwrite the session diagnostic used by later async work.
+    InkpodDocumentInfo document_info{};
+    if (state.engine == nullptr || !QueryDocument(state, document_info)) {
+        state.Workspace().panes.saved_selection_available = false;
+        return false;
+    }
+    (void)RefreshSavedSelectionAvailability(state);
     const InkpodEditorStateInfo* editor = PresentedEditorState(state);
     if (editor == nullptr
         || (editor->flags & INKPOD_EDITOR_STATE_HAS_TARGET) == 0U
@@ -1983,7 +1999,8 @@ bool RefreshLightTablePane(ApplicationHost& state) noexcept {
         }
     }
     if (state.engine == nullptr || target.status != PaneTargetStatus::Ok
-        || document == nullptr || !target.context.generation.has_value()) {
+        || document == nullptr || !target.context.generation.has_value()
+        || !HasPublishedDocument(state, *document)) {
         pane.target_text = UiText(notice == PaneTargetNotice::PinnedDocumentClosed
             ? UiStringId::PinnedClosedFollowingNoTarget
             : UiStringId::FollowingNoTarget);
@@ -2385,7 +2402,8 @@ bool RefreshSequencePane(ApplicationHost& state) noexcept {
         }
     }
     if (state.engine == nullptr || target.status != PaneTargetStatus::Ok
-        || document == nullptr || !target.context.generation.has_value()) {
+        || document == nullptr || !target.context.generation.has_value()
+        || !HasPublishedDocument(state, *document)) {
         state.Thumbnails().RemovePane(state.Workspace().pane_ids.sequence);
         pane.target_text = UiText(notice == PaneTargetNotice::PinnedDocumentClosed
             ? UiStringId::PinnedClosedFollowingNoTarget
@@ -3198,7 +3216,7 @@ void QueueLocatorSample(ApplicationHost& state) noexcept {
         ? document->FindView(pane_target.context.document_view.value())
         : nullptr;
     if (state.engine == nullptr || pane_target.status != PaneTargetStatus::Ok
-        || view == nullptr) {
+        || document == nullptr || view == nullptr) {
         return;
     }
     if (state.routing.locator_pending_token.load(
@@ -3207,6 +3225,12 @@ void QueueLocatorSample(ApplicationHost& state) noexcept {
         return;
     }
     state.routing.locator_latest_requested = false;
+    // A frontend session/view exists before async open or startup creates the
+    // cell document. Only enqueue document-owned locator work after its
+    // presentation has been published by CoreHost.
+    if (!HasPublishedDocument(state, *document)) {
+        return;
+    }
     std::shared_ptr<LocatorAsyncResult> result;
     try {
         result = std::make_shared<LocatorAsyncResult>();
@@ -3634,7 +3658,8 @@ bool RefreshColorPanes(ApplicationHost& state) noexcept {
         }
     }
     if (target.status != PaneTargetStatus::Ok || document == nullptr
-        || !target.context.generation.has_value()) {
+        || !target.context.generation.has_value()
+        || !HasPublishedDocument(state, *document)) {
         inkpod::windows::ui::panes::UpdateColorDockPaneTarget(
             state.Workspace().windows.color_pane,
             UiText(notice == PaneTargetNotice::PinnedDocumentClosed
@@ -13450,6 +13475,18 @@ bool ConfirmDiscard(ApplicationHost& state, std::function<void()> resume = {},
     }
 }
 void RefreshEmptyEditorPresentation(ApplicationHost& state) noexcept {
+    // An editor with no target makes every queued locator result stale. Clear the
+    // completed-result mailbox and request latch before a later document or
+    // bootstrap session reuses the locator pane. Any late completion still carries
+    // the retired command-context generation and is rejected by the normal route.
+    {
+        std::lock_guard lock(state.routing.locator_results_mutex);
+        for (auto& result : state.routing.locator_results) {
+            result.reset();
+        }
+    }
+    state.routing.locator_pending_token.store(0U, std::memory_order_release);
+    state.routing.locator_latest_requested = false;
     ResetPaneDocumentState(state.Workspace().panes);
     ResetToolDocumentState(state.Workspace().tools);
     ResetAnimationDocumentState(state.Workspace().animation);
@@ -20455,7 +20492,10 @@ std::optional<LRESULT> RouteCanvasMessage(
                 auto* view = document == nullptr
                     ? nullptr
                     : document->FindView(group->ActiveView());
-                if (view != nullptr) {
+                // The first visible resize can arrive while an async startup
+                // document is still only a frontend session.
+                if (view != nullptr
+                    && HasPublishedDocument(*state, *document)) {
                     const InkpodViewInput input{
                         sizeof(InkpodViewInput),
                         INKPOD_VIEW_VIEWPORT_RESIZED,

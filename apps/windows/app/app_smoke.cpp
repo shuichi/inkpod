@@ -1104,6 +1104,7 @@ InkpodStatus ImportCommonRasterFromPath(
     ApplicationHost& state, const std::wstring& path) noexcept;
 InkpodStatus OpenFromPath(ApplicationHost& state, const std::wstring& path) noexcept;
 void PumpPendingWindowMessages() noexcept;
+void RefreshEmptyEditorPresentation(ApplicationHost& state) noexcept;
 bool QueryDocument(ApplicationHost& state, InkpodDocumentInfo& info) noexcept;
 bool InstallSubpaletteSources(ApplicationHost& state, inkpod::app::WorkspaceWindow& workspace,
     const std::vector<std::wstring>& paths, bool folder) noexcept;
@@ -16741,6 +16742,13 @@ int RunEmptyWorkspaceAndTabIdentitySmoke(ApplicationHost& state) noexcept {
         const DWORD core_thread = state.engine->ThreadId();
         const DWORD renderer_thread = state.renderer->ThreadId();
         state.lifetime.smoke_dirty_prompt_choice = IDNO;
+        const auto locator_mailbox_is_empty = [&state]() {
+            std::lock_guard lock(state.routing.locator_results_mutex);
+            return std::all_of(
+                state.routing.locator_results.cbegin(),
+                state.routing.locator_results.cend(),
+                [](const auto& result) { return !result.has_value(); });
+        };
         const auto close_all = [&state]() {
             for (std::size_t index = 0U; index < 64U && state.Documents().Count() != 0U; ++index) {
                 const auto* document = state.Documents().SessionAt(0U);
@@ -16755,8 +16763,75 @@ int RunEmptyWorkspaceAndTabIdentitySmoke(ApplicationHost& state) noexcept {
             }
             return state.Documents().Count() == 0U;
         };
+        const auto fail_locator_cleanup = [&state, &locator_mailbox_is_empty](
+                                              const char* stage) {
+            std::fprintf(stderr,
+                "empty workspace locator cleanup mismatch stage=%s token=%llu "
+                "mailbox_empty=%u latest=%u documents=%zu\n",
+                stage,
+                static_cast<unsigned long long>(
+                    state.routing.locator_pending_token.load(std::memory_order_acquire)),
+                static_cast<unsigned>(locator_mailbox_is_empty()),
+                static_cast<unsigned>(state.routing.locator_latest_requested),
+                state.Documents().Count());
+            return 16031;
+        };
+
+        // Seed the exact in-flight locator state that the final-document close
+        // must retire. The second pointer update takes the pending branch and
+        // makes the latest-request latch observable. Do not pump the completion
+        // message before closing: the product close path owns this cleanup.
+        const auto* locator_group = state.Workspace().editors.Active();
+        const DocumentSessionId locator_session = state.Document().id;
+        const Generation locator_generation = state.Document().generation;
+        if (locator_group == nullptr || state.engine->WaitIdle() != INKPOD_STATUS_OK
+            || state.engine->WaitIdle(locator_session, locator_generation)
+                != INKPOD_STATUS_OK) {
+            return fail_locator_cleanup("setup");
+        }
+        // Establish a clean fixture boundary after all older callbacks have
+        // completed. Their already-posted ready messages no longer match a
+        // mailbox entry, while the real requests below remain fully observable.
+        {
+            std::lock_guard lock(state.routing.locator_results_mutex);
+            for (auto& result : state.routing.locator_results) {
+                result.reset();
+            }
+        }
+        state.routing.locator_pending_token.store(0U, std::memory_order_release);
+        state.routing.locator_latest_requested = false;
+        const inkpod::app::PaneTargetStatus follow_locator =
+            state.routing.pane_targets.FollowActive(state.routing.locator_pane);
+        if ((follow_locator != inkpod::app::PaneTargetStatus::Ok
+                && follow_locator != inkpod::app::PaneTargetStatus::NoOp)
+            || state.routing.locator_pending_token.load(
+                   std::memory_order_acquire) != 0U
+            || !locator_mailbox_is_empty()
+            || state.routing.locator_latest_requested) {
+            return fail_locator_cleanup("drain");
+        }
+        if (SendMessageW(state.Workspace().windows.window,
+                inkpod::renderer::kCanvasPointerMoved,
+                static_cast<WPARAM>(locator_group->canvas_id.Value()),
+                MAKELPARAM(7, 7)) != 1
+            || SendMessageW(state.Workspace().windows.window,
+                   inkpod::renderer::kCanvasPointerMoved,
+                   static_cast<WPARAM>(locator_group->canvas_id.Value()),
+                   MAKELPARAM(8, 8)) != 1
+            || state.engine->WaitIdle(locator_session, locator_generation)
+                != INKPOD_STATUS_OK
+            || state.routing.locator_pending_token.load(std::memory_order_acquire) == 0U
+            || locator_mailbox_is_empty()
+            || !state.routing.locator_latest_requested) {
+            return fail_locator_cleanup("seed");
+        }
         if (!close_all()) {
             return 16001;
+        }
+        if (state.routing.locator_pending_token.load(std::memory_order_acquire) != 0U
+            || !locator_mailbox_is_empty()
+            || state.routing.locator_latest_requested) {
+            return fail_locator_cleanup("close");
         }
         const HWND window = state.Workspace().windows.window;
         const auto workspace_id = state.Workspace().id;
@@ -16788,6 +16863,132 @@ int RunEmptyWorkspaceAndTabIdentitySmoke(ApplicationHost& state) noexcept {
         if (!empty()) {
             return 16002;
         }
+
+        // Startup and document replacement briefly have a frontend session whose
+        // Core does not yet own a cell document. Refreshing the layer palette in
+        // that state must stop at the cached document query: a document-owned
+        // saved-selection query would overwrite the session error with
+        // NO_DOCUMENT, which can later be presented as an unrelated async failure.
+        const bool layer_was_visible = state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Layer);
+        const auto empty_startup_session = state.AddDocumentSession();
+        if (!empty_startup_session.has_value()) {
+            return 16030;
+        }
+        // Closing the preceding documents can leave a pointer-sample completion
+        // queued for the UI thread even though CoreHost has already finished it.
+        // Drain that prior generation before testing the blank bootstrap route.
+        if (state.engine->WaitIdle(
+                empty_startup_session->session, empty_startup_session->generation)
+            != INKPOD_STATUS_OK) {
+            (void)state.CloseDocumentSession(empty_startup_session->session);
+            return 16030;
+        }
+        PumpPendingWindowMessages();
+        const auto restore_empty_startup = [&state, empty_startup_session, layer_was_visible]() {
+            const bool layer_is_visible =
+                state.Workspace().windows.workspace.dock.IsPaneVisible(DockPaneType::Layer);
+            if (layer_is_visible != layer_was_visible) {
+                (void)SendMessageW(state.Workspace().windows.window, WM_COMMAND,
+                    IDM_WINDOW_LAYER_PALETTE, 0);
+            }
+            const bool closed =
+                state.CloseDocumentSession(empty_startup_session->session);
+            if (closed) {
+                RefreshEmptyEditorPresentation(state);
+            }
+            return closed;
+        };
+        if (layer_was_visible
+            && SendMessageW(window, WM_COMMAND, IDM_WINDOW_LAYER_PALETTE, 0) != 1) {
+            (void)restore_empty_startup();
+            return 16030;
+        }
+        constexpr std::wstring_view kEmptyStartupSentinel{L"empty startup pane refresh"};
+        state.Workspace().panes.saved_selection_available = true;
+        state.engine->SetLocalFailure(kEmptyStartupSentinel);
+        const LRESULT show_layer =
+            SendMessageW(window, WM_COMMAND, IDM_WINDOW_LAYER_PALETTE, 0);
+        const std::wstring layer_error = state.engine->LastError(
+            empty_startup_session->session, empty_startup_session->generation);
+        const bool saved_selection_cleared =
+            !state.Workspace().panes.saved_selection_available;
+
+        // The complete initial-palette refresh also runs while the bootstrap
+        // session is blank and must not probe any document-owned pane models.
+        state.engine->SetLocalFailure(kEmptyStartupSentinel);
+        ShowInitialPalettes(state);
+        const std::wstring initial_palettes_error = state.engine->LastError(
+            empty_startup_session->session, empty_startup_session->generation);
+
+        // The startup failure can also be raised by a real canvas pointer
+        // notification racing the blank bootstrap session. Reset the diagnostic
+        // after the palette refresh so this check observes only that async route.
+        // The preceding empty-document transition must have retired every older
+        // locator token and mailbox result before this new bootstrap session.
+        auto* empty_startup_group = state.Workspace().editors.Active();
+        state.engine->SetLocalFailure(kEmptyStartupSentinel);
+        const bool locator_mailbox_empty = locator_mailbox_is_empty();
+        const bool locator_was_idle =
+            state.routing.locator_pending_token.load(std::memory_order_acquire) == 0U;
+        const LRESULT pointer_moved = empty_startup_group == nullptr
+            ? 0
+            : SendMessageW(window, inkpod::renderer::kCanvasPointerMoved,
+                  static_cast<WPARAM>(empty_startup_group->canvas_id.Value()),
+                  MAKELPARAM(8, 8));
+        const InkpodStatus pointer_idle = state.engine->WaitIdle(
+            empty_startup_session->session, empty_startup_session->generation);
+        PumpPendingWindowMessages();
+        const std::wstring pointer_error = state.engine->LastError(
+            empty_startup_session->session, empty_startup_session->generation);
+        const bool locator_is_idle =
+            state.routing.locator_pending_token.load(std::memory_order_acquire) == 0U;
+
+        // The first visible Canvas resize follows the same bootstrap window but
+        // is synchronous. It must likewise avoid a document-owned view command
+        // until CoreHost has published document metadata.
+        state.engine->SetLocalFailure(kEmptyStartupSentinel);
+        const LRESULT viewport_changed = empty_startup_group == nullptr
+            ? 1
+            : SendMessageW(window, inkpod::renderer::kCanvasViewportChanged,
+                  static_cast<WPARAM>(empty_startup_group->canvas_id.Value()),
+                  MAKELPARAM(640, 480));
+        const std::wstring viewport_error = state.engine->LastError(
+            empty_startup_session->session, empty_startup_session->generation);
+        const bool restored_empty_startup = restore_empty_startup();
+        const bool returned_to_empty_workspace = empty();
+        if (show_layer != 1 || layer_error != kEmptyStartupSentinel
+            || !saved_selection_cleared
+            || initial_palettes_error != kEmptyStartupSentinel
+            || empty_startup_group == nullptr || !locator_mailbox_empty
+            || !locator_was_idle
+            || pointer_moved != 1 || pointer_idle != INKPOD_STATUS_OK
+            || pointer_error != kEmptyStartupSentinel || !locator_is_idle
+            || viewport_changed != 0 || viewport_error != kEmptyStartupSentinel
+            || !restored_empty_startup || !returned_to_empty_workspace) {
+            std::fwprintf(stderr,
+                L"empty startup refresh mismatch: layer=%lld layer-error=%ls "
+                L"saved=%u palettes-error=%ls group=%p "
+                L"mailbox=%u locator=%u/%u pointer=%lld idle=%u error=%ls "
+                L"viewport=%lld viewport-error=%ls restored=%u empty=%u\n",
+                static_cast<long long>(show_layer),
+                layer_error.c_str(),
+                static_cast<unsigned>(saved_selection_cleared),
+                initial_palettes_error.c_str(),
+                static_cast<void*>(empty_startup_group),
+                static_cast<unsigned>(locator_mailbox_empty),
+                static_cast<unsigned>(locator_was_idle),
+                static_cast<unsigned>(locator_is_idle),
+                static_cast<long long>(pointer_moved),
+                static_cast<unsigned>(pointer_idle),
+                pointer_error.c_str(),
+                static_cast<long long>(viewport_changed),
+                viewport_error.c_str(),
+                static_cast<unsigned>(restored_empty_startup),
+                static_cast<unsigned>(returned_to_empty_workspace));
+            return 16030;
+        }
+
         const HWND blank_canvas = state.Workspace().windows.canvas;
         SendMessageW(blank_canvas, WM_MOUSEWHEEL, MAKEWPARAM(0, WHEEL_DELTA), 0);
         SendMessageW(blank_canvas, WM_MOUSEHWHEEL, MAKEWPARAM(0, WHEEL_DELTA), 0);
