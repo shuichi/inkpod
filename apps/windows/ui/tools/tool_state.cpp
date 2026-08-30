@@ -49,6 +49,19 @@ bool IsGeometryCanvasPlane(std::uint32_t kind) noexcept {
         || kind == INKPOD_TYPED_PLANE_RASTER;
 }
 
+std::uint32_t ActiveToolAfterPlaneTransition(
+    std::uint32_t active_tool,
+    std::uint32_t plane_kind,
+    bool explicit_plane_selection) noexcept {
+    if ((IsGeometryCanvasTool(active_tool)
+            && !IsGeometryCanvasPlane(plane_kind))
+        || (explicit_plane_selection && active_tool == kInteractionFill
+            && plane_kind == INKPOD_TYPED_PLANE_MAIN_LINE)) {
+        return INKPOD_TOOL_PENCIL;
+    }
+    return active_tool;
+}
+
 void CancelRasterGeometryPreview(
     app::ToolUiState& tools, HWND canvas) noexcept {
     const bool had_preview = tools.geometry_preview_active
@@ -115,9 +128,10 @@ void SetActiveCommandColor(
 
 void HandleActivePlaneTransition(
     app::ToolUiState& tools, HWND canvas, std::uint32_t plane_kind) noexcept {
-    if (IsGeometryCanvasTool(tools.active_tool)
-        && !IsGeometryCanvasPlane(plane_kind)) {
-        TransitionActiveTool(tools, canvas, INKPOD_TOOL_PENCIL);
+    const std::uint32_t next_tool =
+        ActiveToolAfterPlaneTransition(tools.active_tool, plane_kind, true);
+    if (next_tool != tools.active_tool) {
+        TransitionActiveTool(tools, canvas, next_tool);
     }
 }
 

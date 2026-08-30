@@ -42,6 +42,15 @@ inline constexpr std::uint32_t kInteractionGeometryPolyline =
 
 bool IsGeometryCanvasTool(std::uint32_t tool) noexcept;
 bool IsGeometryCanvasPlane(std::uint32_t kind) noexcept;
+
+// Resolves the tool that remains meaningful after a plane change. Geometry is
+// always reconciled away from unsupported planes. An explicit MainLine choice
+// additionally returns Fill to main-line drawing; automatic refreshes do not.
+std::uint32_t ActiveToolAfterPlaneTransition(
+    std::uint32_t active_tool,
+    std::uint32_t plane_kind,
+    bool explicit_plane_selection) noexcept;
+
 // All active-tool changes go through this boundary so leaving a geometry,
 // selection, or ranged-fill tool cannot retain a preview owned by the prior
 // interaction.

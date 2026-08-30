@@ -27,6 +27,7 @@ using inkpod::windows::ui::kProductionCommandStateCount;
 using inkpod::windows::ui::tools::SetActiveCommandColor;
 using inkpod::windows::ui::tools::TransitionActiveTool;
 using inkpod::windows::ui::tools::HandleActivePlaneTransition;
+using inkpod::windows::ui::tools::ActiveToolAfterPlaneTransition;
 using inkpod::windows::ui::tools::kInteractionEyedropper;
 using inkpod::windows::ui::tools::kInteractionEffectGradient;
 using inkpod::windows::ui::tools::kInteractionFill;
@@ -712,6 +713,23 @@ int main() {
         || tools.geometry_preview_active
         || tools.geometry_snap_bypass) {
         return 25;
+    }
+
+    TransitionActiveTool(tools, nullptr, kInteractionFill);
+    if (ActiveToolAfterPlaneTransition(
+            tools.active_tool, INKPOD_TYPED_PLANE_MAIN_LINE, false)
+        != kInteractionFill) {
+        return 26;
+    }
+    HandleActivePlaneTransition(tools, nullptr, INKPOD_TYPED_PLANE_COLOR);
+    if (tools.active_tool != kInteractionFill) {
+        return 26;
+    }
+    tools.fill_gesture_samples.push_back(InkpodStrokeSample{});
+    HandleActivePlaneTransition(tools, nullptr, INKPOD_TYPED_PLANE_MAIN_LINE);
+    if (tools.active_tool != INKPOD_TOOL_PENCIL
+        || !tools.fill_gesture_samples.empty()) {
+        return 27;
     }
 
     inputs.edit.clipboard_available = true;

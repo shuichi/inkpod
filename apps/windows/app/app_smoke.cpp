@@ -1120,7 +1120,8 @@ bool QueueAutosave(
 bool RefreshColorPanes(ApplicationHost& state) noexcept;
 bool RefreshLightTablePane(ApplicationHost& state) noexcept;
 bool RefreshSequencePane(ApplicationHost& state) noexcept;
-bool RefreshTreePane(ApplicationHost& state) noexcept;
+bool RefreshTreePane(
+    ApplicationHost& state, bool explicit_plane_selection = false) noexcept;
 void ResetUiForNewActiveDocument(
     ApplicationHost& state, bool preserve_sequence_view = false) noexcept;
 bool ResolveConfiguredShortcut(ApplicationHost& state, std::uint32_t virtual_key, std::uint32_t modifiers, UINT& menu_command) noexcept;
@@ -1129,6 +1130,7 @@ InkpodStatus SaveToPath(ApplicationHost& state, const std::wstring& path) noexce
 void SetDrawingColor(ApplicationHost& state, InkpodColorValue color) noexcept;
 InkpodStatus SetEditorActiveTool(
     ApplicationHost& state, std::uint32_t tool) noexcept;
+InkpodStatus SetEditorDiameter(ApplicationHost& state, float diameter) noexcept;
 InkpodStatus SetEditorActiveTarget(
     ApplicationHost& state,
     std::uint64_t layer_id,
@@ -6452,6 +6454,7 @@ int RunPaintingRecoverySmoke(ApplicationHost& state) noexcept {
     }
     SendMessageW(
         state.Workspace().windows.window, WM_COMMAND, IDM_TOOL_FILL, 0);
+    const std::uint32_t retained_fill_color = state.Workspace().tools.color_rgba;
     if (state.Workspace().panes.layer_palette_dialog.select_plane == nullptr) {
         return 791;
     }
@@ -6459,9 +6462,17 @@ int RunPaintingRecoverySmoke(ApplicationHost& state) noexcept {
         state.Workspace().panes.layer_palette_dialog.context,
         before_fill.main_plane_id);
     if (state.Workspace().tools.active_plane != INKPOD_PLANE_MAIN_LINE
+        || state.Workspace().tools.active_tool != INKPOD_TOOL_PENCIL
         || state.Workspace().panes.active_tree_plane_id != before_fill.main_plane_id
         || LayerPaletteSelectedPlane(state.Workspace().panes.layer_palette)
             != before_fill.main_plane_id) {
+        return 791;
+    }
+    SendMessageW(
+        state.Workspace().windows.window, WM_COMMAND, IDM_TOOL_FILL, 0);
+    if (state.Workspace().tools.active_tool
+            != inkpod::windows::ui::tools::kInteractionFill
+        || state.Workspace().tools.color_rgba != retained_fill_color) {
         return 791;
     }
     if (SendMessageW(
@@ -17161,6 +17172,26 @@ int RunEmptyWorkspaceAndTabIdentitySmoke(ApplicationHost& state) noexcept {
             || OpenDocumentFromPath(state, files.tga) != INKPOD_STATUS_OK) {
             return 16024;
         }
+        const auto same_imported_color =
+            [](const InkpodColorValue& left, const InkpodColorValue& right) {
+                return left.depth == right.depth && left.red == right.red
+                    && left.green == right.green && left.blue == right.blue
+                    && left.alpha == right.alpha;
+            };
+        const InkpodColorValue imported_pencil_color{
+            sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 0U, 0U, 0U, 255U};
+        SendMessageW(window, WM_COMMAND, IDM_TOOL_PENCIL, 0);
+        state.Workspace().panes.color_pane.change_color(
+            state.Workspace().panes.color_pane.context, imported_pencil_color);
+        if (SetEditorDiameter(state, 1.0F) != INKPOD_STATUS_OK
+            || !same_imported_color(
+                state.Workspace().panes.main_line_color,
+                imported_pencil_color)
+            || !same_imported_color(
+                state.Workspace().panes.color_pane.main_line_color,
+                imported_pencil_color)) {
+            return 16032;
+        }
         SendMessageW(window, WM_COMMAND, IDM_TOOL_FILL, 0);
         if (!UpdateEditorFillOptionsForSmoke(state, [](InkpodEditorFillOptions& fill) {
                 fill.operation = INKPOD_FILL_SEED;
@@ -17173,7 +17204,7 @@ int RunEmptyWorkspaceAndTabIdentitySmoke(ApplicationHost& state) noexcept {
             return 16025;
         }
         const InkpodColorValue imported_fill_color{
-            sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 12U, 34U, 56U, 255U};
+            sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 255U, 255U, 0U, 255U};
         state.Workspace().panes.color_pane.change_color(
             state.Workspace().panes.color_pane.context, imported_fill_color);
         SendMessageW(window, WM_COMMAND, IDM_VIEW_FIT, 0);
@@ -17193,9 +17224,110 @@ int RunEmptyWorkspaceAndTabIdentitySmoke(ApplicationHost& state) noexcept {
         if (!QueryDocument(state, imported_after)
             || imported_after.document_revision != imported_before.document_revision + 1U
             || imported_after.main_plane_checksum != imported_before.main_plane_checksum
-            || imported_after.color_plane_checksum == imported_before.color_plane_checksum) {
+            || imported_after.color_plane_checksum == imported_before.color_plane_checksum
+            || imported_after.active_plane != INKPOD_PLANE_COLOR
+            || state.Workspace().tools.active_tool
+                != inkpod::windows::ui::tools::kInteractionFill
+            || !same_imported_color(
+                state.Workspace().tools.drawing_color, imported_fill_color)
+            || !same_imported_color(
+                state.Workspace().panes.main_line_color,
+                imported_pencil_color)
+            || !same_imported_color(
+                state.Workspace().panes.color_pane.main_line_color,
+                imported_pencil_color)) {
             return 16027;
         }
+
+        // Fill owns its yellow command color. Explicitly returning to MainLine
+        // must restore Pencil and its black command color, including when the
+        // target is already MainLine after a repeated tool/plane switch.
+        SendMessageW(window, WM_COMMAND, IDM_PLANE_MAIN_LINE, 0);
+        InkpodDocumentInfo imported_main_line{};
+        if (!QueryDocument(state, imported_main_line)
+            || imported_main_line.active_plane != INKPOD_PLANE_MAIN_LINE
+            || state.Workspace().tools.active_tool != INKPOD_TOOL_PENCIL
+            || !same_imported_color(
+                state.Workspace().tools.drawing_color, imported_pencil_color)
+            || !same_imported_color(
+                state.Workspace().panes.color_pane.drawing_color,
+                imported_pencil_color)
+            || !same_imported_color(
+                state.Workspace().panes.color_pane.main_line_color,
+                imported_pencil_color)) {
+            return 16033;
+        }
+        SendMessageW(window, WM_COMMAND, IDM_TOOL_FILL, 0);
+        if (state.Workspace().tools.active_tool
+                != inkpod::windows::ui::tools::kInteractionFill
+            || !same_imported_color(
+                state.Workspace().tools.drawing_color, imported_fill_color)) {
+            return 16034;
+        }
+        SendMessageW(window, WM_COMMAND, IDM_PLANE_MAIN_LINE, 0);
+        if (state.Workspace().tools.active_tool != INKPOD_TOOL_PENCIL
+            || !same_imported_color(
+                state.Workspace().tools.drawing_color, imported_pencil_color)) {
+            return 16033;
+        }
+
+        // The imported black RGBA boundary exactly matches Pencil's color, so
+        // drawing it again exercises the product auto-erase path rather than a
+        // Binary-only Core fixture.
+        const int imported_line_x = static_cast<int>(
+            std::lround(imported_bounds.left + 2.5 * imported_zoom));
+        const int imported_line_y = static_cast<int>(
+            std::lround(imported_bounds.top + 5.5 * imported_zoom));
+        if (SendMessageW(state.Workspace().windows.canvas,
+                WM_LBUTTONDOWN,
+                MK_LBUTTON,
+                MAKELPARAM(imported_line_x, imported_line_y))
+                != 1
+            || SendMessageW(state.Workspace().windows.canvas,
+                   WM_LBUTTONUP,
+                   0,
+                   MAKELPARAM(imported_line_x, imported_line_y))
+                != 1) {
+            return 16035;
+        }
+        PumpPendingWindowMessages();
+        if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+            return 16035;
+        }
+        PumpPendingWindowMessages();
+        if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+            return 16035;
+        }
+        PumpPendingWindowMessages();
+        InkpodDocumentInfo imported_erased{};
+        if (!QueryDocument(state, imported_erased)
+            || imported_erased.document_revision
+                != imported_after.document_revision + 1U
+            || imported_erased.main_plane_checksum
+                == imported_after.main_plane_checksum
+            || imported_erased.color_plane_checksum
+                != imported_after.color_plane_checksum) {
+            return 16036;
+        }
+        SendMessageW(window, WM_COMMAND, IDM_EDIT_UNDO, 0);
+        InkpodDocumentInfo imported_erase_undo{};
+        if (!QueryDocument(state, imported_erase_undo)
+            || imported_erase_undo.main_plane_checksum
+                != imported_after.main_plane_checksum
+            || imported_erase_undo.color_plane_checksum
+                != imported_after.color_plane_checksum) {
+            return 16037;
+        }
+        SendMessageW(window, WM_COMMAND, IDM_EDIT_REDO, 0);
+        InkpodDocumentInfo imported_erase_redo{};
+        if (!QueryDocument(state, imported_erase_redo)
+            || imported_erase_redo.main_plane_checksum
+                != imported_erased.main_plane_checksum
+            || imported_erase_redo.color_plane_checksum
+                != imported_erased.color_plane_checksum) {
+            return 16038;
+        }
+        SendMessageW(window, WM_COMMAND, IDM_EDIT_UNDO, 0);
         SendMessageW(window, WM_COMMAND, IDM_EDIT_UNDO, 0);
         InkpodDocumentInfo imported_undo{};
         if (!QueryDocument(state, imported_undo)

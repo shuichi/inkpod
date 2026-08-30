@@ -197,6 +197,7 @@ using inkpod::windows::ui::tools::CancelSelectionGeometryPreview;
 using inkpod::windows::ui::tools::CancelColorReplaceGeometryPreview;
 using inkpod::windows::ui::tools::CancelFillGeometryPreview;
 using inkpod::windows::ui::tools::CancelRasterGeometryPreview;
+using inkpod::windows::ui::tools::ActiveToolAfterPlaneTransition;
 using inkpod::windows::ui::tools::IsGeometryCanvasPlane;
 using inkpod::windows::ui::tools::IsGeometryCanvasTool;
 using inkpod::windows::ui::tools::kInteractionBoxZoom;
@@ -554,7 +555,8 @@ using inkpod::windows::ui::tools::ViewController;
 using inkpod::windows::ui::BatchController;
 using inkpod::windows::ui::EffectsController;
 bool QueryTreeNode(ApplicationHost& state, bool plane, TreePaneNode& output) noexcept;
-bool RefreshTreePane(ApplicationHost& state) noexcept;
+bool RefreshTreePane(
+    ApplicationHost& state, bool explicit_plane_selection = false) noexcept;
 bool RefreshSequencePane(ApplicationHost& state) noexcept;
 bool RefreshLightTablePane(ApplicationHost& state) noexcept;
 const InkpodEditorStateInfo* PresentedEditorState(
@@ -1051,7 +1053,7 @@ void SelectLayerPalettePlane(void* context, std::uint64_t plane_id) noexcept {
     if (status != INKPOD_STATUS_OK) {
         ShowCoreError(*state, state->Workspace().windows.window, UiText(UiStringId::Text0321));
     } else {
-        RefreshTreePane(*state);
+        RefreshTreePane(*state, true);
     }
     UpdateMenuState(*state);
 }
@@ -1845,7 +1847,8 @@ bool HasPublishedDocument(
         document.id, document.generation, info);
 }
 
-bool RefreshTreePane(ApplicationHost& state) noexcept {
+bool RefreshTreePane(
+    ApplicationHost& state, bool explicit_plane_selection) noexcept {
     // Startup and async document replacement can expose a live Core session
     // before it owns a cell document. Do not probe document-owned selections
     // until the published document presentation is available: a NO_DOCUMENT
@@ -1958,9 +1961,12 @@ bool RefreshTreePane(ApplicationHost& state) noexcept {
         state.Workspace().panes.active_tree_layer_id,
         state.Workspace().panes.active_tree_plane_id,
         state.Workspace().windows.workspace.layer_split_milli);
-    if (IsGeometryCanvasTool(state.Workspace().tools.active_tool)
-        && !IsGeometryCanvasPlane(active_plane_kind)) {
-        (void)SetEditorActiveTool(state, INKPOD_TOOL_PENCIL);
+    const std::uint32_t next_tool = ActiveToolAfterPlaneTransition(
+        state.Workspace().tools.active_tool,
+        active_plane_kind,
+        explicit_plane_selection);
+    if (next_tool != state.Workspace().tools.active_tool) {
+        (void)SetEditorActiveTool(state, next_tool);
     }
     return true;
 }
@@ -18460,7 +18466,7 @@ std::optional<LRESULT> RouteToolCommand(
             if (plane_status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, UiText(UiStringId::Text0325));
             } else {
-                RefreshTreePane(*state);
+                RefreshTreePane(*state, true);
             }
             UpdateMenuState(*state);
             return 0;
