@@ -292,6 +292,16 @@ void ProvideSelectionViewCommandStates(
             && input.selection_view.editor_group_count == 2U);
     SetEnabled(
         states,
+        IDM_EDITOR_GROUP_FIRST,
+        input.document.has_document
+            && input.selection_view.editor_group_count >= 1U);
+    SetEnabled(
+        states,
+        IDM_EDITOR_GROUP_SECOND,
+        input.document.has_document
+            && input.selection_view.editor_group_count >= 2U);
+    SetEnabled(
+        states,
         {IDM_SELECTION_APPLY_SAVED_MASK, IDM_SELECTION_ADD_SAVED_MASK,
          IDM_SELECTION_SUBTRACT_SAVED_MASK, IDM_SELECTION_RENAME_SAVED_MASK,
          IDM_SELECTION_DELETE_SAVED_MASK},

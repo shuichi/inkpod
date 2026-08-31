@@ -1,5 +1,6 @@
 #include "main_window_runtime.h"
 
+#include <algorithm>
 #include <array>
 #include <cwchar>
 
@@ -7,6 +8,43 @@
 #include "main_window_runtime_internal.h"
 
 namespace inkpod::windows::ui::runtime {
+
+namespace {
+
+bool NativeMenuOwnsKey(const MSG& message) noexcept {
+    if (message.message != WM_KEYDOWN && message.message != WM_SYSKEYDOWN) {
+        return false;
+    }
+    const bool control = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+    const bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+    const bool alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
+    const bool windows = (GetKeyState(VK_LWIN) & 0x8000) != 0
+        || (GetKeyState(VK_RWIN) & 0x8000) != 0;
+    if (message.wParam == VK_MENU) {
+        return true;
+    }
+    if (message.wParam == VK_F10 && !control && !shift && !alt && !windows) {
+        return true;
+    }
+    if (!alt || control || windows) {
+        return false;
+    }
+    if (message.wParam == VK_F4 && !shift) {
+        return true;
+    }
+    if (message.wParam == VK_SPACE) {
+        return true;
+    }
+    constexpr std::array<WPARAM, 11U> kTopLevelMnemonics{
+        L'F', L'E', L'V', L'L', L'S', L'I', L'T', L'C', L'P', L'W', L'H'};
+    return std::find(
+               kTopLevelMnemonics.begin(),
+               kTopLevelMnemonics.end(),
+               message.wParam)
+        != kTopLevelMnemonics.end();
+}
+
+}  // namespace
 
 bool PreTranslateKeyboardMessage(
     app::ApplicationHost& state,
@@ -19,6 +57,9 @@ bool PreTranslateKeyboardMessage(
         return false;
     }
     if (key_up && !state.shortcuts.hold_active) {
+        return false;
+    }
+    if (NativeMenuOwnsKey(message)) {
         return false;
     }
     const bool control = (GetKeyState(VK_CONTROL) & 0x8000) != 0;

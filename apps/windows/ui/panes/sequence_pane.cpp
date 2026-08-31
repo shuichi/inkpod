@@ -262,44 +262,17 @@ LRESULT CALLBACK SequenceListSubclass(
         const bool control = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
         const bool alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
         const bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+        // Left/Right are the focused horizontal ListBox's control-local
+        // navigation. Configured Timeline shortcuts are resolved before the
+        // control receives this message.
         if (!control && !alt && !shift
             && (wparam == VK_LEFT || wparam == VK_RIGHT)) {
             const bool retain_focus = GetFocus() == list;
             StepSequenceCell(*state, wparam == VK_RIGHT);
-            if (retain_focus && IsWindow(list) != FALSE && IsWindowVisible(list) != FALSE) {
+            if (retain_focus && IsWindow(list) != FALSE
+                && IsWindowVisible(list) != FALSE) {
                 SetFocus(list);
             }
-            return 0;
-        }
-        if (!state->view.cut_editable) {
-            return DefSubclassProc(list, message, wparam, lparam);
-        }
-        if (wparam == VK_INSERT) {
-            Dispatch(*state, IDM_CUT_SEQUENCE_ADD);
-            return 0;
-        }
-        if (wparam == VK_DELETE) {
-            Dispatch(*state, IDM_CUT_SEQUENCE_REMOVE);
-            return 0;
-        }
-        if (alt && (wparam == VK_LEFT || wparam == VK_UP)) {
-            Dispatch(*state, IDM_CUT_SEQUENCE_MOVE_UP);
-            return 0;
-        }
-        if (alt && (wparam == VK_RIGHT || wparam == VK_DOWN)) {
-            Dispatch(*state, IDM_CUT_SEQUENCE_MOVE_DOWN);
-            return 0;
-        }
-        if (control && wparam == 'R') {
-            Dispatch(*state, IDM_CUT_SEQUENCE_RENUMBER);
-            return 0;
-        }
-        if (control && wparam == 'Z') {
-            Dispatch(*state, IDM_CUT_UNDO);
-            return 0;
-        }
-        if (control && wparam == 'Y') {
-            Dispatch(*state, IDM_CUT_REDO);
             return 0;
         }
     }

@@ -91,9 +91,17 @@ virtual-key、scan-code、modifier bit mask、Base64、binary blob を JSON へ�
 ```
 
 組み込み shortcut profile は application の既定値なので複製保存せず、利用者が
-作成した profile と active profile だけを JSON に保存する。workspace の pane、
-zone、tab、preset も `layer-plane`、`right`、`right-tab-1`、`coloring` のような
-stable かつ人間が理解できる key で表す。
+作成または import した profile と active profile だけを JSON に保存する。組み込み
+profile は Windows／VS Code 慣例だけを割り当てた sparse profile であり、bindings に
+存在しない production command も shortcut editor の完全な command catalog には
+`未割当`として現れる。組み込み既定表を application update で変更しても、保存済み
+custom profile を新しい既定から再生成しない。利用者が明示した無修飾 `Q`、`K`、`A`
+等を含む assignment、unassignment、primary／secondary slot、context、action、match は
+そのまま保持する。Reset は利用者が選択した profile／command に対する明示操作だけとし、
+settings decode や起動時の既定解決を custom profile の暗黙 reset に使わない。
+
+workspace の pane、zone、tab、preset も `layer-plane`、`right`、`right-tab-1`、
+`coloring` のような stable かつ人間が理解できる key で表す。
 
 現行の設定 schema は `formatVersion: 3` だけを受理する。
 処理進捗 pane と `window.job.progress` command の廃止に伴い、設定と
@@ -124,4 +132,12 @@ Recovery metadata の現行形式は checksummed binary version 2 で、旧形�
   `application-settings-v1.bi` からの migration は実装しない。
 
 `.inkshortcuts` の import/export も同じ readable binding 表現を使い、top-level
-`format` は `inkpod-shortcuts`、current `formatVersion` は `2` とする。
+`format` は `inkpod-shortcuts`、current `formatVersion` は `3` とする。v1/v2 は
+migration せず拒否する。sparse な bindings は command catalog の縮小を意味せず、
+省略した command は未割当として編集可能である。settings と `.inkshortcuts` の
+decode／validation は、bare `Alt`、unmodified `F10`、`Alt+Space`、top-level menu
+mnemonic の `Alt+英字` が既存 custom v3 profile にあってもそのまま保持し、
+round-trip する。これらは shortcut editor の新規 record／rebind 時には拒否し、
+runtime は native menu／system route を優先するため保持済み割当も発火しない。
+`Alt+F4` は組み込み Exit binding の標準例外であり、OS が application へ配送しない
+global shortcut のために hook を導入しない。

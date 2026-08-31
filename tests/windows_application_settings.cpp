@@ -3,7 +3,10 @@
 
 #include <windows.h>
 
+#include <array>
+#include <cstdint>
 #include <filesystem>
+#include <span>
 #include <string>
 
 #include "app/resource.h"
@@ -16,19 +19,20 @@ using inkpod::app::ApplicationSettings;
 using inkpod::app::DecodeApplicationSettingsJson;
 using inkpod::app::EncodeApplicationSettingsJson;
 using inkpod::app::PersistedWorkspace;
-using inkpod::windows::ui::BuildShortcutProfileFromLegacy;
+using inkpod::windows::ui::BuildDefaultShortcutProfile;
+using inkpod::windows::ui::FindShortcutBinding;
 using inkpod::windows::ui::ShortcutAction;
 using inkpod::windows::ui::ShortcutContext;
 using inkpod::windows::ui::ShortcutKeyMatch;
 using inkpod::windows::ui::ShortcutProfile;
 using inkpod::windows::ui::ShortcutProfileBinding;
 using inkpod::windows::ui::ShortcutProfileSet;
+using inkpod::windows::ui::ShortcutPhysicalKeyFromVirtualKey;
 using inkpod::windows::ui::ShortcutSlot;
 
 ShortcutProfileSet Defaults() {
     ShortcutProfileSet result{};
-    result.profiles.push_back(BuildShortcutProfileFromLegacy(
-        L"Built-in", true, inkpod::windows::ui::BuildDefaultShortcutSequences()));
+    result.profiles.push_back(BuildDefaultShortcutProfile(L"Built-in"));
     return result;
 }
 
@@ -55,6 +59,20 @@ ApplicationSettings Sample() {
     binding.strokes[0].physical_key = 0x1fU;
     binding.strokes[0].modifiers = INKPOD_SHORTCUT_MODIFIER_CONTROL;
     custom.bindings.push_back(binding);
+    ShortcutProfileBinding legacy_custom{};
+    legacy_custom.command_id = IDM_TOOL_PENCIL;
+    legacy_custom.slot = ShortcutSlot::Primary;
+    legacy_custom.context = ShortcutContext::Canvas;
+    legacy_custom.action = ShortcutAction::Execute;
+    legacy_custom.key_match = ShortcutKeyMatch::Logical;
+    constexpr std::array<std::uint32_t, 3U> keys{'Q', 'K', 'A'};
+    legacy_custom.stroke_count = static_cast<std::uint32_t>(keys.size());
+    for (std::size_t index = 0U; index < keys.size(); ++index) {
+        legacy_custom.strokes[index].logical_key = keys[index];
+        legacy_custom.strokes[index].physical_key =
+            ShortcutPhysicalKeyFromVirtualKey(keys[index], 0U);
+    }
+    custom.bindings.push_back(legacy_custom);
     result.shortcuts.profiles.push_back(std::move(custom));
     result.shortcuts.active_profile = 1U;
 
@@ -77,6 +95,18 @@ bool Contains(const std::string& text, const char* needle) {
 
 int wmain() {
     const ShortcutProfileSet defaults = Defaults();
+    const ShortcutProfileBinding* redo_alias = FindShortcutBinding(
+        std::span<const ShortcutProfileBinding>(defaults.profiles.front().bindings),
+        IDM_EDIT_REDO,
+        ShortcutSlot::Secondary);
+    if (defaults.profiles.front().bindings.size() != 33U
+        || redo_alias == nullptr || redo_alias->stroke_count != 1U
+        || redo_alias->strokes[0].logical_key != static_cast<std::uint32_t>('Z')
+        || redo_alias->strokes[0].modifiers
+            != (INKPOD_SHORTCUT_MODIFIER_CONTROL
+                | INKPOD_SHORTCUT_MODIFIER_SHIFT)) {
+        return 16;
+    }
     const ApplicationSettings sample = Sample();
     std::string json;
     if (!EncodeApplicationSettingsJson(sample, json)) {
@@ -102,10 +132,13 @@ int wmain() {
         || decoded.sequence_switch_policy != sample.sequence_switch_policy
         || decoded.sequence_endpoint_policy != sample.sequence_endpoint_policy
         || decoded.shortcuts.profiles.size() != 2U
+        || decoded.shortcuts.profiles[0] != defaults.profiles[0]
         || decoded.shortcuts.profiles[1].name != L"My shortcuts"
-        || decoded.shortcuts.profiles[1].bindings.size() != 1U
+        || decoded.shortcuts.profiles[1].bindings.size() != 2U
         || decoded.shortcuts.profiles[1].bindings[0] !=
             sample.shortcuts.profiles[1].bindings[0]
+        || decoded.shortcuts.profiles[1].bindings[1] !=
+            sample.shortcuts.profiles[1].bindings[1]
         || decoded.workspaces.size() != 1U
         || decoded.workspaces[0].slot != 0U
         || decoded.workspaces[0].layout.layer_split_milli != 625U) {

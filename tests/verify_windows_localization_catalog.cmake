@@ -63,10 +63,14 @@ file(READ "${RESOURCE_JA}" RESOURCE_JA_CONTENT)
 file(READ "${RESOURCE_EN}" RESOURCE_EN_CONTENT)
 foreach(GENERATED_RESOURCE_CONTENT IN ITEMS
         "${RESOURCE_JA_CONTENT}" "${RESOURCE_EN_CONTENT}")
-    string(FIND "${GENERATED_RESOURCE_CONTENT}" "@INKPOD_UI_TEXT_" MARKER_POSITION)
-    if(NOT MARKER_POSITION LESS 0)
-        message(FATAL_ERROR "generated resource contains an unresolved catalog marker")
-    endif()
+    foreach(MARKER_PREFIX IN ITEMS "@INKPOD_UI_TEXT_" "@INKPOD_UI_MENU_")
+        string(FIND
+            "${GENERATED_RESOURCE_CONTENT}" "${MARKER_PREFIX}" MARKER_POSITION)
+        if(NOT MARKER_POSITION LESS 0)
+            message(FATAL_ERROR
+                "generated resource contains an unresolved catalog marker: ${MARKER_PREFIX}")
+        endif()
+    endforeach()
     string(FIND "${GENERATED_RESOURCE_CONTENT}" [=[\u]=] JSON_UNICODE_ESCAPE_POSITION)
     if(NOT JSON_UNICODE_ESCAPE_POSITION LESS 0)
         message(FATAL_ERROR
@@ -118,7 +122,8 @@ endforeach()
 
 # Japanese presentation text is permitted only in the canonical JSON catalog
 # and its generated Japanese table/resource. Product C++ and resource templates
-# must reference UiStringId or an @INKPOD_UI_TEXT_* marker instead.
+# must reference UiStringId, an @INKPOD_UI_TEXT_* marker, or the menu-only
+# @INKPOD_UI_MENU_* marker instead.
 file(GLOB_RECURSE PRODUCT_SOURCE_FILES
     RELATIVE "${INKPOD_SOURCE_DIR}"
     "${INKPOD_SOURCE_DIR}/apps/windows/*.cpp"

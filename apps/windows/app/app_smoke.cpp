@@ -1017,23 +1017,27 @@ bool RouteKeyboardKey(
     ApplicationHost& state,
     UINT virtual_key,
     bool control,
-    bool shift) noexcept {
+    bool shift,
+    bool alt = false) noexcept {
     std::array<BYTE, 256U> keyboard{};
     GetKeyboardState(keyboard.data());
     const BYTE previous_control = keyboard[VK_CONTROL];
     const BYTE previous_shift = keyboard[VK_SHIFT];
+    const BYTE previous_alt = keyboard[VK_MENU];
     keyboard[VK_CONTROL] = control ? static_cast<BYTE>(0x80U) : 0U;
     keyboard[VK_SHIFT] = shift ? static_cast<BYTE>(0x80U) : 0U;
+    keyboard[VK_MENU] = alt ? static_cast<BYTE>(0x80U) : 0U;
     SetKeyboardState(keyboard.data());
     MSG key{};
     key.hwnd = GetFocus() != nullptr
         ? GetFocus()
         : state.Workspace().windows.window;
-    key.message = WM_KEYDOWN;
+    key.message = alt ? WM_SYSKEYDOWN : WM_KEYDOWN;
     key.wParam = virtual_key;
     const bool handled = PreTranslateKeyboardMessage(state, key);
     keyboard[VK_CONTROL] = previous_control;
     keyboard[VK_SHIFT] = previous_shift;
+    keyboard[VK_MENU] = previous_alt;
     SetKeyboardState(keyboard.data());
     return handled;
 }
@@ -3277,7 +3281,7 @@ int RunStatusJobProgressSmoke(ApplicationHost& state) noexcept {
     return in_part && cleared && synchronized == INKPOD_STATUS_OK ? 0 : 929;
 }
 
-bool MenuLeavesHaveAssignedShortcuts(
+bool MenuLeavesMatchShortcutProfile(
     HMENU menu,
     std::span<const InkpodShortcutSequence> bindings,
     std::size_t& leaf_count) noexcept {
@@ -3290,7 +3294,7 @@ bool MenuLeavesHaveAssignedShortcuts(
             return false;
         }
         if (item.hSubMenu != nullptr) {
-            if (!MenuLeavesHaveAssignedShortcuts(item.hSubMenu, bindings, leaf_count)) {
+            if (!MenuLeavesMatchShortcutProfile(item.hSubMenu, bindings, leaf_count)) {
                 return false;
             }
             continue;
@@ -3305,9 +3309,8 @@ bool MenuLeavesHaveAssignedShortcuts(
             continue;
         }
         ++leaf_count;
-        if (windows::ui::FindShortcutSequence(bindings, item.wID) == nullptr) {
-            return false;
-        }
+        const InkpodShortcutSequence* binding =
+            windows::ui::FindShortcutSequence(bindings, item.wID);
         const int length = GetMenuStringW(
             menu, static_cast<UINT>(position), nullptr, 0, MF_BYPOSITION);
         try {
@@ -3318,7 +3321,14 @@ bool MenuLeavesHaveAssignedShortcuts(
                 label.data(),
                 static_cast<int>(label.size()),
                 MF_BYPOSITION);
-            if (label.find(L'\t') == std::wstring::npos) {
+            label.resize(std::wcslen(label.c_str()));
+            const std::size_t separator = label.find(L'\t');
+            if ((binding == nullptr) != (separator == std::wstring::npos)) {
+                return false;
+            }
+            if (binding != nullptr
+                && label.substr(separator + 1U)
+                    != windows::ui::FormatShortcutSequence(*binding)) {
                 return false;
             }
         } catch (const std::bad_alloc&) {
@@ -5989,7 +5999,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     }
     std::size_t shortcut_leaf_count{};
     if (!CommandSurfacesMatchComputedState(state)
-        || !MenuLeavesHaveAssignedShortcuts(
+        || !MenuLeavesMatchShortcutProfile(
             menu, state.shortcuts.bindings, shortcut_leaf_count)
         || shortcut_leaf_count < windows::ui::MenuCommandCatalog().size()
         || FindWindowExW(state.Workspace().windows.window, nullptr, TOOLBARCLASSNAMEW, nullptr) != nullptr
@@ -7503,6 +7513,7 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
              IDM_VIEW_FLIP_VERTICAL,
              IDM_VIEW_GRID,
              IDM_VIEW_NEW,
+             IDM_SHORTCUT_KEYBOARD,
              IDM_SHORTCUT_EDIT}) {
         if (menu == nullptr
             || GetMenuState(menu, command, MF_BYCOMMAND)
@@ -8658,7 +8669,8 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
         return 758;
     }
     const InkpodShortcutSequence* multi_stroke =
-        windows::ui::FindShortcutSequence(state.shortcuts.bindings, IDM_FILE_REVERT);
+        windows::ui::FindShortcutSequence(
+            state.shortcuts.bindings, IDM_SHORTCUT_KEYBOARD);
     if (multi_stroke == nullptr || multi_stroke->stroke_count <= 1U) {
         return 359;
     }
@@ -8669,7 +8681,8 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
         const bool last = index + 1U == multi_stroke->stroke_count;
         if ((!last && match != INKPOD_SHORTCUT_MATCH_PREFIX)
             || (last
-                && (match != INKPOD_SHORTCUT_MATCH_EXACT || resolved != IDM_FILE_REVERT))) {
+                && (match != INKPOD_SHORTCUT_MATCH_EXACT
+                    || resolved != IDM_SHORTCUT_KEYBOARD))) {
             return 360;
         }
     }
@@ -8838,7 +8851,12 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
         return 344;
     }
     if (SendMessageW(
-            state.Workspace().windows.window, WM_COMMAND, IDM_SHORTCUT_EDIT, 0) != 1) {
+            state.Workspace().windows.window, WM_COMMAND, IDM_SHORTCUT_EDIT, 0) != 1
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_SHORTCUT_KEYBOARD,
+               0) != 1) {
         return 329;
     }
     if (!ResolveConfiguredShortcut(
@@ -10684,7 +10702,24 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
             navigation_ok, state.lifetime.smoke_dirty_prompt_count, navigation_prompt_count + 1U);
         return 412;
     }
-    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_MOTION_START, 0) != 1
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_MOTION_START,
+            0) != 1
+        || RouteKeyboardKey(state, VK_SPACE, false, false)
+        || RouteKeyboardKey(state, VK_LEFT, false, false)
+        || RouteKeyboardKey(state, VK_RIGHT, false, false)
+        || RouteKeyboardKey(state, VK_HOME, false, false)
+        || RouteKeyboardKey(state, VK_END, false, false)
+        || RouteKeyboardKey(state, L'3', true, false, true)
+        || !RouteKeyboardKey(state, VK_ESCAPE, false, false)
+        || state.Workspace().animation.motion_active
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_MOTION_START,
+               0) != 1
         || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_MOTION_NEXT, 0) != 1
         || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_MOTION_PAUSE, 0) != 1
         || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_MOTION_PAUSE, 0) != 1
@@ -13995,25 +14030,21 @@ int RunSplitEditorGroupSmoke(ApplicationHost& state) noexcept {
         || !renderer::GetCanvasSnapshotSink(second_canvas)->AcceptsSnapshots()) {
         return 772;
     }
-    if (!HandleWorkspaceNavigation(
-            state,
+    if (SendMessageW(
             state.Workspace().windows.window,
-            VK_F6,
-            INKPOD_SHORTCUT_MODIFIER_CONTROL | INKPOD_SHORTCUT_MODIFIER_SHIFT)) {
-        return 1001;
-    }
-    if (editors.Active() == nullptr || editors.Active()->id != first_group_id) {
-        return 1006;
-    }
-    if (!HandleWorkspaceNavigation(
-            state,
-            state.Workspace().windows.window,
-            VK_F6,
-            INKPOD_SHORTCUT_MODIFIER_CONTROL)) {
-        return 1007;
-    }
-    if (editors.Active() == nullptr || editors.Active()->id != second_group_id) {
-        return 1008;
+            WM_COMMAND,
+            IDM_EDITOR_GROUP_FIRST,
+            0) != 1
+        || editors.Active() == nullptr
+        || editors.Active()->id != first_group_id
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_EDITOR_GROUP_SECOND,
+               0) != 1
+        || editors.Active() == nullptr
+        || editors.Active()->id != second_group_id) {
+        return 1009;
     }
     ShowWindow(state.Workspace().windows.status_bar, SW_SHOWNA);
     SetFocus(second_canvas);
@@ -14023,7 +14054,6 @@ int RunSplitEditorGroupSmoke(ApplicationHost& state) noexcept {
     }
     if (!HandleWorkspaceNavigation(
             state,
-            state.Workspace().windows.window,
             VK_F6,
             INKPOD_SHORTCUT_MODIFIER_SHIFT)
         || (GetFocus() != second_canvas
@@ -14032,7 +14062,6 @@ int RunSplitEditorGroupSmoke(ApplicationHost& state) noexcept {
     }
     if (!HandleWorkspaceNavigation(
             state,
-            state.Workspace().windows.window,
             VK_F6,
             INKPOD_SHORTCUT_MODIFIER_SHIFT)
         || (GetFocus() != state.Workspace().windows.tool_palette
@@ -14041,7 +14070,6 @@ int RunSplitEditorGroupSmoke(ApplicationHost& state) noexcept {
     }
     if (!HandleWorkspaceNavigation(
             state,
-            state.Workspace().windows.window,
             VK_F6,
             0U)
         || (GetFocus() != second_canvas
@@ -18094,33 +18122,112 @@ int RunApplicationSmoke(app::ApplicationHost& state) noexcept {
     if (exit_code == 0) {
         const InkpodShortcutSequence* original = FindShortcutSequence(
             state.shortcuts.bindings, IDM_VIEW_GRID);
-        if (original == nullptr) {
+        if (original != nullptr) {
             exit_code = 732;
         } else {
-            const InkpodShortcutSequence saved = *original;
-            InkpodShortcutSequence replacement{};
-            replacement.struct_size = sizeof(replacement);
-            replacement.command_id = IDM_VIEW_GRID;
-            replacement.stroke_count = 1U;
-            replacement.strokes[0] = {
-                static_cast<std::uint32_t>('9'),
-                INKPOD_SHORTCUT_MODIFIER_CONTROL | INKPOD_SHORTCUT_MODIFIER_ALT};
-            UINT resolved{};
-            const InkpodStatus rebind = RebindShortcut(
-                *state.engine, state.shortcuts, replacement);
-            const bool shortcut_resolved = rebind == INKPOD_STATUS_OK
-                && runtime::ResolveConfiguredShortcut(
-                    state,
+            try {
+                const ShortcutProfileSet saved = state.shortcuts.profile_set;
+                InkpodShortcutSequence replacement{};
+                replacement.struct_size = sizeof(replacement);
+                replacement.command_id = IDM_VIEW_GRID;
+                replacement.stroke_count = 1U;
+                replacement.strokes[0] = {
                     static_cast<std::uint32_t>('9'),
-                    INKPOD_SHORTCUT_MODIFIER_CONTROL | INKPOD_SHORTCUT_MODIFIER_ALT,
-                    resolved)
-                && resolved == IDM_VIEW_GRID;
-            const InkpodStatus restore = rebind == INKPOD_STATUS_OK
-                ? RebindShortcut(*state.engine, state.shortcuts, saved)
-                : rebind;
-            if (!shortcut_resolved || restore != INKPOD_STATUS_OK) {
+                    INKPOD_SHORTCUT_MODIFIER_CONTROL
+                        | INKPOD_SHORTCUT_MODIFIER_ALT};
+                UINT resolved{};
+                const InkpodStatus rebind = RebindShortcut(
+                    *state.engine, state.shortcuts, replacement);
+                const bool shortcut_resolved = rebind == INKPOD_STATUS_OK
+                    && runtime::ResolveConfiguredShortcut(
+                        state,
+                        static_cast<std::uint32_t>('9'),
+                        INKPOD_SHORTCUT_MODIFIER_CONTROL
+                            | INKPOD_SHORTCUT_MODIFIER_ALT,
+                        resolved)
+                    && resolved == IDM_VIEW_GRID;
+                InkpodShortcutSequence reassigned{};
+                reassigned.struct_size = sizeof(reassigned);
+                reassigned.command_id = IDM_TOOL_PENCIL;
+                reassigned.stroke_count = 1U;
+                reassigned.strokes[0] = {
+                    static_cast<std::uint32_t>('O'),
+                    INKPOD_SHORTCUT_MODIFIER_CONTROL};
+                const InkpodStatus reassigned_status = RebindShortcut(
+                    *state.engine, state.shortcuts, reassigned);
+                const bool unassigned_command_claimed_existing_key =
+                    reassigned_status == INKPOD_STATUS_OK
+                    && runtime::ResolveConfiguredShortcut(
+                        state,
+                        static_cast<std::uint32_t>('O'),
+                        INKPOD_SHORTCUT_MODIFIER_CONTROL,
+                        resolved)
+                    && resolved == IDM_TOOL_PENCIL
+                    && FindShortcutSequence(
+                           state.shortcuts.bindings, IDM_FILE_OPEN)
+                        == nullptr;
+                ShortcutProfileSet reserved = state.shortcuts.profile_set;
+                ShortcutProfile& reserved_profile = reserved.profiles[
+                    reserved.active_profile];
+                ShortcutProfileBinding reserved_binding{};
+                reserved_binding.command_id = IDM_EDIT_FLOATING_COMMIT;
+                reserved_binding.slot = ShortcutSlot::Primary;
+                reserved_binding.context = ShortcutContext::Global;
+                reserved_binding.action = ShortcutAction::Execute;
+                reserved_binding.key_match = ShortcutKeyMatch::Logical;
+                reserved_binding.stroke_count = 1U;
+                reserved_binding.strokes[0] = {
+                    static_cast<std::uint32_t>('F'),
+                    ShortcutPhysicalKeyFromVirtualKey(
+                        static_cast<std::uint32_t>('F'),
+                        INKPOD_SHORTCUT_MODIFIER_ALT),
+                    INKPOD_SHORTCUT_MODIFIER_ALT};
+                reserved_profile.bindings.push_back(reserved_binding);
+                const InkpodStatus reserved_apply = ApplyShortcutProfileSet(
+                    *state.engine, state.shortcuts, reserved);
+                const bool previous_hold_active = state.shortcuts.hold_active;
+                state.shortcuts.hold_active = true;
+                const bool reserved_handled_during_hold =
+                    reserved_apply == INKPOD_STATUS_OK
+                    && runtime::RouteKeyboardKey(
+                        state, L'F', false, false, true);
+                state.shortcuts.hold_active = previous_hold_active;
+                const InkpodStatus restore = ApplyShortcutProfileSet(
+                    *state.engine, state.shortcuts, saved);
+                if (!shortcut_resolved
+                    || !unassigned_command_claimed_existing_key
+                    || reserved_apply != INKPOD_STATUS_OK
+                    || reserved_handled_during_hold
+                    || restore != INKPOD_STATUS_OK) {
+                    exit_code = 733;
+                }
+            } catch (const std::bad_alloc&) {
                 exit_code = 733;
             }
+        }
+    }
+    if (exit_code == 0) {
+        const HWND previous_focus = GetFocus();
+        SetFocus(state.Workspace().windows.canvas);
+        const std::uint32_t previous_tool = state.Workspace().tools.active_tool;
+        const std::uint32_t previous_palette =
+            state.Workspace().panes.selected_palette_index;
+        const bool legacy_key_handled =
+            runtime::RouteKeyboardKey(state, L'Q', false, false)
+            || runtime::RouteKeyboardKey(state, L'1', false, false)
+            || runtime::RouteKeyboardKey(state, VK_TAB, false, false);
+        const bool native_menu_key_handled =
+            runtime::RouteKeyboardKey(state, L'F', false, false, true)
+            || runtime::RouteKeyboardKey(state, VK_F10, false, false)
+            || runtime::RouteKeyboardKey(state, VK_SPACE, false, false, true)
+            || runtime::RouteKeyboardKey(state, VK_F4, false, false, true);
+        if (previous_focus != nullptr) {
+            SetFocus(previous_focus);
+        }
+        if (legacy_key_handled || native_menu_key_handled
+            || state.Workspace().tools.active_tool != previous_tool
+            || state.Workspace().panes.selected_palette_index != previous_palette) {
+            exit_code = 734;
         }
     }
     if (exit_code == 0) {

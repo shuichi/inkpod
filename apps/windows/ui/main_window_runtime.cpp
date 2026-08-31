@@ -4011,13 +4011,13 @@ bool QueryHistoryMenuLabels(
             return false;
         }
         undo_label = undo_kind == 0U
-            ? UiText(UiStringId::Text0486)
-            : UiText(UiStringId::Text0487)
-                + std::wstring(UiText(undo_string_id.value())) + L"\tCtrl+Z";
+            ? UiText(UiStringId::MenuUndo)
+            : UiText(UiStringId::MenuUndoPrefix)
+                + std::wstring(UiText(undo_string_id.value()));
         redo_label = redo_kind == 0U
-            ? UiText(UiStringId::Text0122)
-            : UiText(UiStringId::Text0123)
-                + std::wstring(UiText(redo_string_id.value())) + L"\tCtrl+Y";
+            ? UiText(UiStringId::MenuRedo)
+            : UiText(UiStringId::MenuRedoPrefix)
+                + std::wstring(UiText(redo_string_id.value()));
     } catch (const std::bad_alloc&) {
         return false;
     }
@@ -4264,7 +4264,6 @@ bool CycleWorkspaceFocus(ApplicationHost& state, bool reverse) noexcept {
 
 bool HandleWorkspaceNavigation(
     ApplicationHost& state,
-    HWND window,
     std::uint32_t virtual_key,
     std::uint32_t modifiers) noexcept {
     const std::uint32_t navigation_modifiers = modifiers
@@ -4277,15 +4276,6 @@ bool HandleWorkspaceNavigation(
         (void)CycleWorkspaceFocus(
             state,
             navigation_modifiers == INKPOD_SHORTCUT_MODIFIER_SHIFT);
-        return true;
-    }
-    if (virtual_key == VK_F6
-        && (navigation_modifiers == INKPOD_SHORTCUT_MODIFIER_CONTROL
-            || navigation_modifiers
-                == (INKPOD_SHORTCUT_MODIFIER_CONTROL
-                    | INKPOD_SHORTCUT_MODIFIER_SHIFT))) {
-        UpdateMenuState(state);
-        DispatchEnabledCommand(state, window, IDM_EDITOR_GROUP_NEXT);
         return true;
     }
     return false;
@@ -18187,6 +18177,26 @@ std::optional<LRESULT> RouteSelectionViewCommand(
         }
         case IDM_EDITOR_GROUP_CLOSE:
             return CloseActiveEditorGroup(*state) ? 1 : 0;
+        case IDM_EDITOR_GROUP_FIRST:
+        case IDM_EDITOR_GROUP_SECOND: {
+            const std::size_t index = LOWORD(wparam) == IDM_EDITOR_GROUP_FIRST
+                ? 0U
+                : 1U;
+            const auto* group = state->Workspace().editors.GroupAt(index);
+            if (group == nullptr || !ActivateEditorGroup(*state, group->id)) {
+                return 0;
+            }
+            const auto* activated = state->Workspace().editors.Active();
+            const HWND focus_target = activated == nullptr
+                ? nullptr
+                : (activated->focus_history != nullptr
+                       ? activated->focus_history
+                       : activated->canvas);
+            if (focus_target != nullptr) {
+                SetFocus(focus_target);
+            }
+            return 1;
+        }
         case IDM_EDITOR_GROUP_NEXT: {
             const auto* active = state->Workspace().editors.Active();
             const auto* other = active == nullptr
@@ -19432,6 +19442,7 @@ std::optional<LRESULT> RouteApplicationCommand(
             RelayoutWorkspace(*state);
             UpdateMenuState(*state);
             return 1;
+        case IDM_SHORTCUT_KEYBOARD:
         case IDM_SHORTCUT_EDIT: {
             PreferencesDialogState dialog_state{};
             try {
@@ -19452,6 +19463,9 @@ std::optional<LRESULT> RouteApplicationCommand(
             }
             dialog_state.apply_context = state;
             dialog_state.apply = ApplyPreferencesValues;
+            dialog_state.initial_page = LOWORD(wparam) == IDM_SHORTCUT_KEYBOARD
+                ? inkpod::windows::ui::PreferencesPage::Shortcuts
+                : inkpod::windows::ui::PreferencesPage::General;
             dialog_state.close_immediately = state->lifetime.smoke_test;
             const INT_PTR result = ShowPreferencesDialog(
                 state->lifetime.instance, window, dialog_state);
@@ -19695,25 +19709,9 @@ std::optional<LRESULT> RouteKeyboardMessage(
                     DispatchEnabledCommand(*state, window, IDM_MOTION_STOP);
                     return 0;
                 }
-                if (state->Workspace().animation.motion_active && wparam == VK_SPACE) {
-                    DispatchEnabledCommand(*state, window, IDM_MOTION_PAUSE);
-                    return 0;
-                }
-                if (state->Workspace().animation.motion_active
-                    && (wparam == VK_LEFT || wparam == VK_RIGHT
-                        || wparam == VK_HOME || wparam == VK_END)) {
-                    const UINT command = wparam == VK_LEFT
-                        ? IDM_MOTION_PREVIOUS
-                        : (wparam == VK_RIGHT
-                                  ? IDM_MOTION_NEXT
-                                  : (wparam == VK_HOME ? IDM_MOTION_FIRST : IDM_MOTION_LAST));
-                    DispatchEnabledCommand(*state, window, command);
-                    return 0;
-                }
                 const std::uint32_t modifiers = CurrentShortcutModifiers(lparam);
                 if (HandleWorkspaceNavigation(
                         *state,
-                        window,
                         static_cast<std::uint32_t>(wparam),
                         modifiers)) {
                     return 0;
@@ -19750,19 +19748,6 @@ std::optional<LRESULT> RouteKeyboardMessage(
                                    || resolution.action == ShortcutAction::Execute) {
                             DispatchEnabledCommand(*state, window, resolved_command);
                         }
-                    }
-                    return 0;
-                }
-                if (modifiers == 0U && wparam >= '0' && wparam <= '9') {
-                    const std::size_t digit = wparam == '0'
-                        ? 9U
-                        : static_cast<std::size_t>(wparam - '1');
-                    const std::size_t index = state->Workspace().panes.palette_group * 10U + digit;
-                    if (index < state->Workspace().panes.palette_colors.size()) {
-                        state->Workspace().panes.selected_palette_index =
-                            static_cast<std::uint32_t>(index);
-                        SetDrawingColor(*state, state->Workspace().panes.palette_colors[index]);
-                        InvalidateRect(state->Workspace().windows.canvas, nullptr, FALSE);
                     }
                     return 0;
                 }

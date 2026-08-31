@@ -4,6 +4,7 @@
 #include <new>
 #include <tuple>
 
+#include "app/resource.h"
 #include "command_catalog.h"
 
 namespace inkpod::windows::ui {
@@ -268,15 +269,50 @@ ShortcutProfile BuildShortcutProfileFromLegacy(
             static_cast<std::uint32_t>(INKPOD_SHORTCUT_MAX_STROKES));
         for (std::uint32_t index = 0U; index < binding.stroke_count; ++index) {
             const auto& source = sequence.strokes[index];
-            const UINT scan = MapVirtualKeyW(source.virtual_key, MAPVK_VK_TO_VSC_EX);
             binding.strokes[index] = {
                 source.virtual_key,
-                scan == 0U ? source.virtual_key : scan,
+                ShortcutPhysicalKeyFromVirtualKey(
+                    source.virtual_key, source.modifiers),
                 source.modifiers};
         }
         profile.bindings.push_back(binding);
     }
     return profile;
+}
+
+bool ShortcutStrokeReservedForNativeMenu(
+    std::uint32_t command_id, const ShortcutInputStroke& stroke) noexcept {
+    if (stroke.logical_key == VK_MENU || stroke.logical_key == VK_LMENU
+        || stroke.logical_key == VK_RMENU) {
+        return true;
+    }
+    constexpr std::uint32_t navigation_modifiers =
+        INKPOD_SHORTCUT_MODIFIER_CONTROL | INKPOD_SHORTCUT_MODIFIER_SHIFT
+        | INKPOD_SHORTCUT_MODIFIER_ALT | kShortcutModifierWindows;
+    const std::uint32_t modifiers = stroke.modifiers & navigation_modifiers;
+    if (stroke.logical_key == VK_F10 && modifiers == 0U) {
+        return true;
+    }
+    if (stroke.logical_key == VK_F4
+        && modifiers == INKPOD_SHORTCUT_MODIFIER_ALT) {
+        return command_id != IDM_APP_EXIT;
+    }
+    if ((modifiers & INKPOD_SHORTCUT_MODIFIER_ALT) == 0U
+        || (modifiers
+            & (INKPOD_SHORTCUT_MODIFIER_CONTROL | kShortcutModifierWindows))
+            != 0U) {
+        return false;
+    }
+    if (stroke.logical_key == VK_SPACE) {
+        return true;
+    }
+    constexpr std::array<std::uint32_t, 11U> top_level_mnemonics{
+        'F', 'E', 'V', 'L', 'S', 'I', 'T', 'C', 'P', 'W', 'H'};
+    return std::find(
+               top_level_mnemonics.begin(),
+               top_level_mnemonics.end(),
+               stroke.logical_key)
+        != top_level_mnemonics.end();
 }
 
 std::uint32_t ShortcutPhysicalKeyFromMessage(WPARAM virtual_key, LPARAM key_data) noexcept {
@@ -285,9 +321,9 @@ std::uint32_t ShortcutPhysicalKeyFromMessage(WPARAM virtual_key, LPARAM key_data
     if (scan != 0U) {
         return scan | (extended ? UINT32_C(0x100) : 0U);
     }
-    const UINT mapped = MapVirtualKeyW(
-        static_cast<UINT>(virtual_key), MAPVK_VK_TO_VSC_EX);
-    return mapped == 0U ? static_cast<std::uint32_t>(virtual_key) : mapped;
+    return ShortcutPhysicalKeyFromVirtualKey(
+        static_cast<std::uint32_t>(virtual_key),
+        extended ? INKPOD_SHORTCUT_MODIFIER_EXTENDED : 0U);
 }
 
 }  // namespace inkpod::windows::ui

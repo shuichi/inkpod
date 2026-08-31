@@ -1866,7 +1866,7 @@
       "kind": "text",
       "ja": "Canvas に表示・snap 対象",
       "en": "Show on Canvas / snap target",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0046",
@@ -1936,7 +1936,7 @@
       "kind": "text",
       "ja": "Color chart: 準備中...",
       "en": "Color chart: Preparing...",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0056",
@@ -1962,15 +1962,15 @@
     {
       "id": "Text0059",
       "kind": "text",
-      "ja": "Inkpodについて(&A)...",
-      "en": "&About Inkpod...",
+      "ja": "Inkpodについて...",
+      "en": "About Inkpod...",
       "resource": true
     },
     {
       "id": "Text0060",
       "kind": "text",
-      "ja": "Inkpodウェブページ(&W)",
-      "en": "Inkpod &Website",
+      "ja": "Inkpodウェブページ",
+      "en": "Inkpod Website",
       "resource": true
     },
     {
@@ -1983,8 +1983,8 @@
     {
       "id": "Text0062",
       "kind": "text",
-      "ja": "Inkpodファイルフォーマット(&F)",
-      "en": "Inkpod &File Format",
+      "ja": "Inkpodファイルフォーマット",
+      "en": "Inkpod File Format",
       "resource": true
     },
     {
@@ -2060,8 +2060,8 @@
     {
       "id": "Text0073",
       "kind": "text",
-      "ja": "Recoveryを保存(&V)",
-      "en": "Sa&ve Recovery",
+      "ja": "Recoveryを保存",
+      "en": "Save Recovery",
       "resource": true
     },
     {
@@ -2074,8 +2074,8 @@
     {
       "id": "Text0075",
       "kind": "text",
-      "ja": "Recoveryを開く(&Y)...",
-      "en": "Open Recover&y...",
+      "ja": "Recoveryを開く...",
+      "en": "Open Recovery...",
       "resource": true
     },
     {
@@ -2207,8 +2207,8 @@
     {
       "id": "Text0094",
       "kind": "text",
-      "ja": "inkpod ヘルプ(&H)\tF1",
-      "en": "inkpod &Help\tF1",
+      "ja": "inkpod ヘルプ\tF1",
+      "en": "inkpod Help\tF1",
       "resource": true
     },
     {
@@ -2396,8 +2396,8 @@
     {
       "id": "Text0122",
       "kind": "text",
-      "ja": "やり直し(&R)\tCtrl+Y",
-      "en": "&Redo\tCtrl+Y",
+      "ja": "やり直し\tCtrl+Y",
+      "en": "Redo\tCtrl+Y",
       "resource": true
     },
     {
@@ -2473,8 +2473,8 @@
     {
       "id": "Text0134",
       "kind": "text",
-      "ja": "ウィンドウ(&N)",
-      "en": "Wi&ndow",
+      "ja": "ウィンドウ",
+      "en": "Window",
       "resource": true
     },
     {
@@ -2515,15 +2515,15 @@
     {
       "id": "Text0140",
       "kind": "text",
-      "ja": "カット(&T)...",
-      "en": "Cu&t...",
+      "ja": "カット...",
+      "en": "Cut...",
       "resource": true
     },
     {
       "id": "Text0141",
       "kind": "text",
-      "ja": "カット(&X)\tCtrl+X",
-      "en": "Cu&t\tCtrl+X",
+      "ja": "カット\tCtrl+X",
+      "en": "Cut\tCtrl+X",
       "resource": true
     },
     {
@@ -2823,8 +2823,8 @@
     {
       "id": "Text0184",
       "kind": "text",
-      "ja": "コピー(&C)\tCtrl+C",
-      "en": "&Copy\tCtrl+C",
+      "ja": "コピー\tCtrl+C",
+      "en": "Copy\tCtrl+C",
       "resource": true
     },
     {
@@ -3019,8 +3019,8 @@
     {
       "id": "Text0212",
       "kind": "text",
-      "ja": "スポイト(&I)",
-      "en": "Eyedropper (&I)",
+      "ja": "スポイト",
+      "en": "Eyedropper",
       "resource": true
     },
     {
@@ -3075,15 +3075,15 @@
     {
       "id": "Text0220",
       "kind": "text",
-      "ja": "セル(&C)\tCtrl+N",
-      "en": "&Cell\tCtrl+N",
+      "ja": "セル\tCtrl+N",
+      "en": "Cell\tCtrl+N",
       "resource": true
     },
     {
       "id": "Text0221",
       "kind": "text",
-      "ja": "セル(&D)",
-      "en": "&Cell",
+      "ja": "セル",
+      "en": "Cell",
       "resource": true
     },
     {
@@ -3131,8 +3131,8 @@
     {
       "id": "Text0228",
       "kind": "text",
-      "ja": "セル切替前に自動保存(&W)",
-      "en": "Autosave Before Cell S&witch",
+      "ja": "セル切替前に自動保存",
+      "en": "Autosave Before Cell Switch",
       "resource": true
     },
     {
@@ -3215,8 +3215,8 @@
     {
       "id": "Text0240",
       "kind": "text",
-      "ja": "ツール(&T)",
-      "en": "&Tools",
+      "ja": "ツール",
+      "en": "Tools",
       "resource": true
     },
     {
@@ -3287,7 +3287,7 @@
       "kind": "text",
       "ja": "バッチ: 準備中...",
       "en": "Batch: preparing...",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0257",
@@ -3439,8 +3439,8 @@
     {
       "id": "Text0278",
       "kind": "text",
-      "ja": "ピクセル等倍(&1)",
-      "en": "&Actual Pixels",
+      "ja": "ピクセル等倍",
+      "en": "Actual Pixels",
       "resource": true
     },
     {
@@ -3453,8 +3453,8 @@
     {
       "id": "Text0280",
       "kind": "text",
-      "ja": "ファイル(&F)",
-      "en": "&File",
+      "ja": "ファイル",
+      "en": "File",
       "resource": true
     },
     {
@@ -3481,8 +3481,8 @@
     {
       "id": "Text0284",
       "kind": "text",
-      "ja": "フィル(&F)",
-      "en": "&Fill",
+      "ja": "フィル",
+      "en": "Fill",
       "resource": true
     },
     {
@@ -3495,8 +3495,8 @@
     {
       "id": "Text0286",
       "kind": "text",
-      "ja": "フィルタ(&I)",
-      "en": "F&ilter",
+      "ja": "フィルタ",
+      "en": "Filter",
       "resource": true
     },
     {
@@ -3663,8 +3663,8 @@
     {
       "id": "Text0310",
       "kind": "text",
-      "ja": "ブラシ(&B)",
-      "en": "&Brush",
+      "ja": "ブラシ",
+      "en": "Brush",
       "resource": true
     },
     {
@@ -3712,8 +3712,8 @@
     {
       "id": "Text0317",
       "kind": "text",
-      "ja": "プレーン(&P)",
-      "en": "&Plane",
+      "ja": "プレーン",
+      "en": "Plane",
       "resource": true
     },
     {
@@ -3824,8 +3824,8 @@
     {
       "id": "Text0333",
       "kind": "text",
-      "ja": "ヘルプ(&H)",
-      "en": "&Help",
+      "ja": "ヘルプ",
+      "en": "Help",
       "resource": true
     },
     {
@@ -4139,8 +4139,8 @@
     {
       "id": "Text0391",
       "kind": "text",
-      "ja": "レイヤー(&L)",
-      "en": "&Layer",
+      "ja": "レイヤー",
+      "en": "Layer",
       "resource": true
     },
     {
@@ -4428,7 +4428,7 @@
       "kind": "format",
       "ja": "不透明度 (%)",
       "en": "Opacity (%)",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0434",
@@ -4503,8 +4503,8 @@
     {
       "id": "Text0446",
       "kind": "text",
-      "ja": "主線(&L)",
-      "en": "Main &Line",
+      "ja": "主線",
+      "en": "Main Line",
       "resource": true
     },
     {
@@ -4629,8 +4629,8 @@
     {
       "id": "Text0465",
       "kind": "text",
-      "ja": "保存(&S)\tCtrl+S",
-      "en": "&Save\tCtrl+S",
+      "ja": "保存\tCtrl+S",
+      "en": "Save\tCtrl+S",
       "resource": true
     },
     {
@@ -4776,8 +4776,8 @@
     {
       "id": "Text0486",
       "kind": "text",
-      "ja": "元に戻す(&U)\tCtrl+Z",
-      "en": "&Undo\tCtrl+Z",
+      "ja": "元に戻す\tCtrl+Z",
+      "en": "Undo\tCtrl+Z",
       "resource": true
     },
     {
@@ -4902,8 +4902,8 @@
     {
       "id": "Text0504",
       "kind": "text",
-      "ja": "全体表示(&F)",
-      "en": "&Fit",
+      "ja": "全体表示",
+      "en": "Fit",
       "resource": true
     },
     {
@@ -4967,7 +4967,7 @@
       "kind": "text",
       "ja": "処理進捗",
       "en": "Job Progress",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0514",
@@ -5030,7 +5030,7 @@
       "kind": "text",
       "ja": "初期レイヤー",
       "en": "Initial layer",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0523",
@@ -5049,8 +5049,8 @@
     {
       "id": "Text0525",
       "kind": "text",
-      "ja": "制作(&W)",
-      "en": "&Production",
+      "ja": "制作",
+      "en": "Production",
       "resource": true
     },
     {
@@ -5343,8 +5343,8 @@
     {
       "id": "Text0569",
       "kind": "text",
-      "ja": "名前を付けて保存(&A)...",
-      "en": "Save &As...",
+      "ja": "名前を付けて保存...",
+      "en": "Save As...",
       "resource": true
     },
     {
@@ -5659,7 +5659,7 @@
       "id": "Text0617",
       "kind": "text",
       "ja": "失敗時",
-      "en": "On Failure",
+      "en": "Failure Handling",
       "resource": true
     },
     {
@@ -5709,7 +5709,7 @@
       "kind": "text",
       "ja": "実行中の処理はありません。",
       "en": "No operation is running.",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0626",
@@ -5758,7 +5758,7 @@
       "kind": "text",
       "ja": "履歴: 準備中...",
       "en": "History: Preparing...",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0633",
@@ -5896,8 +5896,8 @@
     {
       "id": "Text0652",
       "kind": "text",
-      "ja": "彩色(&C)",
-      "en": "&Color",
+      "ja": "彩色",
+      "en": "Color",
       "resource": true
     },
     {
@@ -5952,8 +5952,8 @@
     {
       "id": "Text0660",
       "kind": "text",
-      "ja": "復帰(&R)",
-      "en": "&Revert",
+      "ja": "復帰",
+      "en": "Revert",
       "resource": true
     },
     {
@@ -6001,8 +6001,8 @@
     {
       "id": "Text0668",
       "kind": "text",
-      "ja": "拡大(&I)",
-      "en": "Zoom &In",
+      "ja": "拡大",
+      "en": "Zoom In",
       "resource": true
     },
     {
@@ -6281,8 +6281,8 @@
     {
       "id": "Text0708",
       "kind": "text",
-      "ja": "新規(&N)",
-      "en": "&New",
+      "ja": "新規",
+      "en": "New",
       "resource": true
     },
     {
@@ -6589,8 +6589,8 @@
     {
       "id": "Text0752",
       "kind": "text",
-      "ja": "次の10色グループ\tTab",
-      "en": "Next 10-color Group\tTab",
+      "ja": "次の10色グループ",
+      "en": "Next 10-color Group",
       "resource": true
     },
     {
@@ -6680,8 +6680,8 @@
     {
       "id": "Text0768",
       "kind": "text",
-      "ja": "消しゴム(&E)",
-      "en": "&Eraser",
+      "ja": "消しゴム",
+      "en": "Eraser",
       "resource": true
     },
     {
@@ -6920,7 +6920,7 @@
       "kind": "text",
       "ja": "画像処理: 準備中...",
       "en": "ImageProcess: Preparing...",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0808",
@@ -7100,8 +7100,8 @@
     {
       "id": "Text0833",
       "kind": "text",
-      "ja": "端点で循環(&L)",
-      "en": "&Wrap at Endpoints",
+      "ja": "端点で循環",
+      "en": "Wrap at Endpoints",
       "resource": true
     },
     {
@@ -7149,8 +7149,8 @@
     {
       "id": "Text0841",
       "kind": "text",
-      "ja": "終了(&X)",
-      "en": "E&xit",
+      "ja": "終了",
+      "en": "Exit",
       "resource": true
     },
     {
@@ -7198,8 +7198,8 @@
     {
       "id": "Text0853",
       "kind": "text",
-      "ja": "編集(&E)",
-      "en": "&Edit",
+      "ja": "編集",
+      "en": "Edit",
       "resource": true
     },
     {
@@ -7261,8 +7261,8 @@
     {
       "id": "Text0862",
       "kind": "text",
-      "ja": "縮小(&O)",
-      "en": "Zoom &Out",
+      "ja": "縮小",
+      "en": "Zoom Out",
       "resource": true
     },
     {
@@ -7291,13 +7291,13 @@
       "kind": "text",
       "ja": "色 (R / G / B)",
       "en": "Color (R / G / B)",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0867",
       "kind": "text",
-      "ja": "色(&C)",
-      "en": "&Color",
+      "ja": "色",
+      "en": "Color",
       "resource": true
     },
     {
@@ -7401,8 +7401,8 @@
     {
       "id": "Text0882",
       "kind": "text",
-      "ja": "表示(&V)",
-      "en": "&View",
+      "ja": "表示",
+      "en": "View",
       "resource": true
     },
     {
@@ -7578,7 +7578,7 @@
       "kind": "text",
       "ja": "角度間隔 (度)",
       "en": "Angular interval (degrees)",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text0910",
@@ -7632,8 +7632,8 @@
     {
       "id": "Text0917",
       "kind": "text",
-      "ja": "設定(&G)",
-      "en": "Settin&gs",
+      "ja": "設定",
+      "en": "Settings",
       "resource": false
     },
     {
@@ -7695,8 +7695,8 @@
     {
       "id": "Text0934",
       "kind": "text",
-      "ja": "謝辞(&C)",
-      "en": "A&cknowledgements",
+      "ja": "謝辞",
+      "en": "Acknowledgements",
       "resource": true
     },
     {
@@ -7709,8 +7709,8 @@
     {
       "id": "Text0936",
       "kind": "text",
-      "ja": "貼り付け(&P)\tCtrl+V",
-      "en": "&Paste\tCtrl+V",
+      "ja": "貼り付け\tCtrl+V",
+      "en": "Paste\tCtrl+V",
       "resource": true
     },
     {
@@ -7772,8 +7772,8 @@
     {
       "id": "Text0945",
       "kind": "text",
-      "ja": "起動時に前回の文書を復元(&P)",
-      "en": "Restore &Previous Documents at Startup",
+      "ja": "起動時に前回の文書を復元",
+      "en": "Restore Previous Documents at Startup",
       "resource": true
     },
     {
@@ -7975,8 +7975,8 @@
     {
       "id": "Text0974",
       "kind": "text",
-      "ja": "選択(&S)",
-      "en": "&Selection",
+      "ja": "選択",
+      "en": "Selection",
       "resource": true
     },
     {
@@ -8171,8 +8171,8 @@
     {
       "id": "Text1008",
       "kind": "text",
-      "ja": "鉛筆(&P)",
-      "en": "&Pencil",
+      "ja": "鉛筆",
+      "en": "Pencil",
       "resource": true
     },
     {
@@ -8248,8 +8248,8 @@
     {
       "id": "Text1019",
       "kind": "text",
-      "ja": "開く(&O)...\tCtrl+O",
-      "en": "&Open...\tCtrl+O",
+      "ja": "開く...\tCtrl+O",
+      "en": "Open...\tCtrl+O",
       "resource": true
     },
     {
@@ -8285,7 +8285,7 @@
       "kind": "text",
       "ja": "開始角 (度)",
       "en": "Start angle (degrees)",
-      "resource": true
+      "resource": false
     },
     {
       "id": "Text1025",
@@ -8467,6 +8467,20 @@
       "kind": "text",
       "ja": "その割り当ては別のショートカットと前方一致します。\n両方を一意に識別できるキー列を指定してください。",
       "en": "That assignment has a prefix conflict with another shortcut.\nSpecify a key sequence that identifies each shortcut uniquely.",
+      "resource": false
+    },
+    {
+      "id": "ShortcutReservedKey",
+      "kind": "text",
+      "ja": "このキーはメニューまたはシステム操作用に予約されているため、新しいショートカットには割り当てられません。",
+      "en": "This key is reserved for menu or system navigation and cannot be assigned to a new shortcut.",
+      "resource": false
+    },
+    {
+      "id": "ShortcutReservedExisting",
+      "kind": "text",
+      "ja": "保持済みの割り当てです。メニュー／システム操作が優先されるため実行されません。",
+      "en": "Preserved assignment: menu or system navigation takes priority, so this shortcut will not run.",
       "resource": false
     },
     {
@@ -9557,8 +9571,8 @@
     {
       "id": "SettingsFileOpenMenu",
       "kind": "text",
-      "ja": "設定ファイルを開く(&S)",
-      "en": "Open &Settings File",
+      "ja": "設定ファイルを開く",
+      "en": "Open Settings File",
       "resource": true
     },
     {
@@ -9567,6 +9581,125 @@
       "ja": "設定ファイルを開けませんでした。保存先へのアクセスとJSONファイルの関連付けを確認してください。",
       "en": "The settings file could not be opened. Check access to the destination and the JSON file association.",
       "resource": true
+    },
+    {
+      "id": "MenuViewsAndTabs",
+      "kind": "text",
+      "ja": "ビューとタブ",
+      "en": "Views and Tabs",
+      "resource": true
+    },
+    {
+      "id": "MenuEditorGroups",
+      "kind": "text",
+      "ja": "エディターグループ",
+      "en": "Editor Groups",
+      "resource": true
+    },
+    {
+      "id": "MenuWindows",
+      "kind": "text",
+      "ja": "ウィンドウ",
+      "en": "Windows",
+      "resource": true
+    },
+    {
+      "id": "MenuFps",
+      "kind": "text",
+      "ja": "フレームレート (FPS)",
+      "en": "Frame Rate (FPS)",
+      "resource": true
+    },
+    {
+      "id": "MenuFps30",
+      "kind": "text",
+      "ja": "30 FPS",
+      "en": "30 FPS",
+      "resource": true
+    },
+    {
+      "id": "MenuFps25",
+      "kind": "text",
+      "ja": "25 FPS",
+      "en": "25 FPS",
+      "resource": true
+    },
+    {
+      "id": "MenuFps24",
+      "kind": "text",
+      "ja": "24 FPS",
+      "en": "24 FPS",
+      "resource": true
+    },
+    {
+      "id": "MenuFps12",
+      "kind": "text",
+      "ja": "12 FPS",
+      "en": "12 FPS",
+      "resource": true
+    },
+    {
+      "id": "MenuFps10",
+      "kind": "text",
+      "ja": "10 FPS",
+      "en": "10 FPS",
+      "resource": true
+    },
+    {
+      "id": "MenuFps8",
+      "kind": "text",
+      "ja": "8 FPS",
+      "en": "8 FPS",
+      "resource": true
+    },
+    {
+      "id": "MenuKeyboardShortcuts",
+      "kind": "text",
+      "ja": "キーボードショートカット",
+      "en": "Keyboard Shortcuts",
+      "resource": true
+    },
+    {
+      "id": "MenuFocusGroup1",
+      "kind": "text",
+      "ja": "グループ 1 にフォーカス",
+      "en": "Focus Group 1",
+      "resource": true
+    },
+    {
+      "id": "MenuFocusGroup2",
+      "kind": "text",
+      "ja": "グループ 2 にフォーカス",
+      "en": "Focus Group 2",
+      "resource": true
+    },
+    {
+      "id": "MenuUndo",
+      "kind": "text",
+      "ja": "元に戻す(&U)",
+      "en": "&Undo",
+      "resource": false
+    },
+    {
+      "id": "MenuUndoPrefix",
+      "kind": "text",
+      "ja": "元に戻す(&U): ",
+      "en": "&Undo: ",
+      "resource": false
+    },
+    {
+      "id": "MenuRedo",
+      "kind": "text",
+      "ja": "やり直し(&R)",
+      "en": "&Redo",
+      "resource": false
+    },
+    {
+      "id": "MenuRedoPrefix",
+      "kind": "text",
+      "ja": "やり直し(&R): ",
+      "en": "&Redo: ",
+      "resource": false
     }
   ]
 }

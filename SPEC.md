@@ -96,21 +96,22 @@ Windows GUI は標準的な Windows 11 desktop application とし、古典的 MD
 - 下段の status bar は現在 tool/active plane、document 座標、zoom/view flip/grid、pixel RGBA/selection 寸法、文書寸法/DPI、処理進捗、dirty 状態、複数ストローク入力待ちを短く表示する。
 - バックグラウンド処理の共通表示は status bar のジョブ名と標準 progress bar とし、独立した `処理進捗` pane とその表示 command は設けない。file I/O の既存 polling ABI と各 task の進捗照会を再利用し、UI は Core の処理完了を同期的に待たない。総量不明・反映／保存確定中は不定表示とし、read 件数、loaded 件数、処理量を同じ単位として扱わない。複数実行時は選択 job と残件数を表示し、status bar から対象を選択・cancel できる。対象は発行時 workspace と job identity／generation に固定し、tab 切替や遅い完了通知で別 job へ再解決しない。終了後は通常の status 表示へ戻す。
 - menu、shortcut、context menu、pane button は同じ command ID と enable/checked state を共有する。command 発行時に immutable な `CommandContext` として workspace、group、session、view、pane/job、generation を確定し、非同期実行時に active tab を再解決しない。stale target は明示 error または安全な no-op とし、現在 active な別文書へ fallback しない。
-- 全ての実行可能な menu 末端項目に shortcut を割り当て、menu label に現在の割当を表示する。`Ctrl+S`、`Ctrl+O`、Undo/Redo、clipboard など標準操作は一般的な割当を維持する。描画・選択・塗りなど高頻度操作は、text 入力に focus がないときの single stroke を基本とする。その他は短い prefix-free な multi-stroke を使い、入力待ちを status bar に表示する。
-- 色 palette の `1`–`0`、次 group の `Tab` は数値入力中でない場合の高速操作として保持する。shortcut は検索可能なタブ式の環境設定 dialog で編集し、組み込み preset は全 command に完全な既定割当を持つ。ユーザー preset は組み込み preset の複製から作成し、command ごとに主キーと任意の副キーを持ち、各割当を未設定または最大4 stroke の列として再割当てできる。
+- separator を除く全ての top-level menu、submenu、静的な実行可能 menu item は、英語 command 名を基準に同じ sibling scope 内で一意な mnemonic を持つ。top-level は File `F`、Edit `E`、View `V`、Cell `L`、Selection `S`、Filter `I`、Tools `T`、Color `C`、Production `P`、Window `W`、Help `H` とする。日本語 resource は `ファイル(&F)`、`開く(&O)...`、英語 resource は `&File`、`&Open...` のように同じ Latin mnemonic を表示し、`Alt` で access-key underline を表示して menu bar から全 menu 末端へ到達できるようにする。mnemonic は localized menu resource の一部であり、command shortcut profile へ混ぜない。動的な最近使った file は表示順の `1`–`8` を access key とする。動的な `Inkpod File Visualization` は最大64件を8件ずつの page に分け、page と各 page 内 item のそれぞれに `1`–`8` の mnemonic を与えて全件へ access-key で到達可能にする。
+- 組み込み shortcut preset は、Windows と Visual Studio Code で意味が確立しており inkpod に同じ意味の command が存在する操作だけに既定割当を持つ sparse preset とする。New Cell `Ctrl+N`、Open `Ctrl+O`、Save `Ctrl+S`、Save As `Ctrl+Shift+S`、Undo `Ctrl+Z`、Redo primary／secondary `Ctrl+Y`／`Ctrl+Shift+Z`、Cut／Copy／Paste `Ctrl+X`／`Ctrl+C`／`Ctrl+V`、Select All `Ctrl+A`、Zoom In／Out `Ctrl+=`／`Ctrl+-`、Preferences `Ctrl+,`、Keyboard Shortcuts `Ctrl+K, Ctrl+S`、Help `F1` を維持する。tab は previous primary／secondary `Ctrl+PageUp`／`Ctrl+Shift+Tab`、next primary／secondary `Ctrl+PageDown`／`Ctrl+Tab`、move left／right `Ctrl+Shift+PageUp`／`Ctrl+Shift+PageDown`、Close View primary／secondary `Ctrl+W`／`Ctrl+F4`、Split Right `Ctrl+\`、Move to Other Group `Ctrl+Alt+Right`、Focus Group 1／2 `Ctrl+1`／`Ctrl+2`、Next Editor Group `Ctrl+K, Ctrl+Right`、Close Group `Ctrl+K, W`、New Window `Ctrl+Shift+N`、Duplicate View in New Window `Ctrl+K, O` とする。comma は同時押しではなく次の stroke を表す。
+- 描画、fill、selection、palette、motion、pane、workspace 等の inkpod 固有 command は、組み込み preset では全て未割当とする。無修飾の `Q`、`K`、`A` 等、`Q` prefix、palette の `1`–`0`／`Tab` fallback、motion FPS の `Ctrl+Alt+数字` を暗黙の別経路として残さない。組み込み preset の割当有無とは独立して、production command catalog の全 command を shortcut editor に表示し、利用者が主／副の各割当を未設定または最大4 stroke の列として設定できる。ユーザー preset は sparse な組み込み preset の複製から作成できるが、既存の custom profile、import した profile、利用者が明示した `Q`／`K`／`A` 等の割当は、組み込み既定の変更、application update、decode で暗黙に削除または上書きしない。Reset は利用者が選択した command または profile に対する明示操作だけとする。
 - shortcut 割当は `Global`、`Canvas`、`Timeline`、`Pane` の context、`Execute`、`Hold`、`Toggle` の action、論理キーまたは物理位置の照合方式を型付き値として持つ。`Global` は全 context と重なり、その他は同じ context 同士だけが重なる。重なる context の完全一致は解決待ちの競合として編集候補内に保持できるが、未解決競合がある候補は適用または永続化しない。解決操作は競合相手の解除または主／副割当の交換とし、prefix 衝突は候補作成時に拒否する。`Hold` は一時 tool 等の明示対応 command、`Toggle` は表示切替等の明示対応 command だけが選択できる。
-- shortcut editor は command 名、stable command key、割当キーの文字検索、入力キー検索、context filter、category／競合／変更あり／未割当の件数と絞り込み、競合の前後移動、選択 command の詳細と既定値、修飾キー別の物理 keyboard 可視化を持つ。keyboard 表示は自動、JIS 109、US ANSI 104 を選択でき、キー選択で割当へ移動し、command の drag で割当を作成できる。Win 修飾キーは表示と通常の foreground 入力で扱うが、OS 予約 shortcut を奪う global hook は使わない。
-- shortcut preset の import/export は current-version の `.inkshortcuts` JSON だけを受理する versioned、length-bounded な application data format とする。command は `file.save`、key は `S`／`KeyS`、modifier は `ctrl` 等の意味が読めて手編集できる文字列で表し、Win32 command ID、virtual-key／scan-code 数値、modifier bit mask、Base64／binary payload は保存しない。unknown version、不正 UTF、duplicate key／command／slot、範囲外 count、trailing data、未対応 enum、未解決競合を拒否し、export は同一 volume の temporary file を完成、flush、close してから置換する。
+- shortcut editor は command 名、stable command key、割当キーの文字検索、入力キー検索、context filter、category／競合／変更あり／未割当の件数と絞り込み、競合の前後移動、選択 command の詳細と既定値、修飾キー別の物理 keyboard 可視化を持つ。keyboard 表示は自動、JIS 109、US ANSI 104 を選択でき、キー選択で割当へ移動し、command の drag で割当を作成できる。Win 修飾キーは表示と通常の foreground 入力で扱うが、bare `Alt`、`F10`、`Alt+Space`、top-level menu mnemonic の `Alt+英字` は native menu／system 操作を優先する。shortcut editor の新規 record／rebind でこれらの割当を拒否するが、既存 custom v3 profile の decode／validation では割当自体を削除または無効な profile として拒否せず、そのまま round-trip する。保持した予約割当は runtime では発火せず native 操作が勝つことを editor で説明する。`Alt+F4` は標準の Exit built-in だけを例外とし、`Alt+Tab` 等 OS が foreground application へ配送しない system combination を奪う global hook は使わない。OS が foreground application へ配送しない組合せを設定しても application-wide に動作するとは表示しない。
+- shortcut preset の import/export は top-level `format: "inkpod-shortcuts"`、current `formatVersion: 3` の `.inkshortcuts` JSON だけを受理する versioned、length-bounded な application data format とする。command は `file.save`、key は `S`／`KeyS`、modifier は `ctrl` 等の意味が読めて手編集できる文字列で表し、Win32 command ID、virtual-key／scan-code 数値、modifier bit mask、Base64／binary payload は保存しない。unknown version、不正 UTF、duplicate key／command／slot、範囲外 count、trailing data、未対応 enum、未解決競合を拒否し、export は同一 volume の temporary file を完成、flush、close してから置換する。
 - Windows frontend が所有する application data はすべて `%LOCALAPPDATA%\inkpod` 以下へ集約する。通常設定の正本は固定名 `Settings\inkpod-settings.json` とし、top-level の `format: "inkpod-settings"` と整数 `formatVersion` で schema を識別する。UI 言語、保存・復元、animation、color management、shortcut profile、workspace／window layout と named workspace snapshot は UTF-8、2-space indent、末尾改行付きの JSON へ一度だけ保存し、同じ値を registry や別 file へ二重保存しない。missing file／missing optional section は既定値、duplicate／unknown field、不正 UTF、不正 enum、非現行 version は設定全体を staged decode で拒否する。不正 file は自動終了時に上書きせず、既定値を使って診断を出す。保存は同一 directory の temporary file を flush、close 後に原子的に置換する。HKCU は将来の OS 統合または管理 policy だけに限定し、開発中の旧 HKCU／旧 file migration は実装しない。
 - session-only の前回文書 path は `Session\inkpod-session.bin` の current-version、bounded binary record とし、通常設定 JSON へ混ぜない。recovery は `Recovery`、Batch set は `batch-sets`、埋め込み help cache は `Help`、派生 cache は `Cache`、log は `Logs` に置き、`%APPDATA%` には inkpod 所有 data を保存しない。
 - tab drag は同一 group 内の並べ替え、別 group/window への移動、window 外 drop による新規 window を扱う。active stroke、pointer capture、modal preview 中は開始せず、`Esc` で cancel した場合は元の位置を完全復元する。同じ操作は drag に依存せず menu と keyboard からも実行できる。
-- `Ctrl+Tab`/`Ctrl+Shift+Tab` は tab、`Ctrl+F6`/`Ctrl+Shift+F6` は editor group/view、`F6`/`Shift+F6` は menu・dock pane・editor area・status の focus、`Ctrl+F4` は view close に使う。tab、splitter、pane header、AutoHide、target、dirty、job progress と command の disabled state は UI Automation から取得できるようにする。
+- `Ctrl+PageDown`／`Ctrl+PageUp` は次／前の tab の primary、`Ctrl+Tab`／`Ctrl+Shift+Tab` は同じ linear next／previous command の secondary とする。inkpod はこの変更で VS Code の MRU tab picker 自体は導入しない。`Ctrl+1`／`Ctrl+2` は第1／第2 editor group、`Ctrl+K, Ctrl+Right` は次の editor group、`F6`／`Shift+F6` は menu・dock pane・editor area・status の focus、`Ctrl+W` と secondary `Ctrl+F4` は view close に使う。tab、splitter、pane header、AutoHide、target、dirty、job progress と command の disabled state は UI Automation から取得できるようにする。
 - 数値入力と選択肢を共有する modal dialog は、選択肢ごとに標準 combo box を使い、owner window の中央かつ monitor work area 内へ配置する。Cancel は表示前の状態を変えない。
 - 実行不能 command は disable する。例として選択なしの一部 command、対象 layer 未指定の batch を無言で成功させない。未接続 button、空 pane、常時成功する stub は生成しない。
 
 ### 3. メニュー構成
 
-UI 表示文字列は、日本語と英語を言語非依存の型付き ID で参照する一つの catalog で管理する。単語単位の部分置換で表示文を組み立てず、各言語の完成した文または format string を catalog に置く。文書名、path、Light Table set 名等のユーザー所有文字列は翻訳せず、catalog 由来の prefix/suffix と明示的に合成する。`編集 > 環境設定 > 全般` で `システム設定`、`日本語`、`English` を選択でき、次回起動から process 内の全 workspace に適用する。`システム設定` は Windows の第1優先 UI 言語が `ja` の場合だけ日本語を選び、それ以外または判定不能時は英語を選ぶ。選択値は `inkpod-settings.json` の `general.uiLanguage` に `system`、`ja-JP`、`en-US` のいずれかで保存し、不正な設定 file は全体を拒否して `システム設定` を含む既定値へ戻す。言語は文書、履歴、native file、ユーザー入力の名前や path に混ぜない。実行可能な button、checkbox 等の catalog 由来 caption は、各 pane の最小幅と 96/120/144/192 DPI 相当の標準 UI font で全文を表示し、必要なら操作行を折り返す。省略表示を許すのは文書名や path 等の可変長ユーザー所有文字列であり、操作 caption の切り詰め、略称化、font 縮小で代用しない。以下は機能上必要な top-level menu と command です。Windows の標準慣習に合わせた mnemonic、ellipsis、並びの小調整は許可します。
+UI 表示文字列は、日本語と英語を言語非依存の型付き ID で参照する一つの catalog で管理する。単語単位の部分置換で表示文を組み立てず、各言語の完成した文または format string を catalog に置く。文書名、path、Light Table set 名等のユーザー所有文字列は翻訳せず、catalog 由来の prefix/suffix と明示的に合成する。`編集 > 環境設定 > 全般` で `システム設定`、`日本語`、`English` を選択でき、次回起動から process 内の全 workspace に適用する。`システム設定` は Windows の第1優先 UI 言語が `ja` の場合だけ日本語を選び、それ以外または判定不能時は英語を選ぶ。選択値は `inkpod-settings.json` の `general.uiLanguage` に `system`、`ja-JP`、`en-US` のいずれかで保存し、不正な設定 file は全体を拒否して `システム設定` を含む既定値へ戻す。言語は文書、履歴、native file、ユーザー入力の名前や path に混ぜない。実行可能な button、checkbox 等の catalog 由来 caption は、各 pane の最小幅と 96/120/144/192 DPI 相当の標準 UI font で全文を表示し、必要なら操作行を折り返す。省略表示を許すのは文書名や path 等の可変長ユーザー所有文字列であり、操作 caption の切り詰め、略称化、font 縮小で代用しない。以下は機能上必要な top-level menu と command です。ellipsis と並びは Windows の標準慣習に合わせ、全 menu caption の mnemonic は本節の collision-free access-key 契約に従う。
 
 #### ファイル
 
@@ -137,6 +138,7 @@ UI 表示文字列は、日本語と英語を言語非依存の型付き ID で�
 - `スナップ > ガイド/グリッド`: checked state を表示する。
 - `アルファ使用モード`: alpha 対応の描画、読み込み、保存を有効にする。
 - `編集 > 環境設定`: application／workspace 単位の環境設定を `一般` と `キーボードショートカット` の二つの category tab に集約する。`一般` page は一般、保存と復元、workspace、animation、color 管理の区分見出しを持ち、各区分の少数設定を一つの縦型 form で表示する。document、view、tool、batch operation 固有の設定を混ぜない。dialog は typed initial value と候補だけを所有し、`適用`／`OK` の検証と永続化が成功するまで live state を変更せず、`キャンセル` は最後の適用後の状態へ完全に戻す。shortcut page は上記の preset、検索、競合、一覧、詳細、物理 keyboard を提供し、command 数と各 category 件数を production command catalog から算出する。
+- `編集 > キーボードショートカット`: 同じ環境設定 dialog を `キーボードショートカット` page を選択した状態で直接開く。別の editor／設定 store を作らず、`Ctrl+K, Ctrl+S` と同じ command route を使う。
 - `設定 > グリッド`: 間隔、分割数、原点を指定する。
 
 #### セル
@@ -178,11 +180,11 @@ UI 表示文字列は、日本語と英語を言語非依存の型付き ID で�
 
 #### ウィンドウ
 
-- 表示切替は `ツールパレット`、`ツールオプション` flyout、`カラー`、`レイヤー／プレーン` と、実装済みの補助 pane を列挙する。`ロケーター`、`シーケンス`、`ライトテーブル`、`サブパレット`、`参照`、`バッチ` は submenu ではなく、それぞれ一つの直接 checked toggle とする。menu、shortcut、pane control は同じ command ID と checked state を使い、checked state は dock／floating／AutoHide を含む実可視性、`ツールオプション` は flyout の可視性を表す。Color と Batch の文書固定／追従 command は Window menu に重複配置せず、各 pane の target control から操作する。
-- `新しいビュー`: active document の別 `DocumentView` を active group に作る。
-- `ビューを閉じる`、`文書を閉じる`: 前者は focused view だけを閉じ、後者は全 window/group の該当 view を列挙して document session を一度だけ閉じる。
-- `右へ分割`、`下へ分割`、`別グループへ移動`、`別グループに新しいビュー`、`グループを閉じる`: 最大二 group の editor area を command/keyboard から操作する。
-- `新しいウィンドウ`、`ビューを新しいウィンドウへ移動`、`新しいウィンドウに複製ビュー`: 同一 process、同一 UI/Input thread 上の workspace window を操作する。
+- 表示切替は `ツールパレット`、`ツールオプション` flyout、`カラー`、`レイヤー／プレーン`、`ロケーター`、`シーケンス`、`ライトテーブル`、`サブパレット／参照ビュー`、`バッチ` の九つを Window menu 直下の直接 checked toggle とする。menu、shortcut、pane control は同じ command ID と checked state を使い、checked state は dock／floating／AutoHide を含む実可視性、`ツールオプション` は flyout の可視性を表す。Color と Batch の文書固定／追従 command は Window menu に重複配置せず、各 pane の target control から操作する。
+- pane toggle 群の直接性を保ったまま、document-tab 操作を `ビューとタブ`、二分割操作を `エディターグループ`、workspace-window 間操作を `ウィンドウ` submenu にまとめ、その後に既存の `ワークスペース` submenu を置く。これは menu の発見性だけを変える regroup であり、command ID、route owner、checked／enabled state、shortcut、`CommandContext` は変更しない。
+- `ビューとタブ > 新しいビュー`: active document の別 `DocumentView` を active group に作る。`ビューとタブ > ビューを閉じる`、`文書を閉じる` は、前者は focused view だけを閉じ、後者は全 window/group の該当 view を列挙して document session を一度だけ閉じる。次／前の tab と tab の左／右移動も同じ submenu に置く。
+- `エディターグループ > 右へ分割`、`下へ分割`、`別グループへ移動`、`別グループに新しいビュー`、`次のエディターグループ`、`グループを閉じる`: 最大二 group の editor area を command/keyboard から操作する。
+- `ウィンドウ > 新しいウィンドウ`、`ビューを次／新しいウィンドウへ移動`、`次／新しいウィンドウに複製ビュー`: 同一 process、同一 UI/Input thread 上の workspace window を操作する。
 - `ワークスペース`: named workspace の選択、保存、名前を付けて保存、復元、既定に戻す、および pane の dock/float/hide/auto-hide command を提供する。
 - `フルスクリーン`。
 - current `彩色` preset との移行互換として、従来の `初期位置`、`現在位置を保存`、`保存位置へ戻す`、`左右を反転` の意味を named workspace command から到達可能にする。
@@ -360,7 +362,7 @@ composite は layer/plane 順、visibility、opacity、alpha を決定的に適�
 - color ring、HSV triangle、alpha track の pointer drag は pane-local preview を各入力 sample で即時描画し、button release 時だけ現在色を Core/editor state へ公開する。capture cancellation は drag 開始時の色と hue へ復元し、preview 中に palette/chart list や他 pane を全更新しない。
 - color palette は複数 page/group を持ち、cell click で描画色取得、modifier+click で現在色登録、clear/save/load ができる。
 - 現在色と subpalette 採取色の登録は、対象文書の全 page/group から native depth と straight RGBA が完全一致する最初の項目を再利用する。同色を再登録しても項目数、document revision、history、dirty は変えず、その項目の選択位置と group へ移る。登録上限に達していても既存色の再利用は可能とする。透明度または native depth／成分値が異なる色は別色として保持し、既存項目や読込 file の重複を自動削除しない。
-- 高頻度の10色は `1`から`0`へ割り当て、`Tab`で次の10色 group へ切り替える。shortcut editor で変更可能にする。
+- 高頻度の10色を選ぶ command と次の10色 group へ切り替える command を shortcut catalog に含める。組み込み preset では `1`–`0` と `Tab` を含めて未割当とし、利用者が shortcut editor で必要なキーを設定できるようにする。
 - color chart は色と名前を表形式で管理し、複数 page、検索、次候補、lock、cut/copy/paste、save/load を持つ。旧版の5文字制限は native 形式へ課さない。
 - `セルからカラーチャートを作成` は一意色を抽出するが、gradient/antialias 画像で色数が過大になるため、最大数、quantization、preview を用意する。
 - chart生成previewは発行時のdocument revisionと同じbase compositeから毎回再抽出し、直前候補へ再量子化しない。previewは候補色、頻度、色数超過、元chartとの差分summaryをboundedに返し、chart、history、journal、dirtyを変更しない。Apply tokenがstaleなら別revisionや別chartへ適用しない。
@@ -427,7 +429,7 @@ composite は layer/plane 順、visibility、opacity、alpha を決定的に適�
 - ガード結果は元pixelを変更せず、`新規`、`追加`、`削除`、`交差`で既存selectionへ一transaction、一canonical procedure、一Undo単位として合成する。`新規`が非空selectionを空maskへ置換する場合は変更、既に同じ空maskの場合だけno-opとする。他operationの同一結果もno-opとし、Cancel、invalid profile、stale base revision、overflow、allocation／composition failureではselection、revision、history、journal、dirty、IDを進めない。
 - 大画像scanはrow単位のprogressとcooperative cancellationを持ち、発行時document UUID／base revision／profile／selection operationへ固定する。profile semanticsはcanonical procedureへ保存するが、profileのUI既定値はapplication settingでありdocumentへ永続化しない。
 - motion check は同じ sequence の指定範囲を、倍率、背景色、余白色、開始時 pause、selection のみ、light table を含める設定で再生する。
-- FPS shortcut は少なくとも 30/25/24/12/10/8、前後 frame、先頭/末尾、space pause/resume、Esc 終了を提供する。
+- shortcut catalog は少なくとも 30/25/24/12/10/8 FPS、前後 frame、先頭／末尾、pause／resume、終了の各 command を提供する。これらの inkpod 固有操作は組み込み preset では未割当とし、motion check 中の `Esc` だけは shortcut profile ではなく標準の cancel／終了操作として扱う。
 - 簡易連続表示は追加設定なしで sequence を loop 表示し、Esc で終了する。
 
 ### 13. ライトテーブル
@@ -623,7 +625,7 @@ UI／ABIを production contract とする。M23で批准済みcatalogを使うRu
 - `IO-001`: versioned `.inkpod`、atomic save、round-trip、recovery
 - `IO-002`: PNG/TIFF/TGA/BMP import/export と alpha/white background option
 - `IO-003`: path-only Rust filesystem boundary、shared bounded parallel I/O、file identity/locks、encoded/decoded LRU、polling、通常 native/raster pair 保存
-- `WIN-001`: Windows shell、Help/About、DPI/theme/keyboard behavior
+- `WIN-001`: Windows shell、Help/About、DPI/theme、全 menu mnemonic、native menu／system 予約キーを保つ keyboard behavior
 - `WIN-002`: 同一 process/UI thread 上の複数 `WorkspaceWindow`、window-local focus/menu/status、application activation、最後の window による shutdown
 - `WORKSPACE-001`: 制約付き dock、最大二つの `EditorGroup`、named workspace、versioned layout persistence と monitor/DPI recovery
 - `WORKSPACE-002`: pane scope、follow/pin/job target、発行時 `CommandContext`、ID/generation による stale routing rejection
@@ -645,7 +647,7 @@ UI／ABIを production contract とする。M23で批准済みcatalogを使うRu
 - `VIEW-002`: ruler、guide/grid、snap、transparent view
 - `SNAP-001`: view-targeted device/document座標変換、guide/grid優先順位、Ctrl一時解除を共有するproduction図形入力snap
 - `VIEW-003`: color locator の座標/RGBA/selection sampling と magnified neighborhood 表示・編集
-- `VIEW-004`: 複数文書 tab、同一文書 view、二分割 group、group/window 間の移動と複製
+- `VIEW-004`: 複数文書 tab、同一文書 view、二分割 group、group 1／2 focus command、group/window 間の移動と複製
 - `HIST-001`: transaction、Undo/Redo、savepoint、revert、preview cancel
 - `HIST-002`: open native document の canonical procedure journal、typed 引数、commit 後 thumbnail のモードレス可視化
 
@@ -687,8 +689,8 @@ UI／ABIを production contract とする。M23で批准済みcatalogを使うRu
 - `SEQ-ENDPOINT-001`: application-wideの`Stop`／`Wrap`端点policy、empty／one／stopped／advanced／wrapped result、issue-time cell identity、motion loopとの分離、human-readable settings JSON persistence
 - `SEQ-STRUCT-001`: Cut membership の add／remove／move-before／move-after／range renumber を stable Cell identity の一 transaction として行い、表示順／番号を file 名から分離し、Cut 専用 Undo／Redo、save／reopen、orphan 状態を提供する
 - `SEQ-002`: motion check、FPS、loop、step、selection/light table option
-- `PREF-001`: application／workspace 環境設定を一般と keyboard shortcut の二タブへ集約する dialog、一般 page 内の意味別区分、候補 state、Apply／OK／Cancel 原子性、scope と再起動要否の表示
-- `SHORT-001`: 完全な組み込み preset と未割当可能なユーザー preset、主／副の最大4-stroke shortcut、Global／Canvas／Timeline／Pane context、Execute／Hold／Toggle action、論理／物理照合、text-focus guard、context-aware prefix-free resolve、競合解決、検索／分類／keyboard 可視化、`.inkshortcuts` current-version import/export、永続化、reset
+- `PREF-001`: application／workspace 環境設定を一般と keyboard shortcut の二タブへ集約する dialog、keyboard shortcut page への直接 command、一般 page 内の意味別区分、候補 state、Apply／OK／Cancel 原子性、scope と再起動要否の表示
+- `SHORT-001`: 全 production command を編集できる catalog と Windows／VS Code 慣例だけを割り当てる sparse な組み込み preset、inkpod 固有 command の既定未割当、保持されるユーザー preset、主／副の最大4-stroke shortcut、Global／Canvas／Timeline／Pane context、Execute／Hold／Toggle action、論理／物理照合、text-focus guard、context-aware prefix-free resolve、競合解決、検索／分類／keyboard 可視化、全 menu の collision-free mnemonic、`.inkshortcuts` current v3 import/export、永続化、reset
 
 ### Image processing and batch
 

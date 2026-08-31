@@ -63,19 +63,31 @@ std::wstring EscapeMenuText(std::wstring_view text) {
     return escaped;
 }
 
-bool MenuContainsDirectVisualizationCommand(HMENU menu) noexcept {
-    const int count = GetMenuItemCount(menu);
-    for (int position = 0; position < count; ++position) {
-        MENUITEMINFOW item{};
-        item.cbSize = sizeof(item);
-        item.fMask = MIIM_ID;
-        if (GetMenuItemInfoW(menu, position, TRUE, &item) != FALSE
-            && item.wID >= IDM_TOOL_HISTORY_VISUALIZATION_FIRST
-            && item.wID <= IDM_TOOL_HISTORY_VISUALIZATION_LAST) {
-            return true;
+bool MenuTextEquals(
+    std::wstring_view label,
+    std::wstring_view expected) noexcept {
+    std::size_t label_index{};
+    std::size_t expected_index{};
+    while (label_index < label.size() && expected_index < expected.size()) {
+        wchar_t character = label[label_index++];
+        if (character == L'&' && label_index < label.size()) {
+            character = label[label_index++];
+        }
+        if (character != expected[expected_index++]) {
+            return false;
         }
     }
-    return false;
+    while (label_index < label.size() && label[label_index] == L'&') {
+        ++label_index;
+    }
+    if (label_index == label.size() && expected_index == expected.size()) {
+        return true;
+    }
+    return expected_index == expected.size()
+        && label.size() - label_index == 4U
+        && label[label_index] == L'('
+        && label[label_index + 1U] == L'&'
+        && label[label_index + 3U] == L')';
 }
 
 HMENU FindVisualizationSubmenu(HMENU menu) noexcept {
@@ -84,14 +96,19 @@ HMENU FindVisualizationSubmenu(HMENU menu) noexcept {
     }
     const int count = GetMenuItemCount(menu);
     for (int position = 0; position < count; ++position) {
+        std::array<wchar_t, 128U> label{};
         MENUITEMINFOW item{};
         item.cbSize = sizeof(item);
-        item.fMask = MIIM_SUBMENU;
+        item.fMask = MIIM_SUBMENU | MIIM_STRING;
+        item.dwTypeData = label.data();
+        item.cch = static_cast<UINT>(label.size());
         if (GetMenuItemInfoW(menu, position, TRUE, &item) == FALSE
             || item.hSubMenu == nullptr) {
             continue;
         }
-        if (MenuContainsDirectVisualizationCommand(item.hSubMenu)) {
+        if (MenuTextEquals(
+                label.data(),
+                UiText(UiStringId::HistoryVisualizationTitle))) {
             return item.hSubMenu;
         }
         if (HMENU nested = FindVisualizationSubmenu(item.hSubMenu);
@@ -823,7 +840,10 @@ void UpdateHistoryVisualizationMenu(
         }
         const std::size_t count = std::min(
             candidates.size(), workspace.history_visualization_menu_targets.size());
-        for (std::size_t index = 0U; index < count; ++index) {
+        const auto insert_candidate = [&candidates](
+                                          HMENU destination,
+                                          UINT position,
+                                          std::size_t index) {
             const MenuCandidate& candidate = candidates[index];
             const bool duplicate_leaf = std::count_if(
                 candidates.cbegin(), candidates.cend(),
@@ -836,6 +856,10 @@ void UpdateHistoryVisualizationMenu(
                 ? candidate.leaf + L" - " + candidate.document->shell.current_path
                 : candidate.leaf;
             label = EscapeMenuText(label);
+            std::wstring numbered{
+                L'&', static_cast<wchar_t>(L'1' + (index % 8U)), L' '};
+            numbered += label;
+            label = std::move(numbered);
             MENUITEMINFOW item{};
             item.cbSize = sizeof(item);
             item.fMask = MIIM_ID | MIIM_STATE | MIIM_STRING;
@@ -843,13 +867,71 @@ void UpdateHistoryVisualizationMenu(
                 + static_cast<UINT>(index);
             item.fState = MFS_ENABLED;
             item.dwTypeData = label.data();
-            if (InsertMenuItemW(
-                    submenu, static_cast<UINT>(index), TRUE, &item) == FALSE) {
-                break;
+            return InsertMenuItemW(destination, position, TRUE, &item) != FALSE;
+        };
+        if (count <= 8U) {
+            for (std::size_t index = 0U; index < count; ++index) {
+                if (!insert_candidate(
+                        submenu, static_cast<UINT>(index), index)) {
+                    break;
+                }
+                workspace.history_visualization_menu_targets[index] = {
+                    candidates[index].document->id,
+                    candidates[index].document->generation};
+                workspace.history_visualization_menu_target_count = index + 1U;
             }
-            workspace.history_visualization_menu_targets[index] = {
-                candidate.document->id, candidate.document->generation};
-            workspace.history_visualization_menu_target_count = index + 1U;
+        } else {
+            constexpr std::size_t kItemsPerPage = 8U;
+            for (std::size_t page_start = 0U;
+                 page_start < count;
+                 page_start += kItemsPerPage) {
+                const std::size_t page_end = std::min(
+                    page_start + kItemsPerPage, count);
+                HMENU page_menu = CreatePopupMenu();
+                if (page_menu == nullptr) {
+                    break;
+                }
+                bool page_ready = true;
+                for (std::size_t index = page_start; index < page_end; ++index) {
+                    if (!insert_candidate(
+                            page_menu,
+                            static_cast<UINT>(index - page_start),
+                            index)) {
+                        page_ready = false;
+                        break;
+                    }
+                }
+                if (!page_ready) {
+                    DestroyMenu(page_menu);
+                    break;
+                }
+                const std::size_t page_index = page_start / kItemsPerPage;
+                std::wstring page_label{
+                    L'&', static_cast<wchar_t>(L'1' + page_index), L' '};
+                page_label += std::to_wstring(page_start + 1U);
+                page_label += L'\x2013';
+                page_label += std::to_wstring(page_end);
+                MENUITEMINFOW page_item{};
+                page_item.cbSize = sizeof(page_item);
+                page_item.fMask = MIIM_SUBMENU | MIIM_STATE | MIIM_STRING;
+                page_item.fState = MFS_ENABLED;
+                page_item.hSubMenu = page_menu;
+                page_item.dwTypeData = page_label.data();
+                if (InsertMenuItemW(
+                        submenu,
+                        static_cast<UINT>(page_index),
+                        TRUE,
+                        &page_item) == FALSE) {
+                    DestroyMenu(page_menu);
+                    break;
+                }
+                for (std::size_t index = page_start; index < page_end; ++index) {
+                    workspace.history_visualization_menu_targets[index] = {
+                        candidates[index].document->id,
+                        candidates[index].document->generation};
+                }
+                workspace.history_visualization_menu_target_count = page_end;
+            }
         }
     } catch (const std::bad_alloc&) {
         workspace.history_visualization_menu_target_count = 0U;

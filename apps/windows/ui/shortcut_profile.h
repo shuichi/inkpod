@@ -149,6 +149,24 @@ struct ShortcutResolution final {
     bool built_in,
     std::span<const InkpodShortcutSequence> sequences);
 
+[[nodiscard]] bool ShortcutStrokeReservedForNativeMenu(
+    std::uint32_t command_id, const ShortcutInputStroke& stroke) noexcept;
+
+[[nodiscard]] inline std::uint32_t ShortcutPhysicalKeyFromVirtualKey(
+    std::uint32_t virtual_key, std::uint32_t modifiers) noexcept {
+    const UINT mapped = MapVirtualKeyW(
+        static_cast<UINT>(virtual_key), MAPVK_VK_TO_VSC_EX);
+    if (mapped == 0U) {
+        return virtual_key;
+    }
+    std::uint32_t physical_key = mapped & UINT32_C(0xff);
+    if ((modifiers & INKPOD_SHORTCUT_MODIFIER_EXTENDED) != 0U
+        || (mapped & UINT32_C(0xff00)) != 0U) {
+        physical_key |= UINT32_C(0x100);
+    }
+    return physical_key;
+}
+
 [[nodiscard]] std::uint32_t ShortcutPhysicalKeyFromMessage(
     WPARAM virtual_key, LPARAM key_data) noexcept;
 

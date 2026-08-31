@@ -20,6 +20,8 @@ std::span<const UINT> ShortcutCommandCatalog() noexcept;
 
 std::vector<InkpodShortcutSequence> BuildDefaultShortcutSequences();
 
+ShortcutProfile BuildDefaultShortcutProfile(std::wstring name);
+
 const InkpodShortcutSequence* FindShortcutSequence(
     std::span<const InkpodShortcutSequence> bindings,
     UINT command) noexcept;

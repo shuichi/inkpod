@@ -30,22 +30,10 @@ std::wstring PresetName(std::size_t ordinal) {
     return result;
 }
 
-bool BuiltInIsComplete(const ShortcutProfile& profile) noexcept {
-    const auto commands = ShortcutCommandCatalog();
-    return profile.built_in && std::all_of(
-        commands.begin(), commands.end(), [&profile](UINT command) {
-            return FindShortcutBinding(
-                       std::span<const ShortcutProfileBinding>(profile.bindings),
-                       command,
-                       ShortcutSlot::Primary)
-                != nullptr;
-        });
-}
-
 bool ValidProfileSet(const ShortcutProfileSet& set) noexcept {
     if (set.profiles.empty() || set.profiles.size() > kMaximumShortcutProfiles
         || set.active_profile >= set.profiles.size()
-        || !BuiltInIsComplete(set.profiles.front())
+        || !set.profiles.front().built_in
         || (set.keyboard_layout != ShortcutKeyboardLayout::Automatic
             && set.keyboard_layout != ShortcutKeyboardLayout::Jis109
             && set.keyboard_layout != ShortcutKeyboardLayout::UsAnsi104)) {
@@ -208,8 +196,7 @@ InkpodStatus InitializeShortcuts(
 
 ShortcutProfileSet BuildDefaultShortcutProfileSet() {
     ShortcutProfileSet result{};
-    result.profiles.push_back(BuildShortcutProfileFromLegacy(
-        PresetName(0U), true, BuildDefaultShortcutSequences()));
+    result.profiles.push_back(BuildDefaultShortcutProfile(PresetName(0U)));
     return result;
 }
 
@@ -262,6 +249,18 @@ InkpodStatus RebindShortcut(
         || replacement.stroke_count > INKPOD_SHORTCUT_MAX_STROKES) {
         return INKPOD_STATUS_INVALID_ARGUMENT;
     }
+    for (std::uint32_t index = 0U; index < replacement.stroke_count; ++index) {
+        const InkpodShortcutStroke& source = replacement.strokes[index];
+        const ShortcutInputStroke stroke{
+            source.virtual_key,
+            ShortcutPhysicalKeyFromVirtualKey(
+                source.virtual_key, source.modifiers),
+            source.modifiers};
+        if (ShortcutStrokeReservedForNativeMenu(
+                replacement.command_id, stroke)) {
+            return INKPOD_STATUS_INVALID_ARGUMENT;
+        }
+    }
     try {
         ShortcutProfileSet candidate = state.profile_set;
         ShortcutProfile* profile = candidate.active_profile < candidate.profiles.size()
@@ -287,7 +286,8 @@ InkpodStatus RebindShortcut(
             std::span<ShortcutProfileBinding>(profile->bindings),
             replacement.command_id,
             ShortcutSlot::Primary);
-        if (target == nullptr) {
+        const bool target_existed = target != nullptr;
+        if (!target_existed) {
             prior.command_id = replacement.command_id;
             prior.context = DefaultShortcutContext(replacement.command_id);
             prior.action = DefaultShortcutAction(replacement.command_id);
@@ -301,33 +301,70 @@ InkpodStatus RebindShortcut(
         target->key_match = ShortcutKeyMatch::Logical;
         for (std::uint32_t index = 0U; index < replacement.stroke_count; ++index) {
             const auto& source = replacement.strokes[index];
-            const UINT scan = MapVirtualKeyW(source.virtual_key, MAPVK_VK_TO_VSC_EX);
             target->strokes[index] = {
                 source.virtual_key,
-                scan == 0U ? source.virtual_key : scan,
+                ShortcutPhysicalKeyFromVirtualKey(
+                    source.virtual_key, source.modifiers),
                 source.modifiers};
         }
 
         std::vector<ShortcutConflict> conflicts =
             AnalyzeShortcutConflicts(profile->bindings);
+        const std::size_t target_index = static_cast<std::size_t>(
+            target - profile->bindings.data());
+        std::vector<std::size_t> exact_others;
         for (const ShortcutConflict& conflict : conflicts) {
             if (conflict.kind == ShortcutConflictKind::Prefix) {
                 return INKPOD_STATUS_INVALID_ARGUMENT;
             }
-            const std::size_t other_index = conflict.first_index ==
-                    static_cast<std::size_t>(target - profile->bindings.data())
+            const bool first_is_target = conflict.first_index == target_index;
+            const bool second_is_target = conflict.second_index == target_index;
+            if (first_is_target == second_is_target) {
+                return INKPOD_STATUS_INVALID_STATE;
+            }
+            const std::size_t other_index = first_is_target
                 ? conflict.second_index
                 : conflict.first_index;
             if (other_index >= profile->bindings.size()) {
                 return INKPOD_STATUS_INVALID_STATE;
             }
-            ShortcutProfileBinding& other = profile->bindings[other_index];
-            if (other.slot != ShortcutSlot::Primary) {
+            if (profile->bindings[other_index].slot != ShortcutSlot::Primary) {
                 return INKPOD_STATUS_INVALID_ARGUMENT;
             }
-            const std::uint32_t other_command = other.command_id;
-            other = prior;
-            other.command_id = other_command;
+            exact_others.push_back(other_index);
+        }
+        if (target_existed) {
+            if (exact_others.size() > 1U) {
+                return INKPOD_STATUS_INVALID_ARGUMENT;
+            }
+            if (!exact_others.empty()) {
+                ShortcutProfileBinding& other =
+                    profile->bindings[exact_others.front()];
+                ShortcutProfileBinding swapped = other;
+                swapped.key_match = prior.key_match;
+                swapped.stroke_count = prior.stroke_count;
+                swapped.strokes = prior.strokes;
+                if (std::any_of(
+                        swapped.strokes.begin(),
+                        swapped.strokes.begin() + swapped.stroke_count,
+                        [&](const ShortcutInputStroke& stroke) {
+                            return ShortcutStrokeReservedForNativeMenu(
+                                swapped.command_id, stroke);
+                        })) {
+                    return INKPOD_STATUS_INVALID_ARGUMENT;
+                }
+                other = swapped;
+            }
+        } else {
+            std::sort(exact_others.rbegin(), exact_others.rend());
+            exact_others.erase(
+                std::unique(exact_others.begin(), exact_others.end()),
+                exact_others.end());
+            for (const std::size_t other_index : exact_others) {
+                profile->bindings.erase(
+                    profile->bindings.begin()
+                    + static_cast<std::ptrdiff_t>(other_index));
+            }
         }
         return ApplyShortcutProfileSet(engine, state, candidate);
     } catch (const std::bad_alloc&) {
@@ -388,10 +425,10 @@ InkpodShortcutMatch ResolveShortcutStroke(
     ShortcutUiState& state,
     InkpodShortcutStroke stroke,
     UINT& command) noexcept {
-    const UINT scan = MapVirtualKeyW(stroke.virtual_key, MAPVK_VK_TO_VSC_EX);
     const ShortcutInputStroke input{
         stroke.virtual_key,
-        scan == 0U ? stroke.virtual_key : scan,
+        ShortcutPhysicalKeyFromVirtualKey(
+            stroke.virtual_key, stroke.modifiers),
         stroke.modifiers};
     for (const ShortcutContext context : {
              ShortcutContext::Global,

@@ -874,7 +874,7 @@ Inactive-session notifications validate their captured session/generation and
 update only tab dirty/processing presentation; they do not retarget the active
 view or request continuous snapshots.
 
-The fixed command-state catalog assigns all 321 production commands exactly one
+The fixed command-state catalog assigns all 324 production commands exactly one
 state owner. Pure providers compute enabled/checked state without calling Core or
 Win32 or mutating tools, previews, or documents. Menus, shortcuts, and palette
 entry points consume the same cached result. The main frame deliberately has no
@@ -1287,10 +1287,11 @@ The five built-in presets are Coloring, Line Cleanup, Reference Check, Batch,
 and Focus. Save, Save As, Restore, and Reset share the normal command/state/
 shortcut catalog. Secondary palettes use resource-titled standard-button
 AutoHide edge strips, keeping keyboard and accessibility behavior in Common
-Controls. Workspace navigation is intercepted before the configurable command
-catalog: Ctrl+Tab/Ctrl+Shift+Tab select tabs, Ctrl+F6/Ctrl+Shift+F6 select an
-editor group, F6/Shift+F6 cycle menu, dock, editor, and status, and Ctrl+F4
-closes the captured view. Edit controls retain all other text input. Standard
+Controls. The configurable command catalog supplies the standard workspace
+defaults: Ctrl+Tab/Ctrl+Shift+Tab select tabs, Ctrl+1/Ctrl+2 select an editor
+group, and Ctrl+F4 closes the captured view. Only F6/Shift+F6 focus navigation
+is intercepted before that catalog to cycle menu, dock, editor, and status.
+Edit controls retain all other text input. Standard
 tab, static, dialog, and button controls expose dirty, target, job, pane, and
 AutoHide names through the Windows MSAA/UI Automation bridge; captionless
 splitters receive explicit accessible names. Main and floating placements are

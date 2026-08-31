@@ -230,19 +230,123 @@ INT_PTR CALLBACK PassiveDialogProcedure(
     return message == WM_INITDIALOG ? TRUE : FALSE;
 }
 
-bool MenuCaptionEquals(HMENU menu, std::wstring_view expected) {
-    const int length = GetMenuStringW(menu, 0U, nullptr, 0, MF_BYPOSITION);
-    if (length <= 0 || static_cast<std::size_t>(length) != expected.size()) {
+bool ReadMenuCaption(HMENU menu, UINT position, std::wstring& caption) {
+    const int length = GetMenuStringW(
+        menu, position, nullptr, 0, MF_BYPOSITION);
+    if (length <= 0) {
         return false;
     }
-    std::wstring actual(static_cast<std::size_t>(length) + 1U, L'\0');
+    caption.assign(static_cast<std::size_t>(length) + 1U, L'\0');
     if (GetMenuStringW(
-            menu, 0U, actual.data(), static_cast<int>(actual.size()), MF_BYPOSITION)
+            menu,
+            position,
+            caption.data(),
+            static_cast<int>(caption.size()),
+            MF_BYPOSITION)
         != length) {
         return false;
     }
-    actual.resize(static_cast<std::size_t>(length));
-    return actual == expected;
+    caption.resize(static_cast<std::size_t>(length));
+    return true;
+}
+
+bool MenuCaptionEquals(HMENU menu, std::wstring_view expected) {
+    std::wstring actual;
+    return ReadMenuCaption(menu, 0U, actual) && actual == expected;
+}
+
+bool MenuMnemonicIndex(wchar_t character, std::size_t& index) {
+    if (character >= L'a' && character <= L'z') {
+        character = static_cast<wchar_t>(character - L'a' + L'A');
+    }
+    if (character >= L'A' && character <= L'Z') {
+        index = static_cast<std::size_t>(character - L'A');
+        return true;
+    }
+    if (character >= L'0' && character <= L'9') {
+        index = 26U + static_cast<std::size_t>(character - L'0');
+        return true;
+    }
+    return false;
+}
+
+bool SingleMenuMnemonic(std::wstring_view caption, std::size_t& index) {
+    bool found = false;
+    for (std::size_t offset = 0U; offset < caption.size(); ++offset) {
+        if (caption[offset] != L'&') {
+            continue;
+        }
+        if (offset + 1U >= caption.size()) {
+            return false;
+        }
+        if (caption[offset + 1U] == L'&') {
+            ++offset;
+            continue;
+        }
+        std::size_t candidate = 0U;
+        if (found || !MenuMnemonicIndex(caption[offset + 1U], candidate)) {
+            return false;
+        }
+        index = candidate;
+        found = true;
+    }
+    return found;
+}
+
+bool MenuMnemonicContract(HMENU menu) {
+    const int item_count = GetMenuItemCount(menu);
+    if (item_count <= 0) {
+        return false;
+    }
+    std::array<bool, 36U> sibling_keys{};
+    for (int position = 0; position < item_count; ++position) {
+        MENUITEMINFOW item{};
+        item.cbSize = sizeof(item);
+        item.fMask = MIIM_FTYPE | MIIM_STATE | MIIM_SUBMENU;
+        if (!GetMenuItemInfoW(
+                menu, static_cast<UINT>(position), TRUE, &item)) {
+            return false;
+        }
+        if ((item.fType & MFT_SEPARATOR) == 0U
+            && (item.fState & (MFS_DISABLED | MFS_GRAYED)) == 0U) {
+            std::wstring caption;
+            std::size_t mnemonic = 0U;
+            if (!ReadMenuCaption(
+                    menu, static_cast<UINT>(position), caption)
+                || !SingleMenuMnemonic(caption, mnemonic)
+                || sibling_keys[mnemonic]) {
+                return false;
+            }
+            sibling_keys[mnemonic] = true;
+        }
+        if (item.hSubMenu != nullptr
+            && !MenuMnemonicContract(item.hSubMenu)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::wstring ExpectedMenuLabel(
+    std::wstring_view text, wchar_t mnemonic, UiLanguage language) {
+    std::wstring label(text);
+    if (language == UiLanguage::English) {
+        std::size_t position = label.find(mnemonic);
+        if (position == std::wstring::npos
+            && mnemonic >= L'A' && mnemonic <= L'Z') {
+            position = label.find(
+                static_cast<wchar_t>(mnemonic - L'A' + L'a'));
+        }
+        if (position == std::wstring::npos) {
+            return {};
+        }
+        label.insert(position, 1U, L'&');
+    } else {
+        label += L"(&";
+        label.push_back(mnemonic);
+        label.push_back(L')');
+    }
+    return label;
 }
 
 bool ResourceLanguageContract(UiLanguagePreference preference) {
@@ -273,9 +377,18 @@ bool ResourceLanguageContract(UiLanguagePreference preference) {
             == UiTextView(UiStringId::Text0242, expected_language);
 
     HMENU menu = LoadLocalizedMenuW(instance, MAKEINTRESOURCEW(IDR_MAIN_MENU));
+    const std::wstring expected_file_menu = ExpectedMenuLabel(
+        UiTextView(UiStringId::Text0280, expected_language),
+        L'F',
+        expected_language);
     passed = passed && menu != nullptr
-        && MenuCaptionEquals(
-            menu, UiTextView(UiStringId::Text0280, expected_language));
+        && !expected_file_menu.empty()
+        && MenuCaptionEquals(menu, expected_file_menu)
+        && MenuMnemonicContract(menu)
+        && UiTextView(UiStringId::Text0280, expected_language).find(L'&')
+            == std::wstring_view::npos
+        && UiTextView(UiStringId::Text0242, expected_language).find(L'&')
+            == std::wstring_view::npos;
     if (menu != nullptr) {
         DestroyMenu(menu);
     }

@@ -51,6 +51,38 @@ function Rc-Quote([string]$Value) {
     return (Cpp-Quote $Value).Substring(1)
 }
 
+function Menu-Label([string]$Value, [string]$Key, [string]$Language) {
+    if ($Key.Length -ne 1 -or $Key -cnotmatch '^[A-Z0-9]$') {
+        throw "Invalid menu mnemonic key: $Key"
+    }
+    if ($Value.Contains('&')) {
+        throw "Menu source text must not contain an ampersand: $Value"
+    }
+    $parts = $Value.Split([char]9, 2)
+    $label = $parts[0]
+    if ($Language -eq 'en') {
+        $position = $label.IndexOf($Key, [StringComparison]::OrdinalIgnoreCase)
+        if ($position -lt 0) {
+            throw "English menu label '$label' does not contain mnemonic '$Key'"
+        }
+        $label = $label.Insert($position, '&')
+    } else {
+        $ellipsis = ''
+        if ($label.EndsWith('...')) {
+            $label = $label.Substring(0, $label.Length - 3)
+            $ellipsis = '...'
+        } elseif ($label.EndsWith('…')) {
+            $label = $label.Substring(0, $label.Length - 1)
+            $ellipsis = '…'
+        }
+        $label += "(&$Key)$ellipsis"
+    }
+    if ($parts.Count -eq 2) {
+        $label += "`t$($parts[1])"
+    }
+    return $label
+}
+
 $catalogText = Normalize-Newlines ([IO.File]::ReadAllText($catalogPath, $utf8))
 $catalog = $catalogText | ConvertFrom-Json
 $sha = [Security.Cryptography.SHA256]::Create()
@@ -81,6 +113,18 @@ function Generate-Resource([string]$Language, [string]$LanguageId) {
     $template = Normalize-Newlines ([IO.File]::ReadAllText($templatePath, $utf8))
     $body = [regex]::Replace(
         $template,
+        '@INKPOD_UI_MENU_([A-Za-z][A-Za-z0-9_]*)_([A-Z0-9])@',
+        {
+            param($match)
+            $entry = $byId[$match.Groups[1].Value]
+            if ($null -eq $entry) {
+                throw "Unknown menu localization marker: $($match.Groups[1].Value)"
+            }
+            $value = if ($Language -eq 'ja') { $entry.ja } else { $entry.en }
+            return Rc-Quote (Menu-Label ([string]$value) $match.Groups[2].Value $Language)
+        })
+    $body = [regex]::Replace(
+        $body,
         '@INKPOD_UI_TEXT_([A-Za-z][A-Za-z0-9_]*)@',
         {
             param($match)

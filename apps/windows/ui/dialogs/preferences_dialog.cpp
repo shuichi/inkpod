@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cwchar>
 #include <cwctype>
@@ -351,6 +352,17 @@ std::wstring BindingText(const ShortcutProfileBinding* binding) {
         sequence.strokes[index].modifiers = binding->strokes[index].modifiers;
     }
     return FormatShortcutSequence(sequence);
+}
+
+bool BindingHasNativeReservation(
+    const ShortcutProfileBinding& binding) noexcept {
+    return std::any_of(
+        binding.strokes.begin(),
+        binding.strokes.begin() + binding.stroke_count,
+        [&](const ShortcutInputStroke& stroke) {
+            return ShortcutStrokeReservedForNativeMenu(
+                binding.command_id, stroke);
+        });
 }
 
 const wchar_t* ContextText(ShortcutContext context) noexcept {
@@ -733,6 +745,20 @@ void RefreshDetail(DialogModel& model) noexcept {
 void RefreshStatus(DialogModel& model) noexcept {
     const ShortcutProfile* profile = ActiveProfile(model);
     if (profile == nullptr) {
+        return;
+    }
+    const bool selected_reserved = std::any_of(
+        profile->bindings.begin(),
+        profile->bindings.end(),
+        [&](const ShortcutProfileBinding& binding) {
+            return binding.command_id == model.selected_command
+                && BindingHasNativeReservation(binding);
+        });
+    if (selected_reserved) {
+        SetDlgItemTextW(
+            model.dialog,
+            IDC_SHORTCUT_STATUS,
+            UiText(UiStringId::ShortcutReservedExisting));
         return;
     }
     std::size_t assigned{};
@@ -1546,27 +1572,6 @@ bool ApplyValues(DialogModel& model, bool closing) noexcept {
     return true;
 }
 
-ShortcutProfileBinding* EditableBinding(
-    DialogModel& model,
-    ShortcutSlot slot,
-    bool create) {
-    ShortcutProfile& profile = EnsureEditableProfile(model);
-    auto* binding = FindShortcutBinding(
-        std::span<ShortcutProfileBinding>(profile.bindings),
-        model.selected_command,
-        slot);
-    if (binding == nullptr && create) {
-        ShortcutProfileBinding value{};
-        value.command_id = model.selected_command;
-        value.slot = slot;
-        value.context = DefaultShortcutContext(model.selected_command);
-        value.action = DefaultShortcutAction(model.selected_command);
-        profile.bindings.push_back(value);
-        binding = &profile.bindings.back();
-    }
-    return binding;
-}
-
 void RemoveBinding(DialogModel& model, ShortcutSlot slot, UINT command) {
     ShortcutProfile& profile = EnsureEditableProfile(model);
     std::erase_if(profile.bindings, [=](const auto& binding) {
@@ -1579,12 +1584,41 @@ bool AssignStroke(
     ShortcutSlot slot,
     ShortcutInputStroke stroke,
     bool append) {
+    const std::size_t original_active =
+        model.working.shortcuts.active_profile;
+    const ShortcutProfile* original_profile = ActiveProfile(model);
+    const bool cloned_profile =
+        original_profile != nullptr && original_profile->built_in;
     ShortcutProfile& profile = EnsureEditableProfile(model);
-    ShortcutProfileBinding* binding = EditableBinding(model, slot, true);
-    if (binding == nullptr) {
-        return false;
+    ShortcutProfileBinding* binding = FindShortcutBinding(
+        std::span<ShortcutProfileBinding>(profile.bindings),
+        model.selected_command,
+        slot);
+    const bool created_binding = binding == nullptr;
+    if (created_binding) {
+        ShortcutProfileBinding value{};
+        value.command_id = model.selected_command;
+        value.slot = slot;
+        value.context = DefaultShortcutContext(model.selected_command);
+        value.action = DefaultShortcutAction(model.selected_command);
+        profile.bindings.push_back(value);
+        binding = &profile.bindings.back();
     }
+    const std::size_t binding_index = static_cast<std::size_t>(
+        binding - profile.bindings.data());
     const ShortcutProfileBinding before = *binding;
+    const auto rollback = [&]() noexcept {
+        if (cloned_profile) {
+            model.working.shortcuts.profiles.pop_back();
+            model.working.shortcuts.active_profile = original_active;
+        } else if (created_binding) {
+            profile.bindings.erase(
+                profile.bindings.begin()
+                + static_cast<std::ptrdiff_t>(binding_index));
+        } else {
+            profile.bindings[binding_index] = before;
+        }
+    };
     if (!append || binding->stroke_count >= INKPOD_SHORTCUT_MAX_STROKES) {
         binding->stroke_count = 0U;
     }
@@ -1599,11 +1633,20 @@ bool AssignStroke(
     binding->key_match = match == 1
         ? ShortcutKeyMatch::Physical
         : ShortcutKeyMatch::Logical;
+    if (BindingHasNativeReservation(*binding)) {
+        rollback();
+        MessageBoxW(
+            model.dialog,
+            UiText(UiStringId::ShortcutReservedKey),
+            UiText(UiStringId::PreferencesTitle),
+            MB_OK | MB_ICONWARNING);
+        return false;
+    }
     const auto conflicts = AnalyzeShortcutConflicts(profile.bindings);
     if (std::any_of(conflicts.begin(), conflicts.end(), [](const auto& item) {
             return item.kind == ShortcutConflictKind::Prefix;
         })) {
-        *binding = before;
+        rollback();
         MessageBoxW(
             model.dialog,
             UiText(UiStringId::ShortcutPrefixConflict),
@@ -2022,11 +2065,19 @@ void HandleCommand(DialogModel& model, int id, int notification, HWND source) {
                 && *other < profile->bindings.size()
                 && model.previous_assignment.has_value()) {
                 ShortcutProfileBinding& target = profile->bindings[*other];
-                const UINT command = target.command_id;
-                const ShortcutSlot slot = target.slot;
-                target = *model.previous_assignment;
-                target.command_id = command;
-                target.slot = slot;
+                ShortcutProfileBinding candidate = target;
+                candidate.key_match = model.previous_assignment->key_match;
+                candidate.stroke_count = model.previous_assignment->stroke_count;
+                candidate.strokes = model.previous_assignment->strokes;
+                if (BindingHasNativeReservation(candidate)) {
+                    MessageBoxW(
+                        model.dialog,
+                        UiText(UiStringId::ShortcutReservedKey),
+                        UiText(UiStringId::PreferencesTitle),
+                        MB_OK | MB_ICONWARNING);
+                    break;
+                }
+                target = candidate;
                 model.previous_assignment.reset();
                 RefreshShortcutUi(model);
             }
@@ -2269,8 +2320,9 @@ bool ValidateSmokeLayout(DialogModel& model) noexcept {
 
     HWND tabs = GetDlgItem(model.dialog, IDC_PREFERENCES_TABS);
     if (tabs == nullptr || TabCtrl_GetItemCount(tabs) != 2
-        || TabCtrl_GetCurSel(tabs) != kGeneralPage
-        || model.selected_page != kGeneralPage) {
+        || TabCtrl_GetCurSel(tabs) != model.selected_page
+        || (model.selected_page != kGeneralPage
+            && model.selected_page != kShortcutPage)) {
         return false;
     }
 
@@ -2435,6 +2487,9 @@ INT_PTR OnInit(HWND dialog, LPARAM parameter) {
         model->initial = state->values;
         model->working = state->values;
         model->dialog = dialog;
+        model->selected_page = state->initial_page == PreferencesPage::Shortcuts
+            ? kShortcutPage
+            : kGeneralPage;
         model->font = reinterpret_cast<HFONT>(SendMessageW(dialog, WM_GETFONT, 0U, 0U));
         model->selected_command = ShortcutCommandCatalog().empty()
             ? 0U
@@ -2457,7 +2512,7 @@ INT_PTR OnInit(HWND dialog, LPARAM parameter) {
             item.pszText = const_cast<wchar_t*>(UiText(tab_texts[index]));
             TabCtrl_InsertItem(tabs, static_cast<int>(index), &item);
         }
-        TabCtrl_SetCurSel(tabs, kGeneralPage);
+        TabCtrl_SetCurSel(tabs, model->selected_page);
         CreateGeneralPage(*model);
         CreateShortcutPage(*model);
         LoadControls(*model);

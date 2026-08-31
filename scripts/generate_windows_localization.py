@@ -36,6 +36,12 @@ JAPANESE_RE = re.compile(
     r"\uf900-\ufaff\uff66-\uff9f]"
 )
 MARKER_RE = re.compile(r"@INKPOD_UI_TEXT_([A-Za-z][A-Za-z0-9_]*)@")
+MENU_MARKER_RE = re.compile(
+    r"@INKPOD_UI_MENU_([A-Za-z][A-Za-z0-9_]*)_([A-Z0-9])@"
+)
+RUNTIME_MENU_MNEMONIC_IDS = frozenset(
+    {"MenuUndo", "MenuUndoPrefix", "MenuRedo", "MenuRedoPrefix"}
+)
 SOURCE_STRING_RE = re.compile(r'"(?:\\.|[^"\\])*"')
 
 
@@ -109,6 +115,10 @@ def validate(entries: list[dict[str, Any]]) -> None:
         kind = entry.get("kind")
         resource = entry.get("resource")
         label = identifier if isinstance(identifier, str) else f"entry[{index}]"
+        runtime_menu_text = (
+            isinstance(identifier, str)
+            and identifier in RUNTIME_MENU_MNEMONIC_IDS
+        )
         if not isinstance(identifier, str) or re.fullmatch(
             r"[A-Za-z][A-Za-z0-9_]*", identifier
         ) is None:
@@ -119,14 +129,40 @@ def validate(entries: list[dict[str, Any]]) -> None:
             identifiers.add(identifier)
         if not isinstance(japanese, str) or not japanese:
             errors.append(f"{label}: Japanese text is empty")
+        elif "&" in japanese and not runtime_menu_text:
+            errors.append(
+                f"{label}: Japanese catalog text contains a menu mnemonic marker"
+            )
         if not isinstance(english, str) or not english:
             errors.append(f"{label}: English text is empty")
         elif contains_japanese(english):
             errors.append(f"{label}: English text contains Japanese characters")
+        elif "&" in english and not runtime_menu_text:
+            errors.append(
+                f"{label}: English catalog text contains a menu mnemonic marker"
+            )
         if kind not in {"text", "format"}:
             errors.append(f"{label}: kind must be text or format")
         if not isinstance(resource, bool):
             errors.append(f"{label}: resource must be boolean")
+        if runtime_menu_text:
+            ja_keys = (
+                re.findall(r"&([A-Z0-9])", japanese)
+                if isinstance(japanese, str)
+                else []
+            )
+            en_keys = (
+                re.findall(r"&([A-Z0-9])", english)
+                if isinstance(english, str)
+                else []
+            )
+            if resource is not False:
+                errors.append(f"{label}: runtime menu text must not be a resource")
+            if len(ja_keys) != 1 or ja_keys != en_keys:
+                errors.append(
+                    f"{label}: runtime menu mnemonic must be singular and match "
+                    f"between languages: ja={ja_keys}, en={en_keys}"
+                )
         if isinstance(japanese, str) and isinstance(english, str):
             ja_signature = format_signature(japanese)
             en_signature = format_signature(english)
@@ -174,6 +210,112 @@ def rc_quote(value: str) -> str:
     return cpp_quote(value)[1:]
 
 
+def menu_label(value: str, key: str, language: str) -> str:
+    """Return one menu-only mnemonic rendering without changing typed UI text."""
+    if len(key) != 1 or not key.isascii() or not key.isalnum() or key != key.upper():
+        raise RuntimeError(f"invalid menu mnemonic key: {key!r}")
+    if "&" in value:
+        raise RuntimeError(
+            f"menu source text must not contain an ampersand: {value!r}"
+        )
+    label, separator, shortcut = value.partition("\t")
+    if language == "en":
+        position = label.upper().find(key)
+        if position < 0:
+            raise RuntimeError(
+                f"English menu label {label!r} does not contain mnemonic {key!r}"
+            )
+        label = label[:position] + "&" + label[position:]
+    else:
+        ellipsis = ""
+        if label.endswith("..."):
+            label = label[:-3]
+            ellipsis = "..."
+        elif label.endswith("…"):
+            label = label[:-1]
+            ellipsis = "…"
+        label += f"(&{key}){ellipsis}"
+    return label + (separator + shortcut if separator else "")
+
+
+def validate_menu_template(template: str, by_id: dict[str, dict[str, Any]]) -> None:
+    """Validate complete, sibling-unique occurrence-level main-menu mnemonics."""
+    lines = template.splitlines()
+    try:
+        start = next(
+            index
+            for index, line in enumerate(lines)
+            if line.strip() == "IDR_MAIN_MENU MENU"
+        )
+    except StopIteration as error:
+        raise RuntimeError("resource template does not contain IDR_MAIN_MENU") from error
+
+    root: dict[str, Any] = {"name": "IDR_MAIN_MENU", "keys": {}, "children": []}
+    stack: list[dict[str, Any]] = [root]
+    pending: dict[str, Any] | None = None
+    opened_root = False
+    finished = False
+
+    def marker(line: str) -> tuple[str, str] | None:
+        match = MENU_MARKER_RE.search(line)
+        return (match.group(1), match.group(2)) if match is not None else None
+
+    def add_item(parent: dict[str, Any], identifier: str, key: str, line: int) -> None:
+        if identifier not in by_id:
+            raise RuntimeError(
+                f"main menu line {line} uses unknown catalog ID: {identifier}"
+            )
+        previous = parent["keys"].get(key)
+        if previous is not None:
+            raise RuntimeError(
+                f"main menu mnemonic {key!r} collides under {parent['name']}: "
+                f"{previous} and {identifier} (line {line})"
+            )
+        parent["keys"][key] = identifier
+
+    for index in range(start + 1, len(lines)):
+        stripped = lines[index].strip()
+        line_number = index + 1
+        if stripped == "BEGIN":
+            if not opened_root:
+                opened_root = True
+            elif pending is not None:
+                stack.append(pending)
+                pending = None
+            continue
+        if stripped == "END":
+            if len(stack) > 1:
+                stack.pop()
+            elif opened_root:
+                finished = True
+                break
+            continue
+        if stripped.startswith("POPUP "):
+            parsed = marker(stripped)
+            if parsed is None or MARKER_RE.search(stripped) is not None:
+                raise RuntimeError(
+                    f"actionable main-menu popup lacks a menu marker at line {line_number}"
+                )
+            identifier, key = parsed
+            add_item(stack[-1], identifier, key, line_number)
+            pending = {"name": identifier, "keys": {}, "children": []}
+            stack[-1]["children"].append(pending)
+            continue
+        if not stripped.startswith("MENUITEM ") or stripped == "MENUITEM SEPARATOR":
+            continue
+        if "GRAYED" in stripped:
+            continue
+        parsed = marker(stripped)
+        if parsed is None or MARKER_RE.search(stripped) is not None:
+            raise RuntimeError(
+                f"actionable main-menu item lacks a menu marker at line {line_number}"
+            )
+        add_item(stack[-1], parsed[0], parsed[1], line_number)
+
+    if not finished or len(stack) != 1 or pending is not None:
+        raise RuntimeError("IDR_MAIN_MENU topology is unbalanced")
+
+
 def banner(catalog_hash: str, comment: str = "//") -> str:
     return (
         f"{comment} Generated from apps/windows/ui/localization_catalog.json.\n"
@@ -206,7 +348,10 @@ def generated_artifacts(entries: list[dict[str, Any]]) -> dict[pathlib.Path, str
     )
     template = TEMPLATE_RC_PATH.read_text(encoding="utf-8")
     by_id = {entry["id"]: entry for entry in entries}
-    markers = set(MARKER_RE.findall(template))
+    validate_menu_template(template, by_id)
+    text_markers = set(MARKER_RE.findall(template))
+    menu_markers = {match.group(1) for match in MENU_MARKER_RE.finditer(template)}
+    markers = text_markers | menu_markers
     missing = sorted(markers - set(by_id))
     if missing:
         raise RuntimeError(f"resource template uses unknown catalog IDs: {missing}")
@@ -216,10 +361,18 @@ def generated_artifacts(entries: list[dict[str, Any]]) -> dict[pathlib.Path, str
         raise RuntimeError(f"resource catalog rows are unused by template: {unused}")
 
     def generate_resource(language: str, langid: str) -> str:
+        def replace_menu(match: re.Match[str]) -> str:
+            return rc_quote(
+                menu_label(
+                    by_id[match.group(1)][language], match.group(2), language
+                )
+            )
+
         def replace(match: re.Match[str]) -> str:
             return rc_quote(by_id[match.group(1)][language])
 
-        body = MARKER_RE.sub(replace, template)
+        body = MENU_MARKER_RE.sub(replace_menu, template)
+        body = MARKER_RE.sub(replace, body)
         return (
             banner(catalog_hash)
             + '#include <windows.h>\n#include <commctrl.h>\n#include "resource.h"\n\n'

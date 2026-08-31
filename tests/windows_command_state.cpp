@@ -1,6 +1,8 @@
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstdint>
+#include <initializer_list>
 
 #include "app/frontend_state.h"
 #include "app/resource.h"
@@ -196,7 +198,7 @@ bool CatalogHasExactlyOneOwner(const CommandStateSet& states) noexcept {
         }
     }
     return states.size() == kProductionCommandStateCount
-        && kProductionCommandStateCount == 321U
+        && kProductionCommandStateCount == 324U
         && FindCommandState(states, kRetiredJobProgressCommand) == nullptr;
 }
 
@@ -222,7 +224,7 @@ bool StartsWith(
     return true;
 }
 
-bool ShortcutCatalogIsCompleteAndPrefixFree() {
+bool ShortcutCatalogIsSparseAndPrefixFree() {
     const auto commands = ShortcutCommandCatalog();
     const auto menu_commands = MenuCommandCatalog();
     const auto shortcuts = BuildDefaultShortcutSequences();
@@ -234,9 +236,9 @@ bool ShortcutCatalogIsCompleteAndPrefixFree() {
         }
         return false;
     };
-    if (menu_commands.size() != 313U
-        || shortcuts.size() != kProductionCommandStateCount
-        || shortcuts.size() != commands.size()
+    if (menu_commands.size() != 316U
+        || shortcuts.size() != 29U
+        || commands.size() != kProductionCommandStateCount
         || is_menu_command(IDM_COLOR_PIN)
         || is_menu_command(IDM_BATCH_PIN)
         || !is_menu_command(IDM_WINDOW_BATCH)
@@ -252,21 +254,22 @@ bool ShortcutCatalogIsCompleteAndPrefixFree() {
             kProductionCommandStateCount);
         return false;
     }
-    for (const UINT command : commands) {
-        const auto* sequence = FindShortcutSequence(shortcuts, command);
-        if (sequence == nullptr || sequence->command_id != command
-            || sequence->struct_size != sizeof(InkpodShortcutSequence)
-            || sequence->stroke_count == 0U
-            || sequence->stroke_count > INKPOD_SHORTCUT_MAX_STROKES) {
-            std::fprintf(stderr, "invalid shortcut for command=%u\n", command);
+    for (const auto& sequence : shortcuts) {
+        if (std::find(commands.begin(), commands.end(), sequence.command_id)
+                == commands.end()
+            || sequence.struct_size != sizeof(InkpodShortcutSequence)
+            || sequence.stroke_count == 0U
+            || sequence.stroke_count > INKPOD_SHORTCUT_MAX_STROKES) {
+            std::fprintf(stderr, "invalid shortcut for command=%u\n", sequence.command_id);
             return false;
         }
-        for (std::uint32_t index = 0; index < sequence->stroke_count; ++index) {
-            if (sequence->strokes[index].virtual_key == 0U) {
+        for (std::uint32_t index = 0; index < sequence.stroke_count; ++index) {
+            if (sequence.strokes[index].virtual_key == 0U
+                || sequence.strokes[index].virtual_key == static_cast<std::uint32_t>('Q')) {
                 std::fprintf(
                     stderr,
-                    "zero shortcut stroke for command=%u index=%u\n",
-                    command,
+                    "invalid shortcut stroke for command=%u index=%u\n",
+                    sequence.command_id,
                     index);
                 return false;
             }
@@ -286,54 +289,70 @@ bool ShortcutCatalogIsCompleteAndPrefixFree() {
             }
         }
     }
-    const auto* save = FindShortcutSequence(shortcuts, IDM_FILE_SAVE);
-    const auto* pencil = FindShortcutSequence(shortcuts, IDM_TOOL_PENCIL);
-    const auto* batch = FindShortcutSequence(shortcuts, IDM_WINDOW_BATCH);
-    const auto* tool_palette =
-        FindShortcutSequence(shortcuts, IDM_WINDOW_TOOL_PALETTE);
-    const auto* layer_palette =
-        FindShortcutSequence(shortcuts, IDM_WINDOW_LAYER_PALETTE);
-    const auto* locator =
-        FindShortcutSequence(shortcuts, IDM_WINDOW_LOCATOR);
-    const auto* sequence =
-        FindShortcutSequence(shortcuts, IDM_WINDOW_SEQUENCE);
-    const auto* light_table =
-        FindShortcutSequence(shortcuts, IDM_WINDOW_LIGHT_TABLE);
-    const auto* close_view = FindShortcutSequence(shortcuts, IDM_VIEW_CLOSE);
-    const auto* next_tab = FindShortcutSequence(shortcuts, IDM_TAB_NEXT);
-    const auto* previous_tab =
-        FindShortcutSequence(shortcuts, IDM_TAB_PREVIOUS);
-    const auto* manual = FindShortcutSequence(shortcuts, IDM_HELP_MANUAL);
-    return save != nullptr && save->stroke_count == 1U
-        && save->strokes[0].virtual_key == static_cast<std::uint32_t>('S')
-        && save->strokes[0].modifiers == INKPOD_SHORTCUT_MODIFIER_CONTROL
-        && pencil != nullptr && pencil->stroke_count == 1U
-        && pencil->strokes[0].virtual_key == static_cast<std::uint32_t>('P')
-        && pencil->strokes[0].modifiers == 0U
-        && batch != nullptr && batch->stroke_count > 1U
-        && tool_palette != nullptr && tool_palette->stroke_count == 3U
-        && layer_palette != nullptr && layer_palette->stroke_count == 3U
-        && locator != nullptr && locator->stroke_count == 3U
-        && sequence != nullptr && sequence->stroke_count == 3U
-        && sequence->strokes[2].virtual_key == static_cast<std::uint32_t>('F')
-        && light_table != nullptr && light_table->stroke_count == 3U
-        && light_table->strokes[2].virtual_key == static_cast<std::uint32_t>('H')
-        && close_view != nullptr && close_view->stroke_count == 1U
-        && close_view->strokes[0].virtual_key == VK_F4
-        && close_view->strokes[0].modifiers
-            == INKPOD_SHORTCUT_MODIFIER_CONTROL
-        && next_tab != nullptr && next_tab->stroke_count == 1U
-        && next_tab->strokes[0].virtual_key == VK_TAB
-        && next_tab->strokes[0].modifiers
-            == INKPOD_SHORTCUT_MODIFIER_CONTROL
-        && previous_tab != nullptr && previous_tab->stroke_count == 1U
-        && previous_tab->strokes[0].virtual_key == VK_TAB
-        && previous_tab->strokes[0].modifiers
-            == (INKPOD_SHORTCUT_MODIFIER_CONTROL
-                | INKPOD_SHORTCUT_MODIFIER_SHIFT)
-        && manual != nullptr && manual->stroke_count == 1U
-        && manual->strokes[0].virtual_key == VK_F1
-        && manual->strokes[0].modifiers == 0U;
+    const auto matches = [&shortcuts](
+                             UINT command,
+                             std::initializer_list<InkpodShortcutStroke> expected) {
+        const auto* sequence = FindShortcutSequence(shortcuts, command);
+        if (sequence == nullptr
+            || sequence->stroke_count
+                != static_cast<std::uint32_t>(expected.size())) {
+            return false;
+        }
+        std::size_t index{};
+        for (const auto& stroke : expected) {
+            if (sequence->strokes[index].virtual_key != stroke.virtual_key
+                || sequence->strokes[index].modifiers != stroke.modifiers) {
+                return false;
+            }
+            ++index;
+        }
+        return true;
+    };
+    constexpr auto control = INKPOD_SHORTCUT_MODIFIER_CONTROL;
+    constexpr auto shift = INKPOD_SHORTCUT_MODIFIER_SHIFT;
+    constexpr auto alt = INKPOD_SHORTCUT_MODIFIER_ALT;
+    constexpr auto extended = INKPOD_SHORTCUT_MODIFIER_EXTENDED;
+    return matches(IDM_FILE_NEW, {{'N', control}})
+        && matches(IDM_FILE_OPEN, {{'O', control}})
+        && matches(IDM_FILE_SAVE, {{'S', control}})
+        && matches(IDM_FILE_SAVE_AS, {{'S', control | shift}})
+        && matches(IDM_APP_EXIT, {{VK_F4, alt}})
+        && matches(IDM_HELP_MANUAL, {{VK_F1, 0U}})
+        && matches(IDM_EDIT_UNDO, {{'Z', control}})
+        && matches(IDM_EDIT_REDO, {{'Y', control}})
+        && matches(IDM_EDIT_CUT, {{'X', control}})
+        && matches(IDM_EDIT_COPY, {{'C', control}})
+        && matches(IDM_EDIT_PASTE, {{'V', control}})
+        && matches(IDM_SELECTION_ALL, {{'A', control}})
+        && matches(IDM_SHORTCUT_EDIT, {{VK_OEM_COMMA, control}})
+        && matches(IDM_SHORTCUT_KEYBOARD, {{'K', control}, {'S', control}})
+        && matches(IDM_VIEW_ZOOM_IN, {{VK_OEM_PLUS, control}})
+        && matches(IDM_VIEW_ZOOM_OUT, {{VK_OEM_MINUS, control}})
+        && matches(IDM_TAB_NEXT, {{VK_NEXT, control | extended}})
+        && matches(IDM_TAB_PREVIOUS, {{VK_PRIOR, control | extended}})
+        && matches(
+            IDM_TAB_MOVE_LEFT, {{VK_PRIOR, control | shift | extended}})
+        && matches(
+            IDM_TAB_MOVE_RIGHT, {{VK_NEXT, control | shift | extended}})
+        && matches(IDM_VIEW_CLOSE, {{'W', control}})
+        && matches(IDM_EDITOR_SPLIT_RIGHT, {{VK_OEM_5, control}})
+        && matches(
+            IDM_EDITOR_MOVE_OTHER_GROUP,
+            {{VK_RIGHT, control | alt | extended}})
+        && matches(IDM_EDITOR_GROUP_FIRST, {{'1', control}})
+        && matches(IDM_EDITOR_GROUP_SECOND, {{'2', control}})
+        && matches(
+            IDM_EDITOR_GROUP_NEXT,
+            {{'K', control}, {VK_RIGHT, control | extended}})
+        && matches(IDM_EDITOR_GROUP_CLOSE, {{'K', control}, {'W', 0U}})
+        && matches(IDM_WORKSPACE_NEW_WINDOW, {{'N', control | shift}})
+        && matches(IDM_VIEW_DUPLICATE_NEW_WINDOW, {{'K', control}, {'O', 0U}})
+        && FindShortcutSequence(shortcuts, IDM_TOOL_PENCIL) == nullptr
+        && FindShortcutSequence(shortcuts, IDM_WINDOW_BATCH) == nullptr
+        && FindShortcutSequence(shortcuts, IDM_PALETTE_NEXT_GROUP) == nullptr
+        && FindShortcutSequence(shortcuts, IDM_MOTION_FPS_24) == nullptr
+        && FindShortcutSequence(shortcuts, IDM_EDITOR_SPLIT_DOWN) == nullptr
+        && FindShortcutSequence(shortcuts, IDM_VIEW_MOVE_NEW_WINDOW) == nullptr;
 }
 
 } // namespace
@@ -348,8 +367,13 @@ int main() {
     if (!CatalogHasExactlyOneOwner(states)) {
         return 101;
     }
-    if (!ShortcutCatalogIsCompleteAndPrefixFree()) {
+    if (!ShortcutCatalogIsSparseAndPrefixFree()) {
         return 102;
+    }
+    if (IsCommandEnabled(states, IDM_EDITOR_GROUP_FIRST)
+        || IsCommandEnabled(states, IDM_EDITOR_GROUP_SECOND)) {
+        std::fputs("editor group shortcuts enabled without a document\n", stderr);
+        return 30;
     }
     if (FindCommandState(states, IDM_HELP_MANUAL) == nullptr
         || FindCommandState(states, IDM_HELP_FILE_FORMAT) == nullptr
@@ -528,6 +552,8 @@ int main() {
         || IsCommandEnabled(states, IDM_EDITOR_MOVE_OTHER_GROUP)
         || IsCommandEnabled(states, IDM_EDITOR_GROUP_CLOSE)
         || IsCommandEnabled(states, IDM_EDITOR_GROUP_NEXT)
+        || !IsCommandEnabled(states, IDM_EDITOR_GROUP_FIRST)
+        || IsCommandEnabled(states, IDM_EDITOR_GROUP_SECOND)
         || IsCommandEnabled(states, IDM_TAB_NEXT)
         || IsCommandEnabled(states, IDM_TAB_PREVIOUS)
         || IsCommandEnabled(states, IDM_TAB_MOVE_LEFT)
@@ -591,10 +617,17 @@ int main() {
         || !IsCommandEnabled(states, IDM_EDITOR_MOVE_OTHER_GROUP)
         || !IsCommandEnabled(states, IDM_EDITOR_NEW_VIEW_OTHER_GROUP)
         || !IsCommandEnabled(states, IDM_EDITOR_GROUP_CLOSE)
-        || !IsCommandEnabled(states, IDM_EDITOR_GROUP_NEXT)) {
+        || !IsCommandEnabled(states, IDM_EDITOR_GROUP_NEXT)
+        || !IsCommandEnabled(states, IDM_EDITOR_GROUP_FIRST)
+        || !IsCommandEnabled(states, IDM_EDITOR_GROUP_SECOND)) {
         return 18;
     }
     inputs.selection_view.editor_group_count = 1U;
+    states = ComputeCommandStates(inputs);
+    if (!IsCommandEnabled(states, IDM_EDITOR_GROUP_FIRST)
+        || IsCommandEnabled(states, IDM_EDITOR_GROUP_SECOND)) {
+        return 29;
+    }
 
     inputs.edit.can_undo = true;
     inputs.edit.can_redo = false;

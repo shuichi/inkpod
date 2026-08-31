@@ -2,6 +2,8 @@
 
 #include <windows.h>
 
+#include <cstdint>
+
 #include "app/session_recovery.h"
 #include "app/application_settings.h"
 #include "ui/localization.h"
@@ -9,6 +11,11 @@
 #include "ui/workspace_layout.h"
 
 namespace inkpod::windows::ui {
+
+enum class PreferencesPage : std::uint8_t {
+    General,
+    Shortcuts,
+};
 
 struct PreferencesValues final {
     UiLanguagePreference language{UiLanguagePreference::System};
@@ -35,6 +42,7 @@ struct PreferencesDialogState final {
     PreferencesValues values;
     void* apply_context{};
     ApplyCallback apply{};
+    PreferencesPage initial_page{PreferencesPage::General};
     bool close_immediately{};
 };
 

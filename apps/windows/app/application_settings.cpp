@@ -2260,10 +2260,8 @@ bool LoadApplicationUiLanguagePreference(
     }
     ShortcutProfileSet defaults{};
     try {
-        defaults.profiles.push_back(windows::ui::BuildShortcutProfileFromLegacy(
-            L"Built-in",
-            true,
-            windows::ui::BuildDefaultShortcutSequences()));
+        defaults.profiles.push_back(
+            windows::ui::BuildDefaultShortcutProfile(L"Built-in"));
     } catch (const std::bad_alloc&) {
         return false;
     }
