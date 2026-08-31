@@ -4694,8 +4694,8 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     // height first; at high DPI a 1000-pixel workspace legitimately creates a
     // separate tab because the three panes cannot satisfy their minimums.
     const int structure_workspace_height = have_work_area
-        ? std::max(smoke_height, work_height)
-        : smoke_height;
+        ? std::min(std::max(smoke_height, work_height), 1050)
+        : std::min(smoke_height, 1050);
     const int structure_workspace_y = have_work_area
         ? monitor_info.rcWork.top
         : smoke_y;
@@ -4711,11 +4711,13 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         || GetClientRect(state.Workspace().windows.window, &client) == FALSE) {
         return 11204;
     }
-    LayoutMainChrome(
-        state.Workspace().windows,
-        state.lifetime.smoke_test,
-        client.right - client.left,
-        client.bottom - client.top);
+    if (!LayoutMainChrome(
+            state.Workspace().windows,
+            state.lifetime.smoke_test,
+            client.right - client.left,
+            client.bottom - client.top)) {
+        return 11204;
+    }
     // Updating localized menu labels can change the wrapped menu-bar height
     // at this DPI and width. Settle that non-client geometry before capturing
     // the add/remove baseline so the test compares only the pane transaction.
@@ -4723,11 +4725,13 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     if (GetClientRect(state.Workspace().windows.window, &client) == FALSE) {
         return 11204;
     }
-    LayoutMainChrome(
-        state.Workspace().windows,
-        state.lifetime.smoke_test,
-        client.right - client.left,
-        client.bottom - client.top);
+    if (!LayoutMainChrome(
+            state.Workspace().windows,
+            state.lifetime.smoke_test,
+            client.right - client.left,
+            client.bottom - client.top)) {
+        return 11204;
+    }
     auto& structure_tabs =
         state.Workspace().windows.workspace.right_tool_tabs;
     const ToolTabId structure_tab_id = structure_tabs.Selected();
@@ -4767,6 +4771,91 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     if (!structure_setup) {
         return 11200;
     }
+
+    const auto same_tool_tabs = [](const RightToolTabsModel& left,
+                                    const RightToolTabsModel& right) noexcept {
+        const auto left_tabs = left.Tabs();
+        const auto right_tabs = right.Tabs();
+        if (left.Selected() != right.Selected()
+            || left.NextStableId() != right.NextStableId()
+            || left_tabs.size() != right_tabs.size()) {
+            return false;
+        }
+        for (std::size_t index = 0U; index < left_tabs.size(); ++index) {
+            if (left_tabs[index].id != right_tabs[index].id
+                || left_tabs[index].pane_count != right_tabs[index].pane_count) {
+                return false;
+            }
+            for (std::size_t pane_index = 0U;
+                 pane_index < left_tabs[index].pane_count;
+                 ++pane_index) {
+                if (left_tabs[index].panes[pane_index]
+                    != right_tabs[index].panes[pane_index]) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    };
+    const UINT structure_window_dpi = GetDpiForWindow(
+        state.Workspace().windows.window);
+    const UINT structure_dpi = structure_window_dpi == 0U
+        ? 96U
+        : structure_window_dpi;
+    const auto structure_layout = ComputeWorkspaceLayout(
+        client.right - client.left,
+        client.bottom - client.top,
+        0,
+        structure_dpi,
+        state.Workspace().windows.workspace);
+    const int structure_client_width = client.right - client.left;
+    const int structure_client_height = client.bottom - client.top;
+    const int structure_available_height = structure_layout.dock.zones[
+        static_cast<std::size_t>(DockZone::Right)].height;
+    const int structure_splitter_px = MulDiv(
+        4, static_cast<int>(structure_dpi), 96);
+    std::int64_t structure_required_height = static_cast<std::int64_t>(
+        structure_splitter_px) * static_cast<std::int64_t>(
+        structure_tab_before->pane_count);
+    const auto add_structure_minimum = [&](DockPaneType type) noexcept {
+        const PaneDescriptor* descriptor = FindPaneDescriptor(type);
+        if (descriptor == nullptr) {
+            structure_required_height = -1;
+            return;
+        }
+        if (structure_required_height >= 0) {
+            const std::int64_t scaled = static_cast<std::int64_t>(
+                descriptor->minimum_height_dip) * structure_dpi;
+            structure_required_height += (scaled + 48) / 96;
+        }
+    };
+    for (std::size_t index = 0U; index < structure_tab_before->pane_count;
+         ++index) {
+        add_structure_minimum(structure_tab_before->panes[index]);
+    }
+    add_structure_minimum(DockPaneType::Reference);
+
+    const std::size_t structure_tab_count_before = structure_tabs.Tabs().size();
+    const std::uint32_t structure_next_id_before = structure_tabs.NextStableId();
+    RightToolTabsModel structure_expected_after_add = structure_tabs;
+    const ToolTabResult structure_expected_add_result =
+        structure_expected_after_add.AddPaneToSelected(
+            DockPaneType::Reference,
+            structure_available_height,
+            structure_dpi,
+            structure_splitter_px);
+    const ToolTabId structure_expected_reference_tab =
+        structure_expected_after_add.TabForPane(DockPaneType::Reference);
+    const bool structure_fits_selected = structure_expected_add_result
+            == ToolTabResult::Ok
+        && structure_expected_reference_tab == structure_tab_id;
+    const bool structure_capacity_consistent = structure_required_height >= 0
+        && structure_fits_selected
+            == (structure_required_height <= structure_available_height);
+    RightToolTabsModel structure_expected_after_remove =
+        structure_expected_after_add;
+    const ToolTabResult structure_expected_remove_result =
+        structure_expected_after_remove.RemovePane(DockPaneType::Reference);
 
     const std::array<HWND, 3U> structure_panes{
         structure_color, structure_layer, structure_reference};
@@ -4902,6 +4991,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     POINT add_sentinel{};
     const bool add_sentinel_written = place_resize_sentinel(
         structure_layer, add_sentinel);
+    const HWND structure_focus_before_add = GetFocus();
     const LRESULT reference_show_result = SendMessageW(
         state.Workspace().windows.window,
         WM_COMMAND,
@@ -4914,6 +5004,10 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     // Do not mix older queued Core notifications into the no-data-rebuild
     // assertion for this geometry-only command.
     const ToolTab* structure_tab_after_add = structure_tabs.Find(structure_tab_id);
+    const ToolTabId structure_reference_tab_id = structure_tabs.TabForPane(
+        DockPaneType::Reference);
+    const ToolTab* structure_reference_tab_after_add = structure_tabs.Find(
+        structure_reference_tab_id);
     RECT structure_color_after_add{};
     RECT structure_layer_after_add{};
     RECT structure_reference_after_add{};
@@ -4926,11 +5020,45 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
             != tab.panes.begin()
                 + static_cast<std::ptrdiff_t>(tab.pane_count);
     };
-    bool structure_add_ok = reference_show_result == 1
-        && structure_tab_after_add != nullptr
-        && structure_tab_after_add->pane_count == 3U
-        && structure_contains(*structure_tab_after_add, DockPaneType::Reference)
-        && structure_tabs.Selected() == structure_tab_id
+    const bool structure_add_rects_read =
+        GetWindowRect(structure_color, &structure_color_after_add) != FALSE
+        && GetWindowRect(structure_layer, &structure_layer_after_add) != FALSE
+        && GetWindowRect(structure_reference, &structure_reference_after_add) != FALSE;
+    const bool structure_add_focus_ok = structure_focus_after_add
+        == (structure_reference_natural_focus == nullptr
+                ? structure_reference
+                : structure_reference_natural_focus);
+    const bool structure_add_lists_ok =
+        static_cast<int>(SendMessageW(
+            structure_color_list, LB_GETCOUNT, 0, 0)) == color_count_before
+        && static_cast<int>(SendMessageW(
+            structure_color_list, LB_GETCURSEL, 0, 0)) == color_selection_before
+        && static_cast<int>(SendMessageW(
+            structure_color_list, LB_GETTOPINDEX, 0, 0)) == color_top_before
+        && static_cast<int>(SendMessageW(
+            structure_layer_list, LB_GETCOUNT, 0, 0)) == layer_count_before
+        && static_cast<int>(SendMessageW(
+            structure_layer_list, LB_GETCURSEL, 0, 0)) == layer_selection_before
+        && static_cast<int>(SendMessageW(
+            structure_layer_list, LB_GETTOPINDEX, 0, 0)) == layer_top_before;
+    const bool structure_add_common_updates_ok =
+        has_no_pending_update(structure_reference)
+        && has_no_pending_update(resize_right_tool_tabs)
+        && has_no_pending_update(state.Workspace().windows.window);
+    const bool structure_add_survivor_updates_ok =
+        has_no_pending_update(structure_color)
+        && has_no_pending_update(structure_layer)
+        && has_no_pending_update(structure_color_list)
+        && has_no_pending_update(structure_layer_list)
+        && has_no_pending_update(structure_color_resize_control);
+    const bool add_sentinel_cleared_after_add = add_sentinel_written
+        && resize_sentinel_cleared(add_sentinel);
+    const bool structure_add_model_ok = structure_expected_add_result
+            == ToolTabResult::Ok
+        && same_tool_tabs(structure_expected_after_add, structure_tabs);
+    const bool structure_add_common_ok = structure_capacity_consistent
+        && reference_show_result == 1
+        && structure_add_model_ok
         && state.Workspace().windows.dock_host.ContentWindow(
                DockPaneType::Color) == structure_color
         && state.Workspace().windows.dock_host.ContentWindow(
@@ -4938,9 +5066,23 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         && state.Workspace().windows.dock_host.ContentWindow(
                DockPaneType::Reference) == structure_reference
         && IsWindowVisible(structure_reference) != FALSE
-        && GetWindowRect(structure_color, &structure_color_after_add) != FALSE
-        && GetWindowRect(structure_layer, &structure_layer_after_add) != FALSE
-        && GetWindowRect(structure_reference, &structure_reference_after_add) != FALSE
+        && structure_add_rects_read
+        && structure_reference_after_add.bottom > structure_reference_after_add.top
+        && structure_add_focus_ok
+        && structure_paints[2].count != 0U
+        && structure_color_resets.count == 0U
+        && structure_layer_resets.count == 0U
+        && structure_add_lists_ok
+        && structure_add_common_updates_ok
+        && add_sentinel_cleared_after_add;
+    const bool structure_add_same_tab_ok = structure_fits_selected
+        && structure_tab_after_add != nullptr
+        && structure_tab_after_add->pane_count == 3U
+        && structure_contains(*structure_tab_after_add, DockPaneType::Reference)
+        && structure_reference_tab_id == structure_tab_id
+        && structure_tabs.Selected() == structure_tab_id
+        && IsWindowVisible(structure_color) != FALSE
+        && IsWindowVisible(structure_layer) != FALSE
         && structure_color_after_add.bottom - structure_color_after_add.top
             < structure_color_before.bottom - structure_color_before.top
         && structure_layer_after_add.bottom - structure_layer_after_add.top
@@ -4951,60 +5093,89 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         && structure_layer_after_add.right == structure_reference_after_add.right
         && structure_color_after_add.bottom <= structure_layer_after_add.top
         && structure_layer_after_add.bottom <= structure_reference_after_add.top
-        && structure_reference_after_add.bottom > structure_reference_after_add.top
-        && structure_focus_after_add
-            == (structure_reference_natural_focus == nullptr
-                    ? structure_reference
-                    : structure_reference_natural_focus)
         && structure_paints[0].count != 0U
         && structure_paints[1].count != 0U
-        && structure_paints[2].count != 0U
         && structure_color_child_paints.count != 0U
         && structure_layer_list_paints.count != 0U
-        && structure_color_resets.count == 0U
-        && structure_layer_resets.count == 0U
-        && static_cast<int>(SendMessageW(
-               structure_color_list, LB_GETCOUNT, 0, 0)) == color_count_before
-        && static_cast<int>(SendMessageW(
-               structure_color_list, LB_GETCURSEL, 0, 0)) == color_selection_before
-        && static_cast<int>(SendMessageW(
-               structure_color_list, LB_GETTOPINDEX, 0, 0)) == color_top_before
-        && static_cast<int>(SendMessageW(
-               structure_layer_list, LB_GETCOUNT, 0, 0)) == layer_count_before
-        && static_cast<int>(SendMessageW(
-               structure_layer_list, LB_GETCURSEL, 0, 0)) == layer_selection_before
-        && static_cast<int>(SendMessageW(
-               structure_layer_list, LB_GETTOPINDEX, 0, 0)) == layer_top_before
-        && has_no_pending_update(structure_color)
-        && has_no_pending_update(structure_layer)
-        && has_no_pending_update(structure_reference)
-        && has_no_pending_update(structure_color_list)
-        && has_no_pending_update(structure_layer_list)
-        && has_no_pending_update(structure_color_resize_control)
-        && has_no_pending_update(resize_right_tool_tabs)
-        && has_no_pending_update(state.Workspace().windows.window)
-        && add_sentinel_written && resize_sentinel_cleared(add_sentinel);
+        && structure_add_survivor_updates_ok;
+    const bool structure_add_new_tab_ok = !structure_fits_selected
+        && structure_tab_after_add != nullptr
+        && structure_tab_after_add->pane_count == 2U
+        && !structure_contains(*structure_tab_after_add, DockPaneType::Reference)
+        && structure_reference_tab_after_add != nullptr
+        && structure_reference_tab_after_add->pane_count == 1U
+        && structure_reference_tab_after_add->panes[0]
+            == DockPaneType::Reference
+        && structure_reference_tab_id != structure_tab_id
+        && structure_tabs.Selected() == structure_reference_tab_id
+        && structure_tabs.Tabs().size() == structure_tab_count_before + 1U
+        && structure_tabs.NextStableId() == structure_next_id_before + 1U
+        && IsWindowVisible(structure_color) == FALSE
+        && IsWindowVisible(structure_layer) == FALSE
+        && structure_add_survivor_updates_ok;
+    const bool structure_add_ok = structure_add_common_ok
+        && (structure_add_same_tab_ok || structure_add_new_tab_ok);
+    const std::size_t structure_tab_count_after_add = structure_tabs.Tabs().size();
+    const std::uint32_t structure_selected_after_add =
+        structure_tabs.Selected().Value();
+    const std::uint32_t structure_next_id_after_add =
+        structure_tabs.NextStableId();
+    const BOOL structure_color_visible_after_add = IsWindowVisible(structure_color);
+    const BOOL structure_layer_visible_after_add = IsWindowVisible(structure_layer);
+    const BOOL structure_reference_visible_after_add =
+        IsWindowVisible(structure_reference);
+    const std::array<std::size_t, 3U> structure_paints_after_add{
+        structure_paints[0].count,
+        structure_paints[1].count,
+        structure_paints[2].count};
+    const std::size_t structure_color_child_paints_after_add =
+        structure_color_child_paints.count;
+    const std::size_t structure_layer_list_paints_after_add =
+        structure_layer_list_paints.count;
+    const std::size_t structure_color_resets_after_add =
+        structure_color_resets.count;
+    const std::size_t structure_layer_resets_after_add =
+        structure_layer_resets.count;
     POINT remove_sentinel{};
-    const bool remove_sentinel_written = structure_add_ok
+    const bool structure_reference_visible_before_remove =
+        IsWindowVisible(structure_reference) != FALSE;
+    const bool remove_sentinel_written = structure_reference_visible_before_remove
         && place_resize_sentinel(structure_reference, remove_sentinel);
     for (auto& counter : structure_paints) {
         counter.count = 0U;
     }
     structure_color_child_paints.count = 0U;
     structure_layer_list_paints.count = 0U;
-    if (structure_add_ok && splitter_focus_target != nullptr) {
-        SetFocus(splitter_focus_target);
+    const HWND structure_remove_focus_target = structure_fits_selected
+        ? splitter_focus_target
+        : resize_right_tool_tabs;
+    if (structure_add_ok && structure_remove_focus_target != nullptr
+        && IsWindowVisible(structure_remove_focus_target) != FALSE) {
+        SetFocus(structure_remove_focus_target);
     }
     const HWND focus_before_remove = GetFocus();
-    const LRESULT reference_hide_result = SendMessageW(
-        state.Workspace().windows.window,
-        WM_COMMAND,
-        IDM_WINDOW_SUBPALETTE,
-        0);
+    const bool structure_remove_focus_ready = structure_add_ok
+        && focus_before_remove == structure_remove_focus_target;
+    const LRESULT reference_hide_result = structure_reference_visible_before_remove
+        ? SendMessageW(
+              state.Workspace().windows.window,
+              WM_COMMAND,
+              IDM_WINDOW_SUBPALETTE,
+              0)
+        : 0;
     const ToolTab* structure_tab_after_remove = structure_tabs.Find(structure_tab_id);
     RECT structure_color_after_remove{};
     RECT structure_layer_after_remove{};
-    const bool structure_remove_ok = reference_hide_result == 1
+    const bool structure_remove_focus_kept = GetFocus() == focus_before_remove;
+    const bool structure_remove_model_ok = structure_expected_remove_result
+            == ToolTabResult::Ok
+        && same_tool_tabs(structure_expected_after_remove, structure_tabs);
+    const bool remove_sentinel_cleared_after_remove = remove_sentinel_written
+        && resize_sentinel_cleared(remove_sentinel);
+    const bool structure_remove_layout_ok = structure_add_ok
+        && reference_hide_result == 1
+        && structure_remove_model_ok
+        && structure_remove_focus_ready
         && structure_tab_after_remove != nullptr
         && structure_tab_after_remove->pane_count == 2U
         && !structure_contains(*structure_tab_after_remove, DockPaneType::Reference)
@@ -5014,8 +5185,10 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
                DockPaneType::Layer) == structure_layer
         && state.Workspace().windows.dock_host.ContentWindow(
                DockPaneType::Reference) == structure_reference
+        && IsWindowVisible(structure_color) != FALSE
+        && IsWindowVisible(structure_layer) != FALSE
         && IsWindowVisible(structure_reference) == FALSE
-        && GetFocus() == focus_before_remove
+        && structure_remove_focus_kept
         && GetWindowRect(structure_color, &structure_color_after_remove) != FALSE
         && GetWindowRect(structure_layer, &structure_layer_after_remove) != FALSE
         && EqualRect(&structure_color_after_remove, &structure_color_before) != FALSE
@@ -5046,7 +5219,16 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         && has_no_pending_update(structure_reference)
         && has_no_pending_update(resize_right_tool_tabs)
         && has_no_pending_update(state.Workspace().windows.window)
-        && remove_sentinel_written && resize_sentinel_cleared(remove_sentinel);
+        && remove_sentinel_cleared_after_remove;
+    if (structure_remove_layout_ok && structure_focus_before_add != nullptr
+        && IsWindow(structure_focus_before_add) != FALSE
+        && IsWindowVisible(structure_focus_before_add) != FALSE) {
+        SetFocus(structure_focus_before_add);
+    }
+    const bool structure_focus_restored_after_remove = structure_remove_layout_ok
+        && GetFocus() == structure_focus_before_add;
+    const bool structure_remove_ok = structure_remove_layout_ok
+        && structure_focus_restored_after_remove;
     const auto same_pane_placement = [](
                                          const DockPanePlacement& left,
                                          const DockPanePlacement& right) noexcept {
@@ -5060,31 +5242,6 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
             && left.floating.height_dip == right.floating.height_dip
             && left.present == right.present
             && left.active_tab == right.active_tab;
-    };
-    const auto same_tool_tabs = [](const RightToolTabsModel& left,
-                                    const RightToolTabsModel& right) noexcept {
-        const auto left_tabs = left.Tabs();
-        const auto right_tabs = right.Tabs();
-        if (left.Selected() != right.Selected()
-            || left.NextStableId() != right.NextStableId()
-            || left_tabs.size() != right_tabs.size()) {
-            return false;
-        }
-        for (std::size_t index = 0U; index < left_tabs.size(); ++index) {
-            if (left_tabs[index].id != right_tabs[index].id
-                || left_tabs[index].pane_count != right_tabs[index].pane_count) {
-                return false;
-            }
-            for (std::size_t pane_index = 0U;
-                 pane_index < left_tabs[index].pane_count;
-                 ++pane_index) {
-                if (left_tabs[index].panes[pane_index]
-                    != right_tabs[index].panes[pane_index]) {
-                    return false;
-                }
-            }
-        }
-        return true;
     };
     bool structure_rejection_rollback_ok{};
     if (structure_remove_ok) {
@@ -5116,6 +5273,557 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
             && IsWindowVisible(structure_reference) == FALSE
             && has_no_pending_update(structure_reference);
     }
+
+    // A constrained hosted desktop legitimately exercises the singleton branch
+    // above. When the work area can hold it, retain a visible same-tab
+    // three-pane transaction by preparing the lower-minimum Layer + Sequence +
+    // Locator combination. The preparation is a private fixture; add/remove
+    // still use the real command, DockHost, pane layout and repaint route.
+    bool structure_compact_same_tab_ok = structure_fits_selected;
+    bool structure_compact_setup_ok{};
+    bool structure_compact_add_ok{};
+    bool structure_compact_remove_ok{};
+    bool structure_compact_restore_ok{};
+    bool structure_compact_applicable{};
+    bool structure_compact_restore_model_ok{};
+    bool structure_compact_restore_menu_ok{};
+    bool structure_compact_restore_visibility_ok{};
+    bool structure_compact_restore_geometry_ok{};
+    bool structure_compact_restore_resets_ok{};
+    bool structure_compact_restore_lists_ok{};
+    bool structure_compact_restore_updates_ok{};
+    bool structure_compact_restore_focus_ok{};
+    std::uint32_t structure_compact_restore_pending_mask{};
+    int structure_compact_available_height{};
+    std::int64_t structure_compact_required_height{};
+    if (!structure_fits_selected && structure_remove_ok
+        && structure_rejection_rollback_ok) {
+        auto& compact_workspace = state.Workspace().windows.workspace;
+        const DockLayoutModel compact_dock_snapshot = compact_workspace.dock;
+        const RightToolTabsModel compact_tabs_snapshot = structure_tabs;
+        const HWND compact_focus_snapshot = GetFocus();
+        const HWND compact_sequence = state.Workspace().sequence_palette;
+        const HWND compact_locator = state.Workspace().locator_palette;
+        const HWND compact_sequence_list = GetDlgItem(
+            compact_sequence, IDC_SEQUENCE_CELLS);
+        const HWND compact_locator_target = GetDlgItem(
+            compact_locator, IDC_LOCATOR_TARGET);
+        const ToolTabId compact_layer_tab = compact_tabs_snapshot.TabForPane(
+            DockPaneType::Layer);
+        structure_compact_required_height = static_cast<std::int64_t>(
+            structure_splitter_px) * 2;
+        for (const DockPaneType type : {
+                 DockPaneType::Layer,
+                 DockPaneType::Sequence,
+                 DockPaneType::Locator}) {
+            const PaneDescriptor* descriptor = FindPaneDescriptor(type);
+            if (descriptor == nullptr) {
+                structure_compact_required_height = -1;
+                break;
+            }
+            const std::int64_t scaled = static_cast<std::int64_t>(
+                descriptor->minimum_height_dip) * structure_dpi;
+            structure_compact_required_height += (scaled + 48) / 96;
+        }
+
+        DockLayoutModel compact_dock_candidate = compact_dock_snapshot;
+        RightToolTabsModel compact_tabs_candidate = compact_tabs_snapshot;
+        const ToolTabResult compact_color_remove =
+            compact_tabs_candidate.RemovePane(DockPaneType::Color);
+        const DockResult compact_color_hide = compact_dock_candidate.HidePane(
+            DockPaneType::Color);
+        const ToolTabResult compact_sequence_move = compact_tabs_candidate.MovePane(
+            DockPaneType::Sequence, compact_layer_tab);
+        const DockPanePlacement* compact_sequence_placement =
+            compact_dock_candidate.Pane(DockPaneType::Sequence);
+        const DockResult compact_sequence_add = compact_sequence_placement == nullptr
+            ? DockResult::InvalidPane
+            : (compact_sequence_placement->present
+                    ? DockResult::NoOp
+                    : compact_dock_candidate.AddPane(DockPaneType::Sequence));
+        const DockResult compact_sequence_dock = compact_sequence_add
+                    == DockResult::Ok
+                || compact_sequence_add == DockResult::NoOp
+            ? compact_dock_candidate.MovePane(
+                  DockPaneType::Sequence, DockZone::Right)
+            : compact_sequence_add;
+        const ToolTab* compact_candidate_tab = compact_tabs_candidate.Find(
+            compact_layer_tab);
+        const bool compact_candidate_ok = compact_sequence != nullptr
+            && compact_locator != nullptr && compact_sequence_list != nullptr
+            && compact_locator_target != nullptr && compact_layer_tab
+            && !compact_tabs_snapshot.TabForPane(DockPaneType::Locator)
+            && compact_color_remove == ToolTabResult::Ok
+            && (compact_color_hide == DockResult::Ok
+                || compact_color_hide == DockResult::NoOp)
+            && (compact_sequence_move == ToolTabResult::Ok
+                || compact_sequence_move == ToolTabResult::NoOp)
+            && (compact_sequence_add == DockResult::Ok
+                || compact_sequence_add == DockResult::NoOp)
+            && (compact_sequence_dock == DockResult::Ok
+                || compact_sequence_dock == DockResult::NoOp)
+            && compact_candidate_tab != nullptr
+            && compact_candidate_tab->pane_count == 2U
+            && structure_contains(*compact_candidate_tab, DockPaneType::Layer)
+            && structure_contains(*compact_candidate_tab, DockPaneType::Sequence)
+            && !structure_contains(*compact_candidate_tab, DockPaneType::Color)
+            && compact_tabs_candidate.Selected() == compact_layer_tab;
+        WorkspaceLayoutState compact_layout_candidate = compact_workspace;
+        compact_layout_candidate.dock = compact_dock_candidate;
+        compact_layout_candidate.right_tool_tabs = compact_tabs_candidate;
+        if (compact_candidate_ok && structure_compact_required_height >= 0) {
+            const auto layout = ComputeWorkspaceLayout(
+                structure_client_width,
+                structure_client_height,
+                0,
+                structure_dpi,
+                compact_layout_candidate);
+            structure_compact_available_height = layout.dock.zones[
+                static_cast<std::size_t>(DockZone::Right)].height;
+            structure_compact_applicable = structure_compact_required_height
+                <= structure_compact_available_height;
+            structure_compact_setup_ok = true;
+        }
+        if (structure_compact_setup_ok && !structure_compact_applicable) {
+            // A physically clipped child is not a valid visible-paint oracle.
+            // The exact boundary remains covered by the pure model matrix.
+            structure_compact_restore_ok = true;
+            structure_compact_same_tab_ok = true;
+        }
+        constexpr UINT_PTR kCompactSequencePaintProbe = 107U;
+        constexpr UINT_PTR kCompactLocatorPaintProbe = 108U;
+        constexpr UINT_PTR kCompactSequenceResetProbe = 109U;
+        constexpr UINT_PTR kCompactSequenceListPaintProbe = 110U;
+        constexpr UINT_PTR kCompactLocatorTargetPaintProbe = 111U;
+        WindowMessageCounter compact_sequence_paints{WM_PAINT};
+        WindowMessageCounter compact_locator_paints{WM_PAINT};
+        WindowMessageCounter compact_sequence_resets{LB_RESETCONTENT};
+        WindowMessageCounter compact_sequence_list_paints{WM_PAINT};
+        WindowMessageCounter compact_locator_target_paints{WM_PAINT};
+        const int compact_sequence_count_before = static_cast<int>(SendMessageW(
+            compact_sequence_list, LB_GETCOUNT, 0, 0));
+        const int compact_sequence_selection_before = static_cast<int>(SendMessageW(
+            compact_sequence_list, LB_GETCURSEL, 0, 0));
+        const int compact_sequence_top_before = static_cast<int>(SendMessageW(
+            compact_sequence_list, LB_GETTOPINDEX, 0, 0));
+        structure_layer_resets.count = 0U;
+        const bool compact_sequence_reset_attached = structure_compact_applicable
+            && SetWindowSubclass(
+                   compact_sequence_list,
+                   WindowMessageCounterProcedure,
+                   kCompactSequenceResetProbe,
+                   reinterpret_cast<DWORD_PTR>(&compact_sequence_resets)) != FALSE;
+        if (structure_compact_applicable && !compact_sequence_reset_attached) {
+            structure_compact_setup_ok = false;
+        }
+        if (structure_compact_applicable) {
+            compact_workspace.dock = compact_dock_candidate;
+            structure_tabs = compact_tabs_candidate;
+            structure_compact_setup_ok = LayoutMainChrome(
+                state.Workspace().windows,
+                state.lifetime.smoke_test,
+                structure_client_width,
+                structure_client_height,
+                DockHostChangeKind::Structure);
+        }
+        if (structure_compact_applicable) {
+        RECT compact_layer_before{};
+        RECT compact_sequence_before{};
+        structure_compact_setup_ok = structure_compact_setup_ok
+            && structure_tabs.Selected() == compact_layer_tab
+            && IsWindowVisible(structure_color) == FALSE
+            && IsWindowVisible(structure_layer) != FALSE
+            && IsWindowVisible(compact_sequence) != FALSE
+            && IsWindowVisible(compact_locator) == FALSE
+            && GetWindowRect(structure_layer, &compact_layer_before) != FALSE
+            && GetWindowRect(compact_sequence, &compact_sequence_before) != FALSE;
+
+        RightToolTabsModel compact_expected_after_add = structure_tabs;
+        const ToolTabResult compact_expected_add_result =
+            compact_expected_after_add.AddPaneToSelected(
+                DockPaneType::Locator,
+                structure_compact_available_height,
+                structure_dpi,
+                structure_splitter_px);
+        const bool compact_expected_same_tab = compact_expected_add_result
+                == ToolTabResult::Ok
+            && compact_expected_after_add.TabForPane(DockPaneType::Locator)
+                == compact_layer_tab;
+        RightToolTabsModel compact_expected_after_remove =
+            compact_expected_after_add;
+        const ToolTabResult compact_expected_remove_result =
+            compact_expected_after_remove.RemovePane(DockPaneType::Locator);
+
+        const bool compact_sequence_paint_attached = structure_compact_setup_ok
+            && SetWindowSubclass(
+                   compact_sequence,
+                   WindowMessageCounterProcedure,
+                   kCompactSequencePaintProbe,
+                   reinterpret_cast<DWORD_PTR>(&compact_sequence_paints)) != FALSE;
+        const bool compact_locator_paint_attached = compact_sequence_paint_attached
+            && SetWindowSubclass(
+                   compact_locator,
+                   WindowMessageCounterProcedure,
+                   kCompactLocatorPaintProbe,
+                   reinterpret_cast<DWORD_PTR>(&compact_locator_paints)) != FALSE;
+        const bool compact_sequence_list_paint_attached =
+            compact_locator_paint_attached && compact_sequence_reset_attached
+            && SetWindowSubclass(
+                   compact_sequence_list,
+                   WindowMessageCounterProcedure,
+                   kCompactSequenceListPaintProbe,
+                   reinterpret_cast<DWORD_PTR>(&compact_sequence_list_paints))
+                != FALSE;
+        const bool compact_locator_target_paint_attached =
+            compact_sequence_list_paint_attached
+            && SetWindowSubclass(
+                   compact_locator_target,
+                   WindowMessageCounterProcedure,
+                   kCompactLocatorTargetPaintProbe,
+                   reinterpret_cast<DWORD_PTR>(&compact_locator_target_paints))
+                != FALSE;
+        const bool compact_probes_attached = compact_locator_target_paint_attached;
+
+        structure_paints[1].count = 0U;
+        structure_layer_list_paints.count = 0U;
+        POINT compact_add_sentinel{};
+        const bool compact_add_sentinel_written = compact_probes_attached
+            && place_resize_sentinel(compact_sequence, compact_add_sentinel);
+        const HWND compact_focus_before_add = GetFocus();
+        const LRESULT compact_show_result = compact_probes_attached
+                && compact_expected_same_tab
+            ? SendMessageW(
+                  state.Workspace().windows.window,
+                  WM_COMMAND,
+                  IDM_WINDOW_LOCATOR,
+                  0)
+            : 0;
+        const HWND compact_locator_natural_focus = GetNextDlgTabItem(
+            compact_locator, nullptr, FALSE);
+        RECT compact_layer_after_add{};
+        RECT compact_sequence_after_add{};
+        RECT compact_locator_after_add{};
+        const ToolTab* compact_tab_after_add = structure_tabs.Find(
+            compact_layer_tab);
+        const bool compact_add_sentinel_cleared = compact_add_sentinel_written
+            && resize_sentinel_cleared(compact_add_sentinel);
+        structure_compact_add_ok = compact_show_result == 1
+            && compact_tab_after_add != nullptr
+            && compact_tab_after_add->pane_count == 3U
+            && structure_contains(*compact_tab_after_add, DockPaneType::Layer)
+            && structure_contains(*compact_tab_after_add, DockPaneType::Sequence)
+            && structure_contains(*compact_tab_after_add, DockPaneType::Locator)
+            && structure_tabs.Selected() == compact_layer_tab
+            && same_tool_tabs(compact_expected_after_add, structure_tabs)
+            && state.Workspace().windows.dock_host.ContentWindow(
+                   DockPaneType::Layer) == structure_layer
+            && state.Workspace().windows.dock_host.ContentWindow(
+                   DockPaneType::Sequence) == compact_sequence
+            && state.Workspace().windows.dock_host.ContentWindow(
+                   DockPaneType::Locator) == compact_locator
+            && IsWindowVisible(structure_layer) != FALSE
+            && IsWindowVisible(compact_sequence) != FALSE
+            && IsWindowVisible(compact_locator) != FALSE
+            && GetFocus() == (compact_locator_natural_focus == nullptr
+                    ? compact_locator
+                    : compact_locator_natural_focus)
+            && GetWindowRect(structure_layer, &compact_layer_after_add) != FALSE
+            && GetWindowRect(compact_sequence, &compact_sequence_after_add) != FALSE
+            && GetWindowRect(compact_locator, &compact_locator_after_add) != FALSE
+            && compact_layer_after_add.bottom - compact_layer_after_add.top
+                < compact_layer_before.bottom - compact_layer_before.top
+            && compact_sequence_after_add.bottom - compact_sequence_after_add.top
+                < compact_sequence_before.bottom - compact_sequence_before.top
+            && compact_layer_after_add.left == compact_sequence_after_add.left
+            && compact_layer_after_add.right == compact_sequence_after_add.right
+            && compact_sequence_after_add.left == compact_locator_after_add.left
+            && compact_sequence_after_add.right == compact_locator_after_add.right
+            && compact_layer_after_add.bottom <= compact_sequence_after_add.top
+            && compact_sequence_after_add.bottom <= compact_locator_after_add.top
+            && compact_locator_after_add.bottom > compact_locator_after_add.top
+            && structure_paints[1].count != 0U
+            && compact_sequence_paints.count != 0U
+            && compact_locator_paints.count != 0U
+            && structure_layer_list_paints.count != 0U
+            && compact_sequence_list_paints.count != 0U
+            && compact_locator_target_paints.count != 0U
+            && structure_layer_resets.count == 0U
+            && compact_sequence_resets.count == 0U
+            && static_cast<int>(SendMessageW(
+                   structure_layer_list, LB_GETCOUNT, 0, 0))
+                == layer_count_before
+            && static_cast<int>(SendMessageW(
+                   structure_layer_list, LB_GETCURSEL, 0, 0))
+                == layer_selection_before
+            && static_cast<int>(SendMessageW(
+                   structure_layer_list, LB_GETTOPINDEX, 0, 0))
+                == layer_top_before
+            && static_cast<int>(SendMessageW(
+                   compact_sequence_list, LB_GETCOUNT, 0, 0))
+                == compact_sequence_count_before
+            && static_cast<int>(SendMessageW(
+                   compact_sequence_list, LB_GETCURSEL, 0, 0))
+                == compact_sequence_selection_before
+            && static_cast<int>(SendMessageW(
+                   compact_sequence_list, LB_GETTOPINDEX, 0, 0))
+                == compact_sequence_top_before
+            && has_no_pending_update(structure_layer)
+            && has_no_pending_update(compact_sequence)
+            && has_no_pending_update(compact_locator)
+            && has_no_pending_update(structure_layer_list)
+            && has_no_pending_update(compact_sequence_list)
+            && has_no_pending_update(compact_locator_target)
+            && has_no_pending_update(resize_right_tool_tabs)
+            && has_no_pending_update(state.Workspace().windows.window)
+            && compact_add_sentinel_cleared;
+
+        POINT compact_remove_sentinel{};
+        const bool compact_remove_sentinel_written = structure_compact_add_ok
+            && place_resize_sentinel(compact_locator, compact_remove_sentinel);
+        structure_paints[1].count = 0U;
+        compact_sequence_paints.count = 0U;
+        compact_locator_paints.count = 0U;
+        structure_layer_list_paints.count = 0U;
+        compact_sequence_list_paints.count = 0U;
+        compact_locator_target_paints.count = 0U;
+        if (structure_compact_add_ok) {
+            SetFocus(structure_layer_list);
+        }
+        const HWND compact_focus_before_remove = GetFocus();
+        const LRESULT compact_hide_result = structure_compact_add_ok
+            ? SendMessageW(
+                  state.Workspace().windows.window,
+                  WM_COMMAND,
+                  IDM_WINDOW_LOCATOR,
+                  0)
+            : 0;
+        RECT compact_layer_after_remove{};
+        RECT compact_sequence_after_remove{};
+        const bool compact_remove_sentinel_cleared =
+            compact_remove_sentinel_written
+            && resize_sentinel_cleared(compact_remove_sentinel);
+        structure_compact_remove_ok = compact_hide_result == 1
+            && compact_expected_remove_result == ToolTabResult::Ok
+            && same_tool_tabs(compact_expected_after_remove, structure_tabs)
+            && IsWindowVisible(structure_layer) != FALSE
+            && IsWindowVisible(compact_sequence) != FALSE
+            && IsWindowVisible(compact_locator) == FALSE
+            && compact_focus_before_remove == structure_layer_list
+            && GetFocus() == compact_focus_before_remove
+            && GetWindowRect(structure_layer, &compact_layer_after_remove) != FALSE
+            && GetWindowRect(compact_sequence, &compact_sequence_after_remove) != FALSE
+            && EqualRect(&compact_layer_after_remove, &compact_layer_before) != FALSE
+            && EqualRect(&compact_sequence_after_remove, &compact_sequence_before)
+                != FALSE
+            && structure_paints[1].count != 0U
+            && compact_sequence_paints.count != 0U
+            && structure_layer_list_paints.count != 0U
+            && compact_sequence_list_paints.count != 0U
+            && structure_layer_resets.count == 0U
+            && compact_sequence_resets.count == 0U
+            && static_cast<int>(SendMessageW(
+                   structure_layer_list, LB_GETCOUNT, 0, 0))
+                == layer_count_before
+            && static_cast<int>(SendMessageW(
+                   structure_layer_list, LB_GETCURSEL, 0, 0))
+                == layer_selection_before
+            && static_cast<int>(SendMessageW(
+                   structure_layer_list, LB_GETTOPINDEX, 0, 0))
+                == layer_top_before
+            && static_cast<int>(SendMessageW(
+                   compact_sequence_list, LB_GETCOUNT, 0, 0))
+                == compact_sequence_count_before
+            && static_cast<int>(SendMessageW(
+                   compact_sequence_list, LB_GETCURSEL, 0, 0))
+                == compact_sequence_selection_before
+            && static_cast<int>(SendMessageW(
+                   compact_sequence_list, LB_GETTOPINDEX, 0, 0))
+                == compact_sequence_top_before
+            && has_no_pending_update(structure_layer)
+            && has_no_pending_update(compact_sequence)
+            && has_no_pending_update(compact_locator)
+            && has_no_pending_update(structure_layer_list)
+            && has_no_pending_update(compact_sequence_list)
+            && has_no_pending_update(compact_locator_target)
+            && has_no_pending_update(resize_right_tool_tabs)
+            && has_no_pending_update(state.Workspace().windows.window)
+            && compact_remove_sentinel_cleared;
+
+        RightToolTabsModel compact_restored_tabs{};
+        const bool compact_restored_tabs_loaded = compact_restored_tabs.Load(
+            compact_tabs_snapshot.Tabs(),
+            compact_tabs_snapshot.Selected(),
+            compact_tabs_snapshot.NextStableId());
+        compact_workspace.dock = compact_dock_snapshot;
+        if (compact_restored_tabs_loaded) {
+            structure_tabs = compact_restored_tabs;
+            UpdateMenuState(state, false);
+        }
+        bool compact_restore_focus_ready = compact_focus_snapshot != nullptr
+            && IsWindow(compact_focus_snapshot) != FALSE
+            && IsWindowVisible(compact_focus_snapshot) != FALSE;
+        if (compact_restored_tabs_loaded && compact_restore_focus_ready) {
+            SetFocus(compact_focus_snapshot);
+            compact_restore_focus_ready = GetFocus() == compact_focus_snapshot;
+        }
+        RECT compact_restored_client{};
+        const bool compact_restore_layout_ok = compact_restored_tabs_loaded
+            && compact_restore_focus_ready
+            && GetClientRect(
+                   state.Workspace().windows.window, &compact_restored_client)
+                != FALSE
+            && LayoutMainChrome(
+                state.Workspace().windows,
+                state.lifetime.smoke_test,
+                compact_restored_client.right - compact_restored_client.left,
+                compact_restored_client.bottom - compact_restored_client.top,
+                DockHostChangeKind::Structure);
+        bool compact_dock_model_restored = compact_restore_layout_ok;
+        for (std::size_t index = 0U;
+             compact_dock_model_restored && index < kDockPaneCount;
+             ++index) {
+            const DockPaneType type = static_cast<DockPaneType>(index);
+            const DockPanePlacement* expected = compact_dock_snapshot.Pane(type);
+            const DockPanePlacement* actual = compact_workspace.dock.Pane(type);
+            compact_dock_model_restored = expected != nullptr && actual != nullptr
+                && same_pane_placement(*expected, *actual);
+        }
+        const HMENU compact_restored_menu = GetMenu(
+            state.Workspace().windows.window);
+        const auto compact_checked_state_matches = [&](UINT command,
+                                                       DockPaneType type) noexcept {
+            const bool expected = compact_dock_snapshot.IsPaneVisible(type);
+            return compact_restored_menu != nullptr
+                && (((GetMenuState(compact_restored_menu, command, MF_BYCOMMAND)
+                          & MF_CHECKED)
+                         != 0U)
+                    == expected)
+                && IsCommandChecked(state.Workspace().command_states, command)
+                    == expected;
+        };
+        RECT compact_color_after_restore{};
+        RECT compact_layer_after_restore{};
+        structure_compact_restore_model_ok = compact_dock_model_restored
+            && same_tool_tabs(compact_restored_tabs, structure_tabs);
+        structure_compact_restore_menu_ok = compact_checked_state_matches(
+                IDM_WINDOW_COLOR_PANE, DockPaneType::Color)
+            && compact_checked_state_matches(
+                IDM_WINDOW_SEQUENCE, DockPaneType::Sequence)
+            && compact_checked_state_matches(
+                IDM_WINDOW_LOCATOR, DockPaneType::Locator);
+        structure_compact_restore_visibility_ok =
+            (IsWindowVisible(structure_color) != FALSE)
+                == compact_dock_snapshot.IsPaneVisible(DockPaneType::Color)
+            && (IsWindowVisible(structure_layer) != FALSE)
+                == compact_dock_snapshot.IsPaneVisible(DockPaneType::Layer)
+            && (IsWindowVisible(compact_sequence) != FALSE)
+                == compact_dock_snapshot.IsPaneVisible(DockPaneType::Sequence)
+            && (IsWindowVisible(compact_locator) != FALSE)
+                == compact_dock_snapshot.IsPaneVisible(DockPaneType::Locator)
+            && state.Workspace().windows.dock_host.ContentWindow(
+                   DockPaneType::Color) == structure_color
+            && state.Workspace().windows.dock_host.ContentWindow(
+                   DockPaneType::Layer) == structure_layer
+            && state.Workspace().windows.dock_host.ContentWindow(
+                   DockPaneType::Sequence) == compact_sequence
+            && state.Workspace().windows.dock_host.ContentWindow(
+                   DockPaneType::Locator) == compact_locator;
+        structure_compact_restore_geometry_ok = GetWindowRect(
+                structure_color, &compact_color_after_restore) != FALSE
+            && GetWindowRect(structure_layer, &compact_layer_after_restore) != FALSE
+            && EqualRect(&compact_color_after_restore, &structure_color_before)
+                != FALSE
+            && EqualRect(&compact_layer_after_restore, &structure_layer_before)
+                != FALSE;
+        structure_compact_restore_resets_ok = structure_color_resets.count == 0U
+            && structure_layer_resets.count == 0U
+            && compact_sequence_resets.count == 0U;
+        structure_compact_restore_lists_ok = static_cast<int>(SendMessageW(
+                   structure_color_list, LB_GETCOUNT, 0, 0)) == color_count_before
+            && static_cast<int>(SendMessageW(
+                   structure_color_list, LB_GETCURSEL, 0, 0))
+                == color_selection_before
+            && static_cast<int>(SendMessageW(
+                   structure_color_list, LB_GETTOPINDEX, 0, 0)) == color_top_before
+            && static_cast<int>(SendMessageW(
+                   structure_layer_list, LB_GETCOUNT, 0, 0))
+                == layer_count_before
+            && static_cast<int>(SendMessageW(
+                   structure_layer_list, LB_GETCURSEL, 0, 0))
+                == layer_selection_before
+            && static_cast<int>(SendMessageW(
+                   structure_layer_list, LB_GETTOPINDEX, 0, 0))
+                == layer_top_before
+            && static_cast<int>(SendMessageW(
+                   compact_sequence_list, LB_GETCOUNT, 0, 0))
+                == compact_sequence_count_before
+            && static_cast<int>(SendMessageW(
+                   compact_sequence_list, LB_GETCURSEL, 0, 0))
+                == compact_sequence_selection_before
+            && static_cast<int>(SendMessageW(
+                   compact_sequence_list, LB_GETTOPINDEX, 0, 0))
+                == compact_sequence_top_before;
+        structure_compact_restore_focus_ok = GetFocus() == compact_focus_snapshot;
+        for (const auto& [window, bit] : std::array{
+                 std::pair{structure_color, UINT32_C(1) << 0U},
+                 std::pair{structure_layer, UINT32_C(1) << 1U},
+                 std::pair{structure_color_list, UINT32_C(1) << 2U},
+                 std::pair{structure_layer_list, UINT32_C(1) << 3U},
+                 std::pair{structure_color_resize_control, UINT32_C(1) << 4U},
+                 std::pair{state.Workspace().windows.window, UINT32_C(1) << 5U},
+                 std::pair{resize_right_tool_tabs, UINT32_C(1) << 6U}}) {
+            if (!has_no_pending_update(window)) {
+                structure_compact_restore_pending_mask |= bit;
+            }
+        }
+        structure_compact_restore_updates_ok =
+            structure_compact_restore_pending_mask == 0U;
+        structure_compact_restore_ok = structure_compact_restore_model_ok
+            && structure_compact_restore_menu_ok
+            && structure_compact_restore_visibility_ok
+            && structure_compact_restore_geometry_ok
+            && structure_compact_restore_resets_ok
+            && structure_compact_restore_lists_ok
+            && structure_compact_restore_updates_ok
+            && structure_compact_restore_focus_ok;
+        structure_compact_same_tab_ok = structure_compact_setup_ok
+            && compact_expected_same_tab
+            && structure_compact_add_ok
+            && structure_compact_remove_ok
+            && structure_compact_restore_ok
+            && compact_focus_before_add == compact_focus_snapshot;
+        if (compact_locator_target_paint_attached) {
+            RemoveWindowSubclass(
+                compact_locator_target,
+                WindowMessageCounterProcedure,
+                kCompactLocatorTargetPaintProbe);
+        }
+        if (compact_sequence_list_paint_attached) {
+            RemoveWindowSubclass(
+                compact_sequence_list,
+                WindowMessageCounterProcedure,
+                kCompactSequenceListPaintProbe);
+        }
+        if (compact_sequence_reset_attached) {
+            RemoveWindowSubclass(
+                compact_sequence_list,
+                WindowMessageCounterProcedure,
+                kCompactSequenceResetProbe);
+        }
+        if (compact_locator_paint_attached) {
+            RemoveWindowSubclass(
+                compact_locator,
+                WindowMessageCounterProcedure,
+                kCompactLocatorPaintProbe);
+        }
+        if (compact_sequence_paint_attached) {
+            RemoveWindowSubclass(
+                compact_sequence,
+                WindowMessageCounterProcedure,
+                kCompactSequencePaintProbe);
+        }
+        }
+    }
     detach_structure_probes();
     const bool structure_workspace_restored = SetWindowPos(
             state.Workspace().windows.window,
@@ -5127,23 +5835,152 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
             SWP_NOACTIVATE | SWP_SHOWWINDOW)
             != FALSE
         && GetClientRect(state.Workspace().windows.window, &client) != FALSE;
-    if (structure_workspace_restored) {
-        LayoutMainChrome(
+    if (!structure_workspace_restored
+        || !LayoutMainChrome(
             state.Workspace().windows,
             state.lifetime.smoke_test,
             client.right - client.left,
-            client.bottom - client.top);
-    } else {
+            client.bottom - client.top)) {
         return 11204;
     }
     if (!structure_add_ok) {
+        std::fprintf(stderr,
+            "right-pane structure add failed: fit=%d command=%lld "
+            "dpi=%u work=%dx%d outer=%dx%d client=%dx%d "
+            "right-height=%d required=%lld splitter=%d "
+            "capacity=%d common=%d model=%d same=%d new=%d focus=%d "
+            "tabs=%zu->%zu selected=%u->%u reference-tab=%u "
+            "next-id=%u->%u visible=%d,%d,%d paints=%zu,%zu,%zu "
+            "child-paints=%zu,%zu resets=%zu,%zu lists=%d "
+            "updates=%d,%d sentinel=%d,%d\n",
+            static_cast<int>(structure_fits_selected),
+            static_cast<long long>(reference_show_result),
+            structure_dpi,
+            work_width,
+            work_height,
+            smoke_width,
+            structure_workspace_height,
+            structure_client_width,
+            structure_client_height,
+            structure_available_height,
+            static_cast<long long>(structure_required_height),
+            structure_splitter_px,
+            static_cast<int>(structure_capacity_consistent),
+            static_cast<int>(structure_add_common_ok),
+            static_cast<int>(structure_add_model_ok),
+            static_cast<int>(structure_add_same_tab_ok),
+            static_cast<int>(structure_add_new_tab_ok),
+            static_cast<int>(structure_add_focus_ok),
+            structure_tab_count_before,
+            structure_tab_count_after_add,
+            structure_tab_id.Value(),
+            structure_selected_after_add,
+            structure_reference_tab_id.Value(),
+            structure_next_id_before,
+            structure_next_id_after_add,
+            static_cast<int>(structure_color_visible_after_add),
+            static_cast<int>(structure_layer_visible_after_add),
+            static_cast<int>(structure_reference_visible_after_add),
+            structure_paints_after_add[0],
+            structure_paints_after_add[1],
+            structure_paints_after_add[2],
+            structure_color_child_paints_after_add,
+            structure_layer_list_paints_after_add,
+            structure_color_resets_after_add,
+            structure_layer_resets_after_add,
+            static_cast<int>(structure_add_lists_ok),
+            static_cast<int>(structure_add_common_updates_ok),
+            static_cast<int>(structure_add_survivor_updates_ok),
+            static_cast<int>(add_sentinel_written),
+            static_cast<int>(add_sentinel_cleared_after_add));
+        std::fprintf(stderr,
+            "  color-before=(%ld,%ld)-(%ld,%ld) after=(%ld,%ld)-(%ld,%ld)\n"
+            "  layer-before=(%ld,%ld)-(%ld,%ld) after=(%ld,%ld)-(%ld,%ld)\n"
+            "  reference-after=(%ld,%ld)-(%ld,%ld) focus=%p expected=%p\n",
+            structure_color_before.left,
+            structure_color_before.top,
+            structure_color_before.right,
+            structure_color_before.bottom,
+            structure_color_after_add.left,
+            structure_color_after_add.top,
+            structure_color_after_add.right,
+            structure_color_after_add.bottom,
+            structure_layer_before.left,
+            structure_layer_before.top,
+            structure_layer_before.right,
+            structure_layer_before.bottom,
+            structure_layer_after_add.left,
+            structure_layer_after_add.top,
+            structure_layer_after_add.right,
+            structure_layer_after_add.bottom,
+            structure_reference_after_add.left,
+            structure_reference_after_add.top,
+            structure_reference_after_add.right,
+            structure_reference_after_add.bottom,
+            static_cast<void*>(structure_focus_after_add),
+            static_cast<void*>(structure_reference_natural_focus == nullptr
+                    ? structure_reference
+                    : structure_reference_natural_focus));
         return 11202;
     }
     if (!structure_remove_ok) {
+        std::fprintf(stderr,
+            "right-pane structure remove failed: fit=%d command=%lld "
+            "model=%d focus-ready=%d focus-kept=%d focus-restored=%d "
+            "visible=%d,%d,%d "
+            "paints=%u,%u,%u child-paints=%u,%u resets=%u,%u "
+            "sentinel=%d,%d tabs=%zu selected=%u next-id=%u\n",
+            static_cast<int>(structure_fits_selected),
+            static_cast<long long>(reference_hide_result),
+            static_cast<int>(structure_remove_model_ok),
+            static_cast<int>(structure_remove_focus_ready),
+            static_cast<int>(structure_remove_focus_kept),
+            static_cast<int>(structure_focus_restored_after_remove),
+            static_cast<int>(IsWindowVisible(structure_color)),
+            static_cast<int>(IsWindowVisible(structure_layer)),
+            static_cast<int>(IsWindowVisible(structure_reference)),
+            structure_paints[0].count,
+            structure_paints[1].count,
+            structure_paints[2].count,
+            structure_color_child_paints.count,
+            structure_layer_list_paints.count,
+            structure_color_resets.count,
+            structure_layer_resets.count,
+            static_cast<int>(remove_sentinel_written),
+            static_cast<int>(remove_sentinel_cleared_after_remove),
+            structure_tabs.Tabs().size(),
+            structure_tabs.Selected().Value(),
+            structure_tabs.NextStableId());
         return 11203;
     }
     if (!structure_rejection_rollback_ok) {
         return 11205;
+    }
+    if (!structure_compact_same_tab_ok) {
+        std::fprintf(stderr,
+            "right-pane compact same-tab failed: fit=%d setup=%d add=%d "
+            "remove=%d restore=%d applicable=%d dpi=%u right-height=%d "
+            "required=%lld restore-parts=%d,%d,%d,%d,%d,%d,%d,%d "
+            "pending-mask=0x%08x\n",
+            static_cast<int>(structure_fits_selected),
+            static_cast<int>(structure_compact_setup_ok),
+            static_cast<int>(structure_compact_add_ok),
+            static_cast<int>(structure_compact_remove_ok),
+            static_cast<int>(structure_compact_restore_ok),
+            static_cast<int>(structure_compact_applicable),
+            structure_dpi,
+            structure_compact_available_height,
+            static_cast<long long>(structure_compact_required_height),
+            static_cast<int>(structure_compact_restore_model_ok),
+            static_cast<int>(structure_compact_restore_menu_ok),
+            static_cast<int>(structure_compact_restore_visibility_ok),
+            static_cast<int>(structure_compact_restore_geometry_ok),
+            static_cast<int>(structure_compact_restore_resets_ok),
+            static_cast<int>(structure_compact_restore_lists_ok),
+            static_cast<int>(structure_compact_restore_updates_ok),
+            static_cast<int>(structure_compact_restore_focus_ok),
+            structure_compact_restore_pending_mask);
+        return 11206;
     }
     const HWND fill_expand = GetDlgItem(
         state.Workspace().tools.palette,

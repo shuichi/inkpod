@@ -100,18 +100,28 @@ target-row correction with the same fixed-capacity placement/completion flow for
 every right pane. Its actual-`HWND` helper regression verifies changed-window
 batching, unchanged-window suppression, ancestor deferral, one final synchronous
 subtree repaint and no pending parent/child update region; that test and the x64
-Debug MSVC build pass. All 44 tests other than the two product smokes and the
-unrelated sequence-performance test pass in 28.00 seconds. The final English and
-Japanese product smokes pass in 110.55 and 113.32 seconds. They add and remove
-Reference in the already selected Color/Layer tab, clear the old-frame sentinel
-after both operations, leave no deferred pane/list/owner/tool-tab update region,
-issue zero `LB_RESETCONTENT`, and preserve surviving list counts, selections, top
-indexes and `HWND`/stable-tab identity. Geometry notification itself does not
-reset focus; the explicit show command moves focus into the newly displayed
-Reference pane as required by SPEC 88, and successful removal preserves the
-survivor focus. A callback rejected through `WM_COMMAND` preserves the Reference
-placement, right-tab model, focus and failure result. Outer DockHost OS-level
-placement/rollback failure injection remains pending.
+Debug MSVC build pass. The product smoke settles localized menu geometry and
+uses the actual right-content height and DPI with a cloned `RightToolTabsModel`
+to predict SPEC 88's result. If Color, Layer and Reference fit, it retains the
+visible three-pane shrink/grow, paint and geometry checks. If they do not fit, it
+requires a selected Reference-only tab, unchanged hidden Color/Layer membership,
+stable content `HWND`s and list state, and exact original selection, geometry,
+focus and visibility after Reference is removed; the successfully allocated tab
+ID remains consumed. Both routes clear old-frame sentinels, leave no relevant
+deferred update region, issue zero `LB_RESETCONTENT`, preserve list count,
+selection and top index, and verify rejected-callback rollback. Reference and
+Locator exact-fit/one-pixel-short model cases run at 96/120/144/192 DPI.
+
+On 2026-09-01 the x64 Debug `/W4 /WX` build and focused DockHost-boundary,
+workspace-layout, pane-dialog-layout and owner-model tests pass. A temporary
+700-pixel-height diagnostic completed the English smoke in 115.12 seconds. The
+Japanese constrained run passes the corrected right-pane probe and then reaches
+the separately tracked visible locator sampling check `859`. With the cap
+removed, the final Japanese smoke passes in 119.06 seconds; two English runs pass
+the corrected same-tab probe and reproduce only the later `859` on the current
+desktop. Prior unrestricted English/Japanese product-smoke evidence remains
+110.55/113.32 seconds. Outer DockHost OS-level placement/rollback failure
+injection remains pending.
 
 The `PAINT-001`/`PAINT-003` Canvas stroke smoke derives cancellation and color
 samples from the current presented paper bounds in client device pixels. Its

@@ -290,8 +290,11 @@ bool RetiredJobProgressPaneIsAbsent() noexcept {
     return true;
 }
 
-bool LocatorTabPreparation(
-    unsigned int dpi, bool split_initial_tab, bool fits_selected) noexcept {
+bool RestoredPaneTabPreparation(
+    DockPaneType restored_pane,
+    unsigned int dpi,
+    bool split_initial_tab,
+    bool fits_selected) noexcept {
     RightToolTabsModel tabs{};
     if (split_initial_tab
         && tabs.MovePaneToNewTab(DockPaneType::Layer) != ToolTabResult::Ok) {
@@ -303,13 +306,15 @@ bool LocatorTabPreparation(
     const auto& descriptors = PaneDescriptors();
     const int splitter = MulDiv(4, static_cast<int>(dpi), 96);
     int minimum_height = MulDiv(
-        descriptors[static_cast<std::size_t>(DockPaneType::Locator)]
+        descriptors[static_cast<std::size_t>(restored_pane)]
             .minimum_height_dip,
         static_cast<int>(dpi), 96);
     const ToolTab* selected = tabs.SelectedTab();
     if (selected == nullptr) {
         return false;
     }
+    const ToolTabId selected_before_add = tabs.Selected();
+    const std::size_t selected_pane_count_before_add = selected->pane_count;
     for (std::size_t index = 0U; index < selected->pane_count; ++index) {
         minimum_height += splitter + MulDiv(
             descriptors[static_cast<std::size_t>(selected->panes[index])]
@@ -317,32 +322,44 @@ bool LocatorTabPreparation(
             static_cast<int>(dpi), 96);
     }
     // Exercise the exact fit boundary and the one-pixel-short restore path.
-    if (tabs.AddPaneToSelected(DockPaneType::Locator,
+    if (tabs.AddPaneToSelected(restored_pane,
             minimum_height - (fits_selected ? 0 : 1), dpi, splitter)
             != ToolTabResult::Ok
         || tabs.Tabs().size() != original_count + (fits_selected ? 0U : 1U)) {
         return false;
     }
-    const ToolTabId restored_tab = tabs.TabForPane(DockPaneType::Locator);
+    const ToolTabId restored_tab = tabs.TabForPane(restored_pane);
+    const ToolTab* restored_tab_state = tabs.Find(restored_tab);
+    if (fits_selected
+        && (restored_tab != selected_before_add
+            || tabs.Selected() != selected_before_add
+            || restored_tab_state == nullptr
+            || restored_tab_state->pane_count
+                != selected_pane_count_before_add + 1U
+            || restored_tab_state->panes[selected_pane_count_before_add]
+                != restored_pane)) {
+        return false;
+    }
     const std::uint32_t restored_next_id = tabs.NextStableId();
-    if (tabs.MovePaneToNewTab(DockPaneType::Locator)
+    if (tabs.MovePaneToNewTab(restored_pane)
             != (fits_selected ? ToolTabResult::Ok : ToolTabResult::NoOp)) {
         return false;
     }
-    const ToolTabId locator_tab = tabs.TabForPane(DockPaneType::Locator);
-    const ToolTab* locator = tabs.Find(locator_tab);
-    if (!locator_tab || locator == nullptr || locator->pane_count != 1U
-        || locator->panes[0] != DockPaneType::Locator
-        || tabs.Selected() != locator_tab
+    const ToolTabId restored_singleton_tab = tabs.TabForPane(restored_pane);
+    const ToolTab* restored_singleton = tabs.Find(restored_singleton_tab);
+    if (!restored_singleton_tab || restored_singleton == nullptr
+        || restored_singleton->pane_count != 1U
+        || restored_singleton->panes[0] != restored_pane
+        || tabs.Selected() != restored_singleton_tab
         || tabs.Tabs().size() != original_count + 1U
         || tabs.TabForPane(DockPaneType::Color) != color_tab
         || tabs.TabForPane(DockPaneType::Layer) != layer_tab
-        || (locator_tab != restored_tab) != fits_selected
+        || (restored_singleton_tab != restored_tab) != fits_selected
         || tabs.NextStableId() != restored_next_id + (fits_selected ? 1U : 0U)) {
         return false;
     }
     const RightToolTabsModel before_noop = tabs;
-    if (tabs.MovePaneToNewTab(DockPaneType::Locator) != ToolTabResult::NoOp
+    if (tabs.MovePaneToNewTab(restored_pane) != ToolTabResult::NoOp
         || tabs.NextStableId() != before_noop.NextStableId()
         || tabs.Selected() != before_noop.Selected()
         || tabs.Tabs().size() != before_noop.Tabs().size()) {
@@ -448,15 +465,22 @@ int main() {
         return 44;
     }
 
-    for (const unsigned int dpi : {96U, 120U, 144U, 192U}) {
-        for (const bool split_initial_tab : {false, true}) {
-            for (const bool fits_selected : {false, true}) {
-                if (!LocatorTabPreparation(dpi, split_initial_tab, fits_selected)) {
-                    std::fprintf(stderr,
-                        "locator tab preparation failed: dpi=%u split=%d fits=%d\n",
-                        dpi, static_cast<int>(split_initial_tab),
-                        static_cast<int>(fits_selected));
-                    return 147;
+    for (const DockPaneType restored_pane : {
+             DockPaneType::Locator, DockPaneType::Reference}) {
+        for (const unsigned int dpi : {96U, 120U, 144U, 192U}) {
+            for (const bool split_initial_tab : {false, true}) {
+                for (const bool fits_selected : {false, true}) {
+                    if (!RestoredPaneTabPreparation(
+                            restored_pane, dpi, split_initial_tab, fits_selected)) {
+                        std::fprintf(stderr,
+                            "restored pane tab preparation failed: pane=%u "
+                            "dpi=%u split=%d fits=%d\n",
+                            static_cast<unsigned int>(restored_pane),
+                            dpi,
+                            static_cast<int>(split_initial_tab),
+                            static_cast<int>(fits_selected));
+                        return 147;
+                    }
                 }
             }
         }
