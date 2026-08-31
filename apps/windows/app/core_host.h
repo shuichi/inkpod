@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -18,6 +19,17 @@ class CanvasSnapshotSink;
 }
 
 namespace inkpod::app {
+
+enum class ScrollRangeResetScope : std::uint8_t {
+    None,
+    TargetView,
+    SessionViews,
+};
+
+struct ScrollRangeResetRequest final {
+    ScrollRangeResetScope scope{ScrollRangeResetScope::None};
+    std::uint64_t core_view_id{};
+};
 
 inline constexpr UINT kCoreStateChanged = WM_APP + 0x160U;
 inline constexpr UINT kCoreAsyncFailed = WM_APP + 0x161U;
@@ -91,7 +103,7 @@ public:
     // PENDING retains the operation. Installing fences ordinary document work
     // until this same operation finalizes, including during shutdown.
     using FileIoOperation =
-        std::function<InkpodStatus(InkpodCore*, bool, bool&)>;
+        std::function<InkpodStatus(InkpodCore*, bool, bool&, bool&)>;
     // First status is the durable apply result. The second includes subsequent
     // published-state/snapshot failure, so callers can retry presentation without
     // repeating a successful save/open/install. Both run on the owner thread.
@@ -142,13 +154,15 @@ public:
     InkpodStatus Invoke(
         CoreOperation operation,
         bool publish_snapshot,
-        bool refresh_document_info) noexcept;
+        bool refresh_document_info,
+        ScrollRangeResetRequest scroll_range_reset = {}) noexcept;
     InkpodStatus Invoke(
         DocumentSessionId session,
         Generation generation,
         CoreOperation operation,
         bool publish_snapshot,
-        bool refresh_document_info) noexcept;
+        bool refresh_document_info,
+        ScrollRangeResetRequest scroll_range_reset = {}) noexcept;
     // Dispatch a session-independent operation (for example a workspace Cut)
     // on the Core owner thread, including while no document session exists.
     InkpodStatus InvokeOwnerThread(std::function<InkpodStatus()> operation) noexcept;
@@ -194,7 +208,8 @@ public:
         bool publish_snapshot,
         bool refresh_document_info,
         bool defer_during_active_stroke,
-        std::function<void(InkpodStatus)> completion = {}) noexcept;
+        std::function<void(InkpodStatus)> completion = {},
+        ScrollRangeResetRequest scroll_range_reset = {}) noexcept;
     bool EnqueueFileIo(
         const CommandContext& context,
         bool requires_core,

@@ -238,7 +238,7 @@ endforeach()
 file(READ "${INKPOD_SOURCE_DIR}/apps/windows/ui/main_window_runtime.cpp"
     MAIN_WINDOW_RUNTIME_TEXT)
 foreach(SUBPALETTE_RUNTIME_MARKER IN ITEMS
-        "RebindSubpaletteImageRoute" "SelectColorDockPaneDrawingColor"
+        "subpalette_presentation_epoch" "SelectColorDockPaneDrawingColor"
         "INKPOD_IO_REFERENCE_FILES" "INKPOD_IO_REFERENCE_FOLDER"
         "QueueFileIoWork"
         "inkpod_subpalette_select_cached_raster")

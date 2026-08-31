@@ -614,7 +614,7 @@ void PerformSubpalettePaneAction(
     void* context,
     inkpod::windows::ui::panes::SubpalettePaneAction action) noexcept;
 void SampleSubpalettePane(void* context, double x, double y) noexcept;
-void ApplySubpalettePaneView(
+bool ApplySubpalettePaneView(
     void* context,
     const inkpod::renderer::CanvasViewGesture& gesture) noexcept;
 InkpodStatus ImportSequencePaths(
@@ -2701,10 +2701,62 @@ void ResetSubpaletteTarget(
     workspace.subpalette_sample_available = false;
     workspace.subpalette_error.clear();
     workspace.subpalette_snapshot_revision = 0U;
+    workspace.subpalette_presentation_epoch = 0U;
+    workspace.subpalette_scroll_reset_source = {};
+    workspace.subpalette_scroll_reset_generation = {};
+    workspace.subpalette_scroll_reset_token = 0U;
+}
+
+std::uint64_t NextSubpaletteScrollResetToken(
+    WorkspaceWindow& workspace) noexcept {
+    ++workspace.next_subpalette_scroll_reset_token;
+    if (workspace.next_subpalette_scroll_reset_token == 0U) {
+        ++workspace.next_subpalette_scroll_reset_token;
+    }
+    return workspace.next_subpalette_scroll_reset_token;
+}
+
+std::uint64_t ArmSubpaletteScrollRangeReset(
+    WorkspaceWindow& workspace) noexcept {
+    const std::uint64_t token = NextSubpaletteScrollResetToken(workspace);
+    workspace.subpalette_scroll_reset_source = workspace.subpalette_source_id;
+    workspace.subpalette_scroll_reset_generation = workspace.generation;
+    workspace.subpalette_scroll_reset_token = token;
+    return token;
+}
+
+std::uint64_t PendingSubpaletteScrollRangeReset(
+    const WorkspaceWindow& workspace) noexcept {
+    return workspace.subpalette_scroll_reset_token != 0U
+            && workspace.subpalette_scroll_reset_source
+                == workspace.subpalette_source_id
+            && workspace.subpalette_scroll_reset_generation
+                == workspace.generation
+        ? workspace.subpalette_scroll_reset_token
+        : 0U;
+}
+
+void ConsumeSubpaletteScrollRangeReset(
+    WorkspaceWindow& workspace, std::uint64_t token) noexcept {
+    if (token != 0U && workspace.subpalette_scroll_reset_token == token
+        && PendingSubpaletteScrollRangeReset(workspace) == token) {
+        workspace.subpalette_scroll_reset_source = {};
+        workspace.subpalette_scroll_reset_generation = {};
+        workspace.subpalette_scroll_reset_token = 0U;
+    }
 }
 
 bool PublishSubpaletteSnapshot(
-    ApplicationHost& state, WorkspaceWindow& workspace) noexcept {
+    ApplicationHost& state,
+    WorkspaceWindow& workspace,
+    renderer::CanvasScrollRangeHint scroll_range_hint =
+        renderer::CanvasScrollRangeHint::Preserve) noexcept {
+    if (scroll_range_hint == renderer::CanvasScrollRangeHint::ResetToBase) {
+        // The view/image mutation has already succeeded. Keep its reset cause
+        // even while the Canvas sink is temporarily absent or cannot accept a
+        // snapshot; a later ordinary publication must still carry it.
+        (void)ArmSubpaletteScrollRangeReset(workspace);
+    }
     auto* sink = renderer::GetCanvasSnapshotSink(
         workspace.subpalette_dialog.canvas);
     if (state.engine == nullptr || sink == nullptr
@@ -2755,28 +2807,20 @@ bool PublishSubpaletteSnapshot(
     if (status != INKPOD_STATUS_OK || snapshot == nullptr) {
         return false;
     }
+    const std::uint64_t scroll_cause_token =
+        PendingSubpaletteScrollRangeReset(workspace);
     ++workspace.subpalette_snapshot_revision;
-    return sink->Submit(renderer::SnapshotEnvelope{
-        sink->Route(), snapshot_view.revision, transform.view_revision, snapshot, 0U, 0U});
-}
-
-bool RebindSubpaletteImageRoute(WorkspaceWindow& workspace) noexcept {
-    if (workspace.subpalette_dialog.canvas == nullptr
-        || !workspace.subpalette_source_id
-        || workspace.subpalette_source_id.Value()
-            == std::numeric_limits<std::uint64_t>::max()) {
-        return false;
+    const bool submitted = sink->Submit(renderer::SnapshotEnvelope{
+        sink->Route(), snapshot_view.revision, transform.view_revision, snapshot,
+        0U, 0U, 0U, workspace.subpalette_presentation_epoch, transform,
+        scroll_cause_token != 0U
+            ? renderer::CanvasScrollRangeHint::ResetToBase
+            : renderer::CanvasScrollRangeHint::Preserve,
+        scroll_cause_token});
+    if (submitted) {
+        ConsumeSubpaletteScrollRangeReset(workspace, scroll_cause_token);
     }
-    const inkpod::app::AuxiliarySourceId next_source{
-        workspace.subpalette_source_id.Value() + 1U};
-    if (!renderer::BindAuxiliaryCanvasSnapshotSink(
-            workspace.subpalette_dialog.canvas,
-            next_source,
-            workspace.generation)) {
-        return false;
-    }
-    workspace.subpalette_source_id = next_source;
-    return true;
+    return submitted;
 }
 
 bool RefreshSubpalettePane(ApplicationHost& state) noexcept {
@@ -2921,11 +2965,8 @@ bool InstallSubpaletteSources(
                 if (prepared != INKPOD_STATUS_OK || snapshot == nullptr) {
                     return fail(prepared == INKPOD_STATUS_OK ? INKPOD_STATUS_INVALID_STATE : prepared);
                 }
-                const auto previous_source = owner->subpalette_source_id;
-                if (!RebindSubpaletteImageRoute(*owner)) {
-                    (void)inkpod_snapshot_release(&snapshot);
-                    return fail(INKPOD_STATUS_INVALID_STATE);
-                }
+                const std::uint64_t staged_scroll_cause_token =
+                    NextSubpaletteScrollResetToken(*owner);
                 auto* sink = renderer::GetCanvasSnapshotSink(owner->subpalette_dialog.canvas);
                 // Hiding a parent need not send WM_SHOWWINDOW to its Canvas.
                 // Publish that hidden state before deciding whether to submit;
@@ -2953,7 +2994,10 @@ bool InstallSubpaletteSources(
                 bool submitted{};
                 if (sink != nullptr && !deferred) {
                     submitted = sink->Submit(renderer::SnapshotEnvelope{sink->Route(),
-                        snapshot_view.revision, transform.view_revision, snapshot, 0U, 0U});
+                        snapshot_view.revision, transform.view_revision, snapshot,
+                        0U, 0U, 0U, load_generation, transform,
+                        renderer::CanvasScrollRangeHint::ResetToBase,
+                        staged_scroll_cause_token});
                     snapshot = nullptr; // Submit consumes ownership even on rejection.
                     // Occlusion can change on the renderer thread during Submit.
                     if (!submitted) {
@@ -2962,10 +3006,16 @@ bool InstallSubpaletteSources(
                 }
                 (void)inkpod_snapshot_release(&snapshot);
                 if (!submitted && !deferred) {
-                    owner->subpalette_source_id = previous_source;
-                    (void)renderer::BindAuxiliaryCanvasSnapshotSink(owner->subpalette_dialog.canvas,
-                        previous_source, owner->generation);
-                    (void)PublishSubpaletteSnapshot(state, *owner);
+                    // The stable auxiliary route still owns its old accepted
+                    // snapshot; rejected candidate work changes neither the
+                    // Canvas nor the authoritative catalog.
+                    return fail(INKPOD_STATUS_INVALID_STATE);
+                }
+                if (deferred
+                    && !renderer::BindAuxiliaryCanvasSnapshotSink(
+                        owner->subpalette_dialog.canvas,
+                        owner->subpalette_source_id,
+                        owner->generation)) {
                     return fail(INKPOD_STATUS_INVALID_STATE);
                 }
                 InkpodSubpalette* previous = owner->subpalette;
@@ -2976,6 +3026,13 @@ bool InstallSubpaletteSources(
                 owner->subpalette_navigation_index = result.subpalette.active_index;
                 owner->subpalette_sample_available = false;
                 owner->subpalette_error.clear();
+                owner->subpalette_presentation_epoch = load_generation;
+                owner->subpalette_scroll_reset_source = {};
+                owner->subpalette_scroll_reset_generation = {};
+                owner->subpalette_scroll_reset_token = 0U;
+                if (deferred) {
+                    (void)ArmSubpaletteScrollRangeReset(*owner);
+                }
                 ++owner->subpalette_snapshot_revision;
                 (void)state.engine->ReleaseSubpalette(&previous);
                 PresentSubpalettePane(*owner);
@@ -3014,13 +3071,13 @@ void DispatchSubpalettePaneCommand(void* context, UINT command) noexcept {
     }
 }
 
-void ApplySubpaletteViewInput(
+bool ApplySubpaletteViewInput(
     ApplicationHost& state, const InkpodViewInput& input) noexcept {
     auto& workspace = state.Workspace();
     if (state.engine == nullptr || workspace.subpalette == nullptr
         || (workspace.subpalette_info.flags
             & INKPOD_SUBPALETTE_INFO_IMAGE_LOADED) == 0U) {
-        return;
+        return false;
     }
     const InkpodStatus status = state.engine->InvokeSubpalette(
         workspace.subpalette,
@@ -3028,8 +3085,13 @@ void ApplySubpaletteViewInput(
             return inkpod_subpalette_view_apply(subpalette, &input);
         });
     if (status == INKPOD_STATUS_OK) {
-        (void)PublishSubpaletteSnapshot(state, workspace);
+        const auto scroll_range_hint = input.kind == INKPOD_VIEW_FIT
+                || input.kind == INKPOD_VIEW_ONE_TO_ONE
+            ? renderer::CanvasScrollRangeHint::ResetToBase
+            : renderer::CanvasScrollRangeHint::Preserve;
+        return PublishSubpaletteSnapshot(state, workspace, scroll_range_hint);
     }
+    return false;
 }
 
 void RegisterSubpaletteSample(ApplicationHost& state) noexcept {
@@ -3129,7 +3191,10 @@ void PerformSubpalettePaneAction(
             workspace.subpalette_navigation_index = info.active_index;
             workspace.subpalette_sample_available = false;
             workspace.subpalette_error.clear();
-            if (!PublishSubpaletteSnapshot(*state, workspace)) {
+            if (!PublishSubpaletteSnapshot(
+                    *state,
+                    workspace,
+                    renderer::CanvasScrollRangeHint::ResetToBase)) {
                 workspace.subpalette_error =
                     UiText(UiStringId::SubpaletteReadFailed);
             }
@@ -3156,7 +3221,7 @@ void PerformSubpalettePaneAction(
                     std::max<LONG>(1, bounds.bottom - bounds.top)),
                 0.0,
                 0.0};
-            ApplySubpaletteViewInput(*state, input);
+            (void)ApplySubpaletteViewInput(*state, input);
             return;
         }
         case inkpod::windows::ui::panes::SubpalettePaneAction::RegisterSample:
@@ -3193,12 +3258,12 @@ void SampleSubpalettePane(void* context, double x, double y) noexcept {
     }
 }
 
-void ApplySubpalettePaneView(
+bool ApplySubpalettePaneView(
     void* context,
     const inkpod::renderer::CanvasViewGesture& gesture) noexcept {
     auto* state = ActivateWorkspaceContext(context);
     if (state == nullptr) {
-        return;
+        return false;
     }
     const InkpodViewInput input{
         sizeof(InkpodViewInput),
@@ -3208,7 +3273,7 @@ void ApplySubpalettePaneView(
         gesture.value2,
         gesture.value3,
         0.0};
-    ApplySubpaletteViewInput(*state, input);
+    return ApplySubpaletteViewInput(*state, input);
 }
 
 void QueueLocatorSample(ApplicationHost& state) noexcept {
@@ -3259,7 +3324,7 @@ void QueueLocatorSample(ApplicationHost& state) noexcept {
     result->neighborhood_output.radius = 4U;
     result->neighborhood_output.pixels_rgba8 = result->neighborhood.data();
     result->neighborhood_output.pixel_capacity = result->neighborhood.size();
-    const std::uint64_t view_id = view->presentation.active_view_id;
+    const std::uint64_t view_id = view->core_view_id;
     const double device_x = static_cast<double>(view->presentation.pointer_device_x);
     const double device_y = static_cast<double>(view->presentation.pointer_device_y);
     const HWND window = state.Workspace().windows.window;
@@ -7609,7 +7674,7 @@ InkpodStatus ApplyView(
     }
     const InkpodViewInput input{
         sizeof(InkpodViewInput), kind, 0U, value1, value2, value3, value4};
-    const std::uint64_t view_id = view->presentation.active_view_id;
+    const std::uint64_t view_id = view->core_view_id;
     ViewController controller(*state.engine);
     return controller.Apply(view_id, input);
 }
@@ -7637,6 +7702,8 @@ InkpodStatus ApplyView(
     }
     const InkpodViewInput input{
         sizeof(InkpodViewInput), kind, 0U, value1, value2, value3, value4};
+    const bool reset_scroll_range = kind == INKPOD_VIEW_FIT
+        || kind == INKPOD_VIEW_ONE_TO_ONE;
     return state.engine->Invoke(
         document->id,
         document->generation,
@@ -7652,7 +7719,12 @@ InkpodStatus ApplyView(
             return status;
         },
         true,
-        true);
+        true,
+        reset_scroll_range
+            ? inkpod::app::ScrollRangeResetRequest{
+                  inkpod::app::ScrollRangeResetScope::TargetView,
+                  view->core_view_id}
+            : inkpod::app::ScrollRangeResetRequest{});
 }
 
 bool QuerySnapshotTransform(
@@ -7667,7 +7739,7 @@ bool QuerySnapshotTransform(
     return state.engine->GetSnapshotTransform(
         document->id,
         document->generation,
-        state.ActiveView().presentation.active_view_id,
+        state.ActiveView().core_view_id,
         transform);
 }
 
@@ -12452,7 +12524,9 @@ InkpodStatus SwitchSequenceTarget(
                 }
                 (void)host->PostCompletionNotification(
                     kSequenceSwitchCompleted, result->token.value, result->token.generation);
-            });
+            },
+            inkpod::app::ScrollRangeResetRequest{
+                inkpod::app::ScrollRangeResetScope::SessionViews, 0U});
         } catch (const std::bad_alloc&) {
             queued = false;
         }

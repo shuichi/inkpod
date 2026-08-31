@@ -489,6 +489,19 @@ verified, and leaves any required invalidation to the final bounded redraw. A
 fully covering owner-draw surface may omit
 erase, but only when its paint contract covers every invalidated pixel.
 
+Canvas non-client scrollbars participate in the same final-frame rule. Main and
+Subpalette Canvas layout computes the final client viewport with both permanent
+native bars present, derives `SCROLLINFO` only from the last accepted view
+transform, and keeps zero-movement bars through `SIF_DISABLENOSCROLL`. Both-axis
+`SCROLLINFO` candidates are calculated before either bar is changed, installed
+with `SetScrollInfo(..., FALSE)`, and read back exactly; a partial or normalized
+mismatch restores the previous accepted pair and leaves the candidate model
+uncommitted. Layout does not toggle `WS_HSCROLL`/`WS_VSCROLL`, recreate the
+Canvas, or publish an intermediate candidate frame. Its bounded completion
+repaint includes `RDW_FRAME` together with the Canvas client region. Ordinary
+resize may extend a view's sticky range but does not shrink it, reset pan/focus,
+or borrow another view's range.
+
 The dirty region is selected by ownership and overlap:
 
 - for one boundary or a small independent control set, repaint the union of the
@@ -562,6 +575,20 @@ list count/selection/top index, valid scroll state, parent/child update regions,
 sentinel erasure. Layout itself does not redirect focus; the explicit show-pane
 command must select its destination and move focus to the newly shown pane's
 natural first target after a successful transaction, as required by SPEC 88.
+
+Focused coverage for this slice includes the checked pure range model, permanent
+styles and exact accepted `SCROLLINFO` projection on two document-bound Canvas `HWND`s,
+one native line gesture without optimistic `nPos` publication, and targeted,
+session-wide, rejected, retained and one-shot scroll-reset envelope cases in
+`CoreHost`. The remaining product matrix covers disabled no-movement
+presentation, page/thumb input and endpoint freeze, two views of one document,
+both-axis resize/final-frame regions, complete tab/source switching, unmodified
+Subpalette Arrow/Page navigation, Shift-modified pan, exact sampling after
+scroll, hidden/occluded and renderer-rejection Subpalette publication,
+localized MSAA/UIA range/value exposure, 96/120/144/192-DPI layout, high
+contrast, and screen-reader keyboard reachability. The performance gate must
+also continue to report zero raster payload access on cache-hit scrollbar
+movement.
 
 `ApplicationHost` is the process-lifetime composition root. It owns global
 shortcut and clipboard state, the frontend routing/token registries, job state,
@@ -860,6 +887,29 @@ the window message carries only a value token and generation. No C++ or
 Rust-owned object pointer is placed in `WPARAM` or `LPARAM`. Canvas stroke and
 view-gesture payloads follow the same rule: `CanvasHost` owns them in bounded
 queues until the workspace takes the matching token plus surface generation.
+`WM_HSCROLL`, `WM_VSCROLL`, and the native Shift+Arrow/Page routes use the same
+bounded, pointer-free Canvas gesture record. `CanvasHost` derives a relative
+`PAN_BY` delta from the current accepted absolute `q`; the parent resolves the
+exact Main or auxiliary target and invokes the existing view adapter. That
+adapter may synchronously execute the Core-host operation and snapshot build on
+its established owner lane, but it never waits for Present. The scrollbar does
+not move optimistically: only an envelope accepted by the renderer queue returns
+its transform through the latest-wins scroll-projection mailbox to the Canvas
+owner thread. A relative command remains blocked until that accepted projection
+arrives, so a rejection cannot double-apply the prior delta. Line scrolling uses
+one 32-DIP step; page scrolling uses the accepted viewport extent minus one line
+of overlap, with a one-device-pixel minimum. Close/rebind, invalid operations,
+cancellation, and shutdown retain the prior presented snapshot and scrollbar
+projection. Renderer-queue rejection can leave an already accepted Core view
+awaiting viewport-refresh republication, and relative scrollbar input remains
+blocked until that projection is accepted. Messages and mailbox records carry no
+Rust-owned pointer. A posted projection wake that encounters the Windows message
+quota arms one fixed-ID window timer; if a newer mailbox token arrives during a
+reentrant non-client redraw, the completed outer apply re-arms that wake after its
+guard is released. Projection-apply retries are bounded, and the final viewport
+refresh uses one same-UI-thread parent send only when its ordinary post fails, so
+queue saturation neither loses the latest accepted transform nor creates an
+unbounded retry loop.
 Document-bound and preview queries use typed Canvas APIs rather than output
 pointers in custom messages. Each workspace exposes one or two editor
 groups and one Canvas per visible group. Focus or explicit group activation
@@ -1084,19 +1134,33 @@ reserves the shared decoded budget before allocating; an exhausted budget
 returns no partial snapshot. Leaving the viewport releases only the cache's
 ownership, not charges retained by an immutable snapshot or cloned render tile.
 
+The Subpalette Canvas, like each visible editor-group Canvas, permanently owns
+native non-client horizontal and vertical scrollbars. They remain present and
+use the standard disabled state when their accepted range has no movement. The
+Subpalette projection is keyed by its workspace-local auxiliary view and never
+borrows the active document view's range or position. Unmodified Arrow and Page
+keys continue to navigate sources; Shift+Arrow produces native line scrolling
+on the matching axis and Shift+PageUp/PageDown produces vertical page scrolling.
+These standard-control keyboard and accessibility routes do not create document
+commands or persisted shortcut bindings.
+
 All replacement sources and the first fitted display snapshot validate before a
 single catalog publication; a failed candidate leaves the old selection and
-resident images available. Cached navigation also prepares the candidate's
-first display snapshot before publishing its selection and fitted view; a
-budget failure retains the previous selection, view, and display. The frontend
-rebinds the auxiliary snapshot namespace when swapping catalog owners, so
-catalog-local tile IDs cannot reuse a previous GPU image. Released catalogs do
-not invalidate already-owned immutable snapshots. The Canvas consumes pointer
-strokes and converts only view gestures/sample coordinates, never edit input.
-A target rebind or shutdown unbinds the snapshot sink and releases the catalog
-on its owner before unregistering the Canvas. Legacy memory/sequence sampling
-APIs remain available without being the production reference-file loader.
-Queue rejection retains a single snapshot-release owner.
+resident images available. Catalog replacement keeps the stable workspace-local
+auxiliary route and advances a `presentation_epoch`; the renderer detects that
+catalog incarnation change and clears its ordinary tile cache before repeated
+catalog-local tile IDs can be reused. A visible renderer
+queue rejection retains the old catalog, view, snapshot and epoch. When the
+Canvas is hidden, a checked same-route bind clears any old retained snapshot
+before the new catalog is committed, and the reset cause remains armed for its
+later accepted publication. Released catalogs do not invalidate already-owned
+immutable snapshots. Cached active-image navigation uses the same stable route,
+but strict rollback after a renderer-queue rejection still requires a future
+prepare/commit catalog ABI; `SUBPALETTE-001` therefore remains Experimental. The
+Canvas consumes pointer strokes and converts only view gestures/sample
+coordinates, never edit input. Shutdown unbinds the snapshot sink and releases
+the catalog on its owner before unregistering the Canvas. Queue rejection retains
+a single snapshot-release owner.
 
 Color and Batch panes use the same target registry. Color registration, clear,
 load, save, and main-line changes capture the pane's exact session/generation;
@@ -1438,6 +1502,52 @@ pixel units and a 96-DPI target, so Per-Monitor DPI scaling applies to native UI
 not a second Canvas transform. DPI notification alone does not move or resize the
 document. Fit uses current client-device dimensions; manual pan/zoom survives
 viewport resize.
+
+Every visible editor-group Canvas and the Subpalette Canvas has permanent
+`WS_HSCROLL | WS_VSCROLL` non-client bars. Their system metrics reduce the Canvas
+client rect before that rect becomes the viewport; they are not overlay pixels
+and the renderer never draws or hit-tests them. A zero-movement range is
+published with the standard disabled-scrollbar state rather than by changing the
+window style or hiding a bar. Consequently Fit and 1:1 use one stable final
+client extent and do not enter a show/hide feedback loop.
+
+Scrollbar state is a non-authoritative, view-only projection of an accepted
+`ViewTransform`. For either device axis, let `q = -pan`, let `[b0,b1)` be the
+accepted zoom/flip image bounds before pan, and let `V` be the final client
+viewport extent. The base scroll content range is
+`[b0 - V/2, b1 + V/2)`, the page is `V`, and the base legal position range is
+`[b0 - V/2, b1 - V/2]`. The frontend performs this calculation in checked wide
+arithmetic, then requires the legal position and inclusive page-adjusted maximum
+to fit the signed 32-bit `SCROLLINFO` domain; an unrepresentable candidate is
+rejected atomically. The Rust view keeps the exact transform, so repeated
+projection never round-trips the accepted pan through a quantized thumb
+position. Its fractional `q` residual is retained across integer line/page/thumb
+movement unless an exact endpoint is requested. Thumb tracking reads
+`SIF_TRACKPOS` rather than the 16-bit message payload.
+
+Each stable document view and each workspace-local Subpalette view owns a
+sticky dynamic range initialized from that base. When accepted `q` crosses a
+base or retained endpoint, the crossed side expands past `q` by one current
+viewport extent as guard space. Thumb tracking freezes both gesture-start
+endpoints so its own projection cannot move the thumb beneath the pointer; other
+pan, scrollbar, zoom and resize processing may extend but does not shrink the
+range while that interaction is active. At scroll/pan completion, an axis whose
+accepted `q` has returned inside its base range may discard its sticky extension;
+an axis still outside retains it. If `SB_ENDSCROLL` or pan completion arrives
+before the last renderer-accepted transform reaches the owner-thread mailbox, an
+axis-local one-shot shrink latch folds that decision into the same checked
+two-axis native commit as the next accepted projection. The latch is consumed on
+that successful commit whether the final axis is inside or outside base, retained
+on apply failure, and cleared by a new interaction or view binding. A successful
+Fit, 1:1, explicit view reset, Canvas bind/rebind,
+document/source replacement, or Subpalette active-image change discards only
+that view's sticky range and initializes it from the newly accepted transform.
+Invalid, non-finite, overflowing, stale or cancelled candidates leave the prior
+projection intact. Renderer-queue rejection leaves the displayed `SCROLLINFO`
+and snapshot intact but does not roll back a Core view input already accepted on
+its owner lane; the Canvas blocks another relative scroll until a later accepted
+snapshot reconciles the projection. Other tabs, editor groups, workspaces and
+auxiliary views are never used as a fallback range.
 
 Core keeps document points/sizes/rectangles, device points/sizes/offsets, and
 zoom as distinct private types. Public Rust commands and state accessors retain

@@ -488,8 +488,14 @@ bool FileIoController::Queue(CoreHost& engine, FileIoRequest request,
             && pending->request.kind != INKPOD_IO_EXPORT_RASTER
             && pending->request.kind != INKPOD_IO_AUTOSAVE;
         CoreHost::FileIoOperation operation =
-            [pending, &engine](InkpodCore* core, bool cancelled, bool& installing) {
+            [pending, &engine](
+                InkpodCore* core,
+                bool cancelled,
+                bool& installing,
+                bool& document_replaced) {
                 const InkpodStatus status = pending->Step(core, cancelled, installing);
+                document_replaced = pending->result.document_applied
+                    && ReplacesDocument(pending->request.kind);
                 if (pending->result.document_applied
                     && (pending->request.presentation_epoch != 0U
                         || ReplacesDocument(pending->request.kind))

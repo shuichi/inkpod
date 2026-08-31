@@ -54,6 +54,11 @@ enum class SnapshotOwnerKind : std::uint8_t {
     Auxiliary,
 };
 
+enum class CanvasScrollRangeHint : std::uint8_t {
+    Preserve,
+    ResetToBase,
+};
+
 struct SnapshotRoute {
     app::DocumentSessionId document_session;
     app::DocumentViewId document_view;
@@ -97,6 +102,14 @@ struct SnapshotEnvelope {
     // distinguishes replacements with equal/lower document revisions without
     // becoming part of source identity or any CPU/GPU cache key.
     std::uint64_t presentation_epoch{};
+    // Captured from this exact immutable snapshot. CanvasHost projects these
+    // scalar values into native scrollbars only after RendererHost accepts the
+    // envelope; they are not renderer cache keys or persistent document state.
+    InkpodSnapshotTransform transform{};
+    CanvasScrollRangeHint scroll_range_hint{CanvasScrollRangeHint::Preserve};
+    // Nonpersistent issue-order identity for a pending ResetToBase cause. Zero
+    // accompanies Preserve. CanvasHost uses it only to coalesce UI mail safely.
+    std::uint64_t scroll_cause_token{};
 };
 
 // Process-wide renderer resource telemetry. Byte counts describe payloads and

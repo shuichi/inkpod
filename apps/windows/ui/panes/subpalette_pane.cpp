@@ -88,8 +88,55 @@ void Perform(SubpalettePaneDialogState& state, SubpalettePaneAction action) noex
     }
 }
 
+bool PerformScrollKey(
+    SubpalettePaneDialogState& state, WPARAM virtual_key) noexcept {
+    if ((GetKeyState(VK_SHIFT) & 0x8000) == 0
+        || (GetKeyState(VK_CONTROL) & 0x8000) != 0
+        || (GetKeyState(VK_MENU) & 0x8000) != 0
+        || state.canvas == nullptr) {
+        return false;
+    }
+    UINT message{};
+    UINT request{};
+    switch (virtual_key) {
+        case VK_LEFT:
+            message = WM_HSCROLL;
+            request = SB_LINELEFT;
+            break;
+        case VK_RIGHT:
+            message = WM_HSCROLL;
+            request = SB_LINERIGHT;
+            break;
+        case VK_UP:
+            message = WM_VSCROLL;
+            request = SB_LINEUP;
+            break;
+        case VK_DOWN:
+            message = WM_VSCROLL;
+            request = SB_LINEDOWN;
+            break;
+        case VK_PRIOR:
+            message = WM_VSCROLL;
+            request = SB_PAGEUP;
+            break;
+        case VK_NEXT:
+            message = WM_VSCROLL;
+            request = SB_PAGEDOWN;
+            break;
+        default:
+            return false;
+    }
+    (void)SendMessageW(state.canvas, message, MAKEWPARAM(request, 0U), 0);
+    return true;
+}
+
 bool PerformNavigationKey(
     SubpalettePaneDialogState& state, WPARAM virtual_key) noexcept {
+    if ((GetKeyState(VK_SHIFT) & 0x8000) != 0
+        || (GetKeyState(VK_CONTROL) & 0x8000) != 0
+        || (GetKeyState(VK_MENU) & 0x8000) != 0) {
+        return false;
+    }
     if (virtual_key == VK_LEFT || virtual_key == VK_UP
         || virtual_key == VK_PRIOR) {
         Perform(state, SubpalettePaneAction::Previous);
@@ -128,7 +175,9 @@ LRESULT CALLBACK SubpaletteKeySubclassProcedure(
         case WM_GETDLGCODE:
             return NavigationDialogCode(window, message, wparam, lparam);
         case WM_KEYDOWN:
-            if (state != nullptr && PerformNavigationKey(*state, wparam)) {
+            if (state != nullptr
+                && (PerformScrollKey(*state, wparam)
+                    || PerformNavigationKey(*state, wparam))) {
                 return 0;
             }
             break;
@@ -243,7 +292,8 @@ LRESULT CALLBACK SubpaletteCanvasSubclassProcedure(
             }
             break;
         case WM_KEYDOWN:
-            if (PerformNavigationKey(*state, wparam)) {
+            if (PerformScrollKey(*state, wparam)
+                || PerformNavigationKey(*state, wparam)) {
                 return 0;
             }
             break;
@@ -365,8 +415,7 @@ INT_PTR CALLBACK SubpalettePaneProcedure(
                         static_cast<std::uint64_t>(wparam),
                         app::Generation{static_cast<std::uint64_t>(lparam)},
                         gesture)) {
-                    state->apply_view(state->context, gesture);
-                    handled = true;
+                    handled = state->apply_view(state->context, gesture);
                 }
             }
             SetWindowLongPtrW(dialog, DWLP_MSGRESULT, handled ? 1 : 0);
@@ -379,7 +428,7 @@ INT_PTR CALLBACK SubpalettePaneProcedure(
                     static_cast<double>(LOWORD(lparam)),
                     static_cast<double>(HIWORD(lparam)),
                     0.0};
-                state->apply_view(state->context, gesture);
+                (void)state->apply_view(state->context, gesture);
             }
             return TRUE;
         case renderer::kCanvasActivated:

@@ -13,6 +13,8 @@ ViewController::ViewController(app::CoreHost& engine) noexcept : engine_(engine)
 
 InkpodStatus ViewController::Apply(
     std::uint64_t view_id, const InkpodViewInput& input) noexcept {
+    const bool reset_scroll_range = input.kind == INKPOD_VIEW_FIT
+        || input.kind == INKPOD_VIEW_ONE_TO_ONE;
     return engine_.Invoke(
         [view_id, input](InkpodCore* core) {
             InkpodDocumentInfo info{};
@@ -26,7 +28,11 @@ InkpodStatus ViewController::Apply(
             return status;
         },
         true,
-        true);
+        true,
+        reset_scroll_range
+            ? app::ScrollRangeResetRequest{
+                  app::ScrollRangeResetScope::TargetView, view_id}
+            : app::ScrollRangeResetRequest{});
 }
 
 InkpodStatus ViewController::AddGuide(

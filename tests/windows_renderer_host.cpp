@@ -5,6 +5,7 @@
 #include <atomic>
 #include <chrono>
 #include <climits>
+#include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <cstdint>
@@ -16,6 +17,7 @@
 #include "app/identity.h"
 #include "inkpod/core_ffi.h"
 #include "renderer/canvas.h"
+#include "renderer/canvas_scroll_model.h"
 #include "renderer/renderer_host.h"
 
 namespace {
@@ -90,6 +92,28 @@ public:
 
     bool CancelPreview() noexcept {
         return inkpod_core_stroke_cancel(core_) == INKPOD_STATUS_OK;
+    }
+
+    bool ApplyView(
+        InkpodViewCommandKind kind,
+        double value1,
+        double value2 = 0.0,
+        double value3 = 0.0) noexcept {
+        const InkpodViewInput input{
+            sizeof(InkpodViewInput),
+            kind,
+            INKPOD_FEATURE_NONE,
+            value1,
+            value2,
+            value3,
+            0.0};
+        InkpodDocumentInfo info{};
+        info.struct_size = sizeof(info);
+        if (inkpod_core_apply_view(core_, &input, &info) != INKPOD_STATUS_OK) {
+            return false;
+        }
+        document_ = info;
+        return true;
     }
 
     bool ConfigureSequence(std::uint8_t first_red = 32U, std::uint32_t width = 64U) {
@@ -171,7 +195,8 @@ public:
         }
         envelope = inkpod::renderer::SnapshotEnvelope{
             route, view.revision, transform.view_revision, snapshot, 0U,
-            committed.document_revision, 0U, presentation_epoch_};
+            committed.document_revision, 0U, presentation_epoch_, transform,
+            inkpod::renderer::CanvasScrollRangeHint::Preserve, 0U};
         return true;
     }
 
@@ -241,6 +266,281 @@ HRESULT ReadPresentedPixel(
         });
     } while (result == S_FALSE && std::chrono::steady_clock::now() < deadline);
     return result;
+}
+
+class ScrollGestureObserver final {
+public:
+    explicit ScrollGestureObserver(HWND canvas) noexcept
+        : canvas_(canvas), parent_(GetParent(canvas)),
+          previous_data_(GetWindowLongPtrW(parent_, GWLP_USERDATA)),
+          previous_procedure_(reinterpret_cast<WNDPROC>(
+              GetWindowLongPtrW(parent_, GWLP_WNDPROC))) {
+        SetWindowLongPtrW(parent_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
+        installed_ = SetWindowLongPtrW(parent_, GWLP_WNDPROC,
+            reinterpret_cast<LONG_PTR>(&Procedure)) != 0;
+    }
+
+    ~ScrollGestureObserver() {
+        if (installed_) {
+            SetWindowLongPtrW(parent_, GWLP_WNDPROC,
+                reinterpret_cast<LONG_PTR>(previous_procedure_));
+        }
+        SetWindowLongPtrW(parent_, GWLP_USERDATA, previous_data_);
+    }
+
+    bool installed_{};
+    std::uint32_t received_{};
+    inkpod::renderer::CanvasViewGesture gesture_{};
+
+private:
+    static LRESULT CALLBACK Procedure(
+        HWND window, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
+        auto* observer = reinterpret_cast<ScrollGestureObserver*>(
+            GetWindowLongPtrW(window, GWLP_USERDATA));
+        if (observer != nullptr
+            && message == inkpod::renderer::kCanvasViewGesture) {
+            inkpod::renderer::CanvasViewGesture gesture{};
+            if (!inkpod::renderer::TakeCanvasViewGesture(
+                    observer->canvas_,
+                    static_cast<std::uint64_t>(wparam),
+                    inkpod::app::Generation(static_cast<std::uint64_t>(lparam)),
+                    gesture)) {
+                return 0;
+            }
+            observer->gesture_ = gesture;
+            ++observer->received_;
+            return 1;
+        }
+        return observer == nullptr || observer->previous_procedure_ == nullptr
+            ? DefWindowProcW(window, message, wparam, lparam)
+            : CallWindowProcW(
+                  observer->previous_procedure_, window, message, wparam, lparam);
+    }
+
+    HWND canvas_{};
+    HWND parent_{};
+    LONG_PTR previous_data_{};
+    WNDPROC previous_procedure_{};
+};
+
+bool VerifyCanvasScrollbarProjection(
+    HWND canvas,
+    const InkpodSnapshotTransform& transform,
+    bool exercise_line_input) noexcept {
+    const LONG_PTR style = GetWindowLongPtrW(canvas, GWL_STYLE);
+    RECT client{};
+    if ((style & WS_HSCROLL) == 0 || (style & WS_VSCROLL) == 0
+        || GetClientRect(canvas, &client) == FALSE
+        || client.right <= client.left || client.bottom <= client.top) {
+        return false;
+    }
+    const auto horizontal = inkpod::renderer::ProjectCanvasScrollAxis(
+        inkpod::renderer::CanvasScrollAxisInput{
+            transform.pan_x,
+            transform.zoom,
+            transform.document_width,
+            static_cast<std::uint32_t>(client.right - client.left),
+            {},
+            inkpod::renderer::CanvasScrollRangeUpdate::ResetToBase});
+    const auto vertical = inkpod::renderer::ProjectCanvasScrollAxis(
+        inkpod::renderer::CanvasScrollAxisInput{
+            transform.pan_y,
+            transform.zoom,
+            transform.document_height,
+            static_cast<std::uint32_t>(client.bottom - client.top),
+            {},
+            inkpod::renderer::CanvasScrollRangeUpdate::ResetToBase});
+    if (horizontal.status != inkpod::renderer::CanvasScrollStatus::Ok
+        || vertical.status != inkpod::renderer::CanvasScrollStatus::Ok) {
+        return false;
+    }
+    const auto read = [canvas](int bar, SCROLLINFO& info) {
+        info = {};
+        info.cbSize = sizeof(info);
+        info.fMask = SIF_RANGE | SIF_PAGE | SIF_POS | SIF_TRACKPOS;
+        return GetScrollInfo(canvas, bar, &info) != FALSE;
+    };
+    const auto matches = [](const SCROLLINFO& actual,
+                            const inkpod::renderer::CanvasNativeScrollInfo& expected) {
+        return actual.nMin == expected.minimum
+            && actual.nMax == expected.maximum
+            && actual.nPage == expected.page
+            && actual.nPos == expected.position;
+    };
+    SCROLLINFO horizontal_info{};
+    SCROLLINFO vertical_info{};
+    if (!read(SB_HORZ, horizontal_info) || !read(SB_VERT, vertical_info)
+        || !matches(horizontal_info, horizontal.projection.native)
+        || !matches(vertical_info, vertical.projection.native)) {
+        return false;
+    }
+    if (!exercise_line_input) {
+        return true;
+    }
+
+    ScrollGestureObserver observer(canvas);
+    const UINT dpi = std::max<UINT>(96U, GetDpiForWindow(canvas));
+    const auto line_step = static_cast<std::uint32_t>(std::max(
+        1, MulDiv(32, static_cast<int>(dpi), 96)));
+    const auto expected = inkpod::renderer::ResolveCanvasScrollTarget(
+        horizontal.projection,
+        inkpod::renderer::CanvasScrollTargetRequest{
+            inkpod::renderer::CanvasScrollTargetKind::LineForward,
+            0,
+            line_step,
+            0U});
+    const int accepted_position = horizontal_info.nPos;
+    if (!observer.installed_
+        || expected.status != inkpod::renderer::CanvasScrollStatus::Ok
+        || !expected.changed
+        || SendMessageW(canvas, WM_HSCROLL, SB_LINERIGHT, 0) != 1
+        || observer.received_ != 1U
+        || observer.gesture_.kind != INKPOD_VIEW_PAN_BY
+        || std::abs(observer.gesture_.value1 - expected.pan_by_delta) > 1.0e-12
+        || observer.gesture_.value2 != 0.0
+        || !read(SB_HORZ, horizontal_info)
+        || horizontal_info.nPos != accepted_position) {
+        return false;
+    }
+    return true;
+}
+
+bool VerifyDeferredScrollInteractionShrink(
+    CoreOwner& core,
+    inkpod::renderer::CanvasSnapshotSink& sink,
+    HWND canvas) noexcept {
+    constexpr double excursion = 4096.0;
+    inkpod::renderer::SnapshotEnvelope outside{};
+    if (!core.ApplyView(INKPOD_VIEW_PAN_BY, excursion)
+        || !core.Build(sink.Route(), outside)) {
+        std::fprintf(stderr, "deferred shrink: outside view/build failed\n");
+        return false;
+    }
+    const InkpodSnapshotTransform outside_transform = outside.transform;
+    if (!sink.Submit(outside)) {
+        std::fprintf(stderr, "deferred shrink: outside submit failed\n");
+        return false;
+    }
+    PumpWindowMessages();
+
+    RECT client{};
+    if (GetClientRect(canvas, &client) == FALSE
+        || client.right <= client.left || client.bottom <= client.top) {
+        std::fprintf(stderr, "deferred shrink: invalid client rect\n");
+        return false;
+    }
+    const auto outside_projection = inkpod::renderer::ProjectCanvasScrollAxis(
+        inkpod::renderer::CanvasScrollAxisInput{
+            outside_transform.pan_x,
+            outside_transform.zoom,
+            outside_transform.document_width,
+            static_cast<std::uint32_t>(client.right - client.left),
+            {},
+            inkpod::renderer::CanvasScrollRangeUpdate::ResetToBase});
+    SCROLLINFO actual{};
+    actual.cbSize = sizeof(actual);
+    actual.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+    if (outside_projection.status != inkpod::renderer::CanvasScrollStatus::Ok
+        || outside_projection.projection.coordinate_in_base_range
+        || GetScrollInfo(canvas, SB_HORZ, &actual) == FALSE
+        || actual.nMin != outside_projection.projection.native.minimum
+        || actual.nMax < outside_projection.projection.native.maximum
+        || actual.nPage != outside_projection.projection.native.page
+        || actual.nPos != outside_projection.projection.native.position) {
+        std::fprintf(
+            stderr,
+            "deferred shrink: outside mismatch status=%u inside=%u "
+            "pan=%.3f actual=%d/%d/%u/%d expected=%d/%d/%u/%d\n",
+            static_cast<unsigned>(outside_projection.status),
+            outside_projection.projection.coordinate_in_base_range ? 1U : 0U,
+            outside_transform.pan_x,
+            actual.nMin,
+            actual.nMax,
+            static_cast<unsigned>(actual.nPage),
+            actual.nPos,
+            outside_projection.projection.native.minimum,
+            outside_projection.projection.native.maximum,
+            static_cast<unsigned>(outside_projection.projection.native.page),
+            outside_projection.projection.native.position);
+        return false;
+    }
+
+    inkpod::renderer::SnapshotEnvelope returned{};
+    const double desired_coordinate = static_cast<double>(
+        outside_projection.projection.base_range.minimum_position
+        + outside_projection.projection.base_range.maximum_position) / 2.0;
+    const double return_delta =
+        -desired_coordinate - outside_transform.pan_x;
+    if (!core.ApplyView(INKPOD_VIEW_PAN_BY, return_delta)
+        || !core.Build(sink.Route(), returned)) {
+        std::fprintf(stderr, "deferred shrink: return view/build failed\n");
+        return false;
+    }
+    const InkpodSnapshotTransform returned_transform = returned.transform;
+    if (!sink.Submit(returned)
+        || SendMessageW(canvas, WM_HSCROLL, SB_ENDSCROLL, 0) != 1) {
+        std::fprintf(stderr, "deferred shrink: return submit/end failed\n");
+        return false;
+    }
+    PumpWindowMessages();
+
+    const auto base_projection = inkpod::renderer::ProjectCanvasScrollAxis(
+        inkpod::renderer::CanvasScrollAxisInput{
+            returned_transform.pan_x,
+            returned_transform.zoom,
+            returned_transform.document_width,
+            static_cast<std::uint32_t>(client.right - client.left),
+            {},
+            inkpod::renderer::CanvasScrollRangeUpdate::ResetToBase});
+    actual = {};
+    actual.cbSize = sizeof(actual);
+    actual.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+    const bool read_actual = GetScrollInfo(canvas, SB_HORZ, &actual) != FALSE;
+    const bool matched =
+        base_projection.status == inkpod::renderer::CanvasScrollStatus::Ok
+        && base_projection.projection.coordinate_in_base_range
+        && read_actual
+        && actual.nMin == base_projection.projection.native.minimum
+        && actual.nMax == base_projection.projection.native.maximum
+        && actual.nPage == base_projection.projection.native.page
+        && actual.nPos == base_projection.projection.native.position;
+    if (!matched) {
+        std::fprintf(
+            stderr,
+            "deferred shrink: returned mismatch status=%u inside=%u "
+            "read=%u pan=%.3f q=%.3f base=%lld..%lld "
+            "actual=%d/%d/%u/%d expected=%d/%d/%u/%d\n",
+            static_cast<unsigned>(base_projection.status),
+            base_projection.projection.coordinate_in_base_range ? 1U : 0U,
+            read_actual ? 1U : 0U,
+            returned_transform.pan_x,
+            base_projection.projection.scroll_coordinate,
+            static_cast<long long>(
+                base_projection.projection.base_range.minimum_position),
+            static_cast<long long>(
+                base_projection.projection.base_range.maximum_position),
+            actual.nMin,
+            actual.nMax,
+            static_cast<unsigned>(actual.nPage),
+            actual.nPos,
+            base_projection.projection.native.minimum,
+            base_projection.projection.native.maximum,
+            static_cast<unsigned>(base_projection.projection.native.page),
+            base_projection.projection.native.position);
+        return false;
+    }
+
+    inkpod::renderer::SnapshotEnvelope restored{};
+    const double original_pan = outside_transform.pan_x - excursion;
+    if (!core.ApplyView(
+            INKPOD_VIEW_PAN_BY, original_pan - returned_transform.pan_x)
+        || !core.Build(sink.Route(), restored)
+        || !sink.Submit(restored)) {
+        std::fprintf(stderr, "deferred shrink: baseline restore failed\n");
+        return false;
+    }
+    PumpWindowMessages();
+    return true;
 }
 
 class StrokeObserver final {
@@ -1373,13 +1673,80 @@ int Run() {
     inkpod::renderer::SnapshotEnvelope first_envelope{};
     inkpod::renderer::SnapshotEnvelope second_envelope{};
     if (!first_core.Build(first_sink->Route(), first_envelope)
-        || !second_core.Build(second_sink->Route(), second_envelope)
-        || !first_sink->Submit(first_envelope)
-        || !second_sink->Submit(second_envelope)
-        || !HasBounds(host, first_canvas, first_surface_generation, 32.0, 24.0)
-        || !HasBounds(host, second_canvas, second_surface_generation, 48.0, 16.0)) {
+        || !second_core.Build(second_sink->Route(), second_envelope)) {
         return 8;
     }
+    const InkpodSnapshotTransform first_initial_transform = first_envelope.transform;
+    const InkpodSnapshotTransform second_initial_transform = second_envelope.transform;
+    host.SetQueuePausedForSmokeTest(true);
+    const bool initial_submitted = first_sink->Submit(first_envelope)
+        && second_sink->Submit(second_envelope);
+    PumpWindowMessages();
+    const bool initial_scrollbars_verified = initial_submitted
+        && VerifyCanvasScrollbarProjection(
+            first_canvas_window.window_, first_initial_transform, true)
+        && VerifyCanvasScrollbarProjection(
+            second_canvas_window.window_, second_initial_transform, false);
+    const bool deferred_shrink_verified = initial_scrollbars_verified
+        && VerifyDeferredScrollInteractionShrink(
+            first_core, *first_sink, first_canvas_window.window_);
+    host.SetQueuePausedForSmokeTest(false);
+    if (!initial_submitted) {
+        return 8;
+    }
+    PumpWindowMessages();
+    if (!WithWindowMessages([&] { return host.WaitQueueIdleForSmokeTest(); }, false)) {
+        return 24;
+    }
+    const bool first_has_bounds =
+        HasBounds(host, first_canvas, first_surface_generation, 32.0, 24.0);
+    const bool second_has_bounds =
+        HasBounds(host, second_canvas, second_surface_generation, 48.0, 16.0);
+    if (!first_has_bounds || !second_has_bounds) {
+        std::fprintf(
+            stderr,
+            "initial bounds after paused scrollbar probe: first=%u second=%u\n",
+            first_has_bounds ? 1U : 0U,
+            second_has_bounds ? 1U : 0U);
+        PrintSurfaceState(
+            "first bounds", host, first_canvas,
+            first_surface_generation, first_canvas_window.window_);
+        PrintSurfaceState(
+            "second bounds", host, second_canvas,
+            second_surface_generation, second_canvas_window.window_);
+        return 8;
+    }
+    if (!initial_scrollbars_verified) {
+        return 48;
+    }
+    if (!deferred_shrink_verified) {
+        return 49;
+    }
+    const auto initial_present_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    bool initial_present_recovered{};
+    do {
+        PumpWindowMessages();
+        if (!WithWindowMessages(
+                [&] { return host.WaitQueueIdleForSmokeTest(); }, false)) {
+            return 24;
+        }
+        inkpod::renderer::RendererSurfaceResourceUsage first_probe{};
+        inkpod::renderer::RendererSurfaceResourceUsage second_probe{};
+        initial_present_recovered = host.GetSurfaceResourceUsage(
+                first_canvas, first_surface_generation, first_probe)
+            && host.GetSurfaceResourceUsage(
+                second_canvas, second_surface_generation, second_probe)
+            && !first_probe.occluded && !second_probe.occluded;
+        if (!initial_present_recovered) {
+            (void)MsgWaitForMultipleObjectsEx(
+                0U, nullptr, 5U, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+        }
+    } while (!initial_present_recovered
+        && std::chrono::steady_clock::now() < initial_present_deadline);
+    // Keep this long-standing small-surface readback probe independent from
+    // the Canvas HWND client geometry. WM_SIZE exercises the real client-size
+    // path (including the non-client scrollbars) elsewhere in this test.
     host.Resize(first_canvas, first_surface_generation, 32U, 24U);
     inkpod::renderer::CanvasPixelRgba8 ordered_pixel{};
     const HRESULT initial_pixel_result = ReadPresentedPixel(
@@ -1396,21 +1763,56 @@ int Run() {
             first_surface_generation, first_canvas_window.window_);
         return 35;
     }
+    PumpWindowMessages();
+    if (!WithWindowMessages([&] { return host.WaitQueueIdleForSmokeTest(); }, false)) {
+        return 24;
+    }
     const inkpod::renderer::RendererResourceUsage initial_usage = host.ResourceUsage();
     inkpod::renderer::RendererSurfaceResourceUsage first_surface_usage{};
-    if (initial_usage.gpu_tile_budget_bytes == 0U
+    inkpod::renderer::RendererSurfaceResourceUsage second_surface_usage{};
+    inkpod::renderer::RendererSurfaceResourceUsage stale_surface_usage{};
+    const bool found_first_surface = host.GetSurfaceResourceUsage(
+        first_canvas, first_surface_generation, first_surface_usage);
+    const bool found_second_surface = host.GetSurfaceResourceUsage(
+        second_canvas, second_surface_generation, second_surface_usage);
+    const bool found_stale_surface = host.GetSurfaceResourceUsage(
+        first_canvas, Generation{999U}, stale_surface_usage);
+    if (!initial_present_recovered
+        || initial_usage.gpu_tile_budget_bytes == 0U
         || initial_usage.surface_count != 2U
         || initial_usage.visible_surface_count != 2U
         || initial_usage.retained_snapshot_bytes == 0U
         || initial_usage.gpu_tile_bytes > initial_usage.gpu_tile_budget_bytes
         || initial_usage.active_tile_count > initial_usage.cached_tile_count
-        || !host.GetSurfaceResourceUsage(
-            first_canvas, first_surface_generation, first_surface_usage)
+        || !found_first_surface || !found_second_surface
         || first_surface_usage.route != first_sink->Route()
         || first_surface_usage.retained_snapshot_bytes == 0U
         || !first_surface_usage.visible || first_surface_usage.occluded
-        || host.GetSurfaceResourceUsage(
-            first_canvas, Generation{999U}, first_surface_usage)) {
+        || found_stale_surface) {
+        std::fprintf(stderr,
+            "initial usage: surfaces=%llu visible=%llu retained=%llu tiles=%llu/%llu "
+            "active=%llu cached=%llu first_found=%d first_route=%d first_retained=%llu "
+            "first_visible=%d first_occluded=%d second_found=%d second_visible=%d "
+            "second_occluded=%d first_render=%08lx first_frames=%llu stale_generation=%d\n",
+            static_cast<unsigned long long>(initial_usage.surface_count),
+            static_cast<unsigned long long>(initial_usage.visible_surface_count),
+            static_cast<unsigned long long>(initial_usage.retained_snapshot_bytes),
+            static_cast<unsigned long long>(initial_usage.gpu_tile_bytes),
+            static_cast<unsigned long long>(initial_usage.gpu_tile_budget_bytes),
+            static_cast<unsigned long long>(initial_usage.active_tile_count),
+            static_cast<unsigned long long>(initial_usage.cached_tile_count),
+            found_first_surface ? 1 : 0,
+            first_surface_usage.route == first_sink->Route() ? 1 : 0,
+            static_cast<unsigned long long>(first_surface_usage.retained_snapshot_bytes),
+            first_surface_usage.visible ? 1 : 0,
+            first_surface_usage.occluded ? 1 : 0,
+            found_second_surface ? 1 : 0,
+            second_surface_usage.visible ? 1 : 0,
+            second_surface_usage.occluded ? 1 : 0,
+            static_cast<unsigned long>(first_surface_usage.last_render_result),
+            static_cast<unsigned long long>(
+                host.PresentedFrameCount(first_canvas, first_surface_generation)),
+            found_stale_surface ? 1 : 0);
         return 30;
     }
     phase.Report("initial_and_adjusted_readback");

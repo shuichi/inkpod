@@ -841,10 +841,28 @@ if(WIN32)
         NAME inkpod_windows_inkscript_file_authority
         COMMAND inkpod_windows_inkscript_file_authority_tests)
 
+    add_executable(inkpod_windows_canvas_scroll_model_tests
+        apps/windows/renderer/canvas_scroll_model.cpp
+        apps/windows/renderer/canvas_scroll_model.h
+        tests/windows_canvas_scroll_model.cpp)
+    target_include_directories(inkpod_windows_canvas_scroll_model_tests PRIVATE
+        "${CMAKE_SOURCE_DIR}/apps/windows")
+    target_compile_definitions(inkpod_windows_canvas_scroll_model_tests PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    if(MSVC)
+        inkpod_enable_strict_warnings(inkpod_windows_canvas_scroll_model_tests)
+        target_compile_options(inkpod_windows_canvas_scroll_model_tests PRIVATE /EHsc)
+    endif()
+    add_test(
+        NAME inkpod_windows_canvas_scroll_model
+        COMMAND inkpod_windows_canvas_scroll_model_tests)
+
     add_executable(inkpod_windows_renderer_host_tests
         apps/windows/app/identity.h
         apps/windows/renderer/canvas.cpp
         apps/windows/renderer/canvas.h
+        apps/windows/renderer/canvas_scroll_model.cpp
+        apps/windows/renderer/canvas_scroll_model.h
         apps/windows/renderer/renderer_host.h
         tests/windows_renderer_host.cpp)
     target_include_directories(inkpod_windows_renderer_host_tests PRIVATE
@@ -925,6 +943,8 @@ if(WIN32)
         apps/windows/app/inkscript_file_authority.h
         apps/windows/app/app.rc
         apps/windows/renderer/canvas.cpp
+        apps/windows/renderer/canvas_scroll_model.cpp
+        apps/windows/renderer/canvas_scroll_model.h
         apps/windows/renderer/renderer_host.h
         apps/windows/ui/dialogs/about_dialog.cpp
         apps/windows/ui/dialogs/basic_dialogs.cpp

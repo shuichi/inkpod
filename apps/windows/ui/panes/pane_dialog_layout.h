@@ -147,8 +147,8 @@ inline void CompletePaneDialogResize(HWND dialog) noexcept {
     // Explicit child invalidation is required before the one synchronous
     // subtree update: RDW_ALLCHILDREN alone may skip a page control overlapped
     // by a Common Controls tab sibling even when its final z-order is correct.
-    // RDW_FRAME publishes a pane-owned non-client scrollbar in this same final
-    // frame instead of requiring a control-specific immediate redraw.
+    // RDW_FRAME publishes pane- and child-owned non-client scrollbars in this
+    // same final frame instead of requiring a control-specific immediate redraw.
     EnumChildWindows(
         dialog,
         [](HWND child, LPARAM) noexcept -> BOOL {
@@ -157,7 +157,7 @@ inline void CompletePaneDialogResize(HWND dialog) noexcept {
                     child,
                     nullptr,
                     nullptr,
-                    RDW_INVALIDATE | RDW_ERASE | RDW_NOCHILDREN);
+                    RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_NOCHILDREN);
             }
             return TRUE;
         },

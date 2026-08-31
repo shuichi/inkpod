@@ -61,6 +61,11 @@ public:
     }
 
     bool Submit(inkpod::renderer::SnapshotEnvelope envelope) noexcept override {
+        last_attempted_scroll_hint.store(
+            static_cast<std::uint32_t>(envelope.scroll_range_hint),
+            std::memory_order_release);
+        last_attempted_scroll_cause.store(
+            envelope.scroll_cause_token, std::memory_order_release);
         if (envelope.snapshot == nullptr || envelope.route != route_
             || reject_next_submission.exchange(false)) {
             if (envelope.snapshot != nullptr) {
@@ -101,6 +106,11 @@ public:
         last_presentation_epoch.store(envelope.presentation_epoch, std::memory_order_release);
         last_pan_x.store(transform.pan_x, std::memory_order_release);
         last_digest_byte.store(digest.bytes[0], std::memory_order_release);
+        last_scroll_hint.store(
+            static_cast<std::uint32_t>(envelope.scroll_range_hint),
+            std::memory_order_release);
+        last_scroll_cause.store(
+            envelope.scroll_cause_token, std::memory_order_release);
         ++submitted;
         return inkpod_snapshot_release(&envelope.snapshot) == INKPOD_STATUS_OK;
     }
@@ -112,6 +122,10 @@ public:
     std::atomic<std::uint64_t> last_presentation_epoch{};
     std::atomic<double> last_pan_x{};
     std::atomic<std::uint8_t> last_digest_byte{};
+    std::atomic<std::uint32_t> last_attempted_scroll_hint{};
+    std::atomic<std::uint64_t> last_attempted_scroll_cause{};
+    std::atomic<std::uint32_t> last_scroll_hint{};
+    std::atomic<std::uint64_t> last_scroll_cause{};
 
 private:
     std::mutex submission_mutex_;
@@ -442,7 +456,9 @@ bool FileIoPollingAndInstallFence(HWND owner) {
         && host.CreateSession(second, generation) == INKPOD_STATUS_OK;
     if (passed) {
         passed = host.EnqueueFileIo(Context(first, generation), true,
-            [probe](InkpodCore*, bool cancel, bool& fence) { return probe->Step(cancel, fence); },
+            [probe](InkpodCore*, bool cancel, bool& fence, bool&) {
+                return probe->Step(cancel, fence);
+            },
             false, false, [probe](InkpodStatus status, InkpodStatus presentation_status) {
                 probe->completions.fetch_add(1U);
                 probe->presentation_status.store(presentation_status);
@@ -490,7 +506,8 @@ bool FileIoPollingAndInstallFence(HWND owner) {
     if (passed) {
         sink.reject_next_submission.store(true);
         passed = host.EnqueueFileIo(Context(first, generation), true,
-            [&host, &apply_count, first, generation](InkpodCore* core, bool cancelled, bool&) {
+            [&host, &apply_count, first, generation](
+                InkpodCore* core, bool cancelled, bool&, bool&) {
                 if (cancelled) {
                     return INKPOD_STATUS_CANCELLED;
                 }
@@ -559,7 +576,9 @@ bool FileIoCloseCancellationAndShutdownFinalization(HWND owner) {
         && host.CreateSession(first, generation) == INKPOD_STATUS_OK
         && host.CreateSession(second, generation) == INKPOD_STATUS_OK
         && host.EnqueueFileIo(Context(first, generation), true,
-            [read](InkpodCore*, bool cancel, bool& fence) { return read->Step(cancel, fence); },
+            [read](InkpodCore*, bool cancel, bool& fence, bool&) {
+                return read->Step(cancel, fence);
+            },
             false, false, [read](InkpodStatus status, InkpodStatus presentation_status) {
                 read->completions.fetch_add(1U);
                 read->presentation_status.store(presentation_status);
@@ -573,11 +592,14 @@ bool FileIoCloseCancellationAndShutdownFinalization(HWND owner) {
             && read->presentation_status.load() == INKPOD_STATUS_CANCELLED
             && host.CreateSession(first, Generation{2U}) == INKPOD_STATUS_OK
             && !host.EnqueueFileIo(Context(first, generation), true,
-                [](InkpodCore*, bool, bool&) { return INKPOD_STATUS_OK; }, false, false, {});
+                [](InkpodCore*, bool, bool&, bool&) { return INKPOD_STATUS_OK; },
+                false, false, {});
     }
     if (passed) {
         passed = host.EnqueueFileIo(Context(second, generation), true,
-            [install](InkpodCore*, bool cancel, bool& fence) { return install->Step(cancel, fence); },
+            [install](InkpodCore*, bool cancel, bool& fence, bool&) {
+                return install->Step(cancel, fence);
+            },
             false, false, [install](InkpodStatus status, InkpodStatus presentation_status) {
                 install->completions.fetch_add(1U);
                 install->presentation_status.store(presentation_status);
@@ -1139,6 +1161,105 @@ int wmain() {
         host.Stop();
         DestroyWindow(owner);
         return 87;
+    }
+
+    const auto preserve_hint = static_cast<std::uint32_t>(
+        inkpod::renderer::CanvasScrollRangeHint::Preserve);
+    const auto reset_hint = static_cast<std::uint32_t>(
+        inkpod::renderer::CanvasScrollRangeHint::ResetToBase);
+    if (host.Invoke(
+            first,
+            generation,
+            [](InkpodCore*) { return INKPOD_STATUS_OK; },
+            true,
+            false,
+            inkpod::app::ScrollRangeResetRequest{
+                inkpod::app::ScrollRangeResetScope::TargetView,
+                second_core_view}) != INKPOD_STATUS_OK
+        || sink.last_scroll_hint.load(std::memory_order_acquire) != preserve_hint
+        || sink.last_scroll_cause.load(std::memory_order_acquire) != 0U
+        || second_sink.last_scroll_hint.load(std::memory_order_acquire) != reset_hint
+        || second_sink.last_scroll_cause.load(std::memory_order_acquire) == 0U) {
+        host.Stop();
+        DestroyWindow(owner);
+        return 94;
+    }
+
+    second_sink.reject_next_submission.store(true, std::memory_order_release);
+    const InkpodStatus rejected_reset = host.Invoke(
+        first,
+        generation,
+        [](InkpodCore*) { return INKPOD_STATUS_OK; },
+        true,
+        false,
+        inkpod::app::ScrollRangeResetRequest{
+            inkpod::app::ScrollRangeResetScope::TargetView,
+            second_core_view});
+    const std::uint64_t retained_cause =
+        second_sink.last_attempted_scroll_cause.load(std::memory_order_acquire);
+    if (rejected_reset != INKPOD_STATUS_INVALID_STATE
+        || second_sink.last_attempted_scroll_hint.load(std::memory_order_acquire)
+            != reset_hint
+        || retained_cause == 0U
+        || host.Invoke(
+               first,
+               generation,
+               [](InkpodCore*) { return INKPOD_STATUS_OK; },
+               true,
+               false) != INKPOD_STATUS_OK
+        || second_sink.last_scroll_hint.load(std::memory_order_acquire) != reset_hint
+        || second_sink.last_scroll_cause.load(std::memory_order_acquire)
+            != retained_cause
+        || host.Invoke(
+               first,
+               generation,
+               [](InkpodCore*) { return INKPOD_STATUS_OK; },
+               true,
+               false) != INKPOD_STATUS_OK
+        || second_sink.last_scroll_hint.load(std::memory_order_acquire)
+            != preserve_hint
+        || second_sink.last_scroll_cause.load(std::memory_order_acquire) != 0U) {
+        host.Stop();
+        DestroyWindow(owner);
+        return 95;
+    }
+
+    if (host.Invoke(
+            first,
+            generation,
+            [](InkpodCore*) { return INKPOD_STATUS_OK; },
+            true,
+            false,
+            inkpod::app::ScrollRangeResetRequest{
+                inkpod::app::ScrollRangeResetScope::SessionViews,
+                0U}) != INKPOD_STATUS_OK
+        || sink.last_scroll_hint.load(std::memory_order_acquire) != reset_hint
+        || second_sink.last_scroll_hint.load(std::memory_order_acquire) != reset_hint
+        || sink.last_scroll_cause.load(std::memory_order_acquire) == 0U
+        || sink.last_scroll_cause.load(std::memory_order_acquire)
+            != second_sink.last_scroll_cause.load(std::memory_order_acquire)) {
+        host.Stop();
+        DestroyWindow(owner);
+        return 96;
+    }
+
+    bool invalid_target_executed{};
+    if (host.Invoke(
+            first,
+            generation,
+            [&invalid_target_executed](InkpodCore*) {
+                invalid_target_executed = true;
+                return INKPOD_STATUS_OK;
+            },
+            false,
+            false,
+            inkpod::app::ScrollRangeResetRequest{
+                inkpod::app::ScrollRangeResetScope::TargetView,
+                UINT64_MAX}) != INKPOD_STATUS_INVALID_STATE
+        || invalid_target_executed) {
+        host.Stop();
+        DestroyWindow(owner);
+        return 97;
     }
 
     if (host.SetPresentationEpoch(first, generation, 91U)

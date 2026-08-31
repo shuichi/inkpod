@@ -519,7 +519,7 @@ foreach(REQUIRED IN ITEMS
         "overflowed_"
         "CompletePaneDialogResize"
         "EnumChildWindows"
-        "RDW_INVALIDATE | RDW_ERASE | RDW_NOCHILDREN"
+        "RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_NOCHILDREN"
         "RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_UPDATENOW"
         "RDW_ALLCHILDREN"
         "class ScopedPaneControlRedrawSuspension final"

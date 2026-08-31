@@ -28,7 +28,7 @@ enum class SubpalettePaneAction : std::uint32_t {
 using SubpalettePaneCommandCallback = void (*)(void*, UINT) noexcept;
 using SubpalettePaneActionCallback = void (*)(void*, SubpalettePaneAction) noexcept;
 using SubpalettePaneSampleCallback = void (*)(void*, double, double) noexcept;
-using SubpalettePaneViewCallback = void (*)(
+using SubpalettePaneViewCallback = bool (*)(
     void*, const renderer::CanvasViewGesture&) noexcept;
 
 struct SubpalettePaneView final {

@@ -77,7 +77,21 @@ foreach(REQUIRED IN ITEMS
         "static_cast<LPARAM>(surface_generation_.Value())"
         "const bool supersedes_surface"
         "kReservedHostControlWork"
-        "published->visible = false")
+        "published->visible = false"
+        "WS_HSCROLL | WS_VSCROLL"
+        "SIF_DISABLENOSCROLL"
+        "SIF_TRACKPOS"
+        "kCanvasScrollProjectionRetryTimer"
+        "kMaximumScrollRefreshDeliveryAttempts"
+        "scroll_projection_apply_active_"
+        "scroll_projection_recovery_required_"
+        "horizontal_interaction_shrink_pending_"
+        "vertical_interaction_shrink_pending_"
+        "WakeSupersedingScrollProjection(token)"
+        "DeliverScrollProjectionViewportRefresh()"
+        "GetWindowThreadProcessId(parent, nullptr) != GetCurrentThreadId()"
+        "ScrollInfoMatches(restored_horizontal, previous_horizontal)"
+        "RDW_INVALIDATE | RDW_FRAME | RDW_UPDATENOW")
     string(FIND "${CANVAS}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
         message(FATAL_ERROR "RendererHost implementation is missing: ${REQUIRED}")
@@ -148,6 +162,9 @@ foreach(REQUIRED IN ITEMS
         "frames_before_queue_drain"
         "queued_render_work"
         "first_sink->Submit(queue_failure)"
+        "VerifyCanvasScrollbarProjection("
+        "VerifyDeferredScrollInteractionShrink("
+        "horizontal_info.nPos != accepted_position"
         "UnbindCanvasSnapshotSink("
         "host.Submit(unbound_stale)"
         "first_canvas_window.Reset()"

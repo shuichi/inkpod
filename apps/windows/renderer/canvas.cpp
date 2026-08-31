@@ -1,4 +1,5 @@
 #include "canvas.h"
+#include "canvas_scroll_model.h"
 
 #include <d2d1_1.h>
 #include <d3d11.h>
@@ -42,10 +43,21 @@ constexpr std::uint64_t kMaximumOverlayLines = 8192U;
 constexpr std::size_t kMaximumPointerHistory = 256U;
 constexpr std::size_t kMaximumPendingCanvasInput = 64U;
 constexpr std::uint64_t kMaximumStrokeSamples = UINT64_C(1048576);
+constexpr UINT kCanvasScrollProjectionChanged = WM_APP + 0x12CU;
+constexpr int kCanvasScrollLineReferencePixels = 32;
+constexpr UINT_PTR kCanvasBindingPresentRetryTimer = 0x4A11U;
+constexpr UINT_PTR kCanvasScrollProjectionRetryTimer = 0x4A12U;
+constexpr std::uint8_t kMaximumScrollProjectionApplyAttempts = 3U;
+constexpr std::uint8_t kMaximumScrollRefreshDeliveryAttempts = 1U;
 constexpr std::uint64_t kApplicationGpuTileBudgetBytes = UINT64_C(512) * 1024U * 1024U;
 constexpr std::size_t kMaximumSequenceCacheSources = 8U;
 constexpr std::uint64_t kSequenceGpuCacheBudgetBytes = UINT64_C(128) * 1024U * 1024U;
 std::atomic<std::uint64_t> gApplicationTileUseSequence{};
+
+enum class CanvasScrollAxis : std::uint8_t {
+    Horizontal,
+    Vertical,
+};
 
 struct CachedTile {
     std::uint64_t revision{};
@@ -3170,8 +3182,16 @@ public:
           surface_generation_(surface_generation) {}
 
     HRESULT Initialize() noexcept {
-        return renderer_.RegisterSurface(
+        const HRESULT result = renderer_.RegisterSurface(
             canvas_, surface_generation_, window_, owner_window_);
+        if (SUCCEEDED(result)) {
+            ResetScrollProjection();
+            SynchronizeVisibility(
+                IsWindowVisible(window_) != FALSE
+                    && CanvasAncestorsVisible(window_),
+                false);
+        }
+        return result;
     }
 
     ~CanvasHost() override {
@@ -3191,11 +3211,14 @@ public:
         if (FAILED(renderer_.BindSurface(route))) {
             return false;
         }
-        std::lock_guard lock(route_mutex_);
-        route_ = route;
-        sequence_activation_pending_ = false;
-        required_presented_revision_ = 0U;
-        required_presentation_epoch_ = 0U;
+        {
+            std::lock_guard lock(route_mutex_);
+            route_ = route;
+            sequence_activation_pending_ = false;
+            required_presented_revision_ = 0U;
+            required_presentation_epoch_ = 0U;
+        }
+        PrepareScrollBinding(route);
         return true;
     }
 
@@ -3213,11 +3236,14 @@ public:
         if (FAILED(renderer_.BindSurface(route))) {
             return false;
         }
-        std::lock_guard lock(route_mutex_);
-        route_ = route;
-        sequence_activation_pending_ = false;
-        required_presented_revision_ = 0U;
-        required_presentation_epoch_ = 0U;
+        {
+            std::lock_guard lock(route_mutex_);
+            route_ = route;
+            sequence_activation_pending_ = false;
+            required_presented_revision_ = 0U;
+            required_presentation_epoch_ = 0U;
+        }
+        PrepareScrollBinding(route);
         return true;
     }
 
@@ -3225,11 +3251,14 @@ public:
         if (FAILED(renderer_.UnbindSurface(canvas_, surface_generation_))) {
             return false;
         }
-        std::lock_guard lock(route_mutex_);
-        route_ = {};
-        sequence_activation_pending_ = false;
-        required_presented_revision_ = 0U;
-        required_presentation_epoch_ = 0U;
+        {
+            std::lock_guard lock(route_mutex_);
+            route_ = {};
+            sequence_activation_pending_ = false;
+            required_presented_revision_ = 0U;
+            required_presentation_epoch_ = 0U;
+        }
+        ResetScrollProjection();
         return true;
     }
 
@@ -3251,7 +3280,370 @@ public:
             }
             return false;
         }
-        return renderer_.Submit(envelope);
+        const InkpodSnapshotTransform transform = envelope.transform;
+        const CanvasScrollRangeHint range_hint = envelope.scroll_range_hint;
+        const std::uint64_t scroll_cause_token = envelope.scroll_cause_token;
+        const bool accepted = renderer_.Submit(envelope);
+        if (accepted) {
+            QueueScrollProjection(
+                route, transform, range_hint, scroll_cause_token);
+        }
+        return accepted;
+    }
+
+    void QueueScrollProjection(
+        const SnapshotRoute& route,
+        const InkpodSnapshotTransform& transform,
+        CanvasScrollRangeHint range_hint,
+        std::uint64_t scroll_cause_token) noexcept {
+        std::uint64_t token{};
+        {
+            std::lock_guard lock(scroll_mailbox_mutex_);
+            ++next_scroll_projection_token_;
+            if (next_scroll_projection_token_ == 0U) {
+                ++next_scroll_projection_token_;
+            }
+            token = next_scroll_projection_token_;
+            last_renderer_accepted_scroll_route_ = route;
+            if (pending_scroll_projection_.has_value()
+                && pending_scroll_projection_->route == route
+                && pending_scroll_projection_->range_hint
+                    == CanvasScrollRangeHint::ResetToBase
+                && range_hint == CanvasScrollRangeHint::Preserve) {
+                // A later ordinary snapshot may replace renderer work before
+                // the UI consumes the reset snapshot. Keep the cause latched
+                // until one accepted projection reaches the owner thread.
+                range_hint = CanvasScrollRangeHint::ResetToBase;
+                scroll_cause_token =
+                    pending_scroll_projection_->scroll_cause_token;
+            }
+            pending_scroll_projection_ = PendingScrollProjection{
+                token, route, transform, range_hint, scroll_cause_token, 0U, 0U};
+        }
+        if (PostMessageW(
+                window_,
+                kCanvasScrollProjectionChanged,
+                static_cast<WPARAM>(token),
+                static_cast<LPARAM>(surface_generation_.Value())) == FALSE) {
+            // A window timer is not subject to the posted-message quota. The
+            // invalidation fallback still gives the owner thread a later paint
+            // opportunity if timer allocation itself fails.
+            if (SetTimer(
+                    window_, kCanvasScrollProjectionRetryTimer, 16U, nullptr)
+                == 0U) {
+                (void)RedrawWindow(
+                    window_, nullptr, nullptr, RDW_INVALIDATE | RDW_NOERASE);
+            }
+        }
+    }
+
+    bool ApplyQueuedScrollProjection(
+        std::uint64_t token,
+        app::Generation surface_generation) noexcept {
+        if (token == 0U || surface_generation != surface_generation_
+            || scroll_projection_apply_active_) {
+            return false;
+        }
+        std::optional<PendingScrollProjection> pending;
+        {
+            std::lock_guard lock(scroll_mailbox_mutex_);
+            if (pending_scroll_projection_.has_value()
+                && pending_scroll_projection_->token == token) {
+                pending = pending_scroll_projection_;
+            }
+        }
+        if (!pending.has_value()) {
+            WakeSupersedingScrollProjection(token);
+            return false;
+        }
+        if (pending->route != Route()) {
+            {
+                std::lock_guard lock(scroll_mailbox_mutex_);
+                if (pending_scroll_projection_.has_value()
+                    && pending_scroll_projection_->token == token) {
+                    pending_scroll_projection_.reset();
+                }
+            }
+            WakeSupersedingScrollProjection(token);
+            return false;
+        }
+        scroll_projection_apply_active_ = true;
+        const bool applied = ApplyAcceptedScrollProjection(
+            pending->route, pending->transform, pending->range_hint);
+        scroll_projection_apply_active_ = false;
+        if (!applied) {
+            bool schedule_retry{};
+            bool request_refresh{};
+            {
+                std::lock_guard lock(scroll_mailbox_mutex_);
+                if (pending_scroll_projection_.has_value()
+                    && pending_scroll_projection_->token == token) {
+                    if (pending_scroll_projection_->apply_attempts
+                        < kMaximumScrollProjectionApplyAttempts) {
+                        ++pending_scroll_projection_->apply_attempts;
+                        schedule_retry = true;
+                    } else if (!scroll_projection_refresh_requested_) {
+                        scroll_projection_refresh_requested_ = true;
+                        scroll_projection_recovery_required_ = true;
+                        request_refresh = true;
+                    }
+                }
+            }
+            if (schedule_retry) {
+                if (SetTimer(
+                        window_, kCanvasScrollProjectionRetryTimer, 16U, nullptr) == 0U) {
+                    (void)RedrawWindow(
+                        window_, nullptr, nullptr, RDW_INVALIDATE | RDW_NOERASE);
+                }
+            } else if (request_refresh) {
+                if (!DeliverScrollProjectionViewportRefresh()) {
+                    scroll_projection_refresh_requested_ = false;
+                    bool retry_delivery{};
+                    {
+                        std::lock_guard lock(scroll_mailbox_mutex_);
+                        if (pending_scroll_projection_.has_value()
+                            && pending_scroll_projection_->token == token
+                            && pending_scroll_projection_->refresh_delivery_attempts
+                                < kMaximumScrollRefreshDeliveryAttempts) {
+                            ++pending_scroll_projection_->refresh_delivery_attempts;
+                            retry_delivery = true;
+                        }
+                    }
+                    if (retry_delivery
+                        && SetTimer(
+                               window_, kCanvasScrollProjectionRetryTimer, 16U, nullptr)
+                            == 0U) {
+                            (void)RedrawWindow(
+                                window_, nullptr, nullptr,
+                                RDW_INVALIDATE | RDW_NOERASE);
+                    }
+                }
+            }
+            WakeSupersedingScrollProjection(token);
+            return false;
+        }
+        KillTimer(window_, kCanvasScrollProjectionRetryTimer);
+        {
+            std::lock_guard lock(scroll_mailbox_mutex_);
+            if (pending_scroll_projection_.has_value()
+                && pending_scroll_projection_->token == token) {
+                pending_scroll_projection_.reset();
+            }
+        }
+        WakeSupersedingScrollProjection(token);
+        return true;
+    }
+
+    void WakeSupersedingScrollProjection(std::uint64_t completed_token) noexcept {
+        bool wake_required{};
+        {
+            std::lock_guard lock(scroll_mailbox_mutex_);
+            wake_required = pending_scroll_projection_.has_value()
+                && pending_scroll_projection_->token != completed_token;
+        }
+        if (wake_required
+            && SetTimer(
+                   window_, kCanvasScrollProjectionRetryTimer, 16U, nullptr)
+                == 0U) {
+            // This runs after the outer projection apply has left its reentrant
+            // redraw guard, so a paint fallback cannot consume the only wakeup.
+            (void)RedrawWindow(
+                window_, nullptr, nullptr, RDW_INVALIDATE | RDW_NOERASE);
+        }
+    }
+
+    bool DeliverScrollProjectionViewportRefresh() noexcept {
+        RECT client{};
+        const HWND parent = GetParent(window_);
+        if (parent == nullptr || GetClientRect(window_, &client) == FALSE) {
+            return false;
+        }
+        const WPARAM canvas = static_cast<WPARAM>(canvas_.Value());
+        const LPARAM viewport = MAKELPARAM(
+            client.right - client.left,
+            client.bottom - client.top);
+        if (PostMessageW(
+                parent, kCanvasViewportChanged, canvas, viewport) != FALSE) {
+            return true;
+        }
+        if (GetWindowThreadProcessId(parent, nullptr) != GetCurrentThreadId()) {
+            return false;
+        }
+        // The Canvas and its pane parent share the UI owner thread. A same-thread
+        // send is the finite fallback when the posted-message quota is exhausted.
+        (void)SendMessageW(parent, kCanvasViewportChanged, canvas, viewport);
+        return true;
+    }
+
+    void DrainScrollProjectionMailbox() noexcept {
+        std::uint64_t token{};
+        {
+            std::lock_guard lock(scroll_mailbox_mutex_);
+            if (pending_scroll_projection_.has_value()) {
+                token = pending_scroll_projection_->token;
+            }
+        }
+        if (token != 0U) {
+            (void)ApplyQueuedScrollProjection(token, surface_generation_);
+        }
+    }
+
+    void RefreshScrollProjectionForViewport() noexcept {
+        if (scroll_projection_apply_active_
+            || !has_scroll_transform_ || scroll_route_ != Route()) {
+            return;
+        }
+        (void)ReprojectScrollbars(
+            CanvasScrollRangeUpdate::Preserve,
+            CanvasScrollRangeUpdate::Preserve);
+    }
+
+    bool HandleScroll(CanvasScrollAxis axis, UINT request_code) noexcept {
+        if (request_code == SB_ENDSCROLL) {
+            EndScrollInteraction(axis);
+            return true;
+        }
+        const SnapshotRoute route = Route();
+        if (!route || scroll_route_ != route
+            || scroll_projection_recovery_required_
+            || scroll_command_pending_
+            || (requested_scroll_reset_route_.has_value()
+                && requested_scroll_reset_route_.value() == route)) {
+            return false;
+        }
+        const CanvasScrollProjection* projection = axis == CanvasScrollAxis::Horizontal
+            ? (has_horizontal_scroll_ ? &horizontal_scroll_ : nullptr)
+            : (has_vertical_scroll_ ? &vertical_scroll_ : nullptr);
+        if (projection == nullptr) {
+            return false;
+        }
+
+        CanvasScrollTargetRequest request{};
+        switch (request_code) {
+            case SB_LINELEFT:
+                request.kind = CanvasScrollTargetKind::LineBackward;
+                break;
+            case SB_LINERIGHT:
+                request.kind = CanvasScrollTargetKind::LineForward;
+                break;
+            case SB_PAGELEFT:
+                request.kind = CanvasScrollTargetKind::PageBackward;
+                break;
+            case SB_PAGERIGHT:
+                request.kind = CanvasScrollTargetKind::PageForward;
+                break;
+            case SB_LEFT:
+                request.kind = CanvasScrollTargetKind::Start;
+                break;
+            case SB_RIGHT:
+                request.kind = CanvasScrollTargetKind::End;
+                break;
+            case SB_THUMBTRACK:
+            case SB_THUMBPOSITION: {
+                SCROLLINFO info{};
+                info.cbSize = sizeof(info);
+                info.fMask = SIF_TRACKPOS;
+                const int bar = axis == CanvasScrollAxis::Horizontal
+                    ? SB_HORZ : SB_VERT;
+                if (GetScrollInfo(window_, bar, &info) == FALSE) {
+                    return false;
+                }
+                request.kind = CanvasScrollTargetKind::Thumb;
+                request.thumb_position = info.nTrackPos;
+                if (axis == CanvasScrollAxis::Horizontal) {
+                    horizontal_scroll_tracking_ = true;
+                } else {
+                    vertical_scroll_tracking_ = true;
+                }
+                break;
+            }
+            default:
+                return false;
+        }
+
+        if (axis == CanvasScrollAxis::Horizontal) {
+            horizontal_interaction_shrink_pending_ = false;
+        } else {
+            vertical_interaction_shrink_pending_ = false;
+        }
+
+        const UINT dpi = std::max<UINT>(96U, GetDpiForWindow(window_));
+        request.line_step = static_cast<std::uint32_t>(std::max(
+            1,
+            MulDiv(kCanvasScrollLineReferencePixels, static_cast<int>(dpi), 96)));
+        request.page_step = projection->native.page > request.line_step
+            ? projection->native.page - request.line_step
+            : 1U;
+        const CanvasScrollTargetResult target = ResolveCanvasScrollTarget(
+            *projection, request);
+        if (target.status != CanvasScrollStatus::Ok) {
+            return false;
+        }
+        if (!target.changed) {
+            return true;
+        }
+        const CanvasViewGesture gesture{
+            INKPOD_VIEW_PAN_BY,
+            axis == CanvasScrollAxis::Horizontal ? target.pan_by_delta : 0.0,
+            axis == CanvasScrollAxis::Vertical ? target.pan_by_delta : 0.0,
+            0.0};
+        // Until an accepted snapshot reprojects the bar, another relative
+        // command would be based on the same old q and could double-apply if
+        // Core committed but renderer submission failed.
+        scroll_command_pending_ = true;
+        const bool sent = SendGesture(gesture);
+        if (!sent) {
+            RECT client{};
+            if (GetClientRect(window_, &client) != FALSE) {
+                (void)PostMessageW(
+                    GetParent(window_),
+                    kCanvasViewportChanged,
+                    static_cast<WPARAM>(canvas_.Value()),
+                    MAKELPARAM(
+                        client.right - client.left,
+                        client.bottom - client.top));
+            }
+        }
+        return sent;
+    }
+
+    void EndScrollInteraction(CanvasScrollAxis axis) noexcept {
+        if (axis == CanvasScrollAxis::Horizontal) {
+            horizontal_scroll_tracking_ = false;
+        } else {
+            vertical_scroll_tracking_ = false;
+        }
+        if (!has_scroll_transform_ || scroll_route_ != Route()) {
+            return;
+        }
+        if (axis == CanvasScrollAxis::Horizontal) {
+            horizontal_interaction_shrink_pending_ = true;
+        } else {
+            vertical_interaction_shrink_pending_ = true;
+        }
+        if (!scroll_command_pending_
+            && !HasPendingScrollProjection(scroll_route_)) {
+            (void)ApplyPendingInteractionShrink();
+        }
+    }
+
+    void EndAllScrollInteractions() noexcept {
+        horizontal_scroll_tracking_ = false;
+        vertical_scroll_tracking_ = false;
+        if (!has_scroll_transform_ || scroll_route_ != Route()) {
+            return;
+        }
+        horizontal_interaction_shrink_pending_ = true;
+        vertical_interaction_shrink_pending_ = true;
+        if (!scroll_command_pending_
+            && !HasPendingScrollProjection(scroll_route_)) {
+            (void)ApplyPendingInteractionShrink();
+        }
+    }
+
+    void BeginPanInteraction() noexcept {
+        horizontal_interaction_shrink_pending_ = false;
+        vertical_interaction_shrink_pending_ = false;
     }
 
     void SynchronizeVisibility(bool visible, bool notify_viewport) noexcept {
@@ -3512,6 +3904,21 @@ public:
     bool panning{};
 
 private:
+    struct PendingScrollProjection {
+        std::uint64_t token{};
+        SnapshotRoute route{};
+        InkpodSnapshotTransform transform{};
+        CanvasScrollRangeHint range_hint{CanvasScrollRangeHint::Preserve};
+        std::uint64_t scroll_cause_token{};
+        std::uint8_t apply_attempts{};
+        std::uint8_t refresh_delivery_attempts{};
+    };
+
+    struct ProjectedScrollbars {
+        CanvasScrollProjection horizontal{};
+        CanvasScrollProjection vertical{};
+    };
+
     struct PendingStroke {
         std::uint64_t token{};
         OwnedCanvasStrokeEvent event;
@@ -3521,6 +3928,417 @@ private:
         std::uint64_t token{};
         CanvasViewGesture gesture{};
     };
+
+    static SCROLLINFO NativeScrollInfo(
+        const CanvasNativeScrollInfo& native) noexcept {
+        SCROLLINFO info{};
+        info.cbSize = sizeof(info);
+        info.fMask = SIF_RANGE | SIF_PAGE | SIF_POS | SIF_DISABLENOSCROLL;
+        info.nMin = native.minimum;
+        info.nMax = native.maximum;
+        info.nPage = native.page;
+        info.nPos = native.position;
+        return info;
+    }
+
+    void RedrawScrollFrame() noexcept {
+        if (IsWindowVisible(window_) != FALSE
+            && CanvasAncestorsVisible(window_)) {
+            RedrawWindow(
+                window_,
+                nullptr,
+                nullptr,
+                RDW_INVALIDATE | RDW_FRAME | RDW_UPDATENOW
+                    | RDW_NOCHILDREN | RDW_NOERASE);
+        }
+    }
+
+    void DisableScrollbars() noexcept {
+        SCROLLINFO disabled{};
+        disabled.cbSize = sizeof(disabled);
+        disabled.fMask = SIF_RANGE | SIF_PAGE | SIF_POS | SIF_DISABLENOSCROLL;
+        disabled.nMin = 0;
+        disabled.nMax = 0;
+        disabled.nPage = 1U;
+        disabled.nPos = 0;
+        (void)SetScrollInfo(window_, SB_HORZ, &disabled, FALSE);
+        (void)SetScrollInfo(window_, SB_VERT, &disabled, FALSE);
+        RedrawScrollFrame();
+    }
+
+    void InvalidatePendingScrollProjection() noexcept {
+        std::lock_guard lock(scroll_mailbox_mutex_);
+        ++next_scroll_projection_token_;
+        if (next_scroll_projection_token_ == 0U) {
+            ++next_scroll_projection_token_;
+        }
+        pending_scroll_projection_.reset();
+        horizontal_scroll_tracking_ = false;
+        vertical_scroll_tracking_ = false;
+    }
+
+    void PrepareScrollBinding(const SnapshotRoute& route) noexcept {
+        InvalidatePendingScrollProjection();
+        scroll_command_pending_ = false;
+        horizontal_interaction_shrink_pending_ = false;
+        vertical_interaction_shrink_pending_ = false;
+        std::optional<SnapshotRoute> last_renderer_accepted;
+        {
+            std::lock_guard lock(scroll_mailbox_mutex_);
+            last_renderer_accepted = last_renderer_accepted_scroll_route_;
+        }
+        const bool rolling_back_unaccepted_binding =
+            requested_scroll_reset_route_.has_value()
+            && requested_scroll_reset_route_.value() != scroll_route_
+            && route == scroll_route_
+            && (!last_renderer_accepted.has_value()
+                || last_renderer_accepted.value()
+                    != requested_scroll_reset_route_.value());
+        if (rolling_back_unaccepted_binding) {
+            requested_scroll_reset_route_.reset();
+        } else {
+            requested_scroll_reset_route_ = route;
+        }
+    }
+
+    void ResetScrollProjection() noexcept {
+        KillTimer(window_, kCanvasScrollProjectionRetryTimer);
+        InvalidatePendingScrollProjection();
+        {
+            std::lock_guard lock(scroll_mailbox_mutex_);
+            last_renderer_accepted_scroll_route_.reset();
+        }
+        scroll_route_ = {};
+        scroll_transform_ = {};
+        has_scroll_transform_ = false;
+        horizontal_scroll_ = {};
+        vertical_scroll_ = {};
+        has_horizontal_scroll_ = false;
+        has_vertical_scroll_ = false;
+        horizontal_scroll_tracking_ = false;
+        vertical_scroll_tracking_ = false;
+        requested_scroll_reset_route_.reset();
+        scroll_command_pending_ = false;
+        horizontal_interaction_shrink_pending_ = false;
+        vertical_interaction_shrink_pending_ = false;
+        scroll_projection_recovery_required_ = false;
+        scroll_projection_refresh_requested_ = false;
+        DisableScrollbars();
+    }
+
+    bool ApplyAcceptedScrollProjection(
+        const SnapshotRoute& route,
+        const InkpodSnapshotTransform& transform,
+        CanvasScrollRangeHint range_hint) noexcept {
+        if (!route || route != Route()
+            || transform.struct_size < sizeof(InkpodSnapshotTransform)
+            || (range_hint != CanvasScrollRangeHint::Preserve
+                && range_hint != CanvasScrollRangeHint::ResetToBase)
+            || !std::isfinite(transform.zoom) || transform.zoom <= 0.0
+            || !std::isfinite(transform.pan_x)
+            || !std::isfinite(transform.pan_y)) {
+            return false;
+        }
+        const bool route_changed = scroll_route_ != route;
+        const bool binding_reset = requested_scroll_reset_route_.has_value()
+            && requested_scroll_reset_route_.value() == route;
+        const CanvasScrollRangeUpdate update =
+            route_changed || binding_reset
+                || range_hint == CanvasScrollRangeHint::ResetToBase
+            ? CanvasScrollRangeUpdate::ResetToBase
+            : CanvasScrollRangeUpdate::Preserve;
+        const CanvasScrollRange horizontal_range = !route_changed
+                && has_horizontal_scroll_
+            ? horizontal_scroll_.range
+            : CanvasScrollRange{};
+        const CanvasScrollRange vertical_range = !route_changed
+                && has_vertical_scroll_
+            ? vertical_scroll_.range
+            : CanvasScrollRange{};
+        const CanvasScrollRangeLock horizontal_lock = !route_changed
+                && horizontal_scroll_tracking_
+                && horizontal_range.initialized
+                && update == CanvasScrollRangeUpdate::Preserve
+            ? CanvasScrollRangeLock::Freeze
+            : CanvasScrollRangeLock::Expand;
+        const CanvasScrollRangeLock vertical_lock = !route_changed
+                && vertical_scroll_tracking_
+                && vertical_range.initialized
+                && update == CanvasScrollRangeUpdate::Preserve
+            ? CanvasScrollRangeLock::Freeze
+            : CanvasScrollRangeLock::Expand;
+        ProjectedScrollbars projected{};
+        if (!BuildScrollProjections(
+                transform,
+                horizontal_range,
+                vertical_range,
+                update,
+                update,
+                horizontal_lock,
+                vertical_lock,
+                projected)) {
+            return false;
+        }
+
+        const bool consume_horizontal_shrink =
+            horizontal_interaction_shrink_pending_;
+        const bool consume_vertical_shrink =
+            vertical_interaction_shrink_pending_;
+        const CanvasScrollRangeUpdate horizontal_update =
+            consume_horizontal_shrink
+                && projected.horizontal.coordinate_in_base_range
+            ? CanvasScrollRangeUpdate::ResetToBase
+            : update;
+        const CanvasScrollRangeUpdate vertical_update =
+            consume_vertical_shrink && projected.vertical.coordinate_in_base_range
+            ? CanvasScrollRangeUpdate::ResetToBase
+            : update;
+        if ((horizontal_update != update || vertical_update != update)
+            && !BuildScrollProjections(
+                transform,
+                horizontal_range,
+                vertical_range,
+                horizontal_update,
+                vertical_update,
+                horizontal_lock,
+                vertical_lock,
+                projected)) {
+            return false;
+        }
+
+        if (!CommitScrollProjections(projected)) {
+            return false;
+        }
+        scroll_route_ = route;
+        scroll_transform_ = transform;
+        has_scroll_transform_ = true;
+        if (route_changed || update == CanvasScrollRangeUpdate::ResetToBase) {
+            horizontal_scroll_tracking_ = false;
+            vertical_scroll_tracking_ = false;
+        }
+        if (binding_reset) {
+            requested_scroll_reset_route_.reset();
+        }
+        if (update == CanvasScrollRangeUpdate::ResetToBase
+            || consume_horizontal_shrink) {
+            horizontal_interaction_shrink_pending_ = false;
+        }
+        if (update == CanvasScrollRangeUpdate::ResetToBase
+            || consume_vertical_shrink) {
+            vertical_interaction_shrink_pending_ = false;
+        }
+        scroll_command_pending_ = false;
+        RedrawScrollFrame();
+        if (binding_reset) {
+            // A surface can transiently report DXGI_STATUS_OCCLUDED when its
+            // first snapshot races the final non-client frame publication.
+            // Retry once, asynchronously, after the accepted binding frame has
+            // had a chance to reach the window manager.
+            (void)SetTimer(
+                window_, kCanvasBindingPresentRetryTimer, 16U, nullptr);
+        }
+        return true;
+    }
+
+    bool BuildScrollProjections(
+        const InkpodSnapshotTransform& transform,
+        const CanvasScrollRange& horizontal_range,
+        const CanvasScrollRange& vertical_range,
+        CanvasScrollRangeUpdate horizontal_update,
+        CanvasScrollRangeUpdate vertical_update,
+        CanvasScrollRangeLock horizontal_lock,
+        CanvasScrollRangeLock vertical_lock,
+        ProjectedScrollbars& projected) noexcept {
+        RECT client{};
+        if (GetClientRect(window_, &client) == FALSE
+            || client.right <= client.left || client.bottom <= client.top) {
+            return false;
+        }
+        const auto width = static_cast<std::uint32_t>(client.right - client.left);
+        const auto height = static_cast<std::uint32_t>(client.bottom - client.top);
+        const CanvasScrollProjectionResult horizontal = ProjectCanvasScrollAxis(
+            CanvasScrollAxisInput{
+                transform.pan_x,
+                transform.zoom,
+                transform.document_width,
+                width,
+                horizontal_range,
+                horizontal_update,
+                horizontal_lock});
+        const CanvasScrollProjectionResult vertical = ProjectCanvasScrollAxis(
+            CanvasScrollAxisInput{
+                transform.pan_y,
+                transform.zoom,
+                transform.document_height,
+                height,
+                vertical_range,
+                vertical_update,
+                vertical_lock});
+        if (horizontal.status != CanvasScrollStatus::Ok
+            || vertical.status != CanvasScrollStatus::Ok) {
+            return false;
+        }
+        projected.horizontal = horizontal.projection;
+        projected.vertical = vertical.projection;
+        return true;
+    }
+
+    static bool ScrollInfoMatches(
+        const SCROLLINFO& actual,
+        const CanvasNativeScrollInfo& expected) noexcept {
+        return actual.nMin == expected.minimum
+            && actual.nMax == expected.maximum
+            && actual.nPage == expected.page
+            && actual.nPos == expected.position;
+    }
+
+    static bool ScrollInfoMatches(
+        const SCROLLINFO& actual,
+        const SCROLLINFO& expected) noexcept {
+        return actual.nMin == expected.nMin
+            && actual.nMax == expected.nMax
+            && actual.nPage == expected.nPage
+            && actual.nPos == expected.nPos;
+    }
+
+    bool ReadScrollInfo(int bar, SCROLLINFO& info) const noexcept {
+        info = {};
+        info.cbSize = sizeof(info);
+        info.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+        return GetScrollInfo(window_, bar, &info) != FALSE;
+    }
+
+    bool CommitScrollProjections(
+        const ProjectedScrollbars& projected) noexcept {
+        const bool recovery_was_required = scroll_projection_recovery_required_;
+        SCROLLINFO previous_horizontal{};
+        SCROLLINFO previous_vertical{};
+        if (!ReadScrollInfo(SB_HORZ, previous_horizontal)
+            || !ReadScrollInfo(SB_VERT, previous_vertical)) {
+            return false;
+        }
+        SCROLLINFO horizontal_info = NativeScrollInfo(projected.horizontal.native);
+        SCROLLINFO vertical_info = NativeScrollInfo(projected.vertical.native);
+        (void)SetScrollInfo(window_, SB_HORZ, &horizontal_info, FALSE);
+        (void)SetScrollInfo(window_, SB_VERT, &vertical_info, FALSE);
+        SCROLLINFO applied_horizontal{};
+        SCROLLINFO applied_vertical{};
+        const bool applied = ReadScrollInfo(SB_HORZ, applied_horizontal)
+            && ReadScrollInfo(SB_VERT, applied_vertical)
+            && ScrollInfoMatches(
+                applied_horizontal, projected.horizontal.native)
+            && ScrollInfoMatches(applied_vertical, projected.vertical.native);
+        if (!applied) {
+            previous_horizontal.fMask =
+                SIF_RANGE | SIF_PAGE | SIF_POS | SIF_DISABLENOSCROLL;
+            previous_vertical.fMask =
+                SIF_RANGE | SIF_PAGE | SIF_POS | SIF_DISABLENOSCROLL;
+            (void)SetScrollInfo(
+                window_, SB_HORZ, &previous_horizontal, FALSE);
+            (void)SetScrollInfo(
+                window_, SB_VERT, &previous_vertical, FALSE);
+            SCROLLINFO restored_horizontal{};
+            SCROLLINFO restored_vertical{};
+            const bool restored = ReadScrollInfo(SB_HORZ, restored_horizontal)
+                && ReadScrollInfo(SB_VERT, restored_vertical)
+                && ScrollInfoMatches(restored_horizontal, previous_horizontal)
+                && ScrollInfoMatches(restored_vertical, previous_vertical);
+            scroll_projection_recovery_required_ =
+                recovery_was_required || !restored;
+            if (!restored) {
+                RECT client{};
+                if (GetClientRect(window_, &client) != FALSE) {
+                    (void)PostMessageW(
+                        GetParent(window_),
+                        kCanvasViewportChanged,
+                        static_cast<WPARAM>(canvas_.Value()),
+                        MAKELPARAM(
+                            client.right - client.left,
+                            client.bottom - client.top));
+                }
+            }
+            return false;
+        }
+        horizontal_scroll_ = projected.horizontal;
+        vertical_scroll_ = projected.vertical;
+        has_horizontal_scroll_ = true;
+        has_vertical_scroll_ = true;
+        scroll_projection_recovery_required_ = false;
+        scroll_projection_refresh_requested_ = false;
+        return true;
+    }
+
+    bool ReprojectScrollbars(
+        CanvasScrollRangeUpdate horizontal_update,
+        CanvasScrollRangeUpdate vertical_update) noexcept {
+        if (!has_scroll_transform_ || scroll_route_ != Route()) {
+            return false;
+        }
+        const CanvasScrollRange horizontal_range = has_horizontal_scroll_
+            ? horizontal_scroll_.range : CanvasScrollRange{};
+        const CanvasScrollRange vertical_range = has_vertical_scroll_
+            ? vertical_scroll_.range : CanvasScrollRange{};
+        const CanvasScrollRangeLock horizontal_lock =
+            horizontal_scroll_tracking_ && horizontal_range.initialized
+                && horizontal_update == CanvasScrollRangeUpdate::Preserve
+            ? CanvasScrollRangeLock::Freeze
+            : CanvasScrollRangeLock::Expand;
+        const CanvasScrollRangeLock vertical_lock =
+            vertical_scroll_tracking_ && vertical_range.initialized
+                && vertical_update == CanvasScrollRangeUpdate::Preserve
+            ? CanvasScrollRangeLock::Freeze
+            : CanvasScrollRangeLock::Expand;
+        ProjectedScrollbars projected{};
+        if (!BuildScrollProjections(
+                scroll_transform_,
+                horizontal_range,
+                vertical_range,
+                horizontal_update,
+                vertical_update,
+                horizontal_lock,
+                vertical_lock,
+                projected)) {
+            if (!has_horizontal_scroll_ && !has_vertical_scroll_) {
+                DisableScrollbars();
+            }
+            return false;
+        }
+        if (!CommitScrollProjections(projected)) {
+            return false;
+        }
+        RedrawScrollFrame();
+        return true;
+    }
+
+    bool HasPendingScrollProjection(const SnapshotRoute& route) noexcept {
+        std::lock_guard lock(scroll_mailbox_mutex_);
+        return pending_scroll_projection_.has_value()
+            && pending_scroll_projection_->route == route;
+    }
+
+    bool ApplyPendingInteractionShrink() noexcept {
+        if ((!horizontal_interaction_shrink_pending_
+                && !vertical_interaction_shrink_pending_)
+            || !has_scroll_transform_ || scroll_route_ != Route()) {
+            return false;
+        }
+        const CanvasScrollRangeUpdate horizontal_update =
+            horizontal_interaction_shrink_pending_ && has_horizontal_scroll_
+                && horizontal_scroll_.coordinate_in_base_range
+            ? CanvasScrollRangeUpdate::ResetToBase
+            : CanvasScrollRangeUpdate::Preserve;
+        const CanvasScrollRangeUpdate vertical_update =
+            vertical_interaction_shrink_pending_ && has_vertical_scroll_
+                && vertical_scroll_.coordinate_in_base_range
+            ? CanvasScrollRangeUpdate::ResetToBase
+            : CanvasScrollRangeUpdate::Preserve;
+        if (!ReprojectScrollbars(horizontal_update, vertical_update)) {
+            return false;
+        }
+        horizontal_interaction_shrink_pending_ = false;
+        vertical_interaction_shrink_pending_ = false;
+        return true;
+    }
 
     std::uint64_t NextInputToken() noexcept {
         ++next_input_token_;
@@ -3579,6 +4397,26 @@ private:
     app::Generation surface_generation_{};
     mutable std::mutex route_mutex_;
     SnapshotRoute route_{};
+    std::mutex scroll_mailbox_mutex_;
+    std::optional<PendingScrollProjection> pending_scroll_projection_;
+    std::optional<SnapshotRoute> last_renderer_accepted_scroll_route_;
+    std::uint64_t next_scroll_projection_token_{};
+    SnapshotRoute scroll_route_{};
+    InkpodSnapshotTransform scroll_transform_{};
+    CanvasScrollProjection horizontal_scroll_{};
+    CanvasScrollProjection vertical_scroll_{};
+    bool has_scroll_transform_{};
+    bool has_horizontal_scroll_{};
+    bool has_vertical_scroll_{};
+    bool horizontal_scroll_tracking_{};
+    bool vertical_scroll_tracking_{};
+    std::optional<SnapshotRoute> requested_scroll_reset_route_;
+    bool scroll_command_pending_{};
+    bool horizontal_interaction_shrink_pending_{};
+    bool vertical_interaction_shrink_pending_{};
+    bool scroll_projection_recovery_required_{};
+    bool scroll_projection_refresh_requested_{};
+    bool scroll_projection_apply_active_{};
     std::mutex input_mutex_;
     std::deque<PendingStroke> pending_strokes_;
     std::deque<PendingGesture> pending_gestures_;
@@ -3691,11 +4529,13 @@ LRESULT CALLBACK CanvasWindowProcedure(
         case WM_SIZE:
             if (host != nullptr) {
                 host->CancelStroke();
+                host->DrainScrollProjectionMailbox();
                 const bool visible = wparam != SIZE_MINIMIZED
                     && IsWindowVisible(window) != FALSE
                     && CanvasAncestorsVisible(window);
                 host->SynchronizeVisibility(visible, false);
                 if (wparam != SIZE_MINIMIZED) {
+                    host->RefreshScrollProjectionForViewport();
                     const UINT width = LOWORD(lparam);
                     const UINT height = HIWORD(lparam);
                     host->Renderer().Resize(
@@ -3708,13 +4548,28 @@ LRESULT CALLBACK CanvasWindowProcedure(
                 }
             }
             return 0;
+        case WM_GETDLGCODE: {
+            const LRESULT base = DefWindowProcW(window, message, wparam, lparam);
+            if (wparam == VK_LEFT || wparam == VK_RIGHT
+                || wparam == VK_UP || wparam == VK_DOWN) {
+                return base | DLGC_WANTARROWS;
+            }
+            if (wparam == VK_PRIOR || wparam == VK_NEXT) {
+                return base | DLGC_WANTMESSAGE;
+            }
+            return base;
+        }
         case WM_SHOWWINDOW:
             if (host != nullptr) {
+                host->DrainScrollProjectionMailbox();
                 host->SynchronizeVisibility(
                     wparam != FALSE && CanvasAncestorsVisible(window), true);
             }
             break;
         case WM_PAINT: {
+            if (host != nullptr) {
+                host->DrainScrollProjectionMailbox();
+            }
             PAINTSTRUCT paint{};
             BeginPaint(window, &paint);
             EndPaint(window, &paint);
@@ -3744,6 +4599,76 @@ LRESULT CALLBACK CanvasWindowProcedure(
             }
             return host == nullptr ? 0 : 1;
         }
+        case WM_HSCROLL:
+            return host != nullptr
+                    && host->HandleScroll(
+                        CanvasScrollAxis::Horizontal,
+                        LOWORD(wparam))
+                ? 1
+                : 0;
+        case WM_VSCROLL:
+            return host != nullptr
+                    && host->HandleScroll(
+                        CanvasScrollAxis::Vertical,
+                        LOWORD(wparam))
+                ? 1
+                : 0;
+        case WM_KEYDOWN:
+            if (host != nullptr
+                && (GetKeyState(VK_SHIFT) & 0x8000) != 0
+                && (GetKeyState(VK_CONTROL) & 0x8000) == 0
+                && (GetKeyState(VK_MENU) & 0x8000) == 0) {
+                switch (wparam) {
+                    case VK_LEFT:
+                        return host->HandleScroll(
+                                   CanvasScrollAxis::Horizontal,
+                                   SB_LINELEFT)
+                            ? 1 : 0;
+                    case VK_RIGHT:
+                        return host->HandleScroll(
+                                   CanvasScrollAxis::Horizontal,
+                                   SB_LINERIGHT)
+                            ? 1 : 0;
+                    case VK_UP:
+                        return host->HandleScroll(
+                                   CanvasScrollAxis::Vertical,
+                                   SB_LINEUP)
+                            ? 1 : 0;
+                    case VK_DOWN:
+                        return host->HandleScroll(
+                                   CanvasScrollAxis::Vertical,
+                                   SB_LINEDOWN)
+                            ? 1 : 0;
+                    case VK_PRIOR:
+                        return host->HandleScroll(
+                                   CanvasScrollAxis::Vertical,
+                                   SB_PAGEUP)
+                            ? 1 : 0;
+                    case VK_NEXT:
+                        return host->HandleScroll(
+                                   CanvasScrollAxis::Vertical,
+                                   SB_PAGEDOWN)
+                            ? 1 : 0;
+                    default:
+                        break;
+                }
+            }
+            break;
+        case WM_TIMER:
+            if (host != nullptr
+                && wparam == kCanvasBindingPresentRetryTimer) {
+                KillTimer(window, kCanvasBindingPresentRetryTimer);
+                host->Renderer().RequestRender(
+                    host->Canvas(), host->SurfaceGeneration());
+                return 0;
+            }
+            if (host != nullptr
+                && wparam == kCanvasScrollProjectionRetryTimer) {
+                KillTimer(window, kCanvasScrollProjectionRetryTimer);
+                host->DrainScrollProjectionMailbox();
+                return 0;
+            }
+            break;
         case WM_LBUTTONDOWN:
             if (host != nullptr && !host->PointerStrokeActive()) {
                 SetFocus(window);
@@ -3801,6 +4726,7 @@ LRESULT CALLBACK CanvasWindowProcedure(
         case WM_MBUTTONDOWN:
             if (host != nullptr) {
                 SetFocus(window);
+                host->BeginPanInteraction();
                 host->panning = true;
                 host->last_pan_point = POINT{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
                 SetCapture(window);
@@ -3810,6 +4736,7 @@ LRESULT CALLBACK CanvasWindowProcedure(
         case WM_MBUTTONUP:
             if (host != nullptr) {
                 host->panning = false;
+                host->EndAllScrollInteractions();
             }
             ReleaseCapture();
             return 1;
@@ -3856,6 +4783,7 @@ LRESULT CALLBACK CanvasWindowProcedure(
             if (host != nullptr) {
                 host->CancelStroke();
                 host->panning = false;
+                host->EndAllScrollInteractions();
                 SendMessageW(
                     GetParent(window),
                     kCanvasInteractionEnded,
@@ -3863,6 +4791,13 @@ LRESULT CALLBACK CanvasWindowProcedure(
                     static_cast<LPARAM>(host->SurfaceGeneration().Value()));
             }
             return 0;
+        case kCanvasScrollProjectionChanged:
+            return host != nullptr
+                    && host->ApplyQueuedScrollProjection(
+                        static_cast<std::uint64_t>(wparam),
+                        app::Generation(static_cast<std::uint64_t>(lparam)))
+                ? 1
+                : 0;
         case kCanvasRenderOnce:
             return host != nullptr
                     && SUCCEEDED(host->Renderer().RenderOnce(
@@ -3892,6 +4827,8 @@ LRESULT CALLBACK CanvasWindowProcedure(
                 : static_cast<LRESULT>(host->Renderer().PresentedFrameCount(
                       host->Canvas(), host->SurfaceGeneration()));
         case WM_NCDESTROY:
+            KillTimer(window, kCanvasBindingPresentRetryTimer);
+            KillTimer(window, kCanvasScrollProjectionRetryTimer);
             SetWindowLongPtrW(window, GWLP_USERDATA, 0);
             delete host;
             return DefWindowProcW(window, message, wparam, lparam);
@@ -4238,11 +5175,11 @@ HWND CreateCanvasWindow(
         canvas,
         surface_generation,
         GetAncestor(parent, GA_ROOT)};
-    return CreateWindowExW(
+    const HWND window = CreateWindowExW(
         0,
         kCanvasClassName,
         L"",
-        WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS,
+        WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_HSCROLL | WS_VSCROLL,
         0,
         0,
         client.right - client.left,
@@ -4251,6 +5188,16 @@ HWND CreateCanvasWindow(
         nullptr,
         instance,
         const_cast<CanvasCreateParameters*>(&parameters));
+    auto* host = window == nullptr
+        ? nullptr
+        : reinterpret_cast<CanvasHost*>(
+              GetWindowLongPtrW(window, GWLP_USERDATA));
+    if (host != nullptr) {
+        host->SynchronizeVisibility(
+            IsWindowVisible(window) != FALSE && CanvasAncestorsVisible(window),
+            false);
+    }
+    return window;
 }
 
 CanvasSnapshotSink* GetCanvasSnapshotSink(HWND canvas) noexcept {

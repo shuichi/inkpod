@@ -23,7 +23,9 @@ namespace {
 
 constexpr std::size_t kMaximumSessions =
     CoreHost::kMaximumDocumentSessions;
-constexpr std::size_t kMaximumFrontendViews = kMaximumSessions * 64U;
+constexpr std::size_t kMaximumViewsPerSession = 64U;
+constexpr std::size_t kMaximumFrontendViews =
+    kMaximumSessions * kMaximumViewsPerSession;
 constexpr std::size_t kMaximumQueuedWork = 4096U;
 constexpr std::size_t kReservedStrokeControlWork = 64U;
 constexpr std::size_t kMaximumNotifications = 256U;
@@ -97,6 +99,7 @@ struct AdapterWork {
     bool publish_snapshot{};
     bool refresh_document_info{};
     bool defer_during_active_stroke{};
+    ScrollRangeResetRequest scroll_range_reset;
     std::chrono::steady_clock::time_point queued_at{std::chrono::steady_clock::now()};
 };
 
@@ -254,6 +257,7 @@ struct FrontendViewBinding {
     SessionBinding session;
     DocumentViewId frontend_view{};
     std::uint64_t core_view_id{};
+    std::uint64_t pending_scroll_range_reset_sequence{};
 };
 
 }  // namespace
@@ -719,7 +723,8 @@ struct CoreHost::Impl final {
         SessionBinding binding,
         CoreOperation operation,
         bool publish_snapshot,
-        bool refresh_document_info) noexcept {
+        bool refresh_document_info,
+        ScrollRangeResetRequest scroll_range_reset = {}) noexcept {
         if (!binding || !operation) {
             return INKPOD_STATUS_INVALID_ARGUMENT;
         }
@@ -733,7 +738,8 @@ struct CoreHost::Impl final {
                 0U,
                 publish_snapshot,
                 refresh_document_info,
-                false};
+                false,
+                scroll_range_reset};
             AdapterInput input{
                 0U, std::move(operation), std::nullopt, completion, {}};
             if (!PushAdapter(std::move(item), std::move(input))) {
@@ -829,7 +835,8 @@ struct CoreHost::Impl final {
         bool publish_snapshot,
         bool refresh_document_info,
         bool defer_during_active_stroke,
-        std::function<void(InkpodStatus)> completion) noexcept {
+        std::function<void(InkpodStatus)> completion,
+        ScrollRangeResetRequest scroll_range_reset) noexcept {
         if (!context.document_session.has_value() || !context.generation.has_value()
             || !operation) {
             return false;
@@ -843,7 +850,8 @@ struct CoreHost::Impl final {
                 0U,
                 publish_snapshot,
                 refresh_document_info,
-                defer_during_active_stroke},
+                defer_during_active_stroke,
+                scroll_range_reset},
             AdapterInput{
                 0U,
                 std::move(operation),
@@ -1530,6 +1538,60 @@ struct CoreHost::Impl final {
         return active == binding;
     }
 
+    InkpodStatus ValidateScrollRangeReset(
+        SessionBinding binding,
+        ScrollRangeResetRequest request) const noexcept {
+        if (request.scope == ScrollRangeResetScope::None) {
+            return request.core_view_id == 0U
+                ? INKPOD_STATUS_OK : INKPOD_STATUS_INVALID_ARGUMENT;
+        }
+        if (request.scope == ScrollRangeResetScope::SessionViews) {
+            return request.core_view_id == 0U
+                ? INKPOD_STATUS_OK : INKPOD_STATUS_INVALID_ARGUMENT;
+        }
+        if (request.scope != ScrollRangeResetScope::TargetView || !binding) {
+            return INKPOD_STATUS_INVALID_ARGUMENT;
+        }
+        std::lock_guard lock(state_mutex);
+        const auto found = std::find_if(
+            frontend_views.cbegin(),
+            frontend_views.cend(),
+            [binding, request](const FrontendViewBinding& view) {
+                return view.session == binding
+                    && view.core_view_id == request.core_view_id;
+            });
+        return found != frontend_views.cend()
+            ? INKPOD_STATUS_OK : INKPOD_STATUS_INVALID_STATE;
+    }
+
+    void ArmScrollRangeReset(
+        SessionBinding binding,
+        ScrollRangeResetRequest request,
+        std::uint64_t cause_sequence) noexcept {
+        if (!binding || cause_sequence == 0U
+            || request.scope == ScrollRangeResetScope::None) {
+            return;
+        }
+        std::lock_guard lock(state_mutex);
+        for (auto& view : frontend_views) {
+            if (view.session != binding) {
+                continue;
+            }
+            if (request.scope == ScrollRangeResetScope::TargetView
+                && view.core_view_id != request.core_view_id) {
+                continue;
+            }
+            if (request.scope != ScrollRangeResetScope::TargetView
+                && request.scope != ScrollRangeResetScope::SessionViews) {
+                return;
+            }
+            view.pending_scroll_range_reset_sequence = cause_sequence;
+            if (request.scope == ScrollRangeResetScope::TargetView) {
+                return;
+            }
+        }
+    }
+
     InkpodStatus PublishSnapshot(CoreEntry& entry, bool preview) noexcept {
         // This separate guard pins each borrowed CanvasSnapshotSink until the
         // publication finishes. Expensive snapshot work must not hold the mutex
@@ -1565,6 +1627,7 @@ struct CoreHost::Impl final {
                 continue;
             }
             std::uint64_t core_view_id{};
+            std::uint64_t scroll_cause_token{};
             {
                 std::lock_guard lock(state_mutex);
                 const auto published_session = FindPublishedLocked(entry.binding);
@@ -1582,6 +1645,7 @@ struct CoreHost::Impl final {
                     continue;
                 }
                 core_view_id = mapped->core_view_id;
+                scroll_cause_token = mapped->pending_scroll_range_reset_sequence;
             }
             InkpodSnapshot* snapshot{};
             const InkpodStatus status = core_view_id == 0U
@@ -1624,7 +1688,12 @@ struct CoreHost::Impl final {
                 document_info_status == INKPOD_STATUS_OK
                     ? committed_document.document_revision : 0U,
                 0U,
-                entry.presentation_epoch};
+                entry.presentation_epoch,
+                transform,
+                scroll_cause_token != 0U
+                    ? renderer::CanvasScrollRangeHint::ResetToBase
+                    : renderer::CanvasScrollRangeHint::Preserve,
+                scroll_cause_token};
             if (!sink->Submit(envelope)) {
                 result = INKPOD_STATUS_INVALID_STATE;
             } else {
@@ -1637,6 +1706,20 @@ struct CoreHost::Impl final {
                 const auto found = FindPublishedLocked(entry.binding);
                 if (found != published.end()) {
                     ++found->metrics.submitted_snapshots;
+                }
+                if (scroll_cause_token != 0U) {
+                    const auto mapped = std::find_if(
+                        frontend_views.begin(),
+                        frontend_views.end(),
+                        [&entry, &route](const FrontendViewBinding& view) {
+                            return view.session == entry.binding
+                                && view.frontend_view == route.document_view;
+                        });
+                    if (mapped != frontend_views.end()
+                        && mapped->pending_scroll_range_reset_sequence
+                            == scroll_cause_token) {
+                        mapped->pending_scroll_range_reset_sequence = 0U;
+                    }
                 }
             }
         }
@@ -1801,7 +1884,12 @@ struct CoreHost::Impl final {
         InkpodStatus status = entry == nullptr
             ? INKPOD_STATUS_CANCELLED
             : input.has_value() ? INKPOD_STATUS_OK : INKPOD_STATUS_INVALID_STATE;
-        if (entry != nullptr && input.has_value()) {
+        if (status == INKPOD_STATUS_OK) {
+            status = ValidateScrollRangeReset(
+                item.binding, item.scroll_range_reset);
+        }
+        if (entry != nullptr && input.has_value()
+            && status == INKPOD_STATUS_OK) {
             if (input->active_view_update.has_value()) {
                 entry->active_view_id = input->active_view_update.value();
                 std::lock_guard lock(state_mutex);
@@ -1815,6 +1903,10 @@ struct CoreHost::Impl final {
                 status = input->operation(entry->core);
             } catch (...) {
                 status = INKPOD_STATUS_INVALID_STATE;
+            }
+            if (status == INKPOD_STATUS_OK) {
+                ArmScrollRangeReset(
+                    item.binding, item.scroll_range_reset, item.sequence);
             }
             if (status == INKPOD_STATUS_OK && item.refresh_document_info) {
                 status = RefreshDocumentInfo(*entry, item.context);
@@ -2259,9 +2351,13 @@ struct CoreHost::Impl final {
         }
         cancelled = cancelled || (input->binding && entry == nullptr);
         InkpodStatus status = INKPOD_STATUS_INVALID_STATE;
+        bool document_replaced{};
         try {
             status = input->operation(
-                entry == nullptr ? nullptr : entry->core, cancelled, input->installing);
+                entry == nullptr ? nullptr : entry->core,
+                cancelled,
+                input->installing,
+                document_replaced);
         } catch (...) {
             status = INKPOD_STATUS_INVALID_STATE;
         }
@@ -2278,6 +2374,12 @@ struct CoreHost::Impl final {
         // durable save or staged open must not undo the UI path transition or
         // cause the successfully adopted document to be discarded.
         const InkpodStatus operation_status = status;
+        if (entry != nullptr && document_replaced) {
+            ArmScrollRangeReset(
+                input->binding,
+                ScrollRangeResetRequest{ScrollRangeResetScope::SessionViews, 0U},
+                input->sequence);
+        }
         if (entry != nullptr && status == INKPOD_STATUS_OK && input->refresh_document_info) {
             status = RefreshDocumentInfo(*entry, input->context);
         }
@@ -3008,7 +3110,8 @@ struct CoreHost::Impl final {
                 0U,
                 true,
                 false,
-                false};
+                false,
+                {}};
             AdapterInput input{
                 0U,
                 [](InkpodCore*) { return INKPOD_STATUS_OK; },
@@ -3130,7 +3233,8 @@ std::size_t CoreHost::SessionCount() const noexcept {
 InkpodStatus CoreHost::Invoke(
     CoreOperation operation,
     bool publish_snapshot,
-    bool refresh_document_info) noexcept {
+    bool refresh_document_info,
+    ScrollRangeResetRequest scroll_range_reset) noexcept {
     if (impl_ == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
@@ -3140,7 +3244,8 @@ InkpodStatus CoreHost::Invoke(
               binding.value(),
               std::move(operation),
               publish_snapshot,
-              refresh_document_info)
+              refresh_document_info,
+              scroll_range_reset)
         : INKPOD_STATUS_INVALID_STATE;
 }
 
@@ -3149,14 +3254,16 @@ InkpodStatus CoreHost::Invoke(
     Generation generation,
     CoreOperation operation,
     bool publish_snapshot,
-    bool refresh_document_info) noexcept {
+    bool refresh_document_info,
+    ScrollRangeResetRequest scroll_range_reset) noexcept {
     return impl_ == nullptr
         ? INKPOD_STATUS_INVALID_STATE
         : impl_->Invoke(
               SessionBinding{session, generation},
               std::move(operation),
               publish_snapshot,
-              refresh_document_info);
+              refresh_document_info,
+              scroll_range_reset);
 }
 
 InkpodStatus CoreHost::InvokeOwnerThread(std::function<InkpodStatus()> operation) noexcept {
@@ -3281,7 +3388,8 @@ bool CoreHost::Enqueue(
     bool publish_snapshot,
     bool refresh_document_info,
     bool defer_during_active_stroke,
-    std::function<void(InkpodStatus)> completion) noexcept {
+    std::function<void(InkpodStatus)> completion,
+    ScrollRangeResetRequest scroll_range_reset) noexcept {
     return impl_ != nullptr
         && impl_->Enqueue(
             context,
@@ -3289,7 +3397,8 @@ bool CoreHost::Enqueue(
             publish_snapshot,
             refresh_document_info,
             defer_during_active_stroke,
-            std::move(completion));
+            std::move(completion),
+            scroll_range_reset);
 }
 
 bool CoreHost::EnqueueInkScript(InkScriptEngineRequest request) noexcept {

@@ -112,6 +112,11 @@ struct WorkspaceWindow final {
     InkpodSubpaletteInfo subpalette_info{};
     std::uint32_t subpalette_navigation_index{};
     std::uint64_t subpalette_snapshot_revision{};
+    std::uint64_t subpalette_presentation_epoch{};
+    AuxiliarySourceId subpalette_scroll_reset_source{};
+    Generation subpalette_scroll_reset_generation{};
+    std::uint64_t subpalette_scroll_reset_token{};
+    std::uint64_t next_subpalette_scroll_reset_token{};
     std::uint64_t subpalette_load_generation{};
     std::uint64_t subpalette_io_request{};
     InkpodSubpalette* subpalette_candidate{};
