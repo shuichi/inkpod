@@ -14542,6 +14542,34 @@ bool RelayoutWorkspace(
         dock_change);
 }
 
+bool RelayoutWorkspaceWindow(
+    WorkspaceWindow& workspace,
+    bool smoke_test,
+    DockHostChangeKind dock_change = DockHostChangeKind::Structure) noexcept {
+    RECT client{};
+    if (workspace.windows.window == nullptr
+        || GetClientRect(workspace.windows.window, &client) == FALSE) {
+        return false;
+    }
+    return inkpod::windows::ui::LayoutMainChrome(
+        workspace.windows,
+        smoke_test,
+        client.right - client.left,
+        client.bottom - client.top,
+        dock_change);
+}
+
+void NotifySequencePaneLayoutChanged(void* context) noexcept {
+    auto* workspace = static_cast<WorkspaceWindow*>(context);
+    if (workspace == nullptr || workspace->application == nullptr) {
+        return;
+    }
+    static_cast<void>(RelayoutWorkspaceWindow(
+        *workspace,
+        workspace->application->lifetime.smoke_test,
+        DockHostChangeKind::Geometry));
+}
+
 bool WorkspaceCanvasOwnsCapture(const ApplicationHost& state) noexcept {
     const HWND capture = GetCapture();
     for (std::size_t index = 0U;
@@ -14724,6 +14752,8 @@ bool ApplyPreferencesValues(
         candidate_settings.default_raster_format = values.default_raster_format;
         candidate_settings.sequence_switch_policy = values.sequence_switch_policy;
         candidate_settings.sequence_endpoint_policy = values.sequence_endpoint_policy;
+        candidate_settings.sequence_thumbnail_width_dip =
+            values.sequence_thumbnail_width_dip;
         candidate_settings.output_color_guard_profile = values.color_profile;
         candidate_settings.shortcuts = values.shortcuts;
         const std::uint32_t slot = state->Workspace().persistence_slot;
@@ -14746,6 +14776,50 @@ bool ApplyPreferencesValues(
         const InkpodStatus shortcut_status = ApplyShortcutProfileSet(
             *state->engine, state->shortcuts, values.shortcuts);
         if (shortcut_status != INKPOD_STATUS_OK) {
+            (void)(state->lifetime.smoke_test
+                ? state->settings.ReplaceTransient(previous_settings)
+                : state->settings.Save(previous_settings));
+            return false;
+        }
+        bool sequence_presentation_applied = true;
+        for (std::size_t index = 0U;
+             index < state->Workspaces().Count();
+             ++index) {
+            WorkspaceWindow* workspace_window = state->Workspaces().At(index);
+            if (workspace_window == nullptr
+                || workspace_window->sequence_palette == nullptr) {
+                continue;
+            }
+            if (!panes::SetSequencePaneThumbnailWidthDip(
+                    workspace_window->sequence_palette,
+                    values.sequence_thumbnail_width_dip)
+                || !RelayoutWorkspaceWindow(
+                    *workspace_window,
+                    state->lifetime.smoke_test,
+                    DockHostChangeKind::Geometry)) {
+                sequence_presentation_applied = false;
+                break;
+            }
+        }
+        if (!sequence_presentation_applied) {
+            for (std::size_t index = 0U;
+                 index < state->Workspaces().Count();
+                 ++index) {
+                WorkspaceWindow* workspace_window = state->Workspaces().At(index);
+                if (workspace_window == nullptr
+                    || workspace_window->sequence_palette == nullptr) {
+                    continue;
+                }
+                static_cast<void>(panes::SetSequencePaneThumbnailWidthDip(
+                    workspace_window->sequence_palette,
+                    previous_settings.sequence_thumbnail_width_dip));
+                static_cast<void>(RelayoutWorkspaceWindow(
+                    *workspace_window,
+                    state->lifetime.smoke_test,
+                    DockHostChangeKind::Geometry));
+            }
+            static_cast<void>(ApplyShortcutProfileSet(
+                *state->engine, state->shortcuts, previous_settings.shortcuts));
             (void)(state->lifetime.smoke_test
                 ? state->settings.ReplaceTransient(previous_settings)
                 : state->settings.Save(previous_settings));
@@ -14886,6 +14960,10 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
         ActivateSequencePaneCell;
     state.Workspace().sequence_dialog.reorder_cell =
         ReorderCutSequenceCell;
+    state.Workspace().sequence_dialog.layout_changed =
+        NotifySequencePaneLayoutChanged;
+    state.Workspace().sequence_dialog.thumbnail_width_dip =
+        state.settings.Values().sequence_thumbnail_width_dip;
     state.Workspace().sequence_palette =
         inkpod::windows::ui::panes::CreateSequencePaneDialog(
             state.lifetime.instance,
@@ -14894,6 +14972,8 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
     if (state.Workspace().sequence_palette == nullptr) {
         return false;
     }
+    state.Workspace().windows.sequence_palette =
+        state.Workspace().sequence_palette;
     ShowWindow(state.Workspace().sequence_palette, SW_HIDE);
     state.Workspace().light_table_dialog = {};
     state.Workspace().light_table_dialog.context = &state.Workspace();
@@ -19526,6 +19606,7 @@ std::optional<LRESULT> RouteApplicationCommand(
                     state->settings.Values().default_raster_format,
                     state->lifetime.sequence_switch_policy,
                     state->lifetime.sequence_endpoint_policy,
+                    state->settings.Values().sequence_thumbnail_width_dip,
                     OutputColorGuardProfileSetting::Bt709ConservativeYcbcr,
                     state->Workspace().windows.workspace.selected_preset,
                     state->Workspace().windows.workspace.density,

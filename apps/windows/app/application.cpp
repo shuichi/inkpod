@@ -179,6 +179,7 @@ InkpodStatus StopCore(ApplicationHost& state) noexcept {
         }
         workspace->windows.tool_palette = nullptr;
         workspace->windows.layer_palette = nullptr;
+        workspace->windows.sequence_palette = nullptr;
     }
 
     const InkpodStatus task_status = inkpod_task_release(&state.effects.task);

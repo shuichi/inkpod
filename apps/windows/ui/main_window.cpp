@@ -14,6 +14,7 @@
 
 #include "app/resource.h"
 #include "localization.h"
+#include "panes/sequence_pane.h"
 #include "tab_drag.h"
 
 namespace inkpod::windows::ui {
@@ -486,6 +487,12 @@ bool LayoutMainChrome(
         LayoutJobProgress(windows.status_bar);
     }
     const UINT dpi = windows.window == nullptr ? 96U : GetDpiForWindow(windows.window);
+    if (windows.sequence_palette != nullptr
+        && IsWindow(windows.sequence_palette) != FALSE) {
+        windows.workspace.dock_runtime_metrics.sequence_bottom_extent_dip =
+            panes::MeasureSequencePaneBottomExtentDip(
+                windows.sequence_palette, std::max(0, width));
+    }
     const WorkspaceLayoutRects layout = ComputeWorkspaceLayout(
         width,
         height,

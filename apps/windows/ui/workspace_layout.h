@@ -120,6 +120,7 @@ struct WorkspaceLayoutState {
     // Transient measurement only. These values are never persisted.
     int last_client_width{};
     int last_client_height{};
+    DockLayoutRuntimeMetrics dock_runtime_metrics{};
 };
 
 struct WorkspaceLayoutRects {

@@ -122,6 +122,12 @@ struct DockZoneState {
     int extent_dip{};
 };
 
+struct DockLayoutRuntimeMetrics {
+    // Transient measured extent for a singleton Sequence pane in Bottom.
+    // This is presentation state and is deliberately excluded from records.
+    int sequence_bottom_extent_dip{168};
+};
+
 struct DockLayoutRecord {
     std::uint32_t version{2U};
     std::uint32_t pane_count{static_cast<std::uint32_t>(kDockPaneCount)};
@@ -236,6 +242,7 @@ PaneDescriptors() noexcept;
     int width,
     int height,
     unsigned int dpi,
-    const RightToolTabsModel* right_tool_tabs = nullptr) noexcept;
+    const RightToolTabsModel* right_tool_tabs = nullptr,
+    const DockLayoutRuntimeMetrics* runtime_metrics = nullptr) noexcept;
 
 }  // namespace inkpod::windows::ui

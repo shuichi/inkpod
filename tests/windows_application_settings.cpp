@@ -3,11 +3,14 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <span>
 #include <string>
+#include <string_view>
 
 #include "app/resource.h"
 #include "ui/command_catalog.h"
@@ -44,6 +47,7 @@ ApplicationSettings Sample() {
     result.sequence_switch_policy =
         inkpod::app::SequenceCellSwitchPolicy::AutosaveBeforeSwitch;
     result.sequence_endpoint_policy = inkpod::app::SequenceEndpointPolicy::Wrap;
+    result.sequence_thumbnail_width_dip = 88U;
     result.shortcuts = Defaults();
 
     ShortcutProfile custom{};
@@ -91,6 +95,36 @@ bool Contains(const std::string& text, const char* needle) {
     return text.find(needle) != std::string::npos;
 }
 
+bool WriteTextFile(
+    const std::filesystem::path& path, std::string_view text) noexcept {
+    const HANDLE file = CreateFileW(
+        path.c_str(),
+        GENERIC_WRITE,
+        0U,
+        nullptr,
+        CREATE_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+    std::size_t cursor{};
+    bool success = true;
+    while (cursor < text.size()) {
+        const DWORD requested = static_cast<DWORD>(std::min<std::size_t>(
+            text.size() - cursor, std::numeric_limits<DWORD>::max()));
+        DWORD written{};
+        if (WriteFile(
+                file, text.data() + cursor, requested, &written, nullptr) == FALSE
+            || written == 0U) {
+            success = false;
+            break;
+        }
+        cursor += written;
+    }
+    return CloseHandle(file) != FALSE && success;
+}
+
 }  // namespace
 
 int wmain() {
@@ -113,7 +147,8 @@ int wmain() {
         return 1;
     }
     if (!Contains(json, "\"format\": \"inkpod-settings\"")
-        || !Contains(json, "\"formatVersion\": 3")
+        || !Contains(json, "\"formatVersion\": 4")
+        || !Contains(json, "\"sequenceThumbnailWidthDip\": 88")
         || !Contains(json, "\"defaultRasterFormat\": \"tiff\"")
         || !Contains(json, "\"command\": \"file.save\"")
         || !Contains(json, "\"logicalKey\": \"S\"")
@@ -131,6 +166,8 @@ int wmain() {
         || decoded.default_raster_format != sample.default_raster_format
         || decoded.sequence_switch_policy != sample.sequence_switch_policy
         || decoded.sequence_endpoint_policy != sample.sequence_endpoint_policy
+        || decoded.sequence_thumbnail_width_dip
+            != sample.sequence_thumbnail_width_dip
         || decoded.shortcuts.profiles.size() != 2U
         || decoded.shortcuts.profiles[0] != defaults.profiles[0]
         || decoded.shortcuts.profiles[1].name != L"My shortcuts"
@@ -146,12 +183,12 @@ int wmain() {
     }
 
     const std::string wrong_version =
-        "{\"format\":\"inkpod-settings\",\"formatVersion\":2} ";
+        "{\"format\":\"inkpod-settings\",\"formatVersion\":3} ";
     const std::string duplicate =
         "{\"format\":\"inkpod-settings\",\"format\":\"inkpod-settings\","
-        "\"formatVersion\":3}";
+        "\"formatVersion\":4}";
     const std::string unknown =
-        "{\"format\":\"inkpod-settings\",\"formatVersion\":3,"
+        "{\"format\":\"inkpod-settings\",\"formatVersion\":4,"
         "\"mystery\":true}";
     if (DecodeApplicationSettingsJson(wrong_version, defaults, decoded)
         || DecodeApplicationSettingsJson(duplicate, defaults, decoded)
@@ -160,7 +197,7 @@ int wmain() {
     }
 
     const std::string invalid_raster_format =
-        "{\"format\":\"inkpod-settings\",\"formatVersion\":3,"
+        "{\"format\":\"inkpod-settings\",\"formatVersion\":4,"
         "\"saveAndRecovery\":{\"restorePreviousDocuments\":false,"
         "\"defaultRasterFormat\":\"jpeg\"}}";
     if (DecodeApplicationSettingsJson(invalid_raster_format, defaults, decoded)) {
@@ -181,11 +218,47 @@ int wmain() {
         }
     }
     if (!DecodeApplicationSettingsJson(
-            "{\"format\":\"inkpod-settings\",\"formatVersion\":3}",
+            "{\"format\":\"inkpod-settings\",\"formatVersion\":4}",
             defaults,
             decoded)
-        || decoded.default_raster_format != inkpod::app::RasterFileFormatSetting::Png) {
+        || decoded.default_raster_format != inkpod::app::RasterFileFormatSetting::Png
+        || decoded.sequence_thumbnail_width_dip
+            != inkpod::app::kDefaultSequenceThumbnailWidthDip) {
         return 15;
+    }
+
+    for (const std::uint32_t width : {
+             inkpod::app::kMinimumSequenceThumbnailWidthDip,
+             inkpod::app::kDefaultSequenceThumbnailWidthDip,
+             inkpod::app::kMaximumSequenceThumbnailWidthDip}) {
+        ApplicationSettings candidate = sample;
+        candidate.sequence_thumbnail_width_dip = width;
+        std::string encoded;
+        if (!EncodeApplicationSettingsJson(candidate, encoded)
+            || !DecodeApplicationSettingsJson(encoded, defaults, decoded)
+            || decoded.sequence_thumbnail_width_dip != width) {
+            return 17;
+        }
+    }
+    for (const char* width : {"31", "97"}) {
+        const std::string invalid_width =
+            "{\"format\":\"inkpod-settings\",\"formatVersion\":4,"
+            "\"animation\":{\"sequenceCellSwitch\":\"prompt\","
+            "\"sequenceEndpoint\":\"stop\","
+            "\"sequenceThumbnailWidthDip\":" + std::string(width) + "}}";
+        if (DecodeApplicationSettingsJson(invalid_width, defaults, decoded)) {
+            return 19;
+        }
+    }
+    for (const std::uint32_t width : {
+             inkpod::app::kMinimumSequenceThumbnailWidthDip - 1U,
+             inkpod::app::kMaximumSequenceThumbnailWidthDip + 1U}) {
+        ApplicationSettings candidate = sample;
+        candidate.sequence_thumbnail_width_dip = width;
+        std::string encoded;
+        if (EncodeApplicationSettingsJson(candidate, encoded)) {
+            return 18;
+        }
     }
 
     std::wstring settings_path;
@@ -224,29 +297,9 @@ int wmain() {
         std::filesystem::remove_all(directory, error);
         return 9;
     }
-    const HANDLE invalid_file = CreateFileW(
-        file.c_str(),
-        GENERIC_WRITE,
-        0U,
-        nullptr,
-        TRUNCATE_EXISTING,
-        FILE_ATTRIBUTE_NORMAL,
-        nullptr);
-    constexpr char invalid_json[] = "{\"format\":\"inkpod-settings\"}";
-    DWORD written{};
-    if (invalid_file == INVALID_HANDLE_VALUE) {
-        std::filesystem::remove_all(directory, error);
-        return 10;
-    }
-    const bool invalid_written = WriteFile(
-        invalid_file,
-        invalid_json,
-        static_cast<DWORD>(sizeof(invalid_json) - 1U),
-        &written,
-        nullptr) != FALSE;
-    const bool invalid_closed = CloseHandle(invalid_file) != FALSE;
-    if (!invalid_written || written != sizeof(invalid_json) - 1U
-        || !invalid_closed) {
+    constexpr std::string_view invalid_json =
+        "{\"format\":\"inkpod-settings\"}";
+    if (!WriteTextFile(file, invalid_json)) {
         std::filesystem::remove_all(directory, error);
         return 10;
     }
@@ -263,9 +316,99 @@ int wmain() {
         || loaded.sequence_endpoint_policy
             != inkpod::app::SequenceEndpointPolicy::Stop
         || loaded.shortcuts.profiles.size() != defaults.profiles.size()
-        || !loaded.workspaces.empty() || !loaded.saved_workspaces.empty()) {
+        || !loaded.workspaces.empty() || !loaded.saved_workspaces.empty()
+        || GetFileAttributesW(file.c_str()) == INVALID_FILE_ATTRIBUTES) {
         std::filesystem::remove_all(directory, error);
         return 11;
+    }
+
+    for (std::uint32_t version = 1U;
+         version < inkpod::app::kApplicationSettingsFormatVersion;
+         ++version) {
+        const std::string outdated =
+            "{\"format\":\"inkpod-settings\",\"formatVersion\":"
+            + std::to_string(version) + "}";
+        if (!WriteTextFile(file, outdated)) {
+            std::filesystem::remove_all(directory, error);
+            return 20;
+        }
+        loaded = sample;
+        SetLastError(ERROR_SUCCESS);
+        const auto result = inkpod::app::LoadApplicationSettingsFile(
+            file.wstring(), defaults, loaded);
+        const DWORD attributes = GetFileAttributesW(file.c_str());
+        const DWORD delete_error = GetLastError();
+        if (result != inkpod::app::ApplicationSettingsLoadResult::Missing
+            || attributes != INVALID_FILE_ATTRIBUTES
+            || (delete_error != ERROR_FILE_NOT_FOUND
+                && delete_error != ERROR_PATH_NOT_FOUND)
+            || loaded.ui_language
+                != inkpod::windows::ui::UiLanguagePreference::System
+            || loaded.sequence_thumbnail_width_dip
+                != inkpod::app::kDefaultSequenceThumbnailWidthDip
+            || loaded.shortcuts.profiles.size() != defaults.profiles.size()) {
+            std::filesystem::remove_all(directory, error);
+            return 21;
+        }
+    }
+
+    const std::array retained_noncurrent{
+        std::string_view{
+            "{\"format\":\"inkpod-settings\",\"formatVersion\":5}"},
+        std::string_view{
+            "{\"format\":\"inkpod-settings\",\"formatVersion\":0}"},
+        std::string_view{
+            "{\"format\":\"inkpod-settings\",\"formatVersion\":1,"
+            "\"formatVersion\":1}"},
+        std::string_view{
+            "{\"format\":\"other-settings\",\"formatVersion\":1}"},
+        std::string_view{
+            "{\"format\":\"inkpod-settings\",\"formatVersion\":4,"
+            "\"mystery\":true}"},
+    };
+    for (const std::string_view retained : retained_noncurrent) {
+        if (!WriteTextFile(file, retained)) {
+            std::filesystem::remove_all(directory, error);
+            return 22;
+        }
+        loaded = sample;
+        if (inkpod::app::LoadApplicationSettingsFile(
+                file.wstring(), defaults, loaded)
+                != inkpod::app::ApplicationSettingsLoadResult::Invalid
+            || GetFileAttributesW(file.c_str()) == INVALID_FILE_ATTRIBUTES) {
+            std::filesystem::remove_all(directory, error);
+            return 23;
+        }
+    }
+
+    constexpr std::string_view locked_outdated =
+        "{\"format\":\"inkpod-settings\",\"formatVersion\":1}";
+    if (!WriteTextFile(file, locked_outdated)) {
+        std::filesystem::remove_all(directory, error);
+        return 24;
+    }
+    const HANDLE blocker = CreateFileW(
+        file.c_str(),
+        GENERIC_READ,
+        FILE_SHARE_READ,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+    if (blocker == INVALID_HANDLE_VALUE) {
+        std::filesystem::remove_all(directory, error);
+        return 24;
+    }
+    loaded = sample;
+    const auto blocked_result = inkpod::app::LoadApplicationSettingsFile(
+        file.wstring(), defaults, loaded);
+    const bool blocked_file_retained =
+        GetFileAttributesW(file.c_str()) != INVALID_FILE_ATTRIBUTES;
+    const bool blocker_closed = CloseHandle(blocker) != FALSE;
+    if (blocked_result != inkpod::app::ApplicationSettingsLoadResult::IoError
+        || !blocked_file_retained || !blocker_closed) {
+        std::filesystem::remove_all(directory, error);
+        return 25;
     }
     std::filesystem::remove_all(directory, error);
     if (error) {

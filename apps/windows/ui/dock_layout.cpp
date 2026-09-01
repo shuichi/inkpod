@@ -305,6 +305,13 @@ bool IsFixedToolPaletteZone(const DockLayoutModel& model) noexcept {
         && model.PaneCount(DockZone::Left) == 1U;
 }
 
+bool IsFixedSequenceBottomZone(const DockLayoutModel& model) noexcept {
+    const DockPanePlacement* sequence = model.Pane(DockPaneType::Sequence);
+    return sequence != nullptr && sequence->present
+        && sequence->zone == DockZone::Bottom
+        && model.PaneCount(DockZone::Bottom) == 1U;
+}
+
 int MinimumZoneExtent(
     const DockLayoutModel& model, DockZone zone) noexcept {
     int minimum = zone == DockZone::TopContext || zone == DockZone::Bottom
@@ -930,6 +937,9 @@ DockResult DockLayoutModel::SetZoneExtentDip(
     if (zone == DockZone::Left && IsFixedToolPaletteZone(*this)) {
         return DockResult::NoOp;
     }
+    if (zone == DockZone::Bottom && IsFixedSequenceBottomZone(*this)) {
+        return DockResult::NoOp;
+    }
     const int minimum = MinimumZoneExtent(*this, zone);
     const int maximum = zone == DockZone::TopContext || zone == DockZone::Bottom
         ? 480
@@ -1363,7 +1373,8 @@ DockLayoutGeometry ComputeDockLayout(
     int width,
     int height,
     unsigned int dpi,
-    const RightToolTabsModel* right_tool_tabs) noexcept {
+    const RightToolTabsModel* right_tool_tabs,
+    const DockLayoutRuntimeMetrics* runtime_metrics) noexcept {
     DockLayoutGeometry output{};
     for (std::size_t index = 0U; index < kDockPaneCount; ++index) {
         output.panes[index].type = static_cast<DockPaneType>(index);
@@ -1372,6 +1383,7 @@ DockLayoutGeometry ComputeDockLayout(
     height = std::max(0, height);
     const int splitter = std::max(1, ScaleDip(kSplitterDip, dpi));
     const bool fixed_tool_zone = IsFixedToolPaletteZone(model);
+    const bool fixed_sequence_bottom = IsFixedSequenceBottomZone(model);
     std::array<int, kDockedZoneCount> extents{};
     std::array<bool, kDockedZoneCount> active{};
     for (std::size_t index = 0U; index < kDockedZoneCount; ++index) {
@@ -1389,9 +1401,15 @@ DockLayoutGeometry ComputeDockLayout(
                     && zone == DockZone::Left
                 ? FindPaneDescriptor(DockPaneType::Tool)
                 : nullptr;
-            const int extent_dip = tool_descriptor == nullptr
+            int extent_dip = tool_descriptor == nullptr
                 ? std::max(state->extent_dip, minimum)
                 : tool_descriptor->preferred_width_dip;
+            if (zone == DockZone::Bottom && fixed_sequence_bottom) {
+                const int measured = runtime_metrics == nullptr
+                    ? minimum
+                    : runtime_metrics->sequence_bottom_extent_dip;
+                extent_dip = std::max(minimum, measured);
+            }
             extents[index] = ScaleDip(extent_dip, dpi);
         }
     }
@@ -1402,7 +1420,10 @@ DockLayoutGeometry ComputeDockLayout(
         for (const DockZone zone : {DockZone::TopContext, DockZone::Bottom}) {
             const std::size_t index = ZoneIndex(zone);
             if (active[index]) {
-                value += extents[index] + splitter;
+                value += extents[index]
+                    + (zone == DockZone::Bottom && fixed_sequence_bottom
+                           ? 0
+                           : splitter);
             }
         }
         return value;
@@ -1422,7 +1443,7 @@ DockLayoutGeometry ComputeDockLayout(
         ? extents[ZoneIndex(DockZone::Bottom)]
         : 0;
     const int top_gap = top > 0 ? splitter : 0;
-    const int bottom_gap = bottom > 0 ? splitter : 0;
+    const int bottom_gap = bottom > 0 && !fixed_sequence_bottom ? splitter : 0;
     const int body_y = top + top_gap;
     const int body_height = std::max(0, height - body_y - bottom - bottom_gap);
 
@@ -1438,12 +1459,14 @@ DockLayoutGeometry ComputeDockLayout(
     if (bottom > 0) {
         const int y = height - bottom;
         output.zones[ZoneIndex(DockZone::Bottom)] = DockRect{0, y, width, bottom};
-        AddSplitter(
-            output,
-            DockSplitterKind::ZoneExtent,
-            DockZone::Bottom,
-            0U,
-            DockRect{0, y - splitter, width, splitter});
+        if (!fixed_sequence_bottom) {
+            AddSplitter(
+                output,
+                DockSplitterKind::ZoneExtent,
+                DockZone::Bottom,
+                0U,
+                DockRect{0, y - splitter, width, splitter});
+        }
     }
 
     const int minimum_editor_width = ScaleDip(kMinimumEditorWidthDip, dpi);

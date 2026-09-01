@@ -1073,7 +1073,8 @@ WorkspaceLayoutRects ComputeWorkspaceLayout(
         std::max(0, client_width),
         available_height,
         dpi,
-        &state.right_tool_tabs);
+        &state.right_tool_tabs,
+        &state.dock_runtime_metrics);
     output.editor = ToRect(output.dock.editor);
 
     const int strip_width = ScaleWorkspaceDip(

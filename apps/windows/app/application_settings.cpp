@@ -7,6 +7,7 @@
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <initializer_list>
 #include <limits>
 #include <new>
@@ -1791,6 +1792,16 @@ bool BuildSettingsJson(const ApplicationSettings& settings, JsonValue& output) {
         animation,
         "sequenceEndpoint",
         StringValue(std::string(endpoint_policy)));
+    if (settings.sequence_thumbnail_width_dip
+            < kMinimumSequenceThumbnailWidthDip
+        || settings.sequence_thumbnail_width_dip
+            > kMaximumSequenceThumbnailWidthDip) {
+        return false;
+    }
+    Add(
+        animation,
+        "sequenceThumbnailWidthDip",
+        NumberValue(settings.sequence_thumbnail_width_dip));
     Add(output, "animation", std::move(animation));
 
     JsonValue color_management = ObjectValue();
@@ -1888,11 +1899,19 @@ bool ParseSettingsJson(
         std::string_view switch_policy;
         std::string_view endpoint_policy;
         if (!HasOnlyMembers(
-                *animation, {"sequenceCellSwitch", "sequenceEndpoint"})
+                *animation,
+                {"sequenceCellSwitch", "sequenceEndpoint",
+                 "sequenceThumbnailWidthDip"})
             || !StringMember(
                 *animation, "sequenceCellSwitch", switch_policy)
             || !StringMember(
                 *animation, "sequenceEndpoint", endpoint_policy)
+            || !IntegerMember(
+                *animation,
+                "sequenceThumbnailWidthDip",
+                kMinimumSequenceThumbnailWidthDip,
+                kMaximumSequenceThumbnailWidthDip,
+                candidate.sequence_thumbnail_width_dip)
             || !ParseEnum(
                 switch_policy,
                 kSequenceSwitchNames,
@@ -1973,6 +1992,47 @@ ApplicationSettings DefaultSettings(const ShortcutProfileSet& defaults) {
     return result;
 }
 
+enum class SettingsDocumentVersion : std::uint8_t {
+    Current,
+    Outdated,
+    Unrecognized,
+};
+
+SettingsDocumentVersion ClassifySettingsDocumentVersion(
+    std::string_view input) {
+    if (input.empty() || input.size() > kMaximumApplicationSettingsBytes
+        || !ValidUtf8(input)) {
+        return SettingsDocumentVersion::Unrecognized;
+    }
+    JsonValue root{};
+    JsonParser parser(input);
+    if (!parser.Parse(root) || root.kind != JsonKind::Object) {
+        return SettingsDocumentVersion::Unrecognized;
+    }
+    const auto format_count = std::count_if(
+        root.object.begin(), root.object.end(),
+        [](const auto& item) { return item.first == "format"; });
+    const auto version_count = std::count_if(
+        root.object.begin(), root.object.end(),
+        [](const auto& item) { return item.first == "formatVersion"; });
+    std::string_view format;
+    const JsonValue* version = Member(root, "formatVersion");
+    if (format_count != 1 || version_count != 1
+        || !StringMember(root, "format", format) || format != kSettingsFormat
+        || version == nullptr || version->kind != JsonKind::Number) {
+        return SettingsDocumentVersion::Unrecognized;
+    }
+    if (version->number == static_cast<std::int64_t>(
+            kApplicationSettingsFormatVersion)) {
+        return SettingsDocumentVersion::Current;
+    }
+    return version->number > 0
+            && version->number < static_cast<std::int64_t>(
+                kApplicationSettingsFormatVersion)
+        ? SettingsDocumentVersion::Outdated
+        : SettingsDocumentVersion::Unrecognized;
+}
+
 ApplicationSettingsLoadResult ReadSettingsBytes(
     const std::wstring& path, std::string& output) noexcept {
     const HANDLE file = CreateFileW(
@@ -2018,6 +2078,70 @@ ApplicationSettingsLoadResult ReadSettingsBytes(
         return ApplicationSettingsLoadResult::IoError;
     }
     return ApplicationSettingsLoadResult::Loaded;
+}
+
+enum class OutdatedSettingsRemoval : std::uint8_t {
+    Removed,
+    Changed,
+    IoError,
+};
+
+OutdatedSettingsRemoval RemoveOutdatedSettingsIfUnchanged(
+    const std::wstring& path, std::string_view expected) noexcept {
+    const HANDLE file = CreateFileW(
+        path.c_str(),
+        GENERIC_READ | DELETE,
+        FILE_SHARE_READ,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN,
+        nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        const DWORD error = GetLastError();
+        return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND
+            ? OutdatedSettingsRemoval::Changed
+            : OutdatedSettingsRemoval::IoError;
+    }
+    LARGE_INTEGER size{};
+    if (GetFileSizeEx(file, &size) == FALSE) {
+        CloseHandle(file);
+        return OutdatedSettingsRemoval::IoError;
+    }
+    bool unchanged = size.QuadPart >= 0
+        && static_cast<std::uint64_t>(size.QuadPart) == expected.size();
+    bool read_failed = false;
+    std::array<char, 4096U> buffer{};
+    std::size_t cursor{};
+    while (unchanged && cursor < expected.size()) {
+        const DWORD requested = static_cast<DWORD>(std::min<std::size_t>(
+            buffer.size(), expected.size() - cursor));
+        DWORD read{};
+        if (ReadFile(file, buffer.data(), requested, &read, nullptr) == FALSE
+            || read != requested) {
+            read_failed = true;
+            unchanged = false;
+            break;
+        }
+        if (std::memcmp(buffer.data(), expected.data() + cursor, read) != 0) {
+            unchanged = false;
+            break;
+        }
+        cursor += read;
+    }
+    if (!unchanged) {
+        const bool closed = CloseHandle(file) != FALSE;
+        return closed && !read_failed ? OutdatedSettingsRemoval::Changed
+                                      : OutdatedSettingsRemoval::IoError;
+    }
+    FILE_DISPOSITION_INFO disposition{TRUE};
+    const bool marked = SetFileInformationByHandle(
+        file,
+        FileDispositionInfo,
+        &disposition,
+        static_cast<DWORD>(sizeof(disposition))) != FALSE;
+    const bool closed = CloseHandle(file) != FALSE;
+    return marked && closed ? OutdatedSettingsRemoval::Removed
+                            : OutdatedSettingsRemoval::IoError;
 }
 
 bool WriteSettingsBytesAtomic(
@@ -2226,19 +2350,36 @@ ApplicationSettingsLoadResult LoadApplicationSettingsFile(
     const ShortcutProfileSet& defaults,
     ApplicationSettings& output) noexcept {
     try {
-        std::string bytes;
-        const ApplicationSettingsLoadResult result = ReadSettingsBytes(path, bytes);
-        if (result != ApplicationSettingsLoadResult::Loaded) {
-            output = DefaultSettings(defaults);
-            return result;
+        for (std::uint32_t attempt = 0U; attempt < 2U; ++attempt) {
+            std::string bytes;
+            const ApplicationSettingsLoadResult result =
+                ReadSettingsBytes(path, bytes);
+            if (result != ApplicationSettingsLoadResult::Loaded) {
+                output = DefaultSettings(defaults);
+                return result;
+            }
+            if (ClassifySettingsDocumentVersion(bytes)
+                == SettingsDocumentVersion::Outdated) {
+                const OutdatedSettingsRemoval removed =
+                    RemoveOutdatedSettingsIfUnchanged(path, bytes);
+                if (removed == OutdatedSettingsRemoval::Changed) {
+                    continue;
+                }
+                output = DefaultSettings(defaults);
+                return removed == OutdatedSettingsRemoval::Removed
+                    ? ApplicationSettingsLoadResult::Missing
+                    : ApplicationSettingsLoadResult::IoError;
+            }
+            ApplicationSettings candidate{};
+            if (!DecodeApplicationSettingsJson(bytes, defaults, candidate)) {
+                output = DefaultSettings(defaults);
+                return ApplicationSettingsLoadResult::Invalid;
+            }
+            output = std::move(candidate);
+            return ApplicationSettingsLoadResult::Loaded;
         }
-        ApplicationSettings candidate{};
-        if (!DecodeApplicationSettingsJson(bytes, defaults, candidate)) {
-            output = DefaultSettings(defaults);
-            return ApplicationSettingsLoadResult::Invalid;
-        }
-        output = std::move(candidate);
-        return ApplicationSettingsLoadResult::Loaded;
+        output = DefaultSettings(defaults);
+        return ApplicationSettingsLoadResult::IoError;
     } catch (const std::bad_alloc&) {
         return ApplicationSettingsLoadResult::IoError;
     }

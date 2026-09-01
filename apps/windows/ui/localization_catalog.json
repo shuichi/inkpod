@@ -9114,6 +9114,20 @@
       "resource": false
     },
     {
+      "id": "PreferencesSequenceThumbnailWidth",
+      "kind": "text",
+      "ja": "サムネイル幅 (DIP)",
+      "en": "Thumbnail width (DIP)",
+      "resource": false
+    },
+    {
+      "id": "PreferencesSequenceThumbnailWidthInvalid",
+      "kind": "text",
+      "ja": "サムネイル幅は 32～96 DIP の範囲で入力してください。",
+      "en": "Enter a thumbnail width from 32 through 96 DIP.",
+      "resource": false
+    },
+    {
       "id": "PreferencesEndpointStop",
       "kind": "text",
       "ja": "停止する",

@@ -40,7 +40,7 @@ virtual-key、scan-code、modifier bit mask、Base64、binary blob を JSON へ�
 ```json
 {
   "format": "inkpod-settings",
-  "formatVersion": 3,
+  "formatVersion": 4,
   "general": {
     "uiLanguage": "ja-JP"
   },
@@ -50,7 +50,8 @@ virtual-key、scan-code、modifier bit mask、Base64、binary blob を JSON へ�
   },
   "animation": {
     "sequenceCellSwitch": "autosave-before-switch",
-    "sequenceEndpoint": "wrap"
+    "sequenceEndpoint": "wrap",
+    "sequenceThumbnailWidthDip": 64
   },
   "colorManagement": {
     "outputGuardProfile": "bt709-conservative-ycbcr"
@@ -103,11 +104,14 @@ settings decode や起動時の既定解決を custom profile の暗黙 reset �
 workspace の pane、zone、tab、preset も `layer-plane`、`right`、`right-tab-1`、
 `coloring` のような stable かつ人間が理解できる key で表す。
 
-現行の設定 schema は `formatVersion: 3` だけを受理する。
-処理進捗 pane と `window.job.progress` command の廃止に伴い、設定と
-`.inkshortcuts` preset の top-level version をともに 3 へ更新した。旧 version は
-移行せず拒否し、既存の不正・非現行設定は通常終了時に上書きしない。文書の
+現行の設定 schema は `formatVersion: 4` だけを decode する。
+`animation.sequenceThumbnailWidthDip` の追加に伴い通常設定を 4 へ更新した。
+`.inkshortcuts` preset は引き続き version 3 である。旧 version は
+移行または decode せず、下記の識別・削除規則に従う。文書の
 `.inkpod` version、replay epoch、公開 C ABI はこの表示変更では変わらない。
+`animation.sequenceThumbnailWidthDip` は 32～96 DIP の整数で、既定値は 64 DIP
+である。Sequence pane の表示倍率と単独 Bottom dock の実測固定高だけに作用し、
+文書、Core thumbnail、cache key、history、保存形式を変更しない。
 `saveAndRecovery.defaultRasterFormat` は新規セルのラスタ保存形式で、
 `png`（既定値）、`tiff`、`tga`、`bmp` を指定できる。環境設定の一般ページからも
 同じ値を変更できる。この設定は既存文書の保存形式を変更しない。読み込んだ
@@ -122,14 +126,21 @@ Recovery metadata の現行形式は checksummed binary version 2 で、旧形�
 ## Decode and save rules
 
 - missing file または省略可能 section は current build の既定値を使う。
-- duplicate／unknown field、不正 UTF-8、不正 enum、上限超過、trailing data、
-  非現行 `formatVersion` は staged decode で設定全体を拒否する。
+- valid JSON object の top-level に `format` と `formatVersion` が各一つだけあり、
+  `format` が `inkpod-settings`、version が正の整数かつ current 未満なら旧版と識別する。
+  旧版の内容は decode せず、同じ path を削除権付きで再度開き、検出時の byte 列と完全一致
+  することを確認した同じ handle で削除する。削除成功後は missing file と同様に既定値を使う。
+  検証前に file が変わった場合は一度だけ再読込・再判定し、削除または検証の I/O failure は
+  起動 failure とする。
+- duplicate／unknown field、不正 UTF-8、不正 enum、上限超過、trailing data、未来 version、
+  format 不一致、旧版と一意に識別できない非現行 file は staged decode で設定全体を拒否して保持する。
 - 不正な既存ファイルを通常終了時の自動保存で上書きしない。application は既定値で
   継続し、診断を出す。利用者が環境設定を明示適用した場合は current schema で置換できる。
 - 保存は同じ directory に temporary file を完成し、flush、close 後に
   `MoveFileExW` の replace/write-through で置換する。destination を先に truncate しない。
 - 開発中の形式なので旧 HKCU 値、旧 workspace record、
-  `application-settings-v1.bi` からの migration は実装しない。
+  `application-settings-v1.bi` からの migration は実装しない。上記の旧版 JSON 削除は
+  migration／下位互換 reader ではなく、current-only policy の cleanup とする。
 
 `.inkshortcuts` の import/export も同じ readable binding 表現を使い、top-level
 `format` は `inkpod-shortcuts`、current `formatVersion` は `3` とする。v1/v2 は

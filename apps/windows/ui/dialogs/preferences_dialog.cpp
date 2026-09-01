@@ -63,6 +63,7 @@ struct GeneralPageControls final {
     HWND workspace_density_label{};
     HWND sequence_switch_label{};
     HWND sequence_endpoint_label{};
+    HWND sequence_thumbnail_width_label{};
     HWND color_profile_label{};
 };
 
@@ -835,6 +836,8 @@ void LayoutGeneralPage(DialogModel& model, const RECT& page) noexcept {
         ReadableWidth(model, model.general.workspace_density_label, 210, 12),
         ReadableWidth(model, model.general.sequence_switch_label, 210, 12),
         ReadableWidth(model, model.general.sequence_endpoint_label, 210, 12),
+        ReadableWidth(
+            model, model.general.sequence_thumbnail_width_label, 210, 12),
         ReadableWidth(model, model.general.color_profile_label, 210, 12)});
     const int control_x = field_x + label_width + dip(8);
     const int control_width = std::max(
@@ -857,6 +860,24 @@ void LayoutGeneralPage(DialogModel& model, const RECT& page) noexcept {
             y,
             control_width,
             dip(drop_height));
+        y += row_height + row_gap;
+    };
+    const auto place_numeric = [&](HWND label, int edit_id, int spin_id) noexcept {
+        const int spin_width = dip(20);
+        const int numeric_width = std::min(control_width, dip(120));
+        Place(label, field_x, y + dip(2), label_width, label_height);
+        Place(
+            GetDlgItem(model.dialog, edit_id),
+            control_x,
+            y,
+            std::max(1, numeric_width - spin_width),
+            row_height);
+        Place(
+            GetDlgItem(model.dialog, spin_id),
+            control_x + std::max(1, numeric_width - spin_width),
+            y,
+            spin_width,
+            row_height);
         y += row_height + row_gap;
     };
 
@@ -911,6 +932,10 @@ void LayoutGeneralPage(DialogModel& model, const RECT& page) noexcept {
         model.general.sequence_endpoint_label,
         IDC_PREFERENCES_SEQUENCE_ENDPOINT,
         120);
+    place_numeric(
+        model.general.sequence_thumbnail_width_label,
+        IDC_PREFERENCES_SEQUENCE_THUMBNAIL_WIDTH,
+        IDC_PREFERENCES_SEQUENCE_THUMBNAIL_SPIN);
     y += section_gap - row_gap;
 
     place_heading(model.general.section_headings[4]);
@@ -1226,6 +1251,34 @@ void CreateGeneralPage(DialogModel& model) {
         model, kGeneralPage, IDC_PREFERENCES_SEQUENCE_ENDPOINT);
     AddComboText(endpoint, UiStringId::PreferencesEndpointStop);
     AddComboText(endpoint, UiStringId::PreferencesEndpointWrap);
+    model.general.sequence_thumbnail_width_label = AddLabel(
+        model, kGeneralPage, UiStringId::PreferencesSequenceThumbnailWidth);
+    HWND thumbnail_width = AddControl(
+        model,
+        kGeneralPage,
+        WS_EX_CLIENTEDGE,
+        WC_EDITW,
+        L"",
+        ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP,
+        IDC_PREFERENCES_SEQUENCE_THUMBNAIL_WIDTH);
+    HWND thumbnail_spin = AddControl(
+        model,
+        kGeneralPage,
+        0U,
+        UPDOWN_CLASSW,
+        L"",
+        UDS_ARROWKEYS | UDS_SETBUDDYINT,
+        IDC_PREFERENCES_SEQUENCE_THUMBNAIL_SPIN);
+    SendMessageW(
+        thumbnail_spin,
+        UDM_SETBUDDY,
+        reinterpret_cast<WPARAM>(thumbnail_width),
+        0U);
+    SendMessageW(
+        thumbnail_spin,
+        UDM_SETRANGE32,
+        app::kMinimumSequenceThumbnailWidthDip,
+        app::kMaximumSequenceThumbnailWidthDip);
 
     model.general.section_headings[4] = AddSectionHeading(
         model, UiStringId::PreferencesTabColor);
@@ -1496,6 +1549,12 @@ void LoadControls(DialogModel& model) noexcept {
         CB_SETCURSEL,
         static_cast<WPARAM>(model.working.sequence_endpoint_policy) - 1U,
         0U);
+    SendDlgItemMessageW(
+        model.dialog,
+        IDC_PREFERENCES_SEQUENCE_THUMBNAIL_SPIN,
+        UDM_SETPOS32,
+        0U,
+        static_cast<LPARAM>(model.working.sequence_thumbnail_width_dip));
     SendDlgItemMessageW(model.dialog, IDC_PREFERENCES_COLOR_PROFILE, CB_SETCURSEL, 0U, 0U);
     SendDlgItemMessageW(
         model.dialog,
@@ -1505,7 +1564,7 @@ void LoadControls(DialogModel& model) noexcept {
         0U);
 }
 
-void ReadControls(DialogModel& model) noexcept {
+bool ReadControls(DialogModel& model) noexcept {
     const LRESULT language = SendDlgItemMessageW(
         model.dialog, IDC_PREFERENCES_LANGUAGE, CB_GETCURSEL, 0U, 0U);
     if (language >= 0) {
@@ -1543,10 +1602,34 @@ void ReadControls(DialogModel& model) noexcept {
         model.working.sequence_endpoint_policy =
             static_cast<app::SequenceEndpointPolicy>(endpoint + 1);
     }
+    BOOL invalid_width{};
+    const LRESULT width = SendDlgItemMessageW(
+        model.dialog,
+        IDC_PREFERENCES_SEQUENCE_THUMBNAIL_SPIN,
+        UDM_GETPOS32,
+        0U,
+        reinterpret_cast<LPARAM>(&invalid_width));
+    if (invalid_width != FALSE
+        || width < static_cast<LRESULT>(app::kMinimumSequenceThumbnailWidthDip)
+        || width > static_cast<LRESULT>(app::kMaximumSequenceThumbnailWidthDip)) {
+        MessageBoxW(
+            model.dialog,
+            UiText(UiStringId::PreferencesSequenceThumbnailWidthInvalid),
+            UiText(UiStringId::PreferencesTitle),
+            MB_OK | MB_ICONWARNING);
+        SetFocus(GetDlgItem(
+            model.dialog, IDC_PREFERENCES_SEQUENCE_THUMBNAIL_WIDTH));
+        return false;
+    }
+    model.working.sequence_thumbnail_width_dip =
+        static_cast<std::uint32_t>(width);
+    return true;
 }
 
 bool ApplyValues(DialogModel& model, bool closing) noexcept {
-    ReadControls(model);
+    if (!ReadControls(model)) {
+        return false;
+    }
     if (!model.conflicts.empty()) {
         return false;
     }
@@ -2325,6 +2408,35 @@ bool ValidateSmokeLayout(DialogModel& model) noexcept {
             && model.selected_page != kShortcutPage)) {
         return false;
     }
+    const HWND thumbnail_edit = GetDlgItem(
+        model.dialog, IDC_PREFERENCES_SEQUENCE_THUMBNAIL_WIDTH);
+    const HWND thumbnail_spin = GetDlgItem(
+        model.dialog, IDC_PREFERENCES_SEQUENCE_THUMBNAIL_SPIN);
+    int minimum_width{};
+    int maximum_width{};
+    BOOL invalid_width{};
+    const LRESULT current_width = SendMessageW(
+        thumbnail_spin,
+        UDM_GETPOS32,
+        0U,
+        reinterpret_cast<LPARAM>(&invalid_width));
+    SendMessageW(
+        thumbnail_spin,
+        UDM_GETRANGE32,
+        reinterpret_cast<WPARAM>(&minimum_width),
+        reinterpret_cast<LPARAM>(&maximum_width));
+    if (thumbnail_edit == nullptr || thumbnail_spin == nullptr
+        || reinterpret_cast<HWND>(SendMessageW(
+               thumbnail_spin, UDM_GETBUDDY, 0U, 0U)) != thumbnail_edit
+        || minimum_width
+            != static_cast<int>(app::kMinimumSequenceThumbnailWidthDip)
+        || maximum_width
+            != static_cast<int>(app::kMaximumSequenceThumbnailWidthDip)
+        || invalid_width != FALSE
+        || current_width
+            != static_cast<LRESULT>(model.working.sequence_thumbnail_width_dip)) {
+        return false;
+    }
 
     const int selected_page = model.selected_page;
     const int tolerance = Scale(model.dialog, 2);
@@ -2347,19 +2459,18 @@ bool ValidateSmokeLayout(DialogModel& model) noexcept {
             if (item.page != page) {
                 continue;
             }
-            if (!ControlHasReadableFontHeight(model, item.window)) {
-                model.selected_page = selected_page;
-                ShowSelectedPage(model);
-                return false;
-            }
             std::array<wchar_t, 32U> class_name{};
-            if (GetClassNameW(
+            const bool has_class_name = GetClassNameW(
                     item.window,
                     class_name.data(),
-                    static_cast<int>(class_name.size()))
-                    > 0
-                && lstrcmpiW(class_name.data(), WC_STATICW) == 0
-                && !StaticUsesPageBackground(model, item.window)) {
+                    static_cast<int>(class_name.size())) > 0;
+            const bool metric_only_control = has_class_name
+                && lstrcmpiW(class_name.data(), UPDOWN_CLASSW) == 0;
+            if ((!metric_only_control
+                    && !ControlHasReadableFontHeight(model, item.window))
+                || (has_class_name
+                    && lstrcmpiW(class_name.data(), WC_STATICW) == 0
+                    && !StaticUsesPageBackground(model, item.window))) {
                 model.selected_page = selected_page;
                 ShowSelectedPage(model);
                 return false;
@@ -2380,7 +2491,7 @@ bool ValidateSmokeLayout(DialogModel& model) noexcept {
             }
         }
         if (page == kGeneralPage) {
-            const std::array<HWND, 15U> vertical_order{{
+            const std::array<HWND, 16U> vertical_order{{
                 model.general.section_headings[0],
                 GetDlgItem(model.dialog, IDC_PREFERENCES_LANGUAGE),
                 model.general.language_restart,
@@ -2394,6 +2505,8 @@ bool ValidateSmokeLayout(DialogModel& model) noexcept {
                 model.general.section_headings[3],
                 GetDlgItem(model.dialog, IDC_PREFERENCES_SEQUENCE_SWITCH),
                 GetDlgItem(model.dialog, IDC_PREFERENCES_SEQUENCE_ENDPOINT),
+                GetDlgItem(
+                    model.dialog, IDC_PREFERENCES_SEQUENCE_THUMBNAIL_WIDTH),
                 model.general.section_headings[4],
                 GetDlgItem(model.dialog, IDC_PREFERENCES_COLOR_PROFILE)}};
             RECT previous{};

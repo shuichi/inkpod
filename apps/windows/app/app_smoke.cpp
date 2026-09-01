@@ -1714,6 +1714,58 @@ bool VerifyHorizontalSequenceLayout(ApplicationHost& state) noexcept try {
             return false;
         }
     }
+    const auto* retained_width_cells =
+        state.Workspace().sequence_dialog.view.cells.data();
+    const auto* retained_width_labels =
+        state.Workspace().sequence_dialog.item_labels.data();
+    const std::uint64_t retained_thumbnail_generation =
+        state.Workspace().sequence_dialog.view.thumbnail_generation;
+    int previous_extent{};
+    for (const std::uint32_t width : {
+             app::kMinimumSequenceThumbnailWidthDip,
+             app::kDefaultSequenceThumbnailWidthDip,
+             app::kMaximumSequenceThumbnailWidthDip}) {
+        RECT item{};
+        if (!inkpod::windows::ui::panes::SetSequencePaneThumbnailWidthDip(
+                pane, width)) {
+            return false;
+        }
+        const int extent =
+            inkpod::windows::ui::panes::MeasureSequencePaneBottomExtentDip(
+                pane, scale(560));
+        if (SendMessageW(list, LB_GETITEMRECT, 0U,
+                   reinterpret_cast<LPARAM>(&item)) == LB_ERR
+            || item.right - item.left != scale(static_cast<int>(width) + 48)
+            || SendMessageW(list, LB_GETTOPINDEX, 0, 0) != 8
+            || SendMessageW(list, LB_GETCURSEL, 0, 0) != 5
+            || GetFocus() != focused || sequence_list_rebuilds.count != 0U
+            || state.Workspace().sequence_dialog.view.cells.data()
+                != retained_width_cells
+            || state.Workspace().sequence_dialog.item_labels.data()
+                != retained_width_labels
+            || state.Workspace().sequence_dialog.view.thumbnail_generation
+                != retained_thumbnail_generation
+            || (previous_extent != 0 && extent < previous_extent)) {
+            std::fputs("sequence thumbnail-width presentation changed retained state\n",
+                stderr);
+            return false;
+        }
+        previous_extent = extent;
+    }
+    const SIZE landscape =
+        inkpod::windows::ui::panes::ComputeSequenceThumbnailSize(320U, 180U, 96);
+    const SIZE portrait =
+        inkpod::windows::ui::panes::ComputeSequenceThumbnailSize(180U, 320U, 96);
+    const SIZE square =
+        inkpod::windows::ui::panes::ComputeSequenceThumbnailSize(64U, 64U, 96);
+    if (landscape.cx != 96 || landscape.cy != 54
+        || portrait.cx != 54 || portrait.cy != 96
+        || square.cx != 96 || square.cy != 96
+        || !inkpod::windows::ui::panes::SetSequencePaneThumbnailWidthDip(
+            pane, app::kDefaultSequenceThumbnailWidthDip)) {
+        std::fputs("sequence thumbnail aspect-ratio contract failed\n", stderr);
+        return false;
+    }
     UpdateSequencePaneDialog(pane, sample);
     if (sequence_list_rebuilds.count != 0U
         || SendMessageW(list, LB_GETTOPINDEX, 0, 0) != 8) {
@@ -1885,6 +1937,8 @@ int RunSequencePaneSmoke(ApplicationHost& state) noexcept {
             0) != 1
         || !state.Workspace().windows.workspace.dock.IsPaneVisible(
             DockPaneType::Sequence)
+        || state.Workspace().windows.dock_host.SplitterWindow(
+               DockZone::Bottom, DockSplitterKind::ZoneExtent) != nullptr
         || (GetMenuState(menu, IDM_WINDOW_SEQUENCE, MF_BYCOMMAND) & MF_CHECKED) == 0U
         || GetDlgItem(pane, IDC_SEQUENCE_TARGET) == nullptr
         || GetDlgItem(pane, IDC_SEQUENCE_PIN) == nullptr
@@ -6334,7 +6388,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
             != INKPOD_STATUS_OK
         || !QuerySnapshotTransform(state, stroke_transform)
         || ApplyView(state, INKPOD_VIEW_PAN_BY,
-               320.0 - stroke_transform.pan_x, 120.0 - stroke_transform.pan_y)
+               280.0 - stroke_transform.pan_x, 120.0 - stroke_transform.pan_y)
             != INKPOD_STATUS_OK
         || !WaitForSequencePresentation(state, true)
         || !inkpod::renderer::GetCanvasDocumentBounds(

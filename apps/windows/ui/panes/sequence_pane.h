@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "app/application_settings.h"
 #include "ui/thumbnail_cache.h"
 
 namespace inkpod::windows::ui::panes {
@@ -14,6 +15,7 @@ using SequencePaneCommandCallback = void (*)(void* context, UINT command) noexce
 using SequencePaneActivateCallback = void (*)(void* context, std::uint32_t index) noexcept;
 using SequencePaneReorderCallback = void (*)(
     void* context, std::uint32_t from, std::uint32_t to) noexcept;
+using SequencePaneLayoutChangedCallback = void (*)(void* context) noexcept;
 
 struct SequencePaneCellView final {
     std::uint32_t sequence_index{};
@@ -76,16 +78,33 @@ struct SequencePaneDialogState final {
     SequencePaneCommandCallback dispatch_command{};
     SequencePaneActivateCallback activate_cell{};
     SequencePaneReorderCallback reorder_cell{};
+    SequencePaneLayoutChangedCallback layout_changed{};
+    std::uint32_t thumbnail_width_dip{app::kDefaultSequenceThumbnailWidthDip};
     SequencePaneView view;
     std::vector<std::wstring> item_labels;
     std::uint32_t drag_index{UINT32_MAX};
     int wheel_remainder{};
 };
 
+[[nodiscard]] SIZE ComputeSequenceThumbnailSize(
+    std::uint32_t source_width,
+    std::uint32_t source_height,
+    int box_edge_pixels) noexcept;
+
 HWND CreateSequencePaneDialog(
     HINSTANCE instance, HWND owner, SequencePaneDialogState& state) noexcept;
 
 void UpdateSequencePaneDialog(HWND dialog, SequencePaneView view) noexcept;
+
+// Updates presentation metrics only. List contents, selection, focus, viewport,
+// and thumbnail cache identity are retained.
+[[nodiscard]] bool SetSequencePaneThumbnailWidthDip(
+    HWND dialog, std::uint32_t width_dip) noexcept;
+
+// Returns the singleton Bottom dock extent needed for one unwrapped sequence
+// row, including the DockHost tab header, rounded up to whole DIPs.
+[[nodiscard]] int MeasureSequencePaneBottomExtentDip(
+    HWND dialog, int available_width_pixels) noexcept;
 
 // Selection/header-only update; preserves cells, labels, geometry, focus, and
 // the current viewport unless a changed active cell needs to be revealed.

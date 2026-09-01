@@ -25,6 +25,8 @@ struct PreferencesValues final {
         app::SequenceCellSwitchPolicy::Prompt};
     app::SequenceEndpointPolicy sequence_endpoint_policy{
         app::SequenceEndpointPolicy::Stop};
+    std::uint32_t sequence_thumbnail_width_dip{
+        app::kDefaultSequenceThumbnailWidthDip};
     app::OutputColorGuardProfileSetting color_profile{
         app::OutputColorGuardProfileSetting::Bt709ConservativeYcbcr};
     WorkspacePreset workspace_preset{WorkspacePreset::Coloring};

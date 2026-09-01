@@ -18,6 +18,25 @@
 #include "ui/localization.h"
 
 namespace inkpod::windows::ui::panes {
+
+SIZE ComputeSequenceThumbnailSize(
+    std::uint32_t source_width,
+    std::uint32_t source_height,
+    int box_edge_pixels) noexcept {
+    const std::uint64_t width = std::max(UINT32_C(1), source_width);
+    const std::uint64_t height = std::max(UINT32_C(1), source_height);
+    const std::uint64_t edge = static_cast<std::uint64_t>(
+        std::max(1, box_edge_pixels));
+    if (width >= height) {
+        return SIZE{
+            static_cast<LONG>(edge),
+            static_cast<LONG>(std::max(UINT64_C(1), edge * height / width))};
+    }
+    return SIZE{
+        static_cast<LONG>(std::max(UINT64_C(1), edge * width / height)),
+        static_cast<LONG>(edge)};
+}
+
 namespace {
 
 void Dispatch(SequencePaneDialogState& state, UINT command) noexcept {
@@ -27,14 +46,23 @@ void Dispatch(SequencePaneDialogState& state, UINT command) noexcept {
 }
 
 constexpr int kMaximumSequenceRowPixels = 255;
-constexpr int kSequenceColumnDip = 112;
+constexpr int kSequenceColumnExtraDip = 48;
+constexpr int kDockTabHeightDip = 28;
+constexpr int kMinimumSequenceBottomExtentDip = 168;
 
-void LayoutSequencePane(
+int SequenceColumnDip(const SequencePaneDialogState* state) noexcept {
+    return static_cast<int>(state == nullptr
+            ? app::kDefaultSequenceThumbnailWidthDip
+            : state->thumbnail_width_dip)
+        + kSequenceColumnExtraDip;
+}
+
+bool LayoutSequencePane(
     HWND dialog,
     PaneDialogRepaint repaint = PaneDialogRepaint::Complete) noexcept {
     RECT client{};
     if (GetClientRect(dialog, &client) == FALSE) {
-        return;
+        return false;
     }
     const int margin = ScalePaneDip(dialog, 6);
     const int gap = ScalePaneDip(dialog, 4);
@@ -127,7 +155,7 @@ void LayoutSequencePane(
     // change the top item, and must not run if this placement transaction
     // fails and rolls back.
     if (!plan.Commit(PaneDialogRepaint::None)) {
-        return;
+        return false;
     }
     {
         ScopedPaneControlRedrawSuspension metric_redraw(list);
@@ -141,7 +169,7 @@ void LayoutSequencePane(
             SendMessageW(list, LB_SETITEMHEIGHT, 0, row_height);
         }
         SendMessageW(list, LB_SETCOLUMNWIDTH,
-            static_cast<WPARAM>(ScalePaneDip(dialog, kSequenceColumnDip)), 0);
+            static_cast<WPARAM>(ScalePaneDip(dialog, SequenceColumnDip(state))), 0);
         if (first_visible >= 0
             && first_visible < SendMessageW(list, LB_GETCOUNT, 0, 0)) {
             SendMessageW(list, LB_SETTOPINDEX, first_visible, 0);
@@ -150,6 +178,7 @@ void LayoutSequencePane(
     if (repaint == PaneDialogRepaint::Complete) {
         CompletePaneDialogResize(dialog);
     }
+    return true;
 }
 
 void StepSequenceCell(SequencePaneDialogState& state, bool next) noexcept {
@@ -357,6 +386,9 @@ void DrawThumbnail(
     bitmap.bmiHeader.biPlanes = 1U;
     bitmap.bmiHeader.biBitCount = 32U;
     bitmap.bmiHeader.biCompression = BI_RGB;
+    const int previous_mode = SetStretchBltMode(dc, HALFTONE);
+    POINT previous_origin{};
+    SetBrushOrgEx(dc, 0, 0, &previous_origin);
     StretchDIBits(
         dc,
         destination.left,
@@ -371,6 +403,10 @@ void DrawThumbnail(
         &bitmap,
         DIB_RGB_COLORS,
         SRCCOPY);
+    SetBrushOrgEx(dc, previous_origin.x, previous_origin.y, nullptr);
+    if (previous_mode != 0) {
+        SetStretchBltMode(dc, previous_mode);
+    }
     FrameRect(dc, &destination, GetSysColorBrush(COLOR_3DSHADOW));
 }
 
@@ -400,13 +436,12 @@ void DrawCell(
         static_cast<int>(item.rcItem.bottom - item.rcItem.top)
             - padding * 3 - text_height);
     const int side = std::max(1, std::min({available_width, available_height,
-        ScalePaneDip(item.hwndItem, 64)}));
-    const int source_width = std::max(1, static_cast<int>(cell.thumbnail_width));
-    const int source_height = std::max(1, static_cast<int>(cell.thumbnail_height));
-    const int thumbnail_width = std::max(1,
-        source_width >= source_height ? side : side * source_width / source_height);
-    const int thumbnail_height = std::max(1,
-        source_height >= source_width ? side : side * source_height / source_width);
+        ScalePaneDip(
+            item.hwndItem, static_cast<int>(state.thumbnail_width_dip))}));
+    const SIZE thumbnail_size = ComputeSequenceThumbnailSize(
+        cell.thumbnail_width, cell.thumbnail_height, side);
+    const int thumbnail_width = thumbnail_size.cx;
+    const int thumbnail_height = thumbnail_size.cy;
     const int thumbnail_left = item.rcItem.left
         + (item.rcItem.right - item.rcItem.left - thumbnail_width) / 2;
     RECT thumbnail{
@@ -442,15 +477,26 @@ INT_PTR CALLBACK SequencePaneProcedure(
             return TRUE;
         case WM_SIZE:
         case WM_DPICHANGED_AFTERPARENT:
-            LayoutSequencePane(dialog);
+            static_cast<void>(LayoutSequencePane(dialog));
             return TRUE;
         case WM_MEASUREITEM:
             if (wparam == static_cast<WPARAM>(IDC_SEQUENCE_CELLS)) {
                 auto* measure = reinterpret_cast<MEASUREITEMSTRUCT*>(lparam);
                 measure->itemHeight = static_cast<UINT>(
-                    std::min(kMaximumSequenceRowPixels, ScalePaneDip(dialog, 72)));
+                    std::min(
+                        kMaximumSequenceRowPixels,
+                        ScalePaneDip(
+                            dialog,
+                            static_cast<int>(state == nullptr
+                                    ? app::kDefaultSequenceThumbnailWidthDip
+                                    : state->thumbnail_width_dip)
+                                + 12)
+                            + std::max(
+                                ScalePaneDip(dialog, 16),
+                                PaneControlTextHeight(
+                                    GetDlgItem(dialog, IDC_SEQUENCE_CELLS)))));
                 measure->itemWidth = static_cast<UINT>(
-                    ScalePaneDip(dialog, kSequenceColumnDip));
+                    ScalePaneDip(dialog, SequenceColumnDip(state)));
                 return TRUE;
             }
             break;
@@ -542,6 +588,10 @@ HWND CreateSequencePaneDialog(
     if (state.dispatch_command == nullptr || state.activate_cell == nullptr) {
         return nullptr;
     }
+    if (state.thumbnail_width_dip < app::kMinimumSequenceThumbnailWidthDip
+        || state.thumbnail_width_dip > app::kMaximumSequenceThumbnailWidthDip) {
+        state.thumbnail_width_dip = app::kDefaultSequenceThumbnailWidthDip;
+    }
     const HWND dialog = CreateLocalizedDialogParamW(
         instance,
         MAKEINTRESOURCEW(IDD_SEQUENCE_PALETTE),
@@ -569,7 +619,10 @@ HWND CreateSequencePaneDialog(
         GetDlgItem(dialog, IDC_SEQUENCE_MOVE_UP), PaneIconId::Previous));
     static_cast<void>(SetPaneIconButton(
         GetDlgItem(dialog, IDC_SEQUENCE_MOVE_DOWN), PaneIconId::Next));
-    LayoutSequencePane(dialog);
+    if (!LayoutSequencePane(dialog)) {
+        DestroyWindow(dialog);
+        return nullptr;
+    }
     SetWindowTextW(
         GetDlgItem(dialog, IDC_SEQUENCE_CELLS),
         UiText(UiStringId::SequenceAccessibleName));
@@ -600,6 +653,8 @@ void UpdateSequencePaneDialog(HWND dialog, SequencePaneView view) noexcept {
     } catch (const std::bad_alloc&) {
         return;
     }
+    const bool layout_extent_changed =
+        state->view.cut_editable != view.cut_editable;
     const HWND list = GetDlgItem(dialog, IDC_SEQUENCE_CELLS);
     const LRESULT old_first = SendMessageW(list, LB_GETTOPINDEX, 0, 0);
     LRESULT first_visible = old_first;
@@ -678,11 +733,95 @@ void UpdateSequencePaneDialog(HWND dialog, SequencePaneView view) noexcept {
         IDC_SEQUENCE_EMPTY,
         has_sequence ? L"" : state->view.empty_text.c_str());
     ShowWindow(GetDlgItem(dialog, IDC_SEQUENCE_EMPTY), has_sequence ? SW_HIDE : SW_SHOW);
-    LayoutSequencePane(dialog, PaneDialogRepaint::None);
+    static_cast<void>(LayoutSequencePane(
+        dialog, PaneDialogRepaint::None));
     // The layout keeps the preceding viewport; only a committed active-cell
     // change may subsequently scroll just enough to reveal its frame.
     SelectCommittedCell(list, state->view.active_index, first_visible, selection_changed);
     CompletePaneDialogResize(dialog);
+    if (layout_extent_changed && state->layout_changed != nullptr) {
+        state->layout_changed(state->context);
+    }
+}
+
+bool SetSequencePaneThumbnailWidthDip(
+    HWND dialog, std::uint32_t width_dip) noexcept {
+    auto* state = reinterpret_cast<SequencePaneDialogState*>(
+        dialog == nullptr ? 0 : GetWindowLongPtrW(dialog, GWLP_USERDATA));
+    if (state == nullptr
+        || width_dip < app::kMinimumSequenceThumbnailWidthDip
+        || width_dip > app::kMaximumSequenceThumbnailWidthDip) {
+        return false;
+    }
+    if (state->thumbnail_width_dip == width_dip) {
+        return true;
+    }
+    const std::uint32_t previous_width_dip = state->thumbnail_width_dip;
+    state->thumbnail_width_dip = width_dip;
+    if (!LayoutSequencePane(dialog, PaneDialogRepaint::None)) {
+        state->thumbnail_width_dip = previous_width_dip;
+        static_cast<void>(LayoutSequencePane(
+            dialog, PaneDialogRepaint::None));
+        return false;
+    }
+    const HWND list = GetDlgItem(dialog, IDC_SEQUENCE_CELLS);
+    if (list != nullptr) {
+        InvalidateRect(list, nullptr, FALSE);
+    }
+    CompletePaneDialogResize(dialog);
+    return true;
+}
+
+int MeasureSequencePaneBottomExtentDip(
+    HWND dialog, int available_width_pixels) noexcept {
+    const auto* state = reinterpret_cast<const SequencePaneDialogState*>(
+        dialog == nullptr ? 0 : GetWindowLongPtrW(dialog, GWLP_USERDATA));
+    if (state == nullptr) {
+        return kMinimumSequenceBottomExtentDip;
+    }
+    const UINT measured_dpi = GetDpiForWindow(dialog);
+    const UINT dpi = measured_dpi == 0U ? 96U : measured_dpi;
+    const int margin = ScalePaneDip(dialog, 6);
+    const int gap = ScalePaneDip(dialog, 4);
+    const int header_height = ScalePaneDip(dialog, 24);
+    const int button_height = PaneReadableControlHeight(
+        dialog, IDC_SEQUENCE_IMPORT, 24, 4);
+    const int text_height = std::max(
+        ScalePaneDip(dialog, 16),
+        PaneControlTextHeight(GetDlgItem(dialog, IDC_SEQUENCE_CELLS)));
+    const int thumbnail_height = ScalePaneDip(
+        dialog, static_cast<int>(state->thumbnail_width_dip));
+    const int row_height = std::min(
+        kMaximumSequenceRowPixels,
+        thumbnail_height + ScalePaneDip(dialog, 12) + text_height);
+    const int list_frame = GetSystemMetricsForDpi(SM_CYHSCROLL, dpi)
+        + 2 * GetSystemMetricsForDpi(SM_CYBORDER, dpi);
+    const int content_width = std::max(0, available_width_pixels - margin * 2);
+    const std::array<int, 4U> edit_controls{
+        IDC_SEQUENCE_REMOVE,
+        IDC_SEQUENCE_MOVE_UP,
+        IDC_SEQUENCE_MOVE_DOWN,
+        IDC_SEQUENCE_RENUMBER};
+    const std::size_t edit_rows = state->view.cut_editable
+        ? PaneButtonRowCount(dialog, edit_controls, content_width, gap)
+        : 0U;
+    const int edit_height = static_cast<int>(edit_rows) * button_height
+        + std::max(0, static_cast<int>(edit_rows) - 1) * gap;
+    int required_pixels = margin
+        + std::max(header_height, button_height)
+        + gap
+        + row_height
+        + list_frame
+        + margin
+        + ScalePaneDip(dialog, kDockTabHeightDip);
+    if (edit_rows > 0U) {
+        required_pixels += gap + edit_height;
+    }
+    const int rounded_dip = static_cast<int>(
+        (static_cast<std::int64_t>(required_pixels) * 96
+             + static_cast<std::int64_t>(dpi) - 1)
+        / static_cast<std::int64_t>(dpi));
+    return std::max(kMinimumSequenceBottomExtentDip, rounded_dip);
 }
 
 bool UpdateSequencePaneSelection(

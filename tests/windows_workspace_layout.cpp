@@ -812,25 +812,56 @@ int main() {
         || sequence_descriptor.preferred_height_dip != 184
         || sequence_model.Zone(DockZone::Bottom)->extent_dip != 184
         || sequence_model.RestorePane(DockPaneType::Sequence) != DockResult::Ok
-        || sequence_model.SetZoneExtentDip(DockZone::Bottom, 1) != DockResult::Ok
-        || sequence_model.Zone(DockZone::Bottom)->extent_dip != 168
+        || sequence_model.SetZoneExtentDip(DockZone::Bottom, 1)
+            != DockResult::NoOp
+        || sequence_model.Zone(DockZone::Bottom)->extent_dip != 184
         || sequence_model.SetZoneExtentDip(DockZone::Bottom, 1) != DockResult::NoOp) {
         return 145;
     }
-    const auto sequence_minimum = ComputeDockLayout(sequence_model, 1'200, 720, 96U);
-    const auto sequence_minimum_high_dpi = ComputeDockLayout(sequence_model, 2'400, 1'440, 192U);
-    if (sequence_minimum.panes[static_cast<std::size_t>(DockPaneType::Sequence)].bounds.height != 168
+    inkpod::windows::ui::DockLayoutRuntimeMetrics sequence_metrics{};
+    sequence_metrics.sequence_bottom_extent_dip = 213;
+    const auto sequence_minimum = ComputeDockLayout(
+        sequence_model, 1'200, 720, 96U, nullptr, &sequence_metrics);
+    const auto sequence_minimum_high_dpi = ComputeDockLayout(
+        sequence_model, 2'400, 1'440, 192U, nullptr, &sequence_metrics);
+    const auto has_bottom_extent_splitter = [](const auto& geometry) {
+        for (std::size_t index = 0U; index < geometry.splitter_count; ++index) {
+            if (geometry.splitters[index].kind == DockSplitterKind::ZoneExtent
+                && geometry.splitters[index].zone == DockZone::Bottom) {
+                return true;
+            }
+        }
+        return false;
+    };
+    if (sequence_minimum.panes[static_cast<std::size_t>(DockPaneType::Sequence)].bounds.height != 213
         || sequence_minimum_high_dpi.panes[
-            static_cast<std::size_t>(DockPaneType::Sequence)].bounds.height != 336
+            static_cast<std::size_t>(DockPaneType::Sequence)].bounds.height != 426
+        || has_bottom_extent_splitter(sequence_minimum)
         || sequence_model.HidePane(DockPaneType::Sequence) != DockResult::Ok
         || sequence_model.HidePane(DockPaneType::Sequence) != DockResult::NoOp
         || sequence_model.RestorePane(DockPaneType::Sequence) != DockResult::Ok
-        // Restoring the only pane in a zone retains the existing preferred-size
-        // contract; the compact minimum must remain available after reopening.
         || sequence_model.Zone(DockZone::Bottom)->extent_dip != 184
-        || sequence_model.SetZoneExtentDip(DockZone::Bottom, 1) != DockResult::Ok
-        || sequence_model.Zone(DockZone::Bottom)->extent_dip != 168) {
+        || sequence_model.SetZoneExtentDip(DockZone::Bottom, 1)
+            != DockResult::NoOp) {
         return 146;
+    }
+    if (sequence_model.MovePane(DockPaneType::Color, DockZone::Bottom)
+            != DockResult::Ok
+        || sequence_model.SetZoneExtentDip(DockZone::Bottom, 1)
+            != DockResult::Ok
+        || sequence_model.Zone(DockZone::Bottom)->extent_dip != 300) {
+        return 147;
+    }
+    const auto shared_bottom = ComputeDockLayout(
+        sequence_model, 1'200, 720, 96U, nullptr, &sequence_metrics);
+    if (!has_bottom_extent_splitter(shared_bottom)
+        || shared_bottom.zones[static_cast<std::size_t>(DockZone::Bottom)].height
+            != 300
+        || sequence_model.MovePane(DockPaneType::Sequence, DockZone::Right)
+            != DockResult::Ok
+        || sequence_model.SetZoneExtentDip(DockZone::Right, 310)
+            != DockResult::Ok) {
+        return 148;
     }
 
     DockLayoutModel auxiliary_model{};

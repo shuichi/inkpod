@@ -22,6 +22,8 @@ struct MainWindowHandles {
     HWND tool_palette{};
     HWND color_pane{};
     HWND layer_palette{};
+    // Non-owning alias used only to measure the singleton Bottom Sequence pane.
+    HWND sequence_palette{};
     EditorArea* editors{};
     windows::ui::WorkspaceLayoutState workspace{};
     windows::ui::DockHost dock_host{};

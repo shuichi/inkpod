@@ -519,6 +519,19 @@ responsibility for its child layout and vacated background. A geometry-only
 path does not rebuild tabs or lists, resend reset-content messages, recreate
 controls, or silently change selection and focus.
 
+A Bottom zone containing only the Sequence pane is a measured fixed-extent
+exception. The pane measures its current-DPI thumbnail box, three vertical
+image/text paddings, one text line, native horizontal-scrollbar and border
+metrics, page margins, target/import row, visible Cut action rows, and the
+28-DIP DockHost header in device pixels, then rounds the total up to DIPs with
+a 168-DIP floor. `DockLayoutRuntimeMetrics` carries this transient value; it is
+not persisted. The pure dock projection omits both the Bottom zone-extent
+splitter and its four-DIP gap, and `SetZoneExtentDip` is a no-op. Adding another
+Bottom pane or moving Sequence out of Bottom restores the ordinary saved zone
+extent and splitter. Thumbnail-width changes update ListBox item/column metrics
+under redraw suppression without rebuilding item strings, selection, focus,
+viewport, or application-wide thumbnail-cache entries.
+
 DockHost and pane-child layout form one nested presentation transaction for
 affected pane roots that remain children of DockHost, including a root becoming
 Hidden. Before DockHost moves those roots, their tabs, or their splitters, it
@@ -1001,7 +1014,10 @@ Normal previous/next navigation has a separate application-level endpoint
 policy. It is stored once as the readable `animation.sequenceEndpoint` field in
 `%LOCALAPPDATA%\inkpod\Settings\inkpod-settings.json` and is shared by every
 workspace window in the process. A missing field falls back to `Stop`; malformed
-or noncurrent settings reject the staged settings file and use all current defaults.
+or future settings reject the staged settings file and use all current defaults.
+An exact-format, uniquely versioned older settings object is not decoded: the
+loader reopens it with delete access, verifies the same bytes through that handle,
+deletes it through that handle, and then uses current defaults.
 `Stop` and `Wrap` are closed values and are independent of
 motion-check loop state. The menu checked state, configurable shortcut, status,
 and accessibility presentation all read the same `AppLifetimeState` value, so
@@ -1305,9 +1321,12 @@ selection/pane membership; document paths, active strokes, jobs, and document/Co
 identities are excluded. The decoder validates its exact size, counts, enums,
 stable pane/tab IDs, duplicate pane/tab IDs, nonempty tabs, selected/next ID,
 placement bounds, and bounded names. Unknown fields and pane values are rejected,
-and an invalid or unsupported settings file restores defaults without aborting
-startup or automatically overwriting that invalid file. Development builds do
-not migrate old registry workspace records or old settings files. Transient
+and a malformed, foreign, or future settings file restores defaults without aborting
+startup or automatically overwriting that invalid file. An unambiguously identified
+older `inkpod-settings` version is deleted without migration after same-handle byte
+revalidation; deletion failure aborts startup instead of publishing or overwriting
+the candidate. Development builds do not migrate old registry workspace records
+or decode old settings files. Transient
 narrow-window label suppression is never persisted.
 
 The UI thread owns a fixed-capacity `WorkspaceWindowRegistry`. Each heap-stable
