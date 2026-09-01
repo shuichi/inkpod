@@ -19,7 +19,7 @@ inkpod は、アニメーション彩色の作業工程を、長期保守しや�
 
 ## 現在の実装状況
 
-- アプリケーションのバージョンは 0.2.8、Rust／C++ 間の公開 ABI は v25 です。
+- アプリケーションのバージョンは 0.2.10、Rust／C++ 間の公開 ABI は v25 です。
 - ネイティブ形式は `.inkpod` v32（replay epoch 27）、バッチ設定は `.inkbatch` v5 です。フォーマットフリーズ前のため、各形式は現在のバージョンだけを受理します。
 - セル文書とカット記述子は、それぞれ独立した `.inkpod` ファイルとして保存します。カットではセルの追加、除外、並べ替え、範囲採番、専用の Undo／Redo、保存と再オープンまで利用できます。
 - Windows フロントエンドは UI／入力、単一書き込みの Core エンジン、D3D／D2D レンダラーを独立したスレッドで動かし、x64／ARM64 のビルドとポータブル ZIP／未署名 MSIX の生成に対応しています。
@@ -151,15 +151,15 @@ ctest --preset windows-arm-release
 ポータブル ZIP も生成します。Release 成果物は次の場所に作られます。
 
 ```text
-build/windows-x64-release/package/Inkpod-0.2.8-windows-x64.zip
-build/windows-arm-release/package/Inkpod-0.2.8-windows-arm.zip
+build/windows-x64-release/package/Inkpod-0.2.10-windows-x64.zip
+build/windows-arm-release/package/Inkpod-0.2.10-windows-arm.zip
 ```
 
 ZIP 名は三つ組の application version、EXE と MSIX は build number を加えた
 四つ組 version を使用します。ZIP 直下には次の4ファイルだけを収録します。
 
 ```text
-Inkpod-0.2.8-windows-x64.zip
+Inkpod-0.2.10-windows-x64.zip
 ├─ inkpod.exe
 ├─ README.txt
 ├─ LICENSE.txt
@@ -185,7 +185,7 @@ GitHub prerelease、ダウンロードリンク更新までの実行内容だけ
 作成を行いません。
 
 ```powershell
-.\scripts\publish-windows-release.ps1 -Version 0.2.8 -DryRun
+.\scripts\publish-windows-release.ps1 -Version 0.2.10 -DryRun
 ```
 
 内容を確認してから `-Publish` で実行します。release branch は clean かつ
@@ -194,7 +194,7 @@ HTML link 更新をそれぞれ commit/push し、`v<version>` tag と GitHub pr
 を作成するため、通常のローカル build より強い外部変更を行います。
 
 ```powershell
-.\scripts\publish-windows-release.ps1 -Version 0.2.8 -Publish
+.\scripts\publish-windows-release.ps1 -Version 0.2.10 -Publish
 ```
 
 新規セルは 1920 × 1080 の 2 値彩色セルとして作成されます。UI／入力、単一書き込みの Rust Core エンジン、D3D／D2D 描画は、それぞれ独立したスレッドで動作します。描画中のストロークはペンを離す前からプレビューされ、確定時には 1 回分の「元に戻す」単位として記録されます。
