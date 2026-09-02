@@ -42,6 +42,44 @@ if ($parseErrors.Count -ne 0) {
     throw "Release script has PowerShell parse errors: $($parseErrors.Message -join '; ')"
 }
 
+$scriptAst = [System.Management.Automation.Language.Parser]::ParseFile(
+    $scriptPath,
+    [ref] $tokens,
+    [ref] $parseErrors)
+$optionalCommandFunction = @($scriptAst.FindAll({
+            param($node)
+            $node -is [System.Management.Automation.Language.FunctionDefinitionAst] `
+                -and $node.Name -ceq 'Invoke-OptionalCommand'
+        }, $true))
+if ($optionalCommandFunction.Count -ne 1) {
+    throw 'Release script must define exactly one Invoke-OptionalCommand function.'
+}
+Invoke-Expression $optionalCommandFunction[0].Extent.Text
+$missingTagName = '__inkpod_release_automation_missing_tag__'
+$stderrProbe = Invoke-OptionalCommand `
+    -Tool 'git.exe' `
+    -Arguments @(
+        '-C',
+        $resolvedRoot,
+        'rev-parse',
+        "refs/tags/$missingTagName^{commit}")
+if ($stderrProbe.ExitCode -eq 0) {
+    throw 'A failing native probe was not returned as an optional-command miss.'
+}
+$missingTagProbe = Invoke-OptionalCommand `
+    -Tool 'git.exe' `
+    -Arguments @(
+        '-C',
+        $resolvedRoot,
+        'rev-parse',
+        '--verify',
+        '--quiet',
+        "refs/tags/$missingTagName^{commit}")
+if ($missingTagProbe.ExitCode -eq 0 `
+        -or -not [string]::IsNullOrEmpty($missingTagProbe.Output)) {
+    throw 'A missing release tag was not reported as a quiet optional-command miss.'
+}
+
 $cmake = [System.IO.File]::ReadAllText($cmakePath)
 $versionMatch = [regex]::Match(
     $cmake,

@@ -122,6 +122,32 @@ function Invoke-CheckedCommand {
     }
 }
 
+function Invoke-OptionalCommand {
+    param(
+        [Parameter(Mandatory = $true)][string] $Tool,
+        [Parameter(Mandatory = $true)][string[]] $Arguments
+    )
+
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        # Windows PowerShell turns native stderr into an ErrorRecord. Probe
+        # commands intentionally use nonzero exit codes for "not found", so
+        # keep that expected result from becoming a terminating error while
+        # the rest of this release script remains fail-fast.
+        $ErrorActionPreference = 'SilentlyContinue'
+        $output = @(& $Tool @Arguments 2>$null)
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+
+    return [pscustomobject]@{
+        ExitCode = $exitCode
+        Output = ($output -join "`n").Trim()
+    }
+}
+
 function Assert-CommandAvailable {
     param([Parameter(Mandatory = $true)][string] $Name)
 
@@ -483,18 +509,29 @@ try {
         throw "HEAD ($headCommit) is not synchronized with origin/$Branch ($remoteCommit)."
     }
 
-    $localTagCommit = @(& git.exe rev-parse "refs/tags/$tag^{commit}" 2>$null)
-    $localTagExists = $LASTEXITCODE -eq 0
+    $localTagProbe = Invoke-OptionalCommand `
+        -Tool 'git.exe' `
+        -Arguments @('rev-parse', '--verify', '--quiet', "refs/tags/$tag^{commit}")
+    $localTagCommit = $localTagProbe.Output
+    $localTagExists = $localTagProbe.ExitCode -eq 0
     if ($localTagExists) {
-        $localTagCommit = ($localTagCommit -join "`n").Trim()
         if ($requestedVersionValue -gt $currentVersionValue) {
             throw "Tag $tag already exists at $localTagCommit while the source version is still $currentVersion."
         }
     }
 
-    $releaseJson = @(& gh.exe release view $tag --repo $repository `
-            --json tagName,isPrerelease,url,assets 2>$null)
-    $releaseExists = $LASTEXITCODE -eq 0
+    $releaseProbe = Invoke-OptionalCommand `
+        -Tool 'gh.exe' `
+        -Arguments @(
+            'release',
+            'view',
+            $tag,
+            '--repo',
+            $repository,
+            '--json',
+            'tagName,isPrerelease,url,assets')
+    $releaseJson = $releaseProbe.Output
+    $releaseExists = $releaseProbe.ExitCode -eq 0
     if ($releaseExists -and $requestedVersionValue -gt $currentVersionValue) {
         throw "GitHub release $tag already exists while the source version is still $currentVersion."
     }
