@@ -278,7 +278,12 @@ function Get-VersionFileUpdates {
     $text = [System.IO.File]::ReadAllText((Get-RepositoryPath $relativePath))
     $updates[$relativePath] = Update-LockPackageVersions `
         -Text $text `
-        -PackageNames @('inkpod-core', 'inkpod-ffi', 'inkpod-format', 'inkpod-image') `
+        -PackageNames @(
+            'inkpod-core',
+            'inkpod-ffi',
+            'inkpod-format',
+            'inkpod-image',
+            'inkpod-io') `
         -CurrentVersion $CurrentVersion `
         -NewVersion $NewVersion `
         -RelativePath $relativePath
@@ -287,7 +292,7 @@ function Get-VersionFileUpdates {
     $text = [System.IO.File]::ReadAllText((Get-RepositoryPath $relativePath))
     $updates[$relativePath] = Update-LockPackageVersions `
         -Text $text `
-        -PackageNames @('inkpod-core', 'inkpod-format', 'inkpod-image') `
+        -PackageNames @('inkpod-core', 'inkpod-format', 'inkpod-image', 'inkpod-io') `
         -CurrentVersion $CurrentVersion `
         -NewVersion $NewVersion `
         -RelativePath $relativePath
