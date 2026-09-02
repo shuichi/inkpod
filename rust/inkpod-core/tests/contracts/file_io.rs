@@ -3774,8 +3774,14 @@ fn io_003_pair_open_retains_exact_case_companion_paths() {
     );
     direct_job.apply(&mut direct).unwrap();
     save(&mut direct, &manager, &native);
-    #[cfg(not(windows))]
-    assert!(!native.with_extension("png").exists());
+    let lowercase_alias = native.with_extension("png");
+    let (selected_identity, selected_physical) = manager.resolve_identity(&raster).unwrap();
+    let (alias_identity, alias_physical) = manager.resolve_identity(&lowercase_alias).unwrap();
+    assert!(selected_physical);
+    assert!(
+        !alias_physical || alias_identity == selected_identity,
+        "normal save created a distinct lowercase companion"
+    );
 
     let mut pair = Core::new();
     let mut pair_job = FileIoJob::start(
@@ -3799,7 +3805,6 @@ fn io_003_pair_open_retains_exact_case_companion_paths() {
 }
 
 #[test]
-#[cfg(not(windows))]
 fn io_003_pair_open_rejects_case_variant_companion_ambiguity() {
     let files = Files::new();
     let raster = files.image("source.PNG", CommonRasterFormat::Png);
@@ -3815,7 +3820,21 @@ fn io_003_pair_open_rejects_case_variant_companion_ambiguity() {
     );
 
     let raster_alias = raster.with_extension("png");
-    std::fs::copy(&raster, &raster_alias).unwrap();
+    let raster_identity = manager.resolve_identity(&raster).unwrap().0;
+    let (alias_identity, alias_physical) = manager.resolve_identity(&raster_alias).unwrap();
+    if alias_physical && alias_identity == raster_identity {
+        // A case-insensitive volume exposes another spelling of the selected
+        // file, not a second companion candidate.
+        manager.shutdown_and_wait();
+        return;
+    }
+    if !alias_physical {
+        std::fs::copy(&raster, &raster_alias).unwrap();
+    }
+    assert_ne!(
+        manager.resolve_identity(&raster_alias).unwrap().0,
+        raster_identity
+    );
     let untouched = Core::new();
     let mut direct = FileIoJob::start(
         Some(&untouched),

@@ -654,7 +654,7 @@ old frames and background pixels are removed. The English/Japanese visible runs
 exercise the environment DPI; model/layout tests cover 96/120/144/192 DPI.
 Physical high-DPI repaint remains a separate platform check.
 The visible right-pane matrix also adds and removes a pane from a selected tab
-with sufficient height, so all three final geometries and the surviving shrink /
+with sufficient height, so all affected final geometries and the surviving shrink /
 grow round trip are checked together with pane/control identity, no list reset,
 list count/selection/top index, valid scroll state, parent/child update regions, and old-frame
 sentinel erasure. Layout itself does not redirect focus; the explicit show-pane

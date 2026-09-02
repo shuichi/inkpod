@@ -136,17 +136,24 @@ regression covers both directions of a normal-pair reopen and requires each
 resulting snapshot to expose the selected UUID/source-generation identity.
 
 The right-pane product probe previously assumed that Color, Layer and Reference
-could share one selected tab while the fixed Bottom Sequence pane was visible.
-That assumption is false on a small CI desktop, where the production layout
-correctly creates another tab because the three pane minimums do not fit. The
-probe now hides Bottom Sequence only around this visible same-tab transaction
-and restores it afterward; production placement policy and pane minimums are
-unchanged.
+could share one selected tab on every CI desktop. Their 96-DPI minimums plus two
+splitters require 748 physical pixels. The reported CI geometry leaves only
+about 633 pixels in the selected tab even when Bottom Sequence is already
+hidden, so the production layout correctly creates another tab. The visible
+Structure probe now stages Layer as the selected tab's sole
+survivor before adding Reference; the corresponding minimum is 444 pixels and
+fits the small CI work area. It restores the complete DockLayout/right-tab
+snapshot afterward and still exercises the real Reference command, both pane
+HWNDs, survivor shrink/grow, Layer list state and child repaint, focus and
+rejected-transaction rollback. Production placement policy and pane minimums
+are unchanged.
 
 Workspace format, warning-denied clippy and all Rust tests pass. No-profile x64
-Debug and Release builds pass with static CRT and package generation. The x64
-Debug English/Japanese product smokes pass in 474.65/478.07 seconds and no longer
-fail at Structure add. The local sequence-performance run advances through the
+Debug and Release builds pass with static CRT and package generation. After the
+small-desktop fixture correction, the x64 Debug English/Japanese product smokes
+pass in 433.69/458.39 seconds, and the x64 Release counterparts pass in
+73.64/106.49 seconds; none fail at Structure add. The local sequence-performance
+run advances through the
 former document-revision and first-warm-pristine failures, but this 192-DPI host
 cannot acquire foreground even when requested and each visible Present takes
 about five seconds; CTest therefore reaches its 180-second timeout during the
@@ -164,6 +171,14 @@ later cell switches without another `read_dir`; add, delete, rename, observer
 failure, explicit cache clear and eviction all fail closed to enumeration. The
 selected raster/native stamps, recovery revalidation and final TOCTOU proof are
 unchanged.
+
+Cross-platform pair contracts classify case-only path variants by physical file
+identity rather than treating every non-Windows filesystem as case-sensitive.
+On a case-sensitive volume, distinct `source.PNG`/`source.png` identities still
+exercise and require ambiguity rejection. On a case-insensitive volume such as
+the default macOS CI filesystem, the variant is the same selected file and the
+fixture does not copy that file onto itself or require its alias path to be
+absent.
 
 The status bar now reserves `連番読み込み` for initial automatic/explicit
 sequence discovery. Ordinary cell replacement completed before the 50 ms poll
