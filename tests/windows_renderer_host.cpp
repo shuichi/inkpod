@@ -1457,6 +1457,12 @@ bool VerifyPresentationDuringContinuousSnapshots(
             // Replacement/rejection may occur under pressure; accepted latest
             // frames must still be presented before the producer stops.
             (void)sink.Submit(snapshot);
+            // Keep this a continuous producer while giving the UI and renderer
+            // owner threads a deterministic opportunity to observe an accepted
+            // frame. A tight loop can monopolize a low-core-count CI runner until
+            // its own deadline expires, which tests scheduler luck rather than
+            // presentation under sustained submission.
+            Sleep(1U);
         }
         producing.store(false, std::memory_order_release);
         return true;
@@ -1478,9 +1484,14 @@ bool VerifyPresentationDuringContinuousSnapshots(
         Sleep(1U);
     }
     stop.store(true, std::memory_order_release);
-    return WithWindowMessages([&] { return producer.get(); }, false)
-        && presented_while_producing && bounded
-        && WithWindowMessages([&] { return host.WaitQueueIdleForSmokeTest(); }, false);
+    const bool producer_completed =
+        WithWindowMessages([&] { return producer.get(); }, false);
+    // Always drain accepted work, including when an earlier semantic check
+    // failed, so the diagnostic and the following smoke phases observe a stable
+    // queue instead of the short-circuit residue of the final submission.
+    const bool queue_idle = WithWindowMessages(
+        [&] { return host.WaitQueueIdleForSmokeTest(); }, false);
+    return producer_completed && presented_while_producing && bounded && queue_idle;
 }
 
 bool VerifySharedSequenceCacheLimit(

@@ -123,6 +123,34 @@ its compact historical record is retained in [`legacy.md`](legacy.md).
 
 ## Latest representative verification
 
+### Windows renderer/Locator CI synchronization correction (`PERF-001`, `VIEW-003`, `WIN-001`, 2026-09-02)
+
+The continuous-snapshot renderer smoke retains its exact semantic gates: an
+accepted epoch must be presented while submission is active, host work remains
+bounded, and the final queue reaches idle. Its background producer now yields
+briefly after every submission so a low-core-count CI worker can schedule the UI
+and renderer owner threads before the producer's own deadline. The final idle
+fence is evaluated even when an earlier assertion fails, preventing a
+short-circuit from leaving the last accepted item in the failure diagnostic.
+
+The magnified Locator smoke now records the generation advanced by its first
+pointer sample and waits for that exact-or-newer generation to be copied from
+the asynchronous UI mailbox before checking the 9-by-9 RGBA neighborhood. A
+Core owner-lane idle fence alone did not guarantee that the posted UI result had
+already been presented. Production coalescing, stale-generation rejection and
+the five-second bounded smoke deadline are unchanged.
+
+The x64 Release build, static-CRT check and package generation pass. The
+standalone renderer host passes five consecutive runs (7.49, 7.34, 7.48, 7.09
+and 7.15 seconds); the English product smoke passes two consecutive runs (70.03
+and 66.55 seconds), and the previously reproducible Japanese Locator failure
+passes standalone in 100.50 seconds. The complete 48-test x64 Release CTest run
+passes in 230.17 seconds, including renderer host 6.87 seconds, sequence
+performance 67.06 seconds, and English/Japanese product smokes 64.60/71.46
+seconds. The sequence pair conflict and snapshot-sink capacity messages emitted
+inside the product smoke are expected conflict/rollback fault-injection probes;
+the later TGA paired-open assertion passes in the complete run.
+
 ### Windows CI sequence and right-pane smoke correction (`SEQ-001`, `PERF-001`, `WORKSPACE-001`, 2026-09-02)
 
 Pair-backed sequence replacement may install a staged clean document whose

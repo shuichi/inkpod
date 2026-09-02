@@ -15957,6 +15957,8 @@ int RunMagnifiedRasterHitSmoke(ApplicationHost& state) noexcept {
     const int drag_device_x =
         static_cast<int>(std::lround(bounds.left + 4.75 * zoom));
     const int device_y = static_cast<int>(std::lround(bounds.top + 3.75 * zoom));
+    const std::uint64_t locator_generation_before_sample =
+        state.ActiveView().presentation.locator_generation;
     if (SendMessageW(
             state.Workspace().windows.window,
             inkpod::renderer::kCanvasPointerMoved,
@@ -15965,7 +15967,13 @@ int RunMagnifiedRasterHitSmoke(ApplicationHost& state) noexcept {
         || state.engine->WaitIdle() != INKPOD_STATUS_OK) {
         return 858;
     }
-    PumpPendingWindowMessages();
+    const std::uint64_t locator_sample_generation =
+        state.ActiveView().presentation.locator_generation;
+    if (locator_sample_generation <= locator_generation_before_sample
+        || !WaitForLocatorPresentation(
+            state, locator_sample_generation, std::chrono::seconds(5))) {
+        return 858;
+    }
     constexpr std::size_t kLocatorCenterAlpha = ((4U * 9U + 4U) * 4U) + 3U;
     if (!state.ActiveView().presentation.locator_valid
         || state.ActiveView().presentation.locator_neighborhood_width != 9U
