@@ -1,6 +1,6 @@
 use super::raster::{common_to_tile_raster, thumbnail_allocation_bytes, thumbnail_for_raster};
 use super::*;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// Small owned straight-alpha RGBA8 preview of a sequence cell.
@@ -36,6 +36,9 @@ pub struct SequenceCellSource {
     pub raster_file_format: CommonRasterFormat,
     // Runtime-only charge for the tiled image and thumbnail; not replay identity.
     decoded_lease: Option<inkpod_io::DecodedLease>,
+    // Runtime-only identity cache bound to the exact managed decoded capability.
+    // It is excluded from equality, sequence identity, digests, and persistence.
+    cached_asset_id: Arc<OnceLock<AssetId>>,
     pub(super) thumbnail: Arc<Thumbnail>,
     pub(crate) raster: TileRaster,
 }
@@ -177,6 +180,7 @@ impl SequenceCellSource {
             source_generation,
             raster_file_format: CommonRasterFormat::Png,
             decoded_lease: None,
+            cached_asset_id: Arc::new(OnceLock::new()),
             thumbnail,
             dpi_x_milli,
             dpi_y_milli,
@@ -208,6 +212,21 @@ impl SequenceCellSource {
             .map(|lease| lease.reserve_sequence_render(bytes))
             .transpose()
             .map_err(CoreError::from)
+    }
+
+    pub(crate) fn managed_raster_input(
+        &self,
+        manager: &inkpod_io::IoManager,
+        image: &inkpod_io::LoadedImage,
+    ) -> Option<asset::ManagedRasterAssetInput> {
+        let raster_lease = self.decoded_lease.as_ref()?;
+        let payload = manager.retain_decoded_raster(raster_lease, image)?;
+        Some(asset::ManagedRasterAssetInput {
+            payload,
+            raster: self.raster.clone(),
+            raster_lease: raster_lease.clone(),
+            cached_id: Arc::clone(&self.cached_asset_id),
+        })
     }
 }
 

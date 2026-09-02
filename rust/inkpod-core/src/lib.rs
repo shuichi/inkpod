@@ -86,6 +86,8 @@ pub use color_chart::*;
 pub use color_replace::*;
 pub(crate) use coordinate::*;
 pub use core::Core;
+#[cfg(feature = "test-support")]
+pub use core::CowOptimizationCounters;
 pub use cut::*;
 use document::{CellDocument, DocumentIds, LayerNode, PaperSpec, PlaneNode};
 use editor::EditorSessionState;

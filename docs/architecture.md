@@ -145,6 +145,36 @@ document/catalog. Document/history assets are separate authoritative data and
 are never evicted by this cache. Native/recovery files use uncached bounded
 streaming with the existing 1 GiB limit.
 
+For a sidecar-less Sequence pair target, the final post-recovery `LoadedImage`
+may reuse the catalog source only through an exact runtime capability. A
+`DecodedLease` records the originating manager, complete stamp, cache
+generation, format, raster metadata, payload length, and a weak allocation
+identity. The weak identity does not pin every catalog image. If the final image
+still proves the same allocation, `RetainedDecodedRaster` gives the staged Core
+a pathless immutable dense payload with its existing decoded-budget charge.
+Cache clear/reload, force reload, another manager, or any descriptor mismatch is
+ordinary ineligibility and uses the unchanged owned import. Existing sidecars
+and recovery artifacts are fully replayed and never enter this decision.
+
+The managed builder uses the same stable-ID order, Genesis/editor baseline,
+pair plan, validation, and publication as the owned builder. Its `AssetRecord`
+retains the exact dense payload and the source's derived tile lease, while the
+Genesis and editable MainLine share a cloned `TileRaster`. `TileRaster` clones
+share an `Arc<BTreeMap<...>>` as well as each tile allocation; the first
+effective write detaches the map and only the touched tile. Asset save/replay
+still emits and validates complete canonical bytes, so native v32, replay epoch
+27, digests, history, savepoints, and the C ABI are unchanged. A private
+test-support counter distinguishes managed reuse from owned fallback and records
+copy/hash/materialization work; this classification is not semantic state and
+is absent from production Core storage.
+
+Pair-target adoption remains independent of that optimization classification.
+After the common resolver has proved a staged pair target, the existing restore
+path invalidates the outgoing document and re-registers the selected source as
+pristine for sidecar replay, recovery, owned fallback, and managed reuse alike.
+The existing edit/preview/revision/view-mode invalidation checks remain the sole
+subsequent admission fence.
+
 The same manager also enforces the CPU sequence composition cache's separate
 8-source / 128-MiB ceiling inside the decoded total. `DecodedLease` reservations
 count pending preparation, retained compositions, and live snapshot/tile owners

@@ -8,6 +8,7 @@ use crate::job::{BatchOutput, JobOutput};
 use crate::{
     CacheStats, DecodedLease, FileIdentity, FileStamp, ImageBatch, ImageBatchItem, IoConfig,
     IoError, IoJob, IoResult, JobContext, JobPhase, JobState, LoadedBytes, LoadedImage,
+    RetainedDecodedRaster,
 };
 use inkpod_format::{
     CommonRasterFormat, common_raster_decode_allocation_limit, decode_common_raster,
@@ -127,6 +128,22 @@ impl IoManager {
             ));
         }
         source.reserve_derived(bytes)
+    }
+
+    /// Retains canonical decoded pixels only when a derived source capability
+    /// and the final loaded image identify the exact same manager-owned decoded
+    /// allocation and complete source metadata.
+    ///
+    /// Ineligibility is an ordinary cache miss and has no side effects. The
+    /// returned value is pathless, immutable, shares the existing decoded budget
+    /// charge, and remains valid after cache invalidation or manager shutdown.
+    #[must_use]
+    pub fn retain_decoded_raster(
+        &self,
+        capability: &DecodedLease,
+        image: &LoadedImage,
+    ) -> Option<RetainedDecodedRaster> {
+        capability.retain_exact(&self.inner, image)
     }
 
     pub(crate) fn check_running(&self, context: &JobContext) -> IoResult<()> {

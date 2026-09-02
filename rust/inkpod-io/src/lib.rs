@@ -20,7 +20,7 @@ pub use backend::{FileIdentity, FileStamp};
 pub use cache::{CacheStats, MAX_SEQUENCE_RENDER_ALLOCATIONS, MAX_SEQUENCE_RENDER_BYTES};
 pub use config::IoConfig;
 pub use error::{IoError, IoResult};
-pub use image::{DecodedLease, LoadedBytes, LoadedImage};
+pub use image::{DecodedLease, LoadedBytes, LoadedImage, RetainedDecodedRaster};
 pub use job::{ImageBatch, ImageBatchItem, IoJob, JobContext, JobPhase, JobProgress, JobState};
 pub use manager::IoManager;
 #[cfg(any(test, feature = "test-support"))]

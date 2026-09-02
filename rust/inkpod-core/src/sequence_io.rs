@@ -153,6 +153,24 @@ impl SequenceSwitchSnapshot {
         Ok(())
     }
 
+    pub(crate) fn managed_target_raster(
+        &self,
+        manager: &inkpod_io::IoManager,
+        image: &inkpod_io::LoadedImage,
+    ) -> Result<crate::asset::ManagedRasterDecision, CoreError> {
+        let source = self
+            .document
+            .core
+            .sequence
+            .as_ref()
+            .and_then(|sequence| sequence.cells.get(self.request.target_index as usize))
+            .ok_or(CoreError::InvalidState("sequence switch request is stale"))?;
+        Ok(source.managed_raster_input(manager, image).map_or(
+            crate::asset::ManagedRasterDecision::Ineligible,
+            crate::asset::ManagedRasterDecision::Reuse,
+        ))
+    }
+
     /// Prepares the old source recovery and a fully validated target without I/O.
     ///
     /// A supplied recovery must have the captured target UUID. Otherwise the

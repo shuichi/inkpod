@@ -1,10 +1,10 @@
 use crate::cache::{BudgetKind, Reservation, SequenceRenderReservation};
 use crate::manager::ManagerInner;
 use crate::{FileIdentity, FileStamp, IoResult};
-use inkpod_format::{CommonRaster, CommonRasterFormat};
+use inkpod_format::{CommonRaster, CommonRasterFormat, CommonRasterInfo};
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 struct Charged<T> {
     value: T,
@@ -58,6 +58,16 @@ impl ImageLease {
     }
 }
 
+#[derive(Clone)]
+struct DecodedSourceProof {
+    allocation: Weak<Charged<CommonRaster>>,
+    stamp: FileStamp,
+    generation: u64,
+    format: CommonRasterFormat,
+    info: CommonRasterInfo,
+    payload_length: u64,
+}
+
 /// Reservation retained by a consumer-owned tiled/derived image. Cloning shares
 /// one charge. A consumer must keep this lease alive for the copied allocation's
 /// entire lifetime; dropping the linear source does not release this charge.
@@ -72,6 +82,10 @@ struct DerivedCharge {
     _slot: Arc<Reservation>,
     // Cache entries never own derived leases, so retaining this owner is acyclic.
     cache_owner: Arc<ManagerInner>,
+    // Weak allocation identity keeps a catalog-derived capability from pinning
+    // every dense decoded source. Exact reuse is possible only while the same
+    // immutable decoded allocation remains alive in the originating manager.
+    source: DecodedSourceProof,
 }
 
 impl DecodedLease {
@@ -82,6 +96,14 @@ impl DecodedLease {
             _reservation: reservation,
             _slot: Arc::clone(&source.source.lease.0.slot),
             cache_owner: Arc::clone(&source.cache_owner),
+            source: DecodedSourceProof {
+                allocation: Arc::downgrade(&source.raster.0),
+                stamp: source.source.stamp,
+                generation: source.source.generation,
+                format: source.format,
+                info: source.raster().info,
+                payload_length: source.raster().pixels.len() as u64,
+            },
         }))
     }
 
@@ -113,6 +135,7 @@ impl DecodedLease {
             _reservation: reservation,
             _slot: Arc::clone(&self.0._slot),
             cache_owner: Arc::clone(&self.0.cache_owner),
+            source: self.0.source.clone(),
         })))
     }
 
@@ -120,6 +143,30 @@ impl DecodedLease {
     #[must_use]
     pub fn bytes(&self) -> u64 {
         self.0.bytes
+    }
+
+    pub(crate) fn retain_exact(
+        &self,
+        manager: &Arc<ManagerInner>,
+        image: &LoadedImage,
+    ) -> Option<RetainedDecodedRaster> {
+        if !Arc::ptr_eq(manager, &self.0.cache_owner)
+            || !Arc::ptr_eq(manager, &image.cache_owner)
+            || self.0.source.stamp != image.source.stamp
+            || self.0.source.generation != image.source.generation
+            || self.0.source.format != image.format
+            || self.0.source.info != image.raster().info
+            || self.0.source.payload_length != image.raster().pixels.len() as u64
+        {
+            return None;
+        }
+        let source = self.0.source.allocation.upgrade()?;
+        if !Arc::ptr_eq(&source, &image.raster.0) {
+            return None;
+        }
+        Some(RetainedDecodedRaster {
+            raster: image.raster.clone(),
+        })
     }
 }
 
@@ -129,6 +176,42 @@ impl fmt::Debug for DecodedLease {
             .debug_struct("DecodedLease")
             .field("bytes", &self.0.bytes)
             .finish()
+    }
+}
+
+/// Pathless immutable canonical pixels retained from one exact decoded image.
+///
+/// Values can only be created by [`IoManager::retain_decoded_raster`] after the
+/// originating derived capability and a final [`LoadedImage`] prove the same
+/// manager, file stamp, cache generation, format, metadata, and allocation.
+/// Cloning shares the decoded allocation and its existing budget charge. No
+/// encoded bytes, filesystem path, file handle, or mutable pixel access escapes.
+#[derive(Clone)]
+pub struct RetainedDecodedRaster {
+    raster: ImageLease,
+}
+
+impl RetainedDecodedRaster {
+    /// Returns immutable canonical decoded metadata.
+    #[must_use]
+    pub fn info(&self) -> CommonRasterInfo {
+        self.raster.raster().info
+    }
+
+    /// Borrows tightly packed top-to-bottom canonical decoded pixels.
+    #[must_use]
+    pub fn pixels(&self) -> &[u8] {
+        &self.raster.raster().pixels
+    }
+}
+
+impl fmt::Debug for RetainedDecodedRaster {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RetainedDecodedRaster")
+            .field("info", &self.info())
+            .field("payload_length", &self.pixels().len())
+            .finish_non_exhaustive()
     }
 }
 

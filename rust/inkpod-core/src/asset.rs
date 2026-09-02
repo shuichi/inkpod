@@ -6,7 +6,8 @@
 
 use crate::{CoreError, MAX_RASTER_DIMENSION, PixelFormat, PixelValue, TileRaster};
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
+use std::fmt;
+use std::sync::{Arc, OnceLock};
 
 const ASSET_DIGEST_CONTEXT: &str = "org.inkpod.digest.asset.v1";
 const ASSET_SCHEMA_VERSION: u32 = 1;
@@ -240,12 +241,60 @@ pub struct AssetStoreUsage {
     pub total_reference_count: u64,
 }
 
+#[derive(Clone)]
+enum AssetPayload {
+    Owned(Arc<[u8]>),
+    RetainedDecoded(inkpod_io::RetainedDecodedRaster),
+}
+
+impl AssetPayload {
+    fn as_slice(&self) -> &[u8] {
+        match self {
+            Self::Owned(payload) => payload,
+            Self::RetainedDecoded(payload) => payload.pixels(),
+        }
+    }
+}
+
+impl fmt::Debug for AssetPayload {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AssetPayload")
+            .field(
+                "backing",
+                &match self {
+                    Self::Owned(_) => "owned",
+                    Self::RetainedDecoded(_) => "retained-decoded",
+                },
+            )
+            .field("length", &self.as_slice().len())
+            .finish()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ManagedRasterAssetInput {
+    pub(crate) payload: inkpod_io::RetainedDecodedRaster,
+    pub(crate) raster: TileRaster,
+    pub(crate) raster_lease: inkpod_io::DecodedLease,
+    pub(crate) cached_id: Arc<OnceLock<AssetId>>,
+}
+
+pub(crate) enum ManagedRasterDecision {
+    NotRequested,
+    Ineligible,
+    Reuse(ManagedRasterAssetInput),
+}
+
 #[derive(Debug)]
 pub(crate) struct AssetRecord {
     id: AssetId,
     descriptor: AssetDescriptor,
-    payload: Arc<[u8]>,
+    payload: AssetPayload,
     raster: Option<Arc<TileRaster>>,
+    // The source TileRaster and every COW clone share this one derived budget
+    // charge. Keeping it with the asset survives snapshots that omit Sequence.
+    _runtime_raster_lease: Option<inkpod_io::DecodedLease>,
 }
 
 impl AssetRecord {
@@ -258,7 +307,7 @@ impl AssetRecord {
     }
 
     pub(crate) fn payload(&self) -> &[u8] {
-        &self.payload
+        self.payload.as_slice()
     }
 
     pub(crate) fn raster(&self) -> Option<&Arc<TileRaster>> {
@@ -364,11 +413,46 @@ impl AssetStore {
         let record = Arc::new(AssetRecord {
             id,
             descriptor,
-            payload: Arc::from(input.pixels),
+            payload: AssetPayload::Owned(Arc::from(input.pixels)),
             raster: Some(Arc::new(raster)),
+            _runtime_raster_lease: None,
         });
         self.insert_new(Arc::clone(&record))?;
         Ok(record)
+    }
+
+    pub(crate) fn ingest_managed_raster(
+        &mut self,
+        input: ManagedRasterAssetInput,
+    ) -> Result<(Arc<AssetRecord>, u64), CoreError> {
+        let descriptor = validate_managed_raster_input(&input)?;
+        let (id, hashed_bytes) = if let Some(id) = input.cached_id.get().copied() {
+            (id, 0)
+        } else {
+            let id = canonical_asset_id(descriptor, input.payload.pixels())?;
+            if let Err(candidate) = input.cached_id.set(id)
+                && input.cached_id.get().copied() != Some(candidate)
+            {
+                return Err(CoreError::InvalidState(
+                    "managed raster cached asset identity changed",
+                ));
+            }
+            (id, descriptor.logical_payload_length)
+        };
+        if let Some(existing) = self.records.get(&id) {
+            return validate_deduplicated(existing, descriptor, input.payload.pixels())
+                .map(|record| (record, hashed_bytes));
+        }
+        self.ensure_new_asset_capacity(descriptor.logical_payload_length)?;
+        let record = Arc::new(AssetRecord {
+            id,
+            descriptor,
+            payload: AssetPayload::RetainedDecoded(input.payload),
+            raster: Some(Arc::new(input.raster)),
+            _runtime_raster_lease: Some(input.raster_lease),
+        });
+        self.insert_new(Arc::clone(&record))?;
+        Ok((record, hashed_bytes))
     }
 
     pub(crate) fn ingest_tile_raster(
@@ -393,8 +477,9 @@ impl AssetStore {
         let record = Arc::new(AssetRecord {
             id,
             descriptor,
-            payload: Arc::from(input.payload),
+            payload: AssetPayload::Owned(Arc::from(input.payload)),
             raster: None,
+            _runtime_raster_lease: None,
         });
         self.insert_new(Arc::clone(&record))?;
         Ok(record)
@@ -588,12 +673,70 @@ fn validate_deduplicated(
     descriptor: AssetDescriptor,
     payload: &[u8],
 ) -> Result<Arc<AssetRecord>, CoreError> {
-    if existing.descriptor != descriptor || existing.payload.as_ref() != payload {
+    if existing.descriptor != descriptor || existing.payload() != payload {
         return Err(CoreError::InvalidState(
             "asset digest collision has mismatched canonical content",
         ));
     }
     Ok(Arc::clone(existing))
+}
+
+fn validate_managed_raster_input(
+    input: &ManagedRasterAssetInput,
+) -> Result<AssetDescriptor, CoreError> {
+    let info = input.payload.info();
+    if info.width == 0
+        || info.height == 0
+        || info.width > MAX_RASTER_DIMENSION
+        || info.height > MAX_RASTER_DIMENSION
+        || !matches!(
+            info.pixel_format,
+            PixelFormat::StraightRgba8 | PixelFormat::StraightRgba16
+        )
+    {
+        return Err(CoreError::InvalidArgument(
+            "managed raster metadata is outside canonical bounds",
+        ));
+    }
+    if input.raster.width() != info.width
+        || input.raster.height() != info.height
+        || input.raster.format() != info.pixel_format
+        || input
+            .raster
+            .allocated_coords()
+            .any(|coord| input.raster.tile_revision(coord) != MATERIALIZED_ASSET_REVISION)
+    {
+        return Err(CoreError::InvalidState(
+            "managed raster tile source does not match its decoded capability",
+        ));
+    }
+    let (color_space, alpha_semantics) = canonical_raster_semantics(info.pixel_format)?;
+    let canonical_stride = u64::from(info.width)
+        .checked_mul(info.pixel_format.bytes_per_pixel() as u64)
+        .ok_or(CoreError::InvalidArgument("asset stride overflows"))?;
+    let logical_element_count = u64::from(info.width)
+        .checked_mul(u64::from(info.height))
+        .ok_or(CoreError::InvalidArgument("asset element count overflows"))?;
+    let logical_payload_length = canonical_stride
+        .checked_mul(u64::from(info.height))
+        .ok_or(CoreError::InvalidArgument("asset payload length overflows"))?;
+    validate_payload_bound(logical_payload_length)?;
+    if input.payload.pixels().len() as u64 != logical_payload_length {
+        return Err(CoreError::InvalidArgument(
+            "managed raster payload length does not match its descriptor",
+        ));
+    }
+    Ok(AssetDescriptor {
+        kind: AssetKind::CanonicalRaster,
+        pixel_format: Some(info.pixel_format),
+        color_space,
+        alpha_semantics: Some(alpha_semantics),
+        width: Some(info.width),
+        height: Some(info.height),
+        canonical_stride: Some(canonical_stride),
+        logical_element_count,
+        logical_payload_length,
+    })
 }
 
 fn validate_expected_id(expected: Option<AssetId>, actual: AssetId) -> Result<(), CoreError> {
@@ -1307,7 +1450,12 @@ mod tests {
             assert_eq!(copied.descriptor(), original.descriptor());
             assert_eq!(copied.payload(), original.payload());
             assert!(!Arc::ptr_eq(&copied, &original));
-            assert!(!Arc::ptr_eq(&copied.payload, &original.payload));
+            match (&copied.payload, &original.payload) {
+                (AssetPayload::Owned(copied), AssetPayload::Owned(original)) => {
+                    assert!(!Arc::ptr_eq(copied, original));
+                }
+                _ => panic!("detached owned asset changed payload backing kind"),
+            }
             match (copied.raster(), original.raster()) {
                 (Some(copied), Some(original)) => assert!(!Arc::ptr_eq(copied, original)),
                 (None, None) => {}

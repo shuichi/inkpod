@@ -115,6 +115,8 @@ impl Core {
             native_opaque_sections: Vec::new(),
             last_open_strategy: NativeOpenStrategy::NotOpened,
             canonical_invocation_active: false,
+            #[cfg(feature = "test-support")]
+            cow_optimization_counters: CowOptimizationCounters::default(),
         }
     }
 
@@ -291,6 +293,25 @@ pub(super) struct SequencePreservationBaseline {
     editor_revision: EditorRevision,
 }
 
+#[cfg(feature = "test-support")]
+/// Test-support observations for the current staged sequence raster-pair import.
+///
+/// These counters describe runtime work only. They are excluded from document
+/// state, persistence, replay, digests, history, savepoints, and the C ABI.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct CowOptimizationCounters {
+    /// Exact managed sidecar-less imports completed by this Core.
+    pub cow_hits: u64,
+    /// Ineligible managed candidates that completed through the owned fallback.
+    pub cow_fallbacks: u64,
+    /// Canonical dense bytes copied by the owned fallback.
+    pub dense_payload_copy_bytes: u64,
+    /// Canonical payload bytes hashed while assigning an asset identity.
+    pub asset_hash_bytes: u64,
+    /// Pixels visited by full asset-to-tile materialization.
+    pub full_tile_materialization_pixels: u64,
+}
+
 /// Single-writer application core. Document and view revisions are independent.
 ///
 /// Cloning shares immutable COW payloads but creates an independent runtime file
@@ -352,6 +373,8 @@ pub struct Core {
     pub(super) native_opaque_sections: Vec<NativeSection>,
     pub(super) last_open_strategy: NativeOpenStrategy,
     pub(super) canonical_invocation_active: bool,
+    #[cfg(feature = "test-support")]
+    pub(super) cow_optimization_counters: CowOptimizationCounters,
 }
 
 impl Clone for Core {
@@ -460,8 +483,54 @@ impl Core {
             native_opaque_sections: self.native_opaque_sections.clone(),
             last_open_strategy: self.last_open_strategy,
             canonical_invocation_active: self.canonical_invocation_active,
+            #[cfg(feature = "test-support")]
+            cow_optimization_counters: self.cow_optimization_counters,
         }
     }
+
+    #[cfg(feature = "test-support")]
+    /// Returns non-semantic COW work observations for contract tests and benchmarks.
+    #[must_use]
+    pub const fn cow_optimization_counters(&self) -> CowOptimizationCounters {
+        self.cow_optimization_counters
+    }
+
+    #[cfg(feature = "test-support")]
+    pub(crate) fn record_cow_hit(&mut self, asset_hash_bytes: u64) {
+        self.cow_optimization_counters.cow_hits =
+            self.cow_optimization_counters.cow_hits.saturating_add(1);
+        self.cow_optimization_counters.asset_hash_bytes = self
+            .cow_optimization_counters
+            .asset_hash_bytes
+            .saturating_add(asset_hash_bytes);
+    }
+
+    #[cfg(not(feature = "test-support"))]
+    pub(crate) const fn record_cow_hit(&mut self, _asset_hash_bytes: u64) {}
+
+    #[cfg(feature = "test-support")]
+    pub(crate) fn record_cow_fallback(&mut self, payload_bytes: u64, pixels: u64) {
+        self.cow_optimization_counters.cow_fallbacks = self
+            .cow_optimization_counters
+            .cow_fallbacks
+            .saturating_add(1);
+        self.cow_optimization_counters.dense_payload_copy_bytes = self
+            .cow_optimization_counters
+            .dense_payload_copy_bytes
+            .saturating_add(payload_bytes);
+        self.cow_optimization_counters.asset_hash_bytes = self
+            .cow_optimization_counters
+            .asset_hash_bytes
+            .saturating_add(payload_bytes);
+        self.cow_optimization_counters
+            .full_tile_materialization_pixels = self
+            .cow_optimization_counters
+            .full_tile_materialization_pixels
+            .saturating_add(pixels);
+    }
+
+    #[cfg(not(feature = "test-support"))]
+    pub(crate) const fn record_cow_fallback(&mut self, _payload_bytes: u64, _pixels: u64) {}
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -117,6 +117,30 @@ That result is retained separately and does not meet the foreground latency
 target. It establishes a slow background case, not a diagnosis of the earlier
 unobserved run or proof of a particular OS/driver cause.
 
+## 2026-09-02 COW construction follow-up
+
+The current native v32/replay epoch 27 implementation adds an exact-provenance
+construction optimization for sidecar-less Sequence targets. It retains the
+decoded allocation and clones the catalog tile map only when manager, complete
+file stamp, decode generation, format, metadata and allocation all match. Every
+mismatch takes the ordinary owned import. This classification is used only for
+the optimization choice and test-support counters; pair authority and the
+existing resolver-proven pristine re-registration do not depend on it.
+
+The Core contract records zero dense-copy bytes and zero full tile
+materialization on the managed path, exact 16-byte/four-pixel work on the forced
+fallback, and zero warm AssetId hashing on A–B–A. Both paths have byte-identical
+native output and identical document/Genesis/asset/editor/history semantics,
+including after decoded-cache clear and manager shutdown.
+
+A single current x64 Release product run at 1280×960, 192 DPI and 60 Hz passes
+both 64-switch scenarios in 39.02 seconds. Every measured switch is foreground;
+warm reads, decodes and uploads are zero, snapshots remain one per step, and all
+50 accepted reversal intents commit. A–B–A / A–B–C–B–A handler p50 is
+12.303/12.519 ms and first-Present p95 is 260.862/249.704 ms. This is current
+semantic and diagnostic evidence only: it neither replaces the approved
+five-process series above nor changes its workload or envelope.
+
 ## Verification
 
 The final source passes `cargo fmt --check`, strict workspace/all-target/

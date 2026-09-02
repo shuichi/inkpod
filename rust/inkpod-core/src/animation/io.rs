@@ -8,6 +8,23 @@ enum InitialRasterPlacement {
     MainLinePlane,
 }
 
+enum InitialRasterAsset {
+    Owned(RasterAssetInput),
+    Managed(asset::ManagedRasterAssetInput),
+}
+
+impl InitialRasterAsset {
+    fn dimensions(&self) -> (u32, u32) {
+        match self {
+            Self::Owned(raster) => (raster.width, raster.height),
+            Self::Managed(raster) => {
+                let info = raster.payload.info();
+                (info.width, info.height)
+            }
+        }
+    }
+}
+
 impl Core {
     /// Decodes a common raster into the initial editable main-line plane of a clean cell.
     ///
@@ -87,6 +104,30 @@ impl Core {
         Ok(info)
     }
 
+    pub(crate) fn import_managed_sequence_raster(
+        &mut self,
+        format: CommonRasterFormat,
+        raster: asset::ManagedRasterAssetInput,
+        document_uuid: u128,
+    ) -> Result<DocumentInfo, CoreError> {
+        self.ensure_no_active_stroke()?;
+        let source_info = raster.payload.info();
+        if document_uuid == 0 {
+            return Err(CoreError::InvalidArgument(
+                "common-raster document UUID must be nonzero",
+            ));
+        }
+        let info = self.new_cell_from_raster_asset_seed(
+            InitialRasterAsset::Managed(raster),
+            source_info.dpi_x_milli.unwrap_or(DEFAULT_DPI_MILLI),
+            source_info.dpi_y_milli.unwrap_or(DEFAULT_DPI_MILLI),
+            document_uuid,
+            InitialRasterPlacement::MainLinePlane,
+        )?;
+        self.raster_file_format = format;
+        Ok(info)
+    }
+
     /// Opens canonical raster bytes as the immutable Genesis base of a clean cell.
     ///
     /// The asset's exact pixel format, color/alpha semantics, dimensions, stride,
@@ -118,16 +159,38 @@ impl Core {
         document_uuid: u128,
         placement: InitialRasterPlacement,
     ) -> Result<DocumentInfo, CoreError> {
+        self.new_cell_from_raster_asset_seed(
+            InitialRasterAsset::Owned(raster),
+            dpi_x_milli,
+            dpi_y_milli,
+            document_uuid,
+            placement,
+        )
+    }
+
+    fn new_cell_from_raster_asset_seed(
+        &mut self,
+        raster: InitialRasterAsset,
+        dpi_x_milli: u32,
+        dpi_y_milli: u32,
+        document_uuid: u128,
+        placement: InitialRasterPlacement,
+    ) -> Result<DocumentInfo, CoreError> {
         self.ensure_no_active_stroke()?;
         if document_uuid == 0 {
             return Err(CoreError::InvalidArgument(
                 "asset document UUID must be nonzero",
             ));
         }
-        let width = raster.width;
-        let height = raster.height;
+        let (width, height) = raster.dimensions();
         let mut assets = asset::AssetStore::default();
-        let record = assets.ingest_raster(raster)?;
+        let (record, managed_hash_bytes) = match raster {
+            InitialRasterAsset::Owned(raster) => (assets.ingest_raster(raster)?, None),
+            InitialRasterAsset::Managed(raster) => {
+                let (record, hashed_bytes) = assets.ingest_managed_raster(raster)?;
+                (record, Some(hashed_bytes))
+            }
+        };
         let mut next_id = self.next_id;
         let ids = DocumentIds {
             document: next_id.take_document(),
@@ -210,6 +273,9 @@ impl Core {
         self.subpalette_index = None;
         self.publish_editor_session(Some(editor));
         self.establish_sequence_preservation_baseline();
+        if let Some(hashed_bytes) = managed_hash_bytes {
+            self.record_cow_hit(hashed_bytes);
+        }
         self.document_info()
     }
 

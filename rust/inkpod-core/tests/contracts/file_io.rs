@@ -4194,6 +4194,12 @@ fn io_003_sequence_pair_switch_reopens_a_cell_after_its_normal_pair_save() {
         first_switch.error()
     );
     first_switch.apply(&mut core).unwrap();
+    #[cfg(feature = "test-support")]
+    assert_eq!(
+        core.cow_optimization_counters(),
+        CowOptimizationCounters::default(),
+        "sidecar replay must not enter the COW construction decision"
+    );
     let first_source = core.build_snapshot().sequence_render_source().unwrap();
     assert_eq!(
         (first_source.document_uuid, first_source.source_generation),
@@ -4351,6 +4357,9 @@ fn io_003_sequence_pair_switch_retains_missing_sidecar_first_save_proof() {
         core.revert(),
         Err(CoreError::InvalidState("document has no normal-save path"))
     );
+    // A managed target must own both canonical ASST bytes and tiled Genesis
+    // independently of the image cache that proved the initial reuse.
+    manager.clear_cache();
     save_paths(
         &mut core,
         &manager,
@@ -4361,6 +4370,193 @@ fn io_003_sequence_pair_switch_retains_missing_sidecar_first_save_proof() {
     assert!(second.is_file());
     assert!(core.revert().is_ok());
     manager.shutdown_and_wait();
+}
+
+#[cfg(feature = "test-support")]
+#[test]
+fn io_003_sequence_pair_cow_and_forced_cache_miss_are_semantically_identical() {
+    let files = Files::new();
+    let first = files.image("cell1.png", CommonRasterFormat::Png);
+    let second = files.image("cell2.png", CommonRasterFormat::Png);
+    let manager = manager();
+    let mut initial = Core::new();
+
+    let mut opened = FileIoJob::start(
+        Some(&initial),
+        manager.clone(),
+        FileIoRequest::new(FileIoKind::OpenRasterPair, vec![first.clone()]),
+    )
+    .unwrap();
+    assert_eq!(ready(&mut opened).state, FileIoState::Ready);
+    opened.apply(&mut initial).unwrap();
+    let mut sequence = FileIoJob::start(
+        Some(&initial),
+        manager.clone(),
+        FileIoRequest::new(
+            FileIoKind::SequenceFiles,
+            vec![first.clone(), second.clone()],
+        ),
+    )
+    .unwrap();
+    assert_eq!(ready(&mut sequence).state, FileIoState::Ready);
+    sequence.apply(&mut initial).unwrap();
+
+    let mut managed = initial.clone();
+    let mut fallback = initial.clone();
+    let request = managed
+        .sequence_switch_request(1, SequenceSwitchPolicy::AutosaveBeforeSwitch)
+        .unwrap();
+    let mut managed_switch = FileIoJob::start_sequence_raster_pair_switch(
+        &managed,
+        manager.clone(),
+        request,
+        None,
+        second.clone(),
+        None,
+    )
+    .unwrap();
+    assert_eq!(ready(&mut managed_switch).state, FileIoState::Ready);
+    managed_switch.apply(&mut managed).unwrap();
+    drop(managed_switch);
+    assert_eq!(
+        managed.cow_optimization_counters(),
+        CowOptimizationCounters {
+            cow_hits: 1,
+            asset_hash_bytes: 16,
+            ..CowOptimizationCounters::default()
+        }
+    );
+    let managed_source = managed.build_snapshot().sequence_render_source().unwrap();
+    assert_eq!(
+        (
+            managed_source.document_uuid,
+            managed_source.source_generation
+        ),
+        (
+            managed.document_info().unwrap().document_uuid,
+            managed.sequence_cell(1).unwrap().source_generation,
+        ),
+        "managed construction must preserve resolver-proven pristine registration"
+    );
+
+    let managed_info = managed.document_info().unwrap();
+    let managed_genesis = managed.genesis_info().unwrap();
+    let managed_assets = managed.asset_infos();
+    let managed_digest = managed.document_state_digest().unwrap();
+    let managed_editor = managed.editor_state().unwrap();
+    let managed_history = managed.history_entries().to_vec();
+    let (managed_native, _) = managed
+        .capture_document_save()
+        .unwrap()
+        .prepare_native_save(false, || false)
+        .unwrap();
+    let managed_native_bytes = inkpod_format::encode_procedure_file(&managed_native).unwrap();
+
+    // The same exact source revisited before eviction reuses its cached AssetId,
+    // so neither decoded pixels nor the canonical payload are scanned again.
+    let back_to_first = managed
+        .sequence_switch_request(0, SequenceSwitchPolicy::AutosaveBeforeSwitch)
+        .unwrap();
+    let mut first_switch = FileIoJob::start_sequence_raster_pair_switch(
+        &managed,
+        manager.clone(),
+        back_to_first,
+        None,
+        first,
+        None,
+    )
+    .unwrap();
+    assert_eq!(ready(&mut first_switch).state, FileIoState::Ready);
+    first_switch.apply(&mut managed).unwrap();
+    let revisit_second = managed
+        .sequence_switch_request(1, SequenceSwitchPolicy::AutosaveBeforeSwitch)
+        .unwrap();
+    let mut second_switch = FileIoJob::start_sequence_raster_pair_switch(
+        &managed,
+        manager.clone(),
+        revisit_second,
+        None,
+        second.clone(),
+        None,
+    )
+    .unwrap();
+    assert_eq!(ready(&mut second_switch).state, FileIoState::Ready);
+    second_switch.apply(&mut managed).unwrap();
+    assert_eq!(
+        managed.cow_optimization_counters(),
+        CowOptimizationCounters {
+            cow_hits: 1,
+            ..CowOptimizationCounters::default()
+        }
+    );
+
+    // Cache eviction makes the captured weak allocation proof ineligible. The
+    // ordinary owned path must remain byte-for-byte and state-for-state equal.
+    manager.clear_cache();
+    let fallback_request = fallback
+        .sequence_switch_request(1, SequenceSwitchPolicy::AutosaveBeforeSwitch)
+        .unwrap();
+    let mut fallback_switch = FileIoJob::start_sequence_raster_pair_switch(
+        &fallback,
+        manager.clone(),
+        fallback_request,
+        None,
+        second,
+        None,
+    )
+    .unwrap();
+    assert_eq!(ready(&mut fallback_switch).state, FileIoState::Ready);
+    fallback_switch.apply(&mut fallback).unwrap();
+    assert_eq!(
+        fallback.cow_optimization_counters(),
+        CowOptimizationCounters {
+            cow_fallbacks: 1,
+            dense_payload_copy_bytes: 16,
+            asset_hash_bytes: 16,
+            full_tile_materialization_pixels: 4,
+            ..CowOptimizationCounters::default()
+        }
+    );
+    let fallback_source = fallback.build_snapshot().sequence_render_source().unwrap();
+    assert_eq!(
+        (
+            fallback_source.document_uuid,
+            fallback_source.source_generation,
+        ),
+        (
+            fallback.document_info().unwrap().document_uuid,
+            fallback.sequence_cell(1).unwrap().source_generation,
+        ),
+        "owned fallback must preserve the same resolver-proven pristine registration"
+    );
+    let (fallback_native, _) = fallback
+        .capture_document_save()
+        .unwrap()
+        .prepare_native_save(false, || false)
+        .unwrap();
+    let fallback_native_bytes = inkpod_format::encode_procedure_file(&fallback_native).unwrap();
+
+    assert_eq!(fallback.document_info().unwrap(), managed_info);
+    assert_eq!(fallback.genesis_info().unwrap(), managed_genesis);
+    assert_eq!(fallback.asset_infos(), managed_assets);
+    assert_eq!(fallback.document_state_digest().unwrap(), managed_digest);
+    assert_eq!(fallback.editor_state().unwrap(), managed_editor);
+    assert_eq!(fallback.history_entries(), managed_history);
+    assert_eq!(fallback_native, managed_native);
+    assert_eq!(fallback_native_bytes, managed_native_bytes);
+    manager.shutdown_and_wait();
+
+    // Asset persistence is independent of a live manager/cache once the exact
+    // decoded allocation has been adopted by the staged Core.
+    let (after_shutdown_native, _) = managed
+        .capture_document_save()
+        .unwrap()
+        .prepare_native_save(false, || false)
+        .unwrap();
+    assert_eq!(
+        inkpod_format::encode_procedure_file(&after_shutdown_native).unwrap(),
+        managed_native_bytes
+    );
 }
 
 #[test]

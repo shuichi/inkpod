@@ -111,7 +111,10 @@ pub struct TileRaster {
     width: u32,
     height: u32,
     format: PixelFormat,
-    tiles: BTreeMap<TileCoord, Arc<Tile>>,
+    // Immutable clones share the ordered tile index as well as each tile's
+    // pixels. The first effective mutation detaches this metadata map, then
+    // detaches only the tile whose pixels change.
+    tiles: Arc<BTreeMap<TileCoord, Arc<Tile>>>,
     // Clones of one immutable raster share both cold and populated cache state.
     // A checksum-input mutation detaches this value before publishing pixels.
     checksum_cache: Arc<OnceLock<u64>>,
@@ -153,7 +156,7 @@ impl TileRaster {
             width,
             height,
             format,
-            tiles: BTreeMap::new(),
+            tiles: Arc::new(BTreeMap::new()),
             checksum_cache: Arc::new(OnceLock::new()),
         })
     }
@@ -266,12 +269,14 @@ impl TileRaster {
             .and_then(|pixels| pixels.checked_mul(bytes_per_pixel))
             .ok_or(RasterError::InvalidTile)?;
         self.invalidate_checksum();
-        let tile = self.tiles.entry(coord).or_insert_with(|| {
-            Arc::new(Tile {
-                bytes: vec![0; tile_bytes],
-                revision,
-            })
-        });
+        let tile = Arc::make_mut(&mut self.tiles)
+            .entry(coord)
+            .or_insert_with(|| {
+                Arc::new(Tile {
+                    bytes: vec![0; tile_bytes],
+                    revision,
+                })
+            });
         let tile = Arc::make_mut(tile);
         let offset = ((local_y as usize * TILE_SIZE as usize) + local_x as usize) * bytes_per_pixel;
         match value {
@@ -299,7 +304,7 @@ impl TileRaster {
             .is_some_and(|tile| tile.bytes.iter().all(|byte| *byte == 0))
         {
             self.invalidate_checksum();
-            self.tiles.remove(&coord);
+            Arc::make_mut(&mut self.tiles).remove(&coord);
         }
     }
 
@@ -362,7 +367,7 @@ impl TileRaster {
             {
                 self.invalidate_checksum();
             }
-            self.tiles.insert(
+            Arc::make_mut(&mut self.tiles).insert(
                 data.coord,
                 Arc::new(Tile {
                     bytes,
@@ -390,7 +395,7 @@ impl TileRaster {
             checksum = fnv_bytes(checksum, &self.width.to_le_bytes());
             checksum = fnv_bytes(checksum, &self.height.to_le_bytes());
             checksum = fnv_bytes(checksum, &[self.format as u8]);
-            for (coord, tile) in &self.tiles {
+            for (coord, tile) in self.tiles.iter() {
                 checksum = fnv_bytes(checksum, &coord.x.to_le_bytes());
                 checksum = fnv_bytes(checksum, &coord.y.to_le_bytes());
                 #[cfg(test)]
@@ -643,5 +648,72 @@ mod checksum_cache_tests {
                 (count + work.0, bytes + work.1)
             });
         assert_eq!(total, (1, original.allocated_tile_bytes()));
+    }
+
+    #[test]
+    fn raster_clone_shares_map_and_first_write_detaches_only_touched_tile() {
+        let original = raster();
+        let left = TileCoord { x: 1, y: 0 };
+        let right = TileCoord { x: 0, y: 1 };
+        let mut changed = original.clone();
+
+        assert!(Arc::ptr_eq(&original.tiles, &changed.tiles));
+        assert!(Arc::ptr_eq(
+            original.tiles.get(&left).unwrap(),
+            changed.tiles.get(&left).unwrap()
+        ));
+        assert!(Arc::ptr_eq(
+            original.tiles.get(&right).unwrap(),
+            changed.tiles.get(&right).unwrap()
+        ));
+
+        let unchanged = changed.pixel(64, 2).unwrap();
+        changed.set_pixel(64, 2, unchanged, 2).unwrap();
+        assert!(Arc::ptr_eq(&original.tiles, &changed.tiles));
+
+        changed
+            .set_pixel(64, 2, PixelValue::Rgba([7, 8, 9, 255]), 2)
+            .unwrap();
+        assert!(!Arc::ptr_eq(&original.tiles, &changed.tiles));
+        assert!(!Arc::ptr_eq(
+            original.tiles.get(&left).unwrap(),
+            changed.tiles.get(&left).unwrap()
+        ));
+        assert!(Arc::ptr_eq(
+            original.tiles.get(&right).unwrap(),
+            changed.tiles.get(&right).unwrap()
+        ));
+        assert_eq!(original.tile_revision(left), 1);
+        assert_eq!(changed.tile_revision(left), 2);
+        assert_eq!(original.checksum(), raster().checksum());
+    }
+
+    #[test]
+    fn map_level_cow_covers_insert_and_remove_without_detaching_no_ops() {
+        let original = raster();
+        let mut changed = original.clone();
+        changed.remove_tile_if_empty(TileCoord { x: 0, y: 0 });
+        assert!(Arc::ptr_eq(&original.tiles, &changed.tiles));
+
+        let mut inserted = changed.tile_data(TileCoord { x: 1, y: 0 }).unwrap();
+        inserted.revision = 9;
+        changed.insert_tile(inserted).unwrap();
+        assert!(!Arc::ptr_eq(&original.tiles, &changed.tiles));
+        assert_eq!(original.tile_revision(TileCoord { x: 1, y: 0 }), 1);
+        assert_eq!(changed.tile_revision(TileCoord { x: 1, y: 0 }), 9);
+
+        let mut removable = TileRaster::new(1, 1, PixelFormat::StraightRgba8).unwrap();
+        removable.tiles = Arc::new(BTreeMap::from([(
+            TileCoord { x: 0, y: 0 },
+            Arc::new(Tile {
+                bytes: vec![0; TILE_SIZE as usize * TILE_SIZE as usize * 4],
+                revision: 3,
+            }),
+        )]));
+        let retained = removable.clone();
+        removable.remove_tile_if_empty(TileCoord { x: 0, y: 0 });
+        assert_eq!(removable.allocated_tile_count(), 0);
+        assert_eq!(retained.allocated_tile_count(), 1);
+        assert!(!Arc::ptr_eq(&removable.tiles, &retained.tiles));
     }
 }

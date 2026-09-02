@@ -180,6 +180,7 @@ impl FileIoJob {
                         request.target_document_uuid,
                         &context,
                         |_| snapshot.validate_target_source(),
+                        |image| snapshot.managed_target_raster(&manager, image),
                     )?;
                     let (staged, normal_path) = match prepared {
                         Prepared::Open(staged, None, normal_path) => (staged, normal_path),
@@ -364,6 +365,7 @@ impl FileIoJob {
                             request.target_document_uuid,
                             &context,
                             |_| snapshot.validate_target_source(),
+                            |_| Ok(crate::asset::ManagedRasterDecision::NotRequested),
                         )
                         .map_err(|error| {
                             if error == CoreError::Cancelled {

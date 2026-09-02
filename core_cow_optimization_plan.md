@@ -4,7 +4,8 @@
 
 対象要件: `IO-003`, `SEQ-001`, `PERF-001`
 
-状態: 設計・実装計画。本文書の作成時点では実装しない。
+状態: 現行実装へ適応して実装済み。Rust semantic gate と Windows 検証結果は
+`docs/implementation-status.md` を正本とする。
 
 ## 1. 結論
 
@@ -290,22 +291,15 @@ clone し、worker へ渡す。reuse 判定は recovery 後の final `LoadedImag
 
 ### 5.7 pristine Sequence render cache の再登録
 
-現行の pair target restore は `sequence_render_cache.invalidate_document()` を行うが、pair resolver で作った
-target を pristine source として再登録しない。
+本文書作成後の現行 code と検証記録を照合すると、pair target restore は
+`sequence_render_cache.invalidate_document()` の後、resolver が検証した target を常に pristine source として
+再登録している。この挙動は Windows presentation fence の検証済み契約なので維持する。
 
-準備結果に private な次の分類を持たせる。
-
-```text
-SequencePairTargetKind
-    ReplayedSidecar
-    ReplayedRecovery
-    MaterializedRasterFallback
-    CowManagedRaster
-```
-
-`CowManagedRaster` のときだけ、runtime sequence を staged target へ付けた後に
-`register_pristine_sequence_source` を呼ぶ。sidecar、recovery、fallback では登録しない。
-最初の preview/edit、document revision、state、view mode の既存 invalidation 条件は変更しない。
+COW の分類は missing-sidecar branch 内の private な `ManagedRasterDecision` に限定し、managed builder を使えるか、
+owned fallback が必要か、および test-support counter の計測にだけ使う。分類を owner commit まで運ばず、
+`sequence_restore_prepared_pair_target` の pair authority、pristine 再登録、snapshot source identity を分岐させない。
+sidecar replay、recovery、fallback、managed hit のいずれも、resolver-proven pair target なら同じ既存登録を受ける。
+最初の preview/edit、document revision、state、view mode の既存 invalidation 条件も変更しない。
 
 ## 6. 実装フェーズ
 
@@ -439,7 +433,8 @@ SequencePairTargetKind
 
 - captured target source を raster-pair preparation へ渡す。
 - missing-sidecar branch だけで proof を照合し、managed builder または legacy fallback を選ぶ。
-- preparation kind を owner commit まで運び、exact COW hit のみ pristine source を再登録する。
+- COW 分類を missing-sidecar の構築選択と test-support 計測だけに留め、owner commit へ運ばない。
+- resolver-proven pair target の既存 pristine 再登録を hit/fallback/replay の別なく維持する。
 - 第一段階の正しさ確定後、exact allocation に結び付いた `AssetId` cache で warm hash scan を省略する。
 
 完了条件:
@@ -513,7 +508,8 @@ SequencePairTargetKind
 - normal pair Save 後の再訪は sidecar replay を選ぶ。
 - source recovery、target recovery、repair-needed、malformed/mismatched sidecar の結果を変更しない。
 - stale request、cancel、queue rejection、final candidate drift、post-read stamp change は atomic failure。
-- exact COW hit の snapshot だけが `INKPOD_SNAPSHOT_SOURCE_SEQUENCE_PRISTINE` を持つ。
+- resolver-proven pair target は COW hit/fallback/replay の分類に依存せず、既存どおり
+  `INKPOD_SNAPSHOT_SOURCE_SEQUENCE_PRISTINE` を持つ。
 - first edit/preview/display-mode change の既存 pristine invalidation を維持する。
 
 ### 7.5 既存 regression の強化対象

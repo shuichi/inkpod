@@ -171,6 +171,84 @@ fn shared_cache_hits_keep_pinned_bytes_and_derived_pixels_charged() {
 }
 
 #[test]
+fn retained_decoded_raster_requires_exact_manager_generation_and_allocation() {
+    let directory = Directory::new();
+    let path = directory.path("A001.png");
+    png(&path, 20);
+    let manager = IoManager::new(config()).unwrap();
+    let first = manager.read_image(&path, &JobContext::new()).unwrap();
+    let capability = first.reserve_derived(16).unwrap();
+    let cached = manager.read_image(&path, &JobContext::new()).unwrap();
+    let retained = manager
+        .retain_decoded_raster(&capability, &cached)
+        .expect("same decoded allocation must be reusable");
+    assert_eq!(retained.info(), first.raster().info);
+    assert_eq!(retained.pixels(), first.raster().pixels);
+    assert_eq!(retained.pixels().as_ptr(), first.raster().pixels.as_ptr());
+
+    let other = IoManager::new(config()).unwrap();
+    let same_generation = other.read_image(&path, &JobContext::new()).unwrap();
+    assert_eq!(same_generation.generation(), first.generation());
+    assert!(
+        other
+            .retain_decoded_raster(&capability, &same_generation)
+            .is_none()
+    );
+    assert!(
+        manager
+            .retain_decoded_raster(&capability, &same_generation)
+            .is_none()
+    );
+
+    manager.clear_cache();
+    let reloaded = manager.read_image(&path, &JobContext::new()).unwrap();
+    assert_ne!(reloaded.generation(), first.generation());
+    assert!(
+        manager
+            .retain_decoded_raster(&capability, &reloaded)
+            .is_none()
+    );
+    let forced = manager
+        .read_image_with_reload(&path, true, &JobContext::new())
+        .unwrap();
+    assert!(
+        manager
+            .retain_decoded_raster(&capability, &forced)
+            .is_none()
+    );
+}
+
+#[test]
+fn retained_decoded_raster_keeps_one_existing_charge_until_last_owner_drops() {
+    let directory = Directory::new();
+    let path = directory.path("A001.png");
+    png(&path, 20);
+    let manager = IoManager::new(config()).unwrap();
+    let image = manager.read_image(&path, &JobContext::new()).unwrap();
+    let capability = image.reserve_derived(16).unwrap();
+    let retained = manager.retain_decoded_raster(&capability, &image).unwrap();
+    assert_eq!(manager.cache_stats().decoded_bytes, 20);
+
+    manager.clear_cache();
+    drop(image);
+    drop(capability);
+    let pinned = manager.cache_stats();
+    assert_eq!(pinned.encoded_bytes, 0);
+    assert_eq!(pinned.decoded_bytes, 4);
+    assert_eq!(pinned.images, 1);
+    assert_eq!(retained.pixels(), [20, 20, 20, 255]);
+    manager.shutdown_and_wait();
+    assert_eq!(manager.cache_stats(), pinned);
+
+    let clone = retained.clone();
+    drop(retained);
+    assert_eq!(manager.cache_stats(), pinned);
+    drop(clone);
+    assert_eq!(manager.cache_stats().decoded_bytes, 0);
+    assert_eq!(manager.cache_stats().images, 0);
+}
+
+#[test]
 fn sequence_render_leases_share_one_charge_and_keep_only_their_own_pixels() {
     let directory = Directory::new();
     let path = directory.path("A001.png");

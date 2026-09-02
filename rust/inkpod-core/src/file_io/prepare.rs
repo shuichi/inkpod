@@ -188,6 +188,9 @@ pub(super) fn raster_pair(
     document_uuid: u128,
     context: &JobContext,
     validate_final_image: impl FnOnce(&LoadedImage) -> Result<(), CoreError>,
+    managed_final_image: impl FnOnce(
+        &LoadedImage,
+    ) -> Result<crate::asset::ManagedRasterDecision, CoreError>,
 ) -> Result<(Prepared, Vec<FileIoItem>), CoreError> {
     let raster_path = image.path().to_path_buf();
     let default_native_path = raster_path.with_extension("inkpod");
@@ -292,8 +295,36 @@ pub(super) fn raster_pair(
             if physical {
                 return Err(CoreError::FileConflict);
             }
+            // Provenance-based reuse is deliberately classified only after the
+            // resolver has established that there is no sidecar to replay. The
+            // result selects an equivalent construction strategy; it never
+            // changes pair authority or pristine-source registration.
+            let managed_raster = managed_final_image(&image)?;
             let mut staged = Core::new();
-            staged.import_decoded_common_raster(image.format(), image.raster(), document_uuid)?;
+            match managed_raster {
+                crate::asset::ManagedRasterDecision::Reuse(raster) => {
+                    staged.import_managed_sequence_raster(image.format(), raster, document_uuid)?;
+                }
+                crate::asset::ManagedRasterDecision::Ineligible => {
+                    staged.import_decoded_common_raster(
+                        image.format(),
+                        image.raster(),
+                        document_uuid,
+                    )?;
+                    staged.record_cow_fallback(
+                        image.raster().pixels.len() as u64,
+                        u64::from(image.raster().info.width)
+                            .saturating_mul(u64::from(image.raster().info.height)),
+                    );
+                }
+                crate::asset::ManagedRasterDecision::NotRequested => {
+                    staged.import_decoded_common_raster(
+                        image.format(),
+                        image.raster(),
+                        document_uuid,
+                    )?;
+                }
+            }
             staged.io_pair_plan = Some(PlannedPair {
                 native_path: native_path.clone(),
                 native_missing: identity,
@@ -690,7 +721,14 @@ pub(super) fn images(
     let items = pairs.iter().map(|(_, item)| item.clone()).collect();
     if request.kind == FileIoKind::OpenRasterPair {
         let (image, item) = &pairs[0];
-        return raster_pair(manager, image, item.document_uuid, context, |_| Ok(()));
+        return raster_pair(
+            manager,
+            image,
+            item.document_uuid,
+            context,
+            |_| Ok(()),
+            |_| Ok(crate::asset::ManagedRasterDecision::NotRequested),
+        );
     }
     let prepared = match request.kind {
         FileIoKind::OpenRaster => {
