@@ -123,6 +123,36 @@ its compact historical record is retained in [`legacy.md`](legacy.md).
 
 ## Latest representative verification
 
+### Windows CI sequence and right-pane smoke correction (`SEQ-001`, `PERF-001`, `WORKSPACE-001`, 2026-09-02)
+
+Pair-backed sequence replacement may install a staged clean document whose
+document revision is equal to or lower than the outgoing document. The Windows
+sequence-performance smoke therefore waits for the application-owned switch
+completion count and still requires the exact active cell UUID, presentation
+epoch, presented document revision, route and render-source owner. The pair
+restore path now re-registers the resolver-proven target as the current pristine
+sequence source after invalidating the outgoing document. A public Core
+regression covers both directions of a normal-pair reopen and requires each
+resulting snapshot to expose the selected UUID/source-generation identity.
+
+The right-pane product probe previously assumed that Color, Layer and Reference
+could share one selected tab while the fixed Bottom Sequence pane was visible.
+That assumption is false on a small CI desktop, where the production layout
+correctly creates another tab because the three pane minimums do not fit. The
+probe now hides Bottom Sequence only around this visible same-tab transaction
+and restores it afterward; production placement policy and pane minimums are
+unchanged.
+
+Workspace format, warning-denied clippy and all Rust tests pass. No-profile x64
+Debug and Release builds pass with static CRT and package generation. The x64
+Debug English/Japanese product smokes pass in 474.65/478.07 seconds and no longer
+fail at Structure add. The local sequence-performance run advances through the
+former document-revision and first-warm-pristine failures, but this 192-DPI host
+cannot acquire foreground even when requested and each visible Present takes
+about five seconds; CTest therefore reaches its 180-second timeout during the
+cold preparation loop. This is a local desktop timing limitation, not a relaxed
+semantic gate or a complete current performance result.
+
 ### Sequence companion inventory and progress optimization (`IO-003`, `SEQ-001`, `PERF-001`, `WIN-001`, 2026-09-02)
 
 Raster-pair resolution now obtains native and raster candidate sets from one

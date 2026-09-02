@@ -157,7 +157,8 @@ bool QueryDocument(app::ApplicationHost& state, InkpodDocumentInfo& document) no
 }
 
 bool WaitPresented(app::ApplicationHost& state, std::uint32_t index,
-    std::uint64_t minimum_revision, renderer::RendererSurfaceResourceUsage& surface,
+    std::uint32_t minimum_completion,
+    renderer::RendererSurfaceResourceUsage& surface,
     bool require_pristine = true) noexcept {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
     do {
@@ -173,7 +174,8 @@ bool WaitPresented(app::ApplicationHost& state, std::uint32_t index,
             && state.engine->GetSequenceCatalog(
                 state.Document().id, state.Document().generation, catalog)
             && catalog.active_index == index
-            && document.document_revision >= minimum_revision
+            && state.Workspace().animation.smoke_sequence_switch_completed
+                >= minimum_completion
             && document.document_uuid_high == cells[index].document_uuid_high
             && document.document_uuid_low == cells[index].document_uuid_low
             && state.renderer->GetSurfaceResourceUsage(
@@ -203,10 +205,12 @@ bool WaitPresented(app::ApplicationHost& state, std::uint32_t index,
     (void)state.engine->GetSequenceCatalog(
         state.Document().id, state.Document().generation, catalog);
     std::fprintf(stderr,
-        "sequence wait failed index=%u/%u doc=%llu min=%llu present=%llu pending=%llu "
-        "queue=%zu visible=%d occluded=%d pristine=%u\n",
-        catalog.active_index, index, document.document_revision, minimum_revision,
+        "sequence wait failed index=%u/%u doc=%llu present=%llu completed=%u/%u "
+        "pending=%llu queue=%zu visible=%d occluded=%d pristine=%u\n",
+        catalog.active_index, index, document.document_revision,
         surface.last_presented_document_revision,
+        state.Workspace().animation.smoke_sequence_switch_completed,
+        minimum_completion,
         state.routing.sequence_switch_pending_token.load(std::memory_order_acquire),
         state.routing.sequence_navigation_queue.size(), surface.visible, surface.occluded,
         surface.last_presented_source.flags);
@@ -236,18 +240,24 @@ bool Step(app::ApplicationHost& state, HWND list, bool next,
     const auto* labels = state.Workspace().sequence_dialog.item_labels.data();
     const auto thumbnail_generation = state.Thumbnails().InvalidationGeneration(
         ThumbnailKind::Sequence);
+    const auto completion_before =
+        state.Workspace().animation.smoke_sequence_switch_completed;
+    if (completion_before == UINT32_MAX) {
+        return false;
+    }
     const std::uint64_t start = Qpc();
     Key(state, list, next);
     sample.handler = Qpc() - start;
     renderer::RendererSurfaceResourceUsage surface{};
-    if (!WaitPresented(state, expected_index, before.document_revision + 1U, surface)) {
+    if (!WaitPresented(
+            state, expected_index, completion_before + 1U, surface, warm)) {
         return false;
     }
     if (surface.last_snapshot_submission_qpc < start
         || surface.first_frame_ready_qpc < surface.last_snapshot_submission_qpc
         || surface.first_present_begin_qpc < surface.first_frame_ready_qpc
         || surface.first_presented_revision_qpc < surface.first_present_begin_qpc) {
-        std::fputs("sequence timing did not belong to the requested revision\n", stderr);
+        std::fputs("sequence timing did not belong to the requested presentation\n", stderr);
         return false;
     }
     sample.submit = surface.last_snapshot_submission_qpc - start;
@@ -260,7 +270,10 @@ bool Step(app::ApplicationHost& state, HWND list, bool next,
     const auto engine_after = state.engine->Metrics();
     const auto renderer_after = state.renderer->ResourceUsage();
     if (!QueryDocument(state, after) || (after.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
-        || after.document_revision != before.document_revision + 1U
+        || state.Workspace().animation.smoke_sequence_switch_completed
+            != completion_before + 1U
+        || state.Workspace().animation.smoke_sequence_switch_status
+            != INKPOD_STATUS_OK
         || metadata != state.Workspace().sequence_dialog.view.cells.data()
         || labels != state.Workspace().sequence_dialog.item_labels.data()
         || thumbnail_generation != state.Thumbnails().InvalidationGeneration(ThumbnailKind::Sequence)
@@ -341,7 +354,9 @@ int Run(app::ApplicationHost& state) {
     SendMessageW(state.Workspace().sequence_palette, WM_COMMAND,
         MAKEWPARAM(IDC_SEQUENCE_CELLS, LBN_SELCHANGE), reinterpret_cast<LPARAM>(list));
     renderer::RendererSurfaceResourceUsage surface{};
-    if (!WaitPresented(state, 0U, 0U, surface, false)) {
+    if (!WaitPresented(state, 0U,
+            state.Workspace().animation.smoke_sequence_switch_completed,
+            surface, false)) {
         return 18006;
     }
     LARGE_INTEGER frequency{};
@@ -459,19 +474,24 @@ int Run(app::ApplicationHost& state) {
     // Every accepted directional intent must contribute to the final position.
     state.lifetime.sequence_endpoint_policy = app::SequenceEndpointPolicy::Wrap;
     runtime::UpdateMenuState(state);
-    InkpodDocumentInfo burst_before{};
-    if (!QueryDocument(state, burst_before)) {
+    const auto burst_completion_before =
+        state.Workspace().animation.smoke_sequence_switch_completed;
+    if (burst_completion_before > UINT32_MAX - 50U) {
         return 18011;
     }
     for (std::size_t index = 0U; index < 50U; ++index) {
         Key(state, list, index < 24U || index >= 41U);
     }
-    if (!WaitPresented(state, 1U, burst_before.document_revision + 50U, surface)) {
+    const auto expected_burst_completions = burst_completion_before + 50U;
+    if (!WaitPresented(state, 1U, expected_burst_completions, surface)) {
         return 18012;
     }
     InkpodDocumentInfo burst_after{};
     if (!QueryDocument(state, burst_after)
-        || burst_after.document_revision != burst_before.document_revision + 50U) {
+        || state.Workspace().animation.smoke_sequence_switch_completed
+            != expected_burst_completions
+        || state.Workspace().animation.smoke_sequence_switch_status
+            != INKPOD_STATUS_OK) {
         return 18013;
     }
     std::fprintf(stderr,

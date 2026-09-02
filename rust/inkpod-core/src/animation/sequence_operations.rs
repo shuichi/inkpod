@@ -507,6 +507,7 @@ impl Core {
             return Err(CoreError::InvalidState("sequence switch request is stale"));
         }
         target.document_uuid = restored_uuid;
+        let target_source = target.clone();
         sequence.active_index = Some(request.target_index as usize);
         staged.sequence = Some(sequence);
         staged.sequence_render_cache = self.sequence_render_cache.clone();
@@ -520,6 +521,11 @@ impl Core {
         staged.motion_check = None;
         staged.subpalette_index = self.subpalette_index;
         staged.inherit_file_runtime(self)?;
+        // The common pair resolver has already proved that this staged clean
+        // document exactly represents the selected immutable raster. Restore
+        // the pristine identity invalidated with the outgoing document so the
+        // first snapshot can admit it to the bounded sequence render cache.
+        staged.register_pristine_sequence_source(&target_source);
         *self = staged;
         self.document_info()
     }

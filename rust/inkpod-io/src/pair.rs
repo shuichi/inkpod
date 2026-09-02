@@ -912,6 +912,12 @@ struct Scratch {
 struct ScratchArtifact {
     path: PathBuf,
     identity: FileIdentity,
+    // An open Unix file description keeps an unlinked inode alive, preventing
+    // its identity from being recycled for an external replacement while this
+    // artifact is still tracked. Windows exact cleanup instead needs to open
+    // the path with exclusive sharing, so it retains the existing path proof.
+    #[cfg(unix)]
+    _identity_guard: File,
 }
 
 impl Scratch {
@@ -924,8 +930,21 @@ impl Scratch {
         // expected to change. Its physical identity is stable across those
         // writes and our same-volume publications, and is the authority used
         // by Drop to avoid deleting a later occupant of this pathname.
-        let identity = backend::stamp(&file)?.identity;
-        self.created.push(ScratchArtifact { path, identity });
+        let created_stamp = backend::stamp(&file)?;
+        #[cfg(unix)]
+        let identity_guard = match file.try_clone() {
+            Ok(guard) => guard,
+            Err(error) => {
+                let _ = backend::remove_exact(&path, created_stamp);
+                return Err(error.into());
+            }
+        };
+        self.created.push(ScratchArtifact {
+            path,
+            identity: created_stamp.identity,
+            #[cfg(unix)]
+            _identity_guard: identity_guard,
+        });
         Ok(file)
     }
     fn publish(&mut self, source: &Path, destination: &Path) -> IoResult<()> {

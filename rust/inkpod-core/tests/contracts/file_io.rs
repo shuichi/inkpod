@@ -4147,6 +4147,14 @@ fn io_003_sequence_pair_switch_reopens_a_cell_after_its_normal_pair_save() {
         second_switch.error()
     );
     second_switch.apply(&mut core).unwrap();
+    let second_source = core.build_snapshot().sequence_render_source().unwrap();
+    assert_eq!(
+        (second_source.document_uuid, second_source.source_generation),
+        (
+            core.document_info().unwrap().document_uuid,
+            core.sequence_cell(1).unwrap().source_generation,
+        )
+    );
 
     let to_first = core
         .sequence_switch_request(0, SequenceSwitchPolicy::AutosaveBeforeSwitch)
@@ -4167,6 +4175,14 @@ fn io_003_sequence_pair_switch_reopens_a_cell_after_its_normal_pair_save() {
         first_switch.error()
     );
     first_switch.apply(&mut core).unwrap();
+    let first_source = core.build_snapshot().sequence_render_source().unwrap();
+    assert_eq!(
+        (first_source.document_uuid, first_source.source_generation),
+        (
+            core.document_info().unwrap().document_uuid,
+            core.sequence_cell(0).unwrap().source_generation,
+        )
+    );
     assert_eq!(core.document_state_digest().unwrap(), saved_digest);
     assert_eq!(core.history_entries(), saved_history);
     assert!(!core.document_info().unwrap().dirty);

@@ -4776,7 +4776,20 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     // visible so stale pixels and deferred paints cannot hide behind a model-
     // only geometry check. Give the selected tab the monitor's available
     // height first; at high DPI a 1000-pixel workspace legitimately creates a
-    // separate tab because the three panes cannot satisfy their minimums.
+    // separate tab because the three panes cannot satisfy their minimums. A
+    // small CI desktop can still leave too little right-zone height after the
+    // fixed Bottom Sequence pane is allocated. Hide that pane only for this
+    // probe so the production command exercises the intended same-tab
+    // Structure transaction, then restore it below.
+    const bool structure_sequence_was_visible =
+        state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Sequence);
+    if (structure_sequence_was_visible
+        && state.Workspace().windows.dock_host.TogglePane(
+               DockPaneType::Sequence)
+            != DockResult::Ok) {
+        return 11204;
+    }
     const int structure_workspace_height = have_work_area
         ? std::max(smoke_height, work_height)
         : smoke_height;
@@ -5298,6 +5311,12 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         }
         structure_color_weight->split_weight = color_weight_before;
         structure_layer_weight->split_weight = layer_weight_before;
+        if (structure_sequence_was_visible
+            && state.Workspace().windows.dock_host.TogglePane(
+                   DockPaneType::Sequence)
+                != DockResult::Ok) {
+            return 11204;
+        }
         LayoutMainChrome(
             state.Workspace().windows,
             state.lifetime.smoke_test,

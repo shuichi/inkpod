@@ -337,10 +337,13 @@ fn scratch_drop_preserves_an_external_replacement_of_its_created_path() {
     let mut file = scratch.create(path.clone()).unwrap();
     file.write_all(b"owned").unwrap();
     file.flush().unwrap();
+    let owned_identity = backend::stamp(&file).unwrap().identity;
     drop(file);
 
     std::fs::remove_file(&path).unwrap();
     std::fs::write(&path, b"external").unwrap();
+    let external_identity = optional_stamp(&path).unwrap().unwrap().identity;
+    assert_ne!(external_identity, owned_identity);
     drop(scratch);
 
     assert_eq!(std::fs::read(path).unwrap(), b"external");
