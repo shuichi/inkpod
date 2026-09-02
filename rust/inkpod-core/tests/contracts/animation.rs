@@ -380,8 +380,8 @@ fn sequence_render_catalog_replacement_and_independent_clone_use_new_owner() {
 }
 
 #[test]
-fn sequence_render_live_snapshots_keep_the_eight_source_budget_charged() {
-    let cells = (1..=10)
+fn sequence_render_live_snapshots_keep_the_sixty_four_source_budget_charged() {
+    let cells = (1..=66)
         .map(|index| {
             source(
                 &format!("cell{index}.png"),
@@ -394,26 +394,26 @@ fn sequence_render_live_snapshots_keep_the_eight_source_budget_charged() {
         .collect();
     let mut core = sequence_render_core(cells);
     let mut snapshots = Vec::new();
-    for index in 0..8 {
+    for index in 0..64 {
         core.sequence_activate(index).unwrap();
         snapshots.push(core.build_snapshot());
     }
     let charged = core.resource_usage();
-    assert_eq!(charged.sequence_render_cache_source_count, 8);
-    core.sequence_activate(8).unwrap();
+    assert_eq!(charged.sequence_render_cache_source_count, 64);
+    core.sequence_activate(64).unwrap();
     let fallback = core.build_snapshot();
-    assert_eq!(&fallback.tiles()[0].pixels()[..4], &[56, 34, 9, 255]);
+    assert_eq!(&fallback.tiles()[0].pixels()[..4], &[56, 34, 65, 255]);
     assert_eq!(
         core.resource_usage().sequence_render_cache_bytes,
         charged.sequence_render_cache_bytes
     );
-    assert_eq!(core.resource_usage().sequence_render_cache_source_count, 8);
+    assert_eq!(core.resource_usage().sequence_render_cache_source_count, 64);
     drop(snapshots.remove(0));
-    core.sequence_activate(9).unwrap();
+    core.sequence_activate(65).unwrap();
     let admitted = core.build_snapshot();
-    assert_eq!(&admitted.tiles()[0].pixels()[..4], &[56, 34, 10, 255]);
-    assert_eq!(core.resource_usage().sequence_render_cache_source_count, 8);
-    core.sequence_activate(9).unwrap();
+    assert_eq!(&admitted.tiles()[0].pixels()[..4], &[56, 34, 66, 255]);
+    assert_eq!(core.resource_usage().sequence_render_cache_source_count, 64);
+    core.sequence_activate(65).unwrap();
     assert_eq!(
         core.build_snapshot().tiles()[0].pixels().as_ptr(),
         admitted.tiles()[0].pixels().as_ptr()
@@ -475,7 +475,7 @@ fn sequence_switch_preserves_same_size_views_and_applies_existing_resize_modes()
 }
 
 #[test]
-fn sequence_render_prefetch_uses_two_neighbors_and_never_waits_for_a_busy_worker() {
+fn sequence_render_prefetch_uses_the_full_catalog_and_never_waits_for_a_busy_worker() {
     let manager = inkpod_io::IoManager::new(inkpod_io::IoConfig {
         worker_count: 1,
         queue_capacity: 8,
@@ -880,6 +880,80 @@ fn light_table_swap_accepts_saved_editor_state() {
         "swap establishes a clean document savepoint; only editor dirty kept the session dirty"
     );
     std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn resident_sequence_switch_restores_complete_dirty_cell_state_without_rebuild() {
+    let mut core = sequence_render_core(vec![
+        source("cell1.tga", 0x7011, 4, 2, [12, 34, 56, 255]),
+        source("cell2.tga", 0x7012, 4, 2, [78, 90, 12, 255]),
+        source("cell3.tga", 0x7013, 4, 2, [98, 76, 54, 255]),
+    ]);
+    core.apply_stroke(&line_stroke(vec![StrokeSample {
+        x: 1.0,
+        y: 0.0,
+        pressure: 1.0,
+    }]))
+    .unwrap();
+    let edited_a = core.document_info().unwrap();
+    assert!(edited_a.dirty);
+    let to_b = core
+        .sequence_switch_request(1, SequenceSwitchPolicy::AutosaveBeforeSwitch)
+        .unwrap();
+    assert!(to_b.requires_source_recovery());
+    core.sequence_commit_autosaved_switch(to_b).unwrap();
+    assert_eq!(core.sequence_resident_cell_count(), 1);
+    assert!(core.sequence_resident_target_available(0));
+
+    let b_before = core.document_info().unwrap();
+    let miss = core
+        .sequence_switch_request(2, SequenceSwitchPolicy::AutosaveBeforeSwitch)
+        .unwrap();
+    assert_eq!(core.try_sequence_resident_switch(miss).unwrap(), None);
+    assert_eq!(core.document_info().unwrap(), b_before);
+    assert_eq!(core.sequence_resident_cell_count(), 1);
+
+    core.apply_stroke(&line_stroke(vec![StrokeSample {
+        x: 2.0,
+        y: 0.0,
+        pressure: 1.0,
+    }]))
+    .unwrap();
+    let edited_b = core.document_info().unwrap();
+    let to_a = core
+        .sequence_switch_request(0, SequenceSwitchPolicy::AutosaveBeforeSwitch)
+        .unwrap();
+    let restored_a = core
+        .try_sequence_resident_switch(to_a)
+        .unwrap()
+        .expect("the previously visited cell must be resident");
+    assert_eq!(restored_a.document_uuid, edited_a.document_uuid);
+    assert_eq!(restored_a.document_revision, edited_a.document_revision);
+    assert_eq!(restored_a.main_plane_checksum, edited_a.main_plane_checksum);
+    assert_eq!(
+        restored_a.color_plane_checksum,
+        edited_a.color_plane_checksum
+    );
+    assert!(restored_a.dirty);
+    assert!(restored_a.can_undo);
+    assert_eq!(core.sequence_resident_cell_count(), 1);
+    assert!(core.sequence_resident_target_available(1));
+
+    let back_to_b = core
+        .sequence_switch_request(1, SequenceSwitchPolicy::AutosaveBeforeSwitch)
+        .unwrap();
+    let restored_b = core
+        .try_sequence_resident_switch(back_to_b)
+        .unwrap()
+        .expect("the outgoing dirty cell must remain resident");
+    assert_eq!(restored_b.document_uuid, edited_b.document_uuid);
+    assert_eq!(restored_b.document_revision, edited_b.document_revision);
+    assert_eq!(
+        restored_b.color_plane_checksum,
+        edited_b.color_plane_checksum
+    );
+    assert!(restored_b.dirty);
+    assert!(restored_b.can_undo);
 }
 
 #[test]

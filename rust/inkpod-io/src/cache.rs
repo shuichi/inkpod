@@ -8,9 +8,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// Maximum number of simultaneously reserved sequence display payloads per manager.
-pub const MAX_SEQUENCE_RENDER_ALLOCATIONS: u64 = 8;
+pub const MAX_SEQUENCE_RENDER_ALLOCATIONS: u64 = 64;
 /// Maximum sequence display pixel bytes per manager, within its decoded budget.
-pub const MAX_SEQUENCE_RENDER_BYTES: u64 = 128 * 1024 * 1024;
+pub const MAX_SEQUENCE_RENDER_BYTES: u64 = 1024 * 1024 * 1024;
 
 /// Resident counters include consumer-pinned values and in-flight reservations.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

@@ -130,6 +130,90 @@ pub unsafe extern "C" fn inkpod_snapshot_get_source_identity(
     })
 }
 
+/// Returns the number of completed inactive sequence compositions carried by a snapshot.
+///
+/// # Safety
+/// `snapshot` must remain live and may not be released concurrently.
+/// `out_count` must be aligned and writable for one `u64`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_snapshot_sequence_prepared_source_count(
+    snapshot: *const InkpodSnapshot,
+    out_count: *mut u64,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if snapshot.is_null()
+            || !is_aligned(snapshot)
+            || out_count.is_null()
+            || !is_aligned(out_count)
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "snapshot or prepared-source count output is null or misaligned",
+            );
+        }
+        // SAFETY: Both live input and writable scalar output are required by contract.
+        unsafe { out_count.write((&*snapshot).sequence_sources.len() as u64) };
+        INKPOD_STATUS_OK
+    })
+}
+
+/// Borrows one completed inactive sequence composition from a live snapshot.
+///
+/// # Safety
+/// `snapshot` must remain live and may not be released concurrently. `output`
+/// must be a complete aligned writable record that does not overlap the snapshot.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_snapshot_sequence_prepared_source_get(
+    snapshot: *const InkpodSnapshot,
+    index: u64,
+    output: *mut InkpodSnapshotSequenceSourceView,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if snapshot.is_null() || !is_aligned(snapshot) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "snapshot is null or misaligned",
+            );
+        }
+        // SAFETY: Validate the readable size prefix before accessing the record.
+        if let Err(status) =
+            unsafe { validate_struct(output.cast_const(), "InkpodSnapshotSequenceSourceView") }
+        {
+            return status;
+        }
+        // SAFETY: The caller keeps the snapshot live and provides complete output storage.
+        let snapshot = unsafe { &*snapshot };
+        let Ok(index) = usize::try_from(index) else {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "prepared sequence source index overflows",
+            );
+        };
+        let Some(source) = snapshot.sequence_sources.get(index) else {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "prepared sequence source index is outside bounds",
+            );
+        };
+        let output = unsafe { &mut *output };
+        output.flags = INKPOD_SNAPSHOT_SOURCE_SEQUENCE_PRISTINE;
+        output.document_uuid_high = (source.identity.document_uuid >> 64) as u64;
+        output.document_uuid_low = source.identity.document_uuid as u64;
+        output.source_generation = source.identity.source_generation;
+        output.owner_generation = source.identity.owner_generation;
+        output.tiles = if source.tiles.is_empty() {
+            ptr::null()
+        } else {
+            source.tiles.as_ptr()
+        };
+        output.tile_count = source.tiles.len() as u64;
+        output.tile_stride_bytes = size_of::<InkpodSnapshotTile>() as u64;
+        INKPOD_STATUS_OK
+    })
+}
+
 /// Copies immutable ruler, guide, grid, snap, and transparent-view overlay data.
 ///
 /// # Safety

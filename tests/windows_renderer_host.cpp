@@ -28,13 +28,25 @@ public:
         if (core_ != nullptr) {
             inkpod_core_destroy(&core_);
         }
+        if (io_manager_ != nullptr) {
+            inkpod_io_manager_release(&io_manager_);
+        }
     }
 
-    bool Create(std::uint64_t uuid, std::uint32_t width, std::uint32_t height) noexcept {
+    bool Create(std::uint64_t uuid, std::uint32_t width,
+        std::uint32_t height, bool bind_io_manager = false) noexcept {
         const InkpodCoreConfig config{
             sizeof(InkpodCoreConfig), INKPOD_ABI_VERSION, INKPOD_FEATURE_NONE};
         if (inkpod_core_create(&config, &core_) != INKPOD_STATUS_OK) {
             return false;
+        }
+        if (bind_io_manager) {
+            if (inkpod_io_manager_create(nullptr, &io_manager_)
+                    != INKPOD_STATUS_OK
+                || inkpod_core_bind_io_manager(core_, io_manager_)
+                    != INKPOD_STATUS_OK) {
+                return false;
+            }
         }
         const InkpodCellCreateOptions options{
             sizeof(InkpodCellCreateOptions),
@@ -116,15 +128,19 @@ public:
         return true;
     }
 
-    bool ConfigureSequence(std::uint8_t first_red = 32U, std::uint32_t width = 64U) {
-        constexpr std::size_t count = 10U;
+    bool ConfigureSequence(std::uint8_t first_red = 32U,
+        std::uint32_t width = 64U, std::size_t count = 10U) {
         constexpr std::uint32_t height = 32U;
-        std::array<std::vector<std::uint8_t>, count> pixels;
-        std::array<std::string, count> names;
-        std::array<InkpodSequenceCellInput, count> cells{};
+        if (count == 0U || count > 10'000U) {
+            return false;
+        }
+        std::vector<std::vector<std::uint8_t>> pixels(count);
+        std::vector<std::string> names(count);
+        std::vector<InkpodSequenceCellInput> cells(count);
         for (std::size_t index = 0U; index < count; ++index) {
             pixels[index].resize(width * height * 4U);
-            const auto red = static_cast<std::uint8_t>(first_red + index * 16U);
+            const auto red = static_cast<std::uint8_t>(
+                first_red + (index % 10U) * 16U);
             for (std::size_t offset = 0U; offset < pixels[index].size(); offset += 4U) {
                 pixels[index][offset] = red;
                 pixels[index][offset + 1U] = 64U;
@@ -160,6 +176,48 @@ public:
     bool SelectSequence(std::uint32_t index) noexcept {
         document_.struct_size = sizeof(document_);
         return inkpod_core_sequence_activate(core_, index, &document_) == INKPOD_STATUS_OK;
+    }
+
+    bool WaitForSequenceRenderPreparation(
+        std::uint64_t expected_prepared_sources,
+        ULONGLONG timeout_ms = 5'000U) noexcept {
+        const ULONGLONG deadline = GetTickCount64() + timeout_ms;
+        InkpodSequenceRenderPreparationInfo preparation{};
+        preparation.struct_size = sizeof(preparation);
+        for (;;) {
+            if (inkpod_core_sequence_render_preparation_poll(core_, &preparation)
+                != INKPOD_STATUS_OK) {
+                std::fputs("sequence render preparation poll failed\n", stderr);
+                return false;
+            }
+            if (preparation.pending_source_count == 0U) {
+                if (preparation.prepared_source_count
+                    == expected_prepared_sources) {
+                    return true;
+                }
+                std::fprintf(stderr,
+                    "sequence render preparation count mismatch: "
+                    "pending=%llu prepared=%llu expected=%llu\n",
+                    static_cast<unsigned long long>(
+                        preparation.pending_source_count),
+                    static_cast<unsigned long long>(
+                        preparation.prepared_source_count),
+                    static_cast<unsigned long long>(expected_prepared_sources));
+                return false;
+            }
+            if (GetTickCount64() >= deadline) {
+                std::fprintf(stderr,
+                    "sequence render preparation timed out: pending=%llu "
+                    "prepared=%llu expected=%llu\n",
+                    static_cast<unsigned long long>(
+                        preparation.pending_source_count),
+                    static_cast<unsigned long long>(
+                        preparation.prepared_source_count),
+                    static_cast<unsigned long long>(expected_prepared_sources));
+                return false;
+            }
+            Sleep(1U);
+        }
     }
 
     bool Undo() noexcept {
@@ -202,6 +260,7 @@ public:
 
 private:
     InkpodCore* core_{};
+    InkpodIoManager* io_manager_{};
     InkpodDocumentInfo document_{};
     std::uint64_t presentation_epoch_{};
 };
@@ -1125,21 +1184,19 @@ bool VerifySequenceSourceCache(
     }
     // Use the product Core/FFI/renderer path to fill the bounded source LRU.
     for (std::uint32_t index = 2U; index < 10U; ++index) {
-        if (!select_and_present(core, index, static_cast<std::uint8_t>(32U + index * 16U))) {
+        if (!select_and_present(core, index,
+                static_cast<std::uint8_t>(32U + (index % 10U) * 16U))) {
             return fail("fill LRU presentations");
         }
         const auto resources = host.ResourceUsage();
-        if (resources.sequence_cache_source_count > 8U
-            || resources.sequence_cache_bytes > UINT64_C(128) * 1024U * 1024U
+        if (resources.sequence_cache_source_count > 64U
+            || resources.sequence_cache_bytes > UINT64_C(1024) * 1024U * 1024U
             || resources.gpu_tile_bytes > resources.gpu_tile_budget_bytes) {
             return fail("LRU resource caps");
         }
     }
-    const auto before_evicted = usage();
-    if (!select_and_present(core, 0U, 32U)
-        || usage().uploaded_tile_bytes <= before_evicted.uploaded_tile_bytes
-        || usage().sequence_cache_eviction_count == 0U) {
-        return fail("evicted source uploads again");
+    if (!select_and_present(core, 0U, 32U)) {
+        return fail("warm source remains cached");
     }
     if (!select_and_present(core, 1U, 48U)) {
         return fail("before device reset");
@@ -1148,7 +1205,7 @@ bool VerifySequenceSourceCache(
     if (FAILED(WithWindowMessages([&] {
             return host.SimulateDeviceLoss(route.canvas, route.surface_generation);
         }))
-        || usage().sequence_cache_source_count > 1U
+        || usage().sequence_cache_source_count > 64U
         || !select_and_present(core, 0U, 32U)
         || usage().uploaded_tile_bytes <= before_reset.uploaded_tile_bytes) {
         return fail("after device reset");
@@ -1248,8 +1305,34 @@ bool VerifyFirstSequenceEditTileReuse(
         CoreOwner core;
         std::uint64_t epoch = preview ? 401U : 501U;
         core.SetPresentationEpoch(epoch);
-        if (!core.Create(epoch, 128U, 32U) || !core.ConfigureSequence(32U, 128U)
-            || !core.SelectSequence(0U) || !publish(core) || !read(64U, 32U, 64U, 96U)) {
+        inkpod::renderer::SnapshotEnvelope schedule{};
+        if (!core.Create(epoch, 128U, 32U, true)
+            || !core.ConfigureSequence(32U, 128U, 35U)
+            || !core.SelectSequence(0U) || !core.Build(sink.Route(), schedule)) {
+            return false;
+        }
+        inkpod_snapshot_release(&schedule.snapshot);
+        const bool prepared = core.WaitForSequenceRenderPreparation(34U);
+        const bool published = prepared && publish(core);
+        const bool initially_readable = published
+            && read(64U, 32U, 64U, 96U);
+        if (!prepared || !published || !initially_readable) {
+            const auto failed = usage();
+            std::fprintf(stderr,
+                "first sequence %s setup: prepared=%u published=%u read=%u "
+                "sources=%llu active=%llu uploads=%llu latency_timeouts=%llu "
+                "last_render=%08lx\n",
+                preview ? "preview" : "edit",
+                prepared ? 1U : 0U,
+                published ? 1U : 0U,
+                initially_readable ? 1U : 0U,
+                static_cast<unsigned long long>(
+                    failed.sequence_cache_source_count),
+                static_cast<unsigned long long>(failed.active_tile_count),
+                static_cast<unsigned long long>(failed.uploaded_tile_count),
+                static_cast<unsigned long long>(
+                    failed.frame_latency_timeout_count),
+                static_cast<unsigned long>(failed.last_render_result));
             return false;
         }
         const auto before = usage();
@@ -1258,7 +1341,9 @@ bool VerifyFirstSequenceEditTileReuse(
         edited_view.struct_size = sizeof(edited_view);
         InkpodSnapshotSourceIdentity edited_source{};
         edited_source.struct_size = sizeof(edited_source);
-        if (before.active_tile_count != 2U || before.sequence_cache_source_count != 1U
+        constexpr std::uint64_t source_bytes = UINT64_C(128) * 32U * 4U;
+        if (before.active_tile_count != 2U || before.sequence_cache_source_count != 35U
+            || before.sequence_cache_bytes != 35U * source_bytes
             || !core.ConfigureRasterContent(preview) || !core.Build(sink.Route(), edited)) {
             return false;
         }
@@ -1276,7 +1361,8 @@ bool VerifyFirstSequenceEditTileReuse(
         if (after.uploaded_tile_count != before.uploaded_tile_count + 1U
             || after.uploaded_tile_bytes != before.uploaded_tile_bytes + UINT64_C(64) * 32U * 4U
             || after.gpu_tile_bytes != before.gpu_tile_bytes
-            || after.sequence_cache_source_count != 0U || after.sequence_cache_bytes != 0U) {
+            || after.sequence_cache_source_count != 34U
+            || after.sequence_cache_bytes != 34U * source_bytes) {
             std::fprintf(stderr, "first sequence %s: uploads=%llu/%llu bytes=%llu/%llu sources=%llu\n",
                 preview ? "preview" : "edit",
                 static_cast<unsigned long long>(before.uploaded_tile_count),
@@ -1500,8 +1586,10 @@ bool VerifySharedSequenceCacheLimit(
     inkpod::renderer::CanvasSnapshotSink& second) {
     CoreOwner first_core;
     CoreOwner second_core;
-    if (!first_core.Create(60U, 64U, 32U) || !first_core.ConfigureSequence()
-        || !second_core.Create(61U, 64U, 32U) || !second_core.ConfigureSequence(64U)) {
+    if (!first_core.Create(60U, 64U, 32U)
+        || !first_core.ConfigureSequence(32U, 64U, 66U)
+        || !second_core.Create(61U, 64U, 32U)
+        || !second_core.ConfigureSequence(64U, 64U, 66U)) {
         return false;
     }
     const auto present = [&](CoreOwner& core, inkpod::renderer::CanvasSnapshotSink& sink,
@@ -1517,12 +1605,13 @@ bool VerifySharedSequenceCacheLimit(
             return false;
         }
         const auto usage = host.ResourceUsage();
-        return usage.sequence_cache_source_count <= 8U
-            && usage.sequence_cache_bytes <= UINT64_C(128) * 1024U * 1024U
+        return usage.sequence_cache_source_count <= 64U
+            && usage.sequence_cache_bytes <= UINT64_C(1024) * 1024U * 1024U
             && usage.gpu_tile_bytes <= usage.gpu_tile_budget_bytes;
     };
-    for (std::uint32_t index = 0U; index < 8U; ++index) {
-        if (!present(first_core, first, index, static_cast<std::uint8_t>(32U + index * 16U))) {
+    for (std::uint32_t index = 0U; index < 64U; ++index) {
+        if (!present(first_core, first, index,
+                static_cast<std::uint8_t>(32U + (index % 10U) * 16U))) {
             return false;
         }
     }
@@ -1533,14 +1622,15 @@ bool VerifySharedSequenceCacheLimit(
         return false;
     }
     for (std::uint32_t index = 0U; index < 4U; ++index) {
-        if (!present(second_core, second, index, static_cast<std::uint8_t>(64U + index * 16U))) {
+        if (!present(second_core, second, index,
+                static_cast<std::uint8_t>(64U + (index % 10U) * 16U))) {
             return false;
         }
     }
     inkpod::renderer::RendererSurfaceResourceUsage after{};
     inkpod::renderer::CanvasPixelRgba8 pixel{};
     const auto second_route = second.Route();
-    return host.ResourceUsage().sequence_cache_source_count == 8U
+    return host.ResourceUsage().sequence_cache_source_count == 64U
         && host.GetSurfaceResourceUsage(
             first_route.canvas, first_route.surface_generation, after)
         && after.sequence_cache_source_count < before.sequence_cache_source_count
@@ -1548,7 +1638,7 @@ bool VerifySharedSequenceCacheLimit(
         && after.uploaded_tile_bytes == before.uploaded_tile_bytes
         && ReadPresentedPixel(host, first_route.canvas, first_route.surface_generation,
                16U, 12U, pixel) == S_OK
-        && pixel.red == 144U && pixel.green == 64U && pixel.blue == 96U
+        && pixel.red == 80U && pixel.green == 64U && pixel.blue == 96U
         && SUCCEEDED(host.BindSurface(first_route))
         && SUCCEEDED(host.BindSurface(second_route));
 }

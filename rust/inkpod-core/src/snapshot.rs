@@ -236,6 +236,36 @@ pub struct RenderSnapshot {
     render_passes: Vec<RenderPass>,
     shooting_frames: Vec<ShootingFrameInfo>,
     sequence_render_source: Option<SequenceRenderSourceIdentity>,
+    sequence_prepared_sources: Vec<SequencePreparedRenderSource>,
+}
+
+/// One immutable, non-active sequence composition carried for renderer prewarming.
+///
+/// The tiles share their pixel allocations with the bounded Core sequence cache.
+/// This is process-local derived data: it does not participate in document
+/// equality, revision, history, persistence, or canonical digests.
+#[derive(Clone, Debug)]
+pub struct SequencePreparedRenderSource {
+    identity: SequenceRenderSourceIdentity,
+    tiles: Vec<RenderTile>,
+}
+
+impl SequencePreparedRenderSource {
+    pub(crate) fn new(identity: SequenceRenderSourceIdentity, tiles: Vec<RenderTile>) -> Self {
+        Self { identity, tiles }
+    }
+
+    /// Returns the runtime-only source namespace for this prepared composition.
+    #[must_use]
+    pub const fn identity(&self) -> SequenceRenderSourceIdentity {
+        self.identity
+    }
+
+    /// Borrows the immutable premultiplied BGRA tiles for this source.
+    #[must_use]
+    pub fn tiles(&self) -> &[RenderTile] {
+        &self.tiles
+    }
 }
 
 impl PartialEq for RenderSnapshot {
@@ -278,6 +308,7 @@ impl RenderSnapshot {
             }],
             shooting_frames: Vec::new(),
             sequence_render_source: None,
+            sequence_prepared_sources: Vec::new(),
         }
     }
 
@@ -302,6 +333,16 @@ impl RenderSnapshot {
     #[must_use]
     pub const fn sequence_render_source(&self) -> Option<SequenceRenderSourceIdentity> {
         self.sequence_render_source
+    }
+
+    /// Borrows completed inactive sequence compositions for renderer prewarming.
+    ///
+    /// The list is bounded by the application sequence cache. It can be empty
+    /// while speculative workers are still running; later snapshots publish all
+    /// completed sources without rescanning or recomposing their pixel payloads.
+    #[must_use]
+    pub fn sequence_prepared_sources(&self) -> &[SequencePreparedRenderSource] {
+        &self.sequence_prepared_sources
     }
 
     /// Returns the immutable view transform captured with the snapshot.
@@ -486,6 +527,7 @@ impl Core {
                 render_passes: Vec::new(),
                 shooting_frames: Vec::new(),
                 sequence_render_source: None,
+                sequence_prepared_sources: Vec::new(),
             };
         };
         let snapshot_revision = self
@@ -586,6 +628,14 @@ impl Core {
         cache.retain(|(band, coord), _| *band == 0 && coords.binary_search(coord).is_ok());
         self.sequence_render_cache
             .finish(sequence_render_source, sequence_reservation, &mut cache);
+        // The active cell's bitmap map becomes the ordinary COW edit cache as
+        // soon as the document is dirty or previewing. Never republish that
+        // same source as an inactive prepared entry: doing so would upload and
+        // retain a second full GPU copy on the first edit.
+        let active_catalog_source = self.sequence_active_render_source();
+        let sequence_prepared_sources = self
+            .sequence_render_cache
+            .prepared_sources(active_catalog_source);
         let tiles: Vec<_> = cache.values().cloned().collect();
         let document_size = DocumentSizeU32::new(document.width, document.height);
         self.render_cache = cache;
@@ -615,6 +665,7 @@ impl Core {
                 .map(|frame| vec![frame.info()])
                 .unwrap_or_default(),
             sequence_render_source,
+            sequence_prepared_sources,
         };
         self.schedule_sequence_render_neighbors();
         snapshot
@@ -694,6 +745,7 @@ impl Core {
             }],
             shooting_frames: Vec::new(),
             sequence_render_source: None,
+            sequence_prepared_sources: Vec::new(),
         })
     }
 }
@@ -1881,11 +1933,15 @@ mod tests {
             blake3::hash(validation_call_graph.as_bytes())
                 .to_hex()
                 .to_string(),
-            // Audit 2026-08-30: the formatted standard-layer snapshot body removes
-            // the retired radial-guide preview and its empty fields. The forbidden
-            // payload/hash scan above, the revision-max formula, and the runtime
-            // payload-access counters remain unchanged.
-            "a43e3d5639c2d81aebd2f39cbe78a25f8ccc9ade81e4e4cfe444354744448ce6",
+            // Audit 2026-09-03: snapshots now attach every completed inactive
+            // sequence composition for renderer prewarming. prepared_sources only
+            // iterates bounded cache metadata and clones RenderTile Arc ownership;
+            // the active-catalog identity exclusion likewise reads only bounded
+            // index/identity metadata. Neither path inspects pixels, hashes, or
+            // canonical document payloads.
+            // The forbidden scan above, revision-max formula, and runtime zero-
+            // payload-access neighbor/revisit tests remain unchanged.
+            "b4a9b9f94091e70a0d70f1140876e9edce7201a3961547c49aca6c86b26f152a",
             "primary snapshot validation call graph changed; audit payload/hash access before updating this lock"
         );
     }
@@ -2099,13 +2155,28 @@ mod tests {
             );
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
+        let preparation = core.poll_sequence_render_preparation();
+        assert_eq!(preparation.pending_sources, 0);
+        assert_eq!(preparation.prepared_sources, 2);
         reset_snapshot_payload_access_count();
         core.sequence_activate(2).unwrap();
         let next = core.build_snapshot();
         assert_eq!(next.sequence_render_source().unwrap().document_uuid, 0x6b03);
         assert_eq!(&next.tiles()[0].pixels()[..4], &[30, 20, 3, 255]);
         assert_eq!(snapshot_payload_access_count(), 0);
-        assert_eq!(core.resource_usage().sequence_render_cache_source_count, 2);
+        assert_eq!(next.sequence_prepared_sources().len(), 2);
+        assert_eq!(core.resource_usage().sequence_render_cache_source_count, 3);
+        core.apply_stroke(&color_stroke(80.0, 32.0, [1, 2, 3, 255]))
+            .unwrap();
+        let edited = core.build_snapshot();
+        assert!(edited.sequence_render_source().is_none());
+        assert_eq!(edited.sequence_prepared_sources().len(), 2);
+        assert!(
+            edited
+                .sequence_prepared_sources()
+                .iter()
+                .all(|source| source.identity().document_uuid != 0x6b03)
+        );
         manager.shutdown_and_wait();
     }
 

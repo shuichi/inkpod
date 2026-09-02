@@ -1,22 +1,32 @@
 use super::*;
 
 pub(crate) fn snapshot_handle(snapshot: RenderSnapshot) -> Box<InkpodSnapshot> {
-    let tiles: Box<[InkpodSnapshotTile]> = snapshot
-        .tiles()
+    let tile_records = |tiles: &[RenderTile]| -> Box<[InkpodSnapshotTile]> {
+        tiles
+            .iter()
+            .map(|tile| InkpodSnapshotTile {
+                struct_size: size_of::<InkpodSnapshotTile>() as u32,
+                pixel_format: INKPOD_PIXEL_FORMAT_PREMULTIPLIED_BGRA8,
+                tile_id: tile.tile_id(),
+                origin_x: tile.origin_x(),
+                origin_y: tile.origin_y(),
+                width: tile.width(),
+                height: tile.height(),
+                stride_bytes: tile.stride_bytes(),
+                reserved: 0,
+                pixels: tile.pixels().as_ptr(),
+                pixel_bytes: tile.pixels().len() as u64,
+                tile_revision: tile.tile_revision(),
+            })
+            .collect()
+    };
+    let tiles = tile_records(snapshot.tiles());
+    let sequence_sources = snapshot
+        .sequence_prepared_sources()
         .iter()
-        .map(|tile| InkpodSnapshotTile {
-            struct_size: size_of::<InkpodSnapshotTile>() as u32,
-            pixel_format: INKPOD_PIXEL_FORMAT_PREMULTIPLIED_BGRA8,
-            tile_id: tile.tile_id(),
-            origin_x: tile.origin_x(),
-            origin_y: tile.origin_y(),
-            width: tile.width(),
-            height: tile.height(),
-            stride_bytes: tile.stride_bytes(),
-            reserved: 0,
-            pixels: tile.pixels().as_ptr(),
-            pixel_bytes: tile.pixels().len() as u64,
-            tile_revision: tile.tile_revision(),
+        .map(|source| InkpodPreparedSequenceSource {
+            identity: source.identity(),
+            tiles: tile_records(source.tiles()),
         })
         .collect();
     let guides = snapshot
@@ -62,6 +72,7 @@ pub(crate) fn snapshot_handle(snapshot: RenderSnapshot) -> Box<InkpodSnapshot> {
         guides,
         render_passes,
         shooting_frames,
+        sequence_sources,
     })
 }
 

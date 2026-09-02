@@ -1,5 +1,7 @@
 use inkpod_format::{CommonRaster, CommonRasterFormat, decode_common_raster, encode_common_raster};
-use inkpod_io::{IoConfig, IoError, IoManager, JobContext, JobState};
+use inkpod_io::{
+    IoConfig, IoError, IoManager, JobContext, JobState, MAX_SEQUENCE_RENDER_ALLOCATIONS,
+};
 use std::fs::{self, File, FileTimes};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -309,7 +311,7 @@ fn concurrent_sequence_render_reservations_share_the_manager_count_limit() {
         second.reserve_derived(1).unwrap(),
     ];
     let attempts = std::thread::scope(|scope| {
-        let threads: Vec<_> = (0..16)
+        let threads: Vec<_> = (0..80)
             .map(|index| {
                 let source = &sources[index % sources.len()];
                 scope.spawn(move || source.reserve_sequence_render(1))
@@ -328,10 +330,10 @@ fn concurrent_sequence_render_reservations_share_the_manager_count_limit() {
             Err(error) => panic!("unexpected reservation failure: {error}"),
         })
         .collect();
-    assert_eq!(renders.len(), 8);
+    assert_eq!(renders.len(), 64);
     let full = manager.cache_stats();
-    assert_eq!(full.sequence_render_allocations, 8);
-    assert_eq!(full.sequence_render_bytes, 8);
+    assert_eq!(full.sequence_render_allocations, 64);
+    assert_eq!(full.sequence_render_bytes, 64);
     assert_eq!(full.images, 2);
     assert_eq!(full, other_session.cache_stats());
 
@@ -356,7 +358,7 @@ fn sequence_render_byte_limit_rejects_invalid_and_aggregate_oversize_atomically(
     let directory = Directory::new();
     let path = directory.path("A001.png");
     png(&path, 30);
-    let limit = 128 * 1024 * 1024;
+    let limit = 1024 * 1024 * 1024;
     let manager = IoManager::new(IoConfig {
         max_decoded_bytes: limit + 64,
         ..config()
@@ -494,10 +496,10 @@ fn sequence_render_budgets_belong_to_independent_managers() {
         .unwrap();
     let first_source = first_image.reserve_derived(1).unwrap();
     let second_source = second_image.reserve_derived(1).unwrap();
-    let first: Vec<_> = (0..8)
+    let first: Vec<_> = (0..MAX_SEQUENCE_RENDER_ALLOCATIONS)
         .map(|_| first_source.reserve_sequence_render(1).unwrap())
         .collect();
-    let second: Vec<_> = (0..8)
+    let second: Vec<_> = (0..MAX_SEQUENCE_RENDER_ALLOCATIONS)
         .map(|_| second_source.reserve_sequence_render(1).unwrap())
         .collect();
     assert!(matches!(
@@ -510,7 +512,10 @@ fn sequence_render_budgets_belong_to_independent_managers() {
     ));
     drop(first);
     assert_eq!(first_manager.cache_stats().sequence_render_allocations, 0);
-    assert_eq!(second_manager.cache_stats().sequence_render_allocations, 8);
+    assert_eq!(
+        second_manager.cache_stats().sequence_render_allocations,
+        MAX_SEQUENCE_RENDER_ALLOCATIONS
+    );
     drop(second);
     assert_eq!(second_manager.cache_stats().sequence_render_allocations, 0);
 }

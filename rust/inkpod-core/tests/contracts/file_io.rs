@@ -258,6 +258,73 @@ fn assert_normal_pair_authority_retained(
     assert!(save.item(1).unwrap().identity_physical);
 }
 
+#[test]
+fn io_003_detached_autosave_inherits_the_live_committed_pair_proof() {
+    let files = Files::new();
+    let manager = manager();
+    let raster = files.image("resident.png", CommonRasterFormat::Png);
+    let native = raster.with_extension("inkpod");
+    let recovery = files.0.join("resident-recovery.inkpod");
+    let mut core = Core::new();
+    core.new_cell(2, 2, 96_000, 96_000).unwrap();
+
+    let mut open_pair = FileIoJob::start(
+        Some(&core),
+        manager.clone(),
+        FileIoRequest::new(FileIoKind::OpenRasterPair, vec![raster.clone()]),
+    )
+    .unwrap();
+    assert_eq!(ready(&mut open_pair).state, FileIoState::Ready);
+    assert!(matches!(
+        open_pair.apply(&mut core).unwrap(),
+        FileIoApply::Complete { .. }
+    ));
+    save(&mut core, &manager, &native);
+
+    let document = core.document_info().unwrap();
+    let mut request = FileIoRequest::new(FileIoKind::Autosave, vec![recovery]);
+    request.recovery_metadata = Some(inkpod_io::RecoveryMetadata {
+        session_id: 71,
+        generation: 9,
+        document_uuid: document.document_uuid,
+        original_identity: inkpod_io::RecoveryIdentity::default(),
+        original_path: String::new(),
+        source_path: String::new(),
+        pair_proof: None,
+        written_time_100ns: 0,
+    });
+    let mut autosave = FileIoJob::start(Some(&core), manager.clone(), request).unwrap();
+    assert_eq!(ready(&mut autosave).state, FileIoState::Ready);
+    let metadata = autosave.published_recovery_metadata().unwrap();
+    assert_eq!(
+        manager
+            .normalize_path(Path::new(&metadata.original_path))
+            .unwrap(),
+        manager.normalize_path(&native).unwrap()
+    );
+    assert_eq!(
+        manager
+            .normalize_path(Path::new(&metadata.source_path))
+            .unwrap(),
+        manager.normalize_path(&raster).unwrap()
+    );
+    let inkpod_io::RecoveryPairProof::Committed {
+        native: native_proof,
+        raster: raster_proof,
+    } = metadata.pair_proof.expect("committed pair proof")
+    else {
+        panic!("detached autosave lost committed pair authority");
+    };
+    let context = inkpod_io::JobContext::new();
+    assert_eq!(native_proof, manager.metadata(&native, &context).unwrap());
+    assert_eq!(raster_proof, manager.metadata(&raster, &context).unwrap());
+    assert!(matches!(
+        autosave.apply(&mut core).unwrap(),
+        FileIoApply::Complete { .. }
+    ));
+    manager.shutdown_and_wait();
+}
+
 struct WorkerGate {
     release: Option<std::sync::mpsc::Sender<()>>,
     job: inkpod_io::IoJob<()>,
@@ -2680,6 +2747,35 @@ fn io_003_raster_sequence_navigation_keeps_unedited_cells_clean() {
     assert_eq!(core.document_info().unwrap(), opened);
     assert_eq!(core.editor_state().unwrap(), opened_editor);
     assert_eq!(core.sequence_cells().unwrap().len(), formats.len());
+    assert_eq!(core.sequence_resident_cell_count(), formats.len() - 1);
+    assert!((1..formats.len()).all(|index| core.sequence_resident_target_available(index)));
+    assert_eq!(
+        core.build_snapshot()
+            .sequence_render_source()
+            .map(|source| source.document_uuid),
+        Some(opened.document_uuid)
+    );
+    let warm_io = manager.cache_stats();
+    for target in [1, 2, 1, 0].into_iter().cycle().take(20) {
+        let request = core
+            .sequence_switch_request(target, SequenceSwitchPolicy::AutosaveBeforeSwitch)
+            .unwrap();
+        assert!(
+            core.try_sequence_resident_switch(request)
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(
+            core.build_snapshot()
+                .sequence_render_source()
+                .map(|source| source.document_uuid),
+            Some(core.document_info().unwrap().document_uuid)
+        );
+    }
+    let after_warm_switch = manager.cache_stats();
+    assert_eq!(after_warm_switch.physical_reads, warm_io.physical_reads);
+    assert_eq!(after_warm_switch.decodes, warm_io.decodes);
+    assert_eq!(core.sequence_resident_cell_count(), formats.len() - 1);
 
     for index in [0, 1, 2, 3, 2, 1, 0, 1] {
         let plan = core.resolve_sequence_activation(index).unwrap();
@@ -2729,6 +2825,49 @@ fn io_003_raster_sequence_navigation_keeps_unedited_cells_clean() {
     for (path, bytes) in paths.iter().zip(&original_bytes) {
         assert_eq!(&std::fs::read(path).unwrap(), bytes);
     }
+    manager.shutdown_and_wait();
+}
+
+#[test]
+fn io_003_explicit_sequence_keeps_live_pair_authority_without_duplicate_resident() {
+    let files = Files::new();
+    let manager = serial_manager();
+    let native = files.0.join("a1.inkpod");
+    let raster = files.image("a1.tif", CommonRasterFormat::Tiff);
+    let other = files.image("a2.tif", CommonRasterFormat::Tiff);
+    let mut core = Core::new();
+    let mut open = FileIoJob::start(
+        Some(&core),
+        manager.clone(),
+        FileIoRequest::new(FileIoKind::OpenRasterPair, vec![raster.clone()]),
+    )
+    .unwrap();
+    assert_eq!(ready(&mut open).state, FileIoState::Ready);
+    open.apply(&mut core).unwrap();
+    save(&mut core, &manager, &native);
+    let live_uuid = core.document_info().unwrap().document_uuid;
+
+    let mut job = FileIoJob::start(
+        Some(&core),
+        manager.clone(),
+        FileIoRequest::new(FileIoKind::SequenceFiles, vec![raster.clone(), other]),
+    )
+    .unwrap();
+    assert_eq!(ready(&mut job).state, FileIoState::Ready);
+    let live = job.item(0).unwrap();
+    assert_eq!(live.path.file_name(), raster.file_name());
+    assert_eq!(live.document_uuid, live_uuid);
+    assert_eq!(
+        live.sequence_resident_native
+            .as_ref()
+            .and_then(|item| item.path.file_name()),
+        native.file_name()
+    );
+    job.apply(&mut core).unwrap();
+    assert_eq!(core.document_info().unwrap().document_uuid, live_uuid);
+    assert_eq!(core.sequence_resident_cell_count(), 1);
+    assert!(!core.sequence_resident_target_available(0));
+    assert!(core.sequence_resident_target_available(1));
     manager.shutdown_and_wait();
 }
 
@@ -4522,8 +4661,9 @@ fn io_003_sequence_pair_cow_survives_decoded_cache_eviction() {
         manager.cache_stats().decoded_bytes,
         sequence_usage
             .sequence_source_bytes
-            .saturating_add(sequence_usage.thumbnail_cache_bytes),
-        "all sequence tiles stay resident but dense decode-cache copies do not"
+            .saturating_add(sequence_usage.thumbnail_cache_bytes)
+            .saturating_add(sequence_usage.sequence_render_cache_bytes),
+        "all sequence tiles and bounded renderer preparations stay resident but dense decode-cache copies do not"
     );
 
     let mut managed = initial.clone();

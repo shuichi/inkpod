@@ -61,8 +61,9 @@ pub use animation::{
     LightTableItemInput, LightTableItemProperties, LightTableSetInfo, LightTableSource,
     MotionCheckConfig, MotionFrame, RgbaRasterBytes, SequenceActivationKind,
     SequenceActivationPlan, SequenceCatalogInfo, SequenceCellInfo, SequenceCellMetadata,
-    SequenceCellSource, SequenceDirection, SequenceEndpointPolicy, SequenceRenderSourceIdentity,
-    SequenceStepPlan, SequenceStepResult, SequenceSwitchPolicy, SequenceSwitchRequest, Thumbnail,
+    SequenceCellSource, SequenceDirection, SequenceEndpointPolicy, SequenceRenderPreparationStatus,
+    SequenceRenderSourceIdentity, SequenceStepPlan, SequenceStepResult, SequenceSwitchPolicy,
+    SequenceSwitchRequest, Thumbnail,
 };
 pub use api::*;
 pub use asset::{
@@ -102,8 +103,9 @@ pub use effects::FilterPreviewInfo;
 pub use error::CoreError;
 pub use file_io::{
     DEFAULT_VALIDATED_TARGET_CACHE_BYTES, FileIoApply, FileIoItem, FileIoJob, FileIoKind,
-    FileIoProgress, FileIoRequest, FileIoState, MAX_VALIDATED_TARGET_CACHE_BYTES,
-    MAX_VALIDATED_TARGETS, ValidatedTargetCache, ValidatedTargetCacheStats,
+    FileIoProgress, FileIoRequest, FileIoSequenceResidentNative, FileIoState,
+    MAX_VALIDATED_TARGET_CACHE_BYTES, MAX_VALIDATED_TARGETS, ValidatedTargetCache,
+    ValidatedTargetCacheStats,
 };
 pub use genesis::{BaseSurface, GenesisInfo};
 pub use geometry::{
@@ -145,6 +147,7 @@ use selection::FloatingSelection;
 pub use shooting_frame::*;
 pub use snapshot::{
     CanonicalCompositeDigest, RenderPass, RenderPassKind, RenderSnapshot, RenderTile,
+    SequencePreparedRenderSource,
 };
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;

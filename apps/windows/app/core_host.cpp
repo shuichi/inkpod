@@ -32,6 +32,7 @@ constexpr std::size_t kMaximumNotifications = 256U;
 constexpr std::size_t kMaximumInkScriptJobs = 64U;
 constexpr std::size_t kMaximumFileIoJobs = 128U;
 constexpr auto kFileIoPollInterval = std::chrono::milliseconds(10);
+constexpr auto kSequencePrewarmPollInterval = std::chrono::milliseconds(4);
 constexpr std::size_t kMaximumStrokeSamples = 1048576U;
 constexpr auto kPreviewFrameInterval = std::chrono::milliseconds(8);
 
@@ -251,6 +252,9 @@ struct CoreEntry {
     bool stroke_active{};
     std::uint64_t io_install_fence{};
     std::chrono::steady_clock::time_point next_preview_frame{};
+    std::chrono::steady_clock::time_point next_sequence_prewarm_poll{};
+    std::uint64_t published_sequence_prepared_sources{};
+    bool sequence_prewarm_pending{};
 };
 
 struct FrontendViewBinding {
@@ -1610,6 +1614,7 @@ struct CoreHost::Impl final {
             sizeof(InkpodSnapshotOptions), 0U, INKPOD_FEATURE_NONE};
         InkpodStatus result = INKPOD_STATUS_OK;
         std::uint64_t published_count{};
+        std::uint64_t published_sequence_prepared_sources{};
         bool published_active_view{};
         InkpodSnapshotTransform active_view_transform{};
         InkpodDocumentInfo committed_document{};
@@ -1665,6 +1670,12 @@ struct CoreHost::Impl final {
                 inkpod_snapshot_release(&snapshot);
                 return INKPOD_STATUS_INVALID_STATE;
             }
+            std::uint64_t prepared_source_count{};
+            if (inkpod_snapshot_sequence_prepared_source_count(
+                    snapshot, &prepared_source_count) != INKPOD_STATUS_OK) {
+                inkpod_snapshot_release(&snapshot);
+                return INKPOD_STATUS_INVALID_STATE;
+            }
             if (!document_info_queried) {
                 // Snapshot building changes only derived caches. Capture the
                 // real document revision on this same single-writer turn, not
@@ -1698,6 +1709,7 @@ struct CoreHost::Impl final {
                 result = INKPOD_STATUS_INVALID_STATE;
             } else {
                 ++published_count;
+                published_sequence_prepared_sources = prepared_source_count;
                 if (core_view_id == entry.active_view_id) {
                     published_active_view = true;
                     active_view_transform = transform;
@@ -1724,6 +1736,29 @@ struct CoreHost::Impl final {
             }
         }
         if (published_count != 0U) {
+            entry.published_sequence_prepared_sources =
+                published_sequence_prepared_sources;
+            InkpodSequenceRenderPreparationInfo preparation{};
+            preparation.struct_size = sizeof(preparation);
+            const InkpodStatus preparation_status =
+                inkpod_core_sequence_render_preparation_poll(
+                    entry.core, &preparation);
+            if (preparation_status != INKPOD_STATUS_OK) {
+                entry.sequence_prewarm_pending = false;
+                if (result == INKPOD_STATUS_OK) {
+                    result = preparation_status;
+                }
+            } else {
+                entry.sequence_prewarm_pending =
+                    preparation.pending_source_count != 0U
+                    || preparation.prepared_source_count
+                        > entry.published_sequence_prepared_sources;
+                if (entry.sequence_prewarm_pending) {
+                    entry.next_sequence_prewarm_poll =
+                        std::chrono::steady_clock::now()
+                        + kSequencePrewarmPollInterval;
+                }
+            }
             std::lock_guard lock(state_mutex);
             const auto found = FindPublishedLocked(entry.binding);
             if (found != published.end()) {
@@ -1743,6 +1778,8 @@ struct CoreHost::Impl final {
                     found->has_active_view = true;
                 }
             }
+        } else {
+            entry.sequence_prewarm_pending = false;
         }
         return result;
     }
@@ -2499,6 +2536,58 @@ struct CoreHost::Impl final {
         return result;
     }
 
+    std::chrono::steady_clock::time_point NextSequencePrewarmDeadline() const noexcept {
+        auto result = std::chrono::steady_clock::time_point::max();
+        for (const auto& entry : entries) {
+            if (entry->sequence_prewarm_pending) {
+                result = std::min(result, entry->next_sequence_prewarm_poll);
+            }
+        }
+        return result;
+    }
+
+    void PublishDueSequencePrewarm() noexcept {
+        const auto now = std::chrono::steady_clock::now();
+        for (auto& entry : entries) {
+            if (!entry->sequence_prewarm_pending
+                || now < entry->next_sequence_prewarm_poll) {
+                continue;
+            }
+            if (entry->stroke_active || entry->io_install_fence != 0U) {
+                entry->next_sequence_prewarm_poll =
+                    now + kSequencePrewarmPollInterval;
+                continue;
+            }
+            InkpodSequenceRenderPreparationInfo preparation{};
+            preparation.struct_size = sizeof(preparation);
+            const InkpodStatus poll_status =
+                inkpod_core_sequence_render_preparation_poll(
+                    entry->core, &preparation);
+            if (poll_status != INKPOD_STATUS_OK) {
+                entry->sequence_prewarm_pending = false;
+                CaptureFailure(
+                    *entry, poll_status, false, SessionContext(entry->binding));
+                continue;
+            }
+            if (preparation.pending_source_count != 0U) {
+                entry->next_sequence_prewarm_poll =
+                    now + kSequencePrewarmPollInterval;
+                continue;
+            }
+            if (preparation.prepared_source_count
+                <= entry->published_sequence_prepared_sources) {
+                entry->sequence_prewarm_pending = false;
+                continue;
+            }
+            entry->sequence_prewarm_pending = false;
+            const InkpodStatus publish_status = PublishSnapshot(*entry, false);
+            if (publish_status != INKPOD_STATUS_OK) {
+                CaptureFailure(
+                    *entry, publish_status, false, SessionContext(entry->binding));
+            }
+        }
+    }
+
     std::chrono::steady_clock::time_point NextInkScriptDeadline() const noexcept {
         auto result = std::chrono::steady_clock::time_point::max();
         for (const WorkItem& item : work) {
@@ -2585,12 +2674,15 @@ struct CoreHost::Impl final {
             {
                 std::unique_lock lock(mutex);
                 const auto deadline = std::min({
-                    NextPreviewDeadline(), NextInkScriptDeadline(), NextFileIoDeadline()});
+                    NextPreviewDeadline(), NextSequencePrewarmDeadline(),
+                    NextInkScriptDeadline(), NextFileIoDeadline()});
                 wake.wait_until(lock, deadline, [this] {
                     return (stopping && file_io_inputs.empty())
                         || TransitioningActiveStroke().has_value()
                         || ActionableCancellationWorkLocked().has_value()
                         || std::chrono::steady_clock::now() >= NextFileIoDeadline()
+                        || std::chrono::steady_clock::now()
+                            >= NextSequencePrewarmDeadline()
                         || std::any_of(work.cbegin(), work.cend(), [this](const WorkItem& candidate) {
                                return CanProcess(candidate);
                            });
@@ -2650,6 +2742,7 @@ struct CoreHost::Impl final {
                 }
             }
             AdvanceDueFileIo();
+            PublishDueSequencePrewarm();
             PublishDuePreviews();
         }
 

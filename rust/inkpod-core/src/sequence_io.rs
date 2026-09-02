@@ -540,7 +540,10 @@ impl Core {
         staged.motion_check = None;
         staged.view = next_view;
         staged.render_cache.clear();
+        let outgoing = self.capture_active_sequence_resident()?;
+        staged.sequence_resident_bank = self.sequence_resident_bank.clone();
         *self = *staged;
+        self.publish_outgoing_sequence_resident(outgoing);
         self.document_info()
     }
 }

@@ -58,11 +58,17 @@ struct FileIoRequest final {
 };
 
 struct FileIoItem final {
+    struct SequenceResidentNative final {
+        std::wstring path;
+        DocumentIdentity identity;
+    };
+
     InkpodIoItemInfo info{};
     std::wstring path;
     std::wstring normalized_path;
     std::wstring name;
     DocumentIdentity identity;
+    std::optional<SequenceResidentNative> sequence_resident_native;
 };
 
 struct FileIoResult final {
@@ -145,6 +151,10 @@ public:
         DocumentSessionId session,
         Generation generation,
         std::uint32_t kind) const noexcept;
+    [[nodiscard]] bool HasPendingExceptKind(
+        DocumentSessionId session,
+        Generation generation,
+        std::uint32_t allowed_kind) const noexcept;
     // Approved write destinations stay reserved until their UI completion.
     [[nodiscard]] bool ConflictsWithPendingWrite(
         const FileIoItem& item, std::uint64_t except_request_id = 0U) const noexcept;

@@ -52,7 +52,7 @@ virtual-key、scan-code、modifier bit mask、Base64、binary blob を JSON へ�
     "sequenceCellSwitch": "autosave-before-switch",
     "sequenceEndpoint": "wrap",
     "sequenceThumbnailWidthDip": 64,
-    "validatedSidecarCacheMiB": 256
+    "validatedSidecarCacheMiB": 1024
   },
   "colorManagement": {
     "outputGuardProfile": "bt709-conservative-ycbcr"
@@ -110,11 +110,12 @@ workspace の pane、zone、tab、preset も `layer-plane`、`right`、`right-ta
 `.inkshortcuts` preset は引き続き version 3 である。旧 version は
 移行または decode せず、下記の識別・削除規則に従う。文書の
 `.inkpod` version と replay epoch はこの runtime cache 設定では変わらない。公開 C ABI は
-cache setter と統計 record の追加により v31 へ更新した。
+cache setter と統計 record を v31 で追加し、resident target／全 catalog GPU 準備の固定幅 API を
+v32 で追加した。
 `animation.sequenceThumbnailWidthDip` は 32～96 DIP の整数で、既定値は 64 DIP
 である。Sequence pane の表示倍率と単独 Bottom dock の実測固定高だけに作用し、
 文書、Core thumbnail、cache key、history、保存形式を変更しない。
-`animation.validatedSidecarCacheMiB` は 0～1024 MiB の整数で、既定値は 256 MiB、
+`animation.validatedSidecarCacheMiB` は 0～1024 MiB の整数で、既定値は 1024 MiB、
 0 は cache 無効化である。検証済みの clean sidecar target を application 全体で最大
 64 件まで LRU 保持し、Apply／OK で直ちに上限を変更する。この上限は live 文書と、
 全件 resident の Sequence source tile／thumbnail には適用しない。

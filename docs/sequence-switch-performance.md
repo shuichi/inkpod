@@ -2,9 +2,9 @@
 
 This record covers the user-approved response-time work for `SEQ-001`,
 `PERF-001` and `IO-003`: selecting already loaded, unedited 1754×1240
-images with the sequence pane's Left/Right keys. It does not change native
-v29, replay epoch 25, the canonical `revision-max` expression, or the existing
-benchmark workloads/envelopes. The C ABI advances to exact-current v24.
+images with the sequence pane's Left/Right keys. The current implementation is
+native v32, replay epoch 27 and exact-current ABI v32. The canonical
+`revision-max` expression and existing benchmark workloads/envelopes are unchanged.
 
 ## Cause and implementation
 
@@ -15,13 +15,15 @@ sequence-pane queries generated the same thumbnails again. The frontend
 also published an intermediate view and issued empty preview-clear renders.
 
 The implementation caches checksums with the raster's existing mutation/COW
-boundaries, retains immutable thumbnails, and keeps bounded pristine-source
-CPU/GPU display caches. Both caches are limited to eight images and 128 MiB,
-including the active source, within the existing application-wide decoded/GPU
-budgets. Last-lease accounting includes snapshots and prepared results.
-Adjacent sources can be prepared in the background; stale results are rejected.
+boundaries, retains immutable thumbnails and complete editable states, and keeps
+bounded pristine-source CPU/GPU display caches. Both display caches are limited
+to 64 images and 1 GiB, including the active source, within the application-wide
+decoded/GPU budgets. Last-lease accounting includes snapshots and prepared
+results. The full catalog can be prepared in the background; stale results are rejected.
 
-Clean replacement runs on the Core owner queue. The UI preserves directional
+Resident replacement exchanges the outgoing and target complete Core states on
+the Core owner queue without file I/O, replay, decode or full reconstruction.
+Dirty autosave publication follows as an independent job. The UI preserves directional
 intents, publishes only the final view, preserves zoom/pan/flip for same-size
 images, and does not rebuild an unchanged thumbnail list. Edited/recovered
 documents continue through their existing transaction and persistence routes.
@@ -140,7 +142,7 @@ dense canonical bytes are materialized only for persistence or another explicit
 linear export.
 
 The same update adds an application-wide LRU for fully replayed and pair-validated
-sidecar targets. Its configurable byte budget is 0–1024 MiB (256 MiB default),
+sidecar targets. Its configurable byte budget is 0–1024 MiB (1 GiB default),
 it retains at most 64 clean targets, and an exact hit shares immutable document,
 asset and tile ownership through COW. Both normalized pair paths and both complete
 file stamps are part of the key. Changed stamps invalidate the old pair entry;
@@ -157,27 +159,63 @@ warm reads, decodes and uploads are zero, snapshots remain one per step, and all
 semantic and diagnostic evidence only: it neither replaces the approved
 five-process series above nor changes its workload or envelope.
 
+## 2026-09-03 resident-state and frame-latency follow-up
+
+The current sequence attachment installs up to 64 complete inactive editable
+Core states alongside the active Core. Graphs, assets, and tile maps share their
+immutable backing through COW; the decoded dense owner is released after tile
+adoption. A resident hit puts the outgoing state in the same bank and takes the
+target state without starting a `SequenceSwitch` file job. A dirty outgoing
+state starts durable autosave as a separate operation after the visible switch.
+The status bar therefore does not publish `セルを読み込んでいます` for this path.
+
+CPU composition and renderer GPU source caches now each admit 64 sources up to
+1 GiB. Core preparation covers the full catalog on bounded workers, snapshot
+accessors expose completed inactive sources without payload scans/copies, and
+the renderer pre-uploads them in the background and rebuilds them after device
+loss. The renderer's readiness wait was reduced from 100 ms to 4 ms; a visible
+surface receives a 250-ms transient-occlusion retry window. Canvas/selection
+publication remains immediate, while only secondary pane/menu projection is
+coalesced for 75 ms.
+
+One x64 Release run of the unchanged three-TGA product workload retained zero
+warm reads, decodes, and uploads, one snapshot per step, three CPU/GPU sources
+(26,099,520 bytes), zero frame-latency timeouts, and no lost accepted intents.
+The measured switch CPU stages were:
+
+| Stage | A–B–A p50 / p95 / max (ms) | A–B–C–B–A p50 / p95 / max (ms) |
+| --- | ---: | ---: |
+| Keyboard handler return | 1.303 / 2.011 / 3.108 | 1.285 / 2.483 / 3.886 |
+| Final snapshot submitted | 1.101 / 1.492 / 2.543 | 1.134 / 2.095 / 3.472 |
+
+Successful-Present p95 in that desktop was approximately 324/377 ms. It does
+not satisfy the existing presentation target and is recorded as DWM/desktop
+variability rather than hidden CPU, I/O, decode, upload, or frame-wait work:
+those semantic counters were all zero. The test recorded zero foreground
+samples, while the Present API itself remained at 0.220/0.192 ms p95. No
+workload, envelope, VSync, image quality, or acceptance counter was relaxed.
+
 ## Verification
 
 The final source passes `cargo fmt --check`, strict workspace/all-target/
-all-feature Clippy, Core rustdoc with warnings denied, and 693 Rust tests
-across 26 suites. The one existing Release-only ignore was run separately as
-the unchanged InkScript quick contract described below.
+all-feature Clippy, Core rustdoc with warnings denied, and 801 Rust tests plus
+one intentional ignored Release-only gate. All nine unchanged quick Core
+benchmark scenarios also pass.
 
-Both Windows configurations complete their full build, static-CRT check and
-portable ZIP/unsigned MSIX generation. The final complete CTest results are:
+The current x64 Release build completes its static-CRT check and portable
+ZIP/unsigned MSIX generation. Its focused sequence-performance test passes.
+The current x64 Debug full suite also passes, including both localized product
+smokes:
 
-| Configuration | All tests | English GUI | Japanese GUI |
+| Configuration | Tests | English GUI | Japanese GUI |
 | --- | --- | ---: | ---: |
-| x64 Release | 46/46, 157.03 s | 58.57 s | 64.26 s |
-| ARM64 Debug | 46/46, 570.19 s | 242.69 s | 247.54 s |
+| x64 Debug | 48/48, 1179.46 s | 498.16 s | 496.12 s |
+| x64 Release | focused sequence 1/1, 54.21 s | not rerun | not rerun |
 
-The Renderer test additionally passes five consecutive independent processes
-per configuration. x64 times are 4.31, 4.52, 4.61, 4.66 and 4.60 s; ARM64 times
-are 4.96, 4.78, 4.42, 4.65 and 4.28 s. Every run preserves the existing exact
-248 accepted-render/248 successful-Present gate, with zero timeouts in that
-drain. New diagnostics record phase durations and before/after visibility and
-foreground state; these boundary samples are not continuous foreground proof.
+The strengthened x64 Debug Renderer test passes in 48.84 seconds. It prepares
+all 35 synthetic catalog sources, observes 34 inactive sources after the active
+source's first edit, and covers the shared 64-source/1-GiB ceiling,
+current-source exclusion, one changed-tile upload, and device-loss reconstruction.
 
 Earlier candidate failures remain recorded: the statusbar source gate needed
 the owned completion-mailbox drain; a FIT fixture needed a visible Canvas;
@@ -190,12 +228,12 @@ wait bound, without requesting another render or removing its checksum,
 dirty-state, revision and frame-count assertions. The final full runs above
 include all these regression checks.
 
-An additional ARM64 Debug full-suite performance run records AB/ABC p95
+An earlier ARM64 Debug full-suite performance run records AB/ABC p95
 5.133292/5.212375 ms with 128 foreground samples and the same zero warm
 read/decode/upload gates. It is a supplemental single process, not the
-five-process Release acceptance series above. x64 Debug, ARM64 Release,
+five-process Release acceptance series above. ARM64 and x64 Release full-suite,
 physical keyboard/scanout timing and the user's actual TGA files were not
-verified by this work.
+rerun for the resident-state follow-up.
 
 ## Existing performance contracts
 

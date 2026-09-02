@@ -240,6 +240,7 @@ constexpr UINT kBatchTaskCompleted = WM_APP + 0x171U;
 constexpr UINT kColorChartGenerationCompleted = WM_APP + 0x174U;
 constexpr UINT kShortcutSequenceTimerMilliseconds = 100U;
 constexpr UINT kContinuousSprayIntervalMilliseconds = 50U;
+constexpr UINT kSequenceResidentRefreshDelayMilliseconds = 75U;
 
 using FileIoWorkflowCompletion =
     std::function<InkpodStatus(inkpod::app::FileIoResult&&)>;
@@ -1459,11 +1460,16 @@ void ResetUiForNewActiveDocument(
             state, state.Workspace().windows.window, CommandTimerKind::MotionPlayback);
         DisarmCommandTimer(
             state, state.Workspace().windows.window, CommandTimerKind::ShortcutSequence);
-        ArmCommandTimer(
-            state,
-            state.Workspace().windows.window,
-            CommandTimerKind::Autosave,
-            kAutosaveIntervalMilliseconds);
+        DisarmCommandTimer(
+            state, state.Workspace().windows.window,
+            CommandTimerKind::SequenceResidentRefresh);
+        if (!preserve_sequence_view) {
+            ArmCommandTimer(
+                state,
+                state.Workspace().windows.window,
+                CommandTimerKind::Autosave,
+                kAutosaveIntervalMilliseconds);
+        }
     }
 }
 
@@ -11998,15 +12004,22 @@ InkpodStatus MoveLightTableFromCanvas(
     return status;
 }
 
+struct PreparedSequenceCatalogBindings final {
+    std::vector<SequenceFileBinding> files;
+    std::vector<inkpod::app::SequenceResidentAuthority> residents;
+};
+
 InkpodStatus PrepareSequenceFileBindings(
     const inkpod::app::FileIoResult& result,
-    std::vector<SequenceFileBinding>& output) noexcept {
+    PreparedSequenceCatalogBindings& output) noexcept {
     if (result.items.empty() || result.items.size() > 10'000U) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     try {
         std::vector<SequenceFileBinding> bindings;
+        std::vector<inkpod::app::SequenceResidentAuthority> residents;
         bindings.reserve(result.items.size());
+        residents.reserve(std::min<std::size_t>(result.items.size(), 64U));
         for (const auto& item : result.items) {
             if (item.info.raster_format == 0U
                 || (item.info.document_uuid_high == 0U
@@ -12022,8 +12035,32 @@ InkpodStatus PrepareSequenceFileBindings(
             binding.raster_path = item.path;
             binding.raster_identity = item.identity;
             bindings.push_back(std::move(binding));
+            if (item.sequence_resident_native.has_value()) {
+                const auto& native = item.sequence_resident_native.value();
+                inkpod::app::SequenceResidentAuthority resident{};
+                resident.document_uuid_high = item.info.document_uuid_high;
+                resident.document_uuid_low = item.info.document_uuid_low;
+                resident.source_generation = item.info.source_generation;
+                resident.identity = native.identity;
+                resident.pair_raster_identity = item.identity;
+                resident.shell.source_path = item.path;
+                resident.shell.pair_raster_path = item.path;
+                resident.shell.pair_raster_format_hint =
+                    item.info.raster_format;
+                if (native.identity.kind
+                    == inkpod::app::DocumentIdentityKind::WindowsFile) {
+                    resident.shell.current_path = native.path;
+                } else if (native.identity.kind
+                    == inkpod::app::DocumentIdentityKind::NormalizedPath) {
+                    resident.shell.planned_native_path = native.path;
+                } else {
+                    return INKPOD_STATUS_INVALID_STATE;
+                }
+                residents.push_back(std::move(resident));
+            }
         }
-        output = std::move(bindings);
+        output.files = std::move(bindings);
+        output.residents = std::move(residents);
         return INKPOD_STATUS_OK;
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
@@ -12248,7 +12285,7 @@ InkpodStatus ImportSequenceForContext(
         }
     }
     try {
-        auto bindings = std::make_shared<std::vector<SequenceFileBinding>>();
+        auto bindings = std::make_shared<PreparedSequenceCatalogBindings>();
         inkpod::app::FileIoRequest request{};
         const auto session = context.document_session.value();
         const auto generation = context.generation.value();
@@ -12267,7 +12304,9 @@ InkpodStatus ImportSequenceForContext(
                         != intent_epoch) {
                     return INKPOD_STATUS_CANCELLED;
                 }
-                if (!document->ReplaceSequenceFileBindings(std::move(*bindings))) {
+                if (!document->ReplaceSequenceCatalogBindings(
+                        std::move(bindings->files),
+                        std::move(bindings->residents))) {
                     return INKPOD_STATUS_INVALID_STATE;
                 }
                 auto retired = document->TakeSequenceAutosaves();
@@ -12314,7 +12353,7 @@ void AttachFilePreviewSequence(
     const std::uint64_t intent_epoch =
         issued_document->sequence_catalog_intent_epoch;
     try {
-        auto bindings = std::make_shared<std::vector<SequenceFileBinding>>();
+        auto bindings = std::make_shared<PreparedSequenceCatalogBindings>();
         inkpod::app::FileIoRequest request{};
         request.context = context;
         request.kind = INKPOD_IO_SEQUENCE_AUTO;
@@ -12336,7 +12375,7 @@ void AttachFilePreviewSequence(
                     || document->sequence_catalog_intent_epoch != intent_epoch
                     || !state.engine->GetSequenceCatalog(
                         document->id, document->generation, applied_catalog)
-                    || applied_catalog.cell_count != bindings->size()) {
+                    || applied_catalog.cell_count != bindings->files.size()) {
                     return INKPOD_STATUS_OK;
                 }
                 const bool truncated =
@@ -12362,7 +12401,7 @@ void AttachFilePreviewSequence(
                             != expected_revision
                         || current_catalog.owner_generation
                             != expected_owner_generation
-                        || current_catalog.cell_count != bindings->size()) {
+                        || current_catalog.cell_count != bindings->files.size()) {
                         return INKPOD_STATUS_OK;
                     }
                     // Discovery may have decoded the pre-save raster while a
@@ -12376,8 +12415,8 @@ void AttachFilePreviewSequence(
                             == inkpod::app::DocumentIdentityKind::WindowsFile
                         && current_catalog.active_index
                             != INKPOD_SEQUENCE_INDEX_NONE
-                        && current_catalog.active_index < bindings->size()) {
-                        auto& active = (*bindings)[current_catalog.active_index];
+                        && current_catalog.active_index < bindings->files.size()) {
+                        auto& active = bindings->files[current_catalog.active_index];
                         std::wstring binding_path;
                         std::wstring shell_path;
                         if (inkpod::app::NormalizeDocumentFilePath(
@@ -12389,7 +12428,9 @@ void AttachFilePreviewSequence(
                                 document->pair_raster_identity;
                         }
                     }
-                    if (!document->ReplaceSequenceFileBindings(std::move(*bindings))) {
+                    if (!document->ReplaceSequenceCatalogBindings(
+                            std::move(bindings->files),
+                            std::move(bindings->residents))) {
                         return INKPOD_STATUS_INVALID_STATE;
                     }
                     auto retired = document->TakeSequenceAutosaves();
@@ -14379,6 +14420,374 @@ InkpodStatus QueueResolvedSequenceReplacement(
     return queued;
 }
 
+bool QueueResidentSequenceAutosave(
+    ApplicationHost& state,
+    const CommandContext& context,
+    DocumentSession& document,
+    const InkpodSequenceSwitchRequest& sequence_request) noexcept {
+    if ((sequence_request.flags
+            & INKPOD_SEQUENCE_SWITCH_SOURCE_RECOVERY_REQUIRED) == 0U) {
+        return true;
+    }
+    const auto* existing = document.FindSequenceAutosave(
+        sequence_request.source_document_uuid_high,
+        sequence_request.source_document_uuid_low,
+        sequence_request.source_generation);
+    try {
+        std::optional<SequenceAutosaveBinding> previous;
+        if (existing != nullptr) {
+            previous = *existing;
+        }
+        RecoveryMetadata metadata{};
+        const auto& original_path = !document.shell.current_path.empty()
+            ? document.shell.current_path
+            : !document.shell.planned_native_path.empty()
+            ? document.shell.planned_native_path
+            : document.shell.recovery_original_path;
+        const auto& source_path = !document.shell.pair_raster_path.empty()
+            ? document.shell.pair_raster_path : document.shell.source_path;
+        if (!BuildRecoveryMetadata(
+                document.id,
+                document.generation,
+                document.identity,
+                sequence_request.source_document_uuid_high,
+                sequence_request.source_document_uuid_low,
+                original_path,
+                source_path,
+                metadata)) {
+            return false;
+        }
+        auto attempt_path = std::make_shared<std::wstring>();
+        if (!SequenceRecoveryAttemptPath(
+                sequence_request.source_document_uuid_high,
+                sequence_request.source_document_uuid_low,
+                sequence_request.source_generation,
+                *attempt_path)) {
+            return false;
+        }
+        auto cleanup_attempt_path =
+            std::make_shared<std::wstring>(*attempt_path);
+        const InkpodCommonRasterFormat source_raster_format_hint =
+            document.shell.pair_raster_format_hint;
+        const std::uint64_t expected_generation = previous.has_value()
+            ? previous->artifact_generation : 0U;
+        if (!document.ReserveSequenceAutosave(
+                sequence_request.source_document_uuid_high,
+                sequence_request.source_document_uuid_low,
+                sequence_request.source_generation,
+                expected_generation)) {
+            return false;
+        }
+        auto cleanup = std::make_shared<
+            std::vector<inkpod::app::RecoveryCleanupEntry>>();
+        cleanup->reserve(2U);
+        inkpod::app::FileIoRequest request{};
+        request.context = context;
+        request.kind = INKPOD_IO_AUTOSAVE;
+        request.paths.push_back(*attempt_path);
+        request.recovery_metadata = metadata;
+        const InkpodStatus queued = QueueFileIoWork(
+            state,
+            std::move(request),
+            [&state, context, attempt_path, cleanup_attempt_path, cleanup,
+                previous = std::move(previous), sequence_request,
+                metadata = std::move(metadata), expected_generation,
+                source_raster_format_hint](
+                inkpod::app::FileIoResult&& result) mutable {
+                auto* owner = context.document_session.has_value()
+                    ? state.Documents().Find(context.document_session.value()) : nullptr;
+                const bool durable = result.status == INKPOD_STATUS_OK
+                    && result.document_applied
+                    && result.has_recovery_artifact_proof
+                    && inkpod::app::ValidRecoveryArtifactProof(
+                        result.recovery_artifact_proof);
+                if (owner == nullptr || owner->generation != context.generation
+                    || !durable) {
+                    if (owner != nullptr) {
+                        owner->CancelSequenceAutosaveReservation(
+                            sequence_request.source_document_uuid_high,
+                            sequence_request.source_document_uuid_low,
+                            sequence_request.source_generation,
+                            expected_generation);
+                    }
+                    if (durable) {
+                        AppendRecoveryCleanupArtifact(
+                            *cleanup,
+                            std::move(*cleanup_attempt_path),
+                            result.recovery_artifact_proof);
+                        DiscardRecoveryArtifacts(
+                            state, context, std::move(*cleanup));
+                    }
+                    return result.status == INKPOD_STATUS_OK
+                        ? INKPOD_STATUS_CANCELLED : result.status;
+                }
+                SequenceAutosaveBinding binding{};
+                binding.document_uuid_high =
+                    sequence_request.source_document_uuid_high;
+                binding.document_uuid_low =
+                    sequence_request.source_document_uuid_low;
+                binding.source_generation = sequence_request.source_generation;
+                binding.recovery_path = std::move(*attempt_path);
+                binding.metadata = result.recovery_metadata.has_value()
+                    ? std::move(result.recovery_metadata.value())
+                    : std::move(metadata);
+                binding.artifact_proof = result.recovery_artifact_proof;
+                binding.raster_format_hint = source_raster_format_hint;
+                if (!owner->PublishReservedSequenceAutosave(
+                        std::move(binding), expected_generation)) {
+                    AppendRecoveryCleanupArtifact(
+                        *cleanup,
+                        std::move(*cleanup_attempt_path),
+                        result.recovery_artifact_proof);
+                    DiscardRecoveryArtifacts(
+                        state, context, std::move(*cleanup));
+                    return INKPOD_STATUS_CANCELLED;
+                }
+                if (previous.has_value()) {
+                    AppendRecoveryCleanupArtifact(
+                        *cleanup,
+                        std::move(previous->recovery_path),
+                        previous->artifact_proof);
+                    DiscardRecoveryArtifacts(
+                        state, context, std::move(*cleanup));
+                }
+                return INKPOD_STATUS_OK;
+            },
+            nullptr,
+            {},
+            false);
+        if (!FileIoAccepted(queued)) {
+            document.CancelSequenceAutosaveReservation(
+                sequence_request.source_document_uuid_high,
+                sequence_request.source_document_uuid_low,
+                sequence_request.source_generation,
+                expected_generation);
+            return false;
+        }
+        return true;
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+}
+
+InkpodStatus TryResidentSequenceReplacement(
+    ApplicationHost& state,
+    const CommandContext& context,
+    DocumentSession& document,
+    const InkpodSequenceSwitchRequest& request,
+    bool& handled) noexcept {
+    handled = false;
+    if (state.engine == nullptr || !context.document_session.has_value()
+        || !context.generation.has_value()
+        || (request.flags & INKPOD_SEQUENCE_SWITCH_REQUIRED) == 0U
+        || !document.RetainActiveSequenceResidentAuthority(
+            request.source_document_uuid_high,
+            request.source_document_uuid_low,
+            request.source_generation)) {
+        return INKPOD_STATUS_OK;
+    }
+    const auto* retained = document.FindSequenceResidentAuthority(
+        request.target_document_uuid_high,
+        request.target_document_uuid_low,
+        request.target_source_generation);
+    if (retained == nullptr) {
+        return INKPOD_STATUS_OK;
+    }
+    const InkpodStatus core_resident = state.engine->Invoke(
+        document.id,
+        document.generation,
+        [&request](InkpodCore* core) {
+            return inkpod_core_sequence_resident_target_available(
+                core, request.target_index);
+        },
+        false,
+        false);
+    if (core_resident == INKPOD_STATUS_PENDING) {
+        return INKPOD_STATUS_OK;
+    }
+    if (core_resident != INKPOD_STATUS_OK) {
+        return core_resident;
+    }
+
+    inkpod::app::SequenceResidentAuthority target;
+    try {
+        target = *retained;
+    } catch (const std::bad_alloc&) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    // A resident document removes decode/replay from navigation, but it must
+    // not turn the catalog-time file identities into permanent authority. An
+    // unopened pair can be atomically replaced after discovery. Re-resolving
+    // only the two selected paths is a bounded metadata check (no directory
+    // scan and no payload read); a mismatch falls back to the normal pair
+    // resolver so it can refresh or reject the authority coherently.
+    const auto identity_is_current = [&state](
+                                         const std::wstring& path,
+                                         const inkpod::app::DocumentIdentity& expected) noexcept {
+        inkpod::app::DocumentIdentity current{};
+        return !path.empty() && expected
+            && inkpod::app::ResolveDocumentFileIdentity(
+                state.file_io.Manager(), path, current)
+            && current == expected;
+    };
+    const auto& resident_native_path = !target.shell.current_path.empty()
+        ? target.shell.current_path : target.shell.planned_native_path;
+    if (!identity_is_current(resident_native_path, target.identity)
+        || !identity_is_current(
+            target.shell.pair_raster_path, target.pair_raster_identity)) {
+        return INKPOD_STATUS_OK;
+    }
+    if (const auto* recovery = document.FindSequenceAutosave(
+            request.target_document_uuid_high,
+            request.target_document_uuid_low,
+            request.target_source_generation);
+        recovery != nullptr) {
+        target.shell.recovery_path = recovery->recovery_path;
+        target.shell.recovery_artifact_proof = recovery->artifact_proof;
+        target.shell.recovery_artifact_generation = recovery->artifact_generation;
+        target.shell.recovery_artifact_published = true;
+        if (target.pair_raster_identity) {
+            // A committed/planned pair already owns its normal authority.
+            // recovery_original_path is reserved for unpaired recovery opens.
+            target.shell.recovery_original_path.clear();
+        } else {
+            target.shell.recovery_original_path = recovery->metadata.original_path;
+        }
+    }
+    if (!QueueResidentSequenceAutosave(state, context, document, request)) {
+        // Retain the existing durable-before-switch route when background
+        // recovery could not be accepted. No Core mutation has happened.
+        return INKPOD_STATUS_OK;
+    }
+    const bool paired = static_cast<bool>(target.pair_raster_identity);
+    if (!target.identity
+        || paired != !target.shell.pair_raster_path.empty()
+        || (paired && target.identity == target.pair_raster_identity)) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const auto& original_path = !target.shell.current_path.empty()
+        ? target.shell.current_path
+        : !target.shell.planned_native_path.empty()
+        ? target.shell.planned_native_path
+        : target.shell.recovery_original_path;
+    const auto& source_path = paired
+        ? target.shell.pair_raster_path : target.shell.source_path;
+    const auto reservation = paired
+        ? state.Documents().ReserveIdentityPair(
+            document.id, target.identity, target.pair_raster_identity,
+            original_path, source_path)
+        : state.Documents().ReserveIdentity(
+            document.id, target.identity, original_path, source_path);
+    if (!reservation) {
+        return INKPOD_STATUS_FILE_CONFLICT;
+    }
+
+    const auto token = state.routing.tokens.IssueNotification(
+        context.generation.value());
+    if (!token || !FenceSequenceCanvases(
+            state, document, true,
+            document.sequence_required_present_revision, token.value)) {
+        (void)state.Documents().CancelIdentityReservation(
+            document.id, reservation);
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+
+    InkpodDocumentInfo activated{};
+    activated.struct_size = sizeof(activated);
+    InkpodStatus mutation_status = INKPOD_STATUS_INVALID_STATE;
+    const InkpodStatus status = state.engine->Invoke(
+        document.id,
+        document.generation,
+        [&state, context, request, token, &activated,
+            &mutation_status](InkpodCore* core) {
+            if (!state.engine->SetPresentationEpoch(
+                    context.document_session.value(),
+                    context.generation.value(), token.value)) {
+                return INKPOD_STATUS_INVALID_STATE;
+            }
+            mutation_status = inkpod_core_sequence_try_resident_switch(
+                core, &request, &activated);
+            return mutation_status;
+        },
+        true,
+        true);
+    if (mutation_status == INKPOD_STATUS_PENDING) {
+        handled = true;
+        (void)state.Documents().CancelIdentityReservation(
+            document.id, reservation);
+        (void)FenceSequenceCanvases(
+            state, document, false,
+            document.sequence_required_present_revision,
+            document.sequence_required_present_epoch);
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    handled = true;
+    if (mutation_status != INKPOD_STATUS_OK) {
+        (void)state.Documents().CancelIdentityReservation(
+            document.id, reservation);
+        (void)FenceSequenceCanvases(
+            state, document, false,
+            document.sequence_required_present_revision,
+            document.sequence_required_present_epoch);
+        return mutation_status;
+    }
+
+    // The reservation made every failure check before Core publication. Once
+    // the Core exchange has committed, publish the matching already-validated
+    // frontend authority even when snapshot submission reported a later error.
+    InkpodStatus completion_status = status;
+    if (!state.Documents().PublishReservedIdentity(document.id, reservation)
+        || !document.AdvancePersistenceEpoch()) {
+        completion_status = INKPOD_STATUS_INVALID_STATE;
+        (void)state.Documents().ForceRevokeIdentity(
+            document.id,
+            inkpod::app::UntitledDocumentIdentity(
+                request.target_document_uuid_high,
+                request.target_document_uuid_low));
+        document.shell.current_path.clear();
+        document.shell.source_path.clear();
+        document.shell.planned_native_path.clear();
+        document.shell.pair_raster_path.clear();
+        RetirePublishedRecovery(document.shell);
+    } else {
+        document.shell = std::move(target.shell);
+    }
+    (void)FenceSequenceCanvases(
+        state, document, false, activated.document_revision, token.value);
+    if (document.id != state.routing.targets.DocumentSession()
+        && (document.ActiveView() == nullptr
+            || !ActivateDocumentTab(state, document.ActiveView()->id))) {
+        completion_status = INKPOD_STATUS_INVALID_STATE;
+    }
+    auto* workspace = context.workspace.has_value()
+        ? state.FindWorkspace(context.workspace.value()) : nullptr;
+    ResetUiForNewActiveDocument(state, true);
+    (void)state.RefreshEditorPresentation(
+        document.id, document.generation, false);
+    if (workspace != nullptr && workspace->windows.window != nullptr) {
+        // The catalog-stable route updates only active_index/list selection and
+        // retains labels, thumbnails, focus, and viewport. Do this with the
+        // Canvas exchange; keyboard A/B navigation must never expose the old
+        // selection for the secondary-pane debounce interval.
+        (void)RefreshSequencePane(state);
+        // Coalesce the remaining secondary panes until navigation has been idle
+        // long enough that rapid A/B flipping never rebuilds the same controls
+        // for every intermediate cell.
+        (void)ArmCommandTimer(
+            state,
+            workspace->windows.window,
+            CommandTimerKind::SequenceResidentRefresh,
+            kSequenceResidentRefreshDelayMilliseconds);
+    }
+    if (workspace != nullptr) {
+        if (workspace->animation.smoke_sequence_switch_completed != UINT32_MAX) {
+            ++workspace->animation.smoke_sequence_switch_completed;
+        }
+        workspace->animation.smoke_sequence_switch_status = completion_status;
+    }
+    return completion_status;
+}
+
 InkpodStatus SwitchSequenceTarget(
     ApplicationHost& state,
     const CommandContext& context,
@@ -14417,8 +14826,8 @@ InkpodStatus SwitchSequenceTarget(
         }
         return INKPOD_STATUS_PENDING;
     }
-    if (state.file_io.HasPending(
-            document->id, document->generation)) {
+    if (state.file_io.HasPendingExceptKind(
+            document->id, document->generation, INKPOD_IO_AUTOSAVE)) {
         try {
             if (!state.file_io.WhenIdle(
                     context,
@@ -14565,6 +14974,12 @@ InkpodStatus SwitchSequenceTarget(
         if ((request.flags & INKPOD_SEQUENCE_SWITCH_REQUIRED) == 0U) {
             return INKPOD_STATUS_OK;
         }
+        bool resident_handled{};
+        const InkpodStatus resident_status = TryResidentSequenceReplacement(
+            state, context, *document, request, resident_handled);
+        if (resident_handled || resident_status != INKPOD_STATUS_OK) {
+            return resident_status;
+        }
         return QueueResolvedSequenceReplacement(
             state, context, *document, request);
     }
@@ -14690,6 +15105,12 @@ InkpodStatus SwitchSequenceTarget(
         }
         if ((request.flags & INKPOD_SEQUENCE_SWITCH_REQUIRED) == 0U) {
             return INKPOD_STATUS_OK;
+        }
+        bool resident_handled{};
+        const InkpodStatus resident_status = TryResidentSequenceReplacement(
+            state, context, *document, request, resident_handled);
+        if (resident_handled || resident_status != INKPOD_STATUS_OK) {
+            return resident_status;
         }
         return QueueResolvedSequenceReplacement(
             state, context, *document, request,
@@ -19740,6 +20161,12 @@ std::optional<LRESULT> RouteAnimationCommand(
                 ? ImportSequenceForContext(*state, paths, context)
                 : INKPOD_STATUS_INVALID_STATE;
             if (!FileIoAccepted(status)) {
+                if (state->lifetime.smoke_test) {
+                    std::fprintf(stderr,
+                        "sequence import command failed: status=%u paths=%zu pending=%u\n",
+                        static_cast<unsigned>(status), paths.size(),
+                        static_cast<unsigned>(state->file_io.HasPending()));
+                }
                 ShowCoreError(*state, window, UiText(UiStringId::Text0969));
             }
             RefreshSequencePane(*state);
@@ -23488,15 +23915,21 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                     // Do not synchronously query Core while its snapshot is building.
                     return 0;
                 }
-                if (target_valid && notification.context.workspace.has_value()) {
-                    (void)state->ActivateWorkspaceWindow(
-                        notification.context.workspace.value(), false);
-                }
                 const bool target_current = target_valid
                     && notification.context.document_session.has_value()
                     && notification.context.document_session.value()
                         == state->routing.targets.DocumentSession();
                 if (target_valid && !target_current) {
+                    // A document-scoped Core notification may arrive after the
+                    // user has moved to another workspace or tab. Project the
+                    // changed editor state into every workspace that is still
+                    // visibly presenting that document without stealing the
+                    // global active target. The active document's panes remain
+                    // authoritative until the user explicitly activates the
+                    // changed document again.
+                    (void)state->RefreshEditorPresentation(
+                        notification.context.document_session.value(),
+                        notification.context.generation.value());
                     RefreshSequencePane(*state);
                     (void)RefreshSubpalettePane(*state);
                     UpdateMenuState(*state);
@@ -24106,6 +24539,16 @@ std::optional<LRESULT> RouteTimerAndCloseMessage(
                     }
                 }
                 return 0;
+            case CommandTimerKind::SequenceResidentRefresh:
+                DisarmCommandTimer(
+                    *state, window, CommandTimerKind::SequenceResidentRefresh);
+                RefreshSequencePane(*state);
+                (void)RefreshSubpalettePane(*state);
+                RefreshTreePane(*state);
+                RefreshLightTablePane(*state);
+                RefreshColorPanes(*state);
+                UpdateMenuState(*state);
+                return 0;
             case CommandTimerKind::StatusProgress:
             case CommandTimerKind::EffectProgress:
                 return 0;
@@ -24152,6 +24595,7 @@ std::optional<LRESULT> RouteTimerAndCloseMessage(
                          CommandTimerKind::ContinuousSpray,
                          CommandTimerKind::MotionPlayback,
                          CommandTimerKind::ShortcutSequence,
+                         CommandTimerKind::SequenceResidentRefresh,
                          CommandTimerKind::StatusProgress}) {
                     DisarmCommandTimer(*state, window, kind);
                 }

@@ -10,6 +10,14 @@ use std::path::{Path, PathBuf};
 
 const MAX_NATIVE_BYTES: u64 = 1_073_741_824;
 
+pub(super) struct ImagePreparation {
+    pub(super) images: Vec<LoadedImage>,
+    pub(super) seed: Option<usize>,
+    pub(super) seed_uuid: Option<u128>,
+    pub(super) reload: Option<LightTableItemInfo>,
+    pub(super) target_cache: Option<ValidatedTargetCache>,
+}
+
 pub(super) fn validate_request(request: &FileIoRequest) -> Result<(), CoreError> {
     let multiple = matches!(
         request.kind,
@@ -561,6 +569,7 @@ fn raster_pair_source(
         identity_physical: true,
         source_generation: raster_generation,
         document_uuid: uuid,
+        sequence_resident_native: None,
     };
     let native_item = FileIoItem {
         name: native_path
@@ -574,6 +583,7 @@ fn raster_pair_source(
         identity_physical: native_physical,
         source_generation: 1,
         document_uuid: uuid,
+        sequence_resident_native: None,
     };
     match native_proof {
         RasterPairNativeProof::Existing(expected_native) => manager
@@ -714,6 +724,7 @@ pub(super) fn native(
                 identity_physical: true,
                 source_generation: 1,
                 document_uuid: 0,
+                sequence_resident_native: None,
             }],
         ));
     };
@@ -832,6 +843,7 @@ pub(super) fn native(
             identity_physical: proof.identity_physical,
             source_generation,
             document_uuid: uuid,
+            sequence_resident_native: None,
         });
     }
     context.check_cancelled()?;
@@ -872,6 +884,7 @@ pub(super) fn native(
         identity_physical: true,
         source_generation: 1,
         document_uuid: uuid,
+        sequence_resident_native: None,
     }];
     if let Some(companion) = companion_item {
         items.push(companion);
@@ -897,12 +910,16 @@ pub(super) fn native(
 pub(super) fn images(
     manager: &IoManager,
     request: &FileIoRequest,
-    images: Vec<LoadedImage>,
-    seed: Option<usize>,
-    seed_uuid: Option<u128>,
-    reload: Option<LightTableItemInfo>,
+    preparation: ImagePreparation,
     context: &JobContext,
 ) -> Result<(Prepared, Vec<FileIoItem>), CoreError> {
+    let ImagePreparation {
+        images,
+        seed,
+        seed_uuid,
+        reload,
+        target_cache,
+    } = preparation;
     context.check_cancelled()?;
     let mut pairs: Vec<_> = images
         .into_iter()
@@ -927,12 +944,12 @@ pub(super) fn images(
                 identity_physical: true,
                 source_generation: image.generation(),
                 document_uuid: uuid,
+                sequence_resident_native: None,
             };
             (image, item)
         })
         .collect();
     pairs.sort_by(|left, right| crate::animation::natural_cmp(&left.1.name, &right.1.name));
-    let items = pairs.iter().map(|(_, item)| item.clone()).collect();
     if request.kind == FileIoKind::OpenRasterPair {
         let (image, item) = &pairs[0];
         return raster_pair(
@@ -962,20 +979,103 @@ pub(super) fn images(
         FileIoKind::SequenceAuto | FileIoKind::SequenceFiles => {
             let total = pairs.len() as u64;
             let mut sources = Vec::with_capacity(pairs.len());
-            for (index, (image, item)) in pairs.into_iter().enumerate() {
+            let mut residents = Vec::with_capacity(
+                pairs
+                    .len()
+                    .saturating_sub(1)
+                    .min(super::MAX_VALIDATED_TARGETS),
+            );
+            let mut prepared_target_count = 0_usize;
+            for (index, (image, item)) in pairs.iter_mut().enumerate() {
                 context.check_cancelled()?;
-                sources.push(SequenceCellSource::from_loaded_image(
-                    manager,
-                    &image,
-                    item.document_uuid,
-                )?);
-                manager.discard_cached_decoded(&image)?;
+                let mut source =
+                    SequenceCellSource::from_loaded_image(manager, image, item.document_uuid)?;
+                let defer_live_auto_authority = request.kind == FileIoKind::SequenceAuto
+                    && seed_uuid == Some(item.document_uuid);
+                if !defer_live_auto_authority
+                    && prepared_target_count < super::MAX_VALIDATED_TARGETS
+                {
+                    prepared_target_count += 1;
+                    let stamp = image.source().stamp();
+                    let managed = source
+                        .managed_raster_input_from_stamp(manager, image.path(), stamp)
+                        .ok_or(CoreError::InvalidState(
+                            "sequence source lost its managed raster proof",
+                        ))?;
+                    let (prepared, pair_items) = raster_pair_managed(
+                        manager,
+                        ManagedPairRasterSource::new(
+                            image.path().to_path_buf(),
+                            image.format(),
+                            stamp,
+                            image.generation(),
+                            managed,
+                        ),
+                        item.document_uuid,
+                        context,
+                        target_cache.as_ref(),
+                        |candidate| {
+                            source
+                                .managed_raster_input(manager, candidate)
+                                .map(|_| ())
+                                .ok_or(CoreError::FileConflict)
+                        },
+                        |candidate| {
+                            source
+                                .managed_raster_input(manager, candidate)
+                                .map(crate::asset::ManagedRasterDecision::Reuse)
+                                .ok_or(CoreError::FileConflict)
+                        },
+                    )?;
+                    let (target, normal_path) = match prepared {
+                        Prepared::Open(target, None, normal_path) => (target, normal_path),
+                        _ => {
+                            return Err(CoreError::InvalidState(
+                                "sequence pair resolver returned an invalid resident target",
+                            ));
+                        }
+                    };
+                    let [resolved_raster, resolved_native] = pair_items.as_slice() else {
+                        return Err(CoreError::InvalidState(
+                            "sequence pair resolver returned incomplete resident authority",
+                        ));
+                    };
+                    if resolved_raster.path != item.path
+                        || resolved_raster.identity != item.identity
+                        || !resolved_raster.identity_physical
+                        || resolved_native.format.is_some()
+                        || normal_path.is_some() != resolved_native.identity_physical
+                        || normal_path
+                            .as_ref()
+                            .is_some_and(|path| path != &resolved_native.path)
+                    {
+                        return Err(CoreError::FileConflict);
+                    }
+                    let resident_uuid = target.document_info()?.document_uuid;
+                    if resolved_native.document_uuid != resident_uuid {
+                        return Err(CoreError::InvalidState(
+                            "sequence resident authority has a mismatched document identity",
+                        ));
+                    }
+                    source.document_uuid = resident_uuid;
+                    item.document_uuid = resident_uuid;
+                    item.sequence_resident_native = Some(FileIoSequenceResidentNative {
+                        path: resolved_native.path.clone(),
+                        identity: resolved_native.identity,
+                        identity_physical: resolved_native.identity_physical,
+                    });
+                    if seed_uuid != Some(resident_uuid) {
+                        residents.push((source.source_generation, target));
+                    }
+                }
+                sources.push(source);
+                manager.discard_cached_decoded(image)?;
                 context.set_work(index as u64 + 1, total);
             }
-            Prepared::Sequence(sources)
+            Prepared::Sequence { sources, residents }
         }
         FileIoKind::ReferenceFiles | FileIoKind::ReferenceFolder => {
-            Prepared::References(pairs.into_iter().map(|(image, _)| image).collect())
+            Prepared::References(pairs.iter().map(|(image, _)| image.clone()).collect())
         }
         FileIoKind::LightTableAdd | FileIoKind::LightTableReload => {
             let (image, item) = &pairs[0];
@@ -1011,6 +1111,7 @@ pub(super) fn images(
         _ => return Err(CoreError::InvalidArgument("invalid image job purpose")),
     };
     context.check_cancelled()?;
+    let items = pairs.iter().map(|(_, item)| item.clone()).collect();
     Ok((prepared, items))
 }
 
@@ -1140,6 +1241,7 @@ pub(super) fn save(
                     identity_physical: true,
                     source_generation: 1,
                     document_uuid,
+                    sequence_resident_native: None,
                 });
             }
             Prepared::Pair(Box::new(pair), token, repair_target)

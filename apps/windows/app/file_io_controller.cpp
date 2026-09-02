@@ -319,6 +319,67 @@ struct PendingFileIo final {
             } else if (item.info.identity.kind != 0U) {
                 return INKPOD_STATUS_INVALID_ARGUMENT;
             }
+            if (request.kind == INKPOD_IO_SEQUENCE_AUTO
+                || request.kind == INKPOD_IO_SEQUENCE_FILES) {
+                InkpodIoSequenceResidentInfo resident{};
+                resident.struct_size = sizeof(resident);
+                resident.native_identity.struct_size =
+                    sizeof(resident.native_identity);
+                status = inkpod_io_job_get_sequence_resident(
+                    job, index, &resident, nullptr, 0U);
+                if (status != INKPOD_STATUS_OK
+                    || resident.source_generation != item.info.source_generation
+                    || resident.document_uuid_high
+                        != item.info.document_uuid_high
+                    || resident.document_uuid_low
+                        != item.info.document_uuid_low
+                    || (resident.flags
+                        & ~INKPOD_IO_SEQUENCE_RESIDENT_AVAILABLE) != 0U
+                    || resident.native_path_bytes > kMaximumPathBytes) {
+                    return status == INKPOD_STATUS_OK
+                        ? INKPOD_STATUS_INVALID_STATE : status;
+                }
+                if ((resident.flags
+                        & INKPOD_IO_SEQUENCE_RESIDENT_AVAILABLE) != 0U) {
+                    std::vector<std::uint8_t> native_path(
+                        static_cast<std::size_t>(resident.native_path_bytes));
+                    status = inkpod_io_job_get_sequence_resident(
+                        job, index, &resident,
+                        native_path.empty() ? nullptr : native_path.data(),
+                        native_path.size());
+                    FileIoItem::SequenceResidentNative candidate{};
+                    std::wstring normalized;
+                    if (status != INKPOD_STATUS_OK
+                        || native_path.empty()
+                        || !FromUtf8(native_path, candidate.path)
+                        || !NormalizeDocumentFilePath(
+                            candidate.path, normalized)) {
+                        return status == INKPOD_STATUS_OK
+                            ? INKPOD_STATUS_INVALID_STATE : status;
+                    }
+                    if (resident.native_identity.kind == 1U) {
+                        candidate.identity.kind =
+                            DocumentIdentityKind::WindowsFile;
+                        candidate.identity.volume_serial =
+                            resident.native_identity.volume;
+                        std::memcpy(candidate.identity.file_id.data(),
+                            &resident.native_identity.object_low, 8U);
+                        std::memcpy(candidate.identity.file_id.data() + 8U,
+                            &resident.native_identity.object_high, 8U);
+                    } else if (resident.native_identity.kind == 2U) {
+                        candidate.identity.kind =
+                            DocumentIdentityKind::NormalizedPath;
+                        candidate.identity.normalized_path =
+                            std::move(normalized);
+                    } else {
+                        return INKPOD_STATUS_INVALID_STATE;
+                    }
+                    item.sequence_resident_native = std::move(candidate);
+                } else if (resident.native_path_bytes != 0U
+                    || resident.native_identity.kind != 0U) {
+                    return INKPOD_STATUS_INVALID_STATE;
+                }
+            }
             items.push_back(std::move(item));
         }
         result.items = std::move(items);
@@ -928,6 +989,19 @@ bool FileIoController::HasPendingKind(
             return entry.pending->request.context.document_session == session
                 && entry.pending->request.context.generation == generation
                 && entry.pending->request.kind == kind;
+        });
+}
+
+bool FileIoController::HasPendingExceptKind(
+    DocumentSessionId session,
+    Generation generation,
+    std::uint32_t allowed_kind) const noexcept {
+    return impl_ != nullptr && std::any_of(
+        impl_->entries.cbegin(), impl_->entries.cend(),
+        [session, generation, allowed_kind](const auto& entry) {
+            return entry.pending->request.context.document_session == session
+                && entry.pending->request.context.generation == generation
+                && entry.pending->request.kind != allowed_kind;
         });
 }
 

@@ -479,6 +479,10 @@ impl Core {
         stamp.validate(self)?;
         let mut frozen = self.clone_for_staging();
         frozen.io_manager = None;
+        // Detached file preparation must never publish speculative resident
+        // states into the live owner's bank. The owner caches its outgoing Core
+        // only at the final sequence publication boundary.
+        frozen.sequence_resident_bank = None;
         frozen.render_cache.clear();
         frozen.secondary_views.clear();
         if !retain_sequence {

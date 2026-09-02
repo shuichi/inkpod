@@ -38,6 +38,7 @@ pub const INKPOD_IO_RESULT_INSTALLING: u64 = 2;
 pub const INKPOD_IO_RESULT_CUT_DESCRIPTOR: u64 = 4;
 pub const INKPOD_IO_RESULT_AUTHORITY_REPAIRED: u64 = 8;
 pub const INKPOD_IO_RESULT_AUTHORITY_REVOKED: u64 = 16;
+pub const INKPOD_IO_SEQUENCE_RESIDENT_AVAILABLE: u32 = 1;
 pub const INKPOD_IO_RECOVERY_ARTIFACT_READONLY: u32 = 1;
 pub const INKPOD_IO_RECOVERY_PAIR_NONE: u32 = 0;
 pub const INKPOD_IO_RECOVERY_PAIR_COMMITTED: u32 = 1;
@@ -176,6 +177,18 @@ pub struct InkpodIoItemInfo {
     pub path_bytes: u64,
     pub name_bytes: u64,
     pub identity: InkpodIoFileIdentity,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodIoSequenceResidentInfo {
+    pub struct_size: u32,
+    pub flags: u32,
+    pub source_generation: u64,
+    pub document_uuid_high: u64,
+    pub document_uuid_low: u64,
+    pub native_path_bytes: u64,
+    pub native_identity: InkpodIoFileIdentity,
 }
 
 #[repr(C)]

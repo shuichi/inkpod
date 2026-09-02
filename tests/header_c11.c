@@ -2,13 +2,15 @@
 
 #include <stdint.h>
 
-_Static_assert(INKPOD_ABI_VERSION == 31U, "unexpected ABI version");
+_Static_assert(INKPOD_ABI_VERSION == 32U, "unexpected ABI version");
 _Static_assert(sizeof(InkpodIoConfig) == 48U, "I/O config layout drift");
 _Static_assert(sizeof(InkpodIoPath) == 24U, "I/O path layout drift");
 _Static_assert(sizeof(InkpodIoRequest) == 72U, "I/O request layout drift");
 _Static_assert(sizeof(InkpodIoJobInfo) == 104U, "I/O job info layout drift");
 _Static_assert(sizeof(InkpodIoFileIdentity) == 32U, "I/O identity layout drift");
 _Static_assert(sizeof(InkpodIoItemInfo) == 80U, "I/O item layout drift");
+_Static_assert(sizeof(InkpodIoSequenceResidentInfo) == 72U,
+    "sequence resident I/O layout drift");
 _Static_assert(sizeof(InkpodIoCacheInfo) == 120U, "I/O cache info layout drift");
 _Static_assert(sizeof(InkpodIoRecoveryPairProof) == 168U, "I/O recovery pair proof layout drift");
 _Static_assert(sizeof(InkpodIoRecoveryMetadata) == 328U, "I/O recovery metadata layout drift");
@@ -55,6 +57,8 @@ _Static_assert(sizeof(InkpodCutSequenceEditResult) == 40U, "Cut sequence result 
 _Static_assert(sizeof(InkpodDocumentThumbnailBuffer) == 56U, "document thumbnail layout drift");
 _Static_assert(sizeof(InkpodResourceUsage) == 136U, "resource usage layout drift");
 _Static_assert(sizeof(InkpodSnapshotSourceIdentity) == 40U, "snapshot source identity layout drift");
+_Static_assert(sizeof(InkpodSnapshotSequenceSourceView) == 64U, "snapshot prepared sequence source layout drift");
+_Static_assert(sizeof(InkpodSequenceRenderPreparationInfo) == 24U, "sequence render preparation layout drift");
 _Static_assert(sizeof(InkpodSequenceCatalogInfo) == 32U, "sequence catalog layout drift");
 _Static_assert(sizeof(InkpodHistoryItem) == 24U, "history item layout drift");
 _Static_assert(sizeof(InkpodStrokeSample) == 24U, "stroke sample layout drift");

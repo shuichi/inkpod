@@ -38,6 +38,13 @@ struct SequenceAutosaveBinding final {
     InkpodCommonRasterFormat raster_format_hint{};
 };
 
+struct SequenceAutosaveReservation final {
+    std::uint64_t document_uuid_high{};
+    std::uint64_t document_uuid_low{};
+    std::uint64_t source_generation{};
+    std::uint64_t expected_artifact_generation{};
+};
+
 // Runtime-only source authority for one Core sequence entry. The vector order
 // is the exact natural order published by the same successful I/O result that
 // installed the Core catalog; names or pane selection are never used as paths.
@@ -47,6 +54,19 @@ struct SequenceFileBinding final {
     std::uint64_t source_generation{};
     std::wstring raster_path;
     DocumentIdentity raster_identity{};
+};
+
+// Frontend authority paired with one Core-resident editable sequence state.
+// This contains no pixel/document content. It lets a resident Core exchange
+// publish the already validated shell and file identities without rescanning
+// the directory or reopening either pair member.
+struct SequenceResidentAuthority final {
+    std::uint64_t document_uuid_high{};
+    std::uint64_t document_uuid_low{};
+    std::uint64_t source_generation{};
+    DocumentIdentity identity{};
+    DocumentIdentity pair_raster_identity{};
+    DocumentShellState shell{};
 };
 
 // Registry-issued owner capability for one identity reservation. Zero is
@@ -180,6 +200,9 @@ public:
     void ClearSequenceAutosaves() noexcept;
     [[nodiscard]] bool ReplaceSequenceFileBindings(
         std::vector<SequenceFileBinding> bindings) noexcept;
+    [[nodiscard]] bool ReplaceSequenceCatalogBindings(
+        std::vector<SequenceFileBinding> bindings,
+        std::vector<SequenceResidentAuthority> residents) noexcept;
     [[nodiscard]] const SequenceFileBinding* SequenceFileBindingAt(
         std::size_t index) const noexcept;
     [[nodiscard]] bool UpdateSequenceFileBinding(
@@ -202,6 +225,15 @@ public:
         std::uint64_t document_uuid_low,
         std::uint64_t source_generation) noexcept;
     void ClearSequenceFileBindings() noexcept;
+    [[nodiscard]] bool RetainActiveSequenceResidentAuthority(
+        std::uint64_t document_uuid_high,
+        std::uint64_t document_uuid_low,
+        std::uint64_t source_generation) noexcept;
+    [[nodiscard]] const SequenceResidentAuthority* FindSequenceResidentAuthority(
+        std::uint64_t document_uuid_high,
+        std::uint64_t document_uuid_low,
+        std::uint64_t source_generation) const noexcept;
+    void ClearSequenceResidentAuthorities() noexcept;
 
 private:
     friend class DocumentRegistry;
@@ -216,12 +248,9 @@ private:
     std::size_t view_count_{};
     DocumentViewId active_view_{};
     std::vector<SequenceAutosaveBinding> sequence_autosaves_;
-    std::uint64_t reserved_sequence_document_uuid_high_{};
-    std::uint64_t reserved_sequence_document_uuid_low_{};
-    std::uint64_t reserved_sequence_source_generation_{};
-    std::uint64_t reserved_sequence_artifact_generation_{};
-    bool sequence_autosave_reservation_active_{};
+    std::vector<SequenceAutosaveReservation> sequence_autosave_reservations_;
     std::vector<SequenceFileBinding> sequence_file_bindings_;
+    std::vector<SequenceResidentAuthority> sequence_resident_authorities_;
     IdentityReservationToken identity_reservation_token_{};
     DocumentIdentity reserved_identity_{};
     DocumentIdentity reserved_pair_raster_identity_{};

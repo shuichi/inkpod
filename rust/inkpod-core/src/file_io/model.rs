@@ -138,6 +138,23 @@ pub struct FileIoItem {
     pub source_generation: u64,
     /// Source document identity independent of completion order.
     pub document_uuid: u128,
+    /// Validated normal-pair authority for a prepared sequence target.
+    ///
+    /// This is runtime-only metadata. The raster member is this item's path and
+    /// identity; the optional native member is exposed separately so a frontend
+    /// can publish the same authority without another filesystem scan.
+    pub sequence_resident_native: Option<FileIoSequenceResidentNative>,
+}
+
+/// Runtime normal-pair authority accompanying a prepared sequence cell.
+#[derive(Clone, Debug)]
+pub struct FileIoSequenceResidentNative {
+    /// Absolute normalized same-stem native path.
+    pub path: PathBuf,
+    /// Physical file identity, or normalized missing-path identity.
+    pub identity: FileIdentity,
+    /// Whether `identity` denotes an existing native sidecar.
+    pub identity_physical: bool,
 }
 
 /// Public lifecycle of an I/O job. Ready still requires owner-thread validation.

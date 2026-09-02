@@ -1106,6 +1106,7 @@ bool TestDocumentAndViewLifetime() {
         || sequence_autosave->recovery_path != L"C:\\recovery\\cell.inkpod"
         || sequence_autosave->artifact_proof.native.identity.volume != 101U
         || !document->ReserveSequenceAutosave(71U, 73U, 5U, 1U)
+        || !document->ReserveSequenceAutosave(81U, 83U, 6U, 0U)
         // A reserved continuation freezes this exact prior generation. A
         // newer publication/removal cannot win an ABA race while Core work is
         // in flight, and the wrong expected generation cannot publish.
@@ -1119,6 +1120,7 @@ bool TestDocumentAndViewLifetime() {
             std::move(reserved_binding), 1U)) {
         return false;
     }
+    document->CancelSequenceAutosaveReservation(81U, 83U, 6U, 0U);
     sequence_autosave = document->FindSequenceAutosave(71U, 73U, 5U);
     if (sequence_autosave == nullptr
         || sequence_autosave->artifact_generation != 2U

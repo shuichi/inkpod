@@ -12,6 +12,12 @@ pub struct InkpodSnapshot {
     pub(crate) guides: Box<[InkpodSnapshotGuide]>,
     pub(crate) render_passes: Box<[InkpodSnapshotRenderPass]>,
     pub(crate) shooting_frames: Box<[InkpodShootingFrameInfo]>,
+    pub(crate) sequence_sources: Box<[InkpodPreparedSequenceSource]>,
+}
+
+pub(crate) struct InkpodPreparedSequenceSource {
+    pub(crate) identity: SequenceRenderSourceIdentity,
+    pub(crate) tiles: Box<[InkpodSnapshotTile]>,
 }
 
 pub struct InkpodSubpalette {

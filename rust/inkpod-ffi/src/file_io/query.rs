@@ -194,6 +194,63 @@ pub unsafe extern "C" fn inkpod_io_job_get_item(
     })
 }
 
+/// Copies normal-pair authority for one eagerly resident sequence item.
+/// # Safety
+/// Job/record/native-path buffer are live, writable, and mutually nonoverlapping.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_io_job_get_sequence_resident(
+    job: *const InkpodIoJob,
+    index: u64,
+    out_info: *mut InkpodIoSequenceResidentInfo,
+    native_path: *mut u8,
+    native_path_capacity: u64,
+) -> u32 {
+    io_boundary(|| {
+        // SAFETY: Caller output advertises its complete writable range.
+        unsafe { validate_struct(out_info, "InkpodIoSequenceResidentInfo")? };
+        // SAFETY: Job is live until the end of this bounded query.
+        let job = unsafe { job_lock(job)? };
+        let item = job
+            .item(
+                usize::try_from(index)
+                    .map_err(|_| fail(INKPOD_STATUS_INVALID_ARGUMENT, "item index overflows"))?,
+            )
+            .map_err(map_core_error)?;
+        let Some(native) = item.sequence_resident_native.as_ref() else {
+            // Absence identifies a catalog entry beyond the bounded prepared
+            // set; it is an ordinary successful query.
+            unsafe {
+                out_info.write(InkpodIoSequenceResidentInfo {
+                    struct_size: size_of::<InkpodIoSequenceResidentInfo>() as u32,
+                    source_generation: item.source_generation,
+                    document_uuid_high: (item.document_uuid >> 64) as u64,
+                    document_uuid_low: item.document_uuid as u64,
+                    ..InkpodIoSequenceResidentInfo::default()
+                });
+            }
+            return Ok(INKPOD_STATUS_OK);
+        };
+        let path_text = native
+            .path
+            .to_str()
+            .ok_or_else(|| fail(INKPOD_STATUS_IO_ERROR, "resident native path is not UTF-8"))?;
+        let info = InkpodIoSequenceResidentInfo {
+            struct_size: size_of::<InkpodIoSequenceResidentInfo>() as u32,
+            flags: INKPOD_IO_SEQUENCE_RESIDENT_AVAILABLE,
+            source_generation: item.source_generation,
+            document_uuid_high: (item.document_uuid >> 64) as u64,
+            document_uuid_low: item.document_uuid as u64,
+            native_path_bytes: path_text.len() as u64,
+            native_identity: identity_record(native.identity, native.identity_physical),
+        };
+        // SAFETY: Sizes are returned even for a zero-capacity query.
+        unsafe { out_info.write(info) };
+        // SAFETY: The helper validates the writable span before copying.
+        unsafe { copy_span(path_text.as_bytes(), native_path, native_path_capacity)? };
+        Ok(INKPOD_STATUS_OK)
+    })
+}
+
 // SAFETY: Nonzero-capacity buffer exposes its advertised writable span, without aliasing bytes.
 unsafe fn copy_span(bytes: &[u8], buffer: *mut u8, capacity: u64) -> Result<(), u32> {
     if capacity == 0 {

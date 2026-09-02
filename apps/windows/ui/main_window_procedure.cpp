@@ -44,12 +44,19 @@ LRESULT CALLBACK MainWindowProcedure(
         previous_workspace = previous == nullptr
             ? app::WorkspaceWindowId{}
             : previous->id;
+        const bool starts_mouse_interaction = message == WM_LBUTTONDOWN
+            || message == WM_RBUTTONDOWN || message == WM_MBUTTONDOWN
+            || message == WM_XBUTTONDOWN || message == WM_LBUTTONDBLCLK
+            || message == WM_RBUTTONDBLCLK || message == WM_MBUTTONDBLCLK
+            || message == WM_XBUTTONDBLCLK || message == WM_MOUSEWHEEL
+            || message == WM_MOUSEHWHEEL;
+        const bool starts_pointer_interaction = message == WM_POINTERDOWN
+            || message == WM_POINTERWHEEL || message == WM_POINTERHWHEEL;
         const bool records_focus = message == WM_COMMAND
             || message == WM_SETFOCUS
             || (message == WM_ACTIVATE && LOWORD(wparam) != WA_INACTIVE)
             || (message >= WM_KEYFIRST && message <= WM_KEYLAST)
-            || (message >= WM_MOUSEFIRST && message <= WM_MOUSELAST)
-            || (message >= WM_POINTERUPDATE && message <= WM_POINTERLEAVE);
+            || starts_mouse_interaction || starts_pointer_interaction;
         if (!application->ActivateWorkspaceWindow(
                 workspace->id, records_focus)) {
             return DefWindowProcW(window, message, wparam, lparam);

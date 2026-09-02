@@ -14,6 +14,10 @@ impl PendingSequenceRender {
     pub(super) fn cancel(&self) {
         self.job.cancel();
     }
+
+    pub(super) const fn identity(&self) -> SequenceRenderSourceIdentity {
+        self.identity
+    }
 }
 
 impl std::fmt::Debug for PendingSequenceRender {
@@ -31,20 +35,19 @@ struct PreparedSequenceRender {
     reservation: SequenceRenderReservation,
 }
 
-fn prepare_source(
-    source: SequenceCellSource,
-    reservation: SequenceRenderReservation,
-    context: JobContext,
-) -> IoResult<PreparedSequenceRender> {
+fn compose_source_tiles(
+    source: &SequenceCellSource,
+    mut check_cancelled: impl FnMut() -> IoResult<()>,
+) -> IoResult<BTreeMap<(u64, TileCoord), RenderTile>> {
     // These temporary topology IDs never escape in the prepared tile payload,
     // consume the live document cursor, or become a persistent document.
     let mut ids = StableIdCursor::first();
     let document =
-        Core::document_from_sequence_source(&source, DocumentRevision::from_raw(1), &mut ids)
+        Core::document_from_sequence_source(source, DocumentRevision::from_raw(1), &mut ids)
             .map_err(|_| IoError::InvalidInput("sequence render preparation failed"))?;
     let mut tiles = BTreeMap::new();
     for coord in source.raster.allocated_coords() {
-        context.check_cancelled()?;
+        check_cancelled()?;
         if let Some(tile) = compose_tile(
             &document,
             None,
@@ -57,11 +60,67 @@ fn prepare_source(
             tiles.insert((0, coord), tile);
         }
     }
-    context.check_cancelled()?;
+    check_cancelled()?;
+    Ok(tiles)
+}
+
+fn prepare_source(
+    source: SequenceCellSource,
+    reservation: SequenceRenderReservation,
+    context: JobContext,
+) -> IoResult<PreparedSequenceRender> {
+    let tiles = compose_source_tiles(&source, || context.check_cancelled())?;
     Ok(PreparedSequenceRender { tiles, reservation })
 }
 
 impl Core {
+    pub(crate) fn prepare_sequence_render_catalog(&mut self) {
+        let Some(owner) = self.sequence_render_cache.owner else {
+            return;
+        };
+        let Some(sequence) = self.sequence.as_ref() else {
+            return;
+        };
+        // Sequence import itself is already asynchronous. Complete the bounded
+        // CPU compositions before publishing its completion, so the first user
+        // navigation never cancels an unfinished prewarm job and recomposes the
+        // selected cell synchronously on the Core owner thread.
+        let sources = sequence
+            .cells
+            .iter()
+            .take(MAX_RETAINED_SOURCES as usize)
+            .cloned()
+            .collect::<Vec<_>>();
+        for source in sources {
+            let identity = SequenceRenderSourceIdentity {
+                document_uuid: source.document_uuid,
+                source_generation: source.source_generation,
+                owner_generation: owner.0,
+            };
+            if self
+                .sequence_render_cache
+                .entries
+                .iter()
+                .any(|entry| entry.identity == identity)
+            {
+                continue;
+            }
+            let Some(reservation) = self.sequence_render_cache.reserve(&source, false) else {
+                continue;
+            };
+            let Ok(mut tiles) = compose_source_tiles(&source, || Ok(())) else {
+                continue;
+            };
+            for tile in tiles.values_mut() {
+                tile.assign_sequence_tile_revision(self.next_render_tile_revision);
+                self.next_render_tile_revision =
+                    self.next_render_tile_revision.wrapping_next_nonzero();
+            }
+            self.sequence_render_cache
+                .finish(Some(identity), Some(reservation), &mut tiles);
+        }
+    }
+
     pub(crate) fn poll_sequence_render_preparations(&mut self) {
         let pending = std::mem::take(&mut self.sequence_render_cache.pending);
         for candidate in pending {
@@ -85,10 +144,7 @@ impl Core {
                     })
                     .flatten()
             });
-            if !accepted_index
-                .zip(current_index)
-                .is_some_and(|(candidate, current)| candidate.abs_diff(current) <= 1)
-            {
+            if accepted_index.is_none() {
                 candidate.job.cancel();
                 continue;
             }
@@ -156,17 +212,21 @@ impl Core {
         if self.sequence_render_cache.prefetch_anchor == Some((owner.0, active)) {
             return;
         }
-        // At most one pair of speculative attempts per activation. A fully
-        // transparent result is still not negative-cached, but ordinary view
-        // redraws must not continuously resubmit unsuccessful preparations.
+        // At most one full-catalog speculative pass per activation. Near cells
+        // are submitted first, but every source that fits the 64-source/1-GiB
+        // budget is prepared. A fully transparent result is still not
+        // negative-cached; ordinary redraws do not continuously resubmit it.
         self.sequence_render_cache.prefetch_anchor = Some((owner.0, active));
-        for index in [active.checked_sub(1), active.checked_add(1)] {
-            if self.sequence_render_cache.pending.len() >= 2 {
+        let mut indices = (0..sequence.cells.len())
+            .filter(|index| *index != active)
+            .collect::<Vec<_>>();
+        indices.sort_unstable_by_key(|index| index.abs_diff(active));
+        for index in indices {
+            if self.sequence_render_cache.pending.len()
+                >= MAX_RETAINED_SOURCES.saturating_sub(1) as usize
+            {
                 break;
             }
-            let Some(index) = index else {
-                continue;
-            };
             let Some(source) = sequence.cells.get(index) else {
                 continue;
             };

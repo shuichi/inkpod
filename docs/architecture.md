@@ -45,7 +45,7 @@ Core supplies owned detached work to its generic executor.
 | `inkpod-format` | Bounded procedure-authoritative `.inkpod` v32 Cell/Cut containers and `.inkbatch` v5 models, stream/byte encode/decode/validation, and PNG/TIFF/TGA/BMP codecs; existing synchronous path wrappers remain for Rust callers outside the migrated application routes |
 | `inkpod-io`     | Application-owned bounded workers, filesystem paths/identity/locks, encoded and decoded LRU leases, streaming file access, temporary-file publication/cleanup, recoverable native/raster pair installation, recovery artifacts, and polling progress |
 | `inkpod-core`   | Stable-ID document/layer/plane state, immutable Genesis/base surfaces, a content-addressed canonical asset registry, StateId savepoints, views, raster clipboard, previews, animation, effects/Batch commands, persistence mapping, immutable render snapshots, and canonical primitive execution plus append-only journal/cache-free replay and semantic document digests for the migrated Core slice |
-| `inkpod-ffi`    | ABI v31 fixed records and generation-tagged runtime IDs, opaque I/O manager/job handles and path submission/poll/apply/release, the common raster-pair open kind, issue-time sequence preservation fence, explicit current-document Revert flag, and bounded validated-sidecar-target cache control/telemetry, Batch v5 graph/staged-result handles, InkScript source/compiler/fragment plus authority/plan/run/report handles and fixed DTO host callbacks, persistence/compaction diagnostics, validation/conversion, panic containment, and ownership functions |
+| `inkpod-ffi`    | ABI v32 fixed records and generation-tagged runtime IDs, opaque I/O manager/job handles and path submission/poll/apply/release, the common raster-pair open kind, issue-time sequence preservation fence, explicit current-document Revert flag, bounded validated-sidecar-target cache control/telemetry, complete sequence-resident target transfer, render preparation telemetry, and immutable prepared-source snapshot accessors, Batch v5 graph/staged-result handles, InkScript source/compiler/fragment plus authority/plan/run/report handles and fixed DTO host callbacks, persistence/compaction diagnostics, validation/conversion, panic containment, and ownership functions |
 
 Binary, grayscale, RGBA8/16, straight-alpha, premultiplied display data, and
 selection masks remain distinct types. Win32 may provide a
@@ -131,7 +131,7 @@ silent authority.
 | Encoded bytes per raster file | 512 MiB |
 | Encoded total | 8 GiB |
 | Decoded pixel total | 8 GiB |
-| Validated sidecar targets | 0–1 GiB configurable, 256 MiB default, 64 targets maximum |
+| Validated sidecar targets | 0–1 GiB configurable, 1 GiB default, 64 targets maximum |
 
 Reservations precede reads and pixel allocation. Encoded and decoded LRU
 accounting includes queued results, consumer-held leases, old/new replacement
@@ -165,8 +165,9 @@ the map and then only a touched tile on the first effective edit. A provenance
 mismatch is ordinary ineligibility and uses the unchanged owned import.
 Persistence and InkScript export materialize a temporary canonical dense byte
 stream only when those operations actually request it. Native v32, replay epoch
-27, digests, history, and savepoints are unchanged; ABI v31 changes only for the
-cache control/telemetry described below. Private test-support counters require
+27, digests, history, and savepoints are unchanged; ABI v32 adds resident-target
+transfer and render-preparation accessors without changing canonical state.
+Private test-support counters require
 the managed switch to report zero dense-copy, hash, and full-tile-materialization
 work.
 
@@ -174,7 +175,7 @@ Existing sidecars still undergo full replay and canonical companion comparison
 on the first exact visit. The application-wide `ValidatedTargetCache` then keeps
 only clean, non-recovered, committed targets in an LRU keyed by normalized pair
 paths and both complete stamps. It is capped by both a conservative logical
-weight (0–1 GiB, 256 MiB default) and 64 targets. A hit clones Core metadata and
+weight (0–1 GiB, 1 GiB default) and 64 targets. A hit clones Core metadata and
 COW graph/tile owners without repeating native read, replay, raster decode or
 full comparison. Directory observer proof, selected-member stamp validation and
 final namespace/TOCTOU checks remain mandatory. Changed or missing members,
@@ -189,8 +190,8 @@ The existing edit/preview/revision/view-mode invalidation checks remain the sole
 subsequent admission fence.
 
 The same manager also enforces the CPU sequence composition cache's separate
-8-source / 128-MiB ceiling inside the decoded total. `DecodedLease` reservations
-count pending preparation, retained compositions, and live snapshot/tile owners
+64-source / 1-GiB ceiling inside the decoded total. `DecodedLease` reservations
+count full-catalog pending preparation, retained compositions, and live snapshot/tile owners
 after cache eviction or Core destruction. Manager clones share one budget;
 `InkpodIoCacheInfo::sequence_render_allocations` and `sequence_render_bytes`
 report that subset without adding it again to `decoded_bytes`. An unsuccessful
@@ -223,7 +224,7 @@ discarding edits made after the primary open. Discovery/decode failure leaves
 that successful primary open intact.
 
 Jobs expose nonblocking discovery, read, loaded, failure, work, result, and
-installation counters through ABI v31. Loaded images include cache hits;
+installation counters through ABI v32. Loaded images include cache hits;
 internal Batch output rereads do not count as additional input images. Queued
 drop/cancel cannot publish a live candidate. A result is applied only on its
 captured owner after generation/revision validation. Normal save, sequence
@@ -892,7 +893,7 @@ session/generation value must be supplied when reading them; the UI never
 re-resolves the active document. The read-only C ABI resource query reports
 logical document tile/history, render-cache, CPU-staging, light-table/reference,
 sequence-source, thumbnail-cache, and reserved sequence-composition categories
-without building a snapshot. ABI v31 retains the latter's byte/source/tile counts;
+without building a snapshot. ABI v32 retains the latter's byte/source/tile counts;
 the aggregate render-cache byte/tile counts already include the same charged
 payloads. Shared COW Core clones may report overlapping logical usage; the I/O
 manager's shared reservation counters enforce the application-wide CPU ceiling.
@@ -977,7 +978,7 @@ them. The submission QPC and first successful Present QPC for a committed
 revision/epoch pair are observations, not a substitute for checking its route,
 committed revision, and epoch. Re-presenting that same pair retains its first
 successful-Present time.
-GPU tile payloads share a 512 MiB application-wide
+GPU tile payloads share a 1 GiB application-wide
 budget; active tiles are admitted only when the aggregate fits, while inactive
 tiles are retained for reuse and evicted in application-wide least-recently-used
 order. The frontend retains one Canvas surface per visible editor group, up to two,
@@ -1178,23 +1179,30 @@ The flattened `SequenceCellSource` remains a thumbnail/fresh-cell source and is
 never used to reconstruct saved layer topology, history, selection, or editor
 state.
 
-Only one sequence switch token may be pending application-wide. Fresh
-replacement resolves scalar plan metadata on the Core owner, then queues commit
-and the final snapshot without waiting for composition or Present on the UI
-thread. During this interactive activation, a UI-owned queue accepts at most
+Only one sequence switch token may be pending application-wide. A resident hit
+publishes the outgoing complete editable Core into the sequence resident bank,
+takes the exact target Core, validates the captured UUID/source generation, and
+queues its final snapshot without native read, replay, raster decode, full graph
+reconstruction, or a `SequenceSwitch` file job. Dirty-state recovery capture and
+durable autosave publication start after that switch as a separate job; failure
+keeps the outgoing resident dirty and reports the autosave error without rolling
+the visible target back. During interactive activation, a UI-owned queue accepts at most
 256 further navigation intentions. Each captures its `CommandContext`, catalog
 owner/revision, explicit target or direction, and endpoint policy. After each
 commit, the next intention is revalidated against that same owner and a relative
 step is resolved from the newly committed cell. A stale/closed target is never
 redirected to the currently active document; saturation rejects new intentions.
 Accepted navigation intentions are not frame-coalesced, although the renderer
-may replace their older undrawn snapshots. Autosave/recovery installation keeps
-its existing exclusive behavior and rejects additional switching requests.
+may replace their older undrawn snapshots. A resident miss or invalidated target
+retains the proof-checked asynchronous recovery fallback and its exclusive fence.
 
-The file-I/O controller's UI-thread continuation publishes the prepared
+The owner continuation publishes the prepared
 association, identity, and pathless recovery shell for the captured live session,
 even if the originating view has closed. A token/generation-only window message
-refreshes surviving pane/menu UI; it never carries object pointers. The clean
+refreshes surviving pane/menu UI; it never carries object pointers. A resident
+hit updates Canvas binding and selection immediately, then coalesces secondary
+pane/menu projections for 75 ms; it neither shows `セルを読み込んでいます` nor
+restarts the periodic autosave timer. The clean
 interactive path uses the same owned completion mailbox and publishes authority
 only after Core commit. Core commit success is distinct from snapshot or
 presentation success: a rendering failure cannot revert an already published
@@ -1617,8 +1625,10 @@ can therefore return `S_OK` while its frame is still pending. The Renderer owner
 processes newly queued work first, then `WaitForReadySurface` probes pending
 surfaces and waits on their DXGI handles together with the queue/stop wake event.
 Zero-time probes do not count as latency timeouts. A wait includes at most 63
-surface handles and is bounded to 100 ms; larger sets are probed in full and use
-rotating 1-ms wait batches. New work or stop interrupts the wait. Deferred retry
+surface handles and is bounded to 4 ms; larger sets are probed in full and use
+rotating 1-ms wait batches. New work or stop interrupts the wait. A visible
+surface that transiently reports occlusion is retried for up to 250 ms before it
+is treated as durably occluded. Deferred retry
 does not make the UI wait for frame readiness or make the Renderer busy-spin.
 
 Explicit render requests retain separate `pending_render_requests` credits,
@@ -1744,8 +1754,8 @@ sources under independent application-wide limits:
 
 | Cache | Retained source limit | Pixel limit | Budget owner |
 |---|---|---|---|
-| CPU composed tiles | 8 source reservations | 128 MiB, within the decoded 8 GiB total | Shared `IoManager` plus the Core's reservation ledger |
-| GPU source bitmaps | 8 source allocations across Canvas surfaces | 128 MiB, within the GPU tile 512 MiB total | Process-owned `RendererHost` |
+| CPU composed tiles | 64 source reservations | 1 GiB, within the decoded 8 GiB total | Shared `IoManager` plus the Core's reservation ledger |
+| GPU source bitmaps | 64 source allocations across Canvas surfaces | 1 GiB, within the GPU tile 1 GiB total | Process-owned `RendererHost` |
 
 The key is `(document UUID, source generation, owner generation)`.
 `owner_generation` is a checked, nonzero, process-local namespace for an
@@ -1753,7 +1763,7 @@ independent Core/catalog lifetime. Successful catalog replacement renews it;
 staging preserves it, while an independent Core clone gets a new namespace.
 Exhaustion disables source-cache reuse instead of wrapping. The identity is
 neither persisted nor included in semantic snapshot equality, document digests,
-replay, or revision-max. ABI v31's immutable snapshot accessor copies this
+replay, or revision-max. ABI v32's immutable snapshot accessor copies this
 provenance without payload reads and without giving the caller a source owner.
 
 Pristine eligibility is established by fresh source activation and checked
@@ -1778,20 +1788,22 @@ destruction. The last owner releases the charge; removing an LRU entry alone
 does not. Foreground admission may evict unreferenced LRU entries, but reservation
 failure or a source exceeding the cache cap uses the ordinary active snapshot
 path without retention. Standalone unmanaged Rust sources keep the same local
-8-source / 128-MiB limit; production file sources additionally use the shared
-manager limit. No editable Core is kept for every sequence cell.
+64-source / 1-GiB limit; production file sources additionally use the shared
+manager limit. Up to 64 complete inactive editable Core states live in the same
+catalog-owned COW resident bank; immutable graph, asset, and tile backing is
+shared until the first effective write.
 
-After a snapshot, at most the immediately preceding and following sources are
+After sequence attachment, all catalog sources up to the 64-source cap are
 prepared on the existing bounded Rust I/O worker pool. Preparation reserves
 spare cache capacity first, never evicts a foreground entry to speculate, and
 uses an immutable source with detached temporary topology. The worker consumes
 no persistent IDs and mutates no live Core. Only the Core owner can adopt a
-completed result after checking catalog owner, source UUID/generation, captured
-index, and its current neighborhood. Catalog/source replacement or a departed
-neighborhood cancels/discards old work. An unfinished job for a newly selected
-target is canceled without waiting; foreground composition remains the fallback.
-Attempts are bounded to one adjacent pair per activation, not all-file
-precomposition or repeated speculative work on every view-only frame.
+completed result after checking catalog owner, source UUID/generation, and
+captured index. Catalog/source replacement cancels or discards old work.
+Foreground selection never waits for unfinished preparation; ordinary snapshot
+composition remains the fallback. ABI v32 exposes the prepared source set in
+one immutable snapshot so the renderer can pre-upload the same full catalog
+within its own independent bounds and rebuild it after device loss.
 
 Each Canvas banks GPU tile maps by the full source key and still checks tile ID,
 tile revision, and dimensions before reusing a bitmap. Identical UUIDs and
@@ -2103,7 +2115,7 @@ remain dirty/recovered. Partial selection revert reconstructs the saved document
 this same current-version reader and commits the selected delta as one new
 canonical undo unit.
 
-Whole-document Revert is the explicit ABI v30 `OPEN_NATIVE` request, retained by ABI v31, carrying both
+Whole-document Revert is the explicit ABI v30 `OPEN_NATIVE` request, retained by ABI v32, carrying both
 force-reload and `REVERT_CURRENT`; ordinary forced open is not inferred to be a
 Revert. Preparation resolves the current native pair and captures its logical
 identity. Apply requires the exact live current native path and document UUID,

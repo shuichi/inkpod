@@ -10,7 +10,7 @@
  *
  * @par 共通の構造体規則
  * 拡張可能な入出力構造体は先頭が `uint32_t struct_size` である。呼び出し側は
- * `struct_size = sizeof(その構造体)` を設定する。Core は現行 ABI v31 で既知の末尾まで
+ * `struct_size = sizeof(その構造体)` を設定する。Core は現行 ABI v32 で既知の末尾まで
  * 読み書きできるサイズ、アラインメント、stride、count と全バイト範囲を検証してから
  * ポインターを参照する。構造体ポインターは個別に NULL 可と明記したものを除き非 NULL。
  * count が 0 の任意 span だけはデータポインターを NULL にできる。入力構造体、出力構造体、
@@ -66,7 +66,7 @@
 extern "C" {
 #endif
 
-#define INKPOD_ABI_VERSION UINT32_C(31)
+#define INKPOD_ABI_VERSION UINT32_C(32)
 #define INKPOD_SNAPSHOT_SOURCE_SEQUENCE_PRISTINE UINT32_C(1)
 #define INKPOD_FEATURE_NONE UINT64_C(0)
 
@@ -2260,6 +2260,31 @@ typedef struct InkpodSnapshotSourceIdentity {
     uint64_t source_generation;
     uint64_t owner_generation;
 } InkpodSnapshotSourceIdentity;
+
+/**
+ * Runtime-only immutable sequence composition carried by a snapshot for GPU
+ * prewarming. `tiles` and their pixels are borrowed from the parent snapshot.
+ * Only SEQUENCE_PRISTINE is emitted; all identity fields are nonzero.
+ */
+typedef struct InkpodSnapshotSequenceSourceView {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t document_uuid_high;
+    uint64_t document_uuid_low;
+    uint64_t source_generation;
+    uint64_t owner_generation;
+    const InkpodSnapshotTile* tiles;
+    uint64_t tile_count;
+    uint64_t tile_stride_bytes;
+} InkpodSnapshotSequenceSourceView;
+
+/** Runtime-only full-catalog render preparation progress. */
+typedef struct InkpodSequenceRenderPreparationInfo {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t pending_source_count;
+    uint64_t prepared_source_count;
+} InkpodSequenceRenderPreparationInfo;
 
 /** @brief snapshot 内 guide の immutable borrowed record。 */
 typedef struct InkpodSnapshotGuide {
@@ -5256,6 +5281,35 @@ InkpodStatus inkpod_core_sequence_commit_autosaved_switch(
     const InkpodSequenceSwitchRequest* request,
     InkpodDocumentInfo* out_info);
 /**
+ * @brief Exchanges the active Core with a previously visited resident cell.
+ *
+ * Core owner thread. Success preserves the outgoing complete editable state in
+ * COW storage and writes the restored target document. `PENDING` means the exact
+ * target has not been made resident yet; it changes no Core state and the caller
+ * must use the normal pair/recovery resolver. This call performs no file I/O.
+ * Dirty source recovery may be submitted independently before this call and is
+ * not a prerequisite for the in-memory exchange.
+ */
+InkpodStatus inkpod_core_sequence_try_resident_switch(
+    InkpodCore* core,
+    const InkpodSequenceSwitchRequest* request,
+    InkpodDocumentInfo* out_info);
+/** Returns OK when the exact indexed target has a complete resident Core state,
+ * PENDING on a side-effect-free miss, or an argument/thread error. */
+InkpodStatus inkpod_core_sequence_resident_target_available(
+    InkpodCore* core,
+    uint32_t index);
+
+/**
+ * Nonblockingly collects completed full-catalog render preparations. This
+ * owner-thread query mutates derived caches only; document and editor state are
+ * unchanged. A renderer prewarm snapshot should be published once pending is
+ * zero and prepared count exceeds the last published count.
+ */
+InkpodStatus inkpod_core_sequence_render_preparation_poll(
+    InkpodCore* core,
+    InkpodSequenceRenderPreparationInfo* output);
+/**
  * @brief Restores the requested target from an exact native recovery artifact.
  *
  * The artifact is staged and replayed before one live replacement. Success is
@@ -6269,6 +6323,21 @@ InkpodStatus inkpod_snapshot_get_source_identity(
     const InkpodSnapshot* snapshot,
     InkpodSnapshotSourceIdentity* output);
 
+/** Returns the bounded number of completed inactive sequence compositions. */
+InkpodStatus inkpod_snapshot_sequence_prepared_source_count(
+    const InkpodSnapshot* snapshot,
+    uint64_t* out_count);
+
+/**
+ * Borrows one completed inactive sequence composition. The returned tile span
+ * remains valid until the parent snapshot is released. This accessor does not
+ * scan or copy pixel payloads and may run on the renderer thread.
+ */
+InkpodStatus inkpod_snapshot_sequence_prepared_source_get(
+    const InkpodSnapshot* snapshot,
+    uint64_t index,
+    InkpodSnapshotSequenceSourceView* output);
+
 /**
  * @brief snapshot の overlay/grid と borrowed guide span を取得する。
  * @par 契約
@@ -6863,6 +6932,7 @@ typedef struct InkpodIoJob InkpodIoJob;
  * queryable on the terminal failed job; matching frontend aliases must be
  * cleared and the next normal save must use Save As. */
 #define INKPOD_IO_RESULT_AUTHORITY_REVOKED (UINT64_C(1) << 4)
+#define INKPOD_IO_SEQUENCE_RESIDENT_AVAILABLE UINT32_C(1)
 
 typedef struct InkpodIoConfig {
     uint32_t struct_size;
@@ -6999,6 +7069,21 @@ typedef struct InkpodIoItemInfo {
     InkpodIoFileIdentity identity;
 } InkpodIoItemInfo;
 
+/* Runtime-only validated normal-pair authority for a sequence item prepared by
+ * the common companion resolver. The live source may expose this authority even
+ * though its editable Core is not duplicated in the inactive resident bank.
+ * AVAILABLE clear identifies an item outside the bounded prepared set. The
+ * raster member is InkpodIoItemInfo. */
+typedef struct InkpodIoSequenceResidentInfo {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t source_generation;
+    uint64_t document_uuid_high;
+    uint64_t document_uuid_low;
+    uint64_t native_path_bytes;
+    InkpodIoFileIdentity native_identity;
+} InkpodIoSequenceResidentInfo;
+
 typedef struct InkpodIoCacheInfo {
     uint32_t struct_size;
     uint32_t reserved;
@@ -7093,6 +7178,9 @@ InkpodStatus inkpod_io_job_release(InkpodIoJob** job);
  * SAVE_PAIR's first non-installing READY exposes both physical future-final
  * replacement identities so callers can reserve them before authorizing install. */
 InkpodStatus inkpod_io_job_get_item(const InkpodIoJob* job, uint64_t index, InkpodIoItemInfo* out_info, uint8_t* path, uint64_t path_capacity, uint8_t* name, uint64_t name_capacity);
+/** Copies the prevalidated native member paired with one sequence result item.
+ * Capacity zero is a size query. AVAILABLE clear is a successful cache absence. */
+InkpodStatus inkpod_io_job_get_sequence_resident(const InkpodIoJob* job, uint64_t index, InkpodIoSequenceResidentInfo* out_info, uint8_t* native_path, uint64_t native_path_capacity);
 InkpodStatus inkpod_io_job_copy_error(const InkpodIoJob* job, uint8_t* buffer, uint64_t capacity, uint64_t* out_required_bytes);
 /** Core owner thread only. Save-pair/sequence-switch/compacted-copy may return PENDING
  * while installing; poll then apply again, including failed/cancelled installation. */

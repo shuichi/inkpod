@@ -847,6 +847,113 @@ pub unsafe extern "C" fn inkpod_core_sequence_commit_autosaved_switch(
     })
 }
 
+/// Exchanges the active state with an exact previously visited resident cell.
+/// A side-effect-free cache miss returns PENDING so the caller can start the
+/// ordinary pair/recovery resolver. No filesystem I/O is performed here.
+///
+/// # Safety
+/// Core, request, and output must be complete live owner-thread records. The
+/// request is borrowed only for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_sequence_try_resident_switch(
+    core: *mut InkpodCore,
+    request: *const InkpodSequenceSwitchRequest,
+    out_info: *mut InkpodDocumentInfo,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(request, "InkpodSequenceSwitchRequest") } {
+            return status;
+        }
+        if let Err(status) = unsafe { validate_struct(out_info.cast_const(), "InkpodDocumentInfo") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live records were validated above.
+        let request = match parse_sequence_switch_request(unsafe { &*request }) {
+            Ok(request) => request,
+            Err(status) => return status,
+        };
+        let core = unsafe { &mut *core };
+        let output = unsafe { &mut *out_info };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core.core.try_sequence_resident_switch(request) {
+            Ok(Some(info)) => {
+                write_document_info(output, info);
+                INKPOD_STATUS_OK
+            }
+            Ok(None) => INKPOD_STATUS_PENDING,
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Reports whether an exact indexed target is resident without touching pixels.
+/// # Safety
+/// Core must be a live owner-thread handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_sequence_resident_target_available(
+    core: *mut InkpodCore,
+    index: u32,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        // SAFETY: The live handle was validated above.
+        let core = unsafe { &mut *core };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        if core.core.sequence_resident_target_available(index as usize) {
+            INKPOD_STATUS_OK
+        } else {
+            INKPOD_STATUS_PENDING
+        }
+    })
+}
+
+/// Nonblockingly collects full-catalog render preparations and copies progress.
+/// # Safety
+/// Core and output must be complete live owner-thread records.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_sequence_render_preparation_poll(
+    core: *mut InkpodCore,
+    output: *mut InkpodSequenceRenderPreparationInfo,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) =
+            unsafe { validate_struct(output.cast_const(), "InkpodSequenceRenderPreparationInfo") }
+        {
+            return status;
+        }
+        // SAFETY: The complete live handle and writable output were validated above.
+        let core = unsafe { &mut *core };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        let status = core.core.poll_sequence_render_preparation();
+        let output = unsafe { &mut *output };
+        output.reserved = 0;
+        output.pending_source_count = status.pending_sources;
+        output.prepared_source_count = status.prepared_sources;
+        INKPOD_STATUS_OK
+    })
+}
+
 /// Restores the requested target from one exact native recovery artifact.
 ///
 /// # Safety

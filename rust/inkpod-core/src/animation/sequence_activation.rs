@@ -178,12 +178,37 @@ impl Core {
             return self.document_info();
         }
         if plan.kind == SequenceActivationKind::Bind {
-            let sequence = self
-                .sequence
-                .as_mut()
-                .ok_or(CoreError::InvalidState("sequence disappeared"))?;
-            sequence.cells[target].document_uuid = plan.source_document_uuid;
-            sequence.active_index = Some(target);
+            // Bind resolution already proved that this target is the Genesis
+            // raster. Editor-only reconciliation is not a pixel edit and must
+            // not disable its prepared render identity.
+            let pristine = self.sequence_source_render_content_is_pristine();
+            let source = {
+                let sequence = self
+                    .sequence
+                    .as_mut()
+                    .ok_or(CoreError::InvalidState("sequence disappeared"))?;
+                sequence.cells[target].document_uuid = plan.source_document_uuid;
+                sequence.active_index = Some(target);
+                sequence.cells[target].clone()
+            };
+            // The independently decoded target resident is superseded by the
+            // already-live editable document. Keep just one complete state for
+            // this cell, then rekey its prepared composition without touching
+            // the shared pixel payload.
+            if let Some(bank) = &self.sequence_resident_bank {
+                let _ = bank.take(SequenceResidentKey {
+                    document_uuid: plan.target_document_uuid,
+                    source_generation: plan.target_source_generation,
+                });
+            }
+            self.sequence_render_cache.rebind_source_document_uuid(
+                plan.target_document_uuid,
+                plan.source_document_uuid,
+                plan.target_source_generation,
+            );
+            if pristine {
+                self.register_pristine_sequence_source(&source);
+            }
             return self.document_info();
         }
         let source = self
@@ -259,7 +284,7 @@ impl Core {
         Ok((primary, secondary))
     }
 
-    fn sequence_source_matches_current_asset(
+    pub(crate) fn sequence_source_matches_current_asset(
         &self,
         source: &SequenceCellSource,
     ) -> Result<bool, CoreError> {
@@ -282,7 +307,32 @@ impl Core {
         {
             return Ok(false);
         }
+        if let Some(candidate_id) = source.cached_asset_id() {
+            return Ok(candidate_id == source_id);
+        }
         let mut candidate = asset::AssetStore::default();
         Ok(candidate.ingest_tile_raster(&source.raster, None)?.id() == source_id)
+    }
+
+    /// Compares the exact tiled Genesis plane used for display.
+    ///
+    /// This is used only while installing a sequence in the background. It is
+    /// intentionally independent of dense asset descriptors: the active raster
+    /// importer and managed sequence importer can own different canonical asset
+    /// records while producing the same tiled editable pixels.
+    pub(crate) fn sequence_source_matches_current_genesis_pixels(
+        &self,
+        source: &SequenceCellSource,
+    ) -> bool {
+        let (Some(document), Some(genesis)) = (self.document.as_ref(), self.genesis.as_ref())
+        else {
+            return false;
+        };
+        let Some(raster_source) = genesis.raster_source else {
+            return false;
+        };
+        document
+            .plane_by_id(raster_source.plane_id)
+            .is_some_and(|plane| plane.raster == source.raster)
     }
 }

@@ -45,7 +45,9 @@ pub use sequence::{
     SequenceCellSource, SequenceDirection, SequenceEndpointPolicy, SequenceStepPlan,
     SequenceStepResult, SequenceSwitchPolicy, SequenceSwitchRequest, Thumbnail,
 };
-pub(crate) use sequence::{MotionCheckState, SequenceState};
+pub(crate) use sequence::{
+    MotionCheckState, SequenceResidentBank, SequenceResidentKey, SequenceState,
+};
 pub use sequence_activation::{SequenceActivationKind, SequenceActivationPlan};
-pub use sequence_render_cache::SequenceRenderSourceIdentity;
 pub(crate) use sequence_render_cache::{SequenceRenderCache, SequenceRenderReservation};
+pub use sequence_render_cache::{SequenceRenderPreparationStatus, SequenceRenderSourceIdentity};

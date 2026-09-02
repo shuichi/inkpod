@@ -12,7 +12,7 @@
 #include <type_traits>
 #include <vector>
 
-static_assert(INKPOD_ABI_VERSION == UINT32_C(31));
+static_assert(INKPOD_ABI_VERSION == UINT32_C(32));
 static_assert(std::is_standard_layout_v<InkpodCoreConfig>);
 static_assert(std::is_standard_layout_v<InkpodSnapshotView>);
 static_assert(sizeof(InkpodCoreConfig) == 16U);
@@ -35,6 +35,10 @@ static_assert(sizeof(InkpodDocumentInfo) == 232U);
 static_assert(sizeof(InkpodResourceUsage) == 136U);
 static_assert(std::is_standard_layout_v<InkpodSnapshotSourceIdentity>);
 static_assert(sizeof(InkpodSnapshotSourceIdentity) == 40U);
+static_assert(std::is_standard_layout_v<InkpodSnapshotSequenceSourceView>);
+static_assert(sizeof(InkpodSnapshotSequenceSourceView) == 64U);
+static_assert(std::is_standard_layout_v<InkpodSequenceRenderPreparationInfo>);
+static_assert(sizeof(InkpodSequenceRenderPreparationInfo) == 24U);
 static_assert(std::is_standard_layout_v<InkpodSequenceCatalogInfo>);
 static_assert(sizeof(InkpodSequenceCatalogInfo) == 32U);
 static_assert(sizeof(InkpodStrokeSample) == 24U);
@@ -191,6 +195,7 @@ static_assert(sizeof(InkpodIoRequest) == 72U);
 static_assert(sizeof(InkpodIoJobInfo) == 104U);
 static_assert(sizeof(InkpodIoFileIdentity) == 32U);
 static_assert(sizeof(InkpodIoItemInfo) == 80U);
+static_assert(sizeof(InkpodIoSequenceResidentInfo) == 72U);
 static_assert(sizeof(InkpodIoCacheInfo) == 120U);
 static_assert(sizeof(InkpodIoRecoveryPairProof) == 168U);
 static_assert(sizeof(InkpodIoRecoveryMetadata) == 328U);

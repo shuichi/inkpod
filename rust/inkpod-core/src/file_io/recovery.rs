@@ -73,6 +73,7 @@ pub(super) fn prepare(
                     .metadata
                     .as_ref()
                     .map_or(0, |metadata| metadata.document_uuid),
+                sequence_resident_native: None,
             })
         })
         .collect::<Result<Vec<_>, inkpod_io::IoError>>()?;

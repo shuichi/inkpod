@@ -469,6 +469,29 @@ pub struct InkpodSnapshotSourceIdentity {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+pub struct InkpodSnapshotSequenceSourceView {
+    pub struct_size: u32,
+    pub flags: u32,
+    pub document_uuid_high: u64,
+    pub document_uuid_low: u64,
+    pub source_generation: u64,
+    pub owner_generation: u64,
+    pub tiles: *const InkpodSnapshotTile,
+    pub tile_count: u64,
+    pub tile_stride_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodSequenceRenderPreparationInfo {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub pending_source_count: u64,
+    pub prepared_source_count: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 pub struct InkpodSnapshotGuide {
     pub struct_size: u32,
     pub axis: u32,

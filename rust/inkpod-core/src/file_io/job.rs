@@ -64,7 +64,10 @@ pub(super) enum Prepared {
         Option<inkpod_io::RecoveryCandidate>,
         Option<PathBuf>,
     ),
-    Sequence(Vec<SequenceCellSource>),
+    Sequence {
+        sources: Vec<SequenceCellSource>,
+        residents: Vec<(u64, Box<Core>)>,
+    },
     References(Vec<LoadedImage>),
     LightTable(LightTableItemInput),
     Pair(Box<PreparedPair>, DocumentSaveToken, PairRepairTarget),
@@ -142,6 +145,7 @@ pub struct FileIoJob {
     pub(super) error: Option<CoreError>,
     pub(super) items: Vec<FileIoItem>,
     pub(super) pending: Option<Pending>,
+    pub(super) validated_target_cache: Option<super::ValidatedTargetCache>,
     pub(super) batch_report: Option<crate::BatchRunReport>,
     pub(super) batch_preview: Option<crate::BatchPreview>,
     pub(super) recoveries: Vec<inkpod_io::RecoveryCandidate>,
@@ -162,7 +166,7 @@ impl FileIoJob {
     pub fn start(
         core: Option<&Core>,
         manager: IoManager,
-        request: FileIoRequest,
+        mut request: FileIoRequest,
     ) -> Result<Self, CoreError> {
         prepare::validate_request(&request)?;
         let reference = matches!(
@@ -186,6 +190,20 @@ impl FileIoJob {
                     "recovery metadata belongs to a different document",
                 ));
             }
+        }
+        // An application autosave may be detached from a resident sequence
+        // exchange, but recovery still needs the exact normal-pair proof owned
+        // by Core. Enrich the copied metadata before the save snapshot is
+        // handed to the worker. Standalone/native-only documents retain NONE.
+        if request.kind == FileIoKind::Autosave
+            && core
+                .is_some_and(|core| core.io_pair_authority.is_some() || core.io_pair_plan.is_some())
+            && let Some(metadata) = request.recovery_metadata.as_mut()
+        {
+            super::session::bind_sequence_recovery_pair(
+                core.ok_or(CoreError::NoDocument)?,
+                metadata,
+            )?;
         }
         let open_token = if matches!(
             request.kind,
@@ -275,6 +293,21 @@ impl FileIoJob {
         Ok(job)
     }
 
+    /// Starts a request with one application-owned validated sidecar cache.
+    ///
+    /// Sequence discovery uses this cache while eagerly preparing complete
+    /// inactive editing states. Other request kinds retain their normal behavior.
+    pub fn start_with_validated_target_cache(
+        core: Option<&Core>,
+        manager: IoManager,
+        target_cache: super::ValidatedTargetCache,
+        request: FileIoRequest,
+    ) -> Result<Self, CoreError> {
+        let mut job = Self::start(core, manager, request)?;
+        job.validated_target_cache = Some(target_cache);
+        Ok(job)
+    }
+
     pub(super) fn allocate(
         core: Option<&Core>,
         manager: IoManager,
@@ -298,6 +331,7 @@ impl FileIoJob {
             recovery_artifact_proof: None,
             sequence_install: None,
             pending: None,
+            validated_target_cache: None,
             images: Vec::new(),
             image_error: None,
             #[cfg(test)]
@@ -475,9 +509,19 @@ impl FileIoJob {
                     let seed = self.seed;
                     let seed_uuid = self.target.as_ref().and_then(|target| target.uuid);
                     let reload = self.reload.take();
+                    let target_cache = self.validated_target_cache.clone();
                     self.pending = Some(Pending::Prepare(self.manager.submit(move |context| {
                         Ok(prepare::images(
-                            &manager, &request, images, seed, seed_uuid, reload, &context,
+                            &manager,
+                            &request,
+                            prepare::ImagePreparation {
+                                images,
+                                seed,
+                                seed_uuid,
+                                reload,
+                                target_cache,
+                            },
+                            &context,
                         ))
                     })?));
                 } else {
@@ -907,6 +951,7 @@ mod tests {
             identity_physical: true,
             source_generation: 1,
             document_uuid: uuid,
+            sequence_resident_native: None,
         }
     }
 

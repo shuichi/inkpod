@@ -1,6 +1,69 @@
 use super::raster::{common_to_tile_raster, thumbnail_allocation_bytes, thumbnail_for_raster};
 use super::*;
-use std::sync::{Arc, OnceLock};
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex, OnceLock};
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) struct SequenceResidentKey {
+    pub(crate) document_uuid: u128,
+    pub(crate) source_generation: u64,
+}
+
+/// Runtime-only bank of complete inactive cell editing states.
+///
+/// Stored Cores have their own bank detached before insertion, so this shared
+/// owner never forms an `Arc` cycle. Pixel tiles, assets, and render payloads
+/// remain COW/shared; the bank retains the per-cell document graph, history,
+/// dirty state, and pair authority which cannot be reconstructed from a flat
+/// source image.
+#[derive(Clone, Default)]
+pub(crate) struct SequenceResidentBank {
+    entries: Arc<Mutex<BTreeMap<SequenceResidentKey, Box<Core>>>>,
+}
+
+impl std::fmt::Debug for SequenceResidentBank {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        formatter
+            .debug_struct("SequenceResidentBank")
+            .field("entry_count", &entries.len())
+            .finish()
+    }
+}
+
+impl SequenceResidentBank {
+    pub(crate) fn insert(&self, key: SequenceResidentKey, core: Box<Core>) {
+        self.entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(key, core);
+    }
+
+    pub(crate) fn take(&self, key: SequenceResidentKey) -> Option<Box<Core>> {
+        self.entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&key)
+    }
+
+    pub(crate) fn contains(&self, key: SequenceResidentKey) -> bool {
+        self.entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains_key(&key)
+    }
+
+    #[cfg(feature = "test-support")]
+    pub(crate) fn len(&self) -> usize {
+        self.entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len()
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// Small owned straight-alpha RGBA8 preview of a sequence cell.
@@ -220,6 +283,10 @@ impl SequenceCellSource {
             .map(|lease| lease.reserve_sequence_render(bytes))
             .transpose()
             .map_err(CoreError::from)
+    }
+
+    pub(crate) fn cached_asset_id(&self) -> Option<AssetId> {
+        self.cached_asset_id.get().copied()
     }
 
     pub(crate) fn managed_raster_input(

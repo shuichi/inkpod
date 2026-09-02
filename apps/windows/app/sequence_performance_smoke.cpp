@@ -32,7 +32,7 @@ namespace {
 constexpr std::uint32_t kWidth = 1754U;
 constexpr std::uint32_t kHeight = 1240U;
 constexpr std::size_t kMeasuredSteps = 64U;
-constexpr std::uint64_t kCacheBudget = 128U * 1024U * 1024U;
+constexpr std::uint64_t kCacheBudget = UINT64_C(1024) * 1024U * 1024U;
 
 std::uint64_t Qpc() noexcept {
     LARGE_INTEGER value{};
@@ -128,6 +128,7 @@ struct Sample final {
     std::uint64_t draw{};
     std::uint64_t present_api{};
     bool foreground{};
+    bool pristine{};
 };
 
 struct ForegroundProbe final {
@@ -267,6 +268,8 @@ bool Step(app::ApplicationHost& state, HWND list, bool next,
         - surface.last_snapshot_submission_qpc;
     sample.draw = surface.first_present_begin_qpc - surface.first_frame_ready_qpc;
     sample.present_api = surface.first_presented_revision_qpc - surface.first_present_begin_qpc;
+    sample.pristine = (surface.last_presented_source.flags
+        & INKPOD_SNAPSHOT_SOURCE_SEQUENCE_PRISTINE) != 0U;
     InkpodDocumentInfo after{};
     const auto engine_after = state.engine->Metrics();
     const auto renderer_after = state.renderer->ResourceUsage();
@@ -364,14 +367,19 @@ int Run(app::ApplicationHost& state) {
         std::llround(static_cast<double>(kHeight) / thumbnail_scale));
     const std::uint64_t expected_sequence_residency = fixtures.paths.size()
         * ((tiled_width * tiled_height + thumbnail_width * thumbnail_height) * 4U);
+    const std::uint64_t expected_sequence_render_residency = fixtures.paths.size()
+        * static_cast<std::uint64_t>(kWidth) * kHeight * 4U;
     if (inkpod_io_manager_get_cache_info(
             state.file_io.Manager(), &io_after_sequence_import)
             != INKPOD_STATUS_OK
-        || io_after_sequence_import.decoded_bytes != expected_sequence_residency) {
+        || io_after_sequence_import.decoded_bytes
+            != expected_sequence_residency + expected_sequence_render_residency) {
         std::fprintf(stderr,
-            "sequence residency mismatch decoded=%llu expected=%llu; "
-            "dense source copies must not remain beside resident tiles\n",
-            io_after_sequence_import.decoded_bytes, expected_sequence_residency);
+            "sequence residency mismatch decoded=%llu source=%llu render=%llu; "
+            "editable residents must share source tiles and every source must have one "
+            "bounded premultiplied render composition\n",
+            io_after_sequence_import.decoded_bytes, expected_sequence_residency,
+            expected_sequence_render_residency);
         return 18017;
     }
     KeyboardState keyboard;
@@ -418,10 +426,11 @@ int Run(app::ApplicationHost& state) {
         }
         if (index < 4U) {
             std::fprintf(stderr,
-                "sequence_initial step=%zu handler_ms=%.6f submit_ms=%.6f present_ms=%.6f\n",
+                "sequence_initial step=%zu handler_ms=%.6f submit_ms=%.6f present_ms=%.6f "
+                "pristine=%d\n",
                 index, static_cast<double>(sample.handler) / ticks_per_ms,
                 static_cast<double>(sample.submit) / ticks_per_ms,
-                static_cast<double>(sample.present) / ticks_per_ms);
+                static_cast<double>(sample.present) / ticks_per_ms, sample.pristine);
         }
     }
     InkpodIoCacheInfo io_before{sizeof(InkpodIoCacheInfo)};
@@ -490,9 +499,9 @@ int Run(app::ApplicationHost& state) {
     if (inkpod_io_manager_get_cache_info(state.file_io.Manager(), &io_after) != INKPOD_STATUS_OK
         || io_after.physical_reads != io_before.physical_reads
         || io_after.decodes != io_before.decodes
-        || io_after.sequence_render_allocations > 8U
+        || io_after.sequence_render_allocations > 64U
         || io_after.sequence_render_bytes > kCacheBudget
-        || usage.sequence_cache_source_count > 8U || usage.sequence_cache_bytes > kCacheBudget
+        || usage.sequence_cache_source_count > 64U || usage.sequence_cache_bytes > kCacheBudget
         || prompt_count != state.lifetime.smoke_dirty_prompt_count) {
         return 18010;
     }

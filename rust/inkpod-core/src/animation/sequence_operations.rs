@@ -56,9 +56,106 @@ impl Core {
             active_index,
             revision,
         });
+        // A catalog replacement establishes a new runtime identity namespace.
+        // Complete editable states from the previous catalog must not be
+        // reachable even when source UUID/generation values happen to repeat.
+        self.sequence_resident_bank = Some(SequenceResidentBank::default());
         self.sequence_render_catalog_changed();
         self.motion_check = None;
         self.subpalette_index = None;
+        Ok(())
+    }
+
+    /// Installs a sequence together with validated complete inactive editing states.
+    ///
+    /// Each resident target shares the sequence's immutable source tiles and is
+    /// keyed by the final document UUID plus source generation. The live source
+    /// remains owned by `self`; at most 64 inactive targets are admitted.
+    pub(crate) fn set_sequence_with_residents(
+        &mut self,
+        cells: Vec<SequenceCellSource>,
+        residents: Vec<(u64, Box<Core>)>,
+    ) -> Result<(), CoreError> {
+        if residents.len() > MAX_VALIDATED_TARGETS {
+            return Err(CoreError::InvalidArgument(
+                "sequence resident target count exceeds 64",
+            ));
+        }
+        let live_uuid = self.document.as_ref().map(|document| document.uuid);
+        let mut resident_keys = std::collections::BTreeSet::new();
+        for (source_generation, target) in &residents {
+            let document_uuid = target.document_info()?.document_uuid;
+            if Some(document_uuid) == live_uuid
+                || !cells.iter().any(|source| {
+                    source.document_uuid == document_uuid
+                        && source.source_generation == *source_generation
+                })
+                || !resident_keys.insert((document_uuid, *source_generation))
+            {
+                return Err(CoreError::InvalidArgument(
+                    "sequence resident target identity is invalid",
+                ));
+            }
+        }
+
+        let pristine_active = self
+            .document
+            .as_ref()
+            .and_then(|document| {
+                cells
+                    .iter()
+                    .find(|source| source.document_uuid == document.uuid)
+            })
+            .filter(|source| {
+                self.sequence_source_render_content_is_pristine()
+                    && self.sequence_source_matches_current_genesis_pixels(source)
+            })
+            .cloned();
+        self.set_sequence(cells)?;
+        if let Some(source) = pristine_active.as_ref() {
+            self.register_pristine_sequence_source(source);
+        }
+        self.prepare_sequence_render_catalog();
+        let bank = self
+            .sequence_resident_bank
+            .clone()
+            .ok_or(CoreError::InvalidState("sequence resident bank is missing"))?;
+        let shared_cache = self.sequence_render_cache.clone();
+        let catalog = self.sequence.clone().ok_or(CoreError::InvalidState(
+            "sequence catalog was not installed",
+        ))?;
+        for (source_generation, mut target) in residents {
+            let document_uuid = target
+                .document
+                .as_ref()
+                .expect("resident validation proved a document")
+                .uuid;
+            let target_index = catalog
+                .cells
+                .iter()
+                .position(|source| {
+                    source.document_uuid == document_uuid
+                        && source.source_generation == source_generation
+                })
+                .expect("resident validation proved a sequence identity");
+            let source = catalog.cells[target_index].clone();
+            let mut target_catalog = catalog.clone();
+            target_catalog.active_index = Some(target_index);
+            target.sequence = Some(target_catalog);
+            target.sequence_resident_bank = None;
+            target.sequence_render_cache = shared_cache.clone();
+            target
+                .sequence_render_cache
+                .detach_inactive_resident_catalog();
+            target.register_pristine_sequence_source(&source);
+            bank.insert(
+                SequenceResidentKey {
+                    document_uuid,
+                    source_generation,
+                },
+                target,
+            );
+        }
         Ok(())
     }
 
@@ -404,7 +501,196 @@ impl Core {
         if !request.requires_switch() {
             return self.document_info();
         }
-        self.sequence_activate_impl(request.target_index as usize)
+        let outgoing = self.capture_active_sequence_resident()?;
+        let output = self.sequence_activate_impl(request.target_index as usize)?;
+        self.publish_outgoing_sequence_resident(outgoing);
+        Ok(output)
+    }
+
+    /// Attempts an in-memory sequence switch without filesystem work.
+    ///
+    /// A miss is a side-effect-free `Ok(None)` and the caller must use the
+    /// ordinary pair/recovery resolver. A hit atomically exchanges the complete
+    /// editable Core state for the two cells. The outgoing cell remains dirty
+    /// in memory; durable autosave is deliberately a separate background task.
+    /// Same-size view state is retained and different-size state follows the
+    /// existing resize policy. No pixel payload is flattened or copied.
+    pub fn try_sequence_resident_switch(
+        &mut self,
+        request: SequenceSwitchRequest,
+    ) -> Result<Option<DocumentInfo>, CoreError> {
+        self.validate_autosaved_sequence_switch_request(request)?;
+        if !request.requires_switch() {
+            return self.document_info().map(Some);
+        }
+        let bank = self
+            .sequence_resident_bank
+            .clone()
+            .ok_or(CoreError::InvalidState("sequence resident bank is missing"))?;
+        let target_key = SequenceResidentKey {
+            document_uuid: request.target_document_uuid,
+            source_generation: request.target_source_generation,
+        };
+        let Some(mut target) = bank.take(target_key) else {
+            return Ok(None);
+        };
+
+        // Prepare every fallible part before changing the live Core. A failed
+        // preparation returns the target to the bank and leaves `self` intact.
+        let prepared = (|| {
+            let target_document = target.document.as_ref().ok_or(CoreError::NoDocument)?;
+            if target_document.uuid != request.target_document_uuid {
+                return Err(CoreError::InvalidState(
+                    "resident sequence target identity is invalid",
+                ));
+            }
+            let (view, secondary_views) = self.stage_sequence_views(DocumentSizeU32::new(
+                target_document.width,
+                target_document.height,
+            ))?;
+            target.inherit_file_runtime(self)?;
+            let mut sequence = self
+                .sequence
+                .clone()
+                .ok_or(CoreError::InvalidState("no sequence is configured"))?;
+            let target_source = sequence
+                .cells
+                .get(request.target_index as usize)
+                .filter(|source| {
+                    source.document_uuid == request.target_document_uuid
+                        && source.source_generation == request.target_source_generation
+                })
+                .cloned()
+                .ok_or(CoreError::InvalidState("sequence switch request is stale"))?;
+            sequence.active_index = Some(request.target_index as usize);
+            let pristine = target.pristine_sequence_render_source().is_some();
+            target.sequence = Some(sequence);
+            target.sequence_resident_bank = Some(bank.clone());
+            target.sequence_render_cache = self.sequence_render_cache.clone();
+            target.sequence_render_cache.invalidate_document();
+            target.view = view;
+            target.secondary_views = secondary_views;
+            target.next_view_id = self.next_view_id;
+            target.color_check = self.color_check;
+            target.next_render_tile_revision = self.next_render_tile_revision;
+            target.next_preview_revision = self.next_preview_revision;
+            target.editor_defaults = self.editor_defaults.clone();
+            target.shortcuts = self.shortcuts.clone();
+            target.shortcut_defaults = self.shortcut_defaults.clone();
+            target.subpalette_index = self.subpalette_index;
+            target.motion_check = None;
+            if pristine {
+                target.register_pristine_sequence_source(&target_source);
+            }
+            Ok::<(), CoreError>(())
+        })();
+        if let Err(error) = prepared {
+            target.sequence_resident_bank = None;
+            bank.insert(target_key, target);
+            return Err(error);
+        }
+
+        let outgoing = match self.capture_active_sequence_resident() {
+            Ok(outgoing) => outgoing,
+            Err(error) => {
+                target.sequence_resident_bank = None;
+                bank.insert(target_key, target);
+                return Err(error);
+            }
+        };
+        let outgoing_key = outgoing
+            .sequence
+            .as_ref()
+            .and_then(|sequence| {
+                sequence
+                    .active_index
+                    .and_then(|index| sequence.cells.get(index))
+            })
+            .map(|source| SequenceResidentKey {
+                document_uuid: source.document_uuid,
+                source_generation: source.source_generation,
+            })
+            .ok_or(CoreError::InvalidState(
+                "active sequence resident identity is missing",
+            ))?;
+        bank.insert(outgoing_key, outgoing);
+        *self = *target;
+        self.document_info().map(Some)
+    }
+
+    pub(crate) fn capture_active_sequence_resident(&self) -> Result<Box<Core>, CoreError> {
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let sequence = self
+            .sequence
+            .as_ref()
+            .ok_or(CoreError::InvalidState("no sequence is configured"))?;
+        let source = sequence
+            .active_index
+            .and_then(|index| sequence.cells.get(index))
+            .filter(|source| source.document_uuid == document.uuid)
+            .ok_or(CoreError::InvalidState(
+                "active document identity does not match the sequence source",
+            ))?;
+        if source.source_generation == 0 {
+            return Err(CoreError::InvalidState(
+                "active sequence source generation is invalid",
+            ));
+        }
+        let mut resident = self.clone_for_staging();
+        resident.sequence_resident_bank = None;
+        resident.io_install_pending = false;
+        resident.active_stroke = None;
+        resident.shooting_frame_preview = None;
+        resident.filter_preview = None;
+        resident.motion_check = None;
+        Ok(Box::new(resident))
+    }
+
+    pub(crate) fn publish_outgoing_sequence_resident(&self, resident: Box<Core>) {
+        let Some(bank) = self.sequence_resident_bank.as_ref() else {
+            return;
+        };
+        let Some(source) = resident.sequence.as_ref().and_then(|sequence| {
+            sequence
+                .active_index
+                .and_then(|index| sequence.cells.get(index))
+        }) else {
+            return;
+        };
+        bank.insert(
+            SequenceResidentKey {
+                document_uuid: source.document_uuid,
+                source_generation: source.source_generation,
+            },
+            resident,
+        );
+    }
+
+    /// Reports whether the exact target has a complete resident editing state.
+    /// The query does not inspect pixels or mutate LRU state.
+    #[must_use]
+    pub fn sequence_resident_target_available(&self, target: usize) -> bool {
+        let Some(sequence) = self.sequence.as_ref() else {
+            return false;
+        };
+        let Some(source) = sequence.cells.get(target) else {
+            return false;
+        };
+        self.sequence_resident_bank.as_ref().is_some_and(|bank| {
+            bank.contains(SequenceResidentKey {
+                document_uuid: source.document_uuid,
+                source_generation: source.source_generation,
+            })
+        })
+    }
+
+    #[cfg(feature = "test-support")]
+    /// Returns the number of complete inactive cell states retained by this owner.
+    #[must_use]
+    pub fn sequence_resident_cell_count(&self) -> usize {
+        self.sequence_resident_bank
+            .as_ref()
+            .map_or(0, SequenceResidentBank::len)
     }
 
     /// Restores an exact target cell from a validated native recovery artifact.

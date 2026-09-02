@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 /// Default application-wide budget for replayed and validated sidecar targets.
-pub const DEFAULT_VALIDATED_TARGET_CACHE_BYTES: u64 = 256 * 1024 * 1024;
+pub const DEFAULT_VALIDATED_TARGET_CACHE_BYTES: u64 = 1024 * 1024 * 1024;
 /// Hard maximum application-wide budget for replayed and validated sidecar targets.
 pub const MAX_VALIDATED_TARGET_CACHE_BYTES: u64 = 1024 * 1024 * 1024;
 /// Hard maximum number of replayed and validated sidecar targets.

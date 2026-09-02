@@ -3639,6 +3639,76 @@ fn ffi_contract_light_table_sequence_and_owned_buffers() {
         );
         assert_eq!(active_editor.flags & INKPOD_EDITOR_STATE_DIRTY, 0);
 
+        // The completed switch retained the outgoing full Core graph. A
+        // resident round trip performs no file operation and restores both
+        // targets through the additive ABI v32 fast path.
+        assert_eq!(
+            inkpod_core_sequence_resident_target_available(ptr::null_mut(), 0),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            inkpod_core_sequence_resident_target_available(sequence_core, 0),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_sequence_resident_target_available(sequence_core, 1),
+            INKPOD_STATUS_PENDING
+        );
+        assert_eq!(
+            inkpod_core_sequence_resident_target_available(sequence_core, u32::MAX),
+            INKPOD_STATUS_PENDING
+        );
+        let mut resident_return = InkpodSequenceSwitchRequest {
+            struct_size: size_of::<InkpodSequenceSwitchRequest>() as u32,
+            ..InkpodSequenceSwitchRequest::default()
+        };
+        assert_eq!(
+            inkpod_core_sequence_switch_request(
+                sequence_core,
+                0,
+                INKPOD_SEQUENCE_SWITCH_AUTOSAVE,
+                &mut resident_return,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_sequence_try_resident_switch(sequence_core, ptr::null(), &mut active,),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            inkpod_core_sequence_try_resident_switch(sequence_core, &resident_return, &mut active,),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            active.document_uuid_low,
+            resident_return.target_document_uuid_low
+        );
+        assert_eq!(
+            inkpod_core_sequence_resident_target_available(sequence_core, 1),
+            INKPOD_STATUS_OK
+        );
+        let mut resident_forward = InkpodSequenceSwitchRequest {
+            struct_size: size_of::<InkpodSequenceSwitchRequest>() as u32,
+            ..InkpodSequenceSwitchRequest::default()
+        };
+        assert_eq!(
+            inkpod_core_sequence_switch_request(
+                sequence_core,
+                1,
+                INKPOD_SEQUENCE_SWITCH_AUTOSAVE,
+                &mut resident_forward,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_sequence_try_resident_switch(sequence_core, &resident_forward, &mut active,),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            active.document_uuid_low,
+            resident_forward.target_document_uuid_low
+        );
+
         let mut return_request = InkpodSequenceSwitchRequest {
             struct_size: size_of::<InkpodSequenceSwitchRequest>() as u32,
             ..InkpodSequenceSwitchRequest::default()
@@ -5176,6 +5246,22 @@ fn sequence_catalog_and_snapshot_source_abi_preserve_immutable_provenance() {
         flags: u32::MAX,
         ..InkpodSnapshotSourceIdentity::default()
     };
+    let mut preparation = InkpodSequenceRenderPreparationInfo {
+        struct_size: size_of::<InkpodSequenceRenderPreparationInfo>() as u32,
+        ..InkpodSequenceRenderPreparationInfo::default()
+    };
+    let mut prepared_source_count = u64::MAX;
+    let mut prepared_source = InkpodSnapshotSequenceSourceView {
+        struct_size: size_of::<InkpodSnapshotSequenceSourceView>() as u32,
+        flags: 0,
+        document_uuid_high: 0,
+        document_uuid_low: 0,
+        source_generation: 0,
+        owner_generation: 0,
+        tiles: ptr::null(),
+        tile_count: 0,
+        tile_stride_bytes: 0,
+    };
     let mut info = document_info();
     let mut ordinary = ptr::null_mut();
     let mut first = ptr::null_mut();
@@ -5270,6 +5356,30 @@ fn sequence_catalog_and_snapshot_source_abi_preserve_immutable_provenance() {
             (0, 0x9101, 3)
         );
         assert_eq!(identity.owner_generation, catalog.owner_generation);
+        assert_eq!(
+            inkpod_core_sequence_render_preparation_poll(core, &mut preparation),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            (
+                preparation.pending_source_count,
+                preparation.prepared_source_count
+            ),
+            (0, 0)
+        );
+        assert_eq!(
+            inkpod_snapshot_sequence_prepared_source_count(first, &mut prepared_source_count),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(prepared_source_count, 0);
+        assert_eq!(
+            inkpod_snapshot_sequence_prepared_source_get(first, 0, &mut prepared_source),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            inkpod_snapshot_sequence_prepared_source_count(first, ptr::null_mut()),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
         assert_eq!(
             inkpod_core_sequence_activate(core, 1, &mut info),
             INKPOD_STATUS_OK

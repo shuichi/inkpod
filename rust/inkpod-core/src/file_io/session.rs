@@ -36,7 +36,7 @@ fn write_native(
     Ok(None)
 }
 
-fn bind_sequence_recovery_pair(
+pub(super) fn bind_sequence_recovery_pair(
     core: &Core,
     metadata: &mut RecoveryMetadata,
 ) -> Result<(), CoreError> {
@@ -530,6 +530,7 @@ impl FileIoJob {
                     identity_physical,
                     source_generation: 1,
                     document_uuid: 0,
+                    sequence_resident_native: None,
                 };
                 Ok((Prepared::NativeOutput(file, token), vec![item]))
             })();

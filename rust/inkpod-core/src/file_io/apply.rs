@@ -230,7 +230,7 @@ impl FileIoJob {
                 "reference result requires a reference catalog",
             ));
         }
-        let sequence_only = matches!(self.ready, Some(Prepared::Sequence(_)));
+        let sequence_only = matches!(self.ready, Some(Prepared::Sequence { .. }));
         if !matches!(self.ready, Some(Prepared::Output(_))) {
             self.target
                 .as_ref()
@@ -254,7 +254,9 @@ impl FileIoJob {
                     core.adopt_opened_document(token, *staged, normal_path.as_deref())?;
                 }
             }
-            Prepared::Sequence(sources) => core.set_sequence(sources)?,
+            Prepared::Sequence { sources, residents } => {
+                core.set_sequence_with_residents(sources, residents)?
+            }
             Prepared::LightTable(input) => {
                 if self.request.kind == FileIoKind::LightTableReload {
                     core.light_table_update_item(self.request.object_id, input)?;

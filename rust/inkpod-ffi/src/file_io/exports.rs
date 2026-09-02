@@ -126,15 +126,22 @@ pub unsafe extern "C" fn inkpod_core_io_submit(
         unsafe { empty_owner(out_job)? };
         // SAFETY: Span copying is bounded before any request is accepted.
         let request = unsafe { parse::request(request)? };
-        // SAFETY: The live manager is retained by value in the accepted job.
-        let manager = unsafe { manager_ref(manager)? }.clone();
+        // SAFETY: The live manager and validated-target cache are retained by
+        // value in the accepted job.
+        let manager_handle = unsafe { manager_handle_ref(manager)? };
+        let target_cache = manager_handle.validated_targets.clone();
+        let manager = manager_handle.manager.clone();
         let core = if core.is_null() {
             None
         } else {
             // SAFETY: Non-null Core is exclusively owned by the calling thread.
             Some(&unsafe { owner_core(core)? }.core)
         };
-        let job = FileIoJob::start(core, manager, request).map_err(map_core_error)?;
+        // Sequence discovery eagerly validates complete inactive pair targets;
+        // share the application cache so replayed sidecars remain COW-resident.
+        let job =
+            FileIoJob::start_with_validated_target_cache(core, manager, target_cache, request)
+                .map_err(map_core_error)?;
         // SAFETY: Ownership is transferred to the validated empty output slot.
         unsafe {
             out_job.write(Box::into_raw(Box::new(InkpodIoJob {

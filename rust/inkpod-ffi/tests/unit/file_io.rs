@@ -1313,6 +1313,44 @@ fn io_003_sequence_switch_and_compacted_copy_require_owner_finalization() {
                 INKPOD_STATUS_OK
             );
             assert_eq!(wait_ready(job).state, INKPOD_IO_READY);
+            if kind == INKPOD_IO_SEQUENCE_AUTO {
+                let mut active = InkpodIoSequenceResidentInfo {
+                    struct_size: size_of::<InkpodIoSequenceResidentInfo>() as u32,
+                    ..Default::default()
+                };
+                assert_eq!(
+                    inkpod_io_job_get_sequence_resident(job, 0, &mut active, ptr::null_mut(), 0,),
+                    INKPOD_STATUS_OK
+                );
+                assert_eq!(active.flags, 0);
+                let mut resident = InkpodIoSequenceResidentInfo {
+                    struct_size: size_of::<InkpodIoSequenceResidentInfo>() as u32,
+                    ..Default::default()
+                };
+                assert_eq!(
+                    inkpod_io_job_get_sequence_resident(job, 1, &mut resident, ptr::null_mut(), 0,),
+                    INKPOD_STATUS_OK
+                );
+                assert_eq!(resident.flags, INKPOD_IO_SEQUENCE_RESIDENT_AVAILABLE);
+                assert_eq!(resident.native_identity.kind, 2);
+                assert!(resident.native_path_bytes > 0);
+                let mut native_path = vec![0; resident.native_path_bytes as usize];
+                assert_eq!(
+                    inkpod_io_job_get_sequence_resident(
+                        job,
+                        1,
+                        &mut resident,
+                        native_path.as_mut_ptr(),
+                        native_path.len() as u64,
+                    ),
+                    INKPOD_STATUS_OK
+                );
+                assert!(
+                    std::str::from_utf8(&native_path)
+                        .unwrap()
+                        .ends_with("cell2.inkpod")
+                );
+            }
             assert_eq!(
                 inkpod_core_io_job_apply(core, job, &mut document, ptr::null_mut()),
                 INKPOD_STATUS_OK
@@ -2017,7 +2055,7 @@ fn io_003_validated_target_cache_limit_is_bounded_and_observable() {
             inkpod_io_manager_get_cache_info(manager, &mut cache),
             INKPOD_STATUS_OK
         );
-        assert_eq!(cache.validated_target_maximum_bytes, 256 * 1024 * 1024);
+        assert_eq!(cache.validated_target_maximum_bytes, 1024 * 1024 * 1024);
         assert_eq!(cache.validated_target_count, 0);
 
         assert_eq!(

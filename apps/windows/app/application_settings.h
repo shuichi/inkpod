@@ -18,7 +18,7 @@ inline constexpr std::size_t kMaximumApplicationSettingsBytes =
 inline constexpr std::uint32_t kMinimumSequenceThumbnailWidthDip = 32U;
 inline constexpr std::uint32_t kDefaultSequenceThumbnailWidthDip = 64U;
 inline constexpr std::uint32_t kMaximumSequenceThumbnailWidthDip = 96U;
-inline constexpr std::uint32_t kDefaultValidatedSidecarCacheMiB = 256U;
+inline constexpr std::uint32_t kDefaultValidatedSidecarCacheMiB = 1024U;
 inline constexpr std::uint32_t kMaximumValidatedSidecarCacheMiB = 1024U;
 
 struct PersistedWorkspace final {

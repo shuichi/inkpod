@@ -233,6 +233,7 @@ enum class CommandTimerKind : std::uint8_t {
     ContinuousSpray,
     MotionPlayback,
     ShortcutSequence,
+    SequenceResidentRefresh,
     StatusProgress,
 };
 
@@ -259,7 +260,7 @@ public:
     void Clear() noexcept;
 
 private:
-    static constexpr std::size_t kTimerCount = 6U;
+    static constexpr std::size_t kTimerCount = 7U;
     std::uint64_t next_token_{1U};
     std::array<std::optional<CommandTimerToken>, kTimerCount> timers_{};
 };

@@ -108,6 +108,7 @@ impl Core {
             shortcut_defaults: shortcuts.clone(),
             shortcuts,
             sequence: None,
+            sequence_resident_bank: None,
             motion_check: None,
             subpalette_index: None,
             editor_defaults,
@@ -272,6 +273,7 @@ impl Core {
         self.secondary_views.clear();
         self.floating = None;
         self.sequence = None;
+        self.sequence_resident_bank = None;
         self.sequence_render_catalog_changed();
         self.motion_check = None;
         self.subpalette_index = None;
@@ -366,6 +368,7 @@ pub struct Core {
     pub(super) shortcut_defaults: BTreeMap<u32, Vec<ShortcutStroke>>,
     pub(super) shortcuts: BTreeMap<u32, Vec<ShortcutStroke>>,
     pub(super) sequence: Option<animation::SequenceState>,
+    pub(super) sequence_resident_bank: Option<animation::SequenceResidentBank>,
     pub(super) motion_check: Option<animation::MotionCheckState>,
     pub(super) subpalette_index: Option<usize>,
     pub(super) editor_defaults: EditorDefaults,
@@ -382,6 +385,10 @@ impl Clone for Core {
         let mut cloned = self.clone_for_staging();
         cloned.persistence_state = persistence_task::PersistenceState::new();
         cloned.sequence_render_cache.fork_owner();
+        cloned.sequence_resident_bank = self
+            .sequence_resident_bank
+            .as_ref()
+            .map(|_| animation::SequenceResidentBank::default());
         cloned.io_install_pending = false;
         cloned.canonical_invocation_active = false;
         cloned
@@ -415,15 +422,31 @@ impl Core {
         if self.document.is_none() {
             return false;
         }
-        let preservation_stale =
-            self.sequence_preservation_baseline != self.current_sequence_preservation_baseline();
-        self.savepoint != Some(self.current_state)
-            || self.editor_dirty()
-            || self.recovered
-            || preservation_stale
+        !self.sequence_source_content_is_pristine()
             || self.io_pair_authority.as_ref().is_some_and(|authority| {
                 authority.raster.is_none() && authority.raster_missing.is_some()
             })
+    }
+
+    pub(crate) fn sequence_source_content_is_pristine(&self) -> bool {
+        if self.document.is_none() {
+            return false;
+        }
+        let preservation_stale =
+            self.sequence_preservation_baseline != self.current_sequence_preservation_baseline();
+        self.savepoint == Some(self.current_state)
+            && !self.editor_dirty()
+            && !self.recovered
+            && !preservation_stale
+    }
+
+    /// Reports whether the rendered document still is its immutable Genesis.
+    ///
+    /// Unlike recovery preservation, this deliberately ignores editor-only
+    /// state. Changing an active plane or another saved editor choice does not
+    /// change pixels and must not evict an otherwise reusable sequence render.
+    pub(crate) fn sequence_source_render_content_is_pristine(&self) -> bool {
+        self.document.is_some() && self.current_state == StateId::GENESIS && !self.recovered
     }
 
     /// Clones a COW candidate within this owner's transaction or file snapshot.
@@ -476,6 +499,7 @@ impl Core {
             shortcut_defaults: self.shortcut_defaults.clone(),
             shortcuts: self.shortcuts.clone(),
             sequence: self.sequence.clone(),
+            sequence_resident_bank: self.sequence_resident_bank.clone(),
             motion_check: self.motion_check.clone(),
             subpalette_index: self.subpalette_index,
             editor_defaults: self.editor_defaults.clone(),

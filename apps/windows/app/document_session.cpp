@@ -319,7 +319,17 @@ bool DocumentSession::ReserveSequenceAutosave(
     std::uint64_t source_generation,
     std::uint64_t expected_artifact_generation) noexcept {
     if ((document_uuid_high == 0U && document_uuid_low == 0U)
-        || source_generation == 0U || sequence_autosave_reservation_active_) {
+        || source_generation == 0U
+        || sequence_autosave_reservations_.size() >= 64U
+        || std::any_of(
+            sequence_autosave_reservations_.cbegin(),
+            sequence_autosave_reservations_.cend(),
+            [document_uuid_high, document_uuid_low, source_generation](
+                const SequenceAutosaveReservation& reservation) {
+                return reservation.document_uuid_high == document_uuid_high
+                    && reservation.document_uuid_low == document_uuid_low
+                    && reservation.source_generation == source_generation;
+            })) {
         return false;
     }
     if (const auto* existing = FindSequenceAutosave(
@@ -336,12 +346,17 @@ bool DocumentSession::ReserveSequenceAutosave(
         return false;
     }
     try {
-        sequence_autosaves_.reserve(sequence_autosaves_.size() + 1U);
-        reserved_sequence_document_uuid_high_ = document_uuid_high;
-        reserved_sequence_document_uuid_low_ = document_uuid_low;
-        reserved_sequence_source_generation_ = source_generation;
-        reserved_sequence_artifact_generation_ = expected_artifact_generation;
-        sequence_autosave_reservation_active_ = true;
+        sequence_autosaves_.reserve(
+            sequence_autosaves_.size()
+            + sequence_autosave_reservations_.size() + 1U);
+        sequence_autosave_reservations_.reserve(
+            sequence_autosave_reservations_.size() + 1U);
+        sequence_autosave_reservations_.push_back(
+            SequenceAutosaveReservation{
+                document_uuid_high,
+                document_uuid_low,
+                source_generation,
+                expected_artifact_generation});
         return true;
     } catch (const std::bad_alloc&) {
         return false;
@@ -356,13 +371,21 @@ bool DocumentSession::PublishReservedSequenceAutosave(
         || binding.source_generation == 0U || binding.recovery_path.empty()
         || binding.metadata.document_uuid_high != binding.document_uuid_high
         || binding.metadata.document_uuid_low != binding.document_uuid_low
-        || !ValidRecoveryArtifactProof(binding.artifact_proof)
-        || !sequence_autosave_reservation_active_
-        || reserved_sequence_document_uuid_high_ != binding.document_uuid_high
-        || reserved_sequence_document_uuid_low_ != binding.document_uuid_low
-        || reserved_sequence_source_generation_ != binding.source_generation
-        || reserved_sequence_artifact_generation_
-            != expected_artifact_generation) {
+        || !ValidRecoveryArtifactProof(binding.artifact_proof)) {
+        return false;
+    }
+    const auto reservation = std::find_if(
+        sequence_autosave_reservations_.begin(),
+        sequence_autosave_reservations_.end(),
+        [&binding, expected_artifact_generation](
+            const SequenceAutosaveReservation& candidate) {
+            return candidate.document_uuid_high == binding.document_uuid_high
+                && candidate.document_uuid_low == binding.document_uuid_low
+                && candidate.source_generation == binding.source_generation
+                && candidate.expected_artifact_generation
+                    == expected_artifact_generation;
+        });
+    if (reservation == sequence_autosave_reservations_.end()) {
         return false;
     }
     auto found = std::find_if(
@@ -380,7 +403,7 @@ bool DocumentSession::PublishReservedSequenceAutosave(
         }
         binding.artifact_generation = found->artifact_generation + 1U;
         *found = std::move(binding);
-        sequence_autosave_reservation_active_ = false;
+        sequence_autosave_reservations_.erase(reservation);
         return true;
     }
     if (sequence_autosaves_.size() >= sequence_autosaves_.capacity()
@@ -390,7 +413,7 @@ bool DocumentSession::PublishReservedSequenceAutosave(
     }
     binding.artifact_generation = 1U;
     sequence_autosaves_.push_back(std::move(binding));
-    sequence_autosave_reservation_active_ = false;
+    sequence_autosave_reservations_.erase(reservation);
     return true;
 }
 
@@ -399,13 +422,20 @@ void DocumentSession::CancelSequenceAutosaveReservation(
     std::uint64_t document_uuid_low,
     std::uint64_t source_generation,
     std::uint64_t expected_artifact_generation) noexcept {
-    if (sequence_autosave_reservation_active_
-        && reserved_sequence_document_uuid_high_ == document_uuid_high
-        && reserved_sequence_document_uuid_low_ == document_uuid_low
-        && reserved_sequence_source_generation_ == source_generation
-        && reserved_sequence_artifact_generation_
-            == expected_artifact_generation) {
-        sequence_autosave_reservation_active_ = false;
+    const auto reservation = std::find_if(
+        sequence_autosave_reservations_.begin(),
+        sequence_autosave_reservations_.end(),
+        [document_uuid_high, document_uuid_low, source_generation,
+            expected_artifact_generation](
+            const SequenceAutosaveReservation& candidate) {
+            return candidate.document_uuid_high == document_uuid_high
+                && candidate.document_uuid_low == document_uuid_low
+                && candidate.source_generation == source_generation
+                && candidate.expected_artifact_generation
+                    == expected_artifact_generation;
+        });
+    if (reservation != sequence_autosave_reservations_.end()) {
+        sequence_autosave_reservations_.erase(reservation);
     }
 }
 
@@ -414,10 +444,15 @@ bool DocumentSession::RemoveSequenceAutosave(
     std::uint64_t document_uuid_low,
     std::uint64_t source_generation,
     std::uint64_t artifact_generation) noexcept {
-    if (sequence_autosave_reservation_active_
-        && reserved_sequence_document_uuid_high_ == document_uuid_high
-        && reserved_sequence_document_uuid_low_ == document_uuid_low
-        && reserved_sequence_source_generation_ == source_generation) {
+    if (std::any_of(
+            sequence_autosave_reservations_.cbegin(),
+            sequence_autosave_reservations_.cend(),
+            [document_uuid_high, document_uuid_low, source_generation](
+                const SequenceAutosaveReservation& reservation) {
+                return reservation.document_uuid_high == document_uuid_high
+                    && reservation.document_uuid_low == document_uuid_low
+                    && reservation.source_generation == source_generation;
+            })) {
         return false;
     }
     const auto found = std::find_if(sequence_autosaves_.begin(), sequence_autosaves_.end(),
@@ -439,10 +474,15 @@ std::optional<SequenceAutosaveBinding> DocumentSession::TakeSequenceAutosave(
     std::uint64_t document_uuid_high,
     std::uint64_t document_uuid_low,
     std::uint64_t source_generation) noexcept {
-    if (sequence_autosave_reservation_active_
-        && reserved_sequence_document_uuid_high_ == document_uuid_high
-        && reserved_sequence_document_uuid_low_ == document_uuid_low
-        && reserved_sequence_source_generation_ == source_generation) {
+    if (std::any_of(
+            sequence_autosave_reservations_.cbegin(),
+            sequence_autosave_reservations_.cend(),
+            [document_uuid_high, document_uuid_low, source_generation](
+                const SequenceAutosaveReservation& reservation) {
+                return reservation.document_uuid_high == document_uuid_high
+                    && reservation.document_uuid_low == document_uuid_low
+                    && reservation.source_generation == source_generation;
+            })) {
         return std::nullopt;
     }
     const auto found = std::find_if(
@@ -463,31 +503,81 @@ std::optional<SequenceAutosaveBinding> DocumentSession::TakeSequenceAutosave(
 
 std::vector<SequenceAutosaveBinding>
 DocumentSession::TakeSequenceAutosaves() noexcept {
-    sequence_autosave_reservation_active_ = false;
-    reserved_sequence_document_uuid_high_ = 0U;
-    reserved_sequence_document_uuid_low_ = 0U;
-    reserved_sequence_source_generation_ = 0U;
-    reserved_sequence_artifact_generation_ = 0U;
+    sequence_autosave_reservations_.clear();
     return std::move(sequence_autosaves_);
 }
 
 void DocumentSession::ClearSequenceAutosaves() noexcept {
     sequence_autosaves_.clear();
-    sequence_autosave_reservation_active_ = false;
+    sequence_autosave_reservations_.clear();
 }
 
 bool DocumentSession::ReplaceSequenceFileBindings(
     std::vector<SequenceFileBinding> bindings) noexcept {
+    return ReplaceSequenceCatalogBindings(std::move(bindings), {});
+}
+
+bool DocumentSession::ReplaceSequenceCatalogBindings(
+    std::vector<SequenceFileBinding> bindings,
+    std::vector<SequenceResidentAuthority> residents) noexcept {
     if (bindings.size() > 10'000U
+        || residents.size() > 64U
         || std::any_of(bindings.cbegin(), bindings.cend(), [](const auto& binding) {
                return (binding.document_uuid_high == 0U
                           && binding.document_uuid_low == 0U)
                    || binding.source_generation == 0U
                    || binding.raster_path.empty() || !binding.raster_identity;
-           })) {
+           })
+        || std::any_of(residents.cbegin(), residents.cend(),
+            [&bindings](const SequenceResidentAuthority& resident) {
+                const bool native_path = resident.identity.kind
+                        == DocumentIdentityKind::WindowsFile
+                    ? !resident.shell.current_path.empty()
+                        && resident.shell.planned_native_path.empty()
+                    : resident.identity.kind
+                            == DocumentIdentityKind::NormalizedPath
+                        && resident.shell.current_path.empty()
+                        && !resident.shell.planned_native_path.empty();
+                return (resident.document_uuid_high == 0U
+                           && resident.document_uuid_low == 0U)
+                    || resident.source_generation == 0U
+                    || !resident.identity || !resident.pair_raster_identity
+                    || resident.identity == resident.pair_raster_identity
+                    || !native_path || resident.shell.source_path.empty()
+                    || resident.shell.pair_raster_path.empty()
+                    || std::none_of(bindings.cbegin(), bindings.cend(),
+                        [&resident](const SequenceFileBinding& binding) {
+                            return binding.document_uuid_high
+                                    == resident.document_uuid_high
+                                && binding.document_uuid_low
+                                    == resident.document_uuid_low
+                                && binding.source_generation
+                                    == resident.source_generation
+                                && binding.raster_path
+                                    == resident.shell.pair_raster_path
+                                && binding.raster_identity
+                                    == resident.pair_raster_identity;
+                        });
+            })) {
         return false;
     }
+    for (std::size_t index = 0U; index < residents.size(); ++index) {
+        if (std::any_of(residents.cbegin(), residents.cbegin()
+                    + static_cast<std::ptrdiff_t>(index),
+                [&candidate = residents[index]](
+                    const SequenceResidentAuthority& previous) {
+                    return previous.document_uuid_high
+                            == candidate.document_uuid_high
+                        && previous.document_uuid_low
+                            == candidate.document_uuid_low
+                        && previous.source_generation
+                            == candidate.source_generation;
+                })) {
+            return false;
+        }
+    }
     sequence_file_bindings_ = std::move(bindings);
+    sequence_resident_authorities_ = std::move(residents);
     return true;
 }
 
@@ -558,7 +648,64 @@ bool DocumentSession::RevokeSequenceFileBinding(
 }
 
 void DocumentSession::ClearSequenceFileBindings() noexcept {
+    sequence_resident_authorities_.clear();
     sequence_file_bindings_.clear();
+}
+
+bool DocumentSession::RetainActiveSequenceResidentAuthority(
+    std::uint64_t document_uuid_high,
+    std::uint64_t document_uuid_low,
+    std::uint64_t source_generation) noexcept {
+    if ((document_uuid_high == 0U && document_uuid_low == 0U)
+        || source_generation == 0U || !identity) {
+        return false;
+    }
+    try {
+        SequenceResidentAuthority candidate{};
+        candidate.document_uuid_high = document_uuid_high;
+        candidate.document_uuid_low = document_uuid_low;
+        candidate.source_generation = source_generation;
+        candidate.identity = identity;
+        candidate.pair_raster_identity = pair_raster_identity;
+        candidate.shell = shell;
+        const auto found = std::find_if(
+            sequence_resident_authorities_.begin(),
+            sequence_resident_authorities_.end(),
+            [document_uuid_high, document_uuid_low, source_generation](
+                const SequenceResidentAuthority& entry) {
+                return entry.document_uuid_high == document_uuid_high
+                    && entry.document_uuid_low == document_uuid_low
+                    && entry.source_generation == source_generation;
+            });
+        if (found == sequence_resident_authorities_.end()) {
+            sequence_resident_authorities_.push_back(std::move(candidate));
+        } else {
+            *found = std::move(candidate);
+        }
+        return true;
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+}
+
+const SequenceResidentAuthority* DocumentSession::FindSequenceResidentAuthority(
+    std::uint64_t document_uuid_high,
+    std::uint64_t document_uuid_low,
+    std::uint64_t source_generation) const noexcept {
+    const auto found = std::find_if(
+        sequence_resident_authorities_.cbegin(),
+        sequence_resident_authorities_.cend(),
+        [document_uuid_high, document_uuid_low, source_generation](
+            const SequenceResidentAuthority& entry) {
+            return entry.document_uuid_high == document_uuid_high
+                && entry.document_uuid_low == document_uuid_low
+                && entry.source_generation == source_generation;
+        });
+    return found == sequence_resident_authorities_.cend() ? nullptr : &*found;
+}
+
+void DocumentSession::ClearSequenceResidentAuthorities() noexcept {
+    sequence_resident_authorities_.clear();
 }
 
 bool DocumentRegistry::InitializePlaceholder(Generation generation) noexcept {

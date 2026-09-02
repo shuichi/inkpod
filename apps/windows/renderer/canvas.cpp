@@ -49,9 +49,11 @@ constexpr UINT_PTR kCanvasBindingPresentRetryTimer = 0x4A11U;
 constexpr UINT_PTR kCanvasScrollProjectionRetryTimer = 0x4A12U;
 constexpr std::uint8_t kMaximumScrollProjectionApplyAttempts = 3U;
 constexpr std::uint8_t kMaximumScrollRefreshDeliveryAttempts = 1U;
-constexpr std::uint64_t kApplicationGpuTileBudgetBytes = UINT64_C(512) * 1024U * 1024U;
-constexpr std::size_t kMaximumSequenceCacheSources = 8U;
-constexpr std::uint64_t kSequenceGpuCacheBudgetBytes = UINT64_C(128) * 1024U * 1024U;
+constexpr DWORD kFrameLatencyRetryMilliseconds = 4U;
+constexpr ULONGLONG kTransientOcclusionRetryMilliseconds = 250U;
+constexpr std::uint64_t kApplicationGpuTileBudgetBytes = UINT64_C(1024) * 1024U * 1024U;
+constexpr std::size_t kMaximumSequenceCacheSources = 64U;
+constexpr std::uint64_t kSequenceGpuCacheBudgetBytes = UINT64_C(1024) * 1024U * 1024U;
 std::atomic<std::uint64_t> gApplicationTileUseSequence{};
 
 enum class CanvasScrollAxis : std::uint8_t {
@@ -159,6 +161,40 @@ std::uint64_t EstimateSnapshotPayloadBytes(InkpodSnapshot* snapshot) noexcept {
         shooting_frames.frame_count, shooting_frames.frame_stride_bytes));
     bytes = SaturatingAdd(bytes, SaturatingProduct(
         plan.pass_count, plan.pass_stride_bytes));
+    std::uint64_t prepared_source_count{};
+    if (inkpod_snapshot_sequence_prepared_source_count(
+            snapshot, &prepared_source_count) != INKPOD_STATUS_OK) {
+        return 0U;
+    }
+    for (std::uint64_t source_index = 0U;
+         source_index < prepared_source_count; ++source_index) {
+        InkpodSnapshotSequenceSourceView source{};
+        source.struct_size = sizeof(source);
+        if (inkpod_snapshot_sequence_prepared_source_get(
+                snapshot, source_index, &source) != INKPOD_STATUS_OK) {
+            return 0U;
+        }
+        bytes = SaturatingAdd(bytes, sizeof(source));
+        bytes = SaturatingAdd(bytes, SaturatingProduct(
+            source.tile_count, source.tile_stride_bytes));
+        if (source.tiles == nullptr
+            || source.tile_stride_bytes < sizeof(InkpodSnapshotTile)
+            || source.tile_stride_bytes > static_cast<std::uint64_t>(SIZE_MAX)) {
+            return UINT64_MAX;
+        }
+        const auto* source_base = reinterpret_cast<const std::uint8_t*>(source.tiles);
+        const std::size_t source_stride = static_cast<std::size_t>(
+            source.tile_stride_bytes);
+        for (std::uint64_t tile_index = 0U;
+             tile_index < source.tile_count; ++tile_index) {
+            if (tile_index > static_cast<std::uint64_t>(SIZE_MAX / source_stride)) {
+                return UINT64_MAX;
+            }
+            const auto* tile = reinterpret_cast<const InkpodSnapshotTile*>(
+                source_base + static_cast<std::size_t>(tile_index) * source_stride);
+            bytes = SaturatingAdd(bytes, tile->pixel_bytes);
+        }
+    }
     return bytes;
 }
 
@@ -612,6 +648,184 @@ public:
     // and before any CreateBitmap call. Matched current tiles stay protected.
     HRESULT UploadPreparedSnapshot() noexcept {
         return UploadPreparedTiles();
+    }
+
+    HRESULT UploadPreparedSequenceSources() noexcept {
+        if (snapshot_ == nullptr || !d2d_context_) {
+            return snapshot_ == nullptr ? S_OK : E_UNEXPECTED;
+        }
+        std::uint64_t source_count{};
+        if (inkpod_snapshot_sequence_prepared_source_count(
+                snapshot_, &source_count) != INKPOD_STATUS_OK
+            || source_count > kMaximumSequenceCacheSources) {
+            return E_INVALIDARG;
+        }
+        try {
+            for (std::uint64_t source_index = 0U;
+                 source_index < source_count; ++source_index) {
+                InkpodSnapshotSequenceSourceView source{};
+                source.struct_size = sizeof(source);
+                if (inkpod_snapshot_sequence_prepared_source_get(
+                        snapshot_, source_index, &source) != INKPOD_STATUS_OK) {
+                    return E_INVALIDARG;
+                }
+                const InkpodSnapshotSourceIdentity source_identity{
+                    sizeof(InkpodSnapshotSourceIdentity),
+                    source.flags,
+                    source.document_uuid_high,
+                    source.document_uuid_low,
+                    source.source_generation,
+                    source.owner_generation};
+                if (!ValidateSourceIdentity(source_identity)
+                    || source.flags != INKPOD_SNAPSHOT_SOURCE_SEQUENCE_PRISTINE
+                    || source.tile_count == 0U
+                    || source.tile_count > kMaximumSnapshotTiles
+                    || source.tiles == nullptr
+                    || source.tile_stride_bytes < sizeof(InkpodSnapshotTile)
+                    || source.tile_stride_bytes
+                        > static_cast<std::uint64_t>(SIZE_MAX)) {
+                    return E_INVALIDARG;
+                }
+                const SequenceSourceKey key{
+                    source.document_uuid_high,
+                    source.document_uuid_low,
+                    source.source_generation,
+                    source.owner_generation};
+                if (key == active_source_) {
+                    continue;
+                }
+                for (auto& retained : retained_sources_) {
+                    if (retained.key
+                        && retained.key.owner_generation != key.owner_generation) {
+                        retained.tiles.clear();
+                        retained.key = {};
+                        retained.bytes = 0U;
+                        retained.last_used = 0U;
+                    }
+                }
+                const auto existing_source = std::find_if(
+                    retained_sources_.begin(), retained_sources_.end(),
+                    [key](const CachedSequenceSource& retained) {
+                        return retained.key == key;
+                    });
+                if (existing_source != retained_sources_.end()) {
+                    existing_source->last_used =
+                        gApplicationTileUseSequence.fetch_add(
+                            1U, std::memory_order_relaxed) + 1U;
+                    continue;
+                }
+
+                const auto* base = reinterpret_cast<const std::uint8_t*>(source.tiles);
+                const std::size_t stride = static_cast<std::size_t>(
+                    source.tile_stride_bytes);
+                std::uint64_t source_bytes{};
+                for (std::uint64_t tile_index = 0U;
+                     tile_index < source.tile_count; ++tile_index) {
+                    if (tile_index > static_cast<std::uint64_t>(SIZE_MAX / stride)) {
+                        return E_INVALIDARG;
+                    }
+                    const auto* tile = reinterpret_cast<const InkpodSnapshotTile*>(
+                        base + static_cast<std::size_t>(tile_index) * stride);
+                    if (tile->struct_size < sizeof(InkpodSnapshotTile)
+                        || tile->pixel_format
+                            != INKPOD_PIXEL_FORMAT_PREMULTIPLIED_BGRA8
+                        || tile->reserved != 0U || tile->width == 0U
+                        || tile->height == 0U || tile->pixels == nullptr
+                        || tile->stride_bytes < tile->width * 4U
+                        || tile->pixel_bytes
+                            < static_cast<std::uint64_t>(tile->stride_bytes)
+                                * tile->height
+                        || tile->pixel_bytes > kSequenceGpuCacheBudgetBytes
+                        || source_bytes
+                            > kSequenceGpuCacheBudgetBytes - tile->pixel_bytes) {
+                        return E_INVALIDARG;
+                    }
+                    source_bytes += tile->pixel_bytes;
+                }
+                if (source_bytes > tile_budget_bytes_) {
+                    continue;
+                }
+                while (GpuTileBytes() > tile_budget_bytes_ - source_bytes) {
+                    if (!EvictOldestInactive()) {
+                        break;
+                    }
+                }
+                if (GpuTileBytes() > tile_budget_bytes_ - source_bytes) {
+                    continue;
+                }
+
+                TileCache prepared;
+                prepared.reserve(static_cast<std::size_t>(source.tile_count));
+                std::uint64_t prepared_bytes{};
+                for (std::uint64_t tile_index = 0U;
+                     tile_index < source.tile_count; ++tile_index) {
+                    const auto* tile = reinterpret_cast<const InkpodSnapshotTile*>(
+                        base + static_cast<std::size_t>(tile_index) * stride);
+                    if (prepared.find(tile->tile_id) != prepared.end()) {
+                        return E_INVALIDARG;
+                    }
+                    const D2D1_BITMAP_PROPERTIES1 properties = D2D1::BitmapProperties1(
+                        D2D1_BITMAP_OPTIONS_NONE,
+                        D2D1::PixelFormat(
+                            DXGI_FORMAT_B8G8R8A8_UNORM,
+                            D2D1_ALPHA_MODE_PREMULTIPLIED),
+                        96.0F,
+                        96.0F);
+                    ComPtr<ID2D1Bitmap1> bitmap;
+                    const HRESULT create_result = d2d_context_->CreateBitmap(
+                        D2D1::SizeU(tile->width, tile->height),
+                        tile->pixels,
+                        tile->stride_bytes,
+                        properties,
+                        &bitmap);
+                    if (FAILED(create_result)) {
+                        return create_result;
+                    }
+                    CachedTile cache_entry{};
+                    cache_entry.revision = tile->tile_revision;
+                    cache_entry.last_used =
+                        gApplicationTileUseSequence.fetch_add(
+                            1U, std::memory_order_relaxed) + 1U;
+                    cache_entry.byte_count = tile->pixel_bytes;
+                    cache_entry.origin_x = tile->origin_x;
+                    cache_entry.origin_y = tile->origin_y;
+                    cache_entry.width = tile->width;
+                    cache_entry.height = tile->height;
+                    cache_entry.active = false;
+                    cache_entry.bitmap = std::move(bitmap);
+                    prepared.emplace(tile->tile_id, std::move(cache_entry));
+                    prepared_bytes += tile->pixel_bytes;
+                    uploaded_tile_count_ = SaturatingAdd(uploaded_tile_count_, 1U);
+                    uploaded_tile_bytes_ = SaturatingAdd(
+                        uploaded_tile_bytes_, tile->pixel_bytes);
+                }
+                auto slot = std::find_if(
+                    retained_sources_.begin(), retained_sources_.end(),
+                    [](const CachedSequenceSource& retained) {
+                        return !retained.key;
+                    });
+                if (slot == retained_sources_.end()) {
+                    (void)EvictOldestRetainedSource();
+                    slot = std::find_if(
+                        retained_sources_.begin(), retained_sources_.end(),
+                        [](const CachedSequenceSource& retained) {
+                            return !retained.key;
+                        });
+                }
+                if (slot == retained_sources_.end()) {
+                    continue;
+                }
+                slot->key = key;
+                slot->tiles = std::move(prepared);
+                slot->bytes = prepared_bytes;
+                slot->last_used =
+                    gApplicationTileUseSequence.fetch_add(
+                        1U, std::memory_order_relaxed) + 1U;
+            }
+            return S_OK;
+        } catch (const std::bad_alloc&) {
+            return E_OUTOFMEMORY;
+        }
     }
 
     HRESULT DpiChanged() noexcept {
@@ -1830,7 +2044,11 @@ private:
 
     HRESULT RebuildTileCache() noexcept {
         const HRESULT prepared = PrepareTileCache();
-        return SUCCEEDED(prepared) ? UploadPreparedTiles() : prepared;
+        if (FAILED(prepared)) {
+            return prepared;
+        }
+        const HRESULT active = UploadPreparedTiles();
+        return SUCCEEDED(active) ? UploadPreparedSequenceSources() : active;
     }
 
     HRESULT CreateSurfaceResources() noexcept {
@@ -2042,6 +2260,8 @@ struct SurfaceRecord {
     HRESULT last_render_result{S_OK};
     std::size_t pending_render_requests{};
     bool presentation_pending{};
+    ULONGLONG occlusion_retry_deadline_ms{};
+    ULONGLONG next_occlusion_retry_ms{};
 };
 
 struct PublishedSurface {
@@ -2484,9 +2704,11 @@ private:
             }
             surface.visible = state->visible;
             if (!surface.visible) {
+                ResetOcclusionRetry(surface);
                 SetPresentationWorkLocked(surface, 0U, false);
             } else {
                 surface.occluded = false;
+                ResetOcclusionRetry(surface);
                 state->occluded = false;
                 if (!surface.presentation_pending && surface.pending_render_requests == 0U
                     && OutstandingWorkLocked() >= kMaximumHostWork) {
@@ -2679,6 +2901,7 @@ private:
                 return result;
             }
             surface.occluded = false;
+            ResetOcclusionRetry(surface);
         }
         UpdateTileBudgets();
         for (const auto& surface : surfaces_) {
@@ -2688,18 +2911,43 @@ private:
         return S_OK;
     }
 
+    static void ResetOcclusionRetry(SurfaceRecord& surface) noexcept {
+        surface.occlusion_retry_deadline_ms = 0U;
+        surface.next_occlusion_retry_ms = 0U;
+    }
+
     HRESULT NormalizeResult(SurfaceRecord& surface, HRESULT result) noexcept {
         if (IsDeviceLoss(result)) {
             result = RecoverDevice();
         }
         if (result == DXGI_STATUS_OCCLUDED) {
+            const ULONGLONG now = GetTickCount64();
+            if (surface.visible && (surface.occlusion_retry_deadline_ms == 0U
+                    || now < surface.occlusion_retry_deadline_ms)) {
+                if (surface.occlusion_retry_deadline_ms == 0U) {
+                    surface.occlusion_retry_deadline_ms =
+                        now + kTransientOcclusionRetryMilliseconds;
+                }
+                surface.next_occlusion_retry_ms = now + kFrameLatencyRetryMilliseconds;
+                // A newly shown swap chain can report OCCLUDED while DWM is
+                // still publishing its final window state. Preserve the
+                // accepted frame for a short, paced retry window instead of
+                // permanently discarding it after the first Present.
+                return S_FALSE;
+            }
+            ResetOcclusionRetry(surface);
             surface.occluded = true;
             PublishSurface(surface);
             return S_OK;
         }
-        if (result == S_OK && surface.occluded) {
-            surface.occluded = false;
-            PublishSurface(surface);
+        if (result == S_OK) {
+            ResetOcclusionRetry(surface);
+            if (surface.occluded) {
+                surface.occluded = false;
+                PublishSurface(surface);
+            }
+        } else if (FAILED(result)) {
+            ResetOcclusionRetry(surface);
         }
         return result;
     }
@@ -2734,6 +2982,7 @@ private:
         handles[0] = work_event_;
         DWORD count = 1U;
         bool overflow{};
+        DWORD delayed_occlusion_retry = INFINITE;
         if (surfaces_.empty() || WaitForSingleObject(work_event_, 0U) == WAIT_OBJECT_0) {
             return nullptr;
         }
@@ -2749,6 +2998,13 @@ private:
                 continue;
             }
             if (!surface.presentation_pending && surface.pending_render_requests == 0U) {
+                continue;
+            }
+            const ULONGLONG now = GetTickCount64();
+            if (surface.next_occlusion_retry_ms > now) {
+                const ULONGLONG remaining = surface.next_occlusion_retry_ms - now;
+                delayed_occlusion_retry = std::min<DWORD>(delayed_occlusion_retry,
+                    static_cast<DWORD>(std::min<ULONGLONG>(remaining, MAXDWORD)));
                 continue;
             }
             const HRESULT ready = surface.surface->AcquireFrameLatencyPermit(0U);
@@ -2772,12 +3028,19 @@ private:
             }
         }
         if (count == 1U) {
+            if (delayed_occlusion_retry != INFINITE) {
+                (void)WaitForSingleObject(work_event_, delayed_occlusion_retry);
+            }
             return nullptr;
         }
-        // All normal visible surfaces fit one OS wait. For larger registries,
-        // every handle is still probed above and bounded 1ms batch waits rotate;
-        // one blocked swap chain cannot hold other surfaces for 100ms.
-        const DWORD milliseconds = overflow ? 1U : 100U;
+        // All normal visible surfaces fit one OS wait. A frame-latency handle
+        // is advisory scheduling capacity and can transiently remain unsignaled
+        // across compositor transitions. Retry at a short interruptible cadence
+        // so one missed notification cannot add a 100ms navigation tail. Larger
+        // registries still rotate 1ms batches after probing every handle above.
+        const DWORD normal_retry = overflow ? 1U : kFrameLatencyRetryMilliseconds;
+        const DWORD milliseconds = delayed_occlusion_retry == INFINITE
+            ? normal_retry : std::min(normal_retry, delayed_occlusion_retry);
         const DWORD wait = WaitForMultipleObjectsEx(count, handles.data(), FALSE, milliseconds, FALSE);
         if (wait >= WAIT_OBJECT_0 + 1U && wait < WAIT_OBJECT_0 + count) {
             const auto index = indices[wait - WAIT_OBJECT_0];
@@ -2788,14 +3051,9 @@ private:
         }
         if (wait == WAIT_TIMEOUT) {
             next_retry_surface_ = indices[count - 1U] + 1U;
-            if (!overflow) {
-                for (DWORD index = 1U; index < count; ++index) {
-                    auto& surface = surfaces_[indices[index]];
-                    surface.surface->RecordFrameLatencyTimeout();
-                    surface.last_render_result = S_FALSE;
-                    PublishSurface(surface);
-                }
-            }
+            // A short retry expiry is normal pacing, not a 100ms frame-latency
+            // failure. Explicit bounded Render calls still record their actual
+            // timeout through AcquireFrameLatencyPermit.
         } else if (wait == WAIT_FAILED) {
             const HRESULT failure = HRESULT_FROM_WIN32(GetLastError());
             for (DWORD index = 1U; index < count; ++index) {
@@ -2883,6 +3141,27 @@ private:
                 resource_limit_count_.fetch_add(1U, std::memory_order_relaxed);
             }
         }
+        if (SUCCEEDED(result)) {
+            std::uint64_t other_gpu_bytes{};
+            for (const auto& surface : surfaces_) {
+                if (&surface != &*found) {
+                    other_gpu_bytes = SaturatingAdd(
+                        other_gpu_bytes, surface.surface->GpuTileBytes());
+                }
+            }
+            if (other_gpu_bytes < kApplicationGpuTileBudgetBytes) {
+                found->surface->SetTileBudgetBytes(
+                    kApplicationGpuTileBudgetBytes - other_gpu_bytes);
+                result = found->surface->UploadPreparedSequenceSources();
+            }
+            UpdateSequenceCacheBudgets();
+            if (!ReserveGpuTileCapacity()) {
+                result = E_OUTOFMEMORY;
+            }
+            if (result == E_OUTOFMEMORY) {
+                resource_limit_count_.fetch_add(1U, std::memory_order_relaxed);
+            }
+        }
         result = NormalizeResult(*found, result);
         UpdateTileBudgets();
         for (const auto& surface : surfaces_) {
@@ -2950,6 +3229,7 @@ private:
                 surface.surface->ClearSnapshot();
                 surface.route = control.route;
                 surface.occluded = false;
+                ResetOcclusionRetry(surface);
                 PublishSurface(surface);
                 break;
             case HostControlKind::Unbind:
@@ -2957,6 +3237,7 @@ private:
                 surface.surface->ClearSnapshot();
                 surface.route = {};
                 surface.occluded = false;
+                ResetOcclusionRetry(surface);
                 PublishSurface(surface);
                 render = surface.visible;
                 break;
@@ -2968,8 +3249,10 @@ private:
                 surface.visible = control.visible;
                 if (surface.visible) {
                     surface.occluded = false;
+                    ResetOcclusionRetry(surface);
                     render = true;
                 } else {
+                    ResetOcclusionRetry(surface);
                     SetPresentationWork(surface, 0U, false);
                 }
                 PublishSurface(surface);

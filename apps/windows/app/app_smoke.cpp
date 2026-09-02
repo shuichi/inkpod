@@ -10573,6 +10573,7 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     if (!state.lifetime.smoke_deferred_sequence_auto_publication
         || SendMessageW(state.Workspace().windows.window,
                WM_COMMAND, IDM_SEQ_IMPORT, 0) != 1) {
+        std::fputs("sequence AUTO/explicit import race setup failed\n", stderr);
         return 4174;
     }
     InkpodSequenceCatalogInfo explicit_catalog{};
@@ -11614,13 +11615,18 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
             saved_sequence_shell.pair_raster_path,
             expected_wrap_left_raster_path)
         && wrap_left_raster_path == expected_wrap_left_raster_path;
+    // The resident exchange is intentionally independent of durable autosave
+    // publication. The target may therefore be visible before its earlier
+    // background recovery completion has been dispatched to the UI thread.
+    // If a shell recovery is already attached it must be complete; otherwise
+    // the authoritative per-cell recovery is checked after FileIo settles.
     const bool wrap_left_recovery =
-        state.Document().shell.recovery_original_path.empty()
-        && !state.Document().shell.recovery_path.empty()
-        && state.Document().shell.recovery_artifact_generation != 0U
-        && state.Document().shell.recovery_artifact_published
-        && inkpod::app::ValidRecoveryArtifactProof(
-            state.Document().shell.recovery_artifact_proof);
+        state.Document().shell.recovery_artifact_published
+        ? !state.Document().shell.recovery_path.empty()
+            && state.Document().shell.recovery_artifact_generation != 0U
+            && inkpod::app::ValidRecoveryArtifactProof(
+                state.Document().shell.recovery_artifact_proof)
+        : state.Document().shell.recovery_path.empty();
     const bool wrap_left_authority = wrap_left_flags
         && wrap_left_identity && wrap_left_pair_identity
         && wrap_left_paths && wrap_left_recovery;
@@ -11631,10 +11637,24 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         state.Workspace().sequence_dialog.view.active_index;
     const bool wrap_right_authority =
         sequence_pair_authority_matches(0U, true);
+    const bool wrap_autosave_settled = WaitForFileIo(state);
+    const auto* wrap_target_binding =
+        state.Document().SequenceFileBindingAt(2U);
+    const auto* wrap_target_recovery = wrap_target_binding == nullptr
+        ? nullptr : state.Document().FindSequenceAutosave(
+            wrap_target_binding->document_uuid_high,
+            wrap_target_binding->document_uuid_low,
+            wrap_target_binding->source_generation);
+    const bool wrap_target_recovery_durable = wrap_target_recovery != nullptr
+        && !wrap_target_recovery->recovery_path.empty()
+        && wrap_target_recovery->artifact_generation != 0U
+        && inkpod::app::ValidRecoveryArtifactProof(
+            wrap_target_recovery->artifact_proof);
     if (!wrap_checked || wrap_left_result != 0 || !wrap_left_clean
         || wrap_left_index != 2U || !wrap_left_authority
         || wrap_right_result != 0 || !wrap_right_clean
-        || wrap_right_index != 0U || !wrap_right_authority) {
+        || wrap_right_index != 0U || !wrap_right_authority
+        || !wrap_autosave_settled || !wrap_target_recovery_durable) {
         const auto wrap_pane_target = state.routing.pane_targets.CaptureAction(
             state.routing.sequence_pane,
             state.routing.targets.Capture(),
@@ -12230,8 +12250,13 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         auto& color_pane = workspace.panes.color_pane;
         auto& options = workspace.tools.options_pane;
         inkpod::app::EngineMetrics before{};
-        if (state.SequenceEditReady(target)
-            || color_pane.change_main_line_color == nullptr
+        // Presentation can complete between the caller's readiness probe and
+        // this helper. That is already the other accepted outcome; it must not
+        // be misreported as an unfenced callback failure.
+        if (state.SequenceEditReady(target)) {
+            return true;
+        }
+        if (color_pane.change_main_line_color == nullptr
             || color_pane.change_color == nullptr
             || options.change_diameter == nullptr
             || !state.engine->GetMetrics(state.Document().id,
@@ -12276,9 +12301,6 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
             && after.rejected_work_items == before.rejected_work_items;
     };
     bool autosave_preflight_observed{};
-    bool autosave_pending_before_fence{};
-    bool autosave_authority_unchanged{};
-    bool autosave_pair_reserved{};
     std::wstring autosave_native_reservation_path;
     std::wstring autosave_raster_reservation_path;
     if (!inkpod::app::ResolveDocumentFileIdentity(
@@ -12290,61 +12312,61 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         || sequence_native_identities[2].kind
             != inkpod::app::DocumentIdentityKind::WindowsFile
         || sequence_raster_identities[2].kind
-            != inkpod::app::DocumentIdentityKind::WindowsFile) {
+            != inkpod::app::DocumentIdentityKind::WindowsFile
+        || !inkpod::app::NormalizeDocumentFilePath(
+            sequence_native_paths[2], autosave_native_reservation_path)
+        || !inkpod::app::NormalizeDocumentFilePath(
+            sequence_raster_paths[2], autosave_raster_reservation_path)) {
         restore_sequence_policy();
         return 4096;
     }
     state.lifetime.smoke_after_sequence_pair_reserved = [
-        &](const std::wstring& native_path,
-            const std::wstring& raster_path,
-            const inkpod::app::DocumentIdentity& native_identity,
-            const inkpod::app::DocumentIdentity& raster_identity) noexcept {
+        &](const std::wstring&,
+            const std::wstring&,
+            const inkpod::app::DocumentIdentity&,
+            const inkpod::app::DocumentIdentity&) noexcept {
         autosave_preflight_observed = true;
-        autosave_pending_before_fence =
-            state.Workspace().animation.sequence_switch_pending;
-        autosave_authority_unchanged =
-            authority_unchanged(
-                autosave_source_identity, autosave_source_pair_identity,
-                autosave_source_shell);
-        autosave_pair_reserved =
-            inkpod::app::NormalizeDocumentFilePath(
-                native_path, autosave_native_reservation_path)
-            && inkpod::app::NormalizeDocumentFilePath(
-                raster_path, autosave_raster_reservation_path)
-            && state.Documents().HasIdentityReservation(native_identity)
-            && state.Documents().HasIdentityReservation(raster_identity)
-            && state.Documents().HasIdentityReservation(
-                {}, autosave_native_reservation_path)
-            && state.Documents().HasIdentityReservation(
-                {}, autosave_raster_reservation_path);
     };
     const LRESULT autosave_switch_queued = SendMessageW(
             state.Workspace().windows.window,
             WM_COMMAND,
             IDM_SEQ_NEXT,
             0);
-    const ULONGLONG autosave_reservation_deadline = GetTickCount64() + 5'000U;
-    while (autosave_switch_queued == 1 && !autosave_preflight_observed
-        && state.Workspace().animation.sequence_switch_pending
-        && GetTickCount64() < autosave_reservation_deadline) {
-        state.file_io.Poll();
-        if (!autosave_preflight_observed) {
-            Sleep(1U);
-        }
-    }
     state.lifetime.smoke_after_sequence_pair_reserved = {};
-    if (autosave_switch_queued != 1 || !autosave_preflight_observed
-        || !autosave_pending_before_fence
-        || !autosave_authority_unchanged || !autosave_pair_reserved) {
+    if (autosave_switch_queued != 1 || autosave_preflight_observed
+        || state.Workspace().animation.sequence_switch_pending
+        || state.routing.sequence_switch_pending_token.load(
+               std::memory_order_acquire) != 0U
+        || state.Workspace().sequence_dialog.view.active_index != 2U
+        || !sequence_pair_authority_matches(2U, true)
+        || state.Documents().HasIdentityReservation(
+            sequence_native_identities[2])
+        || state.Documents().HasIdentityReservation(
+            sequence_raster_identities[2])
+        || state.Documents().HasIdentityReservation(
+            {}, autosave_native_reservation_path)
+        || state.Documents().HasIdentityReservation(
+            {}, autosave_raster_reservation_path)) {
         std::fprintf(stderr,
-            "autosave sequence pair preflight missing: queued=%lld pending=%d "
-            "authority=%d reserved=%d native_id=%d raster_id=%d\n",
+            "autosave resident switch used the slow pair path: queued=%lld "
+            "preflight=%d pending=%d authority=%d native_id=%d raster_id=%d "
+            "index=%u identity=%d/%u pair=%d/%u current=%ls planned=%ls "
+            "raster=%ls recovery-original=%ls\n",
             static_cast<long long>(autosave_switch_queued),
-            autosave_pending_before_fence ? 1 : 0,
-            autosave_authority_unchanged ? 1 : 0,
-            autosave_pair_reserved ? 1 : 0,
+            autosave_preflight_observed ? 1 : 0,
+            state.Workspace().animation.sequence_switch_pending,
+            sequence_pair_authority_matches(2U, true),
             state.Documents().HasIdentityReservation(sequence_native_identities[2]),
-            state.Documents().HasIdentityReservation(sequence_raster_identities[2]));
+            state.Documents().HasIdentityReservation(sequence_raster_identities[2]),
+            state.Workspace().sequence_dialog.view.active_index,
+            state.Document().identity == sequence_native_identities[2],
+            static_cast<unsigned>(state.Document().identity.kind),
+            state.Document().pair_raster_identity == sequence_raster_identities[2],
+            static_cast<unsigned>(state.Document().pair_raster_identity.kind),
+            state.Document().shell.current_path.c_str(),
+            state.Document().shell.planned_native_path.c_str(),
+            state.Document().shell.pair_raster_path.c_str(),
+            state.Document().shell.recovery_original_path.c_str());
         restore_sequence_policy();
         return 4096;
     }
@@ -12368,9 +12390,10 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         return 4096;
     }
     const std::uint64_t autosave_epoch =
-        state.routing.sequence_switch_pending_token.load(std::memory_order_acquire);
+        state.Document().sequence_required_present_epoch;
     if (autosave_epoch == 0U || autosave_epoch == before_autosave_epoch
-        || !sequence_edit_callbacks_are_fenced()) {
+        || (!state.SequenceEditReady(state.routing.targets.Capture())
+            && !sequence_edit_callbacks_are_fenced())) {
         std::fputs("pending sequence accepted a direct pane/editor callback\n", stderr);
         restore_sequence_policy();
         return 4096;
@@ -12527,8 +12550,9 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     }
     const auto switching_session = state.Document().id;
     const auto switching_view = state.Document().ActiveView()->id;
-    // The saved source is now a distinct open document. Restoring its recovery
-    // must reject that identity before Core commits or writes the dirty source.
+    // The saved source is now a distinct open document. Activating its resident
+    // state must reject that identity before Core commits or writes the dirty
+    // source. A resident hit reports this conflict synchronously.
     if (OpenFromPath(state, autosave_saved_path) != INKPOD_STATUS_OK
         || state.Document().id == switching_session
         || state.Document().identity != autosave_source_identity) {
@@ -12585,15 +12609,13 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         && duplicate_conflict_history.cursor == autosave_target_history.cursor
         && duplicate_conflict_history.item_count
             == autosave_target_history.item_count;
-    if (duplicate_conflict_queued != 1
+    if (duplicate_conflict_queued != 0
         || !duplicate_conflict_idle
         || state.Workspace().animation.sequence_switch_pending
         || state.routing.sequence_switch_pending_token.load(
                std::memory_order_acquire) != 0U
         || state.Workspace().animation.smoke_sequence_switch_completed
-            != duplicate_conflict_completed_before + 1U
-        || state.Workspace().animation.smoke_sequence_switch_status
-            != INKPOD_STATUS_FILE_CONFLICT
+            != duplicate_conflict_completed_before
         || !duplicate_conflict_core_unchanged
         || !authority_unchanged(
             autosave_target_identity, autosave_target_pair_identity,
@@ -12627,7 +12649,7 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
                 state.routing.sequence_switch_pending_token.load(
                     std::memory_order_acquire)),
             state.Workspace().animation.smoke_sequence_switch_completed,
-            duplicate_conflict_completed_before + 1U,
+            duplicate_conflict_completed_before,
             static_cast<unsigned>(
                 state.Workspace().animation.smoke_sequence_switch_status),
             duplicate_conflict_core_unchanged,
@@ -12644,39 +12666,16 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         return 1517;
     }
     bool recovery_preflight_observed{};
-    bool recovery_pending_before_fence{};
-    bool recovery_authority_unchanged{};
-    bool recovery_pair_reserved{};
-    std::wstring recovery_native_reservation_path;
-    std::wstring recovery_raster_reservation_path;
+    std::wstring recovery_native_reservation_path =
+        autosave_source_native_path;
+    std::wstring recovery_raster_reservation_path =
+        autosave_source_raster_path;
     state.lifetime.smoke_after_sequence_pair_reserved = [
-        &](const std::wstring& native_path,
-            const std::wstring& raster_path,
-            const inkpod::app::DocumentIdentity& native_identity,
-            const inkpod::app::DocumentIdentity& raster_identity) noexcept {
+        &](const std::wstring&,
+            const std::wstring&,
+            const inkpod::app::DocumentIdentity&,
+            const inkpod::app::DocumentIdentity&) noexcept {
         recovery_preflight_observed = true;
-        recovery_pending_before_fence =
-            state.Workspace().animation.sequence_switch_pending;
-        recovery_authority_unchanged =
-            authority_unchanged(
-                autosave_target_identity, autosave_target_pair_identity,
-                autosave_target_shell);
-        recovery_pair_reserved = native_identity == autosave_source_identity
-            && raster_identity == autosave_source_pair_identity
-            && inkpod::app::NormalizeDocumentFilePath(
-                native_path, recovery_native_reservation_path)
-            && inkpod::app::NormalizeDocumentFilePath(
-                raster_path, recovery_raster_reservation_path)
-            && recovery_native_reservation_path
-                == autosave_source_native_path
-            && recovery_raster_reservation_path
-                == autosave_source_raster_path
-            && state.Documents().HasIdentityReservation(native_identity)
-            && state.Documents().HasIdentityReservation(raster_identity)
-            && state.Documents().HasIdentityReservation(
-                {}, recovery_native_reservation_path)
-            && state.Documents().HasIdentityReservation(
-                {}, recovery_raster_reservation_path);
     };
     const std::uint32_t recovery_completed_before =
         state.Workspace().animation.smoke_sequence_switch_completed;
@@ -12685,41 +12684,39 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         WM_COMMAND,
         IDM_SEQ_PREVIOUS,
         0);
-    // Capture the accepted epoch before Poll: a fast worker may complete and
-    // clear the pending token in the same Poll that invokes the preflight hook.
+    // The resident exchange publishes its presentation epoch synchronously;
+    // only the source autosave remains in FileIo.
     const std::uint64_t recovery_epoch =
-        state.routing.sequence_switch_pending_token.load(std::memory_order_acquire);
+        state.Document().sequence_required_present_epoch;
     const bool recovery_callbacks_fenced = recovery_switch_queued == 1
         && recovery_epoch != 0U && recovery_epoch != autosave_epoch
-        && sequence_edit_callbacks_are_fenced();
-    const ULONGLONG recovery_reservation_deadline = GetTickCount64() + 30'000U;
-    while (recovery_switch_queued == 1 && !recovery_preflight_observed
-        && state.Workspace().animation.sequence_switch_pending
-        && GetTickCount64() < recovery_reservation_deadline) {
-        state.file_io.Poll();
-        if (!recovery_preflight_observed) {
-            Sleep(1U);
-        }
-    }
+        && (state.SequenceEditReady(state.routing.targets.Capture())
+            || sequence_edit_callbacks_are_fenced());
     state.lifetime.smoke_after_sequence_pair_reserved = {};
     const InkpodStatus recovery_fence_status = state.engine->Invoke(
         [](InkpodCore*) { return INKPOD_STATUS_OK; }, false, false);
     if (recovery_switch_queued != 1
-        || !recovery_preflight_observed
-        || !recovery_pending_before_fence
-        || !recovery_authority_unchanged
-        || !recovery_pair_reserved
+        || recovery_preflight_observed
+        || state.Workspace().animation.sequence_switch_pending
+        || state.routing.sequence_switch_pending_token.load(
+               std::memory_order_acquire) != 0U
+        || state.Workspace().sequence_dialog.view.active_index != 1U
+        || !sequence_pair_authority_matches(1U, true)
+        || state.Documents().HasIdentityReservation(
+            autosave_source_identity)
+        || state.Documents().HasIdentityReservation(
+            autosave_source_pair_identity)
         || !recovery_callbacks_fenced
         || recovery_fence_status != INKPOD_STATUS_OK) {
         std::fprintf(stderr,
-            "recovery sequence pair preflight missing: queued=%lld pending=%d/%d "
+            "recovery resident switch used the slow path: queued=%lld pending=%d "
             "observed=%d authority=%d reserved=%d callbacks=%d epoch=%llu fence=%u\n",
             static_cast<long long>(recovery_switch_queued),
             state.Workspace().animation.sequence_switch_pending,
-            recovery_pending_before_fence,
             recovery_preflight_observed,
-            recovery_authority_unchanged,
-            recovery_pair_reserved,
+            sequence_pair_authority_matches(1U, true),
+            state.Documents().HasIdentityReservation(
+                autosave_source_identity),
             recovery_callbacks_fenced,
             static_cast<unsigned long long>(recovery_epoch),
             static_cast<unsigned>(recovery_fence_status));
@@ -12751,7 +12748,8 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
             != INKPOD_STATUS_OK
         || state.lifetime.smoke_dirty_prompt_count != autosave_prompt_count
         || !QueryDocument(state, autosave_restored)
-        || autosave_restored.document_revision > autosave_target.document_revision
+        || autosave_restored.document_revision
+            != autosave_source.document_revision
         || state.engine->GetEditorState(
                state.Document().id,
                state.Document().generation,
@@ -12788,7 +12786,7 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
             != autosave_source.color_plane_checksum
         || (autosave_restored.flags
             & (INKPOD_DOCUMENT_FLAG_DIRTY | INKPOD_DOCUMENT_FLAG_RECOVERED))
-            != (INKPOD_DOCUMENT_FLAG_DIRTY | INKPOD_DOCUMENT_FLAG_RECOVERED)
+            != INKPOD_DOCUMENT_FLAG_DIRTY
         || autosave_restored_editor.editor_revision
             != autosave_source_editor.editor_revision
         || std::memcmp(
@@ -12846,13 +12844,14 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         restore_sequence_policy();
         return 4099;
     }
-    // Undo the recovered document journal back to its saved cursor, then restore
+    // Undo the resident document journal back to its saved cursor, then restore
     // the independently persisted EditorState to its saved value. Editor
     // revision is monotonic and is deliberately not part of document Undo;
     // clean state is established by the two savepoint digests independently.
-    // RECOVERED remains a provenance marker at this cursor, so switching away
-    // must publish a fresh append-only generation containing the clean cursor
-    // and redo tail instead of leaving the older dirty association authoritative.
+    // The durable recovery remains associated with the resident cell, so
+    // switching away must publish a fresh append-only generation containing
+    // the clean cursor and redo tail instead of leaving the older dirty
+    // association authoritative.
     InkpodDocumentInfo recovered_clean = EmptyDocumentInfo();
     InkpodEditorStateInfo recovered_clean_editor{};
     recovered_clean_editor.struct_size = sizeof(recovered_clean_editor);
@@ -12915,7 +12914,7 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         || !recovered_clean_query
         || !recovered_clean_editor_query
         || (recovered_clean.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
-        || (recovered_clean.flags & INKPOD_DOCUMENT_FLAG_RECOVERED) == 0U
+        || (recovered_clean.flags & INKPOD_DOCUMENT_FLAG_RECOVERED) != 0U
         || recovered_clean.document_uuid_high
             != autosave_baseline.document_uuid_high
         || recovered_clean.document_uuid_low
@@ -13498,11 +13497,24 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     }
     const auto repair_inactive_artifact_proof =
         repair_inactive_autosave->artifact_proof;
-    if (DeleteFileW(sequence_raster_paths[1].c_str()) == FALSE
-        || SendMessageW(state.Workspace().windows.window,
-               WM_COMMAND, IDM_FILE_REVERT, 0) != 1
-        || !WaitForFileIo(state)
-        || !WaitForSequencePresentation(state)) {
+    const bool repair_raster_deleted =
+        DeleteFileW(sequence_raster_paths[1].c_str()) != FALSE;
+    const LRESULT repair_revert_command = repair_raster_deleted
+        ? SendMessageW(state.Workspace().windows.window,
+              WM_COMMAND, IDM_FILE_REVERT, 0)
+        : 0;
+    const bool repair_revert_io_complete = repair_revert_command == 1
+        && WaitForFileIo(state);
+    const bool repair_revert_presented = repair_revert_io_complete
+        && WaitForSequencePresentation(state);
+    if (!repair_raster_deleted || repair_revert_command != 1
+        || !repair_revert_io_complete || !repair_revert_presented) {
+        std::fprintf(stderr,
+            "sequence repair Revert failed: deleted=%u command=%lld io=%u present=%u\n",
+            static_cast<unsigned>(repair_raster_deleted),
+            static_cast<long long>(repair_revert_command),
+            static_cast<unsigned>(repair_revert_io_complete),
+            static_cast<unsigned>(repair_revert_presented));
         restore_sequence_policy();
         return 4174;
     }

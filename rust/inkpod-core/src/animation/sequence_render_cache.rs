@@ -32,6 +32,15 @@ pub struct SequenceRenderSourceIdentity {
     pub owner_generation: u64,
 }
 
+/// Runtime-only progress of full-catalog sequence render preparation.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct SequenceRenderPreparationStatus {
+    /// Number of speculative source compositions still queued or running.
+    pub pending_sources: u64,
+    /// Number of completed inactive source compositions ready for a renderer.
+    pub prepared_sources: u64,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct SequenceRenderOwnerGeneration(u64);
 
@@ -155,6 +164,57 @@ impl SequenceRenderCache {
         self.pending.clear();
     }
 
+    /// Detaches retained composition metadata from an inactive COW resident.
+    ///
+    /// The live Core remains the single catalog-cache owner. An inactive cell
+    /// keeps only its editable document and pristine marker; when activated it
+    /// receives the live cache before building a snapshot. Pixel payloads and
+    /// their shared reservations are therefore not copied or charged again,
+    /// while 64 resident Cores do not each retain a 64-entry metadata catalog.
+    pub(crate) fn detach_inactive_resident_catalog(&mut self) {
+        self.invalidate_document();
+        self.entries.clear();
+        self.pending.clear();
+    }
+
+    /// Rebinds a prepared immutable source after the initial live-document bind.
+    ///
+    /// Initial binding proves that the current Genesis raster is the selected
+    /// source. Its prepared tiles remain byte-for-byte valid, so changing only
+    /// their runtime UUID avoids a first-frame synchronous recomposition.
+    pub(crate) fn rebind_source_document_uuid(
+        &mut self,
+        old_document_uuid: u128,
+        new_document_uuid: u128,
+        source_generation: u64,
+    ) {
+        let matches = |identity: SequenceRenderSourceIdentity| {
+            identity.document_uuid == old_document_uuid
+                && identity.source_generation == source_generation
+        };
+        if let Some(pristine) = &mut self.pristine
+            && matches(pristine.identity)
+        {
+            pristine.identity.document_uuid = new_document_uuid;
+        }
+        if let Some(identity) = &mut self.active_source
+            && matches(*identity)
+        {
+            identity.document_uuid = new_document_uuid;
+        }
+        for entry in &mut self.entries {
+            if matches(entry.identity) {
+                entry.identity.document_uuid = new_document_uuid;
+            }
+        }
+        for pending in &self.pending {
+            if matches(pending.identity()) {
+                pending.cancel();
+            }
+        }
+        self.pending.retain(|pending| !matches(pending.identity()));
+    }
+
     fn catalog_changed(&mut self) {
         for pending in &self.pending {
             pending.cancel();
@@ -171,6 +231,29 @@ impl SequenceRenderCache {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         (usage.bytes, usage.sources, usage.tiles)
+    }
+
+    pub(crate) fn prepared_sources(
+        &self,
+        active: Option<SequenceRenderSourceIdentity>,
+    ) -> Vec<SequencePreparedRenderSource> {
+        self.entries
+            .iter()
+            .filter(|entry| Some(entry.identity) != active)
+            .map(|entry| {
+                SequencePreparedRenderSource::new(
+                    entry.identity,
+                    entry.tiles.values().cloned().collect(),
+                )
+            })
+            .collect()
+    }
+
+    fn prepared_source_count(&self, active: Option<SequenceRenderSourceIdentity>) -> u64 {
+        self.entries
+            .iter()
+            .filter(|entry| Some(entry.identity) != active)
+            .count() as u64
     }
 
     fn evict_unreferenced(&mut self) -> bool {
@@ -225,7 +308,7 @@ impl SequenceRenderCache {
             tiles: 0,
             _decoded_lease: None,
         };
-        // The application-owned I/O lease enforces the same 8-source/128-MiB
+        // The application-owned I/O lease enforces the same 64-source/1-GiB
         // bound across every managed Core and the existing decoded-byte budget.
         loop {
             match source.reserve_render_payload(bytes) {
@@ -316,6 +399,22 @@ impl SequenceRenderCache {
 }
 
 impl Core {
+    /// Nonblockingly collects completed sequence render preparations.
+    ///
+    /// This changes only bounded process-local derived caches. It never changes
+    /// the document, view, history, dirty state, savepoint, or persistent IDs.
+    /// The caller can publish one later snapshot after `pending_sources` reaches
+    /// zero to transfer every completed inactive source to the renderer.
+    #[must_use]
+    pub fn poll_sequence_render_preparation(&mut self) -> SequenceRenderPreparationStatus {
+        self.poll_sequence_render_preparations();
+        let active = self.sequence_active_render_source();
+        SequenceRenderPreparationStatus {
+            pending_sources: self.sequence_render_cache.pending.len() as u64,
+            prepared_sources: self.sequence_render_cache.prepared_source_count(active),
+        }
+    }
+
     pub(crate) fn sequence_render_catalog_changed(&mut self) {
         self.sequence_render_cache.catalog_changed();
         self.render_cache.retain(|(band, _), _| *band == 0);
@@ -340,7 +439,18 @@ impl Core {
         });
     }
 
-    fn pristine_sequence_render_source(&self) -> Option<SequenceRenderSourceIdentity> {
+    pub(crate) fn sequence_active_render_source(&self) -> Option<SequenceRenderSourceIdentity> {
+        let owner_generation = self.sequence_render_cache.owner_generation();
+        let sequence = self.sequence.as_ref()?;
+        let source = sequence.cells.get(sequence.active_index?)?;
+        (owner_generation != 0).then_some(SequenceRenderSourceIdentity {
+            document_uuid: source.document_uuid,
+            source_generation: source.source_generation,
+            owner_generation,
+        })
+    }
+
+    pub(crate) fn pristine_sequence_render_source(&self) -> Option<SequenceRenderSourceIdentity> {
         let pristine = self.sequence_render_cache.pristine?;
         let document = self.document.as_ref()?;
         let sequence = self.sequence.as_ref()?;
