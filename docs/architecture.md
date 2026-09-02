@@ -82,6 +82,12 @@ shortcuts/settings, clipboard memory images, test fixtures, and Cut member
 validation are outside this migration. Raster input is PNG, TIFF, TGA, or BMP;
 reference-only loading never creates an editable document or native file.
 
+Each temporary-job lease owns and removes only its exclusively created child
+directory. The common `inkpod-file-io` allocation root is retained even when
+empty because other workers or test processes may be between creating and
+canonicalizing that shared root; one job's explicit or deferred cleanup must
+not invalidate another job's allocation attempt.
+
 Editable File Open and Sequence activation use one raster-pair resolver. For a
 selected raster `R`, the manager derives the same-directory, same-stem native
 candidate `N`, probes both identities/complete stamps, and returns one closed

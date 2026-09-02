@@ -12,6 +12,8 @@ static DIRECTORY_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 /// must complete before a preview result is published as successful.
 pub struct TemporaryDirectory {
     manager: IoManager,
+    // Shared allocation root. A job owns only `path`; removing this root would
+    // race another allocator between its create and canonicalize operations.
     base: PathBuf,
     path: PathBuf,
     active: bool,
@@ -27,7 +29,6 @@ impl TemporaryDirectory {
         self.manager
             .remove_tree(&self.path, &self.base, &JobContext::new())?;
         self.active = false;
-        let _ = std::fs::remove_dir(&self.base);
         Ok(())
     }
 }
@@ -40,7 +41,6 @@ impl Drop for TemporaryDirectory {
             let base = self.base.clone();
             let _ = self.manager.enqueue_cleanup(move || {
                 let _ = manager.remove_tree(&path, &base, &JobContext::new());
-                let _ = std::fs::remove_dir(&base);
             });
         }
     }
@@ -157,5 +157,73 @@ impl IoManager {
                 Ok(length)
             },
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::IoConfig;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn cleanup_preserves_the_shared_allocation_root() {
+        let manager = IoManager::new(IoConfig {
+            worker_count: 1,
+            ..IoConfig::default()
+        })
+        .unwrap();
+        let context = JobContext::new();
+        let fixture = manager
+            .create_temporary_directory("temporary-root-contract", &context)
+            .unwrap();
+        let shared_root = fixture.path().join("shared-root");
+        let explicit_path = shared_root.join("explicit-job");
+        std::fs::create_dir_all(&explicit_path).unwrap();
+        let temporary = TemporaryDirectory {
+            manager: manager.clone(),
+            base: std::fs::canonicalize(&shared_root).unwrap(),
+            path: std::fs::canonicalize(&explicit_path).unwrap(),
+            active: true,
+        };
+
+        temporary.cleanup().unwrap();
+
+        assert!(!explicit_path.exists());
+        assert!(
+            shared_root.is_dir(),
+            "one job cleanup must not remove the root used by other allocators"
+        );
+
+        let deferred_path = shared_root.join("deferred-job");
+        std::fs::create_dir(&deferred_path).unwrap();
+        drop(TemporaryDirectory {
+            manager: manager.clone(),
+            base: std::fs::canonicalize(&shared_root).unwrap(),
+            path: std::fs::canonicalize(&deferred_path).unwrap(),
+            active: true,
+        });
+        let barrier = manager.submit(|_| Ok(())).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(result) = barrier.try_take() {
+                result.unwrap();
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "deferred temporary cleanup did not finish"
+            );
+            std::thread::yield_now();
+        }
+        assert!(!deferred_path.exists());
+        assert!(
+            shared_root.is_dir(),
+            "deferred job cleanup must not remove the shared allocation root"
+        );
+
+        std::fs::remove_dir(&shared_root).unwrap();
+        drop(fixture);
+        manager.shutdown_and_wait();
     }
 }
