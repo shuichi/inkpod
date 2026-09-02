@@ -3,7 +3,7 @@
   <assemblyIdentity
       type="win32"
       name="inkpod.desktop"
-      version="0.2.10.0"
+      version="0.3.0.0"
       processorArchitecture="*" />
   <description>inkpod</description>
   <dependency>

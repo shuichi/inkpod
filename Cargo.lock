@@ -131,7 +131,7 @@ dependencies = [
 
 [[package]]
 name = "inkpod-core"
-version = "0.2.10"
+version = "0.3.0"
 dependencies = [
  "blake3",
  "inkpod-format",
@@ -143,7 +143,7 @@ dependencies = [
 
 [[package]]
 name = "inkpod-ffi"
-version = "0.2.10"
+version = "0.3.0"
 dependencies = [
  "inkpod-core",
  "inkpod-format",
@@ -152,7 +152,7 @@ dependencies = [
 
 [[package]]
 name = "inkpod-format"
-version = "0.2.10"
+version = "0.3.0"
 dependencies = [
  "blake3",
  "inkpod-image",
@@ -161,7 +161,7 @@ dependencies = [
 
 [[package]]
 name = "inkpod-image"
-version = "0.2.10"
+version = "0.3.0"
 
 [[package]]
 name = "inkpod-io"
