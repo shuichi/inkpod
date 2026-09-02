@@ -21,6 +21,7 @@ struct RecoveryMetadata final {
     DocumentIdentity original_identity{};
     std::wstring original_path;
     std::wstring source_path;
+    InkpodIoRecoveryPairProof pair_proof{};
     std::uint64_t written_file_time{};
 };
 
@@ -50,6 +51,11 @@ enum class OutputColorGuardProfileSetting : std::uint32_t {
 
 [[nodiscard]] bool RecoveryRootDirectory(std::wstring& output) noexcept;
 [[nodiscard]] bool SequenceRecoveryPath(
+    std::uint64_t document_uuid_high,
+    std::uint64_t document_uuid_low,
+    std::uint64_t source_generation,
+    std::wstring& output) noexcept;
+[[nodiscard]] bool SequenceRecoveryAttemptPath(
     std::uint64_t document_uuid_high,
     std::uint64_t document_uuid_low,
     std::uint64_t source_generation,

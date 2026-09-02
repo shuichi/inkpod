@@ -177,6 +177,58 @@ fn external_change_after_prepare_is_not_overwritten() {
 }
 
 #[test]
+fn same_format_aliases_are_rejected_during_prepare_and_before_install() {
+    let directory = Directory::new();
+    let native = directory.native();
+    let raster = directory.0.join("cell.tiff");
+    let alias = directory.0.join("cell.tif");
+    fs::write(&native, b"native-old").unwrap();
+    fs::write(&raster, b"raster-old").unwrap();
+    fs::write(&alias, b"unexpected-alias").unwrap();
+    let manager = manager();
+    let context = JobContext::new();
+
+    assert!(matches!(
+        manager.prepare_pair(
+            &native,
+            &raster,
+            &context,
+            |file| {
+                file.write_all(b"native-new")?;
+                Ok(())
+            },
+            b"raster-new",
+            true,
+        ),
+        Err(IoError::ConfirmationRequired)
+    ));
+
+    fs::remove_file(&alias).unwrap();
+    let prepared = manager
+        .prepare_pair(
+            &native,
+            &raster,
+            &context,
+            |file| {
+                file.write_all(b"native-new")?;
+                Ok(())
+            },
+            b"raster-new",
+            true,
+        )
+        .unwrap();
+    fs::write(&alias, b"late-alias").unwrap();
+    assert!(matches!(
+        prepared.install(&context),
+        Err(IoError::ConfirmationRequired)
+    ));
+    finish_cleanup(&manager);
+    assert_eq!(fs::read(&native).unwrap(), b"native-old");
+    assert_eq!(fs::read(&raster).unwrap(), b"raster-old");
+    assert_eq!(fs::read(&alias).unwrap(), b"late-alias");
+}
+
+#[test]
 fn captured_stamps_allow_normal_save_and_require_confirmation_after_external_change() {
     let directory = Directory::new();
     fs::write(directory.native(), b"native-old").unwrap();
@@ -277,14 +329,12 @@ fn shutdown_drop_retains_journal_for_next_manager_recovery() {
 fn missing_companion_can_be_rebuilt_but_missing_native_requires_confirmation() {
     let directory = Directory::new();
     fs::write(directory.native(), b"native-old").unwrap();
-    fs::write(directory.raster(), b"raster-old").unwrap();
     let manager = manager();
     let context = JobContext::new();
     let expected = Some((
         Some(manager.metadata(&directory.native(), &context).unwrap()),
-        Some(manager.metadata(&directory.raster(), &context).unwrap()),
+        None,
     ));
-    fs::remove_file(directory.raster()).unwrap();
     let installed = manager
         .prepare_pair_checked(
             &directory.native(),
@@ -315,6 +365,102 @@ fn missing_companion_can_be_rebuilt_but_missing_native_requires_confirmation() {
         ),
         Err(IoError::ConfirmationRequired)
     ));
+
+    let removed = Directory::new();
+    fs::write(removed.native(), b"native-old").unwrap();
+    fs::write(removed.raster(), b"raster-old").unwrap();
+    let removed_expected = Some((
+        Some(manager.metadata(&removed.native(), &context).unwrap()),
+        Some(manager.metadata(&removed.raster(), &context).unwrap()),
+    ));
+    fs::remove_file(removed.raster()).unwrap();
+    assert!(matches!(
+        manager.prepare_pair_checked(
+            &removed.native(),
+            &removed.raster(),
+            &context,
+            |_| Ok(()),
+            b"new",
+            false,
+            removed_expected,
+        ),
+        Err(IoError::ConfirmationRequired)
+    ));
+
+    let appeared = Directory::new();
+    fs::write(appeared.native(), b"native-old").unwrap();
+    let appeared_expected = Some((
+        Some(manager.metadata(&appeared.native(), &context).unwrap()),
+        None,
+    ));
+    fs::write(appeared.raster(), b"external-raster").unwrap();
+    assert!(matches!(
+        manager.prepare_pair_checked(
+            &appeared.native(),
+            &appeared.raster(),
+            &context,
+            |_| Ok(()),
+            b"new",
+            false,
+            appeared_expected,
+        ),
+        Err(IoError::ConfirmationRequired)
+    ));
+}
+
+#[test]
+fn planned_pair_requires_the_exact_open_time_missing_native_and_raster_stamp() {
+    let directory = Directory::new();
+    fs::write(directory.raster(), b"raster-old").unwrap();
+    let manager = manager();
+    let context = JobContext::new();
+    let (native_missing, physical) = manager.resolve_identity(&directory.native()).unwrap();
+    assert!(!physical);
+    let raster = manager.metadata(&directory.raster(), &context).unwrap();
+    manager
+        .prepare_planned_pair_checked(
+            &directory.native(),
+            &directory.raster(),
+            &context,
+            |file| {
+                file.write_all(b"native-new")?;
+                Ok(())
+            },
+            b"raster-new",
+            native_missing,
+            raster,
+        )
+        .unwrap()
+        .install(&context)
+        .unwrap();
+    assert_eq!(fs::read(directory.native()).unwrap(), b"native-new");
+    assert_eq!(fs::read(directory.raster()).unwrap(), b"raster-new");
+
+    for change in ["native-created", "raster-changed", "raster-removed"] {
+        let directory = Directory::new();
+        fs::write(directory.raster(), b"raster-old").unwrap();
+        let (native_missing, physical) = manager.resolve_identity(&directory.native()).unwrap();
+        assert!(!physical);
+        let raster = manager.metadata(&directory.raster(), &context).unwrap();
+        match change {
+            "native-created" => fs::write(directory.native(), b"unexpected-native").unwrap(),
+            "raster-changed" => fs::write(directory.raster(), b"external-change").unwrap(),
+            "raster-removed" => fs::remove_file(directory.raster()).unwrap(),
+            _ => unreachable!(),
+        }
+        assert!(matches!(
+            manager.prepare_planned_pair_checked(
+                &directory.native(),
+                &directory.raster(),
+                &context,
+                |_| Ok(()),
+                b"new",
+                native_missing,
+                raster,
+            ),
+            Err(IoError::ConfirmationRequired)
+        ));
+    }
 }
 
 #[test]

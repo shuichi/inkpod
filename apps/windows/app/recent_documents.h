@@ -20,6 +20,12 @@ public:
     [[nodiscard]] bool Record(
         std::wstring path,
         DocumentIdentity identity) noexcept;
+    // Replaces either the final physical identity or its issue-time logical
+    // identity without allocating after a durable SavePair commit.
+    [[nodiscard]] bool RecordReplacing(
+        std::wstring path,
+        DocumentIdentity identity,
+        const DocumentIdentity& previous_identity) noexcept;
     [[nodiscard]] bool Remove(std::size_t index) noexcept;
     void Clear() noexcept;
     [[nodiscard]] const RecentDocumentEntry* At(

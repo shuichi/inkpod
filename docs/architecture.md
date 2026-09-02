@@ -45,7 +45,7 @@ Core supplies owned detached work to its generic executor.
 | `inkpod-format` | Bounded procedure-authoritative `.inkpod` v32 Cell/Cut containers and `.inkbatch` v5 models, stream/byte encode/decode/validation, and PNG/TIFF/TGA/BMP codecs; existing synchronous path wrappers remain for Rust callers outside the migrated application routes |
 | `inkpod-io`     | Application-owned bounded workers, filesystem paths/identity/locks, encoded and decoded LRU leases, streaming file access, temporary-file publication/cleanup, recoverable native/raster pair installation, recovery artifacts, and polling progress |
 | `inkpod-core`   | Stable-ID document/layer/plane state, immutable Genesis/base surfaces, a content-addressed canonical asset registry, StateId savepoints, views, raster clipboard, previews, animation, effects/Batch commands, persistence mapping, immutable render snapshots, and canonical primitive execution plus append-only journal/cache-free replay and semantic document digests for the migrated Core slice |
-| `inkpod-ffi`    | ABI v25 fixed records and generation-tagged runtime IDs, opaque I/O manager/job handles and path submission/poll/apply/release, Batch v5 graph/staged-result handles, InkScript source/compiler/fragment plus authority/plan/run/report handles and fixed DTO host callbacks, persistence/compaction diagnostics, validation/conversion, panic containment, and ownership functions |
+| `inkpod-ffi`    | ABI v30 fixed records and generation-tagged runtime IDs, opaque I/O manager/job handles and path submission/poll/apply/release, the common raster-pair open kind, issue-time sequence preservation fence and explicit current-document Revert flag, Batch v5 graph/staged-result handles, InkScript source/compiler/fragment plus authority/plan/run/report handles and fixed DTO host callbacks, persistence/compaction diagnostics, validation/conversion, panic containment, and ownership functions |
 
 Binary, grayscale, RGBA8/16, straight-alpha, premultiplied display data, and
 selection masks remain distinct types. Win32 may provide a
@@ -82,6 +82,43 @@ shortcuts/settings, clipboard memory images, test fixtures, and Cut member
 validation are outside this migration. Raster input is PNG, TIFF, TGA, or BMP;
 reference-only loading never creates an editable document or native file.
 
+Editable File Open and Sequence activation use one raster-pair resolver. For a
+selected raster `R`, the manager derives the same-directory, same-stem native
+candidate `N`, probes both identities/complete stamps, and returns one closed
+authority result: `Committed`, `Planned`, or `None`. An existing `N` is decoded,
+asset-validated, and replayed before publication; its normal composite must equal
+the canonical decode of `R` in dimensions, native depth, straight alpha, pixel
+values, and representable DPI. Encoded container layout and optional metadata are
+not equality inputs. A valid match returns `Committed`; an absent `N` returns a
+clean staged raster Genesis plus a session-only `Planned` pair. Corruption,
+non-current native data, format disagreement, or decoded mismatch returns an
+explicit conflict and never silently falls back to a new raster document. A
+separately invoked explicit raster import returns `None` and does not claim the
+existing native path; pair open itself fails atomically.
+
+Companion discovery is a bounded same-directory inventory owned by `inkpod-io`.
+Backend-normalized stems and ASCII-insensitive extensions preserve exact existing
+case on case-sensitive filesystems. Zero matches select the lowercase canonical
+missing path (`.inkpod`, or `.tif` for a newly derived TIFF companion), one match
+selects that directory entry, and two matches are ambiguous. One enumeration
+collects native and raster candidates together. Up to 32 complete inventories,
+each containing at most 20,000 relevant raster/native entries and 16 MiB of
+cached path/stem/extension text, are retained by application-wide LRU when the
+platform supplies a fail-closed
+namespace observer. Windows retains a nonrecursive directory-name change-notification
+handle with each entry. Backends without an equally strong observer do not cache
+the inventory and continue to enumerate on every proof; mtime alone is not cache
+authority. An unchanged observer serves later candidate proofs without `read_dir`.
+Entry addition, deletion, rename, observer failure, explicit cache clearing, or
+LRU eviction discards the inventory and requires another bounded enumeration. A
+directory exceeding the per-inventory entry bound remains correct but uncached.
+The observer starts before enumeration and must remain unchanged through
+completion before the result is cacheable. Candidate snapshots
+are revalidated after pair recovery and after replay/content validation, while
+the selected raster/native complete stamps remain independently checked. Thus
+cache reuse does not turn a new case/TIFF alias or a changed pair member into
+silent authority.
+
 | Image-cache limit | Bound |
 |---|---|
 | Resident images | 10,000 |
@@ -117,6 +154,14 @@ Replacement invalidates affected cache entries. External writes are not locked
 by the application: stamp/content validation detects changes and rejects stale
 reads or unauthorized overwrite instead of trusting a filename or timestamp
 alone.
+Paired save additionally proves that each same-stem native/raster candidate set
+contains only the selected member after staging, after native publication but
+before raster publication, and after both publications before success cleanup.
+The middle fence uses mixed-pair recovery; a final-fence conflict first verifies
+both replacement and backup proofs, restores or removes both prior members, then
+uses ordinary recovery cleanup. An uncoordinated external process can still create
+a new alias after the last directory scan because filesystems provide no
+directory-wide transaction; the next open/save detects that ambiguity.
 
 Automatic sequence loading is a separate job after primary raster open succeeds.
 A Rust worker synchronously enumerates the directory, matches the last ASCII
@@ -129,7 +174,7 @@ discarding edits made after the primary open. Discovery/decode failure leaves
 that successful primary open intact.
 
 Jobs expose nonblocking discovery, read, loaded, failure, work, result, and
-installation counters through ABI v25. Loaded images include cache hits;
+installation counters through ABI v30. Loaded images include cache hits;
 internal Batch output rereads do not count as additional input images. Queued
 drop/cancel cannot publish a live candidate. A result is applied only on its
 captured owner after generation/revision validation. Normal save, sequence
@@ -151,28 +196,55 @@ A sequence activation plan classifies an existing binding as `NOOP`, an identica
 initial raster as `BIND`, and a document replacement as `REPLACE`. Core validates
 the captured source/target identity, source generation, and revisions again at
 commit. `NOOP` and `BIND` preserve the old save authority, including dirty state;
+a successful initial `BIND` rekeys the sequence source to the current document
+UUID/new owner generation and rebases the active frontend file binding to the
+current pair paths/identities without replacing document/history/savepoints;
 the initial binding does not use the bound-source-only autosave request. Only
-`REPLACE` prepares the next recovery path and reserves its document identity
-before applying the switch. A bound autosave switch also uses the request's
-`REQUIRED` flag, including a changed source generation under the same document
-UUID. An unbound replacement follows the ordinary save confirmation first.
-One bounded reservation per registered session
-covers the identity and normalized original/source paths, so another open or
-write cannot claim them while recovery is pending. The old session identity
-and paths remain active until success. Publication only moves prepared values,
-clears the previous normal save destination, and assigns the new UUID's
-Untitled identity or the restored recovery identity. Restoring an original
-identity supports duplicate detection; it does not grant normal save authority.
+`REPLACE` prepares the next recovery path, invokes the shared raster-pair
+resolver, and reserves the target's pair identity before applying the switch. A
+bound autosave switch also uses the request's `REQUIRED` flag, including a changed
+source generation under the same document UUID. Independently, Core compares the
+current document/editor revisions with the runtime-only preservation baseline set
+by normal save, ordinary open, immutable source adoption, or exact recovery. A
+real switch sets `SOURCE_RECOVERY_REQUIRED` whenever that baseline is stale, even
+after Undo returns to a clean savepoint; dirty, recovered, and repair-needed states
+also set it. Frontend generation decisions use this issue-time bit rather than
+recomputing from presentation flags, and owner validation checks it again before
+commit. `NOOP` and `BIND` never set it. An unbound replacement follows
+the ordinary save confirmation first. One bounded reservation per registered
+session covers both target pair members and the normalized original/source paths,
+so another open or write cannot claim them while recovery or target preparation
+is pending. The old session identity and paths remain active until success.
+Publication moves the prepared target-specific `Committed` or `Planned` result;
+it never copies the old pair authority to the new cell. A standalone recovery or
+pair-proof-`None` target remains authority `None`: original identity supports
+duplicate detection and conflict presentation but grants no normal-save authority.
+An exact-pair sequence recovery instead resolves `metadata.source_path` through
+the same raster-pair resolver and adopts that target-specific `Committed`,
+`Planned`, or repair-needed authority only after capture-time proof, current member
+stamps, document UUID, canonical Genesis, raster identity, journal prefix, and
+encoded document/editor savepoint baseline all agree.
 Failure, cancellation, queue rejection, and session close release the reservation.
 True no-ops preserve the old authority, and a snapshot/presentation failure
 cannot undo authority publication after Core has committed the switch.
+An explicitly supplied target-recovery path is exact replay authority: missing,
+malformed, non-current, or wrong-UUID content fails the switch atomically. Only a
+switch whose preservation bit is clear and whose target-recovery path is absent
+may activate the immutable flattened catalog source. For raster-pair navigation,
+the catalog UUID/generation fences
+the selection while the resolver validates the current disk pair; catalog pixels
+are thumbnails/discovery data and do not override a later successful pair save.
 
 Light Table's explicit swap follows the same save-authority rule. Windows captures
 the selected stable item, its source UUID/revision, and the current document/editor
 revisions through existing metadata queries, then revalidates them on the owner
 before swapping. It reserves the new Untitled identity and prepares its recovery
 path before commit. Only a successful swap clears the previous native/source paths;
-ordinary save must obtain a destination for the newly editable reference.
+ordinary save must obtain a destination for the newly editable reference. The
+same commit removes the outgoing sequence catalog and changes its runtime owner,
+so a held automatic-discovery completion cannot republish file bindings for the
+replaced document. Failure, cancellation, and stale validation retain both the
+catalog and its bindings.
 
 ## Primitive, route, and journal target contract
 
@@ -395,7 +467,7 @@ detached registry, so passing verification cannot be an artifact of shared
 `AssetRecord`, payload, or `TileRaster` ownership. Production v32 persists the
 same rooted graph in GENS/ASST.
 
-The present ABI is v25. `InkpodObjectId` separates Core, snapshot, task, color,
+The present ABI is v30. `InkpodObjectId` separates Core, snapshot, task, color,
 sample, raster, thumbnail, and export runtime objects by type and Core generation;
 IDs are monotonic within one Core and are never accepted across generation or
 after release. Variable input is synchronously copied into bounded Rust-owned
@@ -725,16 +797,20 @@ connectivity; selection clipping and the reached round or square footprint are
 independent gates. These values are persisted in `ApplyRasterStroke` schema 3,
 so live commit, Undo/Redo, reopen, and replay share one executor.
 
-`DocumentRegistry` also owns the canonical identity index. For migrated image
-routes, Rust returns physical volume/file identity or normalized missing-path
-identity; the C++ registry performs no filesystem identity query. On Windows,
-case-insensitive path coordination and `FILE_ID_INFO` are backend details.
-An untitled session is keyed by a generated UUID. Display names and tab positions
-are never identities. Open uses the returned identity to detect an existing
-session before publication. Save As stages the destination identity, rejects a
-conflict with a different live session before installation, and publishes the
-new shell path, identity index, title, bounded recent-file entry, and recovery metadata only
-after save succeeds. A failed save leaves the old identity and presentation
+`DocumentRegistry` also owns the canonical logical identity index. For migrated
+image routes, Rust returns physical volume/file identity or normalized
+missing-path identity for each pair member; the C++ registry performs no
+filesystem identity query. On Windows, case-insensitive path coordination and
+`FILE_ID_INFO` are backend details. A normal raster pair registers the native and
+raster identities/missing paths as aliases of one `DocumentSession`, including
+while a `Planned` pair is reserved, so opening either member cannot create a
+second independent Core. An untitled or authority-`None` session is keyed by a
+generated UUID. Display names and tab positions are never identities. Open uses
+the resolver result to detect an existing session before publication. Save As
+stages both destination members, rejects a conflict with a different live or
+planned session before installation, and publishes the new shell path, logical
+identity index, title, bounded recent-file entry, and recovery metadata only
+after pair save succeeds. A failed save leaves the old identity and presentation
 intact.
 
 The top-level window stores only its `WorkspaceWindow*` in `GWLP_USERDATA`.
@@ -767,7 +843,7 @@ session/generation value must be supplied when reading them; the UI never
 re-resolves the active document. The read-only C ABI resource query reports
 logical document tile/history, render-cache, CPU-staging, light-table/reference,
 sequence-source, thumbnail-cache, and reserved sequence-composition categories
-without building a snapshot. ABI v25 retains the latter's byte/source/tile counts;
+without building a snapshot. ABI v30 retains the latter's byte/source/tile counts;
 the aggregate render-cache byte/tile counts already include the same charged
 payloads. Shared COW Core clones may report overlapping logical usage; the I/O
 manager's shared reservation counters enforce the application-wide CPU ceiling.
@@ -1415,7 +1491,8 @@ Document tabs use the session/generation-specific published sequence-cell name,
 saved filename, recovery/untitled fallback, dirty marker, and logical view number.
 Pane visibility, pinning, and the current workspace's sequence view are not label
 sources. Pane target captions use the same published name for their resolved
-session, including pinned panes and pathless raster sequence cells.
+session, including pinned panes, `Planned` raster sequence cells, and
+authority-`None` recovery sessions.
 Closing the final view leaves an empty editor area and preserves its
 workspace HWND and Core/renderer threads. No replacement document is allocated;
 New/Open/Recent routes use workspace context and Rust-provided editor defaults.
@@ -1627,7 +1704,7 @@ independent Core/catalog lifetime. Successful catalog replacement renews it;
 staging preserves it, while an independent Core clone gets a new namespace.
 Exhaustion disables source-cache reuse instead of wrapping. The identity is
 neither persisted nor included in semantic snapshot equality, document digests,
-replay, or revision-max. ABI v25's immutable snapshot accessor copies this
+replay, or revision-max. ABI v30's immutable snapshot accessor copies this
 provenance without payload reads and without giving the caller a source owner.
 
 Pristine eligibility is established by fresh source activation and checked
@@ -1857,6 +1934,34 @@ Timer autosave is queued without blocking the UI and is deferred behind a live
 stroke. Long-running tasks expose progress and cancellation. Format limits and
 recovery details are specified in [`file-format.md`](file-format.md).
 
+The frontend keeps raster-pair authority outside the serialized document as the
+closed states `Planned`, `Committed`, and `None`. `Committed` Save targets the
+installed pair. `Planned` Save revalidates the raster identity/complete stamp and
+the native missing-path proof, then materializes the first pair without opening
+Save As. `None` alone asks for an explicit normal destination. For a complete
+clean `Committed` pair, an implementation may omit physical rewrites only after
+revalidating both identities/complete stamps and external-conflict state; this
+optimization is optional, and executing the normal pair transaction remains
+conforming. An explicit first Planned Save and a missing-companion repair always
+run even when the document is clean. Standalone recovery open and sequence
+recovery with pair proof `None` return authority `None`, even when metadata carries
+an original/source path, and cannot overwrite that prior pair without an explicit
+destination choice. Exact-pair sequence recovery is the narrow exception: after
+the shared resolver and all proof/baseline fences agree, it adopts only the
+resolved target-specific runtime authority and never trusts the path by itself.
+Repair-needed is a missing-raster substate of `Committed`, not a fourth authority;
+the recovery metadata's four proof kinds encode missing-member evidence for these
+three states.
+
+While any file-I/O operation is pending for the same `DocumentSession`, the
+interactive Save and Save As commands are disabled. Their execution path repeats
+that check both before showing a destination dialog and after the modal dialog
+returns, because a nested message loop can admit new work. A detected conflict is
+reported as busy; the explicit request is not silently dropped, retargeted, or
+converted into an implicit queued save. Internal Sequence/recovery continuations
+may serialize after same-session work only when they retain their captured
+session/generation and exact reservation token.
+
 The current `.inkpod` v32 Cell container requires `META`, `GENS`, `ASST`, `PROC`,
 and `EDIT`. META section/record schema 2 requires the closed raster-format value:
 PNG, TIFF, TGA, or BMP. Raster import records its actual codec; a new cell uses
@@ -1876,6 +1981,18 @@ an initial-raster source together with `BaseSurface::SolidWhite` only when the
 exact imported editable RGBA MainLine is fully opaque. Imports carrying any
 non-opaque alpha retain `BaseSurface::Transparent`; in both cases the immutable
 source asset materializes Genesis pixels and does not participate in composition.
+Lossless raster ingestion means exact canonical decoded dimensions, native 8/16
+bit channel depth, straight alpha, and pixel values. It does not promise
+byte-for-byte retention or regeneration of the encoded source container,
+compression, palette representation, optional metadata, provenance, name, or
+path.
+
+Pair paths, filesystem identities, and the `Planned`/`Committed`/`None` state are
+runtime authority and are not serialized. The resolver uses existing META field
+21, Genesis/assets, and the ordinary composite contract, so this change does not
+alter native v32, replay epoch 27, or a section/payload schema. Persisting a pair
+path, filesystem identity, or source digest later would require the normal
+top-level format-version update.
 
 The codec streams headers, records, asset chunks, procedure payloads, and the
 directory without a second complete encoded-file allocation. The I/O manager
@@ -1885,14 +2002,40 @@ contains prospective document/editor savepoints. Both native/raster stages,
 verified old-file backups, and a bounded recovery journal are durable before
 the owner authorizes installation. The worker revalidates destination proofs
 under ordered file locks; owner authorization fences document mutation until
-final apply. Only successful installation of both files advances the live path
-and both savepoints. Existing or externally changed destinations require the
-appropriate overwrite authority; a missing companion can be regenerated by a
-normal save without an edit.
+final apply. The pair is one logical normal-save transaction: only successful
+installation of both files converts `Planned` to `Committed` and advances the
+live path and both savepoints. The physical installation publishes the native
+member first and then its raster companion, while neither the intermediate
+native-only state nor one installed member is a user-visible success boundary.
+Existing or externally changed destinations
+require the appropriate overwrite authority; a missing companion can be
+regenerated by a normal save without an edit.
+
+The runtime pair journal v2 is published from a flushed same-directory private
+stage with the backend's write-through rename before either final changes. Its
+phase remains prepared while the two members are installed and verified. Only
+after both content/identity proofs, the final bounded alias scan, and directory
+durability pass does the worker atomically publish the already-flushed committed
+marker. Therefore a crash after both member renames but before that marker rolls
+both members back; recovery recognizes completion only from the exact marker.
+Cleanup removes the prepared journal before the marker, whose full record also
+supports safe orphan-marker cleanup after a crash in that final interval. This
+runtime journal revision does not change native Cell format v32.
+
+Installation and rollback do not path-overwrite an existing member after a
+check. A durable rollback marker is published first; Windows then verifies and
+deletes each expected member through one exclusive handle and publishes its
+stage or backup with no-overwrite semantics. A competing external file therefore
+wins the path rather than being destroyed, and recovery retains the journal.
+The rollback marker also makes a crash between exact deletion and publication
+resumable. Non-Windows backends make the final portable stamp recheck immediately
+before deletion; eliminating that last external ABA window requires coordination
+outside the application process.
 
 Two independent file replacements are not a filesystem-atomic transaction.
-Failure recovery uses the recorded proofs to restore the prior pair or recognize
-an already completed pair. Uncertain recovery retains its journal and evidence
+Failure recovery uses the recorded proofs to restore the prior pair or recognizes
+an already completed pair only from the committed marker. Uncertain recovery
+retains its journal and evidence
 instead of deleting unverified files or reporting a clean save. Cancellation or
 stale owner validation before installation publishes neither destination.
 
@@ -1900,18 +2043,38 @@ Open validates all container/section/record digests, assets, typed invocation
 bytes, references, branch/cursor relationships, high-watermarks, and final
 document/editor digests in a staged Core, then swaps once and rebases
 `DocumentRevision` to 1. Normal-save output reopens clean with Undo/Redo and
-inactive branches intact. Autosave retains the existing normal path/savepoints;
-recovery open clears both savepoints and path authority and marks the restored
-session dirty. Partial selection revert reconstructs the saved document through
+inactive branches intact. Autosave retains the existing normal path/savepoints.
+Standalone recovery open and pair-proof-`None` sequence recovery clear both
+savepoints, return authority `None`, and mark the restored session dirty;
+original/source metadata alone is only a duplicate/conflict hint. Exact-pair
+sequence recovery preserves encoded savepoints and adopts target authority only
+after the shared resolver baseline and capture-time proof agree; a navigation-only
+artifact is clean/non-recovered, while encoded unsaved document/editor differences
+remain dirty/recovered. Partial selection revert reconstructs the saved document through
 this same current-version reader and commits the selected delta as one new
 canonical undo unit.
 
-Pathless document replacement, including raster import, Light Table swap,
-pathless Core adoption, and real sequence replacement, also clears the previous
-native/raster pair proof and advances its runtime persistence generation at the
-same commit. Old prepared save tokens can no longer authorize a write for the new
-document. Failed replacement retains the existing path and proofs; these runtime
-authorities are not part of the native schema or replay digest.
+Whole-document Revert is an explicit ABI v30 `OPEN_NATIVE` request carrying both
+force-reload and `REVERT_CURRENT`; ordinary forced open is not inferred to be a
+Revert. Preparation resolves the current native pair and captures its logical
+identity. Apply requires the exact live current native path and document UUID,
+then replaces the serialized document/history/editor/savepoints while retaining
+the runtime sequence catalog, active index, every live stable view ID/logical
+view state, the next-view ID, and inactive recovery associations. Render-cache
+entries owned by the replaced document revision are invalidated and rebuilt.
+After `document_applied`, Windows republishes the
+resolved pair identity and shell path, rebases the active `SequenceFileBinding`
+to the new owner generation, and refreshes the Sequence projection. A later
+snapshot or presentation failure is reported only after that applied authority
+has been reconciled; it cannot cause a second Revert or restore the old binding.
+
+Every document replacement revokes the previous native/raster pair proof and
+advances its runtime persistence generation at the same commit. Raster import and
+real Sequence replacement publish only the target resolver's prepared
+`Committed` or `Planned` authority; Light Table swap and pathless Core adoption
+publish `None`. Old prepared save tokens can no longer authorize a write for the
+new document. Failed replacement retains the existing path and proofs; these
+runtime authorities are not part of the native schema or replay digest.
 
 Checkpoint policy is deterministic over procedure count, replay work, and dirty
 bytes. A materialized checkpoint is an optimization only: inactive branches and
@@ -1928,17 +2091,27 @@ counts before showing the save dialog, rejects a path belonging to any open
 session, and reports success without changing current path, dirty state, or
 history.
 
-Each successful application autosave is accompanied by a bounded version-2
-metadata sidecar containing `DocumentSessionId`, generation, document UUID,
-original file identity/path, source path, and write time. Rust owns artifact and
+Each successful application autosave is accompanied by a bounded exact-current
+version-4 metadata sidecar containing `DocumentSessionId`, generation, document
+UUID, original file identity/path, source path, write time, and the capture-time
+runtime pair proof kind (`None`, `Committed`, `Planned`, or repair-needed-
+`Committed`). Rust owns artifact and
 metadata filesystem operations, startup enumeration, and explicit removal.
 Startup offers every bounded recovery candidate instead of selecting one newest
 file; missing or malformed metadata never causes silent deletion, and
-restore/discard/defer is per candidate. Original identity metadata describes the
-source association but never grants normal-save path authority. The artifact is
+restore/discard/defer is per candidate. A successful append-only write returns an
+exact artifact proof binding both the recovery native and sidecar complete stamps;
+explicit switch/read/discard validates both members before and after locked access.
+Original identity metadata alone describes the source association but never grants
+normal-save path authority; only the exact-pair sequence resolver contract above
+may re-adopt target-specific runtime authority. The artifact is
 retained until explicit discard or successful normal save removes it and its
-sidecar. Autosave does not advance the normal savepoint. Workspace layout never
-contains document paths. A separate bounded current-version binary path record at
+sidecar. Closing a live document session does not silently delete an inactive
+sequence-cell artifact that has not reached either boundary. The in-memory
+sequence association ends, while startup enumeration rediscovers the native and
+metadata pair as a standalone, pathless authority-`None` recovery candidate with
+its exact history and EditorState. Autosave does not advance the normal savepoint.
+Workspace layout never contains document paths. A separate bounded current-version binary path record at
 `%LOCALAPPDATA%\inkpod\Session\inkpod-session.bin` is read and written only when
 the default-off `起動時に前回の文書を復元` setting is enabled; crash recovery remains
 independent of that privacy choice.

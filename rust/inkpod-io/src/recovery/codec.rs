@@ -1,9 +1,12 @@
 use super::model::{MAX_METADATA_BYTES, MAX_PATH_UNITS, validate_string};
-use super::{RECOVERY_METADATA_VERSION, RecoveryIdentity, RecoveryIdentityKind, RecoveryMetadata};
-use crate::{IoError, IoResult};
+use super::{
+    RECOVERY_METADATA_VERSION, RecoveryIdentity, RecoveryIdentityKind, RecoveryMetadata,
+    RecoveryPairProof,
+};
+use crate::{FileIdentity, FileStamp, IoError, IoResult};
 
 const MAGIC: &[u8; 8] = b"INKRCVR\0";
-const FIXED_BYTES: usize = 148;
+const FIXED_BYTES: usize = 286;
 
 /// Encodes a bounded, checksummed current-version metadata record without I/O.
 /// A zero timestamp is accepted by the filesystem writers, not by this codec.
@@ -39,6 +42,42 @@ pub fn encode_recovery_metadata(metadata: &RecoveryMetadata) -> IoResult<Vec<u8>
     bytes.extend_from_slice(&metadata.original_identity.volume_serial.to_le_bytes());
     bytes.extend_from_slice(&metadata.original_identity.file_id);
     bytes.extend_from_slice(&metadata.original_identity.uuid.to_le_bytes());
+    let (pair_kind, native, raster) = match metadata.pair_proof {
+        None => (0_u32, zero_stamp(), zero_stamp()),
+        Some(RecoveryPairProof::Committed { native, raster }) => (1, native, raster),
+        Some(RecoveryPairProof::Planned {
+            native_missing,
+            raster,
+        }) => (
+            2,
+            FileStamp {
+                identity: native_missing,
+                length: 0,
+                modified: 0,
+                changed: 0,
+                readonly: false,
+            },
+            raster,
+        ),
+        Some(RecoveryPairProof::RepairNeeded {
+            native,
+            raster_missing,
+        }) => (
+            3,
+            native,
+            FileStamp {
+                identity: raster_missing,
+                length: 0,
+                modified: 0,
+                changed: 0,
+                readonly: false,
+            },
+        ),
+    };
+    bytes.extend_from_slice(&pair_kind.to_le_bytes());
+    bytes.extend_from_slice(&0_u32.to_le_bytes());
+    write_stamp(&mut bytes, native);
+    write_stamp(&mut bytes, raster);
     for value in [
         &metadata.original_path,
         &metadata.original_identity.normalized_path,
@@ -52,7 +91,7 @@ pub fn encode_recovery_metadata(metadata: &RecoveryMetadata) -> IoResult<Vec<u8>
     Ok(bytes)
 }
 
-/// Decodes only metadata version 2. Invalid UTF-8, overlong strings, inconsistent
+/// Decodes only metadata version 4. Invalid UTF-8, overlong strings, inconsistent
 /// identity fields, nonzero reserved fields, and trailing bytes are rejected.
 pub fn decode_recovery_metadata(bytes: &[u8]) -> IoResult<RecoveryMetadata> {
     if !(FIXED_BYTES..=MAX_METADATA_BYTES).contains(&bytes.len()) {
@@ -95,6 +134,46 @@ pub fn decode_recovery_metadata(bytes: &[u8]) -> IoResult<RecoveryMetadata> {
     let volume_serial = u64::from_le_bytes(reader.fixed()?);
     let file_id = reader.fixed()?;
     let uuid = u128::from_le_bytes(reader.fixed()?);
+    let pair_kind = u32::from_le_bytes(reader.fixed()?);
+    if u32::from_le_bytes(reader.fixed()?) != 0 {
+        return Err(IoError::InvalidInput(
+            "recovery pair proof reserved field is nonzero",
+        ));
+    }
+    let native_pair_stamp = reader.stamp()?;
+    let raster_pair_stamp = reader.stamp()?;
+    let pair_proof = match pair_kind {
+        0 if native_pair_stamp == zero_stamp() && raster_pair_stamp == zero_stamp() => None,
+        1 => Some(RecoveryPairProof::Committed {
+            native: native_pair_stamp,
+            raster: raster_pair_stamp,
+        }),
+        2 if native_pair_stamp.length == 0
+            && native_pair_stamp.modified == 0
+            && native_pair_stamp.changed == 0
+            && !native_pair_stamp.readonly =>
+        {
+            Some(RecoveryPairProof::Planned {
+                native_missing: native_pair_stamp.identity,
+                raster: raster_pair_stamp,
+            })
+        }
+        3 if raster_pair_stamp.length == 0
+            && raster_pair_stamp.modified == 0
+            && raster_pair_stamp.changed == 0
+            && !raster_pair_stamp.readonly =>
+        {
+            Some(RecoveryPairProof::RepairNeeded {
+                native: native_pair_stamp,
+                raster_missing: raster_pair_stamp.identity,
+            })
+        }
+        _ => {
+            return Err(IoError::InvalidInput(
+                "recovery pair proof kind or payload is invalid",
+            ));
+        }
+    };
     let original_path = reader.string()?;
     let normalized_path = reader.string()?;
     let source_path = reader.string()?;
@@ -115,9 +194,29 @@ pub fn decode_recovery_metadata(bytes: &[u8]) -> IoResult<RecoveryMetadata> {
         },
         original_path,
         source_path,
+        pair_proof,
     };
     metadata.validate()?;
     Ok(metadata)
+}
+
+fn zero_stamp() -> FileStamp {
+    FileStamp {
+        identity: FileIdentity { volume: 0, file: 0 },
+        length: 0,
+        modified: 0,
+        changed: 0,
+        readonly: false,
+    }
+}
+
+fn write_stamp(bytes: &mut Vec<u8>, stamp: FileStamp) {
+    bytes.extend_from_slice(&stamp.identity.volume.to_le_bytes());
+    bytes.extend_from_slice(&stamp.identity.file.to_le_bytes());
+    bytes.extend_from_slice(&stamp.length.to_le_bytes());
+    bytes.extend_from_slice(&stamp.modified.to_le_bytes());
+    bytes.extend_from_slice(&stamp.changed.to_le_bytes());
+    bytes.push(u8::from(stamp.readonly));
 }
 
 struct Reader<'a> {
@@ -166,5 +265,31 @@ impl Reader<'_> {
         result.push_str(value);
         self.offset = end;
         Ok(result)
+    }
+
+    fn stamp(&mut self) -> IoResult<FileStamp> {
+        let identity = FileIdentity {
+            volume: u64::from_le_bytes(self.fixed()?),
+            file: u128::from_le_bytes(self.fixed()?),
+        };
+        let length = u64::from_le_bytes(self.fixed()?);
+        let modified = i128::from_le_bytes(self.fixed()?);
+        let changed = i128::from_le_bytes(self.fixed()?);
+        let readonly = match self.fixed::<1>()?[0] {
+            0 => false,
+            1 => true,
+            _ => {
+                return Err(IoError::InvalidInput(
+                    "recovery pair proof readonly flag is invalid",
+                ));
+            }
+        };
+        Ok(FileStamp {
+            identity,
+            length,
+            modified,
+            changed,
+            readonly,
+        })
     }
 }

@@ -29,6 +29,7 @@ impl Core {
         self.current_path = Some(path.to_path_buf());
         self.persistence_state = next_authority;
         self.recovered = false;
+        self.establish_sequence_preservation_baseline();
         self.document_info()
     }
 
@@ -99,14 +100,27 @@ impl Core {
 
     /// Reopens the last successful normal-save path, discarding live edits.
     ///
-    /// The operation uses [`Core::open`] atomic replacement semantics and is an
-    /// error when no normal-save path is known.
+    /// The operation uses staged atomic replacement, retains the runtime-only
+    /// sequence catalog for the same document UUID, and is an error when no
+    /// normal-save path is known. A pair-managed document is re-resolved through
+    /// the shared native/raster resolver, so a present companion is validated and
+    /// committed authority (including repair-needed missing-companion authority)
+    /// is refreshed before the staged replacement is published. Native-only
+    /// callers retain the explicit native-only behavior of [`Core::save`].
     pub fn revert(&mut self) -> Result<DocumentInfo, CoreError> {
         let path = self
             .current_path
             .clone()
             .ok_or(CoreError::InvalidState("document has no normal-save path"))?;
-        self.open(&path)
+        let token = self.capture_document_open()?;
+        let staged = if self.io_pair_authority.is_some() {
+            let manager = self.file_io_manager()?;
+            crate::file_io::prepare_pair_revert(&manager, &path)?
+        } else {
+            let file = inkpod_format::read_procedure_file(&path)?;
+            Self::from_native_file(file, false)?
+        };
+        self.adopt_reloaded_document(token, staged, Some(&path))
     }
 
     /// Returns bounded native persistence and checkpoint-policy diagnostics.
@@ -394,6 +408,18 @@ impl Core {
         })
     }
 
+    pub(crate) fn procedure_file_raster_format(
+        file: &inkpod_format::NativeFile,
+    ) -> Result<CommonRasterFormat, CoreError> {
+        inkpod_format::validate_procedure_file(file)?;
+        if file.primitive_catalog_digest != *replay_contract().primitive_catalog_digest() {
+            return Err(format_error(
+                "native primitive catalog digest does not match this build",
+            ));
+        }
+        Ok(decode_meta(singleton_payload(&file.sections, *b"META")?)?.raster_file_format)
+    }
+
     pub(crate) fn from_procedure_file(file: inkpod_format::NativeFile) -> Result<Self, CoreError> {
         inkpod_format::validate_procedure_file(&file)?;
         let contract = replay_contract();
@@ -550,6 +576,7 @@ impl Core {
         staged.current_path = None;
         staged.recovered = false;
         staged.reset_view();
+        staged.establish_sequence_preservation_baseline();
         Ok(staged)
     }
 

@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "core_host.h"
+#include "document_session.h"
 #include "document_shell.h"
 
 namespace inkpod::app {
@@ -53,7 +54,8 @@ bool DocumentlessKind(std::uint32_t kind) noexcept {
 
 bool ReplacesDocument(std::uint32_t kind) noexcept {
     return kind == INKPOD_IO_OPEN_NATIVE || kind == INKPOD_IO_OPEN_RECOVERY
-        || kind == INKPOD_IO_OPEN_RASTER || kind == INKPOD_IO_SEQUENCE_SWITCH;
+        || kind == INKPOD_IO_OPEN_RASTER || kind == INKPOD_IO_OPEN_RASTER_PAIR
+        || kind == INKPOD_IO_SEQUENCE_SWITCH;
 }
 
 bool BatchKind(std::uint32_t kind) noexcept {
@@ -73,11 +75,14 @@ struct PendingFileIo final {
     std::atomic<bool> preflight_started{};
     std::atomic<bool> preflight_complete{};
     InkpodStatus preflight_status{INKPOD_STATUS_INVALID_STATE};
+    InkpodStatus presentation_setup_status{INKPOD_STATUS_OK};
     FileIoResult preflight_result;
     mutable std::mutex progress_mutex;
     InkpodIoJobInfo progress{};
     bool items_loaded{};
     bool recovery_loaded{};
+    bool recovery_artifact_proof_loaded{};
+    bool recovery_metadata_loaded{};
     bool installing{};
 
     ~PendingFileIo() {
@@ -99,6 +104,21 @@ struct PendingFileIo final {
         }
         if (request.kind == INKPOD_IO_SEQUENCE_SWITCH) {
             return SubmitSequenceSwitch(core);
+        }
+        if (request.kind == INKPOD_IO_RECOVERY_DISCARD
+            && request.discard_recovery_proof.has_value()) {
+            if (request.paths.size() != 1U
+                || !ValidRecoveryArtifactProof(
+                    request.discard_recovery_proof.value())) {
+                return INKPOD_STATUS_INVALID_ARGUMENT;
+            }
+            std::vector<std::uint8_t> path;
+            if (!WidePathToUtf8(request.paths[0], path)) {
+                return INKPOD_STATUS_INVALID_ARGUMENT;
+            }
+            return inkpod_core_io_recovery_discard_exact_submit(
+                core, manager, path.data(), path.size(),
+                &request.discard_recovery_proof.value(), &job);
         }
         if (request.kind == INKPOD_IO_COMPACTED_COPY) {
             if (request.paths.size() != 1U || !request.compaction_plan.has_value()) {
@@ -171,11 +191,89 @@ struct PendingFileIo final {
             && !RecoveryMetadataToAbi(request.recovery_metadata.value(), metadata, metadata_text)) {
             return INKPOD_STATUS_INVALID_ARGUMENT;
         }
+        InkpodSequenceSwitchRequest sequence_request = request.sequence_switch.value();
+        if (sequence_request.feature_flags != 0U) {
+            return INKPOD_STATUS_UNSUPPORTED;
+        }
+        const bool target_recovery = !request.sequence_target_raster_pair
+            && !request.paths[1].empty();
+        if (target_recovery != request.target_recovery_proof.has_value()
+            || (target_recovery
+                && !ValidRecoveryArtifactProof(
+                    request.target_recovery_proof.value()))) {
+            return INKPOD_STATUS_INVALID_ARGUMENT;
+        }
+        if (request.sequence_target_raster_pair) {
+            sequence_request.feature_flags = INKPOD_SEQUENCE_SWITCH_TARGET_RASTER_PAIR;
+        }
         return inkpod_core_io_sequence_switch_submit(core, manager,
-            &request.sequence_switch.value(),
+            &sequence_request,
             paths[0].empty() ? nullptr : &records[0],
             paths[1].empty() ? nullptr : &records[1],
+            request.target_recovery_proof.has_value()
+                ? &request.target_recovery_proof.value() : nullptr,
             request.recovery_metadata.has_value() ? &metadata : nullptr, &job);
+    }
+
+    [[nodiscard]] bool RequiresRecoveryArtifactProof() const noexcept {
+        return request.kind == INKPOD_IO_AUTOSAVE
+            || (request.kind == INKPOD_IO_SEQUENCE_SWITCH
+                && !request.paths.empty() && !request.paths[0].empty());
+    }
+
+    InkpodStatus ReadRecoveryArtifactProof() noexcept {
+        if (recovery_artifact_proof_loaded) {
+            return INKPOD_STATUS_OK;
+        }
+        InkpodIoRecoveryArtifactProof proof{};
+        proof.struct_size = sizeof(proof);
+        proof.native.struct_size = sizeof(proof.native);
+        proof.native.identity.struct_size = sizeof(proof.native.identity);
+        proof.metadata.struct_size = sizeof(proof.metadata);
+        proof.metadata.identity.struct_size = sizeof(proof.metadata.identity);
+        const InkpodStatus status =
+            inkpod_io_job_get_recovery_artifact_proof(job, &proof);
+        if (status != INKPOD_STATUS_OK) {
+            return status;
+        }
+        result.recovery_artifact_proof = proof;
+        result.has_recovery_artifact_proof = true;
+        recovery_artifact_proof_loaded = true;
+        return INKPOD_STATUS_OK;
+    }
+
+    InkpodStatus ReadPublishedRecoveryMetadata() noexcept {
+        try {
+            if (recovery_metadata_loaded) {
+                return INKPOD_STATUS_OK;
+            }
+            InkpodIoRecoveryMetadata metadata{};
+            metadata.struct_size = sizeof(metadata);
+            std::uint64_t required{};
+            InkpodStatus status = inkpod_io_job_get_recovery_metadata(
+                job, 0U, &metadata, nullptr, 0U, &required);
+            if ((status != INKPOD_STATUS_OK
+                    && status != INKPOD_STATUS_BUFFER_TOO_SMALL)
+                || required > 3U * kMaximumPathBytes) {
+                return status == INKPOD_STATUS_OK
+                    ? INKPOD_STATUS_INVALID_STATE : status;
+            }
+            std::vector<std::uint8_t> packed(static_cast<std::size_t>(required));
+            status = inkpod_io_job_get_recovery_metadata(job, 0U, &metadata,
+                packed.empty() ? nullptr : packed.data(), packed.size(), &required);
+            RecoveryMetadata effective{};
+            if (status != INKPOD_STATUS_OK
+                || (metadata.flags & 1U) == 0U
+                || !RecoveryMetadataFromAbi(metadata, effective)) {
+                return status == INKPOD_STATUS_OK
+                    ? INKPOD_STATUS_INVALID_STATE : status;
+            }
+            result.recovery_metadata = std::move(effective);
+            recovery_metadata_loaded = true;
+            return INKPOD_STATUS_OK;
+        } catch (const std::bad_alloc&) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
     }
 
     InkpodStatus ReadItems(const InkpodIoJobInfo& info) {
@@ -215,9 +313,11 @@ struct PendingFileIo final {
                 item.identity.volume_serial = item.info.identity.volume;
                 std::memcpy(item.identity.file_id.data(), &item.info.identity.object_low, 8U);
                 std::memcpy(item.identity.file_id.data() + 8U, &item.info.identity.object_high, 8U);
-            } else if (item.info.identity.kind != 0U) {
+            } else if (item.info.identity.kind == 2U) {
                 item.identity.kind = DocumentIdentityKind::NormalizedPath;
                 item.identity.normalized_path = item.normalized_path;
+            } else if (item.info.identity.kind != 0U) {
+                return INKPOD_STATUS_INVALID_ARGUMENT;
             }
             items.push_back(std::move(item));
         }
@@ -225,6 +325,51 @@ struct PendingFileIo final {
         items_loaded = true;
         return (RecoveryCatalogKind(request.kind) || request.kind == INKPOD_IO_OPEN_RECOVERY)
             ? ReadRecoveryItems() : INKPOD_STATUS_OK;
+    }
+
+    InkpodStatus RefreshRepairedPairItems(const InkpodIoJobInfo& info) noexcept {
+        if (request.kind != INKPOD_IO_SAVE_PAIR || !installing
+            || (info.flags & INKPOD_IO_RESULT_AUTHORITY_REPAIRED) == 0U
+            || info.result_count != 2U || result.items.size() != 2U) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        for (std::uint64_t index = 0U; index < 2U; ++index) {
+            InkpodIoItemInfo refreshed{};
+            refreshed.struct_size = sizeof(refreshed);
+            refreshed.identity.struct_size = sizeof(refreshed.identity);
+            const InkpodStatus queried = inkpod_io_job_get_item(
+                job, index, &refreshed, nullptr, 0U, nullptr, 0U);
+            auto& item = result.items[static_cast<std::size_t>(index)];
+            if ((queried != INKPOD_STATUS_OK
+                    && queried != INKPOD_STATUS_BUFFER_TOO_SMALL)
+                || refreshed.path_bytes != item.info.path_bytes
+                || refreshed.name_bytes != item.info.name_bytes
+                || refreshed.raster_format != item.info.raster_format
+                || refreshed.source_generation != item.info.source_generation
+                || refreshed.document_uuid_high != item.info.document_uuid_high
+                || refreshed.document_uuid_low != item.info.document_uuid_low
+                || (refreshed.identity.kind != 1U
+                    && refreshed.identity.kind != 2U)) {
+                return INKPOD_STATUS_INVALID_STATE;
+            }
+            item.info = refreshed;
+            if (refreshed.identity.kind == 1U) {
+                item.identity.kind = DocumentIdentityKind::WindowsFile;
+                item.identity.volume_serial = refreshed.identity.volume;
+                std::memcpy(item.identity.file_id.data(),
+                    &refreshed.identity.object_low, 8U);
+                std::memcpy(item.identity.file_id.data() + 8U,
+                    &refreshed.identity.object_high, 8U);
+                item.identity.normalized_path.clear();
+            } else {
+                item.identity.kind = DocumentIdentityKind::NormalizedPath;
+                item.identity.volume_serial = 0U;
+                item.identity.file_id.fill(0U);
+                item.identity.normalized_path = std::move(item.normalized_path);
+            }
+        }
+        result.authority_repaired = true;
+        return INKPOD_STATUS_OK;
     }
 
     InkpodStatus ReadRecoveryItems() {
@@ -282,33 +427,6 @@ struct PendingFileIo final {
         }
     }
 
-    InkpodStatus RefreshSavedIdentities() noexcept {
-        // Atomic replacement changes file IDs, not path strings. Reuse the
-        // metadata allocated before installation so finalization cannot fail
-        // merely because another path/name allocation is unavailable.
-        for (std::size_t index = 0U; index < result.items.size(); ++index) {
-            auto& item = result.items[index];
-            InkpodIoItemInfo info{};
-            info.struct_size = sizeof(info);
-            info.identity.struct_size = sizeof(info.identity);
-            const InkpodStatus status = inkpod_io_job_get_item(
-                job, index, &info, nullptr, 0U, nullptr, 0U);
-            if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_BUFFER_TOO_SMALL) {
-                return status;
-            }
-            if (info.identity.kind != 1U || info.path_bytes != item.info.path_bytes) {
-                return INKPOD_STATUS_INVALID_STATE;
-            }
-            item.info = info;
-            item.identity.kind = DocumentIdentityKind::WindowsFile;
-            item.identity.volume_serial = info.identity.volume;
-            item.identity.normalized_path.clear();
-            std::memcpy(item.identity.file_id.data(), &info.identity.object_low, 8U);
-            std::memcpy(item.identity.file_id.data() + 8U, &info.identity.object_high, 8U);
-        }
-        return INKPOD_STATUS_OK;
-    }
-
     InkpodStatus Step(InkpodCore* core, bool host_cancelled, bool& fence) {
         if (host_cancelled && request.kind != INKPOD_IO_RECOVERY_DISCARD) {
             cancelled.store(true, std::memory_order_release);
@@ -345,6 +463,7 @@ struct PendingFileIo final {
             return INKPOD_STATUS_PENDING;
         }
         if (info.state == INKPOD_IO_READY) {
+            InkpodStatus repaired_refresh_status = INKPOD_STATUS_OK;
             status = ReadItems(info);
             if (status != INKPOD_STATUS_OK && !installing) {
                 (void)inkpod_io_job_cancel(job);
@@ -363,6 +482,41 @@ struct PendingFileIo final {
                     return preflight_status;
                 }
             }
+            if (installing
+                && (info.flags & INKPOD_IO_RESULT_AUTHORITY_REPAIRED) != 0U) {
+                // The worker has already rolled back durable bytes. Refresh
+                // only fixed item authority. If that fixed-width query cannot
+                // be trusted, cancel asks Core finalization to revoke the pair;
+                // owner final apply remains mandatory to release its fence.
+                repaired_refresh_status =
+                    request.smoke_fail_repaired_item_refresh
+                    ? INKPOD_STATUS_INVALID_STATE
+                    : RefreshRepairedPairItems(info);
+                if (repaired_refresh_status != INKPOD_STATUS_OK) {
+                    (void)inkpod_io_job_cancel(job);
+                }
+            }
+            const bool proof_ready = request.kind == INKPOD_IO_AUTOSAVE
+                || (request.kind == INKPOD_IO_SEQUENCE_SWITCH && installing);
+            InkpodStatus recovery_publication_status = INKPOD_STATUS_OK;
+            if (proof_ready && info.status == INKPOD_STATUS_OK
+                && RequiresRecoveryArtifactProof()) {
+                recovery_publication_status = ReadRecoveryArtifactProof();
+                if (recovery_publication_status == INKPOD_STATUS_OK) {
+                    recovery_publication_status =
+                        ReadPublishedRecoveryMetadata();
+                }
+                if (recovery_publication_status != INKPOD_STATUS_OK
+                    && installing) {
+                    // Installation already ran. Cancellation asks Core final
+                    // apply to retain the source rather than commit a switch
+                    // whose recovery association cannot be published. In all
+                    // cases final apply below is mandatory to release its fence.
+                    (void)inkpod_io_job_cancel(job);
+                } else if (recovery_publication_status != INKPOD_STATUS_OK) {
+                    return recovery_publication_status;
+                }
+            }
             result.document.struct_size = sizeof(result.document);
             result.subpalette.struct_size = sizeof(result.subpalette);
             status = ReferenceKind(request.kind)
@@ -379,13 +533,33 @@ struct PendingFileIo final {
                 && status == INKPOD_STATUS_OK;
             installing = false;
             fence = false;
-            if (status == INKPOD_STATUS_OK) {
-                (void)inkpod_io_job_poll(job, &result.progress);
-                if (request.kind == INKPOD_IO_SAVE_PAIR) {
-                    status = RefreshSavedIdentities();
-                }
+            InkpodIoJobInfo finalized{};
+            finalized.struct_size = sizeof(finalized);
+            if (inkpod_io_job_poll(job, &finalized) == INKPOD_STATUS_OK) {
+                result.progress = finalized;
+                result.authority_revoked =
+                    (finalized.flags
+                        & INKPOD_IO_RESULT_AUTHORITY_REVOKED) != 0U;
+            }
+            if (repaired_refresh_status != INKPOD_STATUS_OK
+                && !result.authority_revoked) {
+                status = repaired_refresh_status;
+            } else if (recovery_publication_status != INKPOD_STATUS_OK) {
+                status = recovery_publication_status;
             }
         } else if (installing) {
+            InkpodStatus recovery_publication_status = INKPOD_STATUS_OK;
+            if (info.status == INKPOD_STATUS_OK
+                && RequiresRecoveryArtifactProof()) {
+                recovery_publication_status = ReadRecoveryArtifactProof();
+                if (recovery_publication_status == INKPOD_STATUS_OK) {
+                    recovery_publication_status =
+                        ReadPublishedRecoveryMetadata();
+                }
+                if (recovery_publication_status != INKPOD_STATUS_OK) {
+                    (void)inkpod_io_job_cancel(job);
+                }
+            }
             result.document.struct_size = sizeof(result.document);
             status = inkpod_core_io_job_apply(core, job, &result.document, &result.object_id);
             if (status == INKPOD_STATUS_PENDING) {
@@ -395,6 +569,17 @@ struct PendingFileIo final {
             result.document_applied = status == INKPOD_STATUS_OK;
             installing = false;
             fence = false;
+            InkpodIoJobInfo finalized{};
+            finalized.struct_size = sizeof(finalized);
+            if (inkpod_io_job_poll(job, &finalized) == INKPOD_STATUS_OK) {
+                result.progress = finalized;
+                result.authority_revoked =
+                    (finalized.flags
+                        & INKPOD_IO_RESULT_AUTHORITY_REVOKED) != 0U;
+            }
+            if (recovery_publication_status != INKPOD_STATUS_OK) {
+                status = recovery_publication_status;
+            }
         } else if (info.state == INKPOD_IO_COMPLETE) {
             status = ReadItems(info);
         } else {
@@ -484,6 +669,8 @@ bool FileIoController::Queue(CoreHost& engine, FileIoRequest request,
             || pending->request.kind == INKPOD_IO_LIGHT_TABLE_ADD
             || pending->request.kind == INKPOD_IO_LIGHT_TABLE_RELOAD
             || pending->request.kind == INKPOD_IO_BATCH_RUN;
+        const bool requires_document =
+            !DocumentlessKind(pending->request.kind);
         const bool refresh = !DocumentlessKind(pending->request.kind)
             && pending->request.kind != INKPOD_IO_EXPORT_RASTER
             && pending->request.kind != INKPOD_IO_AUTOSAVE;
@@ -505,7 +692,12 @@ bool FileIoController::Queue(CoreHost& engine, FileIoRequest request,
                             pending->request.context.document_session.value(),
                             pending->request.context.generation.value(),
                             pending->request.presentation_epoch))) {
-                    return INKPOD_STATUS_INVALID_STATE;
+                    // The Core apply has already committed. Preserve its
+                    // durable status and report epoch/snapshot setup only on
+                    // the presentation channel so the UI can retry without
+                    // applying the file operation a second time.
+                    pending->presentation_setup_status =
+                        INKPOD_STATUS_INVALID_STATE;
                 }
                 return status;
             };
@@ -517,13 +709,16 @@ bool FileIoController::Queue(CoreHost& engine, FileIoRequest request,
             if (status == INKPOD_STATUS_OK && released != INKPOD_STATUS_OK) {
                 status = released;
             }
+            if (pending->presentation_setup_status != INKPOD_STATUS_OK) {
+                presentation_status = pending->presentation_setup_status;
+            }
             pending->result.status = status;
             pending->result.presentation_status = presentation_status;
             pending->finished.store(true, std::memory_order_release);
         };
         impl_->entries.push_back(Impl::Entry{pending, std::move(completion), std::move(preflight)});
         if (!engine.EnqueueFileIo(pending->request.context,
-                !DocumentlessKind(pending->request.kind), std::move(operation),
+                requires_document, std::move(operation),
                 modifies, refresh, std::move(completed))) {
             impl_->entries.pop_back();
             return false;
@@ -696,6 +891,46 @@ bool FileIoController::ConflictsWithPendingWrite(
             if ((item.identity && destination.identity && item.identity == destination.identity)
                 || (!item.normalized_path.empty()
                     && item.normalized_path == destination.normalized_path)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool FileIoController::HasPendingKind(
+    DocumentSessionId session,
+    Generation generation,
+    std::uint32_t kind) const noexcept {
+    return impl_ != nullptr && std::any_of(
+        impl_->entries.cbegin(), impl_->entries.cend(),
+        [session, generation, kind](const auto& entry) {
+            return entry.pending->request.context.document_session == session
+                && entry.pending->request.context.generation == generation
+                && entry.pending->request.kind == kind;
+        });
+}
+
+bool FileIoController::ConflictsWithPendingAuthority(
+    const FileIoItem& item, std::uint64_t except_request_id) const noexcept {
+    if (impl_ == nullptr) {
+        return false;
+    }
+    for (const auto& entry : impl_->entries) {
+        const auto& pending = *entry.pending;
+        const bool owns_file_authority = pending.request.kind == INKPOD_IO_SAVE_PAIR
+            || pending.request.kind == INKPOD_IO_COMPACTED_COPY
+            || pending.request.kind == INKPOD_IO_OPEN_NATIVE
+            || pending.request.kind == INKPOD_IO_OPEN_RASTER_PAIR;
+        if (pending.result.request_id == except_request_id || !owns_file_authority
+            || !pending.preflight_complete.load(std::memory_order_acquire)
+            || pending.preflight_status != INKPOD_STATUS_OK) {
+            continue;
+        }
+        for (const auto& reserved : pending.preflight_result.items) {
+            if ((item.identity && reserved.identity && item.identity == reserved.identity)
+                || (!item.normalized_path.empty()
+                    && item.normalized_path == reserved.normalized_path)) {
                 return true;
             }
         }

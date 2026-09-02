@@ -303,4 +303,39 @@ bool PrivateRecoveryPath(
     }
 }
 
+bool PrivateRecoveryAttemptPath(
+    std::uint64_t uuid_high,
+    std::uint64_t uuid_low,
+    std::wstring& output) noexcept {
+    if (uuid_high == 0U && uuid_low == 0U) {
+        return false;
+    }
+    std::wstring directory;
+    GUID attempt{};
+    if (!RecoveryRootDirectory(directory) || FAILED(CoCreateGuid(&attempt))) {
+        return false;
+    }
+    std::uint64_t attempt_high{};
+    std::uint64_t attempt_low{};
+    static_assert(sizeof(attempt) == sizeof(attempt_high) + sizeof(attempt_low));
+    std::memcpy(&attempt_high, &attempt, sizeof(attempt_high));
+    std::memcpy(&attempt_low,
+        reinterpret_cast<const std::uint8_t*>(&attempt) + sizeof(attempt_high),
+        sizeof(attempt_low));
+    std::array<wchar_t, 144U> name{};
+    _snwprintf_s(
+        name.data(), name.size(), _TRUNCATE,
+        L"\\%016llx%016llx-attempt-%016llx%016llx.inkpod",
+        static_cast<unsigned long long>(uuid_high),
+        static_cast<unsigned long long>(uuid_low),
+        static_cast<unsigned long long>(attempt_high),
+        static_cast<unsigned long long>(attempt_low));
+    try {
+        output = directory + name.data();
+        return true;
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+}
+
 } // namespace inkpod::app

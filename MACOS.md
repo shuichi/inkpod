@@ -12,7 +12,7 @@
 - UI/Input、Core、Renderer を三つの実行領域に分離する。
 - `InkpodCore` の create／全操作／destroy は一つの長寿命 `Foundation.Thread` に固定する。Swift actor や serial `DispatchQueue` はこの thread owner の代替にしない。
 - Rust Core、`.inkpod` v32、replay epoch 27、canonical procedure semantics は変更しない。
-- 現行 ABI v25 で移植を開始する。`SHORT-001` の Windows VK/Ctrl 固有 record を platform-neutral に置換する必要が実証された場合だけ、次の exact ABI version へ進める M3 の独立変更として扱う。
+- 現行 ABI v30 で移植を開始する。`SHORT-001` の Windows VK/Ctrl 固有 record を platform-neutral に置換する必要が実証された場合だけ、次の exact ABI version へ進める M3 の独立変更として扱う。
 - CMake を公式 umbrella entry として維持し、checked-in Xcode project を CMake から呼ぶ macOS sub-build とする。
 - Release は arm64／x86_64 Universal 2 を既定とする。Intel Tahoe 実機 runner がなければ x86_64 runtime は未検証と明記する。
 - App Sandbox を既定とし、Developer ID 署名、Hardened Runtime、notarization を最初の配布経路とする。
@@ -82,7 +82,7 @@ tests/macos/
 | 現在のfrontendは C++/Win32、CanvasはD3D11/D2D/DXGI                                              | [SPEC.md:9–16](/Users/shuichi/GitHub/inkpod/SPEC.md:9)                                                                                                                                                                                                  | C++ frontendを再利用せず、意味上のownerとrouteだけ写像する |
 | CMakeが唯一のbuild入口                                                                          | [AGENTS.md:19](/Users/shuichi/GitHub/inkpod/AGENTS.md:19)、[SPEC.md:14](/Users/shuichi/GitHub/inkpod/SPEC.md:14)                                                                                                                                        | Xcodeを並列のroot builderにしない                          |
 | Rust CoreはOS非依存、`inkpod-ffi`だけがstaticlib                                                | [Cargo.toml:1](/Users/shuichi/GitHub/inkpod/Cargo.toml:1)、[rust/inkpod-ffi/Cargo.toml:8](/Users/shuichi/GitHub/inkpod/rust/inkpod-ffi/Cargo.toml:8)                                                                                                    | 4 crateと意味処理をそのまま再利用できる                    |
-| ABIは純C・current version 25                                                                    | [core_ffi.h:4–69](/Users/shuichi/GitHub/inkpod/include/inkpod/core_ffi.h:4)、[docs/ffi.md:54](/Users/shuichi/GitHub/inkpod/docs/ffi.md:54)                                                                                                              | Clang moduleからSwiftへimport可能                          |
+| ABIは純C・current version 29                                                                    | [core_ffi.h:4–69](/Users/shuichi/GitHub/inkpod/include/inkpod/core_ffi.h:4)、[docs/ffi.md:54](/Users/shuichi/GitHub/inkpod/docs/ffi.md:54)                                                                                                              | Clang moduleからSwiftへimport可能                          |
 | Coreはcreate threadと同じOS threadで全操作/destroyが必要                                        | [core_ffi.h:3242](/Users/shuichi/GitHub/inkpod/include/inkpod/core_ffi.h:3242)                                                                                                                                                                          | dedicated `Thread` が必須                                  |
 | snapshotはimmutableでCoreから独立し、renderer threadでrelease可能                               | [core_ffi.h:6007](/Users/shuichi/GitHub/inkpod/include/inkpod/core_ffi.h:6007)、[core_ffi.h:6176](/Users/shuichi/GitHub/inkpod/include/inkpod/core_ffi.h:6176)                                                                                          | Metal queueへownership transferできる                      |
 | native形式はv32／epoch 27のみ                                                                   | [docs/file-format.md:1–18](/Users/shuichi/GitHub/inkpod/docs/file-format.md:1)、[docs/determinism.md:3](/Users/shuichi/GitHub/inkpod/docs/determinism.md:3)                                                                                             | GUI移植だけではversionを上げない                           |
@@ -482,7 +482,7 @@ flowchart LR
 - **完了状態:** CMake入口からarm64 Rust staticlib、Clang module、Swift ABI smokeをbuild/runできる。smokeは専用test thread上でCore create→query→snapshot build/release→destroyを行う。324-command parity manifestがsourceと一致する。
 - **要件:** `ARCH-001/002`,`ABI-001/002`,`PORT-001`,`SAFE-001`。先行なし。
 - **scope/file:** `apps/macos/Inkpod.xcodeproj`、`Config/*.xcconfig`、`CoreBridge/C/include/{InkpodCoreC.h,module.modulemap}`、最小Swift bridge、`cmake/macos/*`、macOS CMake preset、`tests/macos/command-parity.json`と検証script。
-- **data flow:** Swift smoke→Clang module→ABI v25→Rust staticlib。Universal releaseはarm64/x86_64 thin `.a`を別target-dirで構築して`lipo`する。
+- **data flow:** Swift smoke→Clang module→ABI v30→Rust staticlib。Universal releaseはarm64/x86_64 thin `.a`を別target-dirで構築して`lipo`する。
 - **状態:** success、ABI mismatch、short struct、NULL、wrong-thread、unknown status、double release、link failure。
 - **test:** C11/C++20 include/layout、Swift import/link、opaque pointer NULL化、TLS diagnostic同thread copy、snapshot cross-thread release、raw326の完全partition。
 - **検証:** V-Rust、V-MacUnit、V-Universal-build。Xcode 26/Tahoe SDK。x86 target/runnerがなければruntime未検証。
@@ -521,12 +521,12 @@ flowchart LR
 - **完了状態:** 実装済みsemantic commandが標準menu、toolbar、context menuから同じrouter/stateへ到達し、ja/en、Settings、shortcut編集、IME guardが動く。
 - **要件:** `SHORT-001`,`WORKSPACE-002`,`HIST-001`、新規`MAC-SHELL-001`案。依存M2。
 - **scope/file:** Commands descriptor/router/state provider、`Localizable.xcstrings`、Settings scene、Help/About/Acknowledgements、shortcut editor。
-- **ABI decision:** 現行 ABI v25 の `InkpodShortcutStroke` で要件を満たせないことをcontract testで示した場合だけ、次の exact ABI versionにplatform-neutral key kind（Unicode scalar／named key）と`PRIMARY/SHIFT/ALTERNATE/CONTROL` modifierを追加する。PRIMARYはWindows Ctrl、macOS Commandへmapし、物理Controlを区別する。header/docs/tests/Windows adapterを同時更新し、GUI移植だけではnative file/replay versionを変更しない。
+- **ABI decision:** 現行 ABI v30 の `InkpodShortcutStroke` で要件を満たせないことをcontract testで示した場合だけ、次の exact ABI versionにplatform-neutral key kind（Unicode scalar／named key）と`PRIMARY/SHIFT/ALTERNATE/CONTROL` modifierを追加する。PRIMARYはWindows Ctrl、macOS Commandへmapし、物理Controlを区別する。header/docs/tests/Windows adapterを同時更新し、GUI移植だけではnative file/replay versionを変更しない。
 - **data flow:** SwiftUI `Commands`／NSEvent→normalized sequence→pure resolver→issue-time `CommandContext`→owner route。
 - **状態:** success、state no-op、invalid/conflicting sequence、Cancel、stale context、timeout、IME marked text、persistence failure。
 - **test:** 1–4 stroke、prefix-free、conflict replacement、reset、standard shortcut非上書き、text/IME guard、menu enabled/checked、one-owner/state/surface。
 - **検証:** V-Rust＋V-MacUnit＋V-MacUI＋Windows CIの既存debug/release presets。
-- **完了判定:** ABI v25または承認された後継exact ABIにdriftがなく、Windows regressionとUI未実装commandのplaceholder surfaceがない。
+- **完了判定:** ABI v30または承認された後継exact ABIにdriftがなく、Windows regressionとUI未実装commandのplaceholder surfaceがない。
 - **risk/mitigation:** ABI riskをshortcut変更だけに限定し、M3内でもCore/FFI test→Windows adapter→Mac UIの順で縦切りする。
 - **後続:** parity manifestの未実装行は残せるが、UIには出さない。
 
@@ -536,9 +536,11 @@ flowchart LR
 - **要件:** `IO-001/002`,`SESSION-001`,`CLIP-001`,`CUT-001`,`SAFE-001`,`PORT-001`。依存M1、product UIはM2。
 - **scope/file:** `FileAccessBroker`、security-scope lease/bookmark store、NSOpen/SavePanel adapter、NSFileCoordinator adapter、UTType/Info.plist、NSPasteboard/drag destination。
 - **data flow:** authorized URL/bytesはfrontendが所有し、Coreへborrowed UTF-8 pathまたはcopied bytesだけ渡す。bookmark/NSURLはCore/journalへ入れない。
+- **pair lifecycle:** File Open と Sequence は同じ same-stem resolver を使い、runtime authority は `None`／`Planned`／`Committed` の三状態だけとする。repair-needed は `Committed` の下位状態である。Save As は新しい native/raster pair だけを作り、flat raster は Export とする。
+- **Revert:** ABI v30 の `OPEN_NATIVE | FORCE_RELOAD | REVERT_CURRENT` を使い、発行時と同じ current native path／document UUID を要求する。成功時は runtime sequence catalog／active index／inactive recovery を維持し、active file binding を新しい owner generation へ rebase する。
 - **状態:** success、same-target no-op、invalid type、panel Cancel、stale bookmark/revision、permission denial、write/flush/replace failure、duplicate file identity。
-- **ABI decision gate:** まず現行 ABI v25 の path/job API を active security scope＋`NSFileCoordinator`下で検証する。same-directory atomic replace、Cut member、autosave、Batch folderで成立しないことが実証された場合だけ、次の exact ABI versionへ進めてnative staged decode/prepare-save/commit-saveまたはbounded file-authority APIを追加する。header/docs/testを同時更新し、GUI移植だけではv32/epoch27を変更しない。
-- **test:** savepoint only-after-replace、Save As conflict、cancel/failure atomicity、reopen、private+standard pasteboard representation、unsupported format rejection、bookmark stale regeneration。
+- **ABI decision gate:** まず現行 ABI v30 の path/job API を active security scope＋`NSFileCoordinator`下で検証する。same-directory atomic replace、Cut member、autosave、Batch folderで成立しないことが実証された場合だけ、次の exact ABI versionへ進めてnative staged decode/prepare-save/commit-saveまたはbounded file-authority APIを追加する。header/docs/testを同時更新し、GUI移植だけではv32/epoch27を変更しない。
+- **test:** savepoint only-after-replace、pair-only Save As conflict、same-path/UUID Revert と sequence/binding retention、cancel/failure atomicity、reopen、private+standard pasteboard representation、unsupported format/precision rejection、bookmark stale regeneration。
 - **検証:** V-Rust＋V-MacUnit＋V-MacUI。Sandbox-enabled Tahoe実行が必須。
 - **完了判定:** path authorityをCoreへ永続化せず、既存file bytes/checksumとWindows reopen結果が一致する。
 - **risk/mitigation:** security scopeはlease型でstart/stopをbalanceし、background job完了まで保持する。[App Sandbox file access](https://developer.apple.com/documentation/security/accessing-files-from-the-macos-app-sandbox)
@@ -814,7 +816,7 @@ Windows固有IDとは別にMac IDを追加する必要がある。追加しな�
 ### その他
 
 - `docs/architecture.md`: macOS owner/thread/render/build章。古い381 command proseもsource-derived値へ修正
-- `docs/ffi.md`: Swift import、OwnedSnapshot、Core thread、現行ABI v25と必要時のplatform-neutral shortcut後継ABI
+- `docs/ffi.md`: Swift import、OwnedSnapshot、Core thread、現行ABI v30と必要時のplatform-neutral shortcut後継ABI
 - `docs/compatibility.md`: Mac requirement行とevidence
 - `docs/implementation-status.md`: 各milestoneの現状と未検証事項
 - `docs/macos-command-inventory.md`: generated parity summary
@@ -875,11 +877,11 @@ M0 build/ABI
 | 論点                         | 推奨default                                     | 代替                                  | 影響                                                  | 期限                      |
 | ---------------------------- | ----------------------------------------------- | ------------------------------------- | ----------------------------------------------------- | ------------------------- |
 | CPU配布                      | Universal 2 arm64+x86_64                        | arm64-only                            | size/CI対coverage。Intel runtime runner不足時は未検証 | M0、最終M11               |
-| Native fileとSandbox         | 現行ABI v25 path/job＋security scope＋NSFileCoordinator | 必要時に次のexact ABIでstaged bytes/file authority | ABI追加量、Cut/Batch access、atomicity | M4前半 |
+| Native fileとSandbox         | 現行ABI v30 path/job＋security scope＋NSFileCoordinator | 必要時に次のexact ABIでstaged bytes/file authority | ABI追加量、Cut/Batch access、atomicity | M4前半 |
 | App Sandbox                  | Developer ID版でも有効                          | Hardened Runtimeのみ                  | batch/folder usability対security/将来App Store        | M4                        |
 | Document scene               | WindowGroup＋独自coordinator                    | DocumentGroup spike                   | save/session ownershipが大きく変わる                  | M1。defaultを覆すならM2前 |
 | Canvas                       | custom NSView＋CAMetalLayer                     | MTKView                               | renderer ownership/thread/surface制御                 | M0 spike、M2開始前        |
-| Shortcut ABI                 | 現行ABI v25で検証し、必要時だけ次のexact ABIへneutral recordを追加 | Macだけ独自resolver | Core input interpretationの重複、Windows VK混入 | M3 |
+| Shortcut ABI                 | 現行ABI v30で検証し、必要時だけ次のexact ABIへneutral recordを追加 | Macだけ独自resolver | Core input interpretationの重複、Windows VK混入 | M3 |
 | Pane detachment              | sidebar/inspector＋Batch専用window              | 多数のUtilityWindow                   | target/focus/keyboard複雑性                           | M5                        |
 | Workspace persistence        | versioned Codable property-list record          | Application Support DB                | lightweight state対拡張性                             | M5                        |
 | x86_64 Verified条件          | Intel Tahoe実行を要求                           | Rosetta/cross-buildのみでExperimental | 配布表示とsupport範囲                                 | M11                       |

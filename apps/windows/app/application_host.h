@@ -122,6 +122,10 @@ public:
     [[nodiscard]] bool RecordRecentDocument(
         std::wstring path,
         DocumentIdentity identity) noexcept;
+    [[nodiscard]] bool RecordRecentDocumentReplacing(
+        std::wstring path,
+        DocumentIdentity identity,
+        const DocumentIdentity& previous_identity) noexcept;
     [[nodiscard]] bool RemoveRecentDocument(std::size_t index) noexcept;
     [[nodiscard]] const RecentDocumentEntry* RecentDocumentAt(
         std::size_t index) const noexcept;

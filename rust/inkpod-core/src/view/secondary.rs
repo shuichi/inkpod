@@ -4,8 +4,10 @@ use crate::*;
 impl Core {
     /// Creates a secondary view initialized from the primary view.
     ///
-    /// The returned stable view ID remains valid until [`Core::close_view`] or a
-    /// document replacement. Document revision, history, and dirty state are unchanged.
+    /// The returned stable view ID remains valid until [`Core::close_view`] or an
+    /// unrelated document replacement. A forced same-document Revert retains
+    /// every live view ID and logical state. Document revision, history, and
+    /// dirty state are unchanged.
     pub fn create_view(&mut self) -> Result<u64, CoreError> {
         if self.document.is_none() {
             return Err(CoreError::NoDocument);

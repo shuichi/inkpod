@@ -1,5 +1,7 @@
 #include "session_recovery.h"
 
+#include <objbase.h>
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -19,6 +21,69 @@ constexpr std::uint32_t kSessionPathsMagic = UINT32_C(0x53524b49);
 constexpr std::uint16_t kSessionPathsVersion = 1U;
 constexpr std::size_t kMaximumSessionRecordBytes = 1024U * 1024U;
 constexpr std::size_t kMaximumRestoredDocumentPaths = 64U;
+
+InkpodIoRecoveryPairProof EmptyRecoveryPairProof() noexcept {
+    InkpodIoRecoveryPairProof proof{};
+    proof.struct_size = sizeof(proof);
+    proof.kind = INKPOD_IO_RECOVERY_PAIR_NONE;
+    for (auto* stamp : {&proof.native, &proof.raster}) {
+        stamp->struct_size = sizeof(*stamp);
+        stamp->identity.struct_size = sizeof(stamp->identity);
+    }
+    return proof;
+}
+
+bool ValidRecoveryPairProof(
+    const InkpodIoRecoveryPairProof& proof) noexcept {
+    const auto valid_record = [](const InkpodIoRecoveryArtifactStamp& stamp) {
+        return stamp.struct_size == sizeof(stamp)
+            && stamp.identity.struct_size == sizeof(stamp.identity);
+    };
+    const auto valid_physical = [&](const InkpodIoRecoveryArtifactStamp& stamp) {
+        return valid_record(stamp)
+            && (stamp.flags & ~INKPOD_IO_RECOVERY_ARTIFACT_READONLY) == 0U
+            && stamp.identity.kind == 1U
+            && (stamp.identity.volume != 0U
+                || stamp.identity.object_high != 0U
+                || stamp.identity.object_low != 0U);
+    };
+    const auto zero_stamp = [&](const InkpodIoRecoveryArtifactStamp& stamp) {
+        return valid_record(stamp) && stamp.flags == 0U
+            && stamp.identity.kind == 0U && stamp.identity.volume == 0U
+            && stamp.identity.object_high == 0U
+            && stamp.identity.object_low == 0U && stamp.length == 0U
+            && stamp.modified_high == 0U && stamp.modified_low == 0U
+            && stamp.changed_high == 0U && stamp.changed_low == 0U;
+    };
+    const auto valid_missing = [&](const InkpodIoRecoveryArtifactStamp& stamp) {
+        return valid_record(stamp) && stamp.flags == 0U
+            && stamp.identity.kind == 2U
+            && stamp.identity.volume == UINT64_MAX
+            && (stamp.identity.object_high != 0U
+                || stamp.identity.object_low != 0U)
+            && stamp.length == 0U && stamp.modified_high == 0U
+            && stamp.modified_low == 0U && stamp.changed_high == 0U
+            && stamp.changed_low == 0U;
+    };
+    if (proof.struct_size != sizeof(proof)) {
+        return false;
+    }
+    switch (proof.kind) {
+        case INKPOD_IO_RECOVERY_PAIR_NONE:
+            return zero_stamp(proof.native) && zero_stamp(proof.raster);
+        case INKPOD_IO_RECOVERY_PAIR_COMMITTED:
+            return valid_physical(proof.native)
+                && valid_physical(proof.raster);
+        case INKPOD_IO_RECOVERY_PAIR_PLANNED:
+            return valid_missing(proof.native)
+                && valid_physical(proof.raster);
+        case INKPOD_IO_RECOVERY_PAIR_REPAIR_NEEDED:
+            return valid_physical(proof.native)
+                && valid_missing(proof.raster);
+        default:
+            return false;
+    }
+}
 
 void AppendU16(std::vector<std::uint8_t>& bytes, std::uint16_t value) {
     bytes.push_back(static_cast<std::uint8_t>(value & 0xffU));
@@ -302,6 +367,7 @@ bool BuildRecoveryMetadata(
     metadata.document_uuid_low = document_uuid_low;
     // The Rust recovery writer supplies the durable metadata timestamp.
     metadata.written_file_time = 0U;
+    metadata.pair_proof = EmptyRecoveryPairProof();
     try {
         metadata.original_identity = identity;
         metadata.original_path = current_path;
@@ -317,7 +383,11 @@ bool RecoveryMetadataToAbi(
     const RecoveryMetadata& metadata,
     InkpodIoRecoveryMetadata& output,
     std::vector<std::uint8_t>& text) noexcept {
-    if (!ValidIdentity(metadata.original_identity)) {
+    const InkpodIoRecoveryPairProof pair_proof =
+        metadata.pair_proof.struct_size == 0U
+        ? EmptyRecoveryPairProof() : metadata.pair_proof;
+    if (!ValidIdentity(metadata.original_identity)
+        || !ValidRecoveryPairProof(pair_proof)) {
         return false;
     }
     try {
@@ -344,6 +414,7 @@ bool RecoveryMetadataToAbi(
         result.document_uuid_high = metadata.document_uuid_high;
         result.document_uuid_low = metadata.document_uuid_low;
         result.written_time_100ns = metadata.written_file_time;
+        result.pair_proof = pair_proof;
         result.identity_kind = static_cast<std::uint32_t>(metadata.original_identity.kind);
         result.identity_volume = metadata.original_identity.volume_serial;
         if (metadata.original_identity.kind == DocumentIdentityKind::Untitled) {
@@ -374,7 +445,8 @@ bool RecoveryMetadataFromAbi(
     const InkpodIoRecoveryMetadata& input,
     RecoveryMetadata& output) noexcept {
     if (input.struct_size < sizeof(input) || (input.flags & 1U) == 0U
-        || input.reserved != 0U || input.identity_kind > 3U) {
+        || input.reserved != 0U || input.identity_kind > 3U
+        || !ValidRecoveryPairProof(input.pair_proof)) {
         return false;
     }
     try {
@@ -384,6 +456,7 @@ bool RecoveryMetadataFromAbi(
         result.document_uuid_high = input.document_uuid_high;
         result.document_uuid_low = input.document_uuid_low;
         result.written_file_time = input.written_time_100ns;
+        result.pair_proof = input.pair_proof;
         result.original_identity.kind = static_cast<DocumentIdentityKind>(input.identity_kind);
         result.original_identity.volume_serial = input.identity_volume;
         if (result.original_identity.kind == DocumentIdentityKind::Untitled) {
@@ -404,6 +477,17 @@ bool RecoveryMetadataFromAbi(
                 || !Utf8ToWide(span.path, static_cast<std::size_t>(span.path_bytes), *strings[index])) {
                 return false;
             }
+        }
+        if (result.original_identity.kind
+                == DocumentIdentityKind::NormalizedPath) {
+            std::wstring normalized_identity;
+            if (!NormalizeDocumentFilePath(
+                    result.original_identity.normalized_path,
+                    normalized_identity)) {
+                return false;
+            }
+            result.original_identity.normalized_path =
+                std::move(normalized_identity);
         }
         if (!ValidIdentity(result.original_identity)) {
             return false;
@@ -485,6 +569,44 @@ bool SequenceRecoveryPath(
         static_cast<unsigned long long>(document_uuid_high),
         static_cast<unsigned long long>(document_uuid_low),
         static_cast<unsigned long long>(source_generation));
+    try {
+        output = directory + name.data();
+        return true;
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+}
+
+bool SequenceRecoveryAttemptPath(
+    std::uint64_t document_uuid_high,
+    std::uint64_t document_uuid_low,
+    std::uint64_t source_generation,
+    std::wstring& output) noexcept {
+    if ((document_uuid_high == 0U && document_uuid_low == 0U)
+        || source_generation == 0U) {
+        return false;
+    }
+    std::wstring directory;
+    GUID attempt{};
+    if (!RecoveryRootDirectory(directory) || FAILED(CoCreateGuid(&attempt))) {
+        return false;
+    }
+    std::uint64_t attempt_high{};
+    std::uint64_t attempt_low{};
+    static_assert(sizeof(attempt) == sizeof(attempt_high) + sizeof(attempt_low));
+    std::memcpy(&attempt_high, &attempt, sizeof(attempt_high));
+    std::memcpy(&attempt_low,
+        reinterpret_cast<const std::uint8_t*>(&attempt) + sizeof(attempt_high),
+        sizeof(attempt_low));
+    std::array<wchar_t, 176U> name{};
+    _snwprintf_s(
+        name.data(), name.size(), _TRUNCATE,
+        L"\\%016llx%016llx-sequence-%016llx-attempt-%016llx%016llx.inkpod",
+        static_cast<unsigned long long>(document_uuid_high),
+        static_cast<unsigned long long>(document_uuid_low),
+        static_cast<unsigned long long>(source_generation),
+        static_cast<unsigned long long>(attempt_high),
+        static_cast<unsigned long long>(attempt_low));
     try {
         output = directory + name.data();
         return true;

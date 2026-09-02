@@ -46,7 +46,7 @@ options.feature_flags = INKPOD_FEATURE_NONE;
 ```
 
 - `struct_size` は必ず呼び出し側が設定する。出力構造体でも同じである。
-- ABI v25 で既知の構造体末尾まで読み書きできるサイズが必要である。
+- ABI v30 で既知の構造体末尾まで読み書きできるサイズが必要である。
 - `reserved` は 0 とし、未知の必須機能フラグは指定しない。
 - レコード列では、各レコードの `struct_size` と `*_stride_bytes` の両方を設定する。
 - 要素数、ストライド、アラインメント、列全体のバイト範囲が有効でなければならない。
@@ -56,14 +56,14 @@ options.feature_flags = INKPOD_FEATURE_NONE;
 ABI バージョンは Core 作成前に比較できる。`INKPOD_ABI_VERSION` とライブラリの戻り値が異なる場合は、
 Core を作らず互換性エラーとして扱う。
 
-現行ライブラリは ABI v25 だけを受理し、`InkpodCoreConfig::abi_version` が完全一致しなければ
+現行ライブラリは ABI v30 だけを受理し、`InkpodCoreConfig::abi_version` が完全一致しなければ
 `INKPOD_STATUS_INCOMPATIBLE_ABI` を返す。関数名や型名の `_v3` は、値／ID API 群が導入された世代を
-示す接尾辞であり、ABI v3 の呼び出し側との実行時互換性を意味しない。ABI v1-v24 の呼び出し側は、
-現行の v25 ヘッダーへ更新して再ビルドする。
+示す接尾辞であり、ABI v3 の呼び出し側との実行時互換性を意味しない。ABI v1-v29 の呼び出し側は、
+現行の v30 ヘッダーへ更新して再ビルドする。
 
-ABI v25 は standard layer／saved-selection mask 契約へ C API を閉じ直し、snapshot の実行時 source identity と sequence catalog の固定長照会を保持する。
+ABI v29 は、最後に通常保存または exact recovery で表現した runtime-only document／EditorState revision baseline より journal／Redo branch／editor generation が新しい実セル切替を、clean savepoint でも fresh source recovery 必須とする issue-time request flag を追加した。現行 ABI v30 は ABI v26 の standard layer／saved-selection mask、snapshot source identity、sequence catalog、共通 raster-pair open、ABI v27 の sequence recovery exact runtime pair proof／repair-needed kind、ABI v28 の authority-revoked result flag、および ABI v29 の issue-time preservation flag を保持し、`INKPOD_IO_REVERT_CURRENT` を追加する。この flag は `INKPOD_IO_OPEN_NATIVE` と `INKPOD_IO_FORCE_RELOAD` の組合せでだけ有効であり、Core apply は発行対象と同じ current native path／document UUID を要求して runtime sequence catalog、全 live view の stable ID／論理 state と次の view ID を保持し、旧 revision の render cache を無効化する。
 `InkpodResourceUsage` は 136 bytes、`InkpodIoCacheInfo` は 72 bytes の現行 layout を保持する。
-旧サイズの構造体を渡してはならない。native v32、document replay epoch 27 と ABI v25 は完全一致が必要である。
+旧サイズの構造体を渡してはならない。native v32、document replay epoch 27 と ABI v30 は完全一致が必要である。
 現行 native payload は `DocumentArchive` schema 7、必須 `DOCM` schema 8、document digest schema 12/domain 10、
 snapshot-composite schema 5、Cut payload schema 3/replay epoch 25であり、Batchはgraph v5/operation schema 4、
 InkScriptはcatalog/owner manifest v5の73 commandsである。canonical `revision-max` 式と既存 benchmark の
@@ -76,7 +76,7 @@ sequence source identity、Rust-owned二セルpair preview、その bounded cand
 Batch contact-sheet preview APIも保持する。ABI v14 で
 `InkpodHistoryItem` から表示用UTF-8名を除き、固定幅の `InkpodHistoryEntryKind` を返す。
 Coreは言語や `UiStringId` を保持せず、frontendだけがこの意味種別を表示catalogへ写像する。
-ABI v2 で公開名から実装時のマイルストーン番号を除いたタスク API は、現行 v25 でも引き続き
+ABI v2 で公開名から実装時のマイルストーン番号を除いたタスク API は、現行 v30 でも引き続き
 `InkpodTask` / `InkpodTaskInfo` / `INKPOD_TASK_*` / `inkpod_task_*`、共有ラスタ入力は
 `InkpodRasterSourceInput` を使用する。v1 のマイルストーン名は公開別名として残していない。
 
@@ -91,7 +91,7 @@ Rust 所有の正規化済みバイト列へコピーされ、4 MiB 以下なら
 ABI v18 ではvectorおよびText／Annotationのenum値、record、edit、snapshot、clipboard、diagnostic exportを
 公開境界から削除した。旧enum値、旧primitive ID、旧record size、ABI v17 configは明示的に拒否する。
 
-## 共有ファイル I/O（ABI v25）
+## 共有ファイル I/O（ABI v30）
 
 `ApplicationHost` は `InkpodIoManager` を一つ所有し、全 `InkpodCore` に同じ manager を bind する。
 ファイルダイアログは Windows が所有し、選択後は UTF-8 path と操作パラメーターだけを渡す。
@@ -113,38 +113,157 @@ Cell を採用せず既存 Cut owner に戻す。Batch plan/report は完了後�
 wrong owner、stale document/editor revision、失敗、cancel は live 文書の部分反映を行わない。
 自動連番の追加だけは sequence/source authority を検証し、先行して成功した単体 open と、その後の文書編集を保持する。
 
+`inkpod_core_io_recovery_discard_exact_submit` は文書結果を持たないため `core == NULL` を受理し、元の
+DocumentSession／Core を閉じた後でも application-owned manager 上で完了できる。non-NULL Core を渡す場合だけ
+通常の owner-thread 検証を行う。削除権限は path ではなく native と metadata の完全な
+`InkpodIoRecoveryArtifactProof` であり、片方の欠落、変更、混在、または proof 不一致は両 member を保持して
+conflict とする。Windows frontend は通常保存成功を UI へ通知する前に不要 artifact の cleanup owner を登録し、
+session close 後も bounded queue の空きを待って exact discard を drain する。
+
+Cell の `INKPOD_IO_OPEN_NATIVE` が成功した `READY` result は常に2 itemで、index 0が開いたnative、
+index 1が検証済みraster companion candidateである。index 1はnative内のformatを持ち、存在時はphysical
+identity、欠落時はnormalized-path identityを返す。TIFFはalias解決後の実際の `.tif`／`.tiff` pathを返す。
+候補はdirectoryをbounded scanし、backend-normalized stemとformatが一致する拡張子をASCII case-insensitiveに
+解決する。候補0件はlowercase canonical path、1件はdirectory entryの実path、2件以上は
+`FILE_CONFLICT`であり、replay／decoded比較後の再scanで候補集合の増減も拒否する。
+`CUT_DESCRIPTOR` resultだけは従来どおりnative 1 itemであり、Cellとしてapplyしない。
+
+current-document Revert は `INKPOD_IO_OPEN_NATIVE` に
+`INKPOD_IO_FORCE_RELOAD | INKPOD_IO_REVERT_CURRENT` を指定する。`REVERT_CURRENT` 単独、
+別 kind との組合せ、または通常の force reload を Revert として扱うことは `INVALID_ARGUMENT` である。
+apply は発行時 token の current native path と staged document UUID が live 文書に完全一致する場合だけ
+文書/history/editor/savepoint を置換し、runtime-only sequence catalog、active index、sequence render-cache
+ledger を保持する。Windows は `document_applied` 後に、新しい pair item から logical identity、shell path と
+active `SequenceFileBinding` を owner generation へ rebase し、Sequence pane を refreshする。inactive cell の
+recovery association は保持する。snapshot／presentation failure は Core apply を巻き戻さず、適用済み
+authority を reconciliation してから error として返す。
+
+編集用 File Open と Sequence target の raster path は同じ raster-pair resolver job を使う。raster と
+同一 directory／stem の `.inkpod` が存在する場合は native の staged decode／asset validation／replay と
+通常 composite の生成、raster の canonical decode を完了し、format、寸法、native depth、straight alpha、
+全 pixel 値と保持可能な DPI が一致したときだけ existing sidecar を優先する。結果の authority は閉じた
+`Committed`／`Planned`／`None` とし、sidecar 欠落は clean staged Core と `Planned`、別 command の明示 raster
+import と recovery は `None` を返す。malformed／非 current native、replay failure、format disagreement、
+decoded mismatch は distinct conflict result とし、caller は raster open へ silent fallback してはならない。
+repair-needed は raster member 欠落を表す `Committed` の下位状態であり、第四の authority ではない。
+encoded byte layout と任意 container metadata は decoded 一致の対象外とする。
+native candidateもdirectoryのbackend-normalized stemとASCII case-insensitiveな `.inkpod` extensionで探索し、
+候補0件だけがcanonical `.inkpod` の `Planned`、1件は実path、2件以上はconflictとなる。
+
+`INKPOD_IO_OPEN_RASTER_PAIR` の `READY` result は常に 2 item で、index 0 が選択した raster、index 1 が
+同 stem の native candidate である。native が存在しない場合も index 1 を省略せず、その identity は
+normalized path（`InkpodIoFileIdentity::kind == 2`）とする。
+`INKPOD_SEQUENCE_SWITCH_TARGET_RASTER_PAIR` を設定した sequence submit も同じ 2 item・同じ順序を返し、
+`target_recovery` は選択した raster path として必須である。この flag は submit transport 専用で、Core の
+sequence request identity には残さない。`INKPOD_IO_SAVE_PAIR` の result も常に 2 item だが保存先順であり、
+index 0 が native `.inkpod`、index 1 が raster である。最初のnon-installing `READY`では、両itemのidentityは
+destinationの旧identityやmissing-path identityではなく、同volume rename後も維持されるstaged replacementの
+physical future-final identityである。callerは最初のapply前に両pathと両identityを一括予約し、予約拒否時だけ
+未installのjobをcancelできる。`INSTALLING`後の最終`READY`はdisk commit済みの場合があるため拒否／abortせず、
+予告identityとの一致を確認したうえで必ずfinal applyしてCore authority/savepointを公開する。
+caller は kind ごとの順序を入れ替えて解釈してはならない。
+
 連番の Core-owner 操作は `inkpod_core_sequence_activation_resolve` で `NOOP`／初回の同一画像への `BIND`／
 文書の `REPLACE` を判定し、`activation_commit` で source/target identity・generation・revision を再検証する。
-`NOOP` と `BIND` は dirty 状態と保存の関連付けを保持する。結び付け済み source の非同期切り替えだけは
+`NOOP` と `BIND` は dirty 状態と保存の関連付けを保持する。成功した初回 `BIND` は sequence source を
+現在文書 UUID と新しい owner generation へ rekey し、frontend の active `SequenceFileBinding` を現在文書の
+pair path／identity へ rebase するが、文書、history、savepoint、通常保存 authority は置換しない。結び付け済み source の非同期切り替えだけは
 `InkpodSequenceSwitchRequest.flags` の `REQUIRED` も使い、UUID が同じでも generation が違えば実切り替えとする。
 `inkpod_core_io_sequence_switch_submit` の recovery path は NULL または `path_bytes == 0` で省略できる。
-ただし実切り替え元の document または EditorState が dirty なら `source_recovery` は必須で、省略は
-`INVALID_ARGUMENT` とする。両方が clean の場合に限り、source path 省略で source recovery の生成・保存を
-省き、target recovery の検証後に owner 上の revision／authority 再検証と一回の commit を行う。
+実切り替えで source recovery が必要かは dirty flag から frontend が再計算せず、issue-time token の
+`INKPOD_SEQUENCE_SWITCH_SOURCE_RECOVERY_REQUIRED` を権威とする。Core は dirty document／EditorState、
+`RECOVERED`、repair-needed `Committed` に加え、最後に normal save、通常 open、immutable sequence source、または
+exact sequence recovery で表現した runtime-only document／EditorState revision baseline から journal／Redo branch／
+editor generation が進んだ場合にもこの bit を立てる。したがって edit→Undo で clean savepoint に戻った場合や、
+旧 Redo tail を切って新 branch を作成後に Undo した場合も fresh append-only source recovery が必須であり、省略は
+`INVALID_ARGUMENT` とする。bit が clear の場合だけ source recovery の生成・保存を省き、target recovery の検証後に
+owner 上の revision／authority と同じ preservation 条件を再検証して一回の commit を行う。同一セルの `NOOP` と
+初回 `BIND` は bit を立てず、normal pair 保存成功は current revision を新しい baseline とする。authority revoke は
+baseline も失効し、次の Save As 成功まで fail closed とする。
+通常のrecovery switchでtarget pathを明示した場合、そのfileの欠落、malformed、非current、UUID不一致は
+job全体のatomic failureであり、immutable flattened sequence sourceへfallbackしない。target path自体を
+省略し、かつ source recovery required bit が clear の switch だけが flattened source を使える。
 source path を明示した従来経路は clean でも保存する。`REQUIRED` は dirty 判定ではなく、同一セルへの
-no-op は recovery を読み書きしない。復元された editor revision／digest は保存時の値を保持し、通常保存先と
-document／editor savepoint は採用せず dirty／recovered とする。公開 ABI layout と native schema は変わらない。
+no-op は recovery を読み書きしない。復元された editor revision／digest は保存時の値を保持する。authority-none の
+standalone recovery は document／editor savepoint を採用せず常に dirty／recovered とする。exact pair proof を伴う
+sequence 内部復帰は、resolver baseline の clean document/editor state、journal prefix、両 encoded savepoint digest が
+一致した場合だけ encoded savepoint を保持し、unsaved document/editor 差分があれば dirty／recovered、navigation-only
+の clean repair-needed snapshot なら clean／non-recovered とする。ABI v30 が保持する recovery pair proof は `NONE`、両 member の完全 stamp を
+持つ `COMMITTED`、missing native identity＋raster stamp の `PLANNED`、native stamp＋missing raster identity の
+`REPAIR_NEEDED` の四 kind である。missing identity は kind 2、`volume == UINT64_MAX`、非zero object、stamp fields zero
+でなければならない。この proof の追加で ABI layout は v27 へ進んだが native schema は変わらない。
 未結び付けの source を置換する際は、Auto 設定でも通常の保存確認を先に行う。
-Windows の `DocumentRegistry` は `REPLACE` の反映前に切り替え先 identity と normalized original/source path を予約し、
-その間の別 open/save による重複採用を拒否する。成功後だけ準備済み値を move して旧保存先を解除し、
-新規セルは UUID の Untitled identity、recovery 復元は original identity を重複検出用に採用する。
-どちらも通常保存先は空のままとする。予約は failure/cancel/queue rejection/close で解除し、真の no-op は
-元の関連付けを保持する。Core の commit 成否と snapshot/UI 更新の成否は分離して扱う。
+Windows の `DocumentRegistry` は `REPLACE` の反映前に切り替え先 native/raster 両 member の physical identity
+または normalized missing path と original/source path を一つの logical pair identity として予約し、その間の
+別 open/save による重複採用を拒否する。成功後だけ resolver が準備した target 固有の `Committed` または
+`Planned` と identity aliases を move して旧保存先を解除し、旧 pair authority を新セルへ流用しない。
+sequence-associated recovery 復元は、metadata の source path を同じ pair resolver で再解決し、document UUID、
+canonical Genesis、raster source identity と capture 時の exact pair proof がすべて一致した場合だけ target 固有の
+`Committed`／`Planned`（repair-needed を含む）を採用する。coherent な外部 pair 保存、missing member の出現、
+stamp／identity 不一致は atomic conflict である。pair proof `NONE` の untitled／明示 import／standalone recovery は
+authority `None` と通常保存先空のまま exact history を復元する。通常の standalone recovery open は metadata から
+authority を採用しない。予約は failure/cancel/queue rejection/close で解除し、真の no-op／初回 `BIND` は元の
+関連付けを保持する。Core の commit 成否と snapshot/UI 更新の成否は分離して扱う。
 Light Table の明示的な編集画像との swap も旧保存先を継承しない。既存 item metadata の stable ID・
 source UUID/revision と document/editor revision を発行時に固定し、owner 上で再検証してから交換する。
 Windows は新しい Untitled identity と recovery path を反映前に準備し、Core の成功時だけ関連付けを更新する。
+成功した swap は旧 sequence catalog／owner generation と frontend file binding も同時に失効させ、発行済みの
+自動 catalog completion が旧 binding を後から再公開することを許さない。
 
 `loaded_count` は source の read/decode/validation 成功件数で、cache hit も含む。`read_count` は実際の read 件数、
 `completed_work/total_work` は変換や実行の進捗であり、互いに代用しない。`TRUNCATED` は自動連番の 1,000 件上限を表す。
 item path/name、エラー、recovery metadata の文字列は必要容量を問い合わせてから caller buffer にコピーする。
 recovery codec は純粋なメモリ API であり、参照先パスを開かない。untitled identity と document UUID は別の値として保持する。
 
-通常 Save は `.inkpod` と同名 raster の両方を準備してから置換する。`FILE_CONFLICT` は既存または外部変更された
+通常 Save は authority `Committed` ならその pair、`Planned` なら open 時に固定した native missing-path proof と
+raster identity/complete stamp を再検証した first-save pair を使い、authority `None` の場合だけ UI が明示 destination
+を取得する。`Planned` の明示 Save と missing companion の repair は Core が clean でも必ず実行する。完全な clean
+`Committed` pair も両 member の identity／complete stamp と外部競合を再検査し、その後に限り実装は物理書き出しを
+省略してよいが、省略は ABI の必須挙動ではなく、通常の pair job で両 member を再書き出してよい。`.inkpod` と同名 raster の両方を準備してから置換する。`FILE_CONFLICT` は既存または外部変更された
 保存先の再確認要求であり、UI が両保存先を確認した場合だけ `OVERWRITE_CONFIRMED` で新しい job を送る。
-prepared destination identity で、別の開いている文書への衝突も apply 前に拒否する。2 file の同時 atomic rename は保証しない。
-途中失敗は rollback と永続 journal による復旧対象となり、通常 path/savepoint は両方の保存完了後だけ進む。
+ただし選択したraster以外の同stem／同format alias、または選択したnative以外のcase-variant `.inkpod` が
+存在する状態はconfirmationでは解消できない曖昧なpairであり、`OVERWRITE_CONFIRMED` でもconflictとなる。
+managerはprepare前後、installのnative置換後／raster置換前、および両member置換後／success cleanup前に
+bounded candidate setを再検査する。最後の検査で曖昧化を検出した場合は検証済みbackupで両memberをrollbackする。
+両replacementのidentity／length／digest、最終candidate set、directory durabilityがcommit前fenceであり、そこまでの
+失敗は両memberをrollbackする。runtime pair journal v2のprepared recordはsame-directory private stageから
+WRITE_THROUGH publishされ、上記fence後にだけ事前flush済みcommitted markerをatomic publishする。従って両memberが
+replacementでもmarkerが無ければrecoveryはrollbackし、exact markerがある場合だけcompletedとして扱う。このruntime
+journal revisionはnative `.inkpod` format versionを変更しない。このfence後のstage／backup／journal cleanup失敗はdurable saveを失敗へ戻さず、
+残ったjournalを次回recoveryが検証して除去する。future-final prepared identityで別の開いている文書への衝突も
+最初のapply前に拒否する。2 file の同時 atomic rename は保証しない。
+existing memberのinstall／rollback前にはdurable rollback markerをpublishする。Windowsではexpected complete stampを
+exclusive handle上で再検証してhandle-bound deleteし、stage／backupをno-overwrite publishするため、間に外部fileが
+作成された場合は外部fileがpathを取り、jobはevidenceを保持して失敗する。exact delete後のcrashはrollback markerから
+再開する。非Windows backendはportableな最終stamp再検査を行うが、application外のdirectory coordinationなしには
+path operation直前の残余ABA windowを完全には除去できない。
+publication開始後にinstallが失敗して旧bytesを検証済みbackupからrollbackした場合、copy-backupのため復元先の
+physical identityは旧identityと異なり得る。同じunconfirmed `Committed`／`Planned` targetで、復元後の両memberを
+complete stamp/digestと元のalias集合まで再検証できたときだけ、final `READY` itemsはpath/name/format/UUID/
+source generationを保ったままidentity/physicalをno-allocation更新し、job flagsへ
+`INKPOD_IO_RESULT_AUTHORITY_REPAIRED`を立てる。ownerのfinal applyはsave tokenを再検証してからruntime
+`SavedPair`／`PlannedPair` stampだけを修復し、document/history/savepoint/current pathを進めず元のsave errorを返す。
+alias ambiguity、confirmed overwrite、Save As、rollback不確実ではこのflagを立てず、影響したsame-target authorityは
+fail closedで破棄する。ABI v28 では、この破棄を実際にowner final applyしたterminal failed jobへ
+`INKPOD_IO_RESULT_AUTHORITY_REVOKED`を立てる。frontendはfinal apply後のpollでこのflagを確認し、該当sessionの
+旧pair path／identity alias／bindingを一括解除する。Coreもpair authority／plan／current pathとdocument／editor
+savepointを同じfinalizationで失効し、内容／historyを変えずdirtyにして次回Save Asへ落とす。このflagはpublication前の
+失敗、別targetの失敗、exact `Committed`／`Planned` rollbackには立たず、job releaseまでquery可能である。
+final `READY` の `AUTHORITY_REPAIRED` itemをfrontendが固定幅契約どおりcopyできない場合は、final apply前に
+`inkpod_io_job_cancel`を呼ぶ。これは元のsave errorをcancelへ置換せずrepair publicationだけを取り下げ、必須final
+applyが同じ失効処理と`AUTHORITY_REVOKED`を公開する。
+途中失敗は rollback と永続 journal による復旧対象となり、通常 path/savepoint と `Committed` publication は
+両方の保存完了後だけ進む。片方の install または install 順序を user-visible success にしない。
+application lockへ参加しない外部processが最後のdirectory scan後に新aliasを作るraceはdirectory-wide OS transaction
+なしには閉じられない。この限定は外部write一般と同じで、次のopen/saveのcandidate scanでconflictとして検出する。
 ラスタ import、Light Table swap、pathless Core adopt、実際の連番文書置換は、成功時に旧 pair の書き込み権限も
 解除し、runtime の保存世代を進める。古い prepared save token は新しい文書に流用できず、置換失敗時は元の権限を保つ。
+
+Pair paths、filesystem identities、complete stamps と `Planned`／`Committed`／`None` は runtime authority であり、
+`.inkpod` または recovery payload に永続化しない。既存の META companion-format field と Core の canonical
+Genesis/assets/composite query を使うため、pair authority 自体は native v32、replay epoch 27、既存 record layout を
+変更しない。public `OPEN_RASTER_PAIR` kind の追加で C ABI は v26 とし、将来 path/identity/digest を永続化する場合は
+native top-level version も更新する。
 
 共有 cache の上限は 10,000 画像、encoded 一 file 512 MiB、encoded 合計 8 GiB、decoded pixel 合計 8 GiB。
 in-flight、使用中 lease、置換時の旧/新画像、派生表示 pixel と未解放 snapshot を計上し、map eviction だけで使用量を減らさない。
@@ -152,7 +271,7 @@ native/recovery は cache に入れず 1 GiB の streaming 上限を使う。doc
 cache 統計は `inkpod_io_manager_get_cache_info` から取得する。同期 `resolve_identity` は filesystem query なので、
 製品 UI の open/save はそれを事前に呼ばず、非同期 job の item identity を利用する。
 
-ABI v25 の `InkpodIoCacheInfo::sequence_render_allocations` と `sequence_render_bytes` は、同じ manager に
+ABI v30 の `InkpodIoCacheInfo::sequence_render_allocations` と `sequence_render_bytes` は、同じ manager に
 属する未編集 sequence source の合成 pixel 予約を全 Core 合算で表す。上限は 8 source 分かつ 128 MiB で、
 `decoded_bytes` の内数である。queued/running の隣接事前準備、採用済み cache、cache から外れても生存する
 snapshot/tile の予約を含み、clone ごとに重複加算しない。Rust の tile owner が lease を保持し、catalog/Core の
@@ -177,10 +296,10 @@ owner 反映待ちは不定表示にする。Cancel は選択した同一 reques
 close は非同期に cancel/drain し、保存の最終 apply 前に Core を destroy しない。すべての job と Core の drain 後に
 manager を release する。manager release は worker の終了を待つため、通常の UI 操作経路で呼ばない。
 
-## InkScript source／compiler／fragment（現行 ABI v25）
+## InkScript source／compiler／fragment（現行 ABI v30）
 
 ABI v15 で追加されたsource parse、diagnostic copy、static compile、journal fragment exportは、exact-current
-InkScript file v2／procedure catalog v5／replay epoch 27としてABI v25に保持される。`.inkscript` file filter、
+InkScript file v2／procedure catalog v5／replay epoch 27としてABI v30に保持される。`.inkscript` file filter、
 Windows command／UI、実Windows path authorityはまだ接続しない。
 
 `inkpod_inkscript_source_parse` は `InkpodInkScriptSourceInput` の UTF-8 span を呼出中だけ借用し、128 MiB
@@ -209,14 +328,14 @@ Core destroyより先にreleaseする。NULL、short record、unknown flag/kind�
 non-Commit、oversize、Cancel、stale generation、panicはowned handleを公開せず、document/editor revision、history、
 dirty、savepoint、cache、asset、ID high-watermarkを変更しない。
 
-全InkScript recordは`struct_size`と`version == INKPOD_INKSCRIPT_RECORD_VERSION`を持つ。ABI v25のRust unit contract、
+全InkScript recordは`struct_size`と`version == INKPOD_INKSCRIPT_RECORD_VERSION`を持つ。ABI v30のRust unit contract、
 C11/C++20 layout/include、header/export drift、ABI smokeは、NULL、alignment、short record、unknown flag/kind、
 oversize、wrong thread、stale Core/controller generation、二段階copy、Cancel、double release、v16拒否を検証する。
 error textは既存thread-local二段階APIを使い、共有global mutable bufferを設けない。
 
-## InkScript execution／report（現行 ABI v25）
+## InkScript execution／report（現行 ABI v30）
 
-ABI v25は、M11／M12から維持している単一のRust planner／runnerへ、authority-free `PathIntent`、検証済み
+ABI v30は、M11／M12から維持している単一のRust planner／runnerへ、authority-free `PathIntent`、検証済み
 authority grant、immutable plan、preview、one-shot confirmation、PlanTask／RunTask、task event、detached reportを
 接続する。C++側へparser／catalog node、canonical procedure、別planner、別executorを公開しない。
 
@@ -250,7 +369,7 @@ UTF-8を一括copyし、短いrecordやcapacity不足で部分copyしない。sh
 drainしてtaskをreleaseした後、program、host context、session Core、owner Coreの順に破棄する。M26ではWindows authority／install
 adapter、Core engine command route、UI、file filter、clipboard、product `.inkscript` acceptanceを追加していない。
 
-## 角度付き撮影 frame（現行 ABI v25）
+## 角度付き撮影 frame（現行 ABI v30）
 
 `inkpod_core_shooting_frame_get` はCore所有スレッドのread-only queryで、
 完全サイズのcaller-owned `InkpodShootingFrameInfo`（136 bytes）と0/1 presenceを
@@ -303,7 +422,7 @@ queryで、include flag付き撮影frameを合成したRust-owned
 製品の保存／オープン API は同じ v32 のリプレイ／カタログ契約を使い、現行でないネイティブ形式の
 バージョンをすべて拒否する。
 
-現行 ABI v25 は、Core 所有スレッド専用の永続化操作を三つ提供する。`inkpod_core_get_persistence_info` は、
+現行 ABI v30 は、Core 所有スレッド専用の永続化操作を三つ提供する。`inkpod_core_get_persistence_info` は、
 形式バージョン、最後に成功したオープン方式、正本であるジャーナルの件数、決定的なリプレイ作業量と
 未保存変更量（`dirty_bytes`）、アセット使用量、`INKPOD_PERSISTENCE_CHECKPOINT_DUE` フラグを、
 リプレイや状態変更を行わずに返す。`open_strategy` は `INKPOD_NATIVE_OPEN_NOT_OPENED`、
@@ -318,14 +437,14 @@ queryで、include flag付き撮影frameを合成したRust-owned
 最初に失われるイベント数とプロシージャ数を表示する。出力先には開いているセッションが所有しないパスだけを
 許可し、作成したコピーを現在の保存先として採用しない。
 
-## 履歴可視化 snapshot（現行 ABI v25）
+## 履歴可視化 snapshot（現行 ABI v30）
 
 `inkpod_core_history_visualization_create` と
 `inkpod_core_history_visualization_create_with_task` は Core 所有スレッド専用の一括読み取り操作である。
 後者の `InkpodTask` は ready 状態で渡し、呼び出し中は任意スレッドから進捗照会と cooperative cancel が
 できるが、呼び出し完了前に解放してはならない。
 
-対話 UI は ABI v25 の分割 API を使う。`inkpod_core_history_visualization_builder_begin` は ready task と
+対話 UI は ABI v30 の分割 API を使う。`inkpod_core_history_visualization_builder_begin` は ready task と
 Core を受け取り、呼び出し時点の journal、Genesis、asset、高水位を Rust-owned
 `InkpodHistoryVisualizationBuilder` に固定する。`inkpod_history_visualization_builder_step` は同じ task と
 1 以上の `maximum_events` を受け取り、Core 所有スレッドで最大その件数だけ replay する。`out_progress` は
@@ -347,7 +466,7 @@ dirty、savepoint、persistent ID は変更されない。
 一括コピーする。部分的に短い buffer は `INKPOD_STATUS_BUFFER_TOO_SMALL` となり、Rust-owned の内部 pointer は
 公開しない。同じ handle の照会と release を同時に行ってはならず、解放後に行 metadata を利用してはならない。
 
-## 新規 Cell creation plan（現行 ABI v25）
+## 新規 Cell creation plan（現行 ABI v30）
 
 `InkpodCellCreationOptions` は sizing mode、入力寸法、軸別 DPI、各辺余白率、
 安全／最大寄り比率、五点 anchor、MainLine／Color 共通の RGBA8/16 storage format、
@@ -377,7 +496,7 @@ ID cursor、出力 `InkpodDocumentInfo` を変更しない。ABI v11 の
 `InkpodDocumentInfo` と `InkpodPaperFramesInput` は撮影／最大寄り frame を含み、
 前世代 layout を暗黙に受理しない。
 
-## Cut handle（現行 ABI v25）
+## Cut handle（現行 ABI v30）
 
 `InkpodCut` は Cut メタデータ、Cell 作成既定値、同一ディレクトリにある個別 Cell
 ファイルへの順序付き参照、独立した履歴／保存点を所有する Rust-owned opaque handle である。
@@ -425,10 +544,10 @@ symlink escape、identity mismatch は拒否する。
 wrong-thread 呼び出しは無効であり、所有権移譲にはならない。shutdown では全 `CutSession` を CoreHost
 停止前に owner thread 上で破棄する。
 
-## ABI v25 の `_v3` 付き値／ID 制御 API
+## ABI v30 の `_v3` 付き値／ID 制御 API
 
 この節の `V3` / `_v3` は API 群とレコード名の一部である。すべての呼び出しは、全体として
-ABI v25 に一致するヘッダーとライブラリの組み合わせで使用する。
+ABI v30 に一致するヘッダーとライブラリの組み合わせで使用する。
 
 `InkpodObjectId` は、オブジェクト種別、Core 世代、単調増加値からなる固定幅レコードである。Core、
 スナップショット、タスク、色配列、サンプル列、ラスタアセット、サムネイル、エクスポートは異なる種別を持つ。
@@ -560,9 +679,9 @@ Core エンジンスレッドで登録する。各列は 1–4 個の `InkpodSho
 これらは文書リビジョン、未保存状態、Undo を変更しない。永続化形式、テキスト入力フォーカスの保護、
 入力タイムアウト、衝突時に UI 上で割り当てを交換する方針は、フロントエンドの責務である。
 
-## Batch v5 graph／staged result／二セルpair preview（ABI v25）
+## Batch v5 graph／staged result／二セルpair preview（ABI v30）
 
-ABI v25 の public authoring catalog は `COLOR_REPLACE`、
+ABI v30 の public authoring catalog は `COLOR_REPLACE`、
 `MOVE_TO_COLOR_PLANE`、`MASKING`、`ERASE` の4種類だけである。Input と Output は
 `InkpodBatchOperationKind` へ混在せず、`InkpodBatchGraphInput` の input span と output
 fields に保持する。File／Folder の UTF-8 path、graph名、folder、naming template、
@@ -695,7 +814,7 @@ short/misaligned records,
 unknown pass kinds, invalid group structure, out-of-range item spans, nonzero
 reserved fields, and opacity above 1000 before the renderer retains a snapshot.
 The records transfer no ownership. The render-plan export was additive in ABI
-v5; the current library nevertheless requires the exact ABI v25 header,
+v5; the current library nevertheless requires the exact ABI v30 header,
 including its current selection and resource-accounting records.
 
 ### Filter preview session
@@ -703,7 +822,7 @@ including its current selection and resource-accounting records.
 `inkpod_core_filter_preview_begin[_task]`,
 `inkpod_core_filter_preview_update[_task]`,
 `inkpod_core_filter_preview_apply`, and `inkpod_core_filter_preview_cancel`
-operate on the Core owner thread and reuse the existing ABI v25 records. The
+operate on the Core owner thread and reuse the existing ABI v30 records. The
 `InkpodFilterInput` and any curve-point span are borrowed only for the call;
 `InkpodFilterPreviewInfo` and `InkpodDispatchResult` are caller-owned value
 records and require no release. `InkpodTask*` remains caller-owned: the caller
@@ -755,7 +874,7 @@ NULL, misalignment, short outer or nested records, zero/oversized counts,
 invalid stride, unknown primitive/flag, nonzero reserved fields, stale base,
 cross-target update, and point/work overflow are rejected without partial
 preview or committed publication. Preview snapshots follow the normal
-Rust-owned snapshot lifetime. These additive exports are retained in ABI v25 and do not
+Rust-owned snapshot lifetime. These additive exports are retained in ABI v30 and do not
 make an older ABI version acceptable.
 
 Windows-only Canvas overlay cancellation is separate from that Core state
@@ -899,7 +1018,7 @@ catalog 置換、pane target の変更、thumbnail eviction/invalidation では�
 長さを検証してから各画像をデコードする。全件成功時だけシーケンスを一括置換し、一件でも入力不正、
 デコード失敗、割り当て失敗があれば、以前のシーケンス、現在の文書、未保存状態、Undo を保つ。
 
-通常の前後セル切替は ABI v25 の additive な二段階 API を使う。
+通常の前後セル切替は ABI v30 の additive な二段階 API を使う。
 `inkpod_core_sequence_step_resolve` は Core 所有スレッド専用で、caller-owned の固定長 96-byte
 `InkpodSequenceStepPlan` に direction、`STOP`／`WRAP`、`EMPTY`／`SINGLE_CELL`／`STOPPED`／
 `ADVANCED`／`WRAPPED`、sequence revision、source／target の UUID・generation・自然順 index・
@@ -976,22 +1095,25 @@ Windows の製品経路は個別に filesystem を操作せず、これらの検
 1. `inkpod_core_sequence_switch_request` はcaller-ownedの固定長
    `InkpodSequenceSwitchRequest`へ、policy、source/target document UUID、sequence source
    generation、source document/editor revision、target indexを値としてコピーする。raw pointer、path、
-   pane indexは保持しない。同じcellへの要求は`REQUIRED` flagなしのsuccessであり、範囲外index／policy、
+   pane indexは保持しない。実切替でruntime preservation baselineからjournal／Redo／editor revisionが
+   進んでいればcleanでも`SOURCE_RECOVERY_REQUIRED`を立てる。同じcellへの要求は両flagなしのsuccessであり、範囲外index／policy、
    NULL／短い構造体はinvalidとなる。未結び付けの current document は `INVALID_STATE` となるため、
    初回の選択には activation plan を使う。
-2. callerが別statusのnative recovery saveとmetadata publicationを完了した後だけ、
-   `inkpod_core_sequence_commit_autosaved_switch`へ同じrequestを戻す。Coreはsource identityと両revisionを
-   再検査し、staleなら現在文書、history、dirty、出力を変更しない。
+2. `SOURCE_RECOVERY_REQUIRED`が立つ場合はcallerが別statusのnative recovery saveとmetadata publicationを
+   完了した後だけ、`inkpod_core_sequence_commit_autosaved_switch`へ同じrequestを戻す。bitがclearならsource
+   artifactを省略できる。Coreはsource identity、両revisionとpreservation conditionを再検査し、staleまたは
+   bitを弱めたrequestなら現在文書、history、dirty、出力を変更しない。
 3. target entryにexact recovery associationがある場合は、代わりに
    `inkpod_core_sequence_restore_autosaved_switch`へUTF-8 pathを渡す。path bytesは呼出中だけborrowedで、
    Coreは保持しない。current-version containerのdecode、asset検証、replay、target UUID照合をstaged Coreで
-   完了してから一回で交換し、復元文書を`RECOVERED|DIRTY`かつnormal-path非採用として返す。失敗時は
-   live Coreを交換しない。
+   完了してから一回で交換する。この低水準APIはpair proofを受け取らないauthority-none経路なので、復元文書を
+   `RECOVERED|DIRTY`かつnormal-path非採用として返す。製品の`IO_SEQUENCE_SWITCH` jobだけはmetadata v4のexact
+   pair proofと共通resolver baselineを検証後にtarget固有authority/savepointを再採用できる。失敗時はlive Coreを交換しない。
 
 これらはRust所有objectを新規に返さず、release関数も追加しない。Windows `DocumentSession`がartifact pathと
 metadataをUUID+source generationへ関連付け、CoreHost queueの完了前に別cellへ再解決しない。
 
-## Light Table 前後 N セル一括登録（現行 ABI v25）
+## Light Table 前後 N セル一括登録（現行 ABI v30）
 
 三つの additive API は Core 所有スレッド専用で、すべて caller-owned の固定幅レコードだけを使う。
 `inkpod_core_light_table_bulk_request` は対象 set ID、direction、N、base/step opacity を検証し、文書
@@ -1060,7 +1182,7 @@ read 後の bulk decode を nonblocking Core-owner queue へ渡す。read／deco
 generation を再検証する。終了時は Canvas sink を解除し、pending load を stale にしてから、owner thread 上で
 `InkpodSubpalette` を release する。
 
-## Floating transform（現行 ABI v25）
+## Floating transform（現行 ABI v30）
 
 ABI v10 の `InkpodFloatingTransform` は 48-byte の caller-owned borrowed
 入力で、`struct_size`、closed anchor `u32`、absolute document target X/Y、
@@ -1082,7 +1204,7 @@ unknown anchor、非有限 target/scale/angle、範囲外・非正 scale は
 48-byte layout自体を変えず、旧 reserved/translate field の意味を closed
 anchor/absolute target へ置き換えるため、ABI v9 caller は再コンパイルが必要である。
 
-## EditorDefaults / EditorState（現行 ABI v25）
+## EditorDefaults / EditorState（現行 ABI v30）
 
 ### 複数 edit target
 
@@ -1116,7 +1238,7 @@ anchor/absolute target へ置き換えるため、ABI v9 caller は再コンパ�
 
 ### 文書所有の saved-selection mask
 
-ABI v25 では current selection と saved-selection mask は layer／plane tree の外にある文書状態である。
+ABI v30 では current selection と saved-selection mask は layer／plane tree の外にある文書状態である。
 `inkpod_core_saved_selection_create` は現在の mask と非空 UTF-8 名を一つの canonical commit として保存し、
 成功時だけ新しい stable ID を返す。`inkpod_core_saved_selection_apply` は stable ID を指定して replace／add／subtract
 を一つの Undo 単位で current selection に適用する。`inkpod_core_saved_selection_get` は document order の index から
@@ -1124,7 +1246,7 @@ ID と名前を caller-owned buffer へコピーし、`rename` と `delete` は 
 呼び出し中だけ borrowed で、短い record、不正 UTF-8、存在しない ID、stale／overflow／allocation failure は文書、
 履歴、dirty、ID high-watermark、出力を変更しない。mask 本体を C++ 側へ公開したり Selection planeへ変換したりしない。
 
-次の八つの Core 所有スレッド用 API と固定幅レコードは ABI v2 以降に追加され、現行 ABI v25 に保持されている。
+次の八つの Core 所有スレッド用 API と固定幅レコードは ABI v2 以降に追加され、現行 ABI v30 に保持されている。
 ABI v2 のライブラリや呼び出し側を受理するという意味ではない。
 
 - `inkpod_core_get_editor_defaults` は文書作成前にも有効な Rust 所有の不変 `InkpodEditorDefaults` を、
@@ -1157,7 +1279,7 @@ ABI v2 のライブラリや呼び出し側を受理するという意味では�
   切り替えない。既存の `inkpod_core_select_color` は、同期コマンド開始時に現在の対象を Core 内で捕捉して
   委譲する。
 
-ABI v25 の `InkpodSelectionInput` と `InkpodEditorSelectionOptions` は、range interpretation、
+ABI v30 の `InkpodSelectionInput` と `InkpodEditorSelectionOptions` は、range interpretation、
 Q16.16 aspect、from-center／45度制約、`u32` turns、round／square trace、pressure-size、
 screen-size を固定幅値として保持する。gesture の rectangle／ellipse はちょうど二つの
 `InkpodSelectionPoint` を渡し、trace point は座標に加えて 0..1 の pressure を持つ。
@@ -1174,7 +1296,7 @@ footprint 内の一致 pixel だけを変更する。平滑化は仕様の固定
 公開レコードは `InkpodEditorFillOptions`、`InkpodEditorSelectionOptions`、
 `InkpodEditorBrushOptions`、`InkpodEditorStateInfo`、`InkpodEditorDefaults`、
 `InkpodEditorStateUpdate`、`InkpodEditorStrokeInput` である。呼び出し側は、最上位の入力レコードと、
-その入力が使用する各入れ子レコードの `struct_size` を、現行 ABI v25 ヘッダーにある完全な
+その入力が使用する各入れ子レコードの `struct_size` を、現行 ABI v30 ヘッダーにある完全な
 `sizeof(record)` 以上に設定し、予約領域と未知フラグを 0 にする。照会／更新の出力では、呼び出し側は
 最上位出力の `struct_size` だけを提示する。Core は成功時に、呼び出し側所有の完全なコピーと、各入れ子出力の
 `struct_size` を書き込む。短い最上位レコード、使用対象の短い入れ子入力、NULL、未知の列挙値／更新種別、
@@ -1195,7 +1317,7 @@ Windows の `CoreHost` は、発行時の `DocumentSessionId + Generation` を�
 再照会する。同一文書の複数ビューは一つの EditorState を共有し、別セッションは分離される。ワークスペースに
 残った以前の表示値を Core へ書き戻してはならない。
 
-## 正規 Genesis とアセット取り込み（現行 ABI v25）
+## 正規 Genesis とアセット取り込み（現行 ABI v30）
 
 Core は、Genesis の安定した文書 ID、別個の Cell ID、不変の基底面を所有する。空の文書では
 割り当て不要の `SolidWhite`、読み取り専用ラスタを基底として明示作成する経路では正規ラスタアセットが

@@ -32,5 +32,9 @@ bool PrivateRecoveryPath(
     std::uint64_t uuid_high,
     std::uint64_t uuid_low,
     std::wstring& output) noexcept;
+bool PrivateRecoveryAttemptPath(
+    std::uint64_t uuid_high,
+    std::uint64_t uuid_low,
+    std::wstring& output) noexcept;
 
 } // namespace inkpod::app

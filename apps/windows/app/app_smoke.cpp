@@ -111,6 +111,8 @@ void RecordSubpaletteSample(void* context, double x, double y) noexcept {
 }
 
 bool CommandSurfacesMatchComputedState(const ApplicationHost& state) noexcept;
+void AttachFilePreviewSequence(
+    ApplicationHost& state, const std::wstring& opened_path) noexcept;
 
 void DeleteSavedPairFixture(const std::wstring& path) noexcept {
     DeleteFileW(path.c_str());
@@ -1131,6 +1133,12 @@ void ResetUiForNewActiveDocument(
 bool ResolveConfiguredShortcut(ApplicationHost& state, std::uint32_t virtual_key, std::uint32_t modifiers, UINT& menu_command) noexcept;
 bool SamePersistentMetadata(const InkpodDocumentInfo& left, const InkpodDocumentInfo& right) noexcept;
 InkpodStatus SaveToPath(ApplicationHost& state, const std::wstring& path) noexcept;
+InkpodStatus SaveDocumentForContext(
+    ApplicationHost& state,
+    const CommandContext& context,
+    bool force_dialog,
+    std::function<void(InkpodStatus)> continuation,
+    bool wait_for_smoke) noexcept;
 void SetDrawingColor(ApplicationHost& state, InkpodColorValue color) noexcept;
 InkpodStatus SetEditorActiveTool(
     ApplicationHost& state, std::uint32_t tool) noexcept;
@@ -2206,7 +2214,9 @@ bool WaitForFileIo(ApplicationHost& state) noexcept {
 
 bool WaitForSequencePresentation(
     ApplicationHost& state, bool require_active_view_revision = false,
-    std::optional<std::uint64_t> active_view_frames_before = std::nullopt) noexcept {
+    std::optional<std::uint64_t> active_view_frames_before = std::nullopt,
+    std::optional<std::uint32_t> expected_active_index = std::nullopt,
+    std::optional<std::uint32_t> completed_before = std::nullopt) noexcept {
     if (state.engine == nullptr || state.renderer == nullptr) {
         return false;
     }
@@ -2228,8 +2238,8 @@ bool WaitForSequencePresentation(
             return false;
         }
     }
-    const auto completion_before =
-        state.Workspace().animation.smoke_sequence_switch_completed;
+    const auto completion_before = completed_before.value_or(
+        state.Workspace().animation.smoke_sequence_switch_completed);
     const bool was_pending =
         state.routing.sequence_switch_pending_token.load(std::memory_order_acquire) != 0U
         || state.routing.sequence_navigation_pending
@@ -2262,6 +2272,13 @@ bool WaitForSequencePresentation(
             || workspace->animation.sequence_switch_pending
             || document->sequence_activation_pending;
         if (!pending) {
+            if (completed_before.has_value()
+                && workspace->animation.smoke_sequence_switch_completed
+                    == completion_before) {
+                (void)MsgWaitForMultipleObjectsEx(
+                    0U, nullptr, 10U, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+                continue;
+            }
             if ((was_pending
                     || workspace->animation.smoke_sequence_switch_completed != completion_before)
                 && workspace->animation.smoke_sequence_switch_status != INKPOD_STATUS_OK) {
@@ -2272,6 +2289,19 @@ bool WaitForSequencePresentation(
             InkpodDocumentInfo info = EmptyDocumentInfo();
             if (!state.engine->GetDocumentInfo(session_id, generation, info)) {
                 return false;
+            }
+            if (expected_active_index.has_value()) {
+                InkpodSequenceCatalogInfo catalog{};
+                catalog.struct_size = sizeof(catalog);
+                if (!state.engine->GetSequenceCatalog(
+                        session_id, generation, catalog)
+                    || catalog.active_index != expected_active_index.value()
+                    || workspace->sequence_dialog.view.active_index
+                        != expected_active_index.value()) {
+                    (void)MsgWaitForMultipleObjectsEx(
+                        0U, nullptr, 10U, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+                    continue;
+                }
             }
             required_revision = info.document_revision;
             required_epoch = document->sequence_required_present_epoch;
@@ -4782,6 +4812,28 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         state.lifetime.smoke_test,
         client.right - client.left,
         client.bottom - client.top);
+    // The persisted 32:68 default can put Color exactly at its 192-DPI
+    // minimum even with the full monitor height. Balance the two existing
+    // panes for this structural transaction so both have measurable room to
+    // shrink when Reference is added. Restore the real weights below.
+    auto* structure_color_weight =
+        state.Workspace().windows.workspace.dock.Pane(DockPaneType::Color);
+    auto* structure_layer_weight =
+        state.Workspace().windows.workspace.dock.Pane(DockPaneType::Layer);
+    if (structure_color_weight == nullptr || structure_layer_weight == nullptr) {
+        return 11204;
+    }
+    const std::uint32_t structure_weight_total =
+        structure_color_weight->split_weight
+        + structure_layer_weight->split_weight;
+    structure_color_weight->split_weight = structure_weight_total / 2U;
+    structure_layer_weight->split_weight =
+        structure_weight_total - structure_color_weight->split_weight;
+    LayoutMainChrome(
+        state.Workspace().windows,
+        state.lifetime.smoke_test,
+        client.right - client.left,
+        client.bottom - client.top);
     auto& structure_tabs =
         state.Workspace().windows.workspace.right_tool_tabs;
     const ToolTabId structure_tab_id = structure_tabs.Selected();
@@ -5038,6 +5090,60 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         && has_no_pending_update(resize_right_tool_tabs)
         && has_no_pending_update(state.Workspace().windows.window)
         && add_sentinel_written && resize_sentinel_cleared(add_sentinel);
+    if (!structure_add_ok) {
+        std::fprintf(stderr,
+            "structure add failed: result=%lld tab=%d panes=%zu selected=%llu "
+            "visible=%d before=%ld,%ld/%ld,%ld "
+            "rects=%ld,%ld,%ld,%ld/%ld,%ld,%ld,%ld/%ld,%ld,%ld,%ld "
+            "focus=%p expected=%p "
+            "paints=%llu,%llu,%llu child=%llu list=%llu resets=%llu,%llu "
+            "counts=%d/%d,%d/%d selection=%d/%d,%d/%d top=%d/%d "
+            "pending=%d,%d,%d,%d,%d,%d,%d,%d "
+            "sentinel=%d/%d\n",
+            static_cast<long long>(reference_show_result),
+            structure_tab_after_add != nullptr,
+            structure_tab_after_add == nullptr ? 0U
+                : structure_tab_after_add->pane_count,
+            static_cast<unsigned long long>(structure_tabs.Selected().Value()),
+            IsWindowVisible(structure_reference) != FALSE,
+            structure_color_before.top, structure_color_before.bottom,
+            structure_layer_before.top, structure_layer_before.bottom,
+            structure_color_after_add.left, structure_color_after_add.top,
+            structure_color_after_add.right, structure_color_after_add.bottom,
+            structure_layer_after_add.left, structure_layer_after_add.top,
+            structure_layer_after_add.right, structure_layer_after_add.bottom,
+            structure_reference_after_add.left, structure_reference_after_add.top,
+            structure_reference_after_add.right, structure_reference_after_add.bottom,
+            structure_focus_after_add,
+            structure_reference_natural_focus == nullptr
+                ? structure_reference : structure_reference_natural_focus,
+            static_cast<unsigned long long>(structure_paints[0].count),
+            static_cast<unsigned long long>(structure_paints[1].count),
+            static_cast<unsigned long long>(structure_paints[2].count),
+            static_cast<unsigned long long>(structure_color_child_paints.count),
+            static_cast<unsigned long long>(structure_layer_list_paints.count),
+            static_cast<unsigned long long>(structure_color_resets.count),
+            static_cast<unsigned long long>(structure_layer_resets.count),
+            static_cast<int>(SendMessageW(
+                structure_color_list, LB_GETCOUNT, 0, 0)), color_count_before,
+            static_cast<int>(SendMessageW(
+                structure_layer_list, LB_GETCOUNT, 0, 0)), layer_count_before,
+            static_cast<int>(SendMessageW(
+                structure_color_list, LB_GETCURSEL, 0, 0)), color_selection_before,
+            static_cast<int>(SendMessageW(
+                structure_layer_list, LB_GETCURSEL, 0, 0)), layer_selection_before,
+            static_cast<int>(SendMessageW(
+                structure_color_list, LB_GETTOPINDEX, 0, 0)), color_top_before,
+            has_no_pending_update(structure_color),
+            has_no_pending_update(structure_layer),
+            has_no_pending_update(structure_reference),
+            has_no_pending_update(structure_color_list),
+            has_no_pending_update(structure_layer_list),
+            has_no_pending_update(structure_color_resize_control),
+            has_no_pending_update(resize_right_tool_tabs),
+            has_no_pending_update(state.Workspace().windows.window),
+            add_sentinel_written, resize_sentinel_cleared(add_sentinel));
+    }
     POINT remove_sentinel{};
     const bool remove_sentinel_written = structure_add_ok
         && place_resize_sentinel(structure_reference, remove_sentinel);
@@ -5182,6 +5288,16 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
             != FALSE
         && GetClientRect(state.Workspace().windows.window, &client) != FALSE;
     if (structure_workspace_restored) {
+        structure_color_weight =
+            state.Workspace().windows.workspace.dock.Pane(DockPaneType::Color);
+        structure_layer_weight =
+            state.Workspace().windows.workspace.dock.Pane(DockPaneType::Layer);
+        if (structure_color_weight == nullptr
+            || structure_layer_weight == nullptr) {
+            return 11204;
+        }
+        structure_color_weight->split_weight = color_weight_before;
+        structure_layer_weight->split_weight = layer_weight_before;
         LayoutMainChrome(
             state.Workspace().windows,
             state.lifetime.smoke_test,
@@ -6079,19 +6195,28 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
             == std::wstring::npos) {
         return 703;
     }
-    const std::wstring initial_recovery_path = state.Document().shell.recovery_path;
+    if (!state.Document().shell.recovery_path.empty()
+        || state.Document().shell.recovery_artifact_published) {
+        return 730;
+    }
     RecoveryMetadata initial_recovery_metadata{};
     InkpodDocumentInfo initial_recovery_info = EmptyDocumentInfo();
     std::vector<RecoveryCandidate> recovery_candidates;
-    if (initial_recovery_path.empty()) {
-        return 730;
-    }
     if (!QueueAutosave(
-            state, state.routing.targets.Capture(), initial_recovery_path)) {
+            state, state.routing.targets.Capture(), {})) {
         return 731;
     }
     if (state.engine->WaitIdle() != INKPOD_STATUS_OK || !WaitForFileIo(state)) {
         return 732;
+    }
+    const std::wstring initial_recovery_path =
+        state.Document().shell.recovery_path;
+    if (initial_recovery_path.empty()
+        || !state.Document().shell.recovery_artifact_published
+        || state.Document().shell.recovery_artifact_generation != 1U
+        || !inkpod::app::ValidRecoveryArtifactProof(
+            state.Document().shell.recovery_artifact_proof)) {
+        return 730;
     }
     if (GetFileAttributesW(initial_recovery_path.c_str())
         == INVALID_FILE_ATTRIBUTES) {
@@ -6131,14 +6256,6 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         return 738;
     }
     std::wstring active_stroke_recovery_path;
-    try {
-        active_stroke_recovery_path = initial_recovery_path + L".active-stroke-test.inkpod";
-    } catch (const std::bad_alloc&) {
-        return 217;
-    }
-    if (!DiscardRecoveryArtifact(active_stroke_recovery_path)) {
-        return 218;
-    }
     PumpPendingWindowMessages();
     const DWORD ui_thread = GetCurrentThreadId();
     const DWORD core_thread = state.engine->ThreadId();
@@ -6264,7 +6381,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     if (!QueueAutosave(
             state,
             state.routing.targets.Capture(),
-            active_stroke_recovery_path)) {
+            {})) {
         return 219;
     }
     PumpPendingWindowMessages();
@@ -6335,12 +6452,20 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     if (state.engine->WaitIdle() != INKPOD_STATUS_OK || !WaitForFileIo(state)) {
         return 37;
     }
+    active_stroke_recovery_path = state.Document().shell.recovery_path;
+    if (active_stroke_recovery_path.empty()
+        || active_stroke_recovery_path == initial_recovery_path
+        || !state.Document().shell.recovery_artifact_published
+        || state.Document().shell.recovery_artifact_generation != 2U
+        || !inkpod::app::ValidRecoveryArtifactProof(
+            state.Document().shell.recovery_artifact_proof)
+        || GetFileAttributesW(initial_recovery_path.c_str())
+            != INVALID_FILE_ATTRIBUTES) {
+        return 218;
+    }
     if (GetFileAttributesW(active_stroke_recovery_path.c_str())
         == INVALID_FILE_ATTRIBUTES) {
         return 220;
-    }
-    if (!DiscardRecoveryArtifact(active_stroke_recovery_path)) {
-        return 221;
     }
     PumpPendingWindowMessages();
     InkpodDocumentInfo after_line{};
@@ -6612,6 +6737,10 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         return 717;
     }
     if (GetFileAttributesW(initial_recovery_path.c_str()) != INVALID_FILE_ATTRIBUTES
+        || GetFileAttributesW(active_stroke_recovery_path.c_str())
+            != INVALID_FILE_ATTRIBUTES
+        || !state.Document().shell.recovery_path.empty()
+        || state.Document().shell.recovery_artifact_published
         || GetLastError() != ERROR_FILE_NOT_FOUND) {
         DeleteSavedPairFixture(path);
         return 216;
@@ -6645,9 +6774,18 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         return 49;
     }
     const inkpod::app::DocumentSessionId saved_session = state.Document().id;
-    if (CreateDefaultCell(state) != INKPOD_STATUS_OK
-        || !state.CloseDocumentSession(saved_session)
-        || OpenDocumentFromPath(state, path) != INKPOD_STATUS_OK) {
+    const InkpodStatus created_for_reopen = CreateDefaultCell(state);
+    const bool closed_for_reopen = created_for_reopen == INKPOD_STATUS_OK
+        && state.CloseDocumentSession(saved_session);
+    const InkpodStatus reopened_status = closed_for_reopen
+        ? OpenDocumentFromPath(state, path)
+        : INKPOD_STATUS_CANCELLED;
+    if (created_for_reopen != INKPOD_STATUS_OK || !closed_for_reopen
+        || reopened_status != INKPOD_STATUS_OK) {
+        std::fprintf(stderr,
+            "drawing pair reopen failed: create=%u close=%d open=%u\n",
+            static_cast<unsigned>(created_for_reopen), closed_for_reopen ? 1 : 0,
+            static_cast<unsigned>(reopened_status));
         DeleteSavedPairFixture(path);
         return 50;
     }
@@ -7420,7 +7558,6 @@ int RunPaintingRecoverySmoke(ApplicationHost& state) noexcept {
     }
     const auto suffix = static_cast<unsigned long long>(GetTickCount64());
     std::array<wchar_t, MAX_PATH> normal_buffer{};
-    std::array<wchar_t, MAX_PATH> recovery_buffer{};
     _snwprintf_s(
         normal_buffer.data(),
         normal_buffer.size(),
@@ -7429,16 +7566,8 @@ int RunPaintingRecoverySmoke(ApplicationHost& state) noexcept {
         temporary_directory.data(),
         GetCurrentProcessId(),
         suffix);
-    _snwprintf_s(
-        recovery_buffer.data(),
-        recovery_buffer.size(),
-        _TRUNCATE,
-        L"%lsinkpod-painting-recovery-%lu-%llu.inkpod",
-        temporary_directory.data(),
-        GetCurrentProcessId(),
-        suffix);
     const std::wstring normal_path(normal_buffer.data());
-    const std::wstring recovery_path(recovery_buffer.data());
+    std::wstring recovery_path;
     if (SaveToPath(state, normal_path) != INKPOD_STATUS_OK) {
         return 209;
     }
@@ -7467,21 +7596,48 @@ int RunPaintingRecoverySmoke(ApplicationHost& state) noexcept {
         0U,
         INKPOD_START_COLOR_ANY,
         0U};
-    if (state.engine->Invoke(
+    const InkpodStatus painting_edit_status = state.engine->Invoke(
             [edit](InkpodCore* core) {
                 InkpodDispatchResult result{};
                 result.struct_size = sizeof(result);
                 return inkpod_core_apply_stroke(core, &edit, &result);
             },
             true,
-            true) != INKPOD_STATUS_OK
-        || !QueueAutosave(
-               state, state.routing.targets.Capture(), recovery_path)
-        || state.engine->WaitIdle() != INKPOD_STATUS_OK || !WaitForFileIo(state)
+            true);
+    const bool painting_autosave_queued = painting_edit_status == INKPOD_STATUS_OK
+        && QueueAutosave(state, state.routing.targets.Capture(), {});
+    const InkpodStatus painting_autosave_idle = painting_autosave_queued
+        ? state.engine->WaitIdle() : INKPOD_STATUS_CANCELLED;
+    const bool painting_autosave_completed = painting_autosave_idle == INKPOD_STATUS_OK
+        && WaitForFileIo(state);
+    if (painting_edit_status != INKPOD_STATUS_OK || !painting_autosave_queued
+        || painting_autosave_idle != INKPOD_STATUS_OK
+        || !painting_autosave_completed) {
+        std::fprintf(stderr,
+            "painting autosave request failed: edit=%u queued=%d idle=%u completed=%d pending=%d\n",
+            static_cast<unsigned>(painting_edit_status),
+            painting_autosave_queued ? 1 : 0,
+            static_cast<unsigned>(painting_autosave_idle),
+            painting_autosave_completed ? 1 : 0,
+            state.file_io.HasPending() ? 1 : 0);
+        DeleteSavedPairFixture(normal_path);
+        return 211;
+    }
+    recovery_path = state.Document().shell.recovery_path;
+    if (recovery_path.empty()
+        || !state.Document().shell.recovery_artifact_published
         || GetFileAttributesW(normal_path.c_str()) == INVALID_FILE_ATTRIBUTES
         || GetFileAttributesW(recovery_path.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        std::fprintf(stderr,
+            "painting autosave publication failed: path_empty=%d published=%d generation=%llu native=%lu recovery=%lu\n",
+            recovery_path.empty() ? 1 : 0,
+            state.Document().shell.recovery_artifact_published ? 1 : 0,
+            static_cast<unsigned long long>(
+                state.Document().shell.recovery_artifact_generation),
+            GetFileAttributesW(normal_path.c_str()),
+            recovery_path.empty() ? INVALID_FILE_ATTRIBUTES
+                                  : GetFileAttributesW(recovery_path.c_str()));
         DeleteSavedPairFixture(normal_path);
-        (void)DiscardRecoveryArtifact(recovery_path);
         return 211;
     }
     InkpodDocumentInfo autosaved{};
@@ -7499,6 +7655,42 @@ int RunPaintingRecoverySmoke(ApplicationHost& state) noexcept {
         return 213;
     }
     const inkpod::app::DocumentSessionId recovered_session = state.Document().id;
+    const bool opened_recovery_is_unowned_provenance =
+        state.Document().shell.recovery_path == recovery_path
+        && !state.Document().shell.recovery_artifact_published
+        && state.Document().shell.recovery_artifact_generation == 0U;
+    const DocumentViewId recovered_view =
+        state.routing.targets.ActiveDocumentView();
+    const std::size_t recovered_count = state.Documents().Count();
+    const InkpodStatus recovery_original_open =
+        opened_recovery_is_unowned_provenance
+        ? OpenDocumentFromPath(state, normal_path)
+        : INKPOD_STATUS_INVALID_STATE;
+    const bool recovery_original_conflicted =
+        recovery_original_open == INKPOD_STATUS_FILE_CONFLICT
+        && state.Document().id == recovered_session
+        && state.routing.targets.ActiveDocumentView() == recovered_view
+        && state.Documents().Count() == recovered_count;
+    const bool recovered_autosave_queued = recovery_original_conflicted
+        && QueueAutosave(state, state.routing.targets.Capture(), {});
+    const bool recovered_autosave_completed = recovered_autosave_queued
+        && state.engine->WaitIdle() == INKPOD_STATUS_OK
+        && WaitForFileIo(state);
+    const std::wstring replacement_recovery_path =
+        state.Document().shell.recovery_path;
+    const bool recovered_autosave_published = recovered_autosave_completed
+        && !replacement_recovery_path.empty()
+        && replacement_recovery_path != recovery_path
+        && state.Document().shell.recovery_artifact_published
+        && state.Document().shell.recovery_artifact_generation == 1U
+        && inkpod::app::ValidRecoveryArtifactProof(
+            state.Document().shell.recovery_artifact_proof)
+        && GetFileAttributesW(replacement_recovery_path.c_str())
+            != INVALID_FILE_ATTRIBUTES
+        // Opening a recovery does not grant ownership of that provenance.
+        // Publishing a fresh append-only attempt must leave it untouched.
+        && GetFileAttributesW(recovery_path.c_str())
+            != INVALID_FILE_ATTRIBUTES;
     InkpodDocumentInfo recovered{};
     const bool recovery_state = QueryDocument(state, recovered)
         && (recovered.flags & INKPOD_DOCUMENT_FLAG_RECOVERED) != 0U
@@ -7512,18 +7704,97 @@ int RunPaintingRecoverySmoke(ApplicationHost& state) noexcept {
         },
         false,
         false);
-    const bool normal_unchanged = state.CloseDocumentSession(recovered_session)
+    // Replace the published recovery member after its exact proof was captured.
+    // "Don't Save" must not delete this foreign generation, but it may detach
+    // the stale association and continue closing after reporting the conflict.
+    const std::vector<std::uint8_t> foreign_recovery_bytes{
+        0x49U, 0x4eU, 0x4bU, 0x50U, 0x4fU, 0x44U, 0x2dU, 0x46U,
+        0x4fU, 0x52U, 0x45U, 0x49U, 0x47U, 0x4eU};
+    const int previous_dirty_choice = state.lifetime.smoke_dirty_prompt_choice;
+    const bool recovery_replaced = WriteFileAtomically(
+        replacement_recovery_path, foreign_recovery_bytes);
+    state.lifetime.smoke_dirty_prompt_choice = IDNO;
+    const LRESULT close_result = recovery_replaced
+        ? SendMessageW(state.Workspace().windows.window,
+            WM_COMMAND, IDM_DOCUMENT_CLOSE, 0)
+        : 0;
+    state.lifetime.smoke_dirty_prompt_choice = previous_dirty_choice;
+    const bool conflicted_recovery_preserved = close_result == 1
+        && state.Documents().Find(recovered_session) == nullptr
+        && GetFileAttributesW(replacement_recovery_path.c_str())
+            != INVALID_FILE_ATTRIBUTES;
+    const bool normal_unchanged = conflicted_recovery_preserved
         && OpenDocumentFromPath(state, normal_path) == INKPOD_STATUS_OK;
     InkpodDocumentInfo reopened_normal{};
     const bool normal_matches = QueryDocument(state, reopened_normal)
         && reopened_normal.color_plane_checksum == normally_saved.color_plane_checksum
         && reopened_normal.color_plane_checksum != recovered.color_plane_checksum;
-    DeleteSavedPairFixture(normal_path);
     (void)DiscardRecoveryArtifact(recovery_path);
-    return recovery_state && revert_status == INKPOD_STATUS_INVALID_STATE && normal_unchanged
-            && normal_matches
-        ? 0
-        : 214;
+    if (!replacement_recovery_path.empty()) {
+        (void)DiscardRecoveryArtifact(replacement_recovery_path);
+    }
+    const bool race_edit = normal_matches
+        && UpdateEditorFillOptionsForSmoke(
+            state, [](InkpodEditorFillOptions& fill) {
+                fill.gap_close = fill.gap_close == 5U ? 4U : 5U;
+            });
+    const bool race_autosave_queued = race_edit
+        && QueueAutosave(state, state.routing.targets.Capture(), {});
+    const InkpodStatus race_save = race_autosave_queued
+        ? SaveToPath(state, normal_path) : INKPOD_STATUS_CANCELLED;
+    std::vector<RecoveryCandidate> race_candidates;
+    InkpodDocumentInfo race_saved{};
+    const bool race_idle = WaitForFileIo(state);
+    const bool race_catalog = EnumerateRecoveryCandidates(race_candidates);
+    const bool race_orphan_absent = race_catalog
+        && std::none_of(race_candidates.begin(), race_candidates.end(),
+            [&reopened_normal](const RecoveryCandidate& candidate) {
+                return candidate.has_metadata
+                    && candidate.metadata.document_uuid_high
+                        == reopened_normal.document_uuid_high
+                    && candidate.metadata.document_uuid_low
+                        == reopened_normal.document_uuid_low;
+            });
+    const bool autosave_save_race_clean =
+        (race_save == INKPOD_STATUS_OK
+            || race_save == INKPOD_STATUS_PENDING)
+        && race_idle && QueryDocument(state, race_saved)
+        && (race_saved.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U
+        && state.Document().shell.recovery_path.empty()
+        && !state.Document().shell.recovery_artifact_published
+        && race_orphan_absent;
+    DeleteSavedPairFixture(normal_path);
+    const bool passed = opened_recovery_is_unowned_provenance
+            && recovery_original_conflicted
+            && recovered_autosave_published && recovery_state
+            && revert_status == INKPOD_STATUS_INVALID_STATE
+            && conflicted_recovery_preserved && normal_unchanged
+            && normal_matches && autosave_save_race_clean;
+    if (!passed) {
+        std::fprintf(stderr,
+            "painting recovery mismatch: provenance=%d original=%u/%d "
+            "published=%d state=%d "
+            "revert=%u replaced=%d close=%lld gone=%d foreign=%lu "
+            "preserved=%d normal_open=%d normal_match=%d race=%d/%u/%d/%d\n",
+            opened_recovery_is_unowned_provenance ? 1 : 0,
+            static_cast<unsigned>(recovery_original_open),
+            recovery_original_conflicted ? 1 : 0,
+            recovered_autosave_published ? 1 : 0,
+            recovery_state ? 1 : 0,
+            static_cast<unsigned>(revert_status),
+            recovery_replaced ? 1 : 0,
+            static_cast<long long>(close_result),
+            state.Documents().Find(recovered_session) == nullptr ? 1 : 0,
+            GetFileAttributesW(replacement_recovery_path.c_str()),
+            conflicted_recovery_preserved ? 1 : 0,
+            normal_unchanged ? 1 : 0,
+            normal_matches ? 1 : 0,
+            race_autosave_queued ? 1 : 0,
+            static_cast<unsigned>(race_save),
+            race_idle ? 1 : 0,
+            race_orphan_absent ? 1 : 0);
+    }
+    return passed ? 0 : 214;
 }
 
 int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
@@ -9838,11 +10109,47 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         state.lifetime.smoke_raster_path.clear();
         return 1490;
     }
-    if (state.Document().shell.current_path != asset_base_save
+    std::wstring normalized_asset_base_save;
+    std::wstring normalized_asset_base_companion;
+    std::wstring normalized_saved_authority;
+    std::wstring normalized_raster_authority;
+    std::wstring normalized_recent_authority;
+    const auto* asset_base_recent = state.RecentDocumentAt(0U);
+    if (!inkpod::app::NormalizeDocumentFilePath(
+            asset_base_save, normalized_asset_base_save)
+        || !inkpod::app::NormalizeDocumentFilePath(
+            asset_base_companion, normalized_asset_base_companion)
+        || !inkpod::app::NormalizeDocumentFilePath(
+            state.Document().shell.current_path, normalized_saved_authority)
+        || !inkpod::app::NormalizeDocumentFilePath(
+            state.Document().shell.pair_raster_path,
+            normalized_raster_authority)
+        || asset_base_recent == nullptr
+        || !inkpod::app::NormalizeDocumentFilePath(
+            asset_base_recent->path, normalized_recent_authority)
+        || normalized_saved_authority != normalized_asset_base_save
         || !state.Document().shell.source_path.empty()
-        || state.Document().shell.recovery_path.empty()
+        || !state.Document().shell.planned_native_path.empty()
+        || normalized_raster_authority != normalized_asset_base_companion
+        || !state.Document().shell.recovery_path.empty()
+        || state.Document().shell.recovery_artifact_published
         || !state.Document().shell.recovery_original_path.empty()
-        || state.RecentDocumentCount() != recent_before_asset_base_save + 1U) {
+        // The first native publication replaces this session's raster-driven
+        // logical recent entry; it must not add a second entry for the pair.
+        || state.RecentDocumentCount() != recent_before_asset_base_save
+        || normalized_recent_authority != normalized_asset_base_save
+        || asset_base_recent->identity != state.Document().identity) {
+        std::fwprintf(stderr,
+            L"asset save authority mismatch: current=%d source_empty=%d planned_empty=%d "
+            L"raster=%d recovery_empty=%d published=%d original_empty=%d recent=%zu/%zu\n",
+            normalized_saved_authority == normalized_asset_base_save,
+            state.Document().shell.source_path.empty(),
+            state.Document().shell.planned_native_path.empty(),
+            normalized_raster_authority == normalized_asset_base_companion,
+            state.Document().shell.recovery_path.empty(),
+            state.Document().shell.recovery_artifact_published,
+            state.Document().shell.recovery_original_path.empty(),
+            state.RecentDocumentCount(), recent_before_asset_base_save);
         state.lifetime.smoke_raster_path.clear();
         return 1491;
     }
@@ -10103,6 +10410,13 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         || state.Document().shell.current_path != before_cancelled_swap_shell.current_path
         || state.Document().shell.source_path != before_cancelled_swap_shell.source_path
         || state.Document().shell.recovery_path != before_cancelled_swap_shell.recovery_path
+        || state.Document().shell.recovery_artifact_generation
+            != before_cancelled_swap_shell.recovery_artifact_generation
+        || state.Document().shell.recovery_artifact_published
+            != before_cancelled_swap_shell.recovery_artifact_published
+        || std::memcmp(&state.Document().shell.recovery_artifact_proof,
+               &before_cancelled_swap_shell.recovery_artifact_proof,
+               sizeof(state.Document().shell.recovery_artifact_proof)) != 0
         || state.Document().shell.recovery_original_path != before_cancelled_swap_shell.recovery_original_path) {
         DeleteSavedPairFixture(swap_save);
         DeleteFileW(state.lifetime.smoke_raster_path.c_str());
@@ -10156,12 +10470,28 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         || state.Document().shell.current_path != before_swap_shell.current_path
         || state.Document().shell.source_path != before_swap_shell.source_path
         || state.Document().shell.recovery_path != before_swap_shell.recovery_path
+        || state.Document().shell.recovery_artifact_generation
+            != before_swap_shell.recovery_artifact_generation
+        || state.Document().shell.recovery_artifact_published
+            != before_swap_shell.recovery_artifact_published
+        || std::memcmp(&state.Document().shell.recovery_artifact_proof,
+               &before_swap_shell.recovery_artifact_proof,
+               sizeof(state.Document().shell.recovery_artifact_proof)) != 0
         || state.Document().shell.recovery_original_path != before_swap_shell.recovery_original_path
         || !old_swap_pair_unchanged()) {
         return 4100;
     }
     const std::uint32_t swap_prompt_count =
         state.lifetime.smoke_dirty_prompt_count;
+    state.lifetime.smoke_hold_sequence_auto_publication = true;
+    state.lifetime.smoke_deferred_sequence_auto_publication = {};
+    AttachFilePreviewSequence(state, state.lifetime.smoke_raster_path);
+    if (!state.lifetime.smoke_deferred_sequence_auto_publication) {
+        state.lifetime.smoke_hold_sequence_auto_publication = false;
+        return 4183;
+    }
+    auto publish_pre_swap_auto = std::move(
+        state.lifetime.smoke_deferred_sequence_auto_publication);
     state.lifetime.smoke_dirty_prompt_choice = IDOK;
     const LRESULT confirmed_swap = SendMessageW(
         state.Workspace().windows.window,
@@ -10169,12 +10499,24 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         IDM_LT_ITEM_SWAP,
         0);
     state.lifetime.smoke_dirty_prompt_choice = IDNO;
+    state.lifetime.smoke_hold_sequence_auto_publication = false;
     if (confirmed_swap != 1) {
         DeleteSavedPairFixture(swap_save);
         DeleteFileW((swap_save + L".recovery.inkpod").c_str());
         DeleteFileW(state.lifetime.smoke_raster_path.c_str());
         state.lifetime.smoke_raster_path.clear();
         return 4093;
+    }
+    InkpodSequenceCatalogInfo swapped_catalog{};
+    swapped_catalog.struct_size = sizeof(swapped_catalog);
+    if (!publish_pre_swap_auto
+        || publish_pre_swap_auto() != INKPOD_STATUS_OK
+        || !state.engine->GetSequenceCatalog(
+            state.Document().id, state.Document().generation,
+            swapped_catalog)
+        || swapped_catalog.cell_count != 0U
+        || state.Document().SequenceFileBindingAt(0U) != nullptr) {
+        return 4184;
     }
     if (state.lifetime.smoke_dirty_prompt_count != swap_prompt_count) {
         DeleteSavedPairFixture(swap_save);
@@ -10190,7 +10532,8 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         || !state.Document().shell.current_path.empty()
         || !state.Document().shell.source_path.empty()
         || !state.Document().shell.recovery_original_path.empty()
-        || state.Document().shell.recovery_path.empty()
+        || !state.Document().shell.recovery_path.empty()
+        || state.Document().shell.recovery_artifact_published
         || state.Document().identity != inkpod::app::UntitledDocumentIdentity(
             swapped_document.document_uuid_high, swapped_document.document_uuid_low)
         || state.Document().identity == before_swap_identity
@@ -10227,6 +10570,16 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         state.lifetime.smoke_raster_path.clear();
         return 410;
     }
+    struct SequenceCellPairFixture final {
+        ~SequenceCellPairFixture() {
+            DeleteSavedPairFixture(L"cell1.inkpod");
+            DeleteSavedPairFixture(L"cell3.inkpod");
+            DeleteSavedPairFixture(L"cell10.inkpod");
+        }
+    } sequence_cell_pairs;
+    DeleteSavedPairFixture(L"cell1.inkpod");
+    DeleteSavedPairFixture(L"cell3.inkpod");
+    DeleteSavedPairFixture(L"cell10.inkpod");
     try {
         state.lifetime.smoke_sequence_paths = {L"cell10.png", L"cell1.png", L"cell3.png"};
     } catch (const std::bad_alloc&) {
@@ -10235,10 +10588,229 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         return 410;
     }
     for (const auto& path : state.lifetime.smoke_sequence_paths) {
-        DeleteSavedPairFixture(path);
         if (!WriteFileAtomically(path, sequence_source)) {
             return 410;
         }
+    }
+    // Exercise all catalog/save completion orders on a disposable real raster
+    // session. AUTO has already committed its Core catalog while only its UI
+    // publication is held, so the pair Save must rebase the active binding to
+    // the replacement raster identity. A later explicit import must then make
+    // that held AUTO publication a no-op, and two concurrent explicit imports
+    // must serialize with the most recently issued catalog winning.
+    try {
+    struct SequenceRaceSmokeGuard final {
+        ApplicationHost& state;
+        std::wstring previous_native_save_path;
+        const std::wstring busy_save_path{L"inkpod-busy-save-as.inkpod"};
+
+        explicit SequenceRaceSmokeGuard(ApplicationHost& owner)
+            : state(owner),
+              previous_native_save_path(
+                  std::move(owner.lifetime.smoke_native_save_path)) {}
+        ~SequenceRaceSmokeGuard() {
+            DeleteSavedPairFixture(busy_save_path);
+            state.lifetime.smoke_native_save_path =
+                std::move(previous_native_save_path);
+            state.lifetime.smoke_hold_sequence_auto_publication = false;
+            state.lifetime.smoke_async_sequence_import = false;
+            state.lifetime.smoke_deferred_sequence_auto_publication = {};
+            state.lifetime.smoke_after_native_save_path_selected = {};
+        }
+    } sequence_race_guard{state};
+    const DocumentViewId sequence_race_return_view = state.ActiveView().id;
+    const auto full_sequence_paths = state.lifetime.smoke_sequence_paths;
+    state.lifetime.smoke_hold_sequence_auto_publication = true;
+    if (OpenDocumentFromPath(state, L"cell1.png") != INKPOD_STATUS_OK
+        || !state.lifetime.smoke_deferred_sequence_auto_publication) {
+        return 4170;
+    }
+    const auto sequence_race_session = state.Document().id;
+    const InkpodStatus sequence_race_save =
+        SaveToPath(state, L"cell1.inkpod");
+    if ((sequence_race_save != INKPOD_STATUS_OK
+            && sequence_race_save != INKPOD_STATUS_PENDING)
+        || !WaitForFileIo(state)
+        || state.Document().shell.pair_raster_path.empty()) {
+        std::fprintf(stderr,
+            "sequence AUTO/save race setup failed: status=%u current=%ls raster=%ls\n",
+            static_cast<unsigned>(sequence_race_save),
+            state.Document().shell.current_path.c_str(),
+            state.Document().shell.pair_raster_path.c_str());
+        return 4171;
+    }
+    auto publish_saved_auto = std::move(
+        state.lifetime.smoke_deferred_sequence_auto_publication);
+    state.lifetime.smoke_hold_sequence_auto_publication = false;
+    if (!publish_saved_auto
+        || publish_saved_auto() != INKPOD_STATUS_OK) {
+        return 4172;
+    }
+    InkpodSequenceCatalogInfo saved_auto_catalog{};
+    saved_auto_catalog.struct_size = sizeof(saved_auto_catalog);
+    const auto* saved_auto_binding =
+        state.engine->GetSequenceCatalog(
+            state.Document().id, state.Document().generation,
+            saved_auto_catalog)
+            && saved_auto_catalog.active_index
+                != INKPOD_SEQUENCE_INDEX_NONE
+        ? state.Document().SequenceFileBindingAt(
+            saved_auto_catalog.active_index)
+        : nullptr;
+    if (saved_auto_binding == nullptr
+        || state.Document().pair_raster_identity.kind
+            != inkpod::app::DocumentIdentityKind::WindowsFile
+        || saved_auto_binding->raster_identity
+            != state.Document().pair_raster_identity) {
+        return 4173;
+    }
+    state.lifetime.smoke_hold_sequence_auto_publication = true;
+    AttachFilePreviewSequence(state, L"cell1.png");
+    if (!state.lifetime.smoke_deferred_sequence_auto_publication
+        || SendMessageW(state.Workspace().windows.window,
+               WM_COMMAND, IDM_SEQ_IMPORT, 0) != 1) {
+        return 4174;
+    }
+    InkpodSequenceCatalogInfo explicit_catalog{};
+    explicit_catalog.struct_size = sizeof(explicit_catalog);
+    if (!state.engine->GetSequenceCatalog(
+            state.Document().id, state.Document().generation,
+            explicit_catalog)) {
+        return 4175;
+    }
+    auto publish_stale_auto = std::move(
+        state.lifetime.smoke_deferred_sequence_auto_publication);
+    state.lifetime.smoke_hold_sequence_auto_publication = false;
+    InkpodSequenceCatalogInfo after_stale_auto{};
+    after_stale_auto.struct_size = sizeof(after_stale_auto);
+    if (!publish_stale_auto
+        || publish_stale_auto() != INKPOD_STATUS_OK
+        || !state.engine->GetSequenceCatalog(
+            state.Document().id, state.Document().generation,
+            after_stale_auto)
+        || after_stale_auto.sequence_revision
+            != explicit_catalog.sequence_revision
+        || after_stale_auto.owner_generation
+            != explicit_catalog.owner_generation
+        || after_stale_auto.cell_count != explicit_catalog.cell_count) {
+        return 4176;
+    }
+    state.lifetime.smoke_async_sequence_import = true;
+    state.lifetime.smoke_sequence_paths = {L"cell10.png"};
+    if (SendMessageW(state.Workspace().windows.window,
+            WM_COMMAND, IDM_SEQ_IMPORT, 0) != 1) {
+        return 4177;
+    }
+    state.lifetime.smoke_sequence_paths = {L"cell3.png", L"cell1.png"};
+    if (SendMessageW(state.Workspace().windows.window,
+            WM_COMMAND, IDM_SEQ_IMPORT, 0) != 1
+        || !WaitForFileIo(state)) {
+        return 4178;
+    }
+    state.lifetime.smoke_async_sequence_import = false;
+    const auto* latest_first = state.Document().SequenceFileBindingAt(0U);
+    const auto* latest_second = state.Document().SequenceFileBindingAt(1U);
+    std::wstring normalized_latest_first;
+    std::wstring normalized_latest_second;
+    std::wstring normalized_cell1;
+    std::wstring normalized_cell3;
+    if (latest_first == nullptr || latest_second == nullptr
+        || state.Document().SequenceFileBindingAt(2U) != nullptr
+        || !inkpod::app::NormalizeDocumentFilePath(
+            latest_first->raster_path, normalized_latest_first)
+        || !inkpod::app::NormalizeDocumentFilePath(
+            latest_second->raster_path, normalized_latest_second)
+        || !inkpod::app::NormalizeDocumentFilePath(
+            L"cell1.png", normalized_cell1)
+        || !inkpod::app::NormalizeDocumentFilePath(
+            L"cell3.png", normalized_cell3)
+        || normalized_latest_first != normalized_cell1
+        || normalized_latest_second != normalized_cell3) {
+        return 4179;
+    }
+
+    // Save and Save As are disabled while any same-session file operation is
+    // pending. The runtime guard is repeated both before opening the dialog and
+    // after it returns, because a native dialog can dispatch a nested command.
+    DeleteSavedPairFixture(sequence_race_guard.busy_save_path);
+    state.lifetime.smoke_native_save_path =
+        sequence_race_guard.busy_save_path;
+    state.lifetime.smoke_async_sequence_import = true;
+    state.lifetime.smoke_sequence_paths = {L"cell10.png"};
+    if (SendMessageW(state.Workspace().windows.window,
+            WM_COMMAND, IDM_SEQ_IMPORT, 0) != 1
+        || !state.file_io.HasPending(
+            state.Document().id, state.Document().generation)) {
+        return 4185;
+    }
+    bool issue_time_dialog_reached{};
+    state.lifetime.smoke_after_native_save_path_selected =
+        [&issue_time_dialog_reached] { issue_time_dialog_reached = true; };
+    const InkpodStatus issue_time_save = SaveDocumentForContext(
+        state, state.routing.targets.Capture(), true, {}, false);
+    if (issue_time_save != INKPOD_STATUS_INVALID_STATE
+        || issue_time_dialog_reached
+        || inkpod::windows::ui::IsCommandEnabled(
+            state.Workspace().command_states, IDM_FILE_SAVE)
+        || inkpod::windows::ui::IsCommandEnabled(
+            state.Workspace().command_states, IDM_FILE_SAVE_AS)
+        || GetFileAttributesW(sequence_race_guard.busy_save_path.c_str())
+            != INVALID_FILE_ATTRIBUTES) {
+        return 4186;
+    }
+    if (!WaitForFileIo(state)
+        || !inkpod::windows::ui::IsCommandEnabled(
+            state.Workspace().command_states, IDM_FILE_SAVE)
+        || !inkpod::windows::ui::IsCommandEnabled(
+            state.Workspace().command_states, IDM_FILE_SAVE_AS)) {
+        return 4187;
+    }
+
+    bool selected_path_hook_reached{};
+    bool nested_import_accepted{};
+    const auto authority_before_busy_save = state.Document().identity;
+    const auto native_path_before_busy_save = state.Document().shell.current_path;
+    state.lifetime.smoke_sequence_paths = {L"cell1.png", L"cell3.png"};
+    state.lifetime.smoke_after_native_save_path_selected =
+        [&state, &selected_path_hook_reached, &nested_import_accepted] {
+            selected_path_hook_reached = true;
+            nested_import_accepted = SendMessageW(
+                state.Workspace().windows.window,
+                WM_COMMAND,
+                IDM_SEQ_IMPORT,
+                0) == 1;
+        };
+    const InkpodStatus execution_time_save = SaveDocumentForContext(
+        state, state.routing.targets.Capture(), true, {}, false);
+    if (execution_time_save != INKPOD_STATUS_INVALID_STATE
+        || !selected_path_hook_reached || !nested_import_accepted
+        || !state.file_io.HasPending(
+            state.Document().id, state.Document().generation)
+        || GetFileAttributesW(sequence_race_guard.busy_save_path.c_str())
+            != INVALID_FILE_ATTRIBUTES) {
+        return 4188;
+    }
+    if (!WaitForFileIo(state)
+        || state.Document().identity != authority_before_busy_save
+        || state.Document().shell.current_path != native_path_before_busy_save
+        || GetFileAttributesW(sequence_race_guard.busy_save_path.c_str())
+            != INVALID_FILE_ATTRIBUTES
+        || GetFileAttributesW(L"inkpod-busy-save-as.png")
+            != INVALID_FILE_ATTRIBUTES) {
+        return 4189;
+    }
+    state.lifetime.smoke_async_sequence_import = false;
+    state.lifetime.smoke_sequence_paths = full_sequence_paths;
+    if (!state.CloseDocumentSession(sequence_race_session)
+        || !ActivateDocumentTab(state, sequence_race_return_view)) {
+        return 4180;
+    }
+    DeleteSavedPairFixture(L"cell1.inkpod");
+    if (!WriteFileAtomically(L"cell1.png", sequence_source)) {
+        return 4181;
+    }
+    } catch (const std::bad_alloc&) {
+        return 4182;
     }
     // The completed Light Table swap uses a solid base with raster layer pixels.
     // Initial binding requires the immutable raster Genesis from a real open.
@@ -10284,6 +10856,105 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         || sequence_view.cells[2].name != L"cell10.png") {
         return 1504;
     }
+    constexpr std::array<const wchar_t*, 3U> sequence_raster_names{
+        L"cell1.png", L"cell3.png", L"cell10.png"};
+    std::array<std::wstring, 3U> sequence_raster_paths{};
+    std::array<std::wstring, 3U> sequence_native_paths{};
+    std::array<inkpod::app::DocumentIdentity, 3U> sequence_raster_identities{};
+    std::array<inkpod::app::DocumentIdentity, 3U> sequence_native_identities{};
+    try {
+        for (std::size_t index = 0U; index < sequence_raster_paths.size(); ++index) {
+            const auto* binding = state.Document().SequenceFileBindingAt(index);
+            std::wstring normalized_binding;
+            std::wstring normalized_expected;
+            if (binding == nullptr
+                || binding->raster_identity.kind
+                    != inkpod::app::DocumentIdentityKind::WindowsFile
+                || !inkpod::app::NormalizeDocumentFilePath(
+                    binding->raster_path, normalized_binding)
+                || !inkpod::app::NormalizeDocumentFilePath(
+                    sequence_raster_names[index], normalized_expected)
+                || normalized_binding != normalized_expected) {
+                return 15105;
+            }
+            sequence_raster_paths[index] = binding->raster_path;
+            const std::size_t separator = binding->raster_path.find_last_of(L"\\/");
+            const std::size_t dot = binding->raster_path.find_last_of(L'.');
+            if (dot == std::wstring::npos
+                || (separator != std::wstring::npos && dot < separator)) {
+                return 15105;
+            }
+            sequence_native_paths[index] = binding->raster_path.substr(0U, dot)
+                + L".inkpod";
+            if (!inkpod::app::ResolveDocumentFileIdentity(
+                    state.file_io.Manager(), sequence_native_paths[index],
+                    sequence_native_identities[index])
+                || sequence_native_identities[index].kind
+                    != inkpod::app::DocumentIdentityKind::NormalizedPath) {
+                return 15105;
+            }
+            sequence_raster_identities[index] = binding->raster_identity;
+        }
+    } catch (const std::bad_alloc&) {
+        return 15105;
+    }
+    const auto sequence_pair_authority_matches =
+        [&state, &sequence_raster_paths, &sequence_native_paths,
+            &sequence_raster_identities, &sequence_native_identities](
+            std::size_t index, bool committed) {
+            const auto same_path = [](const std::wstring& left,
+                                      const std::wstring& right) {
+                std::wstring normalized_left;
+                std::wstring normalized_right;
+                return !left.empty() && !right.empty()
+                    && inkpod::app::NormalizeDocumentFilePath(
+                        left, normalized_left)
+                    && inkpod::app::NormalizeDocumentFilePath(
+                        right, normalized_right)
+                    && normalized_left == normalized_right;
+            };
+            return index < sequence_raster_paths.size()
+                && (committed
+                    ? same_path(
+                          state.Document().shell.current_path,
+                          sequence_native_paths[index])
+                        && state.Document().shell.planned_native_path.empty()
+                    : state.Document().shell.current_path.empty()
+                        && same_path(
+                            state.Document().shell.planned_native_path,
+                            sequence_native_paths[index]))
+                && (state.Document().shell.source_path.empty()
+                    ? committed
+                    : same_path(
+                        state.Document().shell.source_path,
+                        sequence_raster_paths[index]))
+                && same_path(
+                    state.Document().shell.pair_raster_path,
+                    sequence_raster_paths[index])
+                && state.Document().shell.recovery_original_path.empty()
+                && state.Document().identity == sequence_native_identities[index]
+                && state.Document().pair_raster_identity
+                    == sequence_raster_identities[index];
+        };
+    const auto sequence_binding_authority_matches =
+        [&state, &sequence_raster_paths, &sequence_raster_identities](
+            std::size_t index) {
+            if (index >= sequence_raster_paths.size()) {
+                return false;
+            }
+            const auto* binding =
+                state.Document().SequenceFileBindingAt(index);
+            std::wstring binding_path;
+            std::wstring expected_path;
+            return binding != nullptr
+                && binding->raster_identity
+                    == sequence_raster_identities[index]
+                && inkpod::app::NormalizeDocumentFilePath(
+                    binding->raster_path, binding_path)
+                && inkpod::app::NormalizeDocumentFilePath(
+                    sequence_raster_paths[index], expected_path)
+                && binding_path == expected_path;
+        };
     if (!inkpod::windows::ui::panes::SequencePaneItemHasThumbnail(
             state.Workspace().sequence_palette, 0U)
         || sequence_view.cells[0].thumbnail_width == 0U
@@ -10363,6 +11034,8 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         return 1507;
     }
     const auto saved_sequence_identity = state.Document().identity;
+    const auto saved_sequence_pair_identity =
+        state.Document().pair_raster_identity;
     const auto saved_sequence_shell = state.Document().shell;
     std::vector<std::uint8_t> saved_sequence_native;
     std::vector<std::uint8_t> saved_sequence_raster;
@@ -10377,11 +11050,22 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
             && ReadBoundedFile(L"inkpod-lt-smoke.png", raster)
             && native == saved_sequence_native && raster == saved_sequence_raster;
     };
-    const auto authority_unchanged = [&state](const auto& identity, const auto& shell) {
+    const auto authority_unchanged = [&state](
+        const auto& identity, const auto& pair_identity, const auto& shell) {
         return state.Document().identity == identity
+            && state.Document().pair_raster_identity == pair_identity
             && state.Document().shell.current_path == shell.current_path
             && state.Document().shell.source_path == shell.source_path
+            && state.Document().shell.planned_native_path == shell.planned_native_path
+            && state.Document().shell.pair_raster_path == shell.pair_raster_path
             && state.Document().shell.recovery_path == shell.recovery_path
+            && state.Document().shell.recovery_artifact_generation
+                == shell.recovery_artifact_generation
+            && state.Document().shell.recovery_artifact_published
+                == shell.recovery_artifact_published
+            && std::memcmp(&state.Document().shell.recovery_artifact_proof,
+                   &shell.recovery_artifact_proof,
+                   sizeof(state.Document().shell.recovery_artifact_proof)) == 0
             && state.Document().shell.recovery_original_path == shell.recovery_original_path;
     };
     struct SequenceSaveChoiceFixture final {
@@ -10435,7 +11119,10 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         reinterpret_cast<LPARAM>(sequence_cells));
     state.lifetime.smoke_dirty_prompt_choice = IDNO;
     InkpodDocumentInfo selected_ten = EmptyDocumentInfo();
-    if (!WaitForSequencePresentation(state)
+    const bool selected_ten_presented = WaitForSequencePresentation(state);
+    const auto* selected_ten_binding =
+        state.Document().SequenceFileBindingAt(2U);
+    if (!selected_ten_presented
         || !QueryDocument(state, selected_ten)
         || state.Workspace().sequence_dialog.view.active_index != 2U
         || state.lifetime.smoke_dirty_prompt_count
@@ -10443,7 +11130,20 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         || selected_ten.document_uuid_high != sequence_saved.document_uuid_high
         || selected_ten.document_uuid_low != sequence_saved.document_uuid_low
         || selected_ten.document_revision != sequence_saved.document_revision
-        || !authority_unchanged(saved_sequence_identity, saved_sequence_shell)
+        || !authority_unchanged(
+            saved_sequence_identity, saved_sequence_pair_identity,
+            saved_sequence_shell)
+        || selected_ten_binding == nullptr
+        || selected_ten_binding->document_uuid_high
+            != first_activation.source_document_uuid_high
+        || selected_ten_binding->document_uuid_low
+            != first_activation.source_document_uuid_low
+        || selected_ten_binding->source_generation
+            != first_activation.target_source_generation
+        || selected_ten_binding->raster_path
+            != saved_sequence_shell.pair_raster_path
+        || selected_ten_binding->raster_identity
+            != saved_sequence_pair_identity
         || !saved_sequence_pair_unchanged()) {
         InkpodSequenceActivationPlan diagnostic{};
         diagnostic.struct_size = sizeof(diagnostic);
@@ -10463,7 +11163,17 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
             saved_sequence_pair_unchanged());
         return 875;
     }
+    // BIND replaces this sequence slot's imported preview authority with the
+    // live document's exact saved pair. All later replacement/reservation
+    // checks for the slot must use that published authority, not the original
+    // cell10.png discovery fixture.
+    sequence_native_paths[2] = saved_sequence_shell.current_path;
+    sequence_raster_paths[2] = saved_sequence_shell.pair_raster_path;
+    sequence_native_identities[2] = saved_sequence_identity;
+    sequence_raster_identities[2] = saved_sequence_pair_identity;
     const auto selected_ten_identity = state.Document().identity;
+    const auto selected_ten_pair_identity =
+        state.Document().pair_raster_identity;
     const auto selected_ten_shell = state.Document().shell;
     // Binding the identical initial raster and selecting that bound source
     // retain the original document and its existing save authority.
@@ -10471,7 +11181,9 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     SendMessageW(state.Workspace().sequence_palette, WM_COMMAND,
         MAKEWPARAM(IDC_SEQUENCE_CELLS, LBN_SELCHANGE),
         reinterpret_cast<LPARAM>(sequence_cells));
-    if (!authority_unchanged(selected_ten_identity, selected_ten_shell)
+    if (!authority_unchanged(
+            selected_ten_identity, selected_ten_pair_identity,
+            selected_ten_shell)
         || state.lifetime.smoke_dirty_prompt_count != same_cell_prompt_count) {
         return 1513;
     }
@@ -10500,7 +11212,9 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     if (!QueryDocument(state, after_dirty_noop)
         || after_dirty_noop.document_revision != dirty_ten.document_revision
         || after_dirty_noop.flags != dirty_ten.flags
-        || !authority_unchanged(selected_ten_identity, selected_ten_shell)
+        || !authority_unchanged(
+            selected_ten_identity, selected_ten_pair_identity,
+            selected_ten_shell)
         || state.lifetime.smoke_dirty_prompt_count != same_cell_prompt_count) {
         return 1516;
     }
@@ -10516,7 +11230,9 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
             != dirty_ten.document_uuid_high
         || after_cancelled_switch.document_uuid_low != dirty_ten.document_uuid_low
         || state.Workspace().sequence_dialog.view.active_index != 2U
-        || !authority_unchanged(selected_ten_identity, selected_ten_shell)
+        || !authority_unchanged(
+            selected_ten_identity, selected_ten_pair_identity,
+            selected_ten_shell)
         || !saved_sequence_pair_unchanged()) {
         return 878;
     }
@@ -10530,6 +11246,29 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
             true) != INKPOD_STATUS_OK) {
         return 879;
     }
+    // The catalog captured cell1's original physical raster identity. Replace
+    // that unopened Planned pair coherently with the same encoded bytes under
+    // a new file identity. Its first activation must refresh the slot binding;
+    // otherwise saving, leaving, and revisiting cell1 later conflicts with the
+    // recovery proof created from the newly resolved pair.
+    const auto discovered_cell_one_raster_identity =
+        sequence_raster_identities[0];
+    inkpod::app::DocumentIdentity replaced_cell_one_raster_identity{};
+    if (!WriteFileAtomically(sequence_raster_paths[0], sequence_source)
+        || !inkpod::app::ResolveDocumentFileIdentity(
+            state.file_io.Manager(), sequence_raster_paths[0],
+            replaced_cell_one_raster_identity)
+        || replaced_cell_one_raster_identity.kind
+            != inkpod::app::DocumentIdentityKind::WindowsFile
+        || replaced_cell_one_raster_identity
+            == discovered_cell_one_raster_identity) {
+        std::fputs(
+            "sequence external Planned-pair replacement fixture failed\n",
+            stderr);
+        return 15171;
+    }
+    sequence_raster_identities[0] =
+        replaced_cell_one_raster_identity;
     InkpodSequenceActivationPlan replacement_activation{};
     replacement_activation.struct_size = sizeof(replacement_activation);
     if (state.engine->Invoke([&replacement_activation](InkpodCore* core) {
@@ -10539,28 +11278,82 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         || replacement_activation.source_index != 2U) {
         return 1517;
     }
+    std::wstring selected_one_native_reservation_path;
+    std::wstring selected_one_raster_reservation_path;
     state.lifetime.smoke_dirty_prompt_choice = IDOK;
     SendMessageW(sequence_cells, LB_SETCURSEL, 0U, 0);
-    SendMessageW(
+    bool selected_one_preflight_observed{};
+    bool selected_one_pending{};
+    bool selected_one_pair_reserved{};
+    state.lifetime.smoke_after_sequence_pair_reserved = [
+        &](const std::wstring& native_path,
+            const std::wstring& raster_path,
+            const inkpod::app::DocumentIdentity& native_identity,
+            const inkpod::app::DocumentIdentity& raster_identity) noexcept {
+        selected_one_preflight_observed = true;
+        selected_one_pending =
+            state.Workspace().animation.sequence_switch_pending;
+        selected_one_pair_reserved =
+            inkpod::app::NormalizeDocumentFilePath(
+                native_path, selected_one_native_reservation_path)
+            && inkpod::app::NormalizeDocumentFilePath(
+                raster_path, selected_one_raster_reservation_path)
+            && state.Documents().HasIdentityReservation(native_identity)
+            && state.Documents().HasIdentityReservation(raster_identity)
+            && state.Documents().HasIdentityReservation(
+                {}, selected_one_native_reservation_path)
+            && state.Documents().HasIdentityReservation(
+                {}, selected_one_raster_reservation_path);
+    };
+    const LRESULT selected_one_queued = SendMessageW(
         state.Workspace().sequence_palette,
         WM_COMMAND,
         MAKEWPARAM(IDC_SEQUENCE_CELLS, LBN_SELCHANGE),
         reinterpret_cast<LPARAM>(sequence_cells));
     state.lifetime.smoke_dirty_prompt_choice = IDNO;
+    const ULONGLONG selected_one_reservation_deadline = GetTickCount64() + 5'000U;
+    while (!selected_one_preflight_observed
+        && state.Workspace().animation.sequence_switch_pending
+        && GetTickCount64() < selected_one_reservation_deadline) {
+        state.file_io.Poll();
+        if (!selected_one_preflight_observed) {
+            Sleep(1U);
+        }
+    }
+    state.lifetime.smoke_after_sequence_pair_reserved = {};
+    if (!selected_one_preflight_observed || !selected_one_pending
+        || !selected_one_pair_reserved) {
+        std::wstring normalized_selected_one_raster;
+        (void)inkpod::app::NormalizeDocumentFilePath(
+            sequence_raster_paths[0], normalized_selected_one_raster);
+        std::fprintf(stderr,
+            "sequence cell1 pair reservation missing: result=%lld pending=%d "
+            "native_id=%d raster_id=%d native_path=%d raster_path=%d\n",
+            static_cast<long long>(selected_one_queued),
+            state.Workspace().animation.sequence_switch_pending,
+            state.Documents().HasIdentityReservation(sequence_native_identities[0]),
+            state.Documents().HasIdentityReservation(sequence_raster_identities[0]),
+            state.Documents().HasIdentityReservation({},
+                sequence_native_identities[0].normalized_path),
+            state.Documents().HasIdentityReservation({}, normalized_selected_one_raster));
+        return 15181;
+    }
     InkpodDocumentInfo selected_one = EmptyDocumentInfo();
     if (!WaitForSequencePresentation(state)
         || !QueryDocument(state, selected_one)
         || selected_one.document_uuid_high == selected_ten.document_uuid_high
             && selected_one.document_uuid_low == selected_ten.document_uuid_low
         || state.Workspace().sequence_dialog.view.active_index != 0U
-        || !state.Document().shell.current_path.empty()
-        || !state.Document().shell.source_path.empty()
-        || !state.Document().shell.recovery_original_path.empty()
-        || state.Document().identity != inkpod::app::UntitledDocumentIdentity(
-            selected_one.document_uuid_high, selected_one.document_uuid_low)
+        || !sequence_pair_authority_matches(0U, false)
+        || !sequence_binding_authority_matches(0U)
         || state.Document().identity == saved_sequence_identity
-        || state.Document().shell.recovery_path.empty()
-        || state.Document().shell.recovery_path == saved_sequence_shell.recovery_path
+        || state.Documents().HasIdentityReservation(
+            {}, selected_one_native_reservation_path)
+        || state.Documents().HasIdentityReservation(
+            {}, selected_one_raster_reservation_path)
+        || GetFileAttributesW(sequence_native_paths[0].c_str()) != INVALID_FILE_ATTRIBUTES
+        || !state.Document().shell.recovery_path.empty()
+        || state.Document().shell.recovery_artifact_published
         || !saved_sequence_pair_unchanged()) {
         return 880;
     }
@@ -10668,21 +11461,158 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     };
     state.lifetime.sequence_endpoint_policy = SequenceEndpointPolicy::Stop;
     UpdateMenuState(state);
-    if (SendMessageW(
+    const LRESULT goto_cell_three = SendMessageW(
             state.Workspace().windows.window,
             WM_COMMAND,
             IDM_SEQ_GOTO,
-            0) != 1
+            0);
+    const std::uint64_t prompt_save_epoch =
+        state.routing.sequence_switch_pending_token.load(
+            std::memory_order_acquire);
+    const std::size_t prompt_queue_before =
+        state.routing.sequence_navigation_queue.size();
+    const LRESULT queued_prompt_goto = SendMessageW(
+        state.Workspace().windows.window,
+        WM_COMMAND,
+        IDM_SEQ_GOTO,
+        0);
+    if (goto_cell_three != 1 || prompt_save_epoch == 0U
+        || !state.routing.sequence_navigation_pending
+        || !state.Workspace().animation.sequence_switch_pending
+        || queued_prompt_goto != 1
+        || state.routing.sequence_navigation_queue.size()
+            != prompt_queue_before + 1U) {
+        std::fputs("dirty prompt save did not fence and queue navigation\n", stderr);
+        restore_endpoint_policy();
+        return 412;
+    }
+    if (goto_cell_three != 1
         || !sequence_is_clean()
+        || state.Workspace().sequence_dialog.view.active_index != 1U
+        || !sequence_pair_authority_matches(1U, false)
+        || GetFileAttributesW(sequence_native_paths[0].c_str()) == INVALID_FILE_ATTRIBUTES
+        || GetFileAttributesW(state.lifetime.smoke_native_save_path.c_str())
+            != INVALID_FILE_ATTRIBUTES) {
+        std::fputs("sequence goto did not save the planned cell1 pair\n", stderr);
+        restore_endpoint_policy();
+        return 412;
+    }
+    if (!inkpod::app::ResolveDocumentFileIdentity(
+            state.file_io.Manager(), sequence_native_paths[0],
+            sequence_native_identities[0])
+        || !inkpod::app::ResolveDocumentFileIdentity(
+            state.file_io.Manager(), sequence_raster_paths[0],
+            sequence_raster_identities[0])
+        || sequence_native_identities[0].kind
+            != inkpod::app::DocumentIdentityKind::WindowsFile
+        || sequence_raster_identities[0].kind
+            != inkpod::app::DocumentIdentityKind::WindowsFile
         || SendMessageW(
                state.Workspace().windows.window,
                WM_COMMAND,
                IDM_SEQ_PREVIOUS,
                0) != 1
-        || !sequence_is_clean()) {
-        std::fputs("sequence goto/previous did not load clean cells\n", stderr);
+        || !sequence_is_clean()
+        || state.Workspace().sequence_dialog.view.active_index != 0U
+        || !sequence_pair_authority_matches(0U, true)
+        || !sequence_binding_authority_matches(0U)) {
+        std::fputs("sequence previous did not reopen the committed cell1 pair\n", stderr);
         restore_endpoint_policy();
         return 412;
+    }
+    // Prompt acceptance owns one pending token across the asynchronous Save.
+    // A Core-side edit after the Save commit but before the UI continuation
+    // must stale the issue-time activation plan instead of navigating away.
+    if (!UpdateEditorFillOptionsForSmoke(state, [](InkpodEditorFillOptions& fill) {
+            fill.tolerance = fill.tolerance == 257U ? 258U : 257U;
+        })) {
+        std::fputs("stale prompt setup edit failed\n", stderr);
+        restore_endpoint_policy();
+        return 4114;
+    }
+    struct StalePromptSaveHookGuard final {
+        ApplicationHost& state;
+        ~StalePromptSaveHookGuard() {
+            state.lifetime.smoke_after_native_save_committed = {};
+        }
+    } stale_prompt_hook_guard{state};
+    InkpodStatus stale_editor_status = INKPOD_STATUS_INVALID_STATE;
+    state.lifetime.smoke_after_native_save_committed =
+        [&state, &stale_editor_status]() {
+            InkpodEditorStateInfo editor{};
+            editor.struct_size = sizeof(editor);
+            if (!state.engine->GetEditorState(
+                    state.Document().id, state.Document().generation,
+                    editor)) {
+                return;
+            }
+            InkpodEditorStateUpdate update{};
+            update.struct_size = sizeof(update);
+            update.kind = INKPOD_EDITOR_UPDATE_ACTIVE_TOOL;
+            update.expected_editor_revision = editor.editor_revision;
+            update.tool = editor.active_tool == INKPOD_TOOL_BRUSH
+                ? INKPOD_TOOL_PENCIL : INKPOD_TOOL_BRUSH;
+            stale_editor_status = state.engine->UpdateEditorState(
+                state.Document().id, state.Document().generation, update);
+        };
+    const std::uint32_t stale_prompt_count =
+        state.lifetime.smoke_dirty_prompt_count;
+    const LRESULT stale_prompt_goto = SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_SEQ_GOTO,
+            0);
+    const std::uint64_t stale_prompt_token =
+        state.routing.sequence_switch_pending_token.load(
+            std::memory_order_acquire);
+    if (stale_prompt_goto != 1 || stale_prompt_token == 0U) {
+        std::fprintf(stderr,
+            "stale prompt did not enter pending state: result=%lld token=%llu\n",
+            static_cast<long long>(stale_prompt_goto),
+            static_cast<unsigned long long>(stale_prompt_token));
+        restore_endpoint_policy();
+        return 4114;
+    }
+    const bool stale_file_io_idle = WaitForFileIo(state);
+    if (stale_editor_status != INKPOD_STATUS_OK || !stale_file_io_idle) {
+        std::fprintf(stderr,
+            "stale prompt continuation did not settle: update=%u idle=%d\n",
+            static_cast<unsigned>(stale_editor_status), stale_file_io_idle);
+        restore_endpoint_policy();
+        return 4114;
+    }
+    InkpodDocumentInfo stale_after = EmptyDocumentInfo();
+    if (!QueryDocument(state, stale_after)
+        || (stale_after.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U
+        || state.Workspace().sequence_dialog.view.active_index != 0U
+        || state.routing.sequence_switch_pending_token.load(
+               std::memory_order_acquire) != 0U
+        || state.Workspace().animation.sequence_switch_pending
+        || state.lifetime.smoke_dirty_prompt_count != stale_prompt_count + 1U
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_FILE_SAVE,
+               0) != 0
+        || !WaitForFileIo(state)
+        || !sequence_is_clean()) {
+        std::fputs("stale prompt continuation navigated after a newer edit\n", stderr);
+        restore_endpoint_policy();
+        return 4114;
+    }
+    if (!inkpod::app::ResolveDocumentFileIdentity(
+            state.file_io.Manager(), sequence_native_paths[0],
+            sequence_native_identities[0])
+        || !inkpod::app::ResolveDocumentFileIdentity(
+            state.file_io.Manager(), sequence_raster_paths[0],
+            sequence_raster_identities[0])
+        || sequence_native_identities[0].kind
+            != inkpod::app::DocumentIdentityKind::WindowsFile
+        || sequence_raster_identities[0].kind
+            != inkpod::app::DocumentIdentityKind::WindowsFile) {
+        std::fputs("saved sequence pair identity did not refresh\n", stderr);
+        restore_endpoint_policy();
+        return 4114;
     }
     InkpodDocumentInfo endpoint_before = EmptyDocumentInfo();
     InkpodDocumentInfo endpoint_after = EmptyDocumentInfo();
@@ -10693,6 +11623,7 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     const std::uint32_t endpoint_prompt_count =
         state.lifetime.smoke_dirty_prompt_count;
     const auto endpoint_identity = state.Document().identity;
+    const auto endpoint_pair_identity = state.Document().pair_raster_identity;
     const auto endpoint_shell = state.Document().shell;
     if (!QueryDocument(state, endpoint_before)
         || state.engine->Invoke(
@@ -10716,21 +11647,132 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         || endpoint_history_after.cursor != endpoint_history_before.cursor
         || endpoint_history_after.item_count != endpoint_history_before.item_count
         || state.lifetime.smoke_dirty_prompt_count != endpoint_prompt_count
-        || !authority_unchanged(endpoint_identity, endpoint_shell)
+        || !authority_unchanged(
+            endpoint_identity, endpoint_pair_identity, endpoint_shell)
         || !saved_sequence_pair_unchanged()) {
         restore_endpoint_policy();
         return 4110;
     }
     state.lifetime.sequence_endpoint_policy = SequenceEndpointPolicy::Wrap;
     UpdateMenuState(state);
-    if (!IsCommandChecked(
-            state.Workspace().command_states, IDM_SEQ_WRAP_ENDPOINTS)
-        || SendMessageW(sequence_cells, WM_KEYDOWN, VK_LEFT, 0) != 0
-        || !sequence_is_clean()
-        || state.Workspace().sequence_dialog.view.active_index != 2U
-        || SendMessageW(sequence_cells, WM_KEYDOWN, VK_RIGHT, 0) != 0
-        || !sequence_is_clean()
-        || state.Workspace().sequence_dialog.view.active_index != 0U) {
+    InkpodSequenceCatalogInfo wrap_core_before{};
+    wrap_core_before.struct_size = sizeof(wrap_core_before);
+    const bool got_wrap_core_before = state.engine->GetSequenceCatalog(
+        state.Document().id, state.Document().generation, wrap_core_before);
+    InkpodSequenceStepPlan wrap_plan_before{};
+    wrap_plan_before.struct_size = sizeof(wrap_plan_before);
+    const InkpodStatus wrap_plan_status = state.engine->Invoke(
+        [&wrap_plan_before](InkpodCore* core) {
+            return inkpod_core_sequence_step_resolve(
+                core, INKPOD_SEQUENCE_PREVIOUS,
+                INKPOD_SEQUENCE_ENDPOINT_WRAP, &wrap_plan_before);
+        }, false, false);
+    const bool wrap_checked = IsCommandChecked(
+        state.Workspace().command_states, IDM_SEQ_WRAP_ENDPOINTS);
+    const LRESULT wrap_left_result =
+        SendMessageW(sequence_cells, WM_KEYDOWN, VK_LEFT, 0);
+    const bool wrap_left_clean = sequence_is_clean();
+    const std::uint32_t wrap_left_index =
+        state.Workspace().sequence_dialog.view.active_index;
+    InkpodSequenceCatalogInfo wrap_core_after_left{};
+    wrap_core_after_left.struct_size = sizeof(wrap_core_after_left);
+    const bool got_wrap_core_after_left = state.engine->GetSequenceCatalog(
+        state.Document().id, state.Document().generation,
+        wrap_core_after_left);
+    InkpodDocumentInfo wrap_left_document = EmptyDocumentInfo();
+    const bool got_wrap_left_document =
+        QueryDocument(state, wrap_left_document);
+    const bool wrap_left_flags = got_wrap_left_document
+        && (wrap_left_document.flags
+            & (INKPOD_DOCUMENT_FLAG_DIRTY
+                | INKPOD_DOCUMENT_FLAG_RECOVERED)) == 0U
+        ;
+    const bool wrap_left_identity =
+        state.Document().identity == saved_sequence_identity;
+    const bool wrap_left_pair_identity =
+        state.Document().pair_raster_identity == saved_sequence_pair_identity;
+    std::wstring wrap_left_current_path;
+    std::wstring expected_wrap_left_current_path;
+    std::wstring wrap_left_raster_path;
+    std::wstring expected_wrap_left_raster_path;
+    const bool wrap_left_paths =
+        inkpod::app::NormalizeDocumentFilePath(
+            state.Document().shell.current_path, wrap_left_current_path)
+        && inkpod::app::NormalizeDocumentFilePath(
+            saved_sequence_shell.current_path,
+            expected_wrap_left_current_path)
+        && wrap_left_current_path == expected_wrap_left_current_path
+        && state.Document().shell.planned_native_path.empty()
+        && inkpod::app::NormalizeDocumentFilePath(
+            state.Document().shell.pair_raster_path,
+            wrap_left_raster_path)
+        && inkpod::app::NormalizeDocumentFilePath(
+            saved_sequence_shell.pair_raster_path,
+            expected_wrap_left_raster_path)
+        && wrap_left_raster_path == expected_wrap_left_raster_path;
+    const bool wrap_left_recovery =
+        state.Document().shell.recovery_original_path.empty()
+        && !state.Document().shell.recovery_path.empty()
+        && state.Document().shell.recovery_artifact_generation != 0U
+        && state.Document().shell.recovery_artifact_published
+        && inkpod::app::ValidRecoveryArtifactProof(
+            state.Document().shell.recovery_artifact_proof);
+    const bool wrap_left_authority = wrap_left_flags
+        && wrap_left_identity && wrap_left_pair_identity
+        && wrap_left_paths && wrap_left_recovery;
+    const LRESULT wrap_right_result =
+        SendMessageW(sequence_cells, WM_KEYDOWN, VK_RIGHT, 0);
+    const bool wrap_right_clean = sequence_is_clean();
+    const std::uint32_t wrap_right_index =
+        state.Workspace().sequence_dialog.view.active_index;
+    const bool wrap_right_authority =
+        sequence_pair_authority_matches(0U, true);
+    if (!wrap_checked || wrap_left_result != 0 || !wrap_left_clean
+        || wrap_left_index != 2U || !wrap_left_authority
+        || wrap_right_result != 0 || !wrap_right_clean
+        || wrap_right_index != 0U || !wrap_right_authority) {
+        const auto wrap_pane_target = state.routing.pane_targets.CaptureAction(
+            state.routing.sequence_pane,
+            state.routing.targets.Capture(),
+            state.routing.targets);
+        const auto& wrap_view = state.Workspace().sequence_dialog.view;
+        std::fprintf(stderr,
+            "wrap navigation failed: checked=%d left=%lld clean=%d index=%u "
+            "authority=%d right=%lld clean=%d index=%u authority=%d "
+            "core=%d:%u plan=%u:%u/%u after-left=%d:%u "
+            "view=%d/%d/%zu/%u/%d command=%d pane=%u "
+            "pending=%llu/%d/%d io=%d status=%u target=%lu "
+            "left-authority=%d/%d/%d/%d flags=%llu recovery=%d/%llu\n",
+            wrap_checked, static_cast<long long>(wrap_left_result),
+            wrap_left_clean, wrap_left_index, wrap_left_authority,
+            static_cast<long long>(wrap_right_result), wrap_right_clean,
+            wrap_right_index, wrap_right_authority,
+            got_wrap_core_before, wrap_core_before.active_index,
+            static_cast<unsigned>(wrap_plan_status),
+            wrap_plan_before.result_class, wrap_plan_before.target_index,
+            got_wrap_core_after_left, wrap_core_after_left.active_index,
+            wrap_view.target_available, wrap_view.cut_editable,
+            wrap_view.cells.size(), wrap_view.active_index,
+            wrap_view.wrap_navigation,
+            IsCommandEnabled(
+                state.Workspace().command_states, IDM_SEQ_PREVIOUS),
+            static_cast<unsigned>(wrap_pane_target.status),
+            static_cast<unsigned long long>(
+                state.routing.sequence_switch_pending_token.load(
+                    std::memory_order_acquire)),
+            state.routing.sequence_navigation_pending,
+            state.Workspace().animation.sequence_switch_pending,
+            state.file_io.HasPending(
+                state.Document().id, state.Document().generation),
+            static_cast<unsigned>(
+                state.lifetime.smoke_last_sequence_switch_status),
+            GetFileAttributesW(sequence_raster_paths[2].c_str()),
+            wrap_left_flags, wrap_left_identity, wrap_left_pair_identity,
+            wrap_left_paths,
+            static_cast<unsigned long long>(wrap_left_document.flags),
+            wrap_left_recovery,
+            static_cast<unsigned long long>(
+                state.Document().shell.recovery_artifact_generation));
         restore_endpoint_policy();
         return 4111;
     }
@@ -10745,15 +11787,20 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
                0) == 1;
     restore_endpoint_policy();
     state.lifetime.smoke_dirty_prompt_choice = IDNO;
-    // Only the actually edited source requires saving. The four subsequent
-    // switches load fresh, unedited cells and must never prompt.
+    // The initial dirty switch and the deliberate stale-save race each own one
+    // prompt. The subsequent clean switches must never add another one.
+    const std::uint32_t expected_navigation_prompt_count =
+        navigation_prompt_count + 2U;
     if (!navigation_ok
         || state.lifetime.smoke_dirty_prompt_count
-            != navigation_prompt_count + 1U
+            != expected_navigation_prompt_count
         || !sequence_is_clean()
+        || state.Workspace().sequence_dialog.view.active_index != 1U
+        || !sequence_pair_authority_matches(1U, false)
         || !saved_sequence_pair_unchanged()) {
         std::fprintf(stderr, "sequence navigation failed: accepted=%d prompts=%u expected=%u\n",
-            navigation_ok, state.lifetime.smoke_dirty_prompt_count, navigation_prompt_count + 1U);
+            navigation_ok, state.lifetime.smoke_dirty_prompt_count,
+            expected_navigation_prompt_count);
         return 412;
     }
     if (SendMessageW(
@@ -10805,16 +11852,284 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
             active_sequence_caption + L" — 3" + UiText(UiStringId::CellsSuffix))
         || !PaneTargetTextEquals(state.Workspace().windows.color_pane, IDC_COLOR_TARGET,
             active_sequence_caption)
-        || !state.Document().shell.current_path.empty()
-        || !state.Document().shell.source_path.empty()) {
+        || !sequence_pair_authority_matches(1U, false)) {
         return 7181;
+    }
+    // A normal pair can be clean while its live history has a new redo tail.
+    // Core's preservation-baseline flag must force an exact source snapshot;
+    // otherwise switching away would silently discard that tail.
+    InkpodDocumentInfo clean_pair_baseline = EmptyDocumentInfo();
+    InkpodEditorStateInfo clean_pair_baseline_editor{};
+    clean_pair_baseline_editor.struct_size = sizeof(clean_pair_baseline_editor);
+    if (!QueryDocument(state, clean_pair_baseline)
+        || (clean_pair_baseline.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
+        || !state.engine->GetEditorState(
+            state.Document().id, state.Document().generation,
+            clean_pair_baseline_editor)
+        || (clean_pair_baseline_editor.flags & INKPOD_EDITOR_STATE_DIRTY) != 0U) {
+        return 4140;
+    }
+    (void)SendMessageW(
+        state.Workspace().windows.window,
+        WM_COMMAND,
+        IDM_SELECTION_ALL,
+        0);
+    InkpodDocumentInfo clean_pair_edited = EmptyDocumentInfo();
+    if (!QueryDocument(state, clean_pair_edited)
+        || (clean_pair_edited.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U) {
+        return 4140;
+    }
+    InkpodDocumentInfo clean_pair_undo = EmptyDocumentInfo();
+    InkpodEditorStateInfo clean_pair_undo_editor{};
+    clean_pair_undo_editor.struct_size = sizeof(clean_pair_undo_editor);
+    SendMessageW(state.Workspace().windows.window,
+        WM_COMMAND, IDM_EDIT_UNDO, 0);
+    InkpodHistoryInfo clean_pair_history{};
+    clean_pair_history.struct_size = sizeof(clean_pair_history);
+    InkpodSequenceSwitchRequest clean_pair_request{};
+    clean_pair_request.struct_size = sizeof(clean_pair_request);
+    const bool clean_pair_query = QueryDocument(state, clean_pair_undo);
+    const bool clean_pair_flags = clean_pair_query
+        && (clean_pair_undo.flags
+            & (INKPOD_DOCUMENT_FLAG_DIRTY
+                | INKPOD_DOCUMENT_FLAG_RECOVERED)) == 0U;
+    const bool clean_pair_editor = state.engine->GetEditorState(
+            state.Document().id, state.Document().generation,
+            clean_pair_undo_editor);
+    const bool clean_pair_editor_clean = clean_pair_editor
+        && (clean_pair_undo_editor.flags & INKPOD_EDITOR_STATE_DIRTY) == 0U
+        && std::memcmp(clean_pair_undo_editor.editor_digest,
+               clean_pair_baseline_editor.editor_digest,
+               sizeof(clean_pair_baseline_editor.editor_digest)) == 0;
+    const InkpodStatus clean_pair_request_status = state.engine->Invoke(
+               [&clean_pair_history, &clean_pair_request](InkpodCore* core) {
+                   InkpodStatus status = inkpod_core_history_info(
+                       core, &clean_pair_history);
+                   if (status == INKPOD_STATUS_OK) {
+                       status = inkpod_core_sequence_switch_request(
+                           core, 2U, INKPOD_SEQUENCE_SWITCH_AUTOSAVE,
+                           &clean_pair_request);
+                   }
+                   return status;
+               }, false, false);
+    const bool clean_pair_history_has_redo =
+        clean_pair_history.cursor < clean_pair_history.item_count;
+    const bool clean_pair_switch_required =
+        (clean_pair_request.flags & INKPOD_SEQUENCE_SWITCH_REQUIRED) != 0U;
+    const bool clean_pair_recovery_required =
+        (clean_pair_request.flags
+            & INKPOD_SEQUENCE_SWITCH_SOURCE_RECOVERY_REQUIRED) != 0U;
+    const bool clean_pair_recovery_absent =
+        state.Document().FindSequenceAutosave(
+            clean_pair_request.source_document_uuid_high,
+            clean_pair_request.source_document_uuid_low,
+            clean_pair_request.source_generation) == nullptr;
+    const LRESULT clean_pair_navigation = SendMessageW(
+        state.Workspace().windows.window, WM_COMMAND, IDM_SEQ_NEXT, 0);
+    const bool clean_pair_io_idle = WaitForFileIo(state);
+    const bool clean_pair_presented = WaitForSequencePresentation(state);
+    if (!clean_pair_flags || !clean_pair_editor_clean
+        || clean_pair_request_status != INKPOD_STATUS_OK
+        || !clean_pair_history_has_redo || !clean_pair_switch_required
+        || !clean_pair_recovery_required || !clean_pair_recovery_absent
+        || clean_pair_navigation != 1 || !clean_pair_io_idle
+        || !clean_pair_presented) {
+        std::fprintf(stderr,
+            "clean pair redo-tail switch failed: query=%d flags=%llu clean=%d "
+            "editor=%d/%llu/%d request=%u history=%llu/%llu required=%d/%d "
+            "absent=%d navigation=%lld idle=%d present=%d index=%u status=%u\n",
+            clean_pair_query,
+            static_cast<unsigned long long>(clean_pair_undo.flags),
+            clean_pair_flags, clean_pair_editor,
+            static_cast<unsigned long long>(clean_pair_undo_editor.flags),
+            clean_pair_editor_clean,
+            static_cast<unsigned>(clean_pair_request_status),
+            static_cast<unsigned long long>(clean_pair_history.cursor),
+            static_cast<unsigned long long>(clean_pair_history.item_count),
+            clean_pair_switch_required, clean_pair_recovery_required,
+            clean_pair_recovery_absent,
+            static_cast<long long>(clean_pair_navigation),
+            clean_pair_io_idle, clean_pair_presented,
+            state.Workspace().sequence_dialog.view.active_index,
+            static_cast<unsigned>(
+                state.Workspace().animation.smoke_sequence_switch_status));
+        return 4141;
+    }
+    const auto* clean_pair_binding = state.Document().FindSequenceAutosave(
+        clean_pair_request.source_document_uuid_high,
+        clean_pair_request.source_document_uuid_low,
+        clean_pair_request.source_generation);
+    if (clean_pair_binding == nullptr
+        || clean_pair_binding->artifact_generation != 1U
+        || !inkpod::app::ValidRecoveryArtifactProof(
+            clean_pair_binding->artifact_proof)
+        || GetFileAttributesW(clean_pair_binding->recovery_path.c_str())
+            == INVALID_FILE_ATTRIBUTES
+        || state.Workspace().sequence_dialog.view.active_index != 2U) {
+        return 4142;
+    }
+    const std::wstring clean_pair_recovery_path =
+        clean_pair_binding->recovery_path;
+    const auto clean_pair_recovery_proof =
+        clean_pair_binding->artifact_proof;
+    const auto clean_pair_restore_completed_before =
+        state.Workspace().animation.smoke_sequence_switch_completed;
+    if (SendMessageW(state.Workspace().windows.window,
+            WM_COMMAND, IDM_SEQ_PREVIOUS, 0) != 1
+        || !WaitForFileIo(state)
+        || !WaitForSequencePresentation(
+            state, false, std::nullopt, 1U,
+            clean_pair_restore_completed_before)) {
+        return 4143;
+    }
+    InkpodDocumentInfo clean_pair_restored = EmptyDocumentInfo();
+    InkpodEditorStateInfo clean_pair_restored_editor{};
+    clean_pair_restored_editor.struct_size = sizeof(clean_pair_restored_editor);
+    InkpodHistoryInfo clean_pair_restored_history{};
+    clean_pair_restored_history.struct_size = sizeof(clean_pair_restored_history);
+    const bool clean_pair_restored_query =
+        QueryDocument(state, clean_pair_restored);
+    const bool clean_pair_restored_flags = clean_pair_restored_query
+        && (clean_pair_restored.flags
+            & (INKPOD_DOCUMENT_FLAG_DIRTY
+                | INKPOD_DOCUMENT_FLAG_RECOVERED)) == 0U;
+    const bool clean_pair_restored_pixels = clean_pair_restored_query
+        && clean_pair_restored.main_plane_checksum
+            == clean_pair_baseline.main_plane_checksum
+        && clean_pair_restored.color_plane_checksum
+            == clean_pair_baseline.color_plane_checksum;
+    const bool clean_pair_restored_editor_query =
+        state.engine->GetEditorState(
+            state.Document().id, state.Document().generation,
+            clean_pair_restored_editor);
+    const bool clean_pair_restored_editor_matches =
+        clean_pair_restored_editor_query
+        && std::memcmp(clean_pair_restored_editor.editor_digest,
+               clean_pair_baseline_editor.editor_digest,
+               sizeof(clean_pair_baseline_editor.editor_digest)) == 0;
+    const InkpodStatus clean_pair_restored_history_status =
+        state.engine->Invoke(
+               [&clean_pair_restored_history](InkpodCore* core) {
+                   return inkpod_core_history_info(
+                       core, &clean_pair_restored_history);
+               }, false, false);
+    const bool clean_pair_restored_redo =
+        clean_pair_restored_history.cursor
+            < clean_pair_restored_history.item_count;
+    const bool clean_pair_restored_recovery =
+        state.Document().shell.recovery_path == clean_pair_recovery_path
+        && state.Document().shell.recovery_artifact_published
+        && std::memcmp(&state.Document().shell.recovery_artifact_proof,
+               &clean_pair_recovery_proof,
+               sizeof(clean_pair_recovery_proof)) == 0;
+    InkpodSequenceCatalogInfo clean_pair_restored_catalog{};
+    clean_pair_restored_catalog.struct_size =
+        sizeof(clean_pair_restored_catalog);
+    const bool clean_pair_restored_catalog_query =
+        state.engine->GetSequenceCatalog(
+            state.Document().id,
+            state.Document().generation,
+            clean_pair_restored_catalog);
+    if (!clean_pair_restored_flags || !clean_pair_restored_pixels
+        || !clean_pair_restored_editor_matches
+        || clean_pair_restored_history_status != INKPOD_STATUS_OK
+        || !clean_pair_restored_redo
+        || state.Workspace().sequence_dialog.view.active_index != 1U
+        || !clean_pair_restored_recovery) {
+        std::fprintf(stderr,
+            "clean pair recovery restore failed: query=%d flags=%llu/%d "
+            "pixels=%d editor=%d/%d/%llu history=%u/%llu/%llu "
+            "index=%u/%u/%d recovery=%d/%d command=%u "
+            "pending=%llu/%d/%zu/%d/%d io=%d completed=%u status=%u\n",
+            clean_pair_restored_query,
+            static_cast<unsigned long long>(clean_pair_restored.flags),
+            clean_pair_restored_flags, clean_pair_restored_pixels,
+            clean_pair_restored_editor_query,
+            clean_pair_restored_editor_matches,
+            static_cast<unsigned long long>(clean_pair_restored_editor.flags),
+            static_cast<unsigned>(clean_pair_restored_history_status),
+            static_cast<unsigned long long>(clean_pair_restored_history.cursor),
+            static_cast<unsigned long long>(clean_pair_restored_history.item_count),
+            state.Workspace().sequence_dialog.view.active_index,
+            clean_pair_restored_catalog.active_index,
+            clean_pair_restored_catalog_query,
+            clean_pair_restored_recovery,
+            state.Document().shell.recovery_artifact_published,
+            static_cast<unsigned>(
+                state.lifetime.smoke_last_sequence_switch_status),
+            static_cast<unsigned long long>(
+                state.routing.sequence_switch_pending_token.load(
+                    std::memory_order_acquire)),
+            state.routing.sequence_navigation_pending,
+            state.routing.sequence_navigation_queue.size(),
+            state.Workspace().animation.sequence_switch_pending,
+            state.Document().sequence_activation_pending,
+            state.file_io.HasPending(
+                state.Document().id,
+                state.Document().generation),
+            state.Workspace().animation.smoke_sequence_switch_completed,
+            static_cast<unsigned>(
+                state.Workspace().animation.smoke_sequence_switch_status));
+        return 4144;
+    }
+    const std::uint64_t clean_pair_cursor =
+        clean_pair_restored_history.cursor;
+    SendMessageW(state.Workspace().windows.window,
+        WM_COMMAND, IDM_EDIT_REDO, 0);
+    InkpodDocumentInfo clean_pair_redone = EmptyDocumentInfo();
+    InkpodEditorStateInfo clean_pair_redone_editor{};
+    clean_pair_redone_editor.struct_size = sizeof(clean_pair_redone_editor);
+    InkpodHistoryInfo clean_pair_redone_history{};
+    clean_pair_redone_history.struct_size = sizeof(clean_pair_redone_history);
+    if (!QueryDocument(state, clean_pair_redone)
+        || !state.engine->GetEditorState(
+            state.Document().id, state.Document().generation,
+            clean_pair_redone_editor)
+        || state.engine->Invoke(
+               [&clean_pair_redone_history](InkpodCore* core) {
+                   return inkpod_core_history_info(
+                       core, &clean_pair_redone_history);
+               }, false, false) != INKPOD_STATUS_OK
+        || clean_pair_redone_history.cursor != clean_pair_cursor + 1U
+        || ((clean_pair_redone.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U
+            && (clean_pair_redone_editor.flags
+                & INKPOD_EDITOR_STATE_DIRTY) == 0U)) {
+        return 4145;
+    }
+    SendMessageW(state.Workspace().windows.window,
+        WM_COMMAND, IDM_EDIT_UNDO, 0);
+    if (!QueryDocument(state, clean_pair_restored)
+        || (clean_pair_restored.flags
+            & (INKPOD_DOCUMENT_FLAG_DIRTY
+                | INKPOD_DOCUMENT_FLAG_RECOVERED)) != 0U) {
+        return 4146;
     }
     const std::wstring autosave_saved_path = L"inkpod-sequence-autosave-source.inkpod";
     DeleteSavedPairFixture(autosave_saved_path);
     if (SaveToPath(state, autosave_saved_path) != INKPOD_STATUS_OK) {
         return 1514;
     }
+    InkpodDocumentInfo autosave_baseline = EmptyDocumentInfo();
+    InkpodEditorStateInfo autosave_baseline_editor{};
+    autosave_baseline_editor.struct_size = sizeof(autosave_baseline_editor);
+    InkpodHistoryInfo autosave_baseline_history{};
+    autosave_baseline_history.struct_size = sizeof(autosave_baseline_history);
+    if (!QueryDocument(state, autosave_baseline)
+        || (autosave_baseline.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
+        || !state.engine->GetEditorState(
+            state.Document().id, state.Document().generation,
+            autosave_baseline_editor)
+        || (autosave_baseline_editor.flags & INKPOD_EDITOR_STATE_DIRTY) != 0U
+        || state.engine->Invoke(
+               [&autosave_baseline_history](InkpodCore* core) {
+                   return inkpod_core_history_info(
+                       core, &autosave_baseline_history);
+               }, false, false) != INKPOD_STATUS_OK) {
+        return 1514;
+    }
     const auto autosave_source_identity = state.Document().identity;
+    const auto autosave_source_pair_identity =
+        state.Document().pair_raster_identity;
     SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_ALL, 0);
     if (!UpdateEditorFillOptionsForSmoke(state, [](InkpodEditorFillOptions& fill) {
             fill.tolerance = fill.tolerance == 0U ? 1U : 0U;
@@ -10822,9 +12137,43 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         return 1515;
     }
     const auto autosave_source_shell = state.Document().shell;
+    const auto* autosave_source_file_binding =
+        state.Document().SequenceFileBindingAt(1U);
+    std::wstring autosave_source_native_path;
+    std::wstring autosave_source_raster_path;
+    if (autosave_source_identity.kind
+            != inkpod::app::DocumentIdentityKind::WindowsFile
+        || autosave_source_pair_identity.kind
+            != inkpod::app::DocumentIdentityKind::WindowsFile
+        || autosave_source_shell.current_path.empty()
+        || autosave_source_shell.pair_raster_path.empty()
+        || autosave_source_file_binding == nullptr
+        || autosave_source_file_binding->raster_path
+            != autosave_source_shell.pair_raster_path
+        || autosave_source_file_binding->raster_identity
+            != autosave_source_pair_identity
+        || !inkpod::app::NormalizeDocumentFilePath(
+            autosave_source_shell.current_path,
+            autosave_source_native_path)
+        || !inkpod::app::NormalizeDocumentFilePath(
+            autosave_source_shell.pair_raster_path,
+            autosave_source_raster_path)) {
+        return 1515;
+    }
+    // Saving the active sequence cell binds that slot to the exact committed
+    // native/raster pair. Later recovery and repair checks must not continue to
+    // use the original cell3 preview authority.
+    sequence_native_paths[1] = autosave_source_shell.current_path;
+    sequence_raster_paths[1] = autosave_source_shell.pair_raster_path;
+    sequence_native_identities[1] = autosave_source_identity;
+    sequence_raster_identities[1] = autosave_source_pair_identity;
     InkpodDocumentInfo autosave_source = EmptyDocumentInfo();
     InkpodEditorStateInfo autosave_source_editor{};
     autosave_source_editor.struct_size = sizeof(autosave_source_editor);
+    InkpodHistoryInfo autosave_source_history{};
+    autosave_source_history.struct_size = sizeof(autosave_source_history);
+    InkpodCompactionPlan autosave_source_plan{};
+    autosave_source_plan.struct_size = sizeof(autosave_source_plan);
     InkpodSequenceSwitchRequest autosave_request{};
     autosave_request.struct_size = sizeof(autosave_request);
     if (!QueryDocument(state, autosave_source)
@@ -10834,6 +12183,20 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
                state.Document().generation,
                autosave_source_editor)
             == false
+        || (autosave_source_editor.flags & INKPOD_EDITOR_STATE_DIRTY) == 0U
+        || state.engine->Invoke(
+               [&autosave_source_history, &autosave_source_plan](
+                   InkpodCore* core) {
+                   InkpodStatus status = inkpod_core_history_info(
+                       core, &autosave_source_history);
+                   if (status == INKPOD_STATUS_OK) {
+                       status = inkpod_core_compaction_plan(
+                           core, &autosave_source_plan);
+                   }
+                   return status;
+               }, false, false) != INKPOD_STATUS_OK
+        || autosave_source_history.cursor
+            != autosave_baseline_history.cursor + 1U
         || state.engine->Invoke(
                [&autosave_request](InkpodCore* core) {
                    return inkpod_core_sequence_switch_request(
@@ -11008,23 +12371,95 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
             && after.accepted_work_items == before.accepted_work_items
             && after.rejected_work_items == before.rejected_work_items;
     };
-    if (SendMessageW(
+    bool autosave_preflight_observed{};
+    bool autosave_pending_before_fence{};
+    bool autosave_authority_unchanged{};
+    bool autosave_pair_reserved{};
+    std::wstring autosave_native_reservation_path;
+    std::wstring autosave_raster_reservation_path;
+    if (!inkpod::app::ResolveDocumentFileIdentity(
+            state.file_io.Manager(), sequence_native_paths[2],
+            sequence_native_identities[2])
+        || !inkpod::app::ResolveDocumentFileIdentity(
+            state.file_io.Manager(), sequence_raster_paths[2],
+            sequence_raster_identities[2])
+        || sequence_native_identities[2].kind
+            != inkpod::app::DocumentIdentityKind::WindowsFile
+        || sequence_raster_identities[2].kind
+            != inkpod::app::DocumentIdentityKind::WindowsFile) {
+        restore_sequence_policy();
+        return 4096;
+    }
+    state.lifetime.smoke_after_sequence_pair_reserved = [
+        &](const std::wstring& native_path,
+            const std::wstring& raster_path,
+            const inkpod::app::DocumentIdentity& native_identity,
+            const inkpod::app::DocumentIdentity& raster_identity) noexcept {
+        autosave_preflight_observed = true;
+        autosave_pending_before_fence =
+            state.Workspace().animation.sequence_switch_pending;
+        autosave_authority_unchanged =
+            authority_unchanged(
+                autosave_source_identity, autosave_source_pair_identity,
+                autosave_source_shell);
+        autosave_pair_reserved =
+            inkpod::app::NormalizeDocumentFilePath(
+                native_path, autosave_native_reservation_path)
+            && inkpod::app::NormalizeDocumentFilePath(
+                raster_path, autosave_raster_reservation_path)
+            && state.Documents().HasIdentityReservation(native_identity)
+            && state.Documents().HasIdentityReservation(raster_identity)
+            && state.Documents().HasIdentityReservation(
+                {}, autosave_native_reservation_path)
+            && state.Documents().HasIdentityReservation(
+                {}, autosave_raster_reservation_path);
+    };
+    const LRESULT autosave_switch_queued = SendMessageW(
             state.Workspace().windows.window,
             WM_COMMAND,
             IDM_SEQ_NEXT,
-            0) != 1
-        || !state.Workspace().animation.sequence_switch_pending
-        || !authority_unchanged(autosave_source_identity, autosave_source_shell)
-        || !state.Documents().HasIdentityReservation(inkpod::app::UntitledDocumentIdentity(
-            autosave_request.target_document_uuid_high, autosave_request.target_document_uuid_low))
-        || SendMessageW(
-               state.Workspace().windows.window,
-               WM_COMMAND,
-               IDM_SEQ_NEXT,
-               0) != 0
-        || state.engine->Invoke(
-               [](InkpodCore*) { return INKPOD_STATUS_OK; }, false, false)
-            != INKPOD_STATUS_OK) {
+            0);
+    const ULONGLONG autosave_reservation_deadline = GetTickCount64() + 5'000U;
+    while (autosave_switch_queued == 1 && !autosave_preflight_observed
+        && state.Workspace().animation.sequence_switch_pending
+        && GetTickCount64() < autosave_reservation_deadline) {
+        state.file_io.Poll();
+        if (!autosave_preflight_observed) {
+            Sleep(1U);
+        }
+    }
+    state.lifetime.smoke_after_sequence_pair_reserved = {};
+    if (autosave_switch_queued != 1 || !autosave_preflight_observed
+        || !autosave_pending_before_fence
+        || !autosave_authority_unchanged || !autosave_pair_reserved) {
+        std::fprintf(stderr,
+            "autosave sequence pair preflight missing: queued=%lld pending=%d "
+            "authority=%d reserved=%d native_id=%d raster_id=%d\n",
+            static_cast<long long>(autosave_switch_queued),
+            autosave_pending_before_fence ? 1 : 0,
+            autosave_authority_unchanged ? 1 : 0,
+            autosave_pair_reserved ? 1 : 0,
+            state.Documents().HasIdentityReservation(sequence_native_identities[2]),
+            state.Documents().HasIdentityReservation(sequence_raster_identities[2]));
+        restore_sequence_policy();
+        return 4096;
+    }
+    const LRESULT duplicate_autosave_switch_result = SendMessageW(
+        state.Workspace().windows.window,
+        WM_COMMAND,
+        IDM_SEQ_NEXT,
+        0);
+    const InkpodStatus autosave_fence_status = state.engine->Invoke(
+        [](InkpodCore*) { return INKPOD_STATUS_OK; }, false, false);
+    // Sequence navigation commands issued while a replacement is pending are
+    // accepted into the bounded intent queue. With Stop endpoint policy this
+    // second Next is drained as an endpoint no-op after cell10 is presented.
+    if (duplicate_autosave_switch_result != 1
+        || autosave_fence_status != INKPOD_STATUS_OK) {
+        std::fprintf(stderr,
+            "autosave sequence fence failed: duplicate=%lld status=%u\n",
+            static_cast<long long>(duplicate_autosave_switch_result),
+            static_cast<unsigned>(autosave_fence_status));
         restore_sequence_policy();
         return 4096;
     }
@@ -11051,6 +12486,8 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         autosave_request.source_document_uuid_low,
         autosave_request.source_generation);
     std::wstring source_metadata_path;
+    const bool autosave_target_query =
+        QueryDocument(state, autosave_target);
     if (state.Workspace().animation.sequence_switch_pending
         || state.Document().sequence_required_present_epoch != autosave_epoch
         || state.Workspace().animation.smoke_sequence_switch_completed
@@ -11058,7 +12495,7 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         || state.Workspace().animation.smoke_sequence_switch_status
             != INKPOD_STATUS_OK
         || state.lifetime.smoke_dirty_prompt_count != autosave_prompt_count
-        || !QueryDocument(state, autosave_target)
+        || !autosave_target_query
         || (autosave_target.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
         || autosave_target.document_uuid_high
             != autosave_request.target_document_uuid_high
@@ -11067,24 +12504,123 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         || state.Workspace().sequence_dialog.view.active_index != 2U
         || source_binding == nullptr
         || source_binding->artifact_generation != 1U
+        || source_binding->artifact_proof.struct_size
+            != sizeof(InkpodIoRecoveryArtifactProof)
+        || source_binding->artifact_proof.native.identity.kind != 1U
+        || source_binding->artifact_proof.metadata.identity.kind != 1U
+        || source_binding->metadata.pair_proof.kind
+            != INKPOD_IO_RECOVERY_PAIR_COMMITTED
+        || source_binding->metadata.pair_proof.native.identity.kind != 1U
+        || source_binding->metadata.pair_proof.native.identity.volume
+            == UINT64_MAX
+        || source_binding->metadata.pair_proof.raster.identity.kind != 1U
         || GetFileAttributesW(source_binding->recovery_path.c_str())
             == INVALID_FILE_ATTRIBUTES
         || !RecoveryMetadataPath(
             source_binding->recovery_path, source_metadata_path)
         || GetFileAttributesW(source_metadata_path.c_str())
             == INVALID_FILE_ATTRIBUTES
-        || !state.Document().shell.current_path.empty()
-        || state.Document().identity != inkpod::app::UntitledDocumentIdentity(
-            autosave_target.document_uuid_high, autosave_target.document_uuid_low)
+        || !sequence_pair_authority_matches(2U, true)
+        || state.Documents().HasIdentityReservation(
+            {}, autosave_native_reservation_path)
+        || state.Documents().HasIdentityReservation(
+            {}, autosave_raster_reservation_path)
+        || GetFileAttributesW(sequence_native_paths[2].c_str())
+            == INVALID_FILE_ATTRIBUTES
         || source_binding->metadata.original_identity != autosave_source_identity
         || source_binding->metadata.original_path != autosave_saved_path
         || !saved_sequence_pair_unchanged()) {
+        std::fprintf(stderr,
+            "autosave switch publication mismatch: pending=%d epoch=%llu/%llu "
+            "completed=%u/%u status=%u prompts=%u/%u query=%d flags=%llu "
+            "uuid=%llu:%llu/%llu:%llu index=%u binding=%d generation=%llu "
+            "artifact=%u/%u/%u pair=%u/%u/%llu/%u recovery=%lu/%lu "
+            "authority=%d reservation=%d/%d native=%lu identity=%d path=%d "
+            "unchanged=%d current=%ls planned=%ls raster=%ls original=%ls\n",
+            state.Workspace().animation.sequence_switch_pending,
+            static_cast<unsigned long long>(
+                state.Document().sequence_required_present_epoch),
+            static_cast<unsigned long long>(autosave_epoch),
+            state.Workspace().animation.smoke_sequence_switch_completed,
+            autosave_completion_count + 1U,
+            static_cast<unsigned>(
+                state.Workspace().animation.smoke_sequence_switch_status),
+            state.lifetime.smoke_dirty_prompt_count,
+            autosave_prompt_count,
+            autosave_target_query,
+            static_cast<unsigned long long>(autosave_target.flags),
+            static_cast<unsigned long long>(autosave_target.document_uuid_high),
+            static_cast<unsigned long long>(autosave_target.document_uuid_low),
+            static_cast<unsigned long long>(
+                autosave_request.target_document_uuid_high),
+            static_cast<unsigned long long>(
+                autosave_request.target_document_uuid_low),
+            state.Workspace().sequence_dialog.view.active_index,
+            source_binding != nullptr,
+            static_cast<unsigned long long>(
+                source_binding == nullptr ? 0U
+                    : source_binding->artifact_generation),
+            source_binding == nullptr ? 0U
+                : source_binding->artifact_proof.native.identity.kind,
+            source_binding == nullptr ? 0U
+                : source_binding->artifact_proof.metadata.identity.kind,
+            source_binding == nullptr ? 0U
+                : source_binding->artifact_proof.struct_size,
+            source_binding == nullptr ? 0U
+                : source_binding->metadata.pair_proof.kind,
+            source_binding == nullptr ? 0U
+                : source_binding->metadata.pair_proof.native.identity.kind,
+            static_cast<unsigned long long>(source_binding == nullptr ? 0U
+                : source_binding->metadata.pair_proof.native.identity.volume),
+            source_binding == nullptr ? 0U
+                : source_binding->metadata.pair_proof.raster.identity.kind,
+            source_binding == nullptr ? INVALID_FILE_ATTRIBUTES
+                : GetFileAttributesW(source_binding->recovery_path.c_str()),
+            GetFileAttributesW(source_metadata_path.c_str()),
+            sequence_pair_authority_matches(2U, true),
+            state.Documents().HasIdentityReservation(
+                {}, autosave_native_reservation_path),
+            state.Documents().HasIdentityReservation(
+                {}, autosave_raster_reservation_path),
+            GetFileAttributesW(sequence_native_paths[2].c_str()),
+            source_binding != nullptr
+                && source_binding->metadata.original_identity
+                    == autosave_source_identity,
+            source_binding != nullptr
+                && source_binding->metadata.original_path
+                    == autosave_saved_path,
+            saved_sequence_pair_unchanged(),
+            state.Document().shell.current_path.c_str(),
+            state.Document().shell.planned_native_path.c_str(),
+            state.Document().shell.pair_raster_path.c_str(),
+            source_binding == nullptr ? L""
+                : source_binding->metadata.original_path.c_str());
         restore_sequence_policy();
         return 4097;
     }
     const std::wstring source_recovery_path = source_binding->recovery_path;
+    const auto source_recovery_proof = source_binding->artifact_proof;
+    const std::uint64_t source_recovery_generation =
+        source_binding->artifact_generation;
     const auto autosave_target_identity = state.Document().identity;
+    const auto autosave_target_pair_identity =
+        state.Document().pair_raster_identity;
     const auto autosave_target_shell = state.Document().shell;
+    InkpodEditorStateInfo autosave_target_editor{};
+    autosave_target_editor.struct_size = sizeof(autosave_target_editor);
+    InkpodHistoryInfo autosave_target_history{};
+    autosave_target_history.struct_size = sizeof(autosave_target_history);
+    if (!state.engine->GetEditorState(
+            state.Document().id, state.Document().generation,
+            autosave_target_editor)
+        || state.engine->Invoke(
+               [&autosave_target_history](InkpodCore* core) {
+                   return inkpod_core_history_info(
+                       core, &autosave_target_history);
+               }, false, false) != INKPOD_STATUS_OK) {
+        restore_sequence_policy();
+        return 4097;
+    }
     const auto switching_session = state.Document().id;
     const auto switching_view = state.Document().ActiveView()->id;
     // The saved source is now a distinct open document. Restoring its recovery
@@ -11095,51 +12631,203 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         restore_sequence_policy();
         return 1516;
     }
+    const auto duplicate_session = state.Document().id;
     const auto duplicate_view = state.Document().ActiveView()->id;
-    if (!ActivateDocumentTab(state, switching_view)
-        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SEQ_PREVIOUS, 0) != 0
+    if (!ActivateDocumentTab(state, switching_view)) {
+        restore_sequence_policy();
+        return 1517;
+    }
+    const std::uint32_t duplicate_conflict_completed_before =
+        state.Workspace().animation.smoke_sequence_switch_completed;
+    const LRESULT duplicate_conflict_queued = SendMessageW(
+        state.Workspace().windows.window,
+        WM_COMMAND,
+        IDM_SEQ_PREVIOUS,
+        0);
+    const bool duplicate_conflict_idle = WaitForFileIo(state);
+    PumpPendingWindowMessages();
+    InkpodDocumentInfo duplicate_conflict_document = EmptyDocumentInfo();
+    InkpodEditorStateInfo duplicate_conflict_editor{};
+    duplicate_conflict_editor.struct_size = sizeof(duplicate_conflict_editor);
+    InkpodHistoryInfo duplicate_conflict_history{};
+    duplicate_conflict_history.struct_size = sizeof(duplicate_conflict_history);
+    const bool duplicate_conflict_core_unchanged =
+        QueryDocument(state, duplicate_conflict_document)
+        && state.engine->GetEditorState(
+            state.Document().id, state.Document().generation,
+            duplicate_conflict_editor)
+        && state.engine->Invoke(
+               [&duplicate_conflict_history](InkpodCore* core) {
+                   return inkpod_core_history_info(
+                       core, &duplicate_conflict_history);
+               }, false, false) == INKPOD_STATUS_OK
+        && duplicate_conflict_document.document_uuid_high
+            == autosave_target.document_uuid_high
+        && duplicate_conflict_document.document_uuid_low
+            == autosave_target.document_uuid_low
+        && duplicate_conflict_document.document_revision
+            == autosave_target.document_revision
+        && duplicate_conflict_document.flags == autosave_target.flags
+        && duplicate_conflict_document.main_plane_checksum
+            == autosave_target.main_plane_checksum
+        && duplicate_conflict_document.color_plane_checksum
+            == autosave_target.color_plane_checksum
+        && duplicate_conflict_editor.editor_revision
+            == autosave_target_editor.editor_revision
+        && duplicate_conflict_editor.flags == autosave_target_editor.flags
+        && std::memcmp(duplicate_conflict_editor.editor_digest,
+               autosave_target_editor.editor_digest,
+               sizeof(duplicate_conflict_editor.editor_digest)) == 0
+        && duplicate_conflict_history.cursor == autosave_target_history.cursor
+        && duplicate_conflict_history.item_count
+            == autosave_target_history.item_count;
+    if (duplicate_conflict_queued != 1
+        || !duplicate_conflict_idle
         || state.Workspace().animation.sequence_switch_pending
-        || !authority_unchanged(autosave_target_identity, autosave_target_shell)
+        || state.routing.sequence_switch_pending_token.load(
+               std::memory_order_acquire) != 0U
+        || state.Workspace().animation.smoke_sequence_switch_completed
+            != duplicate_conflict_completed_before + 1U
+        || state.Workspace().animation.smoke_sequence_switch_status
+            != INKPOD_STATUS_FILE_CONFLICT
+        || !duplicate_conflict_core_unchanged
+        || !authority_unchanged(
+            autosave_target_identity, autosave_target_pair_identity,
+            autosave_target_shell)
         || state.Documents().HasIdentityReservation(autosave_source_identity)
+        || state.Documents().HasIdentityReservation(
+            autosave_source_pair_identity)
+        || state.Documents().HasIdentityReservation(
+            {}, autosave_source_native_path)
+        || state.Documents().HasIdentityReservation(
+            {}, autosave_source_raster_path)
         || !QueryDocument(state, autosave_target)
         || autosave_target.document_uuid_high != autosave_request.target_document_uuid_high
         || autosave_target.document_uuid_low != autosave_request.target_document_uuid_low
         || !saved_sequence_pair_unchanged()
         || !ActivateDocumentTab(state, duplicate_view)
         || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_DOCUMENT_CLOSE, 0) != 1
+        || !WaitForFileIo(state)
+        || state.Documents().Find(duplicate_session) != nullptr
         || !ActivateDocumentTab(state, switching_view)
         || !WaitForSequencePresentation(state)
         || state.Document().sequence_required_present_epoch != autosave_epoch) {
+        std::fprintf(stderr,
+            "duplicate recovery conflict mismatch: queued=%lld idle=%d "
+            "pending=%d/%llu completed=%u/%u status=%u core=%d authority=%d "
+            "reserved=%d index=%u epoch=%llu/%llu\n",
+            static_cast<long long>(duplicate_conflict_queued),
+            duplicate_conflict_idle,
+            state.Workspace().animation.sequence_switch_pending,
+            static_cast<unsigned long long>(
+                state.routing.sequence_switch_pending_token.load(
+                    std::memory_order_acquire)),
+            state.Workspace().animation.smoke_sequence_switch_completed,
+            duplicate_conflict_completed_before + 1U,
+            static_cast<unsigned>(
+                state.Workspace().animation.smoke_sequence_switch_status),
+            duplicate_conflict_core_unchanged,
+            authority_unchanged(
+                autosave_target_identity, autosave_target_pair_identity,
+                autosave_target_shell),
+            state.Documents().HasIdentityReservation(
+                autosave_source_identity),
+            state.Workspace().sequence_dialog.view.active_index,
+            static_cast<unsigned long long>(
+                state.Document().sequence_required_present_epoch),
+            static_cast<unsigned long long>(autosave_epoch));
         restore_sequence_policy();
         return 1517;
     }
-    if (SendMessageW(
-            state.Workspace().windows.window,
-            WM_COMMAND,
-            IDM_SEQ_PREVIOUS,
-            0) != 1
-        || !state.Workspace().animation.sequence_switch_pending
-        || !authority_unchanged(autosave_target_identity, autosave_target_shell)
-        || !state.Documents().HasIdentityReservation(autosave_source_identity)
-        || state.engine->Invoke(
-               [](InkpodCore*) { return INKPOD_STATUS_OK; }, false, false)
-            != INKPOD_STATUS_OK) {
-        restore_sequence_policy();
-        return 4098;
-    }
-    // The outgoing target is already presented. The saved source replays to a
-    // revision no greater than that target, so revision-only fencing would let
-    // its stale frame satisfy recovery. Capture the accepted I/O token before
-    // pumping completion and require that exact epoch to reach Present.
+    bool recovery_preflight_observed{};
+    bool recovery_pending_before_fence{};
+    bool recovery_authority_unchanged{};
+    bool recovery_pair_reserved{};
+    std::wstring recovery_native_reservation_path;
+    std::wstring recovery_raster_reservation_path;
+    state.lifetime.smoke_after_sequence_pair_reserved = [
+        &](const std::wstring& native_path,
+            const std::wstring& raster_path,
+            const inkpod::app::DocumentIdentity& native_identity,
+            const inkpod::app::DocumentIdentity& raster_identity) noexcept {
+        recovery_preflight_observed = true;
+        recovery_pending_before_fence =
+            state.Workspace().animation.sequence_switch_pending;
+        recovery_authority_unchanged =
+            authority_unchanged(
+                autosave_target_identity, autosave_target_pair_identity,
+                autosave_target_shell);
+        recovery_pair_reserved = native_identity == autosave_source_identity
+            && raster_identity == autosave_source_pair_identity
+            && inkpod::app::NormalizeDocumentFilePath(
+                native_path, recovery_native_reservation_path)
+            && inkpod::app::NormalizeDocumentFilePath(
+                raster_path, recovery_raster_reservation_path)
+            && recovery_native_reservation_path
+                == autosave_source_native_path
+            && recovery_raster_reservation_path
+                == autosave_source_raster_path
+            && state.Documents().HasIdentityReservation(native_identity)
+            && state.Documents().HasIdentityReservation(raster_identity)
+            && state.Documents().HasIdentityReservation(
+                {}, recovery_native_reservation_path)
+            && state.Documents().HasIdentityReservation(
+                {}, recovery_raster_reservation_path);
+    };
+    const std::uint32_t recovery_completed_before =
+        state.Workspace().animation.smoke_sequence_switch_completed;
+    const LRESULT recovery_switch_queued = SendMessageW(
+        state.Workspace().windows.window,
+        WM_COMMAND,
+        IDM_SEQ_PREVIOUS,
+        0);
+    // Capture the accepted epoch before Poll: a fast worker may complete and
+    // clear the pending token in the same Poll that invokes the preflight hook.
     const std::uint64_t recovery_epoch =
         state.routing.sequence_switch_pending_token.load(std::memory_order_acquire);
-    if (recovery_epoch == 0U || recovery_epoch == autosave_epoch
-        || !sequence_edit_callbacks_are_fenced()) {
-        std::fputs("pending sequence recovery accepted a direct pane/editor callback\n", stderr);
+    const bool recovery_callbacks_fenced = recovery_switch_queued == 1
+        && recovery_epoch != 0U && recovery_epoch != autosave_epoch
+        && sequence_edit_callbacks_are_fenced();
+    const ULONGLONG recovery_reservation_deadline = GetTickCount64() + 30'000U;
+    while (recovery_switch_queued == 1 && !recovery_preflight_observed
+        && state.Workspace().animation.sequence_switch_pending
+        && GetTickCount64() < recovery_reservation_deadline) {
+        state.file_io.Poll();
+        if (!recovery_preflight_observed) {
+            Sleep(1U);
+        }
+    }
+    state.lifetime.smoke_after_sequence_pair_reserved = {};
+    const InkpodStatus recovery_fence_status = state.engine->Invoke(
+        [](InkpodCore*) { return INKPOD_STATUS_OK; }, false, false);
+    if (recovery_switch_queued != 1
+        || !recovery_preflight_observed
+        || !recovery_pending_before_fence
+        || !recovery_authority_unchanged
+        || !recovery_pair_reserved
+        || !recovery_callbacks_fenced
+        || recovery_fence_status != INKPOD_STATUS_OK) {
+        std::fprintf(stderr,
+            "recovery sequence pair preflight missing: queued=%lld pending=%d/%d "
+            "observed=%d authority=%d reserved=%d callbacks=%d epoch=%llu fence=%u\n",
+            static_cast<long long>(recovery_switch_queued),
+            state.Workspace().animation.sequence_switch_pending,
+            recovery_pending_before_fence,
+            recovery_preflight_observed,
+            recovery_authority_unchanged,
+            recovery_pair_reserved,
+            recovery_callbacks_fenced,
+            static_cast<unsigned long long>(recovery_epoch),
+            static_cast<unsigned>(recovery_fence_status));
         restore_sequence_policy();
         return 4098;
     }
-    if (!WaitForFileIo(state) || !WaitForSequencePresentation(state)) {
+    // The outgoing target is already presented and may have an equal or newer
+    // revision. Require the exact accepted completion and cell index, not a
+    // stale frame that merely satisfies revision ordering.
+    if (!WaitForFileIo(state)
+        || !WaitForSequencePresentation(
+            state, false, std::nullopt, 1U, recovery_completed_before)) {
         restore_sequence_policy();
         return 4098;
     }
@@ -11147,10 +12835,14 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     InkpodDocumentInfo autosave_restored = EmptyDocumentInfo();
     InkpodEditorStateInfo autosave_restored_editor{};
     autosave_restored_editor.struct_size = sizeof(autosave_restored_editor);
+    InkpodHistoryInfo autosave_restored_history{};
+    autosave_restored_history.struct_size = sizeof(autosave_restored_history);
+    InkpodCompactionPlan autosave_restored_plan{};
+    autosave_restored_plan.struct_size = sizeof(autosave_restored_plan);
     if (state.Workspace().animation.sequence_switch_pending
         || state.Document().sequence_required_present_epoch != recovery_epoch
         || state.Workspace().animation.smoke_sequence_switch_completed
-            != autosave_completion_count + 2U
+            != recovery_completed_before + 1U
         || state.Workspace().animation.smoke_sequence_switch_status
             != INKPOD_STATUS_OK
         || state.lifetime.smoke_dirty_prompt_count != autosave_prompt_count
@@ -11161,6 +12853,27 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
                state.Document().generation,
                autosave_restored_editor)
             == false
+        || state.engine->Invoke(
+               [&autosave_restored_history, &autosave_restored_plan](
+                   InkpodCore* core) {
+                   InkpodStatus status = inkpod_core_history_info(
+                       core, &autosave_restored_history);
+                   if (status == INKPOD_STATUS_OK) {
+                       status = inkpod_core_compaction_plan(
+                           core, &autosave_restored_plan);
+                   }
+                   return status;
+               }, false, false) != INKPOD_STATUS_OK
+        || autosave_restored_history.cursor
+            != autosave_source_history.cursor
+        || autosave_restored_history.item_count
+            != autosave_source_history.item_count
+        || std::memcmp(autosave_restored_plan.document_digest,
+               autosave_source_plan.document_digest,
+               sizeof(autosave_restored_plan.document_digest)) != 0
+        || std::memcmp(autosave_restored_plan.journal_digest,
+               autosave_source_plan.journal_digest,
+               sizeof(autosave_restored_plan.journal_digest)) != 0
         || autosave_restored.document_uuid_high
             != autosave_source.document_uuid_high
         || autosave_restored.document_uuid_low
@@ -11180,19 +12893,30 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
                sizeof(autosave_restored_editor.editor_digest)) != 0
         || (autosave_restored_editor.flags & INKPOD_EDITOR_STATE_DIRTY) == 0U
         || state.Workspace().sequence_dialog.view.active_index != 1U
-        || state.Document().shell.current_path.empty() == false
+        || !sequence_pair_authority_matches(1U, true)
         || state.Document().shell.recovery_path != source_recovery_path
-        || state.Document().shell.recovery_original_path != autosave_saved_path
+        || !state.Document().shell.recovery_artifact_published
+        || state.Document().shell.recovery_artifact_generation
+            != source_recovery_generation
+        || std::memcmp(&state.Document().shell.recovery_artifact_proof,
+               &source_recovery_proof, sizeof(source_recovery_proof)) != 0
         || state.Document().identity != autosave_source_identity
         || state.Documents().HasIdentityReservation(autosave_source_identity)
+        || state.Documents().HasIdentityReservation(
+            autosave_source_pair_identity)
+        || state.Documents().HasIdentityReservation(
+            {}, autosave_source_native_path)
+        || state.Documents().HasIdentityReservation(
+            {}, autosave_source_raster_path)
         || !saved_sequence_pair_unchanged()) {
         std::fprintf(stderr,
             "sequence recovery mismatch: pending=%d completed=%u/%u status=%u prompts=%u/%u "
             "uuid=%d checksums=%d flags=%u editor_revision=%llu/%llu editor_digest=%d editor_flags=%u "
-            "index=%u pathless=%d recovery=%d original=%d identity=%d reserved=%d pair=%d "
+            "index=%u pair_authority=%d recovery=%d original_empty=%d identity=%d reserved=%d pair=%d "
             "revision=%llu/%llu epoch=%llu/%llu\n",
             state.Workspace().animation.sequence_switch_pending,
-            state.Workspace().animation.smoke_sequence_switch_completed, autosave_completion_count + 2U,
+            state.Workspace().animation.smoke_sequence_switch_completed,
+            recovery_completed_before + 1U,
             state.Workspace().animation.smoke_sequence_switch_status,
             state.lifetime.smoke_dirty_prompt_count, autosave_prompt_count,
             autosave_restored.document_uuid_high == autosave_source.document_uuid_high
@@ -11205,9 +12929,9 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
             std::memcmp(autosave_restored_editor.editor_digest, autosave_source_editor.editor_digest,
                 sizeof(autosave_restored_editor.editor_digest)) == 0,
             autosave_restored_editor.flags, state.Workspace().sequence_dialog.view.active_index,
-            state.Document().shell.current_path.empty(),
+            sequence_pair_authority_matches(1U, true),
             state.Document().shell.recovery_path == source_recovery_path,
-            state.Document().shell.recovery_original_path == autosave_saved_path,
+            state.Document().shell.recovery_original_path.empty(),
             state.Document().identity == autosave_source_identity,
             state.Documents().HasIdentityReservation(autosave_source_identity),
             saved_sequence_pair_unchanged(),
@@ -11217,6 +12941,1230 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
             static_cast<unsigned long long>(recovery_epoch));
         restore_sequence_policy();
         return 4099;
+    }
+    // Undo the recovered document journal back to its saved cursor, then restore
+    // the independently persisted EditorState to its saved value. Editor
+    // revision is monotonic and is deliberately not part of document Undo;
+    // clean state is established by the two savepoint digests independently.
+    // RECOVERED remains a provenance marker at this cursor, so switching away
+    // must publish a fresh append-only generation containing the clean cursor
+    // and redo tail instead of leaving the older dirty association authoritative.
+    InkpodDocumentInfo recovered_clean = EmptyDocumentInfo();
+    InkpodEditorStateInfo recovered_clean_editor{};
+    recovered_clean_editor.struct_size = sizeof(recovered_clean_editor);
+    InkpodHistoryInfo recovered_clean_history{};
+    recovered_clean_history.struct_size = sizeof(recovered_clean_history);
+    bool reached_recovered_document_baseline{};
+    const std::uint64_t recovered_undo_count =
+        autosave_source_history.cursor - autosave_baseline_history.cursor;
+    for (std::uint64_t undo = 0U; undo < recovered_undo_count; ++undo) {
+        SendMessageW(state.Workspace().windows.window,
+            WM_COMMAND, IDM_EDIT_UNDO, 0);
+        if (QueryDocument(state, recovered_clean)
+            && state.engine->Invoke(
+                   [&recovered_clean_history](InkpodCore* core) {
+                       return inkpod_core_history_info(
+                           core, &recovered_clean_history);
+                   }, false, false) == INKPOD_STATUS_OK
+            && recovered_clean_history.cursor
+                == autosave_baseline_history.cursor) {
+            reached_recovered_document_baseline = true;
+            break;
+        }
+    }
+    InkpodEditorStateInfo recovered_after_document_undo_editor{};
+    recovered_after_document_undo_editor.struct_size =
+        sizeof(recovered_after_document_undo_editor);
+    const bool document_undo_preserved_editor =
+        reached_recovered_document_baseline
+        && state.engine->GetEditorState(
+            state.Document().id, state.Document().generation,
+            recovered_after_document_undo_editor)
+        && (recovered_after_document_undo_editor.flags
+            & INKPOD_EDITOR_STATE_DIRTY) != 0U
+        && recovered_after_document_undo_editor.editor_revision
+            == autosave_restored_editor.editor_revision
+        && std::memcmp(recovered_after_document_undo_editor.editor_digest,
+               autosave_restored_editor.editor_digest,
+               sizeof(recovered_after_document_undo_editor.editor_digest)) == 0;
+    const InkpodEditorFillOptions autosave_baseline_fill =
+        autosave_baseline_editor.fill;
+    const bool restored_recovered_editor_baseline =
+        document_undo_preserved_editor
+        && UpdateEditorFillOptionsForSmoke(
+            state,
+            [autosave_baseline_fill](InkpodEditorFillOptions& fill) {
+                fill = autosave_baseline_fill;
+            });
+    const bool recovered_clean_query = QueryDocument(state, recovered_clean);
+    const bool recovered_clean_editor_query = state.engine->GetEditorState(
+        state.Document().id, state.Document().generation,
+        recovered_clean_editor);
+    const InkpodStatus recovered_clean_history_status = state.engine->Invoke(
+        [&recovered_clean_history](InkpodCore* core) {
+            return inkpod_core_history_info(
+                core, &recovered_clean_history);
+        }, false, false);
+    if (!reached_recovered_document_baseline
+        || !document_undo_preserved_editor
+        || !restored_recovered_editor_baseline
+        || !recovered_clean_query
+        || !recovered_clean_editor_query
+        || (recovered_clean.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
+        || (recovered_clean.flags & INKPOD_DOCUMENT_FLAG_RECOVERED) == 0U
+        || recovered_clean.document_uuid_high
+            != autosave_baseline.document_uuid_high
+        || recovered_clean.document_uuid_low
+            != autosave_baseline.document_uuid_low
+        || recovered_clean.main_plane_checksum
+            != autosave_baseline.main_plane_checksum
+        || recovered_clean.color_plane_checksum
+            != autosave_baseline.color_plane_checksum
+        || (recovered_clean_editor.flags & INKPOD_EDITOR_STATE_DIRTY) != 0U
+        || recovered_clean_editor.editor_revision
+            <= recovered_after_document_undo_editor.editor_revision
+        || std::memcmp(recovered_clean_editor.editor_digest,
+               autosave_baseline_editor.editor_digest,
+               sizeof(autosave_baseline_editor.editor_digest)) != 0
+        || recovered_clean_history_status != INKPOD_STATUS_OK
+        || recovered_clean_history.cursor
+            != autosave_baseline_history.cursor
+        || recovered_clean_history.cursor
+            >= recovered_clean_history.item_count) {
+        std::fprintf(stderr,
+            "recovered baseline mismatch: reached=%d independent=%d restored=%d query=%d/%d "
+            "flags=%llu uuid=%d checksums=%d editor=%llu/%llu digest=%d "
+            "history=%u/%llu/%llu baseline=%llu\n",
+            reached_recovered_document_baseline,
+            document_undo_preserved_editor,
+            restored_recovered_editor_baseline,
+            recovered_clean_query,
+            recovered_clean_editor_query,
+            static_cast<unsigned long long>(recovered_clean.flags),
+            recovered_clean.document_uuid_high
+                    == autosave_baseline.document_uuid_high
+                && recovered_clean.document_uuid_low
+                    == autosave_baseline.document_uuid_low,
+            recovered_clean.main_plane_checksum
+                    == autosave_baseline.main_plane_checksum
+                && recovered_clean.color_plane_checksum
+                    == autosave_baseline.color_plane_checksum,
+            static_cast<unsigned long long>(
+                autosave_source_editor.editor_revision),
+            static_cast<unsigned long long>(
+                recovered_clean_editor.editor_revision),
+            std::memcmp(recovered_clean_editor.editor_digest,
+                autosave_baseline_editor.editor_digest,
+                sizeof(recovered_clean_editor.editor_digest)) == 0,
+            static_cast<unsigned>(recovered_clean_history_status),
+            static_cast<unsigned long long>(recovered_clean_history.cursor),
+            static_cast<unsigned long long>(recovered_clean_history.item_count),
+            static_cast<unsigned long long>(
+                autosave_baseline_history.cursor));
+        restore_sequence_policy();
+        return 4130;
+    }
+    if (SendMessageW(state.Workspace().windows.window,
+            WM_COMMAND, IDM_SEQ_NEXT, 0) != 1
+        || !WaitForFileIo(state) || !WaitForSequencePresentation(state)) {
+        restore_sequence_policy();
+        return 4131;
+    }
+    const auto* refreshed_source_binding = state.Document().FindSequenceAutosave(
+        autosave_request.source_document_uuid_high,
+        autosave_request.source_document_uuid_low,
+        autosave_request.source_generation);
+    if (refreshed_source_binding == nullptr
+        || refreshed_source_binding->artifact_generation
+            <= source_recovery_generation
+        || refreshed_source_binding->recovery_path.empty()
+        || refreshed_source_binding->recovery_path == source_recovery_path
+        || !inkpod::app::ValidRecoveryArtifactProof(
+            refreshed_source_binding->artifact_proof)
+        || GetFileAttributesW(refreshed_source_binding->recovery_path.c_str())
+            == INVALID_FILE_ATTRIBUTES
+        || GetFileAttributesW(source_recovery_path.c_str())
+            != INVALID_FILE_ATTRIBUTES
+        || state.Workspace().sequence_dialog.view.active_index != 2U) {
+        restore_sequence_policy();
+        return 4132;
+    }
+    const std::wstring clean_recovery_path =
+        refreshed_source_binding->recovery_path;
+    const auto clean_recovery_proof =
+        refreshed_source_binding->artifact_proof;
+    const std::uint64_t clean_recovery_generation =
+        refreshed_source_binding->artifact_generation;
+    if (SendMessageW(state.Workspace().windows.window,
+            WM_COMMAND, IDM_SEQ_PREVIOUS, 0) != 1
+        || !WaitForFileIo(state) || !WaitForSequencePresentation(state)) {
+        restore_sequence_policy();
+        return 4133;
+    }
+    InkpodDocumentInfo clean_restored = EmptyDocumentInfo();
+    InkpodEditorStateInfo clean_restored_editor{};
+    clean_restored_editor.struct_size = sizeof(clean_restored_editor);
+    InkpodHistoryInfo clean_restored_history{};
+    clean_restored_history.struct_size = sizeof(clean_restored_history);
+    const auto* current_clean_binding = state.Document().FindSequenceAutosave(
+        autosave_request.source_document_uuid_high,
+        autosave_request.source_document_uuid_low,
+        autosave_request.source_generation);
+    if (!QueryDocument(state, clean_restored)
+        || (clean_restored.flags
+            & (INKPOD_DOCUMENT_FLAG_DIRTY
+                | INKPOD_DOCUMENT_FLAG_RECOVERED)) != 0U
+        || clean_restored.document_uuid_high
+            != autosave_baseline.document_uuid_high
+        || clean_restored.document_uuid_low
+            != autosave_baseline.document_uuid_low
+        || clean_restored.main_plane_checksum
+            != autosave_baseline.main_plane_checksum
+        || clean_restored.color_plane_checksum
+            != autosave_baseline.color_plane_checksum
+        || !state.engine->GetEditorState(
+            state.Document().id, state.Document().generation,
+            clean_restored_editor)
+        || (clean_restored_editor.flags & INKPOD_EDITOR_STATE_DIRTY) != 0U
+        || clean_restored_editor.editor_revision
+            != recovered_clean_editor.editor_revision
+        || std::memcmp(clean_restored_editor.editor_digest,
+               autosave_baseline_editor.editor_digest,
+               sizeof(autosave_baseline_editor.editor_digest)) != 0
+        || state.engine->Invoke(
+               [&clean_restored_history](InkpodCore* core) {
+                   return inkpod_core_history_info(
+                       core, &clean_restored_history);
+               }, false, false) != INKPOD_STATUS_OK
+        || clean_restored_history.cursor
+            >= clean_restored_history.item_count
+        || state.Workspace().sequence_dialog.view.active_index != 1U
+        || !sequence_pair_authority_matches(1U, true)
+        || current_clean_binding == nullptr
+        || current_clean_binding->artifact_generation
+            != clean_recovery_generation
+        || current_clean_binding->recovery_path != clean_recovery_path
+        || state.Document().shell.recovery_path != clean_recovery_path
+        || !state.Document().shell.recovery_artifact_published
+        || std::memcmp(&state.Document().shell.recovery_artifact_proof,
+               &clean_recovery_proof, sizeof(clean_recovery_proof)) != 0) {
+        restore_sequence_policy();
+        return 4134;
+    }
+    const std::uint64_t clean_cursor = clean_restored_history.cursor;
+    SendMessageW(state.Workspace().windows.window,
+        WM_COMMAND, IDM_EDIT_REDO, 0);
+    InkpodDocumentInfo after_clean_redo = EmptyDocumentInfo();
+    InkpodHistoryInfo after_clean_redo_history{};
+    after_clean_redo_history.struct_size = sizeof(after_clean_redo_history);
+    InkpodCompactionPlan after_clean_redo_plan{};
+    after_clean_redo_plan.struct_size = sizeof(after_clean_redo_plan);
+    if (!QueryDocument(state, after_clean_redo)
+        || state.engine->Invoke(
+               [&after_clean_redo_history, &after_clean_redo_plan](
+                   InkpodCore* core) {
+                   InkpodStatus status = inkpod_core_history_info(
+                       core, &after_clean_redo_history);
+                   if (status == INKPOD_STATUS_OK) {
+                       status = inkpod_core_compaction_plan(
+                           core, &after_clean_redo_plan);
+                   }
+                   return status;
+               }, false, false) != INKPOD_STATUS_OK
+        || after_clean_redo_history.cursor != clean_cursor + 1U
+        || (after_clean_redo.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U
+        || std::memcmp(after_clean_redo_plan.document_digest,
+               autosave_source_plan.document_digest,
+               sizeof(after_clean_redo_plan.document_digest)) != 0) {
+        restore_sequence_policy();
+        return 4135;
+    }
+    SendMessageW(state.Workspace().windows.window,
+        WM_COMMAND, IDM_EDIT_UNDO, 0);
+    if (!QueryDocument(state, clean_restored)
+        || (clean_restored.flags
+            & (INKPOD_DOCUMENT_FLAG_DIRTY
+                | INKPOD_DOCUMENT_FLAG_RECOVERED)) != 0U) {
+        restore_sequence_policy();
+        return 4136;
+    }
+    // The clean recovery now has an old redo tail. Create a different branch,
+    // then Undo back to the same clean/non-recovered cursor. Dirty/recovered
+    // flags alone cannot detect this freshness change; Core's preservation bit
+    // must force generation 3 and retire generation 2 exactly.
+    InkpodEditorStateInfo branch_baseline_editor{};
+    branch_baseline_editor.struct_size = sizeof(branch_baseline_editor);
+    InkpodHistoryInfo branch_baseline_history{};
+    branch_baseline_history.struct_size = sizeof(branch_baseline_history);
+    if (!state.engine->GetEditorState(
+            state.Document().id, state.Document().generation,
+            branch_baseline_editor)
+        || state.engine->Invoke(
+               [&branch_baseline_history](InkpodCore* core) {
+                   return inkpod_core_history_info(
+                       core, &branch_baseline_history);
+               }, false, false) != INKPOD_STATUS_OK
+        || SendMessageW(state.Workspace().windows.window,
+               WM_COMMAND, IDM_SELECTION_INVERT, 0) != 0) {
+        restore_sequence_policy();
+        return 4150;
+    }
+    InkpodDocumentInfo branch_dirty = EmptyDocumentInfo();
+    InkpodEditorStateInfo branch_dirty_editor{};
+    branch_dirty_editor.struct_size = sizeof(branch_dirty_editor);
+    InkpodHistoryInfo branch_dirty_history{};
+    branch_dirty_history.struct_size = sizeof(branch_dirty_history);
+    InkpodCompactionPlan branch_dirty_plan{};
+    branch_dirty_plan.struct_size = sizeof(branch_dirty_plan);
+    if (!QueryDocument(state, branch_dirty)
+        || (branch_dirty.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U
+        || !state.engine->GetEditorState(
+            state.Document().id, state.Document().generation,
+            branch_dirty_editor)
+        || (branch_dirty_editor.flags & INKPOD_EDITOR_STATE_DIRTY) != 0U
+        || std::memcmp(branch_dirty_editor.editor_digest,
+               branch_baseline_editor.editor_digest,
+               sizeof(branch_dirty_editor.editor_digest)) != 0
+        || state.engine->Invoke(
+               [&branch_dirty_history, &branch_dirty_plan](InkpodCore* core) {
+                   InkpodStatus status = inkpod_core_history_info(
+                       core, &branch_dirty_history);
+                   if (status == INKPOD_STATUS_OK) {
+                       status = inkpod_core_compaction_plan(
+                           core, &branch_dirty_plan);
+                   }
+                   return status;
+               }, false, false) != INKPOD_STATUS_OK
+        || branch_dirty_history.cursor
+            != branch_baseline_history.cursor + 1U) {
+        restore_sequence_policy();
+        return 4150;
+    }
+    SendMessageW(state.Workspace().windows.window,
+        WM_COMMAND, IDM_EDIT_UNDO, 0);
+    InkpodDocumentInfo branch_clean = EmptyDocumentInfo();
+    InkpodEditorStateInfo branch_clean_editor{};
+    branch_clean_editor.struct_size = sizeof(branch_clean_editor);
+    InkpodHistoryInfo branch_clean_history{};
+    branch_clean_history.struct_size = sizeof(branch_clean_history);
+    InkpodSequenceSwitchRequest branch_request{};
+    branch_request.struct_size = sizeof(branch_request);
+    if (!QueryDocument(state, branch_clean)
+        || (branch_clean.flags
+            & (INKPOD_DOCUMENT_FLAG_DIRTY
+                | INKPOD_DOCUMENT_FLAG_RECOVERED)) != 0U
+        || !state.engine->GetEditorState(
+            state.Document().id, state.Document().generation,
+            branch_clean_editor)
+        || (branch_clean_editor.flags & INKPOD_EDITOR_STATE_DIRTY) != 0U
+        || std::memcmp(branch_clean_editor.editor_digest,
+               branch_baseline_editor.editor_digest,
+               sizeof(branch_baseline_editor.editor_digest)) != 0
+        || state.engine->Invoke(
+               [&branch_clean_history](InkpodCore* core) {
+                   return inkpod_core_history_info(
+                       core, &branch_clean_history);
+               }, false, false) != INKPOD_STATUS_OK
+        || branch_clean_history.cursor != branch_baseline_history.cursor
+        || branch_clean_history.cursor >= branch_clean_history.item_count
+        || state.engine->Invoke(
+               [&branch_request](InkpodCore* core) {
+                   return inkpod_core_sequence_switch_request(
+                       core, 2U, INKPOD_SEQUENCE_SWITCH_AUTOSAVE,
+                       &branch_request);
+               }, false, false) != INKPOD_STATUS_OK
+        || (branch_request.flags
+            & INKPOD_SEQUENCE_SWITCH_SOURCE_RECOVERY_REQUIRED) == 0U
+        || SendMessageW(state.Workspace().windows.window,
+               WM_COMMAND, IDM_SEQ_NEXT, 0) != 1
+        || !WaitForFileIo(state) || !WaitForSequencePresentation(state)) {
+        restore_sequence_policy();
+        return 4151;
+    }
+    const auto* branch_binding = state.Document().FindSequenceAutosave(
+        branch_request.source_document_uuid_high,
+        branch_request.source_document_uuid_low,
+        branch_request.source_generation);
+    if (branch_binding == nullptr
+        || branch_binding->artifact_generation <= clean_recovery_generation
+        || branch_binding->recovery_path.empty()
+        || branch_binding->recovery_path == clean_recovery_path
+        || !inkpod::app::ValidRecoveryArtifactProof(
+            branch_binding->artifact_proof)
+        || GetFileAttributesW(clean_recovery_path.c_str())
+            != INVALID_FILE_ATTRIBUTES
+        || state.Workspace().sequence_dialog.view.active_index != 2U) {
+        restore_sequence_policy();
+        return 4152;
+    }
+    const std::wstring branch_recovery_path = branch_binding->recovery_path;
+    const auto branch_recovery_proof = branch_binding->artifact_proof;
+    if (SendMessageW(state.Workspace().windows.window,
+            WM_COMMAND, IDM_SEQ_PREVIOUS, 0) != 1
+        || !WaitForFileIo(state) || !WaitForSequencePresentation(state)) {
+        restore_sequence_policy();
+        return 4153;
+    }
+    InkpodHistoryInfo branch_restored_history{};
+    branch_restored_history.struct_size = sizeof(branch_restored_history);
+    InkpodEditorStateInfo branch_restored_editor{};
+    branch_restored_editor.struct_size = sizeof(branch_restored_editor);
+    if (!QueryDocument(state, branch_clean)
+        || (branch_clean.flags
+            & (INKPOD_DOCUMENT_FLAG_DIRTY
+                | INKPOD_DOCUMENT_FLAG_RECOVERED)) != 0U
+        || state.engine->Invoke(
+               [&branch_restored_history](InkpodCore* core) {
+                   return inkpod_core_history_info(
+                       core, &branch_restored_history);
+               }, false, false) != INKPOD_STATUS_OK
+        || !state.engine->GetEditorState(
+            state.Document().id, state.Document().generation,
+            branch_restored_editor)
+        || (branch_restored_editor.flags & INKPOD_EDITOR_STATE_DIRTY) != 0U
+        || std::memcmp(branch_restored_editor.editor_digest,
+               branch_baseline_editor.editor_digest,
+               sizeof(branch_restored_editor.editor_digest)) != 0
+        || branch_restored_history.cursor != branch_baseline_history.cursor
+        || branch_restored_history.cursor >= branch_restored_history.item_count
+        || state.Document().shell.recovery_path != branch_recovery_path
+        || std::memcmp(&state.Document().shell.recovery_artifact_proof,
+               &branch_recovery_proof,
+               sizeof(branch_recovery_proof)) != 0) {
+        restore_sequence_policy();
+        return 4154;
+    }
+    SendMessageW(state.Workspace().windows.window,
+        WM_COMMAND, IDM_EDIT_REDO, 0);
+    InkpodEditorStateInfo branch_redone_editor{};
+    branch_redone_editor.struct_size = sizeof(branch_redone_editor);
+    InkpodDocumentInfo branch_redone = EmptyDocumentInfo();
+    InkpodHistoryInfo branch_redone_history{};
+    branch_redone_history.struct_size = sizeof(branch_redone_history);
+    InkpodCompactionPlan branch_redone_plan{};
+    branch_redone_plan.struct_size = sizeof(branch_redone_plan);
+    if (!QueryDocument(state, branch_redone)
+        || (branch_redone.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U
+        || !state.engine->GetEditorState(
+            state.Document().id, state.Document().generation,
+            branch_redone_editor)
+        || std::memcmp(branch_redone_editor.editor_digest,
+               branch_dirty_editor.editor_digest,
+               sizeof(branch_dirty_editor.editor_digest)) != 0
+        || (branch_redone_editor.flags & INKPOD_EDITOR_STATE_DIRTY) != 0U
+        || state.engine->Invoke(
+               [&branch_redone_history, &branch_redone_plan](InkpodCore* core) {
+                   InkpodStatus status = inkpod_core_history_info(
+                       core, &branch_redone_history);
+                   if (status == INKPOD_STATUS_OK) {
+                       status = inkpod_core_compaction_plan(
+                           core, &branch_redone_plan);
+                   }
+                   return status;
+               }, false, false) != INKPOD_STATUS_OK
+        || branch_redone_history.cursor
+            != branch_baseline_history.cursor + 1U
+        || std::memcmp(branch_redone_plan.document_digest,
+               branch_dirty_plan.document_digest,
+               sizeof(branch_redone_plan.document_digest)) != 0) {
+        restore_sequence_policy();
+        return 4155;
+    }
+    SendMessageW(state.Workspace().windows.window,
+        WM_COMMAND, IDM_EDIT_UNDO, 0);
+    if (!QueryDocument(state, branch_clean)
+        || (branch_clean.flags
+            & (INKPOD_DOCUMENT_FLAG_DIRTY
+                | INKPOD_DOCUMENT_FLAG_RECOVERED)) != 0U) {
+        restore_sequence_policy();
+        return 4156;
+    }
+    // A clean native-backed cell with a missing raster companion cannot be
+    // revisited through the ordinary raster route. Revert the saved cell after
+    // removing its raster so the production OpenNative resolver publishes
+    // RepairNeeded authority, then require switch-away to capture an exact
+    // recovery generation and switch-back to restore current native + missing
+    // raster authority without a Save As prompt.
+    const std::uint32_t repair_prompt_count =
+        state.lifetime.smoke_dirty_prompt_count;
+    if (SaveToPath(state, sequence_native_paths[1]) != INKPOD_STATUS_OK
+        || !WaitForFileIo(state)) {
+        restore_sequence_policy();
+        return 4170;
+    }
+    // Create an explicit inactive-cell recovery instead of depending on an
+    // artifact left by an earlier scenario: move to cell 2, edit it, then move
+    // back to cell 1 and save only the active cell. Revert below must not
+    // retire cell 2's independent durable generation.
+    if (SendMessageW(state.Workspace().windows.window,
+            WM_COMMAND, IDM_SEQ_NEXT, 0) != 1
+        || !WaitForFileIo(state) || !WaitForSequencePresentation(state)
+        || !UpdateEditorFillOptionsForSmoke(
+            state, [](InkpodEditorFillOptions& fill) {
+                fill.tolerance = fill.tolerance == 699U ? 698U : 699U;
+            })) {
+        restore_sequence_policy();
+        return 4171;
+    }
+    InkpodSequenceSwitchRequest repair_inactive_request{};
+    repair_inactive_request.struct_size = sizeof(repair_inactive_request);
+    if (state.engine->Invoke(
+            [&repair_inactive_request](InkpodCore* core) {
+                return inkpod_core_sequence_switch_request(
+                    core, 1U, INKPOD_SEQUENCE_SWITCH_AUTOSAVE,
+                    &repair_inactive_request);
+            }, false, false) != INKPOD_STATUS_OK
+        || (repair_inactive_request.flags
+            & INKPOD_SEQUENCE_SWITCH_SOURCE_RECOVERY_REQUIRED) == 0U
+        || SendMessageW(state.Workspace().windows.window,
+               WM_COMMAND, IDM_SEQ_PREVIOUS, 0) != 1
+        || !WaitForFileIo(state) || !WaitForSequencePresentation(state)
+        || SaveToPath(state, sequence_native_paths[1]) != INKPOD_STATUS_OK
+        || !WaitForFileIo(state)) {
+        restore_sequence_policy();
+        return 4172;
+    }
+    // Sequence recovery resolves pair members through the I/O manager, so the
+    // authoritative spelling may change from a relative path to its normalized
+    // absolute form.  Prove that the freshly saved authority still denotes the
+    // expected pair before adopting that spelling for the exact propagation
+    // assertions below.
+    std::wstring expected_repair_native_path;
+    std::wstring current_repair_native_path;
+    std::wstring expected_repair_raster_path;
+    std::wstring current_repair_raster_path;
+    if (state.Document().shell.current_path.empty()
+        || !state.Document().shell.planned_native_path.empty()
+        || state.Document().shell.pair_raster_path.empty()
+        || !inkpod::app::NormalizeDocumentFilePath(
+            sequence_native_paths[1], expected_repair_native_path)
+        || !inkpod::app::NormalizeDocumentFilePath(
+            state.Document().shell.current_path, current_repair_native_path)
+        || expected_repair_native_path != current_repair_native_path
+        || !inkpod::app::NormalizeDocumentFilePath(
+            sequence_raster_paths[1], expected_repair_raster_path)
+        || !inkpod::app::NormalizeDocumentFilePath(
+            state.Document().shell.pair_raster_path,
+            current_repair_raster_path)
+        || expected_repair_raster_path != current_repair_raster_path) {
+        restore_sequence_policy();
+        return 4173;
+    }
+    try {
+        sequence_native_paths[1] = state.Document().shell.current_path;
+        sequence_raster_paths[1] = state.Document().shell.pair_raster_path;
+    } catch (const std::bad_alloc&) {
+        restore_sequence_policy();
+        return 4173;
+    }
+    const auto* repair_file_binding_before =
+        state.Document().SequenceFileBindingAt(1U);
+    const auto* repair_inactive_file_binding =
+        state.Document().SequenceFileBindingAt(2U);
+    InkpodSequenceCatalogInfo repair_catalog_before{};
+    repair_catalog_before.struct_size = sizeof(repair_catalog_before);
+    const auto* repair_inactive_autosave =
+        repair_inactive_file_binding == nullptr ? nullptr
+            : state.Document().FindSequenceAutosave(
+                  repair_inactive_request.source_document_uuid_high,
+                  repair_inactive_request.source_document_uuid_low,
+                  repair_inactive_request.source_generation);
+    const bool repair_catalog_loaded = state.engine->GetSequenceCatalog(
+        state.Document().id, state.Document().generation,
+        repair_catalog_before);
+    const bool repair_inactive_proof_valid =
+        repair_inactive_autosave != nullptr
+        && inkpod::app::ValidRecoveryArtifactProof(
+            repair_inactive_autosave->artifact_proof);
+    const DWORD repair_inactive_attributes =
+        repair_inactive_autosave == nullptr ? INVALID_FILE_ATTRIBUTES
+            : GetFileAttributesW(
+                  repair_inactive_autosave->recovery_path.c_str());
+    std::wstring repair_binding_normalized_path;
+    std::wstring repair_expected_normalized_path;
+    const bool repair_binding_path_matches =
+        repair_file_binding_before != nullptr
+        && inkpod::app::NormalizeDocumentFilePath(
+            repair_file_binding_before->raster_path,
+            repair_binding_normalized_path)
+        && inkpod::app::NormalizeDocumentFilePath(
+            sequence_raster_paths[1], repair_expected_normalized_path)
+        && repair_binding_normalized_path == repair_expected_normalized_path;
+    if (repair_file_binding_before == nullptr
+        || repair_inactive_file_binding == nullptr
+        || repair_inactive_autosave == nullptr
+        || repair_inactive_file_binding->document_uuid_high
+            != repair_inactive_request.source_document_uuid_high
+        || repair_inactive_file_binding->document_uuid_low
+            != repair_inactive_request.source_document_uuid_low
+        || repair_inactive_file_binding->source_generation
+            != repair_inactive_request.source_generation
+        || repair_file_binding_before->raster_identity.kind
+            != inkpod::app::DocumentIdentityKind::WindowsFile
+        || !repair_binding_path_matches
+        || repair_file_binding_before->raster_identity
+            != state.Document().pair_raster_identity
+        || (repair_inactive_file_binding->document_uuid_high
+                == repair_file_binding_before->document_uuid_high
+            && repair_inactive_file_binding->document_uuid_low
+                == repair_file_binding_before->document_uuid_low
+            && repair_inactive_file_binding->source_generation
+                == repair_file_binding_before->source_generation)
+        || !repair_catalog_loaded
+        || repair_catalog_before.active_index != 1U
+        || repair_catalog_before.owner_generation == 0U
+        || state.Workspace().sequence_dialog.view.catalog.session
+            != state.Document().id
+        || state.Workspace().sequence_dialog.view.catalog.generation
+            != state.Document().generation
+        || state.Workspace().sequence_dialog.view.catalog.owner_generation
+            != repair_catalog_before.owner_generation
+        || state.Workspace().sequence_dialog.view.catalog.revision
+            != repair_catalog_before.sequence_revision
+        || state.Workspace().sequence_dialog.view.catalog.cell_count
+            != repair_catalog_before.cell_count
+        || state.Workspace().sequence_dialog.view.active_index != 1U
+        || state.Workspace().animation.active_sequence_index != 1U
+        || !repair_inactive_proof_valid
+        || repair_inactive_attributes == INVALID_FILE_ATTRIBUTES) {
+        std::fprintf(stderr,
+            "revert inactive precondition: active=%d inactive=%d autosave=%d "
+            "request=%llu:%llu/%llu binding=%llu:%llu/%llu kind=%u "
+            "path=%d pair=%d catalog=%d/%u/%llu pane=%u/%u animation=%u "
+            "proof=%d file=%lu binding-path=%ls expected-path=%ls\n",
+            repair_file_binding_before != nullptr,
+            repair_inactive_file_binding != nullptr,
+            repair_inactive_autosave != nullptr,
+            static_cast<unsigned long long>(
+                repair_inactive_request.source_document_uuid_high),
+            static_cast<unsigned long long>(
+                repair_inactive_request.source_document_uuid_low),
+            static_cast<unsigned long long>(
+                repair_inactive_request.source_generation),
+            static_cast<unsigned long long>(repair_inactive_file_binding == nullptr
+                ? 0U : repair_inactive_file_binding->document_uuid_high),
+            static_cast<unsigned long long>(repair_inactive_file_binding == nullptr
+                ? 0U : repair_inactive_file_binding->document_uuid_low),
+            static_cast<unsigned long long>(repair_inactive_file_binding == nullptr
+                ? 0U : repair_inactive_file_binding->source_generation),
+            repair_file_binding_before == nullptr ? 0U
+                : static_cast<unsigned>(
+                    repair_file_binding_before->raster_identity.kind),
+            repair_binding_path_matches,
+            repair_file_binding_before != nullptr
+                && repair_file_binding_before->raster_identity
+                    == state.Document().pair_raster_identity,
+            repair_catalog_loaded,
+            repair_catalog_before.active_index,
+            static_cast<unsigned long long>(
+                repair_catalog_before.owner_generation),
+            state.Workspace().sequence_dialog.view.active_index,
+            state.Workspace().sequence_dialog.view.catalog.revision
+                == repair_catalog_before.sequence_revision,
+            state.Workspace().animation.active_sequence_index,
+            repair_inactive_proof_valid,
+            repair_inactive_attributes,
+            repair_file_binding_before == nullptr ? L"<missing>"
+                                                  : repair_file_binding_before->raster_path.c_str(),
+            sequence_raster_paths[1].c_str());
+        restore_sequence_policy();
+        return 4173;
+    }
+    const std::uint64_t repair_uuid_high_before =
+        repair_file_binding_before->document_uuid_high;
+    const std::uint64_t repair_uuid_low_before =
+        repair_file_binding_before->document_uuid_low;
+    const std::uint64_t repair_generation_before =
+        repair_file_binding_before->source_generation;
+    const std::uint64_t repair_inactive_uuid_high =
+        repair_inactive_file_binding->document_uuid_high;
+    const std::uint64_t repair_inactive_uuid_low =
+        repair_inactive_file_binding->document_uuid_low;
+    const std::uint64_t repair_inactive_generation =
+        repair_inactive_file_binding->source_generation;
+    const std::uint64_t repair_inactive_artifact_generation =
+        repair_inactive_autosave->artifact_generation;
+    std::wstring repair_inactive_recovery_path;
+    try {
+        repair_inactive_recovery_path =
+            repair_inactive_autosave->recovery_path;
+    } catch (const std::bad_alloc&) {
+        restore_sequence_policy();
+        return 4120;
+    }
+    const auto repair_inactive_artifact_proof =
+        repair_inactive_autosave->artifact_proof;
+    if (DeleteFileW(sequence_raster_paths[1].c_str()) == FALSE
+        || SendMessageW(state.Workspace().windows.window,
+               WM_COMMAND, IDM_FILE_REVERT, 0) != 1
+        || !WaitForFileIo(state)
+        || !WaitForSequencePresentation(state)) {
+        restore_sequence_policy();
+        return 4174;
+    }
+    inkpod::app::DocumentIdentity repair_native_identity;
+    inkpod::app::DocumentIdentity repair_missing_raster_identity;
+    const auto* repair_file_binding =
+        state.Document().SequenceFileBindingAt(1U);
+    const bool repair_native_resolved =
+        inkpod::app::ResolveDocumentFileIdentity(
+            state.file_io.Manager(), sequence_native_paths[1],
+            repair_native_identity);
+    const bool repair_raster_resolved =
+        inkpod::app::ResolveDocumentFileIdentity(
+            state.file_io.Manager(), sequence_raster_paths[1],
+            repair_missing_raster_identity);
+    const auto same_repair_path = [](const std::wstring& left,
+                                      const std::wstring& right) noexcept {
+        std::wstring normalized_left;
+        std::wstring normalized_right;
+        return inkpod::app::NormalizeDocumentFilePath(left, normalized_left)
+            && inkpod::app::NormalizeDocumentFilePath(right, normalized_right)
+            && normalized_left == normalized_right;
+    };
+    const bool repair_revert_native_path_matches = same_repair_path(
+        state.Document().shell.current_path, sequence_native_paths[1]);
+    const bool repair_revert_raster_path_matches = same_repair_path(
+        state.Document().shell.pair_raster_path, sequence_raster_paths[1]);
+    const bool repair_revert_binding_path_matches =
+        repair_file_binding != nullptr
+        && repair_file_binding->raster_path
+            == state.Document().shell.pair_raster_path;
+    if (repair_file_binding == nullptr
+        || !repair_native_resolved
+        || !repair_raster_resolved
+        || repair_native_identity.kind
+            != inkpod::app::DocumentIdentityKind::WindowsFile
+        || repair_missing_raster_identity.kind
+            != inkpod::app::DocumentIdentityKind::NormalizedPath
+        || state.Document().identity != repair_native_identity
+        || state.Document().pair_raster_identity
+            != repair_missing_raster_identity
+        || !repair_revert_native_path_matches
+        || !state.Document().shell.planned_native_path.empty()
+        || !repair_revert_raster_path_matches
+        || repair_file_binding->document_uuid_high
+            != repair_uuid_high_before
+        || repair_file_binding->document_uuid_low
+            != repair_uuid_low_before
+        || repair_file_binding->source_generation
+            != repair_generation_before
+        || !repair_revert_binding_path_matches
+        || repair_file_binding->raster_identity
+            != repair_missing_raster_identity) {
+        std::fprintf(stderr,
+            "revert repair authority mismatch: binding=%d resolved=%d/%d "
+            "resolved-kind=%u/%u live-kind=%u/%u identity=%d/%d "
+            "paths=%d/%d/%d key=%llu:%llu/%llu expected=%llu:%llu/%llu "
+            "current=%ls raster=%ls binding-raster=%ls expected-native=%ls "
+            "expected-raster=%ls\n",
+            repair_file_binding != nullptr,
+            repair_native_resolved,
+            repair_raster_resolved,
+            static_cast<unsigned>(repair_native_identity.kind),
+            static_cast<unsigned>(repair_missing_raster_identity.kind),
+            static_cast<unsigned>(state.Document().identity.kind),
+            static_cast<unsigned>(state.Document().pair_raster_identity.kind),
+            state.Document().identity == repair_native_identity,
+            state.Document().pair_raster_identity
+                == repair_missing_raster_identity,
+            repair_revert_native_path_matches,
+            state.Document().shell.planned_native_path.empty(),
+            repair_revert_raster_path_matches,
+            static_cast<unsigned long long>(repair_file_binding == nullptr
+                ? 0U : repair_file_binding->document_uuid_high),
+            static_cast<unsigned long long>(repair_file_binding == nullptr
+                ? 0U : repair_file_binding->document_uuid_low),
+            static_cast<unsigned long long>(repair_file_binding == nullptr
+                ? 0U : repair_file_binding->source_generation),
+            static_cast<unsigned long long>(repair_uuid_high_before),
+            static_cast<unsigned long long>(repair_uuid_low_before),
+            static_cast<unsigned long long>(repair_generation_before),
+            state.Document().shell.current_path.c_str(),
+            state.Document().shell.pair_raster_path.c_str(),
+            repair_file_binding == nullptr ? L"<missing>"
+                                           : repair_file_binding->raster_path.c_str(),
+            sequence_native_paths[1].c_str(),
+            sequence_raster_paths[1].c_str());
+        restore_sequence_policy();
+        return 4121;
+    }
+    try {
+        sequence_native_paths[1] = state.Document().shell.current_path;
+        sequence_raster_paths[1] = state.Document().shell.pair_raster_path;
+    } catch (const std::bad_alloc&) {
+        restore_sequence_policy();
+        return 4121;
+    }
+    sequence_native_identities[1] = repair_native_identity;
+    sequence_raster_identities[1] = repair_missing_raster_identity;
+    repair_file_binding = state.Document().SequenceFileBindingAt(1U);
+    const std::uint64_t repair_uuid_high =
+        repair_file_binding == nullptr ? 0U
+                                       : repair_file_binding->document_uuid_high;
+    const std::uint64_t repair_uuid_low =
+        repair_file_binding == nullptr ? 0U
+                                       : repair_file_binding->document_uuid_low;
+    const std::uint64_t repair_generation =
+        repair_file_binding == nullptr ? 0U
+                                       : repair_file_binding->source_generation;
+    InkpodDocumentInfo repair_source = EmptyDocumentInfo();
+    InkpodEditorStateInfo repair_source_editor{};
+    repair_source_editor.struct_size = sizeof(repair_source_editor);
+    InkpodSequenceCatalogInfo repair_source_catalog{};
+    repair_source_catalog.struct_size = sizeof(repair_source_catalog);
+    const auto* repair_inactive_autosave_after =
+        state.Document().FindSequenceAutosave(
+            repair_inactive_uuid_high,
+            repair_inactive_uuid_low,
+            repair_inactive_generation);
+    if (repair_file_binding == nullptr
+        || (repair_uuid_high == 0U && repair_uuid_low == 0U)
+        || repair_generation == 0U || !QueryDocument(state, repair_source)
+        || (repair_source.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
+        || !state.engine->GetEditorState(
+            state.Document().id, state.Document().generation,
+            repair_source_editor)
+        || (repair_source_editor.flags & INKPOD_EDITOR_STATE_DIRTY) != 0U
+        || state.Document().FindSequenceAutosave(
+            repair_uuid_high, repair_uuid_low, repair_generation) != nullptr
+        || !sequence_pair_authority_matches(1U, true)
+        || !state.engine->GetSequenceCatalog(
+            state.Document().id, state.Document().generation,
+            repair_source_catalog)
+        || repair_source_catalog.sequence_revision
+            != repair_catalog_before.sequence_revision
+        || repair_source_catalog.cell_count
+            != repair_catalog_before.cell_count
+        || repair_source_catalog.owner_generation == 0U
+        || repair_source_catalog.owner_generation
+            == repair_catalog_before.owner_generation
+        || repair_source_catalog.active_index != 1U
+        || state.Workspace().sequence_dialog.view.active_index != 1U
+        || state.Workspace().sequence_dialog.view.catalog.session
+            != state.Document().id
+        || state.Workspace().sequence_dialog.view.catalog.generation
+            != state.Document().generation
+        || state.Workspace().sequence_dialog.view.catalog.owner_generation
+            != repair_source_catalog.owner_generation
+        || state.Workspace().sequence_dialog.view.catalog.revision
+            != repair_source_catalog.sequence_revision
+        || state.Workspace().sequence_dialog.view.catalog.cell_count
+            != repair_source_catalog.cell_count
+        || state.Workspace().animation.active_sequence_index != 1U
+        || state.Workspace().sequence_dialog.view.cells.size() <= 1U
+        || state.Workspace().sequence_dialog.view.cells.size()
+            != repair_source_catalog.cell_count
+        || state.Workspace().animation.active_sequence_name
+            != state.Workspace().sequence_dialog.view.cells[1U].name
+        || repair_inactive_autosave_after == nullptr
+        || repair_inactive_autosave_after->artifact_generation
+            != repair_inactive_artifact_generation
+        || repair_inactive_autosave_after->recovery_path
+            != repair_inactive_recovery_path
+        || std::memcmp(&repair_inactive_autosave_after->artifact_proof,
+               &repair_inactive_artifact_proof,
+               sizeof(repair_inactive_artifact_proof)) != 0
+        || GetFileAttributesW(repair_inactive_recovery_path.c_str())
+            == INVALID_FILE_ATTRIBUTES) {
+        std::fprintf(stderr,
+            "repair source mismatch: binding=%d uuid=%llu:%llu generation=%llu "
+            "flags=%llu editor=%llu authority=%d core-index=%u ui-index=%u\n",
+            repair_file_binding != nullptr,
+            static_cast<unsigned long long>(repair_uuid_high),
+            static_cast<unsigned long long>(repair_uuid_low),
+            static_cast<unsigned long long>(repair_generation),
+            static_cast<unsigned long long>(repair_source.flags),
+            static_cast<unsigned long long>(repair_source_editor.flags),
+            sequence_pair_authority_matches(1U, true),
+            repair_source_catalog.active_index,
+            state.Workspace().sequence_dialog.view.active_index);
+        restore_sequence_policy();
+        return 4122;
+    }
+    const std::uint32_t repair_switch_completed_before =
+        state.Workspace().animation.smoke_sequence_switch_completed;
+    if (SendMessageW(state.Workspace().windows.window,
+            WM_COMMAND, IDM_SEQ_NEXT, 0) != 1
+        || !WaitForFileIo(state)
+        || !WaitForSequencePresentation(
+            state, false, std::nullopt, 2U,
+            repair_switch_completed_before)) {
+        std::fprintf(stderr,
+            "repair switch failed: completed=%u/%u status=%u core-index=%u "
+            "ui-index=%u pending=%d/%llu\n",
+            state.Workspace().animation.smoke_sequence_switch_completed,
+            repair_switch_completed_before + 1U,
+            static_cast<unsigned>(
+                state.Workspace().animation.smoke_sequence_switch_status),
+            repair_source_catalog.active_index,
+            state.Workspace().sequence_dialog.view.active_index,
+            state.Workspace().animation.sequence_switch_pending,
+            static_cast<unsigned long long>(
+                state.routing.sequence_switch_pending_token.load(
+                    std::memory_order_acquire)));
+        restore_sequence_policy();
+        return 4122;
+    }
+    const auto* repair_binding = state.Document().FindSequenceAutosave(
+        repair_uuid_high, repair_uuid_low, repair_generation);
+    if (repair_binding == nullptr
+        || repair_binding->artifact_generation != 1U
+        || !inkpod::app::ValidRecoveryArtifactProof(
+            repair_binding->artifact_proof)
+        || repair_binding->metadata.pair_proof.kind
+            != INKPOD_IO_RECOVERY_PAIR_REPAIR_NEEDED
+        || repair_binding->metadata.pair_proof.native.identity.kind != 1U
+        || repair_binding->metadata.pair_proof.raster.identity.kind != 2U
+        || repair_binding->metadata.pair_proof.raster.identity.volume
+            != UINT64_MAX
+        || repair_binding->metadata.original_identity
+            != repair_native_identity
+        || repair_binding->metadata.original_path
+            != sequence_native_paths[1]
+        || repair_binding->metadata.source_path
+            != sequence_raster_paths[1]
+        || GetFileAttributesW(repair_binding->recovery_path.c_str())
+            == INVALID_FILE_ATTRIBUTES
+        || state.Workspace().sequence_dialog.view.active_index != 2U
+        || !sequence_pair_authority_matches(2U, true)
+        || state.lifetime.smoke_dirty_prompt_count != repair_prompt_count) {
+        std::fprintf(stderr,
+            "repair recovery mismatch: binding=%d generation=%llu kind=%u "
+            "native=%u raster=%u/%llu identity=%d paths=%d/%d file=%lu "
+            "index=%u authority=%d prompts=%u/%u\n",
+            repair_binding != nullptr,
+            static_cast<unsigned long long>(
+                repair_binding == nullptr ? 0U
+                    : repair_binding->artifact_generation),
+            repair_binding == nullptr ? 0U
+                : repair_binding->metadata.pair_proof.kind,
+            repair_binding == nullptr ? 0U
+                : repair_binding->metadata.pair_proof.native.identity.kind,
+            repair_binding == nullptr ? 0U
+                : repair_binding->metadata.pair_proof.raster.identity.kind,
+            static_cast<unsigned long long>(repair_binding == nullptr ? 0U
+                : repair_binding->metadata.pair_proof.raster.identity.volume),
+            repair_binding != nullptr
+                && repair_binding->metadata.original_identity
+                    == repair_native_identity,
+            repair_binding != nullptr
+                && repair_binding->metadata.original_path
+                    == sequence_native_paths[1],
+            repair_binding != nullptr
+                && repair_binding->metadata.source_path
+                    == sequence_raster_paths[1],
+            repair_binding == nullptr ? INVALID_FILE_ATTRIBUTES
+                : GetFileAttributesW(repair_binding->recovery_path.c_str()),
+            state.Workspace().sequence_dialog.view.active_index,
+            sequence_pair_authority_matches(2U, true),
+            state.lifetime.smoke_dirty_prompt_count,
+            repair_prompt_count);
+        restore_sequence_policy();
+        return 4123;
+    }
+    const std::wstring repair_recovery_path = repair_binding->recovery_path;
+    const auto repair_artifact_proof = repair_binding->artifact_proof;
+    if (SendMessageW(state.Workspace().windows.window,
+            WM_COMMAND, IDM_SEQ_PREVIOUS, 0) != 1
+        || !WaitForFileIo(state) || !WaitForSequencePresentation(state)) {
+        restore_sequence_policy();
+        return 4124;
+    }
+    InkpodDocumentInfo repair_restored = EmptyDocumentInfo();
+    InkpodEditorStateInfo repair_restored_editor{};
+    repair_restored_editor.struct_size = sizeof(repair_restored_editor);
+    if (!QueryDocument(state, repair_restored)
+        || (repair_restored.flags
+            & (INKPOD_DOCUMENT_FLAG_DIRTY | INKPOD_DOCUMENT_FLAG_RECOVERED)) != 0U
+        || !state.engine->GetEditorState(
+            state.Document().id, state.Document().generation,
+            repair_restored_editor)
+        || (repair_restored_editor.flags & INKPOD_EDITOR_STATE_DIRTY) != 0U
+        || repair_restored_editor.editor_revision
+            != repair_source_editor.editor_revision
+        || std::memcmp(repair_restored_editor.editor_digest,
+               repair_source_editor.editor_digest,
+               sizeof(repair_source_editor.editor_digest)) != 0
+        || repair_restored.document_uuid_high
+            != repair_source.document_uuid_high
+        || repair_restored.document_uuid_low
+            != repair_source.document_uuid_low
+        || repair_restored.main_plane_checksum
+            != repair_source.main_plane_checksum
+        || repair_restored.color_plane_checksum
+            != repair_source.color_plane_checksum
+        || state.Workspace().sequence_dialog.view.active_index != 1U
+        || !sequence_pair_authority_matches(1U, true)
+        || state.Document().shell.recovery_path != repair_recovery_path
+        || !state.Document().shell.recovery_artifact_published
+        || std::memcmp(&state.Document().shell.recovery_artifact_proof,
+               &repair_artifact_proof, sizeof(repair_artifact_proof)) != 0
+        || state.lifetime.smoke_dirty_prompt_count != repair_prompt_count
+        || SaveToPath(state, sequence_native_paths[1]) != INKPOD_STATUS_OK
+        || !WaitForFileIo(state)) {
+        restore_sequence_policy();
+        return 4125;
+    }
+    if (!inkpod::app::ResolveDocumentFileIdentity(
+            state.file_io.Manager(), sequence_native_paths[1],
+            sequence_native_identities[1])
+        || !inkpod::app::ResolveDocumentFileIdentity(
+            state.file_io.Manager(), sequence_raster_paths[1],
+            sequence_raster_identities[1])
+        || sequence_native_identities[1].kind
+            != inkpod::app::DocumentIdentityKind::WindowsFile
+        || sequence_raster_identities[1].kind
+            != inkpod::app::DocumentIdentityKind::WindowsFile
+        || state.Document().FindSequenceAutosave(
+            repair_uuid_high, repair_uuid_low, repair_generation) != nullptr
+        || !state.Document().shell.recovery_path.empty()
+        || state.Document().shell.recovery_artifact_published
+        || GetFileAttributesW(repair_recovery_path.c_str())
+            != INVALID_FILE_ATTRIBUTES
+        || !sequence_pair_authority_matches(1U, true)) {
+        restore_sequence_policy();
+        return 4126;
+    }
+    struct PairInstallFaultFixture final {
+        ApplicationHost& state;
+        ~PairInstallFaultFixture() {
+            state.lifetime.smoke_lock_pair_raster_during_install = false;
+            state.lifetime.smoke_fail_repaired_item_refresh = false;
+        }
+    } pair_install_fault{state};
+    if (!UpdateEditorFillOptionsForSmoke(
+            state, [](InkpodEditorFillOptions& fill) {
+                fill.tolerance = fill.tolerance == 701U ? 700U : 701U;
+            })) {
+        restore_sequence_policy();
+        return 4160;
+    }
+    const std::uint32_t repaired_prompt_before =
+        state.lifetime.smoke_pair_overwrite_prompt_count;
+    state.lifetime.smoke_lock_pair_raster_during_install = true;
+    const InkpodStatus repaired_save =
+        SaveToPath(state, sequence_native_paths[1]);
+    state.lifetime.smoke_lock_pair_raster_during_install = false;
+    inkpod::app::DocumentIdentity repaired_disk_native;
+    inkpod::app::DocumentIdentity repaired_disk_raster;
+    InkpodDocumentInfo repaired_save_document = EmptyDocumentInfo();
+    const auto* repaired_save_binding =
+        state.Document().SequenceFileBindingAt(1U);
+    const auto recent_contains = [&state](
+        const inkpod::app::DocumentIdentity& identity) noexcept {
+        for (std::size_t index = 0U;
+             index < state.RecentDocumentCount(); ++index) {
+            const auto* entry = state.RecentDocumentAt(index);
+            if (entry != nullptr && entry->identity == identity) {
+                return true;
+            }
+        }
+        return false;
+    };
+    if (repaired_save != INKPOD_STATUS_IO_ERROR
+        || state.lifetime.smoke_pair_overwrite_prompt_count
+            != repaired_prompt_before
+        || !inkpod::app::ResolveDocumentFileIdentity(
+            state.file_io.Manager(), sequence_native_paths[1],
+            repaired_disk_native)
+        || !inkpod::app::ResolveDocumentFileIdentity(
+            state.file_io.Manager(), sequence_raster_paths[1],
+            repaired_disk_raster)
+        || repaired_disk_native.kind
+            != inkpod::app::DocumentIdentityKind::WindowsFile
+        || repaired_disk_raster.kind
+            != inkpod::app::DocumentIdentityKind::WindowsFile
+        || state.Document().identity != repaired_disk_native
+        || state.Document().pair_raster_identity != repaired_disk_raster
+        || state.Document().shell.current_path != sequence_native_paths[1]
+        || state.Document().shell.pair_raster_path != sequence_raster_paths[1]
+        || repaired_save_binding == nullptr
+        || repaired_save_binding->raster_identity != repaired_disk_raster
+        || !recent_contains(repaired_disk_native)
+        || !QueryDocument(state, repaired_save_document)
+        || (repaired_save_document.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U) {
+        std::fprintf(stderr,
+            "repaired pair fault mismatch: status=%u prompts=%u/%u identity=%d "
+            "pair=%d binding=%d recent=%d flags=%u\n",
+            static_cast<unsigned>(repaired_save),
+            state.lifetime.smoke_pair_overwrite_prompt_count,
+            repaired_prompt_before,
+            state.Document().identity == repaired_disk_native,
+            state.Document().pair_raster_identity == repaired_disk_raster,
+            repaired_save_binding != nullptr
+                && repaired_save_binding->raster_identity
+                    == repaired_disk_raster,
+            recent_contains(repaired_disk_native),
+            repaired_save_document.flags);
+        restore_sequence_policy();
+        return 4161;
+    }
+    sequence_native_identities[1] = repaired_disk_native;
+    sequence_raster_identities[1] = repaired_disk_raster;
+    const std::uint32_t revoked_prompt_before =
+        state.lifetime.smoke_pair_overwrite_prompt_count;
+    state.lifetime.smoke_lock_pair_raster_during_install = true;
+    state.lifetime.smoke_fail_repaired_item_refresh = true;
+    const InkpodStatus revoked_save =
+        SaveToPath(state, sequence_native_paths[1]);
+    state.lifetime.smoke_lock_pair_raster_during_install = false;
+    state.lifetime.smoke_fail_repaired_item_refresh = false;
+    InkpodDocumentInfo revoked_document = EmptyDocumentInfo();
+    const auto* revoked_file_binding =
+        state.Document().SequenceFileBindingAt(1U);
+    if (revoked_save != INKPOD_STATUS_IO_ERROR
+        || state.lifetime.smoke_pair_overwrite_prompt_count
+            != revoked_prompt_before
+        || !QueryDocument(state, revoked_document)
+        || (revoked_document.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U
+        || state.Document().identity.kind
+            != inkpod::app::DocumentIdentityKind::Untitled
+        || state.Document().pair_raster_identity
+        || !state.Document().shell.current_path.empty()
+        || !state.Document().shell.source_path.empty()
+        || !state.Document().shell.planned_native_path.empty()
+        || !state.Document().shell.pair_raster_path.empty()
+        || state.Document().shell.pair_raster_format_hint
+            != INKPOD_COMMON_RASTER_PNG
+        || revoked_file_binding == nullptr
+        || !revoked_file_binding->raster_path.empty()
+        || revoked_file_binding->raster_identity
+        || recent_contains(repaired_disk_native)
+        || recent_contains(repaired_disk_raster)) {
+        restore_sequence_policy();
+        return 4162;
+    }
+    const int dirty_choice_before_revoke =
+        state.lifetime.smoke_dirty_prompt_choice;
+    const std::uint32_t dirty_prompts_before_revoke =
+        state.lifetime.smoke_dirty_prompt_count;
+    state.lifetime.smoke_dirty_prompt_choice = IDCANCEL;
+    const LRESULT revoked_close = SendMessageW(
+        state.Workspace().windows.window,
+        WM_COMMAND, IDM_DOCUMENT_CLOSE, 0);
+    state.lifetime.smoke_dirty_prompt_choice = dirty_choice_before_revoke;
+    if (revoked_close != 0
+        || state.lifetime.smoke_dirty_prompt_count
+            != dirty_prompts_before_revoke + 1U
+        || state.Documents().Find(state.Document().id) == nullptr) {
+        restore_sequence_policy();
+        return 4163;
+    }
+    InkpodSequenceSwitchRequest revoked_switch{};
+    revoked_switch.struct_size = sizeof(revoked_switch);
+    if (state.engine->Invoke(
+            [&revoked_switch](InkpodCore* core) {
+                return inkpod_core_sequence_switch_request(
+                    core, 2U, INKPOD_SEQUENCE_SWITCH_AUTOSAVE,
+                    &revoked_switch);
+            }, false, false) != INKPOD_STATUS_OK
+        || (revoked_switch.flags
+            & INKPOD_SEQUENCE_SWITCH_SOURCE_RECOVERY_REQUIRED) == 0U
+        || SendMessageW(state.Workspace().windows.window,
+               WM_COMMAND, IDM_SEQ_NEXT, 0) != 1
+        || !WaitForFileIo(state) || !WaitForSequencePresentation(state)) {
+        restore_sequence_policy();
+        return 4164;
+    }
+    const auto* revoked_recovery = state.Document().FindSequenceAutosave(
+        revoked_switch.source_document_uuid_high,
+        revoked_switch.source_document_uuid_low,
+        revoked_switch.source_generation);
+    if (revoked_recovery == nullptr
+        || revoked_recovery->metadata.pair_proof.kind
+            != INKPOD_IO_RECOVERY_PAIR_NONE
+        || revoked_recovery->raster_format_hint
+            != INKPOD_COMMON_RASTER_PNG
+        || SendMessageW(state.Workspace().windows.window,
+               WM_COMMAND, IDM_SEQ_PREVIOUS, 0) != 1
+        || !WaitForFileIo(state) || !WaitForSequencePresentation(state)) {
+        restore_sequence_policy();
+        return 4165;
+    }
+    if (!QueryDocument(state, revoked_document)
+        || (revoked_document.flags
+            & (INKPOD_DOCUMENT_FLAG_DIRTY
+                | INKPOD_DOCUMENT_FLAG_RECOVERED))
+            != (INKPOD_DOCUMENT_FLAG_DIRTY
+                | INKPOD_DOCUMENT_FLAG_RECOVERED)
+        || state.Document().identity.kind
+            != inkpod::app::DocumentIdentityKind::Untitled
+        || !state.Document().shell.current_path.empty()
+        || !state.Document().shell.planned_native_path.empty()
+        || !state.Document().shell.pair_raster_path.empty()
+        || state.Document().shell.pair_raster_format_hint
+            != INKPOD_COMMON_RASTER_PNG) {
+        restore_sequence_policy();
+        return 4166;
+    }
+    const std::wstring revoked_save_as =
+        L"inkpod-revoked-pair-save-as.inkpod";
+    struct RevokedSaveAsFixture final {
+        ApplicationHost& state;
+        std::wstring prior;
+        std::wstring path;
+        ~RevokedSaveAsFixture() {
+            state.lifetime.smoke_native_save_path = std::move(prior);
+            DeleteSavedPairFixture(path);
+        }
+    } revoked_save_as_fixture{
+        state, state.lifetime.smoke_native_save_path, revoked_save_as};
+    DeleteSavedPairFixture(revoked_save_as);
+    state.lifetime.smoke_native_save_path = revoked_save_as;
+    const LRESULT revoked_save_as_result = SendMessageW(
+        state.Workspace().windows.window, WM_COMMAND, IDM_FILE_SAVE, 0);
+    const bool revoked_save_as_idle =
+        revoked_save_as_result == 0 && WaitForFileIo(state);
+    const bool revoked_save_as_document =
+        revoked_save_as_idle && QueryDocument(state, revoked_document);
+    if (!revoked_save_as_document
+        || (revoked_document.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
+        || state.Document().shell.current_path != revoked_save_as
+        || state.Document().shell.pair_raster_path
+            != L"inkpod-revoked-pair-save-as.png") {
+        std::fprintf(stderr,
+            "revoked Save As mismatch: result=%lld idle=%d document=%d "
+            "flags=%llu current=%ls raster=%ls\n",
+            static_cast<long long>(revoked_save_as_result),
+            revoked_save_as_idle,
+            revoked_save_as_document,
+            static_cast<unsigned long long>(revoked_document.flags),
+            state.Document().shell.current_path.c_str(),
+            state.Document().shell.pair_raster_path.c_str());
+        restore_sequence_policy();
+        return 4167;
+    }
+    const InkpodStatus revoked_restore_status =
+        SaveToPath(state, sequence_native_paths[1]);
+    const bool revoked_restore_idle =
+        revoked_restore_status == INKPOD_STATUS_OK && WaitForFileIo(state);
+    const bool revoked_restore_native = revoked_restore_idle
+        && inkpod::app::ResolveDocumentFileIdentity(
+            state.file_io.Manager(), sequence_native_paths[1],
+            sequence_native_identities[1]);
+    const bool revoked_restore_raster = revoked_restore_native
+        && inkpod::app::ResolveDocumentFileIdentity(
+            state.file_io.Manager(), sequence_raster_paths[1],
+            sequence_raster_identities[1]);
+    const bool revoked_restore_authority = revoked_restore_raster
+        && sequence_pair_authority_matches(1U, true);
+    if (!revoked_restore_authority) {
+        std::fprintf(stderr,
+            "revoked authority restore mismatch: status=%u idle=%d "
+            "resolved=%d/%d authority=%d current=%ls raster=%ls "
+            "expected-native=%ls expected-raster=%ls\n",
+            static_cast<unsigned>(revoked_restore_status),
+            revoked_restore_idle,
+            revoked_restore_native,
+            revoked_restore_raster,
+            revoked_restore_authority,
+            state.Document().shell.current_path.c_str(),
+            state.Document().shell.pair_raster_path.c_str(),
+            sequence_native_paths[1].c_str(),
+            sequence_raster_paths[1].c_str());
+        restore_sequence_policy();
+        return 4167;
     }
     restore_sequence_policy();
     const inkpod::app::DocumentSessionId sequence_session = state.Document().id;
@@ -11272,9 +14220,10 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         return 413;
     }
     {
-        // Ordinary Revert must retire A's sequence epoch even when its I/O
-        // completion arrives with B active. The source is unchanged: save the
-        // already selected A once, reopen it, and repeat Selection All as a no-op.
+        // Revert must retain A's runtime sequence even when its I/O completion
+        // arrives with B active.  It receives a fresh presentation epoch, so A
+        // remains input-fenced until its replacement is actually presented,
+        // while B's visible editor projection remains untouched.
         const std::wstring revert_path = L"inkpod-sequence-hidden-revert.inkpod";
         struct RevertFixture final {
             const std::wstring& path;
@@ -11285,6 +14234,8 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         InkpodDocumentInfo saved_first = EmptyDocumentInfo();
         std::vector<std::uint8_t> saved_bytes;
         if (state.Document().sequence_required_present_epoch == 0U
+            || SendMessageW(state.Workspace().windows.window,
+                   WM_COMMAND, IDM_SELECTION_ALL, 0) != 0
             || SaveToPath(state, revert_path) != INKPOD_STATUS_OK
             || !WaitForSequencePresentation(state)
             || !QueryDocument(state, saved_first)
@@ -11304,6 +14255,27 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
             || !WaitForSequencePresentation(state)) {
             return 40952;
         }
+        InkpodSequenceCatalogInfo hidden_revert_catalog_before{};
+        hidden_revert_catalog_before.struct_size =
+            sizeof(hidden_revert_catalog_before);
+        if (!state.engine->GetSequenceCatalog(
+                first_context.document_session.value(),
+                first_context.generation.value(),
+                hidden_revert_catalog_before)
+            || hidden_revert_catalog_before.cell_count == 0U
+            || hidden_revert_catalog_before.active_index
+                == INKPOD_SEQUENCE_INDEX_NONE) {
+            return 40952;
+        }
+        first_document = state.Documents().Find(
+            first_context.document_session.value());
+        if (first_document == nullptr
+            || first_document->sequence_required_present_epoch == 0U
+            || !first_document->HasSequencePresentationAcknowledgement()) {
+            return 40952;
+        }
+        const std::uint64_t hidden_revert_epoch_before =
+            first_document->sequence_required_present_epoch;
         // Use the production asynchronous command path, then change tabs before
         // any UI Poll can apply the completion. Do not change the worker result.
         const bool previous_smoke = state.lifetime.smoke_test;
@@ -11314,57 +14286,601 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         if (accepted != 1
             || !state.file_io.HasPending(first_context.document_session.value(),
                 first_context.generation.value())
-            || !ActivateDocumentTab(state, second_context.document_view.value())
+            || !ActivateDocumentTab(
+                state, second_context.document_view.value())) {
+            return 40952;
+        }
+        const auto hidden_revert_second_binding_before =
+            state.Workspace().tools.editor;
+        InkpodEditorStateInfo hidden_revert_second_editor_before{};
+        hidden_revert_second_editor_before.struct_size =
+            sizeof(hidden_revert_second_editor_before);
+        if (!hidden_revert_second_binding_before.valid
+            || hidden_revert_second_binding_before.session
+                != second_context.document_session.value()
+            || hidden_revert_second_binding_before.generation
+                != second_context.generation.value()
+            || !state.engine->GetEditorState(
+                second_context.document_session.value(),
+                second_context.generation.value(),
+                hidden_revert_second_editor_before)
             || !WaitForFileIo(state)) {
             return 40952;
         }
         first_document = state.Documents().Find(first_context.document_session.value());
         InkpodDocumentInfo reverted_first = EmptyDocumentInfo();
         InkpodDocumentInfo second_after = EmptyDocumentInfo();
+        InkpodEditorStateInfo hidden_revert_second_editor_after{};
+        hidden_revert_second_editor_after.struct_size =
+            sizeof(hidden_revert_second_editor_after);
+        InkpodSequenceCatalogInfo hidden_revert_catalog_after{};
+        hidden_revert_catalog_after.struct_size =
+            sizeof(hidden_revert_catalog_after);
         std::vector<std::uint8_t> reverted_bytes;
+        const bool hidden_revert_document_loaded =
+            state.engine->GetDocumentInfo(
+                first_context.document_session.value(),
+                first_context.generation.value(), reverted_first);
+        const auto& hidden_revert_second_binding_after =
+            state.Workspace().tools.editor;
         if (state.routing.targets.ActiveDocumentView() != second_context.document_view
             || first_document == nullptr
             || first_document->generation != first_context.generation.value()
             || first_document->sequence_activation_pending
-            || first_document->sequence_required_present_revision != 0U
-            || first_document->sequence_required_present_epoch != 0U
+            || !hidden_revert_document_loaded
+            || first_document->sequence_required_present_revision
+                != reverted_first.document_revision
+            || first_document->sequence_required_present_epoch == 0U
+            || first_document->sequence_required_present_epoch
+                == hidden_revert_epoch_before
             || first_document->HasSequencePresentationAcknowledgement()
-            || !state.SequenceEditReady(first_context)
-            || !state.engine->GetDocumentInfo(first_context.document_session.value(),
-                first_context.generation.value(), reverted_first)
+            || state.SequenceEditReady(first_context)
+            || !state.engine->GetSequenceCatalog(
+                first_context.document_session.value(),
+                first_context.generation.value(),
+                hidden_revert_catalog_after)
+            || hidden_revert_catalog_after.sequence_revision
+                != hidden_revert_catalog_before.sequence_revision
+            || hidden_revert_catalog_after.cell_count
+                != hidden_revert_catalog_before.cell_count
+            || hidden_revert_catalog_after.active_index
+                != hidden_revert_catalog_before.active_index
+            || hidden_revert_catalog_after.owner_generation == 0U
+            || hidden_revert_catalog_after.owner_generation
+                == hidden_revert_catalog_before.owner_generation
             || reverted_first.document_uuid_high != saved_first.document_uuid_high
             || reverted_first.document_uuid_low != saved_first.document_uuid_low
             || reverted_first.main_plane_checksum != saved_first.main_plane_checksum
             || reverted_first.color_plane_checksum != saved_first.color_plane_checksum
             || (reverted_first.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
             || !QueryDocument(state, second_after)
+            || !state.engine->GetEditorState(
+                second_context.document_session.value(),
+                second_context.generation.value(),
+                hidden_revert_second_editor_after)
             || second_after.document_revision != second_before.document_revision
             || second_after.main_plane_checksum != second_before.main_plane_checksum
             || second_after.color_plane_checksum != second_before.color_plane_checksum
+            || !hidden_revert_second_binding_after.valid
+            || hidden_revert_second_binding_after.session
+                != hidden_revert_second_binding_before.session
+            || hidden_revert_second_binding_after.generation
+                != hidden_revert_second_binding_before.generation
+            || hidden_revert_second_binding_after.editor_revision
+                != hidden_revert_second_binding_before.editor_revision
+            || hidden_revert_second_binding_after.editor_digest
+                != hidden_revert_second_binding_before.editor_digest
+            || hidden_revert_second_editor_after.editor_revision
+                != hidden_revert_second_editor_before.editor_revision
+            || std::memcmp(
+                hidden_revert_second_editor_after.editor_digest,
+                hidden_revert_second_editor_before.editor_digest,
+                sizeof(hidden_revert_second_editor_before.editor_digest)) != 0
             || !ReadBoundedFile(revert_path, reverted_bytes)
             || reverted_bytes != saved_bytes) {
-            std::fputs("hidden Revert retained a sequence fence or changed the active document\n",
-                stderr);
+            std::fprintf(stderr,
+                "hidden Revert retention mismatch: active=%d document=%d "
+                "pending=%d revision=%llu/%llu epoch=%llu/%llu ack=%d ready=%d "
+                "catalog=%llu/%llu owner=%llu/%llu index=%u/%u "
+                "second-binding=%d/%d second-editor=%llu/%llu\n",
+                state.routing.targets.ActiveDocumentView()
+                    == second_context.document_view,
+                hidden_revert_document_loaded,
+                first_document == nullptr
+                    || first_document->sequence_activation_pending,
+                static_cast<unsigned long long>(first_document == nullptr
+                    ? 0U
+                    : first_document->sequence_required_present_revision),
+                static_cast<unsigned long long>(
+                    reverted_first.document_revision),
+                static_cast<unsigned long long>(first_document == nullptr
+                    ? 0U
+                    : first_document->sequence_required_present_epoch),
+                static_cast<unsigned long long>(hidden_revert_epoch_before),
+                first_document != nullptr
+                    && first_document->HasSequencePresentationAcknowledgement(),
+                state.SequenceEditReady(first_context),
+                static_cast<unsigned long long>(
+                    hidden_revert_catalog_before.sequence_revision),
+                static_cast<unsigned long long>(
+                    hidden_revert_catalog_after.sequence_revision),
+                static_cast<unsigned long long>(
+                    hidden_revert_catalog_before.owner_generation),
+                static_cast<unsigned long long>(
+                    hidden_revert_catalog_after.owner_generation),
+                hidden_revert_catalog_before.active_index,
+                hidden_revert_catalog_after.active_index,
+                hidden_revert_second_binding_after.valid,
+                hidden_revert_second_binding_after.session
+                    == second_context.document_session.value(),
+                static_cast<unsigned long long>(
+                    hidden_revert_second_editor_before.editor_revision),
+                static_cast<unsigned long long>(
+                    hidden_revert_second_editor_after.editor_revision));
             return 40952;
         }
         InkpodDocumentInfo first_after_noop = EmptyDocumentInfo();
         inkpod::app::EngineMetrics first_work_before{};
         inkpod::app::EngineMetrics first_work_after{};
+        const bool hidden_revert_activated = ActivateDocumentTab(
+            state, first_context.document_view.value());
+        const bool hidden_revert_presented = hidden_revert_activated
+            && WaitForSequencePresentation(state);
+        first_document = state.Documents().Find(
+            first_context.document_session.value());
+        const bool hidden_revert_acknowledged_while_active = hidden_revert_presented
+            && first_document != nullptr
+            && first_document->HasSequencePresentationAcknowledgement();
+        const bool hidden_revert_edit_ready = hidden_revert_presented
+            && state.SequenceEditReady(first_context);
+        const bool hidden_revert_pane_synchronized = hidden_revert_presented
+            && state.Workspace().sequence_dialog.view.catalog.session
+                == first_context.document_session.value()
+            && state.Workspace().sequence_dialog.view.catalog.generation
+                == first_context.generation.value()
+            && state.Workspace().sequence_dialog.view.catalog.revision
+                == hidden_revert_catalog_after.sequence_revision
+            && state.Workspace().sequence_dialog.view.catalog.owner_generation
+                == hidden_revert_catalog_after.owner_generation
+            && state.Workspace().sequence_dialog.view.catalog.cell_count
+                == hidden_revert_catalog_after.cell_count
+            && state.Workspace().sequence_dialog.view.active_index
+                == hidden_revert_catalog_after.active_index;
+        const bool hidden_revert_metrics_before = hidden_revert_presented
+            && state.engine->GetMetrics(
+                first_context.document_session.value(),
+                first_context.generation.value(), first_work_before);
+        const LRESULT hidden_revert_selection_result =
+            hidden_revert_metrics_before
+            ? SendMessageW(state.Workspace().windows.window,
+                  WM_COMMAND, IDM_SELECTION_ALL, 0)
+            : -1;
+        const bool hidden_revert_metrics_after =
+            hidden_revert_metrics_before
+            && state.engine->GetMetrics(
+                first_context.document_session.value(),
+                first_context.generation.value(), first_work_after);
+        const bool hidden_revert_document = hidden_revert_metrics_after
+            && QueryDocument(state, first_after_noop);
+        const bool hidden_revert_returned = hidden_revert_document
+            && ActivateDocumentTab(
+                state, second_context.document_view.value());
+        const bool hidden_revert_acknowledged_after_return =
+            hidden_revert_returned && first_document != nullptr
+            && first_document->HasSequencePresentationAcknowledgement();
+        if (!hidden_revert_returned
+            || !hidden_revert_acknowledged_after_return
+            || !hidden_revert_edit_ready
+            || !hidden_revert_pane_synchronized
+            || hidden_revert_selection_result != 0
+            || first_work_after.accepted_work_items
+                <= first_work_before.accepted_work_items
+            || first_work_after.rejected_work_items
+                != first_work_before.rejected_work_items
+            || first_after_noop.document_revision
+                != reverted_first.document_revision
+            || (first_after_noop.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U) {
+            std::fprintf(stderr,
+                "reverted hidden sequence did not rebuild and resume editing: "
+                "activate=%d present=%d metrics=%d/%d selection=%lld "
+                "work=%llu/%llu rejected=%llu/%llu document=%d revision=%llu/%llu "
+                "ack=%d/%d ready=%d pane=%d returned=%d\n",
+                hidden_revert_activated,
+                hidden_revert_presented,
+                hidden_revert_metrics_before,
+                hidden_revert_metrics_after,
+                static_cast<long long>(hidden_revert_selection_result),
+                static_cast<unsigned long long>(
+                    first_work_before.accepted_work_items),
+                static_cast<unsigned long long>(
+                    first_work_after.accepted_work_items),
+                static_cast<unsigned long long>(
+                    first_work_before.rejected_work_items),
+                static_cast<unsigned long long>(
+                    first_work_after.rejected_work_items),
+                hidden_revert_document,
+                static_cast<unsigned long long>(
+                    reverted_first.document_revision),
+                static_cast<unsigned long long>(
+                    first_after_noop.document_revision),
+                hidden_revert_acknowledged_while_active,
+                hidden_revert_acknowledged_after_return,
+                hidden_revert_edit_ready,
+                hidden_revert_pane_synchronized,
+                hidden_revert_returned);
+            return 40952;
+        }
+
+        // A Revert completion is document-scoped, not globally-active-workspace
+        // scoped.  Keep A visible in the original workspace, put a duplicate A
+        // view behind B in a second workspace, and then make B globally active
+        // before the completion is applied.  The completion must refresh the
+        // visible A projection without replacing B's workspace tools.
+        InkpodEditorStateInfo multi_workspace_saved_editor{};
+        multi_workspace_saved_editor.struct_size =
+            sizeof(multi_workspace_saved_editor);
         if (!ActivateDocumentTab(state, first_context.document_view.value())
             || !WaitForSequencePresentation(state)
-            || !state.engine->GetMetrics(first_context.document_session.value(),
-                first_context.generation.value(), first_work_before)
-            || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_ALL, 0) != 0
-            || !state.engine->GetMetrics(first_context.document_session.value(),
-                first_context.generation.value(), first_work_after)
-            || first_work_after.accepted_work_items <= first_work_before.accepted_work_items
-            || first_work_after.rejected_work_items != first_work_before.rejected_work_items
-            || !QueryDocument(state, first_after_noop)
-            || first_after_noop.document_revision != reverted_first.document_revision
-            || !ActivateDocumentTab(state, second_context.document_view.value())) {
-            std::fputs("reverted sequence document did not present epoch zero and resume editing\n",
-                stderr);
-            return 40952;
+            || !state.engine->GetEditorState(
+                first_context.document_session.value(),
+                first_context.generation.value(),
+                multi_workspace_saved_editor)) {
+            return 40953;
+        }
+        const std::uint32_t changed_tool =
+            multi_workspace_saved_editor.active_tool == INKPOD_TOOL_BRUSH
+            ? INKPOD_TOOL_PENCIL
+            : INKPOD_TOOL_BRUSH;
+        InkpodEditorStateInfo multi_workspace_changed_editor{};
+        multi_workspace_changed_editor.struct_size =
+            sizeof(multi_workspace_changed_editor);
+        if (SetEditorActiveTool(state, changed_tool) != INKPOD_STATUS_OK
+            || !state.engine->GetEditorState(
+                first_context.document_session.value(),
+                first_context.generation.value(),
+                multi_workspace_changed_editor)
+            || multi_workspace_changed_editor.editor_revision
+                <= multi_workspace_saved_editor.editor_revision
+            || std::memcmp(
+                multi_workspace_changed_editor.editor_digest,
+                multi_workspace_saved_editor.editor_digest,
+                sizeof(multi_workspace_saved_editor.editor_digest)) == 0) {
+            return 40953;
+        }
+
+        const auto primary_workspace_id = state.Workspace().id;
+        const std::size_t workspace_count_before_duplicate =
+            state.Workspaces().Count();
+        if (!DispatchEnabledCommand(
+                state, state.Workspace().windows.window,
+                IDM_VIEW_DUPLICATE_NEW_WINDOW)
+            || state.Workspaces().Count()
+                != workspace_count_before_duplicate + 1U) {
+            return 40953;
+        }
+        auto* duplicate_workspace = state.Workspaces().Current();
+        auto* duplicate_group = duplicate_workspace == nullptr
+            ? nullptr
+            : duplicate_workspace->editors.Active();
+        const auto duplicate_workspace_id = duplicate_workspace == nullptr
+            ? inkpod::app::WorkspaceWindowId{}
+            : duplicate_workspace->id;
+        const HWND duplicate_workspace_window = duplicate_workspace == nullptr
+            ? nullptr
+            : duplicate_workspace->windows.window;
+        const auto multi_workspace_duplicate_view =
+            duplicate_group == nullptr
+            ? inkpod::app::DocumentViewId{}
+            : duplicate_group->ActiveView();
+        const auto* duplicate_document = multi_workspace_duplicate_view
+            ? state.Documents().FindByView(multi_workspace_duplicate_view)
+            : nullptr;
+        if (duplicate_workspace == nullptr || duplicate_group == nullptr
+            || duplicate_workspace_id == primary_workspace_id
+            || duplicate_workspace_window == nullptr
+            || duplicate_document == nullptr
+            || duplicate_document->id
+                != first_context.document_session.value()
+            || multi_workspace_duplicate_view
+                == first_context.document_view.value()
+            || !state.MoveDocumentView(
+                second_context.document_view.value(), duplicate_workspace_id,
+                duplicate_group->id, duplicate_group->ViewCount())
+            || !state.ActivateDocumentView(
+                first_context.document_view.value())) {
+            return 40953;
+        }
+        auto* primary_workspace =
+            state.FindWorkspace(primary_workspace_id);
+        duplicate_workspace = state.FindWorkspace(duplicate_workspace_id);
+        const auto* primary_group = primary_workspace == nullptr
+            ? nullptr
+            : primary_workspace->editors.Active();
+        duplicate_group = duplicate_workspace == nullptr
+            ? nullptr
+            : duplicate_workspace->editors.Active();
+        const auto binding_matches_editor = [](
+            const inkpod::app::EditorPresentationBinding& binding,
+            inkpod::app::DocumentSessionId session,
+            inkpod::app::Generation generation,
+            const InkpodEditorStateInfo& editor) noexcept {
+            return binding.valid && binding.session == session
+                && binding.generation == generation
+                && binding.editor_revision == editor.editor_revision
+                && std::equal(
+                    binding.editor_digest.begin(),
+                    binding.editor_digest.end(),
+                    std::begin(editor.editor_digest),
+                    std::end(editor.editor_digest));
+        };
+        if (primary_group == nullptr || duplicate_group == nullptr
+            || primary_group->ActiveView()
+                != first_context.document_view.value()
+            || duplicate_group->ActiveView()
+                != second_context.document_view.value()
+            || duplicate_workspace->editors.FindByView(
+                   multi_workspace_duplicate_view)
+                != duplicate_group
+            || !binding_matches_editor(
+                primary_workspace->tools.editor,
+                first_context.document_session.value(),
+                first_context.generation.value(),
+                multi_workspace_changed_editor)
+            || primary_workspace->tools.active_tool != changed_tool) {
+            return 40953;
+        }
+
+        first_document = state.Documents().Find(
+            first_context.document_session.value());
+        if (first_document == nullptr
+            || first_document->sequence_required_present_epoch == 0U) {
+            return 40953;
+        }
+        const std::uint64_t multi_workspace_epoch_before =
+            first_document->sequence_required_present_epoch;
+        const bool multi_workspace_previous_smoke =
+            state.lifetime.smoke_test;
+        state.lifetime.smoke_test = false;
+        const LRESULT multi_workspace_accepted = SendMessageW(
+            primary_workspace->windows.window,
+            WM_COMMAND, IDM_FILE_REVERT, 0);
+        state.lifetime.smoke_test = multi_workspace_previous_smoke;
+        if (multi_workspace_accepted != 1
+            || !state.file_io.HasPending(
+                first_context.document_session.value(),
+                first_context.generation.value())
+            || !state.ActivateDocumentView(
+                second_context.document_view.value())) {
+            return 40953;
+        }
+        primary_workspace = state.FindWorkspace(primary_workspace_id);
+        duplicate_workspace = state.FindWorkspace(duplicate_workspace_id);
+        if (primary_workspace == nullptr || duplicate_workspace == nullptr) {
+            return 40953;
+        }
+        const auto multi_workspace_first_binding_before =
+            primary_workspace->tools.editor;
+        const auto multi_workspace_second_binding_before =
+            duplicate_workspace->tools.editor;
+        const std::uint32_t multi_workspace_second_tool_before =
+            duplicate_workspace->tools.active_tool;
+        InkpodEditorStateInfo multi_workspace_second_editor_before{};
+        multi_workspace_second_editor_before.struct_size =
+            sizeof(multi_workspace_second_editor_before);
+        if (!binding_matches_editor(
+                multi_workspace_first_binding_before,
+                first_context.document_session.value(),
+                first_context.generation.value(),
+                multi_workspace_changed_editor)
+            || !state.engine->GetEditorState(
+                second_context.document_session.value(),
+                second_context.generation.value(),
+                multi_workspace_second_editor_before)
+            || !binding_matches_editor(
+                multi_workspace_second_binding_before,
+                second_context.document_session.value(),
+                second_context.generation.value(),
+                multi_workspace_second_editor_before)
+            || !WaitForFileIo(state)) {
+            return 40953;
+        }
+
+        primary_workspace = state.FindWorkspace(primary_workspace_id);
+        duplicate_workspace = state.FindWorkspace(duplicate_workspace_id);
+        primary_group = primary_workspace == nullptr
+            ? nullptr
+            : primary_workspace->editors.Active();
+        duplicate_group = duplicate_workspace == nullptr
+            ? nullptr
+            : duplicate_workspace->editors.Active();
+        first_document = state.Documents().Find(
+            first_context.document_session.value());
+        InkpodDocumentInfo multi_workspace_reverted_document =
+            EmptyDocumentInfo();
+        InkpodEditorStateInfo multi_workspace_first_editor_after{};
+        multi_workspace_first_editor_after.struct_size =
+            sizeof(multi_workspace_first_editor_after);
+        InkpodEditorStateInfo multi_workspace_second_editor_after{};
+        multi_workspace_second_editor_after.struct_size =
+            sizeof(multi_workspace_second_editor_after);
+        inkpod::app::EditorPresentationBinding
+            multi_workspace_first_binding_after{};
+        inkpod::app::EditorPresentationBinding
+            multi_workspace_second_binding_after{};
+        std::uint32_t multi_workspace_first_tool_after{};
+        std::uint32_t multi_workspace_second_tool_after{};
+        if (primary_workspace != nullptr) {
+            multi_workspace_first_binding_after =
+                primary_workspace->tools.editor;
+            multi_workspace_first_tool_after =
+                primary_workspace->tools.active_tool;
+        }
+        if (duplicate_workspace != nullptr) {
+            multi_workspace_second_binding_after =
+                duplicate_workspace->tools.editor;
+            multi_workspace_second_tool_after =
+                duplicate_workspace->tools.active_tool;
+        }
+        const bool multi_workspace_reverted = first_document != nullptr
+            && state.engine->GetDocumentInfo(
+                first_context.document_session.value(),
+                first_context.generation.value(),
+                multi_workspace_reverted_document)
+            && state.engine->GetEditorState(
+                first_context.document_session.value(),
+                first_context.generation.value(),
+                multi_workspace_first_editor_after)
+            && state.engine->GetEditorState(
+                second_context.document_session.value(),
+                second_context.generation.value(),
+                multi_workspace_second_editor_after);
+        const bool first_workspace_refreshed = multi_workspace_reverted
+            && primary_group != nullptr
+            && primary_group->ActiveView()
+                == first_context.document_view.value()
+            && binding_matches_editor(
+                multi_workspace_first_binding_after,
+                first_context.document_session.value(),
+                first_context.generation.value(),
+                multi_workspace_first_editor_after)
+            && multi_workspace_first_editor_after.editor_revision
+                == multi_workspace_saved_editor.editor_revision
+            && std::memcmp(
+                multi_workspace_first_editor_after.editor_digest,
+                multi_workspace_saved_editor.editor_digest,
+                sizeof(multi_workspace_saved_editor.editor_digest)) == 0
+            && multi_workspace_first_binding_after.editor_revision
+                != multi_workspace_first_binding_before.editor_revision
+            && multi_workspace_first_binding_after.editor_digest
+                != multi_workspace_first_binding_before.editor_digest
+            && multi_workspace_first_tool_after
+                == multi_workspace_saved_editor.active_tool;
+        const bool second_workspace_untouched = multi_workspace_reverted
+            && duplicate_group != nullptr
+            && duplicate_group->ActiveView()
+                == second_context.document_view.value()
+            && duplicate_workspace->editors.FindByView(
+                   multi_workspace_duplicate_view)
+                == duplicate_group
+            && multi_workspace_second_binding_after.valid
+            && multi_workspace_second_binding_after.session
+                == multi_workspace_second_binding_before.session
+            && multi_workspace_second_binding_after.generation
+                == multi_workspace_second_binding_before.generation
+            && multi_workspace_second_binding_after.editor_revision
+                == multi_workspace_second_binding_before.editor_revision
+            && multi_workspace_second_binding_after.editor_digest
+                == multi_workspace_second_binding_before.editor_digest
+            && multi_workspace_second_tool_after
+                == multi_workspace_second_tool_before
+            && multi_workspace_second_editor_after.editor_revision
+                == multi_workspace_second_editor_before.editor_revision
+            && std::memcmp(
+                multi_workspace_second_editor_after.editor_digest,
+                multi_workspace_second_editor_before.editor_digest,
+                sizeof(multi_workspace_second_editor_before.editor_digest))
+                == 0;
+        const bool multi_workspace_authority_retained =
+            multi_workspace_reverted
+            && multi_workspace_reverted_document.document_uuid_high
+                == saved_first.document_uuid_high
+            && multi_workspace_reverted_document.document_uuid_low
+                == saved_first.document_uuid_low
+            && (multi_workspace_reverted_document.flags
+                & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U
+            && first_document->sequence_required_present_revision
+                == multi_workspace_reverted_document.document_revision
+            && first_document->sequence_required_present_epoch != 0U
+            && first_document->sequence_required_present_epoch
+                != multi_workspace_epoch_before;
+        if (state.routing.targets.ActiveDocumentView()
+                != second_context.document_view
+            || !first_workspace_refreshed
+            || !second_workspace_untouched
+            || !multi_workspace_authority_retained) {
+            std::fprintf(stderr,
+                "multi-workspace Revert projection mismatch: active=%d "
+                "reverted=%d first=%d second=%d authority=%d "
+                "first-view=%d second-view=%d first-session=%d "
+                "second-session=%d first-revision=%llu/%llu "
+                "second-revision=%llu/%llu epoch=%llu/%llu\n",
+                state.routing.targets.ActiveDocumentView()
+                    == second_context.document_view,
+                multi_workspace_reverted,
+                first_workspace_refreshed,
+                second_workspace_untouched,
+                multi_workspace_authority_retained,
+                primary_group != nullptr
+                    && primary_group->ActiveView()
+                        == first_context.document_view.value(),
+                duplicate_group != nullptr
+                    && duplicate_group->ActiveView()
+                        == second_context.document_view.value(),
+                multi_workspace_first_binding_after.session
+                    == first_context.document_session.value(),
+                multi_workspace_second_binding_after.session
+                    == second_context.document_session.value(),
+                static_cast<unsigned long long>(
+                    multi_workspace_first_binding_before.editor_revision),
+                static_cast<unsigned long long>(
+                    multi_workspace_first_binding_after.editor_revision),
+                static_cast<unsigned long long>(
+                    multi_workspace_second_binding_before.editor_revision),
+                static_cast<unsigned long long>(
+                    multi_workspace_second_binding_after.editor_revision),
+                static_cast<unsigned long long>(
+                    multi_workspace_epoch_before),
+                static_cast<unsigned long long>(first_document == nullptr
+                    ? 0U
+                    : first_document->sequence_required_present_epoch));
+            return 40953;
+        }
+
+        // Activating the duplicate A view later must project the restored A
+        // editor state into that workspace and present the fresh Revert epoch on
+        // both currently visible A canvases. Returning to B must restore B's
+        // unchanged binding.
+        const bool duplicate_activated =
+            state.ActivateDocumentView(multi_workspace_duplicate_view);
+        const bool duplicate_presented = duplicate_activated
+            && WaitForSequencePresentation(state);
+        duplicate_workspace = state.FindWorkspace(duplicate_workspace_id);
+        const bool duplicate_projected = duplicate_presented
+            && duplicate_workspace != nullptr
+            && duplicate_workspace->editors.Active() != nullptr
+            && duplicate_workspace->editors.Active()->ActiveView()
+                == multi_workspace_duplicate_view
+            && binding_matches_editor(
+                duplicate_workspace->tools.editor,
+                first_context.document_session.value(),
+                first_context.generation.value(),
+                multi_workspace_first_editor_after)
+            && duplicate_workspace->tools.active_tool
+                == multi_workspace_first_editor_after.active_tool;
+        const bool duplicate_returned_to_second = duplicate_projected
+            && state.ActivateDocumentView(
+                second_context.document_view.value());
+        duplicate_workspace = state.FindWorkspace(duplicate_workspace_id);
+        const bool second_reprojected = duplicate_returned_to_second
+            && duplicate_workspace != nullptr
+            && duplicate_workspace->editors.Active() != nullptr
+            && duplicate_workspace->editors.Active()->ActiveView()
+                == second_context.document_view.value()
+            && binding_matches_editor(
+                duplicate_workspace->tools.editor,
+                second_context.document_session.value(),
+                second_context.generation.value(),
+                multi_workspace_second_editor_after)
+            && duplicate_workspace->tools.active_tool
+                == multi_workspace_second_tool_before;
+        if (!second_reprojected) {
+            std::fprintf(stderr,
+                "multi-workspace Revert activation mismatch: activate=%d "
+                "present=%d project=%d return=%d second=%d\n",
+                duplicate_activated, duplicate_presented,
+                duplicate_projected, duplicate_returned_to_second,
+                second_reprojected);
+            return 40953;
         }
         const auto previous_dirty_choice = state.lifetime.smoke_dirty_prompt_choice;
         state.lifetime.smoke_dirty_prompt_choice = IDNO;
@@ -11377,9 +14893,22 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
             || !WaitForSequencePresentation(state)) {
             return 40952;
         }
+        if (!state.CloseDocumentView(multi_workspace_duplicate_view)) {
+            return 40953;
+        }
+        SendMessageW(duplicate_workspace_window, WM_CLOSE, 0, 0);
+        if (state.FindWorkspace(duplicate_workspace_id) != nullptr
+            || state.Workspaces().Count() != workspace_count_before_duplicate
+            || state.routing.targets.ActiveDocumentView()
+                != first_context.document_view) {
+            return 40953;
+        }
     }
     while (state.RecentDocumentCount() != 0U) {
         if (!state.RemoveRecentDocument(0U)) {
+            std::fprintf(stderr,
+                "sequence recent cleanup removal failed: count=%zu\n",
+                state.RecentDocumentCount());
             return 899;
         }
     }
@@ -11387,6 +14916,10 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
          entry != recent_before_sequence_navigation.rend();
          ++entry) {
         if (!state.RecordRecentDocument(entry->path, entry->identity)) {
+            std::fwprintf(stderr,
+                L"sequence recent cleanup restore failed: path=%ls kind=%u\n",
+                entry->path.c_str(),
+                static_cast<unsigned>(entry->identity.kind));
             return 899;
         }
     }
@@ -13130,6 +16663,22 @@ int RunMultiDocumentTabSmoke(ApplicationHost& state) noexcept {
         ? recent_count_before_missing - 1U
         : recent_count_before_missing;
     if (state.RecentDocumentCount() != expected_recent_count) {
+        std::fprintf(stderr,
+            "missing recent cleanup mismatch: before=%zu expected=%zu actual=%zu "
+            "capacity=%zu\n",
+            recent_count_before_missing,
+            expected_recent_count,
+            state.RecentDocumentCount(),
+            inkpod::app::RecentDocumentList::kCapacity);
+        for (std::size_t index = 0U;
+             index < state.RecentDocumentCount(); ++index) {
+            const auto* entry = state.RecentDocumentAt(index);
+            std::fwprintf(stderr, L"recent[%zu]=%ls kind=%u\n",
+                index,
+                entry == nullptr ? L"<missing>" : entry->path.c_str(),
+                entry == nullptr ? 0U
+                    : static_cast<unsigned>(entry->identity.kind));
+        }
         cleanup();
         return 899;
     }
@@ -13274,17 +16823,15 @@ int RunMultiDocumentTabSmoke(ApplicationHost& state) noexcept {
     const auto* first_document = state.Documents().Find(first_session);
     const auto* second_document = state.Documents().Find(second_session);
     if (first_document == nullptr || second_document == nullptr
-        || first_document->shell.recovery_path.empty()
-        || second_document->shell.recovery_path.empty()
         || !QueueAutosave(
             state,
             state.routing.targets.Capture(),
-            first_document->shell.recovery_path)
+            {})
         || !ActivateDocumentTab(state, second_view)
         || !QueueAutosave(
             state,
             state.routing.targets.Capture(),
-            second_document->shell.recovery_path)
+            {})
         || state.engine->WaitIdle() != INKPOD_STATUS_OK || !WaitForFileIo(state)) {
         cleanup();
         return 952;
@@ -13313,8 +16860,8 @@ int RunMultiDocumentTabSmoke(ApplicationHost& state) noexcept {
             second_session, second_generation, second_after_autosave)
         || (first_after_autosave.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U
         || (second_after_autosave.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U
-        || !DiscardRecoveryArtifact(first_document->shell.recovery_path)
-        || !DiscardRecoveryArtifact(second_document->shell.recovery_path)
+        || !first_document->shell.recovery_artifact_published
+        || !second_document->shell.recovery_artifact_published
         || !ActivateDocumentTab(state, first_view)) {
         cleanup();
         return 954;
@@ -17630,19 +21177,125 @@ int RunEmptyWorkspaceAndTabIdentitySmoke(ApplicationHost& state) noexcept {
         struct Fixtures final {
             ApplicationHost& state;
             std::wstring previous_export;
+            std::wstring previous_native_save;
             std::wstring png;
             std::wstring tga;
             std::wstring native;
+            std::wstring tga_alias;
+            std::wstring tga_alias_native;
+            std::wstring committed_save_as_native;
+            std::wstring committed_save_as_raster;
+            std::wstring planned_save_as_source;
+            std::wstring planned_default_native;
+            std::wstring planned_save_as_native;
+            std::wstring planned_save_as_raster;
             ~Fixtures() {
                 state.lifetime.smoke_test = true;
                 state.lifetime.smoke_dirty_prompt_choice = IDNO;
                 state.lifetime.smoke_raster_path = std::move(previous_export);
+                state.lifetime.smoke_native_save_path =
+                    std::move(previous_native_save);
+                state.lifetime.smoke_after_native_save_path_selected = {};
+                state.lifetime.smoke_after_native_save_committed = {};
                 DeleteFileW(png.c_str());
                 DeleteFileW(tga.c_str());
+                DeleteSavedPairFixture(committed_save_as_native);
+                DeleteFileW(planned_save_as_source.c_str());
+                DeleteSavedPairFixture(planned_default_native);
+                DeleteSavedPairFixture(planned_save_as_native);
+                DeleteSavedPairFixture(tga_alias_native);
                 DeleteSavedPairFixture(native);
             }
         } files{state, state.lifetime.smoke_raster_path,
-            prefix + L"-png001.png", prefix + L"-tga001.tga", prefix + L"-native.inkpod"};
+            std::move(state.lifetime.smoke_native_save_path),
+            prefix + L"-png001.png", prefix + L"-tga001.tga",
+            prefix + L"-tga001.inkpod", prefix + L"-tga001-alias.tga",
+            prefix + L"-tga001-alias.inkpod",
+            prefix + L"-committed-save-as.inkpod",
+            prefix + L"-committed-save-as.tga",
+            prefix + L"-planned-save-as.TGA",
+            prefix + L"-planned-save-as.inkpod",
+            prefix + L"-planned-destination.inkpod",
+            prefix + L"-planned-destination.tga"};
+        const auto same_document_path = [](const std::wstring& left,
+                                             const std::wstring& right) {
+            std::wstring normalized_left;
+            std::wstring normalized_right;
+            return inkpod::app::NormalizeDocumentFilePath(
+                       left, normalized_left)
+                && inkpod::app::NormalizeDocumentFilePath(
+                    right, normalized_right)
+                && normalized_left == normalized_right;
+        };
+        const auto query_persistent_contract = [&state](
+                                                   InkpodDocumentInfo& document,
+                                                   InkpodEditorStateInfo& editor,
+                                                   InkpodHistoryInfo& history,
+                                                   InkpodCompactionPlan& plan) {
+            document = EmptyDocumentInfo();
+            editor = {};
+            editor.struct_size = sizeof(editor);
+            history = {};
+            history.struct_size = sizeof(history);
+            plan = {};
+            plan.struct_size = sizeof(plan);
+            return QueryDocument(state, document)
+                && state.engine->GetEditorState(
+                    state.Document().id, state.Document().generation, editor)
+                && state.engine->Invoke(
+                       [&history, &plan](InkpodCore* core) {
+                           InkpodStatus status =
+                               inkpod_core_history_info(core, &history);
+                           if (status == INKPOD_STATUS_OK) {
+                               status = inkpod_core_compaction_plan(core, &plan);
+                           }
+                           return status;
+                       },
+                       false,
+                       false) == INKPOD_STATUS_OK;
+        };
+        const auto same_editor_state = [](const InkpodEditorStateInfo& left,
+                                           const InkpodEditorStateInfo& right) {
+            return left.editor_revision == right.editor_revision
+                && std::memcmp(left.editor_digest, right.editor_digest,
+                       sizeof(left.editor_digest)) == 0;
+        };
+        const auto same_compaction_plan = [](const InkpodCompactionPlan& left,
+                                              const InkpodCompactionPlan& right) {
+            return left.feature_flags == right.feature_flags
+                && left.history_event_count == right.history_event_count
+                && left.history_procedure_count
+                    == right.history_procedure_count
+                && std::memcmp(left.document_digest, right.document_digest,
+                       sizeof(left.document_digest)) == 0
+                && std::memcmp(left.editor_digest, right.editor_digest,
+                       sizeof(left.editor_digest)) == 0
+                && std::memcmp(left.journal_digest, right.journal_digest,
+                       sizeof(left.journal_digest)) == 0;
+        };
+        const auto active_sequence_binding_matches =
+            [&state, &same_document_path](const std::wstring& raster_path) {
+                InkpodSequenceCatalogInfo catalog{};
+                catalog.struct_size = sizeof(catalog);
+                InkpodDocumentInfo document = EmptyDocumentInfo();
+                if (!QueryDocument(state, document)
+                    || !state.engine->GetSequenceCatalog(
+                        state.Document().id, state.Document().generation,
+                        catalog)
+                    || catalog.active_index == INKPOD_SEQUENCE_INDEX_NONE) {
+                    return false;
+                }
+                const auto* binding = state.Document().SequenceFileBindingAt(
+                    catalog.active_index);
+                return binding != nullptr
+                    && binding->document_uuid_high
+                        == document.document_uuid_high
+                    && binding->document_uuid_low
+                        == document.document_uuid_low
+                    && same_document_path(binding->raster_path, raster_path)
+                    && binding->raster_identity
+                        == state.Document().pair_raster_identity;
+            };
         for (const auto* path : {&files.png, &files.tga}) {
             state.lifetime.smoke_raster_path = *path;
             if (SendMessageW(window, WM_COMMAND, IDM_FILE_EXPORT_RASTER, 0) != 1) {
@@ -17663,6 +21316,21 @@ int RunEmptyWorkspaceAndTabIdentitySmoke(ApplicationHost& state) noexcept {
         state.lifetime.smoke_test = true;
         if (queued != INKPOD_STATUS_PENDING || !WaitForFileIo(state) || !empty()) {
             return 16008;
+        }
+        if (ImportCommonRasterFromPath(state, files.png) != INKPOD_STATUS_OK) {
+            return 16080;
+        }
+        const DocumentSessionId explicit_import_session = state.Document().id;
+        const DocumentViewId explicit_import_view =
+            state.routing.targets.ActiveDocumentView();
+        const std::size_t explicit_import_count = state.Documents().Count();
+        if (OpenDocumentFromPath(state, files.png)
+                != INKPOD_STATUS_FILE_CONFLICT
+            || state.Document().id != explicit_import_session
+            || state.routing.targets.ActiveDocumentView() != explicit_import_view
+            || state.Documents().Count() != explicit_import_count
+            || !close_all() || !empty()) {
+            return 16081;
         }
         if (OpenDocumentFromPath(state, files.png) != INKPOD_STATUS_OK) {
             return 16009;
@@ -17768,9 +21436,27 @@ int RunEmptyWorkspaceAndTabIdentitySmoke(ApplicationHost& state) noexcept {
                 }
             }
         }
-        if (!empty() || !WriteFileAtomically(files.tga, closed_tga)
-            || OpenDocumentFromPath(state, files.tga) != INKPOD_STATUS_OK) {
-            return 16024;
+        if (!empty() || !WriteFileAtomically(files.tga, closed_tga)) {
+            return 16079;
+        }
+        const InkpodStatus closed_tga_open = OpenDocumentFromPath(state, files.tga);
+        if (closed_tga_open != INKPOD_STATUS_OK
+            || !state.Document().shell.current_path.empty()
+            || !same_document_path(
+                state.Document().shell.planned_native_path, files.native)
+            || !same_document_path(
+                state.Document().shell.pair_raster_path, files.tga)) {
+            std::fprintf(stderr,
+                "paired TGA open mismatch: status=%u current-empty=%d planned=%d "
+                "raster=%d documents=%zu\n",
+                static_cast<unsigned>(closed_tga_open),
+                state.Document().shell.current_path.empty(),
+                same_document_path(
+                    state.Document().shell.planned_native_path, files.native),
+                same_document_path(
+                    state.Document().shell.pair_raster_path, files.tga),
+                state.Documents().Count());
+            return 16079;
         }
         const auto same_imported_color =
             [](const InkpodColorValue& left, const InkpodColorValue& right) {
@@ -18103,10 +21789,43 @@ int RunEmptyWorkspaceAndTabIdentitySmoke(ApplicationHost& state) noexcept {
             || !imported_pixel_matches(imported_pixel, imported_white)) {
             return 16075;
         }
-        if (SaveToPath(state, files.native) != INKPOD_STATUS_OK
+        if (SendMessageW(window, WM_COMMAND, IDM_FILE_SAVE, 0) != 0
+            || !WaitForFileIo(state)
+            || !same_document_path(
+                state.Document().shell.current_path, files.native)
+            || !state.Document().shell.planned_native_path.empty()
+            || !same_document_path(
+                state.Document().shell.pair_raster_path, files.tga)
             || !close_all() || !empty()
-            || OpenDocumentFromPath(state, files.native) != INKPOD_STATUS_OK) {
+            || OpenDocumentFromPath(state, files.tga) != INKPOD_STATUS_OK
+            || !same_document_path(
+                state.Document().shell.current_path, files.native)
+            || !state.Document().shell.planned_native_path.empty()
+            || !same_document_path(
+                state.Document().shell.pair_raster_path, files.tga)) {
             return 16076;
+        }
+        const DocumentViewId paired_view = state.routing.targets.ActiveDocumentView();
+        if (OpenDocumentFromPath(state, files.native) != INKPOD_STATUS_OK
+            || OpenDocumentFromPath(state, files.tga) != INKPOD_STATUS_OK
+            || state.Documents().Count() != 1U
+            || state.routing.targets.ActiveDocumentView() != paired_view) {
+            return 16078;
+        }
+        std::vector<std::uint8_t> alias_native_bytes;
+        const DocumentSessionId paired_session = state.Document().id;
+        if (!ReadBoundedFile(files.native, alias_native_bytes)
+            || !WriteFileAtomically(files.tga_alias_native, alias_native_bytes)
+            || CreateHardLinkW(
+                   files.tga_alias.c_str(), files.tga.c_str(), nullptr) == FALSE) {
+            return 16082;
+        }
+        if (OpenDocumentFromPath(state, files.tga_alias)
+                != INKPOD_STATUS_FILE_CONFLICT
+            || state.Documents().Count() != 1U
+            || state.Document().id != paired_session
+            || state.routing.targets.ActiveDocumentView() != paired_view) {
+            return 16083;
         }
         SendMessageW(window, WM_COMMAND, IDM_VIEW_FIT, 0);
         InkpodDocumentInfo imported_reopened{};
@@ -18115,9 +21834,531 @@ int RunEmptyWorkspaceAndTabIdentitySmoke(ApplicationHost& state) noexcept {
                 != imported_explicit_erased.main_plane_checksum
             || imported_reopened.color_plane_checksum != imported_after.color_plane_checksum
             || !read_imported_pixel(imported_pixel)
-            || !imported_pixel_matches(imported_pixel, imported_white)
-            || !close_all() || !empty()) {
+            || !imported_pixel_matches(imported_pixel, imported_white)) {
             return 16077;
+        }
+
+        // An explicit Save As from a healthy committed pair is a pair fork, not
+        // an overwrite of the old authority. Build two divergent selection
+        // branches while returning the visible cursor to the saved raster state:
+        // the first branch becomes inactive, and the rectangle branch remains a
+        // redo tail. The new native file must preserve both journal branches.
+        InkpodDocumentInfo committed_baseline = EmptyDocumentInfo();
+        InkpodEditorStateInfo committed_baseline_editor{};
+        InkpodHistoryInfo committed_baseline_history{};
+        InkpodCompactionPlan committed_baseline_plan{};
+        if (!query_persistent_contract(committed_baseline,
+                committed_baseline_editor, committed_baseline_history,
+                committed_baseline_plan)
+            || (committed_baseline.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
+            || SendMessageW(window, WM_COMMAND, IDM_SELECTION_ALL, 0) != 0) {
+            return 16084;
+        }
+        InkpodDocumentInfo committed_inactive_branch = EmptyDocumentInfo();
+        InkpodEditorStateInfo committed_inactive_branch_editor{};
+        InkpodHistoryInfo committed_inactive_branch_history{};
+        InkpodCompactionPlan committed_inactive_branch_plan{};
+        if (!query_persistent_contract(committed_inactive_branch,
+                committed_inactive_branch_editor,
+                committed_inactive_branch_history,
+                committed_inactive_branch_plan)
+            || committed_inactive_branch_history.cursor
+                != committed_baseline_history.cursor + 1U) {
+            return 16084;
+        }
+        SendMessageW(window, WM_COMMAND, IDM_EDIT_UNDO, 0);
+        InkpodSelectionInput committed_rectangle_branch{};
+        committed_rectangle_branch.struct_size =
+            sizeof(committed_rectangle_branch);
+        committed_rectangle_branch.shape = INKPOD_SELECTION_RECTANGLE;
+        committed_rectangle_branch.operation = INKPOD_SELECTION_NEW;
+        committed_rectangle_branch.bounds = {1, 1, 2, 2};
+        committed_rectangle_branch.interpretation = INKPOD_RANGE_NORMAL;
+        committed_rectangle_branch.trace_shape = INKPOD_TRACE_ROUND;
+        committed_rectangle_branch.view_zoom_q16 = INT64_C(1) << 16;
+        if (state.engine->Invoke(
+                [&committed_rectangle_branch](InkpodCore* core) {
+                    InkpodDispatchResult result{};
+                    result.struct_size = sizeof(result);
+                    return inkpod_core_apply_selection(
+                        core, &committed_rectangle_branch, &result);
+                },
+                true,
+                true) != INKPOD_STATUS_OK) {
+            return 16084;
+        }
+        InkpodDocumentInfo committed_rectangle_active = EmptyDocumentInfo();
+        InkpodEditorStateInfo committed_rectangle_active_editor{};
+        InkpodHistoryInfo committed_rectangle_active_history{};
+        InkpodCompactionPlan committed_rectangle_active_plan{};
+        if (!query_persistent_contract(committed_rectangle_active,
+                committed_rectangle_active_editor,
+                committed_rectangle_active_history,
+                committed_rectangle_active_plan)
+            || committed_rectangle_active_history.cursor
+                != committed_baseline_history.cursor + 1U
+            || committed_rectangle_active_plan.history_procedure_count
+                < committed_baseline_plan.history_procedure_count + 2U) {
+            return 16084;
+        }
+        SendMessageW(window, WM_COMMAND, IDM_EDIT_UNDO, 0);
+        InkpodDocumentInfo committed_save_as_source = EmptyDocumentInfo();
+        InkpodEditorStateInfo committed_save_as_source_editor{};
+        InkpodHistoryInfo committed_save_as_source_history{};
+        InkpodCompactionPlan committed_save_as_source_plan{};
+        if (!query_persistent_contract(committed_save_as_source,
+                committed_save_as_source_editor,
+                committed_save_as_source_history,
+                committed_save_as_source_plan)
+            || committed_save_as_source_history.cursor
+                != committed_baseline_history.cursor
+            || committed_save_as_source_history.item_count
+                != committed_rectangle_active_history.item_count
+            || committed_save_as_source_history.cursor
+                >= committed_save_as_source_history.item_count
+            || committed_save_as_source_plan.history_procedure_count
+                != committed_rectangle_active_plan.history_procedure_count
+            || std::memcmp(committed_save_as_source_plan.document_digest,
+                   committed_baseline_plan.document_digest,
+                   sizeof(committed_baseline_plan.document_digest)) != 0) {
+            return 16084;
+        }
+        std::vector<std::uint8_t> committed_old_native;
+        std::vector<std::uint8_t> committed_old_raster;
+        if (!ReadBoundedFile(files.native, committed_old_native)
+            || !ReadBoundedFile(files.tga, committed_old_raster)) {
+            return 16084;
+        }
+        bool committed_save_as_selected{};
+        bool committed_save_as_committed{};
+        state.lifetime.smoke_native_save_path =
+            files.committed_save_as_native;
+        state.lifetime.smoke_after_native_save_path_selected =
+            [&committed_save_as_selected] {
+                committed_save_as_selected = true;
+            };
+        state.lifetime.smoke_after_native_save_committed =
+            [&committed_save_as_committed] {
+                committed_save_as_committed = true;
+            };
+        const LRESULT committed_save_as_result = SendMessageW(
+            window, WM_COMMAND, IDM_FILE_SAVE_AS, 0);
+        if (committed_save_as_result != 0 || !WaitForFileIo(state)
+            || !committed_save_as_selected || !committed_save_as_committed) {
+            return 16085;
+        }
+        InkpodDocumentInfo committed_after_save_as = EmptyDocumentInfo();
+        InkpodEditorStateInfo committed_after_save_as_editor{};
+        InkpodHistoryInfo committed_after_save_as_history{};
+        InkpodCompactionPlan committed_after_save_as_plan{};
+        std::vector<std::uint8_t> committed_new_native_after_save_as;
+        std::vector<std::uint8_t> committed_new_raster_after_save_as;
+        std::vector<std::uint8_t> committed_old_native_after_save_as;
+        std::vector<std::uint8_t> committed_old_raster_after_save_as;
+        if (!query_persistent_contract(committed_after_save_as,
+                committed_after_save_as_editor,
+                committed_after_save_as_history,
+                committed_after_save_as_plan)
+            || !SamePersistentMetadata(
+                committed_save_as_source, committed_after_save_as)
+            || (committed_after_save_as.flags
+                & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
+            || !same_editor_state(committed_save_as_source_editor,
+                committed_after_save_as_editor)
+            || (committed_after_save_as_editor.flags
+                & INKPOD_EDITOR_STATE_DIRTY) != 0U
+            || committed_after_save_as_history.cursor
+                != committed_save_as_source_history.cursor
+            || committed_after_save_as_history.item_count
+                != committed_save_as_source_history.item_count
+            || !same_compaction_plan(
+                committed_save_as_source_plan, committed_after_save_as_plan)
+            || !same_document_path(state.Document().shell.current_path,
+                files.committed_save_as_native)
+            || !state.Document().shell.planned_native_path.empty()
+            || !same_document_path(state.Document().shell.pair_raster_path,
+                files.committed_save_as_raster)
+            || state.Document().identity.kind
+                != inkpod::app::DocumentIdentityKind::WindowsFile
+            || state.Document().pair_raster_identity.kind
+                != inkpod::app::DocumentIdentityKind::WindowsFile
+            || !active_sequence_binding_matches(
+                files.committed_save_as_raster)
+            || !ReadBoundedFile(files.committed_save_as_native,
+                committed_new_native_after_save_as)
+            || !ReadBoundedFile(files.committed_save_as_raster,
+                committed_new_raster_after_save_as)
+            || !ReadBoundedFile(
+                files.native, committed_old_native_after_save_as)
+            || !ReadBoundedFile(
+                files.tga, committed_old_raster_after_save_as)
+            || committed_old_native_after_save_as != committed_old_native
+            || committed_old_raster_after_save_as != committed_old_raster) {
+            return 16086;
+        }
+
+        // Clear the smoke dialog response before the ordinary Save. An authority
+        // regression would now cancel instead of silently taking a test path.
+        // The editor-only change makes the native destination observably change
+        // while the old pair must remain byte-for-byte untouched.
+        const float committed_normal_diameter =
+            committed_after_save_as_editor.current_diameter_q16
+                == (INT64_C(2) << 16)
+            ? 3.0F
+            : 2.0F;
+        if (SetEditorDiameter(state, committed_normal_diameter)
+            != INKPOD_STATUS_OK) {
+            return 16087;
+        }
+        InkpodDocumentInfo committed_before_normal = EmptyDocumentInfo();
+        InkpodEditorStateInfo committed_before_normal_editor{};
+        InkpodHistoryInfo committed_before_normal_history{};
+        InkpodCompactionPlan committed_before_normal_plan{};
+        if (!query_persistent_contract(committed_before_normal,
+                committed_before_normal_editor,
+                committed_before_normal_history,
+                committed_before_normal_plan)
+            || (committed_before_normal_editor.flags
+                & INKPOD_EDITOR_STATE_DIRTY) == 0U) {
+            return 16087;
+        }
+        state.lifetime.smoke_native_save_path.clear();
+        bool committed_normal_save_committed{};
+        state.lifetime.smoke_after_native_save_committed =
+            [&committed_normal_save_committed] {
+                committed_normal_save_committed = true;
+            };
+        const LRESULT committed_normal_save_result = SendMessageW(
+            window, WM_COMMAND, IDM_FILE_SAVE, 0);
+        InkpodDocumentInfo committed_after_normal = EmptyDocumentInfo();
+        InkpodEditorStateInfo committed_after_normal_editor{};
+        InkpodHistoryInfo committed_after_normal_history{};
+        InkpodCompactionPlan committed_after_normal_plan{};
+        std::vector<std::uint8_t> committed_new_native_after_normal;
+        std::vector<std::uint8_t> committed_new_raster_after_normal;
+        if (committed_normal_save_result != 0 || !WaitForFileIo(state)
+            || !committed_normal_save_committed
+            || !query_persistent_contract(committed_after_normal,
+                committed_after_normal_editor,
+                committed_after_normal_history,
+                committed_after_normal_plan)
+            || !SamePersistentMetadata(
+                committed_before_normal, committed_after_normal)
+            || !same_editor_state(committed_before_normal_editor,
+                committed_after_normal_editor)
+            || (committed_after_normal_editor.flags
+                & INKPOD_EDITOR_STATE_DIRTY) != 0U
+            || committed_after_normal_history.cursor
+                != committed_before_normal_history.cursor
+            || committed_after_normal_history.item_count
+                != committed_before_normal_history.item_count
+            || !same_document_path(state.Document().shell.current_path,
+                files.committed_save_as_native)
+            || !same_document_path(state.Document().shell.pair_raster_path,
+                files.committed_save_as_raster)
+            || !active_sequence_binding_matches(
+                files.committed_save_as_raster)
+            || !ReadBoundedFile(files.committed_save_as_native,
+                committed_new_native_after_normal)
+            || !ReadBoundedFile(files.committed_save_as_raster,
+                committed_new_raster_after_normal)
+            || committed_new_native_after_normal
+                == committed_new_native_after_save_as
+            || !ReadBoundedFile(
+                files.native, committed_old_native_after_save_as)
+            || !ReadBoundedFile(
+                files.tga, committed_old_raster_after_save_as)
+            || committed_old_native_after_save_as != committed_old_native
+            || committed_old_raster_after_save_as != committed_old_raster) {
+            return 16087;
+        }
+
+        if (!close_all() || !empty()
+            || OpenDocumentFromPath(state, files.committed_save_as_raster)
+                != INKPOD_STATUS_OK) {
+            return 16088;
+        }
+        InkpodDocumentInfo committed_reopened = EmptyDocumentInfo();
+        InkpodEditorStateInfo committed_reopened_editor{};
+        InkpodHistoryInfo committed_reopened_history{};
+        InkpodCompactionPlan committed_reopened_plan{};
+        if (!query_persistent_contract(committed_reopened,
+                committed_reopened_editor, committed_reopened_history,
+                committed_reopened_plan)
+            || !SamePersistentMetadata(
+                committed_after_normal, committed_reopened)
+            || !same_editor_state(
+                committed_after_normal_editor, committed_reopened_editor)
+            || (committed_reopened.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
+            || (committed_reopened_editor.flags
+                & INKPOD_EDITOR_STATE_DIRTY) != 0U
+            || committed_reopened_history.cursor
+                != committed_after_normal_history.cursor
+            || committed_reopened_history.item_count
+                != committed_after_normal_history.item_count
+            || committed_reopened_history.cursor
+                >= committed_reopened_history.item_count
+            || !same_compaction_plan(
+                committed_after_normal_plan, committed_reopened_plan)
+            || !same_document_path(state.Document().shell.current_path,
+                files.committed_save_as_native)
+            || !same_document_path(state.Document().shell.pair_raster_path,
+                files.committed_save_as_raster)
+            || !active_sequence_binding_matches(
+                files.committed_save_as_raster)) {
+            return 16088;
+        }
+        InkpodDispatchResult committed_redo_result{};
+        committed_redo_result.struct_size = sizeof(committed_redo_result);
+        if (state.engine->Invoke(
+                [&committed_redo_result](InkpodCore* core) {
+                    return inkpod_core_redo(core, &committed_redo_result);
+                },
+                true,
+                true) != INKPOD_STATUS_OK) {
+            return 16089;
+        }
+        InkpodDocumentInfo committed_redone = EmptyDocumentInfo();
+        InkpodEditorStateInfo committed_redone_editor{};
+        InkpodHistoryInfo committed_redone_history{};
+        InkpodCompactionPlan committed_redone_plan{};
+        if (!query_persistent_contract(committed_redone,
+                committed_redone_editor, committed_redone_history,
+                committed_redone_plan)
+            || committed_redone_history.cursor
+                != committed_reopened_history.cursor + 1U
+            || committed_redone_history.item_count
+                != committed_reopened_history.item_count
+            || std::memcmp(committed_redone_plan.document_digest,
+                   committed_rectangle_active_plan.document_digest,
+                   sizeof(committed_redone_plan.document_digest)) != 0) {
+            return 16089;
+        }
+        InkpodDispatchResult committed_genesis_result{};
+        committed_genesis_result.struct_size = sizeof(committed_genesis_result);
+        if (state.engine->Invoke(
+                [&committed_genesis_result](InkpodCore* core) {
+                    return inkpod_core_history_jump(
+                        core, 0U, &committed_genesis_result);
+                },
+                true,
+                true) != INKPOD_STATUS_OK) {
+            return 16089;
+        }
+        InkpodDocumentInfo committed_genesis = EmptyDocumentInfo();
+        InkpodEditorStateInfo committed_genesis_editor{};
+        InkpodHistoryInfo committed_genesis_history{};
+        InkpodCompactionPlan committed_genesis_plan{};
+        if (!query_persistent_contract(committed_genesis,
+                committed_genesis_editor, committed_genesis_history,
+                committed_genesis_plan)
+            || committed_genesis_history.cursor != 0U
+            || committed_genesis.main_plane_checksum
+                != imported_before.main_plane_checksum
+            || committed_genesis.color_plane_checksum
+                != imported_before.color_plane_checksum
+            || !ReadBoundedFile(
+                files.native, committed_old_native_after_save_as)
+            || !ReadBoundedFile(
+                files.tga, committed_old_raster_after_save_as)
+            || committed_old_native_after_save_as != committed_old_native
+            || committed_old_raster_after_save_as != committed_old_raster
+            || !close_all() || !empty()) {
+            return 16089;
+        }
+
+        // A Planned raster authority may also be explicitly forked to a new
+        // pair. Use an upper-case TGA suffix to exercise the case-insensitive
+        // common-raster route, and prove that neither Save As nor the following
+        // ordinary Save writes the imported source or its originally planned
+        // same-stem native path.
+        DeleteSavedPairFixture(files.planned_default_native);
+        DeleteSavedPairFixture(files.planned_save_as_native);
+        if (!WriteFileAtomically(files.planned_save_as_source, closed_tga)
+            || OpenDocumentFromPath(state, files.planned_save_as_source)
+                != INKPOD_STATUS_OK
+            || !state.Document().shell.current_path.empty()
+            || !same_document_path(state.Document().shell.planned_native_path,
+                files.planned_default_native)
+            || !same_document_path(state.Document().shell.pair_raster_path,
+                files.planned_save_as_source)) {
+            return 16090;
+        }
+        std::vector<std::uint8_t> planned_source_bytes;
+        if (!ReadBoundedFile(
+                files.planned_save_as_source, planned_source_bytes)
+            || SendMessageW(window, WM_COMMAND, IDM_SELECTION_ALL, 0) != 0) {
+            return 16090;
+        }
+        InkpodDocumentInfo planned_before_save_as = EmptyDocumentInfo();
+        InkpodEditorStateInfo planned_before_save_as_editor{};
+        InkpodHistoryInfo planned_before_save_as_history{};
+        InkpodCompactionPlan planned_before_save_as_plan{};
+        if (!query_persistent_contract(planned_before_save_as,
+                planned_before_save_as_editor,
+                planned_before_save_as_history,
+                planned_before_save_as_plan)
+            || (planned_before_save_as.flags
+                & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U) {
+            return 16090;
+        }
+        bool planned_save_as_selected{};
+        bool planned_save_as_committed{};
+        state.lifetime.smoke_native_save_path =
+            files.planned_save_as_native;
+        state.lifetime.smoke_after_native_save_path_selected =
+            [&planned_save_as_selected] { planned_save_as_selected = true; };
+        state.lifetime.smoke_after_native_save_committed =
+            [&planned_save_as_committed] { planned_save_as_committed = true; };
+        const LRESULT planned_save_as_result = SendMessageW(
+            window, WM_COMMAND, IDM_FILE_SAVE_AS, 0);
+        if (planned_save_as_result != 0 || !WaitForFileIo(state)
+            || !planned_save_as_selected || !planned_save_as_committed) {
+            return 16091;
+        }
+        InkpodDocumentInfo planned_after_save_as = EmptyDocumentInfo();
+        InkpodEditorStateInfo planned_after_save_as_editor{};
+        InkpodHistoryInfo planned_after_save_as_history{};
+        InkpodCompactionPlan planned_after_save_as_plan{};
+        std::vector<std::uint8_t> planned_source_after_save_as;
+        std::vector<std::uint8_t> planned_native_after_save_as;
+        if (!query_persistent_contract(planned_after_save_as,
+                planned_after_save_as_editor,
+                planned_after_save_as_history,
+                planned_after_save_as_plan)
+            || !SamePersistentMetadata(
+                planned_before_save_as, planned_after_save_as)
+            || (planned_after_save_as.flags
+                & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
+            || !same_editor_state(planned_before_save_as_editor,
+                planned_after_save_as_editor)
+            || planned_after_save_as_history.cursor
+                != planned_before_save_as_history.cursor
+            || planned_after_save_as_history.item_count
+                != planned_before_save_as_history.item_count
+            || !same_compaction_plan(
+                planned_before_save_as_plan, planned_after_save_as_plan)
+            || !same_document_path(state.Document().shell.current_path,
+                files.planned_save_as_native)
+            || !state.Document().shell.planned_native_path.empty()
+            || !same_document_path(state.Document().shell.pair_raster_path,
+                files.planned_save_as_raster)
+            || state.Document().identity.kind
+                != inkpod::app::DocumentIdentityKind::WindowsFile
+            || state.Document().pair_raster_identity.kind
+                != inkpod::app::DocumentIdentityKind::WindowsFile
+            || !active_sequence_binding_matches(
+                files.planned_save_as_raster)
+            || GetFileAttributesW(files.planned_default_native.c_str())
+                != INVALID_FILE_ATTRIBUTES
+            || !ReadBoundedFile(files.planned_save_as_source,
+                planned_source_after_save_as)
+            || planned_source_after_save_as != planned_source_bytes
+            || !ReadBoundedFile(files.planned_save_as_native,
+                planned_native_after_save_as)
+            || GetFileAttributesW(files.planned_save_as_raster.c_str())
+                == INVALID_FILE_ATTRIBUTES) {
+            return 16092;
+        }
+        const float planned_normal_diameter =
+            planned_after_save_as_editor.current_diameter_q16
+                == (INT64_C(4) << 16)
+            ? 5.0F
+            : 4.0F;
+        if (SetEditorDiameter(state, planned_normal_diameter)
+            != INKPOD_STATUS_OK) {
+            return 16093;
+        }
+        InkpodDocumentInfo planned_before_normal = EmptyDocumentInfo();
+        InkpodEditorStateInfo planned_before_normal_editor{};
+        InkpodHistoryInfo planned_before_normal_history{};
+        InkpodCompactionPlan planned_before_normal_plan{};
+        if (!query_persistent_contract(planned_before_normal,
+                planned_before_normal_editor, planned_before_normal_history,
+                planned_before_normal_plan)
+            || (planned_before_normal_editor.flags
+                & INKPOD_EDITOR_STATE_DIRTY) == 0U) {
+            return 16093;
+        }
+        state.lifetime.smoke_native_save_path.clear();
+        bool planned_normal_save_committed{};
+        state.lifetime.smoke_after_native_save_committed =
+            [&planned_normal_save_committed] {
+                planned_normal_save_committed = true;
+            };
+        const LRESULT planned_normal_save_result = SendMessageW(
+            window, WM_COMMAND, IDM_FILE_SAVE, 0);
+        InkpodDocumentInfo planned_after_normal = EmptyDocumentInfo();
+        InkpodEditorStateInfo planned_after_normal_editor{};
+        InkpodHistoryInfo planned_after_normal_history{};
+        InkpodCompactionPlan planned_after_normal_plan{};
+        std::vector<std::uint8_t> planned_source_after_normal;
+        std::vector<std::uint8_t> planned_native_after_normal;
+        if (planned_normal_save_result != 0 || !WaitForFileIo(state)
+            || !planned_normal_save_committed
+            || !query_persistent_contract(planned_after_normal,
+                planned_after_normal_editor, planned_after_normal_history,
+                planned_after_normal_plan)
+            || !SamePersistentMetadata(
+                planned_before_normal, planned_after_normal)
+            || !same_editor_state(
+                planned_before_normal_editor, planned_after_normal_editor)
+            || (planned_after_normal_editor.flags
+                & INKPOD_EDITOR_STATE_DIRTY) != 0U
+            || planned_after_normal_history.cursor
+                != planned_before_normal_history.cursor
+            || planned_after_normal_history.item_count
+                != planned_before_normal_history.item_count
+            || !same_document_path(state.Document().shell.current_path,
+                files.planned_save_as_native)
+            || !same_document_path(state.Document().shell.pair_raster_path,
+                files.planned_save_as_raster)
+            || !active_sequence_binding_matches(
+                files.planned_save_as_raster)
+            || GetFileAttributesW(files.planned_default_native.c_str())
+                != INVALID_FILE_ATTRIBUTES
+            || !ReadBoundedFile(files.planned_save_as_source,
+                planned_source_after_normal)
+            || planned_source_after_normal != planned_source_bytes
+            || !ReadBoundedFile(files.planned_save_as_native,
+                planned_native_after_normal)
+            || planned_native_after_normal == planned_native_after_save_as) {
+            return 16093;
+        }
+        if (!close_all() || !empty()
+            || OpenDocumentFromPath(state, files.planned_save_as_raster)
+                != INKPOD_STATUS_OK) {
+            return 16094;
+        }
+        InkpodDocumentInfo planned_reopened = EmptyDocumentInfo();
+        InkpodEditorStateInfo planned_reopened_editor{};
+        InkpodHistoryInfo planned_reopened_history{};
+        InkpodCompactionPlan planned_reopened_plan{};
+        if (!query_persistent_contract(planned_reopened,
+                planned_reopened_editor, planned_reopened_history,
+                planned_reopened_plan)
+            || !SamePersistentMetadata(planned_after_normal, planned_reopened)
+            || !same_editor_state(
+                planned_after_normal_editor, planned_reopened_editor)
+            || planned_reopened_history.cursor
+                != planned_after_normal_history.cursor
+            || planned_reopened_history.item_count
+                != planned_after_normal_history.item_count
+            || !same_compaction_plan(
+                planned_after_normal_plan, planned_reopened_plan)
+            || !same_document_path(state.Document().shell.current_path,
+                files.planned_save_as_native)
+            || !same_document_path(state.Document().shell.pair_raster_path,
+                files.planned_save_as_raster)
+            || !active_sequence_binding_matches(
+                files.planned_save_as_raster)
+            || !ReadBoundedFile(files.planned_save_as_source,
+                planned_source_after_normal)
+            || planned_source_after_normal != planned_source_bytes
+            || GetFileAttributesW(files.planned_default_native.c_str())
+                != INVALID_FILE_ATTRIBUTES
+            || !close_all() || !empty()) {
+            return 16094;
         }
         auto* other = CreateWorkspaceWindow(state, false);
         if (other == nullptr || CreateCell(state, 11U, 9U, 96000U) != INKPOD_STATUS_OK) {

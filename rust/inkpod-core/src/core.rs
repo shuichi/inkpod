@@ -89,8 +89,10 @@ impl Core {
             persistence_state: persistence_task::PersistenceState::new(),
             io_manager: None,
             io_pair_authority: None,
+            io_pair_plan: None,
             io_install_pending: false,
             recovered: false,
+            sequence_preservation_baseline: None,
             active_stroke: None,
             shooting_frame_preview: None,
             filter_preview: None,
@@ -259,6 +261,7 @@ impl Core {
         self.current_path = None;
         self.raster_file_format = self.new_cell_raster_format;
         self.io_pair_authority = None;
+        self.io_pair_plan = None;
         self.persistence_state = persistence_state;
         self.recovered = false;
         self.native_opaque_sections.clear();
@@ -271,8 +274,21 @@ impl Core {
         self.motion_check = None;
         self.subpalette_index = None;
         self.reset_editor_state(true);
+        self.establish_sequence_preservation_baseline();
         self.document_info()
     }
+}
+
+/// Runtime-only revision pair represented by the most recent normal save,
+/// opened native container, immutable source, or exact recovery artifact.
+///
+/// This is separate from normal savepoints: Undo can return the visible state
+/// to a clean savepoint while the serializable journal and redo branches remain
+/// newer than the artifact that established this baseline.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct SequencePreservationBaseline {
+    document_revision: DocumentRevision,
+    editor_revision: EditorRevision,
 }
 
 /// Single-writer application core. Document and view revisions are independent.
@@ -310,8 +326,10 @@ pub struct Core {
     pub(super) persistence_state: persistence_task::PersistenceState,
     pub(super) io_manager: Option<inkpod_io::IoManager>,
     pub(super) io_pair_authority: Option<file_io::SavedPair>,
+    pub(super) io_pair_plan: Option<file_io::PlannedPair>,
     pub(super) io_install_pending: bool,
     pub(super) recovered: bool,
+    pub(super) sequence_preservation_baseline: Option<SequencePreservationBaseline>,
     pub(super) active_stroke: Option<StrokeSession>,
     pub(super) shooting_frame_preview: Option<shooting_frame::ShootingFramePreviewSession>,
     pub(super) filter_preview: Option<effects::FilterPreview>,
@@ -348,6 +366,43 @@ impl Clone for Core {
 }
 
 impl Core {
+    fn current_sequence_preservation_baseline(&self) -> Option<SequencePreservationBaseline> {
+        self.document.as_ref()?;
+        let editor = self.editor_session.as_ref()?;
+        Some(SequencePreservationBaseline {
+            document_revision: self.document_revision,
+            editor_revision: editor.revision,
+        })
+    }
+
+    /// Marks the complete current journal/editor frame as represented by a
+    /// durable artifact or immutable sequence source. The marker is runtime-only.
+    pub(super) fn establish_sequence_preservation_baseline(&mut self) {
+        self.sequence_preservation_baseline = self.current_sequence_preservation_baseline();
+    }
+
+    /// Invalidates the only known artifact baseline without changing content.
+    pub(super) fn revoke_sequence_preservation_baseline(&mut self) {
+        self.sequence_preservation_baseline = None;
+    }
+
+    /// Reports whether leaving the active sequence cell requires a fresh exact
+    /// recovery artifact, independently of the visible dirty bit.
+    pub(crate) fn sequence_source_recovery_required(&self) -> bool {
+        if self.document.is_none() {
+            return false;
+        }
+        let preservation_stale =
+            self.sequence_preservation_baseline != self.current_sequence_preservation_baseline();
+        self.savepoint != Some(self.current_state)
+            || self.editor_dirty()
+            || self.recovered
+            || preservation_stale
+            || self.io_pair_authority.as_ref().is_some_and(|authority| {
+                authority.raster.is_none() && authority.raster_missing.is_some()
+            })
+    }
+
     /// Clones a COW candidate within this owner's transaction or file snapshot.
     /// The candidate may replace this owner, so runtime authority is retained.
     /// Independent public Core copies must use `Clone` instead.
@@ -379,8 +434,10 @@ impl Core {
             persistence_state: self.persistence_state.clone(),
             io_manager: self.io_manager.clone(),
             io_pair_authority: self.io_pair_authority.clone(),
+            io_pair_plan: self.io_pair_plan.clone(),
             io_install_pending: self.io_install_pending,
             recovered: self.recovered,
+            sequence_preservation_baseline: self.sequence_preservation_baseline,
             active_stroke: self.active_stroke.clone(),
             shooting_frame_preview: self.shooting_frame_preview.clone(),
             filter_preview: self.filter_preview.clone(),
@@ -644,6 +701,9 @@ impl Core {
         self.next_procedure = ProcedureId::first();
         self.savepoint = saved.then_some(self.current_state);
         self.reset_journal();
+        // The caller must establish a new baseline only after the matching
+        // editor session is also published. Missing that step fails closed.
+        self.sequence_preservation_baseline = None;
     }
 
     pub(super) fn reset_view(&mut self) {

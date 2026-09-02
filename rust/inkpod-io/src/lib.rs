@@ -2,6 +2,7 @@
 
 mod backend;
 mod cache;
+mod companion;
 mod config;
 mod error;
 mod executor;
@@ -22,10 +23,15 @@ pub use error::{IoError, IoResult};
 pub use image::{DecodedLease, LoadedBytes, LoadedImage};
 pub use job::{ImageBatch, ImageBatchItem, IoJob, JobContext, JobPhase, JobProgress, JobState};
 pub use manager::IoManager;
-pub use pair::{PAIR_JOURNAL_VERSION, PairRecovery, PreparedPair};
+#[cfg(any(test, feature = "test-support"))]
+pub use pair::PairInstallFault;
+pub use pair::{
+    PAIR_JOURNAL_VERSION, PairInstallOutcome, PairRecovery, PreparedPair, RestoredPair,
+};
 pub use recovery::{
-    RECOVERY_METADATA_VERSION, RecoveryCandidate, RecoveryIdentity, RecoveryIdentityKind,
-    RecoveryMetadata, decode_recovery_metadata, encode_recovery_metadata, recovery_metadata_path,
+    RECOVERY_METADATA_VERSION, RecoveryArtifactProof, RecoveryArtifactStamp, RecoveryCandidate,
+    RecoveryIdentity, RecoveryIdentityKind, RecoveryMetadata, RecoveryPairProof,
+    decode_recovery_metadata, encode_recovery_metadata, recovery_metadata_path,
 };
 pub use sequence::SequenceDiscovery;
 pub use temporary::TemporaryDirectory;

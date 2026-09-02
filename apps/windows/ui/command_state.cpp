@@ -72,9 +72,11 @@ void ProvideDocumentCommandStates(
     const DocumentCommandStateInput& input, CommandStateSet& states) noexcept {
     SetEnabled(
         states,
-        {IDM_FILE_SAVE,
-         IDM_FILE_SAVE_AS,
-         IDM_FILE_COMPACT_COPY,
+        {IDM_FILE_SAVE, IDM_FILE_SAVE_AS},
+        input.has_document && !input.file_io_pending);
+    SetEnabled(
+        states,
+        {IDM_FILE_COMPACT_COPY,
          IDM_FILE_AUTOSAVE_NOW,
          IDM_FILE_EXPORT_RASTER,
          IDM_FILE_EXPORT_INSTRUCTION_RASTER,
@@ -93,7 +95,7 @@ void ProvideDocumentCommandStates(
     SetEnabled(
         states,
         {IDM_FILE_REVERT, IDM_FILE_REVERT_PARTIAL},
-        input.has_document && input.has_saved_path);
+        input.has_document && input.has_saved_path && !input.file_io_pending);
     constexpr std::array<UINT, 8U> recent_commands{
         IDM_FILE_RECENT_1,
         IDM_FILE_RECENT_2,

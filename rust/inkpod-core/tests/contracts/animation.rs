@@ -883,6 +883,71 @@ fn light_table_swap_accepts_saved_editor_state() {
 }
 
 #[test]
+fn light_table_swap_replaces_and_invalidates_the_previous_sequence_owner() {
+    let mut core = Core::new();
+    core.new_cell_with_uuid(4, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI, 0x1515)
+        .unwrap();
+    core.set_sequence(vec![
+        source("cell1.png", 0x1515, 4, 4, [10, 20, 30, 255]),
+        source("cell2.png", 0x1516, 4, 4, [40, 50, 60, 255]),
+    ])
+    .unwrap();
+    let sequence_before = core.sequence_catalog_info();
+    assert_eq!(sequence_before.cell_count, 2);
+    assert_ne!(sequence_before.owner_generation, 0);
+    let pending_step = core
+        .resolve_sequence_step(SequenceDirection::Next, SequenceEndpointPolicy::Stop)
+        .unwrap();
+
+    let replacement = LightTableSource::from_common_raster(
+        0x1616,
+        1,
+        RectI32 {
+            x: 0,
+            y: 0,
+            width: 3,
+            height: 2,
+        },
+        &rgba8(3, 2, [70, 80, 90, 255].repeat(6)),
+    )
+    .unwrap();
+    let (_, item_id) = core
+        .light_table_add_item(LightTableItemInput::new("replacement", replacement))
+        .unwrap();
+    let path = std::env::temp_dir().join(format!(
+        "inkpod-test-light-table-sequence-owner-{}-{}.inkpod",
+        std::process::id(),
+        item_id
+    ));
+    let _ = std::fs::remove_file(&path);
+    core.save(&path).unwrap();
+
+    let swapped = core.light_table_swap_with_active(item_id).unwrap();
+    assert_eq!(swapped.document_uuid, 0x1616);
+    assert_eq!(
+        core.sequence_catalog_info(),
+        SequenceCatalogInfo {
+            revision: 0,
+            owner_generation: 0,
+            cell_count: 0,
+            active_index: None,
+        }
+    );
+    let empty = core
+        .resolve_sequence_step(SequenceDirection::Next, SequenceEndpointPolicy::Stop)
+        .unwrap();
+    assert_eq!(empty.result, SequenceStepResult::Empty);
+    assert!(matches!(
+        core.commit_sequence_step(pending_step),
+        Err(CoreError::InvalidState("sequence step request is stale"))
+    ));
+    let usage = core.resource_usage();
+    assert_eq!(usage.sequence_render_cache_source_count, 0);
+    assert_eq!(usage.sequence_render_cache_bytes, 0);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn light_table_sources_are_canonical_assets_and_failed_updates_publish_nothing() {
     let mut core = Core::new();
     core.new_cell(2, 2, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
@@ -1482,9 +1547,7 @@ fn detached_sequence_switch_preserves_recovery_history_formats_and_view_owners()
         core.capture_sequence_switch(request)
             .unwrap()
             .prepare(Some(wrong_recovery), || false),
-        Err(CoreError::InvalidArgument(
-            "recovery artifact does not match the sequence target"
-        ))
+        Err(CoreError::FileConflict)
     ));
     assert_eq!(core.document_info().unwrap(), before_invalid);
     let mut prepared = core

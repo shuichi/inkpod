@@ -46,6 +46,8 @@ bool NotifyDockHostChanged(
     void* context, DockHostChangeKind kind) noexcept;
 [[nodiscard]] bool PersistApplicationSettings(
     app::ApplicationHost& state) noexcept;
+[[nodiscard]] bool DrainRecoveryCleanupsForShutdown(
+    app::ApplicationHost& state) noexcept;
 void ShowCoreError(
     const app::ApplicationHost& state,
     HWND owner,

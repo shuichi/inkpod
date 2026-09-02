@@ -214,6 +214,7 @@ impl Core {
         self.document_revision = revision;
         self.raster_file_format = source.raster_file_format;
         self.io_pair_authority = None;
+        self.io_pair_plan = None;
         self.persistence_state = next_file_authority;
         self.next_id = next_id;
         self.assets = asset::AssetStore::default();
@@ -226,6 +227,7 @@ impl Core {
         self.floating = None;
         self.publish_editor_session(Some(editor));
         self.register_pristine_sequence_source(&source);
+        self.establish_sequence_preservation_baseline();
         self.document_info()
     }
 

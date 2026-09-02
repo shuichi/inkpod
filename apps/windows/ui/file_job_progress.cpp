@@ -14,14 +14,16 @@ const wchar_t* FileJobName(std::uint32_t kind) noexcept {
     switch (kind) {
         case INKPOD_IO_OPEN_NATIVE:
         case INKPOD_IO_OPEN_RASTER:
+        case INKPOD_IO_OPEN_RASTER_PAIR:
             return UiText(UiStringId::JobStatusRead);
         case INKPOD_IO_SAVE_PAIR:
         case INKPOD_IO_AUTOSAVE:
             return UiText(UiStringId::JobStatusSave);
         case INKPOD_IO_SEQUENCE_AUTO:
         case INKPOD_IO_SEQUENCE_FILES:
-        case INKPOD_IO_SEQUENCE_SWITCH:
             return UiText(UiStringId::JobStatusSequence);
+        case INKPOD_IO_SEQUENCE_SWITCH:
+            return UiText(UiStringId::JobStatusCellLoading);
         case INKPOD_IO_EXPORT_RASTER:
         case INKPOD_IO_EXPORT_SEQUENCE:
             return UiText(UiStringId::JobStatusExport);

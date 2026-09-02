@@ -65,6 +65,7 @@ using inkpod::app::EditorArea;
 using inkpod::app::EditorGroupId;
 using inkpod::app::EditorSplitOrientation;
 using inkpod::app::Generation;
+using inkpod::app::IdentityReservationToken;
 using inkpod::app::RecentDocumentList;
 using inkpod::app::WorkspaceWindowId;
 using inkpod::app::WorkspaceWindowRegistry;
@@ -84,6 +85,24 @@ using inkpod::windows::ui::ThumbnailPaneUsage;
 using inkpod::windows::ui::ThumbnailPixelLayout;
 using inkpod::windows::ui::ToolTabId;
 using inkpod::windows::ui::ToolTabResult;
+
+InkpodIoRecoveryArtifactProof RecoveryProof(std::uint64_t seed) noexcept {
+    InkpodIoRecoveryArtifactProof proof{};
+    proof.struct_size = sizeof(proof);
+    proof.native.struct_size = sizeof(proof.native);
+    proof.native.identity.struct_size = sizeof(proof.native.identity);
+    proof.native.identity.kind = 1U;
+    proof.native.identity.volume = seed;
+    proof.native.identity.object_low = seed + 1U;
+    proof.native.length = seed + 2U;
+    proof.metadata.struct_size = sizeof(proof.metadata);
+    proof.metadata.identity.struct_size = sizeof(proof.metadata.identity);
+    proof.metadata.identity.kind = 1U;
+    proof.metadata.identity.volume = seed;
+    proof.metadata.identity.object_low = seed + 3U;
+    proof.metadata.length = seed + 4U;
+    return proof;
+}
 
 // Explicit-instantiation access keeps this implementation-local regression on
 // the real private command boundary without adding a production test accessor.
@@ -367,11 +386,19 @@ bool TestDocumentIdentityAndIndex() {
     }
     DocumentIdentity normalized{};
     DocumentIdentity normalized_case{};
+    DocumentIdentity pair_member{};
+    DocumentIdentity replacement_pair_member{};
+    const std::wstring pair_member_path = missing + L".pair-raster";
+    const std::wstring replacement_pair_member_path = missing + L".replacement-raster";
     const bool normalized_equal =
         inkpod::app::ResolveDocumentFileIdentity(io.manager, missing, normalized)
         && inkpod::app::ResolveDocumentFileIdentity(
             io.manager, case_variant, normalized_case)
-        && normalized == normalized_case;
+        && normalized == normalized_case
+        && inkpod::app::ResolveDocumentFileIdentity(
+            io.manager, pair_member_path, pair_member)
+        && inkpod::app::ResolveDocumentFileIdentity(
+            io.manager, replacement_pair_member_path, replacement_pair_member);
 
     DocumentRegistry registry;
     auto* core = reinterpret_cast<CoreHost*>(static_cast<std::uintptr_t>(1U));
@@ -382,6 +409,8 @@ bool TestDocumentIdentityAndIndex() {
             DocumentViewId{17U},
             core)
         && registry.AssignIdentity(DocumentSessionId{11U}, direct)
+        && !registry.Find(DocumentSessionId{11U})->HasExactPairIdentities(
+            direct, pair_member)
         && registry.Add(
             DocumentSessionId{13U},
             Generation{3U},
@@ -391,56 +420,401 @@ bool TestDocumentIdentityAndIndex() {
         && registry.AssignIdentity(
             DocumentSessionId{13U},
             inkpod::app::UntitledDocumentIdentity(7U, 9U))
+        && registry.AssignPairIdentities(
+            DocumentSessionId{11U}, direct, pair_member)
+        && registry.Find(DocumentSessionId{11U})->HasExactPairIdentities(
+            direct, pair_member)
+        && !registry.Find(DocumentSessionId{11U})->HasExactPairIdentities(
+            direct, replacement_pair_member)
+        && !registry.Find(DocumentSessionId{11U})->HasExactPairIdentities(
+            pair_member, direct)
+        && !registry.AssignIdentity(DocumentSessionId{13U}, pair_member)
         && registry.FindByIdentity(direct) != nullptr
         && registry.FindByIdentity(direct)->id == DocumentSessionId{11U}
+        && registry.FindByIdentity(pair_member) != nullptr
+        && registry.FindByIdentity(pair_member)->id == DocumentSessionId{11U}
+        && registry.AssignPairIdentities(
+            DocumentSessionId{11U}, direct, replacement_pair_member)
+        && !registry.Find(DocumentSessionId{11U})->HasExactPairIdentities(
+            direct, pair_member)
+        && registry.Find(DocumentSessionId{11U})->HasExactPairIdentities(
+            direct, replacement_pair_member)
+        && registry.FindByIdentity(pair_member) == nullptr
+        && registry.FindByIdentity(replacement_pair_member) != nullptr
+        && registry.FindByIdentity(replacement_pair_member)->id == DocumentSessionId{11U}
         && registry.FindByView(DocumentViewId{19U}) != nullptr
         && registry.FindByView(DocumentViewId{19U})->id
             == DocumentSessionId{13U};
     bool reservations = indexed;
+    IdentityReservationToken last_issued_token{};
     if (reservations) {
         const auto owner = DocumentSessionId{13U};
+        const auto other_owner = DocumentSessionId{11U};
         const DocumentIdentity prior = registry.Find(owner)->identity;
         g_allocations_before_failure = 0;
-        const bool failed_prepare = !registry.ReserveIdentity(owner, normalized, missing);
+        const auto failed_prepare =
+            registry.ReserveIdentity(owner, normalized, missing);
         g_allocations_before_failure = -1;
-        reservations = failed_prepare && registry.Find(owner)->identity == prior
-            && !registry.HasIdentityReservation(normalized)
-            && registry.ReserveIdentity(owner, normalized, missing)
+        const auto first_token =
+            registry.ReserveIdentity(owner, normalized, missing);
+        reservations = !failed_prepare && first_token
             && registry.Find(owner)->identity == prior
             && registry.FindByIdentity(normalized) == nullptr
             && registry.HasIdentityReservation(normalized)
             && registry.HasIdentityReservation(direct, normalized_case.normalized_path)
-            && !registry.AssignIdentity(DocumentSessionId{11U}, normalized_case)
-            && !registry.ReserveIdentity(DocumentSessionId{11U}, normalized_case)
+            && !registry.AssignIdentity(other_owner, normalized_case)
+            && !registry.ReserveIdentity(other_owner, normalized_case)
             && !registry.ReserveIdentity(owner, prior);
         if (reservations) {
+            const IdentityReservationToken wrong_token{UINT64_MAX};
+            reservations = !registry.PublishReservedIdentity(
+                               other_owner, first_token)
+                && !registry.CancelIdentityReservation(other_owner, first_token)
+                && !registry.PublishReservedIdentity(owner, wrong_token)
+                && !registry.CancelIdentityReservation(owner, wrong_token)
+                && registry.HasIdentityReservation(normalized)
+                && registry.Find(owner)->identity == prior;
+        }
+        if (reservations) {
             g_allocations_before_failure = 0;
-            const bool published = registry.PublishReservedIdentity(owner);
+            const bool published =
+                registry.PublishReservedIdentity(owner, first_token);
             const bool no_allocation = g_allocations_before_failure == 0;
             g_allocations_before_failure = -1;
             reservations = published && no_allocation
                 && registry.Find(owner)->identity == normalized
-                && !registry.HasIdentityReservation(normalized);
+                && !registry.HasIdentityReservation(normalized)
+                && !registry.PublishReservedIdentity(owner, first_token)
+                && !registry.CancelIdentityReservation(owner, first_token);
         }
         const DocumentIdentity next = inkpod::app::UntitledDocumentIdentity(71U, 91U);
+        const DocumentIdentity next_pair = inkpod::app::UntitledDocumentIdentity(72U, 92U);
+        IdentityReservationToken cancelled_pair_token{};
         if (reservations) {
-            reservations = registry.ReserveIdentity(owner, next, case_variant);
-            registry.CancelIdentityReservation(owner);
-            reservations = reservations && registry.Find(owner)->identity == normalized
-                && !registry.HasIdentityReservation(next, normalized.normalized_path)
-                && registry.ReserveIdentity(owner, next, missing)
+            cancelled_pair_token = registry.ReserveIdentityPair(
+                owner, next, next_pair, case_variant, pair_member_path);
+            reservations = cancelled_pair_token
+                && cancelled_pair_token.value > first_token.value
+                && registry.HasIdentityReservation(next)
+                && registry.HasIdentityReservation(next_pair);
+        }
+        if (reservations) {
+            g_allocations_before_failure = 0;
+            const bool cancelled = registry.CancelIdentityReservation(
+                owner, cancelled_pair_token);
+            const bool no_allocation = g_allocations_before_failure == 0;
+            g_allocations_before_failure = -1;
+            reservations = cancelled && no_allocation
+                && registry.Find(owner)->identity == normalized
+                && !registry.Find(owner)->pair_raster_identity
+                && !registry.HasIdentityReservation(
+                    next, normalized.normalized_path);
+        }
+        const auto pair_publish_token = reservations
+            ? registry.ReserveIdentityPair(owner, next, next_pair,
+                  case_variant, pair_member_path)
+            : IdentityReservationToken{};
+        if (reservations) {
+            reservations = pair_publish_token
+                && pair_publish_token.value > cancelled_pair_token.value
+                && !registry.PublishReservedIdentity(
+                    owner, cancelled_pair_token)
+                && !registry.CancelIdentityReservation(
+                    owner, cancelled_pair_token)
+                && registry.HasIdentityReservation(next)
+                && registry.HasIdentityReservation(next_pair);
+        }
+        if (reservations) {
+            g_allocations_before_failure = 0;
+            const bool pair_published = registry.PublishReservedIdentity(
+                owner, pair_publish_token);
+            const bool no_allocation = g_allocations_before_failure == 0;
+            g_allocations_before_failure = -1;
+            reservations = pair_published && no_allocation
+                && registry.Find(owner)->identity == next
+                && registry.Find(owner)->pair_raster_identity == next_pair
+                && !registry.HasIdentityReservation(next)
+                && !registry.PublishReservedIdentity(owner, pair_publish_token);
+        }
+        const auto repair_token = reservations
+            ? registry.ReserveIdentityPair(owner, next, next_pair,
+                  case_variant, pair_member_path)
+            : IdentityReservationToken{};
+        if (reservations) {
+            reservations = repair_token
+                && repair_token.value > pair_publish_token.value;
+        }
+        {
+            DocumentIdentity repaired_native{};
+            repaired_native.kind =
+                inkpod::app::DocumentIdentityKind::NormalizedPath;
+            repaired_native.normalized_path = normalized.normalized_path;
+            DocumentIdentity repaired_raster{};
+            repaired_raster.kind = inkpod::app::DocumentIdentityKind::WindowsFile;
+            repaired_raster.volume_serial = 0x9191U;
+            repaired_raster.file_id[0] = 0x42U;
+            if (reservations) {
+                g_allocations_before_failure = 0;
+                const bool repaired = registry.PublishRepairedReservedIdentityPair(
+                    owner, repair_token, std::move(repaired_native),
+                    std::move(repaired_raster));
+                const bool no_allocation = g_allocations_before_failure == 0;
+                g_allocations_before_failure = -1;
+                reservations = repaired && no_allocation
+                    && registry.Find(owner)->identity.kind
+                        == inkpod::app::DocumentIdentityKind::NormalizedPath
+                    && registry.Find(owner)->pair_raster_identity.kind
+                        == inkpod::app::DocumentIdentityKind::WindowsFile
+                    && !registry.HasIdentityReservation(next);
+            }
+            const DocumentIdentity revoked =
+                inkpod::app::UntitledDocumentIdentity(501U, 503U);
+            IdentityReservationToken revoke_token{};
+            if (reservations) {
+                revoke_token = registry.ReserveIdentityPair(
+                    owner, next, next_pair, case_variant, pair_member_path);
+                reservations = static_cast<bool>(revoke_token);
+            }
+            if (reservations) {
+                g_allocations_before_failure = 0;
+                const bool published =
+                    registry.ForceRevokeIdentity(owner, revoked);
+                const bool no_allocation = g_allocations_before_failure == 0;
+                g_allocations_before_failure = -1;
+                reservations = published && no_allocation
+                    && registry.Find(owner)->identity == revoked
+                    && !registry.Find(owner)->pair_raster_identity
+                    && !registry.HasIdentityReservation(next)
+                    && registry.FindByIdentity(revoked) == registry.Find(owner);
+            }
+            const DocumentIdentity forced_revoked =
+                inkpod::app::UntitledDocumentIdentity(509U, 511U);
+            if (reservations) {
+                // A terminal Core revoke must clear the old pair even if the
+                // frontend reservation was already lost.
+                reservations = registry.AssignPairIdentities(
+                    owner, next, next_pair);
+            }
+            if (reservations) {
+                g_allocations_before_failure = 0;
+                const bool forced = registry.ForceRevokeIdentity(
+                    owner, forced_revoked);
+                const bool no_allocation = g_allocations_before_failure == 0;
+                g_allocations_before_failure = -1;
+                reservations = forced && no_allocation
+                    && registry.Find(owner)->identity == forced_revoked
+                    && !registry.Find(owner)->pair_raster_identity
+                    && registry.FindByIdentity(next) == nullptr
+                    && registry.FindByIdentity(next_pair) == nullptr;
+            }
+            IdentityReservationToken prepared_token{};
+            if (reservations) {
+                prepared_token = registry.ReserveIdentityPair(
+                    owner, next, next_pair, case_variant, pair_member_path);
+                reservations = prepared_token
+                    && prepared_token.value > revoke_token.value
+                    && !registry.PublishPreparedIdentityPair(owner,
+                        revoke_token, next, next_pair)
+                    && registry.HasIdentityReservation(next)
+                    && registry.HasIdentityReservation(next_pair);
+            }
+            if (reservations) {
+                // Core commit publication consumes values prepared before the
+                // apply fence and remains no-allocation, but only for the exact
+                // operation that owns the still-live reservation.
+                g_allocations_before_failure = 0;
+                const bool committed = registry.PublishPreparedIdentityPair(
+                    owner, prepared_token, next, next_pair);
+                const bool no_allocation = g_allocations_before_failure == 0;
+                g_allocations_before_failure = -1;
+                reservations = committed && no_allocation
+                    && registry.Find(owner)->identity == next
+                    && registry.Find(owner)->pair_raster_identity == next_pair
+                    && registry.ForceRevokeIdentity(owner, forced_revoked);
+            }
+            const auto removal_token = reservations
+                ? registry.ReserveIdentity(owner, next, missing)
+                : IdentityReservationToken{};
+            reservations = reservations && removal_token
                 && registry.Remove(owner)
                 && !registry.HasIdentityReservation(next, normalized.normalized_path)
-                && registry.ReserveIdentity(DocumentSessionId{11U}, next)
+                && !registry.CancelIdentityReservation(owner, removal_token);
+            const auto replacement_token = reservations
+                ? registry.ReserveIdentity(other_owner, next)
+                : IdentityReservationToken{};
+            last_issued_token = replacement_token;
+            reservations = reservations && replacement_token
+                && replacement_token.value > removal_token.value
                 && registry.Replace(DocumentSessionId{17U}, Generation{5U},
                     DocumentViewId{23U}, core)
-                && !registry.HasIdentityReservation(next);
+                && !registry.HasIdentityReservation(next)
+                && !registry.CancelIdentityReservation(
+                    DocumentSessionId{17U}, replacement_token)
+                && !registry.PublishReservedIdentity(
+                    DocumentSessionId{17U}, replacement_token);
         }
+    }
+    if (reservations) {
+        registry.Clear();
+        const auto after_clear_owner = DocumentSessionId{31U};
+        const auto after_clear_identity =
+            inkpod::app::UntitledDocumentIdentity(701U, 703U);
+        reservations = registry.InitializePlaceholder(Generation{7U})
+            && registry.Replace(after_clear_owner, Generation{9U},
+                DocumentViewId{29U}, core);
+        const auto after_clear_token = reservations
+            ? registry.ReserveIdentity(after_clear_owner, after_clear_identity)
+            : IdentityReservationToken{};
+        reservations = reservations && after_clear_token
+            && after_clear_token.value > last_issued_token.value
+            && !registry.CancelIdentityReservation(
+                after_clear_owner, last_issued_token)
+            && registry.HasIdentityReservation(after_clear_identity)
+            && registry.CancelIdentityReservation(
+                after_clear_owner, after_clear_token)
+            && !registry.HasIdentityReservation(after_clear_identity);
     }
     registry.Clear();
     DeleteFileW(hard_link.c_str());
     DeleteFileW(path.c_str());
     return normalized_equal && indexed && reservations;
+}
+
+bool TestRevertPairSequenceBindingPublication() {
+    DocumentRegistry registry;
+    auto* core = reinterpret_cast<CoreHost*>(static_cast<std::uintptr_t>(1U));
+    const DocumentSessionId owner{41U};
+    const DocumentIdentity prior_native =
+        inkpod::app::UntitledDocumentIdentity(101U, 103U);
+    const DocumentIdentity prior_raster =
+        inkpod::app::UntitledDocumentIdentity(107U, 109U);
+    const DocumentIdentity next_native =
+        inkpod::app::UntitledDocumentIdentity(201U, 203U);
+    const DocumentIdentity next_raster =
+        inkpod::app::UntitledDocumentIdentity(207U, 209U);
+    const DocumentIdentity unrelated_raster =
+        inkpod::app::UntitledDocumentIdentity(211U, 223U);
+    const std::wstring next_native_path = L"C:\\cells\\next.inkpod";
+    const std::wstring next_raster_path = L"C:\\cells\\next.png";
+    if (!registry.InitializePlaceholder(Generation{1U})
+        || !registry.Replace(
+            owner, Generation{3U}, DocumentViewId{17U}, core)
+        || !registry.AssignPairIdentities(
+            owner, prior_native, prior_raster)) {
+        return false;
+    }
+    auto* document = registry.Find(owner);
+    if (document == nullptr) {
+        return false;
+    }
+    inkpod::app::SequenceFileBinding prior_binding{};
+    prior_binding.document_uuid_high = 301U;
+    prior_binding.document_uuid_low = 307U;
+    prior_binding.source_generation = 11U;
+    prior_binding.raster_path = L"C:\\cells\\prior.png";
+    prior_binding.raster_identity = prior_raster;
+    std::vector<inkpod::app::SequenceFileBinding> bindings;
+    bindings.push_back(std::move(prior_binding));
+    if (!document->ReplaceSequenceFileBindings(std::move(bindings))) {
+        return false;
+    }
+    g_allocations_before_failure = 0;
+    const IdentityReservationToken allocation_failed = registry.ReserveIdentityPair(
+        owner, next_native, next_raster,
+        next_native_path, next_raster_path);
+    g_allocations_before_failure = -1;
+    const auto* after_failed_reservation = document->SequenceFileBindingAt(0U);
+    if (allocation_failed || document->identity != prior_native
+        || document->pair_raster_identity != prior_raster
+        || after_failed_reservation == nullptr
+        || after_failed_reservation->raster_path != L"C:\\cells\\prior.png"
+        || after_failed_reservation->raster_identity != prior_raster
+        || registry.HasIdentityReservation(next_native)
+        || registry.HasIdentityReservation(next_raster)) {
+        return false;
+    }
+    const IdentityReservationToken token = registry.ReserveIdentityPair(
+        owner, next_native, next_raster,
+        next_native_path, next_raster_path);
+    if (!token) {
+        return false;
+    }
+    const auto prepared_binding = [&](DocumentIdentity raster_identity,
+                                      std::uint64_t uuid_low = 307U) {
+        inkpod::app::SequenceFileBinding binding{};
+        binding.document_uuid_high = 301U;
+        binding.document_uuid_low = uuid_low;
+        binding.source_generation = 11U;
+        binding.raster_path = L"C:\\cells\\next.png";
+        binding.raster_identity = std::move(raster_identity);
+        return binding;
+    };
+    const auto unchanged = [&]() {
+        const auto* binding = document->SequenceFileBindingAt(0U);
+        return document->identity == prior_native
+            && document->pair_raster_identity == prior_raster
+            && binding != nullptr
+            && binding->document_uuid_high == 301U
+            && binding->document_uuid_low == 307U
+            && binding->source_generation == 11U
+            && binding->raster_path == L"C:\\cells\\prior.png"
+            && binding->raster_identity == prior_raster
+            && registry.HasIdentityReservation(next_native)
+            && registry.HasIdentityReservation(next_raster);
+    };
+
+    auto stale_candidate = prepared_binding(next_raster);
+    g_allocations_before_failure = 0;
+    const bool stale_rejected =
+        !registry.PublishReservedIdentityPairWithSequenceBinding(
+            owner, IdentityReservationToken{token.value + 1U}, 0U,
+            std::move(stale_candidate));
+    const bool stale_no_allocation = g_allocations_before_failure == 0;
+    g_allocations_before_failure = -1;
+    if (!stale_rejected || !stale_no_allocation || !unchanged()) {
+        return false;
+    }
+
+    auto wrong_key = prepared_binding(next_raster, 311U);
+    if (registry.PublishReservedIdentityPairWithSequenceBinding(
+            owner, token, 0U, std::move(wrong_key))
+        || !unchanged()) {
+        return false;
+    }
+    auto wrong_pair = prepared_binding(unrelated_raster);
+    if (registry.PublishReservedIdentityPairWithSequenceBinding(
+            owner, token, 0U, std::move(wrong_pair))
+        || !unchanged()) {
+        return false;
+    }
+    auto wrong_slot = prepared_binding(next_raster);
+    if (registry.PublishReservedIdentityPairWithSequenceBinding(
+            owner, token, 1U, std::move(wrong_slot))
+        || !unchanged()) {
+        return false;
+    }
+
+    auto committed_binding = prepared_binding(next_raster);
+    g_allocations_before_failure = 0;
+    const bool committed =
+        registry.PublishReservedIdentityPairWithSequenceBinding(
+            owner, token, 0U, std::move(committed_binding));
+    const bool committed_no_allocation = g_allocations_before_failure == 0;
+    g_allocations_before_failure = -1;
+    const auto* published = document->SequenceFileBindingAt(0U);
+    return committed && committed_no_allocation
+        && document->identity == next_native
+        && document->pair_raster_identity == next_raster
+        && published != nullptr
+        && published->document_uuid_high == 301U
+        && published->document_uuid_low == 307U
+        && published->source_generation == 11U
+        && published->raster_path == L"C:\\cells\\next.png"
+        && published->raster_identity == next_raster
+        && !registry.HasIdentityReservation(next_native)
+        && !registry.HasIdentityReservation(next_raster)
+        && !registry.PublishReservedIdentityPairWithSequenceBinding(
+            owner, token, 0U, prepared_binding(next_raster));
 }
 
 bool TestRecentDocumentList() {
@@ -468,6 +842,28 @@ bool TestRecentDocumentList() {
         || recent.Count() != RecentDocumentList::kCapacity - 1U
         || recent.Remove(RecentDocumentList::kCapacity)
         || recent.Record(L"", repeated)) {
+        return false;
+    }
+    const auto logical = inkpod::app::UntitledDocumentIdentity(91U, 93U);
+    const auto physical = inkpod::app::UntitledDocumentIdentity(95U, 97U);
+    if (!recent.Record(L"C:\\cells\\logical.png", logical)
+        || !recent.Record(L"C:\\cells\\duplicate.inkpod", physical)
+        || !recent.RecordReplacing(
+            L"C:\\cells\\logical.inkpod", physical, logical)
+        || recent.At(0U) == nullptr
+        || recent.At(0U)->path != L"C:\\cells\\logical.inkpod"
+        || recent.At(0U)->identity != physical) {
+        return false;
+    }
+    std::size_t physical_count{};
+    for (std::size_t index = 0U; index < recent.Count(); ++index) {
+        const auto* entry = recent.At(index);
+        if (entry != nullptr
+            && (entry->identity == physical || entry->identity == logical)) {
+            ++physical_count;
+        }
+    }
+    if (physical_count != 1U) {
         return false;
     }
     recent.Clear();
@@ -669,27 +1065,138 @@ bool TestDocumentAndViewLifetime() {
     sequence_metadata.generation = document->generation;
     sequence_metadata.document_uuid_high = 71U;
     sequence_metadata.document_uuid_low = 73U;
-    if (!document->PublishSequenceAutosave(
-            71U, 73U, 5U, L"C:\\recovery\\cell.inkpod", sequence_metadata)
+    const auto first_proof = RecoveryProof(101U);
+    const auto second_proof = RecoveryProof(201U);
+    auto reserved_proof = first_proof;
+    reserved_proof.reserved = 1U;
+    auto flagged_proof = first_proof;
+    flagged_proof.native.flags = 2U;
+    auto fake_physical_proof = first_proof;
+    fake_physical_proof.metadata.identity.volume = 0U;
+    fake_physical_proof.metadata.identity.object_high = 0U;
+    fake_physical_proof.metadata.identity.object_low = 0U;
+    if (document->PublishSequenceAutosave(
+            71U, 73U, 5U, L"C:\\recovery\\invalid.inkpod",
+            sequence_metadata, {})
+        || document->PublishSequenceAutosave(
+            71U, 73U, 5U, L"C:\\recovery\\reserved.inkpod",
+            sequence_metadata, reserved_proof)
+        || document->PublishSequenceAutosave(
+            71U, 73U, 5U, L"C:\\recovery\\flagged.inkpod",
+            sequence_metadata, flagged_proof)
+        || document->PublishSequenceAutosave(
+            71U, 73U, 5U, L"C:\\recovery\\fake.inkpod",
+            sequence_metadata, fake_physical_proof)
+        || !document->PublishSequenceAutosave(
+            71U, 73U, 5U, L"C:\\recovery\\cell.inkpod", sequence_metadata,
+            first_proof)
         || document->FindSequenceAutosave(71U, 73U, 4U) != nullptr) {
         return false;
     }
     const auto* sequence_autosave = document->FindSequenceAutosave(71U, 73U, 5U);
+    inkpod::app::SequenceAutosaveBinding reserved_binding{};
+    reserved_binding.document_uuid_high = 71U;
+    reserved_binding.document_uuid_low = 73U;
+    reserved_binding.source_generation = 5U;
+    reserved_binding.recovery_path = L"C:\\recovery\\cell-2.inkpod";
+    reserved_binding.metadata = sequence_metadata;
+    reserved_binding.artifact_proof = second_proof;
     if (sequence_autosave == nullptr
         || sequence_autosave->artifact_generation != 1U
         || sequence_autosave->recovery_path != L"C:\\recovery\\cell.inkpod"
-        || !document->PublishSequenceAutosave(
-            71U, 73U, 5U, L"C:\\recovery\\cell-2.inkpod", sequence_metadata)) {
+        || sequence_autosave->artifact_proof.native.identity.volume != 101U
+        || !document->ReserveSequenceAutosave(71U, 73U, 5U, 1U)
+        // A reserved continuation freezes this exact prior generation. A
+        // newer publication/removal cannot win an ABA race while Core work is
+        // in flight, and the wrong expected generation cannot publish.
+        || document->PublishSequenceAutosave(
+            71U, 73U, 5U, L"C:\\recovery\\racing.inkpod", sequence_metadata,
+            RecoveryProof(251U))
+        || document->RemoveSequenceAutosave(71U, 73U, 5U, 1U)
+        || document->PublishReservedSequenceAutosave(
+            reserved_binding, 0U)
+        || !document->PublishReservedSequenceAutosave(
+            std::move(reserved_binding), 1U)) {
         return false;
     }
     sequence_autosave = document->FindSequenceAutosave(71U, 73U, 5U);
     if (sequence_autosave == nullptr
         || sequence_autosave->artifact_generation != 2U
-        || sequence_autosave->recovery_path != L"C:\\recovery\\cell-2.inkpod") {
+        || sequence_autosave->recovery_path != L"C:\\recovery\\cell-2.inkpod"
+        || sequence_autosave->artifact_proof.native.identity.volume != 201U
+        || document->RemoveSequenceAutosave(71U, 73U, 5U, 1U)
+        || !document->RemoveSequenceAutosave(71U, 73U, 5U, 2U)
+        || document->FindSequenceAutosave(71U, 73U, 5U) != nullptr
+        || document->RemoveSequenceAutosave(71U, 73U, 5U, 2U)) {
+        return false;
+    }
+    auto inactive_metadata = sequence_metadata;
+    inactive_metadata.document_uuid_high = 81U;
+    inactive_metadata.document_uuid_low = 83U;
+    if (!document->PublishSequenceAutosave(
+            71U, 73U, 5U, L"C:\\recovery\\cell-3.inkpod", sequence_metadata,
+            RecoveryProof(301U))
+        || !document->PublishSequenceAutosave(
+            81U, 83U, 6U, L"C:\\recovery\\inactive.inkpod",
+            inactive_metadata, RecoveryProof(401U))) {
+        return false;
+    }
+    auto retired = document->TakeSequenceAutosave(71U, 73U, 5U);
+    if (!retired.has_value()
+        || retired->recovery_path != L"C:\\recovery\\cell-3.inkpod"
+        || document->FindSequenceAutosave(71U, 73U, 5U) != nullptr
+        || document->FindSequenceAutosave(81U, 83U, 6U) == nullptr
+        || document->TakeSequenceAutosave(71U, 73U, 5U).has_value()) {
         return false;
     }
     document->ClearSequenceAutosaves();
-    if (document->FindSequenceAutosave(71U, 73U, 5U) != nullptr) {
+    if (document->FindSequenceAutosave(71U, 73U, 5U) != nullptr
+        || document->FindSequenceAutosave(81U, 83U, 6U) != nullptr) {
+        return false;
+    }
+    inkpod::app::DocumentIdentity raster_identity{};
+    raster_identity.kind = inkpod::app::DocumentIdentityKind::NormalizedPath;
+    raster_identity.normalized_path = L"c:\\cells\\cell.png";
+    inkpod::app::SequenceFileBinding file_binding{};
+    file_binding.document_uuid_high = 71U;
+    file_binding.document_uuid_low = 73U;
+    file_binding.source_generation = 5U;
+    file_binding.raster_path = L"C:\\cells\\cell.png";
+    file_binding.raster_identity = raster_identity;
+    std::vector<inkpod::app::SequenceFileBinding> file_bindings;
+    file_bindings.push_back(std::move(file_binding));
+    inkpod::app::DocumentIdentity updated_raster_identity{};
+    updated_raster_identity.kind = inkpod::app::DocumentIdentityKind::NormalizedPath;
+    updated_raster_identity.normalized_path = L"c:\\cells\\saved.png";
+    if (!document->ReplaceSequenceFileBindings(std::move(file_bindings))
+        || !document->UpdateSequenceFileBinding(0U, 81U, 83U, 7U,
+            L"C:\\cells\\saved.png", updated_raster_identity)) {
+        return false;
+    }
+    const auto* updated_binding = document->SequenceFileBindingAt(0U);
+    if (updated_binding == nullptr || updated_binding->document_uuid_high != 81U
+        || updated_binding->document_uuid_low != 83U
+        || updated_binding->source_generation != 7U
+        || updated_binding->raster_path != L"C:\\cells\\saved.png"
+        || updated_binding->raster_identity != updated_raster_identity) {
+        return false;
+    }
+    inkpod::app::SequenceFileBinding published_binding{};
+    published_binding.document_uuid_high = 91U;
+    published_binding.document_uuid_low = 93U;
+    published_binding.source_generation = 9U;
+    published_binding.raster_path = L"C:\\cells\\published.png";
+    published_binding.raster_identity = updated_raster_identity;
+    if (!document->PublishSequenceFileBinding(
+            0U, std::move(published_binding))) {
+        return false;
+    }
+    updated_binding = document->SequenceFileBindingAt(0U);
+    if (updated_binding == nullptr
+        || updated_binding->document_uuid_high != 91U
+        || updated_binding->document_uuid_low != 93U
+        || updated_binding->source_generation != 9U
+        || updated_binding->raster_path != L"C:\\cells\\published.png") {
         return false;
     }
     if (registry.Replace({}, Generation{4U}, DocumentViewId{21U}, nullptr)
@@ -1048,6 +1555,10 @@ int main() {
     if (!TestDocumentIdentityAndIndex()) {
         std::cerr << "document identity/index test failed\n";
         return 3;
+    }
+    if (!TestRevertPairSequenceBindingPublication()) {
+        std::cerr << "Revert pair/sequence binding publication test failed\n";
+        return 11;
     }
     if (!TestRecentDocumentList()) {
         std::cerr << "recent document list test failed\n";

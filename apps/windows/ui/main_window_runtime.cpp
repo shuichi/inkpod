@@ -117,6 +117,7 @@ using inkpod::app::AnimationUiState;
 using inkpod::app::SequenceAutosaveBinding;
 using inkpod::app::SequenceCellSwitchPolicy;
 using inkpod::app::SequenceEndpointPolicy;
+using inkpod::app::SequenceFileBinding;
 using inkpod::app::SequenceSwitchAsyncResult;
 using inkpod::app::ApplicationHost;
 using inkpod::app::ApplicationSettings;
@@ -169,11 +170,13 @@ using inkpod::app::ChooseInkpodPath;
 using inkpod::app::ChooseOpenDocumentPath;
 using inkpod::app::CommonRasterFormatFromPath;
 using inkpod::app::PrivateRecoveryPath;
+using inkpod::app::PrivateRecoveryAttemptPath;
 using inkpod::app::RecoveryMetadata;
 using inkpod::app::BuildRecoveryMetadata;
 using inkpod::app::ClearPreviousDocumentPaths;
 using inkpod::app::OutputColorGuardProfileSetting;
 using inkpod::app::SequenceRecoveryPath;
+using inkpod::app::SequenceRecoveryAttemptPath;
 using inkpod::app::UntitledDocumentIdentity;
 using inkpod::app::WidePathToUtf8;
 using inkpod::windows::ui::ApplyCommandStates;
@@ -258,6 +261,7 @@ bool FileIoAccepted(InkpodStatus status) noexcept {
 
 bool FenceSequenceCanvases(ApplicationHost& state, DocumentSession& document,
     bool pending, std::uint64_t required_revision, std::uint64_t required_epoch) noexcept;
+void DrainSequenceNavigationQueue(ApplicationHost& state) noexcept;
 
 InkpodStatus QueueFileIoWork(
     ApplicationHost& state,
@@ -276,29 +280,37 @@ InkpodStatus QueueFileIoWork(
     try {
         auto smoke = std::make_shared<SmokeCompletion>();
         const auto workspace = request.context.workspace;
+        const bool best_effort_cleanup = request.best_effort_cleanup;
+        const bool retains_runtime_sequence =
+            (request.flags & INKPOD_IO_REVERT_CURRENT) != 0U;
         std::uint64_t request_id{};
         if (!state.file_io.Queue(*state.engine, std::move(request),
-                [&state, workspace, completion = std::move(completion), smoke](
+                [&state, workspace, best_effort_cleanup,
+                    retains_runtime_sequence,
+                    completion = std::move(completion), smoke](
                     inkpod::app::FileIoResult&& result) {
                     const InkpodStatus job_status = result.status;
                     if (result.document_applied
+                        && !retains_runtime_sequence
                         && (result.kind == INKPOD_IO_OPEN_NATIVE
                             || result.kind == INKPOD_IO_OPEN_RECOVERY
-                            || result.kind == INKPOD_IO_OPEN_RASTER)
+                            || result.kind == INKPOD_IO_OPEN_RASTER
+                            || result.kind == INKPOD_IO_OPEN_RASTER_PAIR)
                         && result.context.document_session.has_value()
                         && result.context.generation.has_value()) {
                         auto* document = state.Documents().Find(
                             result.context.document_session.value());
                         if (document != nullptr
                             && document->generation == result.context.generation.value()) {
-                            // Core has started an ordinary document incarnation
-                            // with epoch zero. Reconcile its session even when
-                            // Revert finishes after the user selected another tab,
-                            // or a later snapshot publication failed.
+                            // An ordinary replacement starts a document
+                            // incarnation at epoch zero. Revert retains the
+                            // runtime sequence and is reconciled by its
+                            // dedicated fresh-epoch completion below.
                             (void)FenceSequenceCanvases(state, *document, false, 0U, 0U);
                         }
                     }
-                    if (!result.error.empty() && state.engine != nullptr) {
+                    if (!best_effort_cleanup && !result.error.empty()
+                        && state.engine != nullptr) {
                         state.engine->SetLocalFailure(result.error);
                     }
                     InkpodStatus status = job_status;
@@ -313,13 +325,16 @@ InkpodStatus QueueFileIoWork(
                     smoke->finished = true;
                     auto* owner = workspace.has_value()
                         ? state.FindWorkspace(workspace.value()) : nullptr;
-                    if (!FileIoAccepted(status) && status != INKPOD_STATUS_CANCELLED
+                    if (!best_effort_cleanup && !FileIoAccepted(status)
+                        && status != INKPOD_STATUS_CANCELLED
                         && !state.lifetime.smoke_test && owner != nullptr) {
                         ShowCoreError(state, owner->windows.window, UiText(UiStringId::FileIoOperation));
                     }
+                    UpdateMenuState(state, false);
                 }, &request_id, std::move(preflight))) {
             return INKPOD_STATUS_INVALID_STATE;
         }
+        UpdateMenuState(state, false);
         if (out_request_id != nullptr) {
             *out_request_id = request_id;
         }
@@ -361,24 +376,159 @@ InkpodStatus RegisterPaletteColor(
     const CommandContext& context,
     const InkpodColorValue& color) noexcept;
 
+struct PublishedRecoverySnapshot final {
+    std::wstring path;
+    InkpodIoRecoveryArtifactProof proof{};
+    std::uint64_t generation{};
+    bool published{};
+};
+
+bool SameRecoveryArtifactProof(
+    const InkpodIoRecoveryArtifactProof& left,
+    const InkpodIoRecoveryArtifactProof& right) noexcept {
+    return std::memcmp(&left, &right, sizeof(left)) == 0;
+}
+
+bool CapturePublishedRecovery(
+    const DocumentShellState& shell,
+    PublishedRecoverySnapshot& output) noexcept {
+    output = {};
+    if (!shell.recovery_artifact_published) {
+        output.generation = shell.recovery_artifact_generation;
+        // A recovery opened from disk keeps its path as provenance but has no
+        // process-local proof. It may be superseded by a fresh append-only
+        // attempt; automatic cleanup must never remove the unproven path.
+        return true;
+    }
+    if (shell.recovery_path.empty()
+        || !inkpod::app::ValidRecoveryArtifactProof(
+            shell.recovery_artifact_proof)) {
+        return false;
+    }
+    try {
+        output.path = shell.recovery_path;
+        output.proof = shell.recovery_artifact_proof;
+        output.generation = shell.recovery_artifact_generation;
+        output.published = true;
+        return true;
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+}
+
+void ResetPublishedRecovery(DocumentShellState& shell) noexcept {
+    shell.recovery_path.clear();
+    shell.recovery_artifact_proof = {};
+    shell.recovery_artifact_generation = 0U;
+    shell.recovery_artifact_published = false;
+}
+
+void RetirePublishedRecovery(DocumentShellState& shell) noexcept {
+    shell.recovery_path.clear();
+    shell.recovery_artifact_proof = {};
+    shell.recovery_artifact_published = false;
+    if (shell.recovery_artifact_generation != UINT64_MAX) {
+        ++shell.recovery_artifact_generation;
+    }
+}
+
+bool TakePublishedRecovery(
+    DocumentShellState& shell,
+    PublishedRecoverySnapshot& output) noexcept {
+    output = {};
+    if (!shell.recovery_artifact_published) {
+        RetirePublishedRecovery(shell);
+        return true;
+    }
+    if (shell.recovery_path.empty()
+        || !inkpod::app::ValidRecoveryArtifactProof(
+            shell.recovery_artifact_proof)) {
+        return false;
+    }
+    output.path = std::move(shell.recovery_path);
+    output.proof = shell.recovery_artifact_proof;
+    output.generation = shell.recovery_artifact_generation;
+    output.published = true;
+    shell.recovery_artifact_proof = {};
+    shell.recovery_artifact_published = false;
+    if (shell.recovery_artifact_generation != UINT64_MAX) {
+        ++shell.recovery_artifact_generation;
+    }
+    return true;
+}
+
+bool SamePublishedRecovery(
+    const PublishedRecoverySnapshot& left,
+    const PublishedRecoverySnapshot& right) noexcept {
+    return left.published && right.published && left.path == right.path
+        && SameRecoveryArtifactProof(left.proof, right.proof);
+}
+
+bool PublishRecoveryAttempt(
+    DocumentShellState& shell,
+    std::uint64_t expected_generation,
+    std::wstring path,
+    const InkpodIoRecoveryArtifactProof& proof) noexcept {
+    if (path.empty() || expected_generation == UINT64_MAX
+        || shell.recovery_artifact_generation != expected_generation
+        || !inkpod::app::ValidRecoveryArtifactProof(proof)) {
+        return false;
+    }
+    shell.recovery_path = std::move(path);
+    shell.recovery_artifact_proof = proof;
+    shell.recovery_artifact_generation = expected_generation + 1U;
+    shell.recovery_artifact_published = true;
+    return true;
+}
+
 InkpodStatus QueueRecoveryDiscard(ApplicationHost& state, const CommandContext& context,
-    const std::wstring& path, SaveContinuation continuation = {}) noexcept {
+    const std::wstring& path, SaveContinuation continuation = {},
+    bool best_effort_cleanup = false,
+    const InkpodIoRecoveryArtifactProof* exact_proof = nullptr,
+    bool wait_for_smoke = true) noexcept {
     try {
         inkpod::app::FileIoRequest request{};
         request.context = context;
         request.kind = INKPOD_IO_RECOVERY_DISCARD;
+        request.best_effort_cleanup = best_effort_cleanup;
         request.paths.push_back(path);
+        if (exact_proof != nullptr) {
+            if (!inkpod::app::ValidRecoveryArtifactProof(*exact_proof)) {
+                return INKPOD_STATUS_INVALID_ARGUMENT;
+            }
+            request.discard_recovery_proof = *exact_proof;
+        }
         return QueueFileIoWork(state, std::move(request),
-            [continuation = std::move(continuation)](inkpod::app::FileIoResult&& result) {
+            [continuation = std::move(continuation), best_effort_cleanup](
+                inkpod::app::FileIoResult&& result) {
+                const InkpodStatus status = best_effort_cleanup
+                    ? INKPOD_STATUS_OK : result.status;
                 if (continuation) {
-                    continuation(result.status);
+                    continuation(status);
                 }
-                return result.status;
-            });
+                return status;
+            }, nullptr, {}, wait_for_smoke);
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
     }
 }
+
+void DiscardSequenceAutosaveArtifacts(
+    ApplicationHost& state,
+    const CommandContext& context,
+    std::vector<SequenceAutosaveBinding> bindings) noexcept;
+void AppendRecoveryCleanupArtifact(
+    std::vector<SequenceAutosaveBinding>& cleanup,
+    std::wstring path,
+    const InkpodIoRecoveryArtifactProof& proof) noexcept;
+void AppendRecoveryCleanupArtifact(
+    std::vector<inkpod::app::RecoveryCleanupEntry>& cleanup,
+    std::wstring path,
+    const InkpodIoRecoveryArtifactProof& proof) noexcept;
+void DiscardRecoveryArtifacts(
+    ApplicationHost& state,
+    const CommandContext& context,
+    std::vector<inkpod::app::RecoveryCleanupEntry> entries) noexcept;
 
 bool ArmCommandTimer(
     ApplicationHost& state,
@@ -538,7 +688,9 @@ bool BuildCellCreationDialogPreview(
 InkpodStatus QueueNativeSave(ApplicationHost& state, const CommandContext& context,
     const std::wstring& path, bool overwrite_confirmed,
     SaveContinuation continuation = {},
-    NativeSaveOverwritePolicy overwrite_policy = NativeSaveOverwritePolicy::Prompt) noexcept;
+    NativeSaveOverwritePolicy overwrite_policy = NativeSaveOverwritePolicy::Prompt,
+    std::wstring raster_path = {},
+    bool wait_for_smoke = true) noexcept;
 InkpodStatus SaveToPath(
     ApplicationHost& state, const std::wstring& path) noexcept;
 std::wstring Utf8UserText(const std::string& text);
@@ -6913,6 +7065,8 @@ CommandStateInputs BuildCommandStateInputs(
         && !document->shell.current_path.empty();
     inputs.document.dirty =
         has_document && (info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U;
+    inputs.document.file_io_pending = has_document
+        && state.file_io.HasPending(document->id, document->generation);
     InkpodShootingFrameInfo shooting_frame{};
     bool shooting_frame_present{};
     inputs.document.shooting_frame_present = has_document
@@ -9158,7 +9312,6 @@ InkpodStatus CreateCellsFromOptions(
     struct PendingIdentity final {
         std::uint64_t high{};
         std::uint64_t low{};
-        std::wstring recovery_path;
     };
     std::array<PendingIdentity, INKPOD_MAX_CELL_CREATION_COUNT> identities{};
     for (std::uint32_t index = 0U; index < count; ++index) {
@@ -9173,13 +9326,6 @@ InkpodStatus CreateCellsFromOptions(
             &identities[index].low,
             reinterpret_cast<const std::uint8_t*>(&uuid) + sizeof(std::uint64_t),
             sizeof(std::uint64_t));
-        if (!PrivateRecoveryPath(
-                identities[index].high,
-                identities[index].low,
-                identities[index].recovery_path)) {
-            release_plan();
-            return INKPOD_STATUS_IO_ERROR;
-        }
     }
 
     const std::uint32_t new_cell_raster_format =
@@ -9216,8 +9362,9 @@ InkpodStatus CreateCellsFromOptions(
         state.Document().untitled_number = state.IssueUntitledNumber();
         state.Document().shell.current_path.clear();
         state.Document().shell.source_path.clear();
-        state.Document().shell.recovery_path =
-            std::move(identities[0].recovery_path);
+        state.Document().shell.planned_native_path.clear();
+        state.Document().shell.pair_raster_path.clear();
+        ResetPublishedRecovery(state.Document().shell);
         state.Document().shell.recovery_original_path.clear();
         state.ActiveView().presentation.color_check_mode =
             INKPOD_COLOR_CHECK_OFF;
@@ -9335,8 +9482,9 @@ InkpodStatus CreateCellsFromOptions(
         document->untitled_number = state.IssueUntitledNumber();
         document->shell.current_path.clear();
         document->shell.source_path.clear();
-        document->shell.recovery_path =
-            std::move(identities[index].recovery_path);
+        document->shell.planned_native_path.clear();
+        document->shell.pair_raster_path.clear();
+        ResetPublishedRecovery(document->shell);
         document->shell.recovery_original_path.clear();
         view->presentation.color_check_mode = INKPOD_COLOR_CHECK_OFF;
         if (!state.RefreshEditorPresentation(
@@ -10726,27 +10874,156 @@ void RollbackNewDocumentTab(
     }
 }
 
-DocumentSession* FindOpenDocumentForFile(ApplicationHost& state,
-    const inkpod::app::FileIoItem& item, DocumentSessionId except = {}) noexcept {
-    auto* by_identity = state.Documents().FindByIdentity(item.identity);
+DocumentSession* FindOpenDocumentForIdentityOrPath(
+    ApplicationHost& state,
+    const DocumentIdentity& identity,
+    const std::wstring& normalized_path,
+    DocumentSessionId except = {},
+    bool* conflicting_owners = nullptr) noexcept {
+    if (conflicting_owners != nullptr) {
+        *conflicting_owners = false;
+    }
+    DocumentSession* owner{};
+    const auto merge_owner = [&owner, conflicting_owners](DocumentSession* candidate) {
+        if (candidate == nullptr) {
+            return;
+        }
+        if (owner != nullptr && owner != candidate) {
+            if (conflicting_owners != nullptr) {
+                *conflicting_owners = true;
+            }
+            return;
+        }
+        owner = candidate;
+    };
+    auto* by_identity = state.Documents().FindByIdentity(identity);
     if (by_identity != nullptr && by_identity->id != except) {
-        return by_identity;
+        merge_owner(by_identity);
     }
     for (std::size_t index = 0U; index < state.Documents().Count(); ++index) {
         auto* document = state.Documents().SessionAt(index);
-        if (document == nullptr || document->id == except) {
+        if (document == nullptr || document->id == except
+            || normalized_path.empty()) {
             continue;
         }
         for (const auto* path : {&document->shell.current_path, &document->shell.source_path,
+                &document->shell.planned_native_path, &document->shell.pair_raster_path,
                 &document->shell.recovery_original_path}) {
             std::wstring normalized;
             if (!path->empty() && inkpod::app::NormalizeDocumentFilePath(*path, normalized)
-                && normalized == item.normalized_path) {
-                return document;
+                && normalized == normalized_path) {
+                merge_owner(document);
+                break;
             }
         }
     }
-    return nullptr;
+    return owner;
+}
+
+DocumentSession* FindOpenDocumentForFile(ApplicationHost& state,
+    const inkpod::app::FileIoItem& item, DocumentSessionId except = {},
+    bool* conflicting_owners = nullptr) noexcept {
+    return FindOpenDocumentForIdentityOrPath(
+        state, item.identity, item.normalized_path, except, conflicting_owners);
+}
+
+struct OpenDocumentItems final {
+    const inkpod::app::FileIoItem* primary{};
+    const inkpod::app::FileIoItem* pair_raster{};
+    bool cut_descriptor{};
+};
+
+struct PreparedOpenNativeAuthority final {
+    std::wstring native_path;
+    std::wstring raster_path;
+    std::optional<SequenceFileBinding> active_sequence_binding;
+    std::vector<SequenceAutosaveBinding> recovery_cleanup;
+    std::uint64_t persistence_epoch{};
+    std::uint64_t sequence_revision{};
+    std::uint64_t sequence_owner_generation{};
+    std::uint64_t source_document_uuid_high{};
+    std::uint64_t source_document_uuid_low{};
+    std::uint64_t source_generation{};
+    std::uint64_t sequence_cell_count{};
+    std::uint64_t presentation_epoch{};
+    std::uint64_t previous_sequence_revision{};
+    std::uint64_t previous_sequence_epoch{};
+    std::uint32_t active_sequence_index{INKPOD_SEQUENCE_INDEX_NONE};
+    inkpod::app::IdentityReservationToken identity_reservation{};
+    bool has_sequence_catalog{};
+    bool has_active_sequence_source{};
+    bool has_active_sequence_recovery{};
+    bool document_applied{};
+};
+
+bool ResolveOpenDocumentItems(const inkpod::app::FileIoResult& result,
+    std::uint32_t kind, OpenDocumentItems& output) noexcept {
+    output = {};
+    const auto physical = [](const inkpod::app::FileIoItem& item) {
+        return !item.path.empty() && item.identity.kind
+            == inkpod::app::DocumentIdentityKind::WindowsFile;
+    };
+    const auto physical_or_missing = [](const inkpod::app::FileIoItem& item) {
+        return !item.path.empty()
+            && (item.identity.kind == inkpod::app::DocumentIdentityKind::WindowsFile
+                || item.identity.kind
+                    == inkpod::app::DocumentIdentityKind::NormalizedPath);
+    };
+    const bool cut_descriptor =
+        (result.progress.flags & INKPOD_IO_RESULT_CUT_DESCRIPTOR) != 0U;
+    if (kind == INKPOD_IO_OPEN_NATIVE) {
+        if (cut_descriptor) {
+            if (result.items.size() != 1U || !physical(result.items[0])) {
+                return false;
+            }
+            output.primary = &result.items[0];
+            output.cut_descriptor = true;
+            return true;
+        }
+        // Direct Cell open reports native first and its raster companion second.
+        if (result.items.size() != 2U || result.items[0].info.raster_format != 0U
+            || result.items[1].info.raster_format == 0U
+            || !physical(result.items[0]) || !physical_or_missing(result.items[1])) {
+            return false;
+        }
+        output.primary = &result.items[0];
+        output.pair_raster = &result.items[1];
+        return true;
+    }
+    if (cut_descriptor) {
+        return false;
+    }
+    if (kind == INKPOD_IO_OPEN_RASTER_PAIR) {
+        // Raster-driven open reports the opposite order: raster, then native.
+        if (result.items.size() != 2U || result.items[0].info.raster_format == 0U
+            || result.items[1].info.raster_format != 0U
+            || !physical(result.items[0]) || !physical_or_missing(result.items[1])) {
+            return false;
+        }
+        output.primary = &result.items[1];
+        output.pair_raster = &result.items[0];
+        return true;
+    }
+    if (result.items.empty() || result.items.front().path.empty()
+        || !result.items.front().identity) {
+        return false;
+    }
+    output.primary = &result.items.front();
+    return true;
+}
+
+bool IsExactLogicalPairDuplicate(
+    const DocumentSession& existing,
+    std::uint32_t kind,
+    const OpenDocumentItems& items) noexcept {
+    if ((kind != INKPOD_IO_OPEN_NATIVE
+            && kind != INKPOD_IO_OPEN_RASTER_PAIR)
+        || items.cut_descriptor || items.primary == nullptr
+        || items.pair_raster == nullptr) {
+        return false;
+    }
+    return existing.HasExactPairIdentities(
+        items.primary->identity, items.pair_raster->identity);
 }
 
 InkpodStatus QueueDocumentOpen(
@@ -10813,6 +11090,38 @@ InkpodStatus QueueDocumentOpen(
         request.context.document_session = binding.session;
         request.context.document_view = binding.view;
         request.context.generation = binding.generation;
+        const auto preflight = [&state, kind, binding](
+                                   const inkpod::app::FileIoResult& candidate) {
+            OpenDocumentItems items{};
+            if (!ResolveOpenDocumentItems(candidate, kind, items)) {
+                return INKPOD_STATUS_INVALID_STATE;
+            }
+            DocumentSession* duplicate{};
+            for (const auto& item : candidate.items) {
+                bool conflicting_owners{};
+                auto* owner = FindOpenDocumentForFile(
+                    state, item, binding.session, &conflicting_owners);
+                if (conflicting_owners
+                    || (owner != nullptr && duplicate != nullptr
+                        && owner != duplicate)) {
+                    return INKPOD_STATUS_FILE_CONFLICT;
+                }
+                if (owner != nullptr) {
+                    duplicate = owner;
+                }
+                if (state.file_io.ConflictsWithPendingAuthority(
+                        item, candidate.request_id)
+                    || state.Documents().HasIdentityReservation(
+                        item.identity, item.normalized_path, binding.session)) {
+                    return INKPOD_STATUS_FILE_CONFLICT;
+                }
+            }
+            if (duplicate != nullptr && !items.cut_descriptor
+                && !IsExactLogicalPairDuplicate(*duplicate, kind, items)) {
+                return INKPOD_STATUS_FILE_CONFLICT;
+            }
+            return INKPOD_STATUS_OK;
+        };
         const InkpodStatus queued = QueueFileIoWork(state, std::move(request),
             [&state, path, kind, binding, issued, workspace_id, workspace_generation, group, empty_bootstrap,
              original_identity = std::move(original_identity),
@@ -10834,17 +11143,21 @@ InkpodStatus QueueDocumentOpen(
                     }
                     return result.status == INKPOD_STATUS_OK ? INKPOD_STATUS_CANCELLED : result.status;
                 }
-                if (result.items.empty()) {
+                OpenDocumentItems open_items{};
+                if (!ResolveOpenDocumentItems(result, kind, open_items)) {
                     (void)state.DiscardPreparedDocumentSession(binding);
                     return INKPOD_STATUS_INVALID_STATE;
                 }
-                if (state.file_io.ConflictsWithPendingWrite(result.items.front())
-                    || state.Documents().HasIdentityReservation(
-                        result.items.front().identity, result.items.front().normalized_path)) {
-                    (void)state.DiscardPreparedDocumentSession(binding);
-                    return INKPOD_STATUS_FILE_CONFLICT;
+                for (const auto& item : result.items) {
+                    if (state.file_io.ConflictsWithPendingAuthority(
+                            item, result.request_id)
+                        || state.Documents().HasIdentityReservation(
+                            item.identity, item.normalized_path, binding.session)) {
+                        (void)state.DiscardPreparedDocumentSession(binding);
+                        return INKPOD_STATUS_FILE_CONFLICT;
+                    }
                 }
-                if ((result.progress.flags & INKPOD_IO_RESULT_CUT_DESCRIPTOR) != 0U) {
+                if (open_items.cut_descriptor) {
                     (void)state.DiscardPreparedDocumentSession(binding);
                     return state.ActivateWorkspaceWindow(workspace_id, false)
                         ? OpenCutDescriptor(state, path) : INKPOD_STATUS_CANCELLED;
@@ -10860,7 +11173,10 @@ InkpodStatus QueueDocumentOpen(
                     }
                 }
                 DocumentIdentity identity = original_identity
-                    ? std::move(original_identity) : std::move(result.items.front().identity);
+                    ? std::move(original_identity)
+                    : open_items.primary->identity;
+                DocumentIdentity pair_raster_identity = open_items.pair_raster != nullptr
+                    ? open_items.pair_raster->identity : DocumentIdentity{};
                 std::wstring normalized_original;
                 if ((!original_path.empty()
                         && !inkpod::app::NormalizeDocumentFilePath(original_path, normalized_original))
@@ -10868,39 +11184,73 @@ InkpodStatus QueueDocumentOpen(
                     (void)state.DiscardPreparedDocumentSession(binding);
                     return INKPOD_STATUS_FILE_CONFLICT;
                 }
-                auto* duplicate = state.Documents().FindByIdentity(identity);
-                if (duplicate == nullptr) {
-                    duplicate = FindOpenDocumentForFile(state, result.items.front());
-                }
-                if (const auto* existing = duplicate;
-                    existing != nullptr && existing->ActiveView() != nullptr) {
-                    const DocumentViewId existing_view = existing->ActiveView()->id;
+                bool conflicting_owners{};
+                DocumentSession* duplicate = FindOpenDocumentForIdentityOrPath(
+                    state, identity, normalized_original, binding.session,
+                    &conflicting_owners);
+                if (conflicting_owners) {
                     (void)state.DiscardPreparedDocumentSession(binding);
-                    if (kind == INKPOD_IO_OPEN_RECOVERY) {
+                    return INKPOD_STATUS_FILE_CONFLICT;
+                }
+                for (const auto& item : result.items) {
+                    bool item_conflicting_owners{};
+                    auto* owner = FindOpenDocumentForFile(
+                        state, item, binding.session, &item_conflicting_owners);
+                    if (item_conflicting_owners
+                        || (owner != nullptr && duplicate != nullptr
+                            && owner != duplicate)) {
+                        (void)state.DiscardPreparedDocumentSession(binding);
+                        return INKPOD_STATUS_FILE_CONFLICT;
+                    }
+                    if (owner != nullptr) {
+                        duplicate = owner;
+                    }
+                }
+                if (const auto* existing = duplicate; existing != nullptr) {
+                    (void)state.DiscardPreparedDocumentSession(binding);
+                    if (!IsExactLogicalPairDuplicate(
+                            *existing, kind, open_items)) {
                         state.engine->SetLocalFailure(UiText(UiStringId::Text0071));
+                        return INKPOD_STATUS_FILE_CONFLICT;
+                    }
+                    if (existing->ActiveView() == nullptr) {
                         return INKPOD_STATUS_INVALID_STATE;
                     }
+                    const DocumentViewId existing_view = existing->ActiveView()->id;
                     if (!ActivateDocumentTab(state, existing_view)) {
                         return INKPOD_STATUS_INVALID_STATE;
                     }
-                    (void)state.RecordRecentDocument(path, std::move(identity));
+                    (void)state.RecordRecentDocument(path, identity);
                     UpdateMenuState(state);
                     return INKPOD_STATUS_OK;
                 }
                 std::wstring current_path;
                 std::wstring source_path;
+                std::wstring planned_native_path;
+                std::wstring pair_raster_path;
                 std::wstring recovery_path;
                 try {
                     if (kind == INKPOD_IO_OPEN_NATIVE) {
-                        current_path = path;
+                        current_path = open_items.primary->path;
+                        pair_raster_path = open_items.pair_raster->path;
                     } else if (kind == INKPOD_IO_OPEN_RASTER) {
                         source_path = path;
+                    } else if (kind == INKPOD_IO_OPEN_RASTER_PAIR) {
+                        source_path = open_items.pair_raster->path;
+                        pair_raster_path = open_items.pair_raster->path;
+                        if (open_items.primary->identity.kind
+                            == inkpod::app::DocumentIdentityKind::WindowsFile) {
+                            current_path = open_items.primary->path;
+                        } else if (open_items.primary->identity.kind
+                            == inkpod::app::DocumentIdentityKind::NormalizedPath) {
+                            planned_native_path = open_items.primary->path;
+                        } else {
+                            (void)state.DiscardPreparedDocumentSession(binding);
+                            return INKPOD_STATUS_INVALID_STATE;
+                        }
                     }
                     if (kind == INKPOD_IO_OPEN_RECOVERY) {
                         recovery_path = path;
-                    } else if (!PrivateRecoveryPath(result.document.document_uuid_high,
-                                   result.document.document_uuid_low, recovery_path)) {
-                        recovery_path = path + L".recovery.inkpod";
                     }
                 } catch (const std::bad_alloc&) {
                     (void)state.DiscardPreparedDocumentSession(binding);
@@ -10914,12 +11264,20 @@ InkpodStatus QueueDocumentOpen(
                     return INKPOD_STATUS_INVALID_STATE;
                 }
                 auto* document = state.Documents().Find(binding.session);
-                if (document == nullptr || !state.Documents().AssignIdentity(binding.session, identity)) {
+                if (document == nullptr
+                    || !state.Documents().AssignPairIdentities(
+                        binding.session, identity, pair_raster_identity)) {
                     (void)state.CloseDocumentSession(binding.session);
                     return INKPOD_STATUS_INVALID_STATE;
                 }
                 document->shell.current_path = std::move(current_path);
                 document->shell.source_path = std::move(source_path);
+                document->shell.planned_native_path = std::move(planned_native_path);
+                document->shell.pair_raster_path = std::move(pair_raster_path);
+                ResetPublishedRecovery(document->shell);
+                // A recovery chosen from disk predates this process and has no
+                // runtime publication proof. Keep it only as user-visible
+                // provenance; automatic cleanup never treats it as owned.
                 document->shell.recovery_path = std::move(recovery_path);
                 document->shell.recovery_original_path = std::move(original_path);
                 document->untitled_number = 0U;
@@ -10936,9 +11294,10 @@ InkpodStatus QueueDocumentOpen(
                 ResetUiForNewActiveDocument(state);
                 const InkpodStatus fit = FitCanvas(state, INKPOD_VIEW_FIT);
                 if (kind != INKPOD_IO_OPEN_RECOVERY) {
-                    (void)state.RecordRecentDocument(path, std::move(identity));
+                    (void)state.RecordRecentDocument(path, identity);
                 }
-                if (kind == INKPOD_IO_OPEN_RASTER) {
+                if (kind == INKPOD_IO_OPEN_RASTER
+                    || kind == INKPOD_IO_OPEN_RASTER_PAIR) {
                     AttachFilePreviewSequence(state, path);
                 }
                 if (retain_focus) {
@@ -10946,7 +11305,7 @@ InkpodStatus QueueDocumentOpen(
                 }
                 UpdateMenuState(state);
                 return fit;
-            });
+            }, nullptr, preflight);
         if (!FileIoAccepted(queued)) {
             (void)state.DiscardPreparedDocumentSession(binding);
         }
@@ -11199,17 +11558,22 @@ InkpodStatus CommitLightTableSwap(ApplicationHost& state, const CommandContext& 
         return INKPOD_STATUS_CANCELLED;
     }
     auto* document = state.Documents().Find(context.document_session.value());
-    if (document == nullptr || document->generation != context.generation.value()) {
+    if (document == nullptr || document->generation != context.generation.value()
+        || document->persistence_epoch == UINT64_MAX
+        || document->sequence_catalog_intent_epoch == UINT64_MAX) {
         return INKPOD_STATUS_CANCELLED;
     }
-    std::wstring next_recovery_path;
-    if (!PrivateRecoveryPath(target.target_document_uuid_high,
-            target.target_document_uuid_low, next_recovery_path)) {
-        return INKPOD_STATUS_INVALID_STATE;
+    if (state.file_io.HasPending(document->id, document->generation)) {
+        return INKPOD_STATUS_PENDING;
     }
     const auto next_identity = inkpod::app::UntitledDocumentIdentity(
         target.target_document_uuid_high, target.target_document_uuid_low);
-    if (!state.Documents().ReserveIdentity(document->id, next_identity)) {
+    auto revoked_identity = next_identity;
+    std::vector<SequenceAutosaveBinding> recovery_cleanup;
+    recovery_cleanup.reserve(1U);
+    const auto identity_reservation =
+        state.Documents().ReserveIdentity(document->id, next_identity);
+    if (!identity_reservation) {
         return INKPOD_STATUS_FILE_CONFLICT;
     }
     InkpodDocumentInfo info{};
@@ -11227,15 +11591,41 @@ InkpodStatus CommitLightTableSwap(ApplicationHost& state, const CommandContext& 
             return mutation_status;
         }, true, true);
     if (mutation_status != INKPOD_STATUS_OK) {
-        state.Documents().CancelIdentityReservation(document->id);
+        (void)state.Documents().CancelIdentityReservation(
+            document->id, identity_reservation);
         return status;
     }
+    // The UI-thread synchronous swap has committed, and the preflight proved
+    // the monotonic counter can advance. Retire discoveries for the predecessor
+    // only on success so a rejected swap preserves its catalog atomically.
+    if (!document->AdvanceSequenceCatalogIntentEpoch()) {
+        (void)state.Documents().CancelIdentityReservation(
+            document->id, identity_reservation);
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    if (!document->AdvancePersistenceEpoch()) {
+        (void)state.Documents().CancelIdentityReservation(
+            document->id, identity_reservation);
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    PublishedRecoverySnapshot recovery{};
+    if (!TakePublishedRecovery(document->shell, recovery)) {
+        RetirePublishedRecovery(document->shell);
+    }
+    auto sequence_recoveries = document->TakeSequenceAutosaves();
     document->shell.current_path.clear();
     document->shell.source_path.clear();
+    document->shell.planned_native_path.clear();
+    document->shell.pair_raster_path.clear();
+    document->shell.pair_raster_format_hint = {};
     document->shell.recovery_original_path.clear();
-    document->shell.recovery_path = std::move(next_recovery_path);
-    if (!state.Documents().PublishReservedIdentity(document->id)) {
-        document->identity = next_identity;
+    document->ClearSequenceFileBindings();
+    if (!state.Documents().PublishReservedIdentity(
+            document->id, identity_reservation)) {
+        if (!state.Documents().ForceRevokeIdentity(
+                document->id, std::move(revoked_identity))) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
         return INKPOD_STATUS_INVALID_STATE;
     }
     if (status != INKPOD_STATUS_OK) {
@@ -11251,13 +11641,18 @@ InkpodStatus CommitLightTableSwap(ApplicationHost& state, const CommandContext& 
         RefreshLightTablePane(state);
         UpdateMenuState(state);
     }
+    if (recovery.published) {
+        AppendRecoveryCleanupArtifact(
+            recovery_cleanup, std::move(recovery.path), recovery.proof);
+    }
+    DiscardSequenceAutosaveArtifacts(
+        state, context, std::move(recovery_cleanup));
+    DiscardSequenceAutosaveArtifacts(
+        state, context, std::move(sequence_recoveries));
     return INKPOD_STATUS_OK;
 } catch (const std::bad_alloc&) {
-    const auto* document = context.document_session.has_value()
-        ? state.Documents().Find(context.document_session.value()) : nullptr;
-    if (document != nullptr && document->generation == context.generation) {
-        state.Documents().CancelIdentityReservation(document->id);
-    }
+    // All allocations are completed before the Core swap. The local exact
+    // reservation token is cancelled by the explicit failure paths above.
     return INKPOD_STATUS_INVALID_STATE;
 }
 InkpodStatus EditLightTableItemProperties(
@@ -11603,6 +11998,220 @@ InkpodStatus MoveLightTableFromCanvas(
     return status;
 }
 
+InkpodStatus PrepareSequenceFileBindings(
+    const inkpod::app::FileIoResult& result,
+    std::vector<SequenceFileBinding>& output) noexcept {
+    if (result.items.empty() || result.items.size() > 10'000U) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    try {
+        std::vector<SequenceFileBinding> bindings;
+        bindings.reserve(result.items.size());
+        for (const auto& item : result.items) {
+            if (item.info.raster_format == 0U
+                || (item.info.document_uuid_high == 0U
+                    && item.info.document_uuid_low == 0U)
+                || item.info.source_generation == 0U || item.path.empty()
+                || !item.identity) {
+                return INKPOD_STATUS_INVALID_STATE;
+            }
+            SequenceFileBinding binding{};
+            binding.document_uuid_high = item.info.document_uuid_high;
+            binding.document_uuid_low = item.info.document_uuid_low;
+            binding.source_generation = item.info.source_generation;
+            binding.raster_path = item.path;
+            binding.raster_identity = item.identity;
+            bindings.push_back(std::move(binding));
+        }
+        output = std::move(bindings);
+        return INKPOD_STATUS_OK;
+    } catch (const std::bad_alloc&) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+}
+
+void AppendRecoveryCleanupArtifact(
+    std::vector<SequenceAutosaveBinding>& cleanup,
+    std::wstring path,
+    const InkpodIoRecoveryArtifactProof& proof) noexcept {
+    if (path.empty() || !inkpod::app::ValidRecoveryArtifactProof(proof)
+        || cleanup.size() >= cleanup.capacity()) {
+        return;
+    }
+    if (std::any_of(cleanup.cbegin(), cleanup.cend(),
+            [&path, &proof](const auto& existing) {
+                return existing.recovery_path == path
+                    && SameRecoveryArtifactProof(
+                        existing.artifact_proof, proof);
+            })) {
+        return;
+    }
+    SequenceAutosaveBinding artifact{};
+    artifact.recovery_path = std::move(path);
+    artifact.artifact_proof = proof;
+    cleanup.push_back(std::move(artifact));
+}
+
+void AppendRecoveryCleanupArtifact(
+    std::vector<inkpod::app::RecoveryCleanupEntry>& cleanup,
+    std::wstring path,
+    const InkpodIoRecoveryArtifactProof& proof) noexcept {
+    if (path.empty() || !inkpod::app::ValidRecoveryArtifactProof(proof)
+        || cleanup.size() >= cleanup.capacity()) {
+        return;
+    }
+    if (std::any_of(cleanup.cbegin(), cleanup.cend(),
+            [&path, &proof](const auto& existing) {
+                return existing.path == path
+                    && SameRecoveryArtifactProof(existing.proof, proof);
+            })) {
+        return;
+    }
+    inkpod::app::RecoveryCleanupEntry artifact{};
+    artifact.path = std::move(path);
+    artifact.proof = proof;
+    cleanup.push_back(std::move(artifact));
+}
+
+struct SequenceAutosaveCleanup final {
+    ApplicationHost* state{};
+    CommandContext context;
+    std::vector<inkpod::app::RecoveryCleanupEntry> entries;
+    std::size_t next_entry{};
+    std::vector<SequenceAutosaveBinding> bindings;
+    std::size_t next{};
+    bool in_flight{};
+    bool finished{};
+};
+
+void QueueNextSequenceAutosaveCleanup(
+    const std::shared_ptr<SequenceAutosaveCleanup>& cleanup) noexcept {
+    if (cleanup == nullptr || cleanup->state == nullptr) {
+        return;
+    }
+    while (cleanup->next_entry < cleanup->entries.size()) {
+        const auto& entry = cleanup->entries[cleanup->next_entry];
+        if (!entry.path.empty()
+            && inkpod::app::ValidRecoveryArtifactProof(entry.proof)) {
+            const InkpodStatus queued = QueueRecoveryDiscard(
+                *cleanup->state, cleanup->context, entry.path,
+                [cleanup](InkpodStatus) {
+                    ++cleanup->next_entry;
+                    cleanup->in_flight = false;
+                    QueueNextSequenceAutosaveCleanup(cleanup);
+                }, true, &entry.proof, false);
+            if (FileIoAccepted(queued)) {
+                cleanup->in_flight = true;
+            }
+            return;
+        }
+        ++cleanup->next_entry;
+    }
+    while (cleanup->next < cleanup->bindings.size()) {
+        const auto& binding = cleanup->bindings[cleanup->next];
+        if (!binding.recovery_path.empty()
+            && inkpod::app::ValidRecoveryArtifactProof(
+                binding.artifact_proof)) {
+            break;
+        }
+        ++cleanup->next;
+    }
+    if (cleanup->next >= cleanup->bindings.size()) {
+        cleanup->finished = true;
+        return;
+    }
+    const auto& binding = cleanup->bindings[cleanup->next];
+    const InkpodStatus queued = QueueRecoveryDiscard(
+        *cleanup->state, cleanup->context, binding.recovery_path,
+        [cleanup](InkpodStatus) {
+            ++cleanup->next;
+            cleanup->in_flight = false;
+            QueueNextSequenceAutosaveCleanup(cleanup);
+        }, true, &binding.artifact_proof, false);
+    if (FileIoAccepted(queued)) {
+        cleanup->in_flight = true;
+        return;
+    }
+}
+
+void DrainRecoveryCleanupOwners(ApplicationHost& state) noexcept {
+    for (auto iterator = state.lifetime.recovery_cleanup_owners.begin();
+         iterator != state.lifetime.recovery_cleanup_owners.end();) {
+        auto cleanup = std::static_pointer_cast<SequenceAutosaveCleanup>(
+            *iterator);
+        if (cleanup == nullptr) {
+            iterator = state.lifetime.recovery_cleanup_owners.erase(iterator);
+            continue;
+        }
+        if (!cleanup->in_flight && !cleanup->finished) {
+            QueueNextSequenceAutosaveCleanup(cleanup);
+        }
+        if (cleanup->finished) {
+            iterator = state.lifetime.recovery_cleanup_owners.erase(iterator);
+        } else {
+            ++iterator;
+        }
+    }
+}
+
+void DiscardSequenceAutosaveArtifacts(
+    ApplicationHost& state,
+    const CommandContext& context,
+    std::vector<SequenceAutosaveBinding> bindings) noexcept {
+    if (bindings.empty()) {
+        return;
+    }
+    try {
+        auto cleanup = std::make_shared<SequenceAutosaveCleanup>();
+        cleanup->state = &state;
+        // Exact recovery discard is a manager-owned documentless operation;
+        // an empty context lets cleanup survive source session/window close.
+        cleanup->context = {};
+        cleanup->bindings = std::move(bindings);
+        state.lifetime.recovery_cleanup_owners.push_back(cleanup);
+        DrainRecoveryCleanupOwners(state);
+    } catch (const std::bad_alloc&) {
+        // Callers retain bindings until after their primary authority commit;
+        // allocation failure here leaves durable startup recovery candidates.
+    }
+    (void)context;
+}
+
+void DiscardRecoveryArtifacts(
+    ApplicationHost& state,
+    const CommandContext& context,
+    std::vector<inkpod::app::RecoveryCleanupEntry> entries) noexcept {
+    if (entries.empty()) {
+        return;
+    }
+    try {
+        auto cleanup = std::make_shared<SequenceAutosaveCleanup>();
+        cleanup->state = &state;
+        cleanup->context = {};
+        cleanup->entries = std::move(entries);
+        state.lifetime.recovery_cleanup_owners.push_back(cleanup);
+        DrainRecoveryCleanupOwners(state);
+    } catch (const std::bad_alloc&) {
+        // Durable artifacts remain startup recovery candidates.
+    }
+    (void)context;
+}
+
+bool DrainRecoveryCleanupsForShutdown(ApplicationHost& state) noexcept {
+    const ULONGLONG deadline = GetTickCount64() + 30'000U;
+    do {
+        state.file_io.Poll();
+        DrainRecoveryCleanupOwners(state);
+        if (state.lifetime.recovery_cleanup_owners.empty()
+            && !state.file_io.HasPending()) {
+            return true;
+        }
+        Sleep(1U);
+    } while (GetTickCount64() < deadline);
+    return state.lifetime.recovery_cleanup_owners.empty()
+        && !state.file_io.HasPending();
+}
+
 InkpodStatus ImportSequenceForContext(
     ApplicationHost& state,
     const std::vector<std::wstring>& paths,
@@ -11611,7 +12220,35 @@ InkpodStatus ImportSequenceForContext(
         || !context.generation.has_value()) {
         return INKPOD_STATUS_INVALID_ARGUMENT;
     }
+    auto* issued_document = state.Documents().Find(
+        context.document_session.value());
+    if (issued_document == nullptr
+        || issued_document->generation != context.generation.value()
+        || !issued_document->AdvanceSequenceCatalogIntentEpoch()) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const std::uint64_t intent_epoch =
+        issued_document->sequence_catalog_intent_epoch;
+    if (state.file_io.HasPending(
+            context.document_session.value(), context.generation.value())) {
+        try {
+            std::vector<std::wstring> deferred_paths = paths;
+            if (!state.file_io.WhenIdle(
+                    context,
+                    [&state, context,
+                        deferred_paths = std::move(deferred_paths)]() mutable {
+                        (void)ImportSequenceForContext(
+                            state, deferred_paths, context);
+                    })) {
+                return INKPOD_STATUS_INVALID_STATE;
+            }
+            return INKPOD_STATUS_PENDING;
+        } catch (const std::bad_alloc&) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+    }
     try {
+        auto bindings = std::make_shared<std::vector<SequenceFileBinding>>();
         inkpod::app::FileIoRequest request{};
         const auto session = context.document_session.value();
         const auto generation = context.generation.value();
@@ -11619,23 +12256,34 @@ InkpodStatus ImportSequenceForContext(
         request.kind = INKPOD_IO_SEQUENCE_FILES;
         request.paths = paths;
         return QueueFileIoWork(state, std::move(request),
-            [&state, session, generation](inkpod::app::FileIoResult&& result) {
+            [&state, session, generation, bindings, intent_epoch](
+                inkpod::app::FileIoResult&& result) {
                 if (result.status != INKPOD_STATUS_OK) {
                     return result.status;
                 }
                 auto* document = state.Documents().Find(session);
-                if (document == nullptr || document->generation != generation) {
+                if (document == nullptr || document->generation != generation
+                    || document->sequence_catalog_intent_epoch
+                        != intent_epoch) {
                     return INKPOD_STATUS_CANCELLED;
                 }
-                document->ClearSequenceAutosaves();
+                if (!document->ReplaceSequenceFileBindings(std::move(*bindings))) {
+                    return INKPOD_STATUS_INVALID_STATE;
+                }
+                auto retired = document->TakeSequenceAutosaves();
                 document->auto_sequence_truncated = false;
                 if (state.routing.targets.DocumentSession() == session
                     && state.routing.targets.CurrentGeneration() == generation) {
                     RefreshSequencePane(state);
                     UpdateMenuState(state);
                 }
+                DiscardSequenceAutosaveArtifacts(
+                    state, result.context, std::move(retired));
                 return INKPOD_STATUS_OK;
-            });
+            }, nullptr,
+            [bindings](const inkpod::app::FileIoResult& result) {
+                return PrepareSequenceFileBindings(result, *bindings);
+            }, !state.lifetime.smoke_async_sequence_import);
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
     }
@@ -11655,14 +12303,25 @@ void AttachFilePreviewSequence(
     if (state.engine == nullptr || opened_path.empty()) {
         return;
     }
+    const auto context = state.routing.targets.Capture();
+    auto* issued_document = context.document_session.has_value()
+        ? state.Documents().Find(context.document_session.value()) : nullptr;
+    if (issued_document == nullptr || !context.generation.has_value()
+        || issued_document->generation != context.generation.value()
+        || !issued_document->AdvanceSequenceCatalogIntentEpoch()) {
+        return;
+    }
+    const std::uint64_t intent_epoch =
+        issued_document->sequence_catalog_intent_epoch;
     try {
+        auto bindings = std::make_shared<std::vector<SequenceFileBinding>>();
         inkpod::app::FileIoRequest request{};
-        request.context = state.routing.targets.Capture();
+        request.context = context;
         request.kind = INKPOD_IO_SEQUENCE_AUTO;
         request.paths.push_back(opened_path);
-        const auto context = request.context;
         (void)QueueFileIoWork(state, std::move(request),
-            [&state, context](inkpod::app::FileIoResult&& result) {
+            [&state, context, bindings, intent_epoch](
+                inkpod::app::FileIoResult&& result) {
                 // Discovery or cache pressure never replaces or rolls back the
                 // single image which was already opened successfully. Core
                 // binds the sequence to that document without activating it.
@@ -11671,17 +12330,94 @@ void AttachFilePreviewSequence(
                 }
                 auto* document = context.document_session.has_value()
                     ? state.Documents().Find(context.document_session.value()) : nullptr;
-                if (document != nullptr && document->generation == context.generation) {
-                    document->ClearSequenceAutosaves();
-                    document->auto_sequence_truncated =
-                        (result.progress.flags & INKPOD_IO_RESULT_TRUNCATED) != 0U;
+                InkpodSequenceCatalogInfo applied_catalog{};
+                applied_catalog.struct_size = sizeof(applied_catalog);
+                if (document == nullptr || document->generation != context.generation
+                    || document->sequence_catalog_intent_epoch != intent_epoch
+                    || !state.engine->GetSequenceCatalog(
+                        document->id, document->generation, applied_catalog)
+                    || applied_catalog.cell_count != bindings->size()) {
+                    return INKPOD_STATUS_OK;
                 }
-                if (context.document_session == state.routing.targets.DocumentSession()
-                    && context.generation == state.routing.targets.CurrentGeneration()) {
-                    RefreshSequencePane(state);
-                    UpdateMenuState(state);
+                const bool truncated =
+                    (result.progress.flags & INKPOD_IO_RESULT_TRUNCATED) != 0U;
+                std::function<InkpodStatus()> publish =
+                    [&state, context, bindings, intent_epoch,
+                        expected_revision = applied_catalog.sequence_revision,
+                        expected_owner_generation = applied_catalog.owner_generation,
+                        truncated]() mutable {
+                    auto* document = context.document_session.has_value()
+                        ? state.Documents().Find(
+                            context.document_session.value()) : nullptr;
+                    InkpodSequenceCatalogInfo current_catalog{};
+                    current_catalog.struct_size = sizeof(current_catalog);
+                    if (document == nullptr
+                        || document->generation != context.generation
+                        || document->sequence_catalog_intent_epoch
+                            != intent_epoch
+                        || !state.engine->GetSequenceCatalog(
+                            document->id, document->generation,
+                            current_catalog)
+                        || current_catalog.sequence_revision
+                            != expected_revision
+                        || current_catalog.owner_generation
+                            != expected_owner_generation
+                        || current_catalog.cell_count != bindings->size()) {
+                        return INKPOD_STATUS_OK;
+                    }
+                    // Discovery may have decoded the pre-save raster while a
+                    // same-session pair Save atomically replaced it. If Save
+                    // published first, rebase only the active binding to that
+                    // already-proven pair identity before installing the late
+                    // catalog projection. External replacements never update
+                    // the session identity and therefore do not pass this gate.
+                    if (!document->shell.pair_raster_path.empty()
+                        && document->pair_raster_identity.kind
+                            == inkpod::app::DocumentIdentityKind::WindowsFile
+                        && current_catalog.active_index
+                            != INKPOD_SEQUENCE_INDEX_NONE
+                        && current_catalog.active_index < bindings->size()) {
+                        auto& active = (*bindings)[current_catalog.active_index];
+                        std::wstring binding_path;
+                        std::wstring shell_path;
+                        if (inkpod::app::NormalizeDocumentFilePath(
+                                active.raster_path, binding_path)
+                            && inkpod::app::NormalizeDocumentFilePath(
+                                document->shell.pair_raster_path, shell_path)
+                            && binding_path == shell_path) {
+                            active.raster_identity =
+                                document->pair_raster_identity;
+                        }
+                    }
+                    if (!document->ReplaceSequenceFileBindings(std::move(*bindings))) {
+                        return INKPOD_STATUS_INVALID_STATE;
+                    }
+                    auto retired = document->TakeSequenceAutosaves();
+                    document->auto_sequence_truncated = truncated;
+                    if (context.document_session
+                            == state.routing.targets.DocumentSession()
+                        && context.generation
+                            == state.routing.targets.CurrentGeneration()) {
+                        RefreshSequencePane(state);
+                        UpdateMenuState(state);
+                    }
+                    DiscardSequenceAutosaveArtifacts(
+                        state, context, std::move(retired));
+                    return INKPOD_STATUS_OK;
+                };
+                if (state.lifetime.smoke_test
+                    && state.lifetime.smoke_hold_sequence_auto_publication) {
+                    if (state.lifetime.smoke_deferred_sequence_auto_publication) {
+                        return INKPOD_STATUS_INVALID_STATE;
+                    }
+                    state.lifetime.smoke_deferred_sequence_auto_publication =
+                        std::move(publish);
+                    return INKPOD_STATUS_OK;
                 }
-                return INKPOD_STATUS_OK;
+                return publish();
+            }, nullptr,
+            [bindings](const inkpod::app::FileIoResult& result) {
+                return PrepareSequenceFileBindings(result, *bindings);
             });
     } catch (const std::bad_alloc&) {
         // The imported single image remains usable when optional discovery
@@ -11738,44 +12474,564 @@ InkpodStatus ExportSequenceToPath(
         return INKPOD_STATUS_INVALID_STATE;
     }
 }
+
+bool PairRasterSaveDestination(const DocumentShellState& shell,
+    const std::wstring& native_path, std::wstring& output) noexcept {
+    try {
+        output.clear();
+        if (shell.pair_raster_path.empty()) {
+            const wchar_t* extension = nullptr;
+            switch (shell.pair_raster_format_hint) {
+                case INKPOD_COMMON_RASTER_PNG: extension = L".png"; break;
+                case INKPOD_COMMON_RASTER_TIFF: extension = L".tif"; break;
+                case INKPOD_COMMON_RASTER_TGA: extension = L".tga"; break;
+                case INKPOD_COMMON_RASTER_BMP: extension = L".bmp"; break;
+                default: return true;
+            }
+            const std::size_t separator = native_path.find_last_of(L"\\/");
+            const std::size_t dot = native_path.find_last_of(L'.');
+            const std::size_t stem_end = dot != std::wstring::npos
+                    && (separator == std::wstring::npos || dot > separator)
+                ? dot : native_path.size();
+            output = native_path.substr(0U, stem_end) + extension;
+            return true;
+        }
+        const auto same_path = [&native_path](const std::wstring& authority) {
+            if (authority.empty()) {
+                return false;
+            }
+            if (authority == native_path) {
+                return true;
+            }
+            std::wstring normalized_native;
+            std::wstring normalized_authority;
+            return inkpod::app::NormalizeDocumentFilePath(
+                       native_path, normalized_native)
+                && inkpod::app::NormalizeDocumentFilePath(
+                    authority, normalized_authority)
+                && normalized_native == normalized_authority;
+        };
+        if (same_path(shell.current_path) || same_path(shell.planned_native_path)) {
+            output = shell.pair_raster_path;
+            return true;
+        }
+        const std::size_t raster_separator = shell.pair_raster_path.find_last_of(L"\\/");
+        const std::size_t raster_dot = shell.pair_raster_path.find_last_of(L'.');
+        const InkpodCommonRasterFormat raster_format =
+            CommonRasterFormatFromPath(shell.pair_raster_path);
+        if (raster_dot == std::wstring::npos
+            || (raster_separator != std::wstring::npos && raster_dot < raster_separator)
+            || raster_format == 0U) {
+            return false;
+        }
+        const std::size_t native_separator = native_path.find_last_of(L"\\/");
+        const std::size_t native_dot = native_path.find_last_of(L'.');
+        const std::size_t stem_end = native_dot != std::wstring::npos
+                && (native_separator == std::wstring::npos || native_dot > native_separator)
+            ? native_dot : native_path.size();
+        output = native_path.substr(0U, stem_end)
+            + (raster_format == INKPOD_COMMON_RASTER_TIFF
+                    ? L".tif" : shell.pair_raster_path.substr(raster_dot));
+        return true;
+    } catch (const std::bad_alloc&) {
+        output.clear();
+        return false;
+    }
+}
+
+struct SequenceSaveBindingTarget final {
+    bool bound{};
+    bool source_present{};
+    std::uint32_t index{};
+    std::uint64_t sequence_revision{};
+    std::uint64_t owner_generation{};
+    std::uint64_t document_uuid_high{};
+    std::uint64_t document_uuid_low{};
+    std::uint64_t source_generation{};
+    std::uint64_t source_document_revision{};
+    std::uint64_t source_editor_revision{};
+    std::uint64_t autosave_artifact_generation{};
+    std::wstring autosave_recovery_path;
+    InkpodIoRecoveryArtifactProof autosave_artifact_proof{};
+    bool autosave_artifact_published{};
+};
+
+bool CaptureSequenceSaveBindingTarget(ApplicationHost& state,
+    const DocumentSession& document, SequenceSaveBindingTarget& output) noexcept {
+    output = {};
+    InkpodSequenceCatalogInfo catalog{};
+    catalog.struct_size = sizeof(catalog);
+    if (state.engine == nullptr
+        || !state.engine->GetSequenceCatalog(
+            document.id, document.generation, catalog)) {
+        return false;
+    }
+    if (catalog.cell_count == 0U
+        || catalog.active_index == INKPOD_SEQUENCE_INDEX_NONE) {
+        return true;
+    }
+    InkpodSequenceActivationPlan plan{};
+    plan.struct_size = sizeof(plan);
+    const InkpodStatus status = state.engine->Invoke(
+        document.id, document.generation,
+        [&plan, index = catalog.active_index](InkpodCore* core) {
+            return inkpod_core_sequence_activation_resolve(core, index, &plan);
+        }, false, false);
+    if (status != INKPOD_STATUS_OK) {
+        return false;
+    }
+    if (plan.source_index == INKPOD_SEQUENCE_INDEX_NONE) {
+        return true;
+    }
+    if (plan.source_index != catalog.active_index
+        || (plan.source_document_uuid_high == 0U
+            && plan.source_document_uuid_low == 0U)
+        || plan.source_generation == 0U) {
+        return false;
+    }
+    output.source_present = true;
+    const auto* frontend_binding = document.SequenceFileBindingAt(
+        catalog.active_index);
+    if (frontend_binding == nullptr) {
+        // Core may have applied automatic discovery while its UI projection is
+        // deliberately delayed. The late publication validates the catalog
+        // revision and rebases the active raster to the saved pair identity;
+        // a normal Save must not synthesize one slot into an otherwise absent
+        // catalog vector after the durable Core commit.
+        return true;
+    }
+    if (frontend_binding->document_uuid_high
+            != plan.source_document_uuid_high
+        || frontend_binding->document_uuid_low
+            != plan.source_document_uuid_low
+        || frontend_binding->source_generation
+            != plan.source_generation) {
+        return false;
+    }
+    output.bound = true;
+    output.index = catalog.active_index;
+    output.sequence_revision = catalog.sequence_revision;
+    output.owner_generation = catalog.owner_generation;
+    output.document_uuid_high = plan.source_document_uuid_high;
+    output.document_uuid_low = plan.source_document_uuid_low;
+    output.source_generation = plan.source_generation;
+    output.source_document_revision = plan.source_document_revision;
+    output.source_editor_revision = plan.source_editor_revision;
+    if (const auto* autosave = document.FindSequenceAutosave(
+            plan.source_document_uuid_high,
+            plan.source_document_uuid_low,
+            plan.source_generation);
+        autosave != nullptr) {
+        output.autosave_artifact_generation = autosave->artifact_generation;
+        if (autosave->recovery_path.empty()
+            || !inkpod::app::ValidRecoveryArtifactProof(
+                autosave->artifact_proof)) {
+            return false;
+        }
+        try {
+            output.autosave_recovery_path = autosave->recovery_path;
+            output.autosave_artifact_proof = autosave->artifact_proof;
+            output.autosave_artifact_published = true;
+        } catch (const std::bad_alloc&) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool MatchesSequenceSaveBindingTarget(ApplicationHost& state,
+    const DocumentSession& document,
+    const SequenceSaveBindingTarget& expected) noexcept {
+    if (!expected.bound) {
+        return true;
+    }
+    InkpodSequenceCatalogInfo catalog{};
+    catalog.struct_size = sizeof(catalog);
+    if (state.engine == nullptr
+        || !state.engine->GetSequenceCatalog(
+            document.id, document.generation, catalog)
+        || catalog.sequence_revision != expected.sequence_revision
+        || catalog.owner_generation != expected.owner_generation
+        || catalog.active_index != expected.index) {
+        return false;
+    }
+    InkpodSequenceActivationPlan plan{};
+    plan.struct_size = sizeof(plan);
+    const InkpodStatus status = state.engine->Invoke(
+        document.id, document.generation,
+        [&plan, index = expected.index](InkpodCore* core) {
+            return inkpod_core_sequence_activation_resolve(core, index, &plan);
+        }, false, false);
+    return status == INKPOD_STATUS_OK
+        && plan.sequence_revision == expected.sequence_revision
+        && plan.source_index == expected.index
+        && plan.source_document_uuid_high == expected.document_uuid_high
+        && plan.source_document_uuid_low == expected.document_uuid_low
+        && plan.source_generation == expected.source_generation
+        && plan.source_document_revision == expected.source_document_revision
+        && plan.source_editor_revision == expected.source_editor_revision;
+}
+
+bool PrepareRevertSequenceAuthority(ApplicationHost& state,
+    const DocumentSession& document,
+    const inkpod::app::FileIoItem& pair_raster,
+    PreparedOpenNativeAuthority& prepared) noexcept {
+    InkpodSequenceCatalogInfo catalog{};
+    catalog.struct_size = sizeof(catalog);
+    if (state.engine == nullptr
+        || !state.engine->GetSequenceCatalog(
+            document.id, document.generation, catalog)) {
+        return false;
+    }
+    if (catalog.cell_count == 0U) {
+        return catalog.active_index == INKPOD_SEQUENCE_INDEX_NONE;
+    }
+    if (catalog.active_index == INKPOD_SEQUENCE_INDEX_NONE
+        || catalog.active_index >= catalog.cell_count) {
+        return false;
+    }
+
+    SequenceSaveBindingTarget target{};
+    if (!CaptureSequenceSaveBindingTarget(state, document, target)) {
+        return false;
+    }
+    prepared.has_sequence_catalog = true;
+    prepared.sequence_revision = catalog.sequence_revision;
+    prepared.sequence_owner_generation = catalog.owner_generation;
+    prepared.sequence_cell_count = catalog.cell_count;
+    prepared.active_sequence_index = catalog.active_index;
+    if (!target.source_present) {
+        return true;
+    }
+    // A Core source without the exact frontend stable-key binding cannot be
+    // repaired after adoption. Revert therefore fails before mutating Core
+    // instead of turning the retained sequence into a pathless catalog.
+    if (!target.bound || target.index != catalog.active_index
+        || target.sequence_revision != catalog.sequence_revision
+        || target.owner_generation != catalog.owner_generation) {
+        return false;
+    }
+    try {
+        SequenceFileBinding candidate{};
+        candidate.document_uuid_high = target.document_uuid_high;
+        candidate.document_uuid_low = target.document_uuid_low;
+        candidate.source_generation = target.source_generation;
+        candidate.raster_path = pair_raster.path;
+        candidate.raster_identity = pair_raster.identity;
+        prepared.active_sequence_binding = std::move(candidate);
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+    prepared.has_active_sequence_source = true;
+    prepared.source_document_uuid_high = target.document_uuid_high;
+    prepared.source_document_uuid_low = target.document_uuid_low;
+    prepared.source_generation = target.source_generation;
+    prepared.has_active_sequence_recovery =
+        target.autosave_artifact_published;
+    return true;
+}
+
+bool MatchesRetainedSequenceAfterRevert(ApplicationHost& state,
+    const DocumentSession& document,
+    const PreparedOpenNativeAuthority& prepared) noexcept {
+    InkpodSequenceCatalogInfo catalog{};
+    catalog.struct_size = sizeof(catalog);
+    if (state.engine == nullptr
+        || state.engine->Invoke(
+               document.id, document.generation,
+               [&catalog](InkpodCore* core) {
+                   return inkpod_core_sequence_catalog_get(core, &catalog);
+               }, false, false)
+            != INKPOD_STATUS_OK) {
+        return false;
+    }
+    if (!prepared.has_sequence_catalog) {
+        return catalog.cell_count == 0U
+            && catalog.active_index == INKPOD_SEQUENCE_INDEX_NONE;
+    }
+    if (catalog.cell_count != prepared.sequence_cell_count
+        || catalog.sequence_revision != prepared.sequence_revision
+        || catalog.active_index != prepared.active_sequence_index
+        || catalog.owner_generation == 0U
+        || catalog.owner_generation == prepared.sequence_owner_generation) {
+        return false;
+    }
+
+    InkpodSequenceActivationPlan plan{};
+    plan.struct_size = sizeof(plan);
+    const InkpodStatus status = state.engine->Invoke(
+        document.id, document.generation,
+        [&plan, index = prepared.active_sequence_index](InkpodCore* core) {
+            return inkpod_core_sequence_activation_resolve(core, index, &plan);
+        }, false, false);
+    if (status != INKPOD_STATUS_OK
+        || plan.sequence_revision != prepared.sequence_revision) {
+        return false;
+    }
+    if (!prepared.has_active_sequence_source) {
+        return plan.source_index == INKPOD_SEQUENCE_INDEX_NONE;
+    }
+    const auto* frontend_binding = document.SequenceFileBindingAt(
+        prepared.active_sequence_index);
+    return prepared.active_sequence_binding.has_value()
+        && plan.source_index == prepared.active_sequence_index
+        && plan.source_document_uuid_high
+            == prepared.source_document_uuid_high
+        && plan.source_document_uuid_low
+            == prepared.source_document_uuid_low
+        && plan.source_generation == prepared.source_generation
+        && frontend_binding != nullptr
+        && frontend_binding->document_uuid_high
+            == prepared.source_document_uuid_high
+        && frontend_binding->document_uuid_low
+            == prepared.source_document_uuid_low
+        && frontend_binding->source_generation == prepared.source_generation;
+}
+
+struct PreparedPairSaveAuthority final {
+    std::wstring native_path;
+    std::wstring raster_path;
+    std::wstring recent_path;
+    DocumentIdentity recent_identity;
+    DocumentIdentity previous_identity;
+    DocumentIdentity committed_native_identity;
+    DocumentIdentity committed_raster_identity;
+    DocumentIdentity repaired_native_identity;
+    DocumentIdentity repaired_raster_identity;
+    DocumentIdentity repaired_recent_identity;
+    DocumentIdentity repaired_binding_raster_identity;
+    DocumentIdentity revoked_identity;
+    DocumentIdentity previous_pair_identity;
+    std::optional<SequenceFileBinding> sequence_binding;
+    std::vector<SequenceAutosaveBinding> recovery_cleanup;
+    InkpodCommonRasterFormat raster_format{};
+    HANDLE smoke_raster_lock{INVALID_HANDLE_VALUE};
+    inkpod::app::IdentityReservationToken identity_reservation{};
+    bool sequence_binding_current{true};
+
+    ~PreparedPairSaveAuthority() {
+        if (smoke_raster_lock != INVALID_HANDLE_VALUE) {
+            CloseHandle(smoke_raster_lock);
+        }
+    }
+};
+
+bool RefreshPreparedRepairedIdentity(
+    DocumentIdentity& prepared,
+    const inkpod::app::FileIoItem& repaired) noexcept {
+    if (!repaired.identity
+        || (repaired.identity.kind
+                != inkpod::app::DocumentIdentityKind::WindowsFile
+            && repaired.identity.kind
+                != inkpod::app::DocumentIdentityKind::NormalizedPath)
+        || (repaired.identity.kind
+                == inkpod::app::DocumentIdentityKind::NormalizedPath
+            && prepared.normalized_path
+                != repaired.identity.normalized_path)) {
+        return false;
+    }
+    prepared.kind = repaired.identity.kind;
+    prepared.volume_serial = repaired.identity.volume_serial;
+    prepared.file_id = repaired.identity.file_id;
+    if (prepared.kind == inkpod::app::DocumentIdentityKind::WindowsFile) {
+        prepared.normalized_path.clear();
+    }
+    return true;
+}
+
 InkpodStatus QueueNativeSave(ApplicationHost& state, const CommandContext& context,
     const std::wstring& path, bool overwrite_confirmed,
-    SaveContinuation continuation, NativeSaveOverwritePolicy overwrite_policy) noexcept {
+    SaveContinuation continuation, NativeSaveOverwritePolicy overwrite_policy,
+    std::wstring raster_path, bool wait_for_smoke) noexcept {
     if (state.engine == nullptr || !context.document_session.has_value()
         || !context.generation.has_value()) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     auto* document = state.Documents().Find(context.document_session.value());
+    if (document != nullptr
+        && document->generation == context.generation.value()
+        && state.file_io.HasPending(
+            document->id, document->generation)) {
+        const std::uint64_t deferred_persistence_epoch =
+            document->persistence_epoch;
+        try {
+            std::wstring deferred_path = path;
+            if (!state.file_io.WhenIdle(
+                    context,
+                    [&state, context,
+                        deferred_path = std::move(deferred_path),
+                        raster_path = std::move(raster_path),
+                        continuation = std::move(continuation),
+                        overwrite_confirmed, overwrite_policy,
+                        wait_for_smoke,
+                        deferred_persistence_epoch]() mutable {
+                        const auto* current =
+                            context.document_session.has_value()
+                            ? state.Documents().Find(
+                                context.document_session.value())
+                            : nullptr;
+                        if (current == nullptr
+                            || current->generation != context.generation
+                            || current->persistence_epoch
+                                != deferred_persistence_epoch) {
+                            if (continuation) {
+                                continuation(INKPOD_STATUS_CANCELLED);
+                            }
+                            return;
+                        }
+                        (void)QueueNativeSave(
+                            state, context, deferred_path,
+                            overwrite_confirmed, std::move(continuation),
+                            overwrite_policy, std::move(raster_path),
+                            wait_for_smoke);
+                    })) {
+                return INKPOD_STATUS_INVALID_STATE;
+            }
+            return INKPOD_STATUS_PENDING;
+        } catch (const std::bad_alloc&) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+    }
     InkpodDocumentInfo info = EmptyDocumentInfo();
+    SequenceSaveBindingTarget sequence_binding_target{};
+    PublishedRecoverySnapshot shell_recovery{};
     if (document == nullptr || document->generation != context.generation.value()
-        || !state.engine->GetDocumentInfo(document->id, document->generation, info)) {
+        || document->persistence_epoch == UINT64_MAX
+        || !state.engine->GetDocumentInfo(document->id, document->generation, info)
+        || !CaptureSequenceSaveBindingTarget(
+            state, *document, sequence_binding_target)
+        || !CapturePublishedRecovery(document->shell, shell_recovery)) {
         return INKPOD_STATUS_INVALID_STATE;
     }
+    const std::uint64_t persistence_epoch = document->persistence_epoch;
     try {
-        std::wstring next_recovery;
-        if (!PrivateRecoveryPath(info.document_uuid_high, info.document_uuid_low, next_recovery)) {
-            next_recovery = path + L".recovery.inkpod";
-        }
+        auto prepared = std::make_shared<PreparedPairSaveAuthority>();
+        prepared->recovery_cleanup.reserve(3U);
+        prepared->revoked_identity =
+            inkpod::app::UntitledDocumentIdentity(
+                info.document_uuid_high, info.document_uuid_low);
         inkpod::app::FileIoRequest request{};
         request.context = context;
         request.kind = INKPOD_IO_SAVE_PAIR;
         request.flags = overwrite_confirmed ? INKPOD_IO_OVERWRITE_CONFIRMED : 0U;
+        request.smoke_fail_repaired_item_refresh =
+            state.lifetime.smoke_test
+            && state.lifetime.smoke_fail_repaired_item_refresh;
         request.paths.push_back(path);
+        if (!raster_path.empty()) {
+            request.paths.push_back(raster_path);
+        }
         return QueueFileIoWork(state, std::move(request),
-            [&state, context, path, display_path = path, next_recovery = std::move(next_recovery),
-             old_recovery = document->shell.recovery_path, overwrite_confirmed, overwrite_policy,
+            [&state, context, path, shell_recovery = std::move(shell_recovery),
+             overwrite_confirmed, overwrite_policy,
+             sequence_binding_target, prepared, wait_for_smoke,
+             persistence_epoch,
+             raster_path = std::move(raster_path),
              continuation = std::move(continuation)](inkpod::app::FileIoResult&& result) mutable {
                 auto* target = state.Documents().Find(context.document_session.value());
                 auto* workspace = context.workspace.has_value()
                     ? state.FindWorkspace(context.workspace.value()) : nullptr;
                 if (target == nullptr || target->generation != context.generation.value()) {
+                    if (target != nullptr && prepared->identity_reservation) {
+                        (void)state.Documents().CancelIdentityReservation(
+                            target->id, prepared->identity_reservation);
+                        prepared->identity_reservation = {};
+                    }
                     if (continuation) {
                         continuation(INKPOD_STATUS_CANCELLED);
                     }
                     return INKPOD_STATUS_CANCELLED;
                 }
-                if (result.status == INKPOD_STATUS_FILE_CONFLICT && !overwrite_confirmed
+                if ((result.authority_revoked || result.authority_repaired)
+                    && (target->persistence_epoch != persistence_epoch
+                        || !target->AdvancePersistenceEpoch())) {
+                    if (prepared->identity_reservation) {
+                        (void)state.Documents().CancelIdentityReservation(
+                            target->id, prepared->identity_reservation);
+                        prepared->identity_reservation = {};
+                    }
+                    if (continuation) {
+                        continuation(INKPOD_STATUS_INVALID_STATE);
+                    }
+                    return INKPOD_STATUS_INVALID_STATE;
+                }
+                const auto revoke_frontend_authority = [&]() noexcept {
+                    if (!state.Documents().ForceRevokeIdentity(
+                            target->id,
+                            std::move(prepared->revoked_identity))) {
+                        if (prepared->identity_reservation) {
+                            (void)state.Documents().CancelIdentityReservation(
+                                target->id, prepared->identity_reservation);
+                        }
+                        prepared->identity_reservation = {};
+                        return false;
+                    }
+                    prepared->identity_reservation = {};
+                    target->shell.current_path.clear();
+                    target->shell.source_path.clear();
+                    target->shell.planned_native_path.clear();
+                    target->shell.pair_raster_path.clear();
+                    target->shell.pair_raster_format_hint =
+                        prepared->raster_format;
+                    if (sequence_binding_target.bound
+                        && prepared->sequence_binding_current
+                        && MatchesSequenceSaveBindingTarget(
+                            state, *target, sequence_binding_target)) {
+                        const auto* binding = target->SequenceFileBindingAt(
+                            sequence_binding_target.index);
+                        const bool matching_binding = binding != nullptr
+                            && binding->document_uuid_high
+                                == sequence_binding_target.document_uuid_high
+                            && binding->document_uuid_low
+                                == sequence_binding_target.document_uuid_low
+                            && binding->source_generation
+                                == sequence_binding_target.source_generation;
+                        if (matching_binding
+                            && !target->RevokeSequenceFileBinding(
+                                sequence_binding_target.index,
+                                sequence_binding_target.document_uuid_high,
+                                sequence_binding_target.document_uuid_low,
+                                sequence_binding_target.source_generation)) {
+                            return false;
+                        }
+                    }
+                    if (target->untitled_number == 0U) {
+                        target->untitled_number = state.IssueUntitledNumber();
+                    }
+                    for (std::size_t index = 0U;
+                         index < state.RecentDocumentCount();) {
+                        const auto* recent = state.RecentDocumentAt(index);
+                        if (recent != nullptr
+                            && (recent->identity == prepared->previous_identity
+                                || (prepared->previous_pair_identity
+                                    && recent->identity
+                                        == prepared->previous_pair_identity))) {
+                            (void)state.RemoveRecentDocument(index);
+                        } else {
+                            ++index;
+                        }
+                    }
+                    UpdateMenuState(state);
+                    return true;
+                };
+                // Terminal authority outcomes are finalized before any generic
+                // overwrite policy. Re-queueing a revoked/repaired conflict
+                // would attach a second save to Core's already-finalized state.
+                if (result.status == INKPOD_STATUS_FILE_CONFLICT
+                    && !result.authority_revoked
+                    && !result.authority_repaired
+                    && !overwrite_confirmed
                     && overwrite_policy == NativeSaveOverwritePolicy::Prompt) {
+                    if (prepared->identity_reservation) {
+                        (void)state.Documents().CancelIdentityReservation(
+                            target->id, prepared->identity_reservation);
+                        prepared->identity_reservation = {};
+                    }
+                    if (state.lifetime.smoke_test
+                        && state.lifetime.smoke_pair_overwrite_prompt_count
+                            != UINT32_MAX) {
+                        ++state.lifetime.smoke_pair_overwrite_prompt_count;
+                    }
                     const int choice = state.lifetime.smoke_test ? IDYES
                         : (workspace == nullptr ? IDCANCEL : MessageBoxW(
                             workspace->windows.window,
@@ -11783,7 +13039,8 @@ InkpodStatus QueueNativeSave(ApplicationHost& state, const CommandContext& conte
                             MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2));
                     if (choice == IDYES) {
                         return QueueNativeSave(state, context, path, true,
-                            std::move(continuation), overwrite_policy);
+                            std::move(continuation), overwrite_policy,
+                            std::move(raster_path), wait_for_smoke);
                     }
                     if (continuation) {
                         continuation(INKPOD_STATUS_CANCELLED);
@@ -11791,36 +13048,233 @@ InkpodStatus QueueNativeSave(ApplicationHost& state, const CommandContext& conte
                     return INKPOD_STATUS_CANCELLED;
                 }
                 if (result.status != INKPOD_STATUS_OK) {
+                    if (result.authority_revoked) {
+                        if (!revoke_frontend_authority()) {
+                            if (continuation) {
+                                continuation(INKPOD_STATUS_INVALID_STATE);
+                            }
+                            return INKPOD_STATUS_INVALID_STATE;
+                        }
+                    } else if (result.authority_repaired) {
+                        const bool repaired_result_valid =
+                            prepared->identity_reservation
+                            && result.items.size() == 2U
+                            && result.items[0].path == prepared->native_path
+                            && result.items[1].path == prepared->raster_path
+                            && result.items[1].identity.kind
+                                == inkpod::app::DocumentIdentityKind::WindowsFile
+                            && RefreshPreparedRepairedIdentity(
+                                prepared->repaired_native_identity,
+                                result.items[0])
+                            && RefreshPreparedRepairedIdentity(
+                                prepared->repaired_raster_identity,
+                                result.items[1])
+                            && RefreshPreparedRepairedIdentity(
+                                prepared->repaired_recent_identity,
+                                result.items[0])
+                            && RefreshPreparedRepairedIdentity(
+                                prepared->repaired_binding_raster_identity,
+                                result.items[1]);
+                        if (!repaired_result_valid) {
+                            (void)revoke_frontend_authority();
+                            if (continuation) {
+                                continuation(INKPOD_STATUS_INVALID_STATE);
+                            }
+                            return INKPOD_STATUS_INVALID_STATE;
+                        }
+                        const bool pair_published =
+                            state.Documents().PublishRepairedReservedIdentityPair(
+                                target->id,
+                                prepared->identity_reservation,
+                                std::move(prepared->repaired_native_identity),
+                                std::move(prepared->repaired_raster_identity));
+                        prepared->identity_reservation = {};
+                        if (!pair_published) {
+                            (void)revoke_frontend_authority();
+                            if (continuation) {
+                                continuation(INKPOD_STATUS_INVALID_STATE);
+                            }
+                            return INKPOD_STATUS_INVALID_STATE;
+                        }
+                        if (prepared->sequence_binding.has_value()
+                            && prepared->sequence_binding_current
+                            && MatchesSequenceSaveBindingTarget(
+                                state, *target, sequence_binding_target)) {
+                            prepared->sequence_binding->raster_identity =
+                                std::move(
+                                    prepared->repaired_binding_raster_identity);
+                            if (!target->PublishSequenceFileBinding(
+                                    sequence_binding_target.index,
+                                    std::move(
+                                        prepared->sequence_binding.value()))
+                                && !target->RevokeSequenceFileBinding(
+                                    sequence_binding_target.index,
+                                    sequence_binding_target.document_uuid_high,
+                                    sequence_binding_target.document_uuid_low,
+                                    sequence_binding_target.source_generation)) {
+                                if (continuation) {
+                                    continuation(INKPOD_STATUS_INVALID_STATE);
+                                }
+                                return INKPOD_STATUS_INVALID_STATE;
+                            }
+                        }
+                        (void)state.RecordRecentDocumentReplacing(
+                            std::move(prepared->recent_path),
+                            std::move(prepared->repaired_recent_identity),
+                            prepared->previous_identity);
+                    }
+                    if (prepared->identity_reservation) {
+                        (void)state.Documents().CancelIdentityReservation(
+                            target->id, prepared->identity_reservation);
+                        prepared->identity_reservation = {};
+                    }
                     if (continuation) {
                         continuation(result.status);
                     }
                     return result.status;
                 }
-                if (result.items.empty()
-                    || !state.Documents().AssignIdentity(target->id, result.items.front().identity)) {
+                if (!result.document_applied || !prepared->identity_reservation) {
+                    if (prepared->identity_reservation) {
+                        (void)state.Documents().CancelIdentityReservation(
+                            target->id, prepared->identity_reservation);
+                        prepared->identity_reservation = {};
+                    }
                     if (continuation) {
                         continuation(INKPOD_STATUS_INVALID_STATE);
                     }
                     return INKPOD_STATUS_INVALID_STATE;
                 }
-                target->shell.current_path = std::move(display_path);
+                if (target->persistence_epoch != persistence_epoch
+                    || !target->AdvancePersistenceEpoch()) {
+                    (void)state.Documents().CancelIdentityReservation(
+                        target->id, prepared->identity_reservation);
+                    prepared->identity_reservation = {};
+                    if (continuation) {
+                        continuation(INKPOD_STATUS_INVALID_STATE);
+                    }
+                    return INKPOD_STATUS_INVALID_STATE;
+                }
+                // The first READY result advertised the stage replacement's
+                // future physical identities. Rust verifies the installed
+                // stamps against them before committing the Core savepoint, so
+                // publication is a no-allocation move of that exact reservation.
+                const bool pair_published =
+                    state.Documents().PublishPreparedIdentityPair(
+                        target->id,
+                        prepared->identity_reservation,
+                        std::move(prepared->committed_native_identity),
+                        std::move(prepared->committed_raster_identity));
+                prepared->identity_reservation = {};
+                if (!pair_published) {
+                    (void)revoke_frontend_authority();
+                    if (continuation) {
+                        continuation(INKPOD_STATUS_INVALID_STATE);
+                    }
+                    return INKPOD_STATUS_INVALID_STATE;
+                }
+                PublishedRecoverySnapshot completion_recovery{};
+                if (!TakePublishedRecovery(
+                        target->shell, completion_recovery)) {
+                    // The durable normal save remains successful. Drop an
+                    // internally malformed association rather than orphaning
+                    // it as if it still protected this clean document.
+                    RetirePublishedRecovery(target->shell);
+                }
+                target->shell.current_path = std::move(prepared->native_path);
                 target->shell.source_path.clear();
-                target->shell.recovery_path = std::move(next_recovery);
+                target->shell.planned_native_path.clear();
+                target->shell.pair_raster_path = std::move(prepared->raster_path);
+                target->shell.pair_raster_format_hint =
+                    prepared->raster_format;
                 target->shell.recovery_original_path.clear();
                 target->untitled_number = 0U;
-                (void)state.RecordRecentDocument(path, result.items.front().identity);
+                const bool binding_target_current = sequence_binding_target.bound
+                    && prepared->sequence_binding_current
+                    && MatchesSequenceSaveBindingTarget(
+                        state, *target, sequence_binding_target);
+                if (binding_target_current
+                    && prepared->sequence_binding.has_value()) {
+                    if (!target->PublishSequenceFileBinding(
+                            sequence_binding_target.index,
+                            std::move(prepared->sequence_binding.value()))
+                        && !target->RevokeSequenceFileBinding(
+                            sequence_binding_target.index,
+                            sequence_binding_target.document_uuid_high,
+                            sequence_binding_target.document_uuid_low,
+                            sequence_binding_target.source_generation)) {
+                        if (continuation) {
+                            continuation(INKPOD_STATUS_INVALID_STATE);
+                        }
+                        return INKPOD_STATUS_INVALID_STATE;
+                    }
+                }
+                bool removed_sequence_autosave{};
+                if (sequence_binding_target.autosave_artifact_generation != 0U) {
+                    removed_sequence_autosave = target->RemoveSequenceAutosave(
+                        sequence_binding_target.document_uuid_high,
+                        sequence_binding_target.document_uuid_low,
+                        sequence_binding_target.source_generation,
+                        sequence_binding_target.autosave_artifact_generation);
+                }
+                (void)state.RecordRecentDocumentReplacing(
+                    std::move(prepared->recent_path),
+                    std::move(prepared->recent_identity),
+                    prepared->previous_identity);
                 UpdateMenuState(state);
-                if (!old_recovery.empty()) {
-                    return QueueRecoveryDiscard(state, context, old_recovery, std::move(continuation));
+                const bool completion_matches_issued =
+                    SamePublishedRecovery(
+                        completion_recovery, shell_recovery);
+                if (shell_recovery.published) {
+                    AppendRecoveryCleanupArtifact(
+                        prepared->recovery_cleanup,
+                        std::move(shell_recovery.path),
+                        shell_recovery.proof);
+                }
+                if (completion_recovery.published
+                    && !completion_matches_issued) {
+                    AppendRecoveryCleanupArtifact(
+                        prepared->recovery_cleanup,
+                        std::move(completion_recovery.path),
+                        completion_recovery.proof);
+                }
+                if (removed_sequence_autosave
+                    && sequence_binding_target.autosave_artifact_published) {
+                    AppendRecoveryCleanupArtifact(
+                        prepared->recovery_cleanup,
+                        std::move(sequence_binding_target.autosave_recovery_path),
+                        sequence_binding_target.autosave_artifact_proof);
+                }
+                DiscardSequenceAutosaveArtifacts(
+                    state, context, std::move(prepared->recovery_cleanup));
+                // Register and start exact cleanup before a close-after-save
+                // continuation can retire the owning DocumentSession.
+                if (state.lifetime.smoke_test
+                    && state.lifetime.smoke_after_native_save_committed) {
+                    auto hook = std::move(
+                        state.lifetime.smoke_after_native_save_committed);
+                    hook();
                 }
                 if (continuation) {
                     continuation(INKPOD_STATUS_OK);
                 }
                 return INKPOD_STATUS_OK;
             }, nullptr,
-            [&state, context](const inkpod::app::FileIoResult& candidate) {
+            [&state, context, sequence_binding_target, prepared,
+                persistence_epoch](
+                const inkpod::app::FileIoResult& candidate) {
                 const auto* target = state.Documents().Find(context.document_session.value());
-                if (target == nullptr || target->generation != context.generation.value()) {
+                if (target == nullptr || target->generation != context.generation.value()
+                    || target->persistence_epoch != persistence_epoch
+                    || target->persistence_epoch == UINT64_MAX
+                    || candidate.items.size() != 2U
+                    || candidate.items[0].info.raster_format != 0U
+                    || candidate.items[1].info.raster_format == 0U
+                    || candidate.items[0].path.empty()
+                    || candidate.items[1].path.empty()
+                    || candidate.items[0].identity.kind
+                        != inkpod::app::DocumentIdentityKind::WindowsFile
+                    || candidate.items[1].identity.kind
+                        != inkpod::app::DocumentIdentityKind::WindowsFile) {
                     return INKPOD_STATUS_CANCELLED;
                 }
                 for (const auto& item : candidate.items) {
@@ -11832,19 +13286,104 @@ InkpodStatus QueueNativeSave(ApplicationHost& state, const CommandContext& conte
                         return INKPOD_STATUS_INVALID_STATE;
                     }
                 }
+                try {
+                    prepared->native_path = candidate.items[0].path;
+                    prepared->raster_path = candidate.items[1].path;
+                    prepared->recent_path = candidate.items[0].path;
+                    prepared->recent_identity = candidate.items[0].identity;
+                    prepared->raster_format =
+                        candidate.items[1].info.raster_format;
+                    prepared->previous_identity = target->identity;
+                    prepared->previous_pair_identity =
+                        target->pair_raster_identity;
+                    prepared->committed_native_identity =
+                        candidate.items[0].identity;
+                    prepared->committed_raster_identity =
+                        candidate.items[1].identity;
+                    prepared->repaired_native_identity =
+                        candidate.items[0].identity;
+                    prepared->repaired_native_identity.normalized_path =
+                        candidate.items[0].normalized_path;
+                    prepared->repaired_raster_identity =
+                        candidate.items[1].identity;
+                    prepared->repaired_raster_identity.normalized_path =
+                        candidate.items[1].normalized_path;
+                    prepared->repaired_recent_identity =
+                        candidate.items[0].identity;
+                    prepared->repaired_recent_identity.normalized_path =
+                        candidate.items[0].normalized_path;
+                    prepared->repaired_binding_raster_identity =
+                        candidate.items[1].identity;
+                    prepared->repaired_binding_raster_identity.normalized_path =
+                        candidate.items[1].normalized_path;
+                } catch (const std::bad_alloc&) {
+                    return INKPOD_STATUS_INVALID_STATE;
+                }
+                prepared->sequence_binding_current =
+                    MatchesSequenceSaveBindingTarget(
+                        state, *target, sequence_binding_target);
+                if (sequence_binding_target.bound
+                    && prepared->sequence_binding_current) {
+                    try {
+                        SequenceFileBinding binding{};
+                        binding.document_uuid_high =
+                            sequence_binding_target.document_uuid_high;
+                        binding.document_uuid_low =
+                            sequence_binding_target.document_uuid_low;
+                        binding.source_generation =
+                            sequence_binding_target.source_generation;
+                        binding.raster_path = prepared->raster_path;
+                        binding.raster_identity = candidate.items[1].identity;
+                        prepared->sequence_binding = std::move(binding);
+                    } catch (const std::bad_alloc&) {
+                        return INKPOD_STATUS_INVALID_STATE;
+                    }
+                }
+                prepared->identity_reservation =
+                    state.Documents().ReserveIdentityPair(
+                        target->id,
+                        candidate.items[0].identity,
+                        candidate.items[1].identity,
+                        prepared->native_path,
+                        prepared->raster_path);
+                if (!prepared->identity_reservation) {
+                    return INKPOD_STATUS_FILE_CONFLICT;
+                }
+                if (state.lifetime.smoke_test
+                    && state.lifetime.smoke_lock_pair_raster_during_install) {
+                    prepared->smoke_raster_lock = CreateFileW(
+                        prepared->raster_path.c_str(), GENERIC_READ,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE,
+                        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+                    if (prepared->smoke_raster_lock == INVALID_HANDLE_VALUE) {
+                        (void)state.Documents().CancelIdentityReservation(
+                            target->id, prepared->identity_reservation);
+                        prepared->identity_reservation = {};
+                        return INKPOD_STATUS_INVALID_STATE;
+                    }
+                }
                 return INKPOD_STATUS_OK;
-            });
+            }, wait_for_smoke);
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
     }
 }
 
 InkpodStatus SaveToPath(ApplicationHost& state, const std::wstring& path) noexcept {
-    return QueueNativeSave(state, state.routing.targets.Capture(), path, false);
+    std::wstring raster_path;
+    const DocumentSessionId session = state.routing.targets.DocumentSession();
+    const auto* target = session ? state.Documents().Find(session) : nullptr;
+    if (target == nullptr
+        || !PairRasterSaveDestination(target->shell, path, raster_path)) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    return QueueNativeSave(state, state.routing.targets.Capture(), path, false,
+        {}, NativeSaveOverwritePolicy::Prompt, std::move(raster_path));
 }
 
 InkpodStatus SaveDocumentForContext(ApplicationHost& state, const CommandContext& context,
-    bool force_dialog, SaveContinuation continuation = {}) noexcept {
+    bool force_dialog, SaveContinuation continuation = {},
+    bool wait_for_smoke = true) noexcept {
     try {
         const auto* target = context.document_session.has_value()
             ? state.Documents().Find(context.document_session.value()) : nullptr;
@@ -11854,7 +13393,13 @@ InkpodStatus SaveDocumentForContext(ApplicationHost& state, const CommandContext
             || target->generation != context.generation.value() || workspace == nullptr) {
             return INKPOD_STATUS_CANCELLED;
         }
-        std::wstring path = target->shell.current_path;
+        if (state.file_io.HasPending(target->id, target->generation)) {
+            // Reject before opening Save As. A later runtime check in
+            // QueueNativeSave covers work queued by the modal dialog itself.
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        std::wstring path = target->shell.current_path.empty() && !force_dialog
+            ? target->shell.planned_native_path : target->shell.current_path;
         if (force_dialog || path.empty()) {
             if (state.lifetime.smoke_test) {
                 path = state.lifetime.smoke_native_save_path;
@@ -11865,8 +13410,25 @@ InkpodStatus SaveDocumentForContext(ApplicationHost& state, const CommandContext
                 return INKPOD_STATUS_CANCELLED;
             }
         }
+        if (state.lifetime.smoke_test && force_dialog
+            && state.lifetime.smoke_after_native_save_path_selected) {
+            auto hook = std::move(
+                state.lifetime.smoke_after_native_save_path_selected);
+            hook();
+        }
+        if (state.file_io.HasPending(target->id, target->generation)) {
+            // A modal Save As dialog can dispatch a nested command. Do not
+            // hand an already-selected user destination to the internal
+            // deferred-save workflow when that happened.
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        std::wstring raster_path;
+        if (!PairRasterSaveDestination(target->shell, path, raster_path)) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
         return QueueNativeSave(state, context, path, false,
-            std::move(continuation));
+            std::move(continuation), NativeSaveOverwritePolicy::Prompt,
+            std::move(raster_path), wait_for_smoke);
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
     }
@@ -11978,33 +13540,188 @@ bool SameSequenceActivationTarget(
         && left.source_document_uuid_high == right.source_document_uuid_high
         && left.source_document_uuid_low == right.source_document_uuid_low
         && left.source_generation == right.source_generation
+        && left.source_document_revision == right.source_document_revision
+        && left.source_editor_revision == right.source_editor_revision
         && left.target_document_uuid_high == right.target_document_uuid_high
         && left.target_document_uuid_low == right.target_document_uuid_low
         && left.target_source_generation == right.target_source_generation
         && left.source_index == right.source_index && left.target_index == right.target_index;
 }
 
-bool ReserveSequenceTargetIdentity(ApplicationHost& state, DocumentSession& document,
-    const SequenceSwitchAsyncResult& result) noexcept {
-    try {
-        inkpod::app::FileIoItem candidate{};
-        candidate.identity = result.target_metadata.original_identity
-            ? result.target_metadata.original_identity
-            : inkpod::app::UntitledDocumentIdentity(
-                result.request.target_document_uuid_high, result.request.target_document_uuid_low);
-        for (const auto* path : {&result.target_metadata.original_path,
-                 &result.target_metadata.source_path}) {
-            candidate.normalized_path.clear();
-            if ((!path->empty()
-                    && !inkpod::app::NormalizeDocumentFilePath(*path, candidate.normalized_path))
-                || state.file_io.ConflictsWithPendingWrite(candidate)) {
-                return false;
-            }
+InkpodStatus ReserveResolvedSequencePairTarget(
+    ApplicationHost& state,
+    DocumentSessionId session,
+    Generation generation,
+    SequenceSwitchAsyncResult& target,
+    const inkpod::app::FileIoResult& prepared) noexcept {
+    auto* document = state.Documents().Find(session);
+    if (document == nullptr || document->generation != generation) {
+        return INKPOD_STATUS_CANCELLED;
+    }
+    const auto file_conflict = [&state](const char* stage) noexcept {
+        if (state.lifetime.smoke_test) {
+            std::fprintf(stderr,
+                "sequence pair reservation conflict: %s\n", stage);
         }
-        return state.Documents().ReserveIdentity(document.id, candidate.identity,
-            result.target_metadata.original_path, result.target_metadata.source_path);
+        return INKPOD_STATUS_FILE_CONFLICT;
+    };
+    if (target.target_artifact_published
+        && target.target_metadata.pair_proof.kind
+            == INKPOD_IO_RECOVERY_PAIR_NONE) {
+        if (!prepared.items.empty()) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        try {
+            inkpod::app::FileIoItem candidate{};
+            candidate.identity = target.target_metadata.original_identity
+                ? target.target_metadata.original_identity
+                : inkpod::app::UntitledDocumentIdentity(
+                    target.request.target_document_uuid_high,
+                    target.request.target_document_uuid_low);
+            for (const auto* path : {&target.target_metadata.original_path,
+                     &target.target_metadata.source_path}) {
+                candidate.normalized_path.clear();
+                if ((!path->empty()
+                        && !inkpod::app::NormalizeDocumentFilePath(
+                            *path, candidate.normalized_path))
+                    || state.file_io.ConflictsWithPendingWrite(
+                        candidate, prepared.request_id)) {
+                    return file_conflict("unpaired pending write");
+                }
+            }
+            const auto identity_reservation =
+                state.Documents().ReserveIdentity(document->id,
+                    candidate.identity, target.target_metadata.original_path,
+                    target.target_metadata.source_path);
+            if (!identity_reservation) {
+                return file_conflict("unpaired identity reservation");
+            }
+            target.identity_reservation_token = identity_reservation.value;
+            return INKPOD_STATUS_OK;
+        } catch (const std::bad_alloc&) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+    }
+    const std::uint32_t pair_kind = target.target_artifact_published
+        ? target.target_metadata.pair_proof.kind
+        : INKPOD_IO_RECOVERY_PAIR_NONE;
+    const bool repair_needed = pair_kind
+        == INKPOD_IO_RECOVERY_PAIR_REPAIR_NEEDED;
+    const auto raster_identity_kind = repair_needed
+        ? inkpod::app::DocumentIdentityKind::NormalizedPath
+        : inkpod::app::DocumentIdentityKind::WindowsFile;
+    const auto native_identity_kind = pair_kind
+            == INKPOD_IO_RECOVERY_PAIR_PLANNED
+        ? inkpod::app::DocumentIdentityKind::NormalizedPath
+        : inkpod::app::DocumentIdentityKind::WindowsFile;
+    if (prepared.items.size() != 2U
+        || prepared.items[0].info.raster_format == 0U
+        || prepared.items[1].info.raster_format != 0U
+        || prepared.items[0].path.empty() || prepared.items[1].path.empty()
+        || !prepared.items[0].identity || !prepared.items[1].identity
+        || prepared.items[0].identity.kind
+            != raster_identity_kind
+        || (target.target_artifact_published
+            ? prepared.items[1].identity.kind != native_identity_kind
+            : (prepared.items[1].identity.kind
+                    != inkpod::app::DocumentIdentityKind::WindowsFile
+                && prepared.items[1].identity.kind
+                    != inkpod::app::DocumentIdentityKind::NormalizedPath))) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    if (target.target_artifact_published
+        && (target.target_metadata.original_identity
+                != prepared.items[1].identity
+            || target.target_expected_raster_identity
+                != prepared.items[0].identity)) {
+        return file_conflict("recovery metadata identity");
+    }
+    if (target.target_artifact_published) {
+        const auto same_identity = [](const InkpodIoRecoveryArtifactStamp& proof,
+                                       const inkpod::app::FileIoItem& item) noexcept {
+            return proof.identity.kind == item.info.identity.kind
+                && proof.identity.volume == item.info.identity.volume
+                && proof.identity.object_high == item.info.identity.object_high
+                && proof.identity.object_low == item.info.identity.object_low;
+        };
+        const auto& pair_proof = target.target_metadata.pair_proof;
+        if (!same_identity(pair_proof.native, prepared.items[1])
+            || !same_identity(pair_proof.raster, prepared.items[0])) {
+            return file_conflict("recovery artifact stamp");
+        }
+    }
+    for (const auto& item : prepared.items) {
+        if (state.file_io.ConflictsWithPendingWrite(
+                item, prepared.request_id)) {
+            return file_conflict("pending write");
+        }
+        if (const auto* other = FindOpenDocumentForFile(
+                state, item, document->id);
+            other != nullptr) {
+            if (state.lifetime.smoke_test) {
+                std::fprintf(stderr,
+                    "sequence target owned by session: item=%ls owner=%llu "
+                    "switching=%llu current=%ls source=%ls planned=%ls "
+                    "raster=%ls recovery-original=%ls\n",
+                    item.path.c_str(),
+                    static_cast<unsigned long long>(other->id.Value()),
+                    static_cast<unsigned long long>(document->id.Value()),
+                    other->shell.current_path.c_str(),
+                    other->shell.source_path.c_str(),
+                    other->shell.planned_native_path.c_str(),
+                    other->shell.pair_raster_path.c_str(),
+                    other->shell.recovery_original_path.c_str());
+            }
+            return file_conflict("other document");
+        }
+    }
+    try {
+        std::wstring source_path = prepared.items[0].path;
+        std::wstring raster_path = prepared.items[0].path;
+        std::wstring native_path = prepared.items[1].path;
+        std::wstring binding_raster_path = prepared.items[0].path;
+        DocumentIdentity raster_identity = prepared.items[0].identity;
+        DocumentIdentity native_identity = prepared.items[1].identity;
+        const auto identity_reservation =
+            state.Documents().ReserveIdentityPair(
+                document->id,
+                native_identity,
+                raster_identity,
+                native_path,
+                raster_path);
+        if (!identity_reservation) {
+            return file_conflict("paired identity reservation");
+        }
+        target.target_source_path = std::move(source_path);
+        target.target_pair_raster_path = std::move(raster_path);
+        target.target_pair_native_path = std::move(native_path);
+        target.target_binding_raster_path =
+            std::move(binding_raster_path);
+        target.target_pair_raster_identity = std::move(raster_identity);
+        target.target_pair_native_identity = std::move(native_identity);
+        target.target_pair_native_exists =
+            prepared.items[1].identity.kind
+            == inkpod::app::DocumentIdentityKind::WindowsFile;
+        target.target_pair_resolved = true;
+        target.identity_reservation_token = identity_reservation.value;
+        if (state.lifetime.smoke_test
+            && state.lifetime.smoke_after_sequence_pair_reserved) {
+            state.lifetime.smoke_after_sequence_pair_reserved(
+                prepared.items[1].path,
+                prepared.items[0].path,
+                prepared.items[1].identity,
+                prepared.items[0].identity);
+        }
+        return INKPOD_STATUS_OK;
     } catch (const std::bad_alloc&) {
-        return false;
+        const inkpod::app::IdentityReservationToken token{
+            target.identity_reservation_token};
+        if (token) {
+            (void)state.Documents().CancelIdentityReservation(
+                document->id, token);
+            target.identity_reservation_token = 0U;
+        }
+        return INKPOD_STATUS_INVALID_STATE;
     }
 }
 
@@ -12016,20 +13733,149 @@ void CompleteSequenceSwitchAuthority(ApplicationHost& state,
         result.status = INKPOD_STATUS_CANCELLED;
         return;
     }
+    const auto cancel_target_reservation = [&state, document, &result]() noexcept {
+        const inkpod::app::IdentityReservationToken token{
+            result.identity_reservation_token};
+        if (token) {
+            (void)state.Documents().CancelIdentityReservation(
+                document->id, token);
+            result.identity_reservation_token = 0U;
+        }
+    };
     if (result.status != INKPOD_STATUS_OK) {
-        state.Documents().CancelIdentityReservation(document->id);
+        cancel_target_reservation();
+        document->CancelSequenceAutosaveReservation(
+            result.request.source_document_uuid_high,
+            result.request.source_document_uuid_low,
+            result.request.source_generation,
+            result.source_previous_artifact_generation);
+        if (result.source_autosaved) {
+            AppendRecoveryCleanupArtifact(
+                result.recovery_cleanup,
+                std::move(result.source_recovery_path),
+                result.source_artifact_proof);
+            DiscardRecoveryArtifacts(
+                state, result.context, std::move(result.recovery_cleanup));
+        }
         return;
+    }
+    if (document->persistence_epoch != result.source_persistence_epoch
+        || !document->AdvancePersistenceEpoch()) {
+        cancel_target_reservation();
+        document->CancelSequenceAutosaveReservation(
+            result.request.source_document_uuid_high,
+            result.request.source_document_uuid_low,
+            result.request.source_generation,
+            result.source_previous_artifact_generation);
+        if (result.source_autosaved) {
+            AppendRecoveryCleanupArtifact(
+                result.recovery_cleanup,
+                std::move(result.source_recovery_path),
+                result.source_artifact_proof);
+            DiscardRecoveryArtifacts(
+                state, result.context, std::move(result.recovery_cleanup));
+        }
+        result.status = INKPOD_STATUS_INVALID_STATE;
+        return;
+    }
+    // Every replacing route reserved its exact target before Core apply. A
+    // pair-backed sequence target must publish its logical identity and its
+    // refreshed slot binding together. Otherwise an externally replaced but
+    // coherent target would install new shell authority while retaining the
+    // discovery-time raster identity in SequenceFileBinding.
+    const inkpod::app::IdentityReservationToken identity_reservation{
+        result.identity_reservation_token};
+    bool pair_authority_published{};
+    bool authority_published{};
+    if (identity_reservation && result.target_pair_resolved) {
+        SequenceFileBinding binding{};
+        binding.document_uuid_high =
+            result.request.target_document_uuid_high;
+        binding.document_uuid_low =
+            result.request.target_document_uuid_low;
+        binding.source_generation =
+            result.request.target_source_generation;
+        binding.raster_path =
+            std::move(result.target_binding_raster_path);
+        binding.raster_identity =
+            std::move(result.target_pair_raster_identity);
+        authority_published = state.Documents()
+            .PublishReservedIdentityPairWithSequenceBinding(
+                document->id, identity_reservation,
+                result.request.target_index, std::move(binding));
+        pair_authority_published = authority_published;
+    } else if (identity_reservation) {
+        authority_published = state.Documents().PublishReservedIdentity(
+            document->id, identity_reservation);
+    }
+    if (!authority_published) {
+        // Core has already committed the target. Never leave its session
+        // attributed to the previous cell when the all-or-nothing frontend
+        // publication invariant is unexpectedly stale. These operations are
+        // allocation-free and close every active pair alias before returning
+        // the error; inactive recovery associations remain available.
+        if (identity_reservation) {
+            (void)state.Documents().CancelIdentityReservation(
+                document->id, identity_reservation);
+        }
+        (void)state.Documents().ForceRevokeIdentity(
+            document->id,
+            inkpod::app::UntitledDocumentIdentity(
+                result.request.target_document_uuid_high,
+                result.request.target_document_uuid_low));
+        if (!document->RevokeSequenceFileBinding(
+                result.request.target_index,
+                result.request.target_document_uuid_high,
+                result.request.target_document_uuid_low,
+                result.request.target_source_generation)) {
+            document->ClearSequenceFileBindings();
+        }
+        document->shell.current_path.clear();
+        document->shell.source_path.clear();
+        document->shell.planned_native_path.clear();
+        document->shell.pair_raster_path.clear();
+        document->shell.pair_raster_format_hint =
+            result.target_raster_format_hint;
+        document->shell.recovery_original_path.clear();
+        RetirePublishedRecovery(document->shell);
+        result.status = INKPOD_STATUS_INVALID_STATE;
+    }
+    result.identity_reservation_token = 0U;
+    PublishedRecoverySnapshot completion_source_recovery{};
+    if (!TakePublishedRecovery(
+            document->shell, completion_source_recovery)) {
+        RetirePublishedRecovery(document->shell);
     }
     // Core has committed. Publish only prepared values, even if its originating
     // view or HWND has closed; the remaining views still share this session.
-    document->shell.current_path.clear();
-    document->shell.source_path = std::move(result.target_metadata.source_path);
-    document->shell.recovery_original_path = std::move(result.target_metadata.original_path);
-    document->shell.recovery_path = std::move(result.next_recovery_path);
-    if (!state.Documents().PublishReservedIdentity(document->id)) {
-        document->identity = inkpod::app::UntitledDocumentIdentity(
-            result.request.target_document_uuid_high, result.request.target_document_uuid_low);
-        result.status = INKPOD_STATUS_INVALID_STATE;
+    if (authority_published) {
+        document->shell.current_path.clear();
+        document->shell.planned_native_path.clear();
+        document->shell.pair_raster_path.clear();
+        document->shell.pair_raster_format_hint =
+            result.target_raster_format_hint;
+    }
+    if (pair_authority_published) {
+        document->shell.source_path = std::move(result.target_source_path);
+        document->shell.pair_raster_path = std::move(result.target_pair_raster_path);
+        if (result.target_pair_native_exists) {
+            document->shell.current_path = std::move(result.target_pair_native_path);
+        } else {
+            document->shell.planned_native_path = std::move(result.target_pair_native_path);
+        }
+        document->shell.recovery_original_path.clear();
+    } else if (authority_published) {
+        document->shell.source_path = std::move(result.target_metadata.source_path);
+        document->shell.recovery_original_path = std::move(result.target_metadata.original_path);
+    }
+    if (authority_published && result.target_artifact_published) {
+        document->shell.recovery_path = std::move(result.target_recovery_path);
+        document->shell.recovery_artifact_proof = result.target_artifact_proof;
+        document->shell.recovery_artifact_generation =
+            result.target_artifact_generation;
+        document->shell.recovery_artifact_published = true;
+    } else if (authority_published) {
+        RetirePublishedRecovery(document->shell);
     }
     if (result.source_autosaved) {
         SequenceAutosaveBinding binding{};
@@ -12038,10 +13884,49 @@ void CompleteSequenceSwitchAuthority(ApplicationHost& state,
         binding.source_generation = result.request.source_generation;
         binding.recovery_path = std::move(result.source_recovery_path);
         binding.metadata = std::move(result.source_metadata);
-        if (!document->PublishReservedSequenceAutosave(std::move(binding))) {
+        binding.artifact_proof = result.source_artifact_proof;
+        binding.raster_format_hint = result.source_raster_format_hint;
+        if (!document->PublishReservedSequenceAutosave(
+                std::move(binding),
+                result.source_previous_artifact_generation)) {
             result.status = INKPOD_STATUS_INVALID_STATE;
+            return;
         }
+        if (result.source_previous_artifact_published) {
+            AppendRecoveryCleanupArtifact(
+                result.recovery_cleanup,
+                std::move(result.source_previous_recovery_path),
+                result.source_previous_artifact_proof);
+        }
+        if (result.source_shell_artifact_published) {
+            AppendRecoveryCleanupArtifact(
+                result.recovery_cleanup,
+                std::move(result.source_shell_recovery_path),
+                result.source_shell_artifact_proof);
+        }
+        if (completion_source_recovery.published) {
+            AppendRecoveryCleanupArtifact(
+                result.recovery_cleanup,
+                std::move(completion_source_recovery.path),
+                completion_source_recovery.proof);
+        }
+    } else if (completion_source_recovery.published
+        && (!result.source_shell_artifact_published
+            || completion_source_recovery.path
+                != result.source_shell_recovery_path
+            || !SameRecoveryArtifactProof(
+                completion_source_recovery.proof,
+                result.source_shell_artifact_proof))) {
+        // A generic autosave may finish after the switch was issued. It does
+        // not belong to the target document and must not become an orphaned
+        // startup candidate when the shell authority is replaced.
+        AppendRecoveryCleanupArtifact(
+            result.recovery_cleanup,
+            std::move(completion_source_recovery.path),
+            completion_source_recovery.proof);
     }
+    DiscardRecoveryArtifacts(
+        state, result.context, std::move(result.recovery_cleanup));
 }
 
 bool FenceSequenceCanvases(ApplicationHost& state, DocumentSession& document,
@@ -12064,6 +13949,434 @@ bool FenceSequenceCanvases(ApplicationHost& state, DocumentSession& document,
         }
     }
     return true;
+}
+
+inkpod::app::PostedNotificationToken ArmSequenceSwitchPending(
+    ApplicationHost& state,
+    const CommandContext& context,
+    DocumentSession& document) noexcept {
+    auto* workspace = context.workspace.has_value()
+        ? state.FindWorkspace(context.workspace.value()) : nullptr;
+    if (workspace == nullptr || !context.generation.has_value()
+        || state.routing.sequence_switch_pending_token.load(
+            std::memory_order_acquire) != 0U) {
+        return {};
+    }
+    const auto token = state.routing.tokens.IssueNotification(
+        context.generation.value());
+    if (!token || !FenceSequenceCanvases(state, document, true,
+            document.sequence_required_present_revision,
+            document.sequence_required_present_epoch)) {
+        return {};
+    }
+    std::uint64_t expected{};
+    if (!state.routing.sequence_switch_pending_token.compare_exchange_strong(
+            expected, token.value, std::memory_order_acq_rel)) {
+        (void)FenceSequenceCanvases(state, document, false,
+            document.sequence_required_present_revision,
+            document.sequence_required_present_epoch);
+        return {};
+    }
+    state.routing.sequence_navigation_pending = true;
+    workspace->animation.sequence_switch_pending = true;
+    PresentStatusBarPart(
+        workspace->windows.status_bar, 5U, UiText(UiStringId::Text0227));
+    UpdateMenuState(state);
+    return token;
+}
+
+void ReleaseSequenceSwitchPending(
+    ApplicationHost& state,
+    const CommandContext& context,
+    DocumentSession* document,
+    inkpod::app::PostedNotificationToken token,
+    bool drain_navigation) noexcept {
+    if (!token) {
+        return;
+    }
+    std::uint64_t expected = token.value;
+    if (!state.routing.sequence_switch_pending_token.compare_exchange_strong(
+            expected, 0U, std::memory_order_acq_rel)) {
+        return;
+    }
+    state.routing.sequence_navigation_pending = false;
+    if (document != nullptr) {
+        (void)FenceSequenceCanvases(state, *document, false,
+            document->sequence_required_present_revision,
+            document->sequence_required_present_epoch);
+    }
+    auto* workspace = context.workspace.has_value()
+        ? state.FindWorkspace(context.workspace.value()) : nullptr;
+    if (workspace != nullptr) {
+        workspace->animation.sequence_switch_pending = false;
+    }
+    UpdateMenuState(state);
+    if (drain_navigation) {
+        DrainSequenceNavigationQueue(state);
+    }
+}
+
+InkpodStatus ResolveSequenceReplacementRequest(
+    ApplicationHost& state,
+    const CommandContext& context,
+    const InkpodSequenceActivationPlan& expected,
+    InkpodSequenceSwitchRequest& request) noexcept {
+    if (state.engine == nullptr || !context.document_session.has_value()
+        || !context.generation.has_value()
+        || expected.result_class != INKPOD_SEQUENCE_ACTIVATION_REPLACE
+        || expected.source_index == INKPOD_SEQUENCE_INDEX_NONE) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    request = {};
+    request.struct_size = sizeof(request);
+    return state.engine->Invoke(
+        context.document_session.value(),
+        context.generation.value(),
+        [&expected, &request](InkpodCore* core) {
+            InkpodSequenceActivationPlan current{};
+            current.struct_size = sizeof(current);
+            InkpodStatus status = inkpod_core_sequence_activation_resolve(
+                core, expected.target_index, &current);
+            if (status != INKPOD_STATUS_OK
+                || !SameSequenceActivationTarget(expected, current)) {
+                return status == INKPOD_STATUS_OK
+                    ? INKPOD_STATUS_INVALID_STATE : status;
+            }
+            status = inkpod_core_sequence_switch_request(
+                core,
+                current.target_index,
+                INKPOD_SEQUENCE_SWITCH_AUTOSAVE,
+                &request);
+            if (status != INKPOD_STATUS_OK) {
+                return status;
+            }
+            return request.policy == INKPOD_SEQUENCE_SWITCH_AUTOSAVE
+                    && request.feature_flags == current.feature_flags
+                    && request.source_document_uuid_high
+                        == current.source_document_uuid_high
+                    && request.source_document_uuid_low
+                        == current.source_document_uuid_low
+                    && request.source_generation == current.source_generation
+                    && request.source_document_revision
+                        == current.source_document_revision
+                    && request.source_editor_revision == current.source_editor_revision
+                    && request.target_document_uuid_high
+                        == current.target_document_uuid_high
+                    && request.target_document_uuid_low
+                        == current.target_document_uuid_low
+                    && request.target_source_generation
+                        == current.target_source_generation
+                    && request.target_index == current.target_index
+                ? INKPOD_STATUS_OK : INKPOD_STATUS_INVALID_STATE;
+        },
+        false,
+        false);
+}
+
+InkpodStatus QueueResolvedSequenceReplacement(
+    ApplicationHost& state,
+    const CommandContext& context,
+    DocumentSession& document,
+    InkpodSequenceSwitchRequest request,
+    inkpod::app::PostedNotificationToken inherited_token = {}) noexcept {
+    struct InheritedPendingGuard final {
+        ApplicationHost& state;
+        const CommandContext& context;
+        DocumentSession& document;
+        inkpod::app::PostedNotificationToken token;
+        bool active{};
+
+        ~InheritedPendingGuard() {
+            if (active) {
+                ReleaseSequenceSwitchPending(
+                    state, context, &document, token, true);
+            }
+        }
+    } inherited_guard{state, context, document, inherited_token,
+        static_cast<bool>(inherited_token)};
+    if (inherited_token
+        && (state.routing.sequence_switch_pending_token.load(
+                std::memory_order_acquire) != inherited_token.value
+            || !state.routing.sequence_navigation_pending
+            || !document.sequence_activation_pending)) {
+        return INKPOD_STATUS_CANCELLED;
+    }
+    if ((request.flags & INKPOD_SEQUENCE_SWITCH_REQUIRED) == 0U
+        || request.target_index == INKPOD_SEQUENCE_INDEX_NONE) {
+        return INKPOD_STATUS_INVALID_ARGUMENT;
+    }
+    if (document.persistence_epoch == UINT64_MAX) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const SequenceAutosaveBinding* target_recovery =
+        document.FindSequenceAutosave(
+            request.target_document_uuid_high,
+            request.target_document_uuid_low,
+            request.target_source_generation);
+    const SequenceFileBinding* target_file =
+        document.SequenceFileBindingAt(request.target_index);
+    const bool has_target_recovery = target_recovery != nullptr;
+    const bool target_requires_pair = !has_target_recovery
+        || target_recovery->metadata.pair_proof.kind
+            != INKPOD_IO_RECOVERY_PAIR_NONE;
+    if (target_requires_pair && (target_file == nullptr
+        || target_file->document_uuid_high
+            != request.target_document_uuid_high
+        || target_file->document_uuid_low != request.target_document_uuid_low
+        || target_file->source_generation != request.target_source_generation)) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    if (has_target_recovery
+        && (target_recovery->recovery_path.empty()
+            || target_recovery->artifact_generation == 0U
+            || !inkpod::app::ValidRecoveryArtifactProof(
+                target_recovery->artifact_proof))) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    InkpodIoRecoveryArtifactProof target_recovery_proof{};
+    // Core owns the preservation baseline for the live document/editor/history.
+    // The issue-time flag covers dirty state, RepairNeeded, RECOVERED, and clean
+    // cursor/redo-tail changes which cannot be inferred from shell authority.
+    const bool source_recovery_required =
+        (request.flags
+            & INKPOD_SEQUENCE_SWITCH_SOURCE_RECOVERY_REQUIRED) != 0U;
+    struct SourceAutosaveReservationGuard final {
+        DocumentSession& document;
+        const InkpodSequenceSwitchRequest& request;
+        std::uint64_t expected_generation{};
+        bool active{};
+        ~SourceAutosaveReservationGuard() {
+            if (active) {
+                document.CancelSequenceAutosaveReservation(
+                    request.source_document_uuid_high,
+                    request.source_document_uuid_low,
+                    request.source_generation,
+                    expected_generation);
+            }
+        }
+    } source_reservation{document, request};
+    std::shared_ptr<SequenceSwitchAsyncResult> result;
+    try {
+        result = std::make_shared<SequenceSwitchAsyncResult>();
+        result->recovery_cleanup.reserve(4U);
+        result->context = context;
+        result->request = request;
+        result->source_persistence_epoch = document.persistence_epoch;
+        result->source_raster_format_hint =
+            document.shell.pair_raster_path.empty()
+            ? document.shell.pair_raster_format_hint
+            : CommonRasterFormatFromPath(document.shell.pair_raster_path);
+        PublishedRecoverySnapshot shell_recovery{};
+        if (!CapturePublishedRecovery(document.shell, shell_recovery)) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        result->source_shell_recovery_path = std::move(shell_recovery.path);
+        result->source_shell_artifact_proof = shell_recovery.proof;
+        result->source_shell_artifact_generation = shell_recovery.generation;
+        result->source_shell_artifact_published = shell_recovery.published;
+        if (has_target_recovery) {
+            result->target_recovery_path = target_recovery->recovery_path;
+            result->target_metadata = target_recovery->metadata;
+            result->target_raster_format_hint =
+                target_recovery->raster_format_hint;
+            if (target_requires_pair) {
+                result->target_expected_raster_identity =
+                    target_file->raster_identity;
+            }
+            target_recovery_proof = target_recovery->artifact_proof;
+            result->target_artifact_proof = target_recovery->artifact_proof;
+            result->target_artifact_generation =
+                target_recovery->artifact_generation;
+            result->target_artifact_published = true;
+        } else {
+            result->target_pair_raster_path = target_file->raster_path;
+            result->target_raster_format_hint =
+                CommonRasterFormatFromPath(target_file->raster_path);
+        }
+        if (source_recovery_required) {
+            if (const auto* previous = document.FindSequenceAutosave(
+                    request.source_document_uuid_high,
+                    request.source_document_uuid_low,
+                    request.source_generation);
+                previous != nullptr) {
+                if (previous->recovery_path.empty()
+                    || !inkpod::app::ValidRecoveryArtifactProof(
+                        previous->artifact_proof)) {
+                    return INKPOD_STATUS_INVALID_STATE;
+                }
+                result->source_previous_recovery_path = previous->recovery_path;
+                result->source_previous_artifact_proof =
+                    previous->artifact_proof;
+                result->source_previous_artifact_generation =
+                    previous->artifact_generation;
+                result->source_previous_artifact_published = true;
+            }
+            source_reservation.expected_generation =
+                result->source_previous_artifact_generation;
+            const auto& original_path = !document.shell.current_path.empty()
+                ? document.shell.current_path
+                : !document.shell.planned_native_path.empty()
+                ? document.shell.planned_native_path
+                : document.shell.recovery_original_path;
+            const auto& source_path = !document.shell.pair_raster_path.empty()
+                ? document.shell.pair_raster_path : document.shell.source_path;
+            if (!SequenceRecoveryAttemptPath(
+                    request.source_document_uuid_high,
+                    request.source_document_uuid_low,
+                    request.source_generation,
+                    result->source_recovery_path)
+                || !BuildRecoveryMetadata(
+                    document.id,
+                    document.generation,
+                    document.identity,
+                    request.source_document_uuid_high,
+                    request.source_document_uuid_low,
+                    original_path,
+                    source_path,
+                    result->source_metadata)
+                || !document.ReserveSequenceAutosave(
+                    request.source_document_uuid_high,
+                    request.source_document_uuid_low,
+                    request.source_generation,
+                    source_reservation.expected_generation)) {
+                return INKPOD_STATUS_INVALID_STATE;
+            }
+            source_reservation.active = true;
+        }
+    } catch (const std::bad_alloc&) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+
+    inkpod::app::FileIoRequest io_request{};
+    try {
+        io_request.context = context;
+        io_request.kind = INKPOD_IO_SEQUENCE_SWITCH;
+        io_request.sequence_switch = request;
+        io_request.sequence_target_raster_pair = !has_target_recovery;
+        if (has_target_recovery) {
+            io_request.target_recovery_proof = target_recovery_proof;
+        }
+        io_request.paths = {
+            result->source_recovery_path,
+            has_target_recovery
+                ? result->target_recovery_path : result->target_pair_raster_path};
+        io_request.publish_snapshot = true;
+        if (source_recovery_required) {
+            io_request.recovery_metadata = result->source_metadata;
+        }
+    } catch (const std::bad_alloc&) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    auto* workspace = context.workspace.has_value()
+        ? state.FindWorkspace(context.workspace.value()) : nullptr;
+    if (workspace == nullptr) {
+        return INKPOD_STATUS_CANCELLED;
+    }
+    result->token = inherited_token ? inherited_token
+        : state.routing.tokens.IssueNotification(
+            state.routing.targets.CurrentGeneration());
+    result->replace_document = true;
+    io_request.presentation_epoch = result->token.value;
+    if (!inherited_token) {
+        if (!FenceSequenceCanvases(state, document, true,
+                document.sequence_required_present_revision,
+                document.sequence_required_present_epoch)) {
+            state.routing.sequence_navigation_pending = false;
+            return INKPOD_STATUS_CANCELLED;
+        }
+        state.routing.sequence_switch_pending_token.store(
+            result->token.value, std::memory_order_release);
+        state.routing.sequence_navigation_pending = true;
+        workspace->animation.sequence_switch_pending = true;
+    }
+    const HWND completion_window = workspace->windows.window;
+    if (source_recovery_required) {
+        PresentStatusBarPart(
+            workspace->windows.status_bar, 5U, UiText(UiStringId::Text0227));
+    }
+    UpdateMenuState(state);
+
+    inkpod::app::FileIoController::Preflight preflight =
+        [&state, result, session = document.id, generation = document.generation](
+            const inkpod::app::FileIoResult& prepared) {
+            return ReserveResolvedSequencePairTarget(
+                state, session, generation, *result, prepared);
+        };
+    InkpodStatus queued = INKPOD_STATUS_INVALID_STATE;
+    try {
+        queued = QueueFileIoWork(state, std::move(io_request),
+            [&state, result, source_recovery_required, completion_window,
+                routing = &state.routing](
+                inkpod::app::FileIoResult&& completed) {
+                result->status = completed.status == INKPOD_STATUS_OK
+                    ? completed.presentation_status : completed.status;
+                result->source_autosaved = source_recovery_required
+                    && completed.has_recovery_artifact_proof
+                    && completed.recovery_metadata.has_value();
+                if (result->source_autosaved) {
+                    result->source_artifact_proof =
+                        completed.recovery_artifact_proof;
+                    result->source_metadata =
+                        std::move(completed.recovery_metadata.value());
+                }
+                if (completed.document_applied) {
+                    result->mutation_status = INKPOD_STATUS_OK;
+                    result->activated_document = completed.document;
+                    const InkpodStatus publication_status = result->status;
+                    result->status = INKPOD_STATUS_OK;
+                    CompleteSequenceSwitchAuthority(state, *result);
+                    if (result->status == INKPOD_STATUS_OK) {
+                        result->status = publication_status;
+                    }
+                } else {
+                    if (result->status == INKPOD_STATUS_OK) {
+                        result->status = INKPOD_STATUS_INVALID_STATE;
+                    }
+                    CompleteSequenceSwitchAuthority(state, *result);
+                }
+                {
+                    std::lock_guard lock(routing->sequence_switch_results_mutex);
+                    routing->sequence_switch_result = result;
+                }
+                if (completion_window != nullptr && IsWindow(completion_window)) {
+                    (void)SendMessageW(completion_window, kSequenceSwitchCompleted,
+                        static_cast<WPARAM>(result->token.value),
+                        static_cast<LPARAM>(result->token.generation.Value()));
+                } else {
+                    (void)state.engine->PostCompletionNotification(
+                        kSequenceSwitchCompleted, result->token.value,
+                        result->token.generation);
+                }
+                return result->status;
+            }, nullptr, std::move(preflight), false);
+    } catch (const std::bad_alloc&) {
+        queued = INKPOD_STATUS_INVALID_STATE;
+    }
+    if (!FileIoAccepted(queued)) {
+        const inkpod::app::IdentityReservationToken identity_reservation{
+            result->identity_reservation_token};
+        if (identity_reservation) {
+            (void)state.Documents().CancelIdentityReservation(
+                document.id, identity_reservation);
+            result->identity_reservation_token = 0U;
+        }
+        if (inherited_token) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        (void)FenceSequenceCanvases(state, document, false,
+            document.sequence_required_present_revision,
+            document.sequence_required_present_epoch);
+        std::uint64_t expected = result->token.value;
+        (void)state.routing.sequence_switch_pending_token.compare_exchange_strong(
+            expected, 0U, std::memory_order_acq_rel);
+        state.routing.sequence_navigation_pending = false;
+        workspace->animation.sequence_switch_pending = false;
+        UpdateMenuState(state);
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    source_reservation.active = false;
+    inherited_guard.active = false;
+    return queued;
 }
 
 InkpodStatus SwitchSequenceTarget(
@@ -12103,6 +14416,28 @@ InkpodStatus SwitchSequenceTarget(
             return INKPOD_STATUS_INVALID_STATE;
         }
         return INKPOD_STATUS_PENDING;
+    }
+    if (state.file_io.HasPending(
+            document->id, document->generation)) {
+        try {
+            if (!state.file_io.WhenIdle(
+                    context,
+                    [&state, context, index, direction,
+                        captured_endpoint_policy]() {
+                        const InkpodStatus resumed = SwitchSequenceTarget(
+                            state, context, index, direction,
+                            captured_endpoint_policy);
+                        if (state.lifetime.smoke_test) {
+                            state.lifetime.smoke_last_sequence_switch_status =
+                                resumed;
+                        }
+                    })) {
+                return INKPOD_STATUS_INVALID_STATE;
+            }
+            return INKPOD_STATUS_PENDING;
+        } catch (const std::bad_alloc&) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
     }
     const DocumentViewId previous_view =
         state.routing.targets.ActiveDocumentView();
@@ -12230,156 +14565,8 @@ InkpodStatus SwitchSequenceTarget(
         if ((request.flags & INKPOD_SEQUENCE_SWITCH_REQUIRED) == 0U) {
             return INKPOD_STATUS_OK;
         }
-        const SequenceAutosaveBinding* target_binding =
-            document->FindSequenceAutosave(
-                request.target_document_uuid_high,
-                request.target_document_uuid_low,
-                request.target_source_generation);
-        const bool source_dirty =
-            (before.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U;
-        if (source_dirty || target_binding != nullptr) {
-            std::shared_ptr<SequenceSwitchAsyncResult> result;
-            try {
-                result = std::make_shared<SequenceSwitchAsyncResult>();
-                result->context = context;
-                result->request = request;
-                if (target_binding != nullptr) {
-                    result->target_recovery_path = target_binding->recovery_path;
-                    result->next_recovery_path = target_binding->recovery_path;
-                    result->target_metadata = target_binding->metadata;
-                } else if (!SequenceRecoveryPath(
-                               request.target_document_uuid_high,
-                               request.target_document_uuid_low,
-                               request.target_source_generation,
-                               result->next_recovery_path)) {
-                    return INKPOD_STATUS_INVALID_STATE;
-                }
-                if (source_dirty) {
-                    if (!SequenceRecoveryPath(
-                            request.source_document_uuid_high,
-                            request.source_document_uuid_low,
-                            request.source_generation,
-                            result->source_recovery_path)
-                        || !BuildRecoveryMetadata(
-                            document->id,
-                            document->generation,
-                            document->identity,
-                            request.source_document_uuid_high,
-                            request.source_document_uuid_low,
-                            document->shell.current_path.empty()
-                                ? document->shell.recovery_original_path
-                                : document->shell.current_path,
-                            document->shell.source_path,
-                            result->source_metadata)
-                        || !document->ReserveSequenceAutosave(
-                            request.source_document_uuid_high,
-                            request.source_document_uuid_low,
-                            request.source_generation)) {
-                        return INKPOD_STATUS_INVALID_STATE;
-                    }
-                }
-            } catch (const std::bad_alloc&) {
-                return INKPOD_STATUS_INVALID_STATE;
-            }
-            inkpod::app::FileIoRequest io_request{};
-            try {
-                io_request.context = context;
-                io_request.kind = INKPOD_IO_SEQUENCE_SWITCH;
-                io_request.sequence_switch = request;
-                io_request.paths = {result->source_recovery_path, result->target_recovery_path};
-                io_request.publish_snapshot = true;
-                if (source_dirty) {
-                    io_request.recovery_metadata = result->source_metadata;
-                }
-            } catch (const std::bad_alloc&) {
-                return INKPOD_STATUS_INVALID_STATE;
-            }
-            if (!ReserveSequenceTargetIdentity(state, *document, *result)) {
-                return INKPOD_STATUS_FILE_CONFLICT;
-            }
-            result->token = state.routing.tokens.IssueNotification(
-                state.routing.targets.CurrentGeneration());
-            result->replace_document = true;
-            io_request.presentation_epoch = result->token.value;
-            if (!FenceSequenceCanvases(state, *document, true,
-                    document->sequence_required_present_revision,
-                    document->sequence_required_present_epoch)) {
-                state.Documents().CancelIdentityReservation(document->id);
-                return INKPOD_STATUS_CANCELLED;
-            }
-            const HWND completion_window = state.Workspace().windows.window;
-            state.routing.sequence_switch_pending_token.store(
-                result->token.value, std::memory_order_release);
-            state.Workspace().animation.sequence_switch_pending = true;
-            PresentStatusBarPart(
-                state.Workspace().windows.status_bar,
-                5U,
-                source_dirty
-                    ? UiText(UiStringId::Text0227)
-                    : UiText(UiStringId::Text0226));
-            UpdateMenuState(state);
-            InkpodStatus queued = INKPOD_STATUS_INVALID_STATE;
-            try {
-                queued = QueueFileIoWork(state, std::move(io_request),
-                    [&state, result, source_dirty, completion_window, routing = &state.routing](
-                        inkpod::app::FileIoResult&& completed) {
-                        result->status = completed.status == INKPOD_STATUS_OK
-                            ? completed.presentation_status : completed.status;
-                        result->source_autosaved = source_dirty && completed.document_applied;
-                        // UUID/revision equality cannot prove a replacement: a
-                        // recovery or another source generation may reuse both.
-                        if (completed.document_applied) {
-                            result->mutation_status = INKPOD_STATUS_OK;
-                            result->activated_document = completed.document;
-                            const InkpodStatus publication_status = result->status;
-                            result->status = INKPOD_STATUS_OK;
-                            CompleteSequenceSwitchAuthority(state, *result);
-                            if (result->status == INKPOD_STATUS_OK) {
-                                result->status = publication_status;
-                            }
-                        } else {
-                            if (result->status == INKPOD_STATUS_OK) {
-                                result->status = INKPOD_STATUS_INVALID_STATE;
-                            }
-                            CompleteSequenceSwitchAuthority(state, *result);
-                        }
-                        {
-                            std::lock_guard lock(routing->sequence_switch_results_mutex);
-                            routing->sequence_switch_result = result;
-                        }
-                        if (completion_window != nullptr && IsWindow(completion_window)) {
-                            // FileIoController invokes continuations on the UI thread.
-                            // Finish before a queued close/idle callback can destroy HWND.
-                            (void)SendMessageW(completion_window, kSequenceSwitchCompleted,
-                                static_cast<WPARAM>(result->token.value),
-                                static_cast<LPARAM>(result->token.generation.Value()));
-                        } else {
-                            // Keep the owned result for a surviving workspace's
-                            // notification or bounded mailbox poll.
-                            (void)state.engine->PostCompletionNotification(
-                                kSequenceSwitchCompleted, result->token.value,
-                                result->token.generation);
-                        }
-                        return result->status;
-                    }, nullptr, {}, false);
-            } catch (const std::bad_alloc&) {
-                queued = INKPOD_STATUS_INVALID_STATE;
-            }
-            if (!FileIoAccepted(queued)) {
-                state.Documents().CancelIdentityReservation(document->id);
-                (void)FenceSequenceCanvases(state, *document, false,
-                    document->sequence_required_present_revision,
-                    document->sequence_required_present_epoch);
-                std::uint64_t expected = result->token.value;
-                (void)state.routing.sequence_switch_pending_token
-                    .compare_exchange_strong(
-                        expected, 0U, std::memory_order_acq_rel);
-                state.Workspace().animation.sequence_switch_pending = false;
-                UpdateMenuState(state);
-                return INKPOD_STATUS_INVALID_STATE;
-            }
-            return queued;
-        }
+        return QueueResolvedSequenceReplacement(
+            state, context, *document, request);
     }
     const bool replace_document = activation_plan.result_class == INKPOD_SEQUENCE_ACTIVATION_REPLACE;
     if (activation_plan.result_class == INKPOD_SEQUENCE_ACTIVATION_NOOP) {
@@ -12397,6 +14584,7 @@ InkpodStatus SwitchSequenceTarget(
         return INKPOD_STATUS_OK;
     }
     bool saved_before_switch = false;
+    inkpod::app::PostedNotificationToken prompt_pending_token{};
     if (replace_document && (before.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U) {
         int choice{};
         if (state.lifetime.smoke_test) {
@@ -12420,22 +14608,42 @@ InkpodStatus SwitchSequenceTarget(
             && !ActivateDocumentTab(state, document->ActiveView()->id)) {
             return INKPOD_STATUS_INVALID_STATE;
         }
+        prompt_pending_token = ArmSequenceSwitchPending(
+            state, context, *document);
+        if (!prompt_pending_token) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
         const InkpodStatus save_status = SaveDocumentForContext(state, context, false,
-            [&state, context, index, direction, expected = activation_plan](InkpodStatus saved) {
-                if (state.lifetime.smoke_test || saved != INKPOD_STATUS_OK) {
+            [&state, context, expected = activation_plan,
+                prompt_pending_token](InkpodStatus saved) {
+                auto* current_document = context.document_session.has_value()
+                    ? state.Documents().Find(context.document_session.value()) : nullptr;
+                if (saved != INKPOD_STATUS_OK || state.engine == nullptr
+                    || current_document == nullptr
+                    || !context.generation.has_value()
+                    || current_document->generation != context.generation.value()) {
+                    ReleaseSequenceSwitchPending(
+                        state, context, current_document,
+                        prompt_pending_token, true);
                     return;
                 }
-                InkpodSequenceActivationPlan current{};
-                current.struct_size = sizeof(current);
-                const InkpodStatus queried = state.engine->Invoke(
-                    context.document_session.value(), context.generation.value(),
-                    [&current, expected](InkpodCore* core) {
-                        return inkpod_core_sequence_activation_resolve(core, expected.target_index, &current);
-                    }, false, false);
-                if (queried != INKPOD_STATUS_OK || !SameSequenceActivationTarget(expected, current)) {
-                    return;
+                InkpodDocumentInfo after_save{};
+                after_save.struct_size = sizeof(after_save);
+                InkpodSequenceSwitchRequest request{};
+                InkpodStatus switched = !state.engine->GetDocumentInfo(
+                            current_document->id, current_document->generation, after_save)
+                    ? INKPOD_STATUS_CANCELLED
+                    : ResolveSequenceReplacementRequest(
+                        state, context, expected, request);
+                if (switched == INKPOD_STATUS_OK) {
+                    switched = QueueResolvedSequenceReplacement(
+                        state, context, *current_document, request,
+                        prompt_pending_token);
+                } else {
+                    ReleaseSequenceSwitchPending(
+                        state, context, current_document,
+                        prompt_pending_token, true);
                 }
-                const InkpodStatus switched = SwitchSequenceTarget(state, context, index, direction);
                 if (!FileIoAccepted(switched) && switched != INKPOD_STATUS_CANCELLED) {
                     auto* owner = context.workspace.has_value()
                         ? state.FindWorkspace(context.workspace.value()) : nullptr;
@@ -12443,14 +14651,24 @@ InkpodStatus SwitchSequenceTarget(
                         ShowCoreError(state, owner->windows.window, UiText(UiStringId::Text0539));
                     }
                 }
-            });
+            }, false);
         if (save_status != INKPOD_STATUS_OK) {
+            if (!FileIoAccepted(save_status)) {
+                ReleaseSequenceSwitchPending(
+                    state, context, document, prompt_pending_token, true);
+            }
             if (!target_was_active && previous_view) {
                 (void)ActivateDocumentTab(state, previous_view);
             }
             return save_status;
         }
         saved_before_switch = true;
+        before = {};
+        before.struct_size = sizeof(before);
+        if (!state.engine->GetDocumentInfo(
+                document->id, document->generation, before)) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
     }
     InkpodSequenceActivationPlan prepared_plan = activation_plan;
     const InkpodStatus prepared_status = saved_before_switch
@@ -12463,83 +14681,60 @@ InkpodStatus SwitchSequenceTarget(
         || !SameSequenceActivationTarget(activation_plan, prepared_plan)) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    std::wstring next_recovery_path;
-    const DocumentIdentity next_identity = inkpod::app::UntitledDocumentIdentity(
-        prepared_plan.target_document_uuid_high, prepared_plan.target_document_uuid_low);
-    if (replace_document
-        && (!SequenceRecoveryPath(prepared_plan.target_document_uuid_high,
-                prepared_plan.target_document_uuid_low, prepared_plan.target_source_generation,
-                next_recovery_path)
-            || !state.Documents().ReserveIdentity(document->id, next_identity))) {
+    if (replace_document) {
+        InkpodSequenceSwitchRequest request{};
+        const InkpodStatus request_status = ResolveSequenceReplacementRequest(
+            state, context, prepared_plan, request);
+        if (request_status != INKPOD_STATUS_OK) {
+            return request_status;
+        }
+        if ((request.flags & INKPOD_SEQUENCE_SWITCH_REQUIRED) == 0U) {
+            return INKPOD_STATUS_OK;
+        }
+        return QueueResolvedSequenceReplacement(
+            state, context, *document, request,
+            prompt_pending_token);
+    }
+    if (prepared_plan.result_class != INKPOD_SEQUENCE_ACTIVATION_BIND) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    if (replace_document) {
-        auto result = std::make_shared<SequenceSwitchAsyncResult>();
-        result->context = context;
-        result->interactive_activation = true;
-        result->replace_document = true;
-        result->next_recovery_path = std::move(next_recovery_path);
-        result->request.target_document_uuid_high = prepared_plan.target_document_uuid_high;
-        result->request.target_document_uuid_low = prepared_plan.target_document_uuid_low;
-        result->request.target_source_generation = prepared_plan.target_source_generation;
-        result->request.source_document_uuid_high = prepared_plan.source_document_uuid_high;
-        result->request.source_document_uuid_low = prepared_plan.source_document_uuid_low;
-        result->request.source_generation = prepared_plan.source_generation;
-        result->token = state.routing.tokens.IssueNotification(context.generation.value());
-        state.routing.sequence_switch_pending_token.store(
-            result->token.value, std::memory_order_release);
-        state.routing.sequence_navigation_pending = true;
-        if (!FenceSequenceCanvases(state, *document, true,
-                document->sequence_required_present_revision,
-                document->sequence_required_present_epoch)) {
-            state.Documents().CancelIdentityReservation(document->id);
-            state.routing.sequence_navigation_pending = false;
-            state.routing.sequence_switch_pending_token.store(0U, std::memory_order_release);
-            return INKPOD_STATUS_CANCELLED;
-        }
-        auto* host = state.engine.get();
-        bool queued{};
-        try {
-            queued = host->Enqueue(
-            context,
-            [host, prepared_plan, result](InkpodCore* core) {
-                result->mutation_status = inkpod_core_sequence_activation_commit(
-                    core, &prepared_plan, &result->activated_document);
-                if (result->mutation_status == INKPOD_STATUS_OK
-                    && !host->SetPresentationEpoch(
-                        result->context.document_session.value(),
-                        result->context.generation.value(), result->token.value)) {
-                    return INKPOD_STATUS_INVALID_STATE;
-                }
-                return result->mutation_status;
-            },
-            true,
-            true,
-            false,
-            [host, result, routing = &state.routing](InkpodStatus completed) {
-                result->status = completed;
-                {
-                    std::lock_guard lock(routing->sequence_switch_results_mutex);
-                    routing->sequence_switch_result = result;
-                }
-                (void)host->PostCompletionNotification(
-                    kSequenceSwitchCompleted, result->token.value, result->token.generation);
-            },
-            inkpod::app::ScrollRangeResetRequest{
-                inkpod::app::ScrollRangeResetScope::SessionViews, 0U});
-        } catch (const std::bad_alloc&) {
-            queued = false;
-        }
-        if (!queued) {
-            state.Documents().CancelIdentityReservation(document->id);
-            state.routing.sequence_navigation_pending = false;
-            state.routing.sequence_switch_pending_token.store(0U, std::memory_order_release);
-            FenceSequenceCanvases(state, *document, false,
-                document->sequence_required_present_revision,
-                document->sequence_required_present_epoch);
+    std::optional<SequenceFileBinding> binding_candidate;
+    if (const auto* target_binding = document->SequenceFileBindingAt(
+            activation_target);
+        target_binding != nullptr) {
+        if (target_binding->document_uuid_high
+                != prepared_plan.target_document_uuid_high
+            || target_binding->document_uuid_low
+                != prepared_plan.target_document_uuid_low
+            || target_binding->source_generation
+                != prepared_plan.target_source_generation
+            || (prepared_plan.source_document_uuid_high == 0U
+                && prepared_plan.source_document_uuid_low == 0U)
+            || prepared_plan.target_source_generation == 0U) {
             return INKPOD_STATUS_INVALID_STATE;
         }
-        return INKPOD_STATUS_PENDING;
+        const bool has_pair_path =
+            !document->shell.pair_raster_path.empty();
+        const bool has_pair_identity =
+            static_cast<bool>(document->pair_raster_identity);
+        if (has_pair_path != has_pair_identity) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        SequenceFileBinding candidate = *target_binding;
+        candidate.document_uuid_high =
+            prepared_plan.source_document_uuid_high;
+        candidate.document_uuid_low =
+            prepared_plan.source_document_uuid_low;
+        candidate.source_generation =
+            prepared_plan.target_source_generation;
+        if (has_pair_path) {
+            // BIND retains the live document's pair authority. The sequence
+            // entry must therefore resolve back to that exact raster member,
+            // not to the imported preview path whose UUID Core just replaced.
+            candidate.raster_path = document->shell.pair_raster_path;
+            candidate.raster_identity = document->pair_raster_identity;
+        }
+        binding_candidate = std::move(candidate);
     }
     InkpodDocumentInfo after{};
     after.struct_size = sizeof(after);
@@ -12554,9 +14749,6 @@ InkpodStatus SwitchSequenceTarget(
         true,
         true);
     if (mutation_status != INKPOD_STATUS_OK) {
-        if (replace_document) {
-            state.Documents().CancelIdentityReservation(document->id);
-        }
         if (!target_was_active && previous_view) {
             (void)ActivateDocumentTab(state, previous_view);
         }
@@ -12565,15 +14757,13 @@ InkpodStatus SwitchSequenceTarget(
         UpdateMenuState(state);
         return status;
     }
-    if (replace_document) {
-        document->shell.current_path.clear();
-        document->shell.source_path.clear();
-        document->shell.recovery_original_path.clear();
-        document->shell.recovery_path = std::move(next_recovery_path);
-        if (!state.Documents().PublishReservedIdentity(document->id)) {
-            document->identity = next_identity;
-            return INKPOD_STATUS_INVALID_STATE;
-        }
+    if (binding_candidate.has_value()
+        && !document->PublishSequenceFileBinding(
+            activation_target, std::move(binding_candidate.value()))) {
+        // Every allocating field and every validation predicate was prepared
+        // before Core commit. Publication is a no-allocation move into the
+        // unchanged catalog slot and is therefore required to succeed.
+        return INKPOD_STATUS_INVALID_STATE;
     }
     if (status != INKPOD_STATUS_OK) {
         return status;
@@ -12585,13 +14775,6 @@ InkpodStatus SwitchSequenceTarget(
         }
         return INKPOD_STATUS_INVALID_STATE;
     }
-    if (replace_document) {
-        ResetUiForNewActiveDocument(state);
-        if (!state.RefreshEditorPresentation(
-                document->id, document->generation)) {
-            return INKPOD_STATUS_INVALID_STATE;
-        }
-    }
     RefreshSequencePane(state);
     (void)RefreshSubpalettePane(state);
     RefreshTreePane(state);
@@ -12600,11 +14783,6 @@ InkpodStatus SwitchSequenceTarget(
     UpdateMenuState(state);
     return INKPOD_STATUS_OK;
 } catch (const std::bad_alloc&) {
-    const auto* document = context.document_session.has_value()
-        ? state.Documents().Find(context.document_session.value()) : nullptr;
-    if (document != nullptr && document->generation == context.generation) {
-        state.Documents().CancelIdentityReservation(document->id);
-    }
     return INKPOD_STATUS_INVALID_STATE;
 }
 
@@ -12828,7 +15006,7 @@ InkpodStatus OpenRecoveryCandidateImpl(
             state.engine->SetLocalFailure(
                 UiText(UiStringId::Text0071));
         }
-        return INKPOD_STATUS_INVALID_STATE;
+        return INKPOD_STATUS_FILE_CONFLICT;
     }
     return OpenRecoveryWithIdentity(
         state, candidate.recovery_path, identity, original_path);
@@ -12837,7 +15015,7 @@ InkpodStatus OpenRecoveryCandidateImpl(
 InkpodStatus OpenDocumentForContext(ApplicationHost& state, const std::wstring& path,
     const CommandContext& issued) noexcept {
     if (CommonRasterFormatFromPath(path) != 0U) {
-        return QueueDocumentOpen(state, path, INKPOD_IO_OPEN_RASTER, {}, {}, issued);
+        return QueueDocumentOpen(state, path, INKPOD_IO_OPEN_RASTER_PAIR, {}, {}, issued);
     }
     if (state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
@@ -12897,7 +15075,7 @@ InkpodStatus OpenDocumentFromPathImpl(
 bool QueueAutosave(
     ApplicationHost& state,
     const CommandContext& context,
-    const std::wstring& path) noexcept {
+    const std::wstring&) noexcept {
     if (state.engine == nullptr || !context.document_session.has_value()
         || !context.generation.has_value()) {
         return false;
@@ -12906,11 +15084,18 @@ bool QueueAutosave(
         context.document_session.value());
     InkpodDocumentInfo info = EmptyDocumentInfo();
     RecoveryMetadata metadata{};
-    if (document == nullptr
-        || document->generation != context.generation.value()
-        || !state.engine->GetDocumentInfo(
-            document->id, document->generation, info)
-        || !BuildRecoveryMetadata(
+    PublishedRecoverySnapshot previous{};
+    const bool document_current = document != nullptr
+        && document->generation == context.generation.value();
+    if (document_current
+        && state.file_io.HasPending(document->id, document->generation)) {
+        return false;
+    }
+    const bool document_queried = document_current
+        && state.engine->GetDocumentInfo(
+            document->id, document->generation, info);
+    const bool metadata_built = document_queried
+        && BuildRecoveryMetadata(
             document->id,
             document->generation,
             document->identity,
@@ -12920,17 +15105,105 @@ bool QueueAutosave(
                 ? document->shell.recovery_original_path
                 : document->shell.current_path,
             document->shell.source_path,
-            metadata)) {
+            metadata);
+    const bool recovery_captured = metadata_built
+        && CapturePublishedRecovery(document->shell, previous);
+    if (!document_current || !document_queried || !metadata_built
+        || !recovery_captured || previous.generation == UINT64_MAX) {
+        if (state.lifetime.smoke_test) {
+            std::fprintf(stderr,
+                "autosave precondition failed: document=%d query=%d metadata=%d recovery=%d generation=%llu identity=%u\n",
+                document_current ? 1 : 0, document_queried ? 1 : 0,
+                metadata_built ? 1 : 0, recovery_captured ? 1 : 0,
+                static_cast<unsigned long long>(previous.generation),
+                document == nullptr ? 0U
+                    : static_cast<unsigned>(document->identity.kind));
+        }
+        return false;
+    }
+    const std::uint64_t persistence_epoch = document->persistence_epoch;
+    if (persistence_epoch == UINT64_MAX) {
         return false;
     }
     try {
+        auto attempt_path = std::make_shared<std::wstring>();
+        auto recovery_cleanup =
+            std::make_shared<std::vector<inkpod::app::RecoveryCleanupEntry>>();
+        recovery_cleanup->reserve(1U);
+        if (!PrivateRecoveryAttemptPath(
+                info.document_uuid_high,
+                info.document_uuid_low,
+                *attempt_path)) {
+            return false;
+        }
         inkpod::app::FileIoRequest request{};
         request.context = context;
         request.kind = INKPOD_IO_AUTOSAVE;
-        request.paths.push_back(path);
+        request.paths.push_back(*attempt_path);
         request.recovery_metadata = std::move(metadata);
-        return FileIoAccepted(QueueFileIoWork(
-            state, std::move(request), {}, nullptr, {}, false));
+        const InkpodStatus queued = QueueFileIoWork(
+            state, std::move(request),
+            [&state, context, attempt_path, recovery_cleanup,
+                previous = std::move(previous),
+                persistence_epoch,
+                document_uuid_high = info.document_uuid_high,
+                document_uuid_low = info.document_uuid_low](
+                inkpod::app::FileIoResult&& result) mutable {
+                auto* target = context.document_session.has_value()
+                    ? state.Documents().Find(context.document_session.value()) : nullptr;
+                const bool durable = result.status == INKPOD_STATUS_OK
+                    && result.document_applied
+                    && result.has_recovery_artifact_proof
+                    && inkpod::app::ValidRecoveryArtifactProof(
+                        result.recovery_artifact_proof);
+                InkpodDocumentInfo current_info = EmptyDocumentInfo();
+                const bool current = target != nullptr
+                    && target->generation == context.generation
+                    && target->persistence_epoch == persistence_epoch
+                    && target->shell.recovery_artifact_generation
+                        == previous.generation
+                    && state.engine != nullptr
+                    && state.engine->GetDocumentInfo(
+                        target->id, target->generation, current_info)
+                    && current_info.document_uuid_high == document_uuid_high
+                    && current_info.document_uuid_low == document_uuid_low;
+                if (!durable || !current) {
+                    if (durable) {
+                        AppendRecoveryCleanupArtifact(
+                            *recovery_cleanup,
+                            std::move(*attempt_path),
+                            result.recovery_artifact_proof);
+                        DiscardRecoveryArtifacts(
+                            state, context,
+                            std::move(*recovery_cleanup));
+                    }
+                    return result.status == INKPOD_STATUS_OK
+                        ? INKPOD_STATUS_CANCELLED : result.status;
+                }
+                // All checks which can fail precede this no-allocation move.
+                if (!PublishRecoveryAttempt(
+                        target->shell,
+                        previous.generation,
+                        std::move(*attempt_path),
+                        result.recovery_artifact_proof)) {
+                    return INKPOD_STATUS_CANCELLED;
+                }
+                if (previous.published) {
+                    AppendRecoveryCleanupArtifact(
+                        *recovery_cleanup,
+                        std::move(previous.path),
+                        previous.proof);
+                    DiscardRecoveryArtifacts(
+                        state, context,
+                        std::move(*recovery_cleanup));
+                }
+                    return INKPOD_STATUS_OK;
+                }, nullptr, {}, false);
+        if (state.lifetime.smoke_test && !FileIoAccepted(queued)) {
+            std::fprintf(stderr, "autosave queue/completion failed: %u\n",
+                static_cast<unsigned>(queued));
+        }
+        return FileIoAccepted(queued);
     } catch (const std::bad_alloc&) {
         return false;
     }
@@ -13489,7 +15762,7 @@ bool ConfirmDiscard(ApplicationHost& state, std::function<void()> resume = {},
     if (choice == IDCANCEL) {
         return false;
     }
-    const auto* target = state.Documents().Find(context.document_session.value());
+    auto* target = state.Documents().Find(context.document_session.value());
     if (target == nullptr || target->generation != context.generation.value()) {
         return false;
     }
@@ -13511,33 +15784,64 @@ bool ConfirmDiscard(ApplicationHost& state, std::function<void()> resume = {},
             approvals->Record(CaptureCloseApproval(state, context, info));
         }
     } else {
-        const std::wstring path = target->shell.recovery_path;
-        if (!path.empty()) {
-            const InkpodStatus status = QueueRecoveryDiscard(state, context, path,
-                [&state, context, path, observed, approvals, resume = std::move(resume)](InkpodStatus discarded) {
-                    if (discarded != INKPOD_STATUS_OK) {
+        PublishedRecoverySnapshot recovery{};
+        if (!CapturePublishedRecovery(target->shell, recovery)) {
+            return false;
+        }
+        if (recovery.published) {
+            const std::wstring recovery_path = recovery.path;
+            const InkpodIoRecoveryArtifactProof proof = recovery.proof;
+            const auto discard_authorized = std::make_shared<bool>(false);
+            const InkpodStatus status = QueueRecoveryDiscard(
+                state, context, recovery_path,
+                [&state, context, recovery = std::move(recovery), observed,
+                    approvals, discard_authorized,
+                    resume = std::move(resume)](InkpodStatus discarded) {
+                    // Exact discard may report FILE_CONFLICT when another actor
+                    // replaced either recovery member after the user approved
+                    // closing. Never delete that replacement, but allow this
+                    // document to detach the exact artifact it approved.
+                    if (discarded != INKPOD_STATUS_OK
+                        && discarded != INKPOD_STATUS_FILE_CONFLICT) {
                         return;
                     }
                     auto* target = state.Documents().Find(context.document_session.value());
                     if (target == nullptr || target->generation != context.generation.value()) {
                         return;
                     }
-                    if (target->shell.recovery_path == path) {
-                        target->shell.recovery_path.clear();
+                    if (target->shell.recovery_artifact_published
+                        && target->shell.recovery_artifact_generation
+                            == recovery.generation
+                        && target->shell.recovery_path == recovery.path
+                        && SameRecoveryArtifactProof(
+                            target->shell.recovery_artifact_proof,
+                            recovery.proof)) {
+                        RetirePublishedRecovery(target->shell);
+                    } else {
+                        return;
                     }
+                    *discard_authorized = true;
                     if (approvals != nullptr) {
                         approvals->Record(observed);
                     }
                     if (!state.lifetime.smoke_test && resume) {
                         resume();
                     }
-                });
-            if (status != INKPOD_STATUS_OK) {
+                }, false, &proof);
+            if (status == INKPOD_STATUS_PENDING) {
+                return false;
+            }
+            if ((status != INKPOD_STATUS_OK
+                    && status != INKPOD_STATUS_FILE_CONFLICT)
+                || !*discard_authorized) {
                 if (!FileIoAccepted(status) && status != INKPOD_STATUS_CANCELLED) {
                     ShowCoreError(state, state.Workspace().windows.window, UiText(UiStringId::Text0072));
                 }
                 return false;
             }
+        } else if (!target->shell.recovery_path.empty()) {
+            // Unproven recovery provenance is detached, never path-deleted.
+            RetirePublishedRecovery(target->shell);
         }
         if (approvals != nullptr) {
             approvals->Record(observed);
@@ -15833,59 +18137,324 @@ std::optional<LRESULT> RouteDocumentCommand(
             return FileIoAccepted(status) ? 1 : 0;
         }
         case IDM_FILE_REVERT: {
-            inkpod::app::FileIoRequest request{};
-            request.context = context;
-            request.kind = INKPOD_IO_OPEN_NATIVE;
-            request.flags = INKPOD_IO_FORCE_RELOAD;
-            request.publish_snapshot = true;
+            std::shared_ptr<PreparedOpenNativeAuthority> revert_authority;
             try {
-                request.paths.push_back(state->Document().shell.current_path);
+                revert_authority = std::make_shared<PreparedOpenNativeAuthority>();
+                revert_authority->recovery_cleanup.reserve(2U);
             } catch (const std::bad_alloc&) {
                 return 0;
             }
+            auto* revert_target = context.document_session.has_value()
+                ? state->Documents().Find(context.document_session.value())
+                : nullptr;
+            if (revert_target == nullptr
+                || revert_target->generation != context.generation
+                || revert_target->persistence_epoch == UINT64_MAX
+                || state->file_io.HasPending(
+                    revert_target->id, revert_target->generation)) {
+                return 0;
+            }
+            revert_authority->persistence_epoch =
+                revert_target->persistence_epoch;
+            inkpod::app::FileIoRequest request{};
+            request.context = context;
+            request.kind = INKPOD_IO_OPEN_NATIVE;
+            request.flags = INKPOD_IO_FORCE_RELOAD | INKPOD_IO_REVERT_CURRENT;
+            request.publish_snapshot = true;
+            try {
+                request.paths.push_back(revert_target->shell.current_path);
+            } catch (const std::bad_alloc&) {
+                return 0;
+            }
+            const auto presentation_token =
+                state->routing.tokens.IssueNotification(
+                    revert_target->generation);
+            revert_authority->presentation_epoch =
+                presentation_token.value;
+            revert_authority->previous_sequence_revision =
+                revert_target->sequence_required_present_revision;
+            revert_authority->previous_sequence_epoch =
+                revert_target->sequence_required_present_epoch;
+            if (!presentation_token
+                || !FenceSequenceCanvases(
+                    *state, *revert_target, true,
+                    revert_authority->previous_sequence_revision,
+                    revert_authority->previous_sequence_epoch)) {
+                return 0;
+            }
+            request.presentation_epoch = presentation_token.value;
             const InkpodStatus status = QueueFileIoWork(*state, std::move(request),
-                [state, context](inkpod::app::FileIoResult&& result) {
-                    if (result.status != INKPOD_STATUS_OK) {
-                        return result.status;
+                [state, context, revert_authority](inkpod::app::FileIoResult&& result) {
+                    const InkpodStatus operation_status = result.status;
+                    InkpodStatus completion_status = operation_status == INKPOD_STATUS_OK
+                        ? result.presentation_status : operation_status;
+                    revert_authority->document_applied =
+                        result.document_applied;
+                    if (!result.document_applied) {
+                        auto* unchanged = context.document_session.has_value()
+                            ? state->Documents().Find(
+                                  context.document_session.value())
+                            : nullptr;
+                        if (unchanged != nullptr
+                            && unchanged->generation == context.generation) {
+                            (void)FenceSequenceCanvases(
+                                *state, *unchanged, false,
+                                revert_authority->previous_sequence_revision,
+                                revert_authority->previous_sequence_epoch);
+                        }
+                        if (revert_authority->identity_reservation
+                            && context.document_session.has_value()) {
+                            (void)state->Documents().CancelIdentityReservation(
+                                context.document_session.value(),
+                                revert_authority->identity_reservation);
+                            revert_authority->identity_reservation = {};
+                        }
+                        return operation_status == INKPOD_STATUS_OK
+                            ? INKPOD_STATUS_INVALID_STATE : operation_status;
                     }
                     auto* document = context.document_session.has_value()
                         ? state->Documents().Find(context.document_session.value()) : nullptr;
+                    if (document != nullptr
+                        && document->generation == context.generation) {
+                        InkpodDocumentInfo applied = result.document;
+                        if (applied.document_revision == 0U
+                            && (state->engine == nullptr
+                                || !state->engine->GetDocumentInfo(
+                                    document->id, document->generation, applied))) {
+                            completion_status = INKPOD_STATUS_INVALID_STATE;
+                        }
+                        const std::uint64_t required_revision =
+                            applied.document_revision == 0U
+                            ? UINT64_MAX : applied.document_revision;
+                        if (!FenceSequenceCanvases(
+                                *state, *document, false, required_revision,
+                                revert_authority->presentation_epoch)) {
+                            completion_status = INKPOD_STATUS_INVALID_STATE;
+                        }
+                    }
                     if (document == nullptr || document->generation != context.generation
-                        || result.items.empty()
-                        || (result.progress.flags & INKPOD_IO_RESULT_CUT_DESCRIPTOR) != 0U) {
+                        || document->persistence_epoch
+                            != revert_authority->persistence_epoch
+                        || !revert_authority->identity_reservation) {
+                        if (revert_authority->identity_reservation
+                            && context.document_session.has_value()) {
+                            (void)state->Documents().CancelIdentityReservation(
+                                context.document_session.value(),
+                                revert_authority->identity_reservation);
+                            revert_authority->identity_reservation = {};
+                        }
                         return INKPOD_STATUS_INVALID_STATE;
                     }
-                    if (!state->Documents().AssignIdentity(document->id, result.items.front().identity)) {
+                    const bool presentation_refreshed =
+                        state->RefreshEditorPresentation(
+                            document->id, document->generation);
+                    if (!presentation_refreshed) {
+                        completion_status = INKPOD_STATUS_INVALID_STATE;
+                    }
+                    const bool sequence_retained =
+                        MatchesRetainedSequenceAfterRevert(
+                            *state, *document, *revert_authority);
+                    if (!document->AdvancePersistenceEpoch()) {
+                        if (revert_authority->identity_reservation) {
+                            (void)state->Documents().CancelIdentityReservation(
+                                document->id,
+                                revert_authority->identity_reservation);
+                        }
+                        revert_authority->identity_reservation = {};
                         return INKPOD_STATUS_INVALID_STATE;
                     }
-                    document->shell.current_path = std::move(result.items.front().path);
+                    const bool combined_publication = sequence_retained
+                        && revert_authority->has_active_sequence_source
+                        && revert_authority->active_sequence_binding.has_value();
+                    bool authority_published{};
+                    if (combined_publication) {
+                        authority_published = state->Documents()
+                            .PublishReservedIdentityPairWithSequenceBinding(
+                                document->id,
+                                revert_authority->identity_reservation,
+                                revert_authority->active_sequence_index,
+                                std::move(
+                                    revert_authority->active_sequence_binding.value()));
+                    } else {
+                        authority_published = state->Documents().PublishReservedIdentity(
+                            document->id,
+                            revert_authority->identity_reservation);
+                    }
+                    bool sequence_binding_published =
+                        !combined_publication || authority_published;
+                    if (!authority_published && combined_publication) {
+                        // The combined helper is all-or-nothing. Publish the
+                        // still-reserved pair authority as a fail-closed
+                        // fallback, then drop stale frontend sequence aliases.
+                        authority_published = state->Documents().PublishReservedIdentity(
+                            document->id,
+                            revert_authority->identity_reservation);
+                        sequence_binding_published = false;
+                        completion_status = INKPOD_STATUS_INVALID_STATE;
+                    }
+                    if (!authority_published) {
+                        (void)state->Documents().CancelIdentityReservation(
+                            document->id,
+                            revert_authority->identity_reservation);
+                        revert_authority->identity_reservation = {};
+                        return INKPOD_STATUS_INVALID_STATE;
+                    }
+                    revert_authority->identity_reservation = {};
+                    if (!sequence_retained || !sequence_binding_published) {
+                        // Core replacement is already authoritative. Never keep
+                        // an old raster alias if its retained-catalog invariant
+                        // was unexpectedly violated after apply.
+                        document->ClearSequenceFileBindings();
+                        completion_status = INKPOD_STATUS_INVALID_STATE;
+                    }
+                    PublishedRecoverySnapshot recovery{};
+                    if (!TakePublishedRecovery(document->shell, recovery)) {
+                        RetirePublishedRecovery(document->shell);
+                    }
+                    std::optional<SequenceAutosaveBinding> sequence_recovery;
+                    if (revert_authority->has_active_sequence_source) {
+                        sequence_recovery = document->TakeSequenceAutosave(
+                            revert_authority->source_document_uuid_high,
+                            revert_authority->source_document_uuid_low,
+                            revert_authority->source_generation);
+                        if (revert_authority->has_active_sequence_recovery
+                            && !sequence_recovery.has_value()) {
+                            completion_status = INKPOD_STATUS_INVALID_STATE;
+                        }
+                    }
+                    document->shell.current_path = std::move(revert_authority->native_path);
                     document->shell.source_path.clear();
+                    document->shell.planned_native_path.clear();
+                    document->shell.pair_raster_path = std::move(revert_authority->raster_path);
+                    document->shell.pair_raster_format_hint =
+                        CommonRasterFormatFromPath(
+                            document->shell.pair_raster_path);
                     document->shell.recovery_original_path.clear();
-                    document->ClearSequenceAutosaves();
-                    document->auto_sequence_truncated = false;
-                    if (!PrivateRecoveryPath(result.document.document_uuid_high,
-                            result.document.document_uuid_low, document->shell.recovery_path)) {
-                        document->shell.recovery_path.clear();
-                    }
                     if (context.document_session == state->routing.targets.DocumentSession()
                         && context.generation == state->routing.targets.CurrentGeneration()) {
-                        ResetUiForNewActiveDocument(*state);
+                        ResetUiForNewActiveDocument(*state, true);
+                        const bool editor_refreshed =
+                            state->RefreshEditorPresentation(
+                                document->id, document->generation, false);
+                        const bool sequence_refreshed = RefreshSequencePane(*state);
+                        (void)RefreshTreePane(*state);
+                        (void)RefreshLightTablePane(*state);
+                        (void)RefreshSubpalettePane(*state);
+                        (void)RefreshColorPanes(*state);
+                        RefreshDockPaneViews(*state);
+                        UpdateBatchTarget(*state);
                         (void)FitCanvas(*state, INKPOD_VIEW_FIT);
                         UpdateMenuState(*state);
+                        if (!editor_refreshed || !sequence_refreshed) {
+                            completion_status = INKPOD_STATUS_INVALID_STATE;
+                        }
                     }
-                    return INKPOD_STATUS_OK;
+                    if (result.presentation_status != INKPOD_STATUS_OK) {
+                        bool retry_queued{};
+                        try {
+                            const DocumentSessionId session = document->id;
+                            const Generation generation = document->generation;
+                            const std::uint64_t epoch =
+                                revert_authority->presentation_epoch;
+                            retry_queued = state->engine != nullptr
+                                && state->engine->Enqueue(
+                                    context,
+                                    [host = state->engine.get(), session,
+                                        generation, epoch](InkpodCore*) {
+                                        return host->SetPresentationEpoch(
+                                            session, generation, epoch)
+                                            ? INKPOD_STATUS_OK
+                                            : INKPOD_STATUS_INVALID_STATE;
+                                    },
+                                    true,
+                                    true,
+                                    false);
+                        } catch (const std::bad_alloc&) {
+                        }
+                        if (!retry_queued) {
+                            completion_status = INKPOD_STATUS_INVALID_STATE;
+                        }
+                    }
+                    if (recovery.published) {
+                        AppendRecoveryCleanupArtifact(
+                            revert_authority->recovery_cleanup,
+                            std::move(recovery.path), recovery.proof);
+                    }
+                    if (sequence_recovery.has_value()) {
+                        revert_authority->recovery_cleanup.push_back(
+                            std::move(sequence_recovery.value()));
+                    }
+                    DiscardSequenceAutosaveArtifacts(
+                        *state, context,
+                        std::move(revert_authority->recovery_cleanup));
+                    return completion_status;
                 }, nullptr,
-                [state, context](const inkpod::app::FileIoResult& candidate) {
+                [state, context, revert_authority](
+                    const inkpod::app::FileIoResult& candidate) {
+                    OpenDocumentItems open_items{};
+                    auto* document = context.document_session.has_value()
+                        ? state->Documents().Find(
+                              context.document_session.value())
+                        : nullptr;
+                    if (document == nullptr
+                        || document->generation != context.generation
+                        || document->persistence_epoch
+                            != revert_authority->persistence_epoch
+                        || !ResolveOpenDocumentItems(
+                            candidate, INKPOD_IO_OPEN_NATIVE, open_items)
+                        || open_items.cut_descriptor
+                        || open_items.pair_raster == nullptr) {
+                        return INKPOD_STATUS_INVALID_STATE;
+                    }
                     for (const auto& item : candidate.items) {
                         const auto* other = FindOpenDocumentForFile(
                             *state, item, context.document_session.value_or(DocumentSessionId{}));
-                        if (other != nullptr || state->file_io.ConflictsWithPendingWrite(item)
-                            || state->Documents().HasIdentityReservation(item.identity, item.normalized_path)) {
-                            return INKPOD_STATUS_INVALID_STATE;
+                        if (other != nullptr
+                            || state->file_io.ConflictsWithPendingAuthority(
+                                item, candidate.request_id)
+                            || state->Documents().HasIdentityReservation(
+                                item.identity, item.normalized_path,
+                                context.document_session.value())) {
+                            return INKPOD_STATUS_FILE_CONFLICT;
                         }
+                    }
+                    try {
+                        revert_authority->native_path = open_items.primary->path;
+                        revert_authority->raster_path = open_items.pair_raster->path;
+                    } catch (const std::bad_alloc&) {
+                        return INKPOD_STATUS_INVALID_STATE;
+                    }
+                    if (!PrepareRevertSequenceAuthority(
+                            *state, *document, *open_items.pair_raster,
+                            *revert_authority)) {
+                        return INKPOD_STATUS_INVALID_STATE;
+                    }
+                    revert_authority->identity_reservation =
+                        state->Documents().ReserveIdentityPair(
+                            context.document_session.value(),
+                            open_items.primary->identity,
+                            open_items.pair_raster->identity,
+                            revert_authority->native_path,
+                            revert_authority->raster_path);
+                    if (!revert_authority->identity_reservation) {
+                        return INKPOD_STATUS_FILE_CONFLICT;
                     }
                     return INKPOD_STATUS_OK;
                 });
+            if (!FileIoAccepted(status)
+                && !revert_authority->document_applied) {
+                auto* unchanged = context.document_session.has_value()
+                    ? state->Documents().Find(
+                          context.document_session.value())
+                    : nullptr;
+                if (unchanged != nullptr
+                    && unchanged->generation == context.generation) {
+                    (void)FenceSequenceCanvases(
+                        *state, *unchanged, false,
+                        revert_authority->previous_sequence_revision,
+                        revert_authority->previous_sequence_epoch);
+                }
+            }
             if (!FileIoAccepted(status)) {
                 ShowCoreError(*state, window, UiText(UiStringId::Text0659));
             }
@@ -15910,18 +18479,8 @@ std::optional<LRESULT> RouteDocumentCommand(
             return 0;
         }
         case IDM_FILE_AUTOSAVE_NOW: {
-            std::wstring path = state->Document().shell.recovery_path;
-            if (path.empty() && !ChooseInkpodPath(window, true, path)) {
-                return 0;
-            }
-            if (!QueueAutosave(*state, context, path)) {
+            if (!QueueAutosave(*state, context, {})) {
                 ShowCoreError(*state, window, UiText(UiStringId::Text0076));
-            } else {
-                try {
-                    state->Document().shell.recovery_path = path;
-                } catch (const std::bad_alloc&) {
-                    ShowCoreError(*state, window, UiText(UiStringId::Text0070));
-                }
             }
             return 0;
         }
@@ -17229,6 +19788,9 @@ std::optional<LRESULT> RouteAnimationCommand(
                 context,
                 std::nullopt,
                 next ? INKPOD_SEQUENCE_NEXT : INKPOD_SEQUENCE_PREVIOUS);
+            if (state->lifetime.smoke_test) {
+                state->lifetime.smoke_last_sequence_switch_status = status;
+            }
             if (!FileIoAccepted(status)
                 && status != INKPOD_STATUS_CANCELLED) {
                 ShowCoreError(*state, window, UiText(UiStringId::Text0539));
@@ -20777,8 +23339,8 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                 && committed_document->generation != result->context.generation) {
                 committed_document = nullptr;
             }
+            state->routing.sequence_navigation_pending = false;
             if (result->interactive_activation) {
-                state->routing.sequence_navigation_pending = false;
                 if (result->mutation_status == INKPOD_STATUS_OK) {
                     // A renderer failure cannot undo an already committed Core.
                     // Publish the reserved path authority even in that case.
@@ -20789,7 +23351,15 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                         result->status = publication_status;
                     }
                 } else if (committed_document != nullptr) {
-                    state->Documents().CancelIdentityReservation(committed_document->id);
+                    const inkpod::app::IdentityReservationToken
+                        identity_reservation{
+                            result->identity_reservation_token};
+                    if (identity_reservation) {
+                        (void)state->Documents().CancelIdentityReservation(
+                            committed_document->id,
+                            identity_reservation);
+                        result->identity_reservation_token = 0U;
+                    }
                 }
             }
             if (result->replace_document && committed_document != nullptr) {
@@ -21415,6 +23985,10 @@ std::optional<LRESULT> RouteCachedProgressTimerMessage(
     }
     const WorkspaceWindowId workspace_id = owner->id;
     if (file_poll) {
+        // Retire owners completed by an earlier poll before the current poll's
+        // callbacks establish their final menu/progress presentation. Owners
+        // completed by this poll are picked up by the next bounded timer tick.
+        DrainRecoveryCleanupOwners(*state);
         // Poll only dispatches ready UI callbacks; an unfinished Core future
         // is never waited here. A callback may close or switch workspaces.
         state->file_io.Poll();
@@ -21505,15 +24079,14 @@ std::optional<LRESULT> RouteTimerAndCloseMessage(
                 return 0;
             case CommandTimerKind::Autosave:
                 if (state->routing.targets.ActiveDocumentView()
-                    && state->Documents().Current() != nullptr
-                    && !state->Document().shell.recovery_path.empty()) {
+                    && state->Documents().Current() != nullptr) {
                     InkpodDocumentInfo info{};
                     if (QueryDocument(*state, info)
                         && (info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U) {
                         QueueAutosave(
                             *state,
                             token->context,
-                            state->Document().shell.recovery_path);
+                            {});
                     }
                 }
                 return 0;

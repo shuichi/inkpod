@@ -43,7 +43,7 @@ product file routeは後続milestoneまで公開しない。
 | required replay epoch               |                                           27 |
 | native output                       |                      exact-current `.inkpod` |
 | native top-level format             |                                           32 |
-| C ABI                               |                                           25 |
+| C ABI                               |                                           30 |
 
 フォーマットフリーズ前のため、reader、writer、clipboard fragment は常に
 exact-current version だけを受理する。grammar、serialized field、selector の

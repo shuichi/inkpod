@@ -181,6 +181,19 @@ fn config() -> InkpodCoreConfig {
     }
 }
 
+#[test]
+fn abi_001_rejects_immediately_previous_abi_version() {
+    let mut previous = config();
+    previous.abi_version = 29;
+    let mut core = ptr::null_mut();
+    // SAFETY: The complete configuration and unique empty output slot are live.
+    assert_eq!(
+        unsafe { inkpod_core_create(&previous, &mut core) },
+        INKPOD_STATUS_INCOMPATIBLE_ABI
+    );
+    assert!(core.is_null());
+}
+
 fn dispatch() -> InkpodDispatchResult {
     InkpodDispatchResult {
         struct_size: size_of::<InkpodDispatchResult>() as u32,
@@ -3398,6 +3411,20 @@ fn ffi_contract_light_table_sequence_and_owned_buffers() {
             INKPOD_STATUS_OK
         );
         assert_eq!(document_observation(&active), before_no_op);
+        let mut no_op_switch = InkpodSequenceSwitchRequest {
+            struct_size: size_of::<InkpodSequenceSwitchRequest>() as u32,
+            ..InkpodSequenceSwitchRequest::default()
+        };
+        assert_eq!(
+            inkpod_core_sequence_switch_request(
+                sequence_core,
+                0,
+                INKPOD_SEQUENCE_SWITCH_AUTOSAVE,
+                &mut no_op_switch,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(no_op_switch.flags, 0);
 
         let before_stopped_step = queried_document_info(sequence_core);
         let mut step_plan = InkpodSequenceStepPlan {
@@ -3492,6 +3519,24 @@ fn ffi_contract_light_table_sequence_and_owned_buffers() {
         assert_eq!(step_plan.result_class, INKPOD_SEQUENCE_STEP_WRAPPED);
         assert_eq!(step_plan.target_index, 1);
 
+        // A normal clean savepoint does not imply that the serializable
+        // history generation is represented by the existing artifact. The
+        // edit/Undo round trip leaves a redo tail and must be surfaced in the
+        // issue-time sequence token even though DIRTY and RECOVERED are clear.
+        let history_color = color(71, 72, 73, 255);
+        assert_eq!(
+            inkpod_core_set_main_line_color(sequence_core, &history_color, &mut result),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_undo(sequence_core, &mut result),
+            INKPOD_STATUS_OK
+        );
+        let clean_history = queried_document_info(sequence_core);
+        assert_eq!(clean_history.flags & INKPOD_DOCUMENT_FLAG_DIRTY, 0);
+        assert_eq!(clean_history.flags & INKPOD_DOCUMENT_FLAG_RECOVERED, 0);
+        assert_ne!(clean_history.flags & INKPOD_DOCUMENT_FLAG_CAN_REDO, 0);
+
         let mut switch_request = InkpodSequenceSwitchRequest {
             struct_size: size_of::<u32>() as u32,
             ..InkpodSequenceSwitchRequest::default()
@@ -3519,7 +3564,10 @@ fn ffi_contract_light_table_sequence_and_owned_buffers() {
             ),
             INKPOD_STATUS_OK
         );
-        assert_eq!(switch_request.flags, INKPOD_SEQUENCE_SWITCH_REQUIRED);
+        assert_eq!(
+            switch_request.flags,
+            INKPOD_SEQUENCE_SWITCH_REQUIRED | INKPOD_SEQUENCE_SWITCH_SOURCE_RECOVERY_REQUIRED
+        );
         assert_eq!(
             inkpod_core_sequence_commit_autosaved_switch(sequence_core, ptr::null(), &mut active,),
             INKPOD_STATUS_INVALID_ARGUMENT
@@ -3533,6 +3581,16 @@ fn ffi_contract_light_table_sequence_and_owned_buffers() {
                 &mut active,
             ),
             INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        let mut weakened_request = switch_request;
+        weakened_request.flags &= !INKPOD_SEQUENCE_SWITCH_SOURCE_RECOVERY_REQUIRED;
+        assert_eq!(
+            inkpod_core_sequence_commit_autosaved_switch(
+                sequence_core,
+                &weakened_request,
+                &mut active,
+            ),
+            INKPOD_STATUS_INVALID_STATE
         );
         let mut stale_request = switch_request;
         stale_request.source_document_revision += 1;

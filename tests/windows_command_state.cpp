@@ -563,6 +563,17 @@ int main() {
         return 2;
     }
 
+    inputs.document.file_io_pending = true;
+    states = ComputeCommandStates(inputs);
+    if (IsCommandEnabled(states, IDM_FILE_SAVE)
+        || IsCommandEnabled(states, IDM_FILE_SAVE_AS)
+        || !IsCommandEnabled(states, IDM_FILE_COMPACT_COPY)
+        || IsCommandEnabled(states, IDM_FILE_REVERT)
+        || IsCommandEnabled(states, IDM_FILE_REVERT_PARTIAL)) {
+        return 31;
+    }
+    inputs.document.file_io_pending = false;
+
     inputs.document.recent_document_count = 2U;
     states = ComputeCommandStates(inputs);
     if (!IsCommandEnabled(states, IDM_FILE_RECENT_1)

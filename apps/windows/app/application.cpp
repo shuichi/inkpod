@@ -89,6 +89,9 @@ InkpodStatus StartCore(ApplicationHost& state) noexcept {
 
 InkpodStatus StopCore(ApplicationHost& state) noexcept {
     state.file_io.CancelAll();
+    const InkpodStatus recovery_cleanup_status =
+        windows::ui::runtime::DrainRecoveryCleanupsForShutdown(state)
+        ? INKPOD_STATUS_OK : INKPOD_STATUS_INVALID_STATE;
     windows::ui::CloseAllHistoryVisualizationDialogs(state);
     const InkpodStatus clipboard_status = inkpod_clipboard_release(&state.clipboard);
     if (state.effects.task != nullptr) {
@@ -201,6 +204,7 @@ InkpodStatus StopCore(ApplicationHost& state) noexcept {
              report_status,
              graph_status,
              run_graph_status,
+             recovery_cleanup_status,
              cut_status}) {
         if (status != INKPOD_STATUS_OK) {
             return status;

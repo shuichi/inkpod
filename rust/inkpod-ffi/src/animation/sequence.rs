@@ -912,7 +912,9 @@ pub(crate) fn parse_sequence_switch_request(
     input: &InkpodSequenceSwitchRequest,
 ) -> Result<SequenceSwitchRequest, u32> {
     if input.feature_flags != INKPOD_FEATURE_NONE
-        || input.flags & !INKPOD_SEQUENCE_SWITCH_REQUIRED != 0
+        || input.flags
+            & !(INKPOD_SEQUENCE_SWITCH_REQUIRED | INKPOD_SEQUENCE_SWITCH_SOURCE_RECOVERY_REQUIRED)
+            != 0
     {
         return Err(fail(
             INKPOD_STATUS_UNSUPPORTED,
@@ -930,13 +932,22 @@ pub(crate) fn parse_sequence_switch_request(
             | u128::from(input.target_document_uuid_low),
         target_source_generation: input.target_source_generation,
         target_index: input.target_index,
+        source_recovery_required: input.flags & INKPOD_SEQUENCE_SWITCH_SOURCE_RECOVERY_REQUIRED
+            != 0,
     };
     let required = if request.requires_switch() {
         INKPOD_SEQUENCE_SWITCH_REQUIRED
     } else {
         0
     };
-    if input.flags != required {
+    let source_recovery_required = if request.requires_source_recovery() {
+        INKPOD_SEQUENCE_SWITCH_SOURCE_RECOVERY_REQUIRED
+    } else {
+        0
+    };
+    if input.flags != (required | source_recovery_required)
+        || (request.requires_source_recovery() && !request.requires_switch())
+    {
         return Err(fail(
             INKPOD_STATUS_INVALID_ARGUMENT,
             "sequence switch request flags do not match its identities",
@@ -965,6 +976,10 @@ fn write_sequence_switch_request(
     output.target_index = request.target_index;
     output.flags = if request.requires_switch() {
         INKPOD_SEQUENCE_SWITCH_REQUIRED
+    } else {
+        0
+    } | if request.requires_source_recovery() {
+        INKPOD_SEQUENCE_SWITCH_SOURCE_RECOVERY_REQUIRED
     } else {
         0
     };

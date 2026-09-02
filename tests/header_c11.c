@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-_Static_assert(INKPOD_ABI_VERSION == 25U, "unexpected ABI version");
+_Static_assert(INKPOD_ABI_VERSION == 30U, "unexpected ABI version");
 _Static_assert(sizeof(InkpodIoConfig) == 48U, "I/O config layout drift");
 _Static_assert(sizeof(InkpodIoPath) == 24U, "I/O path layout drift");
 _Static_assert(sizeof(InkpodIoRequest) == 72U, "I/O request layout drift");
@@ -10,7 +10,20 @@ _Static_assert(sizeof(InkpodIoJobInfo) == 104U, "I/O job info layout drift");
 _Static_assert(sizeof(InkpodIoFileIdentity) == 32U, "I/O identity layout drift");
 _Static_assert(sizeof(InkpodIoItemInfo) == 80U, "I/O item layout drift");
 _Static_assert(sizeof(InkpodIoCacheInfo) == 72U, "I/O cache info layout drift");
-_Static_assert(sizeof(InkpodIoRecoveryMetadata) == 160U, "I/O recovery metadata layout drift");
+_Static_assert(sizeof(InkpodIoRecoveryPairProof) == 168U, "I/O recovery pair proof layout drift");
+_Static_assert(sizeof(InkpodIoRecoveryMetadata) == 328U, "I/O recovery metadata layout drift");
+_Static_assert(sizeof(InkpodIoRecoveryArtifactStamp) == 80U, "I/O recovery artifact stamp layout drift");
+_Static_assert(sizeof(InkpodIoRecoveryArtifactProof) == 168U, "I/O recovery artifact proof layout drift");
+_Static_assert(INKPOD_IO_OPEN_RASTER_PAIR == UINT32_C(22), "raster-pair open kind drift");
+_Static_assert(INKPOD_IO_REVERT_CURRENT == (UINT64_C(1) << 4), "revert-current flag drift");
+_Static_assert(INKPOD_IO_RECOVERY_ARTIFACT_READONLY == (UINT32_C(1) << 0), "recovery artifact flag drift");
+_Static_assert(INKPOD_IO_RECOVERY_PAIR_NONE == UINT32_C(0), "recovery pair none kind drift");
+_Static_assert(INKPOD_IO_RECOVERY_PAIR_COMMITTED == UINT32_C(1), "recovery pair committed kind drift");
+_Static_assert(INKPOD_IO_RECOVERY_PAIR_PLANNED == UINT32_C(2), "recovery pair planned kind drift");
+_Static_assert(INKPOD_IO_RECOVERY_PAIR_REPAIR_NEEDED == UINT32_C(3), "recovery pair repair kind drift");
+_Static_assert(INKPOD_IO_RESULT_AUTHORITY_REPAIRED == (UINT64_C(1) << 3), "I/O authority-repaired flag drift");
+_Static_assert(INKPOD_IO_RESULT_AUTHORITY_REVOKED == (UINT64_C(1) << 4), "I/O authority-revoked flag drift");
+_Static_assert(INKPOD_SEQUENCE_SWITCH_SOURCE_RECOVERY_REQUIRED == (UINT32_C(1) << 1), "sequence preservation flag drift");
 _Static_assert(sizeof(InkpodSubpaletteSourceInput) == 32U, "subpalette source layout drift");
 _Static_assert(sizeof(InkpodSubpaletteRasterInput) == 32U, "subpalette raster layout drift");
 _Static_assert(sizeof(InkpodSubpaletteInfo) == 32U, "subpalette info layout drift");

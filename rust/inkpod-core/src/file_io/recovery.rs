@@ -2,7 +2,21 @@ use super::job::{FileIoJob, Prepared};
 use super::model::{FileIoItem, FileIoKind, FileIoRequest};
 use super::prepare::format_extension;
 use crate::{Core, CoreError};
-use inkpod_io::{IoManager, JobContext, RecoveryCandidate};
+use inkpod_io::{IoManager, JobContext, RecoveryArtifactProof, RecoveryCandidate};
+use std::io::ErrorKind;
+use std::path::PathBuf;
+
+fn exact_discard_error(error: inkpod_io::IoError) -> CoreError {
+    match error {
+        inkpod_io::IoError::ChangedDuringRead | inkpod_io::IoError::ConfirmationRequired => {
+            CoreError::FileConflict
+        }
+        inkpod_io::IoError::Io(error) if error.kind() == ErrorKind::NotFound => {
+            CoreError::FileConflict
+        }
+        other => other.into(),
+    }
+}
 
 pub(super) fn prepare(
     manager: &IoManager,
@@ -66,6 +80,32 @@ pub(super) fn prepare(
 }
 
 impl FileIoJob {
+    /// Starts proof-checked cleanup of one obsolete append-only recovery
+    /// generation. The job owns the copied path and proof, does not borrow a
+    /// live Core, and leaves changed/mixed artifacts untouched.
+    pub fn start_recovery_discard_exact(
+        manager: IoManager,
+        path: PathBuf,
+        proof: RecoveryArtifactProof,
+    ) -> Result<Self, CoreError> {
+        let request = FileIoRequest::new(FileIoKind::RecoveryDiscard, vec![path.clone()]);
+        super::prepare::validate_request(&request)?;
+        let worker_manager = manager.clone();
+        let mut job = Self::allocate(None, manager.clone(), request)?;
+        job.pending = Some(super::job::Pending::Prepare(manager.submit(
+            move |context| {
+                let result = (|| {
+                    worker_manager
+                        .discard_recovery_with_proof(&path, proof, &context)
+                        .map_err(exact_discard_error)?;
+                    Ok((Prepared::Recovery(Vec::new()), Vec::new()))
+                })();
+                Ok(result)
+            },
+        )?));
+        Ok(job)
+    }
+
     /// Borrows bounded typed metadata for one completed recovery candidate.
     /// Missing/corrupt metadata does not erase the corresponding native candidate.
     pub fn recovery(&self, index: usize) -> Result<&RecoveryCandidate, CoreError> {
@@ -144,5 +184,5 @@ pub(super) fn export_sequence(
         }
         context.set_work(index as u64 + 1, total);
     }
-    Ok((Prepared::Output, Vec::new()))
+    Ok((Prepared::Output(None), Vec::new()))
 }

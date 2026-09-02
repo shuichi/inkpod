@@ -1,5 +1,29 @@
 use super::*;
 
+pub(super) fn progress_flags(progress: &inkpod_core::FileIoProgress) -> u64 {
+    (if progress.truncated {
+        INKPOD_IO_RESULT_TRUNCATED
+    } else {
+        0
+    }) | (if progress.installing {
+        INKPOD_IO_RESULT_INSTALLING
+    } else {
+        0
+    }) | (if progress.cut_descriptor {
+        INKPOD_IO_RESULT_CUT_DESCRIPTOR
+    } else {
+        0
+    }) | (if progress.authority_repaired {
+        INKPOD_IO_RESULT_AUTHORITY_REPAIRED
+    } else {
+        0
+    }) | if progress.authority_revoked {
+        INKPOD_IO_RESULT_AUTHORITY_REVOKED
+    } else {
+        0
+    }
+}
+
 fn identity_record(identity: inkpod_io::FileIdentity, physical: bool) -> InkpodIoFileIdentity {
     InkpodIoFileIdentity {
         struct_size: size_of::<InkpodIoFileIdentity>() as u32,
@@ -105,19 +129,7 @@ pub unsafe extern "C" fn inkpod_io_job_poll(
             completed_work: progress.completed_work,
             total_work: progress.total_work,
             result_count: progress.result_count,
-            flags: (if progress.truncated {
-                INKPOD_IO_RESULT_TRUNCATED
-            } else {
-                0
-            }) | (if progress.installing {
-                INKPOD_IO_RESULT_INSTALLING
-            } else {
-                0
-            }) | if progress.cut_descriptor {
-                INKPOD_IO_RESULT_CUT_DESCRIPTOR
-            } else {
-                0
-            },
+            flags: progress_flags(&progress),
         };
         // SAFETY: Caller output was validated before query.
         unsafe { out_info.write(info) };

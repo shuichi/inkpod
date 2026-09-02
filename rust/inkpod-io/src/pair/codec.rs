@@ -8,6 +8,7 @@ pub(super) fn encode(record: &Record) -> IoResult<Vec<u8>> {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(MAGIC);
     bytes.extend_from_slice(&PAIR_JOURNAL_VERSION.to_le_bytes());
+    bytes.push(u8::from(record.committed));
     for member in [&record.native, &record.raster] {
         for name in [&member.name, &member.stage, &member.backup] {
             validate_leaf(name)?;
@@ -57,6 +58,15 @@ pub(super) fn decode(bytes: &[u8]) -> IoResult<Record> {
             "paired journal version is unsupported",
         ));
     }
+    let committed = match reader.fixed::<1>()?[0] {
+        0 => false,
+        1 => true,
+        _ => {
+            return Err(IoError::InvalidInput(
+                "paired journal commit phase is invalid",
+            ));
+        }
+    };
     let native = reader.member()?;
     let raster = reader.member()?;
     if reader.offset != payload.len() {
@@ -106,7 +116,11 @@ pub(super) fn decode(bytes: &[u8]) -> IoResult<Record> {
             }
         }
     }
-    Ok(Record { native, raster })
+    Ok(Record {
+        committed,
+        native,
+        raster,
+    })
 }
 
 struct Reader<'a> {

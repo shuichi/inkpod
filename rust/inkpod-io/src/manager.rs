@@ -1,5 +1,6 @@
 use crate::backend;
 use crate::cache::{BudgetKind, ImageCache};
+use crate::companion::CompanionDirectoryCache;
 use crate::executor::{Executor, Work};
 use crate::file_lock::{FileLocks, lock_unpoisoned};
 use crate::image::{ByteLease, ImageLease};
@@ -21,6 +22,7 @@ use std::sync::{Arc, Mutex};
 pub(crate) struct ManagerInner {
     pub(crate) config: IoConfig,
     pub(crate) cache: ImageCache,
+    pub(crate) companion_directories: Mutex<CompanionDirectoryCache>,
     pub(crate) locks: FileLocks,
     pub(crate) pair_owners: Mutex<BTreeSet<PathBuf>>,
 }
@@ -42,6 +44,7 @@ impl IoManager {
         Ok(Self {
             inner: Arc::new(ManagerInner {
                 cache: ImageCache::new(config.clone()),
+                companion_directories: Mutex::new(CompanionDirectoryCache::default()),
                 locks: FileLocks::default(),
                 pair_owners: Mutex::new(BTreeSet::new()),
                 config,
@@ -87,6 +90,7 @@ impl IoManager {
     /// Removes cache ownership; leased allocations remain charged until dropped.
     pub fn clear_cache(&self) {
         self.inner.cache.clear();
+        lock_unpoisoned(&self.inner.companion_directories).clear();
     }
 
     /// Returns physical authority for an existing file, or stable normalized path
@@ -101,6 +105,13 @@ impl IoManager {
             }
             Err(error) => Err(error.into()),
         }
+    }
+
+    /// Resolves an absolute normalized path through its longest existing
+    /// ancestor. The result is runtime-only path authority and performs no file
+    /// creation or mutation.
+    pub fn normalize_path(&self, path: &Path) -> IoResult<PathBuf> {
+        backend::resolve(path)
     }
 
     /// Reserves budget before a consumer allocates a second decoded/tiled copy.

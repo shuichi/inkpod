@@ -417,6 +417,7 @@ if(WIN32)
     add_executable(inkpod_windows_session_recovery_tests
         apps/windows/app/application_data_paths.cpp
         apps/windows/app/application_data_paths.h
+        apps/windows/app/document_identity.cpp
         apps/windows/app/document_identity.h
         apps/windows/app/identity.h
         apps/windows/app/session_recovery.cpp

@@ -137,6 +137,14 @@ foreach(REQUIRED IN ITEMS
         message(FATAL_ERROR "Cached file-job statusbar adapter contract is missing: ${REQUIRED}")
     endif()
 endforeach()
+string(REGEX REPLACE "[ \t\r\n]+" " " FILE_PROGRESS_COMPACT "${FILE_PROGRESS_IMPLEMENTATION}")
+string(FIND "${FILE_PROGRESS_COMPACT}"
+    "case INKPOD_IO_SEQUENCE_AUTO: case INKPOD_IO_SEQUENCE_FILES: return UiText(UiStringId::JobStatusSequence); case INKPOD_IO_SEQUENCE_SWITCH: return UiText(UiStringId::JobStatusCellLoading);"
+    SEQUENCE_PROGRESS_NAMES)
+if(SEQUENCE_PROGRESS_NAMES LESS 0)
+    message(FATAL_ERROR
+        "Automatic sequence discovery and individual cell loading must have distinct status text")
+endif()
 string(REPLACE "\r\n" "\n" FILE_IO_IMPLEMENTATION "${FILE_IO_IMPLEMENTATION}")
 string(FIND "${FILE_IO_IMPLEMENTATION}" "std::size_t FileIoController::CopyProgress(" COPY_BEGIN)
 if(COPY_BEGIN LESS 0 OR NOT FILE_IO_IMPLEMENTATION MATCHES "kMaximumJobs = 128U")
@@ -734,6 +742,32 @@ foreach(FORBIDDEN IN ITEMS
 endforeach()
 
 string(REGEX REPLACE "[ \t\r\n]+" " " RUNTIME_COMPACT "${RUNTIME}")
+string(FIND "${RUNTIME}" "InkpodStatus QueueResolvedSequenceReplacement(" SEQUENCE_REPLACE_BEGIN)
+string(FIND "${RUNTIME}" "InkpodStatus SwitchSequenceTarget(" SEQUENCE_REPLACE_END)
+if(SEQUENCE_REPLACE_BEGIN LESS 0 OR SEQUENCE_REPLACE_END LESS_EQUAL SEQUENCE_REPLACE_BEGIN)
+    message(FATAL_ERROR "Sequence replacement status boundary is missing")
+endif()
+math(EXPR SEQUENCE_REPLACE_LENGTH "${SEQUENCE_REPLACE_END} - ${SEQUENCE_REPLACE_BEGIN}")
+string(SUBSTRING "${RUNTIME}" ${SEQUENCE_REPLACE_BEGIN} ${SEQUENCE_REPLACE_LENGTH}
+    SEQUENCE_REPLACE_IMPLEMENTATION)
+string(REGEX REPLACE "[ \t\r\n]+" " " SEQUENCE_REPLACE_COMPACT
+    "${SEQUENCE_REPLACE_IMPLEMENTATION}")
+string(FIND "${SEQUENCE_REPLACE_COMPACT}"
+    "if (source_recovery_required) { PresentStatusBarPart( workspace->windows.status_bar, 5U, UiText(UiStringId::Text0227)); }"
+    SEQUENCE_RECOVERY_STATUS)
+if(SEQUENCE_RECOVERY_STATUS LESS 0)
+    message(FATAL_ERROR
+        "Only source recovery may present an immediate sequence-switch status")
+endif()
+foreach(FORBIDDEN IN ITEMS
+        "UiText(UiStringId::Text0226)"
+        "source_recovery_required ?")
+    string(FIND "${SEQUENCE_REPLACE_COMPACT}" "${FORBIDDEN}" OFFSET)
+    if(NOT OFFSET LESS 0)
+        message(FATAL_ERROR
+            "Ordinary cached cell switches must wait for polled job progress: ${FORBIDDEN}")
+    endif()
+endforeach()
 foreach(REQUIRED IN ITEMS
         "InitializeJobProgress( state.Workspace().windows.status_bar, state.Workspace().job_progress_state,"
         "static_cast<inkpod::app::FileIoController*>(context)->Cancel(request_id)"

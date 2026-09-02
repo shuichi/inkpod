@@ -1058,6 +1058,14 @@ source asset is fully opaque; any source containing non-opaque alpha requires
 plane and is not itself composited as the base surface. Its pixel values, depth, and
 alpha remain exact.
 
+This is the native format's lossless raster-import promise: canonical decoded
+dimensions, native 8/16-bit channel depth, straight alpha, and every pixel value
+remain exact in the immutable Genesis asset and can be reconstructed without the
+source codec. It is not a promise to retain or regenerate the encoded source bytes,
+compression/packet/chunk layout, palette representation, optional container
+metadata, provenance, source name, or source path. Those values, when retained at
+all, are optional non-replay metadata.
+
 `EDIT` kind-1 payload is a schema-1 frame: 1 editor-state schema `u32 = 7`; 2
 persisted `EditorRevision u64`; 3 exact canonical EditorState frame; 4 its
 `EditorStateDigest`. Revision starts at 1, is excluded from the digest, and the
@@ -1313,6 +1321,42 @@ storage, and public DTO metadata is revalidated before every conversion.
 
 ## Save and savepoint
 
+### Raster-pair resolution and runtime authority
+
+Normal editable File Open and Sequence activation share one same-directory,
+same-stem raster-pair resolver. Selecting a raster derives its `.inkpod` candidate.
+If that native candidate exists, the reader completes the ordinary staged v32
+decode, asset validation, and replay, then compares its normal raster composite
+with the selected raster's canonical decode. Dimensions, native depth, straight
+alpha, every pixel value, and representable DPI must match the META field-21
+format. Encoded byte layout and optional metadata are not comparison inputs. A
+valid existing sidecar is preferred and yields `Committed` authority. An absent
+sidecar yields an in-memory clean Genesis and a session-only `Planned` pair.
+Malformed/non-current native data, replay failure, format disagreement, or decoded
+mismatch is an explicit conflict and never silently falls back to a new raster
+document. A separately invoked explicit raster import has authority `None` and
+does not claim the existing native path.
+
+Candidate names come from a bounded same-directory scan using the filesystem
+backend's normalized stem plus ASCII-insensitive extension matching. Existing
+case is retained. Zero native matches derives lowercase `.inkpod`; zero raster
+matches derives the format's lowercase extension (`.tif` for TIFF). One match is
+authoritative, while multiple case variants or TIFF `.tif`/`.tiff` aliases are
+ambiguous conflicts. The resolver retains and rescans this candidate set after
+replay and canonical comparison as part of its runtime proof.
+
+`Planned`, `Committed`, and `None`, the two filesystem paths, file identities, and
+complete stamps are runtime/session authority. They are not stored in META, GENS,
+ASST, PROC, EDIT, CKPT, or EXTM. The resolver uses existing field 21 plus the
+canonical Genesis/assets/composite contracts, so this behavior does not change
+top-level format v32, replay epoch 27, or any section/record schema. A future
+serialized pair path, filesystem identity, or source digest would require a new
+top-level format version under the current-only policy.
+These are exactly three authority states. A missing raster companion is the
+repair-needed substate of `Committed`, not a fourth authority. Recovery metadata
+uses four proof kinds only to encode that missing-member evidence alongside the
+three runtime states.
+
 Section layout and digests are finalized before a short-named same-directory
 temporary file is opened. Header, aligned section records, asset chunks,
 procedure payloads, and the directory are streamed directly; neither read nor
@@ -1327,7 +1371,9 @@ commit and replacement of an existing Windows destination.
 
 Only a successful normal save publishes the prospective document StateId and
 EditorStateDigest savepoints plus the normal-save path. A pathless document requires
-an explicit destination. A file produced by normal save reopens clean with its
+an explicit destination. Authority `None` is pathless; `Planned` instead supplies
+a conditional first-save destination without granting a savepoint or overwrite
+authority. A file produced by normal save reopens clean with its
 cursor, branches, history, EditorState, and both savepoints restored; Undo/Redo
 compare persistent state identity rather than file timestamp. Any encode,
 write, flush, cancellation, or replacement failure advances neither savepoint
@@ -1337,7 +1383,11 @@ nor path.
 
 The Windows normal Save/Save As route uses `inkpod-io` to write both `name.inkpod`
 and the same-stem raster selected by META field 21: `.png`, `.tif`, `.tga`, or
-`.bmp`. TIFF input also accepts `.tiff`. Both outputs are prepared before either
+`.bmp`. TIFF input also accepts `.tiff`; an existing planned/committed `.tiff`
+authority remains its normal-save target, while a newly derived pair uses `.tif`.
+Save As always derives a new native/raster pair; a flat raster or format-only
+output is an explicit Export and cannot become a Save As destination.
+Both outputs are prepared before either
 destination is replaced. The raster is the document's normal visible composite,
 without Light Table, guides, or selection overlays. PNG/TIFF preserve RGBA16;
 TGA/BMP reject a 16-bit companion instead of silently reducing depth. Existing
@@ -1345,24 +1395,66 @@ explicit display/instruction exports retain their own established output contrac
 
 The manager acquires destination path/physical-file locks in one order, validates
 observed identities/lengths/timestamps, stages and flushes both files, and uses
-backups plus a checksummed bounded installation journal. Unknown existing targets
+backups plus a checksummed bounded installation journal. The runtime pair journal
+v2 records a prepared/committed phase (this is not the native `.inkpod` format
+version). Its prepared record is WRITE_THROUGH-published from a same-directory
+private stage before either final member can change. After both replacement
+proofs, the final alias scan, and directory durability succeed, one separately
+staged committed-phase marker is atomically published. Recovery never infers
+success merely because both replacement identities are present: without that
+marker it restores/removes both members from the prepared proof. Before the
+first existing final is removed, a durable rollback marker authorizes that
+temporary missing state. Windows binds the final stamp check and deletion to an
+exclusive handle, then publishes the staged replacement without overwrite; an
+external file created in that gap wins the path and leaves conflict evidence
+instead of being overwritten. Other backends perform an immediate final stamp
+recheck but cannot eliminate the remaining portable path-operation race without
+external directory coordination. Unknown existing targets
 and external changes require confirmation of both output paths. A clean normal
 save can repair a missing raster companion. The final owner-thread apply advances
-the path and both savepoints only after both replacements succeed.
+the path and both savepoints only after both replacements succeed. That successful
+apply converts `Planned` to `Committed`; neither installation order nor one
+installed member is a user-visible save-success state. Explicit Save of a
+`Planned` pair materializes the first pair even when the imported document remains
+clean. For a complete clean `Committed` pair, physical rewrites may be omitted
+only after both identities/complete stamps and external-conflict state are
+revalidated. That optimization is not required: a conforming implementation may
+execute the normal pair transaction and rewrite both members.
+
+An unselected same-stem `.inkpod` alias or same-format raster alias is not an
+overwrite choice: it makes pair identity ambiguous and is rejected even after
+overwrite confirmation. Preparation retains the bounded candidate set and
+rechecks it after staging, after native replacement but before raster replacement,
+and once more after both replacements before success cleanup. A final conflict
+verifies the replacement/backup proofs and explicitly restores or removes both
+old members before journal cleanup. No portable filesystem primitive can prevent
+an external process from adding an alias after that final scan; a subsequent
+open/save detects the ambiguity.
 
 Two independent directory entries cannot be renamed as one atomic operation.
 An installation failure attempts rollback; if cleanup/rollback cannot finish,
 the journal and proven temporary/backup paths are retained for recovery on the
 next open/save. Recovery will not overwrite externally changed files merely to
-hide a partial installation. Cancellation before installation leaves original
+hide a partial installation. Committed cleanup removes the prepared journal
+before the commit marker; if interrupted in that interval, the marker's complete
+checksummed record is sufficient to verify both replacements and finish cleanup.
+The committed marker is the success authority when it briefly coexists with the
+rollback marker during cleanup; it is removed last.
+Cancellation before installation leaves original
 files unchanged; cancellation during installation is finalized before removing
 the live Core's save fence. The UI must not report partial installation as success.
 
 Autosave/recovery, explicit compaction, and Batch native output remain native-only.
-They do not create the normal raster companion or adopt normal path/savepoint
-authority. The low-level `Core::save`/format streaming APIs remain native-only
-primitives for these explicit callers and fixtures; the application normal Save
-route uses the paired file job.
+They do not create the normal raster companion or advance normal savepoints.
+Standalone recovery open always has authority `None`; original/source paths and
+pair proof are duplicate/conflict hints there and never reconstruct overwrite
+authority. Sequence-associated target recovery is the sole exception: it may
+adopt the target-specific `Committed`, `Planned`, or repair-needed runtime pair
+only after the ordinary pair resolver reproduces the exact v4 proof and the
+recovery UUID, canonical Genesis, and raster-source identity all match. The
+low-level `Core::save`/format streaming APIs remain native-only primitives for
+these explicit callers and fixtures; the application normal Save route uses the
+paired file job.
 
 The format crate exposes a cancellation hook and tests no-partial-commit
 semantics. `save_recovery_atomic` uses the same same-directory temporary-file
@@ -1380,6 +1472,23 @@ association and its artifact generation are `DocumentSession` state, while the
 Prompt/Autosave policy is the readable `animation.sequenceCellSwitch` field in
 `%LOCALAPPDATA%\inkpod\Settings\inkpod-settings.json`. Neither is a
 new `.inkpod` section or serialized canonical procedure.
+
+An initial sequence `BIND` does not decode or replace the current document. It
+rekeys the source to the current document UUID/new runtime owner generation and
+rebases the active frontend file binding to the current pair paths/identities;
+document/history/dirty/savepoints and pair authority remain unchanged. A real
+replacement instead adopts only the target resolver's authority.
+
+Whole-document Revert is an ABI v30 runtime operation, not a native schema
+feature. It is accepted only as `OPEN_NATIVE` with both force-reload and explicit
+current-document Revert flags, and apply requires the exact live current native
+path and document UUID. The staged v32 data replaces document/history/editor/
+savepoints while runtime sequence catalog, active index, every live stable view
+ID/logical view state, the next-view ID, and inactive recovery associations
+survive. Render-cache entries for the replaced document revision are invalidated.
+The frontend then rebases the active
+pair binding and projection to the new owner generation. None of these runtime
+associations are serialized into the v32 container.
 
 ### Historical version evolution through v29
 
@@ -1439,18 +1548,25 @@ adopts a normal path, clears dirty state, or overwrites the prior normal file.
 Windows chooses a recovery path below the user's local application-data root
 and sends the path plus typed association metadata to Rust. Rust performs native
 and sidecar writes, modification-time checks, listing, decoding, and deletion.
-The sidecar is current-version 2, bounded to 512 KiB, with checked UTF-8 lengths
+The sidecar is current-version 4, bounded to 512 KiB, with checked UTF-8 lengths
 and a digest. Document UUID, session/generation, timestamp, optional original/source
-paths, and original file/path/untitled identity are distinct fields; the untitled
-identity UUID need not equal the document UUID. Missing or malformed metadata
-does not hide an otherwise valid native recovery candidate.
+paths, original file/path/untitled identity, and optional exact runtime pair proof
+are distinct fields; the untitled identity UUID need not equal the document UUID.
+Pair proof is a fixed two-slot record: committed stores two complete physical
+stamps; planned stores a normalized missing-native identity plus a complete raster
+stamp; repair-needed stores a complete native stamp plus a normalized missing-raster
+identity; authority-none stores two zero slots. Missing identities use the runtime
+normalized-path namespace and never enter the procedure journal. Missing or malformed
+metadata does not hide an otherwise valid native recovery candidate.
 
 Timer/manual autosaves and startup review use the shared asynchronous file jobs.
 The startup catalog offers explicit open/discard/defer; normal Open can probe
 for a newer adjacent recovery. Only explicit discard or a successful normal save
-removes the associated artifacts. Recovery metadata is advisory and never grants
-authority to overwrite the former normal destination. The bounded pure metadata
-codec is also exposed through the C ABI for fixtures without performing I/O.
+removes the associated artifacts. Recovery metadata is advisory by itself and never
+grants authority to overwrite the former normal destination. Sequence recovery
+re-adoption requires independent current pair resolution and exact proof equality.
+The bounded pure metadata codec is also exposed through the C ABI for fixtures
+without performing I/O.
 
 Explicit compaction is a separate export. Core first returns a confirmation
 token containing omitted event/procedure counts and document/editor/journal
@@ -1483,7 +1599,8 @@ versions are rejected without compatibility shims.
 
 31. Opaque common-raster Genesis advances the top-level format to v32 without
 changing runtime replay epoch 27, payload schemas, the primitive/InkScript
-catalogs, or C ABI v25. An optional initial-raster source may be paired with
+catalogs, or the then-current C ABI v29. Current ABI v30 later adds only the
+runtime current-document Revert flag and does not change these bytes. An optional initial-raster source may be paired with
 `SolidWhite` only when its exact RGBA8/16 source is fully opaque; a source with
 any non-opaque alpha must retain `Transparent`. In both cases the imported
 pixels remain exact in the editable MainLine plane, and the immutable source

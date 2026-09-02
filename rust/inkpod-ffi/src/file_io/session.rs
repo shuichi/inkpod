@@ -35,6 +35,7 @@ pub unsafe extern "C" fn inkpod_core_io_sequence_switch_submit(
     request: *const InkpodSequenceSwitchRequest,
     source_recovery: *const InkpodIoPath,
     target_recovery: *const InkpodIoPath,
+    target_recovery_proof: *const InkpodIoRecoveryArtifactProof,
     metadata: *const InkpodIoRecoveryMetadata,
     out_job: *mut *mut InkpodIoJob,
 ) -> u32 {
@@ -45,26 +46,78 @@ pub unsafe extern "C" fn inkpod_core_io_sequence_switch_submit(
             validate_struct(request, "InkpodSequenceSwitchRequest")?;
         }
         // SAFETY: The complete request record was validated above.
-        let request = crate::animation::parse_sequence_switch_request(unsafe { &*request })?;
+        let raw_request = unsafe { &*request };
+        if raw_request.feature_flags & !INKPOD_SEQUENCE_SWITCH_TARGET_RASTER_PAIR != 0 {
+            return Err(fail(
+                INKPOD_STATUS_UNSUPPORTED,
+                "sequence switch request contains unsupported submit flags",
+            ));
+        }
+        let resolve_raster_pair =
+            raw_request.feature_flags & INKPOD_SEQUENCE_SWITCH_TARGET_RASTER_PAIR != 0;
+        let mut core_request = *raw_request;
+        core_request.feature_flags = INKPOD_FEATURE_NONE;
+        let request = crate::animation::parse_sequence_switch_request(&core_request)?;
         // SAFETY: Optional path spans remain readable until copied here.
         let source = unsafe { optional_path(source_recovery)? };
         // SAFETY: Same optional path contract as the source.
         let target = unsafe { optional_path(target_recovery)? };
+        let target_proof = if target_recovery_proof.is_null() {
+            None
+        } else {
+            // SAFETY: Non-null proof exposes its complete size-prefixed stamps.
+            Some(unsafe { recovery::parse_artifact_proof(target_recovery_proof)? })
+        };
         let metadata = if metadata.is_null() {
             None
         } else {
             // SAFETY: Non-null metadata exposes all size-prefixed text spans.
             Some(unsafe { recovery::parse_metadata(metadata)? })
         };
+        if !request.requires_switch()
+            && (target.is_some() || target_proof.is_some() || resolve_raster_pair)
+        {
+            return Err(fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "same-cell sequence no-op does not accept a target artifact",
+            ));
+        }
         // SAFETY: The live handles satisfy owner affinity and shared service lifetime.
-        let job = FileIoJob::start_sequence_switch(
-            &unsafe { owner_core(core)? }.core,
-            unsafe { manager_ref(manager)? }.clone(),
-            request,
-            source,
-            target,
-            metadata,
-        )
+        let owner = &unsafe { owner_core(core)? }.core;
+        let manager = unsafe { manager_ref(manager)? }.clone();
+        let job = if resolve_raster_pair {
+            if target_proof.is_some() {
+                return Err(fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "sequence raster-pair target does not accept a recovery proof",
+                ));
+            }
+            let target = target.ok_or_else(|| {
+                fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "sequence raster-pair target path is missing",
+                )
+            })?;
+            FileIoJob::start_sequence_raster_pair_switch(
+                owner, manager, request, source, target, metadata,
+            )
+        } else {
+            let target = if request.requires_switch() {
+                match (target, target_proof) {
+                    (Some(path), Some(proof)) => Some((path, proof)),
+                    (None, None) => None,
+                    _ => {
+                        return Err(fail(
+                            INKPOD_STATUS_INVALID_ARGUMENT,
+                            "explicit sequence recovery requires its exact proof",
+                        ));
+                    }
+                }
+            } else {
+                None
+            };
+            FileIoJob::start_sequence_switch(owner, manager, request, source, target, metadata)
+        }
         .map_err(map_core_error)?;
         // SAFETY: Unique ownership transfers to the validated empty output slot.
         unsafe {

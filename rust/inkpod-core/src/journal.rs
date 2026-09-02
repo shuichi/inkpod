@@ -811,6 +811,7 @@ impl Core {
         prefix.savepoint = None;
         prefix.current_path = None;
         prefix.io_pair_authority = None;
+        prefix.io_pair_plan = None;
         *prefix.canonical_state_cache.get_mut() = None;
         Ok(prefix)
     }

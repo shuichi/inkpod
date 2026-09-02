@@ -12,6 +12,7 @@
 #include <type_traits>
 #include <vector>
 
+static_assert(INKPOD_ABI_VERSION == UINT32_C(30));
 static_assert(std::is_standard_layout_v<InkpodCoreConfig>);
 static_assert(std::is_standard_layout_v<InkpodSnapshotView>);
 static_assert(sizeof(InkpodCoreConfig) == 16U);
@@ -182,6 +183,8 @@ static_assert(sizeof(InkpodSubpaletteItemInfo) == 40U);
 static_assert(std::is_standard_layout_v<InkpodIoRequest>);
 static_assert(std::is_standard_layout_v<InkpodIoJobInfo>);
 static_assert(std::is_standard_layout_v<InkpodIoRecoveryMetadata>);
+static_assert(std::is_standard_layout_v<InkpodIoRecoveryArtifactStamp>);
+static_assert(std::is_standard_layout_v<InkpodIoRecoveryArtifactProof>);
 static_assert(sizeof(InkpodIoConfig) == 48U);
 static_assert(sizeof(InkpodIoPath) == 24U);
 static_assert(sizeof(InkpodIoRequest) == 72U);
@@ -189,7 +192,20 @@ static_assert(sizeof(InkpodIoJobInfo) == 104U);
 static_assert(sizeof(InkpodIoFileIdentity) == 32U);
 static_assert(sizeof(InkpodIoItemInfo) == 80U);
 static_assert(sizeof(InkpodIoCacheInfo) == 72U);
-static_assert(sizeof(InkpodIoRecoveryMetadata) == 160U);
+static_assert(sizeof(InkpodIoRecoveryPairProof) == 168U);
+static_assert(sizeof(InkpodIoRecoveryMetadata) == 328U);
+static_assert(sizeof(InkpodIoRecoveryArtifactStamp) == 80U);
+static_assert(sizeof(InkpodIoRecoveryArtifactProof) == 168U);
+static_assert(INKPOD_IO_OPEN_RASTER_PAIR == UINT32_C(22));
+static_assert(INKPOD_IO_REVERT_CURRENT == (UINT64_C(1) << 4));
+static_assert(INKPOD_IO_RECOVERY_ARTIFACT_READONLY == (UINT32_C(1) << 0));
+static_assert(INKPOD_IO_RECOVERY_PAIR_NONE == UINT32_C(0));
+static_assert(INKPOD_IO_RECOVERY_PAIR_COMMITTED == UINT32_C(1));
+static_assert(INKPOD_IO_RECOVERY_PAIR_PLANNED == UINT32_C(2));
+static_assert(INKPOD_IO_RECOVERY_PAIR_REPAIR_NEEDED == UINT32_C(3));
+static_assert(INKPOD_IO_RESULT_AUTHORITY_REPAIRED == (UINT64_C(1) << 3));
+static_assert(INKPOD_IO_RESULT_AUTHORITY_REVOKED == (UINT64_C(1) << 4));
+static_assert(INKPOD_SEQUENCE_SWITCH_SOURCE_RECOVERY_REQUIRED == (UINT32_C(1) << 1));
 
 extern "C" int inkpod_header_c11_smoke(void);
 
@@ -265,12 +281,12 @@ int InkpodRunAbiSmoke() {
     if (inkpod::app::RunPrivateInkScriptEngineSmoke() != 0) {
         return 162;
     }
-    InkpodCoreConfig old_config{
-        sizeof(InkpodCoreConfig), 16U, INKPOD_FEATURE_NONE};
-    InkpodCore* old_core = nullptr;
-    if (inkpod_core_create(&old_config, &old_core)
+    InkpodCoreConfig previous_config{
+        sizeof(InkpodCoreConfig), 29U, INKPOD_FEATURE_NONE};
+    InkpodCore* previous_core = nullptr;
+    if (inkpod_core_create(&previous_config, &previous_core)
             != INKPOD_STATUS_INCOMPATIBLE_ABI
-        || old_core != nullptr) {
+        || previous_core != nullptr) {
         return 138;
     }
 

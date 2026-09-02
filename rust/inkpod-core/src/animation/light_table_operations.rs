@@ -704,7 +704,9 @@ impl Core {
     /// installs the selected source with a clean document savepoint and preserves the
     /// outgoing flattened document as that item. Deterministic active-target
     /// reconciliation may advance the editor revision and leave the combined session
-    /// dirty. Validation failure is atomic.
+    /// dirty. The replacement clears the previous sequence catalog; it cannot keep
+    /// navigation or file authority associated with the outgoing document.
+    /// Validation failure is atomic.
     pub fn light_table_swap_with_active(
         &mut self,
         item_id: u64,
@@ -783,11 +785,15 @@ impl Core {
         self.reset_view();
         self.current_path = None;
         self.io_pair_authority = None;
+        self.io_pair_plan = None;
         self.persistence_state = persistence_state;
         self.recovered = false;
         self.floating = None;
         self.motion_check = None;
+        self.sequence = None;
+        self.sequence_render_catalog_changed();
         self.publish_editor_session(editor);
+        self.establish_sequence_preservation_baseline();
         self.document_info()
     }
 }

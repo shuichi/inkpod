@@ -412,6 +412,9 @@ pub struct SequenceSwitchRequest {
     pub target_source_generation: u64,
     /// Zero-based natural-order target index.
     pub target_index: u32,
+    /// Whether the source's exact journal/editor generation must be written to
+    /// recovery before this switch can discard the active in-memory session.
+    pub source_recovery_required: bool,
 }
 
 impl SequenceSwitchRequest {
@@ -420,6 +423,12 @@ impl SequenceSwitchRequest {
     pub const fn requires_switch(self) -> bool {
         self.source_document_uuid != self.target_document_uuid
             || self.source_generation != self.target_source_generation
+    }
+
+    /// Reports the issue-time, Core-derived preservation requirement.
+    #[must_use]
+    pub const fn requires_source_recovery(self) -> bool {
+        self.source_recovery_required
     }
 }
 

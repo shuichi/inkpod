@@ -38,6 +38,7 @@ struct DocumentCommandStateInput {
     bool has_document{};
     bool has_saved_path{};
     bool dirty{};
+    bool file_io_pending{};
     bool shooting_frame_present{};
     bool shooting_frame_handle_edit{};
     std::size_t recent_document_count{};

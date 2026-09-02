@@ -21,6 +21,7 @@ pub const INKPOD_IO_RECOVERY_PROBE: u32 = 18;
 pub const INKPOD_IO_EXPORT_SEQUENCE: u32 = 19;
 pub const INKPOD_IO_SEQUENCE_SWITCH: u32 = 20;
 pub const INKPOD_IO_COMPACTED_COPY: u32 = 21;
+pub const INKPOD_IO_OPEN_RASTER_PAIR: u32 = 22;
 pub const INKPOD_IO_QUEUED: u32 = 0;
 pub const INKPOD_IO_RUNNING: u32 = 1;
 pub const INKPOD_IO_READY: u32 = 2;
@@ -31,9 +32,17 @@ pub const INKPOD_IO_FORCE_RELOAD: u64 = 1;
 pub const INKPOD_IO_COMPOSITE_WHITE: u64 = 2;
 pub const INKPOD_IO_OVERWRITE_CONFIRMED: u64 = 4;
 pub const INKPOD_IO_INSTRUCTIONS: u64 = 8;
+pub const INKPOD_IO_REVERT_CURRENT: u64 = 16;
 pub const INKPOD_IO_RESULT_TRUNCATED: u64 = 1;
 pub const INKPOD_IO_RESULT_INSTALLING: u64 = 2;
 pub const INKPOD_IO_RESULT_CUT_DESCRIPTOR: u64 = 4;
+pub const INKPOD_IO_RESULT_AUTHORITY_REPAIRED: u64 = 8;
+pub const INKPOD_IO_RESULT_AUTHORITY_REVOKED: u64 = 16;
+pub const INKPOD_IO_RECOVERY_ARTIFACT_READONLY: u32 = 1;
+pub const INKPOD_IO_RECOVERY_PAIR_NONE: u32 = 0;
+pub const INKPOD_IO_RECOVERY_PAIR_COMMITTED: u32 = 1;
+pub const INKPOD_IO_RECOVERY_PAIR_PLANNED: u32 = 2;
+pub const INKPOD_IO_RECOVERY_PAIR_REPAIR_NEEDED: u32 = 3;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -92,6 +101,7 @@ pub struct InkpodIoRecoveryMetadata {
     pub original_path: InkpodIoPath,
     pub source_path: InkpodIoPath,
     pub identity_path: InkpodIoPath,
+    pub pair_proof: InkpodIoRecoveryPairProof,
 }
 
 #[repr(C)]
@@ -122,6 +132,37 @@ pub struct InkpodIoFileIdentity {
     pub volume: u64,
     pub object_high: u64,
     pub object_low: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodIoRecoveryArtifactStamp {
+    pub struct_size: u32,
+    pub flags: u32,
+    pub identity: InkpodIoFileIdentity,
+    pub length: u64,
+    pub modified_high: u64,
+    pub modified_low: u64,
+    pub changed_high: u64,
+    pub changed_low: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodIoRecoveryArtifactProof {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub native: InkpodIoRecoveryArtifactStamp,
+    pub metadata: InkpodIoRecoveryArtifactStamp,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodIoRecoveryPairProof {
+    pub struct_size: u32,
+    pub kind: u32,
+    pub native: InkpodIoRecoveryArtifactStamp,
+    pub raster: InkpodIoRecoveryArtifactStamp,
 }
 
 #[repr(C)]

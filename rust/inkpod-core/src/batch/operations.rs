@@ -724,6 +724,7 @@ pub(super) fn core_from_document(
     core.document = Some(document);
     core.reset_history(true);
     core.reset_editor_state(true);
+    core.establish_sequence_preservation_baseline();
     core.collect_unreferenced_assets()?;
     Ok(core)
 }

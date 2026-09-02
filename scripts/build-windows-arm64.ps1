@@ -127,13 +127,14 @@ function Resolve-VsDevCmd {
         throw "Visual Studio locator not found: $vswherePath"
     }
 
-    $installationPath = & $vswherePath `
-        -latest `
-        -products "*" `
-        -requires "Microsoft.VisualStudio.Component.VC.Tools.ARM64" `
-        -property "installationPath" |
-        Select-Object -First 1
-    if ($LASTEXITCODE -ne 0 -or
+    $installationPaths = @(& $vswherePath `
+            -latest `
+            -products "*" `
+            -requires "Microsoft.VisualStudio.Component.VC.Tools.ARM64" `
+            -property "installationPath")
+    $vswhereExitCode = $LASTEXITCODE
+    $installationPath = $installationPaths | Select-Object -First 1
+    if ($vswhereExitCode -ne 0 -or
         [string]::IsNullOrWhiteSpace($installationPath)) {
         throw "No Visual Studio installation with the ARM64 MSVC toolchain was found."
     }

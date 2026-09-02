@@ -122,6 +122,12 @@ bool ProjectEditorPresentation(
     }
 }
 
+bool WorkspaceActivelyPresentsView(
+    const WorkspaceWindow& workspace, DocumentViewId view) noexcept {
+    const EditorGroup* group = workspace.editors.Active();
+    return group != nullptr && group->ActiveView() == view;
+}
+
 std::uint64_t SaturatingPaneBytes(
     std::uint64_t current,
     std::size_t item_count,
@@ -987,7 +993,8 @@ bool ApplicationHost::RefreshEditorPresentation(
             WorkspaceWindow* workspace = view == nullptr
                 ? nullptr
                 : WorkspaceForView(view->id);
-            if (workspace != nullptr) {
+            if (workspace != nullptr
+                && WorkspaceActivelyPresentsView(*workspace, view->id)) {
                 workspace->tools.editor = {};
                 workspace->tools.procedure = {};
             }
@@ -1009,16 +1016,17 @@ bool ApplicationHost::RefreshEditorPresentation(
     document->editor_presentation = editor;
     document->has_editor_presentation = true;
 
-    bool projected{};
+    bool projected = true;
     for (std::size_t index = 0U; index < document->ViewCount(); ++index) {
         const DocumentView* view = document->ViewAt(index);
         WorkspaceWindow* workspace = view == nullptr
             ? nullptr
             : WorkspaceForView(view->id);
-        if (workspace != nullptr) {
+        if (workspace != nullptr
+            && WorkspaceActivelyPresentsView(*workspace, view->id)) {
             projected = ProjectEditorPresentation(
                             editor, info_ptr, session, generation, *workspace)
-                || projected;
+                && projected;
         }
     }
     return projected;
@@ -1275,6 +1283,14 @@ bool ApplicationHost::RecordRecentDocument(
     DocumentIdentity identity) noexcept {
     return recent_documents_.Record(
         std::move(path), std::move(identity));
+}
+
+bool ApplicationHost::RecordRecentDocumentReplacing(
+    std::wstring path,
+    DocumentIdentity identity,
+    const DocumentIdentity& previous_identity) noexcept {
+    return recent_documents_.RecordReplacing(
+        std::move(path), std::move(identity), previous_identity);
 }
 
 bool ApplicationHost::RemoveRecentDocument(std::size_t index) noexcept {

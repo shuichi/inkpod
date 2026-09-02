@@ -14,6 +14,7 @@
     { "id": "JobStatusRead", "kind": "text", "ja": "画像読み込み", "en": "Open image", "resource": false },
     { "id": "JobStatusSave", "kind": "text", "ja": "ファイル保存", "en": "Save files", "resource": false },
     { "id": "JobStatusSequence", "kind": "text", "ja": "連番読み込み", "en": "Load sequence", "resource": false },
+    { "id": "JobStatusCellLoading", "kind": "text", "ja": "セルを読み込んでいます", "en": "Loading cell", "resource": false },
     { "id": "JobStatusExport", "kind": "text", "ja": "書き出し", "en": "Export", "resource": false },
     { "id": "JobStatusReference", "kind": "text", "ja": "参照画像読み込み", "en": "Load reference images", "resource": false },
     { "id": "JobStatusLightTable", "kind": "text", "ja": "ライトテーブル画像読み込み", "en": "Load Light Table image", "resource": false },

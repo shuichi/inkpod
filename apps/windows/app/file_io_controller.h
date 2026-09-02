@@ -40,7 +40,20 @@ struct FileIoRequest final {
     // Windows-only activation token, published after Core apply and before its frame.
     std::uint64_t presentation_epoch{};
     std::optional<RecoveryMetadata> recovery_metadata;
+    std::optional<InkpodIoRecoveryArtifactProof> target_recovery_proof;
+    // Present only for application-owned best-effort cleanup.  The backend
+    // removes the pair iff both members still match this exact publication.
+    std::optional<InkpodIoRecoveryArtifactProof> discard_recovery_proof;
     std::optional<InkpodSequenceSwitchRequest> sequence_switch;
+    // The second sequence-switch path is a raster whose same-stem normal pair
+    // must be resolved, rather than a private target recovery artifact.
+    bool sequence_target_raster_pair{};
+    // Non-authoritative cleanup must not replace a completed primary operation's
+    // status or publish a stale local failure.
+    bool best_effort_cleanup{};
+    // Private product-smoke fault: make the fixed repaired-item refresh fail so
+    // the production cancel/final-apply/revoke path is exercised end to end.
+    bool smoke_fail_repaired_item_refresh{};
     std::optional<InkpodCompactionPlan> compaction_plan;
 };
 
@@ -67,6 +80,15 @@ struct FileIoResult final {
     std::uint64_t object_id{};
     std::vector<FileIoItem> items;
     std::vector<RecoveryCandidate> recovery_candidates;
+    bool has_recovery_artifact_proof{};
+    InkpodIoRecoveryArtifactProof recovery_artifact_proof{};
+    // Core-enriched metadata from the same successful append-only publication.
+    // In particular, Sequence recovery carries its exact normal-pair proof.
+    std::optional<RecoveryMetadata> recovery_metadata;
+    bool authority_repaired{};
+    // Owner finalization proved that a published pair can no longer retain a
+    // coherent normal-save authority. Frontend aliases must be revoked.
+    bool authority_revoked{};
     std::wstring error;
     // The completion may transfer these handles by exchanging them with null.
     // Otherwise the controller releases them after the completion returns.
@@ -116,8 +138,16 @@ public:
     [[nodiscard]] bool HasPending() const noexcept;
     [[nodiscard]] bool HasPending(WorkspaceWindowId workspace) const noexcept;
     [[nodiscard]] bool HasPending(DocumentSessionId session, Generation generation) const noexcept;
+    [[nodiscard]] bool HasPendingKind(
+        DocumentSessionId session,
+        Generation generation,
+        std::uint32_t kind) const noexcept;
     // Approved write destinations stay reserved until their UI completion.
     [[nodiscard]] bool ConflictsWithPendingWrite(
+        const FileIoItem& item, std::uint64_t except_request_id = 0U) const noexcept;
+    // Prepared paired opens are not yet published DocumentRegistry sessions.
+    // Keep both resolved members authoritative here until their UI completion.
+    [[nodiscard]] bool ConflictsWithPendingAuthority(
         const FileIoItem& item, std::uint64_t except_request_id = 0U) const noexcept;
     [[nodiscard]] bool Progress(std::uint64_t request_id, InkpodIoJobInfo& output) const noexcept;
     [[nodiscard]] bool Progress(WorkspaceWindowId workspace, InkpodIoJobInfo& output) const noexcept;

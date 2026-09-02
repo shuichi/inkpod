@@ -20,6 +20,7 @@ using inkpod::app::EncodePreviousDocumentPaths;
 using inkpod::app::EncodeRecoveryMetadata;
 using inkpod::app::fixture::EnumerateRecoveryCandidatesInDirectory;
 using inkpod::app::Generation;
+using inkpod::app::NormalizeDocumentFilePath;
 using inkpod::app::fixture::ReadRecoveryMetadata;
 using inkpod::app::RecoveryMetadata;
 using inkpod::app::SequenceRecoveryPath;
@@ -85,17 +86,23 @@ bool WriteRecoveryMetadata(const std::wstring& path, const RecoveryMetadata& met
 }
 
 int TestMetadataCodec() {
-    const RecoveryMetadata metadata = ExampleMetadata(7U);
+    RecoveryMetadata metadata = ExampleMetadata(7U);
+    metadata.original_identity.normalized_path =
+        L"C:\\制作\\セル 7.inkpod";
+    std::wstring expected_identity_path;
     std::vector<std::uint8_t> bytes;
     RecoveryMetadata decoded{};
-    if (!EncodeRecoveryMetadata(metadata, bytes)
+    if (!NormalizeDocumentFilePath(
+            metadata.original_identity.normalized_path,
+            expected_identity_path)
+        || !EncodeRecoveryMetadata(metadata, bytes)
         || !DecodeRecoveryMetadata(bytes.data(), bytes.size(), decoded)
         || decoded.session != metadata.session
         || decoded.generation != metadata.generation
         || decoded.document_uuid_high != metadata.document_uuid_high
         || decoded.original_identity.kind != metadata.original_identity.kind
         || decoded.original_identity.normalized_path
-            != metadata.original_identity.normalized_path
+            != expected_identity_path
         || decoded.original_path != metadata.original_path
         || decoded.source_path != metadata.source_path) {
         return 1;

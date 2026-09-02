@@ -2,11 +2,26 @@ use crate::{CommonRasterFormat, DocumentInfo};
 use inkpod_io::FileIdentity;
 use std::path::PathBuf;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct SavedPair {
     pub native_path: PathBuf,
     pub native: inkpod_io::FileStamp,
+    pub raster_path: PathBuf,
     pub raster: Option<inkpod_io::FileStamp>,
+    /// Exact normalized-path authority when the recorded companion is absent.
+    /// Exactly one of `raster` and `raster_missing` is present.
+    pub raster_missing: Option<FileIdentity>,
+}
+
+/// Runtime-only authority captured while opening a raster whose native
+/// sidecar does not yet exist. This proof permits exactly one first normal
+/// save to materialize that pair if neither filesystem member has changed.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct PlannedPair {
+    pub native_path: PathBuf,
+    pub native_missing: FileIdentity,
+    pub raster_path: PathBuf,
+    pub raster: inkpod_io::FileStamp,
 }
 
 /// A filesystem purpose. Reference and explicit outputs never acquire normal-save authority.
@@ -18,6 +33,8 @@ pub enum FileIoKind {
     OpenRecovery,
     /// Create editable Genesis from one raster source.
     OpenRaster,
+    /// Open a raster editing pair, preferring a validated same-stem native sidecar.
+    OpenRasterPair,
     /// Discover at most 1,000 neighboring sources without replacing the open document.
     SequenceAuto,
     /// Load the explicitly selected raster sequence.
@@ -65,6 +82,9 @@ pub struct FileIoRequest {
     pub paths: Vec<PathBuf>,
     /// Ignore stale cached content for an explicit reload.
     pub force_reload: bool,
+    /// Revert the active native document while retaining its runtime-only sequence catalog.
+    /// Valid only for a forced `OpenNative` of the current normal-save path.
+    pub revert_current: bool,
     /// Composite against white for an explicit export only.
     pub composite_white: bool,
     /// The user authorized replacement of both existing normal-save destinations.
@@ -89,6 +109,7 @@ impl FileIoRequest {
             kind,
             paths,
             force_reload: false,
+            revert_current: false,
             composite_white: false,
             overwrite_confirmed: false,
             instructions: false,
@@ -169,6 +190,13 @@ pub struct FileIoProgress {
     pub installing: bool,
     /// The source is a Cut descriptor; the frontend should route to its Cut owner.
     pub cut_descriptor: bool,
+    /// A failed pair installation restored bytes under new identities and has a
+    /// verified same-target runtime authority repair pending or applied.
+    pub authority_repaired: bool,
+    /// A failed pair installation crossed its disk-publication point and owner
+    /// finalization revoked the affected runtime pair authority. The frontend
+    /// must discard matching path/identity aliases and require Save As next.
+    pub authority_revoked: bool,
 }
 
 /// Result of one owner-thread apply attempt.

@@ -8,21 +8,35 @@ namespace inkpod::app {
 bool RecentDocumentList::Record(
     std::wstring path,
     DocumentIdentity identity) noexcept {
+    return RecordReplacing(std::move(path), std::move(identity), {});
+}
+
+bool RecentDocumentList::RecordReplacing(
+    std::wstring path,
+    DocumentIdentity identity,
+    const DocumentIdentity& previous_identity) noexcept {
     if (path.empty() || !identity) {
         return false;
     }
     RecentDocumentEntry candidate{
         std::move(path), std::move(identity)};
-    const auto end = entries_.begin() + count_;
-    const auto existing = std::find_if(
-        entries_.begin(), end, [&candidate](const RecentDocumentEntry& entry) {
-            return entry.identity == candidate.identity;
-        });
-    if (existing != end) {
-        std::move(existing + 1, end, existing);
-        --count_;
-        entries_[count_] = {};
-    } else if (count_ == entries_.size()) {
+    std::size_t kept{};
+    for (std::size_t index = 0U; index < count_; ++index) {
+        const bool replaced = entries_[index].identity == candidate.identity
+            || (previous_identity
+                && entries_[index].identity == previous_identity);
+        if (!replaced) {
+            if (kept != index) {
+                entries_[kept] = std::move(entries_[index]);
+            }
+            ++kept;
+        }
+    }
+    for (std::size_t index = kept; index < count_; ++index) {
+        entries_[index] = {};
+    }
+    count_ = kept;
+    if (count_ == entries_.size()) {
         --count_;
         entries_[count_] = {};
     }

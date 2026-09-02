@@ -121,7 +121,10 @@ workspace の pane、zone、tab、preset も `layer-plane`、`right`、`right-ta
 `Recovery` の画像、付随 metadata、候補列挙、通常保存との新旧比較、破棄は
 application 共通の Rust I/O manager が処理する。Windows は path と typed metadata を
 渡し、候補確認ダイアログや保存後の画面遷移をジョブ完了後に進める。
-Recovery metadata の現行形式は checksummed binary version 2 で、旧形式を移行しない。
+Recovery metadata の現行形式は checksummed binary version 4 で、旧形式を移行しない。v4 は
+sequence recovery 用の committed／planned／repair-needed-committed／authority-none exact pair proof kind を保持するが、
+runtime authority 自体は `None`／`Planned`／`Committed` の三状態だけであり、
+standalone recovery open の通常保存 authority には使用しない。
 
 ## Decode and save rules
 

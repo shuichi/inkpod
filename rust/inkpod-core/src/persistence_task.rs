@@ -51,6 +51,8 @@ struct PersistenceStamp {
     current_path: Option<PathBuf>,
     recovered: bool,
     raster_format: CommonRasterFormat,
+    pair_authority: Option<Box<file_io::SavedPair>>,
+    pair_plan: Option<Box<file_io::PlannedPair>>,
 }
 
 impl PersistenceStamp {
@@ -68,6 +70,8 @@ impl PersistenceStamp {
             current_path: core.current_path.clone(),
             recovered: core.recovered,
             raster_format: core.raster_file_format,
+            pair_authority: core.io_pair_authority.clone().map(Box::new),
+            pair_plan: core.io_pair_plan.clone().map(Box::new),
         }
     }
 
@@ -107,6 +111,26 @@ pub struct DocumentOpenToken {
 #[derive(Clone, Debug)]
 pub struct DocumentSaveToken {
     stamp: PersistenceStamp,
+}
+
+impl DocumentSaveToken {
+    pub(crate) fn document_uuid(&self) -> Result<u128, CoreError> {
+        self.stamp.document_uuid.ok_or(CoreError::NoDocument)
+    }
+
+    /// Validates only the originating Core lifetime. This is intentionally
+    /// weaker than save-stamp validation and is used solely to finalize a
+    /// worker-reported installation failure: no document/savepoint publication
+    /// occurs, but the original owner's install fence and runtime pair authority
+    /// must still be repaired even if an internal invariant made the stamp stale.
+    pub(crate) fn validate_owner(&self, core: &Core) -> Result<(), CoreError> {
+        if !Arc::ptr_eq(&self.stamp.authority.owner, &core.persistence_state.owner) {
+            return Err(CoreError::InvalidState(
+                "document save token belongs to a different Core",
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Immutable COW document state detached from its live Core for file preparation.
@@ -322,13 +346,43 @@ impl Core {
     pub fn adopt_opened_document(
         &mut self,
         token: DocumentOpenToken,
+        staged: Core,
+        path: Option<&Path>,
+    ) -> Result<DocumentInfo, CoreError> {
+        self.adopt_staged_document(token, staged, path, false)
+    }
+
+    /// Adopts a forced reload of the current native document while retaining
+    /// its runtime-only sequence catalog and every live logical view. The
+    /// native container deliberately excludes the directory-derived catalog
+    /// and secondary views, while its primary view is only the state captured
+    /// at Save. Revert therefore carries the current primary/secondary view
+    /// states and their ID high-watermark across the staged replacement. UUID
+    /// mismatch fails closed instead of attaching runtime state to unrelated
+    /// bytes.
+    pub(crate) fn adopt_reloaded_document(
+        &mut self,
+        token: DocumentOpenToken,
+        staged: Core,
+        path: Option<&Path>,
+    ) -> Result<DocumentInfo, CoreError> {
+        if token.stamp.current_path.as_deref() != path || path.is_none() {
+            return Err(CoreError::FileConflict);
+        }
+        self.adopt_staged_document(token, staged, path, true)
+    }
+
+    fn adopt_staged_document(
+        &mut self,
+        token: DocumentOpenToken,
         mut staged: Core,
         path: Option<&Path>,
+        retain_sequence: bool,
     ) -> Result<DocumentInfo, CoreError> {
         self.ensure_no_active_stroke()?;
         token.stamp.validate(self)?;
         staged.ensure_no_active_stroke()?;
-        staged.document_info()?;
+        let staged_info = staged.document_info()?;
         if path.is_some_and(|path| path.as_os_str().is_empty())
             || (staged.recovered && path.is_some())
         {
@@ -336,11 +390,49 @@ impl Core {
                 "invalid opened document path authority",
             ));
         }
+        let retained_sequence = if retain_sequence {
+            let current = self.document_info()?;
+            if current.document_uuid != staged_info.document_uuid {
+                return Err(CoreError::FileConflict);
+            }
+            self.sequence.clone()
+        } else {
+            None
+        };
         staged.current_path = path.map(Path::to_path_buf);
         if staged.current_path.is_none() {
             staged.io_pair_authority = None;
+        } else {
+            staged.io_pair_plan = None;
         }
         staged.inherit_file_runtime(self)?;
+        if retain_sequence {
+            staged.sequence = retained_sequence;
+            // Views belong to the live DocumentSession rather than to the
+            // serialized document state being reverted. Preserve both their
+            // logical state and Core-local identities so every frontend view
+            // binding remains valid after the same-session replacement. Keep
+            // render revision allocation monotonic because the Canvas routes
+            // retain the same session/generation across Revert, but discard
+            // document-derived tiles from the staged or previous contents.
+            staged.view = self.view;
+            std::mem::swap(&mut staged.secondary_views, &mut self.secondary_views);
+            staged.next_view_id = self.next_view_id;
+            staged.next_render_tile_revision = self.next_render_tile_revision;
+            staged.next_preview_revision = self.next_preview_revision;
+            staged.render_cache.clear();
+            // Preserve the shared usage ledger before invalidating the old
+            // catalog. Exported snapshots may outlive this Core replacement,
+            // and pending prefetch work must be cancelled by catalog_changed.
+            // Every fallible validation has completed, so this swap is part of
+            // the single publication sequence below.
+            std::mem::swap(
+                &mut staged.sequence_render_cache,
+                &mut self.sequence_render_cache,
+            );
+            staged.sequence_render_catalog_changed();
+            staged.establish_sequence_preservation_baseline();
+        }
         *self = staged;
         self.document_info()
     }
@@ -425,6 +517,9 @@ impl Core {
         }
         let next_authority = self.persistence_state.next()?;
         let current_path = path.to_path_buf();
+        let mut output = self.document_info()?;
+        output.dirty = false;
+        output.recovered = false;
         let editor = self.editor_session.as_mut().ok_or(CoreError::NoDocument)?;
         self.savepoint = Some(self.current_state);
         editor.savepoint = Some(editor.digest);
@@ -432,7 +527,8 @@ impl Core {
         self.persistence_state = next_authority;
         self.recovered = false;
         self.io_install_pending = false;
-        self.document_info()
+        self.establish_sequence_preservation_baseline();
+        Ok(output)
     }
 
     /// Preserves application-owned file services across staged document replacement.

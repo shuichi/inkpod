@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -98,6 +99,11 @@ struct LocatorAsyncResult {
     std::array<std::uint8_t, 9U * 9U * 4U> neighborhood{};
 };
 
+struct RecoveryCleanupEntry final {
+    std::wstring path;
+    InkpodIoRecoveryArtifactProof proof{};
+};
+
 struct SequenceSwitchAsyncResult {
     PostedNotificationToken token;
     CommandContext context;
@@ -105,9 +111,42 @@ struct SequenceSwitchAsyncResult {
     InkpodSequenceSwitchRequest request{sizeof(InkpodSequenceSwitchRequest)};
     std::wstring source_recovery_path;
     RecoveryMetadata source_metadata{};
+    InkpodIoRecoveryArtifactProof source_artifact_proof{};
+    InkpodCommonRasterFormat source_raster_format_hint{};
+    std::wstring source_previous_recovery_path;
+    InkpodIoRecoveryArtifactProof source_previous_artifact_proof{};
+    std::uint64_t source_previous_artifact_generation{};
+    bool source_previous_artifact_published{};
+    std::wstring source_shell_recovery_path;
+    InkpodIoRecoveryArtifactProof source_shell_artifact_proof{};
+    std::uint64_t source_shell_artifact_generation{};
+    bool source_shell_artifact_published{};
+    std::uint64_t source_persistence_epoch{};
+    // DocumentRegistry capability for the exact target authority reserved by
+    // this replacement. Stored as the fixed token value here to avoid making
+    // frontend_state.h depend on document_session.h (which owns this record).
+    std::uint64_t identity_reservation_token{};
+    std::vector<RecoveryCleanupEntry> recovery_cleanup;
     std::wstring target_recovery_path;
-    std::wstring next_recovery_path;
+    InkpodIoRecoveryArtifactProof target_artifact_proof{};
+    std::uint64_t target_artifact_generation{};
+    bool target_artifact_published{};
     RecoveryMetadata target_metadata{};
+    InkpodCommonRasterFormat target_raster_format_hint{};
+    std::wstring target_source_path;
+    std::wstring target_pair_raster_path;
+    std::wstring target_pair_native_path;
+    // Independently allocated before Core apply. The shell and sequence slot
+    // each own their raster path, so completion can publish both by move
+    // without allocating after the document replacement has committed.
+    std::wstring target_binding_raster_path;
+    DocumentIdentity target_pair_raster_identity{};
+    DocumentIdentity target_pair_native_identity{};
+    // Recovery replacement must resolve to the exact pair authority captured
+    // with the target binding, not merely the same Genesis/UUID.
+    DocumentIdentity target_expected_raster_identity{};
+    bool target_pair_native_exists{};
+    bool target_pair_resolved{};
     bool source_autosaved{};
     bool interactive_activation{};
     bool replace_document{};
@@ -154,6 +193,23 @@ struct AppLifetimeState {
     bool smoke_test{};
     int smoke_dirty_prompt_choice{IDNO};
     std::uint32_t smoke_dirty_prompt_count{};
+    std::uint32_t smoke_pair_overwrite_prompt_count{};
+    bool smoke_lock_pair_raster_during_install{};
+    bool smoke_fail_repaired_item_refresh{};
+    bool smoke_hold_sequence_auto_publication{};
+    bool smoke_async_sequence_import{};
+    std::function<InkpodStatus()> smoke_deferred_sequence_auto_publication;
+    std::function<void()> smoke_after_native_save_path_selected;
+    std::function<void()> smoke_after_native_save_committed;
+    std::function<void(
+        const std::wstring&,
+        const std::wstring&,
+        const DocumentIdentity&,
+        const DocumentIdentity&)> smoke_after_sequence_pair_reserved;
+    InkpodStatus smoke_last_sequence_switch_status{INKPOD_STATUS_INVALID_STATE};
+    // Type-erased owners for proof-bound exact cleanup chains. The UI timer
+    // keeps them alive across bounded FileIo saturation and shutdown drains.
+    std::vector<std::shared_ptr<void>> recovery_cleanup_owners;
     std::wstring smoke_raster_path;
     std::wstring smoke_native_save_path;
     std::vector<std::wstring> smoke_sequence_paths;
@@ -167,11 +223,27 @@ struct AppLifetimeState {
 struct DocumentShellState {
     std::wstring current_path;
     std::wstring source_path;
+    // A raster opened for editing owns a deterministic same-stem native
+    // destination before the first successful normal save.  This is a plan,
+    // not normal path authority: Revert must continue to require current_path.
+    std::wstring planned_native_path;
+    // The raster member of the editable pair.  It remains associated after a
+    // successful save so either member can identify the same document session.
+    std::wstring pair_raster_path;
+    // Non-authoritative format memory retained after a terminal pair-authority
+    // revoke so the required next Save As can derive its raster companion.
+    InkpodCommonRasterFormat pair_raster_format_hint{};
     std::wstring display_name;
     // A Batch preview is a display-only document. Batch commands issued while
     // it is active keep targeting this exact issue-time source view.
     std::optional<CommandContext> batch_preview_source_context;
     std::wstring recovery_path;
+    // A recovery path is authoritative only when the same successful durable
+    // publication installed this exact proof and monotonically increasing
+    // runtime generation.  A planned or failed attempt is never stored here.
+    InkpodIoRecoveryArtifactProof recovery_artifact_proof{};
+    std::uint64_t recovery_artifact_generation{};
+    bool recovery_artifact_published{};
     std::wstring recovery_original_path;
     std::uint64_t smoke_layer_id{};
 };

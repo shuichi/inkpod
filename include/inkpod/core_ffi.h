@@ -10,7 +10,7 @@
  *
  * @par 共通の構造体規則
  * 拡張可能な入出力構造体は先頭が `uint32_t struct_size` である。呼び出し側は
- * `struct_size = sizeof(その構造体)` を設定する。Core は ABI v17 で既知の末尾まで
+ * `struct_size = sizeof(その構造体)` を設定する。Core は現行 ABI v30 で既知の末尾まで
  * 読み書きできるサイズ、アラインメント、stride、count と全バイト範囲を検証してから
  * ポインターを参照する。構造体ポインターは個別に NULL 可と明記したものを除き非 NULL。
  * count が 0 の任意 span だけはデータポインターを NULL にできる。入力構造体、出力構造体、
@@ -66,7 +66,7 @@
 extern "C" {
 #endif
 
-#define INKPOD_ABI_VERSION UINT32_C(25)
+#define INKPOD_ABI_VERSION UINT32_C(30)
 #define INKPOD_SNAPSHOT_SOURCE_SEQUENCE_PRISTINE UINT32_C(1)
 #define INKPOD_FEATURE_NONE UINT64_C(0)
 
@@ -626,6 +626,14 @@ typedef uint32_t InkpodSequenceStepResult;
 #define INKPOD_SEQUENCE_SWITCH_PROMPT UINT32_C(1)
 #define INKPOD_SEQUENCE_SWITCH_AUTOSAVE UINT32_C(2)
 #define INKPOD_SEQUENCE_SWITCH_REQUIRED (UINT32_C(1) << 0)
+/* The Core issue-time token requires an exact source recovery generation even
+ * when document/editor savepoints currently report clean. This covers journal
+ * and redo-branch freshness relative to the last represented artifact. */
+#define INKPOD_SEQUENCE_SWITCH_SOURCE_RECOVERY_REQUIRED (UINT32_C(1) << 1)
+/* Submit-only transport flag: target_recovery names the selected raster and
+ * the worker resolves its same-stem normal pair. Core request identity fields
+ * retain their ordinary sequence semantics. */
+#define INKPOD_SEQUENCE_SWITCH_TARGET_RASTER_PAIR (UINT64_C(1) << 0)
 typedef uint32_t InkpodSequenceActivationKind;
 #define INKPOD_SEQUENCE_ACTIVATION_NOOP UINT32_C(1)
 #define INKPOD_SEQUENCE_ACTIVATION_BIND UINT32_C(2)
@@ -5228,7 +5236,8 @@ InkpodStatus inkpod_core_sequence_activation_commit(
  * @brief Captures a side-effect-free sequence switch token at command issue time.
  *
  * `policy` must be PROMPT or AUTOSAVE. Success writes exact source/target UUID,
- * generation, document/editor revisions, and REQUIRED status. The token is
+ * generation, document/editor revisions, REQUIRED switch status, and the
+ * Core-derived SOURCE_RECOVERY_REQUIRED preservation fence. The token is
  * caller-owned and contains no borrowed pointers.
  */
 InkpodStatus inkpod_core_sequence_switch_request(
@@ -6793,6 +6802,10 @@ typedef struct InkpodIoManager InkpodIoManager;
 /** @brief Rust-owned asynchronous result. Poll/cancel are thread-safe; release is externally synchronized. */
 typedef struct InkpodIoJob InkpodIoJob;
 
+/* Successful Cell READY results contain exactly two items: item 0 is the
+ * opened native file and item 1 is its validated raster companion candidate.
+ * Item 1 uses the resolved TIFF alias and has a physical identity when present
+ * or a normalized-path identity when missing. CUT_DESCRIPTOR remains one item. */
 #define INKPOD_IO_OPEN_NATIVE UINT32_C(1)
 #define INKPOD_IO_OPEN_RECOVERY UINT32_C(2)
 #define INKPOD_IO_OPEN_RASTER UINT32_C(3)
@@ -6802,6 +6815,12 @@ typedef struct InkpodIoJob InkpodIoJob;
 #define INKPOD_IO_REFERENCE_FOLDER UINT32_C(7)
 #define INKPOD_IO_LIGHT_TABLE_ADD UINT32_C(8)
 #define INKPOD_IO_LIGHT_TABLE_RELOAD UINT32_C(9)
+/* READY/COMPLETE results contain exactly two items in destination order:
+ * item 0 is the native .inkpod member and item 1 is the raster member. The
+ * first non-installing READY advertises physical identities of the staged
+ * replacements; successful same-volume installation preserves those future
+ * final identities. Reserve both before the first apply. Once INSTALLING is
+ * set, the final apply may not be rejected because disk commit may be durable. */
 #define INKPOD_IO_SAVE_PAIR UINT32_C(10)
 #define INKPOD_IO_AUTOSAVE UINT32_C(11)
 #define INKPOD_IO_EXPORT_RASTER UINT32_C(12)
@@ -6814,6 +6833,10 @@ typedef struct InkpodIoJob InkpodIoJob;
 #define INKPOD_IO_EXPORT_SEQUENCE UINT32_C(19)
 #define INKPOD_IO_SEQUENCE_SWITCH UINT32_C(20)
 #define INKPOD_IO_COMPACTED_COPY UINT32_C(21)
+/* READY results contain exactly two items in resolver order: item 0 is the
+ * selected raster and item 1 is its same-stem native candidate. When the
+ * native member is absent, item 1 has a normalized-path identity (kind 2). */
+#define INKPOD_IO_OPEN_RASTER_PAIR UINT32_C(22)
 #define INKPOD_IO_QUEUED UINT32_C(0)
 #define INKPOD_IO_RUNNING UINT32_C(1)
 #define INKPOD_IO_READY UINT32_C(2)
@@ -6824,9 +6847,22 @@ typedef struct InkpodIoJob InkpodIoJob;
 #define INKPOD_IO_COMPOSITE_WHITE (UINT64_C(1) << 1)
 #define INKPOD_IO_OVERWRITE_CONFIRMED (UINT64_C(1) << 2)
 #define INKPOD_IO_INSTRUCTIONS (UINT64_C(1) << 3)
+/* Revert the active native document at its existing authority while retaining
+ * its runtime-only sequence catalog. Valid only with OPEN_NATIVE and FORCE_RELOAD. */
+#define INKPOD_IO_REVERT_CURRENT (UINT64_C(1) << 4)
 #define INKPOD_IO_RESULT_TRUNCATED (UINT64_C(1) << 0)
 #define INKPOD_IO_RESULT_INSTALLING (UINT64_C(1) << 1)
 #define INKPOD_IO_RESULT_CUT_DESCRIPTOR (UINT64_C(1) << 2)
+/* A failed same-target unconfirmed pair install restored the old bytes under
+ * verified current identities. Final READY items contain those identities;
+ * owner final apply repairs runtime authority without advancing savepoints. */
+#define INKPOD_IO_RESULT_AUTHORITY_REPAIRED (UINT64_C(1) << 3)
+/* A failed same-target pair install crossed disk publication but could not
+ * retain or exactly repair runtime authority. This flag appears only after
+ * mandatory owner finalization has revoked that authority. It remains
+ * queryable on the terminal failed job; matching frontend aliases must be
+ * cleared and the next normal save must use Save As. */
+#define INKPOD_IO_RESULT_AUTHORITY_REVOKED (UINT64_C(1) << 4)
 
 typedef struct InkpodIoConfig {
     uint32_t struct_size;
@@ -6845,6 +6881,47 @@ typedef struct InkpodIoPath {
     const uint8_t* path;
     uint64_t path_bytes;
 } InkpodIoPath;
+
+/** Opaque file-object identity, or a hash of the normalized destination when absent. */
+typedef struct InkpodIoFileIdentity {
+    uint32_t struct_size;
+    uint32_t kind;
+    uint64_t volume;
+    uint64_t object_high;
+    uint64_t object_low;
+} InkpodIoFileIdentity;
+
+#define INKPOD_IO_RECOVERY_ARTIFACT_READONLY (UINT32_C(1) << 0)
+
+/* Exact observation of one pair/recovery member. The signed 128-bit time
+ * values use two's-complement high/low words. */
+typedef struct InkpodIoRecoveryArtifactStamp {
+    uint32_t struct_size;
+    uint32_t flags;
+    InkpodIoFileIdentity identity;
+    uint64_t length;
+    uint64_t modified_high;
+    uint64_t modified_low;
+    uint64_t changed_high;
+    uint64_t changed_low;
+} InkpodIoRecoveryArtifactStamp;
+
+#define INKPOD_IO_RECOVERY_PAIR_NONE UINT32_C(0)
+#define INKPOD_IO_RECOVERY_PAIR_COMMITTED UINT32_C(1)
+#define INKPOD_IO_RECOVERY_PAIR_PLANNED UINT32_C(2)
+#define INKPOD_IO_RECOVERY_PAIR_REPAIR_NEEDED UINT32_C(3)
+
+/* Exact normal-pair authority captured with one recovery generation. Committed
+ * carries two physical stamps. Planned carries a kind-2 missing native identity
+ * (`volume == UINT64_MAX`) with zero stamp fields plus one physical raster stamp.
+ * Repair-needed carries one physical native stamp plus a kind-2 missing raster
+ * identity (`volume == UINT64_MAX`) with zero stamp fields. */
+typedef struct InkpodIoRecoveryPairProof {
+    uint32_t struct_size;
+    uint32_t kind;
+    InkpodIoRecoveryArtifactStamp native;
+    InkpodIoRecoveryArtifactStamp raster;
+} InkpodIoRecoveryPairProof;
 
 /* Input text is copied during submit. Query text borrows the caller buffer.
  * flags: 1=metadata present, 2=metadata diagnostic; identity kinds:
@@ -6866,6 +6943,7 @@ typedef struct InkpodIoRecoveryMetadata {
     InkpodIoPath original_path;
     InkpodIoPath source_path;
     InkpodIoPath identity_path;
+    InkpodIoRecoveryPairProof pair_proof;
 } InkpodIoRecoveryMetadata;
 
 /** All paths/spans are copied during submit. No file bytes cross this boundary. */
@@ -6901,14 +6979,14 @@ typedef struct InkpodIoJobInfo {
     uint64_t flags;
 } InkpodIoJobInfo;
 
-/** Opaque file-object identity, or a hash of the normalized destination when absent. */
-typedef struct InkpodIoFileIdentity {
+/* Binds one native recovery publication to its metadata sidecar. Runtime only;
+ * it is retained with the recovery path and never serialized into history. */
+typedef struct InkpodIoRecoveryArtifactProof {
     uint32_t struct_size;
-    uint32_t kind;
-    uint64_t volume;
-    uint64_t object_high;
-    uint64_t object_low;
-} InkpodIoFileIdentity;
+    uint32_t reserved;
+    InkpodIoRecoveryArtifactStamp native;
+    InkpodIoRecoveryArtifactStamp metadata;
+} InkpodIoRecoveryArtifactProof;
 
 typedef struct InkpodIoItemInfo {
     uint32_t struct_size;
@@ -6947,15 +7025,42 @@ InkpodStatus inkpod_core_bind_io_manager(InkpodCore* core, InkpodIoManager* mana
  * Capturing a Core requires its owner thread. All input paths are copied before return. */
 InkpodStatus inkpod_core_io_submit(InkpodCore* core, InkpodIoManager* manager, const InkpodIoRequest* request, InkpodIoJob** out_job);
 InkpodStatus inkpod_core_io_autosave_submit(InkpodCore* core, InkpodIoManager* manager, const uint8_t* path, uint64_t path_bytes, const InkpodIoRecoveryMetadata* metadata, InkpodIoJob** out_job);
+/* Removes an obsolete append-only recovery generation only if its native and
+ * metadata members still match `proof`. Missing, changed, or mixed artifacts
+ * are retained and the completed job reports INKPOD_STATUS_FILE_CONFLICT.
+ * The job has no document result, so `core` may be NULL and cleanup remains
+ * valid after its former document has closed. A non-NULL Core must be supplied
+ * on its owner thread. */
+InkpodStatus inkpod_core_io_recovery_discard_exact_submit(InkpodCore* core, InkpodIoManager* manager, const uint8_t* path, uint64_t path_bytes, const InkpodIoRecoveryArtifactProof* proof, InkpodIoJob** out_job);
 /** Optional recovery paths may be NULL or have zero path_bytes. A real switch
- * requires source_recovery when either document or EditorState is dirty.
- * For a clean source, omitting source_recovery skips its encoding/installation;
- * the target is prepared off-thread and committed once after owner validation.
+ * requires source_recovery exactly when its issue-time token has
+ * INKPOD_SEQUENCE_SWITCH_SOURCE_RECOVERY_REQUIRED. Core sets that bit for
+ * dirty editor/document state, recovered or repair-needed authority, and a
+ * journal/editor generation newer than the last represented artifact, even if
+ * Undo returned the visible state to a clean savepoint. When the bit is clear,
+ * omitting source_recovery skips its encoding/installation; the target is
+ * prepared off-thread and committed once after owner validation.
  * An explicit source path retains installation even for a clean source.
- * REQUIRED describes a cell switch, not dirty state. Same-cell no-ops do no I/O. */
-InkpodStatus inkpod_core_io_sequence_switch_submit(InkpodCore* core, InkpodIoManager* manager, const InkpodSequenceSwitchRequest* request, const InkpodIoPath* source_recovery, const InkpodIoPath* target_recovery, const InkpodIoRecoveryMetadata* metadata, InkpodIoJob** out_job);
+ * An explicitly supplied non-raster target_recovery requires the exact proof
+ * returned by its successful recovery-writing job. Missing, malformed,
+ * non-current, changed, or wrong-document content fails atomically;
+ * only an omitted target_recovery permits flattened sequence activation.
+ * REQUIRED describes a cell switch, not dirty state. Same-cell no-ops do no I/O.
+ * INKPOD_SEQUENCE_SWITCH_TARGET_RASTER_PAIR is submit-only: target_recovery is
+ * required and names the selected raster. A successful raster-pair result has
+ * exactly two items: raster at index 0, then same-stem native at index 1; an
+ * absent native has a normalized-path identity (kind 2). */
+InkpodStatus inkpod_core_io_sequence_switch_submit(InkpodCore* core, InkpodIoManager* manager, const InkpodSequenceSwitchRequest* request, const InkpodIoPath* source_recovery, const InkpodIoPath* target_recovery, const InkpodIoRecoveryArtifactProof* target_recovery_proof, const InkpodIoRecoveryMetadata* metadata, InkpodIoJob** out_job);
 InkpodStatus inkpod_core_io_compacted_copy_submit(InkpodCore* core, InkpodIoManager* manager, const uint8_t* path, uint64_t path_bytes, const InkpodCompactionPlan* plan, InkpodIoJob** out_job);
-/* Two-pass packed UTF-8 query, excluding NUL. Output path spans borrow buffer. */
+/* Exactly one proof becomes queryable at READY after the recovery-writing
+ * worker has durably published both members, before owner final apply. Copy it
+ * into fixed frontend storage before apply, but publish related frontend state
+ * only if that owner apply succeeds. Jobs without recovery reject the query. */
+InkpodStatus inkpod_io_job_get_recovery_artifact_proof(const InkpodIoJob* job, InkpodIoRecoveryArtifactProof* out_proof);
+/* Two-pass packed UTF-8 query, excluding NUL. Output path spans borrow buffer.
+ * Recovery-list jobs use catalog order. A successful recovery-writing job uses
+ * index 0 for its effective durable metadata (including Core-captured pair
+ * proof) once the matching artifact proof is queryable at READY. */
 InkpodStatus inkpod_io_job_get_recovery_metadata(const InkpodIoJob* job, uint64_t index, InkpodIoRecoveryMetadata* out_metadata, uint8_t* buffer, uint64_t capacity, uint64_t* out_required_bytes);
 /* Bounded pure codec adapters, also used by fixture tests; no filesystem I/O. */
 InkpodStatus inkpod_recovery_metadata_encode(const InkpodIoRecoveryMetadata* metadata, uint8_t* buffer, uint64_t capacity, uint64_t* out_required_bytes);
@@ -6968,11 +7073,17 @@ InkpodStatus inkpod_io_job_take_batch_preview(InkpodIoJob* job, InkpodBatchPrevi
 InkpodStatus inkpod_io_job_take_batch_report(InkpodIoJob* job, InkpodBatchReport** out_report);
 /** No filesystem I/O, decode, or live-Core access; loaded_count includes cache hits. */
 InkpodStatus inkpod_io_job_poll(const InkpodIoJob* job, InkpodIoJobInfo* out_info);
+/* For an installing SAVE_PAIR final READY with AUTHORITY_REPAIRED, cancel
+ * withdraws that repair when the frontend cannot publish refreshed item
+ * identities. Mandatory owner final apply then returns the original save error,
+ * revokes Core path/authority/savepoints, and publishes AUTHORITY_REVOKED. */
 InkpodStatus inkpod_io_job_cancel(InkpodIoJob* job);
 /** Any externally synchronized thread may release; accepted workers retain their own state.
  * Installing jobs reject release until final apply (also required after install failure/cancel). */
 InkpodStatus inkpod_io_job_release(InkpodIoJob** job);
-/** Queries immutable item metadata. UTF-8 path/name use caller-owned two-pass buffers, excluding NUL. */
+/** Queries immutable item metadata. UTF-8 path/name use caller-owned two-pass buffers, excluding NUL.
+ * SAVE_PAIR's first non-installing READY exposes both physical future-final
+ * replacement identities so callers can reserve them before authorizing install. */
 InkpodStatus inkpod_io_job_get_item(const InkpodIoJob* job, uint64_t index, InkpodIoItemInfo* out_info, uint8_t* path, uint64_t path_capacity, uint8_t* name, uint64_t name_capacity);
 InkpodStatus inkpod_io_job_copy_error(const InkpodIoJob* job, uint8_t* buffer, uint64_t capacity, uint64_t* out_required_bytes);
 /** Core owner thread only. Save-pair/sequence-switch/compacted-copy may return PENDING

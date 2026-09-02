@@ -4,6 +4,17 @@ use std::time::{Duration, Instant};
 
 static PATH_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
+#[test]
+fn io_003_public_protocol_constants_match_abi_v30() {
+    assert_eq!(INKPOD_IO_OPEN_RASTER_PAIR, 22);
+    assert_eq!(INKPOD_IO_REVERT_CURRENT, 1_u64 << 4);
+    assert_eq!(INKPOD_IO_RECOVERY_ARTIFACT_READONLY, 1_u32 << 0);
+    assert_eq!(INKPOD_IO_RECOVERY_PAIR_NONE, 0);
+    assert_eq!(INKPOD_IO_RECOVERY_PAIR_COMMITTED, 1);
+    assert_eq!(INKPOD_IO_RECOVERY_PAIR_PLANNED, 2);
+    assert_eq!(INKPOD_IO_RECOVERY_PAIR_REPAIR_NEEDED, 3);
+}
+
 fn wait_ready(job: *const InkpodIoJob) -> InkpodIoJobInfo {
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
@@ -99,6 +110,530 @@ fn create_blank_core(uuid: u64) -> *mut InkpodCore {
     core
 }
 
+#[test]
+fn io_003_revert_flag_is_explicit_and_rejects_invalid_combinations() {
+    let path_text = "missing.inkpod";
+    let path = path_input(path_text);
+    let mut manager = ptr::null_mut();
+    let mut core = create_blank_core(89);
+    let mut job = ptr::null_mut();
+    // SAFETY: Complete records and path bytes remain live for each synchronous
+    // submit, and both owners are released exactly once below.
+    unsafe {
+        assert_eq!(
+            inkpod_io_manager_create(ptr::null(), &mut manager),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(inkpod_core_bind_io_manager(core, manager), INKPOD_STATUS_OK);
+
+        let mut invalid = request(&path, INKPOD_IO_OPEN_NATIVE);
+        invalid.flags = INKPOD_IO_REVERT_CURRENT;
+        assert_eq!(
+            inkpod_core_io_submit(core, manager, &invalid, &mut job),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert!(job.is_null());
+
+        invalid.kind = INKPOD_IO_OPEN_RASTER;
+        invalid.flags = INKPOD_IO_FORCE_RELOAD | INKPOD_IO_REVERT_CURRENT;
+        assert_eq!(
+            inkpod_core_io_submit(core, manager, &invalid, &mut job),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert!(job.is_null());
+
+        invalid.kind = INKPOD_IO_OPEN_NATIVE;
+        invalid.flags = 1_u64 << 63;
+        assert_eq!(
+            inkpod_core_io_submit(core, manager, &invalid, &mut job),
+            INKPOD_STATUS_UNSUPPORTED
+        );
+        assert!(job.is_null());
+
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+        assert_eq!(inkpod_io_manager_release(&mut manager), INKPOD_STATUS_OK);
+    }
+}
+
+#[test]
+fn io_003_missing_selected_native_is_reported_as_io_error() {
+    let directory = temporary_directory("missing-native-open");
+    let missing = directory.join("missing.inkpod");
+    let missing_text = missing.to_str().unwrap();
+    let input = path_input(missing_text);
+    let mut manager = ptr::null_mut();
+    let mut core = create_blank_core(891);
+    let mut job = ptr::null_mut();
+    // SAFETY: Complete records and path bytes remain live, and each returned
+    // owner is released exactly once below.
+    unsafe {
+        assert_eq!(
+            inkpod_io_manager_create(ptr::null(), &mut manager),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(inkpod_core_bind_io_manager(core, manager), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_core_io_submit(
+                core,
+                manager,
+                &request(&input, INKPOD_IO_OPEN_NATIVE),
+                &mut job,
+            ),
+            INKPOD_STATUS_OK
+        );
+        let progress = wait_ready(job);
+        assert_eq!(progress.state, INKPOD_IO_FAILED);
+        assert_eq!(progress.status, INKPOD_STATUS_IO_ERROR);
+        assert_eq!(inkpod_io_job_release(&mut job), INKPOD_STATUS_OK);
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+        assert_eq!(inkpod_io_manager_release(&mut manager), INKPOD_STATUS_OK);
+    }
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn io_003_native_open_reports_existing_and_missing_companion_candidates() {
+    let directory = temporary_directory("native-pair-items");
+    let native_path = directory.join("source.inkpod");
+    let raster_path = directory.join("source.png");
+    let raster = CommonRaster::new(
+        1,
+        1,
+        PixelFormat::StraightRgba8,
+        Some(96_000),
+        Some(96_000),
+        vec![10, 20, 30, 255],
+    )
+    .unwrap();
+    let mut fixture = inkpod_core::Core::new();
+    fixture
+        .import_decoded_common_raster(CommonRasterFormat::Png, &raster, 0x91)
+        .unwrap();
+    fixture.save(&native_path).unwrap();
+    std::fs::write(
+        &raster_path,
+        encode_common_raster(CommonRasterFormat::Png, &raster, false).unwrap(),
+    )
+    .unwrap();
+
+    let native_text = native_path.to_str().unwrap();
+    let input = path_input(native_text);
+    let mut manager = ptr::null_mut();
+    let mut core = create_blank_core(90);
+    let mut job = ptr::null_mut();
+    let mut document = InkpodDocumentInfo {
+        struct_size: size_of::<InkpodDocumentInfo>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: Every input/output record and path span remains live, the Core
+    // stays on this owner thread, and every returned handle is released once.
+    unsafe {
+        assert_eq!(
+            inkpod_io_manager_create(ptr::null(), &mut manager),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(inkpod_core_bind_io_manager(core, manager), INKPOD_STATUS_OK);
+        for expected_identity_kind in [1, 2] {
+            assert_eq!(
+                inkpod_core_io_submit(
+                    core,
+                    manager,
+                    &request(&input, INKPOD_IO_OPEN_NATIVE),
+                    &mut job,
+                ),
+                INKPOD_STATUS_OK
+            );
+            let progress = wait_ready(job);
+            assert_eq!(
+                (progress.state, progress.result_count),
+                (INKPOD_IO_READY, 2)
+            );
+            let mut native = InkpodIoItemInfo {
+                struct_size: size_of::<InkpodIoItemInfo>() as u32,
+                ..Default::default()
+            };
+            let mut companion = native;
+            assert_eq!(
+                inkpod_io_job_get_item(job, 0, &mut native, ptr::null_mut(), 0, ptr::null_mut(), 0,),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(
+                inkpod_io_job_get_item(
+                    job,
+                    1,
+                    &mut companion,
+                    ptr::null_mut(),
+                    0,
+                    ptr::null_mut(),
+                    0,
+                ),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!((native.raster_format, native.identity.kind), (0, 1));
+            assert_eq!(companion.raster_format, INKPOD_COMMON_RASTER_PNG);
+            assert_eq!(companion.identity.kind, expected_identity_kind);
+            let mut companion_path = vec![0; companion.path_bytes as usize];
+            assert_eq!(
+                inkpod_io_job_get_item(
+                    job,
+                    1,
+                    &mut companion,
+                    companion_path.as_mut_ptr(),
+                    companion_path.len() as u64,
+                    ptr::null_mut(),
+                    0,
+                ),
+                INKPOD_STATUS_OK
+            );
+            let expected_path = if expected_identity_kind == 1 {
+                std::fs::canonicalize(&raster_path).unwrap()
+            } else {
+                raster_path.clone()
+            };
+            assert_eq!(companion_path, expected_path.to_string_lossy().as_bytes());
+            assert_eq!(
+                inkpod_core_io_job_apply(core, job, &mut document, ptr::null_mut()),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(inkpod_io_job_release(&mut job), INKPOD_STATUS_OK);
+            if expected_identity_kind == 1 {
+                std::fs::remove_file(&raster_path).unwrap();
+            }
+        }
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+        assert_eq!(inkpod_io_manager_release(&mut manager), INKPOD_STATUS_OK);
+    }
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn io_003_raster_pair_open_reports_raster_then_missing_native_candidate() {
+    let directory = temporary_directory("raster-pair");
+    let raster_path = directory.join("source.png");
+    let raster = CommonRaster::new(
+        1,
+        1,
+        PixelFormat::StraightRgba8,
+        Some(96_000),
+        Some(96_000),
+        vec![10, 20, 30, 255],
+    )
+    .unwrap();
+    std::fs::write(
+        &raster_path,
+        encode_common_raster(CommonRasterFormat::Png, &raster, false).unwrap(),
+    )
+    .unwrap();
+    let raster_text = raster_path.to_str().unwrap();
+    let input = path_input(raster_text);
+    let mut manager = ptr::null_mut();
+    let mut core = create_blank_core(91);
+    let mut job = ptr::null_mut();
+    // SAFETY: All records and path bytes remain live for the calls, and each
+    // returned owner is released exactly once below.
+    unsafe {
+        assert_eq!(
+            inkpod_io_manager_create(ptr::null(), &mut manager),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(inkpod_core_bind_io_manager(core, manager), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_core_io_submit(
+                core,
+                manager,
+                &request(&input, INKPOD_IO_OPEN_RASTER_PAIR),
+                &mut job,
+            ),
+            INKPOD_STATUS_OK
+        );
+        let progress = wait_ready(job);
+        assert_eq!(progress.kind, INKPOD_IO_OPEN_RASTER_PAIR);
+        assert_eq!(
+            (progress.state, progress.result_count),
+            (INKPOD_IO_READY, 2)
+        );
+
+        let mut first = InkpodIoItemInfo {
+            struct_size: size_of::<InkpodIoItemInfo>() as u32,
+            ..Default::default()
+        };
+        let mut second = first;
+        assert_eq!(
+            inkpod_io_job_get_item(job, 0, &mut first, ptr::null_mut(), 0, ptr::null_mut(), 0),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_io_job_get_item(job, 1, &mut second, ptr::null_mut(), 0, ptr::null_mut(), 0),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(first.raster_format, INKPOD_COMMON_RASTER_PNG);
+        assert_eq!(first.identity.kind, 1);
+        assert_eq!(second.raster_format, 0);
+        assert_eq!(second.identity.kind, 2);
+        assert_eq!(
+            (first.document_uuid_high, first.document_uuid_low),
+            (second.document_uuid_high, second.document_uuid_low)
+        );
+
+        let mut document = InkpodDocumentInfo {
+            struct_size: size_of::<InkpodDocumentInfo>() as u32,
+            ..Default::default()
+        };
+        let mut object_id = 0;
+        assert_eq!(
+            inkpod_core_io_job_apply(core, job, &mut document, &mut object_id),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(inkpod_io_job_release(&mut job), INKPOD_STATUS_OK);
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+        assert_eq!(inkpod_io_manager_release(&mut manager), INKPOD_STATUS_OK);
+    }
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn io_003_sequence_raster_pair_submit_requires_target_and_reports_raster_then_native() {
+    let directory = temporary_directory("sequence-raster-pair");
+    let first_path = directory.join("cell1.png");
+    let target_path = directory.join("cell2.png");
+    for (path, format, pixel) in [
+        (&first_path, CommonRasterFormat::Png, 10),
+        (&target_path, CommonRasterFormat::Png, 20),
+    ] {
+        let raster = CommonRaster::new(
+            1,
+            1,
+            PixelFormat::StraightRgba8,
+            Some(96_000),
+            Some(96_000),
+            vec![pixel, 0, 0, 255],
+        )
+        .unwrap();
+        std::fs::write(path, encode_common_raster(format, &raster, false).unwrap()).unwrap();
+    }
+    let first_text = first_path.to_str().unwrap();
+    let target_text = target_path.to_str().unwrap();
+    let first = path_input(first_text);
+    let target = path_input(target_text);
+    let sequence_paths = [path_input(first_text), path_input(target_text)];
+    let empty_target = path_input("");
+    let mut manager = ptr::null_mut();
+    let mut core = create_blank_core(92);
+    let mut job = ptr::null_mut();
+    let mut document = InkpodDocumentInfo {
+        struct_size: size_of::<InkpodDocumentInfo>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: All records and their path spans remain live for every call. The
+    // opaque owners stay on this thread and are released exactly once below.
+    unsafe {
+        assert_eq!(
+            inkpod_io_manager_create(ptr::null(), &mut manager),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(inkpod_core_bind_io_manager(core, manager), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_core_io_submit(
+                core,
+                manager,
+                &request(&first, INKPOD_IO_OPEN_RASTER_PAIR),
+                &mut job,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(wait_ready(job).state, INKPOD_IO_READY);
+        assert_eq!(
+            inkpod_core_io_job_apply(core, job, &mut document, ptr::null_mut()),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(inkpod_io_job_release(&mut job), INKPOD_STATUS_OK);
+
+        let mut sequence = request(&sequence_paths[0], INKPOD_IO_SEQUENCE_FILES);
+        sequence.paths = sequence_paths.as_ptr();
+        sequence.path_count = sequence_paths.len() as u64;
+        assert_eq!(
+            inkpod_core_io_submit(core, manager, &sequence, &mut job),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(wait_ready(job).state, INKPOD_IO_READY);
+        assert_eq!(
+            inkpod_core_io_job_apply(core, job, &mut document, ptr::null_mut()),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(inkpod_io_job_release(&mut job), INKPOD_STATUS_OK);
+
+        let mut switch = InkpodSequenceSwitchRequest {
+            struct_size: size_of::<InkpodSequenceSwitchRequest>() as u32,
+            ..Default::default()
+        };
+        assert_eq!(
+            inkpod_core_sequence_switch_request(
+                core,
+                1,
+                INKPOD_SEQUENCE_SWITCH_AUTOSAVE,
+                &mut switch,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(switch.flags, INKPOD_SEQUENCE_SWITCH_REQUIRED);
+
+        switch.feature_flags = INKPOD_SEQUENCE_SWITCH_TARGET_RASTER_PAIR | (1_u64 << 63);
+        assert_eq!(
+            inkpod_core_io_sequence_switch_submit(
+                core,
+                manager,
+                &switch,
+                ptr::null(),
+                &target,
+                ptr::null(),
+                ptr::null(),
+                &mut job,
+            ),
+            INKPOD_STATUS_UNSUPPORTED
+        );
+        assert!(job.is_null());
+
+        switch.feature_flags = INKPOD_SEQUENCE_SWITCH_TARGET_RASTER_PAIR;
+        for missing_target in [ptr::null(), &empty_target as *const InkpodIoPath] {
+            assert_eq!(
+                inkpod_core_io_sequence_switch_submit(
+                    core,
+                    manager,
+                    &switch,
+                    ptr::null(),
+                    missing_target,
+                    ptr::null(),
+                    ptr::null(),
+                    &mut job,
+                ),
+                INKPOD_STATUS_INVALID_ARGUMENT
+            );
+            assert!(job.is_null());
+        }
+
+        assert_eq!(
+            inkpod_core_io_sequence_switch_submit(
+                core,
+                manager,
+                &switch,
+                ptr::null(),
+                &target,
+                ptr::null(),
+                ptr::null(),
+                &mut job,
+            ),
+            INKPOD_STATUS_OK
+        );
+        let progress = wait_ready(job);
+        let mut error_size = 0;
+        assert_eq!(
+            inkpod_io_job_copy_error(job, ptr::null_mut(), 0, &mut error_size),
+            INKPOD_STATUS_OK
+        );
+        let mut error = vec![0; error_size as usize];
+        assert_eq!(
+            inkpod_io_job_copy_error(job, error.as_mut_ptr(), error.len() as u64, &mut error_size,),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(progress.kind, INKPOD_IO_SEQUENCE_SWITCH);
+        assert_eq!(
+            (progress.state, progress.result_count),
+            (INKPOD_IO_READY, 2),
+            "{}",
+            std::str::from_utf8(&error).unwrap()
+        );
+
+        let mut raster_item = InkpodIoItemInfo {
+            struct_size: size_of::<InkpodIoItemInfo>() as u32,
+            ..Default::default()
+        };
+        let mut native_item = raster_item;
+        assert_eq!(
+            inkpod_io_job_get_item(
+                job,
+                0,
+                &mut raster_item,
+                ptr::null_mut(),
+                0,
+                ptr::null_mut(),
+                0,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_io_job_get_item(
+                job,
+                1,
+                &mut native_item,
+                ptr::null_mut(),
+                0,
+                ptr::null_mut(),
+                0,
+            ),
+            INKPOD_STATUS_OK
+        );
+        let mut raster_path = vec![0; raster_item.path_bytes as usize];
+        let mut native_path = vec![0; native_item.path_bytes as usize];
+        assert_eq!(
+            inkpod_io_job_get_item(
+                job,
+                0,
+                &mut raster_item,
+                raster_path.as_mut_ptr(),
+                raster_path.len() as u64,
+                ptr::null_mut(),
+                0,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_io_job_get_item(
+                job,
+                1,
+                &mut native_item,
+                native_path.as_mut_ptr(),
+                native_path.len() as u64,
+                ptr::null_mut(),
+                0,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            std::path::Path::new(std::str::from_utf8(&raster_path).unwrap()),
+            std::fs::canonicalize(&target_path).unwrap()
+        );
+        assert_eq!(
+            std::path::Path::new(std::str::from_utf8(&native_path).unwrap()),
+            std::fs::canonicalize(&directory)
+                .unwrap()
+                .join("cell2.inkpod")
+        );
+        assert_eq!(raster_item.raster_format, INKPOD_COMMON_RASTER_PNG);
+        assert_eq!(raster_item.identity.kind, 1);
+        assert_eq!(native_item.raster_format, 0);
+        assert_eq!(native_item.identity.kind, 2);
+        assert_eq!(
+            (
+                raster_item.document_uuid_high,
+                raster_item.document_uuid_low
+            ),
+            (
+                native_item.document_uuid_high,
+                native_item.document_uuid_low
+            )
+        );
+
+        assert_eq!(
+            inkpod_core_io_job_apply(core, job, &mut document, ptr::null_mut()),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(inkpod_io_job_release(&mut job), INKPOD_STATUS_OK);
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+        assert_eq!(inkpod_io_manager_release(&mut manager), INKPOD_STATUS_OK);
+    }
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
 fn recovery_input(original: &str, source: &str) -> InkpodIoRecoveryMetadata {
     InkpodIoRecoveryMetadata {
         struct_size: size_of::<InkpodIoRecoveryMetadata>() as u32,
@@ -117,6 +652,150 @@ fn recovery_input(original: &str, source: &str) -> InkpodIoRecoveryMetadata {
         original_path: path_input(original),
         source_path: path_input(source),
         identity_path: path_input(""),
+        pair_proof: recovery_pair_none_input(),
+    }
+}
+
+fn recovery_pair_empty_stamp(kind: u32, object_low: u64) -> InkpodIoRecoveryArtifactStamp {
+    InkpodIoRecoveryArtifactStamp {
+        struct_size: size_of::<InkpodIoRecoveryArtifactStamp>() as u32,
+        identity: InkpodIoFileIdentity {
+            struct_size: size_of::<InkpodIoFileIdentity>() as u32,
+            kind,
+            object_low,
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+fn recovery_pair_none_input() -> InkpodIoRecoveryPairProof {
+    InkpodIoRecoveryPairProof {
+        struct_size: size_of::<InkpodIoRecoveryPairProof>() as u32,
+        kind: INKPOD_IO_RECOVERY_PAIR_NONE,
+        native: recovery_pair_empty_stamp(0, 0),
+        raster: recovery_pair_empty_stamp(0, 0),
+    }
+}
+
+fn recovery_artifact_stamp_input() -> InkpodIoRecoveryArtifactStamp {
+    InkpodIoRecoveryArtifactStamp {
+        struct_size: size_of::<InkpodIoRecoveryArtifactStamp>() as u32,
+        identity: InkpodIoFileIdentity {
+            struct_size: size_of::<InkpodIoFileIdentity>() as u32,
+            kind: 1,
+            object_low: 1,
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+fn recovery_artifact_proof_input() -> InkpodIoRecoveryArtifactProof {
+    InkpodIoRecoveryArtifactProof {
+        struct_size: size_of::<InkpodIoRecoveryArtifactProof>() as u32,
+        native: recovery_artifact_stamp_input(),
+        metadata: recovery_artifact_stamp_input(),
+        ..Default::default()
+    }
+}
+
+fn publish_test_recovery(
+    core: *mut InkpodCore,
+    manager: *mut InkpodIoManager,
+    path: &std::path::Path,
+    metadata: &InkpodIoRecoveryMetadata,
+) -> InkpodIoRecoveryArtifactProof {
+    let text = path.to_str().unwrap();
+    let mut job = ptr::null_mut();
+    let mut document = InkpodDocumentInfo {
+        struct_size: size_of::<InkpodDocumentInfo>() as u32,
+        ..Default::default()
+    };
+    let mut proof = recovery_artifact_proof_input();
+    // SAFETY: The caller retains both live handles and every stack/span input
+    // until each synchronous ABI call returns.
+    unsafe {
+        assert_eq!(
+            inkpod_core_io_autosave_submit(
+                core,
+                manager,
+                text.as_ptr(),
+                text.len() as u64,
+                metadata,
+                &mut job,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(wait_ready(job).state, INKPOD_IO_READY);
+        assert_eq!(
+            inkpod_io_job_get_recovery_artifact_proof(job, &mut proof),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_io_job_apply(core, job, &mut document, ptr::null_mut()),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(inkpod_io_job_release(&mut job), INKPOD_STATUS_OK);
+    }
+    proof
+}
+
+fn exact_discard_progress(
+    manager: *mut InkpodIoManager,
+    path: &std::path::Path,
+    proof: &InkpodIoRecoveryArtifactProof,
+) -> InkpodIoJobInfo {
+    let text = path.to_str().unwrap();
+    let mut job = ptr::null_mut();
+    // SAFETY: The live manager and complete path/proof/output values outlive
+    // submit; the accepted job owns copied inputs until release.
+    unsafe {
+        assert_eq!(
+            inkpod_core_io_recovery_discard_exact_submit(
+                ptr::null_mut(),
+                manager,
+                text.as_ptr(),
+                text.len() as u64,
+                proof,
+                &mut job,
+            ),
+            INKPOD_STATUS_OK
+        );
+        let progress = wait_ready(job);
+        assert_eq!(inkpod_io_job_release(&mut job), INKPOD_STATUS_OK);
+        progress
+    }
+}
+
+#[test]
+fn io_003_recovery_artifact_proof_rejects_weakened_abi_stamps() {
+    let valid = recovery_artifact_proof_input();
+    // SAFETY: Every test record is a complete live size-prefixed value.
+    unsafe {
+        assert!(recovery::parse_artifact_proof(&valid).is_ok());
+
+        let mut zero_identity = valid;
+        zero_identity.native.identity.volume = 0;
+        zero_identity.native.identity.object_high = 0;
+        zero_identity.native.identity.object_low = 0;
+        assert!(recovery::parse_artifact_proof(&zero_identity).is_err());
+
+        let mut short_nested = valid;
+        short_nested.metadata.struct_size = 0;
+        assert!(recovery::parse_artifact_proof(&short_nested).is_err());
+
+        let mut short_identity = valid;
+        short_identity.native.identity.struct_size = 0;
+        assert!(recovery::parse_artifact_proof(&short_identity).is_err());
+
+        let mut unknown_flags = valid;
+        unknown_flags.native.flags = 2;
+        assert!(recovery::parse_artifact_proof(&unknown_flags).is_err());
+
+        let mut reserved = valid;
+        reserved.reserved = 1;
+        assert!(recovery::parse_artifact_proof(&reserved).is_err());
     }
 }
 
@@ -194,6 +873,7 @@ fn io_003_recovery_codec_owns_text_and_preserves_independent_untitled_identity()
             (output.identity_object_high, output.identity_object_low),
             (11, 13)
         );
+        assert_eq!(output.pair_proof.kind, INKPOD_IO_RECOVERY_PAIR_NONE);
         assert_eq!(
             slice::from_raw_parts(
                 output.original_path.path,
@@ -212,6 +892,99 @@ fn io_003_recovery_codec_owns_text_and_preserves_independent_untitled_identity()
         invalid.identity_kind = u32::MAX;
         assert_eq!(
             inkpod_recovery_metadata_encode(&invalid, ptr::null_mut(), 0, &mut encoded_size),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        let mut planned = input;
+        planned.pair_proof.kind = INKPOD_IO_RECOVERY_PAIR_PLANNED;
+        planned.pair_proof.native = recovery_pair_empty_stamp(2, 0x1234);
+        planned.pair_proof.native.identity.volume = u64::MAX;
+        planned.pair_proof.raster = recovery_artifact_stamp_input();
+        planned.pair_proof.raster.length = 17;
+        assert_eq!(
+            inkpod_recovery_metadata_encode(&planned, ptr::null_mut(), 0, &mut encoded_size),
+            INKPOD_STATUS_OK
+        );
+        let mut planned_bytes = vec![0; encoded_size as usize];
+        assert_eq!(
+            inkpod_recovery_metadata_encode(
+                &planned,
+                planned_bytes.as_mut_ptr(),
+                planned_bytes.len() as u64,
+                &mut encoded_size
+            ),
+            INKPOD_STATUS_OK
+        );
+        let mut planned_output = recovery_input("", "");
+        assert_eq!(
+            inkpod_recovery_metadata_decode(
+                planned_bytes.as_ptr(),
+                planned_bytes.len() as u64,
+                &mut planned_output,
+                ptr::null_mut(),
+                0,
+                &mut text_size
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            planned_output.pair_proof.kind,
+            INKPOD_IO_RECOVERY_PAIR_PLANNED
+        );
+        assert_eq!(planned_output.pair_proof.native.identity.volume, u64::MAX);
+        assert_eq!(planned_output.pair_proof.native.identity.object_low, 0x1234);
+        planned.pair_proof.native.identity.volume = 0;
+        assert_eq!(
+            inkpod_recovery_metadata_encode(&planned, ptr::null_mut(), 0, &mut encoded_size),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        planned.pair_proof.native.identity.volume = u64::MAX;
+        planned.pair_proof.native.identity.struct_size = 0;
+        assert_eq!(
+            inkpod_recovery_metadata_encode(&planned, ptr::null_mut(), 0, &mut encoded_size),
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+        let mut repair = input;
+        repair.pair_proof.kind = INKPOD_IO_RECOVERY_PAIR_REPAIR_NEEDED;
+        repair.pair_proof.native = recovery_artifact_stamp_input();
+        repair.pair_proof.native.length = 29;
+        repair.pair_proof.raster = recovery_pair_empty_stamp(2, 0x5678);
+        repair.pair_proof.raster.identity.volume = u64::MAX;
+        assert_eq!(
+            inkpod_recovery_metadata_encode(&repair, ptr::null_mut(), 0, &mut encoded_size),
+            INKPOD_STATUS_OK
+        );
+        let mut repair_bytes = vec![0; encoded_size as usize];
+        assert_eq!(
+            inkpod_recovery_metadata_encode(
+                &repair,
+                repair_bytes.as_mut_ptr(),
+                repair_bytes.len() as u64,
+                &mut encoded_size
+            ),
+            INKPOD_STATUS_OK
+        );
+        let mut repair_output = recovery_input("", "");
+        assert_eq!(
+            inkpod_recovery_metadata_decode(
+                repair_bytes.as_ptr(),
+                repair_bytes.len() as u64,
+                &mut repair_output,
+                ptr::null_mut(),
+                0,
+                &mut text_size
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            repair_output.pair_proof.kind,
+            INKPOD_IO_RECOVERY_PAIR_REPAIR_NEEDED
+        );
+        assert_eq!(repair_output.pair_proof.native.identity.kind, 1);
+        assert_eq!(repair_output.pair_proof.raster.identity.kind, 2);
+        assert_eq!(repair_output.pair_proof.raster.identity.volume, u64::MAX);
+        repair.pair_proof.raster.identity.volume = 0;
+        assert_eq!(
+            inkpod_recovery_metadata_encode(&repair, ptr::null_mut(), 0, &mut encoded_size),
             INKPOD_STATUS_INVALID_ARGUMENT
         );
         encoded[0] ^= 1;
@@ -295,6 +1068,15 @@ fn io_003_autosave_catalog_probe_and_discard_share_rust_io_without_normal_savepo
             INKPOD_STATUS_OK
         );
         assert_eq!(wait_ready(job).state, INKPOD_IO_READY);
+        let mut proof = recovery_artifact_proof_input();
+        assert_eq!(
+            inkpod_io_job_get_recovery_artifact_proof(job, &mut proof),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(proof.native.identity.kind, 1);
+        assert_eq!(proof.metadata.identity.kind, 1);
+        assert_ne!(proof.native.identity.object_low, 0);
+        assert_ne!(proof.metadata.identity.object_low, 0);
         assert_eq!(
             inkpod_core_io_job_apply(core, job, &mut document, ptr::null_mut()),
             INKPOD_STATUS_OK
@@ -304,6 +1086,24 @@ fn io_003_autosave_catalog_probe_and_discard_share_rust_io_without_normal_savepo
         assert!(recovery.exists());
         assert!(!recovery.with_extension("png").exists());
         assert!(!original.exists());
+
+        assert_eq!(
+            inkpod_core_io_autosave_submit(
+                core,
+                manager,
+                recovery_text.as_ptr(),
+                recovery_text.len() as u64,
+                &input,
+                &mut job
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(wait_ready(job).state, INKPOD_IO_FAILED);
+        assert_eq!(inkpod_io_job_release(&mut job), INKPOD_STATUS_OK);
+        assert!(
+            recovery.exists(),
+            "append-only autosave kept its first generation"
+        );
 
         let root = path_input(directory.to_str().unwrap());
         assert_eq!(
@@ -381,19 +1181,80 @@ fn io_003_autosave_catalog_probe_and_discard_share_rust_io_without_normal_savepo
             "recovery is newer than absent original"
         );
         assert_eq!(inkpod_io_job_release(&mut job), INKPOD_STATUS_OK);
+
+        let missing_native = directory.join("missing-native.recovery.inkpod");
+        let missing_native_proof = publish_test_recovery(core, manager, &missing_native, &input);
+        let missing_metadata = directory.join("missing-metadata.recovery.inkpod");
+        let missing_metadata_proof =
+            publish_test_recovery(core, manager, &missing_metadata, &input);
+        let mixed = directory.join("mixed.recovery.inkpod");
+        let mixed_proof = publish_test_recovery(core, manager, &mixed, &input);
+        let mixed_donor = directory.join("mixed-donor.recovery.inkpod");
+        let _mixed_donor_proof = publish_test_recovery(core, manager, &mixed_donor, &input);
+
+        let missing_native_sidecar = inkpod_io::recovery_metadata_path(&missing_native).unwrap();
+        let missing_metadata_sidecar =
+            inkpod_io::recovery_metadata_path(&missing_metadata).unwrap();
+        let mixed_sidecar = inkpod_io::recovery_metadata_path(&mixed).unwrap();
+        let mixed_donor_sidecar = inkpod_io::recovery_metadata_path(&mixed_donor).unwrap();
+        std::fs::remove_file(&missing_native).unwrap();
+        std::fs::remove_file(&missing_metadata_sidecar).unwrap();
+        std::fs::remove_file(&mixed_sidecar).unwrap();
+        std::fs::rename(&mixed_donor_sidecar, &mixed_sidecar).unwrap();
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+        let mut wrong_proof = proof;
+        wrong_proof.native.length += 1;
         assert_eq!(
-            inkpod_core_io_submit(
+            inkpod_core_io_recovery_discard_exact_submit(
                 ptr::null_mut(),
                 manager,
-                &request(&paths[1], INKPOD_IO_RECOVERY_DISCARD),
+                recovery_text.as_ptr(),
+                recovery_text.len() as u64,
+                &wrong_proof,
                 &mut job
             ),
             INKPOD_STATUS_OK
         );
-        assert_eq!(wait_ready(job).state, INKPOD_IO_COMPLETE);
+        let wrong_discard = wait_ready(job);
+        assert_eq!(wrong_discard.state, INKPOD_IO_FAILED);
+        assert_eq!(wrong_discard.status, INKPOD_STATUS_FILE_CONFLICT);
         assert_eq!(inkpod_io_job_release(&mut job), INKPOD_STATUS_OK);
-        assert!(!recovery.exists());
-        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+        assert!(recovery.exists(), "wrong proof must not delete recovery");
+        for (path, proof) in [
+            (&missing_native, &missing_native_proof),
+            (&missing_metadata, &missing_metadata_proof),
+            (&mixed, &mixed_proof),
+        ] {
+            let conflict = exact_discard_progress(manager, path, proof);
+            assert_eq!(conflict.state, INKPOD_IO_FAILED);
+            assert_eq!(conflict.status, INKPOD_STATUS_FILE_CONFLICT);
+        }
+        assert!(missing_native_sidecar.exists());
+        assert!(missing_metadata.exists());
+        assert!(mixed.exists());
+        assert!(mixed_sidecar.exists());
+        assert_eq!(
+            inkpod_core_io_recovery_discard_exact_submit(
+                ptr::null_mut(),
+                manager,
+                recovery_text.as_ptr(),
+                recovery_text.len() as u64,
+                &proof,
+                &mut job
+            ),
+            INKPOD_STATUS_OK
+        );
+        let discard_state = wait_ready(job).state;
+        assert!(matches!(
+            discard_state,
+            INKPOD_IO_COMPLETE | INKPOD_IO_FAILED
+        ));
+        assert_eq!(inkpod_io_job_release(&mut job), INKPOD_STATUS_OK);
+        assert_eq!(
+            recovery.exists(),
+            discard_state == INKPOD_IO_FAILED,
+            "only a completed exact discard may remove the proven artifact"
+        );
         assert_eq!(inkpod_io_manager_release(&mut manager), INKPOD_STATUS_OK);
     }
     std::fs::remove_dir_all(directory).unwrap();
@@ -402,10 +1263,10 @@ fn io_003_autosave_catalog_probe_and_discard_share_rust_io_without_normal_savepo
 #[test]
 fn io_003_sequence_switch_and_compacted_copy_require_owner_finalization() {
     let directory = temporary_directory("session");
-    let first = directory.join("cell1.png");
+    let first_path = directory.join("cell1.png");
     let second = directory.join("cell2.bmp");
     for (path, format, pixel) in [
-        (&first, CommonRasterFormat::Png, 10),
+        (&first_path, CommonRasterFormat::Png, 10),
         (&second, CommonRasterFormat::Bmp, 20),
     ] {
         let raster = CommonRaster::new(
@@ -419,9 +1280,17 @@ fn io_003_sequence_switch_and_compacted_copy_require_owner_finalization() {
         .unwrap();
         std::fs::write(path, encode_common_raster(format, &raster, false).unwrap()).unwrap();
     }
-    let first = path_input(first.to_str().unwrap());
+    let first_text = first_path.to_str().unwrap().to_owned();
+    let first = path_input(&first_text);
     let source_recovery = directory.join("source.recovery.inkpod");
     let recovery = path_input(source_recovery.to_str().unwrap());
+    let cancelled_recovery = directory.join("cancelled-after-ready.recovery.inkpod");
+    let cancelled_recovery_input = path_input(cancelled_recovery.to_str().unwrap());
+    let missing_target_path = directory.join("missing-target.inkpod");
+    let corrupt_target_path = directory.join("corrupt-target.inkpod");
+    std::fs::write(&corrupt_target_path, b"not an inkpod recovery").unwrap();
+    let missing_target = path_input(missing_target_path.to_str().unwrap());
+    let corrupt_target = path_input(corrupt_target_path.to_str().unwrap());
     let compacted = directory.join("compacted.inkpod");
     let compacted_text = compacted.to_str().unwrap();
     let mut core = create_blank_core(99);
@@ -438,7 +1307,7 @@ fn io_003_sequence_switch_and_compacted_copy_require_owner_finalization() {
             INKPOD_STATUS_OK
         );
         assert_eq!(inkpod_core_bind_io_manager(core, manager), INKPOD_STATUS_OK);
-        for kind in [INKPOD_IO_OPEN_RASTER, INKPOD_IO_SEQUENCE_AUTO] {
+        for kind in [INKPOD_IO_OPEN_RASTER_PAIR, INKPOD_IO_SEQUENCE_AUTO] {
             assert_eq!(
                 inkpod_core_io_submit(core, manager, &request(&first, kind), &mut job),
                 INKPOD_STATUS_OK
@@ -474,6 +1343,57 @@ fn io_003_sequence_switch_and_compacted_copy_require_owner_finalization() {
             ),
             INKPOD_STATUS_OK
         );
+        let before_failed_target = (
+            document.document_uuid_high,
+            document.document_uuid_low,
+            document.document_revision,
+            document.flags,
+        );
+        let invalid_proof = recovery_artifact_proof_input();
+        assert_eq!(
+            inkpod_core_io_sequence_switch_submit(
+                core,
+                manager,
+                &switch,
+                ptr::null(),
+                &missing_target,
+                ptr::null(),
+                ptr::null(),
+                &mut job,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert!(job.is_null());
+        for explicit_target in [&missing_target, &corrupt_target] {
+            assert_eq!(
+                inkpod_core_io_sequence_switch_submit(
+                    core,
+                    manager,
+                    &switch,
+                    ptr::null(),
+                    explicit_target,
+                    &invalid_proof,
+                    ptr::null(),
+                    &mut job,
+                ),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(wait_ready(job).state, INKPOD_IO_FAILED);
+            assert_eq!(inkpod_io_job_release(&mut job), INKPOD_STATUS_OK);
+            assert_eq!(
+                inkpod_core_get_document_info(core, &mut document),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(
+                (
+                    document.document_uuid_high,
+                    document.document_uuid_low,
+                    document.document_revision,
+                    document.flags,
+                ),
+                before_failed_target
+            );
+        }
         assert_eq!(
             inkpod_core_io_sequence_switch_submit(
                 core,
@@ -482,10 +1402,14 @@ fn io_003_sequence_switch_and_compacted_copy_require_owner_finalization() {
                 &recovery,
                 ptr::null(),
                 ptr::null(),
+                ptr::null(),
                 &mut job
             ),
             INKPOD_STATUS_INVALID_ARGUMENT
         );
+        let mut source_metadata = recovery_input("", "");
+        source_metadata.document_uuid_high = document.document_uuid_high;
+        source_metadata.document_uuid_low = document.document_uuid_low;
         assert_eq!(
             inkpod_core_io_sequence_switch_submit(
                 core,
@@ -494,6 +1418,24 @@ fn io_003_sequence_switch_and_compacted_copy_require_owner_finalization() {
                 &recovery,
                 ptr::null(),
                 ptr::null(),
+                ptr::null(),
+                &mut job,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert!(job.is_null());
+        // Simulate a frontend failure while copying fixed proof/binding data
+        // from the final installing READY. Cancel must suppress the target
+        // commit, and the mandatory final apply must release the Core fence.
+        assert_eq!(
+            inkpod_core_io_sequence_switch_submit(
+                core,
+                manager,
+                &switch,
+                &cancelled_recovery_input,
+                ptr::null(),
+                ptr::null(),
+                &source_metadata,
                 &mut job
             ),
             INKPOD_STATUS_OK
@@ -503,8 +1445,120 @@ fn io_003_sequence_switch_and_compacted_copy_require_owner_finalization() {
             inkpod_core_io_job_apply(core, job, &mut document, ptr::null_mut()),
             INKPOD_STATUS_PENDING
         );
+        let final_ready = wait_ready(job);
+        assert_eq!(final_ready.state, INKPOD_IO_READY);
+        assert_ne!(final_ready.flags & INKPOD_IO_RESULT_INSTALLING, 0);
+        let mut unavailable_metadata = recovery_input("", "");
+        let mut unavailable_bytes = 0;
+        assert_eq!(
+            inkpod_io_job_get_recovery_metadata(
+                job,
+                1,
+                &mut unavailable_metadata,
+                ptr::null_mut(),
+                0,
+                &mut unavailable_bytes,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(inkpod_io_job_cancel(job), INKPOD_STATUS_OK);
+        let cancelled_ready = wait_ready(job);
+        assert_eq!(cancelled_ready.state, INKPOD_IO_READY);
+        assert_ne!(cancelled_ready.flags & INKPOD_IO_RESULT_INSTALLING, 0);
+        assert_eq!(
+            inkpod_core_io_job_apply(core, job, &mut document, ptr::null_mut()),
+            INKPOD_STATUS_CANCELLED
+        );
+        assert_eq!(inkpod_io_job_release(&mut job), INKPOD_STATUS_OK);
+        assert_eq!(
+            (document.document_uuid_high, document.document_uuid_low),
+            original_uuid
+        );
+        assert!(cancelled_recovery.exists());
+        assert_eq!(
+            inkpod_core_io_sequence_switch_submit(
+                core,
+                manager,
+                &switch,
+                &recovery,
+                ptr::null(),
+                ptr::null(),
+                &source_metadata,
+                &mut job
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(wait_ready(job).state, INKPOD_IO_READY);
+        let mut source_proof = recovery_artifact_proof_input();
+        assert_eq!(
+            inkpod_io_job_get_recovery_artifact_proof(job, &mut source_proof),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            inkpod_core_io_job_apply(core, job, &mut document, ptr::null_mut()),
+            INKPOD_STATUS_PENDING
+        );
         assert_eq!(inkpod_io_job_release(&mut job), INKPOD_STATUS_INVALID_STATE);
         assert_eq!(wait_ready(job).state, INKPOD_IO_READY);
+        assert_eq!(
+            inkpod_io_job_get_recovery_artifact_proof(job, &mut source_proof),
+            INKPOD_STATUS_OK
+        );
+        let mut effective_metadata = recovery_input("", "");
+        let mut metadata_bytes = 0;
+        assert_eq!(
+            inkpod_io_job_get_recovery_metadata(
+                job,
+                0,
+                &mut effective_metadata,
+                ptr::null_mut(),
+                0,
+                &mut metadata_bytes,
+            ),
+            INKPOD_STATUS_OK
+        );
+        let mut metadata_text = vec![0; metadata_bytes as usize];
+        assert_eq!(
+            inkpod_io_job_get_recovery_metadata(
+                job,
+                0,
+                &mut effective_metadata,
+                metadata_text.as_mut_ptr(),
+                metadata_text.len() as u64,
+                &mut metadata_bytes,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            effective_metadata.pair_proof.kind,
+            INKPOD_IO_RECOVERY_PAIR_PLANNED
+        );
+        assert_eq!(effective_metadata.pair_proof.native.identity.kind, 2);
+        assert_eq!(
+            effective_metadata.pair_proof.native.identity.volume,
+            u64::MAX
+        );
+        assert_eq!(effective_metadata.pair_proof.raster.identity.kind, 1);
+        let effective_source = std::str::from_utf8(slice::from_raw_parts(
+            effective_metadata.source_path.path,
+            effective_metadata.source_path.path_bytes as usize,
+        ))
+        .unwrap();
+        assert_eq!(
+            std::path::Path::new(effective_source),
+            std::fs::canonicalize(&first_path).unwrap()
+        );
+        let parsed_effective = recovery::parse_metadata(&effective_metadata).unwrap();
+        assert!(matches!(
+            parsed_effective.pair_proof,
+            Some(inkpod_io::RecoveryPairProof::Planned {
+                native_missing: inkpod_io::FileIdentity {
+                    volume: u64::MAX,
+                    ..
+                },
+                ..
+            })
+        ));
         assert_eq!(
             inkpod_core_io_job_apply(core, job, &mut document, ptr::null_mut()),
             INKPOD_STATUS_OK
@@ -589,7 +1643,10 @@ fn io_003_sequence_switch_and_compacted_copy_require_owner_finalization() {
         let recovery_bytes = std::fs::read(&source_recovery).unwrap();
         let file_count = std::fs::read_dir(&directory).unwrap().count();
         let empty_source = path_input("");
-        for omitted_source in [ptr::null(), &empty_source as *const InkpodIoPath] {
+        for (iteration, omitted_source) in [ptr::null(), &empty_source as *const InkpodIoPath]
+            .into_iter()
+            .enumerate()
+        {
             assert_eq!(document.flags & INKPOD_DOCUMENT_FLAG_DIRTY, 0);
             assert_eq!(
                 inkpod_core_sequence_switch_request(
@@ -608,6 +1665,7 @@ fn io_003_sequence_switch_and_compacted_copy_require_owner_finalization() {
                     &switch,
                     omitted_source,
                     &recovery,
+                    &source_proof,
                     ptr::null(),
                     &mut job,
                 ),
@@ -616,6 +1674,54 @@ fn io_003_sequence_switch_and_compacted_copy_require_owner_finalization() {
             let ready = wait_ready(job);
             assert_eq!(ready.state, INKPOD_IO_READY);
             assert_eq!(ready.flags & INKPOD_IO_RESULT_INSTALLING, 0);
+            assert_eq!(ready.result_count, 2);
+            let mut raster_item = InkpodIoItemInfo {
+                struct_size: size_of::<InkpodIoItemInfo>() as u32,
+                ..Default::default()
+            };
+            let mut native_item = raster_item;
+            assert_eq!(
+                inkpod_io_job_get_item(
+                    job,
+                    0,
+                    &mut raster_item,
+                    ptr::null_mut(),
+                    0,
+                    ptr::null_mut(),
+                    0,
+                ),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(
+                inkpod_io_job_get_item(
+                    job,
+                    1,
+                    &mut native_item,
+                    ptr::null_mut(),
+                    0,
+                    ptr::null_mut(),
+                    0,
+                ),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(raster_item.raster_format, INKPOD_COMMON_RASTER_PNG);
+            assert_eq!(raster_item.identity.kind, 1);
+            assert_eq!(native_item.raster_format, 0);
+            assert_eq!(native_item.identity.kind, 2);
+            assert_eq!(
+                (
+                    raster_item.document_uuid_high,
+                    raster_item.document_uuid_low
+                ),
+                original_uuid
+            );
+            assert_eq!(
+                (
+                    native_item.document_uuid_high,
+                    native_item.document_uuid_low
+                ),
+                original_uuid
+            );
             assert_eq!(
                 inkpod_core_io_job_apply(core, job, &mut document, ptr::null_mut()),
                 INKPOD_STATUS_OK
@@ -627,7 +1733,7 @@ fn io_003_sequence_switch_and_compacted_copy_require_owner_finalization() {
             );
             assert_eq!(
                 document.flags & (INKPOD_DOCUMENT_FLAG_DIRTY | INKPOD_DOCUMENT_FLAG_RECOVERED),
-                INKPOD_DOCUMENT_FLAG_DIRTY | INKPOD_DOCUMENT_FLAG_RECOVERED
+                0
             );
             let mut restored_editor = InkpodEditorStateInfo {
                 struct_size: size_of::<InkpodEditorStateInfo>() as u32,
@@ -642,41 +1748,71 @@ fn io_003_sequence_switch_and_compacted_copy_require_owner_finalization() {
                 original_editor.editor_revision
             );
             assert_eq!(restored_editor.editor_digest, original_editor.editor_digest);
-            assert_ne!(restored_editor.flags & INKPOD_EDITOR_STATE_DIRTY, 0);
+            assert_eq!(restored_editor.flags & INKPOD_EDITOR_STATE_DIRTY, 0);
             assert_eq!(std::fs::read(&source_recovery).unwrap(), recovery_bytes);
             assert_eq!(std::fs::read_dir(&directory).unwrap().count(), file_count);
             assert_eq!(inkpod_io_job_release(&mut job), INKPOD_STATUS_OK);
 
-            assert_eq!(
-                inkpod_core_sequence_switch_request(
-                    core,
-                    1,
-                    INKPOD_SEQUENCE_SWITCH_AUTOSAVE,
-                    &mut switch,
-                ),
-                INKPOD_STATUS_OK
-            );
-            assert_eq!(switch.flags, INKPOD_SEQUENCE_SWITCH_REQUIRED);
-            assert_eq!(
-                inkpod_core_io_sequence_switch_submit(
-                    core,
-                    manager,
-                    &switch,
-                    omitted_source,
-                    ptr::null(),
-                    ptr::null(),
-                    &mut job,
-                ),
-                INKPOD_STATUS_INVALID_ARGUMENT
-            );
-            assert!(job.is_null());
-            // This unchanged source already has the durable recovery above.
-            // The direct commit contract still activates a fresh clean target.
-            assert_eq!(
-                inkpod_core_sequence_commit_autosaved_switch(core, &switch, &mut document),
-                INKPOD_STATUS_OK
-            );
+            if iteration == 0 {
+                assert_eq!(
+                    inkpod_core_sequence_switch_request(
+                        core,
+                        1,
+                        INKPOD_SEQUENCE_SWITCH_AUTOSAVE,
+                        &mut switch,
+                    ),
+                    INKPOD_STATUS_OK
+                );
+                assert_eq!(switch.flags, INKPOD_SEQUENCE_SWITCH_REQUIRED);
+                assert_eq!(
+                    inkpod_core_io_sequence_switch_submit(
+                        core,
+                        manager,
+                        &switch,
+                        omitted_source,
+                        ptr::null(),
+                        ptr::null(),
+                        ptr::null(),
+                        &mut job,
+                    ),
+                    INKPOD_STATUS_OK
+                );
+                assert_eq!(wait_ready(job).state, INKPOD_IO_READY);
+                assert_eq!(
+                    inkpod_core_io_job_apply(core, job, &mut document, ptr::null_mut()),
+                    INKPOD_STATUS_OK
+                );
+                assert_eq!(inkpod_io_job_release(&mut job), INKPOD_STATUS_OK);
+            }
         }
+        let normal_native = directory.join("cell1.inkpod");
+        let normal_text = normal_native.to_str().unwrap();
+        let normal_input = path_input(normal_text);
+        assert_eq!(
+            inkpod_core_io_submit(
+                core,
+                manager,
+                &request(&normal_input, INKPOD_IO_SAVE_PAIR),
+                &mut job,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(wait_ready(job).result_count, 2);
+        assert_eq!(
+            inkpod_core_io_job_apply(core, job, &mut document, ptr::null_mut()),
+            INKPOD_STATUS_PENDING
+        );
+        assert_eq!(wait_ready(job).state, INKPOD_IO_READY);
+        assert_eq!(
+            inkpod_core_io_job_apply(core, job, &mut document, ptr::null_mut()),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            document.flags & (INKPOD_DOCUMENT_FLAG_DIRTY | INKPOD_DOCUMENT_FLAG_RECOVERED),
+            0
+        );
+        assert!(normal_native.exists());
+        assert_eq!(inkpod_io_job_release(&mut job), INKPOD_STATUS_OK);
         assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
         assert_eq!(inkpod_io_manager_release(&mut manager), INKPOD_STATUS_OK);
     }
@@ -916,4 +2052,42 @@ fn io_003_ffi_rejects_null_short_unknown_enum_stride_and_occupied_owner() {
         assert!(job.is_null());
         assert_eq!(inkpod_io_manager_release(&mut manager), INKPOD_STATUS_OK);
     }
+}
+
+#[test]
+fn io_003_authority_repair_progress_flag_is_independent_and_additive() {
+    let progress = inkpod_core::FileIoProgress {
+        job_id: 1,
+        kind: inkpod_core::FileIoKind::SavePair,
+        state: inkpod_core::FileIoState::Ready,
+        discovered_count: 0,
+        total_count: 0,
+        read_count: 0,
+        loaded_count: 0,
+        failed_count: 0,
+        cancelled_count: 0,
+        completed_work: 0,
+        total_work: 0,
+        result_count: 2,
+        truncated: false,
+        installing: true,
+        cut_descriptor: false,
+        authority_repaired: true,
+        authority_revoked: false,
+    };
+    assert_eq!(
+        super::query::progress_flags(&progress),
+        INKPOD_IO_RESULT_INSTALLING | INKPOD_IO_RESULT_AUTHORITY_REPAIRED
+    );
+    let revoked = inkpod_core::FileIoProgress {
+        installing: false,
+        authority_repaired: false,
+        authority_revoked: true,
+        state: inkpod_core::FileIoState::Failed,
+        ..progress
+    };
+    assert_eq!(
+        super::query::progress_flags(&revoked),
+        INKPOD_IO_RESULT_AUTHORITY_REVOKED
+    );
 }

@@ -198,6 +198,7 @@ impl Core {
         self.current_path = None;
         self.raster_file_format = self.new_cell_raster_format;
         self.io_pair_authority = None;
+        self.io_pair_plan = None;
         self.persistence_state = persistence_state;
         self.recovered = false;
         self.color_check = None;
@@ -208,6 +209,7 @@ impl Core {
         self.sequence_render_catalog_changed();
         self.subpalette_index = None;
         self.publish_editor_session(Some(editor));
+        self.establish_sequence_preservation_baseline();
         self.document_info()
     }
 

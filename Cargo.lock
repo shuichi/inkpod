@@ -165,7 +165,7 @@ version = "0.2.10"
 
 [[package]]
 name = "inkpod-io"
-version = "0.2.8"
+version = "0.2.10"
 dependencies = [
  "blake3",
  "inkpod-format",

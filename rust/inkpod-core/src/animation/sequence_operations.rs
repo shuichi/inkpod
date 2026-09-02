@@ -369,6 +369,8 @@ impl Core {
                 "active document identity does not match the sequence source",
             ));
         }
+        let requires_switch = source.document_uuid != target_source.document_uuid
+            || source.source_generation != target_source.source_generation;
         Ok(SequenceSwitchRequest {
             policy,
             source_document_uuid: source.document_uuid,
@@ -384,6 +386,7 @@ impl Core {
             target_source_generation: target_source.source_generation,
             target_index: u32::try_from(target)
                 .map_err(|_| CoreError::InvalidArgument("sequence target index overflows"))?,
+            source_recovery_required: requires_switch && self.sequence_source_recovery_required(),
         })
     }
 
@@ -466,6 +469,61 @@ impl Core {
         self.document_info()
     }
 
+    /// Adopts an already resolved raster pair as one sequence target. A replayed
+    /// sidecar retains path/overwrite authority; a sidecar-less raster remains
+    /// pathless while retaining its runtime planned-pair proof. An exact recovery
+    /// may carry either authority while retaining its dirty recovery savepoints.
+    /// The runtime sequence entry is rebound to the staged document UUID because
+    /// raster file identities may change after atomic pair replacement.
+    pub(crate) fn sequence_restore_prepared_pair_target(
+        &mut self,
+        request: SequenceSwitchRequest,
+        mut staged: Core,
+    ) -> Result<DocumentInfo, CoreError> {
+        self.validate_autosaved_sequence_switch_request(request)?;
+        let committed = staged.current_path.is_some()
+            && staged.io_pair_authority.is_some()
+            && staged.io_pair_plan.is_none();
+        let planned = staged.current_path.is_none()
+            && staged.io_pair_authority.is_none()
+            && staged.io_pair_plan.is_some();
+        if !committed && !planned {
+            return Err(CoreError::InvalidArgument(
+                "sequence pair target authority is inconsistent",
+            ));
+        }
+        let restored_uuid = staged.document.as_ref().ok_or(CoreError::NoDocument)?.uuid;
+        let mut sequence = self
+            .sequence
+            .clone()
+            .ok_or(CoreError::InvalidState("no sequence is configured"))?;
+        let target = sequence
+            .cells
+            .get_mut(request.target_index as usize)
+            .ok_or(CoreError::InvalidState("sequence switch request is stale"))?;
+        if target.document_uuid != request.target_document_uuid
+            || target.source_generation != request.target_source_generation
+        {
+            return Err(CoreError::InvalidState("sequence switch request is stale"));
+        }
+        target.document_uuid = restored_uuid;
+        sequence.active_index = Some(request.target_index as usize);
+        staged.sequence = Some(sequence);
+        staged.sequence_render_cache = self.sequence_render_cache.clone();
+        staged.sequence_render_cache.invalidate_document();
+        let document = staged.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let (view, secondary_views) =
+            self.stage_sequence_views(DocumentSizeU32::new(document.width, document.height))?;
+        staged.view = view;
+        staged.secondary_views = secondary_views;
+        staged.next_view_id = self.next_view_id;
+        staged.motion_check = None;
+        staged.subpalette_index = self.subpalette_index;
+        staged.inherit_file_runtime(self)?;
+        *self = staged;
+        self.document_info()
+    }
+
     fn validate_autosaved_sequence_switch_request(
         &self,
         request: SequenceSwitchRequest,
@@ -509,6 +567,8 @@ impl Core {
             || source.source_generation != request.source_generation
             || target.document_uuid != request.target_document_uuid
             || target.source_generation != request.target_source_generation
+            || request.source_recovery_required
+                != (request.requires_switch() && self.sequence_source_recovery_required())
         {
             return Err(CoreError::InvalidState("sequence switch request is stale"));
         }

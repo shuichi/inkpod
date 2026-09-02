@@ -42,6 +42,7 @@ mod paint;
 mod persistence;
 mod persistence_task;
 mod primitive;
+mod raster_pair_validation;
 mod reference_view;
 mod resource;
 mod script;

@@ -23,6 +23,49 @@ pub struct FileStamp {
     pub readonly: bool,
 }
 
+/// Runtime-only observer which proves that one cached directory namespace has
+/// not changed. Selected child contents retain their own complete
+/// [`FileStamp`] validation.
+pub(crate) struct DirectoryChangeObserver {
+    #[cfg(windows)]
+    inner: windows::DirectoryChangeObserver,
+    #[cfg(not(windows))]
+    _unsupported: (),
+}
+
+impl DirectoryChangeObserver {
+    pub(crate) fn new(path: &Path) -> IoResult<Self> {
+        #[cfg(windows)]
+        {
+            Ok(Self {
+                inner: windows::DirectoryChangeObserver::new(path)?,
+            })
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = path;
+            Err(IoError::InvalidInput(
+                "directory change observation is unavailable on this platform",
+            ))
+        }
+    }
+
+    pub(crate) fn unchanged(&self, path: &Path) -> IoResult<bool> {
+        #[cfg(windows)]
+        {
+            let _ = path;
+            self.inner.unchanged()
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = path;
+            Err(IoError::InvalidInput(
+                "directory change observation is unavailable on this platform",
+            ))
+        }
+    }
+}
+
 impl FileStamp {
     /// Classifies a complete-stamp mismatch that can be checked by rereading the
     /// same byte extent. This is only a reason to retry; it does not prove byte
@@ -178,6 +221,55 @@ pub(crate) fn replace(source: &Path, destination: &Path, overwrite: bool) -> IoR
             std::fs::remove_file(source)?;
         }
         if let Some(parent) = destination.parent() {
+            File::open(parent)?.sync_all()?;
+        }
+        Ok(())
+    }
+}
+
+/// Removes two obsolete artifacts only through handles that still carry the
+/// expected complete stamps. Backends without a handle-bound deletion
+/// primitive conservatively retain the files; path-based check-then-delete is
+/// not an acceptable substitute because another process can replace a path.
+pub(crate) fn remove_exact_pair(
+    native: &Path,
+    expected_native: FileStamp,
+    sidecar: &Path,
+    expected_sidecar: FileStamp,
+) -> IoResult<()> {
+    #[cfg(windows)]
+    {
+        windows::remove_exact_pair(native, expected_native, sidecar, expected_sidecar)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (native, expected_native, sidecar, expected_sidecar);
+        Err(IoError::ResourceBusy(
+            "exact recovery cleanup is unavailable on this platform",
+        ))
+    }
+}
+
+/// Removes one file only if its complete stamp still matches. Windows binds the
+/// check and deletion to one exclusive handle. Other backends perform the
+/// narrowest portable final recheck immediately before deletion; callers retain
+/// their recovery journal if that operation cannot be completed.
+pub(crate) fn remove_exact(path: &Path, expected: FileStamp) -> IoResult<()> {
+    #[cfg(windows)]
+    {
+        windows::remove_exact(path, expected)
+    }
+    #[cfg(not(windows))]
+    {
+        let file = File::open(path)?;
+        if stamp(&file)? != expected {
+            return Err(IoError::ChangedDuringRead);
+        }
+        if stamp(&File::open(path)?)? != expected {
+            return Err(IoError::ChangedDuringRead);
+        }
+        std::fs::remove_file(path)?;
+        if let Some(parent) = path.parent() {
             File::open(parent)?.sync_all()?;
         }
         Ok(())

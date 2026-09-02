@@ -6,15 +6,15 @@ mod model;
 
 pub use codec::{decode_recovery_metadata, encode_recovery_metadata};
 pub use model::{
-    RECOVERY_METADATA_VERSION, RecoveryCandidate, RecoveryIdentity, RecoveryIdentityKind,
-    RecoveryMetadata,
+    RECOVERY_METADATA_VERSION, RecoveryArtifactProof, RecoveryArtifactStamp, RecoveryCandidate,
+    RecoveryIdentity, RecoveryIdentityKind, RecoveryMetadata, RecoveryPairProof,
 };
 
 use crate::backend;
-use crate::{IoError, IoManager, IoResult, JobContext, JobPhase, LockedFiles};
+use crate::{FileStamp, IoError, IoManager, IoResult, JobContext, JobPhase, LockedFiles};
 use model::MAX_METADATA_BYTES;
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -62,18 +62,21 @@ impl IoManager {
         Ok(path)
     }
 
-    /// Writes native recovery plus metadata on the worker that calls this API.
-    /// Parents are created here, so the frontend passes only a chosen path and
-    /// typed metadata. The native snapshot remains recoverable if a later sidecar
-    /// publication fails. Success means both writes were flushed and installed;
-    /// it never advances normal-save path authority or document savepoints.
+    /// Writes one new native recovery attempt plus metadata on the worker that
+    /// calls this API. Neither member may already exist: callers rotate to a
+    /// fresh attempt path and publish its returned proof only after this method
+    /// succeeds. Consequently a failed attempt cannot overwrite the previously
+    /// published recovery generation. A failure after the first member was
+    /// installed may leave only this new, unassociated attempt for later cleanup.
+    /// Success means both writes were flushed and installed; it never advances
+    /// normal-save path authority or document savepoints.
     pub fn write_recovery(
         &self,
         recovery_path: &Path,
         metadata: &RecoveryMetadata,
         context: &JobContext,
         native_writer: impl FnOnce(&mut File) -> IoResult<()>,
-    ) -> IoResult<()> {
+    ) -> IoResult<RecoveryArtifactProof> {
         self.check_running(context)?;
         let metadata = metadata_with_time(metadata)?;
         let bytes = encode_recovery_metadata(&metadata)?;
@@ -81,7 +84,10 @@ impl IoManager {
         self.create_dir_all(parent(&native)?, context)?;
         self.with_file_locks(&[native.clone(), sidecar.clone()], context, |files| {
             validate_locked_artifacts(files, &[&native, &sidecar])?;
-            files.write_atomic(&native, |file| {
+            if files.exists(&native)? || files.exists(&sidecar)? {
+                return Err(IoError::ConfirmationRequired);
+            }
+            files.write_new_atomic(&native, |file| {
                 native_writer(file)?;
                 if file.metadata()?.len() > MAX_NATIVE_BYTES {
                     return Err(IoError::LimitExceeded(
@@ -90,7 +96,69 @@ impl IoManager {
                 }
                 Ok(())
             })?;
-            files.write_bytes_atomic(&sidecar, &bytes)
+            files.write_new_atomic(&sidecar, |file| {
+                for chunk in bytes.chunks(64 * 1024) {
+                    context.check_cancelled()?;
+                    file.write_all(chunk)?;
+                }
+                Ok(())
+            })?;
+            recovery_artifact_proof(files, &native, &sidecar)
+        })
+    }
+
+    /// Reads and validates one exact recovery publication under the shared
+    /// native/metadata locks. Both members must match `expected` before any
+    /// decode and again after both decoders complete. Missing, replaced, or
+    /// concurrently changed members therefore never yield a candidate value.
+    pub fn read_recovery_with_proof<T>(
+        &self,
+        recovery_path: &Path,
+        expected: RecoveryArtifactProof,
+        context: &JobContext,
+        native_reader: impl FnOnce(&mut File) -> IoResult<T>,
+    ) -> IoResult<(T, RecoveryMetadata)> {
+        let (native, sidecar) = artifact_paths(recovery_path)?;
+        self.with_file_locks(&[native.clone(), sidecar.clone()], context, |files| {
+            validate_locked_artifacts(files, &[&native, &sidecar])?;
+            if recovery_artifact_proof(files, &native, &sidecar)? != expected {
+                return Err(IoError::ChangedDuringRead);
+            }
+            let metadata = files.with_reader(&sidecar, MAX_METADATA_BYTES as u64, |file| {
+                let length = usize::try_from(file.metadata()?.len())
+                    .map_err(|_| IoError::LimitExceeded("recovery metadata length overflow"))?;
+                if length > MAX_METADATA_BYTES {
+                    return Err(IoError::LimitExceeded(
+                        "recovery metadata exceeds its byte bound",
+                    ));
+                }
+                let mut bytes = Vec::new();
+                bytes
+                    .try_reserve_exact(length)
+                    .map_err(|_| IoError::ResourceBusy("recovery metadata allocation failed"))?;
+                let mut buffer = [0_u8; 64 * 1024];
+                loop {
+                    context.check_cancelled()?;
+                    let read = file.read(&mut buffer)?;
+                    if read == 0 {
+                        break;
+                    }
+                    if bytes
+                        .len()
+                        .checked_add(read)
+                        .is_none_or(|size| size > length)
+                    {
+                        return Err(IoError::ChangedDuringRead);
+                    }
+                    bytes.extend_from_slice(&buffer[..read]);
+                }
+                decode_recovery_metadata(&bytes)
+            })?;
+            let native_value = files.with_reader(&native, MAX_NATIVE_BYTES, native_reader)?;
+            if recovery_artifact_proof(files, &native, &sidecar)? != expected {
+                return Err(IoError::ChangedDuringRead);
+            }
+            Ok((native_value, metadata))
         })
     }
 
@@ -250,6 +318,31 @@ impl IoManager {
         })
     }
 
+    /// Removes an obsolete recovery attempt only while both members still
+    /// match the exact proof returned by its successful publication. This is
+    /// the safe cleanup path after a newer append-only generation has become
+    /// authoritative; a replaced, missing, or mixed pair is left untouched.
+    pub fn discard_recovery_with_proof(
+        &self,
+        recovery_path: &Path,
+        expected: RecoveryArtifactProof,
+        context: &JobContext,
+    ) -> IoResult<()> {
+        let (native, sidecar) = artifact_paths(recovery_path)?;
+        self.with_file_locks(&[native.clone(), sidecar.clone()], context, |files| {
+            validate_locked_artifacts(files, &[&native, &sidecar])?;
+            if recovery_artifact_proof(files, &native, &sidecar)? != expected {
+                return Err(IoError::ChangedDuringRead);
+            }
+            let native_stamp: FileStamp = expected.native.into();
+            let metadata_stamp: FileStamp = expected.metadata.into();
+            backend::remove_exact_pair(&native, native_stamp, &sidecar, metadata_stamp)?;
+            self.inner.cache.invalidate(native_stamp.identity);
+            self.inner.cache.invalidate(metadata_stamp.identity);
+            Ok(())
+        })
+    }
+
     /// Missing recovery is false; an existing recovery without a normal file is
     /// newer. Permission and malformed path errors are distinct from absence.
     pub fn recovery_is_newer(
@@ -314,6 +407,17 @@ fn artifact_paths(recovery_path: &Path) -> IoResult<(PathBuf, PathBuf)> {
     reject_nonregular(&native)?;
     reject_nonregular(&sidecar)?;
     Ok((native, sidecar))
+}
+
+fn recovery_artifact_proof(
+    files: &LockedFiles<'_>,
+    native: &Path,
+    sidecar: &Path,
+) -> IoResult<RecoveryArtifactProof> {
+    Ok(RecoveryArtifactProof {
+        native: files.metadata(native)?.into(),
+        metadata: files.metadata(sidecar)?.into(),
+    })
 }
 
 fn parent(path: &Path) -> IoResult<&Path> {

@@ -1,7 +1,7 @@
 use inkpod_io::{
-    IoConfig, IoError, IoManager, JobContext, RECOVERY_METADATA_VERSION, RecoveryIdentity,
-    RecoveryIdentityKind, RecoveryMetadata, decode_recovery_metadata, encode_recovery_metadata,
-    recovery_metadata_path,
+    FileIdentity, FileStamp, IoConfig, IoError, IoManager, JobContext, RECOVERY_METADATA_VERSION,
+    RecoveryArtifactProof, RecoveryIdentity, RecoveryIdentityKind, RecoveryMetadata,
+    RecoveryPairProof, decode_recovery_metadata, encode_recovery_metadata, recovery_metadata_path,
 };
 use std::fs::{self, File, FileTimes};
 use std::io::Write;
@@ -59,6 +59,7 @@ fn metadata() -> RecoveryMetadata {
         },
         original_path: String::new(),
         source_path: "資料/原画0001.tif".into(),
+        pair_proof: None,
         written_time_100ns: 116_444_736_000_000_001,
     }
 }
@@ -67,6 +68,19 @@ fn checksum(bytes: &mut [u8]) {
     let length = bytes.len() - 32;
     let hash = blake3::hash(&bytes[..length]);
     bytes[length..].copy_from_slice(hash.as_bytes());
+}
+
+fn pair_stamp(seed: u128) -> FileStamp {
+    FileStamp {
+        identity: FileIdentity {
+            volume: 7,
+            file: seed,
+        },
+        length: 100 + seed as u64,
+        modified: 200 + seed as i128,
+        changed: 300 + seed as i128,
+        readonly: seed & 1 != 0,
+    }
 }
 
 fn modified(path: &Path, seconds: u64) {
@@ -114,10 +128,58 @@ fn metadata_round_trips_identity_variants_and_rejects_noncurrent_or_malformed_re
         checksum(&mut reserved);
         assert!(decode_recovery_metadata(&reserved).is_err());
         let mut overflowing = bytes.clone();
-        overflowing[104..108].copy_from_slice(&u32::MAX.to_le_bytes());
+        overflowing[242..246].copy_from_slice(&u32::MAX.to_le_bytes());
         checksum(&mut overflowing);
         assert!(decode_recovery_metadata(&overflowing).is_err());
     }
+    record.original_identity = RecoveryIdentity::default();
+    for proof in [
+        Some(RecoveryPairProof::Committed {
+            native: pair_stamp(1),
+            raster: pair_stamp(2),
+        }),
+        Some(RecoveryPairProof::Planned {
+            native_missing: FileIdentity {
+                volume: u64::MAX,
+                file: 3,
+            },
+            raster: pair_stamp(4),
+        }),
+        Some(RecoveryPairProof::RepairNeeded {
+            native: pair_stamp(5),
+            raster_missing: FileIdentity {
+                volume: u64::MAX,
+                file: 6,
+            },
+        }),
+        None,
+    ] {
+        record.pair_proof = proof;
+        let bytes = encode_recovery_metadata(&record).unwrap();
+        assert_eq!(decode_recovery_metadata(&bytes).unwrap(), record);
+    }
+    record.pair_proof = Some(RecoveryPairProof::Committed {
+        native: pair_stamp(7),
+        raster: pair_stamp(7),
+    });
+    assert!(encode_recovery_metadata(&record).is_err());
+    record.pair_proof = Some(RecoveryPairProof::Planned {
+        native_missing: FileIdentity { volume: 7, file: 8 },
+        raster: pair_stamp(9),
+    });
+    assert!(encode_recovery_metadata(&record).is_err());
+    record.pair_proof = Some(RecoveryPairProof::Committed {
+        native: FileStamp {
+            identity: FileIdentity {
+                volume: u64::MAX,
+                file: 10,
+            },
+            ..pair_stamp(10)
+        },
+        raster: pair_stamp(11),
+    });
+    assert!(encode_recovery_metadata(&record).is_err());
+    record.pair_proof = None;
     record.source_path = "invalid\0path".into();
     assert!(encode_recovery_metadata(&record).is_err());
     record.source_path = "x".repeat(32_768);
@@ -176,6 +238,68 @@ fn rust_creates_recovery_parents_writes_metadata_time_and_keeps_cache_empty() {
             .is_err()
     );
     assert!(recovery_metadata_path(&directory.path("not-native.png")).is_err());
+}
+
+#[test]
+fn exact_proof_binds_both_recovery_members_before_and_after_decode() {
+    let directory = Directory::new();
+    let manager = manager();
+    let context = JobContext::new();
+    let first_path = directory.path("exact-attempt-1.inkpod");
+    let second_path = directory.path("exact-attempt-2.inkpod");
+    let second_sidecar = recovery_metadata_path(&second_path).unwrap();
+    let record = metadata();
+    let first = manager
+        .write_recovery(&first_path, &record, &context, |file| {
+            file.write_all(b"first-native")?;
+            Ok(())
+        })
+        .unwrap();
+    let (native, decoded) = manager
+        .read_recovery_with_proof(&first_path, first, &context, |file| {
+            let mut bytes = Vec::new();
+            std::io::Read::read_to_end(file, &mut bytes)?;
+            Ok(bytes)
+        })
+        .unwrap();
+    assert_eq!(native, b"first-native");
+    assert_eq!(decoded, record);
+
+    let second = manager
+        .write_recovery(&second_path, &record, &context, |file| {
+            file.write_all(b"second-native")?;
+            Ok(())
+        })
+        .unwrap();
+    assert_ne!(first, second);
+    assert!(matches!(
+        manager.read_recovery_with_proof(&second_path, first, &context, |_| Ok(())),
+        Err(IoError::ChangedDuringRead)
+    ));
+    assert!(
+        manager
+            .read_recovery_with_proof(&first_path, first, &context, |_| Ok(()))
+            .is_ok()
+    );
+
+    let before_race = second;
+    assert!(matches!(
+        manager.read_recovery_with_proof(&second_path, before_race, &context, |_| {
+            fs::write(&second_sidecar, b"externally replaced metadata")?;
+            Ok(())
+        }),
+        Err(IoError::ChangedDuringRead)
+    ));
+
+    let malformed = RecoveryArtifactProof {
+        native: manager.metadata(&second_path, &context).unwrap().into(),
+        metadata: manager.metadata(&second_sidecar, &context).unwrap().into(),
+    };
+    assert!(
+        manager
+            .read_recovery_with_proof(&second_path, malformed, &context, |_| Ok(()))
+            .is_err()
+    );
 }
 
 #[test]
@@ -242,30 +366,38 @@ fn candidates_preserve_native_files_when_sidecars_are_missing_invalid_or_obsolet
 }
 
 #[test]
-fn failure_and_cancellation_preserve_previous_recovery_and_discard_is_idempotent() {
+fn append_only_failure_preserves_previous_recovery_and_exact_discard_checks_proof() {
     let directory = Directory::new();
     let manager = manager();
     let context = JobContext::new();
     let path = directory.path("recovery.inkpod");
-    manager
+    let proof = manager
         .write_recovery(&path, &metadata(), &context, |file| {
             file.write_all(b"old")?;
             Ok(())
         })
         .unwrap();
     let old_metadata = fs::read(recovery_metadata_path(&path).unwrap()).unwrap();
+    assert!(matches!(
+        manager.write_recovery(&path, &metadata(), &context, |_| panic!(
+            "an occupied append-only attempt must reject before encoding"
+        )),
+        Err(IoError::ConfirmationRequired)
+    ));
     let mut invalid = metadata();
     invalid.session_id = 0;
+    let invalid_path = directory.path("invalid-attempt.inkpod");
     assert!(
         manager
-            .write_recovery(&path, &invalid, &context, |_| panic!(
+            .write_recovery(&invalid_path, &invalid, &context, |_| panic!(
                 "invalid metadata must be checked before native writer"
             ))
             .is_err()
     );
+    let failed_path = directory.path("failed-attempt.inkpod");
     assert!(
         manager
-            .write_recovery(&path, &metadata(), &context, |file| {
+            .write_recovery(&failed_path, &metadata(), &context, |file| {
                 file.write_all(b"partial")?;
                 Err(IoError::InvalidInput("injected encoder failure"))
             })
@@ -273,8 +405,9 @@ fn failure_and_cancellation_preserve_previous_recovery_and_discard_is_idempotent
     );
     let cancelled = JobContext::new();
     cancelled.cancel();
+    let cancelled_path = directory.path("cancelled-attempt.inkpod");
     assert!(matches!(
-        manager.write_recovery(&path, &metadata(), &cancelled, |_| panic!(
+        manager.write_recovery(&cancelled_path, &metadata(), &cancelled, |_| panic!(
             "cancelled writer ran"
         )),
         Err(IoError::Cancelled)
@@ -288,7 +421,21 @@ fn failure_and_cancellation_preserve_previous_recovery_and_discard_is_idempotent
         fs::read(recovery_metadata_path(&path).unwrap()).unwrap(),
         old_metadata
     );
-    manager.discard_recovery(&path, &context).unwrap();
+    assert!(!invalid_path.exists());
+    assert!(!failed_path.exists());
+    assert!(!cancelled_path.exists());
+
+    let mut wrong = proof;
+    wrong.native.length += 1;
+    assert!(matches!(
+        manager.discard_recovery_with_proof(&path, wrong, &context),
+        Err(IoError::ChangedDuringRead)
+    ));
+    assert_eq!(fs::read(&path).unwrap(), b"old");
+    match manager.discard_recovery_with_proof(&path, proof, &context) {
+        Ok(()) | Err(IoError::ResourceBusy(_)) => {}
+        Err(error) => panic!("unexpected exact-discard result: {error}"),
+    }
     manager.discard_recovery(&path, &context).unwrap();
     assert!(!path.exists());
     assert!(!recovery_metadata_path(&path).unwrap().exists());

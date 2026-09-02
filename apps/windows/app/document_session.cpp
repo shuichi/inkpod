@@ -5,6 +5,23 @@
 #include <utility>
 
 namespace inkpod::app {
+
+bool ValidRecoveryArtifactProof(
+    const InkpodIoRecoveryArtifactProof& proof) noexcept {
+    const auto valid_stamp = [](const InkpodIoRecoveryArtifactStamp& stamp) {
+        const bool physical = stamp.identity.volume != 0U
+            || stamp.identity.object_high != 0U
+            || stamp.identity.object_low != 0U;
+        return stamp.struct_size == sizeof(InkpodIoRecoveryArtifactStamp)
+            && (stamp.flags & ~INKPOD_IO_RECOVERY_ARTIFACT_READONLY) == 0U
+            && stamp.identity.struct_size == sizeof(InkpodIoFileIdentity)
+            && stamp.identity.kind == 1U && physical;
+    };
+    return proof.struct_size == sizeof(InkpodIoRecoveryArtifactProof)
+        && proof.reserved == 0U
+        && valid_stamp(proof.native) && valid_stamp(proof.metadata);
+}
+
 namespace {
 
 void ResetPresentation(ViewUiState& view) noexcept {
@@ -56,6 +73,30 @@ void DocumentSession::BindCore(CoreHost* host) noexcept {
 
 CoreHost* DocumentSession::Core() const noexcept {
     return core_;
+}
+
+bool DocumentSession::AdvancePersistenceEpoch() noexcept {
+    if (persistence_epoch == UINT64_MAX) {
+        return false;
+    }
+    ++persistence_epoch;
+    return true;
+}
+
+bool DocumentSession::AdvanceSequenceCatalogIntentEpoch() noexcept {
+    if (sequence_catalog_intent_epoch == UINT64_MAX) {
+        return false;
+    }
+    ++sequence_catalog_intent_epoch;
+    return true;
+}
+
+bool DocumentSession::HasExactPairIdentities(
+    const DocumentIdentity& native_identity,
+    const DocumentIdentity& raster_identity) const noexcept {
+    return native_identity && raster_identity
+        && identity == native_identity
+        && pair_raster_identity == raster_identity;
 }
 
 bool DocumentSession::AcknowledgeSequencePresentation(
@@ -233,11 +274,13 @@ bool DocumentSession::PublishSequenceAutosave(
     std::uint64_t document_uuid_low,
     std::uint64_t source_generation,
     const std::wstring& recovery_path,
-    const RecoveryMetadata& metadata) noexcept {
+    const RecoveryMetadata& metadata,
+    const InkpodIoRecoveryArtifactProof& artifact_proof) noexcept {
     if ((document_uuid_high == 0U && document_uuid_low == 0U)
         || source_generation == 0U || recovery_path.empty()
         || metadata.document_uuid_high != document_uuid_high
-        || metadata.document_uuid_low != document_uuid_low) {
+        || metadata.document_uuid_low != document_uuid_low
+        || !ValidRecoveryArtifactProof(artifact_proof)) {
         return false;
     }
     try {
@@ -247,9 +290,24 @@ bool DocumentSession::PublishSequenceAutosave(
         binding.source_generation = source_generation;
         binding.recovery_path = recovery_path;
         binding.metadata = metadata;
-        return ReserveSequenceAutosave(
-                   document_uuid_high, document_uuid_low, source_generation)
-            && PublishReservedSequenceAutosave(std::move(binding));
+        binding.artifact_proof = artifact_proof;
+        const auto* existing = FindSequenceAutosave(
+            document_uuid_high, document_uuid_low, source_generation);
+        const std::uint64_t expected_generation = existing == nullptr
+            ? 0U : existing->artifact_generation;
+        if (!ReserveSequenceAutosave(
+                document_uuid_high, document_uuid_low, source_generation,
+                expected_generation)) {
+            return false;
+        }
+        const bool published = PublishReservedSequenceAutosave(
+            std::move(binding), expected_generation);
+        if (!published) {
+            CancelSequenceAutosaveReservation(
+                document_uuid_high, document_uuid_low, source_generation,
+                expected_generation);
+        }
+        return published;
     } catch (const std::bad_alloc&) {
         return false;
     }
@@ -258,21 +316,32 @@ bool DocumentSession::PublishSequenceAutosave(
 bool DocumentSession::ReserveSequenceAutosave(
     std::uint64_t document_uuid_high,
     std::uint64_t document_uuid_low,
-    std::uint64_t source_generation) noexcept {
+    std::uint64_t source_generation,
+    std::uint64_t expected_artifact_generation) noexcept {
     if ((document_uuid_high == 0U && document_uuid_low == 0U)
-        || source_generation == 0U) {
+        || source_generation == 0U || sequence_autosave_reservation_active_) {
         return false;
     }
     if (const auto* existing = FindSequenceAutosave(
             document_uuid_high, document_uuid_low, source_generation);
         existing != nullptr) {
-        return existing->artifact_generation != UINT64_MAX;
+        if (existing->artifact_generation == UINT64_MAX
+            || existing->artifact_generation != expected_artifact_generation) {
+            return false;
+        }
+    } else if (expected_artifact_generation != 0U) {
+        return false;
     }
     if (sequence_autosaves_.size() >= 10'000U) {
         return false;
     }
     try {
         sequence_autosaves_.reserve(sequence_autosaves_.size() + 1U);
+        reserved_sequence_document_uuid_high_ = document_uuid_high;
+        reserved_sequence_document_uuid_low_ = document_uuid_low;
+        reserved_sequence_source_generation_ = source_generation;
+        reserved_sequence_artifact_generation_ = expected_artifact_generation;
+        sequence_autosave_reservation_active_ = true;
         return true;
     } catch (const std::bad_alloc&) {
         return false;
@@ -280,12 +349,20 @@ bool DocumentSession::ReserveSequenceAutosave(
 }
 
 bool DocumentSession::PublishReservedSequenceAutosave(
-    SequenceAutosaveBinding binding) noexcept {
+    SequenceAutosaveBinding binding,
+    std::uint64_t expected_artifact_generation) noexcept {
     if ((binding.document_uuid_high == 0U
             && binding.document_uuid_low == 0U)
         || binding.source_generation == 0U || binding.recovery_path.empty()
         || binding.metadata.document_uuid_high != binding.document_uuid_high
-        || binding.metadata.document_uuid_low != binding.document_uuid_low) {
+        || binding.metadata.document_uuid_low != binding.document_uuid_low
+        || !ValidRecoveryArtifactProof(binding.artifact_proof)
+        || !sequence_autosave_reservation_active_
+        || reserved_sequence_document_uuid_high_ != binding.document_uuid_high
+        || reserved_sequence_document_uuid_low_ != binding.document_uuid_low
+        || reserved_sequence_source_generation_ != binding.source_generation
+        || reserved_sequence_artifact_generation_
+            != expected_artifact_generation) {
         return false;
     }
     auto found = std::find_if(
@@ -297,24 +374,191 @@ bool DocumentSession::PublishReservedSequenceAutosave(
                 && candidate.source_generation == binding.source_generation;
         });
     if (found != sequence_autosaves_.end()) {
-        if (found->artifact_generation == UINT64_MAX) {
+        if (found->artifact_generation != expected_artifact_generation
+            || found->artifact_generation == UINT64_MAX) {
             return false;
         }
         binding.artifact_generation = found->artifact_generation + 1U;
         *found = std::move(binding);
+        sequence_autosave_reservation_active_ = false;
         return true;
     }
     if (sequence_autosaves_.size() >= sequence_autosaves_.capacity()
-        || sequence_autosaves_.size() >= 10'000U) {
+        || sequence_autosaves_.size() >= 10'000U
+        || expected_artifact_generation != 0U) {
         return false;
     }
     binding.artifact_generation = 1U;
     sequence_autosaves_.push_back(std::move(binding));
+    sequence_autosave_reservation_active_ = false;
     return true;
+}
+
+void DocumentSession::CancelSequenceAutosaveReservation(
+    std::uint64_t document_uuid_high,
+    std::uint64_t document_uuid_low,
+    std::uint64_t source_generation,
+    std::uint64_t expected_artifact_generation) noexcept {
+    if (sequence_autosave_reservation_active_
+        && reserved_sequence_document_uuid_high_ == document_uuid_high
+        && reserved_sequence_document_uuid_low_ == document_uuid_low
+        && reserved_sequence_source_generation_ == source_generation
+        && reserved_sequence_artifact_generation_
+            == expected_artifact_generation) {
+        sequence_autosave_reservation_active_ = false;
+    }
+}
+
+bool DocumentSession::RemoveSequenceAutosave(
+    std::uint64_t document_uuid_high,
+    std::uint64_t document_uuid_low,
+    std::uint64_t source_generation,
+    std::uint64_t artifact_generation) noexcept {
+    if (sequence_autosave_reservation_active_
+        && reserved_sequence_document_uuid_high_ == document_uuid_high
+        && reserved_sequence_document_uuid_low_ == document_uuid_low
+        && reserved_sequence_source_generation_ == source_generation) {
+        return false;
+    }
+    const auto found = std::find_if(sequence_autosaves_.begin(), sequence_autosaves_.end(),
+        [document_uuid_high, document_uuid_low, source_generation,
+            artifact_generation](const auto& binding) {
+            return binding.document_uuid_high == document_uuid_high
+                && binding.document_uuid_low == document_uuid_low
+                && binding.source_generation == source_generation
+                && binding.artifact_generation == artifact_generation;
+        });
+    if (found == sequence_autosaves_.end()) {
+        return false;
+    }
+    sequence_autosaves_.erase(found);
+    return true;
+}
+
+std::optional<SequenceAutosaveBinding> DocumentSession::TakeSequenceAutosave(
+    std::uint64_t document_uuid_high,
+    std::uint64_t document_uuid_low,
+    std::uint64_t source_generation) noexcept {
+    if (sequence_autosave_reservation_active_
+        && reserved_sequence_document_uuid_high_ == document_uuid_high
+        && reserved_sequence_document_uuid_low_ == document_uuid_low
+        && reserved_sequence_source_generation_ == source_generation) {
+        return std::nullopt;
+    }
+    const auto found = std::find_if(
+        sequence_autosaves_.begin(), sequence_autosaves_.end(),
+        [document_uuid_high, document_uuid_low, source_generation](
+            const SequenceAutosaveBinding& binding) {
+            return binding.document_uuid_high == document_uuid_high
+                && binding.document_uuid_low == document_uuid_low
+                && binding.source_generation == source_generation;
+        });
+    if (found == sequence_autosaves_.end()) {
+        return std::nullopt;
+    }
+    SequenceAutosaveBinding retired = std::move(*found);
+    sequence_autosaves_.erase(found);
+    return retired;
+}
+
+std::vector<SequenceAutosaveBinding>
+DocumentSession::TakeSequenceAutosaves() noexcept {
+    sequence_autosave_reservation_active_ = false;
+    reserved_sequence_document_uuid_high_ = 0U;
+    reserved_sequence_document_uuid_low_ = 0U;
+    reserved_sequence_source_generation_ = 0U;
+    reserved_sequence_artifact_generation_ = 0U;
+    return std::move(sequence_autosaves_);
 }
 
 void DocumentSession::ClearSequenceAutosaves() noexcept {
     sequence_autosaves_.clear();
+    sequence_autosave_reservation_active_ = false;
+}
+
+bool DocumentSession::ReplaceSequenceFileBindings(
+    std::vector<SequenceFileBinding> bindings) noexcept {
+    if (bindings.size() > 10'000U
+        || std::any_of(bindings.cbegin(), bindings.cend(), [](const auto& binding) {
+               return (binding.document_uuid_high == 0U
+                          && binding.document_uuid_low == 0U)
+                   || binding.source_generation == 0U
+                   || binding.raster_path.empty() || !binding.raster_identity;
+           })) {
+        return false;
+    }
+    sequence_file_bindings_ = std::move(bindings);
+    return true;
+}
+
+const SequenceFileBinding* DocumentSession::SequenceFileBindingAt(
+    std::size_t index) const noexcept {
+    return index < sequence_file_bindings_.size()
+        ? &sequence_file_bindings_[index] : nullptr;
+}
+
+bool DocumentSession::UpdateSequenceFileBinding(
+    std::size_t index,
+    std::uint64_t document_uuid_high,
+    std::uint64_t document_uuid_low,
+    std::uint64_t source_generation,
+    const std::wstring& raster_path,
+    const DocumentIdentity& raster_identity) noexcept {
+    if (index >= sequence_file_bindings_.size()
+        || (document_uuid_high == 0U && document_uuid_low == 0U)
+        || source_generation == 0U || raster_path.empty() || !raster_identity) {
+        return false;
+    }
+    try {
+        std::wstring path_candidate = raster_path;
+        DocumentIdentity identity_candidate = raster_identity;
+        auto& binding = sequence_file_bindings_[index];
+        binding.document_uuid_high = document_uuid_high;
+        binding.document_uuid_low = document_uuid_low;
+        binding.source_generation = source_generation;
+        binding.raster_path = std::move(path_candidate);
+        binding.raster_identity = std::move(identity_candidate);
+        return true;
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+}
+
+bool DocumentSession::PublishSequenceFileBinding(
+    std::size_t index,
+    SequenceFileBinding binding) noexcept {
+    if (index >= sequence_file_bindings_.size()
+        || (binding.document_uuid_high == 0U
+            && binding.document_uuid_low == 0U)
+        || binding.source_generation == 0U || binding.raster_path.empty()
+        || !binding.raster_identity) {
+        return false;
+    }
+    sequence_file_bindings_[index] = std::move(binding);
+    return true;
+}
+
+bool DocumentSession::RevokeSequenceFileBinding(
+    std::size_t index,
+    std::uint64_t document_uuid_high,
+    std::uint64_t document_uuid_low,
+    std::uint64_t source_generation) noexcept {
+    if (index >= sequence_file_bindings_.size()) {
+        return false;
+    }
+    auto& binding = sequence_file_bindings_[index];
+    if (binding.document_uuid_high != document_uuid_high
+        || binding.document_uuid_low != document_uuid_low
+        || binding.source_generation != source_generation) {
+        return false;
+    }
+    binding.raster_path.clear();
+    binding.raster_identity = {};
+    return true;
+}
+
+void DocumentSession::ClearSequenceFileBindings() noexcept {
+    sequence_file_bindings_.clear();
 }
 
 bool DocumentRegistry::InitializePlaceholder(Generation generation) noexcept {
@@ -354,9 +598,10 @@ bool DocumentRegistry::Replace(
     }
     current->id = id;
     current->generation = generation;
-    CancelIdentityReservation(id);
+    ClearIdentityReservation(*current);
     current->BindCore(core);
     current->ClearSequenceAutosaves();
+    current->ClearSequenceFileBindings();
     current->auto_sequence_truncated = false;
     current->ResetViews(initial_view, generation);
     return true;
@@ -467,7 +712,9 @@ const DocumentSession* DocumentRegistry::FindByIdentity(
         return nullptr;
     }
     for (const auto& session : sessions_) {
-        if (session != nullptr && session->identity == identity) {
+        if (session != nullptr
+            && (session->identity == identity
+                || session->pair_raster_identity == identity)) {
             return session.get();
         }
     }
@@ -477,71 +724,110 @@ const DocumentSession* DocumentRegistry::FindByIdentity(
 bool DocumentRegistry::AssignIdentity(
     DocumentSessionId id,
     const DocumentIdentity& identity) noexcept {
+    return AssignPairIdentities(id, identity, {});
+}
+
+bool DocumentRegistry::AssignPairIdentities(
+    DocumentSessionId id,
+    const DocumentIdentity& identity,
+    const DocumentIdentity& pair_raster_identity) noexcept {
     DocumentSession* session = Find(id);
     const DocumentSession* conflict = FindByIdentity(identity);
+    const DocumentSession* pair_conflict = pair_raster_identity
+        ? FindByIdentity(pair_raster_identity) : nullptr;
     if (session == nullptr || !identity
         || (conflict != nullptr && conflict != session)
-        || HasIdentityReservation(identity, {}, id)) {
+        || HasIdentityReservation(identity, {}, id)
+        || (pair_raster_identity
+            && (pair_raster_identity == identity
+                || (pair_conflict != nullptr && pair_conflict != session)
+                || HasIdentityReservation(pair_raster_identity, {}, id)))) {
         return false;
     }
     try {
         DocumentIdentity candidate = identity;
+        DocumentIdentity pair_candidate = pair_raster_identity;
         session->identity = std::move(candidate);
+        session->pair_raster_identity = std::move(pair_candidate);
         return true;
     } catch (const std::bad_alloc&) {
         return false;
     }
 }
 
-bool DocumentRegistry::ReserveIdentity(
+IdentityReservationToken DocumentRegistry::ReserveIdentity(
     DocumentSessionId id,
     const DocumentIdentity& identity,
     const std::wstring& original_path,
     const std::wstring& source_path) noexcept {
+    return ReserveIdentityPair(id, identity, {}, original_path, source_path);
+}
+
+IdentityReservationToken DocumentRegistry::ReserveIdentityPair(
+    DocumentSessionId id,
+    const DocumentIdentity& identity,
+    const DocumentIdentity& pair_raster_identity,
+    const std::wstring& original_path,
+    const std::wstring& source_path) noexcept {
     DocumentSession* session = Find(id);
     const DocumentSession* conflict = FindByIdentity(identity);
-    if (session == nullptr || !identity || session->reserved_identity_
+    const DocumentSession* pair_conflict = pair_raster_identity
+        ? FindByIdentity(pair_raster_identity) : nullptr;
+    if (session == nullptr || !identity || session->identity_reservation_token_
         || (conflict != nullptr && conflict != session)
-        || HasIdentityReservation(identity, {}, id)) {
-        return false;
+        || HasIdentityReservation(identity, {}, id)
+        || (pair_raster_identity
+            && (pair_raster_identity == identity
+                || (pair_conflict != nullptr && pair_conflict != session)
+                || HasIdentityReservation(pair_raster_identity, {}, id)))) {
+        return {};
     }
     try {
         DocumentIdentity candidate = identity;
+        DocumentIdentity pair_candidate = pair_raster_identity;
         std::array<std::wstring, 2U> paths;
         const std::array<const std::wstring*, 2U> inputs{&original_path, &source_path};
         for (std::size_t index = 0U; index < paths.size(); ++index) {
             if (!inputs[index]->empty()
                 && !NormalizeDocumentFilePath(*inputs[index], paths[index])) {
-                return false;
+                return {};
             }
             if (paths[index].empty()) {
                 continue;
             }
             if (HasIdentityReservation(identity, paths[index], id)) {
-                return false;
+                return {};
             }
             for (const auto& other : sessions_) {
                 if (other == nullptr || other.get() == session) {
                     continue;
                 }
                 for (const auto* path : {&other->shell.current_path,
-                         &other->shell.source_path, &other->shell.recovery_original_path}) {
+                         &other->shell.source_path, &other->shell.planned_native_path,
+                         &other->shell.pair_raster_path,
+                         &other->shell.recovery_original_path}) {
                     if (path->empty()) {
                         continue;
                     }
                     std::wstring normalized;
                     if (!NormalizeDocumentFilePath(*path, normalized)
                         || normalized == paths[index]) {
-                        return false;
+                        return {};
                     }
                 }
             }
         }
+        const IdentityReservationToken token = IssueIdentityReservationToken();
+        if (!token) {
+            return {};
+        }
+        session->identity_reservation_token_ = token;
         session->reserved_identity_ = std::move(candidate);
+        session->reserved_pair_raster_identity_ = std::move(pair_candidate);
         session->reserved_identity_paths_ = std::move(paths);
-        return true;
+        return token;
     } catch (const std::bad_alloc&) {
-        return false;
+        return {};
     }
 }
 
@@ -550,10 +836,14 @@ bool DocumentRegistry::HasIdentityReservation(
     const std::wstring& normalized_path,
     DocumentSessionId except) const noexcept {
     for (const auto& session : sessions_) {
-        if (session == nullptr || session->id == except || !session->reserved_identity_) {
+        if (session == nullptr || session->id == except
+            || !session->identity_reservation_token_) {
             continue;
         }
         if (identity && session->reserved_identity_ == identity) {
+            return true;
+        }
+        if (identity && session->reserved_pair_raster_identity_ == identity) {
             return true;
         }
         if (!normalized_path.empty()
@@ -566,22 +856,138 @@ bool DocumentRegistry::HasIdentityReservation(
     return false;
 }
 
-bool DocumentRegistry::PublishReservedIdentity(DocumentSessionId id) noexcept {
+bool DocumentRegistry::PublishReservedIdentity(
+    DocumentSessionId id,
+    IdentityReservationToken token) noexcept {
     DocumentSession* session = Find(id);
-    if (session == nullptr || !session->reserved_identity_) {
+    if (session == nullptr || !token
+        || session->identity_reservation_token_ != token
+        || !session->reserved_identity_) {
         return false;
     }
     session->identity = std::move(session->reserved_identity_);
-    CancelIdentityReservation(id);
+    session->pair_raster_identity = std::move(session->reserved_pair_raster_identity_);
+    ClearIdentityReservation(*session);
     return true;
 }
 
-void DocumentRegistry::CancelIdentityReservation(DocumentSessionId id) noexcept {
-    if (DocumentSession* session = Find(id); session != nullptr) {
-        session->reserved_identity_ = {};
-        for (auto& path : session->reserved_identity_paths_) {
-            path.clear();
-        }
+bool DocumentRegistry::PublishRepairedReservedIdentityPair(
+    DocumentSessionId id,
+    IdentityReservationToken token,
+    DocumentIdentity identity,
+    DocumentIdentity pair_raster_identity) noexcept {
+    DocumentSession* session = Find(id);
+    if (session == nullptr || !token
+        || session->identity_reservation_token_ != token
+        || !session->reserved_identity_
+        || !session->reserved_pair_raster_identity_
+        || !identity || !pair_raster_identity) {
+        return false;
+    }
+    session->identity = std::move(identity);
+    session->pair_raster_identity = std::move(pair_raster_identity);
+    ClearIdentityReservation(*session);
+    return true;
+}
+
+bool DocumentRegistry::PublishPreparedIdentityPair(
+    DocumentSessionId id,
+    IdentityReservationToken token,
+    DocumentIdentity identity,
+    DocumentIdentity pair_raster_identity) noexcept {
+    DocumentSession* session = Find(id);
+    if (session == nullptr || !token
+        || session->identity_reservation_token_ != token
+        || !session->reserved_identity_
+        || !session->reserved_pair_raster_identity_
+        || !identity || !pair_raster_identity) {
+        return false;
+    }
+    session->identity = std::move(identity);
+    session->pair_raster_identity = std::move(pair_raster_identity);
+    ClearIdentityReservation(*session);
+    return true;
+}
+
+bool DocumentRegistry::PublishReservedIdentityPairWithSequenceBinding(
+    DocumentSessionId id,
+    IdentityReservationToken token,
+    std::size_t sequence_index,
+    SequenceFileBinding binding) noexcept {
+    DocumentSession* session = Find(id);
+    if (session == nullptr || !token
+        || session->identity_reservation_token_ != token
+        || !session->reserved_identity_
+        || !session->reserved_pair_raster_identity_
+        || sequence_index >= session->sequence_file_bindings_.size()
+        || (binding.document_uuid_high == 0U
+            && binding.document_uuid_low == 0U)
+        || binding.source_generation == 0U || binding.raster_path.empty()
+        || !binding.raster_identity
+        || binding.raster_identity != session->reserved_pair_raster_identity_) {
+        return false;
+    }
+    const auto& current = session->sequence_file_bindings_[sequence_index];
+    if (current.document_uuid_high != binding.document_uuid_high
+        || current.document_uuid_low != binding.document_uuid_low
+        || current.source_generation != binding.source_generation) {
+        return false;
+    }
+    session->identity = std::move(session->reserved_identity_);
+    session->pair_raster_identity =
+        std::move(session->reserved_pair_raster_identity_);
+    session->sequence_file_bindings_[sequence_index] = std::move(binding);
+    ClearIdentityReservation(*session);
+    return true;
+}
+
+bool DocumentRegistry::ForceRevokeIdentity(
+    DocumentSessionId id,
+    DocumentIdentity identity) noexcept {
+    DocumentSession* session = Find(id);
+    if (session == nullptr || !identity
+        || identity.kind != DocumentIdentityKind::Untitled) {
+        return false;
+    }
+    session->identity = std::move(identity);
+    session->pair_raster_identity = {};
+    ClearIdentityReservation(*session);
+    return true;
+}
+
+bool DocumentRegistry::CancelIdentityReservation(
+    DocumentSessionId id,
+    IdentityReservationToken token) noexcept {
+    DocumentSession* session = Find(id);
+    if (session == nullptr || !token
+        || session->identity_reservation_token_ != token) {
+        return false;
+    }
+    ClearIdentityReservation(*session);
+    return true;
+}
+
+IdentityReservationToken DocumentRegistry::IssueIdentityReservationToken()
+    noexcept {
+    if (next_identity_reservation_token_ == 0U) {
+        return {};
+    }
+    const IdentityReservationToken token{next_identity_reservation_token_};
+    if (next_identity_reservation_token_ == UINT64_MAX) {
+        next_identity_reservation_token_ = 0U;
+    } else {
+        ++next_identity_reservation_token_;
+    }
+    return token;
+}
+
+void DocumentRegistry::ClearIdentityReservation(DocumentSession& session)
+    noexcept {
+    session.identity_reservation_token_ = {};
+    session.reserved_identity_ = {};
+    session.reserved_pair_raster_identity_ = {};
+    for (auto& path : session.reserved_identity_paths_) {
+        path.clear();
     }
 }
 

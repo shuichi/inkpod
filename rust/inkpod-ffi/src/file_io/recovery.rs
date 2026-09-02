@@ -1,5 +1,251 @@
 use super::*;
-use inkpod_io::{RecoveryIdentity, RecoveryIdentityKind, RecoveryMetadata};
+use inkpod_io::{
+    FileIdentity, FileStamp, RecoveryArtifactProof, RecoveryArtifactStamp, RecoveryIdentity,
+    RecoveryIdentityKind, RecoveryMetadata, RecoveryPairProof,
+};
+
+// SAFETY: The complete size-prefixed stamp and its embedded identity are readable.
+unsafe fn validate_artifact_stamp_record(stamp: &InkpodIoRecoveryArtifactStamp) -> Result<(), u32> {
+    // SAFETY: Both records are embedded in a validated live parent input.
+    unsafe {
+        validate_struct(stamp, "InkpodIoRecoveryArtifactStamp")?;
+        validate_struct(&stamp.identity, "InkpodIoFileIdentity")?;
+    }
+    Ok(())
+}
+
+// SAFETY: The complete size-prefixed stamp and its embedded identity are readable.
+unsafe fn parse_artifact_stamp(
+    stamp: &InkpodIoRecoveryArtifactStamp,
+) -> Result<RecoveryArtifactStamp, u32> {
+    // SAFETY: Both records are embedded in a validated live proof input.
+    unsafe { validate_artifact_stamp_record(stamp)? };
+    let object =
+        (u128::from(stamp.identity.object_high) << 64) | u128::from(stamp.identity.object_low);
+    if stamp.flags & !INKPOD_IO_RECOVERY_ARTIFACT_READONLY != 0
+        || stamp.identity.kind != 1
+        || (stamp.identity.volume == 0 && object == 0)
+    {
+        return Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "recovery artifact stamp is not an exact physical-file stamp",
+        ));
+    }
+    Ok(RecoveryArtifactStamp {
+        identity: FileIdentity {
+            volume: stamp.identity.volume,
+            file: object,
+        },
+        length: stamp.length,
+        modified: ((u128::from(stamp.modified_high) << 64) | u128::from(stamp.modified_low))
+            as i128,
+        changed: ((u128::from(stamp.changed_high) << 64) | u128::from(stamp.changed_low)) as i128,
+        readonly: stamp.flags & INKPOD_IO_RECOVERY_ARTIFACT_READONLY != 0,
+    })
+}
+
+// SAFETY: The proof input exposes its advertised complete record.
+pub(super) unsafe fn parse_artifact_proof(
+    pointer: *const InkpodIoRecoveryArtifactProof,
+) -> Result<RecoveryArtifactProof, u32> {
+    // SAFETY: Public record exposes a readable size prefix.
+    unsafe { validate_struct(pointer, "InkpodIoRecoveryArtifactProof")? };
+    // SAFETY: Complete proof range was validated above.
+    let proof = unsafe { &*pointer };
+    if proof.reserved != 0 {
+        return Err(fail(
+            INKPOD_STATUS_UNSUPPORTED,
+            "recovery artifact proof reserved field is nonzero",
+        ));
+    }
+    Ok(RecoveryArtifactProof {
+        // SAFETY: Embedded stamp records remain live with the proof.
+        native: unsafe { parse_artifact_stamp(&proof.native)? },
+        // SAFETY: Same embedded-record contract as the native stamp.
+        metadata: unsafe { parse_artifact_stamp(&proof.metadata)? },
+    })
+}
+
+fn artifact_stamp_to_abi(stamp: RecoveryArtifactStamp) -> InkpodIoRecoveryArtifactStamp {
+    let modified = stamp.modified as u128;
+    let changed = stamp.changed as u128;
+    InkpodIoRecoveryArtifactStamp {
+        struct_size: size_of::<InkpodIoRecoveryArtifactStamp>() as u32,
+        flags: if stamp.readonly {
+            INKPOD_IO_RECOVERY_ARTIFACT_READONLY
+        } else {
+            0
+        },
+        identity: InkpodIoFileIdentity {
+            struct_size: size_of::<InkpodIoFileIdentity>() as u32,
+            kind: 1,
+            volume: stamp.identity.volume,
+            object_high: (stamp.identity.file >> 64) as u64,
+            object_low: stamp.identity.file as u64,
+        },
+        length: stamp.length,
+        modified_high: (modified >> 64) as u64,
+        modified_low: modified as u64,
+        changed_high: (changed >> 64) as u64,
+        changed_low: changed as u64,
+    }
+}
+
+fn artifact_proof_to_abi(proof: RecoveryArtifactProof) -> InkpodIoRecoveryArtifactProof {
+    InkpodIoRecoveryArtifactProof {
+        struct_size: size_of::<InkpodIoRecoveryArtifactProof>() as u32,
+        reserved: 0,
+        native: artifact_stamp_to_abi(proof.native),
+        metadata: artifact_stamp_to_abi(proof.metadata),
+    }
+}
+
+fn empty_pair_stamp(kind: u32, identity: FileIdentity) -> InkpodIoRecoveryArtifactStamp {
+    InkpodIoRecoveryArtifactStamp {
+        struct_size: size_of::<InkpodIoRecoveryArtifactStamp>() as u32,
+        flags: 0,
+        identity: InkpodIoFileIdentity {
+            struct_size: size_of::<InkpodIoFileIdentity>() as u32,
+            kind,
+            volume: identity.volume,
+            object_high: (identity.file >> 64) as u64,
+            object_low: identity.file as u64,
+        },
+        ..InkpodIoRecoveryArtifactStamp::default()
+    }
+}
+
+fn pair_proof_to_abi(proof: Option<RecoveryPairProof>) -> InkpodIoRecoveryPairProof {
+    let zero = FileIdentity { volume: 0, file: 0 };
+    match proof {
+        None => InkpodIoRecoveryPairProof {
+            struct_size: size_of::<InkpodIoRecoveryPairProof>() as u32,
+            kind: INKPOD_IO_RECOVERY_PAIR_NONE,
+            native: empty_pair_stamp(0, zero),
+            raster: empty_pair_stamp(0, zero),
+        },
+        Some(RecoveryPairProof::Committed { native, raster }) => InkpodIoRecoveryPairProof {
+            struct_size: size_of::<InkpodIoRecoveryPairProof>() as u32,
+            kind: INKPOD_IO_RECOVERY_PAIR_COMMITTED,
+            native: artifact_stamp_to_abi(native.into()),
+            raster: artifact_stamp_to_abi(raster.into()),
+        },
+        Some(RecoveryPairProof::Planned {
+            native_missing,
+            raster,
+        }) => InkpodIoRecoveryPairProof {
+            struct_size: size_of::<InkpodIoRecoveryPairProof>() as u32,
+            kind: INKPOD_IO_RECOVERY_PAIR_PLANNED,
+            native: empty_pair_stamp(2, native_missing),
+            raster: artifact_stamp_to_abi(raster.into()),
+        },
+        Some(RecoveryPairProof::RepairNeeded {
+            native,
+            raster_missing,
+        }) => InkpodIoRecoveryPairProof {
+            struct_size: size_of::<InkpodIoRecoveryPairProof>() as u32,
+            kind: INKPOD_IO_RECOVERY_PAIR_REPAIR_NEEDED,
+            native: artifact_stamp_to_abi(native.into()),
+            raster: empty_pair_stamp(2, raster_missing),
+        },
+    }
+}
+
+fn abi_stamp_is_zero(stamp: &InkpodIoRecoveryArtifactStamp) -> bool {
+    stamp.flags == 0
+        && stamp.identity.kind == 0
+        && stamp.identity.volume == 0
+        && stamp.identity.object_high == 0
+        && stamp.identity.object_low == 0
+        && stamp.length == 0
+        && stamp.modified_high == 0
+        && stamp.modified_low == 0
+        && stamp.changed_high == 0
+        && stamp.changed_low == 0
+}
+
+// SAFETY: Pair proof and both nested size-prefixed stamps are readable.
+unsafe fn parse_pair_proof(
+    proof: &InkpodIoRecoveryPairProof,
+) -> Result<Option<RecoveryPairProof>, u32> {
+    // SAFETY: The parent metadata record and embedded proof remain live.
+    unsafe {
+        validate_struct(proof, "InkpodIoRecoveryPairProof")?;
+        validate_artifact_stamp_record(&proof.native)?;
+        validate_artifact_stamp_record(&proof.raster)?;
+    }
+    match proof.kind {
+        INKPOD_IO_RECOVERY_PAIR_NONE
+            if abi_stamp_is_zero(&proof.native) && abi_stamp_is_zero(&proof.raster) =>
+        {
+            Ok(None)
+        }
+        INKPOD_IO_RECOVERY_PAIR_COMMITTED => Ok(Some(RecoveryPairProof::Committed {
+            // SAFETY: Nested records were validated above.
+            native: FileStamp::from(unsafe { parse_artifact_stamp(&proof.native)? }),
+            // SAFETY: Same complete physical-stamp contract.
+            raster: FileStamp::from(unsafe { parse_artifact_stamp(&proof.raster)? }),
+        })),
+        INKPOD_IO_RECOVERY_PAIR_PLANNED => {
+            let object = (u128::from(proof.native.identity.object_high) << 64)
+                | u128::from(proof.native.identity.object_low);
+            if proof.native.flags != 0
+                || proof.native.identity.kind != 2
+                || proof.native.identity.volume != u64::MAX
+                || object == 0
+                || proof.native.length != 0
+                || proof.native.modified_high != 0
+                || proof.native.modified_low != 0
+                || proof.native.changed_high != 0
+                || proof.native.changed_low != 0
+            {
+                return Err(fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "planned recovery pair native proof is inconsistent",
+                ));
+            }
+            Ok(Some(RecoveryPairProof::Planned {
+                native_missing: FileIdentity {
+                    volume: u64::MAX,
+                    file: object,
+                },
+                // SAFETY: Nested raster record was validated above.
+                raster: FileStamp::from(unsafe { parse_artifact_stamp(&proof.raster)? }),
+            }))
+        }
+        INKPOD_IO_RECOVERY_PAIR_REPAIR_NEEDED => {
+            let object = (u128::from(proof.raster.identity.object_high) << 64)
+                | u128::from(proof.raster.identity.object_low);
+            if proof.raster.flags != 0
+                || proof.raster.identity.kind != 2
+                || proof.raster.identity.volume != u64::MAX
+                || object == 0
+                || proof.raster.length != 0
+                || proof.raster.modified_high != 0
+                || proof.raster.modified_low != 0
+                || proof.raster.changed_high != 0
+                || proof.raster.changed_low != 0
+            {
+                return Err(fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "repair-needed recovery pair raster proof is inconsistent",
+                ));
+            }
+            Ok(Some(RecoveryPairProof::RepairNeeded {
+                // SAFETY: Nested native record was validated above.
+                native: FileStamp::from(unsafe { parse_artifact_stamp(&proof.native)? }),
+                raster_missing: FileIdentity {
+                    volume: u64::MAX,
+                    file: object,
+                },
+            }))
+        }
+        _ => Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "recovery pair proof kind or payload is invalid",
+        )),
+    }
+}
 
 // SAFETY: Embedded path exposes its size prefix and advertised UTF-8 bytes.
 unsafe fn optional_path(path: &InkpodIoPath) -> Result<String, u32> {
@@ -75,6 +321,8 @@ pub(super) unsafe fn parse_metadata(
         original_path: unsafe { optional_path(&value.original_path)? },
         // SAFETY: Same lifetime/bounds contract as the original path.
         source_path: unsafe { optional_path(&value.source_path)? },
+        // SAFETY: Embedded size-prefixed pair proof remains live with metadata.
+        pair_proof: unsafe { parse_pair_proof(&value.pair_proof)? },
     };
     let mut validated = metadata.clone();
     // Autosave may ask the Rust writer to supply the timestamp. The pure codec
@@ -216,6 +464,71 @@ pub unsafe extern "C" fn inkpod_core_io_autosave_submit(
     })
 }
 
+/// Submits proof-checked cleanup of one obsolete append-only recovery attempt.
+/// Changed, missing, or mixed members are retained and reported as a conflict.
+/// # Safety
+/// Core may be null because cleanup has no document result. When non-null it is
+/// on its owner thread; manager, path/proof and empty output are live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_io_recovery_discard_exact_submit(
+    core: *mut InkpodCore,
+    manager: *mut InkpodIoManager,
+    path: *const u8,
+    path_bytes: u64,
+    proof: *const InkpodIoRecoveryArtifactProof,
+    out_job: *mut *mut InkpodIoJob,
+) -> u32 {
+    io_boundary(|| {
+        // SAFETY: Caller supplies an empty writable owner slot and bounded inputs.
+        unsafe { empty_owner(out_job)? };
+        if !core.is_null() {
+            // SAFETY: A supplied Core remains subject to the ordinary owner-thread contract.
+            let _ = unsafe { owner_core(core)? };
+        }
+        // SAFETY: Both inputs are copied into Rust-owned values before return.
+        let path = unsafe { path_from_utf8(path, path_bytes)? }.to_path_buf();
+        // SAFETY: Complete proof and nested size-prefixed stamps are readable.
+        let proof = unsafe { parse_artifact_proof(proof)? };
+        // SAFETY: The live manager is cloned into the accepted worker job.
+        let job = FileIoJob::start_recovery_discard_exact(
+            unsafe { manager_ref(manager)? }.clone(),
+            path,
+            proof,
+        )
+        .map_err(map_core_error)?;
+        // SAFETY: Unique job ownership transfers to the validated empty slot.
+        unsafe {
+            out_job.write(Box::into_raw(Box::new(InkpodIoJob {
+                job: Mutex::new(job),
+                owner_thread: thread::current().id(),
+            })))
+        };
+        Ok(INKPOD_STATUS_OK)
+    })
+}
+
+/// Copies the one exact proof retained after durable worker publication. It is
+/// available at `Ready` before owner final apply; callers publish associated
+/// frontend state only after that final apply succeeds.
+/// # Safety
+/// Job is live and the complete size-prefixed output record is writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_io_job_get_recovery_artifact_proof(
+    job: *const InkpodIoJob,
+    out_proof: *mut InkpodIoRecoveryArtifactProof,
+) -> u32 {
+    io_boundary(|| {
+        // SAFETY: Caller supplies a readable prefix and full writable range.
+        unsafe { validate_struct(out_proof, "InkpodIoRecoveryArtifactProof")? };
+        // SAFETY: Job lifetime is synchronized against release for this call.
+        let job = unsafe { job_lock(job)? };
+        let proof = *job.recovery_artifact_proof().map_err(map_core_error)?;
+        // SAFETY: Complete writable output was validated before the copy.
+        unsafe { out_proof.write(artifact_proof_to_abi(proof)) };
+        Ok(INKPOD_STATUS_OK)
+    })
+}
+
 /// Copies typed recovery metadata and three packed UTF-8 path spans.
 /// # Safety
 /// Job is live; record, size scalar and nonzero buffer are writable and nonoverlapping.
@@ -241,13 +554,22 @@ pub unsafe extern "C" fn inkpod_io_job_get_recovery_metadata(
         let job = unsafe { job_lock(job)? };
         let index = usize::try_from(index)
             .map_err(|_| fail(INKPOD_STATUS_INVALID_ARGUMENT, "recovery index overflows"))?;
-        let candidate = job.recovery(index).map_err(map_core_error)?;
+        let published = if index == 0 {
+            job.published_recovery_metadata().ok()
+        } else {
+            None
+        };
+        let candidate = if published.is_none() {
+            Some(job.recovery(index).map_err(map_core_error)?)
+        } else {
+            None
+        };
         // SAFETY: The output record, scalar and spans were validated at entry.
         unsafe {
             copy_metadata(
-                candidate.metadata.as_ref(),
-                candidate.modified_time_100ns,
-                candidate.metadata_error.is_some(),
+                published.or_else(|| candidate.and_then(|value| value.metadata.as_ref())),
+                candidate.map_or(0, |value| value.modified_time_100ns),
+                candidate.is_some_and(|value| value.metadata_error.is_some()),
                 out_metadata,
                 buffer,
                 capacity,
@@ -331,6 +653,7 @@ unsafe fn copy_metadata(
         original_path: paths[0],
         source_path: paths[1],
         identity_path: paths[2],
+        pair_proof: pair_proof_to_abi(metadata.and_then(|data| data.pair_proof)),
     };
     // SAFETY: Complete output record was validated at entry.
     unsafe { out_metadata.write(output) };
