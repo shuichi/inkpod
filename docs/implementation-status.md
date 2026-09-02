@@ -123,6 +123,19 @@ its compact historical record is retained in [`legacy.md`](legacy.md).
 
 ## Latest representative verification
 
+### Hosted Windows CI/local visible-window split (`PERF-001`, `VIEW-003`, `WIN-001`, 2026-09-02)
+
+`inkpod_windows_sequence_performance`, `inkpod_windows_smoke`, and
+`inkpod_windows_smoke_japanese` remain registered CTest tests and remain part of
+an unfiltered local `ctest --preset <windows-preset>` run. They now carry the
+`local-only` label because they require real visible-window Present cadence,
+foreground scheduling, and long UI message-loop scenarios that are not stable
+on the hosted Windows runner. GitHub Actions excludes only that label with
+`ctest --preset <windows-preset> -LE local-only`; the other Windows architecture,
+CoreHost, renderer, ABI, localization, packaging, and static-CRT tests continue
+to gate both Debug and Release jobs. A focused local run is available with
+`ctest --preset <windows-preset> -L local-only`.
+
 ### Windows renderer/Locator CI synchronization correction (`PERF-001`, `VIEW-003`, `WIN-001`, 2026-09-02)
 
 The continuous-snapshot renderer smoke retains its exact semantic gates: an

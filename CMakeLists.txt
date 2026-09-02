@@ -1093,6 +1093,14 @@ if(WIN32)
     add_test(
         NAME inkpod_windows_smoke_japanese
         COMMAND inkpod --smoke-test --smoke-test-language=ja-JP)
+    # These visible-window suites depend on real Present cadence, foreground
+    # scheduling, and long UI message-loop scenarios. Keep them in the default
+    # local CTest run, but give hosted CI an explicit exclusion label.
+    set_tests_properties(
+        inkpod_windows_sequence_performance
+        inkpod_windows_smoke
+        inkpod_windows_smoke_japanese
+        PROPERTIES LABELS "local-only")
     add_test(
         NAME inkpod_windows_release_automation_dry_run
         COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass

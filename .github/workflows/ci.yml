@@ -74,4 +74,5 @@ jobs:
           if ($output -match 'Verifying static MSVC CRT linkage') {
             throw 'unchanged build repeated the static CRT verification'
           }
-      - run: ctest --preset ${{ matrix.preset }}
+      - name: Test Windows CI suite
+        run: ctest --preset ${{ matrix.preset }} -LE local-only
